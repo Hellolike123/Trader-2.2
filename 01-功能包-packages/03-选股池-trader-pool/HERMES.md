@@ -1,8 +1,8 @@
 # Hermes Contract
 
-This package is a script-output skill for Trader Pool candidate management.
+This package is a script-output skill.
 
-Hermes must map the user-facing triggers to these commands:
+Hermes must run:
 
 ```bash
 python3 scripts/final_pool.py add --target <股票名或代码>

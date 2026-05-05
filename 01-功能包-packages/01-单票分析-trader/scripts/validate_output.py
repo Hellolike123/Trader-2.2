@@ -16,7 +16,7 @@ validate = validate_trader
 
 def _read_text(path: str | None) -> str:
     if path is None:
-        return ""
+        return sys.stdin.read()
     with open(path, encoding="utf-8") as f:
         return f.read()
 
