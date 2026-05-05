@@ -216,15 +216,18 @@ def render_single(review: dict[str, Any]) -> str:
             ))
         lines.append("")
     # 📋 今日信号回溯 (no more monthly tracking — just backtrack)
-    lines.extend(_signal_backtrack_lines(review))
+    bt_lines = _signal_backtrack_lines(review)
+    if bt_lines:
+        lines.extend(bt_lines)
+        lines.append("")
     return "\n".join(str(line) for line in lines)
 
 
 def _signal_backtrack_lines(review: dict[str, Any]) -> list[str]:
     signals = review.get("historical_signals") or []
     if not signals:
-        return ["暂无历史信号记录"]
-    lines = []
+        return []
+    lines = ["📋 历史信号"]
     for sig in signals[:5]:
         date = sig.get("trade_date") or "?"
         sig_type = sig.get("signal_type") or "?"
