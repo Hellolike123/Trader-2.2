@@ -622,11 +622,46 @@ def enrich_with_signal_backtrack(review: dict[str, Any], *, limit: int = 10) -> 
         review.setdefault("pnl_pct", None)
         return review
     try:
-        from signal_store import load_recent_signals
+        from signal_store import load_recent_signals, append_signal
         signals = load_recent_signals(symbol, limit=limit)
         review_date = str(review.get("date") or "")
         same_day = [s for s in signals if str(s.get("trade_date") or "") == review_date]
         review["historical_signals"] = same_day if same_day else signals[-limit:]
+        theory = review.get("theory") or {}
+        scores = theory.get("scores") or {}
+        chanlun_text = str(theory.get("chanlun", ""))
+        wyckoff_text = str(theory.get("wyckoff", ""))
+        momentum_text = str(theory.get("momentum", ""))
+        sig_type = "review_result"
+        direction = "neutral"
+        if "底背驰" in chanlun_text or "一类买" in chanlun_text or "Spring" in wyckoff_text or "看多" in momentum_text:
+            direction = "bullish_lean"
+        if "顶背驰" in chanlun_text or "Upthrust" in wyckoff_text or "看空" in momentum_text:
+            direction = "bearish_lean"
+        sig = {
+            "contract": "trader_signal_v1",
+            "source_skill": "review-trader",
+            "symbol": symbol,
+            "name": str(review.get("name", "")),
+            "trade_date": str(review.get("date", "")),
+            "analysis_time": str(review.get("data_time", "")),
+            "signal_type": sig_type,
+            "direction": direction,
+            "action": "observe",
+            "confidence": "medium",
+            "data_status": "stale",
+            "trigger": {"text": chanlun_text},
+            "invalidation": {"text": wyckoff_text},
+            "position": {"max_total_pct": 0, "max_single_move_pct": 0},
+            "risk_flags": [],
+            "summary": f"结构{scores.get('structure','--')} 量价{scores.get('volume','--')} 筹码{scores.get('chip','--')} 动量{scores.get('momentum','--')}",
+        }
+        same_day_sigs = [s for s in signals if str(s.get("trade_date") or "") == str(review.get("date", ""))]
+        if not same_day_sigs:
+            try:
+                append_signal(sig)
+            except Exception:
+                pass
     except ImportError:
         review.setdefault("historical_signals", [])
     try:
