@@ -44,7 +44,7 @@ def main() -> int:
 
     try:
         plan = build_plan(args.target)
-        markdown = render_markdown(plan, history=recent_history(str(plan.get("symbol") or args.target)))
+        markdown = render_markdown(plan)
     except Exception as exc:
         print(f"T0 skill cannot run in this environment: {exc}", file=sys.stderr)
         return 1
