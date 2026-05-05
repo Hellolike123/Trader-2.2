@@ -616,6 +616,23 @@ def _pool_signal_verifications(items: list[dict[str, Any]]) -> tuple[list[dict[s
     return results, summary
 
 
+def action_summary_for_scene(scene: str) -> str:
+    """One-line action advice for pool items."""
+    if scene in {"低吸观察", "防守观察"}:
+        return "守纪律不追，等止跌确认"
+    if scene in {"等转强"}:
+        return "等放量确认"
+    if scene in {"冲高减仓"}:
+        return "冲高减仓，不追"
+    if scene in {"突破确认", "突破观察"}:
+        return "持有观察"
+    if scene in {"空间不足"}:
+        return "不追，等回落"
+    if scene in {"暂不碰"}:
+        return "不参与"
+    return "等待，不主动追"
+
+
 def _build_report_or_offline(name: str) -> dict[str, Any]:
     """Try live report, fallback to offline mock report."""
     try:
@@ -647,12 +664,86 @@ def _build_report_or_offline(name: str) -> dict[str, Any]:
 
 
 def cmd_watch(args: argparse.Namespace) -> int:
-    """Check all pool items → alert on critical levels (trigger, defense, support)."""
+    """Monitor Top 3 pool items, one-screen status per stock."""
     pool = load_pool()
-    items = active_items(pool)
+    items = sort_items(active_items(pool))
     if not items:
         print("选股池为空，无需盯盘")
         return 0
+
+    # Only monitor Top 3
+    top3 = items[:3]
+    now = datetime.now().strftime("%H:%M")
+
+    all_alerts: list[str] = []
+
+    for i, item in enumerate(top3, 1):
+        name = item.get("name", "?")
+        current = to_float(item.get("current")) or 0
+        trigger = to_float(item.get("trigger")) or 0
+        defense = to_float(item.get("defense")) or 0
+        support_raw = to_float(item.get("support")) or 0
+        scene = str(item.get("scene") or "")
+        status = str(item.get("status") or "?")
+
+        # Try to get live quote
+        change_pct = 0.0
+        try:
+            from light_data import fetch_quote, resolve_security
+            sec = resolve_security(name)
+            q = fetch_quote(sec.name)
+            if q and to_float(q.get("price")):
+                current = to_float(q.get("price"))
+                change_pct = to_float(q.get("chgpct")) or 0.0
+        except Exception:
+            pass
+
+        if current <= 0:
+            continue
+
+        # Tolerance threshold
+        thresh_pct = 0.02  # 2% default
+
+        stock_alerts: list[str] = []
+
+        # 1. Defense breach (highest priority)
+        if defense > 0 and current < defense:
+            stock_alerts.append("🛑 破防守位！跌破防守位")
+        # 2. Near defense (<2%)
+        elif defense > 0 and current > defense:
+            dist_def = abs(current - defense) / current * 100
+            if dist_def < thresh_pct * 100:
+                stock_alerts.append(f"⚠️ 靠近防守，距防守仅 {dist_def:.1f}%")
+        # 3. Near trigger
+        elif trigger > 0:
+            dist_trig = abs(trigger - current) / current * 100
+            if dist_trig < thresh_pct * 100:
+                if current >= trigger:
+                    stock_alerts.append("🟢 已到触发位附近")
+                else:
+                    stock_alerts.append(f"⚡ 距触发仅 {dist_trig:.1f}%")
+        # 4. Near support
+        if support_raw > 0 and current <= support_raw:
+            dist_sup = abs(current - support_raw) / current * 100
+            if dist_sup < thresh_pct * 100:
+                stock_alerts.append(f"📊 距支撑仅 {dist_sup:.1f}%")
+
+        # Build output for this stock
+        rank_emoji = ["🥇", "🥈", "🥉"][i - 1]
+        if stock_alerts:
+            alert_line = " | ".join(stock_alerts)
+            all_alerts.append(f"{rank_emoji} {name}  {current:.2f}（{change_pct:+.1f}%）  {alert_line}")
+        else:
+            action = action_summary_for_scene(scene)
+            all_alerts.append(f"{rank_emoji} {name}  {current:.2f}（{change_pct:+.1f}%）  👉 {action}")
+
+    # Print output
+    print(f"📡 选股池盯盘 — {now} | Top3")
+    print()
+    for line in all_alerts:
+        print(f"  {line}")
+
+    return 0
 
     alerts: list[str] = []
     overview: list[str] = []
