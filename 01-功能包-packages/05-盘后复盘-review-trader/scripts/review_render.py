@@ -10,11 +10,11 @@ def signed_pct(value: float | None) -> str:
     return "--" if value is None else f"{value:+.2f}%"
 
 
-def _atr_level_note(level: str, atr14: float) -> str:
+def _atr_level_note(level: str, atr14: float, atr14_2x: float) -> str:
     notes = {
-        "波幅偏高": f"首仓建议≤5%，止损幅度约{atr14 * 2:.2f}元",
-        "波动偏大": f"首仓5-7%，波幅偏大下不追突破",
-        "波动正常": "首仓≤10%，正常操作",
+        "波幅偏高": f"首仓不超过5%，止损设在你买入价下方约{atr14_2x:.2f}元",
+        "波动偏大": "首仓5-7%，波动偏大时不追突破",
+        "波动正常": "首仓不超过10%，正常操作",
         "波动较低": "首仓15-20%，可用上限仓位",
     }
     return notes.get(level, "按正常波动处理")
@@ -171,16 +171,30 @@ def render_single(review: dict[str, Any]) -> str:
     lines.append(f"筹码：{theory.get('chip', '--')}")
     lines.append(f"资金行为：{theory.get('fund', '--')}")
     if atr_data.get("available"):
-        lines.append(f"ATR14日 {atr_data['atr14']:.2f}元（{atr_data['atr_ratio']*100:.2f}%）{atr_data['level']} - {_atr_level_note(atr_data['level'], atr_data['atr14'])}")
+        atr14 = atr_data['atr14']
+        atr_ratio = atr_data['atr_ratio']
+        note = _atr_level_note(atr_data['level'], atr14, atr14 * 2)
+        lines.append(f"💡 参考信息  日均波动约 ±{atr14:.2f}元（占总价{atr_ratio*100:.1f}%），{note}")
     else:
         lines.append("ATR数据不足（新股/停牌）")
     macd_params = review.get("macd_params") or {}
     if macd_params.get("macd_line") is not None:
-        lines.append(f"MACD(D12/E26/S9): 线={macd_params['macd_line']:.4f} DEA={macd_params['dea']:.4f} 柱={macd_params['histogram']:+.4f}")
+        mc = macd_params['macd_line']
+        dea = macd_params['dea']
+        hist = macd_params['histogram']
+        if mc > dea:
+            macd_dir = "偏多"
+        elif mc < dea:
+            macd_dir = "偏空"
+        else:
+            macd_dir = "中性"
+        strength = "不算强" if abs(hist) < 0.01 else ""
+        cross_note = ""
         if macd_params.get("golden_cross"):
-            lines.append("MACD金叉信号：MACD线上穿DEA，短线偏多。")
-        if macd_params.get("death_cross"):
-            lines.append("MACD死叉信号：MACD线下穿DEA，短线偏空。")
+            cross_note = "（金叉状态）"
+        elif macd_params.get("death_cross"):
+            cross_note = "（死叉状态）"
+        lines.append(f"MACD（判断大方向）：目前{macd_dir}{cross_note}{strength}。")
     lines.append("")
     # 🎯 信号判断
     lines.append("🎯 信号判断 ")
@@ -223,35 +237,78 @@ def render_single(review: dict[str, Any]) -> str:
     return "\n".join(str(line) for line in lines)
 
 
+def _signal_type_label(sig_type: str) -> str:
+    labels = {
+        "observe": "观察",
+        "wait_for_confirmation": "等待确认",
+        "track": "跟踪",
+        "low_buy_watch": "低吸观察",
+        "low_buy_triggered": "低吸触发",
+        "high_sell_watch": "高抛观察",
+        "high_sell_triggered": "高抛触发",
+        "reduce": "减仓",
+        "defensive": "防守",
+        "risk_stop": "止损",
+        "trigger_expired": "信号过期",
+        "blocked": "受压",
+        "review_result": "复盘",
+    }
+    return labels.get(sig_type, sig_type)
+
+
+def _direction_label(direction: str) -> str:
+    labels = {
+        "bullish": "看多",
+        "bearish": "看空",
+        "neutral": "中性",
+        "bullish_lean": "偏多",
+        "bearish_lean": "偏空",
+    }
+    return labels.get(direction, direction)
+
+
+def _confidence_label(confidence: str) -> str:
+    labels = {
+        "low": "低",
+        "medium": "中等",
+        "high": "高",
+    }
+    return labels.get(confidence, confidence)
+
+
 def _signal_backtrack_lines(review: dict[str, Any]) -> list[str]:
     signals = review.get("historical_signals") or []
     if not signals:
-        return []
+        return ["📋 历史信号  暂无记录"]
     lines = ["📋 历史信号"]
     for sig in signals[:5]:
         date = sig.get("trade_date") or "?"
         sig_type = sig.get("signal_type") or "?"
         direction = sig.get("direction") or "?"
-        action = sig.get("action") or "?"
-        confidence = sig.get("confidence") or "?"
         source = sig.get("source_skill") or ""
+        confidence = sig.get("confidence") or "?"
+
+        # emoji prefix for t0 signals
         prefix = ""
         if source == "t0-trader":
             if sig_type in ("low_buy_triggered", "low_buy_watch"):
-                prefix = "🟢 T0 "
+                prefix = "🟢 T0低吸"
             elif sig_type in ("high_sell_triggered", "high_sell_watch"):
-                prefix = "🔴 T0 "
+                prefix = "🔴 T0高抛"
             elif sig_type == "risk_stop":
-                prefix = "⚠️ T0 "
+                prefix = "⚠️ T0止损"
+
+        if source == "review-trader":
+            prefix = "📋 复盘"
+
         if not prefix:
-            if sig_type == "track":
-                prefix = "👁 跟踪"
-            elif sig_type == "reduce":
-                prefix = "📉 减仓"
-            elif sig_type == "risk_stop":
-                prefix = "⚠️ 止损"
-        lines.append(f"  {date}│{prefix}{sig_type}│{action}（{confidence}）")
-    return lines if lines else ["暂无历史信号记录"]
+            label = _signal_type_label(sig_type)
+            prefix = f"👁 {label}" if "观察" in label or "跟踪" in label else label
+
+        conf_text = _confidence_label(confidence)
+        dir_text = _direction_label(direction)
+        lines.append(f"  {date}  {_signal_type_label(sig_type)} {dir_text}（{conf_text}）")
+    return lines
 
 
 def render_json(data: dict[str, Any]) -> str:
