@@ -23,6 +23,12 @@ for _path in (SHARED_CANDIDATE, SHARED_MARKET, SHARED_SCRIPTS, SHARED_ROOT, SHAR
 
 import candidate_core as core
 from candidate_core import build_structure_context, atr_volatility_level
+
+try:
+    from review_core import calc_chip_distribution as _calc_chip
+except ImportError:
+    def _calc_chip(daily, lookback=60):
+        return {"peaks": [], "chip_at_price": None}
 from config import (
     LOOKBACK_DAYS,
     STRUCTURE_WINDOW,

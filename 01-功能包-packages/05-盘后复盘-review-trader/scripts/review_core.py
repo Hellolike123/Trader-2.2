@@ -123,6 +123,109 @@ def dense_price_zone(daily: list[dict[str, Any]]) -> tuple[float | None, float |
     return round(center - spread, 2), round(center + spread, 2)
 
 
+def calc_chip_distribution(daily: list[dict[str, Any]], lookback: int = 60) -> dict[str, Any]:
+    """粗算筹码分布：每日量按日K价格区间均匀摊到价格带上。"""
+    bars = daily[-lookback:] if len(daily) >= lookback else daily
+    valid = []
+    for item in bars:
+        high = to_float(item.get("high"))
+        low = to_float(item.get("low"))
+        volume = to_float(item.get("volume")) or 0
+        if high is None or low is None or high == low or volume <= 0:
+            continue
+        valid.append((low, high, volume))
+    if not valid:
+        return {"peaks": [], "current_pct": None, "profit_pct": 0}
+
+    min_price = min(lo for lo, _, _ in valid)
+    max_price = max(hi for _, hi, _ in valid)
+    price_range = max_price - min_price
+
+    # Use a fixed step: ~50 bins across the price range, min 0.3 yuan step
+    num_bins = max(int(price_range / 0.3) + 1, 50)
+    tick = price_range / num_bins
+    if tick < 0.1:
+        tick = 0.1
+        num_bins = int((max_price - min_price) / tick) + 2
+
+    price_bins = [(min_price + (i + 0.5) * tick) for i in range(num_bins)]
+    volume_map = [0.0] * num_bins
+
+    for low, high, volume in valid:
+        lo_idx = max(0, int((low - min_price) / tick))
+        hi_idx = min(num_bins - 1, int((high - min_price) / tick))
+        if hi_idx == lo_idx:
+            volume_map[lo_idx] += volume
+        else:
+            segment = volume / (hi_idx - lo_idx + 1)
+            for i in range(lo_idx, hi_idx + 1):
+                volume_map[i] += segment
+
+    total_chip = sum(volume_map)
+    if total_chip == 0:
+        return {"peaks": [], "current_pct": None, "profit_pct": 0, "mid_price": None}
+
+    # Top 3 peaks by volume
+    sorted_indices = sorted(range(num_bins), key=lambda i: volume_map[i], reverse=True)
+    peaks = []
+    peak_shares = []
+    for idx in sorted_indices[:3]:
+        price = price_bins[idx]
+        volume = volume_map[idx]
+        share_pct = volume / total_chip * 100
+        if share_pct > 0.5:
+            peak_shares.append(share_pct)
+
+    peak_shares = sorted(peak_shares, reverse=True) if peak_shares else [1, 1, 1]
+
+    for idx in sorted_indices[:3]:
+        price = price_bins[idx]
+        volume = volume_map[idx]
+        share_pct = volume / total_chip * 100
+        if share_pct > 0.5:
+            half_range = tick * 2
+            # Rank by relative share: strongest = 强支撑, next = 支撑
+            share_rank = peak_shares.index(share_pct)
+            if share_rank == 0 and share_pct > 3:
+                level = "强支撑"
+            elif share_rank <= 1 and share_pct > 2:
+                level = "支撑"
+            else:
+                level = "弱支撑"
+            peaks.append({
+                "price": round(price, 2),
+                "volume": round(volume),
+                "share_of_total": round(share_pct, 2),
+                "support_level": level,
+            })
+    peaks.sort(key=lambda p: p["price"])
+
+    # Current cumulative position (where is today's close relative to chips)
+    current_pct = None
+    cumulative = 0.0
+    for i, vol in enumerate(volume_map):
+        cumulative += vol
+        if cumulative / total_chip >= 0.5:
+            current_pct = round((i / num_bins) * 100, 1)
+            break
+
+    # Median price (50th percentile of chip distribution)
+    mid_price = None
+    cumulative = 0.0
+    for i, vol in enumerate(volume_map):
+        cumulative += vol
+        if cumulative / total_chip >= 0.5:
+            mid_price = price_bins[i]
+            break
+
+    return {
+        "peaks": peaks,
+        "total_volume": round(total_chip),
+        "current_pct": current_pct,
+        "mid_price": mid_price,
+    }
+
+
 def analyze_intraday(bars_5m: list[dict[str, Any]], trade_date: str | None, session: str = "close") -> dict[str, Any]:
     selected_date, bars = filter_trade_date(bars_5m, trade_date)
     if session == "midday":
@@ -362,6 +465,7 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
     selected_date = trade_date or (daily[-1].get("date") if daily else None) or quote.get("trade_date")
     intraday = analyze_intraday(bars_5m, selected_date, session=session)
     levels = build_levels(current, quote, daily, cost)
+    chip_dist = calc_chip_distribution(daily, lookback=60)
     theory = theory_verdicts(current, quote, daily, intraday, levels, cost, session=session)
     previous_close = to_float(quote.get("pre_close")) or (to_float(daily[-2].get("close")) if len(daily) >= 2 else None)
     change_pct = to_float(quote.get("current_change_pct"))
@@ -411,6 +515,7 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
             "suggested_cap_pct": atr_suggested_cap,
             "available": atr14 > 0,
         },
+        "chip_distribution": chip_dist,
         "data_time": f"{quote.get('trade_date') or review_date} {quote.get('trade_time') or ''}".strip(),
     }
 

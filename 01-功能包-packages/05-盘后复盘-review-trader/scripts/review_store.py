@@ -13,6 +13,7 @@ def review_summary(review: dict[str, Any]) -> dict[str, Any]:
     q = review["quote"]
     theory = review["theory"]
     levels = review["levels"]
+    chip_dist = review.get("chip_distribution", {})
     return {
         "contract": "review_trader_summary_v1",
         "name": review["name"],
@@ -35,6 +36,7 @@ def review_summary(review: dict[str, Any]) -> dict[str, Any]:
         "action": review["summary"]["action"],
         "supports": theory["supports"][:3],
         "blocks": theory["blocks"][:3],
+        "chip_peaks": chip_dist.get("peaks", []),
     }
 
 

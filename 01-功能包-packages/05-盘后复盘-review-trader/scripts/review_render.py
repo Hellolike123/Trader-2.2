@@ -198,6 +198,16 @@ def render_single(review: dict[str, Any]) -> str:
     lines.append(f"明天只有放量站稳 {price_text(pressure)} 才算确认；否则继续按短线修复看。")
     lines.append(f"如果放量跌破 {price_text(key_support)}，这次修复判断失效。")
     lines.append("")
+    # 💰 筹码分布
+    chip_dist = review.get("chip_distribution") or {}
+    peaks = chip_dist.get("peaks", [])
+    if peaks:
+        lines.append("💰 筹码分布（近60日量价粗算） ")
+        for p in peaks:
+            lines.append("  {:.2f}  {:.2f}%  {}".format(
+                p["price"], p["share_of_total"], p["support_level"],
+            ))
+        lines.append("")
     # 📋 今日信号回溯 (no more monthly tracking — just backtrack)
     lines.extend(_signal_backtrack_lines(review))
     return "\n".join(str(line) for line in lines)

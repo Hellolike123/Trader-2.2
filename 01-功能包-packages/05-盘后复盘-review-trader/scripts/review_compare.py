@@ -96,6 +96,14 @@ def render_compare(
             lines.append(f"{item['name']}：副盯，不追高，守住 {price_text(item.get('key_support'))} 继续观察。")
         else:
             lines.append(f"{item['name']}：不主动加仓，等结构重新确认。")
+    lines.extend(["", "筹码密集区（近60日量价粗算）："])
+    for item in ranked:
+        peaks = item.get("chip_peaks") or []
+        if peaks:
+            peak_text = ", ".join(f"{p['price']:.2f}({p.get('support_level', '')})" for p in peaks[:2])
+            lines.append(f"{item['name']}：{peak_text}")
+        else:
+            lines.append(f"{item['name']}：数据不足")
     return "\n".join(lines)
 
 
