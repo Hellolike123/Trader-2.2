@@ -470,6 +470,156 @@ STAR_MAP = {
 }
 
 
+def _pool_signal_verifications(items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    from signal_store import load_recent_signals
+
+    today = date.today()
+    summary = {"已验证": 0, "信号错了": 0, "未验证": 0, "暂无信号": 0}
+    results: list[dict[str, Any]] = []
+
+    for item in items:
+        current = to_float(item.get("current")) or 0
+        trigger = to_float(item.get("trigger")) or 0
+        defense = to_float(item.get("defense")) or 0
+        name = item.get("name", "?")
+        status = str(item.get("status") or "")
+
+        sig_text = "无"
+        verify_status = "暂无信号"
+
+        if trigger <= 0 or defense <= 0:
+            sig_text = "无触发/防守位"
+            verify_status = "暂无信号"
+        else:
+            try:
+                signals = load_recent_signals(name, limit=5)
+            except Exception:
+                signals = []
+
+            if not signals:
+                try:
+                    from signal_store import DEFAULT_SIGNAL_STORE_PATH
+                    signals = load_recent_signals(None, limit=50, path=DEFAULT_SIGNAL_STORE_PATH)
+                    signals = [s for s in signals if s.get("name") == name
+                               or (str(s.get("symbol", "")).upper().endswith((name[-3:], str(name)[:3])))][:5]
+                except Exception:
+                    signals = []
+
+            matched = None
+            for sig in signals:
+                sig_date = sig.get("trade_date", sig.get("analysis_time", ""))
+                if not sig_date:
+                    continue
+                sig_type = str(sig.get("signal_type", ""))
+                if sig_type in ("review_result", "observe", "low_buy_watch", "low_buy_triggered",
+                                "high_sell_watch", "high_sell_triggered", "track", "reduce", "defensive"):
+                    matched = sig
+                    break
+
+            if matched:
+                sig_type = str(matched.get("signal_type", ""))
+                confidence = str(matched.get("confidence", ""))
+                conf_map = {"low": "低", "medium": "中等", "high": "高"}
+                conf_txt = conf_map.get(confidence, confidence)
+
+                if current < defense:
+                    verify_status = "❌ 破防守"
+                    summary["信号错了"] = summary.get("信号错了", 0) + 1
+                elif current >= trigger:
+                    verify_status = "✅ 已触发"
+                    summary["已验证"] = summary.get("已验证", 0) + 1
+                else:
+                    try:
+                        added_str = str(item.get("added_at", today_text()))
+                        added_date = date.fromisoformat(added_str)
+                    except Exception:
+                        added_date = today
+                    days_lapsed = (today - added_date).days
+
+                    if sig_type in ("observe", "low_buy_watch", "track"):
+                        expect_up = current > to_float(item.get("support") or item.get("current") or 0) * 1.01
+                        if days_lapsed <= 2:
+                            verify_status = "⏳ 第1天" if days_lapsed == 1 else "⏳ 第2天"
+                            summary["未验证"] = summary.get("未验证", 0) + 1
+                        elif expect_up:
+                            verify_status = "⏳ 继续等"
+                            summary["未验证"] = summary.get("未验证", 0) + 1
+                        else:
+                            verify_status = "⚠️ 信号存疑"
+                            summary["信号错了"] = summary.get("信号错了", 0) + 1
+                    elif sig_type in ("high_sell_watch", "high_sell_triggered"):
+                        expect_down = current < to_float(item.get("resistance") or current * 1.05 or current)
+                        if days_lapsed <= 2:
+                            verify_status = "⏳ 第1天" if days_lapsed == 1 else "⏳ 第2天"
+                            summary["未验证"] = summary.get("未验证", 0) + 1
+                        elif expect_down:
+                            verify_status = "⏳ 继续等"
+                            summary["未验证"] = summary.get("未验证", 0) + 1
+                        else:
+                            verify_status = "⚠️ 信号存疑"
+                            summary["信号错了"] = summary.get("信号错了", 0) + 1
+                    elif sig_type == "reduce":
+                        verify_status = "⏳ 等确认"
+                        summary["未验证"] = summary.get("未验证", 0) + 1
+                    elif sig_type == "defensive":
+                        if current < defense:
+                            verify_status = "❌ 破防守"
+                            summary["信号错了"] = summary.get("信号错了", 0) + 1
+                        else:
+                            verify_status = "⏳ 守住了"
+                            summary["已验证"] = summary.get("已验证", 0) + 1
+                    elif sig_type == "review_result":
+                        expected_up = str(matched.get("direction", "")) in ("bullish", "bullish_lean")
+                        if current > to_float(item.get("support") or current * 0.995 or 0):
+                            if expected_up:
+                                verify_status = "✅ 对方向"
+                                summary["已验证"] = summary.get("已验证", 0) + 1
+                            else:
+                                verify_status = "⚠️ 方向反了"
+                                summary["信号错了"] = summary.get("信号错了", 0) + 1
+                        else:
+                            verify_status = "⏳ 没到位"
+                            summary["未验证"] = summary.get("未验证", 0) + 1
+                    else:
+                        verify_status = "⏳ 等结果"
+                        summary["未验证"] = summary.get("未验证", 0) + 1
+
+                if matched:
+                    sig_text = f"{_signal_type_label(sig_type)} {conf_txt}"
+                else:
+                    sig_text = "无记录"
+                    verify_status = "暂无信号"
+                    summary["暂无信号"] = summary.get("暂无信号", 0) + 1
+
+        results.append({
+            "name": name,
+            "current": current,
+            "sig_text": sig_text,
+            "verify_status": verify_status,
+        })
+
+    return results, summary
+
+
+def _signal_type_label(sig_type: str) -> str:
+    labels = {
+        "observe": "观察",
+        "wait_for_confirmation": "等确认",
+        "track": "跟踪",
+        "low_buy_watch": "低吸观察",
+        "low_buy_triggered": "低吸触发",
+        "high_sell_watch": "高抛观察",
+        "high_sell_triggered": "高抛触发",
+        "reduce": "减仓",
+        "defensive": "防守",
+        "risk_stop": "止损",
+        "trigger_expired": "过期",
+        "blocked": "受压",
+        "review_result": "复盘",
+    }
+    return labels.get(sig_type, sig_type)
+
+
 def render_rank(items: list[dict[str, Any]]) -> str:
     from candidate_core import atr_volatility_level
 
@@ -542,6 +692,30 @@ def render_rank(items: list[dict[str, Any]]) -> str:
         "    有脑子，但坐不住。\"",
         "    不抢跑，等止跌确认再动手。",
     ])
+
+    # 信号回测段
+    verifications, summary = _pool_signal_verifications(sorted_items)
+    if verifications:
+        lines.append("")
+        lines.append("📊 信号回测")
+        lines.append("")
+        lines.append(f"  {'名称':<8}{'信号':<12}  验证结果")
+        lines.append(f"  {'-'*6:<8}{'-'*10:<12}  {'-'*10}")
+        for v in verifications:
+            lines.append(f"  {v['name']:<8}{v['sig_text']:<12}  {v['verify_status']}")
+
+        total_verified = summary.get("已验证", 0)
+        total_wrong = summary.get("信号错了", 0)
+        total_unverified = summary.get("未验证", 0)
+        total_none = summary.get("暂无信号", 0)
+        total_with_signal = total_verified + total_wrong
+        if total_with_signal > 0:
+            accuracy = f"{total_verified / total_with_signal * 100:.0f}%"
+            lines.append("")
+            lines.append(f"  合计：本月已验证 {total_with_signal} 次，对了 {total_verified} 次，准确率 {accuracy}。未验证 {total_unverified} 次，暂无信号 {total_none} 条。")
+        else:
+            lines.append("")
+            lines.append(f"  合计：本月无已验证信号记录（未验证 {total_unverified} 次，暂无信号 {total_none} 条）。")
 
     return "\n".join(lines)
 
