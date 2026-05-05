@@ -230,3 +230,60 @@ def detect_bearish_divergence(bars: list[dict[str, Any]], rsi_series: list[float
     rsi_max_2 = price_rsi_pairs[1]
     return rsi_max_1[0] < rsi_max_2[0]
 
+
+def calculate_adx(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    period: int = 14,
+) -> dict[str, list[float | None]]:
+    n = len(closes)
+    if n < period * 2:
+        return {"adx": [None] * n, "plus_di": [None] * n, "minus_di": [None] * n}
+    tr_list: list[float] = [0.0]
+    plus_dm_list: list[float] = [0.0]
+    minus_dm_list: list[float] = [0.0]
+    for i in range(1, n):
+        h, l, pc = highs[i], lows[i], closes[i - 1]
+        tr = max(h - l, abs(h - pc), abs(l - pc))
+        tr_list.append(tr)
+        up_move = max(h - highs[i - 1], 0)
+        down_move = max(lows[i - 1] - l, 0)
+        if up_move > down_move:
+            plus_dm_list.append(up_move)
+            minus_dm_list.append(0.0)
+        elif down_move > up_move:
+            plus_dm_list.append(0.0)
+            minus_dm_list.append(down_move)
+        else:
+            plus_dm_list.append(0.0)
+            minus_dm_list.append(0.0)
+    tr_smooth = sum(tr_list[:period]) / period
+    plus_smooth = sum(plus_dm_list[:period]) / period
+    minus_smooth = sum(minus_dm_list[:period]) / period
+    di_plus: list[float | None] = [None] * period
+    di_minus: list[float | None] = [None] * period
+    dx_list: list[float] = []
+    for i in range(period, n):
+        tr_smooth = (tr_smooth * (period - 1) + tr_list[i]) / period
+        plus_smooth = (plus_smooth * (period - 1) + plus_dm_list[i]) / period
+        minus_smooth = (minus_smooth * (period - 1) + minus_dm_list[i]) / period
+        pdi = (plus_smooth / tr_smooth * 100) if tr_smooth > 0 else 0
+        mdi = (minus_smooth / tr_smooth * 100) if tr_smooth > 0 else 0
+        di_plus.append(pdi)
+        di_minus.append(mdi)
+        denom = pdi + mdi
+        dx_list.append(abs(pdi - mdi) / denom * 100 if denom > 0 else 0)
+    adx_values: list[float | None] = [None] * (period * 2)
+    if len(dx_list) >= period:
+        adx_smooth = sum(dx_list[:period]) / period
+        for idx, dx in enumerate(dx_list[period:], start=period):
+            adx_smooth = (adx_smooth * (period - 1) + dx) / period
+            adx_values.append(adx_smooth)
+        pad = period * 2 - len(adx_values)
+        adx_values = [None] * max(pad, 0) + adx_values[max(pad, 0):]
+        while len(adx_values) < n:
+            adx_values.append(None)
+    adx_values = adx_values[:n]
+    return {"adx": adx_values, "plus_di": di_plus, "minus_di": di_minus}
+

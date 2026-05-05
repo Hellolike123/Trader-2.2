@@ -29,9 +29,12 @@ from config import (
     ICT_RECENT_WINDOW,
     ICT_STRUCTURE_LOOKBACK,
     ICT_SWEEP_LOOKBACK,
+    ADX_STRONG_THRESHOLD,
+    ADX_WEAK_THRESHOLD,
 )
 from ict_execution import build_ict_signal
 from indicators import (
+    calculate_adx,
     calculate_bollinger_bands,
     detect_bearish_divergence,
     detect_bullish_divergence,
@@ -259,6 +262,12 @@ def latest_indicator_state(bars: list[dict[str, Any]]) -> dict[str, Any]:
     bb_last = bb.get(max(bb.keys(), default=-1), {})
     bb_pct_b = bb_last.get("pct_b")
     bb_squeeze = (bb_last.get("bandwidth") or 999) < 0.03
+    highs = values(bars, "high")
+    lows = values(bars, "low")
+    adx = calculate_adx(highs, lows, closes, period=14)
+    adx_last = adx["adx"][-1] if adx["adx"] else None
+    pdi_last = adx["plus_di"][-1] if adx["plus_di"] else None
+    mdi_last = adx["minus_di"][-1] if adx["minus_di"] else None
     return {
         "closes": closes,
         "vwap": vwap,
@@ -274,6 +283,13 @@ def latest_indicator_state(bars: list[dict[str, Any]]) -> dict[str, Any]:
         "bb": bb_last,
         "pct_b": bb_pct_b,
         "bb_squeeze": bb_squeeze,
+        "adx": adx_last,
+        "plus_di": pdi_last,
+        "minus_di": mdi_last,
+        "strong_trend": adx_last is not None and adx_last > ADX_STRONG_THRESHOLD,
+        "weak_trend": adx_last is not None and adx_last < ADX_WEAK_THRESHOLD,
+        "di_uptrend": pdi_last is not None and mdi_last is not None and pdi_last > mdi_last,
+        "di_downtrend": pdi_last is not None and mdi_last is not None and mdi_last > pdi_last,
     }
 
 
@@ -405,6 +421,7 @@ def detect_buy_trigger(report_data: dict[str, Any], zones: dict[str, Any], state
         return trigger_result("被阻断", None, [], blocked)
     matched = []
     core_count = 0
+    aux_count = 0
     if not is_new_low_recent(bars):
         matched.append("5m不再创新低")
     if (state.get("volume_ratio") or 1) < VOLUME_SHRINK_RATIO:
@@ -429,11 +446,20 @@ def detect_buy_trigger(report_data: dict[str, Any], zones: dict[str, Any], state
         core_count += 1
     if detect_lower_shadow(last):
         matched.append("出现下影线")
+        aux_count += 1
     if current >= zone["main_support"]:
         matched.append("支撑位收回")
+        aux_count += 1
     if ict.get("buy_confirmed"):
         matched.append("ICT下扫后转强")
-    status = "已触发" if len(matched) >= MIN_TRIGGER_MATCHES and core_count >= 1 else "观察中"
+        aux_count += 1
+    base_count = len(matched) - core_count - aux_count
+    effective_aux = 0 if (state.get("strong_trend") and state.get("di_downtrend")) else aux_count
+    effective_total = core_count + base_count + effective_aux
+    if state.get("weak_trend"):
+        status = "已触发" if (core_count >= 1 and effective_total >= MIN_TRIGGER_MATCHES - 1) else "观察中"
+    else:
+        status = "已触发" if effective_total >= MIN_TRIGGER_MATCHES and core_count >= 1 else "观察中"
     trigger_time = (last.get("time") or last.get("date")) if status == "已触发" else None
     return trigger_result(status, num(last.get("close")) if status == "已触发" else None, matched, [], trigger_time=trigger_time)
 
@@ -475,6 +501,7 @@ def detect_sell_trigger(report_data: dict[str, Any], zones: dict[str, Any], stat
         return trigger_result("被阻断", None, [], blocked)
     matched = []
     core_count = 0
+    aux_count = 0
     if (state.get("volume_ratio") or 1) <= 1.0:
         matched.append("冲高没有继续放量")
     if (state.get("volume_ratio") or 1) < VOLUME_SHRINK_RATIO or detect_upper_shadow(last):
@@ -499,11 +526,20 @@ def detect_sell_trigger(report_data: dict[str, Any], zones: dict[str, Any], stat
         core_count += 1
     if detect_upper_shadow(last):
         matched.append("出现上影线")
+        aux_count += 1
     if current <= zone["main_resistance"]:
         matched.append("压力位回落")
+        aux_count += 1
     if ict.get("sell_confirmed"):
         matched.append("ICT上扫后转弱")
-    status = "已触发" if len(matched) >= MIN_TRIGGER_MATCHES and core_count >= 1 else "观察中"
+        aux_count += 1
+    base_count = len(matched) - core_count - aux_count
+    effective_aux = 0 if (state.get("strong_trend") and state.get("di_uptrend")) else aux_count
+    effective_total = core_count + base_count + effective_aux
+    if state.get("weak_trend"):
+        status = "已触发" if (core_count >= 1 and effective_total >= MIN_TRIGGER_MATCHES - 1) else "观察中"
+    else:
+        status = "已触发" if effective_total >= MIN_TRIGGER_MATCHES and core_count >= 1 else "观察中"
     trigger_time = (last.get("time") or last.get("date")) if status == "已触发" else None
     return trigger_result(status, num(last.get("close")) if status == "已触发" else None, matched, [], trigger_time=trigger_time)
 
