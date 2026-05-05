@@ -54,6 +54,13 @@ def copy_shared(bundle: Path, skill_name: str) -> None:
         if src.exists():
             shutil.copy2(src, scripts_dir / f)
 
+    # shared runtime scripts required by trader_shared dynamic loader
+    shared_scripts_dir = SHARE_DIR / "scripts"
+    for f in ("pipeline.py", "signal_tracker.py", "market_env.py", "calibrator.py"):
+        src = shared_scripts_dir / f
+        if src.exists():
+            shutil.copy2(src, scripts_dir / f)
+
     # shared light_data
     src = SHARE_DIR / "01-行情数据-market-data" / "light_data.py"
     if src.exists():
@@ -64,14 +71,23 @@ def copy_shared(bundle: Path, skill_name: str) -> None:
     if src.exists():
         shutil.copy2(src, scripts_dir / "contract_utils.py")
 
-    # candidate_core — differs per skill
+    # candidate logic — differs per skill
     candidates_dir = SHARE_DIR / "02-候选逻辑-candidate"
     if "t0" in skill_name:
         core = candidates_dir / "t0_candidate_core.py"
+        if core.exists():
+            shutil.copy2(core, scripts_dir / "candidate_core.py")
     else:
-        core = candidates_dir / "candidate_core.py"
-    if core.exists():
-        shutil.copy2(core, scripts_dir / "candidate_core.py")
+        # candidate_core is now a thin compatibility shell that imports
+        # structure_core / decision_core, so all three must be shipped.
+        for src_name, dst_name in (
+            ("candidate_core.py", "candidate_core.py"),
+            ("structure_core.py", "structure_core.py"),
+            ("decision_core.py", "decision_core.py"),
+        ):
+            src = candidates_dir / src_name
+            if src.exists():
+                shutil.copy2(src, scripts_dir / dst_name)
 
     # embed trader_shared package for self-contained runtime
     shared_pkg_src = SHARE_DIR / "trader_shared"
@@ -99,7 +115,9 @@ def pack_skill(skill_dir: Path, skill_name: str, archive: zipfile.ZipFile) -> No
             if should_skip(p):
                 continue
             rel = p.relative_to(staged)
-            arc_name = f"{skill_name}/{rel.as_posix()}"
+            # Keep original repository package prefix so remote agents (e.g. Hermes)
+            # can locate skills by documented path: 01-功能包-packages/<skill>/...
+            arc_name = f"01-功能包-packages/{skill_name}/{rel.as_posix()}"
             if p.is_dir():
                 archive.write(p, f"{arc_name}/")
             else:

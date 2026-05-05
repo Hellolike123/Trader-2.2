@@ -12,35 +12,39 @@ from pathlib import Path
 # ── path helpers ──
 
 def _find_scripts_dir() -> Path | None:
-    """Find the scripts/ directory at runtime."""
-    candidates: list[Path] = []
-    # 1. scripts relative to this __file__ (installed: scripts is not here)
+    """Find the scripts/ directory at runtime across repo/zip/Hermes layouts."""
     _here = Path(__file__).resolve().parent
-    for _base in (
-        _here,
-        _here.parent.parent.parent.parent.parent,
-        Path.cwd(),
-        Path.cwd() / "02-共享模块-shared",
-        _here / ".." / ".." / ".." / "..",
-    ):
-        _b = _base.resolve() if hasattr(_base, "resolve") else _base
-        scripts = _b / "scripts"
-        if scripts.exists() and (scripts / "pipeline.py").exists():
+
+    candidates = [
+        # Hermes/zip layout: .../<skill>/scripts/trader_shared/__init__.py
+        _here.parent,
+        # repo layout: .../02-共享模块-shared/trader_shared/__init__.py
+        _here.parent.parent / "scripts",
+        # current working dir guesses
+        Path.cwd() / "scripts",
+        Path.cwd() / "02-共享模块-shared" / "scripts",
+    ]
+
+    # walk upwards and try sibling scripts directories
+    p = _here
+    for _ in range(8):
+        candidates.append(p / "scripts")
+        candidates.append(p.parent / "scripts")
+        p = p.parent
+
+    seen: set[str] = set()
+    for c in candidates:
+        try:
+            scripts = c.resolve()
+        except Exception:
+            continue
+        key = str(scripts)
+        if key in seen:
+            continue
+        seen.add(key)
+        if scripts.exists() and (scripts / "pipeline.py").exists() and (scripts / "market_env.py").exists():
             return scripts
-    # 2. sibling scripts dirs
-    for p in (
-        Path.cwd() / "02-共享模块-shared",
-    ):
-        s = p / "scripts"
-        if s.exists():
-            return s
-    # 3. relative to __file__ going up 4 levels (src layout)
-    _base = Path(__file__).resolve()
-    for _ in range(5):
-        scripts = _base / "scripts"
-        if scripts.exists() and (scripts / "pipeline.py").exists():
-            return scripts
-        _base = _base.parent
+
     return None
 
 
