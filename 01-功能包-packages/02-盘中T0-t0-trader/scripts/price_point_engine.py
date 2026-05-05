@@ -31,6 +31,9 @@ from config import (
     ICT_SWEEP_LOOKBACK,
     ADX_STRONG_THRESHOLD,
     ADX_WEAK_THRESHOLD,
+    ATR_STOP_FACTOR,
+    ATR_STOP_MAX_PCT,
+    ATR_STOP_MIN_PCT,
 )
 from ict_execution import build_ict_signal
 from indicators import (
@@ -558,7 +561,6 @@ def trigger_result(status: str, trigger_price: float | None, matched: list[str],
 
 
 def calculate_buy_price_model(report_data: dict[str, Any], zones: dict[str, Any], trigger: dict[str, Any], atr14: float = 0) -> dict[str, Any]:
-    from config import ATR_STOP_FACTOR, ATR_STOP_MAX_PCT, ATR_STOP_MIN_PCT
     zone = zones["buy_zone"]
     observation = zone["upper"]
     invalid = round_price(zone["main_support"] * INVALID_BELOW_SUPPORT)

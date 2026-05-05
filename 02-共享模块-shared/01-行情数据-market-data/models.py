@@ -198,3 +198,26 @@ def map_data_status_to_signal(
     if not is_trading_time:
         return "non_trading"
     return DATA_STATUS_MAP.get(raw_status, "degraded")
+
+
+class ChanlunSignal(TypedDict, total=False):
+    trend_label: str
+    buy_point_text: str
+    buy_points: list[dict]
+    last_valid_zone_last_price: float | None
+    last_valid_zone_first_price: float | None
+    strokes_count: int
+    divergence: dict
+    zones_count: int
+
+
+class WyckoffSignal(TypedDict, total=False):
+    spring_signal: bool
+    spring_price: float | None
+    spring_reason: str
+    upthrust_signal: bool
+    upthrust_price: float | None
+    upthrust_reason: str
+    bearish_volume_divergence: bool
+    bullish_volume_divergence: bool
+    wyckoff_summary: str

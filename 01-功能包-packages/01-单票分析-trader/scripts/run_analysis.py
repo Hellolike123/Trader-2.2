@@ -106,6 +106,23 @@ def build_report(target: str) -> dict[str, Any]:
     recent20 = bars[-STRUCTURE_WINDOW:] if len(bars) >= STRUCTURE_WINDOW else bars
     strategies = [build_structure_context]  # pluggable: append additional strategies here
     levels = run_all(current, bars, quote.get("current_change_pct"), quote, *strategies)
+
+    from chan_core import chanlun_analysis
+    from wyckoff_core import wyckoff_analysis
+    macd_h_curr = to_float(bars[-1].get("macd_histogram")) if bars else None
+    macd_h_prev = to_float(bars[-2].get("macd_histogram")) if len(bars) >= 2 else None
+    chan_result = chanlun_analysis(bars=bars, current=current, macd_hist_current=macd_h_curr, macd_hist_prev=macd_h_prev)
+    wyck_result = wyckoff_analysis(bars)
+    levels["chan_trend_label"] = chan_result.get("trend_label", "数据不足")
+    levels["chan_buy_point_text"] = chan_result.get("buy_point_text", "无")
+    levels["chan_buy_points"] = chan_result.get("buy_points", [])
+    levels["chan_strokes_count"] = chan_result.get("strokes_count", 0)
+    levels["chan_zone_last_price"] = chan_result.get("last_valid_zone_last_price")
+    levels["chan_zone_first_price"] = chan_result.get("last_valid_zone_first_price")
+    levels["chan_divergence"] = chan_result.get("divergence", {})
+    levels["wyckoff_spring_signal"] = wyck_result.get("spring_signal", False)
+    levels["wyckoff_summary"] = wyck_result.get("wyckoff_summary", "无明显信号")
+    levels["wyckoff_upthrust_signal"] = wyck_result.get("upthrust_signal", False)
     support = levels["main_support"]
     resistance = levels["resistance"]
     confirm = levels["confirm_price"]

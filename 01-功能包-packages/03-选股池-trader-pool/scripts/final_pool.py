@@ -247,7 +247,18 @@ def score_report(report: dict[str, Any]) -> dict[str, int]:
     if take > current:
         chip += 3
 
+    chan_trend = str(report.get("chan_trend_label", ""))
+    chan_bps = str(report.get("chan_buy_point_text", ""))
+    if "一类买" in chan_bps: chan += 10
+    elif "二类买" in chan_bps: chan += 6
+    elif "三类买" in chan_bps: chan += 5
+    if report.get("chan_strokes_count", 0) < 2 and chan_trend == "数据不足":
+        chan -= 5
     chan = max(0, min(45, chan))
+
+    wyck_spring = report.get("wyckoff_spring_signal", False)
+    if wyck_spring:
+        wyckoff += 5
     wyckoff = max(0, min(30, wyckoff))
     chip = max(0, min(25, chip))
     return {"chanlun_score": chan, "wyckoff_score": wyckoff, "chip_score": chip, "total_score": chan + wyckoff + chip}

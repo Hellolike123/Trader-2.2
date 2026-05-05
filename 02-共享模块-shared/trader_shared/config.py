@@ -50,3 +50,14 @@ ATR_NORMAL_THRESHOLD: float = 0.01
 PYRAMID_SCALES: dict[int, float] = {0: 0, 1: 0.15, 2: 0.35, 3: 0.6, 4: 0.85, 5: 1.0}
 BASE_WEIGHTS: dict[int, int] = {0: 15, 1: 10, 2: 7, 3: 4}
 ATRLV_INDEX: dict[str, int] = {"数据不足": 0, "波幅偏高": 3, "波动偏大": 2, "波动正常": 1, "波动较低": 0}
+
+# ---- Chan Theory (缠论) constants ----
+CHANLUN_MIN_BARS: int = 20
+CHANLUN_MIN_BARS_PER_STROKE: int = 5
+
+# ---- Wyckoff constants ----
+WYCKOFF_MIN_BARS: int = 15
+WYCKOFF_SPRING_SUPPORT_LOOKBACK: int = 10
+WYCKOFF_SPRING_RECLAIM_RATIO: float = 0.92
+WYCKOFF_SPRING_BULLISH_VOL_RATIO: float = 1.3
+WYCKOFF_DIVERGENCE_BARS: int = 5

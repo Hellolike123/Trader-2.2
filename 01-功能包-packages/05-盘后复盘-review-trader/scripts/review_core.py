@@ -435,17 +435,65 @@ def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str,
     elif macd_hist is not None and macd_hist > 0 and hist_expand:
         macd_mom_b = max(macd_mom_b, 12)
 
-    structure_score = 50 + (15 if double_low else 0) + (15 if low_close_reclaim else 0) + (10 if current > (prev_close or current) else 0) - (15 if lower_high else 0) + (15 if above_pressure else 0) + macd_struc_b
-    volume_score = 50 + (20 if volume_repair else 0) - (10 if afternoon_shrink else 0)
+    from chan_core import chanlun_analysis
+    from wyckoff_core import wyckoff_analysis
+    chan_r = chanlun_analysis(bars=daily, current=current, macd_hist_current=macd_hist, macd_hist_prev=macd_hist_prev)
+    wyck_r = wyckoff_analysis(daily)
+
+    structure_score = 50
+    if chan_r.get("trend_label") == "拉升段":
+        structure_score += 15
+    elif chan_r.get("trend_label") == "回调段":
+        structure_score -= 10
+    chan_bps = str(chan_r.get("buy_point_text", ""))
+    if "一类买" in chan_bps: structure_score += 25
+    elif "二类买" in chan_bps: structure_score += 15
+    elif "三类买" in chan_bps: structure_score += 10
+    chan_div = chan_r.get("divergence", {})
+    if chan_div.get("bottom_divergence"): structure_score += 15
+    elif chan_div.get("top_divergence"): structure_score -= 10
+    if chan_r.get("strokes_count", 0) >= 3: structure_score += 5
+    elif chan_r.get("strokes_count", 0) < 2: structure_score -= 5
+    structure_score += (10 if double_low else 0) + (10 if low_close_reclaim else 0)
+    structure_score += 5 if current > (prev_close or current) else 0
+    structure_score -= 10 if lower_high else 0
+    structure_score += 10 if above_pressure else 0
+    structure_score += macd_struc_b
+
+    volume_score = 50
+    if wyck_r.get("spring_signal"): volume_score += 25
+    if wyck_r.get("upthrust_signal"): volume_score += 15
+    if wyck_r.get("bearish_volume_divergence"): volume_score -= 10
+    if wyck_r.get("bullish_volume_divergence"): volume_score += 5
+    volume_score += (15 if volume_repair else 0) - (5 if afternoon_shrink else 0)
+
     chip_score = 50 - (15 if chip_pressure else 0) + (10 if cost and pnl_pct is not None and pnl_pct >= 0 else 0)
     momentum_score = 45 + (20 if above_pressure else 0) + (10 if current > (prev_close or current) else 0) - (10 if afternoon_shrink else 0) + macd_mom_b
     total_score = round(structure_score * 0.32 + volume_score * 0.28 + chip_score * 0.18 + momentum_score * 0.22)
 
     close_word = "现价" if session == "midday" else "收盘"
     next_word = "午后" if session == "midday" else "明天"
+    macd_str = "MACD金叉确认转强。" if macd_gcx else chan_r.get("trend_label", "") + "。"
+    chanlun_text = macd_str
+    if chan_div.get("bottom_divergence"): chanlun_text += " 有底背驰，止跌信号增强。"
+    elif chan_div.get("top_divergence"): chanlun_text += " 有顶背驰，需警惕回调。"
+    elif chan_bps and chan_bps != "无买卖点": chanlun_text += " " + chan_bps
+    else: chanlun_text += " 结构未出现明确买卖点。"
+    wyckoff_text = "供需平衡，无明显信号。"
+    if wyck_r.get("spring_signal"):
+        wyckoff_text = f"Spring 吸筹信号：{wyck_r.get('spring_reason', '')}"
+    elif wyck_r.get("upthrust_signal"):
+        wyckoff_text = f"Upthrust 派发信号：{wyck_r.get('upthrust_reason', '')}"
+    elif wyck_r.get("bearish_volume_divergence"):
+        wyckoff_text = "量价背离（顶背离）：高价创新高但量能萎缩。"
+    elif wyck_r.get("bullish_volume_divergence"):
+        wyckoff_text = "量价背离（底背离）：低价创新低但量能萎缩。"
+    else:
+        wyckoff_text = wyck_r.get("wyckoff_summary", "供需平衡，无明显信号。")
+
     return {
-        "chanlun": ("MACD金叉确认转强。" if macd_gcx else "短线修复段，尚未完成向上离开。") if not above_pressure else ("结构+MACD双确认。" if macd_gcx else "结构尝试向上离开，等待回踩确认。"),
-        "wyckoff": "接近 Spring 类修复，但午后缩量确认不足。" if volume_repair and afternoon_shrink else "量价有修复迹象，仍需放量确认。",
+        "chanlun": chanlun_text,
+        "wyckoff": wyckoff_text,
         "chip": (f"{cost:.2f} 是你的成本压力区；轻量估算不等同真实筹码分布。" if cost else "按近20日成交密集区做轻量估算，不等同真实筹码分布。"),
         "fund": "有吸筹/洗盘嫌疑，但证据不足以确认。" if volume_repair else "资金行为证据不足，只能按价格和量能观察。",
         "momentum": ("MACD柱状图放大，动能增强。" if hist_expand and macd_hist and macd_hist > 0 else "MACD趋势与收盘位置一致，需次日确认。" if macd_mom_b > 0 else "MACD死叉确认，动能偏弱。") if session not in {"midday"} else "上午改善，午后还要 MACD 确认。",
