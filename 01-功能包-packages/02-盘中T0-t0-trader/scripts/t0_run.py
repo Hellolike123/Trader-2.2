@@ -23,8 +23,10 @@ from trader_shared.data_provider import get_provider
 from price_point_engine import build_price_point_model
 from signal_contract import assert_valid_signal
 from t0_core import (
+    build_t0_event_signal,
     build_t0_signals,
     observation_valid,
+    observation_value,
     normalize_t0_data_status,
     pct_text,
     price,
@@ -73,6 +75,10 @@ def build_plan(target: str) -> dict[str, Any]:
         "current_price": float(current),
     }
     model = build_price_point_model(report_data)
+    buy_display_status = side_status(model["buy"])
+    sell_display_status = side_status(model["sell"])
+    buy_display_obs = observation_value(model["buy"], "以下")
+    sell_display_obs = observation_value(model["sell"], "附近")
     return {
         "target": target,
         "name": quote.get("name") or sec.name,
@@ -85,6 +91,10 @@ def build_plan(target: str) -> dict[str, Any]:
         "max_move": model["max_move"],
         "buy": model["buy"],
         "sell": model["sell"],
+        "buy_display_status": buy_display_status,
+        "sell_display_status": sell_display_status,
+        "buy_display_obs": buy_display_obs,
+        "sell_display_obs": sell_display_obs,
         "position_score": model["position_score"],
         "volume_score": model["volume_score"],
         "amplitude_pct": model.get("amplitude_pct"),

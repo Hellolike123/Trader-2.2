@@ -31,13 +31,22 @@ def classify(items: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any
     return main, deputy, rest
 
 
-def render_compare(items: list[dict[str, Any]], date: str | None = None) -> str:
+def render_compare(
+    items: list[dict[str, Any]],
+    date: str | None = None,
+    *,
+    main: dict[str, Any] | None = None,
+    deputy: dict[str, Any] | None = None,
+    rest: list[dict[str, Any]] | None = None,
+) -> str:
     if len(items) < 2:
         raise RuntimeError("至少需要2只已复盘股票才能做多股比较")
     if len(items) > 5:
         items = sorted(items, key=rank_key, reverse=True)[:5]
     compare_date = date or items[0].get("date") or "--"
-    main, deputy, rest = classify(items)
+    if main is None or deputy is None or rest is None:
+        main, deputy, rest = classify(items)
+    ranked = sorted(items, key=rank_key, reverse=True)
     lines = [
         f"📌 多股复盘比较｜{compare_date}",
         "",
@@ -102,7 +111,8 @@ def run_compare(targets: list[str], costs: dict[str, float] | None = None, trade
         enrich_with_signal_backtrack(review)
         save_review(review)
         summaries.append(review_summary(review))
-    markdown = render_compare(summaries)
+    main, deputy, rest = classify(summaries)
+    markdown = render_compare(summaries, main=main, deputy=deputy, rest=rest)
     if output == "json":
         return render_json({"contract": "review_trader_compare_v1", "items": summaries, "markdown": markdown})
     return markdown
@@ -112,7 +122,8 @@ def run_compare_recent(output: str = "markdown") -> str:
     reviews = recent_reviews(limit=5)
     if len(reviews) < 2:
         raise RuntimeError("最近同一交易日复盘少于2只股票，无法比较；请先复盘至少2只股票。")
-    markdown = render_compare(reviews)
+    main, deputy, rest = classify(reviews)
+    markdown = render_compare(reviews, main=main, deputy=deputy, rest=rest)
     if output == "json":
         return render_json({"contract": "review_trader_compare_v1", "items": reviews, "markdown": markdown})
     return markdown

@@ -18,6 +18,8 @@ for name in ("config", "light_data", "signal_store", "models", "pipeline", "sign
     sys.modules.pop(name, None)
 
 from portfolio_run import render_markdown
+from portfolio_core import sort_candidates
+from portfolio_run import build_roles
 
 
 def _fake_item(symbol: str, name: str, status: str) -> dict:
@@ -26,9 +28,15 @@ def _fake_item(symbol: str, name: str, status: str) -> dict:
         "symbol": symbol,
         "name": name,
         "status": status,
+        "score": 75,
+        "current": 56.0,
+        "confirm": 58.0,
         "atr14": 1.5,
         "atr_ratio": 0.015,
+        "atr_level": "波动正常",
+        "atr_cap": 10,
         "livermore_tier": 3,
+        "livermore_score": 75,
         "buy_low": 55.0,
         "buy_high": 56.5,
         "defense": 57.0,
@@ -37,12 +45,18 @@ def _fake_item(symbol: str, name: str, status: str) -> dict:
     }
 
 
+def _render(items):
+    sorted_items = sort_candidates(items)
+    plan = build_roles(sorted_items, max_total=70, main_cap=40)
+    return render_markdown(items, plan, sorted_items, market_level="", market_note="")
+
+
 def test_portfolio_markdown_includes_stocks():
     items = [
         _fake_item("688248.SH", "南网科技", "优先候选"),
         _fake_item("601600.SH", "中国铝业", "等转强"),
     ]
-    result = render_markdown(items)
+    result = _render(items)
     assert "南网科技" in result
     assert "中国铝业" in result
     assert "轮动仓位" in result
@@ -55,7 +69,7 @@ def test_portfolio_markdown_includes_positions():
         _fake_item("688248.SH", "南网科技", "低吸观察"),
         _fake_item("601600.SH", "中国铝业", "防守观察"),
     ]
-    result = render_markdown(items)
+    result = _render(items)
     assert "主仓" in result
     assert "副仓" in result
     assert "现金" in result
@@ -67,6 +81,6 @@ def test_portfolio_markdown_includes_conclusion():
         _fake_item("688248.SH", "南网科技", "优先候选"),
         _fake_item("601600.SH", "中国铝业", "等转强"),
     ]
-    result = render_markdown(items)
+    result = _render(items)
     assert "结论" in result or "当前仓位" in result
     assert "仓位" in result

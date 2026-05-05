@@ -27,14 +27,45 @@ try:
 except Exception:  # pragma: no cover - optional per skill
     TAKE_PROFIT_BUFFER = 1.06
 
-MA_PERIODS = (5, 10, 20, 30)
-MIN_ZONE_WIDTH_PCT = 0.005
-MAX_ZONE_WIDTH_PCT = 0.012
-MIN_STOP_BUFFER_PCT = 0.008
-MAX_STOP_BUFFER_PCT = 0.025
-MIN_CONFIRM_SPACE_PCT = 0.008
-MAX_REASONABLE_MA_DISTANCE_PCT = 0.12
-MA_WEIGHTS = {"ma5": 0.92, "ma10": 0.88, "ma20": 0.65, "ma30": 0.55}
+try:
+    from config import MA_PERIODS
+except Exception:  # pragma: no cover - optional per skill
+    MA_PERIODS = (5, 10, 20, 30)
+
+try:
+    from config import MA_WEIGHTS
+except Exception:  # pragma: no cover - optional per skill
+    MA_WEIGHTS = {"ma5": 0.92, "ma10": 0.88, "ma20": 0.65, "ma30": 0.55}
+
+try:
+    from config import MIN_ZONE_WIDTH_PCT
+except Exception:  # pragma: no cover - optional per skill
+    MIN_ZONE_WIDTH_PCT = 0.005
+
+try:
+    from config import MAX_ZONE_WIDTH_PCT
+except Exception:  # pragma: no cover - optional per skill
+    MAX_ZONE_WIDTH_PCT = 0.012
+
+try:
+    from config import MIN_STOP_BUFFER_PCT
+except Exception:  # pragma: no cover - optional per skill
+    MIN_STOP_BUFFER_PCT = 0.008
+
+try:
+    from config import MAX_STOP_BUFFER_PCT
+except Exception:  # pragma: no cover - optional per skill
+    MAX_STOP_BUFFER_PCT = 0.025
+
+try:
+    from config import MIN_CONFIRM_SPACE_PCT
+except Exception:  # pragma: no cover - optional per skill
+    MIN_CONFIRM_SPACE_PCT = 0.008
+
+try:
+    from config import MAX_REASONABLE_MA_DISTANCE_PCT
+except Exception:  # pragma: no cover - optional per skill
+    MAX_REASONABLE_MA_DISTANCE_PCT = 0.12
 
 
 def clamp(value: float, lower: float, upper: float) -> float:
@@ -190,6 +221,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         "downside_pct": round(abs(pct_change(current, stop)), 2),
         "position_ratio": round(position, 3),
         "pressure_space_pct": round(pressure_space_pct, 4),
+        "status": status,
     }
 
 

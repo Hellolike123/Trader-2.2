@@ -23,61 +23,78 @@ if str(SHARED_ROOT) not in sys.path:
 for name in ("config", "light_data", "contract_utils", "candidate_core", "candidate_model", "validate_output", "signal_contract", "models"):
     sys.modules.pop(name, None)
 
-from portfolio_run import build_signal_summaries, render_markdown, render_snapshot_markdown
+from portfolio_run import build_signal_summaries, render_markdown, render_snapshot_markdown, build_roles
+from portfolio_core import sort_candidates
 from signal_contract import validate_signal
 from validate_output import validate
 
 
 def test_portfolio_markdown_contract() -> None:
-    markdown = render_markdown(
-        [
-            {
-                "ok": True,
-                "name": "中国铝业",
-                "status": "低吸观察",
-                "current": 12.07,
-                "change_pct": 1.43,
-                "defense": 11.76,
-                "stop": 11.52,
-                "buy_low": 11.76,
-                "buy_high": 11.88,
-                "confirm": 12.60,
-                "take": 13.36,
-                "score": 420,
-                "t0_action": "等待高抛触发",
-            },
-            {
-                "ok": True,
-                "name": "南网科技",
-                "status": "防守观察",
-                "current": 56.40,
-                "change_pct": -5.39,
-                "defense": 55.87,
-                "stop": 54.75,
-                "buy_low": 55.87,
-                "buy_high": 56.43,
-                "confirm": 60.55,
-                "take": 64.18,
-                "score": 230,
-                "t0_action": "等待低吸触发",
-            },
-            {
-                "ok": True,
-                "name": "三安光电",
-                "status": "等确认",
-                "current": 15.11,
-                "change_pct": -2.58,
-                "defense": 14.50,
-                "stop": 14.21,
-                "buy_low": 14.50,
-                "buy_high": 14.64,
-                "confirm": 15.50,
-                "take": 16.43,
-                "score": 180,
-                "t0_action": "不做",
-            },
-        ]
-    )
+    items = [
+        {
+            "ok": True,
+            "name": "中国铝业",
+            "status": "低吸观察",
+            "current": 12.07,
+            "change_pct": 1.43,
+            "defense": 11.76,
+            "stop": 11.52,
+            "buy_low": 11.76,
+            "buy_high": 11.88,
+            "confirm": 12.60,
+            "take": 13.36,
+            "score": 420,
+            "atr14": 1.2,
+            "atr_ratio": 0.015,
+            "atr_level": "波动正常",
+            "atr_cap": 10,
+            "livermore_score": 420,
+            "t0_action": "等待高抛触发",
+        },
+        {
+            "ok": True,
+            "name": "南网科技",
+            "status": "防守观察",
+            "current": 56.40,
+            "change_pct": -5.39,
+            "defense": 55.87,
+            "stop": 54.75,
+            "buy_low": 55.87,
+            "buy_high": 56.43,
+            "confirm": 60.55,
+            "take": 64.18,
+            "score": 230,
+            "atr14": 1.5,
+            "atr_ratio": 0.018,
+            "atr_level": "波动正常",
+            "atr_cap": 10,
+            "livermore_score": 230,
+            "t0_action": "等待低吸触发",
+        },
+        {
+            "ok": True,
+            "name": "三安光电",
+            "status": "等确认",
+            "current": 15.11,
+            "change_pct": -2.58,
+            "defense": 14.50,
+            "stop": 14.21,
+            "buy_low": 14.50,
+            "buy_high": 14.64,
+            "confirm": 15.50,
+            "take": 16.43,
+            "score": 180,
+            "atr14": 0.8,
+            "atr_ratio": 0.012,
+            "atr_level": "波动正常",
+            "atr_cap": 10,
+            "livermore_score": 180,
+            "t0_action": "不做",
+        },
+    ]
+    sorted_items = sort_candidates(items)
+    plan = build_roles(sorted_items, max_total=70, main_cap=40)
+    markdown = render_markdown(items, plan, sorted_items, market_level="", market_note="")
 
     assert "轮动仓位 —" in markdown
     assert "📌 组合" in markdown

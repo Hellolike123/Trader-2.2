@@ -100,77 +100,107 @@ def price(value: float | None) -> str:
     return "无" if value is None else f"{value:.2f}元"
 
 
-def build_t0_signals(plan: dict[str, Any]) -> dict[str, Any]:
-    buy_state = side_status(plan["buy"])
-    sell_state = side_status(plan["sell"])
+def build_t0_signals(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        build_side_signal(plan, "buy"),
+        build_side_signal(plan, "sell"),
+    ]
 
-    buy_trigger = side_trigger_price(plan["buy"], buy_state)
-    sell_trigger = side_trigger_price(plan["sell"], sell_state)
 
+def build_side_signal(plan: dict[str, Any], side: str) -> dict[str, Any]:
+    model = plan[side]
+    side_state = side_status(model)
+    signal_type = side_signal_type(side, side_state)
+    action = side_action(side, side_state)
+    trigger_price = side_trigger_price(model, side_state)
+    invalid_price = model.get("invalid_price")
+    direction = "bullish_lean" if side == "buy" else "neutral"
+    trigger_text = "等观察价以下 5m 止跌确认" if side == "buy" else "等观察价附近冲高失败确认"
+    invalid_text = (
+        f"跌破 {price(invalid_price)} 后停止低吸" if side == "buy" else f"放量站上 {price(invalid_price)} 后取消高抛"
+    )
     return {
-        "version": "t0_price_point_v2",
-        "target": {
-            "name": plan.get("name"),
-            "symbol": plan.get("symbol"),
+        "contract": "trader_signal_v1",
+        "source_skill": "t0-trader",
+        "symbol": str(plan.get("symbol") or ""),
+        "name": str(plan.get("name") or ""),
+        "trade_date": str((plan.get("analysis_time") or "").split(" ")[0] or "--"),
+        "analysis_time": str(plan.get("analysis_time") or "--"),
+        "signal_type": signal_type,
+        "direction": direction,
+        "action": action,
+        "confidence": "high" if side_state == "可执行" else "medium",
+        "data_status": normalize_t0_data_status(str(plan.get("data_status") or "partial")),
+        "trigger": {
+            "type": "completed_5m_confirm" if side_state == "可执行" else "watch_price",
+            "price": numeric_or_none(trigger_price),
+            "text": trigger_text,
         },
-        "as_of": plan.get("analysis_time"),
-        "data_status": normalize_t0_data_status(str(plan.get("data_status") or "")),
+        "invalidation": {"type": "price_break", "price": numeric_or_none(invalid_price), "text": invalid_text},
         "position": t0_position(plan),
-        "actions": [
-            {
-                "side": "buy",
-                "signal_type": side_signal_type("buy", buy_state),
-                "status": buy_state,
-                "action": side_action("buy", buy_state),
-                "trigger_price": numeric_or_none(buy_trigger),
-                "summary": side_summary("buy", buy_state, buy_trigger),
-                "risk_flags": side_risk_flags(plan["buy"]),
-            },
-            {
-                "side": "sell",
-                "signal_type": side_signal_type("sell", sell_state),
-                "status": sell_state,
-                "action": side_action("sell", sell_state),
-                "trigger_price": numeric_or_none(sell_trigger),
-                "summary": side_summary("sell", sell_state, sell_trigger),
-                "risk_flags": side_risk_flags(plan["sell"]),
-            },
-        ],
+        "risk_flags": side_risk_flags(model),
+        "summary": side_summary(side, side_state, trigger_price),
     }
+
+
+def build_t0_event_signal(event: str, plan: dict[str, Any]) -> dict[str, Any]:
+    side = "buy" if event.startswith("BUY") else "sell"
+    signal = build_side_signal(plan, side)
+    mapping = {
+        "BUY_TRIGGERED": ("low_buy_triggered", "low_buy"),
+        "SELL_TRIGGERED": ("high_sell_triggered", "high_sell"),
+    }
+    if event in mapping:
+        signal["signal_type"], signal["action"] = mapping[event]
+    return signal
 
 
 def render_markdown(plan: dict[str, Any]) -> str:
     buy = plan["buy"]
     sell = plan["sell"]
-    buy_state = side_status(buy)
-    sell_state = side_status(sell)
+    buy_state = str(plan.get("buy_display_status") or side_status(buy))
+    sell_state = str(plan.get("sell_display_status") or side_status(sell))
+    buy_obs = str(plan.get("buy_display_obs") or observation_value(buy, "以下"))
+    sell_obs = str(plan.get("sell_display_obs") or observation_value(sell, "附近"))
+
+    current_price = numeric_or_none(plan.get('current_price'))
+    current_text = "无" if current_price is None else f"{current_price:.2f}"
 
     lines = [
-        f"# 盘中T0卡片｜{plan.get('name','')}（{plan.get('symbol','')}）",
+        "🎯 T0 盯盘助理",
+        f"{plan.get('name','')}（{plan.get('symbol','')}）｜现价 {current_text}（{pct_text(numeric_or_none(plan.get('current_change_pct')))}）",
         "",
-        f"- 分析时间：{plan.get('analysis_time','--')}  ",
-        f"- 当前价：{price(numeric_or_none(plan.get('current_price')))}（{pct_text(numeric_or_none(plan.get('current_change_pct')))}）  ",
-        f"- 数据状态：{normalize_t0_data_status(str(plan.get('data_status') or ''))}  ",
+        "🔍 扫描",
         "",
-        "## 今日动作",
-        f"- 建议：{plan.get('today_action','等待')}  ",
-        f"- 仓位：{plan.get('max_move','不动')}  ",
+        f"当前：{'低吸' if buy_state == '可执行' else '高抛' if sell_state == '可执行' else '不动'}",
+        f"买入：{buy_state}，观察{buy_obs}。",
+        f"卖出：{sell_state}，观察{sell_obs}。",
         "",
-        "## 低吸",
-        f"- 状态：{buy_state}",
-        f"- 观察价：{observation_value(buy, '以下')}  ",
-        f"- 执行价：{price(numeric_or_none(buy.get('execution_price')))}  ",
-        f"- 可接受价：{price(numeric_or_none(buy.get('acceptable_price')))}  ",
+        "🚩 关键价位",
         "",
-        "## 高抛",
-        f"- 状态：{sell_state}",
-        f"- 观察价：{observation_value(sell, '附近')}  ",
-        f"- 执行价：{price(numeric_or_none(sell.get('execution_price')))}  ",
-        f"- 可接受价：{price(numeric_or_none(sell.get('acceptable_price')))}  ",
+        f"低吸观察：{buy_obs} | 高抛观察：{sell_obs}",
+        f"止损：{price(numeric_or_none(buy.get('invalid_price')))}",
         "",
-        "## 关键事件",
+        "🕒 今日关键事件",
+        "",
     ]
-    lines.extend([f"- {line}" for line in review_lines(plan.get("history"))])
+    lines.extend(review_lines(plan.get("history")))
+    lines.extend(
+        [
+            "",
+            "💰 仓位管控",
+            "",
+            f"当前：{plan.get('today_action', '等待')}",
+            f"触发后：{plan.get('max_move', '不动')}",
+            f"止损：{price(numeric_or_none(buy.get('invalid_price')))}",
+            "",
+            "👀 下一步只盯",
+            "",
+            f"买入：{buy_obs}是否5m止跌。",
+            f"卖出：{sell_obs}是否冲高失败。",
+            f"止损：跌破{price(numeric_or_none(buy.get('invalid_price')))}后不再低吸。",
+        ]
+    )
     return "\n".join(lines)
 
 

@@ -4,23 +4,53 @@ from typing import Any
 
 from light_data import to_float
 
-STATUS_SCORE = {
-    "低吸观察": 80,
-    "等转强": 70,
-    "防守观察": 60,
-    "冲高减仓": 55,
-    "空间不足": 45,
-    "暂不碰": 20,
-    "数据失败": 0,
-}
+try:
+    from config import STATUS_SCORE
+except Exception:  # pragma: no cover - optional per skill
+    STATUS_SCORE = {
+        "低吸观察": 80,
+        "等转强": 70,
+        "防守观察": 60,
+        "冲高减仓": 55,
+        "空间不足": 45,
+        "暂不碰": 20,
+        "数据失败": 0,
+    }
 
-CHANGE_THRESHOLD_STRONG = 3.0
-CHANGE_THRESHOLD_LARGE = 5.0
-CHANGE_THRESHOLD_LARGE_DROP = -5.0
-CHANGE_THRESHOLD_DROP = -7.0
-POSITION_RATIO_STRONG = 0.60
-POSITION_RATIO_CONFIRM = 0.72
-POSITION_RATIO_HIGH = 0.65
+try:
+    from config import CHANGE_THRESHOLD_STRONG
+except Exception:  # pragma: no cover - optional per skill
+    CHANGE_THRESHOLD_STRONG = 3.0
+
+try:
+    from config import CHANGE_THRESHOLD_LARGE
+except Exception:  # pragma: no cover - optional per skill
+    CHANGE_THRESHOLD_LARGE = 5.0
+
+try:
+    from config import CHANGE_THRESHOLD_LARGE_DROP
+except Exception:  # pragma: no cover - optional per skill
+    CHANGE_THRESHOLD_LARGE_DROP = -5.0
+
+try:
+    from config import CHANGE_THRESHOLD_DROP
+except Exception:  # pragma: no cover - optional per skill
+    CHANGE_THRESHOLD_DROP = -7.0
+
+try:
+    from config import POSITION_RATIO_STRONG
+except Exception:  # pragma: no cover - optional per skill
+    POSITION_RATIO_STRONG = 0.60
+
+try:
+    from config import POSITION_RATIO_CONFIRM
+except Exception:  # pragma: no cover - optional per skill
+    POSITION_RATIO_CONFIRM = 0.72
+
+try:
+    from config import POSITION_RATIO_HIGH
+except Exception:  # pragma: no cover - optional per skill
+    POSITION_RATIO_HIGH = 0.65
 
 
 def status_for(
@@ -108,11 +138,11 @@ def score_for(item: dict[str, Any]) -> float:
 def atr_volatility_level(atr_ratio: float) -> tuple[str, int]:
     if atr_ratio <= 0:
         return ("数据不足", 10)
-    if atr_ratio >= 0.03:
+    if atr_ratio >= ATR_HIGH_THRESHOLD:
         return ("波幅偏高", 5)
-    if atr_ratio >= 0.02:
+    if atr_ratio >= ATR_ELEVATED_THRESHOLD:
         return ("波动偏大", 7)
-    if atr_ratio >= 0.01:
+    if atr_ratio >= ATR_NORMAL_THRESHOLD:
         return ("波动正常", 10)
     return ("波动较低", 20)
 
@@ -122,14 +152,40 @@ def atr_stop_buffer(atr_ratio: float, atr14: float) -> tuple[float, str]:
         return (0, "ATR数据不足")
     distance = round(atr14 * 2, 2)
     level, _ = atr_volatility_level(atr_ratio)
-    if atr_ratio >= 0.02:
+    if atr_ratio >= ATR_ELEVATED_THRESHOLD:
         return (distance, f"{level} | ATR×2={distance:.2f}元")
     return (distance, f"ATR×2={distance:.2f}元")
 
 
-PYRAMID_SCALES = {0: 0, 1: 0.15, 2: 0.35, 3: 0.6, 4: 0.85, 5: 1.0}
-BASE_WEIGHTS = {0: 15, 1: 10, 2: 7, 3: 4}
-ATRLV_INDEX = {"数据不足": 0, "波幅偏高": 3, "波动偏大": 2, "波动正常": 1, "波动较低": 0}
+try:
+    from config import PYRAMID_SCALES
+except Exception:  # pragma: no cover - optional per skill
+    PYRAMID_SCALES = {0: 0, 1: 0.15, 2: 0.35, 3: 0.6, 4: 0.85, 5: 1.0}
+
+try:
+    from config import BASE_WEIGHTS
+except Exception:  # pragma: no cover - optional per skill
+    BASE_WEIGHTS = {0: 15, 1: 10, 2: 7, 3: 4}
+
+try:
+    from config import ATRLV_INDEX
+except Exception:  # pragma: no cover - optional per skill
+    ATRLV_INDEX = {"数据不足": 0, "波幅偏高": 3, "波动偏大": 2, "波动正常": 1, "波动较低": 0}
+
+try:
+    from config import ATR_HIGH_THRESHOLD
+except Exception:  # pragma: no cover - optional per skill
+    ATR_HIGH_THRESHOLD = 0.03
+
+try:
+    from config import ATR_ELEVATED_THRESHOLD
+except Exception:  # pragma: no cover - optional per skill
+    ATR_ELEVATED_THRESHOLD = 0.02
+
+try:
+    from config import ATR_NORMAL_THRESHOLD
+except Exception:  # pragma: no cover - optional per skill
+    ATR_NORMAL_THRESHOLD = 0.01
 
 
 def livermore_scale(status: str, score: float) -> int:

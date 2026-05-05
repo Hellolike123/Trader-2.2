@@ -15,12 +15,12 @@ SHARED_SCRIPTS = ROOT / "02-共享模块-shared" / "scripts"
 SHARED_ROOT = ROOT / "02-共享模块-shared"
 SHARED_TS = SHARED_ROOT / "trader_shared"
 CONTRACTS = ROOT / "02-共享模块-shared" / "03-输出校验-contracts"
-for _p in (SHARED_MARKET, SHARED_CANDIDATE, SHARED_SCRIPTS, SHARED_ROOT, SHARED_TS, CONTRACTS):
+for _p in (SHARED_MARKET, SHARED_CANDIDATE, SHARED_SCRIPTS, SHARED_ROOT, CONTRACTS):
     if _p.exists() and str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
 from candidate_model import analyze_target, sort_candidates
-from config import DEFAULT_CASH_FLOOR, DEFAULT_MAIN_CAP, DEFAULT_MAX_TOTAL
+from config import DEFAULT_CASH_FLOOR, DEFAULT_MAIN_CAP, DEFAULT_MAX_TOTAL, LOOKBACK_DAYS
 from trader_shared.data_provider import get_provider
 from signal_contract import assert_valid_signal
 
@@ -464,23 +464,23 @@ def render_snapshot_markdown(
 
 def render_markdown(
     items: list[dict[str, Any]],
+    plan: dict[str, Any],
+    sorted_items: list[dict[str, Any]],
+    market_level: str,
+    market_note: str,
     *,
     max_total: int = DEFAULT_MAX_TOTAL,
     cash_floor: int = DEFAULT_CASH_FLOOR,
     main_cap: int = DEFAULT_MAIN_CAP,
 ) -> str:
-    sorted_items = sort_candidates(items)
-    plan = build_roles(sorted_items, max_total=max_total, main_cap=main_cap)
     weights = plan["weights"]
     total = plan["total"]
     cash = plan["cash"]
 
-    market_level = get_market_level()
-
     lines = [f"轮动仓位 — {' + '.join(sorted(set(str(it['name']) for it in sorted_items if it.get('ok'))))}"]
     lines.append("")
     if market_level:
-        lines.append(f"🌍 大盘{market_level} | {get_market_note()}")
+        lines.append(f"🌍 大盘{market_level} | {market_note}")
         lines.append("")
 
     lines.append("📌 组合")
@@ -677,12 +677,15 @@ def build_portfolio(
     valid_targets = [item.strip() for item in targets if isinstance(item, str) and item.strip()]
     if len(valid_targets) < 2:
         raise RuntimeError("轮动仓位计划至少需要两只股票")
-    items = [analyze_target(target) for target in valid_targets]
+    provider = get_provider()
+    items = [analyze_target(target, provider, LOOKBACK_DAYS) for target in valid_targets]
     if not any(item.get("ok") for item in items):
         raise RuntimeError("所有股票数据都获取失败，无法做仓位计划")
     sorted_items = sort_candidates(items)
     plan = build_roles(sorted_items, max_total=max_total, main_cap=main_cap)
-    markdown = render_markdown(items, max_total=max_total, cash_floor=cash_floor, main_cap=main_cap)
+    market_level = get_market_level()
+    market_note = get_market_note()
+    markdown = render_markdown(items, plan, sorted_items, market_level, market_note, max_total=max_total, cash_floor=cash_floor, main_cap=main_cap)
     signal_summaries = build_signal_summaries(sorted_items, max_total=main_cap, max_single_move=10)
     return {"items": items, "sorted": sorted_items, "plan": plan, "signal_summaries": signal_summaries, "portfolio_markdown": markdown}
 
@@ -703,7 +706,8 @@ def build_snapshot_portfolio(
     valid_targets = snapshot_targets(snapshot)
     if len(valid_targets) < 2:
         raise RuntimeError("快照至少需要两只股票：持仓和候选合计不少于2只")
-    items = [analyze_target(target) for target in valid_targets]
+    provider = get_provider()
+    items = [analyze_target(target, provider, LOOKBACK_DAYS) for target in valid_targets]
     if not any(item.get("ok") for item in items):
         raise RuntimeError("所有股票数据都获取失败，无法做仓位计划")
     merged = attach_snapshot_data(items, snapshot)

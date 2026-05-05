@@ -7,6 +7,10 @@ from pathlib import Path
 import sys
 from typing import Any
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
 ROOT = Path(__file__).resolve().parents[3]
 SHARED_CANDIDATE = ROOT / "02-共享模块-shared" / "02-候选逻辑-candidate"
 SHARED_MARKET = ROOT / "02-共享模块-shared" / "01-行情数据-market-data"
@@ -15,7 +19,7 @@ SHARED_ROOT = ROOT / "02-共享模块-shared"
 SHARED_TRADER_SHARED = SHARED_ROOT / "trader_shared"
 for _path in (SHARED_CANDIDATE, SHARED_MARKET, SHARED_SCRIPTS, SHARED_ROOT, SHARED_TRADER_SHARED):
     if _path.exists() and str(_path) not in sys.path:
-        sys.path.insert(0, str(_path))
+        sys.path.append(str(_path))
 
 import candidate_core as core
 from candidate_core import build_structure_context, atr_volatility_level
@@ -24,6 +28,7 @@ from config import (
     STRUCTURE_WINDOW,
 )
 from trader_shared.data_provider import get_provider
+from trader_shared.strategy_protocol import run_all
 from light_data import to_float, pct_change
 
 _run_analysis_shared_failed = False
@@ -93,7 +98,8 @@ def build_report(target: str) -> dict[str, Any]:
     current = float(current)
 
     recent20 = bars[-STRUCTURE_WINDOW:] if len(bars) >= STRUCTURE_WINDOW else bars
-    levels = build_structure_context(current, bars, quote.get("current_change_pct"), quote)
+    strategies = [build_structure_context]  # pluggable: append additional strategies here
+    levels = run_all(current, bars, quote.get("current_change_pct"), quote, *strategies)
     support = levels["main_support"]
     resistance = levels["resistance"]
     confirm = levels["confirm_price"]
@@ -111,6 +117,20 @@ def build_report(target: str) -> dict[str, Any]:
     high = max(highs) if highs else current
     low = min(lows) if lows else current
     analysis_time = f"{quote.get('trade_date')} {quote.get('trade_time') or ''}".strip()
+
+    state_label = state_text(stage, scene)
+    structure_note = structure_view({
+        "current": current, "confirm": confirm, "stage": stage,
+        "ma": {"ma5": ma_text(levels["ma_values"].get("ma5")),
+               "ma10": ma_text(levels["ma_values"].get("ma10")),
+               "ma20": ma_text(levels["ma_values"].get("ma20")),
+               "ma30": ma_text(levels["ma_values"].get("ma30"))},
+        "scene": scene,
+    })
+    volume_note = volume_view(volume_text)
+    market_env_data = get_env_for_skill("trader")
+    buy_scenes = {"低吸观察", "防守观察", "等转强"}
+    position_cap = min(10, atr_cap) if scene in buy_scenes else 10
 
     return {
         "name": quote.get("name") or sec.name,
@@ -155,6 +175,11 @@ def build_report(target: str) -> dict[str, Any]:
         "atr_ratio": atr_ratio_val,
         "atr_level": atr_level,
         "atr_cap": atr_cap,
+        "state_label": state_label,
+        "structure_note": structure_note,
+        "volume_note": volume_note,
+        "market_env": market_env_data,
+        "position_cap": position_cap,
     }
 
 
@@ -252,16 +277,11 @@ def render_markdown(r: dict[str, Any]) -> str:
     atr_level = str(r.get("atr_level") or "")
     atr_cap = int(r.get("atr_cap") or 10)
 
-    market_level = get_market_level()
-    market_note = get_market_note()
-
     confirm = float(r.get("confirm") or 0)
     low_price = float(r.get("support") or 0)
     stop = float(r.get("stop") or 0)
     scene = str(r.get("scene") or "")
-
-    buy_scenes = {"低吸观察", "防守观察", "等转强"}
-    position_cap = min(10, atr_cap) if scene in buy_scenes else 10
+    position_cap = int(r.get("position_cap") or 10)
     low_zone = str(r.get("low_zone") or f"{low_price:.2f}-{low_price * 1.01:.2f}元")
 
     atr_header = f"｜ATR {atr14:.2f}（{atr_ratio*100:.0f}%）{atr_level}" if atr14 > 0 else ""
@@ -272,14 +292,14 @@ def render_markdown(r: dict[str, Any]) -> str:
         f"MA5：{ma.get('ma5', '--')}|MA10：{ma.get('ma10', '--')}|MA20：{ma.get('ma20', '--')}|MA30：{ma.get('ma30', '--')}{atr_header}",
     ]
 
-    market_env = get_env_for_skill("trader")
+    market_env = r.get("market_env") or {}
     env_level = market_env.get("level", "")
     skill_note = market_env.get("skill_note", "")
     trend_5d = market_env.get("trend_5d", "")
     change_pct = market_env.get("change_pct", 0.0)
     has_env = env_level and env_level not in ("未知", "")
 
-    status_text = state_text(r["stage"], r["scene"])
+    status_text = str(r.get("state_label") or "")
 
     if has_env:
         trend_str = "五条线上方" if trend_5d == "up" else "五条线下方"
@@ -290,6 +310,13 @@ def render_markdown(r: dict[str, Any]) -> str:
             "🌍 中证1000",
             "",
             f"趋势：{trend_str}｜今日{price_dir}{change_abs:.1f}% | 建议：{skill_note}",
+        ])
+    else:
+        lines.extend([
+            "",
+            "🌍 中证1000",
+            "",
+            "趋势：数据不足｜今日--｜建议：市场环境数据暂不可用（回退到个股结构判断）",
         ])
 
     lines.extend([
@@ -322,8 +349,8 @@ def render_markdown(r: dict[str, Any]) -> str:
         "",
         "🧭 简要分析",
         "",
-        f"  结构：{structure_view(r)}",
-        f"  量价：{volume_view(r['volume_text'])} ｜ 筹码：{confirm:.2f} 压力 ｜ 动能：不进攻",
+        f"  结构：{r.get('structure_note') or ''}",
+        f"  量价：{r.get('volume_note') or ''} ｜ 筹码：{confirm:.2f} 压力 ｜ 动能：不进攻",
     ])
 
     pool_count = _pool_count()

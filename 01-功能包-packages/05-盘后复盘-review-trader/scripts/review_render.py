@@ -123,10 +123,12 @@ def render_single(review: dict[str, Any]) -> str:
     data_time = review.get("data_time")
 
     header_cost = f"成本 {cost:.2f}｜浮盈亏 {signed_pct(pnl)}" if cost else "未输入持仓成本｜按观察票复盘"
-    if is_midday:
-        conclusion = "午间弱修复，午后还要看是否重新放量。" if theory["state"] == "弱修复观察" else "午间继续修复，但还没突破关键压力。" if theory["state"] != "转强确认" else "午间尝试转强，午后还要看站稳。"
-    else:
-        conclusion = "弱修复观察，还不能按反转处理。" if theory["state"] == "弱修复观察" else "短线止跌修复，但还不是反转。" if theory["state"] != "转强确认" else "正在尝试转强，仍要看回踩确认。"
+    conclusion = str(review.get("conclusion_text") or "")
+    if not conclusion:
+        if is_midday:
+            conclusion = "午间弱修复，午后还要看是否重新放量。" if theory["state"] == "弱修复观察" else "午间继续修复，但还没突破关键压力。" if theory["state"] != "转强确认" else "午间尝试转强，午后还要看站稳。"
+        else:
+            conclusion = "弱修复观察，还不能按反转处理。" if theory["state"] == "弱修复观察" else "短线止跌修复，但还不是反转。" if theory["state"] != "转强确认" else "正在尝试转强，仍要看回踩确认。"
 
     lines: list[str] = [
         f"📌 {review['name']}｜{review['date']}{review_label}",
@@ -140,7 +142,8 @@ def render_single(review: dict[str, Any]) -> str:
     lines.append("")
     lines.append("结论 ")
     lines.append(conclusion)
-    lines.append(model_summary(theory))
+    model_summary_text = str(review.get("model_summary_text") or model_summary(theory))
+    lines.append(model_summary_text)
     lines.append("")
     # 📊 关键价位 (consolidated: supports + pressures + risk)
     lines.append("📊 关键价位 ")
@@ -182,12 +185,14 @@ def render_single(review: dict[str, Any]) -> str:
         lines.append(f"  ! {b}")
     lines.append("")
     # 👉 一句话
-    if is_midday:
-        one_liner = "午间有修复，还没过成本区。" if cost and close < cost else "午间方向不明，看午后确认。"
-    elif cost and close < cost:
-        one_liner = "现在不适合割肉，也不适合提前加仓。"
-    else:
-        one_liner = "现在不适合追高，先等关键位确认。"
+    one_liner = str(review.get("one_liner_text") or "")
+    if not one_liner:
+        if is_midday:
+            one_liner = "午间有修复，还没过成本区。" if cost and close < cost else "午间方向不明，看午后确认。"
+        elif cost and close < cost:
+            one_liner = "现在不适合割肉，也不适合提前加仓。"
+        else:
+            one_liner = "现在不适合追高，先等关键位确认。"
     lines.append("👉 一句话 ")
     lines.append(one_liner)
     lines.append(f"明天只有放量站稳 {price_text(pressure)} 才算确认；否则继续按短线修复看。")
