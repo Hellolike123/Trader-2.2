@@ -482,6 +482,7 @@ def _pool_signal_verifications(items: list[dict[str, Any]]) -> tuple[list[dict[s
         trigger = to_float(item.get("trigger")) or 0
         defense = to_float(item.get("defense")) or 0
         name = item.get("name", "?")
+        symbol = item.get("symbol") or name
         status = str(item.get("status") or "")
 
         sig_text = "无"
@@ -491,30 +492,44 @@ def _pool_signal_verifications(items: list[dict[str, Any]]) -> tuple[list[dict[s
             sig_text = "无触发/防守位"
             verify_status = "暂无信号"
         else:
+            # Build a search key list: code, name, symbol from item
+            search_keys = []
+            code = str(item.get("target") or "")
+            if code and len(code) == 6:
+                market = "SH" if code.startswith(("6", "688", "689", "8", "4")) else "SZ"
+                search_keys.append(f"{code}.{market}")
+            search_keys.extend([name, symbol])
             try:
-                signals = load_recent_signals(name, limit=5)
+                signals = load_recent_signals(name, limit=10)
+                if not signals:
+                    signals = load_recent_signals(symbol, limit=10)
             except Exception:
                 signals = []
-
             if not signals:
                 try:
                     from signal_store import DEFAULT_SIGNAL_STORE_PATH
-                    signals = load_recent_signals(None, limit=50, path=DEFAULT_SIGNAL_STORE_PATH)
-                    signals = [s for s in signals if s.get("name") == name
-                               or (str(s.get("symbol", "")).upper().endswith((name[-3:], str(name)[:3])))][:5]
+                    signals = load_recent_signals(None, limit=100, path=DEFAULT_SIGNAL_STORE_PATH)
                 except Exception:
                     signals = []
-
+            # Match by code (most precise) or name
+            codes_to_match = set()
+            if code and len(code) == 6:
+                codes_to_match.update([f"{code}.SH", f"{code}.SZ", code, code.upper()])
+            names_to_match = {name, symbol, name.lower(), name.upper()}
             matched = None
             for sig in signals:
-                sig_date = sig.get("trade_date", sig.get("analysis_time", ""))
-                if not sig_date:
-                    continue
-                sig_type = str(sig.get("signal_type", ""))
-                if sig_type in ("review_result", "observe", "low_buy_watch", "low_buy_triggered",
-                                "high_sell_watch", "high_sell_triggered", "track", "reduce", "defensive"):
+                sig_code = str(sig.get("symbol", "") or "").upper()
+                sig_name = str(sig.get("name", "") or "")
+                if sig_code and codes_to_match:
+                    sig_code_upper = sig_code.replace(".", "")
+                    for ck in codes_to_match:
+                        if ck.replace(".", "") == sig_code_upper or sig_code_upper.endswith(ck.replace(".", "")):
+                            matched = sig
+                            break
+                if not matched and (sig_name == name or sig_name == symbol or
+                                    sig_name.lower() == name.lower() or
+                                    sig_name in name or name in sig_name):
                     matched = sig
-                    break
 
             if matched:
                 sig_type = str(matched.get("signal_type", ""))
@@ -599,6 +614,130 @@ def _pool_signal_verifications(items: list[dict[str, Any]]) -> tuple[list[dict[s
         })
 
     return results, summary
+
+
+def _build_report_or_offline(name: str) -> dict[str, Any]:
+    """Try live report, fallback to offline mock report."""
+    try:
+        import importlib.util
+        import sys
+        from pathlib import Path
+        TRADER_DIR = None
+        here = Path(__file__).resolve().parents[2] if "trader-pool" in str(__file__) else Path(__file__).resolve().parents[3]
+        for _dir in [
+            Path(__file__).resolve().parents[2] / "trader" / "scripts",
+            Path(__file__).resolve().parents[3] / "01-功能包-packages" / "01-单票分析-trader" / "scripts",
+        ]:
+            if _dir.exists():
+                TRADER_DIR = _dir
+                break
+        if TRADER_DIR and str(TRADER_DIR) not in sys.path:
+            sys.path.insert(0, str(TRADER_DIR))
+        import run_analysis
+        return run_analysis.build_report(name)
+    except Exception:
+        base = 10 + (sum(ord(char) for char in name) % 700) / 100
+        return {
+            "name": name, "symbol": name, "current": round(base, 2),
+            "change_pct": 0.0, "confirm": round(base * 1.035, 2),
+            "stop": round(base * 0.945, 2), "support": round(base * 0.975, 2),
+            "trigger": round(base * 1.035, 2), "stage": "震荡",
+            "scene": "震荡", "bars": [], "daily_bars": [],
+        }
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
+    """Check all pool items → alert on critical levels (trigger, defense, support)."""
+    pool = load_pool()
+    items = active_items(pool)
+    if not items:
+        print("选股池为空，无需盯盘")
+        return 0
+
+    alerts: list[str] = []
+    overview: list[str] = []
+    now = datetime.now().strftime("%H:%M")
+
+    for item in items:
+        name = item.get("name", "?")
+        current = to_float(item.get("current")) or 0
+        trigger = to_float(item.get("trigger")) or 0
+        defense = to_float(item.get("defense")) or 0
+        support_raw = to_float(item.get("support")) or 0
+        status = str(item.get("status") or "?")
+
+        if current <= 0 or trigger <= 0:
+            # Try live quote
+            r = _build_report_or_offline(name)
+            current = to_float(r.get("current")) or 0
+            trigger = to_float(r.get("trigger")) or to_float(r.get("confirm")) or 0
+            defense = to_float(r.get("defense")) or to_float(r.get("stop")) or 0
+            support_raw = to_float(r.get("support")) or 0
+            if current <= 0:
+                continue
+
+        change_pct = 0.0
+        try:
+            from light_data import fetch_quote, resolve_security
+            sec = resolve_security(name)
+            q = fetch_quote(sec.name)
+            if q and to_float(q.get("price")):
+                current = to_float(q.get("price")) or current
+                change_pct = to_float(q.get("chgpct")) or 0.0
+        except Exception:
+            pass
+
+        if trigger > 0 and current > 0:
+            dist_to_trigger_pct = (trigger - current) / current * 100
+            dist_to_defense_pct = current / defense * 100 - 100 if defense > 0 else 999
+            near_support_pct = (current - support_raw) / support_raw * 100 * -1 if support_raw > 0 else 999
+
+        # Check trigger breaking through (+)
+        if trigger > 0 and current > 0 and dist_to_trigger_pct < 2.0:
+            if dist_to_trigger_pct <= -0.3:
+                alerts.append(f"{name}  🟢 已到触发位附近 {price(trigger)}，现价 {price(current)}({change_pct:+.1f}%) — 关注是否放量确认")
+            elif dist_to_trigger_pct > -0.3 and dist_to_trigger_pct < 2.0:
+                alerts.append(f"{name}  ⚡ 逼近触发位 {price(trigger)}，距触发位仅 {dist_to_trigger_pct:+.1f}% — 放量确认可买")
+
+        # Check defense breach
+        if defense > 0 and current < defense:
+            alerts.append(f"{name}  🛑 已破防守位 {price(defense)}！现价 {price(current)} — 风险警告，止损执行")
+
+        # Check defense approaching (within 1.5%)
+        if defense > 0 and current > defense and dist_to_defense_pct < 1.5:
+            alerts.append(f"{name}  ⚠️ 靠近防守位 {price(defense)}，距防守仅 {dist_to_defense_pct:.1f}% — 准备止损")
+
+        # Check support approaching (within 0.5% either side)
+        if support_raw > 0 and near_support_pct < 0.5 and near_support_pct > -1.5:
+            alerts.append(f"{name}  📊 靠近支撑位 {price(support_raw)}，距支撑仅 {near_support_pct:.1f}%")
+
+        # General status
+        if status == "执行" and not alerts:
+            overview.append(f"  {name}  {price(current)}(±{change_pct:+.1f}%)  触发{price(trigger)}  防守{price(defense)}")
+
+    print(f"📡 池中盯盘状态 — {now}")
+    print(f"  监控 {len(items)} 只 | {'大盘防守优先' if get_market_level() else ''}")
+    print()
+    if alerts:
+        print(f"⚡ {len(alerts)} 条告警：")
+        print()
+        for a in alerts:
+            print(f"  {a}")
+        print()
+    else:
+        print("  无告警，一切正常")
+        print()
+
+    if overview:
+        print("  执行票状态：")
+        for o in overview:
+            print(o)
+        print()
+
+    if not alerts and not overview:
+        print("  所有标的当前不活跃")
+
+    return 0
 
 
 def _signal_type_label(sig_type: str) -> str:
@@ -1198,6 +1337,7 @@ def parse_args() -> argparse.Namespace:
         item = sub.add_parser(command)
         item.add_argument("--target", required=True)
         item.add_argument("--offline", action="store_true")
+    sub.add_parser("watch")
     sub.add_parser("show")
     sub.add_parser("show-pending")
     sub.add_parser("rank")
@@ -1229,6 +1369,7 @@ def main() -> int:
         "plan": cmd_plan,
         "add-last": cmd_add_last,
         "review": cmd_review,
+        "watch": cmd_watch,
         "remove": cmd_remove,
         "archive-exited": cmd_archive_exited,
     }
