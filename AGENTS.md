@@ -1,8 +1,8 @@
 # Trader 2.0 — 架构文档
 
-> 最后更新：2026-05-08
-> 代码版本：trader v0.6.0 / t0-trader v0.7.0 / trader-pool v0.1.0 / trader-portfolio v1.0 / trader-shared v0.6.0 / review-trader pending / trader-compare deprecated
-> 变更：可插拔架构 P1（参数全集中化 config.py + 渲染/决策分离 + 策略协议 strategy_protocol.py + 规则引擎 rule_engine.py/status_rules.yml）
+> 最后更新：2026-05-06
+> 代码版本：trader v0.6.0 / t0-trader v0.7.0 / trader-pool v0.1.0 / trader-portfolio v1.0 / trader-shared v0.6.0 / review-trader v0.1.0
+> 变更：缠论3类买卖点 + 威科夫Spring/Upthrust + Phase1解耦(3策略run_all) + MACD集成 + T0增强(ATR止损/布林/RSI背离/ADX方向过滤)
 
 ---
 
@@ -101,13 +101,13 @@ python3 scripts/final_review.py --target 南网科技 --session close
 
 | 方法论                            | 用哪些 Skill                                     | 对应代码函数                                                                            |
 | ------------------------------ | --------------------------------------------- | --------------------------------------------------------------------------------- |
-| 缠论                             | trader、review-trader                          | `review_model.py:theory_verdicts()` → `structure` 字段                              |
-| 威科夫量价                          | trader、trader-pool、review-trader              | pool `_score_report()` wyckoff子项 / `review_model.py:theory_verdicts()` → `volume` |
+| 缠论                             | trader、review-trader                          | `chan_core.py:chanlun_analysis()` → 分型/笔/中枢/买卖点                               |
+| 威科夫量价                          | trader、trader-pool、review-trader              | `wyckoff_core.py:wyckoff_analysis()` → Spring/Upthrust/量价背离                    |
 | 筹码峰/成本结构                       | trader、review-trader                          | `review_model.py:build_levels()` → `dense_price_zone()` + `chip_zone`             |
 | ATR 动能                         | trader、t0-trader、trader-pool、trader-portfolio | `candidate_core.py:average_amplitude_pct()` + `build_candidate_levels()`          |
 | 利弗莫尔金字塔 + ATR 仓位               | trader-portfolio                              | `candidate_core.py:livermore_scale()` + `base_weight()`                           |
 | 价格点位引擎 (Price Point Engine)    | t0-trader                                     | `price_point_engine.py:build_price_point_model()` → buy/sell 触发区间                 |
-| RSI (Wilder) / MACD / ICT-Lite | t0-trader                                     | `indicators.py` + `ict_execution.py` 的 5m 分析引擎                                    |
+| RSI / MACD / ICT-Lite / 布林带/ADX | t0-trader                                     | `indicators.py` + `ict_execution.py` 的 5m 分析引擎                                    |
 
 
 ---
@@ -155,6 +155,8 @@ python3 scripts/final_review.py --target 南网科技 --session close
 | `CandidateSignal` | 候选信号核心结构（levels + structure + momentum + volume） |
 | `TheoryVerdict`   | 复盘五层理论打分                                         |
 | `SignalRecord`    | Signal Contract v1 记录                            |
+| `ChanlunSignal`   | 缠论分析结果（trend_label/buy_points/divergence）       |
+| `WyckoffSignal`   | 威科夫信号（spring/upthrust/量价背离）                      |
 
 
 **HTTP 客户端** `HttpClient`：GET with User-Agent、gzip、SSL-unverified。 `retry()` 指数退避 3 次。
@@ -202,8 +204,9 @@ python3 scripts/final_review.py --target 南网科技 --session close
 
 **入口**: `01-功能包-packages/01-单票分析-trader/scripts/final_report.py`
 **分析模型**: `run_analysis.py::build_report()` → `final_report.py::render_markdown()` → `build_signal()`
+**策略链**: `strategies = [build_structure_context, chanlun_strategy, wyckoff_strategy]` 经 `run_all()` 合并
 **输入数据**: 腾讯日线（前复权 + ATR）+ 实时快照
-**依赖共享模块**: `candidate_core`、`light_data`、`signal_contract`
+**依赖共享模块**: `candidate_core`、`light_data`、`signal_contract`、`chan_core`、`wyckoff_core`
 
 **Output Contract（固定顺序）**:
 
@@ -226,6 +229,7 @@ T0 参考（低吸/高抛/止损价位，止跌确认）
 **入口**: `01-功能包-packages/02-盘中T0-t0-trader/scripts/final_t0.py`
 **子模块**: `t0_run.py`（计划生成）、 `price_point_engine.py`（价格点位）、 `monitor.py`（盯盘循环）、`indicators.py`（技术指标）、 `ict_execution.py`（ICT执行辅助）
 **输入数据**: 腾讯实时快照 + 新浪 5m/15m/30m K线
+**增强指标**: ATR动态止损(P0-1) · RSI底/顶背离(P0-2) · 布林带20,2σ(P0-3) · ADX方向过滤(P1-4)
 **依赖共享模块**: `light_data`、`signal_contract`、`signal_store`
 
 **Output Contract（无表格卡）**:
@@ -337,6 +341,8 @@ atr_text
                     |-- 02-候选逻辑-candidate/
                     |    candidate_core.py (核心分析)
                     |    t0_candidate_core.py (T0专用)
+                    |    chan_core.py (缠论: 分型/笔/中枢/买卖点)
+                    |    wyckoff_core.py (威科夫: Spring/Upthrust)
                     |-- 03-输出校验-contracts/
                     |    signal_contract.py (v1 校验)
                     |    signal_store.py (JSONL 持久化)
@@ -355,6 +361,9 @@ atr_text
                     |    strategy_protocol.py (策略函数协议)
                     |    rule_engine.py (决策规则引擎)
                     |    status_rules.yml (status_for 决策规则)
+                    |    score_rules.yml (score_for 规则)
+                    |    livermore_rules.yml (livermore 规则)
+                    |    chip_distribution.py (筹码分布)
                     +--------------------------+
                               ^ sys.path.insert(3 parents up)
                     +- 各 skill scripts/*.py
@@ -474,6 +483,31 @@ T0 独有的分析管线：
 | `build_levels(current, quote, daily, cost)`                              | 支撑压力 + 浮盈亏                                   |
 | `enrich_with_signal_backtrack(review, limit=10)`                         | 附加 `historical_signals` 字段                   |
 
+### 5.5 缠论分析 (chan_core.py)
+
+
+| 函数                          | 返回值                             | 说明                     |
+| --------------------------- | ------------------------------- | ---------------------- |
+| `handle_inclusion()`        | 去包含关系的 K 线列表                     | 合并同向包含                |
+| `find_fractions()`          | 顶底分型列表                          | 顶分型/底分型检测             |
+| `build_strokes()`           | 笔序列                             | 底→顶/顶→底交替            |
+| `build_zones()`             | 中枢列表                            | 3 笔非重叠组，zh_top > zh_bottom |
+| `detect_buy_points()`       | 一类买/二类买/三类买                      | MACD 辅助确认             |
+| `detect_divergence()`       | 顶/底背驰                           | MACD 柱状图极值比较          |
+| `chanlun_analysis()`        | 完整分析结果（trend_label, buy_point_text） | 主入口                   |
+| `chanlun_strategy()`        | `{"chanlun": {...}}`              | `run_all()` 协议包装        |
+
+### 5.6 威科夫分析 (wyckoff_core.py)
+
+
+| 函数                       | 返回值                       | 说明              |
+| ------------------------ | ------------------------- | --------------- |
+| `_detect_spring()`       | Spring 弹簧信号                | 跌破支撑 + 收回      |
+| `_detect_upthrust()`     | Upthrust 上冲回落信号            | 突破阻力 + 回踩      |
+| `_detect_volume_divergence()` | (bearish, bullish) 量价背离      | 价格创新高/低但量能不配合 |
+| `wyckoff_analysis()`     | 完整结果（spring/upthrust/summary） | 主入口             |
+| `wyckoff_strategy()`     | `{"wyckoff": {...}}`        | `run_all()` 协议包装  |
+
 
 ---
 
@@ -592,9 +626,10 @@ Tencent API (quotes/K-line)          Sina API (5/15/30m kline)
   light_data.py:load_market_snapshot() / fetch_qfq_daily() + fetch_5m()
       | (ATR14, atr7, atr_ratio appended in daily bars)
       v
-  candidate_core.py:
-    build_candidate_levels() -> support/resistance/stop/take/status  <-- shared
-    status_for(), score_for(), livermore_scale(), base_weight()    <-- shared
+  strategy_protocol.py:run_all():
+    build_structure_context()  → 支撑/阻力/状态  <-- shared
+    chanlun_strategy()         → 缠论 分型/笔/中枢/买卖点
+    wyckoff_strategy()        → 威科夫 Spring/Upthrust/背离
       |
       +---> skill-1: run_analysis.build_report() -> render_markdown() (single stock)
       |
@@ -634,6 +669,8 @@ t0-trader --> ~/.t0-trader/state.json (cooldown timer)
 | review-trader    | `tests/test_review_backtrack.py`   | 5   | Review signal backtrack 回溯             |
 | review-trader    | `tests/test_review_contract.py`    | ~10 | Review output 验证器 + banned words       |
 | portfolio        | `tests/test_portfolio_contract.py` | ~5  | Portfolio output 验证器                   |
+| shared-chan      | `tests/test_chan_core.py`          | 18  | 缠论: 包含处理/分型/笔/中枢/买卖点/背驰             |
+| shared-wyckoff   | `tests/test_wyckoff_core.py`       | 8   | 威科夫: Spring/Upthrust/量价背离              |
 
 
 ### 9.2 测试运行
@@ -792,6 +829,8 @@ Trader 2.0/
 |   +-- 02-候选逻辑-candidate/
 |   |   +-- candidate_core.py         # 状态机 + 打分 + ATR + Livermore
 |   |   +-- t0_candidate_core.py      # T0 专用候选逻辑
+|   |   +-- chan_core.py              # 缠论: 分型/笔/中枢/买卖点/背驰
+|   |   +-- wyckoff_core.py           # 威科夫: Spring/Upthrust/量价背离
 |   |
 |   +-- 03-输出校验-contracts/
 |   |   +-- signal_contract.py        # trader_signal_v1 校验器
@@ -799,6 +838,9 @@ Trader 2.0/
 |   |   +-- test_signal_contract.py   # contract 单元测试
 |   |
 |   +-- contract_utils.py             # 文本校验工具（validate_banned/headings）
+|   +-- tests/
+|   |   +-- test_chan_core.py         # 缠论单元测试（18 个）
+|   |   +-- test_wyckoff_core.py      # 威科夫单元测试（8 个）
 |   +-- scripts/
 |       +-- calibrator.py             # 回测校准
 |       +-- market_env.py             # 大盘环境判断
