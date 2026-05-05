@@ -100,12 +100,78 @@ def price(value: float | None) -> str:
     return "无" if value is None else f"{value:.2f}元"
 
 
-def normalize_t0_data_status(value: str) -> str:
-    if value == "delayed":
-        return "stale"
-    if value in {"fresh", "insufficient", "non_trading"}:
-        return value
-    return "partial"
+def build_t0_signals(plan: dict[str, Any]) -> dict[str, Any]:
+    buy_state = side_status(plan["buy"])
+    sell_state = side_status(plan["sell"])
+
+    buy_trigger = side_trigger_price(plan["buy"], buy_state)
+    sell_trigger = side_trigger_price(plan["sell"], sell_state)
+
+    return {
+        "version": "t0_price_point_v2",
+        "target": {
+            "name": plan.get("name"),
+            "symbol": plan.get("symbol"),
+        },
+        "as_of": plan.get("analysis_time"),
+        "data_status": normalize_t0_data_status(str(plan.get("data_status") or "")),
+        "position": t0_position(plan),
+        "actions": [
+            {
+                "side": "buy",
+                "signal_type": side_signal_type("buy", buy_state),
+                "status": buy_state,
+                "action": side_action("buy", buy_state),
+                "trigger_price": numeric_or_none(buy_trigger),
+                "summary": side_summary("buy", buy_state, buy_trigger),
+                "risk_flags": side_risk_flags(plan["buy"]),
+            },
+            {
+                "side": "sell",
+                "signal_type": side_signal_type("sell", sell_state),
+                "status": sell_state,
+                "action": side_action("sell", sell_state),
+                "trigger_price": numeric_or_none(sell_trigger),
+                "summary": side_summary("sell", sell_state, sell_trigger),
+                "risk_flags": side_risk_flags(plan["sell"]),
+            },
+        ],
+    }
+
+
+def render_markdown(plan: dict[str, Any]) -> str:
+    buy = plan["buy"]
+    sell = plan["sell"]
+    buy_state = side_status(buy)
+    sell_state = side_status(sell)
+
+    lines = [
+        f"# 盘中T0卡片｜{plan.get('name','')}（{plan.get('symbol','')}）",
+        "",
+        f"- 分析时间：{plan.get('analysis_time','--')}  ",
+        f"- 当前价：{price(numeric_or_none(plan.get('current_price')))}（{pct_text(numeric_or_none(plan.get('current_change_pct')))}）  ",
+        f"- 数据状态：{normalize_t0_data_status(str(plan.get('data_status') or ''))}  ",
+        "",
+        "## 今日动作",
+        f"- 建议：{plan.get('today_action','等待')}  ",
+        f"- 仓位：{plan.get('max_move','不动')}  ",
+        "",
+        "## 低吸",
+        f"- 状态：{buy_state}",
+        f"- 观察价：{observation_value(buy, '以下')}  ",
+        f"- 执行价：{price(numeric_or_none(buy.get('execution_price')))}  ",
+        f"- 可接受价：{price(numeric_or_none(buy.get('acceptable_price')))}  ",
+        "",
+        "## 高抛",
+        f"- 状态：{sell_state}",
+        f"- 观察价：{observation_value(sell, '附近')}  ",
+        f"- 执行价：{price(numeric_or_none(sell.get('execution_price')))}  ",
+        f"- 可接受价：{price(numeric_or_none(sell.get('acceptable_price')))}  ",
+        "",
+        "## 关键事件",
+    ]
+    lines.extend([f"- {line}" for line in review_lines(plan.get("history"))])
+    return "\n".join(lines)
 
 
 def side_signal_type(side: str, side_state: str) -> str:

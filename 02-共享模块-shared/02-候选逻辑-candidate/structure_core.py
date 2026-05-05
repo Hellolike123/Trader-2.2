@@ -151,6 +151,21 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     pressure_space_pct = (confirm - current) / current if current > 0 else 0
     below_ma = count_below_ma(current, ma_values)
 
+    # keep compatibility for callers that expect status from structure payload
+    from decision_core import status_for  # local import to avoid tighter module coupling
+
+    status = status_for(
+        current=current,
+        support=support_price,
+        low_zone_upper=low_zone_upper,
+        confirm=confirm,
+        hard_stop=stop,
+        position_ratio=position,
+        change_pct=change_pct,
+        ma_values=ma_values,
+        pressure_space_pct=pressure_space_pct,
+    )
+
     return {
         "main_support": round(support_price, 2),
         "support": round(support_price, 2),

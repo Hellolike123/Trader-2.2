@@ -45,22 +45,24 @@ def repo_root() -> Path:
 
 def copy_shared(bundle: Path, skill_name: str) -> None:
     """Copy shared modules into each skill bundle."""
+    scripts_dir = bundle / "scripts"
+
     # shared contracts
     contracts_dir = SHARE_DIR / "03-输出校验-contracts"
     for f in ("signal_contract.py", "signal_store.py"):
         src = contracts_dir / f
         if src.exists():
-            shutil.copy2(src, bundle / "scripts" / f)
+            shutil.copy2(src, scripts_dir / f)
 
     # shared light_data
     src = SHARE_DIR / "01-行情数据-market-data" / "light_data.py"
     if src.exists():
-        shutil.copy2(src, bundle / "scripts" / "light_data.py")
+        shutil.copy2(src, scripts_dir / "light_data.py")
 
     # shared contract_utils
     src = SHARE_DIR / "contract_utils.py"
     if src.exists():
-        shutil.copy2(src, bundle / "scripts" / "contract_utils.py")
+        shutil.copy2(src, scripts_dir / "contract_utils.py")
 
     # candidate_core — differs per skill
     candidates_dir = SHARE_DIR / "02-候选逻辑-candidate"
@@ -69,7 +71,19 @@ def copy_shared(bundle: Path, skill_name: str) -> None:
     else:
         core = candidates_dir / "candidate_core.py"
     if core.exists():
-        shutil.copy2(core, bundle / "scripts" / "candidate_core.py")
+        shutil.copy2(core, scripts_dir / "candidate_core.py")
+
+    # embed trader_shared package for self-contained runtime
+    shared_pkg_src = SHARE_DIR / "trader_shared"
+    shared_pkg_dst = scripts_dir / "trader_shared"
+    if shared_pkg_src.exists():
+        if shared_pkg_dst.exists():
+            shutil.rmtree(shared_pkg_dst)
+        shutil.copytree(
+            shared_pkg_src,
+            shared_pkg_dst,
+            ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "*.pyc", ".DS_Store"),
+        )
 
 
 def pack_skill(skill_dir: Path, skill_name: str, archive: zipfile.ZipFile) -> None:
