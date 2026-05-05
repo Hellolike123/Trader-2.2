@@ -106,6 +106,7 @@ python3 scripts/final_review.py --target 南网科技 --session close
 | 筹码峰/成本结构                       | trader、review-trader                          | `review_model.py:build_levels()` → `dense_price_zone()` + `chip_zone`             |
 | ATR 动能                         | trader、t0-trader、trader-pool、trader-portfolio | `candidate_core.py:average_amplitude_pct()` + `build_candidate_levels()`          |
 | 利弗莫尔金字塔 + ATR 仓位               | trader-portfolio                              | `candidate_core.py:livermore_scale()` + `base_weight()`                           |
+| 动量策略                           | trader、trader-pool、review-trader              | `momentum_core.py:assess_momentum()` → RSI+MACD+ADX+布林综合方向 |
 | 价格点位引擎 (Price Point Engine)    | t0-trader                                     | `price_point_engine.py:build_price_point_model()` → buy/sell 触发区间                 |
 | RSI / MACD / ICT-Lite / 布林带/ADX | t0-trader                                     | `indicators.py` + `ict_execution.py` 的 5m 分析引擎                                    |
 
@@ -508,6 +509,18 @@ T0 独有的分析管线：
 | `wyckoff_analysis()`     | 完整结果（spring/upthrust/summary） | 主入口             |
 | `wyckoff_strategy()`     | `{"wyckoff": {...}}`        | `run_all()` 协议包装  |
 
+### 5.7 动量策略 (momentum_core.py)
+
+
+| 函数                       | 返回值                       | 说明              |
+| ------------------------ | ------------------------- | --------------- |
+| `calc_rsi()`             | RSI 序列                     | Wilder RSI(14)    |
+| `calc_macd()`            | MACD 线/DEA/柱/金叉/死叉        | EMA12/26/9       |
+| `calc_adx()`             | ADX/DI+/DI- 值              | Wilder ADX(14)   |
+| `calc_bollinger()`       | 上/中/下轨 + pct_b            | 20,2σ             |
+| `assess_momentum()`      | 方向+分数+信号列表               | 多指标综合判定         |
+| `momentum_strategy()`    | `{"momentum": {...}}`      | `run_all()` 协议包装  |
+
 
 ---
 
@@ -671,6 +684,7 @@ t0-trader --> ~/.t0-trader/state.json (cooldown timer)
 | portfolio        | `tests/test_portfolio_contract.py` | ~5  | Portfolio output 验证器                   |
 | shared-chan      | `tests/test_chan_core.py`          | 18  | 缠论: 包含处理/分型/笔/中枢/买卖点/背驰             |
 | shared-wyckoff   | `tests/test_wyckoff_core.py`       | 8   | 威科夫: Spring/Upthrust/量价背离              |
+| shared-momentum  | `tests/test_momentum_core.py`      | 16  | 动量: RSI/MACD/ADX/布林综合判定                  |
 
 
 ### 9.2 测试运行

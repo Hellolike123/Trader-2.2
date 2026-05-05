@@ -261,7 +261,13 @@ def score_report(report: dict[str, Any]) -> dict[str, int]:
         wyckoff += 5
     wyckoff = max(0, min(30, wyckoff))
     chip = max(0, min(25, chip))
-    return {"chanlun_score": chan, "wyckoff_score": wyckoff, "chip_score": chip, "total_score": chan + wyckoff + chip}
+    from momentum_core import assess_momentum
+    daily_bars = report.get("bars") or report.get("daily_bars") or []
+    momentum_result = assess_momentum(daily_bars) if len(daily_bars) >= 30 else {"direction": "insufficient", "score": 0}
+    momentum_dir = momentum_result.get("direction", "insufficient")
+    momentum_score_val = min(20, max(0, momentum_result.get("score", 0) // 5))
+    mom_tag = {"bullish": "🟢看多", "bearish": "🔴看空", "neutral": "🟡中性"}.get(momentum_dir, "⚪数据不足")
+    return {"chanlun_score": chan, "wyckoff_score": wyckoff, "chip_score": chip, "total_score": chan + wyckoff + chip, "momentum_score": momentum_score_val, "momentum_tag": mom_tag}
 
 
 def admission_for(report: dict[str, Any], scores: dict[str, int]) -> dict[str, str]:
@@ -632,6 +638,7 @@ def render_plan(items: list[dict[str, Any]]) -> str:
             lines.append(
                 f"  {item.get('name')}  总分{item['total_score']}  "
                 f"缠{item['chanlun_score']}/45 威{item['wyckoff_score']}/30 筹{item['chip_score']}/25  "
+                f"动量{item.get('momentum_tag', '')}  "
                 f"{item['status']}"
             )
 
