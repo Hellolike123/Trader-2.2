@@ -104,15 +104,12 @@ def build_report(target: str) -> dict[str, Any]:
     current = float(current)
 
     recent20 = bars[-STRUCTURE_WINDOW:] if len(bars) >= STRUCTURE_WINDOW else bars
-    strategies = [build_structure_context]  # pluggable: append additional strategies here
+    from chan_core import chanlun_strategy
+    from wyckoff_core import wyckoff_strategy
+    strategies = [build_structure_context, chanlun_strategy, wyckoff_strategy]
     levels = run_all(current, bars, quote.get("current_change_pct"), quote, *strategies)
-
-    from chan_core import chanlun_analysis
-    from wyckoff_core import wyckoff_analysis
-    macd_h_curr = to_float(bars[-1].get("macd_histogram")) if bars else None
-    macd_h_prev = to_float(bars[-2].get("macd_histogram")) if len(bars) >= 2 else None
-    chan_result = chanlun_analysis(bars=bars, current=current, macd_hist_current=macd_h_curr, macd_hist_prev=macd_h_prev)
-    wyck_result = wyckoff_analysis(bars)
+    chan_result = levels.get("chanlun", {})
+    wyck_result = levels.get("wyckoff", {})
     levels["chan_trend_label"] = chan_result.get("trend_label", "数据不足")
     levels["chan_buy_point_text"] = chan_result.get("buy_point_text", "无")
     levels["chan_buy_points"] = chan_result.get("buy_points", [])

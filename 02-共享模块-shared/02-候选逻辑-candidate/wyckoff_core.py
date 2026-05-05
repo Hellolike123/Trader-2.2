@@ -152,3 +152,7 @@ def wyckoff_analysis(bars: list[dict]) -> dict:
         "bullish_volume_divergence": bullish_div,
         "wyckoff_summary": "；".join(parts),
     }
+
+
+def wyckoff_strategy(current: float, bars: list[dict], change_pct: Any = None, quote: dict | None = None) -> dict:
+    return {"wyckoff": wyckoff_analysis(bars)}

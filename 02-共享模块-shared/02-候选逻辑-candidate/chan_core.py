@@ -387,3 +387,9 @@ def chanlun_analysis(
         "last_valid_zone_last_price": last_valid_zone_last_price,
         "last_valid_zone_first_price": last_valid_zone_first_price,
     }
+
+
+def chanlun_strategy(current: float, bars: list[dict], change_pct: Any = None, quote: dict | None = None) -> dict:
+    macd_h_curr = to_float(bars[-1].get("macd_histogram")) if bars else None
+    macd_h_prev = to_float(bars[-2].get("macd_histogram")) if len(bars) >= 2 else None
+    return {"chanlun": chanlun_analysis(bars, current, macd_h_curr, macd_h_prev)}
