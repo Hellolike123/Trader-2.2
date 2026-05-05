@@ -1,0 +1,6 @@
+{
+  "name": "review-trader",
+  "version": "0.1.0-review-v1",
+  "contract": "review_trader_v1",
+  "description": "Script-output skill. MUST run scripts/final_review.py and return validated stdout verbatim. Supports single-stock after-close review panels, midday review panels, and multi-stock review comparison. Never handwrite, summarize, shorten, restyle, add markdown tables, or output T0 execution cards."
+}

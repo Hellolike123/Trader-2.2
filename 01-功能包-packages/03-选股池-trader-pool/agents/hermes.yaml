@@ -1,0 +1,7 @@
+interface:
+  display_name: "Trader Pool"
+  short_description: "A股选股池：待确认池、入池、作战表、复盘，必须运行脚本原样返回"
+  default_prompt: "Use $trader-pool for candidate-pool workflow. Map `加入选股池` to `python3 scripts/final_pool.py add --target <股票名或代码>`, `看看待确认池`/`看看推荐` to `python3 scripts/final_pool.py show-pending`, `确认入池 <股票名>` to `python3 scripts/final_pool.py confirm-to-pool --target <股票名>`, `生成明日作战表` to `python3 scripts/final_pool.py plan`, and `复盘选股池` to `python3 scripts/final_pool.py review`. Return stdout exactly; do not compose from memory, summarize, shorten, restyle, translate, or add follow-up lines."
+
+policy:
+  allow_implicit_invocation: true

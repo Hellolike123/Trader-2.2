@@ -1,0 +1,7 @@
+interface:
+  display_name: "T0 Trader"
+  short_description: "A股T0盯盘助理和微信状态提醒"
+  default_prompt: "Use $t0-trader to run `python3 scripts/final_t0.py --target <股票名或代码>` for the manual watch assistant, or `python3 scripts/final_t0.py --target <股票名或代码> --monitor --once` for Hermes/OpenClaw scheduled monitoring. This is a script-output skill, not a writing template: return stdout exactly and do not compose from memory, summarize, shorten, restyle, translate, convert to tables, or add follow-up lines. If monitor prints nothing, return nothing. Manual card must start with `T0 盯盘助理` and include `📍 当前结论`, `🎯 今日关键点`, `📜 今日回顾`, `📊 盘中走势`, `📦 仓位建议`, and `🔭 下一步只盯`. If output contains old markers such as `T0 执行卡`, `⏱️ 盘中 T0`, `📉 低吸计划`, `📈 高抛计划`, `🎯 操作提醒`, `T0买入价`, `T0卖出价`, `先买后卖`, `先卖后买`, `规则版本`, `数据状态`, markdown tables, bold-only restyling, or a hand-written 5m replay, rerun the script and return stdout verbatim. Monitor mode only alerts trigger/expired/blocked/invalidated events; do not alert observation-zone entry."
+
+policy:
+  allow_implicit_invocation: true

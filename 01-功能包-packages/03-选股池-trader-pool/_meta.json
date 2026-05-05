@@ -1,0 +1,6 @@
+{
+  "name": "trader-pool",
+  "version": "0.1.0-pool",
+  "contract": "trader_pool_v1",
+  "description": "Script-output skill for manual A-share candidate pool management. MUST run scripts/final_pool.py and return stdout verbatim. Supports analyze/add/show/plan/review/remove/archive-exited. Does not replace the original trader single-stock report."
+}

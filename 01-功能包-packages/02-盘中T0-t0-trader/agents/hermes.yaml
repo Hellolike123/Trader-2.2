@@ -1,0 +1,7 @@
+interface:
+  display_name: "T0 Trader"
+  short_description: "A股T0盯盘助理和微信状态提醒，必须运行脚本原样返回"
+  default_prompt: "Use $t0-trader to run `python3 scripts/final_t0.py --target <股票名或代码>` for the manual watch assistant, or `python3 scripts/final_t0.py --target <股票名或代码> --monitor --once` for scheduled monitoring. This is a script-output skill, not a writing template: return stdout exactly and do not compose from memory, summarize, shorten, restyle, translate, convert to tables, or add follow-up lines. If monitor prints nothing, return nothing. Manual card must start with `T0 盯盘助理`. If the script cannot run, return only the error."
+
+policy:
+  allow_implicit_invocation: true

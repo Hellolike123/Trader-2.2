@@ -1,0 +1,6 @@
+{
+  "name": "trader-portfolio",
+  "version": "0.1.2-contract",
+  "contract": "trader_portfolio_v1",
+  "description": "MUST run scripts/final_portfolio.py and return validated stdout verbatim. Supports --targets default plans and --snapshot high/low rotation panels. Output must include 规则版本：trader_portfolio_v1 or 规则版本：trader_portfolio_rotation_v1. Never handwrite, summarize, shorten, or restyle the portfolio plan."
+}

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Trader Portfolio"
+  short_description: "A股轮动仓位，必须运行脚本原样返回"
+  default_prompt: "Use $trader-portfolio to run `python3 scripts/final_portfolio.py --targets <股票1> <股票2> ...` for the default plan, or `python3 scripts/final_portfolio.py --snapshot <portfolio_snapshot.json>` for high/low rotation from a holding snapshot, and return stdout exactly. Output must include `规则版本：trader_portfolio_v1` or `规则版本：trader_portfolio_rotation_v1`. This is a script-output skill, not a writing template: do not compose from memory, summarize, shorten, restyle, translate, add tables, or add follow-up lines. If the script cannot run, return only the error."
+
+policy:
+  allow_implicit_invocation: true
