@@ -32,6 +32,9 @@ from config import (
 )
 from ict_execution import build_ict_signal
 from indicators import (
+    calculate_bollinger_bands,
+    detect_bearish_divergence,
+    detect_bullish_divergence,
     calculate_macd,
     calculate_rsi,
     calculate_volume_ratio,
@@ -158,6 +161,17 @@ def find_key_levels(report_data: dict[str, Any]) -> dict[str, Any]:
     add_level(resistance, "30m高点", max(values(bars_30m[-8:], "high"), default=None), 0.8)
     add_level(support, "VWAP", vwap, 0.6)
     add_level(resistance, "VWAP上方偏离", vwap * 1.01 if vwap else None, 0.6)
+    bb = calculate_bollinger_bands(values(bars_5m, "close"), period=20, num_std=2.0)
+    bb_last = bb.get(max(bb.keys(), default=-1), {})
+    bb_lower = bb_last.get("lower")
+    bb_upper = bb_last.get("upper")
+    if bb_lower:
+        add_level(support, "布林下轨(20,2σ)", round_price(bb_lower), 0.4)
+    if bb_upper:
+        add_level(resistance, "布林上轨(20,2σ)", round_price(bb_upper), 0.4)
+    if bb_last.get("middle"):
+        add_level(support, "布林中轨", round_price(bb_last["middle"]), 0.3)
+        add_level(resistance, "布林中轨", round_price(bb_last["middle"]), 0.3)
     main_support = choose_level(support, current, below=True)
     main_resistance = choose_level(resistance, current, below=False)
     return {"support_levels": support, "resistance_levels": resistance, "main_support": main_support, "main_resistance": main_resistance, "vwap": round_price(vwap)}
@@ -241,6 +255,10 @@ def latest_indicator_state(bars: list[dict[str, Any]]) -> dict[str, Any]:
     hist = macd.get("hist") or []
     vwap = calculate_vwap_from_bars(bars)
     prev_vwap = calculate_vwap_from_bars(bars[:-1]) if len(bars) >= 2 else None
+    bb = calculate_bollinger_bands(closes, period=20, num_std=2.0)
+    bb_last = bb.get(max(bb.keys(), default=-1), {})
+    bb_pct_b = bb_last.get("pct_b")
+    bb_squeeze = (bb_last.get("bandwidth") or 999) < 0.03
     return {
         "closes": closes,
         "vwap": vwap,
@@ -253,6 +271,9 @@ def latest_indicator_state(bars: list[dict[str, Any]]) -> dict[str, Any]:
         "prev_hist": hist[-2] if len(hist) >= 2 else None,
         "last_rsi": rsi[-1] if rsi else None,
         "prev_rsi": rsi[-2] if len(rsi) >= 2 else None,
+        "bb": bb_last,
+        "pct_b": bb_pct_b,
+        "bb_squeeze": bb_squeeze,
     }
 
 
@@ -391,11 +412,20 @@ def detect_buy_trigger(report_data: dict[str, Any], zones: dict[str, Any], state
     if macd_green_shrinking(state):
         matched.append("MACD绿柱缩短")
         core_count += 1
+    rsi_series = state.get("rsi") or []
+    if detect_bullish_divergence(bars, rsi_series, lookback=12):
+        matched.append("RSI底背离（价格新低RSI未新低）")
+        core_count += 1
     if rsi_turning_up(state):
         matched.append("RSI低位拐头")
         core_count += 1
     if state.get("vwap") is not None and current >= float(state["vwap"]):
         matched.append("站回VWAP")
+        core_count += 1
+    pct_b = state.get("pct_b")
+    last_rsi = state.get("last_rsi")
+    if pct_b is not None and pct_b < 0 and last_rsi is not None and last_rsi < 30:
+        matched.append("布林下轨+RSI超卖共振")
         core_count += 1
     if detect_lower_shadow(last):
         matched.append("出现下影线")
@@ -452,11 +482,20 @@ def detect_sell_trigger(report_data: dict[str, Any], zones: dict[str, Any], stat
     if macd_red_shrinking(state):
         matched.append("MACD红柱缩短")
         core_count += 1
+    rsi_series = state.get("rsi") or []
+    if detect_bearish_divergence(bars, rsi_series, lookback=12):
+        matched.append("RSI顶背离（价格新高RSI未新高）")
+        core_count += 1
     if rsi_turning_down(state):
         matched.append("RSI高位拐头")
         core_count += 1
     if state.get("vwap") is not None and current <= float(state["vwap"]):
         matched.append("跌回VWAP")
+        core_count += 1
+    pct_b = state.get("pct_b")
+    last_rsi = state.get("last_rsi")
+    if pct_b is not None and pct_b > 1 and last_rsi is not None and last_rsi > 70:
+        matched.append("布林上轨+RSI超买共振")
         core_count += 1
     if detect_upper_shadow(last):
         matched.append("出现上影线")
@@ -482,10 +521,21 @@ def trigger_result(status: str, trigger_price: float | None, matched: list[str],
     }
 
 
-def calculate_buy_price_model(report_data: dict[str, Any], zones: dict[str, Any], trigger: dict[str, Any]) -> dict[str, Any]:
+def calculate_buy_price_model(report_data: dict[str, Any], zones: dict[str, Any], trigger: dict[str, Any], atr14: float = 0) -> dict[str, Any]:
+    from config import ATR_STOP_FACTOR, ATR_STOP_MAX_PCT, ATR_STOP_MIN_PCT
     zone = zones["buy_zone"]
     observation = zone["upper"]
     invalid = round_price(zone["main_support"] * INVALID_BELOW_SUPPORT)
+    if atr14 > 0:
+        atr_distance = atr14 * ATR_STOP_FACTOR
+        pct_min = float(report_data.get("current_price", 0)) * ATR_STOP_MIN_PCT
+        atr_distance = max(atr_distance, pct_min)
+        pct_max = float(report_data.get("current_price", 0)) * ATR_STOP_MAX_PCT
+        if atr_distance > pct_max:
+            atr_distance = pct_max
+        atr_invalid = round_price(float(report_data["current_price"]) - atr_distance)
+        if atr_invalid is not None and atr_invalid > 0:
+            invalid = max(invalid, atr_invalid)
     execution = None
     acceptable = None
     status = trigger["status"]
@@ -658,9 +708,13 @@ def build_price_point_model(report_data: dict[str, Any]) -> dict[str, Any]:
         else {"summary": "ICT执行辅助未启用。", "buy_confirmed": False, "sell_confirmed": False, "signal_grade": "无效"}
     )
     report_data["ict_signal"] = ict_signal
+    daily_bars = report_data.get("daily_bars") or []
+    last_daily = daily_bars[-1] if daily_bars else {}
+    atr14_val = float(last_daily.get("atr14") or 0)
+    atr_ratio_val = float(last_daily.get("atr_ratio") or 0)
     buy_trigger = detect_buy_trigger(report_data, zones, indicator_state)
     sell_trigger = detect_sell_trigger(report_data, zones, indicator_state)
-    buy_model = calculate_buy_price_model(report_data, zones, buy_trigger)
+    buy_model = calculate_buy_price_model(report_data, zones, buy_trigger, atr14_val)
     sell_model = calculate_sell_price_model(report_data, zones, sell_trigger)
     observation_flags = observation_validity(report_data, zones)
     buy_model["observation_valid"] = observation_flags["buy_valid"]
@@ -668,10 +722,6 @@ def build_price_point_model(report_data: dict[str, Any]) -> dict[str, Any]:
     sell_model["observation_valid"] = observation_flags["sell_valid"]
     sell_model["observation_reason"] = observation_flags["sell_reason"]
     action = choose_today_action(report_data, buy_model, sell_model)
-    daily_bars = report_data.get("daily_bars") or []
-    last_daily = daily_bars[-1] if daily_bars else {}
-    atr14_val = float(last_daily.get("atr14") or 0)
-    atr_ratio_val = float(last_daily.get("atr_ratio") or 0)
     max_move = position_size(status_value, action, buy_model, sell_model, str(zones.get("space_state") or "unknown"), atr_ratio_val)
     atr_info: dict[str, Any] = {}
     if atr14_val > 0 and atr_ratio_val > 0:

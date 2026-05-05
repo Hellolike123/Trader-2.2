@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -148,3 +149,84 @@ def is_new_high_recent(bars: list[dict[str, Any]], lookback: int = 6) -> bool:
     highs = [_num(bar.get("high")) for bar in bars[-lookback:]]
     highs = [value for value in highs if value is not None]
     return len(highs) >= 3 and highs[-1] >= max(highs[:-1])
+
+
+def calculate_bollinger_bands(
+    closes: list[float],
+    period: int = 20,
+    num_std: float = 2.0,
+) -> dict[int, dict[str, float | None]]:
+    result: dict[int, dict[str, float | None]] = {}
+    for i in range(len(closes)):
+        if i + 1 < period:
+            continue
+        window = closes[i + 1 - period : i + 1]
+        middle = sum(window) / period
+        variance = sum((x - middle) ** 2 for x in window) / period
+        std = math.sqrt(variance)
+        upper = middle + num_std * std
+        lower = middle - num_std * std
+        bandwidth = (upper - lower) / middle if middle > 0 else None
+        pct_b = (closes[i] - lower) / (upper - lower) if (upper - lower) > 0 else None
+        result[i] = {
+            "middle": round(middle, 4),
+            "upper": round(upper, 4),
+            "lower": round(lower, 4),
+            "bandwidth": round(bandwidth, 6) if bandwidth is not None else None,
+            "pct_b": round(pct_b, 4) if pct_b is not None else None,
+        }
+    return result
+
+
+def _find_local_extremes(values: list[float | None], window: int = 3) -> list[tuple[str, int, float]]:
+    extremes: list[tuple[str, int, float]] = []
+    for i in range(window, len(values) - window):
+        v = values[i]
+        if v is None:
+            continue
+        is_low = all(v <= values[i + k] for k in range(-window, window + 1) if k != 0 and values[i + k] is not None)
+        is_high = all(v >= values[i + k] for k in range(-window, window + 1) if k != 0 and values[i + k] is not None)
+        if is_low:
+            extremes.append(("low", i, v))
+        if is_high:
+            extremes.append(("high", i, v))
+    return extremes
+
+
+def detect_bullish_divergence(bars: list[dict[str, Any]], rsi_series: list[float | None], lookback: int = 12) -> bool:
+    if len(bars) < lookback or rsi_series and len(rsi_series) < lookback:
+        return False
+    window_start = len(bars) - lookback
+    price_rsi_pairs: list[tuple[float, float, int]] = []
+    for i in range(window_start, len(bars)):
+        close = _num(bars[i].get("close"))
+        rsi_val = rsi_series[i] if rsi_series else None
+        if close is None or rsi_val is None:
+            continue
+        price_rsi_pairs.append((close, rsi_val, i))
+    if len(price_rsi_pairs) < 2:
+        return False
+    price_rsi_pairs.sort(key=lambda x: x[1])
+    rsi_min_1 = price_rsi_pairs[0]
+    rsi_min_2 = price_rsi_pairs[1]
+    return rsi_min_1[0] < rsi_min_2[0]
+
+
+def detect_bearish_divergence(bars: list[dict[str, Any]], rsi_series: list[float | None], lookback: int = 12) -> bool:
+    if len(bars) < lookback or rsi_series and len(rsi_series) < lookback:
+        return False
+    window_start = len(bars) - lookback
+    price_rsi_pairs: list[tuple[float, float, int]] = []
+    for i in range(window_start, len(bars)):
+        close = _num(bars[i].get("close"))
+        rsi_val = rsi_series[i] if rsi_series else None
+        if close is None or rsi_val is None:
+            continue
+        price_rsi_pairs.append((close, rsi_val, i))
+    if len(price_rsi_pairs) < 2:
+        return False
+    price_rsi_pairs.sort(key=lambda x: x[1], reverse=True)
+    rsi_max_1 = price_rsi_pairs[0]
+    rsi_max_2 = price_rsi_pairs[1]
+    return rsi_max_1[0] < rsi_max_2[0]
+
