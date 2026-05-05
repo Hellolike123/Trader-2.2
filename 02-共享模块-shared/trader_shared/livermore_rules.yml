@@ -1,0 +1,26 @@
+# livermore_scale — first match wins, returns tier (0-5)
+
+rules:
+  - name: strong_confirm
+    result: 4
+    when: "status in {'优先候选', '低吸观察'} and score >= 90"
+
+  - name: high_score
+    result: 3
+    when: "status in {'优先候选', '低吸观察'} and score >= 80"
+
+  - name: mid_score
+    result: 2
+    when: "status in {'优先候选', '低吸观察'} and score >= 65"
+
+  - name: low_buy
+    result: 1
+    when: "status in {'优先候选', '低吸观察'}"
+
+  - name: wait_or_defense
+    result: 2
+    when: "status in {'等转强', '防守观察'}"
+
+  - name: reduce
+    result: 0
+    when: "status == '冲高减仓'"

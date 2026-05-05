@@ -1,0 +1,39 @@
+# score_for modifiers — each rule adds to/from the base STATUS_SCORE.
+# Evaluated in order; only positive-value rules apply.
+
+rules:
+  - name: near_low_zone
+    result: 10
+    when: "current <= low_zone_upper and status != '暂不碰'"
+
+  - name: above_confirm
+    result: 8
+    when: "current >= confirm_price and status != '暂不碰'"
+
+  - name: below_hard_stop
+    result: -40
+    when: "current <= hard_stop"
+
+  - name: near_hard_stop
+    result: -8
+    when: "abs((current - hard_stop) / max(current, 1)) < 0.01"
+
+  - name: large_drop
+    result: -8
+    when: "change <= change_threshold_large_drop and status != '低吸观察'"
+
+  - name: large_rise_high_pos
+    result: -10
+    when: "change >= change_threshold_large and position_ratio >= position_ratio_high"
+
+  - name: confirm_gap_large
+    result: 5
+    when: "(confirm_price - current) / max(current, 1) > 0.02"
+
+  - name: confirm_gap_small
+    result: -4
+    when: "(confirm_price - current) / max(current, 1) <= 0.02"
+
+  - name: low_zone_present
+    result: 5
+    when: "low_zone and confirm_price"

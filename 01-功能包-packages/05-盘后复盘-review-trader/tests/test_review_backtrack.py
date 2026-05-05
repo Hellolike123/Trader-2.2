@@ -8,8 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 CONTRACTS = ROOT.parents[1] / "02-共享模块-shared" / "03-输出校验-contracts"
 MARKET = ROOT.parents[1] / "02-共享模块-shared" / "01-行情数据-market-data"
+CANDIDATE = ROOT.parents[1] / "02-共享模块-shared" / "02-候选逻辑-candidate"
 SHARED_ROOT = ROOT.parents[1] / "02-共享模块-shared"
-for _p in (SCRIPTS, CONTRACTS, MARKET, SHARED_ROOT):
+for _p in (SCRIPTS, CONTRACTS, MARKET, CANDIDATE, SHARED_ROOT):
     if _p.exists() and str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 for name in ("signal_store", "models", "signal_contract"):

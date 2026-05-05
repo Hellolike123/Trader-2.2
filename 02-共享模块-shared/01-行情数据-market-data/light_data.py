@@ -42,6 +42,10 @@ NAME_MAP = {
 _cache: dict[str, Any] = {}
 _cache_expiry: dict[str, float] = {}
 
+# 实时行情缓存（30秒TTL）
+_realtime_cache: dict[str, tuple[Any, float]] = {}
+_REALTIME_TTL = 30
+
 DataStatus = Literal["complete", "partial", "degraded", "failed"]
 
 
@@ -89,6 +93,20 @@ def save_to_cache(key: str, data: Any, ttl_seconds: int = 3600) -> None:
     """保存数据到缓存（默认1小时过期）"""
     _cache[key] = data
     _cache_expiry[key] = time.time() + ttl_seconds
+
+
+def get_realtime_cache(key: str) -> Any:
+    """从实时缓存获取数据（30秒TTL）"""
+    if key in _realtime_cache:
+        data, ts = _realtime_cache[key]
+        if time.time() < ts + _REALTIME_TTL:
+            return data
+    return None
+
+
+def save_realtime_cache(key: str, data: Any) -> None:
+    """保存实时数据到缓存（30秒过期）"""
+    _realtime_cache[key] = (data, time.time())
 
 
 @dataclass(frozen=True)
@@ -197,6 +215,11 @@ def parse_trade_datetime(fields: list[str]) -> tuple[str, str | None]:
 
 
 def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
+    cache_key = f"quote:{sec.qq_symbol}"
+    cached = get_realtime_cache(cache_key)
+    if cached is not None:
+        return cached
+
     def do_fetch():
         text = http.get_text(TENCENT_QUOTE_URL + sec.qq_symbol, encoding="gbk")
         match = re.search(r'="([^"]*)"', text)
@@ -206,7 +229,7 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
         if len(fields) < 40:
             raise RuntimeError("Tencent quote payload incomplete")
         trade_date, trade_time = parse_trade_datetime(fields)
-        return {
+        result = {
             "name": fields[1] or sec.name,
             "symbol": sec.ts_code,
             "trade_date": trade_date,
@@ -221,6 +244,8 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
             "turnover_rate": to_float(fields[38]) if len(fields) > 38 else None,
             "current_change_pct": to_float(fields[32]) if len(fields) > 32 else None,
         }
+        save_realtime_cache(cache_key, result)
+        return result
 
     return retry(do_fetch, url=TENCENT_QUOTE_URL)
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from light_data import to_float
+from trader_shared.modifier_rule_engine import apply_score_modifiers, apply_livermore_scale
 
 _engine: Any = None
 
@@ -144,25 +145,32 @@ def score_for(item: dict[str, Any]) -> float:
     change = to_float(item.get("change_pct")) or 0.0
     below_ma_count = int(item.get("below_ma_count") or 0)
 
-    score = float(STATUS_SCORE.get(status, 0))
-    if status != "暂不碰" and current <= low_upper:
-        score += 10
-    if status != "暂不碰" and current >= confirm:
-        score += 8
-    if current <= hard_stop:
-        score -= 40
-    if abs((current - hard_stop) / max(current, 1)) < 0.01:
-        score -= 8
-    if change <= CHANGE_THRESHOLD_LARGE_DROP and status != "低吸观察":
-        score -= 8
-    if change >= CHANGE_THRESHOLD_LARGE and position_ratio >= POSITION_RATIO_HIGH:
-        score -= 10
-    if (confirm - current) / max(current, 1) > 0.02:
-        score += 5
-    else:
-        score -= 4
-    if item.get("low_zone") and item.get("confirm_price"):
-        score += 5
+    rule_mod = apply_score_modifiers(item)
+    if rule_mod is None:
+        # Fallback to hardcoded logic
+        score = float(STATUS_SCORE.get(status, 0))
+        if status != "暂不碰" and current <= low_upper:
+            score += 10
+        if status != "暂不碰" and current >= confirm:
+            score += 8
+        if current <= hard_stop:
+            score -= 40
+        if abs((current - hard_stop) / max(current, 1)) < 0.01:
+            score -= 8
+        if change <= CHANGE_THRESHOLD_LARGE_DROP and status != "低吸观察":
+            score -= 8
+        if change >= CHANGE_THRESHOLD_LARGE and position_ratio >= POSITION_RATIO_HIGH:
+            score -= 10
+        if (confirm - current) / max(current, 1) > 0.02:
+            score += 5
+        else:
+            score -= 4
+        if item.get("low_zone") and item.get("confirm_price"):
+            score += 5
+        score -= below_ma_count * 2
+        return score
+
+    score = float(STATUS_SCORE.get(status, 0)) + rule_mod
     score -= below_ma_count * 2
     return score
 
@@ -221,6 +229,10 @@ except Exception:  # pragma: no cover - optional per skill
 
 
 def livermore_scale(status: str, score: float) -> int:
+    tier = apply_livermore_scale(status, score)
+    if tier is not None:
+        return tier
+    # Fallback to hardcoded logic
     tier = 0
     if status in {"优先候选", "低吸观察"}:
         tier = 1
