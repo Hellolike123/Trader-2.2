@@ -468,7 +468,16 @@ def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str,
     volume_score += (15 if volume_repair else 0) - (5 if afternoon_shrink else 0)
 
     chip_score = 50 - (15 if chip_pressure else 0) + (10 if cost and pnl_pct is not None and pnl_pct >= 0 else 0)
-    momentum_score = 45 + (20 if above_pressure else 0) + (10 if current > (prev_close or current) else 0) - (10 if afternoon_shrink else 0) + macd_mom_b
+
+    from momentum_core import assess_momentum
+    momentum_result = assess_momentum(daily)
+    momentum_score = momentum_result.get("score", 50)
+    momentum_dir = momentum_result.get("direction", "neutral")
+    momentum_signals = momentum_result.get("signals", [])
+    momentum_rsi = momentum_result.get("rsi", {})
+    momentum_adx = momentum_result.get("adx", {})
+    momentum_macd = momentum_result.get("macd", {})
+
     total_score = round(structure_score * 0.32 + volume_score * 0.28 + chip_score * 0.18 + momentum_score * 0.22)
 
     close_word = "现价" if session == "midday" else "收盘"
@@ -496,7 +505,7 @@ def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str,
         "wyckoff": wyckoff_text,
         "chip": (f"{cost:.2f} 是你的成本压力区；轻量估算不等同真实筹码分布。" if cost else "按近20日成交密集区做轻量估算，不等同真实筹码分布。"),
         "fund": "有吸筹/洗盘嫌疑，但证据不足以确认。" if volume_repair else "资金行为证据不足，只能按价格和量能观察。",
-        "momentum": ("MACD柱状图放大，动能增强。" if hist_expand and macd_hist and macd_hist > 0 else "MACD趋势与收盘位置一致，需次日确认。" if macd_mom_b > 0 else "MACD死叉确认，动能偏弱。") if session not in {"midday"} else "上午改善，午后还要 MACD 确认。",
+        "momentum": "；".join(momentum_signals) if momentum_signals else (f"{momentum_dir.title()}，动能评分{momentum_score}/100" if session not in {"midday"} else "上午改善，午后还需确认。"),
         "supports": [
             "结构：两次接近位置止跌" if double_low else "结构：下杀后收回，短线修复",
             "量价：开盘放量下杀后收回，不是一路放量下跌" if volume_repair else "量价：收盘修复，但分时确认不足",

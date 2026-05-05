@@ -106,7 +106,8 @@ def build_report(target: str) -> dict[str, Any]:
     recent20 = bars[-STRUCTURE_WINDOW:] if len(bars) >= STRUCTURE_WINDOW else bars
     from chan_core import chanlun_strategy
     from wyckoff_core import wyckoff_strategy
-    strategies = [build_structure_context, chanlun_strategy, wyckoff_strategy]
+    from momentum_core import momentum_strategy
+    strategies = [build_structure_context, chanlun_strategy, wyckoff_strategy, momentum_strategy]
     levels = run_all(current, bars, quote.get("current_change_pct"), quote, *strategies)
     chan_result = levels.get("chanlun", {})
     wyck_result = levels.get("wyckoff", {})
