@@ -4,6 +4,25 @@ from typing import Any
 
 from light_data import to_float
 
+_engine: Any = None
+
+
+def _get_engine() -> Any:
+    global _engine
+    if _engine is not None:
+        return _engine
+    try:
+        from trader_shared.rule_engine import RuleEngine
+        from pathlib import Path
+        rules_path = Path(__file__).resolve().parents[2] / "02-共享模块-shared" / "trader_shared" / "status_rules.yml"
+        if rules_path.exists():
+            _engine = RuleEngine.from_yaml(str(rules_path))
+            return _engine
+    except Exception:
+        pass
+    _engine = False
+    return None
+
 try:
     from config import STATUS_SCORE
 except Exception:  # pragma: no cover - optional per skill
@@ -67,6 +86,19 @@ def status_for(
     change = to_float(change_pct) or 0.0
     below_ma_count = sum(1 for value in ma_values.values() if value is not None and current < value)
     above_ma5_ma10 = all(current >= (ma_values.get(name) or float("inf")) for name in ("ma5", "ma10"))
+
+    engine = _get_engine()
+    if engine:
+        ctx = {
+            "current": current, "support": support, "low_zone_upper": low_zone_upper,
+            "confirm": confirm, "stop": hard_stop, "change": change,
+            "change_pct": change, "position_ratio": position_ratio,
+            "pressure_space_pct": pressure_space_pct,
+            "above_ma5_ma10": above_ma5_ma10, "below_ma_count": below_ma_count,
+        }
+        result = engine.evaluate(ctx)
+        if result is not None:
+            return str(result)
     if current <= hard_stop or current < support * 0.995:
         return "暂不碰"
     if change <= CHANGE_THRESHOLD_DROP and current > low_zone_upper:

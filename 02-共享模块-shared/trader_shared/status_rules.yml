@@ -1,0 +1,48 @@
+# Decision rules for status_for() — evaluated in priority order.
+# First matching rule wins. You can edit this file to tune thresholds
+# without changing Python code.
+#
+# Available context variables:
+#   current, support, low_zone_upper, confirm, stop (hard_stop)
+#   change (change_pct as float), position_ratio, pressure_space_pct
+#   above_ma5_ma10 (bool), below_ma_count (int)
+
+rules:
+  - name: 破止损
+    result: 暂不碰
+    when: current <= stop or current < support * 0.995
+
+  - name: 大跌破位
+    result: 暂不碰
+    when: change <= -7 and current > low_zone_upper
+
+  - name: 进入低吸区
+    result: 低吸观察
+    when: current <= low_zone_upper
+
+  - name: 冲高
+    result: 冲高减仓
+    when: current >= confirm and change >= 3
+
+  - name: 触及确认区
+    result: 等转强
+    when: current >= confirm
+
+  - name: 空间不足
+    result: 空间不足
+    when: pressure_space_pct >= 0 and pressure_space_pct < 0.008
+
+  - name: MA上方+高位
+    result: 等转强
+    when: above_ma5_ma10 and position_ratio >= 0.60
+
+  - name: 多均线下方
+    result: 防守观察
+    when: below_ma_count >= 3
+
+  - name: 高确认位
+    result: 等转强
+    when: position_ratio >= 0.72
+
+  - name: 默认防守
+    result: 防守观察
