@@ -169,7 +169,11 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     support = choose_level(support_levels, current, below=True)
     resistance = choose_level(resistance_levels, current, below=False)
     support_price = float(support["price"])
-    confirm = float(resistance["price"])
+
+    # confirm_price: 需要放量站稳的启动确认价（阻力位 + 缓冲）
+    confirm_price = round(float(resistance["price"]) * (1 + MIN_CONFIRM_SPACE_PCT), 2)
+    # resistance: 实际阻力位，用于减仓参考
+    resistance_price = float(resistance["price"])
 
     amplitude = average_amplitude_pct(recent20) or 0.02
     zone_width_pct = clamp(amplitude * 0.28, MIN_ZONE_WIDTH_PCT, MAX_ZONE_WIDTH_PCT)
@@ -177,9 +181,9 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     low_zone_lower = round(support_price, 2)
     low_zone_upper = round(support_price * (1 + zone_width_pct), 2)
     stop = round(support_price * (1 - stop_buffer_pct), 2)
-    take = round(max(confirm, current) * TAKE_PROFIT_BUFFER, 2)
-    position = zone_position(current, support_price, confirm)
-    pressure_space_pct = (confirm - current) / current if current > 0 else 0
+    take = round(max(confirm_price, current) * TAKE_PROFIT_BUFFER, 2)
+    position = zone_position(current, support_price, confirm_price)
+    pressure_space_pct = (confirm_price - current) / current if current > 0 else 0
     below_ma = count_below_ma(current, ma_values)
 
     # keep compatibility for callers that expect status from structure payload
@@ -189,7 +193,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         current=current,
         support=support_price,
         low_zone_upper=low_zone_upper,
-        confirm=confirm,
+        confirm=confirm_price,
         hard_stop=stop,
         position_ratio=position,
         change_pct=change_pct,
@@ -201,7 +205,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         "main_support": round(support_price, 2),
         "support": round(support_price, 2),
         "support_source": support["name"],
-        "resistance": round(confirm, 2),
+        "resistance": round(resistance_price, 2),
         "resistance_source": resistance["name"],
         "support_levels": support_levels,
         "resistance_levels": resistance_levels,
@@ -213,11 +217,11 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         "low_zone_lower": low_zone_lower,
         "low_zone_upper": low_zone_upper,
         "low_zone": f"{low_zone_lower:.2f}-{low_zone_upper:.2f}元",
-        "confirm_price": round(confirm, 2),
-        "sell_observe_price": round(confirm, 2),
+        "confirm_price": round(confirm_price, 2),
+        "sell_observe_price": round(resistance_price, 2),
         "hard_stop": stop,
         "take": take,
-        "upside_pct": round(pct_change(current, confirm), 2),
+        "upside_pct": round(pct_change(current, confirm_price), 2),
         "downside_pct": round(abs(pct_change(current, stop)), 2),
         "position_ratio": round(position, 3),
         "pressure_space_pct": round(pressure_space_pct, 4),
