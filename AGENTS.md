@@ -2,7 +2,7 @@
 
 > 最后更新：2026-05-08
 > 代码版本：trader v0.6.0 / t0-trader v0.7.0 / trader-pool v0.1.0 / trader-portfolio v1.0 / trader-shared v0.6.0 / review-trader pending / trader-compare deprecated
-> 变更：统一打包器 pack_all.py（单一 zip）+ 修复测试计数 94 tests 全部通过（pack_all.py 新增 5 tests）+ trader 新增 --output alert-text 定时价格监控提醒。
+> 变更：可插拔架构 P1（参数全集中化 config.py + 渲染/决策分离 + 策略协议 strategy_protocol.py + 规则引擎 rule_engine.py/status_rules.yml）
 
 ---
 
@@ -349,8 +349,12 @@ atr_text
                     |-- contract_utils.py (文本校验工具)
                     |-- trader_shared/         ← P6: 标准 Python 包
                     |    __init__.py (lazy-load 路由)
+                    |    config.py (全系统常量集中管理)
                     |    schema/v1.py (P7: 输出契约规则库)
                     |    data_provider.py (P8: 可插拔数据接口)
+                    |    strategy_protocol.py (策略函数协议)
+                    |    rule_engine.py (决策规则引擎)
+                    |    status_rules.yml (status_for 决策规则)
                     +--------------------------+
                               ^ sys.path.insert(3 parents up)
                     +- 各 skill scripts/*.py
@@ -367,22 +371,24 @@ atr_text
 
 ## 五、分析模型层详细
 
-### 5.1 candidate_core.py（共享核心，395 行）
+### 5.1 candidate_core.py（共享核心，拆分为 structure_core + decision_core）
 
-**常量配置**:
+**常量配置** — 全部集中到 `trader_shared/config.py`，支持 per-skill 覆盖：
 
 
 | 常量                      | 值               | 用途               |
 | ----------------------- | --------------- | ---------------- |
-| `MA_PERIODS`            | (5, 10, 20, 30) | 均线周期             |
-| `MA_WEIGHTS`            | {ma5:0.92, ...} | 均线权重打分           |
-| `MIN_ZONE_WIDTH_PCT`    | 0.005           | 支撑/阻力区间最小宽度 0.5% |
-| `MAX_ZONE_WIDTH_PCT`    | 0.012           | 最大宽度 1.2%        |
-| `MIN_STOP_BUFFER_PCT`   | 0.008           | 止损缓冲下限 0.8%      |
-| `MIN_CONFIRM_SPACE_PCT` | 0.008           | 确认价最小距离 0.8%     |
-| `RECENT_WINDOW`         | 5               | 近期窗口（可配置）        |
-| `STRUCTURE_WINDOW`      | 20              | 结构窗口（可配置）        |
-| `TAKE_PROFIT_BUFFER`    | 1.06            | 止盈缓冲系数（可配置）      |
+| `MA_PERIODS`            | (5, 10, 20, 30) | 均线周期（可覆盖）       |
+| `MA_WEIGHTS`            | {ma5:0.92, ...} | 均线权重打分（可覆盖）     |
+| `MIN_ZONE_WIDTH_PCT`    | 0.005           | 支撑/阻力区间最小宽度（可覆盖） |
+| `MAX_ZONE_WIDTH_PCT`    | 0.012           | 最大宽度（可覆盖）        |
+| `MIN_STOP_BUFFER_PCT`   | 0.008           | 止损缓冲下限（可覆盖）      |
+| `MIN_CONFIRM_SPACE_PCT` | 0.008           | 确认价最小距离（可覆盖）     |
+| `RECENT_WINDOW`         | 5               | 近期窗口（可覆盖）        |
+| `STRUCTURE_WINDOW`      | 20              | 结构窗口（可覆盖）        |
+| `TAKE_PROFIT_BUFFER`    | 1.06            | 止盈缓冲系数（可覆盖）      |
+
+> 所有常量为 `try/except ImportError` 模式，per-skill `config.py` 可选择性覆盖，未覆盖则使用 `trader_shared/config.py` 默认值。
 
 
 **核心函数**:
@@ -390,8 +396,8 @@ atr_text
 
 | 函数                         | 参数                               | 返回值                  | 说明                                       |
 | -------------------------- | -------------------------------- | -------------------- | ---------------------------------------- |
-| `build_candidate_levels()` | current, bars, change_pct, quote | CandidateLevels      | 主函数：支撑/阻力/止损/止盈/低吸区/状态                   |
-| `status_for()`             | 价格/支撑/确认价/止损等 + MA + 压力空间        | str 状态               | 优先级: 暂不碰 > 低吸观察 > 冲高减仓/等转强 > 空间不足 > 防守观察 |
+| `build_structure_context()` | current, bars, change_pct, quote | CandidateLevels      | 主函数：支撑/阻力/止损/止盈/低吸区/状态                   |
+| `status_for()`             | 价格/支撑/确认价/止损等 + MA + 压力空间        | str 状态               | 优先走 rule_engine + status_rules.yml，回退硬编码逻辑 |
 | `score_for()`              | status + 现价+支撑+空间+MA+ATR dict    | float 0-100          | 综合打分                                     |
 | `livermore_scale()`        | status, score                    | int 0~5              | 利弗莫尔金字塔加仓级                               |
 | `base_weight()`            | atr_level str                    | int %                | ATR 档位 → 基准首仓上限                          |
@@ -400,6 +406,8 @@ atr_text
 | `average_amplitude_pct()`  | bars                             | float%               | 近 20 日平均振幅                               |
 | `moving_averages()`        | bars                             | {ma5,ma10,ma20,ma30} | 多周期均线                                    |
 | `count_below_ma()`         | current, ma_values               | int                  | 跌破均线数量                                   |
+
+> **`status_for` 决策规则化**：规则定义在 `trader_shared/status_rules.yml`，由 `trader_shared/rule_engine.py` 按优先级求值。修改决策阈值只需编辑 YAML 文件，无需改 Python 代码。
 
 
 ### 5.2 利弗莫尔金字塔仓位算法
@@ -658,7 +666,9 @@ python3 -m pytest 01-功能包-packages/01-单票分析-trader/tests/ -v
 | 新增/修改 skill 自然触发映射                                     | 对应 skill 职责小节                             |
 | 修改 `light_data.py` 的 URL 或字段                           | Section 2.2 数据源                           |
 | 修改 `candidate_core.py` 的 `STATUS_SCORE`/`status_for()` | Section 5.1 常量 + Section 2.3 状态机映射        |
+| 修改 `status_rules.yml` 决策规则                        | Section 5.1 规则引擎说明                        |
 | 修改打分公式/权重                                              | Section 5.1 + Section 5.2 利弗莫尔算法          |
+| 修改 `strategy_protocol.py` 或新增策略实现                      | Section 4 依赖拓扑 + Section 5.1 核心函数         |
 | 新增/修改 skill 间信号传递                                      | Section 6.3 写入表 / Section 8 数据流图          |
 | 修改 Output Contract 格式                                  | Section 3 skill 卡 + Section 7 校验          |
 | 新增持久化文件或修改 schema                                      | Section 2.4 持久化表                          |
