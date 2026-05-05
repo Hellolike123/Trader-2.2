@@ -70,6 +70,10 @@ if CONTRACTS.exists() and str(CONTRACTS) not in sys.path:
     sys.path.insert(0, str(CONTRACTS))
 
 from signal_contract import assert_valid_signal
+from datetime import date
+
+def today_text() -> str:
+    return date.today().isoformat()
 
 
 CONTRACT_VERSION = "trader_single_action_v3"
@@ -572,7 +576,7 @@ def generate_alert(report: dict[str, Any]) -> str | None:
 
 
 def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str:
-    """Build a watch-mode alert for a single stock. Returns a human-readable alert/status block."""
+    """One-screen view: status + action + key levels + triggered signals."""
     name = str(report["name"])
     symbol = str(report.get("symbol", ""))
     current = float(report["current"])
@@ -594,99 +598,104 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
 
     # Tolerance for "at level" checks (ATR-based or fixed)
     thresh = max(atr14 * 0.35, current * 0.006) if atr14 > 0 else current * 0.008
-    
+
+    # === DETERMINE ACTION CATEGORY ===
     # 1. 硬止损破位（最优先）
-    if stop > 0 and current < stop:
+    is_stop_broken = stop > 0 and current < stop
+    # 2. 接近止损线
+    is_near_stop = not is_stop_broken and stop > 0 and (current - stop) < thresh * 3
+    # 3. 进入止跌区
+    is_at_support = support > 0 and abs(current - support) <= thresh * 2 and current <= support
+    # 4. 接近启动确认价
+    is_near_confirm = confirm > 0 and abs(current - confirm) <= thresh * 2 and current >= confirm
+    # 5. 接近减仓位
+    is_near_resistance = resistance > 0 and abs(current - resistance) <= thresh * 2 and current >= resistance
+    # 6. 接近止盈位
+    is_near_take = take > 0 and abs(current - take) <= thresh * 2 and take > confirm
+
+    # === BUILD ALERT TEXT ===
+    if is_stop_broken:
         break_pct = (current - stop) / stop * 100 if stop > 0 else 0
-        alerts_found.append(f"🛑 破防守位 {stop:.2f}元！现价 {current:.2f}（跌幅 {break_pct:+.1f}%）")
-    
-    # 2. 接近硬止损（1.5%内）
-    elif stop > 0 and current > stop and (current - stop) < thresh * 3:
+        alerts_found.append(f"已破防守位 {stop:.2f}")
+    elif is_near_stop:
         dist = (current - stop) / stop * 100
-        alerts_found.append(f"⚠️ 靠近防守位 {stop:.2f}元，距止损仅 {dist:.1f}%")
-    
-    # 3. 触及止损（within threshold）
-    elif stop > 0 and abs(current - stop) <= thresh:
-        alerts_found.append(f"⚠️ 现价 {current:.2f} 触及止损线 {stop:.2f}")
+        alerts_found.append(f"距止损仅 {dist:.1f}%")
 
-    # 4. 进入低吸支撑区
-    if support > 0 and abs(current - support) <= thresh * 2:
-        if current <= support:
-            dist = (support - current) / support * 100
-            alerts_found.append(f"📍 进入止跌区 {low_zone}，距支撑 {dist:.1f}%")
-        else:
-            dist = (current - support) / support * 100
-            alerts_found.append(f"📊 靠近支撑 {support:.2f}元，距止损仅 {dist:.1f}%")
-    
-    # 5. 触及确认位（启动区）
-    if confirm > 0 and abs(current - confirm) <= thresh * 2:
-        if current >= confirm:
-            alerts_found.append(f"🟢 已到启动确认价 {confirm:.2f}，关注放量")
-        else:
-            dist = (confirm - current) / confirm * 100
-            alerts_found.append(f"⚡ 接近启动确认价 {confirm:.2f}，距触发仅 {dist:.1f}%")
-    
-    # 6. 触及减仓位
-    if resistance > 0 and abs(current - resistance) <= thresh * 2:
-        if current >= resistance:
-            alerts_found.append(f"📉 已过减仓位 {resistance:.2f}，冲高减仓")
-        else:
-            dist = (resistance - current) / resistance * 100
-            alerts_found.append(f"📈 接近减仓位 {resistance:.2f}，距触压仅 {dist:.1f}%")
+    if is_at_support:
+        dist = (support - current) / support * 100
+        alerts_found.append(f"进入止跌区 {low_zone} ({dist:.1f}%)")
+    elif support > 0 and abs(current - support) <= thresh * 2 and current > support:
+        dist = (current - support) / support * 100
+        alerts_found.append(f"距支撑 {support:.2f} 仅 {dist:.1f}%")
 
-    # 7. 触及止盈位
-    if take > 0 and abs(current - take) <= thresh * 2 and take > confirm:
+    if is_near_confirm:
+        alerts_found.append(f"已到启动确认价 {confirm:.2f}")
+    elif confirm > 0 and confirm - current > 0 and (confirm - current) / confirm * 100 <= 3:
+        dist = (confirm - current) / confirm * 100
+        alerts_found.append(f"距启动确认价 {confirm:.2f} 仅 {dist:.1f}%")
+
+    if is_near_resistance:
+        alerts_found.append(f"已过减仓位 {resistance:.2f}")
+    elif resistance > 0 and resistance - current > 0 and (resistance - current) / resistance * 100 <= 3:
+        dist = (resistance - current) / resistance * 100
+        alerts_found.append(f"距减仓位 {resistance:.2f} 仅 {dist:.1f}%")
+
+    if is_near_take:
         dist = (take - current) / take * 100
-        alerts_found.append(f"🎯 接近止盈位 {take:.2f}，距目标仅 {dist:.1f}%")
+        alerts_found.append(f"距止盈位 {take:.2f} 仅 {dist:.1f}%")
 
-    # Build output
-    if alerts_found:
-        lines.insert(0, f"⚡ 盯盘告警 — {name}  {current:.2f}（{change_pct:+.2f}%）")
-        lines.append("")
-        
-        # Merge alerts that share the same price level
-        price_groups: dict[float, list[str]] = {}
-        for alert in alerts_found:
-            # Extract price from alert text (pattern: number followed by 元)
-            import re
-            prices = re.findall(r'([\d.]+)', alert.split('，')[0].split('的')[0])
-            if prices:
-                key = float(prices[0])
-            else:
-                key = -1  # fallback for alerts without clear price
-            
-            if not price_groups.get(key):
-                price_groups[key] = []
-            price_groups[key].append(alert)
-        
-        for idx, (price, alerts) in enumerate(sorted(price_groups.items(), key=lambda x: abs(x[0] - current)), 1):
-            if len(alerts) > 1:
-                lines.append(f"  [{idx}] 价位 {price:.2f} 元:")
-                for j, a in enumerate(alerts, 1):
-                    lines.append(f"      - {a}")
-            else:
-                alert_text = alerts[0]
-                lines.append(f"  [{idx}] {alert_text}")
+    # === DETERMINE ACTION + STATEMENT ===
+    if is_stop_broken:
+        action = "止损退出，不找理由"
+        state_summary = "防守失败，止损执行"
+    elif is_at_support and not is_stop_broken:
+        action = "不抄底，等止跌确认"
+        state_summary = "止跌确认中，等待承接"
+    elif is_near_confirm:
+        action = "放量站稳才加，不放量不动"
+        state_summary = "启动确认中"
+    elif is_near_resistance:
+        action = "冲高减仓，不追"
+        state_summary = "冲高减仓"
+    elif is_near_stop:
+        action = "盯紧止损线，跌破就退"
+        state_summary = "接近风险线"
     else:
-        lines.insert(0, f"✅ 正常 — {name}  {current:.2f}（{change_pct:+.2f}%）")
-        lines.append(f"  状态{state_label}  防守{stop:.2f} | 支撑{support:.2f} | 启动{confirm:.2f} | 减仓{resistance:.2f}")
-        if atr14 > 0:
-            lines.append(f"  ATR{atr14:.2f}（{atr14/current*100:.0f}%） 仓位上限{atr_cap}%")
+        action = f"当前{state_label}，{action_text_for_scene(scene)}"
+        state_summary = state_label
+
+    # === BUILD OUTPUT ===
+    lines.append(f"盯盘 — {name}  {current:.2f}（{change_pct:+.2f}%）  {state_summary}")
+    lines.append(f"  👉 当前应对：{action}")
+
+    # Show key levels reference
+    lines.append("")
+    lines.append(f"  防守 {stop:.2f}  |  支撑 {support:.2f}  |  启动 {confirm:.2f}  |  减仓 {resistance:.2f}  |  止盈 {take:.2f}")
+
+    # ATR + position cap
+    if atr14 > 0:
+        lines.append(f"  ATR {atr14:.2f}（{atr14/current*100:.0f}%）  仓位上限 {atr_cap}%")
+
+    # Triggered alerts
+    if alerts_found:
+        lines.append("")
+        lines.append("  触发：")
+        for idx, alert in enumerate(alerts_found, 1):
+            lines.append(f"    [{idx}] {alert}")
 
     # Write signal if triggered
     if alerts_found and write_signal:
-        # Determine signal type based on alerts
-        if any("破防守" in a or "破防守位" in a for a in alerts_found):
-            sig_type, direction, action, confidence = "risk_stop", "bearish", "stop", "high"
-        elif any("止跌区" in a or "进入止跌" in a for a in alerts_found):
-            sig_type, direction, action, confidence = "low_buy_triggered", "bullish_lean", "low_buy", "medium"
-        elif any("启动确认" in a for a in alerts_found):
-            sig_type, direction, action, confidence = "low_buy_triggered", "bullish", "track", "medium"
-        elif any("减仓位" in a or "已突破减仓" in a for a in alerts_found):
-            sig_type, direction, action, confidence = "reduce", "neutral", "reduce", "medium"
+        if is_stop_broken:
+            sig_type, direction, action_sig, confidence = "risk_stop", "bearish", "stop", "high"
+        elif is_at_support:
+            sig_type, direction, action_sig, confidence = "low_buy_triggered", "bullish_lean", "low_buy", "medium"
+        elif is_near_confirm:
+            sig_type, direction, action_sig, confidence = "low_buy_triggered", "bullish", "track", "medium"
+        elif is_near_resistance:
+            sig_type, direction, action_sig, confidence = "reduce", "neutral", "reduce", "medium"
         else:
-            sig_type, direction, action, confidence = "observe", "neutral", "observe", "low"
-        
+            sig_type, direction, action_sig, confidence = "observe", "neutral", "observe", "low"
+
         from signal_store import append_signal
         trade_date = analysis_time.split(" ")[0] if analysis_time else today_text()
         signal = {
@@ -698,7 +707,7 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
             "analysis_time": analysis_time,
             "signal_type": sig_type,
             "direction": direction,
-            "action": action,
+            "action": action_sig,
             "confidence": confidence,
             "data_status": str(report.get("data_status") or "full"),
             "trigger": {"type": "price_level", "price": round(current, 2), "text": alerts_found[0]},
@@ -708,15 +717,32 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
                 "max_single_move_pct": min(10, signal_max_total_pct(sig_type)),
             },
             "risk_flags": signal_risk_flags(report),
-            "summary": f"⚡ {alerts_found[0]}",
+            "summary": alerts_found[0],
         }
         try:
             append_signal(signal)
-            lines.append(f"  信号已记录：{sig_type}（置信度{confidence}）")
+            lines.append(f"  信号已记录：{_signal_type_label(sig_type)}（置信度{confidence}）")
         except Exception:
             pass
 
     return "\n".join(lines)
+
+
+def action_text_for_scene(scene: str) -> str:
+    """One-line action advice based on scene."""
+    if scene in {"低吸观察"}:
+        return "等止跌确认再动手"
+    if scene in {"防守观察"}:
+        return "守纪律不追"
+    if scene in {"等转强"}:
+        return "等放量确认"
+    if scene in {"冲高减仓"}:
+        return "冲高减仓，不追"
+    if scene in {"突破确认", "突破观察"}:
+        return "持有观察，不急操作"
+    if scene in {"空间不足"}:
+        return "上方空间不够，先不追"
+    return "等待，不主动追"
 
 
 def parse_args() -> argparse.Namespace:
