@@ -407,20 +407,48 @@ def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str,
     pnl_pct = pct_change(cost, current) if cost else None
     chip_pressure = bool(cost and current < cost and (cost - current) / current <= 0.05)
 
-    structure_score = 50 + (15 if double_low else 0) + (15 if low_close_reclaim else 0) + (10 if current > (prev_close or current) else 0) - (15 if lower_high else 0) + (15 if above_pressure else 0)
+    macd_p = calc_macd_params(daily)
+    macd_above = macd_p.get("above_zero")
+    macd_below = macd_p.get("below_zero")
+    macd_gcx = macd_p.get("golden_cross")
+    macd_dcx = macd_p.get("death_cross")
+    macd_hist = to_float(macd_p.get("histogram"))
+    macd_line = to_float(macd_p.get("macd_line"))
+    macd_hist_prev = to_float(daily[-2].get("macd_histogram")) if len(daily) >= 2 else None
+    hist_expand = macd_hist is not None and macd_hist_prev is not None and ((macd_hist > macd_hist_prev > 0) or (macd_hist < macd_hist_prev < 0))
+    macd_cross_3 = False
+    chk = daily[-3:] if len(daily) >= 3 else daily
+    for _i in range(1, len(chk)):
+        _pm = to_float(chk[_i-1].get("macd_line"))
+        _pd = to_float(chk[_i-1].get("dea"))
+        _cm = to_float(chk[_i].get("macd_line"))
+        _cd = to_float(chk[_i].get("dea"))
+        if _pm is not None and _pd is not None and _cm is not None and _cd is not None and abs((_pm - _pd) - (_cm - _cd)) > 0:
+            sig_prev = (_pm - _pd) * (_cm - _cd)
+            if sig_prev <= 0:
+                macd_cross_3 = True
+                break
+    macd_struc_b = 10 if (macd_gcx and not afternoon_shrink) else (5 if macd_below and not macd_dcx else 0)
+    macd_mom_b = 15 if macd_cross_3 else (10 if macd_above and not macd_dcx else 0)
+    if macd_dcx:
+        macd_mom_b = -10
+    elif macd_hist is not None and macd_hist > 0 and hist_expand:
+        macd_mom_b = max(macd_mom_b, 12)
+
+    structure_score = 50 + (15 if double_low else 0) + (15 if low_close_reclaim else 0) + (10 if current > (prev_close or current) else 0) - (15 if lower_high else 0) + (15 if above_pressure else 0) + macd_struc_b
     volume_score = 50 + (20 if volume_repair else 0) - (10 if afternoon_shrink else 0)
     chip_score = 50 - (15 if chip_pressure else 0) + (10 if cost and pnl_pct is not None and pnl_pct >= 0 else 0)
-    momentum_score = 45 + (20 if above_pressure else 0) + (10 if current > (prev_close or current) else 0) - (10 if afternoon_shrink else 0)
+    momentum_score = 45 + (20 if above_pressure else 0) + (10 if current > (prev_close or current) else 0) - (10 if afternoon_shrink else 0) + macd_mom_b
     total_score = round(structure_score * 0.32 + volume_score * 0.28 + chip_score * 0.18 + momentum_score * 0.22)
 
     close_word = "现价" if session == "midday" else "收盘"
     next_word = "午后" if session == "midday" else "明天"
     return {
-        "chanlun": "短线修复段，尚未完成向上离开。" if not above_pressure else "结构尝试向上离开，等待回踩确认。",
+        "chanlun": ("MACD金叉确认转强。" if macd_gcx else "短线修复段，尚未完成向上离开。") if not above_pressure else ("结构+MACD双确认。" if macd_gcx else "结构尝试向上离开，等待回踩确认。"),
         "wyckoff": "接近 Spring 类修复，但午后缩量确认不足。" if volume_repair and afternoon_shrink else "量价有修复迹象，仍需放量确认。",
         "chip": (f"{cost:.2f} 是你的成本压力区；轻量估算不等同真实筹码分布。" if cost else "按近20日成交密集区做轻量估算，不等同真实筹码分布。"),
         "fund": "有吸筹/洗盘嫌疑，但证据不足以确认。" if volume_repair else "资金行为证据不足，只能按价格和量能观察。",
-        "momentum": "上午改善，午后还要确认。" if session == "midday" else "早盘改善，午后未延续。" if afternoon_shrink else "动能改善但仍需次日放量确认。",
+        "momentum": ("MACD柱状图放大，动能增强。" if hist_expand and macd_hist and macd_hist > 0 else "MACD趋势与收盘位置一致，需次日确认。" if macd_mom_b > 0 else "MACD死叉确认，动能偏弱。") if session not in {"midday"} else "上午改善，午后还要 MACD 确认。",
         "supports": [
             "结构：两次接近位置止跌" if double_low else "结构：下杀后收回，短线修复",
             "量价：开盘放量下杀后收回，不是一路放量下跌" if volume_repair else "量价：收盘修复，但分时确认不足",
@@ -455,6 +483,8 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
     sec = provider.resolve_security(target)
     quote = provider.fetch_quote(sec)
     daily = provider.fetch_qfq_daily(sec, days=40)
+    calc_macd(daily)
+    daily_macd_params = calc_macd_params(daily)
     bars_5m = provider.fetch_5m(sec, datalen=80)
     current = latest_or_quote_close(quote, daily)
     last_bar = daily[-1] if daily else {}
@@ -499,6 +529,13 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
         "intraday": intraday,
         "levels": levels,
         "theory": theory,
+        "macd_params": {
+            "macd_line": daily_macd_params.get("macd_line"),
+            "dea": daily_macd_params.get("dea"),
+            "histogram": daily_macd_params.get("histogram"),
+            "golden_cross": daily_macd_params.get("golden_cross"),
+            "death_cross": daily_macd_params.get("death_cross"),
+        },
         "summary": {
             "state": theory["state"],
             "score": theory["scores"]["total"],
@@ -544,3 +581,101 @@ def enrich_with_signal_backtrack(review: dict[str, Any], *, limit: int = 10) -> 
     except ImportError:
         pass
     return review
+
+
+def calc_macd(bars: list[dict[str, Any]]) -> None:
+    if not bars or len(bars) < 26:
+        return
+
+    closes: list[float] = []
+    for bar in bars:
+        c = to_float(bar.get("close"))
+        if c is not None:
+            closes.append(c)
+
+    if len(closes) < 26:
+        return
+
+    fast_alpha = 2.0 / 13.0
+    slow_alpha = 2.0 / 27.0
+    signal_alpha = 2.0 / 10.0
+
+    ema12 = sum(closes[:12]) / 12.0
+    ema26 = sum(closes[:26]) / 26.0
+
+    dea_values: list[float] = []
+
+    for i in range(12, len(bars)):
+        c = closes[i]
+        ema12 = ema12 * fast_alpha + c * (1.0 - fast_alpha)
+        if i >= 26:
+            ema26 = ema26 * slow_alpha + c * (1.0 - slow_alpha)
+            macd_line = ema12 - ema26
+            dea_values.append(macd_line)
+            if len(dea_values) == 9:
+                dea = sum(dea_values) / 9.0
+            elif len(dea_values) > 9:
+                dea = dea * signal_alpha + macd_line * (1.0 - signal_alpha)
+            else:
+                dea = macd_line
+            bars[i]["macd_line"] = round(macd_line, 4)
+            bars[i]["dea"] = round(dea, 4)
+            bars[i]["macd_histogram"] = round(macd_line - dea, 4)
+
+
+def calc_macd_params(bars: list[dict[str, Any]]) -> dict[str, Any]:
+    calc_macd(bars)
+    latest = bars[-1] if bars else None
+    if latest is None:
+        return {
+            "macd_line": None,
+            "dea": None,
+            "histogram": None,
+            "above_zero": None,
+            "below_zero": None,
+            "golden_cross": False,
+            "death_cross": False,
+            "cross_bar_index": -1,
+        }
+
+    m = to_float(latest.get("macd_line"))
+    d = to_float(latest.get("dea"))
+    h = to_float(latest.get("macd_histogram"))
+
+    if m is not None:
+        above_zero = m > 0
+        below_zero = m < 0
+    else:
+        above_zero = None
+        below_zero = None
+
+    check = bars[-5:] if len(bars) >= 5 else bars
+    golden_cross = False
+    death_cross = False
+    cross_idx = -1
+
+    for i in range(1, len(check)):
+        prev_m = to_float(bars[i - 1].get("macd_line"))
+        prev_d = to_float(bars[i - 1].get("dea"))
+        cur_m = to_float(bars[i].get("macd_line"))
+        cur_d = to_float(bars[i].get("dea"))
+        if prev_m is not None and prev_d is not None and cur_m is not None and cur_d is not None:
+            prev_diff = prev_m - prev_d
+            cur_diff = cur_m - cur_d
+            if prev_diff <= 0 and cur_diff > 0:
+                golden_cross = True
+                cross_idx = i
+            elif prev_diff >= 0 and cur_diff < 0:
+                death_cross = True
+                cross_idx = i
+
+    return {
+        "macd_line": m,
+        "dea": d,
+        "histogram": h,
+        "above_zero": above_zero,
+        "below_zero": below_zero,
+        "golden_cross": golden_cross,
+        "death_cross": death_cross,
+        "cross_bar_index": cross_idx,
+    }

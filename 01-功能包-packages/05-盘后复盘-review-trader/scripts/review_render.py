@@ -174,6 +174,13 @@ def render_single(review: dict[str, Any]) -> str:
         lines.append(f"ATR14日 {atr_data['atr14']:.2f}元（{atr_data['atr_ratio']*100:.2f}%）{atr_data['level']} - {_atr_level_note(atr_data['level'], atr_data['atr14'])}")
     else:
         lines.append("ATR数据不足（新股/停牌）")
+    macd_params = review.get("macd_params") or {}
+    if macd_params.get("macd_line") is not None:
+        lines.append(f"MACD(D12/E26/S9): 线={macd_params['macd_line']:.4f} DEA={macd_params['dea']:.4f} 柱={macd_params['histogram']:+.4f}")
+        if macd_params.get("golden_cross"):
+            lines.append("MACD金叉信号：MACD线上穿DEA，短线偏多。")
+        if macd_params.get("death_cross"):
+            lines.append("MACD死叉信号：MACD线下穿DEA，短线偏空。")
     lines.append("")
     # 🎯 信号判断
     lines.append("🎯 信号判断 ")
