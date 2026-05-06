@@ -527,6 +527,12 @@ def render_markdown(
 
         lines.append(f"    {role}  {name}  仓位 {actual}%  {note}")
         lines.append(f"         状态：{status}")
+        cost = item.get("cost")
+        shares = item.get("shares")
+        if cost is not None and shares:
+            current = float(item.get("current") or 0)
+            pl_pct = round((current - float(cost)) / float(cost) * 100, 1) if float(cost) else 0
+            lines.append(f"         成本 {float(cost):.2f} ｜ {int(shares)} 股 ｜ 浮盈 {pl_pct:+.1f}%")
 
     lines.append(f"    现金  {cash}%")
     lines.append("")
