@@ -16,8 +16,7 @@ SHARED_CANDIDATE = ROOT / "02-共享模块-shared" / "02-候选逻辑-candidate"
 SHARED_MARKET = ROOT / "02-共享模块-shared" / "01-行情数据-market-data"
 SHARED_SCRIPTS = ROOT / "02-共享模块-shared" / "scripts"
 SHARED_ROOT = ROOT / "02-共享模块-shared"
-SHARED_TRADER_SHARED = SHARED_ROOT / "trader_shared"
-for _path in (SHARED_CANDIDATE, SHARED_MARKET, SHARED_SCRIPTS, SHARED_ROOT, SHARED_TRADER_SHARED):
+for _path in (SHARED_CANDIDATE, SHARED_MARKET, SHARED_SCRIPTS, SHARED_ROOT):
     if _path.exists() and str(_path) not in sys.path:
         sys.path.append(str(_path))
 
@@ -41,7 +40,7 @@ _run_analysis_shared_failed = False
 
 try:
     from trader_shared import conflicting_signals, get_market_level, get_market_note, write_stock, log, stats_by_type
-    from trader_shared.market_env import get_env_for_skill
+    from trader_shared import get_env_for_skill
     track_log = log
 except ImportError:
     import warnings

@@ -25,47 +25,27 @@ This is a script-output skill, not a writing template.
 
 Always run `scripts/final_review.py` and return stdout exactly. Do not compose from memory, summarize, shorten, translate, restyle, add tables, add disclaimers, or add follow-up lines.
 
-## When to use
-- User asks for 单票复盘, 盘后复盘, 今日复盘, 明日怎么应对, or wants a WeChat-readable stock review.
-- User asks to compare recently reviewed stocks, 明天先看谁, 多股复盘比较, or 谁更值得盯.
-- Do not use this for T0 intraday execution prices; that belongs to `t0-trader`.
-- Do not use this for the short single-stock action report; that belongs to `trader`.
-
 ## Commands
-Single stock after-close review:
-
+Single stock review:
 ```bash
 python3 scripts/final_review.py --target 南网科技 --cost 57.60
-python3 scripts/final_review.py --target 南网科技 --output json
+python3 scripts/final_review.py --target 南网科技 --session midday
 ```
 
-Single stock midday review:
-
+Multi-stock compare:
 ```bash
-python3 scripts/final_review.py --target 南网科技 --cost 57.60 --session midday
-```
-
-Compare stocks directly:
-
-```bash
-python3 scripts/final_review.py --compare 南网科技 中国铝业 三安光电
-```
-
-Compare recently reviewed stocks from cache:
-
-```bash
+python3 scripts/final_review.py --compare 南网科技 中国铝业
 python3 scripts/final_review.py --compare-recent
 ```
 
-Validate and self-check:
-
+Validate:
 ```bash
 python3 scripts/validate_output.py /path/to/review.md
 python3 scripts/self_check.py
 ```
 
 ## Output Contract
-Single after-close review output must use this order and no markdown tables:
+Single after-close review (no markdown tables):
 
 ```text
 📌 股票｜日期盘后复盘
@@ -77,7 +57,7 @@ Single after-close review output must use this order and no markdown tables:
 👉 一句话
 ```
 
-Single midday review uses the same format but with midday labels:
+Midday review:
 
 ```text
 📌 股票｜日期午间复盘
@@ -89,29 +69,18 @@ Single midday review uses the same format but with midday labels:
 👉 一句话
 ```
 
-Compare output must start with:
+Compare output:
 
 ```text
 📌 多股复盘比较｜日期
+结论： 排序： 主盯： 副盯： 明日动作：
 ```
 
-and include:
-
-```text
-结论：
-排序：
-主盯：
-副盯：
-只观察 / 先防守：
-明日动作：
-```
+## Old Output Detection
+If output contains markdown tables, T0 execution cards, `执行价`, or the two-table `trader` action report format, rerun the script and return stdout verbatim.
 
 ## Rules
-- Single review uses the five-layer theory model: 缠论结构, 威科夫量价, 筹码峰/成本结构, 资金行为, 动能确认.
-- `--session close` is the default after-close review; `--session midday` is a noon review focused on the afternoon plan.
-- This first version uses engineering approximations, not a full canonical Chanlun center algorithm or exact chip distribution.
-- Main-force wording must be probabilistic: `嫌疑`, `可能`, or `证据不足`. Do not state 主力吸筹/锁仓 as fact.
-- Cost is optional. If provided, use it for floating P/L and cost pressure in the output; do not require it.
-- Outside/inside volume is optional. If unavailable, hide it.
+- Single review uses five-layer theory: 缠论结构, 威科夫量价, 筹码峰/成本结构, 资金行为, 动能确认.
+- Main-force wording must be probabilistic: `嫌疑`, `可能`, `证据不足`. Do not state 主力吸筹/锁仓 as fact.
+- Cost is optional. If provided, use for floating P/L; do not require it.
 - Cache is written to `~/.review-trader/state.json` for `--compare-recent`.
-- Do not output markdown tables, T0 execution cards, `执行价`, or the two-table `trader` action report.

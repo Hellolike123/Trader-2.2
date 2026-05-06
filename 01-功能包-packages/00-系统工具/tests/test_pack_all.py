@@ -19,130 +19,182 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[3]
 PACKAGES_DIR = SCRIPTS_DIR / "01-功能包-packages"
 DIST_DIR = SCRIPTS_DIR / "03-安装包-dist"
 
-# Expected entry points per skill
-EXPECTED_ENTRIES = {
-    "01-单票分析-trader": "final_report.py",
-    "02-盘中T0-t0-trader": "final_t0.py",
-    "03-选股池-trader-pool": "final_pool.py",
-    "04-仓位轮动-trader-portfolio": "final_portfolio.py",
-    "05-盘后复盘-review-trader": "final_review.py",
-}
+# (dir_name, slug) → entry script
+EXPECTED_SKILLS: list[tuple[str, str, str]] = [
+    ("01-单票分析-trader", "trader", "final_report.py"),
+    ("02-盘中T0-t0-trader", "t0-trader", "final_t0.py"),
+    ("03-选股池-trader-pool", "trader-pool", "final_pool.py"),
+    ("04-仓位轮动-trader-portfolio", "trader-portfolio", "final_portfolio.py"),
+    ("05-盘后复盘-review-trader", "review-trader", "final_review.py"),
+]
 
 
-def test_pack_all_creates_single_zip() -> None:
-    """pack_all.py should produce one zip at trader-all-skill.zip."""
+def _verify_skill_zip(zf: zipfile.ZipFile, slug: str, expected_script: str) -> None:
+    """Verify a single skill zip has correct flat structure."""
+    names = zf.namelist()
+
+    # Root-level files
+    assert "_meta.json" in names, f"{slug} missing _meta.json"
+    assert "HERMES.md" in names, f"{slug} missing HERMES.md"
+    assert "SKILL.md" in names, f"{slug} missing SKILL.md"
+
+    # Scripts
+    script_entries = [n for n in names if n.startswith("scripts/")]
+    assert len(script_entries) > 0, f"{slug} has no scripts/ entries"
+    assert any(expected_script in n for n in script_entries), \
+        f"{slug} missing {expected_script}"
+
+    # Shared modules
+    assert any("light_data.py" in n for n in script_entries), f"{slug} missing light_data.py"
+    assert any("signal_contract.py" in n for n in script_entries), f"{slug} missing signal_contract.py"
+    assert any("candidate_core.py" in n for n in script_entries), f"{slug} missing candidate_core.py"
+    # Theory modules
+    assert any("chan_core.py" in n for n in script_entries), f"{slug} missing chan_core.py"
+    assert any("wyckoff_core.py" in n for n in script_entries), f"{slug} missing wyckoff_core.py"
+    assert any("momentum_core.py" in n for n in script_entries), f"{slug} missing momentum_core.py"
+
+
+def _verify_combined_zip(zf: zipfile.ZipFile, slug: str, expected_script: str) -> None:
+    """Verify a skill in the combined zip has correct {slug}/ prefix structure."""
+    names = zf.namelist()
+    prefix = f"{slug}/"
+
+    assert f"{prefix}_meta.json" in names, f"{slug} missing _meta.json in combined"
+    assert f"{prefix}HERMES.md" in names, f"{slug} missing HERMES.md in combined"
+    assert f"{prefix}SKILL.md" in names, f"{slug} missing SKILL.md in combined"
+
+    script_entries = [n for n in names if n.startswith(f"{prefix}scripts/")]
+    assert len(script_entries) > 0, f"{slug} has no scripts/ entries in combined"
+    assert any(expected_script in n for n in script_entries), \
+        f"{slug} missing {expected_script} in combined"
+
+    assert any("light_data.py" in n for n in script_entries), f"{slug} missing light_data.py"
+    assert any("signal_contract.py" in n for n in script_entries), f"{slug} missing signal_contract.py"
+    assert any("candidate_core.py" in n for n in script_entries), f"{slug} missing candidate_core.py"
+    assert any("chan_core.py" in n for n in script_entries), f"{slug} missing chan_core.py"
+    assert any("wyckoff_core.py" in n for n in script_entries), f"{slug} missing wyckoff_core.py"
+    assert any("momentum_core.py" in n for n in script_entries), f"{slug} missing momentum_core.py"
+
+
+def test_pack_all_creates_individual_zips() -> None:
+    """pack_all.py should produce individual zips for each skill."""
     with mock.patch.object(pack_all, "repo_root") as mock_root:
         mock_root.return_value = SCRIPTS_DIR
-        archive_path = pack_all.repo_root() / "03-安装包-dist" / "trader-all-skill.zip"
-
         pack_all.main()
 
-        assert archive_path.exists(), f"{archive_path} was not created"
+        for _, slug, _ in EXPECTED_SKILLS:
+            zip_path = DIST_DIR / f"{slug}.zip"
+            assert zip_path.exists(), f"{zip_path} was not created"
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                assert len(zf.namelist()) > 0, f"{slug}.zip is empty"
 
-        with zipfile.ZipFile(archive_path, "r") as zf:
-            names = zf.namelist()
-            assert len(names) > 0, "Archive is empty"
 
-        archive_path.unlink(missing_ok=True)
+def test_pack_all_creates_combined_zip() -> None:
+    """pack_all.py should produce one combined zip."""
+    with mock.patch.object(pack_all, "repo_root") as mock_root:
+        mock_root.return_value = SCRIPTS_DIR
+        pack_all.main()
+
+        combined_path = DIST_DIR / "trader-all-skill.zip"
+        assert combined_path.exists(), f"{combined_path} was not created"
+        with zipfile.ZipFile(combined_path, "r") as zf:
+            assert len(zf.namelist()) > 0, "Combined archive is empty"
 
 
 def test_pack_all_contains_all_skills() -> None:
-    """The zip should contain entries for all 5 active skills."""
-    for name in pack_all.SKILLS:
-        skill_dir = PACKAGES_DIR / name
+    """All 5 active skill source dirs must exist."""
+    for dir_name, _slug, _script in EXPECTED_SKILLS:
+        skill_dir = PACKAGES_DIR / dir_name
         assert skill_dir.exists(), f"Skill dir {skill_dir} not found"
 
 
-def test_pack_all_bundle_structure() -> None:
-    """Verify each skill in the zip has expected scripts and shared modules."""
+def test_pack_all_individual_structure() -> None:
+    """Each individual skill zip must have flat structure (files at root)."""
     bundle_path = DIST_DIR / "trader-all-skill.zip"
-    if bundle_path.exists():
-        bundle_path.unlink()
+    bundle_path.unlink(missing_ok=True)
+
+    with mock.patch.object(pack_all, "repo_root") as mock_root:
+        mock_root.return_value = SCRIPTS_DIR
+        pack_all.main()
+
+    for dir_name, slug, expected_script in EXPECTED_SKILLS:
+        zip_path = DIST_DIR / f"{slug}.zip"
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            _verify_skill_zip(zf, slug, expected_script)
+
+
+def test_pack_all_combined_structure() -> None:
+    """Combined zip must use {slug}/ prefix for each skill."""
+    bundle_path = DIST_DIR / "trader-all-skill.zip"
+    bundle_path.unlink(missing_ok=True)
 
     with mock.patch.object(pack_all, "repo_root") as mock_root:
         mock_root.return_value = SCRIPTS_DIR
         pack_all.main()
 
     with zipfile.ZipFile(bundle_path, "r") as zf:
-        names = zf.namelist()
-
-        for skill_name, expected_script in EXPECTED_ENTRIES.items():
-            skill_prefix = f"01-功能包-packages/{skill_name}/"
-            # Check script directory exists
-            skill_scripts = [n for n in names if n.startswith(skill_prefix + "scripts/")]
-            assert len(skill_scripts) > 0, f"{skill_name} has no scripts in archive"
-
-            # Check expected entry point exists
-            entry_found = any(expected_script in n for n in skill_scripts)
-            assert entry_found, f"{skill_name} missing {expected_script}, scripts: {skill_scripts}"
-
-            # Check SKILL.md exists
-            skill_md = f"01-功能包-packages/{skill_name}/SKILL.md"
-            assert skill_md in names, f"Missing {skill_md}"
-
-            # Check HERMES.md exists
-            hermes_md = f"01-功能包-packages/{skill_name}/HERMES.md"
-            assert hermes_md in names, f"Missing {hermes_md}"
-
-            # Check shared modules were copied
-            assert any("scripts/light_data.py" in n for n in skill_scripts), \
-                f"{skill_name} missing shared light_data.py"
-            assert any("scripts/signal_contract.py" in n for n in skill_scripts), \
-                f"{skill_name} missing shared signal_contract.py"
-
-            # Check candidate_core exists
-            assert any("scripts/candidate_core.py" in n for n in skill_scripts), \
-                f"{skill_name} missing shared candidate_core.py"
-
-            # Check tests directory
-            assert any(n.startswith(skill_prefix + "tests/") for n in names), \
-                f"{skill_name} missing tests/ in archive"
+        for dir_name, slug, expected_script in EXPECTED_SKILLS:
+            _verify_combined_zip(zf, slug, expected_script)
 
     bundle_path.unlink(missing_ok=True)
 
 
 def test_pack_all_no_package_skill() -> None:
-    """Old package_skill.py should NOT be in the new zip."""
+    """Old package_skill.py should NOT be in any zip."""
     bundle_path = DIST_DIR / "trader-all-skill.zip"
-    if bundle_path.exists():
-        bundle_path.unlink()
+    bundle_path.unlink(missing_ok=True)
 
     with mock.patch.object(pack_all, "repo_root") as mock_root:
         mock_root.return_value = SCRIPTS_DIR
         pack_all.main()
 
+    # Check combined zip
     with zipfile.ZipFile(bundle_path, "r") as zf:
-        names = zf.namelist()
-        for name in names:
+        for name in zf.namelist():
             assert "package_skill.py" not in name, \
                 f"Old package_skill.py should not be in bundle: {name}"
+
+    # Check individual zips
+    for _, slug, _ in EXPECTED_SKILLS:
+        zip_path = DIST_DIR / f"{slug}.zip"
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            for name in zf.namelist():
+                assert "package_skill.py" not in name, \
+                    f"Old package_skill.py should not be in {slug}.zip: {name}"
 
     bundle_path.unlink(missing_ok=True)
 
 
 def test_pack_all_skips_irrelevant_skills() -> None:
-    """Deprecated trader-compare should NOT be in the new zip."""
+    """Deprecated trader-compare should NOT be in any zip."""
     bundle_path = DIST_DIR / "trader-all-skill.zip"
-    if bundle_path.exists():
-        bundle_path.unlink()
+    bundle_path.unlink(missing_ok=True)
 
     with mock.patch.object(pack_all, "repo_root") as mock_root:
         mock_root.return_value = SCRIPTS_DIR
         pack_all.main()
 
+    # Check combined zip
     with zipfile.ZipFile(bundle_path, "r") as zf:
-        names = zf.namelist()
-        has_compare = any("trader-compare" in n for n in names)
+        has_compare = any("trader-compare" in n for n in zf.namelist())
         assert not has_compare, "trader-compare should not be in unified zip"
+
+    # Check individual zips
+    for _, slug, _ in EXPECTED_SKILLS:
+        zip_path = DIST_DIR / f"{slug}.zip"
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            has_compare = any("trader-compare" in n for n in zf.namelist())
+            assert not has_compare, f"trader-compare should not be in {slug}.zip"
 
     bundle_path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
-    # Run with PYTHONPATH or pytest
     test_pack_all_skips_irrelevant_skills()
-    test_pack_all_bundle_structure()
-    test_pack_all_creates_single_zip()
+    test_pack_all_combined_structure()
+    test_pack_all_individual_structure()
+    test_pack_all_creates_individual_zips()
+    test_pack_all_creates_combined_zip()
     test_pack_all_contains_all_skills()
     test_pack_all_no_package_skill()
     print("All pack_all tests passed!")

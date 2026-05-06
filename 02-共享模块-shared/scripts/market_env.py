@@ -20,6 +20,7 @@ except ImportError:
     _HAS_PIPELINE = False
 
 from light_data import normalize_bars
+from trader_shared.config import INDEX_CODE
 from trader_shared.data_provider import get_provider
 
 
