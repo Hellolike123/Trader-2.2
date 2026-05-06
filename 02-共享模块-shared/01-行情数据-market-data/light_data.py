@@ -8,6 +8,7 @@ import re
 import ssl
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
@@ -24,8 +25,8 @@ except ImportError:
 TENCENT_QUOTE_URL = "https://qt.gtimg.cn/q="
 TENCENT_FQKLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
 SINA_KLINE_URL = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData"
-TIMEOUT_SECONDS = 12
-MAX_ATTEMPTS = 3
+TIMEOUT_SECONDS = 5
+MAX_ATTEMPTS = 2
 NAME_MAP = {
     "南网科技": "688248",
     "中国铝业": "601600",
@@ -327,29 +328,29 @@ def load_market_snapshot(target: str, days: int = 30, include_5m: bool = True) -
     source_errors: dict[str, str] = {}
     missing_sources: list[str] = []
 
-    try:
-        quote = fetch_quote(sec, http)
-    except Exception as exc:
-        quote = {}
-        source_errors["quote"] = str(exc)
-        missing_sources.append("quote")
+    results: dict[str, Any] = {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {
+            executor.submit(fetch_quote, sec, http): "quote",
+            executor.submit(fetch_qfq_daily, sec, http, days=days): "daily",
+        }
+        if include_5m:
+            futures[executor.submit(fetch_5m, sec, http)] = "bars_5m"
 
-    try:
-        daily_bars = fetch_qfq_daily(sec, http, days=days)
-    except Exception as exc:
-        daily_bars = []
-        source_errors["daily_bars"] = str(exc)
-        missing_sources.append("daily_bars")
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                results[key] = future.result()
+            except Exception as exc:
+                results[key] = None
+                source_errors[key] = str(exc)
+                missing_sources.append(key)
 
-    bars_5m: list[dict[str, Any]] = []
-    if include_5m:
-        try:
-            bars_5m = fetch_5m(sec, http)
-        except Exception as exc:
-            source_errors["bars_5m"] = str(exc)
-            missing_sources.append("bars_5m")
-        if not bars_5m and "bars_5m" not in missing_sources:
-            missing_sources.append("bars_5m")
+    quote = results.get("quote") or {}
+    daily_bars = results.get("daily") or []
+    bars_5m = results.get("bars_5m") or []
+    if include_5m and not bars_5m and "bars_5m" not in missing_sources:
+        missing_sources.append("bars_5m")
 
     if quote and daily_bars and not missing_sources:
         data_status: DataStatus = "complete"

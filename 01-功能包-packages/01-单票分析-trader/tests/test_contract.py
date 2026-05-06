@@ -152,8 +152,18 @@ def test_candidate_confirm_uses_real_resistance_not_current_multiplier() -> None
     levels = build_candidate_levels(10.50, bars, quote={"high": 10.72, "low": 10.32})
     resistance_prices = {item["price"] for item in levels["resistance_levels"]}
 
-    assert levels["confirm_price"] in resistance_prices
-    assert levels["confirm_price"] != round(10.50 * 1.02, 2)
+    # confirm_price = nearest resistance * (1 + MIN_CONFIRM_SPACE_PCT)
+    # not current_price * arbitrary multiplier
+    confirm = levels["confirm_price"]
+    assert confirm not in resistance_prices  # intentional: it's resistance + buffer
+    # Should be close to some resistance * 1.008 (MIN_CONFIRM_SPACE_PCT = 0.008)
+    from trader_shared.config import MIN_CONFIRM_SPACE_PCT
+    assert any(
+        abs(confirm - round(r * (1 + MIN_CONFIRM_SPACE_PCT), 2)) < 0.02
+        for r in resistance_prices
+    ), f"{confirm} should derive from resistance * 1.008"
+    # Must NOT be current * 1.02
+    assert confirm != round(10.50 * 1.02, 2)
 
 
 def test_dynamic_low_zone_and_stop_use_volatility_buffer() -> None:

@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1].parent.parent / "02-�
 import pack_all
 
 
-SCRIPTS_DIR = Path(__file__).resolve().parents[1].parents[1]
+SCRIPTS_DIR = Path(__file__).resolve().parents[3]
 PACKAGES_DIR = SCRIPTS_DIR / "01-功能包-packages"
 DIST_DIR = SCRIPTS_DIR / "03-安装包-dist"
 
@@ -67,7 +67,7 @@ def test_pack_all_bundle_structure() -> None:
         names = zf.namelist()
 
         for skill_name, expected_script in EXPECTED_ENTRIES.items():
-            skill_prefix = f"{skill_name}/"
+            skill_prefix = f"01-功能包-packages/{skill_name}/"
             # Check script directory exists
             skill_scripts = [n for n in names if n.startswith(skill_prefix + "scripts/")]
             assert len(skill_scripts) > 0, f"{skill_name} has no scripts in archive"
@@ -77,11 +77,11 @@ def test_pack_all_bundle_structure() -> None:
             assert entry_found, f"{skill_name} missing {expected_script}, scripts: {skill_scripts}"
 
             # Check SKILL.md exists
-            skill_md = f"{skill_name}/SKILL.md"
+            skill_md = f"01-功能包-packages/{skill_name}/SKILL.md"
             assert skill_md in names, f"Missing {skill_md}"
 
             # Check HERMES.md exists
-            hermes_md = f"{skill_name}/HERMES.md"
+            hermes_md = f"01-功能包-packages/{skill_name}/HERMES.md"
             assert hermes_md in names, f"Missing {hermes_md}"
 
             # Check shared modules were copied

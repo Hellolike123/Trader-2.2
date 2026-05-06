@@ -492,44 +492,13 @@ def _pool_signal_verifications(items: list[dict[str, Any]]) -> tuple[list[dict[s
             sig_text = "无触发/防守位"
             verify_status = "暂无信号"
         else:
-            # Build a search key list: code, name, symbol from item
-            search_keys = []
-            code = str(item.get("target") or "")
-            if code and len(code) == 6:
-                market = "SH" if code.startswith(("6", "688", "689", "8", "4")) else "SZ"
-                search_keys.append(f"{code}.{market}")
-            search_keys.extend([name, symbol])
             try:
                 signals = load_recent_signals(name, limit=10)
                 if not signals:
                     signals = load_recent_signals(symbol, limit=10)
             except Exception:
                 signals = []
-            if not signals:
-                try:
-                    from signal_store import DEFAULT_SIGNAL_STORE_PATH
-                    signals = load_recent_signals(None, limit=100, path=DEFAULT_SIGNAL_STORE_PATH)
-                except Exception:
-                    signals = []
-            # Match by code (most precise) or name
-            codes_to_match = set()
-            if code and len(code) == 6:
-                codes_to_match.update([f"{code}.SH", f"{code}.SZ", code, code.upper()])
-            names_to_match = {name, symbol, name.lower(), name.upper()}
-            matched = None
-            for sig in signals:
-                sig_code = str(sig.get("symbol", "") or "").upper()
-                sig_name = str(sig.get("name", "") or "")
-                if sig_code and codes_to_match:
-                    sig_code_upper = sig_code.replace(".", "")
-                    for ck in codes_to_match:
-                        if ck.replace(".", "") == sig_code_upper or sig_code_upper.endswith(ck.replace(".", "")):
-                            matched = sig
-                            break
-                if not matched and (sig_name == name or sig_name == symbol or
-                                    sig_name.lower() == name.lower() or
-                                    sig_name in name or name in sig_name):
-                    matched = sig
+            matched = signals[0] if signals else None
 
             if matched:
                 sig_type = str(matched.get("signal_type", ""))

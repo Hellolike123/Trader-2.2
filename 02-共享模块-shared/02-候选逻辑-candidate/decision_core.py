@@ -1,27 +1,43 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from light_data import to_float
 from trader_shared.modifier_rule_engine import apply_score_modifiers, apply_livermore_scale
 
 _engine: Any = None
+_engine_loaded: bool = False
 
 
 def _get_engine() -> Any:
-    global _engine
-    if _engine is not None:
+    global _engine, _engine_loaded
+    if _engine_loaded:
         return _engine
-    try:
-        from trader_shared.rule_engine import RuleEngine
-        from pathlib import Path
-        rules_path = Path(__file__).resolve().parents[2] / "02-共享模块-shared" / "trader_shared" / "status_rules.yml"
+    _engine_loaded = True
+
+    # Search multiple candidate paths so this works both from the source tree
+    # and when installed into a skill bundle (the shared module gets copied
+    # into <skill>/scripts/ via pack_all.py).
+    _base = Path(__file__).resolve().parent
+    candidates = [
+        # Source tree: decision_core/ ← ../trader_shared/status_rules.yml
+        _base.parent.parent / "trader_shared" / "status_rules.yml",
+        # Installed: <skill>/scripts/candidate/ ← ../trader_shared/status_rules.yml
+        _base.parent.parent / "trader_shared" / "status_rules.yml",
+        # Fallback: <skill>/scripts/ directly (pack_all copies shared files there)
+        _base.parent / "trader_shared" / "status_rules.yml",
+    ]
+    for rules_path in candidates:
         if rules_path.exists():
-            _engine = RuleEngine.from_yaml(str(rules_path))
-            return _engine
-    except Exception:
-        pass
-    _engine = False
+            try:
+                from trader_shared.rule_engine import RuleEngine
+                _engine = RuleEngine.from_yaml(str(rules_path))
+                return _engine
+            except Exception:
+                pass
+
+    _engine = None
     return None
 
 try:

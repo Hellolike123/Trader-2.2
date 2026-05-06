@@ -131,8 +131,7 @@ def test_log_safe_dedup(tmp_log):
 
 
 def test_fill(tmp_log):
-    sid = st.stable_id("trader", "S1", "2026-05-04", "低吸观察")
-    st.log_safe("trader", "S1", "000001.SZ", "低吸观察", 50.0)
+    sid = st.log_safe("trader", "S1", "000001.SZ", "低吸观察", 50.0)
     ok, _ = st.fill(sid, 3.5, 5, "win")
     assert ok
     records = st._load_all()
