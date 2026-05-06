@@ -706,7 +706,72 @@ python3 -m pytest 01-功能包-packages/01-单票分析-trader/tests/ -v
 
 ---
 
-## 十、维护指南
+## 十、打包与部署
+
+### 10.1 运行方式（源码）
+
+每个 skill 直接 `python3 scripts/final_*.py` 调用：
+
+```bash
+python3 scripts/final_report.py --target 南网科技
+python3 scripts/final_pool.py rank
+python3 scripts/final_t0.py --target 南网科技 --monitor
+python3 scripts/final_portfolio.py --targets 南网科技 中国铝业
+python3 scripts/final_review.py --target 南网科技
+```
+
+Hermes cron 调用示例（每 5 分钟）：
+```bash
+*/5 * * * * python3 /path/to/scripts/final_report.py --target 南网科技 --output alert-text
+*/3 * * * * python3 /path/to/scripts/final_t0.py --target 南网科技 --monitor --once
+```
+
+### 10.2 打包为单一可执行文件（推荐，解决冷启动 5s→0.5s）
+
+Python CLI 解释器冷启动（加载 stdlib）约 **5 秒**，其中：
+- Python 解释器启动 → ~2s
+- 标准库加载（json/urllib/ssl/encodings 等）→ ~2s
+- 项目模块导入（chan_core/decision_core/light_data）→ ~1s
+
+**纯 Python CLI 无法根治冷启动问题。** PyInstaller 是唯一能降到 **0.5-1.5 秒** 的方案。
+
+**打包命令**（仅开发机执行，非运行时依赖）：
+
+```bash
+# 1. 安装构建工具（仅一次）
+pip install pyinstaller
+
+# 2. 打包单个 skill
+pyinstaller --onefile --name trader scripts/final_report.py
+pyinstaller --onefile --name pool scripts/final_pool.py
+# 生成 dist/trader（macOS）或 dist/trader.exe（Windows）
+```
+
+> **注意**：PyInstaller 预编译所有模块嵌入可执行文件，Hermes 服务器拿到后 `chmod +x` 直接执行，**无需安装 Python 或任何依赖**。
+
+**收益**：
+
+| 指标 | 源码 | PyInstaller 后 |
+|------|------|---------------|
+| 首次启动 | 5-8 秒 | **0.5-1.5 秒** |
+| 二次调用 | 1-2 秒 | 0.5-1 秒 |
+| 分发 | 10+ 文件 | 1 个可执行文件 |
+
+**Hermes 部署**：将 `dist/trader` 复制到 `~/.agents/skills/`，替换 `python3 scripts/final_report.py` 为直接执行可执行文件。
+
+### 10.3 zip 包安装（传统方式）
+
+`02-共享模块-shared/scripts/pack_all.py` 将 5 个 skill 打包为 `trader-all-skill.zip`（383 KB），放置于 `03-安装包-dist/`：
+
+```bash
+python3 02-共享模块-shared/scripts/pack_all.py
+```
+
+Hermes 解压后 symlink 到 `~/.agents/skills/` 即可。
+
+---
+
+## 十一、维护指南
 
 ### 10.1 触发更新 AGENTS.md 的条件
 
