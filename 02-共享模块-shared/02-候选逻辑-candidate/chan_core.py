@@ -12,6 +12,7 @@ except ImportError:
 
 
 def _calc_macd(bars: list[dict]) -> list[dict]:
+    bars = [dict(b) for b in bars]
     n = len(bars)
     closes = [to_float(b.get("close")) for b in bars]
 
@@ -50,8 +51,6 @@ def _calc_macd(bars: list[dict]) -> list[dict]:
             continue
 
         dea_buffer.append(d)
-        if len(dea_buffer) > 9:
-            dea_buffer.pop(0)
 
         if len(dea_buffer) < 9:
             bars[i]["macd_histogram"] = 0.0
@@ -145,7 +144,7 @@ def find_fractions(bars: list[dict]) -> list[dict]:
         if any(v is None for v in [h_left, l_left, h_mid, l_mid, h_right, l_right, c_mid]):
             continue
 
-        if h_mid > h_left and h_mid > h_right and l_mid > l_left and l_mid > l_right:
+        if h_mid > h_left and h_mid > h_right:
             fractions.append({
                 "type": "top",
                 "high": h_mid,
@@ -154,7 +153,7 @@ def find_fractions(bars: list[dict]) -> list[dict]:
                 "close": c_mid,
             })
 
-        if l_mid < l_left and l_mid < l_right and h_mid < h_left and h_mid < h_right:
+        if l_mid < l_left and l_mid < l_right:
             fractions.append({
                 "type": "bottom",
                 "high": h_mid,
@@ -206,7 +205,7 @@ def build_zones(strokes: list[dict]) -> list[dict]:
         return []
 
     zones: list[dict[str, Any]] = []
-    for i in range(0, len(strokes) - 2, 2):
+    for i in range(0, len(strokes) - 2, 1):
         group = strokes[i:i + 3]
 
         highs: list[float] = []
@@ -219,13 +218,14 @@ def build_zones(strokes: list[dict]) -> list[dict]:
         zh_bottom = max(lows)
         valid = zh_top > zh_bottom
 
-        zones.append({
-            "zh_top": round(zh_top, 4),
-            "zh_bottom": round(zh_bottom, 4),
-            "zh_center": round((zh_top + zh_bottom) / 2, 4),
-            "strokes": group,
-            "valid": valid,
-        })
+        if valid:
+            zones.append({
+                "zh_top": round(zh_top, 4),
+                "zh_bottom": round(zh_bottom, 4),
+                "zh_center": round((zh_top + zh_bottom) / 2, 4),
+                "strokes": group,
+                "valid": valid,
+            })
 
     return zones
 
@@ -242,33 +242,39 @@ def detect_buy_points(
     if not strokes:
         return buy_points
 
+    # 一类买: 向下笔 + MACD 绿柱缩短 (底背驰信号)
     last_stroke = strokes[-1]
-
     if last_stroke["direction"] == "down":
-        if macd_hist_current is not None and macd_hist_prev is not None:
+        if macd_hist_current is not None and macd_hist_prev is not None and macd_hist_current < 0 and macd_hist_prev < 0:
             if macd_hist_current > macd_hist_prev:
                 buy_points.append({
                     "type": "一类买",
                     "price": round(last_stroke["end_price"], 4),
                     "confidence": 3,
                 })
+        elif macd_hist_current is not None and macd_hist_current < 0:
+            buy_points.append({
+                "type": "一类买",
+                "price": round(last_stroke["end_price"], 4),
+                "confidence": 2,
+            })
 
+    # 二类买: down_1(low_a) -> up -> down_2(low_b) 且 low_b > low_a
     if len(strokes) >= 3:
-        for i in range(len(strokes) - 1, -1, -1):
-            if strokes[i]["direction"] == "down":
-                curr_low = strokes[i]["end_price"]
-                for j in range(i - 1, -1, -1):
-                    if strokes[j]["direction"] == "down":
-                        prev_low = strokes[j]["end_price"]
-                        if curr_low > prev_low:
-                            buy_points.append({
-                                "type": "二类买",
-                                "price": round(curr_low, 4),
-                                "confidence": 2,
-                            })
-                        break
-                break
+        down_strokes = [s for s in strokes if s["direction"] == "down"]
+        up_strokes = [s for s in strokes if s["direction"] == "up"]
+        if len(down_strokes) >= 2 and up_strokes:
+            low_a = down_strokes[-2]["end_price"]
+            low_b = down_strokes[-1]["end_price"]
+            up_high = max(s["end_price"] for s in up_strokes)
+            if low_b > low_a and low_b < up_high:
+                buy_points.append({
+                    "type": "二类买",
+                    "price": round(low_b, 4),
+                    "confidence": 2,
+                })
 
+    # 三类买 confirmed
     if last_close > 0 and zones:
         last_valid: dict | None = None
         for z in reversed(zones):

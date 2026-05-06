@@ -141,15 +141,14 @@ class TestBuildZones:
             {"start_price": 50, "end_price": 80, "direction": "up"},
         ]
         result = build_zones(strokes)
-        assert len(result) == 1
-        assert result[0]["valid"] is False
+        assert len(result) == 0
 
 
 class TestDetectBuyPoints:
     def test_buy_point_1(self):
         strokes = [{"direction": "down", "end_price": 10.0}]
         zones = []
-        result = detect_buy_points(strokes, zones, 10.0, macd_hist_current=1.0, macd_hist_prev=0.5)
+        result = detect_buy_points(strokes, zones, 10.0, macd_hist_current=-0.5, macd_hist_prev=-1.0)
         types = [bp["type"] for bp in result]
         assert "一类买" in types
 

@@ -28,8 +28,6 @@ def calc_rsi(closes: list[float], period: int = 14) -> list[float | None]:
     avg_g = sum(gains[:period]) / period
     avg_l = sum(losses[:period]) / period
     for i in range(period, len(closes)):
-        if i >= len(closes) or i - 1 >= len(gains):
-            break
         if i > period:
             avg_g = (avg_g * (period - 1) + gains[i - 1]) / period
             avg_l = (avg_l * (period - 1) + losses[i - 1]) / period
