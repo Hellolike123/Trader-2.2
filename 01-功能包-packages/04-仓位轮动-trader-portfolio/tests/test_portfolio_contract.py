@@ -102,7 +102,7 @@ def test_portfolio_markdown_contract() -> None:
     assert "主仓  中国铝业" in markdown
     assert "副仓  南网科技" in markdown
     assert "观察  三安光电" in markdown
-    assert "现金  80%" in markdown
+    assert "现金  75%" in markdown
     assert "加仓" in markdown
     assert validate(markdown) == []
 

@@ -40,6 +40,49 @@ except ImportError:
 CONTRACT_VERSION = "trader_portfolio_v1"
 SNAPSHOT_CONTRACT_VERSION = "trader_portfolio_rotation_v1"
 
+# ========== Market Filter Constants & Functions ==========
+
+MARKET_DRAINAGE = {
+    ("很差", "低吸观察"): "防守观察",
+    ("很差", "防守观察"): "防守观察",
+    ("很差", "等转强"): "防守观察",
+    ("很差", "冲高减仓"): "减仓加倍",
+    ("偏弱", "等转强"): "低吸观察",
+    ("偏弱", "冲高减仓"): "减仓加倍",
+}
+
+
+def climate_adjust(status: str, market_level: str) -> str:
+    if not market_level or market_level in ("正常", "", "未知"):
+        return status
+    return MARKET_DRAINAGE.get((market_level, status), status)
+
+
+def portfolio_total_cap(market_level: str, has_high_atr: bool) -> int:
+    if not market_level or market_level in ("正常", "", "未知"):
+        return DEFAULT_MAX_TOTAL
+    if market_level == "很差":
+        return 60
+    if market_level == "偏弱" and has_high_atr:
+        return 60
+    if market_level == "偏弱":
+        return 70
+    return DEFAULT_MAX_TOTAL
+
+
+def dual_index_market_decision(csi1000_level: str, csi300_level: str) -> str:
+    c1 = csi1000_level if csi1000_level and csi1000_level not in ("", "未知") else "缺失"
+    c2 = csi300_level if csi300_level and csi300_level not in ("", "未知") else "缺失"
+    if c1 == "缺失" and c2 == "缺失":
+        return "偏弱"
+    if c1 == "缺失" or c2 == "缺失":
+        return "偏弱"
+    if c1 in {"偏弱", "很差"} and c2 in {"偏弱", "很差"}:
+        return "很差"
+    if c1 in {"偏弱", "很差"} or c2 in {"偏弱", "很差"}:
+        return "偏弱"
+    return "正常"
+
 
 def price(value: float | None) -> str:
     return "无" if value is None else f"{value:.2f}元"
@@ -81,8 +124,12 @@ def compact_fraction(value: float) -> str:
     return mapping.get(round(value, 4), f"{value:.2f}")
 
 
-def signal_state_for_item(item: dict[str, Any]) -> tuple[str, str, str, str]:
-    status = str(item.get("status") or "")
+def signal_state_for_item(item: dict[str, Any], *, market_level: str = "") -> tuple[str, str, str, str]:
+    if market_level and market_level not in ("正常", "", "未知"):
+        adj = item.get("adjusted_status")
+        status = str(adj) if adj else str(item.get("status") or "")
+    else:
+        status = str(item.get("status") or "")
     current = number(item.get("current"))
     confirm = number(item.get("confirm"))
     if status in {"暂不碰", "数据失败"} or is_risk_exit(item):
@@ -111,8 +158,8 @@ def signal_risk_flags_for_item(item: dict[str, Any]) -> list[str]:
     return flags
 
 
-def build_signal_for_item(item: dict[str, Any], *, max_total: int, max_single_move: int) -> dict[str, Any]:
-    signal_type, direction, action, confidence = signal_state_for_item(item)
+def build_signal_for_item(item: dict[str, Any], *, max_total: int, max_single_move: int, market_level: str = "") -> dict[str, Any]:
+    signal_type, direction, action, confidence = signal_state_for_item(item, market_level=market_level)
     symbol = str(item.get("symbol") or item.get("target") or item.get("name") or "")
     name = str(item.get("name") or item.get("target") or symbol)
     confirm = number(item.get("confirm"), number(item.get("current")))
@@ -161,54 +208,89 @@ def signal_summary_for_item(item: dict[str, Any], signal_type: str) -> str:
     return f"{name}继续观察，等待确认。"
 
 
-def build_signal_summaries(items: list[dict[str, Any]], *, max_total: int, max_single_move: int) -> list[dict[str, Any]]:
-    return [build_signal_for_item(item, max_total=max_total, max_single_move=max_single_move) for item in items]
+def build_signal_summaries(items: list[dict[str, Any]], *, max_total: int, max_single_move: int, market_level: str = "") -> list[dict[str, Any]]:
+    return [build_signal_for_item(item, max_total=max_total, max_single_move=max_single_move, market_level=market_level) for item in items]
 
 
-PYRAMID_SCALES = {0: 0, 1: 0.15, 2: 0.35, 3: 0.6, 4: 0.85, 5: 1.0}
+def allocate_weights(
+    sorted_items: list[dict[str, Any]],
+    *,
+    max_total: int = DEFAULT_MAX_TOTAL,
+) -> dict[str, int]:
+    tradable = [
+        item for item in sorted_items
+        if item.get("ok")
+        and (item.get("adjusted_status") or item.get("status") or "")
+        not in {"暂不碰", "数据失败"}
+    ]
+    if not tradable:
+        return {}
 
-def target_weight(role: str, item: dict[str, Any], *, main_cap: int) -> int:
-    status = str(item.get("status") or "")
-    atr_level_str = str(item.get("atr_level") or "")
-    score = float(item.get("livermore_score") or item.get("score") or 0)
-    atr_cap = int(item.get("atr_cap") or 10)
-    if status in {"暂不碰", "数据失败"}:
-        return 0
-    from candidate_core import base_weight, livermore_scale
-    bw = base_weight(atr_level_str)
-    tier = livermore_scale(status, score)
-    scale = PYRAMID_SCALES.get(tier, 0)
-    raw = round(bw * scale / max(scale, 0.01)) if scale > 0 else 0
-    raw = max(raw, 0)
-    raw = min(raw, atr_cap)
-    return raw
+    total_cap = sum(int(item.get("atr_cap") or 10) for item in tradable)
+    alloc_pool = min(total_cap, max_total)
+
+    scores: list[float] = []
+    for item in tradable:
+        raw = item.get("score") or item.get("livermore_score")
+        s = float(raw) if raw is not None and raw != "" else 30.0
+        if s <= 0:
+            s = 30.0
+        scores.append(s)
+
+    total_score = sum(scores)
+    if total_score <= 0:
+        n = len(tradable)
+        each = max(1, round(alloc_pool / n))
+        return {item["name"]: each for item in tradable}
+
+    weights: dict[str, int] = {}
+    for item, score in zip(tradable, scores):
+        weight = round(score / total_score * alloc_pool)
+        atr_cap = int(item.get("atr_cap") or 10)
+        weight = max(weight, 0)
+        weight = min(weight, atr_cap)
+        weights[item["name"]] = weight
+
+    actual_total = sum(weights.values())
+    if actual_total > max_total:
+        excess = actual_total - max_total
+        sorted_by_score = sorted(
+            tradable,
+            key=lambda i: float(i.get("score") or i.get("livermore_score") or 30),
+        )
+        for item in sorted_by_score:
+            if excess <= 0:
+                break
+            name = item["name"]
+            w = weights.get(name, 0)
+            cut = min(w, excess)
+            weights[name] = w - cut
+            excess -= cut
+
+    return weights
 
 
 def build_roles(sorted_items: list[dict[str, Any]], *, max_total: int, main_cap: int) -> dict[str, Any]:
-    tradable = [item for item in sorted_items if item.get("status") not in {"暂不碰", "数据失败"}]
+    tradable = [
+        item for item in sorted_items
+        if item.get("ok")
+        and (item.get("adjusted_status") or item.get("status") or "")
+        not in {"暂不碰", "数据失败"}
+    ]
     roles = {
         "主仓": tradable[0] if len(tradable) >= 1 else None,
         "副仓": tradable[1] if len(tradable) >= 2 else None,
         "观察": tradable[2] if len(tradable) >= 3 else None,
     }
-    weights: dict[str, int] = {}
-    for role, item in roles.items():
-        if item:
-            weights[item["name"]] = target_weight(role, item, main_cap=main_cap)
+    weights = allocate_weights(sorted_items, max_total=max_total)
     total = sum(weights.values())
-    if total > max_total:
-        for role in ("观察", "副仓", "主仓"):
-            item = roles.get(role)
-            if not item:
-                continue
-            name = item["name"]
-            cut = min(weights.get(name, 0), total - max_total)
-            weights[name] = weights.get(name, 0) - cut
-            total -= cut
-            if total <= max_total:
-                break
-    avoid = [item["name"] for item in sorted_items if item.get("status") in {"暂不碰", "数据失败"}]
-    return {"roles": roles, "weights": weights, "avoid": avoid, "total": total, "cash": max(0, 100 - total)}
+    actual_cash = max(0, 100 - total)
+    avoid = [
+        item["name"]
+        for item in sorted_items
+        if not item.get("ok") or item.get("status") in {"暂不碰", "数据失败"}
+    ]
+    return {"roles": roles, "weights": weights, "avoid": avoid, "total": total, "cash": actual_cash}
 
 
 def role_name(plan: dict[str, Any], role: str) -> str:
@@ -486,14 +568,6 @@ def render_markdown(
     lines.append("📌 组合")
     lines.append("")
 
-    livermore_scale_func = None
-    base_weight_func = None
-    try:
-        from candidate_core import base_weight, livermore_scale
-        livermore_scale_func = livermore_scale
-        base_weight_func = base_weight
-    except ImportError:
-        pass
     for role in ("主仓", "副仓", "观察"):
         item = plan["roles"].get(role)
         if not item:
@@ -505,27 +579,7 @@ def render_markdown(
         atr_cap_val = int(item.get("atr_cap") or 10)
         atr_ratio_val = float(item.get("atr_ratio") or 0)
 
-        note = ""
-        sbw = 0
-        if livermore_scale_func and base_weight_func:
-            score = float(item.get("livermore_score") or item.get("score") or 0)
-            tier = livermore_scale_func(status, score)
-            sc = PYRAMID_SCALES.get(tier, 0)
-            sbw = base_weight_func(atr_level_str)
-            if sbw > 0:
-                target_pct = round(sbw * sc / max(sc, 0.01))
-                if sbw != actual:
-                    change = actual - sbw
-                    if change > 0:
-                        note = f"（{sbw}%起→加至{actual}%）"
-                    elif change < 0 and actual > 0:
-                        note = f"（{sbw}%起→{actual}%）"
-                    else:
-                        note = f"（{sbw}%起）"
-        elif atr_cap_val < 10:
-            note = f"（ATR上限{atr_cap_val}%）"
-
-        lines.append(f"    {role}  {name}  仓位 {actual}%  {note}")
+        lines.append(f"    {role}  {name}  仓位 {actual}%")
         lines.append(f"         状态：{status}")
         cost = item.get("cost")
         shares = item.get("shares")
@@ -673,6 +727,19 @@ def build_advice(
     return adv
 
 
+def _with_climate_adjusted(
+    sorted_items: list[dict[str, Any]],
+    market_level: str,
+) -> list[dict[str, Any]]:
+    result = []
+    for item in sorted_items:
+        adj = dict(item)
+        orig = str(item.get("status") or "")
+        adj["adjusted_status"] = climate_adjust(orig, market_level)
+        result.append(adj)
+    return result
+
+
 def build_portfolio(
     targets: list[str],
     *,
@@ -697,12 +764,41 @@ def build_portfolio(
                     item["cost"] = float(h["cost"])
                 item["shares"] = int(h.get("shares", 0))
     sorted_items = sort_candidates(items)
-    plan = build_roles(sorted_items, max_total=max_total, main_cap=main_cap)
-    market_level = get_market_level()
+
+    market_level_raw = get_market_level() or ""
     market_note = get_market_note()
-    markdown = render_markdown(items, plan, sorted_items, market_level, market_note, max_total=max_total, cash_floor=cash_floor, main_cap=main_cap)
-    signal_summaries = build_signal_summaries(sorted_items, max_total=main_cap, max_single_move=10)
-    return {"items": items, "sorted": sorted_items, "plan": plan, "signal_summaries": signal_summaries, "portfolio_markdown": markdown}
+    market_level = market_level_raw if market_level_raw in ("正常", "偏弱", "很差", "") else "正常"
+    if not market_level:
+        market_level = "正常"
+
+    has_high_atr = any(
+        float(it.get("atr_ratio") or 0) >= 0.03
+        for it in sorted_items
+        if it.get("ok")
+    )
+    effective_max = portfolio_total_cap(market_level, has_high_atr)
+
+    if market_level not in ("正常", "", "未知"):
+        sorted_items = _with_climate_adjusted(sorted_items, market_level)
+
+    plan = build_roles(sorted_items, max_total=effective_max, main_cap=main_cap)
+    markdown = render_markdown(
+        items, plan, sorted_items, market_level, market_note,
+        max_total=max_total, cash_floor=cash_floor, main_cap=main_cap,
+    )
+    signal_summaries = build_signal_summaries(
+        sorted_items,
+        max_total=main_cap,
+        max_single_move=10,
+        market_level=market_level,
+    )
+    return {
+        "items": items,
+        "sorted": sorted_items,
+        "plan": plan,
+        "signal_summaries": signal_summaries,
+        "portfolio_markdown": markdown,
+    }
 
 
 def load_snapshot(path: str | Path) -> dict[str, Any]:
