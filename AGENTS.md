@@ -704,6 +704,24 @@ python3 -m pytest 01-功能包-packages/01-单票分析-trader/tests/ -v
 
 所有测试使用 mock 数据，不发起真实网络请求。 `light_data.py` 的 `HttpClient` 无 monkey-patch，测试中用 mock dict 替代。
 
+### 9.4 算法准确性审计（2026-05-06）
+
+对核心算法指标模块进行了逐行审计，修复以下问题：
+
+| 模块 | 功能 | 原始问题 | 修复 |
+|------|------|---------|------|
+| `momentum_core` | MACD 金/死叉 | 检查"交叉后状态"而非"交叉那一刻"，有漏判 | 改为 `macd_prev > dea_prev and macd_line > dea` 的交叉检测 |
+| `momentum_core` | RSI 死代码 | `i >= len(closes)` 条件永远不触发 | 移除 |
+| `chan_core` | 分型检测 | 顶分型多加 `l_mid > l_left`，底分型多加 `h_mid < h_left` | 改为标准缠论：顶只比高，底只比低 |
+| `chan_core` | `_calc_macd` | 原位修改输入 bars（副作用污染） | 函数开头浅拷贝输入 |
+| `chan_core` | DEA 初始化 | `dea_buffer` 滑动窗口导致 DEA 延迟 9 根 | 去掉 pop(0)，9 值后 EMA 平滑 |
+| `chan_core` | `build_zones` | 步长=2 跳过重叠中枢 | 改为步长=1 |
+| `chan_core` | `build_zones` | 无效中枢（zh_top <= zh_bottom）也存入结果 | 只在 valid 时 append |
+| `chan_core` | 一类买点 | 正负柱不区分，任何柱放大都误判 | 绿柱（负）且缩短时才判底背驰 |
+| `chan_core` | 二类买点 | 只比最近两个低点，不考虑上冲确认 | 改为 down→up→down 且 low_b < up_high |
+
+审计覆盖：`momentum_core`（RSI/ADC/布林）、`chan_core`（缠论全链路）、`wyckoff_core`、`structure_core`、`decision_core`、`indicators.py`（T0）、`ict_execution.py`（T0）。
+
 ---
 
 ## 十、打包与部署
