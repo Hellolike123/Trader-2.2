@@ -670,6 +670,7 @@ def build_advice(
 def build_portfolio(
     targets: list[str],
     *,
+    holdings: dict[str, dict] | None = None,
     max_total: int = DEFAULT_MAX_TOTAL,
     cash_floor: int = DEFAULT_CASH_FLOOR,
     main_cap: int = DEFAULT_MAIN_CAP,
@@ -681,6 +682,14 @@ def build_portfolio(
     items = [analyze_target(target, provider, LOOKBACK_DAYS) for target in valid_targets]
     if not any(item.get("ok") for item in items):
         raise RuntimeError("所有股票数据都获取失败，无法做仓位计划")
+    if holdings:
+        for item in items:
+            name = str(item.get("name") or "")
+            h = holdings.get(name)
+            if h:
+                if h.get("cost") is not None:
+                    item["cost"] = float(h["cost"])
+                item["shares"] = int(h.get("shares", 0))
     sorted_items = sort_candidates(items)
     plan = build_roles(sorted_items, max_total=max_total, main_cap=main_cap)
     market_level = get_market_level()

@@ -31,9 +31,13 @@ The current contract marker is `规则版本：trader_portfolio_v1`. If output l
 ```bash
 python3 scripts/final_portfolio.py --targets 南网科技 中国铝业 三安光电
 python3 scripts/final_portfolio.py --snapshot /path/to/portfolio_snapshot.json
+python3 scripts/final_portfolio.py --record buy --name 南网科技 --shares 1000 --cost 54.00
+python3 scripts/final_portfolio.py --record sell --name 南网科技 --shares 500
 python3 scripts/validate_output.py /path/to/portfolio.md
 python3 scripts/self_check.py
 ```
+
+`--record buy/sell` 写入 `~/.trader/positions.json`，`--targets` 自动读持仓合并成本/股数。
 
 ## Output Contract
 Default `--targets` output:
