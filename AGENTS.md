@@ -2,7 +2,7 @@
 
 > 最后更新：2026-05-06
 > 代码版本：trader v0.6.0 / t0-trader v0.7.0 / trader-pool v0.1.0 / trader-portfolio v1.0 / trader-shared v0.6.0 / review-trader v0.1.0
-> 变更：缠论3类买卖点 + 威科夫Spring/Upthrust + Phase1解耦(3策略run_all) + MACD集成 + T0增强(ATR止损/布林/RSI背离/ADX方向过滤)
+> 变更：fix(Hermes): zip flat 结构 + SKILL.md 重写 + INDEX_CODE 修复 + sys.path 包加载修复
 
 ---
 
@@ -949,7 +949,79 @@ Trader 2.0/
 
 ---
 
-## 十三、附录：Skill 自然触发词映射
+## 十三、Hermes 集成要点
+
+### 13.1 Hermes 技能工作原理
+
+| 文件 | 用途 | 谁读它 |
+|------|------|--------|
+| `_meta.json` | 元数据（name/version/contract/description） | Hermes 框架（发现注册） |
+| `HERMES.md` | 框架指令：运行什么命令 | Hermes 框架 |
+| `SKILL.md` | **LLM prompt** — 告诉 LLM 这个 skill 是什么、怎么用 | **LLM**（每次对话注入 context） |
+
+### 13.2 核心问题
+
+**LLM 可以忽略 SKILL.md 的指令。** 即使写一百遍"必须执行脚本不准自己编"，LLM 也可能自己编答案 — 因为 LLM 本质是做文本生成，没有"必须执行工具"的强制约束。
+
+**Hermes 没有内置的 `exec_only` 机制。** `_meta.json` 的 `contract` 字段只是自定义标签，框架不会据此做特殊处理。
+
+### 13.3 唯一可靠的方案
+
+**Agent 操作者直接调 `terminal()` 跑脚本，不让 LLM 参与内容生成。** 流程：
+
+```
+用户说"分析南网科技"
+  → Agent 执行: terminal("python3 scripts/final_report.py --target 南网科技")
+  → 原文贴回 stdout
+  → 结束
+```
+
+### 13.4 技能打包注意事项（`pack_all.py`）
+
+**Zip 结构必须 flat** — 文件在 zip 根级，不能有多余目录前缀：
+```
+正确: trader.zip → _meta.json, HERMES.md, scripts/final_report.py, ...
+错误: trader.zip → 01-单票分析-trader/_meta.json, ...  ← Hermes 找不到
+```
+
+`pack_all.py` 生成两种 zip：
+- **单独 zip**（`trader.zip` 等）：文件在根级，解压到 `~/.hermes/skills/trader/`
+- **合集 zip**（`trader-all-skill.zip`）：文件在 `trader/` 前缀下，解压到 `~/.hermes/skills/`
+
+安装方式：
+```bash
+# 单独装一个 skill
+unzip -o trader.zip -d ~/.hermes/skills/trader
+
+# 一次性装全部
+unzip -o trader-all-skill.zip -d ~/.hermes/skills
+```
+
+**必须包含全部共享模块** — 每个 skill zip 的 `scripts/` 里要自带：
+`light_data.py`, `candidate_core.py`, `structure_core.py`, `decision_core.py`, `signal_contract.py`, `signal_store.py`, `chan_core.py`, `wyckoff_core.py`, `momentum_core.py`, `market_env.py`, `pipeline.py`, `signal_tracker.py`, `calibrator.py`, `contract_utils.py`, `trader_shared/` 包全套
+
+Chan/Wyckoff/Momentum 三个理论核心模块最容易漏，`copy_shared()` 里必须显式复制。
+
+**不要将 `scripts/trader_shared/` 加入 `sys.path`** — 会导致包加载冲突。用 `from trader_shared import X` 走 `__getattr__` 懒加载，而非 `from trader_shared.module import X`。
+
+### 13.5 SKILL.md 写法要点
+
+- 必须简洁、指令明确（参考参考版风格，不要写架构理论）
+- 必须有 **Critical Rule**: "This is a script-output skill, not a writing template"
+- 必须有 **Output Contract**: 精确的标题顺序和格式要求
+- 必须有 **Old Output Detection**: 列出禁止词和错误模式，检测到则 rerun
+
+### 13.6 常见坑
+
+| 问题 | 原因 | 修复 |
+|------|------|------|
+| 中证1000数据不足 | `INDEX_CODE` 未定义，`NAME_MAP` 缺"中证1000" | `config.py` 加 `INDEX_CODE = "000852.SH"`，`light_data.py` NAME_MAP 加映射 |
+| 市场环境回退 | `sys.path` 加了 `scripts/trader_shared/` 导致包冲突 | 去掉该路径，改用 `from trader_shared import get_env_for_skill` |
+| 输出格式被改写 | Hermes 没找到 `_meta.json` → 不识别为 script-output skill | Zip 结构 flat，确保 `_meta.json` 在 root 级 |
+| 脚本无法运行（缺少模块） | `pack_all.py` 的 `copy_shared()` 漏了 chan/wyckoff/momentum | `copy_shared()` 显式复制这三个文件 |
+
+
+## 十四、附录：Skill 自然触发词映射
 
 
 | Skill              | 自然触发词（示例）                                   |
