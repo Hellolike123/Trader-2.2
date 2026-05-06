@@ -30,6 +30,7 @@ def _load() -> dict[str, Any]:
 
 def _save(data: dict[str, Any]) -> None:
     _ensure_dir()
+    tmp_path: str | None = None
     try:
         fd, tmp_path = tempfile.mkstemp(dir=str(STATE_DIR), suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -37,10 +38,11 @@ def _save(data: dict[str, Any]) -> None:
             f.write("\n")
         os.replace(tmp_path, str(STATE_PATH))
     except OSError:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
         _write_fallback(data)
 
 

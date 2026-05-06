@@ -7,7 +7,10 @@ from unittest.mock import patch, MagicMock
 import pytest
 import sys
 
-SHARED = Path(__file__).resolve().parents[1] / "scripts"
+ROOT = Path(__file__).resolve().parents[1]
+SHARED = ROOT / "scripts"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 if str(SHARED) not in sys.path:
     sys.path.insert(0, str(SHARED))
 
@@ -201,6 +204,7 @@ def test_calibrator_uses_shared_assess():
 
 def test_market_env_pipeline_write_via_tradershared():
     import trader_shared as ts
-    with patch.object(ts, "write_market") as mock_write:
-        me = ts.get_market_env()
+    me = ts.get_market_env()
+    with patch.object(me, "write_market") as mock_write:
         me.refresh(write_pipeline=True)
+        mock_write.assert_called_once()
