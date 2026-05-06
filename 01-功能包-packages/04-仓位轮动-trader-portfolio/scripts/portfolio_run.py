@@ -599,7 +599,7 @@ def render_markdown(
     lines.append("")
     extreme_count = sum(1 for it in active_tradable if float(it.get("atr_ratio") or 0) >= 0.03)
     if market_level in ("偏弱", "很差") and extreme_count >= 1:
-        lines.append("大盘偏弱+高波动，不加仓不轮动，先活着再说。")
+        lines.append("大盘偏弱+波幅偏高，不加仓不轮动，先活着再说。")
     elif market_level in ("偏弱", "很差"):
         lines.append(f"大盘{market_level}，不加仓不轮动。")
     elif extreme_count >= 1:
