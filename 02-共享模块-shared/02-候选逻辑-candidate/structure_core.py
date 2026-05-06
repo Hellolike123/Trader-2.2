@@ -141,6 +141,39 @@ def choose_level(levels: list[dict[str, Any]], current: float, *, below: bool) -
     return sorted(candidates, key=sort_key)[0]
 
 
+def _open_price(quote: dict[str, Any] | None) -> float | None:
+    if quote is None:
+        return None
+    for key in ("open", "open_price", "today_open"):
+        v = quote.get(key)
+        if v is not None:
+            return to_float(v)
+    return None
+
+
+def _gap_status(
+    low_zone_lower: float,
+    low_zone_upper: float,
+    hard_stop: float,
+    open_price: float | None,
+    prev_close: float | None,
+) -> dict[str, Any]:
+    if open_price is None or prev_close is None or prev_close <= 0:
+        return {"condition": "unknown", "text": "无开盘数据"}
+    gap_up = open_price > prev_close * 1.003
+    gap_down = open_price < prev_close * 0.997
+
+    if gap_down and open_price < hard_stop:
+        return {"condition": "gap_down_stop", "text": "跳空低开，跌破止损"}
+    if gap_up and open_price > low_zone_upper:
+        return {"condition": "gap_up", "text": "跳空高开，低吸区今日无效"}
+    if gap_down and open_price < low_zone_lower:
+        return {"condition": "gap_down", "text": "跳空低开，低开低于低吸区，关注止损"}
+    if gap_up:
+        return {"condition": "gap_up_low", "text": "跳空高开，但未超过低吸区上沿"}
+    return {"condition": "normal", "text": "正常开盘"}
+
+
 def zone_position(current: float, support: float, confirm: float) -> float:
     width = max(confirm - support, current * 0.01)
     return max(0.0, min(1.0, (current - support) / width))
@@ -153,6 +186,8 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         raise RuntimeError("daily support/resistance unavailable")
 
     quote = quote or {}
+    open_price = _open_price(quote)
+    prev_close = to_float(quote.get("pre_close"))
     ma_values = moving_averages(bars)
     support_levels: list[dict[str, Any]] = []
     resistance_levels: list[dict[str, Any]] = []
@@ -216,6 +251,9 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         "stop_buffer_pct": round(stop_buffer_pct, 4),
         "low_zone_lower": low_zone_lower,
         "low_zone_upper": low_zone_upper,
+        "low_zone": f"{low_zone_lower:.2f}-{low_zone_upper:.2f}元",
+        "open_price": open_price,
+        "gap": _gap_status(low_zone_lower, low_zone_upper, stop, open_price, prev_close),
         "low_zone": f"{low_zone_lower:.2f}-{low_zone_upper:.2f}元",
         "confirm_price": round(confirm_price, 2),
         "sell_observe_price": round(resistance_price, 2),

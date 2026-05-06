@@ -587,6 +587,11 @@ def render_markdown(
             current = float(item.get("current") or 0)
             pl_pct = round((current - float(cost)) / float(cost) * 100, 1) if float(cost) else 0
             lines.append(f"         成本 {float(cost):.2f} ｜ {int(shares)} 股 ｜ 浮盈 {pl_pct:+.1f}%")
+        gap = item.get("gap")
+        if isinstance(gap, dict):
+            gap_text = gap.get("text", "")
+            if gap_text:
+                lines.append(f"         {gap_text}")
 
     lines.append(f"    现金  {cash}%")
     lines.append("")

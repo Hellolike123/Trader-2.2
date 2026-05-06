@@ -309,12 +309,17 @@ def render_markdown(r: dict[str, Any]) -> str:
     low_zone = str(r.get("low_zone") or f"{low_price:.2f}-{low_price * 1.01:.2f}元")
 
     atr_header = f"｜ATR {atr14:.2f}（{atr_ratio*100:.0f}%）{atr_level}" if atr14 > 0 else ""
+    gap = r.get("gap") or {}
+    gap_text = gap.get("text", "") if isinstance(gap, dict) else ""
     lines: list[str] = [
         f"分析报告 — {name}（{display_code}）",
         "",
         f"现价：{price(r['current'])}（{pct(r['change_pct'])}）",
         f"MA5：{ma.get('ma5', '--')}|MA10：{ma.get('ma10', '--')}|MA20：{ma.get('ma20', '--')}|MA30：{ma.get('ma30', '--')}{atr_header}",
     ]
+    if gap_text:
+        lines.append(f"开盘：{gap_text}")
+        lines.append("")
 
     market_env = r.get("market_env") or {}
     env_level = market_env.get("level", "")
