@@ -555,13 +555,16 @@ def run_monitor(
 ) -> int:
     alerts = 0
     first = True
-    while True:
-        message = run_once(target, cost=cost, position=position, verbose=verbose, reset_cache=reset_cache and first)
-        first = False
-        if message:
-            print(message)
-            if message != "无新提醒":
-                alerts += message.count("【T0")
-        if once or alerts >= max_alerts:
-            return 0
-        sleep_until_next_interval(interval)
+    try:
+        while True:
+            message = run_once(target, cost=cost, position=position, verbose=verbose, reset_cache=reset_cache and first)
+            first = False
+            if message:
+                print(message)
+                if message != "无新提醒":
+                    alerts += message.count("【T0")
+            if once or alerts >= max_alerts:
+                return 0
+            sleep_until_next_interval(interval)
+    except KeyboardInterrupt:
+        return 0
