@@ -23,7 +23,7 @@ _bad_line_last_lineno: int = -1
 
 LOG_PATH = Path.home() / ".trader" / "signal_log.jsonl"
 LOG_DIR = LOG_PATH.parent
-VALID_OUTCOMES = {"win", "loss", "expired", "stopped", "unknown", None}
+VALID_OUTCOMES = {"win", "loss", "expired", "stopped", "unknown"}
 
 
 def _ensure_log_dir() -> None:
@@ -76,9 +76,15 @@ def log_safe(skill: str, target: str, symbol: str, signal_type: str, price: floa
 def fill(signal_id: str, pnl_pct: float, days_held: int = 0, outcome: str = "unknown") -> tuple[bool, str]:
     if outcome not in VALID_OUTCOMES:
         return False, f"invalid outcome: {outcome}"
+    # A24: Validate days_held to avoid corrupt data
+    if not isinstance(days_held, (int, float)):
+        return False, f"invalid days_held: {days_held} (must be integer)"
+    if days_held < 0 or days_held > 3650:
+        return False, f"invalid days_held: {days_held} (must be 0-3650)"
     if not LOG_PATH.exists():
         return False, "log file not found"
-    lines = LOG_PATH.read_text(encoding="utf-8").strip().split("\n")
+    # A29: splitlines() handles trailing newline cleanly, unlike strip().split("\n")
+    lines = LOG_PATH.read_text(encoding="utf-8").splitlines()
     found = False
     new_lines = []
     for line in lines:
@@ -96,7 +102,15 @@ def fill(signal_id: str, pnl_pct: float, days_held: int = 0, outcome: str = "unk
             found = True
         new_lines.append(json.dumps(rec, ensure_ascii=False))
     if found:
-        LOG_PATH.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        # A27: Write to .tmp then os.replace for atomicity — prevents corruption on crash
+        tmp = LOG_PATH.with_name(LOG_PATH.name + ".tmp")
+        tmp.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        fd = os.open(str(tmp), os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(str(tmp), str(LOG_PATH))
         return True, "ok"
     return False, "signal_id not found"
 
@@ -186,6 +200,12 @@ def _ensure_result_dir() -> None:
     RESULT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
+def _norm_date(raw: str) -> str:
+    # FIX-T-BIAS-A17: Normalize date strings to YYYY-MM-DD so bar dates like
+    # "2025-04-01T00:00:00" still match signal dates like "2025-04-01".
+    return str(raw).split("T")[0].split(" ")[0][:10]
+
+
 def _load_results() -> list[dict[str, Any]]:
     """从 signal_results.jsonl 读结果（BAD-013: 跟踪坏行计数）"""
     global _bad_line_count, _bad_line_last_lineno, _bad_line_last_reason
@@ -256,18 +276,45 @@ def _compute_results_for_sig(sig: dict) -> dict[str, Any] | None:
             sec = resolve_security(symbol)
         else:
             sec = resolve_security(name)
-        bars = fetch_qfq_daily(sec, HttpClient(), days=40)
+        bars = fetch_qfq_daily(sec, HttpClient(), days=90)
     except (ValueError, KeyError, IOError, ConnectionError):
         return None
 
-    date_map = {bar.get("date", ""): bar for bar in bars if bar.get("date")}
-    signal_bar = date_map.get(sig_date)
+    # FIX-T-BIAS-A17: Normalize date keys so "2025-04-01T00:00:00" matches "2025-04-01"
+    norm_sig_date = _norm_date(sig_date)
+    date_map = {_norm_date(bar.get("date", "")): bar for bar in bars if bar.get("date")}
+    signal_bar = date_map.get(norm_sig_date)
+    # FIX-T-BIAS-A21: If exact date not found, search ±21 calendar days for nearest trading day
+    if signal_bar is None:
+        nearest = None
+        try:
+            sig_dt_search = datetime.strptime(norm_sig_date, "%Y-%m-%d")
+            for ad in range(1, 21):
+                for delta in (-ad, ad):
+                    test = (sig_dt_search + timedelta(days=delta)).strftime("%Y-%m-%d")
+                    if test != norm_sig_date and test in date_map:
+                        nearest = date_map[test]
+                        break
+                if nearest is not None:
+                    break
+        except ValueError:
+            pass
+        signal_bar = nearest
     if signal_bar is None:
         return None
 
     sig_price = float(sig.get("trigger", {}).get("price") or sig.get("current") or signal_bar.get("close", 0) or 0)
+    # A16: Track price source for debugging silent fallbacks
+    _price_source = "unknown"
+    if sig.get("trigger", {}).get("price"):
+        _price_source = "trigger.price"
+    elif sig.get("current"):
+        _price_source = "current"
+    elif signal_bar.get("close"):
+        _price_source = "signal_bar.close"
     if sig_price == 0:
         sig_price = float(signal_bar.get("close", 0) or 0)
+        _price_source = "signal_bar.close (fallback)"
     if sig_price <= 0:
         return None
 
@@ -282,6 +329,7 @@ def _compute_results_for_sig(sig: dict) -> dict[str, Any] | None:
         "source_skill": skill, "signal_price": round(sig_price, 2),
         "schema_version": 1,
         "result_time": datetime.now().isoformat(),
+        "_price_source": _price_source,
     }
 
     for n in (1, 3, 5):
@@ -355,6 +403,8 @@ def check_recent(days: int = 5) -> dict[str, int]:
             result_lines.append(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
             updated += 1
 
+    # FIX-T-BIAS-pre-existing: ensure results dir always exist so test file paths resolve
+    _ensure_result_dir()
     if result_lines:
         if RESULT_PATH.exists():
             try:
@@ -373,7 +423,16 @@ def check_recent(days: int = 5) -> dict[str, int]:
         finally:
             os.close(fd)
         os.replace(str(tmp_path), str(RESULT_PATH))
-        _ensure_result_dir()
+    elif not RESULT_PATH.exists():
+        # Create an empty file so consumers (tests) don't get FileNotFoundError
+        tmp_path = RESULT_PATH.with_suffix(".jsonl.tmp")
+        tmp_path.write_text("", encoding="utf-8")
+        fd = os.open(str(tmp_path), os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(str(tmp_path), str(RESULT_PATH))
 
     return {"updated": updated, "skipped": skipped}
 
@@ -640,7 +699,7 @@ def _make_panel(results: list[dict[str, Any]], days_limit: int | None) -> str:
 # ═══════ CLI ═══════
 
 # FIX-T-BIAS-03: backfill — 强制回溯历史过期信号
-def backfill(days_window: int = 365) -> dict[str, int]:
+def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
     """回溯计算过去 N 天内所有未结算信号的结果。"""
     # 重写 cutoff：days_window 天的全窗口
     signals = _load_signals()
@@ -705,7 +764,7 @@ def backfill(days_window: int = 365) -> dict[str, int]:
     return {"updated": updated, "skipped": skipped}
 
 
-def main() -> int:
+def main(args: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command")
     p1 = sub.add_parser("check", help="更新最近N天信号结果")
@@ -718,7 +777,8 @@ def main() -> int:
     # FIX-T-BIAS-03: backfill 子命令 — 回溯历史过期信号
     p4 = sub.add_parser("backfill", help="回溯计算过去N天内所有未结算信号")
     p4.add_argument("--days", type=int, default=365)
-    args = parser.parse_args()
+    p4.add_argument("--batch", type=int, default=100, help="批处理大小")
+    args = parser.parse_args(args)
 
     if args.command == "check":
         result = check_recent(args.days)
@@ -744,7 +804,7 @@ def main() -> int:
     elif args.command == "backfill":
         # FIX-T-BIAS-03: 覆盖 check_recent 的 cutoff，允许处理历史信号
         # 临时覆盖 _load_signals 的 cutoff 范围需要 backfill 独立实现
-        result = backfill(args.days)
+        result = backfill(args.days, getattr(args, "batch", 100))
         updated = result.get("updated", 0)
         skipped = result.get("skipped", 0)
         if updated == 0 and skipped == 0:
