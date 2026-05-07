@@ -223,7 +223,11 @@ def _compute_results_for_sig(sig: dict) -> dict[str, Any] | None:
     skill = str(sig.get("source_skill") or "trader")
 
     try:
-        sec = resolve_security(name)
+        # Prefer symbol for accurate security lookup; fall back to name lookup
+        if symbol:
+            sec = resolve_security(symbol)
+        else:
+            sec = resolve_security(name)
         bars = fetch_qfq_daily(sec, HttpClient(), days=40)
     except (ValueError, KeyError, IOError, ConnectionError):
         return None
@@ -284,15 +288,15 @@ def check_recent(days: int = 5) -> int:
     cutoff = (datetime.now() - timedelta(days=days + 10)).strftime("%Y-%m-%d")
     recent = [s for s in signals if str(s.get("trade_date", "")) >= cutoff]
 
-    # 已存在的结果
-    existing_keys: dict[tuple[str, str], dict] = {}
+    # 已存在的结果 (symbol, date, signal_type) as key to support multi-signal same day
+    existing_keys: dict[tuple[str, str, str], dict] = {}
     try:
         for line in RESULT_PATH.read_text(encoding="utf-8").strip().split("\n"):
             if not line.strip(): continue
             try:
                 r = json.loads(line)
-                existing_keys[(r.get("symbol", ""), str(r.get("signal_date")))] = r
-            except:
+                existing_keys[(r.get("symbol", ""), str(r.get("signal_date")), str(r.get("signal_type", "")))] = r
+            except (json.JSONDecodeError, ValueError):
                 pass
     except FileNotFoundError:
         pass
@@ -301,7 +305,7 @@ def check_recent(days: int = 5) -> int:
     updated = 0
 
     for sig in recent:
-        key = (sig.get("symbol"), sig.get("trade_date"))
+        key = (sig.get("symbol"), sig.get("trade_date"), sig.get("signal_type"))
         if key in existing_keys:
             continue
         result = _compute_results_for_sig(sig)
@@ -323,9 +327,26 @@ def show_all(days_limit: int | None = None) -> str:
     return _make_panel(results, days_limit)
 
 
+def _normalize_symbol(symbol: str) -> str:
+    """统一 symbol 格式，避免同票分裂（123456 和 123456.SH 视为相同）。"""
+    s = (symbol or "").strip().upper()
+    if not s:
+        return ""
+    if "." in s:
+        return s
+    if len(s) == 6 and s.isdigit():
+        if s.startswith(("6", "9", "5")):
+            return f"{s}.SH"
+        return f"{s}.SZ"
+    return s
+
+
 def show_single(symbol: str, days_limit: int | None = None) -> str:
     """输出单股面板"""
-    results = [r for r in _load_results() if r.get("symbol") == symbol or r.get("name") == symbol]
+    normalized = _normalize_symbol(symbol)
+    results = [r for r in _load_results() if _normalize_symbol(r.get("symbol", "")) == normalized or r.get("name") == symbol]
+    # 按时间排序，取最新的
+    results.sort(key=lambda r: str(r.get("signal_date", "")), reverse=True)
     return _make_panel(results, days_limit)
 
 
@@ -364,7 +385,7 @@ def _make_panel(results: list[dict[str, Any]], days_limit: int | None) -> str:
     # 按信号类型
     types: dict[str, list] = {}
     for r in filtered:
-        types.setdefault(str(r.get("signal_type") or "unknown"), []).append(r)
+        types.setdefault(str(r.get("signal_type") or ""), []).append(r)
     if types:
         L.append("按信号类型:")
         best = sorted(types.items(), key=lambda x: -len(x[1]))[:5]
