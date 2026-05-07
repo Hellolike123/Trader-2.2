@@ -169,7 +169,11 @@ def load_recent(
         if signal_type and str(r.get("signal_type") or "") != signal_type:
             continue
         filtered.append(r)
-    return filtered[-limit:]
+    # FIX-07: 按 timestamp 排序（有 filled_at 也优先）
+    filtered.sort(key=lambda r: r.get("filled_at") or r.get("timestamp") or "", reverse=True)
+    return filtered[:limit]
+    filtered.sort(key=lambda r: r.get("filled_at") or r.get("timestamp") or "", reverse=True)
+    return filtered[:limit]
 
 
 
@@ -278,6 +282,7 @@ def _compute_results_for_sig(sig: dict) -> dict[str, Any] | None:
         "signal_date": sig_date, "signal_type": sig_type,
         "source_skill": skill, "signal_price": round(sig_price, 2),
         "schema_version": "v1",
+        "result_time": datetime.now().isoformat(),
     }
 
     for n in (1, 3, 5):
@@ -290,10 +295,10 @@ def _compute_results_for_sig(sig: dict) -> dict[str, Any] | None:
                 break
         res[f"close_{n}d"] = close_price
         res[f"r_{n}d"] = round((close_price - sig_price) / sig_price * 100, 2) if sig_price > 0 else 0
-        # 极端跳空保护：单日涨跌 >50% 标记异常，不拉坏统计
+        # FIX-01: 极端跳空保护：单日涨跌 >50% 标记异常，不拉坏统计
         if sig_price > 0:
             return_pct = abs(close_price - sig_price) / sig_price
-            if return_pct > 5.0:
+            if return_pct > 0.5:
                 res[f"_extreme_{n}d"] = True
 
     r5 = res["r_5d"]
@@ -322,11 +327,13 @@ def check_recent(days: int = 5) -> dict[str, int]:
     # 已存在的结果 (symbol, date, signal_type) as key to support multi-signal same day
     existing_keys: dict[tuple[str, str, str], dict] = {}
     try:
+        _ensure_result_dir()
         for line in RESULT_PATH.read_text(encoding="utf-8").strip().split("\n"):
             if not line.strip(): continue
             try:
                 r = json.loads(line)
-                existing_keys[(r.get("symbol", ""), str(r.get("signal_date")), str(r.get("signal_type", "")))] = r
+                key_symbol = _normalize_symbol(r.get("symbol", ""))
+                existing_keys[(key_symbol, str(r.get("signal_date")), str(r.get("signal_type", "")))] = r
             except (json.JSONDecodeError, ValueError):
                 pass
     except FileNotFoundError:
@@ -337,7 +344,10 @@ def check_recent(days: int = 5) -> dict[str, int]:
     skipped = 0
 
     for sig in recent:
-        key = (sig.get("symbol"), sig.get("trade_date"), sig.get("signal_type"))
+        nk = _normalize_symbol(sig.get("symbol") or "")
+        nd = str(sig.get("trade_date") or "").strip()
+        nt = str(sig.get("signal_type") or "").strip()
+        key = (nk, nd, nt)
         if key in existing_keys:
             skipped += 1
             continue
@@ -395,7 +405,7 @@ def _normalize_symbol(symbol: str) -> str:
 def show_single(symbol: str, days_limit: int | None = None) -> str:
     """输出单股面板"""
     normalized = _normalize_symbol(symbol)
-    results = [r for r in _load_results() if _normalize_symbol(r.get("symbol", "")) == normalized or r.get("name") == symbol]
+    results = [r for r in _load_results() if _normalize_symbol(r.get("symbol", "")) == normalized or (r.get("name") or "").strip() == symbol.strip()]
     # BUG-012: 按 result_time 排序取最新，signal_date 可能重复
     results.sort(key=lambda r: r.get("result_time") or r.get("signal_date") or "", reverse=True)
     return _make_panel(results, days_limit)
