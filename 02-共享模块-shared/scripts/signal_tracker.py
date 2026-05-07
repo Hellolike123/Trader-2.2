@@ -407,56 +407,154 @@ def show_single(symbol: str, days_limit: int | None = None) -> str:
     return _make_panel(results, days_limit)
 
 
+# FIX-T-BIAS-13: 信号类型归一化映射表 — 旧版 name → 新版 name
+_SIGNAL_TYPE_MAP: dict[str, str] = {
+    "low_buy": "low_buy_watch",        # 旧版 low_buy → 新版 low_buy_watch
+    "high_sell": "high_sell_watch",    # 旧版 high_sell → 新版 high_sell_watch
+    "risk_stop": "risk_stop",
+    "track": "track",
+    "observe": "observe",
+    "wait": "wait_for_confirmation",
+    "reduce": "reduce",
+    "defensive": "defensive",
+    "review_result": "review_result",
+}
+
+
+def _normalize_signal_type(raw_type: str) -> str:
+    """归一化信号类型：旧名映射为新名，未知名透传。"""
+    return _SIGNAL_TYPE_MAP.get(raw_type, raw_type)
+
+
 def _make_panel(results: list[dict[str, Any]], days_limit: int | None) -> str:
     """生成信号追踪面板"""
-    filtered = [r for r in results if r.get("r_5d") is not None]
-    if not filtered:
+    # 所有记录（含 r_5d=None 的失败样本）
+    all_records = [r for r in results]
+    # 有效记录（r_5d 有数值）
+    valid = [r for r in all_records if r.get("r_5d") is not None]
+    # 失败样本（r_5d=None）
+    unresolved = [r for r in all_records if r.get("r_5d") is None]
+
+    if not valid and not unresolved:
         return "📊 信号追踪面板\n\n无有效结果。"
+
+    total_valid = len(valid)
+    total_unresolved = len(unresolved)
+    total_all = total_valid + total_unresolved
 
     if days_limit:
         cutoff = (datetime.now() - timedelta(days=days_limit)).strftime("%Y-%m-%d")
-        filtered = [r for r in filtered if str(r.get("signal_date", "")) >= cutoff]
+        valid = [r for r in valid if str(r.get("signal_date", "")) >= cutoff]
+        unresolved = [r for r in unresolved if str(r.get("signal_date", "")) >= cutoff]
+        total_valid = len(valid)
+        total_unresolved = len(unresolved)
+        total_all = total_valid + total_unresolved
 
-    if not filtered:
+    if total_valid == 0 and total_unresolved == 0:
         return f"📊 信号追踪面板\n\n指定时间范围内无结果。"
 
-    total = len(filtered)
-    ups = [r for r in filtered if r.get("outcome") == "up"]
-    downs = [r for r in filtered if r.get("outcome") == "down"]
-    flats = [r for r in filtered if r.get("outcome") == "flat"]
-    win_rate = round(len(ups) / total * 100, 1) if total > 0 else 0
+    ups = [r for r in valid if r.get("outcome") == "up"]
+    downs = [r for r in valid if r.get("outcome") == "down"]
+    flats = [r for r in valid if r.get("outcome") == "flat"]
+    win_rate = round(len(ups) / total_valid * 100, 1) if total_valid > 0 else 0
 
-    avg_r5 = round(sum(r["r_5d"] for r in filtered) / total, 1) if total > 0 else 0
+    # FIX-T-BIAS-08: 中位数 + 百分位数
+    r5_vals = [r["r_5d"] for r in valid]
+    avg_r5 = round(sum(r5_vals) / total_valid, 1) if total_valid > 0 else 0
+    if total_valid > 0:
+        sorted_vals = sorted(r5_vals)
+        mid = total_valid // 2
+        if total_valid % 2 == 0:
+            median_r5 = round((sorted_vals[mid - 1] + sorted_vals[mid]) / 2, 1)
+        else:
+            median_r5 = round(sorted_vals[mid], 1)
+        p10 = round(sorted_vals[int(total_valid * 0.1)] if total_valid > 1 else sorted_vals[0], 1)
+        p90 = round(sorted_vals[int(total_valid * 0.9)] if total_valid > 1 else sorted_vals[0], 1)
+    else:
+        median_r5 = 0.0
+        p10 = 0.0
+        p90 = 0.0
+
     total_profit = sum(r["r_5d"] for r in ups) if ups else 0
     total_loss = abs(sum(r["r_5d"] for r in downs)) if downs else 0
     pf = round(total_profit / total_loss, 2) if total_loss > 0 else 0
 
+    # FIX-T-BIAS-09: 类别不平衡检测（flat 占比过高）
+    imbalance_warn = ""
+    if total_valid >= 5:
+        flat_pct = round(len(flats) / total_valid * 100, 1)
+        if flat_pct > 80:
+            imbalance_warn = (
+                f"\n⚠️ 【类别不平衡警告】"
+                f" {flat_pct}% 的信号结果为 flat（{len(flats)}/{total_valid}），"
+                f"阈值可能过高或策略信号缺乏区分度。"
+            )
+
+    # FIX-T-BIAS-11: 极端亏损检测
+    extreme_loss_warn = ""
+    worst_single = None
+    for r in valid:
+        rv = r.get("r_5d", 0)
+        if rv is not None and rv < -50:
+            if worst_single is None or rv < worst_single:
+                worst_single = rv
+    if worst_single is not None:
+        extreme_loss_warn = (
+            f"\n⚠️ 【极端亏损风险】单信号最大亏损 {worst_single:+.1f}%，"
+            f"请检查止损逻辑和异常样本处理。"
+        )
+
     L = [
         "📊 信号追踪面板",
         "",
-        f"发出 {total} 次信号 ｜ 5 日后: {len(ups)} 涨 / {len(downs)} 跌 / {len(flats)} 平",
-        f"胜率 {win_rate}% ｜ 平均收益 {avg_r5:+.1f}% ｜ 盈亏比 {pf:.2f}",
+        f"发出 {total_all} 次信号（有效 {total_valid}，无数据 {total_unresolved}）"
+        f" ｜ 5 日后: {len(ups)} 涨 / {len(downs)} 跌 / {len(flats)} 平",
+        f"胜率 {win_rate}% ｜ 平均收益 {avg_r5:+.1f}% ｜ 中位数 {median_r5:+.1f}%"
+        + (f" ｜ P10={p10:+.1f}% P90={p90:+.1f}%" if total_valid > 3 else ""),
+        f"盈亏比 {pf:.2f}",
         "",
     ]
 
-    # 按信号类型
+    # FIX-T-BIAS-13: 按信号类型（归一化后）统计
+    # NOTE: loop variable is `sig_type`, NOT `st` — `st` refers to signal_tracker module
+    # referenced by tests via `import signal_tracker as st`, so we must not shadow it.
     types: dict[str, list] = {}
-    for r in filtered:
-        types.setdefault(str(r.get("signal_type") or "unknown"), []).append(r)
+    for r in valid:
+        # 归一化信号类型
+        raw_type = str(r.get("signal_type") or "unknown")
+        norm_type = _normalize_signal_type(raw_type)
+        types.setdefault(norm_type, []).append(r)
     if types:
         L.append("按信号类型:")
         best = sorted(types.items(), key=lambda x: -len(x[1]))[:5]
-        for st, recs in best:
+        for sig_type, recs in best:
             ups_t = sum(1 for r in recs if r.get("outcome") == "up")
             total_t = len(recs)
             wr_t = round(ups_t / total_t * 100, 1) if total_t else 0
             avg_r = round(sum(r["r_5d"] for r in recs) / total_t, 1) if total_t else 0
-            L.append(f"  {st}: {total_t}次 → 胜率 {wr_t}%（平均{avg_r:+.1f}%）")
+            L.append(f"  {sig_type}: {total_t}次 → 胜率 {wr_t}%（平均{avg_r:+.1f}%）")
+        L.append("")
+
+    # 按 source_skill 分层统计（FIX-T-BIAS-10）
+    skills: dict[str, list] = {}
+    for r in valid:
+        sk = str(r.get("source_skill") or "unknown")
+        skills.setdefault(sk, []).append(r)
+    if len(skills) > 1:
+        L.append("按数据源 (source_skill):")
+        for sk, recs in sorted(skills.items()):
+            ups_s = sum(1 for r in recs if r.get("outcome") == "up")
+            downs_s = sum(1 for r in recs if r.get("outcome") == "down")
+            flats_s = sum(1 for r in recs if r.get("outcome") == "flat")
+            total_s = len(recs)
+            wr_s = round(ups_s / total_s * 100, 1) if total_s else 0
+            avg_r = round(sum(r["r_5d"] for r in recs) / total_s, 1) if total_s else 0
+            L.append(f"  {sk}: {total_s}次 → 胜率 {wr_s}%（平均{avg_r:+.1f}% | {ups_s}涨/{downs_s}跌/{flats_s}平）")
         L.append("")
 
     # 个股
     stocks: dict[str, list] = {}
-    for r in filtered:
+    for r in valid:
         stocks.setdefault(r["name"], []).append(r)
     stock_stats = []
     for name, recs in sorted(stocks.items()):
@@ -475,16 +573,58 @@ def _make_panel(results: list[dict[str, Any]], days_limit: int | None) -> str:
             L.append(f"  {'{} ({})'.format(name, code):30s}  样本:{total_s}次  胜率:{wr_s}%  平均{avg_r:+.1f}%")
         L.append("")
 
+    # 失败样本详情（FIX-T-BIAS-01）
+    if unresolved:
+        L.append("⚠️ 无数据信号 (unresolved):")
+        # 按 failure_code 分类
+        fail_groups: dict[str, list] = {}
+        for r in unresolved:
+            fc = r.get("_failure_code") or "no_data"
+            fail_groups.setdefault(fc, []).append(r)
+        for fc, recs in fail_groups.items():
+            names = []
+            for r in recs:
+                nm = r.get("name", "unknown")
+                if r.get("symbol"):
+                    nm += f" ({r['symbol']})"
+                names.append(nm)
+            reason = recs[0].get("_failure_reason", "")
+            reason_text = f" - {reason}" if reason else ""
+            L.append(f"  {fc}: {len(recs)}次 ({', '.join(names)}){reason_text}")
+        L.append("")
+
+    # FIX-T-BIAS-09 + FIX-T-BIAS-11: 添加到建议区块
+    imbalance_warn = ""
+    if total_valid >= 5:
+        flat_pct = round(len(flats) / total_valid * 100, 1)
+        if flat_pct > 80:
+            imbalance_warn = (
+                f"  • 【类别不平衡】{flat_pct}% (≈{len(flats)}/{total_valid}) 的样本为 flat，"
+                f"阈值可能过高或信号缺乏区分度。\n"
+            )
+
+    extreme_loss_warn = ""
+    if worst_single is not None:
+        extreme_loss_warn = (
+            f"  • 【极端亏损风险】最大单信号亏损 {worst_single:+.1f}%，"
+            f"请检查止损逻辑和异常样本处理。\n"
+        )
+
     # 建议
     L.append("⚠️ 建议:")
-    if win_rate >= 65 and total >= 20:
+    if win_rate >= 65 and total_valid >= 20:
         L.append(f"  • 信号整体表现良好（胜率{win_rate}%>65%），当前策略有效")
-    elif win_rate >= 50 and total >= 20:
+    elif win_rate >= 50 and total_valid >= 20:
         L.append(f"  • 信号胜率 {win_rate}%：中等水平，建议继续积累样本")
-    elif total >= 20:
+    elif total_valid >= 20:
         L.append(f"  • 信号胜率仅 {win_rate}%：低于随机，需要重新校准策略")
     else:
-        L.append(f"  • 样本量仅 {total}，结果仅供参考。建议积累到30次以上再判断")
+        L.append(f"  • 样本量仅 {total_valid}，结果仅供参考。建议积累到30次以上再判断")
+
+    if imbalance_warn:
+        L.append(f"{imbalance_warn}")
+    if extreme_loss_warn:
+        L.append(f"{extreme_loss_warn}")
 
     worst = [(t, recs) for t, recs in types.items() if len(recs) >= 2]
     if worst:
@@ -499,6 +639,72 @@ def _make_panel(results: list[dict[str, Any]], days_limit: int | None) -> str:
 
 # ═══════ CLI ═══════
 
+# FIX-T-BIAS-03: backfill — 强制回溯历史过期信号
+def backfill(days_window: int = 365) -> dict[str, int]:
+    """回溯计算过去 N 天内所有未结算信号的结果。"""
+    # 重写 cutoff：days_window 天的全窗口
+    signals = _load_signals()
+    if not signals or HttpClient is None:
+        return {"updated": 0, "skipped": 0}
+
+    cutoff = (datetime.now() - timedelta(days=days_window)).strftime("%Y-%m-%d")
+    candidates = [s for s in signals if str(s.get("trade_date", "")) >= cutoff]
+
+    # 已存在的结果 (symbol, date, signal_type) as key
+    existing_keys: dict[tuple[str, str, str], dict] = {}
+    try:
+        _ensure_result_dir()
+        for line in RESULT_PATH.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                r = json.loads(line)
+                key_symbol = _normalize_symbol(r.get("symbol", ""))
+                existing_keys[(key_symbol, str(r.get("signal_date")), str(r.get("signal_type", "")))] = r
+            except (json.JSONDecodeError, ValueError):
+                pass
+    except OSError:
+        pass
+
+    result_lines: list[str] = []
+    updated = 0
+    skipped = 0
+
+    for sig in candidates:
+        nk = _normalize_symbol(sig.get("symbol") or "")
+        nd = str(sig.get("trade_date") or "").strip()
+        nt = str(sig.get("signal_type") or "").strip()
+        key = (nk, nd, nt)
+        if key in existing_keys:
+            skipped += 1
+            continue
+        result = _compute_results_for_sig(sig)
+        if result:
+            result_lines.append(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
+            updated += 1
+
+    if result_lines:
+        if RESULT_PATH.exists():
+            try:
+                existing_records = [l for l in RESULT_PATH.read_text(encoding="utf-8").strip().split("\n") if l.strip()]
+            except (IOError, OSError):
+                existing_records = []
+        else:
+            existing_records = []
+        new_lines = existing_records + result_lines
+        tmp_path = RESULT_PATH.with_suffix(".jsonl.tmp")
+        tmp_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        fd = os.open(str(tmp_path), os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(str(tmp_path), str(RESULT_PATH))
+        _ensure_result_dir()
+
+    return {"updated": updated, "skipped": skipped}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command")
@@ -509,6 +715,9 @@ def main() -> int:
     p2.add_argument("--symbol", default=None)
     p3 = sub.add_parser("update", help="计算最近N天信号结果")
     p3.add_argument("--days", type=int, default=5)
+    # FIX-T-BIAS-03: backfill 子命令 — 回溯历史过期信号
+    p4 = sub.add_parser("backfill", help="回溯计算过去N天内所有未结算信号")
+    p4.add_argument("--days", type=int, default=365)
     args = parser.parse_args()
 
     if args.command == "check":
@@ -532,6 +741,16 @@ def main() -> int:
             print("无新结果可更新（全部已有）")
         else:
             print(f"更新了 {updated} 条信号结果，跳过 {skipped} 条")
+    elif args.command == "backfill":
+        # FIX-T-BIAS-03: 覆盖 check_recent 的 cutoff，允许处理历史信号
+        # 临时覆盖 _load_signals 的 cutoff 范围需要 backfill 独立实现
+        result = backfill(args.days)
+        updated = result.get("updated", 0)
+        skipped = result.get("skipped", 0)
+        if updated == 0 and skipped == 0:
+            print("无新结果可更新（全部已有）")
+        else:
+            print(f"回补了 {updated} 条信号结果，跳过 {skipped} 条")
     else:
         parser.print_help()
         return 1
