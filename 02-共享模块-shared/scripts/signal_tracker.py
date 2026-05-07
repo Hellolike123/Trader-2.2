@@ -427,8 +427,6 @@ def _make_panel(results: list[dict[str, Any]], days_limit: int | None) -> str:
     win_rate = round(len(ups) / total * 100, 1) if total > 0 else 0
 
     avg_r5 = round(sum(r["r_5d"] for r in filtered) / total, 1) if total > 0 else 0
-    avg_up = round(sum(r["r_5d"] for r in ups) / len(ups), 1) if ups else 0
-    avg_down = round(sum(r["r_5d"] for r in downs) / len(downs), 1) if downs else 0
     total_profit = sum(r["r_5d"] for r in ups) if ups else 0
     total_loss = abs(sum(r["r_5d"] for r in downs)) if downs else 0
     pf = round(total_profit / total_loss, 2) if total_loss > 0 else 0
