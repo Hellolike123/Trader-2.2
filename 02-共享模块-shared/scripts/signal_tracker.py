@@ -98,14 +98,19 @@ def fill_by_target(target: str, pnl_pct: float, days_held: int = 0, outcome: str
     """兼容 review_core"""
     if not LOG_PATH.exists():
         return 0, []
-    lines = LOG_PATH.read_text(encoding="utf-8").strip().split("\n")
+    raw_text = LOG_PATH.read_text(encoding="utf-8")
+    lines = raw_text.strip().split("\n") if raw_text.strip() else []
     updated = []
     new_lines = []
+    bad = 0
     for line in lines:
-        if not line.strip(): continue
+        if not line.strip():
+            new_lines.append(line)
+            continue
         try:
             rec = json.loads(line)
         except json.JSONDecodeError:
+            bad += 1
             new_lines.append(line)
             continue
         if rec.get("target") == target and rec.get("outcome_pnl_pct") is None:
@@ -115,8 +120,16 @@ def fill_by_target(target: str, pnl_pct: float, days_held: int = 0, outcome: str
             rec["filled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
             updated.append(rec.get("signal_id"))
         new_lines.append(json.dumps(rec, ensure_ascii=False))
-    if updated:
-        LOG_PATH.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    if updated or bad > 0:
+        # 原子写 + fsync
+        tmp_path = LOG_PATH.with_suffix(".jsonl.tmp")
+        tmp_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        fd = os.open(str(tmp_path), os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(str(tmp_path), str(LOG_PATH))
     return len(updated), updated
 
 
@@ -245,7 +258,7 @@ def _compute_results_for_sig(sig: dict) -> dict[str, Any] | None:
         return None
 
     try:
-        base_date = datetime.strptime(sig_date, "%Y-%m-%d")
+        sig_dt = datetime.strptime(sig_date, "%Y-%m-%d")
     except ValueError:
         return None
 
@@ -257,10 +270,10 @@ def _compute_results_for_sig(sig: dict) -> dict[str, Any] | None:
     }
 
     for n in (1, 3, 5):
-        check_date = (datetime.strptime(sig_date, "%Y-%m-%d") + timedelta(days=n)).strftime("%Y-%m-%d")
+        # 在目标日期附近最多扫描 13 个日历日找最近的交易日数据
         close_price = sig_price
-        for add in range(1, 15):
-            test = (datetime.strptime(sig_date, "%Y-%m-%d") + timedelta(days=n + add - 1)).strftime("%Y-%m-%d")
+        for add in range(0, 14):
+            test = (sig_dt + timedelta(days=n + add)).strftime("%Y-%m-%d")
             if test in date_map:
                 close_price = float(date_map[test].get("close", sig_price))
                 break
@@ -286,11 +299,11 @@ def _compute_results_for_sig(sig: dict) -> dict[str, Any] | None:
     return res
 
 
-def check_recent(days: int = 5) -> int:
+def check_recent(days: int = 5) -> dict[str, int]:
     """检查并更新最近 N 天后信号结果"""
     signals = _load_signals()
     if not signals or HttpClient is None:
-        return 0
+        return {"updated": 0, "skipped": 0}
 
     cutoff = (datetime.now() - timedelta(days=days + 10)).strftime("%Y-%m-%d")
     recent = [s for s in signals if str(s.get("trade_date", "")) >= cutoff]
@@ -322,27 +335,30 @@ def check_recent(days: int = 5) -> int:
             result_lines.append(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
             updated += 1
 
-    if result_lines or updated > 0 or skipped > 0:
-        # 原子写：读现有 → 合并 → 临时文件 → replace，避免并发损坏
-        existing_records: list[str] = []
+    if result_lines:
         if RESULT_PATH.exists():
             try:
                 existing_records = [l for l in RESULT_PATH.read_text(encoding="utf-8").strip().split("\n") if l.strip()]
             except (IOError, OSError):
                 existing_records = []
+        else:
+            existing_records = []
         new_lines = existing_records + result_lines
         tmp_path = RESULT_PATH.with_suffix(".jsonl.tmp")
         tmp_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        # fsync 确保数据落盘
+        fd = os.open(str(tmp_path), os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
         os.replace(str(tmp_path), str(RESULT_PATH))
-        print(f"更新了 {updated} 条，跳过 {skipped} 条已存在（含本次新写 + {len(existing_records)} 条历史）")
-
-    if not result_lines and not updated and not skipped:
-        print("无新结果可更新（全部已有）")
         _ensure_result_dir()
-        existing_text = RESULT_PATH.read_text(encoding="utf-8") + "\n" if RESULT_PATH.exists() else ""
-        RESULT_PATH.write_text(existing_text + "\n".join(result_lines) + "\n", encoding="utf-8")
+        print(f"更新了 {updated} 条，跳过 {skipped} 条（含本次新写 + {len(existing_records)} 条历史）")
+    elif skipped > 0:
+        print(f"无新结果可更新，已跳过 {skipped} 条（已有结果）")
 
-    return updated
+    return {"updated": updated, "skipped": skipped}
 
 
 def show_all(days_limit: int | None = None) -> str:
@@ -369,8 +385,8 @@ def show_single(symbol: str, days_limit: int | None = None) -> str:
     """输出单股面板"""
     normalized = _normalize_symbol(symbol)
     results = [r for r in _load_results() if _normalize_symbol(r.get("symbol", "")) == normalized or r.get("name") == symbol]
-    # 按时间排序，取最新的
-    results.sort(key=lambda r: str(r.get("signal_date", "")), reverse=True)
+    # BUG-012: 按 result_time 排序取最新，signal_date 可能重复
+    results.sort(key=lambda r: r.get("result_time") or r.get("signal_date") or "", reverse=True)
     return _make_panel(results, days_limit)
 
 
@@ -441,7 +457,7 @@ def _make_panel(results: list[dict[str, Any]], days_limit: int | None) -> str:
         for name, code, total_s, wr_s, avg_r in stock_stats:
             if total_s < 2:
                 continue
-            L.append(f"  {'{}{}'.format(name, '(' + code + ')'):30s}  样本:{total_s}次  胜率:{wr_s}%  平均{avg_r:+.1f}%")
+            L.append(f"  {'{} ({})'.format(name, code):30s}  样本:{total_s}次  胜率:{wr_s}%  平均{avg_r:+.1f}%")
         L.append("")
 
     # 建议
@@ -481,16 +497,26 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.command == "check":
-        n = check_recent(args.days)
-        print(f"更新了 {n} 条信号结果")
+        result = check_recent(args.days)
+        updated = result.get("updated", 0)
+        skipped = result.get("skipped", 0)
+        if updated == 0 and skipped == 0:
+            print("无新结果可更新（全部已有）")
+        else:
+            print(f"更新了 {updated} 条信号结果，跳过 {skipped} 条")
     elif args.command == "show":
         if args.symbol:
             print(show_single(args.symbol, args.days))
         else:
             print(show_all(args.days))
     elif args.command == "update":
-        n = check_recent(args.days)
-        print(f"更新了 {n} 条信号结果")
+        result = check_recent(args.days)
+        updated = result.get("updated", 0)
+        skipped = result.get("skipped", 0)
+        if updated == 0 and skipped == 0:
+            print("无新结果可更新（全部已有）")
+        else:
+            print(f"更新了 {updated} 条信号结果，跳过 {skipped} 条")
     else:
         parser.print_help()
     return 0
