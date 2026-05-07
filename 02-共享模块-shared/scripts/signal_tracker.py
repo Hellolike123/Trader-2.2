@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import hashlib
+import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -252,6 +253,7 @@ def _compute_results_for_sig(sig: dict) -> dict[str, Any] | None:
         "symbol": symbol, "name": name,
         "signal_date": sig_date, "signal_type": sig_type,
         "source_skill": skill, "signal_price": round(sig_price, 2),
+        "schema_version": "v1",
     }
 
     for n in (1, 3, 5):
@@ -264,6 +266,11 @@ def _compute_results_for_sig(sig: dict) -> dict[str, Any] | None:
                 break
         res[f"close_{n}d"] = close_price
         res[f"r_{n}d"] = round((close_price - sig_price) / sig_price * 100, 2) if sig_price > 0 else 0
+        # 极端跳空保护：单日涨跌 >50% 标记异常，不拉坏统计
+        if sig_price > 0:
+            return_pct = abs(close_price - sig_price) / sig_price
+            if return_pct > 5.0:
+                res[f"_extreme_{n}d"] = True
 
     r5 = res["r_5d"]
     atr = to_float(signal_bar.get("atr14") or 0)
@@ -303,17 +310,34 @@ def check_recent(days: int = 5) -> int:
 
     result_lines: list[str] = []
     updated = 0
+    skipped = 0
 
     for sig in recent:
         key = (sig.get("symbol"), sig.get("trade_date"), sig.get("signal_type"))
         if key in existing_keys:
+            skipped += 1
             continue
         result = _compute_results_for_sig(sig)
         if result:
             result_lines.append(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
             updated += 1
 
-    if result_lines:
+    if result_lines or updated > 0 or skipped > 0:
+        # 原子写：读现有 → 合并 → 临时文件 → replace，避免并发损坏
+        existing_records: list[str] = []
+        if RESULT_PATH.exists():
+            try:
+                existing_records = [l for l in RESULT_PATH.read_text(encoding="utf-8").strip().split("\n") if l.strip()]
+            except (IOError, OSError):
+                existing_records = []
+        new_lines = existing_records + result_lines
+        tmp_path = RESULT_PATH.with_suffix(".jsonl.tmp")
+        tmp_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        os.replace(str(tmp_path), str(RESULT_PATH))
+        print(f"更新了 {updated} 条，跳过 {skipped} 条已存在（含本次新写 + {len(existing_records)} 条历史）")
+
+    if not result_lines and not updated and not skipped:
+        print("无新结果可更新（全部已有）")
         _ensure_result_dir()
         existing_text = RESULT_PATH.read_text(encoding="utf-8") + "\n" if RESULT_PATH.exists() else ""
         RESULT_PATH.write_text(existing_text + "\n".join(result_lines) + "\n", encoding="utf-8")
