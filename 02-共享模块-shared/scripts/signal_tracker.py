@@ -225,7 +225,7 @@ def _compute_results_for_sig(sig: dict) -> dict[str, Any] | None:
     try:
         sec = resolve_security(name)
         bars = fetch_qfq_daily(sec, HttpClient(), days=40)
-    except:
+    except (ValueError, KeyError, IOError, ConnectionError):
         return None
 
     date_map = {bar.get("date", ""): bar for bar in bars if bar.get("date")}
@@ -237,6 +237,11 @@ def _compute_results_for_sig(sig: dict) -> dict[str, Any] | None:
     if sig_price == 0:
         sig_price = float(signal_bar.get("close", 0) or 0)
     if sig_price <= 0:
+        return None
+
+    try:
+        base_date = datetime.strptime(sig_date, "%Y-%m-%d")
+    except ValueError:
         return None
 
     res: dict[str, Any] = {
@@ -258,11 +263,11 @@ def _compute_results_for_sig(sig: dict) -> dict[str, Any] | None:
 
     r5 = res["r_5d"]
     atr = to_float(signal_bar.get("atr14") or 0)
-    atr_pct = atr / sig_price if sig_price > 0 else 0.02
-
-    if r5 > atr_pct * 0.8:
+    atr_pct_pct = atr / sig_price * 100 if sig_price > 0 else 2.0
+    threshold = atr_pct_pct * 0.8
+    if r5 > threshold:
         res["outcome"] = "up"
-    elif r5 < -atr_pct * 0.8:
+    elif r5 < -threshold:
         res["outcome"] = "down"
     else:
         res["outcome"] = "flat"
@@ -439,7 +444,8 @@ def main() -> int:
         else:
             print(show_all(args.days))
     elif args.command == "update":
-        print("已更新结果")
+        n = check_recent(args.days)
+        print(f"更新了 {n} 条信号结果")
     else:
         parser.print_help()
     return 0
