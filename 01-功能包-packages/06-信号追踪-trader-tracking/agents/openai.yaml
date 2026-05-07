@@ -1,0 +1,7 @@
+interface:
+  display_name: "Review Trader"
+  short_description: "A股午间/盘后复盘和多股复盘比较，必须运行脚本原样返回"
+  default_prompt: "Use $review-trader to run `python3 scripts/final_review.py --target <股票名或代码> [--cost <成本价>]` for a single-stock after-close review, `python3 scripts/final_review.py --target <股票名或代码> [--cost <成本价>] --session midday` for a noon review, `python3 scripts/final_review.py --compare <股票1> <股票2> ...` for direct comparison, or `python3 scripts/final_review.py --compare-recent` for recently reviewed stocks. This is a script-output skill, not a writing template: return stdout exactly and do not compose from memory, summarize, shorten, restyle, translate, add tables, add disclaimers, or add follow-up lines. If the script cannot run, return only the error."
+
+policy:
+  allow_implicit_invocation: true

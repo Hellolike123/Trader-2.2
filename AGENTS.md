@@ -787,6 +787,12 @@ python3 02-共享模块-shared/scripts/pack_all.py
 
 Hermes 解压后 symlink 到 `~/.agents/skills/` 即可。
 
+> **⚠️ 安装后 INDEX_CODE 补丁**: `pack_all.py` 将 `trader_shared/config.py` 打包进 zip，其中 `INDEX_CODE = "000852.SH"` 硬编码。如果大盘环境需要换一个指数（如中证500 `000905.SH`），安装解压后需手动修改：
+> ```bash
+> sed -i 's/INDEX_CODE = "000852.SH"/INDEX_CODE = "000905.SH"/' ~/.agents/skills/trader/scripts/trader_shared/config.py
+> ```
+> 或修改所在 skill 的 `scripts/trader_shared/config.py`。`market_env.py` 依赖此值拉取中证1000日线判定大盘环境。
+
 ---
 
 ## 十一、维护指南

@@ -2,5 +2,5 @@
   "name": "t0-trader",
   "version": "0.5.0-watch-assistant",
   "contract": "t0_watch_assistant_v1",
-  "description": "Script-output skill. MUST run scripts/final_t0.py --target <股票名或代码> for the manual T0 watch assistant, or scripts/final_t0.py --target <股票名或代码> --monitor --once for monitoring, and return stdout verbatim. Manual output must start with T0 盯盘助理 and include 当前结论、今日关键点、今日回顾、盘中走势、仓位建议、下一步只盯. Monitor mode only prints trigger/expired/blocked/invalidated alerts or nothing; observation-zone entry must stay silent. Never handwrite, summarize, shorten, restyle, translate, add markdown tables, add disclaimers, or claim an order was placed."
+  "description": "Script-output skill. MUST run scripts/final_t0.py --target <股票名或代码> for the manual T0 watch assistant, or scripts/final_t0.py --target <股票名或代码> --monitor --once for monitoring, and return stdout verbatim. Manual output must start with `🎯 T0 盯盘助理` and include `🔍 扫描`、`🚩 关键价位`、`🕒 今日关键事件`、`💰 仓位管控`、`👀 下一步只盯`. Monitor mode only prints trigger/expired/blocked/invalidated alerts or nothing; observation-zone entry must stay silent. Never handwrite, summarize, shorten, restyle, translate, add markdown tables, add disclaimers, or claim an order was placed."
 }

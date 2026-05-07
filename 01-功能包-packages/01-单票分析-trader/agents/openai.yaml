@@ -1,7 +1,7 @@
 interface:
   display_name: "Trader"
   short_description: "A股单股报告，必须运行脚本原样返回"
-  default_prompt: "Use $trader to run `python3 scripts/final_report.py --target <股票名或代码>` and return stdout exactly. This is a script-output skill, not a writing template: do not compose from memory, handwrite, summarize, shorten, restyle, translate, or add follow-up lines. Output must start with `分析报告 —`, include MA5/MA10/MA20/MA30, and use exactly two markdown tables: `今日交易计划` and `交易指导卡`. If output contains `⏱️ T0 简版`, `T0`, `做T`, `t0-trader`, `执行价`, or more than two tables, it is old/invalid output: rerun the script and return stdout verbatim. If the script cannot run, return only the error."
+  default_prompt: "Use $trader to run `python3 scripts/final_report.py --target <股票名或代码>` and return stdout exactly. This is a script-output skill, not a writing template: do not compose from memory, handwrite, summarize, shorten, restyle, translate, or add follow-up lines. Output must start with `分析报告 —`, include MA5/MA10/MA20/MA30. Do not use markdown tables. If output contains `⏱️ T0 简版`, `T0`, `做T`, `t0-trader`, `执行价`, rerun the script. If the script cannot run, return only the error."
 
 policy:
   allow_implicit_invocation: true

@@ -672,7 +672,7 @@ def render_markdown(
     else:
         lines.append("按计划执行，等信号确认后逐步建仓。")
 
-    lines.extend(["", "💡 分析", ""])
+    lines.extend(["", "💡 分析"])
     lines.extend(build_advice(main, secondary, sorted_items, market_level, weights))
 
     return "\n".join(lines)
@@ -698,9 +698,6 @@ def build_advice(
         if item != main and item != secondary and item.get("status") not in {"暂不碰", "数据失败"}:
             trades.append(item)
 
-    adv.append("")
-    adv.append("| 标的 | 现价 | 现状 | 站稳后看 | 跌破止损 |")
-    adv.append("| :--- | :--- | :--- | :--- | :--- |")
     for t in trades:
         name = t["name"]
         current = float(t.get("current") or 0)
@@ -709,17 +706,18 @@ def build_advice(
         stop = t.get("stop") or 0
         status = t.get("status", "")
         current_txt = f"{current:.2f}" if current > 0 else "--"
+        adv.append(f"  {name}  现价{current_txt}  现状{status}")
         if confirm and take > 0 and current < confirm:
             upside_pct = round((take - confirm) / confirm * 100)
             loss_pct = round((confirm - stop) / confirm * 100) if stop > 0 else 0
-            adv.append(f"| {name} | {current_txt} | {status} | {confirm:.2f}→{take:.2f}（+{upside_pct}%） | {stop:.2f}（-{loss_pct}%） |")
+            adv.append(f"    站稳后看{confirm:.2f}→{take:.2f}（+{upside_pct}%）  跌破止损{stop:.2f}（-{loss_pct}%）")
         elif confirm and take > 0 and current >= confirm:
             upside_pct = round((take - confirm) / confirm * 100)
-            adv.append(f"| {name} | {current_txt} | {status} | 已站上→{take:.2f}（+{upside_pct}%） | -- |")
+            adv.append(f"    站稳后看已站上当→{take:.2f}（+{upside_pct}%）  跌破止损无")
         elif stop > 0:
-            adv.append(f"| {name} | {current_txt} | {status} | -- | {stop:.2f} |")
+            adv.append(f"    站稳后看无  跌破止损{stop:.2f}")
         else:
-            adv.append(f"| {name} | {current_txt} | {status} | -- | -- |")
+            adv.append(f"    站稳后看无  跌破止损无")
     adv.append("")
     if len(trades) > 1:
         adv.append(f"轮动节奏：")

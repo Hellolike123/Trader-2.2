@@ -47,25 +47,24 @@ Valid output starts with:
 Headings must appear in this order:
 
 ```text
-✅ 结论概述
-🎯 今日交易计划
-📏 仓位管理
-🧭 简化分析逻辑
-⚠️ 风险管理
-📌 交易指导卡
-👉 一句话
+🌍 中证1000
+📍 决策
+T0 参考
+❗ 关键价位
+🧭 简要分析
 ```
 
 Required rules:
 - Top block includes `MA5 / MA10 / MA20 / MA30`; use `--` if unavailable.
-- Do not show `分析时间` or `规则版本`.
-- Use exactly two markdown tables: `今日交易计划` with `角色 / 行动`, and `交易指导卡` with `操作 / 条件`.
-- Do not turn `📏 仓位管理`, `🧭 简化分析逻辑`, `⚠️ 风险管理`, or `👉 一句话` into tables.
-- Do not use `##/###`, bold headings, blockquotes, bullet lists, or extra disclaimers.
-- Do not output intraday execution prices, intraday trading cards, or concrete order instructions.
-- Do not output `⏱️ T0 简版`, `T0`, `做T`, `t0-trader`, or `执行价`.
-- `🧭 简化分析逻辑` must include `结构：`, `量价：`, `筹码压力：`, `动能：`, and `反向信号：`.
-- Buy-side wording must include `止跌确认`; observation zones are not buy points.
+- 🌍 中证1000 section includes `趋势：` `今日涨跌%` `建议：`.
+- 📍 决策 includes `状态：` and three bullet lines starting with `  ·` (empty-spoce bullet).
+- `T0 参考` includes three bullet lines for `低吸` `高抛` `止损`.
+- `❗ 关键价位` is a single inline line with `止损` `减仓` `止跌` `支撑` pipe-separated.
+- `🧭 简要分析` is a single inline line with `结构：` `量价：` `筹码：` `动能：`.
+- Do not use `##/###`, bold headings, blockquotes, bullet lists (`-`/`*`), or extra disclaimers.
+- Do not output intraday execution prices or concrete order instructions.
+- Do not output `⏱️ T0 简版`, `做T`, `t0-trader`, or `执行价`.
+- Buy-side wording must include `止跌确认`.
 
 ## Old Output Detection
 If the generated answer contains any of these, it is not valid Trader output and you must rerun the script and return stdout verbatim:
@@ -84,7 +83,7 @@ t0-trader
 📌 最终行动卡
 ```
 
-Valid Trader output has exactly two markdown tables. If more than two tables appear, rerun the script.
+Valid trader output does NOT use markdown tables.
 
 ## Rules
 - This package uses only the Python standard library.

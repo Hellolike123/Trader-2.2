@@ -43,51 +43,48 @@ python3 scripts/self_check.py
 ```
 
 ## Output Contract
-Manual card must start with `T0 —` and use this structure with no markdown tables:
+Manual card must start with `🎯 T0 盯盘助理` and use this structure:
 
 ```text
-T0 — 南网科技  现价 54.91（-2.71%）
+🎯 T0 盯盘助理
+{name}（{symbol}）｜现价 xx.xx（+/-x.xx%）
 
-📍 当前结论
+🔍 扫描
+
 当前：不动 / 低吸 / 高抛
-买入：未触发 / 可执行 / 已错过 / 被阻断 / 数据不足
-卖出：未触发 / 可执行 / 已错过 / 被阻断 / 数据不足
+买入：{状态}，观察{方向}。
+卖出：{状态}，观察{方向}。
 
-🎯 今日关键点
-低吸观察：xx.xx元以下
-高抛观察：xx.xx元附近
-低吸失效：xx.xx元，跌破不接。
-高抛取消：xx.xx元，放量站上不卖。
+🚩 关键价位
 
-📜 今日回顾
-暂无关键事件。
+低吸观察：... | 高抛观察：...
+止损：xx.xx元 或 无
 
-📊 盘中走势
-开盘段：...
-中段：...
-最近：...
+🕒 今日关键事件
 
-📦 仓位建议
-触发后：单次最多动底仓的 10%-20%
+{time} {description}
+...
 
-🔭 下一步只盯
-买入：... 卖出：... 停止：...
+💰 仓位管控
+
+当前：{action}
+触发后：{action}
+止损：xx.xx元 或 无
+
+👀 下一步只盯
+
+买入：...
+卖出：...
+止损：...
 ```
 
-Monitor alert output only appears on state changes:
+Monitor alert output only appears on state changes (no fixed format — just return stdout):
 
 ```text
-🔔 南网科技 低吸触发 | 现价 52.73 | 买入 52.65 附近
+南网科技 低吸触发 | 现价 52.73 | 买入 52.65 附近
 ```
 
-Or with `--verbose`:
-
-```text
-【T0可执行｜低吸触发】中国铝业
-现价：11.95元 | 执行参考：11.94元 | 失效：11.72元
-```
-
-Valid alert titles: `【T0可执行｜低吸触发】`, `【T0可执行｜高抛触发】`, `【T0轻仓做｜...】`, `【T0别犯错｜...】`.
+Valid alert patterns include: `低吸触发`, `高抛触发`, `止损退出`.
 
 ## Old Output Detection
 If output contains any of these, rerun the script and return stdout verbatim:

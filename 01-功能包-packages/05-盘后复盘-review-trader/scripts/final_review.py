@@ -58,8 +58,10 @@ def main() -> int:
                 raise RuntimeError("--compare requires 2-5 stocks")
             costs = {name: cost for name, cost in args.holding}
             text = run_compare(args.compare, costs=costs, trade_date=args.date, output=args.output)
-        else:
+        elif args.compare_recent:
             text = run_compare_recent(output=args.output)
+        else:
+            raise RuntimeError("no command specified")
     except Exception as exc:
         print(f"Review Trader skill cannot run in this environment: {exc}", file=sys.stderr)
         return 1

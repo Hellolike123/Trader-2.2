@@ -1,0 +1,6 @@
+{
+  "name": "trader-tracking",
+  "version": "0.1.0-track-v1",
+  "contract": "trader_tracking_v1",
+  "description": "Script-output skill. MUST run scripts/final_tracker.py and return output verbatim. Shows signal tracking accuracy panel including win rates, risk-reward ratios, and calibration suggestions per signal type and stock."
+}

@@ -54,6 +54,111 @@ python3 scripts/validate_output.py /path/to/panel.md
 python3 scripts/self_check.py
 ```
 
+## Output Contract
+
+The pool has multiple commands, each with different output:
+
+**`rank` output:**
+
+```text
+选股池  ｜  大盘{环境}，{建议}
+
+🥇  ⭐ {name}  {status}  {price}  {atr_text}
+    买  {buy_low}-{buy_high} 止跌确认  ｜  仓位 {cap}%  ｜  止损 {stop}
+
+🥈  ⭐ {name2}  {status}  {price}  {atr_text}
+    买  {buy_low}-{buy_high} 止跌确认  ｜  仓位 {cap}%  ｜  止损 {stop}
+
+👉  
+    首选{name}。信号最强，仓位压到{cap}%所以风险可控。
+    {name2}差一档，做备选。
+    {name3}再等等。
+
+    利弗莫尔："他们不是被市场打败的，是被自己打败的——有脑子，但坐不住。"
+    不抢跑，等止跌确认再动手。
+
+📊 信号回测
+
+  {name}    {sig_text}    {verify_status}
+  {name2}   {sig_text2}   {verify_status2}
+```
+
+**`show` output:**
+
+```text
+选股池  {count}/{POOL_LIMIT}  执行{e}  观察{o}  淘汰{t}
+  {name}  {status}  评分{score}  触发{price}  防守{price}
+```
+
+**`add` output:**
+
+```text
+已加入选股池
+当前容量：{n}/{POOL_LIMIT}
+状态：{status}
+触发：{price}
+防守：{price}
+下一步：盘后可说"生成明日作战表"。
+```
+
+**`add-pending` output:**
+
+```text
+已加入待确认池：{name}
+现价：{price}
+结构：{score} 场景：{scene}
+触发：{price}  防守：{price}
+动作：{action_text}
+入池建议：{admit_result}
+评分：{total_score}
+数量：{n}/{POOL_LIMIT}
+盘后可说"确认入池 {name}"。
+```
+
+**`plan` output:**
+
+```text
+选股池盘后分析 — {date}
+容量 {n}/{POOL_LIMIT}｜执行{e}｜观察{o}｜淘汰{t}｜明日只盯Top2
+
+明日优先级
+🥇 {name}（{status}）
+  {action}
+  触发{price}元  防守{price}元  仓位{percent}
+🥈 {name2}（{status}）
+评分总览
+  {name}  总分{s}  缠{n}/45 威{n}/30 筹{n}/25  动量  {status}
+
+交易指导
+  {name}: {trade_hint}
+
+待补与拒绝
+  {name}：{reason}
+  无
+
+仓位纪律 执行首次1成 确认加至3成 单票风险1R 总仓位≤5成
+{one_sentence}
+```
+
+**`analyze` output:**
+
+```text
+入池建议
+
+结果：通过/观察/拒绝
+理由：...
+建议状态：...
+触发：{price}
+防守：{price}
+下一步：如确认，请说"加入选股池"
+
+📊 ATR入池检查
+ATR {atr14}元（{pct}%） {level}
+建议首仓：≤{cap}%
+```
+
+Common rules: no markdown tables in rank/show/plan outputs; use indented alignment; no `##/###` headings.
+
 ## State
 Pool data is stored outside the skill directory. Reinstalling the skill must not delete user data:
 - `~/.trader/pool.json` — main pool

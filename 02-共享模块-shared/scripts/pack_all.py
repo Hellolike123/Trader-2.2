@@ -25,6 +25,7 @@ SKILLS = [
     ("03-选股池-trader-pool", "trader-pool"),
     ("04-仓位轮动-trader-portfolio", "trader-portfolio"),
     ("05-盘后复盘-review-trader", "review-trader"),
+    ("06-信号追踪-trader-tracking", "trader-tracking"),
 ]
 
 IGNORE_NAMES = {"__pycache__", ".pytest_cache", ".DS_Store"}
