@@ -14,6 +14,12 @@ from typing import Any
 
 # ═══════ 旧 API (兼容 review_core) ═══════
 
+# BAD-013: 坏行统计模块级变量（可读不可写）
+_bad_line_count: int = 0
+_bad_line_last_reason: str = ""
+_bad_line_last_lineno: int = -1
+
+
 LOG_PATH = Path.home() / ".trader" / "signal_log.jsonl"
 LOG_DIR = LOG_PATH.parent
 VALID_OUTCOMES = {"win", "loss", "expired", "stopped", "unknown", None}
@@ -178,16 +184,21 @@ def _ensure_result_dir() -> None:
 
 
 def _load_results() -> list[dict[str, Any]]:
-    """从 signal_results.jsonl 读结果"""
+    """从 signal_results.jsonl 读结果（BAD-013: 跟踪坏行计数）"""
+    global _bad_line_count, _bad_line_last_lineno, _bad_line_last_reason
     if not RESULT_PATH.exists():
         return []
     results = []
-    for line in RESULT_PATH.read_text(encoding="utf-8").strip().split("\n"):
+    _bad_line_count = 0  # 每次读取重新计数
+    lines = RESULT_PATH.read_text(encoding="utf-8").strip().split("\n")
+    for lineno, line in enumerate(lines, start=1):
         if not line.strip(): continue
         try:
             results.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
+        except (json.JSONDecodeError, ValueError) as e:
+            _bad_line_count += 1
+            _bad_line_last_lineno = lineno
+            _bad_line_last_reason = str(e)
     return results
 
 
@@ -519,6 +530,7 @@ def main() -> int:
             print(f"更新了 {updated} 条信号结果，跳过 {skipped} 条")
     else:
         parser.print_help()
+        return 1
     return 0
 
 
