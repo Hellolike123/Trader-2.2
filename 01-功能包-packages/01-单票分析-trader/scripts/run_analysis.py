@@ -35,6 +35,7 @@ from config import (
 from trader_shared.data_provider import get_provider
 from trader_shared.strategy_protocol import run_all
 from light_data import to_float, pct_change
+from models import DATA_STATUS_MAP
 
 _run_analysis_shared_failed = False
 
@@ -418,7 +419,7 @@ def build_signal(r: dict[str, Any]) -> dict[str, Any]:
         "direction": direction,
         "action": action,
         "confidence": confidence,
-        "data_status": str(r.get("data_status") or "degraded"),
+        "data_status": DATA_STATUS_MAP.get(str(r.get("data_status")), "degraded"),
         "trigger": {
             "type": "price_confirm",
             "price": round(trigger_price, 2),
@@ -714,7 +715,7 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
             "direction": direction,
             "action": action_sig,
             "confidence": confidence,
-            "data_status": str(report.get("data_status") or "full"),
+            "data_status": DATA_STATUS_MAP.get(str(report.get("data_status")), "full"),
             "trigger": {"type": "price_level", "price": round(current, 2), "text": alerts_found[0]},
             "invalidation": {"type": "price_break", "price": round(stop, 2), "text": f"跌破 {stop:.2f}元"},
             "position": {
