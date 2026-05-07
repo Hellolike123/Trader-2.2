@@ -72,7 +72,7 @@ class TestSchemaVersion:
 
         assert result is not None, f"Expected result record, got None"
         assert "schema_version" in result
-        assert result["schema_version"] == "v1"
+        assert result["schema_version"] == 1
 
 
 class TestSchemaVersionCompatibility:
@@ -123,7 +123,7 @@ class TestSchemaVersionCompatibility:
         new = json.dumps({
             "symbol": "601600.SH", "signal_date": "2025-04-02",
             "r_5d": -1.0, "outcome": "down",
-            "schema_version": "v1",
+            "schema_version": 1,
         })
         result.write_text(old + "\n" + new + "\n", encoding="utf-8")
 
@@ -133,7 +133,7 @@ class TestSchemaVersionCompatibility:
         # 验证新记录有 schema_version
         new_rec = [r for r in results if r["symbol"] == "601600.SH"]
         assert len(new_rec) == 1
-        assert new_rec[0]["schema_version"] == "v1"
+        assert new_rec[0]["schema_version"] == 1
 
         # 验证旧记录仍可读取（无 schema_version 也不报错）
         old_rec = [r for r in results if r["symbol"] == "688248.SH"]
@@ -143,5 +143,5 @@ class TestSchemaVersionCompatibility:
         """验证当前 schema_version 的值为 'v1'。"""
         import inspect
         source = inspect.getsource(st._compute_results_for_sig)
-        assert '"schema_version": "v1"' in source or "'schema_version': 'v1'" in source, \
-            "_compute_results_for_sig 应写 schema_version='v1'"
+        assert '"schema_version": 1' in source or "'schema_version': 1" in source, \
+            "_compute_results_for_sig 应写 schema_version=1"

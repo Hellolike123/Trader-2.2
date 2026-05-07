@@ -96,7 +96,7 @@ class TestEndToEndPipeline:
         assert len(results) >= 1, f"应有至少1条结果，got {len(results)}"
         r0 = results[0]
         assert r0["symbol"] == "688248.SH"
-        assert r0["schema_version"] == "v1"
+        assert r0["schema_version"] == 1
         assert r0["r_5d"] is not None
         assert r0.get("outcome") in ("up", "down", "flat")
 

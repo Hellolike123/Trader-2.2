@@ -7,6 +7,7 @@ import json
 import hashlib
 import os
 import sys
+import unicodedata
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -61,7 +62,7 @@ def log_safe(skill: str, target: str, symbol: str, signal_type: str, price: floa
     if not LOG_PATH.exists():
         _create_log_record(sig_id, skill, target, symbol, signal_type, price, env_level, env_note)
         return sig_id
-    for line in LOG_PATH.read_text(encoding="utf-8").strip().split("\n"):
+    for line in LOG_PATH.read_text(encoding="utf-8").splitlines():
         if not line.strip(): continue
         try:
             if json.loads(line).get("signal_id") == sig_id:
@@ -172,8 +173,6 @@ def load_recent(
     # FIX-07: 按 timestamp 排序（有 filled_at 也优先）
     filtered.sort(key=lambda r: r.get("filled_at") or r.get("timestamp") or "", reverse=True)
     return filtered[:limit]
-    filtered.sort(key=lambda r: r.get("filled_at") or r.get("timestamp") or "", reverse=True)
-    return filtered[:limit]
 
 
 
@@ -194,7 +193,7 @@ def _load_results() -> list[dict[str, Any]]:
         return []
     results = []
     _bad_line_count = 0  # 每次读取重新计数
-    lines = RESULT_PATH.read_text(encoding="utf-8").strip().split("\n")
+    lines = RESULT_PATH.read_text(encoding="utf-8").splitlines()
     for lineno, line in enumerate(lines, start=1):
         if not line.strip(): continue
         try:
@@ -210,7 +209,7 @@ def _load_signals(symbol: str | None = None) -> list[dict[str, Any]]:
     if not STORE_PATH.exists():
         return []
     signals = []
-    for line in STORE_PATH.read_text(encoding="utf-8").strip().split("\n"):
+    for line in STORE_PATH.read_text(encoding="utf-8").splitlines():
         if not line.strip(): continue
         try:
             sig = json.loads(line)
@@ -281,7 +280,7 @@ def _compute_results_for_sig(sig: dict) -> dict[str, Any] | None:
         "symbol": symbol, "name": name,
         "signal_date": sig_date, "signal_type": sig_type,
         "source_skill": skill, "signal_price": round(sig_price, 2),
-        "schema_version": "v1",
+        "schema_version": 1,
         "result_time": datetime.now().isoformat(),
     }
 
@@ -328,7 +327,7 @@ def check_recent(days: int = 5) -> dict[str, int]:
     existing_keys: dict[tuple[str, str, str], dict] = {}
     try:
         _ensure_result_dir()
-        for line in RESULT_PATH.read_text(encoding="utf-8").strip().split("\n"):
+        for line in RESULT_PATH.read_text(encoding="utf-8").splitlines():
             if not line.strip(): continue
             try:
                 r = json.loads(line)
@@ -336,7 +335,7 @@ def check_recent(days: int = 5) -> dict[str, int]:
                 existing_keys[(key_symbol, str(r.get("signal_date")), str(r.get("signal_type", "")))] = r
             except (json.JSONDecodeError, ValueError):
                 pass
-    except FileNotFoundError:
+    except OSError:
         pass
 
     result_lines: list[str] = []
@@ -375,9 +374,6 @@ def check_recent(days: int = 5) -> dict[str, int]:
             os.close(fd)
         os.replace(str(tmp_path), str(RESULT_PATH))
         _ensure_result_dir()
-        print(f"更新了 {updated} 条，跳过 {skipped} 条（含本次新写 + {len(existing_records)} 条历史）")
-    elif skipped > 0:
-        print(f"无新结果可更新，已跳过 {skipped} 条（已有结果）")
 
     return {"updated": updated, "skipped": skipped}
 
@@ -405,7 +401,7 @@ def _normalize_symbol(symbol: str) -> str:
 def show_single(symbol: str, days_limit: int | None = None) -> str:
     """输出单股面板"""
     normalized = _normalize_symbol(symbol)
-    results = [r for r in _load_results() if _normalize_symbol(r.get("symbol", "")) == normalized or (r.get("name") or "").strip() == symbol.strip()]
+    results = [r for r in _load_results() if _normalize_symbol(r.get("symbol", "")) == normalized or (r.get("name") or "").strip().casefold() == symbol.strip().casefold()]
     # BUG-012: 按 result_time 排序取最新，signal_date 可能重复
     results.sort(key=lambda r: r.get("result_time") or r.get("signal_date") or "", reverse=True)
     return _make_panel(results, days_limit)
@@ -433,7 +429,9 @@ def _make_panel(results: list[dict[str, Any]], days_limit: int | None) -> str:
     avg_r5 = round(sum(r["r_5d"] for r in filtered) / total, 1) if total > 0 else 0
     avg_up = round(sum(r["r_5d"] for r in ups) / len(ups), 1) if ups else 0
     avg_down = round(sum(r["r_5d"] for r in downs) / len(downs), 1) if downs else 0
-    pf = round(abs(avg_up / avg_down), 2) if downs and avg_down != 0 else 0
+    total_profit = sum(r["r_5d"] for r in ups) if ups else 0
+    total_loss = abs(sum(r["r_5d"] for r in downs)) if downs else 0
+    pf = round(total_profit / total_loss, 2) if total_loss > 0 else 0
 
     L = [
         "📊 信号追踪面板",
@@ -446,7 +444,7 @@ def _make_panel(results: list[dict[str, Any]], days_limit: int | None) -> str:
     # 按信号类型
     types: dict[str, list] = {}
     for r in filtered:
-        types.setdefault(str(r.get("signal_type") or ""), []).append(r)
+        types.setdefault(str(r.get("signal_type") or "unknown"), []).append(r)
     if types:
         L.append("按信号类型:")
         best = sorted(types.items(), key=lambda x: -len(x[1]))[:5]
@@ -476,8 +474,6 @@ def _make_panel(results: list[dict[str, Any]], days_limit: int | None) -> str:
     if stock_stats:
         L.append("个股明细:")
         for name, code, total_s, wr_s, avg_r in stock_stats:
-            if total_s < 2:
-                continue
             L.append(f"  {'{} ({})'.format(name, code):30s}  样本:{total_s}次  胜率:{wr_s}%  平均{avg_r:+.1f}%")
         L.append("")
 
