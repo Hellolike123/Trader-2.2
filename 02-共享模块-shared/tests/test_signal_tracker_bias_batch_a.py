@@ -56,7 +56,7 @@ class _T:
         )
 
 
-def _sig(date: str = "2025-04-01", symbol: str = "688248.SH"):
+def _sig(date: str = "2026-05-02", symbol: str = "688248.SH"):
     return {
         "symbol": symbol, "name": "南网科技", "trade_date": date,
         "signal_type": "low_buy_watch", "trigger": {"price": 10},
@@ -179,15 +179,15 @@ class TestIdempotency:
     def test_check_recent_twice_same_count(self):
         t = _T()
         # 写入一条信号到 store
-        sig = _sig(date="2025-04-01")
+        sig = _sig(date="2026-05-02")
         t.write_signals([sig])
 
         # 构造 mock bars
         import datetime as dt
         bars = []
         for i in range(40):
-            d = (dt.date(2025, 3, 5) + dt.timedelta(days=i)).strftime("%Y-%m-%d")
-            bars.append({"date": d, "close": 10 if d <= "2025-04-01" else 11, "atr14": 0.5})
+            d = (dt.date(2026, 4, 20) + dt.timedelta(days=i)).strftime("%Y-%m-%d")
+            bars.append({"date": d, "close": 10 if d <= "2026-05-02" else 11, "atr14": 0.5})
 
         mock_client = MagicMock()
         mock_client.get = MagicMock()
@@ -229,7 +229,7 @@ class TestFailureClassification:
             # 1. 网络失败 → HTTP 不可用
             {
                 "symbol": "688248.SH", "name": "南网科技",
-                "signal_date": "2025-04-01", "signal_type": "track",
+                "signal_date": "2026-05-02", "signal_type": "track",
                 "r_5d": None,
                 "_failure_code": "network_failure",
                 "source_skill": "trader", "schema_version": 1,
