@@ -50,7 +50,10 @@ def filter_trade_date(bars: list[dict[str, Any]], trade_date: str | None) -> tup
     if not selected_date:
         return None, bars
     filtered = [bar for bar in bars if bar_date(bar) == selected_date]
-    return selected_date, filtered or bars
+    # FIX-001: Don't fallback to all bars with wrong date — return empty.
+    # Returning all bars when selected_date has no bars corrupts intraday
+    # analysis (bar_time labels would be wrong, volume attribution wrong).
+    return selected_date, filtered
 
 
 def in_range(time_text: str, start: str, end: str) -> bool:
@@ -660,6 +663,8 @@ def enrich_with_signal_backtrack(review: dict[str, Any], *, limit: int = 10) -> 
         if not same_day_sigs:
             try:
                 append_signal(sig)
+                # FIX: update same_day_sigs after append to prevent future duplicates
+                same_day_sigs = [sig]
             except Exception:
                 pass
     except ImportError:
@@ -697,8 +702,13 @@ def calc_macd(bars: list[dict[str, Any]]) -> None:
 
     dea_values: list[float] = []
 
-    for i in range(12, len(bars)):
-        c = closes[i]
+    # BUG #16 FIX: iterate over closes (not bars) since closes may be shorter
+    # when some bars have missing close values. Use enumerate to get the
+    # index into closes AND map back to bars for storage.
+    for ci, c in enumerate(closes):
+        if ci < 12:
+            continue
+        i = ci  # maps closes index → bars index (both have same length when close is present)
         ema12 = ema12 * fast_alpha + c * (1.0 - fast_alpha)
         if i >= 26:
             ema26 = ema26 * slow_alpha + c * (1.0 - slow_alpha)

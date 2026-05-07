@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import os
 from typing import Any
 
 
@@ -68,8 +69,14 @@ def save_review(review: dict[str, Any]) -> None:
     reviews.append(summary)
     state["reviews"] = reviews[-30:]
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    CACHE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-
+    tmp = CACHE_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    fd = os.open(str(tmp), os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(str(tmp), str(CACHE_PATH))
 
 def recent_reviews(limit: int = 5) -> list[dict[str, Any]]:
     state = load_state()

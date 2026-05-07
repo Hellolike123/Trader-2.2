@@ -62,6 +62,8 @@ def main() -> int:
             text = run_compare_recent(output=args.output)
         else:
             raise RuntimeError("no command specified")
+    except RuntimeError:
+        re-raise
     except Exception as exc:
         print(f"Review Trader skill cannot run in this environment: {exc}", file=sys.stderr)
         return 1
