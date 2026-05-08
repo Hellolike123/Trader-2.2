@@ -259,7 +259,7 @@ def t0_position(plan: dict[str, Any]) -> dict[str, int]:
 def normalize_t0_data_status(value: str) -> str:
     if value == "delayed":
         return "stale"
-    if value in {"complete"}:
+    if value in {"complete", "full"}:
         return "full"
     if value in {"fresh", "insufficient", "non_trading", "partial", "degraded"}:
         return value

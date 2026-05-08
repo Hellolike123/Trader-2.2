@@ -23,7 +23,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 _shared = Path(__file__).resolve().parents[1]
 _market_data = _shared / "01-行情数据-market-data"
 
-DataStatus = Literal["complete", "partial", "degraded", "failed"]
+DataStatus = Literal["full", "partial", "degraded", "failed"]
 
 
 @dataclass(frozen=True)
@@ -49,7 +49,7 @@ class MarketSnapshot:
     quote: dict[str, Any]
     daily_bars: list[dict[str, Any]]
     bars_5m: list[dict[str, Any]] = field(default_factory=list)
-    data_status: DataStatus = "complete"
+    data_status: DataStatus = "full"
     missing_sources: list[str] = field(default_factory=list)
     source_errors: dict[str, str] = field(default_factory=dict)
     fetched_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
@@ -394,7 +394,7 @@ class AkShareProvider:
                 bars_5m = []
 
         if daily_bars and quote:
-            data_status = "complete"
+            data_status = "full"
         elif daily_bars or quote:
             data_status = "partial"
         else:

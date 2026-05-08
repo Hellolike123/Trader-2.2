@@ -48,7 +48,7 @@ _cache_expiry: dict[str, float] = {}
 _realtime_cache: dict[str, tuple[Any, float]] = {}
 _REALTIME_TTL = 30
 
-DataStatus = Literal["complete", "partial", "degraded", "failed"]
+DataStatus = Literal["full", "partial", "degraded", "failed"]
 
 
 @dataclass(frozen=True)
@@ -57,7 +57,7 @@ class MarketSnapshot:
     quote: dict[str, Any]
     daily_bars: list[dict[str, Any]]
     bars_5m: list[dict[str, Any]] = field(default_factory=list)
-    data_status: DataStatus = "complete"
+    data_status: DataStatus = "full"
     missing_sources: list[str] = field(default_factory=list)
     source_errors: dict[str, str] = field(default_factory=dict)
     fetched_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
@@ -299,11 +299,18 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 30) -> list[dic
 
     def do_fetch():
         payload = extract_jsonp(http.get_text(TENCENT_FQKLINE_URL, params=params))
-        rows = (((payload.get("data") or {}).get(sec.qq_symbol) or {}).get("qfqday") or [])
+        sec_data = (payload.get("data") or {}).get(sec.qq_symbol) or {}
+        rows = sec_data.get("qfqday") or []
         bars: list[dict[str, Any]] = []
         for row in rows:
             if isinstance(row, list) and len(row) >= 6:
                 bars.append({"date": row[0], "open": to_float(row[1]), "close": to_float(row[2]), "high": to_float(row[3]), "low": to_float(row[4]), "volume": to_float(row[5])})
+        # 新股/qfqday 为空时回退到原始 day
+        if not bars:
+            day_rows = sec_data.get("day") or []
+            for row in day_rows:
+                if isinstance(row, list) and len(row) >= 6:
+                    bars.append({"date": row[0], "open": to_float(row[1]), "close": to_float(row[2]), "high": to_float(row[3]), "low": to_float(row[4]), "volume": to_float(row[5])})
         if not bars:
             raise RuntimeError("Tencent qfq daily bars unavailable")
         return bars
@@ -354,7 +361,7 @@ def load_market_snapshot(target: str, days: int = 30, include_5m: bool = True) -
         missing_sources.append("bars_5m")
 
     if quote and daily_bars and not missing_sources:
-        data_status: DataStatus = "complete"
+        data_status = "full"
     elif quote and daily_bars:
         data_status = "partial"
     elif quote or daily_bars:
