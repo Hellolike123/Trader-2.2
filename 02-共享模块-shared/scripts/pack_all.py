@@ -12,10 +12,12 @@ Run from anywhere in the repo:
 """
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 import tempfile
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Active skills (deprecated trader-compare removed)
@@ -30,6 +32,34 @@ SKILLS = [
 
 IGNORE_NAMES = {"__pycache__", ".pytest_cache", ".DS_Store"}
 SHARE_DIR = Path("02-共享模块-shared")
+
+
+def read_version_stamp(skill_dir: Path, skill_slug: str) -> str:
+    stamp = skill_dir / "VERSION_STAMP"
+    if not stamp.exists():
+        return "unversioned"
+    text = stamp.read_text(encoding="utf-8").strip()
+    if not text:
+        return "unversioned"
+    prefix = f"{skill_slug}:"
+    if text.startswith(prefix):
+        text = text[len(prefix):].strip()
+    return text.replace(" ", "_")
+
+
+def build_release_suffix() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%SUTC")
+
+
+def build_release_manifest(entries: list[dict[str, str]]) -> str:
+    return json.dumps(
+        {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "entries": entries,
+        },
+        ensure_ascii=False,
+        indent=2,
+    ) + "\n"
 
 
 def should_skip(path: Path) -> bool:
@@ -139,41 +169,53 @@ def main() -> int:
     root = repo_root()
     packages_dir = root / "01-功能包-packages"
     output_dir = root / "03-安装包-dist"
+    release_dir = output_dir / "releases"
     output_dir.mkdir(exist_ok=True)
+    release_dir.mkdir(exist_ok=True)
 
-    stages: list[tuple[str, Path]] = []
+    release_suffix = build_release_suffix()
+    stages: list[tuple[str, str, Path]] = []
+    manifest_entries: list[dict[str, str]] = []
 
     for dir_name, skill_slug in SKILLS:
         src = packages_dir / dir_name
         if not src.exists():
             print(f"SKIP: {src} not found", file=sys.stderr)
             continue
-        print(f"Stage: {dir_name} → {skill_slug}")
+        version = read_version_stamp(src, skill_slug)
+        print(f"Stage: {dir_name} → {skill_slug} ({version})")
         staged = stage_skill(src, skill_slug)
-        stages.append((skill_slug, staged))
+        stages.append((skill_slug, version, staged))
+        manifest_entries.append({"skill": skill_slug, "version": version})
 
     # --- Individual zips (flat, no prefix) ---
-    for skill_slug, staged in stages:
-        zip_path = output_dir / f"{skill_slug}.zip"
+    for skill_slug, version, staged in stages:
+        zip_name = f"{skill_slug}-{version}-{release_suffix}.zip"
+        zip_path = release_dir / zip_name
         if zip_path.exists():
             zip_path.unlink()
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             add_to_zip(staged, archive, arc_prefix="")
-        print(f"  → {zip_path.name}  ({zip_path.stat().st_size / 1024:.0f} KB)")
+        print(f"  → {zip_path.relative_to(output_dir)}  ({zip_path.stat().st_size / 1024:.0f} KB)")
 
     # --- Combined zip (skill_name/ prefix) ---
-    all_path = output_dir / "trader-all-skill.zip"
+    all_name = f"trader-all-skill-{release_suffix}.zip"
+    all_path = release_dir / all_name
     if all_path.exists():
         all_path.unlink()
     with zipfile.ZipFile(all_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for skill_slug, staged in stages:
+        for skill_slug, _, staged in stages:
             add_to_zip(staged, archive, arc_prefix=skill_slug)
-    print(f"\nCombined: {all_path.name}  ({all_path.stat().st_size / 1024:.0f} KB)")
+    print(f"\nCombined: {all_path.relative_to(output_dir)}  ({all_path.stat().st_size / 1024:.0f} KB)")
+
+    manifest_path = release_dir / f"release-manifest-{release_suffix}.json"
+    manifest_path.write_text(build_release_manifest(manifest_entries), encoding="utf-8")
+    print(f"Manifest: {manifest_path.relative_to(output_dir)}")
 
     # --- Verify ---
     print("\n--- Verification ---")
-    for skill_slug, _ in stages:
-        zip_path = output_dir / f"{skill_slug}.zip"
+    for skill_slug, version, _ in stages:
+        zip_path = release_dir / f"{skill_slug}-{version}-{release_suffix}.zip"
         with zipfile.ZipFile(zip_path, "r") as archive:
             names = archive.namelist()
             has_meta = "_meta.json" in names
@@ -181,10 +223,10 @@ def main() -> int:
             has_hermes = "HERMES.md" in names
             has_skill = "SKILL.md" in names
             status = "✅" if has_meta and has_scripts and has_hermes and has_skill else "❌"
-            print(f"  {status} {skill_slug}.zip  meta={has_meta} scripts={has_scripts} hermes={has_hermes} skill={has_skill}")
+            print(f"  {status} {zip_path.name}  meta={has_meta} scripts={has_scripts} hermes={has_hermes} skill={has_skill}")
 
     # Cleanup temp dirs
-    for _, staged in stages:
+    for _, _, staged in stages:
         shutil.rmtree(staged.parent)
 
     return 0
