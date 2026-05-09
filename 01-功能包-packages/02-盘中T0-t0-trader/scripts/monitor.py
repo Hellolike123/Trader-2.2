@@ -365,12 +365,8 @@ def _build_trigger_line(event: str, plan: dict[str, Any]) -> str:
         core += f"（{'、'.join(str(r) for r in blocked_reasons)}）"
         return core
 
-    if event in {BUY_WATCHED, SELL_WATCHED}:
-        core = f"{emoji} {name} ｜ T0 {direction}{state_text}"
-        if obs:
-            core += f" ｜ 参考价 {price(obs)}"
-        return core
-
+    # Note: BUY_WATCHED/SELL_WATCHED are no longer emitted by side_event().
+    # Kept for future use.
     return f"{emoji} {name} ｜ T0 {direction}{state_text}"
 
 
@@ -562,7 +558,7 @@ def run_monitor(
             if message:
                 print(message)
                 if message != "无新提醒":
-                    alerts += message.count("【T0")
+                    alerts += 1
             if once or alerts >= max_alerts:
                 return 0
             sleep_until_next_interval(interval)

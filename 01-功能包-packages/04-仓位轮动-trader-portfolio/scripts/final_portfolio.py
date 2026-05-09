@@ -172,9 +172,6 @@ def main() -> int:
     except Exception as exc:
         print(f"轮动仓位失败：{exc}", file=sys.stderr)
         return 1
-    except Exception as exc:
-        print(f"轮动仓位失败：{exc}", file=sys.stderr)
-        return 1
 
     errors = validate(markdown)
     if errors:

@@ -63,7 +63,7 @@ def main() -> int:
         else:
             raise RuntimeError("no command specified")
     except RuntimeError:
-        re-raise
+        raise
     except Exception as exc:
         print(f"Review Trader skill cannot run in this environment: {exc}", file=sys.stderr)
         return 1

@@ -428,7 +428,7 @@ def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str,
         _cd = to_float(chk[_i].get("dea"))
         if _pm is not None and _pd is not None and _cm is not None and _cd is not None and abs((_pm - _pd) - (_cm - _cd)) > 0:
             sig_prev = (_pm - _pd) * (_cm - _cd)
-            if sig_prev <= 0:
+            if sig_prev < 0:
                 macd_cross_3 = True
                 break
     macd_struc_b = 10 if (macd_gcx and not afternoon_shrink) else (5 if macd_below and not macd_dcx else 0)

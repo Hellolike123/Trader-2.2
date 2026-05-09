@@ -293,7 +293,6 @@ def _render_block_header(trader: str, code: str, name: str) -> str:
 
 def render_markdown(r: dict[str, Any]) -> str:
     ma = r.get("ma") or {}
-    low_zone = str(r.get("low_zone") or f"{r['support']:.2f}-{r['support'] * 1.01:.2f}元")
     display_code = str(r["symbol"]).replace(".SH", "").replace(".SZ", "")
     name = str(r["name"])
 
@@ -396,7 +395,7 @@ def _pool_count() -> int:
     import os
     path = os.path.expanduser("~/.trader/pool.json")
     try:
-        data = json.loads(open(path).read())
+        data = json.loads(path.read_text(encoding="utf-8"))
         items = data.get("items", [])
         return sum(1 for i in items if i.get("status") not in {"淘汰", "已退出"})
     except Exception:

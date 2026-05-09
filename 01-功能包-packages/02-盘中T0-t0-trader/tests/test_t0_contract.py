@@ -556,6 +556,134 @@ def test_monitor_suppresses_observation_and_reports_trigger_position(tmp_path, m
     assert "止损 11.72元" in alert
 
 
+def test_buy_trigger_reaches_confirmation_with_3_signals_after_config_change() -> None:
+    bars = []
+    closes = []
+    for i in range(35):
+        base_close = 10.0 - i * 0.01
+        bars.append({"open": base_close + 0.02, "high": base_close + 0.03, "low": base_close - 0.02, "close": base_close, "volume": 1000})
+        closes.append(base_close)
+    from indicators import calculate_rsi, calculate_macd
+    rsi_series = calculate_rsi(closes)
+    macd_state = calculate_macd(closes)
+    last_bar = bars[-1]
+    base_close = last_bar["close"]
+    current = base_close + 0.01  # slightly above last bar to be inside zone
+    state = {
+        "rsi": rsi_series,
+        "last_rsi": float(rsi_series[-1]) if rsi_series[-1] is not None else 40.0,
+        "macd": macd_state,
+        "macd_ready": False,
+        "vwap": current + 0.05,
+        "prev_vwap": current + 0.04,
+        "volume_ratio": 0.7,
+        "pct_b": -0.05,
+    }
+    report_data = {
+        "kline_5m_completed": bars,
+        "current_price": current,
+        "data_status": "fresh",
+        "space_state": "good",
+        "t0_net_space_pct": 0.02,
+        "sell_net_space_pct": 0.01,
+        "ict_signal": {},
+    }
+    zones = {
+        "buy_zone": {"lower": current - 0.2, "upper": current + 0.05, "main_support": current - 0.2},
+    }
+    from price_point_engine import detect_buy_trigger
+    trigger = detect_buy_trigger(report_data, zones, state)
+    assert trigger["status"] == "已触发", f"Expected triggered but got {trigger['status']}, matched={trigger.get('matched_conditions', [])}, blocked={trigger.get('blocked_reasons', [])}"
+    assert trigger["trigger_price"] == current
+    assert trigger["matched_count"] >= 3
+
+
+def test_macd_expanding_no_longer_blocks_buy_trigger() -> None:
+    from indicators import calculate_rsi, calculate_macd
+    bars = []
+    closes = []
+    for i in range(35):
+        base_close = 10.0 - i * 0.015
+        bars.append({"open": base_close + 0.02, "high": base_close + 0.03, "low": base_close - 0.02, "close": base_close, "volume": 800})
+        closes.append(base_close)
+    rsi_series = calculate_rsi(closes)
+    macd_state = calculate_macd(closes)
+    last_bar = bars[-1]
+    current = last_bar["close"]
+    state = {
+        "rsi": rsi_series,
+        "last_rsi": 38.0,
+        "macd": macd_state,
+        "macd_ready": False,
+        "macd_hist": [-0.1, -0.15, -0.22, -0.3],
+        "macd_hist_prev": -0.22,
+        "macd_hist_current": -0.3,
+        "vwap": current + 0.08,
+        "prev_vwap": current + 0.07,
+        "volume_ratio": 0.75,
+        "pct_b": -0.02,
+    }
+    report_data = {
+        "kline_5m_completed": bars,
+        "current_price": current,
+        "data_status": "fresh",
+        "space_state": "good",
+        "t0_net_space_pct": 0.02,
+        "sell_net_space_pct": 0.01,
+        "ict_signal": {},
+    }
+    zones = {
+        "buy_zone": {"lower": current - 0.2, "upper": current - 0.02, "main_support": current - 0.2},
+    }
+    from price_point_engine import detect_buy_trigger
+    trigger = detect_buy_trigger(report_data, zones, state)
+    assert "MACD绿柱继续放大" not in trigger.get("blocked_reasons", []), f"MACD expanding should not block after change, but got: {trigger.get('blocked_reasons', [])}"
+
+
+def test_macd_expanding_no_longer_blocks_sell_trigger() -> None:
+    from indicators import calculate_rsi, calculate_macd
+    bars = []
+    closes = []
+    for i in range(35):
+        base_close = 10.0 + i * 0.015
+        bars.append({"open": base_close - 0.02, "high": base_close + 0.03, "low": base_close - 0.03, "close": base_close, "volume": 1200})
+        closes.append(base_close)
+    rsi_series = calculate_rsi(closes)
+    macd_state = calculate_macd(closes)
+    last_bar = bars[-1]
+    current = last_bar["close"]
+    state = {
+        "rsi": rsi_series,
+        "last_rsi": 68.0,
+        "macd": macd_state,
+        "macd_ready": False,
+        "macd_hist": [0.1, 0.15, 0.22, 0.3],
+        "macd_hist_prev": 0.22,
+        "macd_hist_current": 0.3,
+        "vwap": current - 0.08,
+        "prev_vwap": current - 0.07,
+        "volume_ratio": 1.5,
+        "pct_b": 0.8,
+        "strong_trend": False,
+        "di_uptrend": False,
+    }
+    report_data = {
+        "kline_5m_completed": bars,
+        "current_price": current,
+        "data_status": "fresh",
+        "space_state": "good",
+        "t0_net_space_pct": 0.02,
+        "sell_net_space_pct": 0.01,
+        "ict_signal": {},
+    }
+    zones = {
+        "sell_zone": {"lower": current + 0.02, "upper": current + 0.2, "main_resistance": current + 0.2},
+    }
+    from price_point_engine import detect_sell_trigger
+    trigger = detect_sell_trigger(report_data, zones, state)
+    assert "MACD红柱继续放大" not in trigger.get("blocked_reasons", []), f"MACD expanding should not block after change, but got: {trigger.get('blocked_reasons', [])}"
+
+
 def test_validate_rejects_reformatted_t0_card() -> None:
     markdown = """### ⏱️ 盘中 T0
 **标的**：南网科技（688248.SH）

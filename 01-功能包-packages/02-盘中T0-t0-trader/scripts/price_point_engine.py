@@ -153,18 +153,38 @@ def find_key_levels(report_data: dict[str, Any]) -> dict[str, Any]:
     recent20 = daily[-STRUCTURE_WINDOW:] if len(daily) >= STRUCTURE_WINDOW else daily
     support: list[dict[str, Any]] = []
     resistance: list[dict[str, Any]] = []
-    add_level(support, "5日低点", min(values(recent5, "low"), default=None), 1.0)
-    add_level(resistance, "5日高点", max(values(recent5, "high"), default=None), 1.0)
+    min5 = min(values(recent5, "low"), default=None)
+    max5 = max(values(recent5, "high"), default=None)
+    if min5 is not None:
+        add_level(support, "5日低点", min5, 1.0)
+    if max5 is not None:
+        add_level(resistance, "5日高点", max5, 1.0)
     add_level(support, "今日低点", num(quote.get("low")), 0.9)
     add_level(resistance, "今日高点", num(quote.get("high")), 0.9)
-    add_level(support, "20日低点", min(values(recent20, "low"), default=None), 0.8)
-    add_level(resistance, "20日高点", max(values(recent20, "high"), default=None), 0.8)
-    add_level(support, "5m低点", min(values(bars_5m[-12:], "low"), default=None), 0.7)
-    add_level(resistance, "5m高点", max(values(bars_5m[-12:], "high"), default=None), 0.7)
-    add_level(support, "15m低点", min(values(bars_15m[-8:], "low"), default=None), 0.7)
-    add_level(resistance, "15m高点", max(values(bars_15m[-8:], "high"), default=None), 0.7)
-    add_level(support, "30m低点", min(values(bars_30m[-8:], "low"), default=None), 0.8)
-    add_level(resistance, "30m高点", max(values(bars_30m[-8:], "high"), default=None), 0.8)
+    min20 = min(values(recent20, "low"), default=None)
+    max20 = max(values(recent20, "high"), default=None)
+    if min20 is not None:
+        add_level(support, "20日低点", min20, 0.8)
+    if max20 is not None:
+        add_level(resistance, "20日高点", max20, 0.8)
+    min5m = min(values(bars_5m[-12:], "low"), default=None)
+    max5m = max(values(bars_5m[-12:], "high"), default=None)
+    if min5m is not None:
+        add_level(support, "5m低点", min5m, 0.7)
+    if max5m is not None:
+        add_level(resistance, "5m高点", max5m, 0.7)
+    min15m = min(values(bars_15m[-8:], "low"), default=None)
+    max15m = max(values(bars_15m[-8:], "high"), default=None)
+    if min15m is not None:
+        add_level(support, "15m低点", min15m, 0.7)
+    if max15m is not None:
+        add_level(resistance, "15m高点", max15m, 0.7)
+    min30m = min(values(bars_30m[-8:], "low"), default=None)
+    max30m = max(values(bars_30m[-8:], "high"), default=None)
+    if min30m is not None:
+        add_level(support, "30m低点", min30m, 0.8)
+    if max30m is not None:
+        add_level(resistance, "30m高点", max30m, 0.8)
     add_level(support, "VWAP", vwap, 0.6)
     add_level(resistance, "VWAP上方偏离", vwap * 1.01 if vwap else None, 0.6)
     bb = calculate_bollinger_bands(values(bars_5m, "close"), period=20, num_std=2.0)
@@ -411,8 +431,6 @@ def detect_buy_trigger(report_data: dict[str, Any], zones: dict[str, Any], state
     blocked = []
     if is_new_low_recent(bars):
         blocked.append("最近5m持续创新低")
-    if macd_green_expanding(state):
-        blocked.append("MACD绿柱继续放大")
     if current < zone["main_support"] and current < (num(last.get("close")) or current):
         blocked.append("跌破主支撑后未收回")
     if (state.get("volume_ratio") or 0) > VOLUME_EXPAND_RATIO and current < zone["main_support"]:
@@ -487,8 +505,6 @@ def detect_sell_trigger(report_data: dict[str, Any], zones: dict[str, Any], stat
     blocked = []
     if is_new_high_recent(bars):
         blocked.append("最近5m持续创新高")
-    if macd_red_expanding(state):
-        blocked.append("MACD红柱继续放大")
     if (
         state.get("vwap") is not None
         and current > float(state["vwap"])
