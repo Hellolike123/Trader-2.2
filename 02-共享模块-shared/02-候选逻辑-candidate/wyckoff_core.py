@@ -34,11 +34,13 @@ def _detect_spring(bars: list[dict]) -> dict:
     recent = bars[-(WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1):-1]
     current = bars[-1]
 
-    support = min(to_float(b["low"]) for b in recent)
+    low_values = [to_float(b["low"]) for b in recent]
+    valid_lows = [v for v in low_values if v is not None]
     current_low = to_float(current.get("low"))
     current_close = to_float(current.get("close"))
     current_volume = to_float(current.get("volume"))
 
+    support = min(valid_lows) if valid_lows else None
     if current_low is None or current_close is None or support is None or current_volume is None:
         return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "数据异常"}
 
@@ -65,10 +67,12 @@ def _detect_upthrust(bars: list[dict]) -> dict:
     recent = bars[-(WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1):-1]
     current = bars[-1]
 
-    resistance = max(to_float(b["high"]) for b in recent)
+    high_values = [to_float(b["high"]) for b in recent]
+    valid_highs = [v for v in high_values if v is not None]
     current_high = to_float(current.get("high"))
     current_close = to_float(current.get("close"))
 
+    resistance = max(valid_highs) if valid_highs else None
     if current_high is None or current_close is None or resistance is None:
         return {"upthrust_signal": False, "upthrust_price": 0.0, "upthrust_reason": "数据异常"}
 
@@ -134,9 +138,11 @@ def wyckoff_analysis(bars: list[dict]) -> dict:
         parts.append(f"弹簧信号: {spring['spring_reason']}")
     if upthrust["upthrust_signal"]:
         parts.append(f"上冲回落信号: {upthrust['upthrust_reason']}")
-    if bearish_div:
+    if bearish_div and bullish_div:
+        parts.append("量价信号冲突，无法确定方向")
+    elif bearish_div:
         parts.append("看空量价背离")
-    if bullish_div:
+    elif bullish_div:
         parts.append("看多量价背离")
     if not parts:
         parts.append("无明显威科夫信号")

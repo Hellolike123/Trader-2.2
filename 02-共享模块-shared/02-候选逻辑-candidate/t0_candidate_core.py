@@ -199,10 +199,12 @@ def score_for(item: dict[str, Any]) -> float:
         score -= 8
     if change >= 5 and position_ratio >= 0.65:
         score -= 10
-    if pct_change(current, confirm) > 2:
-        score += 5
-    else:
+    gap_pct = pct_change(current, confirm)
+    gap_ratio = gap_pct / 100.0
+    if gap_ratio <= 0:
         score -= 4
+    else:
+        score += min(max(int(gap_ratio * 250), 0), 5)
     if item.get("low_zone") and item.get("confirm_price"):
         score += 5
     return score

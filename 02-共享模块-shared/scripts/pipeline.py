@@ -170,7 +170,7 @@ def conflicting_signals(name: str) -> list[str]:
     results: list[str] = []
     for w in data.get("warnings", []):
         stock = str(w.get("stock") or "")
-        if stock == name or stock == "" or name not in stock:
+        if stock == name or stock == "":
             results.append(str(w.get("msg") or ""))
     return list(dict.fromkeys(results))
 

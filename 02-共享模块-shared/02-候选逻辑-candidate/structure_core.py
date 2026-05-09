@@ -254,7 +254,6 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         "low_zone": f"{low_zone_lower:.2f}-{low_zone_upper:.2f}元",
         "open_price": open_price,
         "gap": _gap_status(low_zone_lower, low_zone_upper, stop, open_price, prev_close),
-        "low_zone": f"{low_zone_lower:.2f}-{low_zone_upper:.2f}元",
         "confirm_price": round(confirm_price, 2),
         "sell_observe_price": round(resistance_price, 2),
         "hard_stop": stop,

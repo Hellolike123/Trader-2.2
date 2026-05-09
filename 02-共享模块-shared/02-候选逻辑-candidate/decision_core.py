@@ -21,11 +21,9 @@ def _get_engine() -> Any:
     # into <skill>/scripts/ via pack_all.py).
     _base = Path(__file__).resolve().parent
     candidates = [
-        # Source tree: decision_core/ ← ../trader_shared/status_rules.yml
+        # Source tree: candidate/ ← ../trader_shared/status_rules.yml
         _base.parent.parent / "trader_shared" / "status_rules.yml",
-        # Installed: <skill>/scripts/candidate/ ← ../trader_shared/status_rules.yml
-        _base.parent.parent / "trader_shared" / "status_rules.yml",
-        # Fallback: <skill>/scripts/ directly (pack_all copies shared files there)
+        # Installed: <skill>/scripts/ directly (pack_all copies shared files there)
         _base.parent / "trader_shared" / "status_rules.yml",
     ]
     for rules_path in candidates:
@@ -177,10 +175,11 @@ def score_for(item: dict[str, Any]) -> float:
             score -= 8
         if change >= CHANGE_THRESHOLD_LARGE and position_ratio >= POSITION_RATIO_HIGH:
             score -= 10
-        if (confirm - current) / max(current, 1) > 0.02:
-            score += 5
-        else:
+        gap_pct = (confirm - current) / max(current, 1)
+        if gap_pct <= 0:
             score -= 4
+        else:
+            score += min(max(int(gap_pct * 250), 0), 5)
         if item.get("low_zone") and item.get("confirm_price"):
             score += 5
         score -= below_ma_count * 2
