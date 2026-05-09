@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """Pack all skills into correctly structured zips for Hermes/Agent installation.
 
-Produces two types of archives in 03-安装包-dist/:
+Produces archives in 03-安装包-dist/<timestamp>/:
    - Individual skill zips (trader.zip, t0-trader.zip, etc.)
      → Files under <skill_name>/ prefix inside zip
-  - Combined archive (trader-all-skill.zip)
-    → Files under <skill_name>/ prefix, unzip into ~/.hermes/skills/
+   - Combined archive (trader-all-skill.zip)
+     → Files under <skill_name>/ prefix, unzip into ~/.hermes/skills/
 
 Run from anywhere in the repo:
     python3 02-共享模块-shared/scripts/pack_all.py
 """
 from __future__ import annotations
 
-import json
 import shutil
 import sys
 import tempfile
@@ -47,19 +46,8 @@ def read_version_stamp(skill_dir: Path, skill_slug: str) -> str:
     return text.replace(" ", "_")
 
 
-def build_release_suffix() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%SUTC")
-
-
-def build_release_manifest(entries: list[dict[str, str]]) -> str:
-    return json.dumps(
-        {
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "entries": entries,
-        },
-        ensure_ascii=False,
-        indent=2,
-    ) + "\n"
+def build_release_dir_name() -> str:
+    return datetime.now(timezone.utc).strftime("%m%d-%H%M%S")
 
 
 def should_skip(path: Path) -> bool:
@@ -169,13 +157,13 @@ def main() -> int:
     root = repo_root()
     packages_dir = root / "01-功能包-packages"
     output_dir = root / "03-安装包-dist"
-    release_dir = output_dir / "releases"
+    release_dir_name = build_release_dir_name()
+    release_dir = output_dir / release_dir_name
     output_dir.mkdir(exist_ok=True)
     release_dir.mkdir(exist_ok=True)
+    print(f"Release dir: {release_dir_name}/")
 
-    release_suffix = build_release_suffix()
     stages: list[tuple[str, str, Path]] = []
-    manifest_entries: list[dict[str, str]] = []
 
     for dir_name, skill_slug in SKILLS:
         src = packages_dir / dir_name
@@ -186,11 +174,9 @@ def main() -> int:
         print(f"Stage: {dir_name} → {skill_slug} ({version})")
         staged = stage_skill(src, skill_slug)
         stages.append((skill_slug, version, staged))
-        manifest_entries.append({"skill": skill_slug, "version": version})
 
-    # --- Individual zips (flat, no prefix) ---
     for skill_slug, version, staged in stages:
-        zip_name = f"{skill_slug}-{version}-{release_suffix}.zip"
+        zip_name = f"{skill_slug}.zip"
         zip_path = release_dir / zip_name
         if zip_path.exists():
             zip_path.unlink()
@@ -199,7 +185,7 @@ def main() -> int:
         print(f"  → {zip_path.relative_to(output_dir)}  ({zip_path.stat().st_size / 1024:.0f} KB)")
 
     # --- Combined zip (skill_name/ prefix) ---
-    all_name = f"trader-all-skill-{release_suffix}.zip"
+    all_name = "trader-all-skill.zip"
     all_path = release_dir / all_name
     if all_path.exists():
         all_path.unlink()
@@ -208,15 +194,11 @@ def main() -> int:
             add_to_zip(staged, archive, arc_prefix=skill_slug)
     print(f"\nCombined: {all_path.relative_to(output_dir)}  ({all_path.stat().st_size / 1024:.0f} KB)")
 
-    manifest_path = release_dir / f"release-manifest-{release_suffix}.json"
-    manifest_path.write_text(build_release_manifest(manifest_entries), encoding="utf-8")
-    print(f"Manifest: {manifest_path.relative_to(output_dir)}")
-
     # --- Verify ---
     zip_paths = []
     print("\n--- Verification ---")
     for skill_slug, version, _ in stages:
-        zip_path = release_dir / f"{skill_slug}-{version}-{release_suffix}.zip"
+        zip_path = release_dir / f"{skill_slug}.zip"
         zip_paths.append(zip_path)
         with zipfile.ZipFile(zip_path, "r") as archive:
             names = archive.namelist()
@@ -231,8 +213,7 @@ def main() -> int:
     for _, _, staged in stages:
         shutil.rmtree(staged.parent)
 
-    # Return manifest path for test assertions
-    return manifest_path
+    return 0
 
 
 if __name__ == "__main__":
