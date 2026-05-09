@@ -200,7 +200,7 @@ def score_for(item: dict[str, Any]) -> float:
     if change >= 5 and position_ratio >= 0.65:
         score -= 10
     gap_pct = pct_change(current, confirm)
-    gap_ratio = gap_pct / 100.0
+    gap_ratio = gap_pct / 100.0 if gap_pct > 0 else 0.0
     if gap_ratio <= 0:
         score -= 4
     else:
