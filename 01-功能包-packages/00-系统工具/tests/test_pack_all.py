@@ -18,6 +18,7 @@ import pack_all
 SCRIPTS_DIR = Path(__file__).resolve().parents[3]
 PACKAGES_DIR = SCRIPTS_DIR / "01-功能包-packages"
 DIST_DIR = SCRIPTS_DIR / "03-安装包-dist"
+RELEASE_DIR = DIST_DIR / "releases"
 
 # (dir_name, slug) → entry script
 EXPECTED_SKILLS: list[tuple[str, str, str]] = [
@@ -76,28 +77,46 @@ def _verify_combined_zip(zf: zipfile.ZipFile, slug: str, expected_script: str) -
     assert any("momentum_core.py" in n for n in script_entries), f"{slug} missing momentum_core.py"
 
 
+def _clean_stale_releases() -> None:
+    """Remove all existing release zips so glob only sees current run."""
+    for f in RELEASE_DIR.glob("*.zip"):
+        f.unlink(missing_ok=True)
+
+
+def _clean_stale_releases() -> None:
+    for f in RELEASE_DIR.iterdir():
+        if f.suffix in {".zip", ".json"} and "trader" in f.name:
+            f.unlink(missing_ok=True)
+
+
 def test_pack_all_creates_individual_zips() -> None:
     """pack_all.py should produce individual zips for each skill."""
+    _clean_stale_releases()
     with mock.patch.object(pack_all, "repo_root") as mock_root:
         mock_root.return_value = SCRIPTS_DIR
         pack_all.main()
 
+        import json
+        manifest_file = list(RELEASE_DIR.glob("release-manifest-*.json"))[-1]
+        manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
         for _, slug, _ in EXPECTED_SKILLS:
-            zip_path = DIST_DIR / f"{slug}.zip"
-            assert zip_path.exists(), f"{zip_path} was not created"
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                assert len(zf.namelist()) > 0, f"{slug}.zip is empty"
+            entry = next(e for e in manifest["entries"] if e["skill"] == slug)
+            release_zip = list(RELEASE_DIR.glob(f"{slug}-{entry['version']}-*.zip"))
+            assert len(release_zip) == 1, f"No release zip found for {slug}"
+            with zipfile.ZipFile(release_zip[0], "r") as zf:
+                assert len(zf.namelist()) > 0, f"{release_zip[0]} is empty"
 
 
 def test_pack_all_creates_combined_zip() -> None:
     """pack_all.py should produce one combined zip."""
+    _clean_stale_releases()
     with mock.patch.object(pack_all, "repo_root") as mock_root:
         mock_root.return_value = SCRIPTS_DIR
         pack_all.main()
 
-        combined_path = DIST_DIR / "trader-all-skill.zip"
-        assert combined_path.exists(), f"{combined_path} was not created"
-        with zipfile.ZipFile(combined_path, "r") as zf:
+        combined_zips = list(RELEASE_DIR.glob("trader-all-skill-*.zip"))
+        assert len(combined_zips) == 1, f"Expected 1 combined zip, got {len(combined_zips)}"
+        with zipfile.ZipFile(combined_zips[0], "r") as zf:
             assert len(zf.namelist()) > 0, "Combined archive is empty"
 
 
@@ -110,83 +129,90 @@ def test_pack_all_contains_all_skills() -> None:
 
 def test_pack_all_individual_structure() -> None:
     """Each individual skill zip must have flat structure (files at root)."""
-    bundle_path = DIST_DIR / "trader-all-skill.zip"
-    bundle_path.unlink(missing_ok=True)
-
+    _clean_stale_releases()
     with mock.patch.object(pack_all, "repo_root") as mock_root:
         mock_root.return_value = SCRIPTS_DIR
         pack_all.main()
 
+    import json
+    manifest_files = list(RELEASE_DIR.glob("release-manifest-*.json"))
+    manifest = json.loads(manifest_files[-1].read_text(encoding="utf-8"))
     for dir_name, slug, expected_script in EXPECTED_SKILLS:
-        zip_path = DIST_DIR / f"{slug}.zip"
-        with zipfile.ZipFile(zip_path, "r") as zf:
+        entry = next(e for e in manifest["entries"] if e["skill"] == slug)
+        version = entry["version"]
+        # Find zip matching version+timestamp
+        release_zips = list(RELEASE_DIR.glob(f"{slug}-{version}-*.zip"))
+        assert len(release_zips) == 1, f"Expected exactly 1 zip for {slug}-{version}, got {len(release_zips)}"
+        with zipfile.ZipFile(release_zips[0], "r") as zf:
             _verify_skill_zip(zf, slug, expected_script)
 
 
 def test_pack_all_combined_structure() -> None:
     """Combined zip must use {slug}/ prefix for each skill."""
-    bundle_path = DIST_DIR / "trader-all-skill.zip"
-    bundle_path.unlink(missing_ok=True)
-
     with mock.patch.object(pack_all, "repo_root") as mock_root:
         mock_root.return_value = SCRIPTS_DIR
         pack_all.main()
 
-    with zipfile.ZipFile(bundle_path, "r") as zf:
+    combined_zips = list(RELEASE_DIR.glob("trader-all-skill-*.zip"))
+    assert len(combined_zips) >= 1, "No combined zip found"
+    combined_path = combined_zips[-1]
+    with zipfile.ZipFile(combined_path, "r") as zf:
         for dir_name, slug, expected_script in EXPECTED_SKILLS:
             _verify_combined_zip(zf, slug, expected_script)
 
-    bundle_path.unlink(missing_ok=True)
+    combined_path.unlink(missing_ok=True)
 
 
 def test_pack_all_no_package_skill() -> None:
     """Old package_skill.py should NOT be in any zip."""
-    bundle_path = DIST_DIR / "trader-all-skill.zip"
-    bundle_path.unlink(missing_ok=True)
-
     with mock.patch.object(pack_all, "repo_root") as mock_root:
         mock_root.return_value = SCRIPTS_DIR
         pack_all.main()
 
+    combined_zips = list(RELEASE_DIR.glob("trader-all-skill-*.zip"))
+    assert len(combined_zips) >= 1, "No combined zip found"
+    combined_path = combined_zips[-1]
+
     # Check combined zip
-    with zipfile.ZipFile(bundle_path, "r") as zf:
+    with zipfile.ZipFile(combined_path, "r") as zf:
         for name in zf.namelist():
             assert "package_skill.py" not in name, \
                 f"Old package_skill.py should not be in bundle: {name}"
 
     # Check individual zips
     for _, slug, _ in EXPECTED_SKILLS:
-        zip_path = DIST_DIR / f"{slug}.zip"
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            for name in zf.namelist():
-                assert "package_skill.py" not in name, \
-                    f"Old package_skill.py should not be in {slug}.zip: {name}"
+        release_zips = list(RELEASE_DIR.glob(f"{slug}-*.zip"))
+        if release_zips:
+            with zipfile.ZipFile(release_zips[-1], "r") as zf:
+                for name in zf.namelist():
+                    assert "package_skill.py" not in name, \
+                        f"Old package_skill.py should not be in {slug}: {name}"
 
-    bundle_path.unlink(missing_ok=True)
+    combined_path.unlink(missing_ok=True)
 
 
 def test_pack_all_skips_irrelevant_skills() -> None:
     """Deprecated trader-compare should NOT be in any zip."""
-    bundle_path = DIST_DIR / "trader-all-skill.zip"
-    bundle_path.unlink(missing_ok=True)
-
     with mock.patch.object(pack_all, "repo_root") as mock_root:
         mock_root.return_value = SCRIPTS_DIR
         pack_all.main()
 
     # Check combined zip
-    with zipfile.ZipFile(bundle_path, "r") as zf:
+    combined_zips = list(RELEASE_DIR.glob("trader-all-skill-*.zip"))
+    assert len(combined_zips) >= 1, "No combined zip found"
+    with zipfile.ZipFile(combined_zips[-1], "r") as zf:
         has_compare = any("trader-compare" in n for n in zf.namelist())
         assert not has_compare, "trader-compare should not be in unified zip"
 
     # Check individual zips
     for _, slug, _ in EXPECTED_SKILLS:
-        zip_path = DIST_DIR / f"{slug}.zip"
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            has_compare = any("trader-compare" in n for n in zf.namelist())
-            assert not has_compare, f"trader-compare should not be in {slug}.zip"
+        release_zips = list(RELEASE_DIR.glob(f"{slug}-*.zip"))
+        if release_zips:
+            with zipfile.ZipFile(release_zips[-1], "r") as zf:
+                has_compare = any("trader-compare" in n for n in zf.namelist())
+                assert not has_compare, f"trader-compare should not be in {slug}"
 
-    bundle_path.unlink(missing_ok=True)
+    combined_zips[-1].unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

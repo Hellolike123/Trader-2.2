@@ -218,7 +218,7 @@ def score_report(report: dict[str, Any]) -> dict[str, int]:
 
     if scene in {"等转强", "突破确认", "突破观察", "冲高减仓"}:
         chan += 7
-    elif scene in {"低吸观察", "防守观察"}:
+    elif scene in {"低吸观察", "防守观察", "防守观察，趋势下行谨慎"}:
         chan += 4
     elif scene == "暂不碰":
         chan -= 10
@@ -291,7 +291,7 @@ def structure_summary(report: dict[str, Any]) -> str:
     scene = str(report.get("scene") or "待补")
     if scene in {"等转强", "突破确认", "突破观察", "冲高减仓"}:
         return f"{stage}中，接近确认位，等待放量站稳。"
-    if scene in {"低吸观察", "防守观察"}:
+    if scene in {"低吸观察", "防守观察", "防守观察，趋势下行谨慎"}:
         return f"{stage}观察，防守位未破，等待止跌确认。"
     if scene == "暂不碰":
         return "结构偏弱，防守逻辑不清。"
@@ -587,7 +587,7 @@ def _pool_signal_verifications(items: list[dict[str, Any]]) -> tuple[list[dict[s
 
 def action_summary_for_scene(scene: str) -> str:
     """One-line action advice for pool items."""
-    if scene in {"低吸观察", "防守观察"}:
+    if scene in {"低吸观察", "防守观察", "防守观察，趋势下行谨慎"}:
         return "守纪律不追，等止跌确认"
     if scene in {"等转强"}:
         return "等放量确认"

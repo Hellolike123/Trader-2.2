@@ -9,6 +9,7 @@ STATUS_PRIORITY = {
     "低吸观察": 4,
     "等转强": 3,
     "防守观察": 2,
+    "防守观察，趋势下行谨慎": 2,
     "冲高减仓": 2,
     "暂不碰": 1,
     "数据失败": 0,
@@ -108,7 +109,7 @@ def reason_for(status: str, current: float, defense: float, confirm: float, upsi
         return f"现价 {current:.2f}元 已跌破或贴近防守位 {defense:.2f}元，先不参与。"
     if status == "优先候选":
         return f"防守位 {defense:.2f}元 清楚，确认位 {confirm:.2f}元，向上 {upside:.2f}%、向下 {downside:.2f}%，盈亏比约 {rr:.2f}。"
-    if status == "防守观察":
+    if status in ("防守观察", "防守观察，趋势下行谨慎"):
         return f"仍在防守位 {defense:.2f}元 上方，但确认位 {confirm:.2f}元 还没收回，先观察承接。"
     return f"现价离确认位 {confirm:.2f}元 仍需确认，未放量站上前不排第一。"
 

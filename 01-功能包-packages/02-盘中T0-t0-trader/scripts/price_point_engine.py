@@ -408,6 +408,29 @@ def observation_validity(report_data: dict[str, Any], zones: dict[str, Any]) -> 
     return {"buy_valid": buy_valid, "sell_valid": sell_valid, "buy_reason": buy_reason, "sell_reason": sell_reason}
 
 
+def _close_vals(bars: list[dict[str, Any]]) -> list[float]:
+    vals: list[float] = []
+    for b in bars:
+        try:
+            vals.append(float(b.get("close")))
+        except (TypeError, ValueError):
+            pass
+    return vals
+
+
+def _trend_filter(daily_bars: list[dict[str, Any]]) -> bool:
+    if not daily_bars:
+        return True
+    closes = _close_vals(daily_bars)
+    if len(closes) < 900:
+        return True
+    ma30 = sum(closes[-30:]) / 30
+    long_avg = sum(closes[:-30]) / max(len(closes) - 30, 1)
+    if long_avg <= 0:
+        return True
+    return ma30 > long_avg
+
+
 def vwap_uptrend(state: dict[str, Any]) -> bool:
     vwap = state.get("vwap")
     prev = state.get("prev_vwap")
@@ -427,6 +450,8 @@ def detect_buy_trigger(report_data: dict[str, Any], zones: dict[str, Any], state
         return trigger_result("被阻断", None, [], ["T0净空间不足"])
     if current > zone["upper"]:
         return trigger_result("未进入候选区", None, [], [])
+    if not _trend_filter(report_data.get("daily_bars") or []):
+        return trigger_result("趋势下行暂不低吸", None, [], ["30日均线下破长期均线"])
     last = bars[-1]
     blocked = []
     if is_new_low_recent(bars):
@@ -501,6 +526,8 @@ def detect_sell_trigger(report_data: dict[str, Any], zones: dict[str, Any], stat
         return trigger_result("被阻断", None, [], ["卖出空间不足"])
     if current < zone["lower"]:
         return trigger_result("未进入候选区", None, [], [])
+    if not _trend_filter(report_data.get("daily_bars") or []):
+        return trigger_result("趋势下行暂不高抛", None, [], ["30日均线下破长期均线"])
     last = bars[-1]
     blocked = []
     if is_new_high_recent(bars):

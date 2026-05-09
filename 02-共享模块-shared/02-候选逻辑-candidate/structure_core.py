@@ -234,6 +234,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         change_pct=change_pct,
         ma_values=ma_values,
         pressure_space_pct=pressure_space_pct,
+        bars=bars,
     )
 
     return {

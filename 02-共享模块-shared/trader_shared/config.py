@@ -26,6 +26,8 @@ MAX_REASONABLE_MA_DISTANCE_PCT: float = 0.12
 STRUCTURE_WINDOW: int = 20
 
 # ---- decision_core constants ------------------------------------------------
+DEFENSE_STATUSES = {"防守观察", "防守观察，趋势下行谨慎"}
+
 STATUS_SCORE: dict[str, int] = {
     "低吸观察": 80,
     "等转强": 70,
@@ -57,6 +59,11 @@ CHANLUN_MIN_BARS_PER_STROKE: int = 5
 
 # ---- Market index ----
 INDEX_CODE: str = "000852.SH"
+
+# ---- Trend filter constants (long-term MA filter) ----
+TREND_MA_SHORT: int = 30
+TREND_MA_LONG: int = 900
+TREND_FILTER_ENABLED: bool = True  # 默认开启趋势过滤
 
 # ---- Wyckoff constants ----
 WYCKOFF_MIN_BARS: int = 15

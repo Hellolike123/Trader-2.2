@@ -86,6 +86,40 @@ try:
 except Exception:  # pragma: no cover - optional per skill
     POSITION_RATIO_HIGH = 0.65
 
+try:
+    from trader_shared.config import TREND_MA_SHORT, TREND_MA_LONG, TREND_FILTER_ENABLED
+except Exception:
+    TREND_MA_SHORT = 30
+    TREND_MA_LONG = 900
+    TREND_FILTER_ENABLED = True
+
+STATUS_SCORE["防守观察，趋势下行谨慎"] = 50
+
+
+def _close(vals: list[dict[str, Any]]) -> list[float]:
+    result = []
+    for v in vals:
+        try:
+            c = float(v.get("close"))
+            result.append(c)
+        except (TypeError, ValueError):
+            pass
+    return result
+
+
+def _trend_filter(bars: list[dict[str, Any]]) -> bool:
+    closes = _close(bars)
+    if len(closes) < TREND_MA_LONG:
+        return True
+    try:
+        ma30 = sum(closes[-TREND_MA_SHORT:]) / TREND_MA_SHORT
+    except Exception:
+        return True
+    long_avg = sum(closes[:-TREND_MA_SHORT]) / max(len(closes) - TREND_MA_SHORT, 1)
+    if long_avg <= 0:
+        return True
+    return ma30 > long_avg
+
 
 def status_for(
     current: float,
@@ -97,7 +131,9 @@ def status_for(
     change_pct: Any,
     ma_values: dict[str, float | None],
     pressure_space_pct: float,
+    bars: list[dict[str, Any]] | None = None,
 ) -> str:
+    trend_ok = _trend_filter(bars) if (bars and TREND_FILTER_ENABLED) else True
     change = to_float(change_pct) or 0.0
     below_ma_count = sum(1 for value in ma_values.values() if value is not None and current < value)
     above_ma5_ma10 = all(current >= (ma_values.get(name) or float("inf")) for name in ("ma5", "ma10"))
@@ -110,18 +146,22 @@ def status_for(
             "change_pct": change, "position_ratio": position_ratio,
             "pressure_space_pct": pressure_space_pct,
             "above_ma5_ma10": above_ma5_ma10, "below_ma_count": below_ma_count,
+            "trend_ok": trend_ok,
         }
         result = engine.evaluate(ctx)
         if result is not None:
-            return str(result)
+            status = str(result)
+            if not trend_ok and status in {"低吸观察", "冲高减仓"}:
+                status = "防守观察，趋势下行谨慎"
+            return status
     if current <= hard_stop or current < support * 0.995:
         return "暂不碰"
-    if change <= CHANGE_THRESHOLD_DROP and current > low_zone_upper:
+    if trend_ok and change <= CHANGE_THRESHOLD_DROP and current > low_zone_upper:
         return "暂不碰"
     if current <= low_zone_upper:
-        return "低吸观察"
+        return "低吸观察" if trend_ok else "防守观察，趋势下行谨慎"
     if current >= confirm:
-        return "冲高减仓" if change >= CHANGE_THRESHOLD_STRONG else "等转强"
+        return "冲高减仓" if (change >= CHANGE_THRESHOLD_STRONG and trend_ok) else "等转强"
     if 0 <= pressure_space_pct < 0.008:
         return "空间不足"
     if above_ma5_ma10 and position_ratio >= POSITION_RATIO_STRONG:
@@ -142,11 +182,19 @@ def action_for(status: str, low: float, high: float, sell_observe: float, confir
         return f"冲高先看 {sell_observe:.2f}元 附近量能，不机械卖。"
     if status == "空间不足":
         return "上方空间太近，先观察，不追。"
-    if status == "防守观察":
+    if status in _DEFENSE_STATUSES:
         return "先看防守是否稳定，低吸和减仓都等确认。"
     if status == "暂不碰":
         return "风险不清楚，先不参与。"
     return "数据失败，先不参与。"
+
+
+_DEFENSE_STATUSES = {"防守观察", "防守观察，趋势下行谨慎"}
+
+
+def _is_defense(status: str) -> bool:
+    """Check if status represents a defensive posture."""
+    return status in _DEFENSE_STATUSES
 
 
 def score_for(item: dict[str, Any]) -> float:
@@ -257,7 +305,7 @@ def livermore_scale(status: str, score: float) -> int:
             tier = 3
         elif score >= 65:
             tier = 2
-    elif status in {"等转强", "防守观察"}:
+    elif status in {"等转强", "防守观察", "防守观察，趋势下行谨慎"}:
         tier = 2
     elif status == "冲高减仓":
         tier = 0

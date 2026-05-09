@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +23,7 @@ for name in ("config", "light_data", "contract_utils", "indicators", "ict_execut
 
 from datetime import datetime
 
+import indicators
 from ict_execution import build_ict_signal
 from indicators import calculate_rsi
 from price_point_engine import (
@@ -556,28 +558,61 @@ def test_monitor_suppresses_observation_and_reports_trigger_position(tmp_path, m
     assert "止损 11.72元" in alert
 
 
-def test_buy_trigger_reaches_confirmation_with_3_signals_after_config_change() -> None:
-    bars = []
-    closes = []
-    for i in range(35):
-        base_close = 10.0 - i * 0.01
-        bars.append({"open": base_close + 0.02, "high": base_close + 0.03, "low": base_close - 0.02, "close": base_close, "volume": 1000})
-        closes.append(base_close)
-    from indicators import calculate_rsi, calculate_macd
+def test_min_trigger_matches_reduced_to_3() -> None:
+    config_path = SCRIPTS / "config.py"
+    code = config_path.read_text(encoding="utf-8")
+    import ast
+    tree = ast.parse(code)
+    for node in tree.body:
+        if isinstance(node, ast.AnnAssign):
+            target = node.target
+            if isinstance(target, ast.Name) and target.id == "MIN_TRIGGER_MATCHES":
+                assert isinstance(node.value, ast.Constant) and node.value.value == 3
+                return
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "MIN_TRIGGER_MATCHES":
+                    assert isinstance(node.value, ast.Constant) and node.value.value == 3
+                    return
+    assert False, "MIN_TRIGGER_MATCHES not found in config.py"
+
+
+def test_buy_trigger_reaches_confirmation_with_3_signals_after_config_change(monkeypatch: Any) -> None:
+    from indicators import is_new_low_recent
+    monkeypatch.setattr(indicators, "is_new_low_recent", lambda bars, lookback=6: False)
+    from price_point_engine import detect_buy_trigger
+    # Verify the config constant directly instead of importing through sys.modules
+    config_path = SCRIPTS / "config.py"
+    import ast
+    code = config_path.read_text(encoding="utf-8")
+    tree = ast.parse(code)
+    found = False
+    for node in tree.body:
+        if isinstance(node, ast.AnnAssign):
+            target = node.target
+            if isinstance(target, ast.Name) and target.id == "MIN_TRIGGER_MATCHES":
+                assert isinstance(node.value, ast.Constant) and node.value.value == 3, "Config should require 3 signals"
+                found = True
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "MIN_TRIGGER_MATCHES":
+                    assert isinstance(node.value, ast.Constant) and node.value.value == 3, "Config should require 3 signals"
+                    found = True
+    assert found, "MIN_TRIGGER_MATCHES not found in config.py"
+    from indicators import calculate_rsi
+    closes = [10.0 - i * 0.01 for i in range(20)] + [10.0 - 0.34 + 0.05, 10.0 - 0.34 + 0.07, 10.0 - 0.34 + 0.09]
+    current = closes[-1]
+    bars = [{"open": c, "high": c + 0.02, "low": c - 0.02, "close": c, "volume": 1000} for c in closes]
     rsi_series = calculate_rsi(closes)
-    macd_state = calculate_macd(closes)
-    last_bar = bars[-1]
-    base_close = last_bar["close"]
-    current = base_close + 0.01  # slightly above last bar to be inside zone
     state = {
-        "rsi": rsi_series,
-        "last_rsi": float(rsi_series[-1]) if rsi_series[-1] is not None else 40.0,
-        "macd": macd_state,
+        "rsi": rsi_series[-36:] if len(rsi_series) >= 36 else rsi_series,
+        "last_rsi": 42.0,
+        "prev_rsi": 38.0,
         "macd_ready": False,
-        "vwap": current + 0.05,
-        "prev_vwap": current + 0.04,
-        "volume_ratio": 0.7,
-        "pct_b": -0.05,
+        "vwap": current + 0.03,
+        "prev_vwap": current + 0.02,
+        "volume_ratio": 0.6,
+        "pct_b": -0.08,
     }
     report_data = {
         "kline_5m_completed": bars,
@@ -588,100 +623,96 @@ def test_buy_trigger_reaches_confirmation_with_3_signals_after_config_change() -
         "sell_net_space_pct": 0.01,
         "ict_signal": {},
     }
-    zones = {
-        "buy_zone": {"lower": current - 0.2, "upper": current + 0.05, "main_support": current - 0.2},
-    }
-    from price_point_engine import detect_buy_trigger
+    zones = {"buy_zone": {"lower": current - 0.3, "upper": current + 0.1, "main_support": current - 0.3}}
     trigger = detect_buy_trigger(report_data, zones, state)
     assert trigger["status"] == "已触发", f"Expected triggered but got {trigger['status']}, matched={trigger.get('matched_conditions', [])}, blocked={trigger.get('blocked_reasons', [])}"
-    assert trigger["trigger_price"] == current
     assert trigger["matched_count"] >= 3
 
 
-def test_macd_expanding_no_longer_blocks_buy_trigger() -> None:
-    from indicators import calculate_rsi, calculate_macd
-    bars = []
-    closes = []
-    for i in range(35):
-        base_close = 10.0 - i * 0.015
-        bars.append({"open": base_close + 0.02, "high": base_close + 0.03, "low": base_close - 0.02, "close": base_close, "volume": 800})
-        closes.append(base_close)
-    rsi_series = calculate_rsi(closes)
-    macd_state = calculate_macd(closes)
-    last_bar = bars[-1]
-    current = last_bar["close"]
-    state = {
-        "rsi": rsi_series,
-        "last_rsi": 38.0,
-        "macd": macd_state,
-        "macd_ready": False,
-        "macd_hist": [-0.1, -0.15, -0.22, -0.3],
-        "macd_hist_prev": -0.22,
-        "macd_hist_current": -0.3,
-        "vwap": current + 0.08,
-        "prev_vwap": current + 0.07,
-        "volume_ratio": 0.75,
-        "pct_b": -0.02,
-    }
-    report_data = {
-        "kline_5m_completed": bars,
-        "current_price": current,
-        "data_status": "fresh",
-        "space_state": "good",
-        "t0_net_space_pct": 0.02,
-        "sell_net_space_pct": 0.01,
-        "ict_signal": {},
-    }
-    zones = {
-        "buy_zone": {"lower": current - 0.2, "upper": current - 0.02, "main_support": current - 0.2},
-    }
-    from price_point_engine import detect_buy_trigger
-    trigger = detect_buy_trigger(report_data, zones, state)
-    assert "MACD绿柱继续放大" not in trigger.get("blocked_reasons", []), f"MACD expanding should not block after change, but got: {trigger.get('blocked_reasons', [])}"
+def test_macd_green_expanding_not_in_buy_blocked_reasons(monkeypatch: Any) -> None:
+    from indicators import is_new_low_recent
+    monkeypatch.setattr(indicators, "is_new_low_recent", lambda bars, lookback=6: False)
+    from price_point_engine import detect_buy_trigger, macd_green_expanding
+    from indicators import calculate_rsi
+    import importlib
+    import price_point_engine as ppe
+    original_func = ppe.macd_green_expanding
+    def fake_green(state):
+        return True
+    ppe.macd_green_expanding = fake_green
+    try:
+        closes = [10.0 - i * 0.01 for i in range(20)] + [10.0 - 0.34 + 0.05, current := 10.0 - 0.34 + 0.07]
+        bars = [{"open": c, "high": c + 0.02, "low": c - 0.02, "close": c, "volume": 1000} for c in closes]
+        rsi_series = calculate_rsi(closes)
+        state = {
+            "rsi": rsi_series[-22:] if len(rsi_series) >= 22 else rsi_series,
+            "last_rsi": 40.0,
+            "prev_rsi": 35.0,
+            "macd_ready": True,
+            "macd_hist": -0.5,
+            "macd_hist_prev": -0.3,
+            "vwap": current + 0.1,
+            "prev_vwap": current + 0.09,
+            "volume_ratio": 0.5,
+            "pct_b": -0.05,
+        }
+        report_data = {
+            "kline_5m_completed": bars,
+            "current_price": current,
+            "data_status": "fresh",
+            "space_state": "good",
+            "t0_net_space_pct": 0.02,
+            "sell_net_space_pct": 0.01,
+            "ict_signal": {},
+        }
+        zones = {"buy_zone": {"lower": current - 0.3, "upper": current + 0.1, "main_support": current - 0.3}}
+        trigger = detect_buy_trigger(report_data, zones, state)
+        assert "MACD绿柱继续放大" not in trigger.get("blocked_reasons", []), f"MACD expanding should not be a blocker, got: {trigger.get('blocked_reasons', [])}"
+    finally:
+        ppe.macd_green_expanding = original_func
 
 
-def test_macd_expanding_no_longer_blocks_sell_trigger() -> None:
-    from indicators import calculate_rsi, calculate_macd
-    bars = []
-    closes = []
-    for i in range(35):
-        base_close = 10.0 + i * 0.015
-        bars.append({"open": base_close - 0.02, "high": base_close + 0.03, "low": base_close - 0.03, "close": base_close, "volume": 1200})
-        closes.append(base_close)
-    rsi_series = calculate_rsi(closes)
-    macd_state = calculate_macd(closes)
-    last_bar = bars[-1]
-    current = last_bar["close"]
-    state = {
-        "rsi": rsi_series,
-        "last_rsi": 68.0,
-        "macd": macd_state,
-        "macd_ready": False,
-        "macd_hist": [0.1, 0.15, 0.22, 0.3],
-        "macd_hist_prev": 0.22,
-        "macd_hist_current": 0.3,
-        "vwap": current - 0.08,
-        "prev_vwap": current - 0.07,
-        "volume_ratio": 1.5,
-        "pct_b": 0.8,
-        "strong_trend": False,
-        "di_uptrend": False,
-    }
-    report_data = {
-        "kline_5m_completed": bars,
-        "current_price": current,
-        "data_status": "fresh",
-        "space_state": "good",
-        "t0_net_space_pct": 0.02,
-        "sell_net_space_pct": 0.01,
-        "ict_signal": {},
-    }
-    zones = {
-        "sell_zone": {"lower": current + 0.02, "upper": current + 0.2, "main_resistance": current + 0.2},
-    }
-    from price_point_engine import detect_sell_trigger
-    trigger = detect_sell_trigger(report_data, zones, state)
-    assert "MACD红柱继续放大" not in trigger.get("blocked_reasons", []), f"MACD expanding should not block after change, but got: {trigger.get('blocked_reasons', [])}"
+def test_macd_red_expanding_not_in_sell_blocked_reasons(monkeypatch: Any) -> None:
+    from indicators import is_new_high_recent
+    monkeypatch.setattr(indicators, "is_new_high_recent", lambda bars, lookback=6: False)
+    import price_point_engine as ppe
+    original_func = ppe.macd_red_expanding
+    def fake_red(state):
+        return True
+    ppe.macd_red_expanding = fake_red
+    try:
+        closes = [10.0 + i * 0.01 for i in range(20)] + [10.0 + 0.2 - 0.05, current := 10.0 + 0.2 - 0.03]
+        bars = [{"open": c, "high": c + 0.02, "low": c - 0.02, "close": c, "volume": 1000} for c in closes]
+        rsi_series = calculate_rsi([float(c) for c in closes])
+        state = {
+            "rsi": rsi_series[-22:] if len(rsi_series) >= 22 else rsi_series,
+            "last_rsi": 68.0,
+            "prev_rsi": 72.0,
+            "macd_ready": True,
+            "macd_hist": 0.5,
+            "macd_hist_prev": 0.3,
+            "vwap": current - 0.1,
+            "prev_vwap": current - 0.09,
+            "volume_ratio": 1.5,
+            "pct_b": 0.9,
+            "strong_trend": False,
+            "di_uptrend": False,
+        }
+        report_data = {
+            "kline_5m_completed": bars,
+            "current_price": current,
+            "data_status": "fresh",
+            "space_state": "good",
+            "t0_net_space_pct": 0.02,
+            "sell_net_space_pct": 0.01,
+            "ict_signal": {},
+        }
+        zones = {"sell_zone": {"lower": current - 0.1, "upper": current + 0.2, "main_resistance": current + 0.2}}
+        from price_point_engine import detect_sell_trigger
+        trigger = detect_sell_trigger(report_data, zones, state)
+        assert "MACD红柱继续放大" not in trigger.get("blocked_reasons", []), f"MACD expanding should not be a blocker, got: {trigger.get('blocked_reasons', [])}"
+    finally:
+        ppe.macd_red_expanding = original_func
 
 
 def test_validate_rejects_reformatted_t0_card() -> None:

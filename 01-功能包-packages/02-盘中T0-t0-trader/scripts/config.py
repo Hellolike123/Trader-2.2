@@ -8,7 +8,7 @@ from trader_shared.config import (
 STRUCTURE_WINDOW: int = 20
 MIN_5M_BARS: int = 20
 MACD_WARMUP_BARS: int = 35
-MIN_TRIGGER_MATCHES: int = 4
+MIN_TRIGGER_MATCHES: int = 3
 STRONG_TRIGGER_MATCHES: int = 5
 MIN_T_AMPLITUDE_PCT: float = 0.015
 GOOD_T_AMPLITUDE_PCT: float = 0.03

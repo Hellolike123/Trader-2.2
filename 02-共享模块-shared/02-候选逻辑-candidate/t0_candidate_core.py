@@ -45,6 +45,8 @@ T0_LOW = "等待低吸触发"
 T0_HIGH = "等待高抛触发"
 T0_NONE = "不做"
 
+_DEFENSE_STATUSES = {"防守观察", "防守观察，趋势下行谨慎"}
+
 STATUS_SCORE = {
     "低吸观察": 80,
     "等转强": 70,
@@ -127,9 +129,9 @@ def t0_action_for(status: str, current: float, support: float, confirm: float, p
     width = max(confirm - support, 0)
     if status in {"暂不碰", "数据失败"} or current <= 0 or width / current * 100 < T0_MIN_SPACE_PCT:
         return T0_NONE
-    if status in {"低吸观察", "防守观察"} and position_ratio <= T0_LOW_POSITION_THRESHOLD:
+    if status in _DEFENSE_STATUSES and position_ratio <= T0_LOW_POSITION_THRESHOLD:
         return T0_LOW
-    if status in {"等转强", "冲高减仓"} or position_ratio >= T0_HIGH_POSITION_THRESHOLD or change >= STRONG_MOVE_THRESHOLD:
+    if status in {"等转强", "冲高减仓"} | _DEFENSE_STATUSES or position_ratio >= T0_HIGH_POSITION_THRESHOLD or change >= STRONG_MOVE_THRESHOLD:
         return T0_HIGH
     return T0_NONE
 
@@ -141,7 +143,7 @@ def action_for(status: str, low: float, high: float, sell_observe: float, confir
         return f"不追，等站稳 {confirm:.2f}元 后再看。"
     if status == "冲高减仓":
         return f"冲高先看 {sell_observe:.2f}元 附近量能，不机械卖。"
-    if status == "防守观察":
+    if status in _DEFENSE_STATUSES:
         return "先看防守是否稳定，低吸和高抛都等触发。"
     if status == "暂不碰":
         return "风险不清楚，先不参与。"
@@ -154,7 +156,7 @@ def empty_position_reason_for(status: str, low: float, high: float, confirm: flo
         return f"接近 {low:.2f}-{high:.2f}元 观察区，但还没触发，适合等确认，不适合直接追。"
     if status == "等转强":
         return f"空仓不追，等放量站稳 {confirm:.2f}元 后再看。"
-    if status == "防守观察":
+    if status in _DEFENSE_STATUSES:
         return "位置还不够主动，空仓只观察，不提前买。"
     if change >= 5:
         return "当日涨幅偏大，空仓不作为第一候选。"
@@ -162,7 +164,7 @@ def empty_position_reason_for(status: str, low: float, high: float, confirm: flo
 
 
 def holding_reason_for(status: str, low: float, high: float, sell_observe: float) -> str:
-    if status in {"低吸观察", "防守观察"}:
+    if status in {"低吸观察"} | _DEFENSE_STATUSES:
         return f"有低吸观察区 {low:.2f}-{high:.2f}元 和高抛观察位 {sell_observe:.2f}元，具体盘中触发交给 t0-trader。"
     if status in {"等转强", "冲高减仓"}:
         return f"更适合盯 {sell_observe:.2f}元 附近冲高表现，量能不足再考虑T。"

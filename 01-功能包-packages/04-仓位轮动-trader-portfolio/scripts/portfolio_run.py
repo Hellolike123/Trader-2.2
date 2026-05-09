@@ -140,7 +140,7 @@ def signal_state_for_item(item: dict[str, Any], *, market_level: str = "") -> tu
         return "track", "bullish", "track", "medium"
     if status in {"等转强", "突破确认", "突破观察"}:
         return "wait_for_confirmation", "bullish_lean", "observe", "medium"
-    if status in {"低吸观察", "防守观察"}:
+    if status in {"低吸观察", "防守观察", "防守观察，趋势下行谨慎"}:
         return "low_buy_watch", "bullish_lean", "observe", "medium"
     return "observe", "neutral", "observe", "low"
 

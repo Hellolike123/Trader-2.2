@@ -451,7 +451,7 @@ def signal_state(r: dict[str, Any]) -> tuple[str, str, str, str]:
         return "reduce", "neutral", "reduce", "medium"
     if current >= confirm or scene in {"突破确认", "等转强"}:
         return "track", "bullish", "track", "medium"
-    if scene in {"低吸观察", "防守观察", "空间不足"}:
+    if scene in {"低吸观察", "防守观察", "防守观察，趋势下行谨慎", "空间不足"}:
         return "wait_for_confirmation", "bullish_lean", "observe", "medium"
     return "observe", "neutral", "observe", "low"
 
@@ -480,7 +480,7 @@ def signal_risk_flags(r: dict[str, Any]) -> list[str]:
 def state_text(stage: str, scene: str) -> str:
     if stage == "转弱":
         return "暂不碰"
-    if scene in {"低吸观察", "防守观察"}:
+    if scene in {"低吸观察", "防守观察", "防守观察，趋势下行谨慎"}:
         return "修复观察，未确认转强"
     if scene == "空间不足":
         return "空间不足，先观察"
@@ -737,7 +737,7 @@ def action_text_for_scene(scene: str) -> str:
     """One-line action advice based on scene."""
     if scene in {"低吸观察"}:
         return "等止跌确认再动手"
-    if scene in {"防守观察"}:
+    if scene in {"防守观察", "防守观察，趋势下行谨慎"}:
         return "守纪律不追"
     if scene in {"等转强"}:
         return "等放量确认"

@@ -2,8 +2,8 @@
 """Pack all skills into correctly structured zips for Hermes/Agent installation.
 
 Produces two types of archives in 03-安装包-dist/:
-  - Individual skill zips (trader.zip, t0-trader.zip, etc.)
-    → Files at root level, unzip directly into ~/.hermes/skills/<skill>/
+   - Individual skill zips (trader.zip, t0-trader.zip, etc.)
+     → Files under <skill_name>/ prefix inside zip
   - Combined archive (trader-all-skill.zip)
     → Files under <skill_name>/ prefix, unzip into ~/.hermes/skills/
 
@@ -213,9 +213,11 @@ def main() -> int:
     print(f"Manifest: {manifest_path.relative_to(output_dir)}")
 
     # --- Verify ---
+    zip_paths = []
     print("\n--- Verification ---")
     for skill_slug, version, _ in stages:
         zip_path = release_dir / f"{skill_slug}-{version}-{release_suffix}.zip"
+        zip_paths.append(zip_path)
         with zipfile.ZipFile(zip_path, "r") as archive:
             names = archive.namelist()
             has_meta = "_meta.json" in names
@@ -229,7 +231,8 @@ def main() -> int:
     for _, _, staged in stages:
         shutil.rmtree(staged.parent)
 
-    return 0
+    # Return manifest path for test assertions
+    return manifest_path
 
 
 if __name__ == "__main__":
