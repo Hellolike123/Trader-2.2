@@ -41,6 +41,7 @@ def calc_macd(closes: list[float]) -> dict[str, Any]:
     ema12 = sum(closes[:12]) / 12.0
     ema26 = sum(closes[:26]) / 26.0
     macd_line: float | None = None
+    macd_prev: float | None = None
     dea: float | None = None
     dea_prev: float | None = None
     hist: float | None = None
@@ -50,16 +51,33 @@ def calc_macd(closes: list[float]) -> dict[str, Any]:
         ema12 = ema12 * 11 / 13 + c * 2 / 13
         if i >= 26:
             ema26 = ema26 * 25 / 27 + c * 2 / 27
-            macd_line = ema12 - ema26
-            dea_buffer.append(macd_line)
+            curr_macd = ema12 - ema26
+            dea_buffer.append(curr_macd)
             if len(dea_buffer) == 9:
                 dea = sum(dea_buffer) / 9.0
-            elif len(dea_buffer) > 9:
+                macd_line = curr_macd
+            elif len(dea_buffer) > 9 and dea is not None:
+                macd_prev = macd_line
                 dea_prev = dea
-                dea = dea * 8 / 10 + macd_line * 2 / 10
+                dea = dea * 8 / 10 + curr_macd * 2 / 10
+                macd_line = curr_macd
     hist = macd_line - dea if (macd_line is not None and dea is not None) else None
-    gc = dea_prev is not None and macd_line is not None and dea is not None and dea > dea_prev and macd_line > dea
-    dc = dea_prev is not None and macd_line is not None and dea is not None and dea < dea_prev and macd_line < dea
+    gc = (
+        macd_prev is not None
+        and dea_prev is not None
+        and macd_line is not None
+        and dea is not None
+        and macd_prev <= dea_prev
+        and macd_line > dea
+    )
+    dc = (
+        macd_prev is not None
+        and dea_prev is not None
+        and macd_line is not None
+        and dea is not None
+        and macd_prev >= dea_prev
+        and macd_line < dea
+    )
     return {"macd_line": macd_line, "dea": dea, "histogram": hist, "golden_cross": gc, "death_cross": dc}
 
 
@@ -128,12 +146,11 @@ def assess_momentum(bars: list[dict]) -> dict[str, Any]:
         c = to_float(b.get("close"))
         h = to_float(b.get("high"))
         l_ = to_float(b.get("low"))
-        if c is not None:
-            closes.append(c)
-        if h is not None:
-            highs.append(h)
-        if l_ is not None:
-            lows.append(l_)
+        if c is None or h is None or l_ is None:
+            continue
+        closes.append(c)
+        highs.append(h)
+        lows.append(l_)
     if len(closes) < 30:
         return {"direction": "neutral", "score": 50, "signals": [], "strength": "insufficient"}
     rsi = calc_rsi(closes, 14)

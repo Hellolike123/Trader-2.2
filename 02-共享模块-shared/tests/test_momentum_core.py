@@ -55,6 +55,11 @@ class TestCalcMacd:
         m = calc_macd(closes)
         assert m["macd_line"] is None or m["macd_line"] > 0
 
+    def test_macd_cross_flags_are_mutually_exclusive(self):
+        closes = [10.0 + i * 0.2 for i in range(40)] + [18.0 - i * 0.3 for i in range(20)]
+        m = calc_macd(closes)
+        assert not (m["golden_cross"] and m["death_cross"])
+
 
 class TestCalcAdx:
     def test_adx_uptrend(self):
@@ -87,6 +92,16 @@ class TestCalcBollinger:
 class TestAssessMomentum:
     def test_momentum_basic(self):
         bars = _bars([10.0 + i * 0.1 for i in range(35)])
+        m = assess_momentum(bars)
+        assert "direction" in m
+        assert "score" in m
+        assert 0 <= m["score"] <= 100
+
+    def test_momentum_skips_incomplete_ohlc_rows(self):
+        bars = _bars([10.0 + i * 0.1 for i in range(40)])
+        bars[5].pop("high")
+        bars[12]["low"] = None
+        bars[20].pop("close")
         m = assess_momentum(bars)
         assert "direction" in m
         assert "score" in m

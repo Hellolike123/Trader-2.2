@@ -61,7 +61,8 @@ def _calc_macd(bars: list[dict]) -> list[dict]:
         else:
             dea_val = dea_val * 8 / 10 + d * 2 / 10
 
-        bars[i]["macd_histogram"] = round(2 * (d - dea_val), 4)
+        # Keep histogram definition consistent with momentum_core: DIF - DEA (1x scale)
+        bars[i]["macd_histogram"] = round(d - dea_val, 4)
 
     return bars
 
