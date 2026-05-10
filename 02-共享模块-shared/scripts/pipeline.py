@@ -196,16 +196,16 @@ def _symbols_match(a: str, b: str) -> bool:
 def conflicting_signals(name: str) -> list[str]:
     """Return warnings matching the stock by name, code, or normalized symbol.
     
-    FIX-T-BIAS-138: Ensure symmetric matching across all input formats.
-    A warning for '688248' is found whether queried as '688248', '688248.SH',
-    '688248.SZ', or '688248.bj'.
+    FIX: Skip warnings with empty stock (global/no-owner warnings) so they
+    don't leak into every stock's conflict list.  Only return warnings that
+    are explicitly about this stock by name/code/symbol.
     """
     state = _load()
     results: list[str] = []
     for w in state.get("warnings", []):
         stock = str(w.get("stock") or "")
         if stock == "":
-            results.append(str(w.get("msg") or ""))
+            # Global warning — do not leak into per-stock queries
             continue
         if stock == name:
             results.append(str(w.get("msg") or ""))
