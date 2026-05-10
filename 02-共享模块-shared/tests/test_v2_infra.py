@@ -73,9 +73,11 @@ def test_conflicting_signals_exact(tmp_state):
 
 
 def test_conflicting_signals_empty_stock(tmp_state):
+    """Empty-stock (global) warnings must not leak into per-stock queries."""
     add_warning("全局警告", "")
     conflicts = conflicting_signals("测试")
-    assert "全局警告" in conflicts
+    assert "全局警告" not in conflicts
+    # Global warnings are still saved in the state (just not returned by conflicting_signals)
 
 
 def test_get_full_market_unknown(tmp_state):
