@@ -24,10 +24,10 @@ import candidate_core as core
 from candidate_core import build_structure_context, atr_volatility_level
 
 try:
-    from review_core import calc_chip_distribution as _calc_chip
+    from trader_shared.chip_distribution import calc_chip_distribution as _calc_chip
 except ImportError:
     def _calc_chip(daily, lookback=60):
-        return {"peaks": [], "chip_at_price": None}
+        return {"peaks": [], "total_volume": 0, "current_pct": None, "mid_price": None}
 from config import (
     LOOKBACK_DAYS,
     STRUCTURE_WINDOW,
@@ -35,7 +35,15 @@ from config import (
 from trader_shared.data_provider import get_provider
 from trader_shared.strategy_protocol import run_all
 from light_data import to_float, pct_change
-from models import DATA_STATUS_MAP
+try:
+    from models import DATA_STATUS_MAP
+except ImportError:
+    DATA_STATUS_MAP: dict[str, str] = {
+        "complete": "full",
+        "partial": "partial",
+        "degraded": "degraded",
+        "failed": "insufficient",
+    }
 
 _run_analysis_shared_failed = False
 
@@ -157,6 +165,17 @@ def build_report(target: str) -> dict[str, Any]:
     buy_scenes = {"低吸观察", "防守观察", "等转强"}
     position_cap = min(10, atr_cap) if scene in buy_scenes else 10
 
+    chip = _calc_chip(bars, lookback=60)
+    chip_peaks = chip.get("peaks", [])
+    chip_support: float | None = None
+    chip_resistance: float | None = None
+    for p in chip_peaks:
+        price = p["price"]
+        if price < current:
+            chip_support = price
+        elif price > current and chip_resistance is None:
+            chip_resistance = price
+
     return {
         "name": quote.get("name") or sec.name,
         "symbol": quote.get("symbol") or sec.ts_code,
@@ -205,6 +224,14 @@ def build_report(target: str) -> dict[str, Any]:
         "volume_note": volume_note,
         "market_env": market_env_data,
         "position_cap": position_cap,
+        "ma_raw": {
+            "ma5": levels["ma_values"].get("ma5"),
+            "ma10": levels["ma_values"].get("ma10"),
+            "ma20": levels["ma_values"].get("ma20"),
+            "ma30": levels["ma_values"].get("ma30"),
+        },
+        "chip_support": chip_support,
+        "chip_resistance": chip_resistance,
     }
 
 
@@ -332,14 +359,14 @@ def render_markdown(r: dict[str, Any]) -> str:
     status_text = str(r.get("state_label") or "")
 
     if has_env:
-        trend_str = "五条线上方" if trend_5d == "up" else "五条线下方"
+        trend_str = "均线多头排列" if trend_5d == "up" else "均线空头排列"
         price_dir = "涨" if change_pct >= 0 else "跌"
         change_abs = abs(change_pct)
         lines.extend([
             "",
             "🌍 中证1000",
             "",
-            f"趋势：{trend_str}｜今日{price_dir}{change_abs:.1f}% | 建议：{skill_note}",
+            f"{trend_str}｜今日{price_dir}{change_abs:.1f}% | 建议：{skill_note}",
         ])
     else:
         lines.extend([
@@ -349,39 +376,113 @@ def render_markdown(r: dict[str, Any]) -> str:
             "趋势：数据不足｜今日--｜建议：市场环境数据暂不可用（回退到个股结构判断）",
         ])
 
-    lines.extend([
-        "",
-        "📍 决策",
-        "",
-        f"状态：{status_text}",
-        f"  · 空仓 → 在 {low_zone} 止跌才试，{position_cap}% 仓位上限",
-        f"  · 有底仓 → 反弹 {confirm:.2f} 冲不动就减 10-20%",
-        f"  · 加仓 → 放量站稳 {confirm:.2f} 且回踩不破，才评估",
-    ])
-
-    lines.extend([
-        "",
-        "T0 参考",
-        "",
-        f"  · 低吸：{low_price:.2f}（{low_zone} 支撑区承接，止跌确认）",
-        f"  · 高抛：{confirm:.2f}（均线压力附近，最多 {position_cap}% 仓位）",
-        f"  · 止损：跌破 {low_price:.2f} T0 失效，跌破 {stop:.2f} 退出全部",
-    ])
-
-    lines.extend([
-        "",
-        "❗ 关键价位",
-        "",
-        f"止损：{stop:.2f}元｜减仓：{confirm:.2f}元｜止跌：{low_zone}｜支撑：{low_price:.2f}元",
-    ])
-
+    structure_note = str(r.get("structure_note") or "")
+    volume_note = str(r.get("volume_note") or "")
     lines.extend([
         "",
         "🧭 简要分析",
         "",
-        f"  结构：{r.get('structure_note') or ''}",
-        f"  量价：{r.get('volume_note') or ''} ｜ 筹码：{confirm:.2f} 压力 ｜ 动能：不进攻",
+        f"{structure_note}，{volume_note}",
+        "",
+        "📍 决策",
+        "",
+        f"状态：{status_text}",
+        f"  · 空仓 → 在 {low_zone} 止跌确认才试，最多 {position_cap}% 仓位",
+        f"  · 有底仓 → 反弹 {confirm:.2f} 冲不动就减 10-20%",
+        f"  · 加仓 → 放量站稳 {confirm:.2f} 且回踩不破，才评估",
     ])
+
+    resistance_val = float(r.get("resistance", 0))
+    chip_support = r.get("chip_support")
+    chip_resistance = r.get("chip_resistance")
+    ma_raw_v = r.get("ma_raw") or {}
+    groups: dict[int, list[tuple[float, str]]] = {}
+    if stop > 0:
+        groups.setdefault(1, []).append((stop, "止损位（ATR）"))
+    if low_price > 0 and abs(low_price - stop) > 0.01:
+        groups.setdefault(1, []).append((low_price, "防守位（ATR）"))
+    cost_v = None
+    for v in sorted(filter(None, [ma_raw_v.get("ma10"), ma_raw_v.get("ma20"), ma_raw_v.get("ma30")])):
+        if low_price < v < r["current"]:
+            cost_v = v
+            break
+    if cost_v:
+        groups.setdefault(2, []).append((cost_v, "成本密集区"))
+    if chip_support is not None and chip_support > stop:
+        g = 1 if chip_support < low_price else 2
+        groups.setdefault(g, []).append((chip_support, "有量支撑"))
+    groups.setdefault(3, []).append((r["current"], "当前位置"))
+    if confirm > 0 and abs(confirm - r["current"]) > 0.01:
+        groups.setdefault(3, []).append((confirm, "确认位（ATR）"))
+    if resistance_val > 0 and resistance_val > confirm:
+        groups.setdefault(4, []).append((resistance_val, "减仓位（ATR）"))
+    if chip_resistance is not None and chip_resistance > r["current"]:
+        g = 3 if chip_resistance < confirm else 4
+        groups.setdefault(g, []).append((chip_resistance, "套牢压力区"))
+    key_lines = ["", "❗ 关键价位", ""]
+    last_group = 0
+    for g in sorted(groups):
+        items = sorted(groups[g], key=lambda x: x[0])
+        for p, label in items:
+            sep = "+ ←" if "套牢压力" in label else "  ←"
+            if last_group and g != last_group:
+                key_lines.append("  ┆")
+            key_lines.append(f"{p:.2f}{sep} {label}")
+            last_group = g
+    lines.extend(key_lines)
+
+    stage = str(r.get("stage") or "")
+    if stage == "转弱" or scene in ("空间不足",):
+        lines.extend([
+            "",
+            "⚠️ 风险",
+            "",
+            f"趋势已转弱不可恋战，反弹是减仓机会。若跌破 {low_price:.2f} 必须执行止损",
+        ])
+    elif scene in ("突破确认", "突破观察"):
+        lines.extend([
+            "",
+            "✨ 亮点",
+            "",
+            f"现价 {r['current']:.2f} 已站上确认位 {confirm:.2f}，方向偏多 → 放量站稳继续持有",
+            "",
+            "⚠️ 风险",
+            "",
+            f"突破后回踩 {confirm:.2f} 不破才算确认，缩量冲高先不减",
+        ])
+    elif scene in ("低吸观察", "防守观察", "防守观察，趋势下行谨慎"):
+        lines.extend([
+            "",
+            "✨ 亮点",
+            "",
+            f"价格回到支撑区 {low_price:.2f} 附近，观察止跌信号",
+            "",
+            "⚠️ 风险",
+            "",
+            f"趋势尚未确认，跌破 {low_price:.2f} 要止损，不提前抄底",
+        ])
+    elif scene == "冲高减仓":
+        lines.extend([
+            "",
+            "✨ 亮点",
+            "",
+            "现价接近压力区，有反弹机会",
+            "",
+            "⚠️ 风险",
+            "",
+            f"冲高缩量先减仓，放量突破 {confirm:.2f} 再接回",
+        ])
+    else:
+        lines.extend([
+            "",
+            "✨ 亮点",
+            "",
+            f"当前 {r['current']:.2f} 仍站在防守位 {low_price:.2f} 上方，结构在修复 → 等站稳 {confirm:.2f} 确认转强",
+            "",
+            "⚠️ 风险",
+            "",
+            f"最大风险不是没反弹，而是 {confirm:.2f} 未确认前提前追入。若跌破 {low_price:.2f} 防守位，预期要先收回来",
+        ])
 
     pool_count = _pool_count()
     pool_line = f"当前池 {pool_count}/10，回复 1 入池" if pool_count > 0 else "回复 1 入池"

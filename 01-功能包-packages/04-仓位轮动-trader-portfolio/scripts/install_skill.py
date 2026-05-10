@@ -10,7 +10,7 @@ from pathlib import Path
 
 PRESET_ROOTS = {
     "codex": Path.home() / ".agents" / "skills",
-    "hermes": Path.home() / ".hermes" / "skills",
+    "hermes": Path.home() / "skills",
     "openclaw": Path.home() / ".openclaw" / "workspace" / "skills",
 }
 

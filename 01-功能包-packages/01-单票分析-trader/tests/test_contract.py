@@ -69,15 +69,13 @@ def test_render_contract() -> None:
     assert markdown.startswith("分析报告 — ") or markdown.startswith("📍")
     assert "MA5" in markdown
     assert "📍 决策" in markdown
-    assert "T0 参考" in markdown
     assert "❗ 关键价位" in markdown
     assert "🧭 简要分析" in markdown
+    assert "✨ 亮点" in markdown
+    assert "⚠️ 风险" in markdown
     assert "止跌确认" in markdown
     assert "最多" in markdown
     assert "止损" in markdown
-    assert "结构：" in markdown
-    assert "量价：" in markdown
-    assert "压力" in markdown
     assert "执行价" not in markdown
     assert "t0-trader" not in markdown
     assert validate(markdown) == []
