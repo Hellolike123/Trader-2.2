@@ -708,8 +708,8 @@ def cmd_watch(args: argparse.Namespace) -> int:
                     stock_alerts.append("🟢 已到触发位附近")
                 else:
                     stock_alerts.append(f"⚡ 距触发仅 {dist_trig:.1f}%")
-        # 4. Near support
-        if support_raw > 0 and current <= support_raw:
+        # 4. Near support — only alert if price genuinely breached (within 1% margin)
+        if support_raw > 0 and current <= support_raw * 1.01:
             dist_sup = abs(current - support_raw) / current * 100
             if dist_sup < thresh_pct * 100:
                 stock_alerts.append(f"📊 距支撑仅 {dist_sup:.1f}%")
@@ -786,9 +786,9 @@ def render_rank(items: list[dict[str, Any]]) -> str:
         confirm = to_float(item.get("confirm")) or to_float(item.get("trigger")) or 0
 
         if buy_low and buy_high:
-            buy_text = f"买  {buy_low:.2f}-{buy_high:.2f} 止跌确认"
+            buy_text = f"买(观察区)  {buy_low:.2f}-{buy_high:.2f} 止跌确认"
         elif buy_low:
-            buy_text = f"买  {buy_low:.2f} 止跌确认"
+            buy_text = f"买(观察区)  {buy_low:.2f} 止跌确认"
         else:
             buy_text = "买  暂无"
 
