@@ -87,6 +87,27 @@ def today_text() -> str:
 CONTRACT_VERSION = "trader_single_action_v3"
 
 
+_SIGNAL_TYPE_LABELS = {
+    "observe": "观察",
+    "wait_for_confirmation": "等待确认",
+    "track": "跟踪",
+    "low_buy_watch": "低吸观察",
+    "low_buy_triggered": "低吸触发",
+    "high_sell_watch": "高抛观察",
+    "high_sell_triggered": "高抛触发",
+    "reduce": "减仓",
+    "defensive": "防守",
+    "risk_stop": "止损",
+    "trigger_expired": "信号过期",
+    "blocked": "受压",
+    "review_result": "复盘",
+}
+
+
+def _signal_type_label(sig_type: str) -> str:
+    return _SIGNAL_TYPE_LABELS.get(sig_type, sig_type)
+
+
 def price(value: float | None) -> str:
     return "无" if value is None else f"{value:.2f}元"
 
@@ -169,12 +190,37 @@ def build_report(target: str) -> dict[str, Any]:
     chip_peaks = sorted(chip.get("peaks", []) or [], key=lambda x: x["price"])
     chip_support: float | None = None
     chip_resistance: float | None = None
-    for p in chip_peaks:
-        price = p["price"]
-        if price < current:
-            chip_support = price  # keeps updating, last one < current = closest
-        elif price > current and chip_resistance is None:
-            chip_resistance = price  # first one > current = closest
+    if chip_peaks:
+        support_peaks = [p for p in chip_peaks if p["price"] < current]
+        if support_peaks:
+            strong_near = sorted(
+                [p for p in support_peaks if (current - p["price"]) / current <= 0.03],
+                key=lambda p: float(p.get("share_of_total") or 0),
+                reverse=True,
+            )
+            all_by_strong = sorted(support_peaks, key=lambda p: float(p.get("share_of_total") or 0), reverse=True)
+            # If strongest > 2%, use it regardless of distance
+            # Otherwise prefer strongest within 3%
+            if all_by_strong and float(all_by_strong[0].get("share_of_total") or 0) > 2:
+                chip_support = all_by_strong[0]["price"]
+            elif strong_near:
+                chip_support = strong_near[0]["price"]
+            else:
+                chip_support = support_peaks[-1]["price"]
+        resistance_peaks = [p for p in chip_peaks if p["price"] > current]
+        if resistance_peaks:
+            strong_near = sorted(
+                [p for p in resistance_peaks if (p["price"] - current) / current <= 0.03],
+                key=lambda p: float(p.get("share_of_total") or 0),
+                reverse=True,
+            )
+            all_by_strong = sorted(resistance_peaks, key=lambda p: float(p.get("share_of_total") or 0), reverse=True)
+            if all_by_strong and float(all_by_strong[0].get("share_of_total") or 0) > 2:
+                chip_resistance = all_by_strong[0]["price"]
+            elif strong_near:
+                chip_resistance = strong_near[0]["price"]
+            else:
+                chip_resistance = resistance_peaks[0]["price"]
 
     return {
         "name": quote.get("name") or sec.name,
@@ -312,10 +358,6 @@ def upward_momentum_observation(stage: str, current: float, support: float, conf
     elif current >= confirm - width * 0.25:
         return f"价格接近确认区但还未站稳，结论：属于预备启动，等待放量确认。"
     return f"价格还没贴近确认区，结论：动能仍是弱修复，暂不按启动处理。"
-
-
-def _render_block_header(trader: str, code: str, name: str) -> str:
-    return f"#{' '}{trader}#{' '} {name}（{code}）"
 
 
 def render_markdown(r: dict[str, Any]) -> str:
@@ -505,16 +547,21 @@ def _pool_count() -> int:
 
 def build_signal(r: dict[str, Any]) -> dict[str, Any]:
     signal_type, direction, action, confidence = signal_state(r)
-    trade_date = str(r.get("analysis_time") or "").split(" ")[0] or "--"
-    trigger_price = float(r.get("confirm") or r.get("resistance") or r.get("current"))
-    invalid_price = float(r.get("stop") or r.get("support") or r.get("current"))
+    raw_time = str(r.get("analysis_time") or "") or today_text()
+    trade_date = raw_time.split(" ")[0]
+    if signal_type == "reduce":
+        trigger_price = float(r.get("resistance") or r.get("confirm") or r.get("current"))
+        invalid_price = float(r.get("stop") or r.get("support") or r.get("current"))
+    else:
+        trigger_price = float(r.get("confirm") or r.get("resistance") or r.get("current"))
+        invalid_price = float(r.get("stop") or r.get("support") or r.get("current"))
     signal = {
         "contract": "trader_signal_v1",
         "source_skill": "trader",
         "symbol": str(r.get("symbol") or ""),
         "name": str(r.get("name") or ""),
         "trade_date": trade_date,
-        "analysis_time": str(r.get("analysis_time") or trade_date),
+        "analysis_time": raw_time,
         "signal_type": signal_type,
         "direction": direction,
         "action": action,
@@ -550,20 +597,24 @@ def signal_state(r: dict[str, Any]) -> tuple[str, str, str, str]:
         return "defensive", "bearish_lean", "wait", "low"
     if scene == "冲高减仓":
         return "reduce", "neutral", "reduce", "medium"
-    if current >= confirm or scene == "突破确认":
+    if current >= confirm:
         return "track", "bullish", "track", "medium"
     if scene in {"低吸观察", "防守观察", "防守观察，趋势下行谨慎", "空间不足", "等转强"}:
         return "wait_for_confirmation", "bullish_lean", "observe", "medium"
+    if scene == "突破确认":
+        return "track", "bullish", "track", "medium"
     return "observe", "neutral", "observe", "low"
 
 
 def signal_max_total_pct(signal_type: str) -> int:
+    if signal_type in ("defensive", "risk_stop"):
+        return 0
+    if signal_type in ("trigger_expired", "blocked"):
+        return 0
     if signal_type == "track":
         return 30
     if signal_type == "reduce":
         return 20
-    if signal_type == "defensive":
-        return 0
     return 30
 
 
@@ -583,10 +634,14 @@ def state_text(stage: str, scene: str) -> str:
         return "暂不碰"
     if scene in {"低吸观察", "防守观察", "防守观察，趋势下行谨慎"}:
         return "修复观察，未确认转强"
-    if scene == "空间不足":
+    if scene in {"空间不足"}:
         return "空间不足，先观察"
-    if scene in {"突破确认", "突破观察", "等转强", "冲高减仓"}:
-        return "转强确认中"
+    if scene == "等转强":
+        return "等放量确认转强"
+    if scene in {"突破确认", "突破观察"}:
+        return "突破确认中"
+    if scene == "冲高减仓":
+        return "转强确认中，注意减仓"
     return "震荡观察"
 
 
@@ -603,8 +658,15 @@ def current_action_text(stage: str, scene: str) -> str:
 
 
 def structure_view(r: dict[str, Any]) -> str:
-    if r["current"] >= r["confirm"]:
-        return "转强确认中，等回踩验证"
+    scene = str(r.get("scene") or "")
+    if scene in {"低吸观察", "防守观察", "防守观察，趋势下行谨慎"}:
+        return "修复观察，未确认转强"
+    if r["current"] >= r["confirm"] and not r["stage"] == "转弱":
+        if scene in {"突破确认", "突破观察"}:
+            return "突破确认中，回踩不破加分"
+        if r["stage"] == "走强" or scene == "冲高减仓":
+            return "转强确认中，等回踩验证"
+        return "转强确认中，但结构需回踩验证"
     if r["stage"] == "转弱":
         return "结构偏弱，先退出观察"
     ma = r.get("ma") or {}
@@ -612,8 +674,12 @@ def structure_view(r: dict[str, Any]) -> str:
     below_count = sum(1 for value in ma_values if r["current"] < value)
     if below_count >= 3:
         return "弱修复，还没确认转强"
-    if r.get("scene") == "空间不足":
+    if scene == "空间不足":
         return "上方空间太近，先观察"
+    if scene == "冲高减仓":
+        return "转强但空间受限，先观察"
+    if scene == "突破确认" or scene == "突破观察":
+        return "突破确认中，回踩不破加分"
     return "修复观察，不是主升"
 
 
@@ -634,11 +700,24 @@ def momentum_view(text: str) -> str:
 
 
 def one_sentence(r: dict[str, Any], low_zone: str) -> str:
-    if r["stage"] == "转弱":
-        return f"现在先不参与；等重新站回 {r['support']:.2f}元 上方并稳定后再看。"
-    if r.get("scene") == "空间不足":
-        return f"现在上方空间不够舒服；先不追，等回到 {low_zone} 止跌，或放量越过 {r['confirm']:.2f}元 后再评估。"
-    return f"现在还不是进攻点；先守纪律等确认，跌到 {low_zone} 止跌才轻试，站不上 {r['confirm']:.2f}元 不加仓。"
+    stage = r["stage"]
+    scene = r.get("scene") or ""
+    current = float(r.get("current", 0))
+    confirm = float(r.get("confirm", 0))
+    support = float(r.get("support", 0))
+    if stage == "转弱":
+        return f"现在先不参与；等重新站回 {support:.2f}元 上方并稳定后再看。"
+    if scene == "冲高减仓":
+        return f"上方空间受限，有底仓的逢高减仓，空仓不追。"
+    if scene in ("突破确认", "突破观察"):
+        if current >= confirm:
+            return f"已越过确认位，放量站稳回踩不破可评估加仓。"
+        return f"接近确认位，放量站稳才加仓。"
+    if current >= confirm:
+        return f"已越过确认位，放量站稳回踩不破可评估加仓。"
+    if scene == "空间不足":
+        return f"现在上方空间不够舒服；先不追，等回到 {low_zone} 止跌，或放量越过 {confirm:.2f}元 后再评估。"
+    return f"现在还不是进攻点；先守纪律等确认，跌到 {low_zone} 止跌才轻试，站不上 {confirm:.2f}元 不加仓。"
 
 
 def generate_alert(report: dict[str, Any]) -> str | None:
@@ -651,7 +730,7 @@ def generate_alert(report: dict[str, Any]) -> str | None:
     scene = str(report.get("scene") or "")
     name = str(report["name"])
     atr14 = float(report.get("atr14", 0) or 0)
-    thresh = max(atr14 * 0.4, current * 0.008) if atr14 > 0 else current * 0.01
+    thresh = max(atr14 * 0.35, current * 0.006) if atr14 > 0 else current * 0.008
 
     if stop > 0:
         if current <= stop:
@@ -792,38 +871,39 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
     # Write signal if triggered
     if alerts_found and write_signal:
         if is_stop_broken:
-            sig_type, direction, action_sig, confidence = "risk_stop", "bearish", "stop", "high"
+            sig_type, direction, action_sig, confidence, trigger_price = "risk_stop", "bearish", "stop", "high", stop
         elif is_at_support:
-            sig_type, direction, action_sig, confidence = "low_buy_triggered", "bullish_lean", "low_buy", "medium"
+            sig_type, direction, action_sig, confidence, trigger_price = "low_buy_triggered", "bullish_lean", "low_buy", "medium", support
         elif is_near_confirm:
-            sig_type, direction, action_sig, confidence = "low_buy_triggered", "bullish", "track", "medium"
+            sig_type, direction, action_sig, confidence, trigger_price = "track", "bullish", "track", "medium", confirm
         elif is_near_resistance:
-            sig_type, direction, action_sig, confidence = "reduce", "neutral", "reduce", "medium"
+            sig_type, direction, action_sig, confidence, trigger_price = "reduce", "neutral", "reduce", "medium", resistance
         else:
-            sig_type, direction, action_sig, confidence = "observe", "neutral", "observe", "low"
+            sig_type, direction, action_sig, confidence, trigger_price = "observe", "neutral", "observe", "low", current
 
         from signal_store import append_signal
-        trade_date = analysis_time.split(" ")[0] if analysis_time else today_text()
+        raw_time = analysis_time or today_text()
+        trade_date = raw_time.split(" ")[0]
         signal = {
             "contract": "trader_signal_v1",
             "source_skill": "trader",
             "symbol": symbol,
             "name": name,
             "trade_date": trade_date,
-            "analysis_time": analysis_time,
+            "analysis_time": raw_time,
             "signal_type": sig_type,
             "direction": direction,
             "action": action_sig,
             "confidence": confidence,
             "data_status": DATA_STATUS_MAP.get(str(report.get("data_status")), "full"),
-            "trigger": {"type": "price_level", "price": round(current, 2), "text": alerts_found[0]},
+            "trigger": {"type": "price_level", "price": round(trigger_price, 2), "text": alerts_found[0]},
             "invalidation": {"type": "price_break", "price": round(stop, 2), "text": f"跌破 {stop:.2f}元"},
             "position": {
                 "max_total_pct": signal_max_total_pct(sig_type),
                 "max_single_move_pct": min(10, signal_max_total_pct(sig_type)),
             },
             "risk_flags": signal_risk_flags(report),
-            "summary": alerts_found[0],
+            "summary": ("  ".join(alerts_found[:2])) if alerts_found else "无触发",
         }
         try:
             append_signal(signal)

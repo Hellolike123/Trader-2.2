@@ -718,7 +718,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
 def _signal_type_label(sig_type: str) -> str:
     labels = {
         "observe": "观察",
-        "wait_for_confirmation": "等确认",
+        "wait_for_confirmation": "等待确认",
         "track": "跟踪",
         "low_buy_watch": "低吸观察",
         "low_buy_triggered": "低吸触发",
@@ -727,7 +727,7 @@ def _signal_type_label(sig_type: str) -> str:
         "reduce": "减仓",
         "defensive": "防守",
         "risk_stop": "止损",
-        "trigger_expired": "过期",
+        "trigger_expired": "信号过期",
         "blocked": "受压",
         "review_result": "复盘",
     }

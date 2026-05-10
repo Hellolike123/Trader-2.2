@@ -21,26 +21,6 @@ from contract_utils import (
 # 01-trader
 # ═══════════════════════════════════════════════
 
-TRADER_HEADINGS_V2 = [
-    "✅ 结论概述",
-    "🎯 今日交易计划",
-    "📏 仓位管理",
-    "🧭 简化分析逻辑",
-    "⚠️ 风险管理",
-    "📌 交易指导卡",
-    "👉 一句话",
-]
-
-TRADER_HEADINGS_OLD = [
-    "✅ 结论概述",
-    "🎯 今日交易计划",
-    "📏 仓位管理",
-    "🧭 简化分析逻辑",
-    "⚠️ 风险管理",
-    "📌 交易指导卡",
-    "👉 一句话",
-]
-
 TRADER_BANNED = (
     "必涨", "必跌", "主力入场第一枪", "出货日", "行情结束",
     "enhanced_v1", "daily_basic_v1", "buyback_price", "精确筹码分布",
@@ -93,11 +73,6 @@ def validate_trader(markdown: str) -> list[str]:
     #errors.extend(validate_headings(lines, TRADER_HEADINGS_V2, "headings must follow Trader V2 panel order"))
     
     errors.extend(_validate_fixed_content(lines, markdown))
-    if "🧭 分析依据" in lines:
-        logic = section(lines, "🧭 分析依据", TRADER_HEADINGS_V2)
-        for prefix in TRADER_LOGIC_PREFIXES:
-            if len([line for line in logic if line.startswith(prefix)]) != 1:
-                errors.append(f"logic section must contain exactly one line: {prefix}")
     errors.extend(validate_banned(markdown, TRADER_BANNED, "report must not contain banned old-template term"))
     return errors
 
