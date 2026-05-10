@@ -62,18 +62,23 @@ def _empty() -> dict[str, Any]:
 
 
 def write(field: str, data: dict[str, Any], override: bool = False) -> None:
-    data = _load()
-    data[field] = {**data.get(field, {}), **data, "updated": _now()}
+    """Atomically write/update a named field in pipeline_state.json.
+    
+    FIX: Renamed param to raw_data to avoid shadowing with local `data` (state dict).
+    """
+    raw_data = data
+    state = _load()
+    state[field] = {**state.get(field, {}), **raw_data, "updated": _now()}
     if field in ("stocks", "positions") and not override:
-        existing = data.get(field, {})
-        existing.update(data)
-        data[field] = existing
+        existing = state.get(field, {})
+        existing.update(raw_data)
+        state[field] = existing
     if field == "warnings" and not override:
-        existing = data.get("warnings", [])
-        existing.extend(data)
-        data["warnings"] = _dedup_warn(existing)
-    data["updated"] = _now()
-    _save(data)
+        existing = state.get("warnings", [])
+        existing.extend(raw_data)
+        state["warnings"] = _dedup_warn(existing)
+    state["updated"] = _now()
+    _save(state)
 
 
 def write_stock(name: str, status: str, weight: int, source: str) -> None:
@@ -166,13 +171,41 @@ def get_full_market() -> dict[str, Any]:
 
 
 def conflicting_signals(name: str) -> list[str]:
-    data = _load()
+    """Return warnings matching the stock by name or normalized symbol."""
+    state = _load()
+    norm_query = _normalize_symbol(name) if _is_short_number(name) else None
     results: list[str] = []
-    for w in data.get("warnings", []):
+    for w in state.get("warnings", []):
         stock = str(w.get("stock") or "")
-        if stock == name or stock == "":
+        if stock == "" or stock == name:
             results.append(str(w.get("msg") or ""))
+        elif norm_query is not None:
+            warning_norm = _normalize_symbol(stock) if _is_short_number(stock) else stock
+            if warning_norm == norm_query:
+                results.append(str(w.get("msg") or ""))
     return list(dict.fromkeys(results))
+
+
+def _is_short_number(s: str) -> bool:
+    """True if s looks like a bare 6-digit stock code (no exchange suffix)."""
+    s = (s or "").strip()
+    return len(s) == 6 and s.isdigit() and "." not in s
+
+
+def _normalize_symbol(symbol: str) -> str:
+    """Map a bare 6-digit code to its exchange-suffix form (e.g. 688248 -> 688248.SH)."""
+    if not symbol:
+        return symbol
+    s = (symbol or "").strip().upper()
+    if not s:
+        return ""
+    if "." in s:
+        return s
+    if len(s) == 6 and s.isdigit():
+        if s.startswith(("6", "9", "5")):
+            return f"{s}.SH"
+        return f"{s}.SZ"
+    return s
 
 
 def _now() -> str:
