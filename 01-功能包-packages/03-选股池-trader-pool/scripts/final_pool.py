@@ -650,15 +650,21 @@ def _build_report_or_offline(name: str) -> dict[str, Any]:
 
 
 def cmd_watch(args: argparse.Namespace) -> int:
-    """Monitor Top 3 pool items, one-screen status per stock."""
+    """Monitor top pool items with live prices and proximity alerts."""
     pool = load_pool()
     items = sort_items(active_items(pool))
     if not items:
         print("选股池为空，无需盯盘")
         return 0
 
-    # Only monitor Top 3
-    top3 = items[:3]
+    # FIX-T-BIAS-148: always include execution items beyond rank 3
+    # so that high-risk stocks are never silently ignored.
+    exec_items = [item for item in items if item.get("status") == "执行"]
+    rank_items = [item for item in items if item.get("status") != "执行"]
+    top3 = rank_items[:3]
+    for item in exec_items:
+        if item not in top3:
+            top3.append(item)
     now = datetime.now().strftime("%H:%M")
 
     all_alerts: list[str] = []

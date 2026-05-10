@@ -170,19 +170,48 @@ def get_full_market() -> dict[str, Any]:
     return result
 
 
+def _symbol_bare_digits(symbol: str) -> str:
+    """Extract just the 6-digit code from any symbol format.
+    
+    E.g. '688248.SH' → '688248', '688248' → '688248', '南网科技' → ''.
+    """
+    s = (symbol or "").strip().upper()
+    if not s:
+        return ""
+    # Strip known exchange suffixes
+    for suffix in (".SH", ".SZ", ".BJ"):
+        if s.endswith(suffix):
+            s = s[:-len(suffix)]
+            break
+    if len(s) == 6 and s.isdigit():
+        return s
+    return ""
+
+
+def _symbols_match(a: str, b: str) -> bool:
+    """True if a and b refer to the same A-share stock code."""
+    return _symbol_bare_digits(a) == _symbol_bare_digits(b) and bool(_symbol_bare_digits(a))
+
+
 def conflicting_signals(name: str) -> list[str]:
-    """Return warnings matching the stock by name or normalized symbol."""
+    """Return warnings matching the stock by name, code, or normalized symbol.
+    
+    FIX-T-BIAS-138: Ensure symmetric matching across all input formats.
+    A warning for '688248' is found whether queried as '688248', '688248.SH',
+    '688248.SZ', or '688248.bj'.
+    """
     state = _load()
-    norm_query = _normalize_symbol(name) if _is_short_number(name) else None
     results: list[str] = []
     for w in state.get("warnings", []):
         stock = str(w.get("stock") or "")
-        if stock == "" or stock == name:
+        if stock == "":
             results.append(str(w.get("msg") or ""))
-        elif norm_query is not None:
-            warning_norm = _normalize_symbol(stock) if _is_short_number(stock) else stock
-            if warning_norm == norm_query:
-                results.append(str(w.get("msg") or ""))
+            continue
+        if stock == name:
+            results.append(str(w.get("msg") or ""))
+            continue
+        if _symbols_match(stock, name):
+            results.append(str(w.get("msg") or ""))
     return list(dict.fromkeys(results))
 
 
