@@ -713,32 +713,38 @@ def cmd_watch(args: argparse.Namespace) -> int:
         if current <= 0:
             continue
 
-        # Tolerance threshold
-        thresh_pct = 0.02  # 2% default
+        # Dynamic threshold: each stock gets a warning zone fitted to its volatility.
+        # 1. Use ATR-based distance (ATR × 2) for adaptive sensitivity:
+        #    high-volatility stocks → wider zone (fewer false alarms)
+        #    low-volatility stocks → tighter zone (catches early moves)
+        # 2. Capped at 3% of price so extremely volatile stocks still stay actionable
+        atr14 = to_float(item.get("atr14")) or 0.0
+        thresh_pct = min(atr14 * 2, 0.03) if atr14 > 0 else 0.02
 
         stock_alerts: list[str] = []
+        atr_note = f"（ATR {atr14:.2f}）" if atr14 > 0 else ""
 
         # 1. Defense breach (highest priority)
         if defense > 0 and current < defense:
-            stock_alerts.append("🛑 破防守位！跌破防守位")
-        # 2. Near defense (<2%)
+            stock_alerts.append("🛑 破防守位！跌破防守位" + atr_note)
+        # 2. Near defense (within adaptive threshold)
         elif defense > 0 and current > defense:
             dist_def = abs(current - defense) / current * 100
             if dist_def < thresh_pct * 100:
-                stock_alerts.append(f"⚠️ 靠近防守，距防守仅 {dist_def:.1f}%")
+                stock_alerts.append(f"⚠️ 靠近防守，距防守仅 {dist_def:.1f}%" + atr_note)
         # 3. Near trigger
         elif trigger > 0:
             dist_trig = abs(trigger - current) / current * 100
             if dist_trig < thresh_pct * 100:
                 if current >= trigger:
-                    stock_alerts.append("🟢 已到触发位附近")
+                    stock_alerts.append("🟢 已到触发位附近" + atr_note)
                 else:
-                    stock_alerts.append(f"⚡ 距触发仅 {dist_trig:.1f}%")
+                    stock_alerts.append(f"⚡ 距触发仅 {dist_trig:.1f}%" + atr_note)
         # 4. Near support — only alert if price genuinely breached (within 1% margin)
         if support_raw > 0 and current <= support_raw * 1.01:
             dist_sup = abs(current - support_raw) / current * 100
             if dist_sup < thresh_pct * 100:
-                stock_alerts.append(f"📊 距支撑仅 {dist_sup:.1f}%")
+                stock_alerts.append(f"📊 距支撑仅 {dist_sup:.1f}%" + atr_note)
 
         # Build output for this stock
         rank_emoji = ["🥇", "🥈", "🥉"][i - 1]
@@ -747,7 +753,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
             all_alerts.append(f"{rank_emoji} {name}  {current:.2f}（{change_pct:+.1f}%）  {alert_line}")
         else:
             action = action_summary_for_scene(scene)
-            all_alerts.append(f"{rank_emoji} {name}  {current:.2f}（{change_pct:+.1f}%）  👉 {action}")
+            all_alerts.append(f"{rank_emoji} {name}  {current:.2f}（{change_pct:+.1f}%）  👉 {action}" + atr_note)
 
     # Print output
     print(f"📡 选股池盯盘 — {now} | Top3")
