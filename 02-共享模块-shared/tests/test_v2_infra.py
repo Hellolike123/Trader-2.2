@@ -126,11 +126,17 @@ def test_stable_id(tmp_log):
 
 
 def test_log_safe_dedup(tmp_log):
+    """FIX-T-BIAS-168: different prices produce different signal_ids."""
     id1 = st.log_safe("trader", "测试票", "000001.SZ", "低吸观察", 50.0)
     id2 = st.log_safe("trader", "测试票", "000001.SZ", "低吸观察", 51.0)
-    assert id1 == id2
+    assert id1 != id2, "Same target, different prices → different signal_id"
     records = st._load_all()
-    assert len(records) == 1
+    assert len(records) == 2
+    # Same price → dedup
+    id3 = st.log_safe("trader", "测试票", "000001.SZ", "低吸观察", 50.0)
+    assert id3 == id1
+    records = st._load_all()
+    assert len(records) == 2  # no new record
 
 
 def test_fill(tmp_log):

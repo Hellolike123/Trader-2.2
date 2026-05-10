@@ -34,8 +34,10 @@ def _today() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
-def stable_id(skill: str, target: str, date: str, signal_type: str) -> str:
+def stable_id(skill: str, target: str, date: str, signal_type: str, price: float | None = None) -> str:
     key = f"{date}::{skill}::{target}::{signal_type}"
+    if price is not None:
+        key += f"::{price:.2f}"
     return hashlib.md5(key.encode()).hexdigest()[:12]
 
 
@@ -57,7 +59,7 @@ def _create_log_record(sig_id: str, skill: str, target: str, symbol: str, signal
 def log_safe(skill: str, target: str, symbol: str, signal_type: str, price: float,
              env_level: str = "", env_note: str = "") -> str:
     today = _today()
-    sig_id = stable_id(skill, target, today, signal_type)
+    sig_id = stable_id(skill, target, today, signal_type, price)
     _ensure_log_dir()
     if not LOG_PATH.exists():
         _create_log_record(sig_id, skill, target, symbol, signal_type, price, env_level, env_note)
@@ -115,7 +117,7 @@ def fill(signal_id: str, pnl_pct: float, days_held: int = 0, outcome: str = "unk
     return False, "signal_id not found"
 
 
-def fill_by_target(target: str, pnl_pct: float, days_held: int = 0, outcome: str = "unknown") -> tuple[int, list[str]]:
+def fill_by_target(target: str, pnl_pct: float, days_held: int = 0, outcome: str = "unknown", signal_type: str = "") -> tuple[int, list[str]]:
     """兼容 review_core"""
     if not LOG_PATH.exists():
         return 0, []
@@ -135,6 +137,8 @@ def fill_by_target(target: str, pnl_pct: float, days_held: int = 0, outcome: str
             new_lines.append(line)
             continue
         if rec.get("target") == target and rec.get("outcome_pnl_pct") is None:
+            if signal_type and str(rec.get("signal_type", "")) != signal_type:
+                continue
             rec["outcome_pnl_pct"] = round(pnl_pct, 2)
             rec["outcome_days"] = days_held
             rec["outcome"] = outcome
@@ -382,8 +386,9 @@ def check_recent(days: int = 5) -> dict[str, int]:
     cutoff = (datetime.now() - timedelta(days=days + 10)).strftime("%Y-%m-%d")
     recent = [s for s in signals if _norm_date(str(s.get("trade_date", ""))) >= cutoff]
 
-    # 已存在的结果 (symbol, date, signal_type) as key to support multi-signal same day
-    existing_keys: dict[tuple[str, str, str], dict] = {}
+    # 已存在结果的双层 key：(symbol, date, type, price) for corrections, fallback to 3-key for backward compat
+    existing_keys_4: dict[tuple[str, str, str, str], dict] = {}
+    existing_keys_3: dict[tuple[str, str, str], dict] = {}
     try:
         _ensure_result_dir()
         for line in RESULT_PATH.read_text(encoding="utf-8").splitlines():
@@ -391,7 +396,13 @@ def check_recent(days: int = 5) -> dict[str, int]:
             try:
                 r = json.loads(line)
                 key_symbol = _normalize_symbol(r.get("symbol", ""))
-                existing_keys[(key_symbol, str(r.get("signal_date")), str(r.get("signal_type", "")))] = r
+                key_3 = (key_symbol, str(r.get("signal_date")), str(r.get("signal_type", "")))
+                # Normalize price to 2 decimal string for stable matching
+                sp = r.get("signal_price")
+                price_str = f"{float(sp):.2f}" if sp is not None and float(sp) > 0 else ""
+                # Note: key_4 needs to be a tuple, not concatenated via +
+                existing_keys_4[(key_symbol, str(r.get("signal_date")), str(r.get("signal_type", "")), price_str)] = r
+                existing_keys_3[key_3] = r
             except (json.JSONDecodeError, ValueError):
                 pass
     except OSError:
@@ -405,8 +416,13 @@ def check_recent(days: int = 5) -> dict[str, int]:
         nk = _normalize_symbol(sig.get("symbol") or "")
         nd = str(sig.get("trade_date") or "").strip()
         nt = str(sig.get("signal_type") or "").strip()
-        key = (nk, nd, nt)
-        if key in existing_keys:
+        tp = sig.get("trigger", {})
+        if isinstance(tp, dict):
+            tp = tp.get("price", None)
+        # Normalize price to 2 decimal string matching result schema
+        key_4 = (nk, nd, nt, f"{float(tp):.2f}" if tp is not None and float(tp) > 0 else "")
+        key_3 = (nk, nd, nt)
+        if key_4 in existing_keys_4 or key_3 in existing_keys_3:
             skipped += 1
             continue
         result = _compute_results_for_sig(sig)
@@ -720,17 +736,22 @@ def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
     cutoff = (datetime.now() - timedelta(days=days_window)).strftime("%Y-%m-%d")
     candidates = [s for s in signals if _norm_date(str(s.get("trade_date", ""))) >= cutoff]
 
-    # 已存在的结果 (symbol, date, signal_type) as key
-    existing_keys: dict[tuple[str, str, str], dict] = {}
+    # 已存在结果的双层 key：(symbol, date, type, price) for corrections, fallback to 3-key for backward compat
+    existing_keys_4: dict[tuple[str, str, str, str], dict] = {}
+    existing_keys_3: dict[tuple[str, str, str], dict] = {}
     try:
         _ensure_result_dir()
         for line in RESULT_PATH.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
+            if not line.strip(): continue
             try:
                 r = json.loads(line)
                 key_symbol = _normalize_symbol(r.get("symbol", ""))
-                existing_keys[(key_symbol, str(r.get("signal_date")), str(r.get("signal_type", "")))] = r
+                key_3 = (key_symbol, str(r.get("signal_date")), str(r.get("signal_type", "")))
+                # Normalize price to 2 decimal string for stable matching
+                sp = r.get("signal_price")
+                price_str = f"{float(sp):.2f}" if sp is not None and float(sp) > 0 else ""
+                existing_keys_4[(key_symbol, str(r.get("signal_date")), str(r.get("signal_type", "")), price_str)] = r
+                existing_keys_3[key_3] = r
             except (json.JSONDecodeError, ValueError):
                 pass
     except OSError:
@@ -744,7 +765,13 @@ def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
         nk = _normalize_symbol(sig.get("symbol") or "")
         nd = str(sig.get("trade_date") or "").strip()
         nt = str(sig.get("signal_type") or "").strip()
-        key = (nk, nd, nt)
+        tp = sig.get("trigger", {})
+        if isinstance(tp, dict):
+            tp = tp.get("price", None)
+        # Normalize price to 2 decimal string matching result schema
+        key_4 = (nk, nd, nt, f"{float(tp):.2f}" if tp is not None and float(tp) > 0 else "")
+        key_3 = (nk, nd, nt)
+        if key_4 in existing_keys_4 or key_3 in existing_keys_3:
         if key in existing_keys:
             skipped += 1
             continue

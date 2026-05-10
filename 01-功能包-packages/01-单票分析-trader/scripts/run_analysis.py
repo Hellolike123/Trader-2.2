@@ -896,7 +896,7 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
             "action": action_sig,
             "confidence": confidence,
             "data_status": DATA_STATUS_MAP.get(str(report.get("data_status")), "full"),
-            "trigger": {"type": "price_level", "price": round(trigger_price, 2), "text": alerts_found[0]},
+            "trigger": {"type": "price_level", "price": round(trigger_price, 2), "text": f"{trigger_price:.2f}元 触发{sig_type}"},
             "invalidation": {"type": "price_break", "price": round(stop, 2), "text": f"跌破 {stop:.2f}元"},
             "position": {
                 "max_total_pct": signal_max_total_pct(sig_type),

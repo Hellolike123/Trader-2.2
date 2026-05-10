@@ -498,7 +498,27 @@ def _pool_signal_verifications(items: list[dict[str, Any]]) -> tuple[list[dict[s
                     signals = load_recent_signals(symbol, limit=10)
             except Exception:
                 signals = []
-            matched = signals[0] if signals else None
+
+            # FIX-T-BIAS-177: match signal to pool item's trigger/defense, not just latest
+            if signals:
+                matched = None
+                for s in signals:
+                    s_trigger = to_float(s.get("trigger", {}).get("price") or 0)
+                    s_invalidation = to_float(s.get("invalidation", {}).get("price") or 0)
+                    s_sig_type = str(s.get("signal_type", ""))
+                    # Match by price proximity: signal trigger ~= pool trigger, signal invalidation ~= pool defense
+                    trigger_ok = s_trigger > 0 and abs(s_trigger - trigger) / max(trigger, 0.01) < 0.05
+                    invalidation_ok = s_invalidation > 0 and abs(s_invalidation - defense) / max(defense, 0.01) < 0.05
+                    if trigger_ok and invalidation_ok:
+                        matched = s
+                        break
+                    # Fallback: signal_type must match pool item's implied type
+                    pool_type = _pool_item_signal_type(item)
+                    if pool_type and s_sig_type == pool_type:
+                        matched = s
+                        break
+                if matched is None:
+                    matched = signals[0]  # fallback to latest
 
             if matched:
                 sig_type = str(matched.get("signal_type", ""))
@@ -736,6 +756,31 @@ def cmd_watch(args: argparse.Namespace) -> int:
         print(f"  {line}")
 
     return 0
+
+
+def _pool_item_signal_type(item: dict[str, Any]) -> str | None:
+    """Derive expected signal_type from pool item's trigger/defense/stop configuration."""
+    trigger = to_float(item.get("trigger"))
+    defense = to_float(item.get("defense"))
+    support = to_float(item.get("support"))
+    current = to_float(item.get("current"))
+    resistance = to_float(item.get("resistance"))
+    if current is None or defense is None or trigger is None:
+        return None
+    # If current is below defense: defensive/risk_stop scenario
+    if current < defense:
+        return "risk_stop"
+    # If current is above trigger: track scenario
+    if current >= trigger:
+        return "track"
+    # If current is near resistance: reduce scenario
+    if resistance and current >= resistance * 0.95:
+        return "reduce"
+    # If current is near support: low_buy scenario
+    if support and current <= support * 1.03:
+        return "low_buy_watch"
+    # Default: waiting for confirmation
+    return "wait_for_confirmation"
 
 
 def _signal_type_label(sig_type: str) -> str:
