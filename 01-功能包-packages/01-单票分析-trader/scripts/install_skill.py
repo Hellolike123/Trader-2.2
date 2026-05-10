@@ -10,9 +10,9 @@ from pathlib import Path
 
 def _hermes_root() -> Path:
     home = Path.home()
-    # Inside Hermes sandbox, HOME=/home/abc/.hermes — no need to append .hermes
-    # On normal machine, HOME=/home/abc — need .hermes/skills
-    if home.name == ".hermes":
+    # Inside Hermes sandbox, HOME=/home/abc/.hermes — append skills directly
+    # On normal machine, HOME=/home/abc — append .hermes/skills
+    if ".hermes" in home.parts or "hermes" in home.parts:
         return home / "skills"
     return home / ".hermes" / "skills"
 
