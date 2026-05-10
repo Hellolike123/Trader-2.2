@@ -158,9 +158,9 @@ def main() -> int:
     packages_dir = root / "01-功能包-packages"
     output_dir = root / "03-安装包-dist"
     release_dir_name = build_release_dir_name()
-    release_dir = output_dir / release_dir_name
-    output_dir.mkdir(exist_ok=True)
-    release_dir.mkdir(exist_ok=True)
+    release_dir = output_dir / "releases" / release_dir_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+    release_dir.mkdir(parents=True, exist_ok=True)
     print(f"Release dir: {release_dir_name}/")
 
     stages: list[tuple[str, str, Path]] = []

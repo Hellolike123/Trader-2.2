@@ -772,7 +772,6 @@ def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
         key_4 = (nk, nd, nt, f"{float(tp):.2f}" if tp is not None and float(tp) > 0 else "")
         key_3 = (nk, nd, nt)
         if key_4 in existing_keys_4 or key_3 in existing_keys_3:
-        if key in existing_keys:
             skipped += 1
             continue
         result = _compute_results_for_sig(sig)
