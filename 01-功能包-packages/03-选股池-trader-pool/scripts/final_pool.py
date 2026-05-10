@@ -510,8 +510,14 @@ def _pool_signal_verifications(items: list[dict[str, Any]]) -> tuple[list[dict[s
                     verify_status = "❌ 破防守"
                     summary["信号错了"] = summary.get("信号错了", 0) + 1
                 elif current >= trigger:
-                    verify_status = "✅ 已触发"
-                    summary["已验证"] = summary.get("已验证", 0) + 1
+                    # FIX-T-BIAS-124: require price to exceed trigger by margin
+                    # to avoid false positives on brief touches.
+                    if current > trigger * 1.01:
+                        verify_status = "✅ 已触发"
+                        summary["已验证"] = summary.get("已验证", 0) + 1
+                    else:
+                        verify_status = "⏳ 触碰但未确认"
+                        summary["未验证"] = summary.get("未验证", 0) + 1
                 else:
                     try:
                         added_str = str(item.get("added_at", today_text()))
@@ -542,9 +548,20 @@ def _pool_signal_verifications(items: list[dict[str, Any]]) -> tuple[list[dict[s
                         else:
                             verify_status = "⚠️ 信号存疑"
                             summary["信号错了"] = summary.get("信号错了", 0) + 1
+                    # FIX-T-BIAS-125: reduce 信号需要实质性验证（接近压力/减仓信号出现）
                     elif sig_type == "reduce":
-                        verify_status = "⏳ 等确认"
-                        summary["未验证"] = summary.get("未验证", 0) + 1
+                        resistance = to_float(item.get("resistance") or 0)
+                        close_under_resistance = current < resistance * 0.99 if resistance > 0 else False
+                        hit_resistance = current >= resistance * 0.98 if resistance > 0 else False
+                        if hit_resistance:
+                            verify_status = "⚠️ 已触压"
+                            summary["已验证"] = summary.get("已验证", 0) + 1
+                        elif close_under_resistance:
+                            verify_status = "⏳ 远离压力，暂不操作"
+                            summary["未验证"] = summary.get("未验证", 0) + 1
+                        else:
+                            verify_status = "⏳ 等确认"
+                            summary["未验证"] = summary.get("未验证", 0) + 1
                     elif sig_type == "defensive":
                         if current < defense:
                             verify_status = "❌ 破防守"
