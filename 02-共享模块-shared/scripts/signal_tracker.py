@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import argparse
-import json
 import hashlib
+import json
 import os
 import sys
 import unicodedata
@@ -201,9 +201,17 @@ def _ensure_result_dir() -> None:
 
 
 def _norm_date(raw: str) -> str:
-    # FIX-T-BIAS-A17: Normalize date strings to YYYY-MM-DD so bar dates like
-    # "2025-04-01T00:00:00" still match signal dates like "2025-04-01".
-    return str(raw).split("T")[0].split(" ")[0][:10]
+    """Normalize date strings to zero-padded YYYY-MM-DD for safe comparison.
+    
+    Handles non-zero-padded dates like "2025-5-2" → "2025-05-02".
+    Handles datetime strings "2025-05-02T14:30:00" → "2025-05-02".
+    """
+    s = str(raw).split("T")[0].split(" ")[0]
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").strftime("%Y-%m-%d")
+    except ValueError:
+        pass
+    return s[:10]
 
 
 def _load_results() -> list[dict[str, Any]]:
@@ -226,9 +234,11 @@ def _load_results() -> list[dict[str, Any]]:
 
 
 def _load_signals(symbol: str | None = None) -> list[dict[str, Any]]:
+    """Load signals from store, normalizing symbol for matching."""
     if not STORE_PATH.exists():
         return []
     signals = []
+    normalized_query = _normalize_symbol(symbol) if symbol else None
     for line in STORE_PATH.read_text(encoding="utf-8").splitlines():
         if not line.strip(): continue
         try:
@@ -237,7 +247,8 @@ def _load_signals(symbol: str | None = None) -> list[dict[str, Any]]:
             continue
         if not isinstance(sig, dict):
             continue
-        if symbol and str(sig.get("symbol") or "") != symbol:
+        sig_symbol = str(sig.get("symbol") or "")
+        if normalized_query and _normalize_symbol(sig_symbol) != normalized_query:
             continue
         signals.append(sig)
     return signals
@@ -369,7 +380,7 @@ def check_recent(days: int = 5) -> dict[str, int]:
         return {"updated": 0, "skipped": 0}
 
     cutoff = (datetime.now() - timedelta(days=days + 10)).strftime("%Y-%m-%d")
-    recent = [s for s in signals if str(s.get("trade_date", "")) >= cutoff]
+    recent = [s for s in signals if _norm_date(str(s.get("trade_date", ""))) >= cutoff]
 
     # 已存在的结果 (symbol, date, signal_type) as key to support multi-signal same day
     existing_keys: dict[tuple[str, str, str], dict] = {}
@@ -503,8 +514,8 @@ def _make_panel(results: list[dict[str, Any]], days_limit: int | None) -> str:
 
     if days_limit:
         cutoff = (datetime.now() - timedelta(days=days_limit)).strftime("%Y-%m-%d")
-        valid = [r for r in valid if str(r.get("signal_date", "")) >= cutoff]
-        unresolved = [r for r in unresolved if str(r.get("signal_date", "")) >= cutoff]
+        valid = [r for r in valid if _norm_date(str(r.get("signal_date", ""))) >= cutoff]
+        unresolved = [r for r in unresolved if _norm_date(str(r.get("signal_date", ""))) >= cutoff]
         total_valid = len(valid)
         total_unresolved = len(unresolved)
         total_all = total_valid + total_unresolved
@@ -707,7 +718,7 @@ def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
         return {"updated": 0, "skipped": 0}
 
     cutoff = (datetime.now() - timedelta(days=days_window)).strftime("%Y-%m-%d")
-    candidates = [s for s in signals if str(s.get("trade_date", "")) >= cutoff]
+    candidates = [s for s in signals if _norm_date(str(s.get("trade_date", ""))) >= cutoff]
 
     # 已存在的结果 (symbol, date, signal_type) as key
     existing_keys: dict[tuple[str, str, str], dict] = {}

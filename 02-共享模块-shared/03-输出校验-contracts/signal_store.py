@@ -9,6 +9,18 @@ from typing import Any
 from signal_contract import assert_valid_signal
 
 
+def _normalize_symbol(symbol: str) -> str:
+    """Ensure bare 6-digit codes get exchange suffix so 688248 matches 688248.SH."""
+    if not symbol or "." in symbol:
+        return symbol
+    s = str(symbol).strip()
+    if len(s) == 6 and s.isdigit():
+        if s.startswith(("6", "9", "5")):
+            return f"{s}.SH"
+        return f"{s}.SZ"
+    return s
+
+
 DEFAULT_SIGNAL_STORE_PATH = Path(os.environ.get("TRADER_SIGNAL_STORE_PATH", Path.home() / ".trader" / "signals.jsonl"))
 
 
@@ -60,5 +72,6 @@ def load_recent_signals(symbol: str | None = None, limit: int = 20, path: Path |
         _sig_cache[path_key] = {"mtime": now, "data": signals}
 
     if symbol:
-        signals = [s for s in signals if s.get("symbol") == symbol]
+        norm_query = _normalize_symbol(symbol)
+        signals = [s for s in signals if _normalize_symbol(str(s.get("symbol") or "")) == norm_query]
     return signals[-limit:]
