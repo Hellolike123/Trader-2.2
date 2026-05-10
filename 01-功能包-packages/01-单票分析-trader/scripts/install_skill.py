@@ -8,9 +8,18 @@ import sys
 from pathlib import Path
 
 
+def _hermes_root() -> Path:
+    home = Path.home()
+    # Inside Hermes sandbox, HOME=/home/abc/.hermes — no need to append .hermes
+    # On normal machine, HOME=/home/abc — need .hermes/skills
+    if home.name == ".hermes":
+        return home / "skills"
+    return home / ".hermes" / "skills"
+
+
 PRESET_ROOTS = {
     "codex": Path.home() / ".agents" / "skills",
-    "hermes": Path.home() / "skills",
+    "hermes": _hermes_root(),
     "openclaw": Path.home() / ".openclaw" / "workspace" / "skills",
 }
 

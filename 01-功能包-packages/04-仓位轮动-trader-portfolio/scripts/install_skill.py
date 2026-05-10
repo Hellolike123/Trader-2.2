@@ -8,9 +8,16 @@ import sys
 from pathlib import Path
 
 
+def _hermes_root() -> Path:
+    home = Path.home()
+    if home.name == ".hermes":
+        return home / "skills"
+    return home / ".hermes" / "skills"
+
+
 PRESET_ROOTS = {
     "codex": Path.home() / ".agents" / "skills",
-    "hermes": Path.home() / "skills",
+    "hermes": _hermes_root(),
     "openclaw": Path.home() / ".openclaw" / "workspace" / "skills",
 }
 

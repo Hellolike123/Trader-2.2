@@ -166,15 +166,15 @@ def build_report(target: str) -> dict[str, Any]:
     position_cap = min(10, atr_cap) if scene in buy_scenes else 10
 
     chip = _calc_chip(bars, lookback=60)
-    chip_peaks = chip.get("peaks", [])
+    chip_peaks = sorted(chip.get("peaks", []) or [], key=lambda x: x["price"])
     chip_support: float | None = None
     chip_resistance: float | None = None
     for p in chip_peaks:
         price = p["price"]
         if price < current:
-            chip_support = price
+            chip_support = price  # keeps updating, last one < current = closest
         elif price > current and chip_resistance is None:
-            chip_resistance = price
+            chip_resistance = price  # first one > current = closest
 
     return {
         "name": quote.get("name") or sec.name,
