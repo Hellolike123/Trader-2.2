@@ -34,6 +34,9 @@ class TestClimateAdjust:
         assert climate_adjust("冲高减仓", "很差") == "减仓加倍"
         assert climate_adjust("优先候选", "很差") == "优先候选"
 
+    def test_weak_downgrade_reduce_double(self):
+        assert climate_adjust("冲高减仓", "偏弱") == "减仓加倍"
+
     def test_weak_downgrade_wait_for_strength(self):
         assert climate_adjust("等转强", "偏弱") == "低吸观察"
 
@@ -126,17 +129,20 @@ class TestAllocateWeights:
         assert weights["票A"] > weights["票B"] > weights["票C"]
 
     def test_no_atr_cap_hard_limit(self):
-        """atr_cap no longer hard-caps individual stock positions"""
+        """Score-proportional, atr_cap no longer hard-caps"""
         items = [
-            {"name": "票A", "score": 90, "atr_cap": 3, "ok": True, "status": "低吸观察"},
-            {"name": "票B", "score": 60, "atr_cap": 10, "ok": True, "status": "防守观察"},
+            {"name": "票A", "score": 90, "atr_cap": 3, "chip_weight": 1.0, "ok": True, "status": "低吸观察"},
+            {"name": "票B", "score": 60, "atr_cap": 10, "chip_weight": 1.0, "ok": True, "status": "防守观察"},
         ]
         weights = allocate_weights(items, max_total=DEFAULT_MAX_TOTAL)
-        # Old behavior: 票A capped at 3. New behavior: score-proportional, no hard limit
-        assert weights["票A"] != 3  # Not capped anymore
-        assert weights["票A"] > weights["票B"]
+        # 期望: 80 * (90/150) ≈ 48, 80 * (60/150) ≈ 32
+        expected_a = round(90 / 150 * DEFAULT_MAX_TOTAL)
+        expected_b = round(60 / 150 * DEFAULT_MAX_TOTAL)
+        assert weights["票A"] == expected_a, f"权重={weights['票A']}, 期望={expected_a}"
+        assert weights["票B"] == expected_b, f"权重={weights['票B']}, 期望={expected_b}"
 
-    def test_atr_cap_hard_limit_passes_to_remaining(self):
+    def test_equal_scores_equal_allocation_no_atr_cap(self):
+        """Equal scores → roughly equal allocation regardless of atr_cap"""
         items = [
             {"name": "票A", "score": 100, "atr_cap": 3, "ok": True, "status": "低吸观察"},
             {"name": "票B", "score": 100, "atr_cap": 10, "ok": True, "status": "防守观察"},
@@ -208,19 +214,21 @@ class TestAllocateWeights:
         assert "票B" not in weights
         assert "票A" in weights
 
-    def test_climate_downgrade_affects_tradable_filter(self):
+    def test_climate_downgrade_all_still_tradable(self):
+        """降级后所有标的仍在交易队列中（防守观察不被排除）"""
         from portfolio_run import climate_adjust
         items = [
-            {"name": "票A", "score": 85, "atr_cap": 10, "ok": True, "status": "低吸观察"},
-            {"name": "票B", "score": 60, "atr_cap": 7, "ok": True, "status": "防守观察"},
+            {"name": "票A", "score": 85, "atr_cap": 10, "ok": True, "status": "等转强"},
+            {"name": "票B", "score": 60, "atr_cap": 7, "ok": True, "status": "低吸观察"},
         ]
         for item in items:
             item["adjusted_status"] = climate_adjust(item["status"], "很差")
 
         weights = allocate_weights(items, max_total=DEFAULT_MAX_TOTAL)
+        # Both are still tradable (防守观察 is not excluded), score allocation applies
+        assert sum(weights.values()) == DEFAULT_MAX_TOTAL
         assert "票A" in weights
         assert "票B" in weights
-        assert sum(weights.values()) == DEFAULT_MAX_TOTAL
 
     def test_adjusted_status_downgrade_reduces_allocation(self):
         from portfolio_run import climate_adjust

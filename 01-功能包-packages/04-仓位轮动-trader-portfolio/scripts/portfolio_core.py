@@ -50,7 +50,7 @@ def analyze_target(target: str, provider: Any, lookback_days: int) -> dict[str, 
                 chip_dist = calc_chip_distribution(bars, lookback=60)
                 vol_above = chip_dist.get("volume_above_pct") or 50
                 if vol_above >= 70:
-                    chip_weight = 0.5
+                    chip_weight = 0.6
                 elif vol_above >= 50:
                     chip_weight = 0.75
                 elif vol_above >= 30:

@@ -136,6 +136,8 @@ def signal_state_for_item(item: dict[str, Any], *, market_level: str = "") -> tu
         return "defensive", "bearish_lean", "wait", "low"
     if status == "冲高减仓":
         return "reduce", "neutral", "reduce", "medium"
+    if status == "减仓加倍":
+        return "reduce", "bearish", "reduce", "high"
     if confirm > 0 and current >= confirm:
         return "track", "bullish", "track", "medium"
     if status in {"等转强", "突破确认", "突破观察"}:
@@ -243,24 +245,13 @@ def allocate_weights(
         return {item["name"]: each for item in tradable}
 
     # 筹码降权系数（软调整，不硬限速）
-    def chip_weight(item):
-        v = item.get("volume_above_pct")
-        if v is None:
-            return 1.0
-        if v >= 70:
-            return 0.6
-        if v >= 50:
-            return 0.75
-        if v >= 30:
-            return 0.9
-        return 1.0
-
+    # 使用 portfolio_core.analyze_target 预计算的 chip_weight 值
     weights: dict[str, int] = {}
     for item, score in zip(tradable, scores):
         raw_w = round(score / total_score * alloc_pool)
         raw_w = max(raw_w, 0)
         # 筹码降权（套牢盘越重，仓位越低）
-        cw = chip_weight(item)
+        cw = float(item.get("chip_weight") or 1.0)
         weight = round(raw_w * cw)
         weights[item["name"]] = weight
 
@@ -283,7 +274,8 @@ def allocate_weights(
     return weights
 
 
-def build_roles(sorted_items: list[dict[str, Any]], *, max_total: int, main_cap: int) -> dict[str, Any]:
+def build_roles(sorted_items: list[dict[str, Any]], *, max_total: int, main_cap: int = 50) -> dict[str, Any]:
+    # main_cap 预留参数：仓位分配由 allocate_weights 的 Score 占比 + 筹码降权决定
     tradable = [
         item for item in sorted_items
         if item.get("ok")
