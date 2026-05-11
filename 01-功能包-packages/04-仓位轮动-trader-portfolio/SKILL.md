@@ -38,7 +38,37 @@ Load `references/output-contract.md` (absolute truth — never generate output f
 
 Must pass old output detection — if markdown tables are present, rerun the script.
 
-## Rules
+## Natural Language Input (对话持仓管理)
+
+The agent MUST parse the user's natural language messages and update `~/.trader/positions.json` automatically. The user never needs to edit JSON or remember command flags.
+
+**Supported utterances** — parse these patterns and update `~/.trader/positions.json`:
+
+| User says | Action |
+|-----------|--------|
+| "我买了/加仓了 {股票名} {股数}股 成本{价格}" | Record buy / add to existing position |
+| "我卖了 {股票名} {股数}股" | Record sell |
+| "清仓了 {股票名}" / "卖了全部 {股票名}" | Sell all shares |
+| "账户总资金 {金额}" / "我有 {金额} 万" | Update account total_cash |
+| "更新持仓：{股票A} {N}股成本{P}，{股票B} {M}股成本{Q}" | Full replace of holdings list |
+| "帮我看看 {股票1} {股票2} [股票3] 怎么配仓位" | Skip record, directly run `--targets` |
+
+**Parsing rules:**
+1. Share count: follow "股" or "手" (1 手 = 100 股 for A-shares)
+2. Cost: follow "成本", "买在", "均价", "买入价"
+3. Money: "50万" = 500000, "100万" = 1000000
+4. Stock names: use exact name as it appears in `~/.trader/positions.json` for matching
+
+**After parsing, always confirm what was stored:**
+```
+已记录：
+- 南网科技 2000股 成本35.99
+- 中国铝业 2000股 成本11.50
+  总资金：20万
+要不要生成仓位计划？（回复要/帮我看看 xxx xxx）
+```
+
+**Rules:**
 - If one stock fails, keep the plan for the others and mark that stock as `数据失败`.
 - If all fail, return the failure.
 - Without the `terminal` toolset, fail closed. Do not produce a portfolio plan from memory.

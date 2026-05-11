@@ -142,7 +142,7 @@ def validate_pool(markdown: str) -> list[str]:
 # 04-trader-portfolio
 # ═══════════════════════════════════════════════
 
-PORTFOLIO_HEADINGS = ["📌 组合", "🎯 操作", "📍 关键价位", "🧭 结论"]
+PORTFOLIO_HEADINGS = ["📈 仓位建议", "📋 仓位对比", "🔄 轮动触发"]
 PORTFOLIO_SNAPSHOT_HEADINGS = [
     "🧺 高切低轮动面板", "📌 当前结论", "📊 当前仓位",
     "🔁 轮动动作", "🎯 关键价位", "🛑 卖完条件",
