@@ -143,10 +143,17 @@ git commit -m "refactor(tracker): verify _normalize_signal_type is public-ready"
 
 ```python
 # In test_signal_id_store.py
+import json
+from signal_store import append_signal
+from signal_tracker import (
+    make_signal_id,
+    _normalize_symbol,
+    _norm_date,
+    _normalize_signal_type,
+    _price_from_trigger,
+)
+
 def test_append_signal_generates_signal_id(tmp_path):
-    """Signal written without signal_id gets one auto-generated."""
-    from signal_store import append_signal
-    from signal_tracker import make_signal_id
     
     signal = {
         "contract": "trader_signal_v1",
@@ -229,14 +236,21 @@ Expected: FAIL (function not yet modified)
 
 - [ ] **Step 3: Implement signal_id in append_signal()**
 
-Add after `assert_valid_signal(signal)` in `signal_store.py:append_signal()`:
+Add at top of `signal_store.py` (with other imports):
 
 ```python
-from signal_tracker import make_signal_id, _normalize_symbol, _norm_date, _normalize_signal_type, _price_from_trigger
+from signal_tracker import (
+    make_signal_id,
+    _normalize_symbol,
+    _norm_date,
+    _normalize_signal_type,
+    _price_from_trigger,
+)
+```
 
-def append_signal(signal: dict[str, Any], path: Path | None = None) -> None:
-    assert_valid_signal(signal)
-    
+Then add inside `append_signal()`, immediately after `assert_valid_signal(signal)`:
+
+```python
     # Auto-generate signal_id if not present
     if "signal_id" not in signal:
         raw_type = str(signal.get("signal_type") or "unknown").strip()
@@ -248,12 +262,7 @@ def append_signal(signal: dict[str, Any], path: Path | None = None) -> None:
         )
         signal["signal_id"] = sig_id
     
-    store_path = path or DEFAULT_SIGNAL_STORE_PATH
-    store_path.parent.mkdir(parents=True, exist_ok=True)
-    with store_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(signal, ensure_ascii=False, sort_keys=True, default=str))
-        handle.write("\n")
-    _sig_cache.pop(str(store_path), None)
+    # ... rest of function unchanged
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -878,7 +887,24 @@ Wait — I need to reconsider. The signal dict also has `signal_id` now. Let me 
 
 - [ ] **Step 5: Apply same fix to `backfill()`**
 
-Copy the same existing_keys building pattern to `backfill()` (duplicated code pattern).
+In `backfill()` (around line 790-854 in `signal_tracker.py`), the existing_keys building code is duplicated from `check_recent()`. Apply the identical three-dictionary pattern:
+
+```python
+    # In backfill(): replace the existing_keys building block (same as check_recent)
+    existing_keys_by_id: dict[str, dict] = {}
+    existing_keys_4: dict[tuple[str, str, str, str], dict] = {}
+    existing_keys_3: dict[tuple[str, str, str], dict] = {}
+    # ... same try/except/for loop as check_recent Step 3 ...
+    
+    # And the dedup check below must also include signal_id:
+    for sig in candidates:
+        key = _make_signal_key(sig)
+        if sig.get("signal_id") in existing_keys_by_id:
+            skipped += 1; continue
+        if key in existing_keys_4 or (key[0], key[1], key[2]) in existing_keys_3:
+            skipped += 1; continue
+```
+Expected: `backfill()` now matches identically to `check_recent()`.
 
 - [ ] **Step 6: Run test to verify it passes**
 
@@ -907,19 +933,65 @@ git commit -m "feat(tracker): signal_results matching priority — signal_id > 4
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# In test_signal_id_check_compat.py or test_v2_infra.py
-def test_compute_results_includes_signal_id():
-    """When _compute_results_for_sig returns a success result, signal_id is present."""
-    # This is an integration test — need to mock price fetching
-    # For now, just verify: if _compute_results_for_sig succeeds, signal_id is in result
-    pass  # placeholder, integrate with existing _compute_results tests
+# In test_signal_id_check_compat.py (append to existing file)
+from unittest.mock import MagicMock, patch
+
+def test_compute_results_for_sig_includes_signal_id():
+    """When _compute_results_for_sig succeeds, result dict contains signal_id."""
+    from signal_tracker import _compute_results_for_sig, _normalize_symbol, _norm_date, _normalize_signal_type, make_signal_id
+    
+    # Create a minimal signal
+    sig = {
+        "symbol": "688248.SH",
+        "name": "南网科技",
+        "trade_date": "2025-05-02",
+        "analysis_time": "2025-05-02 10:00",
+        "signal_type": "low_buy_watch",
+        "source_skill": "trader",
+        "trigger": {"price": 10.50, "type": "price_confirm", "text": "test"},
+        "invalidation": {"price": 10.0, "type": "price_break", "text": ""},
+        "position": {"max_total_pct": 30, "max_single_move_pct": 30},
+        "risk_flags": [],
+        "data_status": "full",
+    }
+    
+    mock_bars = [
+        {"date": "2025-05-02", "close": "10.50", "atr14": "0.35"},
+        {"date": "2025-05-03", "close": "10.65", "atr14": "0.35"},
+        {"date": "2025-05-05", "close": "10.80", "atr14": "0.35"},
+    ]
+    
+    with patch("signal_tracker.resolve_security", return_value="688248.SH"), \
+         patch("signal_tracker.fetch_qfq_daily", return_value=mock_bars), \
+         patch("signal_tracker.HttpClient", return_value=MagicMock()), \
+         patch("signal_tracker.to_float", side_effect=lambda v: float(v) if v else None):
+        result = _compute_results_for_sig(sig)
+    
+    assert result is not None
+    assert "signal_id" in result
+    assert len(result["signal_id"]) == 16
+    
+    expected = make_signal_id(
+        symbol=_normalize_symbol("688248.SH"),
+        date=_norm_date("2025-05-02"),
+        signal_type=_normalize_signal_type("low_buy_watch"),
+        price=f"{10.50:.2f}",
+    )
+    assert result["signal_id"] == expected
 ```
 
 - [ ] **Step 2: Add signal_id to _compute_results_for_sig() return dict**
 
-In the return dict construction (around line 424):
+In the return dict construction (around line 424). Insert these variables just before the `res: dict[str, Any] = {` block — extract from `sig` dict:
 
 ```python
+    # Before the return dict, compute signal_id inputs (same pattern as check_recent Step 3)
+    norm_symbol = _normalize_symbol(str(sig.get("symbol") or ""))
+    norm_type = _normalize_signal_type(str(sig.get("signal_type", "unknown") or "unknown"))
+    sig_price = float(sig.get("trigger", {}).get("price") or sig.get("current") or 0)
+    price_str = f"{sig_price:.2f}"
+    norm_sig_date = _norm_date(str(sig.get("trade_date") or str(sig.get("analysis_time", "").split("T")[0])))
+    
     res: dict[str, Any] = {
         "signal_id": make_signal_id(norm_symbol, norm_sig_date, norm_type, price_str),
         "symbol": symbol, "name": name,
@@ -931,7 +1003,7 @@ In the return dict construction (around line 424):
     }
 ```
 
-Where `norm_symbol`, `norm_type`, and `price_str` are computed from the input `sig` dict before the return statement.
+**Note**: `_compute_results_for_sig()` receives a signal dict from `signals.jsonl`, so price comes from `sig["trigger"]["price"]` or `sig["current"]` (not from `signal_price` — that's only for the result's own backward compat in `check_recent()`).
 
 - [ ] **Step 3: Run existing result tests**
 
