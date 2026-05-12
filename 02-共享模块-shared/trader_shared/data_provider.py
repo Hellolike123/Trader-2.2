@@ -374,19 +374,20 @@ class AkShareProvider:
     def load_market_snapshot(self, target: str, days: int = 365, include_5m: bool = True) -> MarketSnapshot:
         sec = self.resolve_security(target)
         daily_bars, bars_5m, quote = [], [], {}
+        source_errors: dict[str, str] = {}
         try:
             daily_bars = self.fetch_qfq_daily(sec, days=days)
         except Exception as e:
-            daily_bars = []
+            source_errors["daily"] = str(e)
         try:
             quote = self.fetch_quote(sec)
-        except Exception:
-            quote = {}
+        except Exception as e:
+            source_errors["quote"] = str(e)
         if include_5m:
             try:
                 bars_5m = self.fetch_5m(sec)
-            except Exception:
-                bars_5m = []
+            except Exception as e:
+                source_errors["5m"] = str(e)
 
         if daily_bars and quote:
             data_status = "full"
@@ -401,6 +402,7 @@ class AkShareProvider:
             daily_bars=daily_bars,
             bars_5m=bars_5m,
             data_status=data_status,
+            source_errors=source_errors,
         )
 
     def pct_change(self, start: float, end: float) -> float:
