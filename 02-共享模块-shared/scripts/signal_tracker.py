@@ -827,6 +827,116 @@ def _make_panel(results: list[dict[str, Any]], days_limit: int | None) -> str:
     return "\n".join(L)
 
 
+# ═══════ Signal ID Migration Tool ═══════
+
+
+def _build_signal_id_inputs(result_rec: dict) -> tuple[str, str, str, str]:
+    """Extract normalized inputs for make_signal_id from a signal or result record.
+
+    Works for both signal dict (signals.jsonl) and result dict (signal_results.jsonl).
+    Price priority: trigger.price > current > signal_price > "0.00".
+    Date field: trade_date (signal) or signal_date (result).
+    """
+    norm_symbol = _normalize_symbol(str(result_rec.get("symbol", ""))) or ""
+
+    # Price priority: trigger.price > current > signal_price > "0.00"
+    if result_rec.get("trigger", {}).get("price"):
+        price_str = f"{float(result_rec['trigger']['price']):.2f}"
+    elif result_rec.get("current"):
+        price_str = f"{float(result_rec['current']):.2f}"
+    elif result_rec.get("signal_price"):
+        price_str = f"{float(result_rec['signal_price']):.2f}"
+    else:
+        price_str = "0.00"
+
+    # date field may be trade_date (signal) or signal_date (result)
+    date_val = result_rec.get("trade_date") or result_rec.get("signal_date", "")
+    norm_date_val = _norm_date(str(date_val)) or ""
+    norm_type = _normalize_signal_type(str(result_rec.get("signal_type", "unknown")))
+
+    return norm_symbol, norm_date_val, norm_type, price_str
+
+
+def _migrate_file(file_path: Path, is_signal: bool = True) -> dict[str, int]:
+    """Migrate a single JSONL file. Returns migrated/skipped counts.
+
+    Idempotent: records with signal_id are skipped. Bad lines pass through unchanged.
+    """
+    if not file_path.exists():
+        return {"migrated": 0, "skipped": 0}
+
+    lines_raw = file_path.read_text(encoding="utf-8").splitlines()
+    new_lines: list[str] = []
+    migrated = 0
+    skipped = 0
+
+    for line in lines_raw:
+        if not line.strip():
+            new_lines.append(line)
+            continue
+
+        try:
+            rec = json.loads(line)
+            if not isinstance(rec, dict):
+                new_lines.append(line)
+                continue
+        except (json.JSONDecodeError, ValueError):
+            new_lines.append(line)  # Bad lines pass through
+            continue
+
+        if rec.get("signal_id"):
+            new_lines.append(line)
+            skipped += 1
+            continue
+
+        norm = _build_signal_id_inputs(rec)
+        rec["signal_id"] = make_signal_id(*norm)
+        new_lines.append(json.dumps(rec, ensure_ascii=False))
+        migrated += 1
+
+    if migrated > 0:
+        tmp_path = file_path.with_suffix(file_path.suffix + ".tmp")
+        tmp_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        fd = os.open(str(tmp_path), os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(str(tmp_path), str(file_path))
+
+    return {"migrated": migrated, "skipped": skipped}
+
+
+def migrate_signal_ids(store_path: Path | None = None,
+                       results_path: Path | None = None) -> dict[str, int]:
+    """Add signal_id to existing records in signals.jsonl and signal_results.jsonl.
+
+    Idempotent: records that already carry signal_id are skipped.
+    Does NOT process signal_log.jsonl (old MD5 signal_id is irreversible).
+
+    Usage:
+        python -c "from signal_tracker import migrate_signal_ids; migrate_signal_ids()"
+
+    Returns:
+        dict with keys "signals_migrated", "signals_skipped",
+                        "results_migrated", "results_skipped"
+    """
+    if store_path is None:
+        store_path = STORE_PATH
+    if results_path is None:
+        results_path = RESULT_PATH
+
+    sig_result = _migrate_file(store_path, is_signal=True)
+    res_result = _migrate_file(results_path, is_signal=False)
+
+    return {
+        "signals_migrated": sig_result["migrated"],
+        "signals_skipped": sig_result["skipped"],
+        "results_migrated": res_result["migrated"],
+        "results_skipped": res_result["skipped"],
+    }
+
+
 # ═══════ CLI ═══════
 
 # FIX-T-BIAS-03: backfill — 强制回溯历史过期信号
