@@ -283,6 +283,37 @@ _SIGNAL_TYPE_MAP: dict[str, str] = {
 _SIGNAL_TYPE_REVERSE: dict[str, str] = {v: k for k, v in _SIGNAL_TYPE_MAP.items()}
 
 
+# ── 信号生命周期状态 ──
+
+SIGNAL_STATUS_VALUES = {"active", "completed", "expired"}
+
+_FORBIDDEN_TRANSITIONS: dict[tuple[str, str], bool] = {
+    ("completed", "active"): True,
+    ("completed", "expired"): True,
+    ("expired", "active"): True,
+    ("expired", "completed"): True,
+}
+
+
+def signal_is_trackable(sig: dict) -> bool:
+    status = sig.get("status")
+    if not status:
+        return True
+    return status == "active"
+
+
+def set_signal_status(rec: dict, new_status: str) -> None:
+    if new_status not in SIGNAL_STATUS_VALUES:
+        raise ValueError(f"Invalid signal status: {new_status}")
+    current = rec.get("status")
+    if current and (current, new_status) in _FORBIDDEN_TRANSITIONS:
+        raise ValueError(
+            f"Transition not allowed: {current} \u2192 {new_status}"
+        )
+    rec["status"] = new_status
+    rec["status_updated_at"] = datetime.now().isoformat()
+
+
 # ═══════ 信号复合 key：(symbol, date, type, price_str) ═══════
 # 用于在 signals.jsonl ↔ signal_results.jsonl 之间匹配信号结果
 # 格式与现有 4-key 兼容，但封装在统一函数中，便于维护
