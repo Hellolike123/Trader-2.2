@@ -264,8 +264,10 @@ def score_report(report: dict[str, Any]) -> dict[str, int]:
 
     # 融合层 bonus: weighted_score(-1.35~1.35) → -20~+20 分
     fusion = report.get("fusion", {}) or {}
-    fw = float(fusion.get("weighted_score") or 0) if isinstance(fusion, dict) else 0
-    fd = float(fusion.get("disagreement") or 0) if isinstance(fusion, dict) else 0
+    fw = to_float(fusion.get("weighted_score")) if isinstance(fusion, dict) else None
+    fd = to_float(fusion.get("disagreement")) if isinstance(fusion, dict) else None
+    fw = fw or 0.0
+    fd = fd or 0.0
     fusion_bonus = max(-20, min(20, round(fw * 15)))
     # 高度分歧时削弱 bonus
     if fd > 1:
@@ -355,9 +357,28 @@ def active_items(pool: dict[str, Any]) -> list[dict[str, Any]]:
     return [item for item in pool.get("items", []) if item.get("status") in {"执行", "观察", "淘汰"}]
 
 
+def _fusion_confidence_rank(value: Any) -> int:
+    if value is None:
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        text = str(value).strip().lower()
+        return {"low": 1, "medium": 2, "high": 3}.get(text, 0)
+
+
 def sort_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     status_rank = {"执行": 3, "观察": 2, "淘汰": 1}
-    return sorted(items, key=lambda item: (status_rank.get(str(item.get("status")), 0), int(item.get("total_score") or 0), -float(item.get("atr_ratio") or 0), float(item.get("fusion_confidence") or 0)), reverse=True)
+    return sorted(
+        items,
+        key=lambda item: (
+            status_rank.get(str(item.get("status")), 0),
+            int(item.get("total_score") or 0),
+            -float(item.get("atr_ratio") or 0),
+            _fusion_confidence_rank(item.get("fusion_confidence")),
+        ),
+        reverse=True,
+    )
 
 
 def counts(items: list[dict[str, Any]]) -> dict[str, int]:
@@ -434,8 +455,11 @@ def cmd_show(args: argparse.Namespace) -> int:
     for item in items:
         line = f"  {item.get('name')}  {item.get('status')}  评分{item.get('total_score')}"
         fs = item.get("fusion_score")
-        if fs is not None and fs != 0:
-            line += f"(融合{fs:+d})"
+        if fs is not None:
+            try:
+                line += f"(融合{int(fs):+d})"
+            except (TypeError, ValueError):
+                line += f"(融合{fs})"
         line += f"  触发{price_yuan(item.get('trigger'))}  防守{price_yuan(item.get('defense'))}"
         fc = item.get("fusion_confidence")
         if fc is not None:
