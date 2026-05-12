@@ -200,6 +200,89 @@ RESULT_PATH = Path.home() / ".trader" / "signal_results.jsonl"
 STORE_PATH = Path.home() / ".trader" / "signals.jsonl"
 
 
+# ── 信号类型归一化：中文旧名 → v1 英文标准名 ──
+
+_SIGNAL_TYPE_MAP: dict[str, str] = {
+    # 中文旧名
+    "低吸观察": "low_buy_watch",
+    "低吸已触发": "low_buy_triggered",
+    "高抛已触发": "high_sell_triggered",
+    "高抛观察": "high_sell_watch",
+    "持股观望": "hold_observe",
+    "增持": "add_position",
+    "减仓": "reduce_position",
+    "空仓/止损": "stop_loss",
+    "防守观察": "defensive_watch",
+    "等转强": "wait_for_strength",
+    "持仓": "hold",
+    "止损": "stop_loss",
+    "追涨": "chase_rally",
+    "背驰入场": "divergence_entry",
+    # 英文旧名/旧版名
+    "low_buy": "low_buy_watch",
+    "high_sell": "high_sell_watch",
+    "wait": "wait_for_confirmation",
+    # 英文标准名（保持不变）
+    "low_buy_watch": "low_buy_watch",
+    "low_buy_triggered": "low_buy_triggered",
+    "high_sell_triggered": "high_sell_triggered",
+    "high_sell_watch": "high_sell_watch",
+    "hold_observe": "hold_observe",
+    "add_position": "add_position",
+    "reduce_position": "reduce_position",
+    "stop_loss": "stop_loss",
+    "defensive_watch": "defensive_watch",
+    "wait_for_strength": "wait_for_strength",
+    "hold": "hold",
+    "chase_rally": "chase_rally",
+    "divergence_entry": "divergence_entry",
+    "track": "track",
+    "risk_stop": "risk_stop",
+    "reduce": "reduce",
+    "observe": "observe",
+    "defensive": "defensive",
+    "review_result": "review_result",
+    "high_sell_watch": "high_sell_watch",
+    "low_sell_triggered": "low_sell_triggered",
+    "low_sell_watch": "low_sell_watch",
+}
+
+# 反向映射（英文 → 中文），用于日志显示
+_SIGNAL_TYPE_REVERSE: dict[str, str] = {v: k for k, v in _SIGNAL_TYPE_MAP.items()}
+
+
+# ═══════ 信号复合 key：(symbol, date, type, price_str) ═══════
+# 用于在 signals.jsonl ↔ signal_results.jsonl 之间匹配信号结果
+# 格式与现有 4-key 兼容，但封装在统一函数中，便于维护
+
+def _price_from_trigger(sig: dict) -> str | None:
+    """从 signal 的 trigger dict 中提取 price 并格式化为 2 位小数。"""
+    tp = sig.get("trigger")
+    if isinstance(tp, dict):
+        p = tp.get("price")
+        if p is not None and float(p) > 0:
+            return f"{float(p):.2f}"
+    # fallback: current 字段
+    curr = sig.get("current")
+    if curr is not None and float(curr) > 0:
+        return f"{float(curr):.2f}"
+    return None
+
+
+def _make_signal_key(sig: dict) -> tuple[str, str, str, str]:
+    """生成信号唯一匹配 key：(symbol, date, type, price_str)
+    
+    与 signal_results.jsonl 的 4-key 格式完全一致，确保双向匹配。
+    """
+    nk = _normalize_symbol(str(sig.get("symbol") or ""))
+    nd = _norm_date(str(sig.get("trade_date") or str(sig.get("analysis_time", "")).split("T")[0]))
+    nt = str(sig.get("signal_type") or "unknown").strip()
+    # 如果 signal_type 是中文旧名，归一化为英文
+    nt = _SIGNAL_TYPE_MAP.get(nt, nt)
+    ps = _price_from_trigger(sig)
+    return (nk, nd, nt, ps or "")
+
+
 def _ensure_result_dir() -> None:
     RESULT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -413,16 +496,8 @@ def check_recent(days: int = 5) -> dict[str, int]:
     skipped = 0
 
     for sig in recent:
-        nk = _normalize_symbol(sig.get("symbol") or "")
-        nd = str(sig.get("trade_date") or "").strip()
-        nt = str(sig.get("signal_type") or "").strip()
-        tp = sig.get("trigger", {})
-        if isinstance(tp, dict):
-            tp = tp.get("price", None)
-        # Normalize price to 2 decimal string matching result schema
-        key_4 = (nk, nd, nt, f"{float(tp):.2f}" if tp is not None and float(tp) > 0 else "")
-        key_3 = (nk, nd, nt)
-        if key_4 in existing_keys_4 or key_3 in existing_keys_3:
+        key = _make_signal_key(sig)
+        if key in existing_keys_4 or (key[0], key[1], key[2]) in existing_keys_3:
             skipped += 1
             continue
         result = _compute_results_for_sig(sig)
@@ -491,20 +566,6 @@ def show_single(symbol: str, days_limit: int | None = None) -> str:
     # BUG-012: 按 result_time 排序取最新，signal_date 可能重复
     results.sort(key=lambda r: r.get("result_time") or r.get("signal_date") or "", reverse=True)
     return _make_panel(results, days_limit)
-
-
-# FIX-T-BIAS-13: 信号类型归一化映射表 — 旧版 name → 新版 name
-_SIGNAL_TYPE_MAP: dict[str, str] = {
-    "low_buy": "low_buy_watch",        # 旧版 low_buy → 新版 low_buy_watch
-    "high_sell": "high_sell_watch",    # 旧版 high_sell → 新版 high_sell_watch
-    "risk_stop": "risk_stop",
-    "track": "track",
-    "observe": "observe",
-    "wait": "wait_for_confirmation",
-    "reduce": "reduce",
-    "defensive": "defensive",
-    "review_result": "review_result",
-}
 
 
 def _normalize_signal_type(raw_type: str) -> str:
@@ -762,16 +823,8 @@ def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
     skipped = 0
 
     for sig in candidates:
-        nk = _normalize_symbol(sig.get("symbol") or "")
-        nd = str(sig.get("trade_date") or "").strip()
-        nt = str(sig.get("signal_type") or "").strip()
-        tp = sig.get("trigger", {})
-        if isinstance(tp, dict):
-            tp = tp.get("price", None)
-        # Normalize price to 2 decimal string matching result schema
-        key_4 = (nk, nd, nt, f"{float(tp):.2f}" if tp is not None and float(tp) > 0 else "")
-        key_3 = (nk, nd, nt)
-        if key_4 in existing_keys_4 or key_3 in existing_keys_3:
+        key = _make_signal_key(sig)
+        if key in existing_keys_4 or (key[0], key[1], key[2]) in existing_keys_3:
             skipped += 1
             continue
         result = _compute_results_for_sig(sig)
