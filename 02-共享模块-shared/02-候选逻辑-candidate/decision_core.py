@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +33,8 @@ def _get_engine() -> Any:
                 from trader_shared.rule_engine import RuleEngine
                 _engine = RuleEngine.from_yaml(str(rules_path))
                 return _engine
-            except Exception:
+            except Exception as exc:
+                print(f"WARN: rule engine loaded from {rules_path} but evaluation failed: {exc}", file=sys.stderr)
                 pass
 
     _engine = None
