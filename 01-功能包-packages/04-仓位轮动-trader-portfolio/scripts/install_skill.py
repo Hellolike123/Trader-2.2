@@ -41,9 +41,8 @@ def default_target(preset: str, skill_name: str) -> Path:
 
 
 def vendor_shared_files(src: Path, dest: Path) -> None:
-    shared_core = src.parents[1] / "02-共享模块-shared" / "02-候选逻辑-candidate" / "candidate_core.py"
-    if shared_core.exists():
-        shutil.copy2(shared_core, dest / "scripts" / "candidate_core.py")
+    # All shared modules are bundled in the zip package.
+    # This function is kept as a no-op for source-tree installs.
 
 
 def main() -> int:
