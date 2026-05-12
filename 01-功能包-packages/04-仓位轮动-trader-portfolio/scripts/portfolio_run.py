@@ -136,6 +136,8 @@ def signal_state_for_item(item: dict[str, Any], *, market_level: str = "") -> tu
         return "defensive", "bearish_lean", "wait", "low"
     if status == "冲高减仓":
         return "reduce", "neutral", "reduce", "medium"
+    if status == "减仓加倍":
+        return "reduce", "bearish", "reduce", "high"
     if confirm > 0 and current >= confirm:
         return "track", "bullish", "track", "medium"
     if status in {"等转强", "突破确认", "突破观察"}:
@@ -226,8 +228,7 @@ def allocate_weights(
     if not tradable:
         return {}
 
-    total_cap = sum(int(item.get("atr_cap") or 10) for item in tradable)
-    alloc_pool = min(total_cap, max_total)
+    alloc_pool = max_total
 
     scores: list[float] = []
     for item in tradable:
@@ -243,12 +244,15 @@ def allocate_weights(
         each = max(1, round(alloc_pool / n))
         return {item["name"]: each for item in tradable}
 
+    # 筹码降权系数（软调整，不硬限速）
+    # 使用 portfolio_core.analyze_target 预计算的 chip_weight 值
     weights: dict[str, int] = {}
     for item, score in zip(tradable, scores):
-        weight = round(score / total_score * alloc_pool)
-        atr_cap = int(item.get("atr_cap") or 10)
-        weight = max(weight, 0)
-        weight = min(weight, atr_cap)
+        raw_w = round(score / total_score * alloc_pool)
+        raw_w = max(raw_w, 0)
+        # 筹码降权（套牢盘越重，仓位越低）
+        cw = float(item.get("chip_weight") or 1.0)
+        weight = round(raw_w * cw)
         weights[item["name"]] = weight
 
     actual_total = sum(weights.values())
@@ -270,7 +274,8 @@ def allocate_weights(
     return weights
 
 
-def build_roles(sorted_items: list[dict[str, Any]], *, max_total: int, main_cap: int) -> dict[str, Any]:
+def build_roles(sorted_items: list[dict[str, Any]], *, max_total: int, main_cap: int = 50) -> dict[str, Any]:
+    # main_cap 预留参数：仓位分配由 allocate_weights 的 Score 占比 + 筹码降权决定
     tradable = [
         item for item in sorted_items
         if item.get("ok")
@@ -556,126 +561,146 @@ def render_markdown(
     main_cap: int = DEFAULT_MAIN_CAP,
 ) -> str:
     weights = plan["weights"]
-    total = plan["total"]
+    total_alloc = plan["total"]
     cash = plan["cash"]
+    
+    tradable = [i for i in sorted_items if i.get("ok")]
+    if not tradable:
+        return "错误：无可用标的数据"
 
-    lines = [f"轮动仓位 — {' + '.join(sorted(set(str(it['name']) for it in sorted_items if it.get('ok'))))}"]
-    lines.append("")
-    if market_level:
-        lines.append(f"🌍 大盘{market_level} | {market_note}")
-        lines.append("")
-
-    lines.append("📌 组合")
-    lines.append("")
-
-    for role in ("主仓", "副仓", "观察"):
-        item = plan["roles"].get(role)
-        if not item:
-            continue
-        name = item["name"]
-        actual = int(weights.get(name, 0))
-        status = str(item.get("status") or "")
-        atr_level_str = str(item.get("atr_level") or "")
-        atr_cap_val = int(item.get("atr_cap") or 10)
-        atr_ratio_val = float(item.get("atr_ratio") or 0)
-
-        lines.append(f"    {role}  {name}  仓位 {actual}%")
-        lines.append(f"         状态：{status}")
-        cost = item.get("cost")
-        shares = item.get("shares")
-        if cost is not None and shares:
-            current = float(item.get("current") or 0)
-            pl_pct = round((current - float(cost)) / float(cost) * 100, 1) if float(cost) else 0
-            lines.append(f"         成本 {float(cost):.2f} ｜ {int(shares)} 股 ｜ 浮盈 {pl_pct:+.1f}%")
-        gap = item.get("gap")
-        if isinstance(gap, dict):
-            gap_text = gap.get("text", "")
-            if gap_text:
-                lines.append(f"         {gap_text}")
-
-    lines.append(f"    现金  {cash}%")
-    lines.append("")
-
-    if market_level in ("偏弱", "很差"):
-        safe_total = 60 if any(float(it.get("atr_ratio") or 0) >= 0.03 for it in sorted_items if it.get("ok")) else 70
-        lines.append(f"    ⚠️ 大盘{market_level} → 总仓不超过{safe_total}%，别轮入新票")
-
-    lines.extend(["", "🎯 操作", ""])
     main = plan["roles"].get("主仓")
     secondary = plan["roles"].get("副仓")
-    main_actual = int(weights.get(main["name"], 0)) if main else 0
-    sec_actual = int(weights.get(secondary["name"], 0)) if secondary else 0
-
-    def fmt_ops(item, current_pct):
-        if not item:
-            return ""
-        name = item["name"]
-        confirm = item.get("confirm")
-        stop = item.get("stop")
-        defense = item.get("defense")
-        parts = [f"  {name}（现价{item.get('current', 0):.2f}元）"]
-        parts.append(f"    · 当前仓位：{current_pct}%")
-        if confirm and current_pct < 20:
-            target = 20 if current_pct < 10 else 30
-            parts.append(f"    · 加仓：站稳 {confirm:.2f} + 回踩不破 → 加到 {target}%")
-        elif confirm and current_pct >= 20:
-            parts.append(f"    · 已{current_pct}%，不加了")
-        if defense and current_pct > 0:
-            reduce_val = min(int(current_pct * 0.7), 10)
-            parts.append(f"    · 防守：跌破 {defense:.2f} → 减至 {reduce_val}%")
-        if stop:
-            parts.append(f"    · 止损：跌破 {stop:.2f} → 清仓")
-        return "\n".join(parts)
-
-    lines.append(fmt_ops(main, main_actual))
+    
+    # 1. 标题
+    lines = [f"轮动仓位 — {' + '.join(sorted(i['name'] for i in tradable))}"]
     lines.append("")
-    sec_ops = fmt_ops(secondary, sec_actual)
-    if sec_ops:
-        lines.append(sec_ops)
-    for item in sorted_items:
-        if not item.get("ok") or item.get("status") in {"暂不碰", "数据失败"}:
-            continue
-        name = item["name"]
-        if name == main.get("name"):
-            continue
-        if secondary and name == secondary.get("name"):
-            continue
-        current_pct = int(weights.get(name, 0))
-        line = fmt_ops(item, current_pct)
-        if line:
-            lines.append("")
-            lines.append(line)
-
-    # Replace price_range import with price
-    lines.extend(["", "📍 关键价位", ""])
-    for item in sorted_items:
-        if not item.get("ok"):
-            continue
-        lines.append(f"  {item['name']}  买{price_range(item['buy_low'], item['buy_high'])}  防{price(item['defense'])}  损{price(item['stop'])}  减{price(item['take'])}")
-
-    lines.extend(["", "🧭 结论", ""])
-    active_tradable = [item for item in sorted_items if item.get("ok") and item.get("status") not in {"暂不碰", "数据失败"}]
-    for i, item in enumerate(active_tradable[:2], 1):
-        name = item["name"]
-        role_name_str = "主仓" if main and main["name"] == name else "副仓" if secondary and secondary["name"] == name else "观察"
-        pct = int(weights.get(name, 0))
-        status = item.get("status", "")
-        lines.append(f"  {role_name_str}  {name}  {pct}%（{status}）")
+    
+    # 2. 决策段
+    lines.append(_render_decision(tradable, main, secondary))
     lines.append("")
-    extreme_count = sum(1 for it in active_tradable if float(it.get("atr_ratio") or 0) >= 0.03)
-    if market_level in ("偏弱", "很差") and extreme_count >= 1:
-        lines.append("大盘偏弱+波幅偏高，不加仓不轮动，先活着再说。")
-    elif market_level in ("偏弱", "很差"):
-        lines.append(f"大盘{market_level}，不加仓不轮动。")
-    elif extreme_count >= 1:
-        lines.append("有标的波动放大，仓位给到最低一档，确认后再加。")
+    
+    # 3. 持仓速览
+    lines.append("📊 持仓速览")
+    for it in tradable:
+        nm = it["name"]
+        cur = it.get("current", 0)
+        cost = it.get("cost")
+        sh = it.get("shares")
+        if cost is not None and sh:
+            pl_pct = round((cur - float(cost)) / float(cost) * 100, 1)
+            pl_amt = round((cur - float(cost)) * sh, 0)
+            lines.append(f"  {nm}: 现价{cur:.2f}  成本{float(cost):.2f}  {int(sh)}股  浮盈{pl_pct:+.1f}%  ({pl_amt:+,.0f}元)")
+        else:
+            lines.append(f"  {nm}: 现价{cur:.2f}  未持仓")
+    lines.append("")
+    
+    # 4. 仓位建议
+    lines.append("📈 仓位建议")
+    for nm, wt in weights.items():
+        it = next((i for i in tradable if i["name"] == nm), None)
+        if not it:
+            continue
+        role_txt = ""
+        for role_nm in ("主仓", "副仓", "观察"):
+            r = plan["roles"].get(role_nm)
+            if r and r["name"] == nm:
+                role_txt = "（得分最高）" if role_nm == "主仓" else "（得分次优）" if role_nm == "副仓" else "（观察）"
+                break
+        lines.append(f"  {nm} → {wt}%  {role_txt}")
+    lines.append(f"  现金 → {cash}%")
+    has_high_atr = any(float(i.get("atr_ratio") or 0) >= 0.03 for i in tradable)
+    if has_high_atr:
+        lines.append("  （有标的波动偏高，得分+筹码降权决定比例）")
     else:
-        lines.append("按计划执行，等信号确认后逐步建仓。")
+        lines.append("  （得分占比决定比例，ATR仅作降权参考）")
+    lines.append("")
+    
+    # 5. 仓位对比（建议 vs 实际）
+    lines.append("📋 仓位对比")
+    total_mv = sum((i["shares"] * i.get("current", 0)) for i in tradable if i.get("shares") and i.get("current"))
+    for nm, wt in weights.items():
+        it = next((i for i in tradable if i["name"] == nm), None)
+        if not it:
+            continue
+        act = 0
+        if total_mv > 0 and it.get("shares") and it.get("current"):
+            act = round(it["shares"] * it["current"] / total_mv * 100)
+        diff = act - wt
+        flag = "✅ 接近" if abs(diff) <= 5 else f"⚠️ 超{diff}%" if diff > 0 else f"⚠️ 少{abs(diff)}%"
+        lines.append(f"  {nm}| 建议{wt}%  实际{act}%  → 差{diff:+d}%  {flag}")
+    lines.append("")
+    
+    # 6. 今日行动
+    lines.append("📎 今日行动")
+    for nm in weights:
+        it = next((i for i in tradable if i["name"] == nm), None)
+        if not it or not it.get("confirm"):
+            continue
+        dist = round((it["confirm"] - it["current"]) / it["current"] * 100, 1)
+        lines.append(f"  · {nm} 距确认位 {it['confirm']:.2f} 还差 {dist}%, 关注盘中")
+    lines.append("")
 
-    lines.extend(["", "💡 分析"])
-    lines.extend(build_advice(main, secondary, sorted_items, market_level, weights))
+    # 7. 轮动触发（仅协同换股条件）
+    lines.append("🔄 轮动触发")
+    if len(tradable) >= 2:
+        a, b = tradable[0], tradable[1]
+        a_stop = f"{a['stop']:.2f}" if a.get("stop") else "--"
+        b_cfm = f"{b['confirm']:.2f}" if b.get("confirm") else "--"
+        lines.append(f"  换股条件: {a['name']} 破 {a_stop} 且 {b['name']} 稳 {b_cfm}")
+    is_trig = any(i.get("status") in ("暂不碰", "数据失败") or (i.get("stop") and i.get("current") <= i["stop"]) for i in tradable)
+    lines.append(f"  当前: {'已触发' if is_trig else '未触发'}")
+    lines.append("")
 
+    # 8. 操作信号（个股买卖点 + 目标价 + 盈亏比）
+    lines.append("💡 操作信号")
+    for it in tradable:
+        nm = it["name"]
+        cur = it.get("current", 0)
+        cfm = it.get("confirm")
+        defense = it.get("defense")
+        stop = it.get("stop")
+        take = it.get("take")
+        if cfm and take:
+            up = round((take - cfm) / cfm * 100, 1)
+            dist_to_stop = round((cur - stop) / cur * 100, 1) if stop else None
+            dist_to_cfm = round((cfm - cur) / cur * 100, 1)
+            # 买入信号：站上确认位 → 看高减仓位
+            lines.append(f"  {nm}（现价{cur:.2f}）：")
+            lines.append(f"    🟢 站上 {cfm:.2f} → 看高 {take:.2f}（最多赚{up}%）")
+            if dist_to_stop is not None and dist_to_stop > 0:
+                lines.append(f"    🔴 跌破 {stop:.2f} → 清仓（最多亏{dist_to_stop}%）")
+            else:
+                lines.append(f"    🔴 跌破 {stop:.2f} → 清仓")
+            lines.append(f"    距触发差 {dist_to_cfm}%, {'快到' if dist_to_cfm < 3 else '还需确认'}")
+            if defense:
+                lines.append(f"    支撑位: {defense:.2f}（止损参考）")
+        elif stop:
+            lines.append(f"  {nm}: 暂无明确信号，继续观望")
+        lines.append("")
+    
     return "\n".join(lines)
+
+
+def _render_decision(tradable, main, secondary):
+    """生成决策段"""
+    st = [i.get("status", "") for i in tradable]
+    if "暂不碰" in st:
+        n = [i["name"] for i in tradable if i.get("status") == "暂不碰"]
+        return f"🔔 决策：卖出\n  {n[0] if n else '某'}进入暂不碰，建议减仓或清仓。"
+    if any("防守" in s for s in st):
+        miss = []
+        for i in tradable:
+            if i.get("confirm") and i.get("current") < i["confirm"]:
+                d = round((i["confirm"] - i["current"]) / i["current"] * 100, 1)
+                miss.append(f"{i['name']}({d}%)")
+        return f"🔔 决策：不动\n  全部待确认{','.join(miss)}，暂不操作。" if miss else "🔔 决策：不动\n  暂无明确信号。"
+    if "低吸观察" in st:
+        n = [i["name"] for i in tradable if i.get("status") == "低吸观察"]
+        return f"🔔 决策：观察买盘\n  {', '.join(n[:2])}进入低吸观察。"
+    if "冲高减仓" in st:
+        n = [i["name"] for i in tradable if i.get("status") == "冲高减仓"]
+        return f"🔔 决策：减仓\n  {', '.join(n[:2])}冲高减仓，建议降低仓位。"
+    return "🔔 决策：等待\n  信号不明确，继续观察盘面。"
 
 
 def build_advice(

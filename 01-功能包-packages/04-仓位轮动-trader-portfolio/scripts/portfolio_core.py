@@ -5,6 +5,12 @@ from typing import Any
 import candidate_core as core
 from light_data import pct_change, to_float
 
+try:
+    from trader_shared.chip_distribution import calc_chip_distribution
+    _HAS_CHIP = True
+except ImportError:
+    _HAS_CHIP = False
+
 STATUS_PRIORITY = {
     "低吸观察": 4,
     "等转强": 3,
@@ -35,6 +41,23 @@ def analyze_target(target: str, provider: Any, lookback_days: int) -> dict[str, 
         atr7_val = float(last_bar.get("atr7") or 0)
         atr_ratio_val = float(last_bar.get("atr_ratio") or 0)
         atr_level, atr_cap = core.atr_volatility_level(atr_ratio_val)
+
+        # 筹码分布计算（用于仓位降权）
+        chip_dist = {}
+        chip_weight = 1.0
+        if _HAS_CHIP and bars:
+            try:
+                chip_dist = calc_chip_distribution(bars, lookback=60)
+                vol_above = chip_dist.get("volume_above_pct") or 50
+                if vol_above >= 70:
+                    chip_weight = 0.6
+                elif vol_above >= 50:
+                    chip_weight = 0.75
+                elif vol_above >= 30:
+                    chip_weight = 0.9
+            except Exception:
+                chip_weight = 1.0
+
         score_val = round(
             core.score_for(
                 {
@@ -81,6 +104,9 @@ def analyze_target(target: str, provider: Any, lookback_days: int) -> dict[str, 
             "atr_ratio": atr_ratio_val,
             "atr_level": atr_level,
             "atr_cap": atr_cap,
+            "chip_dist": chip_dist,
+            "chip_weight": chip_weight,
+            "volume_above_pct": chip_dist.get("volume_above_pct") if chip_dist else None,
             "livermore_tier": livermore_tier,
             "livermore_base_weight": lw_base,
         }

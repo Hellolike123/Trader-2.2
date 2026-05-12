@@ -3,15 +3,19 @@
 
 Produces archives in 03-安装包-dist/<timestamp>/:
    - Individual skill zips (trader.zip, t0-trader.zip, etc.)
-     → Files under <skill_name>/ prefix inside zip
+     Files at root of zip, no prefix
    - Combined archive (trader-all-skill.zip)
-     → Files under <skill_name>/ prefix, unzip into ~/.hermes/skills/
+     Files under <skill_name>/ prefix, unzip into ~/.hermes/skills/
 
 Run from anywhere in the repo:
     python3 02-共享模块-shared/scripts/pack_all.py
+
+After packing, this script auto-installs all skills into ~/.hermes/skills/
+so they are immediately available when you send the zip to Hermes.
 """
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 import tempfile
@@ -153,6 +157,24 @@ def add_to_zip(staged: Path, archive: zipfile.ZipFile, arc_prefix: str = "") -> 
             archive.write(p, arc_name)
 
 
+def auto_install(stages: list[tuple[str, str, Path]]) -> None:
+    """After packing, auto-install all skills into ~/.hermes/skills/."""
+    hermes_dir = Path.home() / ".hermes" / "skills"
+    hermes_dir.mkdir(parents=True, exist_ok=True)
+    print("\n--- Auto-install ---")
+    for skill_slug, version, staged in stages:
+        dest = hermes_dir / skill_slug
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(staged, dest)
+        meta_path = dest / "_meta.json"
+        if meta_path.exists():
+            meta_name = json.loads(meta_path.read_text(encoding="utf-8")).get("name", skill_slug)
+        else:
+            meta_name = skill_slug
+        print(f"  {meta_name} -> {dest}")
+
+
 def main() -> int:
     root = repo_root()
     packages_dir = root / "01-功能包-packages"
@@ -171,10 +193,11 @@ def main() -> int:
             print(f"SKIP: {src} not found", file=sys.stderr)
             continue
         version = read_version_stamp(src, skill_slug)
-        print(f"Stage: {dir_name} → {skill_slug} ({version})")
+        print(f"Stage: {dir_name} -> {skill_slug} ({version})")
         staged = stage_skill(src, skill_slug)
         stages.append((skill_slug, version, staged))
 
+    # --- Build individual zips ---
     for skill_slug, version, staged in stages:
         zip_name = f"{skill_slug}.zip"
         zip_path = release_dir / zip_name
@@ -182,7 +205,7 @@ def main() -> int:
             zip_path.unlink()
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             add_to_zip(staged, archive, arc_prefix="")
-        print(f"  → {zip_path.relative_to(output_dir)}  ({zip_path.stat().st_size / 1024:.0f} KB)")
+        print(f"  -> {zip_path.relative_to(output_dir)}  ({zip_path.stat().st_size / 1024:.0f} KB)")
 
     # --- Combined zip (skill_name/ prefix) ---
     all_name = "trader-all-skill.zip"
@@ -194,20 +217,21 @@ def main() -> int:
             add_to_zip(staged, archive, arc_prefix=skill_slug)
     print(f"\nCombined: {all_path.relative_to(output_dir)}  ({all_path.stat().st_size / 1024:.0f} KB)")
 
+    # --- Auto-install to .hermes/skills ---
+    auto_install(stages)
+
     # --- Verify ---
-    zip_paths = []
     print("\n--- Verification ---")
-    for skill_slug, version, _ in stages:
+    for skill_slug, _, _ in stages:
         zip_path = release_dir / f"{skill_slug}.zip"
-        zip_paths.append(zip_path)
         with zipfile.ZipFile(zip_path, "r") as archive:
             names = archive.namelist()
             has_meta = "_meta.json" in names
             has_scripts = any(n.startswith("scripts/") for n in names)
             has_hermes = "HERMES.md" in names
             has_skill = "SKILL.md" in names
-            status = "✅" if has_meta and has_scripts and has_hermes and has_skill else "❌"
-            print(f"  {status} {zip_path.name}  meta={has_meta} scripts={has_scripts} hermes={has_hermes} skill={has_skill}")
+            status = "ok" if has_meta and has_scripts and has_hermes and has_skill else "MISSING"
+            print(f"  [{status}] {zip_path.name}  meta={has_meta} scripts={has_scripts} hermes={has_hermes} skill={has_skill}")
 
     # Cleanup temp dirs
     for _, _, staged in stages:

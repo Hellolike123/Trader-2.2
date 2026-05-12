@@ -161,7 +161,26 @@ def main() -> int:
             )["portfolio_markdown"]
         else:
             positions = load_positions()
-            holdings = {p["name"]: p for p in positions if p.get("name") in args.targets}
+            # 用 provider 把 targets 转成 stock name，再用 name 匹配持仓
+            from trader_shared.data_provider import get_provider
+            provider = get_provider()
+            target_names = {}
+            for t in args.targets:
+                try:
+                    sec = provider.resolve_security(t)
+                    quote = provider.fetch_quote(sec)
+                    name = quote.get("name") or t
+                    target_names[name] = t
+                    target_names[sec.ts_code] = t
+                except Exception:
+                    target_names[t] = t
+            holdings = {p["name"]: p for p in positions if p.get("name") in target_names}
+            # 也检查 symbol 匹配
+            for p in positions:
+                pn = p.get("name", "")
+                if pn not in holdings and p.get("symbol"):
+                    if p["name"] in target_names:
+                        holdings[pn] = p
             markdown = build_portfolio(
                 args.targets,
                 holdings=holdings or None,

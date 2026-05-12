@@ -190,7 +190,7 @@ def test_market_env_pipeline_import_available(tmp_state, _inject_market_env_path
 
 def test_market_env_assess_no_net():
     import market_env as me
-    with patch.object(me, "_fetch_index_bars", return_value=[]):
+    with patch.object(me, "_fetch_index_data", return_value={}):
         env = me.assess()
     assert env["level"] == "未知"
     assert env["data_status"] == "insufficient"

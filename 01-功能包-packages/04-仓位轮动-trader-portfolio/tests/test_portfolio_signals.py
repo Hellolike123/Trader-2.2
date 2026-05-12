@@ -54,33 +54,30 @@ def _render(items):
 def test_portfolio_markdown_includes_stocks():
     items = [
         _fake_item("688248.SH", "南网科技", "优先候选"),
-        _fake_item("601600.SH", "中国铝业", "等转强"),
+        _fake_item("601899.SH", "紫金矿业", "等转强"),
     ]
     result = _render(items)
     assert "南网科技" in result
-    assert "中国铝业" in result
+    assert "紫金矿业" in result
     assert "轮动仓位" in result
     assert "止损" in result
-    assert "关键价位" in result
 
 
 def test_portfolio_markdown_includes_positions():
     items = [
         _fake_item("688248.SH", "南网科技", "低吸观察"),
-        _fake_item("601600.SH", "中国铝业", "防守观察"),
+        _fake_item("601899.SH", "紫金矿业", "防守观察"),
     ]
     result = _render(items)
-    assert "主仓" in result
-    assert "副仓" in result
+    assert "仓位建议" in result
     assert "现金" in result
-    assert "加仓" in result or "建仓" in result
 
 
 def test_portfolio_markdown_includes_conclusion():
     items = [
         _fake_item("688248.SH", "南网科技", "优先候选"),
-        _fake_item("601600.SH", "中国铝业", "等转强"),
+        _fake_item("601899.SH", "紫金矿业", "等转强"),
     ]
     result = _render(items)
-    assert "结论" in result or "当前仓位" in result
+    assert "决策" in result
     assert "仓位" in result

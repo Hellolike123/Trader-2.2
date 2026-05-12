@@ -97,13 +97,12 @@ def test_portfolio_markdown_contract() -> None:
     markdown = render_markdown(items, plan, sorted_items, market_level="", market_note="")
 
     assert "轮动仓位 —" in markdown
-    assert "📌 组合" in markdown
-    assert "中国铝业" in markdown
-    assert "主仓  中国铝业" in markdown
-    assert "副仓  南网科技" in markdown
-    assert "观察  三安光电" in markdown
-    assert "现金  75%" in markdown
-    assert "加仓" in markdown
+    assert "🔔 决策" in markdown
+    assert "📈 仓位建议" in markdown
+    assert "📋 仓位对比" in markdown
+    assert "🔄 轮动触发" in markdown
+    assert "💡 操作信号" in markdown
+    assert "止损" in markdown
     assert validate(markdown) == []
 
 
