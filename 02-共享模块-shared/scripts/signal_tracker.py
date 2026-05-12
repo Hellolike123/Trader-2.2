@@ -450,7 +450,12 @@ def _compute_results_for_sig(sig: dict) -> dict[str, Any] | None:
     except ValueError:
         return None
 
+    norm_symbol = _normalize_symbol(symbol)
+    norm_type = _normalize_signal_type(sig_type)
+    sig_price_str = f"{sig_price:.2f}"
+
     res: dict[str, Any] = {
+        "signal_id": make_signal_id(norm_symbol, norm_sig_date, norm_type, sig_price_str),
         "symbol": symbol, "name": name,
         "signal_date": sig_date, "signal_type": sig_type,
         "source_skill": skill, "signal_price": round(sig_price, 2),
