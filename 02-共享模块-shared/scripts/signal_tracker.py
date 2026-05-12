@@ -13,6 +13,18 @@ from pathlib import Path
 from typing import Any
 
 
+# ═══════ Signal ID 统一化 ═══════
+
+
+def make_signal_id(symbol: str, date: str, signal_type: str, price: str) -> str:
+    """Generate unified signal ID.
+
+    Uses SHA256 with 4 normalized fields. 16 hex chars = 48 bits of entropy.
+    """
+    key = f"{symbol}|{date}|{signal_type}|{price}"
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
 # ═══════ 旧 API (兼容 review_core) ═══════
 
 # BAD-013: 坏行统计模块级变量（可读不可写）
