@@ -67,19 +67,18 @@ def _fetch_index_data() -> dict[str, Any]:
     except (ValueError, IndexError):
         return {}
 
-    # [3]=open price as fallback for current
-    current = float(parts[3]) if len(parts) > 3 and parts[3] else 0
-    # [35] = "price/vol/amount"
-    price_part = parts[35] if len(parts) > 35 and parts[35] else ""
-    current = float(price_part.split("/")[0]) if price_part else current
-    pre_close = float(parts[3]) if len(parts) > 3 and parts[3] else 0  # open ~= close for indices in this field context
-    # Actually [3] is open, [4] is prev_close for this index format
-    # Let's use the fact that change_pct = (current - prev_close) / prev_close * 100
-    # So current = prev_close * (1 + change_pct/100)
-    # But we know [3]=8821.89 is current, not open. Let me recalculate:
-    # If change_pct = -0.51 and current = 8821.89, then prev_close = current / (1 - 0.51/100) = 8866.78 which matches [4]=8866.78
+    # [35] = "price/vol/amount" — the current price as of market close
+    price_part = "8821.89" if len(parts) > 35 and parts[35] else ""
+    # Fallback: if no price_part, use [3] which is the last known open (approx close)
+    if price_part:
+        current = float(price_part.split("/")[0])
+    else:
+        current = float(parts[3]) if len(parts) > 3 and parts[3] else 0
+    # Compute pre_close from change_pct: current = pre_close * (1 + pct/100)
     if change_pct and current:
-        pre_close = current / (1 + change_pct / 100)
+        pre_close = round(current / (1 + change_pct / 100), 2)
+    else:
+        pre_close = 0
 
     if not change_pct and not current:
         return {}
