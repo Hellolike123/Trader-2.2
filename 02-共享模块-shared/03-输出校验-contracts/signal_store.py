@@ -8,7 +8,6 @@ from typing import Any
 
 from signal_contract import assert_valid_signal
 from signal_tracker import (
-    _normalize_symbol,
     _norm_date,
     _normalize_signal_type,
     _price_from_trigger,

@@ -165,16 +165,28 @@ _CALIBRATOR_ATTRS = {
 def __getattr__(name: str):
     # pipeline
     if name in _PIPELINE_ATTRS:
-        return getattr(get_pipeline(), name, None)
+        mod = get_pipeline()
+        if mod is None:
+            raise AttributeError(f"trader_shared.{name}: pipeline module not loaded")
+        return getattr(mod, name)
     # signal_tracker
     if name in _TRACKER_ATTRS:
-        return getattr(get_signal_tracker(), name, None)
+        mod = get_signal_tracker()
+        if mod is None:
+            raise AttributeError(f"trader_shared.{name}: signal_tracker module not loaded")
+        return getattr(mod, name)
     # market_env
     if name in _MARKET_ATTRS:
-        return getattr(get_market_env(), name, None)
+        mod = get_market_env()
+        if mod is None:
+            raise AttributeError(f"trader_shared.{name}: market_env module not loaded")
+        return getattr(mod, name)
     # calibrator
     if name in _CALIBRATOR_ATTRS:
-        return getattr(get_calibrator(), name, None)
+        mod = get_calibrator()
+        if mod is None:
+            raise AttributeError(f"trader_shared.{name}: calibrator module not loaded")
+        return getattr(mod, name)
     raise AttributeError(f"module 'trader_shared' has no attribute '{name}'")
 
 
