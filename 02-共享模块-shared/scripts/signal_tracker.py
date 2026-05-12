@@ -498,7 +498,8 @@ def check_recent(days: int = 5) -> dict[str, int]:
     cutoff = (datetime.now() - timedelta(days=days + 10)).strftime("%Y-%m-%d")
     recent = [s for s in signals if _norm_date(str(s.get("trade_date", ""))) >= cutoff]
 
-    # 已存在结果的双层 key：(symbol, date, type, price) for corrections, fallback to 3-key for backward compat
+    # 已存在结果 — 三级降级: signal_id → 4-key(规范化) → 3-key(规范化)
+    existing_keys_by_id: dict[str, dict] = {}
     existing_keys_4: dict[tuple[str, str, str, str], dict] = {}
     existing_keys_3: dict[tuple[str, str, str], dict] = {}
     try:
@@ -507,14 +508,19 @@ def check_recent(days: int = 5) -> dict[str, int]:
             if not line.strip(): continue
             try:
                 r = json.loads(line)
-                key_symbol = _normalize_symbol(r.get("symbol", ""))
-                key_3 = (key_symbol, str(r.get("signal_date")), str(r.get("signal_type", "")))
-                # Normalize price to 2 decimal string for stable matching
+                raw_date = _norm_date(str(r.get("signal_date", "")))
+                raw_type = _normalize_signal_type(str(r.get("signal_type", "")))
+                key_symbol = _normalize_symbol(str(r.get("symbol", "")))
                 sp = r.get("signal_price")
                 price_str = f"{float(sp):.2f}" if sp is not None and float(sp) > 0 else ""
-                # Note: key_4 needs to be a tuple, not concatenated via +
-                existing_keys_4[(key_symbol, str(r.get("signal_date")), str(r.get("signal_type", "")), price_str)] = r
-                existing_keys_3[key_3] = r
+                # 1. Primary: signal_id
+                sid = r.get("signal_id")
+                if sid:
+                    existing_keys_by_id[sid] = r
+                # 2. Secondary: 4-key (normalized)
+                existing_keys_4[(key_symbol, raw_date, raw_type, price_str)] = r
+                # 3. Tertiary: 3-key (normalized)
+                existing_keys_3[(key_symbol, raw_date, raw_type)] = r
             except (json.JSONDecodeError, ValueError):
                 pass
     except OSError:
@@ -525,10 +531,13 @@ def check_recent(days: int = 5) -> dict[str, int]:
     skipped = 0
 
     for sig in recent:
+        # 1. Try signal_id match first
+        if sig.get("signal_id") in existing_keys_by_id:
+            skipped += 1; continue
+        # 2. Then try 4-key / 3-key
         key = _make_signal_key(sig)
         if key in existing_keys_4 or (key[0], key[1], key[2]) in existing_keys_3:
-            skipped += 1
-            continue
+            skipped += 1; continue
         result = _compute_results_for_sig(sig)
         if result:
             result_lines.append(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
@@ -826,7 +835,8 @@ def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
     cutoff = (datetime.now() - timedelta(days=days_window)).strftime("%Y-%m-%d")
     candidates = [s for s in signals if _norm_date(str(s.get("trade_date", ""))) >= cutoff]
 
-    # 已存在结果的双层 key：(symbol, date, type, price) for corrections, fallback to 3-key for backward compat
+    # 已存在结果 — 三级降级: signal_id → 4-key(规范化) → 3-key(规范化)
+    existing_keys_by_id: dict[str, dict] = {}
     existing_keys_4: dict[tuple[str, str, str, str], dict] = {}
     existing_keys_3: dict[tuple[str, str, str], dict] = {}
     try:
@@ -835,13 +845,19 @@ def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
             if not line.strip(): continue
             try:
                 r = json.loads(line)
-                key_symbol = _normalize_symbol(r.get("symbol", ""))
-                key_3 = (key_symbol, str(r.get("signal_date")), str(r.get("signal_type", "")))
-                # Normalize price to 2 decimal string for stable matching
+                raw_date = _norm_date(str(r.get("signal_date", "")))
+                raw_type = _normalize_signal_type(str(r.get("signal_type", "")))
+                key_symbol = _normalize_symbol(str(r.get("symbol", "")))
                 sp = r.get("signal_price")
                 price_str = f"{float(sp):.2f}" if sp is not None and float(sp) > 0 else ""
-                existing_keys_4[(key_symbol, str(r.get("signal_date")), str(r.get("signal_type", "")), price_str)] = r
-                existing_keys_3[key_3] = r
+                # 1. Primary: signal_id
+                sid = r.get("signal_id")
+                if sid:
+                    existing_keys_by_id[sid] = r
+                # 2. Secondary: 4-key (normalized)
+                existing_keys_4[(key_symbol, raw_date, raw_type, price_str)] = r
+                # 3. Tertiary: 3-key (normalized)
+                existing_keys_3[(key_symbol, raw_date, raw_type)] = r
             except (json.JSONDecodeError, ValueError):
                 pass
     except OSError:
@@ -852,10 +868,13 @@ def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
     skipped = 0
 
     for sig in candidates:
+        # 1. Try signal_id match first
+        if sig.get("signal_id") in existing_keys_by_id:
+            skipped += 1; continue
+        # 2. Then try 4-key / 3-key
         key = _make_signal_key(sig)
         if key in existing_keys_4 or (key[0], key[1], key[2]) in existing_keys_3:
-            skipped += 1
-            continue
+            skipped += 1; continue
         result = _compute_results_for_sig(sig)
         if result:
             result_lines.append(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
