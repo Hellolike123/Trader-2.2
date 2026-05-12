@@ -15,7 +15,6 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -330,7 +329,7 @@ class AkShareProvider:
         import akshare as ak
         df = ak.stock_zh_a_hist_min_em(symbol=sec.code, period="5")
         bars: list[dict[str, Any]] = []
-        for _, row in df.head(datalen).iterrows():
+        for _, row in df.tail(datalen).iterrows():
             bar = self._to_standard_bar(row.to_dict(), dt_key="时间")
             if bar:
                 bars.append(bar)
@@ -341,7 +340,7 @@ class AkShareProvider:
         import akshare as ak
         df = ak.stock_zh_a_hist_min_em(symbol=sec.code, period="15")
         bars: list[dict[str, Any]] = []
-        for _, row in df.head(datalen).iterrows():
+        for _, row in df.tail(datalen).iterrows():
             bar = self._to_standard_bar(row.to_dict(), dt_key="时间")
             if bar:
                 bars.append(bar)
@@ -352,7 +351,7 @@ class AkShareProvider:
         import akshare as ak
         df = ak.stock_zh_a_hist_min_em(symbol=sec.code, period="30")
         bars: list[dict[str, Any]] = []
-        for _, row in df.head(datalen).iterrows():
+        for _, row in df.tail(datalen).iterrows():
             bar = self._to_standard_bar(row.to_dict(), dt_key="时间")
             if bar:
                 bars.append(bar)
@@ -365,7 +364,7 @@ class AkShareProvider:
         import akshare as ak
         df = ak.stock_zh_a_hist_min_em(symbol=sec.code, period=period)
         bars: list[dict[str, Any]] = []
-        for _, row in df.head(datalen).iterrows():
+        for _, row in df.tail(datalen).iterrows():
             bar = self._to_standard_bar(row.to_dict(), dt_key="时间")
             if bar:
                 bars.append(bar)
