@@ -181,11 +181,10 @@ class SignalRecord(TypedDict, total=False):
 # ── 数据状态映射 ──
 
 DATA_STATUS_MAP: dict[str, str] = {
-    # light_data.DataStatus -> signal_contract 生态
     "complete": "full",
     "partial": "partial",
     "degraded": "degraded",
-    "failed": "insufficient",
+    "failed": "degraded",
 }
 
 
@@ -196,7 +195,7 @@ def map_data_status_to_signal(
 ) -> str:
     """将 light_data 的 DataStatus 映射为 signal_contract 标准状态"""
     if not is_trading_time:
-        return "non_trading"
+        return "partial"
     return DATA_STATUS_MAP.get(raw_status, "degraded")
 
 

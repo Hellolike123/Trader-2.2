@@ -121,7 +121,7 @@ def assess() -> dict[str, Any]:
             "change_pct": 0.0,
             "ma5": None,
             "ma20": None,
-            "data_status": "insufficient",
+            "data_status": "degraded",
             "note": "中证1000数据不足",
         }
 
@@ -191,7 +191,7 @@ def get_env_for_skill(skill: str) -> dict[str, Any]:
     try:
         env = assess()
     except Exception:
-        env = {"level": "未知", "data_status": "insufficient", "note": "大盘数据暂不可用"}
+        env = {"level": "未知", "data_status": "degraded", "note": "大盘数据暂不可用"}
     env["skill_note"] = env_note_for(env, skill)
     return env
 

@@ -72,7 +72,7 @@ def test_triggered_t0_signal_does_not_require_broker_order_fields() -> None:
             "signal_type": "low_buy_triggered",
             "action": "low_buy",
             "confidence": "high",
-            "data_status": "fresh",
+            "data_status": "full",
             "trigger": {"type": "completed_5m_confirm", "price": 11.94, "text": "5m 止跌触发"},
         }
     )

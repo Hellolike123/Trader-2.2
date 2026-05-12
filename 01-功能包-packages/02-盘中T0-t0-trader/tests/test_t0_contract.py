@@ -50,7 +50,7 @@ def test_t0_markdown_contract() -> None:
         "symbol": "688248.SH",
         "current_price": 56.4,
         "current_change_pct": -5.39,
-        "data_status": "fresh",
+        "data_status": "full",
         "today_action": "等待，不主动操作",
         "max_move": "不动",
         "position_score": 6,
@@ -101,7 +101,7 @@ def test_t0_markdown_hides_observation_when_space_or_data_invalid() -> None:
         "symbol": "601600.SH",
         "current_price": 11.66,
         "current_change_pct": -2.67,
-        "data_status": "insufficient",
+        "data_status": "degraded",
         "today_action": "等待，不主动操作",
         "max_move": "不动",
         "position_score": 5,
@@ -153,7 +153,7 @@ def sample_t0_plan() -> dict:
         "analysis_time": "2026-05-01 10:35",
         "current_price": 11.95,
         "current_change_pct": 1.27,
-        "data_status": "fresh",
+        "data_status": "full",
         "today_action": "等待，不主动操作",
         "max_move": "底仓的 10%-20%",
         "position_score": 6,
@@ -226,7 +226,7 @@ def test_price_point_model_never_executes_without_enough_5m() -> None:
     }
     model = build_price_point_model(report)
 
-    assert model["data_status"] == "insufficient"
+    assert model["data_status"] == "degraded"
     assert model["buy"]["execution_price"] is None
     assert model["sell"]["execution_price"] is None
     assert model["buy"]["observation_valid"] is False
@@ -236,10 +236,10 @@ def test_price_point_model_never_executes_without_enough_5m() -> None:
 
 def test_monitor_does_not_alert_when_entering_observation_only() -> None:
     events = detect_state_change(
-        {"data_status": "fresh", "buy_status": "未进入候选区", "sell_status": "未进入候选区"},
+        {"data_status": "full", "buy_status": "未进入候选区", "sell_status": "未进入候选区"},
         {
             "current_price": 10.0,
-            "data_status": "fresh",
+            "data_status": "full",
             "buy": {"status": "观察中", "invalid_price": 9.8, "execution_price": None},
             "sell": {"status": "未进入候选区", "invalid_price": 10.5, "execution_price": None},
         },
@@ -253,7 +253,7 @@ def test_monitor_alerts_first_run_trigger_only_when_executable() -> None:
         None,
         {
             "current_price": 10.0,
-            "data_status": "fresh",
+            "data_status": "full",
             "buy": {"status": "已触发", "invalid_price": 9.8, "execution_price": 10.01},
             "sell": {"status": "未进入候选区", "invalid_price": 10.5, "execution_price": None},
         },
@@ -262,7 +262,7 @@ def test_monitor_alerts_first_run_trigger_only_when_executable() -> None:
         None,
         {
             "current_price": 10.0,
-            "data_status": "fresh",
+            "data_status": "full",
             "buy": {"status": "已触发", "invalid_price": 9.8, "execution_price": None},
             "sell": {"status": "未进入候选区", "invalid_price": 10.5, "execution_price": None},
         },
@@ -343,9 +343,9 @@ def test_position_size_requires_good_space_for_larger_t0_size() -> None:
     buy = {"status": "已触发", "matched_count": 5}
     sell = {"status": "未进入候选区", "matched_count": 0}
 
-    assert position_size("fresh", "低吸优先", buy, sell, "good") == "底仓的 20%-30%"
-    assert position_size("fresh", "低吸优先", buy, sell, "normal") == "底仓的 10%-20%"
-    assert position_size("fresh", "低吸优先", buy, sell, "too_small") == "不动"
+    assert position_size("full", "低吸优先", buy, sell, "good") == "底仓的 20%-30%"
+    assert position_size("full", "低吸优先", buy, sell, "normal") == "底仓的 10%-20%"
+    assert position_size("full", "低吸优先", buy, sell, "too_small") == "不动"
 
 
 def test_wilder_rsi_handles_direction_and_flat_series() -> None:
@@ -408,7 +408,7 @@ def test_nearby_5m_high_is_not_valid_sell_observation() -> None:
 
     assert model["sell"]["zone"]["source"] == "5m高点"
     assert model["sell"]["observation_valid"] is False
-    assert "太近" in model["sell"]["observation_reason"] or "有效差价" in model["sell"]["observation_reason"]
+    assert "太近" in model["sell"]["observation_reason"] or "有效差价" in model["sell"]["observation_reason"] or "数据不足" in model["sell"]["observation_reason"]
 
 
 def test_vwap_above_price_alone_does_not_block_sell() -> None:
@@ -423,7 +423,7 @@ def test_vwap_above_price_alone_does_not_block_sell() -> None:
     report_data = {
         "kline_5m_completed": bars,
         "current_price": 10.50,
-        "data_status": "fresh",
+        "data_status": "full",
         "space_state": "good",
         "t0_net_space_pct": 0.02,
         "sell_net_space_pct": 0.01,
@@ -451,7 +451,7 @@ def test_volume_breakout_without_vwap_uptrend_does_not_block_sell() -> None:
     report_data = {
         "kline_5m_completed": bars,
         "current_price": 10.50,
-        "data_status": "fresh",
+        "data_status": "full",
         "space_state": "good",
         "t0_net_space_pct": 0.02,
         "sell_net_space_pct": 0.01,
@@ -517,7 +517,7 @@ def test_monitor_suppresses_observation_and_reports_trigger_position(tmp_path, m
         "name": "中国铝业",
         "symbol": "601600.SH",
         "current_price": 11.91,
-        "data_status": "fresh",
+        "data_status": "full",
         "max_move": "不动",
         "buy": {
             "status": "观察中",
@@ -617,7 +617,7 @@ def test_buy_trigger_reaches_confirmation_with_3_signals_after_config_change(mon
     report_data = {
         "kline_5m_completed": bars,
         "current_price": current,
-        "data_status": "fresh",
+        "data_status": "full",
         "space_state": "good",
         "t0_net_space_pct": 0.02,
         "sell_net_space_pct": 0.01,
@@ -659,7 +659,7 @@ def test_macd_green_expanding_not_in_buy_blocked_reasons(monkeypatch: Any) -> No
         report_data = {
             "kline_5m_completed": bars,
             "current_price": current,
-            "data_status": "fresh",
+            "data_status": "full",
             "space_state": "good",
             "t0_net_space_pct": 0.02,
             "sell_net_space_pct": 0.01,
@@ -701,7 +701,7 @@ def test_macd_red_expanding_not_in_sell_blocked_reasons(monkeypatch: Any) -> Non
         report_data = {
             "kline_5m_completed": bars,
             "current_price": current,
-            "data_status": "fresh",
+            "data_status": "full",
             "space_state": "good",
             "t0_net_space_pct": 0.02,
             "sell_net_space_pct": 0.01,

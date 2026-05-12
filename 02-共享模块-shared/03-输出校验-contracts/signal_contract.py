@@ -11,7 +11,7 @@ except ImportError:
         "complete": "full",
         "partial": "partial",
         "degraded": "degraded",
-        "failed": "insufficient",
+        "failed": "degraded",
     }
 
     def map_data_status_to_signal(
@@ -20,7 +20,7 @@ except ImportError:
         is_trading_day: bool = True,
     ) -> str:
         if not is_trading_time:
-            return "non_trading"
+            return "partial"
         return DATA_STATUS_MAP.get(raw_status, "degraded")
 
 
@@ -100,12 +100,9 @@ ALLOWED_CONFIDENCE = {"low", "medium", "high"}
 
 ALLOWED_DATA_STATUS = {
     "full",
-    "degraded",
     "partial",
-    "insufficient",
-    "fresh",
-    "stale",
-    "non_trading",
+    "degraded",
+    "failed",
 }
 
 

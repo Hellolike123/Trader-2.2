@@ -193,7 +193,7 @@ def test_market_env_assess_no_net():
     with patch.object(me, "_fetch_index_data", return_value={}):
         env = me.assess()
     assert env["level"] == "未知"
-    assert env["data_status"] == "insufficient"
+    assert env["data_status"] == "degraded"
 
 
 def test_market_env_note_for_all_skills():

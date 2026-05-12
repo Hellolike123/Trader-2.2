@@ -111,7 +111,7 @@ def test_append_signal_for_review_result(tmp_path):
         "direction": "neutral",
         "action": "observe",
         "confidence": "medium",
-        "data_status": "stale",
+        "data_status": "degraded",
         "trigger": {"text": "缠论结构分析"},
         "invalidation": {"text": "威科夫量价背离"},
         "position": {"max_total_pct": 0, "max_single_move_pct": 0},

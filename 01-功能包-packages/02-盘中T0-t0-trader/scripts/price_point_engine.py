@@ -121,14 +121,14 @@ def completed_5m_bars(bars: list[dict[str, Any]], now: datetime | None = None) -
 def data_status(quote: dict[str, Any], daily: list[dict[str, Any]], bars_5m: list[dict[str, Any]], now: datetime | None = None) -> str:
     now = now or datetime.now()
     if not quote or not daily or len(bars_5m) < MIN_5M_BARS:
-        return "insufficient"
+        return "degraded"
     last_dt = parse_dt((bars_5m[-1] or {}).get("time") or (bars_5m[-1] or {}).get("date"))
     if not is_trade_time(now):
-        return "non_trading"
+        return "partial"
     if last_dt is None or last_dt.date() != now.date():
-        return "delayed"
+        return "degraded"
     delay_minutes = (now - last_dt).total_seconds() / 60
-    return "fresh" if delay_minutes <= 12 else "delayed"
+    return "full" if delay_minutes <= 12 else "degraded"
 
 
 def values(bars: list[dict[str, Any]], key: str) -> list[float]:
@@ -378,11 +378,11 @@ def sell_net_space_pct(current: float, zones: dict[str, Any]) -> float | None:
 def observation_validity(report_data: dict[str, Any], zones: dict[str, Any]) -> dict[str, Any]:
     current = float(report_data["current_price"])
     data_status_value = str(report_data.get("data_status") or "")
-    if data_status_value == "insufficient":
+    if data_status_value in ("degraded", "failed"):
         reason = "盘中数据不足，暂不生成T0观察价"
         return {"buy_valid": False, "sell_valid": False, "buy_reason": reason, "sell_reason": reason}
-    if data_status_value == "non_trading":
-        reason = "非交易时段，暂不生成T0观察价"
+    if data_status_value == "partial":
+        reason = "非交易时段或数据部分，暂不生成T0观察价"
         return {"buy_valid": False, "sell_valid": False, "buy_reason": reason, "sell_reason": reason}
 
     net_space = report_data.get("t0_net_space_pct")
@@ -441,7 +441,7 @@ def detect_buy_trigger(report_data: dict[str, Any], zones: dict[str, Any], state
     bars = report_data["kline_5m_completed"]
     current = float(report_data["current_price"])
     zone = zones["buy_zone"]
-    if report_data["data_status"] in {"insufficient", "non_trading"} or len(bars) < MIN_5M_BARS:
+    if report_data["data_status"] in ("degraded", "failed", "partial") or len(bars) < MIN_5M_BARS:
         return trigger_result("数据不足", None, [], ["5m数据不足或非交易时段"])
     if report_data.get("space_state") == "too_small":
         return trigger_result("被阻断", None, [], ["日内振幅不足"])
@@ -514,7 +514,7 @@ def detect_sell_trigger(report_data: dict[str, Any], zones: dict[str, Any], stat
     bars = report_data["kline_5m_completed"]
     current = float(report_data["current_price"])
     zone = zones["sell_zone"]
-    if report_data["data_status"] in {"insufficient", "non_trading"} or len(bars) < MIN_5M_BARS:
+    if report_data["data_status"] in ("degraded", "failed", "partial") or len(bars) < MIN_5M_BARS:
         return trigger_result("数据不足", None, [], ["5m数据不足或非交易时段"])
     if report_data.get("space_state") == "too_small":
         return trigger_result("被阻断", None, [], ["日内振幅不足"])
@@ -699,7 +699,7 @@ def action_for_sell(status: str) -> str:
 
 
 def choose_today_action(report_data: dict[str, Any], buy: dict[str, Any], sell: dict[str, Any]) -> str:
-    if report_data["data_status"] in {"non_trading", "insufficient"}:
+    if report_data["data_status"] in ("partial", "degraded", "failed"):
         return "等待，不主动操作"
     if "触发过期" in {buy["status"], sell["status"]}:
         return "等待下一次触发"
@@ -737,7 +737,7 @@ def position_size(data_status_value: str, action: str, buy: dict[str, Any], sell
         return "不动"
     if atr_ratio >= 0.02:
         return "底仓的 10%-20%"
-    if data_status_value == "fresh" and space_state_value == "good" and model["matched_count"] >= STRONG_TRIGGER_MATCHES:
+    if data_status_value == "full" and space_state_value == "good" and model["matched_count"] >= STRONG_TRIGGER_MATCHES:
         return "底仓的 20%-30%"
     return "底仓的 10%-20%"
 
