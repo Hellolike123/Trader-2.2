@@ -170,6 +170,7 @@ def fill_by_target(target: str, pnl_pct: float, days_held: int = 0, outcome: str
             continue
         if rec.get("target") == target and rec.get("outcome_pnl_pct") is None:
             if signal_type and str(rec.get("signal_type", "")) != signal_type:
+                new_lines.append(json.dumps(rec, ensure_ascii=False))
                 continue
             rec["outcome_pnl_pct"] = round(pnl_pct, 2)
             rec["outcome_days"] = days_held
@@ -191,14 +192,17 @@ def fill_by_target(target: str, pnl_pct: float, days_held: int = 0, outcome: str
 
 
 def _load_log_all() -> list[dict[str, Any]]:
+    global _bad_line_count
     if not LOG_PATH.exists():
         return []
     records = []
+    _bad_line_count = 0
     for line in LOG_PATH.read_text(encoding="utf-8").strip().split("\n"):
         if not line.strip(): continue
         try:
             records.append(json.loads(line))
         except json.JSONDecodeError:
+            _bad_line_count += 1
             continue
     return records
 _load_all = _load_log_all  # 兼容测试
@@ -385,17 +389,21 @@ def _load_results() -> list[dict[str, Any]]:
 
 def _load_signals(symbol: str | None = None) -> list[dict[str, Any]]:
     """Load signals from store, normalizing symbol for matching."""
+    global _bad_line_count
     if not STORE_PATH.exists():
         return []
     signals = []
+    _bad_line_count = 0
     normalized_query = _normalize_symbol(symbol) if symbol else None
     for line in STORE_PATH.read_text(encoding="utf-8").splitlines():
         if not line.strip(): continue
         try:
             sig = json.loads(line)
         except json.JSONDecodeError:
+            _bad_line_count += 1
             continue
         if not isinstance(sig, dict):
+            _bad_line_count += 1
             continue
         sig_symbol = str(sig.get("symbol") or "")
         if normalized_query and _normalize_symbol(sig_symbol) != normalized_query:
