@@ -991,6 +991,62 @@ def migrate_signal_ids(store_path: Path | None = None,
     }
 
 
+def backfill_signal_status() -> dict[str, int]:
+    """为已有结果记录的信号补充 status=completed。
+    
+    幂等：已有 status 的记录跳过。无结果匹配的信号保留 implicit active。
+    """
+    if not STORE_PATH.exists():
+        return {"updated": 0}
+    
+    result_ids: set[str] = set()
+    if RESULT_PATH.exists():
+        for line in RESULT_PATH.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                r = json.loads(line)
+                if r.get("signal_id"):
+                    result_ids.add(r["signal_id"])
+            except (json.JSONDecodeError, ValueError):
+                continue
+    
+    if not result_ids:
+        return {"updated": 0}
+    
+    lines = STORE_PATH.read_text(encoding="utf-8").splitlines()
+    new_lines = []
+    updated = 0
+    
+    for line in lines:
+        if not line.strip():
+            new_lines.append(line)
+            continue
+        try:
+            sig = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            new_lines.append(line)
+            continue
+        
+        if sig.get("status"):
+            new_lines.append(line)
+            continue
+        if sig.get("signal_id") in result_ids:
+            sig["status"] = "completed"
+            sig["status_updated_at"] = datetime.now().isoformat()
+            new_lines.append(json.dumps(sig, ensure_ascii=False))
+            updated += 1
+        else:
+            new_lines.append(line)
+    
+    if updated:
+        tmp = STORE_PATH.with_suffix(".jsonl.tmp")
+        tmp.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        os.replace(str(tmp), STORE_PATH)
+    
+    return {"updated": updated}
+
+
 # ═══════ CLI ═══════
 
 # FIX-T-BIAS-03: backfill — 强制回溯历史过期信号

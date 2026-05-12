@@ -85,6 +85,30 @@ def test_check_recent_skips_completed(tmp_path, monkeypatch):
     assert result.get("updated", 0) == 0
 
 
+def test_backfill_signal_status(tmp_path, monkeypatch):
+    """Signals with matching results get status=completed after backfill."""
+    import signal_tracker as st
+    import json
+
+    store = tmp_path / "signals.jsonl"
+    results = tmp_path / "signal_results.jsonl"
+    results.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(st, "STORE_PATH", store)
+    monkeypatch.setattr(st, "RESULT_PATH", results)
+
+    sig = {"symbol": "688248.SH", "signal_type": "track", "signal_id": "abc"}
+    store.write_text(json.dumps(sig) + "\n", encoding="utf-8")
+
+    result = {"signal_id": "abc", "r_5d": 2.5, "outcome": "up"}
+    results.write_text(json.dumps(result) + "\n", encoding="utf-8")
+
+    st.backfill_signal_status()
+
+    updated = json.loads(store.read_text(encoding="utf-8").strip().splitlines()[0])
+    assert updated.get("status") == "completed"
+    assert "status_updated_at" in updated
+
+
 def test_check_recent_sets_completed_on_signal(tmp_path, monkeypatch):
     """After computing result, signal's status in signals.jsonl becomes completed."""
     import signal_tracker as st
