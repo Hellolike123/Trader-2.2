@@ -7,7 +7,7 @@ import hashlib
 import json
 import os
 import sys
-import warnings
+import unicodedata
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -47,8 +47,6 @@ def _today() -> str:
 
 
 def stable_id(skill: str, target: str, date: str, signal_type: str, price: float | None = None) -> str:
-    """[已弃用] 旧信号 ID 生成函数。请使用 make_signal_id() 替代。将在 v0.7 中移除。"""
-    warnings.warn("stable_id() is deprecated, use make_signal_id() instead", stacklevel=2)
     key = f"{date}::{skill}::{target}::{signal_type}"
     if price is not None:
         key += f"::{price:.2f}"
@@ -505,25 +503,29 @@ def check_recent(days: int = 5) -> dict[str, int]:
     cutoff = (datetime.now() - timedelta(days=days + 10)).strftime("%Y-%m-%d")
     recent = [s for s in signals if _norm_date(str(s.get("trade_date", ""))) >= cutoff]
 
-    # 已存在结果 — 两层匹配: signal_id (迁移后) + 4-key 降级 (未迁移记录)
+    # 已存在结果 — 三级降级: signal_id → 4-key(规范化) → 3-key(规范化)
     existing_keys_by_id: dict[str, dict] = {}
     existing_keys_4: dict[tuple[str, str, str, str], dict] = {}
+    existing_keys_3: dict[tuple[str, str, str], dict] = {}
     try:
         _ensure_result_dir()
         for line in RESULT_PATH.read_text(encoding="utf-8").splitlines():
             if not line.strip(): continue
             try:
                 r = json.loads(line)
+                raw_date = _norm_date(str(r.get("signal_date", "")))
+                raw_type = _normalize_signal_type(str(r.get("signal_type", "")))
+                key_symbol = _normalize_symbol(str(r.get("symbol", "")))
+                sp = r.get("signal_price")
+                price_str = f"{float(sp):.2f}" if sp is not None and float(sp) > 0 else ""
+                # 1. Primary: signal_id
                 sid = r.get("signal_id")
                 if sid:
                     existing_keys_by_id[sid] = r
-                else:
-                    raw_date = _norm_date(str(r.get("signal_date", "")))
-                    raw_type = _normalize_signal_type(str(r.get("signal_type", "")))
-                    key_symbol = _normalize_symbol(str(r.get("symbol", "")))
-                    sp = r.get("signal_price")
-                    price_str = f"{float(sp):.2f}" if sp is not None and float(sp) > 0 else ""
-                    existing_keys_4[(key_symbol, raw_date, raw_type, price_str)] = r
+                # 2. Secondary: 4-key (normalized)
+                existing_keys_4[(key_symbol, raw_date, raw_type, price_str)] = r
+                # 3. Tertiary: 3-key (normalized)
+                existing_keys_3[(key_symbol, raw_date, raw_type)] = r
             except (json.JSONDecodeError, ValueError):
                 pass
     except OSError:
@@ -534,23 +536,12 @@ def check_recent(days: int = 5) -> dict[str, int]:
     skipped = 0
 
     for sig in recent:
-        # 1. signal_id match (优先)
-        sid = sig.get("signal_id")
-        if sid is None:
-            try:
-                sid = make_signal_id(
-                    symbol=_normalize_symbol(str(sig.get("symbol") or "")),
-                    date=_norm_date(str(sig.get("trade_date") or "")),
-                    signal_type=_normalize_signal_type(str(sig.get("signal_type") or "unknown")),
-                    price=_price_from_trigger(sig) or "0.00",
-                )
-            except Exception:
-                sid = None
-        if sid and sid in existing_keys_by_id:
+        # 1. Try signal_id match first
+        if sig.get("signal_id") in existing_keys_by_id:
             skipped += 1; continue
-        # 2. 4-key fallback for un-migrated records
+        # 2. Then try 4-key / 3-key
         key = _make_signal_key(sig)
-        if key in existing_keys_4:
+        if key in existing_keys_4 or (key[0], key[1], key[2]) in existing_keys_3:
             skipped += 1; continue
         result = _compute_results_for_sig(sig)
         if result:
@@ -959,26 +950,29 @@ def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
     cutoff = (datetime.now() - timedelta(days=days_window)).strftime("%Y-%m-%d")
     candidates = [s for s in signals if _norm_date(str(s.get("trade_date", ""))) >= cutoff]
 
-    # 已存在结果 — signal_id + 4-key (未迁移记录) 两层匹配
-    # 已存在结果 — signal_id 精确匹配, 4-key 降级 (未迁移旧记录)
+    # 已存在结果 — 三级降级: signal_id → 4-key(规范化) → 3-key(规范化)
     existing_keys_by_id: dict[str, dict] = {}
     existing_keys_4: dict[tuple[str, str, str, str], dict] = {}
+    existing_keys_3: dict[tuple[str, str, str], dict] = {}
     try:
         _ensure_result_dir()
         for line in RESULT_PATH.read_text(encoding="utf-8").splitlines():
             if not line.strip(): continue
             try:
                 r = json.loads(line)
+                raw_date = _norm_date(str(r.get("signal_date", "")))
+                raw_type = _normalize_signal_type(str(r.get("signal_type", "")))
+                key_symbol = _normalize_symbol(str(r.get("symbol", "")))
+                sp = r.get("signal_price")
+                price_str = f"{float(sp):.2f}" if sp is not None and float(sp) > 0 else ""
+                # 1. Primary: signal_id
                 sid = r.get("signal_id")
                 if sid:
                     existing_keys_by_id[sid] = r
-                else:
-                    raw_date = _norm_date(str(r.get("signal_date", "")))
-                    raw_type = _normalize_signal_type(str(r.get("signal_type", "")))
-                    key_symbol = _normalize_symbol(str(r.get("symbol", "")))
-                    sp = r.get("signal_price")
-                    price_str = f"{float(sp):.2f}" if sp is not None and float(sp) > 0 else ""
-                    existing_keys_4[(key_symbol, raw_date, raw_type, price_str)] = r
+                # 2. Secondary: 4-key (normalized)
+                existing_keys_4[(key_symbol, raw_date, raw_type, price_str)] = r
+                # 3. Tertiary: 3-key (normalized)
+                existing_keys_3[(key_symbol, raw_date, raw_type)] = r
             except (json.JSONDecodeError, ValueError):
                 pass
     except OSError:
@@ -989,23 +983,12 @@ def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
     skipped = 0
 
     for sig in candidates:
-        # 1. signal_id match (优先)
-        sid = sig.get("signal_id")
-        if sid is None:
-            try:
-                sid = make_signal_id(
-                    symbol=_normalize_symbol(str(sig.get("symbol") or "")),
-                    date=_norm_date(str(sig.get("trade_date") or "")),
-                    signal_type=_normalize_signal_type(str(sig.get("signal_type") or "unknown")),
-                    price=_price_from_trigger(sig) or "0.00",
-                )
-            except Exception:
-                sid = None
-        if sid and sid in existing_keys_by_id:
+        # 1. Try signal_id match first
+        if sig.get("signal_id") in existing_keys_by_id:
             skipped += 1; continue
-        # 2. 4-key fallback for un-migrated records
+        # 2. Then try 4-key / 3-key
         key = _make_signal_key(sig)
-        if key in existing_keys_4:
+        if key in existing_keys_4 or (key[0], key[1], key[2]) in existing_keys_3:
             skipped += 1; continue
         result = _compute_results_for_sig(sig)
         if result:
