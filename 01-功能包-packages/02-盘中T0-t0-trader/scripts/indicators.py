@@ -26,13 +26,16 @@ def calculate_sma(values: list[float], period: int) -> list[float | None]:
     return result
 
 
-def calculate_ema(values: list[float], period: int) -> list[float | None]:
+def calculate_ema(values: list[float | None], period: int) -> list[float | None]:
     if period <= 0 or not values:
         return [None for _ in values]
     alpha = 2 / (period + 1)
     result: list[float | None] = []
     ema: float | None = None
     for value in values:
+        if value is None:
+            result.append(ema)
+            continue
         ema = value if ema is None else value * alpha + ema * (1 - alpha)
         result.append(ema)
     return result
@@ -46,9 +49,7 @@ def calculate_macd(closes: list[float], fast: int = 12, slow: int = 26, signal: 
     dif: list[float | None] = []
     for left, right in zip(ema_fast, ema_slow):
         dif.append(None if left is None or right is None else left - right)
-    dif_values = [value if value is not None else 0.0 for value in dif]
-    dea_raw = calculate_ema(dif_values, signal)
-    dea: list[float | None] = [None if item is None else item for item in dea_raw]
+    dea = calculate_ema(dif, signal)
     hist: list[float | None] = []
     for d, e in zip(dif, dea):
         hist.append(None if d is None or e is None else (d - e) * 2)
@@ -176,21 +177,6 @@ def calculate_bollinger_bands(
             "pct_b": round(pct_b, 4) if pct_b is not None else None,
         }
     return result
-
-
-def _find_local_extremes(values: list[float | None], window: int = 3) -> list[tuple[str, int, float]]:
-    extremes: list[tuple[str, int, float]] = []
-    for i in range(window, len(values) - window):
-        v = values[i]
-        if v is None:
-            continue
-        is_low = all(v <= values[i + k] for k in range(-window, window + 1) if k != 0 and values[i + k] is not None)
-        is_high = all(v >= values[i + k] for k in range(-window, window + 1) if k != 0 and values[i + k] is not None)
-        if is_low:
-            extremes.append(("low", i, v))
-        if is_high:
-            extremes.append(("high", i, v))
-    return extremes
 
 
 def detect_bullish_divergence(bars: list[dict[str, Any]], rsi_series: list[float | None], lookback: int = 12) -> bool:
