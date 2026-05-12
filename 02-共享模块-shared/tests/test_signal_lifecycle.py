@@ -52,3 +52,65 @@ def test_set_signal_status_allowed_transition():
 
 def test_signal_status_values():
     assert SIGNAL_STATUS_VALUES == {"active", "completed", "expired"}
+
+
+import json
+from unittest.mock import MagicMock, patch
+
+
+def test_check_recent_skips_completed(tmp_path, monkeypatch):
+    """check_recent should skip signals with status=completed (lifecycle_skipped)."""
+    import signal_tracker as st
+
+    store = tmp_path / "signals.jsonl"
+    results = tmp_path / "signal_results.jsonl"
+    results.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(st, "STORE_PATH", store)
+    monkeypatch.setattr(st, "RESULT_PATH", results)
+
+    signal = {
+        "symbol": "688248.SH", "trade_date": "2026-05-02",
+        "signal_type": "low_buy_watch", "status": "completed",
+        "trigger": {"price": 10.5},
+    }
+    store.write_text(json.dumps(signal) + "\n", encoding="utf-8")
+
+    with patch.object(st, "HttpClient", MagicMock()), \
+         patch.object(st, "resolve_security", return_value="688248.SH"), \
+         patch.object(st, "fetch_qfq_daily", return_value=[]), \
+         patch.object(st, "to_float", return_value=None):
+        result = st.check_recent(days=5)
+
+    assert result.get("lifecycle_skipped", 0) >= 1, f"Should skip completed signal: {result}"
+    assert result.get("updated", 0) == 0
+
+
+def test_check_recent_sets_completed_on_signal(tmp_path, monkeypatch):
+    """After computing result, signal's status in signals.jsonl becomes completed."""
+    import signal_tracker as st
+
+    store = tmp_path / "signals.jsonl"
+    results = tmp_path / "signal_results.jsonl"
+    results.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(st, "STORE_PATH", store)
+    monkeypatch.setattr(st, "RESULT_PATH", results)
+
+    signal = {
+        "symbol": "688248.SH", "trade_date": "2026-05-02",
+        "signal_type": "low_buy_watch",
+        "trigger": {"price": 10.5},
+    }
+    store.write_text(json.dumps(signal) + "\n", encoding="utf-8")
+
+    bars = [{"date": "2026-05-02", "close": 10.5, "atr14": 0.3}]
+
+    with patch.object(st, "HttpClient", return_value=MagicMock()), \
+         patch.object(st, "resolve_security", return_value="688248.SH"), \
+         patch.object(st, "fetch_qfq_daily", return_value=bars), \
+         patch.object(st, "to_float", side_effect=lambda v: float(v) if v else None):
+        result = st.check_recent(days=5)
+
+    assert result.get("updated", 0) >= 1, f"Should compute result: {result}"
+    updated_signal = json.loads(store.read_text(encoding="utf-8").strip().splitlines()[0])
+    assert updated_signal.get("status") == "completed", "Signal should be marked completed"
+    assert "status_updated_at" in updated_signal

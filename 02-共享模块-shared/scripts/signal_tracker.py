@@ -565,8 +565,11 @@ def check_recent(days: int = 5) -> dict[str, int]:
     result_lines: list[str] = []
     updated = 0
     skipped = 0
+    lifecycle_skipped = 0
 
     for sig in recent:
+        if not signal_is_trackable(sig):
+            lifecycle_skipped += 1; continue
         # 1. Try signal_id match first
         if sig.get("signal_id") in existing_keys_by_id:
             skipped += 1; continue
@@ -576,6 +579,7 @@ def check_recent(days: int = 5) -> dict[str, int]:
             skipped += 1; continue
         result = _compute_results_for_sig(sig)
         if result:
+            set_signal_status(sig, "completed")
             result_lines.append(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
             updated += 1
 
@@ -610,7 +614,26 @@ def check_recent(days: int = 5) -> dict[str, int]:
             os.close(fd)
         os.replace(str(tmp_path), str(RESULT_PATH))
 
-    return {"updated": updated, "skipped": skipped}
+    if updated > 0:
+        lines = STORE_PATH.read_text(encoding="utf-8").splitlines()
+        new_sig_lines = []
+        completed_ids = set()
+        for s in recent:
+            if s.get("status") == "completed":
+                completed_ids.add(s.get("signal_id"))
+        for line in lines:
+            if not line.strip():
+                new_sig_lines.append(line); continue
+            sig_rec = json.loads(line)
+            if sig_rec.get("signal_id") in completed_ids:
+                sig_rec["status"] = "completed"
+                sig_rec["status_updated_at"] = datetime.now().isoformat()
+            new_sig_lines.append(json.dumps(sig_rec, ensure_ascii=False))
+        tmp = STORE_PATH.with_suffix(".jsonl.tmp")
+        tmp.write_text("\n".join(new_sig_lines) + "\n", encoding="utf-8")
+        os.replace(str(tmp), STORE_PATH)
+
+    return {"updated": updated, "skipped": skipped, "lifecycle_skipped": lifecycle_skipped}
 
 
 def show_all(days_limit: int | None = None) -> str:
@@ -1009,8 +1032,11 @@ def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
     result_lines: list[str] = []
     updated = 0
     skipped = 0
+    lifecycle_skipped = 0
 
     for sig in candidates:
+        if not signal_is_trackable(sig):
+            lifecycle_skipped += 1; continue
         # 1. Try signal_id match first
         if sig.get("signal_id") in existing_keys_by_id:
             skipped += 1; continue
@@ -1020,6 +1046,7 @@ def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
             skipped += 1; continue
         result = _compute_results_for_sig(sig)
         if result:
+            set_signal_status(sig, "completed")
             result_lines.append(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
             updated += 1
 
@@ -1042,7 +1069,26 @@ def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
         os.replace(str(tmp_path), str(RESULT_PATH))
         _ensure_result_dir()
 
-    return {"updated": updated, "skipped": skipped}
+    if updated > 0:
+        lines = STORE_PATH.read_text(encoding="utf-8").splitlines()
+        new_sig_lines = []
+        completed_ids = set()
+        for s in candidates:
+            if s.get("status") == "completed":
+                completed_ids.add(s.get("signal_id"))
+        for line in lines:
+            if not line.strip():
+                new_sig_lines.append(line); continue
+            sig_rec = json.loads(line)
+            if sig_rec.get("signal_id") in completed_ids:
+                sig_rec["status"] = "completed"
+                sig_rec["status_updated_at"] = datetime.now().isoformat()
+            new_sig_lines.append(json.dumps(sig_rec, ensure_ascii=False))
+        tmp = STORE_PATH.with_suffix(".jsonl.tmp")
+        tmp.write_text("\n".join(new_sig_lines) + "\n", encoding="utf-8")
+        os.replace(str(tmp), STORE_PATH)
+
+    return {"updated": updated, "skipped": skipped, "lifecycle_skipped": lifecycle_skipped}
 
 
 def main(args: list[str] | None = None) -> int:
