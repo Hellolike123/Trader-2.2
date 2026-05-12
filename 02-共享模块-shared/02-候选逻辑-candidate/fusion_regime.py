@@ -63,7 +63,7 @@ ACTION_MAP_DISAGREE: list[tuple[float, str]] = [
 ]
 
 # 冲突阈值: max(signals) - min(signals) > DISAGREEMENT_THRESHOLD 触发降级
-DISAGREEMENT_THRESHOLD: int = 2  # 完全相反才降级
+DISAGREEMENT_THRESHOLD: int = 1  # max(方向) - min(方向) > 1 触发降级。方向取值 -1/0/1，差=1 即代表不一致
 
 
 def score_to_action(

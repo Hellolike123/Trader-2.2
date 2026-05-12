@@ -175,8 +175,9 @@ def _gap_status(
 
 
 def zone_position(current: float, support: float, confirm: float) -> float:
-    width = max(confirm - support, current * 0.01)
-    return max(0.0, min(1.0, (current - support) / width))
+    if confirm <= support:
+        return 0.5  # 无有效区间，返回中间值
+    return max(0.0, min(1.0, (current - support) / (confirm - support)))
 
 
 def build_structure_context(current: float, bars: list[BarData], change_pct: Any = None, quote: QuoteData | None = None) -> dict[str, Any]:

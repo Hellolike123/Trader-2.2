@@ -200,8 +200,8 @@ def _is_defense(status: str) -> bool:
 def score_for(item: dict[str, Any]) -> float:
     status = str(item.get("status"))
     current = float(item.get("current") or 0)
-    low_upper = float(item.get("low_zone_upper") or current)
-    confirm = float(item.get("confirm_price") or current)
+    low_upper = item.get("low_zone_upper")
+    confirm = item.get("confirm_price")
     hard_stop = float(item.get("hard_stop") or current)
     position_ratio = float(item.get("position_ratio") or 0)
     change = to_float(item.get("change_pct")) or 0.0
@@ -209,11 +209,10 @@ def score_for(item: dict[str, Any]) -> float:
 
     rule_mod = apply_score_modifiers(item)
     if rule_mod is None:
-        # Fallback to hardcoded logic
         score = float(STATUS_SCORE.get(status, 0))
-        if status != "暂不碰" and current <= low_upper:
+        if status != "暂不碰" and low_upper is not None and current <= float(low_upper):
             score += 10
-        if status != "暂不碰" and current >= confirm:
+        if status != "暂不碰" and confirm is not None and current >= float(confirm):
             score += 8
         if current <= hard_stop:
             score -= 40
