@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import warnings
 import sys
 import unicodedata
 from datetime import datetime, timedelta
@@ -47,6 +48,8 @@ def _today() -> str:
 
 
 def stable_id(skill: str, target: str, date: str, signal_type: str, price: float | None = None) -> str:
+    """[已弃用] 旧信号 ID 生成函数。请使用 make_signal_id() 替代。将在 v0.7 中移除。"""
+    warnings.warn("stable_id() is deprecated, use make_signal_id() instead", stacklevel=2)
     key = f"{date}::{skill}::{target}::{signal_type}"
     if price is not None:
         key += f"::{price:.2f}"

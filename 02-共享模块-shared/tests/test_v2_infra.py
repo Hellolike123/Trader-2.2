@@ -216,3 +216,14 @@ def test_market_env_pipeline_write_via_tradershared():
     with patch.object(me, "write_market") as mock_write:
         me.refresh(write_pipeline=True)
         mock_write.assert_called_once()
+
+
+def test_stable_id_deprecated():
+    """stable_id() should emit deprecation warning."""
+    import signal_tracker as st
+    import warnings
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        sid = st.stable_id("trader", "南网科技", "2026-05-04", "低吸观察")
+        assert len(w) == 1, f"Expected 1 warning, got {len(w)}"
+        assert "deprecated" in str(w[0].message).lower()
