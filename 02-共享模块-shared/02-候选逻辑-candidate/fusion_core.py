@@ -33,10 +33,10 @@ import json
 import os
 from typing import Any
 
-# ── 安全模式: 默认只打日志不生效 ──
+# ── 安全模式: 环境变量控制 (FUSION_LOG_ONLY=true = 只日志, 不改决策行为)
+# 默认关闭日志模式, 融合层正式生效。调试时可设置 FUSION_LOG_ONLY=true
 
-# 环境变量控制 (FUSION_LOG_ONLY=true = 只日志, 不改决策行为)
-FUSION_LOG_ONLY = os.environ.get("FUSION_LOG_ONLY", "true").lower() in ("true", "1", "yes")
+FUSION_LOG_ONLY = os.environ.get("FUSION_LOG_ONLY", "false").lower() in ("true", "1", "yes")
 
 
 def _log_fusion(result: dict) -> None:
