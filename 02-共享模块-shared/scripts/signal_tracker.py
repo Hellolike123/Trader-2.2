@@ -263,6 +263,8 @@ _SIGNAL_TYPE_MAP: dict[str, str] = {
     "low_buy_triggered": "low_buy_triggered",
     "high_sell_triggered": "high_sell_triggered",
     "high_sell_watch": "high_sell_watch",
+    "trigger_expired": "trigger_expired",
+    "blocked": "blocked",
     "hold_observe": "hold_observe",
     "add_position": "add_position",
     "reduce_position": "reduce_position",
