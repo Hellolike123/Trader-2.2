@@ -108,6 +108,22 @@ def _signal_type_label(sig_type: str) -> str:
     return _SIGNAL_TYPE_LABELS.get(sig_type, sig_type)
 
 
+_FUSION_ACTION_MAP: dict[str, tuple[str, str, str]] = {
+    "半仓试 (多方主导)": ("track", "bullish", "track"),
+    "半仓试 (多方主导但有分歧)": ("track", "bullish", "track"),
+    "增持": ("track", "bullish", "track"),
+    "持股观望": ("wait_for_confirmation", "bullish_lean", "observe"),
+    "减仓": ("defensive", "bearish", "wait"),
+    "空仓/止损": ("defensive", "bearish", "wait"),
+}
+
+
+def _map_fusion_to_signal(fusion_action: str) -> tuple[str, str, str] | None:
+    if not fusion_action:
+        return None
+    return _FUSION_ACTION_MAP.get(fusion_action.strip())
+
+
 def price(value: float | None) -> str:
     return "无" if value is None else f"{value:.2f}元"
 
@@ -565,6 +581,25 @@ def _pool_count() -> int:
 
 def build_signal(r: dict[str, Any]) -> dict[str, Any]:
     signal_type, direction, action, confidence = signal_state(r)
+    
+    # 融合层介入: 置信度高且有明确信号时覆盖 scene 决策
+    fusion_override = False
+    fusion = r.get("fusion")
+    if isinstance(fusion, dict):
+        fc = fusion.get("confidence", 0)
+        sd = fusion.get("signals_detail", {})
+        has_signal = isinstance(sd, dict) and any(
+            isinstance(v, dict) and v.get("direction") != 0
+            for v in sd.values()
+        )
+        if fc > 0.2 and has_signal:
+            mapped = _map_fusion_to_signal(fusion.get("action", ""))
+            if mapped is not None:
+                ft, fd, fa = mapped
+                if fd != direction:
+                    signal_type, direction, action = ft, fd, fa
+                    fusion_override = True
+    
     raw_time = str(r.get("analysis_time") or "") or today_text()
     trade_date = raw_time.split(" ")[0]
     if signal_type == "reduce":
@@ -602,6 +637,8 @@ def build_signal(r: dict[str, Any]) -> dict[str, Any]:
         "risk_flags": signal_risk_flags(r),
         "summary": one_sentence(r, str(r.get("low_zone") or f"{float(r.get('support') or 0):.2f}元")),
     }
+    if fusion_override:
+        signal["fusion_override"] = True
     assert_valid_signal(signal)
     return signal
 
