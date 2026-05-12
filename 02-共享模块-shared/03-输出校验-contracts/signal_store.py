@@ -7,6 +7,13 @@ from pathlib import Path
 from typing import Any
 
 from signal_contract import assert_valid_signal
+from signal_tracker import (
+    _normalize_symbol,
+    _norm_date,
+    _normalize_signal_type,
+    _price_from_trigger,
+    make_signal_id,
+)
 
 
 def _normalize_symbol(symbol: str) -> str:
@@ -26,6 +33,14 @@ DEFAULT_SIGNAL_STORE_PATH = Path(os.environ.get("TRADER_SIGNAL_STORE_PATH", Path
 
 def append_signal(signal: dict[str, Any], path: Path | None = None) -> None:
     assert_valid_signal(signal)
+    if "signal_id" not in signal:
+        raw_type = str(signal.get("signal_type") or "unknown").strip()
+        signal["signal_id"] = make_signal_id(
+            symbol=_normalize_symbol(str(signal.get("symbol") or "")),
+            date=_norm_date(str(signal.get("trade_date") or "")),
+            signal_type=_normalize_signal_type(raw_type),
+            price=_price_from_trigger(signal) or "0.00",
+        )
     store_path = path or DEFAULT_SIGNAL_STORE_PATH
     store_path.parent.mkdir(parents=True, exist_ok=True)
     with store_path.open("a", encoding="utf-8") as handle:
