@@ -334,6 +334,9 @@ def record_from_report(target: str, report: dict[str, Any], offline: bool = Fals
         "atr_ratio": atr_ratio,
         "atr_level": atr_level,
         "atr_cap": atr_cap,
+        "fusion_action": (report.get("fusion") or {}).get("action"),
+        "fusion_confidence": (report.get("fusion") or {}).get("confidence"),
+        "fusion_score": (report.get("fusion") or {}).get("weighted_score"),
         **scores,
     }
 
@@ -344,7 +347,7 @@ def active_items(pool: dict[str, Any]) -> list[dict[str, Any]]:
 
 def sort_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     status_rank = {"执行": 3, "观察": 2, "淘汰": 1}
-    return sorted(items, key=lambda item: (status_rank.get(str(item.get("status")), 0), int(item.get("total_score") or 0), -float(item.get("atr_ratio") or 0)), reverse=True)
+    return sorted(items, key=lambda item: (status_rank.get(str(item.get("status")), 0), int(item.get("total_score") or 0), -float(item.get("atr_ratio") or 0), float(item.get("fusion_confidence") or 0)), reverse=True)
 
 
 def counts(items: list[dict[str, Any]]) -> dict[str, int]:
@@ -419,7 +422,11 @@ def cmd_show(args: argparse.Namespace) -> int:
     print(f"选股池  {len(items)}/{POOL_LIMIT}  执行{count['执行']}  观察{count['观察']}  淘汰{count['淘汰']}")
     print("")
     for item in items:
-        print(f"  {item.get('name')}  {item.get('status')}  评分{item.get('total_score')}  触发{price_yuan(item.get('trigger'))}  防守{price_yuan(item.get('defense'))}")
+        line = f"  {item.get('name')}  {item.get('status')}  评分{item.get('total_score')}  触发{price_yuan(item.get('trigger'))}  防守{price_yuan(item.get('defense'))}"
+        fc = item.get("fusion_confidence")
+        if fc is not None:
+            line += f"  融合:{item.get('fusion_action', '?')}({fc})"
+        print(line)
     return 0
 
 
@@ -1367,6 +1374,10 @@ def render_compare(reports: list[dict[str, Any]]) -> str:
 
         lines.append(f"{i}. {name}  {scene}  {current:.2f}元  {atr_text}{wr_text}{signal_text}")
         lines.append(f"   首仓≤{atr_cap}% | 止损 {stop_val:.2f}元")
+        fusion = r.get("fusion", {}) or {}
+        fc = fusion.get("confidence") if isinstance(fusion, dict) else None
+        if fc is not None and fc > 0:
+            lines.append(f"   融合:{fusion.get('action', '?')} | 置信度{fc}")
         lines.append("")
 
     if market_level == "很差":
