@@ -27,11 +27,22 @@ def _normalize_symbol(symbol: str) -> str:
     return s
 
 
-DEFAULT_SIGNAL_STORE_PATH = Path(os.environ.get("TRADER_SIGNAL_STORE_PATH", Path.home() / ".trader" / "signals.jsonl"))
+def _get_default_store_path() -> Path:
+    """返回默认信号存储路径。
+    
+    优先读取环境变量，否则 fallback 到 ~/.trader/signals.jsonl。
+    测试可通过 patch DEFAULT_SIGNAL_STORE_PATH 覆盖此值。
+    """
+    env_path = os.environ.get("TRADER_SIGNAL_STORE_PATH")
+    if env_path:
+        return Path(env_path)
+    return DEFAULT_SIGNAL_STORE_PATH
+
+
+DEFAULT_SIGNAL_STORE_PATH = Path.home() / ".trader" / "signals.jsonl"
 
 
 def append_signal(signal: dict[str, Any], path: Path | None = None) -> None:
-    # 先补 signal_id 再校验，确保即使 signal_id 纳入必填字段也不会炸
     if "signal_id" not in signal:
         raw_type = str(signal.get("signal_type") or "unknown").strip()
         signal["signal_id"] = make_signal_id(
@@ -41,12 +52,11 @@ def append_signal(signal: dict[str, Any], path: Path | None = None) -> None:
             price=_price_from_trigger(signal) or "0.00",
         )
     assert_valid_signal(signal)
-    store_path = path or DEFAULT_SIGNAL_STORE_PATH
+    store_path = path or _get_default_store_path()
     store_path.parent.mkdir(parents=True, exist_ok=True)
     with store_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(signal, ensure_ascii=False, sort_keys=True, default=str))
         handle.write("\n")
-    # Invalidate cache so the next read sees the new append
     _sig_cache.pop(str(store_path), None)
 
 # Module-level cache for load_recent_signals — keyed by path.
