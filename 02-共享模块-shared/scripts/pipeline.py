@@ -80,6 +80,8 @@ def write(field: str, data: dict[str, Any], override: bool = False) -> None:
         existing.extend(raw_data)
         state["warnings"] = _dedup_warn(existing)
     else:
+        if not isinstance(raw_data, dict):
+            raise TypeError(f"write('{field}'): expected dict, got {type(raw_data).__name__}")
         state[field] = {**state.get(field, {}), **raw_data, "updated": _now()}
     state["updated"] = _now()
     _save(state)
