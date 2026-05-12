@@ -242,11 +242,7 @@ class AkShareProvider:
     """
 
     def __init__(self) -> None:
-        global _provider_set
-        import os
-        provider_set = os.environ.get("TRADER_DATA_PROVIDER", "")
-        if provider_set:
-            _provider_set = True
+        pass
 
     @property
     def name(self) -> str:

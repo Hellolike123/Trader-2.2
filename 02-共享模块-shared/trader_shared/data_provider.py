@@ -13,6 +13,7 @@ Plugin a custom provider:
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 import sys
 from dataclasses import dataclass, field
@@ -242,11 +243,7 @@ class AkShareProvider:
     """
 
     def __init__(self) -> None:
-        global _provider_set
-        import os
-        provider_set = os.environ.get("TRADER_DATA_PROVIDER", "")
-        if provider_set:
-            _provider_set = True
+        pass
 
     @property
     def name(self) -> str:
@@ -284,17 +281,15 @@ class AkShareProvider:
         import akshare as ak
         import pandas as pd
 
-        # akshare 的 ts_code 格式: 600519.SH
-        ts_code = sec.ts_code
-        end_date = ""
+        start_date = ""
         if days:
             from datetime import timedelta
-            end_date = (pd.Timestamp.today() - timedelta(days=days)).strftime("%Y%m%d")
+            start_date = (pd.Timestamp.today() - timedelta(days=days)).strftime("%Y%m%d")
 
         df = ak.stock_zh_a_hist(
             symbol=sec.code,
             period="daily",
-            start_date=end_date,
+            start_date=start_date,
             end_date="",
             adjust="qfq",
         )
@@ -443,11 +438,12 @@ def get_provider() -> DataProvider:
     if provider_name == "akshare":
         try:
             _provider = AkShareProvider()
+            print(f"DataProvider: using akshare (via TRADER_DATA_PROVIDER=akshare)", file=sys.stderr)
             return _provider
         except RuntimeError:
-            _provider = _init_provider()
-            return _provider
+            pass
     _provider = _init_provider()
+    print(f"DataProvider: using Tencent+Sina", file=sys.stderr)
     return _provider
 
 
