@@ -591,6 +591,7 @@ def detect_sell_trigger(report_data: dict[str, Any], zones: dict[str, Any], stat
 
 
 def trigger_result(status: str, trigger_price: float | None, matched: list[str], blocked: list[str], trigger_time: Any = None) -> dict[str, Any]:
+    total = len(matched) + len(blocked)
     return {
         "status": status if status in STATUSES else "观察中",
         "trigger_price": round_price(trigger_price),
@@ -598,8 +599,8 @@ def trigger_result(status: str, trigger_price: float | None, matched: list[str],
         "matched_conditions": matched,
         "blocked_reasons": blocked,
         "matched_count": len(matched),
-        "total_conditions": 8,
-        "confidence": round(len(matched) / 8, 2),
+        "total_conditions": total,
+        "confidence": round(len(matched) / total, 2) if total > 0 else 0.0,
     }
 
 
@@ -766,17 +767,18 @@ def score_volume(state: dict[str, Any]) -> int:
 
 
 def build_price_point_model(report_data: dict[str, Any]) -> dict[str, Any]:
-    now = report_data.get("now") or datetime.now()
-    completed = completed_5m_bars(report_data.get("kline_5m") or [], now)
-    report_data["kline_5m_completed"] = completed
-    status_value = data_status(report_data.get("quote") or {}, report_data.get("daily_bars") or [], completed, now)
-    report_data["data_status"] = status_value
-    key_levels = find_key_levels(report_data)
-    zones = build_candidate_zones(report_data, key_levels)
-    report_data["amplitude_pct"] = zones.get("amplitude_pct")
-    report_data["space_state"] = zones.get("space_state")
-    report_data["t0_net_space_pct"] = t0_net_space_pct(zones)
-    report_data["sell_net_space_pct"] = sell_net_space_pct(float(report_data["current_price"]), zones)
+    data = dict(report_data)  # copy 防止副作用
+    now = data.get("now") or datetime.now()
+    completed = completed_5m_bars(data.get("kline_5m") or [], now)
+    data["kline_5m_completed"] = completed
+    status_value = data_status(data.get("quote") or {}, data.get("daily_bars") or [], completed, now)
+    data["data_status"] = status_value
+    key_levels = find_key_levels(data)
+    zones = build_candidate_zones(data, key_levels)
+    data["amplitude_pct"] = zones.get("amplitude_pct")
+    data["space_state"] = zones.get("space_state")
+    data["t0_net_space_pct"] = t0_net_space_pct(zones)
+    data["sell_net_space_pct"] = sell_net_space_pct(float(data["current_price"]), zones)
     indicator_state = latest_indicator_state(completed)
     ict_signal = (
         build_ict_signal(
@@ -788,21 +790,21 @@ def build_price_point_model(report_data: dict[str, Any]) -> dict[str, Any]:
         if ENABLE_ICT_EXECUTION
         else {"summary": "ICT执行辅助未启用。", "buy_confirmed": False, "sell_confirmed": False, "signal_grade": "无效"}
     )
-    report_data["ict_signal"] = ict_signal
-    daily_bars = report_data.get("daily_bars") or []
+    data["ict_signal"] = ict_signal
+    daily_bars = data.get("daily_bars") or []
     last_daily = daily_bars[-1] if daily_bars else {}
     atr14_val = float(last_daily.get("atr14") or 0)
     atr_ratio_val = float(last_daily.get("atr_ratio") or 0)
-    buy_trigger = detect_buy_trigger(report_data, zones, indicator_state)
-    sell_trigger = detect_sell_trigger(report_data, zones, indicator_state)
-    buy_model = calculate_buy_price_model(report_data, zones, buy_trigger, atr14_val)
-    sell_model = calculate_sell_price_model(report_data, zones, sell_trigger)
-    observation_flags = observation_validity(report_data, zones)
+    buy_trigger = detect_buy_trigger(data, zones, indicator_state)
+    sell_trigger = detect_sell_trigger(data, zones, indicator_state)
+    buy_model = calculate_buy_price_model(data, zones, buy_trigger, atr14_val)
+    sell_model = calculate_sell_price_model(data, zones, sell_trigger)
+    observation_flags = observation_validity(data, zones)
     buy_model["observation_valid"] = observation_flags["buy_valid"]
     buy_model["observation_reason"] = observation_flags["buy_reason"]
     sell_model["observation_valid"] = observation_flags["sell_valid"]
     sell_model["observation_reason"] = observation_flags["sell_reason"]
-    action = choose_today_action(report_data, buy_model, sell_model)
+    action = choose_today_action(data, buy_model, sell_model)
     max_move = position_size(status_value, action, buy_model, sell_model, str(zones.get("space_state") or "unknown"), atr_ratio_val)
     atr_info: dict[str, Any] = {}
     if atr14_val > 0 and atr_ratio_val > 0:
@@ -818,7 +820,7 @@ def build_price_point_model(report_data: dict[str, Any]) -> dict[str, Any]:
         "sell": sell_model,
         "today_action": action,
         "max_move": max_move,
-        "position_score": score_position(report_data, key_levels),
+        "position_score": score_position(data, key_levels),
         "volume_score": score_volume(indicator_state),
         "volume_ratio": indicator_state.get("volume_ratio"),
         "vwap": round_price(indicator_state.get("vwap")),
