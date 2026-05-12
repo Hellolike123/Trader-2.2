@@ -68,7 +68,7 @@ def _fetch_index_data() -> dict[str, Any]:
         return {}
 
     # [35] = "price/vol/amount" — the current price as of market close
-    price_part = "8821.89" if len(parts) > 35 and parts[35] else ""
+    price_part = parts[35] if len(parts) > 35 and parts[35] else ""
     # Fallback: if no price_part, use [3] which is the last known open (approx close)
     if price_part:
         current = float(price_part.split("/")[0])
@@ -80,7 +80,7 @@ def _fetch_index_data() -> dict[str, Any]:
     else:
         pre_close = 0
 
-    if not change_pct and not current:
+    if change_pct == 0 and current == 0:
         return {}
 
     # For MA calculations we still need K-line bars
