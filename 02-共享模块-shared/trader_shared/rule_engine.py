@@ -71,6 +71,8 @@ class ScoreRuleEngine:
         for rule in self._rules:
             when = rule.get("when", "True")
             result = rule.get("result", 0)
+            if not isinstance(result, (int, float)):
+                raise TypeError(f"Score rule result must be numeric, got {type(result).__name__}: {result}")
             if _safe_eval(when, context):
                 total += result
         return total

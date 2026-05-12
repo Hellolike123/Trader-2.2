@@ -112,6 +112,10 @@ ALLOWED_DATA_STATUS = {
 def normalize_signal(signal: dict[str, Any]) -> dict[str, Any]:
     normalized = deepcopy(signal)
     normalized.setdefault("contract", CONTRACT_VERSION)
+    normalized.setdefault("confidence", "low")
+    normalized.setdefault("data_status", "degraded")
+    normalized.setdefault("direction", "neutral")
+    normalized.setdefault("action", "observe")
     normalized.setdefault("risk_flags", [])
     normalized.setdefault("trigger", {})
     normalized.setdefault("invalidation", {})

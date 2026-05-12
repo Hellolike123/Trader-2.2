@@ -1,0 +1,306 @@
+# Signal ID 统一模型 (A-3)
+
+**日期**: 2026-05-12  
+**状态**: 设计阶段  
+**优先级**: P1 — 最高优先级架构问题  
+
+---
+
+## 问题陈述
+
+三套 JSONL 文件使用两套独立的主键体系，零交叉引用：
+
+| 文件 | 当前 ID 模型 | 输入字段 | 哈希算法 |
+|------|------------|---------|---------|
+| `signal_log.jsonl` | `stable_id(skill, target(中文), date, type(中文), price)` | skill + 中文名 + 中文类型 | MD5[:12] |
+| `signals.jsonl` ↔ `signal_results.jsonl` | `_make_signal_key(symbol, date, type(英文化), price) → 4-key 元组匹配` | 符号 + 英文类型 | SHA256 不生成 ID |
+
+核心矛盾：signal_log 用 skill + 中文名，signal_results 用代码 + 英文名。两套 ID 永远无法关联，导致：
+- `fills()` 找不到对应的结果
+- `show` 无法跨表统计
+- 无法建立信号生命周期追溯
+
+---
+
+## 统一方案
+
+### signal_id 计算规则
+
+```python
+def make_signal_id(symbol, date, signal_type, price):
+    """生成统一信号 ID — 唯一函数，所有写入侧共用。"""
+    key = f"{symbol}|{date}|{signal_type}|{price}"
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
+```
+
+**输入字段规范化**（统一在调用方处理）：
+
+| 字段 | 规范化规则 | 默认值 | 示例 |
+|------|-----------|--------|------|
+| `symbol` | `_normalize_symbol()` | 空字符串 | `688248.SH` |
+| `date` | `_norm_date()` | 空字符串 | `2025-05-02` |
+| `signal_type` | `_normalize_signal_type()` | `"unknown"` | `low_buy_watch` |
+| `price` | `_price_from_trigger()` 或 `"0.00"` | `"0.00"` | `10.50` |
+
+### 双字段共存策略（signal_log.jsonl）
+
+signal_log.jsonl 同时保留新旧 ID：
+
+```python
+record = {
+    "signal_id_md5": old_md5,  # 旧 ID，保留用于 fill() 兼容
+    "signal_id": sig_id_v2,    # 新统一 ID
+    "signal_type": signal_type, "price": price,
+    # ... 其余字段不变
+}
+```
+
+旧记录只有 `signal_id`（MD5）和 `signal_id_md5` 字段为空。`fill()`` 和 dedup 逻辑同时检查两个字段。
+
+### 为什么不含 `skill`
+
+| 方案 | 结果 |
+|------|------|
+| 含 skill | signal_log 和 signal_results 永远不匹配 → 统一 ID 目标失败 |
+| 不含 skill | 同票同日同类型信号去重（表达同一件事，合并更合理） |
+
+`source_skill` 字段在每条记录中保留，用于追溯来源。
+
+### 熵分析
+
+SHA256[:16] = 48 bits → 生日边界约 2^24 ≈ 1600 万条记录。当前系统每日约 10-30 条信号，48 位足够。
+
+---
+
+## 改造点
+
+### 1. 新增 `make_signal_id()`
+
+```python
+def make_signal_id(symbol: str, date: str, signal_type: str, price: str) -> str:
+    """生成统一信号 ID。"""
+    key = f"{symbol}|{date}|{signal_type}|{price}"
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
+```
+
+### 2. `signal_store.append_signal()` 兜底
+
+```python
+def append_signal(signal: dict, path=None):
+    assert_valid_signal(signal)
+    if "signal_id" not in signal:
+        raw_type = str(signal.get("signal_type") or "unknown").strip()
+        sig_id = make_signal_id(
+            symbol=_normalize_symbol(str(signal.get("symbol") or "")),
+            date=_norm_date(str(signal.get("trade_date") or "")),
+            signal_type=_normalize_signal_type(raw_type),
+            price=_price_from_trigger(signal) or "0.00",
+        )
+        signal["signal_id"] = sig_id
+    # ... 写入逻辑不变
+```
+
+### 3. `signal_log.jsonl` 写入侧
+
+```python
+def log_safe(skill, target, symbol, signal_type, price, env_level="", env_note=""):
+    today = _today()
+    norm_type = _normalize_signal_type(str(signal_type))
+    sig_id_v2 = make_signal_id(
+        symbol=_normalize_symbol(symbol or ""),
+        date=today,
+        signal_type=norm_type,
+        price=f"{float(price):.2f}" if price else "0.00",
+    )
+    old_md5 = hashlib.md5(f"{today}::{skill}::{target}::{signal_type}".encode()).hexdigest()[:12]
+    # 双字段共存写入
+```
+
+Dedup 改为查 `signal_id`（优先）+ `signal_id_md5`（降级）：
+```python
+if not LOG_PATH.exists():
+    _create_log_record(sig_id_v2, old_md5, ...)
+    return sig_id_v2
+for line in LOG_PATH.read_text().splitlines():
+    try:
+        rec = json.loads(line)
+        if rec.get("signal_id") == sig_id_v2 or rec.get("signal_id_md5") == old_md5:
+            return sig_id_v2
+    except: continue
+_create_log_record(sig_id_v2, old_md5, ...)
+```
+
+### 4. `signal_results.jsonl` 写入侧
+
+`_compute_results_for_sig()` 返回结果时写入 `signal_id`：
+
+```python
+res = {
+    "signal_id": make_signal_id(norm_symbol, norm_date, norm_type, price_str),
+    # ... 其余字段不变
+}
+```
+
+### 5. 读写匹配三级降级
+
+`check_recent()` / `backfill()` 匹配逻辑升级：
+
+```
+1. signal_id 精确匹配 → 跳过
+2. 4-key 匹配（现有逻辑，3-key signal_date 需通过 _norm_date 规范化） → 跳过
+3. 3-key 匹配（老数据降级） → 跳过
+4. 计算新结果
+```
+
+关键点：3-key 降级必须对 `signal_date` 也调用 `_norm_date()` 归一化，否则 `2025-4-1` 和 `2025-04-01` 永远不匹配。
+
+---
+
+## 特殊场景
+
+### review_result 同天多票
+
+同一票同一天的 review_result 信号可能有多条（缠论/威科夫/筹码分别触发）。price 统一为 "0.00"，signal_type 均为 "review_result"。
+
+**修正**：对 `review_result` 类型，在 hash 中加入 trigger 文本 SHA 的短哈希：
+
+```python
+def make_signal_id(symbol, date, signal_type, price, extra_hash=None):
+    key = f"{symbol}|{date}|{signal_type}|{price}"
+    if extra_hash:
+        key += f"|{extra_hash}"
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+# review_result 使用
+extra = hashlib.sha256(trigger_text[:40].encode()).hexdigest()[:8] if trigger_text else ""
+sig_id = make_signal_id(norm_symbol, norm_date, "review_result", "0.00", extra if trigger_text else None)
+```
+
+`review_result` 不参与结果匹配（outcome 为空），ID 区分度只需在写入侧。
+
+---
+
+## 向后兼容
+
+### fill() 旧 MD5 ID 降级
+
+用户调用 `fill("abc123def456")`（旧 MD5 12 位）：
+
+```python
+def fill(signal_id, pnl_pct, days_held=0, outcome="unknown"):
+    # 先查新 ID（精确匹配）
+    for rec in _load_log_all():
+        if rec.get("signal_id") == signal_id:
+            # 更新
+            ...
+            return True, "ok"
+    
+    # 降级：按旧 MD5 ID 扫描
+    for rec in _load_log_all():
+        if rec.get("signal_id_md5") == signal_id:
+            # 写入新 signal_id 并更新
+            rec["signal_id"] = make_signal_id(...)
+            # 记录更新
+            ...
+            return True, "ok"
+    
+    return False, "signal_id not found"
+```
+
+### 旧记录不动
+
+已存在的旧 JSONL 记录不主动修改。新增两条记录：
+- `signal_log.jsonl`：旧记录不添加 `signal_id_v2`（只对新记录添加）；`fill()` 命中旧记录时会补充
+- `signal_results.jsonl`：旧记录补充 `signal_id` 通过 `migrate_signal_ids()` 完成
+
+---
+
+## 迁移策略
+
+### Phase 1: 写入新增 signal_id
+
+- `make_signal_id()` 上线
+- `append_signal()` 兜底补充 signal_id
+- `log_safe()` 写入新 signal_id（双字段共存）
+- `_compute_results_for_sig()` 写入 signal_id
+- 旧代码全部保留
+
+### Phase 2: 迁移工具
+
+```python
+def migrate_signal_ids(path=None):
+    """为旧 signals.jsonl 和 signal_results.jsonl 记录补充 signal_id。
+    
+    幂等：已带 signal_id 的记录跳过。
+    不处理 signal_log.jsonl — 旧 MD5 ID 不可逆（已存保留，fill() 自动补充）。
+    """
+    # signals.jsonl — 读取 → 补充 → 原子写回
+    # signal_results.jsonl — 读取 → 补充 → 原子写回
+```
+
+### Phase 3: 清理旧 ID 函数
+
+- **不** 改动 `stable_id()`（旧逻辑独立）
+- 新增 `fill_old(signal_id: str)` 函数，封装旧 MD5 扫描降级逻辑
+- 将 `fill()` 内部旧逻辑迁移到 `fill_old()`，标记 `stable_id` deprecated
+
+```python
+@deprecated("Use fill_old() for MD5 ID fallback")
+def stable_id(skill, target, date, signal_type, price=None):
+    # 保持 MD5 实现，仅用于 legacy fill_old() 内部
+    ...
+```
+
+### Phase 4: 移除降级逻辑
+
+- 移除 `fill()` 的旧 ID 降级
+- 移除 4-key / 3-key 降级（signal_id 成唯一匹配标准）
+- 完全清理 `stable_id()` 函数
+
+---
+
+## 测试计划
+
+### 单元测试（新增）
+
+1. `make_signal_id()` 基础 — 确定性、长度（16 字符）、SHA256 碰撞概率
+2. 符号规范化 — `688248` / `688248.SH` / `688248.sh` → 同 ID
+3. 日期规范化 — `2025-5-2` / `2025-05-02` / `2025-05-02T14:00:00` → 同 ID
+4. 信号类型归一化 — `低吸观察` / `low_buy_watch` → 同 ID
+5. price 缺失 — `"0.00"` 兜底，有 price 时使用实际值
+6. **price 区分** — `make_signal_id("A", "2025-01-01", "low_buy_watch", "10.50")` ≠ `make_signal_id("A", "2025-01-01", "low_buy_watch", "10.51")`
+7. review_result 特殊处理 — trigger_text[:40] hash 前缀区分、短文本 ≤20 字符、空文本
+8. `_normalize_signal_type()` — 所有 30+ 映射 + 标准名透传
+
+### 集成测试
+
+1. **signals.jsonl → signal_results.jsonl 匹配** — check_recent 优先用 signal_id 匹配
+2. **signal_log.jsonl dedup** — log_safe 双字段去重（signal_id + signal_id_md5）
+3. **三级降级匹配** — 旧记录（无 signal_id）用 4-key / 3-key 正常匹配
+4. **fill() 旧 ID 降级** — 传入旧 MD5 ID，通过 fill_old() 扫描回退更新记录
+5. **mixed-phase** — 旧记录 + 新记录共存时 dedup 正常工作
+6. **3-key 降级** — `2025-4-1`（非归一化）与 `2025-04-01` 匹配
+
+### 迁移测试
+
+1. `migrate_signal_ids()` 幂等 — 运行两次不产生重复或侧效应
+2. `migrate_signal_ids()` 坏行容错 — 文件含 JSONDecodeError 行，跳过并保留
+3. `migrate_signal_ids()` 旧记录不丢失 — 所有非坏行都被处理
+
+### 回归测试
+
+- 现有 243 个 shared tests 全部通过
+- signal_tracker test suite 全部通过
+
+---
+
+## 风险与缓解
+
+| 风险 | 影响 | 缓解 |
+|------|------|------|
+| 旧记录无 signal_id，降级匹配慢 | 大文件时全表扫描 | 保持 4-key + 3-key 索引作为第二级 |
+| review_result 多条同票同天碰撞 | 后写入的被 dedup | review_result 加 trigger_text hash |
+| fill() 旧用户调用失效 | 手动复盘无法更新 | 降级兼容：旧 ID 扫描回退 → fill_old() |
+| 迁移工具中断 | 部分旧记录无 ID | Phase 1 不删旧代码；migrate 原子写回 |
+| signal_store.py vs signal_tracker.py `_normalize_symbol` 不一致 | 两边算出不同 ID | 函数提取到 `signal_utils.py`，共用单一实现 |
+| 3-key 降级 `signal_date` 未规范化 | `2025-4-1` 与 `2025-04-01` 不匹配 | 3-key 构建时对 `signal_date` 调用 `_norm_date()` |

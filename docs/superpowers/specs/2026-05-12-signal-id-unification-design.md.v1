@@ -1,0 +1,276 @@
+# Signal ID 统一模型 (A-3)
+
+**日期**: 2026-05-12  
+**状态**: 设计阶段  
+**优先级**: P1 — 最高优先级架构问题  
+
+---
+
+## 问题陈述
+
+三套 JSONL 文件使用两套独立的主键体系，零交叉引用：
+
+| 文件 | 当前 ID 模型 | 输入字段 | 哈希算法 |
+|------|------------|---------|---------|
+| `signal_log.jsonl` | `stable_id(skill, target(中文), date, signal_type(中文), price)` | skill + 中文名 + 中文类型 | MD5[:12] |
+| `signals.jsonl` ↔ `signal_results.jsonl` | `_make_signal_key(symbol, date, signal_type(英文化), price) → 4-key 元组匹配` | 符号 + 英文类型 | SHA256 不生成 ID |
+
+核心矛盾：signal_log 用 skill + 中文名，signal_results 用代码 + 英文名。两套 ID 永远无法关联。
+
+---
+
+## 统一方案
+
+### signal_id 计算规则
+
+```
+signal_id = sha256(f"{symbol}|{date}|{signal_type}|{price}")[:16]
+```
+
+### 输入字段定义
+
+| 字段 | 规范化规则 | 示例 |
+|------|-----------|------|
+| `symbol` | `_normalize_symbol()`：`688248` → `688248.SH` | `688248.SH` |
+| `date` | `_norm_date()`：`2025-5-2` → `2025-05-02` | `2025-05-02` |
+| `signal_type` | `_SIGNAL_TYPE_MAP()`：`低吸观察` → `low_buy_watch` | `low_buy_watch` |
+| `price` | `_price_from_trigger()` → `f"{p:.2f}"`，无 price 时返回 `"0.00"` | `10.50` |
+
+### 为什么不含 `skill`
+
+- 含 skill → signal_log 和 signal_results 永远不匹配 → 统一 ID 目标失败
+- 不含 skill → 同票同日同类型信号去重（表达同一件事，合并更合理）
+- `source_skill` 字段在每条记录中保留，用于追溯来源
+
+### 为什么用 `_normalize_signal_type()` 而非 `_SIGNAL_TYPE_MAP`
+
+`_normalize_signal_type()` 内部是 `_SIGNAL_TYPE_MAP.get(raw_type, raw_type)`，即旧名映射、标准名透传。设计文档中所有调用点必须使用此函数，而非直接引用 `_SIGNAL_TYPE_MAP`，避免遗漏。
+
+---
+
+## 架构
+
+```
+┌─────────────────────────────────────────────────────┐
+│                  make_signal_id()                     │
+│   sha256(symbol|date|signal_type|price)[:16]          │
+│   唯一函数，所有写入侧共用                              │
+└──────────┬────────────┬────────────┬─────────────────┘
+           │            │            │
+     ┌─────▼─────┐ ┌───▼────┐ ┌────▼──────┐
+     │append_    │ │log_safe│ │_compute_   │
+     │signal()   │ │()      │ │results_    │
+     │signal_    │ │        │ │for_sig()   │
+     │store.py   │ │        │ │            │
+     └─────┬─────┘ └───┬────┘ └────┬────────┘
+           │           │           │
+           ▼           ▼           ▼
+     signals.jsonl  signal_log  signal_results
+                    .jsonl      .jsonl
+```
+
+---
+
+## 改造点
+
+### 1. 新增 `make_signal_id()` 函数
+
+位置：`signal_tracker.py`（所有现有工具函数所在模块）
+
+```python
+import hashlib
+from .signal_tracker import _normalize_symbol, _norm_date, _SIGNAL_TYPE_MAP, _price_from_trigger
+
+def make_signal_id(symbol: str, date: str, signal_type: str, price: str) -> str:
+    """生成统一信号 ID。"""
+    key = f"{symbol}|{date}|{signal_type}|{price}"
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
+```
+
+### 2. `signal_store.append_signal()` 兜底
+
+写入前如果 signal 不带 `signal_id`，自动计算补充：
+
+```python
+def append_signal(signal: dict, path=None):
+    assert_valid_signal(signal)
+    if "signal_id" not in signal:
+        raw_type = str(signal.get("signal_type") or "unknown").strip()
+        sig_id = make_signal_id(
+            symbol=_normalize_symbol(str(signal.get("symbol") or "")),
+            date=_norm_date(str(signal.get("trade_date") or "")),
+            signal_type=_SIGNAL_TYPE_MAP.get(raw_type, raw_type),  # 旧名 → 标准名，标准名透传
+            price=_price_from_trigger(signal) or "0.00",
+        )
+        signal["signal_id"] = sig_id
+    # ... 写入逻辑不变
+```
+
+### 3. `signal_log.jsonl` 写入侧
+
+`log_safe()` → `stable_id()` 替换为 `make_signal_id()`，同时**保留旧 MD5 signal_id 字段**（共存策略）：
+
+```python
+def log_safe(skill, target, symbol, signal_type, price, ...):
+    norm_type = _SIGNAL_TYPE_MAP.get(str(signal_type), str(signal_type))  # 归一化
+    sig_id = make_signal_id(
+        symbol=_normalize_symbol(symbol or ""),
+        date=_today(),
+        signal_type=norm_type,  # 使用归一化后的类型
+        price=f"{float(price):.2f}" if price else "0.00",
+    )
+    # 同时保留旧 MD5 signal_id（双 ID 共存）
+    old_md5 = hashlib.md5(f"{_today()}::{skill}::{target}::{signal_type}".encode()).hexdigest()[:12]
+    # ... dedup 改为查 signal_id 字段（优先）+ old_md5 降级
+```
+
+**双字段共存策略**：signal_log.jsonl 旧记录保持原有 `signal_id`（MD5），新写入记录附加 `signal_id_v2`（统一 SHA256）。旧 ID 字段更名为 `signal_id_md5`：
+
+```python
+record = {
+    "signal_id_md5": old_md5,       # 旧 ID，保留用于兼容性
+    "signal_id": sig_id,            # 新统一 ID
+    # ... 其余字段不变
+}
+```
+
+### 4. `signal_results.jsonl` 写入侧
+
+`_compute_results_for_sig()` 返回结果时写入 `signal_id`。
+
+### 5. 读写匹配三级降级
+
+`check_recent()` / `backfill()` 匹配已存在结果的逻辑升级为：
+
+```
+1. signal_id 精确匹配 → 跳过
+2. 4-key 匹配（现有逻辑） → 跳过
+3. 3-key 匹配（老数据降级） → 跳过
+4. 计算新结果
+```
+
+---
+
+## 特殊场景
+
+### review_result 同天多票
+
+同一票同一天的 review_result 信号可能有多条（缠论/威科夫/筹码分别触发）。price 统一为 "0.00"，signal_type 均为 "review_result"，ID 会冲突。
+
+**修正**：对 `review_result` 类型，在 hash 中追加 trigger 文本前 20 字符：
+
+```python
+# review_result 特殊处理
+if signal_type == "review_result":
+    key = f"{symbol}|{date}|{signal_type}|{price}|{trigger_text[:20]}"
+else:
+    key = f"{symbol}|{date}|{signal_type}|{price}"
+```
+
+`review_result` 不参与结果匹配（outcome 字段为空），ID 区分度只在写入侧需要。
+
+---
+
+## 向后兼容
+
+### fill_old(signal_id) 降级
+
+用户调用 `fill("abc123def456")` 传入旧 MD5 12 位 ID：
+
+1. 先查 `signal_id == "abc123def456"`（命中新 ID 记录）
+2. 未命中则按 `(skill, target, date, type, price)` 扫描旧稳定 ID 匹配
+3. 匹配成功则更新记录，保留旧 signal_id 的语义
+
+### 旧记录不动
+
+已存在的旧三条 JSONL 记录**保持原样**，不修改。新 ID 只对新生成的记录生效。
+
+### `stable_id()` 降级调用
+
+旧 API 不删除，标记 deprecation：
+
+```python
+@deprecated("Use make_signal_id instead. stable_id will be removed in v0.7.")
+def stable_id(skill, target, date, signal_type, price=None):
+    # 仍用 MD5 12 位用于向后兼容 fill()
+    ...
+```
+
+---
+
+## 迁移策略
+
+### Phase 1: 写入新增 signal_id
+
+- `make_signal_id()` 上线
+- `append_signal()` 兜底补充 signal_id
+- `log_safe()` 写入新 signal_id
+- `_compute_results_for_sig()` 写入 signal_id
+- 旧代码全部保留
+
+### Phase 2: 迁移工具
+
+```python
+def migrate_signal_ids():
+    """为旧 signals.jsonl 和 signal_results.jsonl 记录补充 signal_id。"""
+    # 处理 signals.jsonl — 读取 → 补充 signal_id → 写回
+    # 处理 signal_results.jsonl — 读取 → 补充 signal_id → 写回
+    # 不处理 signal_log.jsonl — 旧 MD5 ID 不可逆
+```
+
+### Phase 3: 清理旧 ID 函数
+
+- `stable_id()` 降级为调用 `make_signal_id()`（去掉 skill 参数，参数映射适配 API）
+- 移除 `stable_id()` 在 `log_safe()` 和 `fill_by_target()` 中的引用
+
+### Phase 4: 移除降级逻辑
+
+- 移除 `fill()` 的旧 ID 降级兼容
+- 移除 `check_recent()` 的 4-key / 3-key 降级（signal_id 已成唯一匹配标准）
+- 完全清理 `stable_id()` 函数
+
+---
+
+## 测试计划
+
+### 单元测试
+
+1. `make_signal_id()` 基础功能 — 输入规范化、输出长度、确定性
+2. 符号规范化 — `688248`、`688248.SH`、`688248.sh` 同 ID
+3. 日期规范化 — `2025-5-2`、`2025-05-02`、`2025-05-02T14:00:00` 同 ID
+4. 信号类型映射 — `低吸观察`、`low_buy_watch` 同 ID
+5. price 缺失场景 — `"0.00"` 兜底
+6. review_result 特殊场景 — trigger_text 前缀区分
+
+### 集成测试
+
+1. signals.jsonl → signal_results.jsonl 匹配 — check_recent 用 signal_id 匹配
+2. signal_log.jsonl → signal_id dedup — log_safe 去重
+3. 三级降级匹配 — 旧记录（无 signal_id）用 4-key/3-key 正常匹配
+4. fill 旧 ID 降级 — 传入旧 MD5 ID 仍能更新新记录
+
+### 回归测试
+
+- 现有 243 个 shared tests 全部通过
+- signal_tracker test suite 全部通过
+
+---
+
+## 依赖关系
+
+- `signal_contract.py` — `assert_valid_signal()` 校验（不影响，只校验必需字段）
+- `_SIGNAL_TYPE_MAP` — 信号类型归一化（保留）
+- `_normalize_symbol()` — 符号归一化（保留）
+- `_norm_date()` — 日期归一化（保留）
+- `_price_from_trigger()` — 价格提取（保留）
+
+---
+
+## 风险与缓解
+
+| 风险 | 影响 | 缓解 |
+|------|------|------|
+| 旧记录无 signal_id，降级匹配慢 | 大文件时全表扫描 | 保持 4-key + 3-key 索引作为第二级 |
+| review_result 多条同票同天碰撞 | 后写入的被 dedup | review_result 加 trigger_text 前缀 |
+| fill() 旧用户调用失效 | 手动复盘无法更新 | 降级兼容：旧 ID 扫描回退 |
+| 迁移工具中断 | 部分旧记录无 ID | Phase 1 不删旧代码，随时回退 |
