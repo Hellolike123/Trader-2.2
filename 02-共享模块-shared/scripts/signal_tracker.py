@@ -492,6 +492,7 @@ def _compute_results_for_sig(sig: dict) -> dict[str, Any] | None:
         "signal_id": make_signal_id(norm_symbol, norm_sig_date, norm_type, sig_price_str),
         "symbol": symbol, "name": name,
         "signal_date": sig_date, "signal_type": sig_type,
+        "fusion_override": sig.get("fusion_override", False),
         "source_skill": skill, "signal_price": round(sig_price, 2),
         "schema_version": 1,
         "result_time": datetime.now().isoformat(),
@@ -777,6 +778,19 @@ def _make_panel(results: list[dict[str, Any]], days_limit: int | None) -> str:
             wr_t = round(ups_t / total_t * 100, 1) if total_t else 0
             avg_r = round(sum(r["r_5d"] for r in recs) / total_t, 1) if total_t else 0
             L.append(f"  {sig_type}: {total_t}次 → 胜率 {wr_t}%（平均{avg_r:+.1f}%）")
+        L.append("")
+
+    # 按融合覆盖分类
+    overridden = [r for r in valid if r.get("fusion_override")]
+    if overridden:
+        not_overridden = [r for r in valid if not r.get("fusion_override")]
+        L.append("按融合覆盖:")
+        for label, recs in [("融合覆盖", overridden), ("纯 scene", not_overridden)]:
+            ups_r = sum(1 for r in recs if r.get("outcome") == "up")
+            total_r = len(recs)
+            wr_r = round(ups_r / total_r * 100, 1) if total_r else 0
+            avg_r = round(sum(r["r_5d"] for r in recs) / total_r, 1) if total_r else 0
+            L.append(f"  {label}: {total_r}次 → 胜率 {wr_r}%（平均{avg_r:+.1f}%）")
         L.append("")
 
     # 按 source_skill 分层统计（FIX-T-BIAS-10）
