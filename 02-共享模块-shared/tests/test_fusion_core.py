@@ -132,7 +132,8 @@ class TestMomentumToSignal:
         result = fn({"momentum": {"score": 60, "direction": "neutral", "signals": ["MACD柱为正"]}})
         # direction_str="neutral" → 方向 = 0
         assert result["direction"] == 0
-        assert result["confidence"] == 0.5  # score 60: >= 60 → 0.5
+        # score 60: >= 60 → 0.5
+        assert result["confidence"] == 0.5
 
     def test_bearish_strong(self):
         fn = self._fn
@@ -145,8 +146,8 @@ class TestMomentumToSignal:
         fn = self._fn
         result = fn({"momentum": {"score": 50, "direction": "neutral", "signals": []}})
         assert result["direction"] == 0
-        # score 50 in gap: (50-40)/20*0.2+0.2 = 0.3
-        assert abs(result["confidence"] - 0.3) < 1e-10
+        # score 50 V-底部: 0.2
+        assert result["confidence"] == 0.2
 
     def test_conflict_bullish_with_low_score(self):
         """direction=bullish 但 score 很低 → 降级置信度。"""
@@ -185,12 +186,12 @@ class TestScoreToConfidence:
         assert self._fn(40) == 0.5
 
     def test_weak_gap_50(self):
-        # 50 in [40,60]: (50-40)/20*0.2+0.2 = 0.3 (float precision)
-        assert abs(self._fn(50) - 0.3) < 1e-5
+        # V-底: score 50 → 0.2 (最低置信度)
+        assert abs(self._fn(50) - 0.2) < 1e-10
 
     def test_gap_45(self):
-        # (45-40)/20*0.2+0.2 = 0.25
-        assert self._fn(45) == 0.25
+        # V-左侧: score 45 → 0.2 + 5/10*0.3 = 0.35
+        assert abs(self._fn(45) - 0.35) < 1e-10
 
     def test_gap_60(self):
         # score >= 60 → 0.5

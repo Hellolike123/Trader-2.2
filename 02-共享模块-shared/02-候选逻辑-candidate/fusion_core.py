@@ -50,8 +50,9 @@ def _log_fusion(result: dict) -> None:
             "signals": {k: v["direction"] for k, v in result["signals_detail"].items()},
         }
         print(f"FUSION: {json.dumps(log_data, ensure_ascii=False)}")
-    except Exception:
-        pass  # 日志不能崩溃
+    except (json.JSONDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        # 只吞 JSON 序列化错误，不吞 KeyError/TypeError 等逻辑错误
+        pass
 
 
 def _chan_to_signal(chan_result: dict) -> dict:
@@ -149,14 +150,11 @@ def _momentum_to_signal(momentum_result: dict) -> dict:
 def _score_to_confidence(score: float) -> float:
     """从 0-100 分数映射到 0-1 置信度。
 
-    规则:
-      <= 25: 0.8 (强看空)
-      <= 35: 0.6
-      <= 40: 0.5
-      40-60: 线性插值 0.2→0.4
-      >= 60: 0.5
-      >= 65: 0.6
-      >= 75: 0.8
+    U 型函数: 两端信号强 → 置信度高, 中间灰区 → 置信度低
+    - <= 25/>= 75: 极端信号, 置信度 0.8
+    - <= 35/  >= 65: 强信号, 0.6
+    - <= 40/ >= 60: 中等信号, 0.5
+    - 41-59: 灰区, 0.2-0.5 (50 最低)
     """
     try:
         score = float(score)
@@ -177,10 +175,13 @@ def _score_to_confidence(score: float) -> float:
     if score <= 40:
         return 0.5
 
-    # 40-60 灰色地带: 从 0.2 线性递增到 0.4
-    # 40→0.2, 50→0.3, 60→0.4
-    ratio = (score - 40) / 20  # 0→1
-    return 0.2 + ratio * 0.2
+    # 41-59 灰区: V 形, 50 最低 (0.2), 向 40/60 两侧上升 (0.5)
+    if score < 50:
+        ratio = (50 - score) / 10
+        return 0.2 + ratio * 0.3
+    else:
+        ratio = (score - 50) / 9
+        return 0.2 + ratio * 0.3
 
 
 def _wyckoff_to_signal(wyckoff_result: dict) -> dict:
