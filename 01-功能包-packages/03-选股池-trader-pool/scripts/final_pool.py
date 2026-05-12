@@ -261,13 +261,23 @@ def score_report(report: dict[str, Any]) -> dict[str, int]:
         wyckoff += 5
     wyckoff = max(0, min(30, wyckoff))
     chip = max(0, min(25, chip))
+
+    # 融合层 bonus: weighted_score(-1.35~1.35) → -20~+20 分
+    fusion = report.get("fusion", {}) or {}
+    fw = float(fusion.get("weighted_score") or 0) if isinstance(fusion, dict) else 0
+    fd = float(fusion.get("disagreement") or 0) if isinstance(fusion, dict) else 0
+    fusion_bonus = max(-20, min(20, round(fw * 15)))
+    # 高度分歧时削弱 bonus
+    if fd > 1:
+        fusion_bonus = max(-10, min(10, fusion_bonus))
+
     from momentum_core import assess_momentum
     daily_bars = report.get("bars") or report.get("daily_bars") or []
     momentum_result = assess_momentum(daily_bars) if len(daily_bars) >= 30 else {"direction": "insufficient", "score": 0}
     momentum_dir = momentum_result.get("direction", "insufficient")
     momentum_score_val = min(20, max(0, momentum_result.get("score", 0) // 5))
     mom_tag = {"bullish": "🟢看多", "bearish": "🔴看空", "neutral": "🟡中性"}.get(momentum_dir, "⚪数据不足")
-    return {"chanlun_score": chan, "wyckoff_score": wyckoff, "chip_score": chip, "total_score": chan + wyckoff + chip, "momentum_score": momentum_score_val, "momentum_tag": mom_tag}
+    return {"chanlun_score": chan, "wyckoff_score": wyckoff, "chip_score": chip, "fusion_score": fusion_bonus, "total_score": chan + wyckoff + chip + fusion_bonus, "momentum_score": momentum_score_val, "momentum_tag": mom_tag}
 
 
 def admission_for(report: dict[str, Any], scores: dict[str, int]) -> dict[str, str]:
@@ -422,7 +432,11 @@ def cmd_show(args: argparse.Namespace) -> int:
     print(f"选股池  {len(items)}/{POOL_LIMIT}  执行{count['执行']}  观察{count['观察']}  淘汰{count['淘汰']}")
     print("")
     for item in items:
-        line = f"  {item.get('name')}  {item.get('status')}  评分{item.get('total_score')}  触发{price_yuan(item.get('trigger'))}  防守{price_yuan(item.get('defense'))}"
+        line = f"  {item.get('name')}  {item.get('status')}  评分{item.get('total_score')}"
+        fs = item.get("fusion_score")
+        if fs is not None and fs != 0:
+            line += f"(融合{fs:+d})"
+        line += f"  触发{price_yuan(item.get('trigger'))}  防守{price_yuan(item.get('defense'))}"
         fc = item.get("fusion_confidence")
         if fc is not None:
             line += f"  融合:{item.get('fusion_action', '?')}({fc})"
