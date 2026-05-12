@@ -154,6 +154,23 @@ def build_report(target: str) -> dict[str, Any]:
     levels["wyckoff_spring_signal"] = wyck_result.get("spring_signal", False)
     levels["wyckoff_summary"] = wyck_result.get("wyckoff_summary", "无明显信号")
     levels["wyckoff_upthrust_signal"] = wyck_result.get("upthrust_signal", False)
+
+    # === 融合层 (新) ===
+    # Fusion layer: aggregate chanlun/momentum/wyckoff into unified decision
+    # Zero modification to existing analysis logic. Output added as report["fusion"]
+    try:
+        from fusion_core import merge_decisions
+        env = get_env_for_skill("trader")
+        report_fusion = merge_decisions(
+            chan_result=levels.get("chanlun", {}),
+            momentum_result=levels.get("momentum", {}),
+            wyckoff_result=levels.get("wyckoff", {}),
+            regime=env.get("level", "正常"),
+        )
+    except Exception:
+        report_fusion = {"action": "融合层异常", "confidence": 0, "weighted_score": 0,
+                         "regime": "", "disagreement": 0, "signals_detail": {}, "weights_used": {}}
+
     support = levels["main_support"]
     resistance = levels["resistance"]
     confirm = levels["confirm_price"]
@@ -278,6 +295,7 @@ def build_report(target: str) -> dict[str, Any]:
         },
         "chip_support": chip_support,
         "chip_resistance": chip_resistance,
+        "fusion": report_fusion,
     }
 
 
