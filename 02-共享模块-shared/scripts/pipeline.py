@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -43,6 +44,7 @@ def _save(data: dict[str, Any]) -> None:
                 os.unlink(tmp_path)
             except OSError:
                 pass
+        print("WARN: pipeline atomic write failed, using non-atomic fallback", file=sys.stderr)
         _write_fallback(data)
 
 
@@ -62,21 +64,23 @@ def _empty() -> dict[str, Any]:
 
 
 def write(field: str, data: dict[str, Any], override: bool = False) -> None:
-    """Atomically write/update a named field in pipeline_state.json.
-    
-    FIX: Renamed param to raw_data to avoid shadowing with local `data` (state dict).
-    """
+    """Atomically write/update a named field in pipeline_state.json."""
     raw_data = data
     state = _load()
-    state[field] = {**state.get(field, {}), **raw_data, "updated": _now()}
+    
     if field in ("stocks", "positions") and not override:
         existing = state.get(field, {})
         existing.update(raw_data)
+        existing["updated"] = _now()
         state[field] = existing
-    if field == "warnings" and not override:
+    elif field == "warnings" and not override:
+        if not isinstance(raw_data, list):
+            raise TypeError(f"write('warnings'): expected list, got {type(raw_data).__name__}")
         existing = state.get("warnings", [])
         existing.extend(raw_data)
         state["warnings"] = _dedup_warn(existing)
+    else:
+        state[field] = {**state.get(field, {}), **raw_data, "updated": _now()}
     state["updated"] = _now()
     _save(state)
 
@@ -189,8 +193,12 @@ def _symbol_bare_digits(symbol: str) -> str:
 
 
 def _symbols_match(a: str, b: str) -> bool:
-    """True if a and b refer to the same A-share stock code."""
-    return _symbol_bare_digits(a) == _symbol_bare_digits(b) and bool(_symbol_bare_digits(a))
+    bare_a = _symbol_bare_digits(a)
+    bare_b = _symbol_bare_digits(b)
+    if bare_a and bare_b:
+        return bare_a == bare_b
+    # 一方或双方是中文名或非标准代码，直接字符串匹配
+    return a.strip().lower() == b.strip().lower()
 
 
 def conflicting_signals(name: str) -> list[str]:
