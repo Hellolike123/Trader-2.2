@@ -500,8 +500,8 @@ def _pool_signal_verifications(items: list[dict[str, Any]]) -> tuple[list[dict[s
                 signals = []
 
             # FIX-T-BIAS-177: match signal to pool item's trigger/defense, not just latest
+            matched = None
             if signals:
-                matched = None
                 for s in signals:
                     s_trigger = to_float(s.get("trigger", {}).get("price") or 0)
                     s_invalidation = to_float(s.get("invalidation", {}).get("price") or 0)
