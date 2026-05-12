@@ -24,14 +24,81 @@ from trader_shared.config import INDEX_CODE
 from trader_shared.data_provider import get_provider
 
 
-def _fetch_index_bars(days: int = 30) -> list[dict[str, Any]]:
+def _tencent_index_code(raw_code: str) -> str:
+    """Convert INDEX_CODE format (000852.SH) to Tencent format (sh000852)."""
+    parts = raw_code.split(".")
+    market = parts[1].lower() if len(parts) > 1 else "sh"
+    code = parts[0]
+    return f"{market}{code}"
+
+
+def _fetch_index_data() -> dict[str, Any]:
+    """Fetch current index data via Tencent real-time quote API.
+
+    Tencent index response format (after =quote):
+    market~name~code~~~current_high_low_volume~~pre_change~change_pct~current_price~pre_close~today_high~today_low~~...
+    Key indices: [9]=current, [10]=empty, [12]=pre_change, [13]=change_pct, [14]=current_price, [15]=pre_close
+    """
+    import urllib.request
+
+    tencent_code = _tencent_index_code(INDEX_CODE)
+    url = f"http://qt.gtimg.cn/q={tencent_code}"
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.qq.com"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = resp.read().decode("gbk")
+    except Exception:
+        return {}
+
+    raw = raw.strip()
+    if '"' not in raw:
+        return {}
+    value = raw.split('"', 1)[1].strip().rstrip(";")
+    parts = value.split("~")
+    if len(parts) < 20:
+        return {}
+
+    # [1]=name [3]=current_open [32]=change_pct [33]=high [34]=low [35]=price/vol/amount
+    try:
+        change_pct = float(parts[32])
+    except (ValueError, IndexError):
+        return {}
+
+    # [3]=open price as fallback for current
+    current = float(parts[3]) if len(parts) > 3 and parts[3] else 0
+    # [35] = "price/vol/amount"
+    price_part = parts[35] if len(parts) > 35 and parts[35] else ""
+    current = float(price_part.split("/")[0]) if price_part else current
+    pre_close = float(parts[3]) if len(parts) > 3 and parts[3] else 0  # open ~= close for indices in this field context
+    # Actually [3] is open, [4] is prev_close for this index format
+    # Let's use the fact that change_pct = (current - prev_close) / prev_close * 100
+    # So current = prev_close * (1 + change_pct/100)
+    # But we know [3]=8821.89 is current, not open. Let me recalculate:
+    # If change_pct = -0.51 and current = 8821.89, then prev_close = current / (1 - 0.51/100) = 8866.78 which matches [4]=8866.78
+    if change_pct and current:
+        pre_close = current / (1 + change_pct / 100)
+
+    if not change_pct and not current:
+        return {}
+
+    # For MA calculations we still need K-line bars
     try:
         provider = get_provider()
         sec = provider.resolve_security(INDEX_CODE)
-        raw = provider.fetch_kline(sec, scale="240", datalen=days)
-        return normalize_bars(raw)
+        raw_bars = provider.fetch_kline(sec, scale="240", datalen=30)
+        bars = normalize_bars(raw_bars) if raw_bars else []
     except Exception:
-        return []
+        bars = []
+
+    return {
+        "current": current,
+        "pre_close": pre_close,
+        "change_pct": round(change_pct, 2),
+        "bars": bars,
+    }
 
 
 def _ma(bars: list[dict[str, Any]], period: int) -> float | None:
@@ -46,11 +113,12 @@ def _ma(bars: list[dict[str, Any]], period: int) -> float | None:
 
 
 def assess() -> dict[str, Any]:
-    bars = _fetch_index_bars(30)
-    if len(bars) < 5:
+    idx_data = _fetch_index_data()
+
+    if not idx_data:
         return {
             "level": "未知",
-            "trend_5d": "",
+            "current": 0,
             "change_pct": 0.0,
             "ma5": None,
             "ma20": None,
@@ -58,10 +126,9 @@ def assess() -> dict[str, Any]:
             "note": "中证1000数据不足",
         }
 
-    last = bars[-1]
-    current = float(last.get("close") or 0)
-    prev = float(bars[-2].get("close") or current) if len(bars) >= 2 else current
-    change_pct = round(((current - prev) / prev) * 100, 2) if prev else 0.0
+    current = idx_data.get("current", 0)
+    change_pct = idx_data.get("change_pct", 0.0)
+    bars = idx_data.get("bars", [])
 
     ma5 = _ma(bars, 5)
     ma20 = _ma(bars, 20)
@@ -79,7 +146,7 @@ def assess() -> dict[str, Any]:
 
     return {
         "level": level,
-        "trend_5d": trend_5d,
+        "current": current,
         "change_pct": change_pct,
         "ma5": round(ma5, 2) if ma5 else None,
         "ma20": round(ma20, 2) if ma20 else None,
@@ -131,9 +198,12 @@ def get_env_for_skill(skill: str) -> dict[str, Any]:
 
 
 if __name__ == "__main__":
-    env = refresh()
+    env = assess()
     print("level:", env["level"])
     print("note:", env["note"])
+    print("change_pct:", env["change_pct"])
+    print("current:", env["current"])
+    print("ma5:", env["ma5"])
     print("t0:", env_note_for(env, "t0"))
     print("trader:", env_note_for(env, "trader"))
     print("portfolio:", env_note_for(env, "portfolio"))
