@@ -147,6 +147,7 @@ class TestDedupNormalization:
         existing = json.dumps({
             "symbol": "688248.SH", "name": "南网科技",
             "signal_date": today, "signal_type": "track",
+            "signal_price": 20,
             "r_5d": 3.0, "schema_version": "v1",
         })
         st.RESULT_PATH.write_text(existing + "\n", encoding="utf-8")

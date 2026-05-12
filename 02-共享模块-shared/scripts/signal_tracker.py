@@ -506,10 +506,9 @@ def check_recent(days: int = 5) -> dict[str, int]:
     cutoff = (datetime.now() - timedelta(days=days + 10)).strftime("%Y-%m-%d")
     recent = [s for s in signals if _norm_date(str(s.get("trade_date", ""))) >= cutoff]
 
-    # 已存在结果 — 三级降级: signal_id → 4-key(规范化) → 3-key(规范化)
+    # 已存在结果 — 二级降级: signal_id → 4-key(规范化)
     existing_keys_by_id: dict[str, dict] = {}
     existing_keys_4: dict[tuple[str, str, str, str], dict] = {}
-    existing_keys_3: dict[tuple[str, str, str], dict] = {}
     try:
         _ensure_result_dir()
         for line in RESULT_PATH.read_text(encoding="utf-8").splitlines():
@@ -527,8 +526,6 @@ def check_recent(days: int = 5) -> dict[str, int]:
                     existing_keys_by_id[sid] = r
                 # 2. Secondary: 4-key (normalized)
                 existing_keys_4[(key_symbol, raw_date, raw_type, price_str)] = r
-                # 3. Tertiary: 3-key (normalized)
-                existing_keys_3[(key_symbol, raw_date, raw_type)] = r
             except (json.JSONDecodeError, ValueError):
                 pass
     except OSError:
@@ -542,9 +539,9 @@ def check_recent(days: int = 5) -> dict[str, int]:
         # 1. Try signal_id match first
         if sig.get("signal_id") in existing_keys_by_id:
             skipped += 1; continue
-        # 2. Then try 4-key / 3-key
+        # 2. Then try 4-key
         key = _make_signal_key(sig)
-        if key in existing_keys_4 or (key[0], key[1], key[2]) in existing_keys_3:
+        if key in existing_keys_4:
             skipped += 1; continue
         result = _compute_results_for_sig(sig)
         if result:
@@ -953,10 +950,9 @@ def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
     cutoff = (datetime.now() - timedelta(days=days_window)).strftime("%Y-%m-%d")
     candidates = [s for s in signals if _norm_date(str(s.get("trade_date", ""))) >= cutoff]
 
-    # 已存在结果 — 三级降级: signal_id → 4-key(规范化) → 3-key(规范化)
+    # 已存在结果 — 二级降级: signal_id → 4-key(规范化)
     existing_keys_by_id: dict[str, dict] = {}
     existing_keys_4: dict[tuple[str, str, str, str], dict] = {}
-    existing_keys_3: dict[tuple[str, str, str], dict] = {}
     try:
         _ensure_result_dir()
         for line in RESULT_PATH.read_text(encoding="utf-8").splitlines():
@@ -974,8 +970,6 @@ def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
                     existing_keys_by_id[sid] = r
                 # 2. Secondary: 4-key (normalized)
                 existing_keys_4[(key_symbol, raw_date, raw_type, price_str)] = r
-                # 3. Tertiary: 3-key (normalized)
-                existing_keys_3[(key_symbol, raw_date, raw_type)] = r
             except (json.JSONDecodeError, ValueError):
                 pass
     except OSError:
@@ -989,9 +983,9 @@ def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
         # 1. Try signal_id match first
         if sig.get("signal_id") in existing_keys_by_id:
             skipped += 1; continue
-        # 2. Then try 4-key / 3-key
+        # 2. Then try 4-key
         key = _make_signal_key(sig)
-        if key in existing_keys_4 or (key[0], key[1], key[2]) in existing_keys_3:
+        if key in existing_keys_4:
             skipped += 1; continue
         result = _compute_results_for_sig(sig)
         if result:
