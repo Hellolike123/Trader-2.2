@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from typing import Any
 
 # ── 安全模式: 环境变量控制 (FUSION_LOG_ONLY=true = 只日志, 不改决策行为)
@@ -40,7 +41,10 @@ FUSION_LOG_ONLY = os.environ.get("FUSION_LOG_ONLY", "false").lower() in ("true",
 
 
 def _log_fusion(result: dict) -> None:
-    """打印 FUSION 日志，方便观察融合结果。"""
+    """打印 FUSION 日志，方便观察融合结果。
+    
+    只捕获 JSON 序列化错误，不吞逻辑错误。
+    """
     try:
         log_data = {
             "action": result["action"],
@@ -50,8 +54,8 @@ def _log_fusion(result: dict) -> None:
             "signals": {k: v["direction"] for k, v in result["signals_detail"].items()},
         }
         print(f"FUSION: {json.dumps(log_data, ensure_ascii=False)}")
-    except (json.JSONDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
-        # 只吞 JSON 序列化错误，不吞 KeyError/TypeError 等逻辑错误
+    except (json.JSONDecodeError, TypeError):
+        # JSON 序列化失败不影响决策
         pass
 
 
@@ -264,18 +268,21 @@ def merge_decisions(
     try:
         chan_signal = _chan_to_signal(chan_result)
     except Exception:
+        print(f"FUSION-WARN: chanlun signal normalization failed", file=sys.stderr)
         chan_signal = {"direction": 0, "confidence": 0.0,
                        "reason": "缠论标准化异常", "raw_key": "chan"}
 
     try:
         momentum_signal = _momentum_to_signal(momentum_result)
     except Exception:
+        print(f"FUSION-WARN: momentum signal normalization failed", file=sys.stderr)
         momentum_signal = {"direction": 0, "confidence": 0.0,
                            "reason": "动量标准化异常", "raw_key": "momentum"}
 
     try:
         wyckoff_signal = _wyckoff_to_signal(wyckoff_result)
     except Exception:
+        print(f"FUSION-WARN: wyckoff signal normalization failed", file=sys.stderr)
         wyckoff_signal = {"direction": 0, "confidence": 0.0,
                           "reason": "威科夫标准化异常", "raw_key": "wyckoff"}
 

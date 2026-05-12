@@ -53,21 +53,26 @@ def append_signal(signal: dict[str, Any], path: Path | None = None) -> None:
 # Avoids re-reading/parsing the file when multiple callers query the same store.
 _sig_cache: dict = {}       # path_str → { "mtime": float, "data": list[dict] }
 _CACHE_TTL_SECONDS = 2      # Stale a cache entry after 2 s to pick up fresh appends.
+_bad_line_count: int = 0     # 坏行计数，供外部监控
 
 
 def _read_store(store_path: Path) -> list[dict[str, Any]]:
+    global _bad_line_count
     if not store_path.exists():
         return []
     raw = store_path.read_text(encoding="utf-8")
     signals: list[dict[str, Any]] = []
+    _bad_line_count = 0
     for line in raw.splitlines():
         if not line.strip():
             continue
         try:
             item = json.loads(line)
         except Exception:
+            _bad_line_count += 1
             continue
         if not isinstance(item, dict):
+            _bad_line_count += 1
             continue
         signals.append(item)
     return signals
