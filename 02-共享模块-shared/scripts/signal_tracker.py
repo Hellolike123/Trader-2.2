@@ -53,8 +53,9 @@ def stable_id(skill: str, target: str, date: str, signal_type: str, price: float
     return hashlib.md5(key.encode()).hexdigest()[:12]
 
 
-def _create_log_record(sig_id: str, skill: str, target: str, symbol: str, signal_type: str, price: float, env_level: str, env_note: str) -> None:
+def _create_log_record(sig_id: str, sig_md5: str, skill: str, target: str, symbol: str, signal_type: str, price: float, env_level: str, env_note: str) -> None:
     record = {
+        "signal_id_md5": sig_md5,
         "signal_id": sig_id,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "skill": skill, "target": target, "symbol": symbol,
@@ -71,19 +72,35 @@ def _create_log_record(sig_id: str, skill: str, target: str, symbol: str, signal
 def log_safe(skill: str, target: str, symbol: str, signal_type: str, price: float,
              env_level: str = "", env_note: str = "") -> str:
     today = _today()
-    sig_id = stable_id(skill, target, today, signal_type, price)
+    norm_type = _normalize_signal_type(str(signal_type))
+    sig_id = make_signal_id(
+        symbol=_normalize_symbol(symbol or ""),
+        date=today,
+        signal_type=norm_type,
+        price=f"{float(price):.2f}" if price else "0.00",
+    )
+    old_md5 = hashlib.md5(f"{today}::{skill}::{target}::{signal_type}".encode()).hexdigest()[:12]
     _ensure_log_dir()
+    
+    # Dedup: check signal_id first, then signal_id_md5 for legacy records
     if not LOG_PATH.exists():
-        _create_log_record(sig_id, skill, target, symbol, signal_type, price, env_level, env_note)
+        _create_log_record(sig_id, old_md5, skill, target, symbol, signal_type, price, env_level, env_note)
         return sig_id
+    
     for line in LOG_PATH.read_text(encoding="utf-8").splitlines():
-        if not line.strip(): continue
+        if not line.strip():
+            continue
         try:
-            if json.loads(line).get("signal_id") == sig_id:
+            rec = json.loads(line)
+            if rec.get("signal_id") == sig_id:
+                return sig_id
+            # Legacy records (pre-dual-field) only have signal_id_md5
+            if "signal_id" not in rec and rec.get("signal_id_md5") == old_md5:
                 return sig_id
         except json.JSONDecodeError:
             continue
-    _create_log_record(sig_id, skill, target, symbol, signal_type, price, env_level, env_note)
+    
+    _create_log_record(sig_id, old_md5, skill, target, symbol, signal_type, price, env_level, env_note)
     return sig_id
 
 
