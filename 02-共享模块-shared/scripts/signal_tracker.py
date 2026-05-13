@@ -1224,5 +1224,60 @@ def main(args: list[str] | None = None) -> int:
     return 0
 
 
+def log(skill: str, target: str, symbol: str, signal_type: str, price: float,
+        env_level: str = "", env_note: str = "") -> None:
+    """Append a signal log record (alias-compatible with the old writer)."""
+    log_safe(skill, target, symbol, signal_type, price, env_level, env_note)
+
+
+def stats_by_type(skill: str) -> dict[str, dict[str, Any]]:
+    """Return per-skill stats grouped by signal_type.
+
+    Returns {signal_type: {filled, win, loss, expired, stopped, win_rate}}.
+    """
+    if not LOG_PATH.exists():
+        return {}
+    records: list[dict] = []
+    for line in LOG_PATH.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        records.append(rec)
+
+    skill_lower = skill.lower()
+    result: dict[str, dict[str, Any]] = {}
+    for rec in records:
+        if rec.get("skill", "").lower() != skill_lower:
+            continue
+        sig_type = rec.get("signal_type", "unknown")
+        if sig_type not in result:
+            result[sig_type] = {"filled": 0, "win": 0, "loss": 0, "expired": 0, "stopped": 0, "unknown_count": 0}
+        result[sig_type]["filled"] += 1
+        outcome = rec.get("outcome", "unknown")
+        if outcome == "win":
+            result[sig_type]["win"] += 1
+        elif outcome == "loss":
+            result[sig_type]["loss"] += 1
+        elif outcome == "expired":
+            result[sig_type]["expired"] += 1
+        elif outcome == "stopped":
+            result[sig_type]["stopped"] += 1
+        else:
+            result[sig_type]["unknown_count"] += 1
+
+    for stats in result.values():
+        filled = stats["filled"]
+        if filled >= 1:
+            stats["win_rate"] = round(stats["win"] / filled, 4)
+        else:
+            stats["win_rate"] = 0.0
+
+    return result
+
+
 if __name__ == "__main__":
     sys.exit(main())

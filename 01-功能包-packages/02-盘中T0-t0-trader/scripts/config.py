@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-from trader_shared.config import (
-    LOOKBACK_DAYS,
-    RECENT_WINDOW,
-)
-
+LOOKBACK_DAYS: int = 30
 STRUCTURE_WINDOW: int = 20
 MIN_5M_BARS: int = 20
 MACD_WARMUP_BARS: int = 35

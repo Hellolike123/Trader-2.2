@@ -6,6 +6,7 @@ Usage:
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -76,6 +77,9 @@ def _load_script(name: str):
     scripts = _find_scripts_dir()
     if scripts is None:
         raise RuntimeError(f"trader_shared: cannot find scripts/ directory for module '{name}'")
+    _check = scripts / "pipeline.py"
+    if not _check.exists():
+        raise RuntimeError(f"trader_shared: pipeline.py not found at {scripts}")
     mod_path = scripts / f"{name}.py"
     spec = importlib.util.spec_from_file_location(f"trader_shared_{name}", mod_path)
     if spec is None or spec.loader is None:
