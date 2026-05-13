@@ -42,9 +42,8 @@ def _get_default_store_path() -> Path:
 DEFAULT_SIGNAL_STORE_PATH = Path.home() / ".trader" / "signals.jsonl"
 
 
-def append_signal(signal: dict[str, Any], path: Path | None = None) -> None:
-    # Use a working copy so normalize/assert don't mutate the caller's dict,
-    # but still sync the computed signal_id back to avoid silent mismatches.
+def append_signal(signal: dict[str, Any], path: Path | None = None) -> str:
+    # Use a working copy so normalize/assert don't mutate the caller's dict.
     working = dict(signal)
     if "signal_id" not in working:
         raw_type = str(working.get("signal_type") or "unknown").strip()
@@ -54,7 +53,6 @@ def append_signal(signal: dict[str, Any], path: Path | None = None) -> None:
             signal_type=_normalize_signal_type(raw_type),
             price=_price_from_trigger(working) or "0.00",
         )
-        signal["signal_id"] = working["signal_id"]  # sync back
     assert_valid_signal(working)
     store_path = path or _get_default_store_path()
     store_path.parent.mkdir(parents=True, exist_ok=True)
@@ -62,6 +60,7 @@ def append_signal(signal: dict[str, Any], path: Path | None = None) -> None:
         handle.write(json.dumps(working, ensure_ascii=False, sort_keys=True, default=str))
         handle.write("\n")
     _sig_cache.pop(str(store_path), None)
+    return working["signal_id"]
 
 # Module-level cache for load_recent_signals — keyed by path.
 # Avoids re-reading/parsing the file when multiple callers query the same store.

@@ -140,18 +140,16 @@ def test_signal_lifecycle_full_pipeline(tmp_paths: Path) -> None:
         price=10.5,
     )
 
-    append_signal(signal)
+    sig_id = append_signal(signal)
 
-    # VERIFICATION: signal mutation + persisted
-    assert "signal_id" in signal, "append_signal should add signal_id to signal dict"
-    assert isinstance(signal["signal_id"], str)
-    assert len(signal["signal_id"]) == 16
+    # VERIFICATION: append_signal returns signal_id + persisted
+    assert isinstance(sig_id, str)
+    assert len(sig_id) == 16
 
     with open(tmp_paths / "signals.jsonl", encoding="utf-8") as f:
         written = json.loads(f.readline())
-    assert "signal_id" in written
-    assert written["signal_id"] == signal["signal_id"], \
-        "File should write same signal_id as python dict"
+    assert written["signal_id"] == sig_id, \
+        "File should write same signal_id as append_signal() returns"
 
     # ===== PHASE 2: write a log entry =====
     sig_id_from_log = signal_tracker.log_safe(
@@ -173,7 +171,7 @@ def test_signal_lifecycle_full_pipeline(tmp_paths: Path) -> None:
     # back to 4-key normalization for cross-source matching).
 
     # ===== PHASE 3: pre-write a result with matching signal_id =====
-    expected_sig_id = signal["signal_id"]
+    expected_sig_id = sig_id
     today = signal["trade_date"]
     pre_result = {
         "signal_id": expected_sig_id,
@@ -208,15 +206,22 @@ def test_signal_lifecycle_full_pipeline(tmp_paths: Path) -> None:
     assert final_result["symbol"] == "688248.SH"
 
     # ===== PHASE 6: verify consistency of normalization helpers =====
-    sig = signal  # the mutated dict (now has signal_id)
+    sig = _make_base_sig(
+        symbol="688248.SH",
+        name="南网科技",
+        signal_type="low_buy_watch",
+        price=10.5,
+    )
+    append_signal(sig)
+    # sig dict is NOT mutated — use the returned signal_id
     norm_sym = _normalize_symbol(str(sig.get("symbol") or ""))
     norm_dt = _norm_date(str(sig.get("trade_date") or ""))
     norm_type = _normalize_signal_type(str(sig.get("signal_type") or "unknown").strip())
     norm_price = _price_from_trigger(sig) or "0.00"
     derived_id = make_signal_id(norm_sym, norm_dt, norm_type, norm_price)
 
-    assert derived_id == sig["signal_id"], \
-        f"Derivation should match signal.signal_id: {derived_id} != {sig['signal_id'][:8]}..."
+    assert derived_id == sig_id, \
+        f"Derivation should match return value from append_signal: {derived_id} != {sig_id[:8]}..."
     # log.signal_id is derived from _today() (not signal's trade_date), so it won't match signal's
     # ID. But it is still a valid 16-char hex ID.
     assert len(rec["signal_id"]) == 16 and rec["signal_id"].isalnum(), \
@@ -290,7 +295,7 @@ def test_dual_id_consistency(tmp_paths: Path) -> None:
         trade_date=today_str,
         price=10.50,
     )
-    append_signal(sig_a)
+    sig_id_a = append_signal(sig_a)
     signal_tracker.log_safe(
         "trader", "南网科技", "688248.SH", "低吸观察", 10.50,
         env_level="正常",
@@ -304,8 +309,8 @@ def test_dual_id_consistency(tmp_paths: Path) -> None:
         "10.50",
     )
 
-    # Verify
-    assert sig_a["signal_id"] == expected
+    # Verify via return value
+    assert sig_id_a == expected
     with open(tmp_paths / "signal_log.jsonl", encoding="utf-8") as f:
         log_rec = json.loads(f.readline())
     assert log_rec["signal_id"] == expected
@@ -330,14 +335,16 @@ def test_different_dates_different_ids(tmp_paths: Path) -> None:
         analysis_time="2025-02-15 10:00",
         price=10.5,
     )
-    append_signal(sig_jan)
-    append_signal(sig_feb)
+    jan_id = append_signal(sig_jan)
+    feb_id = append_signal(sig_feb)
 
-    assert sig_jan["signal_id"] != sig_feb["signal_id"]
+    assert jan_id != feb_id
     lines = (tmp_paths / "signals.jsonl").read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 2
     w1, w2 = json.loads(lines[0]), json.loads(lines[1])
     assert w1["signal_id"] != w2["signal_id"]
+    assert w1["signal_id"] == jan_id
+    assert w2["signal_id"] == feb_id
 
 
 if __name__ == "__main__":
