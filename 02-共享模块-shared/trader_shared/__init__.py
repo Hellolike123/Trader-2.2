@@ -19,11 +19,10 @@ def _find_scripts_dir() -> Path | None:
     candidates = [
         # Hermes/zip layout: .../<skill>/scripts/trader_shared/__init__.py
         _here.parent,
-        # repo layout: .../02-共享模块-shared/trader_shared/__init__.py
-        _here.parent.parent / "scripts",
+        # repo/shared layout: .../02-共享模块-shared/trader_shared/__init__.py → scripts/ co-located
+        _here.parent / "scripts",
         # current working dir guesses
         Path.cwd() / "scripts",
-        Path.cwd() / "02-共享模块-shared" / "scripts",
     ]
 
     # walk upwards and try sibling scripts directories
