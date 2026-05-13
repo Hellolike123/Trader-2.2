@@ -290,7 +290,7 @@ def _compute_atr_fields(bars: list[dict[str, Any]]) -> None:
 
 def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 30) -> list[dict[str, Any]]:
     # 避免 urlencode 把逗号编码成 %2C — 腾讯 API 需要字面逗号分隔参数
-    raw_params = f"_var=kline_dayhfq&param={sec.qq_symbol},day,,,100,qfq"
+    raw_params = f"_var=kline_dayhfq&param={sec.qq_symbol},day,,,{max(days, 20)},qfq"
     cache_key = get_cache_key(TENCENT_FQKLINE_URL, raw_params)
 
     # 只缓存非当日数据（通过检查数据中是否有今日K线判断）
