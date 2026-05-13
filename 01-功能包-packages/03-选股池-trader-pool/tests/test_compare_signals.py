@@ -7,11 +7,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
-CONTRACTS = ROOT.parents[1] / "02-共享模块-shared" / "03-输出校验-contracts"
-CANDIDATE = ROOT.parents[1] / "02-共享模块-shared" / "02-候选逻辑-candidate"
-MARKET = ROOT.parents[1] / "02-共享模块-shared" / "01-行情数据-market-data"
 SHARED_ROOT = ROOT.parents[1] / "02-共享模块-shared"
-for _p in (SCRIPTS, CONTRACTS, CANDIDATE, MARKET, SHARED_ROOT):
+SHARED_SCRIPTS = SHARED_ROOT / "scripts"
+CONTRACTS = SHARED_ROOT / "03-输出校验-contracts"
+MARKET = SHARED_ROOT / "01-行情数据-market-data"
+CANDIDATE = SHARED_ROOT / "02-候选逻辑-candidate"
+for _p in (SCRIPTS, SHARED_SCRIPTS, CONTRACTS, CANDIDATE, MARKET, SHARED_ROOT):
     if _p.exists() and str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 for name in ("config", "light_data", "signal_store", "models", "pipeline", "signal_contract", "signal_tracker"):

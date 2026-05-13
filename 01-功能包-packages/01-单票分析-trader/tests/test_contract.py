@@ -474,8 +474,10 @@ def test_alert_confirm_broken() -> None:
 def test_alert_resistance_zone() -> None:
     from run_analysis import generate_alert
 
-    # current=54.2, resistance=55, threshold=0.8, |54.2-55|=0.8 <= 0.8
-    report = _alert_report(current=54.2)
+    # atr14=3.0 → thresh=max(3.0*0.35, current*0.006)=max(1.05, 0.317)=1.05
+    # current=54.2, resistance=55, |54.2-55|=0.8 <= 1.05 → 触发减仓位
+    # |54.2-53|=1.2 > 1.05 → confirm 不触发，让 resistance 有执行机会
+    report = _alert_report(current=54.2, atr14=3.0)
     alert = generate_alert(report)
     assert alert is not None
     assert "📉" in alert

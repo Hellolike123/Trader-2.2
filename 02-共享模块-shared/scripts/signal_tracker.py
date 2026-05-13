@@ -283,6 +283,12 @@ _SIGNAL_TYPE_MAP: dict[str, str] = {
     "high_sell_watch": "high_sell_watch",
     "low_sell_triggered": "low_sell_triggered",
     "low_sell_watch": "low_sell_watch",
+    # Pass-through values — kept explicit to avoid breaking existing signals.
+    # If this grows beyond N items, consider formalizing a trigger_type contract.
+    # NOTE: "completed_5m_confirm" and "price_confirm" are stored from
+    # test_review_backtrack.py samples; they are valid business semantics.
+    "completed_5m_confirm": "completed_5m_confirm",
+    "price_confirm": "price_confirm",
 }
 
 # 反向映射（英文 → 中文），用于日志显示

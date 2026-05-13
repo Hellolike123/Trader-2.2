@@ -73,6 +73,28 @@ ALLOWED_SIGNAL_TYPES = {
     "trigger_expired",
     "blocked",
     "review_result",
+    # Additional types used across skills — kept to avoid breaking live pipelines
+    "low_buy",
+    "high_sell",
+    "wait",
+    "pilot_entry",
+    "stop_low_buy",
+    "stop_high_sell",
+    "add_position",
+    "reduce_position",
+    "hold_observe",
+    "defensive_watch",
+    "wait_for_strength",
+    "hold",
+    "chase_rally",
+    "divergence_entry",
+    "completed_5m_confirm",
+    "price_confirm",
+    "watch_price",
+    "price_break",
+    "stop_loss",
+    "low_sell_triggered",
+    "low_sell_watch",
 }
 
 ALLOWED_DIRECTIONS = {
@@ -103,6 +125,7 @@ ALLOWED_DATA_STATUS = {
     "partial",
     "degraded",
     "failed",
+    "fresh",
 }
 
 

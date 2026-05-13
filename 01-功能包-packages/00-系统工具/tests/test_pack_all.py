@@ -16,6 +16,7 @@ import pack_all
 SCRIPTS_DIR = Path(__file__).resolve().parents[3]
 PACKAGES_DIR = SCRIPTS_DIR / "01-功能包-packages"
 DIST_DIR = SCRIPTS_DIR / "03-安装包-dist"
+RELEASES_DIR = DIST_DIR / "releases"
 RELEASE_DIR_PATTERN = re.compile(r"^\d{4}-\d{6}$")
 
 EXPECTED_SKILLS: list[tuple[str, str, str]] = [
@@ -70,7 +71,9 @@ def _clean_stale_releases() -> None:
 
 
 def _get_release_dirs() -> list[Path]:
-    return sorted(d for d in DIST_DIR.iterdir() if d.is_dir() and RELEASE_DIR_PATTERN.match(d.name))
+    if not RELEASES_DIR.exists():
+        return []
+    return sorted(d for d in RELEASES_DIR.iterdir() if d.is_dir() and RELEASE_DIR_PATTERN.match(d.name))
 
 
 def test_pack_all_creates_individual_zips() -> None:

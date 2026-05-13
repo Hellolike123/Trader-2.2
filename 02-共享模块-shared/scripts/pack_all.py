@@ -16,6 +16,7 @@ so they are immediately available when you send the zip to Hermes.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -175,8 +176,20 @@ def auto_install(stages: list[tuple[str, str, Path]]) -> None:
         print(f"  {meta_name} -> {dest}")
 
 
-def main() -> int:
+
+def main(args: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Pack traderskills into zips")
+    parser.add_argument("--no-install", action="store_true", help="Skip auto-install to ~/.hermes/skills/")
+    parsed, _ = parser.parse_known_args(args if args is not None else None)
+
+    # Also skip auto-install when running under pytest (prevents test pollution)
+    if os.environ.get("PACK_NO_INSTALL") or "pytest" in sys.modules:
+        parsed.no_install = True
+
     root = repo_root()
+
     packages_dir = root / "01-功能包-packages"
     output_dir = root / "03-安装包-dist"
     release_dir_name = build_release_dir_name()
@@ -217,8 +230,10 @@ def main() -> int:
             add_to_zip(staged, archive, arc_prefix=skill_slug)
     print(f"\nCombined: {all_path.relative_to(output_dir)}  ({all_path.stat().st_size / 1024:.0f} KB)")
 
-    # --- Auto-install to .hermes/skills ---
-    auto_install(stages)
+    if parsed.no_install:
+        print("\n[no-install] skipped auto-install")
+    else:
+        auto_install(stages)
 
     # --- Verify ---
     print("\n--- Verification ---")
@@ -230,8 +245,13 @@ def main() -> int:
             has_scripts = any(n.startswith("scripts/") for n in names)
             has_hermes = "HERMES.md" in names
             has_skill = "SKILL.md" in names
-            status = "ok" if has_meta and has_scripts and has_hermes and has_skill else "MISSING"
-            print(f"  [{status}] {zip_path.name}  meta={has_meta} scripts={has_scripts} hermes={has_hermes} skill={has_skill}")
+            # Check for empty .py files — indicates stale/incomplete copy
+            empty_py = [n for n in names if n.endswith(".py") and archive.getinfo(n).file_size == 0]
+            empty_status = "EMPTY!" if empty_py else ""
+            status = "ok" if has_meta and has_scripts and has_hermes and has_skill and empty_status != "EMPTY!" else "MISSING"
+            print(f"  [{status}] {zip_path.name}  meta={has_meta} scripts={has_scripts} hermes={has_hermes} skill={has_skill} {empty_status}")
+            if empty_py:
+                print(f"         EMPTY files: {', '.join(empty_py)}")
 
     # Cleanup temp dirs
     for _, _, staged in stages:
