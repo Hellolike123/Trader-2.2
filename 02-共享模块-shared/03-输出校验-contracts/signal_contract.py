@@ -126,6 +126,7 @@ ALLOWED_DATA_STATUS = {
     "degraded",
     "failed",
     "fresh",
+    "stale",
 }
 
 

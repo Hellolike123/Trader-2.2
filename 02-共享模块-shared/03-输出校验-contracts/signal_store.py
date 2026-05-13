@@ -43,19 +43,23 @@ DEFAULT_SIGNAL_STORE_PATH = Path.home() / ".trader" / "signals.jsonl"
 
 
 def append_signal(signal: dict[str, Any], path: Path | None = None) -> None:
-    if "signal_id" not in signal:
-        raw_type = str(signal.get("signal_type") or "unknown").strip()
-        signal["signal_id"] = make_signal_id(
-            symbol=_normalize_symbol(str(signal.get("symbol") or "")),
-            date=_norm_date(str(signal.get("trade_date") or "")),
+    # Use a working copy so normalize/assert don't mutate the caller's dict,
+    # but still sync the computed signal_id back to avoid silent mismatches.
+    working = dict(signal)
+    if "signal_id" not in working:
+        raw_type = str(working.get("signal_type") or "unknown").strip()
+        working["signal_id"] = make_signal_id(
+            symbol=_normalize_symbol(str(working.get("symbol") or "")),
+            date=_norm_date(str(working.get("trade_date") or "")),
             signal_type=_normalize_signal_type(raw_type),
-            price=_price_from_trigger(signal) or "0.00",
+            price=_price_from_trigger(working) or "0.00",
         )
-    assert_valid_signal(signal)
+        signal["signal_id"] = working["signal_id"]  # sync back
+    assert_valid_signal(working)
     store_path = path or _get_default_store_path()
     store_path.parent.mkdir(parents=True, exist_ok=True)
     with store_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(signal, ensure_ascii=False, sort_keys=True, default=str))
+        handle.write(json.dumps(working, ensure_ascii=False, sort_keys=True, default=str))
         handle.write("\n")
     _sig_cache.pop(str(store_path), None)
 
