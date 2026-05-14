@@ -331,7 +331,6 @@ def build_report(target: str) -> dict[str, Any]:
         "chip_resistance": chip_resistance,
         "fusion": report_fusion,
         "gap": levels.get("gap"),
-        "fib_retrace": levels.get("fib_retrace"),
         "time_window": levels.get("time_window"),
     }
 

@@ -223,44 +223,6 @@ def zone_position(current: float, support: float, confirm: float) -> float:
     return max(0.0, min(1.0, (current - support) / (confirm - support)))
 
 
-def _compute_fib_retrace(chan_result: dict[str, Any] | None) -> dict[str, Any] | None:
-    """从缠论笔数据中计算费波纳契回调位（P4）。
-
-    取最近一个完整的上攻笔（swing_low → swing_high），
-    计算 38.2% / 50% / 61.8% 回调位。
-
-    如果没有笔数据或笔不足，返回 None（静默降级）。
-    """
-    if chan_result is None:
-        return None
-    chan = chan_result.get("chanlun", {}) if isinstance(chan_result, dict) else {}
-    if not isinstance(chan, dict):
-        chan = {}
-    strokes = chan.get("strokes", [])
-    if not isinstance(strokes, list) or len(strokes) < 1:
-        return None
-
-    # 找最近一个完整的上攻笔（direction=up），用它的起止价算回撤
-    up_strokes = [s for s in strokes if isinstance(s, dict) and s.get("direction") == "up"]
-    if not up_strokes:
-        return None
-
-    last_up = up_strokes[-1]
-    swing_low = float(last_up.get("start_price") or 0)
-    swing_high = float(last_up.get("end_price") or 0)
-    if swing_low <= 0 or swing_high <= 0 or swing_high <= swing_low:
-        return None
-
-    diff = swing_high - swing_low
-    return {
-        "swing_high": round(swing_high, 2),
-        "swing_low": round(swing_low, 2),
-        "382": round(swing_high - diff * 0.382, 2),
-        "500": round(swing_high - diff * 0.500, 2),
-        "618": round(swing_high - diff * 0.618, 2),
-        "source": "chanlun_up_stroke",
-    }
-
 
 def _theory_multipliers(fusion_result: dict[str, Any] | None) -> dict[str, float]:
     """根据融合层理论信号计算参数微调系数。
@@ -436,7 +398,6 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         "pressure_space_pct": round(pressure_space_pct, 4),
         "status": status,
         "theory_multipliers": theory,  # P3: 记录理论信号对参数的微调系数，便于调试
-        "fib_retrace": _compute_fib_retrace(chan_result),  # P4: 费波纳契回调位
         "time_window": _check_time_window(bars, chan_result),  # P4: 江恩时间窗口
     }
 
