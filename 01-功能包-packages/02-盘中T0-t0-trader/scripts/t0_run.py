@@ -74,7 +74,14 @@ def build_plan(target: str) -> dict[str, Any]:
         "kline_30m": bars_30m,
         "current_price": float(current),
     }
-    model = build_price_point_model(report_data)
+    # T0-1 fix: 传入 structure_result 让 T0 使用 trader 的支撑/阻力分析
+    # 如果有 trader 的分析报告数据，提取其结构分析结果
+    structure_result = None
+    if isinstance(report_data.get("structure"), dict):
+        structure_result = report_data["structure"]
+    elif isinstance(report_data.get("structure_result"), dict):
+        structure_result = report_data["structure_result"]
+    model = build_price_point_model(report_data, structure_result=structure_result)
     buy_display_status = side_status(model["buy"])
     sell_display_status = side_status(model["sell"])
     buy_display_obs = observation_value(model["buy"], "以下")

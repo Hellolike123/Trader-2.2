@@ -115,6 +115,10 @@ _FUSION_ACTION_MAP: dict[str, tuple[str, str, str]] = {
     "持股观望": ("wait_for_confirmation", "bullish_lean", "observe"),
     "减仓": ("defensive", "bearish", "wait"),
     "空仓/止损": ("defensive", "bearish", "wait"),
+    # T-11 fix: 补全 3 个缺失的融合层 Action 映射，避免决策被静默丢弃
+    "空仓 (大盘很差, 一票否决)": ("risk_stop", "bearish", "stop"),
+    "观望 (信号冲突)": ("observe", "neutral", "observe"),
+    "等转强 (多方主导但有分歧)": ("wait_for_confirmation", "bullish_lean", "observe"),
 }
 
 
@@ -156,10 +160,40 @@ def build_report(target: str) -> dict[str, Any]:
     from chan_core import chanlun_strategy
     from wyckoff_core import wyckoff_strategy
     from momentum_core import momentum_strategy
-    strategies = [build_structure_context, chanlun_strategy, wyckoff_strategy, momentum_strategy]
-    levels = run_all(current, bars, quote.get("current_change_pct"), quote, *strategies)
-    chan_result = levels.get("chanlun", {})
-    wyck_result = levels.get("wyckoff", {})
+    # C-7/C-9 fix: 先运行理论策略（缠论/威科夫/动量），获取 chan_result 和 momentum_result，
+    # 再计算融合层，最后才调用 build_structure_context（它需要 fusion_result 和 chan_result）
+    theory_strategies = [chanlun_strategy, wyckoff_strategy, momentum_strategy]
+    theory_result = run_all(current, bars, quote.get("current_change_pct"), quote, *theory_strategies)
+    chan_result = theory_result.get("chanlun", {})
+    wyck_result = theory_result.get("wyckoff", {})
+    momentum_result = theory_result.get("momentum", {})
+
+    # === 融合层 (新) ===
+    # C-9 fix: 融合层必须在 build_structure_context 之前计算，
+    # 因为 build_structure_context 需要 fusion_result 来微调参数
+    try:
+        from fusion_core import merge_decisions
+        env = get_env_for_skill("trader")
+        report_fusion = merge_decisions(
+            chan_result=chan_result,
+            momentum_result=momentum_result,
+            wyckoff_result=wyck_result,
+            regime=env.get("level", "正常"),
+        )
+    except Exception:
+        report_fusion = {"action": "融合层异常", "confidence": 0, "weighted_score": 0,
+                         "regime": "", "disagreement": 0, "signals_detail": {}, "weights_used": {}}
+
+    # C-7 fix: build_structure_context 现在在融合层之后调用，
+    # 可以正确接收 fusion_result 和 chan_result
+    levels = build_structure_context(current, bars, quote.get("current_change_pct"), quote,
+                                     fusion_result=report_fusion, chan_result=chan_result)
+
+    # 将理论策略结果合并到 levels（不覆盖 structure_core 的输出）
+    for key, val in theory_result.items():
+        if key not in levels:
+            levels[key] = val
+
     levels["chan_trend_label"] = chan_result.get("trend_label", "数据不足")
     levels["chan_buy_point_text"] = chan_result.get("buy_point_text", "无")
     levels["chan_buy_points"] = chan_result.get("buy_points", [])
@@ -170,22 +204,6 @@ def build_report(target: str) -> dict[str, Any]:
     levels["wyckoff_spring_signal"] = wyck_result.get("spring_signal", False)
     levels["wyckoff_summary"] = wyck_result.get("wyckoff_summary", "无明显信号")
     levels["wyckoff_upthrust_signal"] = wyck_result.get("upthrust_signal", False)
-
-    # === 融合层 (新) ===
-    # Fusion layer: aggregate chanlun/momentum/wyckoff into unified decision
-    # Zero modification to existing analysis logic. Output added as report["fusion"]
-    try:
-        from fusion_core import merge_decisions
-        env = get_env_for_skill("trader")
-        report_fusion = merge_decisions(
-            chan_result=levels.get("chanlun", {}),
-            momentum_result=levels.get("momentum", {}),
-            wyckoff_result=levels.get("wyckoff", {}),
-            regime=env.get("level", "正常"),
-        )
-    except Exception:
-        report_fusion = {"action": "融合层异常", "confidence": 0, "weighted_score": 0,
-                         "regime": "", "disagreement": 0, "signals_detail": {}, "weights_used": {}}
 
     support = levels["main_support"]
     resistance = levels["resistance"]
@@ -275,7 +293,7 @@ def build_report(target: str) -> dict[str, Any]:
         "low_zone_upper": levels["low_zone_upper"],
         "support_source": levels.get("support_source"),
         "resistance_source": levels.get("resistance_source"),
-        "avg_amplitude_pct": levels.get("avg_amplitude_pct"),
+        "atr_pct": levels.get("atr_pct"),
         "zone_width_pct": levels.get("zone_width_pct"),
         "stop_buffer_pct": levels.get("stop_buffer_pct"),
         "pressure_space_pct": levels.get("pressure_space_pct"),
@@ -572,7 +590,9 @@ def _pool_count() -> int:
     import os
     path = os.path.expanduser("~/.trader/pool.json")
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        # C-12 fix: path 是 str 类型不能调 .read_text()，需用 Path 或 open
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
         items = data.get("items", [])
         return sum(1 for i in items if i.get("status") not in {"淘汰", "已退出"})
     except Exception:

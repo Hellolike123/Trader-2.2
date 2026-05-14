@@ -140,7 +140,8 @@ def copy_shared(bundle: Path, skill_slug: str) -> None:
     candidates_dir = SHARE_DIR / "02-候选逻辑-candidate"
     # Theory modules needed by all skills
     for f in ("chan_core.py", "wyckoff_core.py", "momentum_core.py",
-              "fusion_core.py", "fusion_regime.py"):
+              "fusion_core.py", "fusion_regime.py",
+              "time_window_detector.py"):
         src = candidates_dir / f
         if src.exists():
             shutil.copy2(src, scripts_dir / f)
@@ -149,6 +150,12 @@ def copy_shared(bundle: Path, skill_slug: str) -> None:
         core = candidates_dir / "t0_candidate_core.py"
         if core.exists():
             shutil.copy2(core, scripts_dir / "candidate_core.py")
+        # C-11 fix: T0 也需要 structure_core.py（T0-1 修复后 find_key_levels 依赖 structure_result 的字段）
+        # 和 decision_core.py（t0_candidate_core 依赖 decision_core 的 status_for/score_for）
+        for extra in ("structure_core.py", "decision_core.py"):
+            src = candidates_dir / extra
+            if src.exists():
+                shutil.copy2(src, scripts_dir / extra)
     else:
         for src_name, dst_name in (
             ("candidate_core.py", "candidate_core.py"),

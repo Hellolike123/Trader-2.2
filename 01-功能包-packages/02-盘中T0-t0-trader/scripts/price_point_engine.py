@@ -141,7 +141,7 @@ def add_level(levels: list[dict[str, Any]], name: str, price_value: float | None
         levels.append({"name": name, "price": rounded, "weight": weight})
 
 
-def find_key_levels(report_data: dict[str, Any]) -> dict[str, Any]:
+def find_key_levels(report_data: dict[str, Any], structure_result: dict[str, Any] | None = None) -> dict[str, Any]:
     quote = report_data["quote"]
     daily = report_data["daily_bars"]
     bars_5m = report_data["kline_5m_completed"]
@@ -153,6 +153,14 @@ def find_key_levels(report_data: dict[str, Any]) -> dict[str, Any]:
     recent20 = daily[-STRUCTURE_WINDOW:] if len(daily) >= STRUCTURE_WINDOW else daily
     support: list[dict[str, Any]] = []
     resistance: list[dict[str, Any]] = []
+    # 优先注入trader结构分析的结果，weight=1.1确保被choose_level优先选中
+    if structure_result is not None:
+        ts = float(structure_result.get("support") or 0)
+        tr = float(structure_result.get("resistance") or 0)
+        if ts > 0:
+            add_level(support, "结构支撑(trader)", ts, 1.1)
+        if tr > 0:
+            add_level(resistance, "结构阻力(trader)", tr, 1.1)
     min5 = min(values(recent5, "low"), default=None)
     max5 = max(values(recent5, "high"), default=None)
     if min5 is not None:
@@ -422,7 +430,9 @@ def _trend_filter(daily_bars: list[dict[str, Any]]) -> bool:
     if not daily_bars:
         return True
     closes = _close_vals(daily_bars)
-    if len(closes) < 900:
+    # C-13/T0-3 fix: 从 900 改为 60，与 trader_shared/config.py 统一
+    # 原 900 需 3.5 年数据，但 T0 只取 30 天数据，趋势过滤永远为 True
+    if len(closes) < 60:
         return True
     ma30 = sum(closes[-30:]) / 30
     long_avg = sum(closes[:-30]) / max(len(closes) - 30, 1)
@@ -766,14 +776,14 @@ def score_volume(state: dict[str, Any]) -> int:
     return max(1, min(10, score))
 
 
-def build_price_point_model(report_data: dict[str, Any]) -> dict[str, Any]:
+def build_price_point_model(report_data: dict[str, Any], structure_result: dict[str, Any] | None = None) -> dict[str, Any]:
     data = dict(report_data)  # copy 防止副作用
     now = data.get("now") or datetime.now()
     completed = completed_5m_bars(data.get("kline_5m") or [], now)
     data["kline_5m_completed"] = completed
     status_value = data_status(data.get("quote") or {}, data.get("daily_bars") or [], completed, now)
     data["data_status"] = status_value
-    key_levels = find_key_levels(data)
+    key_levels = find_key_levels(data, structure_result=structure_result)
     zones = build_candidate_zones(data, key_levels)
     data["amplitude_pct"] = zones.get("amplitude_pct")
     data["space_state"] = zones.get("space_state")

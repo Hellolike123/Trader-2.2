@@ -171,3 +171,11 @@ SKILL.md 精简：Commands/Output Contract 移至 `references/` + "绝对真理"
 ---
 
 > 完整架构、算法详情、Signal Contract 全字段、测试体系、目录结构、维护指南 → 见 `AGENTS_DEEP.md`
+
+---
+
+## 待实施变更
+
+| 文档 | 用途 | 状态 |
+|------|------|------|
+| `docs/buy-zone-accessibility-fix-plan.md` | 低位买入位可达性问题修复计划（P0-P3） | 待实施 |

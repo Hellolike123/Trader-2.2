@@ -29,6 +29,12 @@ try:
 except Exception:  # pragma: no cover - optional per skill
     T0_MIN_SPACE_PCT = 1.5
 
+try:
+    from trader_shared.config import FUSION_OVERRIDE_ENABLED, FUSION_CONFIDENCE_THRESHOLD
+except Exception:
+    FUSION_OVERRIDE_ENABLED = False
+    FUSION_CONFIDENCE_THRESHOLD = 0.6
+
 
 # ---- 可配置阈值常量 ----
 MIN_ZONE_WIDTH_PCT = 0.01       # 最小区间宽度（当前价的 1%）
@@ -46,6 +52,19 @@ T0_HIGH = "等待高抛触发"
 T0_NONE = "不做"
 
 _DEFENSE_STATUSES = {"防守观察", "防守观察，趋势下行谨慎"}
+
+# S-2 fix: 融合层 action → status 映射（与 decision_core 同步）
+_FUSION_STATUS_MAP: dict[str, str] = {
+    "半仓试 (多方主导)": "低吸观察",
+    "半仓试 (多方主导但有分歧)": "等转强",
+    "增持": "低吸观察",
+    "持股观望": "等转强",
+    "减仓": "冲高减仓",
+    "空仓/止损": "暂不碰",
+    "空仓 (大盘很差, 一票否决)": "暂不碰",
+    "观望 (信号冲突)": "防守观察",
+    "等转强 (多方主导但有分歧)": "等转强",
+}
 
 STATUS_SCORE = {
     "低吸观察": 80,
@@ -74,21 +93,35 @@ def zone_position(current: float, support: float, confirm: float) -> float:
     return max(0.0, min(1.0, (current - support) / width))
 
 
-def build_candidate_levels(current: float, bars: list[dict[str, Any]], change_pct: Any = None) -> dict[str, Any]:
-    recent = bars[-RECENT_WINDOW:] if len(bars) >= RECENT_WINDOW else bars
-    support = min_price(recent, "low")
-    resistance = max_price(recent, "high")
-    if support is None or resistance is None:
-        raise RuntimeError("daily support/resistance unavailable")
-
-    confirm = max(resistance, round(current * (1 + CONFIRM_BUFFER), 2))
-    stop = round(support * STOP_BUFFER, 2)
-    low_zone_lower = round(support, 2)
-    low_zone_upper = round(support * LOW_ZONE_UPPER_OFFSET, 2)
-    sell_observe = round(confirm, 2)
-    take = round(max(confirm, current) * TAKE_PROFIT_BUFFER, 2)
-    position = zone_position(current, support, confirm)
-    status = status_for(current, support, low_zone_upper, confirm, stop, position, change_pct)
+def build_candidate_levels(current: float, bars: list[dict[str, Any]], change_pct: Any = None, structure_result: dict[str, Any] | None = None, fusion_result: dict[str, Any] | None = None) -> dict[str, Any]:
+    # 优先复用 trader 的 structure_core 结果，消除两套价位体系不一致的问题
+    if structure_result is not None:
+        support = float(structure_result.get("support") or 0)
+        low_zone_lower = float(structure_result.get("low_zone_lower") or support)
+        low_zone_upper = float(structure_result.get("low_zone_upper") or support)
+        confirm = float(structure_result.get("confirm_price") or 0)
+        stop = float(structure_result.get("hard_stop") or 0)
+        resistance = float(structure_result.get("resistance") or 0)
+        sell_observe = float(structure_result.get("sell_observe_price") or confirm)
+        take = float(structure_result.get("take") or max(confirm, current) * 1.06)
+        position = zone_position(current, support, confirm)
+        status = status_for(current, support, low_zone_upper, confirm, stop, position, change_pct, fusion_result=fusion_result)
+        low_zone_display = structure_result.get("low_zone", f"{low_zone_lower:.2f}-{low_zone_upper:.2f}元")
+    else:
+        recent = bars[-RECENT_WINDOW:] if len(bars) >= RECENT_WINDOW else bars
+        support = min_price(recent, "low")
+        resistance = max_price(recent, "high")
+        if support is None or resistance is None:
+            raise RuntimeError("daily support/resistance unavailable")
+        confirm = max(resistance, round(current * (1 + CONFIRM_BUFFER), 2))
+        stop = round(support * STOP_BUFFER, 2)
+        low_zone_lower = round(support, 2)
+        low_zone_upper = round(support * LOW_ZONE_UPPER_OFFSET, 2)
+        sell_observe = round(confirm, 2)
+        take = round(max(confirm, current) * TAKE_PROFIT_BUFFER, 2)
+        position = zone_position(current, support, confirm)
+        status = status_for(current, support, low_zone_upper, confirm, stop, position, change_pct, fusion_result=fusion_result)
+        low_zone_display = f"{low_zone_lower:.2f}-{low_zone_upper:.2f}元"
 
     return {
         "main_support": round(support, 2),
@@ -96,7 +129,7 @@ def build_candidate_levels(current: float, bars: list[dict[str, Any]], change_pc
         "resistance": round(resistance, 2),
         "low_zone_lower": low_zone_lower,
         "low_zone_upper": low_zone_upper,
-        "low_zone": f"{low_zone_lower:.2f}-{low_zone_upper:.2f}元",
+        "low_zone": low_zone_display,
         "confirm_price": round(confirm, 2),
         "sell_observe_price": sell_observe,
         "hard_stop": stop,
@@ -109,7 +142,21 @@ def build_candidate_levels(current: float, bars: list[dict[str, Any]], change_pc
     }
 
 
-def status_for(current: float, support: float, low_zone_upper: float, confirm: float, hard_stop: float, position_ratio: float, change_pct: Any) -> str:
+def status_for(current: float, support: float, low_zone_upper: float, confirm: float, hard_stop: float, position_ratio: float, change_pct: Any, fusion_result: dict[str, Any] | None = None) -> str:
+    # S-2 fix: 融合层覆盖（与 decision_core 同样的逻辑）
+    if FUSION_OVERRIDE_ENABLED and isinstance(fusion_result, dict):
+        fc = float(fusion_result.get("confidence") or 0)
+        if fc >= FUSION_CONFIDENCE_THRESHOLD:
+            fusion_action = str(fusion_result.get("action") or "").strip()
+            mapped_status = _FUSION_STATUS_MAP.get(fusion_action)
+            if mapped_status is not None:
+                # 止损位安全底线不可覆盖
+                if current <= hard_stop or current < support * HARD_STOP_BUFFER_PCT:
+                    return "暂不碰"
+                if mapped_status == "暂不碰":
+                    return "防守观察"
+                return mapped_status
+
     change = to_float(change_pct) or 0.0
     if current <= hard_stop or current < support * HARD_STOP_BUFFER_PCT:
         return "暂不碰"

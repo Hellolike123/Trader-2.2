@@ -92,8 +92,14 @@ try:
     from trader_shared.config import TREND_MA_SHORT, TREND_MA_LONG, TREND_FILTER_ENABLED
 except Exception:
     TREND_MA_SHORT = 30
-    TREND_MA_LONG = 900
+    TREND_MA_LONG = 60  # C-13 fix synced
     TREND_FILTER_ENABLED = True
+
+try:
+    from trader_shared.config import FUSION_OVERRIDE_ENABLED, FUSION_CONFIDENCE_THRESHOLD
+except Exception:
+    FUSION_OVERRIDE_ENABLED = False
+    FUSION_CONFIDENCE_THRESHOLD = 0.6
 
 STATUS_SCORE["防守观察，趋势下行谨慎"] = 50
 
@@ -123,6 +129,21 @@ def _trend_filter(bars: list[dict[str, Any]]) -> bool:
     return ma30 > long_avg
 
 
+# S-2 fix: 融合层 action → status 映射
+# 当融合层置信度足够高时，直接用融合层的判断替代纯数学 status
+_FUSION_STATUS_MAP: dict[str, str] = {
+    "半仓试 (多方主导)": "低吸观察",
+    "半仓试 (多方主导但有分歧)": "等转强",
+    "增持": "低吸观察",
+    "持股观望": "等转强",
+    "减仓": "冲高减仓",
+    "空仓/止损": "暂不碰",
+    "空仓 (大盘很差, 一票否决)": "暂不碰",
+    "观望 (信号冲突)": "防守观察",
+    "等转强 (多方主导但有分歧)": "等转强",
+}
+
+
 def status_for(
     current: float,
     support: float,
@@ -134,7 +155,33 @@ def status_for(
     ma_values: dict[str, float | None],
     pressure_space_pct: float,
     bars: list[dict[str, Any]] | None = None,
+    space_threshold: float = 0.008,
+    fusion_result: dict[str, Any] | None = None,  # S-2 fix: 接收融合层结果
 ) -> str:
+    # === S-2 fix: 融合层覆盖 ===
+    # 当融合层开启、置信度足够高、且有明确映射时，用融合层判断替代纯数学计算
+    fusion_override_used = False
+    fusion_status = None
+    if FUSION_OVERRIDE_ENABLED and isinstance(fusion_result, dict):
+        fc = float(fusion_result.get("confidence") or 0)
+        if fc >= FUSION_CONFIDENCE_THRESHOLD:
+            fusion_action = str(fusion_result.get("action") or "").strip()
+            mapped_status = _FUSION_STATUS_MAP.get(fusion_action)
+            if mapped_status is not None:
+                # 一票否决：融合层说"暂不碰"时，即使数学计算说"低吸观察"也必须服从
+                # 但止损位判断仍保留（安全底线）
+                if mapped_status == "暂不碰" and current <= hard_stop:
+                    fusion_status = "暂不碰"
+                    fusion_override_used = True
+                elif mapped_status == "暂不碰":
+                    # 当前价没到止损位但融合层说大盘很差 → 降级为防守
+                    fusion_status = "防守观察"
+                    fusion_override_used = True
+                else:
+                    fusion_status = mapped_status
+                    fusion_override_used = True
+
+    # === 旧逻辑完整保留（作为 fallback） ===
     trend_ok = _trend_filter(bars) if (bars and TREND_FILTER_ENABLED) else True
     change = to_float(change_pct) or 0.0
     below_ma_count = sum(1 for value in ma_values.values() if value is not None and current < value)
@@ -155,24 +202,58 @@ def status_for(
             status = str(result)
             if not trend_ok and status in {"低吸观察", "冲高减仓"}:
                 status = "防守观察，趋势下行谨慎"
+            # ATR 动态"空间不足"修正：规则引擎的"默认防守"规则是兜底，
+            # 会在所有特定规则未匹配时返回"防守观察"，导致 Python fallback
+            # 的 ATR 动态阈值"空间不足"判断永远不执行。
+            # 此处对规则引擎返回的"防守观察"做二次检查：
+            # 如果压力空间确实不足（低于 ATR 动态阈值），覆盖为"空间不足"。
+            if status == "防守观察" and 0 <= pressure_space_pct < space_threshold:
+                status = "空间不足"
+            # S-2 fix: 融合层覆盖规则引擎结果
+            if fusion_override_used and fusion_status is not None:
+                # 但"暂不碰"和止损相关的数学判断优先级更高（安全底线）
+                if status == "暂不碰" and current <= hard_stop:
+                    pass  # 保留数学判断
+                else:
+                    status = fusion_status
             return status
     if current <= hard_stop or current < support * 0.995:
         return "暂不碰"
     if trend_ok and change <= CHANGE_THRESHOLD_DROP and current > low_zone_upper:
         return "暂不碰"
     if current <= low_zone_upper:
-        return "低吸观察" if trend_ok else "防守观察，趋势下行谨慎"
+        legacy_status = "低吸观察" if trend_ok else "防守观察，趋势下行谨慎"
+        if fusion_override_used and fusion_status is not None:
+            return fusion_status
+        return legacy_status
     if current >= confirm:
-        return "冲高减仓" if (change >= CHANGE_THRESHOLD_STRONG and trend_ok) else "等转强"
-    if 0 <= pressure_space_pct < 0.008:
-        return "空间不足"
+        legacy_status = "冲高减仓" if (change >= CHANGE_THRESHOLD_STRONG and trend_ok) else "等转强"
+        if fusion_override_used and fusion_status is not None:
+            return fusion_status
+        return legacy_status
     if above_ma5_ma10 and position_ratio >= POSITION_RATIO_STRONG:
+        if fusion_override_used and fusion_status is not None:
+            return fusion_status
         return "等转强"
     if below_ma_count >= 3:
+        if fusion_override_used and fusion_status is not None:
+            return fusion_status
         return "防守观察"
     if position_ratio >= POSITION_RATIO_CONFIRM:
+        if fusion_override_used and fusion_status is not None:
+            return fusion_status
         return "等转强"
-    return "防守观察"
+    # "空间不足"放在等转强判断之后——避免股价接近确认位时因剩余空间小而直接被否决。
+    # 此时能走到这里的场景：压力空间小 but 均线也不配合。
+    # space_threshold 由调用方根据 ATR 动态计算传入，默认0.008作为兜底。
+    if 0 <= pressure_space_pct < space_threshold:
+        if fusion_override_used and fusion_status is not None:
+            return fusion_status
+        return "空间不足"
+    default_status = "防守观察"
+    if fusion_override_used and fusion_status is not None:
+        return fusion_status
+    return default_status
 
 
 def action_for(status: str, low: float, high: float, sell_observe: float, confirm: float) -> str:

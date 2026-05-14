@@ -45,7 +45,7 @@ except Exception:  # pragma: no cover - optional per skill
 try:
     from config import MAX_ZONE_WIDTH_PCT
 except Exception:  # pragma: no cover - optional per skill
-    MAX_ZONE_WIDTH_PCT = 0.012
+    MAX_ZONE_WIDTH_PCT = 0.020
 
 try:
     from config import MIN_STOP_BUFFER_PCT
@@ -60,16 +60,30 @@ except Exception:  # pragma: no cover - optional per skill
 try:
     from config import MIN_CONFIRM_SPACE_PCT
 except Exception:  # pragma: no cover - optional per skill
-    MIN_CONFIRM_SPACE_PCT = 0.008
+    MIN_CONFIRM_SPACE_PCT = 0.005
 
 try:
     from config import MAX_REASONABLE_MA_DISTANCE_PCT
 except Exception:  # pragma: no cover - optional per skill
     MAX_REASONABLE_MA_DISTANCE_PCT = 0.12
 
+try:
+    from time_window_detector import check_time_windows as _check_time_windows_raw
+except ImportError:
+    def _check_time_windows_raw(bars, chan_result=None):
+        return {"window_active": False, "window_type": "", "bars_since_pivot": 0, "tolerance": 0, "all_active": []}
+
 
 def clamp(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, value))
+
+
+def _check_time_window(bars: list[BarData], chan_result: dict[str, Any] | None = None) -> dict[str, Any]:
+    """安全包装 time_window_detector，异常时静默降级。"""
+    try:
+        return _check_time_windows_raw(bars, chan_result)
+    except Exception:
+        return {"window_active": False, "window_type": "", "bars_since_pivot": 0, "tolerance": 0, "all_active": []}
 
 
 def min_price(bars: list[BarData], field: str) -> float | None:
@@ -105,6 +119,30 @@ def average_amplitude_pct(bars: list[BarData]) -> float | None:
         if high is None or low is None or close is None or close <= 0 or high < low:
             continue
         values.append((high - low) / close)
+    return sum(values) / len(values) if values else None
+
+
+def average_atr_pct(bars: list[BarData], period: int | None = None) -> float | None:
+    """计算近 period 根K线的平均真实波幅百分比 (ATR/close)。
+
+    ATR 使用 True Range = max(high-low, |high-prev_close|, |low-prev_close|)，
+    比简单振幅 (high-low) 更能捕捉跳空缺口的影响。
+    """
+    period = period or STRUCTURE_WINDOW
+    values: list[float] = []
+    prev_close: float | None = None
+    for item in bars[-period:]:
+        high = to_float(item.get("high"))
+        low = to_float(item.get("low"))
+        close = to_float(item.get("close"))
+        if high is None or low is None or close is None or close <= 0 or high < low:
+            continue
+        if prev_close is None:
+            tr = high - low
+        else:
+            tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+        values.append(tr / close)
+        prev_close = close
     return sum(values) / len(values) if values else None
 
 
@@ -180,7 +218,116 @@ def zone_position(current: float, support: float, confirm: float) -> float:
     return max(0.0, min(1.0, (current - support) / (confirm - support)))
 
 
-def build_structure_context(current: float, bars: list[BarData], change_pct: Any = None, quote: QuoteData | None = None) -> dict[str, Any]:
+def _compute_fib_retrace(chan_result: dict[str, Any] | None) -> dict[str, Any] | None:
+    """从缠论笔数据中计算费波纳契回调位（P4）。
+
+    取最近一个完整的上攻笔（swing_low → swing_high），
+    计算 38.2% / 50% / 61.8% 回调位。
+
+    如果没有笔数据或笔不足，返回 None（静默降级）。
+    """
+    if chan_result is None:
+        return None
+    chan = chan_result.get("chanlun", {}) if isinstance(chan_result, dict) else {}
+    if not isinstance(chan, dict):
+        chan = {}
+    strokes = chan.get("strokes", [])
+    if not isinstance(strokes, list) or len(strokes) < 1:
+        return None
+
+    # 找最近一个完整的上攻笔（direction=up），用它的起止价算回撤
+    up_strokes = [s for s in strokes if isinstance(s, dict) and s.get("direction") == "up"]
+    if not up_strokes:
+        return None
+
+    last_up = up_strokes[-1]
+    swing_low = float(last_up.get("start_price") or 0)
+    swing_high = float(last_up.get("end_price") or 0)
+    if swing_low <= 0 or swing_high <= 0 or swing_high <= swing_low:
+        return None
+
+    diff = swing_high - swing_low
+    return {
+        "swing_high": round(swing_high, 2),
+        "swing_low": round(swing_low, 2),
+        "382": round(swing_high - diff * 0.382, 2),
+        "500": round(swing_high - diff * 0.500, 2),
+        "618": round(swing_high - diff * 0.618, 2),
+        "source": "chanlun_up_stroke",
+    }
+
+
+def _theory_multipliers(fusion_result: dict[str, Any] | None) -> dict[str, float]:
+    """根据融合层理论信号计算参数微调系数。
+
+    返回 dict，每项默认1.0（不变）。理论信号好时积极放大，差时收窄。
+    若 fusion_result 为 None 或信号不足，全部返回1.0，退化为纯数学计算。
+
+    映射规则（详见 docs/buy-zone-accessibility-fix-plan.md P3）：
+      缠论上攻笔/三买 → zone_width 放大 +15%
+      缠论下跌笔未结束 → zone_width 缩小 -10%
+      威科夫吸筹/Spring → confirm_buffer 收窄 -30%
+      动量强势（bullish + score≥65）→ space_threshold 收窄 -20%
+      动量弱势（bearish + score≤35）→ space_threshold 加宽 +30%
+    """
+    multipliers = {
+        "zone_width": 1.0,
+        "confirm_buffer": 1.0,
+        "space_threshold": 1.0,
+    }
+    if fusion_result is None:
+        return multipliers
+
+    # 从 fusion_result 中读取理论信号详情
+    signals_detail = fusion_result.get("signals_detail", {})
+    if not isinstance(signals_detail, dict):
+        return multipliers
+
+    # --- 缠论信号 ---
+    chan = signals_detail.get("chan", {})
+    if isinstance(chan, dict):
+        reason = str(chan.get("reason", ""))
+        direction = chan.get("direction", 0)
+        confidence = float(chan.get("confidence", 0))
+        # 上攻笔/三买/底背驰 → 低吸区更宽
+        if direction == 1 and confidence >= 0.4:
+            if any(kw in reason for kw in ("三类买", "二类买", "一类买", "拉升段", "底背驰")):
+                multipliers["zone_width"] = 1.15
+        # 下跌笔/回调段 → 低吸区收窄
+        elif direction == -1 and confidence >= 0.4:
+            if any(kw in reason for kw in ("回调段", "顶背驰")):
+                multipliers["zone_width"] = 0.90
+
+    # --- 威科夫信号 ---
+    wyk = signals_detail.get("wyckoff", {})
+    if isinstance(wyk, dict):
+        reason = str(wyk.get("reason", ""))
+        direction = wyk.get("direction", 1)
+        confidence = float(wyk.get("confidence", 0))
+        # Spring / 看多背离 → 突破更可信，确认缓冲收窄
+        if direction == 1 and confidence >= 0.5:
+            if "弹簧" in reason or "看多" in reason:
+                multipliers["confirm_buffer"] = 0.70  # 0.005 * 0.70 = 0.0035
+        # 上冲回落/看空 → 不收窄
+        elif direction == -1 and confidence >= 0.5:
+            multipliers["confirm_buffer"] = 1.0
+
+    # --- 动量信号 ---
+    mom = signals_detail.get("momentum", {})
+    if isinstance(mom, dict):
+        direction = mom.get("direction", 0)
+        confidence = float(mom.get("confidence", 0))
+        # 动量强势 → space阈值收窄（更激进，空间小也给进）
+        if direction == 1 and confidence >= 0.5:
+            multipliers["space_threshold"] = 0.80
+        # 动量弱势 → space阈值加宽（更保守）
+        elif direction == -1 and confidence >= 0.5:
+            multipliers["space_threshold"] = 1.30
+
+    return multipliers
+
+
+def build_structure_context(current: float, bars: list[BarData], change_pct: Any = None, quote: QuoteData | None = None, fusion_result: dict[str, Any] | None = None, chan_result: dict[str, Any] | None = None) -> dict[str, Any]:
     recent5 = bars[-RECENT_WINDOW:] if len(bars) >= RECENT_WINDOW else bars
     recent20 = bars[-STRUCTURE_WINDOW:] if len(bars) >= STRUCTURE_WINDOW else bars
     if not recent5:
@@ -207,13 +354,26 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     support_price = float(support["price"])
 
     # confirm_price: 需要放量站稳的启动确认价（阻力位 + 缓冲）
-    confirm_price = round(float(resistance["price"]) * (1 + MIN_CONFIRM_SPACE_PCT), 2)
+    # P3: 缓冲受威科夫吸筹信号影响，Spring/看多背离时收窄
+    theory = _theory_multipliers(fusion_result)
+    # P3 安全模式：THEORY_ADJUST_LOG_ONLY=true 时只记录不生效
+    try:
+        from config import THEORY_ADJUST_LOG_ONLY
+    except Exception:
+        THEORY_ADJUST_LOG_ONLY = False
+    if THEORY_ADJUST_LOG_ONLY and any(v != 1.0 for v in theory.values()):
+        print(f"THEORY-ADJUST-LOG: multipliers={theory} (suppressed by THEORY_ADJUST_LOG_ONLY)")
+        theory = {"zone_width": 1.0, "confirm_buffer": 1.0, "space_threshold": 1.0}
+    effective_confirm_space = MIN_CONFIRM_SPACE_PCT * theory["confirm_buffer"]
+    confirm_price = round(float(resistance["price"]) * (1 + effective_confirm_space), 2)
     # resistance: 实际阻力位，用于减仓参考
     resistance_price = float(resistance["price"])
 
-    amplitude = average_amplitude_pct(recent20) or 0.02
-    zone_width_pct = clamp(amplitude * 0.28, MIN_ZONE_WIDTH_PCT, MAX_ZONE_WIDTH_PCT)
-    stop_buffer_pct = clamp(amplitude * 0.45, MIN_STOP_BUFFER_PCT, MAX_STOP_BUFFER_PCT)
+    # 使用 ATR 替代振幅，ATR 能捕捉跳空缺口，对"买入位到不了"的跳空场景更敏感
+    # P3: zone_width 受缠论信号影响，上攻笔/三买时放大，下跌笔时收窄
+    atr_pct = average_atr_pct(recent20) or 0.02
+    zone_width_pct = clamp(atr_pct * 0.25 * theory["zone_width"], MIN_ZONE_WIDTH_PCT, MAX_ZONE_WIDTH_PCT)
+    stop_buffer_pct = clamp(atr_pct * 0.40, MIN_STOP_BUFFER_PCT, MAX_STOP_BUFFER_PCT)
     low_zone_lower = round(support_price, 2)
     low_zone_upper = round(support_price * (1 + zone_width_pct), 2)
     stop = round(support_price * (1 - stop_buffer_pct), 2)
@@ -225,6 +385,9 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     # keep compatibility for callers that expect status from structure payload
     from decision_core import status_for  # local import to avoid tighter module coupling
 
+    # 基于ATR的动态"空间不足"阈值：高波幅票给更多容忍，低波幅票收紧
+    # P3: 受动量信号影响，强势时收窄（更激进），弱势时加宽（更保守）
+    dynamic_space_threshold = max(0.002, atr_pct * 0.35 * theory["space_threshold"])
     status = status_for(
         current=current,
         support=support_price,
@@ -236,6 +399,8 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         ma_values=ma_values,
         pressure_space_pct=pressure_space_pct,
         bars=bars,
+        space_threshold=dynamic_space_threshold,
+        fusion_result=fusion_result,  # S-2 fix: 传入融合层结果
     )
 
     return {
@@ -248,7 +413,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         "resistance_levels": resistance_levels,
         "ma_values": ma_values,
         "below_ma_count": below_ma,
-        "avg_amplitude_pct": round(amplitude, 4),
+        "atr_pct": round(atr_pct, 4),
         "zone_width_pct": round(zone_width_pct, 4),
         "stop_buffer_pct": round(stop_buffer_pct, 4),
         "low_zone_lower": low_zone_lower,
@@ -265,6 +430,9 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         "position_ratio": round(position, 3),
         "pressure_space_pct": round(pressure_space_pct, 4),
         "status": status,
+        "theory_multipliers": theory,  # P3: 记录理论信号对参数的微调系数，便于调试
+        "fib_retrace": _compute_fib_retrace(chan_result),  # P4: 费波纳契回调位
+        "time_window": _check_time_window(bars, chan_result),  # P4: 江恩时间窗口
     }
 
 

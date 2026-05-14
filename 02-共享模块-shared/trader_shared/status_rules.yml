@@ -28,10 +28,6 @@ rules:
     result: 等转强
     when: current >= confirm
 
-  - name: 空间不足
-    result: 空间不足
-    when: pressure_space_pct >= 0 and pressure_space_pct < 0.008
-
   - name: MA上方+高位
     result: 等转强
     when: above_ma5_ma10 and position_ratio >= 0.60
@@ -43,6 +39,10 @@ rules:
   - name: 高确认位
     result: 等转强
     when: position_ratio >= 0.72
+
+  # "空间不足"规则已移除——由 decision_core.py 的 Python fallback 处理
+  # 原因：yml 无法使用 ATR 动态阈值，硬编码 0.008 会导致高波幅票误判
+  # Python fallback 使用 max(0.002, atr_pct * 0.35 * theory["space_threshold"]) 动态计算
 
   - name: 默认防守
     result: 防守观察

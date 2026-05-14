@@ -179,42 +179,124 @@ def calculate_bollinger_bands(
     return result
 
 
+def _find_local_extrema(values: list[float | None], mode: str = "min") -> list[int]:
+    """找到序列中的局部极值点索引。
+
+    Args:
+        values: 指标序列（可能含 None）
+        mode: "min" 找极小值，"max" 找极大值
+    """
+    extrema: list[int] = []
+    for i in range(1, len(values) - 1):
+        v = values[i]
+        if v is None:
+            continue
+        v_prev = values[i - 1]
+        v_next = values[i + 1]
+        if v_prev is None or v_next is None:
+            continue
+        if mode == "min" and v < v_prev and v < v_next:
+            extrema.append(i)
+        elif mode == "max" and v > v_prev and v > v_next:
+            extrema.append(i)
+    return extrema
+
+
 def detect_bullish_divergence(bars: list[dict[str, Any]], rsi_series: list[float | None], lookback: int = 12) -> bool:
-    if len(bars) < lookback or rsi_series and len(rsi_series) < lookback:
+    """看多背离：价格创新低但 RSI 未创新低。
+
+    标准背离检测：
+    1. 找 RSI 的局部极小值点（谷底）
+    2. 取最近的两个谷底
+    3. 判断价格创新低但 RSI 未创新低
+    """
+    if not bars or not rsi_series or len(bars) < lookback or len(rsi_series) < lookback:
         return False
     window_start = len(bars) - lookback
-    price_rsi_pairs: list[tuple[float, float, int]] = []
+    closes: list[float | None] = []
+    rsi_window: list[float | None] = []
     for i in range(window_start, len(bars)):
-        close = _num(bars[i].get("close"))
-        rsi_val = rsi_series[i] if rsi_series else None
-        if close is None or rsi_val is None:
-            continue
-        price_rsi_pairs.append((close, rsi_val, i))
-    if len(price_rsi_pairs) < 2:
+        closes.append(_num(bars[i].get("close")))
+        rsi_window.append(rsi_series[i] if i < len(rsi_series) else None)
+
+    # 找 RSI 局部极小值点
+    troughs = _find_local_extrema(rsi_window, mode="min")
+    if len(troughs) < 2:
+        # 如果没有两个极小值点，检查窗口首尾
+        # 简化：只要 RSI 和价格在窗口两端的趋势相反就算
+        first_valid_rsi = None
+        last_valid_rsi = None
+        first_valid_close = None
+        last_valid_close = None
+        for i in range(len(rsi_window)):
+            if rsi_window[i] is not None and first_valid_rsi is None:
+                first_valid_rsi = rsi_window[i]
+                first_valid_close = closes[i]
+            if rsi_window[len(rsi_window) - 1 - i] is not None and last_valid_rsi is None:
+                last_valid_rsi = rsi_window[len(rsi_window) - 1 - i]
+                last_valid_close = closes[len(rsi_window) - 1 - i]
+        if all(v is not None for v in [first_valid_rsi, last_valid_rsi, first_valid_close, last_valid_close]):
+            # 价格创新低 but RSI 未创新低
+            if last_valid_close < first_valid_close and last_valid_rsi > first_valid_rsi:
+                return True
         return False
-    price_rsi_pairs.sort(key=lambda x: x[1])
-    rsi_min_1 = price_rsi_pairs[0]
-    rsi_min_2 = price_rsi_pairs[1]
-    return rsi_min_1[0] < rsi_min_2[0]
+
+    # 取最近两个谷底
+    t1, t2 = troughs[-2], troughs[-1]
+    price1, price2 = closes[t1], closes[t2]
+    rsi1, rsi2 = rsi_window[t1], rsi_window[t2]
+    if any(v is None for v in [price1, price2, rsi1, rsi2]):
+        return False
+    # 价格创新低 but RSI 未创新低 = 看多背离
+    return price2 < price1 and rsi2 > rsi1
 
 
 def detect_bearish_divergence(bars: list[dict[str, Any]], rsi_series: list[float | None], lookback: int = 12) -> bool:
-    if len(bars) < lookback or rsi_series and len(rsi_series) < lookback:
+    """看空背离：价格创新高但 RSI 未创新高。
+
+    标准背离检测：
+    1. 找 RSI 的局部极大值点（峰顶）
+    2. 取最近的两个峰顶
+    3. 判断价格创新高但 RSI 未创新高
+    """
+    if not bars or not rsi_series or len(bars) < lookback or len(rsi_series) < lookback:
         return False
     window_start = len(bars) - lookback
-    price_rsi_pairs: list[tuple[float, float, int]] = []
+    closes: list[float | None] = []
+    rsi_window: list[float | None] = []
     for i in range(window_start, len(bars)):
-        close = _num(bars[i].get("close"))
-        rsi_val = rsi_series[i] if rsi_series else None
-        if close is None or rsi_val is None:
-            continue
-        price_rsi_pairs.append((close, rsi_val, i))
-    if len(price_rsi_pairs) < 2:
+        closes.append(_num(bars[i].get("close")))
+        rsi_window.append(rsi_series[i] if i < len(rsi_series) else None)
+
+    # 找 RSI 局部极大值点
+    peaks = _find_local_extrema(rsi_window, mode="max")
+    if len(peaks) < 2:
+        # 简化：检查窗口首尾
+        first_valid_rsi = None
+        last_valid_rsi = None
+        first_valid_close = None
+        last_valid_close = None
+        for i in range(len(rsi_window)):
+            if rsi_window[i] is not None and first_valid_rsi is None:
+                first_valid_rsi = rsi_window[i]
+                first_valid_close = closes[i]
+            if rsi_window[len(rsi_window) - 1 - i] is not None and last_valid_rsi is None:
+                last_valid_rsi = rsi_window[len(rsi_window) - 1 - i]
+                last_valid_close = closes[len(rsi_window) - 1 - i]
+        if all(v is not None for v in [first_valid_rsi, last_valid_rsi, first_valid_close, last_valid_close]):
+            # 价格创新高 but RSI 未创新高
+            if last_valid_close > first_valid_close and last_valid_rsi < first_valid_rsi:
+                return True
         return False
-    price_rsi_pairs.sort(key=lambda x: x[1], reverse=True)
-    rsi_max_1 = price_rsi_pairs[0]
-    rsi_max_2 = price_rsi_pairs[1]
-    return rsi_max_1[0] < rsi_max_2[0]
+
+    # 取最近两个峰顶
+    p1, p2 = peaks[-2], peaks[-1]
+    price1, price2 = closes[p1], closes[p2]
+    rsi1, rsi2 = rsi_window[p1], rsi_window[p2]
+    if any(v is None for v in [price1, price2, rsi1, rsi2]):
+        return False
+    # 价格创新高 but RSI 未创新高 = 看空背离
+    return price2 > price1 and rsi2 < rsi1
 
 
 def calculate_adx(
