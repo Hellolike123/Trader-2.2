@@ -388,7 +388,7 @@ def normalize_bar(raw: dict[str, Any]) -> dict[str, Any] | None:
         return None
     return {
         "time": raw.get("day") or raw.get("date") or raw.get("time"),
-        "date": raw.get("day") or raw.get("date") or raw.get("date"),
+        "date": raw.get("day") or raw.get("date") or raw.get("time"),
         "open": to_float(raw.get("open")),
         "high": to_float(raw.get("high")),
         "low": to_float(raw.get("low")),
