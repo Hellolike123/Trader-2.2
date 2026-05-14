@@ -57,7 +57,12 @@ def build_release_dir_name() -> str:
 
 
 def cleanup_old_releases(releases_dir: Path, keep: int = MAX_RELEASES) -> int:
-    """Remove oldest release directories, keeping only the most recent `keep` ones.
+    """Remove old release directories, keeping the last one per day.
+
+    1. Per-day dedup: for each day, only the latest release is kept;
+       earlier same-day releases are always removed.
+    2. From the deduped list, keep the most recent ``keep`` entries;
+       older days are pruned.
 
     Returns the number of directories removed.
     """
@@ -67,9 +72,20 @@ def cleanup_old_releases(releases_dir: Path, keep: int = MAX_RELEASES) -> int:
         [d for d in releases_dir.iterdir() if d.is_dir() and d.name != ".gitkeep"],
         key=lambda d: d.name,
     )
-    if len(dirs) <= keep:
-        return 0
-    to_remove = dirs[:-keep]
+    # Group by day prefix (MMDD-) — keep only the last entry per day
+    by_day: dict[str, list[Path]] = {}
+    for d in dirs:
+        day = d.name.split("-")[0]  # e.g. "0514"
+        by_day.setdefault(day, []).append(d)
+
+    # Step 1: last release per day (already in chronological order)
+    last_per_day = [day_dirs[-1] for day_dirs in by_day.values()]
+
+    # Step 2: from deduped list, keep only the most recent `keep`
+    to_keep = set(last_per_day[-keep:]) if keep < len(last_per_day) else set(last_per_day)
+
+    # Step 3: remove everything not in to_keep
+    to_remove = [d for d in dirs if d not in to_keep]
     for d in to_remove:
         shutil.rmtree(d, ignore_errors=True)
     return len(to_remove)
@@ -123,7 +139,8 @@ def copy_shared(bundle: Path, skill_slug: str) -> None:
 
     candidates_dir = SHARE_DIR / "02-候选逻辑-candidate"
     # Theory modules needed by all skills
-    for f in ("chan_core.py", "wyckoff_core.py", "momentum_core.py"):
+    for f in ("chan_core.py", "wyckoff_core.py", "momentum_core.py",
+              "fusion_core.py", "fusion_regime.py"):
         src = candidates_dir / f
         if src.exists():
             shutil.copy2(src, scripts_dir / f)

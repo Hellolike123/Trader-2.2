@@ -42,6 +42,8 @@ def _verify_skill_zip(zf: zipfile.ZipFile, slug: str, expected_script: str) -> N
     assert any("chan_core.py" in n for n in script_entries), f"{slug} missing chan_core.py"
     assert any("wyckoff_core.py" in n for n in script_entries), f"{slug} missing wyckoff_core.py"
     assert any("momentum_core.py" in n for n in script_entries), f"{slug} missing momentum_core.py"
+    assert any("fusion_core.py" in n for n in script_entries), f"{slug} missing fusion_core.py"
+    assert any("fusion_regime.py" in n for n in script_entries), f"{slug} missing fusion_regime.py"
 
 
 def _verify_combined_zip(zf: zipfile.ZipFile, slug: str, expected_script: str) -> None:
@@ -59,6 +61,8 @@ def _verify_combined_zip(zf: zipfile.ZipFile, slug: str, expected_script: str) -
     assert any("chan_core.py" in n for n in script_entries), f"{slug} missing chan_core.py"
     assert any("wyckoff_core.py" in n for n in script_entries), f"{slug} missing wyckoff_core.py"
     assert any("momentum_core.py" in n for n in script_entries), f"{slug} missing momentum_core.py"
+    assert any("fusion_core.py" in n for n in script_entries), f"{slug} missing fusion_core.py in combined"
+    assert any("fusion_regime.py" in n for n in script_entries), f"{slug} missing fusion_regime.py in combined"
 
 
 def _clean_stale_releases() -> None:
@@ -185,18 +189,57 @@ def test_pack_all_skips_irrelevant_skills() -> None:
 
 
 def test_pack_all_cleanup_old_releases() -> None:
-    """cleanup_old_releases should remove oldest dirs, keeping only MAX_RELEASES."""
+    """cleanup_old_releases should keep last per day + at least `keep` overall."""
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         releases = Path(tmp)
-        # Create 8 fake release dirs
-        for i in range(8):
-            (releases / f"0513-16010{i}").mkdir()
+        # Day 0512: 1 release
+        (releases / "0512-080000").mkdir()
+        # Day 0513: 3 releases (only last should be kept)
+        (releases / "0513-080000").mkdir()
+        (releases / "0513-120000").mkdir()
+        (releases / "0513-160000").mkdir()
+        # Day 0514: 3 releases (only last should be kept)
+        (releases / "0514-080000").mkdir()
+        (releases / "0514-120000").mkdir()
+        (releases / "0514-160000").mkdir()
+        # Total 7 dirs across 3 days; keep=5
+        # Step 1: last_per_day = [0512-080000, 0513-160000, 0514-160000] (3 entries)
+        # Step 2: keep=5 > 3, so to_keep = all 3 last_per_day
+        # Step 3: removed = 7 - 3 = 4 (all same-day dups)
         removed = pack_all.cleanup_old_releases(releases, keep=5)
-        assert removed == 3, f"Expected 3 removed, got {removed}"
+        assert removed == 4, f"Expected 4 removed, got {removed}"
         remaining = sorted(d.name for d in releases.iterdir() if d.is_dir())
-        assert len(remaining) == 5
-        assert remaining[0] == "0513-160103"
+        assert remaining == ["0512-080000", "0513-160000", "0514-160000"]
+
+        # Test: per-day dedup still applies even when total < keep
+        with tempfile.TemporaryDirectory() as tmp:
+            releases = Path(tmp)
+            (releases / "0512-080000").mkdir()
+            (releases / "0512-120000").mkdir()
+            (releases / "0513-080000").mkdir()
+            # last_per_day = [0512-120000, 0513-080000], keep=5 > 2 → keep all
+            # Removed: 0512-080000 (same-day dup)
+            removed = pack_all.cleanup_old_releases(releases, keep=5)
+            assert removed == 1, f"Expected 1 removed, got {removed}"
+            remaining = sorted(d.name for d in releases.iterdir() if d.is_dir())
+            assert remaining == ["0512-120000", "0513-080000"]
+
+        # Test: per-day dedup removes same-day dups when total > keep
+        with tempfile.TemporaryDirectory() as tmp:
+            releases = Path(tmp)
+            (releases / "0512-080000").mkdir()
+            (releases / "0512-120000").mkdir()
+            (releases / "0513-080000").mkdir()
+            (releases / "0513-120000").mkdir()
+            (releases / "0514-080000").mkdir()
+            # keep=2, last_per_day = {0512-120000, 0513-120000, 0514-080000}
+            # protected_by_keep = {0513-120000, 0514-080000}
+            # Removed: 0512-080000 (not last_per_day, not in keep), 0512-120000 (last_per_day but not in keep), 0513-080000 (not last_per_day, not in keep)
+            removed = pack_all.cleanup_old_releases(releases, keep=2)
+            assert removed == 3, f"Expected 3 removed, got {removed}"
+            remaining = sorted(d.name for d in releases.iterdir() if d.is_dir())
+            assert remaining == ["0513-120000", "0514-080000"]
 
 
 def test_pack_all_ensure_gitignore() -> None:
