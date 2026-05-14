@@ -53,7 +53,9 @@ def read_version_stamp(skill_dir: Path, skill_slug: str) -> str:
 
 
 def build_release_dir_name() -> str:
-    return datetime.now(timezone.utc).strftime("%m%d-%H%M%S")
+    """本地时间命名：0514-1105"""
+    now = datetime.now()
+    return now.strftime("%m%d-%H%M")
 
 
 def cleanup_old_releases(releases_dir: Path, keep: int = MAX_RELEASES) -> int:
@@ -72,7 +74,7 @@ def cleanup_old_releases(releases_dir: Path, keep: int = MAX_RELEASES) -> int:
         [d for d in releases_dir.iterdir() if d.is_dir() and d.name != ".gitkeep"],
         key=lambda d: d.name,
     )
-    # Group by day prefix (MMDD-) — keep only the last entry per day
+    # Group by day prefix (MMDD) — keep only the last entry per day
     by_day: dict[str, list[Path]] = {}
     for d in dirs:
         day = d.name.split("-")[0]  # e.g. "0514"
