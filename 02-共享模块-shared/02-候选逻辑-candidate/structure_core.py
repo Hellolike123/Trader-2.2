@@ -99,11 +99,10 @@ def max_price(bars: list[BarData], field: str) -> float | None:
 
 
 def moving_average(bars: list[BarData], period: int) -> float | None:
-    closes = [to_float(item.get("close")) for item in bars]
-    valid = [value for value in closes if value is not None]
-    if len(valid) < period:
+    closes = [to_float(item.get("close")) for item in bars[-period:]]
+    if len(closes) < period or None in closes:
         return None
-    return sum(valid[-period:]) / period
+    return sum(closes) / period
 
 
 def moving_averages(bars: list[BarData]) -> dict[str, float | None]:
@@ -127,9 +126,11 @@ def average_atr_pct(bars: list[BarData], period: int | None = None) -> float | N
 
     ATR 使用 True Range = max(high-low, |high-prev_close|, |low-prev_close|)，
     比简单振幅 (high-low) 更能捕捉跳空缺口的影响。
+    先算 ATR 绝对值，再除以最新 close，避免逐根归一化后再平均导致的偏差。
     """
     period = period or STRUCTURE_WINDOW
-    values: list[float] = []
+    tr_values: list[float] = []
+    last_close: float | None = None
     prev_close: float | None = None
     for item in bars[-period:]:
         high = to_float(item.get("high"))
@@ -141,9 +142,13 @@ def average_atr_pct(bars: list[BarData], period: int | None = None) -> float | N
             tr = high - low
         else:
             tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
-        values.append(tr / close)
+        tr_values.append(tr)
         prev_close = close
-    return sum(values) / len(values) if values else None
+        last_close = close
+    if not tr_values or last_close is None or last_close <= 0:
+        return None
+    atr = sum(tr_values) / len(tr_values)
+    return atr / last_close
 
 
 def add_level(levels: list[dict[str, Any]], name: str, value: float | None, weight: float) -> None:

@@ -95,11 +95,10 @@ def latest_or_quote_close(quote: dict[str, Any], daily: list[dict[str, Any]]) ->
 
 
 def moving_average(daily: list[dict[str, Any]], period: int) -> float | None:
-    closes = [to_float(item.get("close")) for item in daily]
-    values = [value for value in closes if value is not None]
-    if len(values) < period:
+    closes = [to_float(item.get("close")) for item in daily[-period:]]
+    if len(closes) < period or None in closes:
         return None
-    return sum(values[-period:]) / period
+    return sum(closes) / period
 
 
 def dense_price_zone(daily: list[dict[str, Any]]) -> tuple[float | None, float | None]:

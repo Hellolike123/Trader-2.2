@@ -145,7 +145,19 @@ def find_fractions(bars: list[dict]) -> list[dict]:
         if any(v is None for v in [h_left, l_left, h_mid, l_mid, h_right, l_right, c_mid]):
             continue
 
-        if h_mid > h_left and h_mid > h_right:
+        is_top = h_mid > h_left and h_mid > h_right
+        is_bottom = l_mid < l_left and l_mid < l_right
+
+        if is_top and is_bottom:
+            # 十字星同时满足顶底条件，按极值倾向决定
+            top_margin = min(h_mid - h_left, h_mid - h_right)
+            bottom_margin = min(l_left - l_mid, l_right - l_mid)
+            if top_margin >= bottom_margin:
+                is_bottom = False
+            else:
+                is_top = False
+
+        if is_top:
             fractions.append({
                 "type": "top",
                 "high": h_mid,
@@ -153,8 +165,7 @@ def find_fractions(bars: list[dict]) -> list[dict]:
                 "index": i,
                 "close": c_mid,
             })
-
-        if l_mid < l_left and l_mid < l_right:
+        elif is_bottom:
             fractions.append({
                 "type": "bottom",
                 "high": h_mid,
@@ -178,14 +189,24 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5) -> list[d
         start = fractions[i]
         j = i + 1
 
+        # 连续同类分型取极值：顶取最高的，底取最低的
+        best_same = start
         while j < num and fractions[j]["type"] == start["type"]:
+            f = fractions[j]
+            if start["type"] == "top" and f["high"] > best_same["high"]:
+                best_same = f
+            elif start["type"] == "bottom" and f["low"] < best_same["low"]:
+                best_same = f
             j += 1
+
+        start = best_same
 
         if j >= num:
             break
 
         end = fractions[j]
-
+        # end 也可能是连续同类分型的第一个，需要在下一轮迭代中取极值
+        # 但这里先检查距离
         if end["index"] - start["index"] >= min_bars_per_stroke - 1:
             direction = "up" if start["type"] == "bottom" else "down"
             strokes.append({
