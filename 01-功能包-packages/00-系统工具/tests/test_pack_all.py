@@ -62,12 +62,11 @@ def _verify_combined_zip(zf: zipfile.ZipFile, slug: str, expected_script: str) -
 
 
 def _clean_stale_releases() -> None:
-    for entry in DIST_DIR.iterdir():
-        if entry.is_dir():
+    """Clean all release dirs under releases/ (not the old flat layout)."""
+    for entry in RELEASES_DIR.iterdir():
+        if entry.is_dir() and entry.name != ".gitkeep":
             if RELEASE_DIR_PATTERN.match(entry.name):
                 shutil.rmtree(str(entry))
-        elif entry.is_file() and entry.suffix == ".zip":
-            entry.unlink()
 
 
 def _get_release_dirs() -> list[Path]:
@@ -185,6 +184,34 @@ def test_pack_all_skips_irrelevant_skills() -> None:
                 assert not has_compare, f"trader-compare should not be in {slug}"
 
 
+def test_pack_all_cleanup_old_releases() -> None:
+    """cleanup_old_releases should remove oldest dirs, keeping only MAX_RELEASES."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        releases = Path(tmp)
+        # Create 8 fake release dirs
+        for i in range(8):
+            (releases / f"0513-16010{i}").mkdir()
+        removed = pack_all.cleanup_old_releases(releases, keep=5)
+        assert removed == 3, f"Expected 3 removed, got {removed}"
+        remaining = sorted(d.name for d in releases.iterdir() if d.is_dir())
+        assert len(remaining) == 5
+        assert remaining[0] == "0513-160103"
+
+
+def test_pack_all_ensure_gitignore() -> None:
+    """ensure_releases_gitignore should create .gitignore with correct content."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        releases = Path(tmp) / "releases"
+        pack_all.ensure_releases_gitignore(releases)
+        gitignore = releases / ".gitignore"
+        assert gitignore.exists()
+        content = gitignore.read_text(encoding="utf-8")
+        assert "*" in content
+        assert "!.gitignore" in content
+
+
 if __name__ == "__main__":
     test_pack_all_skips_irrelevant_skills()
     test_pack_all_combined_structure()
@@ -193,4 +220,6 @@ if __name__ == "__main__":
     test_pack_all_creates_combined_zip()
     test_pack_all_contains_all_skills()
     test_pack_all_no_package_skill()
+    test_pack_all_cleanup_old_releases()
+    test_pack_all_ensure_gitignore()
     print("All pack_all tests passed!")

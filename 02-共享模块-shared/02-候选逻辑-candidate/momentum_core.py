@@ -131,7 +131,7 @@ def calc_bollinger(closes: list[float], period: int = 20, num_std: float = 2.0) 
     std = max(math.sqrt(variance), 1e-10)
     upper = middle + num_std * std
     lower = middle - num_std * std
-    pct_b = (closes[-1] - lower) / (upper - lower)
+    pct_b = (closes[-1] - lower) / max(upper - lower, 1e-10)
     bandwidth = (upper - lower) / middle if middle > 0 else 0
     return {"upper": round(upper, 4), "middle": round(middle, 4), "lower": round(lower, 4), "pct_b": round(pct_b, 4), "squeeze": bandwidth < 0.03}
 

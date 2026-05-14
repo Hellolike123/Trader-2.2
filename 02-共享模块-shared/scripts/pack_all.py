@@ -36,6 +36,7 @@ SKILLS = [
 
 IGNORE_NAMES = {"__pycache__", ".pytest_cache", ".DS_Store"}
 SHARE_DIR = Path("02-共享模块-shared")
+MAX_RELEASES = 5  # 最多保留最近 N 个发布目录
 
 
 def read_version_stamp(skill_dir: Path, skill_slug: str) -> str:
@@ -53,6 +54,33 @@ def read_version_stamp(skill_dir: Path, skill_slug: str) -> str:
 
 def build_release_dir_name() -> str:
     return datetime.now(timezone.utc).strftime("%m%d-%H%M%S")
+
+
+def cleanup_old_releases(releases_dir: Path, keep: int = MAX_RELEASES) -> int:
+    """Remove oldest release directories, keeping only the most recent `keep` ones.
+
+    Returns the number of directories removed.
+    """
+    if not releases_dir.exists() or keep <= 0:
+        return 0
+    dirs = sorted(
+        [d for d in releases_dir.iterdir() if d.is_dir() and d.name != ".gitkeep"],
+        key=lambda d: d.name,
+    )
+    if len(dirs) <= keep:
+        return 0
+    to_remove = dirs[:-keep]
+    for d in to_remove:
+        shutil.rmtree(d, ignore_errors=True)
+    return len(to_remove)
+
+
+def ensure_releases_gitignore(releases_dir: Path) -> None:
+    """Create .gitignore in releases dir so release zips are not tracked by git."""
+    releases_dir.mkdir(parents=True, exist_ok=True)
+    gitignore = releases_dir / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text("# Release archives — auto-generated, do not track\n*\n!.gitignore\n", encoding="utf-8")
 
 
 def should_skip(path: Path) -> bool:
@@ -196,6 +224,10 @@ def main(args: list[str] | None = None) -> int:
     release_dir = output_dir / "releases" / release_dir_name
     output_dir.mkdir(parents=True, exist_ok=True)
     release_dir.mkdir(parents=True, exist_ok=True)
+    ensure_releases_gitignore(output_dir / "releases")
+    removed = cleanup_old_releases(output_dir / "releases")
+    if removed:
+        print(f"Cleaned up {removed} old release(s), keeping {MAX_RELEASES} latest")
     print(f"Release dir: {release_dir_name}/")
 
     stages: list[tuple[str, str, Path]] = []

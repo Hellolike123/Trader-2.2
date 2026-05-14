@@ -43,7 +43,8 @@ def main() -> int:
 
     try:
         if args.check:
-            n = check_recent(args.days)
+            result = check_recent(args.days)
+            n = result.get("updated", 0) if isinstance(result, dict) else result
             if n > 0:
                 print(f"更新了 {n} 条信号结果。")
         if args.stock:

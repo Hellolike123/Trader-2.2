@@ -42,7 +42,7 @@ except ImportError:
         "complete": "full",
         "partial": "partial",
         "degraded": "degraded",
-        "failed": "insufficient",
+        "failed": "degraded",
     }
 
 _run_analysis_shared_failed = False

@@ -47,6 +47,29 @@ def _today() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
+def _safe_price(v: Any) -> float:
+    """安全提取价格 — 处理 int/float/str/dict 类型。
+    dict 类型如 {"price": 64.41} 或 {"current": 12.5} 会提取首个数值字段。
+    """
+    if v is None:
+        return 0.0
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        try:
+            return float(v)
+        except (ValueError, TypeError):
+            return 0.0
+    if isinstance(v, dict):
+        for key in ("price", "current", "value", "amount"):
+            if key in v:
+                try:
+                    return float(v[key])
+                except (ValueError, TypeError):
+                    continue
+    return 0.0
+
+
 def stable_id(skill: str, target: str, date: str, signal_type: str, price: float | None = None) -> str:
     """[已弃用] 旧信号 ID 生成函数。请使用 make_signal_id() 替代。将在 v0.7 中移除。"""
     warnings.warn("stable_id() is deprecated, use make_signal_id() instead", stacklevel=2)
@@ -335,12 +358,12 @@ def _price_from_trigger(sig: dict) -> str | None:
     tp = sig.get("trigger")
     if isinstance(tp, dict):
         p = tp.get("price")
-        if p is not None and float(p) > 0:
-            return f"{float(p):.2f}"
+        if p is not None and _safe_price(p) > 0:
+            return f"{_safe_price(p):.2f}"
     # fallback: current 字段
     curr = sig.get("current")
-    if curr is not None and float(curr) > 0:
-        return f"{float(curr):.2f}"
+    if curr is not None and _safe_price(curr) > 0:
+        return f"{_safe_price(curr):.2f}"
     return None
 
 
@@ -567,7 +590,7 @@ def check_recent(days: int = 5) -> dict[str, int]:
                 raw_type = _normalize_signal_type(str(r.get("signal_type", "")))
                 key_symbol = _normalize_symbol(str(r.get("symbol", "")))
                 sp = r.get("signal_price")
-                price_str = f"{float(sp):.2f}" if sp is not None and float(sp) > 0 else ""
+                price_str = f"{_safe_price(sp):.2f}" if sp is not None and _safe_price(sp) > 0 else ""
                 # 1. Primary: signal_id
                 sid = r.get("signal_id")
                 if sid:
@@ -1103,7 +1126,7 @@ def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
                 raw_type = _normalize_signal_type(str(r.get("signal_type", "")))
                 key_symbol = _normalize_symbol(str(r.get("symbol", "")))
                 sp = r.get("signal_price")
-                price_str = f"{float(sp):.2f}" if sp is not None and float(sp) > 0 else ""
+                price_str = f"{_safe_price(sp):.2f}" if sp is not None and _safe_price(sp) > 0 else ""
                 # 1. Primary: signal_id
                 sid = r.get("signal_id")
                 if sid:
