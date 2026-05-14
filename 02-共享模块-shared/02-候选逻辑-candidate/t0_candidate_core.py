@@ -104,7 +104,8 @@ def build_candidate_levels(current: float, bars: list[dict[str, Any]], change_pc
         resistance = float(structure_result.get("resistance") or 0)
         sell_observe = float(structure_result.get("sell_observe_price") or confirm)
         take = float(structure_result.get("take") or max(confirm, current) * 1.06)
-        position = zone_position(current, support, confirm)
+        # 直接复用 structure_core 算好的 position_ratio，避免 zone_position() 两套实现不一致
+        position = float(structure_result.get("position_ratio") or zone_position(current, support, confirm))
         status = status_for(current, support, low_zone_upper, confirm, stop, position, change_pct, fusion_result=fusion_result)
         low_zone_display = structure_result.get("low_zone", f"{low_zone_lower:.2f}-{low_zone_upper:.2f}元")
     else:
@@ -113,14 +114,32 @@ def build_candidate_levels(current: float, bars: list[dict[str, Any]], change_pc
         resistance = max_price(recent, "high")
         if support is None or resistance is None:
             raise RuntimeError("daily support/resistance unavailable")
-        confirm = max(resistance, round(current * (1 + CONFIRM_BUFFER), 2))
-        stop = round(support * STOP_BUFFER, 2)
-        low_zone_lower = round(support, 2)
-        low_zone_upper = round(support * LOW_ZONE_UPPER_OFFSET, 2)
+        # Bug D fix: fallback 路径也使用 ATR 动态参数，与 structure_core 一致
+        # 避免旧硬编码参数 (CONFIRM_BUFFER=0.02, STOP_BUFFER=0.98, LOW_ZONE_UPPER_OFFSET=1.01)
+        # 导致价位与 trader 差距过大
+        try:
+            from structure_core import average_atr_pct
+            atr_pct = average_atr_pct(bars) or 0.02
+        except ImportError:
+            atr_pct = 0.02
+        try:
+            from config import MIN_ZONE_WIDTH_PCT as _MIN_ZONE, MAX_ZONE_WIDTH_PCT as _MAX_ZONE
+            from config import MIN_STOP_BUFFER_PCT as _MIN_STOP, MAX_STOP_BUFFER_PCT as _MAX_STOP
+            from config import MIN_CONFIRM_SPACE_PCT as _MIN_CONFIRM
+        except ImportError:
+            _MIN_ZONE = 0.005; _MAX_ZONE = 0.020
+            _MIN_STOP = 0.008; _MAX_STOP = 0.025
+            _MIN_CONFIRM = 0.005
+        zone_width_pct = max(_MIN_ZONE, min(atr_pct * 0.25, _MAX_ZONE))
+        stop_buffer_pct = max(_MIN_STOP, min(atr_pct * 0.40, _MAX_STOP))
+        confirm = round(float(resistance) * (1 + _MIN_CONFIRM), 2)
+        stop = round(float(support) * (1 - stop_buffer_pct), 2)
+        low_zone_lower = round(float(support), 2)
+        low_zone_upper = round(float(support) * (1 + zone_width_pct), 2)
         sell_observe = round(confirm, 2)
         take = round(max(confirm, current) * TAKE_PROFIT_BUFFER, 2)
-        position = zone_position(current, support, confirm)
-        status = status_for(current, support, low_zone_upper, confirm, stop, position, change_pct, fusion_result=fusion_result)
+        position = zone_position(current, float(support), confirm)
+        status = status_for(current, float(support), low_zone_upper, confirm, stop, position, change_pct, fusion_result=fusion_result)
         low_zone_display = f"{low_zone_lower:.2f}-{low_zone_upper:.2f}元"
 
     return {

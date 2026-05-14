@@ -200,14 +200,25 @@ def status_for(
         result = engine.evaluate(ctx)
         if result is not None:
             status = str(result)
-            if not trend_ok and status in {"低吸观察", "冲高减仓"}:
+            # Bug B fix: 统一规则引擎与 Python fallback 的趋势下行处理
+            # 规则引擎: 冲高+趋势下行 → "冲高减仓" → 降级为"防守观察，趋势下行谨慎"
+            # Python fallback: 冲高+趋势下行 → "等转强"
+            # 统一为"等转强"：趋势没确认前不应该直接防守，而是等确认
+            if not trend_ok and status == "冲高减仓":
+                status = "等转强"
+            if not trend_ok and status == "低吸观察":
                 status = "防守观察，趋势下行谨慎"
-            # ATR 动态"空间不足"修正：规则引擎的"默认防守"规则是兜底，
-            # 会在所有特定规则未匹配时返回"防守观察"，导致 Python fallback
-            # 的 ATR 动态阈值"空间不足"判断永远不执行。
-            # 此处对规则引擎返回的"防守观察"做二次检查：
-            # 如果压力空间确实不足（低于 ATR 动态阈值），覆盖为"空间不足"。
-            if status == "防守观察" and 0 <= pressure_space_pct < space_threshold:
+            # Bug C fix: ATR 二次检查只应覆盖"默认防守"（兜底规则），不应覆盖
+            # "多均线下方"这种有明确条件的独立判断。
+            # 只有当所有特定条件都不满足时（即默认防守），才检查 ATR 空间不足。
+            # 判断方法：如果"多均线下方"条件成立，说明规则引擎是因为它返回的"防守观察"，
+            # 不应被 ATR 覆盖。
+            is_default_defense = (
+                status == "防守观察"
+                and below_ma_count < 3  # 不是"多均线下方"规则
+                and not (not trend_ok and status == "防守观察")  # 不是趋势降级
+            )
+            if is_default_defense and 0 <= pressure_space_pct < space_threshold:
                 status = "空间不足"
             # S-2 fix: 融合层覆盖规则引擎结果
             if fusion_override_used and fusion_status is not None:
