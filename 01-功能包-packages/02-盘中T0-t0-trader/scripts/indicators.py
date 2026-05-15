@@ -305,53 +305,77 @@ def calculate_adx(
     closes: list[float],
     period: int = 14,
 ) -> dict[str, list[float | None]]:
+    """Calculate ADX with Wilder smoothing.
+
+    Returns dict with keys: adx, plus_di, minus_di — all same length as closes.
+
+    Indexing:
+      0..period-1:  all None (no initial DM)
+      period..2*period-1:  plus_di / minus_di have values, adx is None
+      2*period..:  all three have values
+    """
     n = len(closes)
-    if n < period * 2:
+    # Need at least 2*period bars before first ADX output
+    if n <= 2 * period:
         return {"adx": [None] * n, "plus_di": [None] * n, "minus_di": [None] * n}
-    tr_list: list[float] = [0.0]
-    plus_dm_list: list[float] = [0.0]
-    minus_dm_list: list[float] = [0.0]
+
+    # ── Step 1: Compute TR, DM+ (up), DM- (down) per bar ──
+    tr = [0.0] * n
+    dm_plus = [0.0] * n
+    dm_minus = [0.0] * n
     for i in range(1, n):
-        h, l, pc = highs[i], lows[i], closes[i - 1]
-        tr = max(h - l, abs(h - pc), abs(l - pc))
-        tr_list.append(tr)
-        up_move = max(h - highs[i - 1], 0)
-        down_move = max(lows[i - 1] - l, 0)
-        if up_move > down_move:
-            plus_dm_list.append(up_move)
-            minus_dm_list.append(0.0)
-        elif down_move > up_move:
-            plus_dm_list.append(0.0)
-            minus_dm_list.append(down_move)
+        tr[i] = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i] - closes[i - 1]),
+        )
+        h_diff = highs[i] - highs[i - 1]
+        l_diff = lows[i - 1] - lows[i]
+        if h_diff > l_diff and h_diff > 0:
+            dm_plus[i] = h_diff
+        elif l_diff > h_diff and l_diff > 0:
+            dm_minus[i] = l_diff
+
+    # ── Step 2: Initial smoothed averages (bars 1..period) ──
+    smooth_tr = sum(tr[1 : period + 1]) / period
+    smooth_up = sum(dm_plus[1 : period + 1]) / period
+    smooth_down = sum(dm_minus[1 : period + 1]) / period
+
+    # ── Step 3: First DI at bar `period` ──
+    di_plus: list[float | None] = [None] * n
+    di_minus: list[float | None] = [None] * n
+    di_plus[period] = (smooth_up / smooth_tr * 100) if smooth_tr > 0 else 0.0
+    di_minus[period] = (smooth_down / smooth_tr * 100) if smooth_tr > 0 else 0.0
+
+    # ── Step 4: Iterate — smooth TR/DM, compute DI+DX ──
+    # DX values collected one per bar; first at bar `period`, then bars+1, ...
+    # We need `period` DX values before first ADX can be computed.
+    # Standard Wilder: first ADX output at bar 2*period (after period DX warmup).
+    dx_buffer: list[float] = []
+    adx: list[float | None] = [None] * n
+    for i in range(period + 1, n):
+        smooth_tr = smooth_tr - (smooth_tr / period) + tr[i]
+        smooth_up = smooth_up - (smooth_up / period) + dm_plus[i]
+        smooth_down = smooth_down - (smooth_down / period) + dm_minus[i]
+
+        p = (smooth_up / smooth_tr * 100) if smooth_tr > 0 else 0.0
+        m = (smooth_down / smooth_tr * 100) if smooth_tr > 0 else 0.0
+        di_plus[i] = p
+        di_minus[i] = m
+
+        denom = p + m
+        dx_val = abs(p - m) / denom * 100 if denom > 0 else 0.0
+
+        # ── Step 5: ADX from DX values ──
+        # Keep last `period` DX values; first ADX when buffer is full
+        if len(dx_buffer) >= period:
+            adx[i] = (sum(dx_buffer) / period * (period - 1) + dx_val) / period
         else:
-            plus_dm_list.append(0.0)
-            minus_dm_list.append(0.0)
-    tr_smooth = sum(tr_list[:period]) / period
-    plus_smooth = sum(plus_dm_list[:period]) / period
-    minus_smooth = sum(minus_dm_list[:period]) / period
-    di_plus: list[float | None] = [None] * period
-    di_minus: list[float | None] = [None] * period
-    dx_list: list[float] = []
-    for i in range(period, n):
-        tr_smooth = (tr_smooth * (period - 1) + tr_list[i]) / period
-        plus_smooth = (plus_smooth * (period - 1) + plus_dm_list[i]) / period
-        minus_smooth = (minus_smooth * (period - 1) + minus_dm_list[i]) / period
-        pdi = (plus_smooth / tr_smooth * 100) if tr_smooth > 0 else 0
-        mdi = (minus_smooth / tr_smooth * 100) if tr_smooth > 0 else 0
-        di_plus.append(pdi)
-        di_minus.append(mdi)
-        denom = pdi + mdi
-        dx_list.append(abs(pdi - mdi) / denom * 100 if denom > 0 else 0)
-    adx_values: list[float | None] = [None] * (period * 2)
-    if len(dx_list) >= period:
-        adx_smooth = sum(dx_list[:period]) / period
-        for idx, dx in enumerate(dx_list[period:], start=period):
-            adx_smooth = (adx_smooth * (period - 1) + dx) / period
-            adx_values.append(adx_smooth)
-        pad = period * 2 - len(adx_values)
-        adx_values = [None] * max(pad, 0) + adx_values[max(pad, 0):]
-        while len(adx_values) < n:
-            adx_values.append(None)
-    adx_values = adx_values[:n]
-    return {"adx": adx_values, "plus_di": di_plus, "minus_di": di_minus}
+            dx_buffer.append(dx_val)
+
+        # Trim buffer to keep only last `period` values
+        if len(dx_buffer) > period:
+            dx_buffer.pop(0)
+
+    return {"adx": adx, "plus_di": di_plus, "minus_di": di_minus}
 
