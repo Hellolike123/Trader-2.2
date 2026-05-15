@@ -483,8 +483,8 @@ def render_markdown(r: dict[str, Any]) -> str:
         "📍 决策",
         "",
         f"状态：{status_text}",
-        f"  · 空仓 → 在 {low_zone} 止跌确认才试，最多 {position_cap}% 仓位",
-        f"  · 有底仓 → 反弹 {confirm:.2f} 冲不动就减 10-20%",
+        f"  · 空仓 → 在 {low_zone} 试探买 {position_cap}%, 止损 {stop:.2f}",
+        f"  · 有底仓 → 反弹 {confirm:.2f} 冲不动就减 10-20%, 跌破 {stop:.2f} 止损",
         f"  · 加仓 → 放量站稳 {confirm:.2f} 且回踩不破，才评估",
     ])
 

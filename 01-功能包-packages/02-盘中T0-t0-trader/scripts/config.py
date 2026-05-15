@@ -31,3 +31,15 @@ ATR_STOP_MIN_PCT: float = 0.005
 ATR_STOP_MAX_PCT: float = 0.025
 ADX_STRONG_THRESHOLD: float = 25.0
 ADX_WEAK_THRESHOLD: float = 20.0
+
+# ── Left-side (aggressive entry) parameters ──
+LEFT_TRIGGER_CORE: int = 1                # 1 个核心条件即可触发
+LEFT_TRIGGER_AUX: int = 1                 # 1 个辅助条件即可触发
+LEFT_NO_SUPPORT_BLOCK: bool = True        # 跌破主支撑不阻断（放量跌破仍阻断）
+LEFT_FUSE_THRESHOLD: int = 2              # 熔断：当日 N 只标的同时止损 → 停止买入
+
+# ── Left-side (aggressive entry) parameters ──
+LEFT_TRIGGER_CORE: int = 1                # 1 个核心条件即可触发
+LEFT_TRIGGER_AUX: int = 1                 # 1 个辅助条件即可触发
+LEFT_NO_SUPPORT_BLOCK: bool = True        # 跌破主支撑不阻断（放量跌破仍阻断）
+LEFT_FUSE_THRESHOLD: int = 2              # 熔断：当日 N 只标的同时止损 → 停止买入

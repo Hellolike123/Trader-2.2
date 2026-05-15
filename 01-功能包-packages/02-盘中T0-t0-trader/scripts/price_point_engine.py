@@ -34,6 +34,9 @@ from config import (
     ATR_STOP_FACTOR,
     ATR_STOP_MAX_PCT,
     ATR_STOP_MIN_PCT,
+    LEFT_TRIGGER_CORE,
+    LEFT_TRIGGER_AUX,
+    LEFT_NO_SUPPORT_BLOCK,
 )
 from ict_execution import build_ict_signal
 from indicators import (
@@ -52,7 +55,7 @@ from indicators import (
 )
 
 
-STATUSES = {"已触发", "观察中", "未进入候选区", "被阻断", "数据不足", "触发过期"}
+STATUSES = {"已触发", "观察中", "未进入候选区", "被阻断", "数据不足", "触发过期", "买 10%", "买 23%", "熔断中"}
 MIN_OBSERVE_SPREAD_ABS = 0.05
 MIN_OBSERVE_SPREAD_PCT = 0.005
 
@@ -464,12 +467,16 @@ def detect_buy_trigger(report_data: dict[str, Any], zones: dict[str, Any], state
         return trigger_result("趋势下行暂不低吸", None, [], ["30日均线下破长期均线"])
     last = bars[-1]
     blocked = []
-    if is_new_low_recent(bars):
-        blocked.append("最近5m持续创新低")
-    if current < zone["main_support"] and current < (num(last.get("close")) or current):
-        blocked.append("跌破主支撑后未收回")
+    # 放量跌破：永远阻断
     if (state.get("volume_ratio") or 0) > VOLUME_EXPAND_RATIO and current < zone["main_support"]:
         blocked.append("放量跌破主支撑")
+    # 非放量跌破：左侧模式不阻断，仅记录为辅助条件
+    elif LEFT_NO_SUPPORT_BLOCK and current < zone["main_support"] and current < (num(last.get("close")) or current):
+        pass  # 不阻断，继续等条件
+    else:
+        # 非左侧模式：保留原阻断逻辑
+        if current < zone["main_support"] and current < (num(last.get("close")) or current):
+            blocked.append("跌破主支撑后未收回")
     ict = report_data.get("ict_signal") or {}
     if ict.get("sell_confirmed"):
         blocked.append("ICT反向高抛确认")
@@ -509,15 +516,25 @@ def detect_buy_trigger(report_data: dict[str, Any], zones: dict[str, Any], state
     if ict.get("buy_confirmed"):
         matched.append("ICT下扫后转强")
         aux_count += 1
-    base_count = len(matched) - core_count - aux_count
-    effective_aux = 0 if (state.get("strong_trend") and state.get("di_downtrend")) else aux_count
-    effective_total = core_count + base_count + effective_aux
-    if state.get("weak_trend"):
+    # Left-side: 1 core + 1 aux → 已触发
+    if LEFT_NO_SUPPORT_BLOCK:
+        if core_count >= LEFT_TRIGGER_CORE and aux_count >= LEFT_TRIGGER_AUX:
+            status = "已触发"
+        else:
+            status = "观察中"
+    elif state.get("weak_trend"):
+        base_count = len(matched) - core_count - aux_count
+        effective_aux = 0 if (state.get("strong_trend") and state.get("di_downtrend")) else aux_count
+        effective_total = core_count + base_count + effective_aux
         status = "已触发" if (core_count >= 1 and effective_total >= MIN_TRIGGER_MATCHES - 1) else "观察中"
     else:
+        base_count = len(matched) - core_count - aux_count
+        effective_aux = 0 if (state.get("strong_trend") and state.get("di_downtrend")) else aux_count
+        effective_total = core_count + base_count + effective_aux
         status = "已触发" if effective_total >= MIN_TRIGGER_MATCHES and core_count >= 1 else "观察中"
     trigger_time = (last.get("time") or last.get("date")) if status == "已触发" else None
     return trigger_result(status, num(last.get("close")) if status == "已触发" else None, matched, [], trigger_time=trigger_time)
+
 
 
 def detect_sell_trigger(report_data: dict[str, Any], zones: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
@@ -589,21 +606,31 @@ def detect_sell_trigger(report_data: dict[str, Any], zones: dict[str, Any], stat
     if ict.get("sell_confirmed"):
         matched.append("ICT上扫后转弱")
         aux_count += 1
-    base_count = len(matched) - core_count - aux_count
-    effective_aux = 0 if (state.get("strong_trend") and state.get("di_uptrend")) else aux_count
-    effective_total = core_count + base_count + effective_aux
-    if state.get("weak_trend"):
+    # Left-side: 1 core + 1 aux → 已触发
+    if LEFT_NO_SUPPORT_BLOCK:
+        if core_count >= LEFT_TRIGGER_CORE and aux_count >= LEFT_TRIGGER_AUX:
+            status = "已触发"
+        else:
+            status = "观察中"
+    elif state.get("weak_trend"):
+        base_count = len(matched) - core_count - aux_count
+        effective_aux = 0 if (state.get("strong_trend") and state.get("di_uptrend")) else aux_count
+        effective_total = core_count + base_count + effective_aux
         status = "已触发" if (core_count >= 1 and effective_total >= MIN_TRIGGER_MATCHES - 1) else "观察中"
     else:
+        base_count = len(matched) - core_count - aux_count
+        effective_aux = 0 if (state.get("strong_trend") and state.get("di_uptrend")) else aux_count
+        effective_total = core_count + base_count + effective_aux
         status = "已触发" if effective_total >= MIN_TRIGGER_MATCHES and core_count >= 1 else "观察中"
     trigger_time = (last.get("time") or last.get("date")) if status == "已触发" else None
     return trigger_result(status, num(last.get("close")) if status == "已触发" else None, matched, [], trigger_time=trigger_time)
 
 
+
 def trigger_result(status: str, trigger_price: float | None, matched: list[str], blocked: list[str], trigger_time: Any = None) -> dict[str, Any]:
     total = len(matched) + len(blocked)
     return {
-        "status": status if status in STATUSES else "观察中",
+        "status": status if status in STATUSES or status.startswith("买") else "观察中",
         "trigger_price": round_price(trigger_price),
         "trigger_time": str(trigger_time) if trigger_time else "",
         "matched_conditions": matched,
@@ -632,7 +659,7 @@ def calculate_buy_price_model(report_data: dict[str, Any], zones: dict[str, Any]
     acceptable = None
     status = trigger["status"]
     trigger_price = trigger.get("trigger_price")
-    if status == "已触发" and trigger_price is not None:
+    if status in ("已触发", "买 10%", "买 23%") and trigger_price is not None:
         execution = round_price(trigger_price * BUY_CONFIRM_FACTOR)
         acceptable = round_price(execution * BUY_ACCEPT_FACTOR if execution else None)
         if acceptable is not None and float(report_data["current_price"]) > acceptable:
@@ -694,6 +721,8 @@ def action_for_buy(status: str) -> str:
         "触发过期": "错过了，不追",
         "被阻断": "被阻断，不接",
         "数据不足": "只观察，不执行",
+        "买 10%": "可以低吸",
+        "买 23%": "可以低吸",
     }.get(status, "只观察，不执行")
 
 
@@ -713,11 +742,11 @@ def choose_today_action(report_data: dict[str, Any], buy: dict[str, Any], sell: 
         return "等待，不主动操作"
     if "触发过期" in {buy["status"], sell["status"]}:
         return "等待下一次触发"
-    if buy["status"] == "已触发" and sell["status"] != "已触发":
+    if buy["status"] in ("已触发", "买 10%", "买 23%") and sell["status"] not in ("已触发", "买 10%", "买 23%"):
         return "低吸优先"
     if sell["status"] == "已触发" and buy["status"] != "已触发":
         return "高抛优先"
-    if buy["status"] == "已触发" and sell["status"] == "已触发":
+    if buy["status"] in ("已触发", "买 10%", "买 23%") and sell["status"] in ("已触发", "买 10%", "买 23%"):
         current = float(report_data["current_price"])
         buy_mid = (buy["zone"]["lower"] + buy["zone"]["upper"]) / 2
         sell_mid = (sell["zone"]["lower"] + sell["zone"]["upper"]) / 2
@@ -741,7 +770,7 @@ def position_size(data_status_value: str, action: str, buy: dict[str, Any], sell
     if action not in {"低吸优先", "高抛优先"}:
         return "不动"
     model = buy if action == "低吸优先" else sell
-    if model["status"] != "已触发":
+    if model["status"] not in ("已触发", "买 10%", "买 23%"):
         return "不动"
     if space_state_value == "too_small":
         return "不动"

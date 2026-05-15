@@ -73,8 +73,8 @@ def test_render_contract() -> None:
     assert "🧭 简要分析" in markdown
     assert "✨ 亮点" in markdown
     assert "⚠️ 风险" in markdown
-    assert "止跌确认" in markdown
-    assert "最多" in markdown
+    assert "止损" in markdown
+    assert "试探买" in markdown
     assert "止损" in markdown
     assert "执行价" not in markdown
     assert "t0-trader" not in markdown
