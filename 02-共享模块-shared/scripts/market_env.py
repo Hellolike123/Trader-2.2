@@ -71,8 +71,11 @@ def _fetch_index_data() -> dict[str, Any]:
     price_part = parts[35] if len(parts) > 35 and parts[35] else ""
     # Fallback: if no price_part, use [3] which is the last known open (approx close)
     if price_part:
-        current = float(price_part.split("/")[0])
-    else:
+        try:
+            current = float(price_part.split("/")[0])
+        except (ValueError, IndexError):
+            current = 0
+    if current == 0:
         current = float(parts[3]) if len(parts) > 3 and parts[3] else 0
     # Compute pre_close from change_pct: current = pre_close * (1 + pct/100)
     if change_pct and current:
@@ -131,17 +134,31 @@ def assess() -> dict[str, Any]:
 
     ma5 = _ma(bars, 5)
     ma20 = _ma(bars, 20)
-    trend_5d = "up" if (ma5 is not None and current >= ma5) else "down"
 
-    level = ""
-    if trend_5d == "down" and change_pct < -2.0:
+    # Improved trend: use MA5/MA20 relationship + slope, not just current vs MA5
+    mid_term = "up" if (ma5 is not None and ma20 is not None and ma5 > ma20) else "down"
+    # Volume trend: recent 5d vol / preceding 5d vol (>1 = expanding, <1 = shrinking)
+    closes: list[dict[str, Any]] = [b for b in bars if b.get("close") is not None and b.get("volume") is not None]
+    vol_trend: float | None = None
+    if len(closes) >= 10:
+        vol_recent = sum(float(b["volume"]) for b in closes[-5:]) / 5
+        vol_prev = sum(float(b["volume"]) for b in closes[-10:-5]) / 5
+        if vol_prev > 0:
+            vol_trend = vol_recent / vol_prev
+
+    # Level classification: separate mid-term trend from short-term intraday movement
+    mid_weak = mid_term == "down"
+    intraday_weak = change_pct < -2.0
+    intraday_moderate = 0 > change_pct >= -2.0
+    shrinking = vol_trend is not None and vol_trend < 0.8
+
+    level = "正常"
+    if mid_weak and intraday_weak:
         level = "很差"
-    elif trend_5d == "down" or (change_pct < 0 and change_pct > -2.0):
+    elif mid_weak and shrinking or mid_weak or intraday_moderate:
         level = "偏弱"
-    else:
-        level = "正常"
 
-    note = f"中证1000 {'五条线上方' if trend_5d == 'up' else '五条线下方'} + 今日{'涨' if change_pct >= 0 else '跌'}{abs(change_pct):.1f}%"
+    note = f"中证1000 MA5/MA20 {'>' if mid_term=='up' else '<'} 趋势{'偏多' if mid_term=='up' else '偏空'} 今日{change_pct:+.1f}%"
 
     return {
         "level": level,

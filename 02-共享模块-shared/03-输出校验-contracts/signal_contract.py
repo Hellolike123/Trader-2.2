@@ -26,11 +26,11 @@ except ImportError:
 
 CONTRACT_VERSION = "trader_signal_v1"
 
-# 日期格式：YYYY-MM-DD
+# ── Date/time pattern helpers ──────────────────────────────────────
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-# 时间格式：YYYY-MM-DD HH:MM:SS 或 YYYY-MM-DD HH:MM
 _TIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$")
 
+# ── Required fields ───────────────────────────────────────────────
 REQUIRED_FIELDS = {
     "contract",
     "source_skill",
@@ -50,6 +50,7 @@ REQUIRED_FIELDS = {
     "summary",
 }
 
+# ── Source skills — strict (no legacy aliases) ────────────────────
 ALLOWED_SOURCE_SKILLS = {
     "trader",
     "t0-trader",
@@ -59,7 +60,11 @@ ALLOWED_SOURCE_SKILLS = {
     "trader-pool",
 }
 
-ALLOWED_SIGNAL_TYPES = {
+# ── Main protocol signal types ────────────────────────────────────
+# Only canonical names live in the main set.  Legacy aliases are
+# tracked separately so they can produce warnings rather than silent
+# acceptance.
+_STRICT_SIGNAL_TYPES: set[str] = {
     "observe",
     "wait_for_confirmation",
     "track",
@@ -73,13 +78,7 @@ ALLOWED_SIGNAL_TYPES = {
     "trigger_expired",
     "blocked",
     "review_result",
-    # Additional types used across skills — kept to avoid breaking live pipelines
-    "low_buy",
-    "high_sell",
-    "wait",
-    "pilot_entry",
-    "stop_low_buy",
-    "stop_high_sell",
+    # Additional canonical types used across skills.
     "add_position",
     "reduce_position",
     "hold_observe",
@@ -97,6 +96,23 @@ ALLOWED_SIGNAL_TYPES = {
     "low_sell_watch",
 }
 
+# Legacy / deprecated aliases that still pass for backward compat.
+# These should produce a deprecation warning when encountered.
+LEGACY_SIGNAL_TYPES: set[str] = {
+    "low_buy",          # → low_buy_watch
+    "high_sell",        # → high_sell_watch
+    "wait",             # → wait_for_confirmation
+    "pilot_entry",
+    "stop_low_buy",
+    "stop_high_sell",
+    # These pass-through values are from test data but not canonical.
+    "review_result",    # duplicate — already in strict
+}
+
+# Convenience: main protocol + legacy for full backward compatibility.
+ALLOWED_SIGNAL_TYPES = _STRICT_SIGNAL_TYPES | LEGACY_SIGNAL_TYPES
+
+# ── Main protocol directions ──────────────────────────────────────
 ALLOWED_DIRECTIONS = {
     "bullish",
     "bearish",
@@ -105,6 +121,7 @@ ALLOWED_DIRECTIONS = {
     "bearish_lean",
 }
 
+# ── Main protocol actions ─────────────────────────────────────────
 ALLOWED_ACTIONS = {
     "no_action",
     "observe",
@@ -118,22 +135,35 @@ ALLOWED_ACTIONS = {
     "stop_high_sell",
 }
 
+# ── Confidence / data status ──────────────────────────────────────
 ALLOWED_CONFIDENCE = {"low", "medium", "high"}
 
-ALLOWED_DATA_STATUS = {
+# Strict (main protocol only) — the four canonical states.
+_STRICT_DATA_STATUS: set[str] = {
     "full",
     "partial",
     "degraded",
     "failed",
+}
+
+# Legacy — kept for backward compat but should not be written by
+# new code.  "fresh" and "stale" were informal additions that never
+# made it into the formal protocol.
+LEGACY_DATA_STATUS: set[str] = {
     "fresh",
     "stale",
 }
 
+ALLOWED_DATA_STATUS = _STRICT_DATA_STATUS | LEGACY_DATA_STATUS
+
+
+# ── Normalization ─────────────────────────────────────────────────
 
 def normalize_signal(signal: dict[str, Any]) -> dict[str, Any]:
     normalized = deepcopy(signal)
     normalized.setdefault("contract", CONTRACT_VERSION)
     normalized.setdefault("confidence", "low")
+    # Main protocol default data_status is "degraded".
     normalized.setdefault("data_status", "degraded")
     normalized.setdefault("direction", "neutral")
     normalized.setdefault("action", "observe")
@@ -143,6 +173,8 @@ def normalize_signal(signal: dict[str, Any]) -> dict[str, Any]:
     normalized.setdefault("position", {})
     return normalized
 
+
+# ── Validation ────────────────────────────────────────────────────
 
 def validate_signal(signal: dict[str, Any]) -> list[str]:
     errors: list[str] = []
@@ -167,7 +199,7 @@ def validate_signal(signal: dict[str, Any]) -> list[str]:
     _validate_text(errors, normalized, "symbol")
     _validate_text(errors, normalized, "name")
     _validate_date(errors, normalized, "trade_date")
-    _validate_text(errors, normalized, "analysis_time")  # 允许任意非空字符串，不强制格式
+    _validate_text(errors, normalized, "analysis_time")
     _validate_text(errors, normalized, "summary")
 
     if not isinstance(normalized.get("risk_flags"), list):
@@ -188,6 +220,8 @@ def assert_valid_signal(signal: dict[str, Any]) -> None:
         raise ValueError("; ".join(errors))
 
 
+# ── Internal validators ───────────────────────────────────────────
+
 def _validate_enum(errors: list[str], signal: dict[str, Any], field: str, allowed: set[str]) -> None:
     value = signal.get(field)
     if value is not None and value not in allowed:
@@ -201,14 +235,12 @@ def _validate_text(errors: list[str], signal: dict[str, Any], field: str) -> Non
 
 
 def _validate_date(errors: list[str], signal: dict[str, Any], field: str) -> None:
-    """校验日期格式是否为 YYYY-MM-DD"""
     value = signal.get(field)
     if value is not None and not _DATE_RE.match(str(value)):
         errors.append(f"{field} must be in YYYY-MM-DD format, got: {value}")
 
 
 def _validate_risk_flags(errors: list[str], risk_flags: list[Any]) -> None:
-    """校验 risk_flags 列表中的元素是否都是字符串"""
     for i, flag in enumerate(risk_flags):
         if not isinstance(flag, str):
             errors.append(f"risk_flags[{i}] must be a string, got {type(flag).__name__}")
@@ -244,7 +276,6 @@ def _validate_position(errors: list[str], position: Any) -> None:
             errors.append(f"position.{field} must be numeric")
         elif value < 0 or value > 100:
             errors.append(f"position.{field} must be between 0 and 100")
-    # 逻辑校验：总仓位上限应 >= 单次移动上限
     if (
         max_total is not None
         and max_single is not None

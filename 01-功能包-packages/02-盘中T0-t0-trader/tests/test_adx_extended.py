@@ -114,7 +114,7 @@ class TestAdxDirectionFilter:
             "kline_15m": [],
             "kline_30m": [],
             "quote": {"current_price": 9.5, "pre_close": 9.6, "high": 9.7, "low": 9.3},
-            "data_status": "fresh",
+            "data_status": "degraded",
             "space_state": "good",
             "t0_net_space_pct": 0.02,
         }
@@ -161,7 +161,7 @@ class TestAdxDirectionFilter:
             "kline_15m": [],
             "kline_30m": [],
             "quote": {"current_price": 11.0, "pre_close": 10.5, "high": 11.2, "low": 10.8},
-            "data_status": "fresh",
+            "data_status": "degraded",
             "space_state": "good",
             "t0_net_space_pct": 0.02,
         }

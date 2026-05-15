@@ -61,10 +61,10 @@ def main() -> int:
         print(proc.stderr, file=sys.stderr)
         return proc.returncode
     events = detect_state_change(
-        {"data_status": "fresh", "buy_status": "观察中", "sell_status": "未进入候选区"},
+        {"data_status": "degraded", "buy_status": "观察中", "sell_status": "未进入候选区"},
         {
             "current_price": 11.95,
-            "data_status": "fresh",
+            "data_status": "degraded",
             "buy": {"status": "已触发", "invalid_price": 11.72, "execution_price": 11.94},
             "sell": {"status": "未进入候选区", "invalid_price": 12.48},
         },

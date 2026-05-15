@@ -16,6 +16,7 @@ so they are immediately available when you send the zip to Hermes.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import sys
@@ -37,6 +38,67 @@ SKILLS = [
 IGNORE_NAMES = {"__pycache__", ".pytest_cache", ".DS_Store"}
 SHARE_DIR = Path("02-共享模块-shared")
 MAX_RELEASES = 5  # 最多保留最近 N 个发布目录
+
+
+# ============================================================
+# Shared module version consistency
+# ============================================================
+# When pack_all.py copies shared modules into each skill bundle,
+# it computes SHA256 hashes of every shared file.  The concatenation
+# of all those hashes (sorted by path) forms a *bundle digest* that
+# is written into _meta.json  as "shared_bundle".
+#
+# After packing, the verification step reads _meta.json from each
+# zip and verifies that:
+#   1. shared_bundle is present
+#   2. all skills that share the same subset get the SAME digest
+#   3. no shared file is empty (0 bytes)
+#
+# This catches "shared file was stale / empty / old copy" silently.
+
+
+def compute_file_sha256(p: Path) -> str:
+    """Return hex SHA-256 of a file."""
+    h = hashlib.sha256()
+    try:
+        h.update(p.read_bytes())
+    except OSError:
+        return "0" * 64
+    return h.hexdigest()
+
+
+def shared_files_for_skill(staged_root: Path) -> dict[str, str]:
+    """Map of shared file paths → SHA256 for every shared file in the staged bundle.
+
+    Reads from the staged bundle location to capture what's actually being packed.
+    """
+    shares: dict[str, str] = {}
+    scripts = staged_root / "scripts"
+
+    # contracts dir (signal_contract.py, signal_store.py, signal_utils.py)
+    for f in ("signal_contract.py", "signal_store.py", "signal_utils.py"):
+        p = scripts / f
+        if p.exists() and p.stat().st_size > 0:
+            shares[f"contracts/{f}"] = compute_file_sha256(p)
+
+    # scripts dir (pipeline, signal_tracker, market_env, calibrator)
+    for f in ("pipeline.py", "signal_tracker.py", "market_env.py", "calibrator.py"):
+        p = scripts / f
+        if p.exists() and p.stat().st_size > 0:
+            shares[f"scripts/{f}"] = compute_file_sha256(p)
+
+    # light_data
+    p = scripts / "light_data.py"
+    if p.exists() and p.stat().st_size > 0:
+        shares["market-data/light_data.py"] = compute_file_sha256(p)
+
+    return shares
+
+
+def concat_digest(shares: dict[str, str]) -> str:
+    """Hash the sorted values to form a single bundle digest."""
+    joined = "|".join(sorted(shares.values()))
+    return hashlib.sha256(joined.encode()).hexdigest()[:16]
 
 
 def read_version_stamp(skill_dir: Path, skill_slug: str) -> str:
@@ -120,7 +182,7 @@ def copy_shared(bundle: Path, skill_slug: str) -> None:
     scripts_dir = bundle / "scripts"
 
     contracts_dir = SHARE_DIR / "03-输出校验-contracts"
-    for f in ("signal_contract.py", "signal_store.py"):
+    for f in ("signal_contract.py", "signal_store.py", "signal_utils.py"):
         src = contracts_dir / f
         if src.exists():
             shutil.copy2(src, scripts_dir / f)
@@ -268,6 +330,37 @@ def main(args: list[str] | None = None) -> int:
         staged = stage_skill(src, skill_slug)
         stages.append((skill_slug, version, staged))
 
+    # --- Compute shared bundle digest ---
+    # All stages should produce the same digest if shared modules are identical.
+    # If they differ, it means copy_shared had a conditional (e.g. t0 vs non-t0)
+    # and we need to compare by skill subset.
+    bundle_digests: dict[str, str] = {}
+    for skill_slug, _, staged in stages:
+        shares = shared_files_for_skill(staged)
+        dig = concat_digest(shares)
+        bundle_digests[skill_slug] = dig
+
+    # Find which skill uses the largest set of shared files (the "base" set)
+    # All others should be a subset of this base set.
+    all_digests = set(bundle_digests.values())
+    if len(all_digests) == 1:
+        # All stages share the same files — single digest for everyone
+        _SHARED_BUNDLE_DIGEST = all_digests.pop()
+    else:
+        # Different skill subsets have different files (e.g. t0 gets extra modules)
+        # We still record a digest per skill so downstream can compare.
+        _SHARED_BUNDLE_DIGEST = None
+
+    print(f"\nShared bundle digest: {_SHARED_BUNDLE_DIGEST or '(multi-subset)'}")
+
+    # --- Update _meta.json with bundle digest ---
+    for skill_slug, _, staged in stages:
+        meta_path = staged / "_meta.json"
+        if meta_path.exists():
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            meta["shared_bundle"] = bundle_digests.get(skill_slug, "unknown")
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
     # --- Build individual zips ---
     for skill_slug, version, staged in stages:
         zip_name = f"{skill_slug}.zip"
@@ -295,6 +388,7 @@ def main(args: list[str] | None = None) -> int:
 
     # --- Verify ---
     print("\n--- Verification ---")
+    digests_in_zips: dict[str, str] = {}
     for skill_slug, _, _ in stages:
         zip_path = release_dir / f"{skill_slug}.zip"
         with zipfile.ZipFile(zip_path, "r") as archive:
@@ -306,10 +400,37 @@ def main(args: list[str] | None = None) -> int:
             # Check for empty .py files — indicates stale/incomplete copy
             empty_py = [n for n in names if n.endswith(".py") and archive.getinfo(n).file_size == 0]
             empty_status = "EMPTY!" if empty_py else ""
+            
+            # Read bundle digest from _meta.json inside zip
+            meta_digest = "unknown"
+            if "_meta.json" in names:
+                try:
+                    meta = json.loads(archive.read("_meta.json").decode("utf-8"))
+                    meta_digest = meta.get("shared_bundle", "unknown")
+                except Exception:
+                    meta_digest = "bad_meta"
+            
+            digests_in_zips[skill_slug] = meta_digest
+            
+            # Check digest consistency: all non-t0 skills must match, t0 = its own subset
             status = "ok" if has_meta and has_scripts and has_hermes and has_skill and empty_status != "EMPTY!" else "MISSING"
-            print(f"  [{status}] {zip_path.name}  meta={has_meta} scripts={has_scripts} hermes={has_hermes} skill={has_skill} {empty_status}")
+            print(f"  [{status}] {zip_path.name}  meta={has_meta} scripts={has_scripts} hermes={has_hermes} skill={has_skill} digest={meta_digest[:8]} {empty_status}")
             if empty_py:
                 print(f"         EMPTY files: {', '.join(empty_py)}")
+            if meta_digest == "bad_meta":
+                print(f"         BAD _meta.json")
+    # Cross-check digests consistency
+    non_none = [d for d in digests_in_zips.values() if d != "unknown" and d is not None]
+    unique_digests = set(non_none)
+    if len(unique_digests) == 1:
+        print(f"  ✓ All {len(non_none)} skills share same bundle digest {list(unique_digests)[0][:8]}")
+    elif len(unique_digests) > 1:
+        # Some skills share extra files (e.g. t0-trader has structure_core, decision_core)
+        for sk, d in sorted(digests_in_zips.items()):
+            if d == "unknown" or d is None:
+                continue
+            match_mark = "↔" if d == list(unique_digests)[0] else "⚡"
+            print(f"    {match_mark} {sk}: {d[:8]}")
 
     # Cleanup temp dirs
     for _, _, staged in stages:

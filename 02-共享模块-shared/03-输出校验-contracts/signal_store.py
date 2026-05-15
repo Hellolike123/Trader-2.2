@@ -8,31 +8,21 @@ from pathlib import Path
 from typing import Any
 
 from signal_contract import assert_valid_signal
-from signal_tracker import (
-    _norm_date,
-    _normalize_signal_type,
-    _price_from_trigger,
-    make_signal_id,
+from signal_utils import (
+    build_signal_key,
+    normalize_date,
+    normalize_signal_id,
+    normalize_signal_type,
+    normalize_symbol,
+    price_from_trigger,
 )
 
 
-def _normalize_symbol(symbol: str) -> str:
-    """Ensure bare 6-digit codes get exchange suffix so 688248 matches 688248.SH."""
-    if not symbol or "." in symbol:
-        return symbol
-    s = str(symbol).strip()
-    if len(s) == 6 and s.isdigit():
-        if s.startswith(("6", "9", "5")):
-            return f"{s}.SH"
-        return f"{s}.SZ"
-    return s
-
-
 def _get_default_store_path() -> Path:
-    """返回默认信号存储路径。
-    
-    优先读取环境变量，否则 fallback 到 ~/.trader/signals.jsonl。
-    测试可通过 patch DEFAULT_SIGNAL_STORE_PATH 覆盖此值。
+    """Return default signal store path.
+
+    Prefers TRADER_SIGNAL_STORE_PATH env var, otherwise falls back to
+    ~/.trader/signals.jsonl.
     """
     env_path = os.environ.get("TRADER_SIGNAL_STORE_PATH")
     if env_path:
@@ -44,19 +34,32 @@ DEFAULT_SIGNAL_STORE_PATH = Path.home() / ".trader" / "signals.jsonl"
 
 
 def append_signal(signal: dict[str, Any], path: Path | None = None) -> str:
-    # Use a working copy so normalize/assert don't mutate the caller's dict.
+    """Append a signal to the store.
+
+    Does NOT mutate the caller's dict.  Returns the signal_id so callers
+    that need it can capture the return value.
+    """
+    # Deep-copy so the caller's dict is never mutated.
     working = dict(signal)
+    # Deep-copy nested dicts that build_signal_id may reference.
+    if isinstance(working.get("trigger"), dict):
+        working["trigger"] = dict(working["trigger"])
+    if working.get("trigger") is None:
+        working["trigger"] = {}
+
     if "signal_id" not in working:
-        raw_type = str(working.get("signal_type") or "unknown").strip()
-        working["signal_id"] = make_signal_id(
-            symbol=_normalize_symbol(str(working.get("symbol") or "")),
-            date=_norm_date(str(working.get("trade_date") or "")),
-            signal_type=_normalize_signal_type(raw_type),
-            price=_price_from_trigger(working) or "0.00",
+        working["signal_id"] = normalize_signal_id(
+            symbol=normalize_symbol(str(working.get("symbol") or "")),
+            date=normalize_date(str(working.get("trade_date") or "")),
+            signal_type=normalize_signal_type(str(working.get("signal_type") or "unknown").strip()),
+            price=price_from_trigger(working) or "0.00",
         )
+
     assert_valid_signal(working)
+
     store_path = path or _get_default_store_path()
     store_path.parent.mkdir(parents=True, exist_ok=True)
+
     with store_path.open("a", encoding="utf-8") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
@@ -64,52 +67,90 @@ def append_signal(signal: dict[str, Any], path: Path | None = None) -> str:
             handle.write("\n")
         finally:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
     _sig_cache.pop(str(store_path), None)
     return working["signal_id"]
 
+
 # Module-level cache for load_recent_signals — keyed by path.
-# Avoids re-reading/parsing the file when multiple callers query the same store.
-_sig_cache: dict = {}       # path_str → { "mtime": float, "data": list[dict] }
-_CACHE_TTL_SECONDS = 2      # Stale a cache entry after 2 s to pick up fresh appends.
-_bad_line_count: int = 0     # 坏行计数，供外部监控
+# path_str -> { "mtime": float, "ino": int, "data": list[dict] }
+_sig_cache: dict = {}
+_CACHE_TTL_SECONDS = 2  # Stale a cache entry after 2 s.
+
+# Bad-line observability for external monitoring.
+_bad_line_count: int = 0
+_bad_line_last_reason: str = ""
+_bad_line_last_path: str = ""
 
 
 def _read_store(store_path: Path) -> list[dict[str, Any]]:
-    global _bad_line_count
+    """Read store file with file-change detection in cache."""
+    global _bad_line_count, _bad_line_last_reason, _bad_line_last_path
+
     if not store_path.exists():
         return []
-    raw = store_path.read_text(encoding="utf-8")
-    signals: list[dict[str, Any]] = []
-    _bad_line_count = 0
-    for line in raw.splitlines():
-        if not line.strip():
-            continue
-        try:
-            item = json.loads(line)
-        except Exception:
-            _bad_line_count += 1
-            continue
-        if not isinstance(item, dict):
-            _bad_line_count += 1
-            continue
-        signals.append(item)
+
+    try:
+        stat = store_path.stat()
+        mtime = stat.st_mtime
+        ino = stat.st_ino
+    except OSError:
+        return []
+
+    path_key = str(store_path)
+    entry = _sig_cache.get(path_key)
+
+    # Invalidate cache when file changes on disk.
+    if entry is not None and (
+        entry.get("ino") != ino
+        or entry.get("mtime") != mtime
+        or (time.time() - entry["mtime"]) >= _CACHE_TTL_SECONDS
+    ):
+        entry = None
+
+    if entry is None:
+        raw = store_path.read_text(encoding="utf-8")
+        signals: list[dict[str, Any]] = []
+        _bad_line_count = 0
+        _bad_line_last_reason = ""
+        _bad_line_last_path = path_key
+        for line in raw.splitlines():
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+            except Exception as e:
+                _bad_line_count += 1
+                _bad_line_last_reason = str(e)
+                continue
+            if not isinstance(item, dict):
+                _bad_line_count += 1
+                _bad_line_last_reason = "item is not a dict"
+                continue
+            signals.append(item)
+        _sig_cache[path_key] = {"mtime": mtime, "ino": ino, "data": signals}
+    else:
+        signals = entry["data"]
+
     return signals
 
 
 def load_recent_signals(symbol: str | None = None, limit: int = 20, path: Path | None = None) -> list[dict[str, Any]]:
-    store_path = path or DEFAULT_SIGNAL_STORE_PATH
-    path_key = str(store_path)
-
-    now = time.time()
-    entry = _sig_cache.get(path_key)
-
-    if entry is not None and (now - entry["mtime"]) < _CACHE_TTL_SECONDS:
-        signals = entry["data"]
-    else:
-        signals = _read_store(store_path)
-        _sig_cache[path_key] = {"mtime": now, "data": signals}
+    store_path = path or _get_default_store_path()
+    signals = _read_store(store_path)
 
     if symbol:
-        norm_query = _normalize_symbol(symbol)
-        signals = [s for s in signals if _normalize_symbol(str(s.get("symbol") or "")) == norm_query]
+        norm_query = normalize_symbol(symbol)
+        signals = [
+            s for s in signals
+            if normalize_symbol(str(s.get("symbol") or "")) == norm_query
+        ]
     return signals[-limit:]
+
+
+# ── Convenience helpers for downstream modules ──────────────────────
+
+
+def make_signal_key(sig: dict[str, Any]) -> tuple[str, str, str, str]:
+    """Compatibility alias — use signal_utils.build_signal_key directly."""
+    return build_signal_key(sig)
