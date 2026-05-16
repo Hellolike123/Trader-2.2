@@ -21,6 +21,13 @@ except ImportError:
     BarData = dict
     QuoteData = dict
 
+try:
+    from mootdx.quotes import Quotes
+    _MOOTDX_AVAILABLE = True
+except ImportError:
+    Quotes = None
+    _MOOTDX_AVAILABLE = False
+
 
 TENCENT_QUOTE_URL = "https://qt.gtimg.cn/q="
 TENCENT_FQKLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
@@ -50,6 +57,115 @@ _REALTIME_TTL = 30
 
 DataStatus = Literal["full", "partial", "degraded", "failed"]
 
+_MOOTDX_CLIENT: Quotes | None = None
+
+
+def _get_mootdx_client() -> Quotes | None:
+    global _MOOTDX_CLIENT
+    if _MOOTDX_CLIENT is not None:
+        return _MOOTDX_CLIENT
+    if not _MOOTDX_AVAILABLE:
+        return None
+    try:
+        _MOOTDX_CLIENT = Quotes.factory(market='std')
+        return _MOOTDX_CLIENT
+    except Exception:
+        _MOOTDX_CLIENT = None
+        return None
+
+
+MOOTDX_CATEGORY = {"daily": 4, "weekly": 5, "monthly": 6, "1m": 7, "5m": 8, "15m": 9, "30m": 10, "60m": 11}
+
+_MOOTDX_MARKET = {"SH": 1, "SZ": 0, "BJ": 2}
+
+
+def _mootdx_market(sec: Security) -> int:
+    return _MOOTDX_MARKET.get(sec.market.upper(), 0)
+
+
+def _fetch_qfq_mootdx(sec: Security, days: int = 30) -> list[dict[str, Any]] | None:
+    client = _get_mootdx_client()
+    if client is None:
+        return None
+    try:
+        df = client.bars(symbol=sec.code, category=MOOTDX_CATEGORY["daily"], offset=max(days, 20), market=_mootdx_market(sec))
+        if df is None or len(df) == 0:
+            return None
+        bars = []
+        for _, row in df.iterrows():
+            raw_dt = str(row.get("datetime", ""))
+            bars.append({
+                "date": raw_dt.split(" ")[0],
+                "open": to_float(row.get("open")),
+                "close": to_float(row.get("close")),
+                "high": to_float(row.get("high")),
+                "low": to_float(row.get("low")),
+                "volume": to_float(row.get("vol")),
+                "amount": to_float(row.get("amount")),
+            })
+        return bars
+    except Exception:
+        return None
+
+
+def _fetch_quote_mootdx(sec: Security) -> dict[str, Any] | None:
+    client = _get_mootdx_client()
+    if client is None:
+        return None
+    try:
+        qs = client.quotes(symbol=[sec.code], market=_mootdx_market(sec))
+        if qs is None or len(qs) == 0:
+            return None
+        q = dict(qs.iloc[0])
+        now = datetime.now()
+        price_v = to_float(q.get("price"))
+        last_close_v = to_float(q.get("last_close"))
+        result: dict[str, Any] = {
+            "name": sec.name,
+            "symbol": sec.ts_code,
+            "trade_date": now.strftime("%Y-%m-%d"),
+            "trade_time": str(q.get("servertime", ""))[:8] if q.get("servertime") else None,
+            "current_price": price_v,
+            "pre_close": last_close_v,
+            "open": to_float(q.get("open")),
+            "high": to_float(q.get("high")),
+            "low": to_float(q.get("low")),
+            "volume": to_float(q.get("vol")),
+            "amount": to_float(q.get("amount")),
+            "turnover_rate": None,
+            "current_change_pct": round(((price_v or 0) / (last_close_v or 1) - 1) * 100, 2) if price_v and last_close_v else None,
+            "order_book": _extract_order_book(q),
+        }
+        return result
+    except Exception:
+        return None
+
+
+def _extract_order_book(q: dict[str, Any]) -> dict[str, Any] | None:
+    """从 mootdx quote 原始字典提取五档盘口"""
+    bids = []
+    asks = []
+    for i in range(1, 6):
+        bid_p = to_float(q.get(f"bid{i}"))
+        bid_v = to_float(q.get(f"bid_vol{i}"))
+        ask_p = to_float(q.get(f"ask{i}"))
+        ask_v = to_float(q.get(f"ask_vol{i}"))
+        if bid_p and bid_v:
+            bids.append({"price": bid_p, "volume": int(bid_v)})
+        if ask_p and ask_v:
+            asks.append({"price": ask_p, "volume": int(ask_v)})
+    if not bids and not asks:
+        return None
+    bid_total = sum(b["volume"] for b in bids)
+    ask_total = sum(a["volume"] for a in asks)
+    return {
+        "bids": bids,
+        "asks": asks,
+        "bid_total": bid_total,
+        "ask_total": ask_total,
+        "imbalance": round(bid_total / ask_total, 2) if ask_total > 0 else 99,
+    }
+
 
 @dataclass(frozen=True)
 class MarketSnapshot:
@@ -57,6 +173,7 @@ class MarketSnapshot:
     quote: dict[str, Any]
     daily_bars: list[dict[str, Any]]
     bars_5m: list[dict[str, Any]] = field(default_factory=list)
+    order_book: dict[str, Any] | None = None
     data_status: DataStatus = "full"
     missing_sources: list[str] = field(default_factory=list)
     source_errors: dict[str, str] = field(default_factory=dict)
@@ -222,6 +339,23 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
     if cached is not None:
         return cached
 
+    # mootdx 主源
+    mootdx_q = _fetch_quote_mootdx(sec)
+    if mootdx_q is not None:
+        # 腾讯补充 turnover_rate
+        try:
+            text = http.get_text(TENCENT_QUOTE_URL + sec.qq_symbol, encoding="gbk")
+            match = re.search(r'="([^"]*)"', text)
+            if match:
+                fields = match.group(1).split("~")
+                if len(fields) > 38:
+                    mootdx_q["turnover_rate"] = to_float(fields[38])
+        except Exception:
+            pass
+        save_realtime_cache(cache_key, mootdx_q)
+        return mootdx_q
+
+    # mootdx 不可用时，腾讯全量降级
     def do_fetch():
         text = http.get_text(TENCENT_QUOTE_URL + sec.qq_symbol, encoding="gbk")
         match = re.search(r'="([^"]*)"', text)
@@ -289,11 +423,16 @@ def _compute_atr_fields(bars: list[dict[str, Any]]) -> None:
 
 
 def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 30) -> list[dict[str, Any]]:
-    # 避免 urlencode 把逗号编码成 %2C — 腾讯 API 需要字面逗号分隔参数
+    # mootdx 主源
+    mootdx_bars = _fetch_qfq_mootdx(sec, days)
+    if mootdx_bars is not None:
+        _compute_atr_fields(mootdx_bars)
+        return mootdx_bars
+
+    # mootdx 不可用时，腾讯降级
     raw_params = f"_var=kline_dayhfq&param={sec.qq_symbol},day,,,{max(days, 20)},qfq"
     cache_key = get_cache_key(TENCENT_FQKLINE_URL, raw_params)
 
-    # 只缓存非当日数据（通过检查数据中是否有今日K线判断）
     cached = get_from_cache(cache_key)
     if cached is not None:
         return cached
@@ -307,7 +446,6 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 30) -> list[dic
         for row in rows:
             if isinstance(row, list) and len(row) >= 6:
                 bars.append({"date": row[0], "open": to_float(row[1]), "close": to_float(row[2]), "high": to_float(row[3]), "low": to_float(row[4]), "volume": to_float(row[5])})
-        # 新股/qfqday 为空时回退到原始 day
         if not bars:
             day_rows = sec_data.get("day") or []
             for row in day_rows:
@@ -320,15 +458,36 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 30) -> list[dic
     result = retry(do_fetch)
     _compute_atr_fields(result)
 
-    # 检查是否包含今日数据（如果有，不缓存）
     has_today = any(bar.get("date") == datetime.now().strftime("%Y-%m-%d") for bar in result)
     if not has_today:
-        save_to_cache(cache_key, result, ttl_seconds=3600)  # 1小时过期
+        save_to_cache(cache_key, result, ttl_seconds=3600)
     
     return result
 
 
 def fetch_5m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
+    client = _get_mootdx_client()
+    if client is not None:
+        try:
+            df = client.bars(symbol=sec.code, category=MOOTDX_CATEGORY["5m"], offset=datalen, market=_mootdx_market(sec))
+            if df is not None and len(df) > 0:
+                bars = []
+                for _, row in df.iterrows():
+                    raw_dt = str(row.get("datetime", ""))
+                    parts = raw_dt.split(" ")
+                    bars.append({
+                        "time": raw_dt,
+                        "date": parts[0] if len(parts) > 0 else "",
+                        "open": to_float(row.get("open")),
+                        "high": to_float(row.get("high")),
+                        "low": to_float(row.get("low")),
+                        "close": to_float(row.get("close")),
+                        "volume": to_float(row.get("vol")),
+                        "amount": to_float(row.get("amount")),
+                    })
+                return bars
+        except Exception:
+            pass
     return fetch_kline(sec, http, scale="5", datalen=datalen)
 
 
@@ -359,6 +518,7 @@ def load_market_snapshot(target: str, days: int = 30, include_5m: bool = True) -
     quote = results.get("quote") or {}
     daily_bars = results.get("daily") or []
     bars_5m = results.get("bars_5m") or []
+    order_book = quote.pop("order_book", None) if isinstance(quote, dict) else None
     if include_5m and not bars_5m and "bars_5m" not in missing_sources:
         missing_sources.append("bars_5m")
 
@@ -376,6 +536,7 @@ def load_market_snapshot(target: str, days: int = 30, include_5m: bool = True) -
         quote=quote,
         daily_bars=daily_bars,
         bars_5m=bars_5m,
+        order_book=order_book,
         data_status=data_status,
         missing_sources=missing_sources,
         source_errors=source_errors,

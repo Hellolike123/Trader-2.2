@@ -110,6 +110,7 @@ def build_plan(target: str) -> dict[str, Any]:
         "vwap": model.get("vwap"),
         "ict_signal": model.get("ict_signal") or {},
         "atr_info": model.get("atr_info") or {},
+        "order_book": quote.get("order_book"),
         "data": report_data,
         "model": model,
     }

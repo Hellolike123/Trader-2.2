@@ -69,7 +69,7 @@ def test_check_recent_skips_completed(tmp_path, monkeypatch):
     monkeypatch.setattr(st, "RESULT_PATH", results)
 
     signal = {
-        "symbol": "688248.SH", "trade_date": "2026-05-02",
+        "symbol": "688248.SH", "trade_date": "2026-05-12",
         "signal_type": "low_buy_watch", "status": "completed",
         "trigger": {"price": 10.5},
     }
@@ -120,13 +120,13 @@ def test_check_recent_sets_completed_on_signal(tmp_path, monkeypatch):
     monkeypatch.setattr(st, "RESULT_PATH", results)
 
     signal = {
-        "symbol": "688248.SH", "trade_date": "2026-05-02",
+        "symbol": "688248.SH", "trade_date": "2026-05-12",
         "signal_type": "low_buy_watch",
         "trigger": {"price": 10.5},
     }
     store.write_text(json.dumps(signal) + "\n", encoding="utf-8")
 
-    bars = [{"date": "2026-05-02", "close": 10.5, "atr14": 0.3}]
+    bars = [{"date": "2026-05-12", "close": 10.5, "atr14": 0.3}]
 
     with patch.object(st, "HttpClient", return_value=MagicMock()), \
          patch.object(st, "resolve_security", return_value="688248.SH"), \

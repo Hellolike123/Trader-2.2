@@ -4,6 +4,11 @@ from typing import Any
 
 from light_data import to_float
 
+try:
+    from order_book import analyze as order_book_analyze
+except ImportError:
+    order_book_analyze = None
+
 
 def pct_text(value: float | None) -> str:
     return "数据不足" if value is None else f"{value:+.2f}%"
@@ -189,9 +194,20 @@ def render_markdown(plan: dict[str, Any]) -> str:
         f"低吸观察：{buy_obs} | 高抛观察：{sell_obs}",
         f"止损：{price(numeric_or_none(buy.get('invalid_price')))}",
         "",
+    ]
+    # 盘口验证
+    if order_book_analyze and plan.get("order_book"):
+        ob = order_book_analyze(plan["order_book"])
+        lines.append(f"📊 盘口验证")
+        lines.append("")
+        lines.append(ob["line"])
+        lines.append("")
+
+    lines.extend([
+        "",
         "🕒 今日关键事件",
         "",
-    ]
+    ])
     lines.extend(review_lines(plan.get("history")))
     lines.extend(
         [

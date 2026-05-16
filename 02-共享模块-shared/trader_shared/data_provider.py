@@ -49,6 +49,7 @@ class MarketSnapshot:
     quote: dict[str, Any]
     daily_bars: list[dict[str, Any]]
     bars_5m: list[dict[str, Any]] = field(default_factory=list)
+    order_book: dict[str, Any] | None = None
     data_status: DataStatus = "full"
     missing_sources: list[str] = field(default_factory=list)
     source_errors: dict[str, str] = field(default_factory=dict)
@@ -205,6 +206,7 @@ class TencentSinaProvider:
             quote=snap.quote,
             daily_bars=snap.daily_bars,
             bars_5m=snap.bars_5m,
+            order_book=getattr(snap, "order_book", None),
             data_status=snap.data_status,
             missing_sources=snap.missing_sources,
             source_errors=snap.source_errors,
