@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -105,16 +106,19 @@ class TestSignalIdPrimaryMatch:
         """Signal with signal_id already has result with same signal_id → skipped."""
         self.tmp.apply()
 
+        today = datetime.now()
+        date_str = (today - timedelta(days=3)).strftime("%Y-%m-%d")
+        analysis_time = f"{date_str}T10:00:00"
         sig_id = hashlib.sha256(
-            "688248.SH|2026-04-29|low_buy_watch|10.00".encode()
+            f"688248.SH|{date_str}|low_buy_watch|10.00".encode()
         ).hexdigest()[:16]
 
         # Write signal with signal_id
         sig = _make_sig(
-            trade_date="2026-04-29",
+            trade_date=date_str,
             price=10.0,
             signal_id=sig_id,
-            analysis_time="2026-04-29T10:00:00",
+            analysis_time=analysis_time,
         )
         self.tmp.store_path.write_text(
             json.dumps(sig, ensure_ascii=False) + "\n", encoding="utf-8"
@@ -125,7 +129,7 @@ class TestSignalIdPrimaryMatch:
             "signal_id": sig_id,
             "symbol": "688248.SH",
             "name": "南网科技",
-            "signal_date": "2026-04-29",
+            "signal_date": date_str,
             "signal_type": "low_buy_watch",
             "signal_price": 10.0,
             "r_5d": 2.5,
@@ -161,10 +165,17 @@ class TestDateNormalization:
         """Old result with signal_date='2026-4-29' matches new trade_date='2026-04-29'."""
         self.tmp.apply()
 
+        today = datetime.now()
+        date_padded = (today - timedelta(days=2)).strftime("%Y-%m-%d")
+        # Strip leading zeros: 2026-04-29 → 2026-4-29
+        parts = date_padded.split("-")
+        date_unpadded = "-".join(str(int(p)) for p in parts)
+        analysis_time = f"{date_padded}T10:00:00"
+
         sig = _make_sig(
-            trade_date="2026-04-29",
+            trade_date=date_padded,
             price=10.5,
-            analysis_time="2026-04-29T10:00:00",
+            analysis_time=analysis_time,
         )
         self.tmp.store_path.write_text(
             json.dumps(sig, ensure_ascii=False) + "\n", encoding="utf-8"
@@ -174,7 +185,7 @@ class TestDateNormalization:
         old_result = {
             "symbol": "688248.SH",
             "name": "南网科技",
-            "signal_date": "2026-4-29",  # Non-zero-padded — the classic bug
+            "signal_date": date_unpadded,  # Non-zero-padded — the classic bug
             "signal_type": "low_buy_watch",
             "signal_price": 10.5,
             "r_5d": 0.0,
@@ -210,11 +221,15 @@ class TestTypeNormalization:
         """Chinese old-name signal_type normalizes to match English normalized type."""
         self.tmp.apply()
 
+        today = datetime.now()
+        date_str = (today - timedelta(days=2)).strftime("%Y-%m-%d")
+        analysis_time = f"{date_str}T10:00:00"
+
         sig = _make_sig(
-            trade_date="2026-04-29",
+            trade_date=date_str,
             price=10.5,
             signal_type="低吸观察",  # Chinese old name → _normalize_signal_type → low_buy_watch
-            analysis_time="2026-04-29T10:00:00",
+            analysis_time=analysis_time,
         )
         self.tmp.store_path.write_text(
             json.dumps(sig, ensure_ascii=False) + "\n", encoding="utf-8"
@@ -224,7 +239,7 @@ class TestTypeNormalization:
         old_result = {
             "symbol": "688248.SH",
             "name": "南网科技",
-            "signal_date": "2026-04-29",
+            "signal_date": date_str,
             "signal_type": "low_buy_watch",
             "signal_price": 10.5,
             "r_5d": 0.0,
