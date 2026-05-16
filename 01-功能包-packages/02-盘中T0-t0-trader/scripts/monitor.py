@@ -42,6 +42,7 @@ except ImportError:
 CACHE_DIR = Path(os.environ.get("T0_TRADER_CACHE_DIR", Path.home() / ".t0-trader"))
 CACHE_PATH = Path(os.environ.get("T0_TRADER_STATE_PATH", CACHE_DIR / "state.json"))
 COOLDOWN_MINUTES = 15
+FREQUENCY_STOP_LIMIT: int = 3  # 当日累计止损次数上限
 
 BUY_TRIGGERED = "BUY_TRIGGERED"
 BUY_EXPIRED = "BUY_EXPIRED"
@@ -419,6 +420,25 @@ def build_alert_message(event: str, plan: dict[str, Any], cost: float | None = N
     return "\n".join(lines)
 
 
+# ═══════════════════════════════════════════════
+# 03-System Fuse：单日止损次数熔断机制
+# ═══════════════════════════════════════════════
+
+def _fuse_alert(target_key: str, count: int, name: str = "") -> str:
+    """生成熔断告警"""
+    time_str = datetime.now().strftime("%H:%M")
+    parts = [
+        "🚨熔断（当天止损次数上限）",
+        f"累计止损：{count} 次（阈值：{FREQUENCY_STOP_LIMIT} 次）",
+        f"标的：{name or target_key}",
+        "",
+        "当前标的当日停止 T0 检查",
+        f"时间：{time_str}",
+        "请手动确认或等待明日重置",
+    ]
+    return "\n".join(parts)
+
+
 def _stop_loss_reminder(event: str, plan: dict[str, Any]) -> str:
     is_buy = event.startswith("BUY")
     invalid = plan.get('buy', {}).get('invalid_price') if is_buy else plan.get('sell', {}).get('invalid_price')
@@ -506,8 +526,18 @@ def run_once(
 ) -> str:
     plan = build_plan(target)
     target_key = str(plan.get("symbol") or target)
+    now = datetime.now()
+    
     with state_lock(state_path):
         state = load_state(state_path)
+        fuse_state = state.get("_fuse", {})
+        day = trade_day_key(now)
+        
+        # Check fuse — skip if fused today
+        day_fuse = fuse_state.get(day) if isinstance(fuse_state, dict) else None
+        if isinstance(day_fuse, dict) and day_fuse.get("fused"):
+            return ""
+        
         targets = state.get("targets") if isinstance(state.get("targets"), dict) else {}
         if reset_cache:
             targets.pop(target_key, None)
@@ -523,7 +553,38 @@ def run_once(
         mark_events(new_snapshot, plan, allowed_events)
         targets[target_key] = new_snapshot
         state["targets"] = targets
+        
+        # Count STOP losses and check fuse trigger
+        if allowed_events:
+            stop_count = day_fuse.get("count", 0) if isinstance(day_fuse, dict) else 0
+            fused_targets = day_fuse.get("fused_targets", []) if isinstance(day_fuse, dict) else []
+            for event in allowed_events:
+                if event == BUY_INVALIDATED:
+                    stop_count += 1
+                    if target_key not in fused_targets:
+                        fused_targets = fused_targets + [target_key]
+            
+            if fused_targets is None:
+                fused_targets = []
+            day_fuse = {"count": stop_count, "fused_targets": fused_targets}
+            if stop_count >= FREQUENCY_STOP_LIMIT and not day_fuse.get("fused"):
+                day_fuse["fused"] = True
+                day_fuse["fused_at"] = now.strftime("%H:%M")
+            fuse_state[day] = day_fuse
+            state["_fuse"] = fuse_state
+        
         save_state(state, state_path)
+    
+    # If fuse triggered today, return fuse alert
+    if isinstance(day_fuse, dict) and day_fuse.get("fused"):
+        name = plan.get("name", "")
+        alert = _fuse_alert(target_key, day_fuse["count"], name)
+        try:
+            persist_event_signals([BUY_INVALIDATED], plan)
+        except Exception:
+            pass
+        return alert
+    
     if allowed_events:
         try:
             persist_event_signals(allowed_events, plan)

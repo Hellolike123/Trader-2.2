@@ -38,8 +38,5 @@ LEFT_TRIGGER_AUX: int = 1                 # 1 个辅助条件即可触发
 LEFT_NO_SUPPORT_BLOCK: bool = True        # 跌破主支撑不阻断（放量跌破仍阻断）
 LEFT_FUSE_THRESHOLD: int = 2              # 熔断：当日 N 只标的同时止损 → 停止买入
 
-# ── Left-side (aggressive entry) parameters ──
-LEFT_TRIGGER_CORE: int = 1                # 1 个核心条件即可触发
-LEFT_TRIGGER_AUX: int = 1                 # 1 个辅助条件即可触发
-LEFT_NO_SUPPORT_BLOCK: bool = True        # 跌破主支撑不阻断（放量跌破仍阻断）
-LEFT_FUSE_THRESHOLD: int = 2              # 熔断：当日 N 只标的同时止损 → 停止买入
+# ── Frequency stop limit ──
+FREQUENCY_STOP_LIMIT: int = 3             # 当日累计止损次数上限(任一 BUY_INVALIDATED)触发熔断
