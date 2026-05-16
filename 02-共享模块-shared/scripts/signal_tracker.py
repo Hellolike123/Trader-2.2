@@ -574,7 +574,7 @@ def check_recent(days: int = 5) -> dict[str, int]:
     if not signals or HttpClient is None:
         return {"updated": 0, "skipped": 0}
 
-    cutoff = (datetime.now() - timedelta(days=days + 10)).strftime("%Y-%m-%d")
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     recent = [s for s in signals if _norm_date(str(s.get("trade_date", ""))) >= cutoff]
 
     # 已存在结果 — 二级降级: signal_id → 4-key(规范化)

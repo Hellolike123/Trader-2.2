@@ -56,7 +56,7 @@ class _T:
         )
 
 
-def _sig(date: str = "2026-05-02", symbol: str = "688248.SH"):
+def _sig(date: str = "2026-05-09", symbol: str = "688248.SH"):
     return {
         "symbol": symbol, "name": "南网科技", "trade_date": date,
         "signal_type": "low_buy_watch", "trigger": {"price": 10},
@@ -179,7 +179,7 @@ class TestIdempotency:
     def test_check_recent_twice_same_count(self):
         t = _T()
         # 写入一条信号到 store
-        sig = _sig(date="2026-05-02")
+        sig = _sig(date="2026-05-09")
         t.write_signals([sig])
 
         # 构造 mock bars

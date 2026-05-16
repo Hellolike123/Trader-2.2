@@ -62,11 +62,11 @@ class TestVolumeDivergence:
     def test_bearish_divergence(self):
         bars = [_make_bar(10, 12, 9, 11) for _ in range(10)]
         bars.extend([
-            {"open": 10, "high": 10, "low": 8, "close": 10, "volume": 100},
-            {"open": 10, "high": 11, "low": 9, "close": 11, "volume": 200},
-            {"open": 10, "high": 12, "low": 10, "close": 12, "volume": 150},
-            {"open": 10, "high": 11, "low": 9, "close": 11, "volume": 100},
-            {"open": 10, "high": 10, "low": 8, "close": 10, "volume": 50},
+            {"open": 11, "high": 13, "low": 11, "close": 12, "volume": 100},
+            {"open": 11, "high": 12, "low": 10, "close": 11, "volume": 200},
+            {"open": 11, "high": 13, "low": 11, "close": 13, "volume": 150},
+            {"open": 12, "high": 13, "low": 12, "close": 12, "volume": 100},
+            {"open": 12, "high": 14, "low": 12, "close": 13, "volume": 50},
         ])
         result = wyckoff_analysis(bars)
         assert result["bearish_volume_divergence"] is True
@@ -74,11 +74,11 @@ class TestVolumeDivergence:
     def test_bullish_divergence(self):
         bars = [_make_bar(10, 12, 9, 11) for _ in range(10)]
         bars.extend([
-            {"open": 10, "high": 12, "low": 10, "close": 12, "volume": 100},
-            {"open": 10, "high": 11, "low": 9, "close": 11, "volume": 200},
-            {"open": 10, "high": 10, "low": 8, "close": 10, "volume": 100},
-            {"open": 10, "high": 11, "low": 9, "close": 11, "volume": 50},
-            {"open": 10, "high": 12, "low": 10, "close": 12, "volume": 50},
+            {"open": 12, "high": 13, "low": 12, "close": 12, "volume": 100},
+            {"open": 12, "high": 12, "low": 10, "close": 11, "volume": 200},
+            {"open": 11, "high": 11, "low": 9, "close": 10, "volume": 100},
+            {"open": 9, "high": 11, "low": 9, "close": 11, "volume": 50},
+            {"open": 10, "high": 12, "low": 10, "close": 10, "volume": 50},
         ])
         result = wyckoff_analysis(bars)
         assert result["bullish_volume_divergence"] is True

@@ -20,6 +20,7 @@ for _p in (CONTRACTS, SHARED_SCRIPTS, SHARED_ROOT):
 from price_point_engine import price
 from signal_store import append_signal
 from t0_run import build_plan, build_t0_event_signal
+from config import FREQUENCY_STOP_LIMIT
 
 try:
     from trader_shared import get_market_level, add_warning, get_market_note, log_safe, fill_by_target
@@ -42,7 +43,6 @@ except ImportError:
 CACHE_DIR = Path(os.environ.get("T0_TRADER_CACHE_DIR", Path.home() / ".t0-trader"))
 CACHE_PATH = Path(os.environ.get("T0_TRADER_STATE_PATH", CACHE_DIR / "state.json"))
 COOLDOWN_MINUTES = 15
-FREQUENCY_STOP_LIMIT: int = 3  # 当日累计止损次数上限
 
 BUY_TRIGGERED = "BUY_TRIGGERED"
 BUY_EXPIRED = "BUY_EXPIRED"
@@ -282,6 +282,8 @@ def persist_event_signals(events: list[str], plan: dict[str, Any], store_path: P
                 track_t0_signal("t0-trader", plan["name"], plan["symbol"], signal_type, float(plan.get("current_price") or 0), get_market_level(), get_market_note())
             elif event in {BUY_EXPIRED, SELL_EXPIRED}:
                 track_t0_signal("t0-trader", plan["name"], plan["symbol"], "low_buy_watch" if event.startswith("BUY") else "high_sell_watch", float(plan.get("current_price") or 0), get_market_level(), get_market_note())
+            elif event in {BUY_INVALIDATED, SELL_INVALIDATED, BUY_BLOCKED, SELL_BLOCKED}:
+                track_t0_signal("t0-trader", plan["name"], plan["symbol"], "risk_stop", float(plan.get("current_price") or 0), get_market_level(), get_market_note())
         except Exception:
             # signal tracking is best-effort; persistence to signal_store already succeeded
             pass
@@ -533,10 +535,11 @@ def run_once(
         fuse_state = state.get("_fuse", {})
         day = trade_day_key(now)
         
-        # Check fuse — skip if fused today
+        # If already fused today, mark flag but still allow state updates
+        already_fused = False
         day_fuse = fuse_state.get(day) if isinstance(fuse_state, dict) else None
         if isinstance(day_fuse, dict) and day_fuse.get("fused"):
-            return ""
+            already_fused = True
         
         targets = state.get("targets") if isinstance(state.get("targets"), dict) else {}
         if reset_cache:
@@ -575,14 +578,17 @@ def run_once(
         
         save_state(state, state_path)
     
-    # If fuse triggered today, return fuse alert
-    if isinstance(day_fuse, dict) and day_fuse.get("fused"):
+    # If fuse activated (or already active), return fuse alert
+    if already_fused:
         name = plan.get("name", "")
+        # Persist original events BEFORE fuse alert, so signals.jsonl has correct provenance
+        if allowed_events:
+            try:
+                persist_event_signals(allowed_events, plan)
+            except Exception:
+                pass
+            allowed_events = []
         alert = _fuse_alert(target_key, day_fuse["count"], name)
-        try:
-            persist_event_signals([BUY_INVALIDATED], plan)
-        except Exception:
-            pass
         return alert
     
     if allowed_events:

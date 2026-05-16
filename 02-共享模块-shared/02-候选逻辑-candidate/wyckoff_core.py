@@ -110,9 +110,9 @@ def _detect_volume_divergence(bars: list[dict]) -> tuple[bool, bool]:
     max_vol_idx = max(range(len(volumes)), key=lambda i: volumes[i])
 
     # 看空背离：价格在上升趋势中创新高（峰值高于起点），但量能峰值出现在价格峰值之前（量能萎缩）
-    bearish = prices[max_price_idx] > prices[0] and max_price_idx > max_vol_idx
+    bearish = (prices[max_price_idx] > prices[0]) and (max_price_idx > max_vol_idx)
     # 看多背离：价格在下降趋势中创新低（谷值低于起点），但量能峰值出现在价格谷值之前（抛压释放）
-    bullish = prices[min_price_idx] < prices[0] and min_price_idx > max_vol_idx
+    bullish = (prices[min_price_idx] < prices[0]) and (min_price_idx > max_vol_idx)
 
     return bearish, bullish
 
