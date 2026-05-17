@@ -118,6 +118,117 @@ class DataProvider(Protocol):
 # Default provider: Tencent + Sina (via light_data)
 # ═══════════════════════════════════════════════
 
+class MootdxProvider:
+    """Mootdx-backed implementation using light_data.py mootdx-priority functions."""
+
+    def __init__(self) -> None:
+        self._http = None
+
+    @property
+    def name(self) -> str:
+        return "mootdx"
+
+    def _ensure_paths(self) -> None:
+        _market = _market_data
+        _candidate = _shared / "02-候选逻辑-candidate"
+        for _p in (_market, _candidate):
+            if str(_p) not in sys.path:
+                sys.path.insert(0, str(_p))
+
+    def resolve_security(self, target: str) -> Security:
+        self._ensure_paths()
+        from light_data import resolve_security as _resolve
+        sec = _resolve(target)
+        return Security(code=sec.code, market=sec.market, name=sec.name)
+
+    def fetch_quote(self, sec: Security) -> dict[str, Any]:
+        self._ensure_paths()
+        if self._http is None:
+            from light_data import HttpClient
+            self._http = HttpClient()
+        from light_data import fetch_quote as _fetch
+        from light_data import Security as _Sec
+        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http)
+
+    def fetch_qfq_daily(self, sec: Security, days: int = 30) -> list[dict[str, Any]]:
+        self._ensure_paths()
+        if self._http is None:
+            from light_data import HttpClient
+            self._http = HttpClient()
+        from light_data import fetch_qfq_daily as _fetch
+        from light_data import Security as _Sec
+        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http, days=days)
+
+    def fetch_5m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
+        self._ensure_paths()
+        if self._http is None:
+            from light_data import HttpClient
+            self._http = HttpClient()
+        from light_data import fetch_5m as _fetch
+        from light_data import Security as _Sec
+        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http, datalen=datalen)
+
+    def fetch_15m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
+        self._ensure_paths()
+        if self._http is None:
+            from light_data import HttpClient
+            self._http = HttpClient()
+        from light_data import fetch_15m as _fetch
+        from light_data import Security as _Sec
+        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http, datalen=datalen)
+
+    def fetch_30m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
+        self._ensure_paths()
+        if self._http is None:
+            from light_data import HttpClient
+            self._http = HttpClient()
+        from light_data import fetch_30m as _fetch
+        from light_data import Security as _Sec
+        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http, datalen=datalen)
+
+    def fetch_kline(self, sec: Security, scale: str, datalen: int = 60) -> list[dict[str, Any]]:
+        self._ensure_paths()
+        if self._http is None:
+            from light_data import HttpClient
+            self._http = HttpClient()
+        from light_data import fetch_kline as _fetch
+        from light_data import Security as _Sec
+        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http, scale=scale, datalen=datalen)
+
+    def load_market_snapshot(self, target: str, days: int = 365, include_5m: bool = True) -> MarketSnapshot:
+        self._ensure_paths()
+        from light_data import load_market_snapshot as _load
+        from light_data import MarketSnapshot as _MS
+        snap = _load(target, days=days, include_5m=include_5m)
+        sec = Security(code=snap.security.code, market=snap.security.market, name=snap.security.name)
+        return MarketSnapshot(
+            security=sec,
+            quote=snap.quote,
+            daily_bars=snap.daily_bars,
+            bars_5m=snap.bars_5m,
+            order_book=getattr(snap, "order_book", None),
+            data_status=snap.data_status,
+            missing_sources=snap.missing_sources,
+            source_errors=snap.source_errors,
+            fetched_at=snap.fetched_at,
+        )
+
+    def pct_change(self, start: float, end: float) -> float:
+        self._ensure_paths()
+        from light_data import pct_change as _fn
+        return _fn(start, end)
+
+    def to_float(self, value: Any) -> float | None:
+        self._ensure_paths()
+        from light_data import to_float as _fn
+        return _fn(value)
+
+    def normalize_bars(self, raw_bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        self._ensure_paths()
+        from light_data import normalize_bars as _fn
+        return _fn(raw_bars)
+
+
 class TencentSinaProvider:
     """Default implementation using the existing light_data.py module."""
 
@@ -428,7 +539,10 @@ _provider_set = False
 
 
 def _init_provider() -> DataProvider:
-    return TencentSinaProvider()
+    try:
+        return MootdxProvider()
+    except Exception:
+        return TencentSinaProvider()
 
 
 def get_provider() -> DataProvider:
@@ -438,6 +552,13 @@ def get_provider() -> DataProvider:
         return _provider
 
     provider_name = os.environ.get("TRADER_DATA_PROVIDER", "").lower()
+    if provider_name == "mootdx":
+        try:
+            _provider = MootdxProvider()
+            print(f"DataProvider: using mootdx (via TRADER_DATA_PROVIDER=mootdx)", file=sys.stderr)
+            return _provider
+        except Exception:
+            pass
     if provider_name == "akshare":
         try:
             _provider = AkShareProvider()
@@ -446,7 +567,8 @@ def get_provider() -> DataProvider:
         except RuntimeError:
             pass
     _provider = _init_provider()
-    print(f"DataProvider: using Tencent+Sina", file=sys.stderr)
+    source_name = _provider.name
+    print(f"DataProvider: using {source_name}", file=sys.stderr)
     return _provider
 
 

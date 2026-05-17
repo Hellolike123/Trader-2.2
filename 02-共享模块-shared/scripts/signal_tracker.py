@@ -572,7 +572,7 @@ def check_recent(days: int = 5) -> dict[str, int]:
     """检查并更新最近 N 天后信号结果"""
     signals = _load_signals()
     if not signals or HttpClient is None:
-        return {"updated": 0, "skipped": 0}
+        return {"updated": 0, "skipped": 0, "lifecycle_skipped": 0}
 
     cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     recent = [s for s in signals if _norm_date(str(s.get("trade_date", ""))) >= cutoff]
