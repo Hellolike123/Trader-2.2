@@ -11,6 +11,11 @@ from typing import Any
 STATE_PATH = Path.home() / ".trader" / "pipeline_state.json"
 STATE_DIR = STATE_PATH.parent
 
+STATE_SCHEMA = {
+    "version": 1,
+    "fields": ["updated", "stocks", "market", "positions", "warnings"]
+}
+
 
 def _ensure_dir() -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)

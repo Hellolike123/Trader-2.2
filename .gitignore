@@ -25,3 +25,4 @@ htmlcov/
 
 # Local runtime state
 .trader/
+*.pyc

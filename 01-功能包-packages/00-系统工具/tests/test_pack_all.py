@@ -17,7 +17,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[3]
 PACKAGES_DIR = SCRIPTS_DIR / "01-功能包-packages"
 DIST_DIR = SCRIPTS_DIR / "03-安装包-dist"
 RELEASES_DIR = DIST_DIR / "releases"
-RELEASE_DIR_PATTERN = re.compile(r"^\d{4}-\d{6}$")
+RELEASE_DIR_PATTERN = re.compile(r"^\d{4}-\d{4}$")
 
 EXPECTED_SKILLS: list[tuple[str, str, str]] = [
     ("01-单票分析-trader", "trader", "final_report.py"),
