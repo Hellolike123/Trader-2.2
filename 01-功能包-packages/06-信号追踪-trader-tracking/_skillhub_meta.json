@@ -1,6 +1,6 @@
 {
-  "slug": "review-trader",
-  "name": "Review Trader",
-  "version": "0.1.0-review-v1",
+  "slug": "trader-tracking",
+  "name": "Trader Tracking",
+  "version": "0.1.0-track-v1",
   "source": "local"
 }

@@ -54,10 +54,10 @@ REQUIRED_FIELDS = {
 ALLOWED_SOURCE_SKILLS = {
     "trader",
     "t0-trader",
-    "trader-compare",
     "trader-portfolio",
     "review-trader",
     "trader-pool",
+    # LEGACY: "trader-compare" removed, capability merged into trader-pool compare
 }
 
 # ── Main protocol signal types ────────────────────────────────────

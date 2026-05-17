@@ -1,7 +1,7 @@
 # P0-P4 实施后改进计划
 
+> 状态：待实施（前置依赖：buy-zone-accessibility-fix-plan P0-P4 完成）
 > 创建日期：2026-05-14
-> 状态：已规划，待实施
 > 前置：buy-zone-accessibility-fix-plan.md 中 P0-P4 已全部实施并通过验证
 > 背景：P0-P4 实施后，从理论和代码两个角度审查，发现 7 项待改进项
 

@@ -81,14 +81,13 @@ if [[ -z "$TARGET_ROOT" ]]; then
   esac
 fi
 
-SKILLS=(trader t0-trader trader-compare trader-portfolio review-trader trader-pool)
+SKILLS=(trader t0-trader trader-portfolio review-trader trader-pool)
 LEGACY=(trader-hermes trader-import t0-trader-import trader-old t0-old)
 
 package_dir_for() {
   case "$1" in
     trader) echo "$ROOT_DIR/01-功能包-packages/01-单票分析-trader" ;;
     t0-trader) echo "$ROOT_DIR/01-功能包-packages/02-盘中T0-t0-trader" ;;
-    trader-compare) echo "$ROOT_DIR/01-功能包-packages/03-多股比较-trader-compare" ;;
     trader-portfolio) echo "$ROOT_DIR/01-功能包-packages/04-仓位轮动-trader-portfolio" ;;
     review-trader) echo "$ROOT_DIR/01-功能包-packages/05-盘后复盘-review-trader" ;;
     trader-pool) echo "$ROOT_DIR/01-功能包-packages/06-选股池-trader-pool" ;;
@@ -176,9 +175,6 @@ python3 "$TARGET_ROOT/trader/scripts/validate_output.py" /tmp/trader_reset_smoke
 
 python3 "$TARGET_ROOT/t0-trader/scripts/final_t0.py" --target 南网科技 > /tmp/t0_reset_smoke.md
 python3 "$TARGET_ROOT/t0-trader/scripts/validate_output.py" /tmp/t0_reset_smoke.md
-
-python3 "$TARGET_ROOT/trader-compare/scripts/final_compare.py" --targets 南网科技 中国铝业 > /tmp/compare_reset_smoke.md
-python3 "$TARGET_ROOT/trader-compare/scripts/validate_output.py" /tmp/compare_reset_smoke.md
 
 python3 "$TARGET_ROOT/trader-portfolio/scripts/final_portfolio.py" --targets 南网科技 中国铝业 > /tmp/portfolio_reset_smoke.md
 python3 "$TARGET_ROOT/trader-portfolio/scripts/validate_output.py" /tmp/portfolio_reset_smoke.md

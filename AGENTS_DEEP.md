@@ -1,6 +1,6 @@
 # Trader 2.0 — 架构文档（深挖参考）
 
-> 最后更新：2026-05-06
+> 最后更新：2026-05-17
 > **注意**: AGENTS.md 是 Agent 快速参考，本文档用于开发调试/架构深挖。
 
 ---
@@ -148,6 +148,20 @@ T0 参考 → 低吸/高抛/止损
 | 筹码峰 | 0-100 |
 | 资金行为 | 0-100 |
 | 动能确认 | 0-100 |
+
+### 3.6 trader-tracking（信号追踪）
+
+**入口**: `scripts/final_tracker.py`
+**功能**: 从 `~/.trader/signal_results.jsonl` 生成信号准确率面板（胜率、涨跌比、盈亏比）
+**版本**: v0.1.0
+
+核心逻辑在共享模块 `signal_tracker.py` 中，该 Skill 是薄包装层，负责调用共享模块并渲染输出。
+
+**脚本清单**:
+- `final_tracker.py` — 入口，调用 `signal_tracker.py` 并渲染面板
+- `self_check.py` — 输出格式自检
+- `validate_output.py` — 输出契约校验
+- `install_skill.py` — 安装脚本
 
 ---
 
@@ -384,6 +398,7 @@ git tag trader-v0.6.0 HEAD
 ```
 Trader 2.0/
 ├── 01-功能包-packages/
+│   ├── 00-系统工具/ (系统级工具包，含 tests/test_pack_all.py 打包测试)
 │   ├── 01-单票分析-trader/ (SKILL.md, scripts/final_report.py, references/)
 │   ├── 02-盘中T0-t0-trader/ (SKILL.md, scripts/final_t0.py, references/)
 │   ├── 03-选股池-trader-pool/ (SKILL.md, scripts/final_pool.py, references/)
@@ -394,7 +409,7 @@ Trader 2.0/
 │   ├── 01-行情数据-market-data/ (light_data.py, models.py)
 │   ├── 02-候选逻辑-candidate/ (candidate_core.py, chan_core.py, wyckoff_core.py)
 │   ├── 03-输出校验-contracts/ (signal_contract.py, signal_store.py)
-│   ├── scripts/ (calibrator.py, market_env.py, pipeline.py)
+│   ├── scripts/ (calibrator.py, market_env.py, pipeline.py, signal_tracker.py)
 │   └── trader_shared/ (config.py, schema/v1.py, data_provider.py)
 └── 03-安装包-dist/releases/ (构建产物，不提交)
 ```

@@ -40,6 +40,8 @@ Must pass old output detection — if markdown tables are present, rerun the scr
 
 ## Natural Language Input (对话持仓管理)
 
+> [计划功能 — 尚未实现] 以下自然语言输入解析逻辑目前在 `portfolio_run.py` 中未实现。保留作为未来开发参考，当前 Agent 不应依赖或声称支持这些能力。
+
 The agent MUST parse the user's natural language messages and update `~/.trader/positions.json` automatically. The user never needs to edit JSON or remember command flags.
 
 **Supported utterances** — parse these patterns and update `~/.trader/positions.json`:
