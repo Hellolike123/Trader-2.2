@@ -563,7 +563,13 @@ def _pool_signal_verifications(items: list[dict[str, Any]]) -> tuple[list[dict[s
                         matched = s
                         break
                 if matched is None:
-                    matched = signals[0]  # fallback to latest
+                    # FIX: filter signals by stock name/symbol to avoid cross-stock contamination
+                    for s in signals:
+                        s_name = str(s.get("name", ""))
+                        s_symbol = str(s.get("symbol", ""))
+                        if s_name == name or s_symbol == symbol:
+                            matched = s
+                            break
 
             if matched:
                 sig_type = str(matched.get("signal_type", ""))

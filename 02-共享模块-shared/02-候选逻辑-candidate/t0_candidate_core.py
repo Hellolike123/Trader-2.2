@@ -54,6 +54,7 @@ T0_NONE = "不做"
 _DEFENSE_STATUSES = {"防守观察", "防守观察，趋势下行谨慎"}
 
 # S-2 fix: 融合层 action → status 映射（与 decision_core 同步）
+# 仅保留 T0 包内 fallback 用；当 decision_core 可用时直接 delegate，不用这个
 _FUSION_STATUS_MAP: dict[str, str] = {
     "半仓试 (多方主导)": "低吸观察",
     "半仓试 (多方主导但有分歧)": "等转强",
@@ -161,15 +162,26 @@ def build_candidate_levels(current: float, bars: list[dict[str, Any]], change_pc
     }
 
 
-def status_for(current: float, support: float, low_zone_upper: float, confirm: float, hard_stop: float, position_ratio: float, change_pct: Any, fusion_result: dict[str, Any] | None = None) -> str:
-    # S-2 fix: 融合层覆盖（与 decision_core 同样的逻辑）
+def status_for(current: float, support: float, low_zone_upper: float, confirm: float, hard_stop: float, position_ratio: float, change_pct: Any, fusion_result: dict[str, Any] | None = None, ma_values: dict[str, float | None] | None = None, pressure_space_pct: float = 0.0, bars: list[dict[str, Any]] | None = None) -> str:
+    # Delegate to decision_core to keep a single status judgment logic
+    try:
+        from decision_core import status_for as _dec_status
+        return _dec_status(
+            current=current, support=support, low_zone_upper=low_zone_upper,
+            confirm=confirm, hard_stop=hard_stop, position_ratio=position_ratio,
+            change_pct=change_pct, ma_values=ma_values or {},
+            pressure_space_pct=pressure_space_pct, bars=bars,
+            fusion_result=fusion_result,
+        )
+    except ImportError:
+        pass
+    # Fallback: original T0-only logic (T0 skill may lack decision_core)
     if FUSION_OVERRIDE_ENABLED and isinstance(fusion_result, dict):
         fc = float(fusion_result.get("confidence") or 0)
         if fc >= FUSION_CONFIDENCE_THRESHOLD:
             fusion_action = str(fusion_result.get("action") or "").strip()
             mapped_status = _FUSION_STATUS_MAP.get(fusion_action)
             if mapped_status is not None:
-                # 止损位安全底线不可覆盖
                 if current <= hard_stop or current < support * HARD_STOP_BUFFER_PCT:
                     return "暂不碰"
                 if mapped_status == "暂不碰":
@@ -246,6 +258,13 @@ def risk_note_for(status: str, hard_stop: float) -> str:
 
 
 def score_for(item: dict[str, Any]) -> float:
+    # Delegate to decision_core for a single scoring logic
+    try:
+        from decision_core import score_for as _dec_score
+        return _dec_score(item)
+    except ImportError:
+        # Fallback for T0 install without decision_core
+        pass
     status = str(item.get("status"))
     current = float(item.get("current") or 0)
     low_upper = float(item.get("low_zone_upper") or current)

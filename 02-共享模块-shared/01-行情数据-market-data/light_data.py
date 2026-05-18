@@ -508,7 +508,62 @@ def fetch_5m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[st
     bars = _fetch_mins_mootdx(sec, "5m", datalen)
     if bars:
         return bars
-    return _fetch_mins_akshare(sec, "5m", datalen) or []
+    return _fetch_mins_fallback(sec, "5m", datalen) or []
+
+
+def fetch_15m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
+    bars = _fetch_mins_mootdx(sec, "15m", datalen)
+    if bars:
+        return bars
+    return _fetch_mins_fallback(sec, "15m", datalen) or []
+
+
+def fetch_30m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
+    bars = _fetch_mins_mootdx(sec, "30m", datalen)
+    if bars:
+        return bars
+    return _fetch_mins_fallback(sec, "30m", datalen) or []
+
+
+def fetch_kline(sec: Security, http: HttpClient, datalen: int = 60, interval: str = "60") -> list[dict[str, Any]]:
+    bars = _fetch_mins_mootdx(sec, interval, datalen)
+    if bars:
+        return bars
+    return _fetch_mins_fallback(sec, interval, datalen) or []
+
+
+def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dict[str, Any]]:
+    """Try akshare as a last resort for minute-level data when mootdx is unavailable.
+    
+    akshare (ak.stock_zh_a_hist_min_em) uses em (EastMoney) API internally.
+    """
+    try:
+        import akshare as ak
+    except ImportError:
+        return None
+    try:
+        period_map = {"5m": "5", "15m": "15", "30m": "30", "60": "60"}
+        period = period_map.get(interval, "60")
+        df = ak.stock_zh_a_hist_min_em(symbol=sec.code, period=period, adjust="qfq")
+        if df is None or df.empty:
+            return None
+        bars: list[dict[str, Any]] = []
+        for _, row in df.iterrows():
+            ts_key = "time" if "time" in df.columns else "datetime" if "datetime" in df.columns else None
+            d_key = ts_key or "date"
+            bars.append({
+                "time": str(row.get(ts_key, "")),
+                "date": str(row.get(d_key, "")),
+                "open": to_float(row.get("open")),
+                "high": to_float(row.get("high")),
+                "low": to_float(row.get("low")),
+                "close": to_float(row.get("close")),
+                "volume": to_float(row.get("volume")),
+                "amount": to_float(row.get("amount")),
+            })
+        return bars[-datalen:] if len(bars) > datalen else bars
+    except Exception:
+        return None
 
 
 def load_market_snapshot(target: str, days: int = 30, include_5m: bool = True) -> MarketSnapshot:
@@ -538,7 +593,10 @@ def load_market_snapshot(target: str, days: int = 30, include_5m: bool = True) -
     quote = results.get("quote") or {}
     daily_bars = results.get("daily") or []
     bars_5m = results.get("bars_5m") or []
-    order_book = quote.pop("order_book", None) if isinstance(quote, dict) else None
+    order_book = quote.get("order_book")
+    if isinstance(quote, dict):
+        quote = dict(quote)  # shallow copy to avoid mutating the cache
+        del quote["order_book"]
     if include_5m and not bars_5m and "bars_5m" not in missing_sources:
         missing_sources.append("bars_5m")
 
@@ -586,29 +644,6 @@ def normalize_bars(raw_bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if normalized:
             bars.append(normalized)
     return bars
-
-
-def fetch_15m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
-    bars = _fetch_mins_mootdx(sec, "15m", datalen)
-    if bars:
-        return bars
-    return _fetch_mins_akshare(sec, "15m", datalen) or []
-
-
-def fetch_30m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
-    bars = _fetch_mins_mootdx(sec, "30m", datalen)
-    if bars:
-        return bars
-    return _fetch_mins_akshare(sec, "30m", datalen) or []
-
-
-def fetch_kline(sec: Security, http: HttpClient, scale: str = "5", datalen: int = 60) -> list[dict[str, Any]]:
-    interval_map = {"5": "5m", "15": "15m", "30": "30m", "60": "60m"}
-    interval = interval_map.get(scale, "5m")
-    bars = _fetch_mins_mootdx(sec, interval, datalen)
-    if bars:
-        return bars
-    return _fetch_mins_akshare(sec, interval, datalen) or []
 
 
 def pct_change(start: float, end: float) -> float:

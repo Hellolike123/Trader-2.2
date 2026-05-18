@@ -388,31 +388,49 @@ def short_date(value: Any) -> str:
 
 
 def sync_report_with_data(report: dict, levels: dict) -> dict:
-    """脚本自洽校验：修正数据与文字标签的矛盾。"""
-    ma5 = to_float(levels.get("ma_values", {}).get("ma5"))
+    """脚本自洽校验：修正数据与文字标签的矛盾"""
+    current  = float(report.get("current") or 0)
+    support  = float(report.get("support") or 0)
+    resistance = float(report.get("resistance") or 0)
+    confirm  = float(report.get("confirm") or 0)
+    stop     = float(report.get("stop") or 0)
+    take     = float(report.get("take") or 0)
+    scene    = str(report.get("scene") or "")
+    state_label  = str(report.get("state_label") or "")
+    ma5  = to_float(levels.get("ma_values", {}).get("ma5"))
     ma10 = to_float(levels.get("ma_values", {}).get("ma10"))
-    current = float(report.get("current") or 0)
-    state_label = report.get("state_label", "")
+    # MA 趋势与文字标签
     if ma5 is not None and ma10 is not None and current > 0:
         if ma5 > ma10 and "空头" in state_label:
             report["state_label"] = state_label.replace("空头", "多头")
         elif ma5 < ma10 and "多头" in state_label:
             report["state_label"] = state_label.replace("多头", "空头")
-    scene = str(report.get("scene") or "")
-    confirm = float(report.get("confirm") or 0)
-    stop = float(report.get("stop") or 0)
-    low_price = float(report.get("support") or 0)
+    # support > resistance → 筹码与 ATR 模块打架
+    if support > 0 and resistance > 0 and support >= resistance:
+        report["resistance"] = support * 1.03
+        report["support"]    = resistance * 0.97
+    # stop < support（止损永远在支撑下方）
+    if stop > 0 and support > 0 and stop >= support:
+        report["stop"] = round(support * 0.97, 2)
+    # take < confirm（止盈永远高于确认位）
+    if take > 0 and confirm > 0 and take <= confirm:
+        report["take"] = max(current * 1.05, confirm * 1.03)
+    # 场景与数值的逻辑一致性
     if scene in ("突破确认", "突破观察") and confirm > current:
-        report["scene"] = "观望"
-        report["state_label"] = "未确认"
-    elif scene in ("低吸观察", "防守观察") and current > confirm:
-        report["scene"] = "等转强"
-        report["state_label"] = "等转强"
-    elif scene == "冲高减仓" and current < low_price:
-        report["scene"] = "低吸观察"
-    resistance = float(report.get("resistance") or 0)
-    if resistance > 0 and low_price > 0 and resistance <= low_price:
-        report["resistance"] = low_price * 1.03
+        report["scene"]        = "观望"
+        report["state_label"]  = "未确认"
+    elif scene in ("低吸观察", "防守观察") and current < support and support > 0:
+        report["scene"]        = "破位下行"
+        report["state_label"]  = "破位下行"
+    elif scene == "冲高减仓" and current < support and support > 0:
+        report["scene"]        = "低吸观察"
+        report["state_label"]  = "低吸观察"
+    elif scene == "突破观察" and current >= confirm and confirm > 0:
+        report["scene"]        = "突破确认"
+        report["state_label"]  = "趋势走强"
+    elif scene in ("空间不足",) and current < support and support > 0:
+        report["scene"]        = "修复观察"
+        report["state_label"]  = "修复观察"
     return report
 
 
