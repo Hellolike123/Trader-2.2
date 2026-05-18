@@ -54,6 +54,31 @@ def main() -> int:
 
     print(markdown)
 
+    # ── AI 事实表 (供 Hermes 解析，不展示给用户) ──
+    try:
+        _facts = {
+            "target": args.target,
+            "fetched_at": report.get("fetched_at"),
+            "data_status": report.get("data_status"),
+            "current": report.get("current"),
+            "change_pct": report.get("change_pct"),
+            "ma": report.get("ma_raw", {}),
+            "support": report.get("support"),
+            "resistance": report.get("resistance"),
+            "confirm": report.get("confirm"),
+            "stop": report.get("stop"),
+            "take": report.get("take"),
+            "atr14": report.get("atr14"),
+            "atr_ratio": report.get("atr_ratio"),
+            "state_label": report.get("state_label"),
+            "fusion_action": (report.get("fusion") or {}).get("action", ""),
+            "fusion_weighted_score": (report.get("fusion") or {}).get("weighted_score"),
+            "market_env": (report.get("market_env") or {}).get("level") if isinstance(report.get("market_env"), dict) else "",
+        }
+        print("__FACTS__:" + json.dumps(_facts, ensure_ascii=False, default=str), file=sys.stdout)
+    except Exception:
+        pass
+
     last_target_path = os.path.expanduser("~/.trader/last_target.txt")
     os.makedirs(os.path.dirname(last_target_path), exist_ok=True)
     with open(last_target_path, "w", encoding="utf-8") as f:

@@ -273,7 +273,7 @@ def build_report(target: str) -> dict[str, Any]:
             else:
                 chip_resistance = resistance_peaks[0]["price"]
 
-    return {
+    report = {
         "name": quote.get("name") or sec.name,
         "symbol": quote.get("symbol") or sec.ts_code,
         "analysis_time": analysis_time,
@@ -334,6 +334,9 @@ def build_report(target: str) -> dict[str, Any]:
         "time_window": levels.get("time_window"),
     }
 
+    report = sync_report_with_data(report, levels)
+    return report
+
 
 def numeric_values(bars: list[dict[str, Any]], key: str) -> list[float]:
     return [value for value in (to_float(item.get(key)) for item in bars) if value is not None]
@@ -382,6 +385,35 @@ def chunks(items: list[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]
 def short_date(value: Any) -> str:
     text = str(value or "")
     return text[5:10] if len(text) >= 10 else text
+
+
+def sync_report_with_data(report: dict, levels: dict) -> dict:
+    """脚本自洽校验：修正数据与文字标签的矛盾。"""
+    ma5 = to_float(levels.get("ma_values", {}).get("ma5"))
+    ma10 = to_float(levels.get("ma_values", {}).get("ma10"))
+    current = float(report.get("current") or 0)
+    state_label = report.get("state_label", "")
+    if ma5 is not None and ma10 is not None and current > 0:
+        if ma5 > ma10 and "空头" in state_label:
+            report["state_label"] = state_label.replace("空头", "多头")
+        elif ma5 < ma10 and "多头" in state_label:
+            report["state_label"] = state_label.replace("多头", "空头")
+    scene = str(report.get("scene") or "")
+    confirm = float(report.get("confirm") or 0)
+    stop = float(report.get("stop") or 0)
+    low_price = float(report.get("support") or 0)
+    if scene in ("突破确认", "突破观察") and confirm > current:
+        report["scene"] = "观望"
+        report["state_label"] = "未确认"
+    elif scene in ("低吸观察", "防守观察") and current > confirm:
+        report["scene"] = "等转强"
+        report["state_label"] = "等转强"
+    elif scene == "冲高减仓" and current < low_price:
+        report["scene"] = "低吸观察"
+    resistance = float(report.get("resistance") or 0)
+    if resistance > 0 and low_price > 0 and resistance <= low_price:
+        report["resistance"] = low_price * 1.03
+    return report
 
 
 def volume_observation(daily: list[dict[str, Any]], bars_5m: list[dict[str, Any]]) -> str:
