@@ -206,8 +206,19 @@ def get_cache_key(url: str, params: dict[str, Any] | None = None) -> str:
     return hashlib.md5(raw.encode()).hexdigest()
 
 
+def _prune_cache() -> None:
+    now = time.time()
+    expired_keys = [k for k, exp in _cache_expiry.items() if now >= exp]
+    for k in expired_keys:
+        _cache.pop(k, None)
+        _cache_expiry.pop(k, None)
+    expired_rt = [k for k, (_, ts) in _realtime_cache.items() if now >= ts + _REALTIME_TTL]
+    for k in expired_rt:
+        _realtime_cache.pop(k, None)
+
+
 def get_from_cache(key: str) -> Any:
-    """从缓存获取数据（检查过期时间）"""
+    _prune_cache()
     if key in _cache and key in _cache_expiry:
         if time.time() < _cache_expiry[key]:
             return _cache[key]
@@ -230,7 +241,6 @@ def get_realtime_cache(key: str) -> Any:
 
 
 def save_realtime_cache(key: str, data: Any) -> None:
-    """保存实时数据到缓存（30秒过期）"""
     _realtime_cache[key] = (data, time.time())
 
 

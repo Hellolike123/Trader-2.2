@@ -55,6 +55,7 @@ def test_signal_status_values():
 
 
 import json
+from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
 
@@ -68,17 +69,15 @@ def test_check_recent_skips_completed(tmp_path, monkeypatch):
     monkeypatch.setattr(st, "STORE_PATH", store)
     monkeypatch.setattr(st, "RESULT_PATH", results)
 
+    recent_date = (date.today() - timedelta(days=2)).isoformat()
     signal = {
-        "symbol": "688248.SH", "trade_date": "2026-05-12",
+        "symbol": "688248.SH", "trade_date": recent_date,
         "signal_type": "low_buy_watch", "status": "completed",
         "trigger": {"price": 10.5},
     }
     store.write_text(json.dumps(signal) + "\n", encoding="utf-8")
 
-    with patch.object(st, "HttpClient", MagicMock()), \
-         patch.object(st, "resolve_security", return_value="688248.SH"), \
-         patch.object(st, "fetch_qfq_daily", return_value=[]), \
-         patch.object(st, "to_float", return_value=None):
+    with patch.object(st, "HttpClient", MagicMock()):
         result = st.check_recent(days=5)
 
     assert result.get("lifecycle_skipped", 0) >= 1, f"Should skip completed signal: {result}"
@@ -88,7 +87,6 @@ def test_check_recent_skips_completed(tmp_path, monkeypatch):
 def test_backfill_signal_status(tmp_path, monkeypatch):
     """Signals with matching results get status=completed after backfill."""
     import signal_tracker as st
-    import json
 
     store = tmp_path / "signals.jsonl"
     results = tmp_path / "signal_results.jsonl"
@@ -119,14 +117,15 @@ def test_check_recent_sets_completed_on_signal(tmp_path, monkeypatch):
     monkeypatch.setattr(st, "STORE_PATH", store)
     monkeypatch.setattr(st, "RESULT_PATH", results)
 
+    recent_date = (date.today() - timedelta(days=2)).isoformat()
     signal = {
-        "symbol": "688248.SH", "trade_date": "2026-05-12",
+        "symbol": "688248.SH", "trade_date": recent_date,
         "signal_type": "low_buy_watch",
         "trigger": {"price": 10.5},
     }
     store.write_text(json.dumps(signal) + "\n", encoding="utf-8")
 
-    bars = [{"date": "2026-05-12", "close": 10.5, "atr14": 0.3}]
+    bars = [{"date": recent_date, "close": 10.5, "atr14": 0.3}]
 
     with patch.object(st, "HttpClient", return_value=MagicMock()), \
          patch.object(st, "resolve_security", return_value="688248.SH"), \
