@@ -28,6 +28,12 @@ except ImportError:
     Quotes = None
     _MOOTDX_AVAILABLE = False
 
+try:
+    import akshare as _AKSHARE
+    _AKSHARE_AVAILABLE = True
+except ImportError:
+    _AKSHARE_AVAILABLE = False
+
 
 TENCENT_QUOTE_URL = "https://qt.gtimg.cn/q="
 TENCENT_FQKLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
@@ -465,30 +471,44 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 30) -> list[dic
     return result
 
 
-def fetch_5m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
+def _fetch_mins_mootdx(sec: Security, interval: str, datalen: int = 60) -> list[dict[str, Any]] | None:
     client = _get_mootdx_client()
-    if client is not None:
-        try:
-            df = client.bars(symbol=sec.code, category=MOOTDX_CATEGORY["5m"], offset=datalen, market=_mootdx_market(sec))
-            if df is not None and len(df) > 0:
-                bars = []
-                for _, row in df.iterrows():
-                    raw_dt = str(row.get("datetime", ""))
-                    parts = raw_dt.split(" ")
-                    bars.append({
-                        "time": raw_dt,
-                        "date": parts[0] if len(parts) > 0 else "",
-                        "open": to_float(row.get("open")),
-                        "high": to_float(row.get("high")),
-                        "low": to_float(row.get("low")),
-                        "close": to_float(row.get("close")),
-                        "volume": to_float(row.get("vol")),
-                        "amount": to_float(row.get("amount")),
-                    })
-                return bars
-        except Exception:
-            pass
-    return fetch_kline(sec, http, scale="5", datalen=datalen)
+    if client is None:
+        return None
+    category_map = {"5m": "5m", "15m": "15m", "30m": "30m", "60m": "60m"}
+    cat = category_map.get(interval)
+    if cat is None:
+        return None
+    cat_num = MOOTDX_CATEGORY.get(cat)
+    if cat_num is None:
+        return None
+    try:
+        df = client.bars(symbol=sec.code, category=cat_num, offset=datalen, market=_mootdx_market(sec))
+        if df is None or len(df) == 0:
+            return None
+        bars: list[dict[str, Any]] = []
+        for _, row in df.tail(datalen).iterrows():
+            raw_dt = str(row.get("datetime", ""))
+            bars.append({
+                "time": raw_dt,
+                "date": raw_dt[:10],
+                "open": to_float(row.get("open")),
+                "close": to_float(row.get("close")),
+                "high": to_float(row.get("high")),
+                "low": to_float(row.get("low")),
+                "volume": to_float(row.get("vol")),
+                "amount": to_float(row.get("amount")),
+            })
+        return bars
+    except Exception:
+        return None
+
+
+def fetch_5m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
+    bars = _fetch_mins_mootdx(sec, "5m", datalen)
+    if bars:
+        return bars
+    return _fetch_mins_akshare(sec, "5m", datalen) or []
 
 
 def load_market_snapshot(target: str, days: int = 30, include_5m: bool = True) -> MarketSnapshot:
@@ -568,32 +588,27 @@ def normalize_bars(raw_bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return bars
 
 
-def fetch_kline(sec: Security, http: HttpClient, scale: str = "5", datalen: int = 60) -> list[dict[str, Any]]:
-    def do_fetch():
-        params = {"symbol": sec.qq_symbol, "scale": str(scale), "ma": "no", "datalen": str(datalen)}
-        payload = http.get_json(SINA_KLINE_URL, params=params)
-        if not isinstance(payload, list):
-            raise RuntimeError(f"Sina {scale}m payload invalid")
-        raw_bars = []
-        for row in payload:
-            if isinstance(row, dict):
-                raw_bars.append(row)
-        return normalize_bars(raw_bars)
-
-    try:
-        return retry(do_fetch, url=SINA_KLINE_URL)
-    except Exception as exc:
-        # 分时数据是增强材料，失败时允许上层降级输出。
-        print(f"Warning: Failed to fetch kline data: {exc}", file=sys.stderr)
-        return []
-
-
 def fetch_15m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
-    return fetch_kline(sec, http, scale="15", datalen=datalen)
+    bars = _fetch_mins_mootdx(sec, "15m", datalen)
+    if bars:
+        return bars
+    return _fetch_mins_akshare(sec, "15m", datalen) or []
 
 
 def fetch_30m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
-    return fetch_kline(sec, http, scale="30", datalen=datalen)
+    bars = _fetch_mins_mootdx(sec, "30m", datalen)
+    if bars:
+        return bars
+    return _fetch_mins_akshare(sec, "30m", datalen) or []
+
+
+def fetch_kline(sec: Security, http: HttpClient, scale: str = "5", datalen: int = 60) -> list[dict[str, Any]]:
+    interval_map = {"5": "5m", "15": "15m", "30": "30m", "60": "60m"}
+    interval = interval_map.get(scale, "5m")
+    bars = _fetch_mins_mootdx(sec, interval, datalen)
+    if bars:
+        return bars
+    return _fetch_mins_akshare(sec, interval, datalen) or []
 
 
 def pct_change(start: float, end: float) -> float:
