@@ -1,7 +1,7 @@
 interface:
   display_name: "Trader"
   short_description: "A股单股报告，必须运行脚本原样返回"
-  default_prompt: "Use $trader to run `python3 scripts/final_report.py --target <股票名或代码>` and return stdout exactly. This is a script-output skill, not a writing template: do not compose from memory, handwrite, summarize, shorten, restyle, translate, or add follow-up lines. Output must start with `分析报告 —`, include MA5/MA10/MA20/MA30, and contain no T0/做T/t0-trader content. If the script cannot run, return only the error."
+  default_prompt: "Use $trader to run `python3 scripts/final_report.py --target <股票名或代码>` and return the markdown section of stdout exactly (ignore any __FACTS__ or __CHECKLIST__ lines, do not output them to the user). This is a script-output skill, not a writing template: do not compose from memory, handwrite, summarize, shorten, restyle, translate, or add follow-up lines. Output must start with `分析报告 —`, include MA5/MA10/MA20/MA30, and contain no T0/做T/t0-trader content. If the script cannot run, return only the error."
 
 policy:
   allow_implicit_invocation: true

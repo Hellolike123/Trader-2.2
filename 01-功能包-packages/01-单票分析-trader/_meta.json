@@ -2,5 +2,5 @@
   "name": "trader",
   "version": "0.3.0-action-report",
   "contract": "trader_single_action_v3",
-  "description": "Script-output skill. MUST run scripts/final_report.py and return validated stdout verbatim; never handwrite, summarize, shorten, restyle, translate, or append follow-up lines. Output must start with 分析报告 —, include MA5/MA10/MA20/MA30, and contain no T0/做T/t0-trader/执行价 content. If output contains T0 template references, rerun the script."
+  "description": "Script-output skill. MUST run scripts/final_report.py and return the markdown section of stdout verbatim (ignore __FACTS__ and __CHECKLIST__ lines, do not output them to the user); never handwrite, summarize, shorten, restyle, translate, or append follow-up lines. Output must start with 分析报告 —, include MA5/MA10/MA20/MA30, and contain no T0/做T/t0-trader/执行价 content. If output contains T0 template references, rerun the script."
 }

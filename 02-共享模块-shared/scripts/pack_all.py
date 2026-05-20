@@ -22,7 +22,7 @@ import shutil
 import sys
 import tempfile
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 # Active skills (deprecated trader-compare removed)
@@ -120,39 +120,73 @@ def build_release_dir_name() -> str:
     return now.strftime("%m%d-%H%M")
 
 
+def parse_release_date(name: str) -> datetime | None:
+    """Parse 'MMDD-HHMM' or 'MMDD-HHMMSS' into a datetime object (using a dummy year)."""
+    try:
+        parts = name.split("-")
+        if len(parts) != 2:
+            return None
+        md, time_part = parts
+        if len(md) != 4:
+            return None
+        month = int(md[:2])
+        day = int(md[2:])
+        hour = int(time_part[:2])
+        minute = int(time_part[2:4])
+        # Default to year 2020 (a leap year to safely handle Feb 29)
+        return datetime(2020, month, day, hour, minute)
+    except Exception:
+        return None
+
+
+def days_between(anchor: datetime, target: datetime) -> float:
+    """Compute days difference anchor - target, adjusting for year rollover."""
+    diff = anchor - target
+    # If target is Dec and anchor is Jan, target's dummy year is 2020, anchor is 2020,
+    # diff will be negative (e.g. Jan 2 - Dec 31 = -363 days).
+    # We adjust by shifting target to the previous year (2019), so Jan 2, 2020 - Dec 31, 2019 = 2 days.
+    if diff.days < -300:
+        adjusted_target = datetime(target.year - 1, target.month, target.day, target.hour, target.minute)
+        return (anchor - adjusted_target).total_seconds() / 86400.0
+    return diff.total_seconds() / 86400.0
+
+
 def cleanup_old_releases(releases_dir: Path, keep: int = MAX_RELEASES) -> int:
-    """Remove old release directories, keeping the last one per day.
+    """Remove old release directories, keeping ALL versions within the last `keep` days.
 
-    1. Per-day dedup: for each day, only the latest release is kept;
-       earlier same-day releases are always removed.
-    2. From the deduped list, keep the most recent ``keep`` entries;
-       older days are pruned.
-
-    Returns the number of directories removed.
+    The 'last N days' is calculated relative to the newest folder inside the directory
+    to ensure stable, system-clock independent behavior (highly robust for rollbacks).
     """
     if not releases_dir.exists() or keep <= 0:
         return 0
-    dirs = sorted(
-        [d for d in releases_dir.iterdir() if d.is_dir() and d.name != ".gitkeep"],
-        key=lambda d: d.name,
-    )
-    # Group by day prefix (MMDD) — keep only the last entry per day
-    by_day: dict[str, list[Path]] = {}
+
+    dirs = [d for d in releases_dir.iterdir() if d.is_dir() and d.name != ".gitkeep"]
+    if not dirs:
+        return 0
+
+    # Parse and pair each folder with its datetime
+    parsed_dirs: list[tuple[Path, datetime]] = []
     for d in dirs:
-        day = d.name.split("-")[0]  # e.g. "0514"
-        by_day.setdefault(day, []).append(d)
+        dt = parse_release_date(d.name)
+        if dt is not None:
+            parsed_dirs.append((d, dt))
 
-    # Step 1: last release per day (already in chronological order)
-    last_per_day = [day_dirs[-1] for day_dirs in by_day.values()]
+    if not parsed_dirs:
+        return 0
 
-    # Step 2: from deduped list, keep only the most recent `keep`
-    to_keep = set(last_per_day[-keep:]) if keep < len(last_per_day) else set(last_per_day)
+    # The anchor is the newest directory (latest datetime)
+    parsed_dirs.sort(key=lambda item: item[1])
+    anchor_path, anchor_dt = parsed_dirs[-1]
 
-    # Step 3: remove everything not in to_keep
-    to_remove = [d for d in dirs if d not in to_keep]
-    for d in to_remove:
-        shutil.rmtree(d, ignore_errors=True)
-    return len(to_remove)
+    removed_count = 0
+    for path, dt in parsed_dirs:
+        diff_days = days_between(anchor_dt, dt)
+        # Keep everything within keep days (inclusive of the 5th day, i.e., <= keep)
+        if diff_days > keep:
+            shutil.rmtree(path, ignore_errors=True)
+            removed_count += 1
+
+    return removed_count
 
 
 def ensure_releases_gitignore(releases_dir: Path) -> None:
