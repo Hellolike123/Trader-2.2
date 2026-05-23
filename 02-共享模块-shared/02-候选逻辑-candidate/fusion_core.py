@@ -34,6 +34,15 @@ import os
 import sys
 from typing import Any
 
+# ── [2.3] 贝叶斯融合（可选导入，无则降级） ───────────────────────────────────────────
+try:
+    from bayesian_fusion import is_enabled as _bayesian_enabled, bayesian_merge
+    _BAYESIAN_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _BAYESIAN_AVAILABLE = False
+    def _bayesian_enabled(): return False
+    def bayesian_merge(chan, mom, wyk, regime_state="range"): return {}
+
 # ── 安全模式: 环境变量控制 (FUSION_LOG_ONLY=true = 只日志, 不改决策行为)
 # 默认关闭日志模式, 融合层正式生效。调试时可设置 FUSION_LOG_ONLY=true
 
@@ -243,6 +252,7 @@ def merge_decisions(
     regime: str = "正常",
     current_price: float = 0.0,
     bars: list = None,
+    hmm_regime: str = "range",
 ) -> dict:
     """决策融合层核心函数。
 
@@ -254,6 +264,7 @@ def merge_decisions(
                          ("正常" | "偏弱" | "很差" | "未知")
         current_price:   当前价格，可选，用于动态判断价格区间
         bars:            K线数据，可选，用于动态判断价格区间
+        hmm_regime:      HMM大势前瞻状态 ("bull" | "bear" | "range")
 
     Returns:
         {
@@ -261,6 +272,7 @@ def merge_decisions(
             "confidence": float,
             "weighted_score": float,
             "regime": str,
+            "hmm_regime": str,
             "disagreement": float,
             "signals_detail": {...},
             "weights_used": {...},
@@ -377,11 +389,32 @@ def merge_decisions(
     # 6. 综合置信度
     confidence = compute_confidence(weighted_score, disagreement_for_action, weights)
 
+    # ── [2.3新增] 贝叶斯概率决策融合 ──
+    bayesian_used = False
+    bayesian_info = {}
+    if _BAYESIAN_AVAILABLE and _bayesian_enabled():
+        try:
+            bayesian_res = bayesian_merge(
+                chan_signal=chan_signal,
+                momentum_signal=momentum_signal,
+                wyckoff_signal=wyckoff_signal,
+                regime_state=hmm_regime
+            )
+            if bayesian_res and "action" in bayesian_res:
+                action = bayesian_res["action"]
+                confidence = bayesian_res["confidence"]
+                weighted_score = bayesian_res["action_score"]
+                bayesian_used = True
+                bayesian_info = bayesian_res
+        except Exception as exc:
+            print(f"FUSION-WARN: Bayesian fusion failed, falling back: {exc}", file=sys.stderr)
+
     result = {
         "action": action,
         "confidence": round(confidence, 3),
         "weighted_score": round(weighted_score, 3),
         "regime": regime,
+        "hmm_regime": hmm_regime,
         "disagreement": round(disagreement, 3),
         "signals_detail": {
             "chan": chan_signal,
@@ -390,6 +423,8 @@ def merge_decisions(
         },
         "weights_used": weights,
     }
+    if bayesian_used:
+        result["bayesian_info"] = bayesian_info
 
     # 7. 日志 + 安全模式
     _log_fusion(result)

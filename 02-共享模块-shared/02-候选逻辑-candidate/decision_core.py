@@ -7,7 +7,14 @@ from typing import Any
 from light_data import to_float
 from trader_shared.modifier_rule_engine import apply_score_modifiers, apply_livermore_scale
 
-_engine: Any = None
+# ── [2.3] Volume Profile 日内量价分布（可选，无则降级）────────────────────────────
+try:
+    from volume_profile import assess_vp_breakout as _vp_assess
+    _VP_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _VP_AVAILABLE = False
+    def _vp_assess(price, vp, is_buy_context=True):
+        return {"vp_signal": "no_data", "vp_confidence": 0.5, "vp_note": "无量价分布模块"}
 _engine_loaded: bool = False
 
 
@@ -158,26 +165,27 @@ def _check_theory_breakout(
     position_ratio: float,
     chan_result: dict | None,
     wyk: dict | None,
+    vp_result: dict | None = None,  # [2.3新增] Volume Profile 日内量价分布
 ) -> bool:
     if not chan_result and not wyk:
         return False
-    
+
     # 价格前提：当前价格不能跌破支撑位
     if current < support:
         return False
-    
+
     # 价格已经接近或突破确认位，或者在强势运行区间（position_ratio >= 0.50）
     price_strong = (current >= confirm * 0.985) or (position_ratio >= 0.50)
     if not price_strong:
         return False
 
-    # 1. 缠论验证
+    # 1. 缺论验证
     chan_ok = False
     if isinstance(chan_result, dict):
         buy_point_text = str(chan_result.get("buy_point_text") or "")
         trend_label = str(chan_result.get("trend_label") or "")
         strokes = chan_result.get("strokes", [])
-        
+
         # 最强确认：触发三类买点（突破回踩确认）
         if "三类买" in buy_point_text:
             chan_ok = True
@@ -194,7 +202,7 @@ def _check_theory_breakout(
         has_upthrust = wyk.get("upthrust_signal", False)
         has_spring = wyk.get("spring_signal", False)
         has_bullish_div = wyk.get("bullish_volume_divergence", False)
-        
+
         # 排除假突破 (Upthrust)
         if not has_upthrust:
             # 确认有做多结构 (Spring 或看多背离)
@@ -205,7 +213,22 @@ def _check_theory_breakout(
                 if "无明显威科夫信号" in summary or "看多" in summary:
                     wyk_ok = True
 
-    return chan_ok or wyk_ok
+    theory_ok = chan_ok or wyk_ok
+    if not theory_ok:
+        return False
+
+    # 3. [2.3新增] Volume Profile 日内量价分布验证
+    # 价格跳空下 VA 下沿 = 量价结构不支持突破，封索确认
+    if _VP_AVAILABLE and isinstance(vp_result, dict) and vp_result.get("fitted"):
+        try:
+            vp_info = _vp_assess(current, vp_result, is_buy_context=True)
+            vp_signal = vp_info.get("vp_signal", "no_data")
+            if vp_signal == "below_va":
+                return False
+        except Exception:
+            pass  # VP 异常静默降级
+
+    return True           # 其他状态（va_breakout/above_poc/va_support/no_data）正常通过
 
 
 def status_layers(

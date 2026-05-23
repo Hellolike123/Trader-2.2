@@ -179,10 +179,11 @@ def build_report(target: str) -> dict[str, Any]:
             momentum_result=momentum_result,
             wyckoff_result=wyck_result,
             regime=env.get("level", "正常"),
+            hmm_regime=env.get("hmm_regime_en", "range"),
         )
     except Exception:
         report_fusion = {"action": "融合层异常", "confidence": 0, "weighted_score": 0,
-                         "regime": "", "disagreement": 0, "signals_detail": {}, "weights_used": {}}
+                         "regime": "", "hmm_regime": "range", "disagreement": 0, "signals_detail": {}, "weights_used": {}}
 
     # C-7 fix: build_structure_context 现在在融合层之后调用，
     # 可以正确接收 fusion_result 和 chan_result

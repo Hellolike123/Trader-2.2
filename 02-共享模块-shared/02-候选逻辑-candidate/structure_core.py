@@ -1,8 +1,29 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from light_data import pct_change, to_float
+
+# ── [2.3] HMM 大势检测器（可选导入，阵列中无则降级）──────────────────────────────
+try:
+    from hmm_regime import detect_regime as _hmm_detect_regime, regime_to_multiplier as _hmm_multiplier
+    _HMM_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _HMM_AVAILABLE = False
+    def _hmm_detect_regime(returns): return {"state_en": "range", "confidence": 0.5}
+    def _hmm_multiplier(r): return {"zone_width": 1.0, "confirm_buffer": 1.0, "stop_buffer": 1.0}
+
+# ── [2.3] 离线自校准参数加载器（可选，无则用默认参数）───────────────────────────────
+try:
+    from self_calibration import load_calibrated_params as _load_calibrated_params
+    _CALIBRATION_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _CALIBRATION_AVAILABLE = False
+    def _load_calibrated_params(): return {"zone_width": 1.0, "confirm_buffer": 1.0, "stop_buffer": 1.0}
+
+# 是否启用 HMM 前瞻大势认定（默认开启）
+_HMM_REGIME_ENABLED = os.environ.get("HMM_REGIME_ENABLED", "true").lower() not in ("false", "0", "no")
 
 try:
     from models import BarData, CandidateLevels, MAValues, QuoteData
@@ -224,37 +245,62 @@ def zone_position(current: float, support: float, confirm: float) -> float:
 
 
 
-def _theory_multipliers(fusion_result: dict[str, Any] | None) -> dict[str, float]:
+def _theory_multipliers(fusion_result: dict[str, Any] | None, index_returns: list[float] | None = None) -> dict[str, float]:
     """根据融合层理论信号及大盘环境计算参数微调系数。
 
-    返回 dict，每项默认1.0（不变）。理论信号好时积极放大，差时收窄。
-    若 fusion_result 为 None 或信号不足，全部返回1.0，退化为纯数学计算。
-
+    [2.3升级] 三层叠加架构：
+      层-0：离线历史胜率寻优的自校准参数作为基准倍率
+      层-1：均线大势 Regime（正常/偏弱/很差）调节
+      层-2：[2.3新增] HMM 前瞻 Regime（bull/bear/range）进一步徣化调节（叠加50%）
+      层-3：理论信号（缺论/威科夫/动能）微调
+    若 fusion_result 为 None 且无 HMM 数据，层-0 校准值直接返回。
     映射规则（详见 docs/buy-zone-accessibility-fix-plan.md P3）：
-      缠论上攻笔/三买 → zone_width 放大 +15%
-      缠论下跌笔未结束 → zone_width 缩小 -10%
+      缺论上攻笔/三买 → zone_width 放大 +15%
+      缺论下跌笔未结束 → zone_width 缩小 -10%
       威科夫吸筹/Spring → confirm_buffer 收窄 -30%
       动量强势（bullish + score≥65）→ space_threshold 收窄 -20%
       动量弱势（bearish + score≤35）→ space_threshold 加宽 +30%
     """
+    # 层-0：离线历史寻优的自校准基准值
+    _cal = _load_calibrated_params() if _CALIBRATION_AVAILABLE else {}
     multipliers = {
-        "zone_width": 1.0,
-        "confirm_buffer": 1.0,
+        "zone_width":      _cal.get("zone_width", 1.0),
+        "confirm_buffer":  _cal.get("confirm_buffer", 1.0),
         "space_threshold": 1.0,
-        "stop_buffer": 1.0,
+        "stop_buffer":     _cal.get("stop_buffer", 1.0),
     }
 
-    # ── Regime Multipliers (大势参数自适应) ──
+    # 层-1：均线大势 Regime
     regime = "正常"
     if fusion_result is not None:
         regime = fusion_result.get("regime", "正常")
 
     if regime in ("偏弱", "很差"):
-        multipliers["stop_buffer"] = 0.8
+        multipliers["stop_buffer"] = multipliers["stop_buffer"] * 0.8
         multipliers["confirm_buffer"] = multipliers["confirm_buffer"] * 1.3
     elif regime == "正常":
         multipliers["zone_width"] = multipliers["zone_width"] * 1.2
         multipliers["confirm_buffer"] = multipliers["confirm_buffer"] * 0.8
+
+    # 层-2：[2.3新增] HMM 前瞻 Regime 进一步徣化（50% 叠加）
+    hmm_state = None
+    if fusion_result is not None and isinstance(fusion_result, dict):
+        hmm_state = fusion_result.get("hmm_regime")
+
+    if _HMM_AVAILABLE and _HMM_REGIME_ENABLED and (hmm_state or (index_returns and len(index_returns) >= 20)):
+        try:
+            if hmm_state:
+                hmm_result = {"state_en": hmm_state, "confidence": 0.8}
+            else:
+                hmm_result = _hmm_detect_regime(index_returns)
+            hmm_mult = _hmm_multiplier(hmm_result)
+            for k in ("zone_width", "confirm_buffer", "stop_buffer"):
+                base = multipliers.get(k, 1.0)
+                hmm_adj = hmm_mult.get(k, 1.0)
+                # 徣化：块层-1 结果叠加 HMM 调制，各占 50%
+                multipliers[k] = round(base * 0.5 + base * hmm_adj * 0.5, 4)
+        except Exception:  # 任何 HMM 异常静默降级
+            pass
 
     if fusion_result is None:
         return multipliers

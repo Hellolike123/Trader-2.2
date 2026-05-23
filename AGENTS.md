@@ -10,10 +10,10 @@
 - **双源热备行情 HA**：`MarketDataSourceController` 接管行情数据通道，mootdx 发生 1.5 秒硬超时或连续 3 次失败时，秒级自动 fallback 至 Tencent HTTP / Sina API，以 `data_status="partial"` 标注数据完备度。
 - **智能决策融合层 (Decision Fusion Core)**：通过 Scenario Priority Filter 动态分配结构与动量权重（极值区 80% 权重偏斜），且基于 Belief Priority 冲突消解机制过滤动量噪音。
 - **大势参数自适应 (Regime Multipliers)**：根据 `market_env` 大盘牛熊环境因子动态缩放 `zone_width` / `confirm_buffer` / `stop_buffer`。
-- **[2.3新增] HMM 大势状态检测器**：`hmm_regime.py` 基于纯 numpy Baum-Welch + Viterbi，将指数收益率序列解码为三隐状态（低波上涨/高波下跌/宽幅震荡），输出前瞻性 Regime 判定与参数调节系数。
-- **[2.3新增] 贝叶斯概率决策融合**：`bayesian_fusion.py` 用乘积规则融合三路专家后验概率，按 Regime 动态调整先验矩阵。默认关闭，设 `BAYESIAN_FUSION=true` 激活。
-- **[2.3新增] 日内成交量分布 (Volume Profile)**：`volume_profile.py` 计算 POC 控制节点与 Value Area 70% 成交量密集区，为突破确认提供微观日内支撑/阻力验证。
-- **[2.3新增] 离线参数自校准器**：`scripts/self_calibration.py` 盘后/周末运行，通过随机搜索对历史信号胜率进行参数寻优，结果写入 `~/.trader/calibrated_params.json`。
+- **[2.3新增] HMM 大势状态检测器**：`hmm_regime.py` 基于纯 numpy Baum-Welch + Viterbi。已深度整合进 `market_env.py` 及下游 `fusion_core.py`/`structure_core.py`。大势判定从纯均线驱动升级为“均线+HMM前瞻”双效驱动（高置信度 HMM 状态会自动前瞻修正 `level`，且 `structure_core` 直接复用避免重复抓包）。
+- **[2.3新增] 贝叶斯概率决策融合**：`bayesian_fusion.py` 用乘积规则融合三路专家后验概率。已完美集成在 `fusion_core.py` 中。默认关闭（安全过渡），通过设置环境变量 `BAYESIAN_FUSION=true` 激活，激活后将全面接管传统经验权重，实现纯概率后验的最优交易 action 决策。
+- **[2.3新增] 日内成交量分布 (Volume Profile)**：`volume_profile.py` 计算 POC 控制节点与 Value Area 70% 成交量密集区。已完美嵌入 `decision_core.py` 的突破确认判定 `_check_theory_breakout`，通过微观日内量价验证过滤假突破。
+- **[2.3新增] 离线参数自校准器**：`scripts/self_calibration.py` 盘后/周末运行。参数已在 `structure_core.py` 的 `_theory_multipliers` 层-0 中作为基准自校准倍率加载。
 - 真正的输出格式以 `01-功能包-packages/01-单票分析-trader/references/output-contract.md` 为准。
 - 需要看实现时，先看 `01-功能包-packages/01-单票分析-trader/scripts/run_analysis.py`。
 

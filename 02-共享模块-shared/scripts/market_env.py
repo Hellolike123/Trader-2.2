@@ -86,11 +86,11 @@ def _fetch_index_data() -> dict[str, Any]:
     if change_pct == 0 and current == 0:
         return {}
 
-    # For MA calculations we still need K-line bars
+    # For MA calculations we still need K-line bars, fetch 90 days for stable HMM
     try:
         provider = get_provider()
         sec = provider.resolve_security(INDEX_CODE)
-        raw_bars = provider.fetch_kline(sec, scale="240", datalen=30)
+        raw_bars = provider.fetch_kline(sec, scale="240", datalen=90)
         bars = normalize_bars(raw_bars) if raw_bars else []
     except Exception:
         bars = []
@@ -125,6 +125,9 @@ def assess() -> dict[str, Any]:
             "ma5": None,
             "ma20": None,
             "data_status": "degraded",
+            "hmm_regime_en": "range",
+            "hmm_regime_label": "宽幅震荡",
+            "hmm_confidence": 0.5,
             "note": "中证1000数据不足",
         }
 
@@ -132,17 +135,41 @@ def assess() -> dict[str, Any]:
     change_pct = idx_data.get("change_pct", 0.0)
     bars = idx_data.get("bars", [])
 
+    # [2.3] HMM 大势前瞻判定
+    hmm_regime_en = "range"
+    hmm_regime_label = "宽幅震荡"
+    hmm_confidence = 0.5
+    try:
+        closes = [float(b["close"]) for b in bars if b.get("close") is not None]
+        if len(closes) >= 5:
+            if current > 0 and (not closes or abs(closes[-1] - current) > 1e-5):
+                closes.append(current)
+            index_returns = [(closes[i] - closes[i-1]) / closes[i-1] for i in range(1, len(closes))]
+            if len(index_returns) >= 5:
+                import sys
+                from pathlib import Path
+                _base = Path(__file__).resolve().parent.parent / "02-候选逻辑-candidate"
+                if str(_base) not in sys.path:
+                    sys.path.insert(0, str(_base))
+                from hmm_regime import detect_regime
+                hmm_res = detect_regime(index_returns)
+                hmm_regime_en = hmm_res.get("state_en", "range")
+                hmm_regime_label = hmm_res.get("state_label", "宽幅震荡")
+                hmm_confidence = hmm_res.get("confidence", 0.5)
+    except Exception:
+        pass
+
     ma5 = _ma(bars, 5)
     ma20 = _ma(bars, 20)
 
     # Improved trend: use MA5/MA20 relationship + slope, not just current vs MA5
     mid_term = "up" if (ma5 is not None and ma20 is not None and ma5 > ma20) else "down"
     # Volume trend: recent 5d vol / preceding 5d vol (>1 = expanding, <1 = shrinking)
-    closes: list[dict[str, Any]] = [b for b in bars if b.get("close") is not None and b.get("volume") is not None]
+    closes_vol: list[dict[str, Any]] = [b for b in bars if b.get("close") is not None and b.get("volume") is not None]
     vol_trend: float | None = None
-    if len(closes) >= 10:
-        vol_recent = sum(float(b["volume"]) for b in closes[-5:]) / 5
-        vol_prev = sum(float(b["volume"]) for b in closes[-10:-5]) / 5
+    if len(closes_vol) >= 10:
+        vol_recent = sum(float(b["volume"]) for b in closes_vol[-5:]) / 5
+        vol_prev = sum(float(b["volume"]) for b in closes_vol[-10:-5]) / 5
         if vol_prev > 0:
             vol_trend = vol_recent / vol_prev
 
@@ -158,6 +185,13 @@ def assess() -> dict[str, Any]:
     elif mid_weak and shrinking or mid_weak or intraday_moderate:
         level = "偏弱"
 
+    # HMM 大势前瞻性修正
+    if hmm_confidence >= 0.75:
+        if hmm_regime_en == "bear" and level == "正常":
+            level = "偏弱"
+        elif hmm_regime_en == "bull" and level == "偏弱":
+            level = "正常"
+
     note = f"中证1000 MA5/MA20 {'>' if mid_term=='up' else '<'} 趋势{'偏多' if mid_term=='up' else '偏空'} 今日{change_pct:+.1f}%"
 
     return {
@@ -167,7 +201,10 @@ def assess() -> dict[str, Any]:
         "ma5": round(ma5, 2) if ma5 else None,
         "ma20": round(ma20, 2) if ma20 else None,
         "data_status": "full",
-        "note": note,
+        "hmm_regime_en": hmm_regime_en,
+        "hmm_regime_label": hmm_regime_label,
+        "hmm_confidence": hmm_confidence,
+        "note": note + f" (HMM前瞻: {hmm_regime_label})",
     }
 
 
