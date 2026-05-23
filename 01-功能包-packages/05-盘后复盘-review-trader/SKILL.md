@@ -25,6 +25,13 @@ This is a script-output skill, not a writing template.
 
 Always run `scripts/final_review.py` and return stdout exactly. Do not compose from memory, summarize, shorten, translate, restyle, add tables, add disclaimers, or add follow-up lines.
 
+## Big-Order Extension
+- 盘后按交易日时间轴回看大单在什么时候出现
+- 逐段解释每次大单意味着什么
+- 统计单笔手数、累计手数、成交金额和连续性
+- 判断大单之后的走势是否验证
+- 最终给出 有效 / 无效 / 背离 的复盘结论
+
 ## Commands
 Load `references/commands.md` for full command list (absolute truth — never generate commands from memory).
 

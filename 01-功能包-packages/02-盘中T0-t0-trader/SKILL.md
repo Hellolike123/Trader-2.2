@@ -25,6 +25,13 @@ This is a script-output skill, not a writing template.
 
 Always run `scripts/final_t0.py` and return stdout exactly. Do not compose from memory, summarize, shorten, translate, restyle, add tables, add disclaimers, or add follow-up lines. If the script cannot run, return the command error.
 
+## Big-Order Extension
+- 盘中在价格接近关注区时，识别逐笔成交、分时连续大单和盘口配合
+- 输出关注区附近的大单确认提醒
+- 提醒等级为 观察 / 注意 / 强提醒，默认偏保守
+- 逐笔成交为主，买卖都看，连续同向才升级提醒
+- 输出保持简短，适合盘中盯盘
+
 ## Commands
 Load `references/commands.md` for full command list (absolute truth — never generate commands from memory).
 

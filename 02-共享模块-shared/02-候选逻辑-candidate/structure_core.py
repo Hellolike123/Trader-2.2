@@ -310,7 +310,6 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     add_level(support_levels, "5日低点", min_price(recent5, "low"), 1.0)
     add_level(resistance_levels, "5日高点", max_price(recent5, "high"), 1.0)
     add_level(support_levels, "今日低点", to_float(quote.get("low")), 0.95)
-    add_level(resistance_levels, "今日高点", to_float(quote.get("high")), 0.95)
     add_level(support_levels, "20日低点", min_price(recent20, "low"), 0.85)
     add_level(resistance_levels, "20日高点", max_price(recent20, "high"), 0.85)
     add_ma_levels(support_levels, current, ma_values, below=True)
@@ -368,6 +367,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         bars=bars,
         space_threshold=dynamic_space_threshold,
         fusion_result=fusion_result,  # S-2 fix: 传入融合层结果
+        chan_result=chan_result,
     )
 
     return {

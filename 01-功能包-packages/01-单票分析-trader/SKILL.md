@@ -32,6 +32,8 @@ If stdout contains a `__CHECKLIST__:` line, the AI must strictly follow it:
 
 Do not compose a report from memory. If the command fails, return the error.
 
+Hermes and other consumers should treat the output contract as the source of truth. The current report format includes a dual-status summary in `🧭 简要分析`, where `base_status` is the structural layer and `theory_status` is the theory/fusion layer. `state_label` is the display-facing theory summary.
+
 This is a script-output skill, not a writing template. The only valid final answer is the stdout from `final_report.py`.
 
 ## Commands

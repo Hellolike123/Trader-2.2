@@ -30,12 +30,20 @@ def model_summary(theory: dict[str, Any]) -> str:
     return "五层模型里，只有弱修复迹象，动能、筹码压力和中期趋势还没确认。"
 
 
-def _format_intraday_narrative(intraday: dict[str, Any]) -> list[str]:
+def _format_intraday_narrative(intraday: dict[str, Any], big_order: dict[str, Any] | None = None) -> list[str]:
     """Build time-ordered narrative from intraday data."""
     lines = intraday.get("lines") or []
-    if not lines:
-        return ["分时数据不足，走势只按日线和收盘判断。"]
     result = []
+    if big_order and big_order.get("events"):
+        result.append("今日大单回溯")
+        for event in big_order["events"]:
+            hands_text = f"约 {event['hands']:.0f} 手" if event.get("hands") is not None else "手数不足"
+            amount_text = f"金额约 {event['amount_wan']:.0f} 万" if event.get("amount_wan") is not None else "金额不足"
+            result.append(f"{event['time']}  {event['side']}，{hands_text}，{amount_text}，{event['meaning']}。")
+        result.append(f"回溯总结：{big_order.get('summary')}")
+        result.append("")
+    if not lines:
+        return result + ["分时数据不足，走势只按日线和收盘判断。"]
     for line in lines:
         line = str(line).strip()
         if not line:
@@ -157,7 +165,7 @@ def render_single(review: dict[str, Any]) -> str:
     lines.append("")
     # 🔎 分时走势
     lines.append("🔎 分时走势 ")
-    lines.extend(_format_intraday_narrative(intraday))
+    lines.extend(_format_intraday_narrative(intraday, review.get("big_order")))
     lines.append("")
     # 📈 五层打分
     scores = theory.get("scores", {})

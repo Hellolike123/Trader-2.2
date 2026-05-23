@@ -125,6 +125,7 @@ def dense_price_zone(daily: list[dict[str, Any]]) -> tuple[float | None, float |
     return round(center - spread, 2), round(center + spread, 2)
 
 
+from trader_shared.big_order import analyze_big_orders
 from trader_shared.chip_distribution import calc_chip_distribution
 
 
@@ -488,6 +489,7 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
         "intraday": intraday,
         "levels": levels,
         "theory": theory,
+        "big_order": analyze_big_orders(bars_5m, focus_price=levels.get("key_pressure"), trade_date=selected_date),
         "macd_params": {
             "macd_line": daily_macd_params.get("macd_line"),
             "dea": daily_macd_params.get("dea"),

@@ -102,6 +102,13 @@ except Exception:
     FUSION_CONFIDENCE_THRESHOLD = 0.6
 
 STATUS_SCORE["防守观察，趋势下行谨慎"] = 50
+STATUS_SCORE["突破确认"] = 85
+STATUS_SCORE["突破观察"] = 75
+STATUS_SCORE["体系转强确认"] = 88
+STATUS_SCORE["未确认转强"] = 72
+STATUS_SCORE["转强不足"] = 62
+STATUS_SCORE["承接存在"] = 68
+STATUS_SCORE["修复观察"] = 65
 
 
 def _close(vals: list[dict[str, Any]]) -> list[float]:
@@ -144,6 +151,189 @@ _FUSION_STATUS_MAP: dict[str, str] = {
 }
 
 
+def _check_theory_breakout(
+    current: float,
+    confirm: float,
+    support: float,
+    position_ratio: float,
+    chan_result: dict | None,
+    wyk: dict | None,
+) -> bool:
+    if not chan_result and not wyk:
+        return False
+    
+    # 价格前提：当前价格不能跌破支撑位
+    if current < support:
+        return False
+    
+    # 价格已经接近或突破确认位，或者在强势运行区间（position_ratio >= 0.50）
+    price_strong = (current >= confirm * 0.985) or (position_ratio >= 0.50)
+    if not price_strong:
+        return False
+
+    # 1. 缠论验证
+    chan_ok = False
+    if isinstance(chan_result, dict):
+        buy_point_text = str(chan_result.get("buy_point_text") or "")
+        trend_label = str(chan_result.get("trend_label") or "")
+        strokes = chan_result.get("strokes", [])
+        
+        # 最强确认：触发三类买点（突破回踩确认）
+        if "三类买" in buy_point_text:
+            chan_ok = True
+        # 或是拉升段/上攻笔中
+        elif trend_label == "拉升段" or trend_label == "拉升窗口":
+            chan_ok = True
+        elif isinstance(strokes, list) and len(strokes) > 0:
+            if strokes[-1].get("direction") == "up":
+                chan_ok = True
+
+    # 2. 威科夫验证
+    wyk_ok = False
+    if isinstance(wyk, dict):
+        has_upthrust = wyk.get("upthrust_signal", False)
+        has_spring = wyk.get("spring_signal", False)
+        has_bullish_div = wyk.get("bullish_volume_divergence", False)
+        
+        # 排除假突破 (Upthrust)
+        if not has_upthrust:
+            # 确认有做多结构 (Spring 或看多背离)
+            if has_spring or has_bullish_div:
+                wyk_ok = True
+            else:
+                summary = str(wyk.get("wyckoff_summary", ""))
+                if "无明显威科夫信号" in summary or "看多" in summary:
+                    wyk_ok = True
+
+    return chan_ok or wyk_ok
+
+
+def status_layers(
+    current: float,
+    support: float,
+    low_zone_upper: float,
+    confirm: float,
+    hard_stop: float,
+    position_ratio: float,
+    change_pct: Any,
+    ma_values: dict[str, float | None],
+    pressure_space_pct: float,
+    bars: list[dict[str, Any]] | None = None,
+    space_threshold: float = 0.008,
+    fusion_result: dict[str, Any] | None = None,  # S-2 fix: 接收融合层结果
+    chan_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    # === S-2 fix: 融合层覆盖 ===
+    # 当融合层开启、置信度足够高、且有明确映射时，用融合层判断替代纯数学判断
+    fusion_override_used = False
+    fusion_status = None
+    if FUSION_OVERRIDE_ENABLED and isinstance(fusion_result, dict):
+        fc = float(fusion_result.get("confidence") or 0)
+        if fc >= FUSION_CONFIDENCE_THRESHOLD:
+            fusion_action = str(fusion_result.get("action") or "").strip()
+            mapped_status = _FUSION_STATUS_MAP.get(fusion_action)
+            if mapped_status is not None:
+                if mapped_status == "暂不碰" and current <= hard_stop:
+                    fusion_status = "暂不碰"
+                    fusion_override_used = True
+                elif mapped_status == "暂不碰":
+                    fusion_status = "防守观察"
+                    fusion_override_used = True
+                else:
+                    fusion_status = mapped_status
+                    fusion_override_used = True
+
+    trend_ok = _trend_filter(bars) if (bars and TREND_FILTER_ENABLED) else True
+    change = to_float(change_pct) or 0.0
+    below_ma_count = sum(1 for value in ma_values.values() if value is not None and current < value)
+    above_ma5_ma10 = all(current >= (ma_values.get(name) or float("inf")) for name in ("ma5", "ma10"))
+
+    # 从 fusion_result 中提取威科夫信号，用于理论突破验证
+    signals_detail = fusion_result.get("signals_detail", {}) if isinstance(fusion_result, dict) else {}
+    wyk = signals_detail.get("wyckoff", {}) if isinstance(signals_detail, dict) else None
+
+    # 进行三维理论验证突破判定
+    is_theory_breakout = _check_theory_breakout(
+        current=current,
+        confirm=confirm,
+        support=support,
+        position_ratio=position_ratio,
+        chan_result=chan_result,
+        wyk=wyk,
+    )
+
+    base_status = "风险回避"
+    if current <= hard_stop or current < support * 0.995:
+        base_status = "风险回避"
+    elif trend_ok and change <= CHANGE_THRESHOLD_DROP and current > low_zone_upper:
+        base_status = "风险回避"
+    elif is_theory_breakout:
+        base_status = "突破确认"
+    elif current <= low_zone_upper:
+        base_status = "低位修复"
+    elif current >= confirm:
+        base_status = "确认观察"
+    elif above_ma5_ma10 or position_ratio >= POSITION_RATIO_STRONG:
+        base_status = "均线修复"
+    elif below_ma_count >= 3:
+        base_status = "防守整理"
+    elif position_ratio >= POSITION_RATIO_CONFIRM:
+        base_status = "临近确认"
+    elif 0 <= pressure_space_pct < space_threshold:
+        base_status = "空间偏紧"
+    else:
+        base_status = "中性整理"
+
+    theory_status = "防守观察"
+    if current <= hard_stop or current < support * 0.995:
+        theory_status = "暂不碰"
+    elif trend_ok and change <= CHANGE_THRESHOLD_DROP and current > low_zone_upper:
+        theory_status = "暂不碰"
+    elif is_theory_breakout:
+        theory_status = "突破确认"
+    elif current <= low_zone_upper:
+        theory_status = "修复观察" if trend_ok else "防守观察"
+        if below_ma_count >= 1 and current > support:
+            theory_status = "承接存在"
+        if not trend_ok:
+            theory_status = "修复观察"
+    elif current >= confirm:
+        if change >= CHANGE_THRESHOLD_STRONG and trend_ok:
+            theory_status = "体系转强确认"
+        elif trend_ok and above_ma5_ma10 and position_ratio >= POSITION_RATIO_STRONG:
+            theory_status = "未确认转强"
+        else:
+            theory_status = "转强不足"
+    elif above_ma5_ma10 and position_ratio >= POSITION_RATIO_STRONG:
+        theory_status = "未确认转强"
+    elif below_ma_count >= 3:
+        theory_status = "防守观察"
+    elif position_ratio >= POSITION_RATIO_CONFIRM:
+        theory_status = "未确认转强"
+    elif 0 <= pressure_space_pct < space_threshold:
+        theory_status = "转强不足"
+    else:
+        theory_status = "修复观察" if trend_ok else "防守观察"
+
+    if fusion_override_used and fusion_status is not None:
+        if theory_status == "暂不碰" and current <= hard_stop:
+            pass
+        else:
+            theory_status = fusion_status
+
+    return {
+        "base_status": base_status,
+        "theory_status": theory_status,
+        "status": theory_status,
+        "fusion_override_used": fusion_override_used,
+        "trend_ok": trend_ok,
+        "change": change,
+        "below_ma_count": below_ma_count,
+        "above_ma5_ma10": above_ma5_ma10,
+        "pressure_space_pct": pressure_space_pct,
+    }
+
+
 def status_for(
     current: float,
     support: float,
@@ -157,127 +347,40 @@ def status_for(
     bars: list[dict[str, Any]] | None = None,
     space_threshold: float = 0.008,
     fusion_result: dict[str, Any] | None = None,  # S-2 fix: 接收融合层结果
+    chan_result: dict[str, Any] | None = None,
 ) -> str:
-    # === S-2 fix: 融合层覆盖 ===
-    # 当融合层开启、置信度足够高、且有明确映射时，用融合层判断替代纯数学计算
-    fusion_override_used = False
-    fusion_status = None
-    if FUSION_OVERRIDE_ENABLED and isinstance(fusion_result, dict):
-        fc = float(fusion_result.get("confidence") or 0)
-        if fc >= FUSION_CONFIDENCE_THRESHOLD:
-            fusion_action = str(fusion_result.get("action") or "").strip()
-            mapped_status = _FUSION_STATUS_MAP.get(fusion_action)
-            if mapped_status is not None:
-                # 一票否决：融合层说"暂不碰"时，即使数学计算说"低吸观察"也必须服从
-                # 但止损位判断仍保留（安全底线）
-                if mapped_status == "暂不碰" and current <= hard_stop:
-                    fusion_status = "暂不碰"
-                    fusion_override_used = True
-                elif mapped_status == "暂不碰":
-                    # 当前价没到止损位但融合层说大盘很差 → 降级为防守
-                    fusion_status = "防守观察"
-                    fusion_override_used = True
-                else:
-                    fusion_status = mapped_status
-                    fusion_override_used = True
-
-    # === 旧逻辑完整保留（作为 fallback） ===
-    trend_ok = _trend_filter(bars) if (bars and TREND_FILTER_ENABLED) else True
-    change = to_float(change_pct) or 0.0
-    below_ma_count = sum(1 for value in ma_values.values() if value is not None and current < value)
-    above_ma5_ma10 = all(current >= (ma_values.get(name) or float("inf")) for name in ("ma5", "ma10"))
-
-    engine = _get_engine()
-    if engine:
-        ctx = {
-            "current": current, "support": support, "low_zone_upper": low_zone_upper,
-            "confirm": confirm, "stop": hard_stop, "change": change,
-            "change_pct": change, "position_ratio": position_ratio,
-            "pressure_space_pct": pressure_space_pct,
-            "above_ma5_ma10": above_ma5_ma10, "below_ma_count": below_ma_count,
-            "trend_ok": trend_ok,
-        }
-        result = engine.evaluate(ctx)
-        if result is not None:
-            status = str(result)
-            # Bug B fix: 统一规则引擎与 Python fallback 的趋势下行处理
-            # 规则引擎: 冲高+趋势下行 → "冲高减仓" → 降级为"防守观察，趋势下行谨慎"
-            # Python fallback: 冲高+趋势下行 → "等转强"
-            # 统一为"等转强"：趋势没确认前不应该直接防守，而是等确认
-            if not trend_ok and status == "冲高减仓":
-                status = "等转强"
-            if not trend_ok and status == "低吸观察":
-                status = "防守观察，趋势下行谨慎"
-            # Bug C fix: ATR 二次检查只应覆盖"默认防守"（兜底规则），不应覆盖
-            # "多均线下方"这种有明确条件的独立判断。
-            # 只有当所有特定条件都不满足时（即默认防守），才检查 ATR 空间不足。
-            # 判断方法：如果"多均线下方"条件成立，说明规则引擎是因为它返回的"防守观察"，
-            # 不应被 ATR 覆盖。
-            is_default_defense = (
-                status == "防守观察"
-                and below_ma_count < 3  # 不是"多均线下方"规则
-                and not (not trend_ok and status == "防守观察")  # 不是趋势降级
-            )
-            if is_default_defense and 0 <= pressure_space_pct < space_threshold:
-                status = "空间不足"
-            # S-2 fix: 融合层覆盖规则引擎结果
-            if fusion_override_used and fusion_status is not None:
-                # 但"暂不碰"和止损相关的数学判断优先级更高（安全底线）
-                if status == "暂不碰" and current <= hard_stop:
-                    pass  # 保留数学判断
-                else:
-                    status = fusion_status
-            return status
-    if current <= hard_stop or current < support * 0.995:
-        return "暂不碰"
-    if trend_ok and change <= CHANGE_THRESHOLD_DROP and current > low_zone_upper:
-        return "暂不碰"
-    if current <= low_zone_upper:
-        legacy_status = "低吸观察" if trend_ok else "防守观察，趋势下行谨慎"
-        if fusion_override_used and fusion_status is not None:
-            return fusion_status
-        return legacy_status
-    if current >= confirm:
-        legacy_status = "冲高减仓" if (change >= CHANGE_THRESHOLD_STRONG and trend_ok) else "等转强"
-        if fusion_override_used and fusion_status is not None:
-            return fusion_status
-        return legacy_status
-    if above_ma5_ma10 and position_ratio >= POSITION_RATIO_STRONG:
-        if fusion_override_used and fusion_status is not None:
-            return fusion_status
-        return "等转强"
-    if below_ma_count >= 3:
-        if fusion_override_used and fusion_status is not None:
-            return fusion_status
-        return "防守观察"
-    if position_ratio >= POSITION_RATIO_CONFIRM:
-        if fusion_override_used and fusion_status is not None:
-            return fusion_status
-        return "等转强"
-    # "空间不足"放在等转强判断之后——避免股价接近确认位时因剩余空间小而直接被否决。
-    # 此时能走到这里的场景：压力空间小 but 均线也不配合。
-    # space_threshold 由调用方根据 ATR 动态计算传入，默认0.008作为兜底。
-    if 0 <= pressure_space_pct < space_threshold:
-        if fusion_override_used and fusion_status is not None:
-            return fusion_status
-        return "空间不足"
-    default_status = "防守观察"
-    if fusion_override_used and fusion_status is not None:
-        return fusion_status
-    return default_status
+    return str(status_layers(
+        current,
+        support,
+        low_zone_upper,
+        confirm,
+        hard_stop,
+        position_ratio,
+        change_pct,
+        ma_values,
+        pressure_space_pct,
+        bars=bars,
+        space_threshold=space_threshold,
+        fusion_result=fusion_result,
+        chan_result=chan_result,
+    )["theory_status"])
 
 
 def action_for(status: str, low: float, high: float, sell_observe: float, confirm: float) -> str:
-    if status == "低吸观察":
+    if status in {"突破确认", "突破观察"}:
+        return f"突破已确认/确认中，回踩不破 {confirm:.2f}元 可看多，勿盲目追涨。"
+    if status in {"低吸观察", "修复观察"}:
         return f"等 {low:.2f}-{high:.2f}元 止跌，不追。"
-    if status == "等转强":
+    if status in {"等转强", "未确认转强"}:
         return f"不追，等站稳 {confirm:.2f}元 后再看。"
-    if status == "冲高减仓":
+    if status in {"冲高减仓", "体系转强确认"}:
         return f"冲高先看 {sell_observe:.2f}元 附近量能，不机械卖。"
-    if status == "空间不足":
-        return "上方空间太近，先观察，不追。"
-    if status in _DEFENSE_STATUSES:
+    if status in {"空间不足", "转强不足"}:
+        return "上方空间太近或力度不足，先观察，不追。"
+    if status in _DEFENSE_STATUSES or status == "防守观察":
         return "先看防守是否稳定，低吸和减仓都等确认。"
+    if status == "承接存在":
+        return "有承接但还没确认转强，先观察是否延续。"
     if status == "暂不碰":
         return "风险不清楚，先不参与。"
     return "数据失败，先不参与。"

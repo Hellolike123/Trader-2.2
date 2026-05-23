@@ -22,7 +22,10 @@ Required rules:
 - 📍 决策 includes `状态：` and three bullet lines starting with `  ·`.
 - `T0 参考` includes `低吸` `高抛` `止损`.
 - `❗ 关键价位` is single inline line with pipe-separated values.
-- `🧭 简要分析` is single inline line with `结构：` `量价：` `筹码：` `动能：`.
+- `🧭 简要分析` now reflects the dual-status model:
+  - `基础状态：<base_status>｜体系结论：<theory_status>`
+  - then the inline summary string with `结构：` `量价：` `筹码：` `动能：`
+- `state_label` is the display-layer summary for the theory side, not the base structure side.
 - Buy-side wording must include `止跌确认`.
 - Do not use `##/###`, bold headings, blockquotes, bullet lists (`-`/`*`), tables, or extra disclaimers.
 - Do not output intraday execution prices or concrete order instructions.

@@ -9,6 +9,11 @@ try:
 except ImportError:
     order_book_analyze = None
 
+try:
+    from big_order import analyze_big_orders
+except ImportError:
+    analyze_big_orders = None
+
 
 def pct_text(value: float | None) -> str:
     return "数据不足" if value is None else f"{value:+.2f}%"
@@ -178,6 +183,12 @@ def render_markdown(plan: dict[str, Any]) -> str:
 
     current_price = numeric_or_none(plan.get('current_price'))
     current_text = "无" if current_price is None else f"{current_price:.2f}"
+    big_order = None
+    if analyze_big_orders and plan.get("data"):
+        focus_price = numeric_or_none(buy.get("observation_price")) or numeric_or_none(sell.get("observation_price"))
+        bars = (plan.get("data") or {}).get("kline_5m") or []
+        trade_date = str(plan.get("analysis_time") or "").split(" ", 1)[0] or None
+        big_order = analyze_big_orders(bars, focus_price=focus_price, trade_date=trade_date)
 
     lines = [
         "🎯 T0 盯盘助理",
@@ -201,6 +212,15 @@ def render_markdown(plan: dict[str, Any]) -> str:
         lines.append(f"📊 盘口验证")
         lines.append("")
         lines.append(ob["line"])
+        lines.append("")
+
+    if big_order and big_order.get("events"):
+        lines.extend(["📋 关注区大单确认", ""])
+        for event in big_order["events"][-4:]:
+            hands_text = f"约 {event['hands']:.0f} 手" if event.get("hands") is not None else "手数不足"
+            amount_text = f"金额约 {event['amount_wan']:.0f} 万" if event.get("amount_wan") is not None else "金额不足"
+            lines.append(f"{event['time']}  {event['side']}，{hands_text}，{amount_text}，{event['meaning']}，{event['level']}。")
+        lines.append(f"总结：{big_order.get('summary')}")
         lines.append("")
 
     lines.extend([

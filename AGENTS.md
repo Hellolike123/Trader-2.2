@@ -1,12 +1,28 @@
-# Trader 2.0 — Agent 快速参考
+# Trader 2.1 — Agent 快速参考
 
-> 最后更新：2026-05-17
+> 最后更新：2026-05-22
+
+## 接手先看
+
+- 单票分析现在是**双层状态模型**：`base_status` 是结构层，`theory_status` 是理论层。
+- `state_label` 只是兼容/展示层，不是主契约。
+- `scene` 还会出现在部分兼容代码里，但不要再把它当主状态理解。
+- 真正的输出格式以 `01-功能包-packages/01-单票分析-trader/references/output-contract.md` 为准。
+- 需要看实现时，先看 `01-功能包-packages/01-单票分析-trader/scripts/run_analysis.py`。
 
 ---
 
 ## 业务全景
 
 A 股交易决策辅助系统。免费行情 API（腾讯 + 新浪），缠论/威科夫/筹码/ATR/利弗莫尔分析，输出标准化 Markdown 面板。
+
+当前核心契约是双层状态模型：
+- `base_status` 负责结构位置，描述现在站在什么位置
+- `theory_status` 负责理论结论，描述按当前体系算不算转强
+- `state_label` 现在只是兼容/展示层摘要，偏向理论结论，不再是主契约
+- 旧的 `scene` 语义还会出现在部分兼容代码里，但不应再当成主状态理解
+
+任何接手这个仓库的 AI，先读这里，再读对应 skill 的 `references/output-contract.md` 和 `SKILL.md`。优先相信文档里的输出契约，不要凭旧习惯猜格式。
 
 ---
 

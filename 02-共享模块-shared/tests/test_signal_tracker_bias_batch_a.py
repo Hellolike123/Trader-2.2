@@ -178,16 +178,19 @@ class TestIdempotency:
 
     def test_check_recent_twice_same_count(self):
         t = _T()
+        import datetime as dt
+        now = dt.datetime.now()
+        two_days_ago = (now - dt.timedelta(days=2)).strftime("%Y-%m-%d")
         # 写入一条信号到 store
-        sig = _sig(date="2026-05-09")
+        sig = _sig(date=two_days_ago)
         t.write_signals([sig])
 
-        # 构造 mock bars
-        import datetime as dt
+        # 构造 mock bars (包含 signal_date 及最近的 40 天)
         bars = []
-        for i in range(40):
-            d = (dt.date(2026, 4, 20) + dt.timedelta(days=i)).strftime("%Y-%m-%d")
-            bars.append({"date": d, "close": 10 if d <= "2026-05-02" else 11, "atr14": 0.5})
+        start_date = now.date() - dt.timedelta(days=30)
+        for i in range(45):
+            d = (start_date + dt.timedelta(days=i)).strftime("%Y-%m-%d")
+            bars.append({"date": d, "close": 10 if d <= two_days_ago else 11, "atr14": 0.5})
 
         mock_client = MagicMock()
         mock_client.get = MagicMock()

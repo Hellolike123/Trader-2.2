@@ -204,6 +204,8 @@ def build_report(target: str) -> dict[str, Any]:
     levels["wyckoff_spring_signal"] = wyck_result.get("spring_signal", False)
     levels["wyckoff_summary"] = wyck_result.get("wyckoff_summary", "无明显信号")
     levels["wyckoff_upthrust_signal"] = wyck_result.get("upthrust_signal", False)
+    levels["base_status"] = levels.get("base_status") or levels.get("status")
+    levels["theory_status"] = levels.get("theory_status") or levels.get("status")
 
     support = levels["main_support"]
     resistance = levels["resistance"]
@@ -214,6 +216,8 @@ def build_report(target: str) -> dict[str, Any]:
     monthly_close = float(bars[-STRUCTURE_WINDOW]["close"] if len(bars) >= STRUCTURE_WINDOW else bars[0]["close"])
     stage = determine_stage(current, weekly_close, monthly_close)
     scene = levels["status"]
+    base_status = str(levels.get("base_status") or scene)
+    theory_status = str(levels.get("theory_status") or scene)
     replay = structure_replay(recent20)
     volume_text = volume_observation(recent20, bars_5m)
     upward_momentum = upward_momentum_observation(stage, current, support, confirm)
@@ -223,7 +227,7 @@ def build_report(target: str) -> dict[str, Any]:
     low = min(lows) if lows else current
     analysis_time = f"{quote.get('trade_date')} {quote.get('trade_time') or ''}".strip()
 
-    state_label = state_text(stage, scene)
+    state_label = state_text(stage, theory_status)
     structure_note = structure_view({
         "current": current, "confirm": confirm, "stage": stage,
         "ma": {"ma5": ma_text(levels["ma_values"].get("ma5")),
@@ -316,6 +320,8 @@ def build_report(target: str) -> dict[str, Any]:
         "atr_ratio": atr_ratio_val,
         "atr_level": atr_level,
         "atr_cap": atr_cap,
+        "base_status": base_status,
+        "theory_status": theory_status,
         "state_label": state_label,
         "structure_note": structure_note,
         "volume_note": volume_note,
@@ -416,7 +422,7 @@ def sync_report_with_data(report: dict, levels: dict) -> dict:
     if take > 0 and confirm > 0 and take <= confirm:
         report["take"] = max(current * 1.05, confirm * 1.03)
     # 场景与数值的逻辑一致性
-    if scene in ("突破确认", "突破观察") and confirm > current:
+    if scene in ("突破确认", "突破观察") and current < confirm * 0.98:
         report["scene"]        = "观望"
         report["state_label"]  = "未确认"
     elif scene in ("低吸观察", "防守观察") and current < support and support > 0:
@@ -503,6 +509,8 @@ def render_markdown(r: dict[str, Any]) -> str:
     has_env = env_level and env_level not in ("未知", "")
 
     status_text = str(r.get("state_label") or "")
+    base_status_text = str(r.get("base_status") or "")
+    theory_status_text = str(r.get("theory_status") or status_text)
 
     if has_env:
         trend_str = "均线多头排列" if trend_5d == "up" else "均线空头排列"
@@ -528,6 +536,7 @@ def render_markdown(r: dict[str, Any]) -> str:
         "",
         "🧭 简要分析",
         "",
+        f"基础状态：{base_status_text}｜体系结论：{theory_status_text}",
         f"{structure_note}，{volume_note}",
         "",
         "📍 决策",
@@ -718,18 +727,25 @@ def build_signal(r: dict[str, Any]) -> dict[str, Any]:
 def signal_state(r: dict[str, Any]) -> tuple[str, str, str, str]:
     stage = str(r.get("stage") or "")
     scene = str(r.get("scene") or "")
+    theory_status = str(r.get("theory_status") or r.get("state_label") or scene)
     current = float(r.get("current") or 0)
     confirm = float(r.get("confirm") or current)
-    if stage == "转弱":
+    if stage == "转弱" or theory_status == "暂不碰":
         return "defensive", "bearish_lean", "wait", "low"
-    if scene == "冲高减仓":
+    if theory_status == "体系转强确认":
+        return "track", "bullish", "track", "medium"
+    if theory_status == "未确认转强":
+        return "wait_for_confirmation", "bullish_lean", "observe", "medium"
+    if theory_status == "承接存在":
+        return "wait_for_confirmation", "bullish_lean", "observe", "medium"
+    if theory_status == "转强不足":
+        return "wait_for_confirmation", "neutral", "observe", "low"
+    if scene == "冲高减仓" or theory_status == "冲高减仓":
         return "reduce", "neutral", "reduce", "medium"
-    if current >= confirm:
+    if current >= confirm or scene in {"突破确认", "突破观察"} or theory_status in {"突破确认", "突破观察"}:
         return "track", "bullish", "track", "medium"
     if scene in {"低吸观察", "防守观察", "防守观察，趋势下行谨慎", "空间不足", "等转强"}:
         return "wait_for_confirmation", "bullish_lean", "observe", "medium"
-    if scene == "突破确认":
-        return "track", "bullish", "track", "medium"
     return "observe", "neutral", "observe", "low"
 
 
@@ -756,19 +772,21 @@ def signal_risk_flags(r: dict[str, Any]) -> list[str]:
     return flags
 
 
-def state_text(stage: str, scene: str) -> str:
-    if stage == "转弱":
+def state_text(stage: str, theory_status: str) -> str:
+    if stage == "转弱" or theory_status == "暂不碰":
         return "暂不碰"
-    if scene in {"低吸观察", "防守观察", "防守观察，趋势下行谨慎"}:
-        return "修复观察，未确认转强"
-    if scene in {"空间不足"}:
-        return "空间不足，先观察"
-    if scene == "等转强":
-        return "等放量确认转强"
-    if scene in {"突破确认", "突破观察"}:
-        return "突破确认中"
-    if scene == "冲高减仓":
-        return "转强确认中，注意减仓"
+    if theory_status == "体系转强确认":
+        return "体系转强确认"
+    if theory_status == "未确认转强":
+        return "未确认转强"
+    if theory_status == "承接存在":
+        return "承接存在"
+    if theory_status == "转强不足":
+        return "转强不足"
+    if theory_status == "修复观察":
+        return "修复观察"
+    if theory_status:
+        return theory_status
     return "震荡观察"
 
 
@@ -785,28 +803,23 @@ def current_action_text(stage: str, scene: str) -> str:
 
 
 def structure_view(r: dict[str, Any]) -> str:
+    base_status = str(r.get("base_status") or "")
+    theory_status = str(r.get("theory_status") or r.get("state_label") or "")
     scene = str(r.get("scene") or "")
-    if scene in {"低吸观察", "防守观察", "防守观察，趋势下行谨慎"}:
-        return "修复观察，未确认转强"
-    if r["current"] >= r["confirm"] and not r["stage"] == "转弱":
-        if scene in {"突破确认", "突破观察"}:
-            return "突破确认中，回踩不破加分"
-        if r["stage"] == "走强" or scene == "冲高减仓":
-            return "转强确认中，等回踩验证"
-        return "转强确认中，但结构需回踩验证"
-    if r["stage"] == "转弱":
-        return "结构偏弱，先退出观察"
-    ma = r.get("ma") or {}
-    ma_values = [float(value) for value in ma.values() if value != "--"]
-    below_count = sum(1 for value in ma_values if r["current"] < value)
-    if below_count >= 3:
-        return "弱修复，还没确认转强"
-    if scene == "空间不足":
-        return "上方空间太近，先观察"
-    if scene == "冲高减仓":
-        return "转强但空间受限，先观察"
-    if scene == "突破确认" or scene == "突破观察":
+    if theory_status == "体系转强确认":
         return "突破确认中，回踩不破加分"
+    if theory_status == "未确认转强":
+        return "转强苗头出现，但还没到体系确认"
+    if theory_status == "承接存在":
+        return "下方有承接，但还不是转强"
+    if theory_status == "转强不足":
+        return "有修复迹象，但强度还不够"
+    if theory_status == "修复观察":
+        return "修复阶段，等进一步确认"
+    if base_status == "风险回避" or scene == "转弱":
+        return "结构偏弱，先退出观察"
+    if base_status in {"低位修复", "均线修复", "防守整理", "临近确认", "空间偏紧", "中性整理"}:
+        return "修复观察，等理论确认"
     return "修复观察，不是主升"
 
 
@@ -829,11 +842,20 @@ def momentum_view(text: str) -> str:
 def one_sentence(r: dict[str, Any], low_zone: str) -> str:
     stage = r["stage"]
     scene = r.get("scene") or ""
+    theory_status = str(r.get("theory_status") or r.get("state_label") or "")
     current = float(r.get("current", 0))
     confirm = float(r.get("confirm", 0))
     support = float(r.get("support", 0))
-    if stage == "转弱":
+    if stage == "转弱" or theory_status == "暂不碰":
         return f"现在先不参与；等重新站回 {support:.2f}元 上方并稳定后再看。"
+    if theory_status == "体系转强确认":
+        return f"已形成体系确认，放量站稳回踩不破可评估加仓。"
+    if theory_status == "未确认转强":
+        return f"转强苗头已经出现，但还没到体系确认，先等回踩验证。"
+    if theory_status == "承接存在":
+        return f"下方有承接，但还不是转强，先观察是否能继续修复。"
+    if theory_status == "转强不足":
+        return f"有修复迹象，但强度还不够，先等进一步确认。"
     if scene == "冲高减仓":
         return f"上方空间受限，有底仓的逢高减仓，空仓不追。"
     if scene in ("突破确认", "突破观察"):
@@ -855,6 +877,7 @@ def generate_alert(report: dict[str, Any]) -> str | None:
     confirm = float(report.get("confirm") or 0)
     resistance = float(report.get("resistance") or 0)
     scene = str(report.get("scene") or "")
+    theory_status = str(report.get("theory_status") or report.get("state_label") or scene)
     name = str(report["name"])
     atr14 = float(report.get("atr14", 0) or 0)
     thresh = max(atr14 * 0.35, current * 0.006) if atr14 > 0 else current * 0.008
@@ -874,7 +897,7 @@ def generate_alert(report: dict[str, Any]) -> str | None:
         else:
             return f"📍 {name}｜现价{current:.2f}元 接近支撑 {support:.2f}元 止跌确认中"
 
-    if confirm > 0 and abs(current - confirm) <= thresh and scene not in {"冲高减仓", "突破确认", "突破观察"}:
+    if confirm > 0 and abs(current - confirm) <= thresh and scene not in {"冲高减仓", "突破确认", "突破观察"} and theory_status != "体系转强确认":
         if current >= confirm:
             return f"📈 {name}｜现价{current:.2f}元 已越过确认价 {confirm:.2f} 放量站稳加仓评估"
         return f"📈 {name}｜现价{current:.2f}元 触及确认区 {confirm:.2f} 放量站稳加仓评估"
@@ -973,8 +996,8 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
         action = "盯紧止损线，跌破就退"
         state_summary = "接近风险线"
     else:
-        action = f"当前{state_label}，{action_text_for_scene(scene)}"
-        state_summary = state_label
+        action = f"当前{theory_status_text}，{action_text_for_scene(scene)}"
+        state_summary = theory_status_text
 
     # === BUILD OUTPUT ===
     lines.append(f"盯盘 — {name}  {current:.2f}（{change_pct:+.2f}%）  {state_summary}")
