@@ -1,11 +1,27 @@
-# Trader 2.0 — 架构文档（深挖参考）
+# Trader 2.3 — 架构文档（深挖参考）
 
-> 最后更新：2026-05-17
+> 最后更新：2026-05-23
 > **注意**: AGENTS.md 是 Agent 快速参考，本文档用于开发调试/架构深挖。
 
 ---
 
 ## 变更日志
+
+### 2026-05-23 — Trader 2.3：四大高级统计模块上线
+
+新增四个纯 numpy 轻量级统计学模块，零重量级框架依赖：
+- `hmm_regime.py` — 隐马尔可夫大势检测（Baum-Welch + Viterbi，3 隐状态）
+- `bayesian_fusion.py` — 贝叶斯乘积规则多专家融合（默认关闭，BAYESIAN_FUSION=true 激活）
+- `volume_profile.py` — 日内成交量分布，POC 控制节点与 70% Value Area
+- `scripts/self_calibration.py` — 离线随机搜索参数校准，写入 ~/.trader/calibrated_params.json
+
+测试体系扩展至 485 个用例（新增 3 个测试文件），全部通过零 Regression。
+
+### 2026-05-23 — Trader 2.2：信号生命周期 V2 + 行情 HA + 融合优先级
+
+- Signal Contract v2：SHA256 deterministic UUID，原子落盘，历史数据迁移工具
+- MarketDataSourceController：1.5s TCP 超时熔断，30s 冷却隔离，自动 fallback 至腾讯/新浪
+- 融合层场景优先级过滤器 + 置信冲突消解 + Regime 自适应参数缩放
 
 ### 2026-05-09 — Skill 结构优化：Commands/Output Contract 移至 references/
 
@@ -507,9 +523,11 @@ Trader 2.0/
 │   └── 06-信号追踪-trader-tracking/ (SKILL.md, scripts/final_tracker.py, references/)
 ├── 02-共享模块-shared/
 │   ├── 01-行情数据-market-data/ (light_data.py, models.py)
-│   ├── 02-候选逻辑-candidate/ (candidate_core.py, chan_core.py, wyckoff_core.py)
+│   ├── 02-候选逻辑-candidate/ (candidate_core.py, chan_core.py, wyckoff_core.py,
+│   │                           hmm_regime.py, bayesian_fusion.py, volume_profile.py) ← 2.3新增
 │   ├── 03-输出校验-contracts/ (signal_contract.py, signal_store.py)
-│   ├── scripts/ (calibrator.py, market_env.py, pipeline.py, signal_tracker.py)
+│   ├── scripts/ (calibrator.py, market_env.py, pipeline.py, signal_tracker.py,
+│   │            self_calibration.py, signal_migration_tool.py) ← 2.3/2.2新增
 │   └── trader_shared/ (config.py, schema/v1.py, data_provider.py)
 └── 03-安装包-dist/releases/ (构建产物，不提交)
 ```
@@ -562,13 +580,107 @@ Trader 2.0/
 
 ---
 
-## 十五、规划与路线图
+## 十五、[2.3新增] 高级统计模块深度技术文档
+
+### 15.1 HMM 大势状态检测器 (`hmm_regime.py`)
+
+**算法**：纯 numpy 实现高斯观测分布隐马尔可夫模型（HMM），无任何外部重量级框架依赖。
+
+**流程**：
+1. 输入：最近 60~200 个交易日的大盘指数日收益率序列 `List[float]`
+2. Baum-Welch EM 迭代（最多 50 次，收敛阈值 1e-4）学习三组高斯参数（μ, σ）和状态转移矩阵 A
+3. Viterbi log-domain 解码输出最可能隐状态序列
+4. 按 μ 排序确保状态语义稳定：状态 0 = 低波上涨(Bull)，1 = 高波下跌(Bear)，2 = 宽幅震荡(Range)
+
+**关键函数**：
+
+| 函数 | 说明 |
+|-----|-----|
+| `detect_regime(returns)` | 一站式检测，返回 state_id/label/confidence/mu/sigma |
+| `regime_to_multiplier(result)` | 将状态转为 zone_width/confirm_buffer/stop_buffer 调节系数 |
+| `HMMRegimeDetector.fit(returns)` | 独立拟合 |
+| `HMMRegimeDetector.predict(returns)` | Viterbi 解码 |
+
+**低置信度保护**：confidence < 0.6 时系数自动向中性 1.0 线性收敛，防止模型噪音放大错误。
+
+---
+
+### 15.2 贝叶斯概率决策融合网络 (`bayesian_fusion.py`)
+
+**触发条件**：环境变量 `BAYESIAN_FUSION=true` 时激活，默认关闭（保持 2.2 场景权重行为）。
+
+**算法**：贝叶斯乘积规则（Naïve Bayes Product Rule）融合三路专家似然。
+
+```
+P(action | chan, mom, wyk, regime) ∝ L(chan) × L(mom) × L(wyk)
+```
+
+- 每个专家的似然 `L` 由 `direction × confidence × regime_prior_matrix` 计算
+- 先验矩阵维度：`[regime(3)] × [direction(3)] × [action(5)]`，按领域知识初始化
+- 置信度通过 `blended = confidence × base + (1-confidence) × uniform` 调节，高置信度时向极端动作靠拢
+- 输出：5 个动作的后验概率向量，取 argmax 作为最优动作
+
+**动作标签**（按 action_score 排序）：空仓观望(-1.0) / 减仓防守(-0.5) / 持仓观察(0.0) / 半仓试多(0.5) / 加仓做多(1.0)
+
+**关键函数**：`bayesian_merge(chan_signal, momentum_signal, wyckoff_signal, regime_state)`
+
+---
+
+### 15.3 日内成交量分布分析器 (`volume_profile.py`)
+
+**算法**：将分钟 K 线（5m/15m）成交量按价格区间均匀分配到 n_bins（默认 50）个价格网格，计算：
+
+- **POC（Point of Control）**：成交量最大的价格档位，即日内主力成本最密集区
+- **Value Area（VA）**：从 POC 向两侧双向扩展，直到累计覆盖 70% 总成交量的价格区间
+
+**边界判断函数**：
+
+| 函数 | 说明 |
+|-----|-----|
+| `in_value_area(price)` | 价格是否在价值区内 |
+| `breakout_of_va(price)` | 价格是否突破 VA 上沿（强势信号）|
+| `breakdown_of_va(price)` | 价格是否跌破 VA 下沿（偏空信号）|
+| `above_poc(price)` | 价格是否高于 POC |
+
+**assess_vp_breakout()**：综合评估返回 `vp_signal`（va_breakout / above_poc / va_support / below_va）和 `vp_confidence`（0~1）。
+
+---
+
+### 15.4 离线参数自校准器 (`scripts/self_calibration.py`)
+
+**设计原则**：完全离线，非交易时段运行，零实盘干扰。
+
+**流程**：
+1. 读取 `~/.trader/signals.jsonl` 历史信号和 `~/.trader/signal_results.jsonl` 结算结果
+2. 用随机搜索（Random Search，100~200 次试验）在三维参数空间中寻优：
+   - `zone_width` ∈ [0.90, 1.25]
+   - `confirm_buffer` ∈ [0.70, 1.30]
+   - `stop_buffer` ∈ [0.70, 1.00]
+3. 每次试验用启发式仿真函数 `_simulate_win_rate()` 估算该参数组合下的历史胜率
+4. 将最优参数写入 `~/.trader/calibrated_params.json`
+
+**调用方式**：
+```bash
+# 盘后或周末手动运行
+python3 02-共享模块-shared/scripts/self_calibration.py
+
+# 在代码中读取已校准参数
+from self_calibration import load_calibrated_params
+params = load_calibrated_params()  # 返回 {"zone_width": ..., "confirm_buffer": ..., "stop_buffer": ...}
+```
+
+---
+
+## 十六、规划与路线图
 
 | 规划 | 说明 | 优先级 | 状态 |
 |------ | ------ | ------ | ------ |
 | ✅ JSON Schema 化 Output Contract | `trader_shared/schema/v1.py` | P0 | 已完成 |
 | ✅ 统一数据层 `DataProvider` 接口 | `trader_shared/data_provider.py` | P0 | 已完成 |
-| 回测引擎 | `calibrator.py` 扩展为正式回测框架 | P1 | 探索中 |
-| `t0-trader` signal type 扩展 | 增加 `pilot_entry` 试仓等 | P2 | 未开始 |
-| App/小程序前端面板 | Markdown → 可视化 Chart 面板 | P2 | 未开始 |
-| ✅ shared 包标准化 | `trader_shared/` Python 包 | P3 | 已完成 |
+| ✅ Signal Contract v2 + HA 行情管线 | 2.2 核心重构 | P0 | 已完成 |
+| ✅ HMM 大势检测 + 贝叶斯融合 | `hmm_regime.py` + `bayesian_fusion.py` | P1 | 已完成(2.3) |
+| ✅ 日内量价分布 + 离线自校准 | `volume_profile.py` + `self_calibration.py` | P1 | 已完成(2.3) |
+| Tick 订单流分析 | 盘口十档主动买卖追踪，提升日内时机精度 | P2 | 未开始 |
+| 行业板块共振管理 | 轮动时加入板块强弱因子 | P2 | 未开始 |
+| App/小程序前端面板 | Markdown → 可视化 Chart 面板 | P3 | 未开始 |
+| `t0-trader` signal type 扩展 | 增加 `pilot_entry` 试仓等 | P3 | 未开始 |
