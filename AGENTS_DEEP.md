@@ -35,22 +35,38 @@
 | 腾讯日线 | `web.ifzq.gtimg.cn/appstock/app/fqkline/get` | 前复权日线，附加 `atr14/atr7/atr_ratio/tr` 字段 | 支撑阻力计算、状态判定 |
 | 新浪 K 线 | `money.finance.sina.com.cn/quotes_service/api/...` | 5m / 15m / 30m 分钟线 | t0-trader 盘中分析 |
 
-### 2.2 light_data.py — 唯一数据入口
+### 2.2 light_data.py — 唯一数据入口与双源 HA 管道
 
-`02-共享模块-shared/01-行情数据-market-data/light_data.py` (403 行) 是所有 skill 的唯一数据拉取模块。
+`02-共享模块-shared/01-行情数据-market-data/light_data.py` 是所有 skill 的唯一数据拉取入口。在 Trader 2.2 中，该模块已全面重构为**双源热备高可用 (HA) 行情管道**。
+
+#### 2.2.1 MarketDataSourceController 行情源控制器
+系统使用独立的 `MarketDataSourceController` 来跟踪 mootdx TCP 行情接口的运行健康度：
+* **秒级超时控制**：所有 mootdx 接口调用（如 bars / quotes）强制注入 `socket.setdefaulttimeout(1.5)` 限制，确保因网络阻塞引起的卡死在 1.5s 内强制熔断，防止导致盯盘/选股池任务发生静默离线挂起。
+* **隔离冷却机制**：追踪连续失败次数。当 `consecutive_failures >= 3` 时，行情源判定为 `UNHEALTHY`，强制将其隔离并冷却冷却 `cooldown_seconds = 30` 秒。期间所有数据请求直接避开 mootdx 以节约查询开销。
+* **静默秒切容灾**：当 mootdx 处于隔离冷却期或单次请求超时失败时，管道进行静默秒切降级：
+  * **行情快照 (fetch_quote)**：自动 fallback 至腾讯 HTTP 行情 API。
+  * **前复权日线 (fetch_qfq_daily)**：自动 fallback 至腾讯前复权日线接口。
+  * **分钟线 (fetch_5m/15m/30m/kline)**：自动 fallback 至 `akshare` (EastMoney API)。
+
+#### 2.2.2 数据完备度标识 (`data_status`)
+为保证下游策略对行情数据质量的知情权，`MarketSnapshot` 数据模型原生打上完备度标签：
+* `"full"`：所有主行情源均正常返回完整数据（包含五档盘口）。
+* `"partial"`：触发了 HTTP 行情源降级（例如 mootdx 挂掉，使用腾讯/akshare 行情），或者缺失了次要数据源（如 5m 分时缺失）。
+* `"degraded"`：仅剩下快照或日线单方数据，策略精度降低。
+* `"failed"`：完全无法获取数据。
+* `missing_sources` 和 `source_errors` 用以记录具体失败源及其 Traceback，消除静默故障。
 
 **核心函数：**
 
-| 函数 | 作用 |
-|------ | ------ |
-| `fetch_quote()` | 腾讯实时行情快照 → `QuoteData` |
-| `fetch_qfq_daily()` | 腾讯前复权日线，追加 ATR 字段 |
-| `fetch_5m()` / `fetch_15m()` / `fetch_30m()` | 新浪分钟线 |
-| `fetch_kline()` | 通用多周期 K 线拉取 + 归一化 |
-| `load_market_snapshot()` | 聚合 quote + daily + 5m，返回 `MarketSnapshot` |
-| `resolve_security()` | 股票名/代码 → `Security(dataclass)` |
-| `pct_change()` / `to_float()` | 安全数值工具 |
-| `is_trading_time()` | 判断当前是否为交易日 9:30-15:00 |
+| 函数 | 作用 | 完备度标签影响 |
+|------ | ------ | ------ |
+| `fetch_quote()` | 腾讯实时行情快照 → `QuoteData` | 失败则降级 / 触发重试 |
+| `fetch_qfq_daily()` | 腾讯前复权日线，追加 ATR 字段 | 失败则降级 / 触发重试 |
+| `fetch_5m()` / `fetch_15m()` / `fetch_30m()` | 新浪分钟线 | 失败 fallback 至 akshare |
+| `fetch_kline()` | 通用多周期 K 线拉取 + 归一化 | 失败 fallback 至 akshare |
+| `load_market_snapshot()` | 聚合并拉取多源行情返回 `MarketSnapshot` | 自动标注 `data_status` |
+| `resolve_security()` | 股票名/代码 → `Security(dataclass)` | 解析归一化证券代码 |
+| `is_trading_time()` | 判断当前是否为交易日 9:30-15:00 | 过滤非交易时段 |
 
 **数据模型层** `models.py` 定义统一 TypedDict：
 
@@ -67,7 +83,7 @@
 | `WyckoffSignal` | 威科夫信号 |
 
 **HTTP 客户端** `HttpClient`：GET with User-Agent、gzip、SSL-unverified。 `retry()` 指数退避 3 次。
-**缓存**：bars 不含当日日期时缓存 1 小时，实时数据不缓存。
+**缓存**：bars 不含当日日期时缓存 1 小时，实时数据不缓存，行情快照进行 30s TTL 缓存。
 **NAME_MAP**：9 个常用股票名到代码的映射（南网科技→688248、中国铝业→601600 等）。
 
 ### 2.3 状态机（`candidate_core.STATUS_SCORE`）
@@ -242,9 +258,63 @@ T0 参考 → 低吸/高抛/止损
 
 `calc_rsi()` / `calc_macd()` / `calc_adx()` / `calc_bollinger()` / `assess_momentum()`
 
+### 5.6 智能决策融合层 (`fusion_core.py` / `fusion_regime.py`)
+
+决策融合层是贯穿结构、缠论、动量与威科夫等多维分析体系的“终极裁判”。在传统多指标决策中，多头信号与空头冲突往往会导致系统输出“数据冲突”或者“中性旁观”等平庸判定。Trader 2.2 通过智能决策融合层彻底打破了这一桎梏。
+
+#### 5.6.1 信号标准化抽象
+融合层首先将底层各个策略子系统的原始计算结果抽象为带有方向与置信度的统一信号包（`CandidateSignal`）：
+* **缠论转换**：根据（一/二/三类买点 > 底背驰 > 顶背驰 > 趋势段）优先级映射。一类买点（底背驰极值点）置信度 0.8，趋势拉升段置信度 0.4。
+* **动量转换**：使用独特的 **U 型置信度映射函数**。动量指标分值接近两端（极度超买/超卖，$\le 25$ 或 $\ge 75$）时置信度激增为 0.8，处于 41-59 震荡灰区时置信度跌至 0.2。
+* **威科夫转换**：Spring 弹簧信号置信度 0.70（叠加看多背离达 0.75），上冲回落（Upthrust）置信度 0.6，看多/看空量价背离置信度 0.5。
+
+#### 5.6.2 场景优先级过滤器 (Scenario Priority Filter)
+融合层摒弃了静态等权（Equal Weighting）模式，通过计算股价在 20 日高低区间的相对价格位置（$pos\_pct$），实行动态权重倾斜：
+* **筑底/突破区间（$pos\_pct \le 0.3$ 或强结构买点）**：将 **80% 的决策权重分配给结构化理论（缠论 45% + 威科夫 35%）**，动量权重压缩至 20%。以此消除低位筑底时动量指标金叉/死叉频繁交织产生的磨损，强力捕捉“Spring 弹簧低吸位”或“缠论三买突破位”。
+* **冲顶/超买区间（$pos\_pct \ge 0.7$ 或强结构卖点/高动量）**：将 **80% 的决策权重分配给动量与威科夫量价（动量 55% + 威科夫 25%）**，缠论权重压缩至 20%。用来在情绪高潮期通过动量极值和威科夫上冲回落拦截假突破，预防高位套牢。
+* **震荡区间**：退化为基于宏观大势的标准权重。
+
+```mermaid
+graph TD
+    Price["相对价格区间 (pos_pct)"] -->|<= 0.3 低位/突破| Breakout["低位/突破场景偏斜"]
+    Price -->|>= 0.7 高位/超买| Climax["高位/超买场景偏斜"]
+    Price -->|其他 震荡区| Standard["大势标准权重"]
+
+    Breakout -->|缠论 45% + 威科夫 35%| Output1["结构占 80% 权重"]
+    Climax -->|动量 55% + 威科夫 25%| Output2["动量占 80% 权重"]
+    Standard -->|大盘牛熊自适应权重| Output3["Regime 权重"]
+```
+
+#### 5.6.3 冲突消解与 Veto 噪点消减机制
+当各维理论出现强分歧时（$disagreement = max(dir) - min(dir) > 1$，如 1 与 -1 并存），融合层启动置信度优先级覆盖逻辑：
+* **低位转强 Veto 覆盖**：若底层触发了缠论结构买点或威科夫 Spring 看多信号，直接将动量指标的看空噪点归零（$direction = 0$）。
+* **高位筑顶 Veto 覆盖**：若底层触发了缠论顶背驰或威科夫上冲回落（Upthrust）看空信号，直接将动量指标的冲高看多噪点归零。
+* **分歧解耦**：当发生 Veto 噪声消除时，系统将用于诊断的原始分歧度 `disagreement` 与用于映射决策逻辑的 `disagreement_for_action` 进行解耦，并强制令 `disagreement_for_action = 0`，消除传统策略在强底分型转强突破时被冲突误判拦截的隐患。
+
+### 5.7 大势参数自适应调节器 (Regime Multipliers)
+
+在单票分析的价格计算层（`structure_core.py`），系统不再使用静态硬编码的安全缓冲，而是引入了与大盘宏观牛熊环境（`market_env`）及理论融合结果深度挂钩的自适应调节器：
+
+#### 5.7.1 Regime 参数微调公式
+系统通过 `_theory_multipliers` 计算 4 个维度的动态调节系数：
+
+1. **大势缩放 (Regime Factor)**：
+   * **偏弱/很差大势**：自动收窄止损缓冲距离（`stop_buffer` = 0.8x），防止单票在弱势行情中阴跌扛单；同时加宽突破确认确认门槛（`confirm_buffer` = 1.3x），规避弱势行情中频发的假突破。
+   * **正常大势**：积极拓宽低吸区宽度（`zone_width` = 1.2x），避免低吸区过窄导致强势股踏空；同时收紧突破确认价（`confirm_buffer` = 0.8x），提升在健康市场中的突破敏感度。
+
+2. **理论微调 (Theory Finetuning)**：
+   * 触发缠论强势上攻段或三买信号时：`zone_width` 额外放大 1.15x（拓宽低吸吸纳容错）。
+   * 触发缠论回调或顶背驰时：`zone_width` 额外压缩 0.90x（紧贴防守线）。
+   * 触发威科夫 Spring 弹簧或看多量价背离时：`confirm_buffer` 额外收紧 0.70x（大幅提高对低吸确认的可达性）。
+   * 动量强势（bullish + $\ge 65$）时：`space_threshold`（空间不足过滤门槛）缩窄 0.80x（激进买入）。
+   * 动量弱势（bearish + $\le 35$）时：`space_threshold` 放大 1.30x（保守防守）。
+
+#### 5.7.2 动态价格闭环
+以上 4 维系数完美嵌入 `build_structure_context()`，使得算出来的低吸区上/下沿、止损线、确认价及突破过滤阈值均具备全天候数学鲁棒性，彻底打通了大势-多维理论-单票决策的数据闭环。
+
 ---
 
-## 六、Signal Contract 协议层
+## 六、Signal Contract 协议层与信号生命周期 V2
 
 ### 6.1 Signal Record v1
 
@@ -280,6 +350,34 @@ T0 参考 → 低吸/高抛/止损
 | `risk_stop` | ⚠️T0止损 |
 | `track` / `low_buy_watch` | 👁跟踪 |
 | `reduce` | 📉减仓 |
+
+### 6.4 信号生命周期 V2 与 UUID 强一致去重 (Signal Lifecycle V2)
+
+在 Trader 2.2 中，为了杜绝由于跨组件时区偏差、多进程并发写入、以及大盘跳空等各种边缘场景引起的信号重复生成或冗余结算，引入了严密的信号生命周期 V2 去重防重架构。
+
+#### 6.4.1 make_signal_id 统一 UUID 生成算法
+UUID 生成规则基于强一致的 deterministic SHA256 算法，针对 4 个核心业务要素进行归一化后计算哈希值：
+1. **证券代码归一化 (`_normalize_symbol`)**：支持 `688248.SH`、`SH688248`、`688248` 等各种杂乱输入，统一映射为带点后缀标准格式 `CODE.MARKET` 并大写。
+2. **交易日期归一化 (`_norm_date`)**：将 `2025/5/2`、`20250502`、`2025-05-02T14:30:00` 等日期形式统一转换为零填充的 `YYYY-MM-DD` 格式。
+3. **信号类型归一化 (`_normalize_signal_type`)**：自动将各类旧版中文状态名（如"低吸观察"）或非标准缩写映射为 v1 英文标准字段（如 `low_buy_watch`）。
+4. **触发价格归一化 (`_safe_price` & `f"{price:.2f}"`)**：无论是数值型还是内嵌字典类型中的价格信息，统一提取并格式化为标准双精度字符串。
+
+哈希计算公式：
+$$\text{UUID} = \text{SHA256}(\text{normalized\_symbol} \parallel \text{normalized\_date} \parallel \text{normalized\_type} \parallel \text{price\_2decimals}) \text{[:16]}$$
+返回 16 位确定性 Hex 字符（48 bit 熵），全局唯一，不随环境时区或系统时间改变。
+
+#### 6.4.2 严格 UUID 双向去重与防重结算
+* **加载/检索拦截 (Deduplication)**：在 `check_recent()`、`backfill()` 以及 `log_safe()` 等核心信号读写节点，系统在加载和保存信号时会自动根据新 UUID (及旧 `signal_id_md5` 兼容字段) 在已存在缓存中进行双向检测。只要 UUID 重合，直接幂等丢弃，杜绝二次充填。
+* **状态机转换卫语句**：信号状态划分为 `active` (活跃)、`completed` (已结算)、`expired` (已过期)。注册 `_FORBIDDEN_TRANSITIONS` 状态转换黑名单，禁止将已完成/已过期的信号逆向激活。
+
+#### 6.4.3 原子临时写与 fsync 落盘安全
+为彻底规避系统崩溃或中断造成的 JSONL 写入残缺甚至文件损坏（Corruption），所有信号持久化变更 (`fill`、`fill_by_target`) 均遵循严密的落盘原则：
+1. 先向临时文件 `*.jsonl.tmp` 写入完整序列化内容。
+2. 调用 `os.fsync(fd)` 强制操作系统硬件将缓冲区数据刷新落盘。
+3. 通过操作系统原子指令 `os.replace()` 替代原始文件，保证文件写操作的绝对完整与强事务级安全。
+
+#### 6.4.4 信号平滑迁移工具 (`signal_migration_tool.py`)
+为实现平滑升级，Trader 2.2 提供了一键历史老数据迁移脚本。该 CLI 工具能够自动检索用户根目录 `~/.trader/` 下的 `signals.jsonl` 与 `signal_results.jsonl`，将旧有 MD5 短哈希无损升级为新版 UUID 长 Hex 标识并清理重复记录，保证历史准确率数据无缝流转至新系统。
 
 ---
 

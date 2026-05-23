@@ -457,6 +457,7 @@ class TestMergeDecisions:
             os.environ.pop("FUSION_LOG_ONLY", None)
         else:
             os.environ["FUSION_LOG_ONLY"] = original
+        importlib.reload(fusion_core)
 
 
 class TestIntegrationDataFlow:
@@ -494,3 +495,79 @@ class TestIntegrationDataFlow:
         result = _wyckoff_to_signal(levels_wyckoff)
         assert result["direction"] == 1
         assert result["confidence"] == 0.7
+
+
+class TestPhase3Features:
+    """Comprehensive unit tests for Phase 3: priority overrides, conflict resolutions, and adaptive parameters."""
+
+    def test_scenario_priority_filter_bottom(self):
+        """Under pos_pct <= 0.3, weights should dynamically adjust to {"chan": 0.45, "momentum": 0.20, "wyckoff": 0.35}."""
+        from fusion_core import merge_decisions
+        chan = {"chanlun": {"buy_points": [], "divergence": {}, "trend_label": "数据不足"}}
+        mom = {"momentum": {"score": 50, "direction": "neutral", "signals": []}}
+        wyk = {"wyckoff": {}}
+
+        # Test low price in 20-day high-low range
+        bars = [
+            {"low": 10.0, "high": 20.0},
+            {"low": 11.0, "high": 21.0},
+        ]
+        # pos_pct = (11.0 - 10.0) / (21.0 - 10.0) = 1.0 / 11.0 = 0.09 <= 0.3
+        result = merge_decisions(chan, mom, wyk, regime="正常", current_price=11.0, bars=bars)
+        assert result["weights_used"] == {"chan": 0.45, "momentum": 0.20, "wyckoff": 0.35}
+
+    def test_scenario_priority_filter_top(self):
+        """Under pos_pct >= 0.7, weights should dynamically adjust to {"chan": 0.20, "momentum": 0.55, "wyckoff": 0.25}."""
+        from fusion_core import merge_decisions
+        chan = {"chanlun": {"buy_points": [], "divergence": {}, "trend_label": "数据不足"}}
+        mom = {"momentum": {"score": 50, "direction": "neutral", "signals": []}}
+        wyk = {"wyckoff": {}}
+
+        bars = [
+            {"low": 10.0, "high": 20.0},
+        ]
+        # pos_pct = (18.0 - 10.0) / (20.0 - 10.0) = 8.0 / 10.0 = 0.8 >= 0.7
+        result = merge_decisions(chan, mom, wyk, regime="正常", current_price=18.0, bars=bars)
+        assert result["weights_used"] == {"chan": 0.20, "momentum": 0.55, "wyckoff": 0.25}
+
+    def test_belief_priority_conflict_resolution_bullish_veto(self):
+        """Strong bullish veto signal (Chanlun buy points / bottom divergence, Wyckoff Spring) overrides disagreement and vetos Momentum bearish noise."""
+        from fusion_core import merge_decisions
+        # Chan has a strong bullish signal: 一类买
+        chan = {"chanlun": {"buy_points": [{"type": "一类买", "price": 28}], "divergence": {}, "trend_label": "数据不足"}}
+        # Momentum has bearish noise: direction bearish, score 20
+        mom = {"momentum": {"score": 20, "direction": "bearish", "signals": ["MACD死叉"]}}
+        wyk = {"wyckoff": {}}
+
+        # disagreement unmitigated is 2, but overridden to 0 by bullish veto
+        result = merge_decisions(chan, mom, wyk, regime="正常")
+        assert "半仓试" in result["action"] or "增持" in result["action"]
+        assert result["action"] != "观望 (信号冲突)"
+
+    def test_belief_priority_conflict_resolution_bearish_veto(self):
+        """Strong bearish veto signal (Chanlun top divergence / 1st sell, Wyckoff Upthrust) overrides disagreement and vetos Momentum bullish noise."""
+        from fusion_core import merge_decisions
+        # Chan has a strong bearish signal: 顶背驰
+        chan = {"chanlun": {"buy_points": [], "divergence": {"top_divergence": True}, "trend_label": "数据不足"}}
+        # Momentum has bullish noise: direction bullish, score 80
+        mom = {"momentum": {"score": 80, "direction": "bullish", "signals": ["MACD金叉"]}}
+        wyk = {"wyckoff": {}}
+
+        result = merge_decisions(chan, mom, wyk, regime="正常")
+        assert "减仓" in result["action"] or "空仓" in result["action"]
+        assert result["action"] != "观望 (信号冲突)"
+
+    def test_regime_multipliers_adaptive(self):
+        """Test multipliers adjustments based on Regime in structure_core."""
+        from structure_core import _theory_multipliers
+
+        # Test normal market (正常) → Widen low buy zone, Tighten breakout confirmation buffer
+        mult_normal = _theory_multipliers({"regime": "正常"})
+        assert mult_normal["zone_width"] == 1.2
+        assert mult_normal["confirm_buffer"] == 0.8
+        assert mult_normal["stop_buffer"] == 1.0
+
+        # Test weak market (偏弱 / 很差) → Tighten stop loss buffer, Widen breakout confirmation buffer
+        mult_weak = _theory_multipliers({"regime": "偏弱"})
+        assert mult_weak["stop_buffer"] == 0.8
+        assert mult_weak["confirm_buffer"] == 1.3

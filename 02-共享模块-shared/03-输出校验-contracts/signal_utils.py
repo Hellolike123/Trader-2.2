@@ -17,10 +17,31 @@ from typing import Any
 
 # ── Signal ID generation ───────────────────────────────────────────
 
-def normalize_signal_id(symbol: str, date: str, signal_type: str, price: str) -> str:
-    """Generate unified signal ID (SHA256, 16 hex chars = 48 bits entropy)."""
-    key = f"{symbol}|{date}|{signal_type}|{price}"
-    return hashlib.sha256(key.encode()).hexdigest()[:16]
+def normalize_signal_id(symbol: str, date: str, signal_type: str, price: str | float | Any) -> str:
+    """Generate unified signal ID (SHA256, 16 hex chars = 48 bits entropy).
+    
+    Ensures unicode and case normalization, symbol formatting, date formatting,
+    and consistent price decimal representation.
+    """
+    import unicodedata
+    # 1. Normalize symbol
+    sym_norm = unicodedata.normalize("NFC", str(symbol or "")).strip().upper()
+    sym_norm = normalize_symbol(sym_norm)
+
+    # 2. Normalize date
+    dt_norm = unicodedata.normalize("NFC", str(date or "")).strip()
+    dt_norm = normalize_date(dt_norm)
+
+    # 3. Normalize signal type
+    st_norm = unicodedata.normalize("NFC", str(signal_type or "")).strip()
+    st_norm = normalize_signal_type(st_norm)
+
+    # 4. Normalize price to 2-decimal string
+    p_val = _safe_price(price)
+    price_norm = f"{p_val:.2f}"
+
+    key = f"{sym_norm}|{dt_norm}|{st_norm}|{price_norm}"
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
 # ── Type / date / symbol normalizers ───────────────────────────────

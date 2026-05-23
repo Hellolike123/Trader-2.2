@@ -225,7 +225,7 @@ def zone_position(current: float, support: float, confirm: float) -> float:
 
 
 def _theory_multipliers(fusion_result: dict[str, Any] | None) -> dict[str, float]:
-    """根据融合层理论信号计算参数微调系数。
+    """根据融合层理论信号及大盘环境计算参数微调系数。
 
     返回 dict，每项默认1.0（不变）。理论信号好时积极放大，差时收窄。
     若 fusion_result 为 None 或信号不足，全部返回1.0，退化为纯数学计算。
@@ -241,7 +241,21 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None) -> dict[str, float
         "zone_width": 1.0,
         "confirm_buffer": 1.0,
         "space_threshold": 1.0,
+        "stop_buffer": 1.0,
     }
+
+    # ── Regime Multipliers (大势参数自适应) ──
+    regime = "正常"
+    if fusion_result is not None:
+        regime = fusion_result.get("regime", "正常")
+
+    if regime in ("偏弱", "很差"):
+        multipliers["stop_buffer"] = 0.8
+        multipliers["confirm_buffer"] = multipliers["confirm_buffer"] * 1.3
+    elif regime == "正常":
+        multipliers["zone_width"] = multipliers["zone_width"] * 1.2
+        multipliers["confirm_buffer"] = multipliers["confirm_buffer"] * 0.8
+
     if fusion_result is None:
         return multipliers
 
@@ -259,11 +273,11 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None) -> dict[str, float
         # 上攻笔/三买/底背驰 → 低吸区更宽
         if direction == 1 and confidence >= 0.4:
             if any(kw in reason for kw in ("三类买", "二类买", "一类买", "拉升段", "底背驰")):
-                multipliers["zone_width"] = 1.15
+                multipliers["zone_width"] = multipliers["zone_width"] * 1.15
         # 下跌笔/回调段 → 低吸区收窄
         elif direction == -1 and confidence >= 0.4:
             if any(kw in reason for kw in ("回调段", "顶背驰")):
-                multipliers["zone_width"] = 0.90
+                multipliers["zone_width"] = multipliers["zone_width"] * 0.90
 
     # --- 威科夫信号 ---
     wyk = signals_detail.get("wyckoff", {})
@@ -274,10 +288,10 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None) -> dict[str, float
         # Spring / 看多背离 → 突破更可信，确认缓冲收窄
         if direction == 1 and confidence >= 0.5:
             if "弹簧" in reason or "看多" in reason:
-                multipliers["confirm_buffer"] = 0.70  # 0.005 * 0.70 = 0.0035
+                multipliers["confirm_buffer"] = multipliers["confirm_buffer"] * 0.70  # 0.005 * 0.70 = 0.0035
         # 上冲回落/看空 → 不收窄
         elif direction == -1 and confidence >= 0.5:
-            multipliers["confirm_buffer"] = 1.0
+            multipliers["confirm_buffer"] = multipliers["confirm_buffer"] * 1.0
 
     # --- 动量信号 ---
     mom = signals_detail.get("momentum", {})
@@ -286,10 +300,10 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None) -> dict[str, float
         confidence = float(mom.get("confidence", 0))
         # 动量强势 → space阈值收窄（更激进，空间小也给进）
         if direction == 1 and confidence >= 0.5:
-            multipliers["space_threshold"] = 0.80
+            multipliers["space_threshold"] = multipliers["space_threshold"] * 0.80
         # 动量弱势 → space阈值加宽（更保守）
         elif direction == -1 and confidence >= 0.5:
-            multipliers["space_threshold"] = 1.30
+            multipliers["space_threshold"] = multipliers["space_threshold"] * 1.30
 
     return multipliers
 
@@ -329,7 +343,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         THEORY_ADJUST_LOG_ONLY = False
     if THEORY_ADJUST_LOG_ONLY and any(v != 1.0 for v in theory.values()):
         print(f"THEORY-ADJUST-LOG: multipliers={theory} (suppressed by THEORY_ADJUST_LOG_ONLY)")
-        theory = {"zone_width": 1.0, "confirm_buffer": 1.0, "space_threshold": 1.0}
+        theory = {"zone_width": 1.0, "confirm_buffer": 1.0, "space_threshold": 1.0, "stop_buffer": 1.0}
     effective_confirm_space = MIN_CONFIRM_SPACE_PCT * theory["confirm_buffer"]
     confirm_price = round(float(resistance["price"]) * (1 + effective_confirm_space), 2)
     # resistance: 实际阻力位，用于减仓参考
@@ -339,7 +353,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     # P3: zone_width 受缠论信号影响，上攻笔/三买时放大，下跌笔时收窄
     atr_pct = average_atr_pct(recent20) or 0.02
     zone_width_pct = clamp(atr_pct * 0.25 * theory["zone_width"], MIN_ZONE_WIDTH_PCT, MAX_ZONE_WIDTH_PCT)
-    stop_buffer_pct = clamp(atr_pct * 0.40, MIN_STOP_BUFFER_PCT, MAX_STOP_BUFFER_PCT)
+    stop_buffer_pct = clamp(atr_pct * 0.40 * theory.get("stop_buffer", 1.0), MIN_STOP_BUFFER_PCT, MAX_STOP_BUFFER_PCT)
     low_zone_lower = round(support_price, 2)
     low_zone_upper = round(support_price * (1 + zone_width_pct), 2)
     stop = round(support_price * (1 - stop_buffer_pct), 2)

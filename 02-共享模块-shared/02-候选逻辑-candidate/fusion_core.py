@@ -241,6 +241,8 @@ def merge_decisions(
     momentum_result: dict,
     wyckoff_result: dict,
     regime: str = "正常",
+    current_price: float = 0.0,
+    bars: list = None,
 ) -> dict:
     """决策融合层核心函数。
 
@@ -250,6 +252,8 @@ def merge_decisions(
         wyckoff_result:  wyckoff_strategy() 的返回值 (levels["wyckoff"])
         regime:          market_env assess() 返回的 level 字段
                          ("正常" | "偏弱" | "很差" | "未知")
+        current_price:   当前价格，可选，用于动态判断价格区间
+        bars:            K线数据，可选，用于动态判断价格区间
 
     Returns:
         {
@@ -286,27 +290,92 @@ def merge_decisions(
         wyckoff_signal = {"direction": 0, "confidence": 0.0,
                           "reason": "威科夫标准化异常", "raw_key": "wyckoff"}
 
-    # 2. 获取 Regime 权重
-    weights = get_regime_weights(regime)
+    # 2. 场景优先级过滤器 (Scenario Priority Filter)
+    # 计算20日高低区间位置
+    pos_pct = None
+    if bars and len(bars) > 0 and current_price > 0:
+        recent20 = bars[-20:]
+        lows = []
+        highs = []
+        for b in recent20:
+            if isinstance(b, dict):
+                l_val = b.get("low")
+                h_val = b.get("high")
+            else:
+                l_val = getattr(b, "low", None)
+                h_val = getattr(b, "high", None)
+            try:
+                if l_val is not None:
+                    lows.append(float(str(l_val).replace(",", "")))
+                if h_val is not None:
+                    highs.append(float(str(h_val).replace(",", "")))
+            except (ValueError, TypeError):
+                continue
+        if lows and highs:
+            min_l = min(lows)
+            max_h = max(highs)
+            if max_h > min_l:
+                pos_pct = (current_price - min_l) / (max_h - min_l)
 
-    # 3. 加权计算
+    chan_reason = chan_signal.get("reason", "")
+    strong_bullish_chan = chan_signal.get("direction") == 1 and any(
+        kw in chan_reason for kw in ("一类买", "二类买", "三类买", "1类买", "2类买", "3类买", "底背驰", "1st buy", "2nd buy", "3rd buy", "bottom divergence")
+    )
+    strong_bearish_chan = chan_signal.get("direction") == -1 and any(
+        kw in chan_reason for kw in ("一类卖", "1类卖", "1st sell", "顶背驰", "top_divergence")
+    )
+
+    wyk_reason = wyckoff_signal.get("reason", "")
+    strong_bullish_wyk = wyckoff_signal.get("direction") == 1 and any(
+        kw in wyk_reason for kw in ("弹簧", "Spring", "看多", "bullish")
+    )
+    strong_bearish_wyk = wyckoff_signal.get("direction") == -1 and any(
+        kw in wyk_reason for kw in ("上冲", "Upthrust", "看空", "bearish")
+    )
+
+    mom_score = 50
+    if isinstance(momentum_result, dict):
+        mom_score = momentum_result.get("momentum", {}).get("score", 50)
+
+    is_breakout_or_bottom = (pos_pct is not None and pos_pct <= 0.3) or strong_bullish_chan or strong_bullish_wyk
+    is_climax_or_overbought = (pos_pct is not None and pos_pct >= 0.7) or strong_bearish_chan or strong_bearish_wyk or (mom_score >= 65)
+
+    if is_breakout_or_bottom:
+        weights = {"chan": 0.45, "momentum": 0.20, "wyckoff": 0.35}
+    elif is_climax_or_overbought:
+        weights = {"chan": 0.20, "momentum": 0.55, "wyckoff": 0.25}
+    else:
+        weights = get_regime_weights(regime)
+
+    # 3. 分歧检测与置信优先级冲突消解
+    directions = [chan_signal["direction"],
+                  momentum_signal["direction"],
+                  wyckoff_signal["direction"]]
+    disagreement = max(directions) - min(directions)
+    disagreement_for_action = disagreement
+
+    if disagreement > 1:
+        if strong_bullish_chan or strong_bullish_wyk:
+            if momentum_signal["direction"] == -1:
+                momentum_signal["direction"] = 0  # Veto Momentum bearish noise
+            disagreement_for_action = 0
+        elif strong_bearish_chan or strong_bearish_wyk:
+            if momentum_signal["direction"] == 1:
+                momentum_signal["direction"] = 0  # Veto Momentum bullish noise
+            disagreement_for_action = 0
+
+    # 4. 加权计算 (使用可能消解后的方向及权重)
     weighted_score = (
         chan_signal["direction"] * chan_signal["confidence"] * weights["chan"] +
         momentum_signal["direction"] * momentum_signal["confidence"] * weights["momentum"] +
         wyckoff_signal["direction"] * wyckoff_signal["confidence"] * weights["wyckoff"]
     )
 
-    # 4. 分歧检测 (0=全一致, 2=完全相反)
-    directions = [chan_signal["direction"],
-                  momentum_signal["direction"],
-                  wyckoff_signal["direction"]]
-    disagreement = max(directions) - min(directions)
-
     # 5. 决策映射
-    action = score_to_action(weighted_score, disagreement, regime)
+    action = score_to_action(weighted_score, disagreement_for_action, regime)
 
     # 6. 综合置信度
-    confidence = compute_confidence(weighted_score, disagreement, weights)
+    confidence = compute_confidence(weighted_score, disagreement_for_action, weights)
 
     result = {
         "action": action,
@@ -325,6 +394,6 @@ def merge_decisions(
     # 7. 日志 + 安全模式
     _log_fusion(result)
     if FUSION_LOG_ONLY:
-        result["action"] = "日志模式 (FUSION_LOG_ONLY=true)，决策由现有系统输出"
+        result["action"] = "日志模式 (FUSION_LOG_ONLY=true)，决策由现有 system 输出"
 
     return result

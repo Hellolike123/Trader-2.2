@@ -394,3 +394,40 @@ def test_make_signal_id_different_inputs():
     ids.add(st.make_signal_id("688248.SH", "2025-05-02", "high_sell_watch", "10.50"))
     ids.add(st.make_signal_id("688248.SH", "2025-05-02", "low_buy_watch", "11.00"))
     assert len(ids) == 5
+
+
+def test_migration_tool_cli_entrypoint(tmp_path):
+    """Verify that signal_migration_tool's main() can run successfully with custom paths."""
+    import signal_migration_tool
+    
+    tp = _TempPaths(tmp_path)
+    tp.apply()
+    
+    # Write a signal record that needs migration
+    sig = {
+        "symbol": "688248.SH",
+        "trade_date": "2025-05-02",
+        "analysis_time": "2025-05-02 10:00",
+        "signal_type": "track",
+        "trigger": {"price": 10.5},
+        "data_status": "full",
+    }
+    tp.store_path.write_text(json.dumps(sig, ensure_ascii=False) + "\n", encoding="utf-8")
+    tp.result_path.write_text("", encoding="utf-8")
+    
+    # Call main with custom arguments programmatically
+    sys_argv_backup = sys.argv
+    sys.argv = ["signal_migration_tool.py", "--signals", str(tp.store_path), "--results", str(tp.result_path)]
+    try:
+        exit_code = signal_migration_tool.main()
+        assert exit_code == 0
+    finally:
+        sys.argv = sys_argv_backup
+        tp.restore()
+        
+    # Verify migration did happen
+    lines = tp.store_path.read_text(encoding="utf-8").strip().splitlines()
+    written = json.loads(lines[0])
+    assert "signal_id" in written
+    assert len(written["signal_id"]) == 16
+

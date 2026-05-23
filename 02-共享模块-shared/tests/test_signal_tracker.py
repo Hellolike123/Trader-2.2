@@ -309,3 +309,97 @@ class TestPanelOutputFormat:
         panel = st._make_panel(results, days_limit=None)
         # 面板不应有表格线 |...|
         assert "|" not in panel, "Panel should not contain table markers"
+
+
+# ═══════ Phase 1: Signal Lifecycle V2 Tests ═══════
+
+class TestSignalLifecycleV2:
+    """Tests for Phase 1 enhancements: stable ID, deduplication, and migration."""
+
+    def setup_method(self):
+        self.tmp = _TempPaths(Path.home() / ".trader_test_phase1")
+
+    def teardown_method(self):
+        self.tmp.restore()
+        for p in (self.tmp.result_path, self.tmp.store_path, self.tmp.log_path):
+            p.unlink(missing_ok=True)
+
+    def test_make_signal_id_robustness(self):
+        # Case normalization and unicode normalization
+        id1 = st.make_signal_id("688248.SH", "2025-04-01", "low_buy_watch", 10.0)
+        id2 = st.make_signal_id("688248.sh", "2025-04-01", "LOW_BUY_WATCH", "10")
+        assert id1 == id2
+        assert len(id1) == 16
+        # Symbol prefix normalization: SH688248 -> 688248.SH
+        id3 = st.make_signal_id("SH688248", "2025-04-01", "low_buy_watch", 10.0)
+        assert id1 == id3
+        # Date normalization variations: slashes, dots, compact numeric format
+        id4 = st.make_signal_id("688248.SH", "2025/04/01", "low_buy_watch", 10.0)
+        id5 = st.make_signal_id("688248.SH", "2025.04.01", "low_buy_watch", 10.0)
+        id6 = st.make_signal_id("688248.SH", "20250401", "low_buy_watch", 10.0)
+        assert id1 == id4 == id5 == id6
+
+    def test_deduplicate_signals_logic(self):
+        # Create list of signal records, some duplicate, some active, some completed
+        recs = [
+            {"symbol": "688248.SH", "trade_date": "2025-04-01", "signal_type": "low_buy_watch", "current": 10.0, "status": "active", "analysis_time": "2025-04-01T09:30:00"},
+            {"symbol": "688248.SH", "trade_date": "2025-04-01", "signal_type": "low_buy_watch", "current": 10.0, "status": "completed", "analysis_time": "2025-04-01T10:00:00"}, # completed should win
+            {"symbol": "000001.SZ", "trade_date": "2025-04-01", "signal_type": "high_sell_watch", "current": 15.0, "status": "active"}
+        ]
+        deduped = st._deduplicate_signals(recs, [])
+        assert len(deduped) == 2
+        # Verify 688248.SH became completed
+        s1 = [r for r in deduped if r["symbol"] == "688248.SH"][0]
+        assert s1["status"] == "completed"
+
+    def test_deduplicate_results_logic(self):
+        # Create list of result records, duplicate signal_ids, one with outcome
+        recs = [
+            {"symbol": "688248.SH", "signal_date": "2025-04-01", "signal_type": "low_buy_watch", "signal_price": 10.0, "result_time": "2025-04-01T09:30:00"},
+            {"symbol": "688248.SH", "signal_date": "2025-04-01", "signal_type": "low_buy_watch", "signal_price": 10.0, "result_time": "2025-04-01T10:00:00", "outcome": "up"}, # outcome wins
+        ]
+        deduped = st._deduplicate_results(recs, [])
+        assert len(deduped) == 1
+        assert deduped[0]["outcome"] == "up"
+
+    def test_migrate_signal_ids(self):
+        self.tmp.apply()
+        # Write signals.jsonl with old/missing signal_id
+        sig_data = [
+            {"symbol": "688248.SH", "trade_date": "2025-04-01", "signal_type": "low_buy_watch", "trigger": {"price": 10.0}, "status": "active"},
+            {"symbol": "688248.SH", "trade_date": "2025-04-01", "signal_type": "low_buy_watch", "trigger": {"price": 10.0}, "status": "completed"}, # duplicate to be merged
+            "BROKEN_SIGNAL_LINE"
+        ]
+        self.tmp.store_path.write_text("\n".join(
+            json.dumps(r) if isinstance(r, dict) else r for r in sig_data
+        ) + "\n", encoding="utf-8")
+
+        # Write signal_results.jsonl
+        res_data = [
+            {"symbol": "688248.SH", "signal_date": "2025-04-01", "signal_type": "low_buy_watch", "signal_price": 10.0},
+            "BROKEN_RESULT_LINE"
+        ]
+        self.tmp.result_path.write_text("\n".join(
+            json.dumps(r) if isinstance(r, dict) else r for r in res_data
+        ) + "\n", encoding="utf-8")
+
+        # Run migration
+        res = st.migrate_signal_ids(force=True)
+        assert res["signals_migrated"] >= 1
+        assert res["results_migrated"] >= 1
+
+        # Check migrated signals.jsonl
+        sig_lines = self.tmp.store_path.read_text(encoding="utf-8").splitlines()
+        assert "BROKEN_SIGNAL_LINE" in sig_lines
+        valid_sigs = [json.loads(l) for l in sig_lines if l.strip() and not l.startswith("BROKEN")]
+        assert len(valid_sigs) == 1
+        assert valid_sigs[0]["signal_id"] == st.make_signal_id("688248.SH", "2025-04-01", "low_buy_watch", 10.0)
+        assert valid_sigs[0]["status"] == "completed"
+
+        # Check migrated signal_results.jsonl
+        res_lines = self.tmp.result_path.read_text(encoding="utf-8").splitlines()
+        assert "BROKEN_RESULT_LINE" in res_lines
+        valid_res = [json.loads(l) for l in res_lines if l.strip() and not l.startswith("BROKEN")]
+        assert len(valid_res) == 1
+        assert valid_res[0]["signal_id"] == st.make_signal_id("688248.SH", "2025-04-01", "low_buy_watch", 10.0)
+

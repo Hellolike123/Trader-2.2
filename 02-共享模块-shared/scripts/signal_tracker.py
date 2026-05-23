@@ -17,13 +17,31 @@ from typing import Any
 # ═══════ Signal ID 统一化 ═══════
 
 
-def make_signal_id(symbol: str, date: str, signal_type: str, price: str) -> str:
+def make_signal_id(symbol: str, date: str, signal_type: str, price: str | float | Any) -> str:
     """Generate unified signal ID.
 
     Uses SHA256 with 4 normalized fields. 16 hex chars = 48 bits of entropy.
+    Ensures unicode and case normalization, symbol formatting, date formatting,
+    and consistent price decimal representation.
     """
-    key = f"{symbol}|{date}|{signal_type}|{price}"
-    return hashlib.sha256(key.encode()).hexdigest()[:16]
+    # 1. Normalize symbol
+    sym_norm = unicodedata.normalize("NFC", str(symbol or "")).strip().upper()
+    sym_norm = _normalize_symbol(sym_norm)
+
+    # 2. Normalize date
+    dt_norm = unicodedata.normalize("NFC", str(date or "")).strip()
+    dt_norm = _norm_date(dt_norm)
+
+    # 3. Normalize signal type
+    st_norm = unicodedata.normalize("NFC", str(signal_type or "")).strip()
+    st_norm = _normalize_signal_type(st_norm)
+
+    # 4. Normalize price to 2-decimal string
+    p_val = _safe_price(price)
+    price_norm = f"{p_val:.2f}"
+
+    key = f"{sym_norm}|{dt_norm}|{st_norm}|{price_norm}"
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
 # ═══════ 旧 API (兼容 review_core) ═══════
@@ -391,11 +409,28 @@ def _norm_date(raw: str) -> str:
     Handles non-zero-padded dates like "2025-5-2" → "2025-05-02".
     Handles datetime strings "2025-05-02T14:30:00" → "2025-05-02".
     """
-    s = str(raw).split("T")[0].split(" ")[0]
+    s = str(raw or "").strip().split("T")[0].split(" ")[0]
+    if not s:
+        return ""
+    # Standardize separators to -
+    s = s.replace("/", "-").replace(".", "-")
+    # If it is compact 8-digit date like "20250502"
+    if len(s) == 8 and s.isdigit():
+        s = f"{s[:4]}-{s[4:6]}-{s[6:]}"
     try:
         return datetime.strptime(s, "%Y-%m-%d").strftime("%Y-%m-%d")
     except ValueError:
         pass
+    # Fallback to manual parsing for non-standard formats
+    parts = s.split("-")
+    if len(parts) == 3:
+        try:
+            y = int(parts[0])
+            m = int(parts[1])
+            d = int(parts[2])
+            return f"{y:04d}-{m:02d}-{d:02d}"
+        except ValueError:
+            pass
     return s[:10]
 
 
@@ -582,96 +617,61 @@ def check_recent(days: int = 5) -> dict[str, int]:
     existing_keys_4: dict[tuple[str, str, str, str], dict] = {}
     try:
         _ensure_result_dir()
-        for line in RESULT_PATH.read_text(encoding="utf-8").splitlines():
-            if not line.strip(): continue
-            try:
-                r = json.loads(line)
-                raw_date = _norm_date(str(r.get("signal_date", "")))
-                raw_type = _normalize_signal_type(str(r.get("signal_type", "")))
-                key_symbol = _normalize_symbol(str(r.get("symbol", "")))
-                sp = r.get("signal_price")
-                price_str = f"{_safe_price(sp):.2f}" if sp is not None and _safe_price(sp) > 0 else ""
-                # 1. Primary: signal_id
-                sid = r.get("signal_id")
-                if sid:
-                    existing_keys_by_id[sid] = r
-                # 2. Secondary: 4-key (normalized)
-                existing_keys_4[(key_symbol, raw_date, raw_type, price_str)] = r
-            except (json.JSONDecodeError, ValueError):
-                pass
+        if RESULT_PATH.exists():
+            for line in RESULT_PATH.read_text(encoding="utf-8").splitlines():
+                if not line.strip(): continue
+                try:
+                    r = json.loads(line)
+                    raw_date = _norm_date(str(r.get("signal_date", "")))
+                    raw_type = _normalize_signal_type(str(r.get("signal_type", "")))
+                    key_symbol = _normalize_symbol(str(r.get("symbol", "")))
+                    sp = r.get("signal_price")
+                    price_str = f"{_safe_price(sp):.2f}" if sp is not None and _safe_price(sp) > 0 else ""
+                    # 1. Primary: signal_id
+                    sid = r.get("signal_id")
+                    if sid:
+                        existing_keys_by_id[sid] = r
+                    # 2. Secondary: 4-key (normalized)
+                    existing_keys_4[(key_symbol, raw_date, raw_type, price_str)] = r
+                except (json.JSONDecodeError, ValueError):
+                    pass
     except OSError:
         pass
 
-    result_lines: list[str] = []
+    new_results: list[dict] = []
     updated = 0
     skipped = 0
     lifecycle_skipped = 0
+    computed_ids = set()
 
     for sig in recent:
         if not signal_is_trackable(sig):
             lifecycle_skipped += 1; continue
+        
+        sig_id = sig.get("signal_id")
+        if not sig_id:
+            key = _make_signal_key(sig)
+            sig_id = make_signal_id(*key)
+            sig["signal_id"] = sig_id
+
         # 1. Try signal_id match first
-        if sig.get("signal_id") in existing_keys_by_id:
+        if sig_id in existing_keys_by_id or sig_id in computed_ids:
             skipped += 1; continue
         # 2. Then try 4-key
         key = _make_signal_key(sig)
         if key in existing_keys_4:
             skipped += 1; continue
+            
         result = _compute_results_for_sig(sig)
         if result:
             set_signal_status(sig, "completed")
-            result_lines.append(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
+            new_results.append(result)
+            computed_ids.add(sig_id)
             updated += 1
 
-    # FIX-T-BIAS-pre-existing: ensure results dir always exist so test file paths resolve
-    _ensure_result_dir()
-    if result_lines:
-        if RESULT_PATH.exists():
-            try:
-                existing_records = [l for l in RESULT_PATH.read_text(encoding="utf-8").strip().split("\n") if l.strip()]
-            except (IOError, OSError):
-                existing_records = []
-        else:
-            existing_records = []
-        new_lines = existing_records + result_lines
-        tmp_path = RESULT_PATH.with_suffix(".jsonl.tmp")
-        tmp_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-        # fsync 确保数据落盘
-        fd = os.open(str(tmp_path), os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        os.replace(str(tmp_path), str(RESULT_PATH))
-    elif not RESULT_PATH.exists():
-        # Create an empty file so consumers (tests) don't get FileNotFoundError
-        tmp_path = RESULT_PATH.with_suffix(".jsonl.tmp")
-        tmp_path.write_text("", encoding="utf-8")
-        fd = os.open(str(tmp_path), os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        os.replace(str(tmp_path), str(RESULT_PATH))
-
-    if updated > 0:
-        lines = STORE_PATH.read_text(encoding="utf-8").splitlines()
-        new_sig_lines = []
-        completed_ids = set()
-        for s in recent:
-            if s.get("status") == "completed":
-                completed_ids.add(s.get("signal_id"))
-        for line in lines:
-            if not line.strip():
-                new_sig_lines.append(line); continue
-            sig_rec = json.loads(line)
-            if sig_rec.get("signal_id") in completed_ids:
-                sig_rec["status"] = "completed"
-                sig_rec["status_updated_at"] = datetime.now().isoformat()
-            new_sig_lines.append(json.dumps(sig_rec, ensure_ascii=False))
-        tmp = STORE_PATH.with_suffix(".jsonl.tmp")
-        tmp.write_text("\n".join(new_sig_lines) + "\n", encoding="utf-8")
-        os.replace(str(tmp), STORE_PATH)
+    # Atomically write and deduplicate results
+    if updated > 0 or not RESULT_PATH.exists():
+        _write_and_deduplicate_files(new_results, computed_ids)
 
     return {"updated": updated, "skipped": skipped, "lifecycle_skipped": lifecycle_skipped}
 
@@ -689,6 +689,12 @@ def _normalize_symbol(symbol: str) -> str:
         return ""
     if "." in s:
         return s
+    # Handle SH123456 or SZ123456 formats
+    if len(s) == 8:
+        if s.startswith("SH") and s[2:].isdigit():
+            return f"{s[2:]}.SH"
+        if s.startswith("SZ") and s[2:].isdigit():
+            return f"{s[2:]}.SZ"
     if len(s) == 6 and s.isdigit():
         if s.startswith(("6", "9", "5")):
             return f"{s}.SH"
@@ -707,7 +713,13 @@ def show_single(symbol: str, days_limit: int | None = None) -> str:
 
 def _normalize_signal_type(raw_type: str) -> str:
     """归一化信号类型：旧名映射为新名，未知名透传。"""
-    return _SIGNAL_TYPE_MAP.get(raw_type, raw_type)
+    t = (raw_type or "").strip()
+    if t in _SIGNAL_TYPE_MAP:
+        return _SIGNAL_TYPE_MAP[t]
+    t_lower = t.lower()
+    if t_lower in _SIGNAL_TYPE_MAP:
+        return _SIGNAL_TYPE_MAP[t_lower]
+    return t
 
 
 def _make_panel(results: list[dict[str, Any]], days_limit: int | None) -> str:
@@ -964,46 +976,214 @@ def _build_signal_id_inputs(result_rec: dict) -> tuple[str, str, str, str]:
     return norm_symbol, norm_date_val, norm_type, price_str
 
 
-def _migrate_file(file_path: Path, is_signal: bool = True) -> dict[str, int]:
+def _deduplicate_signals(existing_records: list[dict], new_records: list[dict] = None) -> list[dict]:
+    """Strict UUID-based deduplication for signal records."""
+    if new_records is None:
+        new_records = []
+    records_by_id: dict[str, dict] = {}
+    for rec in existing_records + new_records:
+        sid = rec.get("signal_id")
+        if not sid:
+            key = _make_signal_key(rec)
+            sid = make_signal_id(*key)
+            rec["signal_id"] = sid
+        
+        if sid in records_by_id:
+            existing = records_by_id[sid]
+            # Prefer completed status for signals
+            if rec.get("status") == "completed" and existing.get("status") != "completed":
+                records_by_id[sid] = rec
+            elif rec.get("status") != "completed" and existing.get("status") == "completed":
+                pass
+            else:
+                # Fallback to keep the one with newer analysis_time or status_updated_at
+                t_existing = existing.get("status_updated_at") or existing.get("analysis_time", "")
+                t_rec = rec.get("status_updated_at") or rec.get("analysis_time", "")
+                if t_rec > t_existing:
+                    records_by_id[sid] = rec
+        else:
+            records_by_id[sid] = rec
+    return list(records_by_id.values())
+
+
+def _deduplicate_results(existing_records: list[dict], new_records: list[dict]) -> list[dict]:
+    """Strict UUID-based deduplication for signal result records."""
+    records_by_id: dict[str, dict] = {}
+    for rec in existing_records + new_records:
+        sid = rec.get("signal_id")
+        if not sid:
+            norm = _build_signal_id_inputs(rec)
+            sid = make_signal_id(*norm)
+            rec["signal_id"] = sid
+        
+        if sid in records_by_id:
+            existing = records_by_id[sid]
+            # Keep the one with outcome
+            if rec.get("outcome") and not existing.get("outcome"):
+                records_by_id[sid] = rec
+            elif not rec.get("outcome") and existing.get("outcome"):
+                pass
+            else:
+                # Fallback to keep the one with newer result_time
+                t_existing = existing.get("result_time", "")
+                t_rec = rec.get("result_time", "")
+                if t_rec > t_existing:
+                    records_by_id[sid] = rec
+        else:
+            records_by_id[sid] = rec
+    return list(records_by_id.values())
+
+
+def _write_and_deduplicate_files(new_results: list[dict], completed_ids: set[str]) -> None:
+    """Atomic write and strict deduplication for signal results and signals files."""
+    # 1. Process signal_results.jsonl (RESULT_PATH)
+    _ensure_result_dir()
+    existing_results: list[dict] = []
+    bad_result_lines: list[str] = []
+    
+    if RESULT_PATH.exists():
+        for line in RESULT_PATH.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+                if isinstance(rec, dict):
+                    existing_results.append(rec)
+                else:
+                    bad_result_lines.append(line)
+            except (json.JSONDecodeError, ValueError):
+                bad_result_lines.append(line)
+                
+    deduped_results = _deduplicate_results(existing_results, new_results)
+    result_lines = bad_result_lines + [
+        json.dumps(r, ensure_ascii=False, sort_keys=True, default=str)
+        for r in deduped_results
+    ]
+    
+    tmp_res_path = RESULT_PATH.with_suffix(".jsonl.tmp")
+    tmp_res_path.write_text("\n".join(result_lines) + "\n" if result_lines else "", encoding="utf-8")
+    fd = os.open(str(tmp_res_path), os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(str(tmp_res_path), str(RESULT_PATH))
+    
+    # 2. Process signals.jsonl (STORE_PATH)
+    if STORE_PATH.exists():
+        existing_signals: list[dict] = []
+        bad_signal_lines: list[str] = []
+        for line in STORE_PATH.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+                if isinstance(rec, dict):
+                    existing_signals.append(rec)
+                else:
+                    bad_signal_lines.append(line)
+            except (json.JSONDecodeError, ValueError):
+                bad_signal_lines.append(line)
+                
+        for rec in existing_signals:
+            sid = rec.get("signal_id")
+            if not sid:
+                key = _make_signal_key(rec)
+                sid = make_signal_id(*key)
+                rec["signal_id"] = sid
+            if sid in completed_ids and rec.get("status") != "completed":
+                rec["status"] = "completed"
+                rec["status_updated_at"] = datetime.now().isoformat()
+                
+        deduped_signals = _deduplicate_signals(existing_signals, [])
+        signal_lines = bad_signal_lines + [
+            json.dumps(r, ensure_ascii=False)
+            for r in deduped_signals
+        ]
+        
+        tmp_sig_path = STORE_PATH.with_suffix(".jsonl.tmp")
+        tmp_sig_path.write_text("\n".join(signal_lines) + "\n" if signal_lines else "", encoding="utf-8")
+        fd = os.open(str(tmp_sig_path), os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(str(tmp_sig_path), str(STORE_PATH))
+
+
+def _migrate_file(file_path: Path, is_signal: bool = True, force: bool = False) -> dict[str, int]:
     """Migrate a single JSONL file. Returns migrated/skipped counts.
 
-    Idempotent: records with signal_id are skipped. Bad lines pass through unchanged.
+    Idempotent: records with correct signal_id are skipped. Bad lines pass through unchanged.
+    If force=True, records with incorrect/unstable signal_id will be updated.
+    Performs strict UUID-based deduplication during migration.
     """
     if not file_path.exists():
         return {"migrated": 0, "skipped": 0}
 
     lines_raw = file_path.read_text(encoding="utf-8").splitlines()
-    new_lines: list[str] = []
+    records_dict: dict[str, dict] = {}
+    bad_lines: list[str] = []
+    
     migrated = 0
     skipped = 0
 
     for line in lines_raw:
         if not line.strip():
-            new_lines.append(line)
             continue
 
         try:
             rec = json.loads(line)
             if not isinstance(rec, dict):
-                new_lines.append(line)
+                bad_lines.append(line)
                 continue
         except (json.JSONDecodeError, ValueError):
-            new_lines.append(line)  # Bad lines pass through
-            continue
-
-        if rec.get("signal_id"):
-            new_lines.append(line)
-            skipped += 1
+            bad_lines.append(line)  # Bad lines pass through
             continue
 
         norm = _build_signal_id_inputs(rec)
-        rec["signal_id"] = make_signal_id(*norm)
-        new_lines.append(json.dumps(rec, ensure_ascii=False))
-        migrated += 1
+        correct_id = make_signal_id(*norm)
 
-    if migrated > 0:
+        has_id = rec.get("signal_id")
+        is_correct = (has_id == correct_id)
+
+        # Decide whether to migrate/update this record's ID
+        should_update = False
+        if not has_id:
+            should_update = True
+        elif force and not is_correct:
+            should_update = True
+
+        if should_update:
+            rec["signal_id"] = correct_id
+            migrated += 1
+        else:
+            skipped += 1
+
+        # Deduplicate: if correct_id is already in records_dict, merge status/data
+        if correct_id in records_dict:
+            existing = records_dict[correct_id]
+            # Prefer completed status for signals
+            if is_signal and rec.get("status") == "completed" and existing.get("status") != "completed":
+                records_dict[correct_id] = rec
+            # For result records, we can keep the first one or the one with outcome
+            elif not is_signal and rec.get("outcome") and not existing.get("outcome"):
+                records_dict[correct_id] = rec
+            migrated += 1  # counted as deduplication clean up
+        else:
+            records_dict[correct_id] = rec
+
+    new_lines = bad_lines + [json.dumps(r, ensure_ascii=False) for r in records_dict.values()]
+
+    new_text = "\n".join(new_lines) + "\n" if new_lines else ""
+    try:
+        old_text = file_path.read_text(encoding="utf-8")
+    except Exception:
+        old_text = ""
+
+    if new_text != old_text:
         tmp_path = file_path.with_suffix(file_path.suffix + ".tmp")
-        tmp_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        tmp_path.write_text(new_text, encoding="utf-8")
         fd = os.open(str(tmp_path), os.O_RDONLY)
         try:
             os.fsync(fd)
@@ -1015,10 +1195,11 @@ def _migrate_file(file_path: Path, is_signal: bool = True) -> dict[str, int]:
 
 
 def migrate_signal_ids(store_path: Path | None = None,
-                       results_path: Path | None = None) -> dict[str, int]:
+                       results_path: Path | None = None,
+                       force: bool = False) -> dict[str, int]:
     """Add signal_id to existing records in signals.jsonl and signal_results.jsonl.
 
-    Idempotent: records that already carry signal_id are skipped.
+    Idempotent: records that already carry correct signal_id are skipped.
     Does NOT process signal_log.jsonl (old MD5 signal_id is irreversible).
 
     Usage:
@@ -1033,8 +1214,8 @@ def migrate_signal_ids(store_path: Path | None = None,
     if results_path is None:
         results_path = RESULT_PATH
 
-    sig_result = _migrate_file(store_path, is_signal=True)
-    res_result = _migrate_file(results_path, is_signal=False)
+    sig_result = _migrate_file(store_path, is_signal=True, force=force)
+    res_result = _migrate_file(results_path, is_signal=False, force=force)
 
     return {
         "signals_migrated": sig_result["migrated"],
@@ -1108,7 +1289,7 @@ def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
     # 重写 cutoff：days_window 天的全窗口
     signals = _load_signals()
     if not signals or HttpClient is None:
-        return {"updated": 0, "skipped": 0}
+        return {"updated": 0, "skipped": 0, "lifecycle_skipped": 0}
 
     cutoff = (datetime.now() - timedelta(days=days_window)).strftime("%Y-%m-%d")
     candidates = [s for s in signals if _norm_date(str(s.get("trade_date", ""))) >= cutoff]
@@ -1118,84 +1299,61 @@ def backfill(days_window: int = 365, batch_size: int = 100) -> dict[str, int]:
     existing_keys_4: dict[tuple[str, str, str, str], dict] = {}
     try:
         _ensure_result_dir()
-        for line in RESULT_PATH.read_text(encoding="utf-8").splitlines():
-            if not line.strip(): continue
-            try:
-                r = json.loads(line)
-                raw_date = _norm_date(str(r.get("signal_date", "")))
-                raw_type = _normalize_signal_type(str(r.get("signal_type", "")))
-                key_symbol = _normalize_symbol(str(r.get("symbol", "")))
-                sp = r.get("signal_price")
-                price_str = f"{_safe_price(sp):.2f}" if sp is not None and _safe_price(sp) > 0 else ""
-                # 1. Primary: signal_id
-                sid = r.get("signal_id")
-                if sid:
-                    existing_keys_by_id[sid] = r
-                # 2. Secondary: 4-key (normalized)
-                existing_keys_4[(key_symbol, raw_date, raw_type, price_str)] = r
-            except (json.JSONDecodeError, ValueError):
-                pass
+        if RESULT_PATH.exists():
+            for line in RESULT_PATH.read_text(encoding="utf-8").splitlines():
+                if not line.strip(): continue
+                try:
+                    r = json.loads(line)
+                    raw_date = _norm_date(str(r.get("signal_date", "")))
+                    raw_type = _normalize_signal_type(str(r.get("signal_type", "")))
+                    key_symbol = _normalize_symbol(str(r.get("symbol", "")))
+                    sp = r.get("signal_price")
+                    price_str = f"{_safe_price(sp):.2f}" if sp is not None and _safe_price(sp) > 0 else ""
+                    # 1. Primary: signal_id
+                    sid = r.get("signal_id")
+                    if sid:
+                        existing_keys_by_id[sid] = r
+                    # 2. Secondary: 4-key (normalized)
+                    existing_keys_4[(key_symbol, raw_date, raw_type, price_str)] = r
+                except (json.JSONDecodeError, ValueError):
+                    pass
     except OSError:
         pass
 
-    result_lines: list[str] = []
+    new_results: list[dict] = []
     updated = 0
     skipped = 0
     lifecycle_skipped = 0
+    computed_ids = set()
 
     for sig in candidates:
         if not signal_is_trackable(sig):
             lifecycle_skipped += 1; continue
+        
+        sig_id = sig.get("signal_id")
+        if not sig_id:
+            key = _make_signal_key(sig)
+            sig_id = make_signal_id(*key)
+            sig["signal_id"] = sig_id
+
         # 1. Try signal_id match first
-        if sig.get("signal_id") in existing_keys_by_id:
+        if sig_id in existing_keys_by_id or sig_id in computed_ids:
             skipped += 1; continue
         # 2. Then try 4-key
         key = _make_signal_key(sig)
         if key in existing_keys_4:
             skipped += 1; continue
+            
         result = _compute_results_for_sig(sig)
         if result:
             set_signal_status(sig, "completed")
-            result_lines.append(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
+            new_results.append(result)
+            computed_ids.add(sig_id)
             updated += 1
 
-    if result_lines:
-        if RESULT_PATH.exists():
-            try:
-                existing_records = [l for l in RESULT_PATH.read_text(encoding="utf-8").strip().split("\n") if l.strip()]
-            except (IOError, OSError):
-                existing_records = []
-        else:
-            existing_records = []
-        new_lines = existing_records + result_lines
-        tmp_path = RESULT_PATH.with_suffix(".jsonl.tmp")
-        tmp_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-        fd = os.open(str(tmp_path), os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        os.replace(str(tmp_path), str(RESULT_PATH))
-        _ensure_result_dir()
-
-    if updated > 0:
-        lines = STORE_PATH.read_text(encoding="utf-8").splitlines()
-        new_sig_lines = []
-        completed_ids = set()
-        for s in candidates:
-            if s.get("status") == "completed":
-                completed_ids.add(s.get("signal_id"))
-        for line in lines:
-            if not line.strip():
-                new_sig_lines.append(line); continue
-            sig_rec = json.loads(line)
-            if sig_rec.get("signal_id") in completed_ids:
-                sig_rec["status"] = "completed"
-                sig_rec["status_updated_at"] = datetime.now().isoformat()
-            new_sig_lines.append(json.dumps(sig_rec, ensure_ascii=False))
-        tmp = STORE_PATH.with_suffix(".jsonl.tmp")
-        tmp.write_text("\n".join(new_sig_lines) + "\n", encoding="utf-8")
-        os.replace(str(tmp), STORE_PATH)
+    # Atomically write and deduplicate results
+    if updated > 0 or not RESULT_PATH.exists():
+        _write_and_deduplicate_files(new_results, computed_ids)
 
     return {"updated": updated, "skipped": skipped, "lifecycle_skipped": lifecycle_skipped}
 
@@ -1214,6 +1372,8 @@ def main(args: list[str] | None = None) -> int:
     p4 = sub.add_parser("backfill", help="回溯计算过去N天内所有未结算信号")
     p4.add_argument("--days", type=int, default=365)
     p4.add_argument("--batch", type=int, default=100, help="批处理大小")
+    p5 = sub.add_parser("migrate", help="迁移和修复 signals.jsonl 与 signal_results.jsonl 中的 signal_id")
+    p5.add_argument("--force", action="store_true", help="强制矫正/更新已存在但不正确的 ID")
     args = parser.parse_args(args)
 
     if args.command == "check":
@@ -1247,6 +1407,11 @@ def main(args: list[str] | None = None) -> int:
             print("无新结果可更新（全部已有）")
         else:
             print(f"回补了 {updated} 条信号结果，跳过 {skipped} 条")
+    elif args.command == "migrate":
+        result = migrate_signal_ids(force=args.force)
+        print("信号 ID 迁移与重组完成：")
+        print(f"  signals.jsonl        : 已处理/转换 {result['signals_migrated']} 条记录，跳过 {result['signals_skipped']} 条记录")
+        print(f"  signal_results.jsonl : 已处理/转换 {result['results_migrated']} 条记录，跳过 {result['results_skipped']} 条记录")
     else:
         parser.print_help()
         return 1

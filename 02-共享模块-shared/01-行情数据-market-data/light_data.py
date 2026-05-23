@@ -5,9 +5,11 @@ import json
 import math
 import random
 import re
+import socket
 import ssl
 import sys
 import time
+import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -66,18 +68,107 @@ DataStatus = Literal["full", "partial", "degraded", "failed"]
 _MOOTDX_CLIENT: Quotes | None = None
 
 
+class MarketDataSourceController:
+    """Manages the connection state and health of the mootdx quotes client.
+
+    Tracks consecutive failures, enforces cooldown isolation on repeated failures,
+    and maintains healthy/unhealthy state flags.
+    """
+    def __init__(self, max_failures: int = 3, cooldown_seconds: float = 30.0) -> None:
+        self.max_failures = max_failures
+        self.cooldown_seconds = cooldown_seconds
+        
+        self.consecutive_failures = 0
+        self.last_failure_time = 0.0
+        self.cool_down_until = 0.0
+        self.healthy = True
+        
+        self.total_calls = 0
+        self.total_failures = 0
+
+    def is_healthy(self) -> bool:
+        """Check if mootdx client is healthy or if cooldown has expired."""
+        if not self.healthy:
+            if time.time() >= self.cool_down_until:
+                # Cooldown expired, tentatively treat as healthy
+                self.healthy = True
+                self.consecutive_failures = 0
+                return True
+            return False
+        return True
+
+    def report_success(self) -> None:
+        """Report a successful client call, resetting consecutive failure counts."""
+        self.total_calls += 1
+        self.consecutive_failures = 0
+        self.healthy = True
+
+    def report_failure(self) -> None:
+        """Report a failed client call. Triggers cooldown isolation if failures persist."""
+        self.total_calls += 1
+        self.total_failures += 1
+        self.consecutive_failures += 1
+        self.last_failure_time = time.time()
+        
+        if self.consecutive_failures >= self.max_failures:
+            self.healthy = False
+            self.cool_down_until = time.time() + self.cooldown_seconds
+            warnings.warn(
+                f"⚠️ mootdx client marked as UNHEALTHY due to {self.consecutive_failures} "
+                f"consecutive failures. Isolated for {self.cooldown_seconds} seconds."
+            )
+
+
+_DATA_SOURCE_CONTROLLER = MarketDataSourceController()
+
+
+def run_mootdx_with_timeout(func, *args, **kwargs) -> Any:
+    """Execute a mootdx connection or call with a strict 1.5-second socket timeout."""
+    if not _DATA_SOURCE_CONTROLLER.is_healthy():
+        return None
+
+    orig_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(1.5)
+    try:
+        start_time = time.time()
+        res = func(*args, **kwargs)
+        duration = time.time() - start_time
+        if duration > 1.5:
+            # Enforce strict 1.5s execution limit even if socket doesn't raise timeout
+            _DATA_SOURCE_CONTROLLER.report_failure()
+            warnings.warn(f"⚠️ mootdx call exceeded execution time limit of 1.5s (took {duration:.2f}s)")
+            return None
+        _DATA_SOURCE_CONTROLLER.report_success()
+        return res
+    except (socket.timeout, TimeoutError) as exc:
+        _DATA_SOURCE_CONTROLLER.report_failure()
+        warnings.warn(f"⚠️ mootdx call timed out: {exc}")
+        return None
+    except Exception as exc:
+        _DATA_SOURCE_CONTROLLER.report_failure()
+        warnings.warn(f"⚠️ mootdx call failed with exception: {exc}")
+        return None
+    finally:
+        socket.setdefaulttimeout(orig_timeout)
+
+
 def _get_mootdx_client() -> Quotes | None:
     global _MOOTDX_CLIENT
     if _MOOTDX_CLIENT is not None:
         return _MOOTDX_CLIENT
     if not _MOOTDX_AVAILABLE:
         return None
-    try:
-        _MOOTDX_CLIENT = Quotes.factory(market='std')
-        return _MOOTDX_CLIENT
-    except Exception:
-        _MOOTDX_CLIENT = None
+    if not _DATA_SOURCE_CONTROLLER.is_healthy():
         return None
+        
+    def init_client():
+        return Quotes.factory(market='std')
+        
+    client = run_mootdx_with_timeout(init_client)
+    if client is not None:
+        _MOOTDX_CLIENT = client
+        return _MOOTDX_CLIENT
+    return None
 
 
 MOOTDX_CATEGORY = {"daily": 4, "weekly": 5, "monthly": 6, "1m": 7, "5m": 8, "15m": 9, "30m": 10, "60m": 11}
@@ -94,7 +185,10 @@ def _fetch_qfq_mootdx(sec: Security, days: int = 30) -> list[dict[str, Any]] | N
     if client is None:
         return None
     try:
-        df = client.bars(symbol=sec.code, category=MOOTDX_CATEGORY["daily"], offset=max(days, 20), market=_mootdx_market(sec))
+        def call_bars():
+            return client.bars(symbol=sec.code, category=MOOTDX_CATEGORY["daily"], offset=max(days, 20), market=_mootdx_market(sec))
+            
+        df = run_mootdx_with_timeout(call_bars)
         if df is None or len(df) == 0:
             return None
         bars = []
@@ -110,7 +204,8 @@ def _fetch_qfq_mootdx(sec: Security, days: int = 30) -> list[dict[str, Any]] | N
                 "amount": to_float(row.get("amount")),
             })
         return bars
-    except Exception:
+    except Exception as exc:
+        warnings.warn(f"⚠️ _fetch_qfq_mootdx error processing DataFrame: {exc}")
         return None
 
 
@@ -119,7 +214,10 @@ def _fetch_quote_mootdx(sec: Security) -> dict[str, Any] | None:
     if client is None:
         return None
     try:
-        qs = client.quotes(symbol=[sec.code], market=_mootdx_market(sec))
+        def call_quotes():
+            return client.quotes(symbol=[sec.code], market=_mootdx_market(sec))
+            
+        qs = run_mootdx_with_timeout(call_quotes)
         if qs is None or len(qs) == 0:
             return None
         q = dict(qs.iloc[0])
@@ -143,7 +241,8 @@ def _fetch_quote_mootdx(sec: Security) -> dict[str, Any] | None:
             "order_book": _extract_order_book(q),
         }
         return result
-    except Exception:
+    except Exception as exc:
+        warnings.warn(f"⚠️ _fetch_quote_mootdx error processing DataFrame: {exc}")
         return None
 
 
@@ -368,10 +467,14 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
                     mootdx_q["turnover_rate"] = to_float(fields[38])
         except Exception:
             pass
+        mootdx_q["data_source"] = "mootdx"
+        mootdx_q["data_status"] = "full"
         save_realtime_cache(cache_key, mootdx_q)
         return mootdx_q
 
     # mootdx 不可用时，腾讯全量降级
+    warnings.warn(f"⚠️ mootdx fetch_quote failed or timed out. Falling back to Tencent HTTP API.")
+
     def do_fetch():
         text = http.get_text(TENCENT_QUOTE_URL + sec.qq_symbol, encoding="gbk")
         match = re.search(r'="([^"]*)"', text)
@@ -395,6 +498,8 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
             "amount": to_float(fields[37]) if len(fields) > 37 else None,
             "turnover_rate": to_float(fields[38]) if len(fields) > 38 else None,
             "current_change_pct": to_float(fields[32]) if len(fields) > 32 else None,
+            "data_source": "tencent (fallback)",
+            "data_status": "partial",
         }
         save_realtime_cache(cache_key, result)
         return result
@@ -442,10 +547,15 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 30) -> list[dic
     # mootdx 主源
     mootdx_bars = _fetch_qfq_mootdx(sec, days)
     if mootdx_bars is not None:
+        for bar in mootdx_bars:
+            bar["data_source"] = "mootdx"
+            bar["data_status"] = "full"
         _compute_atr_fields(mootdx_bars)
         return mootdx_bars
 
     # mootdx 不可用时，腾讯降级
+    warnings.warn(f"⚠️ mootdx fetch_qfq_daily failed or timed out. Falling back to Tencent HTTP API.")
+
     raw_params = f"_var=kline_dayhfq&param={sec.qq_symbol},day,,,{max(days, 20)},qfq"
     cache_key = get_cache_key(TENCENT_FQKLINE_URL, raw_params)
 
@@ -461,12 +571,30 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 30) -> list[dic
         bars: list[dict[str, Any]] = []
         for row in rows:
             if isinstance(row, list) and len(row) >= 6:
-                bars.append({"date": row[0], "open": to_float(row[1]), "close": to_float(row[2]), "high": to_float(row[3]), "low": to_float(row[4]), "volume": to_float(row[5])})
+                bars.append({
+                    "date": row[0], 
+                    "open": to_float(row[1]), 
+                    "close": to_float(row[2]), 
+                    "high": to_float(row[3]), 
+                    "low": to_float(row[4]), 
+                    "volume": to_float(row[5]),
+                    "data_source": "tencent (fallback)",
+                    "data_status": "partial",
+                })
         if not bars:
             day_rows = sec_data.get("day") or []
             for row in day_rows:
                 if isinstance(row, list) and len(row) >= 6:
-                    bars.append({"date": row[0], "open": to_float(row[1]), "close": to_float(row[2]), "high": to_float(row[3]), "low": to_float(row[4]), "volume": to_float(row[5])})
+                    bars.append({
+                        "date": row[0], 
+                        "open": to_float(row[1]), 
+                        "close": to_float(row[2]), 
+                        "high": to_float(row[3]), 
+                        "low": to_float(row[4]), 
+                        "volume": to_float(row[5]),
+                        "data_source": "tencent (fallback)",
+                        "data_status": "partial",
+                    })
         if not bars:
             raise RuntimeError("Tencent qfq daily bars unavailable")
         return bars
@@ -493,7 +621,10 @@ def _fetch_mins_mootdx(sec: Security, interval: str, datalen: int = 60) -> list[
     if cat_num is None:
         return None
     try:
-        df = client.bars(symbol=sec.code, category=cat_num, offset=datalen, market=_mootdx_market(sec))
+        def call_bars():
+            return client.bars(symbol=sec.code, category=cat_num, offset=datalen, market=_mootdx_market(sec))
+            
+        df = run_mootdx_with_timeout(call_bars)
         if df is None or len(df) == 0:
             return None
         bars: list[dict[str, Any]] = []
@@ -510,36 +641,69 @@ def _fetch_mins_mootdx(sec: Security, interval: str, datalen: int = 60) -> list[
                 "amount": to_float(row.get("amount")),
             })
         return bars
-    except Exception:
+    except Exception as exc:
+        warnings.warn(f"⚠️ _fetch_mins_mootdx error processing DataFrame: {exc}")
         return None
 
 
 def fetch_5m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
     bars = _fetch_mins_mootdx(sec, "5m", datalen)
     if bars:
+        for bar in bars:
+            bar["data_source"] = "mootdx"
+            bar["data_status"] = "full"
         return bars
-    return _fetch_mins_fallback(sec, "5m", datalen) or []
+    warnings.warn(f"⚠️ mootdx fetch_5m failed or timed out. Falling back to akshare / EastMoney fallback.")
+    fallback_bars = _fetch_mins_fallback(sec, "5m", datalen) or []
+    for bar in fallback_bars:
+        bar["data_source"] = "akshare (fallback)"
+        bar["data_status"] = "partial"
+    return fallback_bars
 
 
 def fetch_15m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
     bars = _fetch_mins_mootdx(sec, "15m", datalen)
     if bars:
+        for bar in bars:
+            bar["data_source"] = "mootdx"
+            bar["data_status"] = "full"
         return bars
-    return _fetch_mins_fallback(sec, "15m", datalen) or []
+    warnings.warn(f"⚠️ mootdx fetch_15m failed or timed out. Falling back to akshare / EastMoney fallback.")
+    fallback_bars = _fetch_mins_fallback(sec, "15m", datalen) or []
+    for bar in fallback_bars:
+        bar["data_source"] = "akshare (fallback)"
+        bar["data_status"] = "partial"
+    return fallback_bars
 
 
 def fetch_30m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
     bars = _fetch_mins_mootdx(sec, "30m", datalen)
     if bars:
+        for bar in bars:
+            bar["data_source"] = "mootdx"
+            bar["data_status"] = "full"
         return bars
-    return _fetch_mins_fallback(sec, "30m", datalen) or []
+    warnings.warn(f"⚠️ mootdx fetch_30m failed or timed out. Falling back to akshare / EastMoney fallback.")
+    fallback_bars = _fetch_mins_fallback(sec, "30m", datalen) or []
+    for bar in fallback_bars:
+        bar["data_source"] = "akshare (fallback)"
+        bar["data_status"] = "partial"
+    return fallback_bars
 
 
 def fetch_kline(sec: Security, http: HttpClient, datalen: int = 60, interval: str = "60") -> list[dict[str, Any]]:
     bars = _fetch_mins_mootdx(sec, interval, datalen)
     if bars:
+        for bar in bars:
+            bar["data_source"] = "mootdx"
+            bar["data_status"] = "full"
         return bars
-    return _fetch_mins_fallback(sec, interval, datalen) or []
+    warnings.warn(f"⚠️ mootdx fetch_kline (interval {interval}) failed or timed out. Falling back to akshare / EastMoney fallback.")
+    fallback_bars = _fetch_mins_fallback(sec, interval, datalen) or []
+    for bar in fallback_bars:
+        bar["data_source"] = "akshare (fallback)"
+        bar["data_status"] = "partial"
+    return fallback_bars
 
 
 def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dict[str, Any]]:
@@ -606,12 +770,19 @@ def load_market_snapshot(target: str, days: int = 30, include_5m: bool = True) -
     order_book = quote.get("order_book")
     if isinstance(quote, dict):
         quote = dict(quote)  # shallow copy to avoid mutating the cache
-        del quote["order_book"]
+        if "order_book" in quote:
+            del quote["order_book"]
     if include_5m and not bars_5m and "bars_5m" not in missing_sources:
         missing_sources.append("bars_5m")
 
     if quote and daily_bars and not missing_sources:
-        data_status = "full"
+        # Check if fallback occurred
+        if (isinstance(quote, dict) and quote.get("data_status") == "partial") or \
+           (isinstance(daily_bars, list) and any(b.get("data_status") == "partial" for b in daily_bars)) or \
+           (isinstance(bars_5m, list) and any(b.get("data_status") == "partial" for b in bars_5m)):
+            data_status = "partial"
+        else:
+            data_status = "full"
     elif quote and daily_bars:
         data_status = "partial"
     elif quote or daily_bars:
