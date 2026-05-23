@@ -1,15 +1,19 @@
-# Trader 2.2 — Agent 快速参考
+# Trader 2.3 — Agent 快速参考
 
 > 最后更新：2026-05-23
 
 ## 接手先看
 
-- **版本升级**：当前版本为 Trader 2.2，全面升级了信号生命周期、容灾行情管线与决策融合算法。
+- **版本升级**：当前版本为 Trader 2.3，在 2.2 基础上新增了隐马尔可夫大势检测、贝叶斯概率融合、日内成交量分布以及离线参数自校准四大高级统计模块。
 - **单票分析双层状态模型**：`base_status` 负责结构位置层，`theory_status` 负责理论结论层；`state_label` 仅作兼容/展示摘要。
 - **信号唯一性契约 (Signal Contract v2)**：基于 SHA256 deterministic hash 的 16 位 Hex 强一致 UUID (`make_signal_id`)，严格规避任何时区/数据抖动造成的重复结算。
 - **双源热备行情 HA**：`MarketDataSourceController` 接管行情数据通道，mootdx 发生 1.5 秒硬超时或连续 3 次失败时，秒级自动 fallback 至 Tencent HTTP / Sina API，以 `data_status="partial"` 标注数据完备度。
 - **智能决策融合层 (Decision Fusion Core)**：通过 Scenario Priority Filter 动态分配结构与动量权重（极值区 80% 权重偏斜），且基于 Belief Priority 冲突消解机制过滤动量噪音。
-- **大势参数自适应 (Regime Multipliers)**：根据 `market_env` 大盘牛熊环境因子动态缩放 `zone_width` (低吸区宽度) 与 `confirm_buffer` (确认价缓冲) 以及 `stop_buffer` (止损缓冲)。
+- **大势参数自适应 (Regime Multipliers)**：根据 `market_env` 大盘牛熊环境因子动态缩放 `zone_width` / `confirm_buffer` / `stop_buffer`。
+- **[2.3新增] HMM 大势状态检测器**：`hmm_regime.py` 基于纯 numpy Baum-Welch + Viterbi，将指数收益率序列解码为三隐状态（低波上涨/高波下跌/宽幅震荡），输出前瞻性 Regime 判定与参数调节系数。
+- **[2.3新增] 贝叶斯概率决策融合**：`bayesian_fusion.py` 用乘积规则融合三路专家后验概率，按 Regime 动态调整先验矩阵。默认关闭，设 `BAYESIAN_FUSION=true` 激活。
+- **[2.3新增] 日内成交量分布 (Volume Profile)**：`volume_profile.py` 计算 POC 控制节点与 Value Area 70% 成交量密集区，为突破确认提供微观日内支撑/阻力验证。
+- **[2.3新增] 离线参数自校准器**：`scripts/self_calibration.py` 盘后/周末运行，通过随机搜索对历史信号胜率进行参数寻优，结果写入 `~/.trader/calibrated_params.json`。
 - 真正的输出格式以 `01-功能包-packages/01-单票分析-trader/references/output-contract.md` 为准。
 - 需要看实现时，先看 `01-功能包-packages/01-单票分析-trader/scripts/run_analysis.py`。
 
