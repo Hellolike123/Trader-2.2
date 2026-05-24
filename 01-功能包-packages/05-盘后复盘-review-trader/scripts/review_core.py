@@ -19,13 +19,7 @@ def price_text(value: float | None) -> str:
 def volume_wan_hands(value: float | None) -> str:
     if value is None:
         return "--"
-    return f"{value / 10000:.1f}万手"
-
-
-def volume_wan_shares(value: float | None) -> str:
-    if value is None:
-        return "--"
-    return f"{value / 10000:.1f}万股"
+    return f"{value / 1000000.0:.1f}万手"
 
 
 def bar_time(bar: dict[str, Any]) -> str:
@@ -185,35 +179,35 @@ def analyze_intraday(bars_5m: list[dict[str, Any]], trade_date: str | None, sess
 
     lines = [
         segment_line("09:30-10:00｜开盘试探", open_flush, "09:30-10:00｜开盘段数据不足。"),
-        f"{bar_time(max_bar)} 放出最大量柱 {volume_wan_shares(to_float(max_bar.get('volume')))}。",
+        f"{bar_time(max_bar)} 放出最大量柱 {volume_wan_hands(to_float(max_bar.get('volume')))}。",
     ]
     if rebound_tops:
-        parts = [f"{bar_time(bar)} {volume_wan_shares(to_float(bar.get('volume')))}" for bar in rebound_tops]
+        parts = [f"{bar_time(bar)} {volume_wan_hands(to_float(bar.get('volume')))}" for bar in rebound_tops]
         lines.extend(["10:00-11:30｜早盘修复", "；".join(parts) + "，推动上午修复。"])
     if session == "midday":
         lines.extend(
             [
                 segment_line("10:45-11:30｜临近午盘", late_morning, "10:45-11:30｜临近午盘数据不足。"),
-                f"临近午盘均量约 {volume_wan_shares(average_volume(late_morning))}。",
+                f"临近午盘均量约 {volume_wan_hands(average_volume(late_morning))}。",
             ]
         )
     else:
         lines.extend(
             [
                 segment_line("13:05-14:30｜午后震荡", digestion, "13:05-14:30｜午后段数据不足。"),
-                f"午后均量约 {volume_wan_shares(recent_avg)}，较早盘明显收敛。" if early_avg and recent_avg < early_avg * 0.75 else f"午后均量约 {volume_wan_shares(recent_avg)}。",
+                f"午后均量约 {volume_wan_hands(recent_avg)}，较早盘明显收敛。" if early_avg and recent_avg < early_avg * 0.75 else f"午后均量约 {volume_wan_hands(recent_avg)}。",
                 segment_line("14:30-15:00｜尾盘横盘", tail, "14:30-15:00｜尾盘数据不足。"),
             ]
         )
         tail_last = tail[-1] if tail else bars[-1]
-        lines.append(f"{bar_time(tail_last)} 量能约 {volume_wan_shares(to_float(tail_last.get('volume')))}。")
+        lines.append(f"{bar_time(tail_last)} 量能约 {volume_wan_hands(to_float(tail_last.get('volume')))}。")
 
-    volume_lines = [f"{bar_time(max_bar)} 最大量柱 {volume_wan_shares(to_float(max_bar.get('volume')))}" + (f"，约为开盘段均量 {max_ratio:.1f}倍" if max_ratio else "")]
+    volume_lines = [f"{bar_time(max_bar)} 最大量柱 {volume_wan_hands(to_float(max_bar.get('volume')))}" + (f"，约为开盘段均量 {max_ratio:.1f}倍" if max_ratio else "")]
     if session == "midday":
-        volume_lines.insert(0, f"上午成交 {volume_wan_shares(morning_total)}")
+        volume_lines.insert(0, f"上午成交 {volume_wan_hands(morning_total)}")
     else:
-        volume_lines.insert(0, f"午后 {volume_wan_shares(afternoon_total)}，占全天 {afternoon_total / total * 100:.0f}%" if total else "午后成交占比不足。")
-        volume_lines.insert(0, f"上午 {volume_wan_shares(morning_total)}，占全天 {morning_total / total * 100:.0f}%" if total else "上午成交占比不足。")
+        volume_lines.insert(0, f"午后 {volume_wan_hands(afternoon_total)}，占全天 {afternoon_total / total * 100:.0f}%" if total else "午后成交占比不足。")
+        volume_lines.insert(0, f"上午 {volume_wan_hands(morning_total)}，占全天 {morning_total / total * 100:.0f}%" if total else "上午成交占比不足。")
     volume_state = "早盘放量、午后缩量" if early_avg and recent_avg and recent_avg < early_avg * 0.75 else "量能平稳"
     return {
         "trade_date": selected_date,

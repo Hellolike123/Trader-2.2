@@ -31,35 +31,77 @@ def model_summary(theory: dict[str, Any]) -> str:
 
 
 def _format_intraday_narrative(intraday: dict[str, Any], big_order: dict[str, Any] | None = None) -> list[str]:
-    """Build time-ordered narrative from intraday data."""
+    """Build a single chronological timeline weaving both segment narratives and big order events."""
+    timeline_items: list[tuple[str, str]] = []  # List of (time_key, text)
+
+    # 1. Process K-line segment narrative lines
     lines = intraday.get("lines") or []
-    result = []
-    if big_order and big_order.get("events"):
-        result.append("今日大单回溯")
-        for event in big_order["events"]:
-            hands_text = f"约 {event['hands']:.0f} 手" if event.get("hands") is not None else "手数不足"
-            amount_text = f"金额约 {event['amount_wan']:.0f} 万" if event.get("amount_wan") is not None else "金额不足"
-            result.append(f"{event['time']}  {event['side']}，{hands_text}，{amount_text}，{event['meaning']}。")
-        result.append(f"回溯总结：{big_order.get('summary')}")
-        result.append("")
-    if not lines:
-        return result + ["分时数据不足，走势只按日线和收盘判断。"]
     for line in lines:
-        line = str(line).strip()
-        if not line:
+        line_str = str(line).strip()
+        if not line_str:
             continue
-        # Check if line starts with time pattern like "09:30-10:00"
-        if len(line) >= 5 and ":" in line[:6] and (line[5] in {"-", "："} or line[5].isdigit()):
-            result.append(line)
+        # Extract time prefix. Format is typically "09:30-10:00｜..." or "14:30..."
+        time_key = "24:00"  # Default fallback
+        if len(line_str) >= 5 and line_str[2] == ":" and line_str[:2].isdigit() and line_str[3:5].isdigit():
+            time_key = line_str[:5]
+        
+        if "｜" in line_str or (len(line_str) >= 5 and line_str[2] == ":"):
+            timeline_items.append((time_key, line_str))
         else:
-            result.append(f"  {line}")
+            timeline_items.append((time_key, f"  {line_str}"))
+
+    # 2. Process big order events
+    if big_order and big_order.get("events"):
+        for event in big_order["events"]:
+            t_key = event["time"]
+            hands = event.get("hands")
+            if hands is not None:
+                if hands >= 10000:
+                    hands_text = f"{hands / 10000:.1f} 万手"
+                else:
+                    hands_text = f"{hands:.0f} 手"
+            else:
+                hands_text = "手数不足"
+                
+            amount_wan = event.get("amount_wan")
+            amount_text = f"{amount_wan:.0f} 万" if amount_wan is not None else "金额不足"
+            
+            side_icon = "🟢" if event["side"] == "主动买入" else "🔴" if event["side"] == "主动卖出" else "⚪"
+            meaning_text = f"，{event['meaning']}" if event.get("meaning") else ""
+            
+            event_line = f"{t_key} {side_icon} {event['side']}，约 {hands_text}，金额约 {amount_text}{meaning_text}"
+            timeline_items.append((t_key, event_line))
+
+    # 3. Sort chronologically by time_key
+    timeline_items.sort(key=lambda x: x[0])
+
+    # 4. Assemble the final narrative lines
+    result = []
+    for _, text in timeline_items:
+        result.append(text)
+
+    # 5. Append big order summary &走势验证 (Validation)
+    if big_order and big_order.get("events"):
+        result.append("")
+        result.append(f"回溯总结：{big_order.get('summary')}")
+        validation = big_order.get("validation")
+        if validation:
+            verdict_icon = "✅" if validation["verdict"] == "有效" else "⚠️" if validation["verdict"] == "背离" else "ℹ️"
+            result.append(f"走势验证：{verdict_icon} {validation['verdict']}（{validation['reason']}）")
+        result.append("")
+
+    if not result:
+        return ["分时数据不足，走势只按日线和收盘判断。"]
+
+    # 6. Append daily volume metadata
     if intraday.get("morning_ratio") is not None:
         mr = intraday["morning_ratio"] * 100
         followup = "跟进" if mr > 55 else "没跟上"
-        result.append(f"全天  上午成交占{mr:.0f}%，量能{followup}")
+        result.append(f"全天  上午成交占 {mr:.0f}%，量能 {followup}")
     if intraday.get("data_state") == "partial_close":
         end = intraday.get("coverage_end_time") or "--"
-        result.append(f"数据覆盖不足  5分钟数据截至{end}，尾盘判断降级")
+        result.append(f"数据覆盖不足  5分钟数据截至 {end}，尾盘判断降级")
+
     return result
 
 
