@@ -263,12 +263,39 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None, index_returns: lis
     """
     # 层-0：离线历史寻优的自校准基准值
     _cal = _load_calibrated_params() if _CALIBRATION_AVAILABLE else {}
+    
+    # 动态根据当前 HMM 大势或均线大势级别决定参数子集
+    regime = "正常"
+    if fusion_result is not None:
+        regime = fusion_result.get("regime", "正常")
+
+    hmm_state = None
+    if fusion_result is not None and isinstance(fusion_result, dict):
+        hmm_state = fusion_result.get("hmm_regime")
+
+    # 标准化状态 Key
+    state_key = hmm_state if hmm_state in ("bull", "bear", "range") else None
+    if not state_key:
+        if regime in ("偏弱", "很差"):
+            state_key = "bear"
+        else:
+            state_key = "range"
+
+    # 读取嵌套参数（Bull/Bear/Range/Global）并完美向下兼容老版本平面字典
+    if state_key in _cal and isinstance(_cal[state_key], dict):
+        cal_subset = _cal[state_key]
+    elif "global" in _cal and isinstance(_cal["global"], dict):
+        cal_subset = _cal["global"]
+    else:
+        cal_subset = _cal
+
     multipliers = {
-        "zone_width":      _cal.get("zone_width", 1.0),
-        "confirm_buffer":  _cal.get("confirm_buffer", 1.0),
+        "zone_width":      cal_subset.get("zone_width", 1.0),
+        "confirm_buffer":  cal_subset.get("confirm_buffer", 1.0),
         "space_threshold": 1.0,
-        "stop_buffer":     _cal.get("stop_buffer", 1.0),
+        "stop_buffer":     cal_subset.get("stop_buffer", 1.0),
     }
+
 
     # 层-1：均线大势 Regime
     regime = "正常"

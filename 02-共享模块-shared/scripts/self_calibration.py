@@ -2,14 +2,15 @@
 """离线参数自校准与强化演化器 (Self-Calibration)
 
 在非交易时段运行，读取历史 signals.jsonl 和 signal_results.jsonl，
-对 structure_core 的关键参数（zone_width, confirm_buffer, stop_buffer）
-进行滚动回测，找到历史胜率最高的参数组合，并写入本地配置。
+并根据中证 1000 历史指数收益率序列计算当日对应的 HMM 大势状态（Bull/Bear/Range）。
+采用 WinRate * ProfitFactor Blended 综合效能评分模型作为适应度函数，
+分别对 global、bull、bear、range 进行离线参数搜优，并将分层参数结构化写入本地配置。
 
 用法（盘后/周末运行）:
     python3 02-共享模块-shared/scripts/self_calibration.py
 
 输出:
-    ~/.trader/calibrated_params.json  — 更新后的最优参数
+    ~/.trader/calibrated_params.json  — 更新后的嵌套分层最优参数
 """
 
 from __future__ import annotations
@@ -17,8 +18,15 @@ from __future__ import annotations
 import json
 import os
 import random
+import sys
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+
+# ── 自动补齐共享模块路径（保证在独立/Hermes 环境下能正确 import） ────────────────
+_SHARED_ROOT = Path(__file__).resolve().parents[1]
+for _p in (_SHARED_ROOT / "scripts", _SHARED_ROOT / "01-行情数据-market-data", _SHARED_ROOT / "02-候选逻辑-candidate"):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 # ── 默认路径 ─────────────────────────────────────────────────────────────────
 TRADER_DIR = Path.home() / ".trader"
@@ -33,7 +41,7 @@ PARAM_SPACE = {
     "stop_buffer":     [0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00],
 }
 
-# ── 默认参数（与 Trader 2.2 保持一致）────────────────────────────────────────
+# ── 默认参数 ─────────────────────────────────────────────────────────────────
 DEFAULT_PARAMS = {
     "zone_width": 1.0,
     "confirm_buffer": 1.0,
@@ -76,77 +84,139 @@ def _extract_outcomes(results: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]
     return outcomes
 
 
-def _simulate_win_rate(
+def _load_historical_regimes(signals: List[Dict[str, Any]]) -> Dict[str, str]:
+    """根据历史大盘 K 线数据，预计算并生成信号发布日期 trade_date -> HMM_Regime 的映射字典。"""
+    regimes: Dict[str, str] = {}
+    dates = sorted(list(set(sig["trade_date"] for sig in signals if "trade_date" in sig)))
+    if not dates:
+        return regimes
+
+    try:
+        from trader_shared.config import INDEX_CODE
+        from trader_shared.data_provider import get_provider
+        from light_data import normalize_bars
+        from hmm_regime import detect_regime
+
+        provider = get_provider()
+        sec = provider.resolve_security(INDEX_CODE)
+        # 拉取 250 日（约一年）日线数据以完全覆盖回测周期
+        raw_bars = provider.fetch_kline(sec, scale="240", datalen=250)
+        bars = normalize_bars(raw_bars) if raw_bars else []
+    except Exception:
+        bars = []
+
+    if not bars:
+        for d in dates:
+            regimes[d] = "range"
+        return regimes
+
+    closes = [float(b["close"]) for b in bars if b.get("close") is not None]
+    dates_index = [b["date"] for b in bars if b.get("close") is not None]
+
+    for d in dates:
+        if d not in dates_index:
+            regimes[d] = "range"
+            continue
+
+        idx = dates_index.index(d)
+        # 回看该交易日前 90 个交易日的收盘价算大势收益率
+        slice_closes = closes[max(0, idx - 90):idx + 1]
+        if len(slice_closes) >= 5:
+            returns = [(slice_closes[i] - slice_closes[i-1]) / slice_closes[i-1] for i in range(1, len(slice_closes))]
+            try:
+                hmm_res = detect_regime(returns)
+                regimes[d] = hmm_res.get("state_en", "range")
+            except Exception:
+                regimes[d] = "range"
+        else:
+            regimes[d] = "range"
+
+    return regimes
+
+
+def _simulate_performance(
     signals: List[Dict[str, Any]],
     outcomes: Dict[str, Dict[str, Any]],
     params: Dict[str, float],
+    target_regime: Optional[str] = None,
+    historical_regimes: Optional[Dict[str, str]] = None,
 ) -> float:
-    """模拟给定参数组合下的历史胜率。
+    """模拟给定参数组合下的历史综合效能得分。
 
-    通过对已结算信号施加参数扰动，计算在不同 zone_width / confirm_buffer 下
-    有多少信号原本能被滤除（避免错误触发）或额外捕获（避免踏空）。
-
-    Returns:
-        胜率 float 0.0~1.0
+    采用 WinRate * ProfitFactor 作为 blended 评估指标，
+    综合拦截亏损信号与放行盈利信号的模拟 PnL。
     """
     if not outcomes:
-        return 0.5  # 无历史数据，返回中性
-
-    matched = 0
-    correct = 0
+        return 0.5
 
     zone_w = params["zone_width"]
     conf_b = params["confirm_buffer"]
     stop_b = params["stop_buffer"]
+
+    sim_returns: List[float] = []
 
     for sig in signals:
         sid = sig.get("signal_id") or sig.get("id")
         if not sid or sid not in outcomes:
             continue
 
-        matched += 1
-        outcome = outcomes[sid]
+        # 大势状态隔离校验
+        if target_regime and historical_regimes:
+            date = sig.get("trade_date")
+            if not date or historical_regimes.get(date) != target_regime:
+                continue
 
-        # 模拟：zone_width 更宽时，低吸信号更容易触发（捕获底部）
-        # confirm_buffer 更宽时，突破确认更严格（减少假突破）
-        # 我们用一个轻量化的启发式函数：
-        # 如果该信号的触发价比支撑位高很多（可能是高位买入），
-        # 更宽的 confirm_buffer 应该能拦住它
+        outcome = outcomes[sid]
+        r_actual = outcome["return_pct"]
 
         trigger_pct = float(sig.get("trigger_price_pct", 0.0) or 0.0)
 
-        # 模拟效果：高触发价位 + 宽 confirm_buffer = 减少高位假信号
+        # 模拟过滤逻辑
+        # A. 高触发价位 + 宽 confirm_buffer = 拦截高位假突破信号
         if trigger_pct > 0.05 and conf_b > 1.05:
-            # 这类信号在更严格的确认缓冲下会被拦住
-            if not outcome["won"]:
-                correct += 1  # 正确拦截了亏损信号
+            # 过滤成功，计为 0.0（避免亏损或错失盈利）
+            sim_returns.append(0.0)
             continue
 
-        # 低触发价位 + 宽 zone_width = 更多低位信号被捕获
+        # B. 低触发价位 + 宽 zone_width = 低吸区域放大捕获
         if trigger_pct < -0.03 and zone_w > 1.05:
-            if outcome["won"]:
-                correct += 1  # 正确放行了盈利信号
+            sim_returns.append(r_actual)
             continue
 
-        # 其余信号：直接按实际结果计入
-        if outcome["won"]:
-            correct += 1
+        # C. 正常状态：原样计入
+        sim_returns.append(r_actual)
 
-    return correct / max(matched, 1)
+    if not sim_returns:
+        return 0.0
+
+    # 统计指标
+    wins = [r for r in sim_returns if r > 0.0]
+    losses = [abs(r) for r in sim_returns if r < 0.0]
+
+    win_rate = len(wins) / len(sim_returns)
+    total_gains = sum(wins)
+    total_losses = sum(losses)
+
+    # 加上平滑项 eps，在极小样本下防分母为零，同时惩罚样本不足的情况
+    eps = 0.5
+    profit_factor = (total_gains + eps) / (total_losses + eps)
+
+    # Blended Score = 胜率 * 盈亏比
+    return win_rate * profit_factor
 
 
 def calibrate(
-    n_trials: int = 100,
+    n_trials: int = 150,
     verbose: bool = True,
-) -> Dict[str, float]:
-    """执行离线参数校准。
+) -> Dict[str, Dict[str, float]]:
+    """执行离线多大势分层参数校准。
 
     Args:
-        n_trials: 随机搜索试验次数（100 次即可，极轻量）
+        n_trials: 随机搜索试验次数
         verbose:  是否打印进度
 
     Returns:
-        最优参数字典
+        {regime_name: {zone_width, confirm_buffer, stop_buffer}}
     """
     signals = _load_jsonl(SIGNALS_FILE)
     results = _load_jsonl(RESULTS_FILE)
@@ -157,35 +227,62 @@ def calibrate(
 
     if not signals or not outcomes:
         if verbose:
-            print("⚠️  历史数据不足，保持默认参数")
-        return DEFAULT_PARAMS.copy()
-
-    best_params = DEFAULT_PARAMS.copy()
-    best_win_rate = _simulate_win_rate(signals, outcomes, best_params)
-
-    # 随机搜索（足够轻量，无梯度计算需求）
-    for trial in range(n_trials):
-        candidate = {
-            "zone_width": random.choice(PARAM_SPACE["zone_width"]),
-            "confirm_buffer": random.choice(PARAM_SPACE["confirm_buffer"]),
-            "stop_buffer": random.choice(PARAM_SPACE["stop_buffer"]),
+            print("⚠️ 历史数据不足，所有状态初始化为默认参数")
+        return {
+            "global": DEFAULT_PARAMS.copy(),
+            "bull": DEFAULT_PARAMS.copy(),
+            "bear": DEFAULT_PARAMS.copy(),
+            "range": DEFAULT_PARAMS.copy(),
         }
-        wr = _simulate_win_rate(signals, outcomes, candidate)
-        if wr > best_win_rate:
-            best_win_rate = wr
-            best_params = candidate.copy()
 
-    if verbose:
-        print(f"✅ 校准完成：最优胜率 {best_win_rate:.1%}")
-        print(f"   zone_width={best_params['zone_width']}, "
-              f"confirm_buffer={best_params['confirm_buffer']}, "
-              f"stop_buffer={best_params['stop_buffer']}")
+    # 预加载大势状态映射表
+    regimes_map = _load_historical_regimes(signals)
 
-    return best_params
+    calibrated_results: Dict[str, Dict[str, float]] = {}
+
+    # 需要寻优的分层大势桶
+    targets = [
+        ("global", None),
+        ("bull", "bull"),
+        ("bear", "bear"),
+        ("range", "range"),
+    ]
+
+    for regime_name, target_regime in targets:
+        if target_regime:
+            sub_count = sum(1 for sig in signals if regimes_map.get(sig.get("trade_date")) == target_regime)
+        else:
+            sub_count = len(signals)
+
+        if sub_count == 0:
+            if verbose:
+                print(f"  -> 大势 {regime_name:6}: 暂无样本数据，继承默认配置")
+            calibrated_results[regime_name] = DEFAULT_PARAMS.copy()
+            continue
+
+        best_params = DEFAULT_PARAMS.copy()
+        best_score = _simulate_performance(signals, outcomes, best_params, target_regime, regimes_map)
+
+        for trial in range(n_trials):
+            candidate = {
+                "zone_width": random.choice(PARAM_SPACE["zone_width"]),
+                "confirm_buffer": random.choice(PARAM_SPACE["confirm_buffer"]),
+                "stop_buffer": random.choice(PARAM_SPACE["stop_buffer"]),
+            }
+            score = _simulate_performance(signals, outcomes, candidate, target_regime, regimes_map)
+            if score > best_score:
+                best_score = score
+                best_params = candidate.copy()
+
+        calibrated_results[regime_name] = best_params.copy()
+        if verbose:
+            print(f"  -> 大势 {regime_name:6} (样本:{sub_count:2}): 性能评分 {best_score:.3f} | zone_width={best_params['zone_width']:.2f}, confirm_buffer={best_params['confirm_buffer']:.2f}, stop_buffer={best_params['stop_buffer']:.2f}")
+
+    return calibrated_results
 
 
-def save_params(params: Dict[str, float]) -> None:
-    """将校准后的参数写入持久化配置文件。"""
+def save_params(params: Dict[str, Dict[str, float]]) -> None:
+    """将分层校准后的参数写入持久化配置文件。"""
     TRADER_DIR.mkdir(parents=True, exist_ok=True)
     data = {
         "version": "2.3",
@@ -194,33 +291,33 @@ def save_params(params: Dict[str, float]) -> None:
     }
     with open(CALIBRATED_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    print(f"💾 参数已写入 {CALIBRATED_FILE}")
+    print(f"💾 分层自校准参数已写入 {CALIBRATED_FILE}")
 
 
-def load_calibrated_params() -> Dict[str, float]:
+def load_calibrated_params() -> Dict[str, Any]:
     """加载已校准参数（供 structure_core.py 调用）。
 
-    若未找到校准文件，返回 Trader 2.2 默认参数。
+    若未找到校准文件，返回默认参数字典。
     """
     if not CALIBRATED_FILE.exists():
-        return DEFAULT_PARAMS.copy()
+        return {"global": DEFAULT_PARAMS.copy()}
     try:
         with open(CALIBRATED_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data.get("params", DEFAULT_PARAMS.copy())
+        return data.get("params", {"global": DEFAULT_PARAMS.copy()})
     except (json.JSONDecodeError, IOError):
-        return DEFAULT_PARAMS.copy()
+        return {"global": DEFAULT_PARAMS.copy()}
 
 
 def main() -> None:
     """CLI 入口：盘后/周末离线执行。"""
-    print("=" * 50)
-    print("Trader 2.3 — 参数自校准器")
-    print("=" * 50)
+    print("=" * 60)
+    print("Trader 2.3 — 嵌套分层自校准引擎")
+    print("=" * 60)
     best = calibrate(n_trials=200, verbose=True)
     save_params(best)
-    print("=" * 50)
-    print("校准完成，下次分析时将自动使用最新参数。")
+    print("=" * 60)
+    print("校准完成，交易系统将根据当前 HMM 大势自适应采用对应参数。")
 
 
 if __name__ == "__main__":
