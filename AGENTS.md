@@ -14,6 +14,7 @@
 - **[2.3新增] 贝叶斯概率决策融合**：`bayesian_fusion.py` 用乘积规则融合三路专家后验概率。已完整集成在 `fusion_core.py` 中。默认关闭（安全过渡），通过设置环境变量 `BAYESIAN_FUSION=true` 激活，激活后将全面接管传统经验权重，实现基于纯概率后验的最优交易动作决策。
 - **[2.3新增] 日内成交量分布 (Volume Profile)**：`volume_profile.py` 计算 POC 控制节点与 Value Area 70% 成交量密集区。已嵌入 `decision_core.py` 的突破确认判定 `_check_theory_breakout`，通过微观日内量价验证过滤假突破。
 - **[2.3新增] 离线参数自校准器**：`scripts/self_calibration.py` 盘后/周末运行。参数已在 `structure_core.py` 的 `_theory_multipliers` 层 -0 中作为基准自校准倍率加载。
+- **[2.3新增] 动态衰减与空间去重筹码分布**：`chip_distribution.py` 摒弃原有静态累加，实现基于时序 `turnover_rate` 换手折旧的动态筹码曲线，并引入基于局部极大值与空间/价格过滤（间距 $\ge 4\%$ 且 $\ge 4$ bins）的独立筹码峰提取算法，供复盘与仓位控制等技能跨模块全局共享。
 - 真正的输出格式以 `01-功能包-packages/01-单票分析-trader/references/output-contract.md` 为准。
 - 需要看实现时，先看 `01-功能包-packages/01-单票分析-trader/scripts/run_analysis.py`。
 

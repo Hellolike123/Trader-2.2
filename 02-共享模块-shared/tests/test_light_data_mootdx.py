@@ -139,8 +139,9 @@ def test_fetch_qfq_mootdx_returns_none_on_error(mock_get_client):
     assert bars is None
 
 
+@patch("light_data._fetch_mins_fallback", return_value=None)
 @patch("light_data._get_mootdx_client")
-def test_fetch_5m_from_mootdx(mock_get_client):
+def test_fetch_5m_from_mootdx(mock_get_client, mock_fallback):
     """fetch_5m should use mootdx 5-minute bars when available."""
     mock_client = MagicMock()
     df_5m = pd.DataFrame([

@@ -206,12 +206,14 @@ def validate_big_orders(
 def analyze_big_orders(
     bars_5m: list[dict[str, Any]],
     *,
+    tick_data: list[dict[str, Any]] | None = None,
     focus_price: float | None = None,
     focus_prices: list[float] | list[tuple[str, float]] | None = None,
     trade_date: str | None = None,
 ) -> dict[str, Any]:
     events: list[BigOrderEvent] = []
-    bars = [bar for bar in bars_5m if not trade_date or str(bar.get("time") or bar.get("date") or "").startswith(trade_date)]
+    
+    # 建立关注区价格列表
     normalized_focus_prices: list[tuple[str, float]] = []
     if focus_prices:
         for index, item in enumerate(focus_prices):
@@ -227,46 +229,143 @@ def analyze_big_orders(
         if focus is not None:
             normalized_focus_prices.append(("关注区", focus))
 
-    prev_side = ""
-    prev_time = ""
-    for index, bar in enumerate(bars):
-        time_text = _bar_time(bar)
-        if not time_text:
-            continue
-        side = _direction(bar)
-        if side == "中性":
-            prev_side = ""
-            prev_time = ""
-            continue
-        hands = _trade_hands(bar)
-        amount_wan = _trade_amount_wan(bar)
-        if hands is None or amount_wan is None:
-            prev_side = ""
-            prev_time = ""
-            continue
-        avg_hands = _avg_hands(bars[max(0, index - 20):index])
-        if not _is_large_order(hands, amount_wan, avg_hands):
-            prev_side = ""
-            prev_time = ""
-            continue
-        close = to_float(bar.get("close"))
-        near_focus, focus_label = _focus_match(close, normalized_focus_prices)
-        consecutive = bool(prev_side == side and prev_time and int(time_text.replace(":", "")) - int(prev_time.replace(":", "")) <= 120)
-        events.append(
-            BigOrderEvent(
-                time=time_text,
-                side=side,
-                hands=hands,
-                amount_wan=amount_wan,
-                meaning=_meaning(side, hands, consecutive, near_focus),
-                level=_level(hands, consecutive),
-                near_focus=near_focus,
-                focus_label=focus_label,
-            )
-        )
-        prev_side = side
-        prev_time = time_text
+    # 判断是否走物理 Tick 驱动路径
+    if tick_data and len(tick_data) > 0:
+        # 分钟级同向 Tick 物理聚合降噪
+        aggregated: dict[tuple[str, str], dict[str, Any]] = {}
+        for tick in tick_data:
+            price = to_float(tick.get("price"))
+            vol = to_float(tick.get("vol")) # 手
+            side_raw = tick.get("buyorsell")
+            tick_time = str(tick.get("time", ""))
+            if price is None or vol is None or not tick_time:
+                continue
+                
+            amount_wan = price * vol / 100.0
+            
+            # 大单筛选阈值
+            if vol >= MIN_BIG_ORDER_HANDS or amount_wan >= MIN_BIG_ORDER_AMOUNT_WAN:
+                direction = "主动买入" if side_raw == "buy" else "主动卖出" if side_raw == "sell" else "中性"
+                # 截取到分钟，如 "14:59:02" -> "14:59"
+                minute_str = tick_time[:5] if ":" in tick_time else tick_time
+                
+                key = (minute_str, direction)
+                if key not in aggregated:
+                    aggregated[key] = {
+                        "time": minute_str,
+                        "side": direction,
+                        "hands": 0.0,
+                        "amount_wan": 0.0,
+                        "prices": []
+                    }
+                aggregated[key]["hands"] += vol
+                aggregated[key]["amount_wan"] += amount_wan
+                aggregated[key]["prices"].append(price)
 
+        raw_events = []
+        for (minute_str, direction), data in sorted(aggregated.items(), key=lambda x: x[0][0]):
+            avg_price = sum(data["prices"]) / len(data["prices"]) if data["prices"] else 0.0
+            raw_events.append({
+                "time": data["time"],
+                "side": data["side"],
+                "hands": round(data["hands"], 2),
+                "amount_wan": round(data["amount_wan"], 2),
+                "close": avg_price
+            })
+
+        prev_side = ""
+        prev_time = ""
+        for bar in raw_events:
+            time_text = bar["time"]
+            side = bar["side"]
+            if side == "中性":
+                prev_side = ""
+                prev_time = ""
+                continue
+            hands = bar["hands"]
+            amount_wan = bar["amount_wan"]
+            close = bar["close"]
+            
+            near_focus, focus_label = _focus_match(close, normalized_focus_prices)
+            
+            # 连续性判定：2分钟以内相同方向
+            consecutive = False
+            if prev_side == side and prev_time:
+                try:
+                    h1, m1 = map(int, time_text.split(":"))
+                    h0, m0 = map(int, prev_time.split(":"))
+                    if (h1 * 60 + m1) - (h0 * 60 + m0) <= 2:
+                        consecutive = True
+                except Exception:
+                    pass
+                    
+            events.append(
+                BigOrderEvent(
+                    time=time_text,
+                    side=side,
+                    hands=hands,
+                    amount_wan=amount_wan,
+                    meaning=_meaning(side, hands, consecutive, near_focus),
+                    level=_level(hands, consecutive),
+                    near_focus=near_focus,
+                    focus_label=focus_label,
+                )
+            )
+            prev_side = side
+            prev_time = time_text
+            
+    else:
+        # K 线估计路径 (原有的 fallback 逻辑)
+        bars = [bar for bar in bars_5m if not trade_date or str(bar.get("time") or bar.get("date") or "").startswith(trade_date)]
+        prev_side = ""
+        prev_time = ""
+        for index, bar in enumerate(bars):
+            time_text = _bar_time(bar)
+            if not time_text:
+                continue
+            side = _direction(bar)
+            if side == "中性":
+                prev_side = ""
+                prev_time = ""
+                continue
+            hands = _trade_hands(bar)
+            amount_wan = _trade_amount_wan(bar)
+            if hands is None or amount_wan is None:
+                prev_side = ""
+                prev_time = ""
+                continue
+            avg_hands = _avg_hands(bars[max(0, index - 20):index])
+            if not _is_large_order(hands, amount_wan, avg_hands):
+                prev_side = ""
+                prev_time = ""
+                continue
+            close = to_float(bar.get("close"))
+            near_focus, focus_label = _focus_match(close, normalized_focus_prices)
+            consecutive = False
+            if prev_side == side and prev_time:
+                try:
+                    h1, m1 = map(int, time_text.split(":"))
+                    h0, m0 = map(int, prev_time.split(":"))
+                    if (h1 * 60 + m1) - (h0 * 60 + m0) <= 2:
+                        consecutive = True
+                except Exception:
+                    pass
+            events.append(
+                BigOrderEvent(
+                    time=time_text,
+                    side=side,
+                    hands=hands,
+                    amount_wan=amount_wan,
+                    meaning=_meaning(side, hands, consecutive, near_focus),
+                    level=_level(hands, consecutive),
+                    near_focus=near_focus,
+                    focus_label=focus_label,
+                )
+            )
+            prev_side = side
+            prev_time = time_text
+
+    # 后续走势验证以及汇总
     if not events:
         return {
             "events": [],
@@ -288,6 +387,9 @@ def analyze_big_orders(
     summary = f"全天回溯到 {len(events)} 次大单事件，累计约 {total_hands:.0f} 手、{total_amount_wan:.0f} 万元，{direction_summary}。"
     
     event_dicts = [event.__dict__ for event in events]
+    
+    # 走势验证：依然基于 bars_5m 的 5 分钟 K 线后续价格验证
+    bars = [bar for bar in bars_5m if not trade_date or str(bar.get("time") or bar.get("date") or "").startswith(trade_date)]
     validation = validate_big_orders(bars, event_dicts)
 
     return {

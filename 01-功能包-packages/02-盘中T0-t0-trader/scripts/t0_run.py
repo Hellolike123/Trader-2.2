@@ -73,7 +73,28 @@ def build_plan(target: str) -> dict[str, Any]:
         "kline_15m": bars_15m,
         "kline_30m": bars_30m,
         "current_price": float(current),
+        "tick_data": [],
     }
+    
+    # 被动触发避险控制：当现价靠近低吸或高抛关注价 1.5% 以内时，才触发物理 Tick 盯盘抓取
+    temp_model = build_price_point_model(report_data)
+    buy_focus = temp_model.get("buy", {}).get("observation_price")
+    sell_focus = temp_model.get("sell", {}).get("observation_price")
+    near_focus = False
+    current_val = float(current)
+    if buy_focus and abs(current_val - buy_focus) / buy_focus <= 0.015:
+        near_focus = True
+    if sell_focus and abs(current_val - sell_focus) / sell_focus <= 0.015:
+        near_focus = True
+        
+    if near_focus:
+        try:
+            ticks = provider.fetch_ticks(sec, count=500)
+            report_data["tick_data"] = ticks
+            import warnings
+            warnings.warn(f"🎯 [PassiveTickTrigger] 现价 {current_val:.2f} 靠近关注价，被动激活物理 Tick 大单验证！")
+        except Exception:
+            pass
     # T0-1 fix: 传入 structure_result 让 T0 使用 trader 的支撑/阻力分析
     # 如果有 trader 的分析报告数据，提取其结构分析结果
     structure_result = None

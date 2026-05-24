@@ -36,6 +36,15 @@ try:
 except ImportError:
     _AKSHARE_AVAILABLE = False
 
+try:
+    from pytdx3.hq import TdxHq_API
+    from pytdx3.params import TDXParams
+    _TDX3_AVAILABLE = True
+except ImportError:
+    TdxHq_API = None
+    TDXParams = None
+    _TDX3_AVAILABLE = False
+
 
 TENCENT_QUOTE_URL = "https://qt.gtimg.cn/q="
 TENCENT_FQKLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
@@ -62,6 +71,234 @@ _cache_expiry: dict[str, float] = {}
 # 实时行情缓存（30秒TTL）
 _realtime_cache: dict[str, tuple[Any, float]] = {}
 _REALTIME_TTL = 30
+
+# -------- Local Rate Limiter to prevent IP bans --------
+import os
+class APIRequestRateLimiter:
+    def __init__(self, limit_file: str | None = None) -> None:
+        self.limit_file = limit_file or os.path.expanduser("~/.trader/api_limits.json")
+        self._ensure_dir()
+
+    def _ensure_dir(self) -> None:
+        os.makedirs(os.path.dirname(self.limit_file), exist_ok=True)
+
+    def _load(self) -> dict[str, list[float]]:
+        if not os.path.exists(self.limit_file):
+            return {"calls": []}
+        try:
+            with open(self.limit_file, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {"calls": []}
+
+    def _save(self, data: dict[str, list[float]]) -> None:
+        try:
+            with open(self.limit_file, "w") as f:
+                json.dump(data, f)
+        except Exception:
+            pass
+
+    def check_and_record(self, max_per_min: int = 15, max_per_hour: int = 80) -> bool:
+        """Return True if allowed, False if throttled."""
+        now = time.time()
+        data = self._load()
+        calls = [t for t in data.get("calls", []) if now - t < 3600] # 只保留一小时内
+        
+        min_calls = [t for t in calls if now - t < 60] # 一分钟内
+        if len(min_calls) >= max_per_min:
+            warnings.warn(f"⚠️ [RateLimit] 1分钟内API请求频次触发上限 ({max_per_min}次)，本地拦截并自适应降级。")
+            return False
+            
+        if len(calls) >= max_per_hour:
+            warnings.warn(f"⚠️ [RateLimit] 1小时内API请求频次触发上限 ({max_per_hour}次)，本地拦截并自适应降级。")
+            return False
+            
+        calls.append(now)
+        data["calls"] = calls
+        self._save(data)
+        return True
+
+_API_RATE_LIMITER = APIRequestRateLimiter()
+
+_TDX3_CLIENT: TdxHq_API | None = None
+
+def _get_tdx3_client() -> TdxHq_API | None:
+    global _TDX3_CLIENT
+    if not _TDX3_AVAILABLE:
+        return None
+    if _TDX3_CLIENT is not None:
+        return _TDX3_CLIENT
+        
+    servers = [
+        ("119.147.212.81", 7709), # 深圳双线
+        ("124.78.224.238", 7709), # 上海双线
+        ("60.191.117.167", 7709), # 浙江电信
+    ]
+    
+    # 动态测速并连接最快节点
+    api = TdxHq_API()
+    orig_timeout = socket.getdefaulttimeout()
+    for ip, port in servers:
+        try:
+            socket.setdefaulttimeout(1.0)
+            if api.connect(ip, port):
+                _TDX3_CLIENT = api
+                warnings.warn(f"📡 pytdx3 成功连接最快行情节点: {ip}:{port}")
+                socket.setdefaulttimeout(orig_timeout)
+                return _TDX3_CLIENT
+        except Exception:
+            continue
+    socket.setdefaulttimeout(orig_timeout)
+    return None
+
+
+def run_tdx3_with_timeout(func, *args, **kwargs) -> Any:
+    """Execute a pytdx3 API call with socket timeout and auto-reconnection on failure."""
+    global _TDX3_CLIENT
+    api = _get_tdx3_client()
+    if api is None:
+        return None
+        
+    orig_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(2.0)
+    try:
+        start_time = time.time()
+        res = func(api, *args, **kwargs)
+        duration = time.time() - start_time
+        if duration > 2.0:
+            warnings.warn(f"⚠️ pytdx3 call exceeded execution time limit of 2.0s (took {duration:.2f}s)")
+            _TDX3_CLIENT = None
+            return None
+        return res
+    except (socket.timeout, TimeoutError) as exc:
+        warnings.warn(f"⚠️ pytdx3 call timed out: {exc}")
+        _TDX3_CLIENT = None
+        return None
+    except Exception as exc:
+        warnings.warn(f"⚠️ pytdx3 call failed: {exc}")
+        _TDX3_CLIENT = None
+        return None
+    finally:
+        socket.setdefaulttimeout(orig_timeout)
+
+
+def _fetch_qfq_tdx3(sec: Security, days: int = 30) -> list[dict[str, Any]] | None:
+    if not _TDX3_AVAILABLE:
+        return None
+    try:
+        def call_bars(api):
+            return api.get_security_bars(category=9, market=_mootdx_market(sec), code=sec.code, start=0, count=max(days, 20))
+            
+        raw_bars = run_tdx3_with_timeout(call_bars)
+        if raw_bars is None or len(raw_bars) == 0:
+            return None
+            
+        bars = []
+        for row in raw_bars:
+            raw_dt = str(row.get("datetime", ""))
+            bars.append({
+                "date": raw_dt.split(" ")[0],
+                "open": to_float(row.get("open")),
+                "close": to_float(row.get("close")),
+                "high": to_float(row.get("high")),
+                "low": to_float(row.get("low")),
+                "volume": to_float(row.get("vol")),
+                "amount": to_float(row.get("amount")),
+            })
+        return bars
+    except Exception as exc:
+        warnings.warn(f"⚠️ _fetch_qfq_tdx3 error: {exc}")
+        return None
+
+
+def _fetch_quote_tdx3(sec: Security) -> dict[str, Any] | None:
+    if not _TDX3_AVAILABLE:
+        return None
+    try:
+        def call_quotes(api):
+            return api.get_security_quotes([(_mootdx_market(sec), sec.code)])
+            
+        qs = run_tdx3_with_timeout(call_quotes)
+        if qs is None or len(qs) == 0:
+            return None
+        q = dict(qs[0])
+        now = datetime.now()
+        price_v = to_float(q.get("price"))
+        last_close_v = to_float(q.get("last_close"))
+        result: dict[str, Any] = {
+            "name": sec.name,
+            "symbol": sec.ts_code,
+            "trade_date": now.strftime("%Y-%m-%d"),
+            "trade_time": str(q.get("servertime", ""))[:8] if q.get("servertime") else None,
+            "current_price": price_v,
+            "pre_close": last_close_v,
+            "open": to_float(q.get("open")),
+            "high": to_float(q.get("high")),
+            "low": to_float(q.get("low")),
+            "volume": to_float(q.get("vol")),
+            "amount": to_float(q.get("amount")),
+            "turnover_rate": None,
+            "current_change_pct": round(((price_v or 0) / (last_close_v or 1) - 1) * 100, 2) if price_v and last_close_v else None,
+            "order_book": _extract_order_book(q),
+        }
+        return result
+    except Exception as exc:
+        warnings.warn(f"⚠️ _fetch_quote_tdx3 error: {exc}")
+        return None
+
+
+def _fetch_ticks_tdx3(sec: Security, count: int = 500) -> list[dict[str, Any]] | None:
+    if not _TDX3_AVAILABLE:
+        return []
+    if not _API_RATE_LIMITER.check_and_record(max_per_min=15, max_per_hour=80):
+        return []
+
+    market = _mootdx_market(sec)
+    
+    def call_today_ticks(api):
+        return api.get_transaction_data(market, sec.code, 0, count)
+        
+    ticks = run_tdx3_with_timeout(call_today_ticks)
+    
+    if not ticks:
+        bars = _fetch_qfq_tdx3(sec, days=1)
+        if bars:
+            last_date = bars[-1].get("date", "")
+            if last_date:
+                try:
+                    date_int = int(last_date.replace("-", ""))
+                    
+                    def call_history_ticks(api):
+                        return api.get_history_transaction_data(market, sec.code, 0, count, date_int)
+                        
+                    ticks = run_tdx3_with_timeout(call_history_ticks)
+                    if ticks:
+                        warnings.warn(f"📡 [TickSelfCalibration] 盘中当日Tick为空，自适应激活周末/盘后历史Tick自愈，成功调取 {last_date} 明细数据。")
+                except Exception:
+                    pass
+
+    if not ticks:
+        return []
+
+    norm_ticks = []
+    for tick in ticks:
+        bos_raw = tick.get("buyorsell")
+        if bos_raw == 1:
+            side = "buy"
+        elif bos_raw == 0:
+            side = "sell"
+        elif bos_raw == 2:
+            side = "neutral"
+        else:
+            side = "neutral"
+            
+        norm_ticks.append({
+            "time": str(tick.get("time", "")),
+            "price": to_float(tick.get("price")),
+            "vol": to_float(tick.get("vol")),
+            "buyorsell": side,
+        })
+    return norm_ticks
 
 DataStatus = Literal["full", "partial", "degraded", "failed"]
 
@@ -124,6 +361,7 @@ _DATA_SOURCE_CONTROLLER = MarketDataSourceController()
 
 def run_mootdx_with_timeout(func, *args, **kwargs) -> Any:
     """Execute a mootdx connection or call with a strict 1.5-second socket timeout."""
+    global _MOOTDX_CLIENT
     if not _DATA_SOURCE_CONTROLLER.is_healthy():
         return None
 
@@ -135,16 +373,19 @@ def run_mootdx_with_timeout(func, *args, **kwargs) -> Any:
         duration = time.time() - start_time
         if duration > 1.5:
             # Enforce strict 1.5s execution limit even if socket doesn't raise timeout
+            _MOOTDX_CLIENT = None
             _DATA_SOURCE_CONTROLLER.report_failure()
             warnings.warn(f"⚠️ mootdx call exceeded execution time limit of 1.5s (took {duration:.2f}s)")
             return None
         _DATA_SOURCE_CONTROLLER.report_success()
         return res
     except (socket.timeout, TimeoutError) as exc:
+        _MOOTDX_CLIENT = None
         _DATA_SOURCE_CONTROLLER.report_failure()
         warnings.warn(f"⚠️ mootdx call timed out: {exc}")
         return None
     except Exception as exc:
+        _MOOTDX_CLIENT = None
         _DATA_SOURCE_CONTROLLER.report_failure()
         warnings.warn(f"⚠️ mootdx call failed with exception: {exc}")
         return None
@@ -279,6 +520,7 @@ class MarketSnapshot:
     daily_bars: list[dict[str, Any]]
     bars_5m: list[dict[str, Any]] = field(default_factory=list)
     order_book: dict[str, Any] | None = None
+    tick_data: list[dict[str, Any]] = field(default_factory=list)
     data_status: DataStatus = "full"
     missing_sources: list[str] = field(default_factory=list)
     source_errors: dict[str, str] = field(default_factory=dict)
@@ -454,6 +696,24 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
     if cached is not None:
         return cached
 
+    # pytdx3 priority
+    if _TDX3_AVAILABLE:
+        tdx3_q = _fetch_quote_tdx3(sec)
+        if tdx3_q is not None:
+            try:
+                text = http.get_text(TENCENT_QUOTE_URL + sec.qq_symbol, encoding="gbk")
+                match = re.search(r'="([^"]*)"', text)
+                if match:
+                    fields = match.group(1).split("~")
+                    if len(fields) > 38:
+                        tdx3_q["turnover_rate"] = to_float(fields[38])
+            except Exception:
+                pass
+            tdx3_q["data_source"] = "pytdx3"
+            tdx3_q["data_status"] = "full"
+            save_realtime_cache(cache_key, tdx3_q)
+            return tdx3_q
+
     # mootdx 主源
     mootdx_q = _fetch_quote_mootdx(sec)
     if mootdx_q is not None:
@@ -544,6 +804,16 @@ def _compute_atr_fields(bars: list[dict[str, Any]]) -> None:
 
 
 def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 30) -> list[dict[str, Any]]:
+    # pytdx3 priority
+    if _TDX3_AVAILABLE:
+        tdx3_bars = _fetch_qfq_tdx3(sec, days)
+        if tdx3_bars is not None:
+            for bar in tdx3_bars:
+                bar["data_source"] = "pytdx3"
+                bar["data_status"] = "full"
+            _compute_atr_fields(tdx3_bars)
+            return tdx3_bars
+
     # mootdx 主源
     mootdx_bars = _fetch_qfq_mootdx(sec, days)
     if mootdx_bars is not None:
@@ -726,7 +996,7 @@ def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dic
     without third-party packages or proxy interference.
     """
     try:
-        period_map = {"5m": "5", "15m": "15", "30m": "30", "60": "60"}
+        period_map = {"5m": "5", "15m": "15", "30m": "30", "60m": "60", "60": "60"}
         scale = period_map.get(interval, "5")
         
         import ssl
@@ -792,20 +1062,22 @@ def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dic
         return None
 
 
-def load_market_snapshot(target: str, days: int = 30, include_5m: bool = True) -> MarketSnapshot:
+def load_market_snapshot(target: str, days: int = 30, include_5m: bool = True, include_ticks: bool = True) -> MarketSnapshot:
     sec = resolve_security(target)
     http = HttpClient()
     source_errors: dict[str, str] = {}
     missing_sources: list[str] = []
 
     results: dict[str, Any] = {}
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {
             executor.submit(fetch_quote, sec, http): "quote",
             executor.submit(fetch_qfq_daily, sec, http, days=days): "daily",
         }
         if include_5m:
             futures[executor.submit(fetch_5m, sec, http)] = "bars_5m"
+        if include_ticks:
+            futures[executor.submit(_fetch_ticks_tdx3, sec, 500)] = "tick_data"
 
         for future in as_completed(futures):
             key = futures[future]
@@ -819,6 +1091,7 @@ def load_market_snapshot(target: str, days: int = 30, include_5m: bool = True) -
     quote = results.get("quote") or {}
     daily_bars = results.get("daily") or []
     bars_5m = results.get("bars_5m") or []
+    tick_data = results.get("tick_data") or []
     order_book = quote.get("order_book")
     if isinstance(quote, dict):
         quote = dict(quote)  # shallow copy to avoid mutating the cache
@@ -848,6 +1121,7 @@ def load_market_snapshot(target: str, days: int = 30, include_5m: bool = True) -
         daily_bars=daily_bars,
         bars_5m=bars_5m,
         order_book=order_book,
+        tick_data=tick_data,
         data_status=data_status,
         missing_sources=missing_sources,
         source_errors=source_errors,

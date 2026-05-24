@@ -39,14 +39,11 @@ def _format_intraday_narrative(intraday: dict[str, Any], big_order: dict[str, An
         result.append("今日大单回溯")
         for event in big_order["events"]:
             hands = event.get("hands")
-            if hands is not None:
-                hands_text = f"{hands / 10000:.1f} 万手" if hands >= 10000 else f"{hands:.0f} 手"
-            else:
-                hands_text = "手数不足"
+            hands_text = f"{hands:.0f} 手" if hands is not None else "手数不足"
             amount_wan = event.get("amount_wan")
             amount_text = f"{amount_wan:.0f} 万" if amount_wan is not None else "金额不足"
             focus_note = f"，贴近{event['focus_label']}" if event.get("near_focus") and event.get("focus_label") else ""
-            result.append(f"{event['time']}  {event['side']}，约 {hands_text}，金额约 {amount_text}，{event['meaning']}{focus_note}。")
+            result.append(f"{event['time']}  {event['side']}  {amount_text} / {hands_text}，{event['meaning']}{focus_note}。")
         result.append(f"回溯总结：{big_order.get('summary')}")
         validation = big_order.get("validation")
         if validation:
@@ -242,11 +239,21 @@ def render_single(review: dict[str, Any]) -> str:
     chip_dist = review.get("chip_distribution") or {}
     peaks = chip_dist.get("peaks", [])
     if peaks:
-        lines.append("💰 筹码分布（近60日量价粗算） ")
+        lines.append("💰 筹码分布 (高清时序衰减图)")
+        max_share = max(p.get("share_of_total", 1.0) for p in peaks) if peaks else 1.0
         for p in peaks:
-            lines.append("  {:.2f}  {:.2f}%  {}".format(
-                p["price"], p["share_of_total"], p["support_level"],
-            ))
+            price = p["price"]
+            share = p["share_of_total"]
+            level = p["support_level"]
+            
+            # WeChat-friendly 6-character full-width progress bar
+            filled = max(1, min(6, round(share / max_share * 6))) if max_share > 0 else 1
+            bar = "■" * filled + "□" * (6 - filled)
+            
+            # Emoji prefix based on support vs resistance
+            emoji = "🟢" if "支撑" in level else "🔴"
+            
+            lines.append(f"  {price:.2f}元 [{bar}] {share:.1f}% {emoji}{level}")
         lines.append("")
     # 📋 今日信号回溯 (no more monthly tracking — just backtrack)
     bt_lines = _signal_backtrack_lines(review)

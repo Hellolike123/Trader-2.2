@@ -50,6 +50,7 @@ class MarketSnapshot:
     daily_bars: list[dict[str, Any]]
     bars_5m: list[dict[str, Any]] = field(default_factory=list)
     order_book: dict[str, Any] | None = None
+    tick_data: list[dict[str, Any]] = field(default_factory=list)
     data_status: DataStatus = "full"
     missing_sources: list[str] = field(default_factory=list)
     source_errors: dict[str, str] = field(default_factory=dict)
@@ -92,8 +93,12 @@ class DataProvider(Protocol):
         """Generic multi-cycle K-line."""
         ...
 
-    def load_market_snapshot(self, target: str, days: int = 365, include_5m: bool = True) -> MarketSnapshot:
+    def load_market_snapshot(self, target: str, days: int = 365, include_5m: bool = True, include_ticks: bool = True) -> MarketSnapshot:
         """Aggregate quote + daily + optional 5m into a single snapshot."""
+        ...
+
+    def fetch_ticks(self, sec: Security, count: int = 500) -> list[dict[str, Any]]:
+        """Fetch transaction ticks for the security."""
         ...
 
     def pct_change(self, start: float, end: float) -> float:
@@ -193,13 +198,26 @@ class MootdxProvider:
             self._http = HttpClient()
         from light_data import fetch_kline as _fetch
         from light_data import Security as _Sec
-        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http, scale=scale, datalen=datalen)
+        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http, interval=scale, datalen=datalen)
 
-    def load_market_snapshot(self, target: str, days: int = 365, include_5m: bool = True) -> MarketSnapshot:
+    def fetch_ticks(self, sec: Security, count: int = 500) -> list[dict[str, Any]]:
+        self._ensure_paths()
+        if self._http is None:
+            from light_data import HttpClient
+            self._http = HttpClient()
+        from light_data import Security as _Sec
+        try:
+            from light_data import _fetch_ticks_tdx3
+            res = _fetch_ticks_tdx3(_Sec(sec.code, sec.market, sec.name), count=count)
+            return res if res is not None else []
+        except ImportError:
+            return []
+
+    def load_market_snapshot(self, target: str, days: int = 365, include_5m: bool = True, include_ticks: bool = True) -> MarketSnapshot:
         self._ensure_paths()
         from light_data import load_market_snapshot as _load
         from light_data import MarketSnapshot as _MS
-        snap = _load(target, days=days, include_5m=include_5m)
+        snap = _load(target, days=days, include_5m=include_5m, include_ticks=include_ticks)
         sec = Security(code=snap.security.code, market=snap.security.market, name=snap.security.name)
         return MarketSnapshot(
             security=sec,
@@ -207,6 +225,7 @@ class MootdxProvider:
             daily_bars=snap.daily_bars,
             bars_5m=snap.bars_5m,
             order_book=getattr(snap, "order_book", None),
+            tick_data=getattr(snap, "tick_data", []),
             data_status=snap.data_status,
             missing_sources=snap.missing_sources,
             source_errors=snap.source_errors,
@@ -304,13 +323,16 @@ class TencentSinaProvider:
             self._http = HttpClient()
         from light_data import fetch_kline as _fetch
         from light_data import Security as _Sec
-        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http, scale=scale, datalen=datalen)
+        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http, interval=scale, datalen=datalen)
 
-    def load_market_snapshot(self, target: str, days: int = 365, include_5m: bool = True) -> MarketSnapshot:
+    def fetch_ticks(self, sec: Security, count: int = 500) -> list[dict[str, Any]]:
+        return []
+
+    def load_market_snapshot(self, target: str, days: int = 365, include_5m: bool = True, include_ticks: bool = True) -> MarketSnapshot:
         self._ensure_paths()
         from light_data import load_market_snapshot as _load
         from light_data import MarketSnapshot as _MS
-        snap = _load(target, days=days, include_5m=include_5m)
+        snap = _load(target, days=days, include_5m=include_5m, include_ticks=include_ticks)
         sec = Security(code=snap.security.code, market=snap.security.market, name=snap.security.name)
         return MarketSnapshot(
             security=sec,
@@ -318,6 +340,7 @@ class TencentSinaProvider:
             daily_bars=snap.daily_bars,
             bars_5m=snap.bars_5m,
             order_book=getattr(snap, "order_book", None),
+            tick_data=getattr(snap, "tick_data", []),
             data_status=snap.data_status,
             missing_sources=snap.missing_sources,
             source_errors=snap.source_errors,
@@ -484,9 +507,12 @@ class AkShareProvider:
                 bars.append(bar)
         return bars
 
-    def load_market_snapshot(self, target: str, days: int = 365, include_5m: bool = True) -> MarketSnapshot:
+    def fetch_ticks(self, sec: Security, count: int = 500) -> list[dict[str, Any]]:
+        return []
+
+    def load_market_snapshot(self, target: str, days: int = 365, include_5m: bool = True, include_ticks: bool = True) -> MarketSnapshot:
         sec = self.resolve_security(target)
-        daily_bars, bars_5m, quote = [], [], {}
+        daily_bars, bars_5m, quote, tick_data = [], [], {}, []
         source_errors: dict[str, str] = {}
         try:
             daily_bars = self.fetch_qfq_daily(sec, days=days)
@@ -501,6 +527,11 @@ class AkShareProvider:
                 bars_5m = self.fetch_5m(sec)
             except Exception as e:
                 source_errors["5m"] = str(e)
+        if include_ticks:
+            try:
+                tick_data = self.fetch_ticks(sec, count=500)
+            except Exception as e:
+                source_errors["ticks"] = str(e)
 
         if daily_bars and quote:
             data_status = "full"
@@ -514,6 +545,7 @@ class AkShareProvider:
             quote=quote,
             daily_bars=daily_bars,
             bars_5m=bars_5m,
+            tick_data=tick_data,
             data_status=data_status,
             source_errors=source_errors,
         )

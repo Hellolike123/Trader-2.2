@@ -194,7 +194,8 @@ def render_markdown(plan: dict[str, Any]) -> str:
             focus_prices.append(("高抛关注区", sell_focus))
         bars = (plan.get("data") or {}).get("kline_5m") or []
         trade_date = str(plan.get("analysis_time") or "").split(" ", 1)[0] or None
-        big_order = analyze_big_orders(bars, focus_prices=focus_prices, trade_date=trade_date)
+        tick_data = (plan.get("data") or {}).get("tick_data") or []
+        big_order = analyze_big_orders(bars, tick_data=tick_data, focus_prices=focus_prices, trade_date=trade_date)
 
     lines = [
         "🎯 T0 盯盘助理",

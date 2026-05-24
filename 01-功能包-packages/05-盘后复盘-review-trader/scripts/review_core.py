@@ -440,6 +440,11 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
     calc_macd(daily)
     daily_macd_params = calc_macd_params(daily)
     bars_5m = provider.fetch_5m(sec, datalen=80)
+    tick_data = []
+    try:
+        tick_data = provider.fetch_ticks(sec, count=500)
+    except Exception:
+        pass
     current = latest_or_quote_close(quote, daily)
     last_bar = daily[-1] if daily else {}
     atr14 = to_float(last_bar.get("atr14")) or 0.0
@@ -483,7 +488,7 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
         "intraday": intraday,
         "levels": levels,
         "theory": theory,
-        "big_order": analyze_big_orders(bars_5m, focus_price=levels.get("key_pressure"), trade_date=selected_date),
+        "big_order": analyze_big_orders(bars_5m, tick_data=tick_data, focus_price=levels.get("key_pressure"), trade_date=selected_date),
         "macd_params": {
             "macd_line": daily_macd_params.get("macd_line"),
             "dea": daily_macd_params.get("dea"),
