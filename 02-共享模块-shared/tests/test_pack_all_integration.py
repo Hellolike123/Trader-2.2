@@ -15,6 +15,9 @@ if str(PACK_ALL_DIR) not in sys.path:
     sys.path.insert(0, str(PACK_ALL_DIR))
 
 
+_REPOS = Path(__file__).resolve().parents[2] / "03-安装包-dist" / "releases"
+
+
 class TestComputeFileSha256:
     """Helper function computes deterministic SHA-256."""
 
@@ -88,7 +91,7 @@ class TestSharedFilesForSkill:
 
     def _find_latest_release(self) -> Path:
         """Find the latest release directory by sorting."""
-        releases_dir = Path("03-安装包-dist/releases")
+        releases_dir = _REPOS
         dirs = sorted(
             [d for d in releases_dir.iterdir() if d.is_dir() and d.name not in (".gitkeep",)],
             reverse=True,
@@ -117,15 +120,12 @@ class TestSharedFilesForSkill:
 
     def test_non_t0_skills_share_digest(self):
         """All non-t0 skills should share the same digest."""
-        releases_dir = Path("03-安装包-dist/releases")
-        release_dirs = sorted(
-            [d for d in releases_dir.iterdir() if d.is_dir()],
-            reverse=True,
-        )
+        release_dirs = sorted([d for d in _REPOS.iterdir() if d.is_dir()], reverse=True)
         assert len(release_dirs) >= 1, "No release directories found"
         latest = release_dirs[0]
 
         non_t0 = {"trader", "trader-pool", "trader-portfolio", "review-trader", "trader-tracking"}
+
         digests = {}
         for skill in non_t0:
             zip_path = latest / f"{skill}.zip"
@@ -154,11 +154,7 @@ class TestPackAllNoEmptyFiles:
         return empty
 
     def test_no_empty_py_in_any_zip(self):
-        releases_dir = Path("03-安装包-dist/releases")
-        release_dirs = sorted(
-            [d for d in releases_dir.iterdir() if d.is_dir()],
-            reverse=True,
-        )
+        release_dirs = sorted([d for d in _REPOS.iterdir() if d.is_dir()], reverse=True)
         assert len(release_dirs) >= 1, "No release directories found"
         latest = release_dirs[0]
 

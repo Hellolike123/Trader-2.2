@@ -115,7 +115,7 @@ def calc_chip_distribution(
                 tr = 100.0
             elif tr < 0.0:
                 tr = 0.0
-            decay_rate = tr / 100.0
+            decay_rate = (tr / 100.0) ** 0.5 * 0.3
         else:
             decay_rate = 0.03  # 无换手率时默认 3% 折旧率
             
@@ -168,14 +168,21 @@ def calc_chip_distribution(
     # B. 按筹码量降序排列局部极大值
     sorted_peaks = sorted(local_peaks, key=lambda idx: volume_map[idx], reverse=True)
     
-    # C. 价格与空间过滤：强制要求筹码峰之间价格相差 >= 4% 且索引间距 >= 4 bins
+    # C. 价格与空间过滤：根据股价区间自适应最小间距
+    avg_price = (min_price + max_price) / 2
+    if avg_price < 10:
+        min_gap_pct = 0.02
+    elif avg_price < 50:
+        min_gap_pct = 0.03
+    else:
+        min_gap_pct = 0.04
     selected_peaks: list[int] = []
     for idx in sorted_peaks:
         price = price_bins[idx]
         far_enough = True
         for sel_idx in selected_peaks:
             sel_price = price_bins[sel_idx]
-            if abs(price - sel_price) / sel_price < 0.04 or abs(idx - sel_idx) < 4:
+            if abs(price - sel_price) / sel_price < min_gap_pct or abs(idx - sel_idx) < 4:
                 far_enough = False
                 break
         if far_enough:
@@ -191,7 +198,7 @@ def calc_chip_distribution(
             far_enough = True
             for sel_idx in selected_peaks:
                 sel_price = price_bins[sel_idx]
-                if abs(price - sel_price) / sel_price < 0.04 or abs(idx - sel_idx) < 4:
+                if abs(price - sel_price) / sel_price < min_gap_pct or abs(idx - sel_idx) < 4:
                     far_enough = False
                     break
             if far_enough:
