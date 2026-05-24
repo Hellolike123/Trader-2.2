@@ -651,23 +651,27 @@ P(action | chan, mom, wyk, regime) ∝ L(chan) × L(mom) × L(wyk)
 **设计原则**：完全离线，非交易时段运行，零实盘干扰。
 
 **流程**：
-1. 读取 `~/.trader/signals.jsonl` 历史信号和 `~/.trader/signal_results.jsonl` 结算结果
-2. 用随机搜索（Random Search，100~200 次试验）在三维参数空间中寻优：
+1. 读取 `~/.trader/signals.jsonl` 历史信号和 `~/.trader/signal_results.jsonl` 结算结果。
+2. 历史大势对齐：拉取中证 1000 指数最近一年历史日线，调用 HMM 状态检测器动态为每一个历史信号标定当日所处的 HMM 大势状态（`bull` 上涨 / `bear` 下跌 / `range` 震荡）。
+3. 分桶搜优：在 `global`（全局）、`bull`、`bear`、`range` 四个大势分组下，并行执行 150 次随机搜索寻优：
    - `zone_width` ∈ [0.90, 1.25]
    - `confirm_buffer` ∈ [0.70, 1.30]
    - `stop_buffer` ∈ [0.70, 1.00]
-3. 每次试验用启发式仿真函数 `_simulate_win_rate()` 估算该参数组合下的历史胜率
-4. 将最优参数写入 `~/.trader/calibrated_params.json`
+4. Blended 盈亏比加权：仿真估算不再采用单一胜率。统计模拟交易的总盈利 `total_gains` 与总亏损 `total_losses`，计算综合评分：
+   `Score = WinRate * (total_gains + 0.5) / (total_losses + 0.5)`
+   确保参数在保障“高胜率”的同时，具备“极佳盈亏比”。
+5. 将最优的嵌套参数结构写入 `~/.trader/calibrated_params.json`。
 
 **调用方式**：
 ```bash
-# 盘后或周末手动运行
+# 盘后或周末手动运行自校准
 python3 02-共享模块-shared/scripts/self_calibration.py
 
-# 在代码中读取已校准参数
+# 在代码中读取已校准参数（支持多层降级，消费时由 structure_core.py 根据当前 hmm_regime 动态匹配）
 from self_calibration import load_calibrated_params
-params = load_calibrated_params()  # 返回 {"zone_width": ..., "confirm_buffer": ..., "stop_buffer": ...}
+params = load_calibrated_params()  # 返回 { "version": "2.3", "params": { "global": {...}, "bull": {...}, "bear": {...}, "range": {...} } }
 ```
+
 
 ---
 
