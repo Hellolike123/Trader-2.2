@@ -31,69 +31,38 @@ def model_summary(theory: dict[str, Any]) -> str:
 
 
 def _format_intraday_narrative(intraday: dict[str, Any], big_order: dict[str, Any] | None = None) -> list[str]:
-    """Build a single chronological timeline weaving both segment narratives and big order events."""
-    timeline_items: list[tuple[str, str]] = []  # List of (time_key, text)
-
-    # 1. Process K-line segment narrative lines
+    """Build the intraday narrative without duplicating the same event twice."""
+    result: list[str] = []
     lines = intraday.get("lines") or []
-    for line in lines:
-        line_str = str(line).strip()
-        if not line_str:
-            continue
-        # Extract time prefix. Format is typically "09:30-10:00｜..." or "14:30..."
-        time_key = "24:00"  # Default fallback
-        if len(line_str) >= 5 and line_str[2] == ":" and line_str[:2].isdigit() and line_str[3:5].isdigit():
-            time_key = line_str[:5]
-        
-        if "｜" in line_str or (len(line_str) >= 5 and line_str[2] == ":"):
-            timeline_items.append((time_key, line_str))
-        else:
-            timeline_items.append((time_key, f"  {line_str}"))
 
-    # 2. Process big order events
     if big_order and big_order.get("events"):
+        result.append("今日大单回溯")
         for event in big_order["events"]:
-            t_key = event["time"]
             hands = event.get("hands")
             if hands is not None:
-                if hands >= 10000:
-                    hands_text = f"{hands / 10000:.1f} 万手"
-                else:
-                    hands_text = f"{hands:.0f} 手"
+                hands_text = f"{hands / 10000:.1f} 万手" if hands >= 10000 else f"{hands:.0f} 手"
             else:
                 hands_text = "手数不足"
-                
             amount_wan = event.get("amount_wan")
             amount_text = f"{amount_wan:.0f} 万" if amount_wan is not None else "金额不足"
-            
-            side_icon = "🟢" if event["side"] == "主动买入" else "🔴" if event["side"] == "主动卖出" else "⚪"
-            meaning_text = f"，{event['meaning']}" if event.get("meaning") else ""
-            
-            event_line = f"{t_key} {side_icon} {event['side']}，约 {hands_text}，金额约 {amount_text}{meaning_text}"
-            timeline_items.append((t_key, event_line))
-
-    # 3. Sort chronologically by time_key
-    timeline_items.sort(key=lambda x: x[0])
-
-    # 4. Assemble the final narrative lines
-    result = []
-    for _, text in timeline_items:
-        result.append(text)
-
-    # 5. Append big order summary &走势验证 (Validation)
-    if big_order and big_order.get("events"):
-        result.append("")
+            focus_note = f"，贴近{event['focus_label']}" if event.get("near_focus") and event.get("focus_label") else ""
+            result.append(f"{event['time']}  {event['side']}，约 {hands_text}，金额约 {amount_text}，{event['meaning']}{focus_note}。")
         result.append(f"回溯总结：{big_order.get('summary')}")
         validation = big_order.get("validation")
         if validation:
             verdict_icon = "✅" if validation["verdict"] == "有效" else "⚠️" if validation["verdict"] == "背离" else "ℹ️"
-            result.append(f"走势验证：{verdict_icon} {validation['verdict']}（{validation['reason']}）")
+            result.append(f"走势验证：{verdict_icon} {validation['verdict']}。{validation['reason']}")
         result.append("")
+    elif lines:
+        for line in lines:
+            line_str = str(line).strip()
+            if not line_str:
+                continue
+            result.append(line_str)
 
     if not result:
         return ["分时数据不足，走势只按日线和收盘判断。"]
 
-    # 6. Append daily volume metadata
     if intraday.get("morning_ratio") is not None:
         mr = intraday["morning_ratio"] * 100
         followup = "跟进" if mr > 55 else "没跟上"

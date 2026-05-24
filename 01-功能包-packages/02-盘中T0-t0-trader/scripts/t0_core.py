@@ -185,10 +185,16 @@ def render_markdown(plan: dict[str, Any]) -> str:
     current_text = "无" if current_price is None else f"{current_price:.2f}"
     big_order = None
     if analyze_big_orders and plan.get("data"):
-        focus_price = numeric_or_none(buy.get("observation_price")) or numeric_or_none(sell.get("observation_price"))
+        focus_prices = []
+        buy_focus = numeric_or_none(buy.get("observation_price"))
+        sell_focus = numeric_or_none(sell.get("observation_price"))
+        if buy_focus is not None:
+            focus_prices.append(("低吸关注区", buy_focus))
+        if sell_focus is not None:
+            focus_prices.append(("高抛关注区", sell_focus))
         bars = (plan.get("data") or {}).get("kline_5m") or []
         trade_date = str(plan.get("analysis_time") or "").split(" ", 1)[0] or None
-        big_order = analyze_big_orders(bars, focus_price=focus_price, trade_date=trade_date)
+        big_order = analyze_big_orders(bars, focus_prices=focus_prices, trade_date=trade_date)
 
     lines = [
         "🎯 T0 盯盘助理",
@@ -216,58 +222,38 @@ def render_markdown(plan: dict[str, Any]) -> str:
 
     if big_order and big_order.get("events"):
         lines.extend(["📋 关注区大单确认", ""])
-        
-        # Local helper to parse K-line bar time
-        def _local_bar_time(bar: dict[str, Any]) -> str:
-            text = str(bar.get("time") or bar.get("date") or "")
-            if " " in text:
-                return text.split(" ", 1)[1][:5]
-            if len(text) >= 16 and text[10] in {" ", "T"}:
-                return text[11:16]
-            return text[-8:-3] if ":" in text else ""
 
-        # Extract K-line times for the last 15 minutes (last 3 bars of K-line 5m)
-        bars = (plan.get("data") or {}).get("kline_5m") or []
-        recent_times = []
-        if len(bars) >= 3:
-            recent_times = [_local_bar_time(b) for b in bars[-3:]]
-        elif bars:
-            recent_times = [_local_bar_time(b) for b in bars]
+        def level_score(lvl: str | None) -> int:
+            return 3 if lvl == "强提醒" else 2 if lvl == "注意" else 1
 
-        recent_events = [e for e in big_order["events"] if e["time"] in recent_times]
+        recent_events = [e for e in big_order["events"] if e.get("near_focus")]
+        if not recent_events:
+            recent_events = big_order["events"]
 
-        if recent_events:
-            # Find the highest level event in the last 15 mins
-            # Levels: "强提醒" > "注意" > "观察"
-            def level_score(lvl):
-                return 3 if lvl == "强提醒" else 2 if lvl == "注意" else 1
-            
-            top_event = max(recent_events, key=lambda e: level_score(e.get("level")))
-            time_str = top_event["time"]
-            side = top_event["side"]
-            meaning = top_event.get("meaning")
-            level = top_event.get("level")
-            hands = top_event.get("hands") or 0.0
-            
-            if "承接" in meaning or ("买入" in side and "关注" in meaning):
-                alert_line = f"关注区附近连续出现主动买入大单（约 {hands:.0f} 手），大单强度升级，继续盯盘"
-            elif "主动买入" in side:
-                alert_line = f"关注区附近出现主动买入大单（约 {hands:.0f} 手），建议注意"
-            elif "抛压" in meaning or ("卖出" in side and "关注" in meaning):
-                alert_line = f"关注区附近连续主动卖出大单（约 {hands:.0f} 手），警惕承压"
-            elif "主动卖出" in side:
-                alert_line = f"关注区附近出现主动卖出大单（约 {hands:.0f} 手），警惕抛压"
+        top_event = max(recent_events, key=lambda e: (level_score(e.get("level")), e.get("hands") or 0.0))
+        time_str = str(top_event.get("time") or "--:--")
+        side = str(top_event.get("side") or "")
+        meaning = str(top_event.get("meaning") or "")
+        level = str(top_event.get("level") or "观察")
+        hands = top_event.get("hands") or 0.0
+        focus_label = str(top_event.get("focus_label") or "关注区")
+        focus_note = f"靠近{focus_label}" if top_event.get("near_focus") else "接近关注区"
+
+        if side == "主动买入":
+            if "承接" in meaning or level == "强提醒":
+                alert_line = f"{focus_note}出现主动买入大单（约 {hands:.0f} 手），大单强度升级，继续盯盘。"
             else:
-                alert_line = f"价格接近关注区，量能异常，继续盯盘"
-                
-            level_icon = "🔴" if level == "强提醒" else "🟡" if level == "注意" else "⚪"
-            lines.append(f"{time_str} {level_icon} {alert_line}")
+                alert_line = f"{focus_note}出现主动买入大单（约 {hands:.0f} 手），建议注意。"
+        elif side == "主动卖出":
+            if "抛压" in meaning or level == "强提醒":
+                alert_line = f"{focus_note}出现主动卖出大单（约 {hands:.0f} 手），警惕承压。"
+            else:
+                alert_line = f"{focus_note}出现主动卖出大单（约 {hands:.0f} 手），警惕抛压。"
         else:
-            # If no large orders in the last 15 minutes, print a simple summary in hand units
-            total_hands = big_order.get("total_hands") or 0.0
-            dir_summary = big_order.get("direction_summary") or "买卖接近"
-            lines.append(f"⚪ 暂无最近 15 分钟活跃大单。全天累计大单约 {total_hands:.0f} 手，偏向 {dir_summary}。")
-            
+            alert_line = f"{focus_note}量能异常，继续盯盘。"
+
+        level_icon = "🔴" if level == "强提醒" else "🟡" if level == "注意" else "⚪"
+        lines.append(f"{time_str} {level_icon} {alert_line}")
         lines.append("")
 
     lines.extend([

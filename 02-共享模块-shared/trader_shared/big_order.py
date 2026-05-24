@@ -14,6 +14,13 @@ class BigOrderEvent:
     amount_wan: float | None
     meaning: str
     level: str
+    near_focus: bool
+    focus_label: str | None = None
+
+
+MIN_BIG_ORDER_HANDS = 2000.0
+MIN_BIG_ORDER_AMOUNT_WAN = 300.0
+VOLUME_SPIKE_MULTIPLIER = 1.8
 
 
 def _bar_time(bar: dict[str, Any]) -> str:
@@ -89,6 +96,31 @@ def _level(hands: float | None, consecutive: bool) -> str:
     if hands >= 5000 or consecutive:
         return "注意"
     return "观察"
+
+
+def _avg_hands(previous_bars: list[dict[str, Any]]) -> float:
+    values = [hands for hands in (_trade_hands(bar) for bar in previous_bars) if hands is not None]
+    return sum(values) / len(values) if values else 0.0
+
+
+def _is_large_order(hands: float, amount_wan: float, avg_hands: float) -> bool:
+    if hands >= MIN_BIG_ORDER_HANDS and amount_wan >= MIN_BIG_ORDER_AMOUNT_WAN:
+        return True
+    if avg_hands > 0 and hands >= avg_hands * VOLUME_SPIKE_MULTIPLIER and amount_wan >= MIN_BIG_ORDER_AMOUNT_WAN:
+        return True
+    return False
+
+
+def _focus_match(close: float | None, focus_prices: list[tuple[str, float]]) -> tuple[bool, str | None]:
+    if close is None:
+        return False, None
+    for label, focus_price in focus_prices:
+        if focus_price <= 0:
+            continue
+        diff_pct = abs(close - focus_price) / focus_price
+        if diff_pct <= 0.015 or abs(close - focus_price) <= max(0.05, focus_price * 0.01):
+            return True, label
+    return False, None
 
 
 def validate_big_orders(
@@ -175,13 +207,29 @@ def analyze_big_orders(
     bars_5m: list[dict[str, Any]],
     *,
     focus_price: float | None = None,
+    focus_prices: list[float] | list[tuple[str, float]] | None = None,
     trade_date: str | None = None,
 ) -> dict[str, Any]:
     events: list[BigOrderEvent] = []
     bars = [bar for bar in bars_5m if not trade_date or str(bar.get("time") or bar.get("date") or "").startswith(trade_date)]
+    normalized_focus_prices: list[tuple[str, float]] = []
+    if focus_prices:
+        for index, item in enumerate(focus_prices):
+            if isinstance(item, tuple):
+                label, value = item
+            else:
+                label, value = f"关注区{index + 1}", item
+            focus = to_float(value)
+            if focus is not None:
+                normalized_focus_prices.append((str(label), focus))
+    elif focus_price is not None:
+        focus = to_float(focus_price)
+        if focus is not None:
+            normalized_focus_prices.append(("关注区", focus))
+
     prev_side = ""
     prev_time = ""
-    for bar in bars:
+    for index, bar in enumerate(bars):
         time_text = _bar_time(bar)
         if not time_text:
             continue
@@ -196,12 +244,13 @@ def analyze_big_orders(
             prev_side = ""
             prev_time = ""
             continue
-        near_focus = False
-        if focus_price is not None:
-            close = to_float(bar.get("close"))
-            if close is not None:
-                diff_pct = abs(close - focus_price) / focus_price if focus_price else 0
-                near_focus = diff_pct <= 0.015 or abs(close - focus_price) <= max(0.05, focus_price * 0.01)
+        avg_hands = _avg_hands(bars[max(0, index - 20):index])
+        if not _is_large_order(hands, amount_wan, avg_hands):
+            prev_side = ""
+            prev_time = ""
+            continue
+        close = to_float(bar.get("close"))
+        near_focus, focus_label = _focus_match(close, normalized_focus_prices)
         consecutive = bool(prev_side == side and prev_time and int(time_text.replace(":", "")) - int(prev_time.replace(":", "")) <= 120)
         events.append(
             BigOrderEvent(
@@ -211,6 +260,8 @@ def analyze_big_orders(
                 amount_wan=amount_wan,
                 meaning=_meaning(side, hands, consecutive, near_focus),
                 level=_level(hands, consecutive),
+                near_focus=near_focus,
+                focus_label=focus_label,
             )
         )
         prev_side = side
