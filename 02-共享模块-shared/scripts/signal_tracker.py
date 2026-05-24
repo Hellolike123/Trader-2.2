@@ -13,6 +13,15 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+# Ensure shared peer directories are in python path
+SHARED_DIR = Path(__file__).resolve().parent.parent
+for folder in ("01-行情数据-market-data", "02-候选逻辑-candidate", "03-输出校验-contracts"):
+    p = SHARED_DIR / folder
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
+
+
+
 
 # ═══════ Signal ID 统一化 ═══════
 
@@ -52,9 +61,31 @@ _bad_line_last_reason: str = ""
 _bad_line_last_lineno: int = -1
 
 
-LOG_PATH = Path.home() / ".trader" / "signal_log.jsonl"
-LOG_DIR = LOG_PATH.parent
 VALID_OUTCOMES = {"win", "loss", "expired", "stopped", "unknown"}
+
+class DynamicPathProxy(os.PathLike):
+    def __init__(self, is_dir=False):
+        self.is_dir = is_dir
+
+    def _resolve(self) -> Path:
+        try:
+            from signal_store import _get_default_store_path
+            p = _get_default_store_path()
+        except ImportError:
+            p = Path.home() / ".trader" / "signals.jsonl"
+        return p.parent if self.is_dir else p
+
+    def __getattr__(self, name):
+        return getattr(self._resolve(), name)
+
+    def __str__(self):
+        return str(self._resolve())
+
+    def __fspath__(self):
+        return str(self._resolve())
+
+LOG_PATH = DynamicPathProxy(is_dir=False)
+LOG_DIR = DynamicPathProxy(is_dir=True)
 
 
 def _ensure_log_dir() -> None:
@@ -98,19 +129,71 @@ def stable_id(skill: str, target: str, date: str, signal_type: str, price: float
 
 
 def _create_log_record(sig_id: str, sig_md5: str, skill: str, target: str, symbol: str, signal_type: str, price: float, env_level: str, env_note: str) -> None:
+    # Build standard compliant trader_signal_v1 signal
+    from signal_utils import normalize_symbol, normalize_date, normalize_signal_type
+    
+    norm_symbol = normalize_symbol(symbol)
+    norm_date = normalize_date(datetime.now().strftime("%Y-%m-%d"))
+    norm_type = normalize_signal_type(signal_type)
+    
+    direction = "neutral"
+    if "triggered" in norm_type or "buy" in norm_type:
+        direction = "bullish_lean"
+    action = "observe"
+    if norm_type == "low_buy_triggered":
+        action = "low_buy"
+    elif norm_type == "high_sell_triggered":
+        action = "high_sell"
+        
     record = {
-        "signal_id_md5": sig_md5,
+        "contract": "trader_signal_v1",
         "signal_id": sig_id,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "skill": skill, "target": target, "symbol": symbol,
-        "signal_type": signal_type, "price": price,
-        "env_level": env_level, "env_note": env_note,
-        "outcome_pnl_pct": None, "outcome_days": None,
-        "outcome": None, "filled_at": None,
+        "signal_id_md5": sig_md5,  # keep for backward compatibility
+        "source_skill": skill,
+        "symbol": norm_symbol,
+        "name": target,
+        "trade_date": norm_date,
+        "analysis_time": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "signal_type": norm_type,
+        "direction": direction,
+        "action": action,
+        "confidence": "medium",
+        "data_status": "partial",
+        "trigger": {
+            "type": "price_confirm",
+            "price": float(price) if price else 0.0,
+            "text": f"等价格到达 {price:.2f} 确认",
+        },
+        "invalidation": {
+            "type": "price_break",
+            "price": round(price * 0.95, 2) if price else 0.0,
+            "text": "防守位止损",
+        },
+        "position": {
+            "max_total_pct": 20,
+            "max_single_move_pct": 20,
+        },
+        "risk_flags": [],
+        "summary": f"T0 {signal_type} 提醒（大盘：{env_level or '正常'} {env_note or ''}）",
+        "env_level": env_level,  # Keep legacy fields for outcome tracking compatibility
+        "env_note": env_note,
+        "outcome_pnl_pct": None,
+        "outcome_days": None,
+        "outcome": None,
+        "filled_at": None,
+        "status": "active"
     }
-    _ensure_log_dir()
-    with open(LOG_PATH, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    
+    # Direct import/call to reuse validation and atomic lock writing
+    try:
+        from signal_store import append_signal
+    except ImportError:
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "03-输出校验-contracts"))
+        from signal_store import append_signal
+        
+    append_signal(record, path=LOG_PATH)
 
 
 def log_safe(skill: str, target: str, symbol: str, signal_type: str, price: float,
@@ -169,11 +252,13 @@ def fill(signal_id: str, pnl_pct: float, days_held: int = 0, outcome: str = "unk
         except json.JSONDecodeError:
             new_lines.append(line)
             continue
-        if rec.get("signal_id") == signal_id:
+        if rec.get("signal_id") == signal_id or rec.get("signal_id_md5") == signal_id:
             rec["outcome_pnl_pct"] = round(pnl_pct, 2)
             rec["outcome_days"] = days_held
             rec["outcome"] = outcome
             rec["filled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+            rec["status"] = "completed"
+            rec["status_updated_at"] = datetime.now().isoformat()
             found = True
         new_lines.append(json.dumps(rec, ensure_ascii=False))
     if found:
@@ -186,6 +271,14 @@ def fill(signal_id: str, pnl_pct: float, days_held: int = 0, outcome: str = "unk
         finally:
             os.close(fd)
         os.replace(str(tmp), str(LOG_PATH))
+        
+        # Clear module level cache in signal_store
+        try:
+            from signal_store import _sig_cache
+            _sig_cache.pop(str(LOG_PATH), None)
+        except Exception:
+            pass
+            
         return True, "ok"
     return False, "signal_id not found"
 
@@ -195,13 +288,12 @@ def fill_by_target(target: str, pnl_pct: float, days_held: int = 0, outcome: str
     if not LOG_PATH.exists():
         return 0, []
     raw_text = LOG_PATH.read_text(encoding="utf-8")
-    lines = raw_text.strip().split("\n") if raw_text.strip() else []
+    lines = raw_text.splitlines()
     updated = []
     new_lines = []
     bad = 0
     for line in lines:
         if not line.strip():
-            new_lines.append(line)
             continue
         try:
             rec = json.loads(line)
@@ -209,7 +301,12 @@ def fill_by_target(target: str, pnl_pct: float, days_held: int = 0, outcome: str
             bad += 1
             new_lines.append(line)
             continue
-        if rec.get("target") == target and rec.get("outcome_pnl_pct") is None:
+        is_match = (
+            rec.get("target") == target 
+            or rec.get("name") == target 
+            or rec.get("symbol") == target
+        )
+        if is_match and rec.get("outcome_pnl_pct") is None:
             if signal_type and str(rec.get("signal_type", "")) != signal_type:
                 new_lines.append(json.dumps(rec, ensure_ascii=False))
                 continue
@@ -217,11 +314,12 @@ def fill_by_target(target: str, pnl_pct: float, days_held: int = 0, outcome: str
             rec["outcome_days"] = days_held
             rec["outcome"] = outcome
             rec["filled_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+            rec["status"] = "completed"
+            rec["status_updated_at"] = datetime.now().isoformat()
             updated.append(rec.get("signal_id"))
         new_lines.append(json.dumps(rec, ensure_ascii=False))
     if updated or bad > 0:
-        # 原子写 + fsync
-        tmp_path = LOG_PATH.with_suffix(".jsonl.tmp")
+        tmp_path = LOG_PATH.with_suffix(LOG_PATH.suffix + ".tmp")
         tmp_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
         fd = os.open(str(tmp_path), os.O_RDONLY)
         try:
@@ -229,6 +327,13 @@ def fill_by_target(target: str, pnl_pct: float, days_held: int = 0, outcome: str
         finally:
             os.close(fd)
         os.replace(str(tmp_path), str(LOG_PATH))
+        
+        try:
+            from signal_store import _sig_cache
+            _sig_cache.pop(str(LOG_PATH), None)
+        except Exception:
+            pass
+            
     return len(updated), updated
 
 
@@ -238,7 +343,7 @@ def _load_log_all() -> list[dict[str, Any]]:
         return []
     records = []
     _bad_line_count = 0
-    for line in LOG_PATH.read_text(encoding="utf-8").strip().split("\n"):
+    for line in LOG_PATH.read_text(encoding="utf-8").splitlines():
         if not line.strip(): continue
         try:
             records.append(json.loads(line))
@@ -253,21 +358,52 @@ def load_recent(
     target: str = "", symbol: str = "", skill: str = "",
     signal_type: str = "", limit: int = 20,
 ) -> list[dict[str, Any]]:
+    from signal_utils import normalize_symbol, normalize_signal_type
+    
+    norm_symbol = normalize_symbol(symbol) if symbol else ""
+    norm_type = normalize_signal_type(signal_type) if signal_type else ""
+    
     records = _load_log_all()
     filtered = []
     for r in records:
-        if target and str(r.get("target") or "") != target:
+        r_target = r.get("name") or r.get("target") or ""
+        if target and str(r_target) != target:
             continue
-        if symbol and str(r.get("symbol") or "") != symbol:
+            
+        r_symbol = normalize_symbol(r.get("symbol") or "")
+        if norm_symbol and r_symbol != norm_symbol:
             continue
-        if skill and str(r.get("skill") or "") != skill:
+            
+        r_skill = r.get("source_skill") or r.get("skill") or ""
+        if skill:
+            if str(r_skill) != skill:
+                # Compatibility: map t0 and t0-trader
+                if not ((skill in ("t0", "t0-trader") and r_skill in ("t0", "t0-trader"))):
+                    continue
+            
+        r_type = normalize_signal_type(r.get("signal_type") or "")
+        if norm_type and r_type != norm_type:
             continue
-        if signal_type and str(r.get("signal_type") or "") != signal_type:
-            continue
+            
         filtered.append(r)
-    # FIX-07: 按 timestamp 排序（有 filled_at 也优先）
-    filtered.sort(key=lambda r: r.get("filled_at") or r.get("timestamp") or "", reverse=True)
-    return filtered[:limit]
+        
+    def sort_key(rec):
+        return rec.get("filled_at") or rec.get("analysis_time") or rec.get("timestamp") or ""
+        
+    filtered.sort(key=sort_key, reverse=True)
+    
+    compat_filtered = []
+    for r in filtered[:limit]:
+        c = dict(r)
+        if "name" in c and "target" not in c:
+            c["target"] = c["name"]
+        if "source_skill" in c and "skill" not in c:
+            c["skill"] = c["source_skill"]
+        if "analysis_time" in c and "timestamp" not in c:
+            c["timestamp"] = c["analysis_time"]
+        compat_filtered.append(c)
+        
+    return compat_filtered
 
 
 
@@ -1194,26 +1330,164 @@ def _migrate_file(file_path: Path, is_signal: bool = True, force: bool = False) 
     return {"migrated": migrated, "skipped": skipped}
 
 
+def consolidate_legacy_log(log_path: Path | None = None, store_path: Path | None = None) -> dict[str, int]:
+    if log_path is None:
+        log_path = Path.home() / ".trader" / "signal_log.jsonl"
+    if store_path is None:
+        store_path = STORE_PATH
+        
+    if not log_path.exists():
+        return {"migrated": 0, "skipped": 0}
+        
+    # Load existing signals to prevent duplicate overwriting
+    existing_signals: dict[str, dict] = {}
+    if store_path.exists():
+        for line in store_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip(): continue
+            try:
+                sig = json.loads(line)
+                sid = sig.get("signal_id")
+                if sid:
+                    existing_signals[sid] = sig
+            except Exception:
+                continue
+                
+    migrated = 0
+    skipped = 0
+    lines_raw = log_path.read_text(encoding="utf-8").splitlines()
+    for line in lines_raw:
+        if not line.strip(): continue
+        try:
+            rec = json.loads(line)
+            if not isinstance(rec, dict): continue
+        except Exception:
+            continue
+            
+        from signal_utils import normalize_symbol, normalize_date, normalize_signal_type
+        
+        symbol = rec.get("symbol") or rec.get("target") or ""
+        norm_symbol = normalize_symbol(symbol)
+        date_str = rec.get("timestamp", "").split(" ")[0] if rec.get("timestamp") else datetime.now().strftime("%Y-%m-%d")
+        norm_date = normalize_date(date_str)
+        norm_type = normalize_signal_type(rec.get("signal_type", ""))
+        price_val = float(rec.get("price") or 0)
+        
+        sig_id = rec.get("signal_id") or make_signal_id(norm_symbol, norm_date, norm_type, f"{price_val:.2f}")
+        
+        if sig_id in existing_signals:
+            # Merge outcomes/filled fields
+            existing = existing_signals[sig_id]
+            updated = False
+            for k in ("outcome", "outcome_pnl_pct", "outcome_days", "filled_at", "env_level", "env_note", "signal_id_md5"):
+                if rec.get(k) is not None and existing.get(k) is None:
+                    existing[k] = rec[k]
+                    updated = True
+            if rec.get("outcome") and existing.get("status") != "completed":
+                existing["status"] = "completed"
+                existing["status_updated_at"] = datetime.now().isoformat()
+                updated = True
+            if updated:
+                migrated += 1
+            else:
+                skipped += 1
+        else:
+            direction = "neutral"
+            if "triggered" in norm_type or "buy" in norm_type:
+                direction = "bullish_lean"
+            action = "observe"
+            if norm_type == "low_buy_triggered":
+                action = "low_buy"
+            elif norm_type == "high_sell_triggered":
+                action = "high_sell"
+                
+            mapped = {
+                "contract": "trader_signal_v1",
+                "signal_id": sig_id,
+                "signal_id_md5": rec.get("signal_id_md5"),
+                "source_skill": rec.get("skill") or "trader",
+                "symbol": norm_symbol,
+                "name": rec.get("target") or "unknown",
+                "trade_date": norm_date,
+                "analysis_time": rec.get("timestamp") or datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "signal_type": norm_type,
+                "direction": direction,
+                "action": action,
+                "confidence": "medium",
+                "data_status": "partial",
+                "trigger": {
+                    "type": "price_confirm",
+                    "price": price_val,
+                    "text": f"等价格到达 {price_val:.2f} 确认",
+                },
+                "invalidation": {
+                    "type": "price_break",
+                    "price": round(price_val * 0.95, 2),
+                    "text": "防守位止损",
+                },
+                "position": {
+                    "max_total_pct": 20,
+                    "max_single_move_pct": 20,
+                },
+                "risk_flags": [],
+                "summary": f"T0 {rec.get('signal_type')} 提醒（大盘：{rec.get('env_level') or '正常'} {rec.get('env_note') or ''}）",
+                "env_level": rec.get("env_level"),
+                "env_note": rec.get("env_note"),
+                "outcome_pnl_pct": rec.get("outcome_pnl_pct"),
+                "outcome_days": rec.get("outcome_days"),
+                "outcome": rec.get("outcome"),
+                "filled_at": rec.get("filled_at"),
+                "status": "completed" if rec.get("outcome") else "active"
+            }
+            existing_signals[sig_id] = mapped
+            migrated += 1
+            
+    # Save the consolidated signals atomically
+    new_lines = [json.dumps(s, ensure_ascii=False, sort_keys=True, default=str) for s in existing_signals.values()]
+    tmp_path = store_path.with_suffix(store_path.suffix + ".tmp")
+    tmp_path.write_text("\n".join(new_lines) + "\n" if new_lines else "", encoding="utf-8")
+    fd = os.open(str(tmp_path), os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(str(tmp_path), str(store_path))
+    
+    # Back up the legacy file by renaming it
+    bak_path = log_path.with_name(log_path.name + ".bak")
+    try:
+        if log_path.exists():
+            os.replace(str(log_path), str(bak_path))
+    except Exception:
+        pass
+        
+    return {"migrated": migrated, "skipped": skipped}
+
+
 def migrate_signal_ids(store_path: Path | None = None,
                        results_path: Path | None = None,
-                       force: bool = False) -> dict[str, int]:
-    """Add signal_id to existing records in signals.jsonl and signal_results.jsonl.
+                       force: bool = False,
+                       log_path: Path | None = None) -> dict[str, int]:
+    """Add signal_id to existing records in signals.jsonl and signal_results.jsonl, and merges signal_log.jsonl.
 
     Idempotent: records that already carry correct signal_id are skipped.
-    Does NOT process signal_log.jsonl (old MD5 signal_id is irreversible).
 
     Usage:
         python -c "from signal_tracker import migrate_signal_ids; migrate_signal_ids()"
 
     Returns:
         dict with keys "signals_migrated", "signals_skipped",
-                        "results_migrated", "results_skipped"
+                        "results_migrated", "results_skipped",
+                        "logs_consolidated"
     """
     if store_path is None:
         store_path = STORE_PATH
     if results_path is None:
         results_path = RESULT_PATH
 
+    # 1. Consolidate legacy flat log file first
+    log_result = consolidate_legacy_log(log_path=log_path, store_path=store_path)
+
+    # 2. Run deterministic SHA256 ID migration and deduplication
     sig_result = _migrate_file(store_path, is_signal=True, force=force)
     res_result = _migrate_file(results_path, is_signal=False, force=force)
 
@@ -1222,6 +1496,7 @@ def migrate_signal_ids(store_path: Path | None = None,
         "signals_skipped": sig_result["skipped"],
         "results_migrated": res_result["migrated"],
         "results_skipped": res_result["skipped"],
+        "logs_consolidated": log_result["migrated"]
     }
 
 

@@ -275,18 +275,20 @@ def mark_events(target_state: dict[str, Any], plan: dict[str, Any], events: list
 
 def persist_event_signals(events: list[str], plan: dict[str, Any], store_path: Path | None = None) -> None:
     for event in events:
-        append_signal(build_t0_event_signal(event, plan), store_path)
-        try:
-            if event in {BUY_TRIGGERED, SELL_TRIGGERED}:
-                signal_type = "low_buy_triggered" if event.startswith("BUY") else "high_sell_triggered"
-                track_t0_signal("t0-trader", plan["name"], plan["symbol"], signal_type, float(plan.get("current_price") or 0), get_market_level(), get_market_note())
-            elif event in {BUY_EXPIRED, SELL_EXPIRED}:
-                track_t0_signal("t0-trader", plan["name"], plan["symbol"], "low_buy_watch" if event.startswith("BUY") else "high_sell_watch", float(plan.get("current_price") or 0), get_market_level(), get_market_note())
-            elif event in {BUY_INVALIDATED, SELL_INVALIDATED, BUY_BLOCKED, SELL_BLOCKED}:
-                track_t0_signal("t0-trader", plan["name"], plan["symbol"], "risk_stop", float(plan.get("current_price") or 0), get_market_level(), get_market_note())
-        except Exception:
-            # signal tracking is best-effort; persistence to signal_store already succeeded
-            pass
+        sig = build_t0_event_signal(event, plan)
+        # Populate market env metrics inside the signal record
+        level = get_market_level()
+        note = get_market_note()
+        if level:
+            sig["env_level"] = level
+        if note:
+            sig["env_note"] = note
+        if level or note:
+            env_str = f"（大盘：{level or '正常'} {note or ''}）"
+            sig["summary"] = (sig.get("summary") or "") + env_str
+            
+        # Standard append to unified signals.jsonl
+        append_signal(sig, store_path)
 
 
 def snapshot(plan: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:

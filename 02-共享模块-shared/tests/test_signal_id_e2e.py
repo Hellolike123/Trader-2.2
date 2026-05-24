@@ -99,6 +99,8 @@ def tmp_paths(tmp_path: Path) -> Path:
         "LOG_PATH": signal_tracker.LOG_PATH,
         "DEFAULT_SIGNAL_STORE_PATH": None,  # computed below
     }
+    import os
+    os.environ["TRADER_SIGNAL_STORE_PATH"] = str(store)
     try:
         # Must patch DEFAULT_SIGNAL_STORE_PATH BEFORE append_signal
         # (it reads it at call time via `path or DEFAULT_SIGNAL_STORE_PATH`)
@@ -110,6 +112,7 @@ def tmp_paths(tmp_path: Path) -> Path:
         signal_tracker.LOG_PATH = logs
         yield tmp_path
     finally:
+        os.environ.pop("TRADER_SIGNAL_STORE_PATH", None)
         signal_tracker.LOG_PATH = orig["LOG_PATH"]
         signal_tracker.RESULT_PATH = orig["RESULT_PATH"]
         signal_tracker.STORE_PATH = orig["STORE_PATH"]

@@ -26,20 +26,23 @@ except ImportError:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Migrate legacy signal IDs to unified V2 signal IDs.")
+    parser = argparse.ArgumentParser(description="Migrate legacy signal IDs and consolidate flat logs.")
     parser.add_argument("--force", action="store_true", help="Force recalculating signal IDs even if already present.")
     parser.add_argument("--signals", type=Path, default=None, help="Custom path to signals.jsonl")
     parser.add_argument("--results", type=Path, default=None, help="Custom path to signal_results.jsonl")
+    parser.add_argument("--logs", type=Path, default=None, help="Custom path to signal_log.jsonl")
     args = parser.parse_args()
 
-    print("🚀 Starting Signal ID Migration...")
+    print("🚀 Starting Signal ID Migration & Log Consolidation...")
     try:
         result = migrate_signal_ids(
             store_path=args.signals,
             results_path=args.results,
-            force=args.force
+            force=args.force,
+            log_path=args.logs
         )
-        print("✅ Signal ID migration and deduplication complete:")
+        print("✅ Signal ID migration and log consolidation complete:")
+        print(f"  signal_log.jsonl     : Consolidated {result.get('logs_consolidated', 0)} legacy flat logs into signals.jsonl")
         print(f"  signals.jsonl        : Migrated/Cleaned {result['signals_migrated']} records, skipped {result['signals_skipped']}")
         print(f"  signal_results.jsonl : Migrated/Cleaned {result['results_migrated']} records, skipped {result['results_skipped']}")
         return 0

@@ -14,7 +14,7 @@ SHARED_ROOT = ROOT.parents[1] / "02-共享模块-shared"
 for _p in (SCRIPTS, CONTRACTS, CANDIDATE, MARKET, SHARED_SCRIPTS, SHARED_ROOT):
     if _p.exists() and str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
-for name in ("config", "light_data", "signal_store", "models", "pipeline", "signal_contract", "signal_tracker", "candidate_core", "candidate_model"):
+for name in ("config", "light_data", "signal_store", "models", "pipeline", "signal_contract", "candidate_core", "candidate_model"):
     sys.modules.pop(name, None)
 
 from portfolio_run import render_markdown

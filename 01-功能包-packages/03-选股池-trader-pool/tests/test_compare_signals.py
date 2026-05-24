@@ -15,7 +15,7 @@ CANDIDATE = SHARED_ROOT / "02-候选逻辑-candidate"
 for _p in (SCRIPTS, SHARED_SCRIPTS, CONTRACTS, CANDIDATE, MARKET, SHARED_ROOT):
     if _p.exists() and str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
-for name in ("config", "light_data", "signal_store", "models", "pipeline", "signal_contract", "signal_tracker"):
+for name in ("config", "light_data", "signal_store", "models", "pipeline", "signal_contract"):
     sys.modules.pop(name, None)
 
 import candidate_core
@@ -36,17 +36,20 @@ def _fake_report(symbol: str, name: str, scene: str, current: float) -> dict:
 
 
 def test_latest_signal_summary_empty_when_no_signal(tmp_path):
+    import os
     from signal_store import DEFAULT_SIGNAL_STORE_PATH
     with Path(tmp_path / "sig").open("w") as f:
         pass
     report = _fake_report("688248.SH", "南网科技", "低吸观察", 56.4)
     old = DEFAULT_SIGNAL_STORE_PATH
+    os.environ["TRADER_SIGNAL_STORE_PATH"] = str(tmp_path / "sig")
     try:
         import signal_store as store_mod
         store_mod.DEFAULT_SIGNAL_STORE_PATH = tmp_path / "sig"
         result = _latest_signal_summary(report)
     finally:
         store_mod.DEFAULT_SIGNAL_STORE_PATH = old
+        os.environ.pop("TRADER_SIGNAL_STORE_PATH", None)
     assert result == ""
 
 

@@ -339,6 +339,7 @@ def build_report(target: str) -> dict[str, Any]:
         "fusion": report_fusion,
         "gap": levels.get("gap"),
         "time_window": levels.get("time_window"),
+        "fib_retrace": levels.get("fib_retrace"),
     }
 
     report = sync_report_with_data(report, levels)
@@ -488,6 +489,10 @@ def render_markdown(r: dict[str, Any]) -> str:
     position_cap = int(r.get("position_cap") or 10)
     low_zone = str(r.get("low_zone") or f"{low_price:.2f}-{low_price * 1.01:.2f}元")
 
+    fib_retrace = r.get("fib_retrace") or {}
+    golden_bid = fib_retrace.get("golden_bid") if isinstance(fib_retrace, dict) else None
+    golden_text = f" (黄金挂单位: {golden_bid:.2f})" if golden_bid else ""
+
     atr_header = f"｜ATR {atr14:.2f}（{atr_ratio*100:.0f}%）{atr_level}" if atr14 > 0 else ""
     gap = r.get("gap") or {}
     gap_text = gap.get("text", "") if isinstance(gap, dict) else ""
@@ -543,7 +548,7 @@ def render_markdown(r: dict[str, Any]) -> str:
         "📍 决策",
         "",
         f"状态：{status_text}",
-        f"  · 空仓 → 在 {low_zone} 试探买 {position_cap}%, 止损 {stop:.2f}",
+        f"  · 空仓 → 在 {low_zone} 试探买 {position_cap}%, 止损 {stop:.2f}{golden_text}",
         f"  · 有底仓 → 反弹 {confirm:.2f} 冲不动就减 10-20%, 跌破 {stop:.2f} 止损",
         f"  · 加仓 → 放量站稳 {confirm:.2f} 且回踩不破，才评估",
     ])

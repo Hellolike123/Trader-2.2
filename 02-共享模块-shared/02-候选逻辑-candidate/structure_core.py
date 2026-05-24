@@ -435,6 +435,55 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     pressure_space_pct = (confirm_price - current) / current if current > 0 else 0
     below_ma = count_below_ma(current, ma_values)
 
+    # ═══════ Fibonacci Retracement & Golden Levels (Direction 2) ═══════
+    swing_high = None
+    swing_low = None
+    retrace_382 = None
+    retrace_500 = None
+    retrace_618 = None
+    golden_bid = None
+
+    if isinstance(chan_result, dict):
+        strokes = chan_result.get("strokes", [])
+        if isinstance(strokes, list) and len(strokes) >= 1:
+            last_stroke = strokes[-1]
+            direction = last_stroke.get("direction")
+            if direction == "up":
+                try:
+                    swing_low = float(last_stroke.get("start_price") or 0.0)
+                    swing_high = float(last_stroke.get("end_price") or 0.0)
+                except (ValueError, TypeError):
+                    pass
+            elif direction == "down" and len(strokes) >= 2:
+                prev_stroke = strokes[-2]
+                try:
+                    swing_low = float(prev_stroke.get("start_price") or 0.0)
+                    swing_high = float(prev_stroke.get("end_price") or 0.0)
+                except (ValueError, TypeError):
+                    pass
+
+            if swing_low is not None and swing_high is not None and swing_high > swing_low and swing_low > 0:
+                diff = swing_high - swing_low
+                retrace_382 = swing_high - diff * 0.382
+                retrace_500 = swing_high - diff * 0.500
+                retrace_618 = swing_high - diff * 0.618
+
+                # Select strongest retracement level that falls inside low-buy zone
+                # Priority: 61.8% > 50.0% > 38.2%
+                for level in (retrace_618, retrace_500, retrace_382):
+                    if low_zone_lower <= level <= low_zone_upper:
+                        golden_bid = round(level, 2)
+                        break
+
+    fib_retrace = {
+        "swing_high": round(swing_high, 2) if swing_high is not None else None,
+        "swing_low": round(swing_low, 2) if swing_low is not None else None,
+        "retrace_382": round(retrace_382, 2) if retrace_382 is not None else None,
+        "retrace_500": round(retrace_500, 2) if retrace_500 is not None else None,
+        "retrace_618": round(retrace_618, 2) if retrace_618 is not None else None,
+        "golden_bid": golden_bid
+    }
+
     # keep compatibility for callers that expect status from structure payload
     from decision_core import status_for  # local import to avoid tighter module coupling
 
@@ -486,6 +535,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         "status": status,
         "theory_multipliers": theory,  # P3: 记录理论信号对参数的微调系数，便于调试
         "time_window": _check_time_window(bars, chan_result),  # P4: 江恩时间窗口
+        "fib_retrace": fib_retrace,  # [2.3新增] 斐波那契黄金回调及挂单参考
     }
 
 

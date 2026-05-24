@@ -15,6 +15,8 @@
 - **[2.3新增] 日内成交量分布 (Volume Profile)**：`volume_profile.py` 计算 POC 控制节点与 Value Area 70% 成交量密集区。已嵌入 `decision_core.py` 的突破确认判定 `_check_theory_breakout`，通过微观日内量价验证过滤假突破。
 - **[2.3新增] 离线参数自校准器**：`scripts/self_calibration.py` 支持分层搜索，基于 HMM regime 对历史信号分桶搜优（`bull` / `bear` / `range` / `global`），并引入盈亏比加权胜率模型（`WinRate * ProfitFactor`）仿真打分。参数由 `structure_core.py` 的 `_theory_multipliers` 层按当前 HMM 大势动态消费并进行多级回退兼容。
 - **[2.3新增] 动态衰减与空间去重筹码分布**：`chip_distribution.py` 摒弃原有静态累加，实现基于时序 `turnover_rate` 换手折旧的动态筹码曲线，并引入基于局部极大值与空间/价格过滤（间距 $\ge 4\%$ 且 $\ge 4$ bins）的独立筹码峰提取算法，供复盘与仓位控制等技能跨模块全局共享。
+- **[2.3新增] 信号生命周期与日志合并**：废弃 `signal_log.jsonl` 等多个冗余文件，将所有 T0 事件、单票分析信号、手动结果回填统一收口至单一可信源 `~/.trader/signals.jsonl`，并由继承自 `os.PathLike` 的原生路径代理 `DynamicPathProxy` 提供透明、防 pytest 缓存污染的无缝 Mock 支持。
+- **[2.3新增] 斐波那契黄金挂单位 (Golden Bid)**：`structure_core.py` 自动从缠论笔中计算 38.2%/50%/61.8% 黄金分割回调价，并与当前低吸价格区间求交集，计算出高置信度的「黄金挂单位」（显示于 `📍 决策` 列表的空仓低吸参考旁）。
 - 真正的输出格式以 `01-功能包-packages/01-单票分析-trader/references/output-contract.md` 为准。
 - 需要看实现时，先看 `01-功能包-packages/01-单票分析-trader/scripts/run_analysis.py`。
 
