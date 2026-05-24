@@ -647,70 +647,122 @@ def _fetch_mins_mootdx(sec: Security, interval: str, datalen: int = 60) -> list[
 
 
 def fetch_5m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
+    # Prioritize robust Sina HTTP API to ensure complete 5m data without weekend truncation
+    fallback_bars = _fetch_mins_fallback(sec, "5m", datalen)
+    if fallback_bars and len(fallback_bars) >= 8:
+        for bar in fallback_bars:
+            bar["data_source"] = "sina"
+            bar["data_status"] = "full"
+        return fallback_bars
+    
+    warnings.warn(f"⚠️ Sina HTTP fetch_5m failed or incomplete. Falling back to Mootdx Quote client.")
     bars = _fetch_mins_mootdx(sec, "5m", datalen)
     if bars:
         for bar in bars:
-            bar["data_source"] = "mootdx"
-            bar["data_status"] = "full"
+            bar["data_source"] = "mootdx (fallback)"
+            bar["data_status"] = "partial"
         return bars
-    warnings.warn(f"⚠️ mootdx fetch_5m failed or timed out. Falling back to akshare / EastMoney fallback.")
-    fallback_bars = _fetch_mins_fallback(sec, "5m", datalen) or []
-    for bar in fallback_bars:
-        bar["data_source"] = "akshare (fallback)"
-        bar["data_status"] = "partial"
-    return fallback_bars
+    return []
 
 
 def fetch_15m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
+    fallback_bars = _fetch_mins_fallback(sec, "15m", datalen)
+    if fallback_bars and len(fallback_bars) >= 8:
+        for bar in fallback_bars:
+            bar["data_source"] = "sina"
+            bar["data_status"] = "full"
+        return fallback_bars
+    
+    warnings.warn(f"⚠️ Sina HTTP fetch_15m failed or incomplete. Falling back to Mootdx Quote client.")
     bars = _fetch_mins_mootdx(sec, "15m", datalen)
     if bars:
         for bar in bars:
-            bar["data_source"] = "mootdx"
-            bar["data_status"] = "full"
+            bar["data_source"] = "mootdx (fallback)"
+            bar["data_status"] = "partial"
         return bars
-    warnings.warn(f"⚠️ mootdx fetch_15m failed or timed out. Falling back to akshare / EastMoney fallback.")
-    fallback_bars = _fetch_mins_fallback(sec, "15m", datalen) or []
-    for bar in fallback_bars:
-        bar["data_source"] = "akshare (fallback)"
-        bar["data_status"] = "partial"
-    return fallback_bars
+    return []
 
 
 def fetch_30m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
+    fallback_bars = _fetch_mins_fallback(sec, "30m", datalen)
+    if fallback_bars and len(fallback_bars) >= 8:
+        for bar in fallback_bars:
+            bar["data_source"] = "sina"
+            bar["data_status"] = "full"
+        return fallback_bars
+    
+    warnings.warn(f"⚠️ Sina HTTP fetch_30m failed or incomplete. Falling back to Mootdx Quote client.")
     bars = _fetch_mins_mootdx(sec, "30m", datalen)
     if bars:
         for bar in bars:
-            bar["data_source"] = "mootdx"
-            bar["data_status"] = "full"
+            bar["data_source"] = "mootdx (fallback)"
+            bar["data_status"] = "partial"
         return bars
-    warnings.warn(f"⚠️ mootdx fetch_30m failed or timed out. Falling back to akshare / EastMoney fallback.")
-    fallback_bars = _fetch_mins_fallback(sec, "30m", datalen) or []
-    for bar in fallback_bars:
-        bar["data_source"] = "akshare (fallback)"
-        bar["data_status"] = "partial"
-    return fallback_bars
+    return []
 
 
 def fetch_kline(sec: Security, http: HttpClient, datalen: int = 60, interval: str = "60") -> list[dict[str, Any]]:
+    fallback_bars = _fetch_mins_fallback(sec, interval, datalen)
+    if fallback_bars and len(fallback_bars) >= 8:
+        for bar in fallback_bars:
+            bar["data_source"] = "sina"
+            bar["data_status"] = "full"
+        return fallback_bars
+    
+    warnings.warn(f"⚠️ Sina HTTP fetch_kline (interval {interval}) failed or incomplete. Falling back to Mootdx Quote client.")
     bars = _fetch_mins_mootdx(sec, interval, datalen)
     if bars:
         for bar in bars:
-            bar["data_source"] = "mootdx"
-            bar["data_status"] = "full"
+            bar["data_source"] = "mootdx (fallback)"
+            bar["data_status"] = "partial"
         return bars
-    warnings.warn(f"⚠️ mootdx fetch_kline (interval {interval}) failed or timed out. Falling back to akshare / EastMoney fallback.")
-    fallback_bars = _fetch_mins_fallback(sec, interval, datalen) or []
-    for bar in fallback_bars:
-        bar["data_source"] = "akshare (fallback)"
-        bar["data_status"] = "partial"
-    return fallback_bars
+    return []
 
 
 def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dict[str, Any]]:
-    """Try akshare as a last resort for minute-level data when mootdx is unavailable.
+    """Try Sina HTTP API first to avoid AkShare proxy/TLS disconnections, then fallback to AkShare.
     
-    akshare (ak.stock_zh_a_hist_min_em) uses em (EastMoney) API internally.
+    Sina HTTP (CN_MarketData.getKLineData) is highly reliable, robust, and performs well
+    without third-party packages or proxy interference.
     """
+    try:
+        period_map = {"5m": "5", "15m": "15", "30m": "30", "60": "60"}
+        scale = period_map.get(interval, "5")
+        
+        import ssl
+        from urllib.request import Request, urlopen
+        import json
+        
+        url = f"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={sec.qq_symbol}&scale={scale}&ma=no&datalen={datalen}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+            "Referer": "https://finance.sina.com.cn/",
+        }
+        ssl_ctx = ssl._create_unverified_context()
+        request = Request(url, headers=headers)
+        
+        with urlopen(request, timeout=5, context=ssl_ctx) as response:
+            text = response.read().decode("gbk", errors="ignore")
+            raw_data = json.loads(text or "[]")
+            
+        if raw_data and isinstance(raw_data, list) and not isinstance(raw_data, dict):
+            bars: list[dict[str, Any]] = []
+            for row in raw_data:
+                dt_str = str(row.get("day", ""))
+                bars.append({
+                    "time": dt_str,
+                    "date": dt_str.split(" ")[0] if dt_str else "",
+                    "open": to_float(row.get("open")),
+                    "high": to_float(row.get("high")),
+                    "low": to_float(row.get("low")),
+                    "close": to_float(row.get("close")),
+                    "volume": to_float(row.get("volume")),
+                    "amount": None,
+                })
+            return bars
+    except Exception as e:
+        warnings.warn(f"⚠️ Sina HTTP fallback failed: {e}. Trying akshare as last resort.")
+
     try:
         import akshare as ak
     except ImportError:

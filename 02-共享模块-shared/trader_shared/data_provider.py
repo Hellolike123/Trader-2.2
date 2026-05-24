@@ -413,6 +413,7 @@ class AkShareProvider:
                 bars.append(bar)
 
         # 附加 ATR 字段（复用 light_data 的逻辑）
+        from light_data import _compute_atr_fields
         _compute_atr_fields(bars)
         return bars
 
