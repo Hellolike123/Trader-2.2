@@ -24,6 +24,7 @@ import candidate_core as core
 
 try:
     from trader_shared import get_market_level, get_market_note, write_stock
+    from trader_shared.data_manager import DataManager
     _SHARED_OK = True
 except ImportError:
     import warnings
@@ -75,17 +76,15 @@ CONTRACT_VERSION_PENDING = "trader_pending_v1"
 def empty_pending() -> dict[str, Any]:
     return {"contract_version": CONTRACT_VERSION_PENDING, "updated_at": today_text(), "items": []}
 
-
 def load_pending() -> dict[str, Any]:
-    payload = load_json(pending_path(), empty_pending())
+    payload = DataManager.load_state("pending", empty_pending())
     payload.setdefault("contract_version", CONTRACT_VERSION_PENDING)
     payload.setdefault("items", [])
     return payload
 
-
 def save_pending(payload: dict[str, Any]) -> None:
     payload["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-    save_json(pending_path(), payload)
+    DataManager.save_state("pending", payload)
 
 
 def price(value: Any) -> str:
@@ -123,17 +122,15 @@ def save_json(path: Path, payload: dict[str, Any]) -> None:
 def empty_pool() -> dict[str, Any]:
     return {"contract_version": CONTRACT_VERSION, "updated_at": today_text(), "items": []}
 
-
 def load_pool() -> dict[str, Any]:
-    payload = load_json(pool_path(), empty_pool())
+    payload = DataManager.load_state("pool", empty_pool())
     payload.setdefault("contract_version", CONTRACT_VERSION)
     payload.setdefault("items", [])
     return payload
 
-
 def save_pool(payload: dict[str, Any]) -> None:
     payload["updated_at"] = today_text()
-    save_json(pool_path(), payload)
+    DataManager.save_state("pool", payload)
 
 
 def offline_report(target: str) -> dict[str, Any]:
@@ -1096,7 +1093,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
     items = active_items(pool)
     markdown = render_plan(items)
     execution = [item for item in sort_items(items) if item.get("status") == "执行"][:EXECUTION_LIMIT]
-    save_json(last_plan_path(), {"contract_version": CONTRACT_VERSION, "date": today_text(), "execution_items": execution, "markdown": markdown})
+    DataManager.save_state("last_plan", {"contract_version": CONTRACT_VERSION, "date": today_text(), "execution_items": execution, "markdown": markdown})
     print(markdown)
     return 0
 
@@ -1148,7 +1145,7 @@ def review_result(item: dict[str, Any], report: dict[str, Any]) -> tuple[str, st
 
 
 def cmd_review(args: argparse.Namespace) -> int:
-    plan = load_json(last_plan_path(), {"execution_items": []})
+    plan = DataManager.load_state("last_plan", {"execution_items": []})
     execution_items = plan.get("execution_items") or []
     rows: list[tuple[dict[str, Any], str, str, str, str]] = []
     summary = {"命中": 0, "未触发": 0, "失效": 0, "误判": 0}
@@ -1209,9 +1206,9 @@ def cmd_archive_exited(args: argparse.Namespace) -> int:
     pool["items"] = keep
     save_pool(pool)
     if archive:
-        existing = load_json(archive_path(), {"items": []})
+        existing = DataManager.load_state("pool_archive", {"items": []})
         existing["items"] = existing.get("items", []) + archive
-        save_json(archive_path(), existing)
+        DataManager.save_state("pool_archive", existing)
     print(f"已归档淘汰记录：{len(archive)}")
     return 0
 

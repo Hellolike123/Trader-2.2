@@ -4,10 +4,7 @@ import json
 from pathlib import Path
 import os
 from typing import Any
-
-
-CACHE_DIR = Path.home() / ".review-trader"
-CACHE_PATH = CACHE_DIR / "state.json"
+from trader_shared.data_manager import DataManager
 
 
 def review_summary(review: dict[str, Any]) -> dict[str, Any]:
@@ -42,16 +39,7 @@ def review_summary(review: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_state() -> dict[str, Any]:
-    if not CACHE_PATH.exists():
-        return {"reviews": []}
-    try:
-        data = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {"reviews": []}
-    if not isinstance(data, dict):
-        return {"reviews": []}
-    reviews = data.get("reviews")
-    return {"reviews": reviews if isinstance(reviews, list) else []}
+    return DataManager.load_state("review_state", {"reviews": []})
 
 
 def save_review(review: dict[str, Any]) -> None:
@@ -68,15 +56,7 @@ def save_review(review: dict[str, Any]) -> None:
     ]
     reviews.append(summary)
     state["reviews"] = reviews[-30:]
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = CACHE_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-    fd = os.open(str(tmp), os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-    os.replace(str(tmp), str(CACHE_PATH))
+    DataManager.save_state("review_state", state)
 
 def recent_reviews(limit: int = 5) -> list[dict[str, Any]]:
     state = load_state()

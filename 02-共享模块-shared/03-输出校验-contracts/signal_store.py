@@ -58,15 +58,9 @@ def append_signal(signal: dict[str, Any], path: Path | None = None) -> str:
     assert_valid_signal(working)
 
     store_path = path or _get_default_store_path()
-    store_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with store_path.open("a", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        try:
-            handle.write(json.dumps(working, ensure_ascii=False, sort_keys=True, default=str))
-            handle.write("\n")
-        finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    
+    from trader_shared.data_manager import DataManager
+    DataManager.append_signal(working, path=store_path)
 
     _sig_cache.pop(str(store_path), None)
     return working["signal_id"]

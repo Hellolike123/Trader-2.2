@@ -17,6 +17,7 @@ for _p in (CONTRACTS, SHARED_SCRIPTS, SHARED_ROOT):
     if _p.exists() and str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+from trader_shared.data_manager import DataManager
 from price_point_engine import price
 from signal_store import append_signal
 from t0_run import build_plan, build_t0_event_signal
@@ -55,13 +56,7 @@ SELL_INVALIDATED = "SELL_INVALIDATED"
 
 
 def load_state(path: Path = CACHE_PATH) -> dict[str, Any]:
-    try:
-        if path.exists():
-            data = json.loads(path.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-    return {}
+    return DataManager.load_state("t0_state", {}, path=path)
 
 
 def state_lock_path(path: Path = CACHE_PATH) -> Path:
@@ -70,21 +65,12 @@ def state_lock_path(path: Path = CACHE_PATH) -> Path:
 
 @contextmanager
 def state_lock(path: Path = CACHE_PATH) -> Iterator[None]:
-    lock_path = state_lock_path(path)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    with DataManager.state_lock("t0_state", path=path):
+        yield
 
 
 def save_state(state: dict[str, Any], path: Path = CACHE_PATH) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-    os.replace(tmp_path, path)
+    DataManager.save_state("t0_state", state, path=path)
 
 
 def reset_target_cache(target_key: str | None = None, path: Path = CACHE_PATH) -> None:
