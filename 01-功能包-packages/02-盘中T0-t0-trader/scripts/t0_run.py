@@ -21,7 +21,6 @@ for _p in (SHARED_MARKET, SHARED_SCRIPTS, SHARED_ROOT, CONTRACTS, TRADER_SHARED)
 
 from trader_shared.data_provider import get_provider
 from price_point_engine import build_price_point_model
-from signal_contract import assert_valid_signal
 from t0_core import (
     build_t0_event_signal,
     build_t0_signals,
