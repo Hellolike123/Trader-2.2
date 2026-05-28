@@ -296,118 +296,120 @@ def snapshot(plan: dict[str, Any], now: datetime | None = None) -> dict[str, Any
     }
 
 
-def _build_trigger_line(event: str, plan: dict[str, Any]) -> str:
-    buy = plan["buy"]
-    sell = plan["sell"]
-    name = plan["name"]
-    current = plan["current_price"]
-    is_buy = event.startswith("BUY")
-    model = buy if is_buy else sell
+def _build_ladder_levels(plan: dict[str, Any]) -> list[tuple[float, str]]:
+    levels = []
+    buy = plan.get("buy") or {}
+    sell = plan.get("sell") or {}
+    
+    if sell.get("observation_price"):
+        levels.append((sell["observation_price"], "高抛压力"))
+    if buy.get("acceptable_price"):
+        levels.append((buy["acceptable_price"], "突破确认" if not buy.get("observation_price") else "最高追高"))
+    if buy.get("observation_price"):
+        levels.append((buy["observation_price"], "黄金低吸位"))
+    if buy.get("invalid_price"):
+        levels.append((buy["invalid_price"], "硬性止损"))
+        
+    unique_levels = {}
+    for p, label in levels:
+        if p not in unique_levels:
+            unique_levels[p] = label
+            
+    sorted_levels = sorted(unique_levels.items(), key=lambda x: x[0], reverse=True)
+    return sorted_levels
 
-    emoji_map = {
-        BUY_TRIGGERED: "🟢", SELL_TRIGGERED: "🔴",
-        BUY_EXPIRED: "⏸️", SELL_EXPIRED: "⏸️",
-        BUY_BLOCKED: "🚫", SELL_BLOCKED: "🚫",
-        BUY_INVALIDATED: "⚠️", SELL_INVALIDATED: "⚠️",
-    }
-    emoji = emoji_map.get(event, "🔍")
-    direction = "低吸" if is_buy else "高抛"
-    state_map = {
-        BUY_TRIGGERED: "触发", SELL_TRIGGERED: "触发",
-        BUY_EXPIRED: "已错过", SELL_EXPIRED: "已错过",
-        BUY_BLOCKED: "被阻断", SELL_BLOCKED: "被阻断",
-        BUY_INVALIDATED: "失效", SELL_INVALIDATED: "失效",
-    }
-    state_text = state_map.get(event, "")
 
-    obs = model.get('observation_price')
-    exec_p = model.get('execution_price')
-    acceptable = model.get('acceptable_price')
-    invalid = model.get('invalid_price')
-
-    if event in {BUY_TRIGGERED, SELL_TRIGGERED}:
-        core = f"{emoji} {name} ｜ T0 {direction}{state_text}"
-        if acceptable:
-            core += f"（最高 {price(acceptable)}）"
-        if exec_p:
-            core += f" ｜ 执行 {price(exec_p)}"
-        if invalid:
-            core += f" ｜ 止损 {price(invalid)}"
-        return core
-
-    if event in {BUY_INVALIDATED, SELL_INVALIDATED}:
-        core = f"{emoji} {name} ｜ T0 {direction}{state_text}"
-        if invalid:
-            if is_buy:
-                core += f" ｜ 跌破 {price(invalid)}"
+def _render_price_ladder(current: float, levels: list[tuple[float, str]]) -> str:
+    lines = ["📈 价格天梯："]
+    all_points = []
+    current_inserted = False
+    
+    for p, label in levels:
+        if abs(p - current) < 0.001:
+            all_points.append({"price": p, "type": "merged", "label": label})
+            current_inserted = True
+        elif not current_inserted and current > p:
+            all_points.append({"price": current, "type": "current"})
+            all_points.append({"price": p, "type": "level", "label": label})
+            current_inserted = True
+        else:
+            all_points.append({"price": p, "type": "level", "label": label})
+            
+    if not current_inserted:
+        all_points.append({"price": current, "type": "current"})
+        
+    for i, pt in enumerate(all_points):
+        p = pt["price"]
+        if pt["type"] == "merged":
+            lines.append(f"   ● {p:.2f} 元 ── ({pt['label']}) 📍 当前现价已达此位")
+        elif pt["type"] == "current":
+            if i == 0:
+                lines.append(f"   ● {p:.2f} 元 ── (最新现价) 🚀 突破上方")
+            elif i == len(all_points) - 1:
+                lines.append(f"   ● {p:.2f} 元 ── (最新现价) 🔴 急速下跌中")
             else:
-                core += f" ｜ 突破 {price(invalid)}"
-        return core
-
-    if event in {BUY_EXPIRED, SELL_EXPIRED}:
-        core = f"{emoji} {name} ｜ T0 {direction}{state_text}"
-        if acceptable:
-            core += f" ｜ 现价 {current:.2f} 已超 {price(acceptable)}"
-        return core
-
-    if event in {BUY_BLOCKED, SELL_BLOCKED}:
-        blocked_reasons = model.get('blocked_reasons') or ['强阻断']
-        core = f"{emoji} {name} ｜ T0 {direction}{state_text}"
-        core += f"（{'、'.join(str(r) for r in blocked_reasons)}）"
-        return core
-
-    # Note: BUY_WATCHED/SELL_WATCHED are no longer emitted by side_event().
-    # Kept for future use.
-    return f"{emoji} {name} ｜ T0 {direction}{state_text}"
-
-
-def _build_context_line(event: str, plan: dict[str, Any]) -> str:
-    buy = plan.get('buy') or {}
-    sell = plan.get('sell') or {}
-    level = get_market_level()
-    note = get_market_note()
-
-    if event in {BUY_TRIGGERED, BUY_INVALIDATED, SELL_TRIGGERED, SELL_INVALIDATED}:
-        intraday_tape = buy.get('t0_tape', {}) if isinstance(buy, dict) else {}
-        tape_key = 'buy_tape' if event.startswith('BUY') else 'sell_tape'
-        tape = intraday_tape.get(tape_key, {}) if isinstance(intraday_tape, dict) else {}
-        tape_time = tape.get('time', '')
-        tape_reason = tape.get('reason', '')
-        tape_text = f"{tape_time} {tape_reason}".strip() if tape_time and tape_reason else ""
-    elif event == BUY_EXPIRED:
-        tape_time = ''
-        tape_text = plan.get('expired_reason', '') or ''
-    elif event == SELL_EXPIRED:
-        tape_time = ''
-        tape_text = plan.get('expired_reason', '') or ''
-    else:
-        tape_time = ''
-        tape_text = ''
-
-    env_parts = []
-    if level:
-        env_parts.append(f"🌍 大盘 {level}")
-    if note:
-        env_parts.append(f"（{note}）")
-    if tape_text:
-        env_parts.append(f"| 📈 盘口 {tape_text}")
-
-    return "".join(env_parts) if env_parts else ""
+                lines.append(f"   ● {p:.2f} 元 ── (最新现价) 🟡 运行区间")
+        else:
+            symbol = "│"
+            if i == 0 or (i == 1 and all_points[0]["type"] == "current"):
+                symbol = "▲"
+            elif i == len(all_points) - 1 or (i == len(all_points) - 2 and all_points[-1]["type"] == "current"):
+                symbol = "▼"
+            lines.append(f"   {symbol} {p:.2f} 元 ── ({pt['label']})")
+            
+    return "\n".join(lines)
 
 
 def build_alert_message(event: str, plan: dict[str, Any], cost: float | None = None, position: int | None = None, previous_state: dict[str, Any] | None = None) -> str:
-    line1 = _build_trigger_line(event, plan)
-    line2 = _build_context_line(event, plan)
-
-    lines = [line1]
-    if line2:
-        lines.append(line2)
-
-    # Add stop-loss reminder for triggered alerts
-    if event in {BUY_TRIGGERED, SELL_TRIGGERED}:
-        lines.append(_stop_loss_reminder(event, plan))
-
-    return "\n".join(lines)
+    name = plan.get("name", "未知")
+    symbol = plan.get("symbol", "未知")
+    current = plan.get("current_price", 0.0)
+    
+    header_map = {
+        BUY_TRIGGERED: "🟢 今日决策：【低吸已触发】 (共振完美，可执行)",
+        SELL_TRIGGERED: "🟢 今日决策：【高抛已触发】 (压力显现，请止盈)",
+        BUY_EXPIRED: "⏸️ 今日决策：【已错过】 (价格已涨超，勿追)",
+        SELL_EXPIRED: "⏸️ 今日决策：【已错过】 (价格已回落)",
+        BUY_BLOCKED: "🚨 今日决策：【被阻断】 (禁止接飞刀！)",
+        SELL_BLOCKED: "🚨 今日决策：【被阻断】 (高抛失效！)",
+        BUY_INVALIDATED: "⚠️ 今日决策：【支撑跌破】 (已失效)",
+        SELL_INVALIDATED: "⚠️ 今日决策：【阻力突破】 (已失效)",
+    }
+    header = f"🎯 {name} ({symbol}) ─ 盘中极简导航\n{header_map.get(event, '🔍 今日决策：【观察中】')}"
+    
+    levels = _build_ladder_levels(plan)
+    ladder = _render_price_ladder(current, levels)
+    
+    summary = ["🔍 发生了什么 & 怎么做："]
+    is_buy = event.startswith("BUY")
+    model = plan.get("buy", {}) if is_buy else plan.get("sell", {})
+    tape = model.get("t0_tape", {}).get("buy_tape" if is_buy else "sell_tape", {})
+    tape_reason = tape.get("reason", "")
+    
+    if event == BUY_TRIGGERED:
+        summary.append(f"价格在 {price(model.get('observation_price'))} 企稳，{tape_reason or '多头反攻确认'}！")
+        summary.append(f"* 📥 【做T指令】：动用部分现金，在 **{(model.get('execution_price') or current):.2f} - {(model.get('acceptable_price') or current):.2f}** 之间分批低吸。")
+        if model.get("acceptable_price"):
+            summary.append(f"* 🚫 【追高防线】：最高不超 **{model.get('acceptable_price'):.2f}**，再高不追。")
+        if model.get("invalid_price"):
+            summary.append(f"* ⚠️ 【日内止损】：跌破 **{model.get('invalid_price'):.2f}** 做T单必须止损。")
+    elif event == SELL_TRIGGERED:
+        summary.append(f"价格接近 {price(model.get('observation_price'))} 压力位，{tape_reason or '空头压制明显'}！")
+        summary.append(f"* 📤 【做T指令】：在 **{(model.get('acceptable_price') or current):.2f} - {(model.get('execution_price') or current):.2f}** 之间分批高抛。")
+    elif event == BUY_BLOCKED:
+        reasons = model.get("blocked_reasons") or ["强阻断"]
+        summary.append(f"盘中发现抛压：{'、'.join(str(r) for r in reasons)}。")
+        summary.append("目前空头力量较大，千万不要伸手接飞刀！底仓卧倒，做T现金锁死，今天直接放弃低吸。")
+    elif event == BUY_INVALIDATED:
+        summary.append(f"价格放量跌破了 **{model.get('invalid_price', '支撑线')}**。")
+        summary.append("该位置已失效，多头防线失守，今天放弃该位置的低吸计划。")
+    elif event == BUY_EXPIRED:
+        summary.append(f"价格已反弹至 **{current:.2f}**，超过了我们的最高心理价位 **{model.get('acceptable_price', '上限')}**。")
+        summary.append("虽然错过了最低点，但不要追高，宁可错过也不要做错。")
+    else:
+        summary.append(f"触发了 {event}，请根据交易纪律严格执行。")
+        
+    return f"{header}\n{ladder}\n" + "\n".join(summary)
 
 
 # ═══════════════════════════════════════════════
@@ -429,17 +431,7 @@ def _fuse_alert(target_key: str, count: int, name: str = "") -> str:
     return "\n".join(parts)
 
 
-def _stop_loss_reminder(event: str, plan: dict[str, Any]) -> str:
-    is_buy = event.startswith("BUY")
-    invalid = plan.get('buy', {}).get('invalid_price') if is_buy else plan.get('sell', {}).get('invalid_price')
-    if invalid:
-        action = "跌破不接" if is_buy else "突破不追"
-        return f"止损 {price(invalid)} {action}"
-    return "严格按失效价执行，破位不接"
-
-
 def _trigger_reason_lines(model: dict[str, Any]) -> list[str]:
-    matched = model.get("matched_conditions") or []
     if not matched:
         return []
     core = [m for m in matched if any(kw in m for kw in ("MACD", "RSI", "VWAP"))]

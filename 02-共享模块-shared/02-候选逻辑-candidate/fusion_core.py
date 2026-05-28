@@ -253,6 +253,8 @@ def merge_decisions(
     current_price: float = 0.0,
     bars: list = None,
     hmm_regime: str = "range",
+    extend_fundamental: dict | None = None,
+    extend_sentiment: dict | None = None,
 ) -> dict:
     """决策融合层核心函数。
 
@@ -409,6 +411,47 @@ def merge_decisions(
         except Exception as exc:
             print(f"FUSION-WARN: Bayesian fusion failed, falling back: {exc}", file=sys.stderr)
 
+    # ── [2.3扩展] 股东户数筹码集中验证 ──
+    try:
+        sh_trend = (extend_fundamental or {}).get("shareholder", {})
+        if sh_trend.get("status") == "筹码集中" and weighted_score > 0:
+            confidence *= 1.15
+            confidence = min(confidence, 1.0)
+    except Exception:
+        pass
+
+    # ── [2.3扩展] 限售解禁一票否决风控 ──
+    has_risk_unlock = False
+    days_to_unlock = None
+    unlock_ratio = None
+    try:
+        unlocks = (extend_sentiment or {}).get("unlocks", [])
+        if unlocks:
+            from datetime import datetime
+            today_dt = datetime.now().date()
+            for u in unlocks:
+                u_date_str = u.get("date", "")
+                try:
+                    u_dt = datetime.strptime(u_date_str, "%Y-%m-%d").date()
+                    days = (u_dt - today_dt).days
+                    ratio = float(u.get("ratio", 0) or 0)
+                    if 0 <= days <= 15 and ratio >= 5.0:
+                        has_risk_unlock = True
+                        days_to_unlock = days
+                        unlock_ratio = ratio
+                        break
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    if has_risk_unlock:
+        positive_actions = {"半仓试 (多方主导)", "半仓试 (多方主导但有分歧)", "增持", "等转强 (多方主导但有分歧)"}
+        if action in positive_actions or weighted_score > 0:
+            action = "空仓 (大盘很差, 一票否决)"
+            confidence = 0.3
+            weighted_score = -0.5
+
     result = {
         "action": action,
         "confidence": round(confidence, 3),
@@ -425,6 +468,9 @@ def merge_decisions(
     }
     if bayesian_used:
         result["bayesian_info"] = bayesian_info
+    if has_risk_unlock:
+        result["unlock_veto"] = True
+        result["unlock_veto_msg"] = f"未来 {days_to_unlock} 天内有大额解禁风险 (比例 {unlock_ratio}%)"
 
     # 7. 日志 + 安全模式
     _log_fusion(result)

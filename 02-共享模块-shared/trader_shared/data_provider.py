@@ -55,6 +55,8 @@ class MarketSnapshot:
     missing_sources: list[str] = field(default_factory=list)
     source_errors: dict[str, str] = field(default_factory=dict)
     fetched_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
+    extend_fundamental: dict[str, Any] | None = None
+    extend_sentiment: dict[str, Any] | None = None
 
 
 # ═══════════════════════════════════════════════
@@ -122,6 +124,48 @@ class DataProvider(Protocol):
 # ═══════════════════════════════════════════════
 # Default provider: Tencent + Sina (via light_data)
 # ═══════════════════════════════════════════════
+
+def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
+    """Enrich the MarketSnapshot with extend_fundamental and extend_sentiment using a thread pool."""
+    sec = snap.security
+    if not sec or not sec.code or len(sec.code) != 6 or not sec.code.isdigit():
+        return snap
+        
+    try:
+        from trader_shared.extend_data import ExtendDataProvider
+        from concurrent.futures import ThreadPoolExecutor
+        
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            f_sh = executor.submit(ExtendDataProvider.get_shareholder_trend, sec.code)
+            f_eps = executor.submit(ExtendDataProvider.get_ths_consensus_eps, sec.code)
+            f_unlocks = executor.submit(ExtendDataProvider.get_upcoming_unlocks, sec.code)
+            f_hot = executor.submit(ExtendDataProvider.get_ths_hot_reason_for_stock, sec.code)
+            
+            sh_trend = f_sh.result(timeout=4.0)
+            ths_eps = f_eps.result(timeout=4.0)
+            unlocks = f_unlocks.result(timeout=4.0)
+            hot_reason = f_hot.result(timeout=4.0)
+            
+            extend_fundamental = {
+                "shareholder": sh_trend,
+                "consensus_eps": ths_eps
+            }
+            extend_sentiment = {
+                "unlocks": unlocks,
+                "theme_harden": hot_reason
+            }
+            
+            import dataclasses
+            return dataclasses.replace(
+                snap,
+                extend_fundamental=extend_fundamental,
+                extend_sentiment=extend_sentiment
+            )
+    except Exception as e:
+        import sys
+        print(f"📡 [DataProvider-Enrich-Warn]: Failed to enrich snapshot with advanced metrics: {e}", file=sys.stderr)
+        return snap
+
 
 class MootdxProvider:
     """Mootdx-backed implementation using light_data.py mootdx-priority functions."""
@@ -219,7 +263,7 @@ class MootdxProvider:
         from light_data import MarketSnapshot as _MS
         snap = _load(target, days=days, include_5m=include_5m, include_ticks=include_ticks)
         sec = Security(code=snap.security.code, market=snap.security.market, name=snap.security.name)
-        return MarketSnapshot(
+        res_snap = MarketSnapshot(
             security=sec,
             quote=snap.quote,
             daily_bars=snap.daily_bars,
@@ -231,6 +275,7 @@ class MootdxProvider:
             source_errors=snap.source_errors,
             fetched_at=snap.fetched_at,
         )
+        return _enrich_snapshot(res_snap)
 
     def pct_change(self, start: float, end: float) -> float:
         self._ensure_paths()
@@ -334,7 +379,7 @@ class TencentSinaProvider:
         from light_data import MarketSnapshot as _MS
         snap = _load(target, days=days, include_5m=include_5m, include_ticks=include_ticks)
         sec = Security(code=snap.security.code, market=snap.security.market, name=snap.security.name)
-        return MarketSnapshot(
+        res_snap = MarketSnapshot(
             security=sec,
             quote=snap.quote,
             daily_bars=snap.daily_bars,
@@ -346,6 +391,7 @@ class TencentSinaProvider:
             source_errors=snap.source_errors,
             fetched_at=snap.fetched_at,
         )
+        return _enrich_snapshot(res_snap)
 
     def pct_change(self, start: float, end: float) -> float:
         self._ensure_paths()
@@ -540,7 +586,7 @@ class AkShareProvider:
         else:
             data_status = "failed"
 
-        return MarketSnapshot(
+        res_snap = MarketSnapshot(
             security=sec,
             quote=quote,
             daily_bars=daily_bars,
@@ -549,6 +595,7 @@ class AkShareProvider:
             data_status=data_status,
             source_errors=source_errors,
         )
+        return _enrich_snapshot(res_snap)
 
     def pct_change(self, start: float, end: float) -> float:
         from light_data import pct_change as _fn

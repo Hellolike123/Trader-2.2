@@ -179,7 +179,11 @@ def build_report(target: str) -> dict[str, Any]:
             momentum_result=momentum_result,
             wyckoff_result=wyck_result,
             regime=env.get("level", "正常"),
+            current_price=current,
+            bars=bars,
             hmm_regime=env.get("hmm_regime_en", "range"),
+            extend_fundamental=snapshot.extend_fundamental,
+            extend_sentiment=snapshot.extend_sentiment,
         )
     except Exception:
         report_fusion = {"action": "融合层异常", "confidence": 0, "weighted_score": 0,
@@ -340,6 +344,8 @@ def build_report(target: str) -> dict[str, Any]:
         "gap": levels.get("gap"),
         "time_window": levels.get("time_window"),
         "fib_retrace": levels.get("fib_retrace"),
+        "extend_fundamental": snapshot.extend_fundamental,
+        "extend_sentiment": snapshot.extend_sentiment,
     }
 
     report = sync_report_with_data(report, levels)
@@ -497,15 +503,66 @@ def render_markdown(r: dict[str, Any]) -> str:
     gap = r.get("gap") or {}
     gap_text = gap.get("text", "") if isinstance(gap, dict) else ""
     gap_condition = gap.get("condition", "normal") if isinstance(gap, dict) else "normal"
+
+    # 提取解禁一票否决信息
+    fusion = r.get("fusion") or {}
+    unlock_veto_msg = fusion.get("unlock_veto_msg") if isinstance(fusion, dict) else None
+
     lines: list[str] = [
         f"分析报告 — {name}（{display_code}）",
         "",
         f"现价：{price(r['current'])}（{pct(r['change_pct'])}）",
         f"MA5：{ma.get('ma5', '--')}|MA10：{ma.get('ma10', '--')}|MA20：{ma.get('ma20', '--')}|MA30：{ma.get('ma30', '--')}{atr_header}",
     ]
-    if gap_text and gap_condition not in ("normal", "unknown"):
+    if unlock_veto_msg:
+        lines.append(f"提示：⚠️ {unlock_veto_msg}，已被决策融合层一票否决")
+        lines.append("")
+    elif gap_text and gap_condition not in ("normal", "unknown"):
         lines.append(f"提示：{gap_text}")
         lines.append("")
+
+    # ── [2.3扩展] 题材与基本面共识版块渲染 ──
+    extend_fundamental = r.get("extend_fundamental") or {}
+    extend_sentiment = r.get("extend_sentiment") or {}
+    
+    theme_info = extend_sentiment.get("theme_harden", {})
+    theme_reason = theme_info.get("reason") if isinstance(theme_info, dict) else None
+    theme_text = f"主线题材：{theme_reason}" if theme_reason else None
+
+    sh_trend = extend_fundamental.get("shareholder", {})
+    sh_notice_date = sh_trend.get("latest_notice_date") if isinstance(sh_trend, dict) else None
+    sh_change_pct = sh_trend.get("change_pct", 0.0) if isinstance(sh_trend, dict) else 0.0
+    sh_status = sh_trend.get("status", "数据不足") if isinstance(sh_trend, dict) else "数据不足"
+    sh_text = None
+    if sh_notice_date and sh_status != "数据不足":
+        sh_text = f"筹码变动：{sh_status} (最新公告环比 {sh_change_pct:+.2f}%)"
+
+    consensus_eps = extend_fundamental.get("consensus_eps", {})
+    eps_rows = consensus_eps.get("rows", []) if isinstance(consensus_eps, dict) else []
+    eps_text = None
+    if eps_rows:
+        active_rows = []
+        for row in eps_rows:
+            yr = str(row.get("year", ""))
+            clean_yr = yr.replace(".0", "")
+            if clean_yr.isdigit() or "预测" in yr:
+                active_rows.append(f"{clean_yr}年:{row.get('avg_eps')}元")
+        if active_rows:
+            eps_text = f"机构共识：每股收益预测 {' | '.join(active_rows[:3])}"
+
+    has_fundamental_section = theme_text or sh_text or eps_text
+    if has_fundamental_section:
+        lines.extend([
+            "",
+            "🔥 题材与基本面共识",
+            "",
+        ])
+        if theme_text:
+            lines.append(f"  · {theme_text}")
+        if sh_text:
+            lines.append(f"  · {sh_text}")
+        if eps_text:
+            lines.append(f"  · {eps_text}")
 
     market_env = r.get("market_env") or {}
     env_level = market_env.get("level", "")
