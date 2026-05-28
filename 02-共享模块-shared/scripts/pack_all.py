@@ -4,14 +4,12 @@
 Produces archives in 03-安装包-dist/<timestamp>/:
    - Individual skill zips (trader.zip, t0-trader.zip, etc.)
      Files at root of zip, no prefix
+   - Combined archives: live-trader.zip & review-commander.zip (super-skills)
    - Combined archive (trader-all-skill.zip)
      Files under <skill_name>/ prefix, unzip into ~/.hermes/skills/
 
 Run from anywhere in the repo:
     python3 02-共享模块-shared/scripts/pack_all.py
-
-After packing, this script auto-installs all skills into ~/.hermes/skills/
-so they are immediately available when you send the zip to Hermes.
 """
 from __future__ import annotations
 
@@ -22,10 +20,10 @@ import shutil
 import sys
 import tempfile
 import zipfile
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from pathlib import Path
 
-# Active skills (deprecated trader-compare removed)
+# Active skills
 SKILLS = [
     ("01-单票分析-trader", "trader"),
     ("02-盘中T0-t0-trader", "t0-trader"),
@@ -37,24 +35,7 @@ SKILLS = [
 
 IGNORE_NAMES = {"__pycache__", ".pytest_cache", ".DS_Store"}
 SHARE_DIR = Path("02-共享模块-shared")
-MAX_RELEASES = 5  # 最多保留最近 N 个发布目录
-
-
-# ============================================================
-# Shared module version consistency
-# ============================================================
-# When pack_all.py copies shared modules into each skill bundle,
-# it computes SHA256 hashes of every shared file.  The concatenation
-# of all those hashes (sorted by path) forms a *bundle digest* that
-# is written into _meta.json  as "shared_bundle".
-#
-# After packing, the verification step reads _meta.json from each
-# zip and verifies that:
-#   1. shared_bundle is present
-#   2. all skills that share the same subset get the SAME digest
-#   3. no shared file is empty (0 bytes)
-#
-# This catches "shared file was stale / empty / old copy" silently.
+MAX_RELEASES = 5
 
 
 def compute_file_sha256(p: Path) -> str:
@@ -68,26 +49,19 @@ def compute_file_sha256(p: Path) -> str:
 
 
 def shared_files_for_skill(staged_root: Path) -> dict[str, str]:
-    """Map of shared file paths → SHA256 for every shared file in the staged bundle.
-
-    Reads from the staged bundle location to capture what's actually being packed.
-    """
     shares: dict[str, str] = {}
     scripts = staged_root / "scripts"
 
-    # contracts dir (signal_contract.py, signal_store.py, signal_utils.py)
     for f in ("signal_contract.py", "signal_store.py", "signal_utils.py"):
         p = scripts / f
         if p.exists() and p.stat().st_size > 0:
             shares[f"contracts/{f}"] = compute_file_sha256(p)
 
-    # scripts dir (pipeline, signal_tracker, market_env, calibrator)
     for f in ("pipeline.py", "signal_tracker.py", "market_env.py", "calibrator.py"):
         p = scripts / f
         if p.exists() and p.stat().st_size > 0:
             shares[f"scripts/{f}"] = compute_file_sha256(p)
 
-    # light_data
     p = scripts / "light_data.py"
     if p.exists() and p.stat().st_size > 0:
         shares["market-data/light_data.py"] = compute_file_sha256(p)
@@ -96,7 +70,6 @@ def shared_files_for_skill(staged_root: Path) -> dict[str, str]:
 
 
 def concat_digest(shares: dict[str, str]) -> str:
-    """Hash the sorted values to form a single bundle digest."""
     joined = "|".join(sorted(shares.values()))
     return hashlib.sha256(joined.encode()).hexdigest()[:16]
 
@@ -115,13 +88,11 @@ def read_version_stamp(skill_dir: Path, skill_slug: str) -> str:
 
 
 def build_release_dir_name() -> str:
-    """本地时间命名：0514-1105"""
     now = datetime.now()
     return now.strftime("%m%d-%H%M")
 
 
 def parse_release_date(name: str) -> datetime | None:
-    """Parse 'MMDD-HHMM' or 'MMDD-HHMMSS' into a datetime object (using a dummy year)."""
     try:
         parts = name.split("-")
         if len(parts) != 2:
@@ -133,18 +104,13 @@ def parse_release_date(name: str) -> datetime | None:
         day = int(md[2:])
         hour = int(time_part[:2])
         minute = int(time_part[2:4])
-        # Default to year 2020 (a leap year to safely handle Feb 29)
         return datetime(2020, month, day, hour, minute)
     except Exception:
         return None
 
 
 def days_between(anchor: datetime, target: datetime) -> float:
-    """Compute days difference anchor - target, adjusting for year rollover."""
     diff = anchor - target
-    # If target is Dec and anchor is Jan, target's dummy year is 2020, anchor is 2020,
-    # diff will be negative (e.g. Jan 2 - Dec 31 = -363 days).
-    # We adjust by shifting target to the previous year (2019), so Jan 2, 2020 - Dec 31, 2019 = 2 days.
     if diff.days < -300:
         adjusted_target = datetime(target.year - 1, target.month, target.day, target.hour, target.minute)
         return (anchor - adjusted_target).total_seconds() / 86400.0
@@ -152,45 +118,30 @@ def days_between(anchor: datetime, target: datetime) -> float:
 
 
 def cleanup_old_releases(releases_dir: Path, keep: int = MAX_RELEASES) -> int:
-    """Remove old release directories, keeping ALL versions within the last `keep` days.
-
-    The 'last N days' is calculated relative to the newest folder inside the directory
-    to ensure stable, system-clock independent behavior (highly robust for rollbacks).
-    """
     if not releases_dir.exists() or keep <= 0:
         return 0
-
     dirs = [d for d in releases_dir.iterdir() if d.is_dir() and d.name != ".gitkeep"]
     if not dirs:
         return 0
-
-    # Parse and pair each folder with its datetime
     parsed_dirs: list[tuple[Path, datetime]] = []
     for d in dirs:
         dt = parse_release_date(d.name)
         if dt is not None:
             parsed_dirs.append((d, dt))
-
     if not parsed_dirs:
         return 0
-
-    # The anchor is the newest directory (latest datetime)
     parsed_dirs.sort(key=lambda item: item[1])
-    anchor_path, anchor_dt = parsed_dirs[-1]
-
+    _, anchor_dt = parsed_dirs[-1]
     removed_count = 0
     for path, dt in parsed_dirs:
         diff_days = days_between(anchor_dt, dt)
-        # Keep everything within keep days (inclusive of the 5th day, i.e., <= keep)
         if diff_days > keep:
             shutil.rmtree(path, ignore_errors=True)
             removed_count += 1
-
     return removed_count
 
 
 def ensure_releases_gitignore(releases_dir: Path) -> None:
-    """Create .gitignore in releases dir so release zips are not tracked by git."""
     releases_dir.mkdir(parents=True, exist_ok=True)
     gitignore = releases_dir / ".gitignore"
     if not gitignore.exists():
@@ -212,8 +163,8 @@ def repo_root() -> Path:
 
 
 def copy_shared(bundle: Path, skill_slug: str) -> None:
-    """Copy shared modules into each skill bundle."""
     scripts_dir = bundle / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
 
     contracts_dir = SHARE_DIR / "03-输出校验-contracts"
     for f in ("signal_contract.py", "signal_store.py", "signal_utils.py"):
@@ -236,7 +187,6 @@ def copy_shared(bundle: Path, skill_slug: str) -> None:
         shutil.copy2(src, scripts_dir / "contract_utils.py")
 
     candidates_dir = SHARE_DIR / "02-候选逻辑-candidate"
-    # Theory modules needed by all skills
     for f in ("chan_core.py", "wyckoff_core.py", "momentum_core.py",
               "fusion_core.py", "fusion_regime.py",
               "time_window_detector.py"):
@@ -244,12 +194,10 @@ def copy_shared(bundle: Path, skill_slug: str) -> None:
         if src.exists():
             shutil.copy2(src, scripts_dir / f)
 
-    if "t0" in skill_slug:
+    if "t0" in skill_slug or "live" in skill_slug:
         core = candidates_dir / "t0_candidate_core.py"
         if core.exists():
             shutil.copy2(core, scripts_dir / "candidate_core.py")
-        # C-11 fix: T0 也需要 structure_core.py（T0-1 修复后 find_key_levels 依赖 structure_result 的字段）
-        # 和 decision_core.py（t0_candidate_core 依赖 decision_core 的 status_for/score_for）
         for extra in ("structure_core.py", "decision_core.py"):
             src = candidates_dir / extra
             if src.exists():
@@ -277,7 +225,6 @@ def copy_shared(bundle: Path, skill_slug: str) -> None:
 
 
 def stage_skill(skill_dir: Path, skill_slug: str) -> Path:
-    """Copy skill + shared into a temp directory. Returns staged root."""
     tmp = Path(tempfile.mkdtemp(prefix=f"trader-{skill_slug}-"))
     staged = tmp / skill_slug
     shutil.copytree(
@@ -289,11 +236,6 @@ def stage_skill(skill_dir: Path, skill_slug: str) -> Path:
 
 
 def add_to_zip(staged: Path, archive: zipfile.ZipFile, arc_prefix: str = "") -> None:
-    """Add files from staged dir to archive with optional arc_prefix.
-
-    If arc_prefix is empty, files are at root of zip.
-    If arc_prefix is 'trader', files are under 'trader/' in the zip.
-    """
     for p in sorted(staged.rglob("*")):
         if should_skip(p):
             continue
@@ -309,7 +251,6 @@ def add_to_zip(staged: Path, archive: zipfile.ZipFile, arc_prefix: str = "") -> 
 
 
 def auto_install(stages: list[tuple[str, str, Path]]) -> None:
-    """After packing, auto-install all skills into ~/.hermes/skills/."""
     hermes_dir = Path.home() / ".hermes" / "skills"
     hermes_dir.mkdir(parents=True, exist_ok=True)
     print("\n--- Auto-install ---")
@@ -326,7 +267,6 @@ def auto_install(stages: list[tuple[str, str, Path]]) -> None:
         print(f"  {meta_name} -> {dest}")
 
 
-
 def main(args: list[str] | None = None) -> int:
     import argparse
 
@@ -334,12 +274,10 @@ def main(args: list[str] | None = None) -> int:
     parser.add_argument("--no-install", action="store_true", help="Skip auto-install to ~/.hermes/skills/")
     parsed, _ = parser.parse_known_args(args if args is not None else None)
 
-    # Also skip auto-install when running under pytest (prevents test pollution)
     if os.environ.get("PACK_NO_INSTALL") or "pytest" in sys.modules:
         parsed.no_install = True
 
     root = repo_root()
-
     packages_dir = root / "01-功能包-packages"
     output_dir = root / "03-安装包-dist"
     release_dir_name = build_release_dir_name()
@@ -354,6 +292,7 @@ def main(args: list[str] | None = None) -> int:
 
     stages: list[tuple[str, str, Path]] = []
 
+    # 1. Pack individual skills (for backward compatibility)
     for dir_name, skill_slug in SKILLS:
         src = packages_dir / dir_name
         if not src.exists():
@@ -364,28 +303,144 @@ def main(args: list[str] | None = None) -> int:
         staged = stage_skill(src, skill_slug)
         stages.append((skill_slug, version, staged))
 
+    # 2. Pack live-trader (Super-skill for active trading)
+    print("\nStage Combined Super-Skill: live-trader")
+    tmp_live = Path(tempfile.mkdtemp(prefix="trader-live-trader-"))
+    staged_live = tmp_live / "live-trader"
+    staged_live.mkdir(parents=True, exist_ok=True)
+    for d in ("01-单票分析-trader", "02-盘中T0-t0-trader"):
+        src_path = packages_dir / d
+        if src_path.exists():
+            for item in src_path.iterdir():
+                if item.name in IGNORE_NAMES or item.suffix == ".pyc":
+                    continue
+                dst_item = staged_live / item.name
+                if item.is_dir():
+                    if dst_item.exists():
+                        # Merge directory
+                        for sub_item in item.rglob("*"):
+                            if should_skip(sub_item):
+                                continue
+                            rel_sub = sub_item.relative_to(item)
+                            sub_dst = dst_item / rel_sub
+                            sub_dst.parent.mkdir(parents=True, exist_ok=True)
+                            if not sub_item.is_dir():
+                                shutil.copy2(sub_item, sub_dst)
+                    else:
+                        shutil.copytree(item, dst_item, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "*.pyc", ".DS_Store"))
+                else:
+                    shutil.copy2(item, dst_item)
+
+    # Overwrite _meta.json and SKILL.md for live-trader
+    meta_live = {
+        "name": "live-trader",
+        "version": "1.0.0-unified-live",
+        "contract": "live_trader_v1",
+        "description": "Script-output skill. Unified live trading commander. Use scripts/run_trader.py live --target <股票名或代码> to run full stock diagnostic, or scripts/run_trader.py live --monitor to run active watch alert, or scripts/run_trader.py live --show to show live ladder snapshot of pool items. Return stdout verbatim. Never handwrite, summarize, restyle, translate, or append follow-up lines."
+    }
+    (staged_live / "_meta.json").write_text(json.dumps(meta_live, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    
+    skill_live_md = """---
+name: live-trader
+description: Unified live trading commander for diagnostic & watch alert.
+version: 1.0.0-unified-live
+author: Trader Central
+license: MIT
+platforms: [macos, linux]
+tags: [finance, stocks, live, terminal, python]
+metadata:
+  hermes:
+    tags: [Finance, AShare, Live, Terminal]
+    requires_toolsets: [terminal]
+dependencies: [python3]
+repository: local
+documentation: SKILL.md
+---
+
+# Live Trader (盘中现场)
+
+Unified live trading commander. MUST run scripts/run_trader.py live and return stdout verbatim.
+
+## Commands
+  - Diagnostic: `python3 scripts/run_trader.py live --target <股票名>`
+  - T0 Monitor: `python3 scripts/run_trader.py live --monitor`
+  - Show Ladder: `python3 scripts/run_trader.py live --show`
+"""
+    (staged_live / "SKILL.md").write_text(skill_live_md, encoding="utf-8")
+    copy_shared(staged_live, "live-trader")
+    stages.append(("live-trader", "1.0.0-unified-live", staged_live))
+
+    # 3. Pack review-commander (Super-skill for post-market commander)
+    print("Stage Combined Super-Skill: review-commander")
+    tmp_review = Path(tempfile.mkdtemp(prefix="trader-review-commander-"))
+    staged_review = tmp_review / "review-commander"
+    staged_review.mkdir(parents=True, exist_ok=True)
+    for d in ("03-选股池-trader-pool", "04-仓位轮动-trader-portfolio", "05-盘后复盘-review-trader", "06-信号追踪-trader-tracking"):
+        src_path = packages_dir / d
+        if src_path.exists():
+            for item in src_path.iterdir():
+                if item.name in IGNORE_NAMES or item.suffix == ".pyc":
+                    continue
+                dst_item = staged_review / item.name
+                if item.is_dir():
+                    if dst_item.exists():
+                        for sub_item in item.rglob("*"):
+                            if should_skip(sub_item):
+                                continue
+                            rel_sub = sub_item.relative_to(item)
+                            sub_dst = dst_item / rel_sub
+                            sub_dst.parent.mkdir(parents=True, exist_ok=True)
+                            if not sub_item.is_dir():
+                                shutil.copy2(sub_item, sub_dst)
+                    else:
+                        shutil.copytree(item, dst_item, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "*.pyc", ".DS_Store"))
+                else:
+                    shutil.copy2(item, dst_item)
+
+    # Overwrite _meta.json and SKILL.md for review-commander
+    meta_review = {
+        "name": "review-commander",
+        "version": "1.0.0-unified-review",
+        "contract": "review_commander_v1",
+        "description": "Script-output skill. Unified post-market commander. Use scripts/run_trader.py review --all to run end-to-end full review of all pool and holding stocks, which returns sorted priorities, golden fib bids, big order validation, signal tracker verifications, and portfolio cash guidance. Return stdout verbatim. Never handwrite, summarize, restyle, translate, or append follow-up lines."
+    }
+    (staged_review / "_meta.json").write_text(json.dumps(meta_review, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    
+    skill_review_md = """---
+name: review-commander
+description: Unified post-market commander for pool management & automated full review.
+version: 1.0.0-unified-review
+author: Trader Central
+license: MIT
+platforms: [macos, linux]
+tags: [finance, stocks, review, terminal, python]
+metadata:
+  hermes:
+    tags: [Finance, AShare, Review, Terminal]
+    requires_toolsets: [terminal]
+dependencies: [python3]
+repository: local
+documentation: SKILL.md
+---
+
+# Review Commander (盘后指挥官)
+
+Unified post-market commander. MUST run scripts/run_trader.py review and return stdout verbatim.
+
+## Commands
+  - One-click All: `python3 scripts/run_trader.py review --all`
+  - Single Review: `python3 scripts/run_trader.py review --target <股票名>`
+"""
+    (staged_review / "SKILL.md").write_text(skill_review_md, encoding="utf-8")
+    copy_shared(staged_review, "review-commander")
+    stages.append(("review-commander", "1.0.0-unified-review", staged_review))
+
     # --- Compute shared bundle digest ---
-    # All stages should produce the same digest if shared modules are identical.
-    # If they differ, it means copy_shared had a conditional (e.g. t0 vs non-t0)
-    # and we need to compare by skill subset.
     bundle_digests: dict[str, str] = {}
     for skill_slug, _, staged in stages:
         shares = shared_files_for_skill(staged)
         dig = concat_digest(shares)
         bundle_digests[skill_slug] = dig
-
-    # Find which skill uses the largest set of shared files (the "base" set)
-    # All others should be a subset of this base set.
-    all_digests = set(bundle_digests.values())
-    if len(all_digests) == 1:
-        # All stages share the same files — single digest for everyone
-        _SHARED_BUNDLE_DIGEST = all_digests.pop()
-    else:
-        # Different skill subsets have different files (e.g. t0 gets extra modules)
-        # We still record a digest per skill so downstream can compare.
-        _SHARED_BUNDLE_DIGEST = None
-
-    print(f"\nShared bundle digest: {_SHARED_BUNDLE_DIGEST or '(multi-subset)'}")
 
     # --- Update _meta.json with bundle digest ---
     for skill_slug, _, staged in stages:
@@ -396,6 +451,7 @@ def main(args: list[str] | None = None) -> int:
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     # --- Build individual zips ---
+    print("\n--- Packing archives ---")
     for skill_slug, version, staged in stages:
         zip_name = f"{skill_slug}.zip"
         zip_path = release_dir / zip_name
@@ -422,7 +478,6 @@ def main(args: list[str] | None = None) -> int:
 
     # --- Verify ---
     print("\n--- Verification ---")
-    digests_in_zips: dict[str, str] = {}
     for skill_slug, _, _ in stages:
         zip_path = release_dir / f"{skill_slug}.zip"
         with zipfile.ZipFile(zip_path, "r") as archive:
@@ -431,11 +486,9 @@ def main(args: list[str] | None = None) -> int:
             has_scripts = any(n.startswith("scripts/") for n in names)
             has_hermes = "HERMES.md" in names
             has_skill = "SKILL.md" in names
-            # Check for empty .py files — indicates stale/incomplete copy
             empty_py = [n for n in names if n.endswith(".py") and archive.getinfo(n).file_size == 0]
             empty_status = "EMPTY!" if empty_py else ""
             
-            # Read bundle digest from _meta.json inside zip
             meta_digest = "unknown"
             if "_meta.json" in names:
                 try:
@@ -444,31 +497,12 @@ def main(args: list[str] | None = None) -> int:
                 except Exception:
                     meta_digest = "bad_meta"
             
-            digests_in_zips[skill_slug] = meta_digest
-            
-            # Check digest consistency: all non-t0 skills must match, t0 = its own subset
             status = "ok" if has_meta and has_scripts and has_hermes and has_skill and empty_status != "EMPTY!" else "MISSING"
             print(f"  [{status}] {zip_path.name}  meta={has_meta} scripts={has_scripts} hermes={has_hermes} skill={has_skill} digest={meta_digest[:8]} {empty_status}")
-            if empty_py:
-                print(f"         EMPTY files: {', '.join(empty_py)}")
-            if meta_digest == "bad_meta":
-                print(f"         BAD _meta.json")
-    # Cross-check digests consistency
-    non_none = [d for d in digests_in_zips.values() if d != "unknown" and d is not None]
-    unique_digests = set(non_none)
-    if len(unique_digests) == 1:
-        print(f"  ✓ All {len(non_none)} skills share same bundle digest {list(unique_digests)[0][:8]}")
-    elif len(unique_digests) > 1:
-        # Some skills share extra files (e.g. t0-trader has structure_core, decision_core)
-        for sk, d in sorted(digests_in_zips.items()):
-            if d == "unknown" or d is None:
-                continue
-            match_mark = "↔" if d == list(unique_digests)[0] else "⚡"
-            print(f"    {match_mark} {sk}: {d[:8]}")
 
     # Cleanup temp dirs
     for _, _, staged in stages:
-        shutil.rmtree(staged.parent)
+        shutil.rmtree(staged.parent, ignore_errors=True)
 
     return 0
 
