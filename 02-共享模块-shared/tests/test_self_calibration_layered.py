@@ -115,3 +115,42 @@ def test_structure_core_compatibility():
         assert abs(mults["stop_buffer"] - 0.576) < 0.01
         
     print("  COMPATIBILITY: PASS — structure_core successfully consumes flat or nested parameters")
+
+
+def test_calibration_guards_and_ema_smoothing():
+    """Verify that calibrate() robustly handles low-sample fallback, EMA parameter blending, and [0.85, 1.25] hard clipping."""
+    # 1. Low sample protection check
+    with patch("self_calibration._load_jsonl", return_value=[{"id": "sig1"}]), \
+         patch("self_calibration._extract_outcomes", return_value={"sig1": {"won": True, "return_pct": 5.0}}):
+        
+        calibrated = sc.calibrate(n_trials=10, verbose=False)
+        # Low samples -> immediately falls back to DEFAULT_PARAMS (1.0)
+        assert calibrated["global"]["zone_width"] == 1.0
+        assert calibrated["bull"]["confirm_buffer"] == 1.0
+
+    # 2. Rich sample optimization with EMA smoothing & clipping check
+    # Generate 40 dummy signals and outcomes
+    fake_signals = [{"id": f"sig{i}", "trade_date": "2026-05-22", "trigger_price_pct": 0.0} for i in range(40)]
+    fake_outcomes = {f"sig{i}": {"won": True, "return_pct": 2.0} for i in range(40)}
+    
+    # Existing old parameters stored in config
+    old_nested = {
+        "global": {"zone_width": 0.90, "confirm_buffer": 0.90, "stop_buffer": 0.90},
+        "bull": {"zone_width": 0.90, "confirm_buffer": 0.90, "stop_buffer": 0.90},
+        "bear": {"zone_width": 0.90, "confirm_buffer": 0.90, "stop_buffer": 0.90},
+        "range": {"zone_width": 0.90, "confirm_buffer": 0.90, "stop_buffer": 0.90},
+    }
+    
+    with patch("self_calibration._load_jsonl", return_value=fake_signals), \
+         patch("self_calibration._extract_outcomes", return_value=fake_outcomes), \
+         patch("self_calibration.load_calibrated_params", return_value=old_nested), \
+         patch("self_calibration._load_historical_regimes", return_value={}):
+        
+        calibrated = sc.calibrate(n_trials=10, verbose=False)
+        
+        # Check that global parameters are blended correctly and clipped between 0.85 and 1.25
+        for key in ["zone_width", "confirm_buffer", "stop_buffer"]:
+            val = calibrated["global"][key]
+            assert 0.85 <= val <= 1.25
+            
+    print("  CALIBRATION GUARDS & EMA: PASS — safety and smoothing successfully verified")

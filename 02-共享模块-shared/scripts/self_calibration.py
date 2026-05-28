@@ -209,15 +209,11 @@ def calibrate(
     n_trials: int = 150,
     verbose: bool = True,
 ) -> Dict[str, Dict[str, float]]:
-    """执行离线多大势分层参数校准。
+    """执行离线多大势分层参数校准，并加入了严格的数据样本保护阀阈与EMA参数平滑融合。"""
+    MIN_SIGNALS_TOTAL = 30
+    MIN_SIGNALS_SUB = 10
+    ALPHA = 0.2  # EMA平滑更新权重 (20% 新参数, 80% 旧参数)
 
-    Args:
-        n_trials: 随机搜索试验次数
-        verbose:  是否打印进度
-
-    Returns:
-        {regime_name: {zone_width, confirm_buffer, stop_buffer}}
-    """
     signals = _load_jsonl(SIGNALS_FILE)
     results = _load_jsonl(RESULTS_FILE)
     outcomes = _extract_outcomes(results)
@@ -225,15 +221,19 @@ def calibrate(
     if verbose:
         print(f"🔍 自校准开始：读取 {len(signals)} 个信号，{len(outcomes)} 个已结算结果")
 
-    if not signals or not outcomes:
+    # 1. 新兵保护：总信号或已结算结果不足 30 次，强制直接降级采用中性出厂参数 1.0
+    if len(signals) < MIN_SIGNALS_TOTAL or len(outcomes) < MIN_SIGNALS_TOTAL:
         if verbose:
-            print("⚠️ 历史数据不足，所有状态初始化为默认参数")
+            print(f"⚠️ [DataLimiter] 历史信号({len(signals)}条)或已结算结果({len(outcomes)}条)样本不足 {MIN_SIGNALS_TOTAL} 条，强制降级使用默认安全参数")
         return {
             "global": DEFAULT_PARAMS.copy(),
             "bull": DEFAULT_PARAMS.copy(),
             "bear": DEFAULT_PARAMS.copy(),
             "range": DEFAULT_PARAMS.copy(),
         }
+
+    # 加载已有的旧参数，用作 EMA 平滑基础
+    old_params = load_calibrated_params()
 
     # 预加载大势状态映射表
     regimes_map = _load_historical_regimes(signals)
@@ -254,10 +254,11 @@ def calibrate(
         else:
             sub_count = len(signals)
 
-        if sub_count == 0:
+        # 2. 子大势样本数保护阀：分桶信号小于 10 条，降级采用全局最优参数
+        if sub_count < MIN_SIGNALS_SUB:
             if verbose:
-                print(f"  -> 大势 {regime_name:6}: 暂无样本数据，继承默认配置")
-            calibrated_results[regime_name] = DEFAULT_PARAMS.copy()
+                print(f"  -> 大势 {regime_name:6} (样本:{sub_count:2}): 样本量不足 {MIN_SIGNALS_SUB} 条，降级继承全局最优参数")
+            calibrated_results[regime_name] = calibrated_results.get("global", DEFAULT_PARAMS).copy()
             continue
 
         best_params = DEFAULT_PARAMS.copy()
@@ -274,9 +275,21 @@ def calibrate(
                 best_score = score
                 best_params = candidate.copy()
 
-        calibrated_results[regime_name] = best_params.copy()
+        # 3. EMA 参数平滑融合与硬边界 [0.85, 1.25] 截断
+        old_regime_param = old_params.get(regime_name, DEFAULT_PARAMS)
+        blended_params = {}
+        for key in ["zone_width", "confirm_buffer", "stop_buffer"]:
+            o_val = float(old_regime_param.get(key, DEFAULT_PARAMS[key]))
+            n_val = float(best_params[key])
+            # EMA 融合
+            blended = (1 - ALPHA) * o_val + ALPHA * n_val
+            # 硬截断限制在 0.85 - 1.25 之间
+            blended = max(0.85, min(1.25, blended))
+            blended_params[key] = round(blended, 4)
+
+        calibrated_results[regime_name] = blended_params
         if verbose:
-            print(f"  -> 大势 {regime_name:6} (样本:{sub_count:2}): 性能评分 {best_score:.3f} | zone_width={best_params['zone_width']:.2f}, confirm_buffer={best_params['confirm_buffer']:.2f}, stop_buffer={best_params['stop_buffer']:.2f}")
+            print(f"  -> 大势 {regime_name:6} (样本:{sub_count:2}): 性能评分 {best_score:.3f} | zone_width={blended_params['zone_width']:.2f}, confirm_buffer={blended_params['confirm_buffer']:.2f}, stop_buffer={blended_params['stop_buffer']:.2f}")
 
     return calibrated_results
 
