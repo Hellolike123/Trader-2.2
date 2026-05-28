@@ -164,22 +164,37 @@ def test_fetch_5m_from_mootdx(mock_get_client, mock_fallback):
 
 
 @patch("light_data._get_mootdx_client", return_value=None)
-def test_fetch_quote_fallback_to_tencent(mock_get_client):
-    """fetch_quote falls back to Tencent when mootdx is unavailable."""
+def test_fetch_quote_fast_path_with_tencent(mock_get_client):
+    """fetch_quote tries Tencent HTTP first (new order).
+    We mock the Tencent HTTP call so the fast path succeeds immediately.
+    Tencent HTTP quote format: prefix="field0~field1~..."  (re.search(r'="([^"]*)")' captures body)
+    """
     from light_data import resolve_security, fetch_quote, HttpClient
 
-    with patch("light_data.retry") as mock_retry:
-        mock_retry.return_value = {
-            "name": "600036", "symbol": "600036.SH",
-            "current_price": 38.5, "pre_close": 38.0,
-            "open": 38.0, "high": 38.5, "low": 37.5,
-            "volume": 800000.0, "amount": 3.0e9,
-            "turnover_rate": 0.35, "current_change_pct": 1.32,
-            "trade_date": "2026-05-16", "trade_time": "15:00",
-        }
-        sec = resolve_security("600036")
-        http = HttpClient()
+    fake_content = ["0"] * 41
+    fake_content[1] = "平安银行"
+    fake_content[3] = "38.50"
+    fake_content[4] = "38.00"
+    fake_content[5] = "38.00"
+    fake_content[32] = "1.32"
+    fake_content[33] = "38.50"
+    fake_content[34] = "37.50"
+    fake_content[36] = "800000"
+    fake_content[37] = "3000000000"
+    fake_content[38] = "0.35"
+
+    # Tencent HTTP format: prefix="fields"
+    fake_text = 'sh600035="' + "~".join(fake_content) + '"'
+
+    def fake_get_text(url, encoding="gbk"):
+        return fake_text
+
+    sec = resolve_security("600036")
+    http = HttpClient()
+    with patch.object(http, "get_text", fake_get_text):
         q = fetch_quote(sec, http)
 
     assert q["current_price"] == 38.5
     assert q["turnover_rate"] == 0.35
+    assert q["data_source"] == "tencent-http"
+    assert q["data_status"] == "full"

@@ -200,13 +200,19 @@ class MootdxProvider:
         return _fetch(_Sec(sec.code, sec.market, sec.name), self._http)
 
     def fetch_qfq_daily(self, sec: Security, days: int = 30) -> list[dict[str, Any]]:
+        from trader_shared.cache_utils import get_cached, set_cached, TTL_DAILY
+        cached = get_cached("daily", sec.code, ttl=TTL_DAILY)
+        if cached is not None:
+            return cached
         self._ensure_paths()
         if self._http is None:
             from light_data import HttpClient
             self._http = HttpClient()
         from light_data import fetch_qfq_daily as _fetch
         from light_data import Security as _Sec
-        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http, days=days)
+        bars = _fetch(_Sec(sec.code, sec.market, sec.name), self._http, days=days)
+        set_cached("daily", sec.code, bars)
+        return bars
 
     def fetch_5m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
         self._ensure_paths()
@@ -326,13 +332,19 @@ class TencentSinaProvider:
         return _fetch(_Sec(sec.code, sec.market, sec.name), self._http)
 
     def fetch_qfq_daily(self, sec: Security, days: int = 30) -> list[dict[str, Any]]:
+        from trader_shared.cache_utils import get_cached, set_cached, TTL_DAILY
+        cached = get_cached("daily", sec.code, ttl=TTL_DAILY)
+        if cached is not None:
+            return cached
         self._ensure_paths()
         if self._http is None:
             from light_data import HttpClient
             self._http = HttpClient()
         from light_data import fetch_qfq_daily as _fetch
         from light_data import Security as _Sec
-        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http, days=days)
+        bars = _fetch(_Sec(sec.code, sec.market, sec.name), self._http, days=days)
+        set_cached("daily", sec.code, bars)
+        return bars
 
     def fetch_5m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
         self._ensure_paths()
@@ -634,9 +646,12 @@ _provider_set = False
 
 def _init_provider() -> DataProvider:
     try:
-        return MootdxProvider()
-    except Exception:
         return TencentSinaProvider()
+    except Exception:
+        try:
+            return MootdxProvider()
+        except Exception:
+            return TencentSinaProvider()
 
 
 def get_provider() -> DataProvider:

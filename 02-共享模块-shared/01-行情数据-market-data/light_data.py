@@ -696,31 +696,45 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
     if cached is not None:
         return cached
 
-    # pytdx3 priority
+    # Tencent HTTP first — fast and stable for most cases
+    try:
+        text = http.get_text(TENCENT_QUOTE_URL + sec.qq_symbol, encoding="gbk")
+        match = re.search(r'="([^"]*)"', text)
+        if match and len(match.group(1).split("~")) >= 35:
+            trade_date, trade_time = parse_trade_datetime(match.group(1).split("~"))
+            fields = match.group(1).split("~")
+            tencent_q = {
+                "name": fields[1] or sec.name,
+                "symbol": sec.ts_code,
+                "trade_date": trade_date,
+                "trade_time": trade_time,
+                "current_price": to_float(fields[3]),
+                "pre_close": to_float(fields[4]),
+                "open": to_float(fields[5]),
+                "high": to_float(fields[33]) if len(fields) > 33 else None,
+                "low": to_float(fields[34]) if len(fields) > 34 else None,
+                "volume": to_float(fields[36]) if len(fields) > 36 else None,
+                "amount": to_float(fields[37]) if len(fields) > 37 else None,
+                "turnover_rate": to_float(fields[38]) if len(fields) > 38 else None,
+                "current_change_pct": to_float(fields[32]) if len(fields) > 32 else None,
+                "data_source": "tencent-http",
+                "data_status": "full",
+            }
+            save_realtime_cache(cache_key, tencent_q)
+            return tencent_q
+    except Exception:
+        pass
+
+    # Fallback: pytdx3 (fast timeout, mainly a backup)
     if _TDX3_AVAILABLE:
         tdx3_q = _fetch_quote_tdx3(sec)
         if tdx3_q is not None:
-            try:
-                text = http.get_text(TENCENT_QUOTE_URL + sec.qq_symbol, encoding="gbk")
-                match = re.search(r'="([^"]*)"', text)
-                if match:
-                    fields = match.group(1).split("~")
-                    # fields[33]=今日最高, fields[34]=今日最低, fields[38]=换手率
-                    if len(fields) > 38:
-                        tdx3_q["turnover_rate"] = to_float(fields[38])
-                    if len(fields) > 34:
-                        if tdx3_q.get("high") is None:
-                            tdx3_q["high"] = to_float(fields[33])
-                        if tdx3_q.get("low") is None:
-                            tdx3_q["low"] = to_float(fields[34])
-            except Exception:
-                pass
             tdx3_q["data_source"] = "pytdx3"
             tdx3_q["data_status"] = "full"
             save_realtime_cache(cache_key, tdx3_q)
             return tdx3_q
 
-    # mootdx 主源
+    # Fallback: mootdx
     mootdx_q = _fetch_quote_mootdx(sec)
     if mootdx_q is not None:
         # 腾讯补充 turnover_rate 和 high/low（如 mootdx 返回为 None）
@@ -729,7 +743,6 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
             match = re.search(r'="([^"]*)"', text)
             if match:
                 fields = match.group(1).split("~")
-                # fields[33]=今日最高, fields[34]=今日最低, fields[38]=换手率
                 if len(fields) > 38:
                     mootdx_q["turnover_rate"] = to_float(fields[38])
                 if len(fields) > 34:
@@ -743,9 +756,6 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
         mootdx_q["data_status"] = "full"
         save_realtime_cache(cache_key, mootdx_q)
         return mootdx_q
-
-    # mootdx 不可用时，腾讯全量降级
-    warnings.warn(f"⚠️ mootdx fetch_quote failed or timed out. Falling back to Tencent HTTP API.")
 
     def do_fetch():
         text = http.get_text(TENCENT_QUOTE_URL + sec.qq_symbol, encoding="gbk")
@@ -821,28 +831,7 @@ def _compute_atr_fields(bars: list[dict[str, Any]]) -> None:
 
 
 def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 30) -> list[dict[str, Any]]:
-    # pytdx3 priority
-    if _TDX3_AVAILABLE:
-        tdx3_bars = _fetch_qfq_tdx3(sec, days)
-        if tdx3_bars is not None:
-            for bar in tdx3_bars:
-                bar["data_source"] = "pytdx3"
-                bar["data_status"] = "full"
-            _compute_atr_fields(tdx3_bars)
-            return tdx3_bars
-
-    # mootdx 主源
-    mootdx_bars = _fetch_qfq_mootdx(sec, days)
-    if mootdx_bars is not None:
-        for bar in mootdx_bars:
-            bar["data_source"] = "mootdx"
-            bar["data_status"] = "full"
-        _compute_atr_fields(mootdx_bars)
-        return mootdx_bars
-
-    # mootdx 不可用时，腾讯降级
-    warnings.warn(f"⚠️ mootdx fetch_qfq_daily failed or timed out. Falling back to Tencent HTTP API.")
-
+    # Tencent HTTP first — fast and stable
     raw_params = f"_var=kline_dayhfq&param={sec.qq_symbol},day,,,{max(days, 20)},qfq"
     cache_key = get_cache_key(TENCENT_FQKLINE_URL, raw_params)
 
@@ -859,41 +848,61 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 30) -> list[dic
         for row in rows:
             if isinstance(row, list) and len(row) >= 6:
                 bars.append({
-                    "date": row[0], 
-                    "open": to_float(row[1]), 
-                    "close": to_float(row[2]), 
-                    "high": to_float(row[3]), 
-                    "low": to_float(row[4]), 
+                    "date": row[0],
+                    "open": to_float(row[1]),
+                    "close": to_float(row[2]),
+                    "high": to_float(row[3]),
+                    "low": to_float(row[4]),
                     "volume": to_float(row[5]),
-                    "data_source": "tencent (fallback)",
-                    "data_status": "partial",
+                    "data_source": "tencent-http",
+                    "data_status": "full",
                 })
         if not bars:
             day_rows = sec_data.get("day") or []
             for row in day_rows:
                 if isinstance(row, list) and len(row) >= 6:
                     bars.append({
-                        "date": row[0], 
-                        "open": to_float(row[1]), 
-                        "close": to_float(row[2]), 
-                        "high": to_float(row[3]), 
-                        "low": to_float(row[4]), 
+                        "date": row[0],
+                        "open": to_float(row[1]),
+                        "close": to_float(row[2]),
+                        "high": to_float(row[3]),
+                        "low": to_float(row[4]),
                         "volume": to_float(row[5]),
-                        "data_source": "tencent (fallback)",
-                        "data_status": "partial",
+                        "data_source": "tencent-http",
+                        "data_status": "full",
                     })
         if not bars:
             raise RuntimeError("Tencent qfq daily bars unavailable")
         return bars
 
-    result = retry(do_fetch)
-    _compute_atr_fields(result)
+    try:
+        result = retry(do_fetch)
+        _compute_atr_fields(result)
+        has_today = any(bar.get("date") == datetime.now().strftime("%Y-%m-%d") for bar in result)
+        if not has_today:
+            save_to_cache(cache_key, result, ttl_seconds=3600)
+        return result
+    except RuntimeError:
+        pass
 
-    has_today = any(bar.get("date") == datetime.now().strftime("%Y-%m-%d") for bar in result)
-    if not has_today:
-        save_to_cache(cache_key, result, ttl_seconds=3600)
-    
-    return result
+    # Fallback: pytdx3
+    if _TDX3_AVAILABLE:
+        tdx3_bars = _fetch_qfq_tdx3(sec, days)
+        if tdx3_bars is not None:
+            for bar in tdx3_bars:
+                bar["data_source"] = "pytdx3"
+                bar["data_status"] = "full"
+            _compute_atr_fields(tdx3_bars)
+            return tdx3_bars
+
+    # Fallback: mootdx
+    mootdx_bars = _fetch_qfq_mootdx(sec, days)
+    if mootdx_bars is not None:
+        for bar in mootdx_bars:
+            bar["data_source"] = "mootdx"
+            bar["data_status"] = "full"
+        _compute_atr_fields(mootdx_bars)
+        return mootdx_bars
 
 
 def _fetch_mins_mootdx(sec: Security, interval: str, datalen: int = 60) -> list[dict[str, Any]] | None:
