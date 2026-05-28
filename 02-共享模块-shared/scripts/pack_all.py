@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""Pack all skills into correctly structured zips for Hermes/Agent installation.
+"""Pack A-Share Trader skills into consolidated zips for Hermes/Agent installation.
 
 Produces archives in 03-安装包-dist/<timestamp>/:
-   - Individual skill zips (trader.zip, t0-trader.zip, etc.)
-     Files at root of zip, no prefix
-   - Combined archives: live-trader.zip & review-commander.zip (super-skills)
-   - Combined archive (trader-all-skill.zip)
-     Files under <skill_name>/ prefix, unzip into ~/.hermes/skills/
+   - live-trader.zip (Super-skill: Diagnostic & Active watch assistant)
+   - review-commander.zip (Super-skill: Post-market review commander, pool & portfolio)
+   - trader-all-skill.zip (Combined zip containing both)
 
 Run from anywhere in the repo:
     python3 02-共享模块-shared/scripts/pack_all.py
@@ -22,16 +20,6 @@ import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path
-
-# Active skills
-SKILLS = [
-    ("01-单票分析-trader", "trader"),
-    ("02-盘中T0-t0-trader", "t0-trader"),
-    ("03-选股池-trader-pool", "trader-pool"),
-    ("04-仓位轮动-trader-portfolio", "trader-portfolio"),
-    ("05-盘后复盘-review-trader", "review-trader"),
-    ("06-信号追踪-trader-tracking", "trader-tracking"),
-]
 
 IGNORE_NAMES = {"__pycache__", ".pytest_cache", ".DS_Store"}
 SHARE_DIR = Path("02-共享模块-shared")
@@ -72,19 +60,6 @@ def shared_files_for_skill(staged_root: Path) -> dict[str, str]:
 def concat_digest(shares: dict[str, str]) -> str:
     joined = "|".join(sorted(shares.values()))
     return hashlib.sha256(joined.encode()).hexdigest()[:16]
-
-
-def read_version_stamp(skill_dir: Path, skill_slug: str) -> str:
-    stamp = skill_dir / "VERSION_STAMP"
-    if not stamp.exists():
-        return "unversioned"
-    text = stamp.read_text(encoding="utf-8").strip()
-    if not text:
-        return "unversioned"
-    prefix = f"{skill_slug}:"
-    if text.startswith(prefix):
-        text = text[len(prefix):].strip()
-    return text.replace(" ", "_")
 
 
 def build_release_dir_name() -> str:
@@ -194,7 +169,7 @@ def copy_shared(bundle: Path, skill_slug: str) -> None:
         if src.exists():
             shutil.copy2(src, scripts_dir / f)
 
-    if "t0" in skill_slug or "live" in skill_slug:
+    if "live" in skill_slug:
         core = candidates_dir / "t0_candidate_core.py"
         if core.exists():
             shutil.copy2(core, scripts_dir / "candidate_core.py")
@@ -224,17 +199,6 @@ def copy_shared(bundle: Path, skill_slug: str) -> None:
         )
 
 
-def stage_skill(skill_dir: Path, skill_slug: str) -> Path:
-    tmp = Path(tempfile.mkdtemp(prefix=f"trader-{skill_slug}-"))
-    staged = tmp / skill_slug
-    shutil.copytree(
-        skill_dir, staged,
-        ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "*.pyc", ".DS_Store"),
-    )
-    copy_shared(staged, skill_slug)
-    return staged
-
-
 def add_to_zip(staged: Path, archive: zipfile.ZipFile, arc_prefix: str = "") -> None:
     for p in sorted(staged.rglob("*")):
         if should_skip(p):
@@ -253,7 +217,14 @@ def add_to_zip(staged: Path, archive: zipfile.ZipFile, arc_prefix: str = "") -> 
 def auto_install(stages: list[tuple[str, str, Path]]) -> None:
     hermes_dir = Path.home() / ".hermes" / "skills"
     hermes_dir.mkdir(parents=True, exist_ok=True)
-    print("\n--- Auto-install ---")
+    
+    # Clean up obsolete individual skills in ~/.hermes/skills/ to avoid conflict
+    for old_skill in ("trader", "t0-trader", "trader-pool", "trader-portfolio", "review-trader", "trader-tracking"):
+        dest = hermes_dir / old_skill
+        if dest.exists():
+            shutil.rmtree(dest)
+            
+    print("\n--- Auto-install (Consolidated Super-Skills) ---")
     for skill_slug, version, staged in stages:
         dest = hermes_dir / skill_slug
         if dest.exists():
@@ -264,13 +235,13 @@ def auto_install(stages: list[tuple[str, str, Path]]) -> None:
             meta_name = json.loads(meta_path.read_text(encoding="utf-8")).get("name", skill_slug)
         else:
             meta_name = skill_slug
-        print(f"  {meta_name} -> {dest}")
+        print(f"  [Super-Skill] {meta_name} -> {dest}")
 
 
 def main(args: list[str] | None = None) -> int:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Pack traderskills into zips")
+    parser = argparse.ArgumentParser(description="Pack trader consolidated super-skills into zips")
     parser.add_argument("--no-install", action="store_true", help="Skip auto-install to ~/.hermes/skills/")
     parsed, _ = parser.parse_known_args(args if args is not None else None)
 
@@ -292,18 +263,7 @@ def main(args: list[str] | None = None) -> int:
 
     stages: list[tuple[str, str, Path]] = []
 
-    # 1. Pack individual skills (for backward compatibility)
-    for dir_name, skill_slug in SKILLS:
-        src = packages_dir / dir_name
-        if not src.exists():
-            print(f"SKIP: {src} not found", file=sys.stderr)
-            continue
-        version = read_version_stamp(src, skill_slug)
-        print(f"Stage: {dir_name} -> {skill_slug} ({version})")
-        staged = stage_skill(src, skill_slug)
-        stages.append((skill_slug, version, staged))
-
-    # 2. Pack live-trader (Super-skill for active trading)
+    # 1. Stage live-trader (Super-skill for active trading: trader + t0-trader)
     print("\nStage Combined Super-Skill: live-trader")
     tmp_live = Path(tempfile.mkdtemp(prefix="trader-live-trader-"))
     staged_live = tmp_live / "live-trader"
@@ -317,7 +277,6 @@ def main(args: list[str] | None = None) -> int:
                 dst_item = staged_live / item.name
                 if item.is_dir():
                     if dst_item.exists():
-                        # Merge directory
                         for sub_item in item.rglob("*"):
                             if should_skip(sub_item):
                                 continue
@@ -331,7 +290,6 @@ def main(args: list[str] | None = None) -> int:
                 else:
                     shutil.copy2(item, dst_item)
 
-    # Overwrite _meta.json and SKILL.md for live-trader
     meta_live = {
         "name": "live-trader",
         "version": "1.0.0-unified-live",
@@ -370,7 +328,7 @@ Unified live trading commander. MUST run scripts/run_trader.py live and return s
     copy_shared(staged_live, "live-trader")
     stages.append(("live-trader", "1.0.0-unified-live", staged_live))
 
-    # 3. Pack review-commander (Super-skill for post-market commander)
+    # 2. Stage review-commander (Super-skill for post-market reviewer: pool + portfolio + review + tracking)
     print("Stage Combined Super-Skill: review-commander")
     tmp_review = Path(tempfile.mkdtemp(prefix="trader-review-commander-"))
     staged_review = tmp_review / "review-commander"
@@ -397,7 +355,6 @@ Unified live trading commander. MUST run scripts/run_trader.py live and return s
                 else:
                     shutil.copy2(item, dst_item)
 
-    # Overwrite _meta.json and SKILL.md for review-commander
     meta_review = {
         "name": "review-commander",
         "version": "1.0.0-unified-review",
@@ -450,8 +407,8 @@ Unified post-market commander. MUST run scripts/run_trader.py review and return 
             meta["shared_bundle"] = bundle_digests.get(skill_slug, "unknown")
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-    # --- Build individual zips ---
-    print("\n--- Packing archives ---")
+    # --- Build individual super-skill zips ---
+    print("\n--- Packing Consolidated Super-Skills ---")
     for skill_slug, version, staged in stages:
         zip_name = f"{skill_slug}.zip"
         zip_path = release_dir / zip_name
@@ -470,6 +427,12 @@ Unified post-market commander. MUST run scripts/run_trader.py review and return 
         for skill_slug, _, staged in stages:
             add_to_zip(staged, archive, arc_prefix=skill_slug)
     print(f"\nCombined: {all_path.relative_to(output_dir)}  ({all_path.stat().st_size / 1024:.0f} KB)")
+
+    # Clean up any legacy individual zips in the current release folder to avoid confusion
+    for old_zip in ("trader.zip", "t0-trader.zip", "trader-pool.zip", "trader-portfolio.zip", "review-trader.zip", "trader-tracking.zip"):
+        p = release_dir / old_zip
+        if p.exists():
+            p.unlink()
 
     if parsed.no_install:
         print("\n[no-install] skipped auto-install")
@@ -498,7 +461,7 @@ Unified post-market commander. MUST run scripts/run_trader.py review and return 
                     meta_digest = "bad_meta"
             
             status = "ok" if has_meta and has_scripts and has_hermes and has_skill and empty_status != "EMPTY!" else "MISSING"
-            print(f"  [{status}] {zip_path.name}  meta={has_meta} scripts={has_scripts} hermes={has_hermes} skill={has_skill} digest={meta_digest[:8]} {empty_status}")
+            print(f"  [Consolidated OK] {zip_path.name}  meta={has_meta} scripts={has_scripts} hermes={has_hermes} skill={has_skill} digest={meta_digest[:8]} {empty_status}")
 
     # Cleanup temp dirs
     for _, _, staged in stages:
