@@ -1071,17 +1071,20 @@ def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dic
             return None
         bars: list[dict[str, Any]] = []
         for _, row in df.iterrows():
-            ts_key = "time" if "time" in df.columns else "datetime" if "datetime" in df.columns else None
-            d_key = ts_key or "date"
+            row_dict = row.to_dict()
+            dt_val = str(row_dict.get("时间") or row_dict.get("time") or row_dict.get("datetime") or "")
+            close = to_float(row_dict.get("收盘") or row_dict.get("close"))
+            if close is None:
+                continue
             bars.append({
-                "time": str(row.get(ts_key, "")),
-                "date": str(row.get(d_key, "")),
-                "open": to_float(row.get("open")),
-                "high": to_float(row.get("high")),
-                "low": to_float(row.get("low")),
-                "close": to_float(row.get("close")),
-                "volume": to_float(row.get("volume")),
-                "amount": to_float(row.get("amount")),
+                "time": dt_val,
+                "date": dt_val.split(" ")[0] if " " in dt_val else dt_val,
+                "open": to_float(row_dict.get("开盘") or row_dict.get("open")),
+                "high": to_float(row_dict.get("最高") or row_dict.get("high")),
+                "low": to_float(row_dict.get("最低") or row_dict.get("low")),
+                "close": close,
+                "volume": to_float(row_dict.get("成交量") or row_dict.get("volume") or row_dict.get("vol")),
+                "amount": to_float(row_dict.get("成交额") or row_dict.get("amount")),
             })
         return bars[-datalen:] if len(bars) > datalen else bars
     except Exception:
