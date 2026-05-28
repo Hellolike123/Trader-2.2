@@ -12,6 +12,33 @@ ROOT = Path(__file__).resolve().parent
 PACKAGES_DIR = ROOT / "01-功能包-packages"
 SHARED_DIR = ROOT / "02-共享模块-shared"
 
+def _bootstrap_dependencies():
+    """全自动自愈引导器：检测并静默安装缺失的三方库依赖"""
+    required = []
+    try:
+        import akshare
+    except ImportError:
+        required.append("akshare")
+    try:
+        import mootdx
+    except ImportError:
+        required.append("mootdx")
+        
+    if required:
+        import subprocess
+        print(f"📡 [自愈引导器] 检测到服务器缺失基础行情库 {required}，正在为您全自动静默安装，请稍候...", file=sys.stderr)
+        try:
+            # 运行 pip 静默升级安装
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install"] + required + ["--upgrade"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=True
+            )
+            print("✓ [自愈引导器] 依赖自动静默安装成功，系统已自愈！", file=sys.stderr)
+        except Exception as e:
+            print(f"⚠️ [自愈引导器] 自动静默安装失败: {e}，请手动执行 pip install {' '.join(required)}", file=sys.stderr)
+
 # 统一注入底层模型路径，彻底解决原脚本里的意大利面条代码
 if str(SHARED_DIR) not in sys.path:
     sys.path.insert(0, str(SHARED_DIR))
@@ -41,6 +68,7 @@ def _run_submodule(module_dir: str, script_name: str) -> int:
         return 1
 
 def main():
+    _bootstrap_dependencies()
     if len(sys.argv) < 2:
         print("Trader 2.3 大一统 CLI")
         print("用法: trader.py <command> [args...]")
