@@ -749,12 +749,12 @@ def cmd_watch(args: argparse.Namespace) -> int:
         # Try to get live quote
         change_pct = 0.0
         try:
-            from light_data import fetch_quote, resolve_security
+            from light_data import fetch_quote, HttpClient, resolve_security
             sec = resolve_security(name)
-            q = fetch_quote(sec.name)
-            if q and to_float(q.get("price")):
-                current = to_float(q.get("price"))
-                change_pct = to_float(q.get("chgpct")) or 0.0
+            q = fetch_quote(sec, HttpClient())
+            if q and to_float(q.get("current_price")):
+                current = to_float(q.get("current_price"))
+                change_pct = to_float(q.get("current_change_pct")) or 0.0
         except Exception:
             pass
 
