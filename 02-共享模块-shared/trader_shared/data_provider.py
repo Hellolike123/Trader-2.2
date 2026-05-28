@@ -436,18 +436,32 @@ class AkShareProvider:
         return Security(code=sec.code, market=sec.market, name=sec.name)
 
     def _to_standard_bar(self, row: dict[str, Any], dt_key: str = "date") -> dict[str, Any] | None:
-        """Convert a raw bar from akshare to standard dict format."""
-        close = to_float(str(row.get("close")) if isinstance(row.get("close"), (str, int, float)) else None)
+        """Convert a raw bar from akshare to standard dict format.
+
+        AkShare stock_zh_a_hist returns Chinese column names:
+            日期, 开盘, 收盘, 最高, 最低, 成交量, 成交额, 换手率 ...
+        AkShare stock_zh_a_hist_min_em returns Chinese column names too:
+            时间, 开盘, 收盘, 最高, 最低, 成交量, 成交额 ...
+        Always try Chinese names first, then fall back to English.
+        """
+        # Chinese column names (akshare standard)
+        close = to_float(row.get("收盘") or row.get("close"))
         if close is None:
             return None
+        # 日期: 日线用"日期", 分钟线用 dt_key（如"时间"）
+        date_val = str(row.get("日期") or row.get(dt_key, ""))
         return {
-            "date": row.get(dt_key, ""),
-            "open": to_float(row.get("open")),
+            "date": date_val.split(" ")[0] if " " in date_val else date_val,
+            "time": date_val,   # review_core bar_time() 需要读这个
+            "open": to_float(row.get("开盘") or row.get("open")),
             "close": close,
-            "high": to_float(row.get("high")),
-            "low": to_float(row.get("low")),
-            "volume": to_float(row.get("vol") or row.get("volume")),
+            "high": to_float(row.get("最高") or row.get("high")),
+            "low": to_float(row.get("最低") or row.get("low")),
+            "volume": to_float(row.get("成交量") or row.get("vol") or row.get("volume")),
+            "amount": to_float(row.get("成交额") or row.get("amount")),
         }
+
+
 
     def _ensure_akshare(self) -> None:
         try:

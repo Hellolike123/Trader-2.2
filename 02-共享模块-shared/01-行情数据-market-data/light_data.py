@@ -705,8 +705,14 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
                 match = re.search(r'="([^"]*)"', text)
                 if match:
                     fields = match.group(1).split("~")
+                    # fields[33]=今日最高, fields[34]=今日最低, fields[38]=换手率
                     if len(fields) > 38:
                         tdx3_q["turnover_rate"] = to_float(fields[38])
+                    if len(fields) > 34:
+                        if tdx3_q.get("high") is None:
+                            tdx3_q["high"] = to_float(fields[33])
+                        if tdx3_q.get("low") is None:
+                            tdx3_q["low"] = to_float(fields[34])
             except Exception:
                 pass
             tdx3_q["data_source"] = "pytdx3"
@@ -717,14 +723,20 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
     # mootdx 主源
     mootdx_q = _fetch_quote_mootdx(sec)
     if mootdx_q is not None:
-        # 腾讯补充 turnover_rate
+        # 腾讯补充 turnover_rate 和 high/low（如 mootdx 返回为 None）
         try:
             text = http.get_text(TENCENT_QUOTE_URL + sec.qq_symbol, encoding="gbk")
             match = re.search(r'="([^"]*)"', text)
             if match:
                 fields = match.group(1).split("~")
+                # fields[33]=今日最高, fields[34]=今日最低, fields[38]=换手率
                 if len(fields) > 38:
                     mootdx_q["turnover_rate"] = to_float(fields[38])
+                if len(fields) > 34:
+                    if mootdx_q.get("high") is None:
+                        mootdx_q["high"] = to_float(fields[33])
+                    if mootdx_q.get("low") is None:
+                        mootdx_q["low"] = to_float(fields[34])
         except Exception:
             pass
         mootdx_q["data_source"] = "mootdx"
@@ -741,7 +753,12 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
         if not match:
             raise RuntimeError("Tencent quote payload missing fields")
         fields = match.group(1).split("~")
-        if len(fields) < 40:
+        # qt.gtimg.cn 字段映射（实测验证）：
+        #   [3]=最新价  [4]=昨收  [5]=今开
+        #   [33]=今日最高  [34]=今日最低
+        #   [36]=成交量(手)  [37]=成交额(万元)  [38]=换手率  [32]=涨跌幅
+        # 注意：[6]/[7] 是买一量/卖一量，不是 high/low（原始 bug 根因）
+        if len(fields) < 35:
             raise RuntimeError("Tencent quote payload incomplete")
         trade_date, trade_time = parse_trade_datetime(fields)
         result = {
@@ -752,8 +769,8 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
             "current_price": to_float(fields[3]),
             "pre_close": to_float(fields[4]),
             "open": to_float(fields[5]),
-            "high": to_float(fields[6]) if len(fields) > 6 else None,
-            "low": to_float(fields[7]) if len(fields) > 7 else None,
+            "high": to_float(fields[33]) if len(fields) > 33 else None,
+            "low": to_float(fields[34]) if len(fields) > 34 else None,
             "volume": to_float(fields[36]) if len(fields) > 36 else None,
             "amount": to_float(fields[37]) if len(fields) > 37 else None,
             "turnover_rate": to_float(fields[38]) if len(fields) > 38 else None,
