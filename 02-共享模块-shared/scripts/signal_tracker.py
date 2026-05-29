@@ -64,7 +64,7 @@ class DynamicPathProxy(os.PathLike):
 
     def _resolve(self) -> Path:
         try:
-            from signal_store import _get_default_store_path
+            from trader_shared.signal_store import _get_default_store_path
             p = _get_default_store_path()
         except ImportError:
             p = Path.home() / ".trader" / "signals.jsonl"
@@ -125,7 +125,7 @@ def stable_id(skill: str, target: str, date: str, signal_type: str, price: float
 
 def _create_log_record(sig_id: str, sig_md5: str, skill: str, target: str, symbol: str, signal_type: str, price: float, env_level: str, env_note: str) -> None:
     # Build standard compliant trader_signal_v1 signal
-    from signal_utils import normalize_symbol, normalize_date, normalize_signal_type
+    from trader_shared.signal_utils import normalize_symbol, normalize_date, normalize_signal_type
     
     norm_symbol = normalize_symbol(symbol)
     norm_date = normalize_date(datetime.now().strftime("%Y-%m-%d"))
@@ -180,7 +180,7 @@ def _create_log_record(sig_id: str, sig_md5: str, skill: str, target: str, symbo
     }
     
     # Direct import/call to reuse validation and atomic lock writing
-    from signal_store import append_signal
+    from trader_shared.signal_store import append_signal
         
     append_signal(record, path=LOG_PATH)
 
@@ -263,7 +263,7 @@ def fill(signal_id: str, pnl_pct: float, days_held: int = 0, outcome: str = "unk
         
         # Clear module level cache in signal_store
         try:
-            from signal_store import _sig_cache
+            from trader_shared.signal_store import _sig_cache
             _sig_cache.pop(str(LOG_PATH), None)
         except Exception:
             pass
@@ -318,7 +318,7 @@ def fill_by_target(target: str, pnl_pct: float, days_held: int = 0, outcome: str
         os.replace(str(tmp_path), str(LOG_PATH))
         
         try:
-            from signal_store import _sig_cache
+            from trader_shared.signal_store import _sig_cache
             _sig_cache.pop(str(LOG_PATH), None)
         except Exception:
             pass
@@ -347,7 +347,7 @@ def load_recent(
     target: str = "", symbol: str = "", skill: str = "",
     signal_type: str = "", limit: int = 20,
 ) -> list[dict[str, Any]]:
-    from signal_utils import normalize_symbol, normalize_signal_type
+    from trader_shared.signal_utils import normalize_symbol, normalize_signal_type
     
     norm_symbol = normalize_symbol(symbol) if symbol else ""
     norm_type = normalize_signal_type(signal_type) if signal_type else ""
@@ -1352,7 +1352,7 @@ def consolidate_legacy_log(log_path: Path | None = None, store_path: Path | None
         except Exception:
             continue
             
-        from signal_utils import normalize_symbol, normalize_date, normalize_signal_type
+        from trader_shared.signal_utils import normalize_symbol, normalize_date, normalize_signal_type
         
         symbol = rec.get("symbol") or rec.get("target") or ""
         norm_symbol = normalize_symbol(symbol)
