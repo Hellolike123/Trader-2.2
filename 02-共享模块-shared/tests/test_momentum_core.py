@@ -1,18 +1,11 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-CANDIDATE = ROOT / "02-候选逻辑-candidate"
-MARKET = ROOT / "01-行情数据-market-data"
-for _p in (CANDIDATE, MARKET):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
-for name in ("momentum_core", "light_data"):
+for name in ("trader_shared.momentum_core", "light_data"):
     sys.modules.pop(name, None)
 
-from momentum_core import calc_rsi, calc_macd, calc_adx, calc_bollinger, assess_momentum, momentum_strategy
+from trader_shared.momentum_core import calc_rsi, calc_macd, calc_adx, calc_bollinger, assess_momentum, momentum_strategy
 
 
 def _bars(closes: list[float]) -> list[dict]:

@@ -26,14 +26,7 @@ try:
 except ImportError:
     _HAS_PANDAS = False
 
-SHARED_ROOT = Path(__file__).resolve().parents[1]
-_SCRIPTS_DIR = SHARED_ROOT / "scripts"
-MARKET_DATA = SHARED_ROOT / "01-行情数据-market-data"
-CANDIDATE = SHARED_ROOT / "02-候选逻辑-candidate"
-SHARE_PY = SHARED_ROOT / "trader_shared"
-for _p in (_SCRIPTS_DIR, MARKET_DATA, CANDIDATE, SHARE_PY):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+import trader_shared
 
 from candidate_core import build_candidate_levels, pct_change, to_float
 from trader_shared.data_provider import get_provider

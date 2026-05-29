@@ -1,14 +1,6 @@
 """Tests for chip_distribution.py dynamic decay and independent peak extraction."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-TESTS_DIR = Path(__file__).resolve().parent
-SHARED = TESTS_DIR.parent
-if str(SHARED.resolve()) not in sys.path:
-    sys.path.insert(0, str(SHARED.resolve()))
-
 from trader_shared.chip_distribution import calc_chip_distribution, to_float
 
 

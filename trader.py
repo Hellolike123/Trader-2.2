@@ -12,6 +12,10 @@ ROOT = Path(__file__).resolve().parent
 PACKAGES_DIR = ROOT / "01-功能包-packages"
 SHARED_DIR = ROOT / "02-共享模块-shared"
 
+# 确保 trader_shared 可被 import（其 __init__.py 会自动配置旧目录的 sys.path）
+if str(SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(SHARED_DIR))
+
 def _bootstrap_dependencies():
     """全自动自愈引导器：检测并静默安装缺失的三方库依赖"""
     required = []
@@ -38,14 +42,6 @@ def _bootstrap_dependencies():
             print("✓ [自愈引导器] 依赖自动静默安装成功，系统已自愈！", file=sys.stderr)
         except Exception as e:
             print(f"⚠️ [自愈引导器] 自动静默安装失败: {e}，请手动执行 pip install {' '.join(required)}", file=sys.stderr)
-
-# 统一注入底层模型路径，彻底解决原脚本里的意大利面条代码
-if str(SHARED_DIR) not in sys.path:
-    sys.path.insert(0, str(SHARED_DIR))
-for _sub in ["01-行情数据-market-data", "02-候选逻辑-candidate", "03-输出校验-contracts"]:
-    _p = SHARED_DIR / _sub
-    if _p.exists() and str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
 
 def _run_submodule(module_dir: str, script_name: str) -> int:
     """动态加载子模块并调用其 main 函数"""
@@ -99,9 +95,47 @@ def main():
         sys.exit(_run_submodule("04-仓位轮动-trader-portfolio", "final_portfolio"))
     elif command == "track":
         sys.exit(_run_submodule("06-信号追踪-trader-tracking", "final_tracker"))
+    elif command == "cache":
+        sys.exit(_handle_cache_command())
     else:
         print(f"未知命令: {command}")
         sys.exit(1)
+
+
+def _handle_cache_command() -> int:
+    """处理 trader.py cache 子命令。"""
+    if len(sys.argv) < 2:
+        print("用法: trader.py cache <subcommand>")
+        print("可用子命令:")
+        print("  clear [--type TYPE]  - 清空缓存")
+        print("  warm                 - 预缓存选股池数据")
+        return 1
+
+    sub = sys.argv[1]
+    if sub == "clear":
+        from trader_shared.cache_utils import clear_cache
+        cache_type = None
+        if "--type" in sys.argv:
+            idx = sys.argv.index("--type")
+            if idx + 1 < len(sys.argv):
+                cache_type = sys.argv[idx + 1]
+        count = clear_cache(cache_type)
+        label = cache_type or "all"
+        print(f"已清空 {label} 缓存，删除 {count} 个文件")
+        return 0
+    elif sub == "warm":
+        from trader_shared.cache_utils import warm_pool_cache
+        result = warm_pool_cache()
+        if result["success"] > 0:
+            print(f"预缓存完成: {result['success']}/{result['total']} 成功")
+        if result["failed"] > 0:
+            print(f"预缓存失败: {result['failed']}/{result['total']}")
+            for err in result.get("errors", []):
+                print(f"  - {err}")
+        return 0 if result["failed"] == 0 else 1
+    else:
+        print(f"未知缓存子命令: {sub}")
+        return 1
 
 if __name__ == "__main__":
     main()

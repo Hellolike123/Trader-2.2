@@ -1,12 +1,6 @@
 from __future__ import annotations
 
 from typing import Any
-import sys
-from pathlib import Path
-
-# Add shared scripts to path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "01-行情数据-market-data"))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "trader_shared"))
 
 from big_order import validate_big_orders
 

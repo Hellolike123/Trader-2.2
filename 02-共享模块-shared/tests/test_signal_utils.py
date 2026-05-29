@@ -2,15 +2,7 @@
 """Tests for signal_utils.py — the new shared utility module."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-from pathlib import Path
-
-UTILS_DIR = Path(__file__).resolve().parent.parent / "03-输出校验-contracts"
-if str(UTILS_DIR) not in sys.path:
-    sys.path.insert(0, str(UTILS_DIR))
 
 from signal_utils import (
     build_signal_key,

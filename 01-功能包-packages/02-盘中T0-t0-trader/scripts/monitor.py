@@ -10,20 +10,19 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator
 
-# 双模式路径发现：Hermes skill 包内 vs 仓库开发
-_SCRIPT_DIR = Path(__file__).resolve().parent
-if (_SCRIPT_DIR.parent / "trader_shared").exists():
-    _SHARED = _SCRIPT_DIR.parent          # skill 模式
-else:
-    _SHARED = _SCRIPT_DIR.parents[3] / "02-共享模块-shared"  # 仓库模式
-
-CONTRACTS = _SHARED / "03-输出校验-contracts"
-SHARED_SCRIPTS = _SHARED / "scripts"
-SHARED_ROOT = _SHARED
-SHARED_MARKET = _SHARED / "01-行情数据-market-data"
-for _p in (CONTRACTS, SHARED_SCRIPTS, SHARED_ROOT, SHARED_MARKET):
-    if _p.exists() and str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+try:
+    import trader_shared
+except ImportError:
+    _d = Path(__file__).resolve().parent
+    for _ in range(8):
+        if (_d / "trader_shared").is_dir():
+            if str(_d) not in sys.path:
+                sys.path.insert(0, str(_d))
+            import trader_shared
+            break
+        _d = _d.parent
+    else:
+        raise
 
 from trader_shared.data_manager import DataManager
 from price_point_engine import price

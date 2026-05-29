@@ -5,17 +5,10 @@ import json
 import sys
 from pathlib import Path
 
-
-ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "scripts"
-SHARED_MARKET = ROOT.parents[1] / "02-共享模块-shared" / "01-行情数据-market-data"
-SHARED_ROOT = ROOT.parents[1] / "02-共享模块-shared"
+SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
-if str(SHARED_MARKET) not in sys.path:
-    sys.path.insert(0, str(SHARED_MARKET))
-if str(SHARED_ROOT) not in sys.path:
-    sys.path.insert(0, str(SHARED_ROOT))
+
 for name in ("contract_utils", "light_data", "review_model", "review_render", "review_compare", "review_store", "validate_output", "models"):
     sys.modules.pop(name, None)
 

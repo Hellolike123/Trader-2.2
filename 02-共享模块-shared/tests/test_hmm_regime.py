@@ -3,25 +3,17 @@
 
 from __future__ import annotations
 
-import sys
 import time
-from pathlib import Path
 
 import numpy as np
 import pytest
-
-# 路径设置
-_ROOT = Path(__file__).resolve().parents[2]
-_CANDIDATE = _ROOT / "02-共享模块-shared" / "02-候选逻辑-candidate"
-if str(_CANDIDATE) not in sys.path:
-    sys.path.insert(0, str(_CANDIDATE))
 
 
 class TestHMMRegimeDetector:
     """HMM 模型数学正确性与稳定性测试。"""
 
     def setup_method(self):
-        from hmm_regime import HMMRegimeDetector, detect_regime, regime_to_multiplier
+        from trader_shared.hmm_regime import HMMRegimeDetector, detect_regime, regime_to_multiplier
         self.HMM = HMMRegimeDetector
         self.detect_regime = detect_regime
         self.regime_to_multiplier = regime_to_multiplier

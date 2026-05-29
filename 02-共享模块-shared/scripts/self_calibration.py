@@ -22,11 +22,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-# ── 自动补齐共享模块路径（保证在独立/Hermes 环境下能正确 import） ────────────────
-_SHARED_ROOT = Path(__file__).resolve().parents[1]
-for _p in (_SHARED_ROOT / "scripts", _SHARED_ROOT / "01-行情数据-market-data", _SHARED_ROOT / "02-候选逻辑-candidate"):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+import trader_shared
 
 # ── 默认路径 ─────────────────────────────────────────────────────────────────
 TRADER_DIR = Path.home() / ".trader"
@@ -95,7 +91,7 @@ def _load_historical_regimes(signals: List[Dict[str, Any]]) -> Dict[str, str]:
         from trader_shared.config import INDEX_CODE
         from trader_shared.data_provider import get_provider
         from light_data import normalize_bars
-        from hmm_regime import detect_regime
+        from trader_shared.hmm_regime import detect_regime
 
         provider = get_provider()
         sec = provider.resolve_security(INDEX_CODE)

@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import trader_shared
+
 PROJ_SCRIPTS = Path(__file__).resolve().parent
 PROJECT_ROOT = PROJ_SCRIPTS.parent
 PACKAGES_DIR = PROJECT_ROOT / "01-功能包-packages"
@@ -60,7 +62,6 @@ def check_gitignore_valid() -> str:
 
 def check_pipeline_schema() -> str:
     try:
-        sys.path.insert(0, str(SHARED_DIR / "scripts"))
         from pipeline import STATE_SCHEMA
         if not STATE_SCHEMA.get("version"):
             return "WARN (pipeline schema missing version)"

@@ -837,6 +837,15 @@ def _compute_atr_fields(bars: list[dict[str, Any]]) -> None:
 
 
 def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[dict[str, Any]]:
+    # ── 文件缓存读取（盘后预缓存的数据，TTL 24小时）──
+    try:
+        from trader_shared.cache_utils import get_cached as _file_cached, CACHE_DAILY, TTL_DAILY
+        file_cached = _file_cached(CACHE_DAILY, sec.code, ttl=TTL_DAILY)
+        if file_cached is not None and isinstance(file_cached, list) and len(file_cached) >= 200:
+            return file_cached
+    except Exception:
+        pass
+
     # Tencent HTTP first — fast and stable
     raw_params = f"_var=kline_dayhfq&param={sec.qq_symbol},day,,,{max(days, 20)},qfq"
     cache_key = get_cache_key(TENCENT_FQKLINE_URL, raw_params)
@@ -887,6 +896,12 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
         has_today = any(bar.get("date") == datetime.now().strftime("%Y-%m-%d") for bar in result)
         if not has_today:
             save_to_cache(cache_key, result, ttl_seconds=3600)
+        # ── 写入文件缓存（供盘后预缓存和下次盘中读取）──
+        try:
+            from trader_shared.cache_utils import set_cached_validated, validate_bars, CACHE_DAILY
+            set_cached_validated(CACHE_DAILY, sec.code, result, validate_bars)
+        except Exception:
+            pass
         return result
     except RuntimeError:
         pass
@@ -1135,6 +1150,15 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
         quote = dict(quote)  # shallow copy to avoid mutating the cache
         if "order_book" in quote:
             del quote["order_book"]
+
+    # ── 合并缓存日线与当日实时 quote ──
+    if daily_bars and quote and isinstance(quote, dict):
+        try:
+            from trader_shared.cache_utils import merge_daily_bars_with_quote
+            daily_bars = merge_daily_bars_with_quote(daily_bars, quote)
+        except Exception:
+            pass
+
     if include_5m and not bars_5m and "bars_5m" not in missing_sources:
         missing_sources.append("bars_5m")
 

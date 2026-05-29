@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-# Add shared library to path if running directly in scripts
-_SHARED = Path(__file__).resolve().parents[1] / "02-共享模块-shared"
-if _SHARED.exists() and str(_SHARED) not in sys.path:
-    sys.path.insert(0, str(_SHARED))
+import trader_shared
 
 from trader_shared.config import (
     LOOKBACK_DAYS,

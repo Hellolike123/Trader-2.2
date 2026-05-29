@@ -3,9 +3,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
-for _p in (SCRIPTS,):
-    if _p.exists() and str(_p) not in sys.path:
-        sys.path.insert(0, str(_p.resolve()))
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
 
 
 def test_fuse_alert_construction():

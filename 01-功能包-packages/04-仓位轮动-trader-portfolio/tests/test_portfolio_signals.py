@@ -4,16 +4,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "scripts"
-CONTRACTS = ROOT.parents[1] / "02-共享模块-shared" / "03-输出校验-contracts"
-CANDIDATE = ROOT.parents[1] / "02-共享模块-shared" / "02-候选逻辑-candidate"
-MARKET = ROOT.parents[1] / "02-共享模块-shared" / "01-行情数据-market-data"
-SHARED_SCRIPTS = ROOT.parents[1] / "02-共享模块-shared" / "scripts"
-SHARED_ROOT = ROOT.parents[1] / "02-共享模块-shared"
-for _p in (SCRIPTS, CONTRACTS, CANDIDATE, MARKET, SHARED_SCRIPTS, SHARED_ROOT):
-    if _p.exists() and str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
 for name in ("config", "light_data", "signal_store", "models", "pipeline", "signal_contract", "candidate_core", "candidate_model"):
     sys.modules.pop(name, None)
 

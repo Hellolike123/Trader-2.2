@@ -1,21 +1,11 @@
 """Tests for self_calibration.py nested optimization, blended fitness, and structure_core compatibility."""
 from __future__ import annotations
 
-import sys
 import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-TESTS_DIR = Path(__file__).resolve().parent
-SHARED = TESTS_DIR.parent
-CANDIDATE = SHARED / "02-候选逻辑-candidate"
-SCRIPTS = SHARED / "scripts"
-for p in (SHARED, CANDIDATE, SCRIPTS):
-    if str(p.resolve()) not in sys.path:
-        sys.path.insert(0, str(p.resolve()))
-
 import self_calibration as sc
-from structure_core import _theory_multipliers
+from trader_shared.structure_core import _theory_multipliers
 
 
 def test_blended_performance_simulation():
@@ -91,7 +81,7 @@ def test_structure_core_compatibility():
         "bull": {"zone_width": 1.15, "confirm_buffer": 0.8, "stop_buffer": 0.95},
     }
 
-    with patch("structure_core._load_calibrated_params", return_value=nested_cal):
+    with patch("trader_shared.structure_core._load_calibrated_params", return_value=nested_cal):
         mults = _theory_multipliers(fusion)
         # Bear regime should scale stop_buffer by 0.8 (Layer 1) -> 0.60
         # Then modulate by HMM bear multiplier (0.8) -> 0.48
@@ -106,7 +96,7 @@ def test_structure_core_compatibility():
 
     # Case B: Flat Params (Legacy version compatibility)
     flat_cal = {"zone_width": 1.0, "confirm_buffer": 1.0, "stop_buffer": 0.8}
-    with patch("structure_core._load_calibrated_params", return_value=flat_cal):
+    with patch("trader_shared.structure_core._load_calibrated_params", return_value=flat_cal):
         mults = _theory_multipliers(fusion)
         # Fallbacks to flat dict directly
         # stop_buffer = 0.8 * 0.8 (Layer 1) -> 0.64

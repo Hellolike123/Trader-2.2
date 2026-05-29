@@ -38,19 +38,19 @@ def shared_files_for_skill(staged_root: Path) -> dict[str, str]:
     shares: dict[str, str] = {}
     scripts = staged_root / "scripts"
 
-    for f in ("signal_contract.py", "signal_store.py", "signal_utils.py"):
-        p = scripts / f
-        if p.exists() and p.stat().st_size > 0:
-            shares[f"contracts/{f}"] = compute_file_sha256(p)
-
     for f in ("pipeline.py", "signal_tracker.py", "market_env.py", "calibrator.py"):
         p = scripts / f
         if p.exists() and p.stat().st_size > 0:
             shares[f"scripts/{f}"] = compute_file_sha256(p)
 
-    p = scripts / "light_data.py"
-    if p.exists() and p.stat().st_size > 0:
-        shares["market-data/light_data.py"] = compute_file_sha256(p)
+    # Digest from trader_shared package (contains all migrated modules)
+    trader_shared_dir = scripts / "trader_shared"
+    if trader_shared_dir.exists():
+        for f in sorted(trader_shared_dir.glob("*.py")):
+            if f.name == "__init__.py":
+                continue
+            if f.stat().st_size > 0:
+                shares[f"trader_shared/{f.name}"] = compute_file_sha256(f)
 
     return shares
 
@@ -139,35 +139,18 @@ def copy_shared(bundle: Path, skill_slug: str) -> None:
     scripts_dir = bundle / "scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)
 
-    contracts_dir = SHARE_DIR / "03-输出校验-contracts"
-    for f in ("signal_contract.py", "signal_store.py", "signal_utils.py"):
-        src = contracts_dir / f
-        if src.exists():
-            shutil.copy2(src, scripts_dir / f)
-
+    # Copy scripts that haven't moved into trader_shared yet
     shared_scripts_dir = SHARE_DIR / "scripts"
     for f in ("pipeline.py", "signal_tracker.py", "market_env.py", "calibrator.py"):
         src = shared_scripts_dir / f
         if src.exists():
             shutil.copy2(src, scripts_dir / f)
 
-    src = SHARE_DIR / "01-行情数据-market-data" / "light_data.py"
-    if src.exists():
-        shutil.copy2(src, scripts_dir / "light_data.py")
-
     src = SHARE_DIR / "contract_utils.py"
     if src.exists():
         shutil.copy2(src, scripts_dir / "contract_utils.py")
 
-    candidates_dir = SHARE_DIR / "02-候选逻辑-candidate"
-    for f in ("chan_core.py", "wyckoff_core.py", "momentum_core.py",
-              "fusion_core.py", "fusion_regime.py",
-              "time_window_detector.py", "t0_candidate_core.py",
-              "structure_core.py", "decision_core.py"):
-        src = candidates_dir / f
-        if src.exists():
-            shutil.copy2(src, scripts_dir / f)
-
+    # Copy the entire trader_shared package (contains all migrated modules)
     shared_pkg_src = SHARE_DIR / "trader_shared"
     shared_pkg_dst = scripts_dir / "trader_shared"
     if shared_pkg_src.exists():

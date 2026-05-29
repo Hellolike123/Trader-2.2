@@ -3,14 +3,7 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 import pytest
-
-_ROOT = Path(__file__).resolve().parents[2]
-_CANDIDATE = _ROOT / "02-共享模块-shared" / "02-候选逻辑-candidate"
-if str(_CANDIDATE) not in sys.path:
-    sys.path.insert(0, str(_CANDIDATE))
 
 
 def _make_bars(prices_and_volumes):
@@ -30,7 +23,7 @@ class TestVolumeProfile:
     """VolumeProfile 数学正确性与鲁棒性测试。"""
 
     def setup_method(self):
-        from volume_profile import VolumeProfile, compute_volume_profile, assess_vp_breakout
+        from trader_shared.volume_profile import VolumeProfile, compute_volume_profile, assess_vp_breakout
         self.VP = VolumeProfile
         self.compute = compute_volume_profile
         self.assess = assess_vp_breakout

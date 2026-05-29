@@ -3,13 +3,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "scripts"
-SHARED = ROOT.parents[1] / "02-共享模块-shared"
-
-for p in (SCRIPTS, SHARED):
-    if p.exists() and str(p) not in sys.path:
-        sys.path.insert(0, str(p))
+SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
 
 import pytest
 from run_analysis import sync_report_with_data

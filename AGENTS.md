@@ -15,6 +15,8 @@
 - **[2.3新增] 动态衰减与空间去重筹码分布**：`chip_distribution.py` 摒弃原有静态累加，实现基于时序 `turnover_rate` 换手折旧的动态筹码曲线，并引入基于局部极大值与空间/价格过滤（间距 $\ge 4\%$ 且 $\ge 4$ bins）的独立筹码峰提取算法，供复盘与仓位控制等技能跨模块全局共享。
 - **[2.3新增] 信号生命周期与日志合并**：废弃 `signal_log.jsonl` 等多个冗余文件，将所有 T0 事件、单票分析信号、手动结果回填统一收口至单一可信源 `~/.trader/signals.jsonl`，并由继承自 `os.PathLike` 的原生路径代理 `DynamicPathProxy` 提供透明、防 pytest 缓存污染的无缝 Mock 支持。
 - **[2.3新增] 斐波那契黄金挂单位 (Golden Bid)**：`structure_core.py` 自动从缠论笔中计算 38.2%/50%/61.8% 黄金分割回调价，并与当前低吸价格区间求交集，计算出高置信度的「黄金挂单位」（显示于 `📍 决策` 列表的空仓低吸参考旁）。
+- **[2.3新增] 分层数据缓存**：日线K线、扩展数据（股东/机构EPS/解禁/题材）、大盘环境均支持文件缓存。盘中分析读缓存 + 追加当日实时数据，盘后预缓存选股池全量数据。命令：`trader.py cache warm`（预缓存）、`trader.py cache clear`（清缓存）。
+- **[2.3新增] 统一包结构**：所有核心模块已迁移到 `trader_shared/` 包下，支持 `pip install -e .` 开发安装和 `pytest` 直接运行。import 统一为 `from trader_shared.xxx import ...`。
 - 真正的输出格式以 `01-功能包-packages/01-单票分析-trader/references/output-contract.md` 为准。
 - 需要看实现时，先看 `01-功能包-packages/01-单票分析-trader/scripts/run_analysis.py`。
 
@@ -319,3 +321,27 @@ python3 02-共享模块-shared/scripts/self_calibration.py
 | 文档 | 用途 | 状态 |
 |------|------|------|
 | `docs/buy-zone-accessibility-fix-plan.md` | 低位买入位可达性问题修复计划（P0-P3） | 待实施 |
+
+---
+
+## 包结构与 import 规范
+
+所有核心计算模块位于 `02-共享模块-shared/trader_shared/` 包下。标准 import 方式：
+
+```python
+from trader_shared.light_data import to_float, fetch_quote
+from trader_shared.chan_core import chanlun_analysis
+from trader_shared.config import LOOKBACK_DAYS
+from trader_shared.cache_utils import get_cached, set_cached
+from trader_shared.data_provider import get_provider
+```
+
+开发环境安装：`pip install -e .`（项目根目录下）
+测试运行：`python3 -m pytest 02-共享模块-shared/tests/`
+
+缓存管理命令：
+```bash
+trader.py cache warm              # 盘后预缓存选股池
+trader.py cache clear             # 清空全部缓存
+trader.py cache clear --type daily  # 只清日线缓存
+```

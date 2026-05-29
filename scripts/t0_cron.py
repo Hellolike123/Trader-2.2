@@ -22,7 +22,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+import trader_shared
 
 # ── 1. 交易时间守卫 ──────────────────────────────────────────
 
@@ -39,9 +39,6 @@ def _is_trading_session() -> bool:
 
 def _fetch_live_price(name: str) -> tuple[float, float] | None:
     """用 light_data 拿实时行情，返回 (current_price, change_pct) 或 None。"""
-    sys.path.insert(0, str(ROOT / "02-共享模块-shared" / "01-行情数据-market-data"))
-    sys.path.insert(0, str(ROOT / "02-共享模块-shared"))
-
     from light_data import fetch_quote, HttpClient, resolve_security
 
     try:
@@ -173,5 +170,20 @@ def main() -> int:
     return 0
 
 
+def warm_cache() -> int:
+    """盘后预缓存：为选股池所有活跃股票预抓取全量数据。"""
+    from trader_shared.cache_utils import warm_pool_cache
+    result = warm_pool_cache()
+    if result["success"] > 0:
+        print(f"预缓存完成: {result['success']}/{result['total']} 成功")
+    if result["failed"] > 0:
+        print(f"预缓存失败: {result['failed']}/{result['total']}")
+        for err in result.get("errors", []):
+            print(f"  - {err}")
+    return 0 if result["failed"] == 0 else 1
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--warm-cache":
+        raise SystemExit(warm_cache())
     raise SystemExit(main())

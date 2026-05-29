@@ -1,21 +1,12 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
-TESTS_DIR = Path(__file__).resolve().parent
-SHARED = TESTS_DIR.parent
-CANDIDATE = SHARED / "02-候选逻辑-candidate"
-MARKET = SHARED / "01-行情数据-market-data"
-for p in (SHARED, CANDIDATE, MARKET):
-    if str(p.resolve()) not in sys.path:
-        sys.path.insert(0, str(p.resolve()))
-
-for mod in ("wyckoff_core", "light_data"):
+for mod in ("trader_shared.wyckoff_core", "light_data"):
     if mod in sys.modules:
         del sys.modules[mod]
 
-from wyckoff_core import wyckoff_analysis
+from trader_shared.wyckoff_core import wyckoff_analysis
 
 
 def _make_bar(open_, high, low, close, volume=1000):

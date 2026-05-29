@@ -7,15 +7,9 @@ from pathlib import Path
 import pytest
 
 # ── Path setup ──────────────────────────────────────────────
-TESTS_DIR = Path(__file__).resolve().parent
-SHARED = TESTS_DIR.parent  # 02-共享模块-shared/
-SCRIPTS = SHARED / "scripts"
-CONTRACTS = SHARED / "03-输出校验-contracts"
-for _p in (SHARED, SCRIPTS, CONTRACTS):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+import trader_shared
 
-from signal_store import append_signal
+from trader_shared.signal_store import append_signal
 from signal_tracker import (
     _normalize_symbol,
     _norm_date,

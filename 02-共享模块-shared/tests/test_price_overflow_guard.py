@@ -1,13 +1,6 @@
 from __future__ import annotations
 
 import unittest
-import sys
-from pathlib import Path
-
-# Add shared paths
-_ROOT = Path(__file__).resolve().parents[2]
-_SHARED_MARKET = _ROOT / "02-共享模块-shared" / "01-行情数据-market-data"
-sys.path.insert(0, str(_SHARED_MARKET))
 
 from light_data import sanitize_quote
 

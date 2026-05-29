@@ -3,33 +3,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-
-ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "scripts"
-CONTRACTS = ROOT.parents[1] / "02-共享模块-shared" / "03-输出校验-contracts"
-SHARED = ROOT.parents[1] / "02-共享模块-shared"
-SHARED_CANDIDATE = ROOT.parents[1] / "02-共享模块-shared" / "02-候选逻辑-candidate"
-SHARED_MARKET = ROOT.parents[1] / "02-共享模块-shared" / "01-行情数据-market-data"
+SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
-if str(CONTRACTS) not in sys.path:
-    sys.path.insert(0, str(CONTRACTS))
-if str(SHARED) not in sys.path:
-    sys.path.insert(0, str(SHARED))
-if str(SHARED_CANDIDATE) not in sys.path:
-    sys.path.insert(0, str(SHARED_CANDIDATE))
-if str(SHARED_MARKET) not in sys.path:
-    sys.path.insert(0, str(SHARED_MARKET))
-for name in ("config", "light_data", "contract_utils", "candidate_core", "candidate_model", "validate_output", "models"):
-    sys.modules.pop(name, None)
-
-import sys
-from pathlib import Path
-
-TESTS_DIR = Path(__file__).resolve().parent
-SCRIPTS_DIR = TESTS_DIR.parent / "scripts"
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
 
 from candidate_core import build_candidate_levels
 from run_analysis import build_signal, render_markdown, volume_observation

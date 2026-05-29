@@ -1,15 +1,7 @@
 """Tests for order_book.py — five-level order book analysis for T0 monitoring."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-TESTS_DIR = Path(__file__).resolve().parent
-CANDIDATE = TESTS_DIR.parent / "02-候选逻辑-candidate"
-if str(CANDIDATE.resolve()) not in sys.path:
-    sys.path.insert(0, str(CANDIDATE.resolve()))
-
-from order_book import analyze
+from trader_shared.order_book import analyze
 
 
 def test_analyze_buy_strong():

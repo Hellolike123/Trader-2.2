@@ -11,20 +11,19 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-# 双模式路径发现：Hermes skill 包内 vs 仓库开发
-_SCRIPT_DIR = Path(__file__).resolve().parent
-if (_SCRIPT_DIR.parent / "trader_shared").exists():
-    _SHARED = _SCRIPT_DIR.parent          # skill 模式
-else:
-    _SHARED = _SCRIPT_DIR.parents[3] / "02-共享模块-shared"  # 仓库模式
-
-SHARED_CANDIDATE = _SHARED / "02-候选逻辑-candidate"
-SHARED_MARKET = _SHARED / "01-行情数据-market-data"
-SHARED_SCRIPTS = _SHARED / "scripts"
-SHARED_ROOT = _SHARED
-for _path in (SHARED_CANDIDATE, SHARED_MARKET, SHARED_SCRIPTS, SHARED_ROOT):
-    if _path.exists() and str(_path) not in sys.path:
-        sys.path.append(str(_path))
+try:
+    import trader_shared
+except ImportError:
+    _d = Path(__file__).resolve().parent
+    for _ in range(8):
+        if (_d / "trader_shared").is_dir():
+            if str(_d) not in sys.path:
+                sys.path.insert(0, str(_d))
+            import trader_shared
+            break
+        _d = _d.parent
+    else:
+        raise
 
 from light_data import to_float, pct_change
 
@@ -76,9 +75,7 @@ except ImportError:
     track_log = _empty_fn
     stats_by_type = _empty_dict
 
-CONTRACTS = Path(__file__).resolve().parents[3] / "02-共享模块-shared" / "03-输出校验-contracts"
-if CONTRACTS.exists() and str(CONTRACTS) not in sys.path:
-    sys.path.insert(0, str(CONTRACTS))
+
 
 from signal_contract import assert_valid_signal
 from datetime import date

@@ -12,15 +12,44 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 CACHE_DIR = Path.home() / ".trader" / "cache"
+
+# Subdirectory constants
+CACHE_DAILY = "daily"
+CACHE_ENRICH = "enrich"
+CACHE_MARKET_ENV = "market_env"
 
 # TTL constants (seconds)
 TTL_DAILY = 86400       # 24 hours - daily bars change once per day
 TTL_WEEKLY = 604800     # 7 days - weekly bars change once per week
 TTL_FUNDAMENTAL = 43200 # 12 hours - shareholder/unlock data updates infrequently
+
+
+def validate_bars(bars: list[dict]) -> bool:
+    """Validate bar data before writing to cache.
+
+    Checks:
+    - Bar count >= 200 (enough history for MA250)
+    - Each bar has close > 0
+    - Dates are monotonically increasing
+    """
+    if not isinstance(bars, list) or len(bars) < 200:
+        return False
+    prev_date = ""
+    for bar in bars:
+        close = bar.get("close")
+        if close is None or float(close) <= 0:
+            return False
+        date = str(bar.get("date") or bar.get("time") or "")
+        if date and date < prev_date:
+            return False
+        if date:
+            prev_date = date
+    return True
 
 
 def get_cached(key: str, target: str, ttl: int = TTL_DAILY) -> list[dict] | dict | None:
@@ -45,7 +74,180 @@ def set_cached(key: str, target: str, data: Any) -> None:
     tmp_file.replace(cache_file)  # atomic on POSIX
 
 
+def set_cached_validated(
+    key: str,
+    target: str,
+    data: Any,
+    validator: Callable[[Any], bool] | None = None,
+) -> bool:
+    """Write data to cache only if validation passes.
+
+    Returns True if written, False if validation failed or write errored.
+    """
+    if validator is not None and not validator(data):
+        return False
+    try:
+        set_cached(key, target, data)
+        return True
+    except Exception:
+        return False
+
+
 def invalidate(key: str, target: str) -> None:
     """Delete a specific cache entry."""
     cache_file = CACHE_DIR / key / f"{target}.json"
     cache_file.unlink(missing_ok=True)
+
+
+def warm_pool_cache() -> dict[str, Any]:
+    """Pre-cache data for all active stocks in the pool.
+
+    Called after market close (15:00) to prepare data for next day's analysis.
+    Reads ~/.trader/pool.json and fetches full data for each active stock.
+
+    Returns:
+        {"total": int, "success": int, "failed": int, "skipped": int, "errors": list}
+    """
+    import sys
+    from pathlib import Path
+
+    pool_path = Path.home() / ".trader" / "pool.json"
+    if not pool_path.exists():
+        return {"total": 0, "success": 0, "failed": 0, "skipped": 0, "errors": []}
+
+    try:
+        pool_data = json.loads(pool_path.read_text(encoding="utf-8"))
+        items = pool_data.get("items", [])
+        targets = [
+            item["name"] for item in items
+            if item.get("status") not in ("淘汰", "已退出")
+        ]
+    except Exception:
+        return {"total": 0, "success": 0, "failed": 0, "skipped": 0, "errors": []}
+
+    if not targets:
+        return {"total": 0, "success": 0, "failed": 0, "skipped": 0, "errors": []}
+
+    # Ensure paths
+    root = Path(__file__).resolve().parents[2]
+    for p in (
+        root / "01-行情数据-market-data",
+        root / "02-候选逻辑-candidate",
+        root / "scripts",
+    ):
+        if p.exists() and str(p) not in sys.path:
+            sys.path.insert(0, str(p))
+
+    try:
+        from trader_shared.data_provider import get_provider
+        from trader_shared.config import LOOKBACK_DAYS
+    except ImportError:
+        return {"total": len(targets), "success": 0, "failed": len(targets), "skipped": 0,
+                "errors": ["data_provider or config not available"]}
+
+    provider = get_provider()
+    success = 0
+    failed = 0
+    errors: list[str] = []
+
+    for name in targets:
+        try:
+            snapshot = provider.load_market_snapshot(name, days=LOOKBACK_DAYS, include_5m=False, include_ticks=False)
+            if snapshot.daily_bars and snapshot.quote:
+                success += 1
+            else:
+                failed += 1
+                errors.append(f"{name}: incomplete data")
+        except Exception as e:
+            failed += 1
+            errors.append(f"{name}: {e}")
+
+    # Also warm market env cache
+    try:
+        sys.path.insert(0, str(root / "scripts"))
+        from market_env import assess as _assess
+        _assess()
+    except Exception:
+        pass
+
+    return {"total": len(targets), "success": success, "failed": failed, "skipped": 0, "errors": errors}
+
+
+def clear_cache(cache_type: str | None = None) -> int:
+    """Clear cache files. If cache_type is specified, only clear that subdirectory.
+
+    Returns number of files deleted.
+    """
+    if cache_type:
+        target_dir = CACHE_DIR / cache_type
+    else:
+        target_dir = CACHE_DIR
+    if not target_dir.exists():
+        return 0
+    count = 0
+    for f in target_dir.rglob("*.json"):
+        try:
+            f.unlink()
+            count += 1
+        except Exception:
+            pass
+    return count
+
+
+def merge_daily_bars_with_quote(
+    cached_bars: list[dict],
+    quote: dict[str, Any],
+) -> list[dict]:
+    """Merge cached historical daily bars with today's real-time quote.
+
+    Strategy:
+    - Use cached bars as base (historical data, immutable after close)
+    - Build today's bar from quote data
+    - If today's date already exists in cached bars, replace it (quote is more recent)
+    - Otherwise append today's bar at the end
+    """
+    if not cached_bars or not quote:
+        return cached_bars
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+
+    def _to_float(v: Any) -> float | None:
+        if v in (None, "", "-", "--"):
+            return None
+        try:
+            return float(str(v).replace(",", ""))
+        except (ValueError, TypeError):
+            return None
+
+    current_price = _to_float(quote.get("current_price"))
+    if current_price is None:
+        return cached_bars
+
+    today_bar = {
+        "date": today_str,
+        "time": today_str,
+        "open": _to_float(quote.get("open")) or current_price,
+        "high": _to_float(quote.get("high")) or current_price,
+        "low": _to_float(quote.get("low")) or current_price,
+        "close": current_price,
+        "volume": _to_float(quote.get("volume")),
+        "amount": None,
+        "data_source": "realtime-merge",
+        "data_status": "partial",
+    }
+
+    # Check if today already exists in cached bars
+    result = []
+    today_replaced = False
+    for bar in cached_bars:
+        bar_date = str(bar.get("date") or bar.get("time") or "")
+        if bar_date == today_str:
+            result.append(today_bar)
+            today_replaced = True
+        else:
+            result.append(bar)
+
+    if not today_replaced:
+        result.append(today_bar)
+
+    return result

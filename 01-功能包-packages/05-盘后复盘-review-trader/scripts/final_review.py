@@ -5,22 +5,23 @@ import argparse
 import sys
 from pathlib import Path
 
-# 双模式路径发现：Hermes skill 包内 vs 仓库开发
+try:
+    import trader_shared
+except ImportError:
+    _d = Path(__file__).resolve().parent
+    for _ in range(8):
+        if (_d / "trader_shared").is_dir():
+            if str(_d) not in sys.path:
+                sys.path.insert(0, str(_d))
+            import trader_shared
+            break
+        _d = _d.parent
+    else:
+        raise
+
 _SCRIPT_DIR = Path(__file__).resolve().parent
-if (_SCRIPT_DIR.parent / "trader_shared").exists():
-    _ROOT = _SCRIPT_DIR.parent          # skill 模式
-else:
-    _ROOT = _SCRIPT_DIR.parents[3]      # 仓库模式
-for _p in (
-    _ROOT / "01-功能包-packages" / "05-盘后复盘-review-trader" / "scripts",
-    _ROOT / "02-共享模块-shared" / "01-行情数据-market-data",
-    _ROOT / "02-共享模块-shared" / "02-候选逻辑-candidate",
-    _ROOT / "02-共享模块-shared",
-    _ROOT / "02-共享模块-shared" / "03-输出校验-contracts",
-    _ROOT / "02-共享模块-shared" / "scripts",
-):
-    if _p.exists() and str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
 
 from review_compare import run_compare, run_compare_recent
 from review_single import run_single

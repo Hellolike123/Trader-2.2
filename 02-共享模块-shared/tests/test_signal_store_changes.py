@@ -25,7 +25,7 @@ class TestAppendSignalNoMutation:
         os.environ["TRADER_SIGNAL_STORE_PATH"] = str(self.store_path)
 
         # Clear any cached entries
-        from signal_store import _sig_cache
+        from trader_shared.signal_store import _sig_cache
         _sig_cache.clear()
 
     def teardown_method(self):
@@ -58,7 +58,7 @@ class TestAppendSignalNoMutation:
         trigger_copy = dict(original["trigger"])
         original_trigger = id(original["trigger"])
 
-        from signal_store import append_signal
+        from trader_shared.signal_store import append_signal
         sid = append_signal(original)
 
         # signal_id should NOT be in original
@@ -71,13 +71,13 @@ class TestAppendSignalNoMutation:
         original = self._make_full_signal(trigger={"price": 55.9, "text": "before"})
         trigger_before = dict(original["trigger"])
 
-        from signal_store import append_signal
+        from trader_shared.signal_store import append_signal
         append_signal(original)
 
         assert original["trigger"] == trigger_before
 
     def test_returns_signal_id(self):
-        from signal_store import append_signal
+        from trader_shared.signal_store import append_signal
         original = self._make_full_signal()
         sid = append_signal(original)
 
@@ -85,7 +85,7 @@ class TestAppendSignalNoMutation:
         assert len(sid) > 0
 
     def test_stored_record_has_signal_id(self):
-        from signal_store import append_signal, _read_store
+        from trader_shared.signal_store import append_signal, _read_store
         original = self._make_full_signal()
         append_signal(original)
 
@@ -102,7 +102,7 @@ class TestAppendSignalValidation:
         self.store_path = Path(self.tmpdir) / "signals.jsonl"
         os.environ["TRADER_SIGNAL_STORE_PATH"] = str(self.store_path)
 
-        from signal_store import _sig_cache
+        from trader_shared.signal_store import _sig_cache
         _sig_cache.clear()
 
     def teardown_method(self):
@@ -128,7 +128,7 @@ class TestAppendSignalValidation:
         }
 
     def test_missing_field_raises(self):
-        from signal_store import append_signal
+        from trader_shared.signal_store import append_signal
         sig = self._make_full_signal()
         del sig["source_skill"]
 
@@ -139,7 +139,7 @@ class TestAppendSignalValidation:
             assert "missing required field" in str(e)
 
     def test_invalid_signal_type_raises(self):
-        from signal_store import append_signal
+        from trader_shared.signal_store import append_signal
         sig = self._make_full_signal()
         sig["signal_type"] = "invalid_future_type"
 
@@ -158,12 +158,12 @@ class TestLoadRecentSignals:
         self.store_path = Path(self.tmpdir) / "signals.jsonl"
         os.environ["TRADER_SIGNAL_STORE_PATH"] = str(self.store_path)
 
-        from signal_store import _sig_cache
+        from trader_shared.signal_store import _sig_cache
         _sig_cache.clear()
 
     def teardown_method(self):
         self.store_path.unlink(missing_ok=True)
-        from signal_store import _sig_cache
+        from trader_shared.signal_store import _sig_cache
         _sig_cache.clear()
 
     def _make_signal(self, symbol="688248"):
@@ -186,12 +186,12 @@ class TestLoadRecentSignals:
         }
 
     def test_load_empty_returns_empty(self):
-        from signal_store import load_recent_signals
+        from trader_shared.signal_store import load_recent_signals
         recents = load_recent_signals(symbol="688248.SH")
         assert isinstance(recents, list)
 
     def test_load_single_signal(self):
-        from signal_store import append_signal, load_recent_signals, _sig_cache
+        from trader_shared.signal_store import append_signal, load_recent_signals, _sig_cache
         _sig_cache.clear()
         sig = self._make_signal()
         append_signal(sig)
@@ -201,7 +201,7 @@ class TestLoadRecentSignals:
         assert len(recents) >= 1
 
     def test_load_filtrers_by_symbol(self):
-        from signal_store import append_signal, load_recent_signals
+        from trader_shared.signal_store import append_signal, load_recent_signals
         sig = self._make_signal("688248")
         append_signal(sig)
 
@@ -218,12 +218,12 @@ class TestBadLineObservability:
         self.store_path = Path(self.tmpdir) / "signals.jsonl"
         os.environ["TRADER_SIGNAL_STORE_PATH"] = str(self.store_path)
 
-        from signal_store import _sig_cache
+        from trader_shared.signal_store import _sig_cache
         _sig_cache.clear()
 
     def teardown_method(self):
         self.store_path.unlink(missing_ok=True)
-        from signal_store import _sig_cache
+        from trader_shared.signal_store import _sig_cache
         _sig_cache.clear()
 
     def test_bad_line_increments_count(self):
@@ -233,10 +233,10 @@ class TestBadLineObservability:
             json.dumps({"test": "good"}) + "\nbad_json\n", encoding="utf-8"
         )
 
-        from signal_store import _read_store
+        from trader_shared.signal_store import _read_store
         signals = _read_store(self.store_path)
 
-        from signal_store import _bad_line_count
+        from trader_shared.signal_store import _bad_line_count
         assert _bad_line_count >= 1, "Bad line should increment counter"
         assert len(signals) == 1  # only the good one parsed
 
@@ -244,9 +244,9 @@ class TestBadLineObservability:
         """_bad_line_last_reason should be set on bad lines."""
         self.store_path.write_text("not_valid_json", encoding="utf-8")
 
-        from signal_store import _read_store
+        from trader_shared.signal_store import _read_store
         _read_store(self.store_path)
 
-        from signal_store import _bad_line_last_reason, _bad_line_last_path
+        from trader_shared.signal_store import _bad_line_last_reason, _bad_line_last_path
         assert _bad_line_last_reason != "", "Reason should be set"
         assert _bad_line_last_path == str(self.store_path)

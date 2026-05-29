@@ -1,19 +1,5 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-# Use absolute paths so pytest can find the module regardless of cwd
-TESTS_DIR = Path(__file__).resolve().parent
-SHARED = TESTS_DIR.parent  # 02-共享模块-shared/
-CANDIDATE = SHARED / "02-候选逻辑-candidate"
-MARKET = SHARED / "01-行情数据-market-data"
-SCRIPTS = SHARED / "scripts"
-TRADER_SHARED = SHARED / "trader_shared"
-for p in (SHARED, SCRIPTS, CANDIDATE, MARKET, TRADER_SHARED):
-    if str(p.resolve()) not in sys.path:
-        sys.path.insert(0, str(p.resolve()))
-
 import calibrator as cal
 
 

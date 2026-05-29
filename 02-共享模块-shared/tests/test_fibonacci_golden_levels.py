@@ -1,20 +1,6 @@
-import sys
-from pathlib import Path
 import pytest
 
-# Ensure candidates directory and shared modules are in python path
-TESTS_DIR = Path(__file__).resolve().parent
-SHARED = TESTS_DIR.parent
-CANDIDATE = SHARED / "02-候选逻辑-candidate"
-MARKET = SHARED / "01-行情数据-market-data"
-CONTRACTS = SHARED / "03-输出校验-contracts"
-TRADER_SCRIPTS = Path(__file__).resolve().parents[2] / "01-功能包-packages/01-单票分析-trader/scripts"
-
-for p in (SHARED, CANDIDATE, MARKET, CONTRACTS, TRADER_SCRIPTS):
-    if str(p.resolve()) not in sys.path:
-        sys.path.insert(0, str(p.resolve()))
-
-from structure_core import build_structure_context
+from trader_shared.structure_core import build_structure_context
 
 def test_fibonacci_golden_levels_calculation():
     # Prepare dummy BarData and MA/ATR mock structures

@@ -10,19 +10,9 @@ import argparse
 import sys
 from pathlib import Path
 
-# Add parent directory to path to allow importing signal_tracker
-SCRIPTS_DIR = Path(__file__).resolve().parent
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
+import trader_shared
 
-try:
-    from signal_tracker import migrate_signal_ids
-except ImportError:
-    # Handle if run from another directory
-    SHARED_DIR = SCRIPTS_DIR.parent
-    if str(SHARED_DIR) not in sys.path:
-        sys.path.insert(0, str(SHARED_DIR))
-    from scripts.signal_tracker import migrate_signal_ids
+from signal_tracker import migrate_signal_ids
 
 
 def main() -> int:

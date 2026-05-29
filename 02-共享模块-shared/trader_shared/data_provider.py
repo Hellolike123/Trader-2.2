@@ -133,24 +133,46 @@ _ENRICH_TTL = 600  # 10 分钟缓存，基本面数据不会盘中秒变
 def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
     """Enrich the MarketSnapshot with extend_fundamental and extend_sentiment using a thread pool.
 
-    带 10 分钟缓存 + 2s 超时，避免每次调用都等 4 路外部 API。
+    三层缓存策略:
+    1. 文件缓存 (TTL 12小时) — 盘后预缓存的数据，进程重启不丢失
+    2. 内存缓存 (TTL 10分钟) — 同一进程内快速命中
+    3. 实时抓取 — 缓存全部 miss 时走 4 路 API
     """
     sec = snap.security
     if not sec or not sec.code or len(sec.code) != 6 or not sec.code.isdigit():
         return snap
 
-    # 缓存命中
     import time
+    import dataclasses
+
+    # ── 层1: 文件缓存命中 (TTL 12小时) ──
+    try:
+        from trader_shared.cache_utils import get_cached as _file_cached, CACHE_ENRICH, TTL_FUNDAMENTAL
+        file_cached = _file_cached(CACHE_ENRICH, sec.code, ttl=TTL_FUNDAMENTAL)
+        if file_cached is not None and isinstance(file_cached, dict):
+            extend_fundamental = file_cached.get("extend_fundamental", {})
+            extend_sentiment = file_cached.get("extend_sentiment", {})
+            if extend_fundamental or extend_sentiment:
+                _ENRICH_CACHE[sec.code] = (time.time(), extend_fundamental, extend_sentiment)
+                return dataclasses.replace(
+                    snap,
+                    extend_fundamental=extend_fundamental,
+                    extend_sentiment=extend_sentiment,
+                )
+    except Exception:
+        pass
+
+    # ── 层2: 内存缓存命中 (TTL 10分钟) ──
     now = time.time()
     cached = _ENRICH_CACHE.get(sec.code)
     if cached is not None and now - cached[0] < _ENRICH_TTL:
-        import dataclasses
         return dataclasses.replace(
             snap,
             extend_fundamental=cached[1],
             extend_sentiment=cached[2],
         )
 
+    # ── 层3: 实时抓取 ──
     try:
         from trader_shared.extend_data import ExtendDataProvider
         from concurrent.futures import ThreadPoolExecutor
@@ -175,10 +197,19 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
                 "theme_harden": hot_reason,
             }
 
-            # 写入缓存
+            # 写入内存缓存
             _ENRICH_CACHE[sec.code] = (now, extend_fundamental, extend_sentiment)
 
-            import dataclasses
+            # 写入文件缓存
+            try:
+                from trader_shared.cache_utils import set_cached as _file_set, CACHE_ENRICH
+                _file_set(CACHE_ENRICH, sec.code, {
+                    "extend_fundamental": extend_fundamental,
+                    "extend_sentiment": extend_sentiment,
+                })
+            except Exception:
+                pass
+
             return dataclasses.replace(
                 snap,
                 extend_fundamental=extend_fundamental,
@@ -190,106 +221,114 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
         return snap
 
 
-class MootdxProvider:
-    """Mootdx-backed implementation using light_data.py mootdx-priority functions."""
+class UnifiedProvider:
+    """Unified data provider — single implementation for all backends.
 
-    def __init__(self) -> None:
+    For tencent/mootdx backends, delegates to light_data.py functions.
+    For akshare backend, uses akshare API directly.
+    """
+
+    def __init__(self, backend: str = "tencent") -> None:
+        self._backend = backend
         self._http = None
 
     @property
     def name(self) -> str:
-        return "mootdx"
+        return self._backend
 
-    def _ensure_paths(self) -> None:
-        _market = _market_data
-        _candidate = _shared / "02-候选逻辑-candidate"
-        for _p in (_market, _candidate):
-            if str(_p) not in sys.path:
-                sys.path.insert(0, str(_p))
+    def _ensure_http(self) -> None:
+        if self._http is None:
+            from light_data import HttpClient
+            self._http = HttpClient()
+
+    def _to_sec(self, sec: Security):
+        from light_data import Security as _Sec
+        return _Sec(sec.code, sec.market, sec.name)
+
+    # ── Common methods (all backends) ──
 
     def resolve_security(self, target: str) -> Security:
-        self._ensure_paths()
         from light_data import resolve_security as _resolve
         sec = _resolve(target)
         return Security(code=sec.code, market=sec.market, name=sec.name)
 
+    def pct_change(self, start: float, end: float) -> float:
+        from light_data import pct_change as _fn
+        return _fn(start, end)
+
+    def to_float(self, value: Any) -> float | None:
+        from light_data import to_float as _fn
+        return _fn(value)
+
+    def normalize_bars(self, raw_bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        from light_data import normalize_bars as _fn
+        return _fn(raw_bars)
+
+    # ── Tencent/Mootdx backend (default) ──
+
     def fetch_quote(self, sec: Security) -> dict[str, Any]:
-        self._ensure_paths()
-        if self._http is None:
-            from light_data import HttpClient
-            self._http = HttpClient()
+        if self._backend == "akshare":
+            return self._akshare_fetch_quote(sec)
+        self._ensure_http()
         from light_data import fetch_quote as _fetch
-        from light_data import Security as _Sec
-        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http)
+        return _fetch(self._to_sec(sec), self._http)
 
     def fetch_qfq_daily(self, sec: Security, days: int = 30) -> list[dict[str, Any]]:
+        if self._backend == "akshare":
+            return self._akshare_fetch_qfq_daily(sec, days)
         from trader_shared.cache_utils import get_cached, set_cached, TTL_DAILY
         cached = get_cached("daily", sec.code, ttl=TTL_DAILY)
         if cached is not None:
             return cached
-        self._ensure_paths()
-        if self._http is None:
-            from light_data import HttpClient
-            self._http = HttpClient()
+        self._ensure_http()
         from light_data import fetch_qfq_daily as _fetch
-        from light_data import Security as _Sec
-        bars = _fetch(_Sec(sec.code, sec.market, sec.name), self._http, days=days)
+        bars = _fetch(self._to_sec(sec), self._http, days=days)
         set_cached("daily", sec.code, bars)
         return bars
 
     def fetch_5m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
-        self._ensure_paths()
-        if self._http is None:
-            from light_data import HttpClient
-            self._http = HttpClient()
+        if self._backend == "akshare":
+            return self._akshare_fetch_kline(sec, "5", datalen)
+        self._ensure_http()
         from light_data import fetch_5m as _fetch
-        from light_data import Security as _Sec
-        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http, datalen=datalen)
+        return _fetch(self._to_sec(sec), self._http, datalen=datalen)
 
     def fetch_15m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
-        self._ensure_paths()
-        if self._http is None:
-            from light_data import HttpClient
-            self._http = HttpClient()
+        if self._backend == "akshare":
+            return self._akshare_fetch_kline(sec, "15", datalen)
+        self._ensure_http()
         from light_data import fetch_15m as _fetch
-        from light_data import Security as _Sec
-        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http, datalen=datalen)
+        return _fetch(self._to_sec(sec), self._http, datalen=datalen)
 
     def fetch_30m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
-        self._ensure_paths()
-        if self._http is None:
-            from light_data import HttpClient
-            self._http = HttpClient()
+        if self._backend == "akshare":
+            return self._akshare_fetch_kline(sec, "30", datalen)
+        self._ensure_http()
         from light_data import fetch_30m as _fetch
-        from light_data import Security as _Sec
-        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http, datalen=datalen)
+        return _fetch(self._to_sec(sec), self._http, datalen=datalen)
 
     def fetch_kline(self, sec: Security, scale: str, datalen: int = 60) -> list[dict[str, Any]]:
-        self._ensure_paths()
-        if self._http is None:
-            from light_data import HttpClient
-            self._http = HttpClient()
+        if self._backend == "akshare":
+            return self._akshare_fetch_kline(sec, scale, datalen)
+        self._ensure_http()
         from light_data import fetch_kline as _fetch
-        from light_data import Security as _Sec
-        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http, interval=scale, datalen=datalen)
+        return _fetch(self._to_sec(sec), self._http, interval=scale, datalen=datalen)
 
     def fetch_ticks(self, sec: Security, count: int = 500) -> list[dict[str, Any]]:
-        self._ensure_paths()
-        if self._http is None:
-            from light_data import HttpClient
-            self._http = HttpClient()
-        from light_data import Security as _Sec
+        if self._backend != "mootdx":
+            return []
+        self._ensure_http()
         try:
             from light_data import _fetch_ticks_tdx3
-            res = _fetch_ticks_tdx3(_Sec(sec.code, sec.market, sec.name), count=count)
+            res = _fetch_ticks_tdx3(self._to_sec(sec), count=count)
             return res if res is not None else []
         except ImportError:
             return []
 
     def load_market_snapshot(self, target: str, days: int = 365, include_5m: bool = True, include_ticks: bool = True) -> MarketSnapshot:
-        self._ensure_paths()
+        if self._backend == "akshare":
+            return self._akshare_load_snapshot(target, days, include_5m, include_ticks)
         from light_data import load_market_snapshot as _load
-        from light_data import MarketSnapshot as _MS
         snap = _load(target, days=days, include_5m=include_5m, include_ticks=include_ticks)
         sec = Security(code=snap.security.code, market=snap.security.market, name=snap.security.name)
         res_snap = MarketSnapshot(
@@ -306,188 +345,22 @@ class MootdxProvider:
         )
         return _enrich_snapshot(res_snap)
 
-    def pct_change(self, start: float, end: float) -> float:
-        self._ensure_paths()
-        from light_data import pct_change as _fn
-        return _fn(start, end)
+    # ── AkShare-specific methods ──
 
-    def to_float(self, value: Any) -> float | None:
-        self._ensure_paths()
-        from light_data import to_float as _fn
-        return _fn(value)
+    def _akshare_ensure(self) -> None:
+        try:
+            import akshare  # noqa: F401
+        except ImportError:
+            raise RuntimeError("akshare 未安装。请运行: pip install akshare")
 
-    def normalize_bars(self, raw_bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        self._ensure_paths()
-        from light_data import normalize_bars as _fn
-        return _fn(raw_bars)
-
-
-class TencentSinaProvider:
-    """Default implementation using the existing light_data.py module."""
-
-    def __init__(self) -> None:
-        self._http = None
-
-    @property
-    def name(self) -> str:
-        return "tencent-sina"
-
-    def _ensure_paths(self) -> None:
-        _market = _market_data
-        _candidate = _shared / "02-候选逻辑-candidate"
-        for _p in (_market, _candidate):
-            if str(_p) not in sys.path:
-                sys.path.insert(0, str(_p))
-
-    def resolve_security(self, target: str) -> Security:
-        self._ensure_paths()
-        from light_data import resolve_security as _resolve
-        sec = _resolve(target)
-        return Security(code=sec.code, market=sec.market, name=sec.name)
-
-    def fetch_quote(self, sec: Security) -> dict[str, Any]:
-        self._ensure_paths()
-        if self._http is None:
-            from light_data import HttpClient
-            self._http = HttpClient()
-        from light_data import fetch_quote as _fetch
-        from light_data import Security as _Sec
-        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http)
-
-    def fetch_qfq_daily(self, sec: Security, days: int = 30) -> list[dict[str, Any]]:
-        from trader_shared.cache_utils import get_cached, set_cached, TTL_DAILY
-        cached = get_cached("daily", sec.code, ttl=TTL_DAILY)
-        if cached is not None:
-            return cached
-        self._ensure_paths()
-        if self._http is None:
-            from light_data import HttpClient
-            self._http = HttpClient()
-        from light_data import fetch_qfq_daily as _fetch
-        from light_data import Security as _Sec
-        bars = _fetch(_Sec(sec.code, sec.market, sec.name), self._http, days=days)
-        set_cached("daily", sec.code, bars)
-        return bars
-
-    def fetch_5m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
-        self._ensure_paths()
-        if self._http is None:
-            from light_data import HttpClient
-            self._http = HttpClient()
-        from light_data import fetch_5m as _fetch
-        from light_data import Security as _Sec
-        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http, datalen=datalen)
-
-    def fetch_15m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
-        self._ensure_paths()
-        if self._http is None:
-            from light_data import HttpClient
-            self._http = HttpClient()
-        from light_data import fetch_15m as _fetch
-        from light_data import Security as _Sec
-        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http, datalen=datalen)
-
-    def fetch_30m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
-        self._ensure_paths()
-        if self._http is None:
-            from light_data import HttpClient
-            self._http = HttpClient()
-        from light_data import fetch_30m as _fetch
-        from light_data import Security as _Sec
-        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http, datalen=datalen)
-
-    def fetch_kline(self, sec: Security, scale: str, datalen: int = 60) -> list[dict[str, Any]]:
-        self._ensure_paths()
-        if self._http is None:
-            from light_data import HttpClient
-            self._http = HttpClient()
-        from light_data import fetch_kline as _fetch
-        from light_data import Security as _Sec
-        return _fetch(_Sec(sec.code, sec.market, sec.name), self._http, interval=scale, datalen=datalen)
-
-    def fetch_ticks(self, sec: Security, count: int = 500) -> list[dict[str, Any]]:
-        return []
-
-    def load_market_snapshot(self, target: str, days: int = 365, include_5m: bool = True, include_ticks: bool = True) -> MarketSnapshot:
-        self._ensure_paths()
-        from light_data import load_market_snapshot as _load
-        from light_data import MarketSnapshot as _MS
-        snap = _load(target, days=days, include_5m=include_5m, include_ticks=include_ticks)
-        sec = Security(code=snap.security.code, market=snap.security.market, name=snap.security.name)
-        res_snap = MarketSnapshot(
-            security=sec,
-            quote=snap.quote,
-            daily_bars=snap.daily_bars,
-            bars_5m=snap.bars_5m,
-            order_book=getattr(snap, "order_book", None),
-            tick_data=getattr(snap, "tick_data", []),
-            data_status=snap.data_status,
-            missing_sources=snap.missing_sources,
-            source_errors=snap.source_errors,
-            fetched_at=snap.fetched_at,
-        )
-        return _enrich_snapshot(res_snap)
-
-    def pct_change(self, start: float, end: float) -> float:
-        self._ensure_paths()
-        from light_data import pct_change as _fn
-        return _fn(start, end)
-
-    def to_float(self, value: Any) -> float | None:
-        self._ensure_paths()
-        from light_data import to_float as _fn
-        return _fn(value)
-
-    def normalize_bars(self, raw_bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        self._ensure_paths()
-        from light_data import normalize_bars as _fn
-        return _fn(raw_bars)
-
-
-# ═══════════════════════════════════════════════
-# AkShare provider (optional, requires akshare)
-# ═══════════════════════════════════════════════
-
-
-class AkShareProvider:
-    """Provider backed by akshare library.
-
-    Usage:
-        from trader_shared.data_provider import get_provider_set_from_env
-        # Then all code that imports from light_data can remain unchanged;
-        # the env var just affects future imports.
-    """
-
-    def __init__(self) -> None:
-        pass
-
-    @property
-    def name(self) -> str:
-        return "akshare"
-
-    def resolve_security(self, target: str) -> Security:
-        from light_data import resolve_security as _resolve
-        sec = _resolve(target)
-        return Security(code=sec.code, market=sec.market, name=sec.name)
-
-    def _to_standard_bar(self, row: dict[str, Any], dt_key: str = "date") -> dict[str, Any] | None:
-        """Convert a raw bar from akshare to standard dict format.
-
-        AkShare stock_zh_a_hist returns Chinese column names:
-            日期, 开盘, 收盘, 最高, 最低, 成交量, 成交额, 换手率 ...
-        AkShare stock_zh_a_hist_min_em returns Chinese column names too:
-            时间, 开盘, 收盘, 最高, 最低, 成交量, 成交额 ...
-        Always try Chinese names first, then fall back to English.
-        """
-        # Chinese column names (akshare standard)
+    def _akshare_to_bar(self, row: dict[str, Any], dt_key: str = "date") -> dict[str, Any] | None:
         close = to_float(row.get("收盘") or row.get("close"))
         if close is None:
             return None
-        # 日期: 日线用"日期", 分钟线用 dt_key（如"时间"）
         date_val = str(row.get("日期") or row.get(dt_key, ""))
         return {
             "date": date_val.split(" ")[0] if " " in date_val else date_val,
-            "time": date_val,   # review_core bar_time() 需要读这个
+            "time": date_val,
             "open": to_float(row.get("开盘") or row.get("open")),
             "close": close,
             "high": to_float(row.get("最高") or row.get("high")),
@@ -496,47 +369,8 @@ class AkShareProvider:
             "amount": to_float(row.get("成交额") or row.get("amount")),
         }
 
-
-
-    def _ensure_akshare(self) -> None:
-        try:
-            import akshare  # noqa: F401
-        except ImportError:
-            raise RuntimeError(
-                "akshare 未安装。请运行: pip install akshare"
-            )
-
-    def fetch_qfq_daily(self, sec: Security, days: int = 30) -> list[dict[str, Any]]:
-        self._ensure_akshare()
-        import akshare as ak
-        import pandas as pd
-
-        start_date = ""
-        if days:
-            from datetime import timedelta
-            start_date = (pd.Timestamp.today() - timedelta(days=days)).strftime("%Y%m%d")
-
-        df = ak.stock_zh_a_hist(
-            symbol=sec.code,
-            period="daily",
-            start_date=start_date,
-            end_date="",
-            adjust="qfq",
-        )
-
-        bars: list[dict[str, Any]] = []
-        for _, row in df.iterrows():
-            bar = self._to_standard_bar(row.to_dict())
-            if bar:
-                bars.append(bar)
-
-        # 附加 ATR 字段（复用 light_data 的逻辑）
-        from light_data import _compute_atr_fields
-        _compute_atr_fields(bars)
-        return bars
-
-    def fetch_quote(self, sec: Security) -> dict[str, Any]:
-        self._ensure_akshare()
+    def _akshare_fetch_quote(self, sec: Security) -> dict[str, Any]:
+        self._akshare_ensure()
         import akshare as ak
         df = ak.stock_zh_a_spot_em()
         row = df[df["代码"] == sec.code]
@@ -556,56 +390,27 @@ class AkShareProvider:
             "current_change_pct": to_float(r.get("涨跌幅")),
         }
 
-    def fetch_5m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
-        self._ensure_akshare()
+    def _akshare_fetch_qfq_daily(self, sec: Security, days: int = 30) -> list[dict[str, Any]]:
+        self._akshare_ensure()
         import akshare as ak
-        df = ak.stock_zh_a_hist_min_em(symbol=sec.code, period="5")
-        bars: list[dict[str, Any]] = []
-        for _, row in df.tail(datalen).iterrows():
-            bar = self._to_standard_bar(row.to_dict(), dt_key="时间")
-            if bar:
-                bars.append(bar)
+        import pandas as pd
+        start_date = ""
+        if days:
+            from datetime import timedelta
+            start_date = (pd.Timestamp.today() - timedelta(days=days)).strftime("%Y%m%d")
+        df = ak.stock_zh_a_hist(symbol=sec.code, period="daily", start_date=start_date, end_date="", adjust="qfq")
+        bars = [bar for _, row in df.iterrows() if (bar := self._akshare_to_bar(row.to_dict()))]
+        from light_data import _compute_atr_fields
+        _compute_atr_fields(bars)
         return bars
 
-    def fetch_15m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
-        self._ensure_akshare()
+    def _akshare_fetch_kline(self, sec: Security, scale: str, datalen: int = 60) -> list[dict[str, Any]]:
+        self._akshare_ensure()
         import akshare as ak
-        df = ak.stock_zh_a_hist_min_em(symbol=sec.code, period="15")
-        bars: list[dict[str, Any]] = []
-        for _, row in df.tail(datalen).iterrows():
-            bar = self._to_standard_bar(row.to_dict(), dt_key="时间")
-            if bar:
-                bars.append(bar)
-        return bars
+        df = ak.stock_zh_a_hist_min_em(symbol=sec.code, period=scale)
+        return [bar for _, row in df.tail(datalen).iterrows() if (bar := self._akshare_to_bar(row.to_dict(), dt_key="时间"))]
 
-    def fetch_30m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
-        self._ensure_akshare()
-        import akshare as ak
-        df = ak.stock_zh_a_hist_min_em(symbol=sec.code, period="30")
-        bars: list[dict[str, Any]] = []
-        for _, row in df.tail(datalen).iterrows():
-            bar = self._to_standard_bar(row.to_dict(), dt_key="时间")
-            if bar:
-                bars.append(bar)
-        return bars
-
-    def fetch_kline(self, sec: Security, scale: str, datalen: int = 60) -> list[dict[str, Any]]:
-        self._ensure_akshare()
-        period_map = {"5": "5", "15": "15", "30": "30", "60": "60"}
-        period = period_map.get(scale, "5")
-        import akshare as ak
-        df = ak.stock_zh_a_hist_min_em(symbol=sec.code, period=period)
-        bars: list[dict[str, Any]] = []
-        for _, row in df.tail(datalen).iterrows():
-            bar = self._to_standard_bar(row.to_dict(), dt_key="时间")
-            if bar:
-                bars.append(bar)
-        return bars
-
-    def fetch_ticks(self, sec: Security, count: int = 500) -> list[dict[str, Any]]:
-        return []
-
-    def load_market_snapshot(self, target: str, days: int = 365, include_5m: bool = True, include_ticks: bool = True) -> MarketSnapshot:
+    def _akshare_load_snapshot(self, target: str, days: int, include_5m: bool, include_ticks: bool) -> MarketSnapshot:
         sec = self.resolve_security(target)
         daily_bars, bars_5m, quote, tick_data = [], [], {}, []
         source_errors: dict[str, str] = {}
@@ -622,41 +427,12 @@ class AkShareProvider:
                 bars_5m = self.fetch_5m(sec)
             except Exception as e:
                 source_errors["5m"] = str(e)
-        if include_ticks:
-            try:
-                tick_data = self.fetch_ticks(sec, count=500)
-            except Exception as e:
-                source_errors["ticks"] = str(e)
-
-        if daily_bars and quote:
-            data_status = "full"
-        elif daily_bars or quote:
-            data_status = "partial"
-        else:
-            data_status = "failed"
-
+        data_status = "full" if (daily_bars and quote) else "partial" if (daily_bars or quote) else "failed"
         res_snap = MarketSnapshot(
-            security=sec,
-            quote=quote,
-            daily_bars=daily_bars,
-            bars_5m=bars_5m,
-            tick_data=tick_data,
-            data_status=data_status,
-            source_errors=source_errors,
+            security=sec, quote=quote, daily_bars=daily_bars, bars_5m=bars_5m,
+            tick_data=tick_data, data_status=data_status, source_errors=source_errors,
         )
         return _enrich_snapshot(res_snap)
-
-    def pct_change(self, start: float, end: float) -> float:
-        from light_data import pct_change as _fn
-        return _fn(start, end)
-
-    def to_float(self, value: Any) -> float | None:
-        from light_data import to_float as _fn
-        return _fn(value)
-
-    def normalize_bars(self, raw_bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        from light_data import normalize_bars as _fn
-        return _fn(raw_bars)
 
 
 # ═══════════════════════════════════════════════
@@ -667,16 +443,6 @@ _provider: DataProvider | None = None
 _provider_set = False
 
 
-def _init_provider() -> DataProvider:
-    try:
-        return TencentSinaProvider()
-    except Exception:
-        try:
-            return MootdxProvider()
-        except Exception:
-            return TencentSinaProvider()
-
-
 def get_provider() -> DataProvider:
     """Return the current DataProvider instance (lazy init via TRADER_DATA_PROVIDER env var)."""
     global _provider
@@ -684,23 +450,13 @@ def get_provider() -> DataProvider:
         return _provider
 
     provider_name = os.environ.get("TRADER_DATA_PROVIDER", "").lower()
-    if provider_name == "mootdx":
-        try:
-            _provider = MootdxProvider()
-            print(f"DataProvider: using mootdx (via TRADER_DATA_PROVIDER=mootdx)", file=sys.stderr)
-            return _provider
-        except Exception as e:
-            warnings.warn(f"[data_provider] TRADER_DATA_PROVIDER=mootdx 创建失败: {e}，静默降级", stacklevel=2)
-    if provider_name == "akshare":
-        try:
-            _provider = AkShareProvider()
-            print(f"DataProvider: using akshare (via TRADER_DATA_PROVIDER=akshare)", file=sys.stderr)
-            return _provider
-        except RuntimeError as e:
-            warnings.warn(f"[data_provider] TRADER_DATA_PROVIDER=akshare 创建失败: {e}，静默降级", stacklevel=2)
-    _provider = _init_provider()
-    source_name = _provider.name
-    print(f"DataProvider: using {source_name}", file=sys.stderr)
+    if provider_name in ("mootdx", "akshare"):
+        _provider = UnifiedProvider(backend=provider_name)
+        print(f"DataProvider: using {provider_name} (via TRADER_DATA_PROVIDER)", file=sys.stderr)
+        return _provider
+
+    _provider = UnifiedProvider(backend="tencent")
+    print(f"DataProvider: using tencent", file=sys.stderr)
     return _provider
 
 

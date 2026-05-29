@@ -13,12 +13,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-# Ensure shared peer directories are in python path
-SHARED_DIR = Path(__file__).resolve().parent.parent
-for folder in ("01-行情数据-market-data", "02-候选逻辑-candidate", "03-输出校验-contracts"):
-    p = SHARED_DIR / folder
-    if str(p) not in sys.path:
-        sys.path.insert(0, str(p))
+import trader_shared
 
 
 
@@ -185,13 +180,7 @@ def _create_log_record(sig_id: str, sig_md5: str, skill: str, target: str, symbo
     }
     
     # Direct import/call to reuse validation and atomic lock writing
-    try:
-        from signal_store import append_signal
-    except ImportError:
-        import sys
-        from pathlib import Path
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "03-输出校验-contracts"))
-        from signal_store import append_signal
+    from signal_store import append_signal
         
     append_signal(record, path=LOG_PATH)
 

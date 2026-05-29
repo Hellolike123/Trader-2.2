@@ -3,16 +3,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-
-ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "scripts"
-CONTRACTS = ROOT.parents[1] / "02-共享模块-shared" / "03-输出校验-contracts"
-SHARED = ROOT.parents[1] / "02-共享模块-shared"
-
-for _path in (SCRIPTS, CONTRACTS, SHARED):
-    if _path.exists() and str(_path) not in sys.path:
-        sys.path.append(str(_path))
-
+SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
 
 import pytest
 from run_analysis import build_signal, _map_fusion_to_signal

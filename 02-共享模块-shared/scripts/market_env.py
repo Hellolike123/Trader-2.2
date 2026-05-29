@@ -4,13 +4,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# ── path setup (MUST precede all imports below) ──
-_SHARED_ROOT = Path(__file__).resolve().parents[1]
-_SCRIPTS_DIR = _SHARED_ROOT / "scripts"
-_MARKET_DATA = _SHARED_ROOT / "01-行情数据-market-data"
-for _p in (_SCRIPTS_DIR, _MARKET_DATA):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+import trader_shared
 
 try:
     from pipeline import write_market
@@ -115,9 +109,20 @@ def _ma(bars: list[dict[str, Any]], period: int) -> float | None:
 
 
 def assess() -> dict[str, Any]:
+    # ── 文件缓存读取（盘后预缓存，TTL 24小时）──
+    _cached_env = None
+    try:
+        from trader_shared.cache_utils import get_cached as _file_cached, CACHE_MARKET_ENV, TTL_DAILY
+        _cached_env = _file_cached(CACHE_MARKET_ENV, "index", ttl=TTL_DAILY)
+    except Exception:
+        pass
+
     idx_data = _fetch_index_data()
 
     if not idx_data:
+        # 缓存有数据但实时抓取失败 → 使用缓存
+        if _cached_env and isinstance(_cached_env, dict) and _cached_env.get("bars"):
+            return _cached_env
         return {
             "level": "未知",
             "current": 0,
@@ -135,6 +140,18 @@ def assess() -> dict[str, Any]:
     change_pct = idx_data.get("change_pct", 0.0)
     bars = idx_data.get("bars", [])
 
+    # ── 合并缓存的历史 bars 与当日实时数据 ──
+    if _cached_env and isinstance(_cached_env, dict):
+        cached_bars = _cached_env.get("bars", [])
+        if cached_bars and bars:
+            # 用缓存的历史 bars 替代（更完整），追加今天的实时 bar
+            today_str = __import__("datetime").datetime.now().strftime("%Y-%m-%d")
+            merged = [b for b in cached_bars if b.get("date") != today_str]
+            merged.extend(bars)  # bars 里有今天的实时数据
+            bars = merged
+        elif cached_bars and not bars:
+            bars = cached_bars
+
     # [2.3] HMM 大势前瞻判定
     hmm_regime_en = "range"
     hmm_regime_label = "宽幅震荡"
@@ -146,12 +163,7 @@ def assess() -> dict[str, Any]:
                 closes.append(current)
             index_returns = [(closes[i] - closes[i-1]) / closes[i-1] for i in range(1, len(closes))]
             if len(index_returns) >= 5:
-                import sys
-                from pathlib import Path
-                _base = Path(__file__).resolve().parent.parent / "02-候选逻辑-candidate"
-                if str(_base) not in sys.path:
-                    sys.path.insert(0, str(_base))
-                from hmm_regime import detect_regime
+                from trader_shared.hmm_regime import detect_regime
                 hmm_res = detect_regime(index_returns)
                 hmm_regime_en = hmm_res.get("state_en", "range")
                 hmm_regime_label = hmm_res.get("state_label", "宽幅震荡")
@@ -194,7 +206,7 @@ def assess() -> dict[str, Any]:
 
     note = f"中证1000 MA5/MA20 {'>' if mid_term=='up' else '<'} 趋势{'偏多' if mid_term=='up' else '偏空'} 今日{change_pct:+.1f}%"
 
-    return {
+    result = {
         "level": level,
         "current": current,
         "change_pct": change_pct,
@@ -205,7 +217,17 @@ def assess() -> dict[str, Any]:
         "hmm_regime_label": hmm_regime_label,
         "hmm_confidence": hmm_confidence,
         "note": note + f" (HMM前瞻: {hmm_regime_label})",
+        "bars": bars,  # 保留 bars 供缓存和下游使用
     }
+
+    # ── 写入文件缓存 ──
+    try:
+        from trader_shared.cache_utils import set_cached as _file_set, CACHE_MARKET_ENV
+        _file_set(CACHE_MARKET_ENV, "index", result)
+    except Exception:
+        pass
+
+    return result
 
 
 def refresh(write_pipeline: bool = True) -> dict[str, Any]:

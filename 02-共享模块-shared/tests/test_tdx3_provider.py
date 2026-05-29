@@ -1,25 +1,15 @@
 """Tests for pytdx3 data source provider and physical Tick aggregation."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-TESTS_DIR = Path(__file__).resolve().parent
-SHARED = TESTS_DIR.parent
-MARKETDATA = SHARED / "01-行情数据-market-data"
-for p in (SHARED, MARKETDATA):
-    if str(p.resolve()) not in sys.path:
-        sys.path.insert(0, str(p.resolve()))
-
 from unittest.mock import MagicMock, patch
 import pytest
 
 
-@patch("light_data._API_RATE_LIMITER.check_and_record", return_value=True)
-@patch("light_data._get_tdx3_client")
+@patch("trader_shared.light_data._API_RATE_LIMITER.check_and_record", return_value=True)
+@patch("trader_shared.light_data._get_tdx3_client")
 def test_fetch_ticks_tdx3_mapping(mock_get_client, mock_rate):
     """Verify that _fetch_ticks_tdx3 maps raw tdx transaction ticks to standard formats."""
-    import light_data
+    import trader_shared.light_data as light_data
     orig_avail = light_data._TDX3_AVAILABLE
     light_data._TDX3_AVAILABLE = True
     try:
@@ -46,11 +36,11 @@ def test_fetch_ticks_tdx3_mapping(mock_get_client, mock_rate):
         light_data._TDX3_AVAILABLE = orig_avail
 
 
-@patch("light_data._API_RATE_LIMITER.check_and_record", return_value=True)
-@patch("light_data._get_tdx3_client")
+@patch("trader_shared.light_data._API_RATE_LIMITER.check_and_record", return_value=True)
+@patch("trader_shared.light_data._get_tdx3_client")
 def test_fetch_ticks_historic_fallback(mock_get_client, mock_rate):
     """Verify weekend or midnight auto-fallback to get_history_transaction_data."""
-    import light_data
+    import trader_shared.light_data as light_data
     orig_avail = light_data._TDX3_AVAILABLE
     light_data._TDX3_AVAILABLE = True
     try:
@@ -80,11 +70,11 @@ def test_fetch_ticks_historic_fallback(mock_get_client, mock_rate):
         light_data._TDX3_AVAILABLE = orig_avail
 
 
-@patch("light_data._API_RATE_LIMITER.check_and_record", return_value=True)
-@patch("light_data._get_tdx3_client")
+@patch("trader_shared.light_data._API_RATE_LIMITER.check_and_record", return_value=True)
+@patch("trader_shared.light_data._get_tdx3_client")
 def test_tick_big_order_aggregation(mock_get_client, mock_rate):
     """Test physical tick minute-level aggregation and noise reduction inside big_order."""
-    import light_data
+    import trader_shared.light_data as light_data
     from trader_shared.big_order import analyze_big_orders
 
     orig_avail = light_data._TDX3_AVAILABLE

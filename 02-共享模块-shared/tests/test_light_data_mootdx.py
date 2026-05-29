@@ -5,16 +5,6 @@ Tests verify field mapping, date formatting, and fallback behavior.
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-TESTS_DIR = Path(__file__).resolve().parent
-SHARED = TESTS_DIR.parent
-MARKETDATA = SHARED / "01-行情数据-market-data"
-for p in (SHARED, MARKETDATA):
-    if str(p.resolve()) not in sys.path:
-        sys.path.insert(0, str(p.resolve()))
-
 import pandas as pd
 from unittest.mock import MagicMock, patch
 
@@ -39,7 +29,7 @@ def _make_quotes_df(symbol="600036"):
     }])
 
 
-@patch("light_data._get_mootdx_client")
+@patch("trader_shared.light_data._get_mootdx_client")
 def test_fetch_qfq_mootdx_fields(mock_get_client):
     """Verify mootdx K-line fields are correctly mapped to BarData format."""
     mock_client = MagicMock()
@@ -66,7 +56,7 @@ def test_fetch_qfq_mootdx_fields(mock_get_client):
     assert bars[-1]["close"] == 37.6
 
 
-@patch("light_data._get_mootdx_client")
+@patch("trader_shared.light_data._get_mootdx_client")
 def test_fetch_qfq_mootdx_ascending_order(mock_get_client):
     """Verify bars are returned in chronological order (oldest first)."""
     mock_client = MagicMock()
@@ -82,7 +72,7 @@ def test_fetch_qfq_mootdx_ascending_order(mock_get_client):
     assert dates == sorted(dates)
 
 
-@patch("light_data._get_mootdx_client")
+@patch("trader_shared.light_data._get_mootdx_client")
 def test_fetch_quote_mootdx_fields(mock_get_client):
     """Verify mootdx quote fields are correctly mapped to QuoteData format."""
     mock_client = MagicMock()
@@ -113,7 +103,7 @@ def test_mootdx_import_fallback():
     assert isinstance(_MOOTDX_AVAILABLE, bool)
 
 
-@patch("light_data._get_mootdx_client", return_value=None)
+@patch("trader_shared.light_data._get_mootdx_client", return_value=None)
 def test_fetch_qfq_mootdx_returns_none_when_unavailable(mock_get_client):
     """When mootdx client unavailable, _fetch_qfq_mootdx returns None."""
     from light_data import resolve_security, _fetch_qfq_mootdx
@@ -124,7 +114,7 @@ def test_fetch_qfq_mootdx_returns_none_when_unavailable(mock_get_client):
     assert bars is None
 
 
-@patch("light_data._get_mootdx_client")
+@patch("trader_shared.light_data._get_mootdx_client")
 def test_fetch_qfq_mootdx_returns_none_on_error(mock_get_client):
     """When mootdx.bars() raises, _fetch_qfq_mootdx returns None."""
     mock_client = MagicMock()
@@ -139,8 +129,8 @@ def test_fetch_qfq_mootdx_returns_none_on_error(mock_get_client):
     assert bars is None
 
 
-@patch("light_data._fetch_mins_fallback", return_value=None)
-@patch("light_data._get_mootdx_client")
+@patch("trader_shared.light_data._fetch_mins_fallback", return_value=None)
+@patch("trader_shared.light_data._get_mootdx_client")
 def test_fetch_5m_from_mootdx(mock_get_client, mock_fallback):
     """fetch_5m should use mootdx 5-minute bars when available."""
     mock_client = MagicMock()
@@ -163,7 +153,7 @@ def test_fetch_5m_from_mootdx(mock_get_client, mock_fallback):
     assert bars[0]["volume"] == 50000.0
 
 
-@patch("light_data._get_mootdx_client", return_value=None)
+@patch("trader_shared.light_data._get_mootdx_client", return_value=None)
 def test_fetch_quote_fast_path_with_tencent(mock_get_client):
     """fetch_quote tries Tencent HTTP first (new order).
     We mock the Tencent HTTP call so the fast path succeeds immediately.

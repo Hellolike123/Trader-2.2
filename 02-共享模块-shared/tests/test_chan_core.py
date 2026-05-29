@@ -1,21 +1,12 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
-TESTS_DIR = Path(__file__).resolve().parent
-SHARED = TESTS_DIR.parent
-CANDIDATE = SHARED / "02-候选逻辑-candidate"
-MARKET = SHARED / "01-行情数据-market-data"
-for p in (SHARED, CANDIDATE, MARKET):
-    if str(p.resolve()) not in sys.path:
-        sys.path.insert(0, str(p.resolve()))
-
-for mod in ("chan_core", "light_data"):
+for mod in ("trader_shared.chan_core", "light_data"):
     if mod in sys.modules:
         del sys.modules[mod]
 
-from chan_core import (
+from trader_shared.chan_core import (
     handle_inclusion,
     find_fractions,
     build_strokes,

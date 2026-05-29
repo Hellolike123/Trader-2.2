@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A-Share Trader 全局中央指挥官路由器 (run_trader.py)
 
-统一管理系统生命周期中的盘中（live）和盘后（review）指令路由。
+统一体管理生命周期中的盘中（live）和盘后（review）指令路由。
 """
 
 from __future__ import annotations
@@ -11,23 +11,16 @@ import sys
 import os
 from pathlib import Path
 
-# ── 物理路径全注入，彻底消除跨模块与 SandBox 的导入问题 ─────────────────────
-_ROOT = Path(__file__).resolve().parent.parent if "scripts" in str(Path(__file__).resolve()) else Path(__file__).resolve()
-_PATH_MATRIX = [
-    _ROOT / "01-功能包-packages" / "01-单票分析-trader" / "scripts",
-    _ROOT / "01-功能包-packages" / "02-盘中T0-t0-trader" / "scripts",
-    _ROOT / "01-功能包-packages" / "03-选股池-trader-pool" / "scripts",
-    _ROOT / "01-功能包-packages" / "04-仓位轮动-trader-portfolio" / "scripts",
-    _ROOT / "01-功能包-packages" / "05-盘后复盘-review-trader" / "scripts",
-    _ROOT / "02-共享模块-shared" / "01-行情数据-market-data",
-    _ROOT / "02-共享模块-shared" / "02-候选逻辑-candidate",
-    _ROOT / "02-共享模块-shared",
-    _ROOT / "02-共享模块-shared" / "03-输出校验-contracts",
-    _ROOT / "02-共享模块-shared" / "scripts",
-]
-for _p in _PATH_MATRIX:
-    if _p.exists() and str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+# trader_shared 自动配置共享模块路径
+import trader_shared
+
+# Skill 脚本目录仍需手动加入（不在 trader_shared 包内）
+_ROOT = Path(__file__).resolve().parent.parent
+for _skill in ("01-单票分析-trader", "02-盘中T0-t0-trader", "03-选股池-trader-pool",
+               "04-仓位轮动-trader-portfolio", "05-盘后复盘-review-trader", "06-信号追踪-trader-tracking"):
+    _d = _ROOT / "01-功能包-packages" / _skill / "scripts"
+    if _d.exists() and str(_d) not in sys.path:
+        sys.path.insert(0, str(_d))
 
 
 def parse_args() -> argparse.Namespace:

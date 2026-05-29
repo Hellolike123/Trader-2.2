@@ -3,21 +3,14 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 import pytest
-
-_ROOT = Path(__file__).resolve().parents[2]
-_CANDIDATE = _ROOT / "02-共享模块-shared" / "02-候选逻辑-candidate"
-if str(_CANDIDATE) not in sys.path:
-    sys.path.insert(0, str(_CANDIDATE))
 
 
 class TestBayesianFusion:
     """贝叶斯融合网络正确性与鲁棒性测试。"""
 
     def setup_method(self):
-        from bayesian_fusion import BayesianFusion, bayesian_merge, ACTIONS
+        from trader_shared.bayesian_fusion import BayesianFusion, bayesian_merge, ACTIONS
         self.BF = BayesianFusion
         self.bayesian_merge = bayesian_merge
         self.ACTIONS = ACTIONS

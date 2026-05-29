@@ -5,14 +5,6 @@ import json
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
-import sys
-
-ROOT = Path(__file__).resolve().parents[1]
-SHARED = ROOT / "scripts"
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-if str(SHARED) not in sys.path:
-    sys.path.insert(0, str(SHARED))
 
 from pipeline import (
     write_stock, write_market, add_warning, conflicting_signals,
@@ -190,7 +182,8 @@ def test_market_env_pipeline_import_available(tmp_state, _inject_market_env_path
 
 def test_market_env_assess_no_net():
     import market_env as me
-    with patch.object(me, "_fetch_index_data", return_value={}):
+    with patch.object(me, "_fetch_index_data", return_value={}), \
+         patch("trader_shared.cache_utils.get_cached", return_value=None):
         env = me.assess()
     assert env["level"] == "未知"
     assert env["data_status"] == "degraded"

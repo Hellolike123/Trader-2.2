@@ -7,24 +7,13 @@
 from __future__ import annotations
 
 import os
-import sys
-from pathlib import Path
-
-# Path setup for imports
-_ROOT = Path(__file__).resolve().parents[2]
-_SHARED_CANDIDATE = _ROOT / "02-共享模块-shared" / "02-候选逻辑-candidate"
-_SHARED_MARKET = _ROOT / "02-共享模块-shared" / "01-行情数据-market-data"
-_SHARED_SCRIPTS = _ROOT / "02-共享模块-shared" / "scripts"
-for _path in (_ROOT / "02-共享模块-shared", _SHARED_CANDIDATE, _SHARED_MARKET, _SHARED_SCRIPTS):
-    if _path.exists() and str(_path) not in sys.path:
-        sys.path.insert(0, str(_path))
 
 
 class TestChanToSignal:
     """缠论信号标准化测试。"""
 
     def setup_method(self):
-        from fusion_core import _chan_to_signal
+        from trader_shared.fusion_core import _chan_to_signal
         self._fn = _chan_to_signal
 
     def test_一类买(self):
@@ -118,7 +107,7 @@ class TestMomentumToSignal:
     """动量信号标准化测试。"""
 
     def setup_method(self):
-        from fusion_core import _momentum_to_signal
+        from trader_shared.fusion_core import _momentum_to_signal
         self._fn = _momentum_to_signal
 
     def test_bullish_strong(self):
@@ -173,7 +162,7 @@ class TestScoreToConfidence:
     """分数→置信度映射测试。"""
 
     def setup_method(self):
-        from fusion_core import _score_to_confidence
+        from trader_shared.fusion_core import _score_to_confidence
         self._fn = _score_to_confidence
 
     def test_strong_bearish_25(self):
@@ -215,7 +204,7 @@ class TestWyckoffToSignal:
     """威科夫信号标准化测试。"""
 
     def setup_method(self):
-        from fusion_core import _wyckoff_to_signal
+        from trader_shared.fusion_core import _wyckoff_to_signal
         self._fn = _wyckoff_to_signal
 
     def test_spring(self):
@@ -271,7 +260,7 @@ class TestRegimeWeights:
     """Regime 权重矩阵测试。"""
 
     def setup_method(self):
-        from fusion_regime import get_regime_weights
+        from trader_shared.fusion_regime import get_regime_weights
         self._fn = get_regime_weights
 
     def test_normal(self):
@@ -302,7 +291,7 @@ class TestRegimeWeights:
 
     def test_unknown_regime_fallback(self):
         """未知 Regime 应 fallback 到默认配置。"""
-        from fusion_regime import get_regime_weights
+        from trader_shared.fusion_regime import get_regime_weights
         w = get_regime_weights("未知状态")
         assert w == get_regime_weights("正常")
 
@@ -311,7 +300,7 @@ class TestScoreToAction:
     """加权分数→动作映射测试。"""
 
     def setup_method(self):
-        from fusion_regime import score_to_action
+        from trader_shared.fusion_regime import score_to_action
         self._fn = score_to_action
 
     def test_bear_reject(self):
@@ -357,7 +346,7 @@ class TestComputeConfidence:
     """综合置信度计算测试。"""
 
     def setup_method(self):
-        from fusion_regime import compute_confidence
+        from trader_shared.fusion_regime import compute_confidence
         self._fn = compute_confidence
 
     def test_high_confidence(self):
@@ -387,7 +376,7 @@ class TestMergeDecisions:
     """完整融合决策测试。"""
 
     def test_all_agree_bullish(self):
-        from fusion_core import merge_decisions
+        from trader_shared.fusion_core import merge_decisions
         chan = {"chanlun": {"buy_points": [{"type": "一类买", "price": 28}], "divergence": {}, "trend_label": "拉升段"}}
         mom = {"momentum": {"score": 72, "direction": "bullish", "signals": ["MACD金叉"]}}
         wyk = {"wyckoff": {"spring_signal": True}}
@@ -401,7 +390,7 @@ class TestMergeDecisions:
         assert "wyckoff" in result["signals_detail"]
 
     def test_conflict(self):
-        from fusion_core import merge_decisions
+        from trader_shared.fusion_core import merge_decisions
         chan = {"chanlun": {"buy_points": [{"type": "一类买", "price": 28}], "divergence": {}, "trend_label": "数据不足"}}
         mom = {"momentum": {"score": 20, "direction": "bearish", "signals": ["MACD死叉"]}}
         wyk = {"wyckoff": {"upthrust_signal": True}}
@@ -411,7 +400,7 @@ class TestMergeDecisions:
         assert result["disagreement"] == 2
 
     def test_bear_market_veto(self):
-        from fusion_core import merge_decisions
+        from trader_shared.fusion_core import merge_decisions
         chan = {"chanlun": {"buy_points": [{"type": "一类买", "price": 28}], "divergence": {}, "trend_label": "拉升段"}}
         mom = {"momentum": {"score": 80, "direction": "bullish", "signals": []}}
         wyk = {"wyckoff": {"spring_signal": True}}
@@ -420,12 +409,12 @@ class TestMergeDecisions:
         assert result["disagreement"] == 0
 
     def test_empty_inputs(self):
-        from fusion_core import merge_decisions
+        from trader_shared.fusion_core import merge_decisions
         result = merge_decisions({}, {}, {}, regime="正常")
         assert isinstance(result["action"], str)
 
     def test_exception_handling_in_standardization(self):
-        from fusion_core import merge_decisions
+        from trader_shared.fusion_core import merge_decisions
         # _chan_to_signal handles invalid input gracefully (type check, no exception)
         # so confidence stays 0.3 (default "no signal"), not 0.0
         result = merge_decisions("not_a_dict", {}, {}, regime="正常")
@@ -440,9 +429,9 @@ class TestMergeDecisions:
         os.environ["FUSION_LOG_ONLY"] = "true"
         # Reimport to pick up new env
         import importlib
-        import fusion_core
-        importlib.reload(fusion_core)
-        from fusion_core import merge_decisions
+        import trader_shared.fusion_core
+        importlib.reload(trader_shared.fusion_core)
+        from trader_shared.fusion_core import merge_decisions
 
         chan = {"chanlun": {"buy_points": [{"type": "一类买", "price": 28}], "divergence": {}, "trend_label": "拉升段"}}
         mom = {"momentum": {"score": 72, "direction": "bullish", "signals": []}}
@@ -457,7 +446,7 @@ class TestMergeDecisions:
             os.environ.pop("FUSION_LOG_ONLY", None)
         else:
             os.environ["FUSION_LOG_ONLY"] = original
-        importlib.reload(fusion_core)
+        importlib.reload(trader_shared.fusion_core)
 
 
 class TestIntegrationDataFlow:
@@ -465,7 +454,7 @@ class TestIntegrationDataFlow:
 
     def test_chan_nested_structure(self):
         """levels["chanlun"] 是嵌套的: {"chanlun": {...}} → chanlun_strategy 返回的是 {"chanlun": {...}}"""
-        from fusion_core import _chan_to_signal
+        from trader_shared.fusion_core import _chan_to_signal
 
         # 模拟 run_all() 返回的 levels["chanlun"] 结构
         levels_chanlun = {
@@ -481,7 +470,7 @@ class TestIntegrationDataFlow:
         assert result["confidence"] == 0.6  # 二类买
 
     def test_momentum_nested_structure(self):
-        from fusion_core import _momentum_to_signal
+        from trader_shared.fusion_core import _momentum_to_signal
 
         levels_momentum = {"momentum": {"score": 72, "direction": "bullish", "signals": ["A"]}}
         result = _momentum_to_signal(levels_momentum)
@@ -489,7 +478,7 @@ class TestIntegrationDataFlow:
         assert result["confidence"] == 0.6  # score 72: >= 65, < 75
 
     def test_wyckoff_nested_structure(self):
-        from fusion_core import _wyckoff_to_signal
+        from trader_shared.fusion_core import _wyckoff_to_signal
 
         levels_wyckoff = {"wyckoff": {"spring_signal": True, "spring_reason": "test"}}
         result = _wyckoff_to_signal(levels_wyckoff)
@@ -502,7 +491,7 @@ class TestPhase3Features:
 
     def test_scenario_priority_filter_bottom(self):
         """Under pos_pct <= 0.3, weights should dynamically adjust to {"chan": 0.45, "momentum": 0.20, "wyckoff": 0.35}."""
-        from fusion_core import merge_decisions
+        from trader_shared.fusion_core import merge_decisions
         chan = {"chanlun": {"buy_points": [], "divergence": {}, "trend_label": "数据不足"}}
         mom = {"momentum": {"score": 50, "direction": "neutral", "signals": []}}
         wyk = {"wyckoff": {}}
@@ -518,7 +507,7 @@ class TestPhase3Features:
 
     def test_scenario_priority_filter_top(self):
         """Under pos_pct >= 0.7, weights should dynamically adjust to {"chan": 0.20, "momentum": 0.55, "wyckoff": 0.25}."""
-        from fusion_core import merge_decisions
+        from trader_shared.fusion_core import merge_decisions
         chan = {"chanlun": {"buy_points": [], "divergence": {}, "trend_label": "数据不足"}}
         mom = {"momentum": {"score": 50, "direction": "neutral", "signals": []}}
         wyk = {"wyckoff": {}}
@@ -532,7 +521,7 @@ class TestPhase3Features:
 
     def test_belief_priority_conflict_resolution_bullish_veto(self):
         """Strong bullish veto signal (Chanlun buy points / bottom divergence, Wyckoff Spring) overrides disagreement and vetos Momentum bearish noise."""
-        from fusion_core import merge_decisions
+        from trader_shared.fusion_core import merge_decisions
         # Chan has a strong bullish signal: 一类买
         chan = {"chanlun": {"buy_points": [{"type": "一类买", "price": 28}], "divergence": {}, "trend_label": "数据不足"}}
         # Momentum has bearish noise: direction bearish, score 20
@@ -546,7 +535,7 @@ class TestPhase3Features:
 
     def test_belief_priority_conflict_resolution_bearish_veto(self):
         """Strong bearish veto signal (Chanlun top divergence / 1st sell, Wyckoff Upthrust) overrides disagreement and vetos Momentum bullish noise."""
-        from fusion_core import merge_decisions
+        from trader_shared.fusion_core import merge_decisions
         # Chan has a strong bearish signal: 顶背驰
         chan = {"chanlun": {"buy_points": [], "divergence": {"top_divergence": True}, "trend_label": "数据不足"}}
         # Momentum has bullish noise: direction bullish, score 80
@@ -559,7 +548,7 @@ class TestPhase3Features:
 
     def test_regime_multipliers_adaptive(self):
         """Test multipliers adjustments based on Regime in structure_core."""
-        from structure_core import _theory_multipliers
+        from trader_shared.structure_core import _theory_multipliers
 
         # Test normal market (正常) → Widen low buy zone, Tighten breakout confirmation buffer
         mult_normal = _theory_multipliers({"regime": "正常"})

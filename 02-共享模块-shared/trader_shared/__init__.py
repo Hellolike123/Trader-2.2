@@ -10,6 +10,14 @@ import importlib.util
 import sys
 from pathlib import Path
 
+# ── 自动路径配置（过渡期兼容层）──────────────────────────────────────
+# scripts/ 目录仍需手动加入（pipeline.py, market_env.py 等在这里）
+_HERE = Path(__file__).resolve().parent
+_SHARED_ROOT = _HERE.parent  # 02-共享模块-shared/
+_scripts = _SHARED_ROOT / "scripts"
+if _scripts.exists() and str(_scripts) not in sys.path:
+    sys.path.insert(0, str(_scripts))
+
 # ── path helpers ──
 
 def _find_scripts_dir() -> Path | None:
@@ -138,6 +146,8 @@ __all__ = [
     "assess", "refresh", "env_note_for", "get_env_for_skill",
     # calibrator
     "run", "generate_suggestions",
+    # signal modules (migrated from 03-输出校验-contracts)
+    "signal_contract", "signal_store", "signal_utils",
     # version
     "__version__",
 ]

@@ -12,16 +12,10 @@ from pathlib import Path
 import pytest
 
 # ── Path setup (same as existing tests) ──
-TESTS_DIR = Path(__file__).resolve().parent
-SHARED = TESTS_DIR.parent  # 02-共享模块-shared/
-SCRIPTS = SHARED / "scripts"
-CONTRACTS = SHARED / "03-输出校验-contracts"
-for _p in (SHARED, SCRIPTS, CONTRACTS):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+import trader_shared
 
 import signal_tracker
-from signal_store import append_signal
+from trader_shared.signal_store import append_signal
 
 
 # ── Helpers ──
@@ -104,7 +98,7 @@ def tmp_paths(tmp_path: Path) -> Path:
     try:
         # Must patch DEFAULT_SIGNAL_STORE_PATH BEFORE append_signal
         # (it reads it at call time via `path or DEFAULT_SIGNAL_STORE_PATH`)
-        import signal_store
+        import trader_shared.signal_store as signal_store
         orig["DEFAULT_SIGNAL_STORE_PATH"] = signal_store.DEFAULT_SIGNAL_STORE_PATH
         signal_store.DEFAULT_SIGNAL_STORE_PATH = store
         signal_tracker.STORE_PATH = store
@@ -116,7 +110,7 @@ def tmp_paths(tmp_path: Path) -> Path:
         signal_tracker.LOG_PATH = orig["LOG_PATH"]
         signal_tracker.RESULT_PATH = orig["RESULT_PATH"]
         signal_tracker.STORE_PATH = orig["STORE_PATH"]
-        import signal_store
+        import trader_shared.signal_store as signal_store
         signal_store.DEFAULT_SIGNAL_STORE_PATH = orig["DEFAULT_SIGNAL_STORE_PATH"]
 
 
