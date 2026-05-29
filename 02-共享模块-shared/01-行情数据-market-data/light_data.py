@@ -690,11 +690,36 @@ def parse_trade_datetime(fields: list[str]) -> tuple[str, str | None]:
     return trade_date, trade_time
 
 
+def sanitize_quote(q: dict[str, Any] | None) -> dict[str, Any] | None:
+    if q is None:
+        return None
+    curr = q.get("current_price") or q.get("close")
+    if curr is None:
+        return q
+    try:
+        current = float(curr)
+        if current > 0:
+            # 价格偏离防线：若今日低点/高点偏离当前现价超过 20%，截断并降级自愈为当前现价本身
+            low_val = q.get("low")
+            if low_val is not None:
+                fl = float(low_val)
+                if fl < current * 0.80 or fl > current * 1.20:
+                    q["low"] = current
+            high_val = q.get("high")
+            if high_val is not None:
+                fh = float(high_val)
+                if fh < current * 0.80 or fh > current * 1.20:
+                    q["high"] = current
+    except (TypeError, ValueError):
+        pass
+    return q
+
+
 def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
     cache_key = f"quote:{sec.qq_symbol}"
     cached = get_realtime_cache(cache_key)
     if cached is not None:
-        return cached
+        return sanitize_quote(cached)
 
     # Tencent HTTP first — fast and stable for most cases
     try:
@@ -721,7 +746,7 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
                 "data_status": "full",
             }
             save_realtime_cache(cache_key, tencent_q)
-            return tencent_q
+            return sanitize_quote(tencent_q)
     except Exception:
         pass
 
@@ -732,12 +757,11 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
             tdx3_q["data_source"] = "pytdx3"
             tdx3_q["data_status"] = "full"
             save_realtime_cache(cache_key, tdx3_q)
-            return tdx3_q
+            return sanitize_quote(tdx3_q)
 
     # Fallback: mootdx
     mootdx_q = _fetch_quote_mootdx(sec)
     if mootdx_q is not None:
-        # 腾讯补充 turnover_rate 和 high/low（如 mootdx 返回为 None）
         try:
             text = http.get_text(TENCENT_QUOTE_URL + sec.qq_symbol, encoding="gbk")
             match = re.search(r'="([^"]*)"', text)
@@ -755,7 +779,7 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
         mootdx_q["data_source"] = "mootdx"
         mootdx_q["data_status"] = "full"
         save_realtime_cache(cache_key, mootdx_q)
-        return mootdx_q
+        return sanitize_quote(mootdx_q)
 
     def do_fetch():
         text = http.get_text(TENCENT_QUOTE_URL + sec.qq_symbol, encoding="gbk")
@@ -763,11 +787,6 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
         if not match:
             raise RuntimeError("Tencent quote payload missing fields")
         fields = match.group(1).split("~")
-        # qt.gtimg.cn 字段映射（实测验证）：
-        #   [3]=最新价  [4]=昨收  [5]=今开
-        #   [33]=今日最高  [34]=今日最低
-        #   [36]=成交量(手)  [37]=成交额(万元)  [38]=换手率  [32]=涨跌幅
-        # 注意：[6]/[7] 是买一量/卖一量，不是 high/low（原始 bug 根因）
         if len(fields) < 35:
             raise RuntimeError("Tencent quote payload incomplete")
         trade_date, trade_time = parse_trade_datetime(fields)
@@ -791,7 +810,7 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
         save_realtime_cache(cache_key, result)
         return result
 
-    return retry(do_fetch, url=TENCENT_QUOTE_URL)
+    return sanitize_quote(retry(do_fetch, url=TENCENT_QUOTE_URL))
 
 
 def _compute_atr_fields(bars: list[dict[str, Any]]) -> None:

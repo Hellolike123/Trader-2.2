@@ -14,8 +14,7 @@ ROOT = Path(__file__).resolve().parents[3]
 SHARED_CANDIDATE = ROOT / "02-共享模块-shared" / "02-候选逻辑-candidate"
 SHARED_SCRIPTS = ROOT / "02-共享模块-shared" / "scripts"
 SHARED_ROOT = ROOT / "02-共享模块-shared"
-SHARED_TS = SHARED_ROOT / "trader_shared"
-for _p in (SHARED_CANDIDATE, SHARED_SCRIPTS, SHARED_ROOT, SHARED_TS):
+for _p in (SHARED_CANDIDATE, SHARED_SCRIPTS, SHARED_ROOT):
     if _p.exists() and str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 

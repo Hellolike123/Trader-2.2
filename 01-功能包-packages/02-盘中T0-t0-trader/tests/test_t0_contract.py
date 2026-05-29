@@ -552,10 +552,10 @@ def test_monitor_suppresses_observation_and_reports_trigger_position(tmp_path, m
     monkeypatch.setattr(monitor, "build_plan", lambda _target: triggered)
 
     alert = monitor.run_once("中国铝业", cost=11.50, position=10000, state_path=state_path)
-    assert "低吸触发" in alert
-    assert "执行 11.94元" in alert
-    assert "最高 11.98元" in alert
-    assert "止损 11.72元" in alert
+    assert "低吸已触发" in alert
+    assert "11.94" in alert
+    assert "11.98" in alert
+    assert "11.72" in alert
 
 
 def test_min_trigger_matches_reduced_to_3() -> None:

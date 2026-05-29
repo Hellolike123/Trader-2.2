@@ -13,7 +13,8 @@ from typing import Any, Iterator
 CONTRACTS = Path(__file__).resolve().parents[3] / "02-共享模块-shared" / "03-输出校验-contracts"
 SHARED_SCRIPTS = Path(__file__).resolve().parents[3] / "02-共享模块-shared" / "scripts"
 SHARED_ROOT = Path(__file__).resolve().parents[3] / "02-共享模块-shared"
-for _p in (CONTRACTS, SHARED_SCRIPTS, SHARED_ROOT):
+SHARED_MARKET = Path(__file__).resolve().parents[3] / "02-共享模块-shared" / "01-行情数据-market-data"
+for _p in (CONTRACTS, SHARED_SCRIPTS, SHARED_ROOT, SHARED_MARKET):
     if _p.exists() and str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
@@ -22,6 +23,7 @@ from price_point_engine import price
 from signal_store import append_signal
 from t0_run import build_plan, build_t0_event_signal
 from config import FREQUENCY_STOP_LIMIT
+from light_data import is_trading_time
 
 try:
     from trader_shared import get_market_level, add_warning, get_market_note, log_safe, fill_by_target
@@ -506,6 +508,9 @@ def run_once(
     reset_cache: bool = False,
     state_path: Path = CACHE_PATH,
 ) -> str:
+    # 非交易时间直接静默退出，避免周末/节假日发垃圾消息
+    if not is_trading_time():
+        return ""
     plan = build_plan(target)
     target_key = str(plan.get("symbol") or target)
     now = datetime.now()

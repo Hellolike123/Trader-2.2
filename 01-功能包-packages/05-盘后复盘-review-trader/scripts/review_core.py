@@ -233,6 +233,16 @@ def analyze_intraday(bars_5m: list[dict[str, Any]], trade_date: str | None, sess
 def build_levels(current: float, quote: dict[str, Any], daily: list[dict[str, Any]], cost: float | None) -> dict[str, Any]:
     today_low = to_float(quote.get("low"))
     today_high = to_float(quote.get("high"))
+    
+    # ── [Bug Fix] 下游双重防线：拦截偏离现价 20% 以上的 API 数据垃圾数据并降级自愈 ──
+    if today_low is not None and (today_low < current * 0.80 or today_low > current * 1.20):
+        last_daily_low = daily[-1].get("low") if daily else None
+        today_low = to_float(last_daily_low) if last_daily_low and current * 0.80 <= to_float(last_daily_low) <= current * 1.20 else current
+        
+    if today_high is not None and (today_high < current * 0.80 or today_high > current * 1.20):
+        last_daily_high = daily[-1].get("high") if daily else None
+        today_high = to_float(last_daily_high) if last_daily_high and current * 0.80 <= to_float(last_daily_high) <= current * 1.20 else current
+
     recent = daily[-20:] if len(daily) >= 20 else daily
     previous = daily[-2] if len(daily) >= 2 else None
     previous_low = to_float(previous.get("low")) if previous else None

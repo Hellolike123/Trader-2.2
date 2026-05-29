@@ -38,8 +38,11 @@ def review_summary(review: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+CACHE_PATH: Path | None = None
+CACHE_DIR: Path | None = None
+
 def load_state() -> dict[str, Any]:
-    return DataManager.load_state("review_state", {"reviews": []})
+    return DataManager.load_state("review_state", {"reviews": []}, path=CACHE_PATH)
 
 
 def save_review(review: dict[str, Any]) -> None:
@@ -56,7 +59,7 @@ def save_review(review: dict[str, Any]) -> None:
     ]
     reviews.append(summary)
     state["reviews"] = reviews[-30:]
-    DataManager.save_state("review_state", state)
+    DataManager.save_state("review_state", state, path=CACHE_PATH)
 
 def recent_reviews(limit: int = 5) -> list[dict[str, Any]]:
     state = load_state()

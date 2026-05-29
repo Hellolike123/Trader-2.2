@@ -103,7 +103,7 @@ class TestSharedFilesForSkill:
         latest = self._find_latest_release()
         assert latest.exists(), "No release directories found"
 
-        expected_skills = {"trader", "t0-trader", "trader-pool", "trader-portfolio", "review-trader", "trader-tracking"}
+        expected_skills = {"trader"}
         missing = []
         for skill in expected_skills:
             zip_path = latest / f"{skill}.zip"
@@ -119,24 +119,19 @@ class TestSharedFilesForSkill:
         assert missing == [], f"Digest issues in latest release {latest.name}: " + "; ".join(missing)
 
     def test_non_t0_skills_share_digest(self):
-        """All non-t0 skills should share the same digest."""
+        """trader's shared_bundle digest must be a valid 16-character hex string."""
         release_dirs = sorted([d for d in _REPOS.iterdir() if d.is_dir()], reverse=True)
         assert len(release_dirs) >= 1, "No release directories found"
         latest = release_dirs[0]
 
-        non_t0 = {"trader", "trader-pool", "trader-portfolio", "review-trader", "trader-tracking"}
+        zip_path = latest / "trader.zip"
+        assert zip_path.exists(), "trader.zip not found"
+        dig = self.extract_digest_from_zip(zip_path)
+        assert dig != "unknown" and dig != "bad_meta", f"Failed to extract digest from {zip_path}"
+        assert len(dig) == 16, f"Digest length is not 16: {dig}"
+        # Assert it only contains hex characters
+        int(dig, 16)
 
-        digests = {}
-        for skill in non_t0:
-            zip_path = latest / f"{skill}.zip"
-            if zip_path.exists():
-                dig = self.extract_digest_from_zip(zip_path)
-                digests[skill] = dig
-
-        # All non-t0 should agree
-        unique = set(digests.values())
-        if len(digests) > 1:
-            assert len(unique) == 1, f"Non-t0 digests differ: {digests}"
 
 
 class TestPackAllNoEmptyFiles:

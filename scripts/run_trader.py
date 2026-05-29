@@ -22,7 +22,6 @@ _PATH_MATRIX = [
     _ROOT / "02-共享模块-shared" / "01-行情数据-market-data",
     _ROOT / "02-共享模块-shared" / "02-候选逻辑-candidate",
     _ROOT / "02-共享模块-shared",
-    _ROOT / "02-共享模块-shared" / "trader_shared",
     _ROOT / "02-共享模块-shared" / "03-输出校验-contracts",
     _ROOT / "02-共享模块-shared" / "scripts",
 ]
