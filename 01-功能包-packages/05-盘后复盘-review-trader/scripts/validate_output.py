@@ -5,7 +5,12 @@ import argparse
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
+# 双模式路径发现：Hermes skill 包内 vs 仓库开发
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if (_SCRIPT_DIR.parent / "trader_shared").exists():
+    ROOT = _SCRIPT_DIR.parent          # skill 模式
+else:
+    ROOT = _SCRIPT_DIR.parents[3]      # 仓库模式
 SHARED = ROOT / "02-共享模块-shared"
 if str(SHARED) not in sys.path:
     sys.path.insert(0, str(SHARED))

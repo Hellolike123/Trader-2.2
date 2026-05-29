@@ -5,7 +5,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-_ROOT = Path(__file__).resolve().parents[3]
+# 双模式路径发现：Hermes skill 包内 vs 仓库开发
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if (_SCRIPT_DIR.parent / "trader_shared").exists():
+    _ROOT = _SCRIPT_DIR.parent          # skill 模式
+else:
+    _ROOT = _SCRIPT_DIR.parents[3]      # 仓库模式
 _SHARED_MARKET = _ROOT / "02-共享模块-shared" / "01-行情数据-market-data"
 _SHARED_CANDIDATE = _ROOT / "02-共享模块-shared" / "02-候选逻辑-candidate"
 for _p in (_SHARED_MARKET, _SHARED_CANDIDATE):

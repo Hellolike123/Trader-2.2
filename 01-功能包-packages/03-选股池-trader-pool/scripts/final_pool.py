@@ -10,10 +10,16 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[3]
-SHARED_CANDIDATE = ROOT / "02-共享模块-shared" / "02-候选逻辑-candidate"
-SHARED_SCRIPTS = ROOT / "02-共享模块-shared" / "scripts"
-SHARED_ROOT = ROOT / "02-共享模块-shared"
+# 双模式路径发现：Hermes skill 包内 vs 仓库开发
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if (_SCRIPT_DIR.parent / "trader_shared").exists():
+    _SHARED = _SCRIPT_DIR.parent          # skill 模式
+else:
+    _SHARED = _SCRIPT_DIR.parents[3] / "02-共享模块-shared"  # 仓库模式
+
+SHARED_CANDIDATE = _SHARED / "02-候选逻辑-candidate"
+SHARED_SCRIPTS = _SHARED / "scripts"
+SHARED_ROOT = _SHARED
 for _p in (SHARED_CANDIDATE, SHARED_SCRIPTS, SHARED_ROOT):
     if _p.exists() and str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
@@ -689,22 +695,8 @@ def action_summary_for_scene(scene: str) -> str:
 def _build_report_or_offline(name: str) -> dict[str, Any]:
     """Try live report, fallback to offline mock report."""
     try:
-        import importlib.util
-        import sys
-        from pathlib import Path
-        TRADER_DIR = None
-        here = Path(__file__).resolve().parents[2] if "trader-pool" in str(__file__) else Path(__file__).resolve().parents[3]
-        for _dir in [
-            Path(__file__).resolve().parents[2] / "trader" / "scripts",
-            Path(__file__).resolve().parents[3] / "01-功能包-packages" / "01-单票分析-trader" / "scripts",
-        ]:
-            if _dir.exists():
-                TRADER_DIR = _dir
-                break
-        if TRADER_DIR and str(TRADER_DIR) not in sys.path:
-            sys.path.insert(0, str(TRADER_DIR))
-        import run_analysis
-        return run_analysis.build_report(name)
+        from run_analysis import build_report
+        return build_report(name)
     except Exception:
         base = 10 + (sum(ord(char) for char in name) % 700) / 100
         return {
@@ -1318,6 +1310,7 @@ def cmd_confirm_to_pool(args: argparse.Namespace) -> int:
 
 
 def cmd_compare(args: argparse.Namespace) -> int:
+    from run_analysis import build_report
     targets = [t.strip() for t in (args.targets or []) if t.strip()]
     if len(targets) < 2:
         print("至少需要两只股票做比较", file=sys.stderr)

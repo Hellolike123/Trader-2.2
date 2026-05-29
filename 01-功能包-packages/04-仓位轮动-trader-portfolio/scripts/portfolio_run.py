@@ -8,13 +8,19 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[3]
-SHARED_MARKET = ROOT / "02-共享模块-shared" / "01-行情数据-market-data"
-SHARED_CANDIDATE = ROOT / "02-共享模块-shared" / "02-候选逻辑-candidate"
-SHARED_SCRIPTS = ROOT / "02-共享模块-shared" / "scripts"
-SHARED_ROOT = ROOT / "02-共享模块-shared"
-SHARED_TS = SHARED_ROOT / "trader_shared"
-CONTRACTS = ROOT / "02-共享模块-shared" / "03-输出校验-contracts"
+# 双模式路径发现：Hermes skill 包内 vs 仓库开发
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if (_SCRIPT_DIR.parent / "trader_shared").exists():
+    _SHARED = _SCRIPT_DIR.parent          # skill 模式
+else:
+    _SHARED = _SCRIPT_DIR.parents[3] / "02-共享模块-shared"  # 仓库模式
+
+SHARED_MARKET = _SHARED / "01-行情数据-market-data"
+SHARED_CANDIDATE = _SHARED / "02-候选逻辑-candidate"
+SHARED_SCRIPTS = _SHARED / "scripts"
+SHARED_ROOT = _SHARED
+SHARED_TS = _SHARED / "trader_shared"
+CONTRACTS = _SHARED / "03-输出校验-contracts"
 for _p in (SHARED_MARKET, SHARED_CANDIDATE, SHARED_SCRIPTS, SHARED_ROOT, CONTRACTS):
     if _p.exists() and str(_p) not in sys.path:
         sys.path.insert(0, str(_p))

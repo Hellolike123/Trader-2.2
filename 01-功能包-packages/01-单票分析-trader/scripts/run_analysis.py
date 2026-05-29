@@ -11,17 +11,22 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-ROOT = Path(__file__).resolve().parents[3]
-SHARED_CANDIDATE = ROOT / "02-共享模块-shared" / "02-候选逻辑-candidate"
-SHARED_MARKET = ROOT / "02-共享模块-shared" / "01-行情数据-market-data"
-SHARED_SCRIPTS = ROOT / "02-共享模块-shared" / "scripts"
-SHARED_ROOT = ROOT / "02-共享模块-shared"
+# 双模式路径发现：Hermes skill 包内 vs 仓库开发
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if (_SCRIPT_DIR.parent / "trader_shared").exists():
+    _SHARED = _SCRIPT_DIR.parent          # skill 模式
+else:
+    _SHARED = _SCRIPT_DIR.parents[3] / "02-共享模块-shared"  # 仓库模式
+
+SHARED_CANDIDATE = _SHARED / "02-候选逻辑-candidate"
+SHARED_MARKET = _SHARED / "01-行情数据-market-data"
+SHARED_SCRIPTS = _SHARED / "scripts"
+SHARED_ROOT = _SHARED
 for _path in (SHARED_CANDIDATE, SHARED_MARKET, SHARED_SCRIPTS, SHARED_ROOT):
     if _path.exists() and str(_path) not in sys.path:
         sys.path.append(str(_path))
 
-import candidate_core as core
-from candidate_core import build_structure_context, atr_volatility_level
+from light_data import to_float, pct_change
 
 try:
     from trader_shared.chip_distribution import calc_chip_distribution as _calc_chip
@@ -32,8 +37,6 @@ from config import (
     LOOKBACK_DAYS,
     STRUCTURE_WINDOW,
 )
-from trader_shared.data_provider import get_provider
-from trader_shared.strategy_protocol import run_all
 from light_data import to_float, pct_change
 try:
     from models import DATA_STATUS_MAP
@@ -137,6 +140,11 @@ def pct(value: float | None) -> str:
 
 
 def build_report(target: str) -> dict[str, Any]:
+    import candidate_core as core
+    from candidate_core import build_structure_context, atr_volatility_level
+    from trader_shared.data_provider import get_provider
+    from trader_shared.strategy_protocol import run_all
+    
     provider = get_provider()
     snapshot = provider.load_market_snapshot(target, days=LOOKBACK_DAYS, include_5m=True)
     if not snapshot.quote or not snapshot.daily_bars:

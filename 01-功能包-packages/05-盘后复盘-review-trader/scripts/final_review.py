@@ -5,7 +5,12 @@ import argparse
 import sys
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[3]
+# 双模式路径发现：Hermes skill 包内 vs 仓库开发
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if (_SCRIPT_DIR.parent / "trader_shared").exists():
+    _ROOT = _SCRIPT_DIR.parent          # skill 模式
+else:
+    _ROOT = _SCRIPT_DIR.parents[3]      # 仓库模式
 for _p in (
     _ROOT / "01-功能包-packages" / "05-盘后复盘-review-trader" / "scripts",
     _ROOT / "02-共享模块-shared" / "01-行情数据-market-data",
@@ -211,7 +216,11 @@ def _trigger_async_calibration() -> None:
     import subprocess
     from pathlib import Path
     
-    script_path = Path(__file__).resolve().parents[3] / "02-共享模块-shared" / "scripts" / "self_calibration.py"
+    _sr = Path(__file__).resolve().parent.parent
+    if (_sr / "trader_shared").exists():
+        script_path = _sr / "scripts" / "self_calibration.py"    # skill 模式
+    else:
+        script_path = _sr.parents[2] / "02-共享模块-shared" / "scripts" / "self_calibration.py"  # 仓库模式
     if script_path.exists():
         try:
             subprocess.Popen(

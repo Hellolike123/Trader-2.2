@@ -270,10 +270,16 @@ def main(args: list[str] | None = None) -> int:
                 dst_item = staged_trader / item.name
                 if item.is_dir():
                     if dst_item.exists():
+                        # 池包中的 run_analysis.py 是包装器，在 skill 里自我递归，跳过
+                        _skip_rel = set()
+                        if d == "03-选股池-trader-pool":
+                            _skip_rel.add("run_analysis.py")
                         for sub_item in item.rglob("*"):
                             if should_skip(sub_item):
                                 continue
                             rel_sub = sub_item.relative_to(item)
+                            if str(rel_sub) in _skip_rel:
+                                continue
                             sub_dst = dst_item / rel_sub
                             sub_dst.parent.mkdir(parents=True, exist_ok=True)
                             if not sub_item.is_dir():
