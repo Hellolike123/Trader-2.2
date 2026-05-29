@@ -1,7 +1,7 @@
 # 决策融合层（Manager Agent）设计文档
 
-> 最后更新：2026-05-12
-> 状态：设计审查中
+> 最后更新：2026-05-29
+> 状态：已实现并激活（FUSION_LOG_ONLY 默认 false）
 > 依赖：/office-hours 产出已确认
 
 ---
@@ -250,27 +250,39 @@ def merge_decisions(
     chan_result: dict,
     momentum_result: dict,
     wyckoff_result: dict,
-    regime: str,  # "正常" | "偏弱" | "很差"
+    regime: str = "正常",
+    current_price: float = 0.0,
+    bars: list = None,
+    hmm_regime: str = "range",
+    extend_fundamental: dict | None = None,
+    extend_sentiment: dict | None = None,
 ) -> dict:
     """决策融合层核心函数。
-    
+
     Args:
-        chan_result: chanlun_strategy() 的返回值
-        momentum_result: momentum_strategy() 的返回值
-        wyckoff_result: wyckoff_strategy() 的返回值
-        regime: market_env.py assess() → level 字段
-        
+        chan_result:      chanlun_strategy() 的返回值
+        momentum_result:  momentum_strategy() 的返回值
+        wyckoff_result:   wyckoff_strategy() 的返回值
+        regime:           market_env.py assess() → level 字段
+                          ("正常" | "偏弱" | "很差" | "未知")
+        current_price:    当前价格，用于动态判断价格区间
+        bars:             K线数据，用于动态判断价格区间
+        hmm_regime:       HMM大势前瞻状态 ("bull" | "bear" | "range")
+        extend_fundamental: 基本面扩展数据（股东户数等）
+        extend_sentiment:   情绪面扩展数据（限售解禁等）
+
     Returns:
         {
             "action": str,                    # 最终决策
             "confidence": float,              # 综合置信度 0-1
             "weighted_score": float,          # 原始加权分数
             "regime": str,                    # 市场状态
+            "hmm_regime": str,                # HMM 状态
             "disagreement": float,            # 分歧度 0-2, >1 表示冲突
             "signals_detail": {               # 信号溯源
-                "by_chan": {...},
-                "by_momentum": {...},
-                "by_wyckoff": {...},
+                "chan": {...},
+                "momentum": {...},
+                "wyckoff": {...},
             },
             "weights_used": {                 # 实际用的权重
                 "chan": 0.3,
@@ -429,11 +441,14 @@ def _score_to_action(score: float, disagreement: float, regime: str) -> str:
 }
 ```
 
-**用户看到（输出层渲染）：**
+**用户看到（输出层渲染，commit 8d67b8b 多行格式）：**
 ```
-📍 决策：止跌确认才试，最多5%仓位
-   └─ 缠论底背驰(50%) + 动量中性 + 威科夫无信号
-      加权: 0.18 | 大盘: 正常
+📍 决策：增持
+   融合层：增持（评分 +0.35，置信度 45%）
+   大盘环境：正常（HMM: 多头）
+     缠论：看多（置信 60%，权重 30%）
+     动量：中性（置信 40%，权重 45%）
+     威科夫：看空（置信 55%，权重 25%）
 ```
 
 ### 冲突场景：缠论看多 vs 动量看空
@@ -532,7 +547,7 @@ report["fusion"] = fusion
 import os
 
 def merge_decisions(..., **kwargs) -> dict:
-    log_only = os.environ.get("FUSION_LOG_ONLY", "true").lower() == "true"
+    log_only = os.environ.get("FUSION_LOG_ONLY", "false").lower() == "true"
     
     result = _do_merge(...)
     
@@ -629,7 +644,73 @@ ACTION_MAP = {
 
 ---
 
-## 十二、演进路线（不是这次的，但提前规划）
+## 十二、FUSION_STATUS_MAP — 融合层→状态机桥接
+
+当融合层置信度足够高时（`FUSION_OVERRIDE_ENABLED=true` 且 `confidence >= FUSION_CONFIDENCE_THRESHOLD`），融合层的 action 会通过以下映射覆盖 `status_layers()` 的判定：
+
+```python
+_FUSION_STATUS_MAP = {
+    "半仓试 (多方主导)": "低吸观察",
+    "半仓试 (多方主导但有分歧)": "等转强",
+    "增持": "低吸观察",
+    "持股观望": "等转强",
+    "减仓": "冲高减仓",
+    "空仓/止损": "暂不碰",
+    "空仓 (大盘很差, 一票否决)": "暂不碰",
+    "观望 (信号冲突)": "防守观察",
+    "等转强 (多方主导但有分歧)": "等转强",
+}
+```
+
+配置项（`config.py`）：
+- `FUSION_OVERRIDE_ENABLED: bool = True` — 是否允许融合层覆盖状态
+- `FUSION_CONFIDENCE_THRESHOLD: float = 0.2` — 覆盖所需最低置信度
+
+---
+
+## 十三、Scenario Priority Filter
+
+根据价格在 20 日区间的位置（`pos_pct`）动态调整信号权重：
+
+```python
+pos_pct = (current_price - min_20d_low) / (max_20d_high - min_20d_low)
+
+if pos_pct <= 0.3 or strong_bullish_chan/strong_bullish_wyk:
+    # 低位/突破场景 → 缠论和威科夫权重提高
+    weights = {"chan": 0.45, "momentum": 0.20, "wyckoff": 0.35}
+elif pos_pct >= 0.7 or strong_bearish_chan/strong_bearish_wyk:
+    # 高位/见顶场景 → 动量权重提高
+    weights = {"chan": 0.20, "momentum": 0.55, "wyckoff": 0.25}
+else:
+    # 中间区域 → 使用 Regime 默认权重
+    weights = get_regime_weights(regime)
+```
+
+---
+
+## 十四、Veto 噪声消除
+
+当信号分歧度 > 1 时，如果缠论或威科夫有强信号（一类买/弹簧等），动量的反向噪声会被 Veto：
+
+```python
+if disagreement > 1:
+    if strong_bullish_chan or strong_bullish_wyk:
+        if momentum_signal["direction"] == -1:
+            momentum_signal["direction"] = 0  # Veto 动量看空噪声
+    elif strong_bearish_chan or strong_bearish_wyk:
+        if momentum_signal["direction"] == 1:
+            momentum_signal["direction"] = 0  # Veto 动量看多噪声
+```
+
+---
+
+## 十五、贝叶斯融合（可选）
+
+`bayesian_fusion.py` 提供独立的贝叶斯概率融合，与加权融合并行运行。通过 `BAYESIAN_ENABLED` 环境变量控制。启用时会覆盖加权融合的 action 和 confidence。
+
+---
+
+## 十六、演进路线（不是这次的，但提前规划）
 
 | 阶段 | 内容 |
 |------|------|

@@ -887,10 +887,15 @@ def _pool_count() -> int:
 
 ### C-13. `TREND_MA_LONG = 900` 使趋势过滤器对大部分股票无效
 
+> **[RESOLVED]** 2026-05-29 — commit 676ae0e
+> 修复方案：`TREND_MA_LONG` 改为 250（年线），`LOOKBACK_DAYS` 改为 300。
+> 同时新增 `_ma250_check()` 一票否决机制：股价在 250 日均线下方直接返回"暂不碰"，跳过所有后续分析。
+> 详见 `openspec/changes/doc-overhaul-2026-05/specs/trend-filter/spec.md`。
+
 **现状**：`config.py` 第 65 行：
 
 ```python
-TREND_MA_LONG: int = 900
+TREND_MA_LONG: int = 250  # 已从 900 修改为 250（年线）
 ```
 
 `decision_core._trend_filter()` 第 114 行：

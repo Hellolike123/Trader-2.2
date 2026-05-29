@@ -1,6 +1,6 @@
 # Trader 2.3 — 架构文档（深挖参考）
 
-> 最后更新：2026-05-23
+> 最后更新：2026-05-29
 > **注意**: AGENTS.md 是 Agent 快速参考，本文档用于开发调试/架构深挖。
 
 ---
@@ -102,23 +102,52 @@
 **缓存**：bars 不含当日日期时缓存 1 小时，实时数据不缓存，行情快照进行 30s TTL 缓存。
 **NAME_MAP**：9 个常用股票名到代码的映射（南网科技→688248、中国铝业→601600 等）。
 
-### 2.3 状态机（`candidate_core.STATUS_SCORE`）
+### 2.3 状态机（`config.py STATUS_SCORE` + `decision_core.status_layers()`）
 
-> 说明：这里描述的是旧的单层候选状态机，它仍然存在于兼容链里，但不是单票分析的主契约。单票分析现在以 `base_status` + `theory_status` 为主，`state_label` 只是展示/兼容层。
+> 单票分析以 `base_status` + `theory_status` 为主，`state_label` 只是展示/兼容层。
+> 核心函数已从 `status_for()` 升级为 `status_layers()`，返回 dict 而非 str。
+
+**STATUS_SCORE 完整列表（config.py）：**
 
 | 状态 | score | 触发条件 | 典型场景 |
 |------ | ------ | ------ | ------ |
-| **暂不碰** | 20 | 现价跌破硬止损 | 破位下行，防守优先 |
+| **暂不碰** | 20 | 现价跌破硬止损 / 年线一票否决 | 破位下行，防守优先 |
 | **低吸观察** | 80 | 现价在低吸区附近，未破止损 | 缩量回调用至支撑区 |
 | **冲高减仓** | 55 | 现价靠近确认价/压力区，上涨乏力 | 反弹触压，减仓信号 |
 | **等转强** | 70 | 现价在支撑之上但距确认价有空间 | 止跌后等待确认突破 |
-| **防守观察** | 60 | 现价靠近支撑但未确认止跌 | 支撑附近观望 |
-| **空间不足** | 45 | 距确认价空间过小，盈亏比不够 | 高位震荡，无明确方向 |
+| **防守观察** | 60 | 现价靠近支撑但未确认止跌 / 假跌破 | 支撑附近观望 |
+| **空间不足** | 30 | 距确认价空间过小，盈亏比不够 | 高位震荡，无明确方向 |
 | **数据失败** | 0 | K 线数据不足 60 根 | 新股/停牌复牌 |
+| **突破确认** | 85 | 理论突破确认（3日验证） | 缠论三买/威科夫突破 |
+| **突破观察** | 75 | 突破待确认 | 突破后观察量能 |
+| **体系转强确认** | 88 | 多维理论共振转强 | 缠论+威科夫+动量共振 |
+| **未确认转强** | 72 | 转强信号未确认 | 信号初现待验证 |
+| **转强不足** | 62 | 转强力度不够 | 假突破回落 |
+| **承接存在** | 68 | 下方有承接力 | 支撑区有买盘 |
+| **修复观察** | 65 | 均线/结构修复中 | 下跌后企稳修复 |
+| **空间偏紧** | — | 操作空间过窄 | 高位窄幅震荡（兼容状态，不在 STATUS_SCORE 中） |
 
 ### 2.4 状态判定优先级
 
-`status_for()` 判定顺序: 暂不碰 > 低吸观察 > 冲高减仓/等转强 > 空间不足 > 防守观察
+`status_layers()` 判定顺序:
+1. `_ma250_check()` — 年线一票否决（硬门控）
+2. 融合层覆盖（`FUSION_OVERRIDE_ENABLED` + 置信度阈值）
+3. 假跌破确认（`_fake_break`）
+4. 分阶段退出（`_near_stop`）
+5. 原有状态级联：暂不碰 > 低吸观察 > 冲高减仓/等转强 > 空间不足 > 防守观察
+
+**返回值格式：**
+```python
+{
+    "base_status": str,     # 基础状态（结构位置层）
+    "theory_status": str,   # 理论结论层
+    "status": str,          # 最终状态（兼容旧接口）
+    "ma250_blocked": bool,  # 是否被年线否决
+    "ma250": float,         # 250日均线值
+    "trailing_stop": float, # 移动止损价
+    ...
+}
+```
 
 ---
 
@@ -276,7 +305,16 @@ T0 参考 → 低吸/高抛/止损
 
 ### 5.6 智能决策融合层 (`fusion_core.py` / `fusion_regime.py`)
 
-决策融合层是贯穿结构、缠论、动量与威科夫等多维分析体系的“终极裁判”。在传统多指标决策中，多头信号与空头冲突往往会导致系统输出“数据冲突”或者“中性旁观”等平庸判定。Trader 2.2 通过智能决策融合层彻底打破了这一桎梏。
+决策融合层是贯穿结构、缠论、动量与威科夫等多维分析体系的”终极裁判”。在传统多指标决策中，多头信号与空头冲突往往会导致系统输出”数据冲突”或者”中性旁观”等平庸判定。Trader 2.2 通过智能决策融合层彻底打破了这一桎梏。
+
+**`merge_decisions()` 当前签名（8 参数）：**
+```python
+def merge_decisions(
+    chan_result, momentum_result, wyckoff_result,
+    regime=”正常”, current_price=0.0, bars=None,
+    hmm_regime=”range”, extend_fundamental=None, extend_sentiment=None,
+) -> dict
+```
 
 #### 5.6.1 信号标准化抽象
 融合层首先将底层各个策略子系统的原始计算结果抽象为带有方向与置信度的统一信号包（`CandidateSignal`）：
@@ -423,11 +461,27 @@ $$\text{UUID} = \text{SHA256}(\text{normalized\_symbol} \parallel \text{normaliz
 ## 八、数据流图
 
 ```
-Tencent API → light_data.py
+Tencent API → light_data.py (days=300)
 Sina API → fetch_5m/fetch_15m/fetch_30m
   ↓
 strategy_protocol.py:run_all()
-  build_structure_context() → chanlun_strategy() → wyckoff_strategy()
+  ├── build_structure_context()  ← ATR + 移动止损 + 支撑/阻力
+  ├── chanlun_strategy()
+  ├── momentum_strategy()
+  ├── wyckoff_strategy()
+  ↓
+  merge_decisions(chan, momentum, wyckoff, regime, hmm_regime, ...)
+  ├── Scenario Priority Filter (pos_pct → 动态权重)
+  ├── Veto 噪声消解
+  ├── 贝叶斯融合 (可选)
+  → {action, confidence, signals_detail, hmm_regime}
+  ↓
+  status_layers(current, bars, structure_ctx, fusion, ...)
+  ├── _ma250_check()        ← 年线一票否决
+  ├── FUSION_STATUS_MAP     ← 融合层覆盖
+  ├── _fake_break           ← 假跌破确认
+  ├── _near_stop            ← 分阶段退出
+  → {base_status, theory_status, status, ...}
   ↓
   └──→ final_report.py (trader)
   └──→ t0_run.py → final_t0.py (t0-trader)

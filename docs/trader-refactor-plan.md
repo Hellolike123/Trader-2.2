@@ -455,3 +455,56 @@ elif ATR_ratio < 0.03: 档位 = "高波动", 首仓上限 = "5-7%"
 else: 档位 = "极端波动", 首仓上限 = "≤5%或观望"
 ```
 
+---
+
+## 十、ATR 移动止损（2026-05-29 新增）
+
+> 来源：commit c4a3289
+> 详见 `openspec/changes/doc-overhaul-2026-05/specs/exit-strategy/spec.md`
+
+### 10.1 概述
+
+在原有静态 ATR 止损（`stop_distance = ATR14 * 2`）基础上，新增动态移动止损机制。两者关系：
+
+- **静态止损（hard_stop）**：买入时确定，作为底线不变
+- **移动止损（trailing_stop）**：跟踪最高收盘价，只紧不松
+- **最终止损**：`max(trailing_stop, hard_stop)`
+
+### 10.2 公式
+
+```python
+trailing_stop = highest_close × (1 - atr_pct × TRAILING_STOP_ATR_MULTIPLE)
+trailing_stop = max(trailing_stop, hard_stop)  # 只紧不松
+```
+
+- `highest_close`：分析窗口内最高收盘价
+- `atr_pct`：ATR 百分比
+- `TRAILING_STOP_ATR_MULTIPLE`：默认 3.0
+
+### 10.3 假跌破确认
+
+当价格跌破止损时，检查近 3 日是否有收盘 ≥ 支撑位。如有，判定为假跌破，状态降级为"防守观察"而非"风险回避"。
+
+### 10.4 分阶段退出
+
+| 条件 | 状态 | 策略 |
+|------|------|------|
+| 价格距止损 < 2×ATR | "冲高减仓" | 逢高减仓 |
+| 跌破止损（无假跌破） | "风险回避" | 全面退出 |
+| 跌破止损 + 假跌破 | "防守观察" | 持有观察 |
+
+### 10.5 配置项
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `ENABLE_TRAILING_STOP` | True | 移动止损开关 |
+| `TRAILING_STOP_ATR_MULTIPLE` | 3.0 | ATR 倍数 |
+| `PULLBACK_CONFIRM_DAYS` | 3 | 假跌破确认天数 |
+| `EXIT_PHASED_ENABLED` | True | 分阶段退出开关 |
+
+### 10.6 实现位置
+
+- `structure_core.py` — `build_structure_context()` 计算 trailing_stop
+- `decision_core.py` — `status_layers()` 假跌破 + 分阶段退出逻辑
+- `run_analysis.py` — 渲染"移动止损（ATR）"显示
+

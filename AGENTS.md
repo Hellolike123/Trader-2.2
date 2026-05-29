@@ -34,6 +34,48 @@ A 股交易决策辅助系统。免费行情 API（腾讯 + 新浪），缠论 /
 
 ---
 
+## 趋势过滤与退出策略
+
+### 250日线趋势过滤（一票否决）
+
+股价在 250 日均线（年线）下方时，`_ma250_check()` 直接返回"暂不碰"，跳过所有后续分析（融合层、Wyckoff、缠论等）。这是硬门控，优先级最高。
+
+- 配置：`TREND_FILTER_ENABLED`、`TREND_MA_LONG=250`、`LOOKBACK_DAYS=300`
+- 位置：`decision_core.py` → `status_layers()` 入口
+- T0 交易不触发（T0 的 `LOOKBACK_DAYS=30`，独立配置）
+
+### ATR 移动止损
+
+止损价动态跟踪最高收盘价，只紧不松：
+
+```
+trailing_stop = highest_close × (1 - ATR% × 3.0)
+最终止损 = max(trailing_stop, hard_stop)
+```
+
+- 配置：`ENABLE_TRAILING_STOP=True`、`TRAILING_STOP_ATR_MULTIPLE=3.0`
+- 位置：`structure_core.py` → `build_structure_context()`
+
+### 假跌破确认 + 分阶段退出
+
+| 条件 | 状态 | 策略 |
+|------|------|------|
+| 价格距止损 < 2×ATR | "冲高减仓" | 逢高减仓 |
+| 跌破止损（无假跌破） | "风险回避" | 全面退出 |
+| 跌破止损 + 近3日有收盘≥支撑 | "防守观察" | 持有观察 |
+
+- 配置：`PULLBACK_CONFIRM_DAYS=3`、`EXIT_PHASED_ENABLED=True`
+- 位置：`decision_core.py` → `status_layers()`
+
+### 融合覆盖机制
+
+当融合层置信度超过阈值时，其 action 通过 `FUSION_STATUS_MAP` 覆盖 `status_layers()` 的判定。
+
+- 配置：`FUSION_OVERRIDE_ENABLED=True`、`FUSION_CONFIDENCE_THRESHOLD=0.2`
+- 位置：`decision_core.py` → `_FUSION_STATUS_MAP`
+
+---
+
 ## Skill 速查表
 
 | Skill | 一句话 | 版本 | 入口脚本 |
