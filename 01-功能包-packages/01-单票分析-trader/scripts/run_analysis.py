@@ -83,6 +83,35 @@ if CONTRACTS.exists() and str(CONTRACTS) not in sys.path:
 from signal_contract import assert_valid_signal
 from datetime import date
 
+def _degraded_quote_report(target: str) -> dict[str, Any]:
+    """计算依赖缺失时的降级报告：仅返回行情数据。"""
+    try:
+        from trader_shared.data_provider import get_provider
+        provider = get_provider()
+        sec = provider.resolve_security(target)
+        quote = provider.fetch_quote(sec)
+        daily = provider.fetch_qfq_daily(sec, days=10)
+    except Exception as exc:
+        return {"error": str(exc), "name": target, "symbol": target}
+
+    current = quote.get("current_price")
+    chg = quote.get("current_change_pct")
+    return {
+        "name": quote.get("name", target),
+        "symbol": quote.get("symbol", target),
+        "current_price": current,
+        "current_change_pct": chg,
+        "high": quote.get("high"),
+        "low": quote.get("low"),
+        "pre_close": quote.get("pre_close"),
+        "volume": quote.get("volume"),
+        "turnover_rate": quote.get("turnover_rate"),
+        "data_source": quote.get("data_source"),
+        "_degraded": True,
+        "daily_bars": daily,
+    }
+
+
 def today_text() -> str:
     return date.today().isoformat()
 
@@ -140,10 +169,16 @@ def pct(value: float | None) -> str:
 
 
 def build_report(target: str) -> dict[str, Any]:
-    import candidate_core as core
-    from candidate_core import build_structure_context, atr_volatility_level
-    from trader_shared.data_provider import get_provider
-    from trader_shared.strategy_protocol import run_all
+    try:
+        import candidate_core as core
+        from candidate_core import build_structure_context, atr_volatility_level
+        from trader_shared.data_provider import get_provider
+        from trader_shared.strategy_protocol import run_all
+    except (ModuleNotFoundError, ImportError) as _ex:
+        # 缺少 numpy/pandas 等计算依赖时降级为行情报告
+        import warnings
+        warnings.warn(f"[trader] 计算依赖缺失，降级为行情模式: {_ex}")
+        return _degraded_quote_report(target)
     
     provider = get_provider()
     snapshot = provider.load_market_snapshot(target, days=LOOKBACK_DAYS, include_5m=True)

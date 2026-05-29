@@ -1,0 +1,16 @@
+# Trader skill 核心依赖
+# pip install -r requirements.txt
+
+# HTTP 数据源（腾讯/Sina/东方财富）—— 必备
+requests>=2.28
+
+# TCP 数据源（通达信）—— 可选，安装后自动启用
+mootdx>=0.5.0
+pytdx3>=0.1.0
+
+# 备选数据源 —— 可选
+akshare>=1.14.0
+
+# 计算依赖 —— 缠论/威科夫/筹码/HMM/量价分布
+numpy>=1.24
+pandas>=1.5
