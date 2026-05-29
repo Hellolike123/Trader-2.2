@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 import time
+import warnings
 from datetime import datetime, date
 from io import StringIO
 from typing import Any
@@ -20,8 +21,8 @@ def _http_get_json(url: str, params: dict[str, Any] | None = None) -> dict:
         r = requests.get(url, params=params, headers={"User-Agent": UA}, timeout=10)
         if r.status_code == 200:
             return r.json()
-    except Exception:
-        pass
+    except Exception as e:
+        warnings.warn(f"[extend_data] HTTP GET JSON 失败: {e}")
     return {}
 
 def _http_get_text(url: str, referer: str | None = None, encoding: str = "utf-8") -> str:
@@ -34,8 +35,8 @@ def _http_get_text(url: str, referer: str | None = None, encoding: str = "utf-8"
         r.encoding = encoding
         if r.status_code == 200:
             return r.text
-    except Exception:
-        pass
+    except Exception as e:
+        warnings.warn(f"[extend_data] HTTP GET text 失败: {e}")
     return ""
 
 def eastmoney_datacenter(report_name: str, filter_str: str = "", page_size: int = 10, sort_columns: str = "", sort_types: str = "-1") -> list[dict]:

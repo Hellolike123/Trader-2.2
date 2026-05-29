@@ -570,8 +570,8 @@ def run_once(
         if allowed_events:
             try:
                 persist_event_signals(allowed_events, plan)
-            except Exception:
-                pass
+            except Exception as e:
+                warnings.warn(f"[t0-monitor] 信号持久化失败: {e}")
             allowed_events = []
         alert = _fuse_alert(target_key, day_fuse["count"], name)
         return alert
@@ -579,8 +579,8 @@ def run_once(
     if allowed_events:
         try:
             persist_event_signals(allowed_events, plan)
-        except Exception:
-            pass
+        except Exception as e:
+            warnings.warn(f"[t0-monitor] 信号持久化失败: {e}")
     if not allowed_events:
         return "无新提醒" if verbose else ""
     return "\n\n".join(build_alert_message(event, plan, cost=cost, position=position, previous_state=target_state) for event in allowed_events)

@@ -296,8 +296,8 @@ def analyze_big_orders(
                     h0, m0 = map(int, prev_time.split(":"))
                     if (h1 * 60 + m1) - (h0 * 60 + m0) <= 2:
                         consecutive = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    warnings.warn(f"[big_order] 连续性判定时间解析失败: time={time_text} prev={prev_time} error={e}")
                     
             events.append(
                 BigOrderEvent(
@@ -348,8 +348,8 @@ def analyze_big_orders(
                     h0, m0 = map(int, prev_time.split(":"))
                     if (h1 * 60 + m1) - (h0 * 60 + m0) <= 2:
                         consecutive = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    warnings.warn(f"[big_order] 连续性判定时间解析失败: time={time_text} prev={prev_time} error={e}")
             events.append(
                 BigOrderEvent(
                     time=time_text,
