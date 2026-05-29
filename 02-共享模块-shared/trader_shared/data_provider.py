@@ -126,41 +126,63 @@ class DataProvider(Protocol):
 # Default provider: Tencent + Sina (via light_data)
 # ═══════════════════════════════════════════════
 
+_ENRICH_CACHE: dict[str, tuple[float, dict, dict]] = {}
+_ENRICH_TTL = 600  # 10 分钟缓存，基本面数据不会盘中秒变
+
+
 def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
-    """Enrich the MarketSnapshot with extend_fundamental and extend_sentiment using a thread pool."""
+    """Enrich the MarketSnapshot with extend_fundamental and extend_sentiment using a thread pool.
+
+    带 10 分钟缓存 + 2s 超时，避免每次调用都等 4 路外部 API。
+    """
     sec = snap.security
     if not sec or not sec.code or len(sec.code) != 6 or not sec.code.isdigit():
         return snap
-        
+
+    # 缓存命中
+    import time
+    now = time.time()
+    cached = _ENRICH_CACHE.get(sec.code)
+    if cached is not None and now - cached[0] < _ENRICH_TTL:
+        import dataclasses
+        return dataclasses.replace(
+            snap,
+            extend_fundamental=cached[1],
+            extend_sentiment=cached[2],
+        )
+
     try:
         from trader_shared.extend_data import ExtendDataProvider
         from concurrent.futures import ThreadPoolExecutor
-        
+
         with ThreadPoolExecutor(max_workers=4) as executor:
             f_sh = executor.submit(ExtendDataProvider.get_shareholder_trend, sec.code)
             f_eps = executor.submit(ExtendDataProvider.get_ths_consensus_eps, sec.code)
             f_unlocks = executor.submit(ExtendDataProvider.get_upcoming_unlocks, sec.code)
             f_hot = executor.submit(ExtendDataProvider.get_ths_hot_reason_for_stock, sec.code)
-            
-            sh_trend = f_sh.result(timeout=4.0)
-            ths_eps = f_eps.result(timeout=4.0)
-            unlocks = f_unlocks.result(timeout=4.0)
-            hot_reason = f_hot.result(timeout=4.0)
-            
+
+            sh_trend = f_sh.result(timeout=2.0)
+            ths_eps = f_eps.result(timeout=2.0)
+            unlocks = f_unlocks.result(timeout=2.0)
+            hot_reason = f_hot.result(timeout=2.0)
+
             extend_fundamental = {
                 "shareholder": sh_trend,
-                "consensus_eps": ths_eps
+                "consensus_eps": ths_eps,
             }
             extend_sentiment = {
                 "unlocks": unlocks,
-                "theme_harden": hot_reason
+                "theme_harden": hot_reason,
             }
-            
+
+            # 写入缓存
+            _ENRICH_CACHE[sec.code] = (now, extend_fundamental, extend_sentiment)
+
             import dataclasses
             return dataclasses.replace(
                 snap,
                 extend_fundamental=extend_fundamental,
-                extend_sentiment=extend_sentiment
+                extend_sentiment=extend_sentiment,
             )
     except Exception as e:
         import sys
