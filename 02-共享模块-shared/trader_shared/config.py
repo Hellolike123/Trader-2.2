@@ -8,7 +8,7 @@ Usage (in skill scripts):
 """
 from __future__ import annotations
 
-LOOKBACK_DAYS: int = 30
+LOOKBACK_DAYS: int = 300  # 250日均线需要至少300根日K线
 RECENT_WINDOW: int = 5
 CONFIRM_BUFFER: float = 0.02
 STOP_BUFFER: float = 0.98
@@ -75,10 +75,9 @@ INDEX_CODE: str = "000852.SH"
 
 # ---- Trend filter constants (long-term MA filter) ----
 TREND_MA_SHORT: int = 30
-# C-13 fix: TREND_MA_LONG 从 900 改为 60（原 900 需 3.5 年数据，但默认只取 30 天）
-# 60 日均线足以判断中期趋势，且与 LOOKBACK_DAYS=30 兼容（30 天数据能算 60 日均线只要日历跨度够）
-TREND_MA_LONG: int = 60
+TREND_MA_LONG: int = 250  # 年线，中长线生死线
 TREND_FILTER_ENABLED: bool = True  # 默认开启趋势过滤
+TREND_MA_LOOKBACK: int = 300  # 至少取 300 天数据才能算出可靠的 MA250
 
 # ---- Wyckoff constants ----
 WYCKOFF_MIN_BARS: int = 15

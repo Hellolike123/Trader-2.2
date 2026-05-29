@@ -99,7 +99,7 @@ try:
     from trader_shared.config import TREND_MA_SHORT, TREND_MA_LONG, TREND_FILTER_ENABLED
 except Exception:
     TREND_MA_SHORT = 30
-    TREND_MA_LONG = 60  # C-13 fix synced
+    TREND_MA_LONG = 250  # 年线过滤
     TREND_FILTER_ENABLED = True
 
 try:
@@ -130,17 +130,45 @@ def _close(vals: list[dict[str, Any]]) -> list[float]:
 
 
 def _trend_filter(bars: list[dict[str, Any]]) -> bool:
+    """250日线趋势过滤：短期均线是否在长期均线上方。"""
     closes = _close(bars)
     if len(closes) < TREND_MA_LONG:
-        return True
+        return True  # 数据不足，不过滤
     try:
-        ma30 = sum(closes[-TREND_MA_SHORT:]) / TREND_MA_SHORT
+        ma_short = sum(closes[-TREND_MA_SHORT:]) / TREND_MA_SHORT
+        ma_long = sum(closes[-TREND_MA_LONG:]) / TREND_MA_LONG
     except Exception:
         return True
-    long_avg = sum(closes[:-TREND_MA_SHORT]) / max(len(closes) - TREND_MA_SHORT, 1)
-    if long_avg <= 0:
+    if ma_long <= 0:
         return True
-    return ma30 > long_avg
+    return ma_short > ma_long
+
+
+def _ma250_check(current: float, bars: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """250日线一票否决：价格在年线下方直接返回拦截结果。
+
+    Returns:
+        None if pass (price above MA250), dict with拦截信息 if fail.
+    """
+    closes = _close(bars)
+    if len(closes) < TREND_MA_LONG:
+        return None  # 数据不足，放行
+    ma250 = sum(closes[-TREND_MA_LONG:]) / TREND_MA_LONG
+    if current < ma250:
+        return {
+            "base_status": "暂不碰",
+            "theory_status": "暂不碰",
+            "status": "暂不碰",
+            "fusion_override_used": False,
+            "trend_ok": False,
+            "change": 0.0,
+            "below_ma_count": 0,
+            "above_ma5_ma10": False,
+            "pressure_space_pct": 0.0,
+            "ma250_blocked": True,
+            "ma250": round(ma250, 2),
+        }
+    return None
 
 
 # S-2 fix: 融合层 action → status 映射
@@ -246,6 +274,12 @@ def status_layers(
     fusion_result: dict[str, Any] | None = None,  # S-2 fix: 接收融合层结果
     chan_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # === 250日线一票否决 ===
+    if bars and TREND_FILTER_ENABLED:
+        ma250_block = _ma250_check(current, bars)
+        if ma250_block is not None:
+            return ma250_block
+
     # === S-2 fix: 融合层覆盖 ===
     # 当融合层开启、置信度足够高、且有明确映射时，用融合层判断替代纯数学判断
     fusion_override_used = False

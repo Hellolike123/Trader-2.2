@@ -182,7 +182,7 @@ def run_tdx3_with_timeout(func, *args, **kwargs) -> Any:
         socket.setdefaulttimeout(orig_timeout)
 
 
-def _fetch_qfq_tdx3(sec: Security, days: int = 30) -> list[dict[str, Any]] | None:
+def _fetch_qfq_tdx3(sec: Security, days: int = 300) -> list[dict[str, Any]] | None:
     if not _TDX3_AVAILABLE:
         return None
     try:
@@ -421,7 +421,7 @@ def _mootdx_market(sec: Security) -> int:
     return _MOOTDX_MARKET.get(sec.market.upper(), 0)
 
 
-def _fetch_qfq_mootdx(sec: Security, days: int = 30) -> list[dict[str, Any]] | None:
+def _fetch_qfq_mootdx(sec: Security, days: int = 300) -> list[dict[str, Any]] | None:
     client = _get_mootdx_client()
     if client is None:
         return None
@@ -836,7 +836,7 @@ def _compute_atr_fields(bars: list[dict[str, Any]]) -> None:
             bar["atr_ratio"] = 0.0
 
 
-def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 30) -> list[dict[str, Any]]:
+def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[dict[str, Any]]:
     # Tencent HTTP first — fast and stable
     raw_params = f"_var=kline_dayhfq&param={sec.qq_symbol},day,,,{max(days, 20)},qfq"
     cache_key = get_cache_key(TENCENT_FQKLINE_URL, raw_params)
@@ -1100,7 +1100,7 @@ def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dic
         return None
 
 
-def load_market_snapshot(target: str, days: int = 30, include_5m: bool = True, include_ticks: bool = True) -> MarketSnapshot:
+def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, include_ticks: bool = True) -> MarketSnapshot:
     sec = resolve_security(target)
     http = HttpClient()
     source_errors: dict[str, str] = {}
