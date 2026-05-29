@@ -484,6 +484,24 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         "golden_bid": golden_bid
     }
 
+    # ── P0: ATR 移动止损 ──
+    try:
+        from config import ENABLE_TRAILING_STOP, TRAILING_STOP_ATR_MULTIPLE
+    except Exception:
+        ENABLE_TRAILING_STOP = False
+        TRAILING_STOP_ATR_MULTIPLE = 3.0
+
+    trailing_stop = None
+    highest_close = None
+    if ENABLE_TRAILING_STOP and atr_pct and atr_pct > 0:
+        closes = [to_float(b.get("close")) for b in bars if to_float(b.get("close")) is not None]
+        if closes:
+            highest_close = max(closes)
+            trailing_stop = round(highest_close * (1 - atr_pct * TRAILING_STOP_ATR_MULTIPLE), 2)
+            # 移动止损不应低于原始 hard_stop（不扩大亏损）
+            if trailing_stop is not None:
+                trailing_stop = max(trailing_stop, stop)
+
     # keep compatibility for callers that expect status from structure payload
     from decision_core import status_for  # local import to avoid tighter module coupling
 
@@ -536,6 +554,8 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         "theory_multipliers": theory,  # P3: 记录理论信号对参数的微调系数，便于调试
         "time_window": _check_time_window(bars, chan_result),  # P4: 江恩时间窗口
         "fib_retrace": fib_retrace,  # [2.3新增] 斐波那契黄金回调及挂单参考
+        "trailing_stop": trailing_stop,  # P0: ATR 移动止损价
+        "highest_close": highest_close,  # P0: 分析区间最高收盘价
     }
 
 

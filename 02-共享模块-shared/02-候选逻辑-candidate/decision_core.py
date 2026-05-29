@@ -285,9 +285,35 @@ def status_layers(
         wyk=wyk,
     )
 
+    # P0: 假跌破检测 + 分阶段退出
+    _fake_break = False
+    _near_stop = False
+    try:
+        from config import PULLBACK_CONFIRM_DAYS, EXIT_PHASED_ENABLED
+    except Exception:
+        PULLBACK_CONFIRM_DAYS = 3
+        EXIT_PHASED_ENABLED = True
+
+    if current <= hard_stop and isinstance(bars, list) and len(bars) > 2:
+        lookback = min(PULLBACK_CONFIRM_DAYS, len(bars) - 1)
+        for i in range(-lookback, 0):
+            prev_close = to_float(bars[i].get("close"))
+            if prev_close is not None and prev_close >= support:
+                _fake_break = True
+                break
+
+    if EXIT_PHASED_ENABLED and not _fake_break and current > hard_stop:
+        atr_est = max(0.01, abs(hard_stop - support) / 2 if support > 0 else 0.01)
+        if current - hard_stop < atr_est * 2:
+            _near_stop = True
+
     base_status = "风险回避"
-    if current <= hard_stop or current < support * 0.995:
+    if _fake_break:
+        base_status = "防守观察"  # 假跌破，不直接清仓
+    elif current <= hard_stop or current < support * 0.995:
         base_status = "风险回避"
+    elif _near_stop:
+        base_status = "冲高减仓"  # 靠近止损，先减仓
     elif trend_ok and change <= CHANGE_THRESHOLD_DROP and current > low_zone_upper:
         base_status = "风险回避"
     elif is_theory_breakout:
@@ -308,8 +334,12 @@ def status_layers(
         base_status = "中性整理"
 
     theory_status = "防守观察"
-    if current <= hard_stop or current < support * 0.995:
+    if _fake_break:
+        theory_status = "防守观察"  # 假跌破，不升级
+    elif current <= hard_stop or current < support * 0.995:
         theory_status = "暂不碰"
+    elif _near_stop:
+        theory_status = "冲高减仓"
     elif trend_ok and change <= CHANGE_THRESHOLD_DROP and current > low_zone_upper:
         theory_status = "暂不碰"
     elif is_theory_breakout:

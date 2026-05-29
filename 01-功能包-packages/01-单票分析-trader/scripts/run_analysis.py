@@ -380,6 +380,7 @@ def build_report(target: str) -> dict[str, Any]:
         "resistance": resistance,
         "confirm": confirm,
         "stop": stop,
+        "trailing_stop": trailing_stop,
         "take": take,
         "stage": stage,
         "scene": scene,
@@ -703,6 +704,9 @@ def render_markdown(r: dict[str, Any]) -> str:
     chip_resistance = r.get("chip_resistance")
     ma_raw_v = r.get("ma_raw") or {}
     groups: dict[int, list[tuple[float, str]]] = {}
+    trailing_stop_val = r.get("trailing_stop")
+    if trailing_stop_val is not None and trailing_stop_val != stop:
+        groups.setdefault(0, []).append((trailing_stop_val, "移动止损（ATR）"))
     if stop > 0:
         groups.setdefault(1, []).append((stop, "止损位（ATR）"))
     if low_price > 0 and abs(low_price - stop) > 0.01:
