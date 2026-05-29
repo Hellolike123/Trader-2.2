@@ -140,6 +140,48 @@ def _signal_type_label(sig_type: str) -> str:
     return _SIGNAL_TYPE_LABELS.get(sig_type, sig_type)
 
 
+def _signal_direction_text(direction: int) -> str:
+    if direction > 0:
+        return "看多"
+    if direction < 0:
+        return "看空"
+    return "中性"
+
+
+def _fusion_breakdown(fusion: dict) -> list[str]:
+    """生成融合层决策分解文本。"""
+    rows = []
+    action = fusion.get("action", "")
+    score = fusion.get("weighted_score", 0)
+    confidence = fusion.get("confidence", 0)
+    regime = fusion.get("regime", "")
+    hmm = fusion.get("hmm_regime", "")
+    signals = fusion.get("signals_detail", {})
+    weights = fusion.get("weights_used", {})
+    disagreement = fusion.get("disagreement", 0)
+
+    rows.append("")
+    rows.append(f"  融合层：{action}（评分 {score:+.2f}，置信度 {confidence:.0%}）")
+
+    if regime:
+        hmm_cn = {"bull": "多头", "bear": "空头", "range": "震荡"}.get(hmm, hmm)
+        rows.append(f"  大盘环境：{regime}（HMM: {hmm_cn}）")
+
+    for key, label in [("chan", "缠论"), ("momentum", "动量"), ("wyckoff", "威科夫")]:
+        sig = signals.get(key, {})
+        if not sig:
+            continue
+        d = sig.get("direction", 0)
+        c = sig.get("confidence", 0)
+        w = weights.get(key, 0)
+        rows.append(f"    {label}：{_signal_direction_text(d)}（置信 {c:.0%}，权重 {w:.0%}）")
+
+    if disagreement > 1:
+        rows.append(f"  注意：多信号存在分歧（分歧度 {disagreement:.1f}），优先采纳缠论/威科夫方向")
+
+    return rows
+
+
 _FUSION_ACTION_MAP: dict[str, tuple[str, str, str]] = {
     "半仓试 (多方主导)": ("track", "bullish", "track"),
     "半仓试 (多方主导但有分歧)": ("track", "bullish", "track"),
@@ -653,6 +695,8 @@ def render_markdown(r: dict[str, Any]) -> str:
         f"  · 有底仓 → 反弹 {confirm:.2f} 冲不动就减 10-20%, 跌破 {stop:.2f} 止损",
         f"  · 加仓 → 放量站稳 {confirm:.2f} 且回踩不破，才评估",
     ])
+    if isinstance(fusion, dict) and fusion.get("action"):
+        lines.extend(_fusion_breakdown(fusion))
 
     resistance_val = float(r.get("resistance", 0))
     chip_support = r.get("chip_support")
