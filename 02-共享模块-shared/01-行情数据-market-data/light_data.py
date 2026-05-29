@@ -762,20 +762,7 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
     # Fallback: mootdx
     mootdx_q = _fetch_quote_mootdx(sec)
     if mootdx_q is not None:
-        try:
-            text = http.get_text(TENCENT_QUOTE_URL + sec.qq_symbol, encoding="gbk")
-            match = re.search(r'="([^"]*)"', text)
-            if match:
-                fields = match.group(1).split("~")
-                if len(fields) > 38:
-                    mootdx_q["turnover_rate"] = to_float(fields[38])
-                if len(fields) > 34:
-                    if mootdx_q.get("high") is None:
-                        mootdx_q["high"] = to_float(fields[33])
-                    if mootdx_q.get("low") is None:
-                        mootdx_q["low"] = to_float(fields[34])
-        except Exception:
-            pass
+        # 注意：不再走 Tencent HTTP 补充（第 1 优先已失败，跳过重复超时）
         mootdx_q["data_source"] = "mootdx"
         mootdx_q["data_status"] = "full"
         save_realtime_cache(cache_key, mootdx_q)
