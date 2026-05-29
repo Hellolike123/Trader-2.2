@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import sys
+import warnings
 from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -666,15 +667,15 @@ def get_provider() -> DataProvider:
             _provider = MootdxProvider()
             print(f"DataProvider: using mootdx (via TRADER_DATA_PROVIDER=mootdx)", file=sys.stderr)
             return _provider
-        except Exception:
-            pass
+        except Exception as e:
+            warnings.warn(f"[data_provider] TRADER_DATA_PROVIDER=mootdx 创建失败: {e}，静默降级", stacklevel=2)
     if provider_name == "akshare":
         try:
             _provider = AkShareProvider()
             print(f"DataProvider: using akshare (via TRADER_DATA_PROVIDER=akshare)", file=sys.stderr)
             return _provider
-        except RuntimeError:
-            pass
+        except RuntimeError as e:
+            warnings.warn(f"[data_provider] TRADER_DATA_PROVIDER=akshare 创建失败: {e}，静默降级", stacklevel=2)
     _provider = _init_provider()
     source_name = _provider.name
     print(f"DataProvider: using {source_name}", file=sys.stderr)

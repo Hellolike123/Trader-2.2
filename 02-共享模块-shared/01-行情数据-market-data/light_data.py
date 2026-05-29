@@ -923,6 +923,9 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 30) -> list[dic
         _compute_atr_fields(mootdx_bars)
         return mootdx_bars
 
+    # 全源失败，返回空列表（避免下游 bars[-1] 炸 TypeError）
+    return []
+
 
 def _fetch_mins_mootdx(sec: Security, interval: str, datalen: int = 60) -> list[dict[str, Any]] | None:
     client = _get_mootdx_client()
