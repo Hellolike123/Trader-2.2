@@ -289,6 +289,17 @@ def main(args: list[str] | None = None) -> int:
                 else:
                     shutil.copy2(item, dst_item)
 
+    # 复制顶层脚本和配置（不属于任何包目录）
+    _EXTRA_FILES = {
+        root / "scripts" / "t0_cron.py": "scripts/t0_cron.py",
+        root / "01-功能包-packages" / "01-单票分析-trader" / "requirements.txt": "requirements.txt",
+    }
+    for _src, _rel in _EXTRA_FILES.items():
+        if _src.exists():
+            _dst = staged_trader / _rel
+            _dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(_src, _dst)
+
     # Overwrite _meta.json and SKILL.md for the ONLY super-skill
     meta_trader = {
         "name": "trader",
