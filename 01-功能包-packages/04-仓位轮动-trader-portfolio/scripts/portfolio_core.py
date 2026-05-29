@@ -27,7 +27,8 @@ def analyze_target(target: str, provider: Any, lookback_days: int) -> dict[str, 
     try:
         quote = provider.fetch_quote(sec)
         bars = provider.fetch_qfq_daily(sec, days=lookback_days)
-        current = quote.get("current_price") or bars[-1].get("close")
+        _cp = quote.get("current_price")
+        current = _cp if _cp is not None else bars[-1].get("close")
         if current is None:
             raise RuntimeError("current price unavailable")
         current = float(current)

@@ -151,7 +151,8 @@ def build_report(target: str) -> dict[str, Any]:
     atr14_val = float(last_bar.get("atr14", 0) or 0)
     atr_ratio_val = float(last_bar.get("atr_ratio", 0) or 0)
     atr_level, atr_cap = atr_volatility_level(atr_ratio_val) if atr14_val > 0 else ("数据不足", 10)
-    current = quote.get("current_price") or bars[-1]["close"]
+    _cp = quote.get("current_price")
+    current = _cp if _cp is not None else bars[-1]["close"]
     if current is None:
         raise RuntimeError("current price unavailable")
     current = float(current)

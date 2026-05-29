@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import sys
@@ -10,6 +11,7 @@ from typing import Any
 
 STATE_PATH = Path.home() / ".trader" / "pipeline_state.json"
 STATE_DIR = STATE_PATH.parent
+LOCK_PATH = STATE_PATH.with_name(STATE_PATH.name + ".lock")
 
 STATE_SCHEMA = {
     "version": 1,
@@ -26,10 +28,12 @@ def _load() -> dict[str, Any]:
     if not STATE_PATH.exists():
         return _empty()
     try:
-        data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return _empty()
-        return data
+        with open(LOCK_PATH, "w") as lock_f:
+            fcntl.flock(lock_f, fcntl.LOCK_SH)
+            data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return _empty()
+            return data
     except (json.JSONDecodeError, OSError):
         return _empty()
 
@@ -42,7 +46,10 @@ def _save(data: dict[str, Any]) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
             f.write("\n")
-        os.replace(tmp_path, str(STATE_PATH))
+        # 在替换前加排它锁，阻止并发读/写
+        with open(LOCK_PATH, "w") as lock_f:
+            fcntl.flock(lock_f, fcntl.LOCK_EX)
+            os.replace(tmp_path, str(STATE_PATH))
     except OSError:
         if tmp_path:
             try:

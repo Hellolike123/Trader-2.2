@@ -62,7 +62,8 @@ def build_plan(target: str) -> dict[str, Any]:
     bars_5m = provider.fetch_5m(sec, datalen=60)
     bars_15m = provider.fetch_15m(sec, datalen=60)
     bars_30m = provider.fetch_30m(sec, datalen=60)
-    current = quote.get("current_price") or daily[-1].get("close")
+    _cp = quote.get("current_price")
+    current = _cp if _cp is not None else daily[-1].get("close")
     if current is None:
         raise RuntimeError("current price unavailable")
     report_data = {
