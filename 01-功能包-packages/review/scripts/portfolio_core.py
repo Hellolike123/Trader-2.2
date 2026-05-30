@@ -4,6 +4,8 @@ from typing import Any
 
 import candidate_core as core
 from light_data import pct_change, to_float
+from trader_shared.stage_positioning import assess_stage
+from trader_shared.structure_core import moving_average
 
 try:
     from trader_shared.chip_distribution import calc_chip_distribution
@@ -77,6 +79,16 @@ def analyze_target(target: str, provider: Any, lookback_days: int) -> dict[str, 
         )
         lw_base = core.base_weight(atr_level)
         t0_action = t0_action_for(current, levels["main_support"], levels["support"], levels["resistance"], status)
+
+        # 四阶段定位
+        ma_vals = levels.get("ma_values") or {}
+        ma250 = moving_average(bars, 250) if bars else None
+        stage_ma = dict(ma_vals)
+        stage_ma["ma250"] = ma250
+        position_ratio = levels.get("position_ratio", 0.5)
+        cp = change_pct if change_pct is not None else 0.0
+        stage = assess_stage(current, stage_ma, float(cp), bars, position_ratio)
+
         return {
             "ok": True,
             "target": target,
@@ -107,6 +119,11 @@ def analyze_target(target: str, provider: Any, lookback_days: int) -> dict[str, 
             "chip_dist": chip_dist,
             "chip_weight": chip_weight,
             "volume_above_pct": chip_dist.get("volume_above_pct") if chip_dist else None,
+            "major_stage": stage["major_stage"],
+            "momentum": stage["momentum"],
+            "stage_label": stage["stage_label"],
+            "stage_action": stage["action"],
+            "max_position_pct": stage["max_position_pct"],
         }
     except Exception as exc:
         return {

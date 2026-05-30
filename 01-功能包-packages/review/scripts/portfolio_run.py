@@ -123,6 +123,7 @@ def compact_fraction(value: float) -> str:
         0.25: "1/4",
         round(1 / 3, 4): "1/3",
         0.5: "1/2",
+        1.0: "全部",
     }
     return mapping.get(round(value, 4), f"{value:.2f}")
 
@@ -394,6 +395,84 @@ def candidate_level(item: dict[str, Any]) -> str:
     return "unconfirmed"
 
 
+def decide_rotation(a_item: dict[str, Any], b_item: dict[str, Any]) -> dict[str, Any]:
+    """阶段 × 阶段 → 轮动决策
+
+    返回:
+        {
+            "action": "不动" | "轮动（强轮动）" | ...,
+            "ratio": float,  # 轮动比例, 0 = 不动, 1.0 = 清仓
+            "reason": str,
+            "level": str,    # 不动/风控退出/强轮动/轻轮动/标准轮动
+        }
+    """
+    a_stage = str(a_item.get("major_stage") or "蓄势")
+    b_stage = str(b_item.get("major_stage") or "蓄势")
+    a_name = str(a_item.get("name") or a_item.get("target") or "A")
+    b_name = str(b_item.get("name") or b_item.get("target") or "B")
+
+    # 衰退期 → 必须轮（清仓）
+    if a_stage == "衰退":
+        return {
+            "action": "轮动（风控退出）",
+            "ratio": 1.0,
+            "level": "风控退出",
+            "reason": f"{a_name}进入衰退期，必须清仓。",
+        }
+
+    # 主升期 → 不轮（让利润跑）
+    if a_stage == "主升":
+        return {
+            "action": "不动",
+            "ratio": 0.0,
+            "level": "不动",
+            "reason": f"{a_name}在主升期，趋势向上，让利润跑。",
+        }
+
+    # 派发期 → 看技术指标
+    if a_stage == "派发":
+        b_confirmed = candidate_level(b_item) == "confirmed"
+        if b_stage in ("蓄势", "主升") and b_confirmed:
+            return {
+                "action": "轮动（强轮动）",
+                "ratio": 1 / 3,
+                "level": "强轮动",
+                "reason": f"{a_name}进入派发期，高位滞涨，该减了。",
+            }
+        if b_stage in ("蓄势", "主升"):
+            return {
+                "action": "轮动（轻轮动）",
+                "ratio": 1 / 6,
+                "level": "轻轮动",
+                "reason": f"{a_name}进入派发期，{b_name}接近确认，先减一点。",
+            }
+        return {
+            "action": "不动",
+            "ratio": 0.0,
+            "level": "不动",
+            "reason": f"{a_name}在派发期，但{b_name}没有好的承接位。",
+        }
+
+    # 蓄势期 × 蓄势期 → 看技术指标
+    if a_stage == "蓄势" and b_stage == "蓄势":
+        a_stalled = is_high_stalled(a_item)
+        b_confirmed = candidate_level(b_item) == "confirmed"
+        if a_stalled and b_confirmed:
+            return {
+                "action": "轮动（标准轮动）",
+                "ratio": 0.25,
+                "level": "标准轮动",
+                "reason": f"{a_name}高位钝化，{b_name}已确认突破。",
+            }
+
+    return {
+        "action": "不动",
+        "ratio": 0.0,
+        "level": "不动",
+        "reason": "两只票都没有到该动的时候。",
+    }
+
+
 def choose_rotation(items: list[dict[str, Any]], snapshot: dict[str, Any]) -> dict[str, Any]:
     account = snapshot.get("account") if isinstance(snapshot.get("account"), dict) else {}
     max_move = number(account.get("max_move_pct"), 10)
@@ -563,147 +642,107 @@ def render_markdown(
     cash_floor: int = DEFAULT_CASH_FLOOR,
     main_cap: int = DEFAULT_MAIN_CAP,
 ) -> str:
-    weights = plan["weights"]
-    total_alloc = plan["total"]
-    cash = plan["cash"]
-    
     tradable = [i for i in sorted_items if i.get("ok")]
     if not tradable:
         return "错误：无可用标的数据"
+    if len(tradable) < 2:
+        return "错误：轮动至少需要两只票"
 
-    main = plan["roles"].get("主仓")
-    secondary = plan["roles"].get("副仓")
-    
-    # 1. 标题
-    lines = [f"轮动仓位 — {' + '.join(sorted(i['name'] for i in tradable))}"]
+    a_item = tradable[0]
+    b_item = tradable[1]
+    rotation = decide_rotation(a_item, b_item)
+    weights = plan["weights"]
+
+    # 标题
+    names = " + ".join(sorted(i["name"] for i in tradable))
+    lines = [f"轮动仓位 — {names}", ""]
+
+    # 决策
+    is_rotating = rotation["ratio"] > 0
+    if is_rotating:
+        lines.append(f"🔔 决策：{rotation['action']}")
+    else:
+        lines.append(f"🔔 决策：不动")
     lines.append("")
-    
-    # 2. 决策段
-    lines.append(_render_decision(tradable, main, secondary))
-    lines.append("")
-    
-    # 3. 持仓速览
-    lines.append("📊 持仓速览")
+
+    # 分析
+    lines.append("📝 分析")
     for it in tradable:
         nm = it["name"]
+        stage = it.get("major_stage", "蓄势")
+        momentum = it.get("momentum", "震荡")
+        if stage == "主升":
+            lines.append(f"  {nm}在主升期，趋势向上，让利润跑。")
+        elif stage == "派发":
+            lines.append(f"  {nm}进入派发期，高位滞涨，该减了。")
+        elif stage == "衰退":
+            lines.append(f"  {nm}进入衰退期，趋势走坏，必须清仓。")
+        elif stage == "蓄势":
+            if momentum == "走强":
+                lines.append(f"  {nm}在蓄势期，开始走强，关注突破确认。")
+            else:
+                lines.append(f"  {nm}在蓄势期，还没突破确认，不急。")
+    if is_rotating:
+        ratio_text = compact_fraction(rotation["ratio"])
+        lines.append(f"  卖强买弱，轮 {ratio_text} 仓位。")
+    else:
+        lines.append(f"  两只票都没有到该动的时候。")
+    lines.append("")
+
+    # 持仓
+    lines.append("📊 持仓")
+    for it in tradable:
+        nm = it["name"]
+        stage = it.get("major_stage", "蓄势")
+        momentum = it.get("momentum", "震荡")
         cur = it.get("current", 0)
         cost = it.get("cost")
-        sh = it.get("shares")
-        if cost is not None and sh:
+        if cost is not None and cost > 0:
             pl_pct = round((cur - float(cost)) / float(cost) * 100, 1)
-            pl_amt = round((cur - float(cost)) * sh, 0)
-            lines.append(f"  {nm}: 现价{cur:.2f}  成本{float(cost):.2f}  {int(sh)}股  浮盈{pl_pct:+.1f}%  ({pl_amt:+,.0f}元)")
+            lines.append(f"  {nm}：{stage}+{momentum} ｜ 现价 {cur:.2f} ｜ 浮盈 {pl_pct:+.1f}%")
         else:
-            lines.append(f"  {nm}: 现价{cur:.2f}  未持仓")
-    lines.append("")
-    
-    # 4. 仓位建议
-    lines.append("📈 仓位建议")
-    for nm, wt in weights.items():
-        it = next((i for i in tradable if i["name"] == nm), None)
-        if not it:
-            continue
-        role_txt = ""
-        for role_nm in ("主仓", "副仓", "观察"):
-            r = plan["roles"].get(role_nm)
-            if r and r["name"] == nm:
-                role_txt = "（得分最高）" if role_nm == "主仓" else "（得分次优）" if role_nm == "副仓" else "（观察）"
-                break
-        lines.append(f"  {nm} → {wt}%  {role_txt}")
-    lines.append(f"  现金 → {cash}%")
-    has_high_atr = any(float(i.get("atr_ratio") or 0) >= 0.03 for i in tradable)
-    if has_high_atr:
-        lines.append("  （有标的波动偏高，得分+筹码降权决定比例）")
-    else:
-        lines.append("  （得分占比决定比例，ATR仅作降权参考）")
-    lines.append("")
-    
-    # 5. 仓位对比（建议 vs 实际）
-    lines.append("📋 仓位对比")
-    total_mv = sum((i["shares"] * i.get("current", 0)) for i in tradable if i.get("shares") and i.get("current"))
-    for nm, wt in weights.items():
-        it = next((i for i in tradable if i["name"] == nm), None)
-        if not it:
-            continue
-        act = 0
-        if total_mv > 0 and it.get("shares") and it.get("current"):
-            act = round(it["shares"] * it["current"] / total_mv * 100)
-        diff = act - wt
-        flag = "✅ 接近" if abs(diff) <= 5 else f"⚠️ 超{diff}%" if diff > 0 else f"⚠️ 少{abs(diff)}%"
-        lines.append(f"  {nm}| 建议{wt}%  实际{act}%  → 差{diff:+d}%  {flag}")
-    lines.append("")
-    
-    # 6. 今日行动
-    lines.append("📎 今日行动")
-    for nm in weights:
-        it = next((i for i in tradable if i["name"] == nm), None)
-        if not it or not it.get("confirm"):
-            continue
-        dist = round((it["confirm"] - it["current"]) / it["current"] * 100, 1)
-        lines.append(f"  · {nm} 距确认位 {it['confirm']:.2f} 还差 {dist}%, 关注盘中")
+            lines.append(f"  {nm}：{stage}+{momentum} ｜ 现价 {cur:.2f}")
     lines.append("")
 
-    # 7. 轮动触发（仅协同换股条件）
-    lines.append("🔄 轮动触发")
-    if len(tradable) >= 2:
-        a, b = tradable[0], tradable[1]
-        a_stop = f"{a['stop']:.2f}" if a.get("stop") else "--"
-        b_cfm = f"{b['confirm']:.2f}" if b.get("confirm") else "--"
-        lines.append(f"  换股条件: {a['name']} 破 {a_stop} 且 {b['name']} 稳 {b_cfm}")
-    is_trig = any(i.get("status") in ("暂不碰", "数据失败") or (i.get("stop") and i.get("current") <= i["stop"]) for i in tradable)
-    lines.append(f"  当前: {'已触发' if is_trig else '未触发'}")
-    lines.append("")
+    # 轮动方案（仅轮动时显示）
+    if is_rotating:
+        lines.append("🔁 轮动方案")
+        ratio_pct = round(rotation["ratio"] * 100)
+        a_hold_pct = weights.get(a_item["name"], 0)
+        released_pct = round(a_hold_pct * rotation["ratio"])
+        lines.append(f"  从{a_item['name']}减 {ratio_pct}%，释放约 {released_pct}% 总仓")
+        lines.append(f"  {b_item['name']}承接 {released_pct}%，剩余留现金")
+        lines.append("")
 
-    # 8. 操作信号（个股买卖点 + 目标价 + 盈亏比）
-    lines.append("💡 操作信号")
+    # 关键价位
+    lines.append("📍 关键价位")
     for it in tradable:
         nm = it["name"]
-        cur = it.get("current", 0)
         cfm = it.get("confirm")
-        defense = it.get("defense")
-        stop = it.get("stop")
-        take = it.get("take")
-        if cfm and take:
-            up = round((take - cfm) / cfm * 100, 1)
-            dist_to_stop = round((cur - stop) / cur * 100, 1) if stop else None
-            dist_to_cfm = round((cfm - cur) / cur * 100, 1)
-            # 买入信号：站上确认位 → 看高减仓位
-            lines.append(f"  {nm}（现价{cur:.2f}）：")
-            lines.append(f"    🟢 站上 {cfm:.2f} → 看高 {take:.2f}（最多赚{up}%）")
-            if dist_to_stop is not None and dist_to_stop > 0:
-                lines.append(f"    🔴 跌破 {stop:.2f} → 清仓（最多亏{dist_to_stop}%）")
-            else:
-                lines.append(f"    🔴 跌破 {stop:.2f} → 清仓")
-            lines.append(f"    距触发差 {dist_to_cfm}%, {'快到' if dist_to_cfm < 3 else '还需确认'}")
-            if defense:
-                lines.append(f"    支撑位: {defense:.2f}（止损参考）")
-        elif stop:
-            lines.append(f"  {nm}: 暂无明确信号，继续观望")
-        lines.append("")
-    
+        stop = it.get("stop") or it.get("defense")
+        cfm_txt = f"{cfm:.2f}" if cfm else "--"
+        stop_txt = f"{stop:.2f}" if stop else "--"
+        lines.append(f"  {nm}：确认 {cfm_txt} ｜ 防守 {stop_txt}")
+    lines.append("")
+
+    # 触发条件
+    lines.append("👀 触发条件")
+    for it in tradable:
+        nm = it["name"]
+        stage = it.get("major_stage", "蓄势")
+        stop = it.get("stop") or it.get("defense")
+        cfm = it.get("confirm")
+        stop_txt = f"{stop:.2f}" if stop else "--"
+        cfm_txt = f"{cfm:.2f}" if cfm else "--"
+        if stage in ("派发", "衰退"):
+            lines.append(f"  {nm}跌破 {stop_txt} → 清仓")
+        else:
+            lines.append(f"  {nm}跌破 {stop_txt} → 减仓")
+        if stage == "蓄势" and cfm:
+            lines.append(f"  {nm}站上 {cfm_txt} → 可以加仓")
+
     return "\n".join(lines)
 
-
-def _render_decision(tradable, main, secondary):
-    """生成决策段"""
-    st = [i.get("status", "") for i in tradable]
-    if "暂不碰" in st:
-        n = [i["name"] for i in tradable if i.get("status") == "暂不碰"]
-        return f"🔔 决策：卖出\n  {n[0] if n else '某'}进入暂不碰，建议减仓或清仓。"
-    if any("防守" in s for s in st):
-        miss = []
-        for i in tradable:
-            if i.get("confirm") and i.get("current") < i["confirm"]:
-                d = round((i["confirm"] - i["current"]) / i["current"] * 100, 1)
-                miss.append(f"{i['name']}({d}%)")
-        return f"🔔 决策：不动\n  全部待确认{','.join(miss)}，暂不操作。" if miss else "🔔 决策：不动\n  暂无明确信号。"
-    if "低吸观察" in st:
-        n = [i["name"] for i in tradable if i.get("status") == "低吸观察"]
-        return f"🔔 决策：观察买盘\n  {', '.join(n[:2])}进入低吸观察。"
-    if "冲高减仓" in st:
-        n = [i["name"] for i in tradable if i.get("status") == "冲高减仓"]
-        return f"🔔 决策：减仓\n  {', '.join(n[:2])}冲高减仓，建议降低仓位。"
-    return "🔔 决策：等待\n  信号不明确，继续观察盘面。"
 
 
 def build_advice(
