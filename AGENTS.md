@@ -89,38 +89,46 @@ trailing_stop = highest_close × (1 - ATR% × 3.0)
 
 | Skill | 一句话 | 版本 | 入口脚本 |
 |-------|--------|------|---------|
-| `trader` | 单票分析 + 选股池全生命周期管理 | `0.4.0-pool-merge` | `scripts/final_report.py` / `scripts/final_pool.py` |
-| `t0` | 盘中 T0 精确执行卡 + 盯盘告警 | `0.6.0-slim` | `scripts/final_t0.py` |
-| `review` | 盘后复盘 + 仓位轮动 + 信号追踪 | `0.2.0-full-review` | `scripts/final_review.py` / `scripts/final_portfolio.py` / `scripts/final_tracker.py` |
+| `trader` | 单票分析 + 选股池全生命周期管理 | `2.4.0-consolidated` | `scripts/final_report.py` / `scripts/final_pool.py` |
+| `t0` | 盘中 T0 精确执行卡 + 盯盘告警 | `2.4.0-consolidated` | `scripts/final_t0.py` |
+| `review` | 盘后复盘 + 仓位轮动 + 信号追踪 | `2.4.0-consolidated` | `scripts/final_review.py` / `scripts/final_portfolio.py` / `scripts/final_tracker.py` |
 
 ---
 
 ## 推荐工作流
 
 ```
-新票验票 → trader
-确认跟踪 → trader script add
-池内排序 → trader script rank
+新票验票 → trader script --target <NAME>
+入池 → trader script add --target <NAME>
 明日作战表 → trader script plan
-盘中执行 → t0 script (monitor)
-盘后复盘 → review script
-仓位轮动 → review script --targets
-信号回溯 → review script (读 signals.jsonl)
+盘中执行 → t0 script --target <NAME> --monitor
+盘后复盘 → review script --target <NAME>
+仓位轮动 → review script --compare A B
+信号回溯 → review script --target <NAME>（读 signals.jsonl）
 ```
 
 ### Skill 命令映射
 
 | 需求 | 命令 |
 |------|------|
-|分析一只票 | `trader script --target <NAME>` |
+| 分析一只票 | `trader script --target <NAME>` |
 | 价格监控 | `trader script --target <NAME> --output alert-text` |
-| T0 盯盘单次检查 | `t0 script --target <NAME> --monitor --once` |
+| 写入信号 | `trader script --target <NAME> --write-signal` |
 | 入池 | `trader script add --target <NAME>` |
-| 池内排序 | `trader script rank` |
-| 仓位轮动 | `review script --targets A B` |
-| 盘后复盘 | `review script --target <NAME>` |
+| 待确认入池 | `trader script add-pending --target <NAME>` |
+| 确认入池 | `trader script confirm-to-pool --target <NAME>` |
+| 作战表 | `trader script plan` |
+| 池子概览 | `trader script list` |
+| 待确认池 | `trader script show-pending` |
+| 多票对比 | `trader script compare --targets A B C` |
 | 移除出池 | `trader script remove --target <NAME>` |
 | 归档已退出 | `trader script archive-exited` |
+| T0 盯盘单次检查 | `t0 script --target <NAME> --monitor --once` |
+| T0 持续监控 | `t0 script --target <NAME> --monitor` |
+| 盘后复盘 | `review script --target <NAME>` |
+| 多票复盘对比 | `review script --compare A B C` |
+| 盘中复盘 | `review script --target <NAME> --session midday` |
+| 仓位轮动 | `review script --portfolio --targets A B` |
 
 详细自然触发词映射见 `AGENTS_DEEP.md` Section 十四。
 
