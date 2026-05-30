@@ -26,10 +26,10 @@ except ImportError:
 
 from trader_shared.data_manager import DataManager
 from price_point_engine import price
-from signal_store import append_signal
+from trader_shared.signal_store import append_signal
 from t0_run import build_plan, build_t0_event_signal
 from config import FREQUENCY_STOP_LIMIT
-from light_data import is_trading_time
+from trader_shared.light_data import is_trading_time
 
 try:
     from trader_shared import get_market_level, add_warning, get_market_note, log_safe, fill_by_target

@@ -8,10 +8,8 @@ SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-for name in ("signal_store", "models", "signal_contract"):
-    sys.modules.pop(name, None)
-
-from signal_store import append_signal, DEFAULT_SIGNAL_STORE_PATH
+import trader_shared
+from trader_shared.signal_store import append_signal, DEFAULT_SIGNAL_STORE_PATH
 from review_model import enrich_with_signal_backtrack
 
 
@@ -42,7 +40,7 @@ def test_enrich_with_signal_backtrack_finds_same_day(tmp_path):
         "name": "南网科技",
         "date": "2026-05-01",
     }
-    import signal_store as store_mod
+    import trader_shared.signal_store as store_mod
     old = store_mod.DEFAULT_SIGNAL_STORE_PATH
     store_mod.DEFAULT_SIGNAL_STORE_PATH = store_path
     try:
@@ -70,7 +68,7 @@ def test_enrich_with_signal_backtrack_no_signals_in_store(tmp_path):
         "name": "南网科技",
         "date": "2026-05-01",
     }
-    import signal_store as store_mod
+    import trader_shared.signal_store as store_mod
     old = store_mod.DEFAULT_SIGNAL_STORE_PATH
     store_mod.DEFAULT_SIGNAL_STORE_PATH = store_path
     try:
@@ -109,7 +107,7 @@ def test_enrich_with_signal_backtrack_filters_same_day(tmp_path):
         "name": "南网科技",
         "date": "2026-05-01",
     }
-    import signal_store as store_mod
+    import trader_shared.signal_store as store_mod
     old = store_mod.DEFAULT_SIGNAL_STORE_PATH
     store_mod.DEFAULT_SIGNAL_STORE_PATH = store_path
     try:
@@ -124,7 +122,7 @@ def test_enrich_with_signal_backtrack_filters_same_day(tmp_path):
 def test_backward_compat_empty_symbols(tmp_path):
     store_path = tmp_path / "compat.jsonl"
     review = {}
-    import signal_store as store_mod
+    import trader_shared.signal_store as store_mod
     old = store_mod.DEFAULT_SIGNAL_STORE_PATH
     store_mod.DEFAULT_SIGNAL_STORE_PATH = store_path
     try:

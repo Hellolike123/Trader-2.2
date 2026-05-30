@@ -23,9 +23,9 @@ except ImportError:
         raise
 
 from candidate_model import analyze_target, sort_candidates
-from config import DEFAULT_CASH_FLOOR, DEFAULT_MAIN_CAP, DEFAULT_MAX_TOTAL, LOOKBACK_DAYS
+from trader_shared.config import DEFAULT_CASH_FLOOR, DEFAULT_MAIN_CAP, DEFAULT_MAX_TOTAL, LOOKBACK_DAYS
 from trader_shared.data_provider import get_provider
-from signal_contract import assert_valid_signal
+from trader_shared.signal_contract import assert_valid_signal
 
 try:
     from trader_shared import get_market_level, get_market_note, add_warning

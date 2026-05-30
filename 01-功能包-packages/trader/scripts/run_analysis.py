@@ -25,7 +25,7 @@ except ImportError:
     else:
         raise
 
-from light_data import to_float, pct_change
+from trader_shared.light_data import to_float, pct_change
 from trader_shared.stage_positioning import assess_stage
 
 try:
@@ -37,7 +37,7 @@ from config import (
     LOOKBACK_DAYS,
     STRUCTURE_WINDOW,
 )
-from light_data import to_float, pct_change
+from trader_shared.light_data import to_float, pct_change
 try:
     from models import DATA_STATUS_MAP
 except ImportError:
@@ -78,7 +78,7 @@ except ImportError:
 
 
 
-from signal_contract import assert_valid_signal
+from trader_shared.signal_contract import assert_valid_signal
 from datetime import date
 
 def _degraded_quote_report(target: str) -> dict[str, Any]:
@@ -211,7 +211,7 @@ def pct(value: float | None) -> str:
 def build_report(target: str) -> dict[str, Any]:
     try:
         import candidate_core as core
-        from candidate_core import build_structure_context, atr_volatility_level
+        from trader_shared.candidate_core import build_structure_context, atr_volatility_level
         from trader_shared.data_provider import get_provider
         from trader_shared.strategy_protocol import run_all
     except (ModuleNotFoundError, ImportError) as _ex:
@@ -241,9 +241,9 @@ def build_report(target: str) -> dict[str, Any]:
     current = float(current)
 
     recent20 = bars[-STRUCTURE_WINDOW:] if len(bars) >= STRUCTURE_WINDOW else bars
-    from chan_core import chanlun_strategy
-    from wyckoff_core import wyckoff_strategy
-    from momentum_core import momentum_strategy
+    from trader_shared.chan_core import chanlun_strategy
+    from trader_shared.wyckoff_core import wyckoff_strategy
+    from trader_shared.momentum_core import momentum_strategy
     from concurrent.futures import ThreadPoolExecutor
 
     # 并行运行三个理论策略
@@ -260,7 +260,7 @@ def build_report(target: str) -> dict[str, Any]:
     # C-9 fix: 融合层必须在 build_structure_context 之前计算，
     # 因为 build_structure_context 需要 fusion_result 来微调参数
     try:
-        from fusion_core import merge_decisions
+        from trader_shared.fusion_core import merge_decisions
         env = get_env_for_skill("trader")
         report_fusion = merge_decisions(
             chan_result=chan_result,
@@ -659,49 +659,6 @@ def render_markdown(r: dict[str, Any]) -> str:
     elif gap_text and gap_condition not in ("normal", "unknown"):
         lines.append(f"提示：{gap_text}")
         lines.append("")
-
-    # ── [2.3扩展] 题材与基本面共识版块渲染 ──
-    extend_fundamental = r.get("extend_fundamental") or {}
-    extend_sentiment = r.get("extend_sentiment") or {}
-    
-    theme_info = extend_sentiment.get("theme_harden", {})
-    theme_reason = theme_info.get("reason") if isinstance(theme_info, dict) else None
-    theme_text = f"主线题材：{theme_reason}" if theme_reason else None
-
-    sh_trend = extend_fundamental.get("shareholder", {})
-    sh_notice_date = sh_trend.get("latest_notice_date") if isinstance(sh_trend, dict) else None
-    sh_change_pct = sh_trend.get("change_pct", 0.0) if isinstance(sh_trend, dict) else 0.0
-    sh_status = sh_trend.get("status", "数据不足") if isinstance(sh_trend, dict) else "数据不足"
-    sh_text = None
-    if sh_notice_date and sh_status != "数据不足":
-        sh_text = f"筹码变动：{sh_status} (最新公告环比 {sh_change_pct:+.2f}%)"
-
-    consensus_eps = extend_fundamental.get("consensus_eps", {})
-    eps_rows = consensus_eps.get("rows", []) if isinstance(consensus_eps, dict) else []
-    eps_text = None
-    if eps_rows:
-        active_rows = []
-        for row in eps_rows:
-            yr = str(row.get("year", ""))
-            clean_yr = yr.replace(".0", "")
-            if clean_yr.isdigit() or "预测" in yr:
-                active_rows.append(f"{clean_yr}年:{row.get('avg_eps')}元")
-        if active_rows:
-            eps_text = f"机构共识：每股收益预测 {' | '.join(active_rows[:3])}"
-
-    has_fundamental_section = theme_text or sh_text or eps_text
-    if has_fundamental_section:
-        lines.extend([
-            "",
-            "🔥 题材与基本面共识",
-            "",
-        ])
-        if theme_text:
-            lines.append(f"  · {theme_text}")
-        if sh_text:
-            lines.append(f"  · {sh_text}")
-        if eps_text:
-            lines.append(f"  · {eps_text}")
 
     market_env = r.get("market_env") or {}
     env_level = market_env.get("level", "")
@@ -1280,7 +1237,7 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
         else:
             sig_type, direction, action_sig, confidence, trigger_price = "observe", "neutral", "observe", "low", current
 
-        from signal_store import append_signal
+        from trader_shared.signal_store import append_signal
         raw_time = analysis_time or today_text()
         trade_date = raw_time.split(" ")[0]
         signal = {
@@ -1347,7 +1304,7 @@ def main() -> int:
         return 1
 
     try:
-        from candidate_core import STATUS_SCORE
+        from trader_shared.candidate_core import STATUS_SCORE
         write_stock(
             report["name"],
             report["scene"],

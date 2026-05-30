@@ -25,7 +25,7 @@ except ImportError:
         raise
 
 from run_analysis import build_report
-import candidate_core as core
+from trader_shared import candidate_core as core
 
 try:
     from trader_shared import get_market_level, get_market_note, write_stock
@@ -281,7 +281,7 @@ def score_report(report: dict[str, Any]) -> dict[str, int]:
     if fd > 1:
         fusion_bonus = max(-10, min(10, fusion_bonus))
 
-    from momentum_core import assess_momentum
+    from trader_shared.momentum_core import assess_momentum
     daily_bars = report.get("bars") or report.get("daily_bars") or []
     momentum_result = assess_momentum(daily_bars) if len(daily_bars) >= 30 else {"direction": "insufficient", "score": 0}
     momentum_dir = momentum_result.get("direction", "insufficient")
@@ -561,7 +561,7 @@ STAR_MAP = {
 
 
 def _pool_signal_verifications(items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    from signal_store import load_recent_signals
+    from trader_shared.signal_store import load_recent_signals
 
     today = date.today()
     summary = {"已验证": 0, "信号错了": 0, "未验证": 0, "暂无信号": 0}
@@ -783,7 +783,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
         # Try to get live quote
         change_pct = 0.0
         try:
-            from light_data import fetch_quote, HttpClient, resolve_security
+            from trader_shared.light_data import fetch_quote, HttpClient, resolve_security
             sec = resolve_security(name)
             q = fetch_quote(sec, HttpClient())
             if q and to_float(q.get("current_price")):
@@ -891,7 +891,7 @@ def _signal_type_label(sig_type: str) -> str:
 
 
 def render_rank(items: list[dict[str, Any]]) -> str:
-    from candidate_core import atr_volatility_level
+    from trader_shared.candidate_core import atr_volatility_level
 
     sorted_items = sort_items(items)
     market_level = get_market_level()
@@ -958,8 +958,6 @@ def render_rank(items: list[dict[str, Any]]) -> str:
 
     lines.extend([
         "",
-        "    利弗莫尔：\"他们不是被市场打败的，是被自己打败的——",
-        "    有脑子，但坐不住。\"",
         "    不抢跑，等止跌确认再动手。",
     ])
 
@@ -1431,7 +1429,7 @@ def _latest_signal_summary(report: dict[str, Any], store_path: Path | None = Non
     if not symbol:
         return ""
     try:
-        from signal_store import load_recent_signals
+        from trader_shared.signal_store import load_recent_signals
         signals = load_recent_signals(symbol, limit=3, path=store_path)
     except Exception:
         return ""
@@ -1456,7 +1454,7 @@ def _latest_signal_summary(report: dict[str, Any], store_path: Path | None = Non
 
 
 def render_compare(reports: list[dict[str, Any]]) -> str:
-    from candidate_core import STATUS_SCORE, atr_volatility_level
+    from trader_shared.candidate_core import STATUS_SCORE, atr_volatility_level
 
     def sort_key(r: dict[str, Any]):
         scene = str(r.get("scene") or "")

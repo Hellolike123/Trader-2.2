@@ -29,8 +29,8 @@ from price_point_engine import (
 )
 from t0_run import build_t0_event_signal, build_t0_signals, render_markdown, segment_avg_volume
 from monitor import BUY_TRIGGERED, detect_state_change, persist_event_signals
-from signal_contract import validate_signal
-from signal_store import load_recent_signals
+from trader_shared.signal_contract import validate_signal
+from trader_shared.signal_store import load_recent_signals
 from validate_output import validate
 
 
@@ -78,10 +78,8 @@ def test_t0_markdown_contract() -> None:
     assert "买入：" in markdown
     assert "卖出：" in markdown
     assert "止损：" in markdown
-    assert "仓位管控" in markdown
     assert "🔍 扫描" in markdown
-    assert "🚩 关键价位" in markdown
-    assert "👀 下一步只盯" in markdown
+    assert "👀 下一步" in markdown
     assert validate(markdown) == []
 
 

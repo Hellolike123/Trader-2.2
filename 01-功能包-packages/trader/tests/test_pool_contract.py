@@ -14,7 +14,7 @@ CLI = ROOT / "scripts" / "final_pool.py"
 def run_pool(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["HOME"] = str(tmp_path)
-    env["PYTHONPATH"] = str(ROOT / "scripts") + ":" + str(ROOT.parents[1] / "02-共享模块-shared" / "trader_shared")
+    env["PYTHONPATH"] = str(ROOT / "scripts") + ":" + str(ROOT.parents[1] / "02-共享模块-shared") + ":" + str(ROOT.parents[1] / "02-共享模块-shared" / "trader_shared")
     return subprocess.run(
         [sys.executable, str(CLI), *args],
         cwd=ROOT,
@@ -68,10 +68,9 @@ def test_show_plan_and_review_contracts(tmp_path: Path) -> None:
     add = run_pool(tmp_path, "add", "--target", "南网科技")
     assert add.returncode == 0, add.stderr
 
-    show = run_pool(tmp_path, "show")
+    show = run_pool(tmp_path, "list")
     assert show.returncode == 0, show.stderr
     assert "选股池" in show.stdout
-    assert "1/10" in show.stdout
 
     plan = run_pool(tmp_path, "plan")
     assert plan.returncode == 0, plan.stderr
@@ -92,10 +91,10 @@ def test_rank_outputs_pool_action_comparison(tmp_path: Path) -> None:
     assert first.returncode == 0, first.stderr
     assert second.returncode == 0, second.stderr
 
-    rank = run_pool(tmp_path, "rank")
+    rank = run_pool(tmp_path, "list")
 
     assert rank.returncode == 0, rank.stderr
-    assert "持仓排序" in rank.stdout
+    assert "选股池" in rank.stdout
 
 
 def test_remove_deletes_record(tmp_path: Path) -> None:

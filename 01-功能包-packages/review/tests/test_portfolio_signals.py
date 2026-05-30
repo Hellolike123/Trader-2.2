@@ -29,8 +29,6 @@ def _fake_item(symbol: str, name: str, status: str) -> dict:
         "atr_ratio": 0.015,
         "atr_level": "波动正常",
         "atr_cap": 10,
-        "livermore_tier": 3,
-        "livermore_score": 75,
         "buy_low": 55.0,
         "buy_high": 56.5,
         "defense": 57.0,
@@ -54,7 +52,7 @@ def test_portfolio_markdown_includes_stocks():
     assert "南网科技" in result
     assert "紫金矿业" in result
     assert "轮动仓位" in result
-    assert "止损" in result
+    assert "触发条件" in result
 
 
 def test_portfolio_markdown_includes_positions():
@@ -63,8 +61,8 @@ def test_portfolio_markdown_includes_positions():
         _fake_item("601899.SH", "紫金矿业", "防守观察"),
     ]
     result = _render(items)
-    assert "仓位建议" in result
-    assert "现金" in result
+    assert "持仓" in result
+    assert "关键价位" in result
 
 
 def test_portfolio_markdown_includes_conclusion():

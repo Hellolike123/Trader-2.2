@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from candidate_core import atr_volatility_level
-from light_data import to_float
+from trader_shared.candidate_core import atr_volatility_level
+from trader_shared.light_data import to_float
 from trader_shared.data_provider import get_provider
 
 
@@ -342,8 +342,8 @@ def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str,
     elif macd_hist is not None and macd_hist > 0 and hist_expand:
         macd_mom_b = max(macd_mom_b, 12)
 
-    from chan_core import chanlun_analysis
-    from wyckoff_core import wyckoff_analysis
+    from trader_shared.chan_core import chanlun_analysis
+    from trader_shared.wyckoff_core import wyckoff_analysis
     chan_r = chanlun_analysis(bars=daily, current=current, macd_hist_current=macd_hist, macd_hist_prev=macd_hist_prev)
     wyck_r = wyckoff_analysis(daily)
 
@@ -376,7 +376,7 @@ def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str,
 
     chip_score = 50 - (15 if chip_pressure else 0) + (10 if cost and pnl_pct is not None and pnl_pct >= 0 else 0)
 
-    from momentum_core import assess_momentum
+    from trader_shared.momentum_core import assess_momentum
     momentum_result = assess_momentum(daily)
     momentum_score = momentum_result.get("score", 50)
     momentum_dir = momentum_result.get("direction", "neutral")
@@ -535,7 +535,7 @@ def enrich_with_signal_backtrack(review: dict[str, Any], *, limit: int = 10) -> 
         review.setdefault("pnl_pct", None)
         return review
     try:
-        from signal_store import load_recent_signals, append_signal
+        from trader_shared.signal_store import load_recent_signals, append_signal
         signals = load_recent_signals(symbol, limit=limit)
         review_date = str(review.get("date") or "")
         same_day = [s for s in signals if str(s.get("trade_date") or "") == review_date]

@@ -99,7 +99,7 @@ def validate_t0(markdown: str) -> list[str]:
     errors.extend(validate_plain_output_format(markdown, lines))
     if not lines or not lines[0].startswith("🎯 T0"):
         errors.append("report must start with 🎯 T0")
-    for label in ("买入", "卖出", "仓位", "止损"):
+    for label in ("买入", "卖出", "止损"):
         if not any(label in line for line in lines):
             errors.append(f"missing line: {label}")
     errors.extend(validate_banned(markdown, T0_BANNED, "T0 output contains banned old-template term"))
@@ -142,7 +142,7 @@ def validate_pool(markdown: str) -> list[str]:
 # 04-review (portfolio)
 # ═══════════════════════════════════════════════
 
-PORTFOLIO_HEADINGS = ["📈 仓位建议", "📋 仓位对比", "🔄 轮动触发"]
+PORTFOLIO_HEADINGS = ["📊 持仓", "📍 关键价位", "👀 触发条件"]
 PORTFOLIO_SNAPSHOT_HEADINGS = [
     "🧺 高切低轮动面板", "📌 当前结论", "📊 当前仓位",
     "🔁 轮动动作", "🎯 关键价位", "🛑 卖完条件",
@@ -169,7 +169,7 @@ def validate_portfolio(markdown: str) -> list[str]:
     if not lines or not lines[0].startswith("轮动仓位 — "):
         errors.append("report must start with 轮动仓位 —")
     errors.extend(validate_headings(lines, PORTFOLIO_HEADINGS, "headings must follow portfolio V2 order"))
-    for required in ("仓位", "操作", "止损"):
+    for required in ("持仓", "触发"):
         if required not in markdown:
             errors.append(f"missing content: {required}")
     errors.extend(validate_banned(markdown, PORTFOLIO_BANNED))

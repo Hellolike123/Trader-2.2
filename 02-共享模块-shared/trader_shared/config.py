@@ -97,3 +97,8 @@ THEORY_ADJUST_LOG_ONLY: bool = os.environ.get("THEORY_ADJUST_LOG_ONLY", "false")
 FUSION_OVERRIDE_ENABLED: bool = os.environ.get("FUSION_OVERRIDE_ENABLED", "true").lower() in ("true", "1", "yes")
 # 融合层置信度低于此值时降级回旧逻辑（0-1，建议 0.6）
 FUSION_CONFIDENCE_THRESHOLD: float = float(os.environ.get("FUSION_CONFIDENCE_THRESHOLD", "0.6"))
+
+# ---- Portfolio constants -----------------------------------------------------
+DEFAULT_MAX_TOTAL: int = 80      # 总仓位上限 (%)
+DEFAULT_CASH_FLOOR: int = 20     # 现金下限 (%)
+DEFAULT_MAIN_CAP: int = 50       # 主仓上限 (%)

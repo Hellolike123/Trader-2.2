@@ -7,9 +7,9 @@ SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from candidate_core import build_candidate_levels
+from trader_shared.candidate_core import build_candidate_levels
 from run_analysis import build_signal, render_markdown, volume_observation
-from signal_contract import validate_signal
+from trader_shared.signal_contract import validate_signal
 from validate_output import validate
 
 
@@ -46,7 +46,7 @@ def test_render_contract() -> None:
     assert "MA5" in markdown
     assert "📍 决策" in markdown
     assert "❗ 关键价位" in markdown
-    assert "🧭 简要分析" in markdown
+    assert "🧭 阶段判断" in markdown
     assert "✨ 亮点" in markdown
     assert "⚠️ 风险" in markdown
     assert "止损" in markdown
@@ -307,7 +307,7 @@ def test_build_signal_all_allowed_values() -> None:
     report = sample_report()
     signal = build_signal(report)
 
-    from signal_contract import (
+    from trader_shared.signal_contract import (
         ALLOWED_ACTIONS,
         ALLOWED_CONFIDENCE,
         ALLOWED_DATA_STATUS,

@@ -99,10 +99,11 @@ def test_pack_all_creates_combined_zip() -> None:
         pack_all.main()
     release_dirs = _get_release_dirs()
     assert len(release_dirs) >= 1, "No release dir found"
-    combined_path = release_dirs[-1] / "trader-all-skill.zip"
-    assert combined_path.exists(), "No combined zip found"
-    with zipfile.ZipFile(combined_path, "r") as zf:
-        assert len(zf.namelist()) > 0, "Combined archive is empty"
+    for _, slug, _ in EXPECTED_SKILLS:
+        zip_path = release_dirs[-1] / f"{slug}.zip"
+        assert zip_path.exists(), f"No zip found for {slug}"
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            assert len(zf.namelist()) > 0, f"{zip_path.name} is empty"
 
 
 def test_pack_all_contains_all_skills() -> None:
@@ -126,18 +127,6 @@ def test_pack_all_individual_structure() -> None:
             _verify_skill_zip(zf, slug, expected_script)
 
 
-def test_pack_all_combined_structure() -> None:
-    _clean_stale_releases()
-    with mock.patch.object(pack_all, "repo_root") as mock_root:
-        mock_root.return_value = SCRIPTS_DIR
-        pack_all.main()
-    release_dirs = _get_release_dirs()
-    assert len(release_dirs) >= 1, "No release dir found"
-    combined_path = release_dirs[-1] / "trader-all-skill.zip"
-    assert combined_path.exists(), "No combined zip found"
-    with zipfile.ZipFile(combined_path, "r") as zf:
-        for dir_name, slug, expected_script in EXPECTED_SKILLS:
-            _verify_combined_zip(zf, slug, expected_script)
 
 
 def test_pack_all_no_package_skill() -> None:
@@ -148,12 +137,6 @@ def test_pack_all_no_package_skill() -> None:
     release_dirs = _get_release_dirs()
     assert len(release_dirs) >= 1, "No release dir found"
     release_dir = release_dirs[-1]
-
-    combined_path = release_dir / "trader-all-skill.zip"
-    assert combined_path.exists()
-    with zipfile.ZipFile(combined_path, "r") as zf:
-        for name in zf.namelist():
-            assert "package_skill.py" not in name, f"Old package_skill.py should not be in bundle: {name}"
 
     for _, slug, _ in EXPECTED_SKILLS:
         zip_path = release_dir / f"{slug}.zip"
@@ -171,12 +154,6 @@ def test_pack_all_skips_irrelevant_skills() -> None:
     release_dirs = _get_release_dirs()
     assert len(release_dirs) >= 1, "No release dir found"
     release_dir = release_dirs[-1]
-
-    combined_path = release_dir / "trader-all-skill.zip"
-    assert combined_path.exists()
-    with zipfile.ZipFile(combined_path, "r") as zf:
-        has_compare = any("trader-compare" in n for n in zf.namelist())
-        assert not has_compare, "trader-compare should not be in unified zip"
 
     for _, slug, _ in EXPECTED_SKILLS:
         zip_path = release_dir / f"{slug}.zip"

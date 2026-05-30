@@ -40,7 +40,6 @@ def main() -> int:
   南网科技  塔3级60%  副仓  10%
   按计划执行，等信号确认后逐步建仓。
 
-  利弗莫尔："不要试图在最高点卖出，也不要在最低点买入。"
   控制仓位比选对股票更重要。"""
     proc = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate_output.py")], input=sample, text=True, capture_output=True)
     if proc.returncode != 0:

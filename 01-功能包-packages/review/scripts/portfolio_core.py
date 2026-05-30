@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import candidate_core as core
-from light_data import pct_change, to_float
+from trader_shared.light_data import pct_change, to_float
 from trader_shared.stage_positioning import assess_stage
 from trader_shared.structure_core import moving_average
 
