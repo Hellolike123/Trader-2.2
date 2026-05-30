@@ -29,7 +29,7 @@ Required rules:
 - Buy-side wording must include `止跌确认`.
 - Do not use `##/###`, bold headings, blockquotes, bullet lists (`-`/`*`), tables, or extra disclaimers.
 - Do not output intraday execution prices or concrete order instructions.
-- Do not output `⏱️ T0 简版`, `做T`, `t0-trader`, `执行价`.
+- Do not output `⏱️ T0 简版`, `做T`, `t0`, `执行价`.
 
 ## Old Output Detection
 
@@ -39,7 +39,7 @@ If output contains any of these, rerun the script:
 ⏱️ T0 简版
 T0
 做T
-t0-trader
+t0-trader → t0
 执行价
 ✅ 先给结论
 🎯 今日行动

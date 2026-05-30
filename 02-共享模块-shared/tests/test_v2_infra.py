@@ -143,8 +143,8 @@ def test_fill(tmp_log):
 
 
 def test_fill_by_target(tmp_log):
-    st.log_safe("review-trader", "X票", "000001.SZ", "observe", 10.0)
-    st.log_safe("t0-trader", "X票", "000001.SZ", "low_buy_watch", 11.0)
+    st.log_safe("review", "X票", "000001.SZ", "observe", 10.0)
+    st.log_safe("t0", "X票", "000001.SZ", "low_buy_watch", 11.0)
     count, ids = st.fill_by_target("X票", 2.0, 3, "win")
     assert count == 2
     records = st._load_all()
@@ -153,10 +153,10 @@ def test_fill_by_target(tmp_log):
 
 def test_load_recent_filter(tmp_log):
     st.log_safe("trader", "A", "000001.SZ", "低吸观察", 10.0)
-    st.log_safe("t0-trader", "B", "000002.SZ", "low_buy_watch", 20.0)
+    st.log_safe("t0", "B", "000002.SZ", "low_buy_watch", 20.0)
     assert len(st.load_recent(target="A")) == 1
     assert st.load_recent(target="A")[0]["skill"] == "trader"
-    assert len(st.load_recent(skill="t0-trader")) == 1
+    assert len(st.load_recent(skill="t0")) == 1
     assert len(st.load_recent(symbol="000001.SZ")) == 1
 
 

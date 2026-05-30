@@ -16,11 +16,9 @@ _SHARED = Path(__file__).resolve().parent
 _WORKSPACE = _SHARED.parents[1]
 
 SKILLS = {
-    "trader": _WORKSPACE / "01-功能包-packages" / "01-单票分析-trader",
-    "t0-trader": _WORKSPACE / "01-功能包-packages" / "02-盘中T0-t0-trader",
-    "pool": _WORKSPACE / "01-功能包-packages" / "03-选股池-trader-pool",
-    "portfolio": _WORKSPACE / "01-功能包-packages" / "04-仓位轮动-trader-portfolio",
-    "review": _WORKSPACE / "01-功能包-packages" / "05-盘后复盘-review-trader",
+    "trader": _WORKSPACE / "01-功能包-packages" / "trader",
+    "t0": _WORKSPACE / "01-功能包-packages" / "t0",
+    "review": _WORKSPACE / "01-功能包-packages" / "review",
 }
 
 

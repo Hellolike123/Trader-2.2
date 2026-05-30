@@ -51,7 +51,7 @@ def test_latest_signal_summary_shows_t0_low_buy(tmp_path):
     store_path = tmp_path / "t0_signals.jsonl"
     sig = {
         "contract": "trader_signal_v1",
-        "source_skill": "t0-trader",
+        "source_skill": "t0",
         "symbol": "688248.SH",
         "name": "南网科技",
         "trade_date": "2026-05-01",
@@ -78,7 +78,7 @@ def test_latest_signal_summary_shows_t0_high_sell(tmp_path):
     store_path = tmp_path / "tsignals.jsonl"
     sig = {
         "contract": "trader_signal_v1",
-        "source_skill": "t0-trader",
+        "source_skill": "t0",
         "symbol": "601600.SH",
         "name": "中国铝业",
         "trade_date": "2026-05-01",
@@ -104,7 +104,7 @@ def test_latest_signal_summary_shows_risk_stop(tmp_path):
     store_path = tmp_path / "rsignals.jsonl"
     sig = {
         "contract": "trader_signal_v1",
-        "source_skill": "t0-trader",
+        "source_skill": "t0",
         "symbol": "002050.SZ",
         "name": "三花智控",
         "trade_date": "2026-05-01",

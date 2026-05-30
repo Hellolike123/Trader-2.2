@@ -17,7 +17,7 @@ def _read_text(path: str | None) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate review-trader output.")
+    parser = argparse.ArgumentParser(description="Validate review output.")
     parser.add_argument("path", nargs="?")
     args = parser.parse_args()
     markdown = _read_text(args.path)

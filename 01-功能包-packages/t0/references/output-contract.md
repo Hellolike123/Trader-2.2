@@ -1,4 +1,4 @@
-# Output Contract — t0-trader
+# Output Contract — t0
 
 > **This is the absolute truth for valid/invalid output.** Never generate output format from memory.
 

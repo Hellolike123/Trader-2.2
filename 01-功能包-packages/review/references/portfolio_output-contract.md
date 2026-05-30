@@ -1,4 +1,4 @@
-# Output Contract — trader-portfolio
+# Output Contract — review (portfolio)
 
 > **This is the absolute truth for valid output.** Never generate output from memory.
 

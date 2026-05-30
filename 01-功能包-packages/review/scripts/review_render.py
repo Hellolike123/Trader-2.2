@@ -316,7 +316,7 @@ def _signal_backtrack_lines(review: dict[str, Any]) -> list[str]:
 
         # emoji prefix for t0 signals
         prefix = ""
-        if source == "t0-trader":
+        if source == "t0":
             if sig_type in ("low_buy_triggered", "low_buy_watch"):
                 prefix = "🟢 T0低吸"
             elif sig_type in ("high_sell_triggered", "high_sell_watch"):
@@ -324,7 +324,7 @@ def _signal_backtrack_lines(review: dict[str, Any]) -> list[str]:
             elif sig_type == "risk_stop":
                 prefix = "⚠️ T0止损"
 
-        if source == "review-trader":
+        if source == "review":
             prefix = "📋 复盘"
 
         if not prefix:

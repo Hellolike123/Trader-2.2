@@ -366,8 +366,11 @@ def load_recent(
         r_skill = r.get("source_skill") or r.get("skill") or ""
         if skill:
             if str(r_skill) != skill:
-                # Compatibility: map t0 and t0-trader
-                if not ((skill in ("t0", "t0-trader") and r_skill in ("t0", "t0-trader"))):
+                # Compatibility: map old and new skill names
+                _skill_aliases = {"t0": "t0", "t0-trader": "t0"}
+                if _skill_aliases.get(skill) == _skill_aliases.get(r_skill):
+                    pass  # match via alias
+                else:
                     continue
             
         r_type = normalize_signal_type(r.get("signal_type") or "")

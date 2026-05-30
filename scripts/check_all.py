@@ -26,11 +26,9 @@ def run_self_check(pkg_name: str) -> str:
 
 def run_tests() -> str:
     test_dirs = []
-    for p in (PACKAGES_DIR / "01-单票分析-trader" / "tests",
-              PACKAGES_DIR / "02-盘中T0-t0-trader" / "tests",
-              PACKAGES_DIR / "03-选股池-trader-pool" / "tests",
-              PACKAGES_DIR / "04-仓位轮动-trader-portfolio" / "tests",
-              PACKAGES_DIR / "05-盘后复盘-review-trader" / "tests",
+    for p in (PACKAGES_DIR / "trader" / "tests",
+              PACKAGES_DIR / "t0" / "tests",
+              PACKAGES_DIR / "review" / "tests",
               SHARED_DIR / "tests"):
         if p.exists():
             test_dirs.append(str(p))

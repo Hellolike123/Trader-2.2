@@ -237,7 +237,7 @@ def test_portfolio_signal_summaries_validate_for_json_consumers() -> None:
 
     assert len(signals) == 3
     assert all(signal["contract"] == "trader_signal_v1" for signal in signals)
-    assert all(signal["source_skill"] == "trader-portfolio" for signal in signals)
+    assert all(signal["source_skill"] == "review" for signal in signals)
     assert [signal["signal_type"] for signal in signals] == ["reduce", "track", "defensive"]
     assert [signal["action"] for signal in signals] == ["reduce", "track", "wait"]
     assert all(validate_signal(signal) == [] for signal in signals)

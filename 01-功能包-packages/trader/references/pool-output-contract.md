@@ -1,4 +1,4 @@
-# Output Contract — trader-pool
+# Output Contract — trader (pool)
 
 > **This is the absolute truth for valid output.** Never generate output from memory.
 

@@ -50,14 +50,21 @@ REQUIRED_FIELDS = {
     "summary",
 }
 
-# ── Source skills — strict (no legacy aliases) ────────────────────
+# ── Source skills — canonical (3-skill structure) ─────────────────
 ALLOWED_SOURCE_SKILLS = {
     "trader",
+    "t0",
+    "review",
+}
+
+# Legacy source skills accepted for backward compat (old 6-skill names).
+# New code MUST only use the 3 canonical names above.
+LEGACY_SOURCE_SKILLS: set[str] = {
     "t0-trader",
+    "trader-pool",
     "trader-portfolio",
     "review-trader",
-    "trader-pool",
-    # LEGACY: "trader-compare" removed, capability merged into trader-pool compare
+    "trader-tracking",
 }
 
 # ── Main protocol signal types ────────────────────────────────────
@@ -189,7 +196,7 @@ def validate_signal(signal: dict[str, Any]) -> list[str]:
     if normalized.get("contract") != CONTRACT_VERSION:
         errors.append(f"invalid contract: {normalized.get('contract')}")
 
-    _validate_enum(errors, normalized, "source_skill", ALLOWED_SOURCE_SKILLS)
+    _validate_enum(errors, normalized, "source_skill", ALLOWED_SOURCE_SKILLS | LEGACY_SOURCE_SKILLS)
     _validate_enum(errors, normalized, "signal_type", ALLOWED_SIGNAL_TYPES)
     _validate_enum(errors, normalized, "direction", ALLOWED_DIRECTIONS)
     _validate_enum(errors, normalized, "action", ALLOWED_ACTIONS)

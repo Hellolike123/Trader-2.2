@@ -231,7 +231,7 @@ def empty_position_reason_for(status: str, low: float, high: float, confirm: flo
 
 def holding_reason_for(status: str, low: float, high: float, sell_observe: float) -> str:
     if status in {"低吸观察"} | _DEFENSE_STATUSES:
-        return f"有低吸观察区 {low:.2f}-{high:.2f}元 和高抛观察位 {sell_observe:.2f}元，具体盘中触发交给 t0-trader。"
+        return f"有低吸观察区 {low:.2f}-{high:.2f}元 和高抛观察位 {sell_observe:.2f}元，具体盘中触发交给 t0。"
     if status in {"等转强", "冲高减仓"}:
         return f"更适合盯 {sell_observe:.2f}元 附近冲高表现，量能不足再考虑T。"
     return "不适合做T，先控制风险。"

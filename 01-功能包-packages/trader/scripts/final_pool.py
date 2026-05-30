@@ -1007,7 +1007,7 @@ def empty_reason(item: dict[str, Any] | None) -> str:
 def holding_reason(item: dict[str, Any] | None) -> str:
     if not item:
         return "池内没有适合做T的候选，先不动底仓。"
-    return f"{item.get('name')} 有明确触发和防守，具体盘中触发交给 t0-trader。"
+    return f"{item.get('name')} 有明确触发和防守，具体盘中触发交给 t0。"
 
 
 def rank_sentence(actionable: list[dict[str, Any]]) -> str:
@@ -1443,9 +1443,9 @@ def _latest_signal_summary(report: dict[str, Any], store_path: Path | None = Non
     action = str(latest.get("action") or "")
     source = str(latest.get("source_skill") or "")
     if sig_type in ("low_buy_triggered", "low_buy_watch", "low_buy"):
-        return f"🟢T0低吸{action if source == 't0-trader' else ''}"
+        return f"🟢T0低吸{action if source == 't0' else ''}"
     if sig_type in ("high_sell_triggered", "high_sell_watch", "high_sell"):
-        return f"🔴T0高抛" if source == "t0-trader" else f"🔴高抛{action}"
+        return f"🔴T0高抛" if source == "t0" else f"🔴高抛{action}"
     if sig_type == "risk_stop":
         return "⚠️止损"
     if sig_type == "reduce":
@@ -1564,7 +1564,7 @@ def main() -> int:
     try:
         return handlers[args.command](args)
     except Exception as exc:
-        print(f"trader-pool failed: {exc}", file=sys.stderr)
+        print(f"trader pool failed: {exc}", file=sys.stderr)
         return 1
 
 

@@ -553,7 +553,7 @@ def enrich_with_signal_backtrack(review: dict[str, Any], *, limit: int = 10) -> 
             direction = "bearish_lean"
         sig = {
             "contract": "trader_signal_v1",
-            "source_skill": "review-trader",
+            "source_skill": "review",
             "symbol": symbol,
             "name": str(review.get("name", "")),
             "trade_date": str(review.get("date", "")),

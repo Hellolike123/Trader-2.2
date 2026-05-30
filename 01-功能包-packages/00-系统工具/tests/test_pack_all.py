@@ -20,11 +20,9 @@ RELEASES_DIR = DIST_DIR / "releases"
 RELEASE_DIR_PATTERN = re.compile(r"^\d{4}-\d{4}$")
 
 EXPECTED_SKILLS: list[tuple[str, str, str]] = [
-    ("01-单票分析-trader", "trader", "final_report.py"),
-    ("02-盘中T0-t0-trader", "t0-trader", "final_t0.py"),
-    ("03-选股池-trader-pool", "trader-pool", "final_pool.py"),
-    ("04-仓位轮动-trader-portfolio", "trader-portfolio", "final_portfolio.py"),
-    ("05-盘后复盘-review-trader", "review-trader", "final_review.py"),
+    ("trader", "trader", "final_report.py"),
+    ("t0", "t0", "final_t0.py"),
+    ("review", "review", "final_review.py"),
 ]
 
 

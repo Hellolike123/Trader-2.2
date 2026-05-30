@@ -303,15 +303,15 @@ class TestStratifiedStats:
         results = [
             {"r_5d": 5.0, "outcome": "up", "signal_type": "track", "source_skill": "trader", "name": "A"},
             {"r_5d": -3.0, "outcome": "down", "signal_type": "track", "source_skill": "trader", "name": "A"},
-            {"r_5d": 8.0, "outcome": "up", "signal_type": "track", "source_skill": "t0-trader", "name": "B"},
-            {"r_5d": -1.0, "outcome": "flat", "signal_type": "track", "source_skill": "t0-trader", "name": "B"},
+            {"r_5d": 8.0, "outcome": "up", "signal_type": "track", "source_skill": "t0", "name": "B"},
+            {"r_5d": -1.0, "outcome": "flat", "signal_type": "track", "source_skill": "t0", "name": "B"},
         ]
 
         panel = st._make_panel(results, None)
 
         # 当前面板不输出分层统计
         # 断言：应包含 source_skill 分层结果
-        assert "trader" in panel and "t0-trader" in panel, \
+        assert "trader" in panel and "t0" in panel, \
             f"面板应按 source_skill 分层输出。面板：\n{panel}"
 
 
@@ -365,7 +365,7 @@ class TestDataSourceDrift:
             "symbol": "688248.SH", "name": "南网科技",
             "trade_date": "2025-04-02", "signal_type": "track",
             "trigger": {"price": 10},
-            "source_skill": "t0-trader",
+            "source_skill": "t0",
         }
 
         with (
@@ -379,7 +379,7 @@ class TestDataSourceDrift:
 
         # 断言：结果应包含 source_skill 字段（当前已有）
         assert r1["source_skill"] == "trader", f"source_skill 应为 'trader', 实际: {r1.get('source_skill')}"
-        assert r2["source_skill"] == "t0-trader", f"source_skill 应为 't0-trader', 实际: {r2.get('source_skill')}"
+        assert r2["source_skill"] == "t0", f"source_skill 应为 't0', 实际: {r2.get('source_skill')}"
 
         # 断言：结果应包含 data_source 字段（当前没有 → 新需求）
         assert "data_source" in r1 or "source_skill" in r1, \

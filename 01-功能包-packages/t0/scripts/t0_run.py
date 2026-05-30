@@ -46,7 +46,7 @@ try:
 except ImportError:
     import warnings
     warnings.warn(
-        "[t0-trader] shared module not available — market status will be unavailable.",
+        "[t0] shared module not available — market status will be unavailable.",
         stacklevel=2,
     )
     _SHARED_OK = False

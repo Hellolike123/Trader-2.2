@@ -1,4 +1,4 @@
-# Output Contract — trader-tracking
+# Output Contract — review (tracking)
 
 > **This is the absolute truth for valid output.** Never generate output from memory.
 

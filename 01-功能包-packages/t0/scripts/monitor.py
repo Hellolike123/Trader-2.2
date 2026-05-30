@@ -37,7 +37,7 @@ try:
 except ImportError:
     import warnings
     warnings.warn(
-        "[t0-trader] shared module not available — market status, signal tracking, and state sync are disabled. "
+        "[t0] shared module not available — market status, signal tracking, and state sync are disabled. "
         "T0 monitor will still work but without shared state integration.",
         stacklevel=2,
     )
@@ -49,7 +49,7 @@ except ImportError:
     def fill_by_target(target, pnl_pct, days_held, outcome): pass
 
 
-CACHE_DIR = Path(os.environ.get("T0_TRADER_CACHE_DIR", Path.home() / ".t0-trader"))
+CACHE_DIR = Path(os.environ.get("T0_CACHE_DIR", Path.home() / ".t0-trader"))
 CACHE_PATH = Path(os.environ.get("T0_TRADER_STATE_PATH", CACHE_DIR / "state.json"))
 COOLDOWN_MINUTES = 15
 

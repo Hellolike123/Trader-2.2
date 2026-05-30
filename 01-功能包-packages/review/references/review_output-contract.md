@@ -1,4 +1,4 @@
-# Output Contract — review-trader
+# Output Contract — review
 
 > **This is the absolute truth for valid output.** Never generate output from memory.
 

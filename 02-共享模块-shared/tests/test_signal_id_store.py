@@ -66,7 +66,7 @@ def test_append_signal_preserves_existing_signal_id(tmp_path):
     """Signal already carrying signal_id is written unmodified."""
     signal = {
         "contract": "trader_signal_v1",
-        "source_skill": "t0-trader",
+        "source_skill": "t0",
         "symbol": "600519.SH",
         "name": "贵州茅台",
         "trade_date": "2025-05-01",
@@ -96,7 +96,7 @@ def test_append_signal_for_review_result(tmp_path):
     """review_result type with no trigger.price gets signal_id with price='0.00'."""
     signal = {
         "contract": "trader_signal_v1",
-        "source_skill": "review-trader",
+        "source_skill": "review",
         "symbol": "688248.SH",
         "name": "南网科技",
         "trade_date": "2025-05-02",

@@ -139,7 +139,7 @@ def build_side_signal(plan: dict[str, Any], side: str) -> dict[str, Any]:
     )
     return {
         "contract": "trader_signal_v1",
-        "source_skill": "t0-trader",
+        "source_skill": "t0",
         "symbol": str(plan.get("symbol") or ""),
         "name": str(plan.get("name") or ""),
         "trade_date": str((plan.get("analysis_time") or "").split(" ")[0] or "--"),

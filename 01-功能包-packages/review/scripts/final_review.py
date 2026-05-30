@@ -40,7 +40,7 @@ def parse_holding(value: str) -> tuple[str, float]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate review-trader single review or multi-stock comparison.")
+    parser = argparse.ArgumentParser(description="Generate review single review or multi-stock comparison.")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--target", help="A-share name or code for single-stock review")
     group.add_argument("--compare", nargs="+", help="Compare 2-5 A-share names/codes")

@@ -78,7 +78,7 @@ def validate_trader(markdown: str) -> list[str]:
 
 
 # ═══════════════════════════════════════════════
-# 02-t0-trader
+# 02-t0
 # ═══════════════════════════════════════════════
 
 T0_BANNED = (
@@ -107,7 +107,7 @@ def validate_t0(markdown: str) -> list[str]:
 
 
 # ═══════════════════════════════════════════════
-# 03-trader-pool  (no banned list, special logic)
+# 03-trader (pool)  (no banned list, special logic)
 # ═══════════════════════════════════════════════
 
 POOL_REQUIRED_PLAN = ("选股池盘后分析", "明日优先级", "结构评分", "上涨动能过滤", "明日交易指导卡", "仓位纪律", "一句话")
@@ -134,12 +134,12 @@ def validate_pool(markdown: str) -> list[str]:
             if item not in markdown:
                 errors.append(f"analyze output missing field: {item}")
     else:
-        errors.append("output is not a recognized trader-pool panel")
+        errors.append("output is not a recognized pool panel")
     return errors
 
 
 # ═══════════════════════════════════════════════
-# 04-trader-portfolio
+# 04-review (portfolio)
 # ═══════════════════════════════════════════════
 
 PORTFOLIO_HEADINGS = ["📈 仓位建议", "📋 仓位对比", "🔄 轮动触发"]
@@ -177,7 +177,7 @@ def validate_portfolio(markdown: str) -> list[str]:
 
 
 # ═══════════════════════════════════════════════
-# 05-review-trader
+# 05-review
 # ═══════════════════════════════════════════════
 
 REVIEW_COMPARE_REQUIRED = ["结论：", "排序：", "主盯：", "副盯：", "只观察 / 先防守：", "明日动作："]

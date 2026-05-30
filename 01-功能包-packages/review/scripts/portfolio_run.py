@@ -172,7 +172,7 @@ def build_signal_for_item(item: dict[str, Any], *, max_total: int, max_single_mo
     stop = number(item.get("stop"), number(item.get("defense"), number(item.get("current"))))
     signal = {
         "contract": "trader_signal_v1",
-        "source_skill": "trader-portfolio",
+        "source_skill": "review",
         "symbol": symbol,
         "name": name,
         "trade_date": str(item.get("trade_date") or date.today().isoformat()),
