@@ -1,4 +1,4 @@
-# Trader 2.3 用户操作手册
+# Trader 2.4 用户操作手册
 
 ## 每日工作流
 
@@ -420,4 +420,69 @@ trader.py cache clear --type daily → 只清日线
 盘中：实时行情抓最新，历史数据用缓存
 盘后：所有数据用缓存
 t0：不缓存，每次都抓最新
+```
+
+## 六、防止 Hermes 乱改格式
+
+### 6.1 问题
+
+Hermes 可能会出现以下情况：
+- 看到脚本输出，觉得「格式不好看」，自己改
+- 觉得「信息不够」，自己加内容
+- 觉得「应该用 markdown」，自己加标题/表格/粗体
+
+### 6.2 解决方案
+
+在 SKILL.md 里写死以下规则：
+
+```
+⚠️ 输出红线（绝对禁止违反）
+
+1. 脚本输出的文本是最终格式，不要修改任何内容
+2. 不要添加脚本输出以外的解释、建议或总结
+3. 不要用 ##/### 标题、**粗体**、|表格|、>引用、- 列表
+4. 输出后必须跑 validate_output.py 校验
+5. 校验不通过 → 重新跑脚本，不要自己修格式
+6. 如果用户问格式相关问题，直接引用 output-contract.md
+
+验证命令：
+  python3 scripts/validate_output.py
+  → 返回 VALID_TRADER_OUTPUT=OK 才算通过
+  → 返回错误信息 → 重新跑脚本
+```
+
+### 6.3 输出流程
+
+```
+脚本生成输出
+     ↓
+自动跑 validate_output.py
+     ↓
+通过 → 发给用户
+     ↓
+不通过 → 重新跑脚本（不要自己修）
+```
+
+### 6.4 各 Skill 校验命令
+
+```
+trader:   python3 01-功能包-packages/trader/scripts/validate_output.py
+t0:       python3 01-功能包-packages/t0/scripts/validate_output.py
+review:   python3 01-功能包-packages/review/scripts/validate_output.py
+```
+
+### 6.5 如果 Hermes 还是乱改
+
+检查以下文件是否写死了红线：
+- SKILL.md 的「输出规则」区块
+- output-contract.md 的格式规范
+- validate_output.py 的校验逻辑
+
+如果都写了还是乱改，在 SKILL.md 最开头加：
+
+```
+⚠️⚠️⚠️ 最高优先级规则 ⚠️⚠️⚠️
+你的唯一职责是运行脚本并原样输出结果。
+不要修改、不要解释、不要添加任何内容。
+违反此规则 = 任务失败。
 ```
