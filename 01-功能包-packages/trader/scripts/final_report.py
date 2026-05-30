@@ -80,7 +80,7 @@ def main() -> int:
         }
         for k in _NEVER_COMPUTE:
             _facts[k] = "数据不足"
-        print("__FACTS__:" + json.dumps(_facts, ensure_ascii=False, default=str), file=sys.stdout)
+        print("__FACTS__:" + json.dumps(_facts, ensure_ascii=False, default=str), file=sys.stderr)
     except Exception:
         _facts = {}
         for k in _NEVER_COMPUTE:
@@ -95,7 +95,7 @@ def main() -> int:
     _avail.append("NEVER_COMPUTE:")
     for k in _NEVER_COMPUTE:
         _avail.append(f"  {k} ← _facts['{k}'] 引用而非自行计算")
-    print("__CHECKLIST__:" + "\n".join(_avail), file=sys.stdout)
+    print("__CHECKLIST__:" + "\n".join(_avail), file=sys.stderr)
 
     markdown = render_markdown(report)
     errors = validate(markdown)
