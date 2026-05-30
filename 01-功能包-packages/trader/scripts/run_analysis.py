@@ -453,9 +453,26 @@ def build_report(target: str) -> dict[str, Any]:
         "stage_action": stage_result["action"],
         "max_position_pct": stage_result["max_position_pct"],
         "stage_label": stage_result["stage_label"],
+        "confidence": stage_result.get("confidence", 0),
+        "protection_notes": stage_result.get("protection_notes", []),
+        "stop_losses": stage_result.get("stop_losses", {}),
         # "extend_fundamental": snapshot.extend_fundamental,
         # "extend_sentiment": snapshot.extend_sentiment,
     }
+
+    # 仓位计算（阶段 + 大盘环境）
+    from trader_shared.stage_positioning import compute_position_with_env
+    market_env_level = market_env_data.get("level", "震荡市")
+    env_map = {"正常": "牛市", "偏弱": "震荡市", "很差": "熊市"}
+    mapped_env = env_map.get(market_env_level, "震荡市")
+    position_info = compute_position_with_env(
+        stage=stage_result["major_stage"],
+        momentum=stage_result["momentum"],
+        market_env=mapped_env,
+        pnl_pct=0.0,
+        total_position_pct=0.0,
+    )
+    report["position_info"] = position_info
 
     report = sync_report_with_data(report, levels)
     return report
@@ -734,8 +751,27 @@ def render_markdown(r: dict[str, Any]) -> str:
         f"  空仓 → 在 {low_zone} 试探买 {position_cap}%, 止损 {stop:.2f}{golden_text}",
         f"  有底仓 → 反弹 {confirm:.2f} 冲不动就减 10-20%, 跌破 {stop:.2f} 止损",
         f"  加仓 → 放量站稳 {confirm:.2f} 且回踩不破，才评估",
-        f"  仓位参考：{major_stage}期上限 {max_position_pct}%",
     ])
+
+    # 仓位计算过程
+    position_info = r.get("position_info") or {}
+    if position_info:
+        stage_pct = position_info.get("stage_position_pct", 0)
+        env_limit = position_info.get("env_limit_pct", 0)
+        env_name = position_info.get("market_env", "震荡市")
+        suggested = position_info.get("suggested_pct", 0)
+        blocked = position_info.get("hard_rule_blocked", False)
+        block_reason = position_info.get("hard_rule_reason", "")
+
+        lines.extend([
+            f"  四阶段仓位：{stage_pct}%",
+            f"  大盘环境：{env_name}",
+            f"  单票上限：{env_limit}%",
+        ])
+        if blocked:
+            lines.append(f"  → ❌ 硬规则阻止：{block_reason}")
+        else:
+            lines.append(f"  → 建议仓位：{suggested}%")
     if isinstance(fusion, dict) and fusion.get("action"):
         lines.extend(_fusion_breakdown(fusion))
 
