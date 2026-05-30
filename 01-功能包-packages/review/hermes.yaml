@@ -1,0 +1,11 @@
+name: review
+description: 盘后复盘 + 仓位轮动 + 信号统计
+triggers:
+  - pattern: "复盘.*"
+    command: "review script --target {stock}"
+  - pattern: "复盘全部"
+    command: "review script --all"
+  - pattern: "轮动.*"
+    command: "review script --targets {stocks}"
+  - pattern: "信号追踪"
+    command: "review script --tracking"

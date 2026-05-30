@@ -16,8 +16,7 @@ import trader_shared
 
 # Skill 脚本目录仍需手动加入（不在 trader_shared 包内）
 _ROOT = Path(__file__).resolve().parent.parent
-for _skill in ("01-单票分析-trader", "02-盘中T0-t0-trader", "03-选股池-trader-pool",
-               "04-仓位轮动-trader-portfolio", "05-盘后复盘-review-trader", "06-信号追踪-trader-tracking"):
+for _skill in ("trader", "t0", "review"):
     _d = _ROOT / "01-功能包-packages" / _skill / "scripts"
     if _d.exists() and str(_d) not in sys.path:
         sys.path.insert(0, str(_d))
