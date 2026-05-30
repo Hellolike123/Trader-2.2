@@ -586,3 +586,190 @@ def compute_stop_losses(
         "stage_based": {"price": stage_stop, "reason": stage_reason},
         "time_limit": {"days": time_days, "reason": time_reason},
     }
+
+
+# ── 加仓/减仓/清仓条件自动检查 ────────────────────────────────
+
+def check_position_actions(
+    stage: str,
+    current: float,
+    support: float,
+    ma20: float | None,
+    ma5: float | None,
+    bars: list[dict[str, Any]] | None = None,
+    pnl_pct: float = 0.0,
+    holding_days: int = 0,
+) -> dict[str, Any]:
+    """自动检查加仓/减仓/清仓条件是否满足。
+
+    Returns:
+        {
+            "add": {"result": "✅"/"❌"/"⏳", "checks": [...]},
+            "reduce": {"result": "✅"/"❌"/"⏳", "checks": [...]},
+            "clear": {"result": "✅"/"❌"/"⏳", "checks": [...]},
+        }
+    """
+    result: dict[str, Any] = {"add": {}, "reduce": {}, "clear": {}}
+
+    # ── 加仓条件 ──
+    add_checks: list[dict[str, Any]] = []
+    if stage == "蓄势":
+        add_checks.append(_check("支撑位不破", current >= support * 0.98 if support > 0 else False))
+        add_checks.append(_check("缩量横盘", _is_low_volume(bars, 3)))
+        add_checks.append(_check("MA收敛", _is_ma_converging(ma5, ma10, ma20)))
+    elif stage == "主升":
+        add_checks.append(_check("放量突破", _is_high_volume(bars, 1)))
+        add_checks.append(_check("MA多头", _is_bullish_ma(ma5, ma10, ma20)))
+        add_checks.append(_check("回踩不破MA20", current >= (ma20 or 0) * 0.98 if ma20 else False))
+    else:
+        add_checks.append(_check(f"{stage}期不建议加仓", False))
+
+    # 硬规则：亏损不加仓
+    add_checks.append(_check("持仓盈利", pnl_pct >= 0))
+    result["add"] = _format_checks(add_checks)
+
+    # ── 减仓条件 ──
+    reduce_checks: list[dict[str, Any]] = []
+    if stage == "派发":
+        reduce_checks.append(_check("跌破MA20", current < (ma20 or float("inf"))))
+        reduce_checks.append(_check("放量", _is_high_volume(bars, 3)))
+        reduce_checks.append(_check("MA20走平", _is_ma_flat(ma20, bars)))
+    elif stage == "主升":
+        reduce_checks.append(_check("跌破MA20", current < (ma20 or float("inf"))))
+        reduce_checks.append(_check("连续3日确认", _is_below_ma_n_days(bars, ma20, 3)))
+    else:
+        reduce_checks.append(_check(f"{stage}期无需减仓", False))
+    result["reduce"] = _format_checks(reduce_checks)
+
+    # ── 清仓条件 ──
+    clear_checks: list[dict[str, Any]] = []
+    if stage == "衰退":
+        clear_checks.append(_check("MA空头排列", _is_bearish_ma(ma5, ma10, ma20)))
+        clear_checks.append(_check("放量下跌", _is_high_volume(bars, 1)))
+        clear_checks.append(_check("移动止损触发", current < (ma20 or float("inf")) * 0.95 if ma20 else False))
+    else:
+        clear_checks.append(_check(f"{stage}期无需清仓", False))
+    result["clear"] = _format_checks(clear_checks)
+
+    return result
+
+
+def _check(label: str, passed: bool) -> dict[str, Any]:
+    return {"label": label, "passed": passed}
+
+
+def _format_checks(checks: list[dict[str, Any]]) -> dict[str, Any]:
+    passed = sum(1 for c in checks if c["passed"])
+    total = len(checks)
+    if passed == total:
+        result = "✅"
+    elif passed == 0:
+        result = "❌"
+    else:
+        result = "⏳"
+    return {"result": result, "passed": passed, "total": total, "checks": checks}
+
+
+def _is_low_volume(bars: list[dict[str, Any]] | None, days: int) -> bool:
+    if not bars or len(bars) < 20:
+        return False
+    recent = bars[-days:]
+    earlier = bars[-20:-days] if len(bars) > days + 20 else bars[:20]
+    vol_recent = sum(float(b.get("volume") or 0) for b in recent) / max(len(recent), 1)
+    vol_earlier = sum(float(b.get("volume") or 0) for b in earlier) / max(len(earlier), 1)
+    return vol_earlier > 0 and vol_recent < vol_earlier * 0.8
+
+
+def _is_high_volume(bars: list[dict[str, Any]] | None, days: int) -> bool:
+    if not bars or len(bars) < 20:
+        return False
+    recent = bars[-days:]
+    earlier = bars[-20:-days] if len(bars) > days + 20 else bars[:20]
+    vol_recent = sum(float(b.get("volume") or 0) for b in recent) / max(len(recent), 1)
+    vol_earlier = sum(float(b.get("volume") or 0) for b in earlier) / max(len(earlier), 1)
+    return vol_earlier > 0 and vol_recent > vol_earlier * 1.2
+
+
+def _is_ma_converging(ma5: float | None, ma10: float | None, ma20: float | None) -> bool:
+    if not all(v is not None and v > 0 for v in [ma5, ma10, ma20]):
+        return False
+    spread = abs(ma5 - ma20) / ma20  # type: ignore[operator]
+    return spread < 0.03
+
+
+def _is_bullish_ma(ma5: float | None, ma10: float | None, ma20: float | None) -> bool:
+    if not all(v is not None and v > 0 for v in [ma5, ma10, ma20]):
+        return False
+    return ma5 > ma10 > ma20  # type: ignore[operator]
+
+
+def _is_bearish_ma(ma5: float | None, ma10: float | None, ma20: float | None) -> bool:
+    if not all(v is not None and v > 0 for v in [ma5, ma10, ma20]):
+        return False
+    return ma5 < ma10 < ma20  # type: ignore[operator]
+
+
+def _is_ma_flat(ma20: float | None, bars: list[dict[str, Any]] | None) -> bool:
+    if not bars or len(bars) < 10 or ma20 is None or ma20 <= 0:
+        return False
+    closes = [float(b.get("close") or 0) for b in bars[-10:]]
+    ma_early = sum(closes[:5]) / 5
+    ma_late = sum(closes[5:]) / 5
+    return abs(ma_early - ma_late) / max(ma20, 1) < 0.01
+
+
+def _is_below_ma_n_days(bars: list[dict[str, Any]] | None, ma: float | None, n: int) -> bool:
+    if not bars or len(bars) < n or ma is None or ma <= 0:
+        return False
+    recent = bars[-n:]
+    return all(float(b.get("close") or 0) < ma for b in recent)
+
+
+# ── 止盈规则 ──────────────────────────────────────────────────
+
+def compute_take_profit(
+    stage: str,
+    current: float,
+    highest_close: float,
+    atr_pct: float,
+    market_env: str = "震荡市",
+) -> dict[str, Any]:
+    """止盈规则：不主动止盈，只在趋势反转时退出。
+
+    移动止损（保护利润）:
+      主升期不看止损，只看阶段
+      阶段转派发后，移动止损生效
+      移动止损 = 最高收盘价 × (1 - ATR% × 倍数)
+
+    大盘环境决定参数:
+      牛市: ATR×4.0，不主动止盈
+      震荡市: ATR×3.0，阻力位减仓
+      熊市: ATR×2.0，快止盈
+    """
+    # ATR 倍数根据大盘环境
+    env_multipliers = {"牛市": 4.0, "震荡市": 3.0, "熊市": 2.0}
+    mult = env_multipliers.get(market_env, 3.0)
+
+    if stage == "主升":
+        # 主升期不看止损，只看阶段
+        trailing_stop = None
+        action = "让利润跑，阶段转派发再减仓"
+    elif stage == "派发":
+        # 派发期移动止损生效
+        trailing_stop = round(highest_close * (1 - atr_pct * mult), 2)
+        action = f"移动止损 {trailing_stop:.2f}，跌破减仓"
+    elif stage == "衰退":
+        # 衰退期清仓
+        trailing_stop = round(highest_close * (1 - atr_pct * 2.0), 2)
+        action = "衰退期清仓"
+    else:
+        # 蓄势期用技术止损
+        trailing_stop = None
+        action = "蓄势期用技术止损"
+
+    return {
+        "trailing_stop": trailing_stop,
+        "action": action,
+        "atr_multiplier": mult,
+        "market_env": market_env,
+    }
