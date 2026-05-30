@@ -508,9 +508,18 @@ python3 -m pytest 01-功能包-packages/*/tests/
 
 ### 10.1 zip 包
 
-`pack_all.py` 生成：
-- **单独 zip** (`trader.zip` 等) → 解压到 `~/.hermes/skills/trader/`
-- **合集 zip** (`trader-all-skill.zip`) → 解压到 `~/.hermes/skills/`
+`pack_all.py` 生成 3 个独立 zip：
+- `trader.zip` → 解压到 `~/.hermes/skills/trader/`
+- `t0.zip` → 解压到 `~/.hermes/skills/t0/`
+- `review.zip` → 解压到 `~/.hermes/skills/review/`
+
+打包时自动执行：
+1. 将 `trader_shared/` 包复制到 `scripts/trader_shared/`
+2. 为 30+ 个模块生成 re-export 存根到 `scripts/` 目录
+3. 存根内容：`from trader_shared.{module} import *`
+4. 确保 `from light_data import ...` 和 `from trader_shared.light_data import ...` 都能工作
+
+存根解决的问题：脚本用裸 import（`from light_data import`），但代码在 `trader_shared/` 子目录里。没有存根会报 `ModuleNotFoundError`。
 
 ### 10.2 PyInstaller（可选）
 
