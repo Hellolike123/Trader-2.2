@@ -5,7 +5,7 @@
 - **版本升级**：当前版本为 Trader 2.4，在 2.3 基础上完成三大技能整合、四阶段定位模型、分析引擎并行化等重大重构。
 - **技能整合**：6 个技能合并为 3 个——`trader`（单票分析 + 选股池）、`t0`（盘中盯盘）、`review`（盘后复盘 + 仓位轮动 + 信号追踪）。
 - **四阶段定位模型**：蓄势/主升/派发/衰退 × 走强/修复/震荡/转弱，贯穿选股池入池三关、仓位轮动、盘后复盘全链路。
-- **250日线改为提醒不屏蔽**：年线下方不再一票否决，改为在报告中标注风险提醒，由用户自行判断。
+- **250日线趋势过滤（硬门控）**：年线下方一票否决，`_ma250_check()` 直接返回"暂不碰"并短路后续分析。
 - **分析引擎并行化**：多票分析场景下缠论/威科夫/筹码等模块并行执行，显著提升选股池批量分析速度。
 - **选股池四阶段挂钩**：入池三关（阶段匹配 + 基本面 + 技术面）自动筛选，回复 `1` 一步完成入池。
 - **T0 输出精简**：从原有冗长格式精简为 4 部分（触发价 / 大单异动 / 操作建议 / 风控提醒）。
@@ -45,9 +45,9 @@ A 股交易决策辅助系统。免费行情 API（腾讯 + 新浪），缠论 /
 
 ## 趋势过滤与退出策略
 
-### 250日线趋势过滤（提醒不屏蔽）
+### 250日线趋势过滤（硬门控）
 
-股价在 250 日均线（年线）下方时，在报告中标注风险提醒（如「⚠️ 年线下方，注意趋势风险」），但不再一票否决跳过分析。由用户自行判断是否操作。
+股价在 250 日均线（年线）下方时，一票否决，`status_layers()` 直接返回"暂不碰"状态并短路后续所有分析。T0 交易不触发（T0 的 `LOOKBACK_DAYS=30`，独立配置）。
 
 - 配置：`TREND_FILTER_ENABLED`、`TREND_MA_LONG=250`、`LOOKBACK_DAYS=300`
 - 位置：`decision_core.py` → `status_layers()` 入口
@@ -80,7 +80,7 @@ trailing_stop = highest_close × (1 - ATR% × 3.0)
 
 当融合层置信度超过阈值时，其 action 通过 `FUSION_STATUS_MAP` 覆盖 `status_layers()` 的判定。
 
-- 配置：`FUSION_OVERRIDE_ENABLED=True`、`FUSION_CONFIDENCE_THRESHOLD=0.2`
+- 配置：`FUSION_OVERRIDE_ENABLED=True`、`FUSION_CONFIDENCE_THRESHOLD=0.6`
 - 位置：`decision_core.py` → `_FUSION_STATUS_MAP`
 
 ---
@@ -287,6 +287,8 @@ MA5：59.63 ｜ MA10：60.74 ｜ MA20：60.60 ｜ MA30：59.72
 | `~/.trader/calibrated_params.json` | 自校准参数（zone_width等）| self_calibration | structure_core |
 | `~/.t0-trader/state.json` | T0 盯盘缓存 | t0 | t0 |
 | `~/.review-trader/state.json` | 复盘缓存 | review | review |
+| `~/.trader/signal_results.jsonl` | 信号结算结果（胜率/盈亏比） | signal_tracker / self_calibration | review / self_calibration |
+| `~/.trader/last_target.txt` | 上次分析标的 | final_report | final_report |
 
 ---
 
@@ -295,6 +297,7 @@ MA5：59.63 ｜ MA10：60.74 ｜ MA20：60.60 ｜ MA30：59.72
 ```bash
 # 运行单元与集成测试（包含 485 个核心计算类测试 + 系统集成测试）
 python3 -m pytest 02-共享模块-shared/tests/
+python3 -m pytest 01-功能包-packages/*/tests/
 
 # 运行各 Skill 格式与逻辑自检
 python3 scripts/check_all.py

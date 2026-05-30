@@ -71,7 +71,7 @@
 * **静默秒切容灾**：当 mootdx 处于隔离冷却期或单次请求超时失败时，管道进行静默秒切降级：
   * **行情快照 (fetch_quote)**：自动 fallback 至腾讯 HTTP 行情 API。
   * **前复权日线 (fetch_qfq_daily)**：自动 fallback 至腾讯前复权日线接口。
-  * **分钟线 (fetch_5m/15m/30m/kline)**：自动 fallback 至 `akshare` (EastMoney API)。
+  * **分钟线 (fetch_5m/15m/30m/kline)**：自动 fallback 至 Sina HTTP API，最后兜底 `akshare` (EastMoney API)。
 
 #### 2.2.2 数据完备度标识 (`data_status`)
 为保证下游策略对行情数据质量的知情权，`MarketSnapshot` 数据模型原生打上完备度标签：
@@ -109,7 +109,7 @@
 
 **HTTP 客户端** `HttpClient`：GET with User-Agent、gzip、SSL-unverified。 `retry()` 指数退避 3 次。
 **缓存**：bars 不含当日日期时缓存 1 小时，实时数据不缓存，行情快照进行 30s TTL 缓存。
-**NAME_MAP**：9 个常用股票名到代码的映射（南网科技→688248、中国铝业→601600 等）。
+**NAME_MAP**：10 个常用股票名到代码的映射（南网科技→688248、中国铝业→601600、中证1000→000852 等）。
 
 ### 2.3 状态机（`config.py STATUS_SCORE` + `decision_core.status_layers()`）
 
@@ -213,13 +213,13 @@ T0 参考 → 低吸/高抛/止损
 
 **五层理论分析** (`theory_verdicts()`):
 
-| 层级 | 范围 |
-|------ | ------ |
-| 缠论结构 | 0-100 |
-| 威科夫量价 | 0-100 |
-| 筹码峰 | 0-100 |
-| 资金行为 | 0-100 |
-| 动能确认 | 0-100 |
+| 层级 | 范围 | TypedDict 字段 |
+|------ | ------ | ------ |
+| 缠论结构 | 0-100 | `chandelier` |
+| 威科夫量价 | 0-100 | `wyckoff` |
+| 筹码峰 | 0-100 | `chips` |
+| 资金行为 | 0-100 | `money` |
+| 动能确认 | 0-100 | 在 `scores["momentum"]` 中返回（未纳入 `TheoryVerdict` TypedDict） |
 
 **仓位轮动四阶段逻辑**: 根据四阶段定位（蓄势/主升/派发/衰退 × 走强/修复/震荡/转弱）动态调整仓位分配策略，不再单纯依赖评分排序。
 
@@ -266,17 +266,21 @@ T0 参考 → 低吸/高抛/止损
 
 ### 5.1 candidate_core.py
 
+**注意**：`candidate_core.py` 是一个薄 re-export 存根（仅 9 行），实际实现分布在：
+- `structure_core.py`：`build_structure_context()`、`_theory_multipliers()`
+- `decision_core.py`：`status_for()`、`status_layers()`、`score_for()`、`base_weight()`、`atr_volatility_level()`、`atr_stop_buffer()`
+
 **常量配置** 全部集中在 `trader_shared/config.py`，per-skill `config.py` 可覆盖。
 
-**核心函数:**
-| 函数 | 参数 | 返回值 |
-|------ | ------ | ------ |
-| `build_structure_context()` | current, bars, change_pct, quote | CandidateLevels |
-| `status_for()` | 价格/支撑/确认价/止损等 + MA + 压力空间 | str 状态 |
-| `score_for()` | status + 现价+支撑+空间+MA+ATR dict | float 0-100 |
-| `base_weight()` | atr_level str | int % |
-| `atr_volatility_level()` | atr_ratio | (level_str, cap_pct) |
-| `atr_stop_buffer()` | atr_ratio, atr14 | (distance, text) |
+**核心函数（实际实现位置）：**
+| 函数 | 实现文件 | 参数 | 返回值 |
+|------ | ------ | ------ | ------ |
+| `build_structure_context()` | structure_core.py | current, bars, change_pct, quote | CandidateLevels |
+| `status_for()` | decision_core.py | 价格/支撑/确认价/止损等 + MA + 压力空间 | str 状态 |
+| `score_for()` | decision_core.py | status + 现价+支撑+空间+MA+ATR dict | float 0-100 |
+| `base_weight()` | decision_core.py | atr_level str | int % |
+| `atr_volatility_level()` | decision_core.py | atr_ratio | (level_str, cap_pct) |
+| `atr_stop_buffer()` | decision_core.py | atr_ratio, atr14 | (distance, text) |
 
 ### 5.2 缠论分析 (`chan_core.py`)
 
@@ -294,7 +298,7 @@ T0 参考 → 低吸/高抛/止损
 
 决策融合层是贯穿结构、缠论、动量与威科夫等多维分析体系的”终极裁判”。在传统多指标决策中，多头信号与空头冲突往往会导致系统输出”数据冲突”或者”中性旁观”等平庸判定。Trader 2.2 通过智能决策融合层彻底打破了这一桎梏。
 
-**`merge_decisions()` 当前签名（8 参数）：**
+**`merge_decisions()` 当前签名（9 参数）：**
 ```python
 def merge_decisions(
     chan_result, momentum_result, wyckoff_result,
@@ -369,8 +373,8 @@ graph TD
 | `source_skill` | string | trader / t0 / review |
 | `symbol` | string | `688248.SH` |
 | `signal_type` | string | observe / low_buy_watch / low_buy_triggered / high_sell_triggered / reduce / defensive / risk_stop / trigger_expired / blocked / review_result |
-| `direction` | string | bullish / bearish / neutral |
-| `action` | string | no_action / observe / wait / track / low_buy / high_sell / reduce |
+| `direction` | string | bullish / bearish / neutral / bullish_lean / bearish_lean |
+| `action` | string | no_action / observe / wait / track / low_buy / high_sell / reduce / stop |
 | `confidence` | string | low / medium / high |
 | `position` | dict | max_total_pct + max_single_move_pct |
 
@@ -451,7 +455,7 @@ $$\text{UUID} = \text{SHA256}(\text{normalized\_symbol} \parallel \text{normaliz
 Tencent API → light_data.py (days=300)
 Sina API → fetch_5m/fetch_15m/fetch_30m
   ↓
-strategy_protocol.py:run_all()
+ThreadPoolExecutor 并行执行策略（run_analysis.py）
   ├── build_structure_context()  ← ATR + 移动止损 + 支撑/阻力
   ├── chanlun_strategy()
   ├── momentum_strategy()
@@ -489,17 +493,18 @@ trader add → pool.json → plan → last_plan.json
 
 | Skill | 单测文件 | 数量 |
 |------ | ------ | ------ |
-| trader | `tests/test_contract.py` + `tests/test_compare_signals.py` | 21 |
+| trader | `tests/test_contract.py` + `tests/test_compare_signals.py` + `test_fusion_integration.py` + `test_pool_contract.py` + `test_self_consistency.py` 等 | 21+ |
 | t0 | `tests/test_t0_contract.py` | 4 |
 | review | `tests/test_portfolio_signals.py` + `tests/test_review_backtrack.py` | 10 |
-| shared-chan | `tests/test_chan_core.py` | 18 |
-| shared-wyckoff | `tests/test_wyckoff_core.py` | 8 |
+| shared | 44 个测试文件（含 `test_bayesian_fusion.py`、`test_big_order_validation.py`、`test_calibrator.py`、`test_signal_tracker_*.py` 等） | 485+ |
+| 总计 | 58 个测试文件，485+ 核心计算类测试用例 | — |
 
 ### 9.2 测试命令
 
 ```bash
-python3 scripts/self_check.py
+python3 -m pytest 02-共享模块-shared/tests/
 python3 -m pytest 01-功能包-packages/*/tests/
+python3 scripts/self_check.py
 ```
 
 ---
@@ -711,7 +716,7 @@ python3 02-共享模块-shared/scripts/self_calibration.py
 
 # 在代码中读取已校准参数（支持多层降级，消费时由 structure_core.py 根据当前 hmm_regime 动态匹配）
 from self_calibration import load_calibrated_params
-params = load_calibrated_params()  # 返回 { "version": "2.3", "params": { "global": {...}, "bull": {...}, "bear": {...}, "range": {...} } }
+params = load_calibrated_params()  # 返回 { "global": {...}, "bull": {...}, "bear": {...}, "range": {...} } （仅 params 子字典，不含外层 version 包装）
 ```
 
 
