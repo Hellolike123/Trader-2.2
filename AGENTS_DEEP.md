@@ -1,11 +1,20 @@
-# Trader 2.3 — 架构文档（深挖参考）
+# Trader 2.4 — 架构文档（深挖参考）
 
-> 最后更新：2026-05-29
+> 最后更新：2026-05-30
 > **注意**: AGENTS.md 是 Agent 快速参考，本文档用于开发调试/架构深挖。
 
 ---
 
 ## 变更日志
+
+### 2026-05-30 — Trader 2.4：三大技能整合 + 四阶段定位模型
+
+- **技能整合**：6 个技能合并为 3 个——`trader`（单票分析 + 选股池）、`t0`（盘中盯盘）、`review`（盘后复盘 + 仓位轮动 + 信号追踪）
+- **四阶段定位模型**：蓄势/主升/派发/衰退 × 走强/修复/震荡/转弱，贯穿选股池入池三关、仓位轮动、盘后复盘全链路
+- **分析引擎并行化**：多票分析场景下缠论/威科夫/筹码等模块并行执行，显著提升选股池批量分析速度
+- **入池三关规则**：阶段匹配 + 基本面 + 技术面自动筛选
+- **T0 输出精简**：从原有冗长格式精简为 4 部分（触发价 / 大单异动 / 操作建议 / 风控提醒）
+- **仓位轮动四阶段逻辑**：根据四阶段定位动态调整仓位分配策略，不再单纯依赖评分排序
 
 ### 2026-05-23 — Trader 2.3：四大高级统计模块上线
 
@@ -28,7 +37,7 @@
 **目的：** 降低 SKILL.md 上下文占用，防止 LLM 幻觉生成错误命令或格式。
 
 **变更内容：**
-- 6 个 skill（trader, t0-trader, trader-pool, trader-portfolio, review-trader, trader-tracking）
+- 3 个 skill（trader, t0, review）
 - SKILL.md 从 ~2100 词精简至 ~1200 词（↓43%）
 - 每个 skill 新增 `references/` 目录，包含：
   - `commands.md` — 所有脚本命令（声明为"绝对真理"）
@@ -49,7 +58,7 @@
 |------ | ------ | ------ | ------ |
 | 腾讯行情 | `qt.gtimg.cn/q=` | 实时快照（现价/昨收/今开/涨跌/成交量/换手率） | 所有 skill 的现价/涨跌幅 |
 | 腾讯日线 | `web.ifzq.gtimg.cn/appstock/app/fqkline/get` | 前复权日线，附加 `atr14/atr7/atr_ratio/tr` 字段 | 支撑阻力计算、状态判定 |
-| 新浪 K 线 | `money.finance.sina.com.cn/quotes_service/api/...` | 5m / 15m / 30m 分钟线 | t0-trader 盘中分析 |
+| 新浪 K 线 | `money.finance.sina.com.cn/quotes_service/api/...` | 5m / 15m / 30m 分钟线 | t0 盘中分析 |
 
 ### 2.2 light_data.py — 唯一数据入口与双源 HA 管道
 
@@ -153,9 +162,9 @@
 
 ## 三、Skill 职责详情
 
-### 3.1 trader（单票分析）
+### 3.1 trader（单票分析 + 选股池）
 
-**入口**: `scripts/final_report.py`
+**入口**: `scripts/final_report.py`（单票分析）/ `scripts/final_pool.py`（选股池）
 **分析模型**: `run_analysis.py::build_report()` → `final_report.py::render_markdown()` → `build_signal()`
 **策略链**: `strategies = [build_structure_context, chanlun_strategy, wyckoff_strategy]`
 **输入数据**: 腾讯日线（前复权 + ATR）+ 实时快照
@@ -172,7 +181,18 @@ T0 参考 → 低吸/高抛/止损
 🧭 简要分析 → 基础状态/体系结论 + 结构/量价/筹码/动能
 ```
 
-### 3.2 t0-trader（盘中T0）
+**选股池命令集**: `analyze` `add` `add-pending` `confirm-to-pool` `show` `show-pending` `rank` `plan` `review` `remove` `archive-exited`
+
+**入池三关规则**:
+- 第一关：阶段匹配（四阶段定位模型：蓄势/主升/派发/衰退 × 走强/修复/震荡/转弱）
+- 第二关：基本面筛选
+- 第三关：技术面评分
+  - 缠论子分（max 45）: 24 基础 + 阶段/场景/价格距离加分
+  - 威科夫子分（max 30）: 15 基础 + 量能/动能加分
+  - 筹码子分（max 25）: 15 基础 + 止损/支撑/止盈加分
+  - 综合 ≥ 70 → 执行; ≥ 55 → 观察；触及防守线 → 拒绝/淘汰
+
+### 3.2 t0（盘中T0）
 
 **入口**: `scripts/final_t0.py`
 **子模块**: `t0_run.py` / `price_point_engine.py` / `monitor.py` / `indicators.py` / `ict_execution.py`
@@ -180,27 +200,16 @@ T0 参考 → 低吸/高抛/止损
 
 **Monitor Mode**: 3 分钟轮询 → `detect_state_change()` → 15 分钟 cooldown → 输出告警文本 + 追加 `signals.jsonl`。单次 `--once` 适合 cron 调度。
 
-### 3.3 trader-pool（选股池）
+**T0 输出精简为 4 部分**:
+- 触发价
+- 大单异动
+- 操作建议
+- 风控提醒
 
-**入口**: `scripts/final_pool.py`
-**命令集**: `analyze` `add` `add-pending` `confirm-to-pool` `show` `show-pending` `rank` `compare` `plan` `review` `remove` `archive-exited`
+### 3.3 review（盘后复盘 + 仓位轮动 + 信号追踪）
 
-**入池打分（ `_score_report()` ）**:
-- 缠论子分（max 45）: 24 基础 + 阶段/场景/价格距离加分
-- 威科夫子分（max 30）: 15 基础 + 量能/动能加分
-- 筹码子分（max 25）: 15 基础 + 止损/支撑/止盈加分
-- 综合 ≥ 70 → 执行; ≥ 55 → 观察；触及防守线 → 拒绝/淘汰
-
-### 3.4 trader-portfolio（仓位轮动）
-
-**入口**: `scripts/final_portfolio.py`
-**子模块**: `candidate_model.py` / `portfolio_run.py`
-**Snapshots 输入**: `{targets: [...], holdings: [...], candidates: [...], account: {max_move_pct, total_position_pct, cash_pct}}`
-
-### 3.5 review-trader（盘后复盘）
-
-**入口**: `scripts/final_review.py`
-**子模块**: `review_model.py` / `review_render.py` / `review_single.py` / `review_compare.py` / `review_store.py`
+**入口**: `scripts/final_review.py`（盘后复盘）/ `scripts/final_portfolio.py`（仓位轮动）/ `scripts/final_tracker.py`（信号追踪）
+**子模块**: `review_model.py` / `review_render.py` / `review_single.py` / `review_compare.py` / `review_store.py` / `candidate_model.py` / `portfolio_run.py`
 
 **五层理论分析** (`theory_verdicts()`):
 
@@ -212,19 +221,9 @@ T0 参考 → 低吸/高抛/止损
 | 资金行为 | 0-100 |
 | 动能确认 | 0-100 |
 
-### 3.6 trader-tracking（信号追踪）
+**仓位轮动四阶段逻辑**: 根据四阶段定位（蓄势/主升/派发/衰退 × 走强/修复/震荡/转弱）动态调整仓位分配策略，不再单纯依赖评分排序。
 
-**入口**: `scripts/final_tracker.py`
-**功能**: 从 `~/.trader/signal_results.jsonl` 生成信号准确率面板（胜率、涨跌比、盈亏比）
-**版本**: v0.1.0
-
-核心逻辑在共享模块 `signal_tracker.py` 中，该 Skill 是薄包装层，负责调用共享模块并渲染输出。
-
-**脚本清单**:
-- `final_tracker.py` — 入口，调用 `signal_tracker.py` 并渲染面板
-- `self_check.py` — 输出格式自检
-- `validate_output.py` — 输出契约校验
-- `install_skill.py` — 安装脚本
+**信号追踪**: 从 `~/.trader/signal_results.jsonl` 生成信号准确率面板（胜率、涨跌比、盈亏比）
 
 ---
 
@@ -275,35 +274,23 @@ T0 参考 → 低吸/高抛/止损
 | `build_structure_context()` | current, bars, change_pct, quote | CandidateLevels |
 | `status_for()` | 价格/支撑/确认价/止损等 + MA + 压力空间 | str 状态 |
 | `score_for()` | status + 现价+支撑+空间+MA+ATR dict | float 0-100 |
-| `livermore_scale()` | status, score | int 0~5 |
 | `base_weight()` | atr_level str | int % |
 | `atr_volatility_level()` | atr_ratio | (level_str, cap_pct) |
 | `atr_stop_buffer()` | atr_ratio, atr14 | (distance, text) |
 
-### 5.2 利弗莫尔金字塔仓位算法
-
-| Tier | 加仓倍率 | 触发条件 |
-|------ | ------ | ------ |
-| 0 | 0% | 冲高减仓状态 / score 过低 |
-| 1 | 15% | 低吸观察/优先候选，score < 65 |
-| 2 | 35% | 优先候选，65≤ score < 80 |
-| 3 | 60% | 优先候选，80≤ score < 90 |
-| 4 | 85% | 强势确认，score ≥ 90 |
-| 5 | 100% | 上限封顶 |
-
-### 5.3 缠论分析 (`chan_core.py`)
+### 5.2 缠论分析 (`chan_core.py`)
 
 `handle_inclusion()` / `find_fractions()` / `build_strokes()` / `build_zones()` / `detect_buy_points()` / `detect_divergence()`
 
-### 5.4 威科夫分析 (`wyckoff_core.py`)
+### 5.3 威科夫分析 (`wyckoff_core.py`)
 
 `_detect_spring()` / `_detect_upthrust()` / `_detect_volume_divergence()` / `wyckoff_analysis()`
 
-### 5.5 动量策略 (`momentum_core.py`)
+### 5.4 动量策略 (`momentum_core.py`)
 
 `calc_rsi()` / `calc_macd()` / `calc_adx()` / `calc_bollinger()` / `assess_momentum()`
 
-### 5.6 智能决策融合层 (`fusion_core.py` / `fusion_regime.py`)
+### 5.5 智能决策融合层 (`fusion_core.py` / `fusion_regime.py`)
 
 决策融合层是贯穿结构、缠论、动量与威科夫等多维分析体系的”终极裁判”。在传统多指标决策中，多头信号与空头冲突往往会导致系统输出”数据冲突”或者”中性旁观”等平庸判定。Trader 2.2 通过智能决策融合层彻底打破了这一桎梏。
 
@@ -316,13 +303,13 @@ def merge_decisions(
 ) -> dict
 ```
 
-#### 5.6.1 信号标准化抽象
+#### 5.5.1 信号标准化抽象
 融合层首先将底层各个策略子系统的原始计算结果抽象为带有方向与置信度的统一信号包（`CandidateSignal`）：
 * **缠论转换**：根据（一/二/三类买点 > 底背驰 > 顶背驰 > 趋势段）优先级映射。一类买点（底背驰极值点）置信度 0.8，趋势拉升段置信度 0.4。
 * **动量转换**：使用独特的 **U 型置信度映射函数**。动量指标分值接近两端（极度超买/超卖，$\le 25$ 或 $\ge 75$）时置信度激增为 0.8，处于 41-59 震荡灰区时置信度跌至 0.2。
 * **威科夫转换**：Spring 弹簧信号置信度 0.70（叠加看多背离达 0.75），上冲回落（Upthrust）置信度 0.6，看多/看空量价背离置信度 0.5。
 
-#### 5.6.2 场景优先级过滤器 (Scenario Priority Filter)
+#### 5.5.2 场景优先级过滤器 (Scenario Priority Filter)
 融合层摒弃了静态等权（Equal Weighting）模式，通过计算股价在 20 日高低区间的相对价格位置（$pos\_pct$），实行动态权重倾斜：
 * **筑底/突破区间（$pos\_pct \le 0.3$ 或强结构买点）**：将 **80% 的决策权重分配给结构化理论（缠论 45% + 威科夫 35%）**，动量权重压缩至 20%。以此消除低位筑底时动量指标金叉/死叉频繁交织产生的磨损，强力捕捉“Spring 弹簧低吸位”或“缠论三买突破位”。
 * **冲顶/超买区间（$pos\_pct \ge 0.7$ 或强结构卖点/高动量）**：将 **80% 的决策权重分配给动量与威科夫量价（动量 55% + 威科夫 25%）**，缠论权重压缩至 20%。用来在情绪高潮期通过动量极值和威科夫上冲回落拦截假突破，预防高位套牢。
@@ -339,17 +326,17 @@ graph TD
     Standard -->|大盘牛熊自适应权重| Output3["Regime 权重"]
 ```
 
-#### 5.6.3 冲突消解与 Veto 噪点消减机制
+#### 5.5.3 冲突消解与 Veto 噪点消减机制
 当各维理论出现强分歧时（$disagreement = max(dir) - min(dir) > 1$，如 1 与 -1 并存），融合层启动置信度优先级覆盖逻辑：
 * **低位转强 Veto 覆盖**：若底层触发了缠论结构买点或威科夫 Spring 看多信号，直接将动量指标的看空噪点归零（$direction = 0$）。
 * **高位筑顶 Veto 覆盖**：若底层触发了缠论顶背驰或威科夫上冲回落（Upthrust）看空信号，直接将动量指标的冲高看多噪点归零。
 * **分歧解耦**：当发生 Veto 噪声消除时，系统将用于诊断的原始分歧度 `disagreement` 与用于映射决策逻辑的 `disagreement_for_action` 进行解耦，并强制令 `disagreement_for_action = 0`，消除传统策略在强底分型转强突破时被冲突误判拦截的隐患。
 
-### 5.7 大势参数自适应调节器 (Regime Multipliers)
+### 5.6 大势参数自适应调节器 (Regime Multipliers)
 
 在单票分析的价格计算层（`structure_core.py`），系统不再使用静态硬编码的安全缓冲，而是引入了与大盘宏观牛熊环境（`market_env`）及理论融合结果深度挂钩的自适应调节器：
 
-#### 5.7.1 Regime 参数微调公式
+#### 5.6.1 Regime 参数微调公式
 系统通过 `_theory_multipliers` 计算 4 个维度的动态调节系数：
 
 1. **大势缩放 (Regime Factor)**：
@@ -363,7 +350,7 @@ graph TD
    * 动量强势（bullish + $\ge 65$）时：`space_threshold`（空间不足过滤门槛）缩窄 0.80x（激进买入）。
    * 动量弱势（bearish + $\le 35$）时：`space_threshold` 放大 1.30x（保守防守）。
 
-#### 5.7.2 动态价格闭环
+#### 5.6.2 动态价格闭环
 以上 4 维系数完美嵌入 `build_structure_context()`，使得算出来的低吸区上/下沿、止损线、确认价及突破过滤阈值均具备全天候数学鲁棒性，彻底打通了大势-多维理论-单票决策的数据闭环。
 
 ---
@@ -379,7 +366,7 @@ graph TD
 | 字段 | 类型 | 允许值 |
 |------ | ------ | ------ |
 | `contract` | string | `trader_signal_v1` |
-| `source_skill` | string | trader / t0-trader / trader-pool / trader-portfolio / review-trader |
+| `source_skill` | string | trader / t0 / review |
 | `symbol` | string | `688248.SH` |
 | `signal_type` | string | observe / low_buy_watch / low_buy_triggered / high_sell_triggered / reduce / defensive / risk_stop / trigger_expired / blocked / review_result |
 | `direction` | string | bullish / bearish / neutral |
@@ -392,8 +379,8 @@ graph TD
 | Skill | 写入时机 | signal_type 示例 |
 |------ | ------ | ------ |
 | `trader` | `--output signal-json` | `observe` / `reduce` |
-| `t0-trader` | monitor mode 状态变化 | `low_buy_watch` → `low_buy_triggered` |
-| `review-trader` | 盘后复盘完成 | `review_result` |
+| `t0` | monitor mode 状态变化 | `low_buy_watch` → `low_buy_triggered` |
+| `review` | 盘后复盘完成 | `review_result` |
 
 ### 6.3 Signal Tag 展示约定
 
@@ -453,7 +440,7 @@ $$\text{UUID} = \text{SHA256}(\text{normalized\_symbol} \parallel \text{normaliz
 | 主力叙事 | `主力入场第一枪`、`主力吸筹`、`主力锁仓` |
 | 极端词汇 | `行情结束`、`出货日`、`极端波动` |
 | 旧模板 | `📱 单票分析报告`、`✅ 先给结论`、`📌 交易指导卡` 等 |
-| T0 旧词 | `t0-trader`、`做T`、`执行价`、`T0买入价` 等 |
+| T0 旧词 | `t0`、`做T`、`执行价`、`T0买入价` 等 |
 | 技术栈 | `pandas`、`requests`、`akshare` 等 |
 
 ---
@@ -484,14 +471,14 @@ strategy_protocol.py:run_all()
   → {base_status, theory_status, status, ...}
   ↓
   └──→ final_report.py (trader)
-  └──→ t0_run.py → final_t0.py (t0-trader)
-  └──→ final_pool.py (trader-pool)
-  └──→ final_portfolio.py (trader-portfolio)
-  └──→ final_review.py (review-trader)
+  └──→ t0_run.py → final_t0.py (t0)
+  └──→ final_pool.py (trader)
+  └──→ final_portfolio.py (review)
+  └──→ final_review.py (review)
 
 数据流转:
-t0-trader monitor → signals.jsonl → review-trader backtrack
-trader-pool add → pool.json → plan → last_plan.json
+t0 monitor → signals.jsonl → review backtrack
+trader add → pool.json → plan → last_plan.json
 ```
 
 ---
@@ -502,11 +489,9 @@ trader-pool add → pool.json → plan → last_plan.json
 
 | Skill | 单测文件 | 数量 |
 |------ | ------ | ------ |
-| trader | `tests/test_contract.py` | 13 |
-| t0-trader | `tests/test_t0_contract.py` | 4 |
-| trader-pool | `tests/test_compare_signals.py` | 8 |
-| trader-portfolio | `tests/test_portfolio_signals.py` | 5 |
-| review-trader | `tests/test_review_backtrack.py` | 5 |
+| trader | `tests/test_contract.py` + `tests/test_compare_signals.py` | 21 |
+| t0 | `tests/test_t0_contract.py` | 4 |
+| review | `tests/test_portfolio_signals.py` + `tests/test_review_backtrack.py` | 10 |
 | shared-chan | `tests/test_chan_core.py` | 18 |
 | shared-wyckoff | `tests/test_wyckoff_core.py` | 8 |
 
@@ -566,15 +551,12 @@ git tag trader-v0.6.0 HEAD
 ## 十二、目录结构
 
 ```
-Trader 2.0/
+Trader 2.4/
 ├── 01-功能包-packages/
 │   ├── 00-系统工具/ (系统级工具包，含 tests/test_pack_all.py 打包测试)
-│   ├── 01-单票分析-trader/ (SKILL.md, scripts/final_report.py, references/)
-│   ├── 02-盘中T0-t0-trader/ (SKILL.md, scripts/final_t0.py, references/)
-│   ├── 03-选股池-trader-pool/ (SKILL.md, scripts/final_pool.py, references/)
-│   ├── 04-仓位轮动-trader-portfolio/ (SKILL.md, scripts/final_portfolio.py, references/)
-│   ├── 05-盘后复盘-review-trader/ (SKILL.md, scripts/final_review.py, references/)
-│   └── 06-信号追踪-trader-tracking/ (SKILL.md, scripts/final_tracker.py, references/)
+│   ├── trader/ (SKILL.md, scripts/final_report.py, scripts/final_pool.py, references/)
+│   ├── t0/ (SKILL.md, scripts/final_t0.py, references/)
+│   └── review/ (SKILL.md, scripts/final_review.py, scripts/final_portfolio.py, scripts/final_tracker.py, references/)
 ├── 02-共享模块-shared/
 │   ├── 01-行情数据-market-data/ (light_data.py, models.py)
 │   ├── 02-候选逻辑-candidate/ (candidate_core.py, chan_core.py, wyckoff_core.py,
@@ -625,12 +607,9 @@ Trader 2.0/
 
 | Skill | 自然触发词 |
 |------ | ------ |
-| `trader` | 分析 XX / 看看 XX / XX 怎么样 / 单票分析 / 盯盘 XX |
-| `t0-trader` | T0 / 做T / 盘中T / 什么价买 / 什么价卖 / 盯盘 |
-| `trader-pool` | 加入选股池 / 入池 / 对比 / 比较 / 池内排序 / 生成作战表 |
-| `trader-portfolio` | 仓位分配 / 轮动 / 仓位计划 / 2-3 只比一下 |
-| `review-trader` | 复盘 XX / 盘后复盘 / 午间复盘 / compare XX YY |
-| `trader-pool` soft | 这个不错 / 可以关注 / 明天看看（→ add-pending） |
+| `trader` | 分析 XX / 看看 XX / XX 怎么样 / 单票分析 / 盯盘 XX / 加入选股池 / 入池 / 对比 / 比较 / 池内排序 / 生成作战表 / 这个不错 / 可以关注 / 明天看看 |
+| `t0` | T0 / 做T / 盘中T / 什么价买 / 什么价卖 / 盯盘 |
+| `review` | 复盘 XX / 盘后复盘 / 午间复盘 / 仓位分配 / 轮动 / 仓位计划 / 2-3 只比一下 |
 
 ---
 
@@ -769,4 +748,4 @@ params = load_calibrated_params()  # 返回 { "version": "2.3", "params": { "glo
 | Tick 订单流分析 | 盘口十档主动买卖追踪，提升日内时机精度 | P2 | 未开始 |
 | 行业板块共振管理 | 轮动时加入板块强弱因子 | P2 | 未开始 |
 | App/小程序前端面板 | Markdown → 可视化 Chart 面板 | P3 | 未开始 |
-| `t0-trader` signal type 扩展 | 增加 `pilot_entry` 试仓等 | P3 | 未开始 |
+| `t0` signal type 扩展 | 增加 `pilot_entry` 试仓等 | P3 | 未开始 |

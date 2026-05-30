@@ -2,29 +2,36 @@
 
 ## 接手先看
 
-- **版本升级**：当前版本为 Trader 2.3，在 2.2 基础上新增了隐马尔可夫大势检测、贝叶斯概率融合、日内成交量分布以及离线参数自校准四大高级统计模块。
+- **版本升级**：当前版本为 Trader 2.4，在 2.3 基础上完成三大技能整合、四阶段定位模型、分析引擎并行化等重大重构。
+- **技能整合**：6 个技能合并为 3 个——`trader`（单票分析 + 选股池）、`t0`（盘中盯盘）、`review`（盘后复盘 + 仓位轮动 + 信号追踪）。
+- **四阶段定位模型**：蓄势/主升/派发/衰退 × 走强/修复/震荡/转弱，贯穿选股池入池三关、仓位轮动、盘后复盘全链路。
+- **250日线改为提醒不屏蔽**：年线下方不再一票否决，改为在报告中标注风险提醒，由用户自行判断。
+- **分析引擎并行化**：多票分析场景下缠论/威科夫/筹码等模块并行执行，显著提升选股池批量分析速度。
+- **选股池四阶段挂钩**：入池三关（阶段匹配 + 基本面 + 技术面）自动筛选，回复 `1` 一步完成入池。
+- **T0 输出精简**：从原有冗长格式精简为 4 部分（触发价 / 大单异动 / 操作建议 / 风控提醒）。
+- **仓位轮动跟着阶段走**：根据四阶段定位动态调整仓位分配策略，不再单纯依赖评分排序。
 - **单票分析双层状态模型**：`base_status` 负责结构位置层，`theory_status` 负责理论结论层；`state_label` 仅作兼容/展示摘要。
 - **信号唯一性契约 (Signal Contract v2)**：基于 SHA256 deterministic hash 的 16 位 Hex 强一致 UUID (`make_signal_id`)，严格规避任何时区/数据抖动造成的重复结算。
 - **双源热备行情 HA**：`MarketDataSourceController` 接管行情数据通道，mootdx 发生 1.5 秒硬超时或连续 3 次失败时，秒级自动 fallback 至 Tencent HTTP / Sina API，以 `data_status="partial"` 标注数据完备度。
 - **智能决策融合层 (Decision Fusion Core)**：通过 Scenario Priority Filter 动态分配结构与动量权重（极值区 80% 权重偏斜），且基于 Belief Priority 冲突消解机制过滤动量噪音。
 - **大势参数自适应 (Regime Multipliers)**：根据 `market_env` 大盘牛熊环境因子动态缩放 `zone_width` / `confirm_buffer` / `stop_buffer`。
-- **[2.3新增] HMM 大势状态检测器**：`hmm_regime.py` 基于纯 numpy Baum-Welch + Viterbi。已深度整合进 `market_env.py` 及下游 `fusion_core.py` / `structure_core.py`。大势判定从纯均线驱动升级为「均线 + HMM 前瞻」双效驱动（高置信度 HMM 状态会自动前瞻修正 `level`，且 `structure_core` 直接复用避免重复抓包）。
-- **[2.3新增] 贝叶斯概率决策融合**：`bayesian_fusion.py` 用乘积规则融合三路专家后验概率。已完整集成在 `fusion_core.py` 中。默认关闭（安全过渡），通过设置环境变量 `BAYESIAN_FUSION=true` 激活，激活后将全面接管传统经验权重，实现基于纯概率后验的最优交易动作决策。
-- **[2.3新增] 日内成交量分布 (Volume Profile)**：`volume_profile.py` 计算 POC 控制节点与 Value Area 70% 成交量密集区。已嵌入 `decision_core.py` 的突破确认判定 `_check_theory_breakout`，通过微观日内量价验证过滤假突破。
-- **[2.3新增] 离线参数自校准器**：`scripts/self_calibration.py` 支持分层搜索，基于 HMM regime 对历史信号分桶搜优（`bull` / `bear` / `range` / `global`），并引入盈亏比加权胜率模型（`WinRate * ProfitFactor`）仿真打分。参数由 `structure_core.py` 的 `_theory_multipliers` 层按当前 HMM 大势动态消费并进行多级回退兼容。
-- **[2.3新增] 动态衰减与空间去重筹码分布**：`chip_distribution.py` 摒弃原有静态累加，实现基于时序 `turnover_rate` 换手折旧的动态筹码曲线，并引入基于局部极大值与空间/价格过滤（间距 $\ge 4\%$ 且 $\ge 4$ bins）的独立筹码峰提取算法，供复盘与仓位控制等技能跨模块全局共享。
-- **[2.3新增] 信号生命周期与日志合并**：废弃 `signal_log.jsonl` 等多个冗余文件，将所有 T0 事件、单票分析信号、手动结果回填统一收口至单一可信源 `~/.trader/signals.jsonl`，并由继承自 `os.PathLike` 的原生路径代理 `DynamicPathProxy` 提供透明、防 pytest 缓存污染的无缝 Mock 支持。
-- **[2.3新增] 斐波那契黄金挂单位 (Golden Bid)**：`structure_core.py` 自动从缠论笔中计算 38.2%/50%/61.8% 黄金分割回调价，并与当前低吸价格区间求交集，计算出高置信度的「黄金挂单位」（显示于 `📍 决策` 列表的空仓低吸参考旁）。
-- **[2.3新增] 分层数据缓存**：日线K线、扩展数据（股东/机构EPS/解禁/题材）、大盘环境均支持文件缓存。盘中分析读缓存 + 追加当日实时数据，盘后预缓存选股池全量数据。命令：`trader.py cache warm`（预缓存）、`trader.py cache clear`（清缓存）。
-- **[2.3新增] 统一包结构**：所有核心模块已迁移到 `trader_shared/` 包下，支持 `pip install -e .` 开发安装和 `pytest` 直接运行。import 统一为 `from trader_shared.xxx import ...`。
-- 真正的输出格式以 `01-功能包-packages/01-单票分析-trader/references/output-contract.md` 为准。
-- 需要看实现时，先看 `01-功能包-packages/01-单票分析-trader/scripts/run_analysis.py`。
+- **HMM 大势状态检测器**：`hmm_regime.py` 基于纯 numpy Baum-Welch + Viterbi。已深度整合进 `market_env.py` 及下游 `fusion_core.py` / `structure_core.py`。大势判定从纯均线驱动升级为「均线 + HMM 前瞻」双效驱动（高置信度 HMM 状态会自动前瞻修正 `level`，且 `structure_core` 直接复用避免重复抓包）。
+- **贝叶斯概率决策融合**：`bayesian_fusion.py` 用乘积规则融合三路专家后验概率。已完整集成在 `fusion_core.py` 中。默认关闭（安全过渡），通过设置环境变量 `BAYESIAN_FUSION=true` 激活，激活后将全面接管传统经验权重，实现基于纯概率后验的最优交易动作决策。
+- **日内成交量分布 (Volume Profile)**：`volume_profile.py` 计算 POC 控制节点与 Value Area 70% 成交量密集区。已嵌入 `decision_core.py` 的突破确认判定 `_check_theory_breakout`，通过微观日内量价验证过滤假突破。
+- **离线参数自校准器**：`scripts/self_calibration.py` 支持分层搜索，基于 HMM regime 对历史信号分桶搜优（`bull` / `bear` / `range` / `global`），并引入盈亏比加权胜率模型（`WinRate * ProfitFactor`）仿真打分。参数由 `structure_core.py` 的 `_theory_multipliers` 层按当前 HMM 大势动态消费并进行多级回退兼容。
+- **动态衰减与空间去重筹码分布**：`chip_distribution.py` 摒弃原有静态累加，实现基于时序 `turnover_rate` 换手折旧的动态筹码曲线，并引入基于局部极大值与空间/价格过滤（间距 $\ge 4\%$ 且 $\ge 4$ bins）的独立筹码峰提取算法，供复盘与仓位控制等技能跨模块全局共享。
+- **信号生命周期与日志合并**：废弃 `signal_log.jsonl` 等多个冗余文件，将所有 T0 事件、单票分析信号、手动结果回填统一收口至单一可信源 `~/.trader/signals.jsonl`，并由继承自 `os.PathLike` 的原生路径代理 `DynamicPathProxy` 提供透明、防 pytest 缓存污染的无缝 Mock 支持。
+- **斐波那契黄金挂单位 (Golden Bid)**：`structure_core.py` 自动从缠论笔中计算 38.2%/50%/61.8% 黄金分割回调价，并与当前低吸价格区间求交集，计算出高置信度的「黄金挂单位」（显示于 `📍 决策` 列表的空仓低吸参考旁）。
+- **分层数据缓存**：日线K线、扩展数据（股东/机构EPS/解禁/题材）、大盘环境均支持文件缓存。盘中分析读缓存 + 追加当日实时数据，盘后预缓存选股池全量数据。命令：`trader.py cache warm`（预缓存）、`trader.py cache clear`（清缓存）。
+- **统一包结构**：所有核心模块已迁移到 `trader_shared/` 包下，支持 `pip install -e .` 开发安装和 `pytest` 直接运行。import 统一为 `from trader_shared.xxx import ...`。
+- 真正的输出格式以 `01-功能包-packages/trader/references/output-contract.md` 为准。
+- 需要看实现时，先看 `01-功能包-packages/trader/scripts/run_analysis.py`。
 
 ---
 
 ## 业务全景
 
-A 股交易决策辅助系统。免费行情 API（腾讯 + 新浪），缠论 / 威科夫 / 筹码 / ATR / 利弗莫尔分析，输出标准化 Markdown 面板。
+A 股交易决策辅助系统。免费行情 API（腾讯 + 新浪），缠论 / 威科夫 / 筹码 / ATR 分析，输出标准化 Markdown 面板。
 
 当前核心契约是双层状态模型：
 - `base_status` 负责结构位置，描述现在站在什么位置
@@ -38,9 +45,9 @@ A 股交易决策辅助系统。免费行情 API（腾讯 + 新浪），缠论 /
 
 ## 趋势过滤与退出策略
 
-### 250日线趋势过滤（一票否决）
+### 250日线趋势过滤（提醒不屏蔽）
 
-股价在 250 日均线（年线）下方时，`_ma250_check()` 直接返回"暂不碰"，跳过所有后续分析（融合层、Wyckoff、缠论等）。这是硬门控，优先级最高。
+股价在 250 日均线（年线）下方时，在报告中标注风险提醒（如「⚠️ 年线下方，注意趋势风险」），但不再一票否决跳过分析。由用户自行判断是否操作。
 
 - 配置：`TREND_FILTER_ENABLED`、`TREND_MA_LONG=250`、`LOOKBACK_DAYS=300`
 - 位置：`decision_core.py` → `status_layers()` 入口
@@ -82,14 +89,9 @@ trailing_stop = highest_close × (1 - ATR% × 3.0)
 
 | Skill | 一句话 | 版本 | 入口脚本 |
 |-------|--------|------|---------|
-| `trader` | 单票手机端分析报告 | `0.3.0-action-report` | `scripts/final_report.py` |
-| `t0-trader` | 盘中 T0 精确执行卡 + 盯盘告警 | `0.5.0-watch-assistant` | `scripts/final_t0.py` |
-| `trader-pool` | 选股池全生命周期管理 | `0.1.0-pool` | `scripts/final_pool.py` |
-| `trader-portfolio` | 2-3 只股票轮动仓位计划 | `0.1.2-contract` | `scripts/final_portfolio.py` |
-| `review-trader` | 盘后五层理论复盘 + 多股对比 | `0.1.0-review-v1` | `scripts/final_review.py` |
-| `trader-tracking` | 信号准确率追踪面板 | `0.1.0-track-v1` | `scripts/final_tracker.py` |
-
-> ⚠️ `trader-compare` 已废弃，能力迁入 `trader-pool compare`
+| `trader` | 单票分析 + 选股池全生命周期管理 | `0.4.0-pool-merge` | `scripts/final_report.py` / `scripts/final_pool.py` |
+| `t0` | 盘中 T0 精确执行卡 + 盯盘告警 | `0.6.0-slim` | `scripts/final_t0.py` |
+| `review` | 盘后复盘 + 仓位轮动 + 信号追踪 | `0.2.0-full-review` | `scripts/final_review.py` / `scripts/final_portfolio.py` / `scripts/final_tracker.py` |
 
 ---
 
@@ -97,13 +99,13 @@ trailing_stop = highest_close × (1 - ATR% × 3.0)
 
 ```
 新票验票 → trader
-确认跟踪 → trader-pool add
-池内排序 → trader-pool rank
-明日作战表 → trader-pool plan
-盘中执行 → t0-trader (monitor)
-盘后复盘 → review-trader / trader-pool review
-仓位轮动 → trader-portfolio
-信号回溯 → review-trader (读 signals.jsonl)
+确认跟踪 → trader script add
+池内排序 → trader script rank
+明日作战表 → trader script plan
+盘中执行 → t0 script (monitor)
+盘后复盘 → review script
+仓位轮动 → review script --targets
+信号回溯 → review script (读 signals.jsonl)
 ```
 
 ### Skill 命令映射
@@ -112,13 +114,13 @@ trailing_stop = highest_close × (1 - ATR% × 3.0)
 |------|------|
 |分析一只票 | `trader script --target <NAME>` |
 | 价格监控 | `trader script --target <NAME> --output alert-text` |
-| T0 盯盘单次检查 | `t0-trader script --target <NAME> --monitor --once` |
-| 入池 | `trader-pool script add --target <NAME>` |
-| 池内排序 | `trader-pool script rank` |
-| 仓位轮动 | `trader-portfolio script --targets A B` |
-| 盘后复盘 | `review-trader script --target <NAME>` |
-| 移除出池 | `trader-pool script remove --target <NAME>` |
-| 归档已退出 | `trader-pool script archive-exited` |
+| T0 盯盘单次检查 | `t0 script --target <NAME> --monitor --once` |
+| 入池 | `trader script add --target <NAME>` |
+| 池内排序 | `trader script rank` |
+| 仓位轮动 | `review script --targets A B` |
+| 盘后复盘 | `review script --target <NAME>` |
+| 移除出池 | `trader script remove --target <NAME>` |
+| 归档已退出 | `trader script archive-exited` |
 
 详细自然触发词映射见 `AGENTS_DEEP.md` Section 十四。
 
@@ -166,7 +168,7 @@ MA5：59.63 ｜ MA10：60.74 ｜ MA20：60.60 ｜ MA30：59.72
 当前处于防守位附近，适合轻仓试探。
 
 ### 2. 盘中盯盘预警
-* 动作命令：`t0-trader script --target <NAME> --monitor`
+* 动作命令：`t0 script --target <NAME> --monitor`
 * 用途：盘中实时大单异动，谁在买谁在卖，价格到没到触发位。
 * 满分标准输出示例（非交易时间输出为空）：
 
@@ -177,7 +179,7 @@ MA5：59.63 ｜ MA10：60.74 ｜ MA20：60.60 ｜ MA30：59.72
 14:35 主动买入 4178万 / 6939手（大单异动）
 
 ### 3. 盘后单票复盘
-* 动作命令：`review-trader script --target <NAME>`
+* 动作命令：`review script --target <NAME>`
 * 用途：今天走势怎么看，大单资金什么态度，五层理论打分多少，明天关键位在哪。
 * 满分标准输出示例：
 
@@ -199,11 +201,11 @@ MA5：59.63 ｜ MA10：60.74 ｜ MA20：60.60 ｜ MA30：59.72
 结构 65 ｜ 量价 45 ｜ 筹码 50 ｜ 动能 50
 
 ### 4. 确认跟踪入池
-* 动作命令：`trader-pool script add --target <NAME>`
-* 用途：无特定微信面板输出，执行完毕后将票加入 `~/.trader/pool.json` 即可。
+* 动作命令：`trader script add --target <NAME>`
+* 用途：无特定微信面板输出，执行完毕后将票加入 `~/.trader/pool.json` 即可。分析报告末尾会提示「回复 1 一步入池」。
 
 ### 5. 池内排序
-* 动作命令：`trader-pool script rank`
+* 动作命令：`trader script rank`
 * 用途：看选股池里哪只最好、买多少、止损在哪。
 * 满分标准输出示例：
 
@@ -222,7 +224,7 @@ MA5：59.63 ｜ MA10：60.74 ｜ MA20：60.60 ｜ MA30：59.72
  5. 紫金矿业
 
 ### 6. 明日作战表
-* 动作命令：`trader-pool script plan`
+* 动作命令：`trader script plan`
 * 用途：明天盯哪几只、什么价格触发、仓位纪律。
 * 满分标准输出示例：
 
@@ -242,7 +244,7 @@ MA5：59.63 ｜ MA10：60.74 ｜ MA20：60.60 ｜ MA30：59.72
 仓位纪律：执行首次1成 确认加至3成 单票风险1R 总仓位≤5成。明天只重点盯南网科技和中国铝业，不触发不买。
 
 ### 7. 仓位轮动与管理
-* 动作命令：`trader-portfolio script --targets <NAME1> <NAME2>`
+* 动作命令：`review script --targets <NAME1> <NAME2>`
 * 用途：两只票怎么分配资金、当前浮盈浮亏、轮动触发条件。
 * 满分标准输出示例：
 
@@ -270,13 +272,13 @@ MA5：59.63 ｜ MA10：60.74 ｜ MA20：60.60 ｜ MA30：59.72
 
 | 文件 | 用途 | 写入者 | 读取者 |
 |------|------|--------|--------|
-| `~/.trader/signals.jsonl` | Signal Contract v1 事件流 | t0 / trader | review / pool / portfolio |
-| `~/.trader/pool.json` | 选股池状态 | trader-pool | trader-pool |
-| `~/.trader/pending.json` | 待确认池 | trader-pool | trader-pool |
-| `~/.trader/last_plan.json` | 上次作战计划 | trader-pool | trader-pool |
+| `~/.trader/signals.jsonl` | Signal Contract v1 事件流 | t0 / trader | review / trader |
+| `~/.trader/pool.json` | 选股池状态 | trader | trader |
+| `~/.trader/pending.json` | 待确认池 | trader | trader |
+| `~/.trader/last_plan.json` | 上次作战计划 | trader | trader |
 | `~/.trader/calibrated_params.json` | 自校准参数（zone_width等）| self_calibration | structure_core |
-| `~/.t0-trader/state.json` | T0 盯盘缓存 | t0-trader | t0-trader |
-| `~/.review-trader/state.json` | 复盘缓存 | review-trader | review-trader |
+| `~/.t0-trader/state.json` | T0 盯盘缓存 | t0 | t0 |
+| `~/.review-trader/state.json` | 复盘缓存 | review | review |
 
 ---
 
