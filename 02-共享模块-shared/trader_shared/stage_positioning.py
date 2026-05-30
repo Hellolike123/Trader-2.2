@@ -415,6 +415,7 @@ def assess_stage(
     position_ratio: float = 0.5,
     chan_result: dict[str, Any] | None = None,
     momentum_result: dict[str, Any] | None = None,
+    support: float = 0.0,
 ) -> dict[str, Any]:
     """四阶段定位主函数（威科夫量价驱动 + 四层防护）
 
@@ -433,6 +434,7 @@ def assess_stage(
     """
     ma5 = ma_values.get("ma5")
     ma10 = ma_values.get("ma10")
+    ma20 = ma_values.get("ma20")
 
     # 第一步：综合阶段判定（量价 + MA + ATR）
     raw_stage, raw_confidence, raw_reason = _detect_major_stage(
@@ -486,6 +488,15 @@ def assess_stage(
 
     stage_label = f"{final_stage}期 + {momentum}"
 
+    # 三层止损体系
+    stop_losses = compute_stop_losses(
+        stage=final_stage,
+        current=current,
+        support=support,
+        ma20=ma20,
+        bars=bars,
+    )
+
     return {
         "major_stage": final_stage,
         "major_reason": raw_reason,
@@ -496,4 +507,82 @@ def assess_stage(
         "stage_label": stage_label,
         "confidence": gated_confidence,
         "protection_notes": protection_notes,
+        "stop_losses": stop_losses,
+    }
+
+
+# ── 三层止损体系 ──────────────────────────────────────────────
+
+def compute_stop_losses(
+    stage: str,
+    current: float,
+    support: float,
+    ma20: float | None,
+    bars: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """三层止损体系。
+
+    第一层：技术止损（支撑位下方 2.5%）
+    第二层：阶段止损（随阶段变化）
+    第三层：时间止损（买入后 N 天不涨走人）
+
+    Returns:
+        {
+            "technical": {"price": float, "reason": str},
+            "stage_based": {"price": float, "reason": str},
+            "time_limit": {"days": int, "reason": str},
+        }
+    """
+    # 第一层：技术止损
+    if support > 0:
+        tech_stop = round(support * 0.975, 2)  # 支撑位下方 2.5%
+        tech_reason = f"关键支撑 {support:.2f} 下方2.5%"
+    else:
+        tech_stop = round(current * 0.95, 2)  # 兜底：当前价下方 5%
+        tech_reason = "无明确支撑，当前价下方5%"
+
+    # 第二层：阶段止损
+    if stage == "蓄势":
+        if support > 0:
+            stage_stop = round(support * 0.98, 2)  # 蓄势区间下沿
+            stage_reason = f"蓄势区间下沿 {support:.2f}"
+        else:
+            stage_stop = round(current * 0.95, 2)
+            stage_reason = "蓄势期保护本金"
+    elif stage == "主升":
+        if ma20 is not None and ma20 > 0:
+            stage_stop = round(ma20 * 0.98, 2)  # MA20 附近
+            stage_reason = f"主升期保护利润，MA20 {ma20:.2f}"
+        else:
+            stage_stop = round(current * 0.92, 2)
+            stage_reason = "主升期保护利润"
+    elif stage == "派发":
+        if ma20 is not None and ma20 > 0:
+            stage_stop = round(ma20 * 1.02, 2)  # MA20 上方锁定收益
+            stage_reason = f"派发期锁定收益，MA20上方 {ma20:.2f}"
+        else:
+            stage_stop = round(current * 0.95, 2)
+            stage_reason = "派发期锁定收益"
+    else:  # 衰退
+        stage_stop = 0.0
+        stage_reason = "衰退期不持有"
+
+    # 第三层：时间止损
+    if stage == "蓄势":
+        time_days = 30
+        time_reason = "蓄势期30天内不突破走人"
+    elif stage == "主升":
+        time_days = 15
+        time_reason = "主升期15天内不创新高减仓"
+    elif stage == "派发":
+        time_days = 0
+        time_reason = "派发期不建议买入"
+    else:
+        time_days = 0
+        time_reason = "衰退期不持有"
+
+    return {
+        "technical": {"price": tech_stop, "reason": tech_reason},
+        "stage_based": {"price": stage_stop, "reason": stage_reason},
+        "time_limit": {"days": time_days, "reason": time_reason},
     }
