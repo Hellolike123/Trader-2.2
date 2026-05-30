@@ -407,6 +407,77 @@ _DECISION_MATRIX: dict[str, dict[str, tuple[str, int]]] = {
 }
 
 
+# ── 大盘环境对仓位的影响 ──────────────────────────────────────
+
+_ENV_LIMITS: dict[str, dict[str, int]] = {
+    #                单票上限  总仓位上限  新建仓
+    "牛市": {"single": 40, "total": 80, "init": 10},
+    "震荡市": {"single": 30, "total": 60, "init": 10},
+    "熊市": {"single": 20, "total": 30, "init": 10},
+}
+
+
+def compute_position_with_env(
+    stage: str,
+    momentum: str,
+    market_env: str = "震荡市",
+    pnl_pct: float = 0.0,
+    total_position_pct: float = 0.0,
+) -> dict[str, Any]:
+    """根据阶段+大盘环境计算建议仓位。
+
+    Returns:
+        {
+            "stage_position_pct": int,   # 阶段仓位
+            "env_limit_pct": int,        # 大盘环境单票上限
+            "total_limit_pct": int,      # 大盘环境总仓位上限
+            "suggested_pct": int,        # 建议仓位（取较小值）
+            "market_env": str,
+            "hard_rule_blocked": bool,   # 硬规则阻止
+            "hard_rule_reason": str,
+        }
+    """
+    # 阶段仓位
+    stage_pct = _DECISION_MATRIX.get(stage, {}).get(momentum, ("观察", 0))[1]
+
+    # 大盘环境限制
+    env = _ENV_LIMITS.get(market_env, _ENV_LIMITS["震荡市"])
+    single_limit = env["single"]
+    total_limit = env["total"]
+
+    # 硬规则检查
+    hard_blocked = False
+    hard_reason = ""
+
+    if pnl_pct < 0:
+        hard_blocked = True
+        hard_reason = "持仓亏损，禁止加仓"
+
+    if stage == "衰退":
+        hard_blocked = True
+        hard_reason = "衰退期，禁止建仓"
+
+    if total_position_pct >= total_limit:
+        hard_blocked = True
+        hard_reason = f"总仓位 {total_position_pct}% 已达上限 {total_limit}%"
+
+    # 建议仓位
+    if hard_blocked:
+        suggested = 0
+    else:
+        suggested = min(stage_pct, single_limit)
+
+    return {
+        "stage_position_pct": stage_pct,
+        "env_limit_pct": single_limit,
+        "total_limit_pct": total_limit,
+        "suggested_pct": suggested,
+        "market_env": market_env,
+        "hard_rule_blocked": hard_blocked,
+        "hard_rule_reason": hard_reason,
+    }
+
+
 def assess_stage(
     current: float,
     ma_values: dict[str, float | None],
