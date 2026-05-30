@@ -487,6 +487,7 @@ def assess_stage(
     chan_result: dict[str, Any] | None = None,
     momentum_result: dict[str, Any] | None = None,
     support: float = 0.0,
+    pnl_pct: float = 0.0,
 ) -> dict[str, Any]:
     """四阶段定位主函数（威科夫量价驱动 + 四层防护）
 
@@ -558,6 +559,15 @@ def assess_stage(
     )
 
     stage_label = f"{final_stage}期 + {momentum}"
+
+    # 硬规则同步: 亏损/衰退期 → action 强制改为"不碰"，position 归零
+    if pnl_pct < 0 and action not in ("不碰", "清仓"):
+        action = "不碰"
+        max_position = 0
+        stage_label = f"{final_stage}期 + {momentum}（亏损不加仓）"
+    elif final_stage == "衰退" and action not in ("不碰", "清仓"):
+        action = "不碰"
+        max_position = 0
 
     # 三层止损体系
     stop_losses = compute_stop_losses(

@@ -698,21 +698,20 @@ def render_markdown(r: dict[str, Any]) -> str:
     theory_status_text = str(r.get("theory_status") or status_text)
 
     if has_env:
-        trend_str = "均线多头排列" if trend_5d == "up" else "均线空头排列"
         price_dir = "涨" if change_pct >= 0 else "跌"
         change_abs = abs(change_pct)
         lines.extend([
             "",
             "🌍 大盘",
             "",
-            f"中证1000｜大阶段：{major_stage}期｜今日{price_dir}{change_abs:.1f}%",
+            f"中证1000｜{env_level}｜今日{price_dir}{change_abs:.1f}%｜{skill_note}",
         ])
     else:
         lines.extend([
             "",
             "🌍 大盘",
             "",
-            f"中证1000｜大阶段：{major_stage}期｜今日--",
+            "中证1000｜数据不足",
         ])
 
     structure_note = str(r.get("structure_note") or "")

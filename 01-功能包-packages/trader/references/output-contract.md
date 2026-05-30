@@ -22,7 +22,8 @@ T0 参考
 Required rules:
 - Top block includes `MA5 / MA10 / MA20 / MA30`; use `--` if unavailable.
 - `ATR` line follows MA line.
-- 🌍 大盘 includes `中证1000｜大阶段：{stage}期｜今日{change}`.
+- 🌍 大盘 includes `中证1000｜{regime}｜今日{change}%｜{skill_note}`.
+  - regime is market env level (正常/偏弱/很差), NOT stock stage (蓄势/主升/派发/衰退)
 - 🧭 阶段判断 includes `大阶段：{stage}期` and `短期动能：{momentum}`.
 - 📍 决策 includes `{stage_label} → {action}` and `仓位参考：{stage}期上限 {pct}%`.
 - `T0 参考` includes `低吸` `高抛` `止损`.
