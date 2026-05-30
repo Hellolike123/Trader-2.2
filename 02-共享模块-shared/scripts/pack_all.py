@@ -162,6 +162,28 @@ def copy_shared(bundle: Path, skill_slug: str) -> None:
             ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "*.pyc", ".DS_Store"),
         )
 
+    # Generate re-export stubs for bare imports
+    # Scripts do `from light_data import ...` but code is in `trader_shared/light_data.py`
+    # Stubs bridge the gap so both repo and packaged environments work
+    _STUB_MODULES = [
+        "light_data", "config", "signal_contract", "signal_store", "signal_utils",
+        "models", "candidate_core", "chan_core", "wyckoff_core", "momentum_core",
+        "decision_core", "structure_core", "fusion_core", "fusion_regime",
+        "hmm_regime", "bayesian_fusion", "volume_profile", "order_book",
+        "t0_candidate_core", "time_window_detector", "stage_positioning",
+        "chip_distribution", "big_order", "extend_data", "data_provider",
+        "cache_utils", "modifier_rule_engine", "rule_engine", "strategy_protocol",
+        "data_manager", "self_check_agg",
+    ]
+    for mod_name in _STUB_MODULES:
+        stub_path = scripts_dir / f"{mod_name}.py"
+        if not stub_path.exists():
+            stub_path.write_text(
+                f'"""Re-export stub — {mod_name} has moved to trader_shared.{mod_name}."""\n'
+                f'from trader_shared.{mod_name} import *  # noqa: F401,F403\n',
+                encoding="utf-8",
+            )
+
 
 def add_to_zip(staged: Path, archive: zipfile.ZipFile, arc_prefix: str = "") -> None:
     for p in sorted(staged.rglob("*")):
