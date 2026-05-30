@@ -1,0 +1,1349 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import sys
+from typing import Any
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+try:
+    import trader_shared
+except ImportError:
+    _d = Path(__file__).resolve().parent
+    for _ in range(8):
+        if (_d / "trader_shared").is_dir():
+            if str(_d) not in sys.path:
+                sys.path.insert(0, str(_d))
+            import trader_shared
+            break
+        _d = _d.parent
+    else:
+        raise
+
+from light_data import to_float, pct_change
+from trader_shared.stage_positioning import assess_stage
+
+try:
+    from trader_shared.chip_distribution import calc_chip_distribution as _calc_chip
+except ImportError:
+    def _calc_chip(daily, lookback=60):
+        return {"peaks": [], "total_volume": 0, "current_pct": None, "mid_price": None}
+from config import (
+    LOOKBACK_DAYS,
+    STRUCTURE_WINDOW,
+)
+from light_data import to_float, pct_change
+try:
+    from models import DATA_STATUS_MAP
+except ImportError:
+    DATA_STATUS_MAP: dict[str, str] = {
+        "complete": "full",
+        "partial": "partial",
+        "degraded": "degraded",
+        "failed": "degraded",
+    }
+
+_run_analysis_shared_failed = False
+
+try:
+    from trader_shared import conflicting_signals, get_market_level, get_market_note, write_stock, log, stats_by_type
+    from trader_shared import get_env_for_skill
+    track_log = log
+except ImportError:
+    import warnings
+    if not _run_analysis_shared_failed:
+        _run_analysis_shared_failed = True
+        warnings.warn(
+            "[trader] shared module not available — market status, signal tracking, and pool operations are disabled. "
+            "The report will still be generated but may lack market context and pool integration.",
+            stacklevel=2,
+        )
+
+    def _empty_str(*a, **k): return ""
+    def _empty_list(*a, **k): return []
+    def _empty_dict(*a, **k): return {}
+    def _empty_fn(*a, **k): return None
+    conflicting_signals = _empty_list
+    get_market_level = _empty_str
+    get_market_note = _empty_str
+    get_env_for_skill = _empty_dict
+    write_stock = _empty_fn
+    track_log = _empty_fn
+    stats_by_type = _empty_dict
+
+
+
+from signal_contract import assert_valid_signal
+from datetime import date
+
+def _degraded_quote_report(target: str) -> dict[str, Any]:
+    """计算依赖缺失时的降级报告：仅返回行情数据。"""
+    try:
+        from trader_shared.data_provider import get_provider
+        provider = get_provider()
+        sec = provider.resolve_security(target)
+        quote = provider.fetch_quote(sec)
+        daily = provider.fetch_qfq_daily(sec, days=10)
+    except Exception as exc:
+        return {"error": str(exc), "name": target, "symbol": target}
+
+    current = quote.get("current_price")
+    chg = quote.get("current_change_pct")
+    return {
+        "name": quote.get("name", target),
+        "symbol": quote.get("symbol", target),
+        "current_price": current,
+        "current_change_pct": chg,
+        "high": quote.get("high"),
+        "low": quote.get("low"),
+        "pre_close": quote.get("pre_close"),
+        "volume": quote.get("volume"),
+        "turnover_rate": quote.get("turnover_rate"),
+        "data_source": quote.get("data_source"),
+        "_degraded": True,
+        "daily_bars": daily,
+    }
+
+
+def today_text() -> str:
+    return date.today().isoformat()
+
+
+CONTRACT_VERSION = "trader_single_action_v3"
+
+
+_SIGNAL_TYPE_LABELS = {
+    "observe": "观察",
+    "wait_for_confirmation": "等待确认",
+    "track": "跟踪",
+    "low_buy_watch": "低吸观察",
+    "low_buy_triggered": "低吸触发",
+    "high_sell_watch": "高抛观察",
+    "high_sell_triggered": "高抛触发",
+    "reduce": "减仓",
+    "defensive": "防守",
+    "risk_stop": "止损",
+    "trigger_expired": "信号过期",
+    "blocked": "受压",
+    "review_result": "复盘",
+}
+
+
+def _signal_type_label(sig_type: str) -> str:
+    return _SIGNAL_TYPE_LABELS.get(sig_type, sig_type)
+
+
+def _signal_direction_text(direction: int) -> str:
+    if direction > 0:
+        return "看多"
+    if direction < 0:
+        return "看空"
+    return "中性"
+
+
+def _fusion_breakdown(fusion: dict) -> list[str]:
+    """生成融合层决策分解文本。"""
+    rows = []
+    action = fusion.get("action", "")
+    score = fusion.get("weighted_score", 0)
+    confidence = fusion.get("confidence", 0)
+    regime = fusion.get("regime", "")
+    hmm = fusion.get("hmm_regime", "")
+    signals = fusion.get("signals_detail", {})
+    weights = fusion.get("weights_used", {})
+    disagreement = fusion.get("disagreement", 0)
+
+    rows.append("")
+    rows.append(f"  融合层：{action}（评分 {score:+.2f}，置信度 {confidence:.0%}）")
+
+    if regime:
+        hmm_cn = {"bull": "多头", "bear": "空头", "range": "震荡"}.get(hmm, hmm)
+        rows.append(f"  大盘环境：{regime}（HMM: {hmm_cn}）")
+
+    for key, label in [("chan", "缠论"), ("momentum", "动量"), ("wyckoff", "威科夫")]:
+        sig = signals.get(key, {})
+        if not sig:
+            continue
+        d = sig.get("direction", 0)
+        c = sig.get("confidence", 0)
+        w = weights.get(key, 0)
+        rows.append(f"    {label}：{_signal_direction_text(d)}（置信 {c:.0%}，权重 {w:.0%}）")
+
+    if disagreement > 1:
+        rows.append(f"  注意：多信号存在分歧（分歧度 {disagreement:.1f}），优先采纳缠论/威科夫方向")
+
+    return rows
+
+
+_FUSION_ACTION_MAP: dict[str, tuple[str, str, str]] = {
+    "半仓试 (多方主导)": ("track", "bullish", "track"),
+    "半仓试 (多方主导但有分歧)": ("track", "bullish", "track"),
+    "增持": ("track", "bullish", "track"),
+    "持股观望": ("wait_for_confirmation", "bullish_lean", "observe"),
+    "减仓": ("defensive", "bearish", "wait"),
+    "空仓/止损": ("defensive", "bearish", "wait"),
+    # T-11 fix: 补全 3 个缺失的融合层 Action 映射，避免决策被静默丢弃
+    "空仓 (大盘很差, 一票否决)": ("risk_stop", "bearish", "stop"),
+    "观望 (信号冲突)": ("observe", "neutral", "observe"),
+    "等转强 (多方主导但有分歧)": ("wait_for_confirmation", "bullish_lean", "observe"),
+}
+
+
+def _map_fusion_to_signal(fusion_action: str) -> tuple[str, str, str] | None:
+    if not fusion_action:
+        return None
+    return _FUSION_ACTION_MAP.get(fusion_action.strip())
+
+
+def price(value: float | None) -> str:
+    return "无" if value is None else f"{value:.2f}元"
+
+
+def pct(value: float | None) -> str:
+    return "数据不足" if value is None else f"{value:+.2f}%"
+
+
+def build_report(target: str) -> dict[str, Any]:
+    try:
+        import candidate_core as core
+        from candidate_core import build_structure_context, atr_volatility_level
+        from trader_shared.data_provider import get_provider
+        from trader_shared.strategy_protocol import run_all
+    except (ModuleNotFoundError, ImportError) as _ex:
+        # 缺少 numpy/pandas 等计算依赖时降级为行情报告
+        import warnings
+        warnings.warn(f"[trader] 计算依赖缺失，降级为行情模式: {_ex}")
+        return _degraded_quote_report(target)
+    
+    provider = get_provider()
+    snapshot = provider.load_market_snapshot(target, days=LOOKBACK_DAYS, include_5m=True)
+    if not snapshot.quote or not snapshot.daily_bars:
+        detail = "; ".join(f"{key}: {value}" for key, value in snapshot.source_errors.items()) or "missing required market data"
+        raise RuntimeError(detail)
+
+    sec = snapshot.security
+    quote = snapshot.quote
+    bars = snapshot.daily_bars
+    bars_5m = snapshot.bars_5m
+    last_bar = bars[-1] if bars else {}
+    atr14_val = float(last_bar.get("atr14", 0) or 0)
+    atr_ratio_val = float(last_bar.get("atr_ratio", 0) or 0)
+    atr_level, atr_cap = atr_volatility_level(atr_ratio_val) if atr14_val > 0 else ("数据不足", 10)
+    _cp = quote.get("current_price")
+    current = _cp if _cp is not None else bars[-1]["close"]
+    if current is None:
+        raise RuntimeError("current price unavailable")
+    current = float(current)
+
+    recent20 = bars[-STRUCTURE_WINDOW:] if len(bars) >= STRUCTURE_WINDOW else bars
+    from chan_core import chanlun_strategy
+    from wyckoff_core import wyckoff_strategy
+    from momentum_core import momentum_strategy
+    from concurrent.futures import ThreadPoolExecutor
+
+    # 并行运行三个理论策略
+    change_pct_val = quote.get("current_change_pct")
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        f_chan = executor.submit(chanlun_strategy, current, bars, change_pct_val, quote)
+        f_wyk = executor.submit(wyckoff_strategy, current, bars, change_pct_val, quote)
+        f_mom = executor.submit(momentum_strategy, current, bars, change_pct_val, quote)
+        chan_result = f_chan.result() or {}
+        wyck_result = f_wyk.result() or {}
+        momentum_result = f_mom.result() or {}
+
+    # === 融合层 (新) ===
+    # C-9 fix: 融合层必须在 build_structure_context 之前计算，
+    # 因为 build_structure_context 需要 fusion_result 来微调参数
+    try:
+        from fusion_core import merge_decisions
+        env = get_env_for_skill("trader")
+        report_fusion = merge_decisions(
+            chan_result=chan_result,
+            momentum_result=momentum_result,
+            wyckoff_result=wyck_result,
+            regime=env.get("level", "正常"),
+            current_price=current,
+            bars=bars,
+            hmm_regime=env.get("hmm_regime_en", "range"),
+            # extend_fundamental=snapshot.extend_fundamental,
+            # extend_sentiment=snapshot.extend_sentiment,
+        )
+    except Exception:
+        report_fusion = {"action": "融合层异常", "confidence": 0, "weighted_score": 0,
+                         "regime": "", "hmm_regime": "range", "disagreement": 0, "signals_detail": {}, "weights_used": {}}
+
+    # C-7 fix: build_structure_context 现在在融合层之后调用，
+    # 可以正确接收 fusion_result 和 chan_result
+    levels = build_structure_context(current, bars, quote.get("current_change_pct"), quote,
+                                     fusion_result=report_fusion, chan_result=chan_result)
+
+    # 将理论策略结果合并到 levels（不覆盖 structure_core 的输出）
+    for key, val in {"chanlun": chan_result, "wyckoff": wyck_result, "momentum": momentum_result}.items():
+        if key not in levels:
+            levels[key] = val
+
+    levels["chan_trend_label"] = chan_result.get("trend_label", "数据不足")
+    levels["chan_buy_point_text"] = chan_result.get("buy_point_text", "无")
+    levels["chan_buy_points"] = chan_result.get("buy_points", [])
+    levels["chan_strokes_count"] = chan_result.get("strokes_count", 0)
+    levels["chan_zone_last_price"] = chan_result.get("last_valid_zone_last_price")
+    levels["chan_zone_first_price"] = chan_result.get("last_valid_zone_first_price")
+    levels["chan_divergence"] = chan_result.get("divergence", {})
+    levels["wyckoff_spring_signal"] = wyck_result.get("spring_signal", False)
+    levels["wyckoff_summary"] = wyck_result.get("wyckoff_summary", "无明显信号")
+    levels["wyckoff_upthrust_signal"] = wyck_result.get("upthrust_signal", False)
+    levels["base_status"] = levels.get("base_status") or levels.get("status")
+    levels["theory_status"] = levels.get("theory_status") or levels.get("status")
+
+    support = levels["main_support"]
+    resistance = levels["resistance"]
+    confirm = levels["confirm_price"]
+    stop = levels["hard_stop"]
+    take = levels["take"]
+    weekly_close = float(bars[-1]["close"])
+    monthly_close = float(bars[-STRUCTURE_WINDOW]["close"] if len(bars) >= STRUCTURE_WINDOW else bars[0]["close"])
+    stage = determine_stage(current, weekly_close, monthly_close)
+    scene = levels["status"]
+    base_status = str(levels.get("base_status") or scene)
+    theory_status = str(levels.get("theory_status") or scene)
+    replay = structure_replay(recent20)
+    volume_text = volume_observation(recent20, bars_5m)
+    upward_momentum = upward_momentum_observation(stage, current, support, confirm)
+    highs = numeric_values(recent20, "high")
+    lows = numeric_values(recent20, "low")
+    high = max(highs) if highs else current
+    low = min(lows) if lows else current
+    analysis_time = f"{quote.get('trade_date')} {quote.get('trade_time') or ''}".strip()
+
+    state_label = state_text(stage, theory_status)
+    structure_note = structure_view({
+        "current": current, "confirm": confirm, "stage": stage,
+        "ma": {"ma5": ma_text(levels["ma_values"].get("ma5")),
+               "ma10": ma_text(levels["ma_values"].get("ma10")),
+               "ma20": ma_text(levels["ma_values"].get("ma20")),
+               "ma30": ma_text(levels["ma_values"].get("ma30"))},
+        "scene": scene,
+    })
+    volume_note = volume_view(volume_text)
+    market_env_data = get_env_for_skill("trader")
+    buy_scenes = {"低吸观察", "防守观察", "等转强"}
+    position_cap = min(10, atr_cap) if scene in buy_scenes else 10
+
+    chip = _calc_chip(bars, lookback=60)
+    chip_peaks = sorted(chip.get("peaks", []) or [], key=lambda x: x["price"])
+    chip_support: float | None = None
+    chip_resistance: float | None = None
+    if chip_peaks:
+        support_peaks = [p for p in chip_peaks if p["price"] < current]
+        if support_peaks:
+            strong_near = sorted(
+                [p for p in support_peaks if (current - p["price"]) / current <= 0.03],
+                key=lambda p: float(p.get("share_of_total") or 0),
+                reverse=True,
+            )
+            all_by_strong = sorted(support_peaks, key=lambda p: float(p.get("share_of_total") or 0), reverse=True)
+            # If strongest > 2%, use it regardless of distance
+            # Otherwise prefer strongest within 3%
+            if all_by_strong and float(all_by_strong[0].get("share_of_total") or 0) > 2:
+                chip_support = all_by_strong[0]["price"]
+            elif strong_near:
+                chip_support = strong_near[0]["price"]
+            else:
+                chip_support = support_peaks[-1]["price"]
+        resistance_peaks = [p for p in chip_peaks if p["price"] > current]
+        if resistance_peaks:
+            strong_near = sorted(
+                [p for p in resistance_peaks if (p["price"] - current) / current <= 0.03],
+                key=lambda p: float(p.get("share_of_total") or 0),
+                reverse=True,
+            )
+            all_by_strong = sorted(resistance_peaks, key=lambda p: float(p.get("share_of_total") or 0), reverse=True)
+            if all_by_strong and float(all_by_strong[0].get("share_of_total") or 0) > 2:
+                chip_resistance = all_by_strong[0]["price"]
+            elif strong_near:
+                chip_resistance = strong_near[0]["price"]
+            else:
+                chip_resistance = resistance_peaks[0]["price"]
+
+    # 四阶段定位
+    ma_raw_v = levels.get("ma_values") or {}
+    closes_250 = [to_float(b.get("close")) for b in bars[-250:] if to_float(b.get("close")) is not None]
+    ma250 = sum(closes_250) / len(closes_250) if len(closes_250) >= 250 else None
+
+    stage_result = assess_stage(
+        current=current,
+        ma_values={**ma_raw_v, "ma250": ma250},
+        change_pct=float(quote.get("current_change_pct") or 0),
+        bars=bars,
+        position_ratio=levels.get("position_ratio", 0.5),
+    )
+
+    report = {
+        "name": quote.get("name") or sec.name,
+        "symbol": quote.get("symbol") or sec.ts_code,
+        "analysis_time": analysis_time,
+        "current": current,
+        "change_pct": quote.get("current_change_pct"),
+        "weekly_close": weekly_close,
+        "monthly_close": monthly_close,
+        "support": support,
+        "resistance": resistance,
+        "confirm": confirm,
+        "stop": stop,
+        "trailing_stop": levels.get("trailing_stop"),
+        "take": take,
+        "stage": stage,
+        "scene": scene,
+        "low_zone": levels["low_zone"],
+        "low_zone_lower": levels["low_zone_lower"],
+        "low_zone_upper": levels["low_zone_upper"],
+        "support_source": levels.get("support_source"),
+        "resistance_source": levels.get("resistance_source"),
+        "atr_pct": levels.get("atr_pct"),
+        "zone_width_pct": levels.get("zone_width_pct"),
+        "stop_buffer_pct": levels.get("stop_buffer_pct"),
+        "pressure_space_pct": levels.get("pressure_space_pct"),
+        "replay": replay,
+        "volume_text": volume_text,
+        "upward_momentum": upward_momentum,
+        "range_low": low,
+        "range_high": high,
+        "data_status": snapshot.data_status,
+        "missing_sources": snapshot.missing_sources,
+        "source_errors": snapshot.source_errors,
+        "fetched_at": snapshot.fetched_at,
+        "ma": {
+            "ma5": ma_text(levels["ma_values"].get("ma5")),
+            "ma10": ma_text(levels["ma_values"].get("ma10")),
+            "ma20": ma_text(levels["ma_values"].get("ma20")),
+            "ma30": ma_text(levels["ma_values"].get("ma30")),
+        },
+        "atr14": atr14_val,
+        "atr_ratio": atr_ratio_val,
+        "atr_level": atr_level,
+        "atr_cap": atr_cap,
+        "base_status": base_status,
+        "theory_status": theory_status,
+        "state_label": state_label,
+        "structure_note": structure_note,
+        "volume_note": volume_note,
+        "market_env": market_env_data,
+        "position_cap": position_cap,
+        "ma_raw": {
+            "ma5": levels["ma_values"].get("ma5"),
+            "ma10": levels["ma_values"].get("ma10"),
+            "ma20": levels["ma_values"].get("ma20"),
+            "ma30": levels["ma_values"].get("ma30"),
+        },
+        "chip_support": chip_support,
+        "chip_resistance": chip_resistance,
+        "fusion": report_fusion,
+        "gap": levels.get("gap"),
+        "time_window": levels.get("time_window"),
+        "fib_retrace": levels.get("fib_retrace"),
+        "major_stage": stage_result["major_stage"],
+        "major_reason": stage_result["major_reason"],
+        "short_term_momentum": stage_result["momentum"],
+        "momentum_reason": stage_result["momentum_reason"],
+        "stage_action": stage_result["action"],
+        "max_position_pct": stage_result["max_position_pct"],
+        "stage_label": stage_result["stage_label"],
+        # "extend_fundamental": snapshot.extend_fundamental,
+        # "extend_sentiment": snapshot.extend_sentiment,
+    }
+
+    report = sync_report_with_data(report, levels)
+    return report
+
+
+def numeric_values(bars: list[dict[str, Any]], key: str) -> list[float]:
+    return [value for value in (to_float(item.get(key)) for item in bars) if value is not None]
+
+
+def ma_text(value: Any) -> str:
+    return "--" if value is None else f"{float(value):.2f}"
+
+
+def determine_stage(current: float, weekly: float, monthly: float) -> str:
+    if current > weekly > monthly:
+        return "走强"
+    if current >= weekly and weekly <= monthly:
+        return "修复"
+    if current >= monthly * 0.98:
+        return "震荡"
+    return "转弱"
+
+
+def structure_replay(bars: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for chunk in chunks(bars, 5):
+        if not chunk:
+            continue
+        start = float(chunk[0]["close"])
+        end = float(chunk[-1]["close"])
+        change = pct_change(start, end)
+        if change >= 4:
+            label = "拉升窗口"
+        elif change <= -4:
+            label = "下跌窗口"
+        elif change >= 1:
+            label = "反弹窗口"
+        elif change <= -1:
+            label = "回踩窗口"
+        else:
+            label = "震荡窗口"
+        parts.append(f"{short_date(chunk[0]['date'])}-{short_date(chunk[-1]['date'])} {label}（{change:+.2f}%）")
+    return "；".join(parts[:4])
+
+
+def chunks(items: list[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]:
+    return [items[index : index + size] for index in range(0, len(items), size)]
+
+
+def short_date(value: Any) -> str:
+    text = str(value or "")
+    return text[5:10] if len(text) >= 10 else text
+
+
+def sync_report_with_data(report: dict, levels: dict) -> dict:
+    """脚本自洽校验：修正数据与文字标签的矛盾"""
+    current  = float(report.get("current") or 0)
+    support  = float(report.get("support") or 0)
+    resistance = float(report.get("resistance") or 0)
+    confirm  = float(report.get("confirm") or 0)
+    stop     = float(report.get("stop") or 0)
+    take     = float(report.get("take") or 0)
+    scene    = str(report.get("scene") or "")
+    state_label  = str(report.get("state_label") or "")
+    ma5  = to_float(levels.get("ma_values", {}).get("ma5"))
+    ma10 = to_float(levels.get("ma_values", {}).get("ma10"))
+    # MA 趋势与文字标签
+    if ma5 is not None and ma10 is not None and current > 0:
+        if ma5 > ma10 and "空头" in state_label:
+            report["state_label"] = state_label.replace("空头", "多头")
+        elif ma5 < ma10 and "多头" in state_label:
+            report["state_label"] = state_label.replace("多头", "空头")
+    # support > resistance → 筹码与 ATR 模块打架
+    if support > 0 and resistance > 0 and support >= resistance:
+        report["resistance"] = support * 1.03
+        report["support"]    = resistance * 0.97
+    # stop < support（止损永远在支撑下方）
+    if stop > 0 and support > 0 and stop >= support:
+        report["stop"] = round(support * 0.97, 2)
+    # take < confirm（止盈永远高于确认位）
+    if take > 0 and confirm > 0 and take <= confirm:
+        report["take"] = max(current * 1.05, confirm * 1.03)
+    # 场景与数值的逻辑一致性
+    if scene in ("突破确认", "突破观察") and current < confirm * 0.98:
+        report["scene"]        = "观望"
+        report["state_label"]  = "未确认"
+    elif scene in ("低吸观察", "防守观察") and current < support and support > 0:
+        report["scene"]        = "破位下行"
+        report["state_label"]  = "破位下行"
+    elif scene == "冲高减仓" and current < support and support > 0:
+        report["scene"]        = "低吸观察"
+        report["state_label"]  = "低吸观察"
+    elif scene == "突破观察" and current >= confirm and confirm > 0:
+        report["scene"]        = "突破确认"
+        report["state_label"]  = "趋势走强"
+    elif scene in ("空间不足",) and current < support and support > 0:
+        report["scene"]        = "修复观察"
+        report["state_label"]  = "修复观察"
+    return report
+
+
+def volume_observation(daily: list[dict[str, Any]], bars_5m: list[dict[str, Any]]) -> str:
+    if bars_5m and len(bars_5m) >= 12:
+        recent = numeric_values(bars_5m[-6:], "volume")
+        prior = numeric_values(bars_5m[-18:-6], "volume")
+        prior_avg = sum(prior) / len(prior) if prior else 0
+        recent_avg = sum(recent) / len(recent) if recent else 0
+        if prior_avg > 0 and recent_avg / prior_avg >= 1.3:
+            return "分时量能放大，冲高和破位都要等确认。"
+        if prior_avg > 0 and recent_avg / prior_avg <= 0.75:
+            return "分时量能收缩，更适合等缩量回踩后的承接。"
+    if not daily:
+        return "量能材料不足，先按关键价位执行。"
+    max_day = max(daily, key=lambda item: to_float(item.get("volume")) or 0)
+    close = to_float(max_day.get("close"))
+    open_ = to_float(max_day.get("open"))
+    direction = "收涨" if close is not None and open_ is not None and close >= open_ else "收跌"
+    return f"近20根K线最大量能日在 {max_day.get('date')}，当天{direction}。"
+
+
+def upward_momentum_observation(stage: str, current: float, support: float, confirm: float) -> str:
+    width = max(confirm - support, current * 0.02)
+    if current >= confirm:
+        return f"价格已经触及启动确认区，结论：有启动迹象，但还要看放量站稳后的延续。"
+    elif stage == "转弱":
+        return f"趋势仍在弱区，结论：启动条件不足，先不做进攻判断。"
+    elif current >= confirm - width * 0.25:
+        return f"价格接近确认区但还未站稳，结论：属于预备启动，等待放量确认。"
+    return f"价格还没贴近确认区，结论：动能仍是弱修复，暂不按启动处理。"
+
+
+def render_markdown(r: dict[str, Any]) -> str:
+    ma = r.get("ma") or {}
+    display_code = str(r["symbol"]).replace(".SH", "").replace(".SZ", "")
+    name = str(r["name"])
+
+    atr14 = float(r.get("atr14", 0) or 0)
+    atr_ratio = float(r.get("atr_ratio", 0) or 0)
+    atr_level = str(r.get("atr_level") or "")
+    atr_cap = int(r.get("atr_cap") or 10)
+
+    confirm = float(r.get("confirm") or 0)
+    low_price = float(r.get("support") or 0)
+    stop = float(r.get("stop") or 0)
+    scene = str(r.get("scene") or "")
+    position_cap = int(r.get("position_cap") or 10)
+    low_zone = str(r.get("low_zone") or f"{low_price:.2f}-{low_price * 1.01:.2f}元")
+
+    fib_retrace = r.get("fib_retrace") or {}
+    golden_bid = fib_retrace.get("golden_bid") if isinstance(fib_retrace, dict) else None
+    golden_text = f" (黄金挂单位: {golden_bid:.2f})" if golden_bid else ""
+
+    atr_header = f"｜ATR {atr14:.2f}（{atr_ratio*100:.0f}%）{atr_level}" if atr14 > 0 else ""
+    gap = r.get("gap") or {}
+    gap_text = gap.get("text", "") if isinstance(gap, dict) else ""
+    gap_condition = gap.get("condition", "normal") if isinstance(gap, dict) else "normal"
+
+    # 提取解禁一票否决信息
+    fusion = r.get("fusion") or {}
+    unlock_veto_msg = fusion.get("unlock_veto_msg") if isinstance(fusion, dict) else None
+
+    major_stage = str(r.get("major_stage") or "")
+    major_reason = str(r.get("major_reason") or "")
+    momentum = str(r.get("short_term_momentum") or "")
+    momentum_reason = str(r.get("momentum_reason") or "")
+    stage_action = str(r.get("stage_action") or "")
+    max_position_pct = int(r.get("max_position_pct") or 0)
+    stage_label = str(r.get("stage_label") or "")
+
+    lines: list[str] = [
+        f"分析报告 — {name}（{display_code}）",
+        "",
+        f"现价：{price(r['current'])}（{pct(r['change_pct'])}）",
+        f"MA5：{ma.get('ma5', '--')}｜MA10：{ma.get('ma10', '--')}｜MA20：{ma.get('ma20', '--')}｜MA30：{ma.get('ma30', '--')}",
+        f"ATR {atr14:.2f}（{atr_ratio*100:.0f}%）{atr_level}" if atr14 > 0 else "",
+    ]
+    if major_stage == "衰退":
+        lines.append("")
+        lines.append("⚠️ 250日线下方，一票否决，建议不参与")
+        lines.append("（以下供参考，如有看好的票可忽略此提醒）")
+    if unlock_veto_msg:
+        lines.append(f"提示：⚠️ {unlock_veto_msg}，已被决策融合层一票否决")
+        lines.append("")
+    elif gap_text and gap_condition not in ("normal", "unknown"):
+        lines.append(f"提示：{gap_text}")
+        lines.append("")
+
+    # ── [2.3扩展] 题材与基本面共识版块渲染 ──
+    extend_fundamental = r.get("extend_fundamental") or {}
+    extend_sentiment = r.get("extend_sentiment") or {}
+    
+    theme_info = extend_sentiment.get("theme_harden", {})
+    theme_reason = theme_info.get("reason") if isinstance(theme_info, dict) else None
+    theme_text = f"主线题材：{theme_reason}" if theme_reason else None
+
+    sh_trend = extend_fundamental.get("shareholder", {})
+    sh_notice_date = sh_trend.get("latest_notice_date") if isinstance(sh_trend, dict) else None
+    sh_change_pct = sh_trend.get("change_pct", 0.0) if isinstance(sh_trend, dict) else 0.0
+    sh_status = sh_trend.get("status", "数据不足") if isinstance(sh_trend, dict) else "数据不足"
+    sh_text = None
+    if sh_notice_date and sh_status != "数据不足":
+        sh_text = f"筹码变动：{sh_status} (最新公告环比 {sh_change_pct:+.2f}%)"
+
+    consensus_eps = extend_fundamental.get("consensus_eps", {})
+    eps_rows = consensus_eps.get("rows", []) if isinstance(consensus_eps, dict) else []
+    eps_text = None
+    if eps_rows:
+        active_rows = []
+        for row in eps_rows:
+            yr = str(row.get("year", ""))
+            clean_yr = yr.replace(".0", "")
+            if clean_yr.isdigit() or "预测" in yr:
+                active_rows.append(f"{clean_yr}年:{row.get('avg_eps')}元")
+        if active_rows:
+            eps_text = f"机构共识：每股收益预测 {' | '.join(active_rows[:3])}"
+
+    has_fundamental_section = theme_text or sh_text or eps_text
+    if has_fundamental_section:
+        lines.extend([
+            "",
+            "🔥 题材与基本面共识",
+            "",
+        ])
+        if theme_text:
+            lines.append(f"  · {theme_text}")
+        if sh_text:
+            lines.append(f"  · {sh_text}")
+        if eps_text:
+            lines.append(f"  · {eps_text}")
+
+    market_env = r.get("market_env") or {}
+    env_level = market_env.get("level", "")
+    skill_note = market_env.get("skill_note", "")
+    trend_5d = market_env.get("trend_5d", "")
+    change_pct = market_env.get("change_pct", 0.0)
+    has_env = env_level and env_level not in ("未知", "")
+
+    status_text = str(r.get("state_label") or "")
+    base_status_text = str(r.get("base_status") or "")
+    theory_status_text = str(r.get("theory_status") or status_text)
+
+    if has_env:
+        trend_str = "均线多头排列" if trend_5d == "up" else "均线空头排列"
+        price_dir = "涨" if change_pct >= 0 else "跌"
+        change_abs = abs(change_pct)
+        lines.extend([
+            "",
+            "🌍 大盘",
+            "",
+            f"中证1000｜大阶段：{major_stage}期｜今日{price_dir}{change_abs:.1f}%",
+        ])
+    else:
+        lines.extend([
+            "",
+            "🌍 大盘",
+            "",
+            f"中证1000｜大阶段：{major_stage}期｜今日--",
+        ])
+
+    structure_note = str(r.get("structure_note") or "")
+    volume_note = str(r.get("volume_note") or "")
+    lines.extend([
+        "",
+        "🧭 阶段判断",
+        "",
+        f"大阶段：{major_stage}期",
+        f"  {major_reason}",
+        f"短期动能：{momentum}",
+        f"  {momentum_reason}",
+    ])
+
+    lines.extend([
+        "",
+        "📍 决策",
+        "",
+        f"{stage_label} → {stage_action}",
+        f"  空仓 → 在 {low_zone} 试探买 {position_cap}%, 止损 {stop:.2f}{golden_text}",
+        f"  有底仓 → 反弹 {confirm:.2f} 冲不动就减 10-20%, 跌破 {stop:.2f} 止损",
+        f"  加仓 → 放量站稳 {confirm:.2f} 且回踩不破，才评估",
+        f"  仓位参考：{major_stage}期上限 {max_position_pct}%",
+    ])
+    if isinstance(fusion, dict) and fusion.get("action"):
+        lines.extend(_fusion_breakdown(fusion))
+
+    # T0 参考
+    lines.extend([
+        "",
+        "T0 参考",
+        "",
+        f"  低吸：{low_zone} ｜ 高抛：{confirm:.2f} ｜ 止损：{stop:.2f}",
+    ])
+
+    resistance_val = float(r.get("resistance", 0))
+    chip_support = r.get("chip_support")
+    chip_resistance = r.get("chip_resistance")
+    ma_raw_v = r.get("ma_raw") or {}
+    groups: dict[int, list[tuple[float, str]]] = {}
+    trailing_stop_val = r.get("trailing_stop")
+    if trailing_stop_val is not None and trailing_stop_val != stop:
+        groups.setdefault(0, []).append((trailing_stop_val, "移动止损（ATR）"))
+    if stop > 0:
+        groups.setdefault(1, []).append((stop, "止损位（ATR）"))
+    if low_price > 0 and abs(low_price - stop) > 0.01:
+        groups.setdefault(1, []).append((low_price, "防守位（ATR）"))
+    cost_v = None
+    for v in sorted(filter(None, [ma_raw_v.get("ma10"), ma_raw_v.get("ma20"), ma_raw_v.get("ma30")])):
+        if low_price < v < r["current"]:
+            cost_v = v
+            break
+    if cost_v:
+        groups.setdefault(2, []).append((cost_v, "成本密集区"))
+    if chip_support is not None and chip_support > stop:
+        g = 1 if chip_support < low_price else 2
+        groups.setdefault(g, []).append((chip_support, "有量支撑"))
+    groups.setdefault(3, []).append((r["current"], "当前位置"))
+    if confirm > 0 and abs(confirm - r["current"]) > 0.01:
+        groups.setdefault(3, []).append((confirm, "确认位（ATR）"))
+    if resistance_val > 0 and resistance_val > confirm:
+        groups.setdefault(4, []).append((resistance_val, "减仓位（ATR）"))
+    if chip_resistance is not None and chip_resistance > r["current"]:
+        g = 3 if chip_resistance < confirm else 4
+        groups.setdefault(g, []).append((chip_resistance, "套牢压力区"))
+    key_lines = ["", "❗ 关键价位", ""]
+    last_group = 0
+    for g in sorted(groups):
+        items = sorted(groups[g], key=lambda x: x[0])
+        for p, label in items:
+            sep = "+ ←" if "套牢压力" in label else "  ←"
+            if last_group and g != last_group:
+                key_lines.append("  ┆")
+            key_lines.append(f"{p:.2f}{sep} {label}")
+            last_group = g
+    lines.extend(key_lines)
+
+    stage = str(r.get("stage") or "")
+    if stage == "转弱" or scene in ("空间不足",):
+        lines.extend([
+            "",
+            "⚠️ 风险",
+            "",
+            f"趋势已转弱不可恋战，反弹是减仓机会。若跌破 {low_price:.2f} 必须执行止损",
+        ])
+    elif scene in ("突破确认", "突破观察"):
+        lines.extend([
+            "",
+            "✨ 亮点",
+            "",
+            f"现价 {r['current']:.2f} 已站上确认位 {confirm:.2f}，方向偏多 → 放量站稳继续持有",
+            "",
+            "⚠️ 风险",
+            "",
+            f"突破后回踩 {confirm:.2f} 不破才算确认，缩量冲高先不减",
+        ])
+    elif scene in ("低吸观察", "防守观察", "防守观察，趋势下行谨慎"):
+        lines.extend([
+            "",
+            "✨ 亮点",
+            "",
+            f"价格回到支撑区 {low_price:.2f} 附近，观察止跌信号",
+            "",
+            "⚠️ 风险",
+            "",
+            f"趋势尚未确认，跌破 {low_price:.2f} 要止损，不提前抄底",
+        ])
+    elif scene == "冲高减仓":
+        lines.extend([
+            "",
+            "✨ 亮点",
+            "",
+            "现价接近压力区，有反弹机会",
+            "",
+            "⚠️ 风险",
+            "",
+            f"冲高缩量先减仓，放量突破 {confirm:.2f} 再接回",
+        ])
+    else:
+        lines.extend([
+            "",
+            "✨ 亮点",
+            "",
+            f"当前 {r['current']:.2f} 仍站在防守位 {low_price:.2f} 上方，结构在修复 → 等站稳 {confirm:.2f} 确认转强",
+            "",
+            "⚠️ 风险",
+            "",
+            f"最大风险不是没反弹，而是 {confirm:.2f} 未确认前提前追入。若跌破 {low_price:.2f} 防守位，预期要先收回来",
+        ])
+
+    pool_count = _pool_count()
+    pool_line = f"当前池 {pool_count}/10，回复 1 入池" if pool_count > 0 else "回复 1 入池"
+
+    one_line = one_sentence(r, low_zone)
+    lines.extend([
+        "",
+        "👉 一句话",
+        "",
+        f"{stage_label}，{stage_action}。{one_line}",
+    ])
+
+    lines.append(f"\n{pool_line}")
+
+    return "\n".join(lines)
+
+
+def _pool_count() -> int:
+    import json
+    import os
+    path = os.path.expanduser("~/.trader/pool.json")
+    try:
+        # C-12 fix: path 是 str 类型不能调 .read_text()，需用 Path 或 open
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        items = data.get("items", [])
+        return sum(1 for i in items if i.get("status") not in {"淘汰", "已退出"})
+    except Exception:
+        return 0
+
+
+def build_signal(r: dict[str, Any]) -> dict[str, Any]:
+    signal_type, direction, action, confidence = signal_state(r)
+    
+    # 融合层介入: 置信度高且有明确信号时覆盖 scene 决策
+    fusion_override = False
+    fusion = r.get("fusion")
+    if isinstance(fusion, dict):
+        fc = fusion.get("confidence", 0)
+        sd = fusion.get("signals_detail", {})
+        has_signal = isinstance(sd, dict) and any(
+            isinstance(v, dict) and v.get("direction") != 0
+            for v in sd.values()
+        )
+        if fc > 0.2 and has_signal:
+            mapped = _map_fusion_to_signal(fusion.get("action", ""))
+            if mapped is not None:
+                ft, fd, fa = mapped
+                if fd != direction:
+                    signal_type, direction, action = ft, fd, fa
+                    fusion_override = True
+    
+    raw_time = str(r.get("analysis_time") or "") or today_text()
+    trade_date = raw_time.split(" ")[0]
+    if signal_type == "reduce":
+        trigger_price = float(r.get("resistance") or r.get("confirm") or r.get("current"))
+        invalid_price = float(r.get("stop") or r.get("support") or r.get("current"))
+    else:
+        trigger_price = float(r.get("confirm") or r.get("resistance") or r.get("current"))
+        invalid_price = float(r.get("stop") or r.get("support") or r.get("current"))
+    signal = {
+        "contract": "trader_signal_v1",
+        "source_skill": "trader",
+        "symbol": str(r.get("symbol") or ""),
+        "name": str(r.get("name") or ""),
+        "trade_date": trade_date,
+        "analysis_time": raw_time,
+        "signal_type": signal_type,
+        "direction": direction,
+        "action": action,
+        "confidence": confidence,
+        "data_status": DATA_STATUS_MAP.get(str(r.get("data_status")), "degraded"),
+        "trigger": {
+            "type": "price_confirm",
+            "price": round(trigger_price, 2),
+            "text": f"{trigger_price:.2f}元 放量站稳并回踩不破后再评估",
+        },
+        "invalidation": {
+            "type": "price_break",
+            "price": round(invalid_price, 2),
+            "text": f"跌破 {invalid_price:.2f}元 后停止低吸",
+        },
+        "position": {
+            "max_total_pct": signal_max_total_pct(signal_type),
+            "max_single_move_pct": min(10, signal_max_total_pct(signal_type)),
+        },
+        "risk_flags": signal_risk_flags(r),
+        "summary": one_sentence(r, str(r.get("low_zone") or f"{float(r.get('support') or 0):.2f}元")),
+    }
+    if fusion_override:
+        signal["fusion_override"] = True
+    assert_valid_signal(signal)
+    return signal
+
+
+def signal_state(r: dict[str, Any]) -> tuple[str, str, str, str]:
+    stage = str(r.get("stage") or "")
+    scene = str(r.get("scene") or "")
+    theory_status = str(r.get("theory_status") or r.get("state_label") or scene)
+    current = float(r.get("current") or 0)
+    confirm = float(r.get("confirm") or current)
+    if stage == "转弱" or theory_status == "暂不碰":
+        return "defensive", "bearish_lean", "wait", "low"
+    if theory_status == "体系转强确认":
+        return "track", "bullish", "track", "medium"
+    if theory_status == "未确认转强":
+        return "wait_for_confirmation", "bullish_lean", "observe", "medium"
+    if theory_status == "承接存在":
+        return "wait_for_confirmation", "bullish_lean", "observe", "medium"
+    if theory_status == "转强不足":
+        return "wait_for_confirmation", "neutral", "observe", "low"
+    if scene == "冲高减仓" or theory_status == "冲高减仓":
+        return "reduce", "neutral", "reduce", "medium"
+    if current >= confirm or scene in {"突破确认", "突破观察"} or theory_status in {"突破确认", "突破观察"}:
+        return "track", "bullish", "track", "medium"
+    if scene in {"低吸观察", "防守观察", "防守观察，趋势下行谨慎", "空间不足", "等转强"}:
+        return "wait_for_confirmation", "bullish_lean", "observe", "medium"
+    return "observe", "neutral", "observe", "low"
+
+
+def signal_max_total_pct(signal_type: str) -> int:
+    if signal_type in ("defensive", "risk_stop"):
+        return 0
+    if signal_type in ("trigger_expired", "blocked"):
+        return 0
+    if signal_type == "track":
+        return 30
+    if signal_type == "reduce":
+        return 20
+    return 30
+
+
+def signal_risk_flags(r: dict[str, Any]) -> list[str]:
+    flags: list[str] = []
+    if str(r.get("stage") or "") == "转弱":
+        flags.append("structure_weak")
+    if str(r.get("scene") or "") == "空间不足":
+        flags.append("limited_upside_space")
+    if "不足" in str(r.get("volume_text") or ""):
+        flags.append("volume_confirmation_missing")
+    return flags
+
+
+def state_text(stage: str, theory_status: str) -> str:
+    if stage == "转弱" or theory_status == "暂不碰":
+        return "暂不碰"
+    if theory_status == "体系转强确认":
+        return "体系转强确认"
+    if theory_status == "未确认转强":
+        return "未确认转强"
+    if theory_status == "承接存在":
+        return "承接存在"
+    if theory_status == "转强不足":
+        return "转强不足"
+    if theory_status == "修复观察":
+        return "修复观察"
+    if theory_status:
+        return theory_status
+    return "震荡观察"
+
+
+def current_action_text(stage: str, scene: str) -> str:
+    if stage == "转弱":
+        return "暂不碰"
+    if scene == "低吸观察":
+        return "低吸观察，等止跌确认"
+    if scene == "空间不足":
+        return "等待，不追"
+    if scene in {"突破确认", "等转强", "冲高减仓"}:
+        return "持有观察，不急卖"
+    return "等待，不主动追"
+
+
+def structure_view(r: dict[str, Any]) -> str:
+    base_status = str(r.get("base_status") or "")
+    theory_status = str(r.get("theory_status") or r.get("state_label") or "")
+    scene = str(r.get("scene") or "")
+    if theory_status == "体系转强确认":
+        return "突破确认中，回踩不破加分"
+    if theory_status == "未确认转强":
+        return "转强苗头出现，但还没到体系确认"
+    if theory_status == "承接存在":
+        return "下方有承接，但还不是转强"
+    if theory_status == "转强不足":
+        return "有修复迹象，但强度还不够"
+    if theory_status == "修复观察":
+        return "修复阶段，等进一步确认"
+    if base_status == "风险回避" or scene == "转弱":
+        return "结构偏弱，先退出观察"
+    if base_status in {"低位修复", "均线修复", "防守整理", "临近确认", "空间偏紧", "中性整理"}:
+        return "修复观察，等理论确认"
+    return "修复观察，不是主升"
+
+
+def volume_view(text: str) -> str:
+    if "收涨" in text or "收缩" in text:
+        return "承接存在，转强不足"
+    if "收跌" in text:
+        return "供应仍需消化"
+    return "量价确认不足"
+
+
+def momentum_view(text: str) -> str:
+    if "启动迹象" in text or "预备启动" in text:
+        return "动能改善，等确认延续"
+    if "弱修复" in text or "启动条件不足" in text:
+        return "启动不足，等确认"
+    return "动能未确认"
+
+
+def one_sentence(r: dict[str, Any], low_zone: str) -> str:
+    major_stage = str(r.get("major_stage") or "")
+    momentum = str(r.get("short_term_momentum") or "")
+    confirm = float(r.get("confirm") or 0)
+    if major_stage == "衰退":
+        return "衰退期，不参与。等站上250日线再说。"
+    if major_stage == "蓄势" and momentum == "转弱":
+        return "蓄势期转弱，不碰。"
+    if major_stage == "蓄势" and momentum == "修复":
+        return f"蓄势期，不动手。等放量站稳 {confirm:.2f} 再说。"
+    if major_stage == "主升" and momentum == "走强":
+        return "主升期走强，持有。"
+    if major_stage == "派发":
+        return "派发期，逢高减仓。"
+    # fallback to old logic
+    stage = r["stage"]
+    scene = r.get("scene") or ""
+    theory_status = str(r.get("theory_status") or r.get("state_label") or "")
+    current = float(r.get("current", 0))
+    support = float(r.get("support", 0))
+    if stage == "转弱" or theory_status == "暂不碰":
+        return f"现在先不参与；等重新站回 {support:.2f}元 上方并稳定后再看。"
+    if theory_status == "体系转强确认":
+        return f"已形成体系确认，放量站稳回踩不破可评估加仓。"
+    if scene == "冲高减仓":
+        return f"上方空间受限，有底仓的逢高减仓，空仓不追。"
+    if current >= confirm:
+        return f"已越过确认位，放量站稳回踩不破可评估加仓。"
+    return f"现在还不是进攻点；先守纪律等确认，跌到 {low_zone} 止跌才轻试，站不上 {confirm:.2f}元 不加仓。"
+
+
+def generate_alert(report: dict[str, Any]) -> str | None:
+    current = float(report["current"])
+    support = float(report.get("support") or 0)
+    low_zone = str(report.get("low_zone") or "")
+    stop = float(report.get("stop") or 0)
+    confirm = float(report.get("confirm") or 0)
+    resistance = float(report.get("resistance") or 0)
+    scene = str(report.get("scene") or "")
+    theory_status = str(report.get("theory_status") or report.get("state_label") or scene)
+    name = str(report["name"])
+    atr14 = float(report.get("atr14", 0) or 0)
+    thresh = max(atr14 * 0.35, current * 0.006) if atr14 > 0 else current * 0.008
+
+    if stop > 0:
+        if current <= stop:
+            return f"⚠️ {name}｜现价{current:.2f}元 跌破止损 {stop:.2f}元 注意控制风险"
+        if current <= stop + thresh:
+            return f"⚠️ {name}｜现价{current:.2f}元 接近止损 {stop:.2f}元 留意防守"
+
+    if support > 0 and abs(current - support) <= thresh:
+        if stop > 0 and abs(current - stop) <= abs(current - support):
+            pass
+        elif current <= support:
+            zone_text = low_zone if low_zone else f"{support:.2f}元"
+            return f"📍 {name}｜现价{current:.2f}元 进入支撑区 {zone_text} 止跌确认中"
+        else:
+            return f"📍 {name}｜现价{current:.2f}元 接近支撑 {support:.2f}元 止跌确认中"
+
+    if confirm > 0 and abs(current - confirm) <= thresh and scene not in {"冲高减仓", "突破确认", "突破观察"} and theory_status != "体系转强确认":
+        if current >= confirm:
+            return f"📈 {name}｜现价{current:.2f}元 已越过确认价 {confirm:.2f} 放量站稳加仓评估"
+        return f"📈 {name}｜现价{current:.2f}元 触及确认区 {confirm:.2f} 放量站稳加仓评估"
+
+    if resistance > 0 and abs(current - resistance) <= thresh:
+        if current >= resistance:
+            return f"📉 {name}｜现价{current:.2f}元 已突破减仓位 {resistance:.2f} 冲高减仓"
+        return f"📉 {name}｜现价{current:.2f}元 触及减仓位 {resistance:.2f} 冲高减仓"
+
+    return None
+
+
+def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str:
+    """One-screen view: status + action + key levels + triggered signals."""
+    name = str(report["name"])
+    symbol = str(report.get("symbol", ""))
+    current = float(report["current"])
+    stop = float(report.get("stop") or 0)
+    support = float(report.get("support") or 0)
+    low_zone = str(report.get("low_zone") or f"{support:.2f}-{support * 1.01:.2f}元")
+    confirm = float(report.get("confirm") or 0)
+    resistance = float(report.get("resistance") or 0)
+    take = float(report.get("take") or 0)
+    change_pct = float(report.get("change_pct") or 0)
+    scene = str(report.get("scene") or "")
+    atr14 = float(report.get("atr14", 0) or 0)
+    atr_cap = int(report.get("atr_cap") or 10)
+    state_label = str(report.get("state_label") or "")
+    analysis_time = str(report.get("analysis_time") or "")
+
+    lines: list[str] = []
+    alerts_found: list[str] = []
+
+    # Tolerance for "at level" checks (ATR-based or fixed)
+    thresh = max(atr14 * 0.35, current * 0.006) if atr14 > 0 else current * 0.008
+
+    # === DETERMINE ACTION CATEGORY ===
+    # 1. 硬止损破位（最优先）
+    is_stop_broken = stop > 0 and current < stop
+    # 2. 接近止损线
+    is_near_stop = not is_stop_broken and stop > 0 and (current - stop) < thresh * 3
+    # 3. 进入止跌区
+    is_at_support = support > 0 and abs(current - support) <= thresh * 2 and current <= support
+    # 4. 接近启动确认价
+    is_near_confirm = confirm > 0 and abs(current - confirm) <= thresh * 2 and current >= confirm
+    # 5. 接近减仓位
+    is_near_resistance = resistance > 0 and abs(current - resistance) <= thresh * 2 and current >= resistance
+    # 6. 接近止盈位
+    is_near_take = take > 0 and abs(current - take) <= thresh * 2 and take > confirm
+
+    # === BUILD ALERT TEXT ===
+    if is_stop_broken:
+        break_pct = (current - stop) / stop * 100 if stop > 0 else 0
+        alerts_found.append(f"已破防守位 {stop:.2f}")
+    elif is_near_stop:
+        dist = (current - stop) / stop * 100
+        alerts_found.append(f"距止损仅 {dist:.1f}%")
+
+    if is_at_support:
+        dist = (support - current) / support * 100
+        alerts_found.append(f"进入止跌区 {low_zone} ({dist:.1f}%)")
+    elif support > 0 and abs(current - support) <= thresh * 2 and current > support:
+        dist = (current - support) / support * 100
+        alerts_found.append(f"距支撑 {support:.2f} 仅 {dist:.1f}%")
+
+    if is_near_confirm:
+        alerts_found.append(f"已到启动确认价 {confirm:.2f}")
+    elif confirm > 0 and confirm - current > 0 and (confirm - current) / confirm * 100 <= 3:
+        dist = (confirm - current) / confirm * 100
+        alerts_found.append(f"距启动确认价 {confirm:.2f} 仅 {dist:.1f}%")
+
+    if is_near_resistance:
+        alerts_found.append(f"已过减仓位 {resistance:.2f}")
+    elif resistance > 0 and resistance - current > 0 and (resistance - current) / resistance * 100 <= 3:
+        dist = (resistance - current) / resistance * 100
+        alerts_found.append(f"距减仓位 {resistance:.2f} 仅 {dist:.1f}%")
+
+    if is_near_take:
+        dist = (take - current) / take * 100
+        alerts_found.append(f"距止盈位 {take:.2f} 仅 {dist:.1f}%")
+
+    # === DETERMINE ACTION + STATEMENT ===
+    if is_stop_broken:
+        action = "止损退出，不找理由"
+        state_summary = "防守失败，止损执行"
+    elif is_at_support and not is_stop_broken:
+        action = "不抄底，等止跌确认"
+        state_summary = "止跌确认中，等待承接"
+    elif is_near_confirm:
+        action = "放量站稳才加，不放量不动"
+        state_summary = "启动确认中"
+    elif is_near_resistance:
+        action = "冲高减仓，不追"
+        state_summary = "冲高减仓"
+    elif is_near_stop:
+        action = "盯紧止损线，跌破就退"
+        state_summary = "接近风险线"
+    else:
+        action = f"当前{theory_status_text}，{action_text_for_scene(scene)}"
+        state_summary = theory_status_text
+
+    # === BUILD OUTPUT ===
+    lines.append(f"盯盘 — {name}  {current:.2f}（{change_pct:+.2f}%）  {state_summary}")
+    lines.append(f"  👉 当前应对：{action}")
+
+    # Show key levels reference
+    lines.append("")
+    lines.append(f"  防守 {stop:.2f}  |  支撑 {support:.2f}  |  启动 {confirm:.2f}  |  减仓 {resistance:.2f}  |  止盈 {take:.2f}")
+
+    # ATR + position cap
+    if atr14 > 0:
+        lines.append(f"  ATR {atr14:.2f}（{atr14/current*100:.0f}%）  仓位上限 {atr_cap}%")
+
+    # Triggered alerts
+    if alerts_found:
+        lines.append("")
+        lines.append("  触发：")
+        for idx, alert in enumerate(alerts_found, 1):
+            lines.append(f"    [{idx}] {alert}")
+
+    # Write signal if triggered
+    if alerts_found and write_signal:
+        if is_stop_broken:
+            sig_type, direction, action_sig, confidence, trigger_price = "risk_stop", "bearish", "stop", "high", stop
+        elif is_at_support:
+            sig_type, direction, action_sig, confidence, trigger_price = "low_buy_triggered", "bullish_lean", "low_buy", "medium", support
+        elif is_near_confirm:
+            sig_type, direction, action_sig, confidence, trigger_price = "track", "bullish", "track", "medium", confirm
+        elif is_near_resistance:
+            sig_type, direction, action_sig, confidence, trigger_price = "reduce", "neutral", "reduce", "medium", resistance
+        else:
+            sig_type, direction, action_sig, confidence, trigger_price = "observe", "neutral", "observe", "low", current
+
+        from signal_store import append_signal
+        raw_time = analysis_time or today_text()
+        trade_date = raw_time.split(" ")[0]
+        signal = {
+            "contract": "trader_signal_v1",
+            "source_skill": "trader",
+            "symbol": symbol,
+            "name": name,
+            "trade_date": trade_date,
+            "analysis_time": raw_time,
+            "signal_type": sig_type,
+            "direction": direction,
+            "action": action_sig,
+            "confidence": confidence,
+            "data_status": DATA_STATUS_MAP.get(str(report.get("data_status")), "full"),
+            "trigger": {"type": "price_level", "price": round(trigger_price, 2), "text": f"{trigger_price:.2f}元 触发{sig_type}"},
+            "invalidation": {"type": "price_break", "price": round(stop, 2), "text": f"跌破 {stop:.2f}元"},
+            "position": {
+                "max_total_pct": signal_max_total_pct(sig_type),
+                "max_single_move_pct": min(10, signal_max_total_pct(sig_type)),
+            },
+            "risk_flags": signal_risk_flags(report),
+            "summary": ("  ".join(alerts_found[:2])) if alerts_found else "无触发",
+        }
+        try:
+            append_signal(signal)
+            lines.append(f"  信号已记录：{_signal_type_label(sig_type)}（置信度{confidence}）")
+        except Exception:
+            pass
+
+    return "\n".join(lines)
+
+
+def action_text_for_scene(scene: str) -> str:
+    """One-line action advice based on scene."""
+    if scene in {"低吸观察"}:
+        return "等止跌确认再动手"
+    if scene in {"防守观察", "防守观察，趋势下行谨慎"}:
+        return "守纪律不追"
+    if scene in {"等转强"}:
+        return "等放量确认"
+    if scene in {"冲高减仓"}:
+        return "冲高减仓，不追"
+    if scene in {"突破确认", "突破观察"}:
+        return "持有观察，不急操作"
+    if scene in {"空间不足"}:
+        return "上方空间不够，先不追"
+    return "等待，不主动追"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Hermes-compatible Trader report renderer.")
+    parser.add_argument("--mode", choices=["http-single"], required=True)
+    parser.add_argument("--target", required=True)
+    parser.add_argument("--output", choices=["markdown", "json", "signal-json", "alert-text"], default="markdown")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        report = build_report(args.target)
+    except Exception as exc:
+        print(f"Trader数据获取失败：{exc}", file=sys.stderr)
+        return 1
+
+    try:
+        from candidate_core import STATUS_SCORE
+        write_stock(
+            report["name"],
+            report["scene"],
+            int(STATUS_SCORE.get(report["scene"], 0)),
+            "trader",
+        )
+    except Exception:
+        pass
+
+    try:
+        track_log(
+            "trader",
+            report["name"],
+            str(report.get("symbol") or ""),
+            report["scene"],
+            float(report.get("current") or 0),
+            get_market_level(),
+            get_market_note(),
+        )
+    except Exception:
+        pass
+
+    if args.output == "json":
+        markdown = render_markdown(report)
+        print(json.dumps({"full_markdown": markdown, "report": report, "signal": build_signal(report)}, ensure_ascii=False, indent=2, default=str))
+    elif args.output == "signal-json":
+        print(json.dumps(build_signal(report), ensure_ascii=False, indent=2, default=str))
+    else:
+        print(render_markdown(report))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

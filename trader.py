@@ -66,7 +66,7 @@ def _run_submodule(module_dir: str, script_name: str) -> int:
 def main():
     _bootstrap_dependencies()
     if len(sys.argv) < 2:
-        print("Trader 2.3 大一统 CLI")
+        print("Trader 2.4 大一统 CLI")
         print("用法: trader.py <command> [args...]")
         print("可用命令:")
         print("  analyze   - 单票分析")
@@ -75,6 +75,7 @@ def main():
         print("  review    - 盘后复盘")
         print("  portfolio - 仓位轮动")
         print("  track     - 信号准确率追踪")
+        print("  cache     - 缓存管理")
         sys.exit(1)
 
     command = sys.argv[1]
@@ -84,17 +85,17 @@ def main():
     sys.argv = [sys.argv[0]] + sys.argv[2:]
 
     if command == "analyze":
-        sys.exit(_run_submodule("01-单票分析-trader", "final_report"))
+        sys.exit(_run_submodule("trader", "final_report"))
     elif command == "monitor":
-        sys.exit(_run_submodule("02-盘中T0-t0-trader", "final_t0"))
+        sys.exit(_run_submodule("t0", "final_t0"))
     elif command == "pool":
-        sys.exit(_run_submodule("03-选股池-trader-pool", "final_pool"))
+        sys.exit(_run_submodule("trader", "final_pool"))
     elif command == "review":
-        sys.exit(_run_submodule("05-盘后复盘-review-trader", "final_review"))
+        sys.exit(_run_submodule("review", "final_review"))
     elif command == "portfolio":
-        sys.exit(_run_submodule("04-仓位轮动-trader-portfolio", "final_portfolio"))
+        sys.exit(_run_submodule("review", "final_portfolio"))
     elif command == "track":
-        sys.exit(_run_submodule("06-信号追踪-trader-tracking", "final_tracker"))
+        sys.exit(_run_submodule("review", "final_tracker"))
     elif command == "cache":
         sys.exit(_handle_cache_command())
     else:

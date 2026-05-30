@@ -53,6 +53,11 @@ def test_fibonacci_golden_levels_calculation():
         assert fib["golden_bid"] is None
 
 def test_markdown_report_displays_golden_bid():
+    import sys
+    from pathlib import Path
+    _trader_scripts = Path(__file__).resolve().parents[2] / "01-功能包-packages" / "trader" / "scripts"
+    if str(_trader_scripts) not in sys.path:
+        sys.path.insert(0, str(_trader_scripts))
     from run_analysis import render_markdown
     
     # Create a test report dict
@@ -65,6 +70,7 @@ def test_markdown_report_displays_golden_bid():
         "resistance": 11.00,
         "confirm": 10.50,
         "stop": 9.20,
+        "trailing_stop": 9.20,
         "scene": "低吸观察",
         "position_cap": 15,
         "low_zone": "9.50-9.80元",
@@ -72,7 +78,21 @@ def test_markdown_report_displays_golden_bid():
             "golden_bid": 9.65
         },
         "ma": {"ma5": "10.10", "ma10": "10.05", "ma20": "9.90", "ma30": "9.80"},
-        "state_label": "低吸已触发"
+        "state_label": "低吸已触发",
+        "base_status": "低吸观察",
+        "theory_status": "低吸观察",
+        "major_stage": "蓄势",
+        "major_reason": "均线收敛",
+        "short_term_momentum": "修复",
+        "momentum_reason": "站上MA5",
+        "stage_action": "观察",
+        "max_position_pct": 30,
+        "stage_label": "蓄势期 + 修复",
+        "market_env": {"level": "正常", "skill_note": "正常建仓", "change_pct": -0.5},
+        "atr14": 0.35,
+        "atr_ratio": 0.035,
+        "atr_level": "波动正常",
+        "atr_cap": 10,
     }
     
     markdown = render_markdown(report)
