@@ -47,53 +47,16 @@ def _get_engine() -> Any:
     _engine = None
     return None
 
-try:
-    from config import STATUS_SCORE
-except Exception:  # pragma: no cover - optional per skill
-    STATUS_SCORE = {
-        "低吸观察": 80,
-        "等转强": 70,
-        "防守观察": 60,
-        "冲高减仓": 55,
-        "空间不足": 45,
-        "暂不碰": 20,
-        "数据失败": 0,
-    }
-
-try:
-    from config import CHANGE_THRESHOLD_STRONG
-except Exception:  # pragma: no cover - optional per skill
-    CHANGE_THRESHOLD_STRONG = 3.0
-
-try:
-    from config import CHANGE_THRESHOLD_LARGE
-except Exception:  # pragma: no cover - optional per skill
-    CHANGE_THRESHOLD_LARGE = 5.0
-
-try:
-    from config import CHANGE_THRESHOLD_LARGE_DROP
-except Exception:  # pragma: no cover - optional per skill
-    CHANGE_THRESHOLD_LARGE_DROP = -5.0
-
-try:
-    from config import CHANGE_THRESHOLD_DROP
-except Exception:  # pragma: no cover - optional per skill
-    CHANGE_THRESHOLD_DROP = -7.0
-
-try:
-    from config import POSITION_RATIO_STRONG
-except Exception:  # pragma: no cover - optional per skill
-    POSITION_RATIO_STRONG = 0.60
-
-try:
-    from config import POSITION_RATIO_CONFIRM
-except Exception:  # pragma: no cover - optional per skill
-    POSITION_RATIO_CONFIRM = 0.72
-
-try:
-    from config import POSITION_RATIO_HIGH
-except Exception:  # pragma: no cover - optional per skill
-    POSITION_RATIO_HIGH = 0.65
+from trader_shared.config import (
+    STATUS_SCORE,
+    CHANGE_THRESHOLD_STRONG,
+    CHANGE_THRESHOLD_LARGE,
+    CHANGE_THRESHOLD_LARGE_DROP,
+    CHANGE_THRESHOLD_DROP,
+    POSITION_RATIO_STRONG,
+    POSITION_RATIO_CONFIRM,
+    POSITION_RATIO_HIGH,
+)
 
 try:
     from trader_shared.config import TREND_MA_SHORT, TREND_MA_LONG, TREND_FILTER_ENABLED

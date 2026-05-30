@@ -33,60 +33,19 @@ except ImportError:
     MAValues = dict
     QuoteData = dict
 
-try:
-    from config import RECENT_WINDOW
-except Exception:  # pragma: no cover - optional per skill
-    RECENT_WINDOW = 5
-
-try:
-    from config import STRUCTURE_WINDOW
-except Exception:  # pragma: no cover - optional per skill
-    STRUCTURE_WINDOW = 20
-
-try:
-    from config import TAKE_PROFIT_BUFFER
-except Exception:  # pragma: no cover - optional per skill
-    TAKE_PROFIT_BUFFER = 1.06
-
-try:
-    from config import MA_PERIODS
-except Exception:  # pragma: no cover - optional per skill
-    MA_PERIODS = (5, 10, 20, 30)
-
-try:
-    from config import MA_WEIGHTS
-except Exception:  # pragma: no cover - optional per skill
-    MA_WEIGHTS = {"ma5": 0.92, "ma10": 0.88, "ma20": 0.65, "ma30": 0.55}
-
-try:
-    from config import MIN_ZONE_WIDTH_PCT
-except Exception:  # pragma: no cover - optional per skill
-    MIN_ZONE_WIDTH_PCT = 0.005
-
-try:
-    from config import MAX_ZONE_WIDTH_PCT
-except Exception:  # pragma: no cover - optional per skill
-    MAX_ZONE_WIDTH_PCT = 0.020
-
-try:
-    from config import MIN_STOP_BUFFER_PCT
-except Exception:  # pragma: no cover - optional per skill
-    MIN_STOP_BUFFER_PCT = 0.008
-
-try:
-    from config import MAX_STOP_BUFFER_PCT
-except Exception:  # pragma: no cover - optional per skill
-    MAX_STOP_BUFFER_PCT = 0.025
-
-try:
-    from config import MIN_CONFIRM_SPACE_PCT
-except Exception:  # pragma: no cover - optional per skill
-    MIN_CONFIRM_SPACE_PCT = 0.005
-
-try:
-    from config import MAX_REASONABLE_MA_DISTANCE_PCT
-except Exception:  # pragma: no cover - optional per skill
-    MAX_REASONABLE_MA_DISTANCE_PCT = 0.12
+from trader_shared.config import (
+    RECENT_WINDOW,
+    STRUCTURE_WINDOW,
+    TAKE_PROFIT_BUFFER,
+    MA_PERIODS,
+    MA_WEIGHTS,
+    MIN_ZONE_WIDTH_PCT,
+    MAX_ZONE_WIDTH_PCT,
+    MIN_STOP_BUFFER_PCT,
+    MAX_STOP_BUFFER_PCT,
+    MIN_CONFIRM_SPACE_PCT,
+    MAX_REASONABLE_MA_DISTANCE_PCT,
+)
 
 try:
     from time_window_detector import check_time_windows as _check_time_windows_raw

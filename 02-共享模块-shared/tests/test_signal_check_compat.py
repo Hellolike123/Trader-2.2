@@ -16,6 +16,7 @@ import hashlib
 import json
 import sys
 from datetime import datetime, timedelta
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -33,8 +34,10 @@ import signal_tracker as st
 class _TempPaths:
     """Temporarily replace RESULT_PATH / LOG_PATH / STORE_PATH."""
 
-    def __init__(self, tmp_dir: Path):
+    def __init__(self, tmp_dir: Path | None = None):
         self._orig: dict[str, Path] = {}
+        if tmp_dir is None:
+            tmp_dir = Path(tempfile.mkdtemp(prefix="trader_test_"))
         tmp_dir.mkdir(exist_ok=True, parents=True)
         self.result_path = tmp_dir / "signal_results.jsonl"
         self.log_path = tmp_dir / "signal_log.jsonl"
@@ -95,7 +98,7 @@ class TestSignalIdPrimaryMatch:
     """check_recent() uses signal_id as primary match key."""
 
     def setup_method(self):
-        self.tmp = _TempPaths(Path.home() / ".trader_test_sid_primary")
+        self.tmp = _TempPaths(None)
 
     def teardown_method(self):
         self.tmp.restore()
@@ -154,7 +157,7 @@ class TestDateNormalization:
     """4-key matching calls _norm_date on read-back from results."""
 
     def setup_method(self):
-        self.tmp = _TempPaths(Path.home() / ".trader_test_date_norm")
+        self.tmp = _TempPaths(None)
 
     def teardown_method(self):
         self.tmp.restore()
@@ -210,7 +213,7 @@ class TestTypeNormalization:
     """3-key fallback normalizes signal_type via _normalize_signal_type on read-back."""
 
     def setup_method(self):
-        self.tmp = _TempPaths(Path.home() / ".trader_test_type_norm")
+        self.tmp = _TempPaths(None)
 
     def teardown_method(self):
         self.tmp.restore()
@@ -264,7 +267,7 @@ class TestNoMatchDifferentSymbol:
     """check_recent() does not match if symbol differs."""
 
     def setup_method(self):
-        self.tmp = _TempPaths(Path.home() / ".trader_test_diff_symbol")
+        self.tmp = _TempPaths(None)
 
     def teardown_method(self):
         self.tmp.restore()
@@ -340,7 +343,7 @@ class TestBackfillNormalization:
     """backfill() should also normalize existing_keys on read-back."""
 
     def setup_method(self):
-        self.tmp = _TempPaths(Path.home() / ".trader_test_backfill")
+        self.tmp = _TempPaths(None)
 
     def teardown_method(self):
         self.tmp.restore()

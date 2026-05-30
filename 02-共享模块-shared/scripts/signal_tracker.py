@@ -14,6 +14,12 @@ from pathlib import Path
 from typing import Any
 
 import trader_shared
+from trader_shared.signal_utils import (
+    normalize_signal_id as _normalize_signal_id,
+    normalize_signal_type as _pub_normalize_signal_type,
+    normalize_date as _pub_normalize_date,
+    normalize_symbol as _pub_normalize_symbol,
+)
 
 
 
@@ -22,30 +28,11 @@ import trader_shared
 
 
 def make_signal_id(symbol: str, date: str, signal_type: str, price: str | float | Any) -> str:
-    """Generate unified signal ID.
+    """Generate unified signal ID — delegates to canonical trader_shared.signal_utils.
 
-    Uses SHA256 with 4 normalized fields. 16 hex chars = 48 bits of entropy.
-    Ensures unicode and case normalization, symbol formatting, date formatting,
-    and consistent price decimal representation.
+    Kept as alias for backward compatibility with existing callers in this module.
     """
-    # 1. Normalize symbol
-    sym_norm = unicodedata.normalize("NFC", str(symbol or "")).strip().upper()
-    sym_norm = _normalize_symbol(sym_norm)
-
-    # 2. Normalize date
-    dt_norm = unicodedata.normalize("NFC", str(date or "")).strip()
-    dt_norm = _norm_date(dt_norm)
-
-    # 3. Normalize signal type
-    st_norm = unicodedata.normalize("NFC", str(signal_type or "")).strip()
-    st_norm = _normalize_signal_type(st_norm)
-
-    # 4. Normalize price to 2-decimal string
-    p_val = _safe_price(price)
-    price_norm = f"{p_val:.2f}"
-
-    key = f"{sym_norm}|{dt_norm}|{st_norm}|{price_norm}"
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+    return _normalize_signal_id(symbol, date, signal_type, price)
 
 
 # ═══════ 旧 API (兼容 review_core) ═══════
@@ -532,24 +519,22 @@ def _ensure_result_dir() -> None:
 
 
 def _norm_date(raw: str) -> str:
-    """Normalize date strings to zero-padded YYYY-MM-DD for safe comparison.
-    
-    Handles non-zero-padded dates like "2025-5-2" → "2025-05-02".
-    Handles datetime strings "2025-05-02T14:30:00" → "2025-05-02".
-    """
+    """Normalize date strings — delegates to canonical signal_utils.normalize_date."""
+    return _pub_normalize_date(raw)
+
+
+def _norm_date_legacy(raw: str) -> str:
+    """Legacy date normalizer with extra fallback formats (compact 8-digit, slash, dot)."""
     s = str(raw or "").strip().split("T")[0].split(" ")[0]
     if not s:
         return ""
-    # Standardize separators to -
     s = s.replace("/", "-").replace(".", "-")
-    # If it is compact 8-digit date like "20250502"
     if len(s) == 8 and s.isdigit():
         s = f"{s[:4]}-{s[4:6]}-{s[6:]}"
     try:
         return datetime.strptime(s, "%Y-%m-%d").strftime("%Y-%m-%d")
     except ValueError:
         pass
-    # Fallback to manual parsing for non-standard formats
     parts = s.split("-")
     if len(parts) == 3:
         try:
@@ -811,23 +796,8 @@ def show_all(days_limit: int | None = None) -> str:
 
 
 def _normalize_symbol(symbol: str) -> str:
-    """统一 symbol 格式，避免同票分裂（123456 和 123456.SH 视为相同）。"""
-    s = (symbol or "").strip().upper()
-    if not s:
-        return ""
-    if "." in s:
-        return s
-    # Handle SH123456 or SZ123456 formats
-    if len(s) == 8:
-        if s.startswith("SH") and s[2:].isdigit():
-            return f"{s[2:]}.SH"
-        if s.startswith("SZ") and s[2:].isdigit():
-            return f"{s[2:]}.SZ"
-    if len(s) == 6 and s.isdigit():
-        if s.startswith(("6", "9", "5")):
-            return f"{s}.SH"
-        return f"{s}.SZ"
-    return s
+    """统一 symbol 格式 — delegates to canonical signal_utils.normalize_symbol."""
+    return _pub_normalize_symbol(symbol) or ""
 
 
 def show_single(symbol: str, days_limit: int | None = None) -> str:
@@ -840,14 +810,8 @@ def show_single(symbol: str, days_limit: int | None = None) -> str:
 
 
 def _normalize_signal_type(raw_type: str) -> str:
-    """归一化信号类型：旧名映射为新名，未知名透传。"""
-    t = (raw_type or "").strip()
-    if t in _SIGNAL_TYPE_MAP:
-        return _SIGNAL_TYPE_MAP[t]
-    t_lower = t.lower()
-    if t_lower in _SIGNAL_TYPE_MAP:
-        return _SIGNAL_TYPE_MAP[t_lower]
-    return t
+    """归一化信号类型 — delegates to canonical signal_utils.normalize_signal_type."""
+    return _pub_normalize_signal_type(raw_type)
 
 
 def _make_panel(results: list[dict[str, Any]], days_limit: int | None) -> str:

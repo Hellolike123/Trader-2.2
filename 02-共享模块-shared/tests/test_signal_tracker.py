@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -24,8 +25,10 @@ import signal_tracker as st
 class _TempPaths:
     """Temporarily replace RESULT_PATH / LOG_PATH / STORE_PATH."""
 
-    def __init__(self, tmp_dir: Path):
+    def __init__(self, tmp_dir: Path | None = None):
         self._orig: dict[str, Path] = {}
+        if tmp_dir is None:
+            tmp_dir = Path(tempfile.mkdtemp(prefix='trader_test_'))
         tmp_dir.mkdir(exist_ok=True, parents=True)
         self.result_path = tmp_dir / "signal_results.jsonl"
         self.log_path = tmp_dir / "signal_log.jsonl"
@@ -72,7 +75,7 @@ class TestFillByTargetPreservesBadLines:
     """BUG-001: fill_by_target should NOT discard bad lines when rewriting."""
 
     def setup_method(self):
-        self.tmp = _TempPaths(Path.home() / ".trader_test_fill_bad")
+        self.tmp = _TempPaths(None)
 
     def teardown_method(self):
         self.tmp.restore()
@@ -120,7 +123,7 @@ class TestExplicitExceptHandling:
         assert "ValueError" in source, "_compute_results_for_sig should catch ValueError"
 
     def test_fill_by_target_preserves_bad_line(self):
-        self.tmp = _TempPaths(Path.home() / ".trader_test_preserve_bad")
+        self.tmp = _TempPaths(None)
         self.tmp.apply()
         with open(self.tmp.log_path, "w", encoding="utf-8") as f:
             f.write(json.dumps({"signal_id": "aaa", "target": "T", "outcome_pnl_pct": None}) + "\n")
@@ -140,7 +143,7 @@ class TestAtomicWriteAndFsync:
     """BUG-006: fill_by_target should use os.replace + fsync."""
 
     def setup_method(self):
-        self.tmp = _TempPaths(Path.home() / ".trader_test_atomic")
+        self.tmp = _TempPaths(None)
 
     def teardown_method(self):
         self.tmp.restore()
@@ -205,7 +208,7 @@ class TestShowSingleSortByResultTime:
     """BUG-012: show_single should sort by result_time, not signal_date."""
 
     def setup_method(self):
-        self.tmp = _TempPaths(Path.home() / ".trader_test_sort")
+        self.tmp = _TempPaths(None)
 
     def teardown_method(self):
         self.tmp.restore()
@@ -236,7 +239,7 @@ class TestCheckRecentReturnType:
     """check_recent should return dict, not int."""
 
     def setup_method(self):
-        self.tmp = _TempPaths(Path.home() / ".trader_test_ret_type")
+        self.tmp = _TempPaths(None)
 
     def teardown_method(self):
         self.tmp.restore()
@@ -264,7 +267,7 @@ class TestCheckRecentEmptyWrite:
     """When no new results and no skipped, don't touch the file."""
 
     def setup_method(self):
-        self.tmp = _TempPaths(Path.home() / ".trader_test_empty")
+        self.tmp = _TempPaths(None)
 
     def teardown_method(self):
         self.tmp.restore()
@@ -284,7 +287,7 @@ class TestPanelOutputFormat:
     """Panel output should not contain # headings or table markers."""
 
     def setup_method(self):
-        self.tmp = _TempPaths(Path.home() / ".trader_test_panel")
+        self.tmp = _TempPaths(None)
 
     def teardown_method(self):
         self.tmp.restore()
@@ -317,7 +320,7 @@ class TestSignalLifecycleV2:
     """Tests for Phase 1 enhancements: stable ID, deduplication, and migration."""
 
     def setup_method(self):
-        self.tmp = _TempPaths(Path.home() / ".trader_test_phase1")
+        self.tmp = _TempPaths(None)
 
     def teardown_method(self):
         self.tmp.restore()

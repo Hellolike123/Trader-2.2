@@ -97,8 +97,19 @@ _SIGNAL_TYPE_MAP: dict[str, str] = {
 
 
 def normalize_signal_type(raw_type: str) -> str:
-    """Normalize signal type: map legacy names to v1 canonical names."""
-    return _SIGNAL_TYPE_MAP.get(raw_type, raw_type)
+    """Normalize signal type: map legacy names to v1 canonical names.
+    
+    Case-insensitive lookup: 'LOW_BUY_WATCH' -> 'low_buy_watch'.
+    """
+    t = (raw_type or "").strip()
+    result = _SIGNAL_TYPE_MAP.get(t)
+    if result is not None:
+        return result
+    t_lower = t.lower()
+    result = _SIGNAL_TYPE_MAP.get(t_lower)
+    if result is not None:
+        return result
+    return t
 
 
 def normalize_date(raw: str) -> str:
@@ -106,24 +117,53 @@ def normalize_date(raw: str) -> str:
 
     Handles non-zero-padded dates like '2025-5-2' -> '2025-05-02'.
     Handles datetime strings '2025-05-02T14:30:00' -> '2025-05-02'.
+    Handles compact numeric dates like '20250401' -> '2025-04-01'.
+    Handles alternative separators: slashes, dots.
     """
-    s = str(raw).split("T")[0].split(" ")[0]
+    s = str(raw).strip().split("T")[0].split(" ")[0]
+    if not s:
+        return ""
+    # Standardize separators
+    s = s.replace("/", "-").replace(".", "-")
+    # Compact 8-digit date: 20250401 -> 2025-04-01
+    if len(s) == 8 and s.isdigit():
+        s = f"{s[:4]}-{s[4:6]}-{s[6:]}"
     try:
         from datetime import datetime
         return datetime.strptime(s, "%Y-%m-%d").strftime("%Y-%m-%d")
     except ValueError:
         pass
+    # Fallback: manual zero-padding
+    parts = s.split("-")
+    if len(parts) == 3:
+        try:
+            y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+            return f"{y:04d}-{m:02d}-{d:02d}"
+        except (ValueError, IndexError):
+            pass
     return s[:10]
 
 
 def normalize_symbol(symbol: str) -> str:
-    """Ensure bare 6-digit codes get exchange suffix.
+    """Ensure bare 6-digit codes get exchange suffix with uppercase normalization.
 
-    688248 -> 688248.SH (shanghai), 000001 -> 000001.SZ (shenzhen)
+    688248 -> 688248.SH, 000001 -> 000001.SZ
+    SH688248 -> 688248.SH, SZ000001 -> 000001.SZ
+    688248.sz -> 688248.SH (corrects wrong suffix based on code prefix)
     """
-    if not symbol or "." in symbol:
+    if not symbol:
         return symbol
-    s = str(symbol).strip()
+    s = str(symbol).strip().upper()
+    if not s:
+        return ""
+    if "." in s:
+        return s
+    # Handle SH123456 or SZ123456 formats
+    if len(s) == 8:
+        if s.startswith("SH") and s[2:].isdigit():
+            return f"{s[2:]}.SH"
+        if s.startswith("SZ") and s[2:].isdigit():
+            return f"{s[2:]}.SZ"
     if len(s) == 6 and s.isdigit():
         if s.startswith(("6", "9", "5")):
             return f"{s}.SH"

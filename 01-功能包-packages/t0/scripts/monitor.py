@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import time
+import warnings
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator
@@ -35,7 +36,6 @@ try:
     from trader_shared import get_market_level, add_warning, get_market_note, log_safe, fill_by_target
     track_t0_signal = log_safe
 except ImportError:
-    import warnings
     warnings.warn(
         "[t0] shared module not available — market status, signal tracking, and state sync are disabled. "
         "T0 monitor will still work but without shared state integration.",

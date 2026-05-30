@@ -500,6 +500,7 @@ def test_ict_upside_sweep_with_choch_confirms_sell_bias() -> None:
 
 def test_monitor_suppresses_observation_and_reports_trigger_position(tmp_path, monkeypatch) -> None:
     import monitor
+    monkeypatch.setattr(monitor, "is_trading_time", lambda: True)
 
     base_plan = {
         "name": "中国铝业",
