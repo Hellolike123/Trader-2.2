@@ -235,7 +235,7 @@ def allocate_weights(
 
     scores: list[float] = []
     for item in tradable:
-        raw = item.get("score") or item.get("livermore_score")
+        raw = item.get("score")
         s = float(raw) if raw is not None and raw != "" else 30.0
         if s <= 0:
             s = 30.0
@@ -263,7 +263,7 @@ def allocate_weights(
         excess = actual_total - max_total
         sorted_by_score = sorted(
             tradable,
-            key=lambda i: float(i.get("score") or i.get("livermore_score") or 30),
+            key=lambda i: float(i.get("score") or 30),
         )
         for item in sorted_by_score:
             if excess <= 0:

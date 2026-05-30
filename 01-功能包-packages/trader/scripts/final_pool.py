@@ -30,6 +30,7 @@ import candidate_core as core
 try:
     from trader_shared import get_market_level, get_market_note, write_stock
     from trader_shared.data_manager import DataManager
+    from trader_shared.stage_positioning import assess_stage
     _SHARED_OK = True
 except ImportError:
     import warnings
@@ -43,10 +44,15 @@ except ImportError:
     def get_market_note() -> str: return ""
     def write_stock(name: str, status: str, weight: int, source: str) -> None: pass
 
+    def assess_stage(**kwargs: Any) -> dict[str, Any]:
+        return {"major_stage": "蓄势", "momentum": "震荡", "stage_label": "蓄势期+震荡", "action": "等待", "max_position_pct": 0}
+
 
 POOL_LIMIT = 10
 EXECUTION_LIMIT = 3
 CONTRACT_VERSION = "trader_pool_v1"
+
+STAGE_PRIORITY = {"主升": 1, "蓄势": 2, "派发": 3, "衰退": 4}
 
 
 def today_text() -> str:
@@ -288,16 +294,41 @@ def admission_for(report: dict[str, Any], scores: dict[str, int]) -> dict[str, s
     current = to_float(report.get("current")) or 0.0
     confirm = to_float(report.get("confirm")) or current
     stop = to_float(report.get("stop")) or current
+    major_stage = str(report.get("major_stage") or "蓄势")
+    total_score = scores["total_score"]
+
+    # 第一关：阶段筛选 — 衰退期直接拒绝
+    if major_stage == "衰退":
+        return {"result": "拒绝", "reason": "衰退期，直接拒绝入池。", "status": "淘汰"}
+
+    # 第二关：评分门槛
+    if major_stage == "蓄势":
+        if total_score >= 80:
+            status = "执行"
+        elif total_score >= 70:
+            status = "观察"
+        else:
+            return {"result": "待补", "reason": "蓄势期但评分不足70，暂不入池。", "status": "观察"}
+    elif major_stage == "主升":
+        if total_score >= 60:
+            status = "执行"
+        else:
+            return {"result": "待补", "reason": "主升期但评分不足60，暂不入池。", "status": "观察"}
+    elif major_stage == "派发":
+        if total_score >= 70:
+            status = "观察"
+        else:
+            return {"result": "待补", "reason": "派发期但评分不足70，暂不入池。", "status": "观察"}
+    else:
+        status = "观察"
+
+    # 第三关：风控检查 — 现价跌破止损
     if stop and current <= stop:
-        return {"result": "拒绝", "reason": "现价跌破或贴近防守位，结构审查失败。", "status": "淘汰"}
+        return {"result": "拒绝", "reason": "现价跌破防守位，结构审查失败。", "status": "淘汰"}
     if not confirm or not stop:
         return {"result": "待补", "reason": "触发位或防守位不清楚，暂不参与排序。", "status": "观察"}
-    if scores["total_score"] >= 70:
-        status = "执行" if momentum_passes(report) else "观察"
-        return {"result": "入池", "reason": "结构成立，触发位和防守位清楚。", "status": status}
-    if scores["total_score"] >= 55:
-        return {"result": "入池", "reason": "结构可跟踪，但动能或位置仍需确认。", "status": "观察"}
-    return {"result": "待补", "reason": "结构尚未充分确认，暂不进入执行排序。", "status": "观察"}
+
+    return {"result": "入池", "reason": "结构成立，触发位和防守位清楚。", "status": status}
 
 
 def structure_summary(report: dict[str, Any]) -> str:
@@ -326,6 +357,9 @@ def record_from_report(target: str, report: dict[str, Any], offline: bool = Fals
     atr14 = to_float(report.get("atr14")) or 0.0
     atr_ratio = to_float(report.get("atr_ratio")) or 0.0
     atr_level, atr_cap = core.atr_volatility_level(atr_ratio) if atr14 > 0 and atr_ratio > 0 else ("", 0)
+    major_stage = str(report.get("major_stage") or "蓄势")
+    momentum = str(report.get("short_term_momentum") or "震荡")
+    stage_status = str(report.get("stage_label") or f"{major_stage}期+{momentum}")
     return {
         "target": target,
         "name": report.get("name") or target,
@@ -351,6 +385,9 @@ def record_from_report(target: str, report: dict[str, Any], offline: bool = Fals
         "fusion_action": (report.get("fusion") or {}).get("action"),
         "fusion_confidence": (report.get("fusion") or {}).get("confidence"),
         "fusion_score": (report.get("fusion") or {}).get("weighted_score"),
+        "major_stage": major_stage,
+        "momentum": momentum,
+        "stage_status": stage_status,
         **scores,
     }
 
@@ -380,6 +417,18 @@ def sort_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             _fusion_confidence_rank(item.get("fusion_confidence")),
         ),
         reverse=True,
+    )
+
+
+def sort_items_by_stage(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    status_rank = {"执行": 3, "观察": 2, "淘汰": 1}
+    return sorted(
+        items,
+        key=lambda item: (
+            STAGE_PRIORITY.get(str(item.get("major_stage") or "蓄势"), 5),
+            status_rank.get(str(item.get("status")), 0),
+            int(item.get("total_score") or 0),
+        ),
     )
 
 
@@ -448,25 +497,19 @@ def cmd_add(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_show(args: argparse.Namespace) -> int:
+def cmd_list(args: argparse.Namespace) -> int:
     pool = load_pool()
     items = sort_items(active_items(pool))
     count = counts(items)
-    print(f"选股池  {len(items)}/{POOL_LIMIT}  执行{count['执行']}  观察{count['观察']}  淘汰{count['淘汰']}")
+    print(f"选股池 {len(items)}/{POOL_LIMIT}")
     print("")
     for item in items:
-        line = f"  {item.get('name')}  {item.get('status')}  评分{item.get('total_score')}"
-        fs = item.get("fusion_score")
-        if fs is not None:
-            try:
-                line += f"(融合{int(fs):+d})"
-            except (TypeError, ValueError):
-                line += f"(融合{fs})"
-        line += f"  触发{price_yuan(item.get('trigger'))}  防守{price_yuan(item.get('defense'))}"
-        fc = item.get("fusion_confidence")
-        if fc is not None:
-            line += f"  融合:{item.get('fusion_action', '?')}({fc})"
-        print(line)
+        stage_str = str(item.get("stage_status") or item.get("major_stage", "蓄势") + "+" + item.get("momentum", "震荡"))
+        name = item.get("name", "?")
+        status = item.get("status", "?")
+        trigger = price(item.get("trigger"))
+        defense = price(item.get("defense"))
+        print(f"{name}  {stage_str}  {status}  触发{trigger}  防守{defense}")
     return 0
 
 
@@ -974,6 +1017,59 @@ def rank_sentence(actionable: list[dict[str, Any]]) -> str:
     return f"今天优先盯{first.get('name')}，只按触发位和防守位执行，不把观察区当操作价。"
 
 
+def quick_add(target: str, offline: bool = False) -> dict[str, Any]:
+    """One-step add: run analysis, check 三关, add to pool if passes."""
+    report = safe_build_report(target, offline)
+    record = record_from_report(target, report, offline)
+    major_stage = str(record.get("major_stage") or "蓄势")
+    total_score = int(record.get("total_score") or 0)
+    current = to_float(record.get("current")) or 0.0
+    stop = to_float(record.get("defense")) or 0.0
+
+    # 第一关：阶段筛选
+    if major_stage == "衰退":
+        return {"ok": False, "reason": "衰退期，直接拒绝", "record": record}
+
+    # 第二关：评分门槛
+    if major_stage == "蓄势":
+        if total_score < 70:
+            return {"ok": False, "reason": f"蓄势期评分{total_score}<70，不入池", "record": record}
+        status = "执行" if total_score >= 80 else "观察"
+    elif major_stage == "主升":
+        if total_score < 60:
+            return {"ok": False, "reason": f"主升期评分{total_score}<60，不入池", "record": record}
+        status = "执行"
+    elif major_stage == "派发":
+        if total_score < 70:
+            return {"ok": False, "reason": f"派发期评分{total_score}<70，不入池", "record": record}
+        status = "观察"
+    else:
+        status = "观察"
+
+    # 第三关：风控检查
+    if stop > 0 and current <= stop:
+        return {"ok": False, "reason": f"现价{current:.2f}跌破防守{stop:.2f}，拒绝", "record": record}
+
+    record["status"] = status
+    pool = load_pool()
+    items = list(pool.get("items", []))
+    existing_index = next((i for i, item in enumerate(items) if target in {str(item.get("target")), str(item.get("name")), str(item.get("symbol"))}), None)
+    if existing_index is None and len(items) >= POOL_LIMIT:
+        return {"ok": False, "reason": f"池容量已满 {len(items)}/{POOL_LIMIT}", "record": record}
+    if existing_index is None:
+        items.append(record)
+    else:
+        record["added_at"] = items[existing_index].get("added_at") or record["added_at"]
+        items[existing_index] = record
+    pool["items"] = items
+    save_pool(pool)
+    try:
+        write_stock(record["name"], status, record["total_score"], "pool")
+    except Exception:
+        pass
+    return {"ok": True, "reason": f"已加入选股池（{major_stage}+{record.get('momentum', '震荡')}，评分{total_score}）", "record": record}
+
+
 def cmd_rank(args: argparse.Namespace) -> int:
     pool = load_pool()
     print(render_rank(active_items(pool)))
@@ -1014,7 +1110,7 @@ def position_for(item: dict[str, Any]) -> str:
 
 
 def render_plan(items: list[dict[str, Any]]) -> str:
-    sorted_items = sort_items(items)
+    sorted_items = sort_items_by_stage(items)
     count = counts(sorted_items)
     execution_items = [item for item in sorted_items if item.get("status") == "执行"][:EXECUTION_LIMIT]
     top_items = execution_items + [item for item in sorted_items if item.get("status") != "执行"]
@@ -1029,7 +1125,8 @@ def render_plan(items: list[dict[str, Any]]) -> str:
         lines.append("明日优先级")
         for i, item in enumerate(top_items[:3], 1):
             rank_emoji = ["🥇", "🥈", "🥉"][i - 1]
-            lines.append(f"{rank_emoji} {item['name']}（{item['status']}）")
+            stage_str = str(item.get("stage_status") or item.get("major_stage", "蓄势") + "+" + item.get("momentum", "震荡"))
+            lines.append(f"{rank_emoji} {item['name']}（{stage_str} {item['status']}）")
             lines.append(f"  {action_for(item)}")
             lines.append(f"  触发{price(item.get('trigger'))}元  防守{price(item.get('defense'))}元  仓位{position_for(item)}")
 
@@ -1431,9 +1528,8 @@ def parse_args() -> argparse.Namespace:
         item.add_argument("--target", required=True)
         item.add_argument("--offline", action="store_true")
     sub.add_parser("watch")
-    sub.add_parser("show")
+    sub.add_parser("list")
     sub.add_parser("show-pending")
-    sub.add_parser("rank")
     sub.add_parser("plan")
     sub.add_parser("add-last")
     review = sub.add_parser("review")
@@ -1453,12 +1549,11 @@ def main() -> int:
     handlers = {
         "analyze": cmd_analyze,
         "add": cmd_add,
-        "show": cmd_show,
+        "list": cmd_list,
         "show-pending": cmd_show_pending,
         "add-pending": cmd_add_pending,
         "confirm-to-pool": cmd_confirm_to_pool,
         "compare": cmd_compare,
-        "rank": cmd_rank,
         "plan": cmd_plan,
         "add-last": cmd_add_last,
         "review": cmd_review,

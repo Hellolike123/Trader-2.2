@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from light_data import to_float
-from trader_shared.modifier_rule_engine import apply_score_modifiers, apply_livermore_scale
+from trader_shared.modifier_rule_engine import apply_score_modifiers
 
 # ── [2.3] Volume Profile 日内量价分布（可选，无则降级）────────────────────────────
 try:
@@ -572,27 +572,6 @@ try:
     from config import ATR_NORMAL_THRESHOLD
 except Exception:  # pragma: no cover - optional per skill
     ATR_NORMAL_THRESHOLD = 0.01
-
-
-def livermore_scale(status: str, score: float) -> int:
-    tier = apply_livermore_scale(status, score)
-    if tier is not None:
-        return tier
-    # Fallback to hardcoded logic
-    tier = 0
-    if status in {"优先候选", "低吸观察"}:
-        tier = 1
-        if score >= 90:
-            tier = 4
-        elif score >= 80:
-            tier = 3
-        elif score >= 65:
-            tier = 2
-    elif status in {"等转强", "防守观察", "防守观察，趋势下行谨慎"}:
-        tier = 2
-    elif status == "冲高减仓":
-        tier = 0
-    return min(tier, 5)
 
 
 def base_weight(atr_level: str) -> int:

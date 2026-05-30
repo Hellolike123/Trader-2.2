@@ -75,7 +75,6 @@ def analyze_target(target: str, provider: Any, lookback_days: int) -> dict[str, 
             ),
             2,
         )
-        livermore_tier = core.livermore_scale(status, score_val)
         lw_base = core.base_weight(atr_level)
         t0_action = t0_action_for(current, levels["main_support"], levels["support"], levels["resistance"], status)
         return {
@@ -108,8 +107,6 @@ def analyze_target(target: str, provider: Any, lookback_days: int) -> dict[str, 
             "chip_dist": chip_dist,
             "chip_weight": chip_weight,
             "volume_above_pct": chip_dist.get("volume_above_pct") if chip_dist else None,
-            "livermore_tier": livermore_tier,
-            "livermore_base_weight": lw_base,
         }
     except Exception as exc:
         return {
