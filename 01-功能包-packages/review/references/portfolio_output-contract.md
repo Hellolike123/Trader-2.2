@@ -2,40 +2,40 @@
 
 > **This is the absolute truth for valid output.** Never generate output from memory.
 
-## Default --targets output
+## Rotation Output (四阶段轮动)
 
 ```text
-轮动仓位 — xxx + xxx
+轮动仓位 — {name_a} + {name_b}
 
-🌍 大盘{level} | {note}
-📌 组合
-    主仓  xxx  仓位 xx%
-          状态：xxx
-          成本 xx.xx ｜ xxx 股 ｜ 浮盈 +/-x.x%
-    副仓  xxx  仓位 xx%
-    现金  xx%
+🔔 决策：不动 / 轮动（{类型}）
 
-🎯 操作
-  xxx（现价xx.xx元）
-    · 当前仓位：xx%
-    · 加仓：站稳 xx.xx + 回踩不破 → 加到 xx%
-    · 防守：跌破 xx.xx → 减至 xx%
-    · 止损：跌破 xx.xx → 清仓
+📝 分析
+  {name_a}在{stage}期，{reason}。
+  {name_b}在{stage}期，{reason}。
+  {conclusion}。
+
+📊 持仓
+  {name_a}：{stage}+{momentum} ｜ 现价 {price} ｜ 浮盈 {pnl}%
+  {name_b}：{stage}+{momentum} ｜ 现价 {price} ｜ 浮盈 {pnl}%
+
+🔁 轮动方案（仅轮动时显示）
+  从{name_a}减 {pct}%，释放约 {pct}% 总仓
+  {name_b}承接 {pct}%，剩余留现金
 
 📍 关键价位
-  xxx  买 xx.xx-xx.xx  防xx.xx  损xx.xx  减xx.xx
+  {name_a}：确认 {confirm} ｜ 防守 {stop}
+  {name_b}：确认 {confirm} ｜ 防守 {stop}
 
-🧭 结论  主仓  xxx  xx%（{status}）
-💡 分析  {advice}
+👀 触发条件
+  {name_a}跌破 {stop} → 减仓/清仓
+  {name_b}站上 {confirm} → 可以加仓
 ```
 
-No markdown tables. Use indented alignment. ATR uses plain language (波幅偏高/偏大/正常/较低).
+Rotation types: `风控退出`（清仓）、`强轮动`（1/3）、`轻轮动`（1/6）、`标准轮动`（25%）。
+
+No markdown tables. Use indented alignment.
 Do not output: `ATR14=`, `极端波动`, `高波动`, `低波动`.
-
-## Snapshot mode (--snapshot)
-
-Same structure above, with marker line `规则版本：trader_portfolio_rotation_v1` after the title.
 
 ## Old Output Detection
 
-If output contains markdown tables, rerun the script and return stdout verbatim.
+If output contains markdown tables or old format without stage info, rerun the script and return stdout verbatim.

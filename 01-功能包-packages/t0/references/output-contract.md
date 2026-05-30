@@ -2,7 +2,7 @@
 
 > **This is the absolute truth for valid/invalid output.** Never generate output format from memory.
 
-## Manual Card Output
+## Manual Card Output (精简为 4 部分)
 
 Must start with `🎯 T0 盯盘助理` and use this structure:
 
@@ -11,32 +11,19 @@ Must start with `🎯 T0 盯盘助理` and use this structure:
 {name}（{symbol}）｜现价 xx.xx（+/-x.xx%）
 
 🔍 扫描
-
 当前：不动 / 低吸 / 高抛
-买入：{状态}，观察{方向}。
-卖出：{状态}，观察{方向}。
+低吸：{状态}，{观察价}
+高抛：{状态}，{观察价}
+止损：xx.xx 元
 
-🚩 关键价位
-
-低吸观察：... | 高抛观察：...
-止损：xx.xx元 或 无
-
-🕒 今日关键事件
-
-{time} {description}
+📋 盘中动态
+{time} {icon} {event_description}
 ...
 
-💰 仓位管控
-
-当前：{action}
-触发后：{action}
-止损：xx.xx元 或 无
-
-👀 下一步只盯
-
-买入：...
-卖出：...
-止损：...
+👀 下一步
+买入：{观察价}是否5m止跌
+卖出：{观察价}是否冲高失败
+止损：跌破{止损价}后不再低吸
 ```
 
 ## Monitor Alert Output
@@ -64,6 +51,10 @@ T0 执行卡
 当前动作：
 先买后卖
 先卖后买
+🚩 关键价位
+🕒 今日关键事件
+💰 仓位管控
+👀 下一步只盯
 ```
 
 Valid manual output has no markdown tables, bullet lists, bold markers, blockquotes, or `##/###` headings.

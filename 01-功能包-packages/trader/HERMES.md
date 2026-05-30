@@ -1,15 +1,25 @@
 # trader
 
-A股交易决策辅助系统。单票分析 + 选股池管理整合技能包。
+A股交易决策辅助系统。单票分析 + 选股池管理。
 
-## 功能
+## ⚠️ 输出红线（最高优先级）
 
-- 单票技术分析报告（缠论/威科夫/筹码/ATR/融合层）
-- 选股池全生命周期管理（入池/排序/作战表/复盘/盯盘）
-- 信号生成与追踪
+1. 脚本输出的文本是最终格式，不要修改任何内容
+2. 不要添加脚本输出以外的解释、建议或总结
+3. 不要用 ##/### 标题、**粗体**、|表格|、>引用、- 列表
+4. 输出后必须跑 validate_output.py 校验
+5. 校验不通过 → 重新跑脚本，不要自己修格式
+6. 如果用户问格式相关问题，直接引用 output-contract.md
 
 ## 入口脚本
 
-- `scripts/final_report.py` — 单票分析报告
-- `scripts/final_pool.py` — 选股池管理
-- `scripts/run_analysis.py` — 核心分析引擎
+- `scripts/final_report.py --target <股票名>` — 单票分析
+- `scripts/final_pool.py <子命令>` — 选股池管理
+
+## 验证命令
+
+```bash
+python3 scripts/validate_output.py
+→ 返回 VALID_TRADER_OUTPUT=OK 才算通过
+→ 返回错误信息 → 重新跑脚本
+```
