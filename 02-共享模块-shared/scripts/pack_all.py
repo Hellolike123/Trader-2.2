@@ -228,41 +228,27 @@ def main(args: list[str] | None = None) -> int:
 
     stages: list[tuple[str, str, Path]] = []
 
-    # Stage the ONE unified super-skill 'trader' (all 6 pack folders merged)
-    print("\nStage Combined ONE Super-Skill: trader")
-    tmp_trader = Path(tempfile.mkdtemp(prefix="trader-unified-"))
-    staged_trader = tmp_trader / "trader"
-    staged_trader.mkdir(parents=True, exist_ok=True)
-    
-    # Merge all 6 package folders into the unified 'trader'
-    packages_to_merge = [
-        "01-单票分析-trader",
-        "02-盘中T0-t0-trader",
-        "03-选股池-trader-pool",
-        "04-仓位轮动-trader-portfolio",
-        "05-盘后复盘-review-trader",
-        "06-信号追踪-trader-tracking"
-    ]
-    
-    for d in packages_to_merge:
-        src_path = packages_dir / d
+    # Stage the 3 skills: trader, t0, review
+    skills_to_pack = ["trader", "t0", "review"]
+
+    for skill_name in skills_to_pack:
+        print(f"\nStage skill: {skill_name}")
+        tmp_dir = Path(tempfile.mkdtemp(prefix=f"{skill_name}-"))
+        staged = tmp_dir / skill_name
+        staged.mkdir(parents=True, exist_ok=True)
+
+        src_path = packages_dir / skill_name
         if src_path.exists():
             for item in src_path.iterdir():
                 if item.name in IGNORE_NAMES or item.suffix == ".pyc":
                     continue
-                dst_item = staged_trader / item.name
+                dst_item = staged / item.name
                 if item.is_dir():
                     if dst_item.exists():
-                        # 池包中的 run_analysis.py 是包装器，在 skill 里自我递归，跳过
-                        _skip_rel = set()
-                        if d == "03-选股池-trader-pool":
-                            _skip_rel.add("run_analysis.py")
                         for sub_item in item.rglob("*"):
                             if should_skip(sub_item):
                                 continue
                             rel_sub = sub_item.relative_to(item)
-                            if str(rel_sub) in _skip_rel:
-                                continue
                             sub_dst = dst_item / rel_sub
                             sub_dst.parent.mkdir(parents=True, exist_ok=True)
                             if not sub_item.is_dir():
@@ -272,57 +258,51 @@ def main(args: list[str] | None = None) -> int:
                 else:
                     shutil.copy2(item, dst_item)
 
-    # 复制顶层脚本和配置（不属于任何包目录）
-    _EXTRA_FILES = {
-        root / "scripts" / "t0_cron.py": "scripts/t0_cron.py",
-        root / "01-功能包-packages" / "01-单票分析-trader" / "requirements.txt": "requirements.txt",
+        # Copy shared modules into each skill
+        copy_shared(staged, skill_name)
+        stages.append((skill_name, "2.4.0", staged))
+
+    # Copy extra files to trader
+    if stages:
+        trader_staged = stages[0][2]
+        _EXTRA_FILES = {
+            root / "scripts" / "t0_cron.py": "scripts/t0_cron.py",
+        }
+        for _src, _rel in _EXTRA_FILES.items():
+            if _src.exists():
+                _dst = trader_staged / _rel
+                _dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(_src, _dst)
+
+    # --- Generate _meta.json and SKILL.md for each skill ---
+    meta_templates = {
+        "trader": {
+            "name": "trader",
+            "version": "2.4.0",
+            "description": "A股单票分析 + 选股池管理（四阶段定位）",
+        },
+        "t0": {
+            "name": "t0",
+            "version": "2.4.0",
+            "description": "A股盘中T0盯盘助理",
+        },
+        "review": {
+            "name": "review",
+            "version": "2.4.0",
+            "description": "A股盘后复盘 + 仓位轮动 + 信号统计",
+        },
     }
-    for _src, _rel in _EXTRA_FILES.items():
-        if _src.exists():
-            _dst = staged_trader / _rel
-            _dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(_src, _dst)
 
-    # Overwrite _meta.json and SKILL.md for the ONLY super-skill
-    meta_trader = {
-        "name": "trader",
-        "version": "1.0.0-unified-commander",
-        "contract": "trader_commander_v1",
-        "description": "Script-output skill. The ONLY unified A-Share Trader Commander. Use scripts/run_trader.py live --target <股票名> to diagnose, scripts/run_trader.py live --show to show ladder, scripts/run_trader.py live --monitor to monitor, and scripts/run_trader.py review --all to run end-to-end post-market review. Return stdout verbatim. Never handwrite, summarize, restyle, translate, or append follow-up lines."
-    }
-    (staged_trader / "_meta.json").write_text(json.dumps(meta_trader, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    
-    skill_trader_md = """---
-name: trader
-description: The ONLY unified A-Share Trader Commander for live trading & post-market review.
-version: 1.0.0-unified-commander
-author: Trader Central
-license: MIT
-platforms: [macos, linux]
-tags: [finance, stocks, terminal, python]
-metadata:
-  hermes:
-    tags: [Finance, AShare, Terminal, Python]
-    requires_toolsets: [terminal]
-dependencies: [python3]
-repository: local
-documentation: SKILL.md
----
+    for skill_slug, version, staged in stages:
+        # Write _meta.json
+        meta = meta_templates.get(skill_slug, {"name": skill_slug, "version": version})
+        (staged / "_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-# Trader (究极大一统指挥官)
-
-The ONLY unified commander for active live trading & automated post-market review.
-
-## Commands
-  - Diagnostic: `python3 scripts/run_trader.py live --target <股票名>`
-  - T0 Monitor: `python3 scripts/run_trader.py live --monitor`
-  - Show Ladder: `python3 scripts/run_trader.py live --show`
-  - One-click All: `python3 scripts/run_trader.py review --all`
-  - Single Review: `python3 scripts/run_trader.py review --target <股票名>`
-"""
-    (staged_trader / "SKILL.md").write_text(skill_trader_md, encoding="utf-8")
-    copy_shared(staged_trader, "trader")
-    stages.append(("trader", "1.0.0-unified-commander", staged_trader))
+        # Write SKILL.md if not already present
+        skill_md_path = staged / "SKILL.md"
+        if not skill_md_path.exists():
+            skill_md = f"---\nname: {skill_slug}\ndescription: {meta.get('description', '')}\nversion: {version}\n---\n\n# {skill_slug}\n\n{meta.get('description', '')}\n"
+            skill_md_path.write_text(skill_md, encoding="utf-8")
 
     # --- Compute shared bundle digest ---
     bundle_digests: dict[str, str] = {}
@@ -339,8 +319,8 @@ The ONLY unified commander for active live trading & automated post-market revie
             meta["shared_bundle"] = bundle_digests.get(skill_slug, "unknown")
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-    # --- Build individual super-skill zip ---
-    print("\n--- Packing Combined ONE Super-Skill ---")
+    # --- Build skill zips ---
+    print("\n--- Packing Skills ---")
     for skill_slug, version, staged in stages:
         zip_name = f"{skill_slug}.zip"
         zip_path = release_dir / zip_name
@@ -350,9 +330,10 @@ The ONLY unified commander for active live trading & automated post-market revie
             add_to_zip(staged, archive, arc_prefix="")
         print(f"  -> {zip_path.relative_to(output_dir)}  ({zip_path.stat().st_size / 1024:.0f} KB)")
 
-    # Clean up all redundant legacy zips inside release folder
-    for old_zip in ("trader-pool.zip", "trader-portfolio.zip", "review-trader.zip", 
-                    "trader-tracking.zip", "t0-trader.zip", "live-trader.zip", "review-commander.zip"):
+    # Clean up legacy zips
+    for old_zip in ("trader-pool.zip", "trader-portfolio.zip", "review-trader.zip",
+                    "trader-tracking.zip", "t0-trader.zip", "live-trader.zip",
+                    "review-commander.zip"):
         p = release_dir / old_zip
         if p.exists():
             p.unlink()
@@ -384,7 +365,7 @@ The ONLY unified commander for active live trading & automated post-market revie
                     meta_digest = "bad_meta"
             
             status = "ok" if has_meta and has_scripts and has_hermes and has_skill and empty_status != "EMPTY!" else "MISSING"
-            print(f"  [The Only Unified Super-Skill OK] {zip_path.name}  meta={has_meta} scripts={has_scripts} hermes={has_hermes} skill={has_skill} digest={meta_digest[:8]} {empty_status}")
+            print(f"  [{skill_slug}] {zip_path.name}  meta={has_meta} scripts={has_scripts} hermes={has_hermes} skill={has_skill} digest={meta_digest[:8]} {empty_status}")
 
     # Cleanup temp dirs
     for _, _, staged in stages:
