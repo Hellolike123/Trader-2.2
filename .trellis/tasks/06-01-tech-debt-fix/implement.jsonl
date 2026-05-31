@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend guidelines for code patterns"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Error handling patterns to follow"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Code quality standards"}
+{"file": "AGENTS.md", "reason": "Project conventions and module structure"}
+{"file": "AGENTS_DEEP.md", "reason": "Architecture details and data pipeline"}
