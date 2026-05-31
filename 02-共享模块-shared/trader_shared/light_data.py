@@ -705,13 +705,27 @@ def extract_jsonp(text: str) -> Any:
 
 
 def parse_trade_datetime(fields: list[str]) -> tuple[str, str | None]:
+    """Parse trade date/time from Tencent quote fields.
+
+    Tencent stores a 14-digit timestamp at fields[30]: "20260529161443".
+    Fallback: scan for 8-digit date or HH:MM:SS patterns.
+    """
     trade_date = datetime.now().strftime("%Y-%m-%d")
     trade_time = None
+
+    # 优先从 fields[30] 提取 14 位时间戳
+    if len(fields) > 30:
+        ts = str(fields[30]).strip()
+        if len(ts) >= 8 and ts[:8].isdigit():
+            trade_date = f"{ts[:4]}-{ts[4:6]}-{ts[6:8]}"
+            if len(ts) >= 14 and ts[8:14].isdigit():
+                trade_time = f"{ts[8:10]}:{ts[10:12]}:{ts[12:14]}"
+            return trade_date, trade_time
+
+    # Fallback: 从后往前扫描
     for item in reversed(fields):
         text = str(item).strip()
-        if re.fullmatch(r"\d{8}", text):
-            trade_date = f"{text[:4]}-{text[4:6]}-{text[6:]}"
-        elif re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
             trade_date = text
         elif re.fullmatch(r"\d{2}:\d{2}:\d{2}", text):
             trade_time = text
