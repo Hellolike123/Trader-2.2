@@ -507,7 +507,32 @@ def build_report(target: str) -> dict[str, Any]:
     )
     report["position_info"] = position_info
 
+    # 补全 JSON 输出需要的字段
     report = sync_report_with_data(report, levels)
+
+    # one_liner: 一句话总结
+    low_zone = str(report.get("low_zone") or f"{float(report.get('support', 0)):.2f}-{float(report.get('support', 0)) * 1.01:.2f}元")
+    report["one_liner"] = one_sentence(report, low_zone)
+
+    # t0_ref: T0 参考价位
+    report["t0_ref"] = {
+        "low_buy": float(report.get("support") or 0),
+        "high_sell": float(report.get("confirm") or 0),
+        "stop": float(report.get("stop") or 0),
+    }
+
+    # macd_status: MACD 方向
+    mom = levels.get("momentum", {})
+    if isinstance(mom, dict):
+        macd = mom.get("macd", {})
+        if isinstance(macd, dict):
+            report["macd_status"] = {
+                "histogram": macd.get("histogram"),
+                "golden_cross": macd.get("golden_cross", False),
+                "death_cross": macd.get("death_cross", False),
+                "positive": macd.get("positive", False),
+            }
+
     return report
 
 

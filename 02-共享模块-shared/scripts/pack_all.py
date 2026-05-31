@@ -203,6 +203,7 @@ def add_to_zip(staged: Path, archive: zipfile.ZipFile, arc_prefix: str = "") -> 
 def auto_install(stages: list[tuple[str, str, Path]]) -> None:
     hermes_dir = Path.home() / ".hermes" / "skills"
     hermes_dir.mkdir(parents=True, exist_ok=True)
+    backup_dir = hermes_dir / ".backup"
     
     # Clean up all obsolete directories to guarantee a single-skill workspace
     for old_skill in ("trader-pool", "trader-portfolio", "review-trader", "trader-tracking", 
@@ -215,6 +216,11 @@ def auto_install(stages: list[tuple[str, str, Path]]) -> None:
     for skill_slug, version, staged in stages:
         dest = hermes_dir / skill_slug
         if dest.exists():
+            # Backup existing skill before overwriting
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            backup_dest = backup_dir / f"{skill_slug}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            shutil.copytree(dest, backup_dest)
+            print(f"  [backup] {skill_slug} -> {backup_dest}")
             shutil.rmtree(dest)
         shutil.copytree(staged, dest)
         meta_path = dest / "_meta.json"

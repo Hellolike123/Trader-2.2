@@ -14,7 +14,7 @@ from validate_output import validate
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate and validate the final Trader report.")
     parser.add_argument("--target", required=True, help="A-share name or code, for example 南网科技 or 688248")
-    parser.add_argument("--output", choices=["markdown", "signal-json", "alert-text", "watch"], default="markdown")
+    parser.add_argument("--output", choices=["markdown", "json", "signal-json", "alert-text", "watch"], default="markdown")
     parser.add_argument("--write-signal", action="store_true", help="Write triggered signals to signals.jsonl")
     return parser.parse_args()
 
@@ -37,6 +37,10 @@ def main() -> int:
     if args.output == "signal-json":
         markdown = render_markdown(report)
         print(json.dumps(build_signal(report), ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    if args.output == "json":
+        print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
         return 0
 
     if args.output == "watch":
