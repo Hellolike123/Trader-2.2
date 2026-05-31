@@ -96,8 +96,7 @@ def _load_historical_regimes(signals: List[Dict[str, Any]]) -> Dict[str, str]:
         provider = get_provider()
         sec = provider.resolve_security(INDEX_CODE)
         # 拉取 250 日（约一年）日线数据以完全覆盖回测周期
-        raw_bars = provider.fetch_kline(sec, scale="240", datalen=250)
-        bars = normalize_bars(raw_bars) if raw_bars else []
+        bars = provider.fetch_qfq_daily(sec, days=250) or []
     except Exception:
         bars = []
 
