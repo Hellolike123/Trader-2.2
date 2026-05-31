@@ -516,7 +516,7 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
         "levels": levels,
         "theory": theory,
         "big_order": analyze_big_orders(bars_5m, tick_data=tick_data, focus_price=levels.get("key_pressure"), trade_date=selected_date),
-        "main_force": _get_main_force(target, bars),
+        "main_force": _get_main_force(target, daily),
         "macd_params": {
             "macd_line": daily_macd_params.get("macd_line"),
             "dea": daily_macd_params.get("dea"),
