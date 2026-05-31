@@ -355,7 +355,7 @@ def main(args: list[str] | None = None) -> int:
         if zip_path.exists():
             zip_path.unlink()
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            add_to_zip(staged, archive, arc_prefix="")
+            add_to_zip(staged, archive, arc_prefix=skill_slug)
         print(f"  -> {zip_path.relative_to(output_dir)}  ({zip_path.stat().st_size / 1024:.0f} KB)")
 
     # Clean up legacy zips
@@ -377,17 +377,19 @@ def main(args: list[str] | None = None) -> int:
         zip_path = release_dir / f"{skill_slug}.zip"
         with zipfile.ZipFile(zip_path, "r") as archive:
             names = archive.namelist()
-            has_meta = "_meta.json" in names
-            has_scripts = any(n.startswith("scripts/") for n in names)
-            has_hermes = "HERMES.md" in names
-            has_skill = "SKILL.md" in names
+            prefix = f"{skill_slug}/"
+            has_meta = f"{prefix}_meta.json" in names or "_meta.json" in names
+            has_scripts = any(n.startswith(f"{prefix}scripts/") or n.startswith("scripts/") for n in names)
+            has_hermes = f"{prefix}HERMES.md" in names or "HERMES.md" in names
+            has_skill = f"{prefix}SKILL.md" in names or "SKILL.md" in names
             empty_py = [n for n in names if n.endswith(".py") and archive.getinfo(n).file_size == 0]
             empty_status = "EMPTY!" if empty_py else ""
             
             meta_digest = "unknown"
-            if "_meta.json" in names:
+            meta_path = f"{prefix}_meta.json" if f"{prefix}_meta.json" in names else "_meta.json"
+            if meta_path in names:
                 try:
-                    meta = json.loads(archive.read("_meta.json").decode("utf-8"))
+                    meta = json.loads(archive.read(meta_path).decode("utf-8"))
                     meta_digest = meta.get("shared_bundle", "unknown")
                 except Exception:
                     meta_digest = "bad_meta"
