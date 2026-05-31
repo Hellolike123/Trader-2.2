@@ -35,6 +35,9 @@ import sys
 from typing import Any
 
 from safe_cast import safe_float
+from trader_shared._logging import get_logger
+
+_logger = get_logger(__name__)
 
 # ── [2.3] 贝叶斯融合（可选导入，无则降级） ───────────────────────────────────────────
 try:
@@ -66,9 +69,8 @@ def _log_fusion(result: dict) -> None:
             "signals": {k: v["direction"] for k, v in result["signals_detail"].items()},
         }
         print(f"FUSION: {json.dumps(log_data, ensure_ascii=False)}")
-    except (json.JSONDecodeError, TypeError):
-        # JSON 序列化失败不影响决策
-        pass
+    except (json.JSONDecodeError, TypeError, KeyError) as exc:
+        _logger.debug("Fusion log serialization failed: %s", exc)
 
 
 def _chan_to_signal(chan_result: dict) -> dict:
@@ -313,24 +315,24 @@ def merge_decisions(
     # 1. 信号标准化 (只读, 不修改输入)
     try:
         chan_signal = _chan_to_signal(chan_result)
-    except Exception:
-        print(f"FUSION-WARN: chanlun signal normalization failed", file=sys.stderr)
+    except (TypeError, KeyError) as exc:
+        _logger.warning("Chanlun signal normalization failed: %s", exc)
         chan_signal = {"direction": 0, "confidence": 0.0,
                        "reason": "缠论标准化异常", "raw_key": "chan"}
 
     try:
         momentum_signal = _momentum_to_signal(momentum_result)
-    except Exception:
-        print(f"FUSION-WARN: momentum signal normalization failed", file=sys.stderr)
+    except (TypeError, KeyError) as exc:
+        _logger.warning("Momentum signal normalization failed: %s", exc)
         momentum_signal = {"direction": 0, "confidence": 0.0,
                            "reason": "动量标准化异常", "raw_key": "momentum"}
 
     try:
         wyckoff_signal = _wyckoff_to_signal(wyckoff_result)
-    except Exception:
-        print(f"FUSION-WARN: wyckoff signal normalization failed", file=sys.stderr)
+    except (TypeError, KeyError) as exc:
+        _logger.warning("Wyckoff signal normalization failed: %s", exc)
         wyckoff_signal = {"direction": 0, "confidence": 0.0,
-                          "reason": "威科夫标准化异常", "raw_key": "wyckoff"}
+                           "reason": "威科夫标准化异常", "raw_key": "wyckoff"}
 
     # 2. 场景优先级过滤器 (Scenario Priority Filter)
     # 计算20日高低区间位置
@@ -442,7 +444,7 @@ def merge_decisions(
                 bayesian_used = True
                 bayesian_info = bayesian_res
         except Exception as exc:
-            print(f"FUSION-WARN: Bayesian fusion failed, falling back: {exc}", file=sys.stderr)
+            _logger.warning("Bayesian fusion failed, falling back: %s", exc)
 
     # ── [2.3扩展] 股东户数筹码集中验证 ──
     try:
@@ -450,8 +452,8 @@ def merge_decisions(
         if sh_trend.get("status") == "筹码集中" and weighted_score > 0:
             confidence *= 1.15
             confidence = min(confidence, 1.0)
-    except Exception:
-        pass
+    except (TypeError, AttributeError) as exc:
+        _logger.debug("Shareholder trend check failed: %s", exc)
 
     # ── [2.3扩展] 限售解禁一票否决风控 ──
     has_risk_unlock = False
@@ -473,10 +475,10 @@ def merge_decisions(
                         days_to_unlock = days
                         unlock_ratio = ratio
                         break
-                except Exception:
+                except (ValueError, TypeError):
                     continue
-    except Exception:
-        pass
+    except (TypeError, AttributeError) as exc:
+        _logger.debug("Unlock risk check failed: %s", exc)
 
     if has_risk_unlock:
         positive_actions = {"半仓试 (多方主导)", "半仓试 (多方主导但有分歧)", "增持", "等转强 (多方主导但有分歧)"}

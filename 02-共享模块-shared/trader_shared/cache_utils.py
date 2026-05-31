@@ -23,6 +23,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
+from trader_shared._logging import get_logger
+
+_logger = get_logger(__name__)
+
 CACHE_DIR = Path.home() / ".trader" / "cache"
 
 # Subdirectory constants
@@ -80,7 +84,8 @@ def get_cached(key: str, target: str, ttl: int = TTL_DAILY) -> CacheResult | Non
         data = json.loads(cache_file.read_text(encoding="utf-8"))
         stale = age > ttl
         return CacheResult(data=data, stale=stale, age_seconds=round(age, 1), source="file")
-    except Exception:
+    except (json.JSONDecodeError, OSError, ValueError) as exc:
+        _logger.debug("Cache read failed for %s/%s: %s", key, target, exc)
         return None
 
 
@@ -103,7 +108,8 @@ def set_cached(key: str, target: str, data: Any) -> None:
                 tmp_file.replace(cache_file)
             finally:
                 fcntl.flock(lock_f, fcntl.LOCK_UN)
-    except Exception:
+    except (OSError, TypeError) as exc:
+        _logger.warning("Cache write failed for %s/%s: %s", key, target, exc)
         tmp_file.unlink(missing_ok=True)
         raise
 
@@ -123,7 +129,8 @@ def set_cached_validated(
     try:
         set_cached(key, target, data)
         return True
-    except Exception:
+    except (OSError, TypeError) as exc:
+        _logger.debug("Validated cache write failed for %s/%s: %s", key, target, exc)
         return False
 
 
@@ -151,8 +158,46 @@ def fetch_fund_flow_cached(symbol: str) -> dict[str, Any]:
         result = {"daily_flow": daily_flow, "features": features}
         set_cached(CACHE_FUND_FLOW, symbol, result)
         return result
-    except Exception:
+    except (ImportError, OSError, ValueError) as exc:
+        _logger.debug("Fund flow fetch/cache failed for %s: %s", symbol, exc)
         return {}
+
+
+def cleanup_old_cache(max_age_days: int = 30) -> dict[str, int]:
+    """Remove cache files older than max_age_days.
+
+    Scans all subdirectories under CACHE_DIR and deletes .json files
+    whose modification time is older than max_age_days.
+
+    Args:
+        max_age_days: Maximum age in days. Files older than this are deleted.
+
+    Returns:
+        Dict with 'scanned', 'deleted', 'failed' counts.
+    """
+    if not CACHE_DIR.exists():
+        return {"scanned": 0, "deleted": 0, "failed": 0}
+
+    cutoff_time = time.time() - (max_age_days * 86400)
+    scanned = 0
+    deleted = 0
+    failed = 0
+
+    for cache_file in CACHE_DIR.rglob("*.json"):
+        scanned += 1
+        try:
+            if cache_file.stat().st_mtime < cutoff_time:
+                cache_file.unlink()
+                deleted += 1
+                _logger.debug("Cleaned old cache file: %s", cache_file)
+        except OSError as exc:
+            failed += 1
+            _logger.debug("Failed to clean cache file %s: %s", cache_file, exc)
+
+    if deleted > 0:
+        _logger.info("Cache cleanup: scanned=%d, deleted=%d, failed=%d", scanned, deleted, failed)
+
+    return {"scanned": scanned, "deleted": deleted, "failed": failed}
 
 
 def warm_pool_cache() -> dict[str, Any]:
@@ -178,7 +223,8 @@ def warm_pool_cache() -> dict[str, Any]:
             item["name"] for item in items
             if item.get("status") not in ("淘汰", "已退出")
         ]
-    except Exception:
+    except (json.JSONDecodeError, OSError, KeyError) as exc:
+        _logger.warning("Failed to read pool.json: %s", exc)
         return {"total": 0, "success": 0, "failed": 0, "skipped": 0, "errors": []}
 
     if not targets:
@@ -223,8 +269,8 @@ def warm_pool_cache() -> dict[str, Any]:
         sys.path.insert(0, str(root / "scripts"))
         from market_env import assess as _assess
         _assess()
-    except Exception:
-        pass
+    except (ImportError, OSError) as exc:
+        _logger.debug("Market env cache warm failed: %s", exc)
 
     # Warm fund flow cache
     ff_success = 0
@@ -239,9 +285,13 @@ def warm_pool_cache() -> dict[str, Any]:
         except Exception:
             ff_failed += 1
 
+    # Clean up old cache files (older than 30 days)
+    cleanup_result = cleanup_old_cache(max_age_days=30)
+
     return {
         "total": len(targets), "success": success, "failed": failed, "skipped": 0, "errors": errors,
         "fund_flow_success": ff_success, "fund_flow_failed": ff_failed,
+        "cache_cleanup": cleanup_result,
     }
 
 
@@ -261,8 +311,8 @@ def clear_cache(cache_type: str | None = None) -> int:
         try:
             f.unlink()
             count += 1
-        except Exception:
-            pass
+        except OSError as exc:
+            _logger.debug("Failed to delete cache file %s: %s", f, exc)
     return count
 
 

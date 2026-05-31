@@ -21,6 +21,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from trader_shared._logging import get_logger
+
+_logger = get_logger(__name__)
+
 # ── 阶段状态持久化（多日确认 + 锁定期）──────────────────────
 _STATE_FILE = Path.home() / ".trader" / "stage_state.json"
 
@@ -30,8 +34,8 @@ def _load_stage_state() -> dict[str, Any]:
     try:
         if _STATE_FILE.exists():
             return json.loads(_STATE_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        pass
+    except (json.JSONDecodeError, OSError) as exc:
+        _logger.debug("Stage state load failed: %s", exc)
     return {}
 
 
@@ -40,8 +44,8 @@ def _save_stage_state(state: dict[str, Any]) -> None:
     try:
         _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         _STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception:
-        pass
+    except OSError as exc:
+        _logger.debug("Stage state save failed: %s", exc)
 
 
 # ── 量价关系判定（核心维度，权重 50%）──────────────────────

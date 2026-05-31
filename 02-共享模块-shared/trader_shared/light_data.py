@@ -17,6 +17,10 @@ from typing import Any, Literal
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from trader_shared._logging import get_logger
+
+_logger = get_logger(__name__)
+
 try:
     from models import BarData, QuoteData
 except ImportError:
@@ -116,15 +120,16 @@ class APIRequestRateLimiter:
         try:
             with open(self.limit_file, "r") as f:
                 return json.load(f)
-        except Exception:
+        except (json.JSONDecodeError, OSError) as exc:
+            _logger.debug("Rate limiter load failed: %s", exc)
             return {"calls": []}
 
     def _save(self, data: dict[str, list[float]]) -> None:
         try:
             with open(self.limit_file, "w") as f:
                 json.dump(data, f)
-        except Exception:
-            pass
+        except OSError as exc:
+            _logger.debug("Rate limiter save failed: %s", exc)
 
     def check_and_record(self, max_per_min: int = 15, max_per_hour: int = 80) -> bool:
         """Return True if allowed, False if throttled."""
@@ -147,6 +152,20 @@ class APIRequestRateLimiter:
         return True
 
 _API_RATE_LIMITER = APIRequestRateLimiter()
+
+# Minimum delay between consecutive API calls (seconds)
+_API_CALL_DELAY = 0.1
+_last_api_call_time: float = 0.0
+
+
+def _rate_limit_delay() -> None:
+    """Enforce minimum delay between consecutive API calls."""
+    global _last_api_call_time
+    now = time.time()
+    elapsed = now - _last_api_call_time
+    if elapsed < _API_CALL_DELAY:
+        time.sleep(_API_CALL_DELAY - elapsed)
+    _last_api_call_time = time.time()
 
 _TDX3_CLIENT: TdxHq_API | None = None
 
@@ -770,6 +789,7 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
 
     # Tencent HTTP first — fast and stable for most cases
     try:
+        _rate_limit_delay()
         text = http.get_text(TENCENT_QUOTE_URL + sec.qq_symbol, encoding="gbk")
         match = re.search(r'="([^"]*)"', text)
         if match and len(match.group(1).split("~")) >= 35:
@@ -795,8 +815,8 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
             }
             save_realtime_cache(cache_key, tencent_q)
             return sanitize_quote(tencent_q)
-    except Exception:
-        pass
+    except (OSError, ValueError, KeyError) as exc:
+        _logger.debug("Tencent HTTP quote failed for %s: %s", sec.qq_symbol, exc)
 
     # Fallback: pytdx3 (fast timeout, mainly a backup)
     if _check_pytdx3():
@@ -817,6 +837,7 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
         return sanitize_quote(mootdx_q)
 
     def do_fetch():
+        _rate_limit_delay()
         text = http.get_text(TENCENT_QUOTE_URL + sec.qq_symbol, encoding="gbk")
         match = re.search(r'="([^"]*)"', text)
         if not match:
@@ -892,8 +913,8 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
         file_cached = _cached_result.data if _cached_result is not None else None
         if file_cached is not None and isinstance(file_cached, list) and len(file_cached) >= 200:
             return file_cached
-    except Exception:
-        pass
+    except (ImportError, OSError) as exc:
+        _logger.debug("File cache read failed for %s: %s", sec.code, exc)
 
     # Tencent HTTP first — fast and stable
     raw_params = f"_var=kline_dayhfq&param={sec.qq_symbol},day,,,{max(days, 20)},qfq"
@@ -904,6 +925,7 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
         return cached
 
     def do_fetch():
+        _rate_limit_delay()
         full_url = f"{TENCENT_FQKLINE_URL}?{raw_params}"
         payload = extract_jsonp(http.get_text(full_url))
         sec_data = (payload.get("data") or {}).get(sec.qq_symbol) or {}
@@ -949,8 +971,8 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
         try:
             from trader_shared.cache_utils import set_cached_validated, validate_bars, CACHE_DAILY
             set_cached_validated(CACHE_DAILY, sec.code, result, validate_bars)
-        except Exception:
-            pass
+        except (ImportError, OSError) as exc:
+            _logger.debug("File cache write failed for %s: %s", sec.code, exc)
         return result
     except RuntimeError:
         pass
@@ -1102,6 +1124,7 @@ def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dic
         from urllib.request import Request, urlopen
         import json
         
+        _rate_limit_delay()
         url = f"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={sec.qq_symbol}&scale={scale}&ma=no&datalen={datalen}"
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36",
@@ -1130,7 +1153,7 @@ def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dic
                 })
             return bars
     except Exception as e:
-        warnings.warn(f"⚠️ Sina HTTP fallback failed: {e}. Trying akshare as last resort.")
+        _logger.debug("Sina HTTP fallback failed for %s %s: %s", sec.qq_symbol, interval, e)
 
     try:
         import akshare as ak
@@ -1160,7 +1183,8 @@ def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dic
                 "amount": to_float(row_dict.get("成交额") or row_dict.get("amount")),
             })
         return bars[-datalen:] if len(bars) > datalen else bars
-    except Exception:
+    except (ImportError, OSError, ValueError) as exc:
+        _logger.debug("AkShare fallback failed for %s %s: %s", sec.qq_symbol, interval, exc)
         return None
 
 
@@ -1177,8 +1201,8 @@ def _fetch_fund_flow_safe(target: str) -> dict[str, Any]:
             if daily_flow:
                 mf = detect_main_force_stage(features)
                 return {"features": features, "stage": mf}
-    except Exception:
-        pass
+    except (ImportError, OSError, ValueError) as exc:
+        _logger.debug("Fund flow fetch failed for %s: %s", target, exc)
     return {}
 
 
@@ -1223,8 +1247,8 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
         try:
             from trader_shared.cache_utils import merge_daily_bars_with_quote
             daily_bars = merge_daily_bars_with_quote(daily_bars, quote)
-        except Exception:
-            pass
+        except (ImportError, OSError) as exc:
+            _logger.debug("Daily bars merge failed: %s", exc)
 
     if include_5m and not bars_5m and "bars_5m" not in missing_sources:
         missing_sources.append("bars_5m")

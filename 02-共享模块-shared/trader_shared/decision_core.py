@@ -7,6 +7,9 @@ from typing import Any
 from light_data import to_float
 from safe_cast import safe_float, safe_dict
 from trader_shared.modifier_rule_engine import apply_score_modifiers
+from trader_shared._logging import get_logger
+
+_logger = get_logger(__name__)
 
 # ── [2.3] Volume Profile 日内量价分布（可选，无则降级）────────────────────────────
 try:
@@ -41,9 +44,8 @@ def _get_engine() -> Any:
                 from trader_shared.rule_engine import RuleEngine
                 _engine = RuleEngine.from_yaml(str(rules_path))
                 return _engine
-            except Exception as exc:
-                print(f"WARN: rule engine loaded from {rules_path} but evaluation failed: {exc}", file=sys.stderr)
-                pass
+            except (ImportError, OSError, ValueError) as exc:
+                _logger.warning("Rule engine loaded from %s but evaluation failed: %s", rules_path, exc)
 
     _engine = None
     return None

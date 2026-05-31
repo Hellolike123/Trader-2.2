@@ -20,6 +20,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal, Protocol, runtime_checkable
 
+from trader_shared._logging import get_logger
+
+_logger = get_logger(__name__)
+
 # -------- inject shared paths so we can import light_data / models --------
 _shared = Path(__file__).resolve().parents[1]
 _market_data = _shared / "01-行情数据-market-data"
@@ -160,8 +164,8 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
                     extend_fundamental=extend_fundamental,
                     extend_sentiment=extend_sentiment,
                 )
-    except Exception:
-        pass
+    except (ImportError, OSError) as exc:
+        _logger.debug("Enrich file cache read failed for %s: %s", sec.code, exc)
 
     # ── 层2: 内存缓存命中 (TTL 10分钟) ──
     now = time.time()
@@ -208,8 +212,8 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
                     "extend_fundamental": extend_fundamental,
                     "extend_sentiment": extend_sentiment,
                 })
-            except Exception:
-                pass
+            except (ImportError, OSError) as exc:
+                _logger.debug("Enrich file cache write failed for %s: %s", sec.code, exc)
 
             return dataclasses.replace(
                 snap,
@@ -217,8 +221,7 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
                 extend_sentiment=extend_sentiment,
             )
     except Exception as e:
-        import sys
-        print(f"📡 [DataProvider-Enrich-Warn]: Failed to enrich snapshot with advanced metrics: {e}", file=sys.stderr)
+        _logger.warning("Failed to enrich snapshot with advanced metrics for %s: %s", sec.code, e)
         return snap
 
 

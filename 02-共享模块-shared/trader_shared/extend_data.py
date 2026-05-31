@@ -12,6 +12,10 @@ from typing import Any
 import requests
 import pandas as pd
 
+from trader_shared._logging import get_logger
+
+_logger = get_logger(__name__)
+
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 DATACENTER_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 
@@ -21,8 +25,8 @@ def _http_get_json(url: str, params: dict[str, Any] | None = None) -> dict:
         r = requests.get(url, params=params, headers={"User-Agent": UA}, timeout=10)
         if r.status_code == 200:
             return r.json()
-    except Exception as e:
-        warnings.warn(f"[extend_data] HTTP GET JSON 失败: {e}")
+    except (requests.RequestException, ValueError) as e:
+        _logger.debug("HTTP GET JSON failed for %s: %s", url, e)
     return {}
 
 def _http_get_text(url: str, referer: str | None = None, encoding: str = "utf-8") -> str:
@@ -35,8 +39,8 @@ def _http_get_text(url: str, referer: str | None = None, encoding: str = "utf-8"
         r.encoding = encoding
         if r.status_code == 200:
             return r.text
-    except Exception as e:
-        warnings.warn(f"[extend_data] HTTP GET text 失败: {e}")
+    except requests.RequestException as e:
+        _logger.debug("HTTP GET text failed for %s: %s", url, e)
     return ""
 
 def eastmoney_datacenter(report_name: str, filter_str: str = "", page_size: int = 10, sort_columns: str = "", sort_types: str = "-1") -> list[dict]:
@@ -83,8 +87,8 @@ def ths_hot_reason(date_str: str | None = None) -> pd.DataFrame:
                     "close": "收盘价", "zhangfu": "涨幅%", "huanshou": "换手率%",
                 }
                 return df.rename(columns=rename_map)
-    except Exception:
-        pass
+    except (requests.RequestException, ValueError, KeyError) as exc:
+        _logger.debug("THS hot reason fetch failed for %s: %s", date_str, exc)
     return pd.DataFrame()
 
 
@@ -129,7 +133,8 @@ class ExtendDataProvider:
                 "change_pct": round(change, 2),
                 "status": status
             }
-        except Exception:
+        except (TypeError, ValueError, KeyError) as exc:
+            _logger.debug("Shareholder trend parse failed for %s: %s", code, exc)
             return {"status": "数据不足", "change_pct": 0.0, "latest_notice_date": "", "latest_holder_num": 0.0}
 
     @staticmethod
@@ -215,8 +220,8 @@ class ExtendDataProvider:
                             "max_eps": str(row_dict.get("最大值", ""))
                         })
                     return {"rows": rows, "source": "ths"}
-        except Exception:
-            pass
+        except (ValueError, KeyError) as exc:
+            _logger.debug("THS EPS pandas parse failed for %s: %s", code, exc)
 
         # 方式 2: 正则回退解析 (针对无 lxml 库或 Pandas 解析失败的情况)
         try:
@@ -248,7 +253,7 @@ class ExtendDataProvider:
                         })
             if rows:
                 return {"rows": rows, "source": "ths-regex"}
-        except Exception:
-            pass
+        except (ValueError, KeyError) as exc:
+            _logger.debug("THS EPS regex parse failed for %s: %s", code, exc)
 
         return {"rows": [], "source": "ths"}

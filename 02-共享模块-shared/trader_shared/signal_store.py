@@ -17,6 +17,9 @@ from .signal_utils import (
     normalize_symbol,
     price_from_trigger,
 )
+from trader_shared._logging import get_logger
+
+_logger = get_logger(__name__)
 
 
 def _get_default_store_path() -> Path:
@@ -58,8 +61,8 @@ def _maybe_rotate(store_path: Path) -> None:
                     fcntl.flock(f, fcntl.LOCK_UN)
             # Truncate current file
             store_path.write_text("", encoding="utf-8")
-    except Exception:
-        pass  # rotation failure should not block signal writing
+    except (OSError, json.JSONDecodeError) as exc:
+        _logger.warning("Signal rotation failed: %s", exc)  # rotation failure should not block signal writing
 
 
 def append_signal(signal: dict[str, Any], path: Path | None = None) -> str:
@@ -143,7 +146,7 @@ def _read_store(store_path: Path) -> list[dict[str, Any]]:
                 continue
             try:
                 item = json.loads(line)
-            except Exception as e:
+            except (json.JSONDecodeError, ValueError) as e:
                 _bad_line_count += 1
                 _bad_line_last_reason = str(e)
                 continue

@@ -5,6 +5,9 @@ from typing import Any
 
 from light_data import pct_change, to_float
 from safe_cast import safe_float
+from trader_shared._logging import get_logger
+
+_logger = get_logger(__name__)
 
 # ── [2.3] HMM 大势检测器（可选导入，阵列中无则降级）──────────────────────────────
 try:
@@ -63,7 +66,8 @@ def _check_time_window(bars: list[BarData], chan_result: dict[str, Any] | None =
     """安全包装 time_window_detector，异常时静默降级。"""
     try:
         return _check_time_windows_raw(bars, chan_result)
-    except Exception:
+    except (TypeError, ValueError) as exc:
+        _logger.debug("Time window check failed: %s", exc)
         return {"window_active": False, "window_type": "", "bars_since_pivot": 0, "tolerance": 0, "all_active": []}
 
 
@@ -277,8 +281,8 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None, index_returns: lis
                 hmm_adj = hmm_mult.get(k, 1.0)
                 # 真混合：base 和 HMM 推荐值各占 50%，确保 HMM 有足够纠偏力
                 multipliers[k] = round(base * 0.5 + hmm_adj * 0.5, 4)
-        except Exception:  # 任何 HMM 异常静默降级
-            pass
+        except (TypeError, ValueError) as exc:  # 任何 HMM 异常静默降级
+            _logger.debug("HMM regime detection failed: %s", exc)
 
     if fusion_result is None:
         return multipliers
@@ -363,7 +367,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     # P3 安全模式：THEORY_ADJUST_LOG_ONLY=true 时只记录不生效
     try:
         from config import THEORY_ADJUST_LOG_ONLY
-    except Exception:
+    except (ImportError, AttributeError):
         THEORY_ADJUST_LOG_ONLY = False
     if THEORY_ADJUST_LOG_ONLY and any(v != 1.0 for v in theory.values()):
         print(f"THEORY-ADJUST-LOG: multipliers={theory} (suppressed by THEORY_ADJUST_LOG_ONLY)")
@@ -440,7 +444,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     # ── P0: ATR 移动止损 ──
     try:
         from config import ENABLE_TRAILING_STOP, TRAILING_STOP_ATR_MULTIPLE
-    except Exception:
+    except (ImportError, AttributeError):
         ENABLE_TRAILING_STOP = False
         TRAILING_STOP_ATR_MULTIPLE = 3.0
 

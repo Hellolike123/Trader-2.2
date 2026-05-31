@@ -10,6 +10,10 @@ from datetime import datetime
 from contextlib import contextmanager
 from typing import Iterator
 
+from trader_shared._logging import get_logger
+
+_logger = get_logger(__name__)
+
 class DataManager:
     """
     统一数据总线管理器
@@ -60,8 +64,9 @@ class DataManager:
                 data = json.load(f)
                 fcntl.flock(f, fcntl.LOCK_UN)
                 return data
-        except Exception as e:
+        except (json.JSONDecodeError, OSError) as e:
             # 文件损坏时自动备份并返回默认值
+            _logger.warning("State file corrupted for %s, creating backup: %s", key, e)
             backup = target_path.with_suffix(target_path.suffix + f".broken-{datetime.now().strftime('%Y%m%d%H%M%S')}")
             shutil.copy2(target_path, backup)
             return default
@@ -91,8 +96,9 @@ class DataManager:
                     fcntl.flock(old_f, fcntl.LOCK_UN)
             else:
                 os.replace(tmp_path, target_path)
-        except OSError:
+        except OSError as exc:
             # Fallback 强制替换
+            _logger.debug("Atomic replace failed for %s, forcing: %s", key, exc)
             os.replace(tmp_path, target_path)
 
     @classmethod
