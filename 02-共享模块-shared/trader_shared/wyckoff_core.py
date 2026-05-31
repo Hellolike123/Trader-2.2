@@ -17,7 +17,7 @@ except ImportError:
 try:
     from trader_shared.config import WYCKOFF_SPRING_RECLAIM_RATIO
 except ImportError:
-    WYCKOFF_SPRING_RECLAIM_RATIO = 0.92
+    WYCKOFF_SPRING_RECLAIM_RATIO = 0.97
 
 try:
     from trader_shared.config import WYCKOFF_DIVERGENCE_BARS
@@ -46,7 +46,7 @@ def _detect_spring(bars: list[dict]) -> dict:
 
     breach_level = support * WYCKOFF_SPRING_RECLAIM_RATIO
 
-    if current_low >= breach_level or current_close < breach_level:
+    if current_low >= breach_level or current_close < support:
         return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "未满足弹簧条件"}
 
     avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
@@ -77,7 +77,7 @@ def _detect_upthrust(bars: list[dict]) -> dict:
         return {"upthrust_signal": False, "upthrust_price": 0.0, "upthrust_reason": "数据异常"}
 
     breakout_level = resistance * 1.02
-    reclaim_level = resistance * 0.98
+    reclaim_level = resistance * 0.995
 
     if current_high <= breakout_level or current_close >= reclaim_level:
         return {"upthrust_signal": False, "upthrust_price": 0.0, "upthrust_reason": "未满足上冲回落条件"}
@@ -105,14 +105,18 @@ def _detect_volume_divergence(bars: list[dict]) -> tuple[bool, bool]:
         prices.append(close_val)
         volumes.append(vol_val)
 
+    # Split into two halves and compare average volume
+    mid = len(prices) // 2
+    first_half_avg_vol = sum(volumes[:mid]) / max(mid, 1)
+    second_half_avg_vol = sum(volumes[mid:]) / max(len(volumes) - mid, 1)
+
     max_price_idx = max(range(len(prices)), key=lambda i: prices[i])
     min_price_idx = min(range(len(prices)), key=lambda i: prices[i])
-    max_vol_idx = max(range(len(volumes)), key=lambda i: volumes[i])
 
-    # 看空背离：价格在上升趋势中创新高（峰值高于起点），但量能峰值出现在价格峰值之前（量能萎缩）
-    bearish = (prices[max_price_idx] > prices[0]) and (max_price_idx > max_vol_idx)
-    # 看多背离：价格在下降趋势中创新低（谷值低于起点），但量能峰值出现在价格谷值之前（抛压释放）
-    bullish = (prices[min_price_idx] < prices[0]) and (min_price_idx > max_vol_idx)
+    # 看空背离：价格在上升趋势中创新高（峰值高于起点），但后半段平均量低于前半段（量能萎缩）
+    bearish = (prices[max_price_idx] > prices[0]) and (second_half_avg_vol < first_half_avg_vol * 0.8)
+    # 看多背离：价格在下降趋势中创新低（谷值低于起点），但后半段平均量低于前半段（抛压释放）
+    bullish = (prices[min_price_idx] < prices[0]) and (second_half_avg_vol < first_half_avg_vol * 0.8)
 
     return bearish, bullish
 

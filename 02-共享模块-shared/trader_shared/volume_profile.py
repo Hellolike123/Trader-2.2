@@ -83,13 +83,27 @@ class VolumeProfile:
         bin_centers = (self.price_bins[:-1] + self.price_bins[1:]) / 2
         self.volume_by_price = np.zeros(self.n_bins)
 
-        # 将每根 K 线成交量均匀分配到价格区间内
+        # 将每根 K 线成交量按价格区间重叠比例分配
         for h, l, v in valid_bars:
             # 找出与 [l, h] 重叠的所有 bin
             mask = (self.price_bins[1:] >= l) & (self.price_bins[:-1] <= h)
             n_overlap = mask.sum()
             if n_overlap > 0:
-                self.volume_by_price[mask] += v / n_overlap
+                # 按每个 bin 与 [l, h] 的重叠价格区间比例分配量能
+                overlap_bins = np.where(mask)[0]
+                total_overlap_range = 0.0
+                overlap_ranges = []
+                for idx in overlap_bins:
+                    bin_lo = float(self.price_bins[idx])
+                    bin_hi = float(self.price_bins[idx + 1])
+                    overlap_lo = max(bin_lo, l)
+                    overlap_hi = min(bin_hi, h)
+                    overlap_range = max(0.0, overlap_hi - overlap_lo)
+                    overlap_ranges.append(overlap_range)
+                    total_overlap_range += overlap_range
+                if total_overlap_range > 0:
+                    for i, idx in enumerate(overlap_bins):
+                        self.volume_by_price[idx] += v * (overlap_ranges[i] / total_overlap_range)
 
         # 计算 POC（成交量最多的价格节点）
         poc_idx = int(np.argmax(self.volume_by_price))

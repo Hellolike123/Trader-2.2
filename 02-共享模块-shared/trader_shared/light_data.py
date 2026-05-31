@@ -550,6 +550,7 @@ class MarketSnapshot:
     order_book: dict[str, Any] | None = None
     tick_data: list[dict[str, Any]] = field(default_factory=list)
     data_status: DataStatus = "full"
+    data_freshness: str = "live"
     missing_sources: list[str] = field(default_factory=list)
     source_errors: dict[str, str] = field(default_factory=dict)
     fetched_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
@@ -560,13 +561,16 @@ class MarketSnapshot:
 
 
 def is_trading_time() -> bool:
-    """判断当前是否是交易时间（9:30-15:00，周末返回False）"""
-    now = datetime.now()
-    if now.weekday() >= 5:  # 周六、周日
-        return False
-    current_time = now.hour * 100 + now.minute
-    # 9:30-11:30 或 13:00-15:00
-    return (930 <= current_time <= 1130) or (1300 <= current_time <= 1500)
+    """判断当前是否是交易时间（9:25-15:00，周末/节假日返回False）"""
+    try:
+        from trader_shared.trading_context import is_trading_time as _itt
+        return _itt()
+    except ImportError:
+        now = datetime.now()
+        if now.weekday() >= 5:
+            return False
+        current_time = now.hour * 100 + now.minute
+        return (930 <= current_time <= 1130) or (1300 <= current_time <= 1500)
 
 
 def get_cache_key(url: str, params: dict[str, Any] | None = None) -> str:
@@ -786,6 +790,7 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
                 "current_change_pct": to_float(fields[32]) if len(fields) > 32 else None,
                 "data_source": "tencent-http",
                 "data_status": "full",
+                "data_freshness": "live" if is_trading_time() else "stale",
             }
             save_realtime_cache(cache_key, tencent_q)
             return sanitize_quote(tencent_q)
@@ -882,7 +887,8 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
     # ── 文件缓存读取（盘后预缓存的数据，TTL 24小时）──
     try:
         from trader_shared.cache_utils import get_cached as _file_cached, CACHE_DAILY, TTL_DAILY
-        file_cached = _file_cached(CACHE_DAILY, sec.code, ttl=TTL_DAILY)
+        _cached_result = _file_cached(CACHE_DAILY, sec.code, ttl=TTL_DAILY)
+        file_cached = _cached_result.data if _cached_result is not None else None
         if file_cached is not None and isinstance(file_cached, list) and len(file_cached) >= 200:
             return file_cached
     except Exception:
@@ -1227,6 +1233,7 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
         order_book=order_book,
         tick_data=tick_data,
         data_status=data_status,
+        data_freshness="live" if is_trading_time() else "stale",
         missing_sources=missing_sources,
         source_errors=source_errors,
     )

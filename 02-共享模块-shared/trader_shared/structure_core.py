@@ -4,6 +4,7 @@ import os
 from typing import Any
 
 from light_data import pct_change, to_float
+from safe_cast import safe_float
 
 # ── [2.3] HMM 大势检测器（可选导入，阵列中无则降级）──────────────────────────────
 try:
@@ -158,7 +159,7 @@ def choose_level(levels: list[dict[str, Any]], current: float, *, below: bool) -
 
     def sort_key(item: dict[str, Any]) -> tuple[float, float]:
         distance = abs(float(item["price"]) - current) / max(current, 1)
-        weight = float(item.get("weight") or 0)
+        weight = safe_float(item, "weight")
         return (distance / max(weight, 0.1), distance)
 
     return sorted(candidates, key=sort_key)[0]
@@ -255,12 +256,7 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None, index_returns: lis
         "stop_buffer":     cal_subset.get("stop_buffer", 1.0),
     }
 
-
     # 层-1：均线大势 Regime
-    regime = "正常"
-    if fusion_result is not None:
-        regime = fusion_result.get("regime", "正常")
-
     if regime in ("偏弱", "很差"):
         multipliers["stop_buffer"] = multipliers["stop_buffer"] * 0.8
         multipliers["confirm_buffer"] = multipliers["confirm_buffer"] * 1.3
@@ -269,10 +265,6 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None, index_returns: lis
         multipliers["confirm_buffer"] = multipliers["confirm_buffer"] * 0.8
 
     # 层-2：[2.3新增] HMM 前瞻 Regime 进一步徣化（50% 叠加）
-    hmm_state = None
-    if fusion_result is not None and isinstance(fusion_result, dict):
-        hmm_state = fusion_result.get("hmm_regime")
-
     if _HMM_AVAILABLE and _HMM_REGIME_ENABLED and (hmm_state or (index_returns and len(index_returns) >= 20)):
         try:
             if hmm_state:
@@ -301,7 +293,7 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None, index_returns: lis
     if isinstance(chan, dict):
         reason = str(chan.get("reason", ""))
         direction = chan.get("direction", 0)
-        confidence = float(chan.get("confidence", 0))
+        confidence = safe_float(chan, "confidence")
         # 上攻笔/三买/底背驰 → 低吸区更宽
         if direction == 1 and confidence >= 0.4:
             if any(kw in reason for kw in ("三类买", "二类买", "一类买", "拉升段", "底背驰")):
@@ -316,7 +308,7 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None, index_returns: lis
     if isinstance(wyk, dict):
         reason = str(wyk.get("reason", ""))
         direction = wyk.get("direction", 1)
-        confidence = float(wyk.get("confidence", 0))
+        confidence = safe_float(wyk, "confidence")
         # Spring / 看多背离 → 突破更可信，确认缓冲收窄
         if direction == 1 and confidence >= 0.5:
             if "弹簧" in reason or "看多" in reason:
@@ -329,7 +321,7 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None, index_returns: lis
     mom = signals_detail.get("momentum", {})
     if isinstance(mom, dict):
         direction = mom.get("direction", 0)
-        confidence = float(mom.get("confidence", 0))
+        confidence = safe_float(mom, "confidence")
         # 动量强势 → space阈值收窄（更激进，空间小也给进）
         if direction == 1 and confidence >= 0.5:
             multipliers["space_threshold"] = multipliers["space_threshold"] * 0.80
@@ -361,8 +353,8 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     add_ma_levels(support_levels, current, ma_values, below=True)
     add_ma_levels(resistance_levels, current, ma_values, below=False)
 
-    support = choose_level(support_levels, current, below=True)
-    resistance = choose_level(resistance_levels, current, below=False)
+    support = choose_level(support_levels, current, below=True) if support_levels else {"name": "现价兜底", "price": round(current, 2), "weight": 0.1}
+    resistance = choose_level(resistance_levels, current, below=False) if resistance_levels else {"name": "现价兜底", "price": round(current, 2), "weight": 0.1}
     support_price = float(support["price"])
 
     # confirm_price: 需要放量站稳的启动确认价（阻力位 + 缓冲）
@@ -453,7 +445,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     trailing_stop = None
     highest_close = None
     if ENABLE_TRAILING_STOP and atr_pct and atr_pct > 0:
-        closes = [to_float(b.get("close")) for b in bars if to_float(b.get("close")) is not None]
+        closes = [v for b in bars if (v := to_float(b.get("close"))) is not None]
         if closes:
             highest_close = max(closes)
             trailing_stop = round(highest_close * (1 - atr_pct * TRAILING_STOP_ATR_MULTIPLE), 2)

@@ -21,8 +21,8 @@ import numpy as np
 from typing import List, Tuple
 
 # 状态标签映射
-REGIME_LABELS = {0: "低波上涨", 1: "高波下跌", 2: "宽幅震荡"}
-REGIME_EN = {0: "bull", 1: "bear", 2: "range"}
+REGIME_LABELS = {0: "低波上涨", 1: "宽幅震荡", 2: "高波下跌"}
+REGIME_EN = {0: "bull", 1: "range", 2: "bear"}
 
 # 最小数值精度保护，防止 log(0) 或除零
 _EPS = 1e-10
@@ -101,7 +101,7 @@ class HMMRegimeDetector:
         return beta
 
     def _baum_welch(self, obs: np.ndarray) -> float:
-        """单次 Baum-Welch EM 迭代，返回对数似然增量。"""
+        """单次 Baum-Welch EM 迭代，返回对数似然（参数更新后重新计算）。"""
         T = len(obs)
         B = self._gaussian_emission(obs)
         alpha, c = self._forward(B)
@@ -134,7 +134,10 @@ class HMMRegimeDetector:
             diff = obs - self.mu[k]
             self.sigma[k] = max(np.sqrt((g_k * diff**2).sum() / g_sum), _EPS)
 
-        log_likelihood = np.sum(np.log(np.clip(c, _EPS, None)))
+        # 参数更新后重新计算对数似然（避免 off-by-one：用旧参数的 c 检查收敛）
+        B_new = self._gaussian_emission(obs)
+        _, c_new = self._forward(B_new)
+        log_likelihood = np.sum(np.log(np.clip(c_new, _EPS, None)))
         return log_likelihood
 
     def _viterbi(self, obs: np.ndarray) -> np.ndarray:
@@ -176,7 +179,7 @@ class HMMRegimeDetector:
             self（链式调用）
         """
         obs = np.array(returns, dtype=float)
-        if len(obs) < 10:
+        if len(obs) < 30:
             return self  # 数据不足，保持先验参数
 
         prev_ll = -np.inf

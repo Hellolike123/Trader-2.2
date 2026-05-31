@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from light_data import to_float
+from safe_cast import safe_float, safe_dict
 from trader_shared.modifier_rule_engine import apply_score_modifiers
 
 # ── [2.3] Volume Profile 日内量价分布（可选，无则降级）────────────────────────────
@@ -108,10 +109,10 @@ def _trend_filter(bars: list[dict[str, Any]]) -> bool:
 
 
 def _ma250_check(current: float, bars: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """250日线一票否决：价格在年线下方直接返回拦截结果。
+    """250日线检查：价格在年线下方时返回提醒信息（不再一票否决）。
 
     Returns:
-        None if pass (price above MA250), dict with拦截信息 if fail.
+        None if pass (price above MA250), dict with提醒信息 if below MA250.
     """
     closes = _close(bars)
     if len(closes) < TREND_MA_LONG:
@@ -236,19 +237,37 @@ def status_layers(
     space_threshold: float = 0.008,
     fusion_result: dict[str, Any] | None = None,  # S-2 fix: 接收融合层结果
     chan_result: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    # === 250日线一票否决 ===
+    vp_result: dict[str, Any] | None = None,  # [2.3] Volume Profile 日内量价分布
+    ) -> dict[str, Any]:
+    # === current=0 前置检查 ===
+    if current <= 0:
+        return {
+            "base_status": "数据不足",
+            "theory_status": "数据不足",
+            "status": "数据不足",
+            "fusion_override_used": False,
+            "trend_ok": False,
+            "change": 0.0,
+            "below_ma_count": 0,
+            "above_ma5_ma10": False,
+            "pressure_space_pct": 0.0,
+        }
+
+    # === 250日线提醒（不屏蔽，只标记） ===
+    ma250_warning = False
+    ma250_value = None
     if bars and TREND_FILTER_ENABLED:
-        ma250_block = _ma250_check(current, bars)
-        if ma250_block is not None:
-            return ma250_block
+        ma250_result = _ma250_check(current, bars)
+        if ma250_result is not None:
+            ma250_warning = True
+            ma250_value = ma250_result.get("ma250")
 
     # === S-2 fix: 融合层覆盖 ===
     # 当融合层开启、置信度足够高、且有明确映射时，用融合层判断替代纯数学判断
     fusion_override_used = False
     fusion_status = None
     if FUSION_OVERRIDE_ENABLED and isinstance(fusion_result, dict):
-        fc = float(fusion_result.get("confidence") or 0)
+        fc = safe_float(fusion_result, "confidence")
         if fc >= FUSION_CONFIDENCE_THRESHOLD:
             fusion_action = str(fusion_result.get("action") or "").strip()
             mapped_status = _FUSION_STATUS_MAP.get(fusion_action)
@@ -266,7 +285,9 @@ def status_layers(
     trend_ok = _trend_filter(bars) if (bars and TREND_FILTER_ENABLED) else True
     change = to_float(change_pct) or 0.0
     below_ma_count = sum(1 for value in ma_values.values() if value is not None and current < value)
-    above_ma5_ma10 = all(current >= (ma_values.get(name) or float("inf")) for name in ("ma5", "ma10"))
+    _ma5 = ma_values.get("ma5")
+    _ma10 = ma_values.get("ma10")
+    above_ma5_ma10 = _ma5 is not None and _ma10 is not None and current >= _ma5 and current >= _ma10
 
     # 从 fusion_result 中提取威科夫信号，用于理论突破验证
     signals_detail = fusion_result.get("signals_detail", {}) if isinstance(fusion_result, dict) else {}
@@ -280,6 +301,7 @@ def status_layers(
         position_ratio=position_ratio,
         chan_result=chan_result,
         wyk=wyk,
+        vp_result=vp_result,
     )
 
     # P0: 假跌破检测 + 分阶段退出
@@ -381,6 +403,8 @@ def status_layers(
         "below_ma_count": below_ma_count,
         "above_ma5_ma10": above_ma5_ma10,
         "pressure_space_pct": pressure_space_pct,
+        "ma250_warning": ma250_warning,
+        "ma250": ma250_value,
     }
 
 
@@ -398,6 +422,7 @@ def status_for(
     space_threshold: float = 0.008,
     fusion_result: dict[str, Any] | None = None,  # S-2 fix: 接收融合层结果
     chan_result: dict[str, Any] | None = None,
+    vp_result: dict[str, Any] | None = None,  # [2.3] Volume Profile 日内量价分布
 ) -> str:
     return str(status_layers(
         current,
@@ -413,6 +438,7 @@ def status_for(
         space_threshold=space_threshold,
         fusion_result=fusion_result,
         chan_result=chan_result,
+        vp_result=vp_result,
     )["theory_status"])
 
 
@@ -445,12 +471,12 @@ def _is_defense(status: str) -> bool:
 
 
 def score_for(item: dict[str, Any]) -> float:
-    status = str(item.get("status"))
-    current = float(item.get("current") or 0)
+    status = item.get("status") or ""
+    current = safe_float(item, "current")
     low_upper = item.get("low_zone_upper")
     confirm = item.get("confirm_price")
-    hard_stop = float(item.get("hard_stop") or current)
-    position_ratio = float(item.get("position_ratio") or 0)
+    hard_stop = safe_float(item, "hard_stop", default=current)
+    position_ratio = safe_float(item, "position_ratio")
     change = to_float(item.get("change_pct")) or 0.0
     below_ma_count = int(item.get("below_ma_count") or 0)
 

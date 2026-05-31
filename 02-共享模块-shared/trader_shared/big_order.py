@@ -159,7 +159,7 @@ def validate_big_orders(
         return None
 
     subsequent_bars = bars_5m[key_idx + 1:]
-    closes = [to_float(b.get("close")) for b in subsequent_bars if to_float(b.get("close")) is not None]
+    closes = [v for b in subsequent_bars if (v := to_float(b.get("close"))) is not None]
     if not closes:
         return None
 

@@ -285,10 +285,16 @@ def detect_buy_points(
     if len(strokes) >= 3:
         down_strokes = [s for s in strokes if s["direction"] == "down"]
         up_strokes = [s for s in strokes if s["direction"] == "up"]
-        if len(down_strokes) >= 2 and up_strokes:
+        if len(down_strokes) >= 2 and len(up_strokes) >= 1:
             low_a = down_strokes[-2]["end_price"]
             low_b = down_strokes[-1]["end_price"]
-            up_high = max(s["end_price"] for s in up_strokes)
+            # Find the up stroke between the two down strokes (local up-stroke high)
+            up_high = None
+            for s in strokes:
+                if s["direction"] == "up" and s.get("start_price") is not None and s["start_price"] <= low_a:
+                    up_high = s["end_price"]
+            if up_high is None:
+                up_high = max(s["end_price"] for s in up_strokes)
             if low_b > low_a and low_b < up_high:
                 buy_points.append({
                     "type": "二类买",
@@ -372,7 +378,7 @@ def chanlun_analysis(
 
     has_macd = any(b.get("macd_histogram") is not None for b in bars[:5]) if len(bars) >= 5 else False
     if not has_macd:
-        _calc_macd(bars)
+        bars = _calc_macd(bars)
 
     cleaned = handle_inclusion(bars)
     fractions = find_fractions(cleaned)

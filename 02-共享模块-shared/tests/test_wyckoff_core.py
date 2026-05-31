@@ -15,8 +15,8 @@ def _make_bar(open_, high, low, close, volume=1000):
 
 class TestDetectSpring:
     def test_spring_detected(self):
-        bars = [_make_bar(100, 105, 95, 102) for _ in range(14)]
-        bars.append(_make_bar(90, 100, 87, 89))
+        bars = [_make_bar(100, 105, 90, 102) for _ in range(14)]
+        bars.append(_make_bar(85, 100, 84, 92))
         result = wyckoff_analysis(bars)
         assert result["spring_signal"] is True
         assert result["spring_price"] is not None
@@ -44,7 +44,7 @@ class TestDetectUpthrust:
 
     def test_upthrust_not_detected(self):
         bars = [_make_bar(100, 110, 95, 105) for _ in range(14)]
-        bars.append(_make_bar(90, 113, 100, 108))
+        bars.append(_make_bar(90, 113, 100, 110))
         result = wyckoff_analysis(bars)
         assert result["upthrust_signal"] is False
 

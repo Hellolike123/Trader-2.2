@@ -34,6 +34,8 @@ import os
 import sys
 from typing import Any
 
+from safe_cast import safe_float
+
 # ── [2.3] 贝叶斯融合（可选导入，无则降级） ───────────────────────────────────────────
 try:
     from bayesian_fusion import is_enabled as _bayesian_enabled, bayesian_merge
@@ -351,12 +353,13 @@ def merge_decisions(
     if isinstance(momentum_result, dict):
         mom_score = momentum_result.get("momentum", {}).get("score", 50)
 
-    is_breakout_or_bottom = (pos_pct is not None and pos_pct <= 0.3) or strong_bullish_chan or strong_bullish_wyk
-    is_climax_or_overbought = (pos_pct is not None and pos_pct >= 0.7) or strong_bearish_chan or strong_bearish_wyk or (mom_score >= 65)
+    is_breakout_or_bottom = (pos_pct is not None and pos_pct <= 0.3) or ((strong_bullish_chan or strong_bullish_wyk) and pos_pct is not None and pos_pct <= 0.5)
+    is_climax_or_overbought = (pos_pct is not None and pos_pct >= 0.7 and mom_score >= 80) or strong_bearish_chan or strong_bearish_wyk
 
     if is_breakout_or_bottom:
         weights = {"chan": 0.45, "momentum": 0.20, "wyckoff": 0.35}
     elif is_climax_or_overbought:
+        # High position + strong momentum: momentum-skewed (55% momentum)
         weights = {"chan": 0.20, "momentum": 0.55, "wyckoff": 0.25}
     else:
         weights = get_regime_weights(regime)
@@ -434,7 +437,7 @@ def merge_decisions(
                 try:
                     u_dt = datetime.strptime(u_date_str, "%Y-%m-%d").date()
                     days = (u_dt - today_dt).days
-                    ratio = float(u.get("ratio", 0) or 0)
+                    ratio = safe_float(u, "ratio")
                     if 0 <= days <= 15 and ratio >= 5.0:
                         has_risk_unlock = True
                         days_to_unlock = days

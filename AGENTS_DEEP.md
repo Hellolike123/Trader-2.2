@@ -1,11 +1,25 @@
 # Trader 2.4 — 架构文档（深挖参考）
 
-> 最后更新：2026-05-30
+> 最后更新：2026-05-31
 > **注意**: AGENTS.md 是 Agent 快速参考，本文档用于开发调试/架构深挖。
 
 ---
 
 ## 变更日志
+
+### 2026-05-31 — 数据消费 Bug 修复 + 性能优化批次
+
+共 5 个 commit，修复 12 个 bug，1 个性能优化：
+
+- **性能：懒加载 fallback 依赖**（`light_data.py`）：mootdx/akshare/pytdx3 改为首次调用时才检测可用性，import 耗时 0.895s → 0.092s（10x），`build_report()` 总计 20s → 0.48s（42x）
+- **修复：market_env.py 数据源错误**：`fetch_kline(scale="240")` 返回的是 Sina 分钟线而非日线，导致 MA/HMM 全部基于错误数据计算，缓存无限膨胀至 20700 条/3.2MB。改用 `fetch_qfq_daily(days=90)` 拉腾讯前复权日线，缓存增加按日期去重
+- **修复：self_calibration.py 数据源不一致**：与 market_env 同样的 bug，离校准 regime 标签与线上不匹配。改用 `fetch_qfq_daily(days=250)`
+- **修复：trade_date 解析错误**：`parse_trade_datetime()` 从后往前扫 `\d{8}` 时误匹配成交量（"10349555"），导致 trade_date = "1034-95-55"。改为优先从 fields[30] 提取腾讯 14 位时间戳
+- **修复：market_env.py 运算符优先级**：`mid_weak and shrinking or mid_weak` 等价于 `(mid_weak and shrinking) or mid_weak`，mid_weak=True 时无条件判为"偏弱"。改为 `mid_weak and (shrinking or intraday_moderate)`
+- **修复：t0_candidate_core.py 集合运算符**：`{"等转强", "冲高减仓"} | _DEFENSE_STATUSES` 位运算优先级混乱。改为 `{"等转强", "冲高减仓", *_DEFENSE_STATUSES}`
+- **修复：monitor.py 未定义变量**：`_trigger_reason_lines()` 直接引用未定义的 `matched`，改为 `model.get("matched")`
+- **修复：big_order.py 缺少 import warnings**：大单分析异常时 NameError 崩溃
+- **修复：price_point_engine.py 布林带空 dict**：`max(bb.keys(), default=-1)` 空 dict 时返回 -1 导致价位丢失
 
 ### 2026-05-30 — Trader 2.4：三大技能整合 + 四阶段定位模型
 
@@ -110,6 +124,24 @@
 **HTTP 客户端** `HttpClient`：GET with User-Agent、gzip、SSL-unverified。 `retry()` 指数退避 3 次。
 **缓存**：bars 不含当日日期时缓存 1 小时，实时数据不缓存，行情快照进行 30s TTL 缓存。
 **NAME_MAP**：10 个常用股票名到代码的映射（南网科技→688248、中国铝业→601600、中证1000→000852 等）。
+
+#### 2.2.3 懒加载 Fallback 依赖（2026-05-31 修复）
+
+`light_data.py` 的三个 fallback 库（mootdx、akshare、pytdx3）改为**懒加载**：import 时不加载，首次调用时才检测可用性。原因是这三个库实际从未被调用（主数据源是腾讯 HTTP API），但 import 时同步加载浪费 ~0.8s。
+
+- `_check_mootdx()` / `_check_akshare()` / `_check_pytdx3()` — 懒加载检测函数
+- `_MOOTDX_AVAILABLE` / `_AKSHARE_AVAILABLE` / `_TDX3_AVAILABLE` — 三态布尔（None=未检测, True/False=已检测）
+- 所有引用 `_MOOTDX_AVAILABLE` 等变量的地方改为调用对应的 `_check_*()` 函数
+- import 耗时：0.895s → 0.092s（10x 提升）
+
+#### 2.2.4 parse_trade_datetime 解析逻辑（2026-05-31 修复）
+
+腾讯行情 `fields[30]` 存储 14 位时间戳（如 "20260529161443"），解析优先级：
+
+1. **优先**：从 `fields[30]` 提取 14 位时间戳 → `trade_date=2026-05-29`, `trade_time=16:14:43`
+2. **兜底**：从后往前扫描 `YYYY-MM-DD` 和 `HH:MM:SS` 格式
+
+旧逻辑从后往前扫 `\d{8}`，会误匹配成交量（fields[36] = "10349555"）导致 `trade_date = "1034-95-55"`。
 
 ### 2.3 状态机（`config.py STATUS_SCORE` + `decision_core.status_layers()`）
 
@@ -699,7 +731,7 @@ P(action | chan, mom, wyk, regime) ∝ L(chan) × L(mom) × L(wyk)
 
 **流程**：
 1. 读取 `~/.trader/signals.jsonl` 历史信号和 `~/.trader/signal_results.jsonl` 结算结果。
-2. 历史大势对齐：拉取中证 1000 指数最近一年历史日线，调用 HMM 状态检测器动态为每一个历史信号标定当日所处的 HMM 大势状态（`bull` 上涨 / `bear` 下跌 / `range` 震荡）。
+2. 历史大势对齐：通过 `fetch_qfq_daily(days=250)` 拉取中证 1000 指数前复权日线（与 `market_env.py` 数据源一致），调用 HMM 状态检测器动态为每一个历史信号标定当日所处的 HMM 大势状态（`bull` 上涨 / `bear` 下跌 / `range` 震荡）。
 3. 分桶搜优：在 `global`（全局）、`bull`、`bear`、`range` 四个大势分组下，并行执行 150 次随机搜索寻优：
    - `zone_width` ∈ [0.90, 1.25]
    - `confirm_buffer` ∈ [0.70, 1.30]
@@ -727,7 +759,8 @@ params = load_calibrated_params()  # 返回 { "global": {...}, "bull": {...}, "b
 在 Trader 2.3 中，四大高级统计模块并非孤立运作，而是作为一套闭环网络在交易决策核心流程中无缝拼合与相互赋能：
 
 1. **HMM 与 MA 大势的“前瞻融合”**：
-   - 入口在 `market_env.py` 中。`_fetch_index_data()` 升级为拉取最近 90 个交易日的大盘指数日 K 线。
+   - 入口在 `market_env.py` 中。`assess()` 通过 `fetch_qfq_daily(days=90)` 拉取腾讯前复权日线（注意：不能用 `fetch_kline(scale="240")`，后者返回的是 Sina 分钟线而非日线，会导致 MA/HMM 全部基于错误数据计算）。
+   - 缓存合并逻辑增加**按日期去重**：保留缓存中非今日的数据 + 当日实时 bar，防止 bars 无限膨胀（旧逻辑每次追加不去重，导致缓存从 90 条膨胀到 20700 条/3.2MB，每次解析耗时 10s+）。
    - `assess()` 计算最近 90 日指数收益率序列，喂入 `hmm_regime.detect_regime()` 获得高斯隐状态。
    - 传统均线判定 `level` 时，若 HMM 产生高置信度前瞻状态（`confidence >= 0.75`），如 HMM 为 `bear`（熊市）而均线为 `正常`，将直接前瞻性地将 `level` 修正为 `偏弱`。从而让所有传统风控模块自动获得前瞻性风控防守能力！
 

@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Any
-
-import trader_shared
 
 try:
     from pipeline import write_market
@@ -13,9 +9,18 @@ try:
 except ImportError:
     _HAS_PIPELINE = False
 
-from light_data import normalize_bars
 from trader_shared.config import INDEX_CODE
 from trader_shared.data_provider import get_provider
+
+
+def _is_market_open_now() -> bool:
+    """判断当前是否是交易时段（用于 data_freshness 标记）。"""
+    try:
+        from trader_shared.trading_context import data_freshness
+        return data_freshness() == "live"
+    except ImportError:
+        from light_data import is_trading_time
+        return is_trading_time()
 
 
 def _tencent_index_code(raw_code: str) -> str:
@@ -64,6 +69,7 @@ def _fetch_index_data() -> dict[str, Any]:
     # [35] = "price/vol/amount" — the current price as of market close
     price_part = parts[35] if len(parts) > 35 and parts[35] else ""
     # Fallback: if no price_part, use [3] which is the last known open (approx close)
+    current = 0
     if price_part:
         try:
             current = float(price_part.split("/")[0])
@@ -112,7 +118,8 @@ def assess() -> dict[str, Any]:
     _cached_env = None
     try:
         from trader_shared.cache_utils import get_cached as _file_cached, CACHE_MARKET_ENV, TTL_DAILY
-        _cached_env = _file_cached(CACHE_MARKET_ENV, "index", ttl=TTL_DAILY)
+        _cached_result = _file_cached(CACHE_MARKET_ENV, "index", ttl=TTL_DAILY)
+        _cached_env = _cached_result.data if _cached_result is not None else None
     except Exception:
         pass
 
@@ -219,9 +226,10 @@ def assess() -> dict[str, Any]:
         "level": level,
         "current": current,
         "change_pct": change_pct,
-        "ma5": round(ma5, 2) if ma5 else None,
-        "ma20": round(ma20, 2) if ma20 else None,
+        "ma5": round(ma5, 2) if ma5 is not None else None,
+        "ma20": round(ma20, 2) if ma20 is not None else None,
         "data_status": "full",
+        "data_freshness": "live" if _is_market_open_now() else "stale",
         "hmm_regime_en": hmm_regime_en,
         "hmm_regime_label": hmm_regime_label,
         "hmm_confidence": hmm_confidence,

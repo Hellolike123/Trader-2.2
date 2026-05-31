@@ -4,6 +4,7 @@ import fcntl
 import json
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,34 @@ def _get_default_store_path() -> Path:
 
 
 DEFAULT_SIGNAL_STORE_PATH = Path.home() / ".trader" / "signals.jsonl"
+_ROTATION_THRESHOLD_BYTES = 10 * 1024 * 1024  # 10MB
+
+
+def _get_archive_path(store_path: Path) -> Path:
+    """Generate quarterly archive path: signals-archive-YYYYQ#.jsonl"""
+    now = datetime.now()
+    quarter = (now.month - 1) // 3 + 1
+    return store_path.parent / f"{store_path.stem}-archive-{now.year}Q{quarter}{store_path.suffix}"
+
+
+def _maybe_rotate(store_path: Path) -> None:
+    """Rotate signals.jsonl if it exceeds the threshold."""
+    try:
+        if store_path.exists() and store_path.stat().st_size > _ROTATION_THRESHOLD_BYTES:
+            archive_path = _get_archive_path(store_path)
+            # Read current content
+            content = store_path.read_bytes()
+            # Append to archive (or create new)
+            with open(archive_path, "ab") as f:
+                fcntl.flock(f, fcntl.LOCK_EX)
+                try:
+                    f.write(content)
+                finally:
+                    fcntl.flock(f, fcntl.LOCK_UN)
+            # Truncate current file
+            store_path.write_text("", encoding="utf-8")
+    except Exception:
+        pass  # rotation failure should not block signal writing
 
 
 def append_signal(signal: dict[str, Any], path: Path | None = None) -> str:
@@ -58,7 +87,8 @@ def append_signal(signal: dict[str, Any], path: Path | None = None) -> str:
     assert_valid_signal(working)
 
     store_path = path or _get_default_store_path()
-    
+    _maybe_rotate(store_path)
+
     from trader_shared.data_manager import DataManager
     DataManager.append_signal(working, path=store_path)
 
@@ -148,3 +178,12 @@ def load_recent_signals(symbol: str | None = None, limit: int = 20, path: Path |
 def make_signal_key(sig: dict[str, Any]) -> tuple[str, str, str, str]:
     """Compatibility alias — use signal_utils.build_signal_key directly."""
     return build_signal_key(sig)
+
+
+def get_bad_line_stats() -> dict[str, Any]:
+    """Return bad line diagnostics from the last _read_store() call."""
+    return {
+        "count": _bad_line_count,
+        "last_reason": _bad_line_last_reason,
+        "last_path": _bad_line_last_path,
+    }

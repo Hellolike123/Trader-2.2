@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from light_data import pct_change, to_float
+from safe_cast import safe_float
 
 try:
     from config import CONFIRM_BUFFER
@@ -85,16 +86,16 @@ def zone_position(current: float, support: float, confirm: float) -> float:
 def build_candidate_levels(current: float, bars: list[dict[str, Any]], change_pct: Any = None, structure_result: dict[str, Any] | None = None, fusion_result: dict[str, Any] | None = None) -> dict[str, Any]:
     # 优先复用 trader 的 structure_core 结果，消除两套价位体系不一致的问题
     if structure_result is not None:
-        support = float(structure_result.get("support") or 0)
-        low_zone_lower = float(structure_result.get("low_zone_lower") or support)
-        low_zone_upper = float(structure_result.get("low_zone_upper") or support)
-        confirm = float(structure_result.get("confirm_price") or 0)
-        stop = float(structure_result.get("hard_stop") or 0)
-        resistance = float(structure_result.get("resistance") or 0)
-        sell_observe = float(structure_result.get("sell_observe_price") or confirm)
-        take = float(structure_result.get("take") or max(confirm, current) * 1.06)
+        support = safe_float(structure_result, "support")
+        low_zone_lower = safe_float(structure_result, "low_zone_lower", default=support)
+        low_zone_upper = safe_float(structure_result, "low_zone_upper", default=support)
+        confirm = safe_float(structure_result, "confirm_price")
+        stop = safe_float(structure_result, "hard_stop")
+        resistance = safe_float(structure_result, "resistance")
+        sell_observe = safe_float(structure_result, "sell_observe_price", default=confirm)
+        take = safe_float(structure_result, "take", default=max(confirm, current) * 1.06)
         # 直接复用 structure_core 算好的 position_ratio，避免 zone_position() 两套实现不一致
-        position = float(structure_result.get("position_ratio") or zone_position(current, support, confirm))
+        position = safe_float(structure_result, "position_ratio", default=zone_position(current, support, confirm))
         status = status_for(current, support, low_zone_upper, confirm, stop, position, change_pct, fusion_result=fusion_result)
         low_zone_display = structure_result.get("low_zone", f"{low_zone_lower:.2f}-{low_zone_upper:.2f}元")
     else:
@@ -150,7 +151,7 @@ def build_candidate_levels(current: float, bars: list[dict[str, Any]], change_pc
     }
 
 
-def status_for(current: float, support: float, low_zone_upper: float, confirm: float, hard_stop: float, position_ratio: float, change_pct: Any, fusion_result: dict[str, Any] | None = None, ma_values: dict[str, float | None] | None = None, pressure_space_pct: float = 0.0, bars: list[dict[str, Any]] | None = None) -> str:
+def status_for(current: float, support: float, low_zone_upper: float, confirm: float, hard_stop: float, position_ratio: float, change_pct: Any, fusion_result: dict[str, Any] | None = None, ma_values: dict[str, float | None] | None = None, pressure_space_pct: float = 0.0, bars: list[dict[str, Any]] | None = None, vp_result: dict[str, Any] | None = None) -> str:
     # Delegate to decision_core to keep a single status judgment logic
     try:
         from decision_core import status_for as _dec_status
@@ -160,12 +161,24 @@ def status_for(current: float, support: float, low_zone_upper: float, confirm: f
             change_pct=change_pct, ma_values=ma_values or {},
             pressure_space_pct=pressure_space_pct, bars=bars,
             fusion_result=fusion_result,
+            vp_result=vp_result,
         )
     except ImportError:
         pass
     # Fallback: original T0-only logic (T0 skill may lack decision_core)
+    _FUSION_STATUS_MAP: dict[str, str] = {
+        "半仓试 (多方主导)": "低吸观察",
+        "半仓试 (多方主导但有分歧)": "等转强",
+        "增持": "低吸观察",
+        "持股观望": "等转强",
+        "减仓": "冲高减仓",
+        "空仓/止损": "暂不碰",
+        "空仓 (大盘很差, 一票否决)": "暂不碰",
+        "观望 (信号冲突)": "防守观察",
+        "等转强 (多方主导但有分歧)": "等转强",
+    }
     if FUSION_OVERRIDE_ENABLED and isinstance(fusion_result, dict):
-        fc = float(fusion_result.get("confidence") or 0)
+        fc = safe_float(fusion_result, "confidence")
         if fc >= FUSION_CONFIDENCE_THRESHOLD:
             fusion_action = str(fusion_result.get("action") or "").strip()
             mapped_status = _FUSION_STATUS_MAP.get(fusion_action)
@@ -253,12 +266,12 @@ def score_for(item: dict[str, Any]) -> float:
     except ImportError:
         # Fallback for T0 install without decision_core
         pass
-    status = str(item.get("status"))
-    current = float(item.get("current") or 0)
-    low_upper = float(item.get("low_zone_upper") or current)
-    confirm = float(item.get("confirm_price") or current)
-    hard_stop = float(item.get("hard_stop") or current)
-    position_ratio = float(item.get("position_ratio") or 0)
+    status = item.get("status") or ""
+    current = safe_float(item, "current")
+    low_upper = safe_float(item, "low_zone_upper", default=current)
+    confirm = safe_float(item, "confirm_price", default=current)
+    hard_stop = safe_float(item, "hard_stop", default=current)
+    position_ratio = safe_float(item, "position_ratio")
     change = to_float(item.get("change_pct")) or 0.0
 
     score = float(STATUS_SCORE.get(status, 0))

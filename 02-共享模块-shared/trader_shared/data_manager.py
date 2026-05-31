@@ -97,24 +97,11 @@ class DataManager:
 
     @classmethod
     def load_signals(cls, path: Path | None = None) -> list[dict[str, Any]]:
-        """读取完整的信号事件流"""
+        """读取完整的信号事件流（委托给 signal_store 统一路径）"""
         cls._init_dir()
         target_path = path or cls.SIGNALS_FILE
-        if not target_path.exists():
-            return []
-            
-        results = []
-        with open(target_path, "r", encoding="utf-8") as f:
-            fcntl.flock(f, fcntl.LOCK_SH)
-            for line in f:
-                line = line.strip()
-                if line:
-                    try:
-                        results.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        continue
-            fcntl.flock(f, fcntl.LOCK_UN)
-        return results
+        from trader_shared.signal_store import _read_store
+        return _read_store(target_path)
 
     @classmethod
     def append_signal(cls, signal: dict[str, Any], path: Path | None = None) -> None:

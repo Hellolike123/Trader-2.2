@@ -31,7 +31,7 @@ def calc_rsi(closes: list[float], period: int = 14) -> list[float | None]:
         if i > period:
             avg_g = (avg_g * (period - 1) + gains[i - 1]) / period
             avg_l = (avg_l * (period - 1) + losses[i - 1]) / period
-        result[i] = 100.0 if avg_l == 0 else 100 - 100 / (1 + avg_g / avg_l)
+        result[i] = 50.0 if avg_l == 0 and avg_g == 0 else 100.0 if avg_l == 0 else 100 - 100 / (1 + avg_g / avg_l)
     return result
 
 
@@ -102,9 +102,9 @@ def calc_adx(highs: list[float], lows: list[float], closes: list[float], period:
         else:
             pdi.append(0.0)
             mdi.append(0.0)
-    tr_s = sum(tr[:period]) / period
-    pdi_s = sum(pdi[:period]) / period
-    mdi_s = sum(mdi[:period]) / period
+    tr_s = sum(tr[1:period + 1]) / period
+    pdi_s = sum(pdi[1:period + 1]) / period
+    mdi_s = sum(mdi[1:period + 1]) / period
     dx_list: list[float] = []
     for i in range(period, n):
         tr_s = (tr_s * (period - 1) + tr[i]) / period

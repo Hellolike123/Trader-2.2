@@ -26,6 +26,7 @@ except ImportError:
         raise
 
 from trader_shared.data_manager import DataManager
+from safe_cast import safe_dict
 from price_point_engine import price
 from trader_shared.signal_store import append_signal
 from t0_run import build_plan, build_t0_event_signal
@@ -390,7 +391,7 @@ def build_alert_message(event: str, plan: dict[str, Any], cost: float | None = N
     
     summary = ["🔍 发生了什么 & 怎么做："]
     is_buy = event.startswith("BUY")
-    model = plan.get("buy", {}) if is_buy else plan.get("sell", {})
+    model = safe_dict(plan, "buy") if is_buy else safe_dict(plan, "sell")
     tape = model.get("t0_tape", {}).get("buy_tape" if is_buy else "sell_tape", {})
     tape_reason = tape.get("reason", "")
     
@@ -612,6 +613,19 @@ def run_monitor(
     first = True
     try:
         while True:
+            # 收盘后长休眠：计算到下一个交易时段的 sleep 时长
+            try:
+                from trader_shared.trading_calendar import is_trading_time, next_trading_open
+                if not is_trading_time():
+                    next_open = next_trading_open()
+                    sleep_seconds = max(60, (next_open - datetime.now()).total_seconds())
+                    if verbose:
+                        print(f"非交易时段，休眠到 {next_open.strftime('%Y-%m-%d %H:%M')}")
+                    time.sleep(min(sleep_seconds, 3600))  # 最多睡 1 小时后重新检查
+                    continue
+            except ImportError:
+                pass
+
             message = run_once(target, cost=cost, position=position, verbose=verbose, reset_cache=reset_cache and first)
             first = False
             if message:

@@ -1177,6 +1177,14 @@ def one_sentence(items: list[dict[str, Any]]) -> str:
 def cmd_plan(args: argparse.Namespace) -> int:
     pool = load_pool()
     items = active_items(pool)
+    # 出池自动淘汰：检测衰退阶段的票并标记
+    declining = [item for item in items if str(item.get("major_stage")) == "衰退"]
+    if declining:
+        for item in declining:
+            item["status"] = "淘汰"
+            name = item.get("name") or item.get("target")
+            print(f"衰退淘汰: {name} 阶段跌至衰退，已标记为淘汰。")
+        save_pool(pool)
     markdown = render_plan(items)
     execution = [item for item in sort_items(items) if item.get("status") == "执行"][:EXECUTION_LIMIT]
     DataManager.save_state("last_plan", {"contract_version": CONTRACT_VERSION, "date": today_text(), "execution_items": execution, "markdown": markdown})
@@ -1539,7 +1547,21 @@ def parse_args() -> argparse.Namespace:
     sub.add_parser("archive-exited")
     compare = sub.add_parser("compare")
     compare.add_argument("--targets", nargs="+", required=True)
+    quick = sub.add_parser("quick-add")
+    quick.add_argument("--target", required=True)
+    quick.add_argument("--offline", action="store_true")
     return parser.parse_args()
+
+
+def _cmd_quick_add(args: argparse.Namespace) -> int:
+    result = quick_add(args.target, offline=args.offline)
+    if result.get("ok"):
+        rec = result.get("record", {})
+        print(f"入池成功: {rec.get('target')} | 评分{rec.get('total_score')} | 阶段{rec.get('major_stage')} | 状态{rec.get('status')}")
+        return 0
+    else:
+        print(f"入池拒绝: {result.get('reason')}")
+        return 1
 
 
 def main() -> int:
@@ -1558,6 +1580,7 @@ def main() -> int:
         "watch": cmd_watch,
         "remove": cmd_remove,
         "archive-exited": cmd_archive_exited,
+        "quick-add": lambda args: _cmd_quick_add(args),
     }
     try:
         return handlers[args.command](args)

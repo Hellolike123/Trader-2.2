@@ -199,3 +199,19 @@ class TestChanlunAnalysis:
         bars = [_make_bar(10, 12, 10, 11) for _ in range(19)]
         result = chanlun_analysis(bars, 10.0)
         assert result == {}
+
+    def test_macd_written_back_to_bars(self):
+        """_calc_macd 应将 MACD 写回 bars（macd_histogram 字段）。"""
+        from trader_shared.chan_core import _calc_macd
+        bars = [_make_bar(10 + i * 0.1, 11 + i * 0.1, 9 + i * 0.1, 10 + i * 0.1) for i in range(30)]
+        result = _calc_macd(bars)
+        has_macd = any(b.get("macd_histogram") is not None for b in result)
+        assert has_macd is True, "MACD histogram should be written to returned bars"
+
+    def test_macd_available_for_divergence(self):
+        """MACD 透传后，背驰检测应能读到 macd_histogram。"""
+        bars = [_make_bar(10 + i * 0.1, 11 + i * 0.1, 9 + i * 0.1, 10 + i * 0.1) for i in range(30)]
+        result = chanlun_analysis(bars, 10.5)
+        assert "divergence" in result
+        assert "top_divergence" in result["divergence"]
+        assert "bottom_divergence" in result["divergence"]

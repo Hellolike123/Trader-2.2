@@ -506,10 +506,10 @@ class TestPhase3Features:
         assert result["weights_used"] == {"chan": 0.45, "momentum": 0.20, "wyckoff": 0.35}
 
     def test_scenario_priority_filter_top(self):
-        """Under pos_pct >= 0.7, weights should dynamically adjust to {"chan": 0.20, "momentum": 0.55, "wyckoff": 0.25}."""
+        """Under pos_pct >= 0.7 AND mom_score >= 80, weights should dynamically adjust to {"chan": 0.20, "momentum": 0.55, "wyckoff": 0.25}."""
         from trader_shared.fusion_core import merge_decisions
         chan = {"chanlun": {"buy_points": [], "divergence": {}, "trend_label": "数据不足"}}
-        mom = {"momentum": {"score": 50, "direction": "neutral", "signals": []}}
+        mom = {"momentum": {"score": 85, "direction": "bullish", "signals": ["多指标共振(强烈看多)"]}}
         wyk = {"wyckoff": {}}
 
         bars = [

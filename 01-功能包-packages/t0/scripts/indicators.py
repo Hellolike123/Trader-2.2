@@ -354,9 +354,9 @@ def calculate_adx(
     dx_buffer: list[float] = []
     adx: list[float | None] = [None] * n
     for i in range(period + 1, n):
-        smooth_tr = smooth_tr - (smooth_tr / period) + tr[i]
-        smooth_up = smooth_up - (smooth_up / period) + dm_plus[i]
-        smooth_down = smooth_down - (smooth_down / period) + dm_minus[i]
+        smooth_tr = (smooth_tr * (period - 1) + tr[i]) / period
+        smooth_up = (smooth_up * (period - 1) + dm_plus[i]) / period
+        smooth_down = (smooth_down * (period - 1) + dm_minus[i]) / period
 
         p = (smooth_up / smooth_tr * 100) if smooth_tr > 0 else 0.0
         m = (smooth_down / smooth_tr * 100) if smooth_tr > 0 else 0.0
@@ -367,9 +367,9 @@ def calculate_adx(
         dx_val = abs(p - m) / denom * 100 if denom > 0 else 0.0
 
         # ── Step 5: ADX from DX values ──
-        # Keep last `period` DX values; first ADX when buffer is full
+        # Standard Wilder smoothing for ADX: running smoothed average of DX
         if len(dx_buffer) >= period:
-            adx[i] = (sum(dx_buffer) / period * (period - 1) + dx_val) / period
+            adx[i] = (adx[i - 1] * (period - 1) + dx_val) / period if adx[i - 1] is not None else (sum(dx_buffer) / period)
         else:
             dx_buffer.append(dx_val)
 

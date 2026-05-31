@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, time, timedelta
 from typing import Any
 
+from safe_cast import safe_max
 from config import (
     BUY_ACCEPT_FACTOR,
     BUY_CONFIRM_FACTOR,
@@ -293,7 +294,7 @@ def latest_indicator_state(bars: list[dict[str, Any]]) -> dict[str, Any]:
     vwap = calculate_vwap_from_bars(bars)
     prev_vwap = calculate_vwap_from_bars(bars[:-1]) if len(bars) >= 2 else None
     bb = calculate_bollinger_bands(closes, period=20, num_std=2.0)
-    bb_last = bb.get(max(bb.keys(), default=-1), {})
+    bb_last = bb.get(safe_max(bb.keys())) if bb else {}
     bb_pct_b = bb_last.get("pct_b")
     bb_squeeze = (bb_last.get("bandwidth") or 999) < 0.03
     highs = values(bars, "high")

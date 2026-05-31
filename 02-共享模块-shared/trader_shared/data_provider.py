@@ -148,7 +148,8 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
     # ── 层1: 文件缓存命中 (TTL 12小时) ──
     try:
         from trader_shared.cache_utils import get_cached as _file_cached, CACHE_ENRICH, TTL_FUNDAMENTAL
-        file_cached = _file_cached(CACHE_ENRICH, sec.code, ttl=TTL_FUNDAMENTAL)
+        _cached_result = _file_cached(CACHE_ENRICH, sec.code, ttl=TTL_FUNDAMENTAL)
+        file_cached = _cached_result.data if _cached_result is not None else None
         if file_cached is not None and isinstance(file_cached, dict):
             extend_fundamental = file_cached.get("extend_fundamental", {})
             extend_sentiment = file_cached.get("extend_sentiment", {})
@@ -279,7 +280,7 @@ class UnifiedProvider:
         from trader_shared.cache_utils import get_cached, set_cached, TTL_DAILY
         cached = get_cached("daily", sec.code, ttl=TTL_DAILY)
         if cached is not None:
-            return cached
+            return cached.data
         self._ensure_http()
         from light_data import fetch_qfq_daily as _fetch
         bars = _fetch(self._to_sec(sec), self._http, days=days)

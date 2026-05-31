@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 import trader_shared
+from light_data import to_float
 
 # ── 默认路径 ─────────────────────────────────────────────────────────────────
 TRADER_DIR = Path.home() / ".trader"
@@ -74,7 +75,10 @@ def _extract_outcomes(results: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]
         if not sid:
             continue
         outcome = r.get("outcome", r.get("status", ""))
-        return_pct = float(r.get("return_pct", r.get("pnl_pct", 0.0)) or 0.0)
+        return_pct = r.get("return_pct")
+        if return_pct is None:
+            return_pct = r.get("pnl_pct", 0.0)
+        return_pct = float(return_pct or 0.0)
         won = outcome in ("win", "profit", "triggered_profit") or return_pct > 0
         outcomes[sid] = {"won": won, "return_pct": return_pct, "outcome": outcome}
     return outcomes
@@ -83,7 +87,7 @@ def _extract_outcomes(results: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]
 def _load_historical_regimes(signals: List[Dict[str, Any]]) -> Dict[str, str]:
     """根据历史大盘 K 线数据，预计算并生成信号发布日期 trade_date -> HMM_Regime 的映射字典。"""
     regimes: Dict[str, str] = {}
-    dates = sorted(list(set(sig["trade_date"] for sig in signals if "trade_date" in sig)))
+    dates = sorted(list(set(sig["trade_date"] for sig in signals if "trade_date" in sig and sig["trade_date"] is not None)))
     if not dates:
         return regimes
 
@@ -105,8 +109,8 @@ def _load_historical_regimes(signals: List[Dict[str, Any]]) -> Dict[str, str]:
             regimes[d] = "range"
         return regimes
 
-    closes = [float(b["close"]) for b in bars if b.get("close") is not None]
-    dates_index = [b["date"] for b in bars if b.get("close") is not None]
+    closes = [to_float(b.get("close")) for b in bars if to_float(b.get("close")) is not None]
+    dates_index = [b.get("date", "") for b in bars if to_float(b.get("close")) is not None]
 
     for d in dates:
         if d not in dates_index:
@@ -117,7 +121,7 @@ def _load_historical_regimes(signals: List[Dict[str, Any]]) -> Dict[str, str]:
         # 回看该交易日前 90 个交易日的收盘价算大势收益率
         slice_closes = closes[max(0, idx - 90):idx + 1]
         if len(slice_closes) >= 5:
-            returns = [(slice_closes[i] - slice_closes[i-1]) / slice_closes[i-1] for i in range(1, len(slice_closes))]
+            returns = [(slice_closes[i] - slice_closes[i-1]) / slice_closes[i-1] for i in range(1, len(slice_closes)) if slice_closes[i-1] != 0]
             try:
                 hmm_res = detect_regime(returns)
                 regimes[d] = hmm_res.get("state_en", "range")

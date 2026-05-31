@@ -158,3 +158,32 @@ class TestHMMRegimeDetector:
         states = hmm.predict(returns)
         assert all(s in (0, 1, 2) for s in states)
         assert len(states) == len(returns)
+
+    def test_bear_market_label_correct(self):
+        """REGIME_EN 字典应正确映射：排序后 index 2 = bear。"""
+        from trader_shared.hmm_regime import REGIME_EN
+        # 验证标签字典与排序语义一致
+        # 排序方向: mu 高→低 = bull(0), range(1), bear(2)
+        assert REGIME_EN[2] == "bear"
+
+    def test_bull_market_label_correct(self):
+        """REGIME_EN 字典应正确映射：排序后 index 0 = bull。"""
+        from trader_shared.hmm_regime import REGIME_EN
+        assert REGIME_EN[0] == "bull"
+
+    def test_label_mapping_consistent(self):
+        """REGIME_EN 标签字典应与排序结果一致：0=Bull, 1=Range, 2=Bear。"""
+        from trader_shared.hmm_regime import REGIME_EN, REGIME_LABELS
+        assert REGIME_EN[0] == "bull"
+        assert REGIME_EN[1] == "range"
+        assert REGIME_EN[2] == "bear"
+        assert REGIME_LABELS[0] == "低波上涨"
+        assert REGIME_LABELS[1] == "宽幅震荡"
+        assert REGIME_LABELS[2] == "高波下跌"
+
+    def test_min_data_threshold(self):
+        """少于 3 个观测值时应返回默认 range 状态。"""
+        returns = [0.01, -0.01]
+        result = self.detect_regime(returns)
+        assert result["state_en"] == "range"
+        assert result["confidence"] == 0.4
