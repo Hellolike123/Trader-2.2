@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend guidelines index with list of files to populate"}
+{"file": "AGENTS.md", "reason": "Project business overview and conventions"}
+{"file": "AGENTS_DEEP.md", "reason": "Deep architecture and algorithm details"}
