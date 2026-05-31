@@ -36,6 +36,8 @@ from typing import Any
 
 from safe_cast import safe_float
 from trader_shared._logging import get_logger
+from trader_shared.interfaces import DataFetcher
+from trader_shared.fetchers import get_fetcher
 
 _logger = get_logger(__name__)
 
@@ -285,6 +287,7 @@ def merge_decisions(
     extend_fundamental: dict | None = None,
     extend_sentiment: dict | None = None,
     main_force_env: str | None = None,
+    fetcher: DataFetcher | None = None,  # DI: 可注入数据源
 ) -> dict:
     """决策融合层核心函数。
 
@@ -311,6 +314,9 @@ def merge_decisions(
         }
     """
     from fusion_regime import get_regime_weights, score_to_action, compute_confidence
+
+    if fetcher is None:
+        fetcher = get_fetcher()
 
     # 1. 信号标准化 (只读, 不修改输入)
     try:
@@ -526,6 +532,7 @@ def merge_decisions_from_plugins(
     main_force_env: str | None = None,
     extend_fundamental: dict | None = None,
     extend_sentiment: dict | None = None,
+    fetcher: DataFetcher | None = None,  # DI: 可注入数据源
 ) -> dict:
     """Decision fusion using the plugin registry.
 

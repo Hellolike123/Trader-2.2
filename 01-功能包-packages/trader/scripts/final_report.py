@@ -9,6 +9,7 @@ from typing import Any
 
 from run_analysis import build_report, build_signal, render_markdown
 from validate_output import validate
+from trader_shared.fetchers import TencentFetcher
 
 
 def parse_args() -> argparse.Namespace:
@@ -21,6 +22,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    # DI: 创建 TencentFetcher 实例供下游使用
+    fetcher = TencentFetcher()
     try:
         report = build_report(args.target)
     except Exception as exc:

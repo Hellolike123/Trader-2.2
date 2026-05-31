@@ -8,6 +8,8 @@ from light_data import to_float
 from safe_cast import safe_float, safe_dict
 from trader_shared.modifier_rule_engine import apply_score_modifiers
 from trader_shared._logging import get_logger
+from trader_shared.interfaces import DataFetcher
+from trader_shared.fetchers import get_fetcher
 
 _logger = get_logger(__name__)
 
@@ -240,7 +242,10 @@ def status_layers(
     fusion_result: dict[str, Any] | None = None,  # S-2 fix: 接收融合层结果
     chan_result: dict[str, Any] | None = None,
     vp_result: dict[str, Any] | None = None,  # [2.3] Volume Profile 日内量价分布
+    fetcher: DataFetcher | None = None,  # DI: 可注入数据源
     ) -> dict[str, Any]:
+    if fetcher is None:
+        fetcher = get_fetcher()
     # === current=0 前置检查 ===
     if current <= 0:
         return {
@@ -425,6 +430,7 @@ def status_for(
     fusion_result: dict[str, Any] | None = None,  # S-2 fix: 接收融合层结果
     chan_result: dict[str, Any] | None = None,
     vp_result: dict[str, Any] | None = None,  # [2.3] Volume Profile 日内量价分布
+    fetcher: DataFetcher | None = None,  # DI: 可注入数据源
 ) -> str:
     return str(status_layers(
         current,
@@ -441,6 +447,7 @@ def status_for(
         fusion_result=fusion_result,
         chan_result=chan_result,
         vp_result=vp_result,
+        fetcher=fetcher,
     )["theory_status"])
 
 

@@ -6,6 +6,8 @@ from typing import Any
 from light_data import pct_change, to_float
 from safe_cast import safe_float
 from trader_shared._logging import get_logger
+from trader_shared.interfaces import DataFetcher
+from trader_shared.fetchers import get_fetcher
 
 _logger = get_logger(__name__)
 
@@ -336,7 +338,9 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None, index_returns: lis
     return multipliers
 
 
-def build_structure_context(current: float, bars: list[BarData], change_pct: Any = None, quote: QuoteData | None = None, fusion_result: dict[str, Any] | None = None, chan_result: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_structure_context(current: float, bars: list[BarData], change_pct: Any = None, quote: QuoteData | None = None, fusion_result: dict[str, Any] | None = None, chan_result: dict[str, Any] | None = None, fetcher: DataFetcher | None = None) -> dict[str, Any]:
+    if fetcher is None:
+        fetcher = get_fetcher()
     recent5 = bars[-RECENT_WINDOW:] if len(bars) >= RECENT_WINDOW else bars
     recent20 = bars[-STRUCTURE_WINDOW:] if len(bars) >= STRUCTURE_WINDOW else bars
     if not recent5:

@@ -26,6 +26,7 @@ if str(_SCRIPT_DIR) not in sys.path:
 from review_compare import run_compare, run_compare_recent
 from review_single import run_single
 from validate_output import validate
+from trader_shared.fetchers import TencentFetcher
 
 
 def parse_holding(value: str) -> tuple[str, float]:
@@ -55,6 +56,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    # DI: 创建 TencentFetcher 实例供下游使用
+    fetcher = TencentFetcher()
     try:
         if args.target:
             text = run_single(args.target, cost=args.cost, trade_date=args.date, output=args.output, session=args.session)

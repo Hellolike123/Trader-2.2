@@ -27,6 +27,7 @@ except ImportError:
 
 from trader_shared.light_data import to_float, pct_change
 from trader_shared.stage_positioning import assess_stage
+from trader_shared.fetchers import TencentFetcher
 
 try:
     from trader_shared.chip_distribution import calc_chip_distribution as _calc_chip
@@ -220,6 +221,8 @@ def build_report(target: str) -> dict[str, Any]:
         warnings.warn(f"[trader] 计算依赖缺失，降级为行情模式: {_ex}")
         return _degraded_quote_report(target)
     
+    # DI: 注入 TencentFetcher 供下游模块使用
+    fetcher = TencentFetcher()
     provider = get_provider()
     snapshot = provider.load_market_snapshot(target, days=LOOKBACK_DAYS, include_5m=True)
     if not snapshot.quote or not snapshot.daily_bars:
@@ -303,6 +306,7 @@ def build_report(target: str) -> dict[str, Any]:
             bars=bars,
             hmm_regime=env.get("hmm_regime_en", "range"),
             main_force_env=main_force_env,
+            fetcher=fetcher,
         )
     except Exception:
         report_fusion = {"action": "融合层异常", "confidence": 0, "weighted_score": 0,
@@ -311,7 +315,8 @@ def build_report(target: str) -> dict[str, Any]:
     # C-7 fix: build_structure_context 现在在融合层之后调用，
     # 可以正确接收 fusion_result 和 chan_result
     levels = build_structure_context(current, bars, quote.get("current_change_pct"), quote,
-                                     fusion_result=report_fusion, chan_result=chan_result)
+                                     fusion_result=report_fusion, chan_result=chan_result,
+                                     fetcher=fetcher)
 
     # 将理论策略结果合并到 levels（不覆盖 structure_core 的输出）
     for key, val in {"chanlun": chan_result, "wyckoff": wyck_result, "momentum": momentum_result}.items():

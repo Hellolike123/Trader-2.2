@@ -7,6 +7,7 @@ import sys
 from monitor import recent_history, run_monitor
 from t0_run import build_plan, render_markdown
 from validate_output import validate
+from trader_shared.fetchers import TencentFetcher
 
 
 def parse_args() -> argparse.Namespace:
@@ -26,6 +27,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    # DI: 创建 TencentFetcher 实例供下游使用
+    fetcher = TencentFetcher()
     if args.monitor:
         try:
             return run_monitor(

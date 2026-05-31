@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from trader_shared.interfaces import IndicatorPlugin
+from trader_shared.plugin_registry import PluginRegistry
 
 # Re-export for convenience
-__all__ = ["IndicatorPlugin"]
+__all__ = ["IndicatorPlugin", "PluginRegistry"]

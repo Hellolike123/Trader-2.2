@@ -91,6 +91,8 @@ def days_between(anchor: datetime, target: datetime) -> float:
 
 
 def cleanup_old_releases(releases_dir: Path, keep: int = MAX_RELEASES) -> int:
+    # 确保目录存在
+    releases_dir.mkdir(parents=True, exist_ok=True)
     if not releases_dir.exists() or keep <= 0:
         return 0
     dirs = [d for d in releases_dir.iterdir() if d.is_dir() and d.name != ".gitkeep"]
@@ -174,6 +176,8 @@ def copy_shared(bundle: Path, skill_slug: str) -> None:
         "chip_distribution", "big_order", "extend_data", "data_provider",
         "cache_utils", "modifier_rule_engine", "rule_engine", "strategy_protocol",
         "data_manager", "self_check_agg",
+        # DI architecture modules
+        "interfaces", "fetchers", "async_utils", "plugin_registry",
     ]
     for mod_name in _STUB_MODULES:
         stub_path = scripts_dir / f"{mod_name}.py"
@@ -384,6 +388,12 @@ def main(args: list[str] | None = None) -> int:
             has_skill = f"{prefix}SKILL.md" in names or "SKILL.md" in names
             empty_py = [n for n in names if n.endswith(".py") and archive.getinfo(n).file_size == 0]
             empty_status = "EMPTY!" if empty_py else ""
+
+            # Verify DI architecture files
+            has_interfaces = any("interfaces.py" in n for n in names)
+            has_fetchers = any("fetchers.py" in n for n in names)
+            has_async_utils = any("async_utils.py" in n for n in names)
+            has_plugins = any("plugins/" in n for n in names)
             
             meta_digest = "unknown"
             meta_path = f"{prefix}_meta.json" if f"{prefix}_meta.json" in names else "_meta.json"
@@ -394,8 +404,9 @@ def main(args: list[str] | None = None) -> int:
                 except Exception:
                     meta_digest = "bad_meta"
             
+            di_status = "DI=ok" if has_interfaces and has_fetchers and has_async_utils and has_plugins else "DI=MISSING"
             status = "ok" if has_meta and has_scripts and has_hermes and has_skill and empty_status != "EMPTY!" else "MISSING"
-            print(f"  [{skill_slug}] {zip_path.name}  meta={has_meta} scripts={has_scripts} hermes={has_hermes} skill={has_skill} digest={meta_digest[:8]} {empty_status}")
+            print(f"  [{skill_slug}] {zip_path.name}  meta={has_meta} scripts={has_scripts} hermes={has_hermes} skill={has_skill} digest={meta_digest[:8]} {di_status} {empty_status}")
 
     # Cleanup temp dirs
     for _, _, staged in stages:
