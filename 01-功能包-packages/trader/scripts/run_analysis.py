@@ -246,20 +246,10 @@ def build_report(target: str) -> dict[str, Any]:
     from trader_shared.momentum_core import momentum_strategy
     from concurrent.futures import ThreadPoolExecutor
 
-    # 并行运行三个理论策略
+    # 并行运行五个独立任务：三策略 + 主力资金 + 大盘环境
     change_pct_val = quote.get("current_change_pct")
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        f_chan = executor.submit(chanlun_strategy, current, bars, change_pct_val, quote)
-        f_wyk = executor.submit(wyckoff_strategy, current, bars, change_pct_val, quote)
-        f_mom = executor.submit(momentum_strategy, current, bars, change_pct_val, quote)
-        chan_result = f_chan.result() or {}
-        wyck_result = f_wyk.result() or {}
-        momentum_result = f_mom.result() or {}
 
-    # === 主力行为引擎 ===
-    main_force_env = "unknown"
-    mf_result = {}
-    try:
+    def _fetch_fund_flow():
         from trader_shared.cache_utils import fetch_fund_flow_cached
         from trader_shared.fund_flow_data import calc_fund_flow_features
         from trader_shared.main_force import detect_main_force_stage
@@ -268,17 +258,42 @@ def build_report(target: str) -> dict[str, Any]:
             daily_flow = ff_data.get("daily_flow", [])
             features = ff_data.get("features", {})
             if daily_flow:
-                mf_result = detect_main_force_stage(features, bars)
-                main_force_env = mf_result.get("stage", "unknown")
+                mf = detect_main_force_stage(features, bars)
+                return mf
+        return {}
+
+    def _fetch_market_env():
+        return get_env_for_skill("trader")
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        f_chan = executor.submit(chanlun_strategy, current, bars, change_pct_val, quote)
+        f_wyk = executor.submit(wyckoff_strategy, current, bars, change_pct_val, quote)
+        f_mom = executor.submit(momentum_strategy, current, bars, change_pct_val, quote)
+        f_mf = executor.submit(_fetch_fund_flow)
+        f_env = executor.submit(_fetch_market_env)
+
+        chan_result = f_chan.result() or {}
+        wyck_result = f_wyk.result() or {}
+        momentum_result = f_mom.result() or {}
+
+    # 主力引擎结果（异常降级为 unknown）
+    main_force_env = "unknown"
+    mf_result = {}
+    try:
+        mf_result = f_mf.result() or {}
+        main_force_env = mf_result.get("stage", "unknown")
     except Exception:
         pass
 
-    # === 融合层 (新) ===
-    # C-9 fix: 融合层必须在 build_structure_context 之前计算，
-    # 因为 build_structure_context 需要 fusion_result 来微调参数
+    # 大盘环境结果（异常降级）
+    try:
+        env = f_env.result()
+    except Exception:
+        env = {"level": "未知", "hmm_regime_en": "range"}
+
+    # === 融合层 ===
     try:
         from trader_shared.fusion_core import merge_decisions
-        env = get_env_for_skill("trader")
         report_fusion = merge_decisions(
             chan_result=chan_result,
             momentum_result=momentum_result,
@@ -288,8 +303,6 @@ def build_report(target: str) -> dict[str, Any]:
             bars=bars,
             hmm_regime=env.get("hmm_regime_en", "range"),
             main_force_env=main_force_env,
-            # extend_fundamental=snapshot.extend_fundamental,
-            # extend_sentiment=snapshot.extend_sentiment,
         )
     except Exception:
         report_fusion = {"action": "融合层异常", "confidence": 0, "weighted_score": 0,

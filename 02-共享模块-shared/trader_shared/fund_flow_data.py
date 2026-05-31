@@ -10,9 +10,10 @@
 from __future__ import annotations
 
 import json
-import urllib.request
 import warnings
 from typing import Any
+
+import requests
 
 FFLOW_URL = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
 
@@ -54,17 +55,17 @@ def fetch_fund_flow(symbol: str, days: int = 30) -> list[dict[str, Any]]:
         API不可用时返回空列表。
     """
     try:
-        params = "&".join(f"{k}={v}" for k, v in {
+        params = {
             "secid": _secid(symbol),
             "lmt": "0",
             "klt": "101",
             "fields1": "f1,f2,f3,f7",
             "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65",
-        }.items())
-        url = f"{FFLOW_URL}?{params}"
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        }
+        r = requests.get(FFLOW_URL, params=params, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        if r.status_code != 200:
+            return []
+        data = r.json()
         klines = data.get("data", {}).get("klines", [])
         if not klines:
             return []

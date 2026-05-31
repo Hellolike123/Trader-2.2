@@ -308,6 +308,13 @@ def merge_daily_bars_with_quote(
         "data_status": "partial",
     }
 
+    # Copy ATR fields from the last cached bar (ATR is a slow variable, previous day's value is a good approximation)
+    if cached_bars:
+        prev_bar = cached_bars[-1]
+        for atr_key in ("atr14", "atr_ratio", "atr7", "tr"):
+            if prev_bar.get(atr_key) is not None:
+                today_bar[atr_key] = prev_bar[atr_key]
+
     # Check if today already exists in cached bars
     result = []
     today_replaced = False
