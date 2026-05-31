@@ -65,7 +65,7 @@ def detect_main_force_stage(
 
     # 计算辅助指标
     vol_ratio = _calc_volume_ratio(bars)
-    price_change_20d = _calc_price_change(bars, 20)
+    price_change_20d = _calc_price_change(bars, 20) or 0.0
     chip_concentrated = False
     chip_loose = False
     if chip_info:
@@ -154,8 +154,9 @@ def detect_main_force_stage(
             scores["markdown"] += 0.2
             signals.append(f"20日跌{price_change_20d*100:.1f}%")
 
-    # 选择最高分阶段
-    best_stage = max(scores, key=scores.get)  # type: ignore[arg-type]
+    # 选择最高分阶段（平局时按优先级：markup > accumulation > testing > distribution > markdown）
+    _PRIORITY = {"markup": 0, "accumulation": 1, "testing": 2, "distribution": 3, "markdown": 4}
+    best_stage = max(scores, key=lambda s: (scores[s], -_PRIORITY.get(s, 99)))  # type: ignore[arg-type]
     best_score = scores[best_stage]
 
     if best_score < 0.3:
@@ -198,10 +199,10 @@ def _calc_volume_ratio(bars: list[dict[str, Any]] | None) -> float | None:
     return round(vol_recent / vol_prev, 2)
 
 
-def _calc_price_change(bars: list[dict[str, Any]] | None, period: int) -> float:
-    """计算近N日价格变化幅度。"""
+def _calc_price_change(bars: list[dict[str, Any]] | None, period: int) -> float | None:
+    """计算近N日价格变化幅度。数据不足返回 None。"""
     if not bars or len(bars) < period:
-        return 0.0
+        return None
     start = float(bars[-period].get("close") or 0)
     end = float(bars[-1].get("close") or 0)
     if start <= 0:

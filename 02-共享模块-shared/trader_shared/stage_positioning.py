@@ -304,12 +304,12 @@ def _layer2_confidence_gate(
     confidence: int,
     state: dict[str, Any],
 ) -> tuple[str, int]:
-    """第二层：置信度评分。< 60% 保持上次阶段。
+    """第二层：置信度评分。< 50% 保持上次阶段。
 
     Returns:
         (final_stage, final_confidence)
     """
-    if confidence < 60:
+    if confidence < 50:
         prev_stage = state.get("last_confirmed_stage", "蓄势")
         return prev_stage, confidence
     return stage, confidence
@@ -639,7 +639,7 @@ def compute_stop_losses(
             stage_reason = "主升期保护利润"
     elif stage == "派发":
         if ma20 is not None and ma20 > 0:
-            stage_stop = round(ma20 * 1.02, 2)  # MA20 上方锁定收益
+            stage_stop = round(ma20 * 0.98, 2)  # MA20 下方锁定收益
             stage_reason = f"派发期锁定收益，MA20上方 {ma20:.2f}"
         else:
             stage_stop = round(current * 0.95, 2)

@@ -84,14 +84,12 @@ def test_structure_core_compatibility():
     with patch("trader_shared.structure_core._load_calibrated_params", return_value=nested_cal):
         mults = _theory_multipliers(fusion)
         # Bear regime should scale stop_buffer by 0.8 (Layer 1) -> 0.60
-        # Then modulate by HMM bear multiplier (0.8) -> 0.48
-        # Blended 50/50 = 0.60 * 0.5 + 0.48 * 0.5 = 0.54
-        assert abs(mults["stop_buffer"] - 0.54) < 0.01
+        # True blend with HMM bear multiplier (0.8) = 0.60 * 0.5 + 0.8 * 0.5 = 0.70
+        assert abs(mults["stop_buffer"] - 0.70) < 0.01
 
         # Base confirm_buffer is 1.25 * 1.3 (bear大势加宽) = 1.625 (Layer 1)
-        # Then modulated by HMM bear multiplier (1.3) -> 2.1125
-        # Blended 50/50 = 1.625 * 0.5 + 2.1125 * 0.5 = 1.86875 (rounds to 1.8688)
-        assert abs(mults["confirm_buffer"] - 1.8688) < 0.01
+        # True blend with HMM bear multiplier (1.3) = 1.625 * 0.5 + 1.3 * 0.5 = 1.4625
+        assert abs(mults["confirm_buffer"] - 1.4625) < 0.01
 
 
     # Case B: Flat Params (Legacy version compatibility)
@@ -100,9 +98,8 @@ def test_structure_core_compatibility():
         mults = _theory_multipliers(fusion)
         # Fallbacks to flat dict directly
         # stop_buffer = 0.8 * 0.8 (Layer 1) -> 0.64
-        # Then modulated by HMM bear multiplier (0.8) -> 0.512
-        # Blended 50/50 = 0.64 * 0.5 + 0.512 * 0.5 = 0.576
-        assert abs(mults["stop_buffer"] - 0.576) < 0.01
+        # True blend with HMM bear multiplier (0.8) = 0.64 * 0.5 + 0.8 * 0.5 = 0.72
+        assert abs(mults["stop_buffer"] - 0.72) < 0.01
         
     print("  COMPATIBILITY: PASS — structure_core successfully consumes flat or nested parameters")
 

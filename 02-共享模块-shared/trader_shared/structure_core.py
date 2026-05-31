@@ -275,8 +275,8 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None, index_returns: lis
             for k in ("zone_width", "confirm_buffer", "stop_buffer"):
                 base = multipliers.get(k, 1.0)
                 hmm_adj = hmm_mult.get(k, 1.0)
-                # 徣化：块层-1 结果叠加 HMM 调制，各占 50%
-                multipliers[k] = round(base * 0.5 + base * hmm_adj * 0.5, 4)
+                # 真混合：base 和 HMM 推荐值各占 50%，确保 HMM 有足够纠偏力
+                multipliers[k] = round(base * 0.5 + hmm_adj * 0.5, 4)
         except Exception:  # 任何 HMM 异常静默降级
             pass
 
@@ -368,6 +368,8 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     if THEORY_ADJUST_LOG_ONLY and any(v != 1.0 for v in theory.values()):
         print(f"THEORY-ADJUST-LOG: multipliers={theory} (suppressed by THEORY_ADJUST_LOG_ONLY)")
         theory = {"zone_width": 1.0, "confirm_buffer": 1.0, "space_threshold": 1.0, "stop_buffer": 1.0}
+    # Clamp confirm_buffer to prevent extreme values from accumulated multiplications
+    theory["confirm_buffer"] = max(0.5, min(2.0, theory["confirm_buffer"]))
     effective_confirm_space = MIN_CONFIRM_SPACE_PCT * theory["confirm_buffer"]
     confirm_price = round(float(resistance["price"]) * (1 + effective_confirm_space), 2)
     # resistance: 实际阻力位，用于减仓参考

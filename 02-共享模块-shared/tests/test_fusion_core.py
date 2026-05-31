@@ -179,8 +179,8 @@ class TestScoreToConfidence:
         assert abs(self._fn(50) - 0.2) < 1e-10
 
     def test_gap_45(self):
-        # V-左侧: score 45 → 0.2 + 5/10*0.3 = 0.35
-        assert abs(self._fn(45) - 0.35) < 1e-10
+        # V-左侧: score 45 → 0.2 + 5/9*0.3 ≈ 0.367 (fixed continuity at 40/41 boundary)
+        assert abs(self._fn(45) - 0.367) < 0.01
 
     def test_gap_60(self):
         # score >= 60 → 0.5

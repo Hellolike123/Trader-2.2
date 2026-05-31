@@ -256,6 +256,23 @@ def build_report(target: str) -> dict[str, Any]:
         wyck_result = f_wyk.result() or {}
         momentum_result = f_mom.result() or {}
 
+    # === 主力行为引擎 ===
+    main_force_env = "unknown"
+    mf_result = {}
+    try:
+        from trader_shared.cache_utils import fetch_fund_flow_cached
+        from trader_shared.fund_flow_data import calc_fund_flow_features
+        from trader_shared.main_force import detect_main_force_stage
+        ff_data = fetch_fund_flow_cached(target)
+        if ff_data:
+            daily_flow = ff_data.get("daily_flow", [])
+            features = ff_data.get("features", {})
+            if daily_flow:
+                mf_result = detect_main_force_stage(features, bars)
+                main_force_env = mf_result.get("stage", "unknown")
+    except Exception:
+        pass
+
     # === 融合层 (新) ===
     # C-9 fix: 融合层必须在 build_structure_context 之前计算，
     # 因为 build_structure_context 需要 fusion_result 来微调参数
@@ -270,6 +287,7 @@ def build_report(target: str) -> dict[str, Any]:
             current_price=current,
             bars=bars,
             hmm_regime=env.get("hmm_regime_en", "range"),
+            main_force_env=main_force_env,
             # extend_fundamental=snapshot.extend_fundamental,
             # extend_sentiment=snapshot.extend_sentiment,
         )
@@ -299,6 +317,8 @@ def build_report(target: str) -> dict[str, Any]:
     levels["wyckoff_upthrust_signal"] = wyck_result.get("upthrust_signal", False)
     levels["base_status"] = levels.get("base_status") or levels.get("status")
     levels["theory_status"] = levels.get("theory_status") or levels.get("status")
+    levels["main_force"] = mf_result
+    levels["main_force_env"] = main_force_env
 
     support = levels["main_support"]
     resistance = levels["resistance"]
@@ -783,6 +803,17 @@ def render_markdown(r: dict[str, Any]) -> str:
     lines.extend(key_lines)
 
     stage = str(r.get("stage") or "")
+
+    # 主力行为段落
+    mf = r.get("main_force") or {}
+    if mf and mf.get("stage") and mf["stage"] != "unknown":
+        try:
+            from trader_shared.main_force_output import format_main_force_section
+            lines.append("")
+            lines.append(format_main_force_section(mf))
+        except Exception:
+            pass
+
     if stage == "转弱" or scene in ("空间不足",):
         lines.extend([
             "",

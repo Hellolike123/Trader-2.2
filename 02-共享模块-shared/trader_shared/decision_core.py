@@ -317,7 +317,7 @@ def status_layers(
         lookback = min(PULLBACK_CONFIRM_DAYS, len(bars) - 1)
         for i in range(-lookback, 0):
             prev_close = to_float(bars[i].get("close"))
-            if prev_close is not None and prev_close >= support:
+            if prev_close is not None and prev_close >= hard_stop:
                 _fake_break = True
                 break
 
@@ -482,7 +482,7 @@ def score_for(item: dict[str, Any]) -> float:
 
     rule_mod = apply_score_modifiers(item)
     if rule_mod is None:
-        score = float(STATUS_SCORE.get(status, 0))
+        score = float(STATUS_SCORE.get(status, STATUS_SCORE.get("等转强", 60)))
         if status != "暂不碰" and low_upper is not None and current <= float(low_upper):
             score += 10
         if status != "暂不碰" and confirm is not None and current >= float(confirm):

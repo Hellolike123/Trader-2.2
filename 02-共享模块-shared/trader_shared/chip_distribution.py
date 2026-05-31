@@ -115,7 +115,7 @@ def calc_chip_distribution(
                 tr = 100.0
             elif tr < 0.0:
                 tr = 0.0
-            decay_rate = (tr / 100.0) ** 0.5 * 0.3
+            decay_rate = max((tr / 100.0) ** 0.5 * 0.3, 0.01)
         else:
             decay_rate = 0.03  # 无换手率时默认 3% 折旧率
             

@@ -193,7 +193,7 @@ def _score_to_confidence(score: float) -> float:
 
     # 41-59 灰区: V 形, 50 最低 (0.2), 向 40/60 两侧上升 (0.5)
     if score < 50:
-        ratio = (50 - score) / 10
+        ratio = (50 - score) / 9
         return 0.2 + ratio * 0.3
     else:
         ratio = (score - 50) / 9
