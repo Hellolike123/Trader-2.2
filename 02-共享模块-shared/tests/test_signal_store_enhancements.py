@@ -190,13 +190,13 @@ class TestCleanupOldSignals:
         sig1 = _make_signal(trade_date="2020-01-01", status="completed")
         append_signal(sig1, path=self.store_path)
 
-        # Old active — should be kept
-        sig2 = _make_signal(trade_date="2020-01-01", status="active")
+        # Old active — should be kept (different symbol to avoid UUID dedup)
+        sig2 = _make_signal(symbol="600519", trade_date="2020-01-01", status="active")
         append_signal(sig2, path=self.store_path)
 
         # Recent completed — should be kept
         recent_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-        sig3 = _make_signal(trade_date=recent_date, status="completed")
+        sig3 = _make_signal(symbol="600703", trade_date=recent_date, status="completed")
         append_signal(sig3, path=self.store_path)
 
         _sig_cache.clear()

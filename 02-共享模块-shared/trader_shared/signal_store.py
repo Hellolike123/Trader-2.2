@@ -73,6 +73,8 @@ def append_signal(signal: dict[str, Any], path: Path | None = None) -> str:
 
     Does NOT mutate the caller's dict.  Returns the signal_id so callers
     that need it can capture the return value.
+
+    Uses in-memory UUID cache for fast duplicate detection.
     """
     # Deep-copy so the caller's dict is never mutated.
     working = dict(signal)
@@ -97,10 +99,20 @@ def append_signal(signal: dict[str, Any], path: Path | None = None) -> str:
     assert_valid_signal(working)
 
     store_path = path or _get_default_store_path()
+
+    # ── UUID deduplication check via in-memory cache ──
+    uuid_cache = _load_uuid_cache(store_path)
+    if working["signal_id"] in uuid_cache:
+        _logger.debug("Duplicate signal_id %s, skipping write", working["signal_id"])
+        return working["signal_id"]
+
     _maybe_rotate(store_path)
 
     from trader_shared.data_manager import DataManager
     DataManager.append_signal(working, path=store_path)
+
+    # Update in-memory UUID cache
+    uuid_cache.add(working["signal_id"])
 
     _sig_cache.pop(str(store_path), None)
     return working["signal_id"]
@@ -115,6 +127,46 @@ _CACHE_TTL_SECONDS = 2  # Stale a cache entry after 2 s.
 _bad_line_count: int = 0
 _bad_line_last_reason: str = ""
 _bad_line_last_path: str = ""
+
+# ── UUID deduplication cache ─────────────────────────────────────────
+# In-memory set of signal_id values for fast duplicate detection.
+# Loaded lazily on first access, updated on every append.
+_uuid_cache: set[str] | None = None
+_uuid_cache_path: str | None = None
+
+
+def _load_uuid_cache(path: Path | None = None) -> set[str]:
+    """Load all UUIDs from signals.jsonl into memory on first access.
+
+    Returns a set of signal_id strings. Subsequent calls return the cached set
+    unless the path has changed.
+    """
+    global _uuid_cache, _uuid_cache_path
+    store_path = str(path or _get_default_store_path())
+
+    if _uuid_cache is not None and _uuid_cache_path == store_path:
+        return _uuid_cache
+
+    uuids: set[str] = set()
+    try:
+        if Path(store_path).exists():
+            raw = Path(store_path).read_text(encoding="utf-8")
+            for line in raw.splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    item = json.loads(line)
+                    sid = item.get("signal_id")
+                    if sid:
+                        uuids.add(str(sid))
+                except (json.JSONDecodeError, ValueError):
+                    continue
+    except OSError as exc:
+        _logger.debug("UUID cache load failed for %s: %s", store_path, exc)
+
+    _uuid_cache = uuids
+    _uuid_cache_path = store_path
+    return _uuid_cache
 
 
 def _read_store(store_path: Path) -> list[dict[str, Any]]:
@@ -310,7 +362,9 @@ def _rewrite_store(signals: list[dict[str, Any]], store_path: Path) -> None:
     """Atomically rewrite the signal store with the given signals.
 
     Uses temp file + fsync + rename for crash safety.
+    Invalidates UUID cache after rewrite.
     """
+    global _uuid_cache, _uuid_cache_path
     tmp_path = store_path.with_suffix(f".{os.getpid()}.rewrite.tmp")
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
@@ -319,6 +373,9 @@ def _rewrite_store(signals: list[dict[str, Any]], store_path: Path) -> None:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, store_path)
+        # Invalidate UUID cache — will be rebuilt on next access
+        _uuid_cache = None
+        _uuid_cache_path = None
     except (OSError, TypeError) as exc:
         tmp_path.unlink(missing_ok=True)
         raise exc

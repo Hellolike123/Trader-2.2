@@ -406,6 +406,50 @@ class MarketDataSourceController:
 _DATA_SOURCE_CONTROLLER = MarketDataSourceController()
 
 
+class _CircuitBreaker:
+    """Circuit breaker for API calls.
+
+    After `threshold` consecutive failures, pauses requests for `cooldown_seconds`.
+    During pause, calls return None (caller should fallback).
+    Successful request resets failure counter.
+    """
+
+    def __init__(self, threshold: int = 5, cooldown_seconds: float = 60.0) -> None:
+        self.threshold = threshold
+        self.cooldown_seconds = cooldown_seconds
+        self._consecutive_failures: int = 0
+        self._paused_until: float = 0.0
+
+    @property
+    def is_open(self) -> bool:
+        """True if circuit is open (requests should be paused)."""
+        if self._paused_until > 0 and time.time() < self._paused_until:
+            return True
+        if self._paused_until > 0 and time.time() >= self._paused_until:
+            # Cooldown expired, half-open state — allow one attempt
+            self._paused_until = 0.0
+        return False
+
+    def record_success(self) -> None:
+        """Reset failure counter on success."""
+        self._consecutive_failures = 0
+        self._paused_until = 0.0
+
+    def record_failure(self) -> None:
+        """Record a failure. Opens circuit after threshold consecutive failures."""
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= self.threshold:
+            self._paused_until = time.time() + self.cooldown_seconds
+            _logger.warning(
+                "Circuit breaker OPEN after %d consecutive failures. Pausing for %.0fs",
+                self._consecutive_failures, self.cooldown_seconds,
+            )
+
+
+_circuit_tencent_quote = _CircuitBreaker(threshold=5, cooldown_seconds=60.0)
+_circuit_tencent_daily = _CircuitBreaker(threshold=5, cooldown_seconds=60.0)
+
+
 def run_mootdx_with_timeout(func, *args, **kwargs) -> Any:
     """Execute a mootdx connection or call with a strict 1.5-second socket timeout."""
     global _MOOTDX_CLIENT
@@ -787,36 +831,42 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
     if cached is not None:
         return sanitize_quote(cached)
 
+    # ── Circuit breaker check — skip Tencent if paused ──
+    tencent_available = not _circuit_tencent_quote.is_open
+
     # Tencent HTTP first — fast and stable for most cases
-    try:
-        _rate_limit_delay()
-        text = http.get_text(TENCENT_QUOTE_URL + sec.qq_symbol, encoding="gbk")
-        match = re.search(r'="([^"]*)"', text)
-        if match and len(match.group(1).split("~")) >= 35:
-            trade_date, trade_time = parse_trade_datetime(match.group(1).split("~"))
-            fields = match.group(1).split("~")
-            tencent_q = {
-                "name": fields[1] or sec.name,
-                "symbol": sec.ts_code,
-                "trade_date": trade_date,
-                "trade_time": trade_time,
-                "current_price": to_float(fields[3]),
-                "pre_close": to_float(fields[4]),
-                "open": to_float(fields[5]),
-                "high": to_float(fields[33]) if len(fields) > 33 else None,
-                "low": to_float(fields[34]) if len(fields) > 34 else None,
-                "volume": to_float(fields[36]) if len(fields) > 36 else None,
-                "amount": to_float(fields[37]) if len(fields) > 37 else None,
-                "turnover_rate": to_float(fields[38]) if len(fields) > 38 else None,
-                "current_change_pct": to_float(fields[32]) if len(fields) > 32 else None,
-                "data_source": "tencent-http",
-                "data_status": "full",
-                "data_freshness": "live" if is_trading_time() else "stale",
-            }
-            save_realtime_cache(cache_key, tencent_q)
-            return sanitize_quote(tencent_q)
-    except (OSError, ValueError, KeyError) as exc:
-        _logger.debug("Tencent HTTP quote failed for %s: %s", sec.qq_symbol, exc)
+    if tencent_available:
+        try:
+            _rate_limit_delay()
+            text = http.get_text(TENCENT_QUOTE_URL + sec.qq_symbol, encoding="gbk")
+            match = re.search(r'="([^"]*)"', text)
+            if match and len(match.group(1).split("~")) >= 35:
+                trade_date, trade_time = parse_trade_datetime(match.group(1).split("~"))
+                fields = match.group(1).split("~")
+                tencent_q = {
+                    "name": fields[1] or sec.name,
+                    "symbol": sec.ts_code,
+                    "trade_date": trade_date,
+                    "trade_time": trade_time,
+                    "current_price": to_float(fields[3]),
+                    "pre_close": to_float(fields[4]),
+                    "open": to_float(fields[5]),
+                    "high": to_float(fields[33]) if len(fields) > 33 else None,
+                    "low": to_float(fields[34]) if len(fields) > 34 else None,
+                    "volume": to_float(fields[36]) if len(fields) > 36 else None,
+                    "amount": to_float(fields[37]) if len(fields) > 37 else None,
+                    "turnover_rate": to_float(fields[38]) if len(fields) > 38 else None,
+                    "current_change_pct": to_float(fields[32]) if len(fields) > 32 else None,
+                    "data_source": "tencent-http",
+                    "data_status": "full",
+                    "data_freshness": "live" if is_trading_time() else "stale",
+                }
+                _circuit_tencent_quote.record_success()
+                save_realtime_cache(cache_key, tencent_q)
+                return sanitize_quote(tencent_q)
+        except (OSError, ValueError, KeyError) as exc:
+            _circuit_tencent_quote.record_failure()
+            _logger.debug("Tencent HTTP quote failed for %s: %s", sec.qq_symbol, exc)
 
     # Fallback: pytdx3 (fast timeout, mainly a backup)
     if _check_pytdx3():
@@ -905,7 +955,58 @@ def _compute_atr_fields(bars: list[dict[str, Any]]) -> None:
             bar["atr_ratio"] = 0.0
 
 
+def _fetch_daily_sina(sec: Security, days: int = 300) -> list[dict[str, Any]] | None:
+    """Fetch daily K-line from Sina API as fallback when Tencent fails.
+
+    Uses the same Sina endpoint as minute bars but with scale=240 (daily).
+    Returns None on failure.
+    """
+    try:
+        _rate_limit_delay()
+        url = (
+            f"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+            f"CN_MarketData.getKLineData?symbol={sec.qq_symbol}&scale=240"
+            f"&ma=no&datalen={max(days, 20)}"
+        )
+        ssl_ctx = ssl._create_unverified_context()
+        request = Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+            "Referer": "https://finance.sina.com.cn/",
+        })
+        with urlopen(request, timeout=TIMEOUT_SECONDS, context=ssl_ctx) as response:
+            text = response.read().decode("gbk", errors="ignore")
+            raw_data = json.loads(text or "[]")
+
+        if not raw_data or not isinstance(raw_data, list) or isinstance(raw_data, dict):
+            return None
+
+        bars: list[dict[str, Any]] = []
+        for row in raw_data:
+            dt_str = str(row.get("day", ""))
+            close = to_float(row.get("close"))
+            if close is None:
+                continue
+            bars.append({
+                "date": dt_str.split(" ")[0] if dt_str else "",
+                "open": to_float(row.get("open")),
+                "high": to_float(row.get("high")),
+                "low": to_float(row.get("low")),
+                "close": close,
+                "volume": to_float(row.get("volume")),
+                "amount": None,
+            })
+        return bars if bars else None
+    except Exception as exc:
+        _logger.debug("Sina daily fallback failed for %s: %s", sec.qq_symbol, exc)
+        return None
+
+
 def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[dict[str, Any]]:
+    # ── Circuit breaker check — return empty if paused ──
+    if _circuit_tencent_daily.is_open:
+        _logger.debug("Circuit breaker open for daily bars, skipping API calls for %s", sec.code)
+        return []
+
     # ── 文件缓存读取（盘后预缓存的数据，TTL 24小时）──
     try:
         from trader_shared.cache_utils import get_cached as _file_cached, CACHE_DAILY, TTL_DAILY
@@ -963,6 +1064,7 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
 
     try:
         result = retry(do_fetch)
+        _circuit_tencent_daily.record_success()
         _compute_atr_fields(result)
         has_today = any(bar.get("date") == datetime.now().strftime("%Y-%m-%d") for bar in result)
         if not has_today:
@@ -975,7 +1077,16 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
             _logger.debug("File cache write failed for %s: %s", sec.code, exc)
         return result
     except RuntimeError:
-        pass
+        _circuit_tencent_daily.record_failure()
+
+    # Fallback: Sina daily bars (scale=240 = daily)
+    sina_bars = _fetch_daily_sina(sec, days)
+    if sina_bars:
+        for bar in sina_bars:
+            bar["data_source"] = "sina"
+            bar["data_status"] = "partial"
+        _compute_atr_fields(sina_bars)
+        return sina_bars
 
     # Fallback: pytdx3
     if _check_pytdx3():

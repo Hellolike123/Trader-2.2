@@ -74,14 +74,42 @@ def validate_bars(bars: list[dict]) -> bool:
     return True
 
 
+_FLOCK_TIMEOUT = 5  # seconds to wait for file lock
+
+
+def _acquire_lock(f, lock_type: int, timeout: float = _FLOCK_TIMEOUT) -> bool:
+    """Acquire file lock with timeout. Returns True if acquired, False on timeout."""
+    deadline = time.time() + timeout
+    while True:
+        try:
+            fcntl.flock(f, lock_type | fcntl.LOCK_NB)
+            return True
+        except (OSError, BlockingIOError):
+            if time.time() >= deadline:
+                _logger.warning("File lock timeout after %.1fs", timeout)
+                return False
+            time.sleep(0.05)
+
+
 def get_cached(key: str, target: str, ttl: int = TTL_DAILY) -> CacheResult | None:
-    """Read cache if exists. Returns CacheResult with stale flag if expired, None if missing."""
+    """Read cache if exists. Returns CacheResult with stale flag if expired, None if missing.
+
+    Uses shared file lock (LOCK_SH) to prevent reading half-written files.
+    """
     cache_file = CACHE_DIR / key / f"{target}.json"
     if not cache_file.exists():
         return None
     try:
         age = time.time() - cache_file.stat().st_mtime
-        data = json.loads(cache_file.read_text(encoding="utf-8"))
+        with open(cache_file, "r", encoding="utf-8") as f:
+            if _acquire_lock(f, fcntl.LOCK_SH):
+                try:
+                    raw = f.read()
+                finally:
+                    fcntl.flock(f, fcntl.LOCK_UN)
+            else:
+                raw = f.read()
+        data = json.loads(raw)
         stale = age > ttl
         return CacheResult(data=data, stale=stale, age_seconds=round(age, 1), source="file")
     except (json.JSONDecodeError, OSError, ValueError) as exc:
@@ -96,18 +124,21 @@ def get_cached_data(key: str, target: str, ttl: int = TTL_DAILY) -> Any | None:
 
 
 def set_cached(key: str, target: str, data: Any) -> None:
-    """Write data to cache (atomic via temp file + rename, with file lock)."""
+    """Write data to cache (atomic via temp file + rename, with exclusive file lock)."""
     cache_file = CACHE_DIR / key / f"{target}.json"
     cache_file.parent.mkdir(parents=True, exist_ok=True)
     tmp_file = cache_file.with_suffix(f".{os.getpid()}.tmp")
     try:
         tmp_file.write_text(json.dumps(data, ensure_ascii=False, default=str), encoding="utf-8")
         with open(cache_file, "a") as lock_f:
-            fcntl.flock(lock_f, fcntl.LOCK_EX)
-            try:
+            if _acquire_lock(lock_f, fcntl.LOCK_EX):
+                try:
+                    tmp_file.replace(cache_file)
+                finally:
+                    fcntl.flock(lock_f, fcntl.LOCK_UN)
+            else:
+                _logger.warning("Cache write lock timeout for %s/%s, writing without lock", key, target)
                 tmp_file.replace(cache_file)
-            finally:
-                fcntl.flock(lock_f, fcntl.LOCK_UN)
     except (OSError, TypeError) as exc:
         _logger.warning("Cache write failed for %s/%s: %s", key, target, exc)
         tmp_file.unlink(missing_ok=True)
