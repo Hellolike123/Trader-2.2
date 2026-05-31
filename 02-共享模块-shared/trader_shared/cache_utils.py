@@ -29,11 +29,13 @@ CACHE_DIR = Path.home() / ".trader" / "cache"
 CACHE_DAILY = "daily"
 CACHE_ENRICH = "enrich"
 CACHE_MARKET_ENV = "market_env"
+CACHE_FUND_FLOW = "fund_flow"
 
 # TTL constants (seconds)
 TTL_DAILY = 86400       # 24 hours - daily bars change once per day
 TTL_WEEKLY = 604800     # 7 days - weekly bars change once per week
 TTL_FUNDAMENTAL = 43200 # 12 hours - shareholder/unlock data updates infrequently
+TTL_FUND_FLOW = 86400   # 24 hours - fund flow data updates daily after market close
 
 
 @dataclass
@@ -131,6 +133,28 @@ def invalidate(key: str, target: str) -> None:
     cache_file.unlink(missing_ok=True)
 
 
+def fetch_fund_flow_cached(symbol: str) -> dict[str, Any]:
+    """获取资金流向数据（带缓存）。
+
+    读缓存 → 过期则调API → 写缓存。
+    返回 {"daily_flow": [...], "features": {...}} 或空 dict。
+    """
+    cached = get_cached_data(CACHE_FUND_FLOW, symbol, ttl=TTL_FUND_FLOW)
+    if cached is not None:
+        return cached
+    try:
+        from trader_shared.fund_flow_data import fetch_fund_flow, calc_fund_flow_features
+        daily_flow = fetch_fund_flow(symbol)
+        if not daily_flow:
+            return {}
+        features = calc_fund_flow_features(daily_flow)
+        result = {"daily_flow": daily_flow, "features": features}
+        set_cached(CACHE_FUND_FLOW, symbol, result)
+        return result
+    except Exception:
+        return {}
+
+
 def warm_pool_cache() -> dict[str, Any]:
     """Pre-cache data for all active stocks in the pool.
 
@@ -202,7 +226,23 @@ def warm_pool_cache() -> dict[str, Any]:
     except Exception:
         pass
 
-    return {"total": len(targets), "success": success, "failed": failed, "skipped": 0, "errors": errors}
+    # Warm fund flow cache
+    ff_success = 0
+    ff_failed = 0
+    for name in targets:
+        try:
+            result = fetch_fund_flow_cached(name)
+            if result:
+                ff_success += 1
+            else:
+                ff_failed += 1
+        except Exception:
+            ff_failed += 1
+
+    return {
+        "total": len(targets), "success": success, "failed": failed, "skipped": 0, "errors": errors,
+        "fund_flow_success": ff_success, "fund_flow_failed": ff_failed,
+    }
 
 
 def clear_cache(cache_type: str | None = None) -> int:

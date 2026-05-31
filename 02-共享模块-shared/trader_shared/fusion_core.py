@@ -62,6 +62,7 @@ def _log_fusion(result: dict) -> None:
             "weighted_score": result["weighted_score"],
             "disagreement": result["disagreement"],
             "regime": result["regime"],
+            "main_force_env": result.get("main_force_env", "unknown"),
             "signals": {k: v["direction"] for k, v in result["signals_detail"].items()},
         }
         print(f"FUSION: {json.dumps(log_data, ensure_ascii=False)}")
@@ -247,6 +248,30 @@ def _wyckoff_to_signal(wyckoff_result: dict) -> dict:
             "reason": "威科夫无明确信号", "raw_key": "wyckoff"}
 
 
+_MAIN_FORCE_WEIGHT_ADJUSTMENTS: dict[str, dict[str, float]] = {
+    "accumulation": {"chan": 0.0, "wyckoff": 0.10, "momentum": -0.10},
+    "testing":      {"chan": 0.0, "wyckoff": 0.0,  "momentum": 0.0},
+    "markup":       {"chan": -0.05, "wyckoff": 0.0,  "momentum": 0.10},
+    "distribution": {"chan": -0.10, "wyckoff": 0.10, "momentum": -0.05},
+    "markdown":     {"chan": -0.15, "wyckoff": -0.10, "momentum": -0.10},
+    "unknown":      {"chan": 0.0, "wyckoff": 0.0, "momentum": 0.0},
+}
+
+
+def _apply_main_force_weights(weights: dict[str, float], main_force_env: str) -> dict[str, float]:
+    """根据主力行为阶段修正三路信号权重，修正后归一化。"""
+    adj = _MAIN_FORCE_WEIGHT_ADJUSTMENTS.get(main_force_env, {})
+    if not adj:
+        return weights
+    adjusted = {}
+    for k in weights:
+        adjusted[k] = max(0.0, weights[k] + adj.get(k, 0.0))
+    total = sum(adjusted.values())
+    if total > 0:
+        adjusted = {k: round(v / total, 4) for k, v in adjusted.items()}
+    return adjusted
+
+
 def merge_decisions(
     chan_result: dict,
     momentum_result: dict,
@@ -257,6 +282,7 @@ def merge_decisions(
     hmm_regime: str = "range",
     extend_fundamental: dict | None = None,
     extend_sentiment: dict | None = None,
+    main_force_env: str | None = None,
 ) -> dict:
     """决策融合层核心函数。
 
@@ -364,6 +390,10 @@ def merge_decisions(
     else:
         weights = get_regime_weights(regime)
 
+    # 2.5 主力行为权重修正
+    if main_force_env and main_force_env != "unknown":
+        weights = _apply_main_force_weights(weights, main_force_env)
+
     # 3. 分歧检测与置信优先级冲突消解
     directions = [chan_signal["direction"],
                   momentum_signal["direction"],
@@ -461,6 +491,7 @@ def merge_decisions(
         "weighted_score": round(weighted_score, 3),
         "regime": regime,
         "hmm_regime": hmm_regime,
+        "main_force_env": main_force_env or "unknown",
         "disagreement": round(disagreement, 3),
         "signals_detail": {
             "chan": chan_signal,
