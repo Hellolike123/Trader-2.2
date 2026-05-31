@@ -514,3 +514,58 @@ def merge_decisions(
         result["action"] = "日志模式 (FUSION_LOG_ONLY=true)，决策由现有 system 输出"
 
     return result
+
+
+def merge_decisions_from_plugins(
+    current: float,
+    bars: list[dict[str, Any]],
+    change_pct: float | None,
+    quote: dict[str, Any],
+    regime: str = "正常",
+    hmm_regime: str = "range",
+    main_force_env: str | None = None,
+    extend_fundamental: dict | None = None,
+    extend_sentiment: dict | None = None,
+) -> dict:
+    """Decision fusion using the plugin registry.
+
+    Runs all registered plugins, then merges their results using the same
+    logic as merge_decisions(). This is the plugin-based alternative to
+    manually passing chan_result/momentum_result/wyckoff_result.
+
+    Args:
+        current: Current stock price
+        bars: Daily K-line bars
+        change_pct: Today's change percentage
+        quote: Real-time quote dict
+        regime: Market environment level
+        hmm_regime: HMM regime state
+        main_force_env: Main force behavior stage
+        extend_fundamental: Extended fundamental data
+        extend_sentiment: Extended sentiment data
+
+    Returns:
+        Same dict as merge_decisions()
+    """
+    from trader_shared.plugin_registry import get_registry
+
+    registry = get_registry()
+    plugin_results = registry.analyze_all(current, bars, change_pct, quote)
+
+    # Map plugin results to the format expected by merge_decisions
+    chan_result = plugin_results.get("chanlun", {})
+    momentum_result = plugin_results.get("momentum", {})
+    wyckoff_result = plugin_results.get("wyckoff", {})
+
+    return merge_decisions(
+        chan_result=chan_result,
+        momentum_result=momentum_result,
+        wyckoff_result=wyckoff_result,
+        regime=regime,
+        current_price=current,
+        bars=bars,
+        hmm_regime=hmm_regime,
+        extend_fundamental=extend_fundamental,
+        extend_sentiment=extend_sentiment,
+        main_force_env=main_force_env,
+    )

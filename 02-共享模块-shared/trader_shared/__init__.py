@@ -148,6 +148,8 @@ __all__ = [
     "run", "generate_suggestions",
     # signal modules (migrated from 03-输出校验-contracts)
     "signal_contract", "signal_store", "signal_utils",
+    # DI & plugins (new in 2.4)
+    "interfaces", "fetchers", "plugin_registry", "async_utils",
     # version
     "__version__",
 ]
