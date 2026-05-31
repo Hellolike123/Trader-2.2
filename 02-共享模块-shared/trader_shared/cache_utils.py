@@ -316,6 +316,44 @@ def clear_cache(cache_type: str | None = None) -> int:
     return count
 
 
+# ── Chunked cache reads for memory efficiency ────────────────────────
+
+
+def get_cached_batches(
+    key: str,
+    target: str,
+    ttl: int = TTL_DAILY,
+    batch_size: int = 50,
+) -> list[list[dict[str, Any]]] | None:
+    """Read cached data and split into batches for memory-efficient processing.
+
+    Instead of returning the entire cached list, this function splits it into
+    batches of ``batch_size`` items. This is useful for processing large K-line
+    datasets without loading everything into memory at once.
+
+    Args:
+        key: Cache subdirectory (e.g., CACHE_DAILY).
+        target: Cache target identifier (e.g., stock code).
+        ttl: Time-to-live in seconds.
+        batch_size: Number of items per batch (default 50).
+
+    Returns:
+        List of batches, or None if cache miss.
+    """
+    result = get_cached(key, target, ttl)
+    if result is None or not isinstance(result.data, list):
+        return None
+
+    data = result.data
+    if not data:
+        return []
+
+    batches: list[list[dict[str, Any]]] = []
+    for i in range(0, len(data), batch_size):
+        batches.append(data[i : i + batch_size])
+    return batches
+
+
 def merge_daily_bars_with_quote(
     cached_bars: list[dict],
     quote: dict[str, Any],

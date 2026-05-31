@@ -158,6 +158,7 @@ class Position(TypedDict):
 class SignalRecord(TypedDict, total=False):
     """信号协议 v1 记录（替代 signal_contract.py 中的 dict 自由组装）"""
     contract: str                   # always "trader_signal_v1"
+    schema_version: int             # schema version for future migrations (default 1)
     source_skill: str               # "trader" | "t0" | "review"
     symbol: str                     # ts_code, e.g. "688248.SH"
     name: str                       # 股票名

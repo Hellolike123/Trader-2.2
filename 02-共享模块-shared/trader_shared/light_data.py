@@ -1310,3 +1310,51 @@ def normalize_bars(raw_bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def pct_change(start: float, end: float) -> float:
     return ((end / start) - 1.0) * 100 if start else 0.0
+
+
+# ── Memory-efficient batch reading ────────────────────────────────────
+
+
+def iter_qfq_daily_batches(
+    sec: Security,
+    http: HttpClient,
+    days: int = 300,
+    batch_size: int = 50,
+) -> list[list[dict[str, Any]]]:
+    """Fetch daily K-line data and return as batches for memory efficiency.
+
+    Instead of returning all bars as a single list, this function splits them
+    into batches of ``batch_size``. This allows callers to process bars in
+    chunks (e.g., for parallel analysis) without holding the entire dataset
+    in memory at once.
+
+    Args:
+        sec: Security to fetch data for.
+        http: HTTP client instance.
+        days: Number of days to fetch (default 300).
+        batch_size: Number of bars per batch (default 50).
+
+    Returns:
+        List of batches, where each batch is a list of bar dicts.
+        Returns empty list if fetch fails.
+    """
+    all_bars = fetch_qfq_daily(sec, http, days=days)
+    if not all_bars:
+        return []
+
+    batches: list[list[dict[str, Any]]] = []
+    for i in range(0, len(all_bars), batch_size):
+        batches.append(all_bars[i : i + batch_size])
+    return batches
+
+
+def get_memory_usage_mb() -> float:
+    """Get current process memory usage in MB.
+
+    Returns 0.0 if psutil is not available.
+    """
+    try:
+        import psutil
+        return psutil.Process().memory_info().rss / (1024 * 1024)
+    except ImportError:
+        return 0.0

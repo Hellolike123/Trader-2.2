@@ -21,6 +21,9 @@ from trader_shared._logging import get_logger
 
 _logger = get_logger(__name__)
 
+# Schema version for signal records — bump when format changes
+SIGNAL_SCHEMA_VERSION: int = 1
+
 
 def _get_default_store_path() -> Path:
     """Return default signal store path.
@@ -86,6 +89,10 @@ def append_signal(signal: dict[str, Any], path: Path | None = None) -> str:
             signal_type=normalize_signal_type(str(working.get("signal_type") or "unknown").strip()),
             price=price_from_trigger(working) or "0.00",
         )
+
+    # Add schema version for future migrations
+    if "schema_version" not in working:
+        working["schema_version"] = SIGNAL_SCHEMA_VERSION
 
     assert_valid_signal(working)
 
@@ -173,6 +180,148 @@ def load_recent_signals(symbol: str | None = None, limit: int = 20, path: Path |
             if normalize_symbol(str(s.get("symbol") or "")) == norm_query
         ]
     return signals[-limit:]
+
+
+# ── Signal expiry cleanup ─────────────────────────────────────────────
+
+
+# Terminal states that can be safely archived
+_TERMINAL_STATES: set[str] = {"completed", "expired"}
+
+
+def cleanup_old_signals(
+    max_age_days: int = 90,
+    path: Path | None = None,
+) -> dict[str, int]:
+    """Archive and remove old signals from the store.
+
+    Signals older than max_age_days are archived to signals_archive_YYYYMM.jsonl
+    before being removed from the main store. Signals with status "active" or
+    without a terminal status are kept regardless of age.
+
+    Args:
+        max_age_days: Maximum age in days. Older terminal signals are archived.
+        path: Override signal store path (default: ~/.trader/signals.jsonl).
+
+    Returns:
+        Dict with 'total', 'archived', 'kept', 'failed' counts.
+    """
+    store_path = path or _get_default_store_path()
+    if not store_path.exists():
+        return {"total": 0, "archived": 0, "kept": 0, "failed": 0}
+
+    signals = _read_store(store_path)
+    if not signals:
+        return {"total": 0, "archived": 0, "kept": 0, "failed": 0}
+
+    cutoff_time = datetime.now().timestamp() - (max_age_days * 86400)
+    cutoff_date = datetime.fromtimestamp(cutoff_time).strftime("%Y-%m-%d")
+
+    to_archive: list[dict[str, Any]] = []
+    to_keep: list[dict[str, Any]] = []
+    failed = 0
+
+    for sig in signals:
+        trade_date = str(sig.get("trade_date") or "")
+        status = str(sig.get("status") or "").lower()
+
+        # Keep active signals regardless of age
+        if status not in _TERMINAL_STATES and status != "":
+            to_keep.append(sig)
+            continue
+
+        # Keep signals without a date (can't determine age)
+        if not trade_date:
+            to_keep.append(sig)
+            continue
+
+        # Archive old terminal signals
+        if trade_date < cutoff_date:
+            to_archive.append(sig)
+        else:
+            to_keep.append(sig)
+
+    # Archive to monthly file before deletion
+    if to_archive:
+        try:
+            _archive_signals(to_archive, store_path)
+        except (OSError, json.JSONDecodeError) as exc:
+            _logger.warning("Signal archival failed: %s", exc)
+            failed = len(to_archive)
+            # If archival fails, keep all signals to avoid data loss
+            return {"total": len(signals), "archived": 0, "kept": len(signals), "failed": failed}
+
+    # Rewrite store with kept signals (atomic via DataManager)
+    if to_archive:
+        try:
+            _rewrite_store(to_keep, store_path)
+        except (OSError, TypeError) as exc:
+            _logger.warning("Signal store rewrite failed: %s", exc)
+            failed = len(to_archive)
+
+    result = {
+        "total": len(signals),
+        "archived": len(to_archive) - failed,
+        "kept": len(to_keep),
+        "failed": failed,
+    }
+
+    if result["archived"] > 0:
+        _logger.info(
+            "Signal cleanup: total=%d, archived=%d, kept=%d, failed=%d, cutoff=%s",
+            result["total"], result["archived"], result["kept"], result["failed"], cutoff_date,
+        )
+
+    return result
+
+
+def _archive_signals(signals: list[dict[str, Any]], store_path: Path) -> None:
+    """Archive signals to a monthly archive file.
+
+    Groups signals by trade_date month and writes to signals_archive_YYYYMM.jsonl.
+    """
+    # Group by YYYY-MM
+    by_month: dict[str, list[dict[str, Any]]] = {}
+    for sig in signals:
+        trade_date = str(sig.get("trade_date") or "")
+        if len(trade_date) >= 7:
+            month_key = trade_date[:7].replace("-", "")  # YYYYMM
+        else:
+            month_key = "unknown"
+        by_month.setdefault(month_key, []).append(sig)
+
+    for month_key, month_signals in by_month.items():
+        archive_path = store_path.parent / f"{store_path.stem}_archive_{month_key}{store_path.suffix}"
+        lines = [json.dumps(s, ensure_ascii=False, default=str) + "\n" for s in month_signals]
+
+        with open(archive_path, "a", encoding="utf-8") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                f.writelines(lines)
+                f.flush()
+                os.fsync(f.fileno())
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+
+        _logger.debug("Archived %d signals to %s", len(month_signals), archive_path)
+
+
+def _rewrite_store(signals: list[dict[str, Any]], store_path: Path) -> None:
+    """Atomically rewrite the signal store with the given signals.
+
+    Uses temp file + fsync + rename for crash safety.
+    """
+    tmp_path = store_path.with_suffix(f".{os.getpid()}.rewrite.tmp")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            for sig in signals:
+                f.write(json.dumps(sig, ensure_ascii=False, default=str) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, store_path)
+    except (OSError, TypeError) as exc:
+        tmp_path.unlink(missing_ok=True)
+        raise exc
 
 
 # ── Convenience helpers for downstream modules ──────────────────────
