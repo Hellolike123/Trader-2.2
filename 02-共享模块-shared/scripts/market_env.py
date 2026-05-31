@@ -80,12 +80,11 @@ def _fetch_index_data() -> dict[str, Any]:
     if change_pct == 0 and current == 0:
         return {}
 
-    # For MA calculations we still need K-line bars, fetch 90 days for stable HMM
+    # For MA calculations we still need daily K-line bars, fetch 90 days for stable HMM
     try:
         provider = get_provider()
         sec = provider.resolve_security(INDEX_CODE)
-        raw_bars = provider.fetch_kline(sec, scale="240", datalen=90)
-        bars = normalize_bars(raw_bars) if raw_bars else []
+        bars = provider.fetch_qfq_daily(sec, days=90) or []
     except Exception:
         bars = []
 
@@ -146,8 +145,18 @@ def assess() -> dict[str, Any]:
         if cached_bars and bars:
             # 用缓存的历史 bars 替代（更完整），追加今天的实时 bar
             today_str = __import__("datetime").datetime.now().strftime("%Y-%m-%d")
+            # 去重：保留缓存中非今日的数据 + 实时数据
             merged = [b for b in cached_bars if b.get("date") != today_str]
             merged.extend(bars)  # bars 里有今天的实时数据
+            # 按日期排序并去重（保留每个日期最后一条）
+            seen_dates: dict[str, int] = {}
+            for i, b in enumerate(merged):
+                d = b.get("date") or b.get("time") or ""
+                if d:
+                    seen_dates[d] = i
+            if len(seen_dates) < len(merged):
+                # 有重复日期，去重
+                merged = [merged[i] for i in sorted(seen_dates.values())]
             bars = merged
         elif cached_bars and not bars:
             bars = cached_bars
