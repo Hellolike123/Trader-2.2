@@ -197,7 +197,7 @@ def t0_action_for(status: str, current: float, support: float, confirm: float, p
         return T0_NONE
     if status in _DEFENSE_STATUSES and position_ratio <= T0_LOW_POSITION_THRESHOLD:
         return T0_LOW
-    if status in {"等转强", "冲高减仓"} | _DEFENSE_STATUSES or position_ratio >= T0_HIGH_POSITION_THRESHOLD or change >= STRONG_MOVE_THRESHOLD:
+    if status in {"等转强", "冲高减仓", *_DEFENSE_STATUSES} or position_ratio >= T0_HIGH_POSITION_THRESHOLD or change >= STRONG_MOVE_THRESHOLD:
         return T0_HIGH
     return T0_NONE
 

@@ -440,6 +440,7 @@ def _fuse_alert(target_key: str, count: int, name: str = "") -> str:
 
 
 def _trigger_reason_lines(model: dict[str, Any]) -> list[str]:
+    matched = model.get("matched") or []
     if not matched:
         return []
     core = [m for m in matched if any(kw in m for kw in ("MACD", "RSI", "VWAP"))]

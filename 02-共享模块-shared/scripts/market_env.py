@@ -203,7 +203,7 @@ def assess() -> dict[str, Any]:
     level = "正常"
     if mid_weak and intraday_weak:
         level = "很差"
-    elif mid_weak and shrinking or mid_weak or intraday_moderate:
+    elif mid_weak and (shrinking or intraday_moderate):
         level = "偏弱"
 
     # HMM 大势前瞻性修正

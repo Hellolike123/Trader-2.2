@@ -199,7 +199,7 @@ def find_key_levels(report_data: dict[str, Any], structure_result: dict[str, Any
     add_level(support, "VWAP", vwap, 0.6)
     add_level(resistance, "VWAP上方偏离", vwap * 1.01 if vwap else None, 0.6)
     bb = calculate_bollinger_bands(values(bars_5m, "close"), period=20, num_std=2.0)
-    bb_last = bb.get(max(bb.keys(), default=-1), {})
+    bb_last = bb.get(max(bb.keys()), {}) if bb else {}
     bb_lower = bb_last.get("lower")
     bb_upper = bb_last.get("upper")
     if bb_lower:
