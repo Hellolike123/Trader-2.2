@@ -96,7 +96,7 @@ def detect_main_force_stage(
             signals.append(f"连续{con_in}日净流入")
 
     # ── 试盘期检测 ──
-    if bars and len(bars) >= 3:
+    if bars and len(bars) >= 4:
         last3 = bars[-3:]
         max_change = max(
             (float(b.get("close") or 0) - float(bars[-4].get("close") or 0)) / max(float(bars[-4].get("close") or 1), 1)
@@ -116,7 +116,7 @@ def detect_main_force_stage(
                     if peak_close > 0 and (peak_close - next_close) / peak_close > 0.015:
                         scores["testing"] += 0.5
                         signals.append("单日脉冲上涨后回落")
-                        if daily_5d[-1] < 0:
+                        if daily_5d[-1] > 0:
                             scores["testing"] += 0.2
                             signals.append("次日资金回流")
 
@@ -181,6 +181,7 @@ def _result(
         "cum_flow_10d_wan": features.get("cum_flow_10d_wan", 0),
         "consecutive_inflow_days": features.get("consecutive_inflow_days", 0),
         "consecutive_outflow_days": features.get("consecutive_outflow_days", 0),
+        "daily_flow_5d": features.get("daily_flow_5d", []),
     }
 
 
