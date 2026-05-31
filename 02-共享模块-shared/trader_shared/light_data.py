@@ -23,27 +23,55 @@ except ImportError:
     BarData = dict
     QuoteData = dict
 
-try:
-    from mootdx.quotes import Quotes
-    _MOOTDX_AVAILABLE = True
-except ImportError:
-    Quotes = None
-    _MOOTDX_AVAILABLE = False
+# 懒加载重量级 fallback 依赖，避免 import 时浪费 ~0.8s
+Quotes = None
+_MOOTDX_AVAILABLE = None  # None = 未检测, True/False = 已检测
+_AKSHARE = None
+_AKSHARE_AVAILABLE = None
+TdxHq_API = None
+TDXParams = None
+_TDX3_AVAILABLE = None
 
-try:
-    import akshare as _AKSHARE
-    _AKSHARE_AVAILABLE = True
-except ImportError:
-    _AKSHARE_AVAILABLE = False
 
-try:
-    from pytdx3.hq import TdxHq_API
-    from pytdx3.params import TDXParams
-    _TDX3_AVAILABLE = True
-except ImportError:
-    TdxHq_API = None
-    TDXParams = None
-    _TDX3_AVAILABLE = False
+def _check_mootdx() -> bool:
+    global Quotes, _MOOTDX_AVAILABLE
+    if _MOOTDX_AVAILABLE is not None:
+        return _MOOTDX_AVAILABLE
+    try:
+        from mootdx.quotes import Q
+        Quotes = Q
+        _MOOTDX_AVAILABLE = True
+    except ImportError:
+        _MOOTDX_AVAILABLE = False
+    return _MOOTDX_AVAILABLE
+
+
+def _check_akshare() -> bool:
+    global _AKSHARE, _AKSHARE_AVAILABLE
+    if _AKSHARE_AVAILABLE is not None:
+        return _AKSHARE_AVAILABLE
+    try:
+        import akshare as _ak
+        _AKSHARE = _ak
+        _AKSHARE_AVAILABLE = True
+    except ImportError:
+        _AKSHARE_AVAILABLE = False
+    return _AKSHARE_AVAILABLE
+
+
+def _check_pytdx3() -> bool:
+    global TdxHq_API, TDXParams, _TDX3_AVAILABLE
+    if _TDX3_AVAILABLE is not None:
+        return _TDX3_AVAILABLE
+    try:
+        from pytdx3.hq import TdxHq_API as _Tdx
+        from pytdx3.params import TDXParams as _TDXP
+        TdxHq_API = _Tdx
+        TDXParams = _TDXP
+        _TDX3_AVAILABLE = True
+    except ImportError:
+        _TDX3_AVAILABLE = False
+    return _TDX3_AVAILABLE
 
 
 TENCENT_QUOTE_URL = "https://qt.gtimg.cn/q="
@@ -124,7 +152,7 @@ _TDX3_CLIENT: TdxHq_API | None = None
 
 def _get_tdx3_client() -> TdxHq_API | None:
     global _TDX3_CLIENT
-    if not _TDX3_AVAILABLE:
+    if not _check_pytdx3():
         return None
     if _TDX3_CLIENT is not None:
         return _TDX3_CLIENT
@@ -183,7 +211,7 @@ def run_tdx3_with_timeout(func, *args, **kwargs) -> Any:
 
 
 def _fetch_qfq_tdx3(sec: Security, days: int = 300) -> list[dict[str, Any]] | None:
-    if not _TDX3_AVAILABLE:
+    if not _check_pytdx3():
         return None
     try:
         def call_bars(api):
@@ -212,7 +240,7 @@ def _fetch_qfq_tdx3(sec: Security, days: int = 300) -> list[dict[str, Any]] | No
 
 
 def _fetch_quote_tdx3(sec: Security) -> dict[str, Any] | None:
-    if not _TDX3_AVAILABLE:
+    if not _check_pytdx3():
         return None
     try:
         def call_quotes(api):
@@ -248,7 +276,7 @@ def _fetch_quote_tdx3(sec: Security) -> dict[str, Any] | None:
 
 
 def _fetch_ticks_tdx3(sec: Security, count: int = 500) -> list[dict[str, Any]] | None:
-    if not _TDX3_AVAILABLE:
+    if not _check_pytdx3():
         return []
     if not _API_RATE_LIMITER.check_and_record(max_per_min=15, max_per_hour=80):
         return []
@@ -397,7 +425,7 @@ def _get_mootdx_client() -> Quotes | None:
     global _MOOTDX_CLIENT
     if _MOOTDX_CLIENT is not None:
         return _MOOTDX_CLIENT
-    if not _MOOTDX_AVAILABLE:
+    if not _check_mootdx():
         return None
     if not _DATA_SOURCE_CONTROLLER.is_healthy():
         return None
@@ -751,7 +779,7 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
         pass
 
     # Fallback: pytdx3 (fast timeout, mainly a backup)
-    if _TDX3_AVAILABLE:
+    if _check_pytdx3():
         tdx3_q = _fetch_quote_tdx3(sec)
         if tdx3_q is not None:
             tdx3_q["data_source"] = "pytdx3"
@@ -907,7 +935,7 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
         pass
 
     # Fallback: pytdx3
-    if _TDX3_AVAILABLE:
+    if _check_pytdx3():
         tdx3_bars = _fetch_qfq_tdx3(sec, days)
         if tdx3_bars is not None:
             for bar in tdx3_bars:

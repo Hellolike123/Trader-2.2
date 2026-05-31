@@ -99,8 +99,9 @@ def test_fetch_quote_mootdx_fields(mock_get_client):
 
 def test_mootdx_import_fallback():
     """Verify light_data handles mootdx import failure gracefully."""
-    from light_data import _MOOTDX_AVAILABLE
-    assert isinstance(_MOOTDX_AVAILABLE, bool)
+    from trader_shared.light_data import _check_mootdx
+    result = _check_mootdx()
+    assert isinstance(result, bool)
 
 
 @patch("trader_shared.light_data._get_mootdx_client", return_value=None)
