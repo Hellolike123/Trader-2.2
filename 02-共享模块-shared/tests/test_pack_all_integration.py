@@ -83,10 +83,12 @@ class TestConcatDigest:
 class TestSharedFilesForSkill:
     """Extracts file hashes from the actual staged bundle."""
 
-    def extract_digest_from_zip(self, zip_path: Path) -> str:
+    def extract_digest_from_zip(self, zip_path: Path, skill: str = "trader") -> str:
         """Read share_bundle digest from _meta.json inside zip."""
         with zipfile.ZipFile(zip_path, "r") as zf:
-            meta = json.loads(zf.read("_meta.json"))
+            names = zf.namelist()
+            meta_path = f"{skill}/_meta.json" if f"{skill}/_meta.json" in names else "_meta.json"
+            meta = json.loads(zf.read(meta_path))
             return meta.get("shared_bundle", "unknown")
 
     def _find_latest_release(self) -> Path:
@@ -110,7 +112,7 @@ class TestSharedFilesForSkill:
             if not zip_path.exists():
                 missing.append(f"{skill}.zip not found")
                 continue
-            dig = self.extract_digest_from_zip(zip_path)
+            dig = self.extract_digest_from_zip(zip_path, skill)
             if dig == "unknown":
                 missing.append(f"{skill}.zip has no shared_bundle")
             if dig == "bad_meta":
@@ -126,7 +128,7 @@ class TestSharedFilesForSkill:
 
         zip_path = latest / "trader.zip"
         assert zip_path.exists(), "trader.zip not found"
-        dig = self.extract_digest_from_zip(zip_path)
+        dig = self.extract_digest_from_zip(zip_path, "trader")
         assert dig != "unknown" and dig != "bad_meta", f"Failed to extract digest from {zip_path}"
         assert len(dig) == 16, f"Digest length is not 16: {dig}"
         # Assert it only contains hex characters

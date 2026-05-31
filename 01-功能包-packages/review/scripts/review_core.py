@@ -440,6 +440,23 @@ def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str,
     }
 
 
+def _get_main_force(target: str, bars: list[dict[str, Any]]) -> dict[str, Any]:
+    """获取主力行为阶段（安全包装，失败返回空 dict）。"""
+    try:
+        from trader_shared.cache_utils import fetch_fund_flow_cached
+        from trader_shared.fund_flow_data import calc_fund_flow_features
+        from trader_shared.main_force import detect_main_force_stage
+        ff_data = fetch_fund_flow_cached(target)
+        if ff_data:
+            daily_flow = ff_data.get("daily_flow", [])
+            features = ff_data.get("features", {})
+            if daily_flow:
+                return detect_main_force_stage(features, bars)
+    except Exception:
+        pass
+    return {}
+
+
 def build_review(target: str, cost: float | None = None, trade_date: str | None = None, session: str = "close") -> dict[str, Any]:
     if session not in {"close", "midday"}:
         raise RuntimeError("session must be close or midday")
@@ -499,6 +516,7 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
         "levels": levels,
         "theory": theory,
         "big_order": analyze_big_orders(bars_5m, tick_data=tick_data, focus_price=levels.get("key_pressure"), trade_date=selected_date),
+        "main_force": _get_main_force(target, bars),
         "macd_params": {
             "macd_line": daily_macd_params.get("macd_line"),
             "dea": daily_macd_params.get("dea"),

@@ -551,6 +551,7 @@ class MarketSnapshot:
     tick_data: list[dict[str, Any]] = field(default_factory=list)
     data_status: DataStatus = "full"
     data_freshness: str = "live"
+    fund_flow: dict[str, Any] = field(default_factory=dict)
     missing_sources: list[str] = field(default_factory=list)
     source_errors: dict[str, str] = field(default_factory=dict)
     fetched_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
@@ -1163,6 +1164,24 @@ def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dic
         return None
 
 
+def _fetch_fund_flow_safe(target: str) -> dict[str, Any]:
+    """获取资金流向数据（安全包装，失败返回空 dict）。"""
+    try:
+        from trader_shared.cache_utils import fetch_fund_flow_cached
+        from trader_shared.fund_flow_data import calc_fund_flow_features
+        from trader_shared.main_force import detect_main_force_stage
+        ff_data = fetch_fund_flow_cached(target)
+        if ff_data:
+            daily_flow = ff_data.get("daily_flow", [])
+            features = ff_data.get("features", {})
+            if daily_flow:
+                mf = detect_main_force_stage(features)
+                return {"features": features, "stage": mf}
+    except Exception:
+        pass
+    return {}
+
+
 def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, include_ticks: bool = True) -> MarketSnapshot:
     sec = resolve_security(target)
     http = HttpClient()
@@ -1234,6 +1253,7 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
         tick_data=tick_data,
         data_status=data_status,
         data_freshness="live" if is_trading_time() else "stale",
+        fund_flow=_fetch_fund_flow_safe(target),
         missing_sources=missing_sources,
         source_errors=source_errors,
     )

@@ -175,6 +175,17 @@ def render_single(review: dict[str, Any]) -> str:
     lines.append("🔎 分时走势 ")
     lines.extend(_format_intraday_narrative(intraday, review.get("big_order")))
     lines.append("")
+
+    # 💰 主力行为
+    mf = review.get("main_force") or {}
+    if mf and mf.get("stage") and mf["stage"] != "unknown":
+        try:
+            from trader_shared.main_force_output import format_main_force_section
+            lines.append(format_main_force_section(mf))
+            lines.append("")
+        except Exception:
+            pass
+
     # 📈 五层打分
     scores = theory.get("scores", {})
     lines.append("📈 五层打分 ")

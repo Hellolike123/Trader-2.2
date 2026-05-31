@@ -42,13 +42,13 @@
 
 ## 6. 数据管线集成
 
-- [ ] 6.1 在 `data_provider.py` 的 `MarketDataSourceController` 或 `load_market_snapshot` 中增加资金流向数据获取
-- [ ] 6.2 在复盘/分析流程中调用 `detect_main_force_stage()` 并将结果传入 `merge_decisions()`
-- [ ] 6.3 在 T0 分析流程中复用资金流向缓存数据（读缓存，不实时抓取）
+- [x] 6.1 在 `data_provider.py` 的 `MarketDataSourceController` 或 `load_market_snapshot` 中增加资金流向数据获取
+- [x] 6.2 在复盘/分析流程中调用 `detect_main_force_stage()` 并将结果传入 `merge_decisions()`
+- [x] 6.3 在 T0 分析流程中复用资金流向缓存数据（读缓存，不实时抓取）
 
 ## 7. 测试
 
 - [x] 7.1 为 `fund_flow_data.py` 编写单元测试：API调用、特征计算、降级处理
 - [x] 7.2 为 `main_force.py` 编写单元测试：五阶段检测规则、置信度计算、信号列表
 - [x] 7.3 为融合层权重修正编写单元测试：各阶段权重修正正确性、归一化验证、无 main_force_env 时行为不变
-- [ ] 7.4 集成测试：端到端从数据采集→行为识别→融合→输出
+- [x] 7.4 集成测试：端到端从数据采集→行为识别→融合→输出

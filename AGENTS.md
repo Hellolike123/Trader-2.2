@@ -96,6 +96,26 @@ trailing_stop = highest_close × (1 - ATR% × 3.0)
 
 ---
 
+## Skill 输出迭代工作流
+
+五步标准流程：观察 → 诊断 → 提案 → 执行 → 验证
+
+```
+观察：发现输出问题（性能/数据/功能/显示）
+诊断：定位根因（哪个模块、哪行代码）
+提案：用 quick_change.py 创建变更（python scripts/quick_change.py --type <类型> --name <名称>）
+执行：按 tasks.md 实施
+验证：跑测试 + 手动验证输出
+```
+
+四类变更模板（`openspec/templates/`）：
+- `performance.md` — 性能优化（含耗时对比）
+- `data-fix.md` — 数据修复（含正确数据来源）
+- `feature.md` — 功能增改（含预期输出示例）
+- `display.md` — 显示调整（含微信兼容性检查）
+
+---
+
 ## 推荐工作流
 
 ```

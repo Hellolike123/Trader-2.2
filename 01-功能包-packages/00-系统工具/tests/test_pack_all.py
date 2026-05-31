@@ -28,6 +28,12 @@ EXPECTED_SKILLS: list[tuple[str, str, str]] = [
 
 def _verify_skill_zip(zf: zipfile.ZipFile, slug: str, expected_script: str) -> None:
     names = zf.namelist()
+    prefix = f"{slug}/"
+    has_prefix = any(n.startswith(prefix) for n in names)
+    if has_prefix:
+        # Zip has top-level directory (e.g., trader/_meta.json)
+        _verify_combined_zip(zf, slug, expected_script)
+        return
     assert "_meta.json" in names, f"{slug} missing _meta.json"
     assert "HERMES.md" in names, f"{slug} missing HERMES.md"
     assert "SKILL.md" in names, f"{slug} missing SKILL.md"
