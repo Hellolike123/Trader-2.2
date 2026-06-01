@@ -428,7 +428,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     if _CHIP_MIGRATION_AVAILABLE and chip_peaks:
         try:
             save_chip_snapshot(name, chip, trade_date=quote.get("trade_date"))
-            chip_migration = check_chip_migration(name, chip)
+            chip_migration = check_chip_migration(name, chip, bars=bars)
         except Exception:
             pass
 
@@ -1225,10 +1225,32 @@ def render_markdown(r: dict[str, Any]) -> str:
             lines.append(f"  当前价以上：{current_pct:.1f}%")
         if mid_price is not None:
             lines.append(f"  中位数价格：{mid_price:.2f}")
-        # 筹码搬家警告
+        # 筹码变化（对比昨天）
         chip_migration = r.get("chip_migration") or {}
+        has_history = chip_migration.get("has_history", False)
         warning_level = chip_migration.get("warning_level", "none")
         warning_text = chip_migration.get("warning_text", "")
+        prev_date = chip_migration.get("prev_date", "")
+        prev_share = chip_migration.get("prev_share", 0)
+        migration_pct = chip_migration.get("migration_pct", 0)
+
+        if has_history and prev_date:
+            lines.append("")
+            lines.append(f"  筹码变化（对比 {prev_date}）：")
+            if migration_pct > 0:
+                # 找到当前最强支撑峰
+                support_peaks = [p for p in chip_peaks if "支撑" in str(p.get("support_level", ""))]
+                if support_peaks:
+                    strongest = max(support_peaks, key=lambda p: p.get("share_of_total", 0))
+                    curr_share = strongest.get("share_of_total", 0)
+                    peak_price = strongest.get("price", 0)
+                    change = curr_share - prev_share
+                    direction = "增加" if change > 0 else "减少"
+                    lines.append(f"    {peak_price:.2f}（支撑）：{prev_share:.1f}% → {curr_share:.1f}%（{direction} {abs(change):.1f}%）")
+            else:
+                lines.append(f"    底部筹码基本稳定，无明显搬家")
+
+        # 搬家警告
         if warning_level == "critical":
             lines.append(f"  🔴 {warning_text}")
         elif warning_level == "warning":

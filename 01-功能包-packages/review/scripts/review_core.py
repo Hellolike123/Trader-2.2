@@ -466,12 +466,12 @@ def _get_main_force(target: str, bars: list[dict[str, Any]]) -> dict[str, Any]:
     return {}
 
 
-def _get_chip_migration(name: str, chip_dist: dict[str, Any], trade_date: str | None = None) -> dict[str, Any]:
+def _get_chip_migration(name: str, chip_dist: dict[str, Any], trade_date: str | None = None, bars: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """获取筹码搬家监控结果。"""
     try:
         from trader_shared.chip_migration_monitor import save_chip_snapshot, check_chip_migration
         save_chip_snapshot(name, chip_dist, trade_date=trade_date)
-        return check_chip_migration(name, chip_dist)
+        return check_chip_migration(name, chip_dist, bars=bars)
     except Exception:
         return {"migration_pct": 0, "warning_level": "none", "warning_text": "", "has_history": False}
 
@@ -502,7 +502,7 @@ def _get_stage_result(
         }
 
         # 计算筹码搬家
-        chip_migration = _get_chip_migration(quote.get("name", ""), chip_dist)
+        chip_migration = _get_chip_migration(quote.get("name", ""), chip_dist, bars=daily)
 
         # 计算 ATR
         last_bar = daily[-1] if daily else {}
@@ -613,7 +613,7 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
         },
         "chip_distribution": chip_dist,
         "wyckoff": wyck_r,
-        "chip_migration": _get_chip_migration(name, chip_dist, selected_date),
+        "chip_migration": _get_chip_migration(name, chip_dist, selected_date, bars=daily),
         "stage_result": _get_stage_result(current, daily, quote, chip_dist),
         "data_time": f"{quote.get('trade_date') or review_date} {quote.get('trade_time') or ''}".strip(),
     }

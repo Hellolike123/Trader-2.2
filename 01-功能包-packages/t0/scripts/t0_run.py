@@ -170,7 +170,7 @@ def build_plan(target: str) -> dict[str, Any]:
         chip_dist = calc_chip_distribution(daily, lookback=60)
         name = quote.get("name") or sec.name
         save_chip_snapshot(name, chip_dist, trade_date=quote.get("trade_date"))
-        result["chip_migration"] = check_chip_migration(name, chip_dist)
+        result["chip_migration"] = check_chip_migration(name, chip_dist, bars=daily)
     except Exception:
         result["chip_migration"] = {"migration_pct": 0, "warning_level": "none", "warning_text": "", "has_history": False}
 
