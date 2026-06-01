@@ -930,6 +930,20 @@ def render_markdown(r: dict[str, Any]) -> str:
         f"  {momentum_reason}",
     ])
 
+    # ✅ 趋势强势提示
+    ma_raw = r.get("ma_raw") or {}
+    ma5 = ma_raw.get("ma5")
+    ma10 = ma_raw.get("ma10")
+    ma20 = ma_raw.get("ma20")
+    ma30 = ma_raw.get("ma30")
+    ma250_val = r.get("ma250")
+    current_price = float(r.get("current") or 0)
+    if (ma250_val and current_price > ma250_val and
+        ma5 and ma10 and ma20 and ma30 and
+        ma5 > ma10 > ma20 > ma30):
+        lines.append("")
+        lines.append("✅ 趋势强势：价格在 250 日线上方，均线多头排列")
+
     # 💰 主力资金（阶段判断之后、决策之前）
     mf = r.get("main_force") or {}
     if mf and mf.get("stage") and mf["stage"] != "unknown":
