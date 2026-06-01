@@ -703,7 +703,9 @@ class HttpClient:
             "Accept": "application/json,text/plain,*/*",
             "Referer": "https://finance.sina.com.cn/",
         }
-        self.ssl_context = ssl._create_unverified_context()
+        self.ssl_context = ssl.create_default_context()
+        self.ssl_context.check_hostname = False
+        self.ssl_context.verify_mode = ssl.CERT_NONE
 
     def get_bytes(self, url: str, params: dict[str, Any] | None = None) -> bytes:
         full_url = f"{url}?{urlencode(params)}" if params else url
@@ -968,7 +970,9 @@ def _fetch_daily_sina(sec: Security, days: int = 300) -> list[dict[str, Any]] | 
             f"CN_MarketData.getKLineData?symbol={sec.qq_symbol}&scale=240"
             f"&ma=no&datalen={max(days, 20)}"
         )
-        ssl_ctx = ssl._create_unverified_context()
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
         request = Request(url, headers={
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36",
             "Referer": "https://finance.sina.com.cn/",
@@ -1002,9 +1006,17 @@ def _fetch_daily_sina(sec: Security, days: int = 300) -> list[dict[str, Any]] | 
 
 
 def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[dict[str, Any]]:
-    # ── Circuit breaker check — return empty if paused ──
+    # ── Circuit breaker check — return cached data if paused ──
     if _circuit_tencent_daily.is_open:
-        _logger.debug("Circuit breaker open for daily bars, skipping API calls for %s", sec.code)
+        _logger.debug("Circuit breaker open for daily bars, returning cached data for %s", sec.code)
+        # 尝试返回缓存数据（即使过期）
+        try:
+            from trader_shared.cache_utils import get_cached as _file_cached, CACHE_DAILY
+            _cached_result = _file_cached(CACHE_DAILY, sec.code, ttl=86400 * 7)  # 7天内都可用
+            if _cached_result is not None and isinstance(_cached_result.data, list):
+                return _cached_result.data
+        except (ImportError, OSError):
+            pass
         return []
 
     # ── 文件缓存读取（盘后预缓存的数据，TTL 24小时）──
@@ -1241,7 +1253,9 @@ def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dic
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36",
             "Referer": "https://finance.sina.com.cn/",
         }
-        ssl_ctx = ssl._create_unverified_context()
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
         request = Request(url, headers=headers)
         
         with urlopen(request, timeout=5, context=ssl_ctx) as response:
