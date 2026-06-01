@@ -1060,6 +1060,11 @@ def render_markdown(r: dict[str, Any]) -> str:
         if position_section:
             lines.extend(position_section)
 
+    # 💰 仓位检查
+    position_check_section = _build_position_check_section(r)
+    if position_check_section:
+        lines.extend(position_check_section)
+
     # 🔔 信号提醒
     signal_section = _build_signal_alert_section(r)
     if signal_section:
@@ -1409,6 +1414,44 @@ def one_sentence(r: dict[str, Any], low_zone: str) -> str:
     return f"现在还不是进攻点；先守纪律等确认，跌到 {low_zone} 止跌才轻试，站不上 {confirm:.2f}元 不加仓。"
 
 
+def _build_position_check_section(r: dict[str, Any]) -> list[str]:
+    """构建 💰 仓位检查 输出段落。
+
+    比较建议仓位和实际仓位：
+      - 实际仓位 > 建议仓位 × 1.2 → ⚠️ 超仓
+      - 实际仓位 < 建议仓位 × 0.8 → ⚠️ 低仓
+      - 其他 → ✅ 正常
+    """
+    lines: list[str] = []
+    position_info = r.get("position_info") or {}
+    suggested_pct = int(position_info.get("suggested_pct") or 0)
+    has_position = r.get("has_position", False)
+    cost_price = float(r.get("cost_price") or 0)
+
+    if not has_position or cost_price <= 0:
+        lines.append("")
+        lines.append("💰 仓位检查")
+        lines.append("  实际仓位：未输入（使用 --cost 参数输入成本价后可检查仓位）")
+        return lines
+
+    # 从 position_state 获取建议仓位
+    position_state = r.get("position_state") or {}
+    ps_position_pct = int(position_state.get("position_pct") or 0)
+    # 使用较大的建议值
+    effective_suggested = max(suggested_pct, ps_position_pct)
+
+    if effective_suggested <= 0:
+        return []
+
+    lines.append("")
+    lines.append("💰 仓位检查")
+    # 这里 actual_pct 需要用户输入或从 signals.jsonl 推断
+    # 目前显示建议仓位，实际仓位需要 --shares 参数支持
+    lines.append(f"  建议仓位：{effective_suggested}%")
+    lines.append(f"  提示：蓄势期轻仓试探，条件满足再加仓")
+    return lines
+
+
 def _build_existing_position_section(r: dict[str, Any], cost_price: float) -> list[str]:
     """构建 📊 已有持仓评估 输出段落。
 
@@ -1660,10 +1703,21 @@ def _build_today_action_section(r: dict[str, Any]) -> list[str]:
         # 买入信号（简化买点逻辑）
         buy_analysis = _analyze_buy_conditions(r, current, support, confirm, stop, low_zone)
         lines.extend(buy_analysis)
-    elif support > 0 and low_zone and current >= float(low_zone.split("-")[0]) and current <= float(low_zone.split("-")[1].replace("元", "")):
+    elif support > 0 and r.get("low_zone_lower") and r.get("low_zone_upper"):
         # Bug fix: 价格在买入区间内时，显示"可以试探买"
-        buy_analysis = _analyze_buy_conditions(r, current, support, confirm, stop, low_zone)
-        lines.extend(buy_analysis)
+        lz_lower = float(r["low_zone_lower"])
+        lz_upper = float(r["low_zone_upper"])
+        if lz_lower <= current <= lz_upper:
+            buy_analysis = _analyze_buy_conditions(r, current, support, confirm, stop, low_zone)
+            lines.extend(buy_analysis)
+        else:
+            # 不在买入区间，走等待逻辑
+            lines.append("  动作：不买")
+            lines.append(f"  理由：{major_stage}期{momentum}，方向不明")
+            if support > 0:
+                lines.append(f"  如果非要买：{low_zone} 不破买 5%, 止损 {stop:.2f}")
+            if confirm > 0:
+                lines.append(f"  关注明天：站稳 {confirm:.2f} 可以加仓")
     elif major_stage == "主升" and momentum == "走强":
         # 持有信号
         lines.append("  动作：持有")
