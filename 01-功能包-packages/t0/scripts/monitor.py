@@ -26,7 +26,7 @@ except ImportError:
         raise
 
 from trader_shared.data_manager import DataManager
-from safe_cast import safe_dict
+from trader_shared.safe_cast import safe_dict
 from price_point_engine import price
 from trader_shared.signal_store import append_signal
 from t0_run import build_plan, build_t0_event_signal

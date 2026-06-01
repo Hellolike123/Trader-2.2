@@ -5,7 +5,7 @@ from copy import deepcopy
 from typing import Any
 
 try:
-    from models import DATA_STATUS_MAP, map_data_status_to_signal
+    from trader_shared.models import DATA_STATUS_MAP, map_data_status_to_signal
 except ImportError:
     DATA_STATUS_MAP: dict[str, str] = {
         "complete": "full",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from light_data import to_float
+from trader_shared.light_data import to_float
 
 try:
     from trader_shared.config import CHANLUN_MIN_BARS, CHANLUN_MIN_BARS_PER_STROKE

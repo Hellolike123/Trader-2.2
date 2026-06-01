@@ -22,7 +22,7 @@ from trader_shared._logging import get_logger
 _logger = get_logger(__name__)
 
 try:
-    from models import BarData, QuoteData
+    from trader_shared.models import BarData, QuoteData
 except ImportError:
     BarData = dict
     QuoteData = dict

@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from light_data import pct_change, to_float
-from safe_cast import safe_float
+from trader_shared.light_data import pct_change, to_float
+from trader_shared.safe_cast import safe_float
 from trader_shared._logging import get_logger
 from trader_shared.interfaces import DataFetcher
 from trader_shared.fetchers import get_fetcher
@@ -13,7 +13,7 @@ _logger = get_logger(__name__)
 
 # ── [2.3] HMM 大势检测器（可选导入，阵列中无则降级）──────────────────────────────
 try:
-    from hmm_regime import detect_regime as _hmm_detect_regime, regime_to_multiplier as _hmm_multiplier
+    from trader_shared.hmm_regime import detect_regime as _hmm_detect_regime, regime_to_multiplier as _hmm_multiplier
     _HMM_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _HMM_AVAILABLE = False
@@ -32,7 +32,7 @@ except ImportError:  # pragma: no cover
 _HMM_REGIME_ENABLED = os.environ.get("HMM_REGIME_ENABLED", "true").lower() not in ("false", "0", "no")
 
 try:
-    from models import BarData, CandidateLevels, MAValues, QuoteData
+    from trader_shared.models import BarData, CandidateLevels, MAValues, QuoteData
 except ImportError:
     BarData = dict
     CandidateLevels = dict
@@ -54,7 +54,7 @@ from trader_shared.config import (
 )
 
 try:
-    from time_window_detector import check_time_windows as _check_time_windows_raw
+    from trader_shared.time_window_detector import check_time_windows as _check_time_windows_raw
 except ImportError:
     def _check_time_windows_raw(bars, chan_result=None):
         return {"window_active": False, "window_type": "", "bars_since_pivot": 0, "tolerance": 0, "all_active": []}
@@ -464,7 +464,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
                 trailing_stop = max(trailing_stop, stop)
 
     # keep compatibility for callers that expect status from structure payload
-    from decision_core import status_for  # local import to avoid tighter module coupling
+    from trader_shared.decision_core import status_for  # local import to avoid tighter module coupling
 
     # 基于ATR的动态"空间不足"阈值：高波幅票给更多容忍，低波幅票收紧
     # P3: 受动量信号影响，强势时收窄（更激进），弱势时加宽（更保守）

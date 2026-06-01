@@ -5,12 +5,12 @@ from typing import Any
 from trader_shared.light_data import to_float
 
 try:
-    from order_book import analyze as order_book_analyze
+    from trader_shared.order_book import analyze as order_book_analyze
 except ImportError:
     order_book_analyze = None
 
 try:
-    from big_order import analyze_big_orders
+    from trader_shared.big_order import analyze_big_orders
 except ImportError:
     analyze_big_orders = None
 

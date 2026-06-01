@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 import trader_shared
-from light_data import to_float
+from trader_shared.light_data import to_float
 
 # ── 默认路径 ─────────────────────────────────────────────────────────────────
 TRADER_DIR = Path.home() / ".trader"
@@ -94,7 +94,7 @@ def _load_historical_regimes(signals: List[Dict[str, Any]]) -> Dict[str, str]:
     try:
         from trader_shared.config import INDEX_CODE
         from trader_shared.data_provider import get_provider
-        from light_data import normalize_bars
+        from trader_shared.light_data import normalize_bars
         from trader_shared.hmm_regime import detect_regime
 
         provider = get_provider()

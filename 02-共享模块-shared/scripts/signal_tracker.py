@@ -592,9 +592,9 @@ def _load_signals(symbol: str | None = None) -> list[dict[str, Any]]:
 
 
 try:
-    from light_data import resolve_security, fetch_qfq_daily, HttpClient
+    from trader_shared.light_data import resolve_security, fetch_qfq_daily, HttpClient
     try:
-        from light_data import to_float
+        from trader_shared.light_data import to_float
     except ImportError:
         def to_float(v):
             if v is None: return None

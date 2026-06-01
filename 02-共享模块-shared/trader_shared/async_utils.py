@@ -231,7 +231,7 @@ def fetch_qfq_daily_sync(code: str, days: int = 300) -> list[dict[str, Any]]:
 
 def _fetch_quote_sync_fallback(code: str) -> dict[str, Any]:
     """Sync fallback using urllib."""
-    from light_data import HttpClient, resolve_security, fetch_quote
+    from trader_shared.light_data import HttpClient, resolve_security, fetch_quote
     http = HttpClient()
     sec = resolve_security(code)
     return fetch_quote(sec, http)
@@ -239,7 +239,7 @@ def _fetch_quote_sync_fallback(code: str) -> dict[str, Any]:
 
 def _fetch_daily_sync_fallback(code: str, days: int) -> list[dict[str, Any]]:
     """Sync fallback using urllib."""
-    from light_data import HttpClient, resolve_security, fetch_qfq_daily
+    from trader_shared.light_data import HttpClient, resolve_security, fetch_qfq_daily
     http = HttpClient()
     sec = resolve_security(code)
     return fetch_qfq_daily(sec, http, days=days)

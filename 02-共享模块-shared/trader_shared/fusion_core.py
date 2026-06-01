@@ -34,7 +34,7 @@ import os
 import sys
 from typing import Any
 
-from safe_cast import safe_float
+from trader_shared.safe_cast import safe_float
 from trader_shared._logging import get_logger
 from trader_shared.interfaces import DataFetcher
 from trader_shared.fetchers import get_fetcher
@@ -43,7 +43,7 @@ _logger = get_logger(__name__)
 
 # ── [2.3] 贝叶斯融合（可选导入，无则降级） ───────────────────────────────────────────
 try:
-    from bayesian_fusion import is_enabled as _bayesian_enabled, bayesian_merge
+    from trader_shared.bayesian_fusion import is_enabled as _bayesian_enabled, bayesian_merge
     _BAYESIAN_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _BAYESIAN_AVAILABLE = False
@@ -313,7 +313,7 @@ def merge_decisions(
             "weights_used": {...},
         }
     """
-    from fusion_regime import get_regime_weights, score_to_action, compute_confidence
+    from trader_shared.fusion_regime import get_regime_weights, score_to_action, compute_confidence
 
     if fetcher is None:
         fetcher = get_fetcher()

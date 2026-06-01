@@ -4,8 +4,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from light_data import to_float
-from safe_cast import safe_float, safe_dict
+from trader_shared.light_data import to_float
+from trader_shared.safe_cast import safe_float, safe_dict
 from trader_shared.modifier_rule_engine import apply_score_modifiers
 from trader_shared._logging import get_logger
 from trader_shared.interfaces import DataFetcher
@@ -15,7 +15,7 @@ _logger = get_logger(__name__)
 
 # ── [2.3] Volume Profile 日内量价分布（可选，无则降级）────────────────────────────
 try:
-    from volume_profile import assess_vp_breakout as _vp_assess
+    from trader_shared.volume_profile import assess_vp_breakout as _vp_assess
     _VP_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _VP_AVAILABLE = False
@@ -542,32 +542,32 @@ def atr_stop_buffer(atr_ratio: float, atr14: float) -> tuple[float, str]:
 
 
 try:
-    from config import PYRAMID_SCALES
+    from trader_shared.config import PYRAMID_SCALES
 except Exception:  # pragma: no cover - optional per skill
     PYRAMID_SCALES = {0: 0, 1: 0.15, 2: 0.35, 3: 0.6, 4: 0.85, 5: 1.0}
 
 try:
-    from config import BASE_WEIGHTS
+    from trader_shared.config import BASE_WEIGHTS
 except Exception:  # pragma: no cover - optional per skill
     BASE_WEIGHTS = {0: 15, 1: 10, 2: 7, 3: 4}
 
 try:
-    from config import ATRLV_INDEX
+    from trader_shared.config import ATRLV_INDEX
 except Exception:  # pragma: no cover - optional per skill
     ATRLV_INDEX = {"数据不足": 0, "波幅偏高": 3, "波动偏大": 2, "波动正常": 1, "波动较低": 0}
 
 try:
-    from config import ATR_HIGH_THRESHOLD
+    from trader_shared.config import ATR_HIGH_THRESHOLD
 except Exception:  # pragma: no cover - optional per skill
     ATR_HIGH_THRESHOLD = 0.03
 
 try:
-    from config import ATR_ELEVATED_THRESHOLD
+    from trader_shared.config import ATR_ELEVATED_THRESHOLD
 except Exception:  # pragma: no cover - optional per skill
     ATR_ELEVATED_THRESHOLD = 0.02
 
 try:
-    from config import ATR_NORMAL_THRESHOLD
+    from trader_shared.config import ATR_NORMAL_THRESHOLD
 except Exception:  # pragma: no cover - optional per skill
     ATR_NORMAL_THRESHOLD = 0.01
 

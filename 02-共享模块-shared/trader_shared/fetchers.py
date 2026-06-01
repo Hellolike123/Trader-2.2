@@ -31,23 +31,23 @@ class TencentFetcher(DataFetcher):
 
     def _ensure_http(self) -> None:
         if self._http is None:
-            from light_data import HttpClient
+            from trader_shared.light_data import HttpClient
             self._http = HttpClient()
 
     def fetch_quote(self, code: str) -> dict[str, Any]:
-        from light_data import fetch_quote, resolve_security
+        from trader_shared.light_data import fetch_quote, resolve_security
         self._ensure_http()
         sec = resolve_security(code)
         return fetch_quote(sec, self._http)
 
     def fetch_qfq_daily(self, code: str, days: int = 300) -> list[dict[str, Any]]:
-        from light_data import fetch_qfq_daily, resolve_security
+        from trader_shared.light_data import fetch_qfq_daily, resolve_security
         self._ensure_http()
         sec = resolve_security(code)
         return fetch_qfq_daily(sec, self._http, days=days)
 
     def fetch_kline(self, code: str, scale: str = "60", datalen: int = 60) -> list[dict[str, Any]]:
-        from light_data import fetch_kline, resolve_security
+        from trader_shared.light_data import fetch_kline, resolve_security
         self._ensure_http()
         sec = resolve_security(code)
         return fetch_kline(sec, self._http, datalen=datalen, interval=scale)
@@ -68,7 +68,7 @@ class SinaFetcher(DataFetcher):
 
     def _ensure_http(self) -> None:
         if self._http is None:
-            from light_data import HttpClient
+            from trader_shared.light_data import HttpClient
             self._http = HttpClient()
 
     def fetch_quote(self, code: str) -> dict[str, Any]:
@@ -77,16 +77,16 @@ class SinaFetcher(DataFetcher):
         return fetcher.fetch_quote(code)
 
     def fetch_qfq_daily(self, code: str, days: int = 300) -> list[dict[str, Any]]:
-        from light_data import _fetch_daily_sina, resolve_security
+        from trader_shared.light_data import _fetch_daily_sina, resolve_security
         sec = resolve_security(code)
         result = _fetch_daily_sina(sec, days)
         if result:
-            from light_data import _compute_atr_fields
+            from trader_shared.light_data import _compute_atr_fields
             _compute_atr_fields(result)
         return result or []
 
     def fetch_kline(self, code: str, scale: str = "60", datalen: int = 60) -> list[dict[str, Any]]:
-        from light_data import _fetch_mins_fallback, resolve_security
+        from trader_shared.light_data import _fetch_mins_fallback, resolve_security
         sec = resolve_security(code)
         return _fetch_mins_fallback(sec, scale, datalen) or []
 

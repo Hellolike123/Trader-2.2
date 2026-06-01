@@ -176,7 +176,7 @@ def handle_live_show(args: argparse.Namespace) -> int:
         # 尝试拉取实时报价（若有行情模块）
         change_pct = 0.0
         try:
-            from light_data import fetch_quote, HttpClient, resolve_security
+            from trader_shared.light_data import fetch_quote, HttpClient, resolve_security
             sec = resolve_security(name)
             q = fetch_quote(sec, HttpClient())
             if q and q.get("current_price"):

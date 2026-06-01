@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from light_data import to_float
+from trader_shared.light_data import to_float
 
 
 def _ema(values: list[float], period: int) -> list[float | None]:

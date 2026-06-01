@@ -242,30 +242,30 @@ class UnifiedProvider:
 
     def _ensure_http(self) -> None:
         if self._http is None:
-            from light_data import HttpClient
+            from trader_shared.light_data import HttpClient
             self._http = HttpClient()
 
     def _to_sec(self, sec: Security):
-        from light_data import Security as _Sec
+        from trader_shared.light_data import Security as _Sec
         return _Sec(sec.code, sec.market, sec.name)
 
     # ── Common methods (all backends) ──
 
     def resolve_security(self, target: str) -> Security:
-        from light_data import resolve_security as _resolve
+        from trader_shared.light_data import resolve_security as _resolve
         sec = _resolve(target)
         return Security(code=sec.code, market=sec.market, name=sec.name)
 
     def pct_change(self, start: float, end: float) -> float:
-        from light_data import pct_change as _fn
+        from trader_shared.light_data import pct_change as _fn
         return _fn(start, end)
 
     def to_float(self, value: Any) -> float | None:
-        from light_data import to_float as _fn
+        from trader_shared.light_data import to_float as _fn
         return _fn(value)
 
     def normalize_bars(self, raw_bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        from light_data import normalize_bars as _fn
+        from trader_shared.light_data import normalize_bars as _fn
         return _fn(raw_bars)
 
     # ── Tencent/Mootdx backend (default) ──
@@ -274,7 +274,7 @@ class UnifiedProvider:
         if self._backend == "akshare":
             return self._akshare_fetch_quote(sec)
         self._ensure_http()
-        from light_data import fetch_quote as _fetch
+        from trader_shared.light_data import fetch_quote as _fetch
         return _fetch(self._to_sec(sec), self._http)
 
     def fetch_qfq_daily(self, sec: Security, days: int = 30) -> list[dict[str, Any]]:
@@ -285,7 +285,7 @@ class UnifiedProvider:
         if cached is not None:
             return cached.data
         self._ensure_http()
-        from light_data import fetch_qfq_daily as _fetch
+        from trader_shared.light_data import fetch_qfq_daily as _fetch
         bars = _fetch(self._to_sec(sec), self._http, days=days)
         set_cached("daily", sec.code, bars)
         return bars
@@ -294,28 +294,28 @@ class UnifiedProvider:
         if self._backend == "akshare":
             return self._akshare_fetch_kline(sec, "5", datalen)
         self._ensure_http()
-        from light_data import fetch_5m as _fetch
+        from trader_shared.light_data import fetch_5m as _fetch
         return _fetch(self._to_sec(sec), self._http, datalen=datalen)
 
     def fetch_15m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
         if self._backend == "akshare":
             return self._akshare_fetch_kline(sec, "15", datalen)
         self._ensure_http()
-        from light_data import fetch_15m as _fetch
+        from trader_shared.light_data import fetch_15m as _fetch
         return _fetch(self._to_sec(sec), self._http, datalen=datalen)
 
     def fetch_30m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
         if self._backend == "akshare":
             return self._akshare_fetch_kline(sec, "30", datalen)
         self._ensure_http()
-        from light_data import fetch_30m as _fetch
+        from trader_shared.light_data import fetch_30m as _fetch
         return _fetch(self._to_sec(sec), self._http, datalen=datalen)
 
     def fetch_kline(self, sec: Security, scale: str, datalen: int = 60) -> list[dict[str, Any]]:
         if self._backend == "akshare":
             return self._akshare_fetch_kline(sec, scale, datalen)
         self._ensure_http()
-        from light_data import fetch_kline as _fetch
+        from trader_shared.light_data import fetch_kline as _fetch
         return _fetch(self._to_sec(sec), self._http, interval=scale, datalen=datalen)
 
     def fetch_ticks(self, sec: Security, count: int = 500) -> list[dict[str, Any]]:
@@ -323,7 +323,7 @@ class UnifiedProvider:
             return []
         self._ensure_http()
         try:
-            from light_data import _fetch_ticks_tdx3
+            from trader_shared.light_data import _fetch_ticks_tdx3
             res = _fetch_ticks_tdx3(self._to_sec(sec), count=count)
             return res if res is not None else []
         except ImportError:
@@ -332,7 +332,7 @@ class UnifiedProvider:
     def load_market_snapshot(self, target: str, days: int = 365, include_5m: bool = True, include_ticks: bool = True) -> MarketSnapshot:
         if self._backend == "akshare":
             return self._akshare_load_snapshot(target, days, include_5m, include_ticks)
-        from light_data import load_market_snapshot as _load
+        from trader_shared.light_data import load_market_snapshot as _load
         snap = _load(target, days=days, include_5m=include_5m, include_ticks=include_ticks)
         sec = Security(code=snap.security.code, market=snap.security.market, name=snap.security.name)
         res_snap = MarketSnapshot(
@@ -404,7 +404,7 @@ class UnifiedProvider:
             start_date = (pd.Timestamp.today() - timedelta(days=days)).strftime("%Y%m%d")
         df = ak.stock_zh_a_hist(symbol=sec.code, period="daily", start_date=start_date, end_date="", adjust="qfq")
         bars = [bar for _, row in df.iterrows() if (bar := self._akshare_to_bar(row.to_dict()))]
-        from light_data import _compute_atr_fields
+        from trader_shared.light_data import _compute_atr_fields
         _compute_atr_fields(bars)
         return bars
 

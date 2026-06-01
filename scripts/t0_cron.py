@@ -39,7 +39,7 @@ def _is_trading_session() -> bool:
 
 def _fetch_live_price(name: str) -> tuple[float, float] | None:
     """用 light_data 拿实时行情，返回 (current_price, change_pct) 或 None。"""
-    from light_data import fetch_quote, HttpClient, resolve_security
+    from trader_shared.light_data import fetch_quote, HttpClient, resolve_security
 
     try:
         sec = resolve_security(name)

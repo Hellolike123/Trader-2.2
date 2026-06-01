@@ -28,7 +28,7 @@ except ImportError:
 
 import trader_shared
 
-from candidate_core import build_candidate_levels, pct_change, to_float
+from trader_shared.candidate_core import build_candidate_levels, pct_change, to_float
 from trader_shared.data_provider import get_provider
 from trader_shared import assess as _assess_market
 

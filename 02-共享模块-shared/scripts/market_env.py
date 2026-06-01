@@ -19,7 +19,7 @@ def _is_market_open_now() -> bool:
         from trader_shared.trading_context import data_freshness
         return data_freshness() == "live"
     except ImportError:
-        from light_data import is_trading_time
+        from trader_shared.light_data import is_trading_time
         return is_trading_time()
 
 

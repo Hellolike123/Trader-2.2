@@ -4,7 +4,7 @@ import warnings
 from dataclasses import dataclass
 from typing import Any
 
-from light_data import to_float
+from trader_shared.light_data import to_float
 
 
 @dataclass(frozen=True)

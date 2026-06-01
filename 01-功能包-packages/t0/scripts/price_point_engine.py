@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, time, timedelta
 from typing import Any
 
-from safe_cast import safe_max
+from trader_shared.safe_cast import safe_max
 from config import (
     BUY_ACCEPT_FACTOR,
     BUY_CONFIRM_FACTOR,

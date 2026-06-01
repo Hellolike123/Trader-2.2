@@ -40,7 +40,7 @@ from config import (
 )
 from trader_shared.light_data import to_float, pct_change
 try:
-    from models import DATA_STATUS_MAP
+    from trader_shared.models import DATA_STATUS_MAP
 except ImportError:
     DATA_STATUS_MAP: dict[str, str] = {
         "complete": "full",

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from decision_core import *  # noqa: F401,F403
-from structure_core import *  # noqa: F401,F403
+from trader_shared.decision_core import *  # noqa: F401,F403
+from trader_shared.structure_core import *  # noqa: F401,F403
 
 
 def build_candidate_levels(current, bars, change_pct=None, quote=None):

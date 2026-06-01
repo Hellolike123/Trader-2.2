@@ -2,31 +2,31 @@ from __future__ import annotations
 
 from typing import Any
 
-from light_data import pct_change, to_float
-from safe_cast import safe_float
+from trader_shared.light_data import pct_change, to_float
+from trader_shared.safe_cast import safe_float
 
 try:
-    from config import CONFIRM_BUFFER
+    from trader_shared.config import CONFIRM_BUFFER
 except Exception:  # pragma: no cover - optional per skill
     CONFIRM_BUFFER = 0.02
 
 try:
-    from config import RECENT_WINDOW
+    from trader_shared.config import RECENT_WINDOW
 except Exception:  # pragma: no cover - optional per skill
     RECENT_WINDOW = 5
 
 try:
-    from config import STOP_BUFFER
+    from trader_shared.config import STOP_BUFFER
 except Exception:  # pragma: no cover - optional per skill
     STOP_BUFFER = 0.98
 
 try:
-    from config import TAKE_PROFIT_BUFFER
+    from trader_shared.config import TAKE_PROFIT_BUFFER
 except Exception:  # pragma: no cover - optional per skill
     TAKE_PROFIT_BUFFER = 1.06
 
 try:
-    from config import T0_MIN_SPACE_PCT
+    from trader_shared.config import T0_MIN_SPACE_PCT
 except Exception:  # pragma: no cover - optional per skill
     T0_MIN_SPACE_PCT = 1.5
 
@@ -108,7 +108,7 @@ def build_candidate_levels(current: float, bars: list[dict[str, Any]], change_pc
         # 避免旧硬编码参数 (CONFIRM_BUFFER=0.02, STOP_BUFFER=0.98, LOW_ZONE_UPPER_OFFSET=1.01)
         # 导致价位与 trader 差距过大
         try:
-            from structure_core import average_atr_pct
+            from trader_shared.structure_core import average_atr_pct
             atr_pct = average_atr_pct(bars) or 0.02
         except ImportError:
             atr_pct = 0.02
@@ -154,7 +154,7 @@ def build_candidate_levels(current: float, bars: list[dict[str, Any]], change_pc
 def status_for(current: float, support: float, low_zone_upper: float, confirm: float, hard_stop: float, position_ratio: float, change_pct: Any, fusion_result: dict[str, Any] | None = None, ma_values: dict[str, float | None] | None = None, pressure_space_pct: float = 0.0, bars: list[dict[str, Any]] | None = None, vp_result: dict[str, Any] | None = None) -> str:
     # Delegate to decision_core to keep a single status judgment logic
     try:
-        from decision_core import status_for as _dec_status
+        from trader_shared.decision_core import status_for as _dec_status
         return _dec_status(
             current=current, support=support, low_zone_upper=low_zone_upper,
             confirm=confirm, hard_stop=hard_stop, position_ratio=position_ratio,
@@ -261,7 +261,7 @@ def risk_note_for(status: str, hard_stop: float) -> str:
 def score_for(item: dict[str, Any]) -> float:
     # Delegate to decision_core for a single scoring logic
     try:
-        from decision_core import score_for as _dec_score
+        from trader_shared.decision_core import score_for as _dec_score
         return _dec_score(item)
     except ImportError:
         # Fallback for T0 install without decision_core
