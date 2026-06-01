@@ -1773,9 +1773,9 @@ def _check_wyckoff_bc_confirmation(r: dict[str, Any]) -> dict[str, Any]:
             confirmed_count += 1
             reasons.append("MACD转弱")
     
-    # 3. 量比 > 2.0（天量）— 用数值判断，不用字符串
-    atr_ratio = float(r.get("atr_ratio") or 0)
-    if atr_ratio > 2.0:
+    # 3. 量比 > 2.0（天量）— 用 volume_ratio 判断
+    volume_ratio = float(r.get("volume_ratio") or 0)
+    if volume_ratio > 2.0:
         confirmed_count += 1
         reasons.append("天量")
     
