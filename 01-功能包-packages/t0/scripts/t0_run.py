@@ -24,6 +24,7 @@ except ImportError:
         raise
 
 from trader_shared.data_provider import get_provider
+from trader_shared.stage_positioning import compute_exit_plan
 from price_point_engine import build_price_point_model
 from t0_core import (
     build_t0_event_signal,
@@ -111,7 +112,7 @@ def build_plan(target: str) -> dict[str, Any]:
     sell_display_status = side_status(model["sell"])
     buy_display_obs = observation_value(model["buy"], "以下")
     sell_display_obs = observation_value(model["sell"], "附近")
-    return {
+    result = {
         "target": target,
         "name": quote.get("name") or sec.name,
         "symbol": quote.get("symbol") or sec.ts_code,
@@ -139,6 +140,18 @@ def build_plan(target: str) -> dict[str, Any]:
         "data": report_data,
         "model": model,
     }
+    # 分批止盈计划（用当前价作为参考买入价）
+    buy_price = numeric_or_none(buy.get("execution_price")) or current
+    stop_price = numeric_or_none(buy.get("invalid_price")) or 0
+    sell_price = numeric_or_none(sell.get("observation_price"))
+    result["exit_plan"] = compute_exit_plan(
+        entry_price=float(buy_price),
+        stop_price=float(stop_price),
+        resistance_price=float(sell_price) if sell_price and sell_price > buy_price else None,
+        current_stage="主升",  # t0 默认按主升处理
+        bars=daily,
+    )
+    return result
 
 
 def current_action_text(plan: dict[str, Any]) -> str:

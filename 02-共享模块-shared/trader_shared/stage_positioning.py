@@ -810,6 +810,213 @@ def _is_below_ma_n_days(bars: list[dict[str, Any]] | None, ma: float | None, n: 
     return all(float(b.get("close") or 0) < ma for b in recent)
 
 
+# ── 分批止盈计划 ──────────────────────────────────────────────
+
+def compute_exit_plan(
+    entry_price: float,
+    stop_price: float,
+    resistance_price: float | None,
+    current_stage: str,
+    bars: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """计算分批止盈计划。
+
+    三批退出：
+      第一笔：价格达到 1R 目标 → 卖 1/3（保本，锁定部分利润）
+      第二笔：价格接近阻力位（距阻力位 ≤ 2%） → 卖 1/3（阻力位是天花板）
+      第三笔：阶段从主升转派发 → 清仓（趋势变了）
+
+    Args:
+        entry_price: 买入价
+        stop_price: 止损价
+        resistance_price: 最近阻力位（可选）
+        current_stage: 当前阶段（蓄势/主升/派发/衰退）
+        bars: K线数据（用于计算动态阻力位）
+
+    Returns:
+        止盈计划字典
+    """
+    if entry_price <= 0 or stop_price <= 0 or entry_price <= stop_price:
+        return {
+            "risk_r": 0.0,
+            "target_1r": 0.0,
+            "resistance_exit": None,
+            "stage_exit": current_stage,
+            "exit_plan": [],
+            "already_exited": [False, False, False],
+        }
+
+    # 1R 计算
+    risk_r = round(entry_price - stop_price, 2)
+    target_1r = round(entry_price + risk_r, 2)
+
+    # 阻力位退出价
+    resistance_exit: float | None = None
+    if resistance_price is not None and resistance_price > entry_price:
+        resistance_exit = round(resistance_price, 2)
+    elif bars and len(bars) >= 20:
+        # 动态计算阻力位：近 20 日最高价
+        highs = [float(b.get("high") or 0) for b in bars[-20:]]
+        max_high = max(highs) if highs else 0
+        if max_high > entry_price:
+            resistance_exit = round(max_high, 2)
+
+    # 阶段退出条件
+    stage_exit = "派发"  # 主升转派发时清仓
+
+    # 构建三批退出计划
+    exit_plan: list[dict[str, Any]] = []
+
+    # 第一笔：1R 目标
+    exit_plan.append({
+        "price": target_1r,
+        "ratio": 0.33,
+        "reason": "1R 目标，保本",
+    })
+
+    # 第二笔：阻力位
+    if resistance_exit is not None:
+        exit_plan.append({
+            "price": resistance_exit,
+            "ratio": 0.33,
+            "reason": "阻力位，锁定利润",
+        })
+    else:
+        # 无明确阻力位，用 2R 代替
+        target_2r = round(entry_price + risk_r * 2, 2)
+        exit_plan.append({
+            "price": target_2r,
+            "ratio": 0.33,
+            "reason": "2R 目标，锁定利润",
+        })
+
+    # 第三笔：阶段转派发
+    exit_plan.append({
+        "price": None,
+        "ratio": 0.34,
+        "reason": "阶段转派发，清仓",
+    })
+
+    return {
+        "risk_r": risk_r,
+        "target_1r": target_1r,
+        "resistance_exit": resistance_exit,
+        "stage_exit": stage_exit,
+        "exit_plan": exit_plan,
+        "already_exited": [False, False, False],
+    }
+
+
+def compute_stage_stop(
+    stage: str,
+    ma20: float | None,
+    range_low: float | None = None,
+    atr_pct: float = 0.02,
+) -> dict[str, Any]:
+    """根据阶段计算止损位。
+
+    蓄势期：蓄势区间下沿（保护本金）
+    主升期：MA20（保护利润）
+    派发期：MA20 上方（锁定收益）
+    衰退期：不持有
+
+    Args:
+        stage: 当前阶段
+        ma20: 20 日均线
+        range_low: 蓄势区间下沿（可选）
+        atr_pct: ATR 占比
+
+    Returns:
+        {"price": float, "reason": str}
+    """
+    if stage == "蓄势":
+        if range_low is not None and range_low > 0:
+            return {"price": round(range_low, 2), "reason": f"蓄势区间下沿 {range_low:.2f}"}
+        if ma20 is not None and ma20 > 0:
+            return {"price": round(ma20 * 0.95, 2), "reason": f"蓄势期保护本金，MA20下方5%"}
+        return {"price": 0.0, "reason": "数据不足"}
+    elif stage == "主升":
+        if ma20 is not None and ma20 > 0:
+            return {"price": round(ma20, 2), "reason": f"主升期保护利润，MA20 {ma20:.2f}"}
+        return {"price": 0.0, "reason": "数据不足"}
+    elif stage == "派发":
+        if ma20 is not None and ma20 > 0:
+            return {"price": round(ma20 * (1 + atr_pct * 0.5), 2), "reason": f"派发期锁定收益，MA20上方"}
+        return {"price": 0.0, "reason": "数据不足"}
+    else:  # 衰退
+        return {"price": 0.0, "reason": "衰退期不持有"}
+
+
+def check_time_stop(
+    entry_date: str | None,
+    current_stage: str,
+    days_held: int,
+    made_new_high: bool,
+) -> dict[str, Any]:
+    """检查时间止损。
+
+    蓄势期买入：30 天不突破 → 走人
+    主升期买入：15 天不创新高 → 减仓
+    派发期买入：不建议
+
+    Args:
+        entry_date: 买入日期（YYYY-MM-DD）
+        current_stage: 当前阶段
+        days_held: 已持有天数
+        made_new_high: 是否创新高
+
+    Returns:
+        {"triggered": bool, "action": str, "days_left": int}
+    """
+    if current_stage == "蓄势":
+        limit = 30
+        if days_held >= limit and not made_new_high:
+            return {"triggered": True, "action": "蓄势期30天不突破，走人", "days_left": 0}
+        return {"triggered": False, "action": "等待突破", "days_left": max(0, limit - days_held)}
+    elif current_stage == "主升":
+        limit = 15
+        if days_held >= limit and not made_new_high:
+            return {"triggered": True, "action": "主升期15天不创新高，减仓", "days_left": 0}
+        return {"triggered": False, "action": "等待创新高", "days_left": max(0, limit - days_held)}
+    elif current_stage == "派发":
+        return {"triggered": False, "action": "派发期不建议买入", "days_left": 0}
+    else:  # 衰退
+        return {"triggered": True, "action": "衰退期清仓", "days_left": 0}
+
+
+def compute_stop_summary(
+    technical_stop: float,
+    stage_stop: float,
+    time_stop: dict[str, Any],
+    current_price: float,
+) -> dict[str, Any]:
+    """汇总三层止损，取最近的作为最终止损。
+
+    Args:
+        technical_stop: 技术止损价
+        stage_stop: 阶段止损价
+        time_stop: 时间止损结果
+        current_price: 当前价
+
+    Returns:
+        {"final_stop": float, "stops": dict, "time_stop": dict}
+    """
+    stops: dict[str, float] = {}
+    if technical_stop > 0:
+        stops["技术止损"] = technical_stop
+    if stage_stop > 0:
+        stops["阶段止损"] = stage_stop
+
+    # 取最高的止损价（最近当前价的）
+    final_stop = max(stops.values()) if stops else 0.0
+
+    return {
+        "final_stop": final_stop,
+        "stops": stops,
+        "time_stop": time_stop,
+    }
+
+
 # ── 止盈规则 ──────────────────────────────────────────────────
 
 def compute_take_profit(

@@ -26,7 +26,7 @@ except ImportError:
         raise
 
 from trader_shared.light_data import to_float, pct_change
-from trader_shared.stage_positioning import assess_stage
+from trader_shared.stage_positioning import assess_stage, compute_exit_plan, compute_stage_stop, check_time_stop
 from trader_shared.fetchers import TencentFetcher
 
 try:
@@ -512,6 +512,29 @@ def build_report(target: str) -> dict[str, Any]:
     )
     report["position_info"] = position_info
 
+    # 分批止盈计划（仅在有持仓参考价时计算）
+    entry_price = float(report.get("support") or current)  # 默认用支撑位作为参考买入价
+    stop_price = float(report.get("stop") or 0)
+    resistance_val = float(report.get("resistance") or 0)
+    exit_plan = compute_exit_plan(
+        entry_price=entry_price,
+        stop_price=stop_price,
+        resistance_price=resistance_val if resistance_val > 0 else None,
+        current_stage=stage_result["major_stage"],
+        bars=bars,
+    )
+    report["exit_plan"] = exit_plan
+
+    # 阶段止损
+    ma20_val = levels["ma_values"].get("ma20")
+    stage_stop_info = compute_stage_stop(
+        stage=stage_result["major_stage"],
+        ma20=ma20_val,
+        range_low=float(report.get("range_low") or 0),
+        atr_pct=float(levels.get("atr_pct") or 0.02),
+    )
+    report["stage_stop"] = stage_stop_info
+
     # 补全 JSON 输出需要的字段
     report = sync_report_with_data(report, levels)
 
@@ -772,6 +795,46 @@ def render_markdown(r: dict[str, Any]) -> str:
         f"  有底仓 → 反弹 {confirm:.2f} 冲不动就减 10-20%, 跌破 {stop:.2f} 止损",
         f"  加仓 → 放量站稳 {confirm:.2f} 且回踩不破，才评估",
     ])
+
+    # 止盈计划（仅在有明确买入价参考时显示）
+    exit_plan = r.get("exit_plan") or {}
+    exit_plan_items = exit_plan.get("exit_plan") or []
+    if exit_plan_items and exit_plan.get("risk_r", 0) > 0:
+        ep_entry = float(r.get("support") or current)
+        lines.append("")
+        lines.append(f"  止盈计划（参考买入价 {ep_entry:.2f}）")
+        for idx, item in enumerate(exit_plan_items, 1):
+            p = item.get("price")
+            ratio = item.get("ratio", 0)
+            reason = item.get("reason", "")
+            if p is not None:
+                lines.append(f"    第{idx}笔：{p:.2f} 卖 {ratio:.0%}（{reason}）")
+            else:
+                lines.append(f"    第{idx}笔：{reason}")
+
+    # 三层止损
+    stage_stop = r.get("stage_stop") or {}
+    stage_stop_price = stage_stop.get("price", 0)
+    stage_stop_reason = stage_stop.get("reason", "")
+    stop_losses = r.get("stop_losses") or {}
+    tech_stop = stop_losses.get("technical", {}).get("price", 0)
+    time_limit = stop_losses.get("time_limit", {})
+    time_days = time_limit.get("days", 0)
+    if tech_stop > 0 or stage_stop_price > 0:
+        lines.append("")
+        lines.append("  三层止损")
+        parts = []
+        if tech_stop > 0:
+            parts.append(f"技术止损：{tech_stop:.2f}")
+        if stage_stop_price > 0:
+            parts.append(f"阶段止损：{stage_stop_price:.2f}")
+        if time_days > 0:
+            parts.append(f"时间止损：{time_days}天")
+        lines.append(f"    {'｜'.join(parts)}")
+        # 取最近的止损
+        nearest_stop = max(tech_stop, stage_stop_price)
+        if nearest_stop > 0:
+            lines.append(f"    → 跌破 {nearest_stop:.2f} 减仓")
 
     # 仓位计算过程
     position_info = r.get("position_info") or {}

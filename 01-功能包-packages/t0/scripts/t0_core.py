@@ -207,8 +207,21 @@ def render_markdown(plan: dict[str, Any]) -> str:
         f"低吸：{buy_state}，{buy_obs}",
         f"高抛：{sell_state}，{sell_obs}",
         f"止损：{price(numeric_or_none(buy.get('invalid_price')))}",
-        "",
     ]
+
+    # 止盈触发价
+    exit_plan = plan.get("exit_plan") or {}
+    exit_items = exit_plan.get("exit_plan") or []
+    if exit_items and exit_plan.get("risk_r", 0) > 0:
+        exit_parts = []
+        for idx, item in enumerate(exit_items, 1):
+            p = item.get("price")
+            if p is not None:
+                exit_parts.append(f"第{idx}笔 {p:.2f}")
+        if exit_parts:
+            lines.append(f"止盈：{'｜'.join(exit_parts)}")
+
+    lines.append("")
 
     # 盘中动态（合并：盘口+大单+事件）
     has_dynamic = False

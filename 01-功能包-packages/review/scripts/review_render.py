@@ -269,6 +269,27 @@ def render_single(review: dict[str, Any]) -> str:
     if bt_lines:
         lines.extend(bt_lines)
         lines.append("")
+
+    # 📍 止盈进度（如有）
+    exit_plan = review.get("exit_plan") or {}
+    exit_items = exit_plan.get("exit_plan") or []
+    if exit_items and exit_plan.get("risk_r", 0) > 0:
+        lines.append("📍 止盈进度")
+        already_exited = exit_plan.get("already_exited") or [False, False, False]
+        for idx, item in enumerate(exit_items):
+            p = item.get("price")
+            reason = item.get("reason", "")
+            exited = already_exited[idx] if idx < len(already_exited) else False
+            if exited:
+                lines.append(f"  ✅ 第{idx+1}笔 已执行")
+            elif p is not None:
+                dist = abs(close - p) / p * 100 if p > 0 else 0
+                status = "已触发" if close >= p else f"未触发（当前 {close:.2f}，距 {dist:.1f}%）"
+                lines.append(f"  {'✅' if close >= p else '⏳'} 第{idx+1}笔 {p:.2f} {status}")
+            else:
+                lines.append(f"  ⏳ 第{idx+1}笔 {reason} 未触发")
+        lines.append("")
+
     return "\n".join(str(line) for line in lines)
 
 

@@ -205,3 +205,197 @@ class TestAssessStage:
         assert "confidence" in result
         assert result["major_stage"] in ("蓄势", "主升", "派发", "衰退")
         assert result["momentum"] in ("走强", "修复", "震荡", "转弱")
+
+
+# ── compute_exit_plan ──────────────────────────────────────────
+
+class TestComputeExitPlan:
+    def test_basic_exit_plan(self):
+        """基本止盈计划：1R + 阻力位 + 阶段转派发"""
+        from trader_shared.stage_positioning import compute_exit_plan
+        result = compute_exit_plan(
+            entry_price=57.50,
+            stop_price=56.11,
+            resistance_price=64.00,
+            current_stage="蓄势",
+        )
+        assert result["risk_r"] == round(57.50 - 56.11, 2)
+        assert result["target_1r"] == round(57.50 + (57.50 - 56.11), 2)
+        assert result["resistance_exit"] == 64.00
+        assert result["stage_exit"] == "派发"
+        assert len(result["exit_plan"]) == 3
+        assert result["exit_plan"][0]["ratio"] == 0.33
+        assert result["exit_plan"][1]["ratio"] == 0.33
+        assert result["exit_plan"][2]["ratio"] == 0.34
+
+    def test_no_resistance_uses_2r(self):
+        """无阻力位 → 用 2R 代替"""
+        from trader_shared.stage_positioning import compute_exit_plan
+        result = compute_exit_plan(
+            entry_price=57.50,
+            stop_price=56.11,
+            resistance_price=None,
+            current_stage="主升",
+        )
+        assert result["resistance_exit"] is None
+        # 第二笔应该是 2R
+        target_2r = round(57.50 + (57.50 - 56.11) * 2, 2)
+        assert result["exit_plan"][1]["price"] == target_2r
+
+    def test_resistance_below_entry_ignored(self):
+        """阻力位低于买入价 → 忽略，用 2R"""
+        from trader_shared.stage_positioning import compute_exit_plan
+        result = compute_exit_plan(
+            entry_price=57.50,
+            stop_price=56.11,
+            resistance_price=55.00,
+            current_stage="蓄势",
+        )
+        assert result["resistance_exit"] is None
+
+    def test_invalid_entry_price(self):
+        """买入价 <= 止损价 → 返回空计划"""
+        from trader_shared.stage_positioning import compute_exit_plan
+        result = compute_exit_plan(
+            entry_price=56.00,
+            stop_price=57.00,
+            resistance_price=60.00,
+            current_stage="蓄势",
+        )
+        assert result["risk_r"] == 0.0
+        assert result["exit_plan"] == []
+
+    def test_dynamic_resistance_from_bars(self):
+        """无阻力位但有 K 线 → 用近 20 日最高价"""
+        from trader_shared.stage_positioning import compute_exit_plan
+        bars = _make_bars([55.0, 56.0, 57.0, 58.0, 59.0, 60.0, 61.0, 62.0,
+                           63.0, 64.0, 65.0, 66.0, 67.0, 68.0, 69.0, 70.0,
+                           71.0, 72.0, 73.0, 74.0])
+        result = compute_exit_plan(
+            entry_price=70.0,
+            stop_price=68.0,
+            resistance_price=None,
+            current_stage="主升",
+            bars=bars,
+        )
+        assert result["resistance_exit"] == round(74.0 * 1.02, 2)  # high = close * 1.02
+
+
+# ── compute_stage_stop ──────────────────────────────────────────
+
+class TestComputeStageStop:
+    def test_accumulation_with_range_low(self):
+        """蓄势期 + 有区间下沿 → 用区间下沿"""
+        from trader_shared.stage_positioning import compute_stage_stop
+        result = compute_stage_stop("蓄势", ma20=10.0, range_low=9.5)
+        assert result["price"] == 9.5
+        assert "蓄势区间下沿" in result["reason"]
+
+    def test_accumulation_no_range_low(self):
+        """蓄势期 + 无区间下沿 → 用 MA20 * 0.95"""
+        from trader_shared.stage_positioning import compute_stage_stop
+        result = compute_stage_stop("蓄势", ma20=10.0, range_low=None)
+        assert result["price"] == round(10.0 * 0.95, 2)
+
+    def test_markup_uses_ma20(self):
+        """主升期 → 用 MA20"""
+        from trader_shared.stage_positioning import compute_stage_stop
+        result = compute_stage_stop("主升", ma20=11.0)
+        assert result["price"] == 11.0
+        assert "MA20" in result["reason"]
+
+    def test_distribution_above_ma20(self):
+        """派发期 → MA20 上方"""
+        from trader_shared.stage_positioning import compute_stage_stop
+        result = compute_stage_stop("派发", ma20=11.0, atr_pct=0.02)
+        assert result["price"] > 11.0
+        assert "锁定收益" in result["reason"]
+
+    def test_decline_no_hold(self):
+        """衰退期 → 不持有"""
+        from trader_shared.stage_positioning import compute_stage_stop
+        result = compute_stage_stop("衰退", ma20=8.0)
+        assert result["price"] == 0.0
+        assert "不持有" in result["reason"]
+
+
+# ── check_time_stop ──────────────────────────────────────────
+
+class TestCheckTimeStop:
+    def test_accumulation_not_triggered(self):
+        """蓄势期 10 天 → 未触发"""
+        from trader_shared.stage_positioning import check_time_stop
+        result = check_time_stop("2026-05-20", "蓄势", 10, False)
+        assert result["triggered"] is False
+        assert result["days_left"] == 20
+
+    def test_accumulation_triggered(self):
+        """蓄势期 30 天不突破 → 触发"""
+        from trader_shared.stage_positioning import check_time_stop
+        result = check_time_stop("2026-05-01", "蓄势", 30, False)
+        assert result["triggered"] is True
+        assert "走人" in result["action"]
+
+    def test_accumulation_with_breakout(self):
+        """蓄势期 30 天但已突破 → 不触发"""
+        from trader_shared.stage_positioning import check_time_stop
+        result = check_time_stop("2026-05-01", "蓄势", 30, True)
+        assert result["triggered"] is False
+
+    def test_markup_not_triggered(self):
+        """主升期 10 天 → 未触发"""
+        from trader_shared.stage_positioning import check_time_stop
+        result = check_time_stop("2026-05-20", "主升", 10, False)
+        assert result["triggered"] is False
+        assert result["days_left"] == 5
+
+    def test_markup_triggered(self):
+        """主升期 15 天不创新高 → 触发"""
+        from trader_shared.stage_positioning import check_time_stop
+        result = check_time_stop("2026-05-15", "主升", 15, False)
+        assert result["triggered"] is True
+        assert "减仓" in result["action"]
+
+    def test_distribution_no_buy(self):
+        """派发期 → 不建议买入"""
+        from trader_shared.stage_positioning import check_time_stop
+        result = check_time_stop("2026-05-20", "派发", 5, False)
+        assert result["triggered"] is False
+        assert "不建议" in result["action"]
+
+    def test_decline_clear(self):
+        """衰退期 → 清仓"""
+        from trader_shared.stage_positioning import check_time_stop
+        result = check_time_stop("2026-05-20", "衰退", 5, False)
+        assert result["triggered"] is True
+        assert "清仓" in result["action"]
+
+
+# ── compute_stop_summary ──────────────────────────────────────────
+
+class TestComputeStopSummary:
+    def test_nearest_stop(self):
+        """取最高的止损价（最近当前价）"""
+        from trader_shared.stage_positioning import compute_stop_summary
+        time_stop = {"triggered": False, "action": "等待", "days_left": 20}
+        result = compute_stop_summary(
+            technical_stop=9.5,
+            stage_stop=9.8,
+            time_stop=time_stop,
+            current_price=10.0,
+        )
+        assert result["final_stop"] == 9.8
+        assert "技术止损" in result["stops"]
+        assert "阶段止损" in result["stops"]
+
+    def test_only_technical(self):
+        """只有技术止损"""
+        from trader_shared.stage_positioning import compute_stop_summary
+        time_stop = {"triggered": False, "action": "等待", "days_left": 0}
+        result = compute_stop_summary(
+            technical_stop=9.5,
+            stage_stop=0.0,
+            time_stop=time_stop,
+            current_price=10.0,
+        )
+        assert result["final_stop"] == 9.5
