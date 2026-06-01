@@ -142,9 +142,9 @@ def build_plan(target: str) -> dict[str, Any]:
         "model": model,
     }
     # 分批止盈计划（用当前价作为参考买入价）
-    buy_price = numeric_or_none(buy.get("execution_price")) or current
-    stop_price = numeric_or_none(buy.get("invalid_price")) or 0
-    sell_price = numeric_or_none(sell.get("observation_price"))
+    buy_price = numeric_or_none(model["buy"].get("execution_price")) or current
+    stop_price = numeric_or_none(model["buy"].get("invalid_price")) or 0
+    sell_price = numeric_or_none(model["sell"].get("observation_price"))
     # 威科夫分析（用于实时信号提醒和止盈计划）
     try:
         from trader_shared.wyckoff_core import wyckoff_analysis

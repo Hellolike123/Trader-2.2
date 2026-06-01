@@ -432,6 +432,43 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         except Exception:
             pass
 
+    # EXPMA 计算（提前到 report 构造之前）
+    expma10_val = None
+    expma12_val = None
+    expma20_val = None
+    expma50_val = None
+    expma_trend = "无数据"
+    try:
+        from trader_shared.momentum_core import calc_expma
+        closes_for_expma = [float(b.get("close") or 0) for b in bars if float(b.get("close") or 0) > 0]
+        if len(closes_for_expma) >= 10:
+            expma_vals = calc_expma(closes_for_expma, 10)
+            expma10_val = expma_vals[-1] if expma_vals else None
+        if len(closes_for_expma) >= 12:
+            expma12_vals = calc_expma(closes_for_expma, 12)
+            expma12_val = expma12_vals[-1] if expma12_vals else None
+        if len(closes_for_expma) >= 20:
+            expma20_vals = calc_expma(closes_for_expma, 20)
+            expma20_val = expma20_vals[-1] if expma20_vals else None
+        if len(closes_for_expma) >= 50:
+            expma50_vals = calc_expma(closes_for_expma, 50)
+            expma50_val = expma50_vals[-1] if expma50_vals else None
+        # EXPMA 趋势判断
+        if expma10_val and expma20_val and expma50_val:
+            if expma10_val > expma20_val > expma50_val:
+                expma_trend = "多头排列"
+            elif expma10_val < expma20_val < expma50_val:
+                expma_trend = "空头排列"
+            else:
+                expma_trend = "交叉震荡"
+        elif expma10_val and expma20_val:
+            if expma10_val > expma20_val:
+                expma_trend = "短期偏多"
+            else:
+                expma_trend = "短期偏空"
+    except Exception:
+        pass
+
     chip_support: float | None = None
     chip_resistance: float | None = None
     if chip_peaks:
@@ -593,37 +630,6 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     )
     report["exit_plan"] = exit_plan
     report["chip_migration"] = chip_migration
-
-    # 五状态仓位管理状态机 + EXPMA 计算
-    expma10_val = None
-    expma12_val = None
-    expma20_val = None
-    expma50_val = None
-    try:
-        from trader_shared.momentum_core import calc_expma
-        closes_for_expma = [float(b.get("close") or 0) for b in bars if float(b.get("close") or 0) > 0]
-        if len(closes_for_expma) >= 10:
-            expma_vals = calc_expma(closes_for_expma, 10)
-            expma10_val = expma_vals[-1] if expma_vals else None
-        if len(closes_for_expma) >= 12:
-            expma12_vals = calc_expma(closes_for_expma, 12)
-            expma12_val = expma12_vals[-1] if expma12_vals else None
-        if len(closes_for_expma) >= 20:
-            expma20_vals = calc_expma(closes_for_expma, 20)
-            expma20_val = expma20_vals[-1] if expma20_vals else None
-        if len(closes_for_expma) >= 50:
-            expma50_vals = calc_expma(closes_for_expma, 50)
-            expma50_val = expma50_vals[-1] if expma50_vals else None
-    except Exception:
-        pass
-    
-    # EXPMA 趋势确认（金叉/死叉）
-    expma_trend = "neutral"
-    if expma12_val is not None and expma50_val is not None:
-        if expma12_val > expma50_val:
-            expma_trend = "bullish"  # EXPMA(12) 金叉 EXPMA(50) → 趋势转强
-        elif expma12_val < expma50_val:
-            expma_trend = "bearish"  # EXPMA(12) 死叉 EXPMA(50) → 趋势转弱
 
     # 已有持仓模式：确定成本价和持仓状态
     # 必须在 evaluate_position_state() 之前，以便传入正确的 has_position 和 entry_price
