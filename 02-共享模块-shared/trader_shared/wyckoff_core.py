@@ -24,6 +24,9 @@ try:
 except ImportError:
     WYCKOFF_DIVERGENCE_BARS = 5
 
+# 量比阈值说明：
+# - _VOL_SPIKE_THRESHOLD = 1.2 用于 SOW/洗盘等一般放量判断（宽松）
+# - _BC_VOL_RATIO_THRESHOLD = 2.0 用于 BC 购买高潮（严格，天量才触发）
 _VOL_SPIKE_THRESHOLD = 1.2
 
 # ── BC (Buying Climax) 购买高潮检测 ──
@@ -61,9 +64,10 @@ def _detect_buying_climax(bars: list[dict]) -> dict:
 
     vol_ratio = cur_volume / avg_volume
 
-    # 涨幅计算
+    # 涨幅计算（相对前收盘）
     price_range = cur_high - cur_low if cur_high != cur_low else 1.0
-    change_pct = abs(cur_close - cur_open) / max(price_range, 0.01) * 100
+    prev_close = to_float(bars[-2].get("close")) if len(bars) >= 2 else cur_open
+    change_pct = (cur_close - prev_close) / max(prev_close, 0.01) * 100
 
     # 上影线比例
     real_body_top = max(cur_open, cur_close)
@@ -124,9 +128,14 @@ def _detect_sign_of_weakness(bars: list[dict]) -> dict:
 
     support = min(valid_lows)
 
-    # 跌破支撑
+    # 跌破支撑（需要连续2天跌破才算）
     if cur_low >= support:
         return {"sow_signal": False, "sow_reason": "未跌破支撑", "sow_price": 0.0}
+    
+    # 检查前一天是否也跌破（连续2天跌破才触发）
+    prev_low = to_float(bars[-2].get("low")) if len(bars) >= 2 else None
+    if prev_low is None or prev_low >= support:
+        return {"sow_signal": False, "sow_reason": "仅单日跌破，需连续2天确认", "sow_price": 0.0}
 
     # 放量确认
     avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)

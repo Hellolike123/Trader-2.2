@@ -41,7 +41,8 @@ def _save_history(history: dict[str, Any]) -> None:
         _CHIP_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
         tmp = _CHIP_HISTORY_PATH.with_suffix(f".{os.getpid()}.tmp")
         tmp.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.fsync(tmp.open("rb").fileno())
+        with tmp.open("rb") as f:
+            os.fsync(f.fileno())
         tmp.replace(_CHIP_HISTORY_PATH)
     except OSError as exc:
         _logger.debug("Chip history save failed: %s", exc)
@@ -146,8 +147,8 @@ def check_chip_migration(
             "has_history": True,
         }
 
-    # 在当前 peaks 中找价格最接近的支撑峰
-    current_support_peaks = [p for p in current_peaks if "支撑" in str(p.get("support_level", ""))]
+    # 在当前 peaks 中找价格最接近的支撑峰（用 startswith 匹配"支撑"开头的级别）
+    current_support_peaks = [p for p in current_peaks if str(p.get("support_level", "")).startswith("支撑")]
     if not current_support_peaks:
         # 所有支撑峰都消失了 → 100% 搬家
         migration_pct = 100.0
