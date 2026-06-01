@@ -305,11 +305,19 @@ class TestComputeStageStop:
         assert "MA20" in result["reason"]
 
     def test_distribution_above_ma20(self):
-        """派发期 → MA20 上方"""
+        """派发期无 expma20 → fallback 到 MA20 上方"""
         from trader_shared.stage_positioning import compute_stage_stop
         result = compute_stage_stop("派发", ma20=11.0, atr_pct=0.02)
         assert result["price"] > 11.0
         assert "锁定收益" in result["reason"]
+        assert "MA20" in result["reason"]
+
+    def test_distribution_uses_expma20(self):
+        """派发期有 expma20 → 优先用 EXPMA(20) 上方"""
+        from trader_shared.stage_positioning import compute_stage_stop
+        result = compute_stage_stop("派发", ma20=11.0, atr_pct=0.02, expma20=11.5)
+        assert result["price"] > 11.5
+        assert "EXPMA(20)" in result["reason"]
 
     def test_decline_no_hold(self):
         """衰退期 → 不持有"""
@@ -364,11 +372,18 @@ class TestCheckTimeStop:
         assert "不建议" in result["action"]
 
     def test_decline_clear(self):
-        """衰退期 → 清仓"""
+        """衰退期有持仓 → 清仓"""
         from trader_shared.stage_positioning import check_time_stop
         result = check_time_stop("2026-05-20", "衰退", 5, False)
         assert result["triggered"] is True
         assert "清仓" in result["action"]
+
+    def test_decline_no_position(self):
+        """衰退期空仓 → 不触发清仓"""
+        from trader_shared.stage_positioning import check_time_stop
+        result = check_time_stop("2026-05-20", "衰退", 5, False, has_position=False)
+        assert result["triggered"] is False
+        assert "空仓" in result["action"]
 
 
 # ── compute_stop_summary ──────────────────────────────────────────

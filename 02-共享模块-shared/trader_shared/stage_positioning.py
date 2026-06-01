@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from trader_shared._logging import get_logger
+from trader_shared.config import ACCUMULATION_DAYS_LIMIT, MARKUP_DAYS_LIMIT
 
 _logger = get_logger(__name__)
 
@@ -978,7 +979,7 @@ def compute_exit_plan(
         "price": None,
         "ratio": 0.34,
         "reason": "阶段转派发，清仓",
-        "condition": "阶段变化",
+        "condition": "阶段转派发",
         "triggered": False,
     })
 
@@ -1037,12 +1038,13 @@ def compute_stage_stop(
     ma20: float | None,
     range_low: float | None = None,
     atr_pct: float = 0.02,
+    expma20: float | None = None,
 ) -> dict[str, Any]:
     """根据阶段计算止损位。
 
     蓄势期：蓄势区间下沿（保护本金）
     主升期：MA20（保护利润）
-    派发期：MA20 上方（锁定收益）
+    派发期：EXPMA(20) 上方（锁定收益）
     衰退期：不持有
 
     Args:
@@ -1050,6 +1052,7 @@ def compute_stage_stop(
         ma20: 20 日均线
         range_low: 蓄势区间下沿（可选）
         atr_pct: ATR 占比
+        expma20: 20 日 EXPMA（可选，派发期优先使用）
 
     Returns:
         {"price": float, "reason": str}
@@ -1065,8 +1068,11 @@ def compute_stage_stop(
             return {"price": round(ma20, 2), "reason": f"主升期保护利润，MA20 {ma20:.2f}"}
         return {"price": 0.0, "reason": "数据不足"}
     elif stage == "派发":
-        if ma20 is not None and ma20 > 0:
-            return {"price": round(ma20 * (1 + atr_pct * 0.5), 2), "reason": f"派发期锁定收益，MA20上方"}
+        # 派发期优先使用 EXPMA(20)，fallback 到 MA20
+        ref_price = expma20 if (expma20 is not None and expma20 > 0) else ma20
+        ref_name = "EXPMA(20)" if (expma20 is not None and expma20 > 0) else "MA20"
+        if ref_price is not None and ref_price > 0:
+            return {"price": round(ref_price * (1 + atr_pct * 0.5), 2), "reason": f"派发期锁定收益，{ref_name}上方"}
         return {"price": 0.0, "reason": "数据不足"}
     else:  # 衰退
         return {"price": 0.0, "reason": "衰退期不持有"}
@@ -1077,6 +1083,7 @@ def check_time_stop(
     current_stage: str,
     days_held: int,
     made_new_high: bool,
+    has_position: bool = True,
 ) -> dict[str, Any]:
     """检查时间止损。
 
@@ -1089,19 +1096,23 @@ def check_time_stop(
         current_stage: 当前阶段
         days_held: 已持有天数
         made_new_high: 是否创新高
+        has_position: 是否有持仓（空仓时不触发清仓）
 
     Returns:
         {"triggered": bool, "action": str, "days_left": int}
     """
+    if not has_position:
+        return {"triggered": False, "action": "空仓不触发时间止损", "days_left": 0}
+
     if current_stage == "蓄势":
-        limit = 30
+        limit = ACCUMULATION_DAYS_LIMIT
         if days_held >= limit and not made_new_high:
-            return {"triggered": True, "action": "蓄势期30天不突破，走人", "days_left": 0}
+            return {"triggered": True, "action": f"蓄势期{limit}天不突破，走人", "days_left": 0}
         return {"triggered": False, "action": "等待突破", "days_left": max(0, limit - days_held)}
     elif current_stage == "主升":
-        limit = 15
+        limit = MARKUP_DAYS_LIMIT
         if days_held >= limit and not made_new_high:
-            return {"triggered": True, "action": "主升期15天不创新高，减仓", "days_left": 0}
+            return {"triggered": True, "action": f"主升期{limit}天不创新高，减仓", "days_left": 0}
         return {"triggered": False, "action": "等待创新高", "days_left": max(0, limit - days_held)}
     elif current_stage == "派发":
         return {"triggered": False, "action": "派发期不建议买入", "days_left": 0}
@@ -1367,23 +1378,6 @@ def evaluate_position_state(
             0, conditions, stop_price=atr_stop,
         )
 
-    # 退出再买逻辑（需要满足条件才能买回）
-    if not has_position and conditions.get("exit_reentry", False):
-        # 退出再买条件：
-        # 必要条件：价格回到支撑位 + 支撑位没破
-        # 加分条件：缩量止跌 / 价格站上 EXPMA(10) / RSI 回升 / 阶段没变坏
-        reentry_score = _calc_reentry_score(conditions, bars, current_price, support, expma10)
-        if reentry_score >= 2:
-            return _make_position_state(
-                "初始建仓", f"退出再买条件满足（{reentry_score}/4），可以买回10%",
-                10, conditions, stop_price=atr_stop,
-            )
-        else:
-            return _make_position_state(
-                "空仓", f"退出再买条件不足（{reentry_score}/4），继续等待",
-                0, conditions,
-            )
-    
     # 默认：持有观察
     return _make_position_state(
         "初始建仓", "持仓观察中",

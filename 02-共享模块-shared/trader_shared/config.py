@@ -140,6 +140,10 @@ EXPMA_SLOW_PERIOD: int = 20            # 慢速 EXPMA（替代 MA20 做移动止
 EXPMA_TREND_FAST: int = 12             # 趋势确认快速线
 EXPMA_TREND_SLOW: int = 50             # 趋势确认慢速线
 
+# 时间止损天数限制
+ACCUMULATION_DAYS_LIMIT: int = 30   # 蓄势期买入：30天不突破 → 走人
+MARKUP_DAYS_LIMIT: int = 15         # 主升期买入：15天不创新高 → 减仓
+
 # 筹码搬家阈值
 CHIP_MIGRATION_WARNING_PCT: float = 40.0   # 筹码松动警告阈值
 CHIP_MIGRATION_CRITICAL_PCT: float = 50.0  # 筹码搬家清仓阈值
@@ -175,5 +179,6 @@ __all__ = [
     "INITIAL_POSITION_PCT",
     "EXIT_RATIO_BC", "EXIT_RATIO_1R", "EXIT_RATIO_STAGE",
     "EXPMA_FAST_PERIOD", "EXPMA_SLOW_PERIOD", "EXPMA_TREND_FAST", "EXPMA_TREND_SLOW",
+    "ACCUMULATION_DAYS_LIMIT", "MARKUP_DAYS_LIMIT",
     "CHIP_MIGRATION_WARNING_PCT", "CHIP_MIGRATION_CRITICAL_PCT",
 ]

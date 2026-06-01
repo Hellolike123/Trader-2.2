@@ -557,6 +557,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "wyckoff": wyck_result.get("wyckoff", wyck_result),
         "expma10": expma10_val,
         "expma12": expma12_val,
+        "expma20": expma20_val,
         "expma50": expma50_val,
         "expma_trend": expma_trend,
         # "extend_fundamental": snapshot.extend_fundamental,
@@ -596,6 +597,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     # 五状态仓位管理状态机 + EXPMA 计算
     expma10_val = None
     expma12_val = None
+    expma20_val = None
     expma50_val = None
     try:
         from trader_shared.momentum_core import calc_expma
@@ -606,6 +608,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         if len(closes_for_expma) >= 12:
             expma12_vals = calc_expma(closes_for_expma, 12)
             expma12_val = expma12_vals[-1] if expma12_vals else None
+        if len(closes_for_expma) >= 20:
+            expma20_vals = calc_expma(closes_for_expma, 20)
+            expma20_val = expma20_vals[-1] if expma20_vals else None
         if len(closes_for_expma) >= 50:
             expma50_vals = calc_expma(closes_for_expma, 50)
             expma50_val = expma50_vals[-1] if expma50_vals else None
@@ -665,6 +670,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         ma20=ma20_val,
         range_low=float(report.get("range_low") or 0),
         atr_pct=float(levels.get("atr_pct") or 0.02),
+        expma20=expma20_val,
     )
     report["stage_stop"] = stage_stop_info
     
@@ -963,6 +969,11 @@ def render_markdown(r: dict[str, Any]) -> str:
         except Exception:
             pass
 
+    # 🎯 今日行动（PRD 要求放在最前面）
+    action_section = _build_today_action_section(r)
+    if action_section:
+        lines.extend(action_section)
+
     lines.extend([
         "",
         "📍 决策",
@@ -1047,36 +1058,18 @@ def render_markdown(r: dict[str, Any]) -> str:
     if isinstance(fusion, dict) and fusion.get("action"):
         lines.extend(_fusion_breakdown(fusion))
 
-    # 🎯 今日行动
-    action_section = _build_today_action_section(r)
-    if action_section:
-        lines.extend(action_section)
-
-    # 📊 已有持仓评估（如果有持仓）
-    has_position = r.get("has_position", False)
-    cost_price = float(r.get("cost_price") or 0)
-    if has_position and cost_price > 0:
-        position_section = _build_existing_position_section(r, cost_price)
-        if position_section:
-            lines.extend(position_section)
-
-    # 💰 仓位检查
-    position_check_section = _build_position_check_section(r)
-    if position_check_section:
-        lines.extend(position_check_section)
-
-    # 🔔 信号提醒
-    signal_section = _build_signal_alert_section(r)
-    if signal_section:
-        lines.extend(signal_section)
-
-    # T0 参考
+    # 📍 决策
     lines.extend([
         "",
         "T0 参考",
         "",
         f"  低吸：{low_zone} ｜ 高抛：{confirm:.2f} ｜ 止损：{stop:.2f}",
     ])
+
+    # 🔔 信号提醒（PRD 要求在 ❗ 关键价位之前）
+    signal_section = _build_signal_alert_section(r)
+    if signal_section:
+        lines.extend(signal_section)
 
     resistance_val = float(r.get("resistance", 0))
     chip_support = r.get("chip_support")
@@ -1119,6 +1112,19 @@ def render_markdown(r: dict[str, Any]) -> str:
             key_lines.append(f"{p:.2f}{sep} {label}")
             last_group = g
     lines.extend(key_lines)
+
+    # 📊 已有持仓评估（如果有持仓）
+    has_position = r.get("has_position", False)
+    cost_price = float(r.get("cost_price") or 0)
+    if has_position and cost_price > 0:
+        position_section = _build_existing_position_section(r, cost_price)
+        if position_section:
+            lines.extend(position_section)
+
+    # 💰 仓位检查
+    position_check_section = _build_position_check_section(r)
+    if position_check_section:
+        lines.extend(position_check_section)
 
     stage = str(r.get("stage") or "")
 
