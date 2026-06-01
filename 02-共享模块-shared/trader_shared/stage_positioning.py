@@ -1526,17 +1526,21 @@ def _assess_resistance_strength(
     # 检查是否在阻力位附近震荡
     near_resistance = abs(current_price - resistance) / max(resistance, 1) < 0.02
     
-    # 检查是否有大阳线突破
+    # 检查是否有大阳线突破（含涨停板特殊处理）
     has_big_green = False
+    has_limit_up = False
     for bar in recent3:
         open_p = float(bar.get("open") or 0)
         close_p = float(bar.get("close") or 0)
+        high_p = float(bar.get("high") or 0)
         if open_p > 0 and close_p > open_p * 1.03:  # 涨幅 > 3%
             has_big_green = True
-            break
+        # 涨停板判断：收盘价 = 最高价，且涨幅 > 9%
+        if open_p > 0 and close_p == high_p and close_p > open_p * 1.09:
+            has_limit_up = True
     
-    # 弱阻力：缩量 + 在阻力位附近震荡 + 没有大阳线突破
-    if is_low_volume and near_resistance and not has_big_green:
+    # 弱阻力：缩量 + 在阻力位附近震荡 + 没有大阳线突破 + 没有涨停板
+    if is_low_volume and near_resistance and not has_big_green and not has_limit_up:
         return "weak"
     
     return "strong"

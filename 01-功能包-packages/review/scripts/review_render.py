@@ -157,7 +157,10 @@ def render_single(review: dict[str, Any]) -> str:
         lines.append("注意午间复盘以数据时间快照为准")
     lines.append("")
     model_summary_text = str(review.get("model_summary_text") or model_summary(theory))
-    lines.append("结论 " + conclusion + model_summary_text)
+    # 结论和摘要分开显示，避免单行过长
+    lines.append("结论 " + conclusion)
+    if model_summary_text:
+        lines.append(model_summary_text)
     lines.append("")
     # 📊 关键价位 (consolidated: supports + pressures + risk)
     lines.append("📊 关键价位 ")
