@@ -95,3 +95,93 @@ def _build_hint(stage: str, con_in: int, con_out: int, signals: list[str]) -> st
     if signals:
         return signals[0]
     return ""
+
+
+def format_flow_trend(daily_5d: list[float]) -> str:
+    """Format daily flow trend with arrow symbols.
+
+    Args:
+        daily_5d: list of daily net flow values (万元)
+
+    Returns:
+        Trend string like "↑↑↓↑↓" or "无数据"
+    """
+    if not daily_5d:
+        return "无数据"
+    symbols = []
+    for v in daily_5d[-5:]:
+        if v > 0:
+            symbols.append("↑")
+        elif v < 0:
+            symbols.append("↓")
+        else:
+            symbols.append("→")
+    return "".join(symbols)
+
+
+def format_main_force_enhanced(
+    result: dict[str, Any],
+    today_super_large: float = 0.0,
+    today_large: float = 0.0,
+) -> str:
+    """Generate enhanced main force section with super-large/large order breakdown.
+
+    Args:
+        result: detect_main_force_stage() return value
+        today_super_large: today's super-large order net flow (万元)
+        today_large: today's large order net flow (万元)
+
+    Returns:
+        Formatted section following WeChat plain-text rules
+    """
+    stage = result.get("stage", "unknown")
+    confidence = result.get("confidence", 0)
+    cum_5 = result.get("cum_flow_5d_wan", 0)
+    con_in = result.get("consecutive_inflow_days", 0)
+    con_out = result.get("consecutive_outflow_days", 0)
+    relation = result.get("flow_price_relation", "无数据")
+    signals = result.get("signals", [])
+    daily_5d = result.get("daily_flow_5d", [])
+
+    if stage == "unknown" and not daily_5d:
+        return "💰 主力资金\n资金流向数据暂不可用"
+
+    stage_cn = STAGE_LABELS.get(stage, "未知")
+    trend_str = format_flow_trend(daily_5d)
+    today_flow = daily_5d[-1] if daily_5d else 0
+    hint = _build_hint(stage, con_in, con_out, signals)
+
+    # Consecutive days info
+    consecutive_text = ""
+    if con_in >= 2:
+        consecutive_text = f"连续{con_in}日净流入"
+    elif con_out >= 2:
+        consecutive_text = f"连续{con_out}日净流出"
+
+    lines = [
+        "💰 主力资金",
+        f"阶段：{stage_cn}（置信度 {confidence:.1f}）",
+    ]
+
+    # 近5日累计 + 趋势 + 连续天数
+    cum_line = f"近5日：{cum_5:+.0f}万（{trend_str}）"
+    if consecutive_text:
+        cum_line += f" {consecutive_text}"
+    lines.append(cum_line)
+
+    # 今日明细（超大单/大单拆分）
+    today_line = f"今日：{today_flow:+.0f}万"
+    if today_super_large != 0 or today_large != 0:
+        today_line += f"（超大单 {today_super_large:+.0f}万｜大单 {today_large:+.0f}万）"
+    lines.append(today_line)
+
+    lines.append(f"价资关系：{relation}")
+
+    if hint:
+        lines.append(f"提示：{hint}")
+
+    # 派发/砸盘警告
+    if stage in ("distribution", "markdown"):
+        lines.append("⚠️ 主力资金持续流出，谨慎追高")
+
+    return "\n".join(lines)

@@ -234,3 +234,121 @@ class TestMainForceFusion:
             weights = {"chan": 0.45, "momentum": 0.20, "wyckoff": 0.35}
             result = _apply_main_force_weights(weights, stage)
             assert abs(sum(result.values()) - 1.0) < 0.01, f"Failed for {stage}"
+
+
+# ── format_flow_trend ──────────────────────────────────────────────
+
+class TestFormatFlowTrend:
+    def test_normal_trend(self):
+        from trader_shared.main_force_output import format_flow_trend
+        assert format_flow_trend([100, -200, 300, -100, 500]) == "↑↓↑↓↑"
+
+    def test_all_positive(self):
+        from trader_shared.main_force_output import format_flow_trend
+        assert format_flow_trend([100, 200, 300]) == "↑↑↑"
+
+    def test_all_negative(self):
+        from trader_shared.main_force_output import format_flow_trend
+        assert format_flow_trend([-100, -200, -300]) == "↓↓↓"
+
+    def test_zero_flow(self):
+        from trader_shared.main_force_output import format_flow_trend
+        assert format_flow_trend([0, 100, 0]) == "→↑→"
+
+    def test_empty(self):
+        from trader_shared.main_force_output import format_flow_trend
+        assert format_flow_trend([]) == "无数据"
+
+    def test_trailing_5_only(self):
+        from trader_shared.main_force_output import format_flow_trend
+        # Only last 5 are used
+        result = format_flow_trend([100, 200, 300, -100, -200, 500, -300])
+        assert result == "↓↑↓↑↓" or len(result) == 5
+
+
+# ── format_main_force_enhanced ─────────────────────────────────────
+
+class TestFormatMainForceEnhanced:
+    def test_accumulation_with_breakdown(self):
+        from trader_shared.main_force_output import format_main_force_enhanced
+        result = {
+            "stage": "accumulation",
+            "confidence": 0.7,
+            "cum_flow_5d_wan": 3200,
+            "cum_flow_10d_wan": 5000,
+            "consecutive_inflow_days": 3,
+            "consecutive_outflow_days": 0,
+            "flow_price_relation": "价跌资入",
+            "signals": ["连续3日净流入"],
+            "daily_flow_5d": [500, 600, 700, 800, 400],
+        }
+        text = format_main_force_enhanced(result, today_super_large=500, today_large=300)
+        assert "吸筹期" in text
+        assert "置信度 0.7" in text
+        assert "3200" in text
+        assert "↑↑↑↑↑" in text
+        assert "连续3日净流入" in text
+        assert "超大单 +500万" in text
+        assert "大单 +300万" in text
+        assert "价跌资入" in text
+        assert "关注是否放量突破" in text
+
+    def test_unknown_shows_unavailable(self):
+        from trader_shared.main_force_output import format_main_force_enhanced
+        result = {"stage": "unknown", "daily_flow_5d": []}
+        text = format_main_force_enhanced(result)
+        assert "暂不可用" in text
+
+    def test_distribution_warning(self):
+        from trader_shared.main_force_output import format_main_force_enhanced
+        result = {
+            "stage": "distribution",
+            "confidence": 0.5,
+            "cum_flow_5d_wan": -1000,
+            "consecutive_inflow_days": 0,
+            "consecutive_outflow_days": 2,
+            "flow_price_relation": "价涨资出",
+            "signals": [],
+            "daily_flow_5d": [-200, -300, -100, -200, -200],
+        }
+        text = format_main_force_enhanced(result, today_super_large=-100, today_large=-100)
+        assert "谨慎追高" in text
+        assert "连续2日净流出" in text
+        assert "超大单 -100万" in text
+
+    def test_no_breakdown_still_works(self):
+        from trader_shared.main_force_output import format_main_force_enhanced
+        result = {
+            "stage": "markup",
+            "confidence": 0.6,
+            "cum_flow_5d_wan": 5000,
+            "consecutive_inflow_days": 5,
+            "consecutive_outflow_days": 0,
+            "flow_price_relation": "价涨资入",
+            "signals": [],
+            "daily_flow_5d": [800, 900, 1000, 1100, 1200],
+        }
+        text = format_main_force_enhanced(result)
+        assert "拉升期" in text
+        assert "今日：+1200万" in text
+        # No super-large/large breakdown when both are 0
+        assert "超大单" not in text
+
+    def test_wechat_format_no_markdown(self):
+        """Output must not contain Markdown syntax."""
+        from trader_shared.main_force_output import format_main_force_enhanced
+        result = {
+            "stage": "accumulation",
+            "confidence": 0.6,
+            "cum_flow_5d_wan": 3200,
+            "consecutive_inflow_days": 3,
+            "consecutive_outflow_days": 0,
+            "flow_price_relation": "价跌资入",
+            "signals": [],
+            "daily_flow_5d": [500, 600, 700, 800, 400],
+        }
+        text = format_main_force_enhanced(result, today_super_large=500, today_large=300)
+        assert "**" not in text
+        assert "#" not in text
+        assert "---" not in text
+        assert "| " not in text

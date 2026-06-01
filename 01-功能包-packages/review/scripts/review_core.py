@@ -441,7 +441,11 @@ def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str,
 
 
 def _get_main_force(target: str, bars: list[dict[str, Any]]) -> dict[str, Any]:
-    """获取主力行为阶段（安全包装，失败返回空 dict）。"""
+    """获取主力行为阶段（安全包装，失败返回空 dict）。
+
+    Returns:
+        dict with main force stage info + today_super_large_wan / today_large_wan
+    """
     try:
         from trader_shared.cache_utils import fetch_fund_flow_cached
         from trader_shared.fund_flow_data import calc_fund_flow_features
@@ -451,7 +455,12 @@ def _get_main_force(target: str, bars: list[dict[str, Any]]) -> dict[str, Any]:
             daily_flow = ff_data.get("daily_flow", [])
             features = ff_data.get("features", {})
             if daily_flow:
-                return detect_main_force_stage(features, bars)
+                mf = detect_main_force_stage(features, bars)
+                # 今日超大单/大单明细
+                today_record = daily_flow[-1] if daily_flow else {}
+                mf["today_super_large_wan"] = float(today_record.get("super_large_wan", 0) or 0)
+                mf["today_large_wan"] = float(today_record.get("large_wan", 0) or 0)
+                return mf
     except Exception:
         pass
     return {}

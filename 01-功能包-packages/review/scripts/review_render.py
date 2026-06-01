@@ -174,12 +174,60 @@ def render_single(review: dict[str, Any]) -> str:
     lines.extend(_format_intraday_narrative(intraday, review.get("big_order")))
     lines.append("")
 
-    # 💰 主力行为
+    # 💰 主力资金复盘
     mf = review.get("main_force") or {}
     if mf and mf.get("stage") and mf["stage"] != "unknown":
         try:
-            from trader_shared.main_force_output import format_main_force_section
-            lines.append(format_main_force_section(mf))
+            from trader_shared.main_force_output import (
+                format_main_force_enhanced,
+                format_flow_trend,
+            )
+            from trader_shared.main_force import STAGE_LABELS
+
+            stage_cn = STAGE_LABELS.get(mf.get("stage", ""), "未知")
+            confidence = mf.get("confidence", 0)
+            daily_5d = mf.get("daily_flow_5d", [])
+            trend_str = format_flow_trend(daily_5d)
+            cum_5 = mf.get("cum_flow_5d_wan", 0)
+            con_in = mf.get("consecutive_inflow_days", 0)
+            con_out = mf.get("consecutive_outflow_days", 0)
+            relation = mf.get("flow_price_relation", "无数据")
+            today_super_large = float(mf.get("today_super_large_wan", 0) or 0)
+            today_large = float(mf.get("today_large_wan", 0) or 0)
+            today_flow = daily_5d[-1] if daily_5d else 0
+
+            lines.append("💰 主力资金复盘")
+            lines.append(f"阶段：{stage_cn}（置信度 {confidence:.1f}）")
+
+            # 今日大单回溯
+            bo = review.get("big_order") or {}
+            bo_events = bo.get("events") or []
+            if bo_events:
+                lines.append("今日大单回溯：")
+                for event in bo_events[:5]:
+                    amt = event.get("amount_wan") or 0
+                    order_type = "超大单" if amt >= 500 else "大单"
+                    direction = "买入" if "买入" in str(event.get("side", "")) else "卖出"
+                    sign = "+" if "买入" in str(event.get("side", "")) else "-"
+                    meaning = str(event.get("meaning") or "")
+                    lines.append(f"  {event.get('time')} {order_type}{direction} {sign}{amt:.0f}万（{meaning}）")
+                lines.append(f"回溯总结：{bo.get('summary', '暂无')}")
+
+            # 近5日累计 + 趋势
+            cum_line = f"近5日累计：{cum_5:+.0f}万（{trend_str}）"
+            if con_in >= 2:
+                cum_line += f" 连续{con_in}日净流入"
+            elif con_out >= 2:
+                cum_line += f" 连续{con_out}日净流出"
+            lines.append(cum_line)
+
+            # 今日超大单/大单明细
+            today_line = f"今日：{today_flow:+.0f}万"
+            if today_super_large != 0 or today_large != 0:
+                today_line += f"（超大单 {today_super_large:+.0f}万｜大单 {today_large:+.0f}万）"
+            lines.append(today_line)
+
+            lines.append(f"价资关系：{relation}")
             lines.append("")
         except Exception:
             pass

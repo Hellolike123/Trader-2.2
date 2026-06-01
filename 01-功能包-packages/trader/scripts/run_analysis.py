@@ -262,6 +262,10 @@ def build_report(target: str) -> dict[str, Any]:
             features = ff_data.get("features", {})
             if daily_flow:
                 mf = detect_main_force_stage(features, bars)
+                # 今日超大单/大单明细
+                today_record = daily_flow[-1] if daily_flow else {}
+                mf["today_super_large_wan"] = float(today_record.get("super_large_wan", 0) or 0)
+                mf["today_large_wan"] = float(today_record.get("large_wan", 0) or 0)
                 return mf
         return {}
 
@@ -786,6 +790,20 @@ def render_markdown(r: dict[str, Any]) -> str:
         f"  {momentum_reason}",
     ])
 
+    # 💰 主力资金（阶段判断之后、决策之前）
+    mf = r.get("main_force") or {}
+    if mf and mf.get("stage") and mf["stage"] != "unknown":
+        try:
+            from trader_shared.main_force_output import format_main_force_enhanced
+            lines.append("")
+            lines.append(format_main_force_enhanced(
+                mf,
+                today_super_large=float(mf.get("today_super_large_wan", 0) or 0),
+                today_large=float(mf.get("today_large_wan", 0) or 0),
+            ))
+        except Exception:
+            pass
+
     lines.extend([
         "",
         "📍 决策",
@@ -909,16 +927,6 @@ def render_markdown(r: dict[str, Any]) -> str:
     lines.extend(key_lines)
 
     stage = str(r.get("stage") or "")
-
-    # 主力行为段落
-    mf = r.get("main_force") or {}
-    if mf and mf.get("stage") and mf["stage"] != "unknown":
-        try:
-            from trader_shared.main_force_output import format_main_force_section
-            lines.append("")
-            lines.append(format_main_force_section(mf))
-        except Exception:
-            pass
 
     if stage == "转弱" or scene in ("空间不足",):
         lines.extend([

@@ -16,6 +16,11 @@ Must start with `🎯 T0 盯盘助理` and use this structure:
 高抛：{状态}，{观察价}
 止损：xx.xx 元
 
+💰 资金异动
+{time} 超大单{买入/卖出} +{amount}万（{meaning}）
+...
+今日净流入：{net}万 ｜ 超大单：{sl_net}万
+
 📋 盘中动态
 {time} {icon} {event_description}
 ...

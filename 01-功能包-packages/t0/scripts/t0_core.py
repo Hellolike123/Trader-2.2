@@ -223,7 +223,49 @@ def render_markdown(plan: dict[str, Any]) -> str:
 
     lines.append("")
 
-    # 盘中动态（合并：盘口+大单+事件）
+    # 💰 资金异动（大单异动独立段落）
+    if big_order and big_order.get("events"):
+        lines.extend(["💰 资金异动", ""])
+
+        def level_score(lvl: str | None) -> int:
+            return 3 if lvl == "强提醒" else 2 if lvl == "注意" else 1
+
+        sorted_events = sorted(
+            big_order["events"],
+            key=lambda e: (level_score(e.get("level")), e.get("hands") or 0.0),
+            reverse=True,
+        )
+        for event in sorted_events[:5]:
+            time_str = str(event.get("time") or "--:--")
+            side = str(event.get("side") or "")
+            amount_wan = event.get("amount_wan") or 0.0
+            hands = event.get("hands") or 0.0
+            meaning = str(event.get("meaning") or "")
+            # 判断超大单/大单类型
+            order_type = "超大单" if amount_wan >= 500 else "大单"
+            direction = "买入" if "买入" in side else "卖出" if "卖出" in side else ""
+            sign = "+" if "买入" in side else "-"
+            lines.append(f"{time_str} {order_type}{direction} {sign}{amount_wan:.0f}万（{meaning}）")
+
+        # 今日汇总
+        by_side = big_order.get("by_side") or {}
+        buy_info = by_side.get("主动买入") or {}
+        sell_info = by_side.get("主动卖出") or {}
+        buy_amount = buy_info.get("amount_wan") or 0
+        sell_amount = sell_info.get("amount_wan") or 0
+        net_flow = buy_amount - sell_amount
+        # 超大单汇总
+        super_large_total = sum(
+            e.get("amount_wan", 0) for e in big_order["events"]
+            if (e.get("amount_wan") or 0) >= 500 and "买入" in str(e.get("side", ""))
+        ) - sum(
+            e.get("amount_wan", 0) for e in big_order["events"]
+            if (e.get("amount_wan") or 0) >= 500 and "卖出" in str(e.get("side", ""))
+        )
+        lines.append(f"今日净流入：{net_flow:+.0f}万 ｜ 超大单：{super_large_total:+.0f}万")
+        lines.append("")
+
+    # 📋 盘中动态（盘口+事件）
     has_dynamic = False
     if order_book_analyze and plan.get("order_book"):
         ob = order_book_analyze(plan["order_book"])
@@ -231,44 +273,6 @@ def render_markdown(plan: dict[str, Any]) -> str:
             lines.extend(["📋 盘中动态", ""])
             has_dynamic = True
         lines.append(ob["line"])
-        lines.append("")
-
-    if big_order and big_order.get("events"):
-        if not has_dynamic:
-            lines.extend(["📋 盘中动态", ""])
-            has_dynamic = True
-
-        def level_score(lvl: str | None) -> int:
-            return 3 if lvl == "强提醒" else 2 if lvl == "注意" else 1
-
-        recent_events = [e for e in big_order["events"] if e.get("near_focus")]
-        if not recent_events:
-            recent_events = big_order["events"]
-
-        top_event = max(recent_events, key=lambda e: (level_score(e.get("level")), e.get("hands") or 0.0))
-        time_str = str(top_event.get("time") or "--:--")
-        side = str(top_event.get("side") or "")
-        meaning = str(top_event.get("meaning") or "")
-        level = str(top_event.get("level") or "观察")
-        hands = top_event.get("hands") or 0.0
-        focus_label = str(top_event.get("focus_label") or "关注区")
-        focus_note = f"靠近{focus_label}" if top_event.get("near_focus") else "接近关注区"
-
-        if side == "主动买入":
-            if "承接" in meaning or level == "强提醒":
-                alert_line = f"{focus_note}出现主动买入大单（约 {hands:.0f} 手），大单强度升级，继续盯盘。"
-            else:
-                alert_line = f"{focus_note}出现主动买入大单（约 {hands:.0f} 手），建议注意。"
-        elif side == "主动卖出":
-            if "抛压" in meaning or level == "强提醒":
-                alert_line = f"{focus_note}出现主动卖出大单（约 {hands:.0f} 手），警惕承压。"
-            else:
-                alert_line = f"{focus_note}出现主动卖出大单（约 {hands:.0f} 手），警惕抛压。"
-        else:
-            alert_line = f"{focus_note}量能异常，继续盯盘。"
-
-        level_icon = "🔴" if level == "强提醒" else "🟡" if level == "注意" else "⚪"
-        lines.append(f"{time_str} {level_icon} {alert_line}")
         lines.append("")
 
     history_lines = review_lines(plan.get("history"))
