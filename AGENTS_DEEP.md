@@ -55,7 +55,8 @@
 - SKILL.md 从 ~2100 词精简至 ~1200 词（↓43%）
 - 每个 skill 新增 `references/` 目录，包含：
   - `commands.md` — 所有脚本命令（声明为"绝对真理"）
-  - `output-contract.md` — 输出格式模板和旧输出检测清单（声明为"绝对真理"）
+  - `output-template.md` — 输出结构模板（声明为"绝对真理"）
+  - `output-style-guide.md` — 输出风格指南和旧输出检测清单（声明为"绝对真理"）
 - 打包：`pack_all.py` 会自动将 `references/` 包含进 zip 包
 
 ### 2026-05-06 — 算法准确性审计
@@ -645,7 +646,7 @@ Trader 2.4/
 - 必须包含 **Critical Rule**: "This is a script-output skill"
 - 必须包含 **Output Contract**: 精确标题顺序和格式
 - 必须包含 **Old Output Detection**: 禁止词和错误模式
-- 现在必须引用 `references/commands.md` 和 `references/output-contract.md` — "绝对真理"声明防止幻觉
+- 现在必须引用 `references/commands.md`、`references/output-template.md` 和 `references/output-style-guide.md` — "绝对真理"声明防止幻觉
 
 ---
 

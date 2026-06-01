@@ -20,7 +20,7 @@ Trader 2.4/
 │   │   ├── SKILL.md                       # LLM prompt (injected into context)
 │   │   ├── HERMES.md                      # Hermes framework instructions
 │   │   ├── _meta.json                     # Skill metadata (name/version)
-│   │   ├── references/                    # commands.md, output-contract.md (absolute truth)
+│   │   ├── references/                    # commands.md, output-template.md, output-style-guide.md (absolute truth)
 │   │   ├── scripts/                       # Entry points + local config
 │   │   │   ├── final_report.py            # Single-stock analysis entry
 │   │   │   ├── final_pool.py              # Pool management entry

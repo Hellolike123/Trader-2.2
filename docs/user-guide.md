@@ -443,7 +443,7 @@ Hermes 可能会出现以下情况：
 3. 不要用 ##/### 标题、**粗体**、|表格|、>引用、- 列表
 4. 输出后必须跑 validate_output.py 校验
 5. 校验不通过 → 重新跑脚本，不要自己修格式
-6. 如果用户问格式相关问题，直接引用 output-contract.md
+6. 如果用户问格式相关问题，直接引用 output-template.md 和 output-style-guide.md
 
 验证命令：
   python3 scripts/validate_output.py
@@ -475,7 +475,7 @@ review:   python3 01-功能包-packages/review/scripts/validate_output.py
 
 检查以下文件是否写死了红线：
 - SKILL.md 的「输出规则」区块
-- output-contract.md 的格式规范
+- output-template.md 和 output-style-guide.md 的格式规范
 - validate_output.py 的校验逻辑
 
 如果都写了还是乱改，在 SKILL.md 最开头加：

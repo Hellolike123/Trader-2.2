@@ -1,6 +1,6 @@
-# Output Contract — trader
+# Output Template — trader
 
-> **This is the absolute truth for valid/invalid output.** Never generate output format from memory.
+> **This is the absolute truth for output structure.** Never generate output format from memory.
 
 ## Valid Output
 
@@ -19,7 +19,8 @@ T0 参考
 👉 一句话
 ```
 
-Required rules:
+## Required Fields
+
 - Top block includes `MA5 / MA10 / MA20 / MA30`; use `--` if unavailable.
 - `ATR` line follows MA line.
 - 🌍 大盘 includes `中证1000｜{regime}｜今日{change}%｜{skill_note}`.
@@ -30,28 +31,4 @@ Required rules:
 - `❗ 关键价位` lists prices with `←` labels (止损位/防守位/当前位置/确认位).
 - `👉 一句话` is the final one-line summary.
 - Buy-side wording must include `止跌确认`.
-- Do not use `##/###`, bold headings, blockquotes, bullet lists (`-`/`*`), tables, or extra disclaimers.
-- Do not output intraday execution prices or concrete order instructions.
-- Do not output `⏱️ T0 简版`, `做T`, `执行价`.
-- 250日线下方时，首行显示 `⚠️ 250日线下方，一票否决，建议不参与`，然后继续完整分析。
-
-## Old Output Detection
-
-If output contains any of these, rerun the script:
-
-```
-⏱️ T0 简版
-做T
-执行价
-✅ 先给结论
-🎯 今日行动
-📏 仓位上限
-🧭 为什么
-⚠️ 如果走势不对
-📌 最终行动卡
-🧭 简要分析
-基础状态：
-体系结论：
-```
-
-Valid output does NOT use markdown tables.
+- 250日线下方时，首行显示 `⚠️ 250日线下方，一票否决，建议不参与`，然后继续完整分析.

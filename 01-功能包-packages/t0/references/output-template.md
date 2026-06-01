@@ -1,6 +1,6 @@
-# Output Contract — t0
+# Output Template — t0
 
-> **This is the absolute truth for valid/invalid output.** Never generate output format from memory.
+> **This is the absolute truth for output structure.** Never generate output format from memory.
 
 ## Manual Card Output (精简为 4 部分)
 
@@ -35,26 +35,3 @@ Appears only on state changes (no fixed format):
 ```
 
 Valid alert patterns: `低吸触发`, `高抛触发`, `止损退出`.
-
-## Old Output Detection
-
-If output contains any of these, rerun the script:
-
-```
-T0 执行卡
-⏱️ 盘中 T0
-📉 低吸计划
-📈 高抛计划
-规则版本：
-数据状态：
-今日做法：
-当前动作：
-先买后卖
-先卖后买
-🚩 关键价位
-🕒 今日关键事件
-💰 仓位管控
-👀 下一步只盯
-```
-
-Valid manual output has no markdown tables, bullet lists, bold markers, blockquotes, or `##/###` headings.

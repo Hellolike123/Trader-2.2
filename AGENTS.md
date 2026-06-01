@@ -25,7 +25,7 @@
 - **分层数据缓存**：日线K线、扩展数据（股东/机构EPS/解禁/题材）、大盘环境均支持文件缓存。盘中分析读缓存 + 追加当日实时数据，盘后预缓存选股池全量数据。命令：`trader.py cache warm`（预缓存）、`trader.py cache clear`（清缓存）。
 - **统一包结构**：所有核心模块已迁移到 `trader_shared/` 包下，支持 `pip install -e .` 开发安装和 `pytest` 直接运行。import 统一为 `from trader_shared.xxx import ...`。
 - **性能优化（2026-05-31）**：`light_data.py` 的 fallback 库（mootdx/akshare/pytdx3）改为懒加载，单票分析 `build_report()` 从 20s 优化到 0.48s（42 倍提升）。`market_env.py` 数据源从 `fetch_kline`（返回分钟线）修正为 `fetch_qfq_daily`（返回日线），缓存增加按日期去重，大盘环境评估从 10s 降到 0.09s。
-- 真正的输出格式以 `01-功能包-packages/trader/references/output-contract.md` 为准。
+- 真正的输出格式以 `01-功能包-packages/trader/references/output-template.md` 和 `01-功能包-packages/trader/references/output-style-guide.md` 为准。
 - 需要看实现时，先看 `01-功能包-packages/trader/scripts/run_analysis.py`。
 
 ---
@@ -40,7 +40,7 @@ A 股交易决策辅助系统。免费行情 API（腾讯 + 新浪），缠论 /
 - `state_label` 现在只是兼容/展示层摘要，偏向理论结论，不再是主契约
 - 旧的 `scene` 语义还会出现在部分兼容代码里，但不应再当成主状态理解
 
-接入本仓库的 AI 协同系统优先阅读本页，随后查阅对应技能目录下的 「output-contract.md」 和 「SKILL.md」 以统一输出契约。
+接入本仓库的 AI 协同系统优先阅读本页，随后查阅对应技能目录下的 「output-template.md」、「output-style-guide.md」 和 「SKILL.md」 以统一输出契约。
 
 ---
 
@@ -342,7 +342,7 @@ python3 02-共享模块-shared/scripts/self_calibration.py
 | 完整架构、算法详情 | `AGENTS_DEEP.md` |
 | 各 Skill 具体实现 | 各 Skill 目录下 `SKILL.md` |
 | 命令绝对真理 | 各 Skill 目录下 `references/commands.md` |
-| 输出格式绝对真理 | 各 Skill 目录下 `references/output-contract.md` |
+| 输出格式绝对真理 | 各 Skill 目录下 `references/output-template.md` + `output-style-guide.md` |
 | Signal Contract 全字段 | `AGENTS_DEEP.md` Section 六 |
 | 测试体系 | `02-共享模块-shared/tests/TESTING.md` |
 | 待实施改进计划 | `docs/superpowers/INDEX.md` |
