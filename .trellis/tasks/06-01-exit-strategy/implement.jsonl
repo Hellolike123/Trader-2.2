@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend guidelines"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Code quality standards"}
+{"file": "AGENTS.md", "reason": "Project conventions"}
+{"file": "AGENTS_DEEP.md", "reason": "Architecture details"}
