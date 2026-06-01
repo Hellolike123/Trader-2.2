@@ -773,7 +773,7 @@ def sync_report_with_data(report: dict, levels: dict) -> dict:
     if take > 0 and confirm > 0 and take <= confirm:
         report["take"] = max(current * 1.05, confirm * 1.03)
     # 场景与数值的逻辑一致性
-    if scene in ("突破确认", "突破观察") and current < confirm * 0.98:
+    if scene in ("突破确认", "突破观察") and current < confirm:
         report["scene"]        = "观望"
         report["state_label"]  = "未确认"
     elif scene in ("低吸观察", "防守观察") and current < support and support > 0:
