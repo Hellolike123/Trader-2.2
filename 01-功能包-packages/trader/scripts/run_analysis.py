@@ -1334,7 +1334,13 @@ def render_markdown(r: dict[str, Any]) -> str:
 
     # ✅ 亮点 / ⚠️ 风险（单行格式）
     lines.append("")
+    # 获取筹码搬家数据
+    chip_migration = r.get("chip_migration") or {}
+    migration_pct = chip_migration.get("migration_pct", 0)
+    warning_level = chip_migration.get("warning_level", "none")
+    
     if stage == "转弱" or scene in ("空间不足",):
+        lines.append(f"✅ 亮点：{r['current']:.2f} 仍站在防守位 {low_price:.2f} 上方")
         lines.append(f"⚠️ 风险：趋势已转弱不可恋战，反弹是减仓机会。若跌破 {low_price:.2f} 必须执行止损")
     elif scene in ("突破确认", "突破观察"):
         lines.append(f"✅ 亮点：现价 {r['current']:.2f} 已站上确认位 {confirm:.2f}，方向偏多")
@@ -1346,8 +1352,12 @@ def render_markdown(r: dict[str, Any]) -> str:
         lines.append("✅ 亮点：现价接近压力区，有反弹机会")
         lines.append(f"⚠️ 风险：冲高缩量先减仓，放量突破 {confirm:.2f} 再接回")
     else:
-        lines.append(f"✅ 亮点：{r['current']:.2f} 仍站在防守位 {low_price:.2f} 上方")
-        lines.append(f"⚠️ 风险：筹码在搬家，主力在出货，警惕继续下跌")
+        lines.append(f"✅ 亮点：{r['current']:.2f} 仍站在防守位 {low_price:.2f} 上方，结构在修复")
+        # 根据实际筹码搬家数据生成风险提示
+        if warning_level in ("warning", "critical"):
+            lines.append(f"⚠️ 风险：{chip_migration.get('warning_text', '筹码松动')}")
+        else:
+            lines.append(f"⚠️ 风险：最大风险是 {confirm:.2f} 未确认前提前追入。若跌破 {low_price:.2f} 防守位，预期要先收回来")
 
     pool_count = _pool_count()
     pool_line = f"当前池 {pool_count}/10，回复 1 入池" if pool_count > 0 else "回复 1 入池"
