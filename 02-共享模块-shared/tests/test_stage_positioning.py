@@ -228,8 +228,8 @@ class TestComputeExitPlan:
         assert result["exit_plan"][1]["ratio"] == 0.33
         assert result["exit_plan"][2]["ratio"] == 0.34
 
-    def test_no_resistance_uses_2r(self):
-        """无阻力位 → 用 2R 代替"""
+    def test_no_resistance_uses_1r(self):
+        """无阻力位 → 第二笔用 1R 目标（保本）"""
         from trader_shared.stage_positioning import compute_exit_plan
         result = compute_exit_plan(
             entry_price=57.50,
@@ -238,9 +238,9 @@ class TestComputeExitPlan:
             current_stage="主升",
         )
         assert result["resistance_exit"] is None
-        # 第二笔应该是 2R
-        target_2r = round(57.50 + (57.50 - 56.11) * 2, 2)
-        assert result["exit_plan"][1]["price"] == target_2r
+        # 第二笔应该是 1R（保本目标）
+        target_1r = round(57.50 + (57.50 - 56.11), 2)
+        assert result["exit_plan"][1]["price"] == target_1r
 
     def test_resistance_below_entry_ignored(self):
         """阻力位低于买入价 → 忽略，用 2R"""

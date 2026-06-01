@@ -34,6 +34,14 @@ try:
 except ImportError:
     def _calc_chip(daily, lookback=60):
         return {"peaks": [], "total_volume": 0, "current_pct": None, "mid_price": None}
+
+try:
+    from trader_shared.chip_migration_monitor import save_chip_snapshot, check_chip_migration
+    _CHIP_MIGRATION_AVAILABLE = True
+except ImportError:
+    _CHIP_MIGRATION_AVAILABLE = False
+    def save_chip_snapshot(target, chip_result, trade_date=None): pass
+    def check_chip_migration(target, chip_result): return {"migration_pct": 0, "warning_level": "none", "warning_text": "", "has_history": False}
 from config import (
     LOOKBACK_DAYS,
     STRUCTURE_WINDOW,
@@ -378,6 +386,16 @@ def build_report(target: str) -> dict[str, Any]:
 
     chip = _calc_chip(bars, lookback=60)
     chip_peaks = sorted(chip.get("peaks", []) or [], key=lambda x: x["price"])
+
+    # 筹码搬家监控：保存快照 + 对比历史
+    chip_migration = {"migration_pct": 0, "warning_level": "none", "warning_text": "", "has_history": False}
+    if _CHIP_MIGRATION_AVAILABLE and chip_peaks:
+        try:
+            save_chip_snapshot(name, chip, trade_date=quote.get("trade_date"))
+            chip_migration = check_chip_migration(name, chip)
+        except Exception:
+            pass
+
     chip_support: float | None = None
     chip_resistance: float | None = None
     if chip_peaks:
@@ -423,6 +441,8 @@ def build_report(target: str) -> dict[str, Any]:
         change_pct=float(quote.get("current_change_pct") or 0),
         bars=bars,
         position_ratio=levels.get("position_ratio", 0.5),
+        atr14=atr14_val,
+        chip_migration=chip_migration,
     )
 
     report = {
@@ -498,6 +518,7 @@ def build_report(target: str) -> dict[str, Any]:
         "confidence": stage_result.get("confidence", 0),
         "protection_notes": stage_result.get("protection_notes", []),
         "stop_losses": stage_result.get("stop_losses", {}),
+        "wyckoff": wyck_result.get("wyckoff", wyck_result),
         # "extend_fundamental": snapshot.extend_fundamental,
         # "extend_sentiment": snapshot.extend_sentiment,
     }
@@ -526,8 +547,11 @@ def build_report(target: str) -> dict[str, Any]:
         resistance_price=resistance_val if resistance_val > 0 else None,
         current_stage=stage_result["major_stage"],
         bars=bars,
+        wyckoff_result=wyck_result,
+        atr14=atr14_val,
     )
     report["exit_plan"] = exit_plan
+    report["chip_migration"] = chip_migration
 
     # 阶段止损
     ma20_val = levels["ma_values"].get("ma20")
@@ -876,6 +900,16 @@ def render_markdown(r: dict[str, Any]) -> str:
     if isinstance(fusion, dict) and fusion.get("action"):
         lines.extend(_fusion_breakdown(fusion))
 
+    # 🎯 今日行动
+    action_section = _build_today_action_section(r)
+    if action_section:
+        lines.extend(action_section)
+
+    # 🔔 信号提醒
+    signal_section = _build_signal_alert_section(r)
+    if signal_section:
+        lines.extend(signal_section)
+
     # T0 参考
     lines.extend([
         "",
@@ -1218,6 +1252,153 @@ def one_sentence(r: dict[str, Any], low_zone: str) -> str:
     if current >= confirm:
         return f"已越过确认位，放量站稳回踩不破可评估加仓。"
     return f"现在还不是进攻点；先守纪律等确认，跌到 {low_zone} 止跌才轻试，站不上 {confirm:.2f}元 不加仓。"
+
+
+def _build_today_action_section(r: dict[str, Any]) -> list[str]:
+    """构建 🎯 今日行动 输出段落。
+
+    优先级从高到低：
+      1. 🔴 止损信号 → "今天必须止损"
+      2. 🔴 减仓信号 → "今天反弹就卖"
+      3. 🟢 买入信号 → "今天可以买"
+      4. ⏳ 等待信号 → "今天不操作，关注明天"
+      5. ❌ 不碰信号 → "今天不碰"
+    """
+    current = float(r.get("current") or 0)
+    support = float(r.get("support") or 0)
+    confirm = float(r.get("confirm") or 0)
+    stop = float(r.get("stop") or 0)
+    low_zone = str(r.get("low_zone") or f"{support:.2f}-{support * 1.01:.2f}元")
+    major_stage = str(r.get("major_stage") or "")
+    momentum = str(r.get("short_term_momentum") or "")
+    stage_action = str(r.get("stage_action") or "")
+    scene = str(r.get("scene") or "")
+
+    lines: list[str] = ["", "🎯 今日行动", ""]
+
+    # 判断动作优先级
+    if stop > 0 and current < stop:
+        # 止损信号
+        lines.append("  动作：止损退出")
+        lines.append(f"  理由：现价 {current:.2f} 已跌破止损 {stop:.2f}")
+        lines.append(f"  如果有底仓：立刻止损，不找理由")
+    elif major_stage == "衰退":
+        # 不碰信号
+        lines.append("  动作：不碰")
+        lines.append("  理由：衰退期，不参与")
+        lines.append("  如果非要关注：等站上250日线再说")
+    elif stage_action in ("清仓", "减仓") or scene == "冲高减仓":
+        # 减仓信号
+        lines.append("  动作：反弹减仓")
+        lines.append(f"  理由：{major_stage}期{momentum}，逢高减仓")
+        if confirm > 0:
+            lines.append(f"  如果有底仓：反弹到 {confirm:.2f} 冲不动就减 10-20%")
+        lines.append(f"  如果跌破 {stop:.2f}：止损")
+    elif stage_action in ("试探买", "加仓") and momentum in ("走强", "修复"):
+        # 买入信号
+        lines.append("  动作：可以试探买")
+        lines.append(f"  理由：{major_stage}期{momentum}")
+        lines.append(f"  如果买：在 {low_zone} 试探买 5%, 止损 {stop:.2f}")
+        if confirm > 0:
+            lines.append(f"  关注：站稳 {confirm:.2f} 可加仓")
+    elif major_stage == "主升" and momentum == "走强":
+        # 持有信号
+        lines.append("  动作：持有")
+        lines.append(f"  理由：主升期走强，让利润跑")
+        lines.append(f"  如果跌破 {stop:.2f}：减仓")
+    else:
+        # 等待信号
+        lines.append("  动作：不买")
+        lines.append(f"  理由：{major_stage}期{momentum}，方向不明")
+        if support > 0:
+            lines.append(f"  如果非要买：{low_zone} 不破买 5%, 止损 {stop:.2f}")
+        if confirm > 0:
+            lines.append(f"  关注明天：站稳 {confirm:.2f} 可以加仓")
+
+    return lines
+
+
+def _build_signal_alert_section(r: dict[str, Any]) -> list[str]:
+    """构建 🔔 信号提醒 输出段落。
+
+    检查以下信号：
+    - BC（购买高潮）→ 减仓 1/3
+    - UTAD（上冲回落）→ 立刻减仓
+    - SOW（弱势信号）→ 关注
+    - 筹码搬家 → 警告/清仓
+    - 突破确认 → 止损上移
+    """
+    lines: list[str] = []
+    alerts: list[str] = []
+
+    # 提取威科夫信号
+    exit_plan = r.get("exit_plan") or {}
+    wyk_signals = exit_plan.get("wyckoff_signals") or {}
+    utad_action = exit_plan.get("utad_action")
+
+    bc_signal = wyk_signals.get("bc_signal", False)
+    bc_reason = wyk_signals.get("bc_reason", "")
+    utad_signal = wyk_signals.get("utad_signal", False)
+    utad_reason = wyk_signals.get("utad_reason", "")
+
+    # 提取威科夫分析结果（从 report 的 wyckoff 字段）
+    wyckoff = r.get("wyckoff") or {}
+    if isinstance(wyckoff, dict):
+        sow_signal = wyckoff.get("sow_signal", False)
+        sow_reason = wyckoff.get("sow_reason", "")
+    else:
+        sow_signal = False
+        sow_reason = ""
+
+    # 提取筹码搬家数据
+    chip_migration = r.get("chip_migration") or {}
+    migration_pct = chip_migration.get("migration_pct", 0)
+    warning_level = chip_migration.get("warning_level", "none")
+    warning_text = chip_migration.get("warning_text", "")
+
+    # BC 信号
+    if bc_signal:
+        alerts.append(f"  🔴 购买高潮（BC）信号")
+        alerts.append(f"    {bc_reason}")
+        alerts.append(f"    动作：减仓 1/3")
+
+    # UTAD 信号
+    if utad_signal:
+        alerts.append(f"  🔴 上冲回落（UTAD）信号")
+        alerts.append(f"    {utad_reason}")
+        alerts.append(f"    动作：立刻减仓")
+
+    # SOW 信号
+    if sow_signal:
+        alerts.append(f"  ⚠️ 弱势信号（SOW）")
+        alerts.append(f"    {sow_reason}")
+        alerts.append(f"    动作：关注，准备减仓")
+
+    # 筹码搬家
+    if warning_level == "critical":
+        alerts.append(f"  🔴 筹码搬家清仓信号")
+        alerts.append(f"    {warning_text}")
+        alerts.append(f"    动作：清仓")
+    elif warning_level == "warning":
+        alerts.append(f"  ⚠️ 筹码松动警告")
+        alerts.append(f"    {warning_text}")
+        alerts.append(f"    动作：关注，随时准备减仓")
+
+    # 突破确认（从 exit_plan 的 breakout_followup 检查）
+    breakout = exit_plan.get("breakout_followup")
+    if breakout and breakout.get("add_on_pullback"):
+        current = float(r.get("current") or 0)
+        confirm = float(r.get("confirm") or 0)
+        if confirm > 0 and current >= confirm * 0.98:
+            alerts.append(f"  🟢 突破确认")
+            alerts.append(f"    价格站稳确认位 {confirm:.2f}")
+            alerts.append(f"    止损上移到 {breakout.get('new_stop', 0):.2f}")
+
+    if alerts:
+        lines.extend(["", "🔔 信号提醒", ""])
+        lines.extend(alerts)
+
+    return lines
 
 
 def generate_alert(report: dict[str, Any]) -> str | None:

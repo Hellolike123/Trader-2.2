@@ -312,6 +312,18 @@ def render_single(review: dict[str, Any]) -> str:
             
             lines.append(f"  {price:.2f}元 [{bar}] {share:.1f}% {emoji}{level}")
         lines.append("")
+    # 🔔 今日信号回顾
+    signal_review_lines = _build_signal_review_section(review)
+    if signal_review_lines:
+        lines.extend(signal_review_lines)
+        lines.append("")
+
+    # 🎯 明日行动
+    tomorrow_action_lines = _build_tomorrow_action_section(review)
+    if tomorrow_action_lines:
+        lines.extend(tomorrow_action_lines)
+        lines.append("")
+
     # 📋 今日信号回溯 (no more monthly tracking — just backtrack)
     bt_lines = _signal_backtrack_lines(review)
     if bt_lines:
@@ -412,6 +424,148 @@ def _signal_backtrack_lines(review: dict[str, Any]) -> list[str]:
         conf_text = _confidence_label(confidence)
         dir_text = _direction_label(direction)
         lines.append(f"  {date}  {_signal_type_label(sig_type)} {dir_text}（{conf_text}）")
+    return lines
+
+
+def _build_signal_review_section(review: dict[str, Any]) -> list[str]:
+    """构建 🔔 今日信号回顾 输出段落。
+
+    检查今日触发的信号：
+    - BC（购买高潮）
+    - UTAD（上冲回落）
+    - SOW（弱势信号）
+    - 筹码搬家
+    """
+    lines: list[str] = []
+    alerts: list[str] = []
+
+    # 提取威科夫信号
+    wyckoff = review.get("wyckoff") or {}
+    if isinstance(wyckoff, dict):
+        bc_signal = wyckoff.get("bc_signal", False)
+        bc_reason = wyckoff.get("bc_reason", "")
+        utad_signal = wyckoff.get("upthrust_signal", False)
+        utad_reason = wyckoff.get("upthrust_reason", "")
+        sow_signal = wyckoff.get("sow_signal", False)
+        sow_reason = wyckoff.get("sow_reason", "")
+    else:
+        bc_signal = utad_signal = sow_signal = False
+        bc_reason = utad_reason = sow_reason = ""
+
+    # 提取筹码搬家数据
+    chip_migration = review.get("chip_migration") or {}
+    warning_level = chip_migration.get("warning_level", "none")
+    warning_text = chip_migration.get("warning_text", "")
+
+    # BC 信号
+    if bc_signal:
+        alerts.append(f"  🔴 购买高潮（BC）信号")
+        alerts.append(f"    {bc_reason}")
+        alerts.append(f"    建议：明天减仓 1/3")
+
+    # UTAD 信号
+    if utad_signal:
+        alerts.append(f"  🔴 上冲回落（UTAD）信号")
+        alerts.append(f"    {utad_reason}")
+        alerts.append(f"    建议：明天立刻减仓")
+
+    # SOW 信号
+    if sow_signal:
+        alerts.append(f"  ⚠️ 弱势信号（SOW）")
+        alerts.append(f"    {sow_reason}")
+        alerts.append(f"    建议：关注，准备减仓")
+
+    # 筹码搬家
+    if warning_level == "critical":
+        alerts.append(f"  🔴 筹码搬家清仓信号")
+        alerts.append(f"    {warning_text}")
+        alerts.append(f"    建议：清仓")
+    elif warning_level == "warning":
+        alerts.append(f"  ⚠️ 筹码松动警告")
+        alerts.append(f"    {warning_text}")
+        alerts.append(f"    建议：关注，随时准备减仓")
+
+    if alerts:
+        lines.append("🔔 今日信号回顾")
+        lines.extend(alerts)
+    else:
+        lines.append("🔔 今日信号回顾")
+        lines.append("  ✅ 未触发任何信号")
+
+    return lines
+
+
+def _build_tomorrow_action_section(review: dict[str, Any]) -> list[str]:
+    """构建 🎯 明日行动 输出段落。
+
+    基于当前阶段和关键价位，给出明天的操作建议。
+    """
+    q = review.get("quote") or {}
+    levels = review.get("levels") or {}
+    theory = review.get("theory") or {}
+
+    close = float(q.get("close") or 0)
+    pressure = levels.get("key_pressure") or 0
+    key_support = levels.get("key_support") or 0
+    first_support = levels.get("first_support") or 0
+
+    # 提取阶段信息
+    stage_result = review.get("stage_result") or {}
+    major_stage = str(stage_result.get("major_stage") or "")
+    momentum = str(stage_result.get("momentum") or "")
+    stage_action = str(stage_result.get("action") or "")
+
+    # 提取威科夫信号
+    wyckoff = review.get("wyckoff") or {}
+    bc_signal = isinstance(wyckoff, dict) and wyckoff.get("bc_signal", False)
+    utad_signal = isinstance(wyckoff, dict) and wyckoff.get("upthrust_signal", False)
+    sow_signal = isinstance(wyckoff, dict) and wyckoff.get("sow_signal", False)
+
+    # 提取筹码搬家
+    chip_migration = review.get("chip_migration") or {}
+    warning_level = chip_migration.get("warning_level", "none")
+
+    lines: list[str] = ["🎯 明日行动"]
+
+    # 优先级判断
+    if utad_signal or sow_signal or warning_level == "critical":
+        lines.append("  动作：减仓或清仓")
+        if utad_signal:
+            lines.append(f"  理由：今日触发 UTAD 上冲回落信号")
+        elif sow_signal:
+            lines.append(f"  理由：今日触发 SOW 弱势信号")
+        elif warning_level == "critical":
+            lines.append(f"  理由：筹码搬家严重")
+        if key_support > 0:
+            lines.append(f"  如果反弹：逢高减仓")
+            lines.append(f"  如果跌破 {key_support:.2f}：清仓")
+    elif bc_signal or warning_level == "warning":
+        lines.append("  动作：关注减仓机会")
+        if bc_signal:
+            lines.append(f"  理由：今日触发 BC 购买高潮信号")
+        elif warning_level == "warning":
+            lines.append(f"  理由：筹码松动警告")
+        if pressure > 0:
+            lines.append(f"  如果冲高到 {pressure:.2f}：减仓 1/3")
+        if key_support > 0:
+            lines.append(f"  如果跌破 {key_support:.2f}：止损")
+    elif major_stage == "主升" and momentum == "走强":
+        lines.append("  动作：持有")
+        lines.append(f"  理由：主升期走强，让利润跑")
+        if key_support > 0:
+            lines.append(f"  如果跌破 {key_support:.2f}：减仓")
+    elif major_stage == "衰退":
+        lines.append("  动作：不碰")
+        lines.append(f"  理由：衰退期，不参与")
+    else:
+        if pressure > 0:
+            lines.append(f"  动作：关注 {pressure:.2f} 是否站稳")
+            lines.append(f"  如果站稳：可以加仓")
+            lines.append(f"  如果跌破 {key_support:.2f}：止损")
+        else:
+            lines.append(f"  动作：等待确认")
+            lines.append(f"  理由：方向不明，等信号")
+
     return lines
 
 

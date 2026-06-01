@@ -145,13 +145,35 @@ def build_plan(target: str) -> dict[str, Any]:
     buy_price = numeric_or_none(buy.get("execution_price")) or current
     stop_price = numeric_or_none(buy.get("invalid_price")) or 0
     sell_price = numeric_or_none(sell.get("observation_price"))
+    # 威科夫分析（用于实时信号提醒和止盈计划）
+    try:
+        from trader_shared.wyckoff_core import wyckoff_analysis
+        wyck_result = {"wyckoff": wyckoff_analysis(daily)}
+        result["wyckoff"] = wyck_result.get("wyckoff", {})
+    except Exception:
+        wyck_result = {}
+        result["wyckoff"] = {}
+
     result["exit_plan"] = compute_exit_plan(
         entry_price=float(buy_price),
         stop_price=float(stop_price),
         resistance_price=float(sell_price) if sell_price and sell_price > buy_price else None,
         current_stage="主升",  # t0 默认按主升处理
         bars=daily,
+        wyckoff_result=wyck_result,
     )
+
+    # 筹码搬家监控
+    try:
+        from trader_shared.chip_distribution import calc_chip_distribution
+        from trader_shared.chip_migration_monitor import save_chip_snapshot, check_chip_migration
+        chip_dist = calc_chip_distribution(daily, lookback=60)
+        name = quote.get("name") or sec.name
+        save_chip_snapshot(name, chip_dist, trade_date=quote.get("trade_date"))
+        result["chip_migration"] = check_chip_migration(name, chip_dist)
+    except Exception:
+        result["chip_migration"] = {"migration_pct": 0, "warning_level": "none", "warning_text": "", "has_history": False}
+
     return result
 
 

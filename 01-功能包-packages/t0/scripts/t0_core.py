@@ -173,6 +173,67 @@ def build_t0_event_signal(event: str, plan: dict[str, Any]) -> dict[str, Any]:
     return signal
 
 
+def _build_realtime_signal_section(plan: dict[str, Any]) -> list[str]:
+    """构建 🔔 实时信号 输出段落。
+
+    检查威科夫信号（BC/UTAD/SOW）和筹码搬家信号。
+    """
+    lines: list[str] = []
+    alerts: list[str] = []
+
+    # 提取威科夫信号
+    wyckoff = plan.get("wyckoff") or {}
+    if isinstance(wyckoff, dict):
+        bc_signal = wyckoff.get("bc_signal", False)
+        bc_reason = wyckoff.get("bc_reason", "")
+        utad_signal = wyckoff.get("upthrust_signal", False)
+        utad_reason = wyckoff.get("upthrust_reason", "")
+        sow_signal = wyckoff.get("sow_signal", False)
+        sow_reason = wyckoff.get("sow_reason", "")
+    else:
+        bc_signal = utad_signal = sow_signal = False
+        bc_reason = utad_reason = sow_reason = ""
+
+    # 提取筹码搬家数据
+    chip_migration = plan.get("chip_migration") or {}
+    warning_level = chip_migration.get("warning_level", "none")
+    warning_text = chip_migration.get("warning_text", "")
+
+    # BC 信号
+    if bc_signal:
+        alerts.append(f"  🔴 购买高潮（BC）信号")
+        alerts.append(f"    {bc_reason}")
+        alerts.append(f"    动作：减仓 1/3")
+
+    # UTAD 信号
+    if utad_signal:
+        alerts.append(f"  🔴 上冲回落（UTAD）信号")
+        alerts.append(f"    {utad_reason}")
+        alerts.append(f"    动作：立刻减仓")
+
+    # SOW 信号
+    if sow_signal:
+        alerts.append(f"  ⚠️ 弱势信号（SOW）")
+        alerts.append(f"    {sow_reason}")
+        alerts.append(f"    动作：关注，准备减仓")
+
+    # 筹码搬家
+    if warning_level == "critical":
+        alerts.append(f"  🔴 筹码搬家清仓信号")
+        alerts.append(f"    {warning_text}")
+        alerts.append(f"    动作：清仓")
+    elif warning_level == "warning":
+        alerts.append(f"  ⚠️ 筹码松动警告")
+        alerts.append(f"    {warning_text}")
+        alerts.append(f"    动作：关注，随时准备减仓")
+
+    if alerts:
+        lines.append("🔔 实时信号")
+        lines.extend(alerts)
+
+    return lines
+
+
 def render_markdown(plan: dict[str, Any]) -> str:
     buy = plan["buy"]
     sell = plan["sell"]
@@ -281,6 +342,12 @@ def render_markdown(plan: dict[str, Any]) -> str:
             lines.extend(["📋 盘中动态", ""])
             has_dynamic = True
         lines.extend(history_lines)
+        lines.append("")
+
+    # 🔔 实时信号
+    signal_lines = _build_realtime_signal_section(plan)
+    if signal_lines:
+        lines.extend(signal_lines)
         lines.append("")
 
     # 下一步（合并：仓位管控+下一步）

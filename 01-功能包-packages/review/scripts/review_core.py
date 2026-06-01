@@ -466,6 +466,64 @@ def _get_main_force(target: str, bars: list[dict[str, Any]]) -> dict[str, Any]:
     return {}
 
 
+def _get_chip_migration(name: str, chip_dist: dict[str, Any], trade_date: str | None = None) -> dict[str, Any]:
+    """获取筹码搬家监控结果。"""
+    try:
+        from trader_shared.chip_migration_monitor import save_chip_snapshot, check_chip_migration
+        save_chip_snapshot(name, chip_dist, trade_date=trade_date)
+        return check_chip_migration(name, chip_dist)
+    except Exception:
+        return {"migration_pct": 0, "warning_level": "none", "warning_text": "", "has_history": False}
+
+
+def _get_stage_result(
+    current: float,
+    daily: list[dict[str, Any]],
+    quote: dict[str, Any],
+    chip_dist: dict[str, Any],
+) -> dict[str, Any]:
+    """获取四阶段定位结果。"""
+    try:
+        from trader_shared.stage_positioning import assess_stage
+        from trader_shared.light_data import to_float
+
+        # 计算 MA 值
+        def _ma(period: int) -> float | None:
+            closes = [to_float(b.get("close")) for b in daily[-period:]]
+            if len(closes) < period or None in closes:
+                return None
+            return sum(closes) / period
+
+        ma_values = {
+            "ma5": _ma(5),
+            "ma10": _ma(10),
+            "ma20": _ma(20),
+            "ma30": _ma(30),
+        }
+
+        # 计算筹码搬家
+        chip_migration = _get_chip_migration(quote.get("name", ""), chip_dist)
+
+        # 计算 ATR
+        last_bar = daily[-1] if daily else {}
+        atr14 = to_float(last_bar.get("atr14")) or 0.0
+
+        change_pct = to_float(quote.get("current_change_pct")) or 0.0
+
+        result = assess_stage(
+            current=current,
+            ma_values=ma_values,
+            change_pct=change_pct,
+            bars=daily,
+            position_ratio=0.5,
+            atr14=atr14,
+            chip_migration=chip_migration,
+        )
+        return result
+    except Exception:
+        return {"major_stage": "未知", "momentum": "未知", "action": "观察", "stage_label": "未知"}
+
+
 def build_review(target: str, cost: float | None = None, trade_date: str | None = None, session: str = "close") -> dict[str, Any]:
     if session not in {"close", "midday"}:
         raise RuntimeError("session must be close or midday")
@@ -492,6 +550,10 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
     levels = build_levels(current, quote, daily, cost)
     chip_dist = calc_chip_distribution(daily, lookback=60)
     theory = theory_verdicts(current, quote, daily, intraday, levels, cost, session=session)
+
+    # 威科夫分析（用于信号回顾）
+    from trader_shared.wyckoff_core import wyckoff_analysis
+    wyck_r = wyckoff_analysis(daily)
     previous_close = to_float(quote.get("pre_close")) or (to_float(daily[-2].get("close")) if len(daily) >= 2 else None)
     change_pct = to_float(quote.get("current_change_pct"))
     if change_pct is None:
@@ -550,6 +612,9 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
             "available": atr14 > 0,
         },
         "chip_distribution": chip_dist,
+        "wyckoff": wyck_r,
+        "chip_migration": _get_chip_migration(name, chip_dist, selected_date),
+        "stage_result": _get_stage_result(current, daily, quote, chip_dist),
         "data_time": f"{quote.get('trade_date') or review_date} {quote.get('trade_time') or ''}".strip(),
     }
 
