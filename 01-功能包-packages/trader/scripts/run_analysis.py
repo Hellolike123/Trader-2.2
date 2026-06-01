@@ -982,31 +982,23 @@ def render_markdown(r: dict[str, Any]) -> str:
         except Exception:
             pass
 
-    # 📍 买卖点（价格流格式）
+    # 📍 买卖点（价格流格式 - PRD 标准）
     lines.append("")
     lines.append("📍 买卖点")
     lines.append("")
-    # 构建价格流：止损 → 买入 → 当前 → 卖出 → 压力
-    price_flow: list[tuple[float, str]] = []
+    # 止损
     if stop > 0:
-        price_flow.append((stop, "止损"))
-    # 买入区间
-    lz_lower = float(r.get("low_zone_lower") or 0)
-    lz_upper = float(r.get("low_zone_upper") or 0)
-    if lz_lower > 0 and lz_upper > 0:
-        buy_mid = (lz_lower + lz_upper) / 2
-        buy_text = f"试探买 {position_cap}%（缩量企稳）"
+        lines.append(f"  {stop:.2f} 止损")
+    # 买入位（支撑位）
+    if low_price > 0:
+        buy_text = f"  {low_price:.2f} ← 试探买 {position_cap}%（缩量企稳）"
         if golden_bid:
             buy_text += f" 黄金挂单位: {golden_bid:.2f}"
-        price_flow.append((buy_mid, buy_text))
-    else:
-        # 如果没有 low_zone_lower/upper，使用 support 作为买入参考
-        if low_price > 0:
-            price_flow.append((low_price, f"试探买 {position_cap}%（缩量企稳）"))
+        lines.append(buy_text)
     # 当前价格
     current_price = float(r.get("current") or 0)
     if current_price > 0:
-        price_flow.append((current_price, "当前"))
+        lines.append(f"  {current_price:.2f} 当前")
     # 卖出计划（止盈计划）
     exit_plan = r.get("exit_plan") or {}
     exit_plan_items = exit_plan.get("exit_plan") or []
@@ -1015,43 +1007,34 @@ def render_markdown(r: dict[str, Any]) -> str:
         ratio = item.get("ratio", 0)
         reason = item.get("reason", "")
         if p is not None and p > 0:
-            price_flow.append((p, f"卖 {ratio:.0%}（{reason}）"))
+            lines.append(f"  {p:.2f} → 卖 {ratio:.0%}（{reason}）")
     # 压力位
     resistance_val = float(r.get("resistance") or 0)
-    if resistance_val > 0 and resistance_val != confirm:
-        price_flow.append((resistance_val, "压力"))
+    if resistance_val > 0:
+        lines.append(f"  {resistance_val:.2f} 压力")
     # 阶段转派发 → 清仓
     if exit_plan.get("stage_exit"):
         lines.append(f"  阶段转{exit_plan['stage_exit']} → 清仓")
-    # 按价格排序
-    price_flow.sort(key=lambda x: x[0])
-    # 格式化输出
-    for p, label in price_flow:
-        if p == current_price:
-            lines.append(f"  {p:.2f} 当前")
-        elif "买" in label:
-            lines.append(f"  {p:.2f} ← {label}")
-        elif "卖" in label or "止损" in label:
-            lines.append(f"  {p:.2f} → {label}")
-        else:
-            lines.append(f"  {p:.2f} {label}")
-    # 黄金挂单位（如果有）
-    if golden_bid:
-        lines.append(f"  黄金挂单位: {golden_bid:.2f}")
-    # 阶段清仓条件
-    if major_stage == "派发":
-        lines.append("  阶段转派发 → 清仓")
 
-    # 💡 为什么这么操作
+    # 💡 为什么这么操作（PRD 标准格式）
     lines.append("")
     lines.append("💡 为什么这么操作")
     lines.append("")
-    lines.append(f"  阶段：{major_stage}期（{major_reason}）")
-    lines.append(f"  趋势：{momentum}（{momentum_reason}）")
+    # 阶段描述（简化）
+    stage_desc_map = {
+        "蓄势": "区间震荡，低吸高抛",
+        "主升": "趋势向上，持股待涨",
+        "派发": "高位震荡，逢高减仓",
+        "衰退": "趋势向下，不碰",
+    }
+    stage_desc = stage_desc_map.get(major_stage, major_reason)
+    lines.append(f"  阶段：{major_stage}期（{stage_desc}）")
+    # 趋势描述（简化）
+    trend_desc = f"价格在 {confirm:.2f} 下方" if current_price < confirm else f"价格站上 {confirm:.2f}"
+    trend_action = "不追" if current_price < confirm else "可加仓"
+    lines.append(f"  趋势：短期偏弱（{trend_desc}），{trend_action}")
 
-    # 止盈计划（仅在有持仓时显示，Bug fix: 空仓不显示止盈计划）
-    exit_plan = r.get("exit_plan") or {}
-    exit_plan_items = exit_plan.get("exit_plan") or []
+    # 止盈计划（仅在有持仓时显示）
     has_position = r.get("has_position", False)
     cost_price = float(r.get("cost_price") or 0)
     
@@ -1064,18 +1047,10 @@ def render_markdown(r: dict[str, Any]) -> str:
             p = item.get("price")
             ratio = item.get("ratio", 0)
             reason = item.get("reason", "")
-            # Bug fix: 第1笔也要显示具体价格（阻力位或1R目标）
             if p is not None:
                 lines.append(f"    第{idx}笔：{p:.2f} 卖 {ratio:.0%}（{reason}）")
             else:
-                # 如果没有价格，使用阻力位或1R目标作为参考
-                resistance_val = float(r.get("resistance") or 0)
-                target_1r = exit_plan.get("target_1r", 0)
-                fallback_price = resistance_val if resistance_val > 0 else target_1r
-                if fallback_price > 0:
-                    lines.append(f"    第{idx}笔：{fallback_price:.2f} 卖 {ratio:.0%}（{reason}）")
-                else:
-                    lines.append(f"    第{idx}笔：{reason}")
+                lines.append(f"    第{idx}笔：{reason}")
 
     # 三层止损
     stage_stop = r.get("stage_stop") or {}
@@ -1268,7 +1243,7 @@ def render_markdown(r: dict[str, Any]) -> str:
         score = fusion.get("weighted_score", 0)
         confidence = fusion.get("confidence", 0)
         signals = fusion.get("signals_detail") or {}
-        # 提取各策略分数
+        # 提取各策略分数（PRD 标准格式）
         chan_score = signals.get("chan", {}).get("confidence", 0) * 100 if isinstance(signals.get("chan"), dict) else 0
         wyk_score = signals.get("wyckoff", {}).get("confidence", 0) * 100 if isinstance(signals.get("wyckoff"), dict) else 0
         mom_score = signals.get("momentum", {}).get("confidence", 0) * 100 if isinstance(signals.get("momentum"), dict) else 0
@@ -1278,16 +1253,16 @@ def render_markdown(r: dict[str, Any]) -> str:
         lines.append("📊 五层打分")
         lines.append("")
         lines.append(f"  结构{chan_score:.0f}/量价{wyk_score:.0f}｜筹码{chip_score:.0f}｜动能{mom_score:.0f}")
-        # 添加威科夫和缠论描述
+        # 添加缠论描述（PRD 标准格式）
+        chan_reason = signals.get("chan", {}).get("reason", "") if isinstance(signals.get("chan"), dict) else ""
+        if chan_reason:
+            lines.append(f"  缠论：{chan_reason}")
+        # 添加威科夫描述
         wyckoff_data = r.get("wyckoff") or {}
         wyckoff_desc = wyckoff_data.get("description", "无明显威科夫信号") if isinstance(wyckoff_data, dict) else "无明显威科夫信号"
-        chan_data = r.get("chan") or {}
-        chan_desc = chan_data.get("description", "") if isinstance(chan_data, dict) else ""
-        if chan_desc:
-            lines.append(f"  缠论：{chan_desc}")
         lines.append(f"  威科夫：{wyckoff_desc}")
 
-    # 🎯 信号判断
+    # 🎯 信号判断（PRD 标准格式）
     lines.append("")
     lines.append("🎯 信号判断")
     lines.append("")
@@ -1295,22 +1270,22 @@ def render_markdown(r: dict[str, Any]) -> str:
     bullish_signals: list[str] = []
     cautious_signals: list[str] = []
     
-    # 检查突破确认
-    if current_price > 0 and confirm > 0 and current_price >= confirm:
-        bullish_signals.append("突破确认位")
+    # 检查结构（缠论）
+    chan_data = signals.get("chan") or {}
+    if isinstance(chan_data, dict) and chan_data.get("direction", 0) > 0:
+        bullish_signals.append("结构（两次接近位置止跌）")
     
-    # 检查威科夫信号
-    wyckoff = r.get("wyckoff") or {}
-    if isinstance(wyckoff, dict):
-        if wyckoff.get("spring_signal"):
-            bullish_signals.append("威科夫弹簧信号")
-        if wyckoff.get("upthrust_signal"):
-            cautious_signals.append("威科夫上冲回落")
+    # 检查量价
+    volume_ratio = float(r.get("volume_ratio") or 0)
+    if volume_ratio < 0.8:
+        cautious_signals.append("量价（午后缩量）")
     
-    # 检查筹码搬家
+    # 检查筹码
     chip_migration = r.get("chip_migration") or {}
     if chip_migration.get("warning_level") in ("warning", "critical"):
-        cautious_signals.append("筹码松动")
+        cautious_signals.append("筹码（筹码松动）")
+    elif float(r.get("chip_current_pct") or 0) > 60:
+        cautious_signals.append("筹码（上方成交密集区）")
     
     # 检查趋势
     if major_stage == "衰退":
