@@ -578,6 +578,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "chip_support": chip_support,
         "chip_resistance": chip_resistance,
         "chip_peaks": chip_peaks,
+        "chip_current_pct": chip.get("current_pct"),
+        "chip_mid_price": chip.get("mid_price"),
         "fusion": report_fusion,
         "gap": levels.get("gap"),
         "time_window": levels.get("time_window"),
@@ -1216,6 +1218,13 @@ def render_markdown(r: dict[str, Any]) -> str:
             level = peak.get("support_level", "")
             if p > 0:
                 lines.append(f"  {p:.2f}（{share:.1f}%）{level}")
+        # 显示当前价以上占比和中位数价格
+        current_pct = r.get("chip_current_pct")
+        mid_price = r.get("chip_mid_price")
+        if current_pct is not None:
+            lines.append(f"  当前价以上：{current_pct:.1f}%")
+        if mid_price is not None:
+            lines.append(f"  中位数价格：{mid_price:.2f}")
         # 筹码搬家警告
         chip_migration = r.get("chip_migration") or {}
         warning_level = chip_migration.get("warning_level", "none")
