@@ -36,6 +36,35 @@
 - **输出**：根据成本价+阶段给出持有/减仓/止损建议
 - **优先级**：🔴 高
 
+## 2026-06-01 第二轮测试发现的 Bug
+
+### Bug 5：trader 报错 expma10_val 未赋值
+- **位置**：run_analysis.py
+- **问题**：`cannot access local variable 'expma10_val' where it is not associated with a value`
+- **原因**：expma10_val 在 try 块中赋值，如果 try 失败，变量没有默认值
+- **修复**：在 try 块前给 expma10_val 设默认值 None
+- **优先级**：🔴 高（trader 完全不能用）
+
+### Bug 6：t0 超时
+- **位置**：final_t0.py
+- **问题**：120 秒没有响应
+- **原因**：可能是网络问题或代码卡住
+- **优先级**：🟡 中
+
+## 今天设计但未实现的显示功能
+
+| 功能 | 设计位置 | 实际显示 | 状态 |
+|------|---------|---------|------|
+| 🎯 今日行动 | trader + review | 没有显示 | ❌ 未实现 |
+| 🔔 信号提醒 | trader + review + t0 | 没有显示 | ❌ 未实现 |
+| 趋势强势提示 | 🧭 阶段判断 | 没有显示 | ❌ 未实现 |
+| 已有持仓模式 | trader --cost | 没有显示 | ❌ 未实现 |
+| 止盈计划（条件止盈） | 📍 决策 | 没有显示 | ❌ 未实现 |
+| 三层止损 | 📍 决策 | 没有显示 | ❌ 未实现 |
+| EXPMA 参数 | 移动止损 | 没有显示 | ❌ 未实现 |
+| 威科夫共振 | 🔔 信号提醒 | 没有显示 | ❌ 未实现 |
+| 筹码搬家监控 | 🔔 信号提醒 | 没有显示 | ❌ 未实现 |
+
 ## 相关文件
 - `01-功能包-packages/trader/scripts/run_analysis.py`
 - `02-共享模块-shared/trader_shared/decision_core.py`
