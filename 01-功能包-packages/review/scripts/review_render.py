@@ -156,10 +156,8 @@ def render_single(review: dict[str, Any]) -> str:
     if is_midday:
         lines.append("注意午间复盘以数据时间快照为准")
     lines.append("")
-    lines.append("结论 ")
-    lines.append(conclusion)
     model_summary_text = str(review.get("model_summary_text") or model_summary(theory))
-    lines.append(model_summary_text)
+    lines.append("结论 " + conclusion + model_summary_text)
     lines.append("")
     # 📊 关键价位 (consolidated: supports + pressures + risk)
     lines.append("📊 关键价位 ")

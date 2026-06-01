@@ -269,7 +269,7 @@ def warm_pool_cache() -> dict[str, Any]:
         root / "scripts",
     ):
         if p.exists() and str(p) not in sys.path:
-            sys.path.insert(0, str(p))
+            sys.path.append(str(p))
 
     try:
         from trader_shared.data_provider import get_provider
@@ -297,7 +297,7 @@ def warm_pool_cache() -> dict[str, Any]:
 
     # Also warm market env cache
     try:
-        sys.path.insert(0, str(root / "scripts"))
+        sys.path.append(str(root / "scripts"))
         from market_env import assess as _assess
         _assess()
     except (ImportError, OSError) as exc:

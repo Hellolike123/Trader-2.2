@@ -16,7 +16,7 @@ _HERE = Path(__file__).resolve().parent
 _SHARED_ROOT = _HERE.parent  # 02-共享模块-shared/
 _scripts = _SHARED_ROOT / "scripts"
 if _scripts.exists() and str(_scripts) not in sys.path:
-    sys.path.insert(0, str(_scripts))
+    sys.path.append(str(_scripts))
 
 # ── path helpers ──
 
