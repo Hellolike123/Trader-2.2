@@ -322,3 +322,65 @@ Before submitting changes:
 5. **Introducing new dependencies**: Core modules have zero heavy dependencies (numpy is the only exception). Optional deps (akshare, mootdx) must be lazy-loaded.
 
 6. **Not deduplicating cache data**: When merging cached + real-time data, always deduplicate by date.
+
+---
+
+## Exit Strategy Output Format (v2.4)
+
+### Trader Output Sections
+
+```
+分析报告 — {name}
+
+现价 / MA / ATR / EXPMA
+
+🌍 大盘
+📊 {stage}期 + {momentum} → {action}
+
+🎯 今日行动
+  动作：{action}
+  理由：{reason}
+
+📍 买卖点
+  {price} → 止损
+  {price} ← 试探买 {pct}%（{condition}）
+  {price} 当前
+  {price} → 卖 {pct}%（{reason}）
+
+💡 为什么这么操作
+  阶段：{stage}期，{reason}
+  动能：{momentum}，{reason}
+  结论：{label}，{action}
+
+📌 如果你有持仓（成本 {cost}）
+  现在：{action}（{pnl}）
+  反弹到 {price}：{action}
+  跌破 {price}：{action}
+
+🔍 主力筹码
+  {price}（{pct}%）{support_level}
+  ...
+
+📊 五层打分
+  结构 {x} ｜ 量价 {x} ｜ 筹码 {x} ｜ 动能 {x}
+
+🎯 信号判断
+  偏多：✓ {signal}
+  警惕：! {signal}
+
+❗ 关键价位
+✅ 亮点：{text}
+⚠️ 风险：{text}
+👉 一句话
+```
+
+### Key Conventions
+
+1. **Stage summary**: Single line `📊 {stage}期 + {momentum} → {action}`
+2. **Price flow**: `📍 买卖点` sorted by price (stop → buy → current → sell → resistance)
+3. **Reasoning**: `💡 为什么这么操作` shows stage/momentum/conclusion
+4. **Position advice**: `📌 如果你有持仓（成本 {cost}）` with specific actions
+5. **Chip peaks**: `🔍 主力筹码` with percentages and support levels
+6. **Scores**: `📊 五层打分` structure/volume/chip/momentum
+7. **Signals**: `🎯 信号判断` bullish/cautious signals
+8. **Highlights**: Single line `✅ 亮点：xxx` / `⚠️ 风险：xxx`
