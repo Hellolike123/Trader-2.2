@@ -66,6 +66,7 @@ def main() -> int:
     try:
         _facts = {
             "target": args.target,
+            "cost": args.cost,
             "fetched_at": report.get("fetched_at"),
             "data_status": report.get("data_status"),
             "current": report.get("current"),

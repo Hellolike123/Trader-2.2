@@ -618,6 +618,25 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         elif expma12_val < expma50_val:
             expma_trend = "bearish"  # EXPMA(12) 死叉 EXPMA(50) → 趋势转弱
 
+    # 已有持仓模式：确定成本价和持仓状态
+    # 必须在 evaluate_position_state() 之前，以便传入正确的 has_position 和 entry_price
+    if cost_price <= 0:
+        # 从 signals.jsonl 中自动推断成本
+        cost_price = _get_cost_from_signals(target)
+    
+    has_position = cost_price > 0
+    report["has_position"] = has_position
+    report["cost_price"] = cost_price
+    
+    # 如果有持仓，计算盈亏比例
+    if has_position and cost_price > 0:
+        pnl_pct = (current - cost_price) / cost_price * 100
+        report["pnl_pct"] = pnl_pct
+        report["pnl_text"] = f"盈 {pnl_pct:+.1f}%" if pnl_pct >= 0 else f"亏 {abs(pnl_pct):.1f}%"
+
+    # 使用成本价作为 entry_price（有持仓时），否则用支撑位
+    entry_price_for_state = cost_price if has_position else float(report.get("support") or current)
+
     position_state = evaluate_position_state(
         current_price=current,
         support=support,
@@ -629,8 +648,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         momentum=stage_result["momentum"],
         bars=bars,
         wyckoff_result=wyck_result,
-        has_position=False,  # 默认无持仓，实际应从持仓系统获取
-        entry_price=float(report.get("support") or current),
+        has_position=has_position,
+        entry_price=entry_price_for_state,
         highest_close=max([float(b.get("close") or 0) for b in bars[-20:]]) if bars else current,
         expma10=expma10_val,
         chip_migration=chip_migration,
@@ -646,21 +665,6 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         atr_pct=float(levels.get("atr_pct") or 0.02),
     )
     report["stage_stop"] = stage_stop_info
-
-    # 已有持仓模式：确定成本价和持仓状态
-    if cost_price <= 0:
-        # 从 signals.jsonl 中自动推断成本
-        cost_price = _get_cost_from_signals(target)
-    
-    has_position = cost_price > 0
-    report["has_position"] = has_position
-    report["cost_price"] = cost_price
-    
-    # 如果有持仓，计算盈亏比例
-    if has_position and cost_price > 0:
-        pnl_pct = (current - cost_price) / cost_price * 100
-        report["pnl_pct"] = pnl_pct
-        report["pnl_text"] = f"盈 {pnl_pct:+.1f}%" if pnl_pct >= 0 else f"亏 {abs(pnl_pct):.1f}%"
     
     # 补全 JSON 输出需要的字段
     report = sync_report_with_data(report, levels)
