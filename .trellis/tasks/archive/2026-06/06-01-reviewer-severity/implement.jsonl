@@ -1,0 +1,3 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".opencode/skills/trellis-check/SKILL.md", "reason": "现有 check skill，需要加 severity 标注"}
+{"file": ".opencode/agents/trellis-check.md", "reason": "现有 check agent，需要改报告格式"}
