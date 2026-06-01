@@ -51,6 +51,13 @@
 - **原因**：可能是网络问题或代码卡住
 - **优先级**：🟡 中
 
+### Bug 7：review 筹码分布不显示
+- **位置**：review_render.py
+- **问题**：原来有筹码分布，现在不显示了
+- **原因**：chip_distribution 可能没被调用，或 peaks 为空
+- **修复**：检查 review_core.py 有没有调用 chip_distribution，数据有没有传到 review_render.py
+- **优先级**：🟡 中
+
 ## 今天设计但未实现的显示功能
 
 | 功能 | 设计位置 | 实际显示 | 状态 |
