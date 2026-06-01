@@ -611,22 +611,25 @@ T0 盯盘 — 南网科技
 ### 命令入口
 
 ```
-已有 --cost 参数：
+需要新增 --cost 参数到 trader（final_report.py）：
   trader script --target 南网科技 --cost 60.00
 
-已有 --holding 参数：
+review 已有 --cost 和 --holding 参数：
+  review script --target 南网科技 --cost 60.00
   review script --compare 南网科技 中国铝业 --holding 南网科技:60.00
+```
 
-输出示例（已有持仓模式）：
-  🎯 今日行动（已有持仓）
-    你的成本：60.00
-    现价：58.50（亏 2.5%）
-    阶段：蓄势期 + 转弱
-    
-    建议：持有，不加仓
-    
-    如果反弹到 60.00（成本价）→ 减仓 50%，保本走人
-    如果跌破 57.61（支撑位）→ 止损，认亏走人
+### 实现要点
+
+```
+1. final_report.py 新增 --cost 参数（float 类型，可选）
+2. build_report(target, cost=None) 接收 cost 参数
+3. cost 传给 evaluate_position_state() 的 entry_price 参数
+4. has_position = cost is not None（有 cost 就是有持仓）
+5. cost 加入 __FACTS__ 输出，供 AI 解析
+```
+
+### 输出示例（已有持仓模式）
     如果站稳 59.22（确认位）→ 继续持有，等突破
 ```
 
@@ -647,7 +650,10 @@ T0 盯盘 — 南网科技
 - [ ] 止损放宽（1.5×ATR）+ 仓位调整正确
 - [ ] `🎯 今日行动` 段落正确显示
 - [ ] `🔔 信号提醒` 段落正确显示
-- [ ] 已有持仓模式正确（--cost 参数）
+- [ ] `--cost` 参数接入正确（final_report.py → build_report → evaluate_position_state）
+- [ ] 有 cost 时 `has_position=True`，无 cost 时 `has_position=False`
+- [ ] cost 加入 `__FACTS__` 输出
+- [ ] 已有持仓模式输出正确（显示成本、盈亏、建议）
 - [ ] 所有现有测试通过
 
 ### 🟡 第二优先级验收
