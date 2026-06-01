@@ -577,6 +577,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         },
         "chip_support": chip_support,
         "chip_resistance": chip_resistance,
+        "chip_peaks": chip_peaks,
         "fusion": report_fusion,
         "gap": levels.get("gap"),
         "time_window": levels.get("time_window"),
@@ -934,14 +935,10 @@ def render_markdown(r: dict[str, Any]) -> str:
 
     structure_note = str(r.get("structure_note") or "")
     volume_note = str(r.get("volume_note") or "")
+    # 📊 阶段判断（一行格式）
     lines.extend([
         "",
-        "🧭 阶段判断",
-        "",
-        f"大阶段：{major_stage}期",
-        f"  {major_reason}",
-        f"短期动能：{momentum}",
-        f"  {momentum_reason}",
+        f"📊 {major_stage}期 + {momentum} → {stage_action}",
     ])
 
     # ✅ 趋势强势提示
@@ -980,15 +977,70 @@ def render_markdown(r: dict[str, Any]) -> str:
     if action_section:
         lines.extend(action_section)
 
-    lines.extend([
-        "",
-        "📍 决策",
-        "",
-        f"{stage_label} → {stage_action}",
-        f"  空仓 → 在 {low_zone} 试探买 {position_cap}%, 止损 {stop:.2f}{golden_text}",
-        f"  有底仓 → 反弹 {confirm:.2f} 冲不动就减 10-20%, 跌破 {stop:.2f} 止损",
-        f"  加仓 → 放量站稳 {confirm:.2f} 且回踩不破，才评估",
-    ])
+    # 📍 买卖点（价格流格式）
+    lines.append("")
+    lines.append("📍 买卖点")
+    lines.append("")
+    # 构建价格流：止损 → 买入 → 当前 → 卖出 → 压力
+    price_flow: list[tuple[float, str]] = []
+    if stop > 0:
+        price_flow.append((stop, "止损"))
+    # 买入区间
+    lz_lower = float(r.get("low_zone_lower") or 0)
+    lz_upper = float(r.get("low_zone_upper") or 0)
+    if lz_lower > 0 and lz_upper > 0:
+        buy_mid = (lz_lower + lz_upper) / 2
+        buy_text = f"试探买 {position_cap}%（缩量企稳）"
+        if golden_bid:
+            buy_text += f" 黄金挂单位: {golden_bid:.2f}"
+        price_flow.append((buy_mid, buy_text))
+    else:
+        # 如果没有 low_zone_lower/upper，使用 support 作为买入参考
+        if low_price > 0:
+            price_flow.append((low_price, f"试探买 {position_cap}%（缩量企稳）"))
+    # 当前价格
+    current_price = float(r.get("current") or 0)
+    if current_price > 0:
+        price_flow.append((current_price, "当前"))
+    # 卖出计划（止盈计划）
+    exit_plan = r.get("exit_plan") or {}
+    exit_plan_items = exit_plan.get("exit_plan") or []
+    for idx, item in enumerate(exit_plan_items, 1):
+        p = item.get("price")
+        ratio = item.get("ratio", 0)
+        reason = item.get("reason", "")
+        if p is not None and p > 0:
+            price_flow.append((p, f"卖 {ratio:.0%}（{reason}）"))
+    # 压力位
+    resistance_val = float(r.get("resistance") or 0)
+    if resistance_val > 0 and resistance_val != confirm:
+        price_flow.append((resistance_val, "压力"))
+    # 按价格排序
+    price_flow.sort(key=lambda x: x[0])
+    # 格式化输出
+    for p, label in price_flow:
+        if p == current_price:
+            lines.append(f"  {p:.2f} 当前")
+        elif "买" in label:
+            lines.append(f"  {p:.2f} ← {label}")
+        elif "卖" in label or "止损" in label:
+            lines.append(f"  {p:.2f} → {label}")
+        else:
+            lines.append(f"  {p:.2f} {label}")
+    # 黄金挂单位（如果有）
+    if golden_bid:
+        lines.append(f"  黄金挂单位: {golden_bid:.2f}")
+    # 阶段清仓条件
+    if major_stage == "派发":
+        lines.append("  阶段转派发 → 清仓")
+
+    # 💡 为什么这么操作
+    lines.append("")
+    lines.append("💡 为什么这么操作")
+    lines.append("")
+    lines.append(f"  阶段：{major_stage}期，{major_reason}")
+    lines.append(f"  动能：{momentum}，{momentum_reason}")
+    lines.append(f"  结论：{stage_label}，{stage_action}")
 
     # 止盈计划（仅在有持仓时显示，Bug fix: 空仓不显示止盈计划）
     exit_plan = r.get("exit_plan") or {}
@@ -1119,13 +1171,115 @@ def render_markdown(r: dict[str, Any]) -> str:
             last_group = g
     lines.extend(key_lines)
 
-    # 📊 已有持仓评估（如果有持仓）
+    # 📌 如果你有持仓（成本 {cost}）
     has_position = r.get("has_position", False)
     cost_price = float(r.get("cost_price") or 0)
     if has_position and cost_price > 0:
-        position_section = _build_existing_position_section(r, cost_price)
-        if position_section:
-            lines.extend(position_section)
+        current = float(r.get("current") or 0)
+        pnl_pct = (current - cost_price) / cost_price * 100 if cost_price > 0 else 0
+        pnl_text = f"盈 {pnl_pct:+.1f}%" if pnl_pct >= 0 else f"亏 {abs(pnl_pct):.1f}%"
+        lines.append("")
+        lines.append(f"📌 如果你有持仓（成本 {cost_price:.2f}）")
+        lines.append("")
+        # 根据盈亏+阶段给出建议
+        if pnl_pct >= 0:
+            if major_stage == "主升":
+                lines.append(f"  现在：持有，让利润跑（{pnl_text}）")
+            elif major_stage == "派发":
+                lines.append(f"  现在：减仓，锁定利润（{pnl_text}）")
+            else:
+                lines.append(f"  现在：部分止盈，留底仓等突破（{pnl_text}）")
+        else:
+            if major_stage == "衰退":
+                lines.append(f"  现在：止损，认亏走人（{pnl_text}）")
+            elif major_stage == "主升":
+                lines.append(f"  现在：持有，主升期大概率会回来（{pnl_text}）")
+            else:
+                lines.append(f"  现在：持有，等反弹到成本价减仓（{pnl_text}）")
+        # 关键价位建议
+        if cost_price > 0:
+            lines.append(f"  反弹到 {cost_price:.2f}：减 50%（保本）")
+        if stop > 0:
+            lines.append(f"  跌破 {stop:.2f}：止损（认亏）")
+
+    # 🔍 主力筹码
+    chip_peaks = r.get("chip_peaks") or []
+    if chip_peaks:
+        lines.append("")
+        lines.append("🔍 主力筹码")
+        lines.append("")
+        # 显示筹码峰（按价格排序，最多显示3个）
+        sorted_peaks = sorted(chip_peaks, key=lambda x: x.get("price", 0))
+        for peak in sorted_peaks[:3]:
+            p = peak.get("price", 0)
+            share = peak.get("share_of_total", 0)
+            level = peak.get("support_level", "")
+            if p > 0:
+                lines.append(f"  {p:.2f}（{share:.1f}%）{level}")
+        # 筹码搬家警告
+        chip_migration = r.get("chip_migration") or {}
+        warning_level = chip_migration.get("warning_level", "none")
+        warning_text = chip_migration.get("warning_text", "")
+        if warning_level == "critical":
+            lines.append(f"  🔴 {warning_text}")
+        elif warning_level == "warning":
+            lines.append(f"  ⚠️ {warning_text}")
+
+    # 📊 五层打分
+    fusion = r.get("fusion") or {}
+    if isinstance(fusion, dict):
+        score = fusion.get("weighted_score", 0)
+        confidence = fusion.get("confidence", 0)
+        signals = fusion.get("signals_detail") or {}
+        # 提取各策略分数
+        chan_score = signals.get("chan", {}).get("confidence", 0) * 100 if isinstance(signals.get("chan"), dict) else 0
+        wyk_score = signals.get("wyckoff", {}).get("confidence", 0) * 100 if isinstance(signals.get("wyckoff"), dict) else 0
+        mom_score = signals.get("momentum", {}).get("confidence", 0) * 100 if isinstance(signals.get("momentum"), dict) else 0
+        chip_score = 50  # 筹码分数默认值
+        
+        lines.append("")
+        lines.append("📊 五层打分")
+        lines.append("")
+        lines.append(f"  结构 {chan_score:.0f} ｜ 量价 {wyk_score:.0f} ｜ 筹码 {chip_score:.0f} ｜ 动能 {mom_score:.0f}")
+        lines.append(f"  融合评分 {score:+.2f}，置信度 {confidence:.0%}")
+
+    # 🎯 信号判断
+    lines.append("")
+    lines.append("🎯 信号判断")
+    lines.append("")
+    # 偏多信号
+    bullish_signals: list[str] = []
+    cautious_signals: list[str] = []
+    
+    # 检查突破确认
+    if current_price > 0 and confirm > 0 and current_price >= confirm:
+        bullish_signals.append("突破确认位")
+    
+    # 检查威科夫信号
+    wyckoff = r.get("wyckoff") or {}
+    if isinstance(wyckoff, dict):
+        if wyckoff.get("spring_signal"):
+            bullish_signals.append("威科夫弹簧信号")
+        if wyckoff.get("upthrust_signal"):
+            cautious_signals.append("威科夫上冲回落")
+    
+    # 检查筹码搬家
+    chip_migration = r.get("chip_migration") or {}
+    if chip_migration.get("warning_level") in ("warning", "critical"):
+        cautious_signals.append("筹码松动")
+    
+    # 检查趋势
+    if major_stage == "衰退":
+        cautious_signals.append("衰退期")
+    elif major_stage == "派发":
+        cautious_signals.append("派发期")
+    
+    if bullish_signals:
+        lines.append(f"  偏多：{'、'.join(bullish_signals)}")
+    if cautious_signals:
+        lines.append(f"  警惕：{'、'.join(cautious_signals)}")
+    if not bullish_signals and not cautious_signals:
+        lines.append("  无明显信号")
 
     # 💰 仓位检查
     position_check_section = _build_position_check_section(r)
@@ -1134,57 +1288,26 @@ def render_markdown(r: dict[str, Any]) -> str:
 
     stage = str(r.get("stage") or "")
 
+    # ✅ 亮点 / ⚠️ 风险（单行格式）
     if stage == "转弱" or scene in ("空间不足",):
-        lines.extend([
-            "",
-            "⚠️ 风险",
-            "",
-            f"趋势已转弱不可恋战，反弹是减仓机会。若跌破 {low_price:.2f} 必须执行止损",
-        ])
+        lines.append("")
+        lines.append(f"⚠️ 风险：趋势已转弱不可恋战，反弹是减仓机会。若跌破 {low_price:.2f} 必须执行止损")
     elif scene in ("突破确认", "突破观察"):
-        lines.extend([
-            "",
-            "✨ 亮点",
-            "",
-            f"现价 {r['current']:.2f} 已站上确认位 {confirm:.2f}，方向偏多 → 放量站稳继续持有",
-            "",
-            "⚠️ 风险",
-            "",
-            f"突破后回踩 {confirm:.2f} 不破才算确认，缩量冲高先不减",
-        ])
+        lines.append("")
+        lines.append(f"✅ 亮点：现价 {r['current']:.2f} 已站上确认位 {confirm:.2f}，方向偏多")
+        lines.append(f"⚠️ 风险：突破后回踩 {confirm:.2f} 不破才算确认，缩量冲高先不减")
     elif scene in ("低吸观察", "防守观察", "防守观察，趋势下行谨慎"):
-        lines.extend([
-            "",
-            "✨ 亮点",
-            "",
-            f"价格回到支撑区 {low_price:.2f} 附近，观察止跌信号",
-            "",
-            "⚠️ 风险",
-            "",
-            f"趋势尚未确认，跌破 {low_price:.2f} 要止损，不提前抄底",
-        ])
+        lines.append("")
+        lines.append(f"✅ 亮点：价格回到支撑区 {low_price:.2f} 附近，观察止跌信号")
+        lines.append(f"⚠️ 风险：趋势尚未确认，跌破 {low_price:.2f} 要止损，不提前抄底")
     elif scene == "冲高减仓":
-        lines.extend([
-            "",
-            "✨ 亮点",
-            "",
-            "现价接近压力区，有反弹机会",
-            "",
-            "⚠️ 风险",
-            "",
-            f"冲高缩量先减仓，放量突破 {confirm:.2f} 再接回",
-        ])
+        lines.append("")
+        lines.append("✅ 亮点：现价接近压力区，有反弹机会")
+        lines.append(f"⚠️ 风险：冲高缩量先减仓，放量突破 {confirm:.2f} 再接回")
     else:
-        lines.extend([
-            "",
-            "✨ 亮点",
-            "",
-            f"当前 {r['current']:.2f} 仍站在防守位 {low_price:.2f} 上方，结构在修复 → 等站稳 {confirm:.2f} 确认转强",
-            "",
-            "⚠️ 风险",
-            "",
-            f"最大风险不是没反弹，而是 {confirm:.2f} 未确认前提前追入。若跌破 {low_price:.2f} 防守位，预期要先收回来",
-        ])
+        lines.append("")
+        lines.append(f"✅ 亮点：当前 {r['current']:.2f} 仍站在防守位 {low_price:.2f} 上方，结构在修复")
+        lines.append(f"⚠️ 风险：最大风险是 {confirm:.2f} 未确认前提前追入。若跌破 {low_price:.2f} 防守位，预期要先收回来")
 
     pool_count = _pool_count()
     pool_line = f"当前池 {pool_count}/10，回复 1 入池" if pool_count > 0 else "回复 1 入池"
