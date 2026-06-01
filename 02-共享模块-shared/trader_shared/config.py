@@ -109,6 +109,41 @@ DEFAULT_MAX_TOTAL: int = 80      # 总仓位上限 (%)
 DEFAULT_CASH_FLOOR: int = 20     # 现金下限 (%)
 DEFAULT_MAIN_CAP: int = 50       # 主仓上限 (%)
 
+# ---- Exit Strategy constants ------------------------------------------------
+# 状态机 5 状态
+POSITION_STATE_EMPTY: int = 0           # 空仓
+POSITION_STATE_INIT: int = 1            # 初始建仓
+POSITION_STATE_RESISTANCE: int = 2      # 阻力位分歧
+POSITION_STATE_PULLBACK_ADD: int = 3    # 回踩加仓
+POSITION_STATE_MARKUP: int = 4          # 主升浪跟踪
+POSITION_STATE_EXIT_REENTRY: int = 5    # 退出再买
+
+# 回踩加仓条件评分阈值
+PULLBACK_ADD_MIN_SCORE: int = 3         # 最低加仓评分（3/5）
+PULLBACK_ADD_FULL_SCORE: int = 5        # 满分加仓评分（5/5）
+
+# 回踩加仓仓位
+PULLBACK_ADD_POSITION_PCT: int = 10     # 满足最低条件加仓 10%
+PULLBACK_ADD_FULL_POSITION_PCT: int = 15  # 满分条件加仓 15%
+
+# 初始建仓仓位
+INITIAL_POSITION_PCT: int = 10          # 初始建仓 10%
+
+# 条件止盈比例
+EXIT_RATIO_BC: float = 0.33            # BC 信号减仓 1/3
+EXIT_RATIO_1R: float = 0.33            # 1R 目标减仓 1/3
+EXIT_RATIO_STAGE: float = 0.34         # 阶段变化清仓
+
+# EXPMA 周期
+EXPMA_FAST_PERIOD: int = 10            # 快速 EXPMA
+EXPMA_SLOW_PERIOD: int = 20            # 慢速 EXPMA（替代 MA20 做移动止损）
+EXPMA_TREND_FAST: int = 12             # 趋势确认快速线
+EXPMA_TREND_SLOW: int = 50             # 趋势确认慢速线
+
+# 筹码搬家阈值
+CHIP_MIGRATION_WARNING_PCT: float = 40.0   # 筹码松动警告阈值
+CHIP_MIGRATION_CRITICAL_PCT: float = 50.0  # 筹码搬家清仓阈值
+
 # ── Exports ──────────────────────────────────────────────────────────
 __all__ = [
     "LOOKBACK_DAYS", "RECENT_WINDOW", "CONFIRM_BUFFER", "STOP_BUFFER", "TAKE_PROFIT_BUFFER",
@@ -132,4 +167,13 @@ __all__ = [
     "THEORY_ADJUST_LOG_ONLY",
     "FUSION_OVERRIDE_ENABLED", "FUSION_CONFIDENCE_THRESHOLD",
     "DEFAULT_MAX_TOTAL", "DEFAULT_CASH_FLOOR", "DEFAULT_MAIN_CAP",
+    # Exit Strategy constants
+    "POSITION_STATE_EMPTY", "POSITION_STATE_INIT", "POSITION_STATE_RESISTANCE",
+    "POSITION_STATE_PULLBACK_ADD", "POSITION_STATE_MARKUP", "POSITION_STATE_EXIT_REENTRY",
+    "PULLBACK_ADD_MIN_SCORE", "PULLBACK_ADD_FULL_SCORE",
+    "PULLBACK_ADD_POSITION_PCT", "PULLBACK_ADD_FULL_POSITION_PCT",
+    "INITIAL_POSITION_PCT",
+    "EXIT_RATIO_BC", "EXIT_RATIO_1R", "EXIT_RATIO_STAGE",
+    "EXPMA_FAST_PERIOD", "EXPMA_SLOW_PERIOD", "EXPMA_TREND_FAST", "EXPMA_TREND_SLOW",
+    "CHIP_MIGRATION_WARNING_PCT", "CHIP_MIGRATION_CRITICAL_PCT",
 ]

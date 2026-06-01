@@ -26,7 +26,7 @@ except ImportError:
         raise
 
 from trader_shared.light_data import to_float, pct_change
-from trader_shared.stage_positioning import assess_stage, compute_exit_plan, compute_stage_stop, check_time_stop
+from trader_shared.stage_positioning import assess_stage, compute_exit_plan, compute_stage_stop, check_time_stop, evaluate_position_state
 from trader_shared.fetchers import TencentFetcher
 
 try:
@@ -552,6 +552,36 @@ def build_report(target: str) -> dict[str, Any]:
     )
     report["exit_plan"] = exit_plan
     report["chip_migration"] = chip_migration
+
+    # 五状态仓位管理状态机
+    expma10_val = None
+    try:
+        from trader_shared.momentum_core import calc_expma
+        closes_for_expma = [float(b.get("close") or 0) for b in bars if float(b.get("close") or 0) > 0]
+        if len(closes_for_expma) >= 10:
+            expma_vals = calc_expma(closes_for_expma, 10)
+            expma10_val = expma_vals[-1] if expma_vals else None
+    except Exception:
+        pass
+
+    position_state = evaluate_position_state(
+        current_price=current,
+        support=support,
+        resistance=float(report.get("resistance") or 0),
+        stop_price=float(report.get("stop") or 0),
+        confirm_price=confirm,
+        atr14=atr14_val,
+        major_stage=stage_result["major_stage"],
+        momentum=stage_result["momentum"],
+        bars=bars,
+        wyckoff_result=wyck_result,
+        has_position=False,  # 默认无持仓，实际应从持仓系统获取
+        entry_price=float(report.get("support") or current),
+        highest_close=max([float(b.get("close") or 0) for b in bars[-20:]]) if bars else current,
+        expma10=expma10_val,
+        chip_migration=chip_migration,
+    )
+    report["position_state"] = position_state
 
     # 阶段止损
     ma20_val = levels["ma_values"].get("ma20")
@@ -1274,6 +1304,13 @@ def _build_today_action_section(r: dict[str, Any]) -> list[str]:
     stage_action = str(r.get("stage_action") or "")
     scene = str(r.get("scene") or "")
 
+    # 五状态仓位管理
+    position_state = r.get("position_state") or {}
+    ps_state = str(position_state.get("state") or "")
+    ps_action = str(position_state.get("action") or "")
+    ps_position_pct = int(position_state.get("position_pct") or 0)
+    ps_stop = float(position_state.get("stop_price") or 0)
+
     lines: list[str] = ["", "🎯 今日行动", ""]
 
     # 判断动作优先级
@@ -1294,6 +1331,19 @@ def _build_today_action_section(r: dict[str, Any]) -> list[str]:
         if confirm > 0:
             lines.append(f"  如果有底仓：反弹到 {confirm:.2f} 冲不动就减 10-20%")
         lines.append(f"  如果跌破 {stop:.2f}：止损")
+    elif ps_state == "回踩加仓" and ps_position_pct > 0:
+        # 回踩加仓信号（状态机）
+        lines.append("  动作：回踩加仓")
+        lines.append(f"  理由：{ps_action}")
+        lines.append(f"  加仓比例：{ps_position_pct}%")
+        if ps_stop > 0:
+            lines.append(f"  止损：{ps_stop:.2f}")
+    elif ps_state == "阻力位分歧":
+        # 阻力位分歧信号（状态机）
+        lines.append("  动作：阻力位观察")
+        lines.append(f"  理由：{ps_action}")
+        if ps_stop > 0:
+            lines.append(f"  止损：{ps_stop:.2f}")
     elif stage_action in ("试探买", "加仓") and momentum in ("走强", "修复"):
         # 买入信号
         lines.append("  动作：可以试探买")
@@ -1314,6 +1364,10 @@ def _build_today_action_section(r: dict[str, Any]) -> list[str]:
             lines.append(f"  如果非要买：{low_zone} 不破买 5%, 止损 {stop:.2f}")
         if confirm > 0:
             lines.append(f"  关注明天：站稳 {confirm:.2f} 可以加仓")
+
+    # 状态机补充信息
+    if ps_state and ps_state not in ("空仓",):
+        lines.append(f"  仓位状态：{ps_state}")
 
     return lines
 

@@ -492,6 +492,8 @@ def assess_stage(
     momentum_result: dict[str, Any] | None = None,
     support: float = 0.0,
     pnl_pct: float = 0.0,
+    atr14: float = 0.0,
+    chip_migration: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """四阶段定位主函数（威科夫量价驱动 + 四层防护）
 
@@ -580,6 +582,8 @@ def assess_stage(
         support=support,
         ma20=ma20,
         bars=bars,
+        atr14=atr14,
+        chip_migration=chip_migration,
     )
 
     return {
@@ -604,32 +608,57 @@ def compute_stop_losses(
     support: float,
     ma20: float | None,
     bars: list[dict[str, Any]] | None = None,
+    atr14: float = 0.0,
+    chip_migration: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """三层止损体系。
+    """三层止损体系（ATR + 筹码驱动）。
 
-    第一层：技术止损（支撑位下方 2.5%）
+    第一层：技术止损（支撑位 - 1.5×ATR，牛市防洗盘）
     第二层：阶段止损（随阶段变化）
     第三层：时间止损（买入后 N 天不涨走人）
+
+    筹码驱动移动止损：
+      底部筹码峰没松动 → 止损跟 MA10
+      底部筹码峰松动 > 40% → 止损收紧到 MA20
+      底部筹码峰搬家 > 50% → 清仓
+
+    Args:
+        stage: 当前阶段
+        current: 当前价
+        support: 支撑位
+        ma20: 20 日均线
+        bars: K线数据
+        atr14: 14日ATR值
+        chip_migration: 筹码搬家监控结果
 
     Returns:
         {
             "technical": {"price": float, "reason": str},
             "stage_based": {"price": float, "reason": str},
             "time_limit": {"days": int, "reason": str},
+            "chip_trailing": {"price": float, "reason": str} | None,
         }
     """
-    # 第一层：技术止损
-    if support > 0:
-        tech_stop = round(support * 0.975, 2)  # 支撑位下方 2.5%
+    # 第一层：技术止损（ATR-based）
+    if support > 0 and atr14 > 0:
+        # 支撑位 - 1.5×ATR
+        tech_stop = round(support - 1.5 * atr14, 2)
+        tech_reason = f"支撑 {support:.2f} - 1.5×ATR({atr14:.2f})"
+    elif support > 0:
+        # 无 ATR 数据，退回旧逻辑
+        tech_stop = round(support * 0.975, 2)
         tech_reason = f"关键支撑 {support:.2f} 下方2.5%"
     else:
-        tech_stop = round(current * 0.95, 2)  # 兜底：当前价下方 5%
+        tech_stop = round(current * 0.95, 2)
         tech_reason = "无明确支撑，当前价下方5%"
 
     # 第二层：阶段止损
     if stage == "蓄势":
-        if support > 0:
-            stage_stop = round(support * 0.98, 2)  # 蓄势区间下沿
+        if support > 0 and atr14 > 0:
+            stage_stop = round(support - 1.5 * atr14, 2)
+            stage_reason = f"蓄势期保护本金，支撑 - 1.5×ATR"
+        elif support > 0:
+            stage_stop = round(support * 0.98, 2)
             stage_reason = f"蓄势区间下沿 {support:.2f}"
         else:
             stage_stop = round(current * 0.95, 2)
@@ -666,10 +695,37 @@ def compute_stop_losses(
         time_days = 0
         time_reason = "衰退期不持有"
 
+    # 筹码驱动移动止损
+    chip_trailing: dict[str, Any] | None = None
+    if isinstance(chip_migration, dict) and chip_migration.get("has_history"):
+        migration_pct = chip_migration.get("migration_pct", 0)
+        warning_level = chip_migration.get("warning_level", "none")
+
+        if warning_level == "critical":
+            # 底部筹码峰搬家 > 50% → 清仓
+            chip_trailing = {
+                "price": 0.0,
+                "reason": f"底部筹码搬家 {migration_pct:.0f}%，清仓信号",
+                "action": "清仓",
+            }
+        elif warning_level == "warning":
+            # 底部筹码峰松动 > 40% → 止损收紧到 MA20
+            if ma20 is not None and ma20 > 0:
+                chip_trailing = {
+                    "price": round(ma20, 2),
+                    "reason": f"筹码松动 {migration_pct:.0f}%，止损收紧到 MA20",
+                    "action": "减仓",
+                }
+        else:
+            # 底部筹码峰没松动 → 止损跟 MA10（如果有的话）
+            # 这里返回 None，表示使用默认止损
+            pass
+
     return {
         "technical": {"price": tech_stop, "reason": tech_reason},
         "stage_based": {"price": stage_stop, "reason": stage_reason},
         "time_limit": {"days": time_days, "reason": time_reason},
+        "chip_trailing": chip_trailing,
     }
 
 
@@ -818,13 +874,20 @@ def compute_exit_plan(
     resistance_price: float | None,
     current_stage: str,
     bars: list[dict[str, Any]] | None = None,
+    wyckoff_result: dict[str, Any] | None = None,
+    atr14: float = 0.0,
 ) -> dict[str, Any]:
-    """计算分批止盈计划。
+    """计算分批止盈计划（条件止盈，威科夫信号驱动）。
 
     三批退出：
-      第一笔：价格达到 1R 目标 → 卖 1/3（保本，锁定部分利润）
-      第二笔：价格接近阻力位（距阻力位 ≤ 2%） → 卖 1/3（阻力位是天花板）
-      第三笔：阶段从主升转派发 → 清仓（趋势变了）
+      第一笔：BC 信号出现 → 卖 1/3（购买高潮，主力在出货）
+      第二笔：1R 目标达到 → 卖 1/3（保本，锁定部分利润）
+      第三笔：阶段转派发 或 筹码搬家 > 50% → 清仓（趋势变了）
+
+    阻力位不再是"到了就卖"，而是"看信号决定"：
+      - 大阳线突破 + 放量 → 继续持有
+      - BC 信号 → 卖 1/3
+      - UTAD 信号 → 立刻减仓
 
     Args:
         entry_price: 买入价
@@ -832,6 +895,8 @@ def compute_exit_plan(
         resistance_price: 最近阻力位（可选）
         current_stage: 当前阶段（蓄势/主升/派发/衰退）
         bars: K线数据（用于计算动态阻力位）
+        wyckoff_result: 威科夫分析结果（包含 BC/UTAD 信号）
+        atr14: 14日ATR值
 
     Returns:
         止盈计划字典
@@ -844,6 +909,7 @@ def compute_exit_plan(
             "stage_exit": current_stage,
             "exit_plan": [],
             "already_exited": [False, False, False],
+            "wyckoff_signals": {},
         }
 
     # 1R 计算
@@ -864,38 +930,89 @@ def compute_exit_plan(
     # 阶段退出条件
     stage_exit = "派发"  # 主升转派发时清仓
 
-    # 构建三批退出计划
+    # 提取威科夫信号
+    bc_signal = False
+    bc_reason = ""
+    utad_signal = False
+    utad_reason = ""
+    if isinstance(wyckoff_result, dict):
+        wyk = wyckoff_result.get("wyckoff", wyckoff_result)
+        if isinstance(wyk, dict):
+            bc_signal = wyk.get("bc_signal", False)
+            bc_reason = wyk.get("bc_reason", "")
+            utad_signal = wyk.get("upthrust_signal", False)
+            utad_reason = wyk.get("upthrust_reason", "")
+
+    # 构建三批退出计划（条件止盈）
     exit_plan: list[dict[str, Any]] = []
 
-    # 第一笔：1R 目标
+    # 第一笔：BC 信号（购买高潮）→ 卖 1/3
+    if bc_signal:
+        exit_plan.append({
+            "price": None,
+            "ratio": 0.33,
+            "reason": "购买高潮（BC），减仓1/3",
+            "condition": "BC 信号出现",
+            "triggered": True,
+        })
+    else:
+        exit_plan.append({
+            "price": None,
+            "ratio": 0.33,
+            "reason": "等待 BC 信号",
+            "condition": "BC 信号出现",
+            "triggered": False,
+        })
+
+    # 第二笔：1R 目标
     exit_plan.append({
         "price": target_1r,
         "ratio": 0.33,
         "reason": "1R 目标，保本",
+        "condition": "1R 达到",
+        "triggered": False,
     })
-
-    # 第二笔：阻力位
-    if resistance_exit is not None:
-        exit_plan.append({
-            "price": resistance_exit,
-            "ratio": 0.33,
-            "reason": "阻力位，锁定利润",
-        })
-    else:
-        # 无明确阻力位，用 2R 代替
-        target_2r = round(entry_price + risk_r * 2, 2)
-        exit_plan.append({
-            "price": target_2r,
-            "ratio": 0.33,
-            "reason": "2R 目标，锁定利润",
-        })
 
     # 第三笔：阶段转派发
     exit_plan.append({
         "price": None,
         "ratio": 0.34,
         "reason": "阶段转派发，清仓",
+        "condition": "阶段变化",
+        "triggered": False,
     })
+
+    # 突破跟进逻辑
+    breakout_followup: dict[str, Any] | None = None
+    if resistance_exit is not None and atr14 > 0:
+        # 突破阻力位后的新止损和新目标
+        new_stop = resistance_exit  # 旧阻力位 → 新支撑位
+        # 新目标：下一个阻力位或 2R
+        next_resistance = None
+        if bars and len(bars) >= 40:
+            all_highs = [float(b.get("high") or 0) for b in bars[-40:]]
+            above_resistance = [h for h in all_highs if h > resistance_exit * 1.01]
+            if above_resistance:
+                next_resistance = round(min(above_resistance), 2)
+        if next_resistance is None:
+            next_resistance = round(entry_price + risk_r * 2, 2)
+
+        breakout_followup = {
+            "new_stop": round(new_stop, 2),
+            "new_target": next_resistance,
+            "add_on_pullback": True,
+            "note": "突破阻力位后止损上移，回踩新支撑不破可加仓",
+        }
+
+    # UTAD 假突破信号
+    utad_action: dict[str, Any] | None = None
+    if utad_signal:
+        utad_action = {
+            "signal": "UTAD",
+            "reason": utad_reason,
+            "action": "立刻减仓",
+            "note": "上冲回落假突破，止损下移回原支撑位",
+        }
 
     return {
         "risk_r": risk_r,
@@ -904,6 +1021,14 @@ def compute_exit_plan(
         "stage_exit": stage_exit,
         "exit_plan": exit_plan,
         "already_exited": [False, False, False],
+        "wyckoff_signals": {
+            "bc_signal": bc_signal,
+            "bc_reason": bc_reason,
+            "utad_signal": utad_signal,
+            "utad_reason": utad_reason,
+        },
+        "breakout_followup": breakout_followup,
+        "utad_action": utad_action,
     }
 
 
@@ -1014,6 +1139,419 @@ def compute_stop_summary(
         "final_stop": final_stop,
         "stops": stops,
         "time_stop": time_stop,
+    }
+
+
+# ── 五状态仓位管理状态机 ──────────────────────────────────────
+
+# 状态定义
+POSITION_STATES = {
+    "空仓": 0,
+    "初始建仓": 1,
+    "阻力位分歧": 2,
+    "回踩加仓": 3,
+    "主升浪跟踪": 4,
+    "退出再买": 5,
+}
+
+# 状态转移矩阵：(当前状态, 条件) → 下一状态
+# 条件由 evaluate_position_state() 返回
+
+
+def evaluate_position_state(
+    current_price: float,
+    support: float,
+    resistance: float,
+    stop_price: float,
+    confirm_price: float,
+    atr14: float,
+    major_stage: str,
+    momentum: str,
+    bars: list[dict[str, Any]] | None = None,
+    wyckoff_result: dict[str, Any] | None = None,
+    holding_days: int = 0,
+    has_position: bool = False,
+    entry_price: float = 0.0,
+    highest_close: float = 0.0,
+    expma10: float | None = None,
+    chip_migration: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """五状态仓位管理状态机。
+
+    状态流转：
+      空仓 → 初始建仓（支撑位买 10%，止损支撑位-1.5×ATR）
+      初始建仓 → 阻力位分歧（到达阻力位，弱→卖1/3，强→不卖）
+      初始建仓 → 回踩加仓（回踩支撑位，条件满足加仓）
+      阻力位分歧 → 回踩加仓（回踩后条件满足）
+      回踩加仓 → 主升浪跟踪（筹码没搬家+EXPMA(10)上→拿着）
+      主升浪跟踪 → 退出再买（跌破止损/阶段转衰退）
+      退出再买 → 初始建仓（回到支撑位+止跌信号+阶段没变）
+
+    Returns:
+        {
+            "state": str,               # 当前状态
+            "state_code": int,          # 状态代码 0-5
+            "action": str,              # 建议动作
+            "position_pct": int,        # 建议仓位 %
+            "stop_price": float,        # 止损价
+            "take_profit_price": float, # 止盈价（条件止盈）
+            "conditions": dict,         # 各条件检查结果
+            "transition_reason": str,   # 状态转移原因
+        }
+    """
+    # 基础检查
+    if current_price <= 0:
+        return _empty_position_state("空仓", "数据不足")
+
+    # ATR 止损计算
+    atr_stop = round(support - 1.5 * atr14, 2) if support > 0 and atr14 > 0 else round(current_price * 0.95, 2)
+
+    # 提取威科夫信号
+    bc_signal = False
+    utad_signal = False
+    sow_signal = False
+    if isinstance(wyckoff_result, dict):
+        wyk = wyckoff_result.get("wyckoff", wyckoff_result)
+        if isinstance(wyk, dict):
+            bc_signal = wyk.get("bc_signal", False)
+            utad_signal = wyk.get("upthrust_signal", False)
+            sow_signal = wyk.get("sow_signal", False)
+
+    # 筹码搬家检查
+    chip_warning = "none"
+    if isinstance(chip_migration, dict):
+        chip_warning = chip_migration.get("warning_level", "none")
+
+    # 条件检查
+    conditions = {
+        "at_support": support > 0 and abs(current_price - support) / max(support, 1) < 0.03,
+        "at_resistance": resistance > 0 and abs(current_price - resistance) / max(resistance, 1) < 0.03,
+        "above_stop": stop_price <= 0 or current_price > stop_price,
+        "above_atr_stop": current_price > atr_stop,
+        "breakout_confirmed": confirm_price > 0 and current_price >= confirm_price,
+        "pullback_to_support": support > 0 and current_price <= support * 1.02 and current_price >= support * 0.98,
+        "chip_stable": chip_warning not in ("critical", "warning"),
+        "expma10_up": expma10 is not None and current_price > expma10,
+        "bc_signal": bc_signal,
+        "utad_signal": utad_signal,
+        "sow_signal": sow_signal,
+        "stage_accumulation": major_stage == "蓄势",
+        "stage_markup": major_stage == "主升",
+        "stage_distribution": major_stage == "派发",
+        "stage_decline": major_stage == "衰退",
+        "momentum_strong": momentum in ("走强", "修复"),
+        "momentum_weak": momentum in ("转弱",),
+    }
+
+    # 状态判定
+    if not has_position:
+        # 空仓状态
+        if conditions["stage_decline"]:
+            return _make_position_state("空仓", "衰退期不碰", 0, conditions)
+        if conditions["at_support"] and conditions["momentum_strong"] and not conditions["stage_decline"]:
+            return _make_position_state(
+                "初始建仓", "到达支撑位+短期走强，试探买10%",
+                10, conditions, stop_price=atr_stop,
+            )
+        return _make_position_state("空仓", "等待到达支撑位", 0, conditions)
+
+    # 有持仓的状态流转
+    # 检查止损
+    if not conditions["above_stop"] or not conditions["above_atr_stop"]:
+        return _make_position_state(
+            "退出再买", "跌破止损，清仓等待",
+            0, conditions, stop_price=0,
+        )
+
+    # 检查 UTAD / SOW / 筹码搬家 → 退出
+    if conditions["utad_signal"] or conditions["sow_signal"] or chip_warning == "critical":
+        reason = "UTAD上冲回落" if conditions["utad_signal"] else "SOW弱势信号" if conditions["sow_signal"] else "筹码搬家清仓"
+        return _make_position_state(
+            "退出再买", f"{reason}，清仓等待",
+            0, conditions, stop_price=0,
+        )
+
+    # 衰退期 → 退出
+    if conditions["stage_decline"]:
+        return _make_position_state(
+            "退出再买", "阶段转衰退，清仓",
+            0, conditions, stop_price=0,
+        )
+
+    # 派发期 → 阻力位分歧
+    if conditions["stage_distribution"]:
+        if conditions["at_resistance"]:
+            if bc_signal:
+                return _make_position_state(
+                    "阻力位分歧", "派发期+BC信号，减仓1/3",
+                    0, conditions, stop_price=atr_stop,
+                )
+            return _make_position_state(
+                "阻力位分歧", "派发期到达阻力位，观察是否突破",
+                0, conditions, stop_price=atr_stop,
+            )
+        return _make_position_state(
+            "阻力位分歧", "派发期，逢高减仓",
+            0, conditions, stop_price=atr_stop,
+        )
+
+    # 主升浪跟踪
+    if conditions["stage_markup"]:
+        if conditions["chip_stable"] and conditions["expma10_up"]:
+            return _make_position_state(
+                "主升浪跟踪", "主升期+筹码稳定+EXPMA(10)支撑，持有",
+                0, conditions, stop_price=expma10 if expma10 else atr_stop,
+            )
+        if not conditions["chip_stable"]:
+            return _make_position_state(
+                "主升浪跟踪", "主升期但筹码松动，收紧止损",
+                0, conditions, stop_price=atr_stop,
+            )
+        return _make_position_state(
+            "主升浪跟踪", "主升期，持有观察",
+            0, conditions, stop_price=atr_stop,
+        )
+
+    # 回踩加仓（蓄势期+回踩支撑+条件满足）
+    if conditions["stage_accumulation"] and conditions["pullback_to_support"]:
+        # 必要条件 + 加分条件评分
+        add_score = _calc_pullback_add_score(
+            conditions, bars, current_price, support, atr14,
+        )
+        if add_score >= 5:
+            return _make_position_state(
+                "回踩加仓", f"回踩支撑+条件满足（{add_score}/5），加仓15%",
+                15, conditions, stop_price=atr_stop,
+            )
+        if add_score >= 3:
+            return _make_position_state(
+                "回踩加仓", f"回踩支撑+部分条件满足（{add_score}/5），加仓10%",
+                10, conditions, stop_price=atr_stop,
+            )
+        return _make_position_state(
+            "回踩加仓", f"回踩支撑但条件不足（{add_score}/5），观望",
+            0, conditions, stop_price=atr_stop,
+        )
+
+    # 阻力位分歧（到达阻力位）
+    if conditions["at_resistance"]:
+        if bc_signal:
+            return _make_position_state(
+                "阻力位分歧", "到达阻力位+BC信号，减仓1/3",
+                0, conditions, stop_price=atr_stop,
+            )
+        if conditions["breakout_confirmed"]:
+            return _make_position_state(
+                "阻力位分歧", "突破阻力位确认，继续持有",
+                0, conditions, stop_price=atr_stop,
+            )
+        return _make_position_state(
+            "阻力位分歧", "到达阻力位，观察量能",
+            0, conditions, stop_price=atr_stop,
+        )
+
+    # 默认：持有观察
+    return _make_position_state(
+        "初始建仓", "持仓观察中",
+        0, conditions, stop_price=atr_stop,
+    )
+
+
+def _calc_pullback_add_score(
+    conditions: dict[str, bool],
+    bars: list[dict[str, Any]] | None,
+    current_price: float,
+    support: float,
+    atr14: float,
+) -> int:
+    """计算回踩加仓条件评分（满分5分）。
+
+    必要条件（2分）：
+      1. 到达支撑位附近（1分）
+      2. 出现止跌信号（1分）
+
+    加分条件（3分）：
+      3. 缩量回踩（1分）
+      4. RSI 超卖区反弹（1分）
+      5. MACD 底背离或金叉（1分）
+    """
+    score = 0
+
+    # 必要条件
+    if conditions.get("pullback_to_support"):
+        score += 1
+    if conditions.get("above_atr_stop"):
+        score += 1
+
+    # 加分条件：缩量回踩
+    if bars and len(bars) >= 10:
+        recent_vol = sum(float(b.get("volume") or 0) for b in bars[-3:]) / 3
+        earlier_vol = sum(float(b.get("volume") or 0) for b in bars[-10:-3]) / 7
+        if earlier_vol > 0 and recent_vol < earlier_vol * 0.8:
+            score += 1
+
+    # 加分条件：RSI 超卖反弹
+    if bars and len(bars) >= 20:
+        try:
+            from trader_shared.momentum_core import calc_rsi
+            closes = [float(b.get("close") or 0) for b in bars]
+            rsi_vals = calc_rsi(closes)
+            if rsi_vals and len(rsi_vals) >= 2:
+                latest_rsi = rsi_vals[-1]
+                prev_rsi = rsi_vals[-2]
+                if latest_rsi is not None and prev_rsi is not None:
+                    if prev_rsi < 30 and latest_rsi > prev_rsi:
+                        score += 1
+        except Exception:
+            pass
+
+    # 加分条件：MACD 底背离或金叉
+    if bars and len(bars) >= 30:
+        try:
+            from trader_shared.momentum_core import calc_macd
+            closes = [float(b.get("close") or 0) for b in bars]
+            macd = calc_macd(closes)
+            if macd.get("golden_cross"):
+                score += 1
+        except Exception:
+            pass
+
+    return min(score, 5)
+
+
+def _make_position_state(
+    state: str,
+    reason: str,
+    position_pct: int,
+    conditions: dict[str, bool],
+    stop_price: float = 0.0,
+    take_profit_price: float = 0.0,
+) -> dict[str, Any]:
+    """构建状态机返回值。"""
+    return {
+        "state": state,
+        "state_code": POSITION_STATES.get(state, 0),
+        "action": reason,
+        "position_pct": position_pct,
+        "stop_price": stop_price,
+        "take_profit_price": take_profit_price,
+        "conditions": conditions,
+        "transition_reason": reason,
+    }
+
+
+def _empty_position_state(state: str, reason: str) -> dict[str, Any]:
+    """空状态返回值。"""
+    return {
+        "state": state,
+        "state_code": POSITION_STATES.get(state, 0),
+        "action": reason,
+        "position_pct": 0,
+        "stop_price": 0.0,
+        "take_profit_price": 0.0,
+        "conditions": {},
+        "transition_reason": reason,
+    }
+
+
+# ── 条件止盈（威科夫信号驱动）──────────────────────────────────
+
+def compute_conditional_take_profit(
+    current_price: float,
+    entry_price: float,
+    stop_price: float,
+    resistance_price: float,
+    major_stage: str,
+    wyckoff_result: dict[str, Any] | None = None,
+    bars: list[dict[str, Any]] | None = None,
+    atr14: float = 0.0,
+) -> dict[str, Any]:
+    """条件止盈（威科夫信号驱动，不是机械止盈）。
+
+    三批退出：
+      第一笔：BC 信号出现 → 卖 1/3（购买高潮，主力在出货）
+      第二笔：1R 目标达到 → 卖 1/3（保本，锁定部分利润）
+      第三笔：阶段转派发 或 筹码搬家 > 50% → 清仓（趋势变了）
+
+    阻力位不再是"到了就卖"，而是"看信号决定"：
+      - 大阳线突破 + 放量 → 继续持有
+      - BC 信号 → 卖 1/3
+      - UTAD 信号 → 立刻减仓
+    """
+    if entry_price <= 0 or stop_price <= 0 or entry_price <= stop_price:
+        return {
+            "risk_r": 0.0,
+            "target_1r": 0.0,
+            "exit_plan": [],
+            "wyckoff_signals": {},
+        }
+
+    # 1R 计算
+    risk_r = round(entry_price - stop_price, 2)
+    target_1r = round(entry_price + risk_r, 2)
+
+    # 提取威科夫信号
+    bc_signal = False
+    bc_reason = ""
+    utad_signal = False
+    utad_reason = ""
+    if isinstance(wyckoff_result, dict):
+        wyk = wyckoff_result.get("wyckoff", wyckoff_result)
+        if isinstance(wyk, dict):
+            bc_signal = wyk.get("bc_signal", False)
+            bc_reason = wyk.get("bc_reason", "")
+            utad_signal = wyk.get("upthrust_signal", False)
+            utad_reason = wyk.get("upthrust_reason", "")
+
+    # 构建三批退出计划
+    exit_plan: list[dict[str, Any]] = []
+
+    # 第一笔：BC 信号 → 卖 1/3
+    if bc_signal:
+        exit_plan.append({
+            "price": None,
+            "ratio": 0.33,
+            "reason": "购买高潮（BC），减仓1/3",
+            "condition": "BC 信号出现",
+            "triggered": True,
+        })
+    else:
+        exit_plan.append({
+            "price": None,
+            "ratio": 0.33,
+            "reason": "等待 BC 信号",
+            "condition": "BC 信号出现",
+            "triggered": False,
+        })
+
+    # 第二笔：1R 目标
+    exit_plan.append({
+        "price": target_1r,
+        "ratio": 0.33,
+        "reason": "1R 目标，保本",
+        "condition": "1R 达到",
+        "triggered": current_price >= target_1r,
+    })
+
+    # 第三笔：阶段转派发
+    exit_plan.append({
+        "price": None,
+        "ratio": 0.34,
+        "reason": "阶段转派发，清仓",
+        "condition": "阶段变化",
+        "triggered": major_stage == "派发",
+    })
+
+    return {
+        "risk_r": risk_r,
+        "target_1r": target_1r,
+        "exit_plan": exit_plan,
+        "wyckoff_signals": {
+            "bc_signal": bc_signal,
+            "bc_reason": bc_reason,
+            "utad_signal": utad_signal,
+            "utad_reason": utad_reason,
+        },
     }
 
 

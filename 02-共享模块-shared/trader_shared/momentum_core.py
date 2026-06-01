@@ -18,6 +18,30 @@ def _ema(values: list[float], period: int) -> list[float | None]:
     return result
 
 
+def calc_expma(closes: list[float], period: int = 10) -> list[float | None]:
+    """计算 EXPMA（指数移动平均线）。
+
+    EXPMA = 收盘价 × K + 昨日EXPMA × (1-K)
+    其中 K = 2 / (period + 1)
+
+    Args:
+        closes: 收盘价序列
+        period: 周期（默认10）
+
+    Returns:
+        EXPMA 值序列
+    """
+    if not closes or period <= 0:
+        return [None] * len(closes)
+    k = 2.0 / (period + 1)
+    result: list[float | None] = []
+    expma: float | None = None
+    for c in closes:
+        expma = c if expma is None else c * k + expma * (1 - k)
+        result.append(expma)
+    return result
+
+
 def calc_rsi(closes: list[float], period: int = 14) -> list[float | None]:
     if len(closes) < period + 1:
         return [None] * len(closes)
