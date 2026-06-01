@@ -38,21 +38,21 @@ Run the project's lint, type-check, and test commands. Fix any failures before p
 
 ### Code Quality
 
-- [ ] Linter passes?
-- [ ] Type checker passes (if applicable)?
-- [ ] Tests pass?
-- [ ] No debug logging left in?
-- [ ] No suppressed warnings or type-safety bypasses?
+- [ ] **[Error]** Linter passes?
+- [ ] **[Error]** Type checker passes (if applicable)?
+- [ ] **[Error]** Tests pass?
+- [ ] **[Error]** No debug logging left in?
+- [ ] **[Error]** No suppressed warnings or type-safety bypasses?
 
 ### Test Coverage
 
-- [ ] New function → unit test added?
-- [ ] Bug fix → regression test added?
-- [ ] Changed behavior → existing tests updated?
+- [ ] **[Warning]** New function → unit test added?
+- [ ] **[Warning]** Bug fix → regression test added?
+- [ ] **[Warning]** Changed behavior → existing tests updated?
 
 ### Spec Sync
 
-- [ ] Does `.trellis/spec/` need updates? (new patterns, conventions, lessons learned)
+- [ ] **[Info]** Does `.trellis/spec/` need updates? (new patterns, conventions, lessons learned)
 
 > "If I fixed a bug or discovered something non-obvious, should I document it so future me won't hit the same issue?" → If YES, update the relevant spec doc.
 
@@ -62,31 +62,42 @@ Skip this step if your change is confined to a single layer.
 
 ### A. Data Flow (changes touch 3+ layers)
 
-- [ ] Read flow traces correctly: Storage → Service → API → UI
-- [ ] Write flow traces correctly: UI → API → Service → Storage
-- [ ] Types/schemas correctly passed between layers?
-- [ ] Errors properly propagated to caller?
+- [ ] **[Warning]** Read flow traces correctly: Storage → Service → API → UI
+- [ ] **[Warning]** Write flow traces correctly: UI → API → Service → Storage
+- [ ] **[Warning]** Types/schemas correctly passed between layers?
+- [ ] **[Warning]** Errors properly propagated to caller?
 
 ### B. Code Reuse (modifying constants, creating utilities)
 
-- [ ] Searched for existing similar code before creating new?
+- [ ] **[Warning]** Searched for existing similar code before creating new?
   ```bash
   grep -r "pattern" src/
   ```
-- [ ] If 2+ places define same value → extracted to shared constant?
-- [ ] After batch modification, all occurrences updated?
+- [ ] **[Warning]** If 2+ places define same value → extracted to shared constant?
+- [ ] **[Warning]** After batch modification, all occurrences updated?
 
 ### C. Import/Dependency (creating new files)
 
-- [ ] Correct import paths (relative vs absolute)?
-- [ ] No circular dependencies?
+- [ ] **[Warning]** Correct import paths (relative vs absolute)?
+- [ ] **[Warning]** No circular dependencies?
 
 ### D. Same-Layer Consistency
 
-- [ ] Other places using the same concept are consistent?
+- [ ] **[Warning]** Other places using the same concept are consistent?
+
+## Step 5b: Severity Handling
+
+- **Error**: Must fix before check passes. Re-run verification after fix.
+- **Warning**: Should fix but not blocking. Record in report.
+- **Info**: Informational. Record in report.
+
+If any Error-level issues remain unfixed, the check FAILS.
+If only Warning/Info issues remain, the check PASSES with notes.
 
 ---
 
 ## Step 6: Report and Fix
 
 Report violations found and fix them directly. Re-run project checks after fixes.
+
+Group findings by severity (Errors → Warnings → Info) in the report.

@@ -45,9 +45,13 @@ Before checking, read:
 
 ## Important
 
-**Fix issues yourself**, don't just report them.
+**Fix Error-level issues yourself** — they block the check from passing.
 
 You have write and edit tools, you can modify code directly.
+
+- **Error**: Must fix before check passes. Re-run verification after fix.
+- **Warning**: Should fix but not blocking. Record in report.
+- **Info**: Informational only. Record in report.
 
 ---
 
@@ -96,14 +100,18 @@ If failed, fix issues and re-run.
 - src/components/Feature.tsx
 - src/hooks/useFeature.ts
 
-### Issues Found and Fixed
+### Errors (must fix)
 
 1. `<file>:<line>` - <what was fixed>
 2. `<file>:<line>` - <what was fixed>
 
-### Issues Not Fixed
+### Warnings (should fix)
 
-(If there are issues that cannot be self-fixed, list them here with reasons)
+1. `<file>:<line>` - <description>
+
+### Info (notes)
+
+1. `<file>:<line>` - <description>
 
 ### Verification Results
 
@@ -112,5 +120,5 @@ If failed, fix issues and re-run.
 
 ### Summary
 
-Checked X files, found Y issues, all fixed.
+Checked X files. Errors: Y (all fixed). Warnings: Z. Info: W.
 ```
