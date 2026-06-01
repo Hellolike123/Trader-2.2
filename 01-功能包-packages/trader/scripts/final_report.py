@@ -17,6 +17,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target", required=True, help="A-share name or code, for example 南网科技 or 688248")
     parser.add_argument("--output", choices=["markdown", "json", "signal-json", "alert-text", "watch"], default="markdown")
     parser.add_argument("--write-signal", action="store_true", help="Write triggered signals to signals.jsonl")
+    parser.add_argument("--cost", type=float, default=0.0, help="Cost price for existing position (e.g., --cost 60.00)")
     return parser.parse_args()
 
 
@@ -25,7 +26,7 @@ def main() -> int:
     # DI: 创建 TencentFetcher 实例供下游使用
     fetcher = TencentFetcher()
     try:
-        report = build_report(args.target)
+        report = build_report(args.target, cost_price=args.cost)
     except Exception as exc:
         print(f"Trader skill cannot run in this environment: {exc}", file=sys.stderr)
         return 1

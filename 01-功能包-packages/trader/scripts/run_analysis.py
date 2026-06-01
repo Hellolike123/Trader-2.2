@@ -89,6 +89,40 @@ except ImportError:
 
 from trader_shared.signal_contract import assert_valid_signal
 from datetime import date
+import os
+
+def _get_cost_from_signals(target: str) -> float:
+    """从 signals.jsonl 中获取买入成本价。"""
+    try:
+        signals_path = os.path.expanduser("~/.trader/signals.jsonl")
+        if not os.path.exists(signals_path):
+            return 0.0
+        
+        # 标准化 target 用于匹配
+        normalized_target = target.replace(".SH", "").replace(".SZ", "").strip()
+        
+        with open(signals_path, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    signal = json.loads(line.strip())
+                    symbol = str(signal.get("symbol", "")).replace(".SH", "").replace(".SZ", "").strip()
+                    name = str(signal.get("name", "")).strip()
+                    
+                    # 匹配股票代码或名称
+                    if symbol == normalized_target or name == normalized_target:
+                        signal_type = signal.get("signal_type", "")
+                        # 查找买入信号
+                        if signal_type in ("low_buy_triggered", "track"):
+                            trigger = signal.get("trigger", {})
+                            price = trigger.get("price", 0)
+                            if price > 0:
+                                return float(price)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+    except Exception:
+        pass
+    return 0.0
+
 
 def _degraded_quote_report(target: str) -> dict[str, Any]:
     """计算依赖缺失时的降级报告：仅返回行情数据。"""
@@ -217,7 +251,7 @@ def pct(value: float | None) -> str:
     return "数据不足" if value is None else f"{value:+.2f}%"
 
 
-def build_report(target: str) -> dict[str, Any]:
+def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     try:
         import candidate_core as core
         from trader_shared.candidate_core import build_structure_context, atr_volatility_level
@@ -519,6 +553,10 @@ def build_report(target: str) -> dict[str, Any]:
         "protection_notes": stage_result.get("protection_notes", []),
         "stop_losses": stage_result.get("stop_losses", {}),
         "wyckoff": wyck_result.get("wyckoff", wyck_result),
+        "expma10": expma10_val,
+        "expma12": expma12_val,
+        "expma50": expma50_val,
+        "expma_trend": expma_trend,
         # "extend_fundamental": snapshot.extend_fundamental,
         # "extend_sentiment": snapshot.extend_sentiment,
     }
@@ -553,16 +591,32 @@ def build_report(target: str) -> dict[str, Any]:
     report["exit_plan"] = exit_plan
     report["chip_migration"] = chip_migration
 
-    # 五状态仓位管理状态机
+    # 五状态仓位管理状态机 + EXPMA 计算
     expma10_val = None
+    expma12_val = None
+    expma50_val = None
     try:
         from trader_shared.momentum_core import calc_expma
         closes_for_expma = [float(b.get("close") or 0) for b in bars if float(b.get("close") or 0) > 0]
         if len(closes_for_expma) >= 10:
             expma_vals = calc_expma(closes_for_expma, 10)
             expma10_val = expma_vals[-1] if expma_vals else None
+        if len(closes_for_expma) >= 12:
+            expma12_vals = calc_expma(closes_for_expma, 12)
+            expma12_val = expma12_vals[-1] if expma12_vals else None
+        if len(closes_for_expma) >= 50:
+            expma50_vals = calc_expma(closes_for_expma, 50)
+            expma50_val = expma50_vals[-1] if expma50_vals else None
     except Exception:
         pass
+    
+    # EXPMA 趋势确认（金叉/死叉）
+    expma_trend = "neutral"
+    if expma12_val is not None and expma50_val is not None:
+        if expma12_val > expma50_val:
+            expma_trend = "bullish"  # EXPMA(12) 金叉 EXPMA(50) → 趋势转强
+        elif expma12_val < expma50_val:
+            expma_trend = "bearish"  # EXPMA(12) 死叉 EXPMA(50) → 趋势转弱
 
     position_state = evaluate_position_state(
         current_price=current,
@@ -593,6 +647,21 @@ def build_report(target: str) -> dict[str, Any]:
     )
     report["stage_stop"] = stage_stop_info
 
+    # 已有持仓模式：确定成本价和持仓状态
+    if cost_price <= 0:
+        # 从 signals.jsonl 中自动推断成本
+        cost_price = _get_cost_from_signals(target)
+    
+    has_position = cost_price > 0
+    report["has_position"] = has_position
+    report["cost_price"] = cost_price
+    
+    # 如果有持仓，计算盈亏比例
+    if has_position and cost_price > 0:
+        pnl_pct = (current - cost_price) / cost_price * 100
+        report["pnl_pct"] = pnl_pct
+        report["pnl_text"] = f"盈 {pnl_pct:+.1f}%" if pnl_pct >= 0 else f"亏 {abs(pnl_pct):.1f}%"
+    
     # 补全 JSON 输出需要的字段
     report = sync_report_with_data(report, levels)
 
@@ -786,12 +855,25 @@ def render_markdown(r: dict[str, Any]) -> str:
     max_position_pct = int(r.get("max_position_pct") or 0)
     stage_label = str(r.get("stage_label") or "")
 
+    # EXPMA 显示
+    expma10 = r.get("expma10")
+    expma12 = r.get("expma12")
+    expma50 = r.get("expma50")
+    expma_trend = r.get("expma_trend", "neutral")
+    expma_text = ""
+    if expma10 is not None:
+        expma_text = f"EXPMA(10)：{expma10:.2f}"
+        if expma12 is not None and expma50 is not None:
+            trend_text = "金叉" if expma_trend == "bullish" else "死叉" if expma_trend == "bearish" else "震荡"
+            expma_text += f"｜EXPMA(12/50)：{trend_text}"
+    
     lines: list[str] = [
         f"分析报告 — {name}（{display_code}）",
         "",
         f"现价：{price(r['current'])}（{pct(r['change_pct'])}）",
         f"MA5：{ma.get('ma5', '--')}｜MA10：{ma.get('ma10', '--')}｜MA20：{ma.get('ma20', '--')}｜MA30：{ma.get('ma30', '--')}",
         f"ATR {atr14:.2f}（{atr_ratio*100:.0f}%）{atr_level}" if atr14 > 0 else "",
+        expma_text if expma_text else "",
     ]
     if major_stage == "衰退":
         lines.append("")
@@ -868,21 +950,33 @@ def render_markdown(r: dict[str, Any]) -> str:
         f"  加仓 → 放量站稳 {confirm:.2f} 且回踩不破，才评估",
     ])
 
-    # 止盈计划（仅在有明确买入价参考时显示）
+    # 止盈计划（仅在有持仓时显示，Bug fix: 空仓不显示止盈计划）
     exit_plan = r.get("exit_plan") or {}
     exit_plan_items = exit_plan.get("exit_plan") or []
-    if exit_plan_items and exit_plan.get("risk_r", 0) > 0:
-        ep_entry = float(r.get("support") or current)
+    has_position = r.get("has_position", False)
+    cost_price = float(r.get("cost_price") or 0)
+    
+    # 只有有持仓时才显示止盈计划
+    if has_position and exit_plan_items and exit_plan.get("risk_r", 0) > 0:
+        ep_entry = cost_price if cost_price > 0 else float(r.get("support") or current)
         lines.append("")
         lines.append(f"  止盈计划（参考买入价 {ep_entry:.2f}）")
         for idx, item in enumerate(exit_plan_items, 1):
             p = item.get("price")
             ratio = item.get("ratio", 0)
             reason = item.get("reason", "")
+            # Bug fix: 第1笔也要显示具体价格（阻力位或1R目标）
             if p is not None:
                 lines.append(f"    第{idx}笔：{p:.2f} 卖 {ratio:.0%}（{reason}）")
             else:
-                lines.append(f"    第{idx}笔：{reason}")
+                # 如果没有价格，使用阻力位或1R目标作为参考
+                resistance_val = float(r.get("resistance") or 0)
+                target_1r = exit_plan.get("target_1r", 0)
+                fallback_price = resistance_val if resistance_val > 0 else target_1r
+                if fallback_price > 0:
+                    lines.append(f"    第{idx}笔：{fallback_price:.2f} 卖 {ratio:.0%}（{reason}）")
+                else:
+                    lines.append(f"    第{idx}笔：{reason}")
 
     # 三层止损
     stage_stop = r.get("stage_stop") or {}
@@ -934,6 +1028,14 @@ def render_markdown(r: dict[str, Any]) -> str:
     action_section = _build_today_action_section(r)
     if action_section:
         lines.extend(action_section)
+
+    # 📊 已有持仓评估（如果有持仓）
+    has_position = r.get("has_position", False)
+    cost_price = float(r.get("cost_price") or 0)
+    if has_position and cost_price > 0:
+        position_section = _build_existing_position_section(r, cost_price)
+        if position_section:
+            lines.extend(position_section)
 
     # 🔔 信号提醒
     signal_section = _build_signal_alert_section(r)
@@ -1284,6 +1386,193 @@ def one_sentence(r: dict[str, Any], low_zone: str) -> str:
     return f"现在还不是进攻点；先守纪律等确认，跌到 {low_zone} 止跌才轻试，站不上 {confirm:.2f}元 不加仓。"
 
 
+def _build_existing_position_section(r: dict[str, Any], cost_price: float) -> list[str]:
+    """构建 📊 已有持仓评估 输出段落。
+
+    根据盈亏状态和阶段给出具体建议：
+      - 赚钱 + 主升期 → 持有，止盈计划从现在开始
+      - 赚钱 + 派发期 → 减仓，锁定利润
+      - 亏钱 + 蓄势期 → 持有，等反弹到成本价减仓
+      - 亏钱 + 衰退期 → 止损，认亏走人
+      - 赚钱 + 蓄势期 → 部分止盈，留底仓等突破
+      - 亏钱 + 主升期 → 持有，主升期大概率会回来
+    """
+    current = float(r.get("current") or 0)
+    support = float(r.get("support") or 0)
+    resistance = float(r.get("resistance") or 0)
+    confirm = float(r.get("confirm") or 0)
+    stop = float(r.get("stop") or 0)
+    major_stage = str(r.get("major_stage") or "")
+    momentum = str(r.get("short_term_momentum") or "")
+    
+    if current <= 0 or cost_price <= 0:
+        return []
+    
+    pnl_pct = (current - cost_price) / cost_price * 100
+    is_profit = pnl_pct >= 0
+    
+    lines: list[str] = ["", "📊 已有持仓评估", ""]
+    lines.append(f"  你的成本：{cost_price:.2f}")
+    lines.append(f"  现价：{current:.2f}（{'盈' if is_profit else '亏'} {abs(pnl_pct):.1f}%）")
+    lines.append(f"  阶段：{major_stage}期 + {momentum}")
+    lines.append("")
+    
+    # 根据盈亏+阶段给出建议
+    if is_profit:
+        if major_stage == "主升":
+            lines.append("  建议：持有，让利润跑")
+            lines.append("")
+            if resistance > 0:
+                lines.append(f"  如果反弹到 {resistance:.2f}（阻力位）→ 观察是否突破")
+            if confirm > 0:
+                lines.append(f"  如果站稳 {confirm:.2f}（确认位）→ 继续持有")
+            if stop > 0:
+                lines.append(f"  如果跌破 {stop:.2f}（止损位）→ 减仓")
+        elif major_stage == "派发":
+            lines.append("  建议：减仓，锁定利润")
+            lines.append("")
+            if resistance > 0:
+                lines.append(f"  如果反弹到 {resistance:.2f}（阻力位）→ 减仓 50%")
+            if stop > 0:
+                lines.append(f"  如果跌破 {stop:.2f}（止损位）→ 清仓")
+        elif major_stage == "蓄势":
+            lines.append("  建议：部分止盈，留底仓等突破")
+            lines.append("")
+            if resistance > 0:
+                lines.append(f"  如果反弹到 {resistance:.2f}（阻力位）→ 减仓 30%")
+            if confirm > 0:
+                lines.append(f"  如果站稳 {confirm:.2f}（确认位）→ 继续持有")
+        else:  # 衰退
+            lines.append("  建议：减仓，趋势转弱")
+            lines.append("")
+            if stop > 0:
+                lines.append(f"  如果跌破 {stop:.2f}（止损位）→ 清仓")
+    else:  # 亏损
+        if major_stage == "蓄势":
+            lines.append("  建议：持有，等反弹到成本价减仓")
+            lines.append("")
+            lines.append(f"  如果反弹到 {cost_price:.2f}（成本价）→ 减仓 50%，保本走人")
+            if support > 0:
+                lines.append(f"  如果跌破 {support:.2f}（支撑位）→ 止损，认亏走人")
+            if confirm > 0:
+                lines.append(f"  如果站稳 {confirm:.2f}（确认位）→ 继续持有，等突破")
+        elif major_stage == "主升":
+            lines.append("  建议：持有，主升期大概率会回来")
+            lines.append("")
+            lines.append(f"  如果反弹到 {cost_price:.2f}（成本价）→ 观察是否继续上涨")
+            if stop > 0:
+                lines.append(f"  如果跌破 {stop:.2f}（止损位）→ 止损")
+        elif major_stage == "衰退":
+            lines.append("  建议：止损，认亏走人")
+            lines.append("")
+            lines.append(f"  现价 {current:.2f} 已亏损 {abs(pnl_pct):.1f}%，趋势转弱")
+            if stop > 0:
+                lines.append(f"  如果跌破 {stop:.2f}（止损位）→ 立刻止损")
+        else:  # 派发
+            lines.append("  建议：减仓，减少损失")
+            lines.append("")
+            lines.append(f"  如果反弹到 {cost_price:.2f}（成本价）→ 减仓 50%")
+            if stop > 0:
+                lines.append(f"  如果跌破 {stop:.2f}（止损位）→ 清仓")
+    
+    return lines
+
+
+def _analyze_buy_conditions(
+    r: dict[str, Any],
+    current: float,
+    support: float,
+    confirm: float,
+    stop: float,
+    low_zone: str,
+) -> list[str]:
+    """分析买入条件（简化买点逻辑）。
+
+    必要条件：价格到支撑位 → 买 10%
+    加分条件（满足越多仓位越大）：
+      1. 缩量回踩（量比 < 0.8）
+      2. RSI 偏低（RSI < 50）
+      3. MACD 金叉或柱状线转正
+      4. 价格在 EXPMA(10) 上
+      5. 威科夫 LPS 确认
+
+    仓位规则：
+      - 必要条件 + 3/5 加分 → 加 10%
+      - 必要条件 + 5/5 加分 → 加 15%
+      - 必要条件 + 0/5 加分 → 不加
+    """
+    lines: list[str] = []
+    
+    # 必要条件：价格在支撑位附近
+    at_support = support > 0 and abs(current - support) / max(support, 1) < 0.03
+    
+    if not at_support:
+        lines.append("  动作：等待")
+        lines.append(f"  理由：价格未到支撑位 {support:.2f}")
+        return lines
+    
+    # 加分条件检查
+    bonus_conditions = []
+    
+    # 1. 缩量回踩（量比 < 0.8）
+    bars = r.get("bars", [])
+    if bars and len(bars) >= 10:
+        recent_vol = sum(float(b.get("volume") or 0) for b in bars[-3:]) / 3
+        earlier_vol = sum(float(b.get("volume") or 0) for b in bars[-10:-3]) / 7
+        if earlier_vol > 0 and recent_vol < earlier_vol * 0.8:
+            bonus_conditions.append("缩量回踩")
+    
+    # 2. RSI 偏低（RSI < 50）
+    momentum_data = r.get("momentum", {})
+    if isinstance(momentum_data, dict):
+        rsi = momentum_data.get("rsi", 50)
+        if rsi < 50:
+            bonus_conditions.append("RSI偏低")
+    
+    # 3. MACD 金叉或柱状线转正
+    macd_data = r.get("macd_status", {})
+    if isinstance(macd_data, dict):
+        if macd_data.get("golden_cross") or macd_data.get("positive"):
+            bonus_conditions.append("MACD转正")
+    
+    # 4. 价格在 EXPMA(10) 上
+    expma10 = r.get("expma10")
+    if expma10 and current > expma10:
+        bonus_conditions.append("站上EXPMA(10)")
+    
+    # 5. 威科夫 LPS 确认
+    wyckoff = r.get("wyckoff", {})
+    if isinstance(wyckoff, dict) and wyckoff.get("lps_signal"):
+        bonus_conditions.append("威科夫LPS确认")
+    
+    # 计算仓位
+    bonus_count = len(bonus_conditions)
+    if bonus_count >= 5:
+        position_pct = 15
+    elif bonus_count >= 3:
+        position_pct = 10
+    else:
+        position_pct = 0
+    
+    # 输出
+    if position_pct > 0:
+        lines.append(f"  动作：可以试探买 {position_pct}%")
+        lines.append(f"  理由：到达支撑位 + {bonus_count}/5 加分条件满足")
+        if bonus_conditions:
+            lines.append(f"  加分项：{'、'.join(bonus_conditions)}")
+        lines.append(f"  如果买：在 {low_zone} 试探买 {position_pct}%, 止损 {stop:.2f}")
+        if confirm > 0:
+            lines.append(f"  关注：站稳 {confirm:.2f} 可加仓")
+    else:
+        lines.append("  动作：等待")
+        lines.append(f"  理由：到达支撑位但加分条件不足（{bonus_count}/5）")
+        if bonus_conditions:
+            lines.append(f"  已满足：{'、'.join(bonus_conditions)}")
+        lines.append(f"  建议：等条件满足后再买")
+    
+    return lines
+
+
 def _build_today_action_section(r: dict[str, Any]) -> list[str]:
     """构建 🎯 今日行动 输出段落。
 
@@ -1345,12 +1634,13 @@ def _build_today_action_section(r: dict[str, Any]) -> list[str]:
         if ps_stop > 0:
             lines.append(f"  止损：{ps_stop:.2f}")
     elif stage_action in ("试探买", "加仓") and momentum in ("走强", "修复"):
-        # 买入信号
-        lines.append("  动作：可以试探买")
-        lines.append(f"  理由：{major_stage}期{momentum}")
-        lines.append(f"  如果买：在 {low_zone} 试探买 5%, 止损 {stop:.2f}")
-        if confirm > 0:
-            lines.append(f"  关注：站稳 {confirm:.2f} 可加仓")
+        # 买入信号（简化买点逻辑）
+        buy_analysis = _analyze_buy_conditions(r, current, support, confirm, stop, low_zone)
+        lines.extend(buy_analysis)
+    elif support > 0 and low_zone and current >= float(low_zone.split("-")[0]) and current <= float(low_zone.split("-")[1].replace("元", "")):
+        # Bug fix: 价格在买入区间内时，显示"可以试探买"
+        buy_analysis = _analyze_buy_conditions(r, current, support, confirm, stop, low_zone)
+        lines.extend(buy_analysis)
     elif major_stage == "主升" and momentum == "走强":
         # 持有信号
         lines.append("  动作：持有")
@@ -1370,6 +1660,98 @@ def _build_today_action_section(r: dict[str, Any]) -> list[str]:
         lines.append(f"  仓位状态：{ps_state}")
 
     return lines
+
+
+def _check_wyckoff_bc_confirmation(r: dict[str, Any]) -> dict[str, Any]:
+    """检查 BC（购买高潮）信号的共振确认。
+
+    BC 确认指标（3/5 确认 = 信号可信）：
+      1. RSI > 70（超买）
+      2. MACD 顶背离
+      3. 量比 > 2.0（天量）
+      4. 涨幅 < 1%（滞涨）
+      5. 价格跌破 EXPMA(10)（趋势转弱）
+    """
+    confirmed_count = 0
+    reasons = []
+    
+    # 1. RSI > 70（超买）
+    momentum_data = r.get("momentum", {})
+    if isinstance(momentum_data, dict):
+        rsi = momentum_data.get("rsi", 50)
+        if rsi > 70:
+            confirmed_count += 1
+            reasons.append(f"RSI超买({rsi:.0f})")
+    
+    # 2. MACD 顶背离
+    macd_data = r.get("macd_status", {})
+    if isinstance(macd_data, dict):
+        if macd_data.get("death_cross") or not macd_data.get("positive"):
+            confirmed_count += 1
+            reasons.append("MACD转弱")
+    
+    # 3. 量比 > 2.0（天量）
+    volume_text = r.get("volume_text", "")
+    if "放量" in volume_text or "天量" in volume_text:
+        confirmed_count += 1
+        reasons.append("天量")
+    
+    # 4. 涨幅 < 1%（滞涨）
+    change_pct = float(r.get("change_pct") or 0)
+    if abs(change_pct) < 1.0:
+        confirmed_count += 1
+        reasons.append("滞涨")
+    
+    # 5. 价格跌破 EXPMA(10)（趋势转弱）
+    expma10 = r.get("expma10")
+    current = float(r.get("current") or 0)
+    if expma10 and current < expma10:
+        confirmed_count += 1
+        reasons.append("跌破EXPMA(10)")
+    
+    return {
+        "confirmed": confirmed_count >= 3,
+        "count": confirmed_count,
+        "reason": "、".join(reasons) if reasons else "无共振确认",
+    }
+
+
+def _check_wyckoff_utad_confirmation(r: dict[str, Any]) -> dict[str, Any]:
+    """检查 UTAD（上冲回落）信号的共振确认。
+
+    UTAD 确认指标（3/3 确认 = 信号可信）：
+      1. 价格突破后跌回
+      2. 量比 > 1.5（放量）
+      3. 价格跌回 EXPMA(10) 下方
+    """
+    confirmed_count = 0
+    reasons = []
+    
+    # 1. 价格突破后跌回（检查是否从高位回落）
+    current = float(r.get("current") or 0)
+    resistance = float(r.get("resistance") or 0)
+    confirm = float(r.get("confirm") or 0)
+    if resistance > 0 and current < resistance * 0.98:
+        confirmed_count += 1
+        reasons.append("价格回落")
+    
+    # 2. 量比 > 1.5（放量）
+    volume_text = r.get("volume_text", "")
+    if "放量" in volume_text:
+        confirmed_count += 1
+        reasons.append("放量")
+    
+    # 3. 价格跌回 EXPMA(10) 下方
+    expma10 = r.get("expma10")
+    if expma10 and current < expma10:
+        confirmed_count += 1
+        reasons.append("跌破EXPMA(10)")
+    
+    return {
+        "confirmed": confirmed_count >= 3,
+        "count": confirmed_count,
+        "reason": "、".join(reasons) if reasons else "无共振确认",
+    }
 
 
 def _build_signal_alert_section(r: dict[str, Any]) -> list[str]:
@@ -1410,17 +1792,33 @@ def _build_signal_alert_section(r: dict[str, Any]) -> list[str]:
     warning_level = chip_migration.get("warning_level", "none")
     warning_text = chip_migration.get("warning_text", "")
 
-    # BC 信号
+    # BC 信号（威科夫共振确认）
     if bc_signal:
-        alerts.append(f"  🔴 购买高潮（BC）信号")
-        alerts.append(f"    {bc_reason}")
-        alerts.append(f"    动作：减仓 1/3")
+        bc_confirmation = _check_wyckoff_bc_confirmation(r)
+        if bc_confirmation["confirmed"]:
+            alerts.append(f"  🔴 购买高潮（BC）信号 - 已确认")
+            alerts.append(f"    {bc_reason}")
+            alerts.append(f"    共振确认：{bc_confirmation['reason']}")
+            alerts.append(f"    动作：减仓 1/3")
+        else:
+            alerts.append(f"  ⚠️ 购买高潮（BC）信号 - 待确认")
+            alerts.append(f"    {bc_reason}")
+            alerts.append(f"    需要更多指标确认：{bc_confirmation['reason']}")
+            alerts.append(f"    动作：关注，准备减仓")
 
-    # UTAD 信号
+    # UTAD 信号（威科夫共振确认）
     if utad_signal:
-        alerts.append(f"  🔴 上冲回落（UTAD）信号")
-        alerts.append(f"    {utad_reason}")
-        alerts.append(f"    动作：立刻减仓")
+        utad_confirmation = _check_wyckoff_utad_confirmation(r)
+        if utad_confirmation["confirmed"]:
+            alerts.append(f"  🔴 上冲回落（UTAD）信号 - 已确认")
+            alerts.append(f"    {utad_reason}")
+            alerts.append(f"    共振确认：{utad_confirmation['reason']}")
+            alerts.append(f"    动作：立刻减仓")
+        else:
+            alerts.append(f"  ⚠️ 上冲回落（UTAD）信号 - 待确认")
+            alerts.append(f"    {utad_reason}")
+            alerts.append(f"    需要更多指标确认：{utad_confirmation['reason']}")
+            alerts.append(f"    动作：关注，准备减仓")
 
     # SOW 信号
     if sow_signal:
@@ -1443,7 +1841,8 @@ def _build_signal_alert_section(r: dict[str, Any]) -> list[str]:
     if breakout and breakout.get("add_on_pullback"):
         current = float(r.get("current") or 0)
         confirm = float(r.get("confirm") or 0)
-        if confirm > 0 and current >= confirm * 0.98:
+        # Bug fix: 改为严格判断 current >= confirm，不再使用 0.98 容差
+        if confirm > 0 and current >= confirm:
             alerts.append(f"  🟢 突破确认")
             alerts.append(f"    价格站稳确认位 {confirm:.2f}")
             alerts.append(f"    止损上移到 {breakout.get('new_stop', 0):.2f}")

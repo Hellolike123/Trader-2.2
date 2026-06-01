@@ -1297,10 +1297,13 @@ def evaluate_position_state(
 
     # 主升浪跟踪
     if conditions["stage_markup"]:
+        # 底仓止损：上移到阻力位（更宽的止损）
+        base_stop = round(resistance * 0.98, 2) if resistance > 0 else atr_stop
+        
         if conditions["chip_stable"] and conditions["expma10_up"]:
             return _make_position_state(
                 "主升浪跟踪", "主升期+筹码稳定+EXPMA(10)支撑，持有",
-                0, conditions, stop_price=expma10 if expma10 else atr_stop,
+                0, conditions, stop_price=expma10 if expma10 else base_stop,
             )
         if not conditions["chip_stable"]:
             return _make_position_state(
@@ -1309,7 +1312,7 @@ def evaluate_position_state(
             )
         return _make_position_state(
             "主升浪跟踪", "主升期，持有观察",
-            0, conditions, stop_price=atr_stop,
+            0, conditions, stop_price=base_stop,
         )
 
     # 回踩加仓（蓄势期+回踩支撑+条件满足）
@@ -1318,23 +1321,30 @@ def evaluate_position_state(
         add_score = _calc_pullback_add_score(
             conditions, bars, current_price, support, atr14,
         )
+        
+        # 加仓独立止损：设在回踩支撑位下方（比底仓止损更窄）
+        add_on_stop = round(support - 1.0 * atr14, 2) if support > 0 and atr14 > 0 else round(current_price * 0.97, 2)
+        
         if add_score >= 5:
             return _make_position_state(
                 "回踩加仓", f"回踩支撑+条件满足（{add_score}/5），加仓15%",
-                15, conditions, stop_price=atr_stop,
+                15, conditions, stop_price=add_on_stop,
             )
         if add_score >= 3:
             return _make_position_state(
                 "回踩加仓", f"回踩支撑+部分条件满足（{add_score}/5），加仓10%",
-                10, conditions, stop_price=atr_stop,
+                10, conditions, stop_price=add_on_stop,
             )
         return _make_position_state(
             "回踩加仓", f"回踩支撑但条件不足（{add_score}/5），观望",
-            0, conditions, stop_price=atr_stop,
+            0, conditions, stop_price=add_on_stop,
         )
 
     # 阻力位分歧（到达阻力位）
     if conditions["at_resistance"]:
+        # 阻力位由客观量价表现决定：弱→止盈，强→等回踩加仓
+        resistance_strength = _assess_resistance_strength(bars, current_price, resistance)
+        
         if bc_signal:
             return _make_position_state(
                 "阻力位分歧", "到达阻力位+BC信号，减仓1/3",
@@ -1345,11 +1355,33 @@ def evaluate_position_state(
                 "阻力位分歧", "突破阻力位确认，继续持有",
                 0, conditions, stop_price=atr_stop,
             )
+        if resistance_strength == "weak":
+            return _make_position_state(
+                "阻力位分歧", "阻力位弱势，可以止盈",
+                0, conditions, stop_price=atr_stop,
+            )
         return _make_position_state(
             "阻力位分歧", "到达阻力位，观察量能",
             0, conditions, stop_price=atr_stop,
         )
 
+    # 退出再买逻辑（需要满足条件才能买回）
+    if not has_position and conditions.get("exit_reentry", False):
+        # 退出再买条件：
+        # 必要条件：价格回到支撑位 + 支撑位没破
+        # 加分条件：缩量止跌 / 价格站上 EXPMA(10) / RSI 回升 / 阶段没变坏
+        reentry_score = _calc_reentry_score(conditions, bars, current_price, support, expma10)
+        if reentry_score >= 2:
+            return _make_position_state(
+                "初始建仓", f"退出再买条件满足（{reentry_score}/4），可以买回10%",
+                10, conditions, stop_price=atr_stop,
+            )
+        else:
+            return _make_position_state(
+                "空仓", f"退出再买条件不足（{reentry_score}/4），继续等待",
+                0, conditions,
+            )
+    
     # 默认：持有观察
     return _make_position_state(
         "初始建仓", "持仓观察中",
@@ -1375,6 +1407,94 @@ def _calc_pullback_add_score(
       4. RSI 超卖区反弹（1分）
       5. MACD 底背离或金叉（1分）
     """
+
+
+def _calc_reentry_score(
+    conditions: dict[str, bool],
+    bars: list[dict[str, Any]] | None,
+    current_price: float,
+    support: float,
+    expma10: float | None,
+) -> int:
+    """计算退出再买条件评分（满分4分）。
+
+    必要条件（1分）：
+      1. 价格回到支撑位附近
+
+    加分条件（3分）：
+      2. 缩量止跌（1分）
+      3. 价格站上 EXPMA(10)（1分）
+      4. 阶段没变坏（1分）
+    """
+    score = 0
+    
+    # 必要条件：价格回到支撑位附近
+    if support > 0 and abs(current_price - support) / max(support, 1) < 0.03:
+        score += 1
+    
+    # 加分条件：缩量止跌
+    if bars and len(bars) >= 10:
+        recent_vol = sum(float(b.get("volume") or 0) for b in bars[-3:]) / 3
+        earlier_vol = sum(float(b.get("volume") or 0) for b in bars[-10:-3]) / 7
+        if earlier_vol > 0 and recent_vol < earlier_vol * 0.8:
+            score += 1
+    
+    # 加分条件：价格站上 EXPMA(10)
+    if expma10 and current_price > expma10:
+        score += 1
+    
+    # 加分条件：阶段没变坏（不是衰退期）
+    if not conditions.get("stage_decline", False):
+        score += 1
+    
+    return score
+
+
+def _assess_resistance_strength(
+    bars: list[dict[str, Any]] | None,
+    current_price: float,
+    resistance: float,
+) -> str:
+    """评估阻力位强度。
+
+    弱阻力（可以止盈）：
+      - 连续2日缩量
+      - 价格在阻力位附近震荡
+
+    强阻力（等回踩加仓）：
+      - 放量突破
+      - 大阳线突破
+
+    Returns:
+        "weak" 或 "strong"
+    """
+    if not bars or len(bars) < 10 or resistance <= 0:
+        return "strong"  # 默认认为强阻力
+    
+    recent3 = bars[-3:]
+    
+    # 检查是否缩量
+    recent_vol = sum(float(b.get("volume") or 0) for b in recent3) / 3
+    earlier_vol = sum(float(b.get("volume") or 0) for b in bars[-10:-3]) / 7
+    is_low_volume = earlier_vol > 0 and recent_vol < earlier_vol * 0.8
+    
+    # 检查是否在阻力位附近震荡
+    near_resistance = abs(current_price - resistance) / max(resistance, 1) < 0.02
+    
+    # 检查是否有大阳线突破
+    has_big_green = False
+    for bar in recent3:
+        open_p = float(bar.get("open") or 0)
+        close_p = float(bar.get("close") or 0)
+        if open_p > 0 and close_p > open_p * 1.03:  # 涨幅 > 3%
+            has_big_green = True
+            break
+    
+    # 弱阻力：缩量 + 在阻力位附近震荡 + 没有大阳线突破
+    if is_low_volume and near_resistance and not has_big_green:
+        return "weak"
+    
+    return "strong"
     score = 0
 
     # 必要条件
