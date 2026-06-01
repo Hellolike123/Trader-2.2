@@ -168,7 +168,12 @@ No active task. **A Direct answer** — pure Q&A / explanation / lookup / chat; 
 [workflow-state:planning]
 Load the `trellis-brainstorm` skill and iterate on prd.md with the user.
 Phase 1.3 (required, once): before `task.py start`, you MUST curate `implement.jsonl` and `check.jsonl` — list the spec / research files sub-agents need so they get the right context injected. You may skip only if the jsonl already has agent-curated entries (the seed `_example` row alone doesn't count).
-Then run `task.py start <task-dir>` to flip status to in_progress.
+**Phase 1.4 Gate (required, once)**: Before running `task.py start`, you MUST:
+1. Present a concise PRD summary to the user (goal, key requirements, acceptance criteria, out of scope)
+2. Ask: "PRD 确认完毕，开始实现？"
+3. Wait for explicit user confirmation (e.g., "ok", "可以", "开始")
+4. Only then run `task.py start <task-dir>` to flip status to in_progress
+Do NOT auto-proceed without user confirmation.
 [/workflow-state:planning]
 
 <!-- Per-turn breadcrumb: shown throughout Phase 1 when codex.dispatch_mode=inline.
@@ -180,7 +185,12 @@ Then run `task.py start <task-dir>` to flip status to in_progress.
 [workflow-state:planning-inline]
 Load the `trellis-brainstorm` skill and iterate on prd.md with the user.
 Phase 1.3 jsonl curation is **skipped** in inline dispatch mode — the main session loads `trellis-before-dev` directly in Phase 2 and reads spec context itself, so there is no sub-agent to inject jsonl into.
-Then run `task.py start <task-dir>` to flip status to in_progress.
+**Phase 1.4 Gate (required, once)**: Before running `task.py start`, you MUST:
+1. Present a concise PRD summary to the user (goal, key requirements, acceptance criteria, out of scope)
+2. Ask: "PRD 确认完毕，开始实现？"
+3. Wait for explicit user confirmation (e.g., "ok", "可以", "开始")
+4. Only then run `task.py start <task-dir>` to flip status to in_progress
+Do NOT auto-proceed without user confirmation.
 [/workflow-state:planning-inline]
 
 ### Phase 2: Execute
