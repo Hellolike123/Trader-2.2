@@ -92,7 +92,7 @@ from datetime import date
 import os
 
 def _get_cost_from_signals(target: str) -> float:
-    """从 signals.jsonl 中获取买入成本价。"""
+    """从 signals.jsonl 中获取买入成本价（只读最近100条）。"""
     try:
         signals_path = os.path.expanduser("~/.trader/signals.jsonl")
         if not os.path.exists(signals_path):
@@ -101,8 +101,10 @@ def _get_cost_from_signals(target: str) -> float:
         # 标准化 target 用于匹配
         normalized_target = target.replace(".SH", "").replace(".SZ", "").strip()
         
+        # 只读最近100条，避免大文件性能问题
         with open(signals_path, "r", encoding="utf-8") as f:
-            for line in f:
+            lines = f.readlines()[-100:]
+            for line in lines:
                 try:
                     signal = json.loads(line.strip())
                     symbol = str(signal.get("symbol", "")).replace(".SH", "").replace(".SZ", "").strip()
@@ -773,7 +775,7 @@ def sync_report_with_data(report: dict, levels: dict) -> dict:
     if take > 0 and confirm > 0 and take <= confirm:
         report["take"] = max(current * 1.05, confirm * 1.03)
     # 场景与数值的逻辑一致性
-    if scene in ("突破确认", "突破观察") and current < confirm:
+    if scene in ("突破确认", "突破观察") and round(current, 2) < round(confirm, 2):
         report["scene"]        = "观望"
         report["state_label"]  = "未确认"
     elif scene in ("低吸观察", "防守观察") and current < support and support > 0:
@@ -937,10 +939,13 @@ def render_markdown(r: dict[str, Any]) -> str:
     ma20 = ma_raw.get("ma20")
     ma30 = ma_raw.get("ma30")
     ma250_val = r.get("ma250")
-    current_price = float(r.get("current") or 0)
-    if (ma250_val and current_price > ma250_val and
-        ma5 and ma10 and ma20 and ma30 and
-        ma5 > ma10 > ma20 > ma30):
+    try:
+        current_price = float(r.get("current") or 0)
+    except (TypeError, ValueError):
+        current_price = 0.0
+    if (ma250_val and current_price > 0 and current_price > ma250_val and
+        ma5 and ma10 and ma20 and ma30 and ma250_val and
+        ma5 > ma10 > ma20 > ma30 > ma250_val):
         lines.append("")
         lines.append("✅ 趋势强势：价格在 250 日线上方，均线多头排列")
 
@@ -1708,9 +1713,9 @@ def _check_wyckoff_bc_confirmation(r: dict[str, Any]) -> dict[str, Any]:
             confirmed_count += 1
             reasons.append("MACD转弱")
     
-    # 3. 量比 > 2.0（天量）
-    volume_text = r.get("volume_text", "")
-    if "放量" in volume_text or "天量" in volume_text:
+    # 3. 量比 > 2.0（天量）— 用数值判断，不用字符串
+    atr_ratio = float(r.get("atr_ratio") or 0)
+    if atr_ratio > 2.0:
         confirmed_count += 1
         reasons.append("天量")
     
@@ -1745,17 +1750,18 @@ def _check_wyckoff_utad_confirmation(r: dict[str, Any]) -> dict[str, Any]:
     confirmed_count = 0
     reasons = []
     
-    # 1. 价格突破后跌回（检查是否从高位回落）
+    # 1. 价格突破后跌回（检查是否从高位回落）— 用 ATR 而非硬编码 2%
     current = float(r.get("current") or 0)
     resistance = float(r.get("resistance") or 0)
-    confirm = float(r.get("confirm") or 0)
-    if resistance > 0 and current < resistance * 0.98:
+    atr14 = float(r.get("atr14") or 0)
+    atr_threshold = atr14 * 0.5 if atr14 > 0 else resistance * 0.02  # 半个ATR或2%
+    if resistance > 0 and current < resistance - atr_threshold:
         confirmed_count += 1
         reasons.append("价格回落")
     
-    # 2. 量比 > 1.5（放量）
-    volume_text = r.get("volume_text", "")
-    if "放量" in volume_text:
+    # 2. 量比 > 1.5（放量）— 用数值判断
+    atr_ratio = float(r.get("atr_ratio") or 0)
+    if atr_ratio > 1.5:
         confirmed_count += 1
         reasons.append("放量")
     

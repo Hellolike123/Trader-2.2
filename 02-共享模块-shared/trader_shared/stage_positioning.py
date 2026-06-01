@@ -1323,7 +1323,9 @@ def evaluate_position_state(
         )
         
         # 加仓独立止损：设在回踩支撑位下方（比底仓止损更窄）
-        add_on_stop = round(support - 1.0 * atr14, 2) if support > 0 and atr14 > 0 else round(current_price * 0.97, 2)
+        # 使用 1.0×ATR 作为止损距离（可配置）
+        _ADD_ON_STOP_ATR_MULTIPLE = 1.0
+        add_on_stop = round(support - _ADD_ON_STOP_ATR_MULTIPLE * atr14, 2) if support > 0 and atr14 > 0 else round(current_price * 0.97, 2)
         
         if add_score >= 5:
             return _make_position_state(
@@ -1407,6 +1409,49 @@ def _calc_pullback_add_score(
       4. RSI 超卖区反弹（1分）
       5. MACD 底背离或金叉（1分）
     """
+    score = 0
+
+    # 必要条件1：到达支撑位附近（1分）
+    if support > 0 and abs(current_price - support) / max(support, 1) < 0.03:
+        score += 1
+
+    # 必要条件2：出现止跌信号（1分）— 价格企稳（近3天未创新低）
+    if bars and len(bars) >= 3:
+        recent_lows = [float(b.get("low") or 0) for b in bars[-3:]]
+        if min(recent_lows) >= support * 0.98:
+            score += 1
+
+    # 加分条件3：缩量回踩（1分）
+    if bars and len(bars) >= 10:
+        recent_vol = sum(float(b.get("volume") or 0) for b in bars[-3:]) / 3
+        earlier_vol = sum(float(b.get("volume") or 0) for b in bars[-10:-3]) / 7
+        if earlier_vol > 0 and recent_vol < earlier_vol * 0.8:
+            score += 1
+
+    # 加分条件4：RSI 超卖区反弹（1分）
+    if bars and len(bars) >= 14:
+        closes = [float(b.get("close") or 0) for b in bars[-14:] if b.get("close")]
+        if len(closes) >= 14:
+            gains = [max(0, closes[i] - closes[i-1]) for i in range(1, len(closes))]
+            losses = [max(0, closes[i-1] - closes[i]) for i in range(1, len(closes))]
+            avg_gain = sum(gains) / len(gains) if gains else 0
+            avg_loss = sum(losses) / len(losses) if losses else 0
+            rs = avg_gain / max(avg_loss, 0.01)
+            rsi = 100 - (100 / (1 + rs))
+            if rsi < 40:
+                score += 1
+
+    # 加分条件5：MACD 金叉（1分）
+    if bars and len(bars) >= 26:
+        closes = [float(b.get("close") or 0) for b in bars[-26:] if b.get("close")]
+        if len(closes) >= 26:
+            ema12 = sum(closes[-12:]) / 12
+            ema26 = sum(closes[-26:]) / 26
+            macd_line = ema12 - ema26
+            if macd_line > 0:
+                score += 1
+
+    return score
 
 
 def _calc_reentry_score(
