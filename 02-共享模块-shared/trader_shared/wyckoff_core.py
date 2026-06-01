@@ -26,6 +26,129 @@ except ImportError:
 
 _VOL_SPIKE_THRESHOLD = 1.2
 
+# ── BC (Buying Climax) 购买高潮检测 ──
+# 量化条件：量比 > 2.0 且 涨幅 < 1% 且 上影线 > 2%
+_BC_VOL_RATIO_THRESHOLD = 2.0
+_BC_CHANGE_THRESHOLD = 1.0
+_BC_UPPER_SHADOW_RATIO = 0.02
+
+
+def _detect_buying_climax(bars: list[dict]) -> dict:
+    """Detect Buying Climax (BC) — 天量滞涨，高位放量阴线。
+
+    Returns:
+        dict with keys: bc_signal (bool), bc_reason (str), bc_price (float)
+    """
+    if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1:
+        return {"bc_signal": False, "bc_reason": "数据不足", "bc_price": 0.0}
+
+    recent = bars[-(WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1):-1]
+    current = bars[-1]
+
+    cur_open = to_float(current.get("open"))
+    cur_high = to_float(current.get("high"))
+    cur_low = to_float(current.get("low"))
+    cur_close = to_float(current.get("close"))
+    cur_volume = to_float(current.get("volume"))
+
+    if any(v is None for v in [cur_open, cur_high, cur_low, cur_close, cur_volume]):
+        return {"bc_signal": False, "bc_reason": "数据异常", "bc_price": 0.0}
+
+    # 量比计算
+    avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
+    if avg_volume <= 0:
+        return {"bc_signal": False, "bc_reason": "历史成交量异常", "bc_price": 0.0}
+
+    vol_ratio = cur_volume / avg_volume
+
+    # 涨幅计算
+    price_range = cur_high - cur_low if cur_high != cur_low else 1.0
+    change_pct = abs(cur_close - cur_open) / max(price_range, 0.01) * 100
+
+    # 上影线比例
+    real_body_top = max(cur_open, cur_close)
+    upper_shadow = cur_high - real_body_top
+    upper_shadow_ratio = upper_shadow / max(price_range, 0.01)
+
+    # BC 条件
+    if vol_ratio < _BC_VOL_RATIO_THRESHOLD:
+        return {"bc_signal": False, "bc_reason": "量比不足", "bc_price": 0.0}
+
+    # 天量 + 滞涨（收盘接近开盘或阴线）
+    is_stagnant = change_pct < _BC_CHANGE_THRESHOLD
+    has_upper_shadow = upper_shadow_ratio > _BC_UPPER_SHADOW_RATIO
+
+    if not (is_stagnant or (cur_close < cur_open)):
+        return {"bc_signal": False, "bc_reason": "未出现滞涨", "bc_price": 0.0}
+
+    parts = []
+    parts.append(f"量比 {vol_ratio:.1f}")
+    if is_stagnant:
+        parts.append(f"涨幅仅 {change_pct:.1f}%")
+    if has_upper_shadow:
+        parts.append("上影线明显")
+    if cur_close < cur_open:
+        parts.append("收阴")
+
+    return {
+        "bc_signal": True,
+        "bc_reason": "天量滞涨，购买高潮信号：" + "，".join(parts),
+        "bc_price": round(cur_high, 2),
+    }
+
+
+# ── SOW (Sign of Weakness) 弱势信号检测 ──
+_SOW_SUPPORT_LOOKBACK = 10
+
+
+def _detect_sign_of_weakness(bars: list[dict]) -> dict:
+    """Detect Sign of Weakness (SOW) — 价格跌破支撑且放量。
+
+    Returns:
+        dict with keys: sow_signal (bool), sow_reason (str), sow_price (float)
+    """
+    if len(bars) < _SOW_SUPPORT_LOOKBACK + 1:
+        return {"sow_signal": False, "sow_reason": "数据不足", "sow_price": 0.0}
+
+    recent = bars[-(_SOW_SUPPORT_LOOKBACK + 1):-1]
+    current = bars[-1]
+
+    low_values = [to_float(b["low"]) for b in recent]
+    valid_lows = [v for v in low_values if v is not None]
+    cur_low = to_float(current.get("low"))
+    cur_close = to_float(current.get("close"))
+    cur_volume = to_float(current.get("volume"))
+
+    if cur_low is None or cur_close is None or cur_volume is None or not valid_lows:
+        return {"sow_signal": False, "sow_reason": "数据异常", "sow_price": 0.0}
+
+    support = min(valid_lows)
+
+    # 跌破支撑
+    if cur_low >= support:
+        return {"sow_signal": False, "sow_reason": "未跌破支撑", "sow_price": 0.0}
+
+    # 放量确认
+    avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
+    is_high_volume = avg_volume > 0 and cur_volume > avg_volume * _VOL_SPIKE_THRESHOLD
+
+    if not is_high_volume:
+        return {"sow_signal": False, "sow_reason": "缩量跌破，非弱势信号", "sow_price": 0.0}
+
+    # 收盘在支撑下方（真跌破）
+    if cur_close >= support:
+        return {
+            "sow_signal": True,
+            "sow_reason": f"放量跌破支撑 {support:.2f} 后收回，弱势警告",
+            "sow_price": round(support, 2),
+        }
+
+    return {
+        "sow_signal": True,
+        "sow_reason": f"放量跌破支撑 {support:.2f}，弱势信号",
+        "sow_price": round(support, 2),
+    }
+
 
 def _detect_spring(bars: list[dict]) -> dict:
     if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1:
@@ -130,6 +253,12 @@ def wyckoff_analysis(bars: list[dict]) -> dict:
             "upthrust_signal": False,
             "upthrust_reason": "数据不足",
             "upthrust_price": None,
+            "bc_signal": False,
+            "bc_reason": "数据不足",
+            "bc_price": None,
+            "sow_signal": False,
+            "sow_reason": "数据不足",
+            "sow_price": None,
             "bearish_volume_divergence": False,
             "bullish_volume_divergence": False,
             "wyckoff_summary": "K线数据不足，无法进行威科夫分析",
@@ -137,6 +266,8 @@ def wyckoff_analysis(bars: list[dict]) -> dict:
 
     spring = _detect_spring(bars)
     upthrust = _detect_upthrust(bars)
+    bc = _detect_buying_climax(bars)
+    sow = _detect_sign_of_weakness(bars)
     bearish_div, bullish_div = _detect_volume_divergence(bars)
 
     parts = []
@@ -144,6 +275,10 @@ def wyckoff_analysis(bars: list[dict]) -> dict:
         parts.append(f"弹簧信号: {spring['spring_reason']}")
     if upthrust["upthrust_signal"]:
         parts.append(f"上冲回落信号: {upthrust['upthrust_reason']}")
+    if bc["bc_signal"]:
+        parts.append(f"购买高潮: {bc['bc_reason']}")
+    if sow["sow_signal"]:
+        parts.append(f"弱势信号: {sow['sow_reason']}")
     if bearish_div and bullish_div:
         parts.append("量价信号冲突，无法确定方向")
     elif bearish_div:
@@ -160,6 +295,12 @@ def wyckoff_analysis(bars: list[dict]) -> dict:
         "upthrust_signal": upthrust["upthrust_signal"],
         "upthrust_reason": upthrust["upthrust_reason"],
         "upthrust_price": round(upthrust["upthrust_price"], 2) if upthrust["upthrust_signal"] else None,
+        "bc_signal": bc["bc_signal"],
+        "bc_reason": bc["bc_reason"],
+        "bc_price": round(bc["bc_price"], 2) if bc["bc_signal"] else None,
+        "sow_signal": sow["sow_signal"],
+        "sow_reason": sow["sow_reason"],
+        "sow_price": round(sow["sow_price"], 2) if sow["sow_signal"] else None,
         "bearish_volume_divergence": bearish_div,
         "bullish_volume_divergence": bullish_div,
         "wyckoff_summary": "；".join(parts),
