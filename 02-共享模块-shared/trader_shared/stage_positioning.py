@@ -239,34 +239,37 @@ def _detect_major_stage(
 
 def _detect_short_term_momentum(
     current: float,
-    ma5: float | None,
-    ma10: float | None,
+    expma10: float | None,
+    expma20: float | None,
     change_pct: float,
     position_ratio: float,
 ) -> tuple[str, str]:
     """判定短期动能：走强/修复/震荡/转弱"""
-    if ma5 is None or ma10 is None:
-        return "震荡", "均线数据不足"
+    if expma10 is None or expma20 is None:
+        return "震荡", "EXPMA数据不足"
 
-    above_ma5 = current >= ma5
-    above_ma10 = current >= ma10
-    ma5_above_ma10 = ma5 > ma10
+    dist_to_expma20 = (current - expma20) / max(expma20, 1)
 
-    if above_ma5 and ma5_above_ma10 and change_pct > 1.0:
-        return "走强", "站上MA5且放量上涨"
-    if above_ma5 and ma5_above_ma10 and position_ratio >= 0.60:
-        return "走强", "站上MA5且接近确认区"
-    if above_ma5 and not ma5_above_ma10:
-        return "修复", "站上MA5但均线未确认"
-    if abs(current - ma10) / max(ma10, 1) < 0.02:
-        return "修复", "在MA10附近震荡"
-    if not above_ma5 and not ma5_above_ma10:
-        if change_pct < -2.0:
-            return "转弱", "跌破MA5且放量下跌"
-        return "转弱", "跌破MA5且均线死叉"
-    if not above_ma5 and ma5_above_ma10:
-        return "震荡", "跌破MA5但均线未死叉"
-    return "震荡", "无明确方向"
+    # 走强 (Strong)：现价站上 EXPMA(10) 且 EXPMA(10) > EXPMA(20)
+    if current >= expma10 and expma10 > expma20:
+        return "走强", "站上EXPMA(10)且多头排列"
+
+    # 修复 (Recovery)：现价在 EXPMA(10) 与 EXPMA(20) 之间
+    if min(expma10, expma20) <= current < max(expma10, expma20):
+        return "修复", "回踩生命线(EXPMA10/20之间)"
+
+    # 均线粘合优先判断为震荡
+    if abs(expma10 - expma20) / max(expma20, 1) < 0.01:
+        return "震荡", "EXPMA均线粘合"
+
+    if current < expma20:
+        if change_pct < -2.0 or expma10 < expma20:
+            return "转弱", "跌破EXPMA(20)且走势破位"
+        if abs(dist_to_expma20) < 0.03:
+            return "震荡", "跌破EXPMA(20)但距离不远"
+        return "转弱", "跌破EXPMA(20)且偏离较大"
+
+    return "震荡", "走势未匹配极强/极弱特征"
 
 
 # ── 四层防护机制 ──────────────────────────────────────────────
@@ -386,28 +389,28 @@ def _layer4_stage_lock(
 
 _DECISION_MATRIX: dict[str, dict[str, tuple[str, int]]] = {
     "蓄势": {
-        "走强": ("试探买", 10),
-        "修复": ("观察", 0),
-        "震荡": ("等待", 0),
-        "转弱": ("不碰", 0),
+        "走强": ("低吸试盘", 20),
+        "修复": ("回调低吸", 15),
+        "震荡": ("观望等待", 0),
+        "转弱": ("观望等待", 0),
     },
     "主升": {
-        "走强": ("加仓", 70),
-        "修复": ("持有", 50),
-        "震荡": ("持有", 50),
-        "转弱": ("减仓", 30),
+        "走强": ("顺势加仓", 60),
+        "修复": ("回踩加仓", 40),
+        "震荡": ("底仓持有", 20),
+        "转弱": ("跌破防线减仓", 20),
     },
     "派发": {
-        "走强": ("减仓", 30),
-        "修复": ("减仓", 20),
-        "震荡": ("减仓", 20),
-        "转弱": ("清仓", 0),
+        "走强": ("逢高减磅", 20),
+        "修复": ("逢反弹减仓", 10),
+        "震荡": ("逢反弹减仓", 10),
+        "转弱": ("清仓逃命", 0),
     },
     "衰退": {
-        "走强": ("不碰", 0),
-        "修复": ("不碰", 0),
-        "震荡": ("不碰", 0),
-        "转弱": ("不碰", 0),
+        "走强": ("空仓规避", 0),
+        "修复": ("空仓规避", 0),
+        "震荡": ("空仓规避", 0),
+        "转弱": ("空仓规避", 0),
     },
 }
 
@@ -556,8 +559,10 @@ def assess_stage(
     _save_stage_state(state)
 
     # 短期动能判定
+    expma10 = ma_values.get("expma10")
+    expma20 = ma_values.get("expma20")
     momentum, momentum_reason = _detect_short_term_momentum(
-        current, ma5, ma10, change_pct, position_ratio
+        current, expma10, expma20, change_pct, position_ratio
     )
 
     # 决策矩阵
@@ -728,143 +733,6 @@ def compute_stop_losses(
         "time_limit": {"days": time_days, "reason": time_reason},
         "chip_trailing": chip_trailing,
     }
-
-
-# ── 加仓/减仓/清仓条件自动检查 ────────────────────────────────
-
-def check_position_actions(
-    stage: str,
-    current: float,
-    support: float,
-    ma20: float | None,
-    ma5: float | None,
-    bars: list[dict[str, Any]] | None = None,
-    pnl_pct: float = 0.0,
-    holding_days: int = 0,
-) -> dict[str, Any]:
-    """自动检查加仓/减仓/清仓条件是否满足。
-
-    Returns:
-        {
-            "add": {"result": "✅"/"❌"/"⏳", "checks": [...]},
-            "reduce": {"result": "✅"/"❌"/"⏳", "checks": [...]},
-            "clear": {"result": "✅"/"❌"/"⏳", "checks": [...]},
-        }
-    """
-    result: dict[str, Any] = {"add": {}, "reduce": {}, "clear": {}}
-
-    # ── 加仓条件 ──
-    add_checks: list[dict[str, Any]] = []
-    if stage == "蓄势":
-        add_checks.append(_check("支撑位不破", current >= support * 0.98 if support > 0 else False))
-        add_checks.append(_check("缩量横盘", _is_low_volume(bars, 3)))
-        add_checks.append(_check("MA收敛", _is_ma_converging(ma5, ma10, ma20)))
-    elif stage == "主升":
-        add_checks.append(_check("放量突破", _is_high_volume(bars, 1)))
-        add_checks.append(_check("MA多头", _is_bullish_ma(ma5, ma10, ma20)))
-        add_checks.append(_check("回踩不破MA20", current >= (ma20 or 0) * 0.98 if ma20 else False))
-    else:
-        add_checks.append(_check(f"{stage}期不建议加仓", False))
-
-    # 硬规则：亏损不加仓
-    add_checks.append(_check("持仓盈利", pnl_pct >= 0))
-    result["add"] = _format_checks(add_checks)
-
-    # ── 减仓条件 ──
-    reduce_checks: list[dict[str, Any]] = []
-    if stage == "派发":
-        reduce_checks.append(_check("跌破MA20", current < (ma20 or float("inf"))))
-        reduce_checks.append(_check("放量", _is_high_volume(bars, 3)))
-        reduce_checks.append(_check("MA20走平", _is_ma_flat(ma20, bars)))
-    elif stage == "主升":
-        reduce_checks.append(_check("跌破MA20", current < (ma20 or float("inf"))))
-        reduce_checks.append(_check("连续3日确认", _is_below_ma_n_days(bars, ma20, 3)))
-    else:
-        reduce_checks.append(_check(f"{stage}期无需减仓", False))
-    result["reduce"] = _format_checks(reduce_checks)
-
-    # ── 清仓条件 ──
-    clear_checks: list[dict[str, Any]] = []
-    if stage == "衰退":
-        clear_checks.append(_check("MA空头排列", _is_bearish_ma(ma5, ma10, ma20)))
-        clear_checks.append(_check("放量下跌", _is_high_volume(bars, 1)))
-        clear_checks.append(_check("移动止损触发", current < (ma20 or float("inf")) * 0.95 if ma20 else False))
-    else:
-        clear_checks.append(_check(f"{stage}期无需清仓", False))
-    result["clear"] = _format_checks(clear_checks)
-
-    return result
-
-
-def _check(label: str, passed: bool) -> dict[str, Any]:
-    return {"label": label, "passed": passed}
-
-
-def _format_checks(checks: list[dict[str, Any]]) -> dict[str, Any]:
-    passed = sum(1 for c in checks if c["passed"])
-    total = len(checks)
-    if passed == total:
-        result = "✅"
-    elif passed == 0:
-        result = "❌"
-    else:
-        result = "⏳"
-    return {"result": result, "passed": passed, "total": total, "checks": checks}
-
-
-def _is_low_volume(bars: list[dict[str, Any]] | None, days: int) -> bool:
-    if not bars or len(bars) < 20:
-        return False
-    recent = bars[-days:]
-    earlier = bars[-20:-days] if len(bars) > days + 20 else bars[:20]
-    vol_recent = sum(float(b.get("volume") or 0) for b in recent) / max(len(recent), 1)
-    vol_earlier = sum(float(b.get("volume") or 0) for b in earlier) / max(len(earlier), 1)
-    return vol_earlier > 0 and vol_recent < vol_earlier * 0.8
-
-
-def _is_high_volume(bars: list[dict[str, Any]] | None, days: int) -> bool:
-    if not bars or len(bars) < 20:
-        return False
-    recent = bars[-days:]
-    earlier = bars[-20:-days] if len(bars) > days + 20 else bars[:20]
-    vol_recent = sum(float(b.get("volume") or 0) for b in recent) / max(len(recent), 1)
-    vol_earlier = sum(float(b.get("volume") or 0) for b in earlier) / max(len(earlier), 1)
-    return vol_earlier > 0 and vol_recent > vol_earlier * 1.2
-
-
-def _is_ma_converging(ma5: float | None, ma10: float | None, ma20: float | None) -> bool:
-    if not all(v is not None and v > 0 for v in [ma5, ma10, ma20]):
-        return False
-    spread = abs(ma5 - ma20) / ma20  # type: ignore[operator]
-    return spread < 0.03
-
-
-def _is_bullish_ma(ma5: float | None, ma10: float | None, ma20: float | None) -> bool:
-    if not all(v is not None and v > 0 for v in [ma5, ma10, ma20]):
-        return False
-    return ma5 > ma10 > ma20  # type: ignore[operator]
-
-
-def _is_bearish_ma(ma5: float | None, ma10: float | None, ma20: float | None) -> bool:
-    if not all(v is not None and v > 0 for v in [ma5, ma10, ma20]):
-        return False
-    return ma5 < ma10 < ma20  # type: ignore[operator]
-
-
-def _is_ma_flat(ma20: float | None, bars: list[dict[str, Any]] | None) -> bool:
-    if not bars or len(bars) < 10 or ma20 is None or ma20 <= 0:
-        return False
-    closes = [float(b.get("close") or 0) for b in bars[-10:]]
-    ma_early = sum(closes[:5]) / 5
-    ma_late = sum(closes[5:]) / 5
-    return abs(ma_early - ma_late) / max(ma20, 1) < 0.01
-
-
-def _is_below_ma_n_days(bars: list[dict[str, Any]] | None, ma: float | None, n: int) -> bool:
-    if not bars or len(bars) < n or ma is None or ma <= 0:
-        return False
-    recent = bars[-n:]
-    return all(float(b.get("close") or 0) < ma for b in recent)
 
 
 # ── 分批止盈计划 ──────────────────────────────────────────────

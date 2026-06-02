@@ -91,29 +91,34 @@ class TestDetectMajorStage:
 # ── _detect_short_term_momentum ──────────────────────────────────
 
 class TestDetectShortTermMomentum:
-    def test_strengthening(self):
-        """MA5 > MA10, change > 1% → 走强"""
+    def test_missing_data(self):
         from trader_shared.stage_positioning import _detect_short_term_momentum
-        momentum, reason = _detect_short_term_momentum(11.0, 10.8, 10.5, 2.0, 0.5)
+        momentum, reason = _detect_short_term_momentum(10.0, None, 10.0, 0.0, 0.5)
+        assert momentum == "震荡"
+
+    def test_strong(self):
+        """现价>=EXPMA10 且 EXPMA10>EXPMA20"""
+        from trader_shared.stage_positioning import _detect_short_term_momentum
+        momentum, reason = _detect_short_term_momentum(11.0, 10.5, 10.0, 1.5, 0.7)
         assert momentum == "走强"
 
-    def test_weakening(self):
-        """MA5 < MA10, change < -2% → 转弱"""
+    def test_recovery(self):
+        """现价在 EXPMA10 和 EXPMA20 之间"""
         from trader_shared.stage_positioning import _detect_short_term_momentum
-        momentum, reason = _detect_short_term_momentum(9.5, 10.0, 10.5, -3.0, 0.3)
-        assert momentum == "转弱"
-
-    def test_repairing(self):
-        """站上MA5但MA5 < MA10 → 修复"""
-        from trader_shared.stage_positioning import _detect_short_term_momentum
-        momentum, reason = _detect_short_term_momentum(10.5, 10.3, 10.8, 0.5, 0.4)
+        momentum, reason = _detect_short_term_momentum(10.2, 10.5, 10.0, 0.0, 0.5)
         assert momentum == "修复"
 
-    def test_oscillating(self):
-        """跌破MA5但MA5 > MA10，不在MA10附近 → 震荡"""
+    def test_ranging_near(self):
+        """跌破EXPMA20但距离不远"""
         from trader_shared.stage_positioning import _detect_short_term_momentum
-        momentum, reason = _detect_short_term_momentum(9.0, 10.5, 10.0, -0.5, 0.4)
+        momentum, reason = _detect_short_term_momentum(9.8, 10.5, 10.0, -0.5, 0.4)
         assert momentum == "震荡"
+
+    def test_weak(self):
+        """跌破EXPMA20且距离较远"""
+        from trader_shared.stage_positioning import _detect_short_term_momentum
+        momentum, reason = _detect_short_term_momentum(9.0, 10.5, 10.0, -2.5, 0.1)
+        assert momentum == "转弱"
 
     def test_no_ma_data(self):
         """均线数据不足 → 震荡"""
@@ -129,7 +134,7 @@ class TestComputePositionWithEnv:
         """主升+走强 → 仓位 >= 50%"""
         from trader_shared.stage_positioning import compute_position_with_env
         result = compute_position_with_env("主升", "走强", "牛市")
-        assert result["stage_position_pct"] == 70
+        assert result["stage_position_pct"] == 60
         assert result["suggested_pct"] > 0
         assert result["hard_rule_blocked"] is False
 
