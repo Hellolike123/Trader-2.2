@@ -885,9 +885,10 @@ def render_markdown(r: dict[str, Any]) -> str:
     low_price = float(r.get("support") or 0)
     position_cap = int(r.get("position_cap") or 10)
     if low_price > 0:
-        lines.append(f"  {low_price:.2f} ← 买 {position_cap}%（缩量企稳）")
-        
-    if current_price > 0:
+        if stage_action == "🌟黄金共振加仓":
+            lines.append(f"  {low_price:.2f} ← {stage_action} {position_cap}%")
+        else:
+            lines.append(f"  {low_price:.2f} ← 买 {position_cap}%（缩量企稳）")
         lines.append(f"  {current_price:.2f} 当前")
         
     exit_plan = r.get("exit_plan") or {}
@@ -922,6 +923,9 @@ def render_markdown(r: dict[str, Any]) -> str:
     trend_action = "不追" if current_price < confirm else "可加仓"
     lines.append(f"  趋势：短期偏弱（{trend_desc}），{trend_action}")
     
+    if r.get("fusion_override_used"):
+        lines.append(f"  🤖 智能修正：多维度AI融合极高置信度结论，已修正基础策略结论。")
+
     has_position = r.get("has_position", False)
     cost_price = float(r.get("cost_price") or 0)
     if has_position and cost_price > 0:

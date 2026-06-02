@@ -338,7 +338,7 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None, index_returns: lis
     return multipliers
 
 
-def build_structure_context(current: float, bars: list[BarData], change_pct: Any = None, quote: QuoteData | None = None, fusion_result: dict[str, Any] | None = None, chan_result: dict[str, Any] | None = None, fetcher: DataFetcher | None = None) -> dict[str, Any]:
+def build_structure_context(current: float, bars: list[BarData], change_pct: Any = None, quote: QuoteData | None = None, fusion_result: dict[str, Any] | None = None, chan_result: dict[str, Any] | None = None, fetcher: DataFetcher | None = None, pnl_pct: float | None = None) -> dict[str, Any]:
     if fetcher is None:
         fetcher = get_fetcher()
     recent5 = bars[-RECENT_WINDOW:] if len(bars) >= RECENT_WINDOW else bars
@@ -473,6 +473,14 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     except (ImportError, AttributeError):
         ENABLE_TRAILING_STOP = False
         TRAILING_STOP_ATR_MULTIPLE = 3.0
+        
+    if pnl_pct is not None:
+        if pnl_pct >= 0.40:
+            TRAILING_STOP_ATR_MULTIPLE = 1.2
+        elif pnl_pct >= 0.30:
+            TRAILING_STOP_ATR_MULTIPLE = 1.5
+        elif pnl_pct >= 0.20:
+            TRAILING_STOP_ATR_MULTIPLE = 2.0
 
     trailing_stop = None
     highest_close = None

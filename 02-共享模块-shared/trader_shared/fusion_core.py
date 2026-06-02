@@ -287,6 +287,7 @@ def merge_decisions(
     extend_fundamental: dict | None = None,
     extend_sentiment: dict | None = None,
     main_force_env: str | None = None,
+    data_status: str = "full",
     fetcher: DataFetcher | None = None,  # DI: 可注入数据源
 ) -> dict:
     """决策融合层核心函数。
@@ -496,6 +497,11 @@ def merge_decisions(
             confidence = 0.3
             weighted_score = -0.5
 
+    # 6.5 🛡️ 防幻觉拦截：数据断层降级
+    if data_status in ("partial", "degraded", "failed"):
+        confidence = min(confidence, 0.3)
+        weighted_score = min(weighted_score, 0.0)
+
     result = {
         "action": action,
         "confidence": round(confidence, 3),
@@ -535,6 +541,7 @@ def merge_decisions_from_plugins(
     main_force_env: str | None = None,
     extend_fundamental: dict | None = None,
     extend_sentiment: dict | None = None,
+    data_status: str = "full",
     fetcher: DataFetcher | None = None,  # DI: 可注入数据源
 ) -> dict:
     """Decision fusion using the plugin registry.
@@ -578,4 +585,6 @@ def merge_decisions_from_plugins(
         extend_fundamental=extend_fundamental,
         extend_sentiment=extend_sentiment,
         main_force_env=main_force_env,
+        data_status=data_status,
+        fetcher=fetcher,
     )
