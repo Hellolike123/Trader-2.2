@@ -96,6 +96,68 @@ NAME_MAP = {
     "中证1000": "000852",
 }
 
+# 运行时名称→代码缓存（避免重复搜索）
+_NAME_SEARCH_CACHE: dict[str, str] = {}
+
+
+def _search_code_by_name(name: str) -> str | None:
+    """通过新浪 suggest 接口，用股票名称查 6 位代码。
+
+    返回代码字符串（如 '603459'），找不到返回 None。
+    使用运行时内存缓存，同一进程内不重复请求。
+    """
+    if name in _NAME_SEARCH_CACHE:
+        return _NAME_SEARCH_CACHE[name]
+
+    try:
+        from urllib.parse import quote as _quote
+        # 新浪联想词搜索接口（支持 A 股 type=11/12）
+        url = f"http://suggest3.sinajs.cn/suggest/type=11,12&key={_quote(name)}"
+        req = Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                "Referer": "https://finance.sina.com.cn/",
+            },
+        )
+        with urlopen(req, timeout=3.0) as resp:
+            raw = resp.read().decode("gbk", errors="ignore")
+
+        # 响应格式: var suggestvalue="红板科技,11,603459,sh603459,红板科技,,红板科技,99,1,,,";
+        # 多条结果用 ";" 分隔
+        m = re.search(r'suggestvalue="([^"]*)"', raw)
+        if not m:
+            return None
+
+        entries = m.group(1).split(";")
+        for entry in entries:
+            parts = entry.split(",")
+            if len(parts) < 3:
+                continue
+            found_name = parts[0].strip()
+            code_raw = parts[2].strip()  # 纯数字代码，如 603459
+            if not code_raw.isdigit() or len(code_raw) != 6:
+                continue
+            # 精确名称匹配优先
+            if found_name == name:
+                _NAME_SEARCH_CACHE[name] = code_raw
+                return code_raw
+
+        # 无精确匹配时取第一条有效结果
+        for entry in entries:
+            parts = entry.split(",")
+            if len(parts) < 3:
+                continue
+            code_raw = parts[2].strip()
+            if code_raw.isdigit() and len(code_raw) == 6:
+                _NAME_SEARCH_CACHE[name] = code_raw
+                return code_raw
+
+    except Exception as exc:
+        _logger.debug("股票名称搜索失败 name=%s: %s", name, exc)
+
+    return None
+
 # 缓存：只用于历史数据（昨日及更早的日线）
 _cache: dict[str, Any] = {}
 _cache_expiry: dict[str, float] = {}
@@ -759,12 +821,23 @@ def resolve_security(target: str) -> Security:
     else:
         digits = re.sub(r"\D", "", cleaned)
         if not digits:
-            raise RuntimeError(f"无法解析股票名称：{raw}，请改用 6 位代码")
+            # 纯名称输入：先用腾讯搜索接口尝试查代码
+            found_code = _search_code_by_name(raw)
+            if found_code:
+                digits = found_code
+                _logger.debug("股票名称 '%s' 解析为代码 %s（在线搜索）", raw, found_code)
+            else:
+                raise RuntimeError(
+                    f"无法解析股票名称：{raw}，请改用 6 位代码"
+                    f"（提示：可先手动将 '{raw}' 添加到 NAME_MAP）"
+                )
         code = digits
     code = code[-6:].zfill(6)
     if not market:
         market = "SH" if code.startswith(("6", "688", "689")) else "BJ" if code.startswith(("8", "4")) else "SZ"
-    return Security(code=code, market=market, name=raw if raw in NAME_MAP else code)
+    # 名称：已知 NAME_MAP > 在线搜索成功 > 回退到代码
+    display_name = raw if (raw in NAME_MAP or not re.sub(r"\D", "", raw)) else code
+    return Security(code=code, market=market, name=display_name)
 
 
 def extract_jsonp(text: str) -> Any:
