@@ -4,38 +4,42 @@ from typing import Any
 
 from trader_shared.light_data import to_float
 
+# 优雅动态导入配置，提供强兼容性的 fallback 默认值
 try:
-    from trader_shared.config import WYCKOFF_MIN_BARS
+    from trader_shared.config import (
+        WYCKOFF_MIN_BARS,
+        WYCKOFF_BC_VOL_RATIO_THRESHOLD,
+        WYCKOFF_BC_CHANGE_THRESHOLD,
+        WYCKOFF_BC_UPPER_SHADOW_RATIO,
+        WYCKOFF_SOW_SUPPORT_LOOKBACK,
+        WYCKOFF_SOW_VOL_RATIO_THRESHOLD,
+        WYCKOFF_SOW_CONSECUTIVE_DAYS,
+        WYCKOFF_SPRING_SUPPORT_LOOKBACK,
+        WYCKOFF_SPRING_RECLAIM_RATIO,
+        WYCKOFF_SPRING_BULLISH_VOL_RATIO,
+        WYCKOFF_UTAD_BREAKOUT_RATIO,
+        WYCKOFF_UTAD_RECLAIM_RATIO,
+        WYCKOFF_DIVERGENCE_BARS,
+        WYCKOFF_DIVERGENCE_RATIO,
+    )
 except ImportError:
     WYCKOFF_MIN_BARS = 15
-
-try:
-    from trader_shared.config import WYCKOFF_SPRING_SUPPORT_LOOKBACK
-except ImportError:
+    WYCKOFF_BC_VOL_RATIO_THRESHOLD = 1.5
+    WYCKOFF_BC_CHANGE_THRESHOLD = 1.0
+    WYCKOFF_BC_UPPER_SHADOW_RATIO = 0.02
+    WYCKOFF_SOW_SUPPORT_LOOKBACK = 10
+    WYCKOFF_SOW_VOL_RATIO_THRESHOLD = 1.0
+    WYCKOFF_SOW_CONSECUTIVE_DAYS = 1
     WYCKOFF_SPRING_SUPPORT_LOOKBACK = 10
-
-try:
-    from trader_shared.config import WYCKOFF_SPRING_RECLAIM_RATIO
-except ImportError:
-    WYCKOFF_SPRING_RECLAIM_RATIO = 0.97
-
-try:
-    from trader_shared.config import WYCKOFF_DIVERGENCE_BARS
-except ImportError:
+    WYCKOFF_SPRING_RECLAIM_RATIO = 0.985
+    WYCKOFF_SPRING_BULLISH_VOL_RATIO = 1.3
+    WYCKOFF_UTAD_BREAKOUT_RATIO = 1.005
+    WYCKOFF_UTAD_RECLAIM_RATIO = 0.995
     WYCKOFF_DIVERGENCE_BARS = 5
+    WYCKOFF_DIVERGENCE_RATIO = 0.85
 
-# 量比阈值说明：
-# - _VOL_SPIKE_THRESHOLD = 1.2 用于 SOW/洗盘等一般放量判断（宽松）
-# - _BC_VOL_RATIO_THRESHOLD = 2.0 用于 BC 购买高潮（严格，天量才触发）
-_VOL_SPIKE_THRESHOLD = 1.2
 
 # ── BC (Buying Climax) 购买高潮检测 ──
-# 量化条件：量比 > 2.0 且 涨幅 < 1% 且 上影线 > 2%
-_BC_VOL_RATIO_THRESHOLD = 2.0
-_BC_CHANGE_THRESHOLD = 1.0
-_BC_UPPER_SHADOW_RATIO = 0.02
-
-
 def _detect_buying_climax(bars: list[dict]) -> dict:
     """Detect Buying Climax (BC) — 天量滞涨，高位放量阴线。
 
@@ -74,13 +78,13 @@ def _detect_buying_climax(bars: list[dict]) -> dict:
     upper_shadow = cur_high - real_body_top
     upper_shadow_ratio = upper_shadow / max(price_range, 0.01)
 
-    # BC 条件
-    if vol_ratio < _BC_VOL_RATIO_THRESHOLD:
+    # BC 条件判断使用外置参数
+    if vol_ratio < WYCKOFF_BC_VOL_RATIO_THRESHOLD:
         return {"bc_signal": False, "bc_reason": "量比不足", "bc_price": 0.0}
 
     # 天量 + 滞涨（收盘接近开盘或阴线）
-    is_stagnant = change_pct < _BC_CHANGE_THRESHOLD
-    has_upper_shadow = upper_shadow_ratio > _BC_UPPER_SHADOW_RATIO
+    is_stagnant = change_pct < WYCKOFF_BC_CHANGE_THRESHOLD
+    has_upper_shadow = upper_shadow_ratio > WYCKOFF_BC_UPPER_SHADOW_RATIO
 
     if not (is_stagnant or (cur_close < cur_open)):
         return {"bc_signal": False, "bc_reason": "未出现滞涨", "bc_price": 0.0}
@@ -102,19 +106,16 @@ def _detect_buying_climax(bars: list[dict]) -> dict:
 
 
 # ── SOW (Sign of Weakness) 弱势信号检测 ──
-_SOW_SUPPORT_LOOKBACK = 10
-
-
 def _detect_sign_of_weakness(bars: list[dict]) -> dict:
     """Detect Sign of Weakness (SOW) — 价格跌破支撑且放量。
 
     Returns:
         dict with keys: sow_signal (bool), sow_reason (str), sow_price (float)
     """
-    if len(bars) < _SOW_SUPPORT_LOOKBACK + 1:
+    if len(bars) < WYCKOFF_SOW_SUPPORT_LOOKBACK + 1:
         return {"sow_signal": False, "sow_reason": "数据不足", "sow_price": 0.0}
 
-    recent = bars[-(_SOW_SUPPORT_LOOKBACK + 1):-1]
+    recent = bars[-(WYCKOFF_SOW_SUPPORT_LOOKBACK + 1):-1]
     current = bars[-1]
 
     low_values = [to_float(b["low"]) for b in recent]
@@ -128,21 +129,27 @@ def _detect_sign_of_weakness(bars: list[dict]) -> dict:
 
     support = min(valid_lows)
 
-    # 跌破支撑（需要连续2天跌破才算）
-    if cur_low >= support:
-        return {"sow_signal": False, "sow_reason": "未跌破支撑", "sow_price": 0.0}
-    
-    # 检查前一天是否也跌破（连续2天跌破才触发）
-    prev_low = to_float(bars[-2].get("low")) if len(bars) >= 2 else None
-    if prev_low is None or prev_low >= support:
-        return {"sow_signal": False, "sow_reason": "仅单日跌破，需连续2天确认", "sow_price": 0.0}
+    # 跌破支撑判定逻辑
+    if WYCKOFF_SOW_CONSECUTIVE_DAYS > 1:
+        # 需要连续 N 天跌破才算
+        if cur_low >= support:
+            return {"sow_signal": False, "sow_reason": "未跌破支撑", "sow_price": 0.0}
+        
+        # 检查前一天是否也跌破
+        prev_low = to_float(bars[-2].get("low")) if len(bars) >= 2 else None
+        if prev_low is None or prev_low >= support:
+            return {"sow_signal": False, "sow_reason": f"仅单日跌破，需连续{WYCKOFF_SOW_CONSECUTIVE_DAYS}天确认", "sow_price": 0.0}
+    else:
+        # 单日判定，最低价或收盘价跌破即可触发
+        if cur_low >= support and cur_close >= support:
+            return {"sow_signal": False, "sow_reason": "未跌破支撑", "sow_price": 0.0}
 
     # 放量确认
     avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
-    is_high_volume = avg_volume > 0 and cur_volume > avg_volume * _VOL_SPIKE_THRESHOLD
+    is_high_volume = avg_volume > 0 and cur_volume >= avg_volume * WYCKOFF_SOW_VOL_RATIO_THRESHOLD
 
     if not is_high_volume:
-        return {"sow_signal": False, "sow_reason": "缩量跌破，非弱势信号", "sow_price": 0.0}
+        return {"sow_signal": False, "sow_reason": "缩量跌破，非强弱势信号", "sow_price": 0.0}
 
     # 收盘在支撑下方（真跌破）
     if cur_close >= support:
@@ -159,6 +166,7 @@ def _detect_sign_of_weakness(bars: list[dict]) -> dict:
     }
 
 
+# ── Spring 弹簧洗盘检测 ──
 def _detect_spring(bars: list[dict]) -> dict:
     if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1:
         return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "数据不足"}
@@ -178,12 +186,13 @@ def _detect_spring(bars: list[dict]) -> dict:
 
     breach_level = support * WYCKOFF_SPRING_RECLAIM_RATIO
 
+    # 刺穿深度判定：最低价刺穿深度线，且收盘价收回到支撑上方
     if current_low >= breach_level or current_close < support:
         return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "未满足弹簧条件"}
 
     avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
 
-    volume_note = "放量恐慌" if (avg_volume > 0 and current_volume > avg_volume * _VOL_SPIKE_THRESHOLD) else "缩量洗盘"
+    volume_note = "放量恐慌" if (avg_volume > 0 and current_volume >= avg_volume * WYCKOFF_SPRING_BULLISH_VOL_RATIO) else "缩量洗盘"
 
     return {
         "spring_signal": True,
@@ -192,6 +201,7 @@ def _detect_spring(bars: list[dict]) -> dict:
     }
 
 
+# ── Upthrust (UT / UTAD) 上冲回落检测 ──
 def _detect_upthrust(bars: list[dict]) -> dict:
     if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1:
         return {"upthrust_signal": False, "upthrust_price": 0.0, "upthrust_reason": "数据不足"}
@@ -208,9 +218,10 @@ def _detect_upthrust(bars: list[dict]) -> dict:
     if current_high is None or current_close is None or resistance is None:
         return {"upthrust_signal": False, "upthrust_price": 0.0, "upthrust_reason": "数据异常"}
 
-    breakout_level = resistance * 1.02
-    reclaim_level = resistance * 0.995
+    breakout_level = resistance * WYCKOFF_UTAD_BREAKOUT_RATIO
+    reclaim_level = resistance * WYCKOFF_UTAD_RECLAIM_RATIO
 
+    # 最高价高过突破界限，且收盘价跌回回落界限之下
     if current_high <= breakout_level or current_close >= reclaim_level:
         return {"upthrust_signal": False, "upthrust_price": 0.0, "upthrust_reason": "未满足上冲回落条件"}
 
@@ -221,6 +232,7 @@ def _detect_upthrust(bars: list[dict]) -> dict:
     }
 
 
+# ── Volume Divergence 量价背离检测 ──
 def _detect_volume_divergence(bars: list[dict]) -> tuple[bool, bool]:
     if len(bars) < WYCKOFF_DIVERGENCE_BARS:
         return False, False
@@ -237,7 +249,7 @@ def _detect_volume_divergence(bars: list[dict]) -> tuple[bool, bool]:
         prices.append(close_val)
         volumes.append(vol_val)
 
-    # Split into two halves and compare average volume
+    # 拆分两部分计算成交量平均值
     mid = len(prices) // 2
     first_half_avg_vol = sum(volumes[:mid]) / max(mid, 1)
     second_half_avg_vol = sum(volumes[mid:]) / max(len(volumes) - mid, 1)
@@ -245,14 +257,15 @@ def _detect_volume_divergence(bars: list[dict]) -> tuple[bool, bool]:
     max_price_idx = max(range(len(prices)), key=lambda i: prices[i])
     min_price_idx = min(range(len(prices)), key=lambda i: prices[i])
 
-    # 看空背离：价格在上升趋势中创新高（峰值高于起点），但后半段平均量低于前半段（量能萎缩）
-    bearish = (prices[max_price_idx] > prices[0]) and (second_half_avg_vol < first_half_avg_vol * 0.8)
-    # 看多背离：价格在下降趋势中创新低（谷值低于起点），但后半段平均量低于前半段（抛压释放）
-    bullish = (prices[min_price_idx] < prices[0]) and (second_half_avg_vol < first_half_avg_vol * 0.8)
+    # 看空背离：价格在上升趋势中创新高（峰值高于起点），但后半段平均量萎缩至前半段比例内
+    bearish = (prices[max_price_idx] > prices[0]) and (second_half_avg_vol < first_half_avg_vol * WYCKOFF_DIVERGENCE_RATIO)
+    # 看多背离：价格在下降趋势中创新低（谷值低于起点），但后半段平均量释放或萎缩度满足抛压出清
+    bullish = (prices[min_price_idx] < prices[0]) and (second_half_avg_vol < first_half_avg_vol * WYCKOFF_DIVERGENCE_RATIO)
 
     return bearish, bullish
 
 
+# ── 威科夫综合分析入口 ──
 def wyckoff_analysis(bars: list[dict]) -> dict:
     if len(bars) < WYCKOFF_MIN_BARS:
         return {

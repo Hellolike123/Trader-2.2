@@ -83,3 +83,41 @@ class TestWyckoffAnalysis:
         assert result["upthrust_signal"] is False
         assert result["spring_reason"] == "数据不足"
         assert result["upthrust_reason"] == "数据不足"
+
+
+class TestDetectBuyingClimax:
+    def test_bc_detected(self):
+        # 准备 14 天的数据，作为 recent 平均 volume 约 100
+        bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
+        # 最新一天：量比 1.9（高于 WYCKOFF_BC_VOL_RATIO_THRESHOLD=1.8），上影线明显，收阴，涨幅仅 0.5%
+        bars.append({"open": 101, "high": 105, "low": 99, "close": 100.5, "volume": 190})
+        result = wyckoff_analysis(bars)
+        assert result["bc_signal"] is True
+        assert result["bc_price"] == 105.0
+
+    def test_bc_not_detected_due_to_volume(self):
+        bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
+        # 最新一天：量比仅 1.6（低于 1.8），不满足
+        bars.append({"open": 101, "high": 105, "low": 99, "close": 100.5, "volume": 160})
+        result = wyckoff_analysis(bars)
+        assert result["bc_signal"] is False
+
+
+class TestDetectSignOfWeakness:
+    def test_sow_detected_single_day(self):
+        # 最近 14 天的 low 分别为 95
+        bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
+        # 当天跌破 95，收在 94（确切跌破），成交量 101（量比 1.01 >= WYCKOFF_SOW_VOL_RATIO_THRESHOLD=1.0）
+        bars.append({"open": 98, "high": 99, "low": 93, "close": 94, "volume": 101})
+        result = wyckoff_analysis(bars)
+        assert result["sow_signal"] is True
+        assert result["sow_price"] == 95.0
+
+    def test_sow_not_detected_due_to_volume(self):
+        bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
+        # 当天虽然跌破，但是成交量 90（量比 0.9 < 1.0），被过滤
+        bars.append({"open": 98, "high": 99, "low": 93, "close": 94, "volume": 90})
+        result = wyckoff_analysis(bars)
+        assert result["sow_signal"] is False
+
+

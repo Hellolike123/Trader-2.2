@@ -87,10 +87,29 @@ TREND_MA_LOOKBACK: int = 300  # 至少取 300 天数据才能算出可靠的 MA2
 # ---- Wyckoff constants ----
 # ⚠️ WYCKOFF_SPRING_RECLAIM_RATIO 每年年底需检查是否需要更新
 WYCKOFF_MIN_BARS: int = 15
-WYCKOFF_SPRING_SUPPORT_LOOKBACK: int = 10
-WYCKOFF_SPRING_RECLAIM_RATIO: float = 0.97
-WYCKOFF_SPRING_BULLISH_VOL_RATIO: float = 1.3
-WYCKOFF_DIVERGENCE_BARS: int = 5
+
+# BC (Buying Climax) 购买高潮相关参数
+WYCKOFF_BC_VOL_RATIO_THRESHOLD: float = 1.8     # BC 购买高潮量比阈值（原 2.0，方案 B 调至 1.8）
+WYCKOFF_BC_CHANGE_THRESHOLD: float = 1.0        # BC 滞涨涨幅门槛 (%)
+WYCKOFF_BC_UPPER_SHADOW_RATIO: float = 0.02     # BC 上影线占波幅比例
+
+# SOW (Sign of Weakness) 弱势信号相关参数
+WYCKOFF_SOW_SUPPORT_LOOKBACK: int = 10          # SOW 支撑查找回溯K线数
+WYCKOFF_SOW_VOL_RATIO_THRESHOLD: float = 1.0    # SOW 放量判定阈值（由 1.2 降为 1.0）
+WYCKOFF_SOW_CONSECUTIVE_DAYS: int = 1           # SOW 确立连续跌破天数（由 2 降为 1，即单日确认）
+
+# Spring 弹簧洗盘相关参数
+WYCKOFF_SPRING_SUPPORT_LOOKBACK: int = 10       # 弹簧支撑回溯K线数
+WYCKOFF_SPRING_RECLAIM_RATIO: float = 0.985     # 刺穿深度比例，跌破 1.5% 即确认（原 0.97）
+WYCKOFF_SPRING_BULLISH_VOL_RATIO: float = 1.3   # 弹簧放量反弹量比
+
+# UTAD (Upthrust Action / Upthrust) 上冲回落相关参数
+WYCKOFF_UTAD_BREAKOUT_RATIO: float = 1.005      # 假突破幅度，超出阻力 0.5% 即可（原 1.02）
+WYCKOFF_UTAD_RECLAIM_RATIO: float = 0.995       # 假突破收回幅度（收回到阻力 99.5% 之下）
+
+# Divergence 量价背离相关参数
+WYCKOFF_DIVERGENCE_BARS: int = 5                # 背离比对K线窗口
+WYCKOFF_DIVERGENCE_RATIO: float = 0.85          # 背离量能萎缩比例由 80% 放宽至 85%
 
 # ---- P3 Theory Adjustment ----
 # THEORY_ADJUST_LOG_ONLY=true 时理论微调只记录日志不实际生效，用于首次上线观察
@@ -168,6 +187,11 @@ __all__ = [
     "WYCKOFF_MIN_BARS", "WYCKOFF_SPRING_SUPPORT_LOOKBACK",
     "WYCKOFF_SPRING_RECLAIM_RATIO", "WYCKOFF_SPRING_BULLISH_VOL_RATIO",
     "WYCKOFF_DIVERGENCE_BARS",
+    "WYCKOFF_BC_VOL_RATIO_THRESHOLD", "WYCKOFF_BC_CHANGE_THRESHOLD",
+    "WYCKOFF_BC_UPPER_SHADOW_RATIO", "WYCKOFF_SOW_SUPPORT_LOOKBACK",
+    "WYCKOFF_SOW_VOL_RATIO_THRESHOLD", "WYCKOFF_SOW_CONSECUTIVE_DAYS",
+    "WYCKOFF_SPRING_SUPPORT_LOOKBACK", "WYCKOFF_UTAD_BREAKOUT_RATIO",
+    "WYCKOFF_UTAD_RECLAIM_RATIO", "WYCKOFF_DIVERGENCE_RATIO",
     "THEORY_ADJUST_LOG_ONLY",
     "FUSION_OVERRIDE_ENABLED", "FUSION_CONFIDENCE_THRESHOLD",
     "DEFAULT_MAX_TOTAL", "DEFAULT_CASH_FLOOR", "DEFAULT_MAIN_CAP",
