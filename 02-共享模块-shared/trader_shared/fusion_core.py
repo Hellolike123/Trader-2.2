@@ -432,6 +432,9 @@ def merge_decisions(
     # 6. 综合置信度
     confidence = compute_confidence(weighted_score, disagreement_for_action, weights)
 
+    # 限制分数范围
+    weighted_score = max(-100, min(100, weighted_score))
+
     # ── [2.3新增] 贝叶斯概率决策融合 ──
     bayesian_used = False
     bayesian_info = {}

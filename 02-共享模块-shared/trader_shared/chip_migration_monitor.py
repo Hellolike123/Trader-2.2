@@ -57,7 +57,6 @@ def _build_snapshot(chip_result: dict[str, Any], trade_date: str) -> dict[str, A
     if not peaks:
         return None
 
-    support_peaks = [p for p in peaks if "支撑" in str(p.get("support_level", ""))]
     return {
         "date": trade_date,
         "peaks": [
@@ -66,7 +65,7 @@ def _build_snapshot(chip_result: dict[str, Any], trade_date: str) -> dict[str, A
                 "share_of_total": p["share_of_total"],
                 "support_level": p["support_level"],
             }
-            for p in support_peaks
+            for p in peaks
         ],
     }
 
@@ -244,9 +243,26 @@ def check_chip_migration(
             "has_history": True,
         }
 
-    # 找到历史底部峰（最强支撑）
+    # 找到历史底部峰（最强支撑）和历史上方峰（最强阻力）
     prev_support_peaks = [p for p in prev_snapshot["peaks"] if "支撑" in str(p.get("support_level", ""))]
-    if not prev_support_peaks:
+    prev_resistance_peaks = [p for p in prev_snapshot["peaks"] if "阻力" in str(p.get("support_level", ""))]
+
+    prev_support_share = 0.0
+    prev_support_price = 0.0
+    if prev_support_peaks:
+        prev_support_peak = max(prev_support_peaks, key=lambda p: p.get("share_of_total", 0))
+        prev_support_share = prev_support_peak.get("share_of_total", 0)
+        prev_support_price = prev_support_peak.get("price", 0)
+
+    prev_resistance_share = 0.0
+    prev_resistance_price = 0.0
+    if prev_resistance_peaks:
+        prev_resistance_peak = max(prev_resistance_peaks, key=lambda p: p.get("share_of_total", 0))
+        prev_resistance_share = prev_resistance_peak.get("share_of_total", 0)
+        prev_resistance_price = prev_resistance_peak.get("price", 0)
+
+    # 如果都没有，直接返回
+    if prev_support_share <= 0 and prev_resistance_share <= 0:
         return {
             "migration_pct": 0.0,
             "warning_level": "none",
@@ -254,53 +270,47 @@ def check_chip_migration(
             "has_history": True,
         }
 
-    # 取历史最强底部峰
-    prev_peak = max(prev_support_peaks, key=lambda p: p.get("share_of_total", 0))
-    prev_share = prev_peak.get("share_of_total", 0)
-    prev_price = prev_peak.get("price", 0)
-
-    if prev_share <= 0:
-        return {
-            "migration_pct": 0.0,
-            "warning_level": "none",
-            "warning_text": "",
-            "has_history": True,
-        }
-
-    # 在当前 peaks 中找价格最接近的支撑峰（用 startswith 匹配"支撑"开头的级别）
-    current_support_peaks = [p for p in current_peaks if str(p.get("support_level", "")).startswith("支撑")]
-    if not current_support_peaks:
-        # 所有支撑峰都消失了 → 100% 搬家
-        migration_pct = 100.0
-    else:
-        # 找价格最接近的峰
-        closest = min(current_support_peaks, key=lambda p: abs(p["price"] - prev_price))
-        current_share = closest.get("share_of_total", 0)
-        # 计算搬家百分比
-        if prev_share > current_share:
-            migration_pct = round((prev_share - current_share) / prev_share * 100, 1)
+    current_support_share = 0.0
+    current_support_peaks = [p for p in current_peaks if "支撑" in str(p.get("support_level", ""))]
+    
+    migration_pct = 0.0
+    if prev_support_share > 0:
+        if not current_support_peaks:
+            migration_pct = 100.0
         else:
-            migration_pct = 0.0
+            closest_supp = min(current_support_peaks, key=lambda p: abs(p["price"] - prev_support_price))
+            current_support_share = closest_supp.get("share_of_total", 0)
+            if prev_support_share > current_support_share:
+                migration_pct = round((prev_support_share - current_support_share) / prev_support_share * 100, 1)
 
-    # 判断警告级别
+    current_resistance_share = 0.0
+    current_resistance_peaks = [p for p in current_peaks if "阻力" in str(p.get("support_level", ""))]
+    if prev_resistance_share > 0 and current_resistance_peaks:
+        closest_res = min(current_resistance_peaks, key=lambda p: abs(p["price"] - prev_resistance_price))
+        current_resistance_share = closest_res.get("share_of_total", 0)
+
+    support_diff = round(current_support_share - prev_support_share, 2) if prev_support_share > 0 else 0.0
+    resistance_diff = round(current_resistance_share - prev_resistance_share, 2) if prev_resistance_share > 0 else 0.0
+
+    warning_text = ""
+    warning_level = "none"
+
+    # 判断警告级别和对比逻辑
     migration_ratio = migration_pct / 100.0
-    if migration_ratio >= _MIGRATION_CLEAR_THRESHOLD:
-        warning_level = "critical"
-        warning_text = (
-            f"底部筹码峰从 {prev_share:.1f}% 降到 "
-            f"{max(0, prev_share - prev_share * migration_ratio):.1f}%"
-            f"（-{migration_pct:.0f}%），清仓信号"
-        )
-    elif migration_ratio >= _MIGRATION_WARNING_THRESHOLD:
-        warning_level = "warning"
-        warning_text = (
-            f"底部筹码峰从 {prev_share:.1f}% 降到 "
-            f"{max(0, prev_share - prev_share * migration_ratio):.1f}%"
-            f"（-{migration_pct:.0f}%），筹码松动警告"
-        )
-    else:
+    if support_diff <= -0.5 and resistance_diff >= 0.5:
+        warning_level = "critical" if migration_ratio >= _MIGRATION_CLEAR_THRESHOLD else "warning"
+        warning_text = f"底部支撑减少 {abs(support_diff):.1f}%，上方阻力增加 {resistance_diff:.1f}% → 筹码在搬家，主力在出货"
+    elif support_diff >= 0.5 and resistance_diff <= -0.5:
         warning_level = "none"
-        warning_text = ""
+        warning_text = f"上方阻力减少 {abs(resistance_diff):.1f}%，底部支撑增加 {support_diff:.1f}% → 主力在吸筹"
+    elif support_diff <= -0.5:
+        warning_level = "critical" if migration_ratio >= _MIGRATION_CLEAR_THRESHOLD else "warning"
+        warning_text = f"底部支撑减少 {abs(support_diff):.1f}%（-{migration_pct:.0f}%） → 筹码松动警告"
+    elif resistance_diff >= 0.5:
+        warning_level = "warning"
+        warning_text = f"上方阻力增加 {resistance_diff:.1f}% → 抛压加重"
+    else:
+        warning_text = "底部筹码基本稳定，无明显搬家"
 
     return {
         "migration_pct": migration_pct,
@@ -308,5 +318,16 @@ def check_chip_migration(
         "warning_text": warning_text,
         "has_history": True,
         "prev_date": prev_snapshot.get("date"),
-        "prev_share": prev_share,
+        "support_migration": {
+            "prev_price": prev_support_price,
+            "prev_share": prev_support_share,
+            "curr_share": current_support_share,
+            "diff": support_diff,
+        } if prev_support_share > 0 else None,
+        "resistance_migration": {
+            "prev_price": prev_resistance_price,
+            "prev_share": prev_resistance_share,
+            "curr_share": current_resistance_share,
+            "diff": resistance_diff,
+        } if prev_resistance_share > 0 else None,
     }

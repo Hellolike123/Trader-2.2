@@ -361,6 +361,26 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     add_ma_levels(support_levels, current, ma_values, below=True)
     add_ma_levels(resistance_levels, current, ma_values, below=False)
 
+    from trader_shared.momentum_core import calc_expma
+    _closes = [to_float(b.get("close")) for b in bars if b.get("close") is not None]
+    if _closes:
+        expma10_list = calc_expma(_closes, 10)
+        expma20_list = calc_expma(_closes, 20)
+        expma10 = expma10_list[-1] if expma10_list else None
+        expma20 = expma20_list[-1] if expma20_list else None
+        
+        if expma10 is not None:
+            if current > expma10:
+                add_level(support_levels, "EXPMA10", expma10, 0.9)
+            else:
+                add_level(resistance_levels, "EXPMA10", expma10, 0.9)
+        
+        if expma20 is not None:
+            if current > expma20:
+                add_level(support_levels, "EXPMA20", expma20, 0.9)
+            else:
+                add_level(resistance_levels, "EXPMA20", expma20, 0.9)
+
     support = choose_level(support_levels, current, below=True) if support_levels else {"name": "现价兜底", "price": round(current, 2), "weight": 0.1}
     resistance = choose_level(resistance_levels, current, below=False) if resistance_levels else {"name": "现价兜底", "price": round(current, 2), "weight": 0.1}
     support_price = float(support["price"])
@@ -464,12 +484,12 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
                 trailing_stop = max(trailing_stop, stop)
 
     # keep compatibility for callers that expect status from structure payload
-    from trader_shared.decision_core import status_for  # local import to avoid tighter module coupling
+    from trader_shared.decision_core import status_layers  # local import to avoid tighter module coupling
 
     # 基于ATR的动态"空间不足"阈值：高波幅票给更多容忍，低波幅票收紧
     # P3: 受动量信号影响，强势时收窄（更激进），弱势时加宽（更保守）
     dynamic_space_threshold = max(0.002, atr_pct * 0.35 * theory["space_threshold"])
-    status = status_for(
+    layer_result = status_layers(
         current=current,
         support=support_price,
         low_zone_upper=low_zone_upper,
@@ -484,6 +504,8 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         fusion_result=fusion_result,  # S-2 fix: 传入融合层结果
         chan_result=chan_result,
     )
+    status = str(layer_result["theory_status"])
+    fusion_override_used = layer_result.get("fusion_override_used", False)
 
     return {
         "main_support": round(support_price, 2),
@@ -512,6 +534,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         "position_ratio": round(position, 3),
         "pressure_space_pct": round(pressure_space_pct, 4),
         "status": status,
+        "fusion_override_used": fusion_override_used,
         "theory_multipliers": theory,  # P3: 记录理论信号对参数的微调系数，便于调试
         "time_window": _check_time_window(bars, chan_result),  # P4: 江恩时间窗口
         "fib_retrace": fib_retrace,  # [2.3新增] 斐波那契黄金回调及挂单参考

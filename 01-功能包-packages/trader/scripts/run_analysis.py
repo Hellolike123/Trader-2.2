@@ -355,6 +355,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             hmm_regime=env.get("hmm_regime_en", "range"),
             main_force_env=main_force_env,
             fetcher=fetcher,
+            data_status=snapshot.data_status,
         )
     except Exception:
         report_fusion = {"action": "融合层异常", "confidence": 0, "weighted_score": 0,
@@ -383,6 +384,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     levels["wyckoff_upthrust_signal"] = wyck_result.get("upthrust_signal", False)
     levels["base_status"] = levels.get("base_status") or levels.get("status")
     levels["theory_status"] = levels.get("theory_status") or levels.get("status")
+    levels["fusion_override_used"] = levels.get("fusion_override_used", False)
     levels["main_force"] = mf_result
     levels["main_force_env"] = main_force_env
 
@@ -564,6 +566,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "atr_cap": atr_cap,
         "base_status": base_status,
         "theory_status": theory_status,
+        "fusion_override_used": levels.get("fusion_override_used", False),
         "state_label": state_label,
         "structure_note": structure_note,
         "volume_note": volume_note,
@@ -839,106 +842,30 @@ def upward_momentum_observation(stage: str, current: float, support: float, conf
 
 
 def render_markdown(r: dict[str, Any]) -> str:
-    ma = r.get("ma") or {}
-    display_code = str(r["symbol"]).replace(".SH", "").replace(".SZ", "")
-    name = str(r["name"])
-
-    atr14 = float(r.get("atr14", 0) or 0)
-    atr_ratio = float(r.get("atr_ratio", 0) or 0)
-    atr_level = str(r.get("atr_level") or "")
-    atr_cap = int(r.get("atr_cap") or 10)
-
-    confirm = float(r.get("confirm") or 0)
-    low_price = float(r.get("support") or 0)
-    stop = float(r.get("stop") or 0)
-    scene = str(r.get("scene") or "")
-    position_cap = int(r.get("position_cap") or 10)
-    low_zone = str(r.get("low_zone") or f"{low_price:.2f}-{low_price * 1.01:.2f}元")
-
-    fib_retrace = r.get("fib_retrace") or {}
-    golden_bid = fib_retrace.get("golden_bid") if isinstance(fib_retrace, dict) else None
-    golden_text = f" (黄金挂单位: {golden_bid:.2f})" if golden_bid else ""
-
-    atr_header = f"｜ATR {atr14:.2f}（{atr_ratio*100:.0f}%）{atr_level}" if atr14 > 0 else ""
-    gap = r.get("gap") or {}
-    gap_text = gap.get("text", "") if isinstance(gap, dict) else ""
-    gap_condition = gap.get("condition", "normal") if isinstance(gap, dict) else "normal"
-
-    # 提取解禁一票否决信息
-    fusion = r.get("fusion") or {}
-    unlock_veto_msg = fusion.get("unlock_veto_msg") if isinstance(fusion, dict) else None
-
-    major_stage = str(r.get("major_stage") or "")
-    major_reason = str(r.get("major_reason") or "")
-    momentum = str(r.get("short_term_momentum") or "")
-    momentum_reason = str(r.get("momentum_reason") or "")
-    stage_action = str(r.get("stage_action") or "")
-    max_position_pct = int(r.get("max_position_pct") or 0)
-    stage_label = str(r.get("stage_label") or "")
-
-    # EXPMA 显示
-    expma10 = r.get("expma10")
-    expma12 = r.get("expma12")
-    expma50 = r.get("expma50")
-    expma_trend = r.get("expma_trend", "neutral")
-    expma_text = ""
-    if expma10 is not None:
-        expma_text = f"EXPMA(10)：{expma10:.2f}"
-        if expma12 is not None and expma50 is not None:
-            trend_text = "金叉" if expma_trend == "bullish" else "死叉" if expma_trend == "bearish" else "震荡"
-            expma_text += f"｜EXPMA(12/50)：{trend_text}"
+    lines: list[str] = []
+    name = str(r.get("name", ""))
+    display_code = str(r.get("symbol", "")).replace(".SH", "").replace(".SZ", "")
+    lines.append(f"分析报告 — {name}（{display_code}）")
+    lines.append("")
     
-    lines: list[str] = [
-        f"分析报告 — {name}（{display_code}）",
-        "",
-        f"现价：{price(r['current'])}（{pct(r['change_pct'])}）",
-        f"MA5：{ma.get('ma5', '--')}｜MA10：{ma.get('ma10', '--')}｜MA20：{ma.get('ma20', '--')}｜MA30：{ma.get('ma30', '--')}",
-        f"ATR {atr14:.2f}（{atr_ratio*100:.0f}%）{atr_level}" if atr14 > 0 else "",
-        expma_text if expma_text else "",
-    ]
-    if major_stage == "衰退":
-        lines.append("")
-        lines.append("⚠️ 250日线下方，一票否决，建议不参与")
-        lines.append("（以下供参考，如有看好的票可忽略此提醒）")
-    if unlock_veto_msg:
-        lines.append(f"提示：⚠️ {unlock_veto_msg}，已被决策融合层一票否决")
-        lines.append("")
-    elif gap_text and gap_condition not in ("normal", "unknown"):
-        lines.append(f"提示：{gap_text}")
-        lines.append("")
-
-    market_env = r.get("market_env") or {}
-    env_level = market_env.get("level", "")
-    skill_note = market_env.get("skill_note", "")
-    trend_5d = market_env.get("trend_5d", "")
-    change_pct = market_env.get("change_pct", 0.0)
-    has_env = env_level and env_level not in ("未知", "")
-
-    status_text = str(r.get("state_label") or "")
-    base_status_text = str(r.get("base_status") or "")
-    theory_status_text = str(r.get("theory_status") or status_text)
-
-    if has_env:
-        price_dir = "涨" if change_pct >= 0 else "跌"
-        change_abs = abs(change_pct)
-        lines.extend([
-            "",
-            "🌍 大盘",
-            "",
-            f"中证1000｜{env_level}｜今日{price_dir}{change_abs:.1f}%｜{skill_note}",
-        ])
-    else:
-        lines.extend([
-            "",
-            "🌍 大盘",
-            "",
-            "中证1000｜数据不足",
-        ])
-
-    structure_note = str(r.get("structure_note") or "")
-    volume_note = str(r.get("volume_note") or "")
-    # 📊 阶段判断（一行格式）
-    # 根据阶段确定操作建议
+    current_price = float(r.get("current") or 0)
+    change_pct = float(r.get("change_pct") or 0)
+    lines.append(f"现价：{current_price:.2f}元（{change_pct:+.2f}%）")
+    
+    ma = r.get("ma") or {}
+    lines.append(f"MA5：{ma.get('ma5', '--')}｜MA10：{ma.get('ma10', '--')}｜MA20：{ma.get('ma20', '--')}｜MA30：{ma.get('ma30', '--')}")
+    
+    atr14 = float(r.get("atr14", 0))
+    atr_ratio = float(r.get("atr_ratio", 0))
+    atr_level = str(r.get("atr_level") or "")
+    if atr14 > 0:
+        lines.append(f"ATR {atr14:.2f}（{atr_ratio*100:.1f}%）{atr_level}")
+    
+    lines.append("")
+    
+    major_stage = str(r.get("major_stage") or "")
+    momentum = str(r.get("short_term_momentum") or "")
+    stage_action = str(r.get("stage_action") or "")
     stage_action_map = {
         "蓄势": "低吸高抛",
         "主升": "持股待涨",
@@ -946,224 +873,62 @@ def render_markdown(r: dict[str, Any]) -> str:
         "衰退": "不碰",
     }
     stage_action_text = stage_action_map.get(major_stage, stage_action)
-    lines.extend([
-        "",
-        f"📊 {major_stage}期 + {momentum} → {stage_action_text}",
-    ])
-
-    # ✅ 趋势强势提示
-    ma_raw = r.get("ma_raw") or {}
-    ma5 = ma_raw.get("ma5")
-    ma10 = ma_raw.get("ma10")
-    ma20 = ma_raw.get("ma20")
-    ma30 = ma_raw.get("ma30")
-    ma250_val = r.get("ma250")
-    try:
-        current_price = float(r.get("current") or 0)
-    except (TypeError, ValueError):
-        current_price = 0.0
-    if (ma250_val and current_price > 0 and current_price > ma250_val and
-        ma5 and ma10 and ma20 and ma30 and ma250_val and
-        ma5 > ma10 > ma20 > ma30 > ma250_val):
-        lines.append("")
-        lines.append("✅ 趋势强势：价格在 250 日线上方，均线多头排列")
-
-    # 💰 主力资金（阶段判断之后、决策之前）
-    mf = r.get("main_force") or {}
-    if mf and mf.get("stage") and mf["stage"] != "unknown":
-        try:
-            from trader_shared.main_force_output import format_main_force_enhanced
-            lines.append("")
-            lines.append(format_main_force_enhanced(
-                mf,
-                today_super_large=float(mf.get("today_super_large_wan", 0) or 0),
-                today_large=float(mf.get("today_large_wan", 0) or 0),
-            ))
-        except Exception:
-            pass
-
-    # 📍 买卖点（价格流格式 - PRD 标准）
+    lines.append(f"📊 {major_stage}期 + {momentum} → {stage_action_text}")
     lines.append("")
+    
     lines.append("📍 买卖点")
-    lines.append("")
-    # 止损
+    stop = float(r.get("stop") or 0)
     if stop > 0:
         lines.append(f"  {stop:.2f} 止损")
-    # 买入位（支撑位）
+        
+    low_price = float(r.get("support") or 0)
+    position_cap = int(r.get("position_cap") or 10)
     if low_price > 0:
-        buy_text = f"  {low_price:.2f} ← 试探买 {position_cap}%（缩量企稳）"
-        if golden_bid:
-            buy_text += f" 黄金挂单位: {golden_bid:.2f}"
-        lines.append(buy_text)
-    # 当前价格
-    current_price = float(r.get("current") or 0)
+        lines.append(f"  {low_price:.2f} ← 试探买 {position_cap}%（缩量企稳）")
+        
     if current_price > 0:
         lines.append(f"  {current_price:.2f} 当前")
-    # 卖出计划（止盈计划）
+        
     exit_plan = r.get("exit_plan") or {}
     exit_plan_items = exit_plan.get("exit_plan") or []
-    for idx, item in enumerate(exit_plan_items, 1):
+    for item in exit_plan_items:
         p = item.get("price")
         ratio = item.get("ratio", 0)
         reason = item.get("reason", "")
         if p is not None and p > 0:
             lines.append(f"  {p:.2f} → 卖 {ratio:.0%}（{reason}）")
-    # 压力位
+            
     resistance_val = float(r.get("resistance") or 0)
     if resistance_val > 0:
         lines.append(f"  {resistance_val:.2f} 压力")
-    # 阶段转派发 → 清仓
+        
     if exit_plan.get("stage_exit"):
         lines.append(f"  阶段转{exit_plan['stage_exit']} → 清仓")
-
-    # 💡 为什么这么操作（PRD 标准格式）
+        
     lines.append("")
     lines.append("💡 为什么这么操作")
-    lines.append("")
-    # 阶段描述（简化）
     stage_desc_map = {
         "蓄势": "区间震荡，低吸高抛",
         "主升": "趋势向上，持股待涨",
         "派发": "高位震荡，逢高减仓",
         "衰退": "趋势向下，不碰",
     }
-    stage_desc = stage_desc_map.get(major_stage, major_reason)
+    stage_desc = stage_desc_map.get(major_stage, "")
     lines.append(f"  阶段：{major_stage}期（{stage_desc}）")
-    # 趋势描述（简化）
+    
+    confirm = float(r.get("confirm") or 0)
     trend_desc = f"价格在 {confirm:.2f} 下方" if current_price < confirm else f"价格站上 {confirm:.2f}"
     trend_action = "不追" if current_price < confirm else "可加仓"
     lines.append(f"  趋势：短期偏弱（{trend_desc}），{trend_action}")
-
-    # 止盈计划（仅在有持仓时显示）
-    has_position = r.get("has_position", False)
-    cost_price = float(r.get("cost_price") or 0)
     
-    # 只有有持仓时才显示止盈计划
-    if has_position and exit_plan_items and exit_plan.get("risk_r", 0) > 0:
-        ep_entry = cost_price if cost_price > 0 else float(r.get("support") or current)
-        lines.append("")
-        lines.append(f"  止盈计划（参考买入价 {ep_entry:.2f}）")
-        for idx, item in enumerate(exit_plan_items, 1):
-            p = item.get("price")
-            ratio = item.get("ratio", 0)
-            reason = item.get("reason", "")
-            if p is not None:
-                lines.append(f"    第{idx}笔：{p:.2f} 卖 {ratio:.0%}（{reason}）")
-            else:
-                lines.append(f"    第{idx}笔：{reason}")
-
-    # 三层止损
-    stage_stop = r.get("stage_stop") or {}
-    stage_stop_price = stage_stop.get("price", 0)
-    stage_stop_reason = stage_stop.get("reason", "")
-    stop_losses = r.get("stop_losses") or {}
-    tech_stop = stop_losses.get("technical", {}).get("price", 0)
-    time_limit = stop_losses.get("time_limit", {})
-    time_days = time_limit.get("days", 0)
-    if tech_stop > 0 or stage_stop_price > 0:
-        lines.append("")
-        lines.append("  三层止损")
-        parts = []
-        if tech_stop > 0:
-            parts.append(f"技术止损：{tech_stop:.2f}")
-        if stage_stop_price > 0:
-            parts.append(f"阶段止损：{stage_stop_price:.2f}")
-        if time_days > 0:
-            parts.append(f"时间止损：{time_days}天")
-        lines.append(f"    {'｜'.join(parts)}")
-        # 取最近的止损
-        nearest_stop = max(tech_stop, stage_stop_price)
-        if nearest_stop > 0:
-            lines.append(f"    → 跌破 {nearest_stop:.2f} 减仓")
-
-    # 仓位计算过程
-    position_info = r.get("position_info") or {}
-    if position_info:
-        stage_pct = position_info.get("stage_position_pct", 0)
-        env_limit = position_info.get("env_limit_pct", 0)
-        env_name = position_info.get("market_env", "震荡市")
-        suggested = position_info.get("suggested_pct", 0)
-        blocked = position_info.get("hard_rule_blocked", False)
-        block_reason = position_info.get("hard_rule_reason", "")
-
-        lines.extend([
-            f"  四阶段仓位：{stage_pct}%",
-            f"  大盘环境：{env_name}",
-            f"  单票上限：{env_limit}%",
-        ])
-        if blocked:
-            lines.append(f"  → ❌ 硬规则阻止：{block_reason}")
-        else:
-            lines.append(f"  → 建议仓位：{suggested}%")
-    if isinstance(fusion, dict) and fusion.get("action"):
-        lines.extend(_fusion_breakdown(fusion))
-
-    # 📍 决策
-    lines.extend([
-        "",
-        "T0 参考",
-        "",
-        f"  低吸：{low_zone} ｜ 高抛：{confirm:.2f} ｜ 止损：{stop:.2f}",
-    ])
-
-    # 🔔 信号提醒（PRD 要求在 ❗ 关键价位之前）
-    signal_section = _build_signal_alert_section(r)
-    if signal_section:
-        lines.extend(signal_section)
-
-    resistance_val = float(r.get("resistance", 0))
-    chip_support = r.get("chip_support")
-    chip_resistance = r.get("chip_resistance")
-    ma_raw_v = r.get("ma_raw") or {}
-    groups: dict[int, list[tuple[float, str]]] = {}
-    trailing_stop_val = r.get("trailing_stop")
-    if trailing_stop_val is not None and trailing_stop_val != stop:
-        groups.setdefault(0, []).append((trailing_stop_val, "移动止损（ATR）"))
-    if stop > 0:
-        groups.setdefault(1, []).append((stop, "止损位（ATR）"))
-    if low_price > 0 and abs(low_price - stop) > 0.01:
-        groups.setdefault(1, []).append((low_price, "防守位（ATR）"))
-    cost_v = None
-    for v in sorted(filter(None, [ma_raw_v.get("ma10"), ma_raw_v.get("ma20"), ma_raw_v.get("ma30")])):
-        if low_price < v < r["current"]:
-            cost_v = v
-            break
-    if cost_v:
-        groups.setdefault(2, []).append((cost_v, "成本密集区"))
-    if chip_support is not None and chip_support > stop:
-        g = 1 if chip_support < low_price else 2
-        groups.setdefault(g, []).append((chip_support, "有量支撑"))
-    groups.setdefault(3, []).append((r["current"], "当前位置"))
-    if confirm > 0 and abs(confirm - r["current"]) > 0.01:
-        groups.setdefault(3, []).append((confirm, "确认位（ATR）"))
-    if resistance_val > 0 and resistance_val > confirm:
-        groups.setdefault(4, []).append((resistance_val, "减仓位（ATR）"))
-    if chip_resistance is not None and chip_resistance > r["current"]:
-        g = 3 if chip_resistance < confirm else 4
-        groups.setdefault(g, []).append((chip_resistance, "套牢压力区"))
-    key_lines = ["", "❗ 关键价位", ""]
-    last_group = 0
-    for g in sorted(groups):
-        items = sorted(groups[g], key=lambda x: x[0])
-        for p, label in items:
-            sep = "+ ←" if "套牢压力" in label else "  ←"
-            if last_group and g != last_group:
-                key_lines.append("  ┆")
-            key_lines.append(f"{p:.2f}{sep} {label}")
-            last_group = g
-    lines.extend(key_lines)
-
-    # 📌 如果你有持仓（成本 {cost}）
     has_position = r.get("has_position", False)
     cost_price = float(r.get("cost_price") or 0)
     if has_position and cost_price > 0:
-        current = float(r.get("current") or 0)
-        pnl_pct = (current - cost_price) / cost_price * 100 if cost_price > 0 else 0
-        pnl_text = f"盈 {pnl_pct:+.1f}%" if pnl_pct >= 0 else f"亏 {abs(pnl_pct):.1f}%"
         lines.append("")
         lines.append(f"📌 如果你有持仓（成本 {cost_price:.2f}）")
-        lines.append("")
-        # 根据盈亏+阶段给出建议
+        pnl_pct = (current_price - cost_price) / cost_price * 100 if cost_price > 0 else 0
+        pnl_text = f"盈 {pnl_pct:+.1f}%" if pnl_pct >= 0 else f"亏 {abs(pnl_pct):.1f}%"
+        
         if pnl_pct >= 0:
             if major_stage == "主升":
                 lines.append(f"  现在：持有，让利润跑（{pnl_text}）")
@@ -1177,21 +942,17 @@ def render_markdown(r: dict[str, Any]) -> str:
             elif major_stage == "主升":
                 lines.append(f"  现在：持有，主升期大概率会回来（{pnl_text}）")
             else:
-                lines.append(f"  现在：持有，等反弹到成本价减仓（{pnl_text}）")
-        # 关键价位建议
-        if cost_price > 0:
-            lines.append(f"  反弹到 {cost_price:.2f}：减 50%（保本）")
+                lines.append(f"  现在：持有，不加仓（{pnl_text}）")
+                
+        lines.append(f"  反弹到 {cost_price:.2f}：减 50%（保本）")
         if stop > 0:
             lines.append(f"  跌破 {stop:.2f}：止损（认亏）")
-
-    # 🔍 主力筹码
+            
     chip_peaks = r.get("chip_peaks") or []
     if chip_peaks:
         lines.append("")
         lines.append("🔍 主力筹码")
-        lines.append("")
         lines.append("  筹码峰：")
-        # 显示筹码峰（按价格排序，最多显示3个）
         sorted_peaks = sorted(chip_peaks, key=lambda x: x.get("price", 0))
         for peak in sorted_peaks[:3]:
             p = peak.get("price", 0)
@@ -1199,154 +960,107 @@ def render_markdown(r: dict[str, Any]) -> str:
             level = peak.get("support_level", "")
             if p > 0:
                 lines.append(f"    {p:.2f}（{level}）｜ 占比 {share:.2f}%")
-        # 显示当前价以上占比和中位数价格
         current_pct = r.get("chip_current_pct")
         mid_price = r.get("chip_mid_price")
         if current_pct is not None:
             lines.append(f"  当前价以上：{current_pct:.1f}%")
         if mid_price is not None:
             lines.append(f"  中位数价格：{mid_price:.2f}")
-        # 筹码变化（对比昨天）
+            
         chip_migration = r.get("chip_migration") or {}
         has_history = chip_migration.get("has_history", False)
-        warning_level = chip_migration.get("warning_level", "none")
-        warning_text = chip_migration.get("warning_text", "")
         prev_date = chip_migration.get("prev_date", "")
-        prev_share = chip_migration.get("prev_share", 0)
-        migration_pct = chip_migration.get("migration_pct", 0)
-
         if has_history and prev_date:
             lines.append("")
-            lines.append(f"  筹码变化（对比 {prev_date}）：")
-            if migration_pct > 0:
-                # 找到当前最强支撑峰
-                support_peaks = [p for p in chip_peaks if "支撑" in str(p.get("support_level", ""))]
-                if support_peaks:
-                    strongest = max(support_peaks, key=lambda p: p.get("share_of_total", 0))
-                    curr_share = strongest.get("share_of_total", 0)
-                    peak_price = strongest.get("price", 0)
-                    change = curr_share - prev_share
-                    direction = "增加" if change > 0 else "减少"
-                    lines.append(f"    {peak_price:.2f}（支撑）：{prev_share:.1f}% → {curr_share:.1f}%（{direction} {abs(change):.1f}%）")
-            else:
-                lines.append(f"    底部筹码基本稳定，无明显搬家")
-
-        # 搬家警告
-        if warning_level == "critical":
-            lines.append(f"  🔴 {warning_text}")
-        elif warning_level == "warning":
-            lines.append(f"  ⚠️ {warning_text}")
-
-    # 📊 五层打分
+            lines.append(f"  筹码变化（对比昨天）：")
+            # Support Migration
+            support_migration = chip_migration.get("support_migration")
+            if support_migration:
+                prev_share = support_migration.get("prev_share", 0)
+                curr_share = support_migration.get("curr_share", 0)
+                diff = support_migration.get("diff", 0)
+                diff_pct = (diff / prev_share * 100) if prev_share > 0 else 0
+                direction_text = "增加" if diff > 0 else "减少"
+                lines.append(f"    {support_migration.get('prev_price', 0):.2f}（支撑）：{prev_share:.2f}% → {curr_share:.2f}%（{diff_pct:+.0f}%）← 底部筹码{direction_text}")
+            # Resistance Migration
+            resistance_migration = chip_migration.get("resistance_migration")
+            if resistance_migration:
+                prev_share = resistance_migration.get("prev_share", 0)
+                curr_share = resistance_migration.get("curr_share", 0)
+                diff = resistance_migration.get("diff", 0)
+                diff_pct = (diff / prev_share * 100) if prev_share > 0 else 0
+                direction_text = "增加" if diff > 0 else "减少"
+                lines.append(f"    {resistance_migration.get('prev_price', 0):.2f}（阻力）：{prev_share:.2f}% → {curr_share:.2f}%（{diff_pct:+.0f}%）← 顶部筹码{direction_text}")
+            
+            warning_text = chip_migration.get("warning_text", "")
+            if warning_text:
+                if "搬家" in warning_text or "吸筹" in warning_text or "松动" in warning_text or "抛压" in warning_text:
+                    pass
+                lines.append(f"    结论：{warning_text}")
+                
     fusion = r.get("fusion") or {}
     if isinstance(fusion, dict):
-        score = fusion.get("weighted_score", 0)
-        confidence = fusion.get("confidence", 0)
         signals = fusion.get("signals_detail") or {}
-        # 提取各策略分数（PRD 标准格式）
         chan_score = signals.get("chan", {}).get("confidence", 0) * 100 if isinstance(signals.get("chan"), dict) else 0
         wyk_score = signals.get("wyckoff", {}).get("confidence", 0) * 100 if isinstance(signals.get("wyckoff"), dict) else 0
         mom_score = signals.get("momentum", {}).get("confidence", 0) * 100 if isinstance(signals.get("momentum"), dict) else 0
-        chip_score = 50  # 筹码分数默认值
+        chip_score = 50
         
         lines.append("")
         lines.append("📊 五层打分")
-        lines.append("")
         lines.append(f"  结构{chan_score:.0f}/量价{wyk_score:.0f}｜筹码{chip_score:.0f}｜动能{mom_score:.0f}")
-        # 添加缠论描述（PRD 标准格式）
         chan_reason = signals.get("chan", {}).get("reason", "") if isinstance(signals.get("chan"), dict) else ""
         if chan_reason:
             lines.append(f"  缠论：{chan_reason}")
-        # 添加威科夫描述
         wyckoff_data = r.get("wyckoff") or {}
         wyckoff_desc = wyckoff_data.get("description", "无明显威科夫信号") if isinstance(wyckoff_data, dict) else "无明显威科夫信号"
         lines.append(f"  威科夫：{wyckoff_desc}")
-
-    # 🎯 信号判断（PRD 标准格式）
+        
     lines.append("")
     lines.append("🎯 信号判断")
-    lines.append("")
-    # 偏多信号
-    bullish_signals: list[str] = []
-    cautious_signals: list[str] = []
+    bullish_signals = []
+    cautious_signals = []
     
-    # 检查结构（缠论）
-    chan_data = signals.get("chan") or {}
+    chan_data = (fusion.get("signals_detail") or {}).get("chan") or {}
     if isinstance(chan_data, dict) and chan_data.get("direction", 0) > 0:
-        bullish_signals.append("结构（两次接近位置止跌）")
-    
-    # 检查量价
+        bullish_signals.append("✓ 结构（两次接近位置止跌）")
+        
     volume_ratio = float(r.get("volume_ratio") or 0)
     if volume_ratio < 0.8:
-        cautious_signals.append("量价（午后缩量）")
-    
-    # 检查筹码
-    chip_migration = r.get("chip_migration") or {}
-    if chip_migration.get("warning_level") in ("warning", "critical"):
-        cautious_signals.append("筹码（筹码松动）")
+        cautious_signals.append("! 量价（午后缩量）")
+        
+    chip_migration_warning = (r.get("chip_migration") or {}).get("warning_level")
+    if chip_migration_warning in ("warning", "critical"):
+        cautious_signals.append("! 筹码（筹码松动）")
     elif float(r.get("chip_current_pct") or 0) > 60:
-        cautious_signals.append("筹码（上方成交密集区）")
-    
-    # 检查趋势
-    if major_stage == "衰退":
-        cautious_signals.append("衰退期")
-    elif major_stage == "派发":
-        cautious_signals.append("派发期")
-    
+        cautious_signals.append("! 筹码（上方成交密集区）")
+        
     if bullish_signals:
-        lines.append(f"  偏多：✓ {'、'.join(bullish_signals)}")
+        lines.append(f"  偏多：{'  '.join(bullish_signals)}")
     if cautious_signals:
-        lines.append(f"  警惕：! {'、'.join(cautious_signals)}")
-    if not bullish_signals and not cautious_signals:
-        lines.append("  无明显信号")
-
-    # 💰 仓位检查
-    position_check_section = _build_position_check_section(r)
-    if position_check_section:
-        lines.extend(position_check_section)
-
-    stage = str(r.get("stage") or "")
-
-    # ✅ 亮点 / ⚠️ 风险（单行格式）
+        lines.append(f"  警惕：{'  '.join(cautious_signals)}")
+        
     lines.append("")
-    # 获取筹码搬家数据
-    chip_migration = r.get("chip_migration") or {}
-    migration_pct = chip_migration.get("migration_pct", 0)
-    warning_level = chip_migration.get("warning_level", "none")
-    
-    if stage == "转弱" or scene in ("空间不足",):
-        lines.append(f"✅ 亮点：{r['current']:.2f} 仍站在防守位 {low_price:.2f} 上方")
-        lines.append(f"⚠️ 风险：趋势已转弱不可恋战，反弹是减仓机会。若跌破 {low_price:.2f} 必须执行止损")
-    elif scene in ("突破确认", "突破观察"):
-        lines.append(f"✅ 亮点：现价 {r['current']:.2f} 已站上确认位 {confirm:.2f}，方向偏多")
-        lines.append(f"⚠️ 风险：突破后回踩 {confirm:.2f} 不破才算确认，缩量冲高先不减")
-    elif scene in ("低吸观察", "防守观察", "防守观察，趋势下行谨慎"):
-        lines.append(f"✅ 亮点：价格回到支撑区 {low_price:.2f} 附近，观察止跌信号")
-        lines.append(f"⚠️ 风险：趋势尚未确认，跌破 {low_price:.2f} 要止损，不提前抄底")
-    elif scene == "冲高减仓":
-        lines.append("✅ 亮点：现价接近压力区，有反弹机会")
-        lines.append(f"⚠️ 风险：冲高缩量先减仓，放量突破 {confirm:.2f} 再接回")
+    if current_price >= low_price and low_price > 0:
+        lines.append(f"✅ 亮点：{current_price:.2f} 仍站在防守位 {low_price:.2f} 上方")
     else:
-        lines.append(f"✅ 亮点：{r['current']:.2f} 仍站在防守位 {low_price:.2f} 上方，结构在修复")
-        # 根据实际筹码搬家数据生成风险提示
-        if warning_level in ("warning", "critical"):
-            lines.append(f"⚠️ 风险：{chip_migration.get('warning_text', '筹码松动')}")
-        else:
-            lines.append(f"⚠️ 风险：最大风险是 {confirm:.2f} 未确认前提前追入。若跌破 {low_price:.2f} 防守位，预期要先收回来")
-
+        lines.append(f"✅ 亮点：当前阶段为 {major_stage}期")
+        
+    chip_warning_text = (r.get("chip_migration") or {}).get("warning_text", "")
+    if "搬家" in chip_warning_text or "出货" in chip_warning_text:
+        lines.append(f"⚠️ 风险：{chip_warning_text}，警惕继续下跌")
+    else:
+        lines.append(f"⚠️ 风险：趋势较弱，需确认支撑有效性")
+        
+    lines.append("")
+    
+    # 动态附加池数量
     pool_count = _pool_count()
-    pool_line = f"当前池 {pool_count}/10，回复 1 入池" if pool_count > 0 else "回复 1 入池"
-
-    one_line = one_sentence(r, low_zone)
-    lines.extend([
-        "",
-        "👉 一句话",
-        "",
-        f"{stage_label}，{stage_action}。{one_line}",
-    ])
-
-    lines.append(f"\n{pool_line}")
-
+    if pool_count > 0:
+        lines.append(f"当前池 {pool_count}/10，回复 1 入池")
+    else:
+        lines.append("回复 1 入池")
+        
     return "\n".join(lines)
 
 

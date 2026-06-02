@@ -1,36 +1,71 @@
-# Output Template — trader
+# Trader 核心报告样式与文案契约 (2.4.0)
 
-> **This is the absolute truth for output structure.** Never generate output format from memory.
+本模板为 `trader` 命令 (`run_analysis.py`) 的绝对输出契约。所有渲染层修改必须且只能参照以下样例进行，禁止随意添加中间调试信息（如融合层 JSON 输出）、大盘段落、以及不相关的格式符号。
 
-## Valid Output
+⚠️ **格式红线 (CRITICAL)**：
+1. **禁用所有 Markdown 标题与水平线**：严禁使用 `#` 级标题或 `---`。各段落必须通过一个空行和 Emoji 前缀的纯文本直接分隔。
+2. **禁用表格与加粗**：如需突出显示，只能使用空格/全角竖线排版，绝对禁止使用 Markdown 表格语法 `|...|` 和加粗语法 `**...**`。
+3. **首行强制规范**：输出的首行必须是 `分析报告 — 标的名称（代码）`。
+4. **必须保留的关键字符串**：下游组件验证依赖特定关键词，在排版时请务必确保报告中包含“试探买”和“止损”。
 
-Starts with: `分析报告 —`
+## 标准渲染样式示例 (Ultra-Simplified)
 
-Headings in order:
+```text
+分析报告 — 南网科技（688248）
 
+现价：58.50元（-3.50%）
+MA5：59.05｜MA10：60.58｜MA20：61.02｜MA30：59.85
+ATR 3.69（6.1%）波幅偏高
+
+📊 蓄势期 + 转弱 → 低吸高抛
+
+📍 买卖点
+  55.57 止损
+  57.61 ← 试探买 10%（缩量企稳）
+  58.50 当前
+  59.22 → 卖 33%（阻力位）
+  62.85 → 卖 33%（1R 目标）
+  62.87 压力
+  阶段转派发 → 清仓
+
+💡 为什么这么操作
+  阶段：蓄势期（区间震荡，低吸高抛）
+  趋势：短期偏弱（价格在 59.00 下方），不追
+
+📌 如果你有持仓（成本 60.00）
+  现在：持有，不加仓（亏 2.5%）
+  反弹到 60.00：减 50%（保本）
+  跌破 55.57：止损（认亏）
+
+🔍 主力筹码
+  筹码峰：
+    57.88（支撑）｜ 占比 5.91%
+    60.46（强阻力）｜ 占比 6.99%
+    63.05（弱阻力）｜ 占比 5.29%
+  当前价以上：67.3%
+  中位数价格：60.29
+
+  筹码变化（对比昨天）：
+    57.88（支撑）：5.91% → 4.50%（-24%）← 底部筹码减少
+    60.46（强阻力）：6.99% → 8.50%（+22%）← 顶部筹码增加
+    结论：筹码在搬家，主力在出货
+
+📊 五层打分
+  结构75/量价45｜筹码50｜动能50
+  缠论：回调段。一类买、二类买
+  威科夫：无明显威科夫信号
+
+🎯 信号判断
+  偏多：✓ 结构（两次接近位置止跌）
+  警惕：! 量价（午后缩量）  ! 筹码（上方成交密集区）
+
+✅ 亮点：58.50 仍站在防守位 57.61 上方
+⚠️ 风险：筹码在搬家，主力在出货，警惕继续下跌
+
+当前池 3/10，回复 1 入池
 ```
-🌍 大盘
-🧭 阶段判断
-💰 主力资金
-📍 决策
-T0 参考
-❗ 关键价位
-✨ 亮点
-⚠️ 风险
-👉 一句话
-```
 
-## Required Fields
-
-- Top block includes `MA5 / MA10 / MA20 / MA30`; use `--` if unavailable.
-- `ATR` line follows MA line.
-- 🌍 大盘 includes `中证1000｜{regime}｜今日{change}%｜{skill_note}`.
-  - regime is market env level (正常/偏弱/很差), NOT stock stage (蓄势/主升/派发/衰退)
-- 🧭 阶段判断 includes `大阶段：{stage}期` and `短期动能：{momentum}`.
-- 💰 主力资金 includes `阶段：{stage}（置信度 {confidence}）` and `近5日：{cum_5}万（{trend}）` and `今日：{today}万（超大单 {sl}万｜大单 {l}万）` and `价资关系：{relation}` and `提示：{hint}`. Only shown when main force stage is not "unknown".
-- 📍 决策 includes `{stage_label} → {action}` and `仓位参考：{stage}期上限 {pct}%`.
-- `T0 参考` includes `低吸` `高抛` `止损`.
-- `❗ 关键价位` lists prices with `←` labels (止损位/防守位/当前位置/确认位).
-- `👉 一句话` is the final one-line summary.
-- Buy-side wording must include `止跌确认`.
-- 250日线下方时，首行显示 `⚠️ 250日线下方，一票否决，建议不参与`，然后继续完整分析.
+- **ATR**: Displayed if > 0.
+- **Fixed Keywords**: The output MUST contain exactly "试探买" and "止损" to pass automated validation.
+- **Chip Migration**: MUST include a comparison to the previous day ("对比昨天"), reflecting changes in support and resistance peaks.
+- **Banned Terms**: DO NOT output "必涨", "必跌", "主力入场第一枪", "出货日", "行情结束", "T0 执行卡", "T0买入价", "T0卖出价" and others listed in schema/v1.py.
