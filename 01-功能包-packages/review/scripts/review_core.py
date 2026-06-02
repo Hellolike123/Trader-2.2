@@ -667,6 +667,7 @@ def enrich_with_signal_backtrack(review: dict[str, Any], *, limit: int = 10) -> 
                 append_signal(sig)
                 # FIX: update same_day_sigs after append to prevent future duplicates
                 same_day_sigs = [sig]
+                review["historical_signals"].append(sig)
             except Exception:
                 pass
     except ImportError:

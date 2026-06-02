@@ -429,8 +429,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     chip_migration = {"migration_pct": 0, "warning_level": "none", "warning_text": "", "has_history": False}
     if _CHIP_MIGRATION_AVAILABLE and chip_peaks:
         try:
-            save_chip_snapshot(name, chip, trade_date=quote.get("trade_date"))
-            chip_migration = check_chip_migration(name, chip, bars=bars)
+            save_chip_snapshot(target, chip, trade_date=quote.get("trade_date"))
+            chip_migration = check_chip_migration(target, chip, bars=bars)
         except Exception:
             pass
 
@@ -884,7 +884,7 @@ def render_markdown(r: dict[str, Any]) -> str:
     low_price = float(r.get("support") or 0)
     position_cap = int(r.get("position_cap") or 10)
     if low_price > 0:
-        lines.append(f"  {low_price:.2f} ← 试探买 {position_cap}%（缩量企稳）")
+        lines.append(f"  {low_price:.2f} ← 买 {position_cap}%（缩量企稳）")
         
     if current_price > 0:
         lines.append(f"  {current_price:.2f} 当前")
@@ -980,7 +980,7 @@ def render_markdown(r: dict[str, Any]) -> str:
                 curr_share = support_migration.get("curr_share", 0)
                 diff = support_migration.get("diff", 0)
                 diff_pct = (diff / prev_share * 100) if prev_share > 0 else 0
-                direction_text = "增加" if diff > 0 else "减少"
+                direction_text = "增加" if diff > 0 else ("减少" if diff < 0 else "未变")
                 lines.append(f"    {support_migration.get('prev_price', 0):.2f}（支撑）：{prev_share:.2f}% → {curr_share:.2f}%（{diff_pct:+.0f}%）← 底部筹码{direction_text}")
             # Resistance Migration
             resistance_migration = chip_migration.get("resistance_migration")
@@ -989,7 +989,7 @@ def render_markdown(r: dict[str, Any]) -> str:
                 curr_share = resistance_migration.get("curr_share", 0)
                 diff = resistance_migration.get("diff", 0)
                 diff_pct = (diff / prev_share * 100) if prev_share > 0 else 0
-                direction_text = "增加" if diff > 0 else "减少"
+                direction_text = "增加" if diff > 0 else ("减少" if diff < 0 else "未变")
                 lines.append(f"    {resistance_migration.get('prev_price', 0):.2f}（阻力）：{prev_share:.2f}% → {curr_share:.2f}%（{diff_pct:+.0f}%）← 顶部筹码{direction_text}")
             
             warning_text = chip_migration.get("warning_text", "")

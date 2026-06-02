@@ -58,8 +58,8 @@ def _validate_plain_report_format(lines: list[str], markdown: str) -> list[str]:
 
 def _validate_fixed_content(lines: list[str], markdown: str) -> list[str]:
     errors: list[str] = []
-    for required in ("止损", "试探买"):
-        if required not in markdown:
+    for required in ("止损", "买"):
+        if not any(required in line for line in lines):
             errors.append(f"missing fixed panel text: {required}")
     return errors
 

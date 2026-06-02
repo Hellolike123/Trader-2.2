@@ -370,12 +370,14 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         expma20 = expma20_list[-1] if expma20_list else None
         
         if expma10 is not None:
+            ma_values["expma10"] = expma10
             if current > expma10:
                 add_level(support_levels, "EXPMA10", expma10, 0.9)
             else:
                 add_level(resistance_levels, "EXPMA10", expma10, 0.9)
         
         if expma20 is not None:
+            ma_values["expma20"] = expma20
             if current > expma20:
                 add_level(support_levels, "EXPMA20", expma20, 0.9)
             else:

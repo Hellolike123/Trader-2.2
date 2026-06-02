@@ -31,7 +31,7 @@ from t0_run import build_t0_event_signal, build_t0_signals, render_markdown, seg
 from monitor import BUY_TRIGGERED, detect_state_change, persist_event_signals
 from trader_shared.signal_contract import validate_signal
 from trader_shared.signal_store import load_recent_signals
-from validate_output import validate
+from trader_shared.schema.v1 import validate_t0 as validate
 
 
 def test_t0_markdown_contract() -> None:

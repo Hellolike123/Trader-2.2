@@ -40,13 +40,16 @@ def test_enrich_with_signal_backtrack_finds_same_day(tmp_path):
         "name": "南网科技",
         "date": "2026-05-01",
     }
-    import trader_shared.signal_store as store_mod
-    old = store_mod.DEFAULT_SIGNAL_STORE_PATH
-    store_mod.DEFAULT_SIGNAL_STORE_PATH = store_path
+    import os
+    old = os.environ.get("TRADER_SIGNAL_STORE_PATH")
+    os.environ["TRADER_SIGNAL_STORE_PATH"] = str(store_path)
     try:
         enrich_with_signal_backtrack(review)
     finally:
-        store_mod.DEFAULT_SIGNAL_STORE_PATH = old
+        if old is None:
+            del os.environ["TRADER_SIGNAL_STORE_PATH"]
+        else:
+            os.environ["TRADER_SIGNAL_STORE_PATH"] = old
 
     assert len(review["historical_signals"]) >= 1
 
@@ -68,13 +71,16 @@ def test_enrich_with_signal_backtrack_no_signals_in_store(tmp_path):
         "name": "南网科技",
         "date": "2026-05-01",
     }
-    import trader_shared.signal_store as store_mod
-    old = store_mod.DEFAULT_SIGNAL_STORE_PATH
-    store_mod.DEFAULT_SIGNAL_STORE_PATH = store_path
+    import os
+    old = os.environ.get("TRADER_SIGNAL_STORE_PATH")
+    os.environ["TRADER_SIGNAL_STORE_PATH"] = str(store_path)
     try:
         enrich_with_signal_backtrack(review, limit=10)
     finally:
-        store_mod.DEFAULT_SIGNAL_STORE_PATH = old
+        if old is None:
+            del os.environ["TRADER_SIGNAL_STORE_PATH"]
+        else:
+            os.environ["TRADER_SIGNAL_STORE_PATH"] = old
 
     assert review["historical_signals"] == []
 
@@ -107,13 +113,16 @@ def test_enrich_with_signal_backtrack_filters_same_day(tmp_path):
         "name": "南网科技",
         "date": "2026-05-01",
     }
-    import trader_shared.signal_store as store_mod
-    old = store_mod.DEFAULT_SIGNAL_STORE_PATH
-    store_mod.DEFAULT_SIGNAL_STORE_PATH = store_path
+    import os
+    old = os.environ.get("TRADER_SIGNAL_STORE_PATH")
+    os.environ["TRADER_SIGNAL_STORE_PATH"] = str(store_path)
     try:
         enrich_with_signal_backtrack(review, limit=10)
     finally:
-        store_mod.DEFAULT_SIGNAL_STORE_PATH = old
+        if old is None:
+            del os.environ["TRADER_SIGNAL_STORE_PATH"]
+        else:
+            os.environ["TRADER_SIGNAL_STORE_PATH"] = old
 
     # Should fall back to last N signals when no same-day match
     assert len(review["historical_signals"]) >= 1
@@ -122,12 +131,15 @@ def test_enrich_with_signal_backtrack_filters_same_day(tmp_path):
 def test_backward_compat_empty_symbols(tmp_path):
     store_path = tmp_path / "compat.jsonl"
     review = {}
-    import trader_shared.signal_store as store_mod
-    old = store_mod.DEFAULT_SIGNAL_STORE_PATH
-    store_mod.DEFAULT_SIGNAL_STORE_PATH = store_path
+    import os
+    old = os.environ.get("TRADER_SIGNAL_STORE_PATH")
+    os.environ["TRADER_SIGNAL_STORE_PATH"] = str(store_path)
     try:
         enrich_with_signal_backtrack(review)
     finally:
-        store_mod.DEFAULT_SIGNAL_STORE_PATH = old
+        if old is None:
+            del os.environ["TRADER_SIGNAL_STORE_PATH"]
+        else:
+            os.environ["TRADER_SIGNAL_STORE_PATH"] = old
 
     assert review["historical_signals"] == []

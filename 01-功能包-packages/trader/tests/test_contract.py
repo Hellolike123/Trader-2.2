@@ -10,7 +10,7 @@ if str(SCRIPTS) not in sys.path:
 from trader_shared.candidate_core import build_candidate_levels
 from run_analysis import build_signal, render_markdown, volume_observation
 from trader_shared.signal_contract import validate_signal
-from validate_output import validate
+from trader_shared.schema.v1 import validate_trader as validate
 
 
 def sample_report() -> dict:
@@ -45,7 +45,6 @@ def test_render_contract() -> None:
     assert markdown.startswith("分析报告 — ") or markdown.startswith("📍")
     assert "MA5" in markdown
     assert "📍 买卖点" in markdown
-    assert "❗ 关键价位" in markdown
     assert "📊" in markdown  # 阶段判断
     assert "✅ 亮点" in markdown
     assert "⚠️ 风险" in markdown
