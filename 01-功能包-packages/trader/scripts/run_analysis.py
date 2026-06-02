@@ -518,6 +518,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         position_ratio=levels.get("position_ratio", 0.5),
         atr14=atr14_val,
         chip_migration=chip_migration,
+        fib_retrace=levels.get("fib_retrace"),
     )
 
     report = {

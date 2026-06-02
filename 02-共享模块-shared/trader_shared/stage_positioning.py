@@ -498,6 +498,7 @@ def assess_stage(
     pnl_pct: float = 0.0,
     atr14: float = 0.0,
     chip_migration: dict[str, Any] | None = None,
+    fib_retrace: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """四阶段定位主函数（威科夫量价驱动 + 四层防护）
 
@@ -512,6 +513,7 @@ def assess_stage(
             "stage_label": str,       # "蓄势期 + 修复"
             "confidence": int,        # 阶段置信度 0-100
             "protection_notes": list, # 四层防护触发说明
+            "stop_losses": dict,
         }
     """
     ma5 = ma_values.get("ma5")
@@ -569,6 +571,19 @@ def assess_stage(
     action, max_position = _DECISION_MATRIX.get(final_stage, {}).get(
         momentum, ("观察", 0)
     )
+
+    # 黄金坑共振验证 (Golden Bid Resonance)
+    if fib_retrace and "golden_bid" in fib_retrace and fib_retrace["golden_bid"] is not None:
+        golden_bid = float(fib_retrace["golden_bid"])
+        # Check if EXPMA(10) or EXPMA(20) is near golden_bid (e.g. within 1.5%)
+        expma_vals = [v for v in (expma10, expma20) if v is not None]
+        if expma_vals:
+            for expma_val in expma_vals:
+                if golden_bid > 0 and abs(expma_val - golden_bid) / golden_bid <= 0.015:
+                    action = "🌟黄金共振加仓"
+                    max_position = 80
+                    protection_notes.append("触发黄金共振（EXPMA与Golden Bid重合）")
+                    break
 
     stage_label = f"{final_stage}期 + {momentum}"
 
