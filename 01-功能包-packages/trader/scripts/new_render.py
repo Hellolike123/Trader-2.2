@@ -1,4 +1,85 @@
-def render_markdown(r: dict[str, Any]) -> str:
+def _load_historical_win_rate(symbol: str) -> dict | None:
+    import os
+    import json
+    path = os.path.expanduser("~/.trader/signal_results.jsonl")
+    if not os.path.exists(path):
+        return None
+
+    normalized_symbol = symbol.replace(".SH", "").replace(".SZ", "").strip()
+
+    trades = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    res_rec = json.loads(line)
+                    r_symbol = str(res_rec.get("symbol") or "")
+                    r_name = str(res_rec.get("name") or "")
+                    norm_r_symbol = r_symbol.replace(".SH", "").replace(".SZ", "").strip()
+                    if normalized_symbol == norm_r_symbol or normalized_symbol == r_name:
+                        trades.append(res_rec)
+                except Exception:
+                    continue
+    except Exception:
+        return None
+
+    if len(trades) < 5:
+        return None
+
+    total = len(trades)
+    wins = 0
+    total_gains = 0.0
+    total_losses = 0.0
+    max_gain = -999.0
+    max_loss = 999.0
+
+    for t in trades:
+        pnl = t.get("return_pct")
+        if pnl is None:
+            pnl = t.get("r_5d")
+        if pnl is None:
+            pnl = t.get("pnl_pct", 0.0)
+        pnl = float(pnl)
+
+        if pnl > 0:
+            wins += 1
+            total_gains += pnl
+        else:
+            total_losses += abs(pnl)
+
+        if pnl > max_gain:
+            max_gain = pnl
+        if pnl < max_loss:
+            max_loss = pnl
+
+    win_rate = (wins / total) * 100
+    eps = 0.001
+    profit_factor = (total_gains + eps) / (total_losses + eps)
+    avg_pnl = sum(float(t.get("return_pct") or t.get("r_5d") or t.get("pnl_pct", 0.0)) for t in trades) / total
+
+    if win_rate >= 60.0 and profit_factor >= 1.5:
+        conclusion = "系统在该股表现出高度适应性，信号极具参考价值"
+    elif win_rate < 45.0:
+        conclusion = "易发生磨损（低胜率），需谨慎跟单，建议降低单笔仓位"
+    else:
+        conclusion = "表现中性，正常参考"
+
+    return {
+        "total": total,
+        "wins": wins,
+        "win_rate": win_rate,
+        "profit_factor": profit_factor,
+        "avg_pnl": avg_pnl,
+        "max_gain": max_gain,
+        "max_loss": max_loss,
+        "conclusion": conclusion
+    }
+
+
+def render_markdown(r: dict) -> str:
     ma = r.get("ma") or {}
     ma_raw = r.get("ma_raw") or ma
     display_code = str(r.get("symbol", "")).replace(".SH", "").replace(".SZ", "")
@@ -230,6 +311,19 @@ def render_markdown(r: dict[str, Any]) -> str:
     else:
         lines.append(f"⚠️ 风险：最大风险是 {confirm:.2f} 未确认前提前追入")
         
+    lines.append("")
+    win_rate_data = _load_historical_win_rate(display_code)
+    lines.append("📊 股性与历史回测")
+    if win_rate_data is not None:
+        lines.append(f"  历史记录：最近共生成 {win_rate_data['total']} 次已平仓信号")
+        lines.append(f"  说买 → 涨了：{win_rate_data['wins']}/{win_rate_data['total']} 次（胜率 {win_rate_data['win_rate']:.1f}%）")
+        lines.append(f"  平均盈亏比：{win_rate_data['profit_factor']:.2f} ｜ 平均每笔收益：{win_rate_data['avg_pnl']:+.2f}%")
+        lines.append(f"  单笔最强：{win_rate_data['max_gain']:+.2f}% ｜ 单笔最弱：{win_rate_data['max_loss']:+.2f}%")
+        lines.append(f"  结论：{win_rate_data['conclusion']}")
+    else:
+        lines.append("  历史交易数据不足，暂不统计")
+    lines.append("")
+
     pool_count = _pool_count()
     if pool_count > 0:
         lines.extend(["", f"当前池 {pool_count}/10，回复 1 入池"])

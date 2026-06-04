@@ -500,3 +500,87 @@ def test_alert_no_trigger_when_0_atr() -> None:
     # 50 距离所有关键位 > 0.5
     assert generate_alert(report) is None
 
+
+def test_load_historical_win_rate_not_exists() -> None:
+    from run_analysis import _load_historical_win_rate
+    from unittest.mock import patch
+
+    with patch("os.path.exists", return_value=False):
+        assert _load_historical_win_rate("688248") is None
+
+
+def test_load_historical_win_rate_insufficient_data() -> None:
+    from run_analysis import _load_historical_win_rate
+    from unittest.mock import patch, mock_open
+
+    mock_data = '{"symbol": "688248.SH", "return_pct": 5.0, "outcome": "win"}\n' * 3
+    with patch("os.path.exists", return_value=True), patch("builtins.open", mock_open(read_data=mock_data)):
+        assert _load_historical_win_rate("688248") is None
+
+
+def test_load_historical_win_rate_sufficient_data() -> None:
+    from run_analysis import _load_historical_win_rate
+    from unittest.mock import patch, mock_open
+
+    # 4 wins (return_pct: 10.0, 5.0, 2.0, 3.0), 2 losses (return_pct: -4.0, -1.0)
+    mock_lines = [
+        '{"symbol": "688248.SH", "return_pct": 10.0, "outcome": "win"}',
+        '{"symbol": "688248.SH", "return_pct": 5.0, "outcome": "win"}',
+        '{"symbol": "688248.SH", "return_pct": 2.0, "outcome": "win"}',
+        '{"symbol": "688248.SH", "return_pct": -4.0, "outcome": "loss"}',
+        '{"symbol": "688248.SH", "r_5d": 3.0, "outcome": "win"}',
+        '{"symbol": "688248.SH", "pnl_pct": -1.0, "outcome": "loss"}',
+    ]
+    mock_data = "\n".join(mock_lines) + "\n"
+
+    with patch("os.path.exists", return_value=True), patch("builtins.open", mock_open(read_data=mock_data)):
+        res = _load_historical_win_rate("688248")
+        assert res is not None
+        assert res["total"] == 6
+        assert res["wins"] == 4
+        assert abs(res["win_rate"] - 66.67) < 0.1
+        # gains: 20.0, losses: 5.0. PF = 20.001 / 5.001 = 4.0
+        assert abs(res["profit_factor"] - 4.0) < 0.1
+        assert abs(res["avg_pnl"] - 2.5) < 0.1
+        assert res["max_gain"] == 10.0
+        assert res["max_loss"] == -4.0
+        assert "高度适应" in res["conclusion"]
+
+
+def test_render_markdown_contains_win_rate() -> None:
+    from run_analysis import render_markdown
+    from unittest.mock import patch, mock_open
+
+    mock_lines = [
+        '{"symbol": "688248.SH", "return_pct": 10.0, "outcome": "win"}',
+        '{"symbol": "688248.SH", "return_pct": 5.0, "outcome": "win"}',
+        '{"symbol": "688248.SH", "return_pct": 2.0, "outcome": "win"}',
+        '{"symbol": "688248.SH", "return_pct": -4.0, "outcome": "loss"}',
+        '{"symbol": "688248.SH", "r_5d": 3.0, "outcome": "win"}',
+        '{"symbol": "688248.SH", "pnl_pct": -1.0, "outcome": "loss"}',
+    ]
+    mock_data = "\n".join(mock_lines) + "\n"
+
+    report = {
+        "name": "南网科技",
+        "symbol": "688248.SH",
+        "current": 56.4,
+        "support": 55.87,
+        "confirm": 60.55,
+        "stop": 54.75,
+        "stage": "修复",
+        "scene": "防守观察",
+        "ma": {"ma5": "57.96", "ma10": "--", "ma20": "--", "ma30": "--"},
+    }
+
+    with patch("os.path.exists", return_value=True), patch("builtins.open", mock_open(read_data=mock_data)):
+        markdown = render_markdown(report)
+        assert "📊 股性与历史回测" in markdown
+        assert "历史记录：最近共生成 6 次已平仓信号" in markdown
+        assert "说买 → 涨了：4/6 次（胜率 66.7%）" in markdown
+        assert "平均盈亏比：4.00" in markdown
+        assert "单笔最强：+10.00%" in markdown
+        assert "单笔最弱：-4.00%" in markdown
+        assert "高度适应" in markdown
+
+
