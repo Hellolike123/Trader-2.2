@@ -91,6 +91,19 @@ from trader_shared.signal_contract import assert_valid_signal
 from datetime import date
 import os
 
+def _get_major_stage(r: dict[str, Any]) -> str:
+    major_stage = str(r.get("major_stage") or "")
+    if not major_stage:
+        old_stage = str(r.get("stage") or "")
+        stage_map = {
+            "修复": "蓄势",
+            "走强": "主升",
+            "震荡": "派发",
+            "转弱": "衰退",
+        }
+        major_stage = stage_map.get(old_stage, old_stage)
+    return major_stage
+
 def _get_cost_from_signals(target: str) -> float:
     """从 signals.jsonl 中获取买入成本价（只读最近100条）。"""
     try:
@@ -229,6 +242,7 @@ _FUSION_ACTION_MAP: dict[str, tuple[str, str, str]] = {
     "半仓试 (多方主导)": ("track", "bullish", "track"),
     "半仓试 (多方主导但有分歧)": ("track", "bullish", "track"),
     "增持": ("track", "bullish", "track"),
+    "等转强观察": ("wait_for_confirmation", "bullish_lean", "observe"),  # Fix 3: 新增
     "持股观望": ("wait_for_confirmation", "bullish_lean", "observe"),
     "减仓": ("defensive", "bearish", "wait"),
     "空仓/止损": ("defensive", "bearish", "wait"),
@@ -864,7 +878,7 @@ def render_markdown(r: dict[str, Any]) -> str:
     
     lines.append("")
     
-    major_stage = str(r.get("major_stage") or "")
+    major_stage = _get_major_stage(r)
     momentum = str(r.get("short_term_momentum") or "")
     stage_action = str(r.get("stage_action") or "")
     stage_action_map = {
@@ -1096,7 +1110,8 @@ def build_signal(r: dict[str, Any]) -> dict[str, Any]:
             isinstance(v, dict) and v.get("direction") != 0
             for v in sd.values()
         )
-        if fc > 0.2 and has_signal:
+        # Fix 4: 门槛从 >0.2 提高到 >0.4，避免低质量灰区信号误覆盖基础决策
+        if fc > 0.4 and has_signal:
             mapped = _map_fusion_to_signal(fusion.get("action", ""))
             if mapped is not None:
                 ft, fd, fa = mapped
@@ -1148,12 +1163,14 @@ def build_signal(r: dict[str, Any]) -> dict[str, Any]:
 
 
 def signal_state(r: dict[str, Any]) -> tuple[str, str, str, str]:
-    stage = str(r.get("stage") or "")
+    # Fix 7: 用 major_stage（四阶段模型）而非 stage（短期3帧 determine_stage 轻量函数）
+    # stage 只看 current/weekly/monthly 三个收盘价，major_stage 是 stage_positioning 综合结论
+    major_stage = _get_major_stage(r)
     scene = str(r.get("scene") or "")
     theory_status = str(r.get("theory_status") or r.get("state_label") or scene)
     current = float(r.get("current") or 0)
     confirm = float(r.get("confirm") or current)
-    if stage == "转弱" or theory_status == "暂不碰":
+    if major_stage == "衰退" or theory_status == "暂不碰":
         return "defensive", "bearish_lean", "wait", "low"
     if theory_status == "体系转强确认":
         return "track", "bullish", "track", "medium"
@@ -1186,7 +1203,8 @@ def signal_max_total_pct(signal_type: str) -> int:
 
 def signal_risk_flags(r: dict[str, Any]) -> list[str]:
     flags: list[str] = []
-    if str(r.get("stage") or "") == "转弱":
+    # Fix A2: 用 major_stage（四阶段）而非旧 stage（三帧轻量函数），与 Fix 7 保持一致
+    if _get_major_stage(r) == "衰退":
         flags.append("structure_weak")
     if str(r.get("scene") or "") == "空间不足":
         flags.append("limited_upside_space")
@@ -1196,7 +1214,9 @@ def signal_risk_flags(r: dict[str, Any]) -> list[str]:
 
 
 def state_text(stage: str, theory_status: str) -> str:
-    if stage == "转弱" or theory_status == "暂不碰":
+    # Fix A3: 不再用旧 stage=="转弱"，统一依赖 theory_status
+    # 旧 stage 来自 determine_stage()（三帧轻量函数），不代表四阶段模型结论
+    if theory_status == "暂不碰":
         return "暂不碰"
     if theory_status == "体系转强确认":
         return "体系转强确认"
@@ -1263,7 +1283,7 @@ def momentum_view(text: str) -> str:
 
 
 def one_sentence(r: dict[str, Any], low_zone: str) -> str:
-    major_stage = str(r.get("major_stage") or "")
+    major_stage = _get_major_stage(r)
     momentum = str(r.get("short_term_momentum") or "")
     confirm = float(r.get("confirm") or 0)
     if major_stage == "衰退":
@@ -1347,7 +1367,7 @@ def _build_existing_position_section(r: dict[str, Any], cost_price: float) -> li
     resistance = float(r.get("resistance") or 0)
     confirm = float(r.get("confirm") or 0)
     stop = float(r.get("stop") or 0)
-    major_stage = str(r.get("major_stage") or "")
+    major_stage = _get_major_stage(r)
     momentum = str(r.get("short_term_momentum") or "")
     
     if current <= 0 or cost_price <= 0:
@@ -1490,12 +1510,15 @@ def _analyze_buy_conditions(
     if isinstance(wyckoff, dict) and wyckoff.get("lps_signal"):
         bonus_conditions.append("威科夫LPS确认")
     
-    # 计算仓位
+    # Fix 9: 1-2个加分条件由0%改为5%试仓
+    # 蓄势期到达支撑位但条件不完美时，5%是合理的试探仓而非完全不买
     bonus_count = len(bonus_conditions)
     if bonus_count >= 5:
         position_pct = 15
     elif bonus_count >= 3:
         position_pct = 10
+    elif bonus_count >= 1:
+        position_pct = 5  # Fix 9: 1-2个加分条件给5%试仓
     else:
         position_pct = 0
     
@@ -1533,7 +1556,7 @@ def _build_today_action_section(r: dict[str, Any]) -> list[str]:
     confirm = float(r.get("confirm") or 0)
     stop = float(r.get("stop") or 0)
     low_zone = str(r.get("low_zone") or f"{support:.2f}-{support * 1.01:.2f}元")
-    major_stage = str(r.get("major_stage") or "")
+    major_stage = _get_major_stage(r)
     momentum = str(r.get("short_term_momentum") or "")
     stage_action = str(r.get("stage_action") or "")
     scene = str(r.get("scene") or "")

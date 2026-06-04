@@ -17,6 +17,15 @@ def render_markdown(r: dict[str, Any]) -> str:
     position_cap = int(r.get("position_cap") or 10)
 
     major_stage = str(r.get("major_stage") or "")
+    if not major_stage:
+        old_stage = str(r.get("stage") or "")
+        stage_map = {
+            "修复": "蓄势",
+            "走强": "主升",
+            "震荡": "派发",
+            "转弱": "衰退",
+        }
+        major_stage = stage_map.get(old_stage, old_stage)
     momentum = str(r.get("short_term_momentum") or "")
     
     stage_action_map = {

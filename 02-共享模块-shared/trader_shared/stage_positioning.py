@@ -529,12 +529,15 @@ def assess_stage(
     state = _load_stage_state()
     protection_notes: list[str] = []
 
-    # 第二层：置信度门控
+    # Fix A4: 实际执行顺序：层2(置信度) → 层1(多日确认) → 层3(交叉验证) → 层4(锁定)
+    # 逻辑合理：先过滤低置信信号，再做多日确认，注释编号之前写反了
+
+    # 置信度门控（先于多日确认，过滤噪音信号）
     gated_stage, gated_confidence = _layer2_confidence_gate(raw_stage, raw_confidence, state)
     if gated_stage != raw_stage:
         protection_notes.append(f"置信度{raw_confidence}%<60%，保持{gated_stage}")
 
-    # 第一层：多日确认
+    # 多日确认（在置信度过滤之后，确认阶段转换真实性）
     confirmed_stage, is_transition = _layer1_multi_day_confirm(gated_stage, state)
     if confirmed_stage != gated_stage:
         protection_notes.append(f"多日确认中（{state.get('pending_count', 0)}/3）")
@@ -581,7 +584,9 @@ def assess_stage(
             for expma_val in expma_vals:
                 if golden_bid > 0 and abs(expma_val - golden_bid) / golden_bid <= 0.015:
                     action = "🌟黄金共振加仓"
-                    max_position = 80
+                    # Fix A5: 原 80% 超过决策矩阵上限（主升走强最高60%）
+                    # 改为 40%：比普通蓄势低吸多一档，但不超仓
+                    max_position = 40
                     protection_notes.append("触发黄金共振（EXPMA与Golden Bid重合）")
                     break
 

@@ -116,24 +116,19 @@ def _ma250_check(current: float, bars: list[dict[str, Any]]) -> dict[str, Any] |
     """250日线检查：价格在年线下方时返回提醒信息（不再一票否决）。
 
     Returns:
-        None if pass (price above MA250), dict with提醒信息 if below MA250.
+        None if pass (price above MA250), dict with 提醒信息 if below MA250.
+        注意：返回 dict 只携带警告信息，不包含任何 status/决策字段。
+        调用方（status_layers L263）只取 ma250_warning 和 ma250 两个字段。
     """
     closes = _close(bars)
     if len(closes) < TREND_MA_LONG:
         return None  # 数据不足，放行
     ma250 = sum(closes[-TREND_MA_LONG:]) / TREND_MA_LONG
+    # Fix A1: 只返回警告信息，不返回 "暂不碰" 决策字段
+    # 原来包含 base_status/theory_status="暂不碰" 与"不再一票否决"矛盾
     if current < ma250:
         return {
-            "base_status": "暂不碰",
-            "theory_status": "暂不碰",
-            "status": "暂不碰",
-            "fusion_override_used": False,
-            "trend_ok": False,
-            "change": 0.0,
-            "below_ma_count": 0,
-            "above_ma5_ma10": False,
-            "pressure_space_pct": 0.0,
-            "ma250_blocked": True,
+            "ma250_warning": True,
             "ma250": round(ma250, 2),
         }
     return None
@@ -145,6 +140,7 @@ _FUSION_STATUS_MAP: dict[str, str] = {
     "半仓试 (多方主导)": "低吸观察",
     "半仓试 (多方主导但有分歧)": "等转强",
     "增持": "低吸观察",
+    "等转强观察": "等转强",       # Fix A7: Fix 3 新增的 action，需在此补充映射
     "持股观望": "等转强",
     "减仓": "冲高减仓",
     "空仓/止损": "暂不碰",
@@ -329,7 +325,10 @@ def status_layers(
                 break
 
     if EXIT_PHASED_ENABLED and not _fake_break and current > hard_stop:
-        atr_est = max(0.01, abs(hard_stop - support) / 2 if support > 0 else 0.01)
+        # Fix A6: hard_stop 和 support 可能极近（如止损就在支撑位附近），
+        # 导致 atr_est 接近0，几乎所有价格都误触发 _near_stop
+        # 用当前价×1.5%（约1个ATR）作为下限，确保合理触发距离
+        atr_est = max(current * 0.015 if current > 0 else 0.01, abs(hard_stop - support) / 2 if support > 0 else 0.01)
         if current - hard_stop < atr_est * 2:
             _near_stop = True
 
@@ -371,13 +370,20 @@ def status_layers(
     elif is_theory_breakout:
         theory_status = "突破确认"
     elif current <= low_zone_upper:
-        theory_status = "修复观察" if trend_ok else "防守观察"
+        # Fix 1: 先判断是否有均线承接信号，有则保留；无则才按 trend_ok 降级
+        # 原逻辑：承接存在 赋值后又被 not trend_ok 强行覆盖 → bug
         if below_ma_count >= 3 and current > support:
+            # 三根均线压着但价格仍站在支撑上方，有实质性承接，大盘弱势不降级
             theory_status = "承接存在"
-        if not trend_ok:
+        elif trend_ok:
             theory_status = "修复观察"
+        else:
+            theory_status = "防守观察"
     elif current >= confirm:
-        if change >= CHANGE_THRESHOLD_STRONG and trend_ok:
+        # Fix 8: 体系转强确认放宽，允许 position_ratio 高位（接近阻力位）作为辅助确认
+        # 原逻辑只看当日涨幅，会漏掉"缩量整理后温和突破"的真实转强
+        strong_breakout = change >= CHANGE_THRESHOLD_STRONG or position_ratio >= POSITION_RATIO_HIGH
+        if strong_breakout and trend_ok:
             theory_status = "体系转强确认"
         elif trend_ok and above_ma5_ma10 and position_ratio >= POSITION_RATIO_STRONG:
             theory_status = "未确认转强"

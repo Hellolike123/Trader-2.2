@@ -388,7 +388,9 @@ def merge_decisions(
     if isinstance(momentum_result, dict):
         mom_score = momentum_result.get("momentum", {}).get("score", 50)
 
-    is_breakout_or_bottom = (pos_pct is not None and pos_pct <= 0.3) or ((strong_bullish_chan or strong_bullish_wyk) and pos_pct is not None and pos_pct <= 0.5)
+    # Fix 2: 有强多信号时的低位判断从 pos_pct <= 0.5 收紧到 <= 0.35
+    # 50% 中轴并非低位，中轴附近的强多信号不应触发底部权重偏置
+    is_breakout_or_bottom = (pos_pct is not None and pos_pct <= 0.3) or ((strong_bullish_chan or strong_bullish_wyk) and pos_pct is not None and pos_pct <= 0.35)
     is_climax_or_overbought = (pos_pct is not None and pos_pct >= 0.7 and mom_score >= 80) or strong_bearish_chan or strong_bearish_wyk
 
     if is_breakout_or_bottom:
@@ -459,7 +461,9 @@ def merge_decisions(
     # ── [2.3扩展] 股东户数筹码集中验证 ──
     try:
         sh_trend = (extend_fundamental or {}).get("shareholder", {})
-        if sh_trend.get("status") == "筹码集中" and weighted_score > 0:
+        # Fix 6: 加 weighted_score > 0.2 门槛，避免弱信号时盲目给置信加成
+        # 筹码集中可能是锁仓也可能是庄股，仅在多方信号有一定质量时才加持
+        if sh_trend.get("status") == "筹码集中" and weighted_score > 0.2:
             confidence *= 1.15
             confidence = min(confidence, 1.0)
     except (TypeError, AttributeError) as exc:
