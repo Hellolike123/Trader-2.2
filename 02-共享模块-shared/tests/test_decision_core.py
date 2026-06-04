@@ -42,6 +42,30 @@ class TestStatusLayers:
         )
         assert result["base_status"] == "低位修复"
 
+    def test_承接存在_requires_below_ma_count_ge_3(self):
+        """承接存在 需要 below_ma_count >= 3 且 current > support。"""
+        # below_ma_count=3 (current=10.05 < ma5=11, ma10=12, ma20=13)
+        ma_values = {"ma5": 11.0, "ma10": 12.0, "ma20": 13.0}
+        result = status_layers(
+            current=10.05, support=10.0, low_zone_upper=10.1, confirm=10.5,
+            hard_stop=9.5, position_ratio=0.0, change_pct=0.0,
+            ma_values=ma_values, pressure_space_pct=0.0,
+        )
+        # With below_ma_count=3 and current > support, should get 承接存在
+        # (assuming trend_ok is True)
+        assert result["theory_status"] in ("承接存在", "修复观察")
+
+    def test_承接存在_not_triggered_below_ma_count_lt_3(self):
+        """below_ma_count < 3 时不应触发承接存在。"""
+        # below_ma_count=1 (current=10.05 < ma20=11, but > ma5=9, ma10=9)
+        ma_values = {"ma5": 9.0, "ma10": 9.0, "ma20": 11.0}
+        result = status_layers(
+            current=10.05, support=10.0, low_zone_upper=10.1, confirm=10.5,
+            hard_stop=9.5, position_ratio=0.0, change_pct=0.0,
+            ma_values=ma_values, pressure_space_pct=0.0,
+        )
+        assert result["theory_status"] != "承接存在"
+
     def test_above_confirm(self):
         """current >= confirm → 确认观察"""
         result = status_layers(

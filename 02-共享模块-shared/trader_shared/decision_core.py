@@ -372,7 +372,7 @@ def status_layers(
         theory_status = "突破确认"
     elif current <= low_zone_upper:
         theory_status = "修复观察" if trend_ok else "防守观察"
-        if below_ma_count >= 1 and current > support:
+        if below_ma_count >= 3 and current > support:
             theory_status = "承接存在"
         if not trend_ok:
             theory_status = "修复观察"

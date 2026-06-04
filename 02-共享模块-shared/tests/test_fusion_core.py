@@ -28,7 +28,7 @@ class TestChanToSignal:
         fn = self._fn
         result = fn({"chanlun": {"buy_points": [{"type": "二类买", "price": 27.8, "confidence": 2}]}})
         assert result["direction"] == 1
-        assert result["confidence"] == 0.6
+        assert result["confidence"] == 0.4
 
     def test_three_buy_points_priority(self):
         """多个 buy_points 时, 第一个匹配的类型优先。"""
@@ -40,7 +40,7 @@ class TestChanToSignal:
             ]
         }})
         assert result["direction"] == 1
-        assert result["confidence"] == 0.6  # 二类买优先(列表中第一个)
+        assert result["confidence"] == 0.4  # 二类买优先(列表中第一个)
 
     def test_底背驰(self):
         fn = self._fn
@@ -91,7 +91,7 @@ class TestChanToSignal:
             "divergence": {"top_divergence": True},
         }})
         assert result["direction"] == 1
-        assert result["confidence"] == 0.6  # 二类买, 不是顶背驰
+        assert result["confidence"] == 0.4  # 二类买, 不是顶背驰
 
     def test_priority_divergence_over_trend(self):
         """divergence 存在时忽略 trend_label。"""
@@ -467,7 +467,7 @@ class TestIntegrationDataFlow:
 
         result = _chan_to_signal(levels_chanlun)
         assert result["direction"] == 1
-        assert result["confidence"] == 0.6  # 二类买
+        assert result["confidence"] == 0.4  # 二类买
 
     def test_momentum_nested_structure(self):
         from trader_shared.fusion_core import _momentum_to_signal

@@ -1,0 +1,3 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "02-共享模块-shared/trader_shared/chan_core.py", "reason": "缠论核心模块，包含二类买点检测逻辑"}
+{"file": "02-共享模块-shared/trader_shared/fusion_core.py", "reason": "融合核心模块，包含二类买点confidence设置"}

@@ -14,6 +14,7 @@ from trader_shared.chan_core import (
     detect_buy_points,
     detect_divergence,
     chanlun_analysis,
+    _check_macd_for_2nd_buy,
 )
 
 
@@ -150,9 +151,22 @@ class TestDetectBuyPoints:
             {"direction": "down", "end_price": 10.0},
         ]
         zones = []
-        result = detect_buy_points(strokes, zones, 10.0)
+        result = detect_buy_points(strokes, zones, 10.0, macd_divergence_ok=True)
         types = [bp["type"] for bp in result]
         assert "二类买" in types
+
+    def test_buy_point_2_requires_macd_divergence(self):
+        """二类买点需要 MACD 确认，否则不触发。"""
+        strokes = [
+            {"direction": "down", "end_price": 8.0},
+            {"direction": "up", "end_price": 11.0},
+            {"direction": "down", "end_price": 10.0},
+        ]
+        zones = []
+        # macd_divergence_ok defaults to False → should NOT trigger 二类买
+        result = detect_buy_points(strokes, zones, 10.0)
+        types = [bp["type"] for bp in result]
+        assert "二类买" not in types
 
     def test_buy_point_3(self):
         strokes = [{"direction": "up", "end_price": 11.0}]
@@ -160,6 +174,69 @@ class TestDetectBuyPoints:
         result = detect_buy_points(strokes, zones, 10.15)
         types = [bp["type"] for bp in result]
         assert "三类买" in types
+
+
+class TestCheckMacdFor2ndBuy:
+    """_check_macd_for_2nd_buy 函数测试。"""
+
+    def _make_bars_with_macd(self, macd_values, closes=None):
+        """Helper: create bars with macd_histogram and optional close values."""
+        bars = []
+        for i, macd in enumerate(macd_values):
+            bar = {"macd_histogram": macd, "close": closes[i] if closes else 10.0 + i * 0.1}
+            bars.append(bar)
+        return bars
+
+    def test_empty_bars_returns_false(self):
+        strokes = [{"direction": "down", "end_price": 8.0}, {"direction": "down", "end_price": 9.0}]
+        assert _check_macd_for_2nd_buy([], strokes) is False
+
+    def test_empty_strokes_returns_false(self):
+        bars = self._make_bars_with_macd([-1.0] * 15)
+        assert _check_macd_for_2nd_buy(bars, []) is False
+
+    def test_insufficient_down_strokes_returns_false(self):
+        bars = self._make_bars_with_macd([-1.0] * 15)
+        strokes = [{"direction": "down", "end_price": 8.0}]
+        assert _check_macd_for_2nd_buy(bars, strokes) is False
+
+    def test_insufficient_macd_data_returns_false(self):
+        bars = self._make_bars_with_macd([-1.0] * 5)  # < 10
+        strokes = [{"direction": "down", "end_price": 8.0}, {"direction": "down", "end_price": 9.0}]
+        assert _check_macd_for_2nd_buy(bars, strokes) is False
+
+    def test_macd_divergence_detected(self):
+        """MACD 底背驰：最近5根柱状线最小值比前面5根高（更浅）。"""
+        # earlier: -2.0, -1.8, -1.5, -1.3, -1.0 (min = -2.0)
+        # recent:  -1.5, -1.2, -1.0, -0.8, -0.5 (min = -1.5, which is > -2.0 and < 0)
+        macd_values = [-2.0, -1.8, -1.5, -1.3, -1.0, -1.5, -1.2, -1.0, -0.8, -0.5]
+        bars = self._make_bars_with_macd(macd_values)
+        strokes = [{"direction": "down", "end_price": 8.0}, {"direction": "down", "end_price": 9.0}]
+        assert _check_macd_for_2nd_buy(bars, strokes) is True
+
+    def test_macd_recovery_detected(self):
+        """MACD 止跌：最后3根柱状线都为负但逐步回升。"""
+        # last 3: -1.0, -0.8, -0.5 (all negative, last > first)
+        macd_values = [-2.0, -1.8, -1.5, -1.3, -1.2, -1.1, -1.0, -0.9, -0.8, -0.5]
+        bars = self._make_bars_with_macd(macd_values)
+        strokes = [{"direction": "down", "end_price": 8.0}, {"direction": "down", "end_price": 9.0}]
+        assert _check_macd_for_2nd_buy(bars, strokes) is True
+
+    def test_bearish_alignment_rejects(self):
+        """空头排列（所有收盘价低于MA5/MA10/MA20）→ 拒绝二类买。"""
+        # MACD shows divergence, but closes are all below MAs
+        macd_values = [-2.0, -1.8, -1.5, -1.3, -1.0, -1.5, -1.2, -1.0, -0.8, -0.5]
+        # Create 30 bars with declining closes (all below MAs)
+        closes = [20.0 - i * 0.5 for i in range(30)]  # 20.0, 19.5, 19.0, ... → downtrend
+        bars = self._make_bars_with_macd(macd_values * 3, closes)
+        strokes = [{"direction": "down", "end_price": 8.0}, {"direction": "down", "end_price": 9.0}]
+        assert _check_macd_for_2nd_buy(bars, strokes) is False
+
+    def test_no_macd_data_returns_false(self):
+        """没有 macd_histogram 数据 → False。"""
+        bars = [{"close": 10.0 + i} for i in range(15)]
+        strokes = [{"direction": "down", "end_price": 8.0}, {"direction": "down", "end_price": 9.0}]
+        assert _check_macd_for_2nd_buy(bars, strokes) is False
 
 
 class TestDetectDivergence:

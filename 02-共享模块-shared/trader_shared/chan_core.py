@@ -252,12 +252,78 @@ def build_zones(strokes: list[dict]) -> list[dict]:
     return zones
 
 
+def _check_macd_for_2nd_buy(
+    bars: list[dict],
+    strokes: list[dict],
+) -> bool:
+    """Check MACD conditions for 2nd buy point.
+    
+    Condition A: MACD divergence - previous down stroke's MACD histogram is deeper (more negative)
+                 than the earlier down stroke, but current is recovering.
+    Condition B: MACD trend reversal - recent MACD histogram shows recovery (less negative).
+    
+    Returns True if either condition is met.
+    """
+    if not bars or not strokes:
+        return False
+    
+    down_strokes = [s for s in strokes if s["direction"] == "down"]
+    if len(down_strokes) < 2:
+        return False
+    
+    # Get MACD histogram values for the bars
+    hist_values = [to_float(b.get("macd_histogram")) for b in bars]
+    hist_values = [h for h in hist_values if h is not None]
+    
+    if len(hist_values) < 10:
+        return False
+    
+    # Condition A: Check for MACD divergence between two down strokes
+    # Compare the MACD at the end of previous down stroke vs earlier down stroke
+    # If previous down stroke has less negative MACD (divergence), it's a buy signal
+    recent_hist = hist_values[-5:]  # Last 5 bars
+    earlier_hist = hist_values[-10:-5]  # 5 bars before that
+    
+    if recent_hist and earlier_hist:
+        recent_min = min(recent_hist)
+        earlier_min = min(earlier_hist)
+        # Condition A: MACD divergence - recent minimum is less negative than earlier
+        condition_a = recent_min > earlier_min and recent_min < 0
+        
+        # Condition B: MACD recovery - recent histogram is recovering from negative
+        # Check if the last 3 bars show recovery (less negative)
+        if len(hist_values) >= 3:
+            last_3 = hist_values[-3:]
+            condition_b = all(h < 0 for h in last_3) and last_3[-1] > last_3[0]
+        else:
+            condition_b = False
+        
+        # Trend filter: reject 2nd buy in bearish alignment
+        # Calculate MAs from data BEFORE the last 5 closes, then check if
+        # the last 5 closes are all below those MAs (strong downtrend).
+        closes = [to_float(b.get("close")) for b in bars]
+        closes = [c for c in closes if c is not None]
+        if len(closes) >= 25:
+            # Use closes before the last 5 to calculate MAs
+            ma5 = sum(closes[-10:-5]) / 5
+            ma10 = sum(closes[-15:-5]) / 10
+            ma20 = sum(closes[-25:-5]) / 20
+            last_5_closes = closes[-5:]
+            if all(c < ma5 and c < ma10 and c < ma20 for c in last_5_closes):
+                return False
+
+        return condition_a or condition_b
+    
+    return False
+
+
 def detect_buy_points(
     strokes: list[dict],
     zones: list[dict],
     last_close: float,
     macd_hist_current: float | None = None,
     macd_hist_prev: float | None = None,
+    macd_divergence_ok: bool = False,
 ) -> list[dict]:
     buy_points: list[dict[str, Any]] = []
 
@@ -282,6 +348,7 @@ def detect_buy_points(
             })
 
     # 二类买: down_1(low_a) -> up -> down_2(low_b) 且 low_b > low_a
+    # Requires MACD divergence/trend confirmation to avoid false positives in downtrends
     if len(strokes) >= 3:
         down_strokes = [s for s in strokes if s["direction"] == "down"]
         up_strokes = [s for s in strokes if s["direction"] == "up"]
@@ -295,7 +362,7 @@ def detect_buy_points(
                     up_high = s["end_price"]
             if up_high is None:
                 up_high = max(s["end_price"] for s in up_strokes)
-            if low_b > low_a and low_b < up_high:
+            if low_b > low_a and low_b < up_high and macd_divergence_ok:
                 buy_points.append({
                     "type": "二类买",
                     "price": round(low_b, 4),
@@ -385,8 +452,11 @@ def chanlun_analysis(
     strokes = build_strokes(fractions, min_bars_per_stroke=CHANLUN_MIN_BARS_PER_STROKE)
     zones = build_zones(strokes)
     divergence = detect_divergence(bars)
+    
+    # Check MACD divergence for 2nd buy point
+    macd_divergence_ok = _check_macd_for_2nd_buy(bars, strokes)
 
-    buy_points = detect_buy_points(strokes, zones, current, macd_hist_current, macd_hist_prev)
+    buy_points = detect_buy_points(strokes, zones, current, macd_hist_current, macd_hist_prev, macd_divergence_ok)
 
     strokes_count = len(strokes)
     zones_count = len(zones)

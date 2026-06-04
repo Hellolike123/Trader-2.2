@@ -323,6 +323,28 @@ Before submitting changes:
 
 6. **Not deduplicating cache data**: When merging cached + real-time data, always deduplicate by date.
 
+7. **MA calculated from same data being compared**: When using MA as a filter (e.g., "if price below MA"), calculate MA from data BEFORE the comparison window, not from the same data. Otherwise the filter is mathematically impossible to trigger since MA is the average of those same values.
+
+```python
+# WRONG — MA5 calculated from closes[-5:], then compared against closes[-5:]
+# Since MA5 is the average, some values must be >= MA5, so all(c < ma5) is always False
+closes = [c for c in closes if c is not None]
+if len(closes) >= 20:
+    ma5 = sum(closes[-5:]) / 5
+    last_5 = closes[-5:]
+    if all(c < ma5 for c in last_5):  # NEVER TRIGGERS
+        return False
+
+# CORRECT — MA calculated from earlier window, compared against recent window
+if len(closes) >= 25:
+    ma5 = sum(closes[-10:-5]) / 5    # MA from bars -10 to -5
+    ma10 = sum(closes[-15:-5]) / 10  # MA from bars -15 to -5
+    ma20 = sum(closes[-25:-5]) / 20  # MA from bars -25 to -5
+    last_5 = closes[-5:]
+    if all(c < ma5 and c < ma10 and c < ma20 for c in last_5):
+        return False
+```
+
 ---
 
 ## Exit Strategy Output Format (v2.4)

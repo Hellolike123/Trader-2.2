@@ -101,7 +101,7 @@ def _chan_to_signal(chan_result: dict) -> dict:
                 return {"direction": 1, "confidence": 0.8,
                         "reason": "缠论一类买 (底背驰)", "raw_key": "chan"}
             if bp_type == "二类买":
-                return {"direction": 1, "confidence": 0.6,
+                return {"direction": 1, "confidence": 0.4,
                         "reason": "缠论二类买 (低点抬高)", "raw_key": "chan"}
             if bp_type == "三类买":
                 return {"direction": 1, "confidence": 0.4,

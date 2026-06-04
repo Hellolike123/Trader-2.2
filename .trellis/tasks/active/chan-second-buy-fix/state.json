@@ -1,0 +1,7 @@
+{
+  "task_id": "chan-second-buy-fix",
+  "status": "in_progress",
+  "created_at": "2026-06-04T10:00:00Z",
+  "prd_path": ".trellis/tasks/active/chan-second-buy-fix/prd.md",
+  "description": "修复缠论二类买点误报 + 承接存在条件过宽"
+}
