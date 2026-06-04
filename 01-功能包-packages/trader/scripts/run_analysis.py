@@ -999,7 +999,7 @@ def render_markdown(r: dict) -> str:
     if stop > 0:
         lines.append(f"  {stop:.2f} 止损")
     if low_price > 0:
-        lines.append(f"  {low_price:.2f} ← 买 {position_cap}%（缩量企稳）")
+        lines.append(f"  {low_price:.2f} ← 试探买 {position_cap}%（缩量企稳）")
     if current_price > 0:
         lines.append(f"  {current_price:.2f} 当前")
     
@@ -1184,10 +1184,11 @@ def render_markdown(r: dict) -> str:
 
     pool_count = _pool_count()
     if pool_count > 0:
-        lines.extend(["", f"当前池 {pool_count}/10，回复 1 入池"])
+        lines.append(f"当前池 {pool_count}/10，回复 1 入池")
+    else:
+        lines.append("回复 1 入池")
     
     return "\n".join(lines)
-
 
 def _pool_count() -> int:
     import json

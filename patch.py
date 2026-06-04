@@ -6,11 +6,13 @@ with open("01-功能包-packages/trader/scripts/run_analysis.py", "r") as f:
 with open("01-功能包-packages/trader/scripts/new_render.py", "r") as f:
     new_render = f.read()
 
-# Replace everything from def render_markdown(r: dict[str, Any]) -> str: to just before def _pool_count() -> int:
-pattern = re.compile(r"def render_markdown\(r: dict\[str, Any\]\) -> str:.*?(?=def _pool_count)", re.DOTALL)
+if "def _load_historical_win_rate" in code:
+    pattern = re.compile(r"def _load_historical_win_rate\(.*?(?=def _pool_count)", re.DOTALL)
+else:
+    pattern = re.compile(r"def render_markdown\(r: dict(?:\[str,\s*Any\])?\) -> str:.*?(?=def _pool_count)", re.DOTALL)
 
 if pattern.search(code):
-    new_code = pattern.sub(lambda m: new_render + "\n\n", code)
+    new_code = pattern.sub(lambda m: new_render.strip() + "\n\n", code)
     with open("01-功能包-packages/trader/scripts/run_analysis.py", "w") as f:
         f.write(new_code)
     print("Patched successfully.")
