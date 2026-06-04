@@ -70,7 +70,8 @@ def _log_fusion(result: dict) -> None:
             "main_force_env": result.get("main_force_env", "unknown"),
             "signals": {k: v["direction"] for k, v in result["signals_detail"].items()},
         }
-        print(f"FUSION: {json.dumps(log_data, ensure_ascii=False)}")
+        import sys
+        print(f"FUSION: {json.dumps(log_data, ensure_ascii=False)}", file=sys.stderr)
     except (json.JSONDecodeError, TypeError, KeyError) as exc:
         _logger.debug("Fusion log serialization failed: %s", exc)
 

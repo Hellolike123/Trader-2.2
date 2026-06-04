@@ -269,7 +269,7 @@ def pct(value: float | None) -> str:
 
 def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     try:
-        import candidate_core as core
+        from trader_shared import candidate_core as core
         from trader_shared.candidate_core import build_structure_context, atr_volatility_level
         from trader_shared.data_provider import get_provider
         from trader_shared.strategy_protocol import run_all
