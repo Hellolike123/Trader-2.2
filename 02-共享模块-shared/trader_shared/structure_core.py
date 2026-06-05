@@ -313,7 +313,7 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None, index_returns: lis
     wyk = signals_detail.get("wyckoff", {})
     if isinstance(wyk, dict):
         reason = str(wyk.get("reason", ""))
-        direction = wyk.get("direction", 1)
+        direction = wyk.get("direction", 0)
         confidence = safe_float(wyk, "confidence")
         # Spring / 看多背离 → 突破更可信，确认缓冲收窄
         if direction == 1 and confidence >= 0.5:
