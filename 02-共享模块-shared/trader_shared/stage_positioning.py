@@ -553,8 +553,8 @@ def assess_stage(
     final_stage, is_locked = _layer4_stage_lock(validated_stage, state, is_transition)
     if is_locked:
         protection_notes.append(f"阶段锁定5天")
-    elif is_locked and final_stage != validated_stage:
-        protection_notes.append(f"锁定期内保持{final_stage}")
+        if final_stage != validated_stage:
+            protection_notes.append(f"锁定期内保持{final_stage}")
 
     # 保存状态
     if is_transition:
