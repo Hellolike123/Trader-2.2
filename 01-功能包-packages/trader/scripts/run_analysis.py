@@ -282,7 +282,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     # DI: 注入 TencentFetcher 供下游模块使用
     fetcher = TencentFetcher()
     provider = get_provider()
-    snapshot = provider.load_market_snapshot(target, days=LOOKBACK_DAYS, include_5m=True)
+    snapshot = provider.load_market_snapshot(target, days=LOOKBACK_DAYS, include_5m=False)
     if not snapshot.quote or not snapshot.daily_bars:
         detail = "; ".join(f"{key}: {value}" for key, value in snapshot.source_errors.items()) or "missing required market data"
         raise RuntimeError(detail)
