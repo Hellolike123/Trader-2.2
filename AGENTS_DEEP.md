@@ -1,6 +1,6 @@
 # Trader 2.4 — 架构文档（深挖参考）
 
-> 最后更新：2026-05-31
+> 最后更新：2026-06-07
 > **注意**: AGENTS.md 是 Agent 快速参考，本文档用于开发调试/架构深挖。
 
 ---
@@ -149,15 +149,18 @@
 > 单票分析以 `base_status` + `theory_status` 为主，`state_label` 只是展示/兼容层。
 > 核心函数已从 `status_for()` 升级为 `status_layers()`，返回 dict 而非 str。
 
-**STATUS_SCORE 完整列表（config.py）：**
+**STATUS_SCORE 完整列表（config.py + decision_core.py 扩展）：**
+
+> **注意**：STATUS_SCORE 在 `config.py` 中定义基础值，`decision_core.py` 中通过直接赋值覆盖（同值重申）并额外新增了"防守观察，趋势下行谨慎"条目。两处定义值保持同步，以 `decision_core.py` 的运行时值为准。
 
 | 状态 | score | 触发条件 | 典型场景 |
 |------ | ------ | ------ | ------ |
-| **暂不碰** | 20 | 现价跌破硬止损 / 年线一票否决 | 破位下行，防守优先 |
+| **暂不碰** | 20 | 现价跌破硬止损 / 年线下方警告 | 破位下行，防守优先 |
 | **低吸观察** | 80 | 现价在低吸区附近，未破止损 | 缩量回调用至支撑区 |
 | **冲高减仓** | 55 | 现价靠近确认价/压力区，上涨乏力 | 反弹触压，减仓信号 |
 | **等转强** | 70 | 现价在支撑之上但距确认价有空间 | 止跌后等待确认突破 |
 | **防守观察** | 60 | 现价靠近支撑但未确认止跌 / 假跌破 | 支撑附近观望 |
+| **防守观察，趋势下行谨慎** | 50 | 现价靠近防守位且趋势朝下 / 多次破均线 | 弱势行情中防守观察的加强版 |
 | **空间不足** | 30 | 距确认价空间过小，盈亏比不够 | 高位震荡，无明确方向 |
 | **数据失败** | 0 | K 线数据不足 60 根 | 新股/停牌复牌 |
 | **突破确认** | 85 | 理论突破确认（3日验证） | 缠论三买/威科夫突破 |
@@ -172,7 +175,7 @@
 ### 2.4 状态判定优先级
 
 `status_layers()` 判定顺序:
-1. `_ma250_check()` — 年线一票否决（硬门控）
+1. `_ma250_check()` — 年线下方标记警告 `ma250_warning=True`，不再一票否决
 2. 融合层覆盖（`FUSION_OVERRIDE_ENABLED` + 置信度阈值）
 3. 假跌破确认（`_fake_break`）
 4. 分阶段退出（`_near_stop`）
@@ -181,15 +184,21 @@
 **返回值格式：**
 ```python
 {
-    "base_status": str,     # 基础状态（结构位置层）
-    "theory_status": str,   # 理论结论层
-    "status": str,          # 最终状态（兼容旧接口）
-    "ma250_blocked": bool,  # 是否被年线否决
-    "ma250": float,         # 250日均线值
-    "trailing_stop": float, # 移动止损价
-    ...
+    "base_status": str,          # 基础状态（结构位置层）
+    "theory_status": str,        # 理论结论层
+    "status": str,               # 兼容旧接口，当前等于 theory_status
+    "fusion_override_used": bool,# 是否触发了融合层覆盖
+    "trend_ok": bool,            # 短期均线是否在长期均线上方
+    "change": float,             # 当日涨跌幅
+    "below_ma_count": int,       # 低于 MA5/MA10/MA20 的均线数
+    "above_ma5_ma10": bool,      # 现价是否在 MA5 和 MA10 上方
+    "pressure_space_pct": float, # 距压力位的空间百分比
+    "ma250_warning": bool,       # 是否在年线下方（警告）
+    "ma250": float,              # 250日均线值
 }
 ```
+
+> **注意**：`trailing_stop`（移动止损价）不在 `status_layers()` 返回中，它由 `structure_core.py` 的 `build_structure_context()` 返回（字段名 `trailing_stop`）。
 
 ---
 
@@ -264,25 +273,37 @@ T0 参考 → 低吸/高抛/止损
 
 ```
                     +- 02-共享模块-shared/
-                    |  01-行情数据-market-data/
-                    |    light_data.py (数据拉取 + HTTP)
-                    |    models.py (TypedDict 统一模型)
-                    |-- 02-候选逻辑-candidate/
-                    |    candidate_core.py (核心分析)
-                    |    t0_candidate_core.py (T0专用)
-                    |    chan_core.py (缠论: 分型/笔/中枢/买卖点)
-                    |    wyckoff_core.py (威科夫: Spring/Upthrust)
-                    |-- 03-输出校验-contracts/
-                    |    signal_contract.py (v1 校验)
-                    |    signal_store.py (JSONL 持久化)
+                    |-- 01-行情数据-market-data/    ← 仅存 re-export 存根
+                    |    light_data.py (9行存根 → trader_shared)
+                    |-- 02-候选逻辑-candidate/     ← 仅存 re-export 存根
+                    |    candidate_core.py (9行存根 → trader_shared)
+                    |-- 03-输出校验-contracts/     ← 空目录（仅 .gitkeep）
                     |-- scripts/
                     |    calibrator.py (回测校准)
                     |    market_env.py (大盘环境)
                     |    pipeline.py (状态管道)
                     |    signal_tracker.py (信号追踪)
-                    |-- trader_shared/         ← P6: 标准 Python 包
+                    |    self_calibration.py (离线参数校准)
+                    |    signal_migration_tool.py (信号迁移)
+                    |-- trader_shared/             ← P6: 标准 Python 包（实际代码所在）
                     |    __init__.py (lazy-load 路由)
                     |    config.py (全系统常量集中管理)
+                    |    light_data.py (数据拉取 + HTTP + HA双源)
+                    |    models.py (TypedDict 统一模型)
+                    |    decision_core.py (状态判定 + status_layers)
+                    |    structure_core.py (支撑/阻力 + 移动止损)
+                    |    fusion_core.py (决策融合层)
+                    |    fusion_regime.py (权重矩阵)
+                    |    chan_core.py (缠论: 分型/笔/中枢/买卖点)
+                    |    wyckoff_core.py (威科夫: Spring/Upthrust)
+                    |    momentum_core.py (动量策略)
+                    |    volume_profile.py (日内成交量分布)
+                    |    bayesian_fusion.py (贝叶斯融合)
+                    |    hmm_regime.py (HMM 大势检测)
+                    |    chip_distribution.py (筹码分布)
+                    |    signal_contract.py (v1 校验)
+                    |    signal_store.py (JSONL 持久化)
+                    |    signal_utils.py (UUID 生成/归一化)
                     |    schema/v1.py (P7: 输出契约规则库)
                     |    data_provider.py (P8: 可插拔数据接口)
                     +--------------------------+
@@ -308,7 +329,7 @@ T0 参考 → 低吸/高抛/止损
 **核心函数（实际实现位置）：**
 | 函数 | 实现文件 | 参数 | 返回值 |
 |------ | ------ | ------ | ------ |
-| `build_structure_context()` | structure_core.py | current, bars, change_pct, quote | CandidateLevels |
+| `build_structure_context()` | structure_core.py | current, bars, change_pct=None, quote=None, fusion_result=None, chan_result=None, fetcher=None, pnl_pct=None | dict[str, Any] |
 | `status_for()` | decision_core.py | 价格/支撑/确认价/止损等 + MA + 压力空间 | str 状态 |
 | `score_for()` | decision_core.py | status + 现价+支撑+空间+MA+ATR dict | float 0-100 |
 | `base_weight()` | decision_core.py | atr_level str | int % |
@@ -336,14 +357,17 @@ T0 参考 → 低吸/高抛/止损
 
 决策融合层是贯穿结构、缠论、动量与威科夫等多维分析体系的”终极裁判”。在传统多指标决策中，多头信号与空头冲突往往会导致系统输出”数据冲突”或者”中性旁观”等平庸判定。Trader 2.2 通过智能决策融合层彻底打破了这一桎梏。
 
-**`merge_decisions()` 当前签名（9 参数）：**
+**`merge_decisions()` 当前签名（12 参数）：**
 ```python
 def merge_decisions(
     chan_result, momentum_result, wyckoff_result,
-    regime=”正常”, current_price=0.0, bars=None,
-    hmm_regime=”range”, extend_fundamental=None, extend_sentiment=None,
+    regime="正常", current_price=0.0, bars=None,
+    hmm_regime="range", extend_fundamental=None, extend_sentiment=None,
+    main_force_env=None, data_status="full", fetcher=None,
 ) -> dict
 ```
+
+> 相比于前文记载的 9 参数版本，实际代码新增了 3 个参数：`main_force_env`（主力行为阶段权重修正）、`data_status`（数据完备度降级拦截）、`fetcher`（可注入数据源 DI）。
 
 #### 5.5.1 信号标准化抽象
 融合层首先将底层各个策略子系统的原始计算结果抽象为带有方向与置信度的统一信号包（`CandidateSignal`）：
@@ -410,9 +434,9 @@ graph TD
 | `contract` | string | `trader_signal_v1` |
 | `source_skill` | string | trader / t0 / review |
 | `symbol` | string | `688248.SH` |
-| `signal_type` | string | observe / low_buy_watch / low_buy_triggered / high_sell_triggered / reduce / defensive / risk_stop / trigger_expired / blocked / review_result |
+| `signal_type` | string | 常用类型：observe / low_buy_watch / low_buy_triggered / high_sell_triggered / reduce / defensive / risk_stop / trigger_expired / blocked / review_result。完整列表约 25 种（含 add_position / reduce_position / hold_observe / defensive_watch / wait_for_strength / hold / chase_rally / divergence_entry / completed_5m_confirm / price_confirm / watch_price / price_break / stop_loss / low_sell_triggered / low_sell_watch / wait_for_confirmation / track / high_sell_watch 等），详见 `trader_shared/signal_contract.py:74-104` |
 | `direction` | string | bullish / bearish / neutral / bullish_lean / bearish_lean |
-| `action` | string | no_action / observe / wait / track / low_buy / high_sell / reduce / stop |
+| `action` | string | no_action / observe / wait / track / low_buy / high_sell / reduce / stop_low_buy / stop_high_sell / pilot_entry |
 | `confidence` | string | low / medium / high |
 | `position` | dict | max_total_pct + max_single_move_pct |
 
@@ -438,8 +462,8 @@ graph TD
 
 在 Trader 2.2 中，为了杜绝由于跨组件时区偏差、多进程并发写入、以及大盘跳空等各种边缘场景引起的信号重复生成或冗余结算，引入了严密的信号生命周期 V2 去重防重架构。
 
-#### 6.4.1 make_signal_id 统一 UUID 生成算法
-UUID 生成规则基于强一致的 deterministic SHA256 算法，针对 4 个核心业务要素进行归一化后计算哈希值：
+#### 6.4.1 normalize_signal_id 统一 UUID 生成算法
+UUID 生成规则基于强一致的 deterministic SHA256 算法。规范函数名为 `normalize_signal_id()`（位于 `trader_shared/signal_utils.py`），`signal_tracker.py` 中保留 `make_signal_id()` 作为兼容包装。算法针对 4 个核心业务要素进行归一化后计算哈希值：
 1. **证券代码归一化 (`_normalize_symbol`)**：支持 `688248.SH`、`SH688248`、`688248` 等各种杂乱输入，统一映射为带点后缀标准格式 `CODE.MARKET` 并大写。
 2. **交易日期归一化 (`_norm_date`)**：将 `2025/5/2`、`20250502`、`2025-05-02T14:30:00` 等日期形式统一转换为零填充的 `YYYY-MM-DD` 格式。
 3. **信号类型归一化 (`_normalize_signal_type`)**：自动将各类旧版中文状态名（如"低吸观察"）或非标准缩写映射为 v1 英文标准字段（如 `low_buy_watch`）。
@@ -494,10 +518,13 @@ Tencent API → light_data.py (days=300)
 Sina API → fetch_5m/fetch_15m/fetch_30m
   ↓
 ThreadPoolExecutor 并行执行策略（run_analysis.py）
-  ├── build_structure_context()  ← ATR + 移动止损 + 支撑/阻力
   ├── chanlun_strategy()
   ├── momentum_strategy()
   ├── wyckoff_strategy()
+  ├── _fetch_fund_flow()        ← 资金流向
+  ├── _fetch_market_env()       ← 大盘环境
+  ↓
+  build_structure_context()     ← ATR + 移动止损 + 支撑/阻力（串行，依赖前序结果）
   ↓
   merge_decisions(chan, momentum, wyckoff, regime, hmm_regime, ...)
   ├── Scenario Priority Filter (pos_pct → 动态权重)
@@ -506,7 +533,7 @@ ThreadPoolExecutor 并行执行策略（run_analysis.py）
   → {action, confidence, signals_detail, hmm_regime}
   ↓
   status_layers(current, bars, structure_ctx, fusion, ...)
-  ├── _ma250_check()        ← 年线一票否决
+  ├── _ma250_check()        ← 年线下方标记警告
   ├── FUSION_STATUS_MAP     ← 融合层覆盖
   ├── _fake_break           ← 假跌破确认
   ├── _near_stop            ← 分阶段退出
@@ -562,6 +589,8 @@ python3 scripts/self_check.py
 3. 存根内容：`from trader_shared.{module} import *`
 4. 确保 `from light_data import ...` 和 `from trader_shared.light_data import ...` 都能工作
 
+> **注**：zip 内部使用 `arc_prefix=<skill_slug>` 组织文件（如 `trader/`、`t0/` 目录前缀），非完全 flat 结构。
+
 存根解决的问题：脚本用裸 import（`from light_data import`），但代码在 `trader_shared/` 子目录里。没有存根会报 `ModuleNotFoundError`。
 
 ### 10.2 PyInstaller（可选）
@@ -610,13 +639,17 @@ Trader 2.4/
 │   ├── t0/ (SKILL.md, scripts/final_t0.py, references/)
 │   └── review/ (SKILL.md, scripts/final_review.py, scripts/final_portfolio.py, scripts/final_tracker.py, references/)
 ├── 02-共享模块-shared/
-│   ├── 01-行情数据-market-data/ (light_data.py, models.py)
-│   ├── 02-候选逻辑-candidate/ (candidate_core.py, chan_core.py, wyckoff_core.py,
-│   │                           hmm_regime.py, bayesian_fusion.py, volume_profile.py) ← 2.3新增
-│   ├── 03-输出校验-contracts/ (signal_contract.py, signal_store.py)
+│   ├── 01-行情数据-market-data/ (light_data.py → re-export 存根，实际代码见 trader_shared/)
+│   ├── 02-候选逻辑-candidate/ (candidate_core.py → re-export 存根，实际代码见 trader_shared/)
+│   ├── 03-输出校验-contracts/ (空目录，仅 .gitkeep，实际代码见 trader_shared/)
 │   ├── scripts/ (calibrator.py, market_env.py, pipeline.py, signal_tracker.py,
-│   │            self_calibration.py, signal_migration_tool.py) ← 2.3/2.2新增
-│   └── trader_shared/ (config.py, schema/v1.py, data_provider.py)
+│   │            self_calibration.py, signal_migration_tool.py)
+│   └── trader_shared/ (全部核心代码，含 light_data.py, models.py, config.py,
+│                       decision_core.py, structure_core.py, fusion_core.py,
+│                       chan_core.py, wyckoff_core.py, momentum_core.py,
+│                       hmm_regime.py, bayesian_fusion.py, volume_profile.py,
+│                       signal_contract.py, signal_store.py, signal_utils.py,
+│                       chip_distribution.py, data_provider.py, schema/v1.py 等)
 └── 03-安装包-dist/releases/ (构建产物，不提交)
 ```
 
@@ -642,8 +675,8 @@ Trader 2.4/
 
 ### 13.4 Pack_all.py 注意事项
 
-**Zip 结构必须 flat** — 文件在 zip 根级，不能有多余目录前缀。
-每个 skill zip 的 `scripts/` 里必须包含所有共享模块（light_data, candidate_core, chan_core, wyckoff_core, momentum_core 等）。
+**Zip 结构**：当前打包使用 `arc_prefix=<skill_slug>`（如 `trader/` 目录前缀），文件在 zip 内位于技能名子目录下，非完全 flat 结构。Hermes 框架在解压安装时自动处理前缀剥离。
+每个 skill zip 的 `scripts/` 里必须包含所有共享模块（light_data, decision_core, chan_core, wyckoff_core, momentum_core 等）。
 
 ### 13.5 SKILL.md 写法要点
 
@@ -727,7 +760,7 @@ P(action | chan, mom, wyk, regime) ∝ L(chan) × L(mom) × L(wyk)
 | `breakdown_of_va(price)` | 价格是否跌破 VA 下沿（偏空信号）|
 | `above_poc(price)` | 价格是否高于 POC |
 
-**assess_vp_breakout()**：综合评估返回 `vp_signal`（va_breakout / above_poc / va_support / below_va）和 `vp_confidence`（0~1）。
+**assess_vp_breakout()**：综合评估返回 `vp_signal`（va_breakout / above_poc / va_support / below_va）、`vp_confidence`（0~1）和 `vp_note`（额外描述说明，如"无日内量价分布"或"突破VA上沿"等）。
 
 ---
 
@@ -738,7 +771,7 @@ P(action | chan, mom, wyk, regime) ∝ L(chan) × L(mom) × L(wyk)
 **流程**：
 1. 读取 `~/.trader/signals.jsonl` 历史信号和 `~/.trader/signal_results.jsonl` 结算结果。
 2. 历史大势对齐：通过 `fetch_qfq_daily(days=250)` 拉取中证 1000 指数前复权日线（与 `market_env.py` 数据源一致），调用 HMM 状态检测器动态为每一个历史信号标定当日所处的 HMM 大势状态（`bull` 上涨 / `bear` 下跌 / `range` 震荡）。
-3. 分桶搜优：在 `global`（全局）、`bull`、`bear`、`range` 四个大势分组下，并行执行 150 次随机搜索寻优：
+3. 分桶搜优：在 `global`（全局）、`bull`、`bear`、`range` 四个大势分组下，并行执行 200 次随机搜索寻优：
    - `zone_width` ∈ [0.90, 1.25]
    - `confirm_buffer` ∈ [0.70, 1.30]
    - `stop_buffer` ∈ [0.70, 1.00]
