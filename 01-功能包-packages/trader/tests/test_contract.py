@@ -509,57 +509,84 @@ def test_load_historical_win_rate_not_exists() -> None:
         assert _load_historical_win_rate("688248") is None
 
 
+def _mock_daily_bars(count: int = 20, base: float = 50.0) -> list[dict]:
+    return [{"date": f"2026-01-{i+1:02d}", "close": base + i * 0.5} for i in range(count)]
+
+
+def _mock_provider(bars: list[dict]):
+    from unittest.mock import MagicMock
+    provider = MagicMock()
+    provider.resolve_security.return_value = MagicMock()
+    provider.fetch_qfq_daily.return_value = bars
+    return provider
+
+
 def test_load_historical_win_rate_insufficient_data() -> None:
     from run_analysis import _load_historical_win_rate
     from unittest.mock import patch, mock_open
 
-    mock_data = '{"symbol": "688248.SH", "return_pct": 5.0, "outcome": "win"}\n' * 3
-    with patch("os.path.exists", return_value=True), patch("builtins.open", mock_open(read_data=mock_data)):
-        assert _load_historical_win_rate("688248") is None
+    bars = _mock_daily_bars()
+    signals = [
+        '{"symbol": "688248.SH", "signal_type": "review_result", "analysis_time": "2026-01-05 15:30:00", "direction": "bullish", "trade_date": "2026-01-05"}',
+    ]
+    mock_data = "\n".join(signals) + "\n"
+
+    with patch("os.path.exists", return_value=True), \
+         patch("builtins.open", mock_open(read_data=mock_data)), \
+         patch("trader_shared.data_provider.get_provider", return_value=_mock_provider(bars)):
+        res = _load_historical_win_rate("688248")
+        assert res is not None
+        assert res["total"] == 1
+        assert res["sample_warning"] is True
 
 
 def test_load_historical_win_rate_sufficient_data() -> None:
     from run_analysis import _load_historical_win_rate
     from unittest.mock import patch, mock_open
 
-    # 4 wins (return_pct: 10.0, 5.0, 2.0, 3.0), 2 losses (return_pct: -4.0, -1.0)
-    mock_lines = [
-        '{"symbol": "688248.SH", "return_pct": 10.0, "outcome": "win"}',
-        '{"symbol": "688248.SH", "return_pct": 5.0, "outcome": "win"}',
-        '{"symbol": "688248.SH", "return_pct": 2.0, "outcome": "win"}',
-        '{"symbol": "688248.SH", "return_pct": -4.0, "outcome": "loss"}',
-        '{"symbol": "688248.SH", "r_5d": 3.0, "outcome": "win"}',
-        '{"symbol": "688248.SH", "pnl_pct": -1.0, "outcome": "loss"}',
+    bars = _mock_daily_bars(count=20, base=50.0)
+    signals = [
+        # win: 2026-01-01 close=50.0, 5d later=52.5 → +5.0%
+        '{"symbol": "688248.SH", "signal_type": "review_result", "analysis_time": "2026-01-01 15:30:00", "direction": "bullish", "trade_date": "2026-01-01"}',
+        # win: 2026-01-02 close=50.5, 5d later=53.0 → +4.95%
+        '{"symbol": "688248.SH", "signal_type": "review_result", "analysis_time": "2026-01-02 15:30:00", "direction": "bullish", "trade_date": "2026-01-02"}',
+        # loss (sell signal, bearish, price went up = loss): 2026-01-03 close=51.0, 5d later=53.5 → +4.9%
+        '{"symbol": "688248.SH", "signal_type": "review_result", "analysis_time": "2026-01-03 15:30:00", "direction": "bearish", "trade_date": "2026-01-03"}',
+        # win (sell signal, bearish, price went down = win)
+        '{"symbol": "688248.SH", "signal_type": "review_result", "analysis_time": "2026-01-08 15:30:00", "direction": "bearish", "trade_date": "2026-01-08"}',
+        # win: low_buy_triggered
+        '{"symbol": "688248.SH", "signal_type": "low_buy_triggered", "analysis_time": "2026-01-09 15:30:00", "direction": "bullish", "trade_date": "2026-01-09"}',
     ]
-    mock_data = "\n".join(mock_lines) + "\n"
+    mock_data = "\n".join(signals) + "\n"
 
-    with patch("os.path.exists", return_value=True), patch("builtins.open", mock_open(read_data=mock_data)):
+    with patch("os.path.exists", return_value=True), \
+         patch("builtins.open", mock_open(read_data=mock_data)), \
+         patch("trader_shared.data_provider.get_provider", return_value=_mock_provider(bars)):
         res = _load_historical_win_rate("688248")
         assert res is not None
-        assert res["total"] == 6
-        assert res["wins"] == 4
-        assert abs(res["win_rate"] - 66.67) < 0.1
-        # gains: 20.0, losses: 5.0. PF = 20.001 / 5.001 = 4.0
-        assert abs(res["profit_factor"] - 4.0) < 0.1
-        assert abs(res["avg_pnl"] - 2.5) < 0.1
-        assert res["max_gain"] == 10.0
-        assert res["max_loss"] == -4.0
-        assert "高度适应" in res["conclusion"]
+        assert res["total"] == 5
+        buy = res["buy"]
+        sell = res["sell"]
+        assert buy is not None
+        assert sell is not None
+        assert buy["count"] == 3  # first 2 bullish + low_buy_triggered
+        assert sell["count"] == 2  # 2 bearish
+        assert res["sample_warning"] is False
 
 
 def test_render_markdown_contains_win_rate() -> None:
     from run_analysis import render_markdown
     from unittest.mock import patch, mock_open
 
-    mock_lines = [
-        '{"symbol": "688248.SH", "return_pct": 10.0, "outcome": "win"}',
-        '{"symbol": "688248.SH", "return_pct": 5.0, "outcome": "win"}',
-        '{"symbol": "688248.SH", "return_pct": 2.0, "outcome": "win"}',
-        '{"symbol": "688248.SH", "return_pct": -4.0, "outcome": "loss"}',
-        '{"symbol": "688248.SH", "r_5d": 3.0, "outcome": "win"}',
-        '{"symbol": "688248.SH", "pnl_pct": -1.0, "outcome": "loss"}',
+    bars = _mock_daily_bars(count=20, base=50.0)
+    signals = [
+        '{"symbol": "688248.SH", "signal_type": "review_result", "analysis_time": "2026-01-01 15:30:00", "direction": "bullish", "trade_date": "2026-01-01"}',
+        '{"symbol": "688248.SH", "signal_type": "review_result", "analysis_time": "2026-01-02 15:30:00", "direction": "bullish", "trade_date": "2026-01-02"}',
+        '{"symbol": "688248.SH", "signal_type": "review_result", "analysis_time": "2026-01-03 15:30:00", "direction": "bearish", "trade_date": "2026-01-03"}',
+        '{"symbol": "688248.SH", "signal_type": "review_result", "analysis_time": "2026-01-04 15:30:00", "direction": "bearish", "trade_date": "2026-01-04"}',
+        '{"symbol": "688248.SH", "signal_type": "review_result", "analysis_time": "2026-01-05 15:30:00", "direction": "bullish", "trade_date": "2026-01-05"}',
     ]
-    mock_data = "\n".join(mock_lines) + "\n"
+    mock_data = "\n".join(signals) + "\n"
 
     report = {
         "name": "南网科技",
@@ -573,15 +600,17 @@ def test_render_markdown_contains_win_rate() -> None:
         "ma": {"ma5": "57.96", "ma10": "--", "ma20": "--", "ma30": "--"},
     }
 
-    with patch("os.path.exists", return_value=True), patch("builtins.open", mock_open(read_data=mock_data)):
+    with patch("os.path.exists", return_value=True), \
+         patch("builtins.open", mock_open(read_data=mock_data)), \
+         patch("trader_shared.data_provider.get_provider", return_value=_mock_provider(bars)):
         markdown = render_markdown(report)
-        # [2.4 重构] 股性与历史回测 板块已移除，输出应更精简
         assert "分析报告 —" in markdown
         assert "📍 买卖点" in markdown
         assert "止损" in markdown
         assert "试探买" in markdown
         assert "💡 为什么这么操作" in markdown
         assert "📊 五层打分" in markdown
+        assert "📊 股性与历史回测" in markdown
         assert "🎯 信号判断" in markdown
 
 

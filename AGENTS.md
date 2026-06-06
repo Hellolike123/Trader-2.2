@@ -306,6 +306,7 @@ MA5：59.63 ｜ MA10：60.74 ｜ MA20：60.60 ｜ MA30：59.72
 | `~/.trader/pending.json` | 待确认池 | trader | trader |
 | `~/.trader/last_plan.json` | 上次作战计划 | trader | trader |
 | `~/.trader/calibrated_params.json` | 自校准参数（zone_width等）| self_calibration | structure_core |
+| `~/.trader/tick_cache/` | Tick 缓存，盘后复盘可读取真实资金异动 | t0 / review | review |
 | `~/.t0-trader/state.json` | T0 盯盘缓存 | t0 | t0 |
 | `~/.review-trader/state.json` | 复盘缓存 | review | review |
 | `~/.trader/signal_results.jsonl` | 信号结算结果（胜率/盈亏比） | signal_tracker / self_calibration | review / self_calibration |

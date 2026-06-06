@@ -1,81 +1,94 @@
 def _load_historical_win_rate(symbol: str) -> dict | None:
-    import os
     import json
-    path = os.path.expanduser("~/.trader/signal_results.jsonl")
-    if not os.path.exists(path):
+    signals_path = os.path.expanduser("~/.trader/signals.jsonl")
+    if not os.path.exists(signals_path):
         return None
 
     normalized_symbol = symbol.replace(".SH", "").replace(".SZ", "").strip()
 
-    trades = []
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        from trader_shared.data_provider import get_provider
+        provider = get_provider()
+        sec = provider.resolve_security(normalized_symbol)
+        daily = provider.fetch_qfq_daily(sec, days=300)
+    except Exception:
+        return None
+
+    sorted_bars = sorted(daily, key=lambda x: str(x.get("date", ""))[:10])
+    dates = [str(b.get("date", ""))[:10] for b in sorted_bars if b.get("date")]
+    close_map = {str(b.get("date", ""))[:10]: float(b["close"]) for b in sorted_bars if b.get("date") and b.get("close")}
+
+    buy_signals: list[float] = []
+    sell_signals: list[float] = []
+
+    try:
+        with open(signals_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
                 try:
-                    res_rec = json.loads(line)
-                    r_symbol = str(res_rec.get("symbol") or "")
-                    r_name = str(res_rec.get("name") or "")
-                    norm_r_symbol = r_symbol.replace(".SH", "").replace(".SZ", "").strip()
-                    if normalized_symbol == norm_r_symbol or normalized_symbol == r_name:
-                        trades.append(res_rec)
+                    sig = json.loads(line)
                 except Exception:
                     continue
+
+                sig_symbol = str(sig.get("symbol", "")).replace(".SH", "").replace(".SZ", "").strip()
+                sig_name = str(sig.get("name", "")).strip()
+                if normalized_symbol not in (sig_symbol, sig_name):
+                    continue
+
+                sig_type = str(sig.get("signal_type", ""))
+                if sig_type not in ("review_result", "low_buy_triggered"):
+                    continue
+
+                analysis_time = str(sig.get("analysis_time") or "")
+                time_part = analysis_time[11:].strip() if len(analysis_time) >= 16 else ""
+                if not (time_part >= "15:00"):
+                    continue
+
+                trade_date = str(sig.get("trade_date") or analysis_time[:10])[:10]
+                if trade_date not in close_map:
+                    continue
+
+                entry_price = close_map[trade_date]
+                try:
+                    idx = dates.index(trade_date)
+                except ValueError:
+                    continue
+                if idx + 5 >= len(dates):
+                    continue
+
+                exit_price = close_map[dates[idx + 5]]
+                return_pct = round(((exit_price - entry_price) / entry_price) * 100, 2)
+
+                direction = str(sig.get("direction", ""))
+                if sig_type == "low_buy_triggered":
+                    buy_signals.append(return_pct)
+                elif direction in ("bullish", "bullish_lean"):
+                    buy_signals.append(return_pct)
+                elif direction in ("bearish", "bearish_lean"):
+                    sell_signals.append(return_pct)
     except Exception:
         return None
 
-    if len(trades) < 5:
+    total = len(buy_signals) + len(sell_signals)
+    if total == 0:
         return None
 
-    total = len(trades)
-    wins = 0
-    total_gains = 0.0
-    total_losses = 0.0
-    max_gain = -999.0
-    max_loss = 999.0
-
-    for t in trades:
-        pnl = t.get("return_pct")
-        if pnl is None:
-            pnl = t.get("r_5d")
-        if pnl is None:
-            pnl = t.get("pnl_pct", 0.0)
-        pnl = float(pnl)
-
-        if pnl > 0:
-            wins += 1
-            total_gains += pnl
-        else:
-            total_losses += abs(pnl)
-
-        if pnl > max_gain:
-            max_gain = pnl
-        if pnl < max_loss:
-            max_loss = pnl
-
-    win_rate = (wins / total) * 100
-    eps = 0.001
-    profit_factor = (total_gains + eps) / (total_losses + eps)
-    avg_pnl = sum(float(t.get("return_pct") or t.get("r_5d") or t.get("pnl_pct", 0.0)) for t in trades) / total
-
-    if win_rate >= 60.0 and profit_factor >= 1.5:
-        conclusion = "系统在该股表现出高度适应性，信号极具参考价值"
-    elif win_rate < 45.0:
-        conclusion = "易发生磨损（低胜率），需谨慎跟单，建议降低单笔仓位"
-    else:
-        conclusion = "表现中性，正常参考"
+    def _stats(signals: list[float]) -> dict | None:
+        if not signals:
+            return None
+        wins = sum(1 for s in signals if s > 0)
+        n = len(signals)
+        win_rate = round((wins / n) * 100)
+        avg = round(sum(signals) / n, 2)
+        return {"count": n, "wins": wins, "win_rate": win_rate, "avg_pnl": avg}
 
     return {
         "total": total,
-        "wins": wins,
-        "win_rate": win_rate,
-        "profit_factor": profit_factor,
-        "avg_pnl": avg_pnl,
-        "max_gain": max_gain,
-        "max_loss": max_loss,
-        "conclusion": conclusion
+        "buy": _stats(buy_signals),
+        "sell": _stats(sell_signals),
+        "sample_warning": total < 5,
     }
 
 
@@ -277,6 +290,20 @@ def render_markdown(r: dict) -> str:
     wyckoff_desc = wyckoff_data.get("description", "无明显威科夫信号") if isinstance(wyckoff_data, dict) else "无明显威科夫信号"
     lines.append(f"  威科夫：{wyckoff_desc}")
     
+    # ── 个股股性透视卡 ──
+    win_rate_data = _load_historical_win_rate(display_code)
+    if win_rate_data is not None:
+        lines.append("")
+        lines.append("📊 股性与历史回测")
+        buy = win_rate_data.get("buy")
+        sell = win_rate_data.get("sell")
+        if buy:
+            lines.append(f"  买入信号 {buy['count']}次 ｜ {buy['wins']}胜{buy['count']-buy['wins']}负 ｜ 胜率 {buy['win_rate']}% ｜ 平均 {buy['avg_pnl']:+.2f}%")
+        if sell:
+            lines.append(f"  卖出信号 {sell['count']}次 ｜ {sell['wins']}胜{sell['count']-sell['wins']}负 ｜ 胜率 {sell['win_rate']}% ｜ 避坑 {sell['avg_pnl']:+.2f}%")
+        if win_rate_data.get("sample_warning"):
+            lines.append("  ⚠️ 样本不足，仅供参考")
+    
     lines.extend(["", "🎯 信号判断"])
     bullish_signals = []
     cautious_signals = []
@@ -311,17 +338,6 @@ def render_markdown(r: dict) -> str:
     else:
         lines.append(f"⚠️ 风险：最大风险是 {confirm:.2f} 未确认前提前追入")
         
-    lines.append("")
-    win_rate_data = _load_historical_win_rate(display_code)
-    lines.append("📊 股性与历史回测")
-    if win_rate_data is not None:
-        lines.append(f"  历史记录：最近共生成 {win_rate_data['total']} 次已平仓信号")
-        lines.append(f"  说买 → 涨了：{win_rate_data['wins']}/{win_rate_data['total']} 次（胜率 {win_rate_data['win_rate']:.1f}%）")
-        lines.append(f"  平均盈亏比：{win_rate_data['profit_factor']:.2f} ｜ 平均每笔收益：{win_rate_data['avg_pnl']:+.2f}%")
-        lines.append(f"  单笔最强：{win_rate_data['max_gain']:+.2f}% ｜ 单笔最弱：{win_rate_data['max_loss']:+.2f}%")
-        lines.append(f"  结论：{win_rate_data['conclusion']}")
-    else:
-        lines.append("  历史交易数据不足，暂不统计")
     lines.append("")
 
     pool_count = _pool_count()

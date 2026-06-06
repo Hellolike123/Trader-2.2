@@ -120,6 +120,7 @@ def dense_price_zone(daily: list[dict[str, Any]]) -> tuple[float | None, float |
 
 
 from trader_shared.big_order import analyze_big_orders
+from trader_shared.tick_cache import save_tick_cache, load_tick_cache
 from trader_shared.chip_distribution import calc_chip_distribution
 
 
@@ -434,6 +435,11 @@ def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str,
             "momentum": max(0, min(100, round(momentum_score))),
             "total": max(0, min(100, total_score)),
         },
+        "momentum_raw": {
+            "rsi": momentum_rsi,
+            "adx": momentum_adx,
+            "macd": momentum_macd,
+        },
         "state": "转强确认" if above_pressure and total_score >= 70 else "短线止跌修复" if total_score >= 55 else "弱修复观察",
         "double_low": double_low,
         "afternoon_shrink": afternoon_shrink,
@@ -536,9 +542,17 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
     bars_5m = provider.fetch_5m(sec, datalen=80)
     tick_data = []
     try:
-        tick_data = provider.fetch_ticks(sec, count=500)
+        ticks = provider.fetch_ticks(sec, count=500)
+        if ticks:
+            tick_data = ticks
+            save_tick_cache(sec.ts_code, ticks, trade_date=selected_date)
     except Exception:
         pass
+    if not tick_data:
+        tick_data = load_tick_cache(sec.ts_code, trade_date=selected_date)
+        if tick_data:
+            import warnings
+            warnings.warn(f"📡 [TickCache] 使用缓存 Tick 数据（{len(tick_data)} 条）")
     current = latest_or_quote_close(quote, daily)
     last_bar = daily[-1] if daily else {}
     atr14 = to_float(last_bar.get("atr14")) or 0.0

@@ -245,6 +245,7 @@ def render_markdown(plan: dict[str, Any]) -> str:
     current_price = numeric_or_none(plan.get('current_price'))
     current_text = "无" if current_price is None else f"{current_price:.2f}"
     big_order = None
+    has_tick_data = False
     if analyze_big_orders and plan.get("data"):
         focus_prices = []
         buy_focus = numeric_or_none(buy.get("observation_price"))
@@ -256,108 +257,99 @@ def render_markdown(plan: dict[str, Any]) -> str:
         bars = (plan.get("data") or {}).get("kline_5m") or []
         trade_date = str(plan.get("analysis_time") or "").split(" ", 1)[0] or None
         tick_data = (plan.get("data") or {}).get("tick_data") or []
+        has_tick_data = len(tick_data) > 0
         big_order = analyze_big_orders(bars, tick_data=tick_data, focus_prices=focus_prices, trade_date=trade_date)
+
+    current_action = '低吸' if buy_state == '可执行' else '高抛' if sell_state == '可执行' else '不动'
 
     lines = [
         "🎯 T0 盯盘助理",
         f"{plan.get('name','')}（{plan.get('symbol','')}）｜现价 {current_text}（{pct_text(numeric_or_none(plan.get('current_change_pct')))}）",
         "",
         "🔍 扫描",
-        "",
-        f"当前：{'低吸' if buy_state == '可执行' else '高抛' if sell_state == '可执行' else '不动'}",
-        f"低吸：{buy_state}，{buy_obs}",
-        f"高抛：{sell_state}，{sell_obs}",
-        f"止损：{price(numeric_or_none(buy.get('invalid_price')))}",
+        f"当前：{current_action} ｜ 止损：{price(numeric_or_none(buy.get('invalid_price')))}",
     ]
 
-    # 止盈触发价
+    if buy_state in ("", "数据不足"):
+        lines.append("低吸：暂无")
+    else:
+        lines.append(f"低吸：{buy_state}，{buy_obs}")
+    if sell_state in ("", "数据不足"):
+        lines.append("高抛：暂无")
+    else:
+        lines.append(f"高抛：{sell_state}，{sell_obs}")
+
     exit_plan = plan.get("exit_plan") or {}
     exit_items = exit_plan.get("exit_plan") or []
     if exit_items and exit_plan.get("risk_r", 0) > 0:
         exit_parts = []
-        for idx, item in enumerate(exit_items, 1):
+        for _, item in enumerate(exit_items, 1):
             p = item.get("price")
             if p is not None:
-                exit_parts.append(f"第{idx}笔 {p:.2f}")
+                exit_parts.append(f"{p:.2f}")
         if exit_parts:
             lines.append(f"止盈：{'｜'.join(exit_parts)}")
 
     lines.append("")
 
-    # 💰 资金异动（大单异动独立段落）
     if big_order and big_order.get("events"):
-        lines.extend(["💰 资金异动", ""])
-
-        def level_score(lvl: str | None) -> int:
-            return 3 if lvl == "强提醒" else 2 if lvl == "注意" else 1
-
-        sorted_events = sorted(
-            big_order["events"],
-            key=lambda e: (level_score(e.get("level")), e.get("hands") or 0.0),
-            reverse=True,
-        )
-        for event in sorted_events[:5]:
-            time_str = str(event.get("time") or "--:--")
-            side = str(event.get("side") or "")
-            amount_wan = event.get("amount_wan") or 0.0
-            hands = event.get("hands") or 0.0
-            meaning = str(event.get("meaning") or "")
-            # 判断超大单/大单类型
-            order_type = "超大单" if amount_wan >= 500 else "大单"
-            direction = "买入" if "买入" in side else "卖出" if "卖出" in side else ""
-            sign = "+" if "买入" in side else "-"
-            lines.append(f"{time_str} {order_type}{direction} {sign}{amount_wan:.0f}万（{meaning}）")
-
-        # 今日汇总
+        title = "💰 资金异动" if has_tick_data else "💰 分时估算"
         by_side = big_order.get("by_side") or {}
         buy_info = by_side.get("主动买入") or {}
         sell_info = by_side.get("主动卖出") or {}
-        buy_amount = buy_info.get("amount_wan") or 0
-        sell_amount = sell_info.get("amount_wan") or 0
-        net_flow = buy_amount - sell_amount
-        # 超大单汇总
-        super_large_total = sum(
-            e.get("amount_wan", 0) for e in big_order["events"]
-            if (e.get("amount_wan") or 0) >= 500 and "买入" in str(e.get("side", ""))
-        ) - sum(
-            e.get("amount_wan", 0) for e in big_order["events"]
-            if (e.get("amount_wan") or 0) >= 500 and "卖出" in str(e.get("side", ""))
-        )
-        lines.append(f"今日净流入：{net_flow:+.0f}万 ｜ 超大单：{super_large_total:+.0f}万")
-        lines.append("")
+        buy_events = [e for e in big_order["events"] if "买入" in str(e.get("side",""))]
+        sell_events = [e for e in big_order["events"] if "卖出" in str(e.get("side",""))]
+        buy_total = round(buy_info.get("amount_wan") or 0)
+        sell_total = round(sell_info.get("amount_wan") or 0)
 
-    # 📋 盘中动态（盘口+事件）
+        if buy_events and sell_events:
+            lines.append(f"{title}\n买入 {len(buy_events)}笔 {buy_total}万 ｜ 卖出 {len(sell_events)}笔 {sell_total}万")
+        elif buy_events:
+            lines.append(f"{title}\n全部买入 {len(buy_events)}笔 +{buy_total}万")
+        elif sell_events:
+            lines.append(f"{title}\n全部卖出 {len(sell_events)}笔 -{sell_total}万")
+
+        sorted_events = sorted(big_order["events"], key=lambda e: str(e.get("time","")))
+        for i in range(0, len(sorted_events), 3):
+            parts = []
+            for e in sorted_events[i:i+3]:
+                t = str(e.get("time",""))
+                amt = e.get("amount_wan") or 0
+                side = str(e.get("side",""))
+                sign = "+" if "买入" in side else "-"
+                parts.append(f"{t} {sign}{amt:.0f}万")
+            lines.append("  ".join(parts))
+
+        net = buy_total - sell_total
+        lines.append(f"净流入 {'+' if net >= 0 else ''}{net}万{'，主力偏多' if net > 0 else '，主力偏空' if net < 0 else ''}")
+        if not has_tick_data:
+            lines.append("（5m分时估算，非真实Tick数据）")
+
     has_dynamic = False
     if order_book_analyze and plan.get("order_book"):
         ob = order_book_analyze(plan["order_book"])
         if not has_dynamic:
-            lines.extend(["📋 盘中动态", ""])
+            lines.append("")
+            lines.append("📋 盘中动态")
             has_dynamic = True
         lines.append(ob["line"])
-        lines.append("")
 
     history_lines = review_lines(plan.get("history"))
-    if history_lines:
+    if history_lines and history_lines != ["暂无关键事件。"]:
         if not has_dynamic:
-            lines.extend(["📋 盘中动态", ""])
+            lines.append("")
+            lines.append("📋 盘中动态")
             has_dynamic = True
         lines.extend(history_lines)
-        lines.append("")
 
-    # 🔔 实时信号
     signal_lines = _build_realtime_signal_section(plan)
     if signal_lines:
-        lines.extend(signal_lines)
         lines.append("")
+        lines.extend(signal_lines)
 
-    # 下一步（合并：仓位管控+下一步）
-    lines.extend([
-        "👀 下一步",
-        "",
-        f"买入：{buy_obs}是否5m止跌。",
-        f"卖出：{sell_obs}是否冲高失败。",
-        f"止损：跌破{price(numeric_or_none(buy.get('invalid_price')))}后不再低吸。",
-    ])
+    stop_price = price(numeric_or_none(buy.get('invalid_price')))
+    lines.append("")
+    lines.append(f"👀 跌破 {stop_price} 止损退出" if buy_state == "可执行" else f"👀 跌破 {stop_price} 后不再低吸")
     return "\n".join(lines)
 
 

@@ -2,42 +2,69 @@
 
 > **This is the absolute truth for valid output.** Never generate output from memory.
 
-## Single After-Close Review (no markdown tables)
+## Single Review (盘后复盘 / 午间复盘)
 
 ```text
-📌 {name}｜{date}盘后复盘
-收盘 {price}（{change_pct}）｜ 成本 {cost}｜ 浮盈亏 {pnl}
+盘后复盘 — {name}（{code}）
 
-结论  {conclusion_text}  {model_summary}
+收盘：{price}元（{change_pct}）
+
+📊 {major_stage} + {momentum} → {action}
+
+结论：{conclusion}
 
 📊 关键价位
-支撑：{support} ｜ 压力：{pressure} ｜ 止损：{stop} ｜ 止盈：{take}
-站上 {pressure} = 转强    跌破{support} = 修复失效
+  {support_price}  ← {support_label}
+  {close_price}  ← 收盘价
+  {pressure_price}  ← {pressure_label}
+站上 {pressure} = 转强  跌破 {support} = 修复失效
 
-⚠️ 最大风险  放量跌破 {support}  含义：关键支撑失败
-
-🔎 分时走势  {intraday_summary}
+🔎 分时与大单
+  {time}  {side} {amount}万（{meaning}）
+  回溯：{summary}
 
 📈 五层打分
-结构{s}/量价{v}｜筹码{c}｜动能{m}
-缠论：{text}  威科夫：{text}  筹码：{text}  资金行为：{text}
+  结构 {s}  量价 {v}  筹码 {c}  动能 {m}
+  缠论  {chanlun_short}
+  威科夫  {wyckoff_short}
+  MACD {dir}  RSI {val} {label}  ADX {val} {label}
+  ATR ±{atr}（{pct}%）{note}
 
-🎯 信号判断  偏多：✓ {bullet}  ! 警惕：{bullet}
+🎴 股性透视
+  买入 {n}次 {wins}胜{losses}负 胜率{rate}% 平均{avg}
+  卖出 {n}次 {wins}胜{losses}负 胜率{rate}%
+  ⚠️ 样本不足，仅供参考
 
-👉 一句话  {one_liner}
-明天只有放量站稳 {pressure} 才算确认；否则继续按短线修复看。
-如果放量跌破 {support}，这次修复判断失效。
+💰 主力资金
+  近5日 {cum}万（{trend}）
+  今日 {today}万  价资{relation}
+
+💰 筹码分布
+  {price} [{bar}] {share}% {emoji} {level}
+  {migration_text}
+
+📍 明日
+  {pressure} 站稳 → 加仓
+  {support} 跌破 → 止损
 ```
 
-Optional sections (present if data available):
-- `ATR数据不足` or `💡 参考信息  日均波动约 ±{atr}元（占总价{pct}%）`
-- `MACD（判断大方向）：目前{偏多/偏空/中性}...`
-- `💰 筹码分布（近60日量价粗算）`
-- `📋 今日信号回溯` (from signals.jsonl)
+### Section rules
 
-## Midday Review
+| Section | Condition |
+|---------|-----------|
+| 📊 stage | Hidden if stage_result data unavailable |
+| 🎴 股性透视 | Hidden if signals.jsonl missing or < 1 signal |
+| 💰 主力资金 | Hidden if main_force data unavailable |
+| 💰 筹码分布 | Hidden if no chip distribution peaks |
+| ATR | Hidden if atr_data unavailable |
+| MACD/RSI/ADX | Hidden if momentum_raw unavailable |
 
-Same format but title has `午间复盘` instead of `盘后复盘`.
+### 判读规则
+
+- RSI < 30 → `超卖`  RSI > 70 → `超买`  RSI < 45 → `偏弱`  RSI > 55 → `偏强`  else `中性`
+- ADX > 25 且 strong_trend → `趋势强`  else `无趋势`
+- MACD: `偏多` / `偏空` / `中性`
+- 筹码搬家: 支撑减少+阻力增加 → `筹码在搬家，主力出货`; 支撑增加+阻力减少 → `主力在吸筹`; else `底部筹码基本稳定`
 
 ## Compare Output
 
@@ -50,6 +77,14 @@ Same format but title has `午间复盘` instead of `盘后复盘`.
 明日动作：
 筹码密集区（近60日量价粗算）：...
 ```
+
+## Format Rules (CRITICAL)
+
+1. **首行** 必须是 `盘后复盘 — {名称}（{代码}）`
+2. **禁用** Markdown 标题 (#), 表格 (|...|), 加粗 (**), 列表 (*/-)
+3. 每节之间空一行
+4. 价格在左、说明在右，用 `←` `→` 对齐
+5. 手机适配：每行不超过 20 字
 
 ## Old Output Detection
 

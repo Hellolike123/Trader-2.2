@@ -25,6 +25,7 @@ except ImportError:
 
 from trader_shared.data_provider import get_provider
 from trader_shared.stage_positioning import compute_exit_plan
+from trader_shared.tick_cache import save_tick_cache
 from price_point_engine import build_price_point_model
 from t0_core import (
     build_t0_event_signal,
@@ -97,6 +98,7 @@ def build_plan(target: str) -> dict[str, Any]:
         try:
             ticks = provider.fetch_ticks(sec, count=500)
             report_data["tick_data"] = ticks
+            save_tick_cache(sec.ts_code, ticks)
             import warnings
             warnings.warn(f"🎯 [PassiveTickTrigger] 现价 {current_val:.2f} 靠近关注价，被动激活物理 Tick 大单验证！")
         except Exception:

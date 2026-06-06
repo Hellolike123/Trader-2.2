@@ -30,6 +30,112 @@ def model_summary(theory: dict[str, Any]) -> str:
     return "五层模型里，只有弱修复迹象，动能、筹码压力和中期趋势还没确认。"
 
 
+def _short_verdict(text: str) -> str:
+    text = str(text).strip()
+    if "。" in text:
+        parts = [p.strip() for p in text.split("。") if p.strip()]
+        short = parts[0]
+        if len(short) <= 12:
+            return short
+        for p in parts:
+            if not any(kw in p for kw in ("回调", "反弹", "修复", "调整", "震荡", "下跌", "上涨")):
+                continue
+            short = p
+            break
+        return short[:16]
+    return text[:16]
+
+
+def _atr_level_note_short(level: str, atr14: float) -> str:
+    notes = {
+        "波幅偏高": "首仓不超5%",
+        "波动偏大": "首仓5-7%",
+        "波动正常": "首仓不超10%",
+        "波动较低": "首仓15-20%",
+    }
+    return notes.get(level, "")
+
+
+def _load_historical_win_rate(symbol: str) -> dict | None:
+    import json
+    import os
+    signals_path = os.path.expanduser("~/.trader/signals.jsonl")
+    if not os.path.exists(signals_path):
+        return None
+    normalized_symbol = symbol.replace(".SH", "").replace(".SZ", "").strip()
+    try:
+        from trader_shared.data_provider import get_provider
+        provider = get_provider()
+        sec = provider.resolve_security(normalized_symbol)
+        daily = provider.fetch_qfq_daily(sec, days=300)
+    except Exception:
+        return None
+    sorted_bars = sorted(daily, key=lambda x: str(x.get("date", ""))[:10])
+    dates = [str(b.get("date", ""))[:10] for b in sorted_bars if b.get("date")]
+    close_map = {str(b.get("date", ""))[:10]: float(b["close"]) for b in sorted_bars if b.get("date") and b.get("close")}
+    buy_signals: list[float] = []
+    sell_signals: list[float] = []
+    try:
+        with open(signals_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    sig = json.loads(line)
+                except Exception:
+                    continue
+                sig_symbol = str(sig.get("symbol", "")).replace(".SH", "").replace(".SZ", "").strip()
+                sig_name = str(sig.get("name", "")).strip()
+                if normalized_symbol not in (sig_symbol, sig_name):
+                    continue
+                sig_type = str(sig.get("signal_type", ""))
+                if sig_type not in ("review_result", "low_buy_triggered"):
+                    continue
+                analysis_time = str(sig.get("analysis_time") or "")
+                time_part = analysis_time[11:].strip() if len(analysis_time) >= 16 else ""
+                if not (time_part >= "15:00"):
+                    continue
+                trade_date = str(sig.get("trade_date") or analysis_time[:10])[:10]
+                if trade_date not in close_map:
+                    continue
+                entry_price = close_map[trade_date]
+                try:
+                    idx = dates.index(trade_date)
+                except ValueError:
+                    continue
+                if idx + 5 >= len(dates):
+                    continue
+                exit_price = close_map[dates[idx + 5]]
+                return_pct = round(((exit_price - entry_price) / entry_price) * 100, 2)
+                direction = str(sig.get("direction", ""))
+                if sig_type == "low_buy_triggered":
+                    buy_signals.append(return_pct)
+                elif direction in ("bullish", "bullish_lean"):
+                    buy_signals.append(return_pct)
+                elif direction in ("bearish", "bearish_lean"):
+                    sell_signals.append(return_pct)
+    except Exception:
+        return None
+    total = len(buy_signals) + len(sell_signals)
+    if total == 0:
+        return None
+    def _stats(signals: list[float]) -> dict | None:
+        if not signals:
+            return None
+        wins = sum(1 for s in signals if s > 0)
+        n = len(signals)
+        win_rate = round((wins / n) * 100)
+        avg = round(sum(signals) / n, 2)
+        return {"count": n, "wins": wins, "win_rate": win_rate, "avg_pnl": avg}
+    return {
+        "total": total,
+        "buy": _stats(buy_signals),
+        "sell": _stats(sell_signals),
+        "sample_warning": total < 5,
+    }
+
+
 def _format_intraday_narrative(intraday: dict[str, Any], big_order: dict[str, Any] | None = None) -> list[str]:
     """Build the intraday narrative without duplicating the same event twice."""
     result: list[str] = []
@@ -124,21 +230,25 @@ def _build_levels_table(levels: dict[str, Any], is_midday: bool) -> list[str]:
 
 def render_single(review: dict[str, Any]) -> str:
     q = review["quote"]
-    intraday = review["intraday"]
     levels = review["levels"]
     theory = review["theory"]
-    cost = review.get("cost")
-    pnl = review.get("pnl_pct")
-    pressure = levels["key_pressure"]
-    first_support = levels["first_support"]
-    key_support = levels["key_support"]
-    close = q["close"]
-    atr_data = review.get("atr") or {}
+    stage = review.get("stage_result") or {}
+    intraday = review["intraday"]
     is_midday = review.get("session") == "midday"
+    close = q["close"]
+    pressure = levels["key_pressure"]
+    key_support = levels["key_support"]
+    cost = review.get("cost")
+    atr_data = review.get("atr") or {}
+    name = review.get("name", "")
+    code = str(review.get("symbol", "")).replace(".SH", "").replace(".SZ", "")
+    change = q.get("change_pct")
     review_label = "午间复盘" if is_midday else "盘后复盘"
-    data_time = review.get("data_time")
 
-    header_cost = f"成本 {cost:.2f}｜浮盈亏 {signed_pct(pnl)}" if cost else "未输入持仓成本｜按观察票复盘"
+    major_stage = stage.get("major_stage", "")
+    momentum = stage.get("momentum", "")
+    stage_action = stage.get("action", "")
+    stage_label = f"{major_stage} + {momentum} → {stage_action}" if major_stage else ""
     conclusion = str(review.get("conclusion_text") or "")
     if not conclusion:
         if is_midday:
@@ -147,113 +257,74 @@ def render_single(review: dict[str, Any]) -> str:
             conclusion = "弱修复观察，还不能按反转处理。" if theory["state"] == "弱修复观察" else "短线止跌修复，但还不是反转。" if theory["state"] != "转强确认" else "正在尝试转强，仍要看回踩确认。"
 
     lines: list[str] = [
-        f"📌 {review['name']}｜{review['date']}{review_label}",
-        f"收盘 {price_text(close)}（{pct_text(q.get('change_pct'))}）",
-        header_cost,
+        f"盘后复盘 — {name}（{code}）",
+        "",
+        f"收盘：{price_text(close)}（{pct_text(change)}）",
+        "",
     ]
-    if data_time:
-        lines.append(f"数据时间：{data_time}")
-    if is_midday:
-        lines.append("注意午间复盘以数据时间快照为准")
-    lines.append("")
-    model_summary_text = str(review.get("model_summary_text") or model_summary(theory))
-    # 结论和摘要分开显示，避免单行过长
-    lines.append("结论 " + conclusion)
-    if model_summary_text:
-        lines.append(model_summary_text)
-    lines.append("")
-    # 📊 关键价位 (consolidated: supports + pressures + risk)
-    lines.append("📊 关键价位 ")
-    lines.extend(_build_levels_table(levels, is_midday))
-    lines.append("")
-    lines.append(f"站上 {price_text(pressure)} = 转强    跌破{price_text(key_support)} = 修复失效")
-    lines.append("")
-    lines.append("⚠️ 最大风险 ")
-    lines.append(f"放量跌破 {price_text(key_support)}")
-    lines.append(f"含义：关键支撑失败，短线修复假设失效。")
-    lines.append("")
-    # 🔎 分时走势
-    lines.append("🔎 分时走势 ")
-    lines.extend(_format_intraday_narrative(intraday, review.get("big_order")))
+
+    if stage_label:
+        lines.append(f"📊 {stage_label}")
+        lines.append("")
+
+    lines.append(f"结论：{conclusion}")
     lines.append("")
 
-    # 💰 主力资金复盘
-    mf = review.get("main_force") or {}
-    if mf and mf.get("stage") and mf["stage"] != "unknown":
-        try:
-            from trader_shared.main_force_output import (
-                format_main_force_enhanced,
-                format_flow_trend,
-            )
-            from trader_shared.main_force import STAGE_LABELS
+    # 📊 关键价位
+    lines.append("📊 关键价位")
+    support_items = levels.get("support", [])
+    pressure_items = levels.get("pressure", [])
+    for item in support_items[:3]:
+        lines.append(f"  {price_text(item['price'])}  ← {item['label']}")
+    for item in pressure_items[:3]:
+        lines.append(f"  {price_text(item['price'])}  ← {item['label']}")
+    lines.append(f"站上 {price_text(pressure)} = 转强  跌破 {price_text(key_support)} = 修复失效")
+    lines.append("")
 
-            stage_cn = STAGE_LABELS.get(mf.get("stage", ""), "未知")
-            confidence = mf.get("confidence", 0)
-            daily_5d = mf.get("daily_flow_5d", [])
-            trend_str = format_flow_trend(daily_5d)
-            cum_5 = mf.get("cum_flow_5d_wan", 0)
-            con_in = mf.get("consecutive_inflow_days", 0)
-            con_out = mf.get("consecutive_outflow_days", 0)
-            relation = mf.get("flow_price_relation", "无数据")
-            today_super_large = float(mf.get("today_super_large_wan", 0) or 0)
-            today_large = float(mf.get("today_large_wan", 0) or 0)
-            today_flow = daily_5d[-1] if daily_5d else 0
-
-            lines.append("💰 主力资金复盘")
-            lines.append(f"阶段：{stage_cn}（置信度 {confidence:.1f}）")
-
-            # 今日大单回溯
-            bo = review.get("big_order") or {}
-            bo_events = bo.get("events") or []
-            if bo_events:
-                lines.append("今日大单回溯：")
-                for event in bo_events[:5]:
-                    amt = event.get("amount_wan") or 0
-                    order_type = "超大单" if amt >= 500 else "大单"
-                    direction = "买入" if "买入" in str(event.get("side", "")) else "卖出"
-                    sign = "+" if "买入" in str(event.get("side", "")) else "-"
-                    meaning = str(event.get("meaning") or "")
-                    lines.append(f"  {event.get('time')} {order_type}{direction} {sign}{amt:.0f}万（{meaning}）")
-                lines.append(f"回溯总结：{bo.get('summary', '暂无')}")
-
-            # 近5日累计 + 趋势
-            cum_line = f"近5日累计：{cum_5:+.0f}万（{trend_str}）"
-            if con_in >= 2:
-                cum_line += f" 连续{con_in}日净流入"
-            elif con_out >= 2:
-                cum_line += f" 连续{con_out}日净流出"
-            lines.append(cum_line)
-
-            # 今日超大单/大单明细
-            today_line = f"今日：{today_flow:+.0f}万"
-            if today_super_large != 0 or today_large != 0:
-                today_line += f"（超大单 {today_super_large:+.0f}万｜大单 {today_large:+.0f}万）"
-            lines.append(today_line)
-
-            lines.append(f"价资关系：{relation}")
-            lines.append("")
-        except Exception:
-            pass
+    # 🔎 分时与大单
+    lines.append("🔎 分时与大单")
+    bo = review.get("big_order") or {}
+    bo_events = bo.get("events") or []
+    if bo_events:
+        for event in bo_events[:4]:
+            hands = event.get("hands")
+            hands_text = f"{hands:.0f}手" if hands is not None else ""
+            amount_wan = event.get("amount_wan")
+            amount_text = f"{amount_wan:.0f}万" if amount_wan is not None else ""
+            if hands_text:
+                amount_text += f"/{hands_text}"
+            meaning = event.get("meaning", "")
+            side = event.get("side", "")
+            lines.append(f"  {event['time']}  {side} {amount_text}（{meaning}）")
+        lines.append(f"  回溯：{bo.get('summary', '')}")
+    else:
+        intraday_lines = intraday.get("lines") or []
+        if intraday_lines:
+            for line in intraday_lines[:3]:
+                line_str = str(line).strip()
+                if line_str:
+                    lines.append(f"  {line_str}")
+        else:
+            lines.append("  分时数据不足")
+    lines.append("")
 
     # 📈 五层打分
     scores = theory.get("scores", {})
-    lines.append("📈 五层打分 ")
-    lines.append("结构{}/量价{}｜筹码{}｜动能{}".format(
-        scores.get("structure", "--"), scores.get("volume", "--"),
-        scores.get("chip", "--"), scores.get("momentum", "--"),
-    ))
-    lines.append(f"缠论：{theory.get('chanlun', '--')}")
-    lines.append(f"威科夫：{theory.get('wyckoff', '--')}")
-    lines.append(f"筹码：{theory.get('chip', '--')}")
-    lines.append(f"资金行为：{theory.get('fund', '--')}")
-    if atr_data.get("available"):
-        atr14 = atr_data['atr14']
-        atr_ratio = atr_data['atr_ratio']
-        note = _atr_level_note(atr_data['level'], atr14, atr14 * 2)
-        lines.append(f"💡 参考信息  日均波动约 ±{atr14:.2f}元（占总价{atr_ratio*100:.1f}%），{note}")
-    else:
-        lines.append("ATR数据不足（新股/停牌）")
+    lines.append("📈 五层打分")
+    lines.append(f"  结构 {scores.get('structure','--')}  量价 {scores.get('volume','--')}  筹码 {scores.get('chip','--')}  动能 {scores.get('momentum','--')}")
+    chanlun = theory.get("chanlun", "")
+    if chanlun:
+        lines.append(f"  缠论  {_short_verdict(chanlun)}")
+    wyckoff = theory.get("wyckoff", "")
+    if wyckoff:
+        lines.append(f"  威科夫  {_short_verdict(wyckoff)}")
+
+    # MACD + RSI + ADX
+    mr = theory.get("momentum_raw") or {}
+    rsi_raw = mr.get("rsi") or {}
+    adx_raw = mr.get("adx") or {}
     macd_params = review.get("macd_params") or {}
+    macd_dir = "偏多" if macd_params.get("golden_cross") else "偏空" if macd_params.get("death_cross") else "中性"
     if macd_params.get("macd_line") is not None:
         mc = macd_params['macd_line']
         dea = macd_params['dea']
@@ -264,94 +335,102 @@ def render_single(review: dict[str, Any]) -> str:
             macd_dir = "偏空"
         else:
             macd_dir = "中性"
-        strength = "不算强" if abs(hist) < 0.01 else ""
-        cross_note = ""
-        if macd_params.get("golden_cross"):
-            cross_note = "（金叉状态）"
-        elif macd_params.get("death_cross"):
-            cross_note = "（死叉状态）"
-        lines.append(f"MACD（判断大方向）：目前{macd_dir}{cross_note}{strength}。")
+        if abs(hist) < 0.01:
+            macd_dir += "（不算强）"
+
+    rsi_val = rsi_raw.get("last")
+    rsi_label = ""
+    if rsi_val is not None:
+        if rsi_val < 30: rsi_label = "超卖"
+        elif rsi_val > 70: rsi_label = "超买"
+        elif rsi_val < 45: rsi_label = "偏弱"
+        elif rsi_val > 55: rsi_label = "偏强"
+        else: rsi_label = "中性"
+
+    adx_val = adx_raw.get("value")
+    adx_label = ""
+    if adx_val is not None:
+        adx_label = "趋势强" if adx_raw.get("strong_trend") else "无趋势"
+
+    momentum_parts = [f"MACD {macd_dir}"]
+    if rsi_val is not None:
+        momentum_parts.append(f"RSI {rsi_val:.0f} {rsi_label}")
+    if adx_val is not None:
+        momentum_parts.append(f"ADX {adx_val:.0f} {adx_label}")
+    if len(momentum_parts) > 1:
+        lines.append(f"  {'  '.join(momentum_parts)}")
+
+    if atr_data.get("available"):
+        atr14 = atr_data['atr14']
+        atr_ratio = atr_data['atr_ratio']
+        note = _atr_level_note_short(atr_data['level'], atr14)
+        lines.append(f"  ATR ±{atr14:.2f}（{atr_ratio*100:.1f}%）{note}")
     lines.append("")
-    # 🎯 信号判断
-    lines.append("🎯 信号判断 ")
-    lines.append("偏多：")
-    for s in theory.get("supports", [])[:3]:
-        lines.append(f"  ✓ {s}")
-    lines.append("  警惕：")
-    for b in theory.get("blocks", [])[:3]:
-        lines.append(f"  ! {b}")
-    lines.append("")
-    # 👉 一句话
-    one_liner = str(review.get("one_liner_text") or "")
-    if not one_liner:
-        if is_midday:
-            one_liner = "午间有修复，还没过成本区。" if cost and close < cost else "午间方向不明，看午后确认。"
-        elif cost and close < cost:
-            one_liner = "现在不适合割肉，也不适合提前加仓。"
-        else:
-            one_liner = "现在不适合追高，先等关键位确认。"
-    lines.append("👉 一句话 ")
-    lines.append(one_liner)
-    lines.append(f"明天只有放量站稳 {price_text(pressure)} 才算确认；否则继续按短线修复看。")
-    lines.append(f"如果放量跌破 {price_text(key_support)}，这次修复判断失效。")
-    lines.append("")
+
+    # 🎴 股性透视
+    win_rate_data = _load_historical_win_rate(review.get("symbol", ""))
+    if win_rate_data is not None:
+        lines.append("🎴 股性透视")
+        buy = win_rate_data.get("buy")
+        sell = win_rate_data.get("sell")
+        if buy:
+            lines.append(f"  买入 {buy['count']}次 {buy['wins']}胜{buy['count']-buy['wins']}负 胜率{buy['win_rate']}% 平均{buy['avg_pnl']:+.2f}%")
+        if sell:
+            lines.append(f"  卖出 {sell['count']}次 {sell['wins']}胜{sell['count']-sell['wins']}负 胜率{sell['win_rate']}%")
+        if win_rate_data.get("sample_warning"):
+            lines.append("  ⚠️ 样本不足，仅供参考")
+        lines.append("")
+
+    # 💰 主力资金
+    mf = review.get("main_force") or {}
+    if mf and mf.get("stage") and mf["stage"] != "unknown":
+        try:
+            from trader_shared.main_force_output import format_flow_trend
+            daily_5d = mf.get("daily_flow_5d", [])
+            trend_str = format_flow_trend(daily_5d)
+            cum_5 = mf.get("cum_flow_5d_wan", 0)
+            con_in = mf.get("consecutive_inflow_days", 0)
+            con_out = mf.get("consecutive_outflow_days", 0)
+            relation = mf.get("flow_price_relation", "无数据")
+            today_flow = daily_5d[-1] if daily_5d else 0
+
+            lines.append("💰 主力资金")
+            cum_line = f"  近5日 {cum_5:+.0f}万（{trend_str}）"
+            if con_in >= 2:
+                cum_line += f" 连续{con_in}日净流入"
+            elif con_out >= 2:
+                cum_line += f" 连续{con_out}日净流出"
+            lines.append(cum_line)
+            lines.append(f"  今日 {today_flow:+.0f}万  价资{relation}")
+            lines.append("")
+        except Exception:
+            pass
+
     # 💰 筹码分布
     chip_dist = review.get("chip_distribution") or {}
     peaks = chip_dist.get("peaks", [])
     if peaks:
-        lines.append("💰 筹码分布 (高清时序衰减图)")
+        lines.append("💰 筹码分布")
         max_share = max(p.get("share_of_total", 1.0) for p in peaks) if peaks else 1.0
         for p in peaks:
             price = p["price"]
             share = p["share_of_total"]
             level = p["support_level"]
-            
-            # WeChat-friendly 6-character full-width progress bar
             filled = max(1, min(6, round(share / max_share * 6))) if max_share > 0 else 1
             bar = "■" * filled + "□" * (6 - filled)
-            
-            # Emoji prefix based on support vs resistance
             emoji = "🟢" if "支撑" in level else "🔴"
-            
-            lines.append(f"  {price:.2f}元 [{bar}] {share:.1f}% {emoji}{level}")
-        lines.append("")
-    # 🔔 今日信号回顾
-    signal_review_lines = _build_signal_review_section(review)
-    if signal_review_lines:
-        lines.extend(signal_review_lines)
+            lines.append(f"  {price:.2f} [{bar}] {share:.1f}% {emoji}{level}")
+
+        cm = review.get("chip_migration") or {}
+        cm_text = cm.get("warning_text", "")
+        if cm_text:
+            lines.append(f"  {cm_text}")
         lines.append("")
 
-    # 🎯 明日行动
-    tomorrow_action_lines = _build_tomorrow_action_section(review)
-    if tomorrow_action_lines:
-        lines.extend(tomorrow_action_lines)
-        lines.append("")
-
-    # 📋 今日信号回溯 (no more monthly tracking — just backtrack)
-    bt_lines = _signal_backtrack_lines(review)
-    if bt_lines:
-        lines.extend(bt_lines)
-        lines.append("")
-
-    # 📍 止盈进度（如有）
-    exit_plan = review.get("exit_plan") or {}
-    exit_items = exit_plan.get("exit_plan") or []
-    if exit_items and exit_plan.get("risk_r", 0) > 0:
-        lines.append("📍 止盈进度")
-        already_exited = exit_plan.get("already_exited") or [False, False, False]
-        for idx, item in enumerate(exit_items):
-            p = item.get("price")
-            reason = item.get("reason", "")
-            exited = already_exited[idx] if idx < len(already_exited) else False
-            if exited:
-                lines.append(f"  ✅ 第{idx+1}笔 已执行")
-            elif p is not None:
-                dist = abs(close - p) / p * 100 if p > 0 else 0
-                status = "已触发" if close >= p else f"未触发（当前 {close:.2f}，距 {dist:.1f}%）"
-                lines.append(f"  {'✅' if close >= p else '⏳'} 第{idx+1}笔 {p:.2f} {status}")
-            else:
-                lines.append(f"  ⏳ 第{idx+1}笔 {reason} 未触发")
-        lines.append("")
+    # 📍 明日
+    lines.append("📍 明日")
+    lines.append(f"  {price_text(pressure)} 站稳 → 加仓")
+    lines.append(f"  {price_text(key_support)} 跌破 → 止损")
 
     return "\n".join(str(line) for line in lines)
 

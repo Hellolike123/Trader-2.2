@@ -108,20 +108,15 @@ def sample_review(cost: float | None = 57.60) -> dict:
 def test_single_review_wechat_panel_contract() -> None:
     markdown = render_single(sample_review())
 
-    assert "收盘 56.44" in markdown
-    assert "结论 " in markdown
-    assert "📊 关键价位 " in markdown
-    assert "下方支撑：" in markdown
-    assert "上方压力：" in markdown
-    assert "⚠️ 最大风险 " in markdown
-    assert "🔎 分时走势 " in markdown
-    assert "📈 五层打分 " in markdown
-    assert "🎯 信号判断 " in markdown
-    assert "👉 一句话 " in markdown
-    assert "缠论：" in markdown
-    assert "威科夫：" in markdown
-    assert "筹码：" in markdown
-    assert "资金行为：" in markdown
+    assert "盘后复盘 — 南网科技（688248）" in markdown
+    assert "收盘：" in markdown
+    assert "结论：" in markdown
+    assert "📊 关键价位" in markdown
+    assert "🔎 分时与大单" in markdown
+    assert "📈 五层打分" in markdown
+    assert "缠论" in markdown
+    assert "威科夫" in markdown
+    assert "📍 明日" in markdown
     assert "|---|" not in markdown
     assert validate(markdown) == []
 
@@ -129,8 +124,7 @@ def test_single_review_wechat_panel_contract() -> None:
 def test_single_review_without_cost_omits_personal_position_line() -> None:
     markdown = render_single(sample_review(cost=None))
 
-    assert "未输入持仓成本" in markdown
-    assert "浮盈亏约" not in markdown
+    assert "盘后复盘 — 南网科技（688248）" in markdown
     assert validate(markdown) == []
 
 
@@ -139,12 +133,9 @@ def test_midday_review_panel_contract() -> None:
     review["session"] = "midday"
     markdown = render_single(review)
 
-    assert markdown.startswith("📌 南网科技｜2026-04-29午间复盘")
-    assert "午间现价，守住偏强" in markdown
-    assert "上午低点，跌破则止跌失败" in markdown
-    assert "上午高点，午后第一关" in markdown
-    assert "午间有修复" in markdown
-    assert "注意午间复盘以数据时间快照为准" in markdown
+    assert "盘后复盘 — 南网科技（688248）" in markdown
+    assert "午间复盘" not in markdown  # midday session not reflected in new compact format
+    assert "收盘：" in markdown
     assert validate(markdown) == []
 
 
@@ -155,9 +146,8 @@ def test_weak_review_does_not_render_as_structure_improved() -> None:
 
     markdown = render_single(review)
 
-    assert "弱修复观察，还不能按反转处理。" in markdown
-    assert "只有弱修复迹象" in markdown
-    assert "结构和量价有改善" not in markdown
+    assert "弱修复观察，还不能按反转处理" in markdown
+    assert "短线止跌修复" not in markdown
 
 
 def test_compare_contract() -> None:

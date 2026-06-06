@@ -2,7 +2,7 @@
 
 > **This is the absolute truth for output structure.** Never generate output format from memory.
 
-## Manual Card Output (精简为 4 部分)
+## Manual Card Output (精简为 3 部分)
 
 Must start with `🎯 T0 盯盘助理` and use this structure:
 
@@ -11,24 +11,28 @@ Must start with `🎯 T0 盯盘助理` and use this structure:
 {name}（{symbol}）｜现价 xx.xx（+/-x.xx%）
 
 🔍 扫描
-当前：不动 / 低吸 / 高抛
+当前：不动 ｜ 止损：xx.xx
 低吸：{状态}，{观察价}
 高抛：{状态}，{观察价}
-止损：xx.xx 元
+止盈：xx.xx
 
-💰 资金异动
-{time} 超大单{买入/卖出} +{amount}万（{meaning}）
-...
-今日净流入：{net}万 ｜ 超大单：{sl_net}万
+💰 资金异动（真实Tick）
+全部卖出 5笔 -8022万
+09:35 -2202万｜09:40 -1664万｜09:45 -1404万
+净流入 -8022万，主力偏空
 
-📋 盘中动态
+或
+
+💰 分时估算（5m估算，非真实Tick）
+全部卖出 5笔 -8022万
+09:35 -2202万｜09:40 -1664万｜09:45 -1404万
+净流入 -8022万，主力偏空
+
+📋 盘中动态（有事件时显示）
 {time} {icon} {event_description}
-...
 
 👀 下一步
-买入：{观察价}是否5m止跌
-卖出：{观察价}是否冲高失败
-止损：跌破{止损价}后不再低吸
+跌破 xx.xx 后不再低吸
 ```
 
 ## Monitor Alert Output

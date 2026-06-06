@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "01-功能包-packages/review/scripts/review_render.py", "reason": "重写 render_single 为9节新格式"}
+{"file": "01-功能包-packages/review/scripts/review_core.py", "reason": "theory_verdicts 返回 momentum_raw 含 RSI/ADX"}
+{"file": "01-功能包-packages/review/references/review_output-contract.md", "reason": "更新输出契约文档"}

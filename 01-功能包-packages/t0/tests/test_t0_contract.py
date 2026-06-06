@@ -75,11 +75,11 @@ def test_t0_markdown_contract() -> None:
     markdown = render_markdown(plan)
 
     assert markdown.startswith("🎯 T0")
-    assert "买入：" in markdown
-    assert "卖出：" in markdown
     assert "止损：" in markdown
     assert "🔍 扫描" in markdown
-    assert "👀 下一步" in markdown
+    assert "低吸：" in markdown
+    assert "高抛：" in markdown
+    assert "👀" in markdown
     assert validate(markdown) == []
 
 
@@ -128,8 +128,8 @@ def test_t0_markdown_hides_observation_when_space_or_data_invalid() -> None:
 
     markdown = render_markdown(plan)
 
-    assert "买入：" in markdown
-    assert "卖出：" in markdown
+    assert "低吸：" in markdown
+    assert "高抛：" in markdown
     assert "止损：" in markdown
     assert validate(markdown) == []
 

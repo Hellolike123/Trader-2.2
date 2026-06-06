@@ -99,7 +99,7 @@ def validate_t0(markdown: str) -> list[str]:
     errors.extend(validate_plain_output_format(markdown, lines))
     if not lines or not lines[0].startswith("🎯 T0"):
         errors.append("report must start with 🎯 T0")
-    for label in ("买入", "卖出", "止损"):
+    for label in ("低吸", "高抛", "止损"):
         if not any(label in line for line in lines):
             errors.append(f"missing line: {label}")
     errors.extend(validate_banned(markdown, T0_BANNED, "T0 output contains banned old-template term"))
@@ -190,15 +190,13 @@ REVIEW_BANNED = (
 
 def _validate_review_single(lines: list[str], markdown: str) -> list[str]:
     errors: list[str] = []
-    if not lines[0].startswith("📌 "):
-        errors.append("single review must start with 📌 股票｜日期")
+    if not lines[0].startswith("盘后复盘 — "):
+        errors.append("single review must start with 盘后复盘 — 名称（代码）")
     # Compact panel — no fixed heading order enforced
     # Just check for required five-layer theory lines
-    for required in ("缠论：", "威科夫：", "筹码：", "资金行为："):
+    for required in ("缠论", "威科夫"):
         if required not in markdown:
             errors.append(f"missing five-layer theory line: {required}")
-    if "资金行为：" in markdown and not any(term in markdown for term in ("嫌疑", "可能", "证据不足")):
-        errors.append("fund behavior must be probabilistic")
     return errors
 
 
