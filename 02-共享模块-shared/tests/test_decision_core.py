@@ -139,3 +139,60 @@ class TestBaseWeight:
 
     def test_normal_volatility(self):
         assert base_weight("波动正常") > 0
+
+
+class TestFakeBreakAndPhasedExit:
+    def test_fake_break_detected(self):
+        bars = [{"close": 10.0, "high": 10.5, "low": 9.5}] * 5 + [{"close": 7.0, "high": 7.5, "low": 6.5}]
+        result = status_layers(
+            current=7.0, support=10.0, low_zone_upper=10.1, confirm=10.5,
+            hard_stop=9.5, position_ratio=0.0, change_pct=0.0,
+            ma_values=_make_ma_values(), pressure_space_pct=0.0,
+            bars=bars,
+        )
+        assert result["theory_status"] == "防守观察"
+        assert result["base_status"] == "防守观察"
+
+    def test_near_stop_triggers(self):
+        bars = [{"close": 10.0, "high": 10.5, "low": 9.5}] * 30
+        result = status_layers(
+            current=9.36, support=9.4, low_zone_upper=10.1, confirm=10.5,
+            hard_stop=9.3, position_ratio=0.0, change_pct=0.0,
+            ma_values=_make_ma_values(), pressure_space_pct=0.0,
+            bars=bars,
+        )
+        assert result["theory_status"] == "冲高减仓"
+
+    def test_near_stop_not_triggers(self):
+        bars = [{"close": 10.0, "high": 10.5, "low": 9.5}] * 30
+        result = status_layers(
+            current=10.4, support=10.0, low_zone_upper=10.1, confirm=10.5,
+            hard_stop=9.0, position_ratio=0.0, change_pct=0.0,
+            ma_values=_make_ma_values(), pressure_space_pct=0.0,
+            bars=bars,
+        )
+        assert result["theory_status"] != "冲高减仓"
+
+    def test_fake_break_not_detected(self):
+        """跌破止损且近3日无收盘>=hard_stop → 真跌破"""
+        bars = [{"close": 7.0, "high": 7.5, "low": 6.5}] * 10
+        result = status_layers(
+            current=7.0, support=10.0, low_zone_upper=10.1, confirm=10.5,
+            hard_stop=9.5, position_ratio=0.0, change_pct=0.0,
+            ma_values=_make_ma_values(), pressure_space_pct=0.0,
+            bars=bars,
+        )
+        assert result["base_status"] == "风险回避"
+        assert result["theory_status"] == "暂不碰"
+
+    def test_exit_phased_disabled(self, monkeypatch):
+        """EXIT_PHASED_ENABLED=False → 不触发_near_stop"""
+        monkeypatch.setattr("config.EXIT_PHASED_ENABLED", False)
+        bars = [{"close": 10.0, "high": 10.5, "low": 9.5}] * 30
+        result = status_layers(
+            current=9.36, support=9.4, low_zone_upper=10.1, confirm=10.5,
+            hard_stop=9.3, position_ratio=0.0, change_pct=0.0,
+            ma_values=_make_ma_values(), pressure_space_pct=0.0,
+            bars=bars,
+        )
+        assert result["base_status"] != "冲高减仓"

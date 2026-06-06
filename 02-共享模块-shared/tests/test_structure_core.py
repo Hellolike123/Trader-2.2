@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+import config
 
 from trader_shared.structure_core import (
     moving_average,
@@ -11,6 +12,7 @@ from trader_shared.structure_core import (
     add_level,
     average_atr_pct,
     average_amplitude_pct,
+    build_structure_context,
 )
 
 
@@ -152,3 +154,37 @@ class TestAverageAmplitudePct:
 
     def test_empty_bars(self):
         assert average_amplitude_pct([]) is None
+
+
+class TestTrailingStop:
+    def test_trailing_stop_basic(self):
+        assert config.ENABLE_TRAILING_STOP is True
+        closes = [10.0 + i * 0.1 for i in range(30)]
+        bars = _make_bars(closes)
+        result = build_structure_context(current=12.0, bars=bars)
+        assert result.get("trailing_stop") is not None
+        assert result["trailing_stop"] < 12.0
+
+    def test_trailing_stop_not_below_hard_stop(self):
+        closes = [10.0 + i * 0.1 for i in range(100)]
+        bars = _make_bars(closes)
+        result = build_structure_context(current=19.0, bars=bars)
+        assert result.get("trailing_stop") is not None
+        assert result["trailing_stop"] >= result.get("hard_stop", 0)
+
+    def test_trailing_stop_disabled(self, monkeypatch):
+        monkeypatch.setattr("config.ENABLE_TRAILING_STOP", False)
+        closes = [10.0 + i * 0.1 for i in range(30)]
+        bars = _make_bars(closes)
+        result = build_structure_context(current=12.0, bars=bars)
+        assert result.get("trailing_stop") is None
+
+    def test_trailing_stop_pnl_scaling(self):
+        closes = [10.0 + i * 0.1 for i in range(50)]
+        bars = _make_bars(closes)
+        result_20 = build_structure_context(current=19.0, bars=bars, pnl_pct=0.20)
+        result_30 = build_structure_context(current=19.0, bars=bars, pnl_pct=0.30)
+        result_40 = build_structure_context(current=19.0, bars=bars, pnl_pct=0.40)
+        assert result_20.get("trailing_stop") is not None
+        assert result_30.get("trailing_stop") is not None
+        assert result_40.get("trailing_stop") is not None
