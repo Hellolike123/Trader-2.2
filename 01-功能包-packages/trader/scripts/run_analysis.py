@@ -375,11 +375,19 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         report_fusion = {"action": "融合层异常", "confidence": 0, "weighted_score": 0,
                          "regime": "", "hmm_regime": "range", "disagreement": 0, "signals_detail": {}, "weights_used": {}}
 
+    # Volume Profile 计算
+    vp_result = None
+    try:
+        from trader_shared.volume_profile import compute_volume_profile
+        vp_result = compute_volume_profile(bars)
+    except Exception:
+        pass  # VP 可选，失败不影响主流程
+
     # C-7 fix: build_structure_context 现在在融合层之后调用，
     # 可以正确接收 fusion_result 和 chan_result
     levels = build_structure_context(current, bars, quote.get("current_change_pct"), quote,
                                      fusion_result=report_fusion, chan_result=chan_result,
-                                     fetcher=fetcher)
+                                     fetcher=fetcher, vp_result=vp_result)
 
     # 将理论策略结果合并到 levels（不覆盖 structure_core 的输出）
     for key, val in {"chanlun": chan_result, "wyckoff": wyck_result, "momentum": momentum_result}.items():
@@ -533,6 +541,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         atr14=atr14_val,
         chip_migration=chip_migration,
         fib_retrace=levels.get("fib_retrace"),
+        symbol=sec.ts_code,
     )
 
     report = {
@@ -622,6 +631,23 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         # "extend_sentiment": snapshot.extend_sentiment,
     }
 
+    # 已有持仓模式：确定成本价和持仓状态
+    # 必须在 compute_position_with_env() 之前，以便传入正确的 pnl_pct
+    if cost_price <= 0:
+        # 从 signals.jsonl 中自动推断成本
+        cost_price = _get_cost_from_signals(target)
+    
+    has_position = cost_price > 0
+    report["has_position"] = has_position
+    report["cost_price"] = cost_price
+    
+    # 如果有持仓，计算盈亏比例
+    pnl_pct = 0.0
+    if has_position and cost_price > 0:
+        pnl_pct = (current - cost_price) / cost_price * 100
+        report["pnl_pct"] = pnl_pct
+        report["pnl_text"] = f"盈 {pnl_pct:+.1f}%" if pnl_pct >= 0 else f"亏 {abs(pnl_pct):.1f}%"
+
     # 仓位计算（阶段 + 大盘环境）
     from trader_shared.stage_positioning import compute_position_with_env
     market_env_level = market_env_data.get("level", "震荡市")
@@ -631,7 +657,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         stage=stage_result["major_stage"],
         momentum=stage_result["momentum"],
         market_env=mapped_env,
-        pnl_pct=0.0,
+        pnl_pct=pnl_pct,
         total_position_pct=0.0,
     )
     report["position_info"] = position_info
@@ -651,22 +677,6 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     )
     report["exit_plan"] = exit_plan
     report["chip_migration"] = chip_migration
-
-    # 已有持仓模式：确定成本价和持仓状态
-    # 必须在 evaluate_position_state() 之前，以便传入正确的 has_position 和 entry_price
-    if cost_price <= 0:
-        # 从 signals.jsonl 中自动推断成本
-        cost_price = _get_cost_from_signals(target)
-    
-    has_position = cost_price > 0
-    report["has_position"] = has_position
-    report["cost_price"] = cost_price
-    
-    # 如果有持仓，计算盈亏比例
-    if has_position and cost_price > 0:
-        pnl_pct = (current - cost_price) / cost_price * 100
-        report["pnl_pct"] = pnl_pct
-        report["pnl_text"] = f"盈 {pnl_pct:+.1f}%" if pnl_pct >= 0 else f"亏 {abs(pnl_pct):.1f}%"
 
     # 使用成本价作为 entry_price（有持仓时），否则用支撑位
     entry_price_for_state = cost_price if has_position else float(report.get("support") or current)

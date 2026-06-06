@@ -50,6 +50,7 @@ STATUS_SCORE: dict[str, int] = {
     "低吸观察": 80,
     "等转强": 70,
     "防守观察": 60,
+    "防守观察，趋势下行谨慎": 50,
     "冲高减仓": 55,
     "空间不足": 30,  # 低于"防守观察"(60)，表示"空间不足+均线不配合"比纯防守观察更消极
     "暂不碰": 20,
@@ -113,7 +114,6 @@ WYCKOFF_DIVERGENCE_RATIO: float = 0.85          # 背离量能萎缩比例由 80
 
 # ---- P3 Theory Adjustment ----
 # THEORY_ADJUST_LOG_ONLY=true 时理论微调只记录日志不实际生效，用于首次上线观察
-import os
 THEORY_ADJUST_LOG_ONLY: bool = os.environ.get("THEORY_ADJUST_LOG_ONLY", "false").lower() in ("true", "1", "yes")
 
 # ---- S-2 Fusion Override (Phase 2) ----

@@ -87,7 +87,7 @@ def analyze_target(target: str, provider: Any, lookback_days: int) -> dict[str, 
         stage_ma["ma250"] = ma250
         position_ratio = levels.get("position_ratio", 0.5)
         cp = change_pct if change_pct is not None else 0.0
-        stage = assess_stage(current, stage_ma, float(cp), bars, position_ratio)
+        stage = assess_stage(current, stage_ma, float(cp), bars, position_ratio, symbol=sec.ts_code)
 
         return {
             "ok": True,

@@ -60,7 +60,8 @@ def test_make_signal_id_sha256_matches():
     """Verify the hash actually matches SHA256 computation."""
     from signal_tracker import make_signal_id
     sid = make_signal_id("688248.SH", "2025-05-02", "low_buy_watch", "10.50")
-    expected = hashlib.sha256(b"688248.SH|2025-05-02|low_buy_watch|10.50").hexdigest()[:16]
+    # P1 Fix: source_skill="" now participates in hash, format is "...|price|skill"
+    expected = hashlib.sha256(b"688248.SH|2025-05-02|low_buy_watch|10.50|").hexdigest()[:16]
     assert sid == expected
 
 

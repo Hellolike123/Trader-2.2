@@ -378,6 +378,7 @@ def record_from_report(target: str, report: dict[str, Any], offline: bool = Fals
         "momentum_state": "通过" if momentum_passes(report) else "未通过",
         "momentum_text": momentum_text(report),
         "offline": offline or bool(report.get("data_note")),
+        "data_freshness": report.get("data_freshness", "live"),
         "atr14": atr14,
         "atr_ratio": atr_ratio,
         "atr_level": atr_level,
@@ -502,6 +503,11 @@ def cmd_list(args: argparse.Namespace) -> int:
     items = sort_items(active_items(pool))
     count = counts(items)
     print(f"选股池 {len(items)}/{POOL_LIMIT}")
+    # P0 Fix: 检查疑似停牌
+    stale_warnings = _check_stale_items(items)
+    if stale_warnings:
+        for w in stale_warnings:
+            print(w)
     print("")
     for item in items:
         stage_str = str(item.get("stage_status") or item.get("major_stage", "蓄势") + "+" + item.get("momentum", "震荡"))
@@ -1174,6 +1180,28 @@ def one_sentence(items: list[dict[str, Any]]) -> str:
     return f"明天只重点盯 {' 和 '.join(top)}；不触发不买，其他只盘后更新。"
 
 
+def _check_stale_items(items: list[dict[str, Any]]) -> list[str]:
+    """P0 Fix: 检查交易时间内数据过期的票，标记为疑似停牌。
+
+    Returns:
+        list of warning strings for stale items
+    """
+    try:
+        from trader_shared.light_data import is_trading_time
+        if not is_trading_time():
+            return []
+    except ImportError:
+        return []
+
+    warnings = []
+    for item in items:
+        freshness = str(item.get("data_freshness", "live"))
+        if freshness == "stale":
+            name = item.get("name") or item.get("target", "?")
+            warnings.append(f"⚠️ {name} 数据过期（data_freshness=stale），疑似停牌")
+    return warnings
+
+
 def cmd_plan(args: argparse.Namespace) -> int:
     pool = load_pool()
     items = active_items(pool)
@@ -1185,6 +1213,11 @@ def cmd_plan(args: argparse.Namespace) -> int:
             name = item.get("name") or item.get("target")
             print(f"衰退淘汰: {name} 阶段跌至衰退，已标记为淘汰。")
         save_pool(pool)
+    # P0 Fix: 检查疑似停牌
+    stale_warnings = _check_stale_items(items)
+    if stale_warnings:
+        for w in stale_warnings:
+            print(w)
     markdown = render_plan(items)
     execution = [item for item in sort_items(items) if item.get("status") == "执行"][:EXECUTION_LIMIT]
     DataManager.save_state("last_plan", {"contract_version": CONTRACT_VERSION, "date": today_text(), "execution_items": execution, "markdown": markdown})

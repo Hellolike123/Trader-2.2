@@ -338,7 +338,7 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None, index_returns: lis
     return multipliers
 
 
-def build_structure_context(current: float, bars: list[BarData], change_pct: Any = None, quote: QuoteData | None = None, fusion_result: dict[str, Any] | None = None, chan_result: dict[str, Any] | None = None, fetcher: DataFetcher | None = None, pnl_pct: float | None = None) -> dict[str, Any]:
+def build_structure_context(current: float, bars: list[BarData], change_pct: Any = None, quote: QuoteData | None = None, fusion_result: dict[str, Any] | None = None, chan_result: dict[str, Any] | None = None, fetcher: DataFetcher | None = None, pnl_pct: float | None = None, vp_result: dict[str, Any] | None = None) -> dict[str, Any]:
     if fetcher is None:
         fetcher = get_fetcher()
     recent5 = bars[-RECENT_WINDOW:] if len(bars) >= RECENT_WINDOW else bars
@@ -513,6 +513,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         space_threshold=dynamic_space_threshold,
         fusion_result=fusion_result,  # S-2 fix: 传入融合层结果
         chan_result=chan_result,
+        vp_result=vp_result,  # VP 日内量价分布
     )
     status = str(layer_result["theory_status"])
     fusion_override_used = layer_result.get("fusion_override_used", False)

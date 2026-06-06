@@ -17,11 +17,21 @@ from typing import Any
 
 # ── Signal ID generation ───────────────────────────────────────────
 
-def normalize_signal_id(symbol: str, date: str, signal_type: str, price: str | float | Any) -> str:
+def normalize_signal_id(
+    symbol: str,
+    date: str,
+    signal_type: str,
+    price: str | float | Any,
+    source_skill: str = "",
+) -> str:
     """Generate unified signal ID (SHA256, 16 hex chars = 48 bits entropy).
     
     Ensures unicode and case normalization, symbol formatting, date formatting,
     and consistent price decimal representation.
+
+    P1 Fix: 当 trigger_price = 0 时，用 "no_price" 替代 "0.00" 参与 hash，
+    避免不同信号因 price=0 产生相同 ID。
+    P1 Fix: 加入 source_skill 字段，进一步区分不同来源的信号。
     """
     import unicodedata
     # 1. Normalize symbol
@@ -37,10 +47,17 @@ def normalize_signal_id(symbol: str, date: str, signal_type: str, price: str | f
     st_norm = normalize_signal_type(st_norm)
 
     # 4. Normalize price to 2-decimal string
+    # P1 Fix: price=0 → "no_price" 避免碰撞
     p_val = _safe_price(price)
-    price_norm = f"{p_val:.2f}"
+    if p_val == 0.0:
+        price_norm = "no_price"
+    else:
+        price_norm = f"{p_val:.2f}"
 
-    key = f"{sym_norm}|{dt_norm}|{st_norm}|{price_norm}"
+    # P1 Fix: source_skill 参与 hash
+    skill_norm = unicodedata.normalize("NFC", str(source_skill or "")).strip()
+
+    key = f"{sym_norm}|{dt_norm}|{st_norm}|{price_norm}|{skill_norm}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 

@@ -961,37 +961,10 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
         save_realtime_cache(cache_key, mootdx_q)
         return sanitize_quote(mootdx_q)
 
-    def do_fetch():
-        _rate_limit_delay()
-        text = http.get_text(TENCENT_QUOTE_URL + sec.qq_symbol, encoding="gbk")
-        match = re.search(r'="([^"]*)"', text)
-        if not match:
-            raise RuntimeError("Tencent quote payload missing fields")
-        fields = match.group(1).split("~")
-        if len(fields) < 35:
-            raise RuntimeError("Tencent quote payload incomplete")
-        trade_date, trade_time = parse_trade_datetime(fields)
-        result = {
-            "name": fields[1] or sec.name,
-            "symbol": sec.ts_code,
-            "trade_date": trade_date,
-            "trade_time": trade_time,
-            "current_price": to_float(fields[3]),
-            "pre_close": to_float(fields[4]),
-            "open": to_float(fields[5]),
-            "high": to_float(fields[33]) if len(fields) > 33 else None,
-            "low": to_float(fields[34]) if len(fields) > 34 else None,
-            "volume": to_float(fields[36]) if len(fields) > 36 else None,
-            "amount": to_float(fields[37]) if len(fields) > 37 else None,
-            "turnover_rate": to_float(fields[38]) if len(fields) > 38 else None,
-            "current_change_pct": to_float(fields[32]) if len(fields) > 32 else None,
-            "data_source": "tencent (fallback)",
-            "data_status": "partial",
-        }
-        save_realtime_cache(cache_key, result)
-        return result
-
-    return sanitize_quote(retry(do_fetch, url=TENCENT_QUOTE_URL))
+    # Cleanup: 移除了重复的 Tencent HTTP retry（do_fetch），
+    # 因为 Tencent HTTP 已在上方尝试过，再次 retry 不会成功。
+    # 全源失败时返回 None 而非再次超时。
+    return None
 
 
 def _compute_atr_fields(bars: list[dict[str, Any]]) -> None:

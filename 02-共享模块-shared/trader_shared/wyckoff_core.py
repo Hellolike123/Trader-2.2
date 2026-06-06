@@ -43,66 +43,74 @@ except ImportError:
 def _detect_buying_climax(bars: list[dict]) -> dict:
     """Detect Buying Climax (BC) — 天量滞涨，高位放量阴线。
 
+    P1 Fix: 扫描 bars[-5:] 而非仅 bars[-1]，任一满足 BC 条件即触发。
+    返回最近一次 BC 的信息。
+
     Returns:
         dict with keys: bc_signal (bool), bc_reason (str), bc_price (float)
     """
     if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1:
         return {"bc_signal": False, "bc_reason": "数据不足", "bc_price": 0.0}
 
-    recent = bars[-(WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1):-1]
-    current = bars[-1]
+    # P1 Fix: 扫描最近 5 根 K 线，任一满足 BC 条件即触发
+    scan_start = max(1, len(bars) - 5)
+    for scan_idx in range(len(bars) - 1, scan_start - 1, -1):
+        current = bars[scan_idx]
+        recent = bars[max(0, scan_idx - WYCKOFF_SPRING_SUPPORT_LOOKBACK):scan_idx]
 
-    cur_open = to_float(current.get("open"))
-    cur_high = to_float(current.get("high"))
-    cur_low = to_float(current.get("low"))
-    cur_close = to_float(current.get("close"))
-    cur_volume = to_float(current.get("volume"))
+        cur_open = to_float(current.get("open"))
+        cur_high = to_float(current.get("high"))
+        cur_low = to_float(current.get("low"))
+        cur_close = to_float(current.get("close"))
+        cur_volume = to_float(current.get("volume"))
 
-    if any(v is None for v in [cur_open, cur_high, cur_low, cur_close, cur_volume]):
-        return {"bc_signal": False, "bc_reason": "数据异常", "bc_price": 0.0}
+        if any(v is None for v in [cur_open, cur_high, cur_low, cur_close, cur_volume]):
+            continue
 
-    # 量比计算
-    avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
-    if avg_volume <= 0:
-        return {"bc_signal": False, "bc_reason": "历史成交量异常", "bc_price": 0.0}
+        # 量比计算
+        avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
+        if avg_volume <= 0:
+            continue
 
-    vol_ratio = cur_volume / avg_volume
+        vol_ratio = cur_volume / avg_volume
 
-    # 涨幅计算（相对前收盘）
-    price_range = cur_high - cur_low if cur_high != cur_low else 1.0
-    prev_close = to_float(bars[-2].get("close")) if len(bars) >= 2 else cur_open
-    change_pct = (cur_close - prev_close) / max(prev_close, 0.01) * 100
+        # 涨幅计算（相对前收盘）
+        price_range = cur_high - cur_low if cur_high != cur_low else 1.0
+        prev_close = to_float(bars[scan_idx - 1].get("close")) if scan_idx >= 1 else cur_open
+        change_pct = (cur_close - prev_close) / max(prev_close, 0.01) * 100
 
-    # 上影线比例
-    real_body_top = max(cur_open, cur_close)
-    upper_shadow = cur_high - real_body_top
-    upper_shadow_ratio = upper_shadow / max(price_range, 0.01)
+        # 上影线比例
+        real_body_top = max(cur_open, cur_close)
+        upper_shadow = cur_high - real_body_top
+        upper_shadow_ratio = upper_shadow / max(price_range, 0.01)
 
-    # BC 条件判断使用外置参数
-    if vol_ratio < WYCKOFF_BC_VOL_RATIO_THRESHOLD:
-        return {"bc_signal": False, "bc_reason": "量比不足", "bc_price": 0.0}
+        # BC 条件判断使用外置参数
+        if vol_ratio < WYCKOFF_BC_VOL_RATIO_THRESHOLD:
+            continue
 
-    # 天量 + 滞涨（收盘接近开盘或阴线）
-    is_stagnant = change_pct < WYCKOFF_BC_CHANGE_THRESHOLD
-    has_upper_shadow = upper_shadow_ratio > WYCKOFF_BC_UPPER_SHADOW_RATIO
+        # 天量 + 滞涨（收盘接近开盘或阴线）
+        is_stagnant = change_pct < WYCKOFF_BC_CHANGE_THRESHOLD
+        has_upper_shadow = upper_shadow_ratio > WYCKOFF_BC_UPPER_SHADOW_RATIO
 
-    if not (is_stagnant or (cur_close < cur_open)):
-        return {"bc_signal": False, "bc_reason": "未出现滞涨", "bc_price": 0.0}
+        if not (is_stagnant or (cur_close < cur_open)):
+            continue
 
-    parts = []
-    parts.append(f"量比 {vol_ratio:.1f}")
-    if is_stagnant:
-        parts.append(f"涨幅仅 {change_pct:.1f}%")
-    if has_upper_shadow:
-        parts.append("上影线明显")
-    if cur_close < cur_open:
-        parts.append("收阴")
+        parts = []
+        parts.append(f"量比 {vol_ratio:.1f}")
+        if is_stagnant:
+            parts.append(f"涨幅仅 {change_pct:.1f}%")
+        if has_upper_shadow:
+            parts.append("上影线明显")
+        if cur_close < cur_open:
+            parts.append("收阴")
 
-    return {
-        "bc_signal": True,
-        "bc_reason": "天量滞涨，购买高潮信号：" + "，".join(parts),
-        "bc_price": round(cur_high, 2),
-    }
+        return {
+            "bc_signal": True,
+            "bc_reason": "天量滞涨，购买高潮信号：" + "，".join(parts),
+            "bc_price": round(cur_high, 2),
+        }
+
+    return {"bc_signal": False, "bc_reason": "未检测到购买高潮", "bc_price": 0.0}
 
 
 # ── SOW (Sign of Weakness) 弱势信号检测 ──

@@ -30,21 +30,49 @@ _logger = get_logger(__name__)
 _STATE_FILE = Path.home() / ".trader" / "stage_state.json"
 
 
-def _load_stage_state() -> dict[str, Any]:
-    """加载阶段状态（用于多日确认和锁定期）。"""
+def _load_stage_state(symbol: str = "") -> dict[str, Any]:
+    """加载阶段状态（用于多日确认和锁定期）。
+
+    P0 Fix: 按 symbol 隔离，避免多票分析时状态互相覆盖。
+    存储格式: {"<symbol>": {...state...}, ...}
+    """
     try:
         if _STATE_FILE.exists():
-            return json.loads(_STATE_FILE.read_text(encoding="utf-8"))
+            raw = json.loads(_STATE_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                # 兼容旧格式（无 symbol 维度）：旧 dict 没有 symbol key 时视为全局
+                if symbol and symbol in raw:
+                    return raw[symbol]
+                # 旧格式迁移：如果顶层没有 symbol key 且不含嵌套 dict，视为全局状态
+                if symbol and not any(isinstance(v, dict) and k != symbol for k, v in raw.items()):
+                    return raw
+                return raw.get(symbol, {}) if symbol else raw
     except (json.JSONDecodeError, OSError) as exc:
         _logger.debug("Stage state load failed: %s", exc)
     return {}
 
 
-def _save_stage_state(state: dict[str, Any]) -> None:
-    """保存阶段状态。"""
+def _save_stage_state(state: dict[str, Any], symbol: str = "") -> None:
+    """保存阶段状态。
+
+    P0 Fix: 按 symbol 隔离存储。
+    """
     try:
         _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        if symbol:
+            # 读取现有完整状态，更新当前 symbol 的部分
+            all_states: dict[str, Any] = {}
+            if _STATE_FILE.exists():
+                try:
+                    all_states = json.loads(_STATE_FILE.read_text(encoding="utf-8"))
+                    if not isinstance(all_states, dict):
+                        all_states = {}
+                except (json.JSONDecodeError, OSError):
+                    all_states = {}
+            all_states[symbol] = state
+            _STATE_FILE.write_text(json.dumps(all_states, ensure_ascii=False, indent=2), encoding="utf-8")
+        else:
+            _STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError as exc:
         _logger.debug("Stage state save failed: %s", exc)
 
@@ -71,11 +99,37 @@ def _assess_volume_price(bars: list[dict[str, Any]]) -> tuple[str, float, str]:
     avg_vol_20 = sum(vol_20) / max(len(vol_20), 1)
     vol_ratio = avg_vol_5 / max(avg_vol_20, 1)
 
-    # 计算价格变化
+    # P1 Fix: 计算 5 日涨幅时，剔除单日涨跌幅 > 7% 的跳空缺口日，
+    # 避免单日缺口主导阶段判定（如涨停后横盘 4 天被误判为"主升"）
     close_5_start = float(recent5[0].get("close") or 0)
     close_5_end = float(recent5[-1].get("close") or 0)
+
+    # 计算每日涨跌幅，找出跳空日
+    gap_indices: set[int] = set()
+    for i, b in enumerate(recent5):
+        if i == 0:
+            continue
+        prev_c = float(recent5[i - 1].get("close") or 0)
+        cur_c = float(b.get("close") or 0)
+        if prev_c > 0 and abs(cur_c - prev_c) / prev_c > 0.07:
+            gap_indices.add(i)
+
     if close_5_start > 0:
-        price_change_5 = (close_5_end - close_5_start) / close_5_start
+        if gap_indices:
+            # 剔除跳空日，用跳空前一日收盘到最后一日收盘计算涨幅
+            # 找到第一个非跳空前的基准价
+            base_idx = 0
+            for i in range(len(recent5)):
+                if i not in gap_indices:
+                    base_idx = i
+                    break
+            base_price = float(recent5[base_idx].get("close") or close_5_start)
+            if base_price > 0:
+                price_change_5 = (close_5_end - base_price) / base_price
+            else:
+                price_change_5 = 0.0
+        else:
+            price_change_5 = (close_5_end - close_5_start) / close_5_start
     else:
         price_change_5 = 0.0
 
@@ -499,6 +553,7 @@ def assess_stage(
     atr14: float = 0.0,
     chip_migration: dict[str, Any] | None = None,
     fib_retrace: dict[str, Any] | None = None,
+    symbol: str = "",
 ) -> dict[str, Any]:
     """四阶段定位主函数（威科夫量价驱动 + 四层防护）
 
@@ -525,9 +580,20 @@ def assess_stage(
         current, ma_values, bars
     )
 
+    # P1 Fix: 新股置信度打折 — 当数据不足 60 天时，置信度按比例折扣
+    new_stock_warning = ""
+    if bars and len(bars) < 60:
+        discount = len(bars) / 60.0
+        raw_confidence = int(raw_confidence * discount)
+        new_stock_warning = f"新股数据不足（{len(bars)}天），置信度打折"
+
     # 加载阶段状态
-    state = _load_stage_state()
+    state = _load_stage_state(symbol=symbol)
     protection_notes: list[str] = []
+
+    # P1 Fix: 新股数据不足警告
+    if new_stock_warning:
+        protection_notes.append(new_stock_warning)
 
     # Fix A4: 实际执行顺序：层2(置信度) → 层1(多日确认) → 层3(交叉验证) → 层4(锁定)
     # 逻辑合理：先过滤低置信信号，再做多日确认，注释编号之前写反了
@@ -561,7 +627,7 @@ def assess_stage(
         state["last_confirmed_stage"] = final_stage
         state["pending_stage"] = ""
         state["pending_count"] = 0
-    _save_stage_state(state)
+    _save_stage_state(state, symbol=symbol)
 
     # 短期动能判定
     expma10 = ma_values.get("expma10")
@@ -704,8 +770,8 @@ def compute_stop_losses(
             stage_stop = round(current * 0.95, 2)
             stage_reason = "派发期锁定收益"
     else:  # 衰退
-        stage_stop = 0.0
-        stage_reason = "衰退期不持有"
+        stage_stop = 0.0  # 衰退阶段不设阶段止损，由技术止损兜底
+        stage_reason = "衰退期技术止损兜底"
 
     # 第三层：时间止损
     if stage == "蓄势":

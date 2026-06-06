@@ -524,6 +524,7 @@ def _get_stage_result(
             position_ratio=0.5,
             atr14=atr14,
             chip_migration=chip_migration,
+            symbol=str(quote.get("symbol", "")),
         )
         return result
     except Exception:

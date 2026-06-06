@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+import hashlib
+from datetime import date
 import numpy as np
 from typing import List, Tuple
 
@@ -252,8 +254,16 @@ class HMMRegimeDetector:
 
 # ─── 便捷函数 ─────────────────────────────────────────────────────────────────
 
+# P1 Fix: HMM 结果内存缓存，同一交易日内相同输入不重复计算
+_HMM_CACHE: dict[str, dict] = {}
+_HMM_CACHE_DATE: str = ""
+
+
 def detect_regime(returns: List[float]) -> dict:
     """一站式大势状态检测函数。
+
+    P1 Fix: 增加内存缓存，key = (data_hash, date)，
+    同一交易日内相同输入不重复计算。
 
     Args:
         returns: 最近 N 日的指数日收益率序列（建议 60~200 个交易日）
@@ -261,8 +271,27 @@ def detect_regime(returns: List[float]) -> dict:
     Returns:
         与 HMMRegimeDetector.fit_predict() 相同的结果字典
     """
+    global _HMM_CACHE, _HMM_CACHE_DATE
+
+    today_str = date.today().isoformat()
+    # 跨日清缓存
+    if _HMM_CACHE_DATE != today_str:
+        _HMM_CACHE.clear()
+        _HMM_CACHE_DATE = today_str
+
+    # 计算缓存 key
+    data_hash = hashlib.md5(
+        ",".join(f"{r:.6f}" for r in returns[-50:]).encode("utf-8")
+    ).hexdigest()[:12]
+    cache_key = f"{data_hash}"
+
+    if cache_key in _HMM_CACHE:
+        return _HMM_CACHE[cache_key]
+
     detector = HMMRegimeDetector()
-    return detector.fit_predict(returns)
+    result = detector.fit_predict(returns)
+    _HMM_CACHE[cache_key] = result
+    return result
 
 
 def regime_to_multiplier(regime_result: dict) -> dict:

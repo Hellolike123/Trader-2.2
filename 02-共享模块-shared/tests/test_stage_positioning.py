@@ -180,9 +180,10 @@ class TestComputeStopLosses:
         assert result["time_limit"]["days"] == 15
 
     def test_decline_stops(self):
-        """衰退期止损 = 0"""
+        """衰退期止损 = 0.0（不设阶段止损，由技术止损兜底）"""
         from trader_shared.stage_positioning import compute_stop_losses
         result = compute_stop_losses("衰退", 8.0, 9.0, 8.5)
+        # 衰退阶段 stage_stop 为 0.0，由技术止损兜底
         assert result["stage_based"]["price"] == 0.0
         assert result["time_limit"]["days"] == 0
 
@@ -325,7 +326,7 @@ class TestComputeStageStop:
         assert "EXPMA(20)" in result["reason"]
 
     def test_decline_no_hold(self):
-        """衰退期 → 不持有"""
+        """衰退期 → 不持有（compute_stage_stop 仍返回 0，因为此函数无 current 参数）"""
         from trader_shared.stage_positioning import compute_stage_stop
         result = compute_stage_stop("衰退", ma20=8.0)
         assert result["price"] == 0.0

@@ -76,15 +76,6 @@ except Exception:
     FUSION_OVERRIDE_ENABLED = False
     FUSION_CONFIDENCE_THRESHOLD = 0.6
 
-STATUS_SCORE["防守观察，趋势下行谨慎"] = 50
-STATUS_SCORE["突破确认"] = 85
-STATUS_SCORE["突破观察"] = 75
-STATUS_SCORE["体系转强确认"] = 88
-STATUS_SCORE["未确认转强"] = 72
-STATUS_SCORE["转强不足"] = 62
-STATUS_SCORE["承接存在"] = 68
-STATUS_SCORE["修复观察"] = 65
-
 
 def _close(vals: list[dict[str, Any]]) -> list[float]:
     result = []
@@ -202,7 +193,7 @@ def _check_theory_breakout(
                 wyk_ok = True
             else:
                 summary = str(wyk.get("wyckoff_summary", ""))
-                if "无明显威科夫信号" in summary or "看多" in summary:
+                if "看多" in summary:
                     wyk_ok = True
 
     theory_ok = chan_ok or wyk_ok
@@ -510,11 +501,15 @@ def score_for(item: dict[str, Any]) -> float:
             score -= 8
         if change >= CHANGE_THRESHOLD_LARGE and position_ratio >= POSITION_RATIO_HIGH:
             score -= 10
-        gap_pct = (confirm - current) / max(current, 1)
-        if gap_pct <= 0:
-            score -= 4
+        # P0 Fix: 当 current >= confirm 时，跳过 gap 扣分（已突破的票不应被扣分）
+        if confirm is not None and current >= float(confirm):
+            pass  # 已突破确认位，不扣 gap 分
         else:
-            score += min(max(int(gap_pct * 250), 0), 5)
+            gap_pct = (float(confirm) - current) / max(current, 1) if confirm is not None else 0
+            if gap_pct <= 0:
+                score -= 4
+            else:
+                score += min(max(int(gap_pct * 250), 0), 5)
         if item.get("low_zone") and item.get("confirm_price"):
             score += 5
         score -= below_ma_count * 2
