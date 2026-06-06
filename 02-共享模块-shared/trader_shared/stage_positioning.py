@@ -584,9 +584,9 @@ def assess_stage(
             for expma_val in expma_vals:
                 if golden_bid > 0 and abs(expma_val - golden_bid) / golden_bid <= 0.015:
                     action = "🌟黄金共振加仓"
-                    # Fix A5: 原 80% 超过决策矩阵上限（主升走强最高60%）
-                    # 改为 40%：比普通蓄势低吸多一档，但不超仓
-                    max_position = 40
+                    # 黄金共振：EXPMA支撑与Golden Bid重合，强力信号
+                    # 拔高至 80% 作为最大建议仓位（实际仓位由 compute_position_with_env 根据大盘环境截断）
+                    max_position = 80
                     protection_notes.append("触发黄金共振（EXPMA与Golden Bid重合）")
                     break
 
