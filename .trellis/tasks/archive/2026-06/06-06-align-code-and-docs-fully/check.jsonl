@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Code review checklist, testing requirements, forbidden patterns"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Error handling validation, forbidden patterns check"}
