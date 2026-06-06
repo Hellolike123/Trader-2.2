@@ -1085,32 +1085,31 @@ def render_markdown(r: dict) -> str:
         if has_history:
             lines.extend(["", f"  筹码变化（对比昨天）："])
             
-            support_diff = chip_migration.get("support_diff", 0)
-            resistance_diff = chip_migration.get("resistance_diff", 0)
+            # 使用 chip_migration_monitor 的匹配对比数据，而非自行从当前筹码峰推算
+            support_mig = chip_migration.get("support_migration")
+            resistance_mig = chip_migration.get("resistance_migration")
             
-            support_peaks = [p for p in chip_peaks if "支撑" in str(p.get("support_level", ""))]
-            if support_peaks:
-                strongest_supp = max(support_peaks, key=lambda p: p.get("share_of_total", 0))
-                supp_price = strongest_supp.get("price", 0)
-                curr_supp_share = strongest_supp.get("share_of_total", 0)
-                prev_supp_share = curr_supp_share - support_diff
-                if prev_supp_share > 0:
-                    chg_pct = round((curr_supp_share - prev_supp_share) / prev_supp_share * 100)
-                    dir_txt = "底部筹码减少" if curr_supp_share < prev_supp_share else "底部筹码增加"
-                    sign = "+" if chg_pct > 0 else ""
-                    lines.append(f"    {supp_price:.2f}（支撑）：{prev_supp_share:.2f}% → {curr_supp_share:.2f}%（{sign}{chg_pct}%）← {dir_txt}")
-                    
-            res_peaks = [p for p in chip_peaks if "阻力" in str(p.get("support_level", ""))]
-            if res_peaks:
-                strongest_res = max(res_peaks, key=lambda p: p.get("share_of_total", 0))
-                res_price = strongest_res.get("price", 0)
-                curr_res_share = strongest_res.get("share_of_total", 0)
-                prev_res_share = curr_res_share - resistance_diff
-                if prev_res_share > 0:
-                    chg_pct = round((curr_res_share - prev_res_share) / prev_res_share * 100)
-                    dir_txt = "顶部筹码减少" if curr_res_share < prev_res_share else "顶部筹码增加"
-                    sign = "+" if chg_pct > 0 else ""
-                    lines.append(f"    {res_price:.2f}（阻力）：{prev_res_share:.2f}% → {curr_res_share:.2f}%（{sign}{chg_pct}%）← {dir_txt}")
+            if support_mig:
+                prev_share = support_mig.get("prev_share", 0)
+                curr_share = support_mig.get("curr_share", 0)
+                price = support_mig.get("prev_price", 0)
+                diff = support_mig.get("diff", 0)
+                if prev_share > 0 and price > 0:
+                    chg_pct = round(diff / prev_share * 100)
+                    dir_txt = "底部筹码减少" if diff < 0 else "底部筹码增加"
+                    sign = "+" if diff > 0 else ""
+                    lines.append(f"    {price:.2f}（支撑）：{prev_share:.2f}% → {curr_share:.2f}%（{sign}{chg_pct}%）← {dir_txt}")
+            
+            if resistance_mig:
+                prev_share = resistance_mig.get("prev_share", 0)
+                curr_share = resistance_mig.get("curr_share", 0)
+                price = resistance_mig.get("prev_price", 0)
+                diff = resistance_mig.get("diff", 0)
+                if prev_share > 0 and price > 0:
+                    chg_pct = round(diff / prev_share * 100)
+                    dir_txt = "顶部筹码减少" if diff < 0 else "顶部筹码增加"
+                    sign = "+" if diff > 0 else ""
+                    lines.append(f"    {price:.2f}（阻力）：{prev_share:.2f}% → {curr_share:.2f}%（{sign}{chg_pct}%）← {dir_txt}")
             
             warning_text = chip_migration.get("warning_text", "底部筹码基本稳定，无明显搬家")
             
@@ -1169,17 +1168,6 @@ def render_markdown(r: dict) -> str:
     else:
         lines.append(f"⚠️ 风险：最大风险是 {confirm:.2f} 未确认前提前追入")
         
-    lines.append("")
-    win_rate_data = _load_historical_win_rate(display_code)
-    lines.append("📊 股性与历史回测")
-    if win_rate_data is not None:
-        lines.append(f"  历史记录：最近共生成 {win_rate_data['total']} 次已平仓信号")
-        lines.append(f"  说买 → 涨了：{win_rate_data['wins']}/{win_rate_data['total']} 次（胜率 {win_rate_data['win_rate']:.1f}%）")
-        lines.append(f"  平均盈亏比：{win_rate_data['profit_factor']:.2f} ｜ 平均每笔收益：{win_rate_data['avg_pnl']:+.2f}%")
-        lines.append(f"  单笔最强：{win_rate_data['max_gain']:+.2f}% ｜ 单笔最弱：{win_rate_data['max_loss']:+.2f}%")
-        lines.append(f"  结论：{win_rate_data['conclusion']}")
-    else:
-        lines.append("  历史交易数据不足，暂不统计")
     lines.append("")
 
     pool_count = _pool_count()

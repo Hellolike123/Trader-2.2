@@ -575,12 +575,13 @@ def test_render_markdown_contains_win_rate() -> None:
 
     with patch("os.path.exists", return_value=True), patch("builtins.open", mock_open(read_data=mock_data)):
         markdown = render_markdown(report)
-        assert "📊 股性与历史回测" in markdown
-        assert "历史记录：最近共生成 6 次已平仓信号" in markdown
-        assert "说买 → 涨了：4/6 次（胜率 66.7%）" in markdown
-        assert "平均盈亏比：4.00" in markdown
-        assert "单笔最强：+10.00%" in markdown
-        assert "单笔最弱：-4.00%" in markdown
-        assert "高度适应" in markdown
+        # [2.4 重构] 股性与历史回测 板块已移除，输出应更精简
+        assert "分析报告 —" in markdown
+        assert "📍 买卖点" in markdown
+        assert "止损" in markdown
+        assert "试探买" in markdown
+        assert "💡 为什么这么操作" in markdown
+        assert "📊 五层打分" in markdown
+        assert "🎯 信号判断" in markdown
 
 
