@@ -1,0 +1,6 @@
+{"type":"spec","path":"02-共享模块-shared/trader_shared/decision_core.py","description":"status_layers: _fake_break 假跌破检测 + _near_stop 分阶段退出（lines 300-380）"}
+{"type":"spec","path":"02-共享模块-shared/trader_shared/structure_core.py","description":"build_structure_context: ATR trailing_stop 计算 + PnL 动态缩放（lines 480-510）"}
+{"type":"spec","path":"02-共享模块-shared/trader_shared/chip_migration_monitor.py","description":"save_chip_snapshot / backfill_history / check_chip_migration 完整 333 行"}
+{"type":"code","path":"02-共享模块-shared/tests/test_decision_core.py","description":"追加 TestFakeBreakAndPhasedExit 测试类"}
+{"type":"code","path":"02-共享模块-shared/tests/test_structure_core.py","description":"追加 TestTrailingStop 测试类"}
+{"type":"code","path":"02-共享模块-shared/tests/test_chip_migration_monitor.py","description":"新建文件"}

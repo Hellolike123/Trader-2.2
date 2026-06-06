@@ -1,0 +1,4 @@
+{"type":"cmd","command":"python3 -m pytest 02-共享模块-shared/tests/test_decision_core.py -x -v --tb=short 2>&1","description":"验证 decision_core 测试全部通过"}
+{"type":"cmd","command":"python3 -m pytest 02-共享模块-shared/tests/test_structure_core.py -x -v --tb=short 2>&1","description":"验证 structure_core 测试全部通过"}
+{"type":"cmd","command":"python3 -m pytest 02-共享模块-shared/tests/test_chip_migration_monitor.py -x -v --tb=short 2>&1","description":"验证 chip_migration_monitor 测试全部通过"}
+{"type":"cmd","command":"python3 -m pytest 02-共享模块-shared/tests/ -x --tb=short 2>&1","description":"全局回归验证"}
