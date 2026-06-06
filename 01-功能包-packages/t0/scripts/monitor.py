@@ -507,6 +507,30 @@ def sell_alert_lines(event: str, sell: dict[str, Any]) -> list[str]:
     return []
 
 
+def _check_volume_vacuum_t0(plan: dict[str, Any]) -> str | None:
+    """检查量能真空区风险（T0 盘中监控用）。
+
+    使用 30m K 线计算成交量分布，如果现价跌破 POC 且下方量能
+    不足 POC 峰值的 10%，触发强烈预警。
+    """
+    try:
+        from trader_shared.volume_profile import check_volume_vacuum
+        data = plan.get("data") or {}
+        # 优先用 30m 线（日内视角好），其次用 15m
+        bars = data.get("kline_30m") or data.get("kline_15m") or data.get("kline_5m")
+        if not bars:
+            return None
+        current = float(plan.get("current_price") or 0)
+        if current <= 0:
+            return None
+        result = check_volume_vacuum(bars, current)
+        if result.get("vacuum_warning"):
+            return result["warning_text"]
+    except Exception:
+        pass
+    return None
+
+
 def run_once(
     target: str,
     *,
@@ -522,6 +546,9 @@ def run_once(
     plan = build_plan(target)
     target_key = str(plan.get("symbol") or target)
     now = datetime.now()
+    
+    # ── [2.5] 量能真空区预警检查 ──
+    vacuum_alert = _check_volume_vacuum_t0(plan)
     
     with state_lock(state_path):
         state = load_state(state_path)
@@ -584,14 +611,24 @@ def run_once(
         alert = _fuse_alert(target_key, day_fuse["count"], name)
         return alert
     
+    # ── 量能真空预警（独立于事件系统，每次检查都触发） ──
+    vacuum_line = ""
+    if vacuum_alert:
+        vacuum_line = vacuum_alert + "\n"
+
     if allowed_events:
         try:
             persist_event_signals(allowed_events, plan)
         except Exception as e:
             warnings.warn(f"[t0-monitor] 信号持久化失败: {e}")
     if not allowed_events:
+        if vacuum_alert:
+            return vacuum_line.strip()
         return "无新提醒" if verbose else ""
-    return "\n\n".join(build_alert_message(event, plan, cost=cost, position=position, previous_state=target_state) for event in allowed_events)
+    events_text = "\n\n".join(build_alert_message(event, plan, cost=cost, position=position, previous_state=target_state) for event in allowed_events)
+    if vacuum_line:
+        return vacuum_line + events_text
+    return events_text
 
 
 def sleep_until_next_interval(interval_minutes: int) -> None:

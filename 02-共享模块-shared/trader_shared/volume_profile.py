@@ -206,6 +206,68 @@ def compute_volume_profile(bars: List[Dict[str, Any]], n_bins: int = 50) -> Dict
     return result
 
 
+def check_volume_vacuum(bars: List[Dict[str, Any]], current_price: float, n_bins: int = 50) -> Dict[str, Any]:
+    """检查量能真空区风险。
+
+    当价格跌破 POC（控制节点）且下方量能不足 POC 峰值 10% 时，
+    表示处于量能真空区，容易发生加速杀跌。
+
+    Args:
+        bars:           K 线列表（日线/分钟线均可），每根含 high/low/close/volume
+        current_price:  当前价格
+        n_bins:         价格网格分辨率
+
+    Returns:
+        {
+            "vacuum_warning": bool,   # 是否触发真空预警
+            "poc": float | None,      # POC 价格
+            "poc_volume": float,      # POC 处量能
+            "below_volume": float,    # POC 下方总量能
+            "below_pct": float,       # 下方量能占 POC 峰值百分比
+            "warning_text": str,      # 预警文本
+        }
+    """
+    vp = VolumeProfile(n_bins=n_bins)
+    vp.fit(bars)
+
+    if not vp._fitted or vp.volume_by_price is None or vp.price_bins is None:
+        return {"vacuum_warning": False, "poc": None, "poc_volume": 0.0,
+                "below_volume": 0.0, "below_pct": 0.0, "warning_text": ""}
+
+    poc_idx = int(np.argmax(vp.volume_by_price))
+    poc_volume = float(vp.volume_by_price[poc_idx])
+    poc = vp.poc
+
+    # 条件 1：价格必须跌破 POC
+    if current_price >= poc:
+        return {"vacuum_warning": False, "poc": round(poc, 3), "poc_volume": round(poc_volume),
+                "below_volume": 0.0, "below_pct": 0.0, "warning_text": ""}
+
+    # 计算 POC 之下所有价格区间的总成交量
+    bin_centers = (vp.price_bins[:-1] + vp.price_bins[1:]) / 2
+    below_volume = float(np.sum(vp.volume_by_price[bin_centers < current_price]))
+
+    # 条件 2：下方量能不足 POC 峰值的 10%
+    if poc_volume > 0 and (below_volume / poc_volume) < 0.10:
+        below_pct = below_volume / poc_volume * 100
+        return {
+            "vacuum_warning": True,
+            "poc": round(poc, 3),
+            "poc_volume": round(poc_volume, 1),
+            "below_volume": round(below_volume, 1),
+            "below_pct": round(below_pct, 1),
+            "warning_text": (
+                f"⚠️ 警告：已跌破 POC({poc:.2f})密集区，下方为量能真空"
+                f"（下方量能仅为 POC 处 {below_pct:.1f}%），"
+                f"极易发生加速杀跌，建议立刻清仓！"
+            ),
+        }
+
+    return {"vacuum_warning": False, "poc": round(poc, 3), "poc_volume": round(poc_volume),
+            "below_volume": round(below_volume), "below_pct": round(below_volume / poc_volume * 100, 1)
+            if poc_volume > 0 else 0.0, "warning_text": ""}
+
+
 def assess_vp_breakout(
     current_price: float,
     vp: Dict[str, Any],

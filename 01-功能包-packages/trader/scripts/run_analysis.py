@@ -727,6 +727,14 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
                 "positive": macd.get("positive", False),
             }
 
+    # ── [2.5] 量能真空区检查 ──
+    try:
+        from trader_shared.volume_profile import check_volume_vacuum
+        volume_vacuum = check_volume_vacuum(bars, current)
+        report["volume_vacuum"] = volume_vacuum
+    except Exception:
+        report["volume_vacuum"] = {"vacuum_warning": False, "warning_text": ""}
+
     return report
 
 
@@ -1167,8 +1175,27 @@ def render_markdown(r: dict) -> str:
         lines.append(f"⚠️ 风险：筹码在搬家，主力在出货，警惕继续下跌")
     else:
         lines.append(f"⚠️ 风险：最大风险是 {confirm:.2f} 未确认前提前追入")
+
+    # ── [2.5] 量能真空区预警 ──
+    volume_vacuum = r.get("volume_vacuum") or {}
+    if volume_vacuum.get("vacuum_warning"):
+        lines.append(f"⚠️ 量能真空：{volume_vacuum.get('warning_text', '')}")
         
     lines.append("")
+
+    # ── [2.5] 个股股性透视卡（重新加回） ──
+    win_rate_data = _load_historical_win_rate(display_code)
+    if win_rate_data is not None:
+        lines.extend([
+            "",
+            "📊 股性与历史回测",
+            f"  历史信号总数：{win_rate_data['total']} 次",
+            f"  胜率：{win_rate_data['win_rate']:.0f}%（{win_rate_data['wins']}/{win_rate_data['total']}）",
+            f"  盈亏比：{win_rate_data['profit_factor']:.2f}",
+            f"  平均盈亏：{win_rate_data['avg_pnl']:+.1f}%",
+            f"  最大盈利：{win_rate_data['max_gain']:+.1f}% ｜ 最大亏损：{win_rate_data['max_loss']:.1f}%",
+            f"  结论：{win_rate_data['conclusion']}",
+        ])
 
     pool_count = _pool_count()
     if pool_count > 0:
