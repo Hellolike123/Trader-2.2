@@ -416,11 +416,11 @@ def merge_decisions(
     if disagreement > 1:
         if strong_bullish_chan or strong_bullish_wyk:
             if momentum_signal["direction"] == -1:
-                momentum_signal["direction"] = 0  # Veto Momentum bearish noise
+                momentum_signal["direction"] = int(momentum_signal["direction"] * 0.3)  # 衰减而非归零，保留风险信号
             disagreement_for_action = 0
         elif strong_bearish_chan or strong_bearish_wyk:
             if momentum_signal["direction"] == 1:
-                momentum_signal["direction"] = 0  # Veto Momentum bullish noise
+                momentum_signal["direction"] = int(momentum_signal["direction"] * 0.3)  # 衰减而非归零，保留风险信号
             disagreement_for_action = 0
 
     # 4. 加权计算 (使用可能消解后的方向及权重)

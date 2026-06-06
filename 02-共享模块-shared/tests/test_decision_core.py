@@ -187,7 +187,7 @@ class TestFakeBreakAndPhasedExit:
 
     def test_exit_phased_disabled(self, monkeypatch):
         """EXIT_PHASED_ENABLED=False → 不触发_near_stop"""
-        monkeypatch.setattr("config.EXIT_PHASED_ENABLED", False)
+        monkeypatch.setattr("trader_shared.config.EXIT_PHASED_ENABLED", False)
         bars = [{"close": 10.0, "high": 10.5, "low": 9.5}] * 30
         result = status_layers(
             current=9.36, support=9.4, low_zone_upper=10.1, confirm=10.5,

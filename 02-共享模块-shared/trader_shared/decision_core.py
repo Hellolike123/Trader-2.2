@@ -302,7 +302,7 @@ def status_layers(
     _fake_break = False
     _near_stop = False
     try:
-        from config import PULLBACK_CONFIRM_DAYS, EXIT_PHASED_ENABLED
+        from trader_shared.config import PULLBACK_CONFIRM_DAYS, EXIT_PHASED_ENABLED
     except Exception:
         PULLBACK_CONFIRM_DAYS = 3
         EXIT_PHASED_ENABLED = True

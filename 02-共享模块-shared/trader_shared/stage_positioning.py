@@ -331,6 +331,7 @@ def _detect_short_term_momentum(
 def _layer1_multi_day_confirm(
     raw_stage: str,
     state: dict[str, Any],
+    trade_date: str = "",
 ) -> tuple[str, bool]:
     """第一层：多日确认。连续 3 日信号一致才确认阶段转换。
 
@@ -340,24 +341,31 @@ def _layer1_multi_day_confirm(
     prev_stage = state.get("last_confirmed_stage", "蓄势")
     pending_stage = state.get("pending_stage", "")
     pending_count = state.get("pending_count", 0)
+    pending_date = state.get("pending_date", "")
 
     if raw_stage == prev_stage:
         # 信号一致，重置 pending
         return prev_stage, False
 
     if raw_stage == pending_stage:
-        # 连续相同的非当前信号
+        # 连续相同的非当前信号 — 按交易日计数
+        if trade_date and trade_date == pending_date:
+            # 同一天多次调用，不递增
+            return prev_stage, False
+        # 新交易日，递增
         pending_count += 1
         if pending_count >= 3:
             # 确认转换
             return raw_stage, True
         # 还没到 3 天，保持当前阶段
         state["pending_count"] = pending_count
+        state["pending_date"] = trade_date
         return prev_stage, False
     else:
         # 新的非当前信号，重新计数
         state["pending_stage"] = raw_stage
         state["pending_count"] = 1
+        state["pending_date"] = trade_date
         return prev_stage, False
 
 
@@ -554,6 +562,7 @@ def assess_stage(
     chip_migration: dict[str, Any] | None = None,
     fib_retrace: dict[str, Any] | None = None,
     symbol: str = "",
+    trade_date: str = "",
 ) -> dict[str, Any]:
     """四阶段定位主函数（威科夫量价驱动 + 四层防护）
 
@@ -604,7 +613,7 @@ def assess_stage(
         protection_notes.append(f"置信度{raw_confidence}%<60%，保持{gated_stage}")
 
     # 多日确认（在置信度过滤之后，确认阶段转换真实性）
-    confirmed_stage, is_transition = _layer1_multi_day_confirm(gated_stage, state)
+    confirmed_stage, is_transition = _layer1_multi_day_confirm(gated_stage, state, trade_date=trade_date)
     if confirmed_stage != gated_stage:
         protection_notes.append(f"多日确认中（{state.get('pending_count', 0)}/3）")
 
@@ -627,6 +636,7 @@ def assess_stage(
         state["last_confirmed_stage"] = final_stage
         state["pending_stage"] = ""
         state["pending_count"] = 0
+        state["pending_date"] = ""
     _save_stage_state(state, symbol=symbol)
 
     # 短期动能判定
