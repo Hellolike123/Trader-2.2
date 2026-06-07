@@ -187,3 +187,44 @@ class TestHMMRegimeDetector:
         result = self.detect_regime(returns)
         assert result["state_en"] == "range"
         assert result["confidence"] == 0.4
+
+
+class TestMarketEnvHMMFallback:
+    """Verify that market_env.assess() logs (not swallows) HMM failures (P1 #6 fix)."""
+
+    def test_hmm_failure_logs(self, caplog):
+        """When HMM detection raises, market_env must still return a result and log at DEBUG."""
+        import logging
+        from unittest.mock import patch
+
+        from market_env import assess
+
+        # Force detect_regime to raise an exception (simulating garbage closes / NaN)
+        def _boom(_returns):
+            raise ZeroDivisionError("simulated closes[i-1] == 0")
+
+        with caplog.at_level(logging.DEBUG, logger="trader.market_env"), \
+             patch.dict("os.environ", {"TRADER_LOG_LEVEL": "DEBUG"}), \
+             patch("trader_shared.hmm_regime.detect_regime", _boom):
+            with patch("market_env._fetch_index_data") as mock_fetch, \
+                 patch("market_env._is_market_open_now", return_value=False):
+                mock_fetch.return_value = {
+                    "current": 5000.0,
+                    "pre_close": 4900.0,
+                    "change_pct": 2.04,
+                    "bars": [
+                        {"date": f"2026-05-{(i % 28) + 1:02d}", "close": 4900.0 + i}
+                        for i in range(60)
+                    ],
+                }
+                result = assess()
+
+        # assess() must still return a result (graceful degradation)
+        assert result is not None
+        assert "hmm_regime_en" in result
+        # The fallback neutral regime must be set
+        assert result["hmm_regime_en"] == "range"
+        # The failure must be logged at DEBUG
+        log_msgs = [r.getMessage() for r in caplog.records]
+        assert any("HMM regime detection failed" in m for m in log_msgs), \
+            f"expected HMM failure log, got: {log_msgs}"

@@ -189,3 +189,67 @@ def test_fetch_quote_fast_path_with_tencent(mock_get_client):
     assert q["turnover_rate"] == 0.35
     assert q["data_source"] == "tencent-http"
     assert q["data_status"] == "full"
+
+
+def test_api_rate_limiter_in_memory_cache():
+    """APIRequestRateLimiter must do in-memory I/O after first load (P1 #7 fix).
+
+    100 consecutive check_and_record() calls should complete in well under
+    100ms, since only the first call hits the disk. Before the fix, every
+    call did a load + save round-trip (15-30ms each), so 100 calls would
+    take 1.5-3 seconds.
+    """
+    import tempfile
+    import time
+
+    from trader_shared.light_data import APIRequestRateLimiter
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        limit_file = f"{tmpdir}/api_limits.json"
+        limiter = APIRequestRateLimiter(limit_file=limit_file)
+        # Prime the cache by doing one call (loads from disk) — use a high
+        # per-minute cap so the 100-iteration loop never hits the throttle.
+        assert limiter.check_and_record(max_per_min=10000, max_per_hour=100000) is True
+
+        t0 = time.perf_counter()
+        for _ in range(100):
+            assert limiter.check_and_record(max_per_min=10000, max_per_hour=100000) is True
+        elapsed = time.perf_counter() - t0
+
+        # In-memory-only path: 100 calls should be < 100ms (typically < 10ms)
+        assert elapsed < 0.1, f"100 in-memory calls took {elapsed*1000:.1f}ms (expected <100ms)"
+
+        # The cache must be marked dirty (unflushed writes pending)
+        assert limiter._dirty is True
+
+        # _flush must persist to disk
+        limiter._flush()
+        assert limiter._dirty is False
+        import os
+        assert os.path.exists(limit_file)
+
+
+def test_api_rate_limiter_first_call_loads_from_disk():
+    """First check_and_record() should lazy-load from disk; subsequent calls use cache."""
+    import json
+    import tempfile
+    import time
+
+    from trader_shared.light_data import APIRequestRateLimiter
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        limit_file = f"{tmpdir}/api_limits.json"
+        # Pre-seed the limit file with a recent call timestamp (within 60s window)
+        now = time.time()
+        seed = {"calls": [now - 5.0] * 14}  # 14 calls in the past 60s
+        with open(limit_file, "w") as f:
+            json.dump(seed, f)
+
+        limiter = APIRequestRateLimiter(limit_file=limit_file)
+        # 14 prior calls → 15th call should still pass (under 15/min threshold)
+        # but the in-memory cache must reflect the 14 pre-seeded calls.
+        assert limiter._cache is None  # not yet loaded
+        assert limiter.check_and_record() is True
+        # After the first call, the cache is populated
+        assert limiter._cache is not None
+        assert len(limiter._cache["calls"]) == 15  # 14 seed + 1 new

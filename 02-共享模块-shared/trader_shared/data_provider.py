@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from trader_shared._logging import get_logger
+from trader_shared.light_data import to_float
 
 _logger = get_logger(__name__)
 

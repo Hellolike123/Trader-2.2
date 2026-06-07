@@ -168,15 +168,18 @@ _REALTIME_TTL = 30
 
 # -------- Local Rate Limiter to prevent IP bans --------
 import os
+import atexit
 class APIRequestRateLimiter:
     def __init__(self, limit_file: str | None = None) -> None:
         self.limit_file = limit_file or os.path.expanduser("~/.trader/api_limits.json")
         self._ensure_dir()
+        self._cache: dict | None = None
+        self._dirty = False
 
     def _ensure_dir(self) -> None:
         os.makedirs(os.path.dirname(self.limit_file), exist_ok=True)
 
-    def _load(self) -> dict[str, list[float]]:
+    def _load_from_disk(self) -> dict[str, list[float]]:
         if not os.path.exists(self.limit_file):
             return {"calls": []}
         try:
@@ -193,27 +196,38 @@ class APIRequestRateLimiter:
         except OSError as exc:
             _logger.debug("Rate limiter save failed: %s", exc)
 
+    def _get_data(self) -> dict:
+        if self._cache is None:
+            self._cache = self._load_from_disk()
+        return self._cache
+
+    def _flush(self) -> None:
+        if self._dirty and self._cache is not None:
+            self._save(self._cache)
+            self._dirty = False
+
     def check_and_record(self, max_per_min: int = 15, max_per_hour: int = 80) -> bool:
         """Return True if allowed, False if throttled."""
         now = time.time()
-        data = self._load()
+        data = self._get_data()
         calls = [t for t in data.get("calls", []) if now - t < 3600] # 只保留一小时内
-        
+
         min_calls = [t for t in calls if now - t < 60] # 一分钟内
         if len(min_calls) >= max_per_min:
             warnings.warn(f"⚠️ [RateLimit] 1分钟内API请求频次触发上限 ({max_per_min}次)，本地拦截并自适应降级。")
             return False
-            
+
         if len(calls) >= max_per_hour:
             warnings.warn(f"⚠️ [RateLimit] 1小时内API请求频次触发上限 ({max_per_hour}次)，本地拦截并自适应降级。")
             return False
-            
+
         calls.append(now)
         data["calls"] = calls
-        self._save(data)
+        self._dirty = True
         return True
 
 _API_RATE_LIMITER = APIRequestRateLimiter()
+atexit.register(_API_RATE_LIMITER._flush)
 
 # Minimum delay between consecutive API calls (seconds)
 _API_CALL_DELAY = 0.1

@@ -9,8 +9,11 @@ try:
 except ImportError:
     _HAS_PIPELINE = False
 
+from trader_shared._logging import get_logger
 from trader_shared.config import INDEX_CODE
 from trader_shared.data_provider import get_provider
+
+_logger = get_logger(__name__)
 
 
 def _is_market_open_now() -> bool:
@@ -184,8 +187,8 @@ def assess() -> dict[str, Any]:
                 hmm_regime_en = hmm_res.get("state_en", "range")
                 hmm_regime_label = hmm_res.get("state_label", "宽幅震荡")
                 hmm_confidence = hmm_res.get("confidence", 0.5)
-    except Exception:
-        pass
+    except Exception as exc:
+        _logger.debug("HMM regime detection failed: %s", exc)
 
     ma5 = _ma(bars, 5)
     ma20 = _ma(bars, 20)

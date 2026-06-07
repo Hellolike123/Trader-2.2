@@ -116,27 +116,29 @@ def test_rate_limiter_throttling():
     """Verify rate limiter blocks when calls exceed limit."""
     from light_data import APIRequestRateLimiter
     import os
-    
+
     test_file = "/tmp/test_api_limits.json"
     if os.path.exists(test_file):
         try:
             os.remove(test_file)
         except Exception:
             pass
-            
+
     limiter = APIRequestRateLimiter(limit_file=test_file)
-    
-    # Force mock database load to return high call counts
-    with patch.object(limiter, "_load") as mock_load:
-        # Pretend there are 15 calls in the last minute
-        import time
-        now = time.time()
-        mock_load.return_value = {"calls": [now - 10] * 16}
-        
-        # Rate limit should trigger and block
-        allowed = limiter.check_and_record(max_per_min=15, max_per_hour=80)
-        assert allowed is False
-        
+
+    # Force the in-memory cache to contain 16 prior calls (within 60s) by
+    # pre-populating the cache directly. After P1 #7 the rate limiter reads
+    # from `_cache` (lazy-loaded from disk on first call), so we inject the
+    # high-volume state into the cache rather than patching `_load` (which
+    # was renamed to `_load_from_disk` and is now only called on cold-start).
+    import time
+    now = time.time()
+    limiter._cache = {"calls": [now - 10] * 16}
+
+    # Rate limit should trigger and block (16 calls > 15/min threshold)
+    allowed = limiter.check_and_record(max_per_min=15, max_per_hour=80)
+    assert allowed is False
+
     if os.path.exists(test_file):
         try:
             os.remove(test_file)
