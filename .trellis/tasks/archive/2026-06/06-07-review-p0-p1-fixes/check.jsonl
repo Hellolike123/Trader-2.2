@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "质量检查阶段需要的 lint / type-check / 测试规范"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "P0 #1 + P1 #6 修复需验证未引入新的 except pass 反模式"}
+{"file": ".trellis/tasks/06-07-review-p0-p1-fixes/prd.md", "reason": "验收标准与修复清单，用于核对实现是否覆盖所有 P0/P1 项"}
+{"file": "01-功能包-packages/review/references/review_output-contract.md", "reason": "验证 P1 #5 修复后午间复盘标题与合同一致"}
+{"file": "01-功能包-packages/t0/tests/test_t0_contract.py", "reason": "验证 P1 #3 修复后 T0 卖方向测试通过"}
+{"file": "01-功能包-packages/trader/tests/test_contract.py", "reason": "验证 P1 #2 修复后 win-rate 测试用真实盘中时间"}
+{"file": "02-共享模块-shared/trader_shared/data_provider.py", "reason": "验证 P0 #2 修复后 to_float 顶层 import 存在"}
+{"file": "02-共享模块-shared/scripts/market_env.py", "reason": "验证 P1 #6 修复后 HMM 异常不再 bare except 吞掉"}
+{"file": "02-共享模块-shared/trader_shared/light_data.py", "reason": "验证 P1 #7 修复后限速器在 100 次调用内耗时 < 100ms"}
+{"file": "02-共享模块-shared/tests/test_hmm_regime.py", "reason": "回归测试 HMM 失败时的 fallback 行为与日志记录"}

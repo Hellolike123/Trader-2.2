@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "P0 #1 + P1 #6 修复涉及函数内变量作用域与异常处理路径，需要遵循项目异常处理规范避免 except pass 反模式"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "修复涉及回归测试添加与跨文件同步修改，需要遵循质量门禁规范"}
+{"file": ".trellis/tasks/06-07-review-p0-p1-fixes/prd.md", "reason": "本任务的完整需求文档，包含 2 P0 + 6 P1 修复清单与验收标准"}
+{"file": "01-功能包-packages/review/references/review_output-contract.md", "reason": "review 9 段式输出合同，P1 #5 修复后输出必须符合合同第 8/83 行的'午间复盘/盘后复盘'标题规范"}
+{"file": "01-功能包-packages/t0/references/output-template.md", "reason": "T0 输出模板，确保 P1 #3 修复不破坏现有输出格式"}
+{"file": "02-共享模块-shared/trader_shared/tick_cache.py", "reason": "P1 #4 修复涉及 tick_cache.save_tick_cache 签名与 trade_date 参数语义"}
+{"file": "02-共享模块-shared/trader_shared/data_provider.py", "reason": "P0 #2 修复需要在模块顶部 import to_float，验证无循环依赖"}
+{"file": "02-共享模块-shared/scripts/market_env.py", "reason": "P1 #6 修复涉及 HMM 异常处理 + 日志记录，需读取完整 HMM 上下文"}
+{"file": "02-共享模块-shared/trader_shared/light_data.py", "reason": "P1 #7 修复涉及 APIRequestRateLimiter 重构为内存缓存+flush 模式"}
+{"file": "02-共享模块-shared/trader_shared/_logging.py", "reason": "P1 #6 修复需要 get_logger 用于 HMM 异常日志"}
