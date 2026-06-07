@@ -37,9 +37,11 @@ JSON 输出是 `build_report()` 返回的完整 dict，核心字段：
 | `one_liner` | str | 一句话总结 |
 | `t0_ref.low_buy` | float | T0 低吸参考价 |
 | `t0_ref.high_sell` | float | T0 高抛参考价 |
+| `t0_ref.stop` | float | T0 止损参考价 |
 | `position_info.suggested_pct` | int | 建议仓位 % |
+| `scene` | str | 场景标签：低吸观察/冲高减仓/突破确认 |
+| `exit_plan` | dict | 分批止盈计划（含分阶段退出条件） |
 | `data_status` | str | 数据状态：full/partial/degraded |
-| `warnings` | list | 风险警告列表 |
 
 ## 工作流程
 
@@ -52,7 +54,7 @@ Step 2: 解读数据
   读 major_stage + short_term_momentum → 当前位置
   读 fusion.action + fusion.weighted_score → 系统建议
   读 theory_status → 体系结论
-  读 warnings → 风险
+  读 scene + market_env → 风险判断
   检查: 信号是否矛盾（如 major_stage=主升 但 theory_status=暂不碰）
   关卡: 矛盾 → 说明矛盾在哪，建议等待
 
@@ -103,5 +105,5 @@ Step 3: 给建议
 □ 我引用的数字来自 JSON 哪个字段？说不出来 → 不要用这个数字
 □ 我的建议有数据支撑吗？说不出来 → 改为"数据不足"
 □ data_status 是什么？partial → 提示数据不完整
-□ 有没有 warnings？有 → 必须提及
+□ 有没有检查 scene / chip_migration / market_env → 评估风险
 □ 我有没有编造内容？价格/评分/信号全部来自 JSON？有一个不是 → 删掉

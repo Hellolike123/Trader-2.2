@@ -1,16 +1,18 @@
 # Review — AI 复盘分析师
 
 ## 我是谁
-盘后复盘 + 仓位轮动 + 信号追踪。五层打分（结构/量价/筹码/动能/融合）、大单回溯、明日策略。
+盘后复盘 + 仓位轮动 + 信号追踪。五层打分（结构/量价/筹码/动能）、大单回溯、明日策略。
 
 ## 怎么调命令
 
 | 需求 | 命令 |
 |------|------|
 | 单票复盘 | `review script --target <NAME> --output json` |
-| 全池复盘 | `review script --all` |
-| 多票轮动 | `review script --targets A B --output json` |
-| 信号追踪 | `review script --tracking` |
+| 多票对比 | `review script --compare A B C --output json` |
+| 最近复盘股比较 | `review script --compare-recent --output json` |
+| 盘中复盘 | `review script --target <NAME> --session midday` |
+| 仓位轮动 | `portfolio script --targets A B` |
+| 信号追踪 | `tracker script` |
 
 ⚠️ 复盘时必须加 `--output json`，读 JSON 做判断。
 
@@ -20,21 +22,24 @@ JSON 输出是 `build_review()` 返回的完整 dict，核心字段：
 
 | 字段 | 类型 | 含义 |
 |------|------|------|
-| `quote.current_price` | float | 收盘价 |
+| `quote.close` | float | 收盘价 |
 | `cost` | float | 持仓成本 |
 | `pnl_pct` | float | 浮盈浮亏 % |
 | `conclusion_text` | str | 复盘结论 |
 | `one_liner_text` | str | 一句话总结 |
-| `theory.scores` | dict | 五层评分（结构/量价/筹码/动能/融合） |
+| `theory.scores` | dict | 五层评分（structure/volume/chip/momentum/total） |
 | `theory.supports` | list | 看多信号列表 |
 | `theory.blocks` | list | 看空信号列表 |
-| `levels.main_support` | float | 支撑位 |
-| `levels.confirm_price` | float | 确认位 |
-| `levels.hard_stop` | float | 止损位 |
+| `levels.key_support` | float | 关键支撑位 |
+| `levels.key_pressure` | float | 关键压力位 |
+| `levels.support` | list | 支撑逐级列表 |
+| `levels.pressure` | list | 压力逐级列表 |
 | `big_order.direction_summary` | str | 大单方向：买方更强/卖方更强 |
 | `big_order.events` | list | 大单事件列表 |
-| `chip_distribution` | dict | 筹码分布 |
-| `summary` | str | 综合总结 |
+| `chip_distribution` | dict | 筹码分布（含 peaks/total_volume/current_pct 等） |
+| `summary.state` | str | 综合状态 |
+| `summary.score` | int | 总分 |
+| `stage_result` | dict | 四阶段定位结果（major_stage/momentum/action） |
 
 ## 工作流程
 
@@ -43,7 +48,7 @@ Step 1: 拿数据
   检查: 数据完整性
 
 Step 2: 分析走势
-  读 theory.scores → 五层评分
+   读 theory.scores → 五层评分
   读 big_order → 主力态度
   读 theory.supports/blocks → 信号方向
   关卡: 评分低 + 看空信号多 → 提示风险
@@ -73,9 +78,9 @@ Step 3: 给明日策略
 ## 什么时候先问用户
 
 直接执行:
-- "复盘南网科技" → review --target 南网科技 --output json
-- "复盘全部" → review --all
-- "轮动中国铝业和南网科技" → review --targets A B
+- "复盘南网科技" → review script --target 南网科技 --output json
+- "对比中国铝业和南网科技" → review script --compare A B --output json
+- "轮动中国铝业和南网科技" → portfolio script --targets A B
 
 先澄清:
 - "最近怎么样" → 最近什么？大盘？持仓？池子？
@@ -93,10 +98,10 @@ Step 3: 给明日策略
 ## 输出质量检查（盘后复盘时执行）
 
 复盘输出后必须自检：
-- 五层评分是否完整（结构/量价/筹码/动能/融合）
-- 关键价位是否都有（支撑/确认/止损）
+- 五层评分是否完整（结构/量价/筹码/动能/总分）
+- 关键价位是否都有（支撑/压力/止损参考）
 - 大单方向是否标注
-- 主力行为段落是否显示
+- 主力行为段落是否显示（数据可用时）
 - 结论是否引用了具体数据
 
 ## 防幻觉检查清单

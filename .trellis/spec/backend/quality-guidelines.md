@@ -345,6 +345,47 @@ if len(closes) >= 25:
         return False
 ```
 
+8. **Optional feature results not passed through pipeline**: When adding optional features (VP, HMM, etc.), the result must be passed through the entire call chain. Forgetting to pass `vp_result` to `status_layers()` means the feature is computed but never used.
+
+```python
+# WRONG — vp_result computed but not passed
+vp_result = compute_volume_profile(bars)
+layer_result = status_layers(current=current, ...)  # vp_result missing!
+
+# CORRECT — pass through entire pipeline
+vp_result = compute_volume_profile(bars)
+layer_result = status_layers(current=current, ..., vp_result=vp_result)
+```
+
+9. **Hardcoding default values for optional parameters**: When a function has optional parameters (like `pnl_pct`), callers should pass real values when available, not just use the default `0.0`. This prevents downstream logic from ever triggering.
+
+```python
+# WRONG — pnl_pct always 0.0, floating loss logic never triggers
+position_info = compute_position_with_env(
+    stage=stage, momentum=momentum, market_env=env,
+    pnl_pct=0.0,  # ← should be real value!
+)
+
+# CORRECT — compute pnl_pct before calling
+pnl_pct = (current - cost_price) / cost_price * 100 if cost_price > 0 else 0.0
+position_info = compute_position_with_env(
+    stage=stage, momentum=momentum, market_env=env,
+    pnl_pct=pnl_pct,  # ← real value
+)
+```
+
+10. **"No signal" treated as approval**: When checking signals, "无明显信号" (no clear signal) should be treated as neutral/reject, not as approval. Logic errors in signal interpretation can lead to false positives.
+
+```python
+# WRONG — "no signal" treated as bullish
+if "无明显威科夫信号" in summary or "看多" in summary:
+    wyk_ok = True  # ← "no signal" should NOT be True!
+
+# CORRECT — only explicit bullish signals approve
+if "看多" in summary:
+    wyk_ok = True
+```
+
 ---
 
 ## Exit Strategy Output Format (v2.4)
