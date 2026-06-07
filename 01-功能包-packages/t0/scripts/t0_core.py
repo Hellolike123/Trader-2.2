@@ -132,7 +132,7 @@ def build_side_signal(plan: dict[str, Any], side: str) -> dict[str, Any]:
     action = side_action(side, side_state)
     trigger_price = side_trigger_price(model, side_state)
     invalid_price = model.get("invalid_price")
-    direction = "bullish_lean" if side == "buy" else "neutral"
+    direction = "bullish_lean" if side == "buy" else "bearish_lean"
     trigger_text = "等观察价以下 5m 止跌确认" if side == "buy" else "等观察价附近冲高失败确认"
     invalid_text = (
         f"跌破 {price(invalid_price)} 后停止低吸" if side == "buy" else f"放量站上 {price(invalid_price)} 后取消高抛"

@@ -243,7 +243,7 @@ def render_single(review: dict[str, Any]) -> str:
     name = review.get("name", "")
     code = str(review.get("symbol", "")).replace(".SH", "").replace(".SZ", "")
     change = q.get("change_pct")
-    review_label = "午间复盘" if is_midday else "盘后复盘"
+    session_label = "午间复盘" if is_midday else "盘后复盘"
 
     major_stage = stage.get("major_stage", "")
     momentum = stage.get("momentum", "")
@@ -257,7 +257,7 @@ def render_single(review: dict[str, Any]) -> str:
             conclusion = "弱修复观察，还不能按反转处理。" if theory["state"] == "弱修复观察" else "短线止跌修复，但还不是反转。" if theory["state"] != "转强确认" else "正在尝试转强，仍要看回踩确认。"
 
     lines: list[str] = [
-        f"盘后复盘 — {name}（{code}）",
+        f"{session_label} — {name}（{code}）",
         "",
         f"收盘：{price_text(close)}（{pct_text(change)}）",
         "",

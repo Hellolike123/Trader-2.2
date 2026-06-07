@@ -190,8 +190,8 @@ REVIEW_BANNED = (
 
 def _validate_review_single(lines: list[str], markdown: str) -> list[str]:
     errors: list[str] = []
-    if not lines[0].startswith("盘后复盘 — "):
-        errors.append("single review must start with 盘后复盘 — 名称（代码）")
+    if not (lines[0].startswith("盘后复盘 — ") or lines[0].startswith("午间复盘 — ")):
+        errors.append("single review must start with 盘后复盘/午间复盘 — 名称（代码）")
     # Compact panel — no fixed heading order enforced
     # Just check for required five-layer theory lines
     for required in ("缠论", "威科夫"):

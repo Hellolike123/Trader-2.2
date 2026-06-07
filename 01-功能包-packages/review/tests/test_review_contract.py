@@ -133,8 +133,8 @@ def test_midday_review_panel_contract() -> None:
     review["session"] = "midday"
     markdown = render_single(review)
 
-    assert "盘后复盘 — 南网科技（688248）" in markdown
-    assert "午间复盘" not in markdown  # midday session not reflected in new compact format
+    assert "午间复盘 — 南网科技（688248）" in markdown
+    assert "盘后复盘" not in markdown  # midday session should use 午间复盘, not 盘后复盘
     assert "收盘：" in markdown
     assert validate(markdown) == []
 

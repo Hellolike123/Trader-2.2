@@ -98,7 +98,7 @@ def build_plan(target: str) -> dict[str, Any]:
         try:
             ticks = provider.fetch_ticks(sec, count=500)
             report_data["tick_data"] = ticks
-            save_tick_cache(sec.ts_code, ticks)
+            save_tick_cache(sec.ts_code, ticks, trade_date=quote.get("trade_date"))
             import warnings
             warnings.warn(f"🎯 [PassiveTickTrigger] 现价 {current_val:.2f} 靠近关注价，被动激活物理 Tick 大单验证！")
         except Exception:

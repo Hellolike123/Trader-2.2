@@ -914,12 +914,13 @@ def _load_historical_win_rate(symbol: str) -> dict | None:
                     continue
 
                 sig_type = str(sig.get("signal_type", ""))
-                if sig_type not in ("review_result", "low_buy_triggered"):
+                if sig_type not in ("review_result", "low_buy_triggered", "high_sell_triggered"):
                     continue
 
                 analysis_time = str(sig.get("analysis_time") or "")
                 time_part = analysis_time[11:].strip() if len(analysis_time) >= 16 else ""
-                if not (time_part >= "15:00"):
+                # 只对 review_result 应用 15:00 时间过滤，T0 盘中信号不受限
+                if sig_type == "review_result" and not (time_part >= "15:00"):
                     continue
 
                 trade_date = str(sig.get("trade_date") or analysis_time[:10])[:10]

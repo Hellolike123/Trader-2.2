@@ -542,6 +542,7 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
     daily_macd_params = calc_macd_params(daily)
     bars_5m = provider.fetch_5m(sec, datalen=80)
     tick_data = []
+    selected_date = trade_date or (daily[-1].get("date") if daily else None) or quote.get("trade_date")
     try:
         ticks = provider.fetch_ticks(sec, count=500)
         if ticks:
@@ -560,7 +561,6 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
     atr7 = to_float(last_bar.get("atr7")) or 0.0
     atr_ratio_val = to_float(last_bar.get("atr_ratio")) or 0.0
     atr_level_name, atr_suggested_cap = atr_volatility_level(atr_ratio_val) if atr14 > 0 else ("数据不足", 10)
-    selected_date = trade_date or (daily[-1].get("date") if daily else None) or quote.get("trade_date")
     intraday = analyze_intraday(bars_5m, selected_date, session=session)
     levels = build_levels(current, quote, daily, cost)
     chip_dist = calc_chip_distribution(daily, lookback=60)
