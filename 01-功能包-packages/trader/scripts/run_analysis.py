@@ -415,7 +415,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     confirm = levels["confirm_price"]
     stop = levels["hard_stop"]
     take = levels["take"]
-    weekly_close = float(bars[-1]["close"])
+    weekly_close = float(quote.get("pre_close") or bars[-1]["close"])
     monthly_close = float(bars[-STRUCTURE_WINDOW]["close"] if len(bars) >= STRUCTURE_WINDOW else bars[0]["close"])
     stage = determine_stage(current, weekly_close, monthly_close)
     scene = levels["status"]
@@ -1037,12 +1037,13 @@ def render_markdown(r: dict) -> str:
     
     exit_plan = r.get("exit_plan") or {}
     exit_plan_items = exit_plan.get("exit_plan") or []
-    for item in exit_plan_items:
-        p = item.get("price")
+    priced_items = [item for item in exit_plan_items if item.get("price") is not None and item["price"] > 0]
+    priced_items.sort(key=lambda x: x["price"])
+    for item in priced_items:
+        p = item["price"]
         ratio = item.get("ratio", 0)
         reason = item.get("reason", "")
-        if p is not None and p > 0:
-            lines.append(f"  {p:.2f} → 卖 {ratio:.0%}（{reason}）")
+        lines.append(f"  {p:.2f} → 卖 {ratio:.0%}（{reason}）")
     
     if resistance_val > 0:
         lines.append(f"  {resistance_val:.2f} 压力")
@@ -2197,13 +2198,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", choices=["http-single"], required=True)
     parser.add_argument("--target", required=True)
     parser.add_argument("--output", choices=["markdown", "json", "signal-json", "alert-text"], default="markdown")
+    parser.add_argument("--cost", type=float, default=0.0, help="持仓成本价（用于显示持仓建议和盈亏分析）")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     try:
-        report = build_report(args.target)
+        report = build_report(args.target, cost_price=args.cost)
     except Exception as exc:
         print(f"Trader数据获取失败：{exc}", file=sys.stderr)
         return 1

@@ -197,7 +197,7 @@ def _assess_ma_structure(
     if convergence < 0.03:
         return "蓄势", 60, "均线收敛"
     if ma20 > ma30:
-        return "派发", 45, "MA20>MA30 但未多头排列"
+        return "蓄势", 45, "MA20>MA30 中期偏多"
     return "蓄势", 40, "均线无明确方向"
 
 
@@ -277,8 +277,8 @@ def _detect_major_stage(
 
     # 加权投票
     stage_votes: dict[str, float] = {"蓄势": 0, "主升": 0, "派发": 0, "衰退": 0}
-    stage_votes[vp_stage] += vp_score * 0.5
-    stage_votes[ma_stage] += ma_score * 0.3
+    stage_votes[vp_stage] += vp_score * 0.4
+    stage_votes[ma_stage] += ma_score * 0.4
     stage_votes[atr_stage] += atr_score * 0.2
 
     best_stage = max(stage_votes, key=stage_votes.get)  # type: ignore[arg-type]
@@ -929,7 +929,17 @@ def compute_exit_plan(
             "triggered": False,
         })
 
-    # 第二笔：1R 目标
+    # 第二笔：阻力位止盈（如果有效）
+    if resistance_exit is not None and resistance_exit > entry_price:
+        exit_plan.append({
+            "price": resistance_exit,
+            "ratio": 0.33,
+            "reason": "阻力位",
+            "condition": "触及阻力位",
+            "triggered": False,
+        })
+
+    # 第三笔：1R 目标
     exit_plan.append({
         "price": target_1r,
         "ratio": 0.33,
@@ -938,7 +948,7 @@ def compute_exit_plan(
         "triggered": False,
     })
 
-    # 第三笔：阶段转派发
+    # 第四笔：阶段转派发
     exit_plan.append({
         "price": None,
         "ratio": 0.34,
