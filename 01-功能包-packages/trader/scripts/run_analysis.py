@@ -1032,6 +1032,12 @@ def render_markdown(r: dict) -> str:
         lines.append(f"  {stop:.2f} 止损")
     if low_price > 0:
         lines.append(f"  {low_price:.2f} ← 试探买 {position_cap}%（缩量企稳）")
+    fib = r.get("fib_retrace") or {}
+    golden_bid = fib.get("golden_bid")
+    if golden_bid and golden_bid > 0 and golden_bid != low_price:
+        level_map = {fib.get("retrace_618"): "61.8%", fib.get("retrace_500"): "50%", fib.get("retrace_382"): "38.2%"}
+        label = level_map.get(golden_bid, "")
+        lines.append(f"  {golden_bid:.2f} ← 黄金挂单（斐波那契{label}）")
     if current_price > 0:
         lines.append(f"  {current_price:.2f} 当前")
     
