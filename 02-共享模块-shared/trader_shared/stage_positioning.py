@@ -165,6 +165,12 @@ def _assess_volume_price(bars: list[dict[str, Any]]) -> tuple[str, float, str]:
     if is_high_volume:
         return "派发", 45, f"放量方向不明（量比{vol_ratio:.1f}，涨跌{price_change_5*100:+.1f}%）"
 
+    # 正常量能 + 方向（覆盖 vol_ratio 0.8~1.2 死区）
+    if is_rising:
+        return "主升", 55, f"正常量能上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
+    if is_falling:
+        return "衰退", 50, f"正常量能下跌（量比{vol_ratio:.1f}，跌{price_change_5*100:+.1f}%）"
+
     # 默认
     return "蓄势", 40, f"量价无明确信号（量比{vol_ratio:.1f}，涨跌{price_change_5*100:+.1f}%）"
 
@@ -198,6 +204,8 @@ def _assess_ma_structure(
         return "蓄势", 60, "均线收敛"
     if ma20 > ma30:
         return "蓄势", 45, "MA20>MA30 中期偏多"
+    if ma20 < ma30:
+        return "衰退", 45, "MA20<MA30 中期偏空"
     return "蓄势", 40, "均线无明确方向"
 
 
@@ -308,13 +316,13 @@ def _detect_short_term_momentum(
     if current >= expma10 and expma10 > expma20:
         return "走强", "站上EXPMA(10)且多头排列"
 
+    # 均线粘合优先判断为震荡（需在修复之前，避免粘合期误报修复）
+    if abs(expma10 - expma20) / max(expma20, 1) < 0.01:
+        return "震荡", "EXPMA均线粘合"
+
     # 修复 (Recovery)：现价在 EXPMA(10) 与 EXPMA(20) 之间
     if min(expma10, expma20) <= current < max(expma10, expma20):
         return "修复", "回踩生命线(EXPMA10/20之间)"
-
-    # 均线粘合优先判断为震荡
-    if abs(expma10 - expma20) / max(expma20, 1) < 0.01:
-        return "震荡", "EXPMA均线粘合"
 
     if current < expma20:
         if change_pct < -2.0 or expma10 < expma20:
