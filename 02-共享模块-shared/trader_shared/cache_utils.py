@@ -17,6 +17,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -127,7 +128,9 @@ def set_cached(key: str, target: str, data: Any) -> None:
     """Write data to cache (atomic via temp file + rename, with exclusive file lock)."""
     cache_file = CACHE_DIR / key / f"{target}.json"
     cache_file.parent.mkdir(parents=True, exist_ok=True)
-    tmp_file = cache_file.with_suffix(f".{os.getpid()}.tmp")
+    # 临时文件名必须包含线程标识：同进程多线程 os.getpid() 相同，
+    # 若只用 pid 会导致并发写同一 target 时 tmp 文件互相覆盖/丢失。
+    tmp_file = cache_file.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
     try:
         tmp_file.write_text(json.dumps(data, ensure_ascii=False, default=str), encoding="utf-8")
         with open(cache_file, "a") as lock_f:

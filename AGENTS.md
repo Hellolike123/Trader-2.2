@@ -139,6 +139,8 @@ trailing_stop = highest_close × (1 - ATR% × 3.0)
 | 待确认入池 | `trader script add-pending --target <NAME>` |
 | 确认入池 | `trader script confirm-to-pool --target <NAME>` |
 | 作战表 | `trader script plan` |
+| 刷新全池数据 | `trader script refresh` |
+| 刷新单只票 | `trader script refresh --target <NAME>` |
 | 池子概览 | `trader script list` |
 | 待确认池 | `trader script show-pending` |
 | 多票对比 | `trader script compare --targets A B C` |

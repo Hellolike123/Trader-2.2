@@ -1080,6 +1080,95 @@ def cmd_rank(args: argparse.Namespace) -> int:
     return 0
 
 
+def _match_item(items: list[dict[str, Any]], target: str) -> dict[str, Any] | None:
+    """按 target/name/symbol 任一字段匹配池内项（与 cmd_add 的匹配口径一致）。"""
+    for item in items:
+        if target in {str(item.get("target")), str(item.get("name")), str(item.get("symbol"))}:
+            return item
+    return None
+
+
+def cmd_refresh(args: argparse.Namespace) -> int:
+    """批量重跑 build_report 刷新全池 record，写回 pool.json。
+
+    - 默认刷新全部 active 项；--target <名称> 只刷单只。
+    - 保留 added_at，更新 updated_at，保留原 status（衰退期除外→标淘汰）。
+    - 并行刷新（max_workers=5，与 build_report 内部并行一致）。
+    - 单只失败 → safe_build_report 自动降级为离线 record，不中断全池。
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    pool = load_pool()
+    all_items = list(pool.get("items", []))
+
+    # 选定刷新目标
+    if args.target:
+        item = _match_item(all_items, args.target)
+        if item is None:
+            names = [str(i.get("name") or i.get("target")) for i in all_items]
+            print(f"未在选股池中找到 {args.target}")
+            print(f"池内现有标的：{', '.join(names) or '空'}")
+            return 2
+        targets = [item]
+    else:
+        targets = active_items(pool)
+        if not targets:
+            print("选股池为空，无需刷新")
+            return 0
+
+    # 并行刷新：用 target 作为 key（record_from_report 也用它）
+    target_keys = [str(t.get("target") or t.get("name")) for t in targets]
+    results: dict[str, dict[str, Any] | None] = {}
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        future_to_key = {
+            ex.submit(safe_build_report, key): key for key in target_keys
+        }
+        for fut in as_completed(future_to_key):
+            key = future_to_key[fut]
+            try:
+                results[key] = fut.result()
+            except Exception:
+                results[key] = None  # 失败保留原 record
+
+    # 逐只更新 record（遍历原始全量以保持顺序）
+    refreshed = 0
+    failed: list[str] = []
+    declined: list[str] = []
+    for idx, item in enumerate(all_items):
+        key = str(item.get("target") or item.get("name"))
+        if key not in results:
+            continue
+        report = results[key]
+        if report is None:
+            failed.append(str(item.get("name") or key))
+            continue  # 失败，跳过不覆盖原 record
+        new_record = record_from_report(key, report)
+        # 保留原入池时间，更新本次刷新时间
+        new_record["added_at"] = item.get("added_at") or new_record["added_at"]
+        new_record["updated_at"] = today_text()
+        # 衰退自动淘汰（唯一会改 status 的情况）；其余保留原 status
+        if str(new_record.get("major_stage")) == "衰退":
+            new_record["status"] = "淘汰"
+            declined.append(str(new_record.get("name") or key))
+        else:
+            new_record["status"] = item.get("status") or new_record["status"]
+        all_items[idx] = new_record
+        refreshed += 1
+
+    pool["items"] = all_items
+    save_pool(pool)
+
+    # 摘要（遵守微信端格式红线：无 #/**/|）
+    print(f"选股池刷新 — {today_text()}")
+    print(f"刷新 {refreshed}/{len(targets)} 只")
+    if declined:
+        print(f"衰退淘汰：{', '.join(declined)}")
+    if failed:
+        print(f"刷新失败（保留旧数据）：{', '.join(failed)}")
+    print("下一步：说「生成明日作战表」查看最新池子")
+    return 0
+
+
 def priority_block(items: list[dict[str, Any]]) -> list[str]:
     labels = ["第一优先", "第二优先", "第三优先"]
     lines = ["明日优先级", ""]
@@ -1570,6 +1659,9 @@ def parse_args() -> argparse.Namespace:
     sub.add_parser("list")
     sub.add_parser("show-pending")
     sub.add_parser("plan")
+    refresh = sub.add_parser("refresh")
+    refresh.add_argument("--target", help="只刷新指定票（名称或代码），默认全池")
+    sub.add_parser("rank")
     sub.add_parser("add-last")
     review = sub.add_parser("review")
     review.add_argument("--offline", action="store_true")
@@ -1608,6 +1700,8 @@ def main() -> int:
         "confirm-to-pool": cmd_confirm_to_pool,
         "compare": cmd_compare,
         "plan": cmd_plan,
+        "rank": cmd_rank,
+        "refresh": cmd_refresh,
         "add-last": cmd_add_last,
         "review": cmd_review,
         "watch": cmd_watch,
