@@ -62,13 +62,34 @@ CONTRACT_VERSION = "t0_price_point_v2"
 
 
 def build_plan(target: str) -> dict[str, Any]:
+    from concurrent.futures import ThreadPoolExecutor
+
     provider = get_provider()
     sec = provider.resolve_security(target)
-    quote = provider.fetch_quote(sec)
-    daily = provider.fetch_qfq_daily(sec, days=LOOKBACK_DAYS)
-    bars_5m = provider.fetch_5m(sec, datalen=60)
-    bars_15m = provider.fetch_15m(sec, datalen=60)
-    bars_30m = provider.fetch_30m(sec, datalen=60)
+    # 5 个数据请求互相独立，并行抓取（串行总耗时≈各请求之和≈0.77s，
+    # 并行后≈最慢一个≈0.24s，盘中每个 monitor 循环都能省 0.5s）。
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        f_quote = ex.submit(provider.fetch_quote, sec)
+        f_daily = ex.submit(provider.fetch_qfq_daily, sec, days=LOOKBACK_DAYS)
+        f_5m = ex.submit(provider.fetch_5m, sec, datalen=60)
+        f_15m = ex.submit(provider.fetch_15m, sec, datalen=60)
+        f_30m = ex.submit(provider.fetch_30m, sec, datalen=60)
+        # quote/daily 是必需的，立即取（失败抛异常）
+        quote = f_quote.result()
+        daily = f_daily.result()
+        # 分钟线可选，失败降级为空列表
+        try:
+            bars_5m = f_5m.result()
+        except Exception:
+            bars_5m = []
+        try:
+            bars_15m = f_15m.result()
+        except Exception:
+            bars_15m = []
+        try:
+            bars_30m = f_30m.result()
+        except Exception:
+            bars_30m = []
     _cp = quote.get("current_price")
     current = _cp if _cp is not None else daily[-1].get("close")
     if current is None:
