@@ -1536,17 +1536,25 @@ def cmd_confirm_to_pool(args: argparse.Namespace) -> int:
 
 def cmd_compare(args: argparse.Namespace) -> int:
     from run_analysis import build_report
+    from concurrent.futures import ThreadPoolExecutor
+
     targets = [t.strip() for t in (args.targets or []) if t.strip()]
     if len(targets) < 2:
         print("至少需要两只股票做比较", file=sys.stderr)
         return 1
-    results = []
-    for target in targets:
-        try:
-            r = build_report(target)
-            results.append(r)
-        except Exception as exc:
-            print(f"{target}：数据获取失败（{exc}）", file=sys.stderr)
+    # 并行分析：多只票的 build_report 互相独立，并行执行总耗时≈最慢一只。
+    # build_report 内部已对单票的缠论/威科夫/动量做并行，这里再做一层票间并行。
+    results: list[dict[str, Any]] = []
+    errors: dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=min(len(targets), 5)) as ex:
+        future_to_target = {ex.submit(build_report, t): t for t in targets}
+        for fut, t in future_to_target.items():
+            try:
+                results.append(fut.result())
+            except Exception as exc:
+                errors[t] = str(exc)
+    for t, msg in errors.items():
+        print(f"{t}：数据获取失败（{msg}）", file=sys.stderr)
     if len(results) < 2:
         print("至少需要两只股票数据成功才能比较", file=sys.stderr)
         return 1
