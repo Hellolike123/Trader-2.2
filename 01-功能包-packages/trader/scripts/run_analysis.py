@@ -440,7 +440,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "scene": scene,
     })
     volume_note = volume_view(volume_text)
-    market_env_data = get_env_for_skill("trader")
+    market_env_data = env  # 复用并行块已抓取的大盘环境，避免重复请求
     buy_scenes = {"低吸观察", "防守观察", "等转强"}
     position_cap = min(10, atr_cap) if scene in buy_scenes else 10
 
@@ -745,6 +745,11 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     except Exception:
         report["volume_vacuum"] = {"vacuum_warning": False, "warning_text": ""}
 
+    # 个股股性透视卡：预计算历史胜率，复用已抓的日线，避免 render 时重复请求
+    report["win_rate_data"] = _load_historical_win_rate(
+        str(sec.ts_code), daily_bars=bars
+    )
+
     return report
 
 
@@ -874,7 +879,7 @@ def upward_momentum_observation(stage: str, current: float, support: float, conf
     return f"价格还没贴近确认区，结论：动能仍是弱修复，暂不按启动处理。"
 
 
-def _load_historical_win_rate(symbol: str) -> dict | None:
+def _load_historical_win_rate(symbol: str, daily_bars: list[dict[str, Any]] | None = None) -> dict | None:
     import json
     signals_path = os.path.expanduser("~/.trader/signals.jsonl")
     if not os.path.exists(signals_path):
@@ -883,10 +888,13 @@ def _load_historical_win_rate(symbol: str) -> dict | None:
     normalized_symbol = symbol.replace(".SH", "").replace(".SZ", "").strip()
 
     try:
-        from trader_shared.data_provider import get_provider
-        provider = get_provider()
-        sec = provider.resolve_security(normalized_symbol)
-        daily = provider.fetch_qfq_daily(sec, days=300)
+        if daily_bars and len(daily_bars) >= 30:
+            daily = daily_bars
+        else:
+            from trader_shared.data_provider import get_provider
+            provider = get_provider()
+            sec = provider.resolve_security(normalized_symbol)
+            daily = provider.fetch_qfq_daily(sec, days=300)
     except Exception:
         return None
 
@@ -1173,8 +1181,10 @@ def render_markdown(r: dict) -> str:
     wyckoff_desc = wyckoff_data.get("description", "无明显威科夫信号") if isinstance(wyckoff_data, dict) else "无明显威科夫信号"
     lines.append(f"  威科夫：{wyckoff_desc}")
     
-    # ── 个股股性透视卡 ──
-    win_rate_data = _load_historical_win_rate(display_code)
+    # ── 个股股性透视卡（build_report 预计算存 report["win_rate_data"]，无则 lazy 计算）──
+    win_rate_data = r.get("win_rate_data")
+    if win_rate_data is None:
+        win_rate_data = _load_historical_win_rate(display_code)
     if win_rate_data is not None:
         lines.append("")
         lines.append("📊 股性与历史回测")
