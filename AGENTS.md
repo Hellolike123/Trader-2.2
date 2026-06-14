@@ -25,6 +25,7 @@
 - **分层数据缓存**：日线K线、扩展数据（股东/机构EPS/解禁/题材）、大盘环境均支持文件缓存。盘中分析读缓存 + 追加当日实时数据，盘后预缓存选股池全量数据。命令：`trader.py cache warm`（预缓存）、`trader.py cache clear`（清缓存）。
 - **统一包结构**：所有核心模块已迁移到 `trader_shared/` 包下，支持 `pip install -e .` 开发安装和 `pytest` 直接运行。import 统一为 `from trader_shared.xxx import ...`。
 - **性能优化（2026-05-31）**：`light_data.py` 的 fallback 库（mootdx/akshare/pytdx3）改为懒加载，单票分析 `build_report()` 从 20s 优化到 0.48s（42 倍提升）。`market_env.py` 数据源从 `fetch_kline`（返回分钟线）修正为 `fetch_qfq_daily`（返回日线），缓存增加按日期去重，大盘环境评估从 10s 降到 0.09s。
+- **性能优化（2026-06-15）**：① T0 `build_plan` 的 5 个数据请求（quote/daily/5m/15m/30m）从串行改并行，单次卡片从 0.92s 降到 0.45s（约 46%），盘中每个 monitor 循环都受益。② 单票 `build_report` 消除重复的 `get_env_for_skill` 调用与 `_load_historical_win_rate` 重复抓 300 天日线，稳态从 0.48s 降到 0.43s。③ `cache_utils.set_cached` 修复多线程 tmp 文件名竞态（原用 `os.getpid()` 导致同进程线程互相覆盖），选股池刷新的 cache warning 从每次 4 次降到 0。④ 新增 `refresh` 命令批量重跑全池 `build_report` 并行刷新（8 只票约 1.8s），解决 `plan`/`rank` 使用入池时旧数据的问题。
 - 真正的输出格式以 `01-功能包-packages/trader/references/output-template.md` 和 `01-功能包-packages/trader/references/output-style-guide.md` 为准。
 - 需要看实现时，先看 `01-功能包-packages/trader/scripts/run_analysis.py`。
 
@@ -136,11 +137,15 @@ trailing_stop = highest_close × (1 - ATR% × 3.0)
 | 价格监控 | `trader script --target <NAME> --output alert-text` |
 | 写入信号 | `trader script --target <NAME> --write-signal` |
 | 入池 | `trader script add --target <NAME>` |
+| 一步入池（带三关筛选） | `trader script quick-add --target <NAME>` |
+| 入池前分析 | `trader script analyze --target <NAME>` |
 | 待确认入池 | `trader script add-pending --target <NAME>` |
 | 确认入池 | `trader script confirm-to-pool --target <NAME>` |
 | 作战表 | `trader script plan` |
+| 执行项复盘 | `trader script review` |
 | 刷新全池数据 | `trader script refresh` |
 | 刷新单只票 | `trader script refresh --target <NAME>` |
+| 盘中盯盘告警 | `trader script watch` |
 | 池子概览 | `trader script list` |
 | 待确认池 | `trader script show-pending` |
 | 多票对比 | `trader script compare --targets A B C` |

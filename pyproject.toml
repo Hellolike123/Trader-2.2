@@ -1,6 +1,6 @@
 [project]
 name = "trader"
-version = "2.3.0"
+version = "2.4.0"
 description = "A股交易决策辅助系统 — 缠论/威科夫/筹码/ATR/利弗莫尔分析"
 requires-python = ">=3.10"
 dependencies = [
