@@ -392,13 +392,23 @@ def merge_decisions(
     # Fix 2: 有强多信号时的低位判断从 pos_pct <= 0.5 收紧到 <= 0.35
     # 50% 中轴并非低位，中轴附近的强多信号不应触发底部权重偏置
     is_breakout_or_bottom = (pos_pct is not None and pos_pct <= 0.3) or ((strong_bullish_chan or strong_bullish_wyk) and pos_pct is not None and pos_pct <= 0.35)
-    is_climax_or_overbought = (pos_pct is not None and pos_pct >= 0.7 and mom_score >= 80) or strong_bearish_chan or strong_bearish_wyk
+
+    # 真正的高位超买（价格在区间上沿 + 动量极强）：动量权重最高，
+    # 因为高位要看动量是否衰竭来决定去留。
+    is_genuine_climax = pos_pct is not None and pos_pct >= 0.7 and mom_score >= 80
+    # 仅有强看空信号（顶背驰/上冲回落），未必处于高位：这是结构发出看空警告，
+    # 应尊重结构信号而非给动量最高权重去否决它。
+    is_bearish_structure_warning = (strong_bearish_chan or strong_bearish_wyk) and not is_genuine_climax
 
     if is_breakout_or_bottom:
         weights = {"chan": 0.45, "momentum": 0.20, "wyckoff": 0.35}
-    elif is_climax_or_overbought:
-        # High position + strong momentum: momentum-skewed (55% momentum)
+    elif is_genuine_climax:
+        # 高位 + 强动量：动量权重最高（55%），高位看动量衰竭
         weights = {"chan": 0.20, "momentum": 0.55, "wyckoff": 0.25}
+    elif is_bearish_structure_warning:
+        # 结构看空警告（顶背驰/上冲回落）：尊重结构，chan/wyk 权重高于动量，
+        # 避免动量噪音在结构发出撤退信号时反向主导。
+        weights = {"chan": 0.45, "momentum": 0.20, "wyckoff": 0.35}
     else:
         weights = get_regime_weights(regime)
 
@@ -416,11 +426,14 @@ def merge_decisions(
     if disagreement > 1:
         if strong_bullish_chan or strong_bullish_wyk:
             if momentum_signal["direction"] == -1:
-                momentum_signal["direction"] = int(momentum_signal["direction"] * 0.3)  # 衰减而非归零，保留风险信号
+                # 衰减动量权重而非归零方向：confidence 是连续值可真正衰减，
+                # direction 是离散值 (±1)，对它做 *0.3 会被 int() 抹成 0，
+                # 导致冲突的动量信号彻底消失而非减弱。修正后保留方向、削弱权重。
+                momentum_signal["confidence"] *= 0.3
             disagreement_for_action = 0
         elif strong_bearish_chan or strong_bearish_wyk:
             if momentum_signal["direction"] == 1:
-                momentum_signal["direction"] = int(momentum_signal["direction"] * 0.3)  # 衰减而非归零，保留风险信号
+                momentum_signal["confidence"] *= 0.3
             disagreement_for_action = 0
 
     # 4. 加权计算 (使用可能消解后的方向及权重)
