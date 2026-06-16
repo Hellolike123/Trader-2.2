@@ -301,7 +301,8 @@ def score_report(report: dict[str, Any]) -> dict[str, int]:
     momentum_dir = momentum_result.get("direction", "insufficient")
     momentum_score_val = min(20, max(0, momentum_result.get("score", 0) // 5))
     mom_tag = {"bullish": "🟢看多", "bearish": "🔴看空", "neutral": "🟡中性"}.get(momentum_dir, "⚪数据不足")
-    return {"chanlun_score": chan, "wyckoff_score": wyckoff, "chip_score": chip, "fusion_score": fusion_bonus, "total_score": chan + wyckoff + chip + fusion_bonus, "momentum_score": momentum_score_val, "momentum_tag": mom_tag}
+    total = max(0, min(100, chan + wyckoff + chip + fusion_bonus))
+    return {"chanlun_score": chan, "wyckoff_score": wyckoff, "chip_score": chip, "fusion_score": fusion_bonus, "total_score": total, "momentum_score": momentum_score_val, "momentum_tag": mom_tag}
 
 
 def _evaluate_admission(major_stage: str, total_score: int, current: float, confirm: float, stop: float) -> dict[str, str]:
@@ -486,6 +487,15 @@ def cmd_add(args: argparse.Namespace) -> int:
     pool = load_pool()
     report = safe_build_report(args.target, args.offline)
     record = record_from_report(args.target, report, args.offline)
+
+    # admission 门控：拒绝/待补的票不允许入池
+    admission_result = record.get("admission_result", "入池")
+    if admission_result in ("拒绝", "待补"):
+        reason = record.get("admission_reason", "未通过筛选")
+        print(f"入池被拒：{reason}")
+        print(f"当前状态：{record['status']}  评分：{record['total_score']}  阶段：{record.get('major_stage', '?')}")
+        return 3
+
     items = list(pool.get("items", []))
     existing_index = next((index for index, item in enumerate(items) if args.target in {str(item.get("target")), str(item.get("name")), str(item.get("symbol"))}), None)
     if existing_index is None and len(items) >= POOL_LIMIT:
@@ -1375,6 +1385,15 @@ def cmd_add_last(args: argparse.Namespace) -> int:
         return 2
     report = safe_build_report(target, False)
     record = record_from_report(target, report, False)
+
+    # admission 门控：拒绝/待补的票不允许入池
+    admission_result = record.get("admission_result", "入池")
+    if admission_result in ("拒绝", "待补"):
+        reason = record.get("admission_reason", "未通过筛选")
+        print(f"入池被拒：{reason}")
+        print(f"当前状态：{record['status']}  评分：{record['total_score']}  阶段：{record.get('major_stage', '?')}")
+        return 3
+
     items.append(record)
     pool["items"] = items
     save_pool(pool)
@@ -1404,11 +1423,14 @@ def cmd_review(args: argparse.Namespace) -> int:
     execution_items = plan.get("execution_items") or []
     rows: list[tuple[dict[str, Any], str, str, str, str]] = []
     summary = {"命中": 0, "未触发": 0, "失效": 0, "误判": 0}
+    declined_items: list[str] = []  # 需要降级的标的
     for item in execution_items:
         report = safe_build_report(str(item.get("target") or item.get("name")), args.offline)
         result, performance, note = review_result(item, report)
         summary[result] = summary.get(result, 0) + 1
         rows.append((item, f"{price(item.get('trigger'))} 触发，{price(item.get('defense'))} 防守", performance, result, note))
+        if result == "失效":
+            declined_items.append(str(item.get("target") or item.get("name")))
 
     lines = [
         f"选股池次日复盘 — {today_text()}",
@@ -1431,6 +1453,21 @@ def cmd_review(args: argparse.Namespace) -> int:
     else:
         lines.append("无")
     print("\n".join(lines))
+
+    # 写回：失效票降级为观察，写入 pool.json
+    if declined_items:
+        pool = load_pool()
+        changed = 0
+        for idx, item in enumerate(pool.get("items", [])):
+            item_name = str(item.get("target") or item.get("name"))
+            if item_name in declined_items and item.get("status") == "执行":
+                pool["items"][idx]["status"] = "观察"
+                pool["items"][idx]["updated_at"] = today_text()
+                changed += 1
+        if changed:
+            save_pool(pool)
+            print(f"\n已写回：{changed}只票从执行降为观察（{', '.join(declined_items)}）")
+
     return 0
 
 
