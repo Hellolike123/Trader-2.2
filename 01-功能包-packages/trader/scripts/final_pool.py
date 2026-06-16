@@ -1113,7 +1113,7 @@ def quick_add(target: str, offline: bool = False) -> dict[str, Any]:
     pool["items"] = items
     save_pool(pool)
     try:
-        write_stock(record["name"], status, record["total_score"], "pool")
+        write_stock(record["name"], record["status"], record["total_score"], "pool")
     except Exception:
         pass
     return {"ok": True, "reason": f"已加入选股池（{major_stage}+{record.get('momentum', '震荡')}，评分{total_score}）", "record": record}
@@ -1357,7 +1357,7 @@ def cmd_add_last(args: argparse.Namespace) -> int:
     if not os.path.exists(last_target_path):
         print("没有找到最近分析的标的，请先运行 trader 分析。")
         return 1
-    target = open(last_target_path).read().strip()
+    target = Path(last_target_path).read_text(encoding="utf-8").strip()
     if not target:
         print("最近分析的标的为空，请先运行 trader 分析。")
         return 1
@@ -1633,7 +1633,7 @@ def render_compare(reports: list[dict[str, Any]]) -> str:
 
     def sort_key(r: dict[str, Any]):
         scene = str(r.get("scene") or "")
-        atr_ratio = float(r.get("atr_ratio", 0) or 0)
+        atr_ratio = to_float(r.get("atr_ratio")) or 0.0
         return (-STATUS_SCORE.get(scene, 0), atr_ratio)
 
     sorted_reports = sorted(reports, key=sort_key)
@@ -1646,12 +1646,12 @@ def render_compare(reports: list[dict[str, Any]]) -> str:
     for i, r in enumerate(sorted_reports, 1):
         name = r.get("name", "?")
         scene = str(r.get("scene") or "?")
-        current = float(r.get("current", 0) or 0)
-        atr14 = float(r.get("atr14", 0) or 0)
-        atr_ratio = float(r.get("atr_ratio", 0) or 0)
+        current = to_float(r.get("current")) or 0.0
+        atr14 = to_float(r.get("atr14")) or 0.0
+        atr_ratio = to_float(r.get("atr_ratio")) or 0.0
         atr_level, atr_cap = atr_volatility_level(atr_ratio)
         atr_pct = atr_ratio * 100
-        stop_val = float(r.get("stop", 0) or 0)
+        stop_val = to_float(r.get("stop")) or 0.0
 
         if atr_ratio >= 0.03:
             atr_text = f"波幅偏高({atr_pct:.0f}%)"

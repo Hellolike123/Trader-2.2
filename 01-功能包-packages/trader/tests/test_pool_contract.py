@@ -52,16 +52,16 @@ def test_add_writes_pool_and_repeated_add_updates_same_record(tmp_path: Path) ->
 
 
 def test_pool_capacity_rejects_eleventh_unique_record(tmp_path: Path) -> None:
-    for index in range(10):
+    for index in range(20):
         item = run_pool(tmp_path, "add", "--target", f"测试{index}", "--offline")
         assert item.returncode == 0, item.stderr
 
-    extra = run_pool(tmp_path, "add", "--target", "测试10", "--offline")
+    extra = run_pool(tmp_path, "add", "--target", "测试20", "--offline")
 
     assert extra.returncode == 3
-    assert "候选池容量已满：10/10" in extra.stdout
+    assert "候选池容量已满：20/20" in extra.stdout
     data = json.loads(pool_file(tmp_path).read_text(encoding="utf-8"))
-    assert len(data["items"]) == 10
+    assert len(data["items"]) == 20
 
 
 def test_show_plan_and_review_contracts(tmp_path: Path) -> None:
