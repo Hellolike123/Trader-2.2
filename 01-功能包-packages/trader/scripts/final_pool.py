@@ -26,6 +26,29 @@ except ImportError:
 
 from run_analysis import build_report
 from trader_shared import candidate_core as core
+from config import (
+    ADMISSION_SCORE_EXECUTE,
+    ADMISSION_SCORE_OBSERVE,
+    CHAN_BASE,
+    CHAN_STAGE_BONUS,
+    CHAN_SCENE_BONUS,
+    CHAN_CONFIRM_CLOSE_BONUS,
+    CHAN_CONFIRM_FAR_BONUS,
+    CHAN_BUYPOINT_BONUS,
+    CHAN_DATA_INSUFFICIENT_PENALTY,
+    WYCKOFF_BASE,
+    WYCKOFF_VOL_AMPLIFY_BONUS,
+    WYCKOFF_VOL_SHRINK_BONUS,
+    WYCKOFF_VOL_NORMAL_BONUS,
+    WYCKOFF_MOMENTUM_PASS_BONUS,
+    WYCKOFF_SPRING_BONUS,
+    CHIP_BASE,
+    CHIP_ABOVE_STOP_BONUS,
+    CHIP_IN_ZONE_BONUS,
+    CHIP_UPSIDE_BONUS,
+    FUSION_BONUS_SCALE,
+    FUSION_DISAGREEMENT_CAP,
+)
 
 try:
     from trader_shared import get_market_level, get_market_note, write_stock
@@ -211,75 +234,66 @@ def score_report(report: dict[str, Any]) -> dict[str, int]:
     take = to_float(report.get("take")) or confirm
     stage = str(report.get("stage") or "")
     scene = str(report.get("scene") or "")
-    chan = 24
-    wyckoff = 15
-    chip = 15
+    chan = CHAN_BASE
+    wyckoff = WYCKOFF_BASE
+    chip = CHIP_BASE
 
-    if stage == "走强":
-        chan += 10
-    elif stage == "修复":
-        chan += 7
-    elif stage == "震荡":
-        chan += 3
-    elif stage == "转弱":
-        chan -= 10
-
-    if scene in {"等转强", "突破确认", "突破观察", "冲高减仓"}:
-        chan += 7
-    elif scene in {"低吸观察", "防守观察", "防守观察，趋势下行谨慎"}:
-        chan += 4
-    elif scene == "暂不碰":
-        chan -= 10
+    # ── 缠论分：阶段 + 场景 + 确认位距离 ──
+    chan += CHAN_STAGE_BONUS.get(stage, 0)
+    chan += CHAN_SCENE_BONUS.get(scene, 0)
 
     if current and confirm:
         distance = abs(confirm - current) / max(current, 0.01)
         if distance <= 0.02:
-            chan += 4
+            chan += CHAN_CONFIRM_CLOSE_BONUS
         elif distance <= 0.05:
-            chan += 2
+            chan += CHAN_CONFIRM_FAR_BONUS
 
+    # ── 威科夫分：量价 + 动量 ──
     volume_text = str(report.get("volume_text") or "")
     if "放大" in volume_text or "放量" in volume_text:
-        wyckoff += 8
+        wyckoff += WYCKOFF_VOL_AMPLIFY_BONUS
     elif "缩量" in volume_text or "收缩" in volume_text:
-        wyckoff += 5
+        wyckoff += WYCKOFF_VOL_SHRINK_BONUS
     else:
-        wyckoff += 3
+        wyckoff += WYCKOFF_VOL_NORMAL_BONUS
     if momentum_passes(report):
-        wyckoff += 5
+        wyckoff += WYCKOFF_MOMENTUM_PASS_BONUS
 
+    # ── 筹码分：价格位置 ──
     if current > stop:
-        chip += 5
+        chip += CHIP_ABOVE_STOP_BONUS
     if support <= current <= max(confirm, support):
-        chip += 4
+        chip += CHIP_IN_ZONE_BONUS
     if take > current:
-        chip += 3
+        chip += CHIP_UPSIDE_BONUS
 
-    chan_trend = str(report.get("chan_trend_label", ""))
+    # ── 缠论分：买点 + 数据充分性 ──
     chan_bps = str(report.get("chan_buy_point_text", ""))
-    if "一类买" in chan_bps: chan += 10
-    elif "二类买" in chan_bps: chan += 6
-    elif "三类买" in chan_bps: chan += 5
+    for bp_key, bp_bonus in CHAN_BUYPOINT_BONUS.items():
+        if bp_key in chan_bps:
+            chan += bp_bonus
+            break
+    chan_trend = str(report.get("chan_trend_label", ""))
     if report.get("chan_strokes_count", 0) < 2 and chan_trend == "数据不足":
-        chan -= 5
+        chan -= CHAN_DATA_INSUFFICIENT_PENALTY
     chan = max(0, min(45, chan))
 
-    wyck_spring = report.get("wyckoff_spring_signal", False)
-    if wyck_spring:
-        wyckoff += 5
+    # ── 威科夫分：spring ──
+    if report.get("wyckoff_spring_signal", False):
+        wyckoff += WYCKOFF_SPRING_BONUS
     wyckoff = max(0, min(30, wyckoff))
     chip = max(0, min(25, chip))
 
-    # 融合层 bonus: weighted_score(-1.35~1.35) → -20~+20 分
+    # ── 融合层 bonus: weighted_score(-1.35~1.35) → -20~+20 分 ──
     fusion = report.get("fusion", {}) or {}
     fw = to_float(fusion.get("weighted_score")) if isinstance(fusion, dict) else None
     fd = to_float(fusion.get("disagreement")) if isinstance(fusion, dict) else None
     fw = fw or 0.0
     fd = fd or 0.0
-    fusion_bonus = max(-20, min(20, round(fw * 15)))
-    # 高度分歧时削弱 bonus
+    fusion_bonus = max(-20, min(20, round(fw * FUSION_BONUS_SCALE)))
     if fd > 1:
-        fusion_bonus = max(-10, min(10, fusion_bonus))
+        fusion_bonus = max(-FUSION_DISAGREEMENT_CAP, min(FUSION_DISAGREEMENT_CAP, fusion_bonus))
 
     from trader_shared.momentum_core import assess_momentum
     daily_bars = report.get("bars") or report.get("daily_bars") or []
@@ -290,45 +304,45 @@ def score_report(report: dict[str, Any]) -> dict[str, int]:
     return {"chanlun_score": chan, "wyckoff_score": wyckoff, "chip_score": chip, "fusion_score": fusion_bonus, "total_score": chan + wyckoff + chip + fusion_bonus, "momentum_score": momentum_score_val, "momentum_tag": mom_tag}
 
 
+def _evaluate_admission(major_stage: str, total_score: int, current: float, confirm: float, stop: float) -> dict[str, str]:
+    """三关筛选统一实现：阶段筛选 → 评分门槛 → 风控检查。
+
+    Returns:
+        {"result": "入池"|"待补"|"拒绝", "reason": str, "status": "执行"|"观察"|"淘汰"}
+    """
+    # 第一关：阶段筛选 — 衰退期直接拒绝
+    if major_stage == "衰退":
+        return {"result": "拒绝", "reason": "衰退期，直接拒绝入池。", "status": "淘汰"}
+
+    # 第二关：评分门槛（查表）
+    exec_threshold = ADMISSION_SCORE_EXECUTE.get(major_stage, 999)
+    obs_threshold = ADMISSION_SCORE_OBSERVE.get(major_stage, 999)
+
+    if total_score >= exec_threshold:
+        status = "执行"
+    elif total_score >= obs_threshold:
+        status = "观察"
+    else:
+        threshold = min(exec_threshold, obs_threshold)
+        return {"result": "待补", "reason": f"{major_stage}期但评分不足{threshold}，暂不入池。", "status": "观察"}
+
+    # 第三关：风控检查 — 现价跌破止损
+    if stop > 0 and current <= stop:
+        return {"result": "拒绝", "reason": "现价跌破防守位，结构审查失败。", "status": "淘汰"}
+    if confirm <= 0 or stop <= 0:
+        return {"result": "待补", "reason": "触发位或防守位不清楚，暂不参与排序。", "status": "观察"}
+
+    return {"result": "入池", "reason": "结构成立，触发位和防守位清楚。", "status": status}
+
+
 def admission_for(report: dict[str, Any], scores: dict[str, int]) -> dict[str, str]:
+    """三关筛选入口（从 report/scores 提取参数后委托 _evaluate_admission）。"""
     current = to_float(report.get("current")) or 0.0
     confirm = to_float(report.get("confirm")) or current
     stop = to_float(report.get("stop")) or current
     major_stage = str(report.get("major_stage") or "蓄势")
     total_score = scores["total_score"]
-
-    # 第一关：阶段筛选 — 衰退期直接拒绝
-    if major_stage == "衰退":
-        return {"result": "拒绝", "reason": "衰退期，直接拒绝入池。", "status": "淘汰"}
-
-    # 第二关：评分门槛
-    if major_stage == "蓄势":
-        if total_score >= 80:
-            status = "执行"
-        elif total_score >= 70:
-            status = "观察"
-        else:
-            return {"result": "待补", "reason": "蓄势期但评分不足70，暂不入池。", "status": "观察"}
-    elif major_stage == "主升":
-        if total_score >= 60:
-            status = "执行"
-        else:
-            return {"result": "待补", "reason": "主升期但评分不足60，暂不入池。", "status": "观察"}
-    elif major_stage == "派发":
-        if total_score >= 70:
-            status = "观察"
-        else:
-            return {"result": "待补", "reason": "派发期但评分不足70，暂不入池。", "status": "观察"}
-    else:
-        status = "观察"
-
-    # 第三关：风控检查 — 现价跌破止损
-    if stop and current <= stop:
-        return {"result": "拒绝", "reason": "现价跌破防守位，结构审查失败。", "status": "淘汰"}
-    if not confirm or not stop:
-        return {"result": "待补", "reason": "触发位或防守位不清楚，暂不参与排序。", "status": "观察"}
-
-    return {"result": "入池", "reason": "结构成立，触发位和防守位清楚。", "status": status}
+    return _evaluate_admission(major_stage, total_score, current, confirm, stop)
 
 
 def structure_summary(report: dict[str, Any]) -> str:
@@ -382,7 +396,7 @@ def record_from_report(target: str, report: dict[str, Any], offline: bool = Fals
         "atr14": atr14,
         "atr_ratio": atr_ratio,
         "atr_level": atr_level,
-        "atr_cap": atr_cap,
+        "atr_cap": atr_cap,  # ATR 波动率决定的单票最大仓位（硬上限）
         "fusion_action": (report.get("fusion") or {}).get("action"),
         "fusion_confidence": (report.get("fusion") or {}).get("confidence"),
         "fusion_score": (report.get("fusion") or {}).get("weighted_score"),
@@ -566,6 +580,117 @@ STAR_MAP = {
 }
 
 
+def _days_lapsed(item: dict[str, Any], today: date) -> int:
+    """Calculate days since item was added to pool."""
+    try:
+        added_str = str(item.get("added_at", today_text()))
+        return (today - date.fromisoformat(added_str)).days
+    except Exception:
+        return 0
+
+
+def _verify_observe_track(sig_type: str, item: dict[str, Any], current: float, days: int, summary: dict) -> str:
+    """Verify observe/low_buy_watch/track signals: expect price to rise from support."""
+    expect_up = current > to_float(item.get("support") or item.get("current") or 0) * 1.01
+    if days <= 2:
+        summary["未验证"] = summary.get("未验证", 0) + 1
+        return "⏳ 第1天" if days == 1 else "⏳ 第2天"
+    if expect_up:
+        summary["未验证"] = summary.get("未验证", 0) + 1
+        return "⏳ 继续等"
+    summary["信号错了"] = summary.get("信号错了", 0) + 1
+    return "⚠️ 信号存疑"
+
+
+def _verify_high_sell(sig_type: str, item: dict[str, Any], current: float, days: int, summary: dict) -> str:
+    """Verify high_sell_watch/high_sell_triggered signals: expect price to fall from resistance."""
+    expect_down = current < to_float(item.get("resistance") or current * 1.05 or current)
+    if days <= 2:
+        summary["未验证"] = summary.get("未验证", 0) + 1
+        return "⏳ 第1天" if days == 1 else "⏳ 第2天"
+    if expect_down:
+        summary["未验证"] = summary.get("未验证", 0) + 1
+        return "⏳ 继续等"
+    summary["信号错了"] = summary.get("信号错了", 0) + 1
+    return "⚠️ 信号存疑"
+
+
+def _verify_reduce(sig_type: str, item: dict[str, Any], current: float, days: int, summary: dict) -> str:
+    """Verify reduce signals: expect price near resistance for confirmation."""
+    resistance = to_float(item.get("resistance") or 0)
+    hit_resistance = current >= resistance * 0.98 if resistance > 0 else False
+    close_under_resistance = current < resistance * 0.99 if resistance > 0 else False
+    if hit_resistance:
+        summary["已验证"] = summary.get("已验证", 0) + 1
+        return "⚠️ 已触压"
+    if close_under_resistance:
+        summary["未验证"] = summary.get("未验证", 0) + 1
+        return "⏳ 远离压力，暂不操作"
+    summary["未验证"] = summary.get("未验证", 0) + 1
+    return "⏳ 等确认"
+
+
+def _verify_defensive(sig_type: str, item: dict[str, Any], current: float, defense: float, summary: dict) -> str:
+    """Verify defensive signals: expect price to hold above defense."""
+    if current < defense:
+        summary["信号错了"] = summary.get("信号错了", 0) + 1
+        return "❌ 破防守"
+    summary["已验证"] = summary.get("已验证", 0) + 1
+    return "⏳ 守住了"
+
+
+def _verify_review_result(sig_type: str, matched: dict, item: dict[str, Any], current: float, summary: dict) -> str:
+    """Verify review_result signals: check if direction matches."""
+    expected_up = str(matched.get("direction", "")) in ("bullish", "bullish_lean")
+    support = to_float(item.get("support") or current * 0.995 or 0)
+    if current > support:
+        if expected_up:
+            summary["已验证"] = summary.get("已验证", 0) + 1
+            return "✅ 对方向"
+        summary["信号错了"] = summary.get("信号错了", 0) + 1
+        return "⚠️ 方向反了"
+    summary["未验证"] = summary.get("未验证", 0) + 1
+    return "⏳ 没到位"
+
+
+# Signal type → handler mapping
+_SIGNAL_HANDLERS: dict[str, Any] = {
+    "observe": _verify_observe_track,
+    "low_buy_watch": _verify_observe_track,
+    "track": _verify_observe_track,
+    "high_sell_watch": _verify_high_sell,
+    "high_sell_triggered": _verify_high_sell,
+    "reduce": _verify_reduce,
+    "defensive": _verify_defensive,
+    "review_result": _verify_review_result,
+}
+
+
+def _verify_by_signal_type(
+    sig_type: str, matched: dict, item: dict[str, Any],
+    current: float, defense: float, today: date, summary: dict,
+) -> tuple[str, dict]:
+    """Dispatch to per-type signal verifier. Returns (verify_status, updated_summary)."""
+    handler = _SIGNAL_HANDLERS.get(sig_type)
+    if handler is None:
+        summary["未验证"] = summary.get("未验证", 0) + 1
+        return "⏳ 等结果", summary
+
+    days = _days_lapsed(item, today)
+    if sig_type in ("observe", "low_buy_watch", "track"):
+        return handler(sig_type, item, current, days, summary), summary
+    if sig_type in ("high_sell_watch", "high_sell_triggered"):
+        return handler(sig_type, item, current, days, summary), summary
+    if sig_type == "reduce":
+        return handler(sig_type, item, current, days, summary), summary
+    if sig_type == "defensive":
+        return handler(sig_type, item, current, defense, summary), summary
+    if sig_type == "review_result":
+        return handler(sig_type, matched, item, current, summary), summary
+    summary["未验证"] = summary.get("未验证", 0) + 1
+    return "⏳ 等结果", summary
+
+
 def _pool_signal_verifications(items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
     from trader_shared.signal_store import load_recent_signals
 
@@ -628,12 +753,11 @@ def _pool_signal_verifications(items: list[dict[str, Any]]) -> tuple[list[dict[s
                 conf_map = {"low": "低", "medium": "中等", "high": "高"}
                 conf_txt = conf_map.get(confidence, confidence)
 
+                # 通用检查：破防守 / 已触发
                 if current < defense:
                     verify_status = "❌ 破防守"
                     summary["信号错了"] = summary.get("信号错了", 0) + 1
                 elif current >= trigger:
-                    # FIX-T-BIAS-124: require price to exceed trigger by margin
-                    # to avoid false positives on brief touches.
                     if current > trigger * 1.01:
                         verify_status = "✅ 已触发"
                         summary["已验证"] = summary.get("已验证", 0) + 1
@@ -641,71 +765,10 @@ def _pool_signal_verifications(items: list[dict[str, Any]]) -> tuple[list[dict[s
                         verify_status = "⏳ 触碰但未确认"
                         summary["未验证"] = summary.get("未验证", 0) + 1
                 else:
-                    try:
-                        added_str = str(item.get("added_at", today_text()))
-                        added_date = date.fromisoformat(added_str)
-                    except Exception:
-                        added_date = today
-                    days_lapsed = (today - added_date).days
-
-                    if sig_type in ("observe", "low_buy_watch", "track"):
-                        expect_up = current > to_float(item.get("support") or item.get("current") or 0) * 1.01
-                        if days_lapsed <= 2:
-                            verify_status = "⏳ 第1天" if days_lapsed == 1 else "⏳ 第2天"
-                            summary["未验证"] = summary.get("未验证", 0) + 1
-                        elif expect_up:
-                            verify_status = "⏳ 继续等"
-                            summary["未验证"] = summary.get("未验证", 0) + 1
-                        else:
-                            verify_status = "⚠️ 信号存疑"
-                            summary["信号错了"] = summary.get("信号错了", 0) + 1
-                    elif sig_type in ("high_sell_watch", "high_sell_triggered"):
-                        expect_down = current < to_float(item.get("resistance") or current * 1.05 or current)
-                        if days_lapsed <= 2:
-                            verify_status = "⏳ 第1天" if days_lapsed == 1 else "⏳ 第2天"
-                            summary["未验证"] = summary.get("未验证", 0) + 1
-                        elif expect_down:
-                            verify_status = "⏳ 继续等"
-                            summary["未验证"] = summary.get("未验证", 0) + 1
-                        else:
-                            verify_status = "⚠️ 信号存疑"
-                            summary["信号错了"] = summary.get("信号错了", 0) + 1
-                    # FIX-T-BIAS-125: reduce 信号需要实质性验证（接近压力/减仓信号出现）
-                    elif sig_type == "reduce":
-                        resistance = to_float(item.get("resistance") or 0)
-                        close_under_resistance = current < resistance * 0.99 if resistance > 0 else False
-                        hit_resistance = current >= resistance * 0.98 if resistance > 0 else False
-                        if hit_resistance:
-                            verify_status = "⚠️ 已触压"
-                            summary["已验证"] = summary.get("已验证", 0) + 1
-                        elif close_under_resistance:
-                            verify_status = "⏳ 远离压力，暂不操作"
-                            summary["未验证"] = summary.get("未验证", 0) + 1
-                        else:
-                            verify_status = "⏳ 等确认"
-                            summary["未验证"] = summary.get("未验证", 0) + 1
-                    elif sig_type == "defensive":
-                        if current < defense:
-                            verify_status = "❌ 破防守"
-                            summary["信号错了"] = summary.get("信号错了", 0) + 1
-                        else:
-                            verify_status = "⏳ 守住了"
-                            summary["已验证"] = summary.get("已验证", 0) + 1
-                    elif sig_type == "review_result":
-                        expected_up = str(matched.get("direction", "")) in ("bullish", "bullish_lean")
-                        if current > to_float(item.get("support") or current * 0.995 or 0):
-                            if expected_up:
-                                verify_status = "✅ 对方向"
-                                summary["已验证"] = summary.get("已验证", 0) + 1
-                            else:
-                                verify_status = "⚠️ 方向反了"
-                                summary["信号错了"] = summary.get("信号错了", 0) + 1
-                        else:
-                            verify_status = "⏳ 没到位"
-                            summary["未验证"] = summary.get("未验证", 0) + 1
-                    else:
-                        verify_status = "⏳ 等结果"
-                        summary["未验证"] = summary.get("未验证", 0) + 1
+                    # 按信号类型分支验证
+                    verify_status, summary = _verify_by_signal_type(
+                        sig_type, matched, item, current, defense, today, summary
+                    )
 
                 if matched:
                     sig_text = f"{_signal_type_label(sig_type)} {conf_txt}"
@@ -1028,33 +1091,15 @@ def quick_add(target: str, offline: bool = False) -> dict[str, Any]:
     major_stage = str(record.get("major_stage") or "蓄势")
     total_score = int(record.get("total_score") or 0)
     current = to_float(record.get("current")) or 0.0
+    confirm = to_float(record.get("confirm")) or 0.0
     stop = to_float(record.get("defense")) or 0.0
 
-    # 第一关：阶段筛选
-    if major_stage == "衰退":
-        return {"ok": False, "reason": "衰退期，直接拒绝", "record": record}
+    # 统一三关筛选
+    admission = _evaluate_admission(major_stage, total_score, current, confirm, stop)
+    if admission["result"] != "入池":
+        return {"ok": False, "reason": f"{admission['reason']}（{major_stage}，评分{total_score}）", "record": record}
 
-    # 第二关：评分门槛
-    if major_stage == "蓄势":
-        if total_score < 70:
-            return {"ok": False, "reason": f"蓄势期评分{total_score}<70，不入池", "record": record}
-        status = "执行" if total_score >= 80 else "观察"
-    elif major_stage == "主升":
-        if total_score < 60:
-            return {"ok": False, "reason": f"主升期评分{total_score}<60，不入池", "record": record}
-        status = "执行"
-    elif major_stage == "派发":
-        if total_score < 70:
-            return {"ok": False, "reason": f"派发期评分{total_score}<70，不入池", "record": record}
-        status = "观察"
-    else:
-        status = "观察"
-
-    # 第三关：风控检查
-    if stop > 0 and current <= stop:
-        return {"ok": False, "reason": f"现价{current:.2f}跌破防守{stop:.2f}，拒绝", "record": record}
-
-    record["status"] = status
+    record["status"] = admission["status"]
     pool = load_pool()
     items = list(pool.get("items", []))
     existing_index = next((i for i, item in enumerate(items) if target in {str(item.get("target")), str(item.get("name")), str(item.get("symbol"))}), None)
@@ -1294,14 +1339,7 @@ def _check_stale_items(items: list[dict[str, Any]]) -> list[str]:
 def cmd_plan(args: argparse.Namespace) -> int:
     pool = load_pool()
     items = active_items(pool)
-    # 出池自动淘汰：检测衰退阶段的票并标记
-    declining = [item for item in items if str(item.get("major_stage")) == "衰退"]
-    if declining:
-        for item in declining:
-            item["status"] = "淘汰"
-            name = item.get("name") or item.get("target")
-            print(f"衰退淘汰: {name} 阶段跌至衰退，已标记为淘汰。")
-        save_pool(pool)
+    # 衰退淘汰已在 refresh 中处理，plan 只读不写
     # P0 Fix: 检查疑似停牌
     stale_warnings = _check_stale_items(items)
     if stale_warnings:
@@ -1335,7 +1373,6 @@ def cmd_add_last(args: argparse.Namespace) -> int:
         return 2
     report = safe_build_report(target, False)
     record = record_from_report(target, report, False)
-    record["added_at"] = record["added_at"]
     items.append(record)
     pool["items"] = items
     save_pool(pool)

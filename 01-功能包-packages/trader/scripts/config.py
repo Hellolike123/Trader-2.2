@@ -79,3 +79,37 @@ DEFAULT_MAX_TOTAL: int = 80
 DEFAULT_CASH_FLOOR: int = 20
 DEFAULT_MAIN_CAP: int = 50
 
+# ── Pool admission thresholds (三关筛选) ──
+# Gate 2: 评分门槛 — 按阶段分类的最低入池分数
+ADMISSION_SCORE_EXECUTE: dict[str, int] = {"蓄势": 80, "主升": 60, "派发": 999}  # 999 = 不允许执行
+ADMISSION_SCORE_OBSERVE: dict[str, int] = {"蓄势": 70, "主升": 999, "派发": 70}  # 999 = 不允许观察
+
+# ── Score report magic numbers (评分体系) ──
+# 缠论基础分
+CHAN_BASE: int = 24
+CHAN_STAGE_BONUS: dict[str, int] = {"走强": 10, "修复": 7, "震荡": 3, "转弱": -10}
+CHAN_SCENE_BONUS: dict[str, int] = {"等转强": 7, "突破确认": 7, "突破观察": 7, "冲高减仓": 7,
+                                     "低吸观察": 4, "防守观察": 4, "暂不碰": -10}
+CHAN_CONFIRM_CLOSE_BONUS: int = 4      # 现价距确认位 ≤2%
+CHAN_CONFIRM_FAR_BONUS: int = 2        # 现价距确认位 ≤5%
+CHAN_BUYPOINT_BONUS: dict[str, int] = {"一类买": 10, "二类买": 6, "三类买": 5}
+CHAN_DATA_INSUFFICIENT_PENALTY: int = 5
+
+# 威科夫基础分
+WYCKOFF_BASE: int = 15
+WYCKOFF_VOL_AMPLIFY_BONUS: int = 8
+WYCKOFF_VOL_SHRINK_BONUS: int = 5
+WYCKOFF_VOL_NORMAL_BONUS: int = 3
+WYCKOFF_MOMENTUM_PASS_BONUS: int = 5
+WYCKOFF_SPRING_BONUS: int = 5
+
+# 筹码基础分
+CHIP_BASE: int = 15
+CHIP_ABOVE_STOP_BONUS: int = 5
+CHIP_IN_ZONE_BONUS: int = 4
+CHIP_UPSIDE_BONUS: int = 3
+
+# 融合层 bonus
+FUSION_BONUS_SCALE: int = 15           # weighted_score × 15 → -20~+20
+FUSION_DISAGREEMENT_CAP: int = 10      # 高分歧时 bonus 上限
+
