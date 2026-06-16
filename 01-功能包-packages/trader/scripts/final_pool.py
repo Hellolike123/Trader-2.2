@@ -1137,7 +1137,8 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     """批量重跑 build_report 刷新全池 record，写回 pool.json。
 
     - 默认刷新全部 active 项；--target <名称> 只刷单只。
-    - 保留 added_at，更新 updated_at，保留原 status（衰退期除外→标淘汰）。
+    - 保留 added_at，更新 updated_at，重新走 admission 判定（确保 status 与当前评分/阶段一致）。
+    - 衰退期 → 自动标淘汰。
     - 并行刷新（max_workers=5，与 build_report 内部并行一致）。
     - 单只失败 → safe_build_report 自动降级为离线 record，不中断全池。
     """
@@ -1191,12 +1192,13 @@ def cmd_refresh(args: argparse.Namespace) -> int:
         # 保留原入池时间，更新本次刷新时间
         new_record["added_at"] = item.get("added_at") or new_record["added_at"]
         new_record["updated_at"] = today_text()
-        # 衰退自动淘汰（唯一会改 status 的情况）；其余保留原 status
+        # 衰退自动淘汰；其余重新走 admission 判定（确保与当前评分/阶段一致）
         if str(new_record.get("major_stage")) == "衰退":
             new_record["status"] = "淘汰"
             declined.append(str(new_record.get("name") or key))
         else:
-            new_record["status"] = item.get("status") or new_record["status"]
+            # 用新 record 的 admission 结果，而非保留旧 status
+            pass  # new_record["status"] 已由 record_from_report → admission_for 正确设置
         all_items[idx] = new_record
         refreshed += 1
 
