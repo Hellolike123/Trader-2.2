@@ -71,7 +71,7 @@ except ImportError:
         return {"major_stage": "蓄势", "momentum": "震荡", "stage_label": "蓄势期+震荡", "action": "等待", "max_position_pct": 0}
 
 
-POOL_LIMIT = 10
+POOL_LIMIT = 20
 EXECUTION_LIMIT = 3
 CONTRACT_VERSION = "trader_pool_v1"
 
