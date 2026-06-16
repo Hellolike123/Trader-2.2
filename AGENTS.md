@@ -26,6 +26,10 @@
 - **统一包结构**：所有核心模块已迁移到 `trader_shared/` 包下，支持 `pip install -e .` 开发安装和 `pytest` 直接运行。import 统一为 `from trader_shared.xxx import ...`。
 - **性能优化（2026-05-31）**：`light_data.py` 的 fallback 库（mootdx/akshare/pytdx3）改为懒加载，单票分析 `build_report()` 从 20s 优化到 0.48s（42 倍提升）。`market_env.py` 数据源从 `fetch_kline`（返回分钟线）修正为 `fetch_qfq_daily`（返回日线），缓存增加按日期去重，大盘环境评估从 10s 降到 0.09s。
 - **性能优化（2026-06-15）**：① T0 `build_plan` 的 5 个数据请求（quote/daily/5m/15m/30m）从串行改并行，单次卡片从 0.92s 降到 0.45s（约 46%），盘中每个 monitor 循环都受益。② 单票 `build_report` 消除重复的 `get_env_for_skill` 调用与 `_load_historical_win_rate` 重复抓 300 天日线，稳态从 0.48s 降到 0.43s。③ `cache_utils.set_cached` 修复多线程 tmp 文件名竞态（原用 `os.getpid()` 导致同进程线程互相覆盖），选股池刷新的 cache warning 从每次 4 次降到 0。④ 新增 `refresh` 命令批量重跑全池 `build_report` 并行刷新（8 只票约 1.8s），解决 `plan`/`rank` 使用入池时旧数据的问题。
+- **筹码搬家监控 (Chip Migration Monitor)**：`chip_migration_monitor.py` 对每次单票分析生成的筹码峰快照进行持久化（`~/.trader/chip_history.json`），并对比前后变化。底部筹码峰下降超过 40% 触发警告、超过 50% 触发清仓信号，用于识别主力出货迹象。
+- **资金流向数据 (Fund Flow Data)**：`fund_flow_data.py` 通过东方财富 HTTP API 采集个股日线级资金流向（超大单/大单/中单/小单净流入），并计算衍生特征供主力行为识别引擎使用。
+- **主力行为五阶段识别 (Main Force)**：`main_force.py` 基于资金流向特征、价格数据和筹码信息，识别主力行为所处阶段（吸筹/试盘/拉升/派发/砸盘）。`main_force_output.py` 负责复盘输出格式化。
+- **规则引擎 (Rule Engine)**：`rule_engine.py` 基于 YAML 配置的决策规则引擎，支持比较运算和布尔表达式。`modifier_rule_engine.py` 基于评分修饰规则对候选人评分进行动态调整。
 - 真正的输出格式以 `01-功能包-packages/trader/references/output-template.md` 和 `01-功能包-packages/trader/references/output-style-guide.md` 为准。
 - 需要看实现时，先看 `01-功能包-packages/trader/scripts/run_analysis.py`。
 
@@ -95,6 +99,13 @@ trailing_stop = highest_close × (1 - ATR% × 3.0)
 | `t0` | 盘中 T0 精确执行卡 + 盯盘告警 | `2.4.0-consolidated` | `scripts/final_t0.py` |
 | `review` | 盘后复盘 + 仓位轮动 + 信号追踪 | `2.4.0-consolidated` | `scripts/final_review.py` / `scripts/final_portfolio.py` / `scripts/final_tracker.py` |
 
+运维工具（非 Skill 入口）：
+| 工具 | 用途 | 入口 |
+|------|------|------|
+| `run_trader.py` | 全局中央指挥官路由器，统一路由盘中/盘后指令 | `scripts/run_trader.py` |
+| `t0_cron.py` | T0 盯盘 cron 入口，适合 crontab 每 5 分钟调用 | `scripts/t0_cron.py` |
+| `wechat_monitor.py` | 选股池 WeChat 监控，自动轮询活跃票并推送消息 | `scripts/wechat_monitor.py` |
+
 ---
 
 ## Skill 输出迭代工作流
@@ -109,7 +120,7 @@ trailing_stop = highest_close × (1 - ATR% × 3.0)
 验证：跑测试 + 手动验证输出
 ```
 
-四类变更模板（`openspec/templates/`）：
+四类变更模板（原 `openspec/templates/`，现已废弃）：
 - `performance.md` — 性能优化（含耗时对比）
 - `data-fix.md` — 数据修复（含正确数据来源）
 - `feature.md` — 功能增改（含预期输出示例）
@@ -308,7 +319,7 @@ MA5：59.63 ｜ MA10：60.74 ｜ MA20：60.60 ｜ MA30：59.72
 
 | 文件 | 用途 | 写入者 | 读取者 |
 |------|------|--------|--------|
-| `~/.trader/signals.jsonl` | Signal Contract v1 事件流 | t0 / trader | review / trader |
+| `~/.trader/signals.jsonl` | Signal Contract v2 事件流 | t0 / trader | review / trader |
 | `~/.trader/pool.json` | 选股池状态 | trader | trader |
 | `~/.trader/pending.json` | 待确认池 | trader | trader |
 | `~/.trader/last_plan.json` | 上次作战计划 | trader | trader |
@@ -317,6 +328,7 @@ MA5：59.63 ｜ MA10：60.74 ｜ MA20：60.60 ｜ MA30：59.72
 | `~/.t0-trader/state.json` | T0 盯盘缓存 | t0 | t0 |
 | `~/.review-trader/state.json` | 复盘缓存 | review | review |
 | `~/.trader/signal_results.jsonl` | 信号结算结果（胜率/盈亏比） | signal_tracker / self_calibration | review / self_calibration |
+| `~/.trader/chip_history.json` | 筹码搬家历史快照（用于对比底部筹码峰变化） | chip_migration_monitor | chip_migration_monitor / review |
 | `~/.trader/last_target.txt` | 上次分析标的 | final_report | final_report |
 
 ---
@@ -324,7 +336,7 @@ MA5：59.63 ｜ MA10：60.74 ｜ MA20：60.60 ｜ MA30：59.72
 ## 自检与验证命令
 
 ```bash
-# 运行单元与集成测试（包含 485 个核心计算类测试 + 系统集成测试）
+# 运行单元与集成测试（包含 718 个核心计算类测试 + 系统集成测试）
 python3 -m pytest 02-共享模块-shared/tests/
 python3 -m pytest 01-功能包-packages/*/tests/
 
@@ -337,6 +349,9 @@ python3 02-共享模块-shared/scripts/signal_migration_tool.py
 # 全局打包并自动安装各 Hermes 技能包
 python3 02-共享模块-shared/scripts/pack_all.py
 
+# T0 盯盘 cron 入口（crontab 每 5 分钟）
+# */5 9-14 * * 1-5  cd /path/to/project && python3 scripts/t0_cron.py --pool
+
 # [2.3新增] 盘后/周末离线参数自校准（输出 ~/.trader/calibrated_params.json）
 python3 02-共享模块-shared/scripts/self_calibration.py
 ```
@@ -346,15 +361,15 @@ python3 02-共享模块-shared/scripts/self_calibration.py
 ## 深度参考
 
 | 需要了解 | 去哪里找 |
-|---------|---------|
+|---------|----------|
 | 完整架构、算法详情 | `AGENTS_DEEP.md` |
 | 各 Skill 具体实现 | 各 Skill 目录下 `SKILL.md` |
 | 命令绝对真理 | 各 Skill 目录下 `references/commands.md` |
-| 输出格式绝对真理 | 各 Skill 目录下 `references/output-template.md` + `output-style-guide.md` |
+| 输出格式绝对真理 | 各 Skill 目录下 `references/output-template.md` + `output-style-guide.md`（review 技能用 `review_output-contract.md` 等替代） |
 | Signal Contract 全字段 | `AGENTS_DEEP.md` Section 六 |
 | 测试体系 | `02-共享模块-shared/tests/TESTING.md` |
-| 待实施改进计划 | `docs/superpowers/INDEX.md` |
-| 已知问题 | `docs/issues-and-fix-plan.md` |
+| 待实施改进计划 | `docs/_deprecated/superpowers/` |
+| 已知问题 | `docs/_deprecated/issues-and-fix-plan.md` |
 
 ---
 
@@ -362,7 +377,7 @@ python3 02-共享模块-shared/scripts/self_calibration.py
 
 | 文档 | 用途 | 状态 |
 |------|------|------|
-| `docs/buy-zone-accessibility-fix-plan.md` | 低位买入位可达性问题修复计划（P0-P3） | 待实施 |
+| `docs/_deprecated/buy-zone-accessibility-fix-plan.md` | 低位买入位可达性问题修复计划（P0-P3） | 已归档（待实施） |
 
 ---
 

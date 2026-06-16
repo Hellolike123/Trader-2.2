@@ -208,7 +208,7 @@
 
 **入口**: `scripts/final_report.py`（单票分析）/ `scripts/final_pool.py`（选股池）
 **分析模型**: `run_analysis.py::build_report()` → `final_report.py::render_markdown()` → `build_signal()`
-**策略链**: `strategies = [build_structure_context, chanlun_strategy, wyckoff_strategy]`
+**策略链**: `chanlun_strategy` + `wyckoff_strategy` + `momentum_strategy` 并行执行 → 融合层合并 → `build_structure_context` 串行调用
 **输入数据**: 腾讯日线（前复权 + ATR）+ 实时快照
 **依赖共享模块**: `candidate_core`、`light_data`、`signal_contract`、`chan_core`、`wyckoff_core`
 
@@ -329,7 +329,7 @@ T0 参考 → 低吸/高抛/止损
 **核心函数（实际实现位置）：**
 | 函数 | 实现文件 | 参数 | 返回值 |
 |------ | ------ | ------ | ------ |
-| `build_structure_context()` | structure_core.py | current, bars, change_pct=None, quote=None, fusion_result=None, chan_result=None, fetcher=None, pnl_pct=None | dict[str, Any] |
+| `build_structure_context()` | structure_core.py | current, bars, change_pct=None, quote=None, fusion_result=None, chan_result=None, fetcher=None, pnl_pct=None, vp_result=None | dict[str, Any] |
 | `status_for()` | decision_core.py | 价格/支撑/确认价/止损等 + MA + 压力空间 | str 状态 |
 | `score_for()` | decision_core.py | status + 现价+支撑+空间+MA+ATR dict | float 0-100 |
 | `base_weight()` | decision_core.py | atr_level str | int % |
@@ -558,18 +558,18 @@ trader add → pool.json → plan → last_plan.json
 
 | Skill | 单测文件 | 数量 |
 |------ | ------ | ------ |
-| trader | `tests/test_contract.py` + `tests/test_compare_signals.py` + `test_fusion_integration.py` + `test_pool_contract.py` + `test_self_consistency.py` 等 | 21+ |
-| t0 | `tests/test_t0_contract.py` | 4 |
-| review | `tests/test_portfolio_signals.py` + `tests/test_review_backtrack.py` | 10 |
-| shared | 44 个测试文件（含 `test_bayesian_fusion.py`、`test_big_order_validation.py`、`test_calibrator.py`、`test_signal_tracker_*.py` 等） | 485+ |
-| 总计 | 58 个测试文件，485+ 核心计算类测试用例 | — |
+| trader | `tests/test_contract.py` + `tests/test_compare_signals.py` + `test_fusion_integration.py` + `test_pool_contract.py` + `test_self_consistency.py` + `test_skill_redesign.py` | 6 |
+| t0 | `tests/test_t0_contract.py` + `test_adx_extended.py` + `test_indicators_comprehensive.py` + `test_monitor_fuse.py` | 4 |
+| review | `tests/test_portfolio_signals.py` + `tests/test_review_backtrack.py` + `tests/test_portfolio_contract.py` + `tests/test_portfolio_allocation.py` + `tests/test_review_contract.py` | 5 |
+| shared | 54 个测试文件（含 `test_bayesian_fusion.py`、`test_big_order_validation.py`、`test_calibrator.py`、`test_signal_tracker_*.py` 等） | 718 |
+| 总计 | 70 个测试文件，718 个核心计算类测试用例 | — |
 
 ### 9.2 测试命令
 
 ```bash
 python3 -m pytest 02-共享模块-shared/tests/
 python3 -m pytest 01-功能包-packages/*/tests/
-python3 scripts/self_check.py
+python3 scripts/check_all.py
 ```
 
 ---
@@ -624,7 +624,7 @@ python3 02-共享模块-shared/scripts/pack_all.py
 ### 11.2 版本管理
 
 ```bash
-git tag trader-v0.6.0 HEAD
+git tag trader-v2.4.0 HEAD
 ```
 
 ---
@@ -684,7 +684,7 @@ Trader 2.4/
 - 必须包含 **Critical Rule**: "This is a script-output skill"
 - 必须包含 **Output Contract**: 精确标题顺序和格式
 - 必须包含 **Old Output Detection**: 禁止词和错误模式
-- 现在必须引用 `references/commands.md`、`references/output-template.md` 和 `references/output-style-guide.md` — "绝对真理"声明防止幻觉
+- 现在必须引用 `references/commands.md`、`references/output-template.md` 和 `references/output-style-guide.md` — "绝对真理"声明防止幻觉（review 技能使用 `review_output-contract.md` / `portfolio_output-contract.md` / `tracking_output-contract.md` 替代）
 
 ---
 
