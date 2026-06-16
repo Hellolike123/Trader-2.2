@@ -22,6 +22,7 @@ ATR 3.69（6.1%）波幅偏高
 📍 买卖点
   55.57 止损
   57.61 ← 试探买 10%（缩量企稳）
+  58.20 ← 黄金挂单（斐波那契61.8%）
   58.50 当前
   59.22 → 卖 33%（阻力位）
   62.85 → 卖 33%（1R 目标）
@@ -72,5 +73,6 @@ ATR 3.69（6.1%）波幅偏高
 
 - **ATR**: Displayed if > 0.
 - **Fixed Keywords**: The output MUST contain exactly "试探买" and "止损" to pass automated validation.
+- **黄金挂单**: If `fib_retrace.golden_bid` is valid and differs from the low_zone price, render a line: `{price} ← 黄金挂单（斐波那契{比例}）` between "试探买" and "当前", e.g. `58.20 ← 黄金挂单（斐波那契61.8%）`.
 - **Chip Migration**: MUST include a comparison to the previous day ("对比昨天"), reflecting changes in support and resistance peaks.
 - **Banned Terms**: DO NOT output "必涨", "必跌", "主力入场第一枪", "出货日", "行情结束", "T0 执行卡", "T0买入价", "T0卖出价" and others listed in schema/v1.py.
