@@ -421,3 +421,75 @@ class TestComputeStopSummary:
             current_price=10.0,
         )
         assert result["final_stop"] == 9.5
+
+
+# ── action_for_holding_state ─────────────────────────────────────
+
+class TestActionForHoldingState:
+    """fusion action 持仓场景化仲裁测试。"""
+
+    def test_reduce_with_position(self):
+        """减仓 + 已有仓位 → 已有仓位者执行"""
+        from trader_shared.stage_positioning import action_for_holding_state
+        result = action_for_holding_state("减仓", True)
+        assert result["action"] == "减仓"
+        assert "已有仓位者" in result["holding_hint"]
+
+    def test_reduce_without_position(self):
+        """减仓 + 无仓位 → 未持仓者不参与"""
+        from trader_shared.stage_positioning import action_for_holding_state
+        result = action_for_holding_state("减仓", False)
+        assert result["action"] == "减仓"
+        assert "未持仓者不参与" in result["holding_hint"]
+
+    def test_empty_stop_without_position(self):
+        """空仓/止损 + 无仓位 → 未持仓者不参与"""
+        from trader_shared.stage_positioning import action_for_holding_state
+        result = action_for_holding_state("空仓/止损", False)
+        assert "未持仓者不参与" in result["holding_hint"]
+
+    def test_veto_without_position(self):
+        """大盘否决 + 无仓位 → 未持仓者不参与"""
+        from trader_shared.stage_positioning import action_for_holding_state
+        result = action_for_holding_state("空仓 (大盘很差, 一票否决)", False)
+        assert "未持仓者不参与" in result["holding_hint"]
+
+    def test_add_without_position(self):
+        """增持 + 无仓位 → 未持仓者建仓"""
+        from trader_shared.stage_positioning import action_for_holding_state
+        result = action_for_holding_state("增持", False)
+        assert result["action"] == "增持"
+        assert "建仓" in result["holding_hint"]
+
+    def test_add_with_position(self):
+        """增持 + 已有仓位 → 已有仓位者加仓"""
+        from trader_shared.stage_positioning import action_for_holding_state
+        result = action_for_holding_state("半仓试 (多方主导)", True)
+        assert "已有仓位者" in result["holding_hint"]
+        assert "加仓" in result["holding_hint"]
+
+    def test_neutral_action(self):
+        """观望类动作 → 观望等待"""
+        from trader_shared.stage_positioning import action_for_holding_state
+        result = action_for_holding_state("持股观望", False)
+        assert "观望" in result["holding_hint"]
+
+    def test_disagreement_action(self):
+        """分歧降级动作 → 观望等待"""
+        from trader_shared.stage_positioning import action_for_holding_state
+        result = action_for_holding_state("观望 (信号冲突)", True)
+        assert "观望" in result["holding_hint"]
+
+    def test_empty_action(self):
+        """空 action → 观望等待（fallback）"""
+        from trader_shared.stage_positioning import action_for_holding_state
+        result = action_for_holding_state("", False)
+        assert "观望" in result["holding_hint"]
+
+    def test_action_preserved(self):
+        """所有情况 action 原始值不变"""
+        from trader_shared.stage_positioning import action_for_holding_state
+        for action in ["减仓", "增持", "持股观望", "空仓/止损"]:
+            for has_pos in [True, False]:
+                result = action_for_holding_state(action, has_pos)
+                assert result["action"] == action

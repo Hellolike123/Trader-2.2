@@ -196,3 +196,76 @@ class TestFakeBreakAndPhasedExit:
             bars=bars,
         )
         assert result["base_status"] != "冲高减仓"
+
+
+# ── theory_fusion_conflict ────────────────────────────────────────
+
+class TestTheoryFusionConflict:
+    """低置信度冲突标记测试。"""
+
+    def test_low_confidence_reduce_with_neutral_theory_conflict(self):
+        """低置信度 + 减仓 + 修复观察 → conflict=True"""
+        fusion_result = {"action": "减仓", "confidence": 0.3}
+        result = status_layers(
+            current=10.05, support=10.0, low_zone_upper=10.1, confirm=10.5,
+            hard_stop=9.5, position_ratio=0.0, change_pct=0.0,
+            ma_values=_make_ma_values(), pressure_space_pct=0.0,
+            fusion_result=fusion_result,
+        )
+        assert result["theory_fusion_conflict"] is True
+
+    def test_low_confidence_empty_stop_with_neutral_theory_conflict(self):
+        """低置信度 + 空仓/止损 + 修复观察 → conflict=True"""
+        fusion_result = {"action": "空仓/止损", "confidence": 0.4}
+        result = status_layers(
+            current=10.05, support=10.0, low_zone_upper=10.1, confirm=10.5,
+            hard_stop=9.5, position_ratio=0.0, change_pct=0.0,
+            ma_values=_make_ma_values(), pressure_space_pct=0.0,
+            fusion_result=fusion_result,
+        )
+        assert result["theory_fusion_conflict"] is True
+
+    def test_high_confidence_override_no_conflict(self):
+        """高置信度（触发 override）→ conflict=False"""
+        fusion_result = {"action": "减仓", "confidence": 0.7}
+        result = status_layers(
+            current=10.05, support=10.0, low_zone_upper=10.1, confirm=10.5,
+            hard_stop=9.5, position_ratio=0.0, change_pct=0.0,
+            ma_values=_make_ma_values(), pressure_space_pct=0.0,
+            fusion_result=fusion_result,
+        )
+        # 高置信度触发 override，fusion_override_used=True，conflict=False
+        assert result["fusion_override_used"] is True
+        assert result["theory_fusion_conflict"] is False
+
+    def test_add_action_no_conflict(self):
+        """增持动作不触发冲突（只有减仓/空仓类才标记）"""
+        fusion_result = {"action": "增持", "confidence": 0.3}
+        result = status_layers(
+            current=10.05, support=10.0, low_zone_upper=10.1, confirm=10.5,
+            hard_stop=9.5, position_ratio=0.0, change_pct=0.0,
+            ma_values=_make_ma_values(), pressure_space_pct=0.0,
+            fusion_result=fusion_result,
+        )
+        assert result["theory_fusion_conflict"] is False
+
+    def test_no_fusion_result_no_conflict(self):
+        """无 fusion_result → conflict=False"""
+        result = status_layers(
+            current=10.05, support=10.0, low_zone_upper=10.1, confirm=10.5,
+            hard_stop=9.5, position_ratio=0.0, change_pct=0.0,
+            ma_values=_make_ma_values(), pressure_space_pct=0.0,
+        )
+        assert result["theory_fusion_conflict"] is False
+
+    def test_bearish_theory_no_conflict(self):
+        """theory_status 已是防守观察（非中性）→ conflict=False"""
+        fusion_result = {"action": "减仓", "confidence": 0.3}
+        # 价格远低于支撑位，theory_status 会变成 防守观察/暂不碰，非中性
+        result = status_layers(
+            current=8.0, support=10.0, low_zone_upper=10.1, confirm=10.5,
+            hard_stop=7.5, position_ratio=0.0, change_pct=0.0,
+            ma_values={"ma5": 11.0, "ma10": 12.0, "ma20": 13.0}, pressure_space_pct=0.5,
+            fusion_result=fusion_result,
+        )
+        assert result["theory_fusion_conflict"] is False

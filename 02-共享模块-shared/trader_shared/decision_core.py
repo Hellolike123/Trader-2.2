@@ -397,11 +397,24 @@ def status_layers(
         else:
             theory_status = fusion_status
 
+    # ── 低置信度冲突标记 ──
+    # fusion 说减仓但置信度不够覆盖 theory_status 时，标记冲突让下游感知
+    _reduce_action_set = {"减仓", "空仓/止损", "空仓 (大盘很差, 一票否决)"}
+    _neutral_theory_set = {"修复观察", "承接存在", "未确认转强", "等转强"}
+    theory_fusion_conflict = (
+        not fusion_override_used
+        and isinstance(fusion_result, dict)
+        and safe_float(fusion_result, "confidence") < FUSION_CONFIDENCE_THRESHOLD
+        and str(fusion_result.get("action") or "").strip() in _reduce_action_set
+        and theory_status in _neutral_theory_set
+    )
+
     return {
         "base_status": base_status,
         "theory_status": theory_status,
         "status": theory_status,
         "fusion_override_used": fusion_override_used,
+        "theory_fusion_conflict": theory_fusion_conflict,
         "trend_ok": trend_ok,
         "change": change,
         "below_ma_count": below_ma_count,

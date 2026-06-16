@@ -591,6 +591,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "base_status": base_status,
         "theory_status": theory_status,
         "fusion_override_used": levels.get("fusion_override_used", False),
+        "theory_fusion_conflict": levels.get("theory_fusion_conflict", False),
         "state_label": state_label,
         "structure_note": structure_note,
         "volume_note": volume_note,
@@ -749,6 +750,25 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     report["win_rate_data"] = _load_historical_win_rate(
         str(sec.ts_code), daily_bars=bars
     )
+
+    # ── 一致性仲裁：给 fusion action + suggested_pct 加持仓场景标签 ──
+    # 四个字段（theory_status / fusion.action / suggested_pct / stop）来自独立模块，
+    # 可能互斥（如 fusion 说「减仓」但 suggested_pct=0%）。
+    # 通过 holding_hint + suggested_pct_context 消除互斥语义，让 AI 事实表不再打架。
+    from trader_shared.stage_positioning import action_for_holding_state
+    fusion_action_str = str((report_fusion or {}).get("action") or "").strip()
+    holding_state = action_for_holding_state(fusion_action_str, has_position)
+    report["fusion_holding_hint"] = holding_state["holding_hint"]
+
+    suggested = int((report.get("position_info") or {}).get("suggested_pct") or 0)
+    _reduce_set = {"减仓", "空仓/止损", "空仓 (大盘很差, 一票否决)"}
+    if suggested == 0:
+        if fusion_action_str in _reduce_set:
+            report["suggested_pct_context"] = "0%（未持仓者不参与；已有仓位者执行减仓）"
+        else:
+            report["suggested_pct_context"] = "0%（阶段建议空仓观望）"
+    else:
+        report["suggested_pct_context"] = f"{suggested}%（阶段×大盘环境建议）"
 
     return report
 

@@ -556,6 +556,45 @@ def compute_position_with_env(
     }
 
 
+# ── fusion action 持仓场景化仲裁 ────────────────────────────────────
+
+# fusion action 分类常量
+_REDUCE_ACTIONS = frozenset({"减仓", "空仓/止损", "空仓 (大盘很差, 一票否决)"})
+_ADD_ACTIONS = frozenset({"增持", "半仓试 (多方主导)", "半仓试 (多方主导但有分歧)"})
+
+
+def action_for_holding_state(
+    fusion_action: str,
+    has_position: bool,
+) -> dict[str, str]:
+    """根据持仓状态给 fusion action 加场景标签，消除与 suggested_pct 的互斥。
+
+    当 fusion action 说「减仓」但 suggested_pct=0（未持仓）时，
+    两个语义互斥：减仓的前提是你有仓位才能减。
+    此函数通过 holding_hint 明确场景，让 AI 渲染时不再同框打架。
+
+    Returns:
+        {
+            "action": str,        # 原始 action 保留
+            "holding_hint": str,  # 场景化提示（显示给用户/AI）
+        }
+    """
+    action = str(fusion_action).strip()
+
+    if action in _REDUCE_ACTIONS:
+        if has_position:
+            return {"action": action, "holding_hint": "已有仓位者执行减仓/止损"}
+        return {"action": action, "holding_hint": "未持仓者不参与，无仓可减"}
+
+    if action in _ADD_ACTIONS:
+        if has_position:
+            return {"action": action, "holding_hint": "已有仓位者按 suggested_pct 加仓"}
+        return {"action": action, "holding_hint": "未持仓者按 suggested_pct 建仓"}
+
+    # 持股观望 / 等转强观察 / 观望(信号冲突) 等
+    return {"action": action, "holding_hint": "观望等待，不操作"}
+
+
 def assess_stage(
     current: float,
     ma_values: dict[str, float | None],

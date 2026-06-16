@@ -82,10 +82,15 @@ def main() -> int:
             "state_label": report.get("state_label"),
             "scene": report.get("scene"),
             "fusion_action": (report.get("fusion") or {}).get("action", ""),
+            "fusion_holding_hint": report.get("fusion_holding_hint", ""),
             "fusion_confidence": (report.get("fusion") or {}).get("confidence"),
             "fusion_weighted_score": (report.get("fusion") or {}).get("weighted_score"),
             "fusion_signals_detail": (report.get("fusion") or {}).get("signals_detail"),
             "market_env": (report.get("market_env") or {}).get("level") if isinstance(report.get("market_env"), dict) else "",
+            "suggested_pct": (report.get("position_info") or {}).get("suggested_pct", 0),
+            "suggested_pct_context": report.get("suggested_pct_context", ""),
+            "has_position": report.get("has_position", False),
+            "theory_fusion_conflict": report.get("theory_fusion_conflict", False),
         }
         for k in _NEVER_COMPUTE:
             _facts[k] = "数据不足"
