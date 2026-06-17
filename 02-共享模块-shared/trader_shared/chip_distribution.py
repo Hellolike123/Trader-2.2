@@ -49,7 +49,7 @@ def calc_chip_distribution(
         low = to_float(item.get("low"))
         close = to_float(item.get("close"))
         volume = to_float(item.get("volume")) or 0.0
-        if high is None or low is None or high == low or volume <= 0:
+        if high is None or low is None or volume <= 0:
             continue
         if close is None:
             close = (high + low) / 2.0

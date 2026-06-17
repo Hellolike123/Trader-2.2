@@ -29,7 +29,7 @@ from typing import Dict, Any
 BAYESIAN_FUSION = os.environ.get("BAYESIAN_FUSION", "false").lower() in ("true", "1", "yes")
 
 # ── 动作标签 ─────────────────────────────────────────────────────────────────
-ACTIONS = ["空仓观望", "减仓/防守", "持仓观察", "半仓试多", "加仓做多"]
+ACTIONS = ["空仓/止损", "减仓", "持股观望", "增持", "半仓试 (多方主导)"]
 ACTION_SCORES = [-1.0, -0.5, 0.0, 0.5, 1.0]   # 对应连续分数
 
 
@@ -132,9 +132,9 @@ class BayesianFusion:
         momentum_signal: Dict[str, Any],
         wyckoff_signal: Dict[str, Any],
         regime_state: str = "range",
-        chan_weight: float = 1.2,
-        momentum_weight: float = 0.8,
-        wyckoff_weight: float = 1.1,
+        chan_weight: float = 1.0,
+        momentum_weight: float = 1.5,
+        wyckoff_weight: float = 0.8,
     ) -> Dict[str, Any]:
         """贝叶斯乘积规则融合三路专家似然，返回最优动作及后验概率。
 

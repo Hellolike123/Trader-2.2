@@ -195,10 +195,13 @@ def assess_momentum(bars: list[dict]) -> dict[str, Any]:
     current = last_close
     signals: list[str] = []
     score = 50
+    bullish_rsi_handled = False
+    bearish_rsi_handled = False
     if rsi_oversold or bb_below:
         if rsi_rising or macd_golden:
             signals.append("RSI超卖+回升(看多)")
             score += 15
+            bullish_rsi_handled = True
         elif not rsi_falling:
             signals.append("RSI超卖区(潜在反弹)")
             score += 5
@@ -206,13 +209,14 @@ def assess_momentum(bars: list[dict]) -> dict[str, Any]:
         if rsi_falling or macd_death:
             signals.append("RSI超买+回落(看空)")
             score -= 15
+            bearish_rsi_handled = True
         elif not rsi_rising:
             signals.append("RSI超买区(潜在回调)")
             score -= 5
-    if macd_golden and rsi_rising:
+    if macd_golden and rsi_rising and not bullish_rsi_handled:
         signals.append("MACD金叉+RSI上升(偏多)")
         score += 12
-    if macd_death and rsi_falling:
+    if macd_death and rsi_falling and not bearish_rsi_handled:
         signals.append("MACD死叉+RSI下降(偏空)")
         score -= 12
     if macd_positive and not rsi_falling:
