@@ -6,7 +6,7 @@
 
 四层防护：
   1. 多日确认（连续 3 日信号一致才确认阶段转换）
-  2. 置信度评分（<60% 保持上次阶段）
+  2. 置信度评分（<50% 保持上次阶段）
   3. 缠论+动量交叉验证（冲突时降级）
   4. 阶段锁定期（转换后锁定 5 天）
 
@@ -530,21 +530,24 @@ def compute_position_with_env(
     single_limit = env["single"]
     total_limit = env["total"]
 
-    # 硬规则检查
+    # 硬规则检查（收集所有触发的原因）
     hard_blocked = False
-    hard_reason = ""
+    hard_reasons: list[str] = []
 
     if pnl_pct < 0:
         hard_blocked = True
-        hard_reason = "持仓亏损，禁止加仓"
+        hard_reasons.append("持仓亏损，禁止加仓")
 
     if stage == "衰退":
         hard_blocked = True
-        hard_reason = "衰退期，禁止建仓"
+        hard_reasons.append("衰退期，禁止建仓")
 
     if total_position_pct >= total_limit:
         hard_blocked = True
-        hard_reason = f"总仓位 {total_position_pct}% 已达上限 {total_limit}%"
+        hard_reasons.append(f"总仓位 {total_position_pct}% 已达上限 {total_limit}%")
+
+    # 合并原因为字符串
+    hard_reason = "；".join(hard_reasons) if hard_reasons else ""
 
     # 建议仓位
     if hard_blocked:
@@ -664,7 +667,7 @@ def assess_stage(
     # 置信度门控（先于多日确认，过滤噪音信号）
     gated_stage, gated_confidence = _layer2_confidence_gate(raw_stage, raw_confidence, state)
     if gated_stage != raw_stage:
-        protection_notes.append(f"置信度{raw_confidence}%<60%，保持{gated_stage}")
+        protection_notes.append(f"置信度{raw_confidence}%<50%，保持{gated_stage}")
 
     # 多日确认（在置信度过滤之后，确认阶段转换真实性）
     confirmed_stage, is_transition = _layer1_multi_day_confirm(gated_stage, state, trade_date=trade_date)

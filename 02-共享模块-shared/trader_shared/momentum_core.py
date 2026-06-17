@@ -47,7 +47,7 @@ def calc_rsi(closes: list[float], period: int = 14) -> list[float | None]:
         if i > period:
             avg_g = (avg_g * (period - 1) + gains[i - 1]) / period
             avg_l = (avg_l * (period - 1) + losses[i - 1]) / period
-        result[i] = 50.0 if avg_l == 0 and avg_g == 0 else 100.0 if avg_l == 0 else 100 - 100 / (1 + avg_g / avg_l)
+        result[i] = 50.0 if avg_l < 1e-10 and avg_g < 1e-10 else 100.0 if avg_l < 1e-10 else 100 - 100 / (1 + avg_g / avg_l)
     return result
 
 
@@ -143,7 +143,7 @@ def calc_bollinger(closes: list[float], period: int = 20, num_std: float = 2.0) 
         return {"upper": None, "middle": None, "lower": None, "pct_b": None, "squeeze": False}
     window = closes[-period:]
     middle = sum(window) / period
-    variance = sum((x - middle) ** 2 for x in window) / period
+    variance = sum((x - middle) ** 2 for x in window) / (period - 1)  # 样本方差
     std = max(math.sqrt(variance), 1e-10)
     upper = middle + num_std * std
     lower = middle - num_std * std

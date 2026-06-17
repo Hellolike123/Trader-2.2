@@ -146,6 +146,8 @@ def _score_chip(chip_migration: dict[str, Any]) -> int:
             score += 0  # 支撑小幅减弱
         else:
             score += -1  # 支撑大幅减弱（扣分后归零）
+    else:
+        score += 1  # 数据缺失时给基础分，保持评分公平
 
     # 阻力变化（2分）
     if resistance_info:
@@ -158,6 +160,8 @@ def _score_chip(chip_migration: dict[str, Any]) -> int:
             score += 0  # 阻力小幅增加
         else:
             score += -1  # 阻力大幅增加
+    else:
+        score += 1  # 数据缺失时给基础分，保持评分公平
 
     # 警告级别（1分）
     if warning_level == "none":

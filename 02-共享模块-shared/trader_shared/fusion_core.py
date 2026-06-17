@@ -273,7 +273,11 @@ def _apply_main_force_weights(weights: dict[str, float], main_force_env: str) ->
         adjusted[k] = max(0.0, weights[k] + adj.get(k, 0.0))
     total = sum(adjusted.values())
     if total > 0:
-        adjusted = {k: round(v / total, 4) for k, v in adjusted.items()}
+        # 先归一化，然后将最后一个权重设为 1.0 - sum(其他权重) 确保精确和为1.0
+        keys = list(adjusted.keys())
+        for k in keys[:-1]:
+            adjusted[k] = round(adjusted[k] / total, 4)
+        adjusted[keys[-1]] = round(1.0 - sum(adjusted[k] for k in keys[:-1]), 4)
     return adjusted
 
 

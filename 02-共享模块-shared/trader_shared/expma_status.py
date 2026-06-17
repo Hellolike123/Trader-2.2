@@ -113,19 +113,19 @@ def _score_alignment(expma_values: dict[str, float | None]) -> int:
     e30 = expma_values.get("30")
     e50 = expma_values.get("50")
 
-    if e10 and e20 and e30:
+    if e10 is not None and e20 is not None and e30 is not None and e10 > 0 and e20 > 0 and e30 > 0:
         if e10 > e20 > e30:
             return 3
         elif e10 < e20 < e30:
             return 0
         else:
             return 1
-    elif e10 and e20:
+    elif e10 is not None and e20 is not None and e10 > 0 and e20 > 0:
         if e10 > e20:
             return 2
         else:
             return 0
-    elif e10:
+    elif e10 is not None and e10 > 0:
         return 1
 
     return 0

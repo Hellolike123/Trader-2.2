@@ -298,7 +298,7 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None, index_returns: lis
     chan = signals_detail.get("chan", {})
     if isinstance(chan, dict):
         reason = str(chan.get("reason", ""))
-        direction = chan.get("direction", 0)
+        direction = max(-1, min(1, int(chan.get("direction", 0) or 0)))  # 范围截断
         confidence = safe_float(chan, "confidence")
         # 上攻笔/三买/底背驰 → 低吸区更宽
         if direction == 1 and confidence >= 0.4:

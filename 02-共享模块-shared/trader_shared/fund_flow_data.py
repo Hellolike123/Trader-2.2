@@ -136,7 +136,8 @@ def calc_fund_flow_features(
     cum_5 = sum(d.get("net_flow_wan", 0) for d in recent5)
     cum_10 = sum(d.get("net_flow_wan", 0) for d in recent10)
 
-    # 连续流入/流出天数（net_flow=0 视为当前方向延续）
+    # 连续流入/流出天数
+    # net_flow=0 时：若已有方向则延续，否则中断
     consecutive_in = 0
     consecutive_out = 0
     for d in reversed(daily_flow):
@@ -152,7 +153,7 @@ def calc_fund_flow_features(
             else:
                 break
         else:
-            # net_flow=0: 视为当前方向延续
+            # net_flow=0: 若已有方向则延续，否则中断
             if consecutive_in > 0:
                 consecutive_in += 1
             elif consecutive_out > 0:
