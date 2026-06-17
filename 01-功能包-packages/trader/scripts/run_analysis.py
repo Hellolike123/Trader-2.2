@@ -324,6 +324,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
                 today_record = daily_flow[-1] if daily_flow else {}
                 mf["today_super_large_wan"] = float(today_record.get("super_large_wan", 0) or 0)
                 mf["today_large_wan"] = float(today_record.get("large_wan", 0) or 0)
+                # 补充 net_flow_pct（detect_main_force_stage 的 _result 不返回此字段）
+                mf["net_flow_pct"] = features.get("net_flow_pct", 0)
                 return mf
         return {}
 
@@ -349,6 +351,13 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         main_force_env = mf_result.get("stage", "unknown")
     except Exception:
         pass
+
+    # 大单分析（初始空结果，稍后在 levels 计算后补全）
+    big_order_result: dict[str, Any] = {"events": [], "summary": "暂无明显大单回溯。",
+                                         "direction_summary": "暂无明显方向。",
+                                         "total_hands": None, "total_amount_wan": None,
+                                         "by_side": {"主动买入": None, "主动卖出": None},
+                                         "validation": None}
 
     # 大盘环境结果（异常降级）
     try:
@@ -410,6 +419,15 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     levels["main_force"] = mf_result
     levels["main_force_env"] = main_force_env
 
+    # 大单分析（在 levels 计算后补全，使用 key_pressure 作为关注区）
+    if big_order_result.get("events") is None or not big_order_result.get("events"):
+        try:
+            from trader_shared.big_order import analyze_big_orders
+            big_order_result = analyze_big_orders(bars_5m, focus_prices=levels.get("key_pressure"),
+                                                   trade_date=quote.get("trade_date")) if bars_5m else big_order_result
+        except Exception:
+            pass
+
     support = levels["main_support"]
     resistance = levels["resistance"]
     confirm = levels["confirm_price"]
@@ -456,6 +474,22 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         except Exception:
             pass
 
+    # 主力行为独立评分（15分制）
+    main_force_score_result: dict[str, Any] = {"total_score": 0, "flow_score": 0, "chip_score": 0,
+                                                 "order_score": 0, "detail": {}, "label": "🔴无数据"}
+    mf_features = mf_result if mf_result else {}
+    if mf_features or big_order_result.get("events"):
+        try:
+            from trader_shared.main_force_scoring import score_main_force
+            main_force_score_result = score_main_force(
+                features=mf_features,
+                chip_migration=chip_migration,
+                big_order=big_order_result,
+                bars=bars,
+            )
+        except Exception:
+            pass
+
     # EXPMA 计算（提前到 report 构造之前）
     expma10_val = None
     expma12_val = None
@@ -490,6 +524,45 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
                 expma_trend = "短期偏多"
             else:
                 expma_trend = "短期偏空"
+    except Exception:
+        pass
+
+    # EXPMA 详细状态（10分制）
+    expma_status_result: dict[str, Any] = {
+        "total_score": 0, "alignment_score": 0, "slope_score": 0,
+        "cross_score": 0, "deviation_score": 0,
+        "expma_values": {}, "trend_label": "数据不足", "detail": {},
+    }
+    try:
+        closes_for_expma = [float(b.get("close") or 0) for b in bars if float(b.get("close") or 0) > 0]
+        if len(closes_for_expma) >= 10:
+            from trader_shared.expma_status import calc_expma_status
+            expma_status_result = calc_expma_status(closes_for_expma, current, bars)
+    except Exception:
+        pass
+
+    # 多时间窗共振（10分制）
+    resonance_result: dict[str, Any] = {
+        "total_score": 0, "weekly_score": 0, "daily_score": 0,
+        "timing_score": 0, "resonance_score": 0,
+        "weekly_label": "无数据", "daily_label": "无数据",
+        "timing_label": "无数据", "resonance_label": "无数据",
+        "detail": {},
+    }
+    try:
+        from trader_shared.multi_timeframe_resonance import calc_resonance
+        res_d_closes = [float(b.get("close") or 0) for b in bars if float(b.get("close") or 0) > 0]
+        _support_f = float(support) if support else 0
+        _resistance_f = float(resistance) if resistance else 0
+        if res_d_closes and len(res_d_closes) >= 10:
+            resonance_result = calc_resonance(
+                daily_closes=res_d_closes,
+                current_price=current,
+                weekly_bars=None,  # 周线数据暂不抓取，用日线代理
+                bars_60m=bars_5m,  # 用5分钟线作为短线代理（暂无60分钟线抓取）
+                daily_support=_support_f,
+                daily_resistance=_resistance_f,
+            )
     except Exception:
         pass
 
@@ -621,6 +694,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "gap": levels.get("gap"),
         "time_window": levels.get("time_window"),
         "fib_retrace": levels.get("fib_retrace"),
+        "main_force_score": main_force_score_result,
+        "big_order_summary": big_order_result.get("summary"),
+        "big_order_direction": big_order_result.get("direction_summary"),
         "major_stage": stage_result["major_stage"],
         "major_reason": stage_result["major_reason"],
         "short_term_momentum": stage_result["momentum"],
@@ -637,6 +713,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "expma20": expma20_val,
         "expma50": expma50_val,
         "expma_trend": expma_trend,
+        "expma_status": expma_status_result,
+        "resonance": resonance_result,
         # "extend_fundamental": snapshot.extend_fundamental,
         # "extend_sentiment": snapshot.extend_sentiment,
     }
@@ -1124,6 +1202,40 @@ def render_markdown(r: dict) -> str:
     trend_action = "不追" if current_price < confirm else "可加仓"
     lines.append(f"  趋势：短期偏弱（{trend_desc}），{trend_action}")
 
+    # EXPMA 详细状态
+    ems = r.get("expma_status") or {}
+    if ems.get("total_score") is not None:
+        em_total = ems["total_score"]
+        em_trend = ems.get("trend_label", "无数据")
+        em_vals = ems.get("expma_values", {})
+        lines.append(f"  EXPMA：{em_trend}（{em_total}/10）")
+        expma_parts = []
+        for p in [5, 10, 20, 50]:
+            val = em_vals.get(str(p))
+            if val and val > 0:
+                expma_parts.append(f"EXPMA{p}={val:.2f}")
+        if expma_parts:
+            lines.append(f"  {', '.join(expma_parts)}")
+
+    # 多时间窗共振
+    res = r.get("resonance") or {}
+    if res.get("total_score") is not None:
+        res_total = res["total_score"]
+        res_label = res.get("resonance_label", "无数据")
+        w_label = res.get("weekly_label", "")
+        d_label = res.get("daily_label", "")
+        t_label = res.get("timing_label", "")
+        lines.append(f"  多窗：{res_label}（{res_total}/10）")
+        parts = []
+        if w_label:
+            parts.append(f"周{w_label}")
+        if d_label:
+            parts.append(f"日{d_label}")
+        if t_label:
+            parts.append(f"60min{t_label}")
+        if parts:
+            lines.append(f"  {' ｜ '.join(parts)}")
+
     has_position = r.get("has_position", False)
     cost_price = float(r.get("cost_price") or 0)
     if has_position and cost_price > 0:
@@ -1210,7 +1322,28 @@ def render_markdown(r: dict) -> str:
                 lines.append(f"    结论：主力在吸筹")
             else:
                 lines.append(f"    结论：{warning_text}")
-            
+
+    # 主力行为评分（15分制）
+    mf_score = r.get("main_force_score") or {}
+    if mf_score.get("total_score") is not None:
+        total = mf_score["total_score"]
+        label = mf_score.get("label", "无数据")
+        flow = mf_score.get("flow_score", 0)
+        chip_s = mf_score.get("chip_score", 0)
+        order_s = mf_score.get("order_score", 0)
+        detail = mf_score.get("detail", {})
+        sigs = detail.get("signals", [])
+        lines.extend(["", "💰 主力行为",
+                       f"  {label} ｜ {total}/15",
+                       f"  资金{flow}/6 ｜ 筹码{chip_s}/5 ｜ 大单{order_s}/4"])
+        if sigs:
+            for s in sigs[:3]:
+                lines.append(f"  ·{s}")
+        # 大单方向
+        bo_dir = r.get("big_order_direction")
+        if bo_dir and bo_dir not in ("暂无明显方向。", ""):
+            lines.append(f"  大单方向：{bo_dir}")
+
     fusion = r.get("fusion") or {}
     signals = fusion.get("signals_detail") or {}
     chan_score = signals.get("chan", {}).get("confidence", 0) * 100 if isinstance(signals.get("chan"), dict) else 75
