@@ -189,11 +189,16 @@ def calc_chip_distribution(
             selected_peaks.append(idx)
             
     # D. 如果独立的局部极大值峰不足 3 个，使用普通 bins 进行补齐，同样遵守非邻近/去重过滤
+    # M1 fix: 补齐的峰至少占总筹码 1%，防止弱信号峰干扰
+    min_peak_share = 1.0
     if len(selected_peaks) < 3:
         sorted_indices = sorted(range(num_bins), key=lambda i: volume_map[i], reverse=True)
         for idx in sorted_indices:
             if len(selected_peaks) >= 3:
                 break
+            share_pct = volume_map[idx] / total_chip * 100
+            if share_pct < min_peak_share:
+                continue  # 跳过体积不足 1% 的 bin
             price = price_bins[idx]
             far_enough = True
             for sel_idx in selected_peaks:
@@ -291,10 +296,13 @@ def calc_chip_distribution(
     volume_above = vol_above_current_bin + (total_chip - vol_below - volume_map[current_bin_idx])
     volume_above_pct = round(max(0.0, min(100.0, (volume_above / total_chip) * 100)), 1)
 
+    # M2 fix: current_pct = 当前价之下筹码占比（与 volume_above_pct 互补）
+    current_pct = round(max(0.0, min(100.0, 100.0 - volume_above_pct)), 1)
+
     return {
         "peaks": all_peaks,
         "total_volume": round(total_chip),
-        "current_pct": volume_above_pct,
+        "current_pct": current_pct,
         "mid_price": round(mid_price, 2) if mid_price is not None else None,
         "volume_above_pct": volume_above_pct,
         "bin_width": round(tick, 4),

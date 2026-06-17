@@ -98,7 +98,7 @@ def _get_major_stage(r: dict[str, Any]) -> str:
         stage_map = {
             "修复": "蓄势",
             "走强": "主升",
-            "震荡": "派发",
+            "震荡": "蓄势",
             "转弱": "衰退",
         }
         major_stage = stage_map.get(old_stage, old_stage)
@@ -532,6 +532,14 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     closes_250 = [to_float(b.get("close")) for b in bars[-250:] if to_float(b.get("close")) is not None]
     ma250 = sum(closes_250) / len(closes_250) if len(closes_250) >= 250 else None
 
+    # C2 fix: extract trade_date from bars/quote for multi-day confirmation
+    bars_date = ""
+    if bars and len(bars) > 0:
+        last_bar = bars[-1]
+        bars_date = str(last_bar.get("trade_date") or last_bar.get("date") or "")
+    if not bars_date:
+        bars_date = str(quote.get("trade_date") or quote.get("date") or "")
+
     stage_result = assess_stage(
         current=current,
         ma_values={**ma_raw_v, "ma250": ma250},
@@ -542,6 +550,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         chip_migration=chip_migration,
         fib_retrace=levels.get("fib_retrace"),
         symbol=sec.ts_code,
+        trade_date=bars_date,
     )
 
     report = {
@@ -969,6 +978,8 @@ def _load_historical_win_rate(symbol: str, daily_bars: list[dict[str, Any]] | No
                 direction = str(sig.get("direction", ""))
                 if sig_type == "low_buy_triggered":
                     buy_signals.append(return_pct)
+                elif sig_type == "high_sell_triggered":
+                    sell_signals.append(return_pct)
                 elif direction in ("bullish", "bullish_lean"):
                     buy_signals.append(return_pct)
                 elif direction in ("bearish", "bearish_lean"):
@@ -1021,7 +1032,7 @@ def render_markdown(r: dict) -> str:
         stage_map = {
             "修复": "蓄势",
             "走强": "主升",
-            "震荡": "派发",
+            "震荡": "蓄势",
             "转弱": "衰退",
         }
         major_stage = stage_map.get(old_stage, old_stage)
@@ -1068,7 +1079,7 @@ def render_markdown(r: dict) -> str:
         lines.append(f"  {golden_bid:.2f} ← 黄金挂单（斐波那契{label}）")
     else:
         # 没有落在低吸区的回撤位，取最接近低吸区的那个作为参考
-        low_zone_upper = r.get("low_zone_upper") or (support * 1.05 if support else 0)
+        low_zone_upper = r.get("low_zone_upper") or (low_price * 1.05 if low_price else 0)
         candidates = []
         for ratio_label, key in [("61.8%", "retrace_618"), ("50%", "retrace_500"), ("38.2%", "retrace_382")]:
             val = fib.get(key)

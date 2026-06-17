@@ -6,13 +6,17 @@ from trader_shared.chip_distribution import calc_chip_distribution, to_float
 
 # ========== BUG 10: current_pct semantic ==========
 def test_bug10_current_pct_is_volume_above_pct():
-    """current_pct now correctly reflects '% volume above current price', NOT median bin position."""
+    """current_pct now correctly reflects '% chips below current price', complementary to volume_above_pct."""
     bar_sym = [{"high": 61.0, "low": 59.0, "close": 60.0, "volume": 10000}] * 5
     r = calc_chip_distribution(bar_sym, tick_size=0.15)
     assert r["current_pct"] is not None
-    assert r["current_pct"] == r["volume_above_pct"]
-    assert 20 < r["current_pct"] < 80, "volume_above_pct should be between 20%% and 80%%, got %.1f%%" % r["current_pct"]
-    print("  BUG 10: PASS — current_pct=%.1f%% is actual volume above" % r["current_pct"])
+    # M2 fix: current_pct + volume_above_pct ≈ 100 (complementary relationship)
+    assert abs(r["current_pct"] + r["volume_above_pct"] - 100.0) < 0.5, (
+        f"current_pct={r['current_pct']} + volume_above_pct={r['volume_above_pct']} should sum to ~100"
+    )
+    assert 20 < r["volume_above_pct"] < 80, "volume_above_pct should be between 20%% and 80%%, got %.1f%%" % r["volume_above_pct"]
+    print("  BUG 10: PASS — current_pct=%.1f%% + volume_above_pct=%.1f%% = %.1f%% (complementary)" % (
+        r["current_pct"], r["volume_above_pct"], r["current_pct"] + r["volume_above_pct"]))
 
 
 # ========== BUG 11: mid_price linear interpolation ==========

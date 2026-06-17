@@ -183,7 +183,7 @@ def offline_report(target: str) -> dict[str, Any]:
         "confirm": confirm,
         "stop": stop,
         "take": take,
-        "stage": "震荡",
+        "stage": "蓄势",
         "scene": "防守观察",
         "low_zone": f"{support:.2f}-{base:.2f}元",
         "volume_text": "离线样本，量能按待确认处理。",
@@ -601,15 +601,16 @@ def _days_lapsed(item: dict[str, Any], today: date) -> int:
 
 def _verify_observe_track(sig_type: str, item: dict[str, Any], current: float, days: int, summary: dict) -> str:
     """Verify observe/low_buy_watch/track signals: expect price to rise from support."""
-    expect_up = current > to_float(item.get("support") or item.get("current") or 0) * 1.01
+    support = to_float(item.get("support") or item.get("current") or 0)
+    confirmed_up = current > support * 1.01 if support > 0 else False
     if days <= 2:
         summary["未验证"] = summary.get("未验证", 0) + 1
         return "⏳ 第1天" if days == 1 else "⏳ 第2天"
-    if expect_up:
-        summary["未验证"] = summary.get("未验证", 0) + 1
-        return "⏳ 继续等"
-    summary["信号错了"] = summary.get("信号错了", 0) + 1
-    return "⚠️ 信号存疑"
+    if confirmed_up:
+        summary["已验证"] = summary.get("已验证", 0) + 1
+        return "✅ 确认上涨中"
+    summary["守支撑"] = summary.get("守支撑", 0) + 1
+    return "⏳ 支撑位守住了"
 
 
 def _verify_high_sell(sig_type: str, item: dict[str, Any], current: float, days: int, summary: dict) -> str:

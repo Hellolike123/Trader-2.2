@@ -355,9 +355,16 @@ def _layer1_multi_day_confirm(
         # 信号一致，重置 pending
         return prev_stage, False
 
+    if not trade_date:
+        # 降级模式：trade_date 为空时直接返回原始阶段，不触发转换
+        state["pending_stage"] = ""
+        state["pending_count"] = 0
+        state["pending_date"] = ""
+        return raw_stage, False
+
     if raw_stage == pending_stage:
         # 连续相同的非当前信号 — 按交易日计数
-        if trade_date and trade_date == pending_date:
+        if trade_date == pending_date:
             # 同一天多次调用，不递增
             return prev_stage, False
         # 新交易日，递增
@@ -1559,50 +1566,6 @@ def _assess_resistance_strength(
         return "weak"
     
     return "strong"
-    score = 0
-
-    # 必要条件
-    if conditions.get("pullback_to_support"):
-        score += 1
-    if conditions.get("above_atr_stop"):
-        score += 1
-
-    # 加分条件：缩量回踩
-    if bars and len(bars) >= 10:
-        recent_vol = sum(float(b.get("volume") or 0) for b in bars[-3:]) / 3
-        earlier_vol = sum(float(b.get("volume") or 0) for b in bars[-10:-3]) / 7
-        if earlier_vol > 0 and recent_vol < earlier_vol * 0.8:
-            score += 1
-
-    # 加分条件：RSI 超卖反弹
-    if bars and len(bars) >= 20:
-        try:
-            from trader_shared.momentum_core import calc_rsi
-            closes = [float(b.get("close") or 0) for b in bars]
-            rsi_vals = calc_rsi(closes)
-            if rsi_vals and len(rsi_vals) >= 2:
-                latest_rsi = rsi_vals[-1]
-                prev_rsi = rsi_vals[-2]
-                if latest_rsi is not None and prev_rsi is not None:
-                    if prev_rsi < 30 and latest_rsi > prev_rsi:
-                        score += 1
-        except Exception:
-            pass
-
-    # 加分条件：MACD 底背离或金叉
-    if bars and len(bars) >= 30:
-        try:
-            from trader_shared.momentum_core import calc_macd
-            closes = [float(b.get("close") or 0) for b in bars]
-            macd = calc_macd(closes)
-            if macd.get("golden_cross"):
-                score += 1
-        except Exception:
-            pass
-
-    return min(score, 5)
-
-
 def _make_position_state(
     state: str,
     reason: str,

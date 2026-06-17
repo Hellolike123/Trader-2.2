@@ -10,6 +10,7 @@ accumulation（吸筹）、testing（试盘）、markup（拉升）、distributi
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -106,8 +107,10 @@ def detect_main_force_stage(
             # 检查是否有次日回落
             if len(bars) >= 3:
                 peak_idx = None
+                last3_closes = [float(bb.get("close") or 0) for bb in bars[-3:]]
+                max_close = max(last3_closes)
                 for i, b in enumerate(bars[-3:]):
-                    if float(b.get("close") or 0) == max(float(bb.get("close") or 0) for bb in bars[-3:]):
+                    if math.isclose(float(b.get("close") or 0), max_close, rel_tol=1e-9, abs_tol=1e-9):
                         peak_idx = i
                         break
                 if peak_idx is not None and peak_idx < 2:
