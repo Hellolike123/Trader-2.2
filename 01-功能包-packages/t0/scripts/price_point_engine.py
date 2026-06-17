@@ -56,7 +56,7 @@ from indicators import (
 )
 
 
-STATUSES = {"已触发", "观察中", "未进入候选区", "被阻断", "数据不足", "触发过期", "买 10%", "买 23%", "熔断中"}
+STATUSES = {"已触发", "观察中", "未进入候选区", "被阻断", "数据不足", "触发过期", "熔断中"}
 MIN_OBSERVE_SPREAD_ABS = 0.05
 MIN_OBSERVE_SPREAD_PCT = 0.005
 
@@ -336,28 +336,12 @@ def macd_green_shrinking(state: dict[str, Any]) -> bool:
     return last is not None and prev is not None and last < 0 and abs(last) < abs(prev)
 
 
-def macd_green_expanding(state: dict[str, Any]) -> bool:
-    if not state.get("macd_ready"):
-        return False
-    last = state.get("last_hist")
-    prev = state.get("prev_hist")
-    return last is not None and prev is not None and last < 0 and abs(last) > abs(prev)
-
-
 def macd_red_shrinking(state: dict[str, Any]) -> bool:
     if not state.get("macd_ready"):
         return False
     last = state.get("last_hist")
     prev = state.get("prev_hist")
     return last is not None and prev is not None and last > 0 and last < prev
-
-
-def macd_red_expanding(state: dict[str, Any]) -> bool:
-    if not state.get("macd_ready"):
-        return False
-    last = state.get("last_hist")
-    prev = state.get("prev_hist")
-    return last is not None and prev is not None and last > 0 and last > prev
 
 
 def rsi_turning_up(state: dict[str, Any]) -> bool:
@@ -434,15 +418,14 @@ def _trend_filter(daily_bars: list[dict[str, Any]]) -> bool:
     if not daily_bars:
         return True
     closes = _close_vals(daily_bars)
-    # C-13/T0-3 fix: 从 900 改为 60，与 trader_shared/config.py 统一
-    # 原 900 需 3.5 年数据，但 T0 只取 30 天数据，趋势过滤永远为 True
-    if len(closes) < 60:
+    # T0 只抓取 30 天日线，用 15 天 vs 15 天判断短期趋势
+    if len(closes) < 30:
         return True
-    ma30 = sum(closes[-30:]) / 30
-    long_avg = sum(closes[:-30]) / max(len(closes) - 30, 1)
+    ma15 = sum(closes[-15:]) / 15
+    long_avg = sum(closes[:-15]) / max(len(closes) - 15, 1)
     if long_avg <= 0:
         return True
-    return ma30 > long_avg
+    return ma15 > long_avg
 
 
 def vwap_uptrend(state: dict[str, Any]) -> bool:
@@ -660,7 +643,7 @@ def calculate_buy_price_model(report_data: dict[str, Any], zones: dict[str, Any]
     acceptable = None
     status = trigger["status"]
     trigger_price = trigger.get("trigger_price")
-    if status in ("已触发", "买 10%", "买 23%") and trigger_price is not None:
+    if status == "已触发" and trigger_price is not None:
         execution = round_price(trigger_price * BUY_CONFIRM_FACTOR)
         acceptable = round_price(execution * BUY_ACCEPT_FACTOR if execution else None)
         if acceptable is not None and float(report_data["current_price"]) > acceptable:
@@ -683,10 +666,20 @@ def calculate_buy_price_model(report_data: dict[str, Any], zones: dict[str, Any]
     }
 
 
-def calculate_sell_price_model(report_data: dict[str, Any], zones: dict[str, Any], trigger: dict[str, Any]) -> dict[str, Any]:
+def calculate_sell_price_model(report_data: dict[str, Any], zones: dict[str, Any], trigger: dict[str, Any], atr14: float = 0) -> dict[str, Any]:
     zone = zones["sell_zone"]
     observation = zone["lower"]
     invalid = round_price(zone["main_resistance"] * INVALID_ABOVE_RESISTANCE)
+    if atr14 > 0:
+        atr_distance = atr14 * ATR_STOP_FACTOR
+        pct_min = float(report_data.get("current_price", 0)) * ATR_STOP_MIN_PCT
+        atr_distance = max(atr_distance, pct_min)
+        pct_max = float(report_data.get("current_price", 0)) * ATR_STOP_MAX_PCT
+        if atr_distance > pct_max:
+            atr_distance = pct_max
+        atr_invalid = round_price(float(report_data["current_price"]) + atr_distance)
+        if atr_invalid is not None and atr_invalid > 0:
+            invalid = max(invalid, atr_invalid)
     execution = None
     acceptable = None
     status = trigger["status"]
@@ -722,8 +715,6 @@ def action_for_buy(status: str) -> str:
         "触发过期": "错过了，不追",
         "被阻断": "被阻断，不接",
         "数据不足": "只观察，不执行",
-        "买 10%": "可以低吸",
-        "买 23%": "可以低吸",
     }.get(status, "只观察，不执行")
 
 
@@ -743,11 +734,11 @@ def choose_today_action(report_data: dict[str, Any], buy: dict[str, Any], sell: 
         return "等待，不主动操作"
     if "触发过期" in {buy["status"], sell["status"]}:
         return "等待下一次触发"
-    if buy["status"] in ("已触发", "买 10%", "买 23%") and sell["status"] not in ("已触发", "买 10%", "买 23%"):
+    if buy["status"] == "已触发" and sell["status"] != "已触发":
         return "低吸优先"
     if sell["status"] == "已触发" and buy["status"] != "已触发":
         return "高抛优先"
-    if buy["status"] in ("已触发", "买 10%", "买 23%") and sell["status"] in ("已触发", "买 10%", "买 23%"):
+    if buy["status"] == "已触发" and sell["status"] == "已触发":
         current = float(report_data["current_price"])
         buy_mid = (buy["zone"]["lower"] + buy["zone"]["upper"]) / 2
         sell_mid = (sell["zone"]["lower"] + sell["zone"]["upper"]) / 2
@@ -771,7 +762,7 @@ def position_size(data_status_value: str, action: str, buy: dict[str, Any], sell
     if action not in {"低吸优先", "高抛优先"}:
         return "不动"
     model = buy if action == "低吸优先" else sell
-    if model["status"] not in ("已触发", "买 10%", "买 23%"):
+    if model["status"] != "已触发":
         return "不动"
     if space_state_value == "too_small":
         return "不动"
@@ -838,7 +829,7 @@ def build_price_point_model(report_data: dict[str, Any], structure_result: dict[
     buy_trigger = detect_buy_trigger(data, zones, indicator_state)
     sell_trigger = detect_sell_trigger(data, zones, indicator_state)
     buy_model = calculate_buy_price_model(data, zones, buy_trigger, atr14_val)
-    sell_model = calculate_sell_price_model(data, zones, sell_trigger)
+    sell_model = calculate_sell_price_model(data, zones, sell_trigger, atr14_val)
     observation_flags = observation_validity(data, zones)
     buy_model["observation_valid"] = observation_flags["buy_valid"]
     buy_model["observation_reason"] = observation_flags["buy_reason"]

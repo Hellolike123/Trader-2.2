@@ -89,7 +89,7 @@ def numeric_or_none(value: Any) -> float | None:
 
 def side_status(model: dict[str, Any]) -> str:
     status = str(model.get("status") or "")
-    if status in ("已触发", "买 10%", "买 23%") and model.get("execution_price") is not None:
+    if status == "已触发" and model.get("execution_price") is not None:
         return "可执行"
     if status == "触发过期":
         return "已错过"
@@ -101,10 +101,7 @@ def side_status(model: dict[str, Any]) -> str:
 
 
 def side_display(model: dict[str, Any]) -> str:
-    """Return display status: show '买 10%' or '买 23%' instead of '已触发'."""
-    raw = str(model.get("status") or "")
-    if raw in ("买 10%", "买 23%"):
-        return raw
+    """Return display status string."""
     return side_status(model)
 
 
@@ -290,6 +287,12 @@ def render_markdown(plan: dict[str, Any]) -> str:
         if exit_parts:
             lines.append(f"止盈：{'｜'.join(exit_parts)}")
 
+    # ATR 波动提示（来自 price_point_engine 的 level_advice）
+    atr_info = plan.get("atr_info") or {}
+    level_advice = atr_info.get("level_advice")
+    if level_advice:
+        lines.append(f"波动：{level_advice}")
+
     lines.append("")
 
     if big_order and big_order.get("events"):
@@ -382,17 +385,9 @@ def side_summary(model: dict[str, Any], side: str, trigger_price: Any) -> str:
     side_state = side_status(model)
     if side == "buy":
         if side_state == "可执行":
-            if raw_status == "买 10%":
-                return f"买 10%，参考 {price(trigger_price)}，超过可接受价不追。"
-            if raw_status == "买 23%":
-                return f"买 23%，参考 {price(trigger_price)}，超过可接受价不追。"
             return f"低吸已触发，参考 {price(trigger_price)}，超过可接受价不追。"
         return f"低吸未触发，只盯 {price(trigger_price)} 以下是否 5m 止跌。"
     if side_state == "可执行":
-        if raw_status == "买 10%":
-            return f"卖 10%，参考 {price(trigger_price)}，低于可接受价不砸。"
-        if raw_status == "买 23%":
-            return f"卖 23%，参考 {price(trigger_price)}，低于可接受价不砸。"
         return f"高抛已触发，参考 {price(trigger_price)}，低于可接受价不砸。"
     return f"高抛未触发，只盯 {price(trigger_price)} 附近是否冲高失败。"
 

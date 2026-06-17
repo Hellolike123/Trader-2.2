@@ -450,9 +450,12 @@ def _trigger_reason_lines(model: dict[str, Any]) -> list[str]:
 
 
 def _monitor_position_lines(plan: dict[str, Any], position: int | None) -> list[str]:
-    atr_info = plan.get("atr_info") or {}
-    atr_ratio = float(atr_info.get("atr_ratio", 0) or 0)
-    pos_range = "底仓10%-20%" if atr_ratio >= 0.02 else "底仓10%-30%"
+    # Use the already-computed max_move from price_point_engine (no duplicate logic)
+    max_move = str(plan.get("max_move") or "")
+    if max_move == "不动":
+        pos_range = "不动"
+    else:
+        pos_range = max_move.replace("底仓的 ", "") if "底仓的" in max_move else max_move
     lines = [f"仓位 {pos_range}"]
     if position:
         try:
