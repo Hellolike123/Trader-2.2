@@ -260,8 +260,8 @@ def main(args: list[str] | None = None) -> int:
 
     stages: list[tuple[str, str, Path]] = []
 
-    # Stage the 3 skills: trader, t0, review
-    skills_to_pack = ["trader", "t0", "review"]
+    # Stage the 4 skills: trader, t0, review, daily_briefing
+    skills_to_pack = ["trader", "t0", "review", "daily_briefing"]
 
     for skill_name in skills_to_pack:
         print(f"\nStage skill: {skill_name}")
@@ -322,6 +322,11 @@ def main(args: list[str] | None = None) -> int:
             "name": "review",
             "version": "2.4.0",
             "description": "A股盘后复盘 + 仓位轮动 + 信号统计",
+        },
+        "daily_briefing": {
+            "name": "daily_briefing",
+            "version": "1.0.0",
+            "description": "A股每日简报 — 从候选池批量分析、排序、分层，输出操作建议",
         },
     }
 
