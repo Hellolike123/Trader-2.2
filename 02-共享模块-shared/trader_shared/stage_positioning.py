@@ -270,10 +270,10 @@ def _detect_major_stage(
     Returns:
         (stage, confidence, reason)
     """
-    # 量价关系（核心，权重 50%）
+    # 量价关系（核心，权重 40%）
     vp_stage, vp_score, vp_reason = _assess_volume_price(bars)
 
-    # MA 结构（辅助，权重 30%）
+    # MA 结构（辅助，权重 40%）
     ma5 = ma_values.get("ma5")
     ma10 = ma_values.get("ma10")
     ma20 = ma_values.get("ma20")
@@ -797,8 +797,8 @@ def compute_stop_losses(
     """
     # 第一层：技术止损（ATR-based）
     if support > 0 and atr14 > 0:
-        # 支撑位 - 1.5×ATR
-        tech_stop = round(support - 1.5 * atr14, 2)
+        # 支撑位 - 1.5×ATR，确保止损价为正
+        tech_stop = round(max(0.01, support - 1.5 * atr14), 2)
         tech_reason = f"支撑 {support:.2f} - 1.5×ATR({atr14:.2f})"
     elif support > 0:
         # 无 ATR 数据，退回旧逻辑
@@ -811,7 +811,7 @@ def compute_stop_losses(
     # 第二层：阶段止损
     if stage == "蓄势":
         if support > 0 and atr14 > 0:
-            stage_stop = round(support - 1.5 * atr14, 2)
+            stage_stop = round(max(0.01, support - 1.5 * atr14), 2)
             stage_reason = f"蓄势期保护本金，支撑 - 1.5×ATR"
         elif support > 0:
             stage_stop = round(support * 0.98, 2)
@@ -962,32 +962,41 @@ def compute_exit_plan(
             utad_signal = wyk.get("upthrust_signal", False)
             utad_reason = wyk.get("upthrust_reason", "")
 
-    # 构建三批退出计划（条件止盈）
+    # 构建退出计划（条件止盈），确保总比例为1.0
     exit_plan: list[dict[str, Any]] = []
+    has_resistance_exit = resistance_exit is not None and resistance_exit > entry_price
 
-    # 第一笔：BC 信号（购买高潮）→ 卖 1/3
+    # 根据是否有阻力位退出，动态分配比例
+    if has_resistance_exit:
+        # 四笔退出：各25%
+        ratios = [0.25, 0.25, 0.25, 0.25]
+    else:
+        # 三笔退出：各1/3
+        ratios = [0.33, 0.33, 0.34]
+
+    # 第一笔：BC 信号（购买高潮）
     if bc_signal:
         exit_plan.append({
             "price": None,
-            "ratio": 0.33,
-            "reason": "购买高潮（BC），减仓1/3",
+            "ratio": ratios[0],
+            "reason": "购买高潮（BC），减仓",
             "condition": "BC 信号出现",
             "triggered": True,
         })
     else:
         exit_plan.append({
             "price": None,
-            "ratio": 0.33,
+            "ratio": ratios[0],
             "reason": "等待 BC 信号",
             "condition": "BC 信号出现",
             "triggered": False,
         })
 
     # 第二笔：阻力位止盈（如果有效）
-    if resistance_exit is not None and resistance_exit > entry_price:
+    if has_resistance_exit:
         exit_plan.append({
             "price": resistance_exit,
-            "ratio": 0.33,
+            "ratio": ratios[1],
             "reason": "阻力位",
             "condition": "触及阻力位",
             "triggered": False,
@@ -996,7 +1005,7 @@ def compute_exit_plan(
     # 第三笔：1R 目标
     exit_plan.append({
         "price": target_1r,
-        "ratio": 0.33,
+        "ratio": ratios[2] if has_resistance_exit else ratios[1],
         "reason": "1R 目标，保本",
         "condition": "1R 达到",
         "triggered": False,
@@ -1005,7 +1014,7 @@ def compute_exit_plan(
     # 第四笔：阶段转派发
     exit_plan.append({
         "price": None,
-        "ratio": 0.34,
+        "ratio": ratios[3] if has_resistance_exit else ratios[2],
         "reason": "阶段转派发，清仓",
         "condition": "阶段转派发",
         "triggered": False,
@@ -1242,8 +1251,8 @@ def evaluate_position_state(
     if current_price <= 0:
         return _empty_position_state("空仓", "数据不足")
 
-    # ATR 止损计算
-    atr_stop = round(support - 1.5 * atr14, 2) if support > 0 and atr14 > 0 else round(current_price * 0.95, 2)
+    # ATR 止损计算，确保止损价为正
+    atr_stop = round(max(0.01, support - 1.5 * atr14), 2) if support > 0 and atr14 > 0 else round(current_price * 0.95, 2)
 
     # 提取威科夫信号
     bc_signal = False

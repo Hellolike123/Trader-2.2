@@ -1,0 +1,1 @@
+{"type":"cmd","command":"python3 -m pytest 02-共享模块-shared/tests/ -x --tb=short 2>&1","description":"全局回归测试"}

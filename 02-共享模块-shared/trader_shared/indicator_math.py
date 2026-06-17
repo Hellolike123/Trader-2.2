@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 
-def calc_expma(closes: list[float], period: int) -> float:
+def calc_expma(closes: list[float], period: int) -> float | None:
     """计算单个EXPMA值（使用SMA初始化）。
 
     必须传入完整历史数据（而非切片），否则会退化为SMA。
@@ -20,10 +20,10 @@ def calc_expma(closes: list[float], period: int) -> float:
         period: EXPMA周期
 
     Returns:
-        最后一个EXPMA值，数据不足时返回0.0
+        最后一个EXPMA值，数据不足时返回None
     """
     if not closes or period <= 0 or len(closes) < period:
-        return 0.0
+        return None
     k = 2.0 / (period + 1)
     # SMA初始化：前period根的均值
     expma_val = sum(closes[:period]) / period
@@ -33,7 +33,7 @@ def calc_expma(closes: list[float], period: int) -> float:
     return round(expma_val, 4)
 
 
-def calc_expma_series(closes: list[float], period: int) -> list[float]:
+def calc_expma_series(closes: list[float], period: int) -> list[float | None]:
     """计算完整的EXPMA序列。
 
     Args:
@@ -41,12 +41,17 @@ def calc_expma_series(closes: list[float], period: int) -> list[float]:
         period: EXPMA周期
 
     Returns:
-        EXPMA值序列，长度与closes相同，前period-1个值为空列表
+        EXPMA值序列，长度与closes相同，前period-1个值为None
     """
-    if not closes or period <= 0 or len(closes) < period:
-        return []
+    if not closes or period <= 0:
+        return [None] * len(closes)
+    if len(closes) < period:
+        return [None] * len(closes)
     k = 2.0 / (period + 1)
-    result = []
+    result: list[float | None] = []
+    # 前period-1个值为None
+    for _ in range(period - 1):
+        result.append(None)
     # SMA初始化：前period根的均值
     expma_val = sum(closes[:period]) / period
     result.append(round(expma_val, 4))

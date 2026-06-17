@@ -1,0 +1,15 @@
+{"type":"spec","path":"01-功能包-packages/trader/scripts/run_analysis.py","description":"build_report() actual return fields"}
+{"type":"spec","path":"01-功能包-packages/trader/references/output-template.md","description":"trader output template to align"}
+{"type":"spec","path":"01-功能包-packages/trader/references/ai-guide.md","description":"trader AI field guide to align"}
+{"type":"spec","path":"01-功能包-packages/trader/references/output-style-guide.md","description":"trader style guide to align"}
+{"type":"spec","path":"01-功能包-packages/trader/SKILL.md","description":"trader skill definition to align"}
+{"type":"spec","path":"01-功能包-packages/t0/scripts/t0_run.py","description":"build_plan() actual return fields"}
+{"type":"spec","path":"01-功能包-packages/t0/references/output-template.md","description":"t0 output template to align"}
+{"type":"spec","path":"01-功能包-packages/t0/references/ai-guide.md","description":"t0 AI field guide to align"}
+{"type":"spec","path":"01-功能包-packages/t0/references/output-style-guide.md","description":"t0 style guide to align"}
+{"type":"spec","path":"01-功能包-packages/t0/SKILL.md","description":"t0 skill definition to align"}
+{"type":"spec","path":"01-功能包-packages/review/scripts/review_core.py","description":"build_review() actual return fields"}
+{"type":"spec","path":"01-功能包-packages/review/references/review_output-contract.md","description":"review output template to align"}
+{"type":"spec","path":"01-功能包-packages/review/references/ai-guide.md","description":"review AI field guide to align"}
+{"type":"spec","path":"01-功能包-packages/review/references/output-style-guide.md","description":"review style guide to align"}
+{"type":"spec","path":"01-功能包-packages/review/SKILL.md","description":"review skill definition to align"}

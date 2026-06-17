@@ -1,0 +1,6 @@
+pyproject.toml
+trader.egg-info/PKG-INFO
+trader.egg-info/SOURCES.txt
+trader.egg-info/dependency_links.txt
+trader.egg-info/requires.txt
+trader.egg-info/top_level.txt

@@ -29,7 +29,7 @@ def calc_resonance(
     daily_support: float = 0,
     daily_resistance: float = 0,
 ) -> dict[str, Any]:
-    """多时间窗共振分析（10分制）。
+    """多时间窗共振分析（11分制）。
 
     Args:
         daily_closes: 日线收盘价序列（用于日线结构评分）
@@ -41,11 +41,11 @@ def calc_resonance(
 
     Returns:
         {
-            "total_score": int,        # 总分 0-10
+            "total_score": int,        # 总分 0-11
             "weekly_score": int,       # 周线分 0-3
             "daily_score": int,        # 日线分 0-3
-            "timming_score": int,      # 60min分 0-2
-            "resonance_score": int,    # 共振分 0-2
+            "timing_score": int,       # 60min分 0-2
+            "resonance_score": int,    # 共振分 0-3
             "weekly_label": str,       # 周线标签
             "daily_label": str,        # 日线标签
             "timing_label": str,       # 60min标签

@@ -230,10 +230,10 @@ class TestComputeExitPlan:
         assert result["resistance_exit"] == 64.00
         assert result["stage_exit"] == "派发"
         assert len(result["exit_plan"]) == 4
-        assert result["exit_plan"][0]["ratio"] == 0.33
-        assert result["exit_plan"][1]["ratio"] == 0.33
-        assert result["exit_plan"][2]["ratio"] == 0.33
-        assert result["exit_plan"][3]["ratio"] == 0.34
+        assert result["exit_plan"][0]["ratio"] == 0.25
+        assert result["exit_plan"][1]["ratio"] == 0.25
+        assert result["exit_plan"][2]["ratio"] == 0.25
+        assert result["exit_plan"][3]["ratio"] == 0.25
 
     def test_no_resistance_uses_1r(self):
         """无阻力位 → 第二笔用 1R 目标（保本）"""
