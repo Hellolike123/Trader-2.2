@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from trader_shared.indicator_math import calc_expma as _calc_expma, calc_expma_series as _calc_expma_series
+
 
 def calc_expma_status(
     closes: list[float],
@@ -50,12 +52,12 @@ def calc_expma_status(
             "expma_values": {}, "trend_label": "数据不足", "detail": {},
         }
 
-    # 计算各周期 EXPMA
+    # 计算各周期 EXPMA（使用完整历史数据，避免退化为SMA）
     expma_values: dict[str, float | None] = {}
     periods = [5, 10, 12, 20, 30, 50]
     for p in periods:
         if len(closes) >= p:
-            expma_values[str(p)] = _calc_expma(closes[-p:], p)
+            expma_values[str(p)] = _calc_expma(closes, p)
         else:
             expma_values[str(p)] = None
 
@@ -141,12 +143,12 @@ def _score_slope(expma_values: dict[str, float | None],
       - EXPMA20 斜率向下：0分
     """
     e20 = expma_values.get("20")
-    if e20 and bars and len(bars) >= 6:
+    if e20 is not None and bars and len(bars) >= 6:
         # 计算5日前的EXPMA20（用当时的收盘价计算）
-        closes_5d_ago = [float(b.get("close")) for b in bars[:-5] if float(b.get("close", 0)) > 0]
+        closes_5d_ago = [float(b.get("close") or 0) for b in bars[:-5] if float(b.get("close") or 0) > 0]
         if len(closes_5d_ago) >= 20:
-            e20_prev = _calc_expma(closes_5d_ago[-20:], 20)
-            if e20_prev and e20_prev > 0:
+            e20_prev = _calc_expma(closes_5d_ago, 20)
+            if e20_prev is not None and e20_prev > 0:
                 change_pct = (e20 - e20_prev) / e20_prev
                 if change_pct > 0.01:
                     return 2
@@ -178,49 +180,33 @@ def _score_crossover(closes: list[float], expma_values: dict[str, float | None])
     if len(closes) < 20:
         return 1
 
-    # 计算近10日的EXPMA10和EXPMA20序列
-    closes_short = closes[-10:]
-    closes_long = closes[-20:]
-    if len(closes_short) < 10 or len(closes_long) < 20:
-        return 1
-
-    expma10_series = []
-    k10 = 2.0 / 11
-    # 用前10根数据初始化
-    expma10_val = sum(closes[:10]) / 10
-    expma10_series.append(expma10_val)
-    for c in closes[10:10 + len(closes_short)]:
-        expma10_val = c * k10 + expma10_val * (1 - k10)
-        expma10_series.append(expma10_val)
-
-    expma20_series = []
-    k20 = 2.0 / 21
-    expma20_val = sum(closes[:20]) / 20
-    expma20_series.append(expma20_val)
-    for c in closes[20:20 + len(closes_long)]:
-        expma20_val = c * k20 + expma20_val * (1 - k20)
-        expma20_series.append(expma20_val)
-
-    if not expma10_series or not expma20_series:
-        return 1
-
-    # 检查最后10根（EXPMA10）和最后20根（EXPMA20）的交叉
-    short_len = min(len(expma10_series), len(expma20_series) - 10)
-    if short_len < 2:
-        return 1
-
-    recent10_10 = expma10_series[-short_len:]
-    recent10_20 = expma20_series[-10 - short_len + 1:] if len(expma20_series) >= 10 + short_len - 1 else expma20_series[-short_len:]
-
-    # 找金叉：EXPMA10 从下穿上 EXPMA20
+    # 计算近5日的EXPMA10和EXPMA20值（基于到当天为止的完整数据）
     golden = 0
     death = 0
-    for i in range(1, len(recent10_10)):
-        prev_diff = recent10_10[i - 1] - (recent10_20[i - 1] if i < len(recent10_20) else 0)
-        curr_diff = recent10_10[i] - (recent10_20[i] if i < len(recent10_20) else 0)
-        if prev_diff <= 0 and curr_diff > 0:
+    
+    # 检查近5日是否有交叉
+    for i in range(1, min(6, len(closes))):
+        # 计算到第i天为止的EXPMA10和EXPMA20
+        closes_to_day_i = closes[:-i] if i > 0 else closes
+        if len(closes_to_day_i) < 20:
+            continue
+            
+        expma10 = _calc_expma(closes_to_day_i, 10)
+        expma20 = _calc_expma(closes_to_day_i, 20)
+        
+        # 计算到第i-1天为止的EXPMA10和EXPMA20
+        closes_to_day_prev = closes[:-i+1] if i > 1 else closes
+        if len(closes_to_day_prev) < 20:
+            continue
+            
+        expma10_prev = _calc_expma(closes_to_day_prev, 10)
+        expma20_prev = _calc_expma(closes_to_day_prev, 20)
+        
+        # 检查金叉：EXPMA10从下穿上EXPMA20
+        if expma10_prev <= expma20_prev and expma10 > expma20:
             golden += 1
-        elif prev_diff >= 0 and curr_diff < 0:
+        # 检查死叉：EXPMA10从上穿下EXPMA20
+        elif expma10_prev >= expma20_prev and expma10 < expma20:
             death += 1
 
     if golden > 0:
@@ -238,8 +224,10 @@ def _score_deviation(current_price: float, expma_values: dict[str, float | None]
     评分因子：
       - 价格适中高于 EXPMA20（0-3%）：3分（最佳低吸/持有位）
       - 价格适中低于 EXPMA20（0-3%）：2分
-      - 价格过高高于 EXPMA20（>5%）：0分（超买风险）
-      - 价格过低低于 EXPMA20（>5%）：1分（超卖可能反弹）
+      - 价格略超买（3-5%）：1分
+      - 价格略超卖（-3% ~ -5%）：1分
+      - 价格极端超买（>5%）：0分
+      - 价格极端超卖（<-5%）：0分
     """
     e20 = expma_values.get("20")
     if not e20 or current_price <= 0 or e20 <= 0:
@@ -251,12 +239,14 @@ def _score_deviation(current_price: float, expma_values: dict[str, float | None]
         return 3  # 最佳位
     elif -0.03 <= deviation_pct < 0:
         return 2  # 略低
+    elif 0.03 < deviation_pct <= 0.05:
+        return 1  # 略超买
+    elif -0.05 <= deviation_pct < -0.03:
+        return 1  # 略超卖
     elif deviation_pct > 0.05:
-        return 0  # 超买
-    elif deviation_pct > 0.03:
-        return 1  # 偏买
+        return 0  # 极端超买
     else:
-        return 1  # 超卖但可能反弹
+        return 0  # 极端超卖（dev < -0.05）
 
 
 # ── 趋势标签 ─────────────────────────────────────────────────────
@@ -321,18 +311,3 @@ def _build_signals(
             signals.append(f"超卖（乖离{dev*100:.1f}%）")
 
     return signals
-
-
-# ── 核心 EXPMA 计算（与 momentum_core 共享） ─────────────────────
-
-def _calc_expma(closes: list[float], period: int) -> float:
-    """计算单个 EXPMA 值。"""
-    if not closes or period <= 0 or len(closes) < period:
-        return 0.0
-    k = 2.0 / (period + 1)
-    # 初始化：前 period 根的平均值
-    expma_val = sum(closes[:period]) / period
-    # 递推
-    for c in closes[period:]:
-        expma_val = c * k + expma_val * (1 - k)
-    return round(expma_val, 4)

@@ -28,6 +28,7 @@ except ImportError:
 from trader_shared.light_data import to_float, pct_change
 from trader_shared.stage_positioning import assess_stage, compute_exit_plan, compute_stage_stop, check_time_stop, evaluate_position_state
 from trader_shared.fetchers import TencentFetcher
+from trader_shared.indicator_math import aggregate_5m_to_60m
 
 try:
     from trader_shared.chip_distribution import calc_chip_distribution as _calc_chip
@@ -433,7 +434,11 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     confirm = levels["confirm_price"]
     stop = levels["hard_stop"]
     take = levels["take"]
-    weekly_close = float(quote.get("pre_close") or bars[-1]["close"])
+    # 使用约5个交易日前的收盘价作为周收盘价的近似
+    if len(bars) >= 5:
+        weekly_close = float(bars[-5]["close"])
+    else:
+        weekly_close = float(bars[0]["close"])
     monthly_close = float(bars[-STRUCTURE_WINDOW]["close"] if len(bars) >= STRUCTURE_WINDOW else bars[0]["close"])
     stage = determine_stage(current, weekly_close, monthly_close)
     scene = levels["status"]
@@ -497,19 +502,19 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     expma50_val = None
     expma_trend = "无数据"
     try:
-        from trader_shared.momentum_core import calc_expma
+        from trader_shared.indicator_math import calc_expma_series
         closes_for_expma = [float(b.get("close") or 0) for b in bars if float(b.get("close") or 0) > 0]
         if len(closes_for_expma) >= 10:
-            expma_vals = calc_expma(closes_for_expma, 10)
+            expma_vals = calc_expma_series(closes_for_expma, 10)
             expma10_val = expma_vals[-1] if expma_vals else None
         if len(closes_for_expma) >= 12:
-            expma12_vals = calc_expma(closes_for_expma, 12)
+            expma12_vals = calc_expma_series(closes_for_expma, 12)
             expma12_val = expma12_vals[-1] if expma12_vals else None
         if len(closes_for_expma) >= 20:
-            expma20_vals = calc_expma(closes_for_expma, 20)
+            expma20_vals = calc_expma_series(closes_for_expma, 20)
             expma20_val = expma20_vals[-1] if expma20_vals else None
         if len(closes_for_expma) >= 50:
-            expma50_vals = calc_expma(closes_for_expma, 50)
+            expma50_vals = calc_expma_series(closes_for_expma, 50)
             expma50_val = expma50_vals[-1] if expma50_vals else None
         # EXPMA 趋势判断
         if expma10_val and expma20_val and expma50_val:
@@ -555,11 +560,13 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         _support_f = float(support) if support else 0
         _resistance_f = float(resistance) if resistance else 0
         if res_d_closes and len(res_d_closes) >= 10:
+            # 将5分钟线聚合为60分钟线
+            bars_60m = aggregate_5m_to_60m(bars_5m) if bars_5m else []
             resonance_result = calc_resonance(
                 daily_closes=res_d_closes,
                 current_price=current,
                 weekly_bars=None,  # 周线数据暂不抓取，用日线代理
-                bars_60m=bars_5m,  # 用5分钟线作为短线代理（暂无60分钟线抓取）
+                bars_60m=bars_60m,  # 聚合后的60分钟线
                 daily_support=_support_f,
                 daily_resistance=_resistance_f,
             )

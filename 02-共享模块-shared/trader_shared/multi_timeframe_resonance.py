@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from trader_shared.indicator_math import calc_expma as _calc_expma
+
 
 def calc_resonance(
     daily_closes: list[float],
@@ -108,8 +110,8 @@ def _score_weekly(
     if weekly_bars and len(weekly_bars) >= 20:
         weekly_closes = [float(b.get("close", 0)) for b in weekly_bars if float(b.get("close", 0)) > 0]
         if weekly_closes:
-            e20 = _calc_expma(weekly_closes[-20:], 20)
-            e10 = _calc_expma(weekly_closes[-10:], 10) if len(weekly_closes) >= 10 else e20
+            e20 = _calc_expma(weekly_closes, 20)
+            e10 = _calc_expma(weekly_closes, 10) if len(weekly_closes) >= 10 else e20
 
             if e20 > 0:
                 # 趋势判断
@@ -129,8 +131,8 @@ def _score_weekly(
     else:
         # 用日线最后20根作为周线代理（大约4周数据）
         if len(daily_closes) >= 20:
-            e20 = _calc_expma(daily_closes[-20:], 20)
-            e10 = _calc_expma(daily_closes[-10:], 10) if len(daily_closes) >= 10 else e20
+            e20 = _calc_expma(daily_closes, 20)
+            e10 = _calc_expma(daily_closes, 10) if len(daily_closes) >= 10 else e20
             if e20 > 0:
                 if e10 and e10 > e20:
                     score += 1
@@ -147,7 +149,11 @@ def _score_weekly(
     # 至少1分基础分（有数据时）
     if not weekly_bars or len(weekly_bars) < 5:
         score = max(score, 0)
-        label = "无周线数据"
+        # 如果已经有日线代理评分，保留并添加注释
+        if score > 0 and label and label != "无周线数据":
+            label = f"{label}（无周线数据）"
+        else:
+            label = "无周线数据"
 
     return {"points": min(3, score), "label": label}
 
@@ -172,8 +178,8 @@ def _score_daily(
     if not daily_closes or len(daily_closes) < 10:
         return {"points": 0, "label": "数据不足"}
 
-    e10 = _calc_expma(daily_closes[-10:], 10) if len(daily_closes) >= 10 else 0
-    e20 = _calc_expma(daily_closes[-20:], 20) if len(daily_closes) >= 20 else 0
+    e10 = _calc_expma(daily_closes, 10) if len(daily_closes) >= 10 else 0
+    e20 = _calc_expma(daily_closes, 20) if len(daily_closes) >= 20 else 0
     e50 = _calc_expma(daily_closes, 50) if len(daily_closes) >= 50 else 0
 
     # EXPMA 排列（2分）
@@ -237,7 +243,7 @@ def _score_timing_60m(
     # 60分钟趋势
     closes_60m = [float(b.get("close", 0)) for b in bars_60m if float(b.get("close", 0)) > 0]
     if len(closes_60m) >= 10:
-        e10_60 = _calc_expma(closes_60m[-10:], 10)
+        e10_60 = _calc_expma(closes_60m, 10)
         if e10_60 and current_price > e10_60:
             score += 1
             label = f"{label}（60min站上EXPMA10）" if score > 0 else "60min偏多（站上EXPMA10）"
@@ -248,11 +254,12 @@ def _score_timing_60m(
 # ── 共振加分（2分） ─────────────────────────────────────────────
 
 def _score_resonance(weekly: dict, daily: dict, timing: dict) -> int:
-    """共振加分 0-2 分。
+    """共振加分 0-3 分。
 
     当多个时间窗方向一致时加分：
       - 周线+日线同向：1分
       - 三窗同向：2分
+      - 60分钟强势共振：3分
     """
     score = 0
 
@@ -262,26 +269,29 @@ def _score_resonance(weekly: dict, daily: dict, timing: dict) -> int:
     daily_bullish = "多头" in daily.get("label", "") or "偏多" in daily.get("label", "")
     daily_bearish = "空头" in daily.get("label", "") or "偏空" in daily.get("label", "")
     timing_positive = timing.get("points", 0) >= 1
+    timing_strong = timing.get("points", 0) >= 2
 
     # 周线+日线同向
     if (weekly_bullish and daily_bullish) or (weekly_bearish and daily_bearish):
         score += 1
         if timing_positive:
             score += 1  # 三窗同向
+            if timing_strong:
+                score += 1  # 60分钟强势共振
     elif weekly_bullish or daily_bullish:
         # 至少一个偏多，给半分
         if timing_positive:
             score += 1
 
-    return min(2, score)
+    return min(3, score)
 
 
 # ── 共振标签 ─────────────────────────────────────────────────────
 
-def _resonance_label(resonance: int, weekly: dict, daily: dict, timing: dict) -> str:
+def _resonance_label(resonance: int, weekly: dict = None, daily: dict = None, timing: dict = None) -> str:
     """共振等级标签。"""
     if resonance >= 3:
-        return "三窗共振向上（强）"
+        return "三窗强势共振"
     elif resonance >= 2:
         return "多窗共振（较强）"
     elif resonance >= 1:
@@ -309,18 +319,6 @@ def _build_signals(weekly: dict, daily: dict, timing: dict, resonance: int) -> l
 
     return signals
 
-
-# ── EXPMA 计算 ───────────────────────────────────────────────────
-
-def _calc_expma(closes: list[float], period: int) -> float:
-    """计算单个 EXPMA 值。"""
-    if not closes or period <= 0 or len(closes) < period:
-        return 0.0
-    k = 2.0 / (period + 1)
-    expma_val = sum(closes[:period]) / period
-    for c in closes[period:]:
-        expma_val = c * k + expma_val * (1 - k)
-    return expma_val
 
 
 def _empty_result() -> dict[str, Any]:

@@ -88,12 +88,12 @@ def _score_flow(features: dict[str, Any]) -> int:
     score = 0
 
     # 累计净流入方向（2分）
-    if cum_5 > 0:
-        score += 1
     if cum_5 > 1000:
-        score += 1  # 大额流入加分
+        score += 2  # 大额流入
     elif cum_5 > 500:
-        score += 0  # 中等不额外加分
+        score += 1  # 中等流入
+    elif cum_5 > 0:
+        score += 0  # 小额流入（不加分）
 
     # 连续流入天数（2分）
     if con_in >= 5:
@@ -101,7 +101,7 @@ def _score_flow(features: dict[str, Any]) -> int:
     elif con_in >= 3:
         score += 1
     elif con_in >= 1 and cum_5 > 0:
-        score += 0  # 仅1天不加分
+        score += 0  # 至少1天流入（不加分）
 
     # 净流入占成交额比（2分）
     if net_pct > 0.05:
@@ -109,7 +109,7 @@ def _score_flow(features: dict[str, Any]) -> int:
     elif net_pct > 0.02:
         score += 1
     elif net_pct > 0:
-        score += 0
+        score += 0  # 正向流入（不加分）
 
     # 价资关系加分/减分
     if relation == "价跌资入":
@@ -192,8 +192,8 @@ def _score_order(big_order: dict[str, Any]) -> int:
         score += 0  # 至少有一次记录
 
     # 净买卖比（2分）
-    buy_hands = by_side.get("主动买入", {}).get("hands", 0) or 0
-    sell_hands = by_side.get("主动卖出", {}).get("hands", 0) or 0
+    buy_hands = (by_side.get("主动买入") or {}).get("hands", 0) or 0
+    sell_hands = (by_side.get("主动卖出") or {}).get("hands", 0) or 0
     total_hands = buy_hands + sell_hands
     if total_hands > 0:
         buy_ratio = buy_hands / total_hands
