@@ -370,7 +370,7 @@ def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str,
 
     volume_score = 50
     if wyck_r.get("spring_signal"): volume_score += 25
-    if wyck_r.get("upthrust_signal"): volume_score += 15
+    if wyck_r.get("upthrust_signal"): volume_score -= 15
     if wyck_r.get("bearish_volume_divergence"): volume_score -= 10
     if wyck_r.get("bullish_volume_divergence"): volume_score += 5
     volume_score += (15 if volume_repair else 0) - (5 if afternoon_shrink else 0)

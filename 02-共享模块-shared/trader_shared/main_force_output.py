@@ -161,48 +161,6 @@ def format_flow_trend(daily_5d: list[float]) -> str:
     return "".join(symbols)
 
 
-def format_main_force_score_section(result: dict[str], score_result: dict[str] | None = None) -> str:
-    """生成主力行为评分段落（微信纯文本格式）。
-
-    Args:
-        result: detect_main_force_stage() 返回值
-        score_result: score_main_force() 返回值（15分制），None 时降级输出
-
-    Returns:
-        微信端纯文本格式的主力行为评分段落
-    """
-    stage = result.get("stage", "unknown")
-    if stage == "unknown" and not result.get("daily_flow_5d"):
-        return "💰 主力行为 ｜ 🔴数据暂不可用"
-
-    stage_cn = STAGE_LABELS.get(stage, "未知")
-
-    if score_result and score_result.get("total_score") is not None:
-        total = score_result["total_score"]
-        label = score_result.get("label", "🔴无数据")
-        flow = score_result.get("flow_score", 0)
-        chip = score_result.get("chip_score", 0)
-        order = score_result.get("order_score", 0)
-        detail = score_result.get("detail", {})
-        signals = detail.get("signals", [])
-
-        lines = [
-            "💰 主力行为",
-            f"阶段：{stage_cn} ｜ 综合 {total}/15（{label}）",
-            f"  资金 {flow}/6 ｜ 筹码 {chip}/5 ｜ 大单 {order}/4",
-        ]
-
-        if signals:
-            # 只显示前3个关键信号
-            for s in signals[:3]:
-                lines.append(f"  ·{s}")
-
-        return "\n".join(lines)
-    else:
-        # 降级：只显示阶段
-        return f"💰 主力行为 ｜ {stage_cn}"
-
-
 def format_main_force_enhanced(
     result: dict[str, Any],
     today_super_large: float = 0.0,

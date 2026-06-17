@@ -2238,6 +2238,7 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
     atr14 = float(report.get("atr14", 0) or 0)
     atr_cap = int(report.get("atr_cap") or 10)
     state_label = str(report.get("state_label") or "")
+    theory_status_text = str(report.get("theory_status") or state_label or scene)
     analysis_time = str(report.get("analysis_time") or "")
 
     lines: list[str] = []

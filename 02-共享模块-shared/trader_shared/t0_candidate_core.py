@@ -52,18 +52,7 @@ T0_LOW = "等待低吸触发"
 T0_HIGH = "等待高抛触发"
 T0_NONE = "不做"
 
-_DEFENSE_STATUSES = {"防守观察", "防守观察，趋势下行谨慎"}
-
-STATUS_SCORE = {
-    "低吸观察": 80,
-    "等转强": 70,
-    "防守观察": 60,
-    "冲高减仓": 55,
-    "暂不碰": 20,
-    "数据失败": 0,
-    "空间不足": 45,
-    "防守观察，趋势下行谨慎": 50,
-}
+from trader_shared.config import STATUS_SCORE, DEFENSE_STATUSES as _DEFENSE_STATUSES
 
 
 def min_price(bars: list[dict[str, Any]], field: str) -> float | None:
