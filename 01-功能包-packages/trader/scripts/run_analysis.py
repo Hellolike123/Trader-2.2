@@ -1066,6 +1066,11 @@ def render_markdown(r: dict) -> str:
         level_map = {fib.get("retrace_618"): "61.8%", fib.get("retrace_500"): "50%", fib.get("retrace_382"): "38.2%"}
         label = level_map.get(golden_bid, "")
         lines.append(f"  {golden_bid:.2f} ← 黄金挂单（斐波那契{label}）")
+    # 斐波那契回撤位单独展示
+    for ratio_label, key in [("38.2%", "retrace_382"), ("50%", "retrace_500"), ("61.8%", "retrace_618")]:
+        val = fib.get(key)
+        if val and val > 0:
+            lines.append(f"  {val:.2f} 斐波那契{ratio_label}")
     if current_price > 0:
         lines.append(f"  {current_price:.2f} 当前")
     

@@ -445,6 +445,10 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
                 except (ValueError, TypeError):
                     pass
 
+            # 安全检查：确保 swing_high > swing_low
+            if swing_high is not None and swing_low is not None and swing_high < swing_low:
+                swing_high, swing_low = swing_low, swing_high
+
             if swing_low is not None and swing_high is not None and swing_high > swing_low and swing_low > 0:
                 diff = swing_high - swing_low
                 retrace_382 = swing_high - diff * 0.382
