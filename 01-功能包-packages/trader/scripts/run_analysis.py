@@ -337,7 +337,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         f_mf = executor.submit(_fetch_fund_flow)
         f_env = executor.submit(_fetch_market_env)
 
-        chan_result = f_chan.result() or {}
+        chan_result = (f_chan.result() or {}).get("chanlun", {})
         wyck_result = f_wyk.result() or {}
         momentum_result = f_mom.result() or {}
 
