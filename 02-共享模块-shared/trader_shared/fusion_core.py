@@ -79,20 +79,37 @@ def _log_fusion(result: dict) -> None:
 def _chan_to_signal(chan_result: dict) -> dict:
     """将 chanlun_strategy() 的原始输出映射为统一信号。
 
-    优先级: buy_points > divergence > trend_label
+    优先级: sell_points > buy_points > divergence > trend_label
 
     缠论输出结构 (chanlun_strategy → run_all → levels["chanlun"]):
-        {"chanlun": {"buy_points": [...], "divergence": {...}, "trend_label": "..."}}
+        {"chanlun": {"buy_points": [...], "sell_points": [...], "divergence": {...}, "trend_label": "..."}}
     """
     chan = chan_result.get("chanlun", {}) if isinstance(chan_result, dict) else {}
     if not isinstance(chan, dict):
         chan = {}
 
     buy_points = chan.get("buy_points", [])
+    sell_points = chan.get("sell_points", [])
     divergence = chan.get("divergence", {})
     trend_label = chan.get("trend_label", "数据不足")
 
-    # 优先级1: buy_points (一类买 > 二类买 > 三类买)
+    # 优先级1: sell_points (一类卖 > 二类卖 > 三类卖) - 卖点优先于买点
+    if isinstance(sell_points, list):
+        for sp in sell_points:
+            if not isinstance(sp, dict):
+                continue
+            sp_type = sp.get("type", "")
+            if sp_type == "一类卖":
+                return {"direction": -1, "confidence": 0.8,
+                        "reason": "缠论一类卖 (顶背驰)", "raw_key": "chan"}
+            if sp_type == "二类卖":
+                return {"direction": -1, "confidence": 0.5,
+                        "reason": "缠论二类卖 (高点降低)", "raw_key": "chan"}
+            if sp_type == "三类卖":
+                return {"direction": -1, "confidence": 0.5,
+                        "reason": "缠论三类卖 (跌破中枢)", "raw_key": "chan"}
+
+    # 优先级2: buy_points (一类买 > 二类买 > 三类买)
     if isinstance(buy_points, list):
         for bp in buy_points:
             if not isinstance(bp, dict):

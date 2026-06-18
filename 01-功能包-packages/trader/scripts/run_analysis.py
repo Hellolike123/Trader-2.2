@@ -407,6 +407,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     levels["chan_trend_label"] = chan_result.get("trend_label", "数据不足")
     levels["chan_buy_point_text"] = chan_result.get("buy_point_text", "无")
     levels["chan_buy_points"] = chan_result.get("buy_points", [])
+    levels["chan_sell_point_text"] = chan_result.get("sell_point_text", "无")
+    levels["chan_sell_points"] = chan_result.get("sell_points", [])
     levels["chan_strokes_count"] = chan_result.get("strokes_count", 0)
     levels["chan_zone_last_price"] = chan_result.get("last_valid_zone_last_price")
     levels["chan_zone_first_price"] = chan_result.get("last_valid_zone_first_price")
@@ -1361,6 +1363,16 @@ def render_markdown(r: dict) -> str:
     lines.extend(["", "📊 五层打分", f"  结构{chan_score:.0f}/量价{wyk_score:.0f}｜筹码{chip_score:.0f}｜动能{mom_score:.0f}"])
     chan_reason = signals.get("chan", {}).get("reason", "回调段。一类买、二类买") if isinstance(signals.get("chan"), dict) else "无信号"
     lines.append(f"  缠论：{chan_reason}")
+    # 显示缠论买卖点
+    chan_buy_text = r.get("chan_buy_point_text", "无")
+    chan_sell_text = r.get("chan_sell_point_text", "无")
+    if chan_buy_text != "无" or chan_sell_text != "无":
+        bp_parts = []
+        if chan_buy_text != "无":
+            bp_parts.append(f"买{chan_buy_text}")
+        if chan_sell_text != "无":
+            bp_parts.append(f"卖{chan_sell_text}")
+        lines.append(f"  买卖点：{' ｜ '.join(bp_parts)}")
     wyckoff_data = r.get("wyckoff") or {}
     wyckoff_desc = wyckoff_data.get("description", "无明显威科夫信号") if isinstance(wyckoff_data, dict) else "无明显威科夫信号"
     lines.append(f"  威科夫：{wyckoff_desc}")

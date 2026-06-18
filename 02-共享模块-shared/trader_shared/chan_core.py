@@ -390,6 +390,84 @@ def detect_buy_points(
     return buy_points
 
 
+def detect_sell_points(
+    strokes: list[dict],
+    zones: list[dict],
+    last_close: float,
+    macd_hist_current: float | None = None,
+    macd_hist_prev: float | None = None,
+    macd_divergence_ok: bool = False,
+) -> list[dict]:
+    """检测缠论卖点（与detect_buy_points对称）。
+
+    一类卖: 向上笔 + MACD 红柱缩短（顶背驰）
+    二类卖: 高点降低（up_1 -> down -> up_2 且 high_b < high_a）
+    三类卖: 跌破中枢下沿后反弹不回
+    """
+    sell_points: list[dict[str, Any]] = []
+
+    if not strokes:
+        return sell_points
+
+    # 一类卖: 向上笔 + MACD 红柱缩短 (顶背驰信号)
+    last_stroke = strokes[-1]
+    if last_stroke["direction"] == "up":
+        if macd_hist_current is not None and macd_hist_prev is not None and macd_hist_current > 0 and macd_hist_prev > 0:
+            if macd_hist_current < macd_hist_prev:
+                sell_points.append({
+                    "type": "一类卖",
+                    "price": round(last_stroke["end_price"], 4),
+                    "confidence": 3,
+                })
+        elif macd_hist_current is not None and macd_hist_current > 0:
+            sell_points.append({
+                "type": "一类卖",
+                "price": round(last_stroke["end_price"], 4),
+                "confidence": 2,
+            })
+
+    # 二类卖: up_1(high_a) -> down -> up_2(high_b) 且 high_b < high_a
+    if len(strokes) >= 3:
+        up_strokes = [s for s in strokes if s["direction"] == "up"]
+        down_strokes = [s for s in strokes if s["direction"] == "down"]
+        if len(up_strokes) >= 2 and len(down_strokes) >= 1:
+            high_a = up_strokes[-2]["end_price"]
+            high_b = up_strokes[-1]["end_price"]
+            # 找两根向上笔之间的向下笔低点
+            down_low = None
+            for s in strokes:
+                if s["direction"] == "down" and s.get("start_price") is not None and s["start_price"] >= high_a:
+                    down_low = s["end_price"]
+            if down_low is None:
+                down_low = min(s["end_price"] for s in down_strokes)
+            if high_b < high_a and high_b > down_low and macd_divergence_ok:
+                sell_points.append({
+                    "type": "二类卖",
+                    "price": round(high_b, 4),
+                    "confidence": 2,
+                })
+
+    # 三类卖: 跌破中枢下沿后反弹不回
+    if last_close > 0 and zones:
+        last_valid: dict | None = None
+        for z in reversed(zones):
+            if z["valid"]:
+                last_valid = z
+                break
+
+        if last_valid is not None:
+            zh_bottom = last_valid["zh_bottom"]
+            below_pct = (zh_bottom - last_close) / zh_bottom
+            if 0 < below_pct <= 0.05:
+                sell_points.append({
+                    "type": "三类卖",
+                    "price": round(last_close, 4),
+                    "confidence": 1,
+                })
+
+    return sell_points
+
+
 def detect_divergence(bars: list[dict]) -> dict:
     result: dict[str, bool] = {"top_divergence": False, "bottom_divergence": False}
 
@@ -457,6 +535,7 @@ def chanlun_analysis(
     macd_divergence_ok = _check_macd_for_2nd_buy(bars, strokes)
 
     buy_points = detect_buy_points(strokes, zones, current, macd_hist_current, macd_hist_prev, macd_divergence_ok)
+    sell_points = detect_sell_points(strokes, zones, current, macd_hist_current, macd_hist_prev, macd_divergence_ok)
 
     strokes_count = len(strokes)
     zones_count = len(zones)
@@ -467,6 +546,7 @@ def chanlun_analysis(
         trend_label = "数据不足"
 
     buy_point_text = "、".join([bp["type"] for bp in buy_points]) if buy_points else "无"
+    sell_point_text = "、".join([sp["type"] for sp in sell_points]) if sell_points else "无"
 
     last_valid_zone_last_price = None
     last_valid_zone_first_price = None
@@ -483,8 +563,10 @@ def chanlun_analysis(
         "strokes": strokes,
         "zones": zones,
         "buy_points": buy_points,
+        "sell_points": sell_points,
         "trend_label": trend_label,
         "buy_point_text": buy_point_text,
+        "sell_point_text": sell_point_text,
         "strokes_count": strokes_count,
         "zones_count": zones_count,
         "divergence": divergence,
