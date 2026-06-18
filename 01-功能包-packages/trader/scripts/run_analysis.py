@@ -710,6 +710,12 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "gap": levels.get("gap"),
         "time_window": levels.get("time_window"),
         "fib_retrace": levels.get("fib_retrace"),
+        "high_zone": levels.get("high_zone"),
+        "high_zone_lower": levels.get("high_zone_lower"),
+        "high_zone_upper": levels.get("high_zone_upper"),
+        "fib_ext_1382": levels.get("fib_ext_1382"),
+        "fib_ext_1618": levels.get("fib_ext_1618"),
+        "resonance": resonance_result,
         "main_force_score": main_force_score_result,
         "big_order_summary": big_order_result.get("summary"),
         "big_order_direction": big_order_result.get("direction_summary"),
@@ -1188,7 +1194,12 @@ def render_markdown(r: dict) -> str:
                 lines.append(f"  {best_val:.2f} ← 斐波那契{best_label}回撤参考")
     if current_price > 0:
         lines.append(f"  {current_price:.2f} 当前")
-    
+
+    # 高抛区间
+    high_zone = r.get("high_zone")
+    if high_zone:
+        lines.append(f"  高抛区间 {high_zone}")
+
     exit_plan = r.get("exit_plan") or {}
     exit_plan_items = exit_plan.get("exit_plan") or []
     priced_items = [item for item in exit_plan_items if item.get("price") is not None and item["price"] > 0]
@@ -1201,7 +1212,15 @@ def render_markdown(r: dict) -> str:
     
     if resistance_val > 0:
         lines.append(f"  {resistance_val:.2f} 压力")
-        
+
+    # Fibonacci 扩展目标位
+    fib_ext_1382 = r.get("fib_ext_1382")
+    fib_ext_1618 = r.get("fib_ext_1618")
+    if fib_ext_1382 and fib_ext_1382 > resistance_val:
+        lines.append(f"  {fib_ext_1382:.2f} ← Fib 138.2%目标")
+    if fib_ext_1618 and fib_ext_1618 > resistance_val:
+        lines.append(f"  {fib_ext_1618:.2f} ← Fib 161.8%目标")
+
     stage_exit = exit_plan.get("stage_exit")
     if stage_exit:
         lines.append(f"  阶段转{stage_exit} → 清仓")
@@ -1964,9 +1983,14 @@ def _build_today_action_section(r: dict[str, Any]) -> list[str]:
         if ps_stop > 0:
             lines.append(f"  止损：{ps_stop:.2f}")
     elif ps_state == "阻力位分歧":
-        # 阻力位分歧信号（状态机）
-        lines.append("  动作：阻力位观察")
-        lines.append(f"  理由：{ps_action}")
+        # 阻力位分歧信号（状态机，含减仓评分）
+        if ps_position_pct < 0:
+            lines.append("  动作：冲高减仓")
+            lines.append(f"  理由：{ps_action}")
+            lines.append(f"  减仓比例：{abs(ps_position_pct)}%")
+        else:
+            lines.append("  动作：阻力位观察")
+            lines.append(f"  理由：{ps_action}")
         if ps_stop > 0:
             lines.append(f"  止损：{ps_stop:.2f}")
     elif stage_action in ("试探买", "加仓") and momentum in ("走强", "修复"):
