@@ -11,8 +11,8 @@ from trader_shared.schema.v1 import validate_trader
 validate = validate_trader
 
 # 融合层方向校验：emoji 必须与加权分方向一致
-_DIRECTION_EMOJI = {"🟢", "🔴", "🟡", "⚪"}
-_BEARISH_EMOJI = {"🔴"}
+_DIRECTION_EMOJI = {"🟢", "🔴", "🟡", "⚪", "🟠"}
+_BEARISH_EMOJI = {"🔴", "🟠"}
 _BULLISH_EMOJI = {"🟢"}
 _NEUTRAL_EMOJI = {"⚪", "🟡"}
 
@@ -27,7 +27,7 @@ def _check_fusion_direction(markdown: str) -> list[str]:
     """校验融合层方向是否与加权分一致。"""
     errors: list[str] = []
     # 匹配融合｜emoji action（加权分 X.XX，置信度 XX%）
-    pattern = r"融合[｜|]\s*(🟢|🔴|🟡|⚪)\s*(.+?)（加权分\s*([-\d.]+)"
+    pattern = r"融合[｜|]\s*(🟢|🔴|🟡|⚪|🟠)\s*(.+?)（加权分\s*([-\d.]+)"
     m = re.search(pattern, markdown)
     if not m:
         return errors  # 没有融合行，跳过
@@ -38,11 +38,17 @@ def _check_fusion_direction(markdown: str) -> list[str]:
     except ValueError:
         return errors
     if score >= 0.25 and emoji not in _BULLISH_EMOJI:
-        errors.append(f"fusion direction mismatch: score={score:.2f} (bullish) but emoji={emoji}")
-    elif score <= -0.2 and emoji not in _BEARISH_EMOJI:
-        errors.append(f"fusion direction mismatch: score={score:.2f} (bearish) but emoji={emoji}")
-    elif -0.05 < score < 0.1 and emoji not in _NEUTRAL_EMOJI:
+        errors.append(f"fusion direction mismatch: score={score:.2f} (strong bullish) but emoji={emoji}")
+    elif 0.1 <= score < 0.25 and emoji != "🟡":
+        errors.append(f"fusion direction mismatch: score={score:.2f} (weak bullish) but emoji={emoji}")
+    elif -0.05 <= score < 0.1 and emoji not in _NEUTRAL_EMOJI:
         errors.append(f"fusion direction mismatch: score={score:.2f} (neutral) but emoji={emoji}")
+    elif -0.12 <= score < -0.05 and emoji != "🟡":
+        errors.append(f"fusion direction mismatch: score={score:.2f} (weak bearish) but emoji={emoji}")
+    elif -0.2 <= score < -0.12 and emoji != "🟠":
+        errors.append(f"fusion direction mismatch: score={score:.2f} (lean bearish) but emoji={emoji}")
+    elif score < -0.2 and emoji not in _BEARISH_EMOJI:
+        errors.append(f"fusion direction mismatch: score={score:.2f} (strong bearish) but emoji={emoji}")
     return errors
 
 

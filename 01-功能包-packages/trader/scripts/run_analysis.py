@@ -244,13 +244,16 @@ _FUSION_ACTION_MAP: dict[str, tuple[str, str, str]] = {
     "半仓试 (多方主导但有分歧)": ("track", "bullish", "track"),
     "增持": ("track", "bullish", "track"),
     "等转强观察": ("wait_for_confirmation", "bullish_lean", "observe"),  # Fix 3: 新增
-    "持股观望": ("wait_for_confirmation", "bullish_lean", "observe"),
+    "持股观望": ("observe", "neutral", "observe"),
     "减仓": ("defensive", "bearish", "wait"),
     "空仓/止损": ("defensive", "bearish", "wait"),
     # T-11 fix: 补全 3 个缺失的融合层 Action 映射，避免决策被静默丢弃
     "空仓 (大盘很差, 一票否决)": ("risk_stop", "bearish", "stop"),
     "观望 (信号冲突)": ("observe", "neutral", "observe"),
     "等转强 (多方主导但有分歧)": ("wait_for_confirmation", "bullish_lean", "observe"),
+    # 卖点侧补强：减1/3 中间态映射
+    "减1/3 (高位松动)": ("defensive", "bearish_lean", "wait"),
+    "高位松动": ("defensive", "bearish_lean", "wait"),
 }
 
 
@@ -398,11 +401,13 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         elif _ws >= 0.25:
             _emoji = "🟢"
         elif _ws >= 0.1:
-            _emoji = "🟡"
+            _emoji = "🟡"      # 弱多
         elif _ws >= -0.05:
             _emoji = "⚪"
+        elif _ws >= -0.12:
+            _emoji = "🟡"      # 弱空
         elif _ws >= -0.2:
-            _emoji = "🟡"
+            _emoji = "🟠"      # 偏空
         else:
             _emoji = "🔴"
         _disclaimer = ""

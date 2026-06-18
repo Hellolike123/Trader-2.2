@@ -16,7 +16,7 @@ def test_map_fusion_buy():
     assert _map_fusion_to_signal("增持") == ("track", "bullish", "track")
 
 def test_map_fusion_hold():
-    assert _map_fusion_to_signal("持股观望") == ("wait_for_confirmation", "bullish_lean", "observe")
+    assert _map_fusion_to_signal("持股观望") == ("observe", "neutral", "observe")
 
 def test_map_fusion_sell():
     assert _map_fusion_to_signal("减仓") == ("defensive", "bearish", "wait")

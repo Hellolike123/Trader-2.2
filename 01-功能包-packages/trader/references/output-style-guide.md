@@ -30,7 +30,7 @@ If output contains any of these, rerun the script:
 
 - The `融合｜{emoji} {action}（加权分 X.XX，置信度 XX%）` line MUST appear between the stage summary (`📊 XX期`) and the buy/sell section (`📍 买卖点`).
 - This line comes from `fusion.fusion_verbatim` in the JSON output. Copy it verbatim; do NOT paraphrase or omit it.
-- The emoji (🟢/🔴/🟡/⚪) and the weighted_score direction MUST be consistent. If they conflict, rerun the script.
+- The emoji (🟢/🟡/⚪/🟠/🔴) and the weighted_score direction MUST be consistent. If they conflict, rerun the script.
 
 ## Additional Rules
 
