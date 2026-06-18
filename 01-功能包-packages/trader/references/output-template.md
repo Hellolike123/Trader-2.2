@@ -19,6 +19,8 @@ ATR 3.69（6.1%）波幅偏高
 
 📊 蓄势期 + 转弱 → 低吸高抛
 
+融合｜🟢 增持（加权分 0.32，置信度 72%）
+
 📍 买卖点
   55.57 止损
   57.61 ← 试探买 10%（缩量企稳）
@@ -83,6 +85,7 @@ ATR 3.69（6.1%）波幅偏高
 ```
 
 - **ATR**: Displayed if > 0.
+- **Fusion Verbatim**: MUST include the `融合｜{emoji} {action}（加权分 X.XX，置信度 XX%）` line between the stage summary and 买卖点 section. Use `fusion.fusion_verbatim` from JSON directly; do NOT paraphrase.
 - **Fixed Keywords**: The output MUST contain exactly "试探买" and "止损" to pass automated validation.
 - **黄金挂单**: If `fib_retrace.golden_bid` is valid and differs from the low_zone price, render a line: `{price} ← 黄金挂单（斐波那契{比例}）` between "试探买" and "当前", e.g. `58.20 ← 黄金挂单（斐波那契61.8%）`.
 - **Chip Migration**: MUST include a comparison to the previous day ("对比昨天"), reflecting changes in support and resistance peaks.

@@ -385,6 +385,35 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         report_fusion = {"action": "融合层异常", "confidence": 0, "weighted_score": 0,
                          "regime": "", "hmm_regime": "range", "disagreement": 0, "signals_detail": {}, "weights_used": {}}
 
+    # 生成 fusion_verbatim（AI 原话直出，不可改写）
+    try:
+        _ws = float(report_fusion.get("weighted_score") or 0)
+        _conf = float(report_fusion.get("confidence") or 0)
+        _action = str(report_fusion.get("action") or "未知")
+        _regime = str(report_fusion.get("regime") or "未知")
+        _dis = float(report_fusion.get("disagreement") or 0)
+        if _regime == "很差":
+            _emoji = "🔴"
+            _verbatim_action = "空仓 (大盘很差, 一票否决)"
+        elif _ws >= 0.25:
+            _emoji = "🟢"
+        elif _ws >= 0.1:
+            _emoji = "🟡"
+        elif _ws >= -0.05:
+            _emoji = "⚪"
+        elif _ws >= -0.2:
+            _emoji = "🟡"
+        else:
+            _emoji = "🔴"
+        _disclaimer = ""
+        if _dis > 1:
+            _disclaimer = "，信号冲突建议等待"
+        elif _conf < 0.3:
+            _disclaimer = "，信号弱轻仓"
+        report_fusion["fusion_verbatim"] = f"融合｜{_emoji} {_action}（加权分 {_ws:.2f}，置信度 {_conf:.0%}{_disclaimer}）"
+    except Exception:
+        report_fusion["fusion_verbatim"] = "融合｜数据异常"
+
     # Volume Profile 计算
     vp_result = None
     try:

@@ -107,3 +107,13 @@ Step 3: 给建议
 □ data_status 是什么？partial → 提示数据不完整
 □ 有没有检查 scene / chip_migration / market_env → 评估风险
 □ 我有没有编造内容？价格/评分/信号全部来自 JSON？有一个不是 → 删掉
+□ 融合层判断用了 fusion_verbatim 吗？没用 → 按模板原话直出，禁止自由发挥
+
+## Installed Skill References（Agent 必读）
+
+Installed skill (`~/.agents/skills/trader/`) 的 `references/` 目录包含以下 Agent 必读文件：
+- `anti-hallucination.md`：数据锚定表 + 信号矛盾处理 + 禁止用语
+- `fusion-guide.md`：融合层字段解读 + 8档阈值 + verbatim 模板 + 常见误读纠正
+- `commands.md`：所有命令示例
+
+Agent 使用 trader skill 时，必须先读这 3 个文件再开始工作。
