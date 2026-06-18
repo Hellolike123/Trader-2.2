@@ -1194,6 +1194,15 @@ def render_markdown(r: dict) -> str:
     lines.extend([
         "",
         f"📊 {major_stage}期 + {momentum} → {stage_action_text}",
+    ])
+
+    # 融合层 verbatim（从 JSON fusion.fusion_verbatim 直出）
+    fusion_verbatim = (r.get("fusion") or {}).get("fusion_verbatim")
+    if fusion_verbatim:
+        lines.append("")
+        lines.append(fusion_verbatim)
+
+    lines.extend([
         "",
         "📍 买卖点"
     ])
