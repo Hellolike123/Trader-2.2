@@ -38,11 +38,38 @@ PARAM_SPACE = {
     "stop_buffer":     [0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00],
 }
 
+# 置信度映射参数搜索空间（数据充足时启用）
+CONFIDENCE_PARAM_SPACE = {
+    "conf_extreme":  [0.70, 0.75, 0.80, 0.85, 0.90],
+    "conf_strong":   [0.50, 0.55, 0.60, 0.65, 0.70],
+    "conf_medium":   [0.40, 0.45, 0.50, 0.55],
+    "conf_floor":    [0.15, 0.20, 0.25, 0.30],
+    "high_extreme":  [70, 75, 80],
+    "high_strong":   [60, 65, 70],
+    "low_extreme":   [20, 25, 30],
+    "low_strong":    [30, 35, 40],
+}
+
+# 置信度校准所需最小信号数
+CONFIDENCE_MIN_SIGNALS = 30
+
 # ── 默认参数 ─────────────────────────────────────────────────────────────────
 DEFAULT_PARAMS = {
     "zone_width": 1.0,
     "confirm_buffer": 1.0,
     "stop_buffer": 1.0,
+}
+
+# 置信度映射默认参数
+CONFIDENCE_DEFAULT_PARAMS = {
+    "conf_extreme": 0.80,
+    "conf_strong": 0.60,
+    "conf_medium": 0.50,
+    "conf_floor": 0.20,
+    "high_extreme": 75,
+    "high_strong": 65,
+    "low_extreme": 25,
+    "low_strong": 35,
 }
 
 
@@ -289,6 +316,39 @@ def calibrate(
         calibrated_results[regime_name] = blended_params
         if verbose:
             print(f"  -> 大势 {regime_name:6} (样本:{sub_count:2}): 性能评分 {best_score:.3f} | zone_width={blended_params['zone_width']:.2f}, confirm_buffer={blended_params['confirm_buffer']:.2f}, stop_buffer={blended_params['stop_buffer']:.2f}")
+
+    # 置信度映射校准（数据充足时启用）
+    if len(outcomes) >= CONFIDENCE_MIN_SIGNALS:
+        if verbose:
+            print(f"\n🔍 置信度映射校准：{len(outcomes)} 个已结算结果 >= {CONFIDENCE_MIN_SIGNALS}，开始校准")
+        best_conf = CONFIDENCE_DEFAULT_PARAMS.copy()
+        best_conf_score = _simulate_performance(signals, outcomes, {**DEFAULT_PARAMS, **best_conf}, None, regimes_map)
+
+        for trial in range(n_trials):
+            candidate_conf = {
+                k: random.choice(v) for k, v in CONFIDENCE_PARAM_SPACE.items()
+            }
+            merged = {**DEFAULT_PARAMS, **candidate_conf}
+            score = _simulate_performance(signals, outcomes, merged, None, regimes_map)
+            if score > best_conf_score:
+                best_conf_score = score
+                best_conf = candidate_conf.copy()
+
+        # EMA 平滑
+        old_conf = old_params.get("confidence_mapping", CONFIDENCE_DEFAULT_PARAMS)
+        blended_conf = {}
+        for key in CONFIDENCE_DEFAULT_PARAMS:
+            o_val = float(old_conf.get(key, CONFIDENCE_DEFAULT_PARAMS[key]))
+            n_val = float(best_conf[key])
+            blended = (1 - ALPHA) * o_val + ALPHA * n_val
+            blended_conf[key] = round(blended, 2)
+
+        calibrated_results["confidence_mapping"] = blended_conf
+        if verbose:
+            print(f"  -> 置信度映射: 性能评分 {best_conf_score:.3f} | {blended_conf}")
+    else:
+        if verbose:
+            print(f"\n⚠️ 置信度映射校准：已结算结果({len(outcomes)}条)不足 {CONFIDENCE_MIN_SIGNALS} 条，跳过")
 
     return calibrated_results
 

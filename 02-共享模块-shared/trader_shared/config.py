@@ -156,6 +156,18 @@ RALLY_REDUCE_FULL_SCORE: int = 5        # 满分减仓评分（5/5）
 RALLY_REDUCE_POSITION_PCT: int = -15    # 满分条件减仓 15%
 RALLY_REDUCE_LITE_POSITION_PCT: int = -10  # 最低条件减仓 10%
 
+# 置信度映射默认值（未校准时使用，校准后从 calibrated_params.json 覆盖）
+CONFIDENCE_MAPPING_DEFAULTS: dict[str, float] = {
+    "conf_extreme": 0.80,   # 极端信号置信度
+    "conf_strong": 0.60,    # 强信号置信度
+    "conf_medium": 0.50,    # 中等信号置信度
+    "conf_floor": 0.20,     # 灰区最低置信度
+    "high_extreme": 75,     # 极端看多分数阈值
+    "high_strong": 65,      # 强看多分数阈值
+    "low_extreme": 25,      # 极端看空分数阈值
+    "low_strong": 35,       # 强看空分数阈值
+}
+
 # 条件止盈比例
 EXIT_RATIO_BC: float = 0.33            # BC 信号减仓 1/3
 EXIT_RATIO_1R: float = 0.33            # 1R 目标减仓 1/3

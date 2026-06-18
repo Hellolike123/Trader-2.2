@@ -185,41 +185,62 @@ def _momentum_to_signal(momentum_result: dict) -> dict:
     }
 
 
+def _load_confidence_params() -> dict[str, float]:
+    """加载置信度映射参数。优先从 calibrated_params.json 读取，fallback 到 config 默认值。"""
+    from trader_shared.config import CONFIDENCE_MAPPING_DEFAULTS
+    try:
+        from trader_shared.self_calibration import load_calibrated_params
+        cal = load_calibrated_params()
+        if cal and "confidence_mapping" in cal:
+            # 合并：校准值覆盖默认值
+            merged = dict(CONFIDENCE_MAPPING_DEFAULTS)
+            merged.update(cal["confidence_mapping"])
+            return merged
+    except Exception:
+        pass
+    return dict(CONFIDENCE_MAPPING_DEFAULTS)
+
+
 def _score_to_confidence(score: float) -> float:
     """从 0-100 分数映射到 0-1 置信度。
 
     U 型函数: 两端信号强 → 置信度高, 中间灰区 → 置信度低
-    - <= 25/>= 75: 极端信号, 置信度 0.8
-    - <= 35/  >= 65: 强信号, 0.6
-    - <= 40/ >= 60: 中等信号, 0.5
-    - 41-59: 灰区, 0.2-0.5 (50 最低)
+    阈值从 calibrated_params.json 读取（可校准），fallback 到 config 默认值。
     """
     try:
         score = float(score)
     except (TypeError, ValueError):
         return 0.2
 
-    if score >= 75:
-        return 0.8
-    if score >= 65:
-        return 0.6
-    if score >= 60:
-        return 0.5
+    p = _load_confidence_params()
+    ce, cs, cm, cf = p["conf_extreme"], p["conf_strong"], p["conf_medium"], p["conf_floor"]
+    he, hs = p["high_extreme"], p["high_strong"]
+    le, ls = p["low_extreme"], p["low_strong"]
 
-    if score <= 25:
-        return 0.8
-    if score <= 35:
-        return 0.6
-    if score <= 40:
-        return 0.5
+    if score >= he:
+        return ce
+    if score >= hs:
+        return cs
+    if score >= (hs - 5):  # 60 附近
+        return cm
 
-    # 41-59 灰区: V 形, 50 最低 (0.2), 向 40/60 两侧上升 (0.5)
-    if score < 50:
-        ratio = (50 - score) / 9
-        return 0.2 + ratio * 0.3
+    if score <= le:
+        return ce
+    if score <= ls:
+        return cs
+    if score <= (ls + 5):  # 40 附近
+        return cm
+
+    # 灰区: V 形, 50 最低 (cf), 向两侧上升 (cm)
+    mid = 50
+    half_width = (hs - 5) - mid  # 通常是 9
+    if half_width <= 0:
+        half_width = 9
+    if score < mid:
+        ratio = (mid - score) / half_width
     else:
-        ratio = (score - 50) / 9
-        return 0.2 + ratio * 0.3
+        ratio = (score - mid) / half_width
+    return cf + ratio * (cm - cf)
 
 
 def _wyckoff_to_signal(wyckoff_result: dict) -> dict:
