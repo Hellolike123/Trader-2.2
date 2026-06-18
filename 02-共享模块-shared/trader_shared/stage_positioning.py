@@ -22,7 +22,11 @@ from pathlib import Path
 from typing import Any
 
 from trader_shared._logging import get_logger
-from trader_shared.config import ACCUMULATION_DAYS_LIMIT, MARKUP_DAYS_LIMIT
+from trader_shared.config import (
+    ACCUMULATION_DAYS_LIMIT, MARKUP_DAYS_LIMIT,
+    RALLY_REDUCE_FULL_SCORE, RALLY_REDUCE_MIN_SCORE,
+    RALLY_REDUCE_POSITION_PCT, RALLY_REDUCE_LITE_POSITION_PCT,
+)
 
 _logger = get_logger(__name__)
 
@@ -1350,15 +1354,15 @@ def evaluate_position_state(
                     "阻力位分歧", "派发期+BC信号，减仓1/3",
                     0, conditions, stop_price=atr_stop,
                 )
-            if rally_score >= 5:
+            if rally_score >= RALLY_REDUCE_FULL_SCORE:
                 return _make_position_state(
                     "阻力位分歧", f"派发期+冲高条件充分（{rally_score}/5），减仓15%",
-                    -15, conditions, stop_price=atr_stop,
+                    RALLY_REDUCE_POSITION_PCT, conditions, stop_price=atr_stop,
                 )
-            if rally_score >= 3:
+            if rally_score >= RALLY_REDUCE_MIN_SCORE:
                 return _make_position_state(
                     "阻力位分歧", f"派发期+冲高条件部分满足（{rally_score}/5），减仓10%",
-                    -10, conditions, stop_price=atr_stop,
+                    RALLY_REDUCE_LITE_POSITION_PCT, conditions, stop_price=atr_stop,
                 )
             return _make_position_state(
                 "阻力位分歧", f"派发期到达阻力位（{rally_score}/5），观察是否突破",
@@ -1377,15 +1381,15 @@ def evaluate_position_state(
         # 进入高抛区间时，用评分决定是否提前减仓
         if conditions["in_high_zone"]:
             rally_score = _calc_rally_reduce_score(conditions, bars, current_price, resistance, atr14)
-            if rally_score >= 5:
+            if rally_score >= RALLY_REDUCE_FULL_SCORE:
                 return _make_position_state(
                     "阻力位分歧", f"主升期进入高抛区+冲高条件充分（{rally_score}/5），减仓15%",
-                    -15, conditions, stop_price=expma10 if expma10 else base_stop,
+                    RALLY_REDUCE_POSITION_PCT, conditions, stop_price=expma10 if expma10 else base_stop,
                 )
-            if rally_score >= 3:
+            if rally_score >= RALLY_REDUCE_MIN_SCORE:
                 return _make_position_state(
                     "阻力位分歧", f"主升期进入高抛区+冲高条件部分满足（{rally_score}/5），减仓10%",
-                    -10, conditions, stop_price=expma10 if expma10 else base_stop,
+                    RALLY_REDUCE_LITE_POSITION_PCT, conditions, stop_price=expma10 if expma10 else base_stop,
                 )
 
         if conditions["chip_stable"] and conditions["expma10_up"]:
@@ -1444,15 +1448,15 @@ def evaluate_position_state(
                 "阻力位分歧", "突破阻力位确认，继续持有",
                 0, conditions, stop_price=atr_stop,
             )
-        if rally_score >= 5:
+        if rally_score >= RALLY_REDUCE_FULL_SCORE:
             return _make_position_state(
                 "阻力位分歧", f"冲高条件充分（{rally_score}/5），减仓15%",
-                -15, conditions, stop_price=atr_stop,
+                RALLY_REDUCE_POSITION_PCT, conditions, stop_price=atr_stop,
             )
-        if rally_score >= 3:
+        if rally_score >= RALLY_REDUCE_MIN_SCORE:
             return _make_position_state(
                 "阻力位分歧", f"冲高条件部分满足（{rally_score}/5），减仓10%",
-                -10, conditions, stop_price=atr_stop,
+                RALLY_REDUCE_LITE_POSITION_PCT, conditions, stop_price=atr_stop,
             )
         return _make_position_state(
             "阻力位分歧", f"到达阻力位（{rally_score}/5），观察量能",
@@ -1516,14 +1520,14 @@ def _calc_pullback_add_score(
             if rsi < 40:
                 score += 1
 
-    # 加分条件5：MACD 金叉（1分）
+    # 加分条件5：MACD 金叉（1分）— 使用真正的 EMA
     if bars and len(bars) >= 26:
-        closes = [float(b.get("close") or 0) for b in bars[-26:] if b.get("close")]
+        from trader_shared.indicator_math import calc_expma
+        closes = [float(b.get("close") or 0) for b in bars if b.get("close")]
         if len(closes) >= 26:
-            ema12 = sum(closes[-12:]) / 12
-            ema26 = sum(closes[-26:]) / 26
-            macd_line = ema12 - ema26
-            if macd_line > 0:
+            ema12 = calc_expma(closes, 12)
+            ema26 = calc_expma(closes, 26)
+            if ema12 is not None and ema26 is not None and ema12 > ema26:
                 score += 1
 
     return score
@@ -1584,10 +1588,12 @@ def _calc_rally_reduce_score(
       2. 创新高后回落（近5日高点 > 前期高点，且当前 < 高点×0.98）
 
     加分条件（3分）：
-      3. 放量滞涨（近3日均量 > 7日均量×1.2 且涨幅 < 1%）
+      3. 放量滞涨（近3日均量 > 7日均量×1.2 且涨幅 < 3%）
       4. RSI 超买（RSI14 > 70）
       5. MACD 死叉（EMA12 < EMA26）
     """
+    from trader_shared.indicator_math import calc_expma
+
     score = 0
 
     # 必要条件1：接近阻力位（1分）
@@ -1596,14 +1602,14 @@ def _calc_rally_reduce_score(
 
     # 必要条件2：创新高后回落（1分）
     if bars and len(bars) >= 10:
-        highs = [float(b.get("high") or 0) for b in bars]
+        highs = [float(b.get("high") or 0) for b in bars if float(b.get("high") or 0) > 0]
         recent_5_high = max(highs[-5:]) if len(highs) >= 5 else 0
         earlier_high = max(highs[:-5]) if len(highs) > 5 else 0
         if recent_5_high > earlier_high and earlier_high > 0:
             if current_price < recent_5_high * 0.98:
                 score += 1
 
-    # 加分条件3：放量滞涨（1分）— 量增但价不动
+    # 加分条件3：放量滞涨（1分）— 量增但价不涨（允许下跌）
     if bars and len(bars) >= 10:
         recent_vol = sum(float(b.get("volume") or 0) for b in bars[-3:]) / 3
         earlier_vol = sum(float(b.get("volume") or 0) for b in bars[-10:-3]) / 7
@@ -1612,7 +1618,7 @@ def _calc_rally_reduce_score(
             prev_close = float(bars[-4].get("close") or 0)
             if prev_close > 0:
                 recent_change = (current_price - prev_close) / prev_close
-        if earlier_vol > 0 and recent_vol > earlier_vol * 1.2 and abs(recent_change) < 0.01:
+        if earlier_vol > 0 and recent_vol > earlier_vol * 1.2 and recent_change < 0.03:
             score += 1
 
     # 加分条件4：RSI 超买（1分）
@@ -1628,14 +1634,13 @@ def _calc_rally_reduce_score(
             if rsi > 70:
                 score += 1
 
-    # 加分条件5：MACD 死叉（1分）
+    # 加分条件5：MACD 死叉（1分）— 使用真正的 EMA
     if bars and len(bars) >= 26:
-        closes = [float(b.get("close") or 0) for b in bars[-26:] if b.get("close")]
+        closes = [float(b.get("close") or 0) for b in bars if b.get("close")]
         if len(closes) >= 26:
-            ema12 = sum(closes[-12:]) / 12
-            ema26 = sum(closes[-26:]) / 26
-            macd_line = ema12 - ema26
-            if macd_line < 0:
+            ema12 = calc_expma(closes, 12)
+            ema26 = calc_expma(closes, 26)
+            if ema12 is not None and ema26 is not None and ema12 < ema26:
                 score += 1
 
     return score

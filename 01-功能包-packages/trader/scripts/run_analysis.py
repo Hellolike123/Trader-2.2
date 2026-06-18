@@ -551,9 +551,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     # 多时间窗共振（10分制）
     resonance_result: dict[str, Any] = {
         "total_score": 0, "weekly_score": 0, "daily_score": 0,
-        "timing_score": 0, "resonance_score": 0,
+        "timing_score": 0, "sell_timing_score": 0, "resonance_score": 0,
         "weekly_label": "无数据", "daily_label": "无数据",
-        "timing_label": "无数据", "resonance_label": "无数据",
+        "timing_label": "无数据", "sell_timing_label": "无数据", "resonance_label": "无数据",
         "detail": {},
     }
     try:
@@ -576,6 +576,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         pass
 
     # 60分钟卖点确认 → 提升融合层卖方置信度
+    # 注：买方 timing 信号已通过 weighted_score 正值体现，此处仅对卖方补充置信度
     _sell_timing = resonance_result.get("sell_timing_score", 0)
     if _sell_timing >= 1 and report_fusion.get("weighted_score", 0) < 0:
         _boost = 0.05 * _sell_timing  # +0.05 per sell_timing point
