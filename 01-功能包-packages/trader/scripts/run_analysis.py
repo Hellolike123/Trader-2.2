@@ -1611,7 +1611,7 @@ def signal_state(r: dict[str, Any]) -> tuple[str, str, str, str]:
     if theory_status == "转强不足":
         return "wait_for_confirmation", "neutral", "observe", "low"
     if scene == "冲高减仓" or theory_status == "冲高减仓":
-        return "reduce", "neutral", "reduce", "medium"
+        return "reduce", "bearish_lean", "reduce", "medium"
     if current >= confirm or scene in {"突破确认", "突破观察"} or theory_status in {"突破确认", "突破观察"}:
         return "track", "bullish", "track", "medium"
     if scene in {"低吸观察", "防守观察", "防守观察，趋势下行谨慎", "空间不足", "等转强"}:

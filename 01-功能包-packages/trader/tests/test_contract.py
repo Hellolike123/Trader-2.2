@@ -211,7 +211,7 @@ def test_build_signal_for_scene_冲高减仓() -> None:
     signal = build_signal(report)
 
     assert signal["signal_type"] == "reduce"
-    assert signal["direction"] == "neutral"
+    assert signal["direction"] == "bearish_lean"
     assert signal["action"] == "reduce"
     assert signal["confidence"] == "medium"
 
