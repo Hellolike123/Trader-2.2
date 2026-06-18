@@ -468,13 +468,46 @@ def detect_sell_points(
     return sell_points
 
 
-def detect_divergence(bars: list[dict]) -> dict:
+def detect_divergence(bars: list[dict], strokes: list[dict] | None = None) -> dict:
     result: dict[str, bool] = {"top_divergence": False, "bottom_divergence": False}
 
     n = len(bars)
     if n < 5:
         return result
 
+    # 按笔分段检测背离（优先），否则回退到全局检测
+    if strokes and len(strokes) >= 2:
+        # 比较最后两笔的 MACD 极值
+        up_strokes = [s for s in strokes if s.get("direction") == 1]
+        down_strokes = [s for s in strokes if s.get("direction") == -1]
+
+        # 顶背离：最后两个上升笔，价格新高但 MACD 走低
+        if len(up_strokes) >= 2:
+            s1, s2 = up_strokes[-2], up_strokes[-1]
+            p1 = s1.get("end", {})
+            p2 = s2.get("end", {})
+            price1 = to_float(p1.get("price")) or 0
+            price2 = to_float(p2.get("price")) or 0
+            macd1 = to_float(p1.get("macd")) or 0
+            macd2 = to_float(p2.get("macd")) or 0
+            if price2 > price1 and macd2 < macd1:
+                result["top_divergence"] = True
+
+        # 底背离：最后两个下降笔，价格新低但 MACD 走高
+        if len(down_strokes) >= 2:
+            s1, s2 = down_strokes[-2], down_strokes[-1]
+            p1 = s1.get("end", {})
+            p2 = s2.get("end", {})
+            price1 = to_float(p1.get("price")) or 0
+            price2 = to_float(p2.get("price")) or 0
+            macd1 = to_float(p1.get("macd")) or 0
+            macd2 = to_float(p2.get("macd")) or 0
+            if price2 < price1 and macd2 > macd1:
+                result["bottom_divergence"] = True
+
+        return result
+
+    # 回退：全局扫描（无笔数据时）
     peaks: list[dict[str, Any]] = []
     for i in range(2, n - 2):
         high = to_float(bars[i].get("high"))
@@ -529,7 +562,7 @@ def chanlun_analysis(
     fractions = find_fractions(cleaned)
     strokes = build_strokes(fractions, min_bars_per_stroke=CHANLUN_MIN_BARS_PER_STROKE)
     zones = build_zones(strokes)
-    divergence = detect_divergence(bars)
+    divergence = detect_divergence(bars, strokes)
     
     # Check MACD divergence for 2nd buy point
     macd_divergence_ok = _check_macd_for_2nd_buy(bars, strokes)

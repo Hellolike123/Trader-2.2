@@ -304,6 +304,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     if current is None:
         raise RuntimeError("current price unavailable")
     current = float(current)
+    # 当 quote 缺少 current_price 时，标记数据降级
+    if _cp is None:
+        snapshot.data_status = "partial"
 
     recent20 = bars[-STRUCTURE_WINDOW:] if len(bars) >= STRUCTURE_WINDOW else bars
     from trader_shared.chan_core import chanlun_strategy
@@ -1278,9 +1281,15 @@ def render_markdown(r: dict) -> str:
     stage_desc = stage_desc_map.get(major_stage, "")
     lines.append(f"  阶段：{major_stage}期（{stage_desc}）")
     
-    trend_desc = f"价格在 {confirm:.2f} 下方" if current_price < confirm else f"价格站上 {confirm:.2f}"
-    trend_action = "不追" if current_price < confirm else "可加仓"
-    lines.append(f"  趋势：短期偏弱（{trend_desc}），{trend_action}")
+    # 趋势描述与 state_label 保持一致（避免硬编码与 sync_report_with_data 矛盾）
+    state_label = str(r.get("state_label") or "")
+    if current_price >= confirm:
+        trend_desc = f"价格站上 {confirm:.2f}，可加仓"
+    elif "走强" in state_label or "转强" in state_label:
+        trend_desc = f"价格在 {confirm:.2f} 下方，但趋势走强，等确认"
+    else:
+        trend_desc = f"价格在 {confirm:.2f} 下方，不追"
+    lines.append(f"  趋势：{trend_desc}")
 
     # EXPMA 详细状态
     ems = r.get("expma_status") or {}
@@ -1600,8 +1609,16 @@ def signal_state(r: dict[str, Any]) -> tuple[str, str, str, str]:
     theory_status = str(r.get("theory_status") or r.get("state_label") or scene)
     current = float(r.get("current") or 0)
     confirm = float(r.get("confirm") or current)
+
+    # 最高优先级：衰退/暂不碰 → 一票否决
     if major_stage == "衰退" or theory_status == "暂不碰":
         return "defensive", "bearish_lean", "wait", "low"
+
+    # 突破确认优先于冲高减仓（已站上确认位应跟踪而非减仓）
+    if current >= confirm or scene in {"突破确认", "突破观察"} or theory_status in {"突破确认", "突破观察"}:
+        return "track", "bullish", "track", "medium"
+
+    # 体系确认类
     if theory_status == "体系转强确认":
         return "track", "bullish", "track", "medium"
     if theory_status == "未确认转强":
@@ -1610,11 +1627,20 @@ def signal_state(r: dict[str, Any]) -> tuple[str, str, str, str]:
         return "wait_for_confirmation", "bullish_lean", "observe", "medium"
     if theory_status == "转强不足":
         return "wait_for_confirmation", "neutral", "observe", "low"
+
+    # 冲高减仓（突破确认已优先处理，此处为未突破时的减仓信号）
     if scene == "冲高减仓" or theory_status == "冲高减仓":
         return "reduce", "bearish_lean", "reduce", "medium"
-    if current >= confirm or scene in {"突破确认", "突破观察"} or theory_status in {"突破确认", "突破观察"}:
-        return "track", "bullish", "track", "medium"
+
+    # 风险回避类
+    if theory_status in {"风险回避", "数据不足"}:
+        return "defensive", "bearish_lean", "wait", "low"
+
+    # 观察等待类（覆盖所有 scene 和 theory_status 变体）
     if scene in {"低吸观察", "防守观察", "防守观察，趋势下行谨慎", "空间不足", "等转强"}:
+        return "wait_for_confirmation", "bullish_lean", "observe", "medium"
+    if theory_status in {"防守观察", "修复观察", "低吸观察", "等转强", "观望", "中性整理",
+                         "低位修复", "均线修复", "防守整理", "临近确认", "空间偏紧"}:
         return "wait_for_confirmation", "bullish_lean", "observe", "medium"
     return "observe", "neutral", "observe", "low"
 
@@ -2011,7 +2037,7 @@ def _build_today_action_section(r: dict[str, Any]) -> list[str]:
         lines.append("  动作：不碰")
         lines.append("  理由：衰退期，不参与")
         lines.append("  如果非要关注：等站上250日线再说")
-    elif stage_action in ("清仓", "减仓") or scene == "冲高减仓":
+    elif stage_action in ("逢高减磅", "逢反弹减仓", "清仓逃命", "跌破防线减仓") or scene == "冲高减仓":
         # 减仓信号
         lines.append("  动作：反弹减仓")
         lines.append(f"  理由：{major_stage}期{momentum}，逢高减仓")

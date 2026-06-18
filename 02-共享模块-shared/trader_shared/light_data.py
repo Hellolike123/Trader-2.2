@@ -1128,7 +1128,7 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
                         "low": to_float(row[4]),
                         "volume": to_float(row[5]),
                         "data_source": "tencent-http",
-                        "data_status": "full",
+                        "data_status": "partial",  # 非前复权数据，标记为 partial
                     })
         if not bars:
             raise RuntimeError("Tencent qfq daily bars unavailable")
