@@ -575,6 +575,12 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     except Exception:
         pass
 
+    # 60分钟卖点确认 → 提升融合层卖方置信度
+    _sell_timing = resonance_result.get("sell_timing_score", 0)
+    if _sell_timing >= 1 and report_fusion.get("weighted_score", 0) < 0:
+        _boost = 0.05 * _sell_timing  # +0.05 per sell_timing point
+        report_fusion["confidence"] = min(0.95, report_fusion.get("confidence", 0) + _boost)
+
     chip_support: float | None = None
     chip_resistance: float | None = None
     if chip_peaks:
@@ -794,6 +800,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         highest_close=max([float(b.get("close") or 0) for b in bars[-20:]]) if bars else current,
         expma10=expma10_val,
         chip_migration=chip_migration,
+        high_zone_lower=float(levels.get("high_zone_lower") or 0),
+        trailing_stop=levels.get("trailing_stop"),
     )
     report["position_state"] = position_state
 

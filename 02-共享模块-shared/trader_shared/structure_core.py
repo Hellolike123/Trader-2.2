@@ -471,6 +471,18 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         "golden_bid": golden_bid
     }
 
+    # ═══════ 高抛区间 & Fibonacci 扩展目标位（对称低吸区间）═══════
+    high_zone_upper = round(resistance_price, 2)
+    high_zone_lower = round(resistance_price * (1 - zone_width_pct), 2)
+
+    # Fibonacci 扩展目标位（从缠论笔计算 138.2% / 161.8%）
+    fib_ext_1382 = None
+    fib_ext_1618 = None
+    if swing_low is not None and swing_high is not None and swing_high > swing_low and swing_low > 0:
+        diff = swing_high - swing_low
+        fib_ext_1382 = round(swing_low + diff * 1.382, 2)
+        fib_ext_1618 = round(swing_low + diff * 1.618, 2)
+
     # ── P0: ATR 移动止损 ──
     try:
         from config import ENABLE_TRAILING_STOP, TRAILING_STOP_ATR_MULTIPLE
@@ -553,6 +565,11 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         "theory_multipliers": theory,  # P3: 记录理论信号对参数的微调系数，便于调试
         "time_window": _check_time_window(bars, chan_result),  # P4: 江恩时间窗口
         "fib_retrace": fib_retrace,  # [2.3新增] 斐波那契黄金回调及挂单参考
+        "high_zone_upper": high_zone_upper,  # 高抛区间上沿
+        "high_zone_lower": high_zone_lower,  # 高抛区间下沿
+        "high_zone": f"{high_zone_lower:.2f}-{high_zone_upper:.2f}元",
+        "fib_ext_1382": fib_ext_1382,  # Fibonacci 138.2% 扩展目标位
+        "fib_ext_1618": fib_ext_1618,  # Fibonacci 161.8% 扩展目标位
         "trailing_stop": trailing_stop,  # P0: ATR 移动止损价
         "highest_close": highest_close,  # P0: 分析区间最高收盘价
     }

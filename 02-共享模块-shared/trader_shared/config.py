@@ -148,6 +148,14 @@ PULLBACK_ADD_FULL_POSITION_PCT: int = 15  # 满分条件加仓 15%
 # 初始建仓仓位
 INITIAL_POSITION_PCT: int = 10          # 初始建仓 10%
 
+# 冲高减仓条件评分阈值
+RALLY_REDUCE_MIN_SCORE: int = 3         # 最低减仓评分（3/5）
+RALLY_REDUCE_FULL_SCORE: int = 5        # 满分减仓评分（5/5）
+
+# 冲高减仓仓位（占当前仓位百分比，负数表示减仓）
+RALLY_REDUCE_POSITION_PCT: int = -15    # 满分条件减仓 15%
+RALLY_REDUCE_LITE_POSITION_PCT: int = -10  # 最低条件减仓 10%
+
 # 条件止盈比例
 EXIT_RATIO_BC: float = 0.33            # BC 信号减仓 1/3
 EXIT_RATIO_1R: float = 0.33            # 1R 目标减仓 1/3

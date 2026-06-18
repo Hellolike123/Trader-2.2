@@ -1226,6 +1226,8 @@ def evaluate_position_state(
     highest_close: float = 0.0,
     expma10: float | None = None,
     chip_migration: dict[str, Any] | None = None,
+    high_zone_lower: float = 0.0,
+    trailing_stop: float | None = None,
 ) -> dict[str, Any]:
     """五状态仓位管理状态机。
 
@@ -1274,11 +1276,21 @@ def evaluate_position_state(
         chip_warning = chip_migration.get("warning_level", "none")
 
     # 条件检查
+    # 统一止损：取 hard_stop / atr_stop / trailing_stop 三者最高（只紧不松）
+    effective_stop = max(
+        stop_price if stop_price > 0 else 0,
+        atr_stop if atr_stop > 0 else 0,
+        trailing_stop if trailing_stop and trailing_stop > 0 else 0,
+    )
+
     conditions = {
         "at_support": support > 0 and abs(current_price - support) / max(support, 1) < 0.03,
         "at_resistance": resistance > 0 and abs(current_price - resistance) / max(resistance, 1) < 0.03,
+        "in_high_zone": high_zone_lower > 0 and high_zone_lower <= current_price <= resistance,
         "above_stop": stop_price <= 0 or current_price > stop_price,
         "above_atr_stop": current_price > atr_stop,
+        "above_trailing_stop": trailing_stop is None or trailing_stop <= 0 or current_price > trailing_stop,
+        "above_effective_stop": effective_stop <= 0 or current_price > effective_stop,
         "breakout_confirmed": confirm_price > 0 and current_price >= confirm_price,
         "pullback_to_support": support > 0 and current_price <= support * 1.02 and current_price >= support * 0.98,
         "chip_stable": chip_warning not in ("critical", "warning"),
@@ -1307,8 +1319,8 @@ def evaluate_position_state(
         return _make_position_state("空仓", "等待到达支撑位", 0, conditions)
 
     # 有持仓的状态流转
-    # 检查止损
-    if not conditions["above_stop"] or not conditions["above_atr_stop"]:
+    # 检查统一止损（hard_stop / atr_stop / trailing_stop 取最高）
+    if not conditions["above_effective_stop"]:
         return _make_position_state(
             "退出再买", "跌破止损，清仓等待",
             0, conditions, stop_price=0,
@@ -1329,16 +1341,27 @@ def evaluate_position_state(
             0, conditions, stop_price=0,
         )
 
-    # 派发期 → 阻力位分歧
+    # 派发期 → 阻力位分歧（用多因子评分决定减仓力度）
     if conditions["stage_distribution"]:
+        rally_score = _calc_rally_reduce_score(conditions, bars, current_price, resistance, atr14)
         if conditions["at_resistance"]:
             if bc_signal:
                 return _make_position_state(
                     "阻力位分歧", "派发期+BC信号，减仓1/3",
                     0, conditions, stop_price=atr_stop,
                 )
+            if rally_score >= 5:
+                return _make_position_state(
+                    "阻力位分歧", f"派发期+冲高条件充分（{rally_score}/5），减仓15%",
+                    -15, conditions, stop_price=atr_stop,
+                )
+            if rally_score >= 3:
+                return _make_position_state(
+                    "阻力位分歧", f"派发期+冲高条件部分满足（{rally_score}/5），减仓10%",
+                    -10, conditions, stop_price=atr_stop,
+                )
             return _make_position_state(
-                "阻力位分歧", "派发期到达阻力位，观察是否突破",
+                "阻力位分歧", f"派发期到达阻力位（{rally_score}/5），观察是否突破",
                 0, conditions, stop_price=atr_stop,
             )
         return _make_position_state(
@@ -1350,7 +1373,21 @@ def evaluate_position_state(
     if conditions["stage_markup"]:
         # 底仓止损：上移到阻力位（更宽的止损）
         base_stop = round(resistance * 0.98, 2) if resistance > 0 else atr_stop
-        
+
+        # 进入高抛区间时，用评分决定是否提前减仓
+        if conditions["in_high_zone"]:
+            rally_score = _calc_rally_reduce_score(conditions, bars, current_price, resistance, atr14)
+            if rally_score >= 5:
+                return _make_position_state(
+                    "阻力位分歧", f"主升期进入高抛区+冲高条件充分（{rally_score}/5），减仓15%",
+                    -15, conditions, stop_price=expma10 if expma10 else base_stop,
+                )
+            if rally_score >= 3:
+                return _make_position_state(
+                    "阻力位分歧", f"主升期进入高抛区+冲高条件部分满足（{rally_score}/5），减仓10%",
+                    -10, conditions, stop_price=expma10 if expma10 else base_stop,
+                )
+
         if conditions["chip_stable"] and conditions["expma10_up"]:
             return _make_position_state(
                 "主升浪跟踪", "主升期+筹码稳定+EXPMA(10)支撑，持有",
@@ -1393,11 +1430,10 @@ def evaluate_position_state(
             0, conditions, stop_price=add_on_stop,
         )
 
-    # 阻力位分歧（到达阻力位）
+    # 阻力位分歧（到达阻力位，用多因子评分决定减仓力度）
     if conditions["at_resistance"]:
-        # 阻力位由客观量价表现决定：弱→止盈，强→等回踩加仓
-        resistance_strength = _assess_resistance_strength(bars, current_price, resistance)
-        
+        rally_score = _calc_rally_reduce_score(conditions, bars, current_price, resistance, atr14)
+
         if bc_signal:
             return _make_position_state(
                 "阻力位分歧", "到达阻力位+BC信号，减仓1/3",
@@ -1408,13 +1444,18 @@ def evaluate_position_state(
                 "阻力位分歧", "突破阻力位确认，继续持有",
                 0, conditions, stop_price=atr_stop,
             )
-        if resistance_strength == "weak":
+        if rally_score >= 5:
             return _make_position_state(
-                "阻力位分歧", "阻力位弱势，可以止盈",
-                0, conditions, stop_price=atr_stop,
+                "阻力位分歧", f"冲高条件充分（{rally_score}/5），减仓15%",
+                -15, conditions, stop_price=atr_stop,
+            )
+        if rally_score >= 3:
+            return _make_position_state(
+                "阻力位分歧", f"冲高条件部分满足（{rally_score}/5），减仓10%",
+                -10, conditions, stop_price=atr_stop,
             )
         return _make_position_state(
-            "阻力位分歧", "到达阻力位，观察量能",
+            "阻力位分歧", f"到达阻力位（{rally_score}/5），观察量能",
             0, conditions, stop_price=atr_stop,
         )
 
@@ -1526,6 +1567,77 @@ def _calc_reentry_score(
     if not conditions.get("stage_decline", False):
         score += 1
     
+    return score
+
+
+def _calc_rally_reduce_score(
+    conditions: dict[str, bool],
+    bars: list[dict[str, Any]] | None,
+    current_price: float,
+    resistance: float,
+    atr14: float,
+) -> int:
+    """计算冲高减仓条件评分（满分5分，对称 _calc_pullback_add_score）。
+
+    必要条件（2分）：
+      1. 接近阻力位（距阻力 < 3%）
+      2. 创新高后回落（近5日高点 > 前期高点，且当前 < 高点×0.98）
+
+    加分条件（3分）：
+      3. 放量滞涨（近3日均量 > 7日均量×1.2 且涨幅 < 1%）
+      4. RSI 超买（RSI14 > 70）
+      5. MACD 死叉（EMA12 < EMA26）
+    """
+    score = 0
+
+    # 必要条件1：接近阻力位（1分）
+    if resistance > 0 and abs(current_price - resistance) / max(resistance, 1) < 0.03:
+        score += 1
+
+    # 必要条件2：创新高后回落（1分）
+    if bars and len(bars) >= 10:
+        highs = [float(b.get("high") or 0) for b in bars]
+        recent_5_high = max(highs[-5:]) if len(highs) >= 5 else 0
+        earlier_high = max(highs[:-5]) if len(highs) > 5 else 0
+        if recent_5_high > earlier_high and earlier_high > 0:
+            if current_price < recent_5_high * 0.98:
+                score += 1
+
+    # 加分条件3：放量滞涨（1分）— 量增但价不动
+    if bars and len(bars) >= 10:
+        recent_vol = sum(float(b.get("volume") or 0) for b in bars[-3:]) / 3
+        earlier_vol = sum(float(b.get("volume") or 0) for b in bars[-10:-3]) / 7
+        recent_change = 0
+        if len(bars) >= 4:
+            prev_close = float(bars[-4].get("close") or 0)
+            if prev_close > 0:
+                recent_change = (current_price - prev_close) / prev_close
+        if earlier_vol > 0 and recent_vol > earlier_vol * 1.2 and abs(recent_change) < 0.01:
+            score += 1
+
+    # 加分条件4：RSI 超买（1分）
+    if bars and len(bars) >= 14:
+        closes = [float(b.get("close") or 0) for b in bars[-14:] if b.get("close")]
+        if len(closes) >= 14:
+            gains = [max(0, closes[i] - closes[i-1]) for i in range(1, len(closes))]
+            losses = [max(0, closes[i-1] - closes[i]) for i in range(1, len(closes))]
+            avg_gain = sum(gains) / len(gains) if gains else 0
+            avg_loss = sum(losses) / len(losses) if losses else 0
+            rs = avg_gain / max(avg_loss, 0.01)
+            rsi = 100 - (100 / (1 + rs))
+            if rsi > 70:
+                score += 1
+
+    # 加分条件5：MACD 死叉（1分）
+    if bars and len(bars) >= 26:
+        closes = [float(b.get("close") or 0) for b in bars[-26:] if b.get("close")]
+        if len(closes) >= 26:
+            ema12 = sum(closes[-12:]) / 12
+            ema26 = sum(closes[-26:]) / 26
+            macd_line = ema12 - ema26
+            if macd_line < 0:
+                score += 1
+
     return score
 
 

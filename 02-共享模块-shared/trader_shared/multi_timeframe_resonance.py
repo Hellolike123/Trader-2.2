@@ -59,6 +59,7 @@ def calc_resonance(
     weekly = _score_weekly(weekly_bars, current_price, daily_closes)
     daily = _score_daily(daily_closes, current_price, daily_support, daily_resistance)
     timing = _score_timing_60m(bars_60m, current_price, daily_support, daily_resistance)
+    sell_timing = _score_sell_timing_60m(bars_60m, current_price, daily_resistance)
     resonance = _score_resonance(weekly, daily, timing)
 
     total = weekly.get("points", 0) + daily.get("points", 0) + timing.get("points", 0) + resonance
@@ -69,10 +70,12 @@ def calc_resonance(
         "weekly_points": weekly,
         "daily_points": daily,
         "timing_points": timing,
+        "sell_timing_points": sell_timing,
         "resonance_points": resonance,
         "weekly_label": weekly.get("label", "未知"),
         "daily_label": daily.get("label", "未知"),
         "timing_label": timing.get("label", "未知"),
+        "sell_timing_label": sell_timing.get("label", "未知"),
         "signals": _build_signals(weekly, daily, timing, resonance),
     }
 
@@ -81,10 +84,12 @@ def calc_resonance(
         "weekly_score": weekly.get("points", 0),
         "daily_score": daily.get("points", 0),
         "timing_score": timing.get("points", 0),
+        "sell_timing_score": sell_timing.get("points", 0),
         "resonance_score": resonance,
         "weekly_label": weekly.get("label", "未知"),
         "daily_label": daily.get("label", "未知"),
         "timing_label": timing.get("label", "未知"),
+        "sell_timing_label": sell_timing.get("label", "未知"),
         "resonance_label": resonance_label,
         "detail": detail,
     }
@@ -251,6 +256,41 @@ def _score_timing_60m(
     return {"points": min(2, score), "label": label}
 
 
+# ── 60分钟卖点确认评分（2分） ───────────────────────────────────
+
+def _score_sell_timing_60m(
+    bars_60m: list[dict[str, Any]] | None,
+    current_price: float,
+    daily_resistance: float,
+) -> dict[str, Any]:
+    """60分钟卖点确认 0-2 分（对称 _score_timing_60m）。
+
+    评分因子：
+      - 接近阻力位（1分）：距日线阻力位 < 3%
+      - 60min EXPMA10 下方（1分）：60分钟趋势转弱
+    """
+    score = 0
+    label = "60min卖点未知"
+
+    if not bars_60m or len(bars_60m) < 10:
+        return {"points": 0, "label": "无60分钟数据"}
+
+    # 接近阻力位
+    if daily_resistance > 0 and abs(current_price - daily_resistance) / daily_resistance <= 0.03:
+        score += 1
+        label = "60min接近阻力"
+
+    # 60分钟趋势转弱（跌破 EXPMA10）
+    closes_60m = [float(b.get("close", 0)) for b in bars_60m if float(b.get("close", 0)) > 0]
+    if len(closes_60m) >= 10:
+        e10_60 = _calc_expma(closes_60m, 10)
+        if e10_60 and current_price < e10_60:
+            score += 1
+            label = f"{label}（60min跌破EXPMA10）" if score > 1 else "60min偏空（跌破EXPMA10）"
+
+    return {"points": min(2, score), "label": label}
+
+
 # ── 共振加分（2分） ─────────────────────────────────────────────
 
 def _score_resonance(weekly: dict, daily: dict, timing: dict) -> int:
@@ -325,8 +365,8 @@ def _empty_result() -> dict[str, Any]:
     """返回空结果。"""
     return {
         "total_score": 0, "weekly_score": 0, "daily_score": 0,
-        "timing_score": 0, "resonance_score": 0,
+        "timing_score": 0, "sell_timing_score": 0, "resonance_score": 0,
         "weekly_label": "无数据", "daily_label": "无数据",
-        "timing_label": "无数据", "resonance_label": "无数据",
+        "timing_label": "无数据", "sell_timing_label": "无数据", "resonance_label": "无数据",
         "detail": {},
     }
