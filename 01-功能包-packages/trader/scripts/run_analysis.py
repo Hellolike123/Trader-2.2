@@ -1408,7 +1408,12 @@ def render_markdown(r: dict) -> str:
                 diff = support_mig.get("diff", 0)
                 if prev_share > 0 and price > 0:
                     chg_pct = round(diff / prev_share * 100)
-                    dir_txt = "底部筹码减少" if diff < 0 else "底部筹码增加"
+                    if diff < 0:
+                        dir_txt = "底部筹码减少"
+                    elif diff > 0:
+                        dir_txt = "底部筹码增加"
+                    else:
+                        dir_txt = "底部筹码不变"
                     sign = "+" if diff > 0 else ""
                     lines.append(f"    {price:.2f}（支撑）：{prev_share:.2f}% → {curr_share:.2f}%（{sign}{chg_pct}%）← {dir_txt}")
             
@@ -1419,7 +1424,12 @@ def render_markdown(r: dict) -> str:
                 diff = resistance_mig.get("diff", 0)
                 if prev_share > 0 and price > 0:
                     chg_pct = round(diff / prev_share * 100)
-                    dir_txt = "顶部筹码减少" if diff < 0 else "顶部筹码增加"
+                    if diff < 0:
+                        dir_txt = "顶部筹码减少"
+                    elif diff > 0:
+                        dir_txt = "顶部筹码增加"
+                    else:
+                        dir_txt = "顶部筹码不变"
                     sign = "+" if diff > 0 else ""
                     lines.append(f"    {price:.2f}（阻力）：{prev_share:.2f}% → {curr_share:.2f}%（{sign}{chg_pct}%）← {dir_txt}")
             
