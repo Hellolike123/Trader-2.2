@@ -1229,7 +1229,7 @@ def render_markdown(r: dict) -> str:
     if golden_bid and golden_bid > 0 and golden_bid != low_price:
         level_map = {fib.get("retrace_618"): "61.8%", fib.get("retrace_500"): "50%", fib.get("retrace_382"): "38.2%"}
         label = level_map.get(golden_bid, "")
-        lines.append(f"  {golden_bid:.2f} ← 黄金挂单（斐波那契{label}）")
+        lines.append(f"  {golden_bid:.2f} ← 黄金挂单（黄金分割{label}）")
     else:
         # 没有落在低吸区的回撤位，取最接近低吸区的那个作为参考
         low_zone_upper = r.get("low_zone_upper") or (low_price * 1.05 if low_price else 0)
@@ -1242,7 +1242,7 @@ def render_markdown(r: dict) -> str:
             candidates.sort()
             best_val, best_label = candidates[0][1], candidates[0][2]
             if best_val != low_price:
-                lines.append(f"  {best_val:.2f} ← 斐波那契{best_label}回撤参考")
+                lines.append(f"  {best_val:.2f} ← 黄金分割{best_label}回撤参考")
     if current_price > 0:
         lines.append(f"  {current_price:.2f} 当前")
 
@@ -1268,9 +1268,9 @@ def render_markdown(r: dict) -> str:
     fib_ext_1382 = r.get("fib_ext_1382")
     fib_ext_1618 = r.get("fib_ext_1618")
     if fib_ext_1382 and fib_ext_1382 > resistance_val:
-        lines.append(f"  {fib_ext_1382:.2f} ← Fib 138.2%目标")
+        lines.append(f"  {fib_ext_1382:.2f} ← 黄金分割138.2%目标")
     if fib_ext_1618 and fib_ext_1618 > resistance_val:
-        lines.append(f"  {fib_ext_1618:.2f} ← Fib 161.8%目标")
+        lines.append(f"  {fib_ext_1618:.2f} ← 黄金分割161.8%目标")
 
     stage_exit = exit_plan.get("stage_exit")
     if stage_exit:

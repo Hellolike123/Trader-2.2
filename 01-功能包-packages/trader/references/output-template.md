@@ -112,7 +112,8 @@ EXPMA：偏空排列（3/10）
 - **ATR**: Displayed if > 0.
 - **Fusion Verbatim**: MUST include the `融合｜{emoji} {action}（加权分 X.XX，置信度 XX%）` line between the stage summary and 买卖点 section. Use `fusion.fusion_verbatim` from JSON directly; do NOT paraphrase.
 - **Fixed Keywords**: The output MUST contain exactly "试探买" and "止损" to pass automated validation.
-- **黄金挂单**: If `fib_retrace.golden_bid` is valid and differs from the low_zone price, render a line: `{price} ← 黄金挂单（斐波那契{比例}）` between "试探买" and "当前".
+- **黄金挂单**: If `fib_retrace.golden_bid` is valid and differs from the low_zone price, render a line: `{price} ← 黄金挂单（黄金分割{比例}）` between "试探买" and "当前".
+- **Fibonacci**: Report output uses Chinese: "黄金分割" instead of "Fibonacci"/"Fib". Example: "8.55 ← 黄金分割78.6%压力".
 - **Chip Migration**: MUST include a comparison to the previous day ("对比昨天"), reflecting changes in support and resistance peaks.
 - **Banned Terms**: DO NOT output "必涨", "必跌", "主力入场第一枪", "出货日", "行情结束" and others listed in schema/v1.py.
 - **竖屏友好**: 一行一个数据点。价格、指标、评分各占独立行。不用逗号分隔。
