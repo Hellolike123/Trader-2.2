@@ -1751,12 +1751,20 @@ def one_sentence(r: dict[str, Any], low_zone: str) -> str:
         return "蓄势期转弱，不碰。"
     if major_stage == "蓄势" and momentum == "修复":
         return f"蓄势期，不动手。等放量站稳 {confirm:.2f} 再说。"
+    if major_stage == "蓄势" and momentum in ("走强", "震荡"):
+        return f"蓄势期，等突破 {confirm:.2f} 确认后再动手。"
     if major_stage == "主升" and momentum == "走强":
         return "主升期走强，持有。"
+    if major_stage == "主升" and momentum == "修复":
+        return f"主升期修复，回踩可加仓。站稳 {confirm:.2f} 确认。"
+    if major_stage == "主升" and momentum == "震荡":
+        return "主升期震荡，警惕见顶，持有但不追。"
+    if major_stage == "主升" and momentum == "转弱":
+        return "主升期转弱，风险信号，考虑减仓。"
     if major_stage == "派发":
         return "派发期，逢高减仓。"
-    # fallback to old logic
-    stage = r["stage"]
+    # fallback to old theory_status（仅当 major_stage 为空时）
+    stage = r.get("stage") or ""
     scene = r.get("scene") or ""
     theory_status = str(r.get("theory_status") or r.get("state_label") or "")
     current = float(r.get("current", 0))
@@ -2065,7 +2073,7 @@ def _build_today_action_section(r: dict[str, Any]) -> list[str]:
             lines.append(f"  理由：{ps_action}")
         if ps_stop > 0:
             lines.append(f"  止损：{ps_stop:.2f}")
-    elif stage_action in ("试探买", "加仓") and momentum in ("走强", "修复"):
+    elif ("加仓" in stage_action or "试" in stage_action or "低吸" in stage_action) and momentum in ("走强", "修复", "震荡"):
         # 买入信号（简化买点逻辑）
         buy_analysis = _analyze_buy_conditions(r, current, support, confirm, stop, low_zone)
         lines.extend(buy_analysis)
