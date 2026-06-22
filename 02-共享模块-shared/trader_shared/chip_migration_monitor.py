@@ -250,6 +250,7 @@ def check_chip_migration(
     prev_support_share = 0.0
     prev_support_price = 0.0
     if prev_support_peaks:
+        # 统一用最大占比选取（与当前峰匹配逻辑一致）
         prev_support_peak = max(prev_support_peaks, key=lambda p: p.get("share_of_total", 0))
         prev_support_share = prev_support_peak.get("share_of_total", 0)
         prev_support_price = prev_support_peak.get("price", 0)
@@ -278,16 +279,17 @@ def check_chip_migration(
         if not current_support_peaks:
             migration_pct = 100.0
         else:
-            closest_supp = min(current_support_peaks, key=lambda p: abs(p["price"] - prev_support_price))
-            current_support_share = closest_supp.get("share_of_total", 0)
+            # 统一用最大占比选取（与历史峰选取逻辑一致）
+            strongest_supp = max(current_support_peaks, key=lambda p: p.get("share_of_total", 0))
+            current_support_share = strongest_supp.get("share_of_total", 0)
             if prev_support_share > current_support_share:
                 migration_pct = round((prev_support_share - current_support_share) / prev_support_share * 100, 1)
 
     current_resistance_share = 0.0
     current_resistance_peaks = [p for p in current_peaks if "阻力" in str(p.get("support_level", ""))]
     if prev_resistance_share > 0 and current_resistance_peaks:
-        closest_res = min(current_resistance_peaks, key=lambda p: abs(p["price"] - prev_resistance_price))
-        current_resistance_share = closest_res.get("share_of_total", 0)
+        strongest_res = max(current_resistance_peaks, key=lambda p: p.get("share_of_total", 0))
+        current_resistance_share = strongest_res.get("share_of_total", 0)
 
     support_diff = round(current_support_share - prev_support_share, 2) if prev_support_share > 0 else 0.0
     resistance_diff = round(current_resistance_share - prev_resistance_share, 2) if prev_resistance_share > 0 else 0.0

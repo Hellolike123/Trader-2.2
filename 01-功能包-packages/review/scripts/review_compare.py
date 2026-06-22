@@ -63,7 +63,6 @@ def render_compare(
         "",
         "排序：",
     ]
-    ranked = sorted(items, key=rank_key, reverse=True)
     for index, item in enumerate(ranked, start=1):
         lines.append(f"{index}）{item['name']}｜{item['state']}｜总分 {item['score']}｜压力 {price_text(item.get('key_pressure'))}")
     lines.extend(

@@ -114,7 +114,7 @@ def _load_historical_win_rate(symbol: str) -> dict | None:
                 elif direction in ("bullish", "bullish_lean"):
                     buy_signals.append(return_pct)
                 elif direction in ("bearish", "bearish_lean"):
-                    sell_signals.append(return_pct)
+                    sell_signals.append(-return_pct)  # 取反：股价下跌=看空正确=正收益
     except Exception:
         return None
     total = len(buy_signals) + len(sell_signals)
@@ -168,7 +168,7 @@ def _format_intraday_narrative(intraday: dict[str, Any], big_order: dict[str, An
 
     if intraday.get("morning_ratio") is not None:
         mr = intraday["morning_ratio"] * 100
-        followup = "跟进" if mr > 55 else "没跟上"
+        followup = "跟进" if mr >= 55 else "没跟上"
         result.append(f"全天  上午成交占 {mr:.0f}%，量能 {followup}")
     if intraday.get("data_state") == "partial_close":
         end = intraday.get("coverage_end_time") or "--"
@@ -589,8 +589,6 @@ def _build_tomorrow_action_section(review: dict[str, Any]) -> list[str]:
     close = float(q.get("close") or 0)
     pressure = levels.get("key_pressure") or 0
     key_support = levels.get("key_support") or 0
-    first_support = levels.get("first_support") or 0
-
     # 提取阶段信息
     stage_result = review.get("stage_result") or {}
     major_stage = str(stage_result.get("major_stage") or "")
@@ -639,6 +637,28 @@ def _build_tomorrow_action_section(review: dict[str, Any]) -> list[str]:
     elif major_stage == "衰退":
         lines.append("  动作：不碰")
         lines.append(f"  理由：衰退期，不参与")
+    elif stage_action in ("逢高减磅", "逢反弹减仓"):
+        lines.append(f"  动作：逢高减仓")
+        lines.append(f"  理由：四阶段定位 {stage_action}")
+        if pressure > 0:
+            lines.append(f"  如果冲高到 {pressure:.2f}：减仓 1/3")
+        if key_support > 0:
+            lines.append(f"  如果跌破 {key_support:.2f}：止损")
+    elif stage_action in ("清仓逃命", "跌破防线减仓", "空仓规避"):
+        lines.append(f"  动作：减仓或清仓")
+        lines.append(f"  理由：四阶段定位 {stage_action}")
+        if key_support > 0:
+            lines.append(f"  如果跌破 {key_support:.2f}：清仓")
+    elif stage_action in ("回调低吸", "低吸试盘"):
+        lines.append(f"  动作：低吸")
+        lines.append(f"  理由：四阶段定位 {stage_action}")
+        if key_support > 0:
+            lines.append(f"  回踩 {key_support:.2f} 附近：试探买")
+    elif stage_action in ("顺势加仓",):
+        lines.append(f"  动作：加仓")
+        lines.append(f"  理由：四阶段定位 {stage_action}")
+        if pressure > 0:
+            lines.append(f"  站稳 {pressure:.2f}：加仓")
     else:
         if pressure > 0:
             lines.append(f"  动作：关注 {pressure:.2f} 是否站稳")

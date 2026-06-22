@@ -40,6 +40,8 @@ def _compute_display(review: dict) -> dict:
         one_liner = "午间有修复，还没过成本区。" if cost and close < cost else "午间方向不明，看午后确认。"
     elif cost and close < cost:
         one_liner = "现在不适合割肉，也不适合提前加仓。"
+    elif cost and close >= cost:
+        one_liner = "已浮盈，关注关键压力位止盈信号。"
     else:
         one_liner = "现在不适合追高，先等关键位确认。"
 

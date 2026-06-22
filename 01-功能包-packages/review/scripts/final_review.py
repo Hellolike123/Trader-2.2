@@ -178,15 +178,15 @@ def run_postmarket_backfill_and_calibration() -> None:
         try:
             exit_price = float(user_input)
             pnl_pct = round(((exit_price - entry_price) / entry_price) * 100, 2)
-            won = pnl_pct > 0
-            
+            outcome = "win" if pnl_pct > 0 else "draw" if pnl_pct == 0 else "loss"
+
             result_record = {
                 "signal_id": sid,
                 "symbol": symbol,
                 "entry_price": entry_price,
                 "exit_price": exit_price,
                 "return_pct": pnl_pct,
-                "outcome": "win" if won else "loss",
+                "outcome": outcome,
                 "source": "manual_backfill",
                 "timestamp": int(_time.time())
             }
