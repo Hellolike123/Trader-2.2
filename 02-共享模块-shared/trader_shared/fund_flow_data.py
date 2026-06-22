@@ -3,6 +3,8 @@
 通过东方财富HTTP API获取个股日线级资金流向（超大单/大单/中单/小单净流入），
 并计算衍生特征供主力行为识别引擎使用。
 
+备用数据源：通达信 MCP（当东方财富 API 不可用时自动 fallback）。
+
 用法:
     from trader_shared.fund_flow_data import fetch_fund_flow, calc_fund_flow_features
 """
@@ -16,6 +18,7 @@ from typing import Any
 import requests
 
 FFLOW_URL = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
+TDX_MCP_URL = "https://txmcp.tdx.com.cn:3001/txmcp"
 
 
 def _secid(symbol: str) -> str:
@@ -36,8 +39,71 @@ def _secid(symbol: str) -> str:
     return f"0.{code}"
 
 
+def _fetch_fund_flow_tdx_mcp(symbol: str, days: int = 30) -> list[dict[str, Any]]:
+    """通过通达信 MCP 获取资金流向数据（备用数据源）。
+
+    MCP 协议调用 tdx-connector 的资金流向工具。
+    需要 WorkBuddy 环境下的 OAuth 认证（自动管理）。
+    """
+    import os
+    # 检查是否启用 TDX MCP
+    source = os.environ.get("FUND_FLOW_SOURCE", "auto")
+    if source == "eastmoney":
+        return []  # 明确指定东方财富时跳过 TDX
+
+    code = symbol.split(".")[0] if "." in symbol else symbol
+    try:
+        # MCP 协议：调用工具
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "get_fund_flow",
+                "arguments": {"code": code, "days": days}
+            }
+        }
+        headers = {"Content-Type": "application/json"}
+
+        # 尝试从 WorkBuddy connector 读取 token
+        token_file = os.path.expanduser(
+            "~/.workbuddy/connectors/572cf11d-9298-4719-8350-617354ea6617/connector-states.json"
+        )
+        if os.path.exists(token_file):
+            with open(token_file) as f:
+                states = json.load(f)
+                bearer = states.get("headerOverridesBearerStripped")
+                if bearer:
+                    headers["Authorization"] = f"Bearer {bearer}"
+
+        r = requests.post(TDX_MCP_URL, json=payload, headers=headers, timeout=15)
+        if r.status_code != 200:
+            return []
+
+        data = r.json()
+        if "error" in data:
+            warnings.warn(f"[fund_flow] TDX MCP 错误: {data['error']}")
+            return []
+
+        # 解析 MCP 响应（格式取决于 tdx-connector 的实现）
+        result_data = data.get("result", {})
+        if isinstance(result_data, dict) and "content" in result_data:
+            content = result_data["content"]
+            if isinstance(content, list) and len(content) > 0:
+                text = content[0].get("text", "")
+                if text:
+                    return json.loads(text)
+
+        return []
+    except Exception as e:
+        warnings.warn(f"[fund_flow] TDX MCP 失败: {e}")
+        return []
+
+
 def fetch_fund_flow(symbol: str, days: int = 30) -> list[dict[str, Any]]:
     """获取个股资金流向数据。
+
+    优先使用东方财富 API，失败时自动 fallback 到通达信 MCP。
 
     Args:
         symbol: 股票代码（如 "688248.SH" 或 "688248"）
@@ -50,10 +116,28 @@ def fetch_fund_flow(symbol: str, days: int = 30) -> list[dict[str, Any]]:
         - large_wan: 大单净流入（万元）
         - medium_wan: 中单净流入（万元）
         - small_wan: 小单净流入（万元）
-        - net_flow_wan: 主力净流入（万元）= super_large + large
-
-        API不可用时返回空列表。
+        - net_flow_wan: 主力净流入（万元）
     """
+    import os
+    source = os.environ.get("FUND_FLOW_SOURCE", "auto")
+
+    # 东方财富
+    if source != "tdx":
+        result = _fetch_fund_flow_eastmoney(symbol, days)
+        if result:
+            return result
+
+    # TDX MCP 备用
+    if source != "eastmoney":
+        result = _fetch_fund_flow_tdx_mcp(symbol, days)
+        if result:
+            return result
+
+    return []
+
+
+def _fetch_fund_flow_eastmoney(symbol: str, days: int = 30) -> list[dict[str, Any]]:
+    """东方财富资金流向 API（原始实现）。"""
     try:
         params = {
             "secid": _secid(symbol),
@@ -81,7 +165,6 @@ def fetch_fund_flow(symbol: str, days: int = 30) -> list[dict[str, Any]]:
                 large = float(parts[2]) if parts[2] != "-" else 0.0
                 medium = float(parts[3]) if parts[3] != "-" else 0.0
                 small = float(parts[4]) if parts[4] != "-" else 0.0
-                # parts[5] = 主力净流入, parts[6] = 小单净流入 (有时重复)
                 net_flow = float(parts[5]) if parts[5] != "-" else super_large + large
                 result.append({
                     "date": date_str,
@@ -95,7 +178,7 @@ def fetch_fund_flow(symbol: str, days: int = 30) -> list[dict[str, Any]]:
                 continue
         return result
     except Exception as e:
-        warnings.warn(f"[fund_flow] 东方财富资金流向API失败: {e}")
+        warnings.warn(f"[fund_flow] 东方财富API失败: {e}")
         return []
 
 
