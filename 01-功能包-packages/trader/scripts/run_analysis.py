@@ -1282,11 +1282,14 @@ def render_markdown(r: dict) -> str:
     lines.append(f"  阶段：{major_stage}期（{stage_desc}）")
     
     # 趋势描述与 state_label 保持一致（避免硬编码与 sync_report_with_data 矛盾）
+    # 使用 confirm_label 区分"确认位"和"突破确认位"（方案B：消除语义冲突）
+    confirm_label = str(r.get("confirm_label") or "确认位")
+    confirm_note = str(r.get("confirm_note") or "")
     state_label = str(r.get("state_label") or "")
     if current_price >= confirm:
-        trend_desc = f"价格站上 {confirm:.2f}，可加仓"
+        trend_desc = f"价格站上 {confirm:.2f}（{confirm_label}），可加仓"
     elif "走强" in state_label or "转强" in state_label:
-        trend_desc = f"价格在 {confirm:.2f} 下方，但趋势走强，等确认"
+        trend_desc = f"价格在 {confirm:.2f} 下方，但趋势走强，等{confirm_label}"
     else:
         trend_desc = f"价格在 {confirm:.2f} 下方，不追"
     lines.append(f"  趋势：{trend_desc}")
@@ -1505,7 +1508,7 @@ def render_markdown(r: dict) -> str:
     if "出货" in str(chip_migration.get("warning_text", "")):
         lines.append(f"⚠️ 风险：筹码在搬家，主力在出货，警惕继续下跌")
     else:
-        lines.append(f"⚠️ 风险：最大风险是 {confirm:.2f} 未确认前提前追入")
+        lines.append(f"⚠️ 风险：最大风险是 {confirm:.2f} 未{confirm_label}前提前追入")
 
     # ── [2.5] 量能真空区预警 ──
     volume_vacuum = r.get("volume_vacuum") or {}
@@ -1846,7 +1849,7 @@ def _build_existing_position_section(r: dict[str, Any], cost_price: float) -> li
             if resistance > 0:
                 lines.append(f"  如果反弹到 {resistance:.2f}（阻力位）→ 观察是否突破")
             if confirm > 0:
-                lines.append(f"  如果站稳 {confirm:.2f}（确认位）→ 继续持有")
+                lines.append(f"  如果站稳 {confirm:.2f}（{confirm_label}）→ 继续持有")
             if stop > 0:
                 lines.append(f"  如果跌破 {stop:.2f}（止损位）→ 减仓")
         elif major_stage == "派发":
@@ -1862,7 +1865,7 @@ def _build_existing_position_section(r: dict[str, Any], cost_price: float) -> li
             if resistance > 0:
                 lines.append(f"  如果反弹到 {resistance:.2f}（阻力位）→ 减仓 30%")
             if confirm > 0:
-                lines.append(f"  如果站稳 {confirm:.2f}（确认位）→ 继续持有")
+                lines.append(f"  如果站稳 {confirm:.2f}（{confirm_label}）→ 继续持有")
         else:  # 衰退
             lines.append("  建议：减仓，趋势转弱")
             lines.append("")
@@ -2285,7 +2288,7 @@ def _build_signal_alert_section(r: dict[str, Any]) -> list[str]:
         # Bug fix: 改为严格判断 current >= confirm，不再使用 0.98 容差
         if confirm > 0 and current >= confirm:
             alerts.append(f"  🟢 突破确认")
-            alerts.append(f"    价格站稳确认位 {confirm:.2f}")
+            alerts.append(f"    价格站稳 {confirm:.2f}")
             alerts.append(f"    止损上移到 {breakout.get('new_stop', 0):.2f}")
 
     if alerts:

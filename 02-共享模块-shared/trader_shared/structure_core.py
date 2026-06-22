@@ -553,6 +553,9 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         "open_price": open_price,
         "gap": _gap_status(low_zone_lower, low_zone_upper, stop, open_price, prev_close),
         "confirm_price": round(confirm_price, 2),
+        # 当前价接近阻力时，确认位改为"突破确认位"并标注条件（方案B）
+        "confirm_label": "突破确认位" if current >= resistance_price * 0.97 else "确认位",
+        "confirm_note": "需放量站稳阻力上方" if current >= resistance_price * 0.97 else "",
         "sell_observe_price": round(resistance_price, 2),
         "hard_stop": stop,
         "take": take,
