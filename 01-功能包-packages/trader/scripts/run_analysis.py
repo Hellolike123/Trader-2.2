@@ -346,7 +346,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         f_mf = executor.submit(_fetch_fund_flow)
         f_env = executor.submit(_fetch_market_env)
 
-        chan_result = (f_chan.result() or {}).get("chanlun", {})
+        chan_result = f_chan.result() or {}  # 保留 chanlun 包装层，_chan_to_signal 会自己剥
         wyck_result = f_wyk.result() or {}
         momentum_result = f_mom.result() or {}
 
@@ -441,15 +441,17 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         if key not in levels:
             levels[key] = val
 
-    levels["chan_trend_label"] = chan_result.get("trend_label", "数据不足")
-    levels["chan_buy_point_text"] = chan_result.get("buy_point_text", "无")
-    levels["chan_buy_points"] = chan_result.get("buy_points", [])
-    levels["chan_sell_point_text"] = chan_result.get("sell_point_text", "无")
-    levels["chan_sell_points"] = chan_result.get("sell_points", [])
-    levels["chan_strokes_count"] = chan_result.get("strokes_count", 0)
-    levels["chan_zone_last_price"] = chan_result.get("last_valid_zone_last_price")
-    levels["chan_zone_first_price"] = chan_result.get("last_valid_zone_first_price")
-    levels["chan_divergence"] = chan_result.get("divergence", {})
+    # chan_result 带 chanlun 包装层，取内层用于 levels
+    chan_inner = chan_result.get("chanlun", chan_result) if "chanlun" in chan_result else chan_result
+    levels["chan_trend_label"] = chan_inner.get("trend_label", "数据不足")
+    levels["chan_buy_point_text"] = chan_inner.get("buy_point_text", "无")
+    levels["chan_buy_points"] = chan_inner.get("buy_points", [])
+    levels["chan_sell_point_text"] = chan_inner.get("sell_point_text", "无")
+    levels["chan_sell_points"] = chan_inner.get("sell_points", [])
+    levels["chan_strokes_count"] = chan_inner.get("strokes_count", 0)
+    levels["chan_zone_last_price"] = chan_inner.get("last_valid_zone_last_price")
+    levels["chan_zone_first_price"] = chan_inner.get("last_valid_zone_first_price")
+    levels["chan_divergence"] = chan_inner.get("divergence", {})
     levels["wyckoff_spring_signal"] = wyck_result.get("spring_signal", False)
     levels["wyckoff_summary"] = wyck_result.get("wyckoff_summary", "无明显信号")
     levels["wyckoff_upthrust_signal"] = wyck_result.get("upthrust_signal", False)
