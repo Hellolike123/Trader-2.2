@@ -485,7 +485,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     theory_status = str(levels.get("theory_status") or scene)
     replay = structure_replay(recent20)
     volume_text = volume_observation(recent20, bars_5m)
-    upward_momentum = upward_momentum_observation(stage, current, support, confirm)
+    upward_momentum = ""  # 延迟到 assess_stage 之后计算
     highs = numeric_values(recent20, "high")
     lows = numeric_values(recent20, "low")
     high = max(highs) if highs else current
@@ -679,6 +679,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         trade_date=bars_date,
     )
 
+    # 用 major_stage 替代旧 stage 计算 upward_momentum（修复 P1-4）
+    upward_momentum = upward_momentum_observation(stage_result["major_stage"], current, support, confirm)
+
     report = {
         "name": quote.get("name") or sec.name,
         "symbol": quote.get("symbol") or sec.ts_code,
@@ -867,10 +870,10 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     low_zone = str(report.get("low_zone") or f"{float(report.get('support', 0)):.2f}-{float(report.get('support', 0)) * 1.01:.2f}元")
     report["one_liner"] = one_sentence(report, low_zone)
 
-    # t0_ref: T0 参考价位
+    # t0_ref: T0 参考价位（high_sell 用阻力位而非 confirm，避免 T0 卖价高于报告显示的压力位）
     report["t0_ref"] = {
         "low_buy": float(report.get("support") or 0),
-        "high_sell": float(report.get("confirm") or 0),
+        "high_sell": float(report.get("resistance") or 0),
         "stop": float(report.get("stop") or 0),
     }
 
@@ -1040,8 +1043,10 @@ def upward_momentum_observation(stage: str, current: float, support: float, conf
     width = max(confirm - support, current * 0.02)
     if current >= confirm:
         return f"价格已经触及启动确认区，结论：有启动迹象，但还要看放量站稳后的延续。"
-    elif stage == "转弱":
+    elif stage in ("转弱", "衰退"):
         return f"趋势仍在弱区，结论：启动条件不足，先不做进攻判断。"
+    elif stage == "派发":
+        return f"派发期，动能减弱，结论：逢高减仓，不追。"
     elif current >= confirm - width * 0.25:
         return f"价格接近确认区但还未站稳，结论：属于预备启动，等待放量确认。"
     return f"价格还没贴近确认区，结论：动能仍是弱修复，暂不按启动处理。"
@@ -1337,13 +1342,23 @@ def render_markdown(r: dict) -> str:
             "",
             f"📌 如果你有持仓（成本 {cost_price:.2f}）"
         ])
+        # 检查 fusion 层是否有减仓信号（避免忽略空方信号让用户"让利润跑"）
+        fusion_action = str((r.get("fusion") or {}).get("action") or "")
+        fusion_reduce = fusion_action in ("减仓", "空仓/止损", "减1/3 (高位松动)")
+
         if pnl_pct >= 0:
             if major_stage == "主升":
-                lines.append(f"  现在：持有，让利润跑（{pnl_text}）")
+                if fusion_reduce:
+                    lines.append(f"  现在：持有，但融合层提示{fusion_action}，注意风险（{pnl_text}）")
+                else:
+                    lines.append(f"  现在：持有，让利润跑（{pnl_text}）")
             elif major_stage == "派发":
                 lines.append(f"  现在：减仓，锁定利润（{pnl_text}）")
             else:
-                lines.append(f"  现在：部分止盈，留底仓等突破（{pnl_text}）")
+                if fusion_reduce:
+                    lines.append(f"  现在：融合层提示{fusion_action}，考虑减仓（{pnl_text}）")
+                else:
+                    lines.append(f"  现在：部分止盈，留底仓等突破（{pnl_text}）")
         else:
             if major_stage == "衰退":
                 lines.append(f"  现在：止损，认亏走人（{pnl_text}）")
@@ -1438,12 +1453,22 @@ def render_markdown(r: dict) -> str:
 
     fusion = r.get("fusion") or {}
     signals = fusion.get("signals_detail") or {}
-    chan_score = signals.get("chan", {}).get("confidence", 0) * 100 if isinstance(signals.get("chan"), dict) else 75
-    wyk_score = signals.get("wyckoff", {}).get("confidence", 0) * 100 if isinstance(signals.get("wyckoff"), dict) else 45
-    mom_score = signals.get("momentum", {}).get("confidence", 0) * 100 if isinstance(signals.get("momentum"), dict) else 50
-    chip_score = 50
-    
-    lines.extend(["", "📊 五层打分", f"  结构{chan_score:.0f}/量价{wyk_score:.0f}｜筹码{chip_score:.0f}｜动能{mom_score:.0f}"])
+    # 五层打分 = direction × confidence × 100（正=多方，负=空方）
+    def _dir_score(sig: dict | None, default: float = 50) -> float:
+        if not isinstance(sig, dict):
+            return default
+        d = sig.get("direction", 0)
+        c = sig.get("confidence", 0)
+        return d * c * 100 if d != 0 else default
+
+    chan_score = _dir_score(signals.get("chan"), 50)
+    wyk_score = _dir_score(signals.get("wyckoff"), 30)
+    mom_score = _dir_score(signals.get("momentum"), 50)
+    # chip_score: 使用筹码稳定性（有筹码数据时用实际值，否则默认 50）
+    chip_migration = r.get("chip_migration") or {}
+    chip_score = 50  # TODO: 接入实际筹码稳定性评分
+
+    lines.extend(["", "📊 五层打分", f"  结构{chan_score:+.0f}｜量价{wyk_score:+.0f}｜筹码{chip_score:.0f}｜动能{mom_score:+.0f}"])
     chan_reason = signals.get("chan", {}).get("reason", "回调段。一类买、二类买") if isinstance(signals.get("chan"), dict) else "无信号"
     lines.append(f"  缠论：{chan_reason}")
     # 显示缠论买卖点
@@ -1500,8 +1525,11 @@ def render_markdown(r: dict) -> str:
         lines.append(f"  警惕：! {'  ! '.join(cautious_signals)}")
         
     lines.append("")
+    scene = str(r.get("scene") or "")
     if current_price >= low_price:
         lines.append(f"✅ 亮点：{current_price:.2f} 仍站在防守位 {low_price:.2f} 上方")
+    elif scene in ("破位下行", "风险回避"):
+        lines.append(f"⚠️ 亮点：暂无亮点，价格已跌破防守位 {low_price:.2f}，等待企稳信号")
     else:
         lines.append(f"✅ 亮点：价格超跌，关注 {low_price:.2f} 附近企稳机会")
         
