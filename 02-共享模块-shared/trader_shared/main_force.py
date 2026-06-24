@@ -36,7 +36,7 @@ def detect_main_force_stage(
 
     Args:
         features: calc_fund_flow_features() 的返回值
-        bars: 近期K线数据
+        bars: 近期K线数据（fund flow 不可用时自动推导）
         chip_info: 筹码分布信息（可选）
         position_ratio: 价格在近期区间的位置（0-1）
 
@@ -52,6 +52,18 @@ def detect_main_force_stage(
             "consecutive_outflow_days": int,
         }
     """
+    # ── fallback: fund flow 不可用时从 bars 推导近似特征 ──
+    if bars:
+        has_real_flow = any(features.get(k) for k in ("cum_flow_5d_wan", "daily_flow_5d", "flow_price_relation"))
+        if not has_real_flow or features.get("cum_flow_5d_wan", 0) == 0:
+            try:
+                from trader_shared.fund_flow_data import calc_fund_flow_features_from_bars
+                derived = calc_fund_flow_features_from_bars(bars)
+                # 合并: 有真实数据用真实的, 没有的用推导的
+                features = {**features, **derived}
+            except Exception:
+                pass  # 推导失败, 继续使用空 features
+
     cum_5 = features.get("cum_flow_5d_wan", 0)
     cum_10 = features.get("cum_flow_10d_wan", 0)
     con_in = features.get("consecutive_inflow_days", 0)

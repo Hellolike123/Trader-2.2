@@ -679,6 +679,11 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         fib_retrace=levels.get("fib_retrace"),
         symbol=sec.ts_code,
         trade_date=bars_date,
+        fusion_hint={
+            "action": report_fusion.get("action"),
+            "confidence": report_fusion.get("confidence", 0),
+            "weighted_score": report_fusion.get("weighted_score", 0),
+        },
     )
 
     # 用 major_stage 替代旧 stage 计算 upward_momentum（修复 P1-4）
@@ -1048,7 +1053,7 @@ def upward_momentum_observation(stage: str, current: float, support: float, conf
     elif stage in ("转弱", "衰退"):
         return f"趋势仍在弱区，结论：启动条件不足，先不做进攻判断。"
     elif stage == "派发":
-        return f"派发期，动能减弱，结论：逢高减仓，不追。"
+        return f"派发期，动能减弱，结论：逢高减仓，暂不追涨。"
     elif current >= confirm - width * 0.25:
         return f"价格接近确认区但还未站稳，结论：属于预备启动，等待放量确认。"
     return f"价格还没贴近确认区，结论：动能仍是弱修复，暂不按启动处理。"
@@ -1297,8 +1302,14 @@ def render_markdown(r: dict) -> str:
         trend_desc = f"价格站上 {confirm:.2f}（{confirm_label}），可加仓"
     elif "走强" in state_label or "转强" in state_label:
         trend_desc = f"价格在 {confirm:.2f} 下方，但趋势走强，等{confirm_label}"
+    elif major_stage == "主升":
+        trend_desc = f"价格在 {confirm:.2f} 下方，主升期回踩关注支撑"
+    elif major_stage == "蓄势":
+        trend_desc = f"价格在 {confirm:.2f} 下方，蓄势期低吸区等待"
+    elif major_stage == "派发":
+        trend_desc = f"价格在 {confirm:.2f} 下方，派发期注意风险"
     else:
-        trend_desc = f"价格在 {confirm:.2f} 下方，不追"
+        trend_desc = f"价格在 {confirm:.2f} 下方，等信号确认"
     lines.append(f"  趋势：{trend_desc}")
 
     # EXPMA 详细状态
@@ -1547,8 +1558,16 @@ def render_markdown(r: dict) -> str:
         
     if "出货" in str(chip_migration.get("warning_text", "")):
         lines.append(f"⚠️ 风险：筹码在搬家，主力在出货，警惕继续下跌")
+    elif major_stage == "主升":
+        lines.append(f"⚠️ 风险：主升期主要风险是回踩 {low_price:.2f} 支撑未守住")
+    elif major_stage == "蓄势":
+        lines.append(f"⚠️ 风险：蓄势期主要风险是突破 {confirm:.2f} 前不宜提前介入")
+    elif major_stage == "派发":
+        lines.append(f"⚠️ 风险：派发期注意破位，跌破 {stop:.2f} 需离场")
+    elif major_stage == "衰退":
+        lines.append(f"⚠️ 风险：趋势向下，不宜介入")
     else:
-        lines.append(f"⚠️ 风险：最大风险是 {confirm:.2f} 未{confirm_label}前提前追入")
+        lines.append(f"⚠️ 风险：等信号确认，{confirm:.2f} 未站稳前不宜提前介入")
 
     # ── [2.5] 量能真空区预警 ──
     volume_vacuum = r.get("volume_vacuum") or {}
@@ -1732,15 +1751,21 @@ def state_text(stage: str, theory_status: str) -> str:
     return "震荡观察"
 
 
-def current_action_text(stage: str, scene: str) -> str:
+def current_action_text(stage: str, scene: str, major_stage: str = "") -> str:
     if stage == "转弱":
         return "暂不碰"
     if scene == "低吸观察":
         return "低吸观察，等止跌确认"
     if scene == "空间不足":
-        return "等待，不追"
+        return "上方空间有限，等回落再评估"
     if scene in {"突破确认", "等转强", "冲高减仓"}:
         return "持有观察，不急卖"
+    if major_stage == "主升":
+        return "主升中，回踩有支撑可关注"
+    if major_stage == "蓄势":
+        return "蓄势区，等方向明确"
+    if major_stage == "派发":
+        return "派发期，逢高减仓为主"
     return "等待，不主动追"
 
 
@@ -1798,7 +1823,7 @@ def one_sentence(r: dict[str, Any], low_zone: str) -> str:
     if major_stage == "主升" and momentum == "修复":
         return f"主升期修复，回踩可加仓。站稳 {confirm:.2f} 确认。"
     if major_stage == "主升" and momentum == "震荡":
-        return "主升期震荡，警惕见顶，持有但不追。"
+        return "主升期震荡，持有底仓，回踩确认。"
     if major_stage == "主升" and momentum == "转弱":
         return "主升期转弱，风险信号，考虑减仓。"
     if major_stage == "派发":
@@ -1814,7 +1839,7 @@ def one_sentence(r: dict[str, Any], low_zone: str) -> str:
     if theory_status == "体系转强确认":
         return f"已形成体系确认，放量站稳回踩不破可评估加仓。"
     if scene == "冲高减仓":
-        return f"上方空间受限，有底仓的逢高减仓，空仓不追。"
+        return f"上方空间受限，有底仓的逢高减仓，空仓需等回调。"
     if current >= confirm:
         return f"已越过确认位，放量站稳回踩不破可评估加仓。"
     return f"现在还不是进攻点；先守纪律等确认，跌到 {low_zone} 止跌才轻试，站不上 {confirm:.2f}元 不加仓。"

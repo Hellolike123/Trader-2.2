@@ -164,14 +164,14 @@
 | `atr.suggested_cap_pct` | int | 建议仓位上限 % | 5 |
 | `atr.available` | bool | ATR 数据是否可用 | true |
 
-## 四阶段定位字段
+## 阶段定位字段（6 阶段 + 4 动能）
 
 | 字段 | 类型 | 含义 | 示例 |
 |------|------|------|------|
-| `stage_result.major_stage` | str | 四阶段：蓄势/主升/派发/衰退 | "蓄势" |
+| `stage_result.major_stage` | str | 大阶段：蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退 | "蓄势偏强" |
 | `stage_result.momentum` | str | 短期动能：走强/修复/震荡/转弱 | "修复" |
 | `stage_result.action` | str | 操作建议：试探买/加仓/持有/减仓/清仓/不碰 | "试探买" |
-| `stage_result.stage_label` | str | 阶段标签 | "蓄势期修复" |
+| `stage_result.stage_label` | str | 阶段标签 | "蓄势偏强期修复" |
 | `stage_result.confidence` | int | 置信度 0-100 | 65 |
 
 ## 其他字段

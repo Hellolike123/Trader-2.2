@@ -1,14 +1,14 @@
 """四阶段定位模型（Stage Positioning Model）— 威科夫量价驱动版
 
 两层嵌套：
-  第一层：大阶段（蓄势/主升/派发/衰退）→ 威科夫量价关系为核心 + MA 结构 + ATR
+  第一层：大阶段（蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退）→ 威科夫量价关系为核心 + MA 结构 + ATR
   第二层：短期动能（走强/修复/震荡/转弱）→ 基于 MA5/MA10 + change_pct
 
-四层防护：
+四层防护（从宽松到严格）：
   1. 多日确认（连续 3 日信号一致才确认阶段转换）
-  2. 置信度评分（<50% 保持上次阶段）
+  2. 置信度评分（<35% 保持上次阶段，从 50% 降低）
   3. 缠论+动量交叉验证（冲突时降级）
-  4. 阶段锁定期（转换后锁定 5 天）
+  4. 阶段锁定期（转换后锁定 3 天，从 5 天降低）
 
 用法:
     from stage_positioning import assess_stage
@@ -169,11 +169,35 @@ def _assess_volume_price(bars: list[dict[str, Any]]) -> tuple[str, float, str]:
     if is_high_volume:
         return "派发", 45, f"放量方向不明（量比{vol_ratio:.1f}，涨跌{price_change_5*100:+.1f}%）"
 
-    # 正常量能 + 方向（覆盖 vol_ratio 0.8~1.2 死区）
-    if is_rising:
-        return "主升", 55, f"正常量能上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
-    if is_falling:
-        return "衰退", 50, f"正常量能下跌（量比{vol_ratio:.1f}，跌{price_change_5*100:+.1f}%）"
+    # ── 正常量能区域分化（vol_ratio 0.8~1.2，覆盖约 65% 的交易日） ──
+    if vol_ratio >= 0.8 and vol_ratio < 1.2:
+        if price_change_5 > 0.03:
+            return "蓄势偏强", 65, f"正常量能上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
+        if price_change_5 > 0.01:
+            return "蓄势偏强", 58, f"温和上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
+        if price_change_5 < -0.03:
+            return "蓄势偏弱", 55, f"正常量能下跌（量比{vol_ratio:.1f}，跌{price_change_5*100:+.1f}%）"
+        if price_change_5 < -0.01:
+            return "蓄势偏弱", 48, f"正常量能回调（量比{vol_ratio:.1f}，跌{price_change_5*100:+.1f}%）"
+        # 正常量能 + 横盘 → 真正的蓄势
+        return "蓄势", 40, f"正常量能横盘（量比{vol_ratio:.1f}，涨跌{price_change_5*100:+.1f}%）"
+
+    # ── 缩量区域分化 ──
+    if vol_ratio < 0.8:
+        if price_change_5 > 0.01:
+            return "蓄势偏强", 58, f"缩量上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
+        if price_change_5 < -0.01:
+            return "蓄势偏弱", 42, f"缩量下跌（量比{vol_ratio:.1f}，跌{price_change_5*100:+.1f}%）"
+        # 缩量横盘已在上面处理（is_low_volume and is_flat），这里兜底
+        return "蓄势", 40, f"缩量横盘（量比{vol_ratio:.1f}，涨跌{price_change_5*100:+.1f}%）"
+
+    # ── 放量区域 ──
+    # 已在上面处理（is_high_volume + rising/flat/falling）
+    # 这里是放量但幅度不够大的兜底
+    if price_change_5 > 0:
+        return "蓄势偏强", 50, f"放量微涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
+    if price_change_5 < 0:
+        return "蓄势偏弱", 48, f"放量微跌（量比{vol_ratio:.1f}，跌{price_change_5*100:+.1f}%）"
 
     # 默认
     return "蓄势", 40, f"量价无明确信号（量比{vol_ratio:.1f}，涨跌{price_change_5*100:+.1f}%）"
@@ -186,8 +210,11 @@ def _assess_ma_structure(
     ma10: float | None,
     ma20: float | None,
     ma30: float | None,
+    current_price: float = 0.0,
 ) -> tuple[str, float, str]:
     """MA 结构辅助判定。
+
+    均线收敛时按价格位置细分，避免一刀切全部判定为蓄势。
 
     Returns:
         (stage_hint, score, reason)
@@ -205,7 +232,14 @@ def _assess_ma_structure(
     if bearish:
         return "衰退", 70, "均线空头排列"
     if convergence < 0.03:
-        return "蓄势", 60, "均线收敛"
+        # 均线收敛时按价格位置细分
+        if current_price > 0 and ma5 > 0:
+            price_pos = (current_price - ma30) / max(ma30, 1)
+            if price_pos > 0.02:
+                return "蓄势偏强", 55, f"均线收敛，价格在上端（距MA30+{price_pos*100:.1f}%）"
+            if price_pos < -0.02:
+                return "蓄势偏弱", 45, f"均线收敛，价格在下端（距MA30{price_pos*100:.1f}%）"
+        return "蓄势", 50, "均线收敛（中性）"
     if ma20 > ma30:
         return "蓄势", 45, "MA20>MA30 中期偏多"
     if ma20 < ma30:
@@ -268,8 +302,13 @@ def _detect_major_stage(
     current: float,
     ma_values: dict[str, float | None],
     bars: list[dict[str, Any]] | None = None,
+    fusion_hint: dict[str, Any] | None = None,
 ) -> tuple[str, float, str]:
     """综合三个维度判定大阶段。
+
+    Args:
+        fusion_hint: 融合层的 {action, confidence, weighted_score}
+                     强信号时作为加权投票的额外一票。
 
     Returns:
         (stage, confidence, reason)
@@ -282,16 +321,34 @@ def _detect_major_stage(
     ma10 = ma_values.get("ma10")
     ma20 = ma_values.get("ma20")
     ma30 = ma_values.get("ma30")
-    ma_stage, ma_score, ma_reason = _assess_ma_structure(ma5, ma10, ma20, ma30)
+    ma_stage, ma_score, ma_reason = _assess_ma_structure(ma5, ma10, ma20, ma30, current_price=current)
 
     # ATR 波动（辅助，权重 20%）
     atr_stage, atr_score, atr_reason = _assess_atr_volatility(bars)
 
-    # 加权投票
-    stage_votes: dict[str, float] = {"蓄势": 0, "主升": 0, "派发": 0, "衰退": 0}
+    # 加权投票（扩展：蓄势偏强 / 蓄势偏弱作为中间态）
+    stage_votes: dict[str, float] = {"蓄势": 0, "蓄势偏强": 0, "蓄势偏弱": 0, "主升": 0, "派发": 0, "衰退": 0}
     stage_votes[vp_stage] += vp_score * 0.4
     stage_votes[ma_stage] += ma_score * 0.4
     stage_votes[atr_stage] += atr_score * 0.2
+
+    # fusion_hint: 强信号作为额外一票
+    if fusion_hint:
+        ws = fusion_hint.get("weighted_score")
+        conf = fusion_hint.get("confidence", 0)
+        if ws is not None and conf is not None:
+            # 置信度够才算数
+            if conf >= 0.3:
+                try:
+                    ws_f = float(ws)
+                    if ws_f > 0.25:
+                        # 融合强烈买入 → 给主升额外加分
+                        stage_votes["主升"] += 5.0 * min(ws_f, 1.0)
+                    elif ws_f < -0.2:
+                        # 融合强烈卖出 → 给衰退额外加分
+                        stage_votes["衰退"] += 5.0 * min(abs(ws_f), 1.0)
+                except (TypeError, ValueError):
+                    pass
 
     best_stage = max(stage_votes, key=stage_votes.get)  # type: ignore[arg-type]
     total_score = stage_votes[best_stage]
@@ -393,12 +450,12 @@ def _layer2_confidence_gate(
     confidence: int,
     state: dict[str, Any],
 ) -> tuple[str, int]:
-    """第二层：置信度评分。< 50% 保持上次阶段。
+    """第二层：置信度评分。< 35% 保持上次阶段。
 
     Returns:
         (final_stage, final_confidence)
     """
-    if confidence < 50:
+    if confidence < 35:
         prev_stage = state.get("last_confirmed_stage", "蓄势")
         return prev_stage, confidence
     return stage, confidence
@@ -445,7 +502,7 @@ def _layer4_stage_lock(
     state: dict[str, Any],
     is_transition: bool,
 ) -> tuple[str, bool]:
-    """第四层：阶段锁定期。转换后锁定 5 天。
+    """第四层：阶段锁定期。转换后锁定 3 天（从 5 天降低，避免错过波段窗口）。
 
     Returns:
         (final_stage, is_locked)
@@ -453,8 +510,8 @@ def _layer4_stage_lock(
     lock_remaining = state.get("lock_remaining", 0)
 
     if is_transition:
-        # 新转换，设置锁定期
-        state["lock_remaining"] = 5
+        # 新转换，设置锁定期（从 5 天降低到 3 天）
+        state["lock_remaining"] = 3
         return stage, True
 
     if lock_remaining > 0:
@@ -472,6 +529,18 @@ _DECISION_MATRIX: dict[str, dict[str, tuple[str, int]]] = {
     "蓄势": {
         "走强": ("低吸试盘", 20),
         "修复": ("回调低吸", 15),
+        "震荡": ("观望等待", 0),
+        "转弱": ("观望等待", 0),
+    },
+    "蓄势偏强": {
+        "走强": ("试探建仓", 30),
+        "修复": ("回调低吸", 25),
+        "震荡": ("小仓试探", 10),
+        "转弱": ("观望等待", 0),
+    },
+    "蓄势偏弱": {
+        "走强": ("观望等待", 0),
+        "修复": ("观望等待", 0),
         "震荡": ("观望等待", 0),
         "转弱": ("观望等待", 0),
     },
@@ -624,6 +693,7 @@ def assess_stage(
     fib_retrace: dict[str, Any] | None = None,
     symbol: str = "",
     trade_date: str = "",
+    fusion_hint: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """四阶段定位主函数（威科夫量价驱动 + 四层防护）
 
@@ -645,9 +715,9 @@ def assess_stage(
     ma10 = ma_values.get("ma10")
     ma20 = ma_values.get("ma20")
 
-    # 第一步：综合阶段判定（量价 + MA + ATR）
+    # 第一步：综合阶段判定（量价 + MA + ATR + fusion_hint）
     raw_stage, raw_confidence, raw_reason = _detect_major_stage(
-        current, ma_values, bars
+        current, ma_values, bars, fusion_hint=fusion_hint
     )
 
     # P1 Fix: 新股置信度打折 — 当数据不足 60 天时，置信度按比例折扣
@@ -688,7 +758,7 @@ def assess_stage(
     # 第四层：阶段锁定期
     final_stage, is_locked = _layer4_stage_lock(validated_stage, state, is_transition)
     if is_locked:
-        protection_notes.append(f"阶段锁定5天")
+        protection_notes.append(f"阶段锁定3天")
         if final_stage != validated_stage:
             protection_notes.append(f"锁定期内保持{final_stage}")
 

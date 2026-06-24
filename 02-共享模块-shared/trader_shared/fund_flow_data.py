@@ -269,6 +269,116 @@ def calc_fund_flow_features(
     }
 
 
+def calc_fund_flow_features_from_bars(
+    bars: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """从K线数据推导近似资金流向特征。
+
+    当东方财富 API 不可用时，用价格 + 成交量估算主力方向。
+    原理：上涨放量 ≈ 主力买入，下跌放量 ≈ 主力卖出。
+
+    注意：此为近似值，精度远低于真实资金流向数据，
+    仅用于 detect_main_force_stage 的 fallback 分支。
+
+    Args:
+        bars: 近期 K 线数据（至少 10 根）
+
+    Returns:
+        与 calc_fund_flow_features() 相同结构的特征字典
+    """
+    if not bars or len(bars) < 10:
+        return {
+            "cum_flow_5d_wan": 0,
+            "cum_flow_10d_wan": 0,
+            "consecutive_inflow_days": 0,
+            "consecutive_outflow_days": 0,
+            "net_flow_pct": 0.0,
+            "flow_price_relation": "无数据",
+            "daily_flow_5d": [],
+        }
+
+    # 每日估算净流量（万元）
+    # 方法：当日涨跌方向 * 成交额 → 正为流入，负为流出
+    # 成交额 = close * volume (简化)
+    daily_estimates: list[float] = []
+    for b in bars:
+        close = float(b.get("close") or 0)
+        open_ = float(b.get("open") or 0)
+        volume = float(b.get("volume") or 0)  # 股数
+        if open_ > 0 and volume > 0:
+            # 成交额
+            amount = close * volume
+            # 涨跌幅方向
+            change = (close - open_) / open_
+            # 估算净流量（万元）: 成交额 * 涨跌幅方向 / 10000
+            # 除 10000 因为 volume 是股数, amount 是元
+            est = amount * abs(change) / 10000.0
+            daily_estimates.append(est * (1 if change > 0 else -1))
+        else:
+            daily_estimates.append(0)
+
+    # 累计净流入
+    cum_5 = sum(daily_estimates[-5:])
+    cum_10 = sum(daily_estimates[-10:])
+
+    # 连续流入/流出天数（从 K 线数据推导）
+    consecutive_in = 0
+    consecutive_out = 0
+    for est in reversed(daily_estimates):
+        if est > 0:
+            if consecutive_out == 0:
+                consecutive_in += 1
+            else:
+                break
+        elif est < 0:
+            if consecutive_in == 0:
+                consecutive_out += 1
+            else:
+                break
+        else:
+            if consecutive_in > 0:
+                consecutive_in += 1
+            elif consecutive_out > 0:
+                consecutive_out += 1
+            else:
+                break
+
+    # 净流入占成交额比（近似）
+    total_amount_5d = sum(
+        float(bars[-(i+1)].get("close", 0) or 0) * float(bars[-(i+1)].get("volume", 0) or 0)
+        for i in range(min(5, len(bars)))
+    )
+    net_flow_pct = round(cum_5 * 10000 / total_amount_5d, 4) if total_amount_5d > 0 else 0.0
+
+    # 价资关系：用近5日累计估算流向 vs 价格变动
+    recent5 = bars[-5:]
+    if len(recent5) >= 2 and recent5[0].get("close", 0) > 0:
+        price_up = recent5[-1].get("close", 0) > recent5[0].get("close", 0)
+        flow_up = cum_5 > 0
+        if price_up and flow_up:
+            flow_price_relation = "价涨资入"
+        elif price_up and not flow_up:
+            flow_price_relation = "价涨资出"
+        elif not price_up and flow_up:
+            flow_price_relation = "价跌资入"
+        else:
+            flow_price_relation = "价跌资出"
+    else:
+        flow_price_relation = "无数据"
+
+    daily_flow_5d = [round(x, 2) for x in daily_estimates[-5:]]
+
+    return {
+        "cum_flow_5d_wan": round(cum_5, 2),
+        "cum_flow_10d_wan": round(cum_10, 2),
+        "consecutive_inflow_days": consecutive_in,
+        "consecutive_outflow_days": consecutive_out,
+        "net_flow_pct": net_flow_pct,
+        "flow_price_relation": flow_price_relation,
+        "daily_flow_5d": daily_flow_5d,
+    }
+
+
 def _calc_flow_price_relation(
     daily_flow: list[dict[str, Any]],
     bars: list[dict[str, Any]] | None,
