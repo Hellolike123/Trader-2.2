@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from portfolio_run import build_portfolio, build_snapshot_portfolio, load_snapshot
-from validate_output import validate
+from portfolio_validate_output import validate
 
 POSITIONS_PATH = Path.home() / ".trader" / "positions.json"
 

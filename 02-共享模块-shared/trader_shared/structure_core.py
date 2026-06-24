@@ -412,6 +412,9 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     stop_buffer_pct = clamp(atr_pct * 0.40 * theory.get("stop_buffer", 1.0), MIN_STOP_BUFFER_PCT, MAX_STOP_BUFFER_PCT)
     low_zone_lower = round(support_price, 2)
     low_zone_upper = round(support_price * (1 + zone_width_pct), 2)
+    # 约束：买入区不偏离现价太远
+    low_zone_lower = max(low_zone_lower, current * 0.95)    # 不超过现价下方5%
+    low_zone_upper = max(low_zone_upper, current * 0.985)   # 买入区上沿至少在现价下方1.5%
     stop = round(support_price * (1 - stop_buffer_pct), 2)
     take = round(max(confirm_price, current) * TAKE_PROFIT_BUFFER, 2)
     position = zone_position(current, support_price, confirm_price)
@@ -477,6 +480,8 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         round(resistance_price * (1 - zone_width_pct), 2),
         round(current * 1.005, 2),  # 不低于现价的 0.5% 上方
     )
+    # 约束：高抛区间下限不超过现价上方 8%（避免融合说"现在减"但买卖点说"等涨 9%"的矛盾）
+    high_zone_lower = min(high_zone_lower, round(current * 1.08, 2))
 
     # Fibonacci 扩展目标位（从缠论笔计算 138.2% / 161.8%）
     fib_ext_1382 = None
@@ -578,6 +583,18 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         "fib_ext_1618": fib_ext_1618,  # Fibonacci 161.8% 扩展目标位
         "trailing_stop": trailing_stop,  # P0: ATR 移动止损价
         "highest_close": highest_close,  # P0: 分析区间最高收盘价
+        # 单一可信源：所有视图（单票/T0/Review/Pool）共用此价位字典
+        "price_levels": {
+            "stop": stop,
+            "defense": round(support_price, 2),
+            "confirm": round(confirm_price, 2),
+            "buy_low": low_zone_lower,
+            "buy_high": low_zone_upper,
+            "high_low": high_zone_lower,
+            "high_high": high_zone_upper,
+            "take": take,
+            "trailing_stop": trailing_stop,
+        },
     }
 
 

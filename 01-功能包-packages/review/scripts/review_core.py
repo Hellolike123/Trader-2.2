@@ -532,7 +532,7 @@ def _get_stage_result(
         return {"major_stage": "未知", "momentum": "未知", "action": "观察", "stage_label": "未知"}
 
 
-def build_review(target: str, cost: float | None = None, trade_date: str | None = None, session: str = "close") -> dict[str, Any]:
+def build_review(target: str, cost: float | None = None, trade_date: str | None = None, session: str = "close", single_report: dict[str, Any] | None = None) -> dict[str, Any]:
     if session not in {"close", "midday"}:
         raise RuntimeError("session must be close or midday")
     provider = get_provider()
@@ -564,7 +564,15 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
     atr_level_name, atr_suggested_cap = atr_volatility_level(atr_ratio_val) if atr14 > 0 else ("数据不足", 10)
     intraday = analyze_intraday(bars_5m, selected_date, session=session)
     levels = build_levels(current, quote, daily, cost)
-    chip_dist = calc_chip_distribution(daily, lookback=60)
+    # 优先复用单票分析结果，避免跨视图数据不一致（B3/B4）
+    if single_report and single_report.get("chip_peaks"):
+        chip_dist = {
+            "peaks": single_report["chip_peaks"],
+            "current_pct": single_report.get("chip_current_pct"),
+            "mid_price": single_report.get("chip_mid_price"),
+        }
+    else:
+        chip_dist = calc_chip_distribution(daily, lookback=60)
     theory = theory_verdicts(current, quote, daily, intraday, levels, cost, session=session)
 
     # 威科夫分析（用于信号回顾）

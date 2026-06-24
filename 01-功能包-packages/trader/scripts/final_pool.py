@@ -572,6 +572,8 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 
 def rank_status(item: dict[str, Any]) -> str:
+    if item.get("_stop_broken"):
+        return "已破止损"
     if item.get("status") == "执行":
         return "等转强" if item.get("momentum_state") != "通过" else "低吸观察"
     if item.get("status") == "观察":
@@ -615,6 +617,7 @@ STAR_MAP = {
     "防守观察": "⭐⭐⭐",
     "冲高减仓": "⭐⭐",
     "暂不碰": "⭐",
+    "已破止损": "🔴",
 }
 
 
@@ -864,6 +867,51 @@ def _pool_signal_verifications(items: list[dict[str, Any]]) -> tuple[list[dict[s
     return results, summary
 
 
+def _apply_signal_adjustments(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """根据信号回测结果调整排序：失败信号降级，已触发标记。"""
+    from trader_shared.signal_store import load_recent_signals
+
+    adjusted = []
+    for item in items:
+        item = dict(item)  # shallow copy
+        name = item.get("name", "?")
+        symbol = item.get("symbol") or name
+        current = to_float(item.get("current")) or 0
+        defense = to_float(item.get("defense")) or 0
+
+        try:
+            signals = load_recent_signals(name, limit=5)
+            if not signals:
+                signals = load_recent_signals(symbol, limit=5)
+        except Exception:
+            signals = []
+
+        if signals:
+            latest = signals[-1]
+            # 检查信号结果字段
+            result = str(latest.get("result") or latest.get("verify_status") or "")
+            sig_status = str(latest.get("status") or "")
+
+            # 信号失败（破防守 / 方向反了）→ 降级为观察
+            if "❌" in result or "破防守" in result or "方向反" in result:
+                if item.get("status") != "淘汰":
+                    item["status"] = "观察"
+                    item["_signal_downgrade"] = True
+
+            # 信号已触发 → 标记
+            if "✅" in result or "已触发" in result:
+                item["_signal_triggered"] = True
+
+            # 现价跌破防守位 → 降级
+            if defense > 0 and current > 0 and current < defense:
+                if item.get("status") != "淘汰":
+                    item["status"] = "观察"
+                    item["_defense_broken"] = True
+
+        adjusted.append(item)
+    return adjusted
+
+
 def action_summary_for_scene(scene: str) -> str:
     """One-line action advice for pool items."""
     if scene in {"低吸观察", "防守观察", "防守观察，趋势下行谨慎"}:
@@ -1041,6 +1089,7 @@ def _signal_type_label(sig_type: str) -> str:
 def render_rank(items: list[dict[str, Any]]) -> str:
     from trader_shared.candidate_core import atr_volatility_level
 
+    items = _apply_signal_adjustments(items)
     sorted_items = sort_items_unified(items)
     market_level = get_market_level()
 
@@ -1061,7 +1110,16 @@ def render_rank(items: list[dict[str, Any]]) -> str:
             else:
                 stars = "⭐"
         else:
-            stars = STAR_MAP.get(rs, "⭐")  # fallback
+            # fallback：按池内排名位置分配星级
+            pool_pct = i / max(len(sorted_items), 1)
+            if pool_pct < 0.2:
+                stars = "⭐⭐⭐⭐"
+            elif pool_pct < 0.5:
+                stars = "⭐⭐⭐"
+            elif pool_pct < 0.8:
+                stars = "⭐⭐"
+            else:
+                stars = "⭐"
         medal = ["🥇", "🥈", "🥉"][i] if i < 3 else f" {i+1}."
 
         name = item.get("name", "?")
@@ -1103,12 +1161,22 @@ def render_rank(items: list[dict[str, Any]]) -> str:
         stop_val = to_float(item.get("stop")) or to_float(item.get("defense")) or 0
         confirm = to_float(item.get("confirm")) or to_float(item.get("trigger")) or 0
 
+        # 止损 > 现价时标记已破止损
+        current_price_val = to_float(item.get("current")) or to_float(item.get("price")) or 0
+        if stop_val > 0 and current_price_val > 0 and stop_val > current_price_val:
+            item = dict(item)  # shallow copy to avoid mutating original
+            item["_stop_broken"] = True
+
         if buy_low and buy_high:
             buy_text = f"买(观察区)  {buy_low:.2f}-{buy_high:.2f} 止跌确认"
         elif buy_low:
             buy_text = f"买(观察区)  {buy_low:.2f} 止跌确认"
         else:
             buy_text = "买  暂无"
+
+        # 买入区过期检查
+        if buy_low > 0 and current_price_val > 0 and buy_low > current_price_val * 1.05:
+            buy_text = f"买入区已过期（{buy_low:.2f}）"
 
         lines.append(f"{medal}  {stars}  {name}  {rs}  {current:.2f}  {atr_text}")
         cap_display = f"仓位 {final_cap}%"
@@ -1375,6 +1443,7 @@ def position_for(item: dict[str, Any]) -> str:
 
 
 def render_plan(items: list[dict[str, Any]]) -> str:
+    items = _apply_signal_adjustments(items)
     sorted_items = sort_items_unified(items)
     # 分离触发价过期的票（距现价 > 5%）
     active_plan_items = [it for it in sorted_items if not _is_trigger_stale(it)]
@@ -1444,6 +1513,10 @@ def render_plan(items: list[dict[str, Any]]) -> str:
 
 
 def trade_hint(item: dict[str, Any]) -> str:
+    if item.get("_signal_triggered"):
+        return f"信号已触发，按计划执行（防守{price(item.get('defense'))}元）"
+    if item.get("_signal_downgrade"):
+        return f"近期信号失败，暂不介入，等新信号"
     if item.get("status") == "执行":
         return f"放量站稳{price(item['trigger'])}元才买 → 回踩不破可加至3成"
     return f"{price(item['trigger'])}元站稳再看，防守{price(item.get('defense'))}元"

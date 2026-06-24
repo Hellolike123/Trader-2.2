@@ -33,7 +33,7 @@ def calc_chip_distribution(
     dict with keys:
         peaks : list[dict]      去重后的独立峰值列表
         total_volume : float    总筹码量 (衰减后的累积值)
-        current_pct : float     当前收盘价之上的筹码占比 (%)
+        current_pct : float     当前收盘价之下的筹码占比 (%)
         mid_price : float       筹码中位数价格 (50%分位, 线性插值)
         volume_above_pct : float  当前收盘价之上的筹码占比 (%)
         bin_width : float       箱宽

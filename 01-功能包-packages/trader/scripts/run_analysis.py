@@ -481,12 +481,13 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     stop = levels["hard_stop"]
     take = levels["take"]
     # 使用约5个交易日前的收盘价作为周收盘价的近似
+    # 注意：这是5/20个交易日前的日线收盘价，非真实周/月K线
     if len(bars) >= 5:
-        weekly_close = float(bars[-5]["close"])
+        weekly_proxy_close = float(bars[-5]["close"])
     else:
-        weekly_close = float(bars[0]["close"])
-    monthly_close = float(bars[-STRUCTURE_WINDOW]["close"] if len(bars) >= STRUCTURE_WINDOW else bars[0]["close"])
-    stage = determine_stage(current, weekly_close, monthly_close)
+        weekly_proxy_close = float(bars[0]["close"])
+    monthly_proxy_close = float(bars[-STRUCTURE_WINDOW]["close"] if len(bars) >= STRUCTURE_WINDOW else bars[0]["close"])
+    stage = determine_stage(current, weekly_proxy_close, monthly_proxy_close)
     scene = levels["status"]
     base_status = str(levels.get("base_status") or scene)
     theory_status = str(levels.get("theory_status") or scene)
@@ -613,6 +614,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
                 daily_closes=res_d_closes,
                 current_price=current,
                 weekly_bars=None,  # 周线数据暂不抓取，用日线代理
+                weekly_close=weekly_proxy_close,  # 传入5日前收盘价作为周线代理
                 bars_60m=bars_60m,  # 聚合后的60分钟线
                 daily_support=_support_f,
                 daily_resistance=_resistance_f,
@@ -701,8 +703,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "analysis_time": analysis_time,
         "current": current,
         "change_pct": quote.get("current_change_pct"),
-        "weekly_close": weekly_close,
-        "monthly_close": monthly_close,
+        "weekly_close": weekly_proxy_close,
+        "monthly_close": monthly_proxy_close,
         "support": support,
         "resistance": resistance,
         "confirm": confirm,
@@ -1165,6 +1167,24 @@ def _load_historical_win_rate(symbol: str, daily_bars: list[dict[str, Any]] | No
     }
 
 
+def _get_buy_label(change_pct: float, volume_ratio: float) -> str:
+    """根据当日涨跌和量比动态生成试探买标签。"""
+    is_shrink = volume_ratio > 0 and volume_ratio < 0.8
+    is_expand = volume_ratio >= 1.2
+
+    if is_expand:
+        return "放量企稳"
+    if is_shrink:
+        if change_pct < -3:
+            return "回踩缩量"
+        elif change_pct > 3:
+            return "上涨缩量"
+        elif abs(change_pct) <= 1:
+            return "横盘缩量"
+        return "缩量整理"
+    return "试探买入"
+
+
 def render_markdown(r: dict) -> str:
     ma = r.get("ma") or {}
     ma_raw = r.get("ma_raw") or ma
@@ -1288,7 +1308,9 @@ def render_markdown(r: dict) -> str:
         lines.append(f"  {stop:.2f} 止损")
     risk_reward_available = str(r.get("risk_reward") or "") not in ("数据不足", "", "0")
     if low_price > 0 and risk_reward_available:
-        lines.append(f"  {low_price:.2f} ← 试探买 {position_cap}%（缩量企稳）")
+        # 动态生成试探买标签
+        _buy_label = _get_buy_label(change_pct, volume_ratio_val)
+        lines.append(f"  {low_price:.2f} ← 试探买 {position_cap}%（{_buy_label}）")
     elif low_price > 0 and not risk_reward_available:
         lines.append(f"  {low_price:.2f} ← 参考低吸区（盈亏比数据不足，等待）")
     fib = r.get("fib_retrace") or {}
@@ -1347,7 +1369,7 @@ def render_markdown(r: dict) -> str:
         lines.append(line)
 
     stage_exit = exit_plan.get("stage_exit")
-    if stage_exit:
+    if stage_exit and major_stage in ("主升", "拉升"):
         lines.append(f"  阶段转{stage_exit} → 清仓")
     
     lines.extend(["", "💡 为什么这么操作"])
@@ -1465,13 +1487,18 @@ def render_markdown(r: dict) -> str:
         current_pct = r.get("chip_current_pct")
         mid_price = r.get("chip_mid_price")
         if current_pct is not None:
-            lines.append(f"  当前价以上：{current_pct:.1f}%")
+            lines.append(f"  当前价以下：{current_pct:.1f}%")
         if mid_price is not None:
             lines.append(f"  中位数价格：{mid_price:.2f}")
             
         chip_migration = r.get("chip_migration") or {}
         has_history = chip_migration.get("has_history", False)
-        
+        migration_pct = chip_migration.get("migration_pct", 0)
+
+        # 跳过无意义的同日对比（migration_pct == 0 且无支撑/阻力变化数据）
+        if has_history and migration_pct == 0 and not chip_migration.get("support_migration"):
+            has_history = False
+
         if has_history:
             lines.extend(["", f"  筹码变化（对比昨天）："])
             
@@ -1576,10 +1603,17 @@ def render_markdown(r: dict) -> str:
     elif change_pct_val > 3:
         mom_score = min(100, mom_score + 5)
 
+    # D1: 三类卖 + 大阳线（>3%）→ 反转修正，原三类卖信号被否定
+    chan_signal = signals.get("chan") or {}
+    chan_reason_text = str(chan_signal.get("reason", "")) if isinstance(chan_signal, dict) else ""
+    if "三类卖" in chan_reason_text and change_pct_val > 3:
+        chan_score = max(chan_score, 15)  # 至少给 15 分，否定三类卖的极端负分
+        chan_reason_text = chan_reason_text + "（今日大阳线已否定）"
+
     mom_score_str = "⚪ N/A" if mom_data_insufficient else f"{mom_score:+.0f}"
 
     lines.extend(["", "📊 五层打分", f"  结构{chan_score:+.0f}｜量价{wyk_score:+.0f}｜筹码{chip_score:.0f}｜动能{mom_score_str}"])
-    chan_reason = signals.get("chan", {}).get("reason", "回调段。一类买、二类买") if isinstance(signals.get("chan"), dict) else "无信号"
+    chan_reason = chan_reason_text if chan_reason_text else (signals.get("chan", {}).get("reason", "回调段。一类买、二类买") if isinstance(signals.get("chan"), dict) else "无信号")
     lines.append(f"  缠论：{chan_reason}")
     # 显示缠论买卖点
     chan_buy_text = r.get("chan_buy_point_text", "无")
@@ -1636,19 +1670,23 @@ def render_markdown(r: dict) -> str:
         
     lines.append("")
     scene = str(r.get("scene") or "")
-    if current_price >= low_price:
+    # E2: 现价距防守位 < 0.5% 时显示逼近警告
+    if current_price >= low_price * 1.005:
         lines.append(f"✅ 亮点：{current_price:.2f} 仍站在防守位 {low_price:.2f} 上方")
+    elif current_price >= low_price:
+        lines.append(f"⚠️ 现价逼近防守位 {low_price:.2f}，随时可能跌破")
     elif scene in ("破位下行", "风险回避"):
         lines.append(f"⚠️ 亮点：暂无亮点，价格已跌破防守位 {low_price:.2f}，等待企稳信号")
     else:
         lines.append(f"✅ 亮点：价格超跌，关注 {low_price:.2f} 附近企稳机会")
-        
+
     if "出货" in str(chip_migration.get("warning_text", "")):
         lines.append(f"⚠️ 风险：筹码在搬家，主力在出货，警惕继续下跌")
     elif major_stage == "主升":
         lines.append(f"⚠️ 风险：主升期主要风险是回踩 {low_price:.2f} 支撑未守住")
     elif major_stage == "蓄势":
-        lines.append(f"⚠️ 风险：蓄势期主要风险是突破 {confirm:.2f} 前不宜提前介入")
+        # E1: 修正文案歧义
+        lines.append(f"⚠️ 风险：突破 {confirm:.2f} 失败将引发回踩，故突破前不宜提前介入")
     elif major_stage == "派发":
         lines.append(f"⚠️ 风险：派发期注意破位，跌破 {stop:.2f} 需离场")
     elif major_stage == "衰退":
@@ -2093,6 +2131,19 @@ def _analyze_buy_conditions(
     if not at_support:
         lines.append("  动作：等待")
         lines.append(f"  理由：价格未到支撑位 {support:.2f}")
+        return lines
+
+    # D2: EXPMA 偏空 + 三类卖 → 屏蔽试探买
+    expma_status = r.get("expma_status") or {}
+    expma_total = expma_status.get("total_score", 5) if isinstance(expma_status, dict) else 5
+    # 从 fusion signals 中获取缠论信号
+    fusion_data = r.get("fusion") or {}
+    signals_detail = fusion_data.get("signals_detail") or {}
+    chan_signal = signals_detail.get("chan") or {}
+    chan_reason = str(chan_signal.get("reason", "")) if isinstance(chan_signal, dict) else ""
+    if expma_total <= 3 and "三类卖" in chan_reason:
+        lines.append("  动作：暂不介入")
+        lines.append(f"  理由：EXPMA偏空（{expma_total}/10）+ 缠论三类卖，看空信号叠加")
         return lines
     
     # 加分条件检查

@@ -69,7 +69,7 @@ def calc_expma_status(
     total = alignment + slope + cross + deviation
 
     # 趋势标签
-    trend_label = _trend_label(expma_values, alignment, slope)
+    trend_label = _trend_label(expma_values, alignment, slope, current_price=current_price)
 
     # 详细解释
     detail: dict[str, Any] = {
@@ -221,19 +221,22 @@ def _score_crossover(closes: list[float], expma_values: dict[str, float | None])
 def _score_deviation(current_price: float, expma_values: dict[str, float | None]) -> int:
     """乖离程度 0-3 分。
 
-    评分因子：
-      - 价格适中高于 EXPMA20（0-3%）：3分（最佳低吸/持有位）
-      - 价格适中低于 EXPMA20（0-3%）：2分
+    评分因子（以 EXPMA5 为参照，更快捕捉短期变化）：
+      - 价格适中高于 EXPMA5（0-3%）：3分（最佳低吸/持有位）
+      - 价格适中低于 EXPMA5（0-3%）：2分
       - 价格略超买（3-5%）：1分
       - 价格略超卖（-3% ~ -5%）：1分
       - 价格极端超买（>5%）：0分
       - 价格极端超卖（<-5%）：0分
     """
+    e5 = expma_values.get("5")
     e20 = expma_values.get("20")
-    if not e20 or current_price <= 0 or e20 <= 0:
+    # 优先用 EXPMA5（更灵敏），无数据时回退 EXPMA20
+    ref = e5 if (e5 and e5 > 0) else e20
+    if not ref or current_price <= 0 or ref <= 0:
         return 1  # 无数据中性
 
-    deviation_pct = (current_price - e20) / e20
+    deviation_pct = (current_price - ref) / ref
 
     if 0 <= deviation_pct <= 0.03:
         return 3  # 最佳位
@@ -252,11 +255,22 @@ def _score_deviation(current_price: float, expma_values: dict[str, float | None]
 # ── 趋势标签 ─────────────────────────────────────────────────────
 
 def _trend_label(expma_values: dict[str, float | None],
-                 alignment: int, slope: int) -> str:
-    """综合排列和斜率得出趋势标签。"""
+                 alignment: int, slope: int, current_price: float = 0) -> str:
+    """综合排列和斜率得出趋势标签，增加现价 vs EXPMA5 维度。"""
+    e5 = expma_values.get("5")
+    e10 = expma_values.get("10")
+
     if alignment >= 3 and slope >= 2:
+        # 多头排列，但需检查现价是否在 EXPMA5 上方
+        if e5 and current_price > 0 and current_price < e5:
+            if e10 and e5 > e10:
+                return "多头排列（回调）"
+            else:
+                return "多头排列失效"
         return "多头排列（强势）"
     elif alignment >= 2 and slope >= 1:
+        if e5 and current_price > 0 and current_price < e5:
+            return "偏多排列（回调）"
         return "偏多排列"
     elif alignment <= 0 and slope <= 0:
         return "空头排列（弱势）"

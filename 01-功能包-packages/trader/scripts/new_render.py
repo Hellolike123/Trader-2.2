@@ -92,6 +92,24 @@ def _load_historical_win_rate(symbol: str) -> dict | None:
     }
 
 
+def _get_buy_label(change_pct: float, volume_ratio: float) -> str:
+    """根据当日涨跌和量比动态生成试探买标签。"""
+    is_shrink = volume_ratio > 0 and volume_ratio < 0.8
+    is_expand = volume_ratio >= 1.2
+
+    if is_expand:
+        return "放量企稳"
+    if is_shrink:
+        if change_pct < -3:
+            return "回踩缩量"
+        elif change_pct > 3:
+            return "上涨缩量"
+        elif abs(change_pct) <= 1:
+            return "横盘缩量"
+        return "缩量整理"
+    return "试探买入"
+
+
 def render_markdown(r: dict) -> str:
     ma = r.get("ma") or {}
     ma_raw = r.get("ma_raw") or ma
@@ -154,7 +172,10 @@ def render_markdown(r: dict) -> str:
     if stop > 0:
         lines.append(f"  {stop:.2f} 止损")
     if low_price > 0:
-        lines.append(f"  {low_price:.2f} ← 试探买 {position_cap}%（缩量企稳）")
+        # 动态生成试探买标签
+        vol_ratio = float(r.get("volume_ratio") or 0)
+        buy_label = _get_buy_label(change_pct, vol_ratio)
+        lines.append(f"  {low_price:.2f} ← 试探买 {position_cap}%（{buy_label}）")
     if current_price > 0:
         lines.append(f"  {current_price:.2f} 当前")
     
@@ -171,7 +192,7 @@ def render_markdown(r: dict) -> str:
         lines.append(f"  {resistance_val:.2f} 压力")
         
     stage_exit = exit_plan.get("stage_exit")
-    if stage_exit:
+    if stage_exit and major_stage in ("主升", "拉升"):
         lines.append(f"  阶段转{stage_exit} → 清仓")
     
     lines.extend(["", "💡 为什么这么操作"])
@@ -239,13 +260,18 @@ def render_markdown(r: dict) -> str:
         current_pct = r.get("chip_current_pct")
         mid_price = r.get("chip_mid_price")
         if current_pct is not None:
-            lines.append(f"  当前价以上：{current_pct:.1f}%")
+            lines.append(f"  当前价以下：{current_pct:.1f}%")
         if mid_price is not None:
             lines.append(f"  中位数价格：{mid_price:.2f}")
             
         chip_migration = r.get("chip_migration") or {}
         has_history = chip_migration.get("has_history", False)
-        
+        migration_pct = chip_migration.get("migration_pct", 0)
+
+        # 跳过无意义的同日对比（migration_pct == 0 说明筹码未变化）
+        if has_history and migration_pct == 0 and not chip_migration.get("support_migration"):
+            has_history = False
+
         if has_history:
             lines.extend(["", f"  筹码变化（对比昨天）："])
             
@@ -337,15 +363,18 @@ def render_markdown(r: dict) -> str:
         lines.append(f"  警惕：! {'  ! '.join(cautious_signals)}")
         
     lines.append("")
-    if current_price >= low_price:
+    # E2: 现价距防守位 < 0.5% 时显示逼近警告，不显示"亮点"
+    if current_price >= low_price * 1.005:
         lines.append(f"✅ 亮点：{current_price:.2f} 仍站在防守位 {low_price:.2f} 上方")
+    elif current_price >= low_price:
+        lines.append(f"⚠️ 现价逼近防守位 {low_price:.2f}，随时可能跌破")
     else:
         lines.append(f"✅ 亮点：价格超跌，关注 {low_price:.2f} 附近企稳机会")
-        
+
     if "出货" in str(chip_migration.get("warning_text", "")):
         lines.append(f"⚠️ 风险：筹码在搬家，主力在出货，警惕继续下跌")
     else:
-        lines.append(f"⚠️ 风险：最大风险是 {confirm:.2f} 未确认前提前追入")
+        lines.append(f"⚠️ 风险：突破 {confirm:.2f} 失败将引发回踩，故突破前不宜提前介入")
         
     lines.append("")
 

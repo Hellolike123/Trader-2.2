@@ -25,6 +25,7 @@ def calc_resonance(
     daily_closes: list[float],
     current_price: float,
     weekly_bars: list[dict[str, Any]] | None = None,
+    weekly_close: float | None = None,
     bars_60m: list[dict[str, Any]] | None = None,
     daily_support: float = 0,
     daily_resistance: float = 0,
@@ -35,6 +36,7 @@ def calc_resonance(
         daily_closes: 日线收盘价序列（用于日线结构评分）
         current_price: 当前价格
         weekly_bars: 周线K线数据（可选）
+        weekly_close: 周线收盘价代理值（5个交易日前日线收盘，可选）
         bars_60m: 60分钟K线数据（可选）
         daily_support: 日线支撑位（用于共振判断）
         daily_resistance: 日线阻力位（用于共振判断）
@@ -56,7 +58,7 @@ def calc_resonance(
     if not daily_closes or len(daily_closes) < 10:
         return _empty_result()
 
-    weekly = _score_weekly(weekly_bars, current_price, daily_closes)
+    weekly = _score_weekly(weekly_bars, current_price, daily_closes, weekly_close=weekly_close)
     daily = _score_daily(daily_closes, current_price, daily_support, daily_resistance)
     timing = _score_timing_60m(bars_60m, current_price, daily_support, daily_resistance)
     sell_timing = _score_sell_timing_60m(bars_60m, current_price, daily_resistance)
@@ -101,6 +103,7 @@ def _score_weekly(
     weekly_bars: list[dict[str, Any]] | None,
     current_price: float,
     daily_closes: list[float],
+    weekly_close: float | None = None,
 ) -> dict[str, Any]:
     """周线方向 0-3 分。
 
@@ -134,8 +137,14 @@ def _score_weekly(
                     score += 1
                     label = f"{label}（站上EXPMA20）"
     else:
-        # 用日线最后20根作为周线代理（大约4周数据）
-        if len(daily_closes) >= 20:
+        # 优先使用传入的 weekly_close（5日前日线收盘）作为周线代理
+        if weekly_close is not None and weekly_close > 0:
+            if current_price > weekly_close:
+                score += 1
+                label = "周线代理（基于5日收盘）（站上）"
+            else:
+                label = "周线代理（基于5日收盘）（未站上）"
+        elif len(daily_closes) >= 20:
             e20 = _calc_expma(daily_closes, 20)
             e10 = _calc_expma(daily_closes, 10) if len(daily_closes) >= 10 else e20
             if e20 > 0:
@@ -154,11 +163,13 @@ def _score_weekly(
     # 至少1分基础分（有数据时）
     if not weekly_bars or len(weekly_bars) < 5:
         score = max(score, 0)
-        # 如果已经有日线代理评分，保留并添加注释
-        if score > 0 and label and label != "无周线数据":
-            label = f"{label}（无周线数据）"
+        # E4: 修正自相矛盾文案 — 代理标签已隐含"无真实周线"，不再追加"（无周线数据）"
+        if score > 0 and label and label != "无周线数据" and "代理" not in label:
+            label = f"⚠️ 周线数据缺失，{label}"
+        elif score > 0 and "代理" in label:
+            pass  # 代理标签已够清晰，不追加
         else:
-            label = "无周线数据"
+            label = "⚠️ 周线数据缺失"
 
     return {"points": min(3, score), "label": label}
 
