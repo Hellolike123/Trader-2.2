@@ -473,7 +473,10 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
 
     # ═══════ 高抛区间 & Fibonacci 扩展目标位（对称低吸区间）═══════
     high_zone_upper = round(resistance_price, 2)
-    high_zone_lower = round(resistance_price * (1 - zone_width_pct), 2)
+    high_zone_lower = max(
+        round(resistance_price * (1 - zone_width_pct), 2),
+        round(current * 1.005, 2),  # 不低于现价的 0.5% 上方
+    )
 
     # Fibonacci 扩展目标位（从缠论笔计算 138.2% / 161.8%）
     fib_ext_1382 = None

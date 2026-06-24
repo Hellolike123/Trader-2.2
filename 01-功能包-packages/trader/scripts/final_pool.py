@@ -422,6 +422,33 @@ def _fusion_confidence_rank(value: Any) -> int:
         return {"low": 1, "medium": 2, "high": 3}.get(text, 0)
 
 
+STAGE_STRENGTH = {"主升": 1.0, "拉升": 0.9, "蓄势偏强": 0.8, "蓄势": 0.5, "蓄势偏弱": 0.3, "派发": 0.2, "衰退": 0.0}
+
+
+def sort_items_unified(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """统一排序：plan 和 rank 共用同一个排序逻辑。
+    
+    主键：status（执行 > 观察 > 淘汰）
+    次键：融合置信度 × 40% + 总分归一化 × 30% + 阶段强度 × 30%
+    """
+    status_rank = {"执行": 3, "观察": 2, "淘汰": 1}
+    def _composite(item: dict[str, Any]) -> float:
+        conf = float(item.get("fusion_confidence") or 0)
+        score = int(item.get("total_score") or 0)
+        stage = str(item.get("major_stage") or "蓄势")
+        stage_str = STAGE_STRENGTH.get(stage, 0.5)
+        return conf * 0.4 + (score / 100.0) * 0.3 + stage_str * 0.3
+    
+    return sorted(
+        items,
+        key=lambda item: (
+            status_rank.get(str(item.get("status")), 0),
+            _composite(item),
+        ),
+        reverse=True,
+    )
+
+
 def sort_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     status_rank = {"执行": 3, "观察": 2, "淘汰": 1}
     return sorted(
@@ -525,6 +552,7 @@ def cmd_add(args: argparse.Namespace) -> int:
 def cmd_list(args: argparse.Namespace) -> int:
     pool = load_pool()
     items = sort_items(active_items(pool))
+    items = _refresh_pool_prices(items, pool)
     count = counts(items)
     print(f"选股池 {len(items)}/{POOL_LIMIT}")
     # P0 Fix: 检查疑似停牌
@@ -588,6 +616,44 @@ STAR_MAP = {
     "冲高减仓": "⭐⭐",
     "暂不碰": "⭐",
 }
+
+
+def _price_freshness_warning(item: dict[str, Any]) -> str | None:
+    """检测价格是否过期（超过 1 小时），返回警告文本或 None。"""
+    fetched_at = item.get("price_fetched_at")
+    if not fetched_at:
+        return None
+    try:
+        fetched_dt = datetime.fromisoformat(str(fetched_at))
+        age_minutes = (datetime.now() - fetched_dt).total_seconds() / 60
+        if age_minutes > 60:
+            return f"⚠️ 价格过期（{age_minutes:.0f}分钟前）"
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def _trigger_distance_warning(item: dict[str, Any]) -> str | None:
+    """检测触发价与现价的偏离程度，返回警告文本或 None。"""
+    current = to_float(item.get("current"))
+    trigger = to_float(item.get("trigger"))
+    if not current or not trigger or current <= 0 or trigger <= 0:
+        return None
+    pct = (trigger - current) / current * 100
+    if abs(pct) > 15:
+        return f"⚠️ 触发价偏离 {pct:+.0f}%，可能已过期"
+    if abs(pct) > 5:
+        return f"触发价偏离 {pct:+.0f}%，建议运行 pool refresh"
+    return None
+
+
+def _is_trigger_stale(item: dict[str, Any]) -> bool:
+    """触发价偏离现价超过 5%，视为过期。"""
+    current = to_float(item.get("current"))
+    trigger = to_float(item.get("trigger"))
+    if not current or not trigger or current <= 0 or trigger <= 0:
+        return False
+    return abs((trigger - current) / current) > 0.05
 
 
 def _days_lapsed(item: dict[str, Any], today: date) -> int:
@@ -975,7 +1041,7 @@ def _signal_type_label(sig_type: str) -> str:
 def render_rank(items: list[dict[str, Any]]) -> str:
     from trader_shared.candidate_core import atr_volatility_level
 
-    sorted_items = sort_items(items)
+    sorted_items = sort_items_unified(items)
     market_level = get_market_level()
 
     lines = [f"选股池  ｜  {'大盘' + market_level + '，防守优先' if market_level else '持仓排序'}"]
@@ -983,13 +1049,44 @@ def render_rank(items: list[dict[str, Any]]) -> str:
 
     for i, item in enumerate(sorted_items):
         rs = rank_status(item)
-        stars = STAR_MAP.get(rs, "⭐")
+        # 动态星级：按 fusion_confidence 池内分位划分
+        confidences = [it.get("fusion_confidence", 0) or 0 for it in sorted_items]
+        item_conf = item.get("fusion_confidence", 0) or 0
+        if confidences and max(confidences) > 0:
+            rank_pct = sum(1 for c in confidences if c > item_conf) / len(confidences)
+            if rank_pct < 0.2:
+                stars = "⭐⭐⭐"
+            elif rank_pct < 0.5:
+                stars = "⭐⭐"
+            else:
+                stars = "⭐"
+        else:
+            stars = STAR_MAP.get(rs, "⭐")  # fallback
         medal = ["🥇", "🥈", "🥉"][i] if i < 3 else f" {i+1}."
 
         name = item.get("name", "?")
         current = to_float(item.get("current")) or 0
         atr_ratio = to_float(item.get("atr_ratio")) or 0
-        atr_level, atr_cap = atr_volatility_level(atr_ratio) if atr_ratio > 0 else ("数据不足", 10)
+        atr_level, base_cap = atr_volatility_level(atr_ratio) if atr_ratio > 0 else ("数据不足", 10)
+        # 按阶段 × ATR × 置信度差异化仓位
+        major_stage = str(item.get("major_stage") or "蓄势")
+        stage_mult = STAGE_STRENGTH.get(major_stage, 0.5)
+        conf = float(item.get("fusion_confidence") or 0.5)
+        final_cap = round(base_cap * stage_mult * conf)
+        final_cap = max(2, min(final_cap, 25))  # 夹在 2%-25%
+        # 仓位理由
+        cap_reason_parts = []
+        if major_stage in ("主升", "拉升"):
+            cap_reason_parts.append("主升期")
+        elif major_stage in ("蓄势偏强",):
+            cap_reason_parts.append("蓄势偏强")
+        elif major_stage in ("蓄势偏弱", "派发"):
+            cap_reason_parts.append(major_stage)
+        if atr_ratio >= 0.03:
+            cap_reason_parts.append("波幅偏高")
+        if conf < 0.4:
+            cap_reason_parts.append(f"置信{conf:.1f}")
+        cap_reason = " × ".join(cap_reason_parts) if cap_reason_parts else ""
         atr_pct = (atr_ratio or 0) * 100
 
         if atr_ratio >= 0.03:
@@ -1014,7 +1111,17 @@ def render_rank(items: list[dict[str, Any]]) -> str:
             buy_text = "买  暂无"
 
         lines.append(f"{medal}  {stars}  {name}  {rs}  {current:.2f}  {atr_text}")
-        lines.append(f"    {buy_text}  ｜  仓位 {atr_cap}%  ｜  止损 {stop_val:.2f}")
+        cap_display = f"仓位 {final_cap}%"
+        if cap_reason:
+            cap_display += f"（{cap_reason}）"
+        lines.append(f"    {buy_text}  ｜  {cap_display}  ｜  止损 {stop_val:.2f}")
+        # 价格过期 & 触发价偏离警告
+        fw = _price_freshness_warning(item)
+        if fw:
+            lines.append(f"    {fw}")
+        tw = _trigger_distance_warning(item)
+        if tw:
+            lines.append(f"    {tw}")
         lines.append("")
 
     first = sorted_items[0] if sorted_items else None
@@ -1026,8 +1133,7 @@ def render_rank(items: list[dict[str, Any]]) -> str:
     if first:
         fname = first.get("name", "?")
         fs = rank_status(first)
-        fcap = atr_volatility_level(to_float(first.get("atr_ratio")) or 0)[1]
-        lines.append(f"    首选{fname}。{fs}信号最强，仓位压到{fcap}%所以风险可控。")
+        lines.append(f"    首选{fname}。{fs}信号最强，优先关注。")
 
     if second:
         sname = second.get("name", "?")
@@ -1060,9 +1166,13 @@ def render_rank(items: list[dict[str, Any]]) -> str:
         total_none = summary.get("暂无信号", 0)
         total_with_signal = total_verified + total_wrong
         if total_with_signal > 0:
-            accuracy = f"{total_verified / total_with_signal * 100:.0f}%"
+            accuracy_val = total_verified / total_with_signal
+            accuracy = f"{accuracy_val * 100:.0f}%"
             lines.append("")
             lines.append(f"  合计：本月已验证 {total_with_signal} 次，对了 {total_verified} 次，准确率 {accuracy}。未验证 {total_unverified} 次，暂无信号 {total_none} 条。")
+            # 低胜率警告
+            if total_with_signal >= 5 and accuracy_val < 0.3:
+                lines.append("  ⚠️ 策略近期胜率偏低（<30%），建议暂停实盘，仅保持观察")
         else:
             lines.append("")
             lines.append(f"  合计：本月无已验证信号记录（未验证 {total_unverified} 次，暂无信号 {total_none} 条）。")
@@ -1134,7 +1244,9 @@ def quick_add(target: str, offline: bool = False) -> dict[str, Any]:
 
 def cmd_rank(args: argparse.Namespace) -> int:
     pool = load_pool()
-    print(render_rank(active_items(pool)))
+    items = active_items(pool)
+    items = _refresh_pool_prices(items, pool)
+    print(render_rank(items))
     return 0
 
 
@@ -1263,10 +1375,13 @@ def position_for(item: dict[str, Any]) -> str:
 
 
 def render_plan(items: list[dict[str, Any]]) -> str:
-    sorted_items = sort_items_by_stage(items)
+    sorted_items = sort_items_unified(items)
+    # 分离触发价过期的票（距现价 > 5%）
+    active_plan_items = [it for it in sorted_items if not _is_trigger_stale(it)]
+    stale_plan_items = [it for it in sorted_items if _is_trigger_stale(it)]
     count = counts(sorted_items)
-    execution_items = [item for item in sorted_items if item.get("status") == "执行"][:EXECUTION_LIMIT]
-    top_items = execution_items + [item for item in sorted_items if item.get("status") != "执行"]
+    execution_items = [item for item in active_plan_items if item.get("status") == "执行"][:EXECUTION_LIMIT]
+    top_items = execution_items + [item for item in active_plan_items if item.get("status") != "执行"]
 
     lines = [
         f"选股池盘后分析 — {today_text()}",
@@ -1282,6 +1397,18 @@ def render_plan(items: list[dict[str, Any]]) -> str:
             lines.append(f"{rank_emoji} {item['name']}（{stage_str} {item['status']}）")
             lines.append(f"  {action_for(item)}")
             lines.append(f"  触发{price(item.get('trigger'))}元  防守{price(item.get('defense'))}元  仓位{position_for(item)}")
+            fw = _price_freshness_warning(item)
+            if fw:
+                lines.append(f"  {fw}")
+
+        # 远期观察（触发价过期 > 5%）
+        if stale_plan_items:
+            lines.append("")
+            lines.append("远期观察（触发价偏离现价 > 5%，等刷新后再看）")
+            for item in stale_plan_items:
+                tw = _trigger_distance_warning(item)
+                note = f" — {tw}" if tw else ""
+                lines.append(f"  {item.get('name')}  触发{price(item.get('trigger'))}元  现价{price(item.get('current'))}元{note}")
 
         lines.append("")
         lines.append("评分总览")
@@ -1329,6 +1456,44 @@ def one_sentence(items: list[dict[str, Any]]) -> str:
     return f"明天只重点盯 {' 和 '.join(top)}；不触发不买，其他只盘后更新。"
 
 
+def _refresh_pool_prices(items: list[dict[str, Any]], pool: dict[str, Any]) -> list[dict[str, Any]]:
+    """批量拉取实时行情，刷新 pool item 的 current / change_pct，写回 pool.json。
+
+    在 list / rank / plan 等只读视图中调用，确保显示的现价不超过 1 分钟。
+    """
+    try:
+        from trader_shared.light_data import fetch_quote, HttpClient, resolve_security
+    except ImportError:
+        return items
+
+    client = HttpClient()
+    now_iso = datetime.now().isoformat()
+    refreshed = 0
+
+    for item in items:
+        name = item.get("name", "")
+        if not name:
+            continue
+        try:
+            sec = resolve_security(name)
+            q = fetch_quote(sec, client)
+        except Exception:
+            continue
+        if not q:
+            continue
+        current_val = to_float(q.get("current_price"))
+        if current_val is None or current_val <= 0:
+            continue
+        item["current"] = round(current_val, 2)
+        item["change_pct"] = round(to_float(q.get("current_change_pct") or 0), 2)
+        item["price_fetched_at"] = now_iso
+        refreshed += 1
+
+    if refreshed > 0:
+        save_pool(pool)
+    return items
+
+
 def _check_stale_items(items: list[dict[str, Any]]) -> list[str]:
     """P0 Fix: 检查交易时间内数据过期的票，标记为疑似停牌。
 
@@ -1354,6 +1519,7 @@ def _check_stale_items(items: list[dict[str, Any]]) -> list[str]:
 def cmd_plan(args: argparse.Namespace) -> int:
     pool = load_pool()
     items = active_items(pool)
+    items = _refresh_pool_prices(items, pool)
     # 衰退淘汰已在 refresh 中处理，plan 只读不写
     # P0 Fix: 检查疑似停牌
     stale_warnings = _check_stale_items(items)
@@ -1735,6 +1901,53 @@ def render_compare(reports: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def cmd_reconcile(args: argparse.Namespace) -> int:
+    """视图调和：对比 pool 快照与实时行情，暴露不一致。"""
+    pool = load_pool()
+    items = active_items(pool)
+    items = _refresh_pool_prices(items, pool)
+    sorted_items = sort_items_unified(items)
+
+    lines = ["📋 视图调和报告", ""]
+    issues_found = 0
+
+    for item in sorted_items:
+        name = item.get("name", "?")
+        item_lines = [f"{name}"]
+
+        # 1. 触发价偏离检查
+        current = to_float(item.get("current")) or 0
+        trigger = to_float(item.get("trigger")) or 0
+        if current > 0 and trigger > 0:
+            trigger_pct = (trigger - current) / current * 100
+            if abs(trigger_pct) > 5:
+                item_lines.append(f"  触发价 {trigger:.2f} vs 现价 {current:.2f}（偏离 {trigger_pct:+.0f}%）← 建议运行 pool refresh")
+                issues_found += 1
+
+        # 2. 价格过期检查
+        fw = _price_freshness_warning(item)
+        if fw:
+            item_lines.append(f"  {fw}")
+            issues_found += 1
+
+        # 3. 阶段快照过期检查
+        major_stage = str(item.get("major_stage") or "-")
+        momentum = str(item.get("momentum") or "-")
+        item_lines.append(f"  阶段快照：{major_stage}+{momentum}")
+
+        if len(item_lines) > 1:
+            lines.extend(item_lines)
+            lines.append("")
+
+    if issues_found == 0:
+        lines.append("✅ 所有视图一致，无异常。")
+    else:
+        lines.append(f"共 {issues_found} 项不一致，建议运行 pool refresh 同步数据。")
+
+    print("\n".join(lines))
+    return 0
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Manage Trader Pool candidate workflow.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1749,6 +1962,7 @@ def parse_args() -> argparse.Namespace:
     refresh = sub.add_parser("refresh")
     refresh.add_argument("--target", help="只刷新指定票（名称或代码），默认全池")
     sub.add_parser("rank")
+    sub.add_parser("reconcile")
     sub.add_parser("add-last")
     review = sub.add_parser("review")
     review.add_argument("--offline", action="store_true")
@@ -1789,6 +2003,7 @@ def main() -> int:
         "plan": cmd_plan,
         "rank": cmd_rank,
         "refresh": cmd_refresh,
+        "reconcile": cmd_reconcile,
         "add-last": cmd_add_last,
         "review": cmd_review,
         "watch": cmd_watch,

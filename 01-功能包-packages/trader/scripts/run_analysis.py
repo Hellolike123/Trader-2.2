@@ -325,16 +325,21 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         if ff_data:
             daily_flow = ff_data.get("daily_flow", [])
             features = ff_data.get("features", {})
-            if daily_flow:
-                mf = detect_main_force_stage(features, bars)
-                # 今日超大单/大单明细
-                today_record = daily_flow[-1] if daily_flow else {}
-                mf["today_super_large_wan"] = float(today_record.get("super_large_wan", 0) or 0)
-                mf["today_large_wan"] = float(today_record.get("large_wan", 0) or 0)
-                # 补充 net_flow_pct（detect_main_force_stage 的 _result 不返回此字段）
-                mf["net_flow_pct"] = features.get("net_flow_pct", 0)
-                return mf
-        return {}
+        else:
+            daily_flow = []
+            features = {}
+        # 始终调用 detect_main_force_stage：有 real flow 时用 real flow，无 real flow 时
+        # detect_main_force_stage 内置 calc_fund_flow_features_from_bars K 线 fallback
+        mf = detect_main_force_stage(features, bars)
+        if daily_flow:
+            today_record = daily_flow[-1] if daily_flow else {}
+            mf["today_super_large_wan"] = float(today_record.get("super_large_wan", 0) or 0)
+            mf["today_large_wan"] = float(today_record.get("large_wan", 0) or 0)
+        else:
+            mf["today_super_large_wan"] = 0.0
+            mf["today_large_wan"] = 0.0
+        mf["net_flow_pct"] = features.get("net_flow_pct", 0)
+        return mf
 
     def _fetch_market_env():
         return get_env_for_skill("trader")
@@ -515,8 +520,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     chip_migration = {"migration_pct": 0, "warning_level": "none", "warning_text": "", "has_history": False}
     if _CHIP_MIGRATION_AVAILABLE and chip_peaks:
         try:
-            save_chip_snapshot(target, chip, trade_date=quote.get("trade_date"))
             chip_migration = check_chip_migration(target, chip, bars=bars)
+            save_chip_snapshot(target, chip, trade_date=quote.get("trade_date"))
         except Exception:
             pass
 
@@ -524,7 +529,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     main_force_score_result: dict[str, Any] = {"total_score": 0, "flow_score": 0, "chip_score": 0,
                                                  "order_score": 0, "detail": {}, "label": "🔴无数据"}
     mf_features = mf_result if mf_result else {}
-    if mf_features or big_order_result.get("events"):
+    chip_has_history = chip_migration.get("has_history", False) if chip_migration else False
+    if mf_features or big_order_result.get("events") or chip_has_history:
         try:
             from trader_shared.main_force_scoring import score_main_force
             main_force_score_result = score_main_force(
@@ -1210,11 +1216,62 @@ def render_markdown(r: dict) -> str:
     ]
     if atr14 > 0:
         lines.append(f"ATR {atr14:.2f}（{atr_ratio*100:.1f}%）{atr_level}")
+
+    # 量能与相对强度
+    volume_ratio_val = float(r.get("volume_ratio") or 0)
+    turnover_val = float(r.get("turnover_rate") or 0)
+    bars_for_range = r.get("daily_bars") or []
+    dist_20h_str = "--"
+    dist_20l_str = "--"
+    if len(bars_for_range) >= 20 and current_price > 0:
+        highs = [float(b.get("high") or 0) for b in bars_for_range[-20:] if float(b.get("high") or 0) > 0]
+        lows = [float(b.get("low") or 0) for b in bars_for_range[-20:] if float(b.get("low") or 0) > 0]
+        if highs:
+            max20 = max(highs)
+            dist_20h_str = f"{(current_price - max20) / max20 * 100:+.1f}%"
+        if lows:
+            min20 = min(lows)
+            dist_20l_str = f"{(current_price - min20) / min20 * 100:+.1f}%"
+
+    vol_parts = []
+    if volume_ratio_val > 0:
+        vol_label = "放量" if volume_ratio_val >= 1.5 else ("缩量" if volume_ratio_val <= 0.7 else "平量")
+        vol_parts.append(f"量比 {volume_ratio_val:.2f} {vol_label}")
+    if turnover_val > 0:
+        vol_parts.append(f"换手 {turnover_val:.2f}%")
+    if dist_20h_str != "--":
+        vol_parts.append(f"距20日高 {dist_20h_str}")
+    if dist_20l_str != "--":
+        vol_parts.append(f"距20日低 {dist_20l_str}")
+    if vol_parts:
+        lines.append(f"📊 量能：{' ｜ '.join(vol_parts)}")
+
+    # 相对大盘强度
+    market_env_data = r.get("market_env") or {}
+    market_idx_chg = float(market_env_data.get("index_change_pct") or 0)
+    if market_idx_chg != 0 or change_pct != 0:
+        rel_str = change_pct - market_idx_chg
+        rel_label = "强于大盘" if rel_str > 0.5 else ("弱于大盘" if rel_str < -0.5 else "与大盘同步")
+        lines.append(f"🏭 相对大盘：个股 {change_pct:+.2f}% ｜ 大盘 {market_idx_chg:+.2f}% ｜ {rel_label}")
         
     lines.extend([
         "",
         f"📊 {major_stage}期 + {momentum} → {stage_action_text}",
     ])
+
+    # 数据完整性检查：关键指标缺失时在报告顶部警告
+    risk_reward_val = r.get("risk_reward")
+    momentum_score_val = r.get("momentum_score")
+    volume_ratio_val = r.get("volume_ratio")
+    data_incomplete = (
+        str(risk_reward_val) in ("数据不足", "")
+        or str(momentum_score_val) == "数据不足"
+        or volume_ratio_val is None
+        or (isinstance(volume_ratio_val, (int, float)) and volume_ratio_val <= 0)
+    )
+    if data_incomplete:
+        lines.append("")
+        lines.append("⚠️ 数据不完整（盈亏比/动能/量比缺失），建议仅供参考")
 
     # 融合层 verbatim（从 JSON fusion.fusion_verbatim 直出）
     fusion_verbatim = (r.get("fusion") or {}).get("fusion_verbatim")
@@ -1229,8 +1286,11 @@ def render_markdown(r: dict) -> str:
     
     if stop > 0:
         lines.append(f"  {stop:.2f} 止损")
-    if low_price > 0:
+    risk_reward_available = str(r.get("risk_reward") or "") not in ("数据不足", "", "0")
+    if low_price > 0 and risk_reward_available:
         lines.append(f"  {low_price:.2f} ← 试探买 {position_cap}%（缩量企稳）")
+    elif low_price > 0 and not risk_reward_available:
+        lines.append(f"  {low_price:.2f} ← 参考低吸区（盈亏比数据不足，等待）")
     fib = r.get("fib_retrace") or {}
     golden_bid = fib.get("golden_bid")
     if golden_bid and golden_bid > 0 and golden_bid != low_price:
@@ -1260,24 +1320,31 @@ def render_markdown(r: dict) -> str:
 
     exit_plan = r.get("exit_plan") or {}
     exit_plan_items = exit_plan.get("exit_plan") or []
-    priced_items = [item for item in exit_plan_items if item.get("price") is not None and item["price"] > 0]
-    priced_items.sort(key=lambda x: x["price"])
-    for item in priced_items:
-        p = item["price"]
-        ratio = item.get("ratio", 0)
-        reason = item.get("reason", "")
-        lines.append(f"  {p:.2f} → 卖 {ratio:.0%}（{reason}）")
-    
+
+    # 收集所有价格行，统一排序后输出（确保严格递增）
+    all_price_lines: list[tuple[float, str]] = []
+
+    for item in exit_plan_items:
+        p = item.get("price")
+        if p is not None and p > 0:
+            ratio = item.get("ratio", 0)
+            reason = item.get("reason", "")
+            all_price_lines.append((p, f"  {p:.2f} → 卖 {ratio:.0%}（{reason}）"))
+
     if resistance_val > 0:
-        lines.append(f"  {resistance_val:.2f} 压力")
+        all_price_lines.append((resistance_val, f"  {resistance_val:.2f} 压力"))
 
     # Fibonacci 扩展目标位
     fib_ext_1382 = r.get("fib_ext_1382")
     fib_ext_1618 = r.get("fib_ext_1618")
     if fib_ext_1382 and fib_ext_1382 > resistance_val:
-        lines.append(f"  {fib_ext_1382:.2f} ← 黄金分割138.2%目标")
+        all_price_lines.append((fib_ext_1382, f"  {fib_ext_1382:.2f} ← 黄金分割138.2%目标"))
     if fib_ext_1618 and fib_ext_1618 > resistance_val:
-        lines.append(f"  {fib_ext_1618:.2f} ← 黄金分割161.8%目标")
+        all_price_lines.append((fib_ext_1618, f"  {fib_ext_1618:.2f} ← 黄金分割161.8%目标"))
+
+    all_price_lines.sort(key=lambda x: x[0])
+    for _, line in all_price_lines:
+        lines.append(line)
 
     stage_exit = exit_plan.get("stage_exit")
     if stage_exit:
@@ -1486,12 +1553,32 @@ def render_markdown(r: dict) -> str:
 
     chan_score = _dir_score(signals.get("chan"), 50)
     wyk_score = _dir_score(signals.get("wyckoff"), 30)
-    mom_score = _dir_score(signals.get("momentum"), 50)
+    # 动能分：检查数据是否充足
+    mom_signal = signals.get("momentum")
+    mom_strength = mom_signal.get("strength", "") if isinstance(mom_signal, dict) else ""
+    mom_data_insufficient = (mom_strength == "insufficient")
+    if mom_data_insufficient:
+        mom_score = 50
+    else:
+        mom_score = _dir_score(mom_signal, 50)
     # chip_score: 使用筹码稳定性（有筹码数据时用实际值，否则默认 50）
     chip_migration = r.get("chip_migration") or {}
     chip_score = 50  # TODO: 接入实际筹码稳定性评分
 
-    lines.extend(["", "📊 五层打分", f"  结构{chan_score:+.0f}｜量价{wyk_score:+.0f}｜筹码{chip_score:.0f}｜动能{mom_score:+.0f}"])
+    # 当日方向修正：跌 >3% 时量价/动能分降权
+    change_pct_val = float(r.get("change_pct") or 0)
+    if change_pct_val < -3:
+        wyk_score = 0  # 量价分强制归零
+        mom_score = max(0, mom_score // 2)
+    elif change_pct_val < -1:
+        wyk_score = max(0, wyk_score - 10)
+        mom_score = max(0, mom_score - 5)
+    elif change_pct_val > 3:
+        mom_score = min(100, mom_score + 5)
+
+    mom_score_str = "⚪ N/A" if mom_data_insufficient else f"{mom_score:+.0f}"
+
+    lines.extend(["", "📊 五层打分", f"  结构{chan_score:+.0f}｜量价{wyk_score:+.0f}｜筹码{chip_score:.0f}｜动能{mom_score_str}"])
     chan_reason = signals.get("chan", {}).get("reason", "回调段。一类买、二类买") if isinstance(signals.get("chan"), dict) else "无信号"
     lines.append(f"  缠论：{chan_reason}")
     # 显示缠论买卖点

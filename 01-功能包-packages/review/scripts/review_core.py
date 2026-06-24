@@ -476,8 +476,9 @@ def _get_chip_migration(name: str, chip_dist: dict[str, Any], trade_date: str | 
     """获取筹码搬家监控结果。"""
     try:
         from trader_shared.chip_migration_monitor import save_chip_snapshot, check_chip_migration
+        chip_migration = check_chip_migration(name, chip_dist, bars=bars)
         save_chip_snapshot(name, chip_dist, trade_date=trade_date)
-        return check_chip_migration(name, chip_dist, bars=bars)
+        return chip_migration
     except Exception:
         return {"migration_pct": 0, "warning_level": "none", "warning_text": "", "has_history": False}
 

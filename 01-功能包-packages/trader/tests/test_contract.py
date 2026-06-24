@@ -598,6 +598,8 @@ def test_render_markdown_contains_win_rate() -> None:
         "stage": "修复",
         "scene": "防守观察",
         "ma": {"ma5": "57.96", "ma10": "--", "ma20": "--", "ma30": "--"},
+        "risk_reward": "2.5",
+        "volume_ratio": 1.2,
     }
 
     with patch("os.path.exists", return_value=True), \

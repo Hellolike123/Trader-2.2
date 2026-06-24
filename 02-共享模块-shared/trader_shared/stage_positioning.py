@@ -1023,6 +1023,10 @@ def compute_exit_plan(
         if max_high > entry_price:
             resistance_exit = round(max_high, 2)
 
+    # 1R 目标价不超过阻力位（阻力位卖出优先于 1R 保本）
+    if resistance_exit is not None and resistance_exit > entry_price and target_1r > resistance_exit:
+        target_1r = round(resistance_exit * 0.99, 2)
+
     # 阶段退出条件
     stage_exit = "派发"  # 主升转派发时清仓
 

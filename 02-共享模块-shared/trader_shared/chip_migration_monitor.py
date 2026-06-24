@@ -178,6 +178,52 @@ def backfill_history(
     return backfill_count > 0
 
 
+def _calc_poc_migration(prev: dict[str, Any], curr: dict[str, Any]) -> dict[str, Any] | None:
+    """对比前后 POC（Point of Control，成交量最大价位）变化。"""
+    prev_poc = prev.get("poc_price") or prev.get("max_volume_price")
+    curr_poc = curr.get("poc_price") or curr.get("max_volume_price")
+    if prev_poc is None or curr_poc is None:
+        # 尝试从 peaks 推算：占比最大的峰的价格
+        prev_peaks = prev.get("peaks", [])
+        curr_peaks = curr.get("peaks", [])
+        if prev_peaks and curr_peaks:
+            prev_poc = max(prev_peaks, key=lambda p: p.get("share_of_total", 0)).get("price", 0)
+            curr_poc = max(curr_peaks, key=lambda p: p.get("share_of_total", 0)).get("price", 0)
+        else:
+            return None
+    prev_poc = float(prev_poc)
+    curr_poc = float(curr_poc)
+    if prev_poc <= 0 or curr_poc <= 0:
+        return None
+    shift_pct = round((curr_poc - prev_poc) / prev_poc * 100, 2)
+    return {"prev_poc": prev_poc, "curr_poc": curr_poc, "shift_pct": shift_pct}
+
+
+def _calc_value_area_migration(prev: dict[str, Any], curr: dict[str, Any]) -> dict[str, Any] | None:
+    """对比前后 Value Area（70% 成交量区间）宽窄变化。"""
+    prev_va_low = prev.get("value_area_low")
+    prev_va_high = prev.get("value_area_high")
+    curr_va_low = curr.get("value_area_low")
+    curr_va_high = curr.get("value_area_high")
+    if not all([prev_va_low, prev_va_high, curr_va_low, curr_va_high]):
+        return None
+    prev_va_low = float(prev_va_low)
+    prev_va_high = float(prev_va_high)
+    curr_va_low = float(curr_va_low)
+    curr_va_high = float(curr_va_high)
+    prev_width = prev_va_high - prev_va_low
+    curr_width = curr_va_high - curr_va_low
+    if prev_width <= 0 or curr_width <= 0:
+        return None
+    width_change_pct = round((curr_width - prev_width) / prev_width * 100, 2)
+    return {
+        "prev_va_low": prev_va_low, "prev_va_high": prev_va_high,
+        "curr_va_low": curr_va_low, "curr_va_high": curr_va_high,
+        "prev_width": round(prev_width, 2), "curr_width": round(curr_width, 2),
+        "width_change_pct": width_change_pct,
+    }
+
+
 def check_chip_migration(
     target: str,
     current_chip_result: dict[str, Any],
@@ -332,4 +378,7 @@ def check_chip_migration(
             "curr_share": current_resistance_share,
             "diff": resistance_diff,
         } if prev_resistance_share > 0 else None,
+        # POC 控制点 & Value Area 趋势
+        "poc_migration": _calc_poc_migration(prev_snapshot, current_chip_result),
+        "value_area_migration": _calc_value_area_migration(prev_snapshot, current_chip_result),
     }

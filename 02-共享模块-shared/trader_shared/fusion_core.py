@@ -182,6 +182,7 @@ def _momentum_to_signal(momentum_result: dict) -> dict:
         "confidence": confidence,
         "reason": reason,
         "raw_key": "momentum",
+        "strength": mom.get("strength", ""),
     }
 
 
