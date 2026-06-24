@@ -185,7 +185,16 @@ def render_markdown(r: dict) -> str:
     lines.append(f"  阶段：{major_stage}期（{stage_desc}）")
     
     trend_desc = f"价格在 {confirm:.2f} 下方" if current_price < confirm else f"价格站上 {confirm:.2f}"
-    trend_action = "不追" if current_price < confirm else "可加仓"
+    if current_price >= confirm:
+        trend_action = "可加仓"
+    elif major_stage == "主升":
+        trend_action = "主升回踩，关注支撑"
+    elif major_stage == "蓄势":
+        trend_action = "蓄势区，等止跌"
+    elif major_stage == "派发":
+        trend_action = "派发期，注意风险"
+    else:
+        trend_action = "等信号确认"
     lines.append(f"  趋势：短期偏弱（{trend_desc}），{trend_action}")
 
     has_position = r.get("has_position", False)

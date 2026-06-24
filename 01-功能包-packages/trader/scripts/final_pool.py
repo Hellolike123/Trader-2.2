@@ -812,6 +812,8 @@ def action_summary_for_scene(scene: str) -> str:
         return "不追，等回落"
     if scene in {"暂不碰"}:
         return "不参与"
+    if not scene:
+        return "信息不足，暂不操作"
     return "等待，不主动追"
 
 

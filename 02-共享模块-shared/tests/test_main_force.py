@@ -188,7 +188,7 @@ class TestMainForceOutput:
             "daily_flow_5d": [-200, -300, -100, -200, -200],
         }
         text = format_main_force_section(result)
-        assert "谨慎追高" in text
+        assert "谨防接盘" in text
 
 
 # ── fusion_core 权重修正 ──────────────────────────────────────────
@@ -312,7 +312,7 @@ class TestFormatMainForceEnhanced:
             "daily_flow_5d": [-200, -300, -100, -200, -200],
         }
         text = format_main_force_enhanced(result, today_super_large=-100, today_large=-100)
-        assert "谨慎追高" in text
+        assert "谨防接盘" in text
         assert "连续2日净流出" in text
         assert "超大单 -100万" in text
 

@@ -43,7 +43,12 @@ def _compute_display(review: dict) -> dict:
     elif cost and close >= cost:
         one_liner = "已浮盈，关注关键压力位止盈信号。"
     else:
-        one_liner = "现在不适合追高，先等关键位确认。"
+        if state == "转强确认":
+            one_liner = "突破已确认，可逢回踩关注"
+        elif state == "弱修复观察":
+            one_liner = "弱修复中，暂不适合追高"
+        else:
+            one_liner = "观望中，等信号明确后再考虑"
 
     return {"model_summary_text": summary_text, "conclusion_text": conclusion, "one_liner_text": one_liner}
 

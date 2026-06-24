@@ -98,9 +98,11 @@ def format_main_force_section(result: dict[str, Any]) -> str:
     if hint:
         lines.append(f"提示：{hint}")
 
-    # 派发/砸盘警告
-    if stage in ("distribution", "markdown"):
-        lines.append("⚠️ 主力资金持续流出，谨慎追高")
+    # 主力派发/砸盘警告
+    if stage == "distribution":
+        lines.append("⚠️ 高位派发，资金持续流出，谨防接盘")
+    elif stage == "markdown":
+        lines.append("⚠️ 砸盘进行中，资金持续流出，不宜抄底")
 
     return "\n".join(lines)
 
@@ -222,8 +224,10 @@ def format_main_force_enhanced(
     if hint:
         lines.append(f"提示：{hint}")
 
-    # 派发/砸盘警告
-    if stage in ("distribution", "markdown"):
-        lines.append("⚠️ 主力资金持续流出，谨慎追高")
+    # 主力派发/砸盘警告
+    if stage == "distribution":
+        lines.append("⚠️ 高位派发，资金持续流出，谨防接盘")
+    elif stage == "markdown":
+        lines.append("⚠️ 砸盘进行中，资金持续流出，不宜抄底")
 
     return "\n".join(lines)
