@@ -63,7 +63,7 @@ ACTION_MAP_NORMAL: list[tuple[float, str]] = [
 ACTION_MAP_DISAGREE: list[tuple[float, str]] = [
     (0.4, "半仓试 (多方主导但有分歧)"),
     (0.1, "观望 (信号冲突)"),
-    (-0.1, "等转强 (多方主导但有分歧)"),
+    (-0.1, "回调观望"),
 ]
 
 # 冲突阈值: max(signals) - min(signals) > DISAGREEMENT_THRESHOLD 触发降级

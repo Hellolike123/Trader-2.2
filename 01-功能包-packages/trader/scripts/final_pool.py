@@ -1086,6 +1086,44 @@ def _signal_type_label(sig_type: str) -> str:
     return labels.get(sig_type, sig_type)
 
 
+def edge_reason(item: dict[str, Any], all_items: list[dict[str, Any]]) -> str:
+    """返回排名的核心优势/劣势一句话。从 pool item 字段推导。"""
+    confidences = [it.get("fusion_confidence", 0) or 0 for it in all_items]
+    item_conf = float(item.get("fusion_confidence") or 0)
+    top_conf = max(confidences) if confidences else 1
+
+    # 优势：从得分最高的维度提取
+    scores = {}
+    for key, max_s in [("chanlun_score", 45), ("wyckoff_score", 30), ("chip_score", 25), ("momentum_score", 20)]:
+        v = float(item.get(key) or 0)
+        scores[key] = v
+    best_dim = max(scores, key=scores.get)
+    dim_labels = {"chanlun_score": "结构", "wyckoff_score": "量价", "chip_score": "筹码", "momentum_score": "动能"}
+    ratio = scores[best_dim] / max(max(scores.values()), 0.01)
+    if ratio >= 0.85:
+        advantage = dim_labels.get(best_dim, best_dim) + "突出"
+    else:
+        advantage = ""
+
+    # 置信度分位
+    if top_conf > 0:
+        conf_pct = item_conf / top_conf
+    else:
+        conf_pct = 1.0
+
+    if conf_pct >= 0.9 and advantage:
+        return f"置信最高｜{advantage}"
+    elif conf_pct >= 0.7:
+        return f"置信较高｜{advantage}" if advantage else "置信较高"
+    elif conf_pct < 0.4:
+        return "置信偏低"
+    elif conf_pct < 0.6:
+        return "置信中等"
+    elif advantage:
+        return advantage
+    return ""
+
+
 def render_rank(items: list[dict[str, Any]]) -> str:
     from trader_shared.candidate_core import atr_volatility_level
 
@@ -1098,29 +1136,9 @@ def render_rank(items: list[dict[str, Any]]) -> str:
 
     for i, item in enumerate(sorted_items):
         rs = rank_status(item)
-        # 动态星级：按 fusion_confidence 池内分位划分
-        confidences = [it.get("fusion_confidence", 0) or 0 for it in sorted_items]
-        item_conf = item.get("fusion_confidence", 0) or 0
-        if confidences and max(confidences) > 0:
-            rank_pct = sum(1 for c in confidences if c > item_conf) / len(confidences)
-            if rank_pct < 0.2:
-                stars = "⭐⭐⭐"
-            elif rank_pct < 0.5:
-                stars = "⭐⭐"
-            else:
-                stars = "⭐"
-        else:
-            # fallback：按池内排名位置分配星级
-            pool_pct = i / max(len(sorted_items), 1)
-            if pool_pct < 0.2:
-                stars = "⭐⭐⭐⭐"
-            elif pool_pct < 0.5:
-                stars = "⭐⭐⭐"
-            elif pool_pct < 0.8:
-                stars = "⭐⭐"
-            else:
-                stars = "⭐"
         medal = ["🥇", "🥈", "🥉"][i] if i < 3 else f" {i+1}."
+        reason = edge_reason(item, sorted_items)
+        reason_line = f"    {reason}" if reason else ""
 
         name = item.get("name", "?")
         current = to_float(item.get("current")) or 0
@@ -1178,7 +1196,9 @@ def render_rank(items: list[dict[str, Any]]) -> str:
         if buy_low > 0 and current_price_val > 0 and buy_low > current_price_val * 1.05:
             buy_text = f"买入区已过期（{buy_low:.2f}）"
 
-        lines.append(f"{medal}  {stars}  {name}  {rs}  {current:.2f}  {atr_text}")
+        lines.append(f"{medal}  {name}  {rs}  {current:.2f}  {atr_text}")
+        if reason_line:
+            lines.append(f"    {reason_line}")
         cap_display = f"仓位 {final_cap}%"
         if cap_reason:
             cap_display += f"（{cap_reason}）"
@@ -1483,10 +1503,7 @@ def render_plan(items: list[dict[str, Any]]) -> str:
         lines.append("评分总览")
         for item in sorted_items:
             lines.append(
-                f"  {item.get('name')}  总分{item['total_score']}  "
-                f"缠{item['chanlun_score']}/45 威{item['wyckoff_score']}/30 筹{item['chip_score']}/25  "
-                f"动量{item.get('momentum_tag', '')}  "
-                f"{item['status']}"
+                f"  {item.get('name')}  {score_summary(item)}  {item['status']}"
             )
 
         lines.append("")
@@ -1510,6 +1527,16 @@ def render_plan(items: list[dict[str, Any]]) -> str:
         lines.append("当前选股池没有可执行对象，今天不主动处理。")
 
     return "\n".join(lines)
+
+
+def score_summary(item: dict[str, Any]) -> str:
+    """返回压缩后的评分摘要，如：45/45 35/30 40/25 85/20 总88"""
+    parts = []
+    for key, max_s in [("chanlun_score", 45), ("wyckoff_score", 30), ("chip_score", 25), ("momentum_score", 20)]:
+        v = float(item.get(key) or 0)
+        parts.append(f"{v:.0f}/{max_s}")
+    total = float(item.get("total_score") or 0)
+    return "  ".join(parts) + f"  总{total:.0f}"
 
 
 def trade_hint(item: dict[str, Any]) -> str:
@@ -2032,7 +2059,7 @@ def render_compare(reports: list[dict[str, Any]]) -> str:
         # 多周期共振
         resonance = r.get("resonance") or {}
         if isinstance(resonance, dict) and resonance.get("total_score", 0) > 0:
-            lines.append(f"   共振评分：{resonance.get('total_score',0)}分（{resonance.get('weekly_label','')}｜{resonance.get('daily_label','')}｜{resonance.get('timing_label','')}）")
+            _format_resonance_score(resonance.get("total_score", 0), lines)
 
         # 信号摘要
         signal_summary = _latest_signal_summary(r)
@@ -2272,6 +2299,18 @@ def main() -> int:
     except Exception as exc:
         print(f"trader pool failed: {exc}", file=sys.stderr)
         return 1
+
+
+def _format_resonance_score(score: int, lines: list[str]) -> None:
+    """格式化共振评分（微信可读版）。"""
+    parts = []
+    if score >= 8:
+        parts.append("多时间窗共振强")
+    elif score >= 6:
+        parts.append("部分时间窗共振")
+    elif score >= 4:
+        parts.append("低分，信号未共振")
+    lines.append(f"   共振评分：{score}分（{'；'.join(parts)}）")
 
 
 if __name__ == "__main__":

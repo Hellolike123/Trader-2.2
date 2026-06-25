@@ -71,7 +71,8 @@ def classify(r: dict) -> tuple[str, str]:
 # ── Signal extraction ──────────────────────────────────────────────
 
 def signal_tags(r: dict) -> tuple[str, str]:
-    """返回 (buy_tags, risk_tags) 空格分隔。不含 EXPMA（由调用方加评分）。"""
+    """返回 (buy_tag, risk_tag) 各只保留最重要的一项。
+    优先级：融合 > 结构 > 量价 > 筹码 > MACD > 均线。"""
     buy = []
     risk = []
 
@@ -81,34 +82,34 @@ def signal_tags(r: dict) -> tuple[str, str]:
     if isinstance(chan, dict):
         conf = chan.get("confidence", 0)
         if conf >= 0.6:
-            buy.append("结构强")
+            buy.append(("结构强", 5))
         elif conf < 0.3:
-            risk.append("结构弱")
+            risk.append(("结构弱", 5))
         else:
-            risk.append("结构及格")
+            risk.append(("结构及格", 3))
 
     # 量价
     wyk = r.get("wyckoff") or {}
     if isinstance(wyk, dict):
         desc = str(wyk.get("description", ""))
         if "放量" in desc and "缩量" not in desc:
-            buy.append("量价健康")
+            buy.append(("量价健康", 4))
         elif "缩量" in desc or "无量" in desc:
-            risk.append("量价弱")
+            risk.append(("量价弱", 4))
 
     # 筹码
     cc = r.get("chip_current_pct", 0)
     if cc and cc > 60:
-        buy.append(f"筹码锁定({int(cc)}%)")
+        buy.append((f"筹码锁定({int(cc)}%)", 3))
 
     # MACD
     macd = r.get("macd_status", {})
     if macd and isinstance(macd, dict):
         d = macd.get("diff", 0)
         if d is not None and d > 0:
-            buy.append("MACD零轴上")
+            buy.append(("MACD零轴上", 3))
         elif d is not None and d < 0:
-            risk.append("MACD零轴下")
+            risk.append(("MACD零轴下", 3))
 
     # 均线
     ma = r.get("ma", {})
@@ -116,22 +117,25 @@ def signal_tags(r: dict) -> tuple[str, str]:
         ma20 = float(ma.get("20", 0) or 0)
         cur = r.get("current", 0)
         if ma20 > 0 and cur > ma20:
-            buy.append("均线多头")
+            buy.append(("均线多头", 3))
         elif ma20 > 0 and cur < ma20:
-            risk.append("均线空头")
+            risk.append(("均线空头", 4))
         elif ma20 > 0:
-            risk.append("均线不明")
+            risk.append(("均线不明", 2))
 
-    # 融合动作
+    # 融合动作（最高优先级）
     action = fusion.get("action", "")
     if action in ("买入", "加仓"):
-        buy.append("融合看多")
+        buy.insert(0, ("融合看多", 10))
     elif action in ("空仓/止损",):
-        risk.append("融合空仓")
+        risk.insert(0, ("融合空仓", 10))
 
     # EXPMA 排除（由调用方统一输出评分）
 
-    return (" ".join(buy) if buy else "", " ".join(risk) if risk else "")
+    # 取优先级最高的一项
+    buy_tag = max(buy, key=lambda x: x[1])[0] if buy else ""
+    risk_tag = max(risk, key=lambda x: x[1])[0] if risk else ""
+    return (buy_tag, risk_tag)
 
 
 # ── Output formatting ──────────────────────────────────────────────

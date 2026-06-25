@@ -487,7 +487,20 @@ def merge_decisions(
     )
 
     # 5. 决策映射
-    action = score_to_action(weighted_score, disagreement_for_action, regime)
+    # 先做数据断层降级，再映射 action（避免截断前的高分触发"半仓试"、
+    # 但截断后 weighted_score=0.0，导致 action 与显示不一致）
+    _action_score = weighted_score
+    if data_status in ("partial", "degraded", "failed"):
+        _action_score = min(weighted_score, 0.0)
+    action = score_to_action(_action_score, disagreement_for_action, regime)
+
+    # 5b. 高位修正：如果价格已在 20 日高位（pos_pct >= 0.8），
+    # 且动作是"观望"类（隐含"等一下就有买点"），改为"高位观望"
+    # 避免误导用户"回调就有机会"——实际可能再涨 50%
+    if pos_pct is not None and pos_pct >= 0.8:
+        # 包含所有"观望/等待"类 action（截断后可能产出"持股观望"）
+        if action in {"等转强", "等转强观察", "回调观望", "观望 (信号冲突)", "持股观望", "观望"}:
+            action = "高位观望"
 
     # 6. 综合置信度
     confidence = compute_confidence(weighted_score, disagreement_for_action, weights)
@@ -552,16 +565,16 @@ def merge_decisions(
         _logger.debug("Unlock risk check failed: %s", exc)
 
     if has_risk_unlock:
-        positive_actions = {"半仓试 (多方主导)", "半仓试 (多方主导但有分歧)", "增持", "等转强 (多方主导但有分歧)"}
+        positive_actions = {"半仓试 (多方主导)", "半仓试 (多方主导但有分歧)", "增持", "等转强"}
         if action in positive_actions:
             action = "空仓 (大盘很差, 一票否决)"
             confidence = 0.3
             weighted_score = -0.5
 
     # 6.5 🛡️ 防幻觉拦截：数据断层降级
+    # 只降置信度，不 truncation 分数本身（action 已在 493 行用 _action_score 处理过）
     if data_status in ("partial", "degraded", "failed"):
         confidence = min(confidence, 0.3)
-        weighted_score = min(weighted_score, 0.0)
 
     result = {
         "action": action,

@@ -232,6 +232,15 @@ def _build_realtime_signal_section(plan: dict[str, Any]) -> list[str]:
 
 
 def render_markdown(plan: dict[str, Any]) -> str:
+    # 今天不做：振幅 < 1% 且量比 < 0.8，无操作价值
+    amp = numeric_or_none(plan.get("amplitude_pct"))
+    vol_ratio = numeric_or_none(plan.get("volume_ratio"))
+    if amp is not None and amp < 1.0 and (vol_ratio is None or vol_ratio < 0.8):
+        return (
+            f"{plan.get('name','')}（{plan.get('symbol','')}）"
+            f"｜现价 {plan.get('current_price','?')}｜振幅 {amp:.2f}% 量能不足，今天不做"
+        )
+
     buy = plan["buy"]
     sell = plan["sell"]
     buy_state = str(plan.get("buy_display_status") or side_display(buy))

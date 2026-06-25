@@ -164,7 +164,9 @@ def status_for(current: float, support: float, low_zone_upper: float, confirm: f
         "空仓/止损": "暂不碰",
         "空仓 (大盘很差, 一票否决)": "暂不碰",
         "观望 (信号冲突)": "防守观察",
-        "等转强 (多方主导但有分歧)": "等转强",
+        "等转强": "等转强",
+        "回调观望": "防守观察",
+        "高位观望": "暂不碰",
     }
     if FUSION_OVERRIDE_ENABLED and isinstance(fusion_result, dict):
         fc = safe_float(fusion_result, "confidence")
