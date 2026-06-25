@@ -727,7 +727,7 @@ def _compute_results_for_sig(sig: dict) -> dict[str, Any] | None:
     return res
 
 
-def check_recent(days: int = 5) -> dict[str, int]:
+def check_recent(days: int = 90) -> dict[str, int]:
     """检查并更新最近 N 天后信号结果"""
     signals = _load_signals()
     if not signals or HttpClient is None:
@@ -800,10 +800,195 @@ def check_recent(days: int = 5) -> dict[str, int]:
     return {"updated": updated, "skipped": skipped, "lifecycle_skipped": lifecycle_skipped}
 
 
+
+def _load_signal_outcomes() -> list[dict[str, Any]]:
+    """从 signals.jsonl 加载已结算信号的 outcome 数据。
+
+    优先级：
+      1. outcome 已知（win/loss/up/down/flat）→ 直接映射
+      2. outcome 为 unknown/null → 从价格数据计算 r_5d 推断
+
+    返回格式与 signal_results.jsonl 兼容。
+    """
+    if not STORE_PATH.exists() or HttpClient is None:
+        return []
+
+    outcome_map = {
+        "win": "up",
+        "loss": "down",
+        "expired": "flat",
+        "stopped": "down",
+        "up": "up",
+        "down": "down",
+        "flat": "flat",
+    }
+
+    # 过滤测试名称，避免污染面板
+    _TEST_NAMES = frozenset({"A", "B", "X票", "X", "测试票", "S1", "S2", "S3"})
+
+    results = []
+    for line in STORE_PATH.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if rec.get("status") != "completed":
+            continue
+
+        # 跳过测试数据
+        name = rec.get("name", rec.get("target", ""))
+        if name in _TEST_NAMES:
+            continue
+
+        symbol = rec.get("symbol", "")
+        trade_date = str(rec.get("trade_date", rec.get("analysis_time", "").split("T")[0]))
+        norm_date = _norm_date(trade_date)
+
+        sig_outcome = rec.get("outcome", "")
+        mapped = outcome_map.get(sig_outcome)
+        if mapped:
+            # 已知 outcome，无需计算
+            results.append({
+                "signal_id": rec.get("signal_id", ""),
+                "signal_date": norm_date,
+                "symbol": symbol,
+                "name": name,
+                "outcome": mapped,
+                "r_5d": None,
+                "source_skill": rec.get("source_skill", "trader"),
+                "signal_type": rec.get("signal_type", ""),
+                "fusion_override": rec.get("fusion_override", False),
+            })
+            continue
+
+        # outcome 为 unknown/null → 从价格计算 r_5d
+        r5 = _compute_simple_r5(rec)
+        if r5 is not None:
+            mapped = "up" if r5 > 1.0 else ("down" if r5 < -1.0 else "flat")
+            results.append({
+                "signal_id": rec.get("signal_id", ""),
+                "signal_date": norm_date,
+                "symbol": symbol,
+                "name": name,
+                "outcome": mapped,
+                "r_5d": round(r5, 2),
+                "source_skill": rec.get("source_skill", "trader"),
+                "signal_type": rec.get("signal_type", ""),
+                "fusion_override": rec.get("fusion_override", False),
+            })
+
+    return results
+
+
+def _compute_simple_r5(sig: dict) -> float | None:
+    """为 signals.jsonl 中的信号快速计算 r_5d（5 日后收益率 %）。
+
+    简化版 _compute_results_for_sig：仅拉取日线、取信号日价格、
+    找 5 日后最近交易日收盘价，计算收益率。
+    """
+    if HttpClient is None:
+        return None
+
+    symbol = str(sig.get("symbol") or "")
+    if not symbol:
+        return None
+
+    try:
+        sec = resolve_security(symbol)
+        bars = fetch_qfq_daily(sec, HttpClient(), days=90)
+    except (ValueError, KeyError, IOError, ConnectionError):
+        return None
+
+    date_map = {_norm_date(bar.get("date", "")): bar for bar in bars if bar.get("date")}
+    sig_date = _norm_date(str(sig.get("trade_date") or ""))
+    signal_bar = date_map.get(sig_date)
+
+    if signal_bar is None:
+        # 尝试 ±5 天内最近的交易日
+        try:
+            sig_dt = datetime.strptime(sig_date, "%Y-%m-%d")
+            for ad in range(1, 6):
+                for delta in (-ad, ad):
+                    test = (sig_dt + timedelta(days=delta)).strftime("%Y-%m-%d")
+                    if test != sig_date and test in date_map:
+                        signal_bar = date_map[test]
+                        break
+                if signal_bar is not None:
+                    break
+        except ValueError:
+            pass
+
+    if signal_bar is None:
+        return None
+
+    # 优先使用 signal_bar.close（信号日实际收盘价），避免 trigger.price 为
+    # 测试数据（如 10.5）导致 r5d 严重失真。
+    # current 和 trigger.price 作为 fallback。
+    sig_price = signal_bar.get("close") or 0
+    if sig_price <= 0:
+        sig_price = _safe_price(sig.get("current"))
+    if sig_price <= 0:
+        sig_price = _safe_price(sig.get("trigger", {}).get("price"))
+    if sig_price <= 0:
+        return None
+    if sig_price <= 0:
+        return None
+
+    try:
+        sig_dt = datetime.strptime(sig_date, "%Y-%m-%d")
+    except ValueError:
+        return None
+
+    # 找 5 日后最近交易日
+    for add in range(0, 14):
+        test = (sig_dt + timedelta(days=5 + add)).strftime("%Y-%m-%d")
+        if test in date_map:
+            close_5d = float(date_map[test].get("close", sig_price))
+            return round((close_5d - sig_price) / sig_price * 100, 2)
+
+    return None
+
+
+def _merge_dual_source(results: list[dict], outcomes: list[dict]) -> list[dict]:
+    """合并 signal_results.jsonl 和 signals.jsonl 的数据。
+
+    策略：以 signal_results.jsonl 为主（有 r_5d），signals.jsonl 补充 outcome 数据。
+    如果同一信号在两个文件中都存在，保留 signal_results.jsonl 的完整数据。
+    没有 signal_id 的记录使用 (symbol, signal_date) 组合作为 fallback key。
+    """
+    by_id: dict = {}
+    for r in results:
+        sid = r.get("signal_id")
+        if sid:
+            by_id[sid] = r
+        else:
+            # Fallback: 使用 (symbol, signal_date) 组合作为 key
+            key = (r.get("symbol", ""), r.get("signal_date", ""))
+            by_id[key] = r
+
+    for o in outcomes:
+        sid = o.get("signal_id")
+        if sid and sid not in by_id:
+            by_id[sid] = o
+        elif sid and sid in by_id:
+            # 合并：signal_results.jsonl 的数据优先，补充 signals.jsonl 缺少的字段
+            existing = by_id[sid]
+            if existing.get("r_5d") is None and o.get("r_5d") is not None:
+                existing["r_5d"] = o["r_5d"]
+            if not existing.get("outcome") and o.get("outcome"):
+                existing["outcome"] = o["outcome"]
+    
+    return list(by_id.values())
+
+
 def show_all(days_limit: int | None = None) -> str:
-    """输出面板"""
+    """输出面板 — 双源读取：signal_results.jsonl + signals.jsonl"""
     results = _load_results()
-    return _make_panel(results, days_limit)
+    outcomes = _load_signal_outcomes()
+    merged = _merge_dual_source(results, outcomes)
+    return _make_panel(merged, days_limit)
 
 
 def _normalize_symbol(symbol: str) -> str:
@@ -812,12 +997,15 @@ def _normalize_symbol(symbol: str) -> str:
 
 
 def show_single(symbol: str, days_limit: int | None = None) -> str:
-    """输出单股面板"""
+    """输出单股面板 — 双源读取"""
+    results = _load_results()
+    outcomes = _load_signal_outcomes()
+    merged = _merge_dual_source(results, outcomes)
+    
     normalized = _normalize_symbol(symbol)
-    results = [r for r in _load_results() if _normalize_symbol(r.get("symbol", "")) == normalized or (r.get("name") or "").strip().casefold() == symbol.strip().casefold()]
-    # BUG-012: 按 result_time 排序取最新，signal_date 可能重复
-    results.sort(key=lambda r: r.get("result_time") or r.get("signal_date") or "", reverse=True)
-    return _make_panel(results, days_limit)
+    filtered = [r for r in merged if _normalize_symbol(r.get("symbol", "")) == normalized or (r.get("name") or "").strip().casefold() == symbol.strip().casefold()]
+    filtered.sort(key=lambda r: r.get("result_time") or r.get("signal_date") or "", reverse=True)
+    return _make_panel(filtered, days_limit)
 
 
 def _normalize_signal_type(raw_type: str) -> str:
