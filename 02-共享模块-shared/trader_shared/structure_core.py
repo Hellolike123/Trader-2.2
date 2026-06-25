@@ -416,42 +416,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     low_zone_lower = max(low_zone_lower, current * 0.95)    # 不超过现价下方5%
     low_zone_upper = max(low_zone_upper, current * 0.985)   # 买入区上沿至少在现价下方1.5%
     stop = round(support_price * (1 - stop_buffer_pct), 2)
-
-    # 止盈：优先用 Fibonacci 扩展位，次选阻力位，兜底用 ATR
-    # （不再用固定 6% buffer，改用实际市场结构）
-    fib_ext_1382 = None
-    fib_ext_1618 = None
-    if isinstance(chan_result, dict):
-        strokes = chan_result.get("strokes", [])
-        if isinstance(strokes, list) and len(strokes) >= 1:
-            last_stroke = strokes[-1]
-            _dir = last_stroke.get("direction")
-            _sl = None
-            _sh = None
-            if _dir == "up":
-                try:
-                    _sl = float(last_stroke.get("start_price") or 0.0)
-                    _sh = float(last_stroke.get("end_price") or 0.0)
-                except (ValueError, TypeError):
-                    pass
-            elif _dir == "down" and len(strokes) >= 2:
-                prev = strokes[-2]
-                try:
-                    _sl = float(prev.get("start_price") or 0.0)
-                    _sh = float(prev.get("end_price") or 0.0)
-                except (ValueError, TypeError):
-                    pass
-            if _sl is not None and _sh is not None and _sh > _sl and _sl > 0:
-                _diff = _sh - _sl
-                fib_ext_1382 = round(_sl + _diff * 1.382, 2)
-                fib_ext_1618 = round(_sl + _diff * 1.618, 2)
-
-    if fib_ext_1382 and fib_ext_1382 > current:
-        take = fib_ext_1382
-    elif resistance_price and resistance_price > current:
-        take = round(resistance_price * 1.02, 2)  # 阻力位上方2%
-    else:
-        take = round(current * (1 + atr14 / current * 2), 2)  # 2倍ATR目标
+    take = round(max(confirm_price, current) * TAKE_PROFIT_BUFFER, 2)
     position = zone_position(current, support_price, confirm_price)
     pressure_space_pct = (confirm_price - current) / current if current > 0 else 0
     below_ma = count_below_ma(current, ma_values)
@@ -517,6 +482,14 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     )
     # 约束：高抛区间下限不超过现价上方 8%（避免融合说"现在减"但买卖点说"等涨 9%"的矛盾）
     high_zone_lower = min(high_zone_lower, round(current * 1.08, 2))
+
+    # Fibonacci 扩展目标位（从缠论笔计算 138.2% / 161.8%）
+    fib_ext_1382 = None
+    fib_ext_1618 = None
+    if swing_low is not None and swing_high is not None and swing_high > swing_low and swing_low > 0:
+        diff = swing_high - swing_low
+        fib_ext_1382 = round(swing_low + diff * 1.382, 2)
+        fib_ext_1618 = round(swing_low + diff * 1.618, 2)
 
     # ── P0: ATR 移动止损 ──
     try:
