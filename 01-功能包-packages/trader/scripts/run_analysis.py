@@ -1488,6 +1488,10 @@ def render_markdown(r: dict) -> str:
         _upside = round(take_price - low_price, 2)
         _downside = round(low_price - stop, 2)
         lines.append(f"  {low_price:.2f} ← 试探买 {position_cap}%（{_buy_label}，盈亏比 {risk_reward_val}R｜赚{_upside} 亏{_downside}）")
+        # 加仓条件：站稳确认位可加仓至最大仓位
+        _max_pos = int(r.get("max_position_pct") or 0)
+        if _max_pos > position_cap and confirm > 0:
+            lines.append(f"  {confirm:.2f} 站稳可加仓至 {_max_pos}%")
     elif low_price > 0:
         lines.append(f"  {low_price:.2f} ← 参考低吸区（等待）")
     fib = r.get("fib_retrace") or {}
