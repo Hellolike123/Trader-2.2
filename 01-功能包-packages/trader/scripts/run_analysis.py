@@ -26,7 +26,7 @@ except ImportError:
         raise
 
 from trader_shared.light_data import to_float, pct_change
-from trader_shared.stage_positioning import assess_stage, compute_exit_plan, compute_stage_stop, check_time_stop, evaluate_position_state
+from trader_shared.stage_positioning import assess_stage, compute_exit_plan, compute_stage_stop, check_time_stop, evaluate_position_state, _detect_major_stage
 from trader_shared.fetchers import TencentFetcher
 from trader_shared.indicator_math import aggregate_5m_to_60m
 
@@ -476,9 +476,25 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
 
     # C-7 fix: build_structure_context 现在在融合层之后调用，
     # 可以正确接收 fusion_result 和 chan_result
+    # 快速阶段判定：传给 build_structure_context 用于止盈计算
+    def _quick_ma(period: int) -> float | None:
+        if len(bars) < period:
+            return None
+        return sum(float(b.get("close") or 0) for b in bars[-period:]) / period
+
+    _pre_ma = {"ma5": _quick_ma(5), "ma10": _quick_ma(10),
+               "ma20": _quick_ma(20), "ma30": _quick_ma(30)}
+    _pre_stage, _, _, _ = _detect_major_stage(
+        current, _pre_ma, bars,
+        fusion_hint={"action": report_fusion.get("action"),
+                     "confidence": report_fusion.get("confidence", 0),
+                     "weighted_score": report_fusion.get("weighted_score", 0)},
+        wyckoff_result=wyck_result,
+    )
     levels = build_structure_context(current, bars, quote.get("current_change_pct"), quote,
                                      fusion_result=report_fusion, chan_result=chan_result,
-                                     fetcher=fetcher, vp_result=vp_result)
+                                     fetcher=fetcher, vp_result=vp_result,
+                                     major_stage=_pre_stage)
 
     # 将理论策略结果合并到 levels（不覆盖 structure_core 的输出）
     for key, val in {"chanlun": chan_result, "wyckoff": wyck_result, "momentum": momentum_result}.items():

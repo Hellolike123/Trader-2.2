@@ -338,7 +338,7 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None, index_returns: lis
     return multipliers
 
 
-def build_structure_context(current: float, bars: list[BarData], change_pct: Any = None, quote: QuoteData | None = None, fusion_result: dict[str, Any] | None = None, chan_result: dict[str, Any] | None = None, fetcher: DataFetcher | None = None, pnl_pct: float | None = None, vp_result: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_structure_context(current: float, bars: list[BarData], change_pct: Any = None, quote: QuoteData | None = None, fusion_result: dict[str, Any] | None = None, chan_result: dict[str, Any] | None = None, fetcher: DataFetcher | None = None, pnl_pct: float | None = None, vp_result: dict[str, Any] | None = None, major_stage: str | None = None) -> dict[str, Any]:
     if fetcher is None:
         fetcher = get_fetcher()
     recent5 = bars[-RECENT_WINDOW:] if len(bars) >= RECENT_WINDOW else bars
@@ -415,8 +415,27 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     # 约束：买入区不偏离现价太远
     low_zone_lower = max(low_zone_lower, current * 0.95)    # 不超过现价下方5%
     low_zone_upper = max(low_zone_upper, current * 0.985)   # 买入区上沿至少在现价下方1.5%
-    stop = round(support_price * (1 - stop_buffer_pct), 2)
-    take = round(max(confirm_price, current) * TAKE_PROFIT_BUFFER, 2)
+
+    # ═══════ 止损：MA20 + 前低融合 ═══════
+    ma20_val = ma_values.get('ma20')
+    recent_lows = [float(b.get('close') or 0) for b in bars[-20:] if b.get('close')]
+    prev_low = min(recent_lows) if recent_lows else 0
+    candidates = [v for v in [ma20_val, prev_low] if v and v > 0]
+    if candidates:
+        support_ref = max(candidates)  # 取更接近现价的（较大的）
+        stop = round(support_ref * (1 - stop_buffer_pct), 2)
+    else:
+        stop = round(current * 0.95, 2)
+
+    # ═══════ 止盈：按阶段动态 ═══════
+    if major_stage == '蓄势':
+        take = round(resistance_price, 2) if resistance_price else round(current * 1.05, 2)
+    elif major_stage == '主升':
+        take = round(resistance_price, 2) if resistance_price else round(current * 1.10, 2)
+    elif major_stage == '派发':
+        take = round(current, 2)
+    else:
+        take = round(current * 0.95, 2)
     position = zone_position(current, support_price, confirm_price)
     pressure_space_pct = (confirm_price - current) / current if current > 0 else 0
     below_ma = count_below_ma(current, ma_values)
