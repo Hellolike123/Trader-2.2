@@ -1487,7 +1487,9 @@ def render_markdown(r: dict) -> str:
     if low_price > 0 and risk_reward_available:
         # 动态生成试探买标签
         _buy_label = _get_buy_label(change_pct, volume_ratio_val)
-        lines.append(f"  {low_price:.2f} ← 试探买 {position_cap}%（{_buy_label}，盈亏比 {risk_reward_val}R）")
+        _upside = round(take_price - low_price, 2)
+        _downside = round(low_price - stop, 2)
+        lines.append(f"  {low_price:.2f} ← 试探买 {position_cap}%（{_buy_label}，盈亏比 {risk_reward_val}R｜赚{_upside} 亏{_downside}）")
     elif low_price > 0:
         lines.append(f"  {low_price:.2f} ← 参考低吸区（等待）")
     fib = r.get("fib_retrace") or {}
