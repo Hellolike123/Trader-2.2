@@ -1343,7 +1343,6 @@ def render_markdown(r: dict) -> str:
         f"分析报告 — {name}（{display_code}）",
         "",
         f"现价：{current_price:.2f}元（{change_pct:+.2f}%）",
-        f"MA5：{ma5_text}｜MA10：{ma10_text}｜MA20：{ma20_text}｜MA30：{ma30_text}｜MA250：{ma250_text}",
     ]
     if atr14 > 0:
         lines.append(f"ATR {atr14:.2f}（{atr_ratio*100:.1f}%）{atr_level}")
