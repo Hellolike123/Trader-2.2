@@ -209,7 +209,7 @@ class TestAssessStage:
         assert "major_stage" in result
         assert "momentum" in result
         assert "confidence" in result
-        assert result["major_stage"] in ("蓄势", "主升", "派发", "衰退")
+        assert result["major_stage"] in ("蓄势", "蓄势偏强", "蓄势偏弱", "主升", "派发", "衰退")
         assert result["momentum"] in ("走强", "修复", "震荡", "转弱")
 
 

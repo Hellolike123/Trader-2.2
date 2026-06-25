@@ -490,6 +490,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
                      "confidence": report_fusion.get("confidence", 0),
                      "weighted_score": report_fusion.get("weighted_score", 0)},
         wyckoff_result=wyck_result,
+        chan_result=chan_result,
+        main_force_result=mf_result,
     )
     levels = build_structure_context(current, bars, quote.get("current_change_pct"), quote,
                                      fusion_result=report_fusion, chan_result=chan_result,
@@ -748,6 +750,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             "weighted_score": report_fusion.get("weighted_score", 0),
         },
         wyckoff_result=wyck_result,
+        main_force_result=mf_result,
+        chan_result=chan_result,
     )
 
     # 用 major_stage 替代旧 stage 计算 upward_momentum（修复 P1-4）

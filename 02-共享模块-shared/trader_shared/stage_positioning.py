@@ -1,8 +1,11 @@
-"""四阶段定位模型（Stage Positioning Model）— 威科夫量价驱动版
+"""四阶段定位模型（Stage Positioning Model）— 主力行为驱动版
 
-两层嵌套：
-  第一层：大阶段（蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退）→ 威科夫量价关系为核心 + MA 结构 + ATR
-  第二层：短期动能（走强/修复/震荡/转弱）→ 基于 MA5/MA10 + change_pct
+三层判定架构：
+  第一层：主力行为主判定（60%） — main_force 五阶段（吸筹/试盘/拉升/派发/砸盘）
+  第二层：量价确认（30%） — 验证主力信号真伪，降级虚假信号，Wyckoff 增强
+  第三层：结构兜底（10%） — 量价启发式，主力数据不可用时使用
+
+短期动能（走强/修复/震荡/转弱）→ 基于 MA5/MA10 + change_pct
 
 四层防护（从宽松到严格）：
   1. 多日确认（连续 3 日信号一致才确认阶段转换）
@@ -81,7 +84,7 @@ def _save_stage_state(state: dict[str, Any], symbol: str = "") -> None:
         _logger.debug("Stage state save failed: %s", exc)
 
 
-# ── 量价关系判定（核心维度，权重 50%）──────────────────────
+# ── 量价关系判定（兜底备用层，权重 10%）──────────────────────
 
 def _assess_volume_price(
     bars: list[dict[str, Any]],
@@ -239,97 +242,180 @@ def _assess_volume_price(
     return "蓄势", 40, f"量价无明确信号（量比{vol_ratio:.1f}，涨跌{price_change_5*100:+.1f}%）"
 
 
-# ── MA 结构辅助判定（权重 30%）─────────────────────────────
+# ── 主力行为 → 大阶段映射（权重 60%）──────────────────────────
 
-def _assess_ma_structure(
-    ma5: float | None,
-    ma10: float | None,
-    ma20: float | None,
-    ma30: float | None,
-    current_price: float = 0.0,
+def _detect_main_force_stage(main_force_result: dict | None) -> tuple[str | None, float, str]:
+    """主力行为 → 大阶段映射。
+
+    Args:
+        main_force_result: detect_main_force_stage() 的返回值，含 stage/confidence/signals
+
+    Returns:
+        (stage, confidence, reason)
+        stage=None 表示无数据，不参与融合
+        confidence: 0-100
+    """
+    if not main_force_result or not isinstance(main_force_result, dict):
+        return None, 0.0, ""
+
+    mf_stage = main_force_result.get("stage", "unknown")
+    mf_confidence = float(main_force_result.get("confidence", 0))
+    mf_signals = main_force_result.get("signals", [])
+
+    if mf_stage == "unknown" or mf_confidence <= 0:
+        return None, 0.0, ""
+
+    signal_text = "；".join(mf_signals[-2:]) if mf_signals else ""
+
+    mapping = {
+        "accumulation": ("蓄势", 60),
+        "testing": ("蓄势偏强", 55),
+        "markup": ("主升", 70),
+        "distribution": ("派发", 65),
+        "markdown": ("衰退", 60),
+    }
+
+    result = mapping.get(mf_stage)
+    if result is None:
+        return None, 0.0, ""
+
+    stage, base_conf = result
+    # 置信度打折：main_force 的 confidence 是 0-1，一致性高时全额，低时打折
+    conf_multiplier = max(0.5, mf_confidence / 0.5) if mf_confidence > 0 else 0.5
+    confidence = min(100, int(base_conf * min(conf_multiplier, 1.0)))
+
+    reason = f"主力{mf_stage}(置信度{mf_confidence:.2f})"
+    if signal_text:
+        reason += f" [{signal_text}]"
+
+    return stage, confidence, reason
+
+
+# ── 量价确认（权重 30%）─────────────────────────────────────
+
+def _volume_price_confirm(
+    mf_stage: str,
+    bars: list[dict[str, Any]] | None,
+    wyckoff_result: dict[str, Any] | None = None,
 ) -> tuple[str, float, str]:
-    """MA 结构辅助判定。
+    """量价确认主力信号的真假。
 
-    均线收敛时按价格位置细分，避免一刀切全部判定为蓄势。
+    不独立判阶段，只对主力信号做确认/降级/升级。
 
-    Returns:
-        (stage_hint, score, reason)
-    """
-    has_ma = [v is not None and v > 0 for v in [ma5, ma10, ma20, ma30]]
-    if not all(has_ma):
-        return "蓄势", 20, "均线数据不足"
-
-    bullish = ma5 > ma10 > ma20 > ma30
-    bearish = ma5 < ma10 < ma20 < ma30
-    convergence = abs(ma20 - ma30) / max(ma30, 1)
-
-    if bullish:
-        return "主升", 75, "均线多头排列"
-    if bearish:
-        return "衰退", 70, "均线空头排列"
-    if convergence < 0.03:
-        # 均线收敛时按价格位置细分
-        if current_price > 0 and ma5 > 0:
-            price_pos = (current_price - ma30) / max(ma30, 1)
-            if price_pos > 0.02:
-                return "蓄势偏强", 55, f"均线收敛，价格在上端（距MA30+{price_pos*100:.1f}%）"
-            if price_pos < -0.02:
-                return "蓄势偏弱", 45, f"均线收敛，价格在下端（距MA30{price_pos*100:.1f}%）"
-        return "蓄势", 50, "均线收敛（中性）"
-    if ma20 > ma30:
-        return "蓄势", 45, "MA20>MA30 中期偏多"
-    if ma20 < ma30:
-        return "衰退", 45, "MA20<MA30 中期偏空"
-    return "蓄势", 40, "均线无明确方向"
-
-
-# ── ATR 波动辅助判定（权重 20%）─────────────────────────────
-
-def _assess_atr_volatility(bars: list[dict[str, Any]]) -> tuple[str, float, str]:
-    """ATR 波动辅助判定。
+    Args:
+        mf_stage: main_force 输出的阶段 (accumulation/testing/markup/distribution/markdown)
+        bars: K线数据
+        wyckoff_result: 威科夫分析结果
 
     Returns:
-        (stage_hint, score, reason)
+        (action, confidence, reason)
+        action: "confirm" / "downgrade" / "upgrade"
+        confidence: 0-1 确认置信度
     """
-    if not bars or len(bars) < 20:
-        return "蓄势", 20, "数据不足"
+    if not bars or len(bars) < 5:
+        return "confirm", 0.0, "数据不足，默认确认"
 
-    recent10 = bars[-10:]
-    recent20 = bars[-20:]
+    recent5 = bars[-5:]
 
-    def _atr(bars_slice: list[dict]) -> float:
-        trs = []
-        for i, b in enumerate(bars_slice):
-            h = float(b.get("high") or 0)
-            l = float(b.get("low") or 0)
-            if i > 0:
-                pc = float(bars_slice[i-1].get("close") or 0)
-                tr = max(h - l, abs(h - pc), abs(l - pc))
-            else:
-                tr = h - l
-            trs.append(tr)
-        return sum(trs) / max(len(trs), 1)
+    # ── 量价计算 ──
+    vol_5 = [float(b.get("volume") or 0) for b in recent5]
+    vol_20_avg = 0.0
+    if len(bars) >= 20:
+        vol_20 = [float(b.get("volume") or 0) for b in bars[-20:]]
+        vol_20_avg = sum(vol_20) / max(len(vol_20), 1)
+    elif len(bars) >= 10:
+        vol_10 = [float(b.get("volume") or 0) for b in bars[-10:]]
+        vol_20_avg = sum(vol_10) / max(len(vol_10), 1)
+    avg_vol_5 = sum(vol_5) / max(len(vol_5), 1)
+    vol_ratio = avg_vol_5 / max(vol_20_avg, 1) if vol_20_avg > 0 else 1.0
 
-    atr_10 = _atr(recent10)
-    atr_20 = _atr(recent20)
-    close = float(bars[-1].get("close") or 0)
+    close_5_start = float(recent5[0].get("close") or 0)
+    close_5_end = float(recent5[-1].get("close") or 0)
+    price_change_5 = (close_5_end - close_5_start) / close_5_start if close_5_start > 0 else 0.0
 
-    if close <= 0 or atr_20 <= 0:
-        return "蓄势", 20, "ATR 数据异常"
+    # ── 提取威科夫信号 ──
+    spring = False
+    upthrust = False
+    if wyckoff_result:
+        wyk = wyckoff_result.get("wyckoff", {}) if isinstance(wyckoff_result, dict) else {}
+        if isinstance(wyk, dict):
+            spring = wyk.get("spring_signal", False)
+            upthrust = wyk.get("upthrust_signal", False)
 
-    atr_ratio = atr_10 / atr_20
-    atr_pct = atr_20 / close
+    # ── 量价判断 ──
+    rising = price_change_5 > 0.03
+    falling = price_change_5 < -0.03
+    flat = abs(price_change_5) < 0.01
+    high_vol = vol_ratio > 1.2
+    low_vol = vol_ratio < 0.8
 
-    # ATR 上升 → 阶段活跃
-    if atr_ratio > 1.3:
-        if atr_pct > 0.03:
-            return "主升", 55, f"ATR 上升（比值{atr_ratio:.1f}），高波动"
-        return "主升", 45, f"ATR 上升（比值{atr_ratio:.1f}）"
-    # ATR 下降 → 阶段收敛
-    if atr_ratio < 0.7:
-        return "蓄势", 55, f"ATR 下降（比值{atr_ratio:.1f}），收敛中"
-    # ATR 平稳
-    return "蓄势", 35, f"ATR 平稳（比值{atr_ratio:.1f}）"
+    if mf_stage == "markup":
+        # 拉升 → 需放量上涨确认
+        if high_vol and rising:
+            return "confirm", 0.30, f"放量上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
+        if falling or (low_vol and not rising):
+            return "downgrade", 0.20, f"价跌或缩量，不配合拉升信号"
+        return "confirm", 0.15, f"量价中性（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
+
+    elif mf_stage == "accumulation":
+        # 吸筹 → 缩量筑底最佳
+        if low_vol and flat:
+            return "confirm", 0.30, f"缩量筑底（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
+        if high_vol and falling:
+            return "downgrade", 0.25, f"放量下跌，吸筹期走坏"
+        if spring:
+            return "upgrade", 0.25, "Wyckoff Spring确认吸筹"
+        if falling:
+            return "downgrade", 0.15, "价跌，可能吸筹失败"
+        return "confirm", 0.15, f"量价中性（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
+
+    elif mf_stage == "distribution":
+        # 派发 → 放量滞涨或价跌
+        if high_vol and (flat or falling):
+            return "confirm", 0.30, f"放量滞涨/下跌（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
+        if upthrust:
+            return "confirm", 0.30, "Wyckoff Upthrust确认派发"
+        if low_vol and rising:
+            return "downgrade", 0.20, "缩量上涨，非典型派发"
+        return "confirm", 0.15, f"量价中性（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
+
+    elif mf_stage == "testing":
+        # 试盘 → 价冲高+小幅回落是正常试盘
+        return "confirm", 0.15, "试盘期量价中性"
+
+    elif mf_stage == "markdown":
+        # 砸盘 → 放量下跌确认
+        if high_vol and falling:
+            return "confirm", 0.30, f"放量下跌确认砸盘"
+        return "confirm", 0.15, f"量价中性（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
+
+    return "confirm", 0.0, "未知主力阶段"
+
+
+# ── 升降级辅助函数 ────────────────────────────────────────────
+
+def _downgrade_stage(stage: str) -> str:
+    """将阶段降一级。用于量价不配合主力信号时的保守处理。
+
+    Note: "蓄势偏弱"下再无更低阶段可降，main_force "衰退"已是最差阶段。
+    """
+    mapping = {
+        "主升": "蓄势偏强",
+        "蓄势偏强": "蓄势",
+        "蓄势": "蓄势偏弱",
+        "派发": "蓄势偏弱",
+    }
+    return mapping.get(stage, stage)
+
+
+def _upgrade_stage(stage: str) -> str:
+    """将阶段升一级。用于 Wyckoff 等信号增强确认时。"""
+    mapping = {
+        "蓄势": "蓄势偏强",
+        "蓄势偏强": "主升",
+        "蓄势偏弱": "蓄势偏强",  # 蓄势偏弱跳一级到蓄势偏强
+    }
+    return mapping.get(stage, stage)
 
 
 # ── 综合阶段判定 ──────────────────────────────────────────
@@ -340,61 +426,89 @@ def _detect_major_stage(
     bars: list[dict[str, Any]] | None = None,
     fusion_hint: dict[str, Any] | None = None,
     wyckoff_result: dict[str, Any] | None = None,
+    chan_result: dict[str, Any] | None = None,
+    main_force_result: dict[str, Any] | None = None,
 ) -> tuple[str, float, str, str]:
-    """综合三个维度判定大阶段。
+    """主力行为三层架构判定大阶段。
+
+    第一层：主力行为主判定（60%） — main_force 五阶段映射
+    第二层：量价确认（30%） — 验证主力信号真伪
+    第三层：结构兜底（10%） — 主力数据不可用时使用量价启发式
+
+    All new params default None for backward compatibility.
 
     Args:
-        fusion_hint: 融合层的 {action, confidence, weighted_score}
-                     强信号时作为加权投票的额外一票。
-        wyckoff_result: 威科夫分析原始输出，含 spring/upthrust/背离 信号。
+        current: 当前价格
+        ma_values: 均线值字典（保留用于兜底兼容）
+        bars: K线数据
+        fusion_hint: 融合层信号（微调用）
+        wyckoff_result: 威科夫分析结果
+        chan_result: 缠论分析结果（兜底保留，当前未使用）
+        main_force_result: 主力行为分析结果
 
     Returns:
-        (stage, confidence, reason)
+        (stage, confidence, reason, vp_stage)
     """
-    # 量价关系（核心，权重 40%）— 威科夫信号优先，量比兜底
+    # 始终计算量价评估供 vp_stage 兼容 + 兜底
     vp_stage, vp_score, vp_reason = _assess_volume_price(bars, wyckoff_result=wyckoff_result)
 
-    # MA 结构（辅助，权重 40%）
-    ma5 = ma_values.get("ma5")
-    ma10 = ma_values.get("ma10")
-    ma20 = ma_values.get("ma20")
-    ma30 = ma_values.get("ma30")
-    ma_stage, ma_score, ma_reason = _assess_ma_structure(ma5, ma10, ma20, ma30, current_price=current)
+    # ── 第一步：主力行为主判定 ──
+    mf_stage, mf_conf, mf_reason = _detect_main_force_stage(main_force_result)
 
-    # ATR 波动（辅助，权重 20%）
-    atr_stage, atr_score, atr_reason = _assess_atr_volatility(bars)
+    if mf_stage is not None:
+        # ── 第二步：量价确认 ──
+        confirm_action, confirm_conf, confirm_reason = _volume_price_confirm(
+            mf_stage, bars, wyckoff_result
+        )
 
-    # 加权投票（蓄势偏强/偏弱合并到蓄势，避免分票导致误判）
-    stage_votes: dict[str, float] = {"蓄势": 0, "主升": 0, "派发": 0, "衰退": 0}
-    for stage_name, score, weight in [(vp_stage, vp_score, 0.4), (ma_stage, ma_score, 0.4), (atr_stage, atr_score, 0.2)]:
-        target = "蓄势" if stage_name in ("蓄势", "蓄势偏强", "蓄势偏弱") else stage_name
-        if target in stage_votes:
-            stage_votes[target] += score * weight
+        if confirm_action == "confirm":
+            final_stage = mf_stage
+            confidence = min(100, int(mf_conf + 30 * confirm_conf))
+            reason = f"主力:{mf_reason} | 量价确认:{confirm_reason}"
+        elif confirm_action == "downgrade":
+            final_stage = _downgrade_stage(mf_stage)
+            confidence = int(mf_conf * 0.6)
+            reason = f"主力:{mf_reason} | 量价不符，降级:{confirm_reason}"
+        elif confirm_action == "upgrade":
+            final_stage = _upgrade_stage(mf_stage)
+            confidence = min(100, mf_conf + 15)
+            reason = f"主力:{mf_reason} | Wyckoff增强:{confirm_reason}"
+        else:
+            final_stage = mf_stage
+            confidence = mf_conf
+            reason = mf_reason
 
-    # fusion_hint: 强信号作为额外一票
-    if fusion_hint:
-        ws = fusion_hint.get("weighted_score")
-        conf = fusion_hint.get("confidence", 0)
-        if ws is not None and conf is not None:
-            # 置信度够才算数
-            if conf >= 0.3:
+        # fusion_hint 微调 (不影响阶段，只做边际调整)
+        if fusion_hint:
+            ws = fusion_hint.get("weighted_score")
+            conf = fusion_hint.get("confidence", 0)
+            if ws is not None and conf is not None and conf >= 0.3:
                 try:
                     ws_f = float(ws)
-                    if ws_f > 0.25:
-                        # 融合强烈买入 → 给主升额外加分
-                        stage_votes["主升"] += 5.0 * min(ws_f, 1.0)
-                    elif ws_f < -0.2:
-                        # 融合强烈卖出 → 给衰退额外加分
-                        stage_votes["衰退"] += 5.0 * min(abs(ws_f), 1.0)
+                    if ws_f > 0.25 and final_stage in ("蓄势", "蓄势偏弱"):
+                        # 强买入信号 → 偏积极方向微调
+                        if final_stage == "蓄势偏弱":
+                            final_stage = "蓄势"
+                        elif final_stage == "蓄势":
+                            final_stage = "蓄势偏强"
+                        confidence = min(100, confidence + 10)
+                    elif ws_f < -0.2 and final_stage in ("主升", "蓄势偏强", "蓄势"):
+                        # 强卖出信号 → 偏保守方向微调
+                        base_for_downgrade = final_stage
+                        if base_for_downgrade in ("蓄势偏强", "蓄势"):
+                            final_stage = _downgrade_stage(base_for_downgrade)
+                        elif base_for_downgrade == "主升":
+                            final_stage = "蓄势偏强"
+                        confidence = max(0, confidence - 10)
                 except (TypeError, ValueError):
                     pass
+    else:
+        # ── 第三步：结构兜底 — 量价启发式 ──
+        final_stage = vp_stage
+        confidence = vp_score
+        reason = f"量价兜底:{vp_reason}"
 
-    best_stage = max(stage_votes, key=stage_votes.get)  # type: ignore[arg-type]
-    total_score = stage_votes[best_stage]
-    confidence = min(100, int(total_score))
-
-    reason = f"量价:{vp_reason} | 均线:{ma_reason} | ATR:{atr_reason}"
-    return best_stage, confidence, reason, vp_stage
+    return final_stage, confidence, reason, vp_stage
 
 
 # ── 短期动能判定 ──────────────────────────────────────────────
@@ -745,12 +859,13 @@ def assess_stage(
     trade_date: str = "",
     fusion_hint: dict[str, Any] | None = None,
     wyckoff_result: dict[str, Any] | None = None,
+    main_force_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """四阶段定位主函数（威科夫量价驱动 + 四层防护）
+    """四阶段定位主函数（主力行为驱动 + 量价确认 + 四层防护）
 
     Returns:
         {
-            "major_stage": str,       # 蓄势/主升/派发/衰退
+            "major_stage": str,       # 蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退
             "major_reason": str,
             "momentum": str,          # 走强/修复/震荡/转弱
             "momentum_reason": str,
@@ -766,9 +881,10 @@ def assess_stage(
     ma10 = ma_values.get("ma10")
     ma20 = ma_values.get("ma20")
 
-    # 第一步：综合阶段判定（量价 + MA + ATR + fusion_hint + 威科夫）
+    # 第一步：综合阶段判定（主力行为优先 + 量价确认 + 结构兜底）
     raw_stage, raw_confidence, raw_reason, vp_stage = _detect_major_stage(
-        current, ma_values, bars, fusion_hint=fusion_hint, wyckoff_result=wyckoff_result
+        current, ma_values, bars, fusion_hint=fusion_hint, wyckoff_result=wyckoff_result,
+        chan_result=chan_result, main_force_result=main_force_result,
     )
 
     # P1 Fix: 新股置信度打折 — 当数据不足 60 天时，置信度按比例折扣
