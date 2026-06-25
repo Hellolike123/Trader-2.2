@@ -1910,7 +1910,7 @@ def _latest_signal_summary(report: dict[str, Any], store_path: Path | None = Non
 
 
 def render_compare(reports: list[dict[str, Any]]) -> str:
-    from trader_shared.candidate_core import STATUS_SCORE, atr_volatility_level
+    from trader_shared.candidate_core import atr_volatility_level
 
     # ── 评分辅助函数 ──
     def _scores(r: dict[str, Any]) -> dict[str, int]:
@@ -1921,9 +1921,11 @@ def render_compare(reports: list[dict[str, Any]]) -> str:
                     "chip_score": 0, "fusion_score": 0, "momentum_score": 0, "momentum_tag": ""}
 
     def _sort_key(r: dict[str, Any]):
-        scene = str(r.get("scene") or "")
-        atr_ratio = to_float(r.get("atr_ratio")) or 0.0
-        return (-STATUS_SCORE.get(scene, 0), atr_ratio)
+        try:
+            sc = score_report(r)
+            return (-sc.get("total_score", 0),)
+        except Exception:
+            return (0,)
 
     sorted_reports = sorted(reports, key=_sort_key)
 
@@ -2003,6 +2005,35 @@ def render_compare(reports: list[dict[str, Any]]) -> str:
         # 关键价位
         lines.append(f"   关键位：止损 {stop_val:.2f} 支撑 {support_val:.2f} 现价 {current:.2f} 压力 {resistance_val:.2f} 确认 {confirm_val:.2f}")
 
+        # EXPMA 趋势
+        expma = r.get("expma_status") or {}
+        expma_label = expma.get("trend_label", "") if isinstance(expma, dict) else ""
+        if expma_label:
+            lines.append(f"   EXPMA：{expma_label}")
+
+        # 筹码峰
+        chip_peaks = r.get("chip_peaks") or []
+        if chip_peaks:
+            support_peaks = sorted(
+                [p for p in chip_peaks if float(p.get("price", 0)) < current],
+                key=lambda p: float(p.get("share_of_total", 0)), reverse=True
+            )
+            resist_peaks = sorted(
+                [p for p in chip_peaks if float(p.get("price", 0)) > current],
+                key=lambda p: float(p.get("share_of_total", 0)), reverse=True
+            )
+            if support_peaks:
+                top_s = support_peaks[0]
+                lines.append(f"   筹码支撑：{float(top_s.get('price',0)):.2f}元（占比{float(top_s.get('share_of_total',0))*100:.0f}%）")
+            if resist_peaks:
+                top_r = resist_peaks[0]
+                lines.append(f"   筹码压力：{float(top_r.get('price',0)):.2f}元（占比{float(top_r.get('share_of_total',0))*100:.0f}%）")
+
+        # 多周期共振
+        resonance = r.get("resonance") or {}
+        if isinstance(resonance, dict) and resonance.get("total_score", 0) > 0:
+            lines.append(f"   共振评分：{resonance.get('total_score',0)}分（{resonance.get('weekly_label','')}｜{resonance.get('daily_label','')}｜{resonance.get('timing_label','')}）")
+
         # 信号摘要
         signal_summary = _latest_signal_summary(r)
         if signal_summary:
@@ -2040,17 +2071,18 @@ def _render_ranking_conclusion(sorted_reports: list[dict[str, Any]],
 
     # 表头
     headers = ["标的"] + [dim_labels.get(d, d) for d in dim_labels if d != "total_score"] + ["总分"]
-    result.append("  " + "  ".join(f"{h:>4s}" for h in headers))
+    result.append("  " + "  ".join(f"{h:>6s}" for h in headers))
 
-    # 数据行
+    # 数据行（与表头顺序一致：标的 缠论 威科夫 筹码 融合 动能 总分）
+    max_name_len = max((len(str(r.get("name", "?"))[:8]) for r in sorted_reports), default=4)
     for i, (r, sc) in enumerate(zip(sorted_reports, scores_list)):
-        name = r.get("name", "?")[:6]
-        vals = []
+        name = str(r.get("name", "?"))[:8]
+        vals = [f"{name:<{max_name_len}s}"]
         for d in dim_labels:
             if d == "total_score":
-                vals.append(f"{sc.get('total_score', 0):>4d}")
-            else:
-                vals.append(f"{sc.get(d, 0):>4d}")
+                continue  # total_score 放到最后
+            vals.append(f"{sc.get(d, 0):>6d}")
+        vals.append(f"{sc.get('total_score', 0):>6d}")
         result.append("  " + "  ".join(vals))
 
     result.append("")
@@ -2098,16 +2130,29 @@ def _render_ranking_conclusion(sorted_reports: list[dict[str, Any]],
         for reason in reasons:
             result.append(f"  • {reason}")
 
-    # 大盘提示
+    # 大盘提示 + 明确推荐
     if market_level == "很差":
         result.append("")
         result.append("👉 大盘很差，所有标的先观察，不急着买")
     elif market_level == "偏弱":
         result.append("")
         result.append("👉 大盘偏弱，优先选波动小、信号靠谱的")
-    elif reasons:
+    elif len(sorted_reports) >= 2:
         result.append("")
-        result.append(f"👉 同等条件下，优先选波动小的（{min_atr_name} 波动最低）")
+        w_name = winner_name
+        w_score = winner_total
+        s_name = sorted_reports[1].get("name", "?")
+        s_score = scores_list[1].get("total_score", 0)
+        if w_score > s_score:
+            gap = w_score - s_score
+            if gap >= 10:
+                result.append(f"👉 综合评分差距明显（{gap}分），优先选择 {w_name}")
+            elif gap >= 5:
+                result.append(f"👉 {w_name} 综合略优（领先{gap}分），建议优先关注")
+            else:
+                result.append(f"👉 {w_name} 与 {s_name} 分差不大（{gap}分），结合当前持仓综合判断")
+        else:
+            result.append(f"👉 同等条件下，优先选波动小的（{min_atr_name} 波动最低）")
 
     return result
 

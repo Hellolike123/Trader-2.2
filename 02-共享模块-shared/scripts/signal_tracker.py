@@ -260,7 +260,11 @@ def fill(signal_id: str, pnl_pct: float, days_held: int = 0, outcome: str = "unk
 
 
 def fill_by_target(target: str, pnl_pct: float, days_held: int = 0, outcome: str = "unknown", signal_type: str = "") -> tuple[int, list[str]]:
-    """兼容 review_core"""
+    """兼容 review_core
+
+    警告：批量写入同一 pnl_pct 到多条信号是危险的——应使用 check_recent()
+    按信号生成时的价格独立计算 PnL。当匹配信号数 >= 3 时发出警告。
+    """
     if not LOG_PATH.exists():
         return 0, []
     raw_text = LOG_PATH.read_text(encoding="utf-8")
@@ -295,6 +299,13 @@ def fill_by_target(target: str, pnl_pct: float, days_held: int = 0, outcome: str
             updated.append(rec.get("signal_id"))
         new_lines.append(json.dumps(rec, ensure_ascii=False))
     if updated or bad > 0:
+        # Safety: warn when same PnL is being written to many signals
+        if len(updated) >= 3:
+            import warnings as _warnings_module_
+            _warnings_module_.warn(
+                f"[fill_by_target] 将对 {len(updated)} 条 '{target}' 信号写入相同的 pnl_pct={pnl_pct}。"
+                f"建议通过 check_recent() 按信号生成时的实际价格独立计算 PnL，避免批量写入固定值。"
+            )
         tmp_path = LOG_PATH.with_suffix(LOG_PATH.suffix + ".tmp")
         tmp_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
         fd = os.open(str(tmp_path), os.O_RDONLY)
