@@ -456,9 +456,10 @@ def _detect_major_stage(
     mf_stage, mf_conf, mf_reason = _detect_main_force_stage(main_force_result)
 
     if mf_stage is not None:
-        # ── 第二步：量价确认 ──
+        # ── 第二步：量价确认（用原始英文 stage 匹配）──
+        raw_mf_stage = main_force_result.get("stage", "unknown") if isinstance(main_force_result, dict) else "unknown"
         confirm_action, confirm_conf, confirm_reason = _volume_price_confirm(
-            mf_stage, bars, wyckoff_result
+            raw_mf_stage, bars, wyckoff_result
         )
 
         if confirm_action == "confirm":
