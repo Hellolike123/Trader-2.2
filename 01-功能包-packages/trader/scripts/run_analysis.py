@@ -1339,10 +1339,17 @@ def render_markdown(r: dict) -> str:
     ma30_text = f"{ma_raw.get('ma30', 0):.2f}" if isinstance(ma_raw.get("ma30"), (int, float)) else "--"
     ma250_text = f"{ma_raw.get('ma250', 0):.2f}" if isinstance(ma_raw.get("ma250"), (int, float)) else "--"
 
+    # 相对大盘强度（紧跟现价）
+    market_env_data = r.get("market_env") or {}
+    market_idx_chg = float(market_env_data.get("change_pct") or market_env_data.get("index_change_pct") or 0)
+    rel_str = change_pct - market_idx_chg
+    rel_label = "强于大盘" if rel_str > 0.5 else ("弱于大盘" if rel_str < -0.5 else "与大盘同步")
+
     lines: list[str] = [
         f"分析报告 — {name}（{display_code}）",
         "",
         f"现价：{current_price:.2f}元（{change_pct:+.2f}%）",
+        f"相对大盘 {rel_label}｜个股 {change_pct:+.2f}% ｜ 大盘 {market_idx_chg:+.2f}%",
     ]
     if atr14 > 0:
         lines.append(f"ATR {atr14:.2f}（{atr_ratio*100:.1f}%）{atr_level}")
@@ -1376,14 +1383,6 @@ def render_markdown(r: dict) -> str:
     if vol_parts:
         lines.append(f"📊 量能：{' ｜ '.join(vol_parts)}")
 
-    # 相对大盘强度
-    market_env_data = r.get("market_env") or {}
-    market_idx_chg = float(market_env_data.get("change_pct") or market_env_data.get("index_change_pct") or 0)
-    if market_idx_chg != 0 or change_pct != 0:
-        rel_str = change_pct - market_idx_chg
-        rel_label = "强于大盘" if rel_str > 0.5 else ("弱于大盘" if rel_str < -0.5 else "与大盘同步")
-        lines.append(f"🏭 相对大盘：个股 {change_pct:+.2f}% ｜ 大盘 {market_idx_chg:+.2f}% ｜ {rel_label}")
-        
     lines.extend([
         "",
         f"📊 {major_stage}期 + {momentum} → {stage_action_text}",
