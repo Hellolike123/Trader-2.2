@@ -113,7 +113,7 @@
 | 字段 | 类型 | 含义 | 示例 |
 |------|------|------|------|
 | `major_stage` | str | 大阶段 | 蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退 |
-| `major_reason` | str | 阶段判定原因 | "价格在MA20下方，动能走弱" |
+| `major_reason` | str | 阶段判定原因 | "主力:主力行为不明｜量价兜底:蓄势" |
 | `short_term_momentum` | str | 短期动能 | 走强/修复/震荡/转弱 |
 | `momentum_reason` | str | 动能判定原因 | "MACD转正，量价修复" |
 | `stage_action` | str | 阶段操作建议 | 试探买/持有/减仓/不碰 |
