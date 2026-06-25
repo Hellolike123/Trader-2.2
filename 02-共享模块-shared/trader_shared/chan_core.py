@@ -574,7 +574,16 @@ def chanlun_analysis(
     zones_count = len(zones)
 
     if strokes_count >= 3:
-        trend_label = "回调段" if strokes[-1]["direction"] == "down" else "拉升段"
+        # 最近3笔方向多数决：过滤单笔噪音，避免最后一笔小回调误判整段趋势
+        recent3 = [s["direction"] for s in strokes[-3:]]
+        up_count = recent3.count("up")
+        down_count = recent3.count("down")
+        if up_count >= 2:
+            trend_label = "拉升段"
+        elif down_count >= 2:
+            trend_label = "回调段"
+        else:
+            trend_label = "震荡段"
     else:
         trend_label = "数据不足"
 

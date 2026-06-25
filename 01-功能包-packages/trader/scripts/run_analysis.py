@@ -1406,6 +1406,68 @@ def render_markdown(r: dict) -> str:
         lines.append("")
         lines.append(fusion_verbatim)
 
+    # 当前研判 + 技术指标（紧跟融合层，一眼看清状态）
+    stage_desc_map = {
+        "蓄势": "区间震荡，低吸高抛", "主升": "持股待涨",
+        "派发": "逢高减仓", "衰退": "不碰",
+    }
+    stage_desc = stage_desc_map.get(major_stage, major_stage)
+    confirm_label = str(r.get("confirm_label") or "确认位")
+    state_label = str(r.get("state_label") or "")
+    if current_price >= confirm:
+        trend_desc = f"站上{confirm:.2f}（{confirm_label}）"
+    elif "走强" in state_label or "转强" in state_label:
+        trend_desc = f"趋势走强，等{confirm_label}"
+    elif major_stage == "主升":
+        trend_desc = f"回踩支撑"
+    elif major_stage == "蓄势":
+        trend_desc = f"低吸等确认"
+    else:
+        trend_desc = f"等信号确认"
+    lines.append(f"  {stage_desc} ｜ {trend_desc}")
+
+    # 技术指标摘要
+    _ind_parts = []
+    ems = r.get("expma_status") or {}
+    if ems.get("total_score") is not None:
+        _em_trend = ems.get("trend_label", "")
+        _em_short = _em_trend.replace("偏多排列", "均线多头").replace("偏空排列", "均线空头")
+        _ind_parts.append(f"{_em_short}（{ems['total_score']}/10）")
+
+    res = r.get("resonance") or {}
+    _week_label = str(res.get("weekly_label", ""))
+    _day_label = str(res.get("daily_label", ""))
+    _tim_label = str(res.get("timing_label", ""))
+
+    def _tf_short(label: str, name: str) -> str:
+        """把周期标签翻译成简短方向。"""
+        if "多头" in label:
+            return f"{name}多"
+        elif "空头" in label:
+            return f"{name}空"
+        elif "中性" in label or "震荡" in label:
+            return f"{name}平"
+        elif "站上" in label:
+            return f"{name}多"
+        elif "跌破" in label:
+            return f"{name}空"
+        return ""
+
+    _res_score = int(res.get("total_score", 0))
+    if _res_score >= 8:
+        _ind_parts.append("多周期共振")
+    else:
+        _tf_parts = []
+        for lbl, nm in [(_week_label, "周"), (_day_label, "日"), (_tim_label, "60m")]:
+            s = _tf_short(lbl, nm)
+            if s:
+                _tf_parts.append(s)
+        if _tf_parts:
+            _ind_parts.append(" ｜ ".join(_tf_parts))
+
+    if _ind_parts:
+        lines.append(f"  {' ｜ '.join(_ind_parts)}")
+
     lines.extend([
         "",
         "📍 买卖点"
@@ -1456,6 +1518,7 @@ def render_markdown(r: dict) -> str:
         lines.append(f"  高抛区间 {high_zone}")
 
     exit_plan = r.get("exit_plan") or {}
+    stage_exit = exit_plan.get("stage_exit")
     exit_plan_items = exit_plan.get("exit_plan") or []
 
     # 收集所有价格行，统一排序后输出（确保严格递增）
@@ -1486,72 +1549,8 @@ def render_markdown(r: dict) -> str:
     for _, line in all_price_lines:
         lines.append(line)
 
-    stage_exit = exit_plan.get("stage_exit")
     if stage_exit and major_stage in ("主升", "拉升"):
         lines.append(f"  阶段转{stage_exit} → 清仓")
-    
-    # 为什么这么操作（压缩为1行）
-    stage_desc_map = {
-        "蓄势": "区间震荡，低吸高抛", "主升": "持股待涨",
-        "派发": "逢高减仓", "衰退": "不碰",
-    }
-    stage_desc = stage_desc_map.get(major_stage, major_stage)
-    confirm_label = str(r.get("confirm_label") or "确认位")
-    state_label = str(r.get("state_label") or "")
-    if current_price >= confirm:
-        trend_desc = f"站上{confirm:.2f}（{confirm_label}）"
-    elif "走强" in state_label or "转强" in state_label:
-        trend_desc = f"趋势走强，等{confirm_label}"
-    elif major_stage == "主升":
-        trend_desc = f"回踩支撑"
-    elif major_stage == "蓄势":
-        trend_desc = f"低吸等确认"
-    else:
-        trend_desc = f"等信号确认"
-    lines.append(f"  {stage_desc} ｜ {trend_desc}")
-
-    # 技术指标摘要 → 压缩为1行，告诉你每个周期的方向
-    _ind_parts = []
-    ems = r.get("expma_status") or {}
-    if ems.get("total_score") is not None:
-        _em_trend = ems.get("trend_label", "")
-        _em_short = _em_trend.replace("偏多排列", "均线多头").replace("偏空排列", "均线空头")
-        _ind_parts.append(f"{_em_short}（{ems['total_score']}/10）")
-
-    res = r.get("resonance") or {}
-    _week_label = str(res.get("weekly_label", ""))
-    _day_label = str(res.get("daily_label", ""))
-    _tim_label = str(res.get("timing_label", ""))
-
-    def _tf_short(label: str, name: str) -> str:
-        """把周期标签翻译成简短方向。"""
-        if "多头" in label:
-            return f"{name}多"
-        elif "空头" in label:
-            return f"{name}空"
-        elif "中性" in label or "震荡" in label:
-            return f"{name}平"
-        elif "站上" in label:
-            return f"{name}多"
-        elif "跌破" in label:
-            return f"{name}空"
-        return ""
-
-    # 只在有分歧时展开各周期方向，共振强时只说"多周期共振"
-    _res_score = int(res.get("total_score", 0))
-    if _res_score >= 8:
-        _ind_parts.append("多周期共振")
-    else:
-        _tf_parts = []
-        for lbl, nm in [(_week_label, "周"), (_day_label, "日"), (_tim_label, "60m")]:
-            s = _tf_short(lbl, nm)
-            if s:
-                _tf_parts.append(s)
-        if _tf_parts:
-            _ind_parts.append(" ｜ ".join(_tf_parts))
-
-    if _ind_parts:
-        lines.append(f"  {' ｜ '.join(_ind_parts)}")
 
     has_position = r.get("has_position", False)
     cost_price = float(r.get("cost_price") or 0)
