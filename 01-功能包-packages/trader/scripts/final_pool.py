@@ -1912,27 +1912,44 @@ def _latest_signal_summary(report: dict[str, Any], store_path: Path | None = Non
 def render_compare(reports: list[dict[str, Any]]) -> str:
     from trader_shared.candidate_core import STATUS_SCORE, atr_volatility_level
 
-    def sort_key(r: dict[str, Any]):
+    # ── 评分辅助函数 ──
+    def _scores(r: dict[str, Any]) -> dict[str, int]:
+        try:
+            return score_report(r)
+        except Exception:
+            return {"total_score": 0, "chanlun_score": 0, "wyckoff_score": 0,
+                    "chip_score": 0, "fusion_score": 0, "momentum_score": 0, "momentum_tag": ""}
+
+    def _sort_key(r: dict[str, Any]):
         scene = str(r.get("scene") or "")
         atr_ratio = to_float(r.get("atr_ratio")) or 0.0
         return (-STATUS_SCORE.get(scene, 0), atr_ratio)
 
-    sorted_reports = sorted(reports, key=sort_key)
+    sorted_reports = sorted(reports, key=_sort_key)
+
+    # ── 大盘 ──
     market_level = get_market_level()
     lines = [f"对比 — {' vs '.join(r.get('name','?') for r in sorted_reports)}", ""]
     if market_level:
         lines.append(f"🌍 大盘{market_level} | {get_market_note()}")
         lines.append("")
 
+    # ── 逐票详情 ──
     for i, r in enumerate(sorted_reports, 1):
         name = r.get("name", "?")
+        code = str(r.get("symbol", "")).replace(".SH", "").replace(".SZ", "")
         scene = str(r.get("scene") or "?")
         current = to_float(r.get("current")) or 0.0
+        stop_val = to_float(r.get("stop")) or 0.0
+        support_val = to_float(r.get("support")) or 0.0
+        resistance_val = to_float(r.get("resistance")) or 0.0
+        confirm_val = to_float(r.get("confirm")) or 0.0
+        take_val = to_float(r.get("take")) or 0.0
+
         atr14 = to_float(r.get("atr14")) or 0.0
         atr_ratio = to_float(r.get("atr_ratio")) or 0.0
         atr_level, atr_cap = atr_volatility_level(atr_ratio)
         atr_pct = atr_ratio * 100
-        stop_val = to_float(r.get("stop")) or 0.0
 
         if atr_ratio >= 0.03:
             atr_text = f"波幅偏高({atr_pct:.0f}%)"
@@ -1943,35 +1960,156 @@ def render_compare(reports: list[dict[str, Any]]) -> str:
         else:
             atr_text = "数据不足"
 
-        wr_text = ""
-        try:
-            from trader_shared import stats_by_type
-            st = stats_by_type("trader")
-            signal_stats = st.get(scene, {})
-            if signal_stats.get("filled", 0) >= 1:
-                wr_text = f" 胜率{signal_stats['win_rate']*100:.0f}%"
-        except Exception:
-            pass
+        # 阶段 + 动能
+        major_stage = str(r.get("major_stage") or "")
+        momentum = str(r.get("short_term_momentum") or "")
 
+        # 评分
+        scores = _scores(r)
+        total = scores.get("total_score", 0)
+        chan = scores.get("chanlun_score", 0)
+        wyck = scores.get("wyckoff_score", 0)
+        chip = scores.get("chip_score", 0)
+        fus = scores.get("fusion_score", 0)
+        mom = scores.get("momentum_score", 0)
+        chan_max = 45
+        wyck_max = 30
+        chip_max = 25
+        fus_max = 20
+        mom_max = 20
+
+        # 融合详情
+        fusion = r.get("fusion") or {}
+        fusion_action = fusion.get("action", "")
+        fusion_conf = fusion.get("confidence", 0)
+        fusion_ws = fusion.get("weighted_score", 0)
+
+        # 主力评分
+        mf = r.get("main_force_score") or {}
+        mf_total = mf.get("total_score", 0) if isinstance(mf, dict) else 0
+
+        lines.append(f"{i}. {name}（{code}）  {scene}  {current:.2f}元  {atr_text}")
+        lines.append(f"   阶段：{major_stage} ｜ 动能：{momentum} ｜ 综合评分：{total}")
+
+        # 五层打分
+        lines.append(f"   五层打分：缠{chan}/{chan_max} 威{wyck}/{wyck_max} 筹{chip}/{chip_max} 融{fus}/{fus_max} 动{mom}/{mom_max}")
+
+        # 融合 + 主力
+        if fusion_action:
+            lines.append(f"   融合：{fusion_action}（得分 {fusion_ws:+.2f}，置信度 {fusion_conf:.0%}）")
+        if mf_total > 0:
+            lines.append(f"   主力评分：{mf_total}分（{mf.get('label', '')}）")
+
+        # 关键价位
+        lines.append(f"   关键位：止损 {stop_val:.2f} 支撑 {support_val:.2f} 现价 {current:.2f} 压力 {resistance_val:.2f} 确认 {confirm_val:.2f}")
+
+        # 信号摘要
         signal_summary = _latest_signal_summary(r)
-        signal_text = f"  {signal_summary}" if signal_summary else ""
+        if signal_summary:
+            lines.append(f"   信号：{signal_summary}")
 
-        lines.append(f"{i}. {name}  {scene}  {current:.2f}元  {atr_text}{wr_text}{signal_text}")
-        lines.append(f"   首仓≤{atr_cap}% | 止损 {stop_val:.2f}元")
-        fusion = r.get("fusion", {}) or {}
-        fc = fusion.get("confidence") if isinstance(fusion, dict) else None
-        if fc is not None and fc > 0:
-            lines.append(f"   融合:{fusion.get('action', '?')} | 置信度{fc}")
         lines.append("")
 
-    if market_level == "很差":
-        lines.append("👉 大盘很差，所有标的先观察，不急着买")
-    elif market_level == "偏弱":
-        lines.append("👉 大盘偏弱，优先选波动小、信号靠谱的")
-    else:
-        lines.append("👉 同等条件下，优先选波动小的")
+    # ── 量化排序结论 ──
+    ranking = _render_ranking_conclusion(sorted_reports, _scores, market_level)
+    lines.extend(ranking)
 
     return "\n".join(lines)
+
+
+def _render_ranking_conclusion(sorted_reports: list[dict[str, Any]],
+                                get_scores,
+                                market_level: str) -> list[str]:
+    """生成量化排序结论，解释为什么这样排。"""
+    if len(sorted_reports) < 2:
+        return []
+
+    scores_list = [get_scores(r) for r in sorted_reports]
+
+    # 多维度打分对比
+    dim_labels = {
+        "total_score": "综合",
+        "chanlun_score": "缠论",
+        "wyckoff_score": "威科夫",
+        "chip_score": "筹码",
+        "fusion_score": "融合",
+        "momentum_score": "动能",
+    }
+
+    result: list[str] = ["", "📊 多维度对比"]
+
+    # 表头
+    headers = ["标的"] + [dim_labels.get(d, d) for d in dim_labels if d != "total_score"] + ["总分"]
+    result.append("  " + "  ".join(f"{h:>4s}" for h in headers))
+
+    # 数据行
+    for i, (r, sc) in enumerate(zip(sorted_reports, scores_list)):
+        name = r.get("name", "?")[:6]
+        vals = []
+        for d in dim_labels:
+            if d == "total_score":
+                vals.append(f"{sc.get('total_score', 0):>4d}")
+            else:
+                vals.append(f"{sc.get(d, 0):>4d}")
+        result.append("  " + "  ".join(vals))
+
+    result.append("")
+
+    # 排序理由
+    winner = sorted_reports[0]
+    winner_scores = scores_list[0]
+    winner_name = winner.get("name", "?")
+    winner_total = winner_scores.get("total_score", 0)
+
+    reasons = []
+    for j in range(1, len(sorted_reports)):
+        other = sorted_reports[j]
+        other_scores = scores_list[j]
+        other_total = other_scores.get("total_score", 0)
+        delta = winner_total - other_total
+        if delta <= 0:
+            continue
+
+        # 找出赢在哪几个维度
+        wins = []
+        for d in ("chanlun_score", "wyckoff_score", "chip_score", "fusion_score", "momentum_score"):
+            wd = winner_scores.get(d, 0) - other_scores.get(d, 0)
+            if wd > 0:
+                dim_name = dim_labels.get(d, d)
+                wins.append(f"{dim_name}+{wd}")
+
+        reason = f"{winner_name} 领先 {delta} 分"
+        if wins:
+            reason += f"（优势：{', '.join(wins[:3])}）"
+        reasons.append(reason)
+
+    # ATR 补充提示
+    atr_info = []
+    for r in sorted_reports:
+        atr_pct = to_float(r.get("atr_ratio")) or 0.0
+        atr_pct *= 100
+        atr_info.append((r.get("name", "?"), atr_pct))
+    min_atr_name = min(atr_info, key=lambda x: x[1])[0]
+    if len(atr_info) >= 2:
+        reasons.append(f"波动率最低：{min_atr_name}（{min(atr_info, key=lambda x: x[1])[1]:.0f}%）")
+
+    if reasons:
+        result.append("💡 排序理由：")
+        for reason in reasons:
+            result.append(f"  • {reason}")
+
+    # 大盘提示
+    if market_level == "很差":
+        result.append("")
+        result.append("👉 大盘很差，所有标的先观察，不急着买")
+    elif market_level == "偏弱":
+        result.append("")
+        result.append("👉 大盘偏弱，优先选波动小、信号靠谱的")
+    elif reasons:
+        result.append("")
+        result.append(f"👉 同等条件下，优先选波动小的（{min_atr_name} 波动最低）")
+
+    return result
 
 
 def cmd_reconcile(args: argparse.Namespace) -> int:

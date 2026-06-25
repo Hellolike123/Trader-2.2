@@ -22,6 +22,12 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+# 确保 trader_shared 可被 import
+_ROOT = Path(__file__).resolve().parent.parent
+_SHARED_DIR = _ROOT / "02-共享模块-shared"
+if str(_SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(_SHARED_DIR))
+
 import trader_shared
 
 # ── 1. 交易时间守卫 ──────────────────────────────────────────

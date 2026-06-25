@@ -11,7 +11,12 @@ import sys
 import os
 from pathlib import Path
 
-# trader_shared 自动配置共享模块路径
+# 确保 trader_shared 可被 import
+_ROOT = Path(__file__).resolve().parent.parent
+_SHARED_DIR = _ROOT / "02-共享模块-shared"
+if str(_SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(_SHARED_DIR))
+
 import trader_shared
 
 # Skill 脚本目录仍需手动加入（不在 trader_shared 包内）
