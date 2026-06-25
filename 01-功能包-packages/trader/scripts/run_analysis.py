@@ -295,7 +295,26 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
 
     sec = snapshot.security
     quote = snapshot.quote
-    bars = snapshot.daily_bars
+    bars = list(snapshot.daily_bars)  # copy to avoid mutating snapshot
+
+    # 如果日线最新日期不是今天，追加今日 quote 作为当天 bar
+    # （解决盘中分析时日线数据滞后导致阶段判定错误的问题）
+    _today = str(quote.get("trade_date") or "")[:10]
+    _last_date = str(bars[-1].get("date") or bars[-1].get("trade_date") or "")[:10] if bars else ""
+    _cp = quote.get("current_price")
+    if _today and _last_date != _today and _cp is not None and float(_cp) > 0:
+        _chg = float(quote.get("current_change_pct") or 0)
+        _prev_close = float(_cp) / (1 + _chg / 100) if _chg != 0 else float(_cp)
+        bars.append({
+            "date": _today,
+            "open": _prev_close,
+            "close": float(_cp),
+            "high": float(_cp),
+            "low": float(_cp),
+            "volume": 0,
+            "data_source": "quote-today",
+            "data_status": "full",
+        })
     bars_5m = snapshot.bars_5m
     last_bar = bars[-1] if bars else {}
     atr14_val = float(last_bar.get("atr14", 0) or 0)
@@ -425,7 +444,25 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             _disclaimer = "，信号冲突建议等待"
         elif _conf < 0.3:
             _disclaimer = "，信号弱轻仓"
-        report_fusion["fusion_verbatim"] = f"融合｜{_emoji} {_action}（加权分 {_ws:.2f}，置信度 {_conf:.0%}{_disclaimer}）"
+        _main_line = f"融合｜{_emoji} {_action}（加权分 {_ws:.2f}，置信度 {_conf:.0%}{_disclaimer}）"
+        # 第二行：各维度状态（显示具体信号，不只方向）
+        _sd = report_fusion.get("signals_detail") or {}
+        _dim_parts = []
+        for key, label in [("chan", "缠论"), ("wyckoff", "威科夫"), ("momentum", "动量")]:
+            _sig = _sd.get(key)
+            if isinstance(_sig, dict):
+                _reason = str(_sig.get("reason", ""))
+                # 去掉前缀
+                _short = _reason.replace("缠论", "").replace("威科夫", "").replace("动量", "").strip()
+                if not _short or _short == "无明确信号":
+                    _dim_parts.append(f"{label}无信号")
+                elif key == "momentum" and "、" in _short:
+                    # 动量信号可能很长，只取最后一个最重要的
+                    _dim_parts.append(f"{label}{_short.split('、')[-1]}")
+                else:
+                    _dim_parts.append(f"{label}{_short}")
+        _breakdown = f"  {'｜'.join(_dim_parts)}" if _dim_parts else ""
+        report_fusion["fusion_verbatim"] = _main_line + ("\n" + _breakdown if _breakdown else "")
     except Exception:
         report_fusion["fusion_verbatim"] = "融合｜数据异常"
 
@@ -694,6 +731,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             "confidence": report_fusion.get("confidence", 0),
             "weighted_score": report_fusion.get("weighted_score", 0),
         },
+        wyckoff_result=wyck_result,
     )
 
     # 用 major_stage 替代旧 stage 计算 upward_momentum（修复 P1-4）
@@ -1341,7 +1379,7 @@ def render_markdown(r: dict) -> str:
 
     # 相对大盘强度
     market_env_data = r.get("market_env") or {}
-    market_idx_chg = float(market_env_data.get("index_change_pct") or 0)
+    market_idx_chg = float(market_env_data.get("change_pct") or market_env_data.get("index_change_pct") or 0)
     if market_idx_chg != 0 or change_pct != 0:
         rel_str = change_pct - market_idx_chg
         rel_label = "强于大盘" if rel_str > 0.5 else ("弱于大盘" if rel_str < -0.5 else "与大盘同步")
@@ -1472,15 +1510,48 @@ def render_markdown(r: dict) -> str:
         trend_desc = f"等信号确认"
     lines.append(f"  {stage_desc} ｜ {trend_desc}")
 
-    # EXPMA + 多窗共振（各1行）
+    # 技术指标摘要 → 压缩为1行，告诉你每个周期的方向
+    _ind_parts = []
     ems = r.get("expma_status") or {}
     if ems.get("total_score") is not None:
-        em_total = ems["total_score"]
-        em_trend = ems.get("trend_label", "无数据")
-        lines.append(f"  EXPMA {em_trend}（{em_total}/10）")
+        _em_trend = ems.get("trend_label", "")
+        _em_short = _em_trend.replace("偏多排列", "均线多头").replace("偏空排列", "均线空头")
+        _ind_parts.append(f"{_em_short}（{ems['total_score']}/10）")
+
     res = r.get("resonance") or {}
-    if res.get("total_score") is not None:
-        _render_resonance(res, current_price, lines)
+    _week_label = str(res.get("weekly_label", ""))
+    _day_label = str(res.get("daily_label", ""))
+    _tim_label = str(res.get("timing_label", ""))
+
+    def _tf_short(label: str, name: str) -> str:
+        """把周期标签翻译成简短方向。"""
+        if "多头" in label:
+            return f"{name}多"
+        elif "空头" in label:
+            return f"{name}空"
+        elif "中性" in label or "震荡" in label:
+            return f"{name}平"
+        elif "站上" in label:
+            return f"{name}多"
+        elif "跌破" in label:
+            return f"{name}空"
+        return ""
+
+    # 只在有分歧时展开各周期方向，共振强时只说"多周期共振"
+    _res_score = int(res.get("total_score", 0))
+    if _res_score >= 8:
+        _ind_parts.append("多周期共振")
+    else:
+        _tf_parts = []
+        for lbl, nm in [(_week_label, "周"), (_day_label, "日"), (_tim_label, "60m")]:
+            s = _tf_short(lbl, nm)
+            if s:
+                _tf_parts.append(s)
+        if _tf_parts:
+            _ind_parts.append(" ｜ ".join(_tf_parts))
+
+    if _ind_parts:
+        lines.append(f"  {' ｜ '.join(_ind_parts)}")
 
     has_position = r.get("has_position", False)
     cost_price = float(r.get("cost_price") or 0)
@@ -1540,7 +1611,7 @@ def render_markdown(r: dict) -> str:
         chip_line_parts = [f"筹码{','.join(peak_strs)}"]
         current_pct = r.get("chip_current_pct")
         if current_pct is not None and current_pct > 50:
-            chip_line_parts.append(f"当前{current_pct:.0f}%")
+            chip_line_parts.append(f"获利{current_pct:.0f}%")
         chip_migration = r.get("chip_migration") or {}
         warning_text = chip_migration.get("warning_text", "")
         if "筹码在搬家" in warning_text:

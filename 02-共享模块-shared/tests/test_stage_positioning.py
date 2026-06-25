@@ -83,7 +83,7 @@ class TestDetectMajorStage:
         volumes = [1000] * 15 + [2000, 2200, 2400, 2600, 2800]
         bars = _make_bars(closes, volumes)
         ma_values = {"ma5": 12.0, "ma10": 11.5, "ma20": 11.0, "ma30": 10.5}
-        stage, confidence, reason = _detect_major_stage(12.5, ma_values, bars)
+        stage, confidence, reason, vp_stage = _detect_major_stage(12.5, ma_values, bars)
         assert stage == "主升"
         assert confidence > 50
 

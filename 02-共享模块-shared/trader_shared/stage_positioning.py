@@ -83,8 +83,14 @@ def _save_stage_state(state: dict[str, Any], symbol: str = "") -> None:
 
 # ── 量价关系判定（核心维度，权重 50%）──────────────────────
 
-def _assess_volume_price(bars: list[dict[str, Any]]) -> tuple[str, float, str]:
+def _assess_volume_price(
+    bars: list[dict[str, Any]],
+    wyckoff_result: dict[str, Any] | None = None,
+) -> tuple[str, float, str]:
     """威科夫量价关系判定四阶段。
+
+    优先使用 wyckoff_core 的真实信号（spring/upthrust/背离），
+    无威科夫信号时 fallback 到量比+涨跌幅启发式判断。
 
     Returns:
         (stage, score, reason)
@@ -92,6 +98,32 @@ def _assess_volume_price(bars: list[dict[str, Any]]) -> tuple[str, float, str]:
     """
     if not bars or len(bars) < 20:
         return "蓄势", 30, "数据不足，默认蓄势"
+
+    # ── 威科夫信号优先判定 ──
+    if wyckoff_result:
+        wyk = wyckoff_result.get("wyckoff", {}) if isinstance(wyckoff_result, dict) else {}
+        if isinstance(wyk, dict):
+            spring = wyk.get("spring_signal")
+            upthrust = wyk.get("upthrust_signal")
+            bullish_div = wyk.get("bullish_volume_divergence")
+            bearish_div = wyk.get("bearish_volume_divergence")
+            spring_reason = wyk.get("spring_reason", "")
+
+            # Spring = 吸筹确认 → 蓄势偏强/主升前兆
+            if spring:
+                return "蓄势偏强", 75, f"威科夫弹簧确认（{spring_reason}），吸筹末期"
+
+            # 上冲回落 = 派发信号
+            if upthrust:
+                return "派发", 70, "威科夫上冲回落，派发信号"
+
+            # 看多量价背离 = 吸筹
+            if bullish_div and not bearish_div:
+                return "蓄势偏强", 60, "威科夫看多量价背离，吸筹中"
+
+            # 看空量价背离 = 派发
+            if bearish_div and not bullish_div:
+                return "派发", 60, "威科夫看空量价背离，派发中"
 
     recent5 = bars[-5:]
     recent20 = bars[-20:]
@@ -103,15 +135,16 @@ def _assess_volume_price(bars: list[dict[str, Any]]) -> tuple[str, float, str]:
     avg_vol_20 = sum(vol_20) / max(len(vol_20), 1)
     vol_ratio = avg_vol_5 / max(avg_vol_20, 1)
 
-    # P1 Fix: 计算 5 日涨幅时，剔除单日涨跌幅 > 7% 的跳空缺口日，
+    # P1 Fix: 计算 5 日涨幅时，剔除历史单日涨跌幅 > 7% 的跳空缺口日，
     # 避免单日缺口主导阶段判定（如涨停后横盘 4 天被误判为"主升"）
+    # 注意：最后一天（今天）不排除，真突破不应被误杀
     close_5_start = float(recent5[0].get("close") or 0)
     close_5_end = float(recent5[-1].get("close") or 0)
 
-    # 计算每日涨跌幅，找出跳空日
+    # 计算每日涨跌幅，找出跳空日（排除最后一天/今天）
     gap_indices: set[int] = set()
     for i, b in enumerate(recent5):
-        if i == 0:
+        if i == 0 or i == len(recent5) - 1:
             continue
         prev_c = float(recent5[i - 1].get("close") or 0)
         cur_c = float(b.get("close") or 0)
@@ -151,11 +184,14 @@ def _assess_volume_price(bars: list[dict[str, Any]]) -> tuple[str, float, str]:
     is_rising = price_change_5 > 0.03  # 涨幅 > 3%
     is_falling = price_change_5 < -0.03  # 跌幅 > 3%
     is_flat = abs(price_change_5) < 0.01  # 振幅 < 1%
+    is_strong_rising = price_change_5 > 0.08  # 涨幅 > 8%，强势突破
 
     if is_low_volume and is_flat and amplitude < 0.05:
         return "蓄势", 70, f"缩量横盘（量比{vol_ratio:.1f}，涨跌{price_change_5*100:+.1f}%）"
     if is_high_volume and is_rising:
         return "主升", 80, f"放量上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
+    if is_strong_rising:
+        return "主升", 75, f"强势上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
     if is_high_volume and is_flat:
         return "派发", 65, f"放量不涨（量比{vol_ratio:.1f}，涨跌{price_change_5*100:+.1f}%）"
     if is_high_volume and is_falling:
@@ -303,18 +339,20 @@ def _detect_major_stage(
     ma_values: dict[str, float | None],
     bars: list[dict[str, Any]] | None = None,
     fusion_hint: dict[str, Any] | None = None,
-) -> tuple[str, float, str]:
+    wyckoff_result: dict[str, Any] | None = None,
+) -> tuple[str, float, str, str]:
     """综合三个维度判定大阶段。
 
     Args:
         fusion_hint: 融合层的 {action, confidence, weighted_score}
                      强信号时作为加权投票的额外一票。
+        wyckoff_result: 威科夫分析原始输出，含 spring/upthrust/背离 信号。
 
     Returns:
         (stage, confidence, reason)
     """
-    # 量价关系（核心，权重 40%）
-    vp_stage, vp_score, vp_reason = _assess_volume_price(bars)
+    # 量价关系（核心，权重 40%）— 威科夫信号优先，量比兜底
+    vp_stage, vp_score, vp_reason = _assess_volume_price(bars, wyckoff_result=wyckoff_result)
 
     # MA 结构（辅助，权重 40%）
     ma5 = ma_values.get("ma5")
@@ -326,11 +364,12 @@ def _detect_major_stage(
     # ATR 波动（辅助，权重 20%）
     atr_stage, atr_score, atr_reason = _assess_atr_volatility(bars)
 
-    # 加权投票（扩展：蓄势偏强 / 蓄势偏弱作为中间态）
-    stage_votes: dict[str, float] = {"蓄势": 0, "蓄势偏强": 0, "蓄势偏弱": 0, "主升": 0, "派发": 0, "衰退": 0}
-    stage_votes[vp_stage] += vp_score * 0.4
-    stage_votes[ma_stage] += ma_score * 0.4
-    stage_votes[atr_stage] += atr_score * 0.2
+    # 加权投票（蓄势偏强/偏弱合并到蓄势，避免分票导致误判）
+    stage_votes: dict[str, float] = {"蓄势": 0, "主升": 0, "派发": 0, "衰退": 0}
+    for stage_name, score, weight in [(vp_stage, vp_score, 0.4), (ma_stage, ma_score, 0.4), (atr_stage, atr_score, 0.2)]:
+        target = "蓄势" if stage_name in ("蓄势", "蓄势偏强", "蓄势偏弱") else stage_name
+        if target in stage_votes:
+            stage_votes[target] += score * weight
 
     # fusion_hint: 强信号作为额外一票
     if fusion_hint:
@@ -355,7 +394,7 @@ def _detect_major_stage(
     confidence = min(100, int(total_score))
 
     reason = f"量价:{vp_reason} | 均线:{ma_reason} | ATR:{atr_reason}"
-    return best_stage, confidence, reason
+    return best_stage, confidence, reason, vp_stage
 
 
 # ── 短期动能判定 ──────────────────────────────────────────────
@@ -401,8 +440,10 @@ def _layer1_multi_day_confirm(
     raw_stage: str,
     state: dict[str, Any],
     trade_date: str = "",
+    price_change_5: float = 0.0,
 ) -> tuple[str, bool]:
-    """第一层：多日确认。连续 3 日信号一致才确认阶段转换。
+    """第一层：多日确认。默认连续 3 日信号一致才确认阶段转换。
+    但当近5日涨幅>5%时，只需1天确认（避免强势突破被死板规则拖住）。
 
     Returns:
         (confirmed_stage, is_transition)
@@ -411,6 +452,9 @@ def _layer1_multi_day_confirm(
     pending_stage = state.get("pending_stage", "")
     pending_count = state.get("pending_count", 0)
     pending_date = state.get("pending_date", "")
+
+    # 强势突破时降低确认天数
+    required_days = 1 if abs(price_change_5) > 0.05 else 3
 
     if raw_stage == prev_stage:
         # 信号一致，重置 pending
@@ -426,14 +470,16 @@ def _layer1_multi_day_confirm(
     if raw_stage == pending_stage:
         # 连续相同的非当前信号 — 按交易日计数
         if trade_date == pending_date:
-            # 同一天多次调用，不递增
+            # 同一天：如果已满确认天数，直接确认；否则不递增
+            if pending_count >= required_days:
+                return raw_stage, True
             return prev_stage, False
         # 新交易日，递增
         pending_count += 1
-        if pending_count >= 3:
+        if pending_count >= required_days:
             # 确认转换
             return raw_stage, True
-        # 还没到 3 天，保持当前阶段
+        # 还没到确认天数，保持当前阶段
         state["pending_count"] = pending_count
         state["pending_date"] = trade_date
         return prev_stage, False
@@ -449,13 +495,17 @@ def _layer2_confidence_gate(
     stage: str,
     confidence: int,
     state: dict[str, Any],
+    vp_stage: str = "",
 ) -> tuple[str, int]:
-    """第二层：置信度评分。< 35% 保持上次阶段。
+    """第二层：置信度评分。< 35% 保持上次阶段，但量价明确判主升/衰退时不拦截。
 
     Returns:
         (final_stage, final_confidence)
     """
     if confidence < 35:
+        # 量价维度明确判主升或衰退时，信任量价信号（不被置信度门控拦截）
+        if vp_stage in ("主升", "衰退"):
+            return stage, max(confidence, 40)
         prev_stage = state.get("last_confirmed_stage", "蓄势")
         return prev_stage, confidence
     return stage, confidence
@@ -694,6 +744,7 @@ def assess_stage(
     symbol: str = "",
     trade_date: str = "",
     fusion_hint: dict[str, Any] | None = None,
+    wyckoff_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """四阶段定位主函数（威科夫量价驱动 + 四层防护）
 
@@ -715,9 +766,9 @@ def assess_stage(
     ma10 = ma_values.get("ma10")
     ma20 = ma_values.get("ma20")
 
-    # 第一步：综合阶段判定（量价 + MA + ATR + fusion_hint）
-    raw_stage, raw_confidence, raw_reason = _detect_major_stage(
-        current, ma_values, bars, fusion_hint=fusion_hint
+    # 第一步：综合阶段判定（量价 + MA + ATR + fusion_hint + 威科夫）
+    raw_stage, raw_confidence, raw_reason, vp_stage = _detect_major_stage(
+        current, ma_values, bars, fusion_hint=fusion_hint, wyckoff_result=wyckoff_result
     )
 
     # P1 Fix: 新股置信度打折 — 当数据不足 60 天时，置信度按比例折扣
@@ -739,14 +790,27 @@ def assess_stage(
     # 逻辑合理：先过滤低置信信号，再做多日确认，注释编号之前写反了
 
     # 置信度门控（先于多日确认，过滤噪音信号）
-    gated_stage, gated_confidence = _layer2_confidence_gate(raw_stage, raw_confidence, state)
+    gated_stage, gated_confidence = _layer2_confidence_gate(raw_stage, raw_confidence, state, vp_stage=vp_stage)
     if gated_stage != raw_stage:
         protection_notes.append(f"置信度{raw_confidence}%<50%，保持{gated_stage}")
 
     # 多日确认（在置信度过滤之后，确认阶段转换真实性）
-    confirmed_stage, is_transition = _layer1_multi_day_confirm(gated_stage, state, trade_date=trade_date)
+    # 计算5日涨幅，强势时降低确认天数
+    _price_change_5 = 0.0
+    if bars and len(bars) >= 5:
+        try:
+            _c5 = float(bars[-5].get("close") or 0)
+            _cend = float(bars[-1].get("close") or 0)
+            if _c5 > 0:
+                _price_change_5 = (_cend - _c5) / _c5
+        except (TypeError, ValueError):
+            pass
+    confirmed_stage, is_transition = _layer1_multi_day_confirm(
+        gated_stage, state, trade_date=trade_date, price_change_5=_price_change_5
+    )
     if confirmed_stage != gated_stage:
-        protection_notes.append(f"多日确认中（{state.get('pending_count', 0)}/3）")
+        _req = 1 if abs(_price_change_5) > 0.05 else 3
+        protection_notes.append(f"多日确认中（{state.get('pending_count', 0)}/{_req}）")
 
     # 第三层：交叉验证
     validated_stage, conflict_note = _layer3_cross_validation(
