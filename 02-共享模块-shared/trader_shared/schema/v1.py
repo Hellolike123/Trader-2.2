@@ -51,8 +51,8 @@ def _validate_plain_report_format(lines: list[str], markdown: str) -> list[str]:
         errors.append("bold markdown markers are not allowed")
     if any(line.startswith(("- ", "* ")) for line in lines):
         errors.append("markdown bullet lists are not allowed")
-    if not any("MA5" in line and "MA10" in line and "MA20" in line and "MA30" in line for line in lines):
-        errors.append("top summary must include MA5 / MA10 / MA20 / MA30")
+    if not any("MA20" in line and "MA250" in line for line in lines):
+        errors.append("top summary must include MA20 / MA250")
     return errors
 
 

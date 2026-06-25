@@ -36,6 +36,7 @@ def sample_report() -> dict:
         "range_low": 54.6,
         "range_high": 65.0,
         "ma": {"ma5": "57.96", "ma10": "--", "ma20": "--", "ma30": "--"},
+        "ma_raw": {"ma5": 57.96, "ma10": 0, "ma20": 0, "ma30": 0, "ma250": 0},
     }
 
 
@@ -43,7 +44,7 @@ def test_render_contract() -> None:
     markdown = render_markdown(sample_report())
 
     assert markdown.startswith("分析报告 — ") or markdown.startswith("📍")
-    assert "MA5" in markdown
+    assert "MA20" in markdown
     assert "📍 买卖点" in markdown
     assert "📊" in markdown  # 阶段判断
     assert "✅ 亮点" in markdown
@@ -598,6 +599,7 @@ def test_render_markdown_contains_win_rate() -> None:
         "stage": "修复",
         "scene": "防守观察",
         "ma": {"ma5": "57.96", "ma10": "--", "ma20": "--", "ma30": "--"},
+        "ma_raw": {"ma5": 57.96, "ma10": 0, "ma20": 0, "ma30": 0, "ma250": 0},
         "risk_reward": "2.5",
         "volume_ratio": 1.2,
     }
@@ -610,9 +612,9 @@ def test_render_markdown_contains_win_rate() -> None:
         assert "📍 买卖点" in markdown
         assert "止损" in markdown
         assert "试探买" in markdown
-        assert "💡 为什么这么操作" in markdown
-        assert "📊 五层打分" in markdown
-        assert "📊 股性与历史回测" in markdown
-        assert "🎯 信号判断" in markdown
+        assert "📊 股性" in markdown
+        assert "MA250" in markdown
+        assert "试探买" in markdown
+        assert "确认" in markdown
 
 
