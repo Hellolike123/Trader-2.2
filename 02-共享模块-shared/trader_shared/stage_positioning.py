@@ -1560,16 +1560,16 @@ def evaluate_position_state(
         if add_score >= 5:
             return _make_position_state(
                 "回踩加仓", f"回踩支撑+条件满足（{add_score}/5），加仓15%",
-                15, conditions, stop_price=add_on_stop,
+                15, conditions, stop_price=add_on_stop, pullback_add_score=add_score,
             )
         if add_score >= 3:
             return _make_position_state(
                 "回踩加仓", f"回踩支撑+部分条件满足（{add_score}/5），加仓10%",
-                10, conditions, stop_price=add_on_stop,
+                10, conditions, stop_price=add_on_stop, pullback_add_score=add_score,
             )
         return _make_position_state(
             "回踩加仓", f"回踩支撑但条件不足（{add_score}/5），观望",
-            0, conditions, stop_price=add_on_stop,
+            0, conditions, stop_price=add_on_stop, pullback_add_score=add_score,
         )
 
     # 阻力位分歧（到达阻力位，用多因子评分决定减仓力度）
@@ -1840,6 +1840,7 @@ def _make_position_state(
     conditions: dict[str, bool],
     stop_price: float = 0.0,
     take_profit_price: float = 0.0,
+    pullback_add_score: int = 0,
 ) -> dict[str, Any]:
     """构建状态机返回值。"""
     return {
@@ -1851,6 +1852,7 @@ def _make_position_state(
         "take_profit_price": take_profit_price,
         "conditions": conditions,
         "transition_reason": reason,
+        "pullback_add_score": pullback_add_score,
     }
 
 

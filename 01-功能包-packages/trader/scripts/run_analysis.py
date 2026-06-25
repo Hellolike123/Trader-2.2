@@ -1556,6 +1556,38 @@ def render_markdown(r: dict) -> str:
     if stage_exit and major_stage in ("主升", "拉升"):
         lines.append(f"  阶段转{stage_exit} → 清仓")
 
+    # 回踩加仓条件（显示支撑位回踩时的加仓评分）
+    _ps = r.get("position_state") or {}
+    _pb_score = int(_ps.get("pullback_add_score") or 0)
+    _support_val = float(r.get("support") or 0)
+    if _support_val > 0:
+        _dist_support = (current_price - _support_val) / current_price * 100
+        # 列出加仓条件满足情况
+        _pb_parts = []
+        _pb_parts.append(f"距支撑{_dist_support:.1f}%")
+        if _dist_support < 3:
+            _pb_parts.append("到位")
+        # 缩量
+        if volume_ratio_val > 0 and volume_ratio_val < 0.8:
+            _pb_parts.append("缩量")
+        # RSI（从report的bars_for_range算）
+        _bars_for_rsi = r.get("daily_bars") or []
+        if _bars_for_rsi and len(_bars_for_rsi) >= 14:
+            _closes = [float(b.get("close") or 0) for b in _bars_for_rsi[-14:] if b.get("close")]
+            if len(_closes) >= 14:
+                _gains = [max(0, _closes[i] - _closes[i-1]) for i in range(1, len(_closes))]
+                _losses = [max(0, _closes[i-1] - _closes[i]) for i in range(1, len(_closes))]
+                _avg_gain = sum(_gains) / len(_gains) if _gains else 0
+                _avg_loss = sum(_losses) / len(_losses) if _losses else 0
+                _rs = _avg_gain / max(_avg_loss, 0.01)
+                _rsi = 100 - (100 / (1 + _rs))
+                if _rsi < 40:
+                    _pb_parts.append(f"RSI超卖({_rsi:.0f})")
+        if _pb_score >= 3:
+            lines.append(f"  {_support_val:.2f} 回踩加仓｜评分 {_pb_score}/5｜{'｜'.join(_pb_parts)}")
+        elif _dist_support < 5:
+            lines.append(f"  {_support_val:.2f} 支撑回踩观察｜{'｜'.join(_pb_parts)}")
+
     has_position = r.get("has_position", False)
     cost_price = float(r.get("cost_price") or 0)
     if has_position and cost_price > 0:
