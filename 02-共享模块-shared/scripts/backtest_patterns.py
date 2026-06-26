@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import List
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -42,21 +43,26 @@ def fetch_daily_bars(code: str, days: int = 120) -> list[dict]:
 
 
 def run_backtest(
-    bars: list[dict],
+    bars: List[dict],
     window: int = 60,
-    hold_days: int = 5,
+    max_hold_days: int = 20,
+    stop_loss_pct: float = 0.05,
 ) -> dict:
-    """运行形态识别回测。
+    """运行形态识别回测 (改进版)。
 
     策略逻辑:
     - 滑动窗口检测形态
-    - 检测到买入信号(W底) → 持有 hold_days 天后卖出
-    - 检测到卖出信号(M头) → 立即卖出(如果有持仓)
+    - W底 → 买入，止损设在入场价下方
+    - M头 → 卖出(如果有持仓)
+    - 到达目标位 → 卖出
+    - 跌破止损 → 卖出
+    - 持有超过 max_hold_days → 卖出
 
     Args:
         bars: 日线数据
         window: 形态检测窗口大小
-        hold_days: 买入后持有天数
+        max_hold_days: 最大持有天数
+        stop_loss_pct: 止损比例 (默认5%)
 
     Returns:
         回测结果统计
@@ -73,34 +79,52 @@ def run_backtest(
             closes.append(0.0)
 
     trades = []
-    position = None  # {"entry_price": float, "entry_idx": int, "pattern": str}
+    position = None
 
     for i in range(window, len(closes)):
-        # 如果有持仓，检查是否到期
+        current_price = closes[i]
+
+        # 如果有持仓，检查退出条件
         if position is not None:
             days_held = i - position["entry_idx"]
-            if days_held >= hold_days:
-                # 到期卖出
-                exit_price = closes[i]
-                pnl_pct = (exit_price - position["entry_price"]) / position["entry_price"]
+            should_exit = False
+            exit_reason = ""
+
+            # 止损检查
+            if current_price <= position["stop_loss"]:
+                should_exit = True
+                exit_reason = "止损"
+
+            # 目标位检查
+            elif position.get("target") and current_price >= position["target"]:
+                should_exit = True
+                exit_reason = "目标位"
+
+            # 最大持有天数
+            elif days_held >= max_hold_days:
+                should_exit = True
+                exit_reason = "到期"
+
+            if should_exit:
+                pnl_pct = (current_price - position["entry_price"]) / position["entry_price"]
                 trades.append({
                     "entry_idx": position["entry_idx"],
                     "exit_idx": i,
                     "entry_price": position["entry_price"],
-                    "exit_price": exit_price,
+                    "exit_price": current_price,
                     "pnl_pct": pnl_pct,
                     "pattern": position["pattern"],
                     "hold_days": days_held,
+                    "exit_reason": exit_reason,
                 })
                 position = None
 
-        # 如果无持仓，检测买入信号
+        # 如果无持仓，检测信号
         if position is None:
             window_closes = closes[i - window:i + 1]
             window_highs = [bars[j].get("high", closes[j]) for j in range(i - window, i + 1)]
             window_lows = [bars[j].get("low", closes[j]) for j in range(i - window, i + 1)]
 
-            # 转换为 float
             try:
                 highs_f = [float(str(h).replace(",", "")) for h in window_highs]
                 lows_f = [float(str(l).replace(",", "")) for l in window_lows]
@@ -109,12 +133,31 @@ def run_backtest(
 
             result = detect_pattern(window_closes, highs_f, lows_f)
 
-            if result.signal == 1:  # 买入信号
+            if result.signal == 1 and result.pattern == "double_bottom":
+                # 买入: W底确认
+                stop_loss = current_price * (1 - stop_loss_pct)
                 position = {
-                    "entry_price": closes[i],
+                    "entry_price": current_price,
                     "entry_idx": i,
                     "pattern": result.pattern,
+                    "target": result.target if result.target > current_price else None,
+                    "stop_loss": stop_loss,
                 }
+            elif result.signal == -1 and result.pattern == "double_top":
+                # M头 → 如果有持仓则卖出
+                if position is not None:
+                    pnl_pct = (current_price - position["entry_price"]) / position["entry_price"]
+                    trades.append({
+                        "entry_idx": position["entry_idx"],
+                        "exit_idx": i,
+                        "entry_price": position["entry_price"],
+                        "exit_price": current_price,
+                        "pnl_pct": pnl_pct,
+                        "pattern": position["pattern"],
+                        "hold_days": i - position["entry_idx"],
+                        "exit_reason": "M头卖出",
+                    })
+                    position = None
 
     # 统计结果
     if not trades:
@@ -133,8 +176,16 @@ def run_backtest(
     avg_win = sum(t["pnl_pct"] for t in winning_trades) / len(winning_trades) if winning_trades else 0
     avg_loss = sum(t["pnl_pct"] for t in losing_trades) / len(losing_trades) if losing_trades else 0
 
-    # 盈亏比
     profit_factor = abs(avg_win / avg_loss) if avg_loss != 0 else float("inf")
+
+    # 按退出原因统计
+    exit_reasons = {}
+    for t in trades:
+        reason = t.get("exit_reason", "未知")
+        if reason not in exit_reasons:
+            exit_reasons[reason] = {"count": 0, "total_pnl": 0}
+        exit_reasons[reason]["count"] += 1
+        exit_reasons[reason]["total_pnl"] += t["pnl_pct"]
 
     return {
         "total_trades": len(trades),
@@ -146,6 +197,7 @@ def run_backtest(
         "avg_win": avg_win,
         "avg_loss": avg_loss,
         "profit_factor": profit_factor,
+        "exit_reasons": exit_reasons,
         "trades": trades,
     }
 
@@ -155,7 +207,8 @@ def main():
     parser.add_argument("--target", required=True, help="股票代码或名称")
     parser.add_argument("--days", type=int, default=120, help="回测天数")
     parser.add_argument("--window", type=int, default=60, help="形态检测窗口")
-    parser.add_argument("--hold", type=int, default=5, help="持有天数")
+    parser.add_argument("--max-hold", type=int, default=20, help="最大持有天数")
+    parser.add_argument("--stop-loss", type=float, default=0.05, help="止损比例")
     args = parser.parse_args()
 
     print(f"获取 {args.target} 日线数据...")
@@ -172,8 +225,13 @@ def main():
     print(f"数据范围: {first_date} ~ {last_date}")
 
     # 运行回测
-    print(f"\n运行回测 (窗口={args.window}, 持有={args.hold}天)...")
-    result = run_backtest(bars, window=args.window, hold_days=args.hold)
+    print(f"\n运行回测 (窗口={args.window}, 最大持有={args.max_hold}天, 止损={args.stop_loss:.0%})...")
+    result = run_backtest(
+        bars,
+        window=args.window,
+        max_hold_days=args.max_hold,
+        stop_loss_pct=args.stop_loss,
+    )
 
     # 输出结果
     print("\n" + "=" * 50)
@@ -198,15 +256,22 @@ def main():
     print(f"平均亏损: {result['avg_loss']:.2%}")
     print(f"盈亏比: {result['profit_factor']:.2f}")
 
+    # 退出原因统计
+    if result.get("exit_reasons"):
+        print("\n退出原因统计:")
+        for reason, stats in result["exit_reasons"].items():
+            avg = stats["total_pnl"] / stats["count"] if stats["count"] > 0 else 0
+            print(f"  {reason}: {stats['count']}次, 平均收益 {avg:+.2%}")
+
     # 显示交易明细
     if result.get("trades"):
         print("\n交易明细:")
-        print("-" * 50)
+        print("-" * 60)
         for i, t in enumerate(result["trades"], 1):
             emoji = "🟢" if t["pnl_pct"] > 0 else "🔴"
             print(f"  {emoji} #{i}: {t['pattern']} | "
                   f"买入{t['entry_price']:.2f} → 卖出{t['exit_price']:.2f} | "
-                  f"收益 {t['pnl_pct']:+.2%}")
+                  f"收益 {t['pnl_pct']:+.2%} | {t.get('exit_reason', '')}")
 
 
 if __name__ == "__main__":
