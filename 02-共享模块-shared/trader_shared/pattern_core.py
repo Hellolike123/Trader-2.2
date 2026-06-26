@@ -53,6 +53,10 @@ def _find_local_extrema(
         window = values[i - min_gap: i + min_gap + 1]
         val = values[i]
 
+        # 平盘数据跳过 (min == max 表示无波动)
+        if min(window) == max(window):
+            continue
+
         # 局部低点
         if val == min(window):
             if not lows or (i - lows[-1][0]) >= min_gap:
@@ -116,8 +120,8 @@ def _detect_double_bottom(
         # 当前价格突破颈线
         current = closes[-1]
         if current > neckline:
-            # 目标位: 颈线 + 形态高度
-            pattern_height = neckline - low1
+            # 目标位: 颈线 + 形态高度 (使用两个低点中的最低点)
+            pattern_height = neckline - min(low1, low2)
             target = neckline + pattern_height
 
             return PatternResult(
@@ -180,8 +184,8 @@ def _detect_double_top(
         # 当前价格跌破颈线
         current = closes[-1]
         if current < neckline:
-            # 目标位: 颈线 - 形态高度
-            pattern_height = high1 - neckline
+            # 目标位: 颈线 - 形态高度 (使用两个高点中的最高点)
+            pattern_height = max(high1, high2) - neckline
             target = neckline - pattern_height
 
             return PatternResult(
@@ -220,6 +224,10 @@ def _detect_triangle(
     if len(price_highs) < 2 or len(price_lows) < 2:
         return None
 
+    # 至少需要3个高点和3个低点才能形成有效三角形
+    if len(price_highs) < 3 or len(price_lows) < 3:
+        return None
+
     # 检查最近的高点是否递降
     recent_highs = price_highs[-min_points:]
     highs_declining = all(
@@ -251,9 +259,13 @@ def _detect_triangle(
     current = closes[-1]
     prev = closes[-2] if len(closes) > 1 else current
 
+    # 最小形态高度检查 (至少1%波动，避免退化信号)
+    pattern_height = upper_track - lower_track
+    if current > 0 and pattern_height < current * 0.01:
+        return None
+
     if current > upper_track and prev <= upper_track:
         # 向上突破
-        pattern_height = upper_track - lower_track
         target = upper_track + pattern_height
         return PatternResult(
             pattern="triangle_breakout",
@@ -265,7 +277,6 @@ def _detect_triangle(
         )
     elif current < lower_track and prev >= lower_track:
         # 向下突破
-        pattern_height = upper_track - lower_track
         target = lower_track - pattern_height
         return PatternResult(
             pattern="triangle_breakdown",

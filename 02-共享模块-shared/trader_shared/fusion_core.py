@@ -55,6 +55,9 @@ except ImportError:  # pragma: no cover
 
 FUSION_LOG_ONLY = os.environ.get("FUSION_LOG_ONLY", "false").lower() in ("true", "1", "yes")
 
+# ── 形态识别权重常量 ──
+PATTERN_WEIGHT = 0.10  # 形态信号在融合层中的基准权重
+
 
 def _log_fusion(result: dict) -> None:
     """打印 FUSION 日志，方便观察融合结果。
@@ -461,18 +464,18 @@ def merge_decisions(
     is_bearish_structure_warning = (strong_bearish_chan or strong_bearish_wyk) and not is_genuine_climax
 
     if is_breakout_or_bottom:
-        weights = {"chan": 0.40, "momentum": 0.18, "wyckoff": 0.32, "pattern": 0.10}
+        weights = {"chan": 0.40, "momentum": 0.18, "wyckoff": 0.32, "pattern": PATTERN_WEIGHT}
     elif is_genuine_climax:
         # 高位 + 强动量：动量权重最高（50%），高位看动量衰竭
-        weights = {"chan": 0.18, "momentum": 0.50, "wyckoff": 0.22, "pattern": 0.10}
+        weights = {"chan": 0.18, "momentum": 0.50, "wyckoff": 0.22, "pattern": PATTERN_WEIGHT}
     elif is_bearish_structure_warning:
         # 结构看空警告（顶背驰/上冲回落）：尊重结构，chan/wyk 权重高于动量，
         # 避免动量噪音在结构发出撤退信号时反向主导。
-        weights = {"chan": 0.40, "momentum": 0.18, "wyckoff": 0.32, "pattern": 0.10}
+        weights = {"chan": 0.40, "momentum": 0.18, "wyckoff": 0.32, "pattern": PATTERN_WEIGHT}
     else:
         regime_weights = get_regime_weights(regime)
         # 补齐 pattern 权重
-        weights = {**regime_weights, "pattern": 0.10}
+        weights = {**regime_weights, "pattern": PATTERN_WEIGHT}
 
     # 2.5 主力行为权重修正
     if main_force_env and main_force_env != "unknown":

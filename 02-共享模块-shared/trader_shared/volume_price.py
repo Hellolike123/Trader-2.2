@@ -126,7 +126,7 @@ def detect_volume_divergence(
 
     # 检查近3天是否有上影线
     recent_upper_shadow = any(
-        _has_upper_shadow(bars[i]) for i in range(-3, 0) if abs(i) <= len(bars)
+        _has_upper_shadow(bars[i]) for i in range(-3, 0)
     )
 
     # 检查是否创新高（近20日）
