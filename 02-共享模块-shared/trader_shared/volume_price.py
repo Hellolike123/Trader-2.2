@@ -28,32 +28,42 @@ class VolumeWarning:
     reason: str = ""                # 人类可读描述
 
 
+def _safe_float(val: Any) -> float:
+    """安全转换为 float，避免重复的 str().replace() 调用。"""
+    if isinstance(val, (int, float)):
+        return float(val)
+    try:
+        return float(str(val).replace(",", ""))
+    except (ValueError, TypeError):
+        return 0.0
+
+
 def _calc_volume_ratio(bars: List[Dict[str, Any]], window: int = 5) -> float:
     """计算量比（近N日均量 / 前N日均量）。"""
     if len(bars) < 2 * window:
         return 1.0
 
-    recent_vols = []
-    prev_vols = []
-    for b in bars[-window:]:
-        try:
-            v = float(str(b.get("volume", 0)).replace(",", ""))
-            recent_vols.append(v)
-        except (ValueError, TypeError):
-            pass
+    recent_sum = 0.0
+    recent_count = 0
+    prev_sum = 0.0
+    prev_count = 0
 
-    for b in bars[-2 * window:-window]:
-        try:
-            v = float(str(b.get("volume", 0)).replace(",", ""))
-            prev_vols.append(v)
-        except (ValueError, TypeError):
-            pass
+    for b in bars[-2 * window:]:
+        v = _safe_float(b.get("volume", 0))
+        if v <= 0:
+            continue
+        if recent_count < window:
+            recent_sum += v
+            recent_count += 1
+        else:
+            prev_sum += v
+            prev_count += 1
 
-    if not recent_vols or not prev_vols:
+    if recent_count == 0 or prev_count == 0:
         return 1.0
 
-    avg_recent = sum(recent_vols) / len(recent_vols)
-    avg_prev = sum(prev_vols) / len(prev_vols)
+    avg_recent = recent_sum / recent_count
+    avg_prev = prev_sum / prev_count
 
     return avg_recent / avg_prev if avg_prev > 0 else 1.0
 
@@ -63,38 +73,30 @@ def _calc_price_change(bars: List[Dict[str, Any]], days: int = 3) -> float:
     if len(bars) < days + 1:
         return 0.0
 
-    try:
-        current = float(str(bars[-1].get("close", 0)).replace(",", ""))
-        prev = float(str(bars[-1 - days].get("close", 0)).replace(",", ""))
-        if prev > 0:
-            return (current - prev) / prev
-    except (ValueError, TypeError):
-        pass
+    current = _safe_float(bars[-1].get("close", 0))
+    prev = _safe_float(bars[-1 - days].get("close", 0))
 
-    return 0.0
+    return (current - prev) / prev if prev > 0 else 0.0
 
 
 def _has_upper_shadow(bar: Dict[str, Any], threshold: float = 0.3) -> bool:
     """检查是否有长上影线（上影线占实体比例 > threshold）。"""
-    try:
-        high = float(str(bar.get("high", 0)).replace(",", ""))
-        low = float(str(bar.get("low", 0)).replace(",", ""))
-        close = float(str(bar.get("close", 0)).replace(",", ""))
-        open_ = float(str(bar.get("open", 0)).replace(",", ""))
+    high = _safe_float(bar.get("high", 0))
+    low = _safe_float(bar.get("low", 0))
+    close = _safe_float(bar.get("close", 0))
+    open_ = _safe_float(bar.get("open", 0))
 
-        if high == low:
-            return False
-
-        body_top = max(open_, close)
-        upper_shadow = high - body_top
-        body = abs(close - open_)
-
-        if body < 1e-10:
-            return upper_shadow / (high - low) > threshold
-
-        return upper_shadow / body > threshold
-    except (ValueError, TypeError):
+    if high == low or high == 0:
         return False
+
+    body_top = max(open_, close)
+    upper_shadow = high - body_top
+    body = abs(close - open_)
+
+    if body < 1e-10:
+        return upper_shadow / (high - low) > threshold
+
+    return upper_shadow / body > threshold
 
 
 def detect_volume_divergence(
@@ -130,16 +132,13 @@ def detect_volume_divergence(
     )
 
     # 检查是否创新高（近20日）
-    recent_highs = []
-    for b in bars[-20:]:
-        try:
-            h = float(str(b.get("high", 0)).replace(",", ""))
-            recent_highs.append(h)
-        except (ValueError, TypeError):
-            pass
-    current_high = recent_highs[-1] if recent_highs else 0
-    max_recent_high = max(recent_highs[:-1]) if len(recent_highs) > 1 else 0
-    is_new_high = current_high > max_recent_high and max_recent_high > 0
+    recent_highs = [_safe_float(b.get("high", 0)) for b in bars[-20:]]
+    recent_highs = [h for h in recent_highs if h > 0]
+    if len(recent_highs) < 2:
+        return VolumeWarning(reason="数据不足，无法判断新高")
+    current_high = recent_highs[-1]
+    max_recent_high = max(recent_highs[:-1])
+    is_new_high = current_high > max_recent_high
 
     # 天量天价检测
     if vol_ratio >= climactic_threshold and is_new_high and price_change > 0:

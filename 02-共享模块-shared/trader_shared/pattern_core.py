@@ -34,7 +34,7 @@ def _find_local_extrema(
     values: List[float],
     min_gap: int = 3,
 ) -> tuple[List[tuple[int, float]], List[tuple[int, float]]]:
-    """找局部极值点。
+    """找局部极值点 (单次遍历，O(n))。
 
     Args:
         values: 价格序列
@@ -43,31 +43,60 @@ def _find_local_extrema(
     Returns:
         (lows, highs) - 低点列表和高点列表，每项为 (index, value)
     """
-    if len(values) < 2 * min_gap + 1:
+    n = len(values)
+    if n < 2 * min_gap + 1:
         return [], []
 
     lows: List[tuple[int, float]] = []
     highs: List[tuple[int, float]] = []
 
-    for i in range(min_gap, len(values) - min_gap):
-        window = values[i - min_gap: i + min_gap + 1]
+    for i in range(min_gap, n - min_gap):
         val = values[i]
 
-        # 平盘数据跳过 (min == max 表示无波动)
-        if min(window) == max(window):
-            continue
+        # 单次遍历检查窗口极值 (避免重复切片)
+        is_min = True
+        is_max = True
+        for j in range(i - min_gap, i + min_gap + 1):
+            if j == i:
+                continue
+            if values[j] < val:
+                is_min = False
+            if values[j] > val:
+                is_max = False
+            if not is_min and not is_max:
+                break
 
-        # 局部低点
-        if val == min(window):
+        if is_min and is_max:
+            continue  # 平盘跳过
+
+        if is_min:
             if not lows or (i - lows[-1][0]) >= min_gap:
                 lows.append((i, val))
 
-        # 局部高点
-        if val == max(window):
+        if is_max:
             if not highs or (i - highs[-1][0]) >= min_gap:
                 highs.append((i, val))
 
     return lows, highs
+
+
+def _compute_extrema_cache(
+    closes: List[float],
+    highs: List[float],
+    lows: List[float],
+    min_gap: int = 3,
+) -> tuple[
+    List[tuple[int, float]], List[tuple[int, float]],  # lows_extrema, highs_extrema (from lows)
+    List[tuple[int, float]], List[tuple[int, float]],  # lows_extrema2, highs_extrema (from highs)
+]:
+    """预计算极值点缓存，避免重复调用 _find_local_extrema。
+
+    Returns:
+        (lows_from_lows, highs_from_lows, lows_from_highs, highs_from_highs)
+    """
+    lows_from_lows, highs_from_lows = _find_local_extrema(lows, min_gap)
+    lows_from_highs, highs_from_highs = _find_local_extrema(highs, min_gap)
+    return lows_from_lows, highs_from_lows, lows_from_highs, highs_from_highs
 
 
 def _detect_double_bottom(
@@ -75,6 +104,7 @@ def _detect_double_bottom(
     highs: List[float],
     lows: List[float],
     min_gap: int = 5,
+    price_lows: List[tuple[int, float]] | None = None,
 ) -> Optional[PatternResult]:
     """检测W底(双底)形态。
 
@@ -87,7 +117,8 @@ def _detect_double_bottom(
     if len(closes) < 20:
         return None
 
-    price_lows, _ = _find_local_extrema(lows, min_gap=3)
+    if price_lows is None:
+        price_lows, _ = _find_local_extrema(lows, min_gap=3)
     if len(price_lows) < 2:
         return None
 
@@ -141,6 +172,7 @@ def _detect_double_top(
     highs: List[float],
     lows: List[float],
     min_gap: int = 5,
+    price_highs: List[tuple[int, float]] | None = None,
 ) -> Optional[PatternResult]:
     """检测M头(双顶)形态。
 
@@ -153,7 +185,8 @@ def _detect_double_top(
     if len(closes) < 20:
         return None
 
-    _, price_highs = _find_local_extrema(highs, min_gap=3)
+    if price_highs is None:
+        _, price_highs = _find_local_extrema(highs, min_gap=3)
     if len(price_highs) < 2:
         return None
 
@@ -206,6 +239,8 @@ def _detect_triangle(
     highs: List[float],
     lows: List[float],
     min_points: int = 4,
+    price_highs: List[tuple[int, float]] | None = None,
+    price_lows: List[tuple[int, float]] | None = None,
 ) -> Optional[PatternResult]:
     """检测三角形收敛突破。
 
@@ -218,8 +253,10 @@ def _detect_triangle(
     if len(closes) < 20:
         return None
 
-    _, price_highs = _find_local_extrema(highs, min_gap=3)
-    price_lows, _ = _find_local_extrema(lows, min_gap=3)
+    if price_highs is None:
+        _, price_highs = _find_local_extrema(highs, min_gap=3)
+    if price_lows is None:
+        price_lows, _ = _find_local_extrema(lows, min_gap=3)
 
     # 需要至少2个高点和2个低点
     if len(price_highs) < 2 or len(price_lows) < 2:
@@ -311,16 +348,19 @@ def detect_pattern(
     if len(closes) < 20 or len(highs) < 20 or len(lows) < 20:
         return PatternResult(reason="数据不足，需要至少20根K线")
 
-    # 按优先级检测
-    result = _detect_double_bottom(closes, highs, lows)
+    # 预计算极值点缓存 (避免重复遍历)
+    price_lows, _, _, price_highs = _compute_extrema_cache(closes, highs, lows, min_gap=3)
+
+    # 按优先级检测 (传递缓存)
+    result = _detect_double_bottom(closes, highs, lows, price_lows=price_lows)
     if result:
         return result
 
-    result = _detect_double_top(closes, highs, lows)
+    result = _detect_double_top(closes, highs, lows, price_highs=price_highs)
     if result:
         return result
 
-    result = _detect_triangle(closes, highs, lows)
+    result = _detect_triangle(closes, highs, lows, price_highs=price_highs, price_lows=price_lows)
     if result:
         return result
 
