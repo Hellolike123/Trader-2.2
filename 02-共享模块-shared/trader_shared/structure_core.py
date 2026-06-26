@@ -338,6 +338,175 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None, index_returns: lis
     return multipliers
 
 
+def _calc_trendline_support(bars: list[BarData]) -> float | None:
+    """从摆动低点计算上升趋势线在当前日的投影支撑价。
+
+    算法：
+    1. 在最近 60 根 K 线中找摆动低点（窗口 5：最低价且左右各 2 根更高）
+    2. 取最近至少 2 个上升的摆动低点
+    3. 计算趋势线斜率，投影到今日
+    4. 验证至少被触碰过 3 次（最低价 <= 趋势线价 * 1.02）
+    """
+    try:
+        window = 5
+        lookback = min(60, len(bars))
+        recent = bars[-lookback:]
+
+        # 找摆动低点
+        swing_lows: list[tuple[int, float]] = []
+        for i in range(window, len(recent) - window):
+            low = to_float(recent[i].get("low"))
+            if low is None:
+                continue
+            left_lows = [to_float(recent[j].get("low")) for j in range(i - window, i)]
+            right_lows = [to_float(recent[j].get("low")) for j in range(i + 1, i + window + 1)]
+            if any(l is None for l in left_lows) or any(r is None for r in right_lows):
+                continue
+            if low <= min(left_lows) and low <= min(right_lows):
+                swing_lows.append((i, low))
+
+        if len(swing_lows) < 2:
+            return None
+
+        # 取最近 2 个，必须上升
+        p1_idx, p1 = swing_lows[-2]
+        p2_idx, p2 = swing_lows[-1]
+        if p2 <= p1:
+            return None
+
+        # 趋势线投影到今日
+        slope = (p2 - p1) / max(p2_idx - p1_idx, 1)
+        current_idx = len(recent) - 1
+        trend_price = p2 + slope * (current_idx - p2_idx)
+        if trend_price <= 0:
+            return None
+
+        # 验证至少被触碰 3 次（用各 index 处的趋势线投影价判断）
+        touch_count = 0
+        for j in range(p1_idx, current_idx + 1):
+            bar_low = to_float(recent[j].get("low"))
+            if bar_low is not None:
+                trend_at_j = p2 + slope * (j - p2_idx)
+                if bar_low <= trend_at_j * 1.02:
+                    touch_count += 1
+
+        return round(trend_price, 2) if touch_count >= 3 else None
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def _calc_rsi_divergence(closes: list[float], bars: list[BarData]) -> float | None:
+    """检测 RSI 底背离：价格创更低低点但 RSI 未创新低 -> 支撑信号。"""
+    try:
+        from trader_shared.momentum_core import calc_rsi
+        rsi = calc_rsi(closes, 14)
+        if len(rsi) < 30:
+            return None
+
+        # 最近 30 根 K 线的摆动低点
+        lookback = 30
+        recent_bars = bars[-lookback:]
+        recent_rsi = rsi[-lookback:]
+        recent_lows = [to_float(b.get("low")) for b in recent_bars]
+        if any(l is None for l in recent_lows):
+            return None
+
+        window = 5
+        swing_lows: list[tuple[int, float]] = []
+        for i in range(window, len(recent_lows) - window):
+            price = recent_lows[i]
+            left = recent_lows[i - window:i]
+            right = recent_lows[i + 1:i + window + 1]
+            if all(price <= (ll if ll is not None else float('inf')) for ll in left) and \
+               all(price <= (ll if ll is not None else float('inf')) for ll in right):
+                swing_lows.append((i, price))
+
+        if len(swing_lows) < 2:
+            return None
+
+        p1_idx, p1_price = swing_lows[-2]
+        p2_idx, p2_price = swing_lows[-1]
+
+        # 必须价格创新低
+        if p2_price >= p1_price:
+            return None
+
+        rsi1 = recent_rsi[p1_idx]
+        rsi2 = recent_rsi[p2_idx]
+        if rsi1 is not None and rsi2 is not None and rsi2 > rsi1:
+            return round(p2_price, 2)
+
+        return None
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def _calc_macd_divergence(closes: list[float], bars: list[BarData]) -> float | None:
+    """检测 MACD 底背离：价格创更低低点但 MACD (EMA12-EMA26) 未创新低 -> 支撑信号。"""
+    try:
+        if len(closes) < 26:
+            return None
+
+        n = len(closes)
+        # 计算 EMA12 和 EMA26 全序列
+        ema12_series: list[float | None] = [None] * n
+        ema26_series: list[float | None] = [None] * n
+
+        if n >= 12:
+            ema12 = sum(closes[:12]) / 12.0  # SMA seed
+            for i in range(12, n):
+                ema12 = ema12 * 11 / 13 + closes[i] * 2 / 13
+                ema12_series[i] = ema12
+
+        if n >= 26:
+            ema26 = sum(closes[:26]) / 26.0  # SMA seed
+            for i in range(26, n):
+                ema26 = ema26 * 25 / 27 + closes[i] * 2 / 27
+                ema26_series[i] = ema26
+
+        # MACD = EMA12 - EMA26
+        macd_series: list[float | None] = [None] * n
+        for i in range(26, n):
+            if ema12_series[i] is not None and ema26_series[i] is not None:
+                macd_series[i] = ema12_series[i] - ema26_series[i]
+
+        # 最近 30 根 K 线的摆动低点
+        lookback = 30
+        recent_bars = bars[-lookback:]
+        recent_macd = macd_series[-lookback:]
+        recent_lows = [to_float(b.get("low")) for b in recent_bars]
+        if any(l is None for l in recent_lows):
+            return None
+
+        window = 5
+        swing_lows: list[tuple[int, float]] = []
+        for i in range(window, len(recent_lows) - window):
+            price = recent_lows[i]
+            left = recent_lows[i - window:i]
+            right = recent_lows[i + 1:i + window + 1]
+            if all(price <= (ll if ll is not None else float('inf')) for ll in left) and \
+               all(price <= (ll if ll is not None else float('inf')) for ll in right):
+                swing_lows.append((i, price))
+
+        if len(swing_lows) < 2:
+            return None
+
+        p1_idx, p1_price = swing_lows[-2]
+        p2_idx, p2_price = swing_lows[-1]
+
+        if p2_price >= p1_price:
+            return None
+
+        m1 = recent_macd[p1_idx]
+        m2 = recent_macd[p2_idx]
+        if m1 is not None and m2 is not None and m2 > m1:
+            return round(p2_price, 2)
+
+        return None
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
 def build_structure_context(current: float, bars: list[BarData], change_pct: Any = None, quote: QuoteData | None = None, fusion_result: dict[str, Any] | None = None, chan_result: dict[str, Any] | None = None, fetcher: DataFetcher | None = None, pnl_pct: float | None = None, vp_result: dict[str, Any] | None = None, major_stage: str | None = None) -> dict[str, Any]:
     if fetcher is None:
         fetcher = get_fetcher()
@@ -382,6 +551,36 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
                 add_level(support_levels, "EXPMA20", expma20, 0.9)
             else:
                 add_level(resistance_levels, "EXPMA20", expma20, 0.9)
+
+    # ═══════ 布林下轨支撑 ═══════
+    if len(_closes) >= 20:
+        from trader_shared.momentum_core import calc_bollinger
+        bb = calc_bollinger(_closes, 20, 2.0)
+        bb_lower = bb.get("lower")
+        bb_middle = bb.get("middle")
+        if bb_lower is not None and bb_middle is not None:
+            if current > bb_lower:
+                add_level(support_levels, "布林下轨", bb_lower, 0.80)
+            else:
+                add_level(resistance_levels, "布林下轨", bb_lower, 0.80)
+
+    # ═══════ 趋势线支撑 ═══════
+    if len(bars) >= 30:
+        _trendline_price = _calc_trendline_support(bars)
+        if _trendline_price is not None and _trendline_price < current:
+            add_level(support_levels, "趋势线", _trendline_price, 0.85)
+
+    # ═══════ RSI 底背离支撑 ═══════
+    if len(_closes) >= 30:
+        _rsi_div_price = _calc_rsi_divergence(_closes, bars)
+        if _rsi_div_price is not None and _rsi_div_price < current:
+            add_level(support_levels, "RSI底背离", _rsi_div_price, 0.75)
+
+    # ═══════ MACD 底背离支撑 ═══════
+    if len(_closes) >= 30:
+        _macd_div_price = _calc_macd_divergence(_closes, bars)
+        if _macd_div_price is not None and _macd_div_price < current:
+            add_level(support_levels, "MACD底背离", _macd_div_price, 0.75)
 
     support = choose_level(support_levels, current, below=True) if support_levels else {"name": "现价兜底", "price": round(current, 2), "weight": 0.1}
     resistance = choose_level(resistance_levels, current, below=False) if resistance_levels else {"name": "现价兜底", "price": round(current, 2), "weight": 0.1}
