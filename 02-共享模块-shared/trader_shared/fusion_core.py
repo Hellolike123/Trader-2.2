@@ -333,6 +333,8 @@ def merge_decisions(
     main_force_env: str | None = None,
     data_status: str = "full",
     fetcher: DataFetcher | None = None,  # DI: 可注入数据源
+    pattern_result: dict | None = None,  # 形态识别结果 (可选)
+    volume_warning: dict | None = None,  # 量价背离警告 (可选)
 ) -> dict:
     """决策融合层核心函数。
 
@@ -384,6 +386,21 @@ def merge_decisions(
         _logger.warning("Wyckoff signal normalization failed: %s", exc)
         wyckoff_signal = {"direction": 0, "confidence": 0.0,
                            "reason": "威科夫标准化异常", "raw_key": "wyckoff"}
+
+    # 形态识别信号 (可选第4路)
+    pattern_signal = {"direction": 0, "confidence": 0.0,
+                      "reason": "无形态信号", "raw_key": "pattern"}
+    if pattern_result and isinstance(pattern_result, dict):
+        p_signal = pattern_result.get("signal", 0)
+        p_conf = pattern_result.get("confidence", 0.0)
+        p_reason = pattern_result.get("reason", "")
+        if p_signal != 0 and p_conf > 0:
+            pattern_signal = {
+                "direction": p_signal,
+                "confidence": p_conf,
+                "reason": p_reason,
+                "raw_key": "pattern",
+            }
 
     # 2. 场景优先级过滤器 (Scenario Priority Filter)
     # 计算20日高低区间位置
@@ -444,16 +461,18 @@ def merge_decisions(
     is_bearish_structure_warning = (strong_bearish_chan or strong_bearish_wyk) and not is_genuine_climax
 
     if is_breakout_or_bottom:
-        weights = {"chan": 0.45, "momentum": 0.20, "wyckoff": 0.35}
+        weights = {"chan": 0.40, "momentum": 0.18, "wyckoff": 0.32, "pattern": 0.10}
     elif is_genuine_climax:
-        # 高位 + 强动量：动量权重最高（55%），高位看动量衰竭
-        weights = {"chan": 0.20, "momentum": 0.55, "wyckoff": 0.25}
+        # 高位 + 强动量：动量权重最高（50%），高位看动量衰竭
+        weights = {"chan": 0.18, "momentum": 0.50, "wyckoff": 0.22, "pattern": 0.10}
     elif is_bearish_structure_warning:
         # 结构看空警告（顶背驰/上冲回落）：尊重结构，chan/wyk 权重高于动量，
         # 避免动量噪音在结构发出撤退信号时反向主导。
-        weights = {"chan": 0.45, "momentum": 0.20, "wyckoff": 0.35}
+        weights = {"chan": 0.40, "momentum": 0.18, "wyckoff": 0.32, "pattern": 0.10}
     else:
-        weights = get_regime_weights(regime)
+        regime_weights = get_regime_weights(regime)
+        # 补齐 pattern 权重
+        weights = {**regime_weights, "pattern": 0.10}
 
     # 2.5 主力行为权重修正
     if main_force_env and main_force_env != "unknown":
@@ -483,7 +502,8 @@ def merge_decisions(
     weighted_score = (
         chan_signal["direction"] * chan_signal["confidence"] * weights["chan"] +
         momentum_signal["direction"] * momentum_signal["confidence"] * weights["momentum"] +
-        wyckoff_signal["direction"] * wyckoff_signal["confidence"] * weights["wyckoff"]
+        wyckoff_signal["direction"] * wyckoff_signal["confidence"] * weights["wyckoff"] +
+        pattern_signal["direction"] * pattern_signal["confidence"] * weights.get("pattern", 0.10)
     )
 
     # 5. 决策映射
@@ -527,6 +547,28 @@ def merge_decisions(
                 bayesian_info = bayesian_res
         except Exception as exc:
             _logger.warning("Bayesian fusion failed, falling back: %s", exc)
+
+    # ── [2.4新增] 量价背离警告 ──
+    # 天量天价: 强烈看空信号，覆盖 action
+    # 放量滞涨: 降低看多置信度
+    if volume_warning and isinstance(volume_warning, dict):
+        vw_type = volume_warning.get("warning_type", "none")
+        vw_signal = volume_warning.get("signal", 0)
+        vw_conf = volume_warning.get("confidence", 0.0)
+
+        if vw_type == "climactic" and vw_signal == -1:
+            # 天量天价: 强制改为卖出类 action
+            positive_actions = {"半仓试 (多方主导)", "半仓试 (多方主导但有分歧)",
+                                "增持", "等转强", "等转强观察", "回调观望",
+                                "持股观望", "高位观望"}
+            if action in positive_actions:
+                action = "天量天价，减仓观望"
+                confidence = min(confidence, 0.4)
+        elif vw_type == "stagnation" and vw_signal == -1:
+            # 放量滞涨: 降低看多置信度
+            if weighted_score > 0:
+                confidence *= (1 - vw_conf * 0.3)
+                confidence = max(confidence, 0.2)
 
     # ── [2.3扩展] 股东户数筹码集中验证 ──
     try:
@@ -588,9 +630,12 @@ def merge_decisions(
             "chan": chan_signal,
             "momentum": momentum_signal,
             "wyckoff": wyckoff_signal,
+            "pattern": pattern_signal,
         },
         "weights_used": weights,
     }
+    if volume_warning:
+        result["volume_warning"] = volume_warning
     if bayesian_used:
         result["bayesian_info"] = bayesian_info
     if has_risk_unlock:
@@ -617,6 +662,7 @@ def merge_decisions_from_plugins(
     extend_sentiment: dict | None = None,
     data_status: str = "full",
     fetcher: DataFetcher | None = None,  # DI: 可注入数据源
+    volume_warning: dict | None = None,  # 量价背离警告 (可选)
 ) -> dict:
     """Decision fusion using the plugin registry.
 
@@ -647,6 +693,7 @@ def merge_decisions_from_plugins(
     chan_result = plugin_results.get("chanlun", {})
     momentum_result = plugin_results.get("momentum", {})
     wyckoff_result = plugin_results.get("wyckoff", {})
+    pattern_result = plugin_results.get("pattern", None)
 
     return merge_decisions(
         chan_result=chan_result,
@@ -661,4 +708,6 @@ def merge_decisions_from_plugins(
         main_force_env=main_force_env,
         data_status=data_status,
         fetcher=fetcher,
+        pattern_result=pattern_result,
+        volume_warning=volume_warning,
     )

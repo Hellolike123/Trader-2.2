@@ -503,10 +503,10 @@ class TestPhase3Features:
         ]
         # pos_pct = (11.0 - 10.0) / (21.0 - 10.0) = 1.0 / 11.0 = 0.09 <= 0.3
         result = merge_decisions(chan, mom, wyk, regime="正常", current_price=11.0, bars=bars)
-        assert result["weights_used"] == {"chan": 0.45, "momentum": 0.20, "wyckoff": 0.35}
+        assert result["weights_used"] == {"chan": 0.40, "momentum": 0.18, "wyckoff": 0.32, "pattern": 0.10}
 
     def test_scenario_priority_filter_top(self):
-        """Under pos_pct >= 0.7 AND mom_score >= 80, weights should dynamically adjust to {"chan": 0.20, "momentum": 0.55, "wyckoff": 0.25}."""
+        """Under pos_pct >= 0.7 AND mom_score >= 80, weights should dynamically adjust."""
         from trader_shared.fusion_core import merge_decisions
         chan = {"chanlun": {"buy_points": [], "divergence": {}, "trend_label": "数据不足"}}
         mom = {"momentum": {"score": 85, "direction": "bullish", "signals": ["多指标共振(强烈看多)"]}}
@@ -517,7 +517,7 @@ class TestPhase3Features:
         ]
         # pos_pct = (18.0 - 10.0) / (20.0 - 10.0) = 8.0 / 10.0 = 0.8 >= 0.7
         result = merge_decisions(chan, mom, wyk, regime="正常", current_price=18.0, bars=bars)
-        assert result["weights_used"] == {"chan": 0.20, "momentum": 0.55, "wyckoff": 0.25}
+        assert result["weights_used"] == {"chan": 0.18, "momentum": 0.50, "wyckoff": 0.22, "pattern": 0.10}
 
     def test_belief_priority_conflict_resolution_bullish_veto(self):
         """Strong bullish veto signal (Chanlun buy points / bottom divergence, Wyckoff Spring) overrides disagreement and vetos Momentum bearish noise."""

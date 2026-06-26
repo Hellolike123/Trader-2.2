@@ -224,14 +224,20 @@ def _fusion_breakdown(fusion: dict) -> list[str]:
         hmm_cn = {"bull": "多头", "bear": "空头", "range": "震荡"}.get(hmm, hmm)
         rows.append(f"  大盘环境：{regime}（HMM: {hmm_cn}）")
 
-    for key, label in [("chan", "缠论"), ("momentum", "动量"), ("wyckoff", "威科夫")]:
+    for key, label in [("chan", "缠论"), ("momentum", "动量"), ("wyckoff", "威科夫"), ("pattern", "形态")]:
         sig = signals.get(key, {})
         if not sig:
             continue
         d = sig.get("direction", 0)
         c = sig.get("confidence", 0)
         w = weights.get(key, 0)
-        rows.append(f"    {label}：{_signal_direction_text(d)}（置信 {c:.0%}，权重 {w:.0%}）")
+        if c > 0:
+            rows.append(f"    {label}：{_signal_direction_text(d)}（置信 {c:.0%}，权重 {w:.0%}）")
+
+    # 量价背离警告
+    vw = fusion.get("volume_warning", {})
+    if vw and vw.get("warning_type") != "none":
+        rows.append(f"    ⚠️ {vw.get('reason', '')}")
 
     if disagreement > 1:
         rows.append(f"  注意：多信号存在分歧（分歧度 {disagreement:.1f}），优先采纳缠论/威科夫方向")
@@ -406,6 +412,45 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     # === 融合层 ===
     try:
         from trader_shared.fusion_core import merge_decisions
+        from trader_shared.pattern_core import detect_pattern
+        from trader_shared.volume_price import detect_volume_divergence
+
+        # 形态识别
+        pattern_result = None
+        try:
+            closes = [to_float(b, "close") for b in bars if to_float(b, "close")]
+            highs = [to_float(b, "high") for b in bars if to_float(b, "high")]
+            lows = [to_float(b, "low") for b in bars if to_float(b, "low")]
+            if len(closes) >= 20 and len(highs) >= 20 and len(lows) >= 20:
+                pat = detect_pattern(closes[-60:], highs[-60:], lows[-60:])
+                if pat and pat.signal != 0:
+                    pattern_result = {
+                        "pattern": pat.pattern,
+                        "signal": pat.signal,
+                        "confidence": pat.confidence,
+                        "neckline": pat.neckline,
+                        "target": pat.target,
+                        "reason": pat.reason,
+                    }
+        except Exception:
+            pass
+
+        # 量价背离检测
+        volume_warning = None
+        try:
+            vw = detect_volume_divergence(bars)
+            if vw and vw.warning_type != "none":
+                volume_warning = {
+                    "warning_type": vw.warning_type,
+                    "signal": vw.signal,
+                    "confidence": vw.confidence,
+                    "volume_ratio": vw.volume_ratio,
+                    "price_change": vw.price_change,
+                    "reason": vw.reason,
+                }
+        except Exception:
+            pass
+
         report_fusion = merge_decisions(
             chan_result=chan_result,
             momentum_result=momentum_result,
@@ -417,6 +462,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             main_force_env=main_force_env,
             fetcher=fetcher,
             data_status=snapshot.data_status,
+            pattern_result=pattern_result,
+            volume_warning=volume_warning,
         )
     except Exception:
         report_fusion = {"action": "融合层异常", "confidence": 0, "weighted_score": 0,
