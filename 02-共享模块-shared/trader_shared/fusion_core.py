@@ -474,8 +474,11 @@ def merge_decisions(
         weights = {"chan": 0.40, "momentum": 0.18, "wyckoff": 0.32, "pattern": PATTERN_WEIGHT}
     else:
         regime_weights = get_regime_weights(regime)
-        # 补齐 pattern 权重
-        weights = {**regime_weights, "pattern": PATTERN_WEIGHT}
+        # 补齐 pattern 权重 (但 "很差" regime 全员权重为0，pattern 也不加)
+        if regime == "很差":
+            weights = regime_weights
+        else:
+            weights = {**regime_weights, "pattern": PATTERN_WEIGHT}
 
     # 2.5 主力行为权重修正
     if main_force_env and main_force_env != "unknown":
