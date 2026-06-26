@@ -305,6 +305,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     if _today and _last_date != _today and _cp is not None and float(_cp) > 0:
         _chg = float(quote.get("current_change_pct") or 0)
         _prev_close = float(_cp) / (1 + _chg / 100) if _chg != 0 else float(_cp)
+        _prev_bar = bars[-1] if bars else {}
         bars.append({
             "date": _today,
             "open": _prev_close,
@@ -314,6 +315,10 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             "volume": 0,
             "data_source": "quote-today",
             "data_status": "full",
+            "atr14": _prev_bar.get("atr14", 0),
+            "atr_ratio": _prev_bar.get("atr_ratio", 0),
+            "atr7": _prev_bar.get("atr7", 0),
+            "tr": _prev_bar.get("tr", 0),
         })
     bars_5m = snapshot.bars_5m
     last_bar = bars[-1] if bars else {}
@@ -1078,7 +1083,8 @@ def sync_report_with_data(report: dict, levels: dict) -> dict:
         report["stop"] = round(support * 0.97, 2)
     # take < confirm（止盈永远高于确认位）
     if take > 0 and confirm > 0 and take <= confirm:
-        report["take"] = max(current * 1.05, confirm * 1.03)
+        _zw = float(levels.get("zone_width_pct", 0.02) or 0.02)
+        report["take"] = round(confirm * (1 + _zw), 2)
     # 场景与数值的逻辑一致性
     if scene in ("突破确认", "突破观察") and round(current, 2) < round(confirm, 2):
         report["scene"]        = "观望"
@@ -1652,7 +1658,6 @@ def render_markdown(r: dict) -> str:
 
     chip_peaks = r.get("chip_peaks") or []
     if chip_peaks:
-        # 筹码信息压缩为1行
         sorted_peaks = sorted(chip_peaks, key=lambda x: x.get("price", 0))
         peak_strs = []
         for peak in sorted_peaks[:3]:
