@@ -91,8 +91,8 @@ def _detect_double_bottom(
     if len(price_lows) < 2:
         return None
 
-    # 检查最近的两个低点
-    for i in range(len(price_lows) - 1):
+    # 检查最近的两个低点 (倒序遍历，优先匹配最近的形态)
+    for i in range(len(price_lows) - 2, -1, -1):
         idx1, low1 = price_lows[i]
         idx2, low2 = price_lows[i + 1]
 
@@ -153,11 +153,12 @@ def _detect_double_top(
     if len(closes) < 20:
         return None
 
-    price_highs, _ = _find_local_extrema(highs, min_gap=3)
+    _, price_highs = _find_local_extrema(highs, min_gap=3)
     if len(price_highs) < 2:
         return None
 
-    for i in range(len(price_highs) - 1):
+    # 倒序遍历，优先匹配最近的形态
+    for i in range(len(price_highs) - 2, -1, -1):
         idx1, high1 = price_highs[i]
         idx2, high2 = price_highs[i + 1]
 
@@ -217,7 +218,7 @@ def _detect_triangle(
     if len(closes) < 20:
         return None
 
-    price_highs, _ = _find_local_extrema(highs, min_gap=3)
+    _, price_highs = _find_local_extrema(highs, min_gap=3)
     price_lows, _ = _find_local_extrema(lows, min_gap=3)
 
     # 需要至少2个高点和2个低点
