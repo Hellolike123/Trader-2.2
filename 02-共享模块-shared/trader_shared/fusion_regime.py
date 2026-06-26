@@ -87,11 +87,7 @@ def score_to_action(
         disagreement:   0 (全一致) ~ 2 (完全相反)
         regime:         "正常" | "偏弱" | "很差" | "未知"
     """
-    # 1. 一票否决
-    if regime == "很差":
-        return "空仓 (大盘很差, 一票否决)"
-
-    # 2. 分歧检测
+    # 1. 分歧检测
     if disagreement > DISAGREEMENT_THRESHOLD:
         actions = ACTION_MAP_DISAGREE
     else:

@@ -305,9 +305,9 @@ class TestScoreToAction:
 
     def test_bear_reject(self):
         fn = self._fn
+        # regime="很差"不再一票否决，走正常分数路径
         result = fn(0.5, 0, "很差")
-        assert "空仓" in result
-        assert "一票否决" in result
+        assert "半仓" in result
 
     def test_high_bullish(self):
         fn = self._fn

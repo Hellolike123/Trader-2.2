@@ -567,7 +567,7 @@ def merge_decisions(
     if has_risk_unlock:
         positive_actions = {"半仓试 (多方主导)", "半仓试 (多方主导但有分歧)", "增持", "等转强"}
         if action in positive_actions:
-            action = "空仓 (大盘很差, 一票否决)"
+            action = "空仓 (限售解禁风险)"
             confidence = 0.3
             weighted_score = -0.5
 
