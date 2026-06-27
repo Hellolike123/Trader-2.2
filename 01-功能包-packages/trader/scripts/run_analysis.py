@@ -493,30 +493,47 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             _emoji = "🔴"
         _disclaimer = ""
         if _dis > 1:
-            _disclaimer = "，信号冲突建议等待"
+            _disclaimer = "（信号冲突，建议等待）"
         elif _conf < 0.3:
-            _disclaimer = "，信号弱轻仓"
-        _main_line = f"融合｜{_emoji} {_action}（加权分 {_ws:.2f}，置信度 {_conf:.0%}{_disclaimer}）"
+            _disclaimer = "（信号弱，轻仓）"
+
+        # 动作通俗解释
+        _action_explain = {
+            "高位观望": "不追高，等回调",
+            "空仓/止损": "不买，有仓位要走",
+            "减仓": "减仓锁定利润",
+            "减1/3 (高位松动)": "减仓，高位有风险",
+            "持股观望": "持有，等方向",
+            "等转强观察": "等突破再买",
+            "等转强": "等信号确认",
+        }
+        _explain = _action_explain.get(_action, "")
+
+        _main_line = f"🎯 {_action}{_disclaimer}"
+        if _explain:
+            _main_line += f"\n  {_explain}"
         # 第二行：各维度状态（显示具体信号，不只方向）
         _sd = report_fusion.get("signals_detail") or {}
         _dim_parts = []
-        for key, label in [("chan", "缠论"), ("wyckoff", "威科夫"), ("momentum", "动量")]:
+        for key, label in [("chan", "缠论"), ("momentum", "动量"), ("wyckoff", "威科夫")]:
             _sig = _sd.get(key)
             if isinstance(_sig, dict):
                 _reason = str(_sig.get("reason", ""))
-                # 去掉前缀
+                # 去掉前缀，但保留冒号后的内容
                 _short = _reason.replace("缠论", "").replace("威科夫", "").replace("动量", "").strip()
+                if _short.startswith(":"):
+                    _short = _short[1:]  # 去掉开头的冒号
                 if not _short or _short == "无明确信号":
-                    _dim_parts.append(f"{label}无信号")
+                    _dim_parts.append(f"{label}:无信号")
                 elif key == "momentum" and "、" in _short:
                     # 动量信号可能很长，只取最后一个最重要的
-                    _dim_parts.append(f"{label}{_short.split('、')[-1]}")
+                    _dim_parts.append(f"{label}:{_short.split('、')[-1]}")
                 else:
-                    _dim_parts.append(f"{label}{_short}")
+                    _dim_parts.append(f"{label}:{_short}")
         _breakdown = f"  {'｜'.join(_dim_parts)}" if _dim_parts else ""
         report_fusion["fusion_verbatim"] = _main_line + ("\n" + _breakdown if _breakdown else "")
     except Exception:
-        report_fusion["fusion_verbatim"] = "融合｜数据异常"
+        report_fusion["fusion_verbatim"] = "🎯 数据异常"
 
     # Volume Profile 计算
     vp_result = None
