@@ -1475,7 +1475,6 @@ def render_markdown(r: dict) -> str:
 
     lines.extend([
         "",
-        f"📊 {major_stage}期 + {momentum} → {stage_action_text}",
     ])
 
     # 数据完整性检查：仅当关键数据真正缺失时才提示
@@ -1488,31 +1487,26 @@ def render_markdown(r: dict) -> str:
         lines.append("")
         lines.append("⚠️ 关键数据缺失，分析仅供参考")
 
-    # 融合层 verbatim（从 JSON fusion.fusion_verbatim 直出）
+    # 融合层 verbatim（合并阶段信息 + 融合判断）
     fusion_verbatim = (r.get("fusion") or {}).get("fusion_verbatim")
     if fusion_verbatim:
+        # 把阶段信息合并到第一行
+        stage_line = f"{major_stage}期 + {momentum} → {stage_action_text}"
+        # 替换 fusion_verbatim 的第一行
+        _lines = fusion_verbatim.split("\n")
+        if _lines:
+            # 提取动作和原因
+            _first = _lines[0].replace("🎯 ", "")
+            # 分离动作和原因（如"高位观望（信号弱，轻仓）"）
+            if "（" in _first:
+                _action = _first.split("（")[0]
+                _reason = _first.split("（")[1].rstrip("）")
+                _lines[0] = f"🎯 {stage_line}｜{_action}（{_reason}）"
+            else:
+                _lines[0] = f"🎯 {stage_line}｜{_first}"
+        fusion_verbatim = "\n".join(_lines)
         lines.append("")
         lines.append(fusion_verbatim)
-
-    # 当前研判 + 技术指标（紧跟融合层，一眼看清状态）
-    stage_desc_map = {
-        "蓄势": "区间震荡，低吸高抛", "主升": "持股待涨",
-        "派发": "逢高减仓", "衰退": "不碰",
-    }
-    stage_desc = stage_desc_map.get(major_stage, major_stage)
-    confirm_label = str(r.get("confirm_label") or "确认位")
-    state_label = str(r.get("state_label") or "")
-    if current_price >= confirm:
-        trend_desc = f"站上{confirm:.2f}（{confirm_label}）"
-    elif "走强" in state_label or "转强" in state_label:
-        trend_desc = f"趋势走强，等{confirm_label}"
-    elif major_stage == "主升":
-        trend_desc = f"回踩支撑"
-    elif major_stage == "蓄势":
-        trend_desc = f"低吸等确认"
-    else:
-        trend_desc = f"等信号确认"
-    lines.append(f"  {stage_desc} ｜ {trend_desc}")
 
     # 技术指标摘要
     _ind_parts = []
