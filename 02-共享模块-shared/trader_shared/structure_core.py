@@ -617,7 +617,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
 
     # ═══════ 止损：MA20 + 前低融合 ═══════
     ma20_val = ma_values.get('ma20')
-    recent_lows = [float(b.get('close') or 0) for b in bars[-20:] if b.get('close')]
+    recent_lows = [float(b.get('low') or 0) for b in bars[-20:] if b.get('low')]
     prev_low = min(recent_lows) if recent_lows else 0
     candidates = [v for v in [ma20_val, prev_low] if v and v > 0]
     if candidates:

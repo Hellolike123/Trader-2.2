@@ -478,7 +478,10 @@ def merge_decisions(
         if regime == "很差":
             weights = regime_weights
         else:
-            weights = {**regime_weights, "pattern": PATTERN_WEIGHT}
+            # 先将原有权重缩小，腾出空间给 pattern，确保总和=1.0
+            shrink_factor = 1.0 - PATTERN_WEIGHT
+            weights = {k: v * shrink_factor for k, v in regime_weights.items()}
+            weights["pattern"] = PATTERN_WEIGHT
 
     # 2.5 主力行为权重修正
     if main_force_env and main_force_env != "unknown":

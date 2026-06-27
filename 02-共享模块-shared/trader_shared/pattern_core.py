@@ -258,12 +258,8 @@ def _detect_triangle(
     if price_lows is None:
         price_lows, _ = _find_local_extrema(lows, min_gap=3)
 
-    # 需要至少2个高点和2个低点
-    if len(price_highs) < 2 or len(price_lows) < 2:
-        return None
-
-    # 至少需要3个高点和3个低点才能形成有效三角形
-    if len(price_highs) < 3 or len(price_lows) < 3:
+    # 需要至少 min_points 个高点和低点才能形成有效三角形
+    if len(price_highs) < min_points or len(price_lows) < min_points:
         return None
 
     # 检查最近的高点是否递降

@@ -65,7 +65,7 @@ def _calc_volume_ratio(bars: List[Dict[str, Any]], window: int = 5) -> float:
     avg_recent = recent_sum / recent_count
     avg_prev = prev_sum / prev_count
 
-    return avg_recent / avg_prev if avg_prev > 0 else 1.0
+    return avg_prev / avg_recent if avg_recent > 0 else 1.0
 
 
 def _calc_price_change(bars: List[Dict[str, Any]], days: int = 3) -> float:
