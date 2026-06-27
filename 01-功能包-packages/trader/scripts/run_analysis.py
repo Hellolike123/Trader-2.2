@@ -1541,11 +1541,18 @@ def render_markdown(r: dict) -> str:
 
     lines.extend([
         "",
-        "📍 买卖点"
+        "📍 操作建议"
     ])
-    
+
+    # 融合层警告（看空时显示）
+    fusion_action = str((r.get("fusion") or {}).get("action") or "")
+    _reduce_set = {"减仓", "空仓/止损", "空仓 (大盘很差, 一票否决)", "减1/3 (高位松动)", "高位松动"}
+    if fusion_action in _reduce_set:
+        lines.append(f"  ⚠️ 融合层提示：{fusion_action}（看空信号，谨慎买入）")
+        lines.append("")
+
     if stop > 0:
-        lines.append(f"  {stop:.2f} 止损")
+        lines.append(f"  {stop:.2f} 止损（跌破支撑，趋势破坏）")
 
     # 直接计算盈亏比（不依赖 AI 字段，避免直接运行时永远"数据不足"）
     take_price = float(r.get("take") or 0)
@@ -1560,11 +1567,11 @@ def render_markdown(r: dict) -> str:
         _buy_label = _get_buy_label(change_pct, volume_ratio_val)
         _upside = round(take_price - low_price, 2)
         _downside = round(low_price - stop, 2)
-        lines.append(f"  {low_price:.2f} ← 试探买 {position_cap}%（{_buy_label}，盈亏比 {risk_reward_val}R｜赚{_upside} 亏{_downside}）")
+        lines.append(f"  {low_price:.2f} ← 试探买 {position_cap}%（{_buy_label}，盈亏比 {risk_reward_val}R，止损 {stop:.2f}）")
         # 加仓条件：站稳确认位可加仓至最大仓位
         _max_pos = int(r.get("max_position_pct") or 0)
         if _max_pos > position_cap and confirm > 0:
-            lines.append(f"  {confirm:.2f} 站稳可加仓至 {_max_pos}%")
+            lines.append(f"  {confirm:.2f} 站稳可加仓至 {_max_pos}%（突破阻力确认，趋势延续）")
     elif low_price > 0:
         lines.append(f"  {low_price:.2f} ← 参考低吸区（等待）")
     fib = r.get("fib_retrace") or {}
@@ -1586,20 +1593,17 @@ def render_markdown(r: dict) -> str:
             best_val, best_label = candidates[0][1], candidates[0][2]
             if best_val != low_price:
                 lines.append(f"  {best_val:.2f} ← 黄金分割{best_label}回撤参考")
-    if current_price > 0:
-        lines.append(f"  {current_price:.2f} 当前")
 
-    # 高抛区间
-    high_zone = r.get("high_zone")
-    if high_zone:
-        lines.append(f"  高抛区间 {high_zone}")
+    # 收集所有价格行，统一排序后输出（确保严格递增）
+    all_price_lines: list[tuple[float, str]] = []
+
+    # 当前价格
+    if current_price > 0:
+        all_price_lines.append((current_price, f"  {current_price:.2f} 当前"))
 
     exit_plan = r.get("exit_plan") or {}
     stage_exit = exit_plan.get("stage_exit")
     exit_plan_items = exit_plan.get("exit_plan") or []
-
-    # 收集所有价格行，统一排序后输出（确保严格递增）
-    all_price_lines: list[tuple[float, str]] = []
 
     for item in exit_plan_items:
         p = item.get("price")
@@ -1612,7 +1616,7 @@ def render_markdown(r: dict) -> str:
             all_price_lines.append((p, f"  {p:.2f} → 卖 {ratio:.0%}（{reason}）"))
 
     if resistance_val > 0:
-        all_price_lines.append((resistance_val, f"  {resistance_val:.2f} 压力"))
+        pass  # 压力位已整合到卖出条件中，不再单独显示
 
     # Fibonacci 扩展目标位
     fib_ext_1382 = r.get("fib_ext_1382")
@@ -1627,7 +1631,7 @@ def render_markdown(r: dict) -> str:
         lines.append(line)
 
     if stage_exit and major_stage in ("主升", "拉升"):
-        lines.append(f"  阶段转{stage_exit} → 清仓")
+        lines.append(f"  阶段转{stage_exit} → 清仓（主力出货，趋势结束）")
 
     # 回踩加仓条件（显示支撑位回踩时的加仓评分）
     _ps = r.get("position_state") or {}
@@ -1658,8 +1662,7 @@ def render_markdown(r: dict) -> str:
                     _pb_parts.append(f"RSI超卖({_rsi:.0f})")
         if _pb_score >= 3:
             lines.append(f"  {_support_val:.2f} 回踩加仓｜评分 {_pb_score}/5｜{'｜'.join(_pb_parts)}")
-        elif _dist_support < 5:
-            lines.append(f"  {_support_val:.2f} 支撑回踩观察｜{'｜'.join(_pb_parts)}")
+        # 支撑回踩观察已整合到试探买条件中，不再单独显示
 
     has_position = r.get("has_position", False)
     cost_price = float(r.get("cost_price") or 0)
