@@ -111,7 +111,6 @@ def _score_alignment(expma_values: dict[str, float | None]) -> int:
     e10 = expma_values.get("10")
     e20 = expma_values.get("20")
     e30 = expma_values.get("30")
-    e50 = expma_values.get("50")
 
     if e10 is not None and e20 is not None and e30 is not None and e10 > 0 and e20 > 0 and e30 > 0:
         if e10 > e20 > e30:
@@ -316,10 +315,10 @@ def _build_signals(
     elif cross <= 0:
         signals.append("近5日死叉")
 
-    # 乖离信号
-    e20 = expma_values.get("20")
-    if e20 and current_price > 0:
-        dev = (current_price - e20) / e20
+    # 乖离信号（使用 EXPMA5 作为参考，与 _score_deviation 一致）
+    e5 = expma_values.get("5")
+    if e5 and current_price > 0:
+        dev = (current_price - e5) / e5
         if dev > 0.05:
             signals.append(f"超买（乖离+{dev*100:.1f}%）")
         elif dev < -0.05:

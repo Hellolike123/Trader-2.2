@@ -122,8 +122,9 @@ class BayesianFusion:
         uniform = np.ones(len(ACTIONS)) / len(ACTIONS)
         blended = confidence * base_prob + (1 - confidence) * uniform
 
-        # 加权并归一化
-        weighted = blended ** expert_weight
+        # 加权并归一化（对数空间加权，避免幂运算平坦化分布）
+        log_weighted = np.log(np.clip(blended, 1e-10, None)) * expert_weight
+        weighted = np.exp(log_weighted)
         return weighted / (weighted.sum() + 1e-10)
 
     def merge(

@@ -58,8 +58,15 @@ def _build_snapshot(chip_result: dict[str, Any], trade_date: str) -> dict[str, A
     if not peaks:
         return None
 
+    # 计算 POC（成交量最大的峰）
+    poc_price = None
+    if peaks:
+        max_vol_peak = max(peaks, key=lambda p: p.get("volume", p.get("share_of_total", 0)))
+        poc_price = max_vol_peak.get("price")
+
     return {
         "date": trade_date,
+        "poc_price": poc_price,
         "peaks": [
             {
                 "price": p["price"],

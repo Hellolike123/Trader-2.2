@@ -1343,13 +1343,13 @@ def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dic
     try:
         import akshare as ak
     except ImportError:
-        return None
+        return []
     try:
         period_map = {"5m": "5", "15m": "15", "30m": "30", "60": "60"}
         period = period_map.get(interval, "60")
         df = ak.stock_zh_a_hist_min_em(symbol=sec.code, period=period, adjust="qfq")
         if df is None or df.empty:
-            return None
+            return []
         bars: list[dict[str, Any]] = []
         for _, row in df.iterrows():
             row_dict = row.to_dict()
@@ -1494,7 +1494,9 @@ def normalize_bars(raw_bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def pct_change(start: float, end: float) -> float:
-    return ((end / start) - 1.0) * 100 if start else 0.0
+    if start == 0:
+        return 0.0 if end == 0 else float('inf')
+    return ((end / start) - 1.0) * 100
 
 
 # ── Memory-efficient batch reading ────────────────────────────────────

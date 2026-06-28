@@ -204,7 +204,7 @@ class HMMRegimeDetector:
         """用 Viterbi 解码最可能的隐状态序列。
 
         Returns:
-            整数数组，每个元素为 0(Bull) / 1(Bear) / 2(Range)
+            整数数组，每个元素为 0(Bull) / 1(Range) / 2(Bear)
         """
         obs = np.array(returns, dtype=float)
         if len(obs) < 3:
@@ -216,9 +216,9 @@ class HMMRegimeDetector:
 
         Returns:
             {
-                "state_id": int,          # 0=Bull, 1=Bear, 2=Range
-                "state_label": str,       # "低波上涨" / "高波下跌" / "宽幅震荡"
-                "state_en": str,          # "bull" / "bear" / "range"
+                "state_id": int,          # 0=Bull, 1=Range, 2=Bear
+                "state_label": str,       # "低波上涨" / "宽幅震荡" / "高波下跌"
+                "state_en": str,          # "bull" / "range" / "bear"
                 "confidence": float,      # 当前状态的后验概率置信度
                 "mu": float,              # 当前状态均值
                 "sigma": float,           # 当前状态波动率

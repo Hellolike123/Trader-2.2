@@ -153,7 +153,8 @@ def status_for(current: float, support: float, low_zone_upper: float, confirm: f
             vp_result=vp_result,
         )
     except ImportError:
-        pass
+        import logging
+        logging.getLogger(__name__).debug("decision_core unavailable, using T0 fallback status_for")
     # Fallback: original T0-only logic (T0 skill may lack decision_core)
     _FUSION_STATUS_MAP: dict[str, str] = {
         "半仓试 (多方主导)": "低吸观察",
