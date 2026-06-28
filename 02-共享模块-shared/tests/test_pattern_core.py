@@ -56,8 +56,7 @@ class TestDoubleBottom:
         lows = [c - 0.3 for c in closes]
 
         result = _detect_double_bottom(closes, highs, lows)
-        # 颈线在10附近，当前价格10.1可能刚好突破
-        # 这个测试验证函数不报错即可
+        # 验证函数不报错，结果可能是 None 或 double_bottom
         assert result is None or result.pattern == "double_bottom"
 
 
@@ -89,8 +88,7 @@ class TestTriangle:
         lows = [c - 0.2 for c in closes]
 
         result = _detect_triangle(closes, highs, lows)
-        # 三角形检测可能不总是触发，取决于数据
-        # 这里主要验证不报错
+        # 验证函数不报错
         assert result is None or result.signal in (1, -1)
 
     def test_no_triangle(self):

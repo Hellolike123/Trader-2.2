@@ -418,9 +418,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         # 形态识别
         pattern_result = None
         try:
-            closes = [to_float(b, "close") for b in bars if to_float(b, "close")]
-            highs = [to_float(b, "high") for b in bars if to_float(b, "high")]
-            lows = [to_float(b, "low") for b in bars if to_float(b, "low")]
+            closes = [to_float(b.get("close")) for b in bars if b.get("close") is not None]
+            highs = [to_float(b.get("high")) for b in bars if b.get("high") is not None]
+            lows = [to_float(b.get("low")) for b in bars if b.get("low") is not None]
             if len(closes) >= 20 and len(highs) >= 20 and len(lows) >= 20:
                 pat = detect_pattern(closes[-60:], highs[-60:], lows[-60:])
                 if pat and pat.signal != 0:
