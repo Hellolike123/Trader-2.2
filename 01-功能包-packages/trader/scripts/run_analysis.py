@@ -47,7 +47,6 @@ from config import (
     LOOKBACK_DAYS,
     STRUCTURE_WINDOW,
 )
-from trader_shared.light_data import to_float, pct_change
 try:
     from trader_shared.models import DATA_STATUS_MAP
 except ImportError:
@@ -190,6 +189,7 @@ _SIGNAL_TYPE_LABELS = {
     "trigger_expired": "信号过期",
     "blocked": "受压",
     "review_result": "复盘",
+    "no_entry": "不参与",
 }
 
 
@@ -860,6 +860,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "missing_sources": snapshot.missing_sources,
         "source_errors": snapshot.source_errors,
         "fetched_at": snapshot.fetched_at,
+        "volume_ratio": quote.get("volume_ratio"),
+        "turnover_rate": quote.get("turnover_rate"),
+        "daily_bars": bars,
         "ma": {
             "ma5": ma_text(levels["ma_values"].get("ma5")),
             "ma10": ma_text(levels["ma_values"].get("ma10")),
@@ -902,7 +905,6 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "high_zone_upper": levels.get("high_zone_upper"),
         "fib_ext_1382": levels.get("fib_ext_1382"),
         "fib_ext_1618": levels.get("fib_ext_1618"),
-        "resonance": resonance_result,
         "main_force_score": main_force_score_result,
         "big_order_summary": big_order_result.get("summary"),
         "big_order_direction": big_order_result.get("direction_summary"),
@@ -1166,73 +1168,6 @@ def sync_report_with_data(report: dict, levels: dict) -> dict:
         report["scene"]        = "修复观察"
         report["state_label"]  = "修复观察"
     return report
-
-
-def _render_resonance(res: dict[str, Any], current_price: float, lines: list[str]) -> None:
-    """渲染多窗共振（微信可读版）。
-
-    逻辑：
-    1. 共振标签 + 分数一行
-    2. 周线/日线/60min 各一行，翻译模块原始标签
-    3. 分数高时提示"多时间窗共振，适合关注"
-    """
-    resonance_label = str(res.get("resonance_label", ""))
-    score = int(res.get("total_score", 0))
-
-    # 共振行
-    lines.append(f"  多窗共振 {resonance_label}（{score}/10）")
-
-    # 每周线/日线/60min 子标签
-    _week_label = str(res.get("weekly_label", "无数据"))
-    _day_label = str(res.get("daily_label", "无数据"))
-    _tim_label = str(res.get("timing_label", "无数据"))
-
-    # 周线翻译
-    if "周线多头" in _week_label:
-        lines.append("  周线：多头排列，价格站上EXPMA20")
-    elif "周线空头" in _week_label:
-        lines.append("  周线：空头排列")
-    elif "周线中性" in _week_label:
-        lines.append("  周线：中性（震荡中）")
-    elif "日线代理多头" in _week_label:
-        lines.append("  周线（日线代理）：多头排列")
-    elif "日线代理空头" in _week_label:
-        lines.append("  周线（日线代理）：空头排列")
-    elif "基于5日收盘" in _week_label:
-        if "站上" in _week_label:
-            lines.append("  周线（日线代理）：价格站上5日前收盘")
-        else:
-            lines.append("  周线（日线代理）：价格未站上5日前收盘")
-    else:
-        lines.append(f"  周线：{_week_label}")
-
-    # 日线翻译
-    if "多头排列" in _day_label:
-        lines.append("  日线：多头排列（安全位）")
-    elif "空头排列" in _day_label:
-        lines.append("  日线：空头排列（风险位）")
-    elif "支撑上" in _day_label:
-        lines.append("  日线：价格在支撑上方")
-    else:
-        lines.append(f"  日线：{_day_label}")
-
-    # 60min：无数据则不显示
-    if "无60分钟" in _tim_label or "无数据" in _tim_label:
-        pass
-    elif "回调到位" in _tim_label:
-        lines.append("  60min：回调至日线支撑附近，买点信号")
-    elif "站上EXPMA" in _tim_label:
-        lines.append("  60min：站上EXPMA10（偏多）")
-    elif "跌破EXPMA" in _tim_label:
-        lines.append("  60min：跌破EXPMA10（偏空）")
-    elif _tim_label and _tim_label not in ("无数据", "未知"):
-        lines.append(f"  60min：{_tim_label}")
-
-    # 高分共振提示
-    if score >= 8:
-        lines.append("  多时间窗共振强，适合关注")
-    elif score >= 6:
-        lines.append("  部分时间窗共振，可观察确认")
 
 
 def volume_observation(daily: list[dict[str, Any]], bars_5m: list[dict[str, Any]]) -> str:
@@ -1931,6 +1866,8 @@ def signal_max_total_pct(signal_type: str) -> int:
     if signal_type in ("defensive", "risk_stop"):
         return 0
     if signal_type in ("trigger_expired", "blocked"):
+        return 0
+    if signal_type == "no_entry":
         return 0
     if signal_type == "track":
         return 30
