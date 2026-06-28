@@ -281,7 +281,7 @@ def _detect_main_force_stage(main_force_result: dict | None) -> tuple[str | None
 
     stage, base_conf = result
     # 置信度打折：main_force 的 confidence 是 0-1，一致性高时全额，低时打折
-    conf_multiplier = max(0.5, mf_confidence / 0.5) if mf_confidence > 0 else 0.5
+    conf_multiplier = min(mf_confidence, 1.0) if mf_confidence > 0 else 0.5
     confidence = min(100, int(base_conf * min(conf_multiplier, 1.0)))
 
     reason = f"主力{mf_stage}(置信度{mf_confidence:.2f})"
@@ -909,7 +909,7 @@ def assess_stage(
     # 置信度门控（先于多日确认，过滤噪音信号）
     gated_stage, gated_confidence = _layer2_confidence_gate(raw_stage, raw_confidence, state, vp_stage=vp_stage)
     if gated_stage != raw_stage:
-        protection_notes.append(f"置信度{raw_confidence}%<50%，保持{gated_stage}")
+        protection_notes.append(f"置信度{raw_confidence}%<35%，保持{gated_stage}")
 
     # 多日确认（在置信度过滤之后，确认阶段转换真实性）
     # 计算5日涨幅，强势时降低确认天数
@@ -1185,7 +1185,7 @@ def compute_exit_plan(
             "resistance_exit": None,
             "stage_exit": current_stage,
             "exit_plan": [],
-            "already_exited": [False, False, False],
+            "already_exited": [],
             "wyckoff_signals": {},
         }
 
