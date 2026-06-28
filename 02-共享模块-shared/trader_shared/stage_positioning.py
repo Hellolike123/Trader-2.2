@@ -156,13 +156,9 @@ def _assess_volume_price(
 
     if close_5_start > 0:
         if gap_indices:
-            # 剔除跳空日，用跳空前一日收盘到最后一日收盘计算涨幅
-            # 找到第一个非跳空前的基准价
-            base_idx = 0
-            for i in range(len(recent5)):
-                if i not in gap_indices:
-                    base_idx = i
-                    break
+            # P1 Fix: 剔除跳空日，基准价为第一个跳空日前一日的收盘价。
+            # 原代码 base_idx 循环从 0 开始、index 0 永不为 gap，永远返回 0 —— 跳空检测完全旁路。
+            base_idx = max(0, min(gap_indices) - 1)
             base_price = float(recent5[base_idx].get("close") or close_5_start)
             if base_price > 0:
                 price_change_5 = (close_5_end - base_price) / base_price

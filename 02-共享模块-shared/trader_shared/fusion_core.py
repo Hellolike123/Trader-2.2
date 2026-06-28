@@ -450,7 +450,9 @@ def merge_decisions(
 
     mom_score = 50
     if isinstance(momentum_result, dict):
-        mom_score = momentum_result.get("momentum", {}).get("score", 50)
+        # P2 Fix: momentum 键可能值为 None，直接 .get("score") 会抛 AttributeError
+        mom = momentum_result.get("momentum") or {}
+        mom_score = mom.get("score", 50) if isinstance(mom, dict) else 50
 
     # Fix 2: 有强多信号时的低位判断从 pos_pct <= 0.5 收紧到 <= 0.35
     # 50% 中轴并非低位，中轴附近的强多信号不应触发底部权重偏置
@@ -477,6 +479,7 @@ def merge_decisions(
         # 补齐 pattern 权重 (但 "很差" regime 全员权重为0，pattern 也不加)
         if regime == "很差":
             weights = regime_weights
+            weights["pattern"] = 0.0  # P1 Fix: 显式归零，避免 get 默认值偷渡
         else:
             # 先将原有权重缩小，腾出空间给 pattern，确保总和=1.0
             shrink_factor = 1.0 - PATTERN_WEIGHT
@@ -512,7 +515,7 @@ def merge_decisions(
         chan_signal["direction"] * chan_signal["confidence"] * weights["chan"] +
         momentum_signal["direction"] * momentum_signal["confidence"] * weights["momentum"] +
         wyckoff_signal["direction"] * wyckoff_signal["confidence"] * weights["wyckoff"] +
-        pattern_signal["direction"] * pattern_signal["confidence"] * weights.get("pattern", 0.10)
+        pattern_signal["direction"] * pattern_signal["confidence"] * weights.get("pattern", 0.0)
     )
 
     # 5. 决策映射

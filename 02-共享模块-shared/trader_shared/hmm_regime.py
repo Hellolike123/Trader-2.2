@@ -55,9 +55,11 @@ class HMMRegimeDetector:
         # 状态转移矩阵 A (n×n)
         self.A = np.full((n, n), 1.0 / n)
         # 观测高斯分布参数: 均值 μ 与标准差 σ
-        # 先验: 牛 > 震荡 > 熊
-        self.mu = np.array([0.008, -0.008, 0.001])
-        self.sigma = np.array([0.01, 0.02, 0.015])
+        # 先验: 牛(0) > 震荡(1) > 熊(2)
+        # P1 Fix: 原 mu=[0.008, -0.008, 0.001] 把 bear 配给 state1(=range label)、range 配给 state2(=bear label)
+        # 正序: [bull=高收益低波动, range=近零中等波动, bear=负收益高波动]
+        self.mu = np.array([0.008, 0.001, -0.008])
+        self.sigma = np.array([0.01, 0.015, 0.02])
 
     # ─── 核心算法 ────────────────────────────────────────────────────────────
 
@@ -230,7 +232,7 @@ class HMMRegimeDetector:
         obs = np.array(returns, dtype=float)
         if len(obs) < 3:
             return {
-                "state_id": 2, "state_label": "宽幅震荡",
+                "state_id": 1, "state_label": "宽幅震荡",
                 "state_en": "range", "confidence": 0.4,
                 "mu": 0.0, "sigma": 0.015,
             }
@@ -280,8 +282,10 @@ def detect_regime(returns: List[float]) -> dict:
         _HMM_CACHE_DATE = today_str
 
     # 计算缓存 key
+    # P2 Fix: 缓存 key 增加 len(returns)，避免不同长度/不同标的(末50日相同)串缓存
     data_hash = hashlib.md5(
-        ",".join(f"{r:.6f}" for r in returns[-50:]).encode("utf-8")
+        f"{len(returns)}:".encode("utf-8")
+        + ",".join(f"{r:.6f}" for r in returns[-50:]).encode("utf-8")
     ).hexdigest()[:12]
     cache_key = f"{data_hash}"
 

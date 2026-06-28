@@ -317,6 +317,65 @@ def _check_macd_for_2nd_buy(
     return False
 
 
+def _check_macd_for_2nd_sell(
+    bars: list[dict],
+    strokes: list[dict],
+) -> bool:
+    """Check MACD conditions for 2nd sell point (top divergence).
+
+    P0 Fix: 二类卖点需要顶部背离检测，此前误用底部背离标志导致二类卖几乎永不触发。
+
+    Condition A: MACD top divergence - previous up stroke's MACD histogram is weaker (less positive)
+                 than the earlier up stroke's peak.
+    Condition B: MACD decline - recent MACD histogram shows decline from positive territory.
+
+    Returns True if either condition is met.
+    """
+    if not bars or not strokes:
+        return False
+
+    up_strokes = [s for s in strokes if s["direction"] == "up"]
+    if len(up_strokes) < 2:
+        return False
+
+    hist_values = [to_float(b.get("macd_histogram")) for b in bars]
+    hist_values = [h for h in hist_values if h is not None]
+
+    if len(hist_values) < 10:
+        return False
+
+    recent_hist = hist_values[-5:]
+    earlier_hist = hist_values[-10:-5]
+
+    if recent_hist and earlier_hist:
+        recent_max = max(recent_hist)
+        earlier_max = max(earlier_hist)
+        # Condition A: MACD top divergence - recent peak is lower (weakening momentum)
+        condition_a = recent_max < earlier_max and recent_max > 0
+
+        # Condition B: MACD decline from positive - last 3 bars show weakening
+        if len(hist_values) >= 3:
+            last_3 = hist_values[-3:]
+            condition_b = all(h > 0 for h in last_3) and last_3[-1] < last_3[0]
+        else:
+            condition_b = False
+
+        # Trend filter: reject 2nd sell in bullish alignment
+        closes = [to_float(b.get("close")) for b in bars]
+        closes = [c for c in closes if c is not None]
+        if len(closes) >= 25:
+            ma5 = sum(closes[-10:-5]) / 5
+            ma10 = sum(closes[-15:-5]) / 10
+            ma20 = sum(closes[-25:-5]) / 20
+            last_5_closes = closes[-5:]
+            if all(c > ma5 and c > ma10 and c > ma20 for c in last_5_closes):
+                return False
+
+        return condition_a or condition_b
+
+    return False
+
+
 def detect_buy_points(
     strokes: list[dict],
     zones: list[dict],
@@ -532,11 +591,13 @@ def chanlun_analysis(
     zones = build_zones(strokes)
     divergence = detect_divergence(bars, strokes)
     
-    # Check MACD divergence for 2nd buy point
-    macd_divergence_ok = _check_macd_for_2nd_buy(bars, strokes)
+    # Check MACD divergence for 2nd buy point (bottom divergence)
+    macd_divergence_buy = _check_macd_for_2nd_buy(bars, strokes)
+    # Check MACD divergence for 2nd sell point (top divergence) — P0 fix
+    macd_divergence_sell = _check_macd_for_2nd_sell(bars, strokes)
 
-    buy_points = detect_buy_points(strokes, zones, current, macd_hist_current, macd_hist_prev, macd_divergence_ok)
-    sell_points = detect_sell_points(strokes, zones, current, macd_hist_current, macd_hist_prev, macd_divergence_ok)
+    buy_points = detect_buy_points(strokes, zones, current, macd_hist_current, macd_hist_prev, macd_divergence_buy)
+    sell_points = detect_sell_points(strokes, zones, current, macd_hist_current, macd_hist_prev, macd_divergence_sell)
 
     strokes_count = len(strokes)
     zones_count = len(zones)

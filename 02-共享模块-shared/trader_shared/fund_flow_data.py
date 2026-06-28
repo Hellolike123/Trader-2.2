@@ -161,11 +161,15 @@ def _fetch_fund_flow_eastmoney(symbol: str, days: int = 30) -> list[dict[str, An
                 continue
             try:
                 date_str = parts[0]
-                super_large = float(parts[1]) if parts[1] != "-" else 0.0
-                large = float(parts[2]) if parts[2] != "-" else 0.0
+                # 东方财富 API 字段顺序: parts[1]=主力净流入(超大+大), parts[2]=小单, parts[3]=中单, parts[4]=大单, parts[5]=超大单
+                # Fix P0: 字段映射全部错位，以 parts[4]+parts[5]=parts[1] 的约束关系验证
+                super_large = float(parts[5]) if parts[5] != "-" else 0.0
+                large = float(parts[4]) if parts[4] != "-" else 0.0
                 medium = float(parts[3]) if parts[3] != "-" else 0.0
-                small = float(parts[4]) if parts[4] != "-" else 0.0
-                net_flow = float(parts[5]) if parts[5] != "-" else super_large + large
+                small = float(parts[2]) if parts[2] != "-" else 0.0
+                main_force = float(parts[1]) if parts[1] != "-" else super_large + large
+                # 主力净流入 = 超大单 + 大单（用于缓存格式兼容，保留 net_flow 字段）
+                net_flow = main_force
                 result.append({
                     "date": date_str,
                     "super_large_wan": round(super_large, 2),

@@ -186,19 +186,18 @@ def _check_theory_breakout(
     # 2. 威科夫验证
     wyk_ok = False
     if isinstance(wyk, dict):
-        has_upthrust = wyk.get("upthrust_signal", False)
-        has_spring = wyk.get("spring_signal", False)
-        has_bullish_div = wyk.get("bullish_volume_divergence", False)
+        # P2 Fix: signals_detail 中的 wyckoff 是标准化信号 {direction, confidence, reason}，
+        # 不含原始 upthrust_signal/spring_signal 等字段。改用 reason 关键词匹配。
+        reason = str(wyk.get("reason", ""))
+        has_upthrust = any(kw in reason for kw in ("上冲", "Upthrust", "看空"))
+        has_spring = "Spring" in reason or "做多" in reason
+        has_bullish_div = "看多" in reason and any(
+            kw in reason for kw in ("背离", "量价")
+        )
 
-        # 排除假突破 (Upthrust)
         if not has_upthrust:
-            # 确认有做多结构 (Spring 或看多背离)
             if has_spring or has_bullish_div:
                 wyk_ok = True
-            else:
-                summary = str(wyk.get("wyckoff_summary", ""))
-                if "看多" in summary:
-                    wyk_ok = True
 
     theory_ok = chan_ok or wyk_ok
     if not theory_ok:

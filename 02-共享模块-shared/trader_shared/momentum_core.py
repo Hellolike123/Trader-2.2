@@ -123,9 +123,12 @@ def calc_adx(highs: list[float], lows: list[float], closes: list[float], period:
     mdi_s = sum(mdi[1:period + 1]) / period
     dx_list: list[float] = []
     for i in range(period, n):
-        tr_s = (tr_s * (period - 1) + tr[i]) / period
-        pdi_s = (pdi_s * (period - 1) + pdi[i]) / period
-        mdi_s = (mdi_s * (period - 1) + mdi[i]) / period
+        # P2 Fix: i=period 时 tr[period] 已被初始值包含，需加 guard 避免双重计数
+        # (calc_rsi 使用 if i > period: 守卫，calc_adx 遗漏了)
+        if i > period:
+            tr_s = (tr_s * (period - 1) + tr[i]) / period
+            pdi_s = (pdi_s * (period - 1) + pdi[i]) / period
+            mdi_s = (mdi_s * (period - 1) + mdi[i]) / period
         p = (pdi_s / tr_s * 100) if tr_s > 0 else 0
         m = (mdi_s / tr_s * 100) if tr_s > 0 else 0
         denom = p + m

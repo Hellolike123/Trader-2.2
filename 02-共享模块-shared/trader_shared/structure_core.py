@@ -118,8 +118,15 @@ def average_atr_pct(bars: list[BarData], period: int | None = None) -> float | N
     period = period or STRUCTURE_WINDOW
     tr_values: list[float] = []
     last_close: float | None = None
+    # P1 Fix: 当 len(bars) > period 时，首根 K 线的 prev_close 应取 bars[-period-1].close
+    # 原代码始终用 None 初始化为 prev_close，首根 K 线跳空缺口被漏算导致 ATR 低估。
+    preview = bars[-(period + 1):] if len(bars) > period else bars[-period:]
     prev_close: float | None = None
-    for item in bars[-period:]:
+    if len(bars) > period and len(preview) > period:
+        first_prev = to_float(bars[-period - 1].get("close"))
+        if first_prev is not None and first_prev > 0:
+            prev_close = first_prev
+    for item in preview:
         high = to_float(item.get("high"))
         low = to_float(item.get("low"))
         close = to_float(item.get("close"))
@@ -571,14 +578,16 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
             add_level(support_levels, "趋势线", _trendline_price, 0.85)
 
     # ═══════ RSI 底背离支撑 ═══════
+    # P2 Fix: bars 与 _closes 可能不同长度（closed bars 有 None close），需要对齐后传入
+    _bars = [b for b in bars if b.get("close") is not None]
     if len(_closes) >= 30:
-        _rsi_div_price = _calc_rsi_divergence(_closes, bars)
+        _rsi_div_price = _calc_rsi_divergence(_closes, _bars)
         if _rsi_div_price is not None and _rsi_div_price < current:
             add_level(support_levels, "RSI底背离", _rsi_div_price, 0.75)
 
     # ═══════ MACD 底背离支撑 ═══════
     if len(_closes) >= 30:
-        _macd_div_price = _calc_macd_divergence(_closes, bars)
+        _macd_div_price = _calc_macd_divergence(_closes, _bars)
         if _macd_div_price is not None and _macd_div_price < current:
             add_level(support_levels, "MACD底背离", _macd_div_price, 0.75)
 

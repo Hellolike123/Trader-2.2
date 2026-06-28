@@ -1435,7 +1435,7 @@ def render_markdown(r: dict) -> str:
             # 分离动作和原因（如"高位观望（信号弱，轻仓）"）
             if "（" in _first:
                 _action = _first.split("（")[0]
-                _reason = _first.split("（")[1].rstrip("）")
+                _reason = _first.split("（")[1].rstrip("）)")
                 _lines[0] = f"🎯 {stage_line}｜{_action}（{_reason}）"
             else:
                 _lines[0] = f"🎯 {stage_line}｜{_first}"
@@ -1675,8 +1675,6 @@ def render_markdown(r: dict) -> str:
         elif "主力在吸筹" in warning_text:
             chip_line_parts.append("吸筹")
         lines.append(f"  {' ｜ '.join(chip_line_parts)}")
-
-    chip_migration = r.get("chip_migration") or {}
 
     # ── 个股股性透视卡（build_report 预计算存 report["win_rate_data"]，无则 lazy 计算）──
     win_rate_data = r.get("win_rate_data")
@@ -2142,6 +2140,14 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
         from trader_shared.signal_store import append_signal
         raw_time = analysis_time or today_text()
         trade_date = raw_time.split(" ")[0]
+
+        # 防护：trigger_price 和 invalidation.price 必须 > 0
+        if trigger_price <= 0:
+            lines.append("  ⚠️ 信号跳过：当前价无效")
+            return "\n".join(lines)
+        if stop <= 0:
+            stop = None  # invalidation 会跳过
+
         signal = {
             "contract": "trader_signal_v1",
             "source_skill": "trader",
@@ -2155,7 +2161,7 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
             "confidence": confidence,
             "data_status": DATA_STATUS_MAP.get(str(report.get("data_status")), "full"),
             "trigger": {"type": "price_level", "price": round(trigger_price, 2), "text": f"{trigger_price:.2f}元 触发{sig_type}"},
-            "invalidation": {"type": "price_break", "price": round(stop, 2), "text": f"跌破 {stop:.2f}元"},
+            "invalidation": {"type": "price_break", "price": round(stop, 2), "text": f"跌破 {stop:.2f}元"} if stop else None,
             "position": {
                 "max_total_pct": signal_max_total_pct(sig_type),
                 "max_single_move_pct": min(10, signal_max_total_pct(sig_type)),
