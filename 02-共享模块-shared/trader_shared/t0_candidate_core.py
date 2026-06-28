@@ -102,9 +102,9 @@ def build_candidate_levels(current: float, bars: list[dict[str, Any]], change_pc
         except ImportError:
             atr_pct = 0.02
         try:
-            from config import MIN_ZONE_WIDTH_PCT as _MIN_ZONE, MAX_ZONE_WIDTH_PCT as _MAX_ZONE
-            from config import MIN_STOP_BUFFER_PCT as _MIN_STOP, MAX_STOP_BUFFER_PCT as _MAX_STOP
-            from config import MIN_CONFIRM_SPACE_PCT as _MIN_CONFIRM
+            from trader_shared.config import MIN_ZONE_WIDTH_PCT as _MIN_ZONE, MAX_ZONE_WIDTH_PCT as _MAX_ZONE
+            from trader_shared.config import MIN_STOP_BUFFER_PCT as _MIN_STOP, MAX_STOP_BUFFER_PCT as _MAX_STOP
+            from trader_shared.config import MIN_CONFIRM_SPACE_PCT as _MIN_CONFIRM
         except ImportError:
             _MIN_ZONE = 0.005; _MAX_ZONE = 0.020
             _MIN_STOP = 0.008; _MAX_STOP = 0.025

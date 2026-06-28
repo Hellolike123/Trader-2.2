@@ -41,8 +41,9 @@ def _load_history() -> dict[str, Any]:
 def _save_history(history: dict[str, Any]) -> None:
     """Save chip history to file atomically."""
     try:
+        import uuid
         _CHIP_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp = _CHIP_HISTORY_PATH.with_suffix(f".{os.getpid()}.tmp")
+        tmp = _CHIP_HISTORY_PATH.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")
         tmp.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
         with tmp.open("rb") as f:
             os.fsync(f.fileno())

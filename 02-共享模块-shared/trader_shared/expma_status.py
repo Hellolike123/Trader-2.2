@@ -203,10 +203,11 @@ def _score_crossover(closes: list[float], expma_values: dict[str, float | None])
         expma20_prev = _calc_expma(closes_to_day_prev, 20)
         
         # 检查金叉：EXPMA10从下穿上EXPMA20
-        if expma10_prev <= expma20_prev and expma10 > expma20:
+        # 注意：expma10_prev 是更新的数据，expma10 是更旧的数据
+        if expma10_prev >= expma20_prev and expma10 < expma20:
             golden += 1
         # 检查死叉：EXPMA10从上穿下EXPMA20
-        elif expma10_prev >= expma20_prev and expma10 < expma20:
+        elif expma10_prev <= expma20_prev and expma10 > expma20:
             death += 1
 
     if golden > 0:
