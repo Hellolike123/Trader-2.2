@@ -148,6 +148,12 @@ def _detect_double_bottom(
         if bounce_pct < 0.03:
             continue
 
+        # 反弹不能超过W底前的高点（质量过滤）
+        if idx1 > 0:
+            prev_high = max(highs[:idx1])
+            if neckline > prev_high:
+                continue
+
         # 当前价格突破颈线
         current = closes[-1]
         if current > neckline:
