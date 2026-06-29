@@ -860,7 +860,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "missing_sources": snapshot.missing_sources,
         "source_errors": snapshot.source_errors,
         "fetched_at": snapshot.fetched_at,
-        "volume_ratio": quote.get("volume_ratio"),
+        "volume_ratio": _calc_volume_ratio_from_bars(bars),
         "turnover_rate": quote.get("turnover_rate"),
         "daily_bars": bars,
         "ma": {
@@ -1318,6 +1318,33 @@ def _get_buy_label(change_pct: float, volume_ratio: float) -> str:
             return "横盘缩量"
         return "缩量整理"
     return "试探买入"
+
+
+def _calc_volume_ratio_from_bars(bars: list[dict], window: int = 5) -> float:
+    """从日K线计算量比（近N日均量 / 前N日均量）。"""
+    if len(bars) < 2 * window:
+        return 0.0
+
+    recent_vols = []
+    prev_vols = []
+    for b in bars[-2 * window:]:
+        try:
+            v = float(str(b.get("volume", 0)).replace(",", ""))
+            if v > 0:
+                if len(recent_vols) < window:
+                    recent_vols.append(v)
+                else:
+                    prev_vols.append(v)
+        except (ValueError, TypeError):
+            pass
+
+    if not recent_vols or not prev_vols:
+        return 0.0
+
+    avg_recent = sum(recent_vols) / len(recent_vols)
+    avg_prev = sum(prev_vols) / len(prev_vols)
+
+    return avg_recent / avg_prev if avg_prev > 0 else 0.0
 
 
 def render_markdown(r: dict) -> str:
