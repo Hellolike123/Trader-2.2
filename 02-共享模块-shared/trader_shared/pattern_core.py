@@ -105,6 +105,7 @@ def _detect_double_bottom(
     lows: List[float],
     min_gap: int = 5,
     price_lows: List[tuple[int, float]] | None = None,
+    volumes: List[float] | None = None,
 ) -> Optional[PatternResult]:
     """检测W底(双底)形态。
 
@@ -113,6 +114,7 @@ def _detect_double_bottom(
     2. 第二低点 > 第一低点 (不破前低，允许微破2%)
     3. 两低点之间有反弹 (涨幅 >= 3%)
     4. 当前价格突破颈线 (两低点间最高点)
+    5. 量价配合: 第二低点缩量，反弹温和放量 (可选)
     """
     if len(closes) < 20:
         return None
@@ -152,6 +154,20 @@ def _detect_double_bottom(
         if idx1 > 0:
             prev_high = max(highs[:idx1])
             if neckline > prev_high:
+                continue
+
+        # 量价配合验证（可选）
+        if volumes and len(volumes) > max(idx1, idx2):
+            vol1 = volumes[idx1]  # 第一低点时的成交量
+            vol2 = volumes[idx2]  # 第二低点时的成交量
+            vol_bounce = max(volumes[idx1:idx2 + 1])  # 反弹期间最大成交量
+
+            # 第二低点要缩量（比第一低点量小，允许20%误差）
+            if vol2 > vol1 * 1.2:
+                continue
+
+            # 反弹要温和放量（比第二低点量大，至少80%）
+            if vol_bounce < vol2 * 0.8:
                 continue
 
         # 当前价格突破颈线
@@ -361,6 +377,7 @@ def detect_pattern(
     closes: List[float],
     highs: List[float],
     lows: List[float],
+    volumes: List[float] | None = None,
 ) -> PatternResult:
     """检测价格形态。
 
@@ -370,6 +387,7 @@ def detect_pattern(
         closes: 收盘价序列 (至少20根)
         highs: 最高价序列
         lows: 最低价序列
+        volumes: 成交量序列 (可选，用于量价配合验证)
 
     Returns:
         PatternResult 包含形态类型、信号方向、置信度、颈线位、目标位
@@ -383,8 +401,8 @@ def detect_pattern(
     # 预计算极值点缓存 (避免重复遍历)
     price_lows, _, _, price_highs = _compute_extrema_cache(closes, highs, lows, min_gap=3)
 
-    # 按优先级检测 (传递缓存)
-    result = _detect_double_bottom(closes, highs, lows, price_lows=price_lows)
+    # 按优先级检测 (传递缓存和量价数据)
+    result = _detect_double_bottom(closes, highs, lows, price_lows=price_lows, volumes=volumes)
     if result:
         return result
 

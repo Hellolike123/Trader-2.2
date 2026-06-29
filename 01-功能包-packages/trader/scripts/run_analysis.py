@@ -422,8 +422,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             closes = [to_float(b.get("close")) for b in bars if b.get("close") is not None]
             highs = [to_float(b.get("high")) for b in bars if b.get("high") is not None]
             lows = [to_float(b.get("low")) for b in bars if b.get("low") is not None]
+            volumes = [to_float(b.get("volume")) for b in bars if b.get("volume") is not None]
             if len(closes) >= 20 and len(highs) >= 20 and len(lows) >= 20:
-                pat = detect_pattern(closes[-60:], highs[-60:], lows[-60:])
+                pat = detect_pattern(closes[-60:], highs[-60:], lows[-60:], volumes=volumes[-60:] if volumes else None)
                 if pat and pat.signal != 0:
                     pattern_result = {
                         "pattern": pat.pattern,
