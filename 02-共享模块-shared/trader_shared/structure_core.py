@@ -600,7 +600,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     theory = _theory_multipliers(fusion_result)
     # P3 安全模式：THEORY_ADJUST_LOG_ONLY=true 时只记录不生效
     try:
-        from config import THEORY_ADJUST_LOG_ONLY
+        from trader_shared.config import THEORY_ADJUST_LOG_ONLY
     except (ImportError, AttributeError):
         THEORY_ADJUST_LOG_ONLY = False
     if THEORY_ADJUST_LOG_ONLY and any(v != 1.0 for v in theory.values()):
@@ -636,14 +636,20 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         stop = round(current * 0.95, 2)
 
     # ═══════ 止盈：按阶段动态 ═══════
-    if major_stage == '蓄势':
+    if major_stage in ('蓄势', '蓄势偏强'):
         take = round(resistance_price, 2) if resistance_price else round(current * 1.05, 2)
     elif major_stage == '主升':
         take = round(resistance_price, 2) if resistance_price else round(current * 1.10, 2)
     elif major_stage == '派发':
         take = round(current, 2)
+    elif major_stage == '蓄势偏弱':
+        take = round(resistance_price * 0.98, 2) if resistance_price else round(current, 2)
+    elif major_stage == '衰退':
+        take = round(current * 1.03, 2)
     else:
-        take = round(current * 0.95, 2)
+        take = round(resistance_price, 2) if resistance_price else round(current * 1.05, 2)
+    # 安全网: 止盈不能低于现价
+    take = max(take, current)
     position = zone_position(current, support_price, confirm_price)
     pressure_space_pct = (confirm_price - current) / current if current > 0 else 0
     below_ma = count_below_ma(current, ma_values)

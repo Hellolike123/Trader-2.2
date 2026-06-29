@@ -341,12 +341,12 @@ def status_layers(
         base_status = "低位修复"
     elif current >= confirm:
         base_status = "确认观察"
+    elif position_ratio >= POSITION_RATIO_CONFIRM:
+        base_status = "临近确认"
     elif above_ma5_ma10 or position_ratio >= POSITION_RATIO_STRONG:
         base_status = "均线修复"
     elif below_ma_count >= 3:
         base_status = "防守整理"
-    elif position_ratio >= POSITION_RATIO_CONFIRM:
-        base_status = "临近确认"
     elif 0 <= pressure_space_pct < space_threshold:
         base_status = "空间偏紧"
     else:
@@ -383,6 +383,8 @@ def status_layers(
             theory_status = "未确认转强"
         else:
             theory_status = "转强不足"
+    elif position_ratio >= POSITION_RATIO_CONFIRM:
+        theory_status = "未确认转强"
     elif above_ma5_ma10 and position_ratio >= POSITION_RATIO_STRONG:
         theory_status = "未确认转强"
     elif below_ma_count >= 3:
