@@ -621,22 +621,11 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     theory_status = str(levels.get("theory_status") or scene)
     replay = structure_replay(recent20)
     volume_text = volume_observation(recent20, bars_5m)
-    upward_momentum = ""  # 延迟到 assess_stage 之后计算
-    highs = numeric_values(recent20, "high")
-    lows = numeric_values(recent20, "low")
-    high = max(highs) if highs else current
-    low = min(lows) if lows else current
+    high = max((to_float(b.get("high")) for b in recent20), default=current)
+    low = min((to_float(b.get("low")) for b in recent20), default=current)
     analysis_time = f"{quote.get('trade_date')} {quote.get('trade_time') or ''}".strip()
 
     state_label = state_text(stage, theory_status)
-    structure_note = structure_view({
-        "current": current, "confirm": confirm, "stage": stage,
-        "ma": {"ma5": ma_text(levels["ma_values"].get("ma5")),
-               "ma10": ma_text(levels["ma_values"].get("ma10")),
-               "ma20": ma_text(levels["ma_values"].get("ma20")),
-               "ma30": ma_text(levels["ma_values"].get("ma30"))},
-        "scene": scene,
-    })
     volume_note = volume_view(volume_text)
     market_env_data = env  # 复用并行块已抓取的大盘环境，避免重复请求
     buy_scenes = {"低吸观察", "防守观察", "等转强"}
@@ -881,7 +870,6 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "fusion_override_used": levels.get("fusion_override_used", False),
         "theory_fusion_conflict": levels.get("theory_fusion_conflict", False),
         "state_label": state_label,
-        "structure_note": structure_note,
         "volume_note": volume_note,
         "market_env": market_env_data,
         "position_cap": position_cap,
@@ -1016,6 +1004,14 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     
     # 补全 JSON 输出需要的字段
     report = sync_report_with_data(report, levels)
+
+    # structure_note: 在 sync_report_with_data 之后计算，使用已修正的 scene
+    structure_note = structure_view({
+        "current": current, "confirm": confirm, "stage": stage,
+        "base_status": base_status, "theory_status": theory_status,
+        "scene": str(report.get("scene") or scene),
+    })
+    report["structure_note"] = structure_note
 
     # one_liner: 一句话总结
     low_zone = str(report.get("low_zone") or f"{float(report.get('support', 0)):.2f}-{float(report.get('support', 0)) * 1.01:.2f}元")
@@ -2201,6 +2197,7 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
             "summary": ("  ".join(alerts_found[:2])) if alerts_found else "无触发",
         }
         try:
+            assert_valid_signal(signal)
             append_signal(signal)
             lines.append(f"  信号已记录：{_signal_type_label(sig_type)}（置信度{confidence}）")
         except Exception:

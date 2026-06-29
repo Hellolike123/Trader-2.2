@@ -132,7 +132,7 @@ class TestCliExitCodes:
         # 检查是否有 exit code 逻辑
         has_exit = "sys.exit" in source or "return 1" in source or "return 2" in source
         if has_exit:
-            assert True  # 已实现
+            assert "sys.exit" in source or "return 1" in source or "return 2" in source
         else:
             # 尚未实现 exit code —— 记录已知限制
             assert "return 0" in source, "当前实现总是返回 0"

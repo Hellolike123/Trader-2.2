@@ -56,8 +56,7 @@ class TestDoubleBottom:
         lows = [c - 0.3 for c in closes]
 
         result = _detect_double_bottom(closes, highs, lows)
-        # 验证函数不报错，结果可能是 None 或 double_bottom
-        assert result is None or result.pattern == "double_bottom"
+        assert result is None, "无突破时不应检测到双底"
 
 
 class TestDoubleTop:
@@ -72,24 +71,26 @@ class TestDoubleTop:
         lows = [c - 0.3 for c in closes]
 
         result = _detect_double_top(closes, highs, lows)
-        # 验证函数不报错
-        assert result is None or result.pattern == "double_top"
+        assert result is not None, "清晰M头应被检测到"
+        assert result.pattern == "double_top"
+        assert result.signal == -1
 
 
 class TestTriangle:
     def test_triangle_breakout(self):
         # 三角形收敛: 高点递降，低点递升
         closes = [
-            10, 10.2, 10.5, 11, 11.5, 11, 10.5, 10.8, 11.2, 11,
-            10.8, 10.6, 11, 10.8, 10.6, 10.8, 11, 10.8, 11.2, 11.5,
-            11.8, 12, 12.2, 12.5, 12.8, 13, 13.2, 13.5, 13.8, 14
+            10, 11, 10.5, 11.5, 10.8, 11.3, 11.0, 11.2, 10.9, 11.1,
+            11.0, 11.05, 11.0, 11.02, 11.0, 11.01, 11.0, 11.5, 12, 12.5,
+            13, 13.5, 14, 14.5, 15, 15.5, 16, 16.5, 17, 17.5
         ]
-        highs = [c + 0.2 for c in closes]
-        lows = [c - 0.2 for c in closes]
+        highs = [c + 0.3 for c in closes]
+        lows = [c - 0.3 for c in closes]
 
         result = _detect_triangle(closes, highs, lows)
-        # 验证函数不报错
-        assert result is None or result.signal in (1, -1)
+        # 三角形检测可能返回 None 或检测到三角形，验证函数不报错
+        if result is not None:
+            assert result.signal in (1, -1)
 
     def test_no_triangle(self):
         # 无收敛形态

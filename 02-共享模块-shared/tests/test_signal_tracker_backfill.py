@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import sys
+import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -150,8 +151,8 @@ class TestBackfillRequires:
         has_backfill_in_source = "def backfill" in source
 
         if has_backfill or has_backfill_in_source:
-            # 已实现，跳过 xfail
-            assert True
+            # 已实现，验证函数可调用
+            assert callable(getattr(st, "backfill", None)) or "def backfill" in source
         else:
             # 尚未实现 —— 这是一个 known limitation
             assert not has_backfill, "backfill 功能尚未实现（BUG-007）"
@@ -209,4 +210,4 @@ class TestBackfillIdempotent:
             has_batch = any("batch" in p or "page" in p or "limit" in p for p in params)
             assert has_batch, "backfill 应支持批处理/分页参数"
         # 未实现则跳过
-        assert True
+        pytest.skip("backfill 功能尚未实现")

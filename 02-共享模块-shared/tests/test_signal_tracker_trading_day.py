@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sys
+import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta
@@ -166,7 +167,7 @@ class TestBadLineObservability:
             pass
         else:
             # 未实现 —— 记录缺陷
-            assert True, "bad_line_count 统计尚未实现（BUG-013）"
+            pytest.xfail("bad_line_count 统计尚未实现（BUG-013）")
 
     def test_result_path_encoding_is_utf8(self):
         """验证：读写使用 utf-8 编码（非默认系统编码）。"""
