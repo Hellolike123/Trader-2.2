@@ -131,8 +131,8 @@ def _detect_double_bottom(
         if (idx2 - idx1) < min_gap:
             continue
 
-        # 第二低点不破前低 (允许微破2%)
-        if low2 < low1 * 0.98:
+        # 第二低点不破前低 (允许微破2%)，且不能比前高太多 (允许15%)
+        if low2 < low1 * 0.98 or low2 > low1 * 1.15:
             continue
 
         # 两低点之间找最高点作为颈线
@@ -198,8 +198,8 @@ def _detect_double_top(
         if (idx2 - idx1) < min_gap:
             continue
 
-        # 第二高点不创新高 (允许微破2%)
-        if high2 > high1 * 1.02:
+        # 第二高点不创新高 (允许微破2%)，且不能比前低太多 (允许15%)
+        if high2 > high1 * 1.02 or high2 < high1 * 0.85:
             continue
 
         # 两高点之间找最低点作为颈线
@@ -262,17 +262,19 @@ def _detect_triangle(
     if len(price_highs) < min_points or len(price_lows) < min_points:
         return None
 
-    # 检查最近的高点是否递降
+    # 检查最近的高点是否递降（每步变化不超过10%）
     recent_highs = price_highs[-min_points:]
     highs_declining = all(
         recent_highs[j][1] > recent_highs[j + 1][1]
+        and recent_highs[j][1] * 0.90 <= recent_highs[j + 1][1]
         for j in range(len(recent_highs) - 1)
     )
 
-    # 检查最近的低点是否递升
+    # 检查最近的低点是否递升（每步变化不超过10%）
     recent_lows = price_lows[-min_points:]
     lows_rising = all(
         recent_lows[j][1] < recent_lows[j + 1][1]
+        and recent_lows[j][1] * 1.10 >= recent_lows[j + 1][1]
         for j in range(len(recent_lows) - 1)
     )
 
