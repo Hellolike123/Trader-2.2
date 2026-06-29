@@ -480,7 +480,6 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         _dis = float(report_fusion.get("disagreement") or 0)
         if _regime == "很差":
             _emoji = "🔴"
-            _verbatim_action = "空仓 (大盘很差, 一票否决)"
         elif _ws >= 0.25:
             _emoji = "🟢"
         elif _ws >= 0.1:
@@ -1326,24 +1325,33 @@ def _calc_volume_ratio_from_bars(bars: list[dict], window: int = 5) -> float:
     if len(bars) < 2 * window:
         return 0.0
 
-    recent_vols = []
-    prev_vols = []
-    for b in bars[-2 * window:]:
+    # 切片：前半部分是旧数据，后半部分是新数据
+    older = bars[-2 * window:-window]
+    newer = bars[-window:]
+
+    older_vols = []
+    newer_vols = []
+    for b in older:
         try:
             v = float(str(b.get("volume", 0)).replace(",", ""))
             if v > 0:
-                if len(recent_vols) < window:
-                    recent_vols.append(v)
-                else:
-                    prev_vols.append(v)
+                older_vols.append(v)
         except (ValueError, TypeError):
             pass
 
-    if not recent_vols or not prev_vols:
+    for b in newer:
+        try:
+            v = float(str(b.get("volume", 0)).replace(",", ""))
+            if v > 0:
+                newer_vols.append(v)
+        except (ValueError, TypeError):
+            pass
+
+    if not newer_vols or not older_vols:
         return 0.0
 
-    avg_recent = sum(recent_vols) / len(recent_vols)
-    avg_prev = sum(prev_vols) / len(prev_vols)
+    avg_recent = sum(newer_vols) / len(newer_vols)
+    avg_prev = sum(older_vols) / len(older_vols)
 
     return avg_recent / avg_prev if avg_prev > 0 else 0.0
 
@@ -1766,13 +1774,10 @@ def render_markdown(r: dict) -> str:
     return "\n".join(lines)
 
 def _pool_count() -> int:
-    import json
-    import os
-    path = os.path.expanduser("~/.trader/pool.json")
+    from pathlib import Path
+    path = Path.home() / ".trader" / "pool.json"
     try:
-        # C-12 fix: path 是 str 类型不能调 .read_text()，需用 Path 或 open
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
+        data = json.loads(path.read_text(encoding="utf-8"))
         items = data.get("items", [])
         return sum(1 for i in items if i.get("status") not in {"淘汰", "已退出"})
     except Exception:
@@ -1820,7 +1825,7 @@ def build_signal(r: dict[str, Any]) -> dict[str, Any]:
         "direction": direction,
         "action": action,
         "confidence": confidence,
-        "data_status": DATA_STATUS_MAP.get(str(r.get("data_status")), "degraded"),
+        "data_status": "degraded" if r.get("data_status") is None else DATA_STATUS_MAP.get(str(r.get("data_status")), "degraded"),
         "trigger": {
             "type": "price_confirm",
             "price": round(trigger_price, 2),
@@ -2187,7 +2192,7 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
             "direction": direction,
             "action": action_sig,
             "confidence": confidence,
-            "data_status": DATA_STATUS_MAP.get(str(report.get("data_status")), "full"),
+            "data_status": "degraded" if report.get("data_status") is None else DATA_STATUS_MAP.get(str(report.get("data_status")), "full"),
             "trigger": {"type": "price_level", "price": round(trigger_price, 2), "text": f"{trigger_price:.2f}元 触发{sig_type}"},
             "invalidation": {"type": "price_break", "price": round(stop, 2), "text": f"跌破 {stop:.2f}元"} if stop else None,
             "position": {
