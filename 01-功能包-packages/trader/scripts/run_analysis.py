@@ -549,7 +549,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     def _quick_ma(period: int) -> float | None:
         if len(bars) < period:
             return None
-        return sum(float(b.get("close") or 0) for b in bars[-period:]) / period
+        valid_closes = [float(b.get("close") or 0) for b in bars[-period:] if float(b.get("close") or 0) > 0]
+        return sum(valid_closes) / len(valid_closes) if valid_closes else None
 
     _pre_ma = {"ma5": _quick_ma(5), "ma10": _quick_ma(10),
                "ma20": _quick_ma(20), "ma30": _quick_ma(30)}
@@ -1096,8 +1097,8 @@ def structure_replay(bars: list[dict[str, Any]]) -> str:
     for chunk in chunks(bars, 5):
         if not chunk:
             continue
-        start = float(chunk[0]["close"])
-        end = float(chunk[-1]["close"])
+        start = float(chunk[0].get("close", 0) or 0)
+        end = float(chunk[-1].get("close", 0) or 0)
         change = pct_change(start, end)
         if change >= 4:
             label = "拉升窗口"
@@ -1109,7 +1110,9 @@ def structure_replay(bars: list[dict[str, Any]]) -> str:
             label = "回踩窗口"
         else:
             label = "震荡窗口"
-        parts.append(f"{short_date(chunk[0]['date'])}-{short_date(chunk[-1]['date'])} {label}（{change:+.2f}%）")
+        start_date = short_date(chunk[0].get("date", ""))
+        end_date = short_date(chunk[-1].get("date", ""))
+        parts.append(f"{start_date}-{end_date} {label}（{change:+.2f}%）")
     return "；".join(parts[:4])
 
 
