@@ -867,7 +867,7 @@ def parse_trade_datetime(fields: list[str]) -> tuple[str, str | None]:
     Tencent stores a 14-digit timestamp at fields[30]: "20260529161443".
     Fallback: scan for 8-digit date or HH:MM:SS patterns.
     """
-    trade_date = datetime.now().strftime("%Y-%m-%d")
+    trade_date = None
     trade_time = None
 
     # 优先从 fields[30] 提取 14 位时间戳

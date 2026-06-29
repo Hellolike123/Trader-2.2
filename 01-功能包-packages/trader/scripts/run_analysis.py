@@ -162,6 +162,7 @@ def _degraded_quote_report(target: str) -> dict[str, Any]:
         "pre_close": quote.get("pre_close"),
         "volume": quote.get("volume"),
         "turnover_rate": quote.get("turnover_rate"),
+        "trade_date": quote.get("trade_date"),
         "data_source": quote.get("data_source"),
         "_degraded": True,
         "daily_bars": daily,
