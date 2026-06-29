@@ -1555,7 +1555,7 @@ def render_markdown(r: dict) -> str:
         if _max_pos > position_cap and confirm > 0:
             lines.append(f"  {confirm:.2f} 站稳可加仓至 {_max_pos}%（突破阻力确认，趋势延续）")
     elif low_price > 0:
-        lines.append(f"  {low_price:.2f} ← 参考低吸区（等待）")
+        lines.append(f"  {low_price:.2f} ← 试探买（等待确认）")
     fib = r.get("fib_retrace") or {}
     golden_bid = fib.get("golden_bid")
     if golden_bid and golden_bid > 0 and golden_bid != low_price:
@@ -1574,7 +1574,7 @@ def render_markdown(r: dict) -> str:
             candidates.sort()
             best_val, best_label = candidates[0][1], candidates[0][2]
             if best_val != low_price:
-                lines.append(f"  {best_val:.2f} ← 黄金分割{best_label}回撤参考")
+                lines.append(f"  {best_val:.2f} ← 黄金分割{best_label}回撤参考（潜在支撑位）")
 
     # 收集所有价格行，统一排序后输出（确保严格递增）
     all_price_lines: list[tuple[float, str]] = []
@@ -1613,7 +1613,7 @@ def render_markdown(r: dict) -> str:
         lines.append(line)
 
     if stage_exit and major_stage in ("主升", "拉升"):
-        lines.append(f"  阶段转{stage_exit} → 清仓（主力出货，趋势结束）")
+        lines.append(f"  阶段转派发 → 清仓（主力出货，趋势结束）")
 
     # 回踩加仓条件（显示支撑位回踩时的加仓评分）
     _ps = r.get("position_state") or {}
