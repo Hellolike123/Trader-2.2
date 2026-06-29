@@ -50,14 +50,14 @@ def _find_local_extrema(
     lows: List[tuple[int, float]] = []
     highs: List[tuple[int, float]] = []
 
-    for i in range(min_gap, n - min_gap):
+    for i in range(min_gap, n):
         val = values[i]
 
         # 单次遍历检查窗口极值 (避免重复切片)
         is_min = True
         is_max = True
         for j in range(i - min_gap, i + min_gap + 1):
-            if j == i:
+            if j == i or j < 0 or j >= n:
                 continue
             if values[j] < val:
                 is_min = False
@@ -245,8 +245,8 @@ def _detect_triangle(
     """检测三角形收敛突破。
 
     条件:
-    1. 高点逐步降低 (至少2个递降高点)
-    2. 低点逐步抬高 (至少2个递升高点)
+    1. 高点逐步降低 (至少4个递降高点)
+    2. 低点逐步抬高 (至少4个递升高点)
     3. 收敛区间 >= 5根K线
     4. 突破上轨 = 买入, 跌破下轨 = 卖出
     """
@@ -278,7 +278,24 @@ def _detect_triangle(
         for j in range(len(recent_lows) - 1)
     )
 
-    if not (highs_declining and lows_rising):
+    # 检查上升/下降三角形（只需要一侧递变）
+    lows_flat = False
+    highs_flat = False
+    if len(recent_lows) >= 2:
+        low_vals = [l_v for _, l_v in recent_lows]
+        lows_flat = (max(low_vals) - min(low_vals)) / min(low_vals) <= 0.02 if min(low_vals) > 0 else False
+    if len(recent_highs) >= 2:
+        high_vals = [h_v for _, h_v in recent_highs]
+        highs_flat = (max(high_vals) - min(high_vals)) / min(high_vals) <= 0.02 if min(high_vals) > 0 else False
+
+    # 上升三角形: 低点抬高 + 高点持平
+    ascending = lows_rising and highs_flat
+    # 下降三角形: 高点降低 + 低点持平
+    descending = highs_declining and lows_flat
+    # 对称三角形: 高点降低 + 低点抬高
+    symmetrical = highs_declining and lows_rising
+
+    if not (ascending or descending or symmetrical):
         return None
 
     # 收敛区间
@@ -300,6 +317,14 @@ def _detect_triangle(
     if current > 0 and pattern_height < current * 0.01:
         return None
 
+    # 确定三角形类型
+    if ascending:
+        triangle_type = "上升三角形"
+    elif descending:
+        triangle_type = "下降三角形"
+    else:
+        triangle_type = "对称三角形"
+
     if current > upper_track and prev <= upper_track:
         # 向上突破
         target = upper_track + pattern_height
@@ -309,7 +334,7 @@ def _detect_triangle(
             confidence=0.5,
             neckline=round(upper_track, 2),
             target=round(target, 2),
-            reason=f"三角形向上突破{upper_track:.2f}，目标{target:.2f}",
+            reason=f"{triangle_type}向上突破{upper_track:.2f}，目标{target:.2f}",
         )
     elif current < lower_track and prev >= lower_track:
         # 向下突破
@@ -345,6 +370,9 @@ def detect_pattern(
     """
     if len(closes) < 20 or len(highs) < 20 or len(lows) < 20:
         return PatternResult(reason="数据不足，需要至少20根K线")
+
+    if not (len(closes) == len(highs) == len(lows)):
+        return PatternResult(reason="输入序列长度不一致")
 
     # 预计算极值点缓存 (避免重复遍历)
     price_lows, _, _, price_highs = _compute_extrema_cache(closes, highs, lows, min_gap=3)
