@@ -1029,16 +1029,11 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "data_note": None,  # None = 正常分析，有值 = 离线/降级占位
         "bars": bars,  # daily_bars 的别名，供 score_report 兼容
         "risk_flags": risk_flags,  # ST / 停牌 / 新股
-        # ═══ 缠论结构（display string + structured for scoring） ═══
+        # ═══ 缠论/威科夫（computed/手动赋值，auto-sync 不覆盖） ═══
         "chan_buy_point_text": levels.get("chan_buy_point_text", "无"),
         "chan_trend_label": levels.get("chan_trend_label", "数据不足"),
         "chan_buy_point_types": [bp.get("type", "") for bp in levels.get("chan_buy_points", [])],
         "chan_sell_point_types": [sp.get("type", "") for sp in levels.get("chan_sell_points", [])],
-        "chan_strokes_count": levels.get("chan_strokes_count", 0),
-        "chan_divergence": levels.get("chan_divergence", {}),
-        # ═══ 威科夫信号（供 score_report 消费） ═══
-        "wyckoff_spring_signal": levels.get("wyckoff_spring_signal", False),
-        "wyckoff_upthrust_signal": levels.get("wyckoff_upthrust_signal", False),
         "missing_sources": snapshot.missing_sources,
         "source_errors": snapshot.source_errors,
         "fetched_at": snapshot.fetched_at,
@@ -1111,6 +1106,33 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         # "extend_fundamental": snapshot.extend_fundamental,
         # "extend_sentiment": snapshot.extend_sentiment,
     }
+
+    # ═══ 自动同步：levels → report ═══
+    # INTERNAL_LEVELS 只用于 build_report 内部计算，不应暴露给下游
+    _INTERNAL_LEVELS = frozenset({
+        # 原始中间值（已在 report 中用不同名字暴露）
+        "status", "confirm_price", "hard_stop", "main_support", "main_resistance",
+        "support_source", "resistance_source",
+        # 内部计算列表
+        "resistance_levels", "support_levels",
+        # 原始结构数据（已在 report 中以简化形式暴露）
+        "chan_buy_points", "chan_sell_points",
+        "chan_zone_last_price", "chan_zone_first_price",
+        # 详细区域（report 只暴露 low_zone 字符串）
+        "low_zone_lower", "low_zone_upper",
+        # 原始 MA 计算结果（已在 report 中以 "ma" 暴露）
+        "ma_values",
+        # 主力数据原始结果（已在 report 中暴露为 main_force_score）
+        "main_force", "main_force_env",
+        # 威科夫原始结果（已在 report 中暴露为 wyckoff + wyckoff_spring_signal）
+        "wyckoff_summary",
+        # 其他中间值
+        "fus_score", "fus_disagree", "fus_override",
+        "fus_override_used",
+    })
+    for _key, _val in levels.items():
+        if _key not in _INTERNAL_LEVELS:
+            report.setdefault(_key, _val)
 
     # 已有持仓模式：确定成本价和持仓状态
     # 必须在 compute_position_with_env() 之前，以便传入正确的 pnl_pct
