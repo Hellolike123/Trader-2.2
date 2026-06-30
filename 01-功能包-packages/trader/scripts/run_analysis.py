@@ -1433,6 +1433,19 @@ def render_markdown(r: dict) -> str:
     if atr14 > 0:
         lines.append(f"ATR {atr14:.2f}（{atr_ratio*100:.1f}%）{atr_level}")
 
+    # 均线显示
+    ma_parts = []
+    if ma5_text != "--":
+        ma_parts.append(f"MA5 {ma5_text}")
+    if ma10_text != "--":
+        ma_parts.append(f"MA10 {ma10_text}")
+    if ma20_text != "--":
+        ma_parts.append(f"MA20 {ma20_text}")
+    if ma30_text != "--":
+        ma_parts.append(f"MA30 {ma30_text}")
+    if ma_parts:
+        lines.append(f"📊 均线 {'｜'.join(ma_parts)}")
+
     # 量能与相对强度
     volume_ratio_val = float(r.get("volume_ratio") or 0)
     turnover_val = float(r.get("turnover_rate") or 0)
