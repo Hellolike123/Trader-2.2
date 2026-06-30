@@ -8,6 +8,7 @@ import re
 import socket
 import ssl
 import sys
+import threading
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -18,6 +19,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from trader_shared._logging import get_logger
+from trader_shared.cache_utils import get_shared_build_pool
 
 _logger = get_logger(__name__)
 
@@ -98,6 +100,7 @@ NAME_MAP = {
 
 # 运行时名称→代码缓存（避免重复搜索）
 _NAME_SEARCH_CACHE: dict[str, str] = {}
+_name_search_lock = threading.Lock()
 
 
 def _search_code_by_name(name: str) -> str | None:
@@ -106,13 +109,14 @@ def _search_code_by_name(name: str) -> str | None:
     返回代码字符串（如 '603459'），找不到返回 None。
     使用运行时内存缓存，同一进程内不重复请求。
     """
-    if name in _NAME_SEARCH_CACHE:
-        return _NAME_SEARCH_CACHE[name]
+    with _name_search_lock:
+        if name in _NAME_SEARCH_CACHE:
+            return _NAME_SEARCH_CACHE[name]
 
     try:
         from urllib.parse import quote as _quote
         # 新浪联想词搜索接口（支持 A 股 type=11/12）
-        url = f"http://suggest3.sinajs.cn/suggest/type=11,12&key={_quote(name)}"
+        url = f"http://suggest3.sinais.cn/suggest/type=11,12&key={_quote(name)}"
         req = Request(
             url,
             headers={
@@ -140,7 +144,8 @@ def _search_code_by_name(name: str) -> str | None:
                 continue
             # 精确名称匹配优先
             if found_name == name:
-                _NAME_SEARCH_CACHE[name] = code_raw
+                with _name_search_lock:
+                    _NAME_SEARCH_CACHE[name] = code_raw
                 return code_raw
 
         # 无精确匹配时取第一条有效结果
@@ -150,7 +155,8 @@ def _search_code_by_name(name: str) -> str | None:
                 continue
             code_raw = parts[2].strip()
             if code_raw.isdigit() and len(code_raw) == 6:
-                _NAME_SEARCH_CACHE[name] = code_raw
+                with _name_search_lock:
+                    _NAME_SEARCH_CACHE[name] = code_raw
                 return code_raw
 
     except Exception as exc:
@@ -232,16 +238,18 @@ atexit.register(_API_RATE_LIMITER._flush)
 # Minimum delay between consecutive API calls (seconds)
 _API_CALL_DELAY = 0.1
 _last_api_call_time: float = 0.0
+_api_call_lock = threading.Lock()
 
 
 def _rate_limit_delay() -> None:
     """Enforce minimum delay between consecutive API calls."""
     global _last_api_call_time
-    now = time.time()
-    elapsed = now - _last_api_call_time
-    if elapsed < _API_CALL_DELAY:
-        time.sleep(_API_CALL_DELAY - elapsed)
-    _last_api_call_time = time.time()
+    with _api_call_lock:
+        now = time.time()
+        elapsed = now - _last_api_call_time
+        if elapsed < _API_CALL_DELAY:
+            time.sleep(_API_CALL_DELAY - elapsed)
+        _last_api_call_time = time.time()
 
 _TDX3_CLIENT: TdxHq_API | None = None
 
@@ -773,6 +781,8 @@ class Security:
 
 
 class HttpClient:
+    """HTTP 客户端，带连接池和指数退避重试。"""
+
     def __init__(self) -> None:
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36",
@@ -780,17 +790,46 @@ class HttpClient:
             "Referer": "https://finance.sina.com.cn/",
         }
         self.ssl_context = ssl.create_default_context()
-        self.ssl_context.check_hostname = False
-        self.ssl_context.verify_mode = ssl.CERT_NONE
 
-    def get_bytes(self, url: str, params: dict[str, Any] | None = None) -> bytes:
+    def get_bytes(
+        self,
+        url: str,
+        params: dict[str, Any] | None = None,
+        max_retries: int = 2,
+        backoffs: tuple = (0.2, 0.5),
+    ) -> bytes:
+        """获取 URL 字节内容，带指数退避重试。
+
+        仅对网络类异常重试（TimeoutError, socket.timeout, OSError 但非 HTTPError）。
+        HTTP 4xx/5xx 错误不重试，直接抛出。
+        """
+        from urllib.error import HTTPError
         full_url = f"{url}?{urlencode(params)}" if params else url
-        request = Request(full_url, headers=self.headers)
-        with urlopen(request, timeout=TIMEOUT_SECONDS, context=self.ssl_context) as response:
-            return response.read()
+        last_error: Exception | None = None
+        for attempt in range(max_retries + 1):
+            try:
+                request = Request(full_url, headers=self.headers)
+                with urlopen(request, timeout=TIMEOUT_SECONDS, context=self.ssl_context) as response:
+                    return response.read()
+            except HTTPError:
+                raise  # HTTP 错误码不重试，直接失败
+            except (TimeoutError, socket.timeout, OSError) as exc:
+                last_error = exc
+                if attempt < max_retries:
+                    time.sleep(backoffs[attempt])
+                else:
+                    raise
+        raise last_error  # type: ignore[misc]
 
-    def get_text(self, url: str, params: dict[str, Any] | None = None, encoding: str = "utf-8") -> str:
-        return self.get_bytes(url, params=params).decode(encoding, errors="ignore")
+    def get_text(
+        self,
+        url: str,
+        params: dict[str, Any] | None = None,
+        encoding: str = "utf-8",
+        max_retries: int = 2,
+    ) -> str:
+        """获取 URL 文本内容，带指数退避重试。"""
+        return self.get_bytes(url, params=params, max_retries=max_retries).decode(encoding, errors="ignore")
 
     def get_json(self, url: str, params: dict[str, Any] | None = None) -> Any:
         return json.loads(self.get_text(url, params=params))
@@ -1031,15 +1070,29 @@ def _fetch_daily_sina(sec: Security, days: int = 300) -> list[dict[str, Any]] | 
             f"&ma=no&datalen={max(days, 20)}"
         )
         ssl_ctx = ssl.create_default_context()
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.CERT_NONE
-        request = Request(url, headers={
+        headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36",
             "Referer": "https://finance.sina.com.cn/",
-        })
-        with urlopen(request, timeout=TIMEOUT_SECONDS, context=ssl_ctx) as response:
-            text = response.read().decode("gbk", errors="ignore")
-            raw_data = json.loads(text or "[]")
+        }
+        # 指数退避重试（仅网络异常，HTTP 错误码不重试）
+        from urllib.error import HTTPError
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                request = Request(url, headers=headers)
+                with urlopen(request, timeout=TIMEOUT_SECONDS, context=ssl_ctx) as response:
+                    text = response.read().decode("gbk", errors="ignore")
+                    break
+            except HTTPError:
+                raise  # HTTP 错误码不重试
+            except (TimeoutError, socket.timeout, OSError) as exc:
+                last_error = exc
+                if attempt < 2:
+                    time.sleep(0.2 * (2 ** attempt))
+        else:
+            raise last_error  # type: ignore[misc]
+
+        raw_data = json.loads(text or "[]")
 
         if not raw_data or not isinstance(raw_data, list) or isinstance(raw_data, dict):
             return None
@@ -1314,13 +1367,26 @@ def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dic
             "Referer": "https://finance.sina.com.cn/",
         }
         ssl_ctx = ssl.create_default_context()
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.CERT_NONE
-        request = Request(url, headers=headers)
         
-        with urlopen(request, timeout=5, context=ssl_ctx) as response:
-            text = response.read().decode("gbk", errors="ignore")
-            raw_data = json.loads(text or "[]")
+        # 指数退避重试（仅网络异常，HTTP 错误码不重试）
+        from urllib.error import HTTPError
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                request = Request(url, headers=headers)
+                with urlopen(request, timeout=5, context=ssl_ctx) as response:
+                    text = response.read().decode("gbk", errors="ignore")
+                    break
+            except HTTPError:
+                raise  # HTTP 错误码不重试
+            except (TimeoutError, socket.timeout, OSError) as exc:
+                last_error = exc
+                if attempt < 2:
+                    time.sleep(0.2 * (2 ** attempt))
+        else:
+            raise last_error  # type: ignore[misc]
+
+        raw_data = json.loads(text or "[]")
             
         if raw_data and isinstance(raw_data, list) and not isinstance(raw_data, dict):
             bars: list[dict[str, Any]] = []
@@ -1370,7 +1436,7 @@ def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dic
         return bars[-datalen:] if len(bars) > datalen else bars
     except (ImportError, OSError, ValueError) as exc:
         _logger.debug("AkShare fallback failed for %s %s: %s", sec.qq_symbol, interval, exc)
-        return None
+        return []  # 返回空列表而非 None，避免调用方 len(None) TypeError
 
 
 def _fetch_fund_flow_safe(target: str) -> dict[str, Any]:
@@ -1398,24 +1464,24 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
     missing_sources: list[str] = []
 
     results: dict[str, Any] = {}
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {
-            executor.submit(fetch_quote, sec, http): "quote",
-            executor.submit(fetch_qfq_daily, sec, http, days=days): "daily",
-        }
-        if include_5m:
-            futures[executor.submit(fetch_5m, sec, http)] = "bars_5m"
-        if include_ticks:
-            futures[executor.submit(_fetch_ticks_tdx3, sec, 500)] = "tick_data"
+    # 复用全局共享线程池，避免嵌套 ThreadPoolExecutor 导致线程爆炸
+    pool = get_shared_build_pool()
+    f_quote = pool.submit(fetch_quote, sec, http)
+    f_daily = pool.submit(fetch_qfq_daily, sec, http, days=days)
+    f_futures: dict[Any, str] = {f_quote: "quote", f_daily: "daily"}
+    if include_5m:
+        f_futures[pool.submit(fetch_5m, sec, http)] = "bars_5m"
+    if include_ticks:
+        f_futures[pool.submit(_fetch_ticks_tdx3, sec, 500)] = "tick_data"
 
-        for future in as_completed(futures):
-            key = futures[future]
-            try:
-                results[key] = future.result()
-            except Exception as exc:
-                results[key] = None
-                source_errors[key] = str(exc)
-                missing_sources.append(key)
+    for future in as_completed(f_futures):
+        key = f_futures[future]
+        try:
+            results[key] = future.result(timeout=30)
+        except Exception as exc:
+            results[key] = None
+            source_errors[key] = str(exc)
+            missing_sources.append(key)
 
     quote = results.get("quote") or {}
     daily_bars = results.get("daily") or []
@@ -1430,8 +1496,8 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
     # ── 合并缓存日线与当日实时 quote ──
     if daily_bars and quote and isinstance(quote, dict):
         try:
-            from trader_shared.cache_utils import merge_daily_bars_with_quote
-            daily_bars = merge_daily_bars_with_quote(daily_bars, quote)
+            from trader_shared.cache_utils import merge_daily_bars_cached
+            daily_bars = merge_daily_bars_cached(daily_bars, quote)
         except (ImportError, OSError) as exc:
             _logger.debug("Daily bars merge failed: %s", exc)
 

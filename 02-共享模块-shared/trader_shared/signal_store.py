@@ -75,6 +75,8 @@ def append_signal(signal: dict[str, Any], path: Path | None = None) -> str:
     that need it can capture the return value.
 
     Uses in-memory UUID cache for fast duplicate detection.
+    Uses fcntl.flock for cross-process atomicity: check + append is a single
+    locked section to prevent duplicate writes from parallel processes.
     """
     # Deep-copy so the caller's dict is never mutated.
     working = dict(signal)
@@ -100,21 +102,28 @@ def append_signal(signal: dict[str, Any], path: Path | None = None) -> str:
 
     store_path = path or _get_default_store_path()
 
-    # ── UUID deduplication check via in-memory cache ──
-    uuid_cache = _load_uuid_cache(store_path)
-    if working["signal_id"] in uuid_cache:
-        _logger.debug("Duplicate signal_id %s, skipping write", working["signal_id"])
-        return working["signal_id"]
-
+    # ── Cross-process dedup + append: use fcntl.flock for atomicity ──
     _maybe_rotate(store_path)
+    with open(store_path, "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            # Re-check via in-memory UUID cache (may have been populated by another process
+            # that held the lock first)
+            uuid_cache = _load_uuid_cache(store_path)
+            if working["signal_id"] in uuid_cache:
+                _logger.debug("Duplicate signal_id %s, skipping write", working["signal_id"])
+                return working["signal_id"]
 
-    from trader_shared.data_manager import DataManager
-    DataManager.append_signal(working, path=store_path)
+            # Write signal atomically under lock
+            from trader_shared.data_manager import DataManager
+            DataManager.append_signal(working, path=store_path)
 
-    # Update in-memory UUID cache
-    uuid_cache.add(working["signal_id"])
+            # Update in-memory UUID cache
+            uuid_cache.add(working["signal_id"])
+            _sig_cache.pop(str(store_path), None)
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
-    _sig_cache.pop(str(store_path), None)
     return working["signal_id"]
 
 

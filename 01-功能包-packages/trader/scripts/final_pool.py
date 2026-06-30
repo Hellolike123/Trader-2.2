@@ -119,8 +119,9 @@ def load_pending() -> dict[str, Any]:
     return payload
 
 def save_pending(payload: dict[str, Any]) -> None:
-    payload["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-    DataManager.save_state("pending", payload)
+    with DataManager.state_lock("pending"):
+        payload["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        DataManager.save_state("pending", payload)
 
 
 def price(value: Any) -> str:
@@ -165,8 +166,9 @@ def load_pool() -> dict[str, Any]:
     return payload
 
 def save_pool(payload: dict[str, Any]) -> None:
-    payload["updated_at"] = today_text()
-    DataManager.save_state("pool", payload)
+    with DataManager.state_lock("pool"):
+        payload["updated_at"] = today_text()
+        DataManager.save_state("pool", payload)
 
 
 def offline_report(target: str) -> dict[str, Any]:
@@ -409,12 +411,14 @@ def record_from_report(target: str, report: dict[str, Any], offline: bool = Fals
         **scores,
     }
     # 计算盈亏比存入记录
-    support_val = record.get("support", 0.0)
+    # 使用 trigger（确认位/实际执行入场价）而非 support（支撑位）作为入场价，
+    # 因为当 trigger > support 时（突破策略），用 support 会虚增盈亏比。
+    trigger_val = record.get("trigger", 0.0)
     stop_val = record.get("defense", 0.0)
     take_val = round(float(report.get("take") or 0), 2)
-    risk_reward = 0.0
-    if stop_val > 0 and support_val > stop_val and take_val > support_val:
-        risk_reward = round((take_val - support_val) / (support_val - stop_val), 1)
+    risk_reward = None  # None 表示无法计算，0.0 表示计算为 0
+    if stop_val > 0 and trigger_val > stop_val and take_val > trigger_val:
+        risk_reward = round((take_val - trigger_val) / (trigger_val - stop_val), 1)
     record["take"] = take_val
     record["risk_reward"] = risk_reward
     return record
@@ -428,7 +432,7 @@ def _fusion_confidence_rank(value: Any) -> int:
     if value is None:
         return 0
     try:
-        return int(value)
+        return int(round(float(value)))
     except (TypeError, ValueError):
         text = str(value).strip().lower()
         return {"low": 1, "medium": 2, "high": 3}.get(text, 0)
@@ -1381,8 +1385,10 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     - 衰退期 → 自动标淘汰。
     - 并行刷新（max_workers=5，与 build_report 内部并行一致）。
     - 单只失败 → safe_build_report 自动降级为离线 record，不中断全池。
+    - 优化：复用全局共享线程池，避免嵌套 ThreadPoolExecutor 线程爆炸。
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from concurrent.futures import as_completed
+    from trader_shared.cache_utils import get_shared_build_pool
 
     pool = load_pool()
     all_items = list(pool.get("items", []))
@@ -1403,18 +1409,19 @@ def cmd_refresh(args: argparse.Namespace) -> int:
             return 0
 
     # 并行刷新：用 target 作为 key（record_from_report 也用它）
+    # 复用全局共享线程池，避免嵌套 pool → build_report → load_market_snapshot 的线程爆炸
     target_keys = [str(t.get("target") or t.get("name")) for t in targets]
     results: dict[str, dict[str, Any] | None] = {}
-    with ThreadPoolExecutor(max_workers=5) as ex:
-        future_to_key = {
-            ex.submit(safe_build_report, key): key for key in target_keys
-        }
-        for fut in as_completed(future_to_key):
-            key = future_to_key[fut]
-            try:
-                results[key] = fut.result()
-            except Exception:
-                results[key] = None  # 失败保留原 record
+    shared = get_shared_build_pool()
+    future_to_key: dict = {
+        shared.submit(safe_build_report, key): key for key in target_keys
+    }
+    for fut in as_completed(future_to_key):
+        key = future_to_key[fut]
+        try:
+            results[key] = fut.result()
+        except Exception:
+            results[key] = None  # 失败保留原 record
 
     # 逐只更新 record（遍历原始全量以保持顺序）
     refreshed = 0
@@ -1432,8 +1439,12 @@ def cmd_refresh(args: argparse.Namespace) -> int:
         # 保留原入池时间，更新本次刷新时间
         new_record["added_at"] = item.get("added_at") or new_record["added_at"]
         new_record["updated_at"] = today_text()
-        # 衰退自动淘汰；其余重新走 admission 判定（确保与当前评分/阶段一致）
-        if str(new_record.get("major_stage")) == "衰退":
+        # 检查 admission_result：拒绝则直接淘汰
+        if str(new_record.get("admission_result")) == "拒绝":
+            new_record["status"] = "淘汰"
+            declined.append(str(new_record.get("name") or key))
+        # 衰退自动淘汰
+        elif str(new_record.get("major_stage")) == "衰退":
             new_record["status"] = "淘汰"
             declined.append(str(new_record.get("name") or key))
         else:
@@ -1672,7 +1683,8 @@ def cmd_plan(args: argparse.Namespace) -> int:
             print(w)
     markdown = render_plan(items)
     execution = [item for item in sort_items(items) if item.get("status") == "执行"][:EXECUTION_LIMIT]
-    DataManager.save_state("last_plan", {"contract_version": CONTRACT_VERSION, "date": today_text(), "execution_items": execution, "markdown": markdown})
+    with DataManager.state_lock("last_plan"):
+        DataManager.save_state("last_plan", {"contract_version": CONTRACT_VERSION, "date": today_text(), "execution_items": execution, "markdown": markdown})
     print(markdown)
     return 0
 
@@ -1813,7 +1825,8 @@ def cmd_archive_exited(args: argparse.Namespace) -> int:
     if archive:
         existing = DataManager.load_state("pool_archive", {"items": []})
         existing["items"] = existing.get("items", []) + archive
-        DataManager.save_state("pool_archive", existing)
+        with DataManager.state_lock("pool_archive"):
+            DataManager.save_state("pool_archive", existing)
     print(f"已归档淘汰记录：{len(archive)}")
     return 0
 

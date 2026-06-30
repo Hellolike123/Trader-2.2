@@ -14,11 +14,13 @@ Usage:
 """
 from __future__ import annotations
 
+import atexit
 import fcntl
 import json
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +29,43 @@ from typing import Any, Callable
 from trader_shared._logging import get_logger
 
 _logger = get_logger(__name__)
+
+# ── 全局共享线程池 ──────────────────────────────────────────────
+# 用于 build_report / load_market_snapshot / cmd_refresh 等场景，
+# 避免"cmd_refresh 内建 ThreadPoolExecutor → build_report 内再建 → load_market_snapshot 内再建"的
+# 嵌套线程池爆炸（N 只票 × 5 策略 × 3 数据源 × 3 数据源 = N×45 线程竞争）。
+# 所有调用者共享同一个 max_workers=5 的池，由 GIL 和任务自然调度管理。
+
+_shared_build_pool: ThreadPoolExecutor | None = None
+_shared_build_pool_lock = threading.Lock()
+
+
+def _shutdown_shared_build_pool() -> None:
+    """进程退出时优雅关闭共享线程池。"""
+    global _shared_build_pool
+    pool, _shared_build_pool = _shared_build_pool, None
+    if pool is not None:
+        pool.shutdown(wait=True)
+
+
+atexit.register(_shutdown_shared_build_pool)
+
+
+def get_shared_build_pool() -> ThreadPoolExecutor:
+    """获取全局共享构建线程池（懒加载，双检锁）。
+
+    线程安全：第一次调用时通过锁保证只创建一个实例。
+    后续调用直接返回，零开销。
+    """
+    global _shared_build_pool
+    if _shared_build_pool is None:
+        with _shared_build_pool_lock:
+            if _shared_build_pool is None:
+                _shared_build_pool = ThreadPoolExecutor(
+                    max_workers=5,
+                    thread_name_prefix="trader-build",
+                )
+    return _shared_build_pool
 
 CACHE_DIR = Path.home() / ".trader" / "cache"
 
@@ -452,3 +491,48 @@ def merge_daily_bars_with_quote(
         result.append(today_bar)
 
     return result
+
+
+# ── 内存缓存：merge_daily_bars_with_quote ──────────────────────
+# 同一天对同一标的重复调用此函数（如 cmd_refresh 全池刷新）时，
+# cached_bars 和 quote 不变，直接返回缓存结果。
+
+_merge_daily_cache: dict[tuple, list[dict]] = {}
+_merge_daily_lock = threading.Lock()
+_MERGE_CACHE_MAX = 256
+
+
+def merge_daily_bars_cached(
+    cached_bars: list[dict],
+    quote: dict[str, Any],
+) -> list[dict]:
+    """带进程内 LRU 缓存的 daily bars 合并。
+
+    缓存键由 bars 日期序列 + quote 的 (trade_date, current_price, volume) 组成。
+    多线程安全：读写加锁。
+    返回值始终是浅拷贝，不会污染缓存。
+    """
+    # 构建可哈希的缓存键
+    dates = tuple(str(b.get("date") or b.get("time") or b.get("trade_date") or "") for b in cached_bars)
+    quote_key = (
+        str(quote.get("trade_date") or ""),
+        str(quote.get("current_price") or 0),
+        str(quote.get("volume") or 0),
+    )
+    key = (dates, quote_key)
+
+    with _merge_daily_lock:
+        cached = _merge_daily_cache.get(key)
+        if cached is not None:
+            return list(cached)
+
+    # Cache miss → 调用原函数
+    result = merge_daily_bars_with_quote(cached_bars, quote)
+
+    with _merge_daily_lock:
+        if len(_merge_daily_cache) >= _MERGE_CACHE_MAX:
+            # FIFO 淘汰单个最早条目（而非一次清空一半）
+            _merge_daily_cache.pop(next(iter(_merge_daily_cache)))
+        _merge_daily_cache[key] = list(result)
+
+    return list(result)

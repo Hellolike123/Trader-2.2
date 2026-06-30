@@ -48,6 +48,8 @@ from config import (
     STRUCTURE_WINDOW,
     ENABLE_RISK_REWARD_FILTER,
     RISK_REWARD_THRESHOLDS,
+    KELLY_MAX_TOTAL_POSITIONS,
+    KELLY_MIN_TRADES,
 )
 try:
     from trader_shared.models import DATA_STATUS_MAP
@@ -93,6 +95,49 @@ from trader_shared.signal_contract import assert_valid_signal
 from datetime import date
 import os
 
+# ── Kelly cache: 读取 signal_results.jsonl 一次，按 market_env_level 缓存结果 ──
+_kelly_cache: dict[str, dict[str, float]] = {}
+
+
+def _get_kelly_data(market_env_level: str) -> dict[str, float]:
+    """读取并缓存信号结果中的胜率数据，供 Kelly 仓位计算使用。
+
+    返回 dict 包含: {"win_rate": float | None, "total": int}
+    同一进程内只读取一次文件，后续直接读缓存。
+    """
+    if market_env_level in _kelly_cache:
+        return _kelly_cache[market_env_level]
+
+    result: dict[str, float] = {"win_rate": None, "total": 0}
+    try:
+        results_file = Path.home() / ".trader" / "signal_results.jsonl"
+        if results_file.exists():
+            wins, total = 0, 0
+            with open(results_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    rec_env = rec.get("market_env", "")
+                    if rec_env and rec_env != market_env_level:
+                        continue
+                    if rec.get("status", "") == "filled":
+                        total += 1
+                        if float(rec.get("return_pct") or 0) > 0:
+                            wins += 1
+            if total >= KELLY_MIN_TRADES:
+                result["win_rate"] = wins / total
+            result["total"] = total
+    except Exception:
+        pass
+    _kelly_cache[market_env_level] = result
+    return result
+
+
 def _get_major_stage(r: dict[str, Any]) -> str:
     major_stage = str(r.get("major_stage") or "")
     if not major_stage:
@@ -106,39 +151,127 @@ def _get_major_stage(r: dict[str, Any]) -> str:
         major_stage = stage_map.get(old_stage, old_stage)
     return major_stage
 
-def _get_cost_from_signals(target: str) -> float:
-    """从 signals.jsonl 中获取买入成本价（只读最近100条）。"""
+def _read_signals_for_report(target: str, daily_bars: list[dict[str, Any]]) -> tuple[float, dict | None]:
+    """一次性读取 signals.jsonl，同时返回成本价和历史胜率。
+
+    合并了原来的 _get_cost_from_signals + _load_historical_win_rate，
+    避免对同一文件做两次 I/O。
+    只读最近 100 条信号（足够覆盖成本推断和胜率统计）。
+
+    Returns:
+        (cost_price, win_rate_data)
+        cost_price: 最近买入信号的价格，找不到返回 0.0
+        win_rate_data: 历史胜率统计 dict 或 None
+    """
+    signals_path = os.path.expanduser("~/.trader/signals.jsonl")
+    if not os.path.exists(signals_path):
+        return 0.0, None
+
+    normalized_target = target.replace(".SH", "").replace(".SZ", "").strip()
+
+    # 构建日期→收盘价的映射（用于计算收益率）
+    sorted_bars = sorted(daily_bars, key=lambda x: str(x.get("date", ""))[:10])
+    dates = [str(b.get("date", ""))[:10] for b in sorted_bars if b.get("date")]
+    close_map: dict[str, float] = {}
+    for b in sorted_bars:
+        d = str(b.get("date", ""))[:10]
+        if d and b.get("close") is not None:
+            close_map[d] = float(b["close"])
+
+    if not close_map:
+        return 0.0, None
+
+    # 日期索引（用于计算 5 日后收益率）
+    date_to_idx: dict[str, int] = {d: i for i, d in enumerate(dates)}
+
+    buy_signals: list[float] = []
+    sell_signals: list[float] = []
+    cost_price: float = 0.0
+
     try:
-        signals_path = os.path.expanduser("~/.trader/signals.jsonl")
-        if not os.path.exists(signals_path):
-            return 0.0
-        
-        # 标准化 target 用于匹配
-        normalized_target = target.replace(".SH", "").replace(".SZ", "").strip()
-        
-        # 只读最近100条，避免大文件性能问题
         with open(signals_path, "r", encoding="utf-8") as f:
             lines = f.readlines()[-100:]
-            for line in lines:
-                try:
-                    signal = json.loads(line.strip())
-                    symbol = str(signal.get("symbol", "")).replace(".SH", "").replace(".SZ", "").strip()
-                    name = str(signal.get("name", "")).strip()
-                    
-                    # 匹配股票代码或名称
-                    if symbol == normalized_target or name == normalized_target:
-                        signal_type = signal.get("signal_type", "")
-                        # 查找买入信号
-                        if signal_type in ("low_buy_triggered", "track"):
-                            trigger = signal.get("trigger", {})
-                            price = trigger.get("price", 0)
-                            if price > 0:
-                                return float(price)
-                except (json.JSONDecodeError, ValueError):
+            for line in reversed(lines):  # 从新到旧遍历
+                line = line.strip()
+                if not line:
                     continue
+                try:
+                    sig = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                sig_symbol = str(sig.get("symbol", "")).replace(".SH", "").replace(".SZ", "").strip()
+                sig_name = str(sig.get("name", "")).strip()
+                if normalized_target not in (sig_symbol, sig_name):
+                    continue
+
+                sig_type = str(sig.get("signal_type", ""))
+                trade_date = str(sig.get("trade_date") or "")[:10]
+                analysis_time = str(sig.get("analysis_time") or "")
+                time_part = analysis_time[11:].strip() if len(analysis_time) >= 16 else ""
+
+                # ── 成本推断：从新到旧找第一个买入信号 ──
+                if cost_price == 0.0:
+                    if sig_type in ("low_buy_triggered", "track"):
+                        trigger = sig.get("trigger", {})
+                        price = trigger.get("price", 0)
+                        if price > 0:
+                            cost_price = float(price)
+                            break  # 找到最近的买入信号，停止
+
+                # ── 胜率统计：继续扫描 ──
+                if sig_type not in ("review_result", "low_buy_triggered", "high_sell_triggered"):
+                    continue
+                if sig_type == "review_result" and not (time_part >= "15:00"):
+                    continue
+                if trade_date not in date_to_idx:
+                    continue
+
+                idx = date_to_idx[trade_date]
+                if idx + 5 >= len(dates):
+                    continue
+
+                entry_price = close_map.get(trade_date, 0)
+                if entry_price <= 0:
+                    continue
+                exit_price = close_map.get(dates[idx + 5], 0)
+                if exit_price <= 0:
+                    continue
+                return_pct = round(((exit_price - entry_price) / entry_price) * 100, 2)
+
+                direction = str(sig.get("direction", ""))
+                if sig_type == "low_buy_triggered":
+                    buy_signals.append(return_pct)
+                elif sig_type == "high_sell_triggered":
+                    sell_signals.append(return_pct)
+                elif direction in ("bullish", "bullish_lean"):
+                    buy_signals.append(return_pct)
+                elif direction in ("bearish", "bearish_lean"):
+                    sell_signals.append(return_pct)
     except Exception:
-        pass
-    return 0.0
+        return cost_price, None
+
+    # 构造胜率数据
+    win_rate_data: dict | None = None
+    total = len(buy_signals) + len(sell_signals)
+    if total > 0:
+        def _stats(signals: list[float]) -> dict | None:
+            if not signals:
+                return None
+            wins = sum(1 for s in signals if s > 0)
+            n = len(signals)
+            win_rate = round((wins / n) * 100)
+            avg = round(sum(signals) / n, 2)
+            return {"count": n, "wins": wins, "win_rate": win_rate, "avg_pnl": avg}
+
+        win_rate_data = {
+            "total": total,
+            "buy": _stats(buy_signals),
+            "sell": _stats(sell_signals),
+            "sample_warning": total < 5,
+        }
+
+    return cost_price, win_rate_data
 
 
 def _degraded_quote_report(target: str) -> dict[str, Any]:
@@ -288,6 +421,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         from trader_shared.candidate_core import build_structure_context, atr_volatility_level
         from trader_shared.data_provider import get_provider
         from trader_shared.strategy_protocol import run_all
+        from trader_shared.cache_utils import get_shared_build_pool
     except (ModuleNotFoundError, ImportError) as _ex:
         # 缺少 numpy/pandas 等计算依赖时降级为行情报告
         import warnings
@@ -305,6 +439,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     sec = snapshot.security
     quote = snapshot.quote
     bars = list(snapshot.daily_bars)  # copy to avoid mutating snapshot
+
+    # 一次性读取 signals.jsonl：同时获取成本价和历史胜率（合并两次 I/O）
+    _signal_cost_price, _signal_win_rate = _read_signals_for_report(target, bars)
 
     # 如果日线最新日期不是今天，追加今日 quote 作为当天 bar
     # （解决盘中分析时日线数据滞后导致阶段判定错误的问题）
@@ -347,7 +484,6 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     from trader_shared.chan_core import chanlun_strategy
     from trader_shared.wyckoff_core import wyckoff_strategy
     from trader_shared.momentum_core import momentum_strategy
-    from concurrent.futures import ThreadPoolExecutor
 
     # 并行运行五个独立任务：三策略 + 主力资金 + 大盘环境
     change_pct_val = quote.get("current_change_pct")
@@ -379,16 +515,19 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     def _fetch_market_env():
         return get_env_for_skill("trader")
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        f_chan = executor.submit(chanlun_strategy, current, bars, change_pct_val, quote)
-        f_wyk = executor.submit(wyckoff_strategy, current, bars, change_pct_val, quote)
-        f_mom = executor.submit(momentum_strategy, current, bars, change_pct_val, quote)
-        f_mf = executor.submit(_fetch_fund_flow)
-        f_env = executor.submit(_fetch_market_env)
+    # 复用全局共享线程池，避免嵌套 ThreadPoolExecutor 导致线程爆炸
+    # cmd_refresh 内建 pool → build_report 内再建 pool → load_market_snapshot 内再建 pool
+    # 现在三层共享同一个 max_workers=5 池
+    pool = get_shared_build_pool()
+    f_chan = pool.submit(chanlun_strategy, current, bars, change_pct_val, quote)
+    f_wyk = pool.submit(wyckoff_strategy, current, bars, change_pct_val, quote)
+    f_mom = pool.submit(momentum_strategy, current, bars, change_pct_val, quote)
+    f_mf = pool.submit(_fetch_fund_flow)
+    f_env = pool.submit(_fetch_market_env)
 
-        chan_result = f_chan.result() or {}  # 保留 chanlun 包装层，_chan_to_signal 会自己剥
-        wyck_result = f_wyk.result() or {}
-        momentum_result = f_mom.result() or {}
+    chan_result = f_chan.result() or {}  # 保留 chanlun 包装层，_chan_to_signal 会自己剥
+    wyck_result = f_wyk.result() or {}
+    momentum_result = f_mom.result() or {}
 
     # 主力引擎结果（异常降级为 unknown）
     main_force_env = "unknown"
@@ -943,9 +1082,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
 
     # 已有持仓模式：确定成本价和持仓状态
     # 必须在 compute_position_with_env() 之前，以便传入正确的 pnl_pct
+    # 成本价已在 bars 获取后从 signals.jsonl 读取（与胜率合并为一次 I/O）
     if cost_price <= 0:
-        # 从 signals.jsonl 中自动推断成本
-        cost_price = _get_cost_from_signals(target)
+        cost_price = _signal_cost_price
     
     has_position = cost_price > 0
     report["has_position"] = has_position
@@ -1035,7 +1174,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     report["structure_note"] = structure_note
 
     # one_liner: 一句话总结
-    low_zone = str(report.get("low_zone") or f"{float(report.get('support', 0)):.2f}-{float(report.get('support', 0)) * 1.01:.2f}元")
+    _support = report.get("support")
+    low_zone = str(report.get("low_zone") or (f"{_support*0.98:.2f}-{_support*1.02:.2f}元" if _support else "数据不足"))
     report["one_liner"] = one_sentence(report, low_zone)
 
     # t0_ref: T0 参考价位（high_sell 用阻力位而非 confirm，避免 T0 卖价高于报告显示的压力位）
@@ -1065,10 +1205,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     except Exception:
         report["volume_vacuum"] = {"vacuum_warning": False, "warning_text": ""}
 
-    # 个股股性透视卡：预计算历史胜率，复用已抓的日线，避免 render 时重复请求
-    report["win_rate_data"] = _load_historical_win_rate(
-        str(sec.ts_code), daily_bars=bars
-    )
+    # 个股股性透视卡：历史胜率（与成本推断合并为一次 I/O，已在上面读取）
+    report["win_rate_data"] = _signal_win_rate
 
     # ── 一致性仲裁：给 fusion action + suggested_pct 加持仓场景标签 ──
     # 四个字段（theory_status / fusion.action / suggested_pct / stop）来自独立模块，
@@ -1223,106 +1361,6 @@ def upward_momentum_observation(stage: str, current: float, support: float, conf
     return f"价格还没贴近确认区，结论：动能仍是弱修复，暂不按启动处理。"
 
 
-def _load_historical_win_rate(symbol: str, daily_bars: list[dict[str, Any]] | None = None) -> dict | None:
-    import json
-    signals_path = os.path.expanduser("~/.trader/signals.jsonl")
-    if not os.path.exists(signals_path):
-        return None
-
-    normalized_symbol = symbol.replace(".SH", "").replace(".SZ", "").strip()
-
-    try:
-        if daily_bars and len(daily_bars) >= 30:
-            daily = daily_bars
-        else:
-            from trader_shared.data_provider import get_provider
-            provider = get_provider()
-            sec = provider.resolve_security(normalized_symbol)
-            daily = provider.fetch_qfq_daily(sec, days=300)
-    except Exception:
-        return None
-
-    sorted_bars = sorted(daily, key=lambda x: str(x.get("date", ""))[:10])
-    dates = [str(b.get("date", ""))[:10] for b in sorted_bars if b.get("date")]
-    close_map = {str(b.get("date", ""))[:10]: float(b["close"]) for b in sorted_bars if b.get("date") and b.get("close")}
-
-    buy_signals: list[float] = []
-    sell_signals: list[float] = []
-
-    try:
-        with open(signals_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    sig = json.loads(line)
-                except Exception:
-                    continue
-
-                sig_symbol = str(sig.get("symbol", "")).replace(".SH", "").replace(".SZ", "").strip()
-                sig_name = str(sig.get("name", "")).strip()
-                if normalized_symbol not in (sig_symbol, sig_name):
-                    continue
-
-                sig_type = str(sig.get("signal_type", ""))
-                if sig_type not in ("review_result", "low_buy_triggered", "high_sell_triggered"):
-                    continue
-
-                analysis_time = str(sig.get("analysis_time") or "")
-                time_part = analysis_time[11:].strip() if len(analysis_time) >= 16 else ""
-                # 只对 review_result 应用 15:00 时间过滤，T0 盘中信号不受限
-                if sig_type == "review_result" and not (time_part >= "15:00"):
-                    continue
-
-                trade_date = str(sig.get("trade_date") or analysis_time[:10])[:10]
-                if trade_date not in close_map:
-                    continue
-
-                entry_price = close_map[trade_date]
-                try:
-                    idx = dates.index(trade_date)
-                except ValueError:
-                    continue
-                if idx + 5 >= len(dates):
-                    continue
-
-                exit_price = close_map[dates[idx + 5]]
-                return_pct = round(((exit_price - entry_price) / entry_price) * 100, 2)
-
-                direction = str(sig.get("direction", ""))
-                if sig_type == "low_buy_triggered":
-                    buy_signals.append(return_pct)
-                elif sig_type == "high_sell_triggered":
-                    sell_signals.append(return_pct)
-                elif direction in ("bullish", "bullish_lean"):
-                    buy_signals.append(return_pct)
-                elif direction in ("bearish", "bearish_lean"):
-                    sell_signals.append(return_pct)
-    except Exception:
-        return None
-
-    total = len(buy_signals) + len(sell_signals)
-    if total == 0:
-        return None
-
-    def _stats(signals: list[float]) -> dict | None:
-        if not signals:
-            return None
-        wins = sum(1 for s in signals if s > 0)
-        n = len(signals)
-        win_rate = round((wins / n) * 100)
-        avg = round(sum(signals) / n, 2)
-        return {"count": n, "wins": wins, "win_rate": win_rate, "avg_pnl": avg}
-
-    return {
-        "total": total,
-        "buy": _stats(buy_signals),
-        "sell": _stats(sell_signals),
-        "sample_warning": total < 5,
-    }
-
-
 def _get_buy_label(change_pct: float, volume_ratio: float) -> str:
     """根据当日涨跌和量比动态生成试探买标签。"""
     is_shrink = volume_ratio > 0 and volume_ratio < 0.8
@@ -1377,7 +1415,12 @@ def _calc_volume_ratio_from_bars(bars: list[dict], window: int = 5) -> float:
     return avg_recent / avg_prev if avg_prev > 0 else 0.0
 
 
-def render_markdown(r: dict) -> str:
+def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = None) -> str:
+    """渲染 Markdown 报告。
+
+    `_kelly_cache_only` 是内部参数，用于传入预计算的 Kelly 数据，
+    避免在每只股票渲染时重复读取 signal_results.jsonl。
+    """
     ma = r.get("ma") or {}
     ma_raw = r.get("ma_raw") or ma
     display_code = str(r.get("symbol", "")).replace(".SH", "").replace(".SZ", "")
@@ -1628,48 +1671,32 @@ def render_markdown(r: dict) -> str:
         # R2: Kelly 仓位叠加
         if position_cap > 0 and not rr_filtered:
             try:
-                results_file = Path.home() / ".trader" / "signal_results.jsonl"
-                if results_file.exists():
-                    wins, total = 0, 0
-                    with open(results_file) as f:
-                        for line in f:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                rec = json.loads(line)
-                            except json.JSONDecodeError:
-                                continue
-                            rec_env = rec.get("market_env", "")
-                            if rec_env and rec_env != market_env_level:
-                                continue
-                            status_str = rec.get("status", "")
-                            if status_str == "filled":
-                                total += 1
-                                rtn = float(rec.get("return_pct") or 0)
-                                if rtn > 0:
-                                    wins += 1
-                    if total >= 10:
-                        win_rate = wins / total
-                        R = risk_reward_val
-                        kelly = (win_rate * R - (1 - win_rate)) / R
-                        kelly = max(0, min(kelly, 0.5))
-                        total_position_limit = 10
-                        kelly_cap = int(kelly * 2 * total_position_limit)
-                        if kelly_cap > 0:
-                            position_cap = min(position_cap, kelly_cap)
+                # 优先使用传入的缓存数据（由 main() 预计算），避免重复 I/O
+                if _kelly_cache_only is not None:
+                    _kdata = _kelly_cache_only
+                else:
+                    _kdata = _get_kelly_data(market_env_level)
+                win_rate = _kdata.get("win_rate")
+                total = int(_kdata.get("total", 0))
+                if win_rate is not None:
+                    R = risk_reward_val
+                    kelly = (win_rate * R - (1 - win_rate)) / R
+                    kelly = max(0, min(kelly, 0.5))
+                    kelly_cap = int(kelly * 2 * KELLY_MAX_TOTAL_POSITIONS)
+                    if kelly_cap > 0:
+                        position_cap = min(position_cap, kelly_cap)
             except Exception:
                 pass
 
     # 形态目标文字说明
+    # 注意：这里用 r.get("take")（原始止盈价）而非 take_price（可能被 R3 形态修正），
+    # 因为要判断"形态目标是否高于原始止盈"来决定是否显示形态提示。
     if pattern and isinstance(pattern, dict) and float(pattern.get("target") or 0) > float(r.get("take") or 0) > 0:
         pattern_target_display = f"，形态目标 {float(pattern['target']):.2f}元"
 
     if low_price > 0 and risk_reward_available and not rr_filtered and risk_reward_val is not None:
         # 动态生成试探买标签
         _buy_label = _get_buy_label(change_pct, volume_ratio_val)
-        _upside = round(take_price - low_price, 2)
-        _downside = round(low_price - stop, 2)
         rr_status = "✓"
         all_price_lines.append((low_price, f"  {low_price:.2f} ← 试探买 {position_cap}%（{_buy_label}，盈亏比 {risk_reward_val}R{rr_status}，需胜率≥{min_win_rate}%，止损 {stop:.2f}）{pattern_target_display}"))
         # 加仓条件：站稳确认位可加仓至最大仓位
@@ -1834,10 +1861,9 @@ def render_markdown(r: dict) -> str:
             chip_line_parts.append("吸筹")
         lines.append(f"  {' ｜ '.join(chip_line_parts)}")
 
-    # ── 个股股性透视卡（build_report 预计算存 report["win_rate_data"]，无则 lazy 计算）──
+    # ── 个股股性透视卡（build_report 预计算存 report["win_rate_data"]）──
+    # 如果缺失（极少见），由于 render 无法获取 bars 数据，只能跳过
     win_rate_data = r.get("win_rate_data")
-    if win_rate_data is None:
-        win_rate_data = _load_historical_win_rate(display_code)
     if win_rate_data is not None:
         lines.append("")
         lines.append("📊 股性与历史回测")
@@ -2314,7 +2340,7 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
             "direction": direction,
             "action": action_sig,
             "confidence": confidence,
-            "data_status": "degraded" if report.get("data_status") is None else DATA_STATUS_MAP.get(str(report.get("data_status")), "full"),
+            "data_status": "degraded" if report.get("data_status") is None else DATA_STATUS_MAP.get(str(report.get("data_status")), "degraded"),
             "trigger": {"type": "price_level", "price": round(trigger_price, 2), "text": f"{trigger_price:.2f}元 触发{sig_type}"},
             "invalidation": {"type": "price_break", "price": round(stop, 2), "text": f"跌破 {stop:.2f}元"} if stop else None,
             "position": {
@@ -2392,13 +2418,17 @@ def main() -> int:
     except Exception:
         pass
 
+    # 预计算 Kelly 数据（同一进程内只读一次文件，供 render_markdown 使用）
+    market_env_data = report.get("market_env") or {}
+    _kelly = _get_kelly_data(market_env_data.get("level", "正常"))
+
     if args.output == "json":
-        markdown = render_markdown(report)
+        markdown = render_markdown(report, _kelly_cache_only=_kelly)
         print(json.dumps({"full_markdown": markdown, "report": report, "signal": build_signal(report)}, ensure_ascii=False, indent=2, default=str))
     elif args.output == "signal-json":
         print(json.dumps(build_signal(report), ensure_ascii=False, indent=2, default=str))
     else:
-        print(render_markdown(report))
+        print(render_markdown(report, _kelly_cache_only=_kelly))
     return 0
 
 

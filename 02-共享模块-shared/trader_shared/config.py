@@ -117,8 +117,8 @@ WYCKOFF_DIVERGENCE_RATIO: float = 0.85          # 背离量能萎缩比例由 80
 THEORY_ADJUST_LOG_ONLY: bool = os.environ.get("THEORY_ADJUST_LOG_ONLY", "false").lower() in ("true", "1", "yes")
 
 # ---- S-2 Fusion Override (Phase 2) ----
-# FUSION_OVERRIDE_ENABLED=false 时融合层不覆盖 status_for() 的决策，默认关闭
-# 验证几个股票没问题后改为 True 即可全量开启
+# FUSION_OVERRIDE_ENABLED=true 时融合层覆盖 status_for() 的决策，默认开启
+# 验证几个股票没问题后改为 False 即可关闭
 FUSION_OVERRIDE_ENABLED: bool = os.environ.get("FUSION_OVERRIDE_ENABLED", "true").lower() in ("true", "1", "yes")
 # 融合层置信度低于此值时降级回旧逻辑（0-1，建议 0.6）
 FUSION_CONFIDENCE_THRESHOLD: float = float(os.environ.get("FUSION_CONFIDENCE_THRESHOLD", "0.6"))
@@ -188,13 +188,20 @@ CHIP_MIGRATION_WARNING_PCT: float = 40.0   # 筹码松动警告阈值
 CHIP_MIGRATION_CRITICAL_PCT: float = 50.0  # 筹码搬家清仓阈值
 
 # ---- Risk/Reward filter constants -------------------------------------------
-ENABLE_RISK_REWARD_FILTER: bool = True
+ENABLE_RISK_REWARD_FILTER: bool = os.environ.get("ENABLE_RISK_REWARD_FILTER", "true").lower() in ("true", "1", "yes")
 # 盈亏比最低阈值（按 market_env level 分场景）
 RISK_REWARD_THRESHOLDS: dict[str, float] = {
-    "正常": 2.0,    # 牛市
-    "偏弱": 1.5,    # 震荡
-    "很差": 1.2,    # 熊市
+    "正常": 2.0,    # 市场环境健康/偏多，要求较高盈亏比
+    "偏弱": 1.5,    # 市场环境震荡/一般，中等盈亏比要求
+    "很差": 1.2,    # 市场弱势/熊市，放宽盈亏比要求
 }
+
+# ---- T0 trade constants ----------------------------------------------------
+T0_MIN_SPACE_PCT: float = 1.5  # T0 最小操作空间百分比（现价与确认位的间距下限）
+
+# ---- Kelly position sizing constants ----------------------------------------
+KELLY_MAX_TOTAL_POSITIONS: int = 10       # Kelly 公式中的总仓位上限（最大持仓数）
+KELLY_MIN_TRADES: int = 10                # Kelly 计算所需的最小成交信号数
 
 # ── Exports ──────────────────────────────────────────────────────────
 __all__ = [
@@ -235,4 +242,6 @@ __all__ = [
     "ACCUMULATION_DAYS_LIMIT", "MARKUP_DAYS_LIMIT",
     "CHIP_MIGRATION_WARNING_PCT", "CHIP_MIGRATION_CRITICAL_PCT",
     "ENABLE_RISK_REWARD_FILTER", "RISK_REWARD_THRESHOLDS",
+    "KELLY_MAX_TOTAL_POSITIONS", "KELLY_MIN_TRADES",
+    "T0_MIN_SPACE_PCT",
 ]

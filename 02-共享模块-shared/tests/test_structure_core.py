@@ -173,7 +173,7 @@ class TestTrailingStop:
         assert result["trailing_stop"] >= result.get("hard_stop", 0)
 
     def test_trailing_stop_disabled(self, monkeypatch):
-        monkeypatch.setattr("config.ENABLE_TRAILING_STOP", False)
+        monkeypatch.setattr("trader_shared.config.ENABLE_TRAILING_STOP", False)
         closes = [10.0 + i * 0.1 for i in range(30)]
         bars = _make_bars(closes)
         result = build_structure_context(current=12.0, bars=bars)

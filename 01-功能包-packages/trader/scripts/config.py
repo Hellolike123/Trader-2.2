@@ -33,6 +33,8 @@ from trader_shared.config import (
     ATRLV_INDEX,
     ENABLE_RISK_REWARD_FILTER,
     RISK_REWARD_THRESHOLDS,
+    KELLY_MAX_TOTAL_POSITIONS,
+    KELLY_MIN_TRADES,
 )
 
 # ── T0 Intraday parameters ──

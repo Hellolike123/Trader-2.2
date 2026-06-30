@@ -726,11 +726,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         fib_ext_1618 = round(swing_low + diff * 1.618, 2)
 
     # ── P0: ATR 移动止损 ──
-    try:
-        from config import ENABLE_TRAILING_STOP, TRAILING_STOP_ATR_MULTIPLE
-    except (ImportError, AttributeError):
-        ENABLE_TRAILING_STOP = False
-        TRAILING_STOP_ATR_MULTIPLE = 3.0
+    from trader_shared.config import ENABLE_TRAILING_STOP, TRAILING_STOP_ATR_MULTIPLE
         
     if pnl_pct is not None:
         if pnl_pct >= 0.40:

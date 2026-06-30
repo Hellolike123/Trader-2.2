@@ -456,7 +456,10 @@ def merge_decisions(
 
     # Fix 2: 有强多信号时的低位判断从 pos_pct <= 0.5 收紧到 <= 0.35
     # 50% 中轴并非低位，中轴附近的强多信号不应触发底部权重偏置
-    is_breakout_or_bottom = (pos_pct is not None and pos_pct <= 0.3) or ((strong_bullish_chan or strong_bullish_wyk) and pos_pct is not None and pos_pct <= 0.35)
+    # P2 Fix: bars < 20 时放宽阈值到 0.5，避免数据不足时误判
+    _pct_threshold = 0.3 if (bars and len(bars) >= 20) else 0.5
+    _pct_threshold_strong = 0.35 if (bars and len(bars) >= 20) else 0.5
+    is_breakout_or_bottom = (pos_pct is not None and pos_pct <= _pct_threshold) or ((strong_bullish_chan or strong_bullish_wyk) and pos_pct is not None and pos_pct <= _pct_threshold_strong)
 
     # 真正的高位超买（价格在区间上沿 + 动量极强）：动量权重最高，
     # 因为高位要看动量是否衰竭来决定去留。

@@ -25,10 +25,7 @@ try:
 except Exception:  # pragma: no cover - optional per skill
     TAKE_PROFIT_BUFFER = 1.06
 
-try:
-    from trader_shared.config import T0_MIN_SPACE_PCT
-except Exception:  # pragma: no cover - optional per skill
-    T0_MIN_SPACE_PCT = 1.5
+from trader_shared.config import T0_MIN_SPACE_PCT
 
 try:
     from trader_shared.config import FUSION_OVERRIDE_ENABLED, FUSION_CONFIDENCE_THRESHOLD
