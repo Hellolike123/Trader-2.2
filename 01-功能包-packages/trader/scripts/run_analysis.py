@@ -1465,15 +1465,20 @@ def render_markdown(r: dict) -> str:
     vol_parts = []
     if volume_ratio_val > 0:
         vol_label = "放量" if volume_ratio_val >= 1.5 else ("缩量" if volume_ratio_val <= 0.7 else "平量")
-        vol_parts.append(f"量比 {volume_ratio_val:.2f} {vol_label}")
+        vol_parts.append(f"量比{volume_ratio_val:.2f}（{vol_label}）")
     if turnover_val > 0:
-        vol_parts.append(f"换手 {turnover_val:.2f}%")
-    if dist_20h_str != "--":
-        vol_parts.append(f"距20日高 {dist_20h_str}")
-    if dist_20l_str != "--":
-        vol_parts.append(f"距20日低 {dist_20l_str}")
+        vol_parts.append(f"换手{turnover_val:.2f}%")
     if vol_parts:
-        lines.append(f"📊 量能：{' ｜ '.join(vol_parts)}")
+        vol_line = f"📊 量能：{''.join(vol_parts)}"
+        # 距离信息
+        dist_parts = []
+        if dist_20h_str != "--":
+            dist_parts.append(f"上方{dist_20h_str}到压力")
+        if dist_20l_str != "--":
+            dist_parts.append(f"下方{dist_20l_str}到支撑")
+        if dist_parts:
+            vol_line += f" ｜ {'｜'.join(dist_parts)}"
+        lines.append(vol_line)
 
     lines.extend([
         "",
