@@ -177,6 +177,11 @@ def offline_report(target: str) -> dict[str, Any]:
     confirm = round(base * 1.035, 2)
     stop = round(base * 0.945, 2)
     take = round(base * 1.09, 2)
+    ma5 = round(base, 2)
+    ma10 = round(base * 0.995, 2)
+    ma20 = round(base * 0.99, 2)
+    ma30 = round(base * 0.985, 2)
+    ma250 = round(base * 1.05, 2)
     return {
         "name": target,
         "symbol": target,
@@ -188,11 +193,38 @@ def offline_report(target: str) -> dict[str, Any]:
         "stop": stop,
         "take": take,
         "stage": "蓄势",
+        "major_stage": "蓄势",
+        "momentum": "震荡",
+        "short_term_momentum": "震荡",
+        "stage_label": "蓄势期+震荡",
         "scene": "防守观察",
         "low_zone": f"{support:.2f}-{base:.2f}元",
         "volume_text": "离线样本，量能按待确认处理。",
+        "volume_ratio": 1.0,
+        "volume_warning": False,
         "upward_momentum": "价格还没贴近确认区，结论：动能仍是弱修复，暂不按启动处理。",
-        "ma": {"ma5": f"{base:.2f}", "ma10": f"{base * 0.995:.2f}", "ma20": f"{base * 0.99:.2f}", "ma30": f"{base * 0.985:.2f}"},
+        "ma": {"ma5": f"{ma5:.2f}", "ma10": f"{ma10:.2f}", "ma20": f"{ma20:.2f}", "ma30": f"{ma30:.2f}", "ma250": f"{ma250:.2f}"},
+        "ma_values": {"ma5": ma5, "ma10": ma10, "ma20": ma20, "ma30": ma30, "ma250": ma250},
+        "fusion": {
+            "action": "观望",
+            "confidence": 0,
+            "weighted_score": 0.0,
+            "regime": "",
+            "hmm_regime": "range",
+            "disagreement": 0,
+            "signals_detail": {},
+            "weights_used": {},
+        },
+        "chanlun": {"score": 0, "label": "离线"},
+        "wyckoff": {"accumulation": False, "spring": False, "spring_signal": False},
+        "fib_retrace": {"level_382": base * 0.618, "level_500": base * 0.5, "level_618": base * 0.382},
+        "position_cap": {"sector_cap": 10, "score_cap": 10},
+        "atr14": round(base * 0.03, 2),
+        "atr_ratio": 1.0,
+        "stage_status": "蓄势期+震荡",
+        "data_note": "离线占位数据（offline_report），非实时分析结果。",
+        "data_status": "offline",
+        "data_freshness": "offline",
     }
 
 
@@ -404,10 +436,11 @@ def record_from_report(target: str, report: dict[str, Any], offline: bool = Fals
         "atr_cap": atr_cap,  # ATR 波动率决定的单票最大仓位（硬上限）
         "fusion_action": (report.get("fusion") or {}).get("action"),
         "fusion_confidence": (report.get("fusion") or {}).get("confidence"),
-        "fusion_score": (report.get("fusion") or {}).get("weighted_score"),
+        # fusion_score 由 **scores 提供（已做 -20~20 变换），与 total_score 一致
         "major_stage": major_stage,
         "momentum": momentum,
         "stage_status": stage_status,
+        "risk_flags": report.get("risk_flags", []) or [],
         **scores,
     }
     # 计算盈亏比存入记录

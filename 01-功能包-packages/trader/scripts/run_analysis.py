@@ -440,6 +440,24 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     quote = snapshot.quote
     bars = list(snapshot.daily_bars)  # copy to avoid mutating snapshot
 
+    # ═══════ ST / 退市风险 / 新股 / 停牌 检测 ═══════
+    stock_name = str(quote.get("name") or sec.name or target)
+    is_st = "ST" in stock_name or "*ST" in stock_name
+    # 停牌：现价等于昨收且成交量为 0（或极小）
+    cp = to_float(quote.get("current_price"))
+    pc = to_float(quote.get("pre_close"))
+    vol = to_float(quote.get("volume"))
+    is_suspended = cp is not None and pc is not None and vol is not None and cp > 0 and abs(cp - pc) < 1e-6 and vol < 1
+    bar_count = len(bars)
+    is_new_stock = bar_count < 60  # 上市不足 60 个交易日
+    risk_flags: list[str] = []
+    if is_st:
+        risk_flags.append("ST")
+    if is_suspended:
+        risk_flags.append("停牌")
+    if is_new_stock:
+        risk_flags.append("新股")
+
     # 一次性读取 signals.jsonl：同时获取成本价和历史胜率（合并两次 I/O）
     _signal_cost_price, _signal_win_rate = _read_signals_for_report(target, bars)
 
@@ -1007,6 +1025,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "range_low": low,
         "range_high": high,
         "data_status": snapshot.data_status,
+        "data_freshness": getattr(snapshot, "data_freshness", "live"),
+        "risk_flags": risk_flags,  # ST / 停牌 / 新股
         "missing_sources": snapshot.missing_sources,
         "source_errors": snapshot.source_errors,
         "fetched_at": snapshot.fetched_at,
@@ -2057,6 +2077,9 @@ def signal_max_total_pct(signal_type: str) -> int:
 
 def signal_risk_flags(r: dict[str, Any]) -> list[str]:
     flags: list[str] = []
+    # 前置风险标志（ST/停牌/新股）优先
+    pre_flags = r.get("risk_flags", []) or []
+    flags.extend(pre_flags)
     # Fix A2: 用 major_stage（四阶段）而非旧 stage（三帧轻量函数），与 Fix 7 保持一致
     if _get_major_stage(r) == "衰退":
         flags.append("structure_weak")
