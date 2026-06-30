@@ -216,6 +216,11 @@ def offline_report(target: str) -> dict[str, Any]:
             "weights_used": {},
         },
         "chanlun": {"score": 0, "label": "离线"},
+        "chan_buy_point_text": "无",
+        "chan_trend_label": "数据不足",
+        "chan_buy_point_types": [],
+        "chan_sell_point_types": [],
+        "chan_strokes_count": 0,
         "wyckoff": {"accumulation": False, "spring": False, "spring_signal": False},
         "fib_retrace": {"level_382": base * 0.618, "level_500": base * 0.5, "level_618": base * 0.382},
         "position_cap": {"sector_cap": 10, "score_cap": 10},
@@ -305,13 +310,14 @@ def score_report(report: dict[str, Any]) -> dict[str, int]:
         chip += CHIP_UPSIDE_BONUS
 
     # ── 缠论分：买点 + 数据充分性 ──
-    chan_bps = str(report.get("chan_buy_point_text", ""))
+    # 使用结构化 buy_point_types 列表而非字符串 in 匹配
+    chan_bps = [str(bp) for bp in report.get("chan_buy_point_types", [])]
     for bp_key, bp_bonus in CHAN_BUYPOINT_BONUS.items():
         if bp_key in chan_bps:
             chan += bp_bonus
             break
-    chan_trend = str(report.get("chan_trend_label", ""))
-    if report.get("chan_strokes_count", 0) < 2 and chan_trend == "数据不足":
+    # 数据充分性：笔数不足 2 笔或趋势标签为"数据不足"
+    if report.get("chan_strokes_count", 0) < 2 and str(report.get("chan_trend_label", "")) == "数据不足":
         chan -= CHAN_DATA_INSUFFICIENT_PENALTY
     chan = max(0, min(45, chan))
 

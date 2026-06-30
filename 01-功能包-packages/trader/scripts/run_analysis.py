@@ -1027,6 +1027,12 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "data_status": snapshot.data_status,
         "data_freshness": getattr(snapshot, "data_freshness", "live"),
         "risk_flags": risk_flags,  # ST / 停牌 / 新股
+        # ═══ 缠论结构（display string + structured for scoring） ═══
+        "chan_buy_point_text": levels.get("chan_buy_point_text", "无"),
+        "chan_trend_label": levels.get("chan_trend_label", "数据不足"),
+        "chan_buy_point_types": [bp.get("type", "") for bp in levels.get("chan_buy_points", [])],
+        "chan_sell_point_types": [sp.get("type", "") for sp in levels.get("chan_sell_points", [])],
+        "chan_strokes_count": levels.get("chan_strokes_count", 0),
         "missing_sources": snapshot.missing_sources,
         "source_errors": snapshot.source_errors,
         "fetched_at": snapshot.fetched_at,
