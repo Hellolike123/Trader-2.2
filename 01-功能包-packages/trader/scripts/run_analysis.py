@@ -1582,8 +1582,12 @@ def render_markdown(r: dict) -> str:
         lines.append(f"  ⚠️ 融合层提示：{fusion_action}（看空信号，谨慎买入）")
         lines.append("")
 
+    # 收集所有价格行，统一排序后输出（确保严格递增）
+    all_price_lines: list[tuple[float, str]] = []
+
+    # 止损
     if stop > 0:
-        lines.append(f"  {stop:.2f} 止损（跌破支撑，趋势破坏）")
+        all_price_lines.append((stop, f"  {stop:.2f} 止损（跌破支撑，趋势破坏）"))
 
     # 直接计算盈亏比（不依赖 AI 字段，避免直接运行时永远"数据不足"）
     take_price = float(r.get("take") or 0)
@@ -1598,13 +1602,17 @@ def render_markdown(r: dict) -> str:
         _buy_label = _get_buy_label(change_pct, volume_ratio_val)
         _upside = round(take_price - low_price, 2)
         _downside = round(low_price - stop, 2)
-        lines.append(f"  {low_price:.2f} ← 试探买 {position_cap}%（{_buy_label}，盈亏比 {risk_reward_val}R，止损 {stop:.2f}）")
+        all_price_lines.append((low_price, f"  {low_price:.2f} ← 试探买 {position_cap}%（{_buy_label}，盈亏比 {risk_reward_val}R，止损 {stop:.2f}）"))
         # 加仓条件：站稳确认位可加仓至最大仓位
         _max_pos = int(r.get("max_position_pct") or 0)
         if _max_pos > position_cap and confirm > 0:
-            lines.append(f"  {confirm:.2f} 站稳可加仓至 {_max_pos}%（突破阻力确认，趋势延续）")
+            all_price_lines.append((confirm, f"  {confirm:.2f} 站稳可加仓至 {_max_pos}%（突破阻力确认，趋势延续）"))
     elif low_price > 0:
-        lines.append(f"  {low_price:.2f} ← 试探买（等待确认）")
+        all_price_lines.append((low_price, f"  {low_price:.2f} ← 试探买（等待确认）"))
+
+    # 当前价格
+    if current_price > 0:
+        all_price_lines.append((current_price, f"  {current_price:.2f} 当前"))
     fib = r.get("fib_retrace") or {}
     golden_bid = fib.get("golden_bid")
     if golden_bid and golden_bid > 0 and golden_bid != low_price:
@@ -1624,13 +1632,6 @@ def render_markdown(r: dict) -> str:
             best_val, best_label = candidates[0][1], candidates[0][2]
             if best_val != low_price:
                 lines.append(f"  {best_val:.2f} ← 黄金分割{best_label}回撤参考（潜在支撑位）")
-
-    # 收集所有价格行，统一排序后输出（确保严格递增）
-    all_price_lines: list[tuple[float, str]] = []
-
-    # 当前价格
-    if current_price > 0:
-        all_price_lines.append((current_price, f"  {current_price:.2f} 当前"))
 
     exit_plan = r.get("exit_plan") or {}
     stage_exit = exit_plan.get("stage_exit")
