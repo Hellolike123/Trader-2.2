@@ -1026,6 +1026,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "range_high": high,
         "data_status": snapshot.data_status,
         "data_freshness": getattr(snapshot, "data_freshness", "live"),
+        "data_note": None,  # None = 正常分析，有值 = 离线/降级占位
+        "bars": bars,  # daily_bars 的别名，供 score_report 兼容
         "risk_flags": risk_flags,  # ST / 停牌 / 新股
         # ═══ 缠论结构（display string + structured for scoring） ═══
         "chan_buy_point_text": levels.get("chan_buy_point_text", "无"),
@@ -1033,6 +1035,10 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "chan_buy_point_types": [bp.get("type", "") for bp in levels.get("chan_buy_points", [])],
         "chan_sell_point_types": [sp.get("type", "") for sp in levels.get("chan_sell_points", [])],
         "chan_strokes_count": levels.get("chan_strokes_count", 0),
+        "chan_divergence": levels.get("chan_divergence", {}),
+        # ═══ 威科夫信号（供 score_report 消费） ═══
+        "wyckoff_spring_signal": levels.get("wyckoff_spring_signal", False),
+        "wyckoff_upthrust_signal": levels.get("wyckoff_upthrust_signal", False),
         "missing_sources": snapshot.missing_sources,
         "source_errors": snapshot.source_errors,
         "fetched_at": snapshot.fetched_at,
