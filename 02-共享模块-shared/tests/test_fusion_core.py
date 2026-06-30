@@ -605,8 +605,8 @@ class TestP0Regression:
         assert result["take"] >= 50.0
 
     def test_take_profit衰退(self):
-        """衰退期止盈不应低于现价"""
+        """衰退期不设止盈，只靠止损退出"""
         from trader_shared.structure_core import build_structure_context
         bars = [{"close": 50, "high": 51, "low": 49, "open": 50, "volume": 1000} for _ in range(30)]
         result = build_structure_context(50.0, bars, major_stage="衰退")
-        assert result["take"] >= 50.0
+        assert result["take"] is None  # 衰退期不设止盈

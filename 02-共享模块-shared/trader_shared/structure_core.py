@@ -645,11 +645,12 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     elif major_stage == '蓄势偏弱':
         take = round(resistance_price * 0.98, 2) if resistance_price else round(current, 2)
     elif major_stage == '衰退':
-        take = round(current * 1.03, 2)
+        take = None  # 衰退期不设止盈，只靠止损退出
     else:
         take = round(resistance_price, 2) if resistance_price else round(current * 1.05, 2)
-    # 安全网: 止盈不能低于现价
-    take = max(take, current)
+    # 安全网: 止盈不能低于现价（衰退期除外）
+    if take is not None:
+        take = max(take, current)
     position = zone_position(current, support_price, confirm_price)
     pressure_space_pct = (confirm_price - current) / current if current > 0 else 0
     below_ma = count_below_ma(current, ma_values)
