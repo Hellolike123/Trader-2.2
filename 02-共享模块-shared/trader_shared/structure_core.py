@@ -783,6 +783,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         "resistance_source": resistance["name"],
         "support_levels": support_levels,
         "resistance_levels": resistance_levels,
+        "resistance_list": sorted(resistance_levels, key=lambda x: abs(x['price'] - current))[:3],
         "ma_values": ma_values,
         "below_ma_count": below_ma,
         "atr_pct": round(atr_pct, 4),

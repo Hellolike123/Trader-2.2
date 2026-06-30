@@ -780,6 +780,15 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             else:
                 chip_resistance = resistance_peaks[0]["price"]
 
+    # Inject chip resistance into resistance levels
+    if chip_resistance and chip_resistance > current:
+        levels["resistance_levels"].append({"name": "筹码阻力", "price": round(chip_resistance, 2), "weight": 0.95})
+        from trader_shared.structure_core import choose_level
+        _new_res = choose_level(levels["resistance_levels"], current, below=False)
+        levels["resistance"] = round(float(_new_res["price"]), 2)
+        levels["resistance_source"] = _new_res["name"]
+    levels["chip_resistance"] = chip_resistance
+
     # 四阶段定位
     ma_raw_v = levels.get("ma_values") or {}
     closes_250 = [to_float(b.get("close")) for b in bars[-250:] if to_float(b.get("close")) is not None]
