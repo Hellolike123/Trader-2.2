@@ -905,6 +905,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "chip_current_pct": chip.get("current_pct"),
         "chip_mid_price": chip.get("mid_price"),
         "fusion": report_fusion,
+        "pattern_result": pattern_result,
         "gap": levels.get("gap"),
         "time_window": levels.get("time_window"),
         "fib_retrace": levels.get("fib_retrace"),
@@ -1556,6 +1557,18 @@ def render_markdown(r: dict) -> str:
 
     if _ind_parts:
         lines.append(f"  {' ｜ '.join(_ind_parts)}")
+
+    # 形态分析段落
+    pattern = r.get("pattern_result") or {}
+    if pattern and pattern.get("pattern") and pattern.get("pattern") != "none":
+        pat_name = {"double_bottom": "W底", "double_top": "M头", "triangle_breakout": "三角形突破", "triangle_breakdown": "三角形破位"}.get(pattern.get("pattern", ""), pattern.get("pattern", ""))
+        pat_signal = "看多" if pattern.get("signal", 0) == 1 else "看空"
+        neckline = pattern.get("neckline", 0)
+        target = pattern.get("target", 0)
+        if neckline > 0 and target > 0:
+            lines.append(f"📈 {pat_name}{pat_signal}（颈线{neckline:.2f}，目标{target:.2f}）")
+        else:
+            lines.append(f"📈 {pat_name}{pat_signal}")
 
     lines.extend([
         "",
