@@ -59,6 +59,7 @@ class MarketSnapshot:
     tick_data: list[dict[str, Any]] = field(default_factory=list)
     data_status: DataStatus = "full"
     data_freshness: str = "live"  # "live" 或 "stale"，用于停牌/离线检测
+    fund_flow: dict[str, Any] = field(default_factory=dict)
     missing_sources: list[str] = field(default_factory=list)
     source_errors: dict[str, str] = field(default_factory=dict)
     fetched_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
@@ -346,6 +347,7 @@ class UnifiedProvider:
             tick_data=getattr(snap, "tick_data", []),
             data_status=snap.data_status,
             data_freshness=getattr(snap, "data_freshness", "live"),
+            fund_flow=getattr(snap, "fund_flow", {}),
             missing_sources=snap.missing_sources,
             source_errors=snap.source_errors,
             fetched_at=snap.fetched_at,
