@@ -157,6 +157,14 @@ _signals_cache_mtime: float = 0
 _signals_cache_path: str = ""
 
 
+def _clear_signals_cache() -> None:
+    """清除 signals.jsonl 缓存（用于测试或文件变动后）"""
+    global _signals_cache_data, _signals_cache_mtime, _signals_cache_path
+    _signals_cache_data = None
+    _signals_cache_mtime = 0
+    _signals_cache_path = ""
+
+
 def _read_signals_for_report(target: str, daily_bars: list[dict[str, Any]]) -> tuple[float, dict | None]:
     """一次性读取 signals.jsonl，同时返回成本价和历史胜率。
 
@@ -298,6 +306,24 @@ def _read_signals_for_report(target: str, daily_bars: list[dict[str, Any]]) -> t
         }
 
     return cost_price, win_rate_data
+
+
+def _load_historical_win_rate(target: str) -> dict | None:
+    """兼容旧 API：内部取日线，返回胜率数据 dict 或 None。
+
+    替代原来的独立 _load_historical_win_rate 函数，
+    底层复用已缓存的 _read_signals_for_report。
+    """
+    _clear_signals_cache()  # 每次读取都重新读取文件（测试/独立调用场景）
+    try:
+        from trader_shared.data_provider import get_provider
+        provider = get_provider()
+        sec = provider.resolve_security(target)
+        bars = provider.fetch_qfq_daily(sec)
+    except Exception:
+        bars = []
+    _, win_rate_data = _read_signals_for_report(target, bars)
+    return win_rate_data
 
 
 def _degraded_quote_report(target: str) -> dict[str, Any]:
