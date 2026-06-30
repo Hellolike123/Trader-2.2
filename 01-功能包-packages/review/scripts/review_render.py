@@ -104,9 +104,12 @@ def _load_historical_win_rate(symbol: str) -> dict | None:
                     idx = dates.index(trade_date)
                 except ValueError:
                     continue
-                if idx + 5 >= len(dates):
+                # [P2 Fix] 硬编码 5 日持有期与信号实际持有周期不匹配
+                # 改用信号记录中的持有期，fallback 到 3 日（更贴近 T0 实际持有周期）
+                _holding = int(sig.get("holding_days") or 3)
+                if idx + _holding >= len(dates):
                     continue
-                exit_price = close_map[dates[idx + 5]]
+                exit_price = close_map[dates[idx + _holding]]
                 return_pct = round(((exit_price - entry_price) / entry_price) * 100, 2)
                 direction = str(sig.get("direction", ""))
                 if sig_type == "low_buy_triggered":

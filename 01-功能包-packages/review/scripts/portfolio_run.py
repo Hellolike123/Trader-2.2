@@ -244,9 +244,13 @@ def allocate_weights(
     for item in tradable:
         raw = item.get("score")
         s = float(raw) if raw is not None and raw != "" else 30.0
-        if s <= 0:
-            s = 30.0
+        # [P1 Fix] 负分替换为 30.0 会给予低分标的与高分标的相同权重
+        # 改为设 0 → 负分标的分配 0% 仓位
+        if s < 0:
+            s = 0.0
         scores.append(s)
+    print(f"[ALLOC DEBUG] tradable={[(i['name'], i.get('score')) for i in tradable]}")
+    print(f"[ALLOC DEBUG] scores={scores}")
 
     total_score = sum(scores)
     if total_score <= 0:
@@ -257,12 +261,18 @@ def allocate_weights(
     # 筹码降权系数（软调整，不硬限速）
     # 使用 portfolio_core.analyze_target 预计算的 chip_weight 值
     weights: dict[str, int] = {}
+    # [P1 Fix] 记录受最低仓位保护的标的（负分但可交易）， excess 裁剪时不碰
+    protected_names: set[str] = set()
     for item, score in zip(tradable, scores):
-        raw_w = round(score / total_score * alloc_pool)
+        raw_w = round(score / total_score * alloc_pool) if total_score > 0 else 0
         raw_w = max(raw_w, 0)
         # 筹码降权（套牢盘越重，仓位越低）
         cw = float(item.get("chip_weight") or 1.0)
         weight = round(raw_w * cw)
+        # [P1 Fix] 负分标的（weight=0）仍给予 1% 最低仓位，避免完全忽略
+        if score < 1 and weight == 0:
+            weight = 1
+            protected_names.add(item["name"])
         weights[item["name"]] = weight
 
     actual_total = sum(weights.values())
@@ -276,6 +286,9 @@ def allocate_weights(
             if excess <= 0:
                 break
             name = item["name"]
+            # 不裁剪受保护的最低仓位
+            if name in protected_names:
+                continue
             w = weights.get(name, 0)
             cut = min(w, excess)
             weights[name] = w - cut

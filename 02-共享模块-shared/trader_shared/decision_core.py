@@ -190,7 +190,8 @@ def _check_theory_breakout(
         # 不含原始 upthrust_signal/spring_signal 等字段。改用 reason 关键词匹配。
         reason = str(wyk.get("reason", ""))
         has_upthrust = any(kw in reason for kw in ("上冲", "Upthrust", "看空"))
-        has_spring = "Spring" in reason or "做多" in reason
+        # [P2 Fix] fusion_core 生成的 spring reason 是中文"威科夫弹簧"而非"Spring"
+        has_spring = "弹簧" in reason or "Spring" in reason or "做多" in reason or "看多" in reason
         has_bullish_div = "看多" in reason and any(
             kw in reason for kw in ("背离", "量价")
         )

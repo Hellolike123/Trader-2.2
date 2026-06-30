@@ -179,6 +179,7 @@ class APIRequestRateLimiter:
     def __init__(self, limit_file: str | None = None) -> None:
         self.limit_file = limit_file or os.path.expanduser("~/.trader/api_limits.json")
         self._ensure_dir()
+        self._lock = threading.Lock()
         self._cache: dict | None = None
         self._dirty = False
 
@@ -203,34 +204,39 @@ class APIRequestRateLimiter:
             _logger.debug("Rate limiter save failed: %s", exc)
 
     def _get_data(self) -> dict:
-        if self._cache is None:
-            self._cache = self._load_from_disk()
-        return self._cache
+        with self._lock:
+            if self._cache is None:
+                self._cache = self._load_from_disk()
+            return self._cache
 
     def _flush(self) -> None:
-        if self._dirty and self._cache is not None:
-            self._save(self._cache)
-            self._dirty = False
+        with self._lock:
+            if self._dirty and self._cache is not None:
+                self._save(self._cache)
+                self._dirty = False
 
     def check_and_record(self, max_per_min: int = 15, max_per_hour: int = 80) -> bool:
-        """Return True if allowed, False if throttled."""
-        now = time.time()
-        data = self._get_data()
-        calls = [t for t in data.get("calls", []) if now - t < 3600] # 只保留一小时内
+        """Return True if allowed, False if throttled. (线程安全)"""
+        with self._lock:
+            if self._cache is None:
+                self._cache = self._load_from_disk()
+            now = time.time()
+            data = self._cache
+            calls = [t for t in data.get("calls", []) if now - t < 3600]
 
-        min_calls = [t for t in calls if now - t < 60] # 一分钟内
-        if len(min_calls) >= max_per_min:
-            warnings.warn(f"⚠️ [RateLimit] 1分钟内API请求频次触发上限 ({max_per_min}次)，本地拦截并自适应降级。")
-            return False
+            min_calls = [t for t in calls if now - t < 60]
+            if len(min_calls) >= max_per_min:
+                warnings.warn(f"⚠️ [RateLimit] 1分钟内API请求频次触发上限 ({max_per_min}次)，本地拦截并自适应降级。")
+                return False
 
-        if len(calls) >= max_per_hour:
-            warnings.warn(f"⚠️ [RateLimit] 1小时内API请求频次触发上限 ({max_per_hour}次)，本地拦截并自适应降级。")
-            return False
+            if len(calls) >= max_per_hour:
+                warnings.warn(f"⚠️ [RateLimit] 1小时内API请求频次触发上限 ({max_per_hour}次)，本地拦截并自适应降级。")
+                return False
 
-        calls.append(now)
-        data["calls"] = calls
-        self._dirty = True
-        return True
+            calls.append(now)
+            data["calls"] = calls
+            self._dirty = True
+            return True
 
 _API_RATE_LIMITER = APIRequestRateLimiter()
 atexit.register(_API_RATE_LIMITER._flush)
@@ -440,11 +446,12 @@ class MarketDataSourceController:
     """Manages the connection state and health of the mootdx quotes client.
 
     Tracks consecutive failures, enforces cooldown isolation on repeated failures,
-    and maintains healthy/unhealthy state flags.
+    and maintains healthy/unhealthy state flags. (线程安全)
     """
     def __init__(self, max_failures: int = 3, cooldown_seconds: float = 30.0) -> None:
         self.max_failures = max_failures
         self.cooldown_seconds = cooldown_seconds
+        self._lock = threading.Lock()
         
         self.consecutive_failures = 0
         self.last_failure_time = 0.0
@@ -456,35 +463,37 @@ class MarketDataSourceController:
 
     def is_healthy(self) -> bool:
         """Check if mootdx client is healthy or if cooldown has expired."""
-        if not self.healthy:
-            if time.time() >= self.cool_down_until:
-                # Cooldown expired, tentatively treat as healthy
-                self.healthy = True
-                self.consecutive_failures = 0
-                return True
-            return False
-        return True
+        with self._lock:
+            if not self.healthy:
+                if time.time() >= self.cool_down_until:
+                    self.healthy = True
+                    self.consecutive_failures = 0
+                    return True
+                return False
+            return True
 
     def report_success(self) -> None:
         """Report a successful client call, resetting consecutive failure counts."""
-        self.total_calls += 1
-        self.consecutive_failures = 0
-        self.healthy = True
+        with self._lock:
+            self.total_calls += 1
+            self.consecutive_failures = 0
+            self.healthy = True
 
     def report_failure(self) -> None:
         """Report a failed client call. Triggers cooldown isolation if failures persist."""
-        self.total_calls += 1
-        self.total_failures += 1
-        self.consecutive_failures += 1
-        self.last_failure_time = time.time()
-        
-        if self.consecutive_failures >= self.max_failures:
-            self.healthy = False
-            self.cool_down_until = time.time() + self.cooldown_seconds
-            warnings.warn(
-                f"⚠️ mootdx client marked as UNHEALTHY due to {self.consecutive_failures} "
-                f"consecutive failures. Isolated for {self.cooldown_seconds} seconds."
-            )
+        with self._lock:
+            self.total_calls += 1
+            self.total_failures += 1
+            self.consecutive_failures += 1
+            self.last_failure_time = time.time()
+            
+            if self.consecutive_failures >= self.max_failures:
+                self.healthy = False
+                self.cool_down_until = time.time() + self.cooldown_seconds
+                warnings.warn(
+                    f"⚠️ mootdx client marked as UNHEALTHY due to {self.consecutive_failures} "
+                    f"consecutive failures. Isolated for {self.cooldown_seconds} seconds."
+                )
 
 
 _DATA_SOURCE_CONTROLLER = MarketDataSourceController()

@@ -116,7 +116,20 @@ def _ma(bars: list[dict[str, Any]], period: int) -> float | None:
     return sum(closes[-period:]) / period
 
 
+# ── 进程内缓存（批量刷新时避免每票重复 HTTP + HMM 计算）──
+_assess_cache: dict[str, Any] | None = None
+_assess_cache_time: float = 0
+_ASSess_CACHE_TTL = 60  # 1 分钟内复用进程内结果
+
+
 def assess() -> dict[str, Any]:
+    global _assess_cache, _assess_cache_time
+    # 进程内缓存：同一进程内 60 秒内复用
+    import time as _time
+    now = _time.time()
+    if _assess_cache is not None and now - _assess_cache_time < _ASSess_CACHE_TTL:
+        return _assess_cache
+
     # ── 文件缓存读取（盘后预缓存，TTL 24小时）──
     _cached_env = None
     try:
@@ -246,6 +259,10 @@ def assess() -> dict[str, Any]:
         _file_set(CACHE_MARKET_ENV, "index", result)
     except Exception:
         pass
+
+    # ── 进程内缓存 ──
+    _assess_cache = result
+    _assess_cache_time = now
 
     return result
 

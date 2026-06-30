@@ -151,6 +151,12 @@ def _get_major_stage(r: dict[str, Any]) -> str:
         major_stage = stage_map.get(old_stage, old_stage)
     return major_stage
 
+# ── 进程内 signals.jsonl 缓存（批量刷新时避免每票重读文件）──
+_signals_cache_data: list[dict] | None = None
+_signals_cache_mtime: float = 0
+_signals_cache_path: str = ""
+
+
 def _read_signals_for_report(target: str, daily_bars: list[dict[str, Any]]) -> tuple[float, dict | None]:
     """一次性读取 signals.jsonl，同时返回成本价和历史胜率。
 
@@ -163,9 +169,31 @@ def _read_signals_for_report(target: str, daily_bars: list[dict[str, Any]]) -> t
         cost_price: 最近买入信号的价格，找不到返回 0.0
         win_rate_data: 历史胜率统计 dict 或 None
     """
+    global _signals_cache_data, _signals_cache_mtime, _signals_cache_path
+
     signals_path = os.path.expanduser("~/.trader/signals.jsonl")
-    if not os.path.exists(signals_path):
-        return 0.0, None
+
+    # 进程内缓存：文件未修改则复用上次结果
+    try:
+        current_mtime = os.path.getmtime(signals_path)
+    except OSError:
+        current_mtime = 0
+
+    if (_signals_cache_data is not None and
+            _signals_cache_path == signals_path and
+            _signals_cache_mtime == current_mtime):
+        all_lines = _signals_cache_data
+    else:
+        if not os.path.exists(signals_path):
+            _signals_cache_data = []
+            _signals_cache_mtime = current_mtime
+            _signals_cache_path = signals_path
+            return 0.0, None
+        with open(signals_path, "r", encoding="utf-8") as f:
+            all_lines = f.readlines()[-100:]
+        _signals_cache_data = all_lines
+        _signals_cache_mtime = current_mtime
+        _signals_cache_path = signals_path
 
     normalized_target = target.replace(".SH", "").replace(".SZ", "").strip()
 
@@ -189,9 +217,7 @@ def _read_signals_for_report(target: str, daily_bars: list[dict[str, Any]]) -> t
     cost_price: float = 0.0
 
     try:
-        with open(signals_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()[-100:]
-            for line in reversed(lines):  # 从新到旧遍历
+        for line in reversed(all_lines):  # 从新到旧遍历
                 line = line.strip()
                 if not line:
                     continue
@@ -769,6 +795,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     confirm = levels["confirm_price"]
     stop = levels["hard_stop"]
     take = levels["take"]
+    # key_pressure 为大单分析提供关注价位（确认位优先，次选阻力位）
+    levels["key_pressure"] = confirm if confirm > 0 else resistance
     # 使用约5个交易日前的收盘价作为周收盘价的近似
     # 注意：这是5/20个交易日前的日线收盘价，非真实周/月K线
     if len(bars) >= 5:

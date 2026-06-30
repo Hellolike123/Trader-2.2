@@ -134,11 +134,17 @@ def run_postmarket_backfill_and_calibration() -> None:
                         continue
 
     # 3. 筛选活跃的买入触发信号
+    # [P1 Fix] 此前只查 low_buy_triggered，遗漏 track/high_sell_triggered/reduce/defensive 等
+    _ACTIVE_SIGNAL_TYPES = frozenset({
+        "low_buy_triggered", "low_buy_watch",
+        "high_sell_triggered", "high_sell_watch",
+        "track", "reduce", "defensive",
+    })
     active_signals = []
     for sig in signals:
         sid = sig.get("signal_id")
         sig_type = sig.get("signal_type")
-        if sid and sig_type == "low_buy_triggered" and sid not in outcomes:
+        if sid and sig_type in _ACTIVE_SIGNAL_TYPES and sid not in outcomes:
             active_signals.append(sig)
 
     if not active_signals:

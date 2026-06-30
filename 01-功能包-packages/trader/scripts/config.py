@@ -85,8 +85,16 @@ DEFAULT_MAIN_CAP: int = 50
 
 # ── Pool admission thresholds (三关筛选) ──
 # Gate 2: 评分门槛 — 按阶段分类的最低入池分数
-ADMISSION_SCORE_EXECUTE: dict[str, int] = {"蓄势": 80, "主升": 60, "派发": 999}  # 999 = 不允许执行
-ADMISSION_SCORE_OBSERVE: dict[str, int] = {"蓄势": 70, "主升": 999, "派发": 70}  # 999 = 不允许观察
+ADMISSION_SCORE_EXECUTE: dict[str, int] = {
+    "蓄势": 80, "蓄势偏强": 75, "蓄势偏弱": 85,
+    "主升": 60, "派发": 999, "衰退": 999,  # 999 = 不允许执行
+    "走强": 70, "修复": 75, "震荡": 85, "转弱": 999,
+}
+ADMISSION_SCORE_OBSERVE: dict[str, int] = {
+    "蓄势": 70, "蓄势偏强": 65, "蓄势偏弱": 75,
+    "主升": 999, "派发": 70, "衰退": 999,  # 999 = 不允许观察
+    "走强": 60, "修复": 65, "震荡": 75, "转弱": 999,
+}
 
 # ── Score report magic numbers (评分体系) ──
 # 缠论基础分

@@ -113,6 +113,7 @@ def empty_pending() -> dict[str, Any]:
     return {"contract_version": CONTRACT_VERSION_PENDING, "updated_at": today_text(), "items": []}
 
 def load_pending() -> dict[str, Any]:
+    """加载待确认池（load_state 内部使用 _read_lock 与 save_state 的 state_lock 互斥）"""
     payload = DataManager.load_state("pending", empty_pending())
     payload.setdefault("contract_version", CONTRACT_VERSION_PENDING)
     payload.setdefault("items", [])
@@ -226,6 +227,8 @@ def offline_report(target: str) -> dict[str, Any]:
         "wyckoff_upthrust_signal": False,
         "wyckoff": {"accumulation": False, "spring": False, "spring_signal": False},
         "fib_retrace": {"level_382": base * 0.618, "level_500": base * 0.5, "level_618": base * 0.382},
+        "fib_ext_1382": round(base * 1.382, 2),
+        "fib_ext_1618": round(base * 1.618, 2),
         "position_cap": {"sector_cap": 10, "score_cap": 10},
         "atr14": round(base * 0.03, 2),
         "atr_ratio": 1.0,
@@ -346,7 +349,8 @@ def score_report(report: dict[str, Any]) -> dict[str, int]:
     momentum_dir = momentum_result.get("direction", "insufficient")
     momentum_score_val = min(20, max(0, momentum_result.get("score", 0) // 5))
     mom_tag = {"bullish": "🟢看多", "bearish": "🔴看空", "neutral": "🟡中性"}.get(momentum_dir, "⚪数据不足")
-    total = max(0, min(100, chan + wyckoff + chip + fusion_bonus))
+    # [P0 Fix] momentum 独立计算后此前未计入 total → 修正
+    total = max(0, min(100, chan + wyckoff + chip + fusion_bonus + momentum_score_val))
     return {"chanlun_score": chan, "wyckoff_score": wyckoff, "chip_score": chip, "fusion_score": fusion_bonus, "total_score": total, "momentum_score": momentum_score_val, "momentum_tag": mom_tag}
 
 
@@ -897,6 +901,7 @@ def _pool_signal_verifications(items: list[dict[str, Any]]) -> tuple[list[dict[s
                 confidence = str(matched.get("confidence", ""))
                 conf_map = {"low": "低", "medium": "中等", "high": "高"}
                 conf_txt = conf_map.get(confidence, confidence)
+                sig_text = f"{_signal_type_label(sig_type)} {conf_txt}"
 
                 # 通用检查：破防守 / 已触发
                 if current < defense:
@@ -914,13 +919,10 @@ def _pool_signal_verifications(items: list[dict[str, Any]]) -> tuple[list[dict[s
                     verify_status, summary = _verify_by_signal_type(
                         sig_type, matched, item, current, defense, today, summary
                     )
-
-                if matched:
-                    sig_text = f"{_signal_type_label(sig_type)} {conf_txt}"
-                else:
-                    sig_text = "无记录"
-                    verify_status = "暂无信号"
-                    summary["暂无信号"] = summary.get("暂无信号", 0) + 1
+            else:
+                sig_text = "无记录"
+                verify_status = "暂无信号"
+                summary["暂无信号"] = summary.get("暂无信号", 0) + 1
 
         results.append({
             "name": name,

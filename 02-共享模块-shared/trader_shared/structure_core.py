@@ -273,6 +273,8 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None, index_returns: lis
     if regime in ("偏弱", "很差"):
         multipliers["stop_buffer"] = multipliers["stop_buffer"] * 0.8
         multipliers["confirm_buffer"] = multipliers["confirm_buffer"] * 1.3
+        # [P1 Fix] 大盘偏弱/很差时，买入区间应收窄而非维持不变
+        multipliers["zone_width"] = multipliers["zone_width"] * 0.85
     elif regime == "正常":
         multipliers["zone_width"] = multipliers["zone_width"] * 1.2
         multipliers["confirm_buffer"] = multipliers["confirm_buffer"] * 0.8

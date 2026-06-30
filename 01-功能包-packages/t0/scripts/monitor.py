@@ -31,7 +31,11 @@ from price_point_engine import price
 from trader_shared.signal_store import append_signal
 from t0_run import build_plan, build_t0_event_signal
 from config import FREQUENCY_STOP_LIMIT
-from trader_shared.light_data import is_trading_time
+try:
+    from trader_shared.trading_calendar import is_trading_time, next_trading_open
+except ImportError:
+    from trader_shared.light_data import is_trading_time
+    next_trading_open = None
 
 try:
     from trader_shared import get_market_level, add_warning, get_market_note, log_safe, fill_by_target
@@ -165,7 +169,11 @@ def trigger_key(side: str, model: dict[str, Any]) -> str:
 
 def event_id(event: str, plan: dict[str, Any]) -> str:
     model = plan["buy"] if event.startswith("BUY") else plan["sell"]
-    return f"{event}:{trigger_key('BUY' if event.startswith('BUY') else 'SELL', model)}"
+    # [P1 Fix] 事件冷却 key 不再包含 trigger_price（动态价格导致冷却可绕过）
+    # 改用 side + source 作为稳定 key，同一侧的同一事件类型共享冷却
+    zone = model.get("zone") if isinstance(model.get("zone"), dict) else {}
+    source = zone.get("source") or ""
+    return f"{event}:{model.get('trigger_time', '')}:{source}"
 
 
 def is_executable(model: dict[str, Any]) -> bool:
@@ -581,7 +589,8 @@ def run_once(
         state["targets"] = targets
         
         # Count STOP losses and check fuse trigger
-        if allowed_events:
+        if allowed_events and not day_fuse.get("fused", False):
+            # [P1 Fix] 熔断后不再统计 stop_count，避免计数超过阈值
             stop_count = day_fuse.get("count", 0) if isinstance(day_fuse, dict) else 0
             fused_targets = day_fuse.get("fused_targets", []) if isinstance(day_fuse, dict) else []
             for event in allowed_events:
@@ -589,11 +598,11 @@ def run_once(
                     stop_count += 1
                     if target_key not in fused_targets:
                         fused_targets = fused_targets + [target_key]
-            
+
             if fused_targets is None:
                 fused_targets = []
             day_fuse = {"count": stop_count, "fused_targets": fused_targets}
-            if stop_count >= FREQUENCY_STOP_LIMIT and not day_fuse.get("fused"):
+            if stop_count >= FREQUENCY_STOP_LIMIT:
                 day_fuse["fused"] = True
                 day_fuse["fused_at"] = now.strftime("%H:%M")
             fuse_state[day] = day_fuse

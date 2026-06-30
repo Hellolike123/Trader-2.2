@@ -177,11 +177,13 @@ def build_plan(target: str) -> dict[str, Any]:
         wyck_result = {}
         result["wyckoff"] = {}
 
+    # 取融合层或报告中的阶段，避免硬编码"主升"导致衰退期仍激进
+    _stage = result.get("major_stage") or result.get("stage") or "蓄势"
     result["exit_plan"] = compute_exit_plan(
         entry_price=float(buy_price),
         stop_price=float(stop_price),
         resistance_price=float(sell_price) if sell_price and sell_price > buy_price else None,
-        current_stage="主升",  # t0 默认按主升处理
+        current_stage=_stage,
         bars=daily,
         wyckoff_result=wyck_result,
     )
