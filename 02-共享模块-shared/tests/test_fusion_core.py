@@ -563,3 +563,50 @@ class TestPhase3Features:
         mult_weak = _theory_multipliers({"regime": "偏弱"})
         assert mult_weak["stop_buffer"] == 0.8
         assert mult_weak["confirm_buffer"] == 1.3
+
+
+class TestP0Regression:
+    """P0 回归测试 — 覆盖关键 bug 修复路径。"""
+
+    def test_sell_points_一类卖(self):
+        """一类卖信号应返回 direction=-1, confidence=0.8"""
+        from trader_shared.fusion_core import _chan_to_signal
+        result = _chan_to_signal({"chanlun": {"sell_points": [{"type": "一类卖", "price": 30}]}})
+        assert result["direction"] == -1
+        assert result["confidence"] == 0.8
+
+    def test_sell_points_二类卖(self):
+        from trader_shared.fusion_core import _chan_to_signal
+        result = _chan_to_signal({"chanlun": {"sell_points": [{"type": "二类卖", "price": 28}]}})
+        assert result["direction"] == -1
+        assert result["confidence"] == 0.5
+
+    def test_sell_points_三类卖(self):
+        from trader_shared.fusion_core import _chan_to_signal
+        result = _chan_to_signal({"chanlun": {"sell_points": [{"type": "三类卖", "price": 25}]}})
+        assert result["direction"] == -1
+        assert result["confidence"] == 0.5
+
+    def test_data_status_degradation(self):
+        """data_status=partial 应降级 action"""
+        from trader_shared.fusion_core import merge_decisions
+        chan = {"chanlun": {"buy_points": [{"type": "一类买", "price": 28}], "divergence": {}, "trend_label": "数据不足"}}
+        mom = {"momentum": {"score": 80, "direction": "bullish", "signals": ["多指标共振"]}}
+        wyk = {"wyckoff": {}}
+        result = merge_decisions(chan, mom, wyk, regime="正常", data_status="partial")
+        # partial 数据应降级 action，不应触发积极买入
+        assert result["action"] not in {"半仓试 (多方主导)", "增持"}
+
+    def test_take_profit蓄势(self):
+        """蓄势期止盈应为阻力位"""
+        from trader_shared.structure_core import build_structure_context
+        bars = [{"close": 50, "high": 51, "low": 49, "open": 50, "volume": 1000} for _ in range(30)]
+        result = build_structure_context(50.0, bars, major_stage="蓄势")
+        assert result["take"] >= 50.0
+
+    def test_take_profit衰退(self):
+        """衰退期止盈不应低于现价"""
+        from trader_shared.structure_core import build_structure_context
+        bars = [{"close": 50, "high": 51, "low": 49, "open": 50, "volume": 1000} for _ in range(30)]
+        result = build_structure_context(50.0, bars, major_stage="衰退")
+        assert result["take"] >= 50.0
