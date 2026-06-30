@@ -625,6 +625,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             data_status=snapshot.data_status,
             pattern_result=pattern_result,
             volume_warning=volume_warning,
+            extend_fundamental=snapshot.extend_fundamental,
+            extend_sentiment=snapshot.extend_sentiment,
         )
     except Exception:
         report_fusion = {"action": "融合层异常", "confidence": 0, "weighted_score": 0,
@@ -1269,7 +1271,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     from trader_shared.stage_positioning import action_for_holding_state
     fusion_action_str = str((report_fusion or {}).get("action") or "").strip()
     holding_state = action_for_holding_state(fusion_action_str, has_position)
-    report["fusion_holding_hint"] = holding_state["holding_hint"]
+    report["fusion_holding_hint"] = holding_state.get("holding_hint", "待定")
 
     suggested = int((report.get("position_info") or {}).get("suggested_pct") or 0)
     _reduce_set = {"减仓", "空仓/止损", "空仓 (大盘很差, 一票否决)"}
