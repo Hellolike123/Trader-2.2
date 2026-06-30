@@ -46,6 +46,8 @@ except ImportError:
 from config import (
     LOOKBACK_DAYS,
     STRUCTURE_WINDOW,
+    ENABLE_RISK_REWARD_FILTER,
+    RISK_REWARD_THRESHOLDS,
 )
 try:
     from trader_shared.models import DATA_STATUS_MAP
@@ -1597,16 +1599,86 @@ def render_markdown(r: dict) -> str:
         risk_reward_val = round((take_price - low_price) / downside, 1)
     risk_reward_available = risk_reward_val is not None and risk_reward_val > 0
 
-    if low_price > 0 and risk_reward_available:
+    # —— R3: 形态目标修正盈亏比 ——
+    pattern = r.get("pattern_result") or {}
+    if pattern and isinstance(pattern, dict):
+        pattern_target = float(pattern.get("target") or 0)
+        if pattern_target > take_price > 0:
+            take_price = pattern_target
+            downside = low_price - stop if stop < low_price else None
+            if downside and downside > 0:
+                risk_reward_val = round((take_price - low_price) / downside, 1)
+            risk_reward_available = risk_reward_val is not None and risk_reward_val > 0
+
+    # —— R1 + R2: 场景感知过滤闸门 + Kelly 仓位叠加 ——
+    rr_filtered = False
+    rr_threshold = 1.5
+    min_win_rate = 0
+    pattern_target_display = ""
+    if risk_reward_available and risk_reward_val is not None and risk_reward_val > 0 and ENABLE_RISK_REWARD_FILTER:
+        min_win_rate = round(1 / (1 + risk_reward_val) * 100)
+        base_status = str(r.get("base_status") or "")
+        market_env_level = market_env_data.get("level", "正常")
+        rr_threshold = RISK_REWARD_THRESHOLDS.get(market_env_level, 1.5)
+        # 突破场景不过滤
+        if base_status in ("突破确认", "突破观察"):
+            pass
+        elif risk_reward_val < rr_threshold:
+            rr_filtered = True
+        # R2: Kelly 仓位叠加
+        if position_cap > 0 and not rr_filtered:
+            try:
+                results_file = Path.home() / ".trader" / "signal_results.jsonl"
+                if results_file.exists():
+                    wins, total = 0, 0
+                    with open(results_file) as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                rec = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            rec_env = rec.get("market_env", "")
+                            if rec_env and rec_env != market_env_level:
+                                continue
+                            status_str = rec.get("status", "")
+                            if status_str == "filled":
+                                total += 1
+                                rtn = float(rec.get("return_pct") or 0)
+                                if rtn > 0:
+                                    wins += 1
+                    if total >= 10:
+                        win_rate = wins / total
+                        R = risk_reward_val
+                        kelly = (win_rate * R - (1 - win_rate)) / R
+                        kelly = max(0, min(kelly, 0.5))
+                        total_position_limit = 10
+                        kelly_cap = int(kelly * 2 * total_position_limit)
+                        if kelly_cap > 0:
+                            position_cap = min(position_cap, kelly_cap)
+            except Exception:
+                pass
+
+    # 形态目标文字说明
+    if pattern and isinstance(pattern, dict) and float(pattern.get("target") or 0) > float(r.get("take") or 0) > 0:
+        pattern_target_display = f"，形态目标 {float(pattern['target']):.2f}元"
+
+    if low_price > 0 and risk_reward_available and not rr_filtered and risk_reward_val is not None:
         # 动态生成试探买标签
         _buy_label = _get_buy_label(change_pct, volume_ratio_val)
         _upside = round(take_price - low_price, 2)
         _downside = round(low_price - stop, 2)
-        all_price_lines.append((low_price, f"  {low_price:.2f} ← 试探买 {position_cap}%（{_buy_label}，盈亏比 {risk_reward_val}R，止损 {stop:.2f}）"))
+        rr_status = "✓"
+        all_price_lines.append((low_price, f"  {low_price:.2f} ← 试探买 {position_cap}%（{_buy_label}，盈亏比 {risk_reward_val}R{rr_status}，需胜率≥{min_win_rate}%，止损 {stop:.2f}）{pattern_target_display}"))
         # 加仓条件：站稳确认位可加仓至最大仓位
         _max_pos = int(r.get("max_position_pct") or 0)
         if _max_pos > position_cap and confirm > 0:
             all_price_lines.append((confirm, f"  {confirm:.2f} 站稳可加仓至 {_max_pos}%（突破阻力确认，趋势延续）"))
+    elif low_price > 0 and risk_reward_val is not None and risk_reward_val > 0 and rr_filtered:
+        # 盈亏比不足，仍显示价格但标记为留意（不生成买入建议）
+        all_price_lines.append((low_price, f"  {low_price:.2f} ← 留意（盈亏比 {risk_reward_val}R ✗ 需胜率≥{min_win_rate}%，低于大环境下限 {rr_threshold}R）"))
     elif low_price > 0:
         all_price_lines.append((low_price, f"  {low_price:.2f} ← 试探买（等待确认）"))
 
@@ -1739,6 +1811,7 @@ def render_markdown(r: dict) -> str:
             lines.append(f"  跌破 {stop:.2f}：止损（认亏）")
 
     chip_peaks = r.get("chip_peaks") or []
+    chip_migration = r.get("chip_migration") or {}
     if chip_peaks:
         sorted_peaks = sorted(chip_peaks, key=lambda x: x.get("price", 0))
         peak_strs = []
@@ -1754,7 +1827,6 @@ def render_markdown(r: dict) -> str:
         current_pct = r.get("chip_current_pct")
         if current_pct is not None and current_pct > 50:
             chip_line_parts.append(f"获利{current_pct:.0f}%")
-        chip_migration = r.get("chip_migration") or {}
         warning_text = chip_migration.get("warning_text", "")
         if "筹码在搬家" in warning_text:
             chip_line_parts.append("⚠️搬家")

@@ -187,6 +187,15 @@ MARKUP_DAYS_LIMIT: int = 15         # 主升期买入：15天不创新高 → �
 CHIP_MIGRATION_WARNING_PCT: float = 40.0   # 筹码松动警告阈值
 CHIP_MIGRATION_CRITICAL_PCT: float = 50.0  # 筹码搬家清仓阈值
 
+# ---- Risk/Reward filter constants -------------------------------------------
+ENABLE_RISK_REWARD_FILTER: bool = True
+# 盈亏比最低阈值（按 market_env level 分场景）
+RISK_REWARD_THRESHOLDS: dict[str, float] = {
+    "正常": 2.0,    # 牛市
+    "偏弱": 1.5,    # 震荡
+    "很差": 1.2,    # 熊市
+}
+
 # ── Exports ──────────────────────────────────────────────────────────
 __all__ = [
     "LOOKBACK_DAYS", "RECENT_WINDOW", "CONFIRM_BUFFER", "STOP_BUFFER", "TAKE_PROFIT_BUFFER",
@@ -225,4 +234,5 @@ __all__ = [
     "EXPMA_FAST_PERIOD", "EXPMA_SLOW_PERIOD", "EXPMA_TREND_FAST", "EXPMA_TREND_SLOW",
     "ACCUMULATION_DAYS_LIMIT", "MARKUP_DAYS_LIMIT",
     "CHIP_MIGRATION_WARNING_PCT", "CHIP_MIGRATION_CRITICAL_PCT",
+    "ENABLE_RISK_REWARD_FILTER", "RISK_REWARD_THRESHOLDS",
 ]

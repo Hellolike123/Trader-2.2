@@ -31,6 +31,8 @@ from trader_shared.config import (
     PYRAMID_SCALES,
     BASE_WEIGHTS,
     ATRLV_INDEX,
+    ENABLE_RISK_REWARD_FILTER,
+    RISK_REWARD_THRESHOLDS,
 )
 
 # ── T0 Intraday parameters ──

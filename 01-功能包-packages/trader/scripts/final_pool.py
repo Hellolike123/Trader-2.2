@@ -48,6 +48,8 @@ from config import (
     CHIP_UPSIDE_BONUS,
     FUSION_BONUS_SCALE,
     FUSION_DISAGREEMENT_CAP,
+    ENABLE_RISK_REWARD_FILTER,
+    RISK_REWARD_THRESHOLDS,
 )
 
 try:
@@ -375,7 +377,7 @@ def record_from_report(target: str, report: dict[str, Any], offline: bool = Fals
     major_stage = str(report.get("major_stage") or "蓄势")
     momentum = str(report.get("short_term_momentum") or "震荡")
     stage_status = str(report.get("stage_label") or f"{major_stage}期+{momentum}")
-    return {
+    record = {
         "target": target,
         "name": report.get("name") or target,
         "symbol": report.get("symbol") or target,
@@ -406,6 +408,16 @@ def record_from_report(target: str, report: dict[str, Any], offline: bool = Fals
         "stage_status": stage_status,
         **scores,
     }
+    # 计算盈亏比存入记录
+    support_val = record.get("support", 0.0)
+    stop_val = record.get("defense", 0.0)
+    take_val = round(float(report.get("take") or 0), 2)
+    risk_reward = 0.0
+    if stop_val > 0 and support_val > stop_val and take_val > support_val:
+        risk_reward = round((take_val - support_val) / (support_val - stop_val), 1)
+    record["take"] = take_val
+    record["risk_reward"] = risk_reward
+    return record
 
 
 def active_items(pool: dict[str, Any]) -> list[dict[str, Any]]:
@@ -430,6 +442,7 @@ def sort_items_unified(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     
     主键：status（执行 > 观察 > 淘汰）
     次键：融合置信度 × 40% + 总分归一化 × 30% + 阶段强度 × 30%
+    附加：盈亏比提权（评分 × (1 + min(盈亏比-1,2) × 0.1)）
     """
     status_rank = {"执行": 3, "观察": 2, "淘汰": 1}
     def _composite(item: dict[str, Any]) -> float:
@@ -437,7 +450,13 @@ def sort_items_unified(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         score = int(item.get("total_score") or 0)
         stage = str(item.get("major_stage") or "蓄势")
         stage_str = STAGE_STRENGTH.get(stage, 0.5)
-        return conf * 0.4 + (score / 100.0) * 0.3 + stage_str * 0.3
+        composite = conf * 0.4 + (score / 100.0) * 0.3 + stage_str * 0.3
+        # R4: 盈亏比排序加分
+        rr = to_float(item.get("risk_reward")) or 0
+        if rr > 1.0 and ENABLE_RISK_REWARD_FILTER:
+            rr_bonus = min(rr - 1.0, 2.0) * 0.1
+            composite *= (1.0 + rr_bonus)
+        return composite
     
     return sorted(
         items,
@@ -1202,6 +1221,14 @@ def render_rank(items: list[dict[str, Any]]) -> str:
         cap_display = f"仓位 {final_cap}%"
         if cap_reason:
             cap_display += f"（{cap_reason}）"
+        # R4: 盈亏比显示
+        rr_val = to_float(item.get("risk_reward")) or 0
+        if rr_val > 0 and ENABLE_RISK_REWARD_FILTER:
+            market_env_level_s = get_market_level()
+            rr_th = RISK_REWARD_THRESHOLDS.get(market_env_level_s, 1.5)
+            rr_ok = rr_val >= rr_th
+            rr_sym = "✓" if rr_ok else "✗"
+            cap_display += f" 盈亏比 {rr_val}R {rr_sym}"
         lines.append(f"    {buy_text}  ｜  {cap_display}  ｜  止损 {stop_val:.2f}")
         # 价格过期 & 触发价偏离警告
         fw = _price_freshness_warning(item)
@@ -1485,7 +1512,17 @@ def render_plan(items: list[dict[str, Any]]) -> str:
             stage_str = str(item.get("stage_status") or item.get("major_stage", "蓄势") + "+" + item.get("momentum", "震荡"))
             lines.append(f"{rank_emoji} {item['name']}（{stage_str} {item['status']}）")
             lines.append(f"  {action_for(item)}")
-            lines.append(f"  触发{price(item.get('trigger'))}元  防守{price(item.get('defense'))}元  仓位{position_for(item)}")
+            # R4: 计划页显示盈亏比
+            rr_val = to_float(item.get("risk_reward")) or 0
+            if rr_val > 0 and ENABLE_RISK_REWARD_FILTER:
+                market_env_level_s = get_market_level()
+                rr_th = RISK_REWARD_THRESHOLDS.get(market_env_level_s, 1.5)
+                rr_ok = rr_val >= rr_th
+                rr_sym = "✓" if rr_ok else "✗"
+                plan_rr_text = f"  盈亏比 {rr_val}R {rr_sym}"
+            else:
+                plan_rr_text = ""
+            lines.append(f"  触发{price(item.get('trigger'))}元  防守{price(item.get('defense'))}元  仓位{position_for(item)}{plan_rr_text}")
             fw = _price_freshness_warning(item)
             if fw:
                 lines.append(f"  {fw}")
@@ -1502,8 +1539,15 @@ def render_plan(items: list[dict[str, Any]]) -> str:
         lines.append("")
         lines.append("评分总览")
         for item in sorted_items:
+            _rr = to_float(item.get("risk_reward")) or 0
+            _rr_suffix = ""
+            if _rr > 0 and ENABLE_RISK_REWARD_FILTER:
+                _rr_s = get_market_level()
+                _rr_th = RISK_REWARD_THRESHOLDS.get(_rr_s, 1.5)
+                _rr_sym = "✓" if _rr >= _rr_th else "✗"
+                _rr_suffix = f" 盈亏比 {_rr}R {_rr_sym}"
             lines.append(
-                f"  {item.get('name')}  {score_summary(item)}  {item['status']}"
+                f"  {item.get('name')}  {score_summary(item)}  {item['status']}{_rr_suffix}"
             )
 
         lines.append("")
