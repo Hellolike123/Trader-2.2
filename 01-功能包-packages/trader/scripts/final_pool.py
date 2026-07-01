@@ -36,12 +36,6 @@ from config import (
     CHAN_CONFIRM_FAR_BONUS,
     CHAN_BUYPOINT_BONUS,
     CHAN_DATA_INSUFFICIENT_PENALTY,
-    WYCKOFF_BASE,
-    WYCKOFF_VOL_AMPLIFY_BONUS,
-    WYCKOFF_VOL_SHRINK_BONUS,
-    WYCKOFF_VOL_NORMAL_BONUS,
-    WYCKOFF_MOMENTUM_PASS_BONUS,
-    WYCKOFF_SPRING_BONUS,
     CHIP_BASE,
     CHIP_ABOVE_STOP_BONUS,
     CHIP_IN_ZONE_BONUS,
@@ -282,7 +276,6 @@ def score_report(report: dict[str, Any]) -> dict[str, int]:
     stage = str(report.get("stage") or "")
     scene = str(report.get("scene") or "")
     chan = CHAN_BASE
-    wyckoff = WYCKOFF_BASE
     chip = CHIP_BASE
 
     # ── 缠论分：阶段 + 场景 + 确认位距离 ──
@@ -296,16 +289,12 @@ def score_report(report: dict[str, Any]) -> dict[str, int]:
         elif distance <= 0.05:
             chan += CHAN_CONFIRM_FAR_BONUS
 
-    # ── 威科夫分：量价 + 动量 ──
-    volume_text = str(report.get("volume_text") or "")
-    if "放大" in volume_text or "放量" in volume_text:
-        wyckoff += WYCKOFF_VOL_AMPLIFY_BONUS
-    elif "缩量" in volume_text or "收缩" in volume_text:
-        wyckoff += WYCKOFF_VOL_SHRINK_BONUS
-    else:
-        wyckoff += WYCKOFF_VOL_NORMAL_BONUS
-    if momentum_passes(report):
-        wyckoff += WYCKOFF_MOMENTUM_PASS_BONUS
+    # ── 威科夫分：基于 Wyckoff 信号规则的独立打分 ──
+    # 先计算 0-100 分数，再缩放至 [0, 30]（与旧契约 max=30 保持一致）
+    from trader_shared.wyckoff_core import calculate_wyckoff_score
+    daily_bars = report.get("bars") or report.get("daily_bars") or []
+    wyckoff_result = calculate_wyckoff_score(daily_bars)
+    wyckoff = int(wyckoff_result["score"] / 100 * 30)
 
     # ── 筹码分：价格位置 ──
     if current > stop:
@@ -326,10 +315,6 @@ def score_report(report: dict[str, Any]) -> dict[str, int]:
     if report.get("chan_strokes_count", 0) < 2 and str(report.get("chan_trend_label", "")) == "数据不足":
         chan -= CHAN_DATA_INSUFFICIENT_PENALTY
     chan = max(0, min(45, chan))
-
-    # ── 威科夫分：spring ──
-    if report.get("wyckoff_spring_signal", False):
-        wyckoff += WYCKOFF_SPRING_BONUS
     wyckoff = max(0, min(30, wyckoff))
     chip = max(0, min(25, chip))
 

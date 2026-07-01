@@ -610,3 +610,73 @@ class TestP0Regression:
         bars = [{"close": 50, "high": 51, "low": 49, "open": 50, "volume": 1000} for _ in range(30)]
         result = build_structure_context(50.0, bars, major_stage="衰退")
         assert result["take"] is None  # 衰退期不设止盈
+
+
+class TestWyckoffScoreToDirection:
+    """wyckoff_score_to_direction 单元测试"""
+
+    def setup_method(self):
+        from trader_shared.fusion_core import wyckoff_score_to_direction
+        self._fn = wyckoff_score_to_direction
+
+    def test_bullish_strong(self):
+        """score >= 65 → 看多"""
+        fn = self._fn
+        result = fn(75)
+        assert result["direction"] == 1
+        assert result["confidence"] == 0.75
+        assert "看多" in result["reason"]
+        assert result["raw_key"] == "wyckoff"
+
+    def test_bullish_boundary(self):
+        """score = 65 → 看多边界"""
+        fn = self._fn
+        result = fn(65)
+        assert result["direction"] == 1
+        assert result["confidence"] == 0.65
+
+    def test_neutral_high(self):
+        """score = 60 → 中性"""
+        fn = self._fn
+        result = fn(60)
+        assert result["direction"] == 0
+        assert result["confidence"] == 0.3
+        assert "中性" in result["reason"]
+
+    def test_neutral_mid(self):
+        """score = 50 → 中性"""
+        fn = self._fn
+        result = fn(50)
+        assert result["direction"] == 0
+        assert result["confidence"] == 0.3
+
+    def test_neutral_low(self):
+        """score = 36 → 中性下边界 (35 是看空边界)"""
+        fn = self._fn
+        result = fn(36)
+        assert result["direction"] == 0
+        assert result["confidence"] == 0.3
+
+    def test_bearish_boundary(self):
+        """score = 34 → 看空边界"""
+        fn = self._fn
+        result = fn(34)
+        assert result["direction"] == -1
+        assert result["confidence"] == 0.66
+        assert "看空" in result["reason"]
+
+    def test_bearish_strong(self):
+        """score = 20 → 看空"""
+        fn = self._fn
+        result = fn(20)
+        assert result["direction"] == -1
+        assert result["confidence"] == 0.80
+        assert result["raw_key"] == "wyckoff"
+
+    def test_confidence_capped_at_0_95(self):
+        """confidence 上限 0.95"""
+        fn = self._fn
+        result_bull = fn(96)
+        result_bear = fn(4)
+        assert result_bull["confidence"] == 0.95
+        assert result_bear["confidence"] == 0.95

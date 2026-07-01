@@ -344,7 +344,7 @@ def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str,
         macd_mom_b = max(macd_mom_b, 12)
 
     from trader_shared.chan_core import chanlun_analysis
-    from trader_shared.wyckoff_core import wyckoff_analysis
+    from trader_shared.wyckoff_core import wyckoff_analysis, calculate_wyckoff_score
     chan_r = chanlun_analysis(bars=daily, current=current, macd_hist_current=macd_hist, macd_hist_prev=macd_hist_prev)
     wyck_r = wyckoff_analysis(daily)
 
@@ -368,11 +368,10 @@ def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str,
     structure_score += 10 if above_pressure else 0
     structure_score += macd_struc_b
 
-    volume_score = 50
-    if wyck_r.get("spring_signal"): volume_score += 25
-    if wyck_r.get("upthrust_signal"): volume_score -= 15
-    if wyck_r.get("bearish_volume_divergence"): volume_score -= 10
-    if wyck_r.get("bullish_volume_divergence"): volume_score += 5
+    # ── 威科夫分：基于独立打分函数 ──
+    # 基准 50，叠加 review 特有的 intraday 量价调整
+    wyckoff_result = calculate_wyckoff_score(daily)
+    volume_score = 50 + (wyckoff_result["score"] - 50)  # score=50 时不偏移
     volume_score += (15 if volume_repair else 0) - (5 if afternoon_shrink else 0)
 
     chip_score = 50 - (15 if chip_pressure else 0) + (10 if cost and pnl_pct is not None and pnl_pct >= 0 else 0)

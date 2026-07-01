@@ -103,6 +103,7 @@ WYCKOFF_SOW_CONSECUTIVE_DAYS: int = 1           # SOW 确立连续跌破天数�
 # Spring 弹簧洗盘相关参数
 WYCKOFF_SPRING_SUPPORT_LOOKBACK: int = 10       # 弹簧支撑回溯K线数
 WYCKOFF_SPRING_RECLAIM_RATIO: float = 0.985     # 刺穿深度比例，跌破 1.5% 即确认（原 0.97）
+WYCKOFF_SPRING_ATR_MULTIPLE: float = 0.5        # ATR 动态刺穿深度（0.5 × ATR）
 WYCKOFF_SPRING_BULLISH_VOL_RATIO: float = 1.3   # 弹簧放量反弹量比
 
 # UTAD (Upthrust Action / Upthrust) 上冲回落相关参数
@@ -112,6 +113,25 @@ WYCKOFF_UTAD_RECLAIM_RATIO: float = 0.995       # 假突破收回幅度（收回
 # Divergence 量价背离相关参数
 WYCKOFF_DIVERGENCE_BARS: int = 5                # 背离比对K线窗口
 WYCKOFF_DIVERGENCE_RATIO: float = 0.85          # 背离量能萎缩比例由 80% 放宽至 85%
+
+# ---- Wyckoff Score 独立打分权重常量（均衡型） ----
+# 基准分数 0（raw=0 → score=50），各信号权重可正可负
+# 原始权重理论最大绝对值 = 25+5+10+20+10+15+10+10+15+8+12 = 130
+# 新增: AR(+10) SOS(+15) ST(+8) LPS(+12)；看空额外 -20
+# 归一化分母取 95，留一定余量
+WYCKOFF_SCORE_SPRING: int = 25                  # Spring 弹簧洗盘 — 最强看多信号
+WYCKOFF_SCORE_SPRING_BULLISH_DIV_BONUS: int = 5 # Spring + 看多背离 — 额外加分
+WYCKOFF_SCORE_BULLISH_DIV: int = 10             # 看多量价背离 — 量能萎缩支撑止跌
+WYCKOFF_SCORE_UT: int = -20                     # Upthrust 上冲回落 — 假突破派发
+WYCKOFF_SCORE_BEARISH_DIV: int = -10            # 看空量价背离 — 量能萎缩见顶
+WYCKOFF_SCORE_BC: int = -15                     # Buying Climax 购买高潮 — 天量滞涨
+WYCKOFF_SCORE_SOW: int = -10                    # Sign of Weakness 弱势信号 — 放量跌破
+# 新增经典威科夫信号权重
+WYCKOFF_SCORE_AR: int = 10                      # Automatic Rally 自动反弹 — BC 后放量反弹
+WYCKOFF_SCORE_SOS: int = 15                     # Sign of Strength 强势信号 — 连续放量突破
+WYCKOFF_SCORE_ST: int = 8                       # Secondary Test 二次测试 — 缩量确认支撑
+WYCKOFF_SCORE_LPS: int = 12                     # Last Point of Support 最后支撑 — SOS 后缩量回调
+WYCKOFF_SCORE_MAX_ABS: int = 95                 # 归一化分母，raw 映射到 [-50, +50]
 
 # ---- P3 Theory Adjustment ----
 # THEORY_ADJUST_LOG_ONLY=true 时理论微调只记录日志不实际生效，用于首次上线观察
@@ -229,6 +249,14 @@ __all__ = [
     "WYCKOFF_SOW_VOL_RATIO_THRESHOLD", "WYCKOFF_SOW_CONSECUTIVE_DAYS",
     "WYCKOFF_SPRING_SUPPORT_LOOKBACK", "WYCKOFF_UTAD_BREAKOUT_RATIO",
     "WYCKOFF_UTAD_RECLAIM_RATIO", "WYCKOFF_DIVERGENCE_RATIO",
+    # Wyckoff Score constants
+    "WYCKOFF_SCORE_SPRING", "WYCKOFF_SCORE_SPRING_BULLISH_DIV_BONUS",
+    "WYCKOFF_SCORE_BULLISH_DIV", "WYCKOFF_SCORE_UT",
+    "WYCKOFF_SCORE_BEARISH_DIV", "WYCKOFF_SCORE_BC",
+    "WYCKOFF_SCORE_SOW", "WYCKOFF_SCORE_MAX_ABS",
+    # 新增经典信号权重
+    "WYCKOFF_SCORE_AR", "WYCKOFF_SCORE_SOS",
+    "WYCKOFF_SCORE_ST", "WYCKOFF_SCORE_LPS",
     "THEORY_ADJUST_LOG_ONLY",
     "FUSION_OVERRIDE_ENABLED", "FUSION_CONFIDENCE_THRESHOLD",
     "DEFAULT_MAX_TOTAL", "DEFAULT_CASH_FLOOR", "DEFAULT_MAIN_CAP",

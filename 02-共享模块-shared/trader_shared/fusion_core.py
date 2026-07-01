@@ -255,8 +255,13 @@ def _wyckoff_to_signal(wyckoff_result: dict) -> dict:
     威科夫输出结构 (wyckoff_strategy → run_all → levels["wyckoff"]):
         {"wyckoff": {"spring_signal": True, "bullish_volume_divergence": False, ...}}
 
-    Spring 信号最强 (0.7)，背离次之 (0.5)，上冲回落看空 (0.6)。
-    Spring + bullish_div 同时存在时叠加 (取较高者, 不重复加)。
+    信号优先级（强→弱）：
+      Spring + bullish_div (0.75) > Spring (0.7) > SOS (0.7) >
+      Upthrust (0.6) > AR (0.6) > ST (0.5) > LPS (0.5) >
+      背离 (0.5) > 无信号 (0.2)
+
+    新增: ar / sos / st / lps 信号消费原始 *_reason 字符串，
+    fusion_verbatim 渲染层直接取用，无需硬编码。
     """
     wyk = wyckoff_result.get("wyckoff", {}) if isinstance(wyckoff_result, dict) else {}
     if not isinstance(wyk, dict):
@@ -266,9 +271,21 @@ def _wyckoff_to_signal(wyckoff_result: dict) -> dict:
     bullish_div = wyk.get("bullish_volume_divergence")
     bearish_div = wyk.get("bearish_volume_divergence")
     upthrust = wyk.get("upthrust_signal")
-    spring_reason = wyk.get("spring_reason", "")
 
-    # Spring 信号最强 (0.7) + 如果同时有 bullish_div，微调为 0.75
+    # 新增信号
+    ar = wyk.get("ar_signal")
+    sos = wyk.get("sos_signal")
+    st = wyk.get("st_signal")
+    lps = wyk.get("lps_signal")
+
+    # 从原始结果取 reason 字符串，保持可追溯
+    def _reason(base_key: str, fallback: str) -> str:
+        r = wyk.get(f"{base_key}_reason", "")
+        if not r:
+            return fallback
+        return r
+
+    # ── Spring 系列 (最强做多信号) ──
     if spring:
         confidence = 0.7
         if bullish_div:
@@ -276,25 +293,100 @@ def _wyckoff_to_signal(wyckoff_result: dict) -> dict:
         return {
             "direction": 1,
             "confidence": confidence,
-            "reason": f"威科夫弹簧 ({spring_reason})",
+            "reason": f"威科夫弹簧 ({_reason('spring', '支撑测试有效')})",
             "raw_key": "wyckoff",
         }
 
-    # 看涨 vs 看空背离 (同时出现以看涨为准, 威科夫偏多信号权重更高)
-    if bullish_div and not bearish_div:
-        return {"direction": 1, "confidence": 0.5,
-                "reason": "威科夫看多量价背离", "raw_key": "wyckoff"}
-    if bearish_div and not bullish_div:
-        return {"direction": -1, "confidence": 0.5,
-                "reason": "威科夫看空量价背离", "raw_key": "wyckoff"}
+    # ── SOS: Sign of Strength (强势确认) ──
+    if sos:
+        return {
+            "direction": 1,
+            "confidence": 0.7,
+            "reason": f"威科夫 {(_reason('sos', '强势突破'))}",
+            "raw_key": "wyckoff",
+        }
 
-    # 上冲回落 (看空)
+    # ── Upthrust: 上冲回落 (看空) ──
     if upthrust:
-        return {"direction": -1, "confidence": 0.6,
-                "reason": "威科夫上冲回落", "raw_key": "wyckoff"}
+        return {
+            "direction": -1,
+            "confidence": 0.6,
+            "reason": f"威科夫 {_reason('upthrust', '上冲回落')}",
+            "raw_key": "wyckoff",
+        }
+
+    # ── AR: Automatic Rally (BC 后自动反弹) ──
+    if ar:
+        return {
+            "direction": 1,
+            "confidence": 0.6,
+            "reason": f"威科夫 {_reason('ar', '自动反弹')}",
+            "raw_key": "wyckoff",
+        }
+
+    # ── ST: Secondary Test (Spring 后二次测试) ──
+    if st:
+        return {
+            "direction": 1,
+            "confidence": 0.5,
+            "reason": f"威科夫 {_reason('st', '二次测试确认')}",
+            "raw_key": "wyckoff",
+        }
+
+    # ── LPS: Last Point of Support (最后支撑点) ──
+    if lps:
+        return {
+            "direction": 1,
+            "confidence": 0.5,
+            "reason": f"威科夫 {_reason('lps', '最后支撑确认')}",
+            "raw_key": "wyckoff",
+        }
+
+    # ── 背离 (同时出现以看涨为准) ──
+    if bullish_div and not bearish_div:
+        return {
+            "direction": 1, "confidence": 0.5,
+            "reason": "威科夫看多量价背离", "raw_key": "wyckoff"}
+    if bearish_div and not bullish_div:
+        return {
+            "direction": -1, "confidence": 0.5,
+            "reason": "威科夫看空量价背离", "raw_key": "wyckoff"}
 
     return {"direction": 0, "confidence": 0.2,
             "reason": "威科夫无明确信号", "raw_key": "wyckoff"}
+
+
+def wyckoff_score_to_direction(score: int) -> dict:
+    """将 WyckoffScore.score (0-100) 映射为统一信号。
+
+    作为 _wyckoff_to_signal 的替代方案，直接从分数推导方向：
+    - score >= 65: 看多, confidence = score/100
+    - score <= 35: 看空, confidence = (100-score)/100
+    - 35 < score < 65: 中性, confidence = 0.3
+
+    保留 _wyckoff_to_signal 不变（基于布尔信号的精确映射仍在使用中）。
+    """
+    if score >= 65:
+        return {
+            "direction": 1,
+            "confidence": min(score / 100, 0.95),
+            "reason": f"威科夫看多（{score}/100）",
+            "raw_key": "wyckoff",
+        }
+    elif score <= 35:
+        return {
+            "direction": -1,
+            "confidence": min((100 - score) / 100, 0.95),
+            "reason": f"威科夫看空（{score}/100）",
+            "raw_key": "wyckoff",
+        }
+    else:
+        return {
+            "direction": 0,
+            "confidence": 0.3,
+            "reason": f"威科夫中性（{score}/100）",
+            "raw_key": "wyckoff",
+        }
 
 
 _MAIN_FORCE_WEIGHT_ADJUSTMENTS: dict[str, dict[str, float]] = {
