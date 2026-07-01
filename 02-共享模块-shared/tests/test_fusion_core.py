@@ -383,6 +383,12 @@ class TestScoreToAction:
     def test_moderate_bearish(self):
         fn = self._fn
         result = fn(-0.15, 0, "正常")
+        assert "减1/3" in result
+
+    def test_moderate_bearish_deeper(self):
+        """-0.3 应该触发减仓。"""
+        fn = self._fn
+        result = fn(-0.3, 0, "正常")
         assert "减仓" in result
 
     def test_very_bearish(self):
