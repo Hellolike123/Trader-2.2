@@ -1886,11 +1886,11 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         vol_trend = r.get("vol_trend", "")
 
         if weighted_score >= 0.25:
-            _long_resist_action = "持有关注（趋势强）"
+            _long_resist_action = "持有关注 / 趋势强"
         elif weighted_score >= 0.1:
             _long_resist_action = "减仓 20%"
         else:
-            _long_resist_action = "减仓 50%（趋势弱）"
+            _long_resist_action = "减仓 50% / 趋势弱"
 
         # 支撑位（现价下方）：长线 → 中线 → 短线
         for kl_key, label, pct in [
