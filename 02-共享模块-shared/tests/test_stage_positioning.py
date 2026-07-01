@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -580,3 +581,140 @@ class TestT1Cooldown:
         )
 
         assert result["state"] == "回踩加仓"
+
+
+# ── calc_portfolio_correlation（P2-1 持仓相关性熔断）─────────────
+
+class TestCalcPortfolioCorrelation:
+    """P2-1: 持仓相关性熔断测试。"""
+
+    def _make_positions(self, *codes: str) -> list[dict]:
+        return [{"code": c, "position_pct": 10} for c in codes]
+
+    def _make_price_series(self, base: float, drift: float, n: int = 25) -> list[dict]:
+        """生成带固定漂移的价格序列。"""
+        return _make_bars([base + drift * i for i in range(n)])
+
+    def _make_correlated_series(self, base: float, n: int = 25, noise_scale: float = 0.1) -> list[dict]:
+        """生成带噪声的上升序列（与其他高相关序列配合使用）。"""
+        import random
+        random.seed(42)
+        return _make_bars([base + i * 0.5 + random.uniform(-noise_scale, noise_scale) for i in range(n)])
+
+    def test_empty_positions(self):
+        """空持仓 → 不触发，空结果"""
+        from trader_shared.stage_positioning import calc_portfolio_correlation
+        result = calc_portfolio_correlation([], {})
+        assert result["triggered"] is False
+        assert result["risk_groups"] == []
+        assert result["adjusted_total_limit"] is None
+
+    def test_single_position(self):
+        """单只持仓 → 不触发"""
+        from trader_shared.stage_positioning import calc_portfolio_correlation
+        positions = self._make_positions("000001.SZ")
+        bars_map = {"000001.SZ": _make_bars([10.0 + i * 0.1 for i in range(25)])}
+        result = calc_portfolio_correlation(positions, bars_map)
+        assert result["triggered"] is False
+        assert len(result["risk_groups"]) == 1
+        assert result["adjusted_total_limit"] is None
+
+    def test_two_uncorrelated_stocks(self):
+        """两只不相关股票 → 不触发熔断"""
+        from trader_shared.stage_positioning import calc_portfolio_correlation
+        positions = self._make_positions("000001.SZ", "000002.SZ")
+        # 一只涨，一只跌 → 负相关
+        bars_map = {
+            "000001.SZ": _make_bars([10.0 + i * 0.5 for i in range(25)]),
+            "000002.SZ": _make_bars([20.0 - i * 0.3 for i in range(25)]),
+        }
+        result = calc_portfolio_correlation(positions, bars_map)
+        assert result["triggered"] is False
+        # 两只应各自独立分组
+        assert len(result["risk_groups"]) == 2
+
+    def test_two_highly_correlated_stocks(self):
+        """两只高相关股票 → 触发熔断，合并为同一风险组"""
+        from trader_shared.stage_positioning import calc_portfolio_correlation
+        positions = self._make_positions("000001.SZ", "000002.SZ")
+        # 同方向漂移，高度相关
+        base_closes = [10.0 + i * 0.5 for i in range(25)]
+        bars_map = {
+            "000001.SZ": _make_bars(base_closes),
+            "000002.SZ": _make_bars([c * 1.01 + 0.1 for c in base_closes]),
+        }
+        result = calc_portfolio_correlation(positions, bars_map)
+        assert result["triggered"] is True
+        assert len(result["risk_groups"]) == 1  # 合并为一组
+        assert result["adjusted_total_limit"] == 30
+        # 相关系数应 > 0.7
+        pair = list(result["correlation_matrix"].values())[0]
+        assert pair > 0.7
+
+    def test_three_stocks_two_correlated(self):
+        """三只股票，其中两只高相关 → 触发，组数为 2"""
+        from trader_shared.stage_positioning import calc_portfolio_correlation
+        positions = self._make_positions("000001.SZ", "000002.SZ", "000003.SZ")
+        base_closes = [10.0 + i * 0.5 for i in range(25)]
+        bars_map = {
+            "000001.SZ": _make_bars(base_closes),
+            "000002.SZ": _make_bars([c * 1.01 + 0.1 for c in base_closes]),
+            "000003.SZ": _make_bars([20.0 - i * 0.3 for i in range(25)]),
+        }
+        result = calc_portfolio_correlation(positions, bars_map)
+        assert result["triggered"] is True
+        assert len(result["risk_groups"]) == 2
+        # 找出大小组
+        sizes = sorted(len(g) for g in result["risk_groups"])
+        assert sizes == [1, 2]
+
+    def test_missing_bars_in_bars_map(self):
+        """某只持仓在 bars_map 中无数据 → 跳过该票"""
+        from trader_shared.stage_positioning import calc_portfolio_correlation
+        positions = self._make_positions("000001.SZ", "000002.SZ")
+        bars_map = {
+            "000001.SZ": _make_bars([10.0 + i * 0.1 for i in range(25)]),
+            # 000002.SZ 缺失
+        }
+        result = calc_portfolio_correlation(positions, bars_map)
+        assert result["triggered"] is False
+        assert len(result["risk_groups"]) == 1
+
+    def test_short_bars_skipped(self):
+        """K线不足 2 根 → 跳过"""
+        from trader_shared.stage_positioning import calc_portfolio_correlation
+        positions = self._make_positions("000001.SZ", "000002.SZ")
+        bars_map = {
+            "000001.SZ": _make_bars([10.0] * 25),
+            "000002.SZ": _make_bars([20.0]),  # 只有 1 根
+        }
+        result = calc_portfolio_correlation(positions, bars_map)
+        assert result["triggered"] is False
+        assert len(result["risk_groups"]) == 1
+
+    def test_custom_threshold(self):
+        """自定义阈值 → 宽松阈值触发，严格阈值不触发"""
+        from trader_shared.stage_positioning import calc_portfolio_correlation
+        positions = self._make_positions("000001.SZ", "000002.SZ")
+        # 一只涨一只跌 → 负相关，宽松阈值触发
+        bars_map = {
+            "000001.SZ": _make_bars([10.0 + i * 0.5 for i in range(25)]),
+            "000002.SZ": _make_bars([20.0 - i * 0.5 for i in range(25)]),
+        }
+        # 严格阈值（接近 -1）→ 不触发（负相关不算高"正"相关，但 R < 0.7 绝对值大）
+        result_strict = calc_portfolio_correlation(positions, bars_map, threshold=0.99)
+        assert result_strict["triggered"] is False
+        # 用绝对值阈值验证 correlation_matrix 存在
+        assert len(result_strict["correlation_matrix"]) == 1
+
+    def test_backward_compat_no_numpy_dependency_issue(self):
+        """函数独立，不影响现有逻辑"""
+        from trader_shared.stage_positioning import calc_portfolio_correlation, assess_stage
+        # 确保原有函数仍然正常
+        closes = [10.0] * 20
+        bars = _make_bars(closes)
+        ma_values = {"ma5": 10.0, "ma10": 10.0, "ma20": 10.0, "ma30": 10.0}
+        with patch("trader_shared.stage_positioning._load_stage_state", return_value={}):
+            with patch("trader_shared.stage_positioning._save_stage_state"):
+                result = assess_stage(10.0, ma_values, 0.0, bars)
+        assert "major_stage" in result

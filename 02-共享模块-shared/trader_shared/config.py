@@ -150,6 +150,10 @@ DEFAULT_MAX_TOTAL: int = 80      # 总仓位上限 (%)
 DEFAULT_CASH_FLOOR: int = 20     # 现金下限 (%)
 DEFAULT_MAIN_CAP: int = 50       # 主仓上限 (%)
 
+# ---- Portfolio Correlation (P2-1) -------------------------------------------
+CORRELATION_THRESHOLD: float = 0.7         # 相关系数超过此值视为同一风险暴露
+CORRELATION_LOOKBACK_DAYS: int = 20        # 相关性计算的收盘价回溯天数
+
 # ---- Exit Strategy constants ------------------------------------------------
 # 状态机 5 状态
 POSITION_STATE_EMPTY: int = 0           # 空仓
@@ -286,4 +290,5 @@ __all__ = [
     "T0_MIN_SPACE_PCT",
     "MIN_BIG_ORDER_HANDS", "MIN_BIG_ORDER_AMOUNT_WAN", "BIG_ORDER_HANDS_RATIO",
     "FUND_FLOW_CONSECUTIVE_OUTFLOW_DAYS", "FUND_FLOW_OUTFLOW_VETO_WAN",
+    "CORRELATION_THRESHOLD", "CORRELATION_LOOKBACK_DAYS",
 ]
