@@ -4,6 +4,11 @@ import warnings
 from dataclasses import dataclass
 from typing import Any
 
+from trader_shared.config import (
+    BIG_ORDER_HANDS_RATIO,
+    MIN_BIG_ORDER_AMOUNT_WAN,
+    MIN_BIG_ORDER_HANDS,
+)
 from trader_shared.light_data import to_float
 
 
@@ -19,8 +24,6 @@ class BigOrderEvent:
     focus_label: str | None = None
 
 
-MIN_BIG_ORDER_HANDS = 2000.0
-MIN_BIG_ORDER_AMOUNT_WAN = 300.0
 VOLUME_SPIKE_MULTIPLIER = 1.8
 
 
@@ -102,6 +105,11 @@ def _level(hands: float | None, consecutive: bool) -> str:
 def _avg_hands(previous_bars: list[dict[str, Any]]) -> float:
     values = [hands for hands in (_trade_hands(bar) for bar in previous_bars) if hands is not None]
     return sum(values) / len(values) if values else 0.0
+
+
+def _max_hands(previous_bars: list[dict[str, Any]]) -> float:
+    values = [hands for hands in (_trade_hands(bar) for bar in previous_bars) if hands is not None]
+    return max(values) if values else 0.0
 
 
 def _is_large_order(hands: float, amount_wan: float, avg_hands: float) -> bool:
@@ -232,6 +240,13 @@ def analyze_big_orders(
 
     # 判断是否走物理 Tick 驱动路径
     if tick_data and len(tick_data) > 0:
+        # P1-1: 动态大单手数阈值 = max(绝对阈值, 20日最大成交量 * BIG_ORDER_HANDS_RATIO)
+        max_hands_20d = _max_hands(bars_5m[-20:]) if bars_5m else 0.0
+        if max_hands_20d > 0:
+            dyn_hands_threshold = max(MIN_BIG_ORDER_HANDS, max_hands_20d * BIG_ORDER_HANDS_RATIO)
+        else:
+            dyn_hands_threshold = MIN_BIG_ORDER_HANDS
+
         # 分钟级同向 Tick 物理聚合降噪
         aggregated: dict[tuple[str, str], dict[str, Any]] = {}
         for tick in tick_data:
@@ -241,11 +256,11 @@ def analyze_big_orders(
             tick_time = str(tick.get("time", ""))
             if price is None or vol is None or not tick_time:
                 continue
-                
+
             amount_wan = price * vol / 100.0
-            
-            # 大单筛选阈值
-            if vol >= MIN_BIG_ORDER_HANDS or amount_wan >= MIN_BIG_ORDER_AMOUNT_WAN:
+
+            # 大单筛选阈值（P1-1: 手数用动态比例，金额仍用绝对阈值）
+            if vol >= dyn_hands_threshold or amount_wan >= MIN_BIG_ORDER_AMOUNT_WAN:
                 direction = "主动买入" if side_raw == "buy" else "主动卖出" if side_raw == "sell" else "中性"
                 # 截取到分钟，如 "14:59:02" -> "14:59"
                 minute_str = tick_time[:5] if ":" in tick_time else tick_time

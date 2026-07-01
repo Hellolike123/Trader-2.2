@@ -225,6 +225,11 @@ T0_MIN_SPACE_PCT: float = 1.5  # T0 最小操作空间百分比（现价与确�
 KELLY_MAX_TOTAL_POSITIONS: int = 10       # Kelly 公式中的总仓位上限（最大持仓数）
 KELLY_MIN_TRADES: int = 10                # Kelly 计算所需的最小成交信号数
 
+# ---- Big Order (大单) constants -----------------------------------------------
+MIN_BIG_ORDER_HANDS: float = 2000.0         # 大单绝对阈值（手）
+MIN_BIG_ORDER_AMOUNT_WAN: float = 300.0     # 大单绝对阈值（万元）
+BIG_ORDER_HANDS_RATIO: float = 0.9          # P1-1: 动态比例阈值（20日最大成交量的 90%）
+
 # ── Exports ──────────────────────────────────────────────────────────
 __all__ = [
     "LOOKBACK_DAYS", "RECENT_WINDOW", "CONFIRM_BUFFER", "STOP_BUFFER", "TAKE_PROFIT_BUFFER",
@@ -275,4 +280,5 @@ __all__ = [
     "ENABLE_RISK_REWARD_FILTER", "RISK_REWARD_THRESHOLDS",
     "KELLY_MAX_TOTAL_POSITIONS", "KELLY_MIN_TRADES",
     "T0_MIN_SPACE_PCT",
+    "MIN_BIG_ORDER_HANDS", "MIN_BIG_ORDER_AMOUNT_WAN", "BIG_ORDER_HANDS_RATIO",
 ]
