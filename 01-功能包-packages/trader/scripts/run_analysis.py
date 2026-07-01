@@ -1718,11 +1718,7 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
             _momentum = _MOM_MAP.get(_mom_val, _mom_val)
     elif isinstance(_raw_mom, str) and _raw_mom != "None":
         _momentum = _raw_mom
-    _stage_str = ""
-    if _major_stage:
-        _stage_str = _major_stage
-        if _momentum:
-            _stage_str += f"({_momentum})"
+    _stage_str = _major_stage
 
     # 3. 第一行：四阶段 → 动作
     # 检查一票否决
