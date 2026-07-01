@@ -30,6 +30,19 @@
 - **性能优化（2026-06-15）**：① T0 `build_plan` 的 5 个数据请求（quote/daily/5m/15m/30m）从串行改并行，单次卡片从 0.92s 降到 0.45s（约 46%），盘中每个 monitor 循环都受益。② 单票 `build_report` 消除重复的 `get_env_for_skill` 调用与 `_load_historical_win_rate` 重复抓 300 天日线，稳态从 0.48s 降到 0.43s。③ `cache_utils.set_cached` 修复多线程 tmp 文件名竞态（原用 `os.getpid()` 导致同进程线程互相覆盖），选股池刷新的 cache warning 从每次 4 次降到 0。④ 新增 `refresh` 命令批量重跑全池 `build_report` 并行刷新（8 只票约 1.8s），解决 `plan`/`rank` 使用入池时旧数据的问题。
 - **筹码搬家监控 (Chip Migration Monitor)**：`chip_migration_monitor.py` 对每次单票分析生成的筹码峰快照进行持久化（`~/.trader/chip_history.json`），并对比前后变化。底部筹码峰下降超过 40% 触发警告、超过 50% 触发清仓信号，用于识别主力出货迹象。
 - **资金流向数据 (Fund Flow Data)**：`fund_flow_data.py` 通过东方财富 HTTP API 采集个股日线级资金流向（超大单/大单/中单/小单净流入），并计算衍生特征供主力行为识别引擎使用。
+- **Spring ATR 动态刺穿深度**：`wyckoff_core.py` 的 `_detect_spring()` 优先用 ATR 计算刺穿深度（`support - 0.5×ATR`），ATR 不可用时 fallback 到固定比例（1.5%）。配置：`WYCKOFF_SPRING_ATR_MULTIPLE=0.5`。
+- **假跌破硬性熔断**：`decision_core.py` 的 `status_layers()` 在假跌破确认之前检查单日跌幅，跌幅超 7% 直接返回"风险回避"，跳过假跌破逻辑。配置：`HARD_STOP_SINGLE_DAY_DROP=-0.07`。
+- **T+1 隔离锁**：`stage_positioning.py` 的 `evaluate_position_state()` 新增 `last_add_date` 参数，当天已加仓则返回"持仓观察（T+1冷却）"，禁止日内重复加仓。
+- **多周期支撑压力阶梯**：`structure_core.py` 新增 `find_key_levels(bars)` 函数，在 300 根数据里找短线（10日）、中线（60日）、长线（120日）三级支撑压力位。报告展示为价格阶梯（🌟当前位置）。
+- **长线压力位动态动作**：`run_analysis.py` 根据 `weighted_score` 动态决定长线压力位动作：≥0.25 持有关注，≥0.1 减仓 20%，否则减仓 50%。
+- **止损分层展示**：报告「📌 如果你有持仓」区块分短线止损和中线止损，分别显示认亏比例。
+- **亮点与风险距离百分比量化**：亮点描述当前价距离最近支撑的百分比，风险描述当前价距离最近压力的百分比。
+- **大单阈值动态比例**：`big_order.py` 的 tick 路径新增动态阈值 `max(绝对阈值, 20日最大量×0.9)`，适应不同市值股票。配置：`BIG_ORDER_HANDS_RATIO=0.9`。
+- **大单连续流出一票否决**：`fusion_core.py` 的 `merge_decisions()` 检查近 3 日 fund_flow 数据，连续 3 日主力净流出 > 500 万强制覆盖 action 为"资金流出，减仓观望"。
+- **HMM 2D 成交额特征**：`hmm_regime.py` 支持 2D 输入 `(returns, volume_ratio)`，`market_env.py` 导出 `vol_trend`。`volume_ratio=None` 时 fallback 到 1D，完全向后兼容。
+- **持仓相关性熔断**：`stage_positioning.py` 新增 `calc_portfolio_correlation()` 函数，计算持仓个股 20 日收盘价两两相关系数，R > 0.7 时合并为同一风险暴露，总仓位上限降为单票上限。
+- **开盘尾盘噪音过滤**：`volume_price.py` 新增 `calc_weighted_volume(bars_5m)` 函数，排除 9:30-9:45 和 14:45-15:00 的噪音数据，用 VWAP 计算加权均量。
+- **缠论走势分层重构**：`chan_core.py` 补全线段构建（`build_segments()`）和走势分类（`classify_structure()`），支持盘整/趋势/单边上涨/单边下跌/线段不足X/Y。报告输出 `缠论:拉升段(盘整)` 格式。
 - **主力行为五阶段识别 (Main Force)**：`main_force.py` 基于资金流向特征、价格数据和筹码信息，识别主力行为所处阶段（吸筹/试盘/拉升/派发/砸盘）。`main_force_output.py` 负责复盘输出格式化。
 - **规则引擎 (Rule Engine)**：`rule_engine.py` 基于 YAML 配置的决策规则引擎，支持比较运算和布尔表达式。`modifier_rule_engine.py` 基于评分修饰规则对候选人评分进行动态调整。
 - 真正的输出格式以 `01-功能包-packages/trader/references/output-template.md` 和 `01-功能包-packages/trader/references/output-style-guide.md` 为准。
