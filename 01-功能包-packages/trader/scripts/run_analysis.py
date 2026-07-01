@@ -1868,8 +1868,16 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
     # P0-4: 多周期支撑压力阶梯
     key_levels = r.get("key_levels") or {}
     if key_levels:
-        # 长线压力的动态动作标签（P0-5 预留，当前用固定值）
-        _long_resist_action = "持有关注（趋势强）"
+        # P0-5: 长线压力位动态动作
+        weighted_score = r.get("weighted_score", 0) or 0
+        vol_trend = r.get("vol_trend", "")
+
+        if weighted_score >= 0.25:
+            _long_resist_action = "持有关注（趋势强）"
+        elif weighted_score >= 0.1:
+            _long_resist_action = "减仓 20%"
+        else:
+            _long_resist_action = "减仓 50%（趋势弱）"
 
         # 检查是否与已有价位重复（容差 1.5%）
         def _is_duplicate(price_val: float) -> bool:
@@ -1998,10 +2006,23 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         # 成本参考：仅在现价低于成本时显示保本位（已盈时利润已在"现在"行显示）
         if cost_price > 0 and current_price <= cost_price:
             lines.append(f"  反弹到 {cost_price:.2f}：减 50%（保本）")
-        if stop > 0 and stop < current_price:
-            lines.append(f"  跌破 {stop:.2f}：止损（认亏 {abs(current_price - stop)/current_price*100:.1f}%）")
-        elif stop > 0 and stop >= current_price:
-            lines.append(f"  跌破 {stop:.2f}：止损（认亏）")
+
+        # P0-6: 止损分层展示
+        _kl = r.get("key_levels") or {}
+        _short_support = float(_kl.get("short_support") or 0)
+        _long_support = float(_kl.get("long_support") or 0)
+
+        if _short_support > 0 and _short_support < current_price:
+            lines.append(f"  短线止损 {_short_support:.2f}：跌破认亏 {abs(current_price - _short_support)/current_price*100:.1f}%")
+        if _long_support > 0 and _long_support < current_price:
+            lines.append(f"  中线止损 {_long_support:.2f}：跌破认亏 {abs(current_price - _long_support)/current_price*100:.1f}%")
+
+        # 兜底：如果没有分层支撑位，保留原止损逻辑
+        if not (_short_support > 0 and _short_support < current_price) and not (_long_support > 0 and _long_support < current_price):
+            if stop > 0 and stop < current_price:
+                lines.append(f"  跌破 {stop:.2f}：止损（认亏 {abs(current_price - stop)/current_price*100:.1f}%）")
+            elif stop > 0 and stop >= current_price:
+                lines.append(f"  跌破 {stop:.2f}：止损（认亏）")
 
     chip_peaks = r.get("chip_peaks") or []
     chip_migration = r.get("chip_migration") or {}
@@ -2048,8 +2069,18 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
 
     lines.append("")
     scene = str(r.get("scene") or "")
-    # E2: 现价距防守位 < 0.5% 时显示逼近警告
-    if current_price >= low_price * 1.005:
+
+    # P0-7: 亮点与风险距离百分比量化
+    _kl_highlight = r.get("key_levels") or {}
+    _mid_support = float(_kl_highlight.get("mid_support") or 0)
+    _short_resist = float(_kl_highlight.get("short_resist") or 0)
+
+    # 亮点：当前价距离支撑的百分比
+    if _mid_support > 0 and _mid_support < current_price:
+        _dist_sup = (current_price - _mid_support) / current_price * 100
+        lines.append(f"✅ 亮点：中线支撑 {_mid_support:.2f} 距当前价 {_dist_sup:.0f}%，下跌空间有限")
+    elif current_price >= low_price * 1.005:
+        # 兜底：没有 key_levels 时保留原逻辑
         lines.append(f"✅ 亮点：{current_price:.2f} 仍站在防守位 {low_price:.2f} 上方")
     elif current_price >= low_price:
         lines.append(f"⚠️ 现价逼近防守位 {low_price:.2f}，随时可能跌破")
@@ -2058,7 +2089,11 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
     else:
         lines.append(f"✅ 亮点：价格超跌，关注 {low_price:.2f} 附近企稳机会")
 
-    if "出货" in str(chip_migration.get("warning_text", "")):
+    # 风险：当前价距离压力的百分比
+    if _short_resist > 0 and _short_resist > current_price:
+        _dist_res = (_short_resist - current_price) / current_price * 100
+        lines.append(f"⚠️ 风险：短线压力 {_short_resist:.2f} 距当前价仅 {_dist_res:.0f}%，追高风险大")
+    elif "出货" in str(chip_migration.get("warning_text", "")):
         lines.append(f"⚠️ 风险：筹码在搬家，主力在出货，警惕继续下跌")
     elif major_stage == "主升":
         lines.append(f"⚠️ 风险：主升期主要风险是回踩 {low_price:.2f} 支撑未守住")
