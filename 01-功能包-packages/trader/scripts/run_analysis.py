@@ -1844,8 +1844,7 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
     if low_price > 0 and risk_reward_available and not rr_filtered and risk_reward_val is not None:
         # 动态生成试探买标签
         _buy_label = _get_buy_label(change_pct, volume_ratio_val)
-        rr_status = "✓"
-        all_price_lines.append((low_price, f"  {low_price:.2f} ← 试探买 {position_cap}%（{_buy_label}，盈亏比 {risk_reward_val}R{rr_status}，需胜率≥{min_win_rate}%，止损 {stop:.2f}）{pattern_target_display}"))
+        all_price_lines.append((low_price, f"  {low_price:.2f} ← 试探买 {position_cap}%（{_buy_label}，盈亏比 {risk_reward_val:.1f}:1，{min_win_rate}% 胜率回本，止损 {stop:.2f}）"))
         # 加仓条件：站稳确认位可加仓至最大仓位
         _max_pos = int(r.get("max_position_pct") or 0)
         if _max_pos > position_cap and confirm > 0:
