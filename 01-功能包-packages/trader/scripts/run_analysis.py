@@ -1725,12 +1725,20 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
             _stage_str += f"({_momentum})"
 
     # 3. 第一行：四阶段 → 动作
+    # 检查一票否决
+    _veto = fusion_data.get("fund_flow_outflow_veto_msg") or ""
+    _veto_part = f"（{_veto}）" if _veto else ""
+    # 显示加权分数
+    _ws = fusion_data.get("weighted_score")
+    _ws_part = f"（WS:{_ws:.2f}）" if _ws is not None else ""
+    _info = _veto_part + _ws_part
+
     if _stage_str:
-        lines.append(f"🎯 {_stage_str} → {_action_word}")
+        lines.append(f"🎯 {_stage_str} → {_action_word}{_info}")
     elif _reason:
-        lines.append(f"🎯 {_reason} → {_action_word}")
+        lines.append(f"🎯 {_reason} → {_action_word}{_info}")
     else:
-        lines.append(f"🎯 {_action_word}")
+        lines.append(f"🎯 {_action_word}{_info}")
 
 
     # 4. 理论状态（第二行）— 从 fusion_signals 获取
