@@ -1728,17 +1728,13 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
     # 检查一票否决
     _veto = fusion_data.get("fund_flow_outflow_veto_msg") or ""
     _veto_part = f"（{_veto}）" if _veto else ""
-    # 显示加权分数
-    _ws = fusion_data.get("weighted_score")
-    _ws_part = f"（WS:{_ws:.2f}）" if _ws is not None else ""
-    _info = _veto_part + _ws_part
 
     if _stage_str:
-        lines.append(f"🎯 {_stage_str} → {_action_word}{_info}")
+        lines.append(f"🎯 {_stage_str} → {_action_word}{_veto_part}")
     elif _reason:
-        lines.append(f"🎯 {_reason} → {_action_word}{_info}")
+        lines.append(f"🎯 {_reason} → {_action_word}{_veto_part}")
     else:
-        lines.append(f"🎯 {_action_word}{_info}")
+        lines.append(f"🎯 {_action_word}{_veto_part}")
 
 
     # 4. 理论状态（第二行）— 从 fusion_signals 获取
