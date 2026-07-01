@@ -1711,7 +1711,7 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
     if _mf_display:
         lines.append(f"🎯 {_mf_display} → {_action_word}")
     else:
-        lines.append(f"🎯 → {_action_word}")
+        lines.append(f"🎯 {_action_word}")
 
     # 4. 理论状态（第二行）— 从 fusion_signals 获取
     _theory_parts = []
