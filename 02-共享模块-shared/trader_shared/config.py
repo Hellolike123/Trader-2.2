@@ -230,6 +230,10 @@ MIN_BIG_ORDER_HANDS: float = 2000.0         # 大单绝对阈值（手）
 MIN_BIG_ORDER_AMOUNT_WAN: float = 300.0     # 大单绝对阈值（万元）
 BIG_ORDER_HANDS_RATIO: float = 0.9          # P1-1: 动态比例阈值（20日最大成交量的 90%）
 
+# ---- 大单连续流出一票否决 (P1-2) ------------------------------------------------
+FUND_FLOW_CONSECUTIVE_OUTFLOW_DAYS: int = 3     # 连续流出天数阈值
+FUND_FLOW_OUTFLOW_VETO_WAN: float = 500.0       # 每日主力净流出阈值（万元）
+
 # ── Exports ──────────────────────────────────────────────────────────
 __all__ = [
     "LOOKBACK_DAYS", "RECENT_WINDOW", "CONFIRM_BUFFER", "STOP_BUFFER", "TAKE_PROFIT_BUFFER",
@@ -281,4 +285,5 @@ __all__ = [
     "KELLY_MAX_TOTAL_POSITIONS", "KELLY_MIN_TRADES",
     "T0_MIN_SPACE_PCT",
     "MIN_BIG_ORDER_HANDS", "MIN_BIG_ORDER_AMOUNT_WAN", "BIG_ORDER_HANDS_RATIO",
+    "FUND_FLOW_CONSECUTIVE_OUTFLOW_DAYS", "FUND_FLOW_OUTFLOW_VETO_WAN",
 ]

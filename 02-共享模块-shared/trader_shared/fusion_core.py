@@ -432,6 +432,7 @@ def merge_decisions(
     fetcher: DataFetcher | None = None,  # DI: 可注入数据源
     pattern_result: dict | None = None,  # 形态识别结果 (可选)
     volume_warning: dict | None = None,  # 量价背离警告 (可选)
+    fund_flow_data: dict | None = None,  # P1-2: 资金流向特征 (可选)
 ) -> dict:
     """决策融合层核心函数。
 
@@ -444,6 +445,8 @@ def merge_decisions(
         current_price:   当前价格，可选，用于动态判断价格区间
         bars:            K线数据，可选，用于动态判断价格区间
         hmm_regime:      HMM大势前瞻状态 ("bull" | "bear" | "range")
+        fund_flow_data:  资金流向特征字典，可选，来自 calc_fund_flow_features()
+                         需要包含 consecutive_outflow_days 和 net_flow_wan 等字段
 
     Returns:
         {
@@ -678,6 +681,42 @@ def merge_decisions(
                 confidence *= (1 - vw_conf * 0.3)
                 confidence = max(confidence, 0.2)
 
+    # ── [P1-2] 大单连续流出一票否决 ──
+    # 如果近 N 日主力连续净流出超阈值，强制覆盖 action 为减仓观望
+    has_fund_flow_outflow_veto = False
+    fund_flow_outflow_days = 0
+    try:
+        from trader_shared.config import (
+            FUND_FLOW_CONSECUTIVE_OUTFLOW_DAYS,
+            FUND_FLOW_OUTFLOW_VETO_WAN,
+        )
+        if fund_flow_data and isinstance(fund_flow_data, dict):
+            consecutive_outflow = fund_flow_data.get("consecutive_outflow_days", 0)
+            # 从近 N 日每日流向列表计算实际连续流出天数和均值
+            daily_flow_5d = fund_flow_data.get("daily_flow_5d", [])
+            cum_flow_5d = fund_flow_data.get("cum_flow_5d_wan", 0)
+            if consecutive_outflow >= FUND_FLOW_CONSECUTIVE_OUTFLOW_DAYS:
+                # 检查近 N 日每日流出是否均超阈值（防止单日巨额拉高均值）
+                recent_n = daily_flow_5d[-FUND_FLOW_CONSECUTIVE_OUTFLOW_DAYS:] if daily_flow_5d else []
+                if recent_n and all(
+                    isinstance(v, (int, float)) and v < 0 and abs(v) >= FUND_FLOW_OUTFLOW_VETO_WAN
+                    for v in recent_n
+                ):
+                    has_fund_flow_outflow_veto = True
+                    fund_flow_outflow_days = consecutive_outflow
+    except ImportError:
+        pass  # config 不可用时静默跳过
+    except (TypeError, KeyError) as exc:
+        _logger.debug("Fund flow outflow veto check failed: %s", exc)
+
+    if has_fund_flow_outflow_veto:
+        positive_actions = {"半仓试 (多方主导)", "半仓试 (多方主导但有分歧)",
+                            "增持", "等转强", "等转强观察", "回调观望",
+                            "持股观望", "高位观望"}
+        if action in positive_actions:
+            action = "资金流出，减仓观望"
+            confidence = min(confidence, 0.35)
+
     # ── [2.3扩展] 股东户数筹码集中验证 ──
     try:
         sh_trend = (extend_fundamental or {}).get("shareholder", {})
@@ -749,6 +788,9 @@ def merge_decisions(
     if has_risk_unlock:
         result["unlock_veto"] = True
         result["unlock_veto_msg"] = f"未来 {days_to_unlock} 天内有大额解禁风险 (比例 {unlock_ratio}%)"
+    if has_fund_flow_outflow_veto:
+        result["fund_flow_outflow_veto"] = True
+        result["fund_flow_outflow_veto_msg"] = f"连续 {fund_flow_outflow_days} 日主力净流出超阈值"
 
     # 7. 日志 + 安全模式
     _log_fusion(result)
@@ -771,6 +813,7 @@ def merge_decisions_from_plugins(
     data_status: str = "full",
     fetcher: DataFetcher | None = None,  # DI: 可注入数据源
     volume_warning: dict | None = None,  # 量价背离警告 (可选)
+    fund_flow_data: dict | None = None,  # P1-2: 资金流向特征 (可选)
 ) -> dict:
     """Decision fusion using the plugin registry.
 
@@ -788,6 +831,7 @@ def merge_decisions_from_plugins(
         main_force_env: Main force behavior stage
         extend_fundamental: Extended fundamental data
         extend_sentiment: Extended sentiment data
+        fund_flow_data: Fund flow features from calc_fund_flow_features()
 
     Returns:
         Same dict as merge_decisions()
@@ -818,4 +862,5 @@ def merge_decisions_from_plugins(
         fetcher=fetcher,
         pattern_result=pattern_result,
         volume_warning=volume_warning,
+        fund_flow_data=fund_flow_data,
     )

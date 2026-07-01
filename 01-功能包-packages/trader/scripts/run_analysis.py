@@ -583,7 +583,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             mf["today_super_large_wan"] = 0.0
             mf["today_large_wan"] = 0.0
         mf["net_flow_pct"] = features.get("net_flow_pct", 0)
-        return mf
+        return mf, features
 
     def _fetch_market_env():
         return get_env_for_skill("trader")
@@ -605,8 +605,14 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     # 主力引擎结果（异常降级为 unknown）
     main_force_env = "unknown"
     mf_result = {}
+    fund_flow_features = {}
     try:
-        mf_result = f_mf.result() or {}
+        mf_raw = f_mf.result()
+        if isinstance(mf_raw, tuple) and len(mf_raw) == 2:
+            mf_result = mf_raw[0] or {}
+            fund_flow_features = mf_raw[1] or {}
+        else:
+            mf_result = mf_raw or {}
         main_force_env = mf_result.get("stage", "unknown")
     except Exception:
         pass
@@ -680,6 +686,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             data_status=snapshot.data_status,
             pattern_result=pattern_result,
             volume_warning=volume_warning,
+            fund_flow_data=fund_flow_features,
             extend_fundamental=snapshot.extend_fundamental,
             extend_sentiment=snapshot.extend_sentiment,
         )

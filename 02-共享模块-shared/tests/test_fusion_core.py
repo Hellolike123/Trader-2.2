@@ -680,3 +680,113 @@ class TestWyckoffScoreToDirection:
         result_bear = fn(4)
         assert result_bull["confidence"] == 0.95
         assert result_bear["confidence"] == 0.95
+
+
+class TestFundFlowOutflowVeto:
+    """P1-2: 大单连续流出一票否决测试。"""
+
+    def _bullish_inputs(self):
+        """返回一组看多信号输入（所有三路均看多）。"""
+        chan = {"chanlun": {"buy_points": [{"type": "一类买", "price": 28}], "divergence": {}, "trend_label": "拉升段"}}
+        mom = {"momentum": {"score": 72, "direction": "bullish", "signals": ["MACD金叉"]}}
+        wyk = {"wyckoff": {"spring_signal": True}}
+        return chan, mom, wyk
+
+    def test_consecutive_outflow_triggers_veto(self):
+        """连续3日净流出超阈值 → 覆盖看多 action 为减仓观望。"""
+        from trader_shared.fusion_core import merge_decisions
+        chan, mom, wyk = self._bullish_inputs()
+        fund_flow = {
+            "consecutive_outflow_days": 3,
+            "daily_flow_5d": [-600.0, -700.0, -800.0, -550.0, -650.0],
+            "cum_flow_5d_wan": -3300.0,
+        }
+        result = merge_decisions(chan, mom, wyk, regime="正常", fund_flow_data=fund_flow)
+        assert result["action"] == "资金流出，减仓观望"
+        assert result.get("fund_flow_outflow_veto") is True
+        assert "连续 3 日" in result.get("fund_flow_outflow_veto_msg", "")
+        assert result["confidence"] <= 0.35
+
+    def test_outflow_below_threshold_no_veto(self):
+        """连续3日流出但金额未超阈值 → 不触发否决。"""
+        from trader_shared.fusion_core import merge_decisions
+        chan, mom, wyk = self._bullish_inputs()
+        fund_flow = {
+            "consecutive_outflow_days": 3,
+            "daily_flow_5d": [-200.0, -300.0, -100.0],
+            "cum_flow_5d_wan": -600.0,
+        }
+        result = merge_decisions(chan, mom, wyk, regime="正常", fund_flow_data=fund_flow)
+        # 每日流出 < 500万阈值，不触发否决
+        assert result["action"] != "资金流出，减仓观望"
+        assert result.get("fund_flow_outflow_veto") is not True
+
+    def test_outflow_only_2_days_no_veto(self):
+        """连续2日流出（不足3日）→ 不触发否决。"""
+        from trader_shared.fusion_core import merge_decisions
+        chan, mom, wyk = self._bullish_inputs()
+        fund_flow = {
+            "consecutive_outflow_days": 2,
+            "daily_flow_5d": [100.0, -600.0, -700.0],
+            "cum_flow_5d_wan": -1200.0,
+        }
+        result = merge_decisions(chan, mom, wyk, regime="正常", fund_flow_data=fund_flow)
+        assert result["action"] != "资金流出，减仓观望"
+        assert result.get("fund_flow_outflow_veto") is not True
+
+    def test_no_fund_flow_data_no_veto(self):
+        """fund_flow_data=None 时静默跳过，不崩溃。"""
+        from trader_shared.fusion_core import merge_decisions
+        chan, mom, wyk = self._bullish_inputs()
+        result = merge_decisions(chan, mom, wyk, regime="正常", fund_flow_data=None)
+        assert result.get("fund_flow_outflow_veto") is not True
+        # 看多 action 正常
+        assert result["action"] != "资金流出，减仓观望"
+
+    def test_empty_fund_flow_dict_no_veto(self):
+        """fund_flow_data={} 空字典时静默跳过。"""
+        from trader_shared.fusion_core import merge_decisions
+        chan, mom, wyk = self._bullish_inputs()
+        result = merge_decisions(chan, mom, wyk, regime="正常", fund_flow_data={})
+        assert result.get("fund_flow_outflow_veto") is not True
+
+    def test_mixed_flow_no_veto(self):
+        """近3日中有一日流入 → 不满足全部流出条件，不触发否决。"""
+        from trader_shared.fusion_core import merge_decisions
+        chan, mom, wyk = self._bullish_inputs()
+        fund_flow = {
+            "consecutive_outflow_days": 3,
+            "daily_flow_5d": [-700.0, -800.0, -600.0, 200.0, -700.0],
+            "cum_flow_5d_wan": -1600.0,
+        }
+        result = merge_decisions(chan, mom, wyk, regime="正常", fund_flow_data=fund_flow)
+        # 最近3日 = [-600, 200, -700]，有一日流入，不全是流出
+        assert result["action"] != "资金流出，减仓观望"
+        assert result.get("fund_flow_outflow_veto") is not True
+
+    def test_already_bearish_action_not_overridden(self):
+        """如果 action 已是看空类（如"空仓"），不重复覆盖。"""
+        from trader_shared.fusion_core import merge_decisions
+        # 全部看空
+        chan = {"chanlun": {"divergence": {"top_divergence": True}, "trend_label": "数据不足"}}
+        mom = {"momentum": {"score": 20, "direction": "bearish", "signals": ["MACD死叉"]}}
+        wyk = {"wyckoff": {"upthrust_signal": True}}
+        fund_flow = {
+            "consecutive_outflow_days": 3,
+            "daily_flow_5d": [-600.0, -700.0, -800.0],
+            "cum_flow_5d_wan": -2100.0,
+        }
+        result = merge_decisions(chan, mom, wyk, regime="正常", fund_flow_data=fund_flow)
+        # 空仓 action 不在 positive_actions 中，不会被覆盖
+        assert result["action"] != "资金流出，减仓观望"
+        # 但 veto 标记仍应为 True（因为满足条件）
+        assert result.get("fund_flow_outflow_veto") is True
+
+    def test_backward_compatible_no_fund_flow_param(self):
+        """不传 fund_flow_data 参数（向后兼容）不影响行为。"""
+        from trader_shared.fusion_core import merge_decisions
+        chan, mom, wyk = self._bullish_inputs()
+        # 不传 fund_flow_data，使用默认值 None
+        result = merge_decisions(chan, mom, wyk, regime="正常")
+        assert isinstance(result["action"], str)
+        assert result.get("fund_flow_outflow_veto") is not True
