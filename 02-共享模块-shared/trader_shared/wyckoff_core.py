@@ -17,6 +17,7 @@ try:
         WYCKOFF_SOW_CONSECUTIVE_DAYS,
         WYCKOFF_SPRING_SUPPORT_LOOKBACK,
         WYCKOFF_SPRING_RECLAIM_RATIO,
+        WYCKOFF_SPRING_ATR_MULTIPLE,
         WYCKOFF_SPRING_BULLISH_VOL_RATIO,
         WYCKOFF_UTAD_BREAKOUT_RATIO,
         WYCKOFF_UTAD_RECLAIM_RATIO,
@@ -47,6 +48,7 @@ except ImportError:
     WYCKOFF_SOW_CONSECUTIVE_DAYS = 1
     WYCKOFF_SPRING_SUPPORT_LOOKBACK = 10
     WYCKOFF_SPRING_RECLAIM_RATIO = 0.985
+    WYCKOFF_SPRING_ATR_MULTIPLE = 0.5
     WYCKOFF_SPRING_BULLISH_VOL_RATIO = 1.3
     WYCKOFF_UTAD_BREAKOUT_RATIO = 1.005
     WYCKOFF_UTAD_RECLAIM_RATIO = 0.995
@@ -221,7 +223,12 @@ def _detect_spring(bars: list[dict]) -> dict:
     if current_low is None or current_close is None or support is None or current_volume is None:
         return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "数据异常"}
 
-    breach_level = support * WYCKOFF_SPRING_RECLAIM_RATIO
+    # P0-1: ATR 动态刺穿深度，优先使用 ATR，fallback 到固定比例
+    atr14 = to_float(current.get("atr14"))
+    if atr14 is not None and atr14 > 0:
+        breach_level = support - atr14 * WYCKOFF_SPRING_ATR_MULTIPLE
+    else:
+        breach_level = support * WYCKOFF_SPRING_RECLAIM_RATIO
 
     # 刺穿深度判定：最低价刺穿深度线，且收盘价收回到支撑上方
     if current_low >= breach_level or current_close < support:
