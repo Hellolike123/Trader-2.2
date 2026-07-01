@@ -269,3 +269,88 @@ class TestTheoryFusionConflict:
             fusion_result=fusion_result,
         )
         assert result["theory_fusion_conflict"] is False
+
+
+# ── P0-2: 假跌破硬性熔断 ────────────────────────────────────────────
+
+class TestHardStopSingleDayDrop:
+    """P0-2: 单日跌幅超 7% 时跳过假跌破逻辑，直接返回风险回避。"""
+
+    def test_single_day_drop_7pct_triggers_circuit_breaker(self):
+        """change_pct=-7%, 有假跌破形态 → 仍返回"风险回避"（熔断优先于假跌破）"""
+        # bars 中有近期收盘 >= hard_stop（假跌破形态）
+        bars = [{"close": 10.0, "high": 10.5, "low": 9.5}] * 5 + [
+            {"close": 7.0, "high": 7.5, "low": 6.5}
+        ]
+        result = status_layers(
+            current=7.0, support=10.0, low_zone_upper=10.1, confirm=10.5,
+            hard_stop=9.5, position_ratio=0.0, change_pct=-7.0,
+            ma_values=_make_ma_values(), pressure_space_pct=0.0,
+            bars=bars,
+        )
+        # 单日跌幅 7% 触发硬性熔断，不走假跌破逻辑
+        assert result["base_status"] == "风险回避"
+        assert result["theory_status"] == "风险回避"
+        assert result["status"] == "风险回避"
+
+    def test_single_day_drop_8pct_triggers_circuit_breaker(self):
+        """change_pct=-8%, 跌幅更大 → 同样触发熔断"""
+        bars = [{"close": 10.0, "high": 10.5, "low": 9.5}] * 5 + [
+            {"close": 7.0, "high": 7.5, "low": 6.5}
+        ]
+        result = status_layers(
+            current=7.0, support=10.0, low_zone_upper=10.1, confirm=10.5,
+            hard_stop=9.5, position_ratio=0.0, change_pct=-8.5,
+            ma_values=_make_ma_values(), pressure_space_pct=0.0,
+            bars=bars,
+        )
+        assert result["base_status"] == "风险回避"
+        assert result["theory_status"] == "风险回避"
+
+    def test_single_day_drop_6pct_no_circuit_breaker(self):
+        """change_pct=-6%, 跌幅未达阈值 → 假跌破逻辑正常工作"""
+        # bars 中有近期收盘 >= hard_stop（假跌破形态）
+        bars = [{"close": 10.0, "high": 10.5, "low": 9.5}] * 5 + [
+            {"close": 7.0, "high": 7.5, "low": 6.5}
+        ]
+        result = status_layers(
+            current=7.0, support=10.0, low_zone_upper=10.1, confirm=10.5,
+            hard_stop=9.5, position_ratio=0.0, change_pct=-6.0,
+            ma_values=_make_ma_values(), pressure_space_pct=0.0,
+            bars=bars,
+        )
+        # 跌幅未达 7%，假跌破逻辑生效 → "防守观察"
+        assert result["base_status"] == "防守观察"
+        assert result["theory_status"] == "防守观察"
+
+    def test_single_day_drop_exactly_minus_7_boundary(self):
+        """change_pct=-7.0, 刚好等于阈值 → 触发熔断"""
+        bars = [{"close": 10.0, "high": 10.5, "low": 9.5}] * 5 + [
+            {"close": 7.0, "high": 7.5, "low": 6.5}
+        ]
+        result = status_layers(
+            current=7.0, support=10.0, low_zone_upper=10.1, confirm=10.5,
+            hard_stop=9.5, position_ratio=0.0, change_pct=-7.0,
+            ma_values=_make_ma_values(), pressure_space_pct=0.0,
+            bars=bars,
+        )
+        assert result["theory_status"] == "风险回避"
+
+    def test_circuit_breaker_returns_required_fields(self):
+        """熔断返回值包含所有必要字段，向后兼容"""
+        bars = [{"close": 10.0, "high": 10.5, "low": 9.5}] * 5
+        result = status_layers(
+            current=7.0, support=10.0, low_zone_upper=10.1, confirm=10.5,
+            hard_stop=9.5, position_ratio=0.0, change_pct=-10.0,
+            ma_values=_make_ma_values(), pressure_space_pct=0.1,
+            bars=bars,
+        )
+        required_keys = {
+            "base_status", "theory_status", "status",
+            "fusion_override_used", "trend_ok", "change",
+            "below_ma_count", "above_ma5_ma10", "pressure_space_pct",
+            "ma250_warning", "ma250",
+        }
+        assert required_keys.issubset(result.keys())
+        assert result["change"] == -10.0
+        assert result["fusion_override_used"] is False

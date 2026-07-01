@@ -58,6 +58,7 @@ from trader_shared.config import (
     CHANGE_THRESHOLD_LARGE,
     CHANGE_THRESHOLD_LARGE_DROP,
     CHANGE_THRESHOLD_DROP,
+    HARD_STOP_SINGLE_DAY_DROP,
     POSITION_RATIO_STRONG,
     POSITION_RATIO_CONFIRM,
     POSITION_RATIO_HIGH,
@@ -301,6 +302,24 @@ def status_layers(
         wyk=wyk,
         vp_result=vp_result,
     )
+
+    # P0-2: 单日跌幅硬性熔断 — 跌幅超阈值直接"风险回避"，跳过假跌破逻辑
+    # 注: HARD_STOP_SINGLE_DAY_DROP 是小数(-0.07)，change 是百分比(-7.0)
+    # 用 round 避免浮点精度问题 (-0.07*100 = -7.000000000000001)
+    if round(change, 4) <= round(HARD_STOP_SINGLE_DAY_DROP * 100, 4):
+        return {
+            "base_status": "风险回避",
+            "theory_status": "风险回避",
+            "status": "风险回避",
+            "fusion_override_used": False,
+            "trend_ok": trend_ok,
+            "change": change,
+            "below_ma_count": below_ma_count,
+            "above_ma5_ma10": above_ma5_ma10,
+            "pressure_space_pct": pressure_space_pct,
+            "ma250_warning": ma250_warning,
+            "ma250": ma250_value,
+        }
 
     # P0: 假跌破检测 + 分阶段退出
     _fake_break = False
