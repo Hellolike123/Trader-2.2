@@ -1607,26 +1607,19 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
     lines: list[str] = [
         f"分析报告 — {name}（{display_code}）",
         "",
-        f"现价：{current_price:.2f}元（{change_pct:+.2f}%）",
-        f"相对大盘 {rel_label}｜个股 {change_pct:+.2f}% ｜ 大盘 {market_idx_chg:+.2f}%",
+        f"现价 {current_price:.2f}（{change_pct:+.2f}%）{rel_label}",
     ]
-    if atr14 > 0:
-        lines.append(f"ATR {atr14:.2f}（{atr_ratio*100:.1f}%）{atr_level}")
 
-    # 均线显示
+    # 均线显示（保留 1 位小数更清爽）
     ma_parts = []
-    if ma5_text != "--":
-        ma_parts.append(f"MA5 {ma5_text}")
-    if ma10_text != "--":
-        ma_parts.append(f"MA10 {ma10_text}")
-    if ma20_text != "--":
-        ma_parts.append(f"MA20 {ma20_text}")
-    if ma30_text != "--":
-        ma_parts.append(f"MA30 {ma30_text}")
+    for ma_key in ("ma5", "ma10", "ma20", "ma30"):
+        if ma_raw.get(ma_key) and isinstance(ma_raw.get(ma_key), (int, float)) and ma_raw[ma_key] > 0:
+            ma_num = int(ma_key[2:])
+            ma_parts.append(f"MA{ma_num} {ma_raw[ma_key]:.1f}")
     if ma_parts:
-        lines.append(f"📊 均线 {'｜'.join(ma_parts)}")
+        lines.append(f"  {' ｜ '.join(ma_parts)}")
 
-    # 量能与相对强度
+    # 量能 + 距高低点（合并为 1 行）
     volume_ratio_val = float(r.get("volume_ratio") or 0)
     turnover_val = float(r.get("turnover_rate") or 0)
     bars_for_range = r.get("daily_bars") or []
@@ -1645,20 +1638,35 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
     vol_parts = []
     if volume_ratio_val > 0:
         vol_label = "放量" if volume_ratio_val >= 1.5 else ("缩量" if volume_ratio_val <= 0.7 else "平量")
-        vol_parts.append(f"量比{volume_ratio_val:.2f}（{vol_label}）")
+        vol_parts.append(f"量比{volume_ratio_val:.1f}（{vol_label}）")
     if turnover_val > 0:
-        vol_parts.append(f"换手{turnover_val:.2f}%")
-    if vol_parts:
-        vol_line = f"📊 量能：{''.join(vol_parts)}"
-        # 距离信息
+        vol_parts.append(f"换手{turnover_val:.1f}%")
+    if dist_20h_str != "--" and dist_20l_str != "--":
         dist_parts = []
-        if dist_20h_str != "--":
-            dist_parts.append(f"上方{dist_20h_str}到压力")
-        if dist_20l_str != "--":
-            dist_parts.append(f"下方{dist_20l_str}到支撑")
+        dist_num_h = float(dist_20h_str.replace("%", ""))
+        dist_num_l = float(dist_20l_str.replace("%", ""))
+        if dist_num_h >= 0:
+            dist_parts.append(f"高{dist_20h_str}")
+        elif dist_num_h > -5:
+            dist_parts.append(f"距高{dist_20h_str}")
+        else:
+            dist_parts.append(f"距高{abs(dist_num_h):.1f}%")
+        if dist_num_l <= 0:
+            dist_parts.append(f"低{dist_20l_str}")
+        elif dist_num_l < 5:
+            dist_parts.append(f"距低{dist_20l_str}")
+        else:
+            dist_parts.append(f"距低+{dist_num_l:.1f}%")
         if dist_parts:
-            vol_line += f" ｜ {'｜'.join(dist_parts)}"
-        lines.append(vol_line)
+            vol_parts.append("｜".join(dist_parts))
+    if vol_parts:
+        lines.append(f"  {' ｜ '.join(vol_parts)}")
+
+    # 年线警告（股价在250日均线下方时显示）
+    ma250_warning = r.get("ma250_warning", False)
+    ma250_val = r.get("ma250")
+    if ma250_warning and ma250_val and ma250_val > 0:
+        lines.append(f"  ⚠️ 股价在年线（{ma250_val:.2f}）下方运行，注意风险")
 
     lines.extend([
         "",
@@ -1674,105 +1682,84 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         lines.append("")
         lines.append("⚠️ 关键数据缺失，分析仅供参考")
 
-    # 融合层 verbatim（合并阶段信息 + 融合判断）
-    fusion_verbatim = (r.get("fusion") or {}).get("fusion_verbatim")
-    if fusion_verbatim:
-        # 把阶段信息合并到第一行
-        stage_line = f"{major_stage}期 + {momentum} → {stage_action_text}"
-        # 替换 fusion_verbatim 的第一行
-        _lines = fusion_verbatim.split("\n")
-        if _lines:
-            # 提取动作和原因
-            _first = _lines[0].replace("🎯 ", "")
-            # 分离动作和原因（如"高位观望（信号弱，轻仓）"）
-            if "（" in _first:
-                _action = _first.split("（")[0]
-                _reason = _first.split("（")[1].rstrip("）)")
-                _lines[0] = f"🎯 {stage_line}｜{_action}（{_reason}）"
-            else:
-                _lines[0] = f"🎯 {stage_line}｜{_first}"
-        fusion_verbatim = "\n".join(_lines)
-        lines.append("")
-        lines.append(fusion_verbatim)
+    # 融合层输出 — 3 行：阶段+建议 ｜ 理论分析 ｜ 冲突比
+    fusion_data = r.get("fusion") or {}
+    fusion_action = str(fusion_data.get("action") or "未知")
+    disagreement_count = int(fusion_data.get("disagreement", 0))
+    fusion_signals = fusion_data.get("signals_detail") or {}
+    _STAGE_LABELS = {
+        "accumulation": "吸筹期", "testing": "试盘期", "markup": "拉升期",
+        "distribution": "派发期", "markdown": "砸盘期",
+    }
 
-    # 技术指标摘要
-    _ind_parts = []
-    ems = r.get("expma_status") or {}
-    if ems.get("total_score") is not None:
-        _em_trend = ems.get("trend_label", "")
-        _em_short = _em_trend.replace("偏多排列", "均线多头").replace("偏空排列", "均线空头")
-        _ind_parts.append(f"{_em_short}（{ems['total_score']}/10）")
+    # 1. 拆分动作词和理由
+    _action_word = fusion_action
+    _reason = ""
+    if "（" in fusion_action:
+        _action_word = fusion_action.split("（")[0].strip()
+        _reason = fusion_action.split("（")[1].rstrip("）").strip()
+    elif "(" in fusion_action:
+        _action_word = fusion_action.split("(")[0].strip()
+        _reason = fusion_action.split("(")[1].rstrip(")").strip()
 
-    res = r.get("resonance") or {}
-    _month_label = str(res.get("monthly_label", ""))
-    _week_label = str(res.get("weekly_label", ""))
-    _day_label = str(res.get("daily_label", ""))
-    _tim_label = str(res.get("timing_label", ""))
+    # 2. 主力阶段（未知时不显示）
+    _mf_env = r.get("main_force_env") or "unknown"
+    _mf_stage = _STAGE_LABELS.get(_mf_env, "")
+    _mf_display = f"{_mf_stage} + {_reason}" if _mf_stage and _reason else (_mf_stage if _mf_stage else (_reason if _reason else ""))
 
-    def _tf_short(label: str, name: str) -> str:
-        """把周期标签翻译成简短方向。"""
-        if "多头" in label:
-            return f"{name}多"
-        elif "空头" in label:
-            return f"{name}空"
-        elif "中性" in label or "震荡" in label:
-            return f"{name}平"
-        elif "站上" in label:
-            return f"{name}多"
-        elif "跌破" in label:
-            return f"{name}空"
-        return ""
-
-    _res_score = int(res.get("total_score", 0))
-    if _res_score >= 9:
-        _ind_parts.append("多层共振")
+    # 3. 第一行
+    if _mf_display:
+        lines.append(f"🎯 {_mf_display} → {_action_word}")
     else:
-        _tf_parts = []
-        for lbl, nm in [(_month_label, "月"), (_week_label, "周"), (_day_label, "日"), (_tim_label, "60m")]:
-            s = _tf_short(lbl, nm)
-            if s:
-                _tf_parts.append(s)
-        if _tf_parts:
-            _ind_parts.append(" ｜ ".join(_tf_parts))
+        lines.append(f"🎯 → {_action_word}")
 
-    if _ind_parts:
-        lines.append(f"  {' ｜ '.join(_ind_parts)}")
+    # 4. 理论状态（第二行）— 从 fusion_signals 获取
+    _theory_parts = []
+    _SIGNAL_LABELS = {
+        "chan": "缠论", "momentum": "动量", "wyckoff": "威科夫",
+    }
+    for _sig_key, _sig_label in _SIGNAL_LABELS.items():
+        if _sig_key in fusion_signals:
+            _sig = fusion_signals[_sig_key]
+            if isinstance(_sig, dict):
+                _state = str(_sig.get("reason", "") or "").strip()
+                _dir = _sig.get("direction", 0)
+                _dir_label = "看涨" if _dir > 0 else ("看跌" if _dir < 0 else "中性")
+                if not _state or _state == "无明确信号":
+                    _state = "无信号"
+                # 去掉前缀冗余
+                _state = _state.replace(_sig_label, "").strip()
+                if _state.startswith(":"):
+                    _state = _state[1:]
+                _theory_parts.append(f"{_sig_label}:{_state}·{_dir_label}")
 
-    # 形态分析段落
-    pattern = r.get("pattern_result") or {}
-    if pattern and pattern.get("pattern") and pattern.get("pattern") != "none":
-        pat_name = {"double_bottom": "W底", "double_top": "M头", "triangle_breakout": "三角形突破", "triangle_breakdown": "三角形破位"}.get(pattern.get("pattern", ""), pattern.get("pattern", ""))
-        pat_signal = "看多" if pattern.get("signal", 0) == 1 else "看空"
-        neckline = pattern.get("neckline", 0)
-        target = pattern.get("target", 0)
-        if neckline > 0 and target > 0:
-            lines.append(f"📈 {pat_name}{pat_signal}（颈线{neckline:.2f}，目标{target:.2f}）")
-        else:
-            lines.append(f"📈 {pat_name}{pat_signal}")
+    # 形态分析
+    _pat = r.get("pattern_result") or {}
+    if _pat and _pat.get("pattern") and _pat.get("pattern") != "none":
+        pat_name = {"double_bottom": "W底", "double_top": "M头", "triangle_breakout": "三角突破", "triangle_breakdown": "三角破位"}.get(_pat.get("pattern", ""), _pat.get("pattern", ""))
+        pat_signal = "看涨" if _pat.get("signal", 0) > 0 else ("看跌" if _pat.get("signal", 0) < 0 else "中性")
+        _theory_parts.append(f"形态:{pat_name}·{pat_signal}")
+
+    for _tp in _theory_parts:
+        lines.append(f"  {_tp}")
+
+    # 5. 冲突比（第三行，如有）
+    if disagreement_count > 0 and fusion_signals:
+        _bull_count = sum(1 for v in fusion_signals.values() if isinstance(v, dict) and v.get("direction", 0) > 0)
+        _bear_count = sum(1 for v in fusion_signals.values() if isinstance(v, dict) and v.get("direction", 0) < 0)
+        lines.append(f"  {_bull_count}方看多 vs {_bear_count}方看空")
 
     lines.extend([
         "",
-        "📍 操作建议"
+        "📍 价格阶梯"
     ])
-
-    # 融合层警告（看空时显示）
-    fusion_action = str((r.get("fusion") or {}).get("action") or "")
-    _reduce_set = {"减仓", "空仓/止损", "空仓 (大盘很差, 一票否决)", "减1/3 (高位松动)", "高位松动"}
-    if fusion_action in _reduce_set:
-        lines.append(f"  ⚠️ 融合层提示：{fusion_action}（看空信号，谨慎买入）")
-        lines.append("")
 
     # 收集所有价格行，统一排序后输出（确保严格递增）
     all_price_lines: list[tuple[float, str]] = []
 
-    # 止损
+    # 止损（独立风控位，不与其他支撑合并）
     if stop > 0:
-        _kl = r.get("key_levels") or {}
-        _long_sup = float(_kl.get("long_support") or 0)
-        if _long_sup > 0 and stop < _long_sup:
-            all_price_lines.append((stop, f"  {stop:.2f} 止损（跌破长线支撑）"))
-        else:
-            all_price_lines.append((stop, f"  {stop:.2f} 止损（跌破支撑，趋势破坏）"))
+        all_price_lines.append((stop, f"  {stop:.2f} 止损（跌破支撑，趋势破坏）"))
 
     # 直接计算盈亏比（不依赖 AI 字段，避免直接运行时永远"数据不足"）
     take_price = float(r.get("take") or 0)
@@ -1886,13 +1873,6 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         else:
             _long_resist_action = "减仓 50%（趋势弱）"
 
-        # 检查是否与已有价位重复（容差 1.5%）
-        def _is_duplicate(price_val: float) -> bool:
-            for existing_price, _ in all_price_lines:
-                if existing_price > 0 and abs(price_val - existing_price) / max(existing_price, 1) < 0.015:
-                    return True
-            return False
-
         # 支撑位（现价下方）：长线 → 中线 → 短线
         for kl_key, label, pct in [
             ("long_support", "长线支撑", "加仓至 20%"),
@@ -1900,7 +1880,7 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
             ("short_support", "短线支撑", "试探买 5%"),
         ]:
             val = float(key_levels.get(kl_key) or 0)
-            if val > 0 and val < current_price and not _is_duplicate(val):
+            if val > 0 and val < current_price:
                 all_price_lines.append((val, f"  {val:.2f} ← {label}（{pct}）"))
 
         # 压力位（现价上方）：短线 → 中线 → 长线
@@ -1910,7 +1890,7 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
             ("long_resist", "长线压力", _long_resist_action),
         ]:
             val = float(key_levels.get(kl_key) or 0)
-            if val > 0 and val > current_price and not _is_duplicate(val):
+            if val > 0 and val > current_price:
                 all_price_lines.append((val, f"  {val:.2f} → {label}（{pct}）"))
 
     exit_plan = r.get("exit_plan") or {}
@@ -1922,6 +1902,10 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         if p is not None and p > 0:
             # 已过价位不显示为卖点
             if p < current_price:
+                continue
+            # 去重：与已有价位重复则跳过（容差 1.5%）
+            is_dup = any(abs(p - ep) / max(ep, 1) < 0.015 for ep, _ in all_price_lines)
+            if is_dup:
                 continue
             ratio = item.get("ratio", 0)
             reason = item.get("reason", "")
@@ -2014,23 +1998,6 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         if cost_price > 0 and current_price <= cost_price:
             lines.append(f"  反弹到 {cost_price:.2f}：减 50%（保本）")
 
-        # P0-6: 止损分层展示
-        _kl = r.get("key_levels") or {}
-        _short_support = float(_kl.get("short_support") or 0)
-        _long_support = float(_kl.get("long_support") or 0)
-
-        if _short_support > 0 and _short_support < current_price:
-            lines.append(f"  短线止损 {_short_support:.2f}：跌破认亏 {abs(current_price - _short_support)/current_price*100:.1f}%")
-        if _long_support > 0 and _long_support < current_price:
-            lines.append(f"  中线止损 {_long_support:.2f}：跌破认亏 {abs(current_price - _long_support)/current_price*100:.1f}%")
-
-        # 兜底：如果没有分层支撑位，保留原止损逻辑
-        if not (_short_support > 0 and _short_support < current_price) and not (_long_support > 0 and _long_support < current_price):
-            if stop > 0 and stop < current_price:
-                lines.append(f"  跌破 {stop:.2f}：止损（认亏 {abs(current_price - stop)/current_price*100:.1f}%）")
-            elif stop > 0 and stop >= current_price:
-                lines.append(f"  跌破 {stop:.2f}：止损（认亏）")
-
     chip_peaks = r.get("chip_peaks") or []
     chip_migration = r.get("chip_migration") or {}
     if chip_peaks:
@@ -2044,16 +2011,20 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
                 if level:
                     label += f"({level})"
                 peak_strs.append(label)
-        chip_line_parts = [f"筹码{','.join(peak_strs)}"]
+        chip_line_parts = [f"筹码：{' · '.join(peak_strs)}"]
         current_pct = r.get("chip_current_pct")
         if current_pct is not None and current_pct > 50:
             chip_line_parts.append(f"获利{current_pct:.0f}%")
         warning_text = chip_migration.get("warning_text", "")
         if "筹码在搬家" in warning_text:
-            chip_line_parts.append("⚠️搬家")
+            chip_line_parts.append("搬家")
+            lines.append(f"  {' ｜ '.join(chip_line_parts)}")
+            lines.append(f"  ⚠️ 筹码搬家：{warning_text}")
         elif "主力在吸筹" in warning_text:
             chip_line_parts.append("吸筹")
-        lines.append(f"  {' ｜ '.join(chip_line_parts)}")
+            lines.append(f"  {' ｜ '.join(chip_line_parts)}")
+        else:
+            lines.append(f"  {' ｜ '.join(chip_line_parts)}")
 
     # ── 个股股性透视卡（build_report 预计算存 report["win_rate_data"]）──
     # 如果缺失（极少见），由于 render 无法获取 bars 数据，只能跳过

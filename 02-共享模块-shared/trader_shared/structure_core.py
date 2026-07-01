@@ -806,6 +806,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         "pressure_space_pct": round(pressure_space_pct, 4),
         "status": status,
         "fusion_override_used": fusion_override_used,
+        "ma250_warning": layer_result.get("ma250_warning", False),
         "theory_multipliers": theory,  # P3: 记录理论信号对参数的微调系数，便于调试
         "time_window": _check_time_window(bars, chan_result),  # P4: 江恩时间窗口
         "fib_retrace": fib_retrace,  # [2.3新增] 斐波那契黄金回调及挂单参考

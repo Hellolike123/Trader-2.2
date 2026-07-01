@@ -703,6 +703,8 @@ class MarketSnapshot:
     quote: dict[str, Any]
     daily_bars: list[dict[str, Any]]
     bars_5m: list[dict[str, Any]] = field(default_factory=list)
+    weekly_bars: list[dict[str, Any]] = field(default_factory=list)
+    monthly_bars: list[dict[str, Any]] = field(default_factory=list)
     order_book: dict[str, Any] | None = None
     tick_data: list[dict[str, Any]] = field(default_factory=list)
     data_status: DataStatus = "full"
