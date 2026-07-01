@@ -483,7 +483,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     # DI: 注入 TencentFetcher 供下游模块使用
     fetcher = TencentFetcher()
     provider = get_provider()
-    snapshot = provider.load_market_snapshot(target, days=LOOKBACK_DAYS, include_5m=True, include_weekly=True)
+    snapshot = provider.load_market_snapshot(target, days=LOOKBACK_DAYS, include_5m=True, include_weekly=True, include_monthly=True)
     if not snapshot.quote or not snapshot.daily_bars:
         detail = "; ".join(f"{key}: {value}" for key, value in snapshot.source_errors.items()) or "missing required market data"
         raise RuntimeError(detail)
@@ -538,6 +538,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         })
     bars_5m = snapshot.bars_5m
     weekly_bars = snapshot.weekly_bars if hasattr(snapshot, "weekly_bars") else []
+    monthly_bars = snapshot.monthly_bars if hasattr(snapshot, "monthly_bars") else []
     last_bar = bars[-1] if bars else {}
     atr14_val = float(last_bar.get("atr14", 0) or 0)
     atr_ratio_val = float(last_bar.get("atr_ratio", 0) or 0)

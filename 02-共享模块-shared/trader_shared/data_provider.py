@@ -56,6 +56,7 @@ class MarketSnapshot:
     daily_bars: list[dict[str, Any]]
     bars_5m: list[dict[str, Any]] = field(default_factory=list)
     weekly_bars: list[dict[str, Any]] = field(default_factory=list)
+    monthly_bars: list[dict[str, Any]] = field(default_factory=list)
     order_book: dict[str, Any] | None = None
     tick_data: list[dict[str, Any]] = field(default_factory=list)
     data_status: DataStatus = "full"
@@ -104,12 +105,16 @@ class DataProvider(Protocol):
         """Weekly K-line bars."""
         ...
 
+    def fetch_monthly(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
+        """Monthly K-line bars."""
+        ...
+
     def fetch_kline(self, sec: Security, scale: str, datalen: int = 60) -> list[dict[str, Any]]:
         """Generic multi-cycle K-line."""
         ...
 
-    def load_market_snapshot(self, target: str, days: int = 365, include_5m: bool = True, include_ticks: bool = True) -> MarketSnapshot:
-        """Aggregate quote + daily + optional 5m into a single snapshot."""
+    def load_market_snapshot(self, target: str, days: int = 365, include_5m: bool = True, include_weekly: bool = True, include_monthly: bool = True, include_ticks: bool = True) -> MarketSnapshot:
+        """Aggregate quote + daily + optional intraday/weekly/monthly into a single snapshot."""
         ...
 
     def fetch_ticks(self, sec: Security, count: int = 500) -> list[dict[str, Any]]:
@@ -327,6 +332,14 @@ class UnifiedProvider:
         from trader_shared.light_data import fetch_kline as _fetch
         return _fetch(self._to_sec(sec), self._http, interval="weekly", datalen=datalen)
 
+    def fetch_monthly(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
+        """Fetch monthly K-line bars via mootdx or kline endpoint."""
+        if self._backend == "akshare":
+            return self._akshare_fetch_kline(sec, "monthly", datalen)
+        self._ensure_http()
+        from trader_shared.light_data import fetch_kline as _fetch
+        return _fetch(self._to_sec(sec), self._http, interval="monthly", datalen=datalen)
+
     def fetch_kline(self, sec: Security, scale: str, datalen: int = 60) -> list[dict[str, Any]]:
         if self._backend == "akshare":
             return self._akshare_fetch_kline(sec, scale, datalen)
@@ -345,11 +358,11 @@ class UnifiedProvider:
         except ImportError:
             return []
 
-    def load_market_snapshot(self, target: str, days: int = 365, include_5m: bool = True, include_weekly: bool = True, include_ticks: bool = True) -> MarketSnapshot:
+    def load_market_snapshot(self, target: str, days: int = 365, include_5m: bool = True, include_weekly: bool = True, include_monthly: bool = True, include_ticks: bool = True) -> MarketSnapshot:
         if self._backend == "akshare":
-            return self._akshare_load_snapshot(target, days, include_5m, include_weekly, include_ticks)
+            return self._akshare_load_snapshot(target, days, include_5m, include_weekly, include_monthly, include_ticks)
         from trader_shared.light_data import load_market_snapshot as _load
-        snap = _load(target, days=days, include_5m=include_5m, include_weekly=include_weekly, include_ticks=include_ticks)
+        snap = _load(target, days=days, include_5m=include_5m, include_weekly=include_weekly, include_monthly=include_monthly, include_ticks=include_ticks)
         sec = Security(code=snap.security.code, market=snap.security.market, name=snap.security.name)
         res_snap = MarketSnapshot(
             security=sec,
@@ -357,6 +370,7 @@ class UnifiedProvider:
             daily_bars=snap.daily_bars,
             bars_5m=snap.bars_5m,
             weekly_bars=getattr(snap, "weekly_bars", []),
+            monthly_bars=getattr(snap, "monthly_bars", []),
             order_book=getattr(snap, "order_book", None),
             tick_data=getattr(snap, "tick_data", []),
             data_status=snap.data_status,
@@ -433,9 +447,9 @@ class UnifiedProvider:
         df = ak.stock_zh_a_hist_min_em(symbol=sec.code, period=scale)
         return [bar for _, row in df.tail(datalen).iterrows() if (bar := self._akshare_to_bar(row.to_dict(), dt_key="时间"))]
 
-    def _akshare_load_snapshot(self, target: str, days: int, include_5m: bool, include_weekly: bool, include_ticks: bool) -> MarketSnapshot:
+    def _akshare_load_snapshot(self, target: str, days: int, include_5m: bool, include_weekly: bool, include_monthly: bool, include_ticks: bool) -> MarketSnapshot:
         sec = self.resolve_security(target)
-        daily_bars, bars_5m, weekly_bars, quote, tick_data = [], [], [], {}, []
+        daily_bars, bars_5m, weekly_bars, monthly_bars, quote, tick_data = [], [], [], [], {}, []
         source_errors: dict[str, str] = {}
         try:
             daily_bars = self.fetch_qfq_daily(sec, days=days)
@@ -455,9 +469,14 @@ class UnifiedProvider:
                 weekly_bars = self.fetch_weekly(sec)
             except Exception as e:
                 source_errors["weekly"] = str(e)
+        if include_monthly:
+            try:
+                monthly_bars = self.fetch_monthly(sec)
+            except Exception as e:
+                source_errors["monthly"] = str(e)
         data_status = "full" if (daily_bars and quote) else "partial" if (daily_bars or quote) else "failed"
         res_snap = MarketSnapshot(
-            security=sec, quote=quote, daily_bars=daily_bars, bars_5m=bars_5m, weekly_bars=weekly_bars,
+            security=sec, quote=quote, daily_bars=daily_bars, bars_5m=bars_5m, weekly_bars=weekly_bars, monthly_bars=monthly_bars,
             tick_data=tick_data, data_status=data_status, source_errors=source_errors,
         )
         return _enrich_snapshot(res_snap)
