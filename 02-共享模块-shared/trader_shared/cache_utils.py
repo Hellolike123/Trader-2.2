@@ -327,7 +327,7 @@ def warm_pool_cache() -> dict[str, Any]:
 
     for name in targets:
         try:
-            snapshot = provider.load_market_snapshot(name, days=LOOKBACK_DAYS, include_5m=False, include_ticks=False)
+            snapshot = provider.load_market_snapshot(name, days=LOOKBACK_DAYS, include_5m=False, include_weekly=False, include_ticks=False)
             if snapshot.daily_bars and snapshot.quote:
                 success += 1
             else:

@@ -1249,7 +1249,7 @@ def _fetch_mins_mootdx(sec: Security, interval: str, datalen: int = 60) -> list[
     client = _get_mootdx_client()
     if client is None:
         return None
-    category_map = {"5m": "5m", "15m": "15m", "30m": "30m", "60m": "60m"}
+    category_map = {"5m": "5m", "15m": "15m", "30m": "30m", "60m": "60m", "weekly": "weekly"}
     cat = category_map.get(interval)
     if cat is None:
         return None
@@ -1332,6 +1332,17 @@ def fetch_30m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[s
     if bars:
         for bar in bars:
             bar["data_source"] = "mootdx (fallback)"
+            bar["data_status"] = "partial"
+        return bars
+    return []
+
+
+def fetch_weekly(sec: Security, http: HttpClient, datalen: int = 80) -> list[dict[str, Any]]:
+    """Fetch weekly K-line bars via mootdx (Sina 不支持周线)."""
+    bars = _fetch_mins_mootdx(sec, "weekly", datalen)
+    if bars:
+        for bar in bars:
+            bar["data_source"] = "mootdx"
             bar["data_status"] = "partial"
         return bars
     return []
@@ -1466,7 +1477,7 @@ def _fetch_fund_flow_safe(target: str) -> dict[str, Any]:
     return {}
 
 
-def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, include_ticks: bool = True) -> MarketSnapshot:
+def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, include_weekly: bool = True, include_ticks: bool = True) -> MarketSnapshot:
     sec = resolve_security(target)
     http = HttpClient()
     source_errors: dict[str, str] = {}
@@ -1480,6 +1491,8 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
     f_futures: dict[Any, str] = {f_quote: "quote", f_daily: "daily"}
     if include_5m:
         f_futures[pool.submit(fetch_5m, sec, http)] = "bars_5m"
+    if include_weekly:
+        f_futures[pool.submit(fetch_weekly, sec, http)] = "weekly_bars"
     if include_ticks:
         f_futures[pool.submit(_fetch_ticks_tdx3, sec, 500)] = "tick_data"
 
@@ -1495,6 +1508,7 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
     quote = results.get("quote") or {}
     daily_bars = results.get("daily") or []
     bars_5m = results.get("bars_5m") or []
+    weekly_bars = results.get("weekly_bars") or []
     tick_data = results.get("tick_data") or []
     order_book = quote.get("order_book")
     if isinstance(quote, dict):
@@ -1513,11 +1527,15 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
     if include_5m and not bars_5m and "bars_5m" not in missing_sources:
         missing_sources.append("bars_5m")
 
+    if include_weekly and not weekly_bars and "weekly_bars" not in missing_sources:
+        missing_sources.append("weekly_bars")
+
     if quote and daily_bars and not missing_sources:
         # Check if fallback occurred
         if (isinstance(quote, dict) and quote.get("data_status") == "partial") or \
            (isinstance(daily_bars, list) and any(b.get("data_status") == "partial" for b in daily_bars)) or \
-           (isinstance(bars_5m, list) and any(b.get("data_status") == "partial" for b in bars_5m)):
+           (isinstance(bars_5m, list) and any(b.get("data_status") == "partial" for b in bars_5m)) or \
+           (isinstance(weekly_bars, list) and any(b.get("data_status") == "partial" for b in weekly_bars)):
             data_status = "partial"
         else:
             data_status = "full"
@@ -1533,6 +1551,7 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
         quote=quote,
         daily_bars=daily_bars,
         bars_5m=bars_5m,
+        weekly_bars=weekly_bars,
         order_book=order_book,
         tick_data=tick_data,
         data_status=data_status,
