@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -1483,6 +1484,7 @@ def evaluate_position_state(
     chip_migration: dict[str, Any] | None = None,
     high_zone_lower: float = 0.0,
     trailing_stop: float | None = None,
+    last_add_date: str | None = None,
 ) -> dict[str, Any]:
     """五状态仓位管理状态机。
 
@@ -1660,6 +1662,14 @@ def evaluate_position_state(
 
     # 回踩加仓（蓄势期+回踩支撑+条件满足）
     if conditions["stage_accumulation"] and conditions["pullback_to_support"]:
+        # T+1 隔离锁：当天已加仓则冷却，不重复加仓
+        today = datetime.now().strftime("%Y-%m-%d")
+        if last_add_date is not None and last_add_date == today:
+            return _make_position_state(
+                "持仓观察", "T+1冷却，今日已加仓，等待明日再评估",
+                0, conditions,
+            )
+
         # 必要条件 + 加分条件评分
         add_score = _calc_pullback_add_score(
             conditions, bars, current_price, support, atr14,

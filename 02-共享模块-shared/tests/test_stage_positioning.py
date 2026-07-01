@@ -493,3 +493,90 @@ class TestActionForHoldingState:
             for has_pos in [True, False]:
                 result = action_for_holding_state(action, has_pos)
                 assert result["action"] == action
+
+
+# ── evaluate_position_state  T+1 隔离锁 ─────────────────────────
+
+class TestT1Cooldown:
+    """P0-3: 回踩加仓路径的 T+1 冷却测试。"""
+
+    def _base_kwargs(self, **overrides) -> dict:
+        """构造触发回踩加仓路径的基础参数。"""
+        from datetime import datetime
+        base = dict(
+            current_price=10.0,
+            support=10.0,
+            resistance=12.0,
+            stop_price=9.0,
+            confirm_price=12.5,
+            atr14=0.3,
+            major_stage="蓄势",
+            momentum="走强",
+            has_position=True,
+            entry_price=10.0,
+        )
+        base.update(overrides)
+        return base
+
+    def test_t1_cooldown_blocks_add_when_same_day(self):
+        """last_add_date == today → 返回持仓观察（T+1冷却），不加仓"""
+        from unittest.mock import patch
+        from trader_shared.stage_positioning import evaluate_position_state
+
+        mock_dt = patch(
+            "trader_shared.stage_positioning.datetime",
+            **{"now.return_value.strftime.return_value": "2026-07-02"},
+        )
+        with mock_dt:
+            result = evaluate_position_state(
+                **self._base_kwargs(),
+                last_add_date="2026-07-02",
+            )
+
+        assert result["state"] == "持仓观察"
+        assert "T+1" in result["transition_reason"]
+        assert result["position_pct"] == 0
+
+    def test_no_cooldown_when_different_day(self):
+        """last_add_date != today → 正常进入回踩加仓逻辑"""
+        from unittest.mock import patch
+        from trader_shared.stage_positioning import evaluate_position_state
+
+        mock_dt = patch(
+            "trader_shared.stage_positioning.datetime",
+            **{"now.return_value.strftime.return_value": "2026-07-02"},
+        )
+        with mock_dt:
+            result = evaluate_position_state(
+                **self._base_kwargs(),
+                last_add_date="2026-07-01",
+            )
+
+        assert result["state"] == "回踩加仓"
+
+    def test_no_cooldown_when_last_add_date_is_none(self):
+        """last_add_date=None（默认）→ 正常进入回踩加仓逻辑，向后兼容"""
+        from trader_shared.stage_positioning import evaluate_position_state
+
+        result = evaluate_position_state(**self._base_kwargs())
+
+        assert result["state"] == "回踩加仓"
+
+    def test_backward_compat_without_param(self):
+        """不传 last_add_date 参数 → 正常工作，向后兼容"""
+        from trader_shared.stage_positioning import evaluate_position_state
+
+        result = evaluate_position_state(
+            current_price=10.0,
+            support=10.0,
+            resistance=12.0,
+            stop_price=9.0,
+            confirm_price=12.5,
+            atr14=0.3,
+            major_stage="蓄势",
+            momentum="走强",
+            has_position=True,
+            entry_price=10.0,
+        )
+
+        assert result["state"] == "回踩加仓"
