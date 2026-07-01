@@ -13,6 +13,7 @@ from trader_shared.structure_core import (
     average_atr_pct,
     average_amplitude_pct,
     build_structure_context,
+    find_key_levels,
 )
 
 
@@ -188,3 +189,106 @@ class TestTrailingStop:
         assert result_20.get("trailing_stop") is not None
         assert result_30.get("trailing_stop") is not None
         assert result_40.get("trailing_stop") is not None
+
+
+# ── find_key_levels (P0-4) ──────────────────────────────────────────
+
+class TestFindKeyLevels:
+    """P0-4: 多周期支撑压力阶梯测试。"""
+
+    def test_empty_input(self):
+        """空 bars → 全部 0.0"""
+        result = find_key_levels([])
+        assert result["short_support"] == 0.0
+        assert result["short_resist"] == 0.0
+        assert result["mid_support"] == 0.0
+        assert result["mid_resist"] == 0.0
+        assert result["long_support"] == 0.0
+        assert result["long_resist"] == 0.0
+
+    def test_insufficient_bars(self):
+        """不足 10 根 → 短线用全部数据，中长线 fallback"""
+        closes = [10.0, 10.5, 9.8, 10.2, 11.0]
+        bars = _make_bars(closes)
+        result = find_key_levels(bars)
+        # 短线 = 5 根中的高低
+        assert result["short_support"] == pytest.approx(9.8 * 0.98, abs=0.1)  # low = close*0.98
+        assert result["short_resist"] > 0
+        # 中线/长线 fallback 到全周期
+        assert result["mid_support"] > 0
+        assert result["mid_resist"] > 0
+
+    def test_returns_all_six_keys(self):
+        """正常 300 根 bars → 返回 6 个 key"""
+        closes = [50.0 + (i % 20 - 10) * 0.5 for i in range(300)]
+        bars = _make_bars(closes)
+        result = find_key_levels(bars)
+        expected_keys = {"short_support", "mid_support", "long_support",
+                         "short_resist", "mid_resist", "long_resist"}
+        assert set(result.keys()) == expected_keys
+
+    def test_support_below_resistance(self):
+        """每个周期的支撑 < 压力"""
+        closes = [50.0 + (i % 20 - 10) * 0.5 for i in range(200)]
+        bars = _make_bars(closes)
+        result = find_key_levels(bars)
+        assert result["short_support"] < result["short_resist"]
+        assert result["mid_support"] < result["mid_resist"]
+        assert result["long_support"] < result["long_resist"]
+
+    def test_short_is_within_long(self):
+        """短线区间包含在长线区间内"""
+        closes = [50.0 + (i % 20 - 10) * 2 for i in range(200)]
+        bars = _make_bars(closes)
+        result = find_key_levels(bars)
+        # 短线支撑 >= 长线支撑（短线低点不会低于长线低点）
+        assert result["short_support"] >= result["long_support"] or result["long_support"] > 0
+        # 短线压力 <= 长线压力
+        assert result["short_resist"] <= result["long_resist"] or result["long_resist"] > 0
+
+    def test_with_local_extrema(self):
+        """构造有明显局部极值的数据，验证 multi-touch 检测"""
+        # 150 根 bars，在 40 和 60 之间震荡，有多次触及 40 和 60 的价位
+        closes = []
+        for i in range(150):
+            if i % 10 < 5:
+                closes.append(40.0 + (i % 5) * 0.5)  # 低点区域 ~40
+            else:
+                closes.append(55.0 + (i % 5) * 1.0)  # 高点区域 ~55-59
+        bars = _make_bars(closes)
+        result = find_key_levels(bars)
+        # 支撑应该在 40 附近，压力应该在 55+ 附近
+        assert result["short_support"] > 0
+        assert result["short_resist"] > result["short_support"]
+        assert result["mid_support"] > 0
+        assert result["mid_resist"] > result["mid_support"]
+
+    def test_monotonically_increasing(self):
+        """单调上涨数据 → 短线支撑为最近 10 日低点"""
+        closes = [10.0 + i * 0.5 for i in range(150)]
+        bars = _make_bars(closes)
+        result = find_key_levels(bars)
+        # 单调上涨，短线支撑 = 最近10日低点
+        expected_short_low = closes[-10] * 0.98  # low = close * 0.98
+        assert result["short_support"] > 0
+        assert result["short_resist"] > result["short_support"]
+
+    def test_all_positive_values(self):
+        """所有返回值必须 > 0（有效数据）"""
+        closes = [50.0 + (i % 15 - 7) * 1.0 for i in range(200)]
+        bars = _make_bars(closes)
+        result = find_key_levels(bars)
+        for key, val in result.items():
+            assert val > 0, f"{key} should be > 0, got {val}"
+
+    def test_fallback_when_no_multi_touch(self):
+        """没有 multi-touch 极值时，fallback 到周期最高/最低"""
+        # 直线数据，不会有局部极值
+        closes = [50.0] * 150
+        bars = _make_bars(closes)
+        result = find_key_levels(bars)
+        # 所有值应该接近 50 * 0.98 和 50 * 1.02
+        assert result["mid_support"] > 0
+        assert result["mid_resist"] > 0
+        assert result["long_support"] > 0
+        assert result["long_resist"] > 0

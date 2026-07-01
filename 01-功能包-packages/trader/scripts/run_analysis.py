@@ -471,6 +471,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     try:
         from trader_shared import candidate_core as core
         from trader_shared.candidate_core import build_structure_context, atr_volatility_level
+        from trader_shared.structure_core import find_key_levels
         from trader_shared.data_provider import get_provider
         from trader_shared.strategy_protocol import run_all
         from trader_shared.cache_utils import get_shared_build_pool
@@ -810,6 +811,15 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     levels["fusion_override_used"] = levels.get("fusion_override_used", False)
     levels["main_force"] = mf_result
     levels["main_force_env"] = main_force_env
+
+    # P0-4: 多周期支撑压力阶梯
+    try:
+        levels["key_levels"] = find_key_levels(bars)
+    except Exception:
+        levels["key_levels"] = {
+            "short_support": 0.0, "mid_support": 0.0, "long_support": 0.0,
+            "short_resist": 0.0, "mid_resist": 0.0, "long_resist": 0.0,
+        }
 
     # 大单分析（在 levels 计算后补全，使用 key_pressure 作为关注区）
     if big_order_result.get("events") is None or not big_order_result.get("events"):
@@ -1750,7 +1760,12 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
 
     # 止损
     if stop > 0:
-        all_price_lines.append((stop, f"  {stop:.2f} 止损（跌破支撑，趋势破坏）"))
+        _kl = r.get("key_levels") or {}
+        _long_sup = float(_kl.get("long_support") or 0)
+        if _long_sup > 0 and stop < _long_sup:
+            all_price_lines.append((stop, f"  {stop:.2f} 止损（跌破长线支撑）"))
+        else:
+            all_price_lines.append((stop, f"  {stop:.2f} 止损（跌破支撑，趋势破坏）"))
 
     # 直接计算盈亏比（不依赖 AI 字段，避免直接运行时永远"数据不足"）
     take_price = float(r.get("take") or 0)
@@ -1829,7 +1844,7 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
 
     # 当前价格
     if current_price > 0:
-        all_price_lines.append((current_price, f"  {current_price:.2f} 当前"))
+        all_price_lines.append((current_price, f"  🌟 {current_price:.2f} 当前位置"))
     fib = r.get("fib_retrace") or {}
     golden_bid = fib.get("golden_bid")
     if golden_bid and golden_bid > 0 and golden_bid != low_price:
@@ -1849,6 +1864,39 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
             best_val, best_label = candidates[0][1], candidates[0][2]
             if best_val != low_price:
                 lines.append(f"  {best_val:.2f} ← 黄金分割{best_label}回撤参考（潜在支撑位）")
+
+    # P0-4: 多周期支撑压力阶梯
+    key_levels = r.get("key_levels") or {}
+    if key_levels:
+        # 长线压力的动态动作标签（P0-5 预留，当前用固定值）
+        _long_resist_action = "持有关注（趋势强）"
+
+        # 检查是否与已有价位重复（容差 1.5%）
+        def _is_duplicate(price_val: float) -> bool:
+            for existing_price, _ in all_price_lines:
+                if existing_price > 0 and abs(price_val - existing_price) / max(existing_price, 1) < 0.015:
+                    return True
+            return False
+
+        # 支撑位（现价下方）：长线 → 中线 → 短线
+        for kl_key, label, pct in [
+            ("long_support", "长线支撑", "加仓至 20%"),
+            ("mid_support", "中线支撑", "首次建仓 10%"),
+            ("short_support", "短线支撑", "试探买 5%"),
+        ]:
+            val = float(key_levels.get(kl_key) or 0)
+            if val > 0 and val < current_price and not _is_duplicate(val):
+                all_price_lines.append((val, f"  {val:.2f} ← {label}（{pct}）"))
+
+        # 压力位（现价上方）：短线 → 中线 → 长线
+        for kl_key, label, pct in [
+            ("short_resist", "短线压力", "卖 20%"),
+            ("mid_resist", "中线压力", "减仓 30%"),
+            ("long_resist", "长线压力", _long_resist_action),
+        ]:
+            val = float(key_levels.get(kl_key) or 0)
+            if val > 0 and val > current_price and not _is_duplicate(val):
+                all_price_lines.append((val, f"  {val:.2f} → {label}（{pct}）"))
 
     exit_plan = r.get("exit_plan") or {}
     stage_exit = exit_plan.get("stage_exit")

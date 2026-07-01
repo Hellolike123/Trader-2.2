@@ -831,5 +831,148 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     }
 
 
+def find_key_levels(bars: list[BarData]) -> dict[str, float]:
+    """在 300 根数据里找三个周期的关键支撑/压力位。
+
+    短线（10日）：最近 10 日的高低点
+    中线（60日）：最近 60 日内至少 2 次触及未破的重要价位
+    长线（120日）：最近 120 日内至少 2 次触及未破的重要价位
+
+    返回 dict：
+        short_support, mid_support, long_support,
+        short_resist, mid_resist, long_resist
+    """
+    if not bars:
+        return {
+            "short_support": 0.0, "mid_support": 0.0, "long_support": 0.0,
+            "short_resist": 0.0, "mid_resist": 0.0, "long_resist": 0.0,
+        }
+
+    n = len(bars)
+    # 提取有效的 (high, low) 对
+    highs: list[float] = []
+    lows: list[float] = []
+    for bar in bars:
+        h = to_float(bar.get("high"))
+        l = to_float(bar.get("low"))
+        if h is not None and l is not None and h > 0 and l > 0:
+            highs.append(h)
+            lows.append(l)
+        else:
+            # 用 close 做 fallback
+            c = to_float(bar.get("close"))
+            if c is not None and c > 0:
+                highs.append(c)
+                lows.append(c)
+
+    if not highs:
+        return {
+            "short_support": 0.0, "mid_support": 0.0, "long_support": 0.0,
+            "short_resist": 0.0, "mid_resist": 0.0, "long_resist": 0.0,
+        }
+
+    # ── 短线：最近 10 日高低点 ──
+    short_n = min(10, len(highs))
+    short_support = round(min(lows[-short_n:]), 2)
+    short_resist = round(max(highs[-short_n:]), 2)
+
+    # ── 辅助：在指定窗口内找局部极值 + 至少 2 次触及 ──
+    def _find_level_with_touches(
+        window_highs: list[float],
+        window_lows: list[float],
+        *,
+        find_support: bool,
+    ) -> float | None:
+        """在 window 内找局部极值，并验证至少 2 次触及未破。
+
+        find_support=True  → 找支撑（局部低点，至少 2 次低点触及但未跌破）
+        find_support=False → 找压力（局部高点，至少 2 次高点触及但未突破）
+        """
+        if len(window_highs) < 5:
+            return None
+
+        swing_window = 3  # 局部极值窗口：左右各 3 根
+        tolerance_pct = 0.015  # 触及容差 1.5%
+
+        source = window_lows if find_support else window_highs
+        opposite = window_highs if find_support else window_lows
+        extrema: list[tuple[int, float]] = []
+
+        for i in range(swing_window, len(source) - swing_window):
+            val = source[i]
+            left_vals = source[i - swing_window:i]
+            right_vals = source[i + 1:i + swing_window + 1]
+
+            if find_support:
+                if val <= min(left_vals) and val <= min(right_vals):
+                    extrema.append((i, val))
+            else:
+                if val >= max(left_vals) and val >= max(right_vals):
+                    extrema.append((i, val))
+
+        if not extrema:
+            return None
+
+        # 按触及次数排序：遍历每个极值，统计「对面数据在 tolerance 内」的次数
+        best_price = None
+        best_count = 0
+
+        for idx, price in extrema:
+            band_lo = price * (1 - tolerance_pct)
+            band_hi = price * (1 + tolerance_pct)
+            # 至少 2 次：极值本身算 1 次，再加上「对面序列在 band 内」的次数
+            touch_count = 0
+            for j in range(len(source)):
+                if band_lo <= source[j] <= band_hi:
+                    touch_count += 1
+            # 还要验证「未破」：如果是支撑，opposite 不应多次大幅跌破
+            # 简化：只要触及次数 >= 2 且 price 在合理范围内即可
+            if touch_count >= 2:
+                if find_support:
+                    # 验证未跌破：在 window 内，最低价没有远离 price
+                    breach_count = sum(1 for o in opposite if o < price * 0.97)
+                    if breach_count < len(opposite) * 0.3:  # 不超过 30% 的 bar 跌破 3%
+                        if best_price is None or abs(price - source[-1]) < abs(best_price - source[-1]):
+                            best_price = price
+                            best_count = touch_count
+                else:
+                    # 验证未突破
+                    breach_count = sum(1 for o in opposite if o > price * 1.03)
+                    if breach_count < len(opposite) * 0.3:
+                        if best_price is None or abs(price - source[-1]) < abs(best_price - source[-1]):
+                            best_price = price
+                            best_count = touch_count
+
+        return round(best_price, 2) if best_price is not None else None
+
+    # ── 中线：60 日 ──
+    mid_n = min(60, len(highs))
+    mid_support = _find_level_with_touches(highs[-mid_n:], lows[-mid_n:], find_support=True)
+    mid_resist = _find_level_with_touches(highs[-mid_n:], lows[-mid_n:], find_support=False)
+    # fallback 到周期最低/最高
+    if mid_support is None:
+        mid_support = round(min(lows[-mid_n:]), 2)
+    if mid_resist is None:
+        mid_resist = round(max(highs[-mid_n:]), 2)
+
+    # ── 长线：120 日 ──
+    long_n = min(120, len(highs))
+    long_support = _find_level_with_touches(highs[-long_n:], lows[-long_n:], find_support=True)
+    long_resist = _find_level_with_touches(highs[-long_n:], lows[-long_n:], find_support=False)
+    if long_support is None:
+        long_support = round(min(lows[-long_n:]), 2)
+    if long_resist is None:
+        long_resist = round(max(highs[-long_n:]), 2)
+
+    return {
+        "short_support": short_support,
+        "mid_support": mid_support,
+        "long_support": long_support,
+        "short_resist": short_resist,
+        "mid_resist": mid_resist,
+        "long_resist": long_resist,
+    }
+
+
 def count_below_ma(current: float, ma_values: dict[str, float | None]) -> int:
     return sum(1 for value in ma_values.values() if value is not None and current < value)
