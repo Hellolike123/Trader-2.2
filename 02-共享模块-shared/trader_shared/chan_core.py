@@ -5,10 +5,11 @@ from typing import Any
 from trader_shared.light_data import to_float
 
 try:
-    from trader_shared.config import CHANLUN_MIN_BARS, CHANLUN_MIN_BARS_PER_STROKE
+    from trader_shared.config import CHANLUN_MIN_BARS, CHANLUN_MIN_BARS_PER_STROKE, CHANLUN_MIN_STROKES_PER_SEGMENT
 except ImportError:
     CHANLUN_MIN_BARS = 20
     CHANLUN_MIN_BARS_PER_STROKE = 5
+    CHANLUN_MIN_STROKES_PER_SEGMENT = 3
 
 
 def _calc_macd(bars: list[dict]) -> list[dict]:
@@ -184,6 +185,7 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5) -> list[d
     strokes: list[dict[str, Any]] = []
     num = len(fractions)
     i = 0
+    last_direction: str | None = None
 
     while i < num - 1:
         start = fractions[i]
@@ -205,10 +207,14 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5) -> list[d
             break
 
         end = fractions[j]
-        # end 也可能是连续同类分型的第一个，需要在下一轮迭代中取极值
-        # 但这里先检查距离
+        direction = "up" if start["type"] == "bottom" else "down"
+
+        # 强制交替：新笔方向必须与上一笔相反
+        if last_direction is not None and direction == last_direction:
+            i = j
+            continue
+
         if end["index"] - start["index"] >= min_bars_per_stroke - 1:
-            direction = "up" if start["type"] == "bottom" else "down"
             strokes.append({
                 "start_type": start["type"],
                 "start_price": start["low"] if start["type"] == "bottom" else start["high"],
@@ -216,19 +222,172 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5) -> list[d
                 "end_price": end["high"] if end["type"] == "top" else end["low"],
                 "direction": direction,
             })
+            last_direction = direction
 
         i = j
 
     return strokes
 
 
-def build_zones(strokes: list[dict]) -> list[dict]:
-    if len(strokes) < 3:
+def build_segments(strokes: list[dict], min_strokes: int = 3) -> list[dict]:
+    """将笔序列构建为线段序列。
+
+    线段是最小可递归走势单元，由至少3笔构成。
+    使用简化版特征序列法判断线段终结：
+    - 向上线段中，取所有向下笔构成特征序列
+    - 如果某根向下笔的低点跌破前一根向下笔的低点，线段终结
+    - 向下线段中，取所有向上笔构成特征序列
+    - 如果某根向上笔的高点升破前一根向上笔的高点，线段终结
+    """
+    if len(strokes) < min_strokes:
+        return []
+
+    # 寻找第一个有价格重叠的3笔组合作为线段起点
+    seg_start = -1
+    for k in range(len(strokes) - 2):
+        h0 = max(strokes[k]["start_price"], strokes[k]["end_price"])
+        l0 = min(strokes[k]["start_price"], strokes[k]["end_price"])
+        h1 = max(strokes[k + 1]["start_price"], strokes[k + 1]["end_price"])
+        l1 = min(strokes[k + 1]["start_price"], strokes[k + 1]["end_price"])
+        h2 = max(strokes[k + 2]["start_price"], strokes[k + 2]["end_price"])
+        l2 = min(strokes[k + 2]["start_price"], strokes[k + 2]["end_price"])
+        overlap_top = min(h0, h1, h2)
+        overlap_bottom = max(l0, l1, l2)
+        if overlap_top > overlap_bottom:
+            seg_start = k
+            break
+
+    if seg_start < 0:
+        # 所有3笔组合都没有价格重叠
+        return []
+
+    # 确定第一段线段方向
+    first_high = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+    first_low = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+    third_high = max(strokes[seg_start + 2]["start_price"], strokes[seg_start + 2]["end_price"])
+    third_low = min(strokes[seg_start + 2]["start_price"], strokes[seg_start + 2]["end_price"])
+
+    if strokes[seg_start]["direction"] == "up" and third_high > first_high:
+        current_direction = "up"
+    elif strokes[seg_start]["direction"] == "down" and third_low < first_low:
+        current_direction = "down"
+    else:
+        current_direction = strokes[seg_start]["direction"]
+
+    segments: list[dict[str, Any]] = []
+    # seg_start 已在上面确定，不再重置为0
+    # 特征序列：记录与线段方向相反的笔
+    # 向上线段 → 取向下笔（用低点）；向下线段 → 取向上笔（用高点）
+    last_char_val: float | None = None  # 上一根特征序列的极值
+
+    for i in range(seg_start + 1, len(strokes)):
+        s = strokes[i]
+
+        if current_direction == "up":
+            # 向上线段：只看向下笔作为特征序列
+            if s["direction"] == "down":
+                char_val = min(s["start_price"], s["end_price"])  # 向下笔低点
+                if last_char_val is not None and char_val < last_char_val:
+                    # 线段终结：当前向下笔低点 < 前一根向下笔低点
+                    # 线段终结于前一根笔（向上笔，即 i-1）
+                    end_idx = i - 1
+                    seg_strokes = strokes[seg_start:end_idx + 1]
+                    seg_high = max(
+                        max(ss["start_price"], ss["end_price"]) for ss in seg_strokes
+                    )
+                    seg_low = min(
+                        min(ss["start_price"], ss["end_price"]) for ss in seg_strokes
+                    )
+                    start_p = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                    end_p = max(strokes[end_idx]["start_price"], strokes[end_idx]["end_price"])
+                    segments.append({
+                        "direction": "up",
+                        "start_price": start_p,
+                        "end_price": end_p,
+                        "high": seg_high,
+                        "low": seg_low,
+                        "start_index": seg_start,
+                        "end_index": end_idx,
+                        "strokes_count": len(seg_strokes),
+                    })
+                    # 新线段从终结点开始，方向反转
+                    seg_start = end_idx
+                    current_direction = "down"
+                    last_char_val = None
+                    continue
+                last_char_val = char_val
+
+        else:  # current_direction == "down"
+            # 向下线段：只看向上笔作为特征序列
+            if s["direction"] == "up":
+                char_val = max(s["start_price"], s["end_price"])  # 向上笔高点
+                if last_char_val is not None and char_val > last_char_val:
+                    # 线段终结：当前向上笔高点 > 前一根向上笔高点
+                    # 线段终结于前一根笔（向下笔，即 i-1）
+                    end_idx = i - 1
+                    seg_strokes = strokes[seg_start:end_idx + 1]
+                    seg_high = max(
+                        max(ss["start_price"], ss["end_price"]) for ss in seg_strokes
+                    )
+                    seg_low = min(
+                        min(ss["start_price"], ss["end_price"]) for ss in seg_strokes
+                    )
+                    start_p = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                    end_p = min(strokes[end_idx]["start_price"], strokes[end_idx]["end_price"])
+                    segments.append({
+                        "direction": "down",
+                        "start_price": start_p,
+                        "end_price": end_p,
+                        "high": seg_high,
+                        "low": seg_low,
+                        "start_index": seg_start,
+                        "end_index": end_idx,
+                        "strokes_count": len(seg_strokes),
+                    })
+                    # 新线段从终结点开始，方向反转
+                    seg_start = end_idx
+                    current_direction = "up"
+                    last_char_val = None
+                    continue
+                last_char_val = char_val
+
+    # 收尾：如果最后一段至少有 min_strokes 笔，追加
+    remaining = strokes[seg_start:]
+    if len(remaining) >= min_strokes:
+        seg_high = max(max(ss["start_price"], ss["end_price"]) for ss in remaining)
+        seg_low = min(min(ss["start_price"], ss["end_price"]) for ss in remaining)
+        if current_direction == "up":
+            start_p = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+            end_p = max(strokes[-1]["start_price"], strokes[-1]["end_price"])
+        else:
+            start_p = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+            end_p = min(strokes[-1]["start_price"], strokes[-1]["end_price"])
+        segments.append({
+            "direction": current_direction,
+            "start_price": start_p,
+            "end_price": end_p,
+            "high": seg_high,
+            "low": seg_low,
+            "start_index": seg_start,
+            "end_index": len(strokes) - 1,
+            "strokes_count": len(remaining),
+        })
+
+    return segments
+
+
+def build_zones(items: list[dict], level: str = "segment") -> list[dict]:
+    """构建中枢序列。
+
+    当 level=="segment" 且 items 含 start_index/end_index 字段时，用 3 段线段构建中枢；
+    否则用旧逻辑（3 笔构建中枢）。
+    """
+    if len(items) < 3:
         return []
 
     zones: list[dict[str, Any]] = []
-    for i in range(0, len(strokes) - 2, 1):
-        group = strokes[i:i + 3]
+    for i in range(0, len(items) - 2, 1):
+        group = items[i:i + 3]
 
         highs: list[float] = []
         lows: list[float] = []
@@ -250,6 +409,154 @@ def build_zones(strokes: list[dict]) -> list[dict]:
             })
 
     return zones
+
+
+def _detect_unilateral(strokes: list[dict]) -> str | None:
+    """检测单边走势：大部分笔之间无价格重叠，整体方向明确。
+
+    返回 "单边上涨" / "单边下跌" / None
+    """
+    if len(strokes) < 6:
+        return None
+
+    # 统计相邻笔重叠比例
+    total_pairs = len(strokes) - 1
+    overlap_count = 0
+    for i in range(total_pairs):
+        h1 = max(strokes[i]["start_price"], strokes[i]["end_price"])
+        l1 = min(strokes[i]["start_price"], strokes[i]["end_price"])
+        h2 = max(strokes[i + 1]["start_price"], strokes[i + 1]["end_price"])
+        l2 = min(strokes[i + 1]["start_price"], strokes[i + 1]["end_price"])
+        if min(h1, h2) > max(l1, l2):
+            overlap_count += 1
+
+    # 超过60%的笔对无重叠 → 视为单边
+    if overlap_count / total_pairs > 0.4:
+        return None  # 重叠太多，不是单边
+
+    # 判断方向：取每笔中点，看首尾差异
+    mids = [(max(s["start_price"], s["end_price"]) + min(s["start_price"], s["end_price"])) / 2 for s in strokes]
+    if len(mids) < 2:
+        return None
+
+    if mids[-1] > mids[0] * 1.05:
+        return "单边上涨"
+    elif mids[-1] < mids[0] * 0.95:
+        return "单边下跌"
+    return None
+
+
+def classify_structure(zones: list[dict], segments: list[dict] | None = None, strokes: list[dict] | None = None) -> dict:
+    """走势分类：根据中枢关系和线段数量判断盘整或趋势。
+
+    线段数量要求（标准缠论）：
+    - 盘整走势 = 进入段 + 中枢(3段) + 离开段 = 最少 5 段线段
+    - 趋势走势 = 进1 + 中枢1(3段) + 离1 + 进2 + 中枢2(3段) + 离2 = 最少 11 段线段
+
+    单边走势：
+    - 线段不足但笔之间无重叠 → 单边上涨/单边下跌
+
+    输出结构类型：
+    - "盘整" / "上涨趋势" / "下跌趋势" / "单边上涨" / "单边下跌"
+    - "线段不足X/Y" — 有线段但不够判定（X=当前线段数，Y=需要数）
+    - "无结构" — 连笔都没有
+    """
+    MIN_SEGMENTS_CONSOLIDATION = 5   # 盘整最少线段数
+    MIN_SEGMENTS_TREND = 11          # 趋势最少线段数
+
+    valid_zones = [z for z in zones if z.get("valid")]
+    seg_count = len(segments) if segments else 0
+    strokes_count = len(strokes) if strokes else 0
+
+    # 笔都没有 → 无结构
+    if strokes_count < 3:
+        return {
+            "structure_type": "无结构",
+            "structure_segments_count": seg_count,
+            "structure_zones_count": 0,
+        }
+
+    # 没有中枢 → 尝试检测单边走势，否则显示线段不足
+    if not valid_zones:
+        unilateral = _detect_unilateral(strokes or [])
+        if unilateral:
+            return {
+                "structure_type": unilateral,
+                "structure_segments_count": seg_count,
+                "structure_zones_count": 0,
+            }
+        if seg_count > 0:
+            return {
+                "structure_type": f"线段不足{seg_count}/{MIN_SEGMENTS_CONSOLIDATION}",
+                "structure_segments_count": seg_count,
+                "structure_zones_count": 0,
+            }
+        return {
+            "structure_type": f"线段不足0/{MIN_SEGMENTS_CONSOLIDATION}",
+            "structure_segments_count": 0,
+            "structure_zones_count": 0,
+        }
+
+    # 先判断中枢方向关系
+    pair_direction: str | None = None
+    zones_trend = "盘整"
+    for i in range(1, len(valid_zones)):
+        prev = valid_zones[i - 1]
+        curr = valid_zones[i]
+        if curr["zh_bottom"] > prev["zh_top"]:
+            this_dir = "up"
+        elif curr["zh_top"] < prev["zh_bottom"]:
+            this_dir = "down"
+        else:
+            zones_trend = "盘整"
+            break
+        if pair_direction is not None and this_dir != pair_direction:
+            zones_trend = "盘整"
+            break
+        pair_direction = this_dir
+        zones_trend = "上涨趋势" if this_dir == "up" else "下跌趋势"
+
+    # 1 个中枢 → 盘整（需 ≥5 段线段）
+    if len(valid_zones) == 1:
+        if seg_count < MIN_SEGMENTS_CONSOLIDATION:
+            return {
+                "structure_type": f"线段不足{seg_count}/{MIN_SEGMENTS_CONSOLIDATION}",
+                "structure_segments_count": seg_count,
+                "structure_zones_count": 1,
+            }
+        return {
+            "structure_type": "盘整",
+            "structure_segments_count": seg_count,
+            "structure_zones_count": 1,
+        }
+
+    # 2+ 个中枢
+    if zones_trend in ("上涨趋势", "下跌趋势"):
+        if seg_count < MIN_SEGMENTS_TREND:
+            return {
+                "structure_type": f"线段不足{seg_count}/{MIN_SEGMENTS_TREND}",
+                "structure_segments_count": seg_count,
+                "structure_zones_count": len(valid_zones),
+            }
+        return {
+            "structure_type": zones_trend,
+            "structure_segments_count": seg_count,
+            "structure_zones_count": len(valid_zones),
+        }
+
+    # 中枢重叠 → 盘整
+    if seg_count < MIN_SEGMENTS_CONSOLIDATION:
+        return {
+            "structure_type": f"线段不足{seg_count}/{MIN_SEGMENTS_CONSOLIDATION}",
+            "structure_segments_count": seg_count,
+            "structure_zones_count": len(valid_zones),
+        }
+
+    return {
+        "structure_type": "盘整",
+        "structure_segments_count": seg_count,
+        "structure_zones_count": len(valid_zones),
+    }
 
 
 def _check_macd_for_2nd_buy(
@@ -588,9 +895,12 @@ def chanlun_analysis(
     cleaned = handle_inclusion(bars)
     fractions = find_fractions(cleaned)
     strokes = build_strokes(fractions, min_bars_per_stroke=CHANLUN_MIN_BARS_PER_STROKE)
-    zones = build_zones(strokes)
+    segments = build_segments(strokes, min_strokes=CHANLUN_MIN_STROKES_PER_SEGMENT)
+    zones = build_zones(segments if len(segments) >= 3 else strokes,
+                         level="segment" if len(segments) >= 3 else "stroke")
+    structure = classify_structure(zones, segments, strokes)
     divergence = detect_divergence(bars, strokes)
-    
+
     # Check MACD divergence for 2nd buy point (bottom divergence)
     macd_divergence_buy = _check_macd_for_2nd_buy(bars, strokes)
     # Check MACD divergence for 2nd sell point (top divergence) — P0 fix
@@ -602,7 +912,18 @@ def chanlun_analysis(
     strokes_count = len(strokes)
     zones_count = len(zones)
 
-    if strokes_count >= 3:
+    # 优先用线段投票，不足时 fallback 到笔级别
+    if len(segments) >= 3:
+        recent3 = [seg["direction"] for seg in segments[-3:]]
+        up_count = recent3.count("up")
+        down_count = recent3.count("down")
+        if up_count >= 2:
+            trend_label = "拉升段"
+        elif down_count >= 2:
+            trend_label = "回调段"
+        else:
+            trend_label = "震荡段"
+    elif strokes_count >= 3:
         # 最近3笔方向多数决：过滤单笔噪音，避免最后一笔小回调误判整段趋势
         recent3 = [s["direction"] for s in strokes[-3:]]
         up_count = recent3.count("up")
@@ -643,6 +964,10 @@ def chanlun_analysis(
         "divergence": divergence,
         "last_valid_zone_last_price": last_valid_zone_last_price,
         "last_valid_zone_first_price": last_valid_zone_first_price,
+        "segments": segments,
+        "segments_count": len(segments),
+        "structure_type": structure["structure_type"],
+        "structure_segments_count": structure["structure_segments_count"],
     }
 
 

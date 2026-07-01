@@ -10,7 +10,9 @@ from trader_shared.chan_core import (
     handle_inclusion,
     find_fractions,
     build_strokes,
+    build_segments,
     build_zones,
+    classify_structure,
     detect_buy_points,
     detect_divergence,
     chanlun_analysis,
@@ -292,3 +294,183 @@ class TestChanlunAnalysis:
         assert "divergence" in result
         assert "top_divergence" in result["divergence"]
         assert "bottom_divergence" in result["divergence"]
+
+
+class TestBuildSegments:
+    """build_segments 测试。"""
+
+    def test_insufficient_strokes(self):
+        """不足 3 笔返回空。"""
+        strokes = [
+            {"direction": "up", "start_price": 10, "end_price": 20},
+            {"direction": "down", "start_price": 20, "end_price": 15},
+        ]
+        assert build_segments(strokes) == []
+
+    def test_minimal_up_segment(self):
+        """3 笔构成最小向上线段（上-下-上）。"""
+        strokes = [
+            {"direction": "up",   "start_price": 10, "end_price": 20},
+            {"direction": "down", "start_price": 20, "end_price": 15},
+            {"direction": "up",   "start_price": 15, "end_price": 25},
+        ]
+        segs = build_segments(strokes, min_strokes=3)
+        assert len(segs) == 1
+        assert segs[0]["direction"] == "up"
+        assert segs[0]["start_price"] == 10
+        assert segs[0]["end_price"] == 25
+        assert segs[0]["strokes_count"] == 3
+
+    def test_minimal_down_segment(self):
+        """3 笔构成最小向下线段（下-上-下）。"""
+        strokes = [
+            {"direction": "down", "start_price": 20, "end_price": 10},
+            {"direction": "up",   "start_price": 10, "end_price": 15},
+            {"direction": "down", "start_price": 15, "end_price": 8},
+        ]
+        segs = build_segments(strokes, min_strokes=3)
+        assert len(segs) == 1
+        assert segs[0]["direction"] == "down"
+        assert segs[0]["start_price"] == 20
+        assert segs[0]["end_price"] == 8
+
+    def test_segment_termination(self):
+        """特征序列反转导致线段终结。"""
+        # 向上线段：特征序列取向下笔低点
+        # 第1根向下笔低点=15，第2根向下笔低点=13 < 15 → 终结
+        strokes = [
+            {"direction": "up",   "start_price": 10, "end_price": 20},  # 0
+            {"direction": "down", "start_price": 20, "end_price": 15},  # 1
+            {"direction": "up",   "start_price": 15, "end_price": 25},  # 2
+            {"direction": "down", "start_price": 25, "end_price": 13},  # 3 — 低点13 < 15 → 终结
+            {"direction": "up",   "start_price": 13, "end_price": 18},  # 4
+        ]
+        segs = build_segments(strokes, min_strokes=3)
+        # 应该有2段：第1段终结于笔2，第2段从笔2开始
+        assert len(segs) >= 2
+        assert segs[0]["direction"] == "up"
+        assert segs[0]["end_index"] == 2
+        assert segs[1]["direction"] == "down"
+
+    def test_multiple_segments(self):
+        """多段线段正确分割。"""
+        # 向上线段 1: up(10→20), down(20→15), up(15→25)
+        # 终结: down(25→14) 低点14 < 15
+        # 向下线段 2: down(25→14), up(14→18), down(18→12)
+        strokes = [
+            {"direction": "up",   "start_price": 10, "end_price": 20},
+            {"direction": "down", "start_price": 20, "end_price": 15},
+            {"direction": "up",   "start_price": 15, "end_price": 25},
+            {"direction": "down", "start_price": 25, "end_price": 14},
+            {"direction": "up",   "start_price": 14, "end_price": 18},
+            {"direction": "down", "start_price": 18, "end_price": 12},
+        ]
+        segs = build_segments(strokes, min_strokes=3)
+        assert len(segs) >= 2
+        assert segs[0]["direction"] == "up"
+        assert segs[1]["direction"] == "down"
+
+
+class TestClassifyStructure:
+    """classify_structure 测试。"""
+
+    def _make_strokes(self, n=6):
+        """生成 n 笔交替的测试数据。"""
+        strokes = []
+        for i in range(n):
+            if i % 2 == 0:
+                strokes.append({"direction": "up", "start_price": 10.0, "end_price": 15.0})
+            else:
+                strokes.append({"direction": "down", "start_price": 15.0, "end_price": 10.0})
+        return strokes
+
+    def test_no_zones_no_strokes(self):
+        """0 中枢 0 笔 → 无结构。"""
+        result = classify_structure([], strokes=[])
+        assert result["structure_type"] == "无结构"
+
+    def test_no_zones_insufficient_segments(self):
+        """0 中枢有笔但线段不足 → 线段不足X/5。"""
+        strokes = self._make_strokes(6)
+        result = classify_structure([], segments=[{"direction": "up"}], strokes=strokes)
+        assert "线段不足" in result["structure_type"]
+
+    def test_insufficient_segments_for_consolidation(self):
+        """1 中枢但线段不足 5 → 线段不足3/5。"""
+        zones = [{"zh_top": 20.0, "zh_bottom": 15.0, "valid": True}]
+        strokes = self._make_strokes(6)
+        result = classify_structure(zones, segments=[{}, {}, {}], strokes=strokes)
+        assert result["structure_type"] == "线段不足3/5"
+        assert result["structure_zones_count"] == 1
+
+    def test_consolidation(self):
+        """1 中枢 + 5 段线段 → 盘整。"""
+        zones = [{"zh_top": 20.0, "zh_bottom": 15.0, "valid": True}]
+        segs = [{"direction": "up"} for _ in range(5)]
+        strokes = self._make_strokes(6)
+        result = classify_structure(zones, segments=segs, strokes=strokes)
+        assert result["structure_type"] == "盘整"
+        assert result["structure_zones_count"] == 1
+
+    def test_insufficient_segments_for_trend(self):
+        """2 个递增中枢但线段不足 11 → 线段不足5/11。"""
+        zones = [
+            {"zh_top": 20.0, "zh_bottom": 15.0, "valid": True},
+            {"zh_top": 30.0, "zh_bottom": 25.0, "valid": True},
+        ]
+        segs = [{"direction": "up"} for _ in range(5)]
+        strokes = self._make_strokes(6)
+        result = classify_structure(zones, segments=segs, strokes=strokes)
+        assert result["structure_type"] == "线段不足5/11"
+
+    def test_uptrend(self):
+        """2 个递增中枢 + 11 段线段 → 上涨趋势。"""
+        zones = [
+            {"zh_top": 20.0, "zh_bottom": 15.0, "valid": True},
+            {"zh_top": 30.0, "zh_bottom": 25.0, "valid": True},
+        ]
+        segs = [{"direction": "up"} for _ in range(11)]
+        strokes = self._make_strokes(12)
+        result = classify_structure(zones, segments=segs, strokes=strokes)
+        assert result["structure_type"] == "上涨趋势"
+        assert result["structure_zones_count"] == 2
+
+    def test_downtrend(self):
+        """2 个递减中枢 + 11 段线段 → 下跌趋势。"""
+        zones = [
+            {"zh_top": 30.0, "zh_bottom": 25.0, "valid": True},
+            {"zh_top": 20.0, "zh_bottom": 15.0, "valid": True},
+        ]
+        segs = [{"direction": "down"} for _ in range(11)]
+        strokes = self._make_strokes(12)
+        result = classify_structure(zones, segments=segs, strokes=strokes)
+        assert result["structure_type"] == "下跌趋势"
+        assert result["structure_zones_count"] == 2
+
+
+class TestChanlunAnalysisIntegration:
+    """chanlun_analysis 集成测试：验证新增字段。"""
+
+    def test_full_pipeline_has_segments(self):
+        """验证 chanlun_analysis 返回 segments 和 structure_type 字段。"""
+        bars = [_make_bar(10 + i * 0.1, 11 + i * 0.1, 9 + i * 0.1, 10 + i * 0.1) for i in range(30)]
+        result = chanlun_analysis(bars, 10.5)
+        assert "segments" in result
+        assert "segments_count" in result
+        assert "structure_type" in result
+        assert "structure_segments_count" in result
+        assert isinstance(result["segments"], list)
+        assert isinstance(result["segments_count"], int)
+
+    def test_backward_compat_fields(self):
+        """验证所有旧字段仍然存在。"""
+        bars = [_make_bar(10 + i * 0.1, 11 + i * 0.1, 9 + i * 0.1, 10 + i * 0.1) for i in range(30)]
+        result = chanlun_analysis(bars, 10.5)
+        legacy_fields = [
+            "strokes", "zones", "buy_points", "sell_points",
+            "trend_label", "buy_point_text", "sell_point_text",
+            "strokes_count", "zones_count", "divergence",
+            "last_valid_zone_last_price", "last_valid_zone_first_price",
+        ]
+        for field in legacy_fields:
+            assert field in result, f"缺少旧字段: {field}"

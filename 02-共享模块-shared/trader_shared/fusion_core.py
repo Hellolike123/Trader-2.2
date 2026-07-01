@@ -138,13 +138,15 @@ def _chan_to_signal(chan_result: dict) -> dict:
                     "reason": "缠论顶背驰", "raw_key": "chan"}
 
     # 优先级3: 趋势
+    structure_type = chan.get("structure_type", "")
+    _st_suffix = f"({structure_type})" if structure_type else ""
     if isinstance(trend_label, str):
         if "拉升段" in trend_label:
             return {"direction": 1, "confidence": 0.4,
-                    "reason": f"缠论:{trend_label}", "raw_key": "chan"}
+                    "reason": f"缠论:{trend_label}{_st_suffix}", "raw_key": "chan"}
         if "回调段" in trend_label:
             return {"direction": -1, "confidence": 0.4,
-                    "reason": f"缠论:{trend_label}", "raw_key": "chan"}
+                    "reason": f"缠论:{trend_label}{_st_suffix}", "raw_key": "chan"}
 
     return {"direction": 0, "confidence": 0.3,
             "reason": "缠论无明确信号", "raw_key": "chan"}
