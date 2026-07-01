@@ -364,7 +364,9 @@ def wyckoff_score_to_direction(score: int) -> dict:
     - score <= 35: 看空, confidence = (100-score)/100
     - 35 < score < 65: 中性, confidence = 0.3
 
-    保留 _wyckoff_to_signal 不变（基于布尔信号的精确映射仍在使用中）。
+    自动受益：calculate_wyckoff_score() 新增 AR/SOS/ST/LPS 信号后，
+    score 范围自动扩大，此函数无需改动即可反映新分数。
+    当前 _wyckoff_to_signal 是主线，此函数保留为 score-based 备选。
     """
     if score >= 65:
         return {

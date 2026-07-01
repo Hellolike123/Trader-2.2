@@ -40,7 +40,7 @@ try:
     )
 except ImportError:
     WYCKOFF_MIN_BARS = 15
-    WYCKOFF_BC_VOL_RATIO_THRESHOLD = 1.5
+    WYCKOFF_BC_VOL_RATIO_THRESHOLD = 1.8  # must match config.py:95
     WYCKOFF_BC_CHANGE_THRESHOLD = 1.0
     WYCKOFF_BC_UPPER_SHADOW_RATIO = 0.02
     WYCKOFF_SOW_SUPPORT_LOOKBACK = 10
@@ -560,7 +560,7 @@ def _detect_st(bars: list[dict]) -> dict:
 def _detect_lps(bars: list[dict]) -> dict:
     """Detect LPS (Last Point of Support) — SOS 突破后回调不破前低。
 
-    威科夫阶段: ... → 回调 (LPS) → SOS → 主升
+    威科夫阶段: ... → SOS → 回调 → LPS → 主升
     检测窗口 (25+ 根):
       bars[-5:]     = SOS 窗口
       bars[-15:-5]  = 回调窗口 (5-10 根)
@@ -613,13 +613,26 @@ def _detect_lps(bars: list[dict]) -> dict:
     if len(pullback) < 2:
         return {"lps_signal": False, "lps_reason": "回调窗口不足", "lps_price": None}
 
-    pb_closes = [to_float(b.get("close")) or 0 for b in pullback]
-    pb_lows = [to_float(b.get("low")) or 0 for b in pullback]
-    pb_vols = [to_float(b.get("volume")) or 0 for b in pullback]
+    # 跳过 None 数据，与 _detect_spring 一致：静默变 0 会误触发信号
+    pb_closes: list[float] = []
+    pb_lows: list[float] = []
+    pb_vols: list[float] = []
+    for b in pullback:
+        c = to_float(b.get("close"))
+        lo = to_float(b.get("low"))
+        v = to_float(b.get("volume"))
+        if c is None or lo is None or v is None:
+            continue
+        pb_closes.append(c)
+        pb_lows.append(lo)
+        pb_vols.append(v)
+
+    if len(pb_closes) < 2:
+        return {"lps_signal": False, "lps_reason": "回调有效数据不足", "lps_price": None}
 
     best_lps: dict | None = None
 
-    for end in range(1, len(pullback) + 1):  # 回调长度 1..5
+    for end in range(1, len(pb_closes) + 1):  # 回调长度 1..5
         seg_closes = pb_closes[:end]
         seg_lows = pb_lows[:end]
 

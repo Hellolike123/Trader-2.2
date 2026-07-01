@@ -255,6 +255,62 @@ class TestWyckoffToSignal:
         result = fn({"wyckoff": {"spring_signal": True, "bearish_volume_divergence": True}})
         assert result["direction"] == 1  # Spring 决定方向
 
+    # ── 新增经典信号测试 ──
+
+    def test_ar_signal_mapping(self):
+        """AR (Automatic Rally) 信号映射。"""
+        fn = self._fn
+        result = fn({"wyckoff": {"ar_signal": True, "ar_reason": "BC 后自动反弹，放量+3.1%"}})
+        assert result["direction"] == 1
+        assert result["confidence"] == 0.6
+        assert "自动反弹" in result["reason"]
+
+    def test_sos_signal_mapping(self):
+        """SOS (Sign of Strength) 信号映射。"""
+        fn = self._fn
+        result = fn({"wyckoff": {"sos_signal": True, "sos_reason": "强势突破，5连阳累计涨5.2%"}})
+        assert result["direction"] == 1
+        assert result["confidence"] == 0.7
+        assert "强势突破" in result["reason"]
+
+    def test_st_signal_mapping(self):
+        """ST (Secondary Test) 信号映射。"""
+        fn = self._fn
+        result = fn({"wyckoff": {"st_signal": True, "st_reason": "Spring 支撑二次测试，缩量确认"}})
+        assert result["direction"] == 1
+        assert result["confidence"] == 0.5
+        assert "二次测试" in result["reason"]
+
+    def test_lps_signal_mapping(self):
+        """LPS (Last Point of Support) 信号映射。"""
+        fn = self._fn
+        result = fn({"wyckoff": {"lps_signal": True, "lps_reason": "SOS 后缩量回调，不破前低"}})
+        assert result["direction"] == 1
+        assert result["confidence"] == 0.5
+        assert "缩量回调" in result["reason"] or "最后支撑" in result["reason"]
+
+    def test_sos_priority_over_ar(self):
+        """SOS 优先于 AR（置信度更高）。"""
+        fn = self._fn
+        result = fn({"wyckoff": {"ar_signal": True, "ar_reason": "x", "sos_signal": True, "sos_reason": "y"}})
+        assert result["direction"] == 1
+        assert result["confidence"] == 0.7  # SOS 的置信度
+
+    def test_ar_priority_over_st(self):
+        """AR 优先于 ST（置信度更高）。"""
+        fn = self._fn
+        result = fn({"wyckoff": {"st_signal": True, "ar_signal": True}})
+        assert result["direction"] == 1
+        assert result["confidence"] == 0.6  # AR 的置信度
+
+    def test_lps_priority_over_bullish_div(self):
+        """LPS 优先于看多背离。"""
+        fn = self._fn
+        result = fn({"wyckoff": {"lps_signal": True, "lps_reason": "SOS 后缩量回调，不破前低", "bullish_volume_divergence": True}})
+        assert result["direction"] == 1
+        assert result["confidence"] == 0.5  # LPS
+        assert "缩量回调" in result["reason"]
+
 
 class TestRegimeWeights:
     """Regime 权重矩阵测试。"""

@@ -674,4 +674,97 @@ class TestWyckoffScoreWithClassicSignals:
         assert len(spring_signals) >= 1, f"Spring not detected: {result['signals']}"
         assert result["score"] > 60  # Spring=+25
 
+    def test_ar_adds_10(self):
+        """AR 信号精确贡献 +10。构造 BC(+ 反弹) 场景: BC=-15, AR=+10, raw=-5。"""
+        from trader_shared.wyckoff_core import calculate_wyckoff_score
+        # BC bar: vol_ratio=1000/10=100>>1.8, change=0.5%<1%, upper_shadow=(105-100.5)/4.5=100%>2%
+        bars = [_make_bar(100, 105, 95, 102, 10) for _ in range(16)]
+        bars.append(_make_bar(101, 105, 100, 100.5, 1000))  # BC at bar 17
+        # AR bar: close=103 > 100.5*1.02=102.51, vol=300 > 10*1.2=12
+        bars.append(_make_bar(101, 103, 101, 103, 300))  # AR trigger at bar 18
+        result = calculate_wyckoff_score(bars)
+        assert result["raw"] == -5, f"Expected raw=-5 (BC-15 + AR+10), got {result['raw']}"
+
+    def test_sos_adds_15(self):
+        """SOS 信号精确贡献 +15。5 连阳放量突破，无其他信号。
+
+        数学推导：S > 1.38B 满足 SOS，S < 1.8B 避免 BC。取 S=1.5B。
+        20 base bars (vol=200) + 5 SOS bars (vol=300)。
+        """
+        from trader_shared.wyckoff_core import calculate_wyckoff_score
+        bars = []
+        for i in range(20):
+            o = 100 + i * 0.01
+            bars.append(_make_bar(o, o + 0.5, o - 0.5, o + 0.2, 200))
+        # 5 连阳：累计涨 (106.16-104)/104 ≈ 2.1% ≥ 2%
+        for i in range(5):
+            o = 104 + i * 0.44
+            c = o + 0.4
+            bars.append(_make_bar(o, c, o - 0.2, c, 300))
+        result = calculate_wyckoff_score(bars)
+        assert result["raw"] == 15, f"Expected raw=15 (SOS only), got {result['raw']}"
+
+    def test_st_adds_8(self):
+        """ST 信号精确贡献 +8。Spring(+25) + ST(+8) = 33。
+
+        构造：27 根 bars (ST 需要 len >= 26)
+        - bars[4:14]: 基准 10 根 (low=90, vol=200)
+        - bars[14]: Spring (low=88<90*0.985, close=90>=90)
+        - bars[15:17]: 2 根中间 bar
+        - bars[18]: ST trigger (low=89.5≈support, vol=100<200*0.8=160)
+        - bars[19:25]: 7 根收尾 (low≥90, 不触发新 Spring)
+        - bars[26]: Spring bar (bars[-1], low=88<90*0.985, close=90>=90)
+        """
+        from trader_shared.wyckoff_core import calculate_wyckoff_score
+        # 前 14 根：基准，low=90
+        bars = [_make_bar(100, 105, 90, 102, 200) for _ in range(14)]
+        # Spring bar (index 14)
+        bars.append(_make_bar(89, 91, 88, 90, 150))
+        # 中间 bar (index 15-16)
+        bars.append(_make_bar(91, 92, 90, 91.5, 180))
+        bars.append(_make_bar(91.5, 92, 90.5, 91, 180))
+        # ST trigger (index 18): low=89.5 回到 support(90) ±1%, vol=100 < 200*0.8
+        bars.append(_make_bar(91, 91.5, 89.5, 90.5, 100))
+        # 收尾 bars (index 19-25): low≥90, 确保不被误判为 Spring
+        for i in range(7):
+            bars.append(_make_bar(90 + i * 0.1, 91 + i * 0.1, 90, 90.5, 150))
+        # bars[-1] (index 26): Spring bar
+        bars.append(_make_bar(89, 91, 88, 90, 150))
+        result = calculate_wyckoff_score(bars)
+        assert result["raw"] == 33, f"Spring+ST: expected raw=33 (25+8), got {result['raw']}"
+
+    def test_lps_adds_12(self):
+        """LPS 信号精确贡献 +12。SOS(+15) + LPS(+12) = 27。
+
+        构造：27 根 bars
+        - bars[12:17]: 前低窗口 (5 根, low=88)
+        - bars[17:22]: 回调窗口 (5 根, 下行)
+        - bars[22:27]: SOS 窗口 (5 连阳)
+        volume: baseline=150, SOS=200, pullback=80
+        ratio=200/150=1.33 > 1.2 (SOS ✓), < 1.8 (BC ✗)
+        """
+        from trader_shared.wyckoff_core import calculate_wyckoff_score, wyckoff_analysis
+        bars = []
+        # 前 12 根：基准
+        for i in range(12):
+            bars.append(_make_bar(100 + i * 0.1, 101 + i * 0.1, 99 + i * 0.1, 100 + i * 0.1, 150))
+        # 前低窗口 (index 12-16): low=88
+        for i in range(5):
+            bars.append(_make_bar(89, 90, 88, 89, 150))
+        # 回调窗口 (index 17-21): 下行
+        for i in range(5):
+            o = 90 - i * 0.5
+            bars.append(_make_bar(o, o + 0.3, o - 0.3, o - 0.2, 80))
+        # SOS 窗口 (index 22-26): 5 连阳
+        for i in range(5):
+            o = 88 + i * 0.44
+            c = o + 0.4
+            bars.append(_make_bar(o, c, o - 0.2, c, 200))
+        # 验证信号触发
+        analysis = wyckoff_analysis(bars)
+        assert analysis["sos_signal"] is True, f"SOS not detected: {analysis.get('sos_reason')}"
+        assert analysis["lps_signal"] is True, f"LPS not detected: {analysis.get('lps_reason')}"
+        result = calculate_wyckoff_score(bars)
+        assert result["raw"] == 27, f"SOS+LPS: expected raw=27 (15+12), got {result['raw']}"
+
 
