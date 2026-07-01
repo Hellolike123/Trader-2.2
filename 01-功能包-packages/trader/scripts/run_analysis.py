@@ -928,11 +928,11 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     except Exception:
         pass
 
-    # 多时间窗共振（10分制）
+    # 多时间窗共振（13分制）
     resonance_result: dict[str, Any] = {
-        "total_score": 0, "weekly_score": 0, "daily_score": 0,
+        "total_score": 0, "monthly_score": 0, "weekly_score": 0, "daily_score": 0,
         "timing_score": 0, "sell_timing_score": 0, "resonance_score": 0,
-        "weekly_label": "无数据", "daily_label": "无数据",
+        "monthly_label": "无数据", "weekly_label": "无数据", "daily_label": "无数据",
         "timing_label": "无数据", "sell_timing_label": "无数据", "resonance_label": "无数据",
         "detail": {},
     }
@@ -944,6 +944,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         if res_d_closes and len(res_d_closes) >= 10:
             # 将5分钟线聚合为60分钟线
             bars_60m = aggregate_5m_to_60m(bars_5m) if bars_5m else []
+            # 提取月线数据
+            monthly_bars = snapshot.monthly_bars if hasattr(snapshot, "monthly_bars") else []
             resonance_result = calc_resonance(
                 daily_closes=res_d_closes,
                 current_price=current,
@@ -952,6 +954,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
                 bars_60m=bars_60m,  # 聚合后的60分钟线
                 daily_support=_support_f,
                 daily_resistance=_resistance_f,
+                monthly_bars=monthly_bars or [],  # 月线K线数据
             )
     except Exception:
         pass
@@ -1682,6 +1685,7 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         _ind_parts.append(f"{_em_short}（{ems['total_score']}/10）")
 
     res = r.get("resonance") or {}
+    _month_label = str(res.get("monthly_label", ""))
     _week_label = str(res.get("weekly_label", ""))
     _day_label = str(res.get("daily_label", ""))
     _tim_label = str(res.get("timing_label", ""))
@@ -1701,11 +1705,11 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         return ""
 
     _res_score = int(res.get("total_score", 0))
-    if _res_score >= 8:
-        _ind_parts.append("多周期共振")
+    if _res_score >= 9:
+        _ind_parts.append("多层共振")
     else:
         _tf_parts = []
-        for lbl, nm in [(_week_label, "周"), (_day_label, "日"), (_tim_label, "60m")]:
+        for lbl, nm in [(_month_label, "月"), (_week_label, "周"), (_day_label, "日"), (_tim_label, "60m")]:
             s = _tf_short(lbl, nm)
             if s:
                 _tf_parts.append(s)

@@ -1,9 +1,10 @@
-"""多时间窗共振分析模块（11分制）。
+"""多时间窗共振分析模块（13分制）。
 
-基于周线定方向、日线定结构、60分钟定买点的三层共振理念，
-提供 11 分制评分，用于选股池打分和输出展示。
+基于月线定中期方向、周线定方向、日线定结构、60分钟定买点的四层共振理念，
+提供 13 分制评分，用于选股池打分和输出展示。
 
 评分维度：
+  - 月线中期方向（2分）：月线 EXPMA20 方向
   - 周线方向（3分）：周线趋势、支撑/阻力位置
   - 日线结构（3分）：日线 EXPMA 排列、动量状态
   - 60分钟买卖点（2分）：60分钟价格相对于关键位
@@ -11,7 +12,7 @@
 
 用法:
     from trader_shared.multi_timeframe_resonance import calc_resonance
-    result = calc_resonance(daily_bars, weekly_bars, bars_60m, current_price)
+    result = calc_resonance(daily_bars, weekly_bars, bars_60m, current_price, monthly_bars=monthly_bars)
 """
 
 from __future__ import annotations
@@ -29,8 +30,9 @@ def calc_resonance(
     bars_60m: list[dict[str, Any]] | None = None,
     daily_support: float = 0,
     daily_resistance: float = 0,
+    monthly_bars: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """多时间窗共振分析（11分制）。
+    """多时间窗共振分析（13分制）。
 
     Args:
         daily_closes: 日线收盘价序列（用于日线结构评分）
@@ -40,14 +42,17 @@ def calc_resonance(
         bars_60m: 60分钟K线数据（可选）
         daily_support: 日线支撑位（用于共振判断）
         daily_resistance: 日线阻力位（用于共振判断）
+        monthly_bars: 月线K线数据（可选）
 
     Returns:
         {
-            "total_score": int,        # 总分 0-11
+            "total_score": int,        # 总分 0-13
+            "monthly_score": int,      # 月线分 0-2
             "weekly_score": int,       # 周线分 0-3
             "daily_score": int,        # 日线分 0-3
             "timing_score": int,       # 60min分 0-2
             "resonance_score": int,    # 共振分 0-3
+            "monthly_label": str,      # 月线标签
             "weekly_label": str,       # 周线标签
             "daily_label": str,        # 日线标签
             "timing_label": str,       # 60min标签
@@ -58,36 +63,42 @@ def calc_resonance(
     if not daily_closes or len(daily_closes) < 10:
         return _empty_result()
 
+    monthly = _score_monthly(monthly_bars, current_price)
     weekly = _score_weekly(weekly_bars, current_price, daily_closes, weekly_close=weekly_close)
     daily = _score_daily(daily_closes, current_price, daily_support, daily_resistance)
     timing = _score_timing_60m(bars_60m, current_price, daily_support, daily_resistance)
     sell_timing = _score_sell_timing_60m(bars_60m, current_price, daily_resistance)
-    resonance = _score_resonance(weekly, daily, timing)
+    resonance = _score_resonance(monthly, weekly, daily, timing)
 
-    total = weekly.get("points", 0) + daily.get("points", 0) + timing.get("points", 0) + resonance
+    total = (monthly.get("points", 0) + weekly.get("points", 0)
+             + daily.get("points", 0) + timing.get("points", 0) + resonance)
 
-    resonance_label = _resonance_label(resonance, weekly, daily, timing)
+    resonance_label = _resonance_label(resonance, monthly, weekly, daily, timing)
 
     detail: dict[str, Any] = {
+        "monthly_points": monthly,
         "weekly_points": weekly,
         "daily_points": daily,
         "timing_points": timing,
         "sell_timing_points": sell_timing,
         "resonance_points": resonance,
+        "monthly_label": monthly.get("label", "未知"),
         "weekly_label": weekly.get("label", "未知"),
         "daily_label": daily.get("label", "未知"),
         "timing_label": timing.get("label", "未知"),
         "sell_timing_label": sell_timing.get("label", "未知"),
-        "signals": _build_signals(weekly, daily, timing, resonance),
+        "signals": _build_signals(monthly, weekly, daily, timing, resonance),
     }
 
     return {
         "total_score": total,
+        "monthly_score": monthly.get("points", 0),
         "weekly_score": weekly.get("points", 0),
         "daily_score": daily.get("points", 0),
         "timing_score": timing.get("points", 0),
         "sell_timing_score": sell_timing.get("points", 0),
         "resonance_score": resonance,
+        "monthly_label": monthly.get("label", "未知"),
         "weekly_label": weekly.get("label", "未知"),
         "daily_label": daily.get("label", "未知"),
         "timing_label": timing.get("label", "未知"),
@@ -95,6 +106,49 @@ def calc_resonance(
         "resonance_label": resonance_label,
         "detail": detail,
     }
+
+
+# ── 月线中期方向评分（2分） ─────────────────────────────────────
+
+def _score_monthly(
+    monthly_bars: list[dict[str, Any]] | None,
+    current_price: float,
+) -> dict[str, Any]:
+    """月线中期方向 0-2 分。
+
+    评分因子：
+      - 月线 EXPMA20 方向（2分）：EXPMA10 > EXPMA20 = 多头，否则空头
+      - 价格站在 EXPMA20 上方（额外 0-1 分，封顶 2 分）
+
+    月线看的是中长期趋势方向，给 2 分权重即可。
+    """
+    score = 0
+    label = "月线未知"
+
+    if monthly_bars and len(monthly_bars) >= 20:
+        monthly_closes = [float(b.get("close", 0)) for b in monthly_bars if float(b.get("close", 0)) > 0]
+        if monthly_closes:
+            e20 = _calc_expma(monthly_closes, 20)
+            e10 = _calc_expma(monthly_closes, 10) if len(monthly_closes) >= 10 else e20
+
+            if e20 > 0:
+                if e10 and e10 > e20:
+                    score += 1
+                    label = "月线多头"
+                elif e10 and e10 < e20:
+                    label = "月线空头"
+                else:
+                    score += 1
+                    label = "月线中性"
+
+                if current_price > e20:
+                    score = min(2, score + 1)
+                    label = f"{label}（站上EXPMA20）"
+    else:
+        label = "⚠️ 月线数据缺失"
+        score = max(score, 0)
+
+    return {"points": min(2, score), "label": label}
 
 
 # ── 周线方向评分（3分） ──────────────────────────────────────────
@@ -304,17 +358,19 @@ def _score_sell_timing_60m(
 
 # ── 共振加分（2分） ─────────────────────────────────────────────
 
-def _score_resonance(weekly: dict, daily: dict, timing: dict) -> int:
+def _score_resonance(monthly: dict, weekly: dict, daily: dict, timing: dict) -> int:
     """共振加分 0-3 分。
 
     当多个时间窗方向一致时加分：
-      - 周线+日线同向：1分
-      - 三窗同向：2分
+      - 月线+周线+日线同向：1-2分
+      - 四层共振（含月线）：2分
       - 60分钟强势共振：3分
     """
     score = 0
 
     # 判断各窗方向
+    monthly_bullish = "多头" in monthly.get("label", "")
+    monthly_bearish = "空头" in monthly.get("label", "")
     weekly_bullish = "多头" in weekly.get("label", "")
     weekly_bearish = "空头" in weekly.get("label", "")
     daily_bullish = "多头" in daily.get("label", "") or "偏多" in daily.get("label", "")
@@ -322,14 +378,22 @@ def _score_resonance(weekly: dict, daily: dict, timing: dict) -> int:
     timing_positive = timing.get("points", 0) >= 1
     timing_strong = timing.get("points", 0) >= 2
 
-    # 周线+日线同向
-    if (weekly_bullish and daily_bullish) or (weekly_bearish and daily_bearish):
-        score += 1
+    # 月线+周线+日线同向
+    if (monthly_bullish and weekly_bullish and daily_bullish) or \
+       (monthly_bearish and weekly_bearish and daily_bearish):
+        score += 1  # 三层同向
         if timing_positive:
-            score += 1  # 三窗同向
+            score += 1  # 四层共振
             if timing_strong:
                 score += 1  # 60分钟强势共振
-    elif weekly_bullish or daily_bullish:
+    # 周线+日线同向（月线缺失时）
+    elif (weekly_bullish and daily_bullish) or (weekly_bearish and daily_bearish):
+        score += 1
+        if timing_positive:
+            score += 1
+            if timing_strong:
+                score += 1
+    elif monthly_bullish or weekly_bullish or daily_bullish:
         # 至少一个偏多，给半分
         if timing_positive:
             score += 1
@@ -339,12 +403,12 @@ def _score_resonance(weekly: dict, daily: dict, timing: dict) -> int:
 
 # ── 共振标签 ─────────────────────────────────────────────────────
 
-def _resonance_label(resonance: int, weekly: dict = None, daily: dict = None, timing: dict = None) -> str:
+def _resonance_label(resonance: int, monthly: dict = None, weekly: dict = None, daily: dict = None, timing: dict = None) -> str:
     """共振等级标签。"""
     if resonance >= 3:
-        return "三窗强势共振"
+        return "四层强势共振"
     elif resonance >= 2:
-        return "多窗共振（较强）"
+        return "多层共振（较强）"
     elif resonance >= 1:
         return "部分共振"
     else:
@@ -353,14 +417,19 @@ def _resonance_label(resonance: int, weekly: dict = None, daily: dict = None, ti
 
 # ── 信号聚合 ─────────────────────────────────────────────────────
 
-def _build_signals(weekly: dict, daily: dict, timing: dict, resonance: int) -> list[str]:
+def _build_signals(monthly: dict, weekly: dict, daily: dict, timing: dict, resonance: int) -> list[str]:
     """聚合关键信号。"""
     signals: list[str] = []
 
+    m_label = monthly.get("label", "") if monthly else ""
     w_label = weekly.get("label", "")
     d_label = daily.get("label", "")
     t_label = timing.get("label", "")
 
+    if m_label and "多头" in m_label:
+        signals.append(f"月线{m_label}")
+    if m_label and "空头" in m_label:
+        signals.append(f"月线{m_label}")
     if w_label and "多头" in w_label:
         signals.append(f"周线{w_label}")
     if d_label and "多头" in d_label:
@@ -375,9 +444,9 @@ def _build_signals(weekly: dict, daily: dict, timing: dict, resonance: int) -> l
 def _empty_result() -> dict[str, Any]:
     """返回空结果。"""
     return {
-        "total_score": 0, "weekly_score": 0, "daily_score": 0,
+        "total_score": 0, "monthly_score": 0, "weekly_score": 0, "daily_score": 0,
         "timing_score": 0, "sell_timing_score": 0, "resonance_score": 0,
-        "weekly_label": "无数据", "daily_label": "无数据",
+        "monthly_label": "无数据", "weekly_label": "无数据", "daily_label": "无数据",
         "timing_label": "无数据", "sell_timing_label": "无数据", "resonance_label": "无数据",
         "detail": {},
     }
