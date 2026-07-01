@@ -1851,8 +1851,8 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         if _max_pos > position_cap and confirm > 0:
             all_price_lines.append((confirm, f"  {confirm:.2f} 站稳可加仓至 {_max_pos}%（突破阻力确认，趋势延续）"))
     elif low_price > 0 and risk_reward_val is not None and risk_reward_val > 0 and rr_filtered:
-        # 盈亏比不足，仍显示价格但标记为留意（不生成买入建议）
-        all_price_lines.append((low_price, f"  {low_price:.2f} ← ⚠️ 盈亏比太低，不买"))
+        # 盈亏比不足，不显示
+        pass
     elif low_price > 0:
         all_price_lines.append((low_price, f"  {low_price:.2f} ← 试探买（等待确认）"))
 
