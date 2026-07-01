@@ -1702,16 +1702,36 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         _action_word = fusion_action.split("(")[0].strip()
         _reason = fusion_action.split("(")[1].rstrip(")").strip()
 
-    # 2. 主力阶段（未知时不显示）
-    _mf_env = r.get("main_force_env") or "unknown"
-    _mf_stage = _STAGE_LABELS.get(_mf_env, "")
-    _mf_display = f"{_mf_stage} + {_reason}" if _mf_stage and _reason else (_mf_stage if _mf_stage else (_reason if _reason else ""))
+    # 2. 四阶段定位：蓄势/主升/派发/衰退 + 动能
+    _major_stage = str(r.get("major_stage") or "")
+    if _major_stage == "None":
+        _major_stage = ""
+    # momentum 可能是 dict 包含 direction/信号等
+    _raw_mom = r.get("momentum")
+    _momentum = ""
+    if isinstance(_raw_mom, dict):
+        _mom_dir = _raw_mom.get("momentum", {})
+        if isinstance(_mom_dir, dict):
+            _mom_val = _mom_dir.get("direction", "") or _mom_dir.get("label", "")
+            # 英文 → 中文
+            _MOM_MAP = {"bullish": "走强", "bearish": "转弱", "neutral": "震荡", "flat": "震荡"}
+            _momentum = _MOM_MAP.get(_mom_val, _mom_val)
+    elif isinstance(_raw_mom, str) and _raw_mom != "None":
+        _momentum = _raw_mom
+    _stage_str = ""
+    if _major_stage:
+        _stage_str = _major_stage
+        if _momentum:
+            _stage_str += f"({_momentum})"
 
-    # 3. 第一行
-    if _mf_display:
-        lines.append(f"🎯 {_mf_display} → {_action_word}")
+    # 3. 第一行：四阶段 → 动作
+    if _stage_str:
+        lines.append(f"🎯 {_stage_str} → {_action_word}")
+    elif _reason:
+        lines.append(f"🎯 {_reason} → {_action_word}")
     else:
         lines.append(f"🎯 {_action_word}")
+
 
     # 4. 理论状态（第二行）— 从 fusion_signals 获取
     _theory_parts = []
