@@ -196,7 +196,7 @@ def assess() -> dict[str, Any]:
             index_returns = [(closes[i] - closes[i-1]) / closes[i-1] for i in range(1, len(closes))]
             if len(index_returns) >= 5:
                 from trader_shared.hmm_regime import detect_regime
-                hmm_res = detect_regime(index_returns)
+                hmm_res = detect_regime(index_returns, volume_ratio=vol_trend)
                 hmm_regime_en = hmm_res.get("state_en", "range")
                 hmm_regime_label = hmm_res.get("state_label", "宽幅震荡")
                 hmm_confidence = hmm_res.get("confidence", 0.5)
@@ -249,6 +249,7 @@ def assess() -> dict[str, Any]:
         "hmm_regime_en": hmm_regime_en,
         "hmm_regime_label": hmm_regime_label,
         "hmm_confidence": hmm_confidence,
+        "vol_trend": round(vol_trend, 2) if vol_trend is not None else None,
         "note": note + f" (HMM前瞻: {hmm_regime_label})",
         "bars": bars,  # 保留 bars 供缓存和下游使用
     }

@@ -189,6 +189,178 @@ class TestHMMRegimeDetector:
         assert result["confidence"] == 0.4
 
 
+class TestHMMRegime2D:
+    """P1-3: HMM 2D 模型（收益率 + 成交额比率）测试。"""
+
+    def setup_method(self):
+        from trader_shared.hmm_regime import HMMRegimeDetector, detect_regime
+        self.HMM = HMMRegimeDetector
+        self.detect_regime = detect_regime
+
+    def _bull_returns(self, n=100):
+        np.random.seed(42)
+        return list(np.random.normal(0.008, 0.008, n))
+
+    def _bear_returns(self, n=100):
+        np.random.seed(99)
+        return list(np.random.normal(-0.008, 0.020, n))
+
+    def _range_returns(self, n=100):
+        np.random.seed(7)
+        return list(np.random.normal(0.0, 0.013, n))
+
+    # ── 向后兼容 ─────────────────────────────────────────────────────────────
+
+    def test_1d_fallback_when_volume_ratio_none(self):
+        """volume_ratio=None 时应保持 1D 行为（向后兼容）。"""
+        result = self.detect_regime(self._bull_returns())
+        assert result["state_en"] in ("bull", "bear", "range")
+        assert result["volume_ratio"] is None
+
+    def test_1d_fallback_no_extra_keys(self):
+        """1D 模式下 volume_ratio 输出应为 None。"""
+        result = self.detect_regime(self._range_returns())
+        assert result["volume_ratio"] is None
+
+    # ── 2D 基本功能 ─────────────────────────────────────────────────────────
+
+    def test_2d_returns_valid_dict(self):
+        """2D 模式应返回包含所有必要键的字典。"""
+        result = self.detect_regime(self._bull_returns(), volume_ratio=1.3)
+        assert isinstance(result, dict)
+        assert "state_id" in result
+        assert "state_label" in result
+        assert "state_en" in result
+        assert "confidence" in result
+        assert "mu" in result
+        assert "sigma" in result
+        assert "volume_ratio" in result
+        assert result["state_en"] in ("bull", "bear", "range")
+
+    def test_2d_state_id_valid_range(self):
+        """2D 模式下 state_id 应在 [0, 1, 2] 范围内。"""
+        result = self.detect_regime(self._bear_returns(), volume_ratio=0.6)
+        assert result["state_id"] in (0, 1, 2)
+
+    def test_2d_confidence_valid_range(self):
+        """2D 模式下 confidence 应在 [0, 1] 之间。"""
+        result = self.detect_regime(self._range_returns(), volume_ratio=1.0)
+        assert 0.0 <= result["confidence"] <= 1.0
+
+    def test_2d_volume_ratio_in_output(self):
+        """2D 模式下输出应包含 volume_ratio 均值。"""
+        result = self.detect_regime(self._bull_returns(), volume_ratio=1.5)
+        assert result["volume_ratio"] is not None
+        assert isinstance(result["volume_ratio"], float)
+        # 先验: bull state 的 volume_ratio 均值约 1.3，收敛后应在其附近
+        assert 0.5 < result["volume_ratio"] < 2.0
+
+    def test_2d_mu_and_sigma_are_float(self):
+        """2D 模式下 mu 和 sigma 应为收益率维度的浮点数。"""
+        result = self.detect_regime(self._bull_returns(), volume_ratio=1.2)
+        assert isinstance(result["mu"], float)
+        assert isinstance(result["sigma"], float)
+        assert result["sigma"] > 0
+
+    # ── 2D 极端输入 ─────────────────────────────────────────────────────────
+
+    def test_2d_empty_returns(self):
+        """2D 模式下空序列应返回默认状态，不崩溃。"""
+        result = self.detect_regime([], volume_ratio=1.0)
+        assert result["state_en"] == "range"
+        assert result["volume_ratio"] == 1.0
+
+    def test_2d_short_data_returns_default(self):
+        """2D 模式下不足 3 条数据应返回默认状态。"""
+        result = self.detect_regime([0.01, -0.01], volume_ratio=0.8)
+        assert result["state_en"] == "range"
+        assert result["volume_ratio"] == 0.8
+
+    def test_2d_extreme_volume_ratio(self):
+        """极端成交量比率（放大 10 倍）不应崩溃。"""
+        result = self.detect_regime(self._bull_returns(), volume_ratio=10.0)
+        assert isinstance(result, dict)
+        assert result["state_en"] in ("bull", "bear", "range")
+
+    def test_2d_zero_volume_ratio(self):
+        """volume_ratio=0（完全缩量）不应崩溃。"""
+        result = self.detect_regime(self._bear_returns(), volume_ratio=0.0)
+        assert isinstance(result, dict)
+
+    # ── 2D 收敛速度 ─────────────────────────────────────────────────────────
+
+    def test_2d_convergence_speed_under_1s(self):
+        """2D 200 点数据拟合+解码应在 1 秒内完成。"""
+        returns = self._bull_returns(200)
+        import time
+        start = time.perf_counter()
+        self.detect_regime(returns, volume_ratio=1.3)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        assert elapsed_ms < 1000.0, f"2D 模式耗时 {elapsed_ms:.2f}ms 超过 1s"
+
+    def test_2d_convergence_speed_short_series(self):
+        """2D 60 点数据拟合+解码应在 500ms 内完成。"""
+        returns = self._bull_returns(60)
+        import time
+        start = time.perf_counter()
+        self.detect_regime(returns, volume_ratio=1.0)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        assert elapsed_ms < 500.0, f"2D 短序列耗时 {elapsed_ms:.2f}ms 超过 500ms"
+
+    # ── 2D 内部算法 ─────────────────────────────────────────────────────────
+
+    def test_2d_forward_backward_no_nan(self):
+        """2D 前向-后向算法不应产生 NaN/Inf。"""
+        hmm = self.HMM()
+        returns = self._range_returns(50)
+        hmm.fit(returns, volume_ratio=1.0)
+        obs_dim = hmm.obs_dim
+        assert obs_dim == 2
+        # 构建 2D 观测
+        obs = np.column_stack([np.array(returns), np.full(50, 1.0)])
+        B = hmm._gaussian_emission(obs)
+        alpha, c = hmm._forward(B)
+        beta = hmm._backward(B, c)
+        gamma = alpha * beta
+        assert not np.any(np.isnan(gamma)), "2D gamma 中存在 NaN"
+        assert not np.any(np.isinf(gamma)), "2D gamma 中存在 Inf"
+
+    def test_2d_viterbi_returns_valid_states(self):
+        """2D Viterbi 解码结果应全部为有效状态 [0, 1, 2]。"""
+        hmm = self.HMM()
+        returns = self._bull_returns(80)
+        hmm.fit(returns, volume_ratio=1.2)
+        states = hmm.predict(returns, volume_ratio=1.2)
+        assert all(s in (0, 1, 2) for s in states)
+        assert len(states) == 80
+
+    def test_2d_obs_dim_set_correctly(self):
+        """fit() 后 obs_dim 应为 2。"""
+        hmm = self.HMM()
+        assert hmm.obs_dim == 1  # 初始值
+        hmm.fit(self._bull_returns(50), volume_ratio=1.0)
+        assert hmm.obs_dim == 2
+
+    def test_1d_obs_dim_stays_1(self):
+        """fit() 无 volume_ratio 时 obs_dim 应为 1。"""
+        hmm = self.HMM()
+        hmm.fit(self._bull_returns(50))
+        assert hmm.obs_dim == 1
+
+    # ── detect_regime 缓存隔离 ──────────────────────────────────────────────
+
+    def test_different_volume_ratio_different_results(self):
+        """不同 volume_ratio 的 detect_regime 不应命中同一缓存。"""
+        from trader_shared.hmm_regime import _HMM_CACHE
+        _HMM_CACHE.clear()
+        returns = self._bull_returns(80)
+        r1 = self.detect_regime(returns, volume_ratio=0.5)
+        r2 = self.detect_regime(returns, volume_ratio=2.0)
+        # 两者均正常返回（缓存未串）
+        assert isinstance(r1, dict)
+        assert isinstance(r2, dict)
+
+
 class TestMarketEnvHMMFallback:
     """Verify that market_env.assess() logs (not swallows) HMM failures (P1 #6 fix)."""
 

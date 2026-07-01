@@ -43,36 +43,82 @@ class HMMRegimeDetector:
         self.n_states = n_states
         self.max_iter = max_iter
         self.tol = tol
+        self.obs_dim: int = 1  # fit() 中根据 volume_ratio 自动切换
 
         # 模型参数（随机初始化，fit 后更新）
         self._init_params()
 
     def _init_params(self) -> None:
-        """随机初始化模型参数。"""
+        """随机初始化模型参数（自适应 1D / 2D）。"""
         n = self.n_states
         # 初始状态分布 π
         self.pi = np.ones(n) / n
         # 状态转移矩阵 A (n×n)
         self.A = np.full((n, n), 1.0 / n)
-        # 观测高斯分布参数: 均值 μ 与标准差 σ
-        # 先验: 牛(0) > 震荡(1) > 熊(2)
-        # P1 Fix: 原 mu=[0.008, -0.008, 0.001] 把 bear 配给 state1(=range label)、range 配给 state2(=bear label)
-        # 正序: [bull=高收益低波动, range=近零中等波动, bear=负收益高波动]
-        self.mu = np.array([0.008, 0.001, -0.008])
-        self.sigma = np.array([0.01, 0.015, 0.02])
+
+        # 观测高斯分布参数
+        # P1 Fix: 先验正序: [bull=高收益低波动, range=近零中等波动, bear=负收益高波动]
+        if self.obs_dim == 2:
+            # mu[k] = [returns_mean, volume_ratio_mean]
+            # 先验: 牛市放量(1.3) / 震荡平量(1.0) / 熊市缩量(0.7)
+            self.mu = np.array([
+                [0.008, 1.3],
+                [0.001, 1.0],
+                [-0.008, 0.7],
+            ])
+            # 协方差矩阵（每状态 2×2）
+            self.cov = np.zeros((n, self.obs_dim, self.obs_dim))
+            for k in range(n):
+                self.cov[k] = np.eye(self.obs_dim)
+            self.cov[0][0, 0] = 0.01 ** 2   # bull 收益率方差
+            self.cov[0][1, 1] = 0.15 ** 2   # 成交量比率方差
+            self.cov[1][0, 0] = 0.015 ** 2
+            self.cov[1][1, 1] = 0.10 ** 2
+            self.cov[2][0, 0] = 0.02 ** 2
+            self.cov[2][1, 1] = 0.12 ** 2
+            self.sigma = None  # 2D 模式不使用
+        else:
+            # 1D: 均值 μ 与标准差 σ
+            self.mu = np.array([0.008, 0.001, -0.008])
+            self.sigma = np.array([0.01, 0.015, 0.02])
+            self.cov = None  # 1D 模式不使用
 
     # ─── 核心算法 ────────────────────────────────────────────────────────────
 
     def _gaussian_emission(self, obs: np.ndarray) -> np.ndarray:
-        """计算所有观测对所有状态的高斯概率密度矩阵 B[t, k]。"""
+        """计算所有观测对所有状态的高斯概率密度矩阵 B[t, k]。
+
+        支持 1D（标量 mu/sigma）和 2D（向量 mu + 协方差矩阵）。
+        """
         T = len(obs)
         B = np.zeros((T, self.n_states))
-        for k in range(self.n_states):
-            diff = obs - self.mu[k]
-            sigma_k = max(self.sigma[k], _EPS)
-            B[:, k] = (1.0 / (sigma_k * np.sqrt(2 * np.pi))) * np.exp(
-                -0.5 * (diff / sigma_k) ** 2
-            )
+
+        if self.obs_dim == 2:
+            for k in range(self.n_states):
+                diff = obs - self.mu[k]  # (T, 2)
+                cov_k = self.cov[k]  # (2, 2)
+                # Explicit 2×2 inverse (pure numpy, zero extra dependencies)
+                a, b = cov_k[0, 0], cov_k[0, 1]
+                c, d = cov_k[1, 0], cov_k[1, 1]
+                det = a * d - b * c
+                det = max(det, _EPS)
+                inv00, inv01 = d / det, -b / det
+                inv10, inv11 = -c / det, a / det
+                # Mahalanobis distance² = diff @ inv_cov @ diff.T
+                mahal_sq = (
+                    diff[:, 0] * (inv00 * diff[:, 0] + inv01 * diff[:, 1])
+                    + diff[:, 1] * (inv10 * diff[:, 0] + inv11 * diff[:, 1])
+                )
+                norm = 1.0 / (2.0 * np.pi * np.sqrt(det))
+                B[:, k] = norm * np.exp(-0.5 * mahal_sq)
+        else:
+            for k in range(self.n_states):
+                diff = obs - self.mu[k]
+                sigma_k = max(self.sigma[k], _EPS)
+                B[:, k] = (1.0 / (sigma_k * np.sqrt(2 * np.pi))) * np.exp(
+                    -0.5 * (diff / sigma_k) ** 2
+                )
+
         return np.clip(B, _EPS, None)
 
     def _forward(self, B: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -134,9 +180,17 @@ class HMMRegimeDetector:
         for k in range(self.n_states):
             g_k = gamma[:, k]
             g_sum = max(g_k.sum(), _EPS)
-            self.mu[k] = (g_k * obs).sum() / g_sum
-            diff = obs - self.mu[k]
-            self.sigma[k] = max(np.sqrt((g_k * diff**2).sum() / g_sum), _EPS)
+            if self.obs_dim == 2:
+                self.mu[k] = (g_k[:, None] * obs).sum(axis=0) / g_sum
+                diff = obs - self.mu[k]
+                self.cov[k] = (
+                    (diff * g_k[:, None]).T @ diff / g_sum
+                    + np.eye(self.obs_dim) * _EPS
+                )
+            else:
+                self.mu[k] = (g_k * obs).sum() / g_sum
+                diff = obs - self.mu[k]
+                self.sigma[k] = max(np.sqrt((g_k * diff**2).sum() / g_sum), _EPS)
 
         # 参数更新后重新计算对数似然（避免 off-by-one：用旧参数的 c 检查收敛）
         B_new = self._gaussian_emission(obs)
@@ -173,16 +227,31 @@ class HMMRegimeDetector:
 
     # ─── 公开接口 ─────────────────────────────────────────────────────────────
 
-    def fit(self, returns: List[float]) -> "HMMRegimeDetector":
+    def fit(
+        self,
+        returns: List[float],
+        volume_ratio: float | None = None,
+    ) -> "HMMRegimeDetector":
         """使用 Baum-Welch 算法拟合模型参数。
 
         Args:
             returns: 日收益率序列（浮点数列表，如 [0.01, -0.02, ...]）
+            volume_ratio: 近 5 日均成交额 / 前 5 日均成交额。
+                          提供时切换为 2D 模型；None 时保持 1D（向后兼容）。
 
         Returns:
             self（链式调用）
         """
-        obs = np.array(returns, dtype=float)
+        if volume_ratio is not None:
+            self.obs_dim = 2
+            self._init_params()  # 以 2D 先验重新初始化
+            obs = np.column_stack([
+                np.array(returns, dtype=float),
+                np.full(len(returns), float(volume_ratio)),
+            ])
+        else:
+            self.obs_dim = 1
+            obs = np.array(returns, dtype=float)
         if len(obs) < 30:
             return self  # 数据不足，保持先验参数
 
@@ -193,28 +262,55 @@ class HMMRegimeDetector:
                 break
             prev_ll = ll
 
-        # 排序状态确保一致性：按均值排序（低→高对应 bull/range/bear 逆序）
-        order = np.argsort(self.mu)[::-1]  # 均值从高到低: bull(0), range(2), bear(1)
+        # 排序状态确保一致性：按收益率均值排序（高→低: bull, range, bear）
+        mu_col = self.mu[:, 0] if self.obs_dim == 2 else self.mu
+        order = np.argsort(mu_col)[::-1]
         self.mu = self.mu[order]
-        self.sigma = self.sigma[order]
+        if self.obs_dim == 2:
+            self.cov = self.cov[order]
+        else:
+            self.sigma = self.sigma[order]
         self.pi = self.pi[order]
         self.A = self.A[order][:, order]
 
         return self
 
-    def predict(self, returns: List[float]) -> np.ndarray:
+    def predict(
+        self,
+        returns: List[float],
+        volume_ratio: float | None = None,
+    ) -> np.ndarray:
         """用 Viterbi 解码最可能的隐状态序列。
+
+        Args:
+            returns: 日收益率序列
+            volume_ratio: 成交量比率（与 fit 保持一致）。
 
         Returns:
             整数数组，每个元素为 0(Bull) / 1(Range) / 2(Bear)
         """
-        obs = np.array(returns, dtype=float)
+        if self.obs_dim == 2 and volume_ratio is not None:
+            obs = np.column_stack([
+                np.array(returns, dtype=float),
+                np.full(len(returns), float(volume_ratio)),
+            ])
+        else:
+            obs = np.array(returns, dtype=float)
         if len(obs) < 3:
             return np.zeros(len(obs), dtype=int)
         return self._viterbi(obs)
 
-    def fit_predict(self, returns: List[float]) -> dict:
+    def fit_predict(
+        self,
+        returns: List[float],
+        volume_ratio: float | None = None,
+    ) -> dict:
         """拟合并返回当前大势状态判定结果。
+
+        Args:
+            returns: 日收益率序列
+            volume_ratio: 近 5 日均成交额 / 前 5 日均成交额。
+                          None 时回退到 1D 模型（向后兼容）。
 
         Returns:
             {
@@ -222,35 +318,56 @@ class HMMRegimeDetector:
                 "state_label": str,       # "低波上涨" / "宽幅震荡" / "高波下跌"
                 "state_en": str,          # "bull" / "range" / "bear"
                 "confidence": float,      # 当前状态的后验概率置信度
-                "mu": float,              # 当前状态均值
-                "sigma": float,           # 当前状态波动率
+                "mu": float,              # 当前状态均值（收益率维度）
+                "sigma": float,           # 当前状态波动率（收益率维度）
+                "volume_ratio": float|None, # 当前状态成交量比率均值（2D时）
             }
         """
         self._init_params()  # 重置，保证每次独立
-        self.fit(returns)
+        self.fit(returns, volume_ratio=volume_ratio)
 
-        obs = np.array(returns, dtype=float)
+        if self.obs_dim == 2 and volume_ratio is not None:
+            obs = np.column_stack([
+                np.array(returns, dtype=float),
+                np.full(len(returns), float(volume_ratio)),
+            ])
+        else:
+            obs = np.array(returns, dtype=float)
+
         if len(obs) < 3:
             return {
                 "state_id": 1, "state_label": "宽幅震荡",
                 "state_en": "range", "confidence": 0.4,
                 "mu": 0.0, "sigma": 0.015,
+                "volume_ratio": volume_ratio,
             }
 
-        states = self.predict(returns)
+        states = self.predict(returns, volume_ratio=volume_ratio)
         current_state = int(states[-1])
 
         # 计算当前状态置信度（最近5个状态的一致度）
         recent = states[-5:]
         confidence = float(np.mean(recent == current_state))
 
+        # 提取收益率维度的 mu / sigma
+        vr_out: float | None = None
+        if self.obs_dim == 2:
+            mu_ret = float(self.mu[current_state, 0])
+            cov_k = self.cov[current_state]
+            sig_ret = float(np.sqrt(max(cov_k[0, 0], _EPS)))
+            vr_out = round(float(self.mu[current_state, 1]), 4)
+        else:
+            mu_ret = float(self.mu[current_state])
+            sig_ret = float(max(self.sigma[current_state], _EPS))
+
         return {
             "state_id": current_state,
             "state_label": REGIME_LABELS.get(current_state, "宽幅震荡"),
             "state_en": REGIME_EN.get(current_state, "range"),
             "confidence": round(confidence, 3),
-            "mu": round(float(self.mu[current_state]), 5),
-            "sigma": round(float(self.sigma[current_state]), 5),
+            "mu": round(mu_ret, 5),
+            "sigma": round(sig_ret, 5),
+            "volume_ratio": vr_out,
         }
 
 
@@ -261,14 +378,20 @@ _HMM_CACHE: dict[str, dict] = {}
 _HMM_CACHE_DATE: str = ""
 
 
-def detect_regime(returns: List[float]) -> dict:
+def detect_regime(
+    returns: List[float],
+    volume_ratio: float | None = None,
+) -> dict:
     """一站式大势状态检测函数。
 
     P1 Fix: 增加内存缓存，key = (data_hash, date)，
     同一交易日内相同输入不重复计算。
+    P1-3: 支持 2D 输入 (returns + volume_ratio)。
 
     Args:
         returns: 最近 N 日的指数日收益率序列（建议 60~200 个交易日）
+        volume_ratio: 近 5 日均成交额 / 前 5 日均成交额（>1 放量，<1 缩量）。
+                      None 时回退到 1D 模型（向后兼容）。
 
     Returns:
         与 HMMRegimeDetector.fit_predict() 相同的结果字典
@@ -283,8 +406,12 @@ def detect_regime(returns: List[float]) -> dict:
 
     # 计算缓存 key
     # P2 Fix: 缓存 key 增加 len(returns)，避免不同长度/不同标的(末50日相同)串缓存
+    # P1-3: volume_ratio 进入 key，避免不同成交量输入串缓存
+    vr_prefix = (
+        f"vr{volume_ratio:.4f}:" if volume_ratio is not None else "vr-:"
+    )
     data_hash = hashlib.md5(
-        f"{len(returns)}:".encode("utf-8")
+        f"{len(returns)}:{vr_prefix}".encode("utf-8")
         + ",".join(f"{r:.6f}" for r in returns[-50:]).encode("utf-8")
     ).hexdigest()[:12]
     cache_key = f"{data_hash}"
@@ -293,7 +420,7 @@ def detect_regime(returns: List[float]) -> dict:
         return _HMM_CACHE[cache_key]
 
     detector = HMMRegimeDetector()
-    result = detector.fit_predict(returns)
+    result = detector.fit_predict(returns, volume_ratio=volume_ratio)
     _HMM_CACHE[cache_key] = result
     return result
 
