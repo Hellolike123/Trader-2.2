@@ -16,6 +16,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
 
+# 开盘/尾盘噪音时段（HHMM 格式，左闭右闭）
+_OPEN_NOISE_START = 930   # 09:30
+_OPEN_NOISE_END = 945     # 09:45
+_CLOSE_NOISE_START = 1445 # 14:45
+_CLOSE_NOISE_END = 1500   # 15:00
+
 
 @dataclass
 class VolumeWarning:
@@ -36,6 +42,80 @@ def _safe_float(val: Any) -> float:
         return float(str(val).replace(",", ""))
     except (ValueError, TypeError):
         return 0.0
+
+
+def _parse_hhmm(bar: Dict[str, Any]) -> int | None:
+    """从 bar 的 time 字段提取 HHMM 整数（如 930、1445）。
+
+    支持格式: "YYYY-MM-DD HH:MM", "HH:MM:SS", "HH:MM"。
+    解析失败返回 None。
+    """
+    raw = bar.get("time") or bar.get("date") or ""
+    raw = str(raw).strip()
+    if not raw:
+        return None
+    # "YYYY-MM-DD HH:MM" 或 "YYYY-MM-DD HH:MM:SS"
+    if " " in raw:
+        raw = raw.split(" ", 1)[1]
+    # 现在 raw 应该是 "HH:MM" 或 "HH:MM:SS"
+    parts = raw.split(":")
+    if len(parts) < 2:
+        return None
+    try:
+        hh = int(parts[0])
+        mm = int(parts[1])
+        return hh * 100 + mm
+    except (ValueError, TypeError):
+        return None
+
+
+def _is_noise_window(hhmm: int) -> bool:
+    """判断 HHMM 是否在开盘或尾盘噪音窗口内。"""
+    return (_OPEN_NOISE_START <= hhmm <= _OPEN_NOISE_END
+            or _CLOSE_NOISE_START <= hhmm <= _CLOSE_NOISE_END)
+
+
+def calc_weighted_volume(bars_5m: List[Dict[str, Any]]) -> float:
+    """基于 5 分钟 K线计算排除开盘/尾盘噪音后的加权均量。
+
+    1. 排除 9:30-9:45（开盘15分钟）和 14:45-15:00（尾盘15分钟）的 bar。
+    2. 对剩余 bar 按 amount/volume 计算成交额加权均量（VWAP 模型）。
+       若 amount 不可用，则退化为简单均量。
+    3. 数据不足（<3 根有效 bar）时返回 0.0。
+
+    Args:
+        bars_5m: 5分钟 K线数据列表，每根需含 volume 和 time 字段。
+
+    Returns:
+        加权均量（float），可用于替代日线成交量做放量判断。
+    """
+    if not bars_5m:
+        return 0.0
+
+    filtered: list[tuple[float, float]] = []  # (volume, amount) pairs
+    for bar in bars_5m:
+        hhmm = _parse_hhmm(bar)
+        if hhmm is not None and _is_noise_window(hhmm):
+            continue
+        vol = _safe_float(bar.get("volume", 0))
+        if vol <= 0:
+            continue
+        amt = _safe_float(bar.get("amount", 0))
+        filtered.append((vol, amt))
+
+    if len(filtered) < 3:
+        return 0.0
+
+    total_vol = sum(v for v, _ in filtered)
+    total_amt = sum(a for _, a in filtered)
+
+    # 有成交额时用 VWAP 模型：加权均量 = total_amount / total_volume
+    # 含义：平均每手（或每单位成交量）的成交额，反映真实交易活跃度
+    if total_amt > 0 and total_vol > 0:
+        return total_amt / total_vol
+
+    # 退化：简单均量
+    return total_vol / len(filtered)
 
 
 def _calc_volume_ratio(bars: List[Dict[str, Any]], window: int = 5) -> float:
