@@ -23,10 +23,15 @@ from datetime import datetime
 from pathlib import Path
 
 # 确保 trader_shared 可被 import
+# 开发环境：scripts/../02-共享模块-shared
+# 打包环境：scripts/trader_shared/
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
 _ROOT = Path(__file__).resolve().parent.parent
-_SHARED_DIR = _ROOT / "02-共享模块-shared"
-if str(_SHARED_DIR) not in sys.path:
-    sys.path.insert(0, str(_SHARED_DIR))
+_root_shared = _ROOT / "02-共享模块-shared"
+if _root_shared.exists() and str(_root_shared) not in sys.path:
+    sys.path.insert(0, str(_root_shared))
 
 import trader_shared
 
