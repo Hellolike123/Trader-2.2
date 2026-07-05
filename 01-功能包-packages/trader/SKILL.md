@@ -148,14 +148,13 @@ python3 01-功能包-packages/trader/scripts/final_report.py --target <NAME> --o
 
 | 文件 | 用途 |
 |------|------|
-| `references/anti-hallucination.md` | 数据锚定表 + 信号矛盾处理 + 禁止用语 |
-| `references/fusion-guide.md` | 融合层字段解读 + 8档阈值 + verbatim 模板 + 阶段-动能方向表 |
 | `references/output-template.md` | 输出结构契约（7段模板） |
 | `references/output-style-guide.md` | 格式规则 + Old Output Detection（过时格式检测） |
 | `references/commands.md` | 所有命令示例 |
 | `references/pool-commands.md` | 选股池命令 |
 | `references/pool-output-contract.md` | 选股池输出契约 |
-| `references/data-fetch-handoff.md` | 数据对接说明 |
+| `~/.agents/skills/trader/references/anti-hallucination.md` | 数据锚定表 + 信号矛盾处理 + 禁止用语（安装后） |
+| `~/.agents/skills/trader/references/fusion-guide.md` | 融合层字段解读 + 8档阈值 + verbatim 模板（安装后） |
 
 **使用前必须先 `read` 以上文件，禁止凭记忆生成报告。**
 

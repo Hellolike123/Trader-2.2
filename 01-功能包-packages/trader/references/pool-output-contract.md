@@ -1,6 +1,6 @@
 # Output Contract — trader (pool)
 
-> **This is the absolute truth for valid output.** Never generate output from memory.
+> **This is the absolute truth for valid output.** Never generate output format from memory.
 
 Common rules: no markdown tables in rank/show/plan outputs; use indented alignment; no `##/###` headings.
 

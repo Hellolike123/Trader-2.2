@@ -1,6 +1,6 @@
 # Output Template — t0
 
-> **This is the absolute truth for output structure.** Never generate output format from memory.
+> **This is the absolute truth for valid output.** Never generate output format from memory.
 
 ## Manual Card Output
 
@@ -48,16 +48,14 @@ Must start with `🎯 T0 盯盘助理`:
 👀 跌破 xx.xx元 止损退出
 ```
 
-### Sections
+### Sections（条件显示规则）
 
-| Section | Condition |
-|---------|-----------|
-| `止盈` | Shown only when `exit_plan` has items AND `risk_r > 0` |
-| `💰 资金异动` | Shown when tick data is available and events exist |
-| `💰 分时估算` | Shown when only 5m bar estimates exist (no tick data) |
-| `📋 盘中动态` | Shown when `order_book` or `history` data exists |
-| `🔔 实时信号` | Shown when wyckoff signals (BC/UTAD/SOW) or chip migration warnings exist |
-| Footer text | `止损退出` when buy state is `可执行`; `后不再低吸` otherwise |
+- `止盈` — 当 `exit_plan` 有项目且 `risk_r > 0` 时显示
+- `💰 资金异动` — 当 tick 数据可用且有事件时显示
+- `💰 分时估算` — 仅当有 5m bar 估算（无 tick 数据）时显示，与「资金异动」互斥
+- `📋 盘中动态` — 当有 `order_book` 或 `history` 数据时显示
+- `🔔 实时信号` — 当有 wyckoff 信号（BC/UTAD/SOW）或筹码搬家警告时显示
+- Footer text — 当 buy 状态为 `可执行` 时显示 `止损退出`；否则显示 `后不再低吸`
 
 ## Monitor Alert Output
 
