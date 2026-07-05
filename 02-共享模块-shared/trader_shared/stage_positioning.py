@@ -328,9 +328,7 @@ def _assess_volume_price(
         return "蓄势", 70, f"缩量横盘（量比{vol_ratio:.1f}，涨跌{price_change_5*100:+.1f}%）"
     if is_high_volume and is_rising:
         return "主升", 80, f"放量上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
-    if is_strong_rising and is_high_volume:
-        return "主升", 75, f"放量强势上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
-    elif is_strong_rising:
+    if is_strong_rising:
         return "蓄势偏强", 55, f"缩量强势上涨，量价不配合（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
     if is_high_volume and is_flat:
         return "派发", 65, f"放量不涨（量比{vol_ratio:.1f}，涨跌{price_change_5*100:+.1f}%）"
@@ -711,7 +709,7 @@ def _layer1_multi_day_confirm(
     pending_date = state.get("pending_date", "")
 
     # 强势突破时降低确认天数
-    required_days = 1 if abs(price_change_5) > 0.05 else 3
+    required_days = 1 if price_change_5 > 0.05 else 3
 
     if raw_stage == prev_stage:
         # 信号一致，重置 pending
