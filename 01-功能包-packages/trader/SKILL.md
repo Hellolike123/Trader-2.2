@@ -3,117 +3,162 @@
 ## 我是谁
 单票分析 + 选股池管理。主力行为驱动四阶段定位（蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退 × 走强/修复/震荡/转弱），基本面+技术面三关入池。
 
-## 怎么调命令
+## 命令入口
 
 | 需求 | 命令 |
 |------|------|
-| 分析一只票 | `trader script --target <NAME> --output json` |
-| 价格监控 | `trader script --target <NAME> --output alert-text` |
-| 入池 | `trader script add --target <NAME>` |
-| 作战表 | `trader script plan` |
-| 池子概览 | `trader script list` |
-| 多票对比 | `trader script compare --targets A B C` |
+| 分析一只票（渲染报告） | `python3 01-功能包-packages/trader/scripts/final_report.py --target <NAME> --output markdown` |
+| 分析一只票（纯 JSON） | `python3 01-功能包-packages/trader/scripts/final_report.py --target <NAME> --output json` |
+| 价格监控 | `python3 01-功能包-packages/trader/scripts/final_report.py --target <NAME> --output alert-text` |
+| 入池 | `python3 01-功能包-packages/trader/scripts/final_pool.py add --target <NAME>` |
+| 入池前分析 | `python3 01-功能包-packages/trader/scripts/final_pool.py analyze --target <NAME>` |
+| 作战表 | `python3 01-功能包-packages/trader/scripts/final_pool.py plan` |
+| 池子概览 | `python3 01-功能包-packages/trader/scripts/final_pool.py list` |
+| 排序 | `python3 01-功能包-packages/trader/scripts/final_pool.py rank` |
+| 多票对比 | `python3 01-功能包-packages/trader/scripts/final_pool.py compare --targets A B C` |
+| 刷新全池 | `python3 01-功能包-packages/trader/scripts/final_pool.py refresh` |
 
-⚠️ 分析时必须加 `--output json`，读 JSON 做判断，禁止从 Markdown 解析数据。
+⚠️ **渲染优先原则**：优先用 `--output markdown` 拿脚本渲染好的完整报告。仅当 `--output markdown` 失败或需要额外判断时，才 fallback 到 `--output json` + 从字段构建。
 
-## 怎么读数据
+⚠️ **禁止手写 Markdown**：如果脚本能输出 markdown，绝不让 Agent 从 JSON 字段手动拼 Markdown。
 
-JSON 输出是 `build_report()` 返回的完整 dict，核心字段：
+## 工作流程（Pipeline + Inversion Gates）
+
+### Step 1: 拿数据
+调命令获取分析结果。
+
+```bash
+python3 01-功能包-packages/trader/scripts/final_report.py --target <NAME> --output markdown
+```
+
+- 如果成功 → 输出报告，进入 Exit
+- 如果 `--output markdown` 失败但 `--output json` 成功 → 进入 Step 2
+
+### Step 2: 解读 JSON（仅当 markdown 渲染不可用时）
+读 `build_report()` 返回的 JSON，参考 `references/anti-hallucination.md` 和 `references/fusion-guide.md`。
+
+核心字段：
 
 | 字段 | 类型 | 含义 |
 |------|------|------|
 | `current` | float | 当前价格 |
 | `change_pct` | float | 今日涨跌幅 |
-| `major_stage` | str | 大阶段：蓄势/主升/派发/衰退 |
+| `major_stage` | str | 大阶段：蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退 |
 | `short_term_momentum` | str | 短期动能：走强/修复/震荡/转弱 |
-| `stage_action` | str | 阶段对应操作建议 |
-| `confidence` | int | 阶段置信度 0-100 |
 | `theory_status` | str | 体系结论：突破确认/等转强/低吸观察/暂不碰 |
 | `fusion.action` | str | 融合层建议动作 |
 | `fusion.weighted_score` | float | 融合加权分 -1~+1 |
+| `fusion.confidence` | float | 置信度 0~1 |
+| `fusion.regime` | str | 大盘环境：正常/偏弱/很差 |
+| `fusion.disagreement` | float | 信号分歧度 |
 | `support` | float | 支撑位 |
-| `confirm` | float | 确认位（站稳才加仓） |
+| `confirm` | float | 确认位 |
 | `stop` | float | 止损位 |
-| `one_liner` | str | 一句话总结 |
-| `t0_ref.low_buy` | float | T0 低吸参考价 |
-| `t0_ref.high_sell` | float | T0 高抛参考价 |
-| `t0_ref.stop` | float | T0 止损参考价 |
 | `position_info.suggested_pct` | int | 建议仓位 % |
-| `scene` | str | 场景标签：低吸观察/冲高减仓/突破确认 |
-| `exit_plan` | dict | 分批止盈计划（含分阶段退出条件） |
 | `data_status` | str | 数据状态：full/partial/degraded |
+| `scene` | str | 场景标签：低吸观察/冲高减仓/突破确认 |
+| `exit_plan` | dict | 分批止盈计划 |
+| `low_zone` / `high_zone` | float | 低吸/高抛区间 |
 
-## 工作流程
+### Step 3: 输出报告
+使用 `--output markdown` 的已渲染结果。如需补充说明，严格遵循 references/ 中的契约。
 
-Step 1: 拿数据
-  调 `trader script --target <NAME> --output json`
-  检查: data_status 是否 full/partial/degraded
-  关卡: degraded → 提示"数据不完整，分析可能不准"
+## GATES（Inversion 门控 — 必须全部通过）
 
-Step 2: 解读数据
-  读 major_stage + short_term_momentum → 当前位置
-  读 fusion.action + fusion.weighted_score → 系统建议
-  读 theory_status → 体系结论
-  读 scene + market_env → 风险判断
-  检查: 信号是否矛盾（如 major_stage=主升 但 theory_status=暂不碰）
-  关卡: 矛盾 → 说明矛盾在哪，建议等待
+**GATE 1 — 数据完备度**（仅在 JSON 模式激活）：
+检查 `data_status`：
+- `full` → 正常分析
+- `partial` → 必须在输出开头标注：`⚠️ 数据不完整，分析可能不准`
+- `degraded` → 仅输出基础行情，不做深度分析
 
-Step 3: 给建议
-  基于 Step 2 解读
-  检查: 每个建议是否有数据支撑（引用具体字段值）
-  关卡: 无支撑 → 改为"数据不足，无法给建议"
+**MUST NOT proceed to output until data_status 已检查并处理。**
 
-## 解读框架
+**GATE 2 — 信号矛盾检测**：
+检查以下矛盾组合（详见 `references/anti-hallucination.md` Rule 3）：
+- `major_stage=主升` + `theory_status=暂不碰` → 说明矛盾
+- `fusion.weighted_score > 0.3` + `theory_status=暂不碰` → 说明矛盾
+- `major_stage=衰退` + `fusion.weighted_score > 0.3` → 以衰退为准
+- `major_stage=派发` + `fusion.weighted_score > 0.25` → 以派发为准
+- `data_status=partial` + 所有信号一致 → 加前缀警告
 
-阶段判断:
-- 蓄势+走强 → 关注放量突破
-- 主升+走强 → 持有
-- 派发 → 逢高减仓
-- 衰退 → 不参与
+**MUST NOT output until 所有矛盾已说明，不得隐藏或选择性忽略。**
 
-评分参考:
-- fusion.weighted_score > 0.3 → 偏多
-- fusion.weighted_score < -0.3 → 偏空
-- -0.3 ~ 0.3 → 中性，等信号
+**GATE 3 — 方向判断铁律**（详见 `references/fusion-guide.md`）：
+- `weighted_score` 正 = 多方，负 = 空方。唯一方向判断依据。
+- 禁止用 `action` 字符串字面意思推断方向。
+- `confidence < 0.3` → 降级处理：`信号弱，建议轻仓`
+- `disagreement > 1` → 提示分歧：`信号有分歧，建议谨慎`
+- `regime=很差` → 一票否决：`暂不碰`
+- `regime=偏弱` → 所有买入建议降一档
+
+**MUST NOT output until 方向判断符合铁律。**
+
+## 绝对优先级（Direction Priority）
+
+当以下规则冲突时，按此顺序裁决（高优先级覆盖低优先级）：
+
+1. `regime="很差"` → 一票否决，输出「暂不碰」（最高）
+2. `major_stage=衰退` → 不参与，即使 fusion 偏多
+3. `major_stage=派发` → 不加仓，即使 fusion 偏多
+4. `fusion.weighted_score` > `major_stage` > `theory_status`（默认）
+5. 当存在矛盾时，必须明确说明矛盾所在
+
+## 方向判断速查
+
+| major_stage | momentum | 默认方向 | 输出用语 |
+|-------------|----------|----------|---------|
+| 蓄势 | 走强 | 偏多 | 可轻仓试探 |
+| 蓄势 | 修复 | 中性偏多 | 等确认 |
+| 蓄势 | 震荡 | 中性 | 观望 |
+| 蓄势 | 转弱 | 中性偏空 | 等企稳 |
+| 主升 | 走强 | 强多 | 趋势明确 |
+| 主升 | 修复 | 偏多 | 等转强确认 |
+| 主升 | 震荡 | 中性 | 警惕见顶 |
+| 主升 | 转弱 | 偏空 | 风险信号 |
+| 派发 | 走强 | 偏空 | 诱多，不参与 |
+| 派发 | 修复 | 偏空 | 诱多，不参与 |
+| 派发 | 震荡 | 偏空 | 逐步退出 |
+| 派发 | 转弱 | 强空 | 清仓 |
+| 衰退 | 走强 | 偏空 | 反弹出货 |
+| 衰退 | 修复 | 偏空 | 反弹出货 |
+| 衰退 | 震荡 | 强空 | 不参与 |
+| 衰退 | 转弱 | 极空 | 远离 |
+
+评分参考：
+- `fusion.weighted_score > 0.3` → 偏多
+- `fusion.weighted_score < -0.3` → 偏空
+- `-0.3 ~ 0.3` → 中性，等信号
 
 ## 什么时候先问用户
 
-直接执行:
-- "南网科技怎么样" → trader --target 南网科技
-- "分析南网科技" → trader --target 南网科技
-- "入池南网科技" → trader add --target 南网科技
-- "明日作战表" → trader plan
+直接执行：
+- "南网科技怎么样" / "分析南网科技" → 单票分析
+- "入池南网科技" → `add --target 南网科技`
+- "明日作战表" → `plan`
+- "池子概览" → `list`
 
-先澄清:
+先澄清：
 - "这个票怎么样" → 哪个票？
 - "帮我看看" → 看什么？池子？某只票？
 - "要不要买" → 买哪只？什么价位？
 
-## 常见迭代场景
-
-| 问题类型 | 典型场景 | 处理路径 |
-|---------|---------|---------|
-| 性能 | 分析耗时过长 | profile → 定位瓶颈 → 并行/缓存 |
-| 数据 | 字段缺失或为0 | 检查数据源 → 修复传递链 |
-| 功能 | 缺少某个信号/指标 | 设计 → 接入融合层 → 验证 |
-| 显示 | 输出格式不符合规范 | 修改 render → 跑 validate |
-
-## 防幻觉检查清单（每次回答前必须自检）
-
-□ 我调了命令吗？没调 → 不能回答
-□ 我读的是 JSON 还是 Markdown？Markdown → 切换到 JSON
-□ 我引用的数字来自 JSON 哪个字段？说不出来 → 不要用这个数字
-□ 我的建议有数据支撑吗？说不出来 → 改为"数据不足"
-□ data_status 是什么？partial → 提示数据不完整
-□ 有没有检查 scene / chip_migration / market_env → 评估风险
-□ 我有没有编造内容？价格/评分/信号全部来自 JSON？有一个不是 → 删掉
-□ 融合层判断用了 fusion_verbatim 吗？没用 → 按模板原话直出，禁止自由发挥
-
 ## Installed Skill References（Agent 必读）
 
-Installed skill (`~/.agents/skills/trader/`) 的 `references/` 目录包含以下 Agent 必读文件：
-- `anti-hallucination.md`：数据锚定表 + 信号矛盾处理 + 禁止用语
-- `fusion-guide.md`：融合层字段解读 + 8档阈值 + verbatim 模板 + 常见误读纠正
-- `commands.md`：所有命令示例
+项目 `references/` 目录下的文件是 **绝对真理**，必须读取后再工作：
 
-Agent 使用 trader skill 时，必须先读这 3 个文件再开始工作。
+| 文件 | 用途 |
+|------|------|
+| `references/anti-hallucination.md` | 数据锚定表 + 信号矛盾处理 + 禁止用语 |
+| `references/fusion-guide.md` | 融合层字段解读 + 8档阈值 + verbatim 模板 + 阶段-动能方向表 |
+| `references/output-template.md` | 输出结构契约（7段模板） |
+| `references/output-style-guide.md` | 格式规则 + Old Output Detection（过时格式检测） |
+| `references/commands.md` | 所有命令示例 |
+| `references/pool-commands.md` | 选股池命令 |
+| `references/pool-output-contract.md` | 选股池输出契约 |
+| `references/data-fetch-handoff.md` | 数据对接说明 |
+
+**使用前必须先 `read` 以上文件，禁止凭记忆生成报告。**
+
+## Exit Criterion
+
+输出完成后即停止。不重新分析、不补充额外建议、不展开未在 JSON 中体现的延伸讨论。
