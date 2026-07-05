@@ -1617,8 +1617,9 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
     ]
 
     # 均线显示（冒号分隔 + 2 位小数，与 output-template 契约一致）
+    # 必须包含 MA250 以通过 validate_output.py 的 MA20+MA250 同行验证
     ma_parts = []
-    for ma_key in ("ma5", "ma10", "ma20", "ma30"):
+    for ma_key in ("ma5", "ma10", "ma20", "ma30", "ma250"):
         if ma_raw.get(ma_key) and isinstance(ma_raw.get(ma_key), (int, float)) and ma_raw[ma_key] > 0:
             ma_num = int(ma_key[2:])
             ma_parts.append(f"MA{ma_num}：{ma_raw[ma_key]:.2f}")
