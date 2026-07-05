@@ -341,9 +341,12 @@ def _assess_volume_price(
     if is_low_volume and is_falling:
         return "蓄势", 50, f"缩量下跌（量比{vol_ratio:.1f}，跌{price_change_5*100:+.1f}%），可能筑底"
 
-    # 弱信号：放量但方向不明确
+    # 弱信号：放量但方向不明确（分涨跌处理）
     if is_high_volume:
-        return "派发", 45, f"放量方向不明（量比{vol_ratio:.1f}，涨跌{price_change_5*100:+.1f}%）"
+        if price_change_5 > 0:
+            return "蓄势偏强", 50, f"放量微涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
+        else:
+            return "派发", 45, f"放量微跌（量比{vol_ratio:.1f}，跌{price_change_5*100:+.1f}%）"
 
     # ── 正常量能区域分化（vol_ratio 0.8~1.2，覆盖约 65% 的交易日） ──
     if vol_ratio >= 0.8 and vol_ratio < 1.2:
