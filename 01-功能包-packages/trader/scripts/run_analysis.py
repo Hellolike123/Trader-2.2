@@ -1054,6 +1054,26 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         chan_result=chan_result,
     )
 
+    # 修复：止盈应使用保护后的阶段（与仓位/止损一致）
+    protected_stage = stage_result["major_stage"]
+    if protected_stage != _pre_stage:
+        resistance_price = levels.get("resistance") or 0
+        if protected_stage in ('蓄势', '蓄势偏强'):
+            take = round(resistance_price, 2) if resistance_price else round(current * 1.05, 2)
+        elif protected_stage == '主升':
+            take = round(resistance_price, 2) if resistance_price else round(current * 1.10, 2)
+        elif protected_stage == '派发':
+            take = round(current, 2)
+        elif protected_stage == '蓄势偏弱':
+            take = round(resistance_price * 0.98, 2) if resistance_price else round(current, 2)
+        elif protected_stage == '衰退':
+            take = None
+        else:
+            take = round(resistance_price, 2) if resistance_price else round(current * 1.05, 2)
+        if take is not None:
+            take = max(take, current)
+        levels["take"] = take
+
     # 用 major_stage 替代旧 stage 计算 upward_momentum（修复 P1-4）
     upward_momentum = upward_momentum_observation(stage_result["major_stage"], current, support, confirm)
 
