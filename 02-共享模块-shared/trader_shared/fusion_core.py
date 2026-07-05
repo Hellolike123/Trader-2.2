@@ -55,8 +55,6 @@ except ImportError:  # pragma: no cover
 
 FUSION_LOG_ONLY = os.environ.get("FUSION_LOG_ONLY", "false").lower() in ("true", "1", "yes")
 
-# ── 形态识别权重常量 ──
-PATTERN_WEIGHT = 0.10  # 形态信号在融合层中的基准权重
 
 
 def _log_fusion(result: dict) -> None:
@@ -432,7 +430,6 @@ def merge_decisions(
     main_force_env: str | None = None,
     data_status: str = "full",
     fetcher: DataFetcher | None = None,  # DI: 可注入数据源
-    pattern_result: dict | None = None,  # 形态识别结果 (可选)
     volume_warning: dict | None = None,  # 量价背离警告 (可选)
     fund_flow_data: dict | None = None,  # P1-2: 资金流向特征 (可选)
 ) -> dict:
@@ -488,21 +485,6 @@ def merge_decisions(
         _logger.warning("Wyckoff signal normalization failed: %s", exc)
         wyckoff_signal = {"direction": 0, "confidence": 0.0,
                            "reason": "威科夫标准化异常", "raw_key": "wyckoff"}
-
-    # 形态识别信号 (可选第4路)
-    pattern_signal = {"direction": 0, "confidence": 0.0,
-                      "reason": "无形态信号", "raw_key": "pattern"}
-    if pattern_result and isinstance(pattern_result, dict):
-        p_signal = pattern_result.get("signal", 0)
-        p_conf = pattern_result.get("confidence", 0.0)
-        p_reason = pattern_result.get("reason", "")
-        if p_signal != 0 and p_conf > 0:
-            pattern_signal = {
-                "direction": p_signal,
-                "confidence": p_conf,
-                "reason": p_reason,
-                "raw_key": "pattern",
-            }
 
     # 2. 场景优先级过滤器 (Scenario Priority Filter)
     # 计算20日高低区间位置
@@ -568,25 +550,20 @@ def merge_decisions(
     is_bearish_structure_warning = (strong_bearish_chan or strong_bearish_wyk) and not is_genuine_climax
 
     if is_breakout_or_bottom:
-        weights = {"chan": 0.40, "momentum": 0.18, "wyckoff": 0.32, "pattern": PATTERN_WEIGHT}
+        weights = {"chan": 0.44, "momentum": 0.20, "wyckoff": 0.36}
     elif is_genuine_climax:
-        # 高位 + 强动量：动量权重最高（50%），高位看动量衰竭
-        weights = {"chan": 0.18, "momentum": 0.50, "wyckoff": 0.22, "pattern": PATTERN_WEIGHT}
+        # 高位 + 强动量：动量权重最高（56%），高位看动量衰竭
+        weights = {"chan": 0.20, "momentum": 0.56, "wyckoff": 0.24}
     elif is_bearish_structure_warning:
         # 结构看空警告（顶背驰/上冲回落）：尊重结构，chan/wyk 权重高于动量，
         # 避免动量噪音在结构发出撤退信号时反向主导。
-        weights = {"chan": 0.40, "momentum": 0.18, "wyckoff": 0.32, "pattern": PATTERN_WEIGHT}
+        weights = {"chan": 0.44, "momentum": 0.20, "wyckoff": 0.36}
     else:
         regime_weights = get_regime_weights(regime)
-        # 补齐 pattern 权重 (但 "很差" regime 全员权重为0，pattern 也不加)
         if regime == "很差":
             weights = regime_weights
-            weights["pattern"] = 0.0  # P1 Fix: 显式归零，避免 get 默认值偷渡
         else:
-            # 先将原有权重缩小，腾出空间给 pattern，确保总和=1.0
-            shrink_factor = 1.0 - PATTERN_WEIGHT
-            weights = {k: v * shrink_factor for k, v in regime_weights.items()}
-            weights["pattern"] = PATTERN_WEIGHT
+            weights = regime_weights
 
     # 2.5 主力行为权重修正
     if main_force_env and main_force_env != "unknown":
@@ -616,8 +593,7 @@ def merge_decisions(
     weighted_score = (
         chan_signal["direction"] * chan_signal["confidence"] * weights["chan"] +
         momentum_signal["direction"] * momentum_signal["confidence"] * weights["momentum"] +
-        wyckoff_signal["direction"] * wyckoff_signal["confidence"] * weights["wyckoff"] +
-        pattern_signal["direction"] * pattern_signal["confidence"] * weights.get("pattern", 0.0)
+        wyckoff_signal["direction"] * wyckoff_signal["confidence"] * weights["wyckoff"]
     )
 
     # 5. 决策映射
@@ -779,7 +755,6 @@ def merge_decisions(
             "chan": chan_signal,
             "momentum": momentum_signal,
             "wyckoff": wyckoff_signal,
-            "pattern": pattern_signal,
         },
         "weights_used": weights,
     }
@@ -847,7 +822,6 @@ def merge_decisions_from_plugins(
     chan_result = plugin_results.get("chanlun", {})
     momentum_result = plugin_results.get("momentum", {})
     wyckoff_result = plugin_results.get("wyckoff", {})
-    pattern_result = plugin_results.get("pattern", None)
 
     return merge_decisions(
         chan_result=chan_result,
@@ -862,7 +836,6 @@ def merge_decisions_from_plugins(
         main_force_env=main_force_env,
         data_status=data_status,
         fetcher=fetcher,
-        pattern_result=pattern_result,
         volume_warning=volume_warning,
         fund_flow_data=fund_flow_data,
     )

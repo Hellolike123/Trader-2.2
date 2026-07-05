@@ -418,7 +418,7 @@ def _fusion_breakdown(fusion: dict) -> list[str]:
         hmm_cn = {"bull": "多头", "bear": "空头", "range": "震荡"}.get(hmm, hmm)
         rows.append(f"  大盘环境：{regime}（HMM: {hmm_cn}）")
 
-    for key, label in [("chan", "缠论"), ("momentum", "动量"), ("wyckoff", "威科夫"), ("pattern", "形态")]:
+    for key, label in [("chan", "缠论"), ("momentum", "动量"), ("wyckoff", "威科夫")]:
         sig = signals.get(key, {})
         if not sig:
             continue
@@ -639,29 +639,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     # === 融合层 ===
     try:
         from trader_shared.fusion_core import merge_decisions
-        from trader_shared.pattern_core import detect_pattern
         from trader_shared.volume_price import detect_volume_divergence
-
-        # 形态识别
-        pattern_result = None
-        try:
-            closes = [to_float(b.get("close")) for b in bars if b.get("close") is not None]
-            highs = [to_float(b.get("high")) for b in bars if b.get("high") is not None]
-            lows = [to_float(b.get("low")) for b in bars if b.get("low") is not None]
-            volumes = [to_float(b.get("volume")) for b in bars if b.get("volume") is not None]
-            if len(closes) >= 20 and len(highs) >= 20 and len(lows) >= 20:
-                pat = detect_pattern(closes[-60:], highs[-60:], lows[-60:], volumes=volumes[-60:] if volumes else None)
-                if pat and pat.signal != 0:
-                    pattern_result = {
-                        "pattern": pat.pattern,
-                        "signal": pat.signal,
-                        "confidence": pat.confidence,
-                        "neckline": pat.neckline,
-                        "target": pat.target,
-                        "reason": pat.reason,
-                    }
-        except Exception:
-            pass
 
         # 量价背离检测
         volume_warning = None
@@ -690,7 +668,6 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             main_force_env=main_force_env,
             fetcher=fetcher,
             data_status=snapshot.data_status,
-            pattern_result=pattern_result,
             volume_warning=volume_warning,
             fund_flow_data=fund_flow_features,
             extend_fundamental=snapshot.extend_fundamental,
@@ -1159,7 +1136,6 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "chip_current_pct": chip.get("current_pct"),
         "chip_mid_price": chip.get("mid_price"),
         "fusion": report_fusion,
-        "pattern_result": pattern_result,
         "gap": levels.get("gap"),
         "time_window": levels.get("time_window"),
         "fib_retrace": levels.get("fib_retrace"),
@@ -1764,13 +1740,6 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
                     _state = _state[1:]
                 _theory_parts.append(f"{_sig_label}:{_state}·{_dir_label}")
 
-    # 形态分析
-    _pat = r.get("pattern_result") or {}
-    if _pat and _pat.get("pattern") and _pat.get("pattern") != "none":
-        pat_name = {"double_bottom": "W底", "double_top": "M头", "triangle_breakout": "三角突破", "triangle_breakdown": "三角破位"}.get(_pat.get("pattern", ""), _pat.get("pattern", ""))
-        pat_signal = "看涨" if _pat.get("signal", 0) > 0 else ("看跌" if _pat.get("signal", 0) < 0 else "中性")
-        _theory_parts.append(f"形态:{pat_name}·{pat_signal}")
-
     for _tp in _theory_parts:
         lines.append(f"  {_tp}")
 
@@ -1828,22 +1797,10 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         risk_reward_val = round((take_price - low_price) / downside, 1)
     risk_reward_available = risk_reward_val is not None and risk_reward_val > 0
 
-    # —— R3: 形态目标修正盈亏比 ——
-    pattern = r.get("pattern_result") or {}
-    if pattern and isinstance(pattern, dict):
-        pattern_target = float(pattern.get("target") or 0)
-        if pattern_target > take_price > 0:
-            take_price = pattern_target
-            downside = low_price - stop if stop < low_price else None
-            if downside and downside > 0:
-                risk_reward_val = round((take_price - low_price) / downside, 1)
-            risk_reward_available = risk_reward_val is not None and risk_reward_val > 0
-
     # —— R1 + R2: 场景感知过滤闸门 + Kelly 仓位叠加 ——
     rr_filtered = False
     rr_threshold = 1.5
     min_win_rate = 0
-    pattern_target_display = ""
     if risk_reward_available and risk_reward_val is not None and risk_reward_val > 0 and ENABLE_RISK_REWARD_FILTER:
         min_win_rate = round(1 / (1 + risk_reward_val) * 100)
         base_status = str(r.get("base_status") or "")
@@ -1873,12 +1830,6 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
                         position_cap = min(position_cap, kelly_cap)
             except Exception:
                 pass
-
-    # 形态目标文字说明
-    # 注意：这里用 r.get("take")（原始止盈价）而非 take_price（可能被 R3 形态修正），
-    # 因为要判断"形态目标是否高于原始止盈"来决定是否显示形态提示。
-    if pattern and isinstance(pattern, dict) and float(pattern.get("target") or 0) > float(r.get("take") or 0) > 0:
-        pattern_target_display = f"，形态目标 {float(pattern['target']):.2f}元"
 
     if low_price > 0 and risk_reward_available and not rr_filtered and risk_reward_val is not None:
         # 动态生成试探买标签
