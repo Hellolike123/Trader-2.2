@@ -238,7 +238,12 @@ def _assess_volume_price(
 
     # ── 威科夫信号优先判定 ──
     if wyckoff_result:
-        wyk = wyckoff_result.get("wyckoff", {}) if isinstance(wyckoff_result, dict) else {}
+        # 兼容两种格式：嵌套（wyckoff_strategy 包装后 {"wyckoff": {...}}）
+        # 和扁平（wyckoff_analysis 直接返回 {...}）
+        if isinstance(wyckoff_result, dict) and "wyckoff" in wyckoff_result:
+            wyk = wyckoff_result["wyckoff"]
+        else:
+            wyk = wyckoff_result if isinstance(wyckoff_result, dict) else {}
         if isinstance(wyk, dict):
             spring = wyk.get("spring_signal")
             upthrust = wyk.get("upthrust_signal")
@@ -323,8 +328,10 @@ def _assess_volume_price(
         return "蓄势", 70, f"缩量横盘（量比{vol_ratio:.1f}，涨跌{price_change_5*100:+.1f}%）"
     if is_high_volume and is_rising:
         return "主升", 80, f"放量上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
-    if is_strong_rising:
-        return "主升", 75, f"强势上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
+    if is_strong_rising and is_high_volume:
+        return "主升", 75, f"放量强势上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
+    elif is_strong_rising:
+        return "蓄势偏强", 55, f"缩量强势上涨，量价不配合（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
     if is_high_volume and is_flat:
         return "派发", 65, f"放量不涨（量比{vol_ratio:.1f}，涨跌{price_change_5*100:+.1f}%）"
     if is_high_volume and is_falling:
@@ -483,8 +490,10 @@ def _volume_price_confirm(
         # 拉升 → 需放量上涨确认
         if high_vol and rising:
             return "confirm", 0.30, f"放量上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
-        if falling or (low_vol and not rising):
-            return "downgrade", 0.20, f"价跌或缩量，不配合拉升信号"
+        if falling:
+            return "downgrade", 0.20, f"价跌，不配合拉升信号"
+        if low_vol:
+            return "downgrade", 0.20, f"缩量拉升，量价不配合（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
         return "confirm", 0.15, f"量价中性（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
 
     elif mf_stage == "accumulation":
