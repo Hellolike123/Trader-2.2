@@ -110,9 +110,9 @@ trailing_stop = highest_close × (1 - ATR% × 3.0)
 
 | Skill | 一句话 | 版本 | 入口脚本 |
 |-------|--------|------|---------|
-| `trader` | 单票分析 + 选股池全生命周期管理 | `2.4.0-consolidated` | `scripts/final_report.py` / `scripts/final_pool.py` |
-| `t0` | 盘中 T0 精确执行卡 + 盯盘告警 | `2.4.0-consolidated` | `scripts/final_t0.py` |
-| `review` | 盘后复盘 + 仓位轮动 + 信号追踪 | `2.4.0-consolidated` | `scripts/final_review.py` / `scripts/final_portfolio.py` / `scripts/final_tracker.py` |
+| `trader` | 单票分析 + 选股池全生命周期管理 | `2.4.0-consolidated` | `01-功能包-packages/trader/scripts/final_report.py` / `01-功能包-packages/trader/scripts/final_pool.py` |
+| `t0` | 盘中 T0 精确执行卡 + 盯盘告警 | `2.4.0-consolidated` | `01-功能包-packages/t0/scripts/final_t0.py` |
+| `review` | 盘后复盘 + 仓位轮动 + 信号追踪 | `2.4.0-consolidated` | `01-功能包-packages/review/scripts/final_review.py` / `01-功能包-packages/portfolio/scripts/final_portfolio.py` / `01-功能包-packages/review/scripts/final_tracker.py` |
 
 运维工具（非 Skill 入口）：
 | 工具 | 用途 | 入口 |
@@ -146,43 +146,41 @@ trailing_stop = highest_close × (1 - ATR% × 3.0)
 ## 推荐工作流
 
 ```
-新票验票 → trader script --target <NAME>
-入池 → trader script add --target <NAME>
-明日作战表 → trader script plan
-盘中执行 → t0 script --target <NAME> --monitor
-盘后复盘 → review script --target <NAME>
-仓位轮动 → review script --compare A B
-信号回溯 → review script --target <NAME>（读 signals.jsonl）
+新票验票 → python 01-功能包-packages/trader/scripts/final_report.py --target <NAME>
+入池 → python 01-功能包-packages/trader/scripts/final_pool.py add --target <NAME>
+排序 → python 01-功能包-packages/trader/scripts/final_pool.py rank
+明日作战表 → python 01-功能包-packages/trader/scripts/final_pool.py plan
+盘中执行 → python 01-功能包-packages/t0/scripts/final_t0.py --target <NAME> --monitor
+盘后复盘 → python 01-功能包-packages/review/scripts/final_review.py --target <NAME>
+仓位轮动 → python 01-功能包-packages/portfolio/scripts/final_portfolio.py --targets A B
+信号回溯 → python 01-功能包-packages/review/scripts/final_review.py --target <NAME>（读 signals.jsonl）
 ```
 
 ### Skill 命令映射
 
 | 需求 | 命令 |
 |------|------|
-| 分析一只票 | `trader script --target <NAME>` |
-| 价格监控 | `trader script --target <NAME> --output alert-text` |
-| 写入信号 | `trader script --target <NAME> --write-signal` |
-| 入池 | `trader script add --target <NAME>` |
-| 一步入池（带三关筛选） | `trader script quick-add --target <NAME>` |
-| 入池前分析 | `trader script analyze --target <NAME>` |
-| 待确认入池 | `trader script add-pending --target <NAME>` |
-| 确认入池 | `trader script confirm-to-pool --target <NAME>` |
-| 作战表 | `trader script plan` |
-| 执行项复盘 | `trader script review` |
-| 刷新全池数据 | `trader script refresh` |
-| 刷新单只票 | `trader script refresh --target <NAME>` |
-| 盘中盯盘告警 | `trader script watch` |
-| 池子概览 | `trader script list` |
-| 待确认池 | `trader script show-pending` |
-| 多票对比 | `trader script compare --targets A B C` |
-| 移除出池 | `trader script remove --target <NAME>` |
-| 归档已退出 | `trader script archive-exited` |
-| T0 盯盘单次检查 | `t0 script --target <NAME> --monitor --once` |
-| T0 持续监控 | `t0 script --target <NAME> --monitor` |
-| 盘后复盘 | `review script --target <NAME>` |
-| 多票复盘对比 | `review script --compare A B C` |
-| 盘中复盘 | `review script --target <NAME> --session midday` |
-| 仓位轮动 | `review script --portfolio --targets A B` |
+| 分析一只票 | `python 01-功能包-packages/trader/scripts/final_report.py --target <NAME>` |
+| 价格监控 | `python 01-功能包-packages/trader/scripts/final_report.py --target <NAME> --output alert-text` |
+| 写入信号 | `python 01-功能包-packages/trader/scripts/final_report.py --target <NAME> --write-signal` |
+| 入池 | `python 01-功能包-packages/trader/scripts/final_pool.py add --target <NAME>` |
+| 入池前分析 | `python 01-功能包-packages/trader/scripts/final_pool.py analyze --target <NAME>` |
+| 池子概览 | `python 01-功能包-packages/trader/scripts/final_pool.py list` |
+| 排序 | `python 01-功能包-packages/trader/scripts/final_pool.py rank` |
+| 明日作战表 | `python 01-功能包-packages/trader/scripts/final_pool.py plan` |
+| 刷新全池数据 | `python 01-功能包-packages/trader/scripts/final_pool.py refresh` |
+| 刷新单只票 | `python 01-功能包-packages/trader/scripts/final_pool.py refresh --target <NAME>` |
+| 池中盯盘 | `python 01-功能包-packages/trader/scripts/final_pool.py watch` |
+| 待确认池 | `python 01-功能包-packages/trader/scripts/final_pool.py show-pending` |
+| 多票对比 | `python 01-功能包-packages/trader/scripts/final_pool.py compare --targets A B C` |
+| 移除出池 | `python 01-功能包-packages/trader/scripts/final_pool.py remove --target <NAME>` |
+| 归档已退出 | `python 01-功能包-packages/trader/scripts/final_pool.py archive-exited` |
+| T0 盯盘单次 | `python 01-功能包-packages/t0/scripts/final_t0.py --target <NAME> --monitor --once` |
+| T0 持续监控 | `python 01-功能包-packages/t0/scripts/final_t0.py --target <NAME> --monitor` |
+| 盘后复盘 | `python 01-功能包-packages/review/scripts/final_review.py --target <NAME>` |
+| 多票复盘对比 | `python 01-功能包-packages/review/scripts/final_review.py --compare A B C` |
+| 盘中复盘 | `python 01-功能包-packages/review/scripts/final_review.py --target <NAME> --session midday` |
+| 仓位轮动 | `python 01-功能包-packages/portfolio/scripts/final_portfolio.py --targets A B` |
 
 详细自然触发词映射见 `AGENTS_DEEP.md` Section 十四。
 
@@ -203,34 +201,44 @@ trailing_stop = highest_close × (1 - ATR% × 3.0)
 > 违背以上红线将直接导致移动端/微信端渲染破碎。以下是微信端日常循环中 7 大核心步骤的**高分满分输出范例**，请严格对照模仿：
 
 ### 1. 盘中快速验票
-* 动作命令：`trader script --target <NAME>`
+* 动作命令：`python 01-功能包-packages/trader/scripts/final_report.py --target <NAME>`
 * 用途：值不值得看，给出当前位置、该买该卖、多少钱动手。
 * 满分标准输出示例：
 
 分析报告 — 南网科技（688248）
 
-现价：59.33元（+2.70%）
-MA5：59.63 ｜ MA10：60.74 ｜ MA20：60.60 ｜ MA30：59.72
+现价 59.33（+2.70%）
+  MA5：59.63 ｜ MA10：60.74 ｜ MA20：60.60 ｜ MA30：59.72
 
-🧭 简要分析
-基础状态：防守观察 ｜ 体系结论：防守观察
+🎯 蓄势期 → 低吸试盘
+  基础状态：防守观察 ｜ 体系结论：防守观察
+
+  缠论:拉升段(盘整)·看涨
+  威科夫:无信号·中性
+  动量:MACD柱为正(偏多)·看涨
+  2方看多 vs 1方看空
 
 📍 决策
-状态：防守观察
-  空仓：在 57.50-58.64元 试探买 5%, 止损 56.11
-  有底仓：反弹 59.84 冲不动就减 10-20%
+  状态：防守观察
+  空仓：在 57.50-58.64元 试探买 5%，止损 56.11
 
-❗ 关键价位
-56.11  ← 止损位
-57.50  ← 防守位
-59.33  ← 当前位置
-59.84  ← 确认位
+  56.11 止损（跌破支撑，趋势破坏）
+  57.50 ← 试探买 5%（蓄势期，盈亏比 2.1:1，65% 胜率回本，止损 56.11）
+  59.33 当前位置
+  59.84 → 减仓 20%（冲不动即减）
 
-✨ 亮点与风险
-当前处于防守位附近，适合轻仓试探。
+筹码：57.20 · 59.80 · 61.50 ｜ 获利55%
+
+📊 股性与历史回测
+  买入信号 12次 ｜ 8胜4负 ｜ 胜率 67% ｜ 平均 +3.2%
+
+✅ 亮点：处于蓄势偏强期，买方力量占优
+⚠️ 风险：上方 59.84 元有压力位，需放量确认
+
+当前池 5/10，回复 1 入池
 
 ### 2. 盘中盯盘预警
-* 动作命令：`t0 script --target <NAME> --monitor`
+* 动作命令：`python 01-功能包-packages/t0/scripts/final_t0.py --target <NAME> --monitor`
 * 用途：盘中实时大单异动，谁在买谁在卖，价格到没到触发位。
 * 满分标准输出示例（非交易时间输出为空）：
 
@@ -241,7 +249,7 @@ MA5：59.63 ｜ MA10：60.74 ｜ MA20：60.60 ｜ MA30：59.72
 14:35 主动买入 4178万 / 6939手（大单异动）
 
 ### 3. 盘后单票复盘
-* 动作命令：`review script --target <NAME>`
+* 动作命令：`python 01-功能包-packages/review/scripts/final_review.py --target <NAME>`
 * 用途：今天走势怎么看，大单资金什么态度，五层理论打分多少，明天关键位在哪。
 * 满分标准输出示例：
 
@@ -263,11 +271,11 @@ MA5：59.63 ｜ MA10：60.74 ｜ MA20：60.60 ｜ MA30：59.72
 结构 65 ｜ 量价 45 ｜ 筹码 50 ｜ 动能 50
 
 ### 4. 确认跟踪入池
-* 动作命令：`trader script add --target <NAME>`
+* 动作命令：`python 01-功能包-packages/trader/scripts/final_pool.py add --target <NAME>`
 * 用途：无特定微信面板输出，执行完毕后将票加入 `~/.trader/pool.json` 即可。分析报告末尾会提示「回复 1 一步入池」。
 
 ### 5. 池内排序
-* 动作命令：`trader script rank`
+* 动作命令：`python 01-功能包-packages/trader/scripts/final_pool.py rank`
 * 用途：看选股池里哪只最好、买多少、止损在哪。
 * 满分标准输出示例：
 
@@ -286,7 +294,7 @@ MA5：59.63 ｜ MA10：60.74 ｜ MA20：60.60 ｜ MA30：59.72
  5. 紫金矿业
 
 ### 6. 明日作战表
-* 动作命令：`trader script plan`
+* 动作命令：`python 01-功能包-packages/trader/scripts/final_pool.py plan`
 * 用途：明天盯哪几只、什么价格触发、仓位纪律。
 * 满分标准输出示例：
 
@@ -306,7 +314,7 @@ MA5：59.63 ｜ MA10：60.74 ｜ MA20：60.60 ｜ MA30：59.72
 仓位纪律：执行首次1成 确认加至3成 单票风险1R 总仓位≤5成。明天只重点盯南网科技和中国铝业，不触发不买。
 
 ### 7. 仓位轮动与管理
-* 动作命令：`review script --targets <NAME1> <NAME2>`
+* 动作命令：`python 01-功能包-packages/portfolio/scripts/final_portfolio.py --targets <NAME1> <NAME2>`
 * 用途：两只票怎么分配资金、当前浮盈浮亏、轮动触发条件。
 * 满分标准输出示例：
 
@@ -356,7 +364,7 @@ python3 -m pytest 02-共享模块-shared/tests/
 python3 -m pytest 01-功能包-packages/*/tests/
 
 # 运行各 Skill 格式与逻辑自检
-python3 scripts/check_all.py
+# （check_all.py 已废弃，运行 pytest 即可覆盖格式校验）
 
 # 信号历史老数据迁移与去重工具
 python3 02-共享模块-shared/scripts/signal_migration_tool.py

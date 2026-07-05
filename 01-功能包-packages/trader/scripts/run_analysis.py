@@ -1616,12 +1616,12 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         f"现价 {current_price:.2f}（{change_pct:+.2f}%）{rel_label}",
     ]
 
-    # 均线显示（保留 1 位小数更清爽）
+    # 均线显示（冒号分隔 + 2 位小数，与 output-template 契约一致）
     ma_parts = []
     for ma_key in ("ma5", "ma10", "ma20", "ma30"):
         if ma_raw.get(ma_key) and isinstance(ma_raw.get(ma_key), (int, float)) and ma_raw[ma_key] > 0:
             ma_num = int(ma_key[2:])
-            ma_parts.append(f"MA{ma_num} {ma_raw[ma_key]:.1f}")
+            ma_parts.append(f"MA{ma_num}：{ma_raw[ma_key]:.2f}")
     if ma_parts:
         lines.append(f"  {' ｜ '.join(ma_parts)}")
 
@@ -1707,6 +1707,10 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
     elif "(" in fusion_action:
         _action_word = fusion_action.split("(")[0].strip()
         _reason = fusion_action.split("(")[1].rstrip(")").strip()
+    #  regime override 覆盖：一票否决时显示真实决策，不显示融合原始信号
+    _real_status = str(r.get("base_status") or "")
+    if _real_status in ("暂不碰", "风险回避", "空仓规避") and _real_status != _action_word:
+        _action_word = _real_status
 
     # 2. 四阶段定位：蓄势/主升/派发/衰退 + 动能
     _major_stage = str(r.get("major_stage") or "")
@@ -1775,10 +1779,38 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         _bear_count = sum(1 for v in fusion_signals.values() if isinstance(v, dict) and v.get("direction", 0) < 0)
         lines.append(f"  {_bull_count}方看多 vs {_bear_count}方看空")
 
-    lines.extend([
-        "",
-        "📍 价格阶梯"
-    ])
+    # 双状态行（仅两者不同时显示，避免与 🎯 行重复）
+    bs = str(r.get("base_status") or "")
+    ts = str(r.get("theory_status") or "")
+    if bs and ts and bs != ts:
+        lines.extend(["", f"  基础状态：{bs} ｜ 体系结论：{ts}"])
+
+    # 决策摘要（仅非限制状态时显示，避免与🎯和双状态行重复）
+    _RESTRICTIVE = frozenset({"暂不碰", "风险回避", "空仓规避", "退场观察"})
+    _pos_cap = int(r.get("position_cap") or 0)
+    _stop_val = float(r.get("stop") or 0)
+    _lz_low = float(r.get("low_zone_lower") or 0)
+    _lz_high = float(r.get("low_zone_upper") or 0)
+    _action_text = ""
+    if not r.get("has_position"):
+        if bs not in _RESTRICTIVE and _lz_low > 0 and _lz_high > 0:
+            _action_text = f"空仓：在 {_lz_low:.2f}-{_lz_high:.2f}元 试探买 {_pos_cap}%，止损 {_stop_val:.2f}"
+    else:
+        if bs not in _RESTRICTIVE:
+            _take_val = float(r.get("take") or 0)
+            if _take_val > 0:
+                _action_text = f"有底仓：反弹 {_take_val:.2f} 冲不动减"
+
+    if _action_text:
+        lines.extend([
+            "",
+            f"📍 决策｜{_action_text}"
+        ])
+    else:
+        lines.extend([
+            "",
+            "📍 价格阶梯"
+        ])
 
     # 收集所有价格行，统一排序后输出（确保严格递增）
     all_price_lines: list[tuple[float, str]] = []
