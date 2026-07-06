@@ -669,15 +669,16 @@ def merge_decisions(
             FUND_FLOW_OUTFLOW_VETO_WAN,
         )
         if fund_flow_data and isinstance(fund_flow_data, dict):
-            consecutive_outflow = fund_flow_data.get("consecutive_outflow_days", 0)
+            consecutive_outflow = fund_flow_data.get("consecutive_outflow_days") or 0  # fix: None guard
             # 从近 N 日每日流向列表计算实际连续流出天数和均值
-            daily_flow_5d = fund_flow_data.get("daily_flow_5d", [])
-            cum_flow_5d = fund_flow_data.get("cum_flow_5d_wan", 0)
+            daily_flow_5d = fund_flow_data.get("daily_flow_5d") or []  # fix: None guard
+            cum_flow_5d = fund_flow_data.get("cum_flow_5d_wan") or 0  # fix: None guard
             if consecutive_outflow >= FUND_FLOW_CONSECUTIVE_OUTFLOW_DAYS:
                 # 检查近 N 日每日流出是否均超阈值（防止单日巨额拉高均值）
                 recent_n = daily_flow_5d[-FUND_FLOW_CONSECUTIVE_OUTFLOW_DAYS:] if daily_flow_5d else []
-                if recent_n and all(
-                    isinstance(v, (int, float)) and v < 0 and abs(v) >= FUND_FLOW_OUTFLOW_VETO_WAN
+                # fix: require enough samples before applying all() veto
+                if len(recent_n) >= FUND_FLOW_CONSECUTIVE_OUTFLOW_DAYS and all(
+                    isinstance(v, (int, float)) and v < 0 and abs(v) > FUND_FLOW_OUTFLOW_VETO_WAN  # fix: contract ">" (strict)
                     for v in recent_n
                 ):
                     has_fund_flow_outflow_veto = True

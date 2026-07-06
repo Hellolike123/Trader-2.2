@@ -179,8 +179,11 @@ def set_cached(key: str, target: str, data: Any) -> None:
                 finally:
                     fcntl.flock(lock_f, fcntl.LOCK_UN)
             else:
-                _logger.warning("Cache write lock timeout for %s/%s, writing without lock", key, target)
-                tmp_file.replace(cache_file)
+                # fix: lock timeout — skip write instead of racing without lock.
+                # Cache miss is a performance issue, not a correctness issue; a racing
+                # unlocked replace could overwrite another thread's newer write.
+                _logger.warning("Cache write lock timeout for %s/%s, skipping write", key, target)
+                tmp_file.unlink(missing_ok=True)
     except (OSError, TypeError) as exc:
         _logger.warning("Cache write failed for %s/%s: %s", key, target, exc)
         tmp_file.unlink(missing_ok=True)

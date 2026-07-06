@@ -267,7 +267,7 @@ def status_layers(
     fusion_status = None
     if FUSION_OVERRIDE_ENABLED and isinstance(fusion_result, dict):
         fc = safe_float(fusion_result, "confidence")
-        if fc >= FUSION_CONFIDENCE_THRESHOLD:
+        if fc > FUSION_CONFIDENCE_THRESHOLD:  # fix: contract says "超过阈值" (strict >)
             fusion_action = str(fusion_result.get("action") or "").strip()
             mapped_status = _FUSION_STATUS_MAP.get(fusion_action)
             if mapped_status is not None:
@@ -306,7 +306,7 @@ def status_layers(
     # P0-2: 单日跌幅硬性熔断 — 跌幅超阈值直接"风险回避"，跳过假跌破逻辑
     # 注: HARD_STOP_SINGLE_DAY_DROP 是小数(-0.07)，change 是百分比(-7.0)
     # 用 round 避免浮点精度问题 (-0.07*100 = -7.000000000000001)
-    if round(change, 4) <= round(HARD_STOP_SINGLE_DAY_DROP * 100, 4):
+    if round(change, 4) < round(HARD_STOP_SINGLE_DAY_DROP * 100, 4):  # fix: "超7%" means strictly greater than
         return {
             "base_status": "风险回避",
             "theory_status": "风险回避",
@@ -334,7 +334,8 @@ def status_layers(
         lookback = min(PULLBACK_CONFIRM_DAYS, len(bars) - 1)
         for i in range(-lookback, 0):
             prev_close = to_float(bars[i].get("close"))
-            if prev_close is not None and prev_close >= hard_stop:
+            # fix: contract requires prev_close >= support (not hard_stop); hard_stop < support
+            if prev_close is not None and prev_close >= support:
                 _fake_break = True
                 break
 
@@ -571,7 +572,7 @@ def atr_volatility_level(atr_ratio: float) -> tuple[str, int]:
 
 
 def atr_stop_buffer(atr_ratio: float, atr14: float) -> tuple[float, str]:
-    if atr14 <= 0:
+    if not (atr14 > 0):  # fix: NaN guard — NaN > 0 is False, so NaN falls through here
         return (0, "ATR数据不足")
     distance = round(atr14 * 2, 2)
     level, _ = atr_volatility_level(atr_ratio)

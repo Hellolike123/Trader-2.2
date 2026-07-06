@@ -800,8 +800,9 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
         "sell_observe_price": round(resistance_price, 2),
         "hard_stop": stop,
         "take": take,
-        "upside_pct": round(pct_change(current, confirm_price), 2),
-        "downside_pct": round(abs(pct_change(current, stop)), 2),
+        # fix: guard against inf from pct_change when current=0
+        "upside_pct": round(pct_change(current, confirm_price), 2) if current > 0 else 0.0,
+        "downside_pct": round(abs(pct_change(current, stop)), 2) if current > 0 else 0.0,
         "position_ratio": round(position, 3),
         "pressure_space_pct": round(pressure_space_pct, 4),
         "status": status,

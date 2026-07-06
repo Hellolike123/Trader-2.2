@@ -163,11 +163,12 @@ def _fetch_fund_flow_eastmoney(symbol: str, days: int = 30) -> list[dict[str, An
                 date_str = parts[0]
                 # 东方财富 API 字段顺序: parts[1]=主力净流入(超大+大), parts[2]=小单, parts[3]=中单, parts[4]=大单, parts[5]=超大单
                 # Fix P0: 字段映射全部错位，以 parts[4]+parts[5]=parts[1] 的约束关系验证
-                super_large = float(parts[5]) if parts[5] != "-" else 0.0
-                large = float(parts[4]) if parts[4] != "-" else 0.0
-                medium = float(parts[3]) if parts[3] != "-" else 0.0
-                small = float(parts[2]) if parts[2] != "-" else 0.0
-                main_force = float(parts[1]) if parts[1] != "-" else super_large + large
+                # fix: unit mismatch — eastmoney API returns yuan, _wan fields require wan (÷10000)
+                super_large = float(parts[5]) / 10000.0 if parts[5] != "-" else 0.0
+                large = float(parts[4]) / 10000.0 if parts[4] != "-" else 0.0
+                medium = float(parts[3]) / 10000.0 if parts[3] != "-" else 0.0
+                small = float(parts[2]) / 10000.0 if parts[2] != "-" else 0.0
+                main_force = float(parts[1]) / 10000.0 if parts[1] != "-" else super_large + large
                 # 主力净流入 = 超大单 + 大单（用于缓存格式兼容，保留 net_flow 字段）
                 net_flow = main_force
                 result.append({
@@ -220,15 +221,16 @@ def calc_fund_flow_features(
     # 累计净流入
     recent5 = daily_flow[-5:]
     recent10 = daily_flow[-10:]
-    cum_5 = sum(d.get("net_flow_wan", 0) for d in recent5)
-    cum_10 = sum(d.get("net_flow_wan", 0) for d in recent10)
+    # fix: None guard — d.get(k, 0) returns None when key exists with None value
+    cum_5 = sum((d.get("net_flow_wan") or 0) for d in recent5)
+    cum_10 = sum((d.get("net_flow_wan") or 0) for d in recent10)
 
     # 连续流入/流出天数
     # net_flow=0 时：若已有方向则延续，否则中断
     consecutive_in = 0
     consecutive_out = 0
     for d in reversed(daily_flow):
-        nf = d.get("net_flow_wan", 0)
+        nf = d.get("net_flow_wan") or 0  # fix: None guard
         if nf > 0:
             if consecutive_out == 0:
                 consecutive_in += 1
@@ -260,7 +262,7 @@ def calc_fund_flow_features(
     flow_price_relation = _calc_flow_price_relation(daily_flow, bars)
 
     # 近5日每日净流入
-    daily_flow_5d = [d.get("net_flow_wan", 0) for d in recent5]
+    daily_flow_5d = [d.get("net_flow_wan") or 0 for d in recent5]  # fix: None guard
 
     return {
         "cum_flow_5d_wan": round(cum_5, 2),
@@ -356,8 +358,8 @@ def calc_fund_flow_features_from_bars(
 
     # 价资关系：用近5日累计估算流向 vs 价格变动
     recent5 = bars[-5:]
-    if len(recent5) >= 2 and recent5[0].get("close", 0) > 0:
-        price_up = recent5[-1].get("close", 0) > recent5[0].get("close", 0)
+    if len(recent5) >= 2 and (recent5[0].get("close") or 0) > 0:  # fix: None guard
+        price_up = (recent5[-1].get("close") or 0) > (recent5[0].get("close") or 0)
         flow_up = cum_5 > 0
         if price_up and flow_up:
             flow_price_relation = "价涨资入"
@@ -392,7 +394,7 @@ def _calc_flow_price_relation(
         return "无数据"
 
     recent5_flow = daily_flow[-5:]
-    cum_flow = sum(d.get("net_flow_wan", 0) for d in recent5_flow)
+    cum_flow = sum((d.get("net_flow_wan") or 0) for d in recent5_flow)  # fix: None guard
     flow_in = cum_flow > 0
     flow_out = cum_flow < 0
 
