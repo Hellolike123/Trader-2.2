@@ -83,6 +83,14 @@ class BayesianFusion:
         for m in [bull, bear, rang]:
             m /= m.sum(axis=1, keepdims=True)
 
+        # ── 边际先验 P(action | regime)：对各方向求平均作为基线 ──────────────
+        # 用于贝叶斯去偏：三路直接相乘会放大先验 n 次方，需除以 prior^(n-1)
+        self._action_prior: dict[str, np.ndarray] = {
+            "bull":  bull.mean(axis=0),        # 行平均 = 无方向偏好的边际分布
+            "bear":  bear.mean(axis=0),
+            "range": rang.mean(axis=0),
+        }
+
         return {"bull": bull, "bear": bear, "range": rang}
 
     def _dir_to_idx(self, direction: int) -> int:
@@ -92,6 +100,14 @@ class BayesianFusion:
     def _get_prior(self, regime: str) -> np.ndarray:
         """获取对应 Regime 的先验矩阵。"""
         return self._prior.get(regime, self._prior["range"])
+
+    def _get_action_prior(self, regime: str) -> np.ndarray:
+        """获取对应 Regime 的边际先验概率向量 P(action | regime)。
+
+        对各方向条件概率求平均，作为贝叶斯去偏基线。
+        落在 N/A 键时 fallback 到 range。
+        """
+        return self._action_prior.get(regime, self._action_prior["range"])
 
     def _expert_likelihood(
         self,
@@ -122,8 +138,10 @@ class BayesianFusion:
         base_prob = prior_matrix[row_idx].copy()
 
         # 用置信度对先验进行调节：高置信度时向该方向的极端动作靠拢
-        uniform = np.ones(len(ACTIONS)) / len(ACTIONS)
-        blended = confidence * base_prob + (1 - confidence) * uniform
+        # null_belief = 该 regime 的边际先验 P(action|regime)，代表无专家信号时的基线
+        # 代替固定 uniform，这样低置信度时自然回退到 regime 基线而非等权重均匀
+        null_belief = self._get_action_prior(regime)
+        blended = confidence * base_prob + (1 - confidence) * null_belief
 
         # 加权并归一化（对数空间加权，避免幂运算平坦化分布）
         log_weighted = np.log(np.clip(blended, 1e-10, None)) * expert_weight
@@ -164,8 +182,11 @@ class BayesianFusion:
         l_mom  = self._expert_likelihood(momentum_signal, regime_state, momentum_weight)
         l_wyk  = self._expert_likelihood(wyckoff_signal, regime_state, wyckoff_weight)
 
-        # 贝叶斯乘积规则：后验 ∝ L_chan × L_mom × L_wyk × 均匀先验
-        posterior = l_chan * l_mom * l_wyk
+        # 贝叶斯乘积规则：后验 ∝ L_chan × L_mom × L_wyk
+        # 但三路似然均源自同一 regime 先验，直接相乘会放大先验 3 次方。
+        # 修正：除以 P(action|regime)^(n-1) = prior^2 做去偏。
+        prior_acts = self._get_action_prior(regime_state)
+        posterior = l_chan * l_mom * l_wyk / (prior_acts ** 2 + 1e-10)
         posterior /= (posterior.sum() + 1e-10)
 
         # 最优动作
