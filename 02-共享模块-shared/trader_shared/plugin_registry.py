@@ -132,3 +132,17 @@ def _auto_register(registry: PluginRegistry) -> None:
         registry.register(MomentumPlugin())
     except ImportError:
         _logger.debug("MomentumPlugin not available")
+
+    # Supertrend plugin (展示型，不进融合)
+    try:
+        from trader_shared.plugins.supertrend_plugin import SupertrendPlugin
+        registry.register(SupertrendPlugin())
+    except ImportError:
+        _logger.debug("SupertrendPlugin not available")
+
+    # VWAP plugin (展示型，不进融合)
+    try:
+        from trader_shared.plugins.vwap_plugin import VwapPlugin
+        registry.register(VwapPlugin())
+    except ImportError:
+        _logger.debug("VwapPlugin not available")

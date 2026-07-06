@@ -59,6 +59,13 @@ python3 01-功能包-packages/trader/scripts/final_report.py --target <NAME> --o
 | `scene` | str | 场景标签：低吸观察/冲高减仓/突破确认 |
 | `exit_plan` | dict | 分批止盈计划 |
 | `low_zone` / `high_zone` | float | 低吸/高抛区间 |
+| `atr14` | float | ATR14 绝对值（元） |
+| `supertrend_direction` | str | Supertrend 趋势带方向：up/down/neutral（展示，不进融合） |
+| `supertrend_stop` | float | Supertrend 轨道价（多头下轨/空头上轨），仅参考 |
+| `supertrend_atr` / `supertrend_vol_level` | float/str | ATR 值 / 波动率分级（波动较低/正常/偏大/偏高） |
+| `vwap` / `vwap_dev` / `vwap_position` / `vwap_level` | float/float/str/str | 当日 VWAP、现价比 VWAP 偏离（小数）、位置、机构成本状态（展示，不进融合） |
+
+> **展示增强 (v2.4.1)**：`📊 趋势轨道（参考）` 与 `📈 主力成本（VWAP·当日）` 两段均为**纯展示**，不参与融合加权、不替换止损。Supertrend 与动量**同向**时对动量置信度做 `+0.1` 封顶确认增强（方案 B，**反向不惩罚**），保护吸筹买点。报告解读时这两段仅供人的上下文参考，方向判断仍唯一以 `fusion.weighted_score` 为准。
 
 ### Step 3: 输出报告
 使用 `--output markdown` 的已渲染结果。如需补充说明，严格遵循 references/ 中的契约。

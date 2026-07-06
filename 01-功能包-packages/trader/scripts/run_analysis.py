@@ -34,7 +34,7 @@ except ImportError:
 from trader_shared.light_data import to_float, pct_change
 from trader_shared.stage_positioning import assess_stage, compute_exit_plan, compute_stage_stop, check_time_stop, evaluate_position_state, _detect_major_stage
 from trader_shared.fetchers import TencentFetcher
-from trader_shared.indicator_math import aggregate_5m_to_60m
+from trader_shared.indicator_math import aggregate_5m_to_60m, calc_supertrend, calc_vwap
 
 try:
     from trader_shared.chip_distribution import calc_chip_distribution as _calc_chip
@@ -608,6 +608,17 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     wyck_result = f_wyk.result() or {}
     momentum_result = f_mom.result() or {}
 
+    # ── ATR / Supertrend / VWAP 展示增强（方案 A+B）──
+    # Supertrend 趋势带方向对动量做「只确认不否决」微调（方案 B）
+    from trader_shared.plugins.momentum_plugin import apply_supertrend_nudge
+    _st = calc_supertrend(bars)
+    _st_dir = _st.get("direction")
+    momentum_result = apply_supertrend_nudge(momentum_result, _st_dir)
+    # VWAP：复用快照内 5 分钟 K 线，避免每次渲染重拉行情
+    _vwap_res = calc_vwap(bars_5m, current_price=current)
+    # 注入 5m 供 VwapPlugin 在 analyze_all 路径使用（与 build_report 直算结果一致）
+    quote["_bars_5m"] = bars_5m
+
     # 主力引擎结果（异常降级为 unknown）
     main_force_env = "unknown"
     mf_result = {}
@@ -1134,6 +1145,14 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "atr_ratio": atr_ratio_val,
         "atr_level": atr_level,
         "atr_cap": atr_cap,
+        "supertrend_direction": _st_dir,
+        "supertrend_stop": _st.get("stop_long"),
+        "supertrend_atr": _st.get("atr"),
+        "supertrend_vol_level": _st.get("vol_level"),
+        "vwap": _vwap_res.get("vwap"),
+        "vwap_dev": _vwap_res.get("deviation_pct"),
+        "vwap_position": _vwap_res.get("position"),
+        "vwap_level": _vwap_res.get("level"),
         "base_status": base_status,
         "theory_status": theory_status,
         "fusion_override_used": levels.get("fusion_override_used", False),
@@ -1777,6 +1796,40 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
     ts = str(r.get("theory_status") or "")
     if bs and ts:
         lines.extend(["", f"  基础状态：{bs} ｜ 体系结论：{ts}"])
+
+    # ── 📊 趋势轨道（参考，展示型，不进融合）──
+    _st_dir = r.get("supertrend_direction")
+    if _st_dir:
+        _st_emoji = "🟢" if _st_dir == "up" else ("🔴" if _st_dir == "down" else "⚪")
+        _st_label = "多头" if _st_dir == "up" else ("空头" if _st_dir == "down" else "中性")
+        _st_stop = r.get("supertrend_stop")
+        _st_vol = r.get("supertrend_vol_level") or ""
+        _st_atr = float(r.get("supertrend_atr") or r.get("atr14") or 0)
+        lines.append("")
+        lines.append("📊 趋势轨道（参考）")
+        if _st_atr and _st_atr > 0:
+            lines.append(f"  ATR {_st_atr:.2f}元（{_st_vol}）")
+        if _st_stop:
+            _st_dist = (current_price - _st_stop) / _st_stop * 100 if _st_stop else 0
+            lines.append(f"  轨道：{_st_emoji} {_st_label} {_st_stop:.2f}（距现价 {_st_dist:+.1f}%）— 仅趋势带参考，非止损")
+        if ma250_warning and _st_dir == "up":
+            lines.append("  ⚠️ 年线下方，趋势带信号谨慎")
+
+    # ── 📈 主力成本（VWAP·当日，展示型，不进融合）──
+    _vwap = r.get("vwap")
+    if _vwap:
+        _vwap_dev = float(r.get("vwap_dev") or 0)
+        _vwap_pos = r.get("vwap_position")
+        _vwap_emoji = "🟢" if _vwap_pos == "above" else "🔴"
+        _vwap_sign = "+" if _vwap_dev >= 0 else ""
+        _vwap_level = r.get("vwap_level") or ""
+        lines.append("")
+        lines.append("📈 主力成本（VWAP·当日）")
+        lines.append(f"  今日VWAP：{_vwap:.2f}元")
+        if _vwap_pos == "above":
+            lines.append(f"  价格 {_vwap_emoji} 在VWAP之上（当日{_vwap_level}，{_vwap_sign}{_vwap_dev * 100:.1f}%）")
+        else:
+            lines.append(f"  价格 {_vwap_emoji} 在VWAP之下（当日{_vwap_level}，{_vwap_sign}{_vwap_dev * 100:.1f}%）")
 
     # 决策摘要（仅非限制状态时显示，避免与🎯和双状态行重复）
     _RESTRICTIVE = frozenset({"暂不碰", "风险回避", "空仓规避", "退场观察"})
