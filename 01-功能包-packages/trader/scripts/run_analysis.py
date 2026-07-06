@@ -1142,6 +1142,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "volume_note": volume_note,
         "market_env": market_env_data,
         "position_cap": position_cap,
+        "ma250": round(ma250, 2) if ma250 is not None else None,
+        "ma250_warning": current < ma250 if (current is not None and ma250 is not None) else False,
         "ma_raw": {
             "ma5": levels["ma_values"].get("ma5"),
             "ma10": levels["ma_values"].get("ma10"),
@@ -1773,7 +1775,7 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
     # 双状态行（仅两者不同时显示，避免与 🎯 行重复）
     bs = str(r.get("base_status") or "")
     ts = str(r.get("theory_status") or "")
-    if bs and ts and bs != ts:
+    if bs and ts:
         lines.extend(["", f"  基础状态：{bs} ｜ 体系结论：{ts}"])
 
     # 决策摘要（仅非限制状态时显示，避免与🎯和双状态行重复）
@@ -1795,12 +1797,13 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
     if _action_text:
         lines.extend([
             "",
-            f"📍 决策｜{_action_text}"
+            "📍 决策",
+            f"  {_action_text}"
         ])
     else:
         lines.extend([
             "",
-            "📍 价格阶梯"
+            "📍 决策"
         ])
 
     # 收集所有价格行，统一排序后输出（确保严格递增）
