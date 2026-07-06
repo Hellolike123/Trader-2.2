@@ -70,7 +70,7 @@ class ScoreRuleEngine:
         total = 0.0
         for rule in self._rules:
             when = rule.get("when", "True")
-            result = rule.get("result", 0)
+            result = rule.get("result") or 0
             if not isinstance(result, (int, float)):
                 raise TypeError(f"Score rule result must be numeric, got {type(result).__name__}: {result}")
             if _safe_eval(when, context):
