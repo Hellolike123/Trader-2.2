@@ -242,7 +242,8 @@ def calc_chip_distribution(
         price = price_bins[idx]
         vol = volume_map[idx]
         share_pct = vol / total_chip * 100
-        if abs(price - current_price) / current_price > 0.05:
+        # P2 Fix: current_price=0 除零守卫
+        if current_price <= 0 or abs(price - current_price) / current_price > 0.05:
             continue
         # 如果已经收录在 top 3 peaks 中，跳过
         already_in = any(p["price"] == round(price, 2) for p in peaks)

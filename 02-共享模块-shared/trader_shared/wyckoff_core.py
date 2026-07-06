@@ -157,7 +157,7 @@ def _detect_sign_of_weakness(bars: list[dict]) -> dict:
     recent = bars[-(WYCKOFF_SOW_SUPPORT_LOOKBACK + 1):-1]
     current = bars[-1]
 
-    low_values = [to_float(b["low"]) for b in recent]
+    low_values = [to_float(b.get("low")) for b in recent]
     valid_lows = [v for v in low_values if v is not None]
     cur_low = to_float(current.get("low"))
     cur_close = to_float(current.get("close"))
@@ -213,7 +213,7 @@ def _detect_spring(bars: list[dict]) -> dict:
     recent = bars[-(WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1):-1]
     current = bars[-1]
 
-    low_values = [to_float(b["low"]) for b in recent]
+    low_values = [to_float(b.get("low")) for b in recent]
     valid_lows = [v for v in low_values if v is not None]
     current_low = to_float(current.get("low"))
     current_close = to_float(current.get("close"))
@@ -253,7 +253,7 @@ def _detect_upthrust(bars: list[dict]) -> dict:
     recent = bars[-(WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1):-1]
     current = bars[-1]
 
-    high_values = [to_float(b["high"]) for b in recent]
+    high_values = [to_float(b.get("high")) for b in recent]
     valid_highs = [v for v in high_values if v is not None]
     current_high = to_float(current.get("high"))
     current_close = to_float(current.get("close"))
@@ -464,7 +464,7 @@ def _detect_st(bars: list[dict]) -> dict:
     recent = bars[-(WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1):-1]
     current = bars[-1]
 
-    low_values = [to_float(b["low"]) for b in recent]
+    low_values = [to_float(b.get("low")) for b in recent]
     valid_lows = [v for v in low_values if v is not None]
     support = min(valid_lows) if valid_lows else None
 
@@ -489,7 +489,7 @@ def _detect_st(bars: list[dict]) -> dict:
                 continue
             # 找 support
             pre = scan_range[max(0, i - WYCKOFF_SPRING_SUPPORT_LOOKBACK):i]
-            pls = [to_float(b["low"]) for b in pre]
+            pls = [to_float(b.get("low")) for b in pre]
             vs = [v for v in pls if v is not None]
             if not vs:
                 continue
@@ -513,7 +513,7 @@ def _detect_st(bars: list[dict]) -> dict:
         if sl is None or sc is None:
             continue
         pre = bars[max(0, i - WYCKOFF_SPRING_SUPPORT_LOOKBACK):i]
-        pls = [to_float(b["low"]) for b in pre]
+        pls = [to_float(b.get("low")) for b in pre]
         vs = [v for v in pls if v is not None]
         if not vs:
             continue
