@@ -102,6 +102,34 @@ class HMMRegimeDetector:
             self.sigma = np.array([0.01, 0.015, 0.02])
             self.cov = None  # 1D 模式不使用
 
+    def _build_obs(
+        self, returns: List[float], volume_ratio: float | List[float] | None
+    ) -> np.ndarray:
+        """构造观察矩阵 (T, obs_dim)。
+
+        DEFER-2 Fix: volume_ratio 支持每日成交量比率序列，使 2D HMM 第二维
+        真正携带时间变化信息（原实现广播为常数序列，2D 退化为 1.5D）。
+
+        - list/tuple/ndarray → 取与 returns 等长的最近部分作为第二维
+        - float            → 广播为常数（向后兼容旧标量接口）
+        - None / 1D        → 单维收益率序列
+        """
+        returns = _clean_floats(returns)
+        if self.obs_dim == 2 and volume_ratio is not None:
+            if isinstance(volume_ratio, (list, tuple, np.ndarray)):
+                vr = [float(v) for v in volume_ratio if v is not None and np.isfinite(float(v))]
+                if len(vr) >= len(returns):
+                    vr_seq = np.array(vr[-len(returns):], dtype=float)
+                elif vr:
+                    # 序列不足，用其均值广播兜底（避免 2D 列全为 1.0 退化）
+                    vr_seq = np.full(len(returns), float(np.mean(vr)))
+                else:
+                    vr_seq = np.full(len(returns), 1.0)
+            else:
+                vr_seq = np.full(len(returns), float(volume_ratio))
+            return np.column_stack([np.array(returns, dtype=float), vr_seq])
+        return np.array(returns, dtype=float)
+
     # ─── 核心算法 ────────────────────────────────────────────────────────────
 
     def _gaussian_emission(self, obs: np.ndarray) -> np.ndarray:
@@ -249,30 +277,25 @@ class HMMRegimeDetector:
     def fit(
         self,
         returns: List[float],
-        volume_ratio: float | None = None,
+        volume_ratio: float | List[float] | None = None,
     ) -> "HMMRegimeDetector":
         """使用 Baum-Welch 算法拟合模型参数。
 
         Args:
             returns: 日收益率序列（浮点数列表，如 [0.01, -0.02, ...]）
-            volume_ratio: 近 5 日均成交额 / 前 5 日均成交额。
-                          提供时切换为 2D 模型；None 时保持 1D（向后兼容）。
+            volume_ratio: 每日成交量比率序列（与 returns 等长）或标量
+                          （近 5 日均成交额 / 前 5 日均成交额）。
+                          提供序列 / 标量时切换为 2D 模型；None 时保持 1D（向后兼容）。
 
         Returns:
             self（链式调用）
         """
-        if volume_ratio is not None:
-            self.obs_dim = 2
-            self._init_params()  # 以 2D 先验重新初始化
-            returns = _clean_floats(returns)  # P2 Fix: None/NaN 清洗
-            obs = np.column_stack([
-                np.array(returns, dtype=float),
-                np.full(len(returns), float(volume_ratio)),
-            ])
-        else:
-            self.obs_dim = 1
-            returns = _clean_floats(returns)  # P2 Fix: None/NaN 清洗
-            obs = np.array(returns, dtype=float)
+        # obs_dim 依据 volume_ratio 切换：序列或标量 → 2D，None → 1D
+        # DEFER-2 Fix: 支持每日成交量比率序列，真正启用 2D 观察维度
+        self.obs_dim = 2 if volume_ratio is not None else 1
+        self._init_params()  # 确保参数形状与 obs_dim 匹配
+        returns = _clean_floats(returns)  # P2 Fix: None/NaN 清洗
+        obs = self._build_obs(returns, volume_ratio)
         if len(obs) < 30:
             return self  # 数据不足，保持先验参数
 
@@ -299,26 +322,18 @@ class HMMRegimeDetector:
     def predict(
         self,
         returns: List[float],
-        volume_ratio: float | None = None,
+        volume_ratio: float | List[float] | None = None,
     ) -> np.ndarray:
         """用 Viterbi 解码最可能的隐状态序列。
 
         Args:
             returns: 日收益率序列
-            volume_ratio: 成交量比率（与 fit 保持一致）。
+            volume_ratio: 成交量比率序列或标量（与 fit 保持一致）。
 
         Returns:
             整数数组，每个元素为 0(Bull) / 1(Range) / 2(Bear)
         """
-        if self.obs_dim == 2 and volume_ratio is not None:
-            returns = _clean_floats(returns)  # P2 Fix: None/NaN 清洗
-            obs = np.column_stack([
-                np.array(returns, dtype=float),
-                np.full(len(returns), float(volume_ratio)),
-            ])
-        else:
-            returns = _clean_floats(returns)  # P2 Fix: None/NaN 清洗
-            obs = np.array(returns, dtype=float)
+        obs = self._build_obs(returns, volume_ratio)
         if len(obs) < 3:
             return np.zeros(len(obs), dtype=int)
         return self._viterbi(obs)
@@ -349,22 +364,13 @@ class HMMRegimeDetector:
         self._init_params()  # 重置，保证每次独立
         self.fit(returns, volume_ratio=volume_ratio)
 
-        if self.obs_dim == 2 and volume_ratio is not None:
-            returns = _clean_floats(returns)  # P2 Fix: None/NaN 清洗
-            obs = np.column_stack([
-                np.array(returns, dtype=float),
-                np.full(len(returns), float(volume_ratio)),
-            ])
-        else:
-            returns = _clean_floats(returns)  # P2 Fix: None/NaN 清洗
-            obs = np.array(returns, dtype=float)
-
+        obs = self._build_obs(returns, volume_ratio)
         if len(obs) < 3:
             return {
                 "state_id": 1, "state_label": "宽幅震荡",
                 "state_en": "range", "confidence": 0.4,
                 "mu": 0.0, "sigma": 0.015,
-                "volume_ratio": volume_ratio,
+                "volume_ratio": volume_ratio if not isinstance(volume_ratio, (list, tuple, np.ndarray)) else None,
             }
 
         states = self.predict(returns, volume_ratio=volume_ratio)
@@ -405,7 +411,7 @@ _HMM_CACHE_DATE: str = ""
 
 def detect_regime(
     returns: List[float],
-    volume_ratio: float | None = None,
+    volume_ratio: float | List[float] | None = None,
 ) -> dict:
     """一站式大势状态检测函数。
 
@@ -435,9 +441,15 @@ def detect_regime(
     # 计算缓存 key
     # P2 Fix: 缓存 key 增加 len(returns)，避免不同长度/不同标的(末50日相同)串缓存
     # P1-3: volume_ratio 进入 key，避免不同成交量输入串缓存
-    vr_prefix = (
-        f"vr{volume_ratio:.4f}:" if volume_ratio is not None else "vr-:"
-    )
+    # DEFER-2 Fix: 序列型 volume_ratio 用其内容 hash 作为 key 前缀
+    if volume_ratio is None:
+        vr_prefix = "vr-:"
+    elif isinstance(volume_ratio, (list, tuple, np.ndarray)):
+        vr_prefix = "vrseq" + hashlib.md5(
+            ",".join(f"{v:.3f}" for v in volume_ratio[-20:]).encode("utf-8")
+        ).hexdigest()[:8] + ":"
+    else:
+        vr_prefix = f"vr{volume_ratio:.4f}:"
     data_hash = hashlib.md5(
         f"{len(returns)}:{vr_prefix}".encode("utf-8")
         + ",".join(f"{r:.6f}" for r in returns[-50:]).encode("utf-8")
