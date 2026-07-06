@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -275,7 +275,9 @@ def _assess_volume_price(
     vol_20 = [float(b.get("volume") or 0) for b in recent20]
     avg_vol_5 = sum(vol_5) / max(len(vol_5), 1)
     avg_vol_20 = sum(vol_20) / max(len(vol_20), 1)
-    vol_ratio = avg_vol_5 / max(avg_vol_20, 1)
+    if avg_vol_20 <= 0:
+        return 0.0, "", ""
+    vol_ratio = avg_vol_5 / avg_vol_20
 
     # P1 Fix: 计算 5 日涨幅时，剔除历史单日涨跌幅 > 7% 的跳空缺口日，
     # 避免单日缺口主导阶段判定（如涨停后横盘 4 天被误判为"主升"）
@@ -397,7 +399,7 @@ def _detect_main_force_stage(main_force_result: dict | None) -> tuple[str | None
         return None, 0.0, ""
 
     mf_stage = main_force_result.get("stage", "unknown")
-    mf_confidence = float(main_force_result.get("confidence", 0))
+    mf_confidence = float(main_force_result.get("confidence") or 0)
     mf_signals = main_force_result.get("signals", [])
 
     if mf_stage == "unknown" or mf_confidence <= 0:
@@ -626,7 +628,7 @@ def _detect_major_stage(
             if ws is not None and conf is not None and conf >= 0.3:
                 try:
                     ws_f = float(ws)
-                    if ws_f > 0.25 and final_stage in ("蓄势", "蓄势偏弱"):
+                    if ws_f >= 0.25 and final_stage in ("蓄势", "蓄势偏弱"):
                         # 强买入信号 → 偏积极方向微调
                         if final_stage == "蓄势偏弱":
                             final_stage = "蓄势"
@@ -1806,7 +1808,7 @@ def evaluate_position_state(
     # 回踩加仓（蓄势期+回踩支撑+条件满足）
     if conditions["stage_accumulation"] and conditions["pullback_to_support"]:
         # T+1 隔离锁：当天已加仓则冷却，不重复加仓
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
         if last_add_date is not None and last_add_date == today:
             return _make_position_state(
                 "持仓观察", "T+1冷却，今日已加仓，等待明日再评估",

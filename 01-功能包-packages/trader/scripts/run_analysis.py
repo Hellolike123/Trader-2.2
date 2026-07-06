@@ -1284,6 +1284,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         chip_migration=chip_migration,
         high_zone_lower=float(levels.get("high_zone_lower") or 0),
         trailing_stop=levels.get("trailing_stop"),
+        last_add_date=bars_date,
     )
     report["position_state"] = position_state
 

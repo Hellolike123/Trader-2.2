@@ -30,6 +30,25 @@ REGIME_EN = {0: "bull", 1: "range", 2: "bear"}
 _EPS = 1e-10
 
 
+def _clean_floats(values: List[float]) -> List[float]:
+    """P2 Fix: 过滤 None/NaN/非数值，返回纯浮点列表。
+
+    numpy 2.x 遇 None 抛 ValueError；NaN 全链路透传导致 argmax 返回未定义状态。
+    """
+    out: List[float] = []
+    for v in values:
+        if v is None:
+            continue
+        try:
+            fv = float(v)
+        except (TypeError, ValueError):
+            continue
+        if not np.isfinite(fv):
+            continue
+        out.append(fv)
+    return out
+
+
 class HMMRegimeDetector:
     """轻量级隐马尔可夫模型大势状态检测器。
 
@@ -245,12 +264,14 @@ class HMMRegimeDetector:
         if volume_ratio is not None:
             self.obs_dim = 2
             self._init_params()  # 以 2D 先验重新初始化
+            returns = _clean_floats(returns)  # P2 Fix: None/NaN 清洗
             obs = np.column_stack([
                 np.array(returns, dtype=float),
                 np.full(len(returns), float(volume_ratio)),
             ])
         else:
             self.obs_dim = 1
+            returns = _clean_floats(returns)  # P2 Fix: None/NaN 清洗
             obs = np.array(returns, dtype=float)
         if len(obs) < 30:
             return self  # 数据不足，保持先验参数
@@ -290,11 +311,13 @@ class HMMRegimeDetector:
             整数数组，每个元素为 0(Bull) / 1(Range) / 2(Bear)
         """
         if self.obs_dim == 2 and volume_ratio is not None:
+            returns = _clean_floats(returns)  # P2 Fix: None/NaN 清洗
             obs = np.column_stack([
                 np.array(returns, dtype=float),
                 np.full(len(returns), float(volume_ratio)),
             ])
         else:
+            returns = _clean_floats(returns)  # P2 Fix: None/NaN 清洗
             obs = np.array(returns, dtype=float)
         if len(obs) < 3:
             return np.zeros(len(obs), dtype=int)
@@ -327,11 +350,13 @@ class HMMRegimeDetector:
         self.fit(returns, volume_ratio=volume_ratio)
 
         if self.obs_dim == 2 and volume_ratio is not None:
+            returns = _clean_floats(returns)  # P2 Fix: None/NaN 清洗
             obs = np.column_stack([
                 np.array(returns, dtype=float),
                 np.full(len(returns), float(volume_ratio)),
             ])
         else:
+            returns = _clean_floats(returns)  # P2 Fix: None/NaN 清洗
             obs = np.array(returns, dtype=float)
 
         if len(obs) < 3:
@@ -397,6 +422,9 @@ def detect_regime(
         与 HMMRegimeDetector.fit_predict() 相同的结果字典
     """
     global _HMM_CACHE, _HMM_CACHE_DATE
+
+    # P2 Fix: 入口清洗 None/NaN，避免缓存 key 格式化与 np.array 双重崩溃
+    returns = _clean_floats(returns)
 
     today_str = date.today().isoformat()
     # 跨日清缓存

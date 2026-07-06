@@ -112,7 +112,10 @@ class BayesianFusion:
         raw_dir = signal.get("direction", 0)
         direction = int(raw_dir) if raw_dir is not None else 0
         confidence = float(signal.get("confidence", 0.3))
-        confidence = np.clip(confidence, 0.05, 0.95)
+        # P2 Fix: NaN 防御 — confidence 为 NaN 时 np.clip 不处理，posterior 全 NaN 导致 argmax 误选索引 0
+        if not np.isfinite(confidence):
+            confidence = 0.3
+        confidence = float(np.clip(confidence, 0.05, 0.95))
 
         prior_matrix = self._get_prior(regime)
         row_idx = self._dir_to_idx(direction)

@@ -1,5 +1,5 @@
 # score_for modifiers — each rule adds to/from the base STATUS_SCORE.
-# Evaluated in order; only positive-value rules apply.
+# Evaluated in order; all matching rules apply (both positive and negative).
 
 rules:
   - name: near_low_zone

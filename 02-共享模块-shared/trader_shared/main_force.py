@@ -64,13 +64,14 @@ def detect_main_force_stage(
             except Exception:
                 pass  # 推导失败, 继续使用空 features
 
-    cum_5 = features.get("cum_flow_5d_wan", 0)
-    cum_10 = features.get("cum_flow_10d_wan", 0)
-    con_in = features.get("consecutive_inflow_days", 0)
-    con_out = features.get("consecutive_outflow_days", 0)
-    net_pct = features.get("net_flow_pct", 0)
-    relation = features.get("flow_price_relation", "无数据")
-    daily_5d = features.get("daily_flow_5d", [])
+    # P2 Fix: None 防御 — .get(k, 0) 在值为 None 时返回 None，后续比较抛 TypeError（与第 1 批 fund_flow 同类）
+    cum_5 = features.get("cum_flow_5d_wan") or 0
+    cum_10 = features.get("cum_flow_10d_wan") or 0
+    con_in = features.get("consecutive_inflow_days") or 0
+    con_out = features.get("consecutive_outflow_days") or 0
+    net_pct = features.get("net_flow_pct") or 0
+    relation = features.get("flow_price_relation") or "无数据"
+    daily_5d = features.get("daily_flow_5d") or []
 
     # 数据不足
     if not daily_5d or len(daily_5d) < 3:

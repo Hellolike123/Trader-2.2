@@ -290,9 +290,10 @@ def assess_vp_breakout(
     if not vp.get("fitted"):
         return {"vp_signal": "no_data", "vp_confidence": 0.5, "vp_note": "无量价分布数据"}
 
-    poc = vp["poc"]
-    va_high = vp["va_high"]
-    va_low = vp["va_low"]
+    # P2 Fix: 防御性 .get() — vp 字典缺 key 时 KeyError
+    poc = vp.get("poc", 0.0)
+    va_high = vp.get("va_high", 0.0)
+    va_low = vp.get("va_low", 0.0)
 
     if current_price > va_high:
         return {
