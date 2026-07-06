@@ -184,6 +184,15 @@ def assess() -> dict[str, Any]:
         elif cached_bars and not bars:
             bars = cached_bars
 
+    # Volume trend: recent 5d vol / preceding 5d vol (>1 = expanding, <1 = shrinking)
+    closes_vol: list[dict[str, Any]] = [b for b in bars if b.get("close") is not None and b.get("volume") is not None]
+    vol_trend: float | None = None
+    if len(closes_vol) >= 10:
+        vol_recent = sum(float(b["volume"]) for b in closes_vol[-5:]) / 5
+        vol_prev = sum(float(b["volume"]) for b in closes_vol[-10:-5]) / 5
+        if vol_prev > 0:
+            vol_trend = vol_recent / vol_prev
+
     # [2.3] HMM 大势前瞻判定
     hmm_regime_en = "range"
     hmm_regime_label = "宽幅震荡"
@@ -208,14 +217,6 @@ def assess() -> dict[str, Any]:
 
     # Improved trend: use MA5/MA20 relationship + slope, not just current vs MA5
     mid_term = "up" if (ma5 is not None and ma20 is not None and ma5 > ma20) else "down"
-    # Volume trend: recent 5d vol / preceding 5d vol (>1 = expanding, <1 = shrinking)
-    closes_vol: list[dict[str, Any]] = [b for b in bars if b.get("close") is not None and b.get("volume") is not None]
-    vol_trend: float | None = None
-    if len(closes_vol) >= 10:
-        vol_recent = sum(float(b["volume"]) for b in closes_vol[-5:]) / 5
-        vol_prev = sum(float(b["volume"]) for b in closes_vol[-10:-5]) / 5
-        if vol_prev > 0:
-            vol_trend = vol_recent / vol_prev
 
     # Level classification: separate mid-term trend from short-term intraday movement
     mid_weak = mid_term == "down"

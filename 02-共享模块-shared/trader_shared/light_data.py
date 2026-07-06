@@ -375,7 +375,7 @@ def _fetch_quote_tdx3(sec: Security) -> dict[str, Any] | None:
             "volume": to_float(q.get("vol")),
             "amount": to_float(q.get("amount")),
             "turnover_rate": None,
-            "current_change_pct": round(((price_v or 0) / (last_close_v or 1) - 1) * 100, 2) if price_v and last_close_v else None,
+            "current_change_pct": round(((price_v or 0) / (last_close_v if last_close_v and last_close_v > 0 else 1) - 1) * 100, 2) if price_v and last_close_v else None,
             "order_book": _extract_order_book(q),
         }
         return result
@@ -662,7 +662,7 @@ def _fetch_quote_mootdx(sec: Security) -> dict[str, Any] | None:
             "volume": to_float(q.get("vol")),
             "amount": to_float(q.get("amount")),
             "turnover_rate": None,
-            "current_change_pct": round(((price_v or 0) / (last_close_v or 1) - 1) * 100, 2) if price_v and last_close_v else None,
+            "current_change_pct": round(((price_v or 0) / (last_close_v if last_close_v and last_close_v > 0 else 1) - 1) * 100, 2) if price_v and last_close_v else None,
             "order_book": _extract_order_book(q),
         }
         return result
@@ -1027,8 +1027,8 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
 
     # Cleanup: 移除了重复的 Tencent HTTP retry（do_fetch），
     # 因为 Tencent HTTP 已在上方尝试过，再次 retry 不会成功。
-    # 全源失败时返回 None 而非再次超时。
-    return None
+    # 全源失败时返回空 dict 而非 None，避免下游 .get() 调用引发 AttributeError。
+    return {}
 
 
 def _compute_atr_fields(bars: list[dict[str, Any]]) -> None:

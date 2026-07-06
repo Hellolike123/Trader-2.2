@@ -79,7 +79,7 @@ def ths_hot_reason(date_str: str | None = None) -> pd.DataFrame:
         r.encoding = "gbk"
         if r.status_code == 200:
             data = r.json()
-            if data.get("errocode", 0) == 0 and data.get("data"):
+            if data.get("errcode", 0) == 0 and data.get("data"):
                 rows = data["data"]
                 df = pd.DataFrame(rows)
                 rename_map = {
