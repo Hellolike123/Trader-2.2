@@ -194,18 +194,31 @@ def assess() -> dict[str, Any]:
             vol_trend = vol_recent / vol_prev
 
     # [2.3] HMM 大势前瞻判定
+    # DEFER-2 Fix: 传每日量比序列（当日量/近5日均量），真正启用 2D 观察维度；
+    # 原实现传 vol_trend 标量被广播为常数，2D 退化为 1.5D。
     hmm_regime_en = "range"
     hmm_regime_label = "宽幅震荡"
     hmm_confidence = 0.5
     try:
-        closes = [float(b["close"]) for b in bars if b.get("close") is not None]
-        if len(closes) >= 5:
+        # 使用同时含 close 与 volume 的 bars，保证 returns 与量比序列等长对齐
+        if len(closes_vol) >= 6:
+            closes = [float(b["close"]) for b in closes_vol]
+            volumes = [float(b["volume"]) for b in closes_vol]
             if current > 0 and (not closes or abs(closes[-1] - current) > 1e-5):
                 closes.append(current)
+                volumes.append(volumes[-1] if volumes else 0.0)
             index_returns = [(closes[i] - closes[i-1]) / closes[i-1] for i in range(1, len(closes))]
-            if len(index_returns) >= 5:
+            # 每日量比序列：当日量 / 近5日均量（非正值兜底为 1.0，避免 inf/nan）
+            vol_series = []
+            for i in range(1, len(volumes)):
+                window = volumes[max(0, i - 4):i + 1]
+                if volumes[i] <= 0 or sum(window) <= 0:
+                    vol_series.append(1.0)
+                else:
+                    vol_series.append(volumes[i] / (sum(window) / len(window)))
+            if len(index_returns) >= 5 and len(vol_series) == len(index_returns):
                 from trader_shared.hmm_regime import detect_regime
-                hmm_res = detect_regime(index_returns, volume_ratio=vol_trend)
+                hmm_res = detect_regime(index_returns, volume_ratio=vol_series)
                 hmm_regime_en = hmm_res.get("state_en", "range")
                 hmm_regime_label = hmm_res.get("state_label", "宽幅震荡")
                 hmm_confidence = hmm_res.get("confidence", 0.5)

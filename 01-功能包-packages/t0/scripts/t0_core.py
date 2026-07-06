@@ -268,44 +268,42 @@ def render_markdown(plan: dict[str, Any]) -> str:
 
     current_action = '低吸' if buy_state == '可执行' else '高抛' if sell_state == '可执行' else '不动'
 
-    lines = [
-        "🎯 T0 盯盘助理",
-        f"{plan.get('name','')}（{plan.get('symbol','')}）｜现价 {current_text}（{pct_text(numeric_or_none(plan.get('current_change_pct')))}）",
-        "",
-        "🔍 扫描",
-        f"当前：{current_action} ｜ 止损：{price(numeric_or_none(buy.get('invalid_price')))}",
-    ]
+    stop_price = price(numeric_or_none(buy.get('invalid_price')))
 
+    # ── 段1: 触发价 ──
+    trigger_lines = [
+        "📌 触发价",
+        f"当前：{current_action} ｜ 止损：{stop_price}",
+    ]
     if buy_state in ("", "数据不足"):
-        lines.append("低吸：暂无")
+        trigger_lines.append("低吸：暂无")
     else:
-        lines.append(f"低吸：{buy_state}，{buy_obs}")
+        trigger_lines.append(f"低吸：{buy_state}，{buy_obs}")
     if sell_state in ("", "数据不足"):
-        lines.append("高抛：暂无")
+        trigger_lines.append("高抛：暂无")
     else:
-        lines.append(f"高抛：{sell_state}，{sell_obs}")
+        trigger_lines.append(f"高抛：{sell_state}，{sell_obs}")
 
     exit_plan = plan.get("exit_plan") or {}
     exit_items = exit_plan.get("exit_plan") or []
     if exit_items and exit_plan.get("risk_r", 0) > 0:
         exit_parts = []
-        for _, item in enumerate(exit_items, 1):
+        for item in exit_items:
             p = item.get("price")
             if p is not None:
                 exit_parts.append(f"{p:.2f}")
         if exit_parts:
-            lines.append(f"止盈：{'｜'.join(exit_parts)}")
+            trigger_lines.append(f"止盈：{'｜'.join(exit_parts)}")
 
-    # ATR 波动提示（来自 price_point_engine 的 level_advice）
     atr_info = plan.get("atr_info") or {}
     level_advice = atr_info.get("level_advice")
     if level_advice:
-        lines.append(f"波动：{level_advice}")
+        trigger_lines.append(f"波动：{level_advice}")
 
-    lines.append("")
-
+    # ── 段2: 大单异动 ──
+    capital_lines = []
     if big_order and big_order.get("events"):
-        title = "💰 资金异动" if has_tick_data else "💰 分时估算"
+        title = "💰 大单异动" if has_tick_data else "💰 分时估算"
         by_side = big_order.get("by_side") or {}
         buy_info = by_side.get("主动买入") or {}
         sell_info = by_side.get("主动卖出") or {}
@@ -315,11 +313,11 @@ def render_markdown(plan: dict[str, Any]) -> str:
         sell_total = round(sell_info.get("amount_wan") or 0)
 
         if buy_events and sell_events:
-            lines.append(f"{title}\n买入 {len(buy_events)}笔 {buy_total}万 ｜ 卖出 {len(sell_events)}笔 {sell_total}万")
+            capital_lines.append(f"{title}\n买入 {len(buy_events)}笔 {buy_total}万 ｜ 卖出 {len(sell_events)}笔 {sell_total}万")
         elif buy_events:
-            lines.append(f"{title}\n全部买入 {len(buy_events)}笔 +{buy_total}万")
+            capital_lines.append(f"{title}\n全部买入 {len(buy_events)}笔 +{buy_total}万")
         elif sell_events:
-            lines.append(f"{title}\n全部卖出 {len(sell_events)}笔 -{sell_total}万")
+            capital_lines.append(f"{title}\n全部卖出 {len(sell_events)}笔 -{sell_total}万")
 
         sorted_events = sorted(big_order["events"], key=lambda e: str(e.get("time","")))
         for i in range(0, len(sorted_events), 3):
@@ -330,38 +328,54 @@ def render_markdown(plan: dict[str, Any]) -> str:
                 side = str(e.get("side",""))
                 sign = "+" if "买入" in side else "-"
                 parts.append(f"{t} {sign}{amt:.0f}万")
-            lines.append("  ".join(parts))
+            capital_lines.append("  ".join(parts))
 
         net = buy_total - sell_total
-        lines.append(f"净流入 {'+' if net >= 0 else ''}{net}万{'，主力偏多' if net > 0 else '，主力偏空' if net < 0 else ''}")
+        capital_lines.append(f"净流入 {'+' if net >= 0 else ''}{net}万{'，主力偏多' if net > 0 else '，主力偏空' if net < 0 else ''}")
         if not has_tick_data:
-            lines.append("（5m分时估算，非真实Tick数据）")
+            capital_lines.append("（5m分时估算，非真实Tick数据）")
 
-    has_dynamic = False
+    # ── 段3: 操作建议（盘中动态 + 实时信号） ──
+    advice_lines = []
     if order_book_analyze and plan.get("order_book"):
         ob = order_book_analyze(plan["order_book"])
-        if not has_dynamic:
-            lines.append("")
-            lines.append("📋 盘中动态")
-            has_dynamic = True
-        lines.append(ob["line"])
-
+        advice_lines.append(ob["line"])
     history_lines = review_lines(plan.get("history"))
     if history_lines and history_lines != ["暂无关键事件。"]:
-        if not has_dynamic:
-            lines.append("")
-            lines.append("📋 盘中动态")
-            has_dynamic = True
-        lines.extend(history_lines)
-
+        advice_lines.extend(history_lines)
     signal_lines = _build_realtime_signal_section(plan)
     if signal_lines:
-        lines.append("")
-        lines.extend(signal_lines)
+        # 跳过段内标题行（🔔 实时信号），并入统一「操作建议」段
+        advice_lines.extend(signal_lines[1:])
 
-    stop_price = price(numeric_or_none(buy.get('invalid_price')))
+    # ── 段4: 风控提醒 ──
+    risk_lines = [
+        f"👀 跌破 {stop_price} 止损退出" if buy_state == "可执行" else f"👀 跌破 {stop_price} 后不再低吸"
+    ]
+    ds = str(plan.get("data_status") or "")
+    if ds == "partial":
+        risk_lines.append("⚠️ 数据不完整，盘中判断可能不准")
+    elif ds == "degraded":
+        risk_lines.append("⚠️ 数据不足，盘中判断可能不准")
+
+    # ── 组装输出 ──
+    lines = [
+        "🎯 T0 盯盘助理",
+        f"{plan.get('name','')}（{plan.get('symbol','')}）｜现价 {current_text}（{pct_text(numeric_or_none(plan.get('current_change_pct')))}）",
+        "",
+    ]
+    lines.extend(trigger_lines)
+    if capital_lines:
+        lines.append("")
+        lines.extend(capital_lines)
+    if advice_lines:
+        lines.append("")
+        lines.append("📈 操作建议")
+        lines.extend(advice_lines)
     lines.append("")
-    lines.append(f"👀 跌破 {stop_price} 止损退出" if buy_state == "可执行" else f"👀 跌破 {stop_price} 后不再低吸")
+    lines.append("⚠️ 风控提醒")
+    lines.extend(risk_lines)
+
     return "\n".join(lines)
 
 
