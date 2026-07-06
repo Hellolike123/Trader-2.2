@@ -111,6 +111,8 @@ def completed_5m_bars(bars: list[dict[str, Any]], now: datetime | None = None) -
     now = now or datetime.now()
     completed: list[dict[str, Any]] = []
     for bar in bars:
+        if bar is None:
+            continue
         dt = parse_dt(bar.get("time") or bar.get("date"))
         if dt is None:
             completed.append(bar)

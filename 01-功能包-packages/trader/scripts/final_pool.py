@@ -444,7 +444,7 @@ def record_from_report(target: str, report: dict[str, Any], offline: bool = Fals
     # 计算盈亏比存入记录
     # 使用 trigger（确认位/实际执行入场价）而非 support（支撑位）作为入场价，
     # 因为当 trigger > support 时（突破策略），用 support 会虚增盈亏比。
-    trigger_val = record.get("trigger", 0.0)
+    trigger_val = record.get("trigger") or 0.0
     stop_val = record.get("defense", 0.0)
     take_val = round(float(report.get("take") or 0), 2)
     risk_reward = None  # None 表示无法计算，0.0 表示计算为 0
@@ -1183,7 +1183,7 @@ def render_rank(items: list[dict[str, Any]]) -> str:
     sorted_items = sort_items_unified(items)
     market_level = get_market_level()
 
-    lines = [f"选股池  ｜  {'大盘' + market_level + '，防守优先' if market_level else '持仓排序'}"]
+    lines = [f"选股日报 — {today_text()}  ｜  {'大盘' + market_level + '，防守优先' if market_level else '持仓排序'}"]
     lines.append("")
 
     for i, item in enumerate(sorted_items):
