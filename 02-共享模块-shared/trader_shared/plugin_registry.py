@@ -10,12 +10,28 @@ Usage:
 """
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 from trader_shared.interfaces import IndicatorPlugin
 from trader_shared._logging import get_logger
 
 _logger = get_logger(__name__)
+
+
+def _plugin_accepts_supertrend_direction(fn) -> bool:
+    """检测插件 analyze 是否接受 supertrend_direction 关键字参数。
+
+    旧插件（如 chan/wyckoff 展示插件）签名不含该参数，不能透传，否则 TypeError。
+    含 **kwargs 的插件视为兼容。
+    """
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return False
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+        return True
+    return "supertrend_direction" in sig.parameters
 
 
 class PluginRegistry:
@@ -51,6 +67,7 @@ class PluginRegistry:
         bars: list[dict[str, Any]],
         change_pct: float | None,
         quote: dict[str, Any],
+        supertrend_direction: str | None = None,
     ) -> dict[str, dict[str, Any]]:
         """Run all registered plugins and return their results.
 
@@ -59,14 +76,34 @@ class PluginRegistry:
             bars: Daily K-line bars
             change_pct: Today's change percentage
             quote: Real-time quote dict
+            supertrend_direction: Supertrend 趋势带方向（"up"/"down"/None）。
+                用于方案 B「只确认不否决」微调：若未传入，则内部基于 bars 自动计算
+                （与 build_report 直算路径一致）。仅透传给显式声明接受该参数的插件
+                （当前为 momentum），避免破坏其他插件签名。
 
         Returns:
             Dict mapping plugin name → analysis result dict
         """
+        # 方案 B（P1-1）：registry 路径也应触发动量「只确认不否决」微调。
+        # build_report 走 momentum_strategy 直算 + 显式 nudge，不经 analyze_all，
+        # 故此处透传不会与 build_report 造成双重微调。
+        if supertrend_direction is None:
+            try:
+                from trader_shared.indicator_math import calc_supertrend
+                supertrend_direction = calc_supertrend(bars).get("direction")
+            except Exception:
+                supertrend_direction = None
+
         results: dict[str, dict[str, Any]] = {}
         for name, plugin in self._plugins.items():
             try:
-                result = plugin.analyze(current, bars, change_pct, quote)
+                if _plugin_accepts_supertrend_direction(plugin.analyze):
+                    result = plugin.analyze(
+                        current, bars, change_pct, quote,
+                        supertrend_direction=supertrend_direction,
+                    )
+                else:
+                    result = plugin.analyze(current, bars, change_pct, quote)
                 if isinstance(result, dict):
                     results[name] = result
                 else:

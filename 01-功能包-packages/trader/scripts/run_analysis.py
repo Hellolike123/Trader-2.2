@@ -1146,7 +1146,13 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "atr_level": atr_level,
         "atr_cap": atr_cap,
         "supertrend_direction": _st_dir,
-        "supertrend_stop": _st.get("stop_long"),
+        # 渲染契约「多头/空头轨道价」：按当前方向取活动轨道价，
+        # 保证空头(direction=="down")时 stop_short 也能展示。
+        "supertrend_stop": (
+            _st.get("stop_long") if _st_dir == "up"
+            else _st.get("stop_short") if _st_dir == "down"
+            else None
+        ),
         "supertrend_atr": _st.get("atr"),
         "supertrend_vol_level": _st.get("vol_level"),
         "vwap": _vwap_res.get("vwap"),

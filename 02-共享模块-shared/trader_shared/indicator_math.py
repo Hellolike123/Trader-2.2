@@ -166,6 +166,17 @@ def calc_supertrend(bars: list, atr_period: int = 14, multiplier: float = 3.0) -
             "vol_level": str,            # 波动较低/正常/偏大/偏高
         }
     """
+    if not bars:
+        # 空输入早返回：避免 atr_list[-1] 索引越界，保持下游契约完整
+        return {
+            "direction": "neutral",
+            "stop_long": None,
+            "stop_short": None,
+            "atr": 0.0,
+            "atr_pct": 0.0,
+            "vol_level": "波动正常",
+        }
+
     atr_list = calc_atr_series(bars, atr_period)
     n = len(bars)
     basic_upper: list[float | None] = []
@@ -175,9 +186,12 @@ def calc_supertrend(bars: list, atr_period: int = 14, multiplier: float = 3.0) -
             basic_upper.append(None)
             basic_lower.append(None)
             continue
-        _, _, c = _bar_values(bar)
-        basic_upper.append(c + multiplier * atr_list[i])
-        basic_lower.append(c - multiplier * atr_list[i])
+        # 标准 Supertrend 以 (H+L)/2 为中心构造上下轨，首根方向比较才有意义；
+        # 若以 close 为中心，basic_lower = close - mult*ATR 恒成立，首根永远为 up。
+        h, l, c = _bar_values(bar)
+        hl2 = (h + l) / 2.0
+        basic_upper.append(hl2 + multiplier * atr_list[i])
+        basic_lower.append(hl2 - multiplier * atr_list[i])
 
     # 标准 Supertrend：正向序列状态机，随收盘是否跌破/突破轨道翻转方向
     final_upper: list[float | None] = [None] * n

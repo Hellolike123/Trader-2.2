@@ -10,6 +10,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))) +
 
 from trader_shared.indicator_math import calc_supertrend, calc_vwap, calc_atr_series
 from trader_shared.plugins.momentum_plugin import apply_supertrend_nudge
+from trader_shared.plugin_registry import PluginRegistry, _plugin_accepts_supertrend_direction
+from trader_shared.interfaces import IndicatorPlugin
 
 
 def _bars_up(n=30):
@@ -94,6 +96,94 @@ def test_nudge_none_is_noop():
     assert out["momentum"]["score"] == 60
 
 
+# ── P2-2：空输入 / 短输入早返回不崩 ──
+
+def test_supertrend_empty_input():
+    st = calc_supertrend([])
+    assert st["direction"] == "neutral"
+    assert st["stop_long"] is None
+    assert st["stop_short"] is None
+    assert st["atr"] == 0.0
+    assert st["vol_level"] == "波动正常"
+
+
+def test_supertrend_short_input_returns_neutral():
+    st = calc_supertrend([{"high": 10, "low": 9, "close": 9.5}])
+    assert st["direction"] == "neutral"
+    assert st["stop_long"] is None
+    assert st["stop_short"] is None
+
+
+# ── P2-1：首根方向不再恒为 up（以 (H+L)/2 为中心）──
+
+def test_supertrend_first_valid_bar_down():
+    # 前 13 根走平 + 第 14 根放量大跌：首根有效棒应初始化为 down
+    bars = [{"high": 100.0, "low": 100.0, "close": 100.0} for _ in range(13)]
+    bars.append({"high": 100.0, "low": 90.0, "close": 90.0})
+    st = calc_supertrend(bars, atr_period=14, multiplier=3.0)
+    assert st["direction"] == "down"
+    assert st["stop_short"] is not None
+    assert st["stop_short"] >= 90.0
+
+
+# ── P1-1：registry.analyze_all 透传 supertrend_direction ──
+
+def test_plugin_accepts_supertrend_direction_detection():
+    class MomLike(IndicatorPlugin):
+        def name(self): return "momentum"
+        def analyze(self, current, bars, change_pct, quote, supertrend_direction=None):
+            return {}
+    class Other(IndicatorPlugin):
+        def name(self): return "other"
+        def analyze(self, current, bars, change_pct, quote):
+            return {}
+    assert _plugin_accepts_supertrend_direction(MomLike().analyze) is True
+    assert _plugin_accepts_supertrend_direction(Other().analyze) is False
+
+
+def test_analyze_all_passes_supertrend_direction():
+    captured = {}
+
+    class MomLike(IndicatorPlugin):
+        def name(self): return "momentum"
+        def analyze(self, current, bars, change_pct, quote, supertrend_direction=None):
+            captured["sd"] = supertrend_direction
+            return {"momentum": {"direction": "bullish", "score": 50}}
+
+    class Other(IndicatorPlugin):
+        def name(self): return "other"
+        def analyze(self, current, bars, change_pct, quote):
+            # 旧插件签名不含 supertrend_direction，必须不被透传，否则 TypeError
+            return {"direction": 1}
+
+    reg = PluginRegistry()
+    reg.register(MomLike())
+    reg.register(Other())
+    results = reg.analyze_all(10.0, [], 0.0, {}, supertrend_direction="up")
+
+    # momentum 收到透传的方向；other 未被透传且不崩
+    assert captured["sd"] == "up"
+    assert "momentum" in results
+    assert "other" in results
+    assert results["other"]["direction"] == 1
+
+
+def test_analyze_all_autocompute_supertrend_direction():
+    captured = {}
+
+    class MomLike(IndicatorPlugin):
+        def name(self): return "momentum"
+        def analyze(self, current, bars, change_pct, quote, supertrend_direction=None):
+            captured["sd"] = supertrend_direction
+            return {"momentum": {"direction": "bullish", "score": 50}}
+
+    reg = PluginRegistry()
+    reg.register(MomLike())
+    # 未显式传入时，analyze_all 应基于 bars 自动计算方向（此处空 bars → neutral）
+    reg.analyze_all(10.0, [], 0.0, {})
+    assert captured["sd"] == "neutral"
+
+
 if __name__ == "__main__":
     test_supertrend_up()
     test_supertrend_down()
@@ -104,4 +194,10 @@ if __name__ == "__main__":
     test_nudge_opposite_direction_no_punish()
     test_nudge_neutral_no_flip()
     test_nudge_none_is_noop()
+    test_supertrend_empty_input()
+    test_supertrend_short_input_returns_neutral()
+    test_supertrend_first_valid_bar_down()
+    test_plugin_accepts_supertrend_direction_detection()
+    test_analyze_all_passes_supertrend_direction()
+    test_analyze_all_autocompute_supertrend_direction()
     print("ALL INDICATOR ENHANCEMENT TESTS PASSED")
