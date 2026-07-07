@@ -44,10 +44,10 @@ def _check_mootdx() -> bool:
     if _MOOTDX_AVAILABLE is not None:
         return _MOOTDX_AVAILABLE
     try:
-        from mootdx.quotes import Q
-        Quotes = Q
+        from mootdx.quotes import Quotes
         _MOOTDX_AVAILABLE = True
     except ImportError:
+        Quotes = None
         _MOOTDX_AVAILABLE = False
     return _MOOTDX_AVAILABLE
 
@@ -1345,7 +1345,7 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int = 80) -> list[dic
     if bars:
         for bar in bars:
             bar["data_source"] = "mootdx"
-            bar["data_status"] = "partial"
+            bar["data_status"] = "full"
         return bars
     return []
 
@@ -1356,7 +1356,7 @@ def fetch_monthly(sec: Security, http: HttpClient, datalen: int = 60) -> list[di
     if bars:
         for bar in bars:
             bar["data_source"] = "mootdx"
-            bar["data_status"] = "partial"
+            bar["data_status"] = "full"
         return bars
     return []
 
@@ -1550,12 +1550,11 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
         missing_sources.append("monthly_bars")
 
     if quote and daily_bars and not missing_sources:
-        # Check if fallback occurred
-        if (isinstance(quote, dict) and quote.get("data_status") == "partial") or \
-           (isinstance(daily_bars, list) and any(b.get("data_status") == "partial" for b in daily_bars)) or \
-           (isinstance(bars_5m, list) and any(b.get("data_status") == "partial" for b in bars_5m)) or \
-           (isinstance(weekly_bars, list) and any(b.get("data_status") == "partial" for b in weekly_bars)) or \
-           (isinstance(monthly_bars, list) and any(b.get("data_status") == "partial" for b in monthly_bars)):
+        # 完备度由「分项源是否缺失」(missing_sources) 与「核心行情 quote 是否降级」决定。
+        # 各源内部个别 bar 的 data_status（如日线非前复权、分钟线 fallback）属数据质量细分，
+        # 已在各 bar 的 data_status 字段暴露给下游消费，不应反向降级整体 data_status，
+        # 否则即使所有源都取到数据，整体也会因个别 bar 标记而永远 partial。
+        if isinstance(quote, dict) and quote.get("data_status") == "partial":
             data_status = "partial"
         else:
             data_status = "full"
