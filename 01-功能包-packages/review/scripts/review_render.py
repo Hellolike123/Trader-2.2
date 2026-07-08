@@ -533,9 +533,20 @@ def _build_signal_review_section(review: dict[str, Any]) -> list[str]:
         utad_reason = wyckoff.get("upthrust_reason", "")
         sow_signal = wyckoff.get("sow_signal", False)
         sow_reason = wyckoff.get("sow_reason", "")
+        ar_signal = wyckoff.get("ar_signal", False)
+        ar_reason = wyckoff.get("ar_reason", "")
+        sos_signal = wyckoff.get("sos_signal", False)
+        sos_reason = wyckoff.get("sos_reason", "")
+        st_signal = wyckoff.get("st_signal", False)
+        st_reason = wyckoff.get("st_reason", "")
+        lps_signal = wyckoff.get("lps_signal", False)
+        lps_reason = wyckoff.get("lps_reason", "")
+        wyckoff_phase = wyckoff.get("phase_label", "")
     else:
         bc_signal = utad_signal = sow_signal = False
-        bc_reason = utad_reason = sow_reason = ""
+        ar_signal = sos_signal = st_signal = lps_signal = False
+        bc_reason = utad_reason = sow_reason = ar_reason = sos_reason = st_reason = lps_reason = ""
+        wyckoff_phase = ""
 
     # 提取筹码搬家数据
     chip_migration = review.get("chip_migration") or {}
@@ -559,6 +570,24 @@ def _build_signal_review_section(review: dict[str, Any]) -> list[str]:
         alerts.append(f"  ⚠️ 弱势信号（SOW）")
         alerts.append(f"    {sow_reason}")
         alerts.append(f"    建议：关注，准备减仓")
+
+    # AR / SOS / ST / LPS（经典威科夫信号）
+    if ar_signal:
+        alerts.append(f"  🟢 自动反弹（AR）")
+        alerts.append(f"    {ar_reason}")
+    if sos_signal:
+        alerts.append(f"  🟢 强势信号（SOS）")
+        alerts.append(f"    {sos_reason}")
+    if st_signal:
+        alerts.append(f"  🟡 二次测试（ST）")
+        alerts.append(f"    {st_reason}")
+    if lps_signal:
+        alerts.append(f"  🟢 最后支撑（LPS）")
+        alerts.append(f"    {lps_reason}")
+
+    # 阶段标签
+    if wyckoff_phase and wyckoff_phase != "无明确阶段":
+        alerts.append(f"  📊 威科夫阶段：{wyckoff_phase}")
 
     # 筹码搬家
     if warning_level == "critical":

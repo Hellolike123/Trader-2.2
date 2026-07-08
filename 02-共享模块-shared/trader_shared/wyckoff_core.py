@@ -19,10 +19,14 @@ try:
         WYCKOFF_SPRING_RECLAIM_RATIO,
         WYCKOFF_SPRING_ATR_MULTIPLE,
         WYCKOFF_SPRING_BULLISH_VOL_RATIO,
+        WYCKOFF_SPRING_LOW_VOL_RATIO,
         WYCKOFF_UTAD_BREAKOUT_RATIO,
         WYCKOFF_UTAD_RECLAIM_RATIO,
+        WYCKOFF_UT_VOL_RATIO,
         WYCKOFF_DIVERGENCE_BARS,
         WYCKOFF_DIVERGENCE_RATIO,
+        WYCKOFF_PHASE_LOOKBACK,
+        WYCKOFF_VSA_AVG_SPREAD_PERIOD,
         # Wyckoff Score 权重
         WYCKOFF_SCORE_SPRING,
         WYCKOFF_SCORE_SPRING_BULLISH_DIV_BONUS,
@@ -50,10 +54,14 @@ except ImportError:
     WYCKOFF_SPRING_RECLAIM_RATIO = 0.985
     WYCKOFF_SPRING_ATR_MULTIPLE = 0.5
     WYCKOFF_SPRING_BULLISH_VOL_RATIO = 1.3
+    WYCKOFF_SPRING_LOW_VOL_RATIO = 0.8
     WYCKOFF_UTAD_BREAKOUT_RATIO = 1.005
     WYCKOFF_UTAD_RECLAIM_RATIO = 0.995
+    WYCKOFF_UT_VOL_RATIO = 1.2
     WYCKOFF_DIVERGENCE_BARS = 5
     WYCKOFF_DIVERGENCE_RATIO = 0.85
+    WYCKOFF_PHASE_LOOKBACK = 60
+    WYCKOFF_VSA_AVG_SPREAD_PERIOD = 20
     # Wyckoff Score 权重 fallback
     WYCKOFF_SCORE_SPRING = 25
     WYCKOFF_SCORE_SPRING_BULLISH_DIV_BONUS = 5
@@ -236,12 +244,22 @@ def _detect_spring(bars: list[dict]) -> dict:
 
     avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
 
-    volume_note = "放量恐慌" if (avg_volume > 0 and current_volume >= avg_volume * WYCKOFF_SPRING_BULLISH_VOL_RATIO) else "缩量洗盘"
+    # 量能分级：低量弹簧（供应耗尽）最可靠，高量弹簧可能是真破位
+    if avg_volume > 0 and current_volume < avg_volume * WYCKOFF_SPRING_LOW_VOL_RATIO:
+        vol_class = "low_vol_confirm"
+        volume_note = "缩量洗盘（供应耗尽，可靠）"
+    elif avg_volume > 0 and current_volume >= avg_volume * WYCKOFF_SPRING_BULLISH_VOL_RATIO:
+        vol_class = "high_vol_warning"
+        volume_note = "⚠️ 放量弹簧（可能是真破位）"
+    else:
+        vol_class = "normal"
+        volume_note = "正常量能"
 
     return {
         "spring_signal": True,
         "spring_price": round(breach_level, 2),
         "spring_reason": f"跌破支撑后收回 {volume_note}",
+        "spring_vol_class": vol_class,
     }
 
 
@@ -268,6 +286,12 @@ def _detect_upthrust(bars: list[dict]) -> dict:
     # 最高价高过突破界限，且收盘价跌回回落界限之下
     if current_high <= breakout_level or current_close >= reclaim_level:
         return {"upthrust_signal": False, "upthrust_price": 0.0, "upthrust_reason": "未满足上冲回落条件"}
+
+    # P0-2: UT 需放量确认（派发需要成交量配合）
+    current_volume = to_float(current.get("volume"))
+    avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
+    if current_volume is not None and avg_volume > 0 and current_volume < avg_volume * WYCKOFF_UT_VOL_RATIO:
+        return {"upthrust_signal": False, "upthrust_price": 0.0, "upthrust_reason": "上冲未放量，非主力派发"}
 
     return {
         "upthrust_signal": True,
@@ -421,9 +445,10 @@ def _detect_sos(bars: list[dict]) -> dict:
         opens.append(o)
         volumes.append(v)
 
-    # 全部阳线
-    if not all(c > o for c, o in zip(closes, opens)):
-        return {"sos_signal": False, "sos_reason": "非全部阳线", "sos_price": None}
+    # P1-2: 放宽为 ≥4/5 阳线（A 股连续 5 阳极罕见，4/5 + 强涨幅更实际）
+    bullish_count = sum(1 for c, o in zip(closes, opens) if c > o)
+    if bullish_count < 4:
+        return {"sos_signal": False, "sos_reason": f"仅 {bullish_count}/5 阳线，不足 4 根", "sos_price": None}
 
     # 总体抬高
     if closes[4] < opens[0]:
@@ -441,7 +466,7 @@ def _detect_sos(bars: list[dict]) -> dict:
 
     return {
         "sos_signal": True,
-        "sos_reason": f"强势突破，5 连阳累计涨{gain*100:.1f}%，量能放大",
+        "sos_reason": f"强势突破，{bullish_count}/5 阳线累计涨{gain*100:.1f}%，量能放大",
         "sos_price": round(closes[4], 2),
     }
 
@@ -679,6 +704,107 @@ def _detect_lps(bars: list[dict]) -> dict:
     }
 
 
+# ── VSA (Volume Spread Analysis) 努力 vs 结果检测 ───────────────────
+
+def _detect_effort_vs_result(bars: list[dict]) -> dict[str, bool]:
+    """基础量价幅度分析（Effort vs Result）。
+
+    检测最近 3 根 K 线的 spread（high-low）与 volume 的关系：
+    - 高量窄幅（Effort No Result）：vol > 1.5x avg 且 spread < 0.7x avg_spread
+      → 努力无结果，供应仍在
+    - 低量窄幅（No Supply）：vol < 0.7x avg 且 spread < 0.7x avg_spread
+      → 供应耗尽，可靠信号
+
+    Returns:
+        {"effort_no_result": bool, "no_supply": bool}
+    """
+    period = WYCKOFF_VSA_AVG_SPREAD_PERIOD
+    if len(bars) < period + 3:
+        return {"effort_no_result": False, "no_supply": False}
+
+    # 计算基线均量和平均波幅
+    baseline = bars[-(period + 3):-3]
+    volumes_b = [to_float(b.get("volume")) or 0 for b in baseline]
+    spreads_b = []
+    for b in baseline:
+        h = to_float(b.get("high"))
+        l = to_float(b.get("low"))
+        if h is not None and l is not None:
+            spreads_b.append(h - l)
+    avg_vol = sum(volumes_b) / max(len(volumes_b), 1)
+    avg_spread = sum(spreads_b) / max(len(spreads_b), 1) if spreads_b else 0
+
+    if avg_vol <= 0 or avg_spread <= 0:
+        return {"effort_no_result": False, "no_supply": False}
+
+    # 检查最近 3 根 K 线
+    recent3 = bars[-3:]
+    for b in recent3:
+        vol = to_float(b.get("volume")) or 0
+        high = to_float(b.get("high"))
+        low = to_float(b.get("low"))
+        if high is None or low is None:
+            continue
+        spread = high - low
+        if vol > avg_vol * 1.5 and spread < avg_spread * 0.7:
+            return {"effort_no_result": True, "no_supply": False}
+        if vol < avg_vol * 0.7 and spread < avg_spread * 0.7:
+            return {"effort_no_result": False, "no_supply": True}
+
+    return {"effort_no_result": False, "no_supply": False}
+
+
+# ── 积累/派发阶段状态机 ──────────────────────────────────────────────
+
+def _detect_phase(bars: list[dict], signals: dict[str, Any]) -> dict[str, Any]:
+    """基于信号序列推断威科夫阶段（积累 Phase A-E / 派发 Phase A'-E'）。
+
+    扫描最近 WYCKOFF_PHASE_LOOKBACK 根 K 线，检测早期信号（BC/UT）是否在
+    较宽时间窗内出现，再结合当前窗口已检测到的后期信号（Spring/SOS/LPS）推断阶段。
+
+    Returns:
+        {"phase": str, "phase_label": str}
+        phase: "accumulation_a" / "accumulation_c" / "accumulation_d"
+               / "distribution_a" / "distribution_c" / "none"
+    """
+    lookback = WYCKOFF_PHASE_LOOKBACK
+    if len(bars) < lookback:
+        lookback = len(bars)
+
+    # 在宽窗口中扫描早期信号（BC/UT），因为它们通常发生在阶段初期
+    wide_bars = bars[-lookback:]
+    bc_in_wide = _detect_buying_climax(wide_bars)
+    ut_in_wide = _detect_upthrust(wide_bars)
+    sow_in_wide = _detect_sign_of_weakness(wide_bars)
+    ar_in_wide = _detect_ar(wide_bars)
+
+    # 后期信号直接用当前检测结果（通常在近期窗口内）
+    spring = signals.get("spring_signal", False)
+    sos = signals.get("sos_signal", False)
+    lps = signals.get("lps_signal", False)
+
+    bc = bc_in_wide.get("bc_signal", False)
+    ar = ar_in_wide.get("ar_signal", False)
+    ut = ut_in_wide.get("upthrust_signal", False)
+    sow = sow_in_wide.get("sow_signal", False)
+
+    # 积累型序列：BC → AR → Spring → SOS/LPS
+    if bc and ar and spring and (sos or lps):
+        return {"phase": "accumulation_d", "phase_label": "积累期 D（确认：SOS/LPS）"}
+    if bc and ar and spring:
+        return {"phase": "accumulation_c", "phase_label": "积累期 C（测试：Spring）"}
+    if bc and ar:
+        return {"phase": "accumulation_a", "phase_label": "积累期 A（停止：BC+AR）"}
+
+    # 派发型序列：UT + SOW → 分配
+    if ut and sow:
+        return {"phase": "distribution_c", "phase_label": "派发期 C（确认：UT+SOW）"}
+    if ut:
+        return {"phase": "distribution_a", "phase_label": "派发期 A（上冲回落：UT）"}
+
+    return {"phase": "none", "phase_label": "无明确阶段"}
+
+
 # ── 威科夫综合分析入口 ──
 def wyckoff_analysis(bars: list[dict]) -> dict:
     if len(bars) < WYCKOFF_MIN_BARS:
@@ -706,6 +832,22 @@ def wyckoff_analysis(bars: list[dict]) -> dict:
     st = _detect_st(bars)
     lps = _detect_lps(bars)
 
+    # P1-1: 阶段状态机 — 基于信号序列推断积累/派发阶段
+    signals_dict = {
+        "spring_signal": spring["spring_signal"],
+        "upthrust_signal": upthrust["upthrust_signal"],
+        "bc_signal": bc["bc_signal"],
+        "sow_signal": sow["sow_signal"],
+        "ar_signal": ar["ar_signal"],
+        "sos_signal": sos["sos_signal"],
+        "st_signal": st["st_signal"],
+        "lps_signal": lps["lps_signal"],
+    }
+    phase = _detect_phase(bars, signals_dict)
+
+    # P3-1: VSA 量价幅度分析
+    vsa = _detect_effort_vs_result(bars)
+
     parts = []
     if spring["spring_signal"]:
         parts.append(f"弹簧信号: {spring['spring_reason']}")
@@ -729,6 +871,10 @@ def wyckoff_analysis(bars: list[dict]) -> dict:
         parts.append("看空量价背离")
     elif bullish_div:
         parts.append("看多量价背离")
+    if vsa["effort_no_result"]:
+        parts.append("高量窄幅（努力无结果）")
+    if vsa["no_supply"]:
+        parts.append("低量窄幅（供应耗尽）")
     if not parts:
         parts.append("无明显威科夫信号")
 
@@ -760,6 +906,14 @@ def wyckoff_analysis(bars: list[dict]) -> dict:
         "lps_signal": lps["lps_signal"],
         "lps_reason": lps["lps_reason"],
         "lps_price": round(lps["lps_price"], 2) if lps["lps_signal"] else None,
+        # P0-1: 弹簧量能分级
+        "spring_vol_class": spring.get("spring_vol_class", "normal") if spring["spring_signal"] else None,
+        # P1-1: 阶段状态机
+        "phase": phase["phase"],
+        "phase_label": phase["phase_label"],
+        # P3-1: VSA 量价幅度分析
+        "effort_no_result": vsa["effort_no_result"],
+        "no_supply": vsa["no_supply"],
         "wyckoff_summary": "；".join(parts),
     }
 
@@ -863,6 +1017,25 @@ def calculate_wyckoff_score(bars: list[dict]) -> dict:
     if analysis.get("lps_signal"):
         raw += WYCKOFF_SCORE_LPS
         signals.append(f"LPS +{WYCKOFF_SCORE_LPS}")
+
+    # ── P3-1: VSA 量价幅度修正 ──
+    effort_no_result = analysis.get("effort_no_result", False)
+    no_supply = analysis.get("no_supply", False)
+
+    # Spring + 低量窄幅（供应耗尽）→ 额外加分
+    if spring and no_supply:
+        raw += 5
+        signals.append("Spring×供应耗尽 +5")
+
+    # UT + 高量窄幅（努力无结果）→ 额外扣分（派发确认）
+    if upthrust and effort_no_result:
+        raw -= 5
+        signals.append("UT×努力无结果 -5")
+
+    # SOS + 高量窄幅 → SOS 不可靠，取消加分
+    if analysis.get("sos_signal") and effort_no_result:
+        raw -= WYCKOFF_SCORE_SOS
+        signals.append(f"SOS×努力无结果 撤销 +{WYCKOFF_SCORE_SOS}")
 
     # 线性映射: raw ∈ [-MAX_ABS, +MAX_ABS] → score ∈ [0, 100]
     score = max(0, min(100, 50 + raw * 50 // WYCKOFF_SCORE_MAX_ABS))

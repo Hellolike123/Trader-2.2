@@ -107,18 +107,26 @@ WYCKOFF_BC_UPPER_SHADOW_RATIO: float = 0.02     # BC 上影线占波幅比例
 
 # SOW (Sign of Weakness) 弱势信号相关参数
 WYCKOFF_SOW_SUPPORT_LOOKBACK: int = 10          # SOW 支撑查找回溯K线数
-WYCKOFF_SOW_VOL_RATIO_THRESHOLD: float = 1.0    # SOW 放量判定阈值（由 1.2 降为 1.0）
-WYCKOFF_SOW_CONSECUTIVE_DAYS: int = 1           # SOW 确立连续跌破天数（由 2 降为 1，即单日确认）
+WYCKOFF_SOW_VOL_RATIO_THRESHOLD: float = 1.2    # SOW 放量判定阈值（恢复原值，收紧假阳性）
+WYCKOFF_SOW_CONSECUTIVE_DAYS: int = 2           # SOW 确立连续跌破天数（恢复 2 日确认）
 
 # Spring 弹簧洗盘相关参数
 WYCKOFF_SPRING_SUPPORT_LOOKBACK: int = 10       # 弹簧支撑回溯K线数
 WYCKOFF_SPRING_RECLAIM_RATIO: float = 0.985     # 刺穿深度比例，跌破 1.5% 即确认（原 0.97）
 WYCKOFF_SPRING_ATR_MULTIPLE: float = 0.5        # ATR 动态刺穿深度（0.5 × ATR）
 WYCKOFF_SPRING_BULLISH_VOL_RATIO: float = 1.3   # 弹簧放量反弹量比
+WYCKOFF_SPRING_LOW_VOL_RATIO: float = 0.8       # 弹簧低量确认阈值（低量 = 供应耗尽，可靠）
 
 # UTAD (Upthrust Action / Upthrust) 上冲回落相关参数
 WYCKOFF_UTAD_BREAKOUT_RATIO: float = 1.005      # 假突破幅度，超出阻力 0.5% 即可（原 1.02）
 WYCKOFF_UTAD_RECLAIM_RATIO: float = 0.995       # 假突破收回幅度（收回到阻力 99.5% 之下）
+WYCKOFF_UT_VOL_RATIO: float = 1.2               # UT 放量确认阈值（派发需放量）
+
+# Wyckoff 阶段状态机
+WYCKOFF_PHASE_LOOKBACK: int = 60                # 阶段序列回溯窗口（约 3 个月）
+
+# VSA (Volume Spread Analysis) 量价幅度分析
+WYCKOFF_VSA_AVG_SPREAD_PERIOD: int = 20         # VSA 平均波幅计算周期
 
 # Divergence 量价背离相关参数
 WYCKOFF_DIVERGENCE_BARS: int = 5                # 背离比对K线窗口
