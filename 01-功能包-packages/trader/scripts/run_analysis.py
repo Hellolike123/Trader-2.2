@@ -598,7 +598,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     # cmd_refresh 内建 pool → build_report 内再建 pool → load_market_snapshot 内再建 pool
     # 现在三层共享同一个 max_workers=5 池
     pool = get_shared_build_pool()
-    f_chan = pool.submit(chanlun_strategy, current, bars, change_pct_val, quote)
+    f_chan = pool.submit(chanlun_strategy, current, bars, change_pct_val, quote, weekly_bars=weekly_bars)
     f_wyk = pool.submit(wyckoff_strategy, current, bars, change_pct_val, quote)
     f_mom = pool.submit(momentum_strategy, current, bars, change_pct_val, quote)
     f_mf = pool.submit(_fetch_fund_flow)

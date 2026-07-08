@@ -1,0 +1,73 @@
+# 信号组合规则（YAML 驱动）
+# 融合层加载此文件，在现有加权融合之上叠加组合规则。
+# 每条规则定义：哪些信号同时出现 → 调整统一信号的方向/置信度。
+#
+# 字段说明：
+#   name        — 规则名称（用于日志）
+#   condition   — 条件组合（all_of / any_of）
+#     all_of    — 所有信号类型必须同时出现
+#     any_of    — 至少一个信号类型出现
+#   action      — 触发后的动作
+#     direction_override  — 覆盖方向（1/-1/0），留空则不覆盖
+#     confidence_delta    — 置信度偏移（加到现有值，可正可负）
+#     reason_prefix       — 在 reason 前缀追加标记
+#   enabled     — 开关（false 可关闭单条规则）
+#   priority    — 优先级（数值越大越先匹配，默认 0）
+
+rules:
+  - name: "缠论一类买 + 威科夫 Spring → 高置信入场"
+    condition:
+      all_of:
+        - "chan_buy_1"
+        - "wyckoff_spring"
+    action:
+      confidence_delta: 0.15
+      reason_prefix: "【强信号】"
+    enabled: true
+    priority: 10
+
+  - name: "缠论一类卖 + 威科夫 UT → 高置信出场"
+    condition:
+      all_of:
+        - "chan_sell_1"
+        - "wyckoff_ut"
+    action:
+      confidence_delta: 0.15
+      reason_prefix: "【强信号】"
+    enabled: true
+    priority: 10
+
+  - name: "缠论拉升段 + 动量bull + 主力拉升期 → 追涨确认"
+    condition:
+      all_of:
+        - "chan_trend_up"
+        - "momentum_bullish"
+        - "main_force_拉高"
+    action:
+      confidence_delta: 0.10
+      reason_prefix: "【追涨确认】"
+    enabled: true
+    priority: 8
+
+  - name: "动量bear + 缠论回调段 → 空头一致（削弱）"
+    condition:
+      all_of:
+        - "momentum_bearish"
+        - "chan_trend_down"
+    action:
+      confidence_delta: -0.05
+      reason_prefix: ""
+    enabled: true
+    priority: 5
+
+  - name: "任何一类卖 → 方向覆盖为卖出"
+    condition:
+      any_of:
+        - "chan_sell_1"
+        - "chan_sell_2"
+        - "chan_sell_3"
+    action:
+      direction_override: -1
+      reason_prefix: ""
+    enabled: false   # 默认关闭：过于激进，需要验证
+    priority: 20

@@ -231,14 +231,39 @@ def _aggregate_bars(bars: list[dict], chunk: int = 5) -> list[dict]:
     return coarse
 
 
-def _higher_level_trend(bars: list[dict], chunk: int = 5) -> dict:
+def _higher_level_trend(bars: list[dict], chunk: int = 5, weekly_bars: list[dict] | None = None) -> dict:
     """基于粗粒度 K 线估计上级别趋势方向（区间套，轻量自包含实现）。
 
+    优先使用真实周线（weekly_bars），不可用时回退到日线 chunk 聚合。
     返回 {"trend": "up"|"down"|"sideways"|None, "confidence": float, "segments_count": int}。
-    - 粗K线不足 CHAN_MULTILEVEL_MIN_BARS 或无足够线段 → trend=None, confidence=0
+    - 数据不足 CHAN_MULTILEVEL_MIN_BARS 或无足够线段 → trend=None, confidence=0
     - 取末 3 段多数决；confidence = 同向段数 / 3（需 >=3 段才置信）
     """
     result: dict[str, Any] = {"trend": None, "confidence": 0.0, "segments_count": 0}
+
+    # 优先用真实周线（比 chunk 聚合准）
+    if weekly_bars and len(weekly_bars) >= CHAN_MULTILEVEL_MIN_BARS:
+        cleaned = handle_inclusion(weekly_bars)
+        fractions = find_fractions(cleaned)
+        strokes = build_strokes(fractions, min_bars_per_stroke=CHANLUN_MIN_BARS_PER_STROKE)
+        segments = build_segments(strokes, min_strokes=CHANLUN_MIN_STROKES_PER_SEGMENT)
+        if len(segments) >= 3:
+            recent3 = [seg["direction"] for seg in segments[-3:]]
+            up = recent3.count("up")
+            down = recent3.count("down")
+            result["segments_count"] = len(segments)
+            if up >= 2:
+                result["trend"] = "up"
+                result["confidence"] = up / 3.0
+            elif down >= 2:
+                result["trend"] = "down"
+                result["confidence"] = down / 3.0
+            else:
+                result["trend"] = "sideways"
+                result["confidence"] = 0.5
+            return result
+
+    # 回退到 chunk 聚合
     if not bars or len(bars) < CHAN_MULTILEVEL_MIN_BARS:
         return result
     coarse = _aggregate_bars(bars, chunk=chunk)
@@ -1008,6 +1033,7 @@ def chanlun_analysis(
     higher_trend: dict | None = None,
     symbol: str | None = None,
     analysis_date: str | None = None,
+    weekly_bars: list[dict] | None = None,
 ) -> dict:
     if len(bars) < CHANLUN_MIN_BARS:
         return {}
@@ -1046,7 +1072,7 @@ def chanlun_analysis(
 
     # --- E1: 多级别区间套确认 ---
     if higher_trend is None and CHAN_MULTILEVEL_ENABLED:
-        higher_trend = _higher_level_trend(bars, chunk=CHAN_MULTILEVEL_CHUNK)
+        higher_trend = _higher_level_trend(bars, chunk=CHAN_MULTILEVEL_CHUNK, weekly_bars=weekly_bars)
     ht: str | None = None
     hc: float = 0.0
     if isinstance(higher_trend, dict):
@@ -1174,6 +1200,7 @@ def chanlun_strategy(
     quote: dict | None = None,
     symbol: str | None = None,
     analysis_date: str | None = None,
+    weekly_bars: list[dict] | None = None,
 ) -> dict:
     macd_h_curr = to_float(bars[-1].get("macd_histogram")) if bars else None
     macd_h_prev = to_float(bars[-2].get("macd_histogram")) if len(bars) >= 2 else None
@@ -1186,5 +1213,6 @@ def chanlun_strategy(
         "chanlun": chanlun_analysis(
             bars, current, macd_h_curr, macd_h_prev,
             symbol=symbol, analysis_date=analysis_date,
+            weekly_bars=weekly_bars,
         )
     }

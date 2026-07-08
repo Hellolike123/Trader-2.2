@@ -103,15 +103,15 @@ def _chan_to_signal(chan_result: dict) -> dict:
             if sp_type == "一类卖":
                 return {"direction": -1, "confidence": 0.8,
                         "reason": "缠论一类卖 (顶背驰)", "raw_key": "chan",
-                        "signal_id": sp.get("signal_id")}
+                        "signal_id": sp.get("signal_id"), "signal_type": "chan_sell_1"}
             if sp_type == "二类卖":
                 return {"direction": -1, "confidence": 0.5,
                         "reason": "缠论二类卖 (高点降低)", "raw_key": "chan",
-                        "signal_id": sp.get("signal_id")}
+                        "signal_id": sp.get("signal_id"), "signal_type": "chan_sell_2"}
             if sp_type == "三类卖":
                 return {"direction": -1, "confidence": 0.5,
                         "reason": "缠论三类卖 (跌破中枢)", "raw_key": "chan",
-                        "signal_id": sp.get("signal_id")}
+                        "signal_id": sp.get("signal_id"), "signal_type": "chan_sell_3"}
 
     # 优先级2: buy_points (一类买 > 二类买 > 三类买)
     if isinstance(buy_points, list):
@@ -122,15 +122,15 @@ def _chan_to_signal(chan_result: dict) -> dict:
             if bp_type == "一类买":
                 return {"direction": 1, "confidence": 0.8,
                         "reason": "缠论一类买 (底背驰)", "raw_key": "chan",
-                        "signal_id": bp.get("signal_id")}
+                        "signal_id": bp.get("signal_id"), "signal_type": "chan_buy_1"}
             if bp_type == "二类买":
                 return {"direction": 1, "confidence": 0.4,
                         "reason": "缠论二类买 (低点抬高)", "raw_key": "chan",
-                        "signal_id": bp.get("signal_id")}
+                        "signal_id": bp.get("signal_id"), "signal_type": "chan_buy_2"}
             if bp_type == "三类买":
                 return {"direction": 1, "confidence": 0.4,
                         "reason": "缠论三类买 (突破中枢)", "raw_key": "chan",
-                        "signal_id": bp.get("signal_id")}
+                        "signal_id": bp.get("signal_id"), "signal_type": "chan_buy_3"}
 
     # 优先级2: 背驰
     if isinstance(divergence, dict):

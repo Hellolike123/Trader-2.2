@@ -85,6 +85,7 @@ CHAN_MULTILEVEL_MIN_BARS: int = 15          # 粗K线最少根数（独立于 CH
 CHAN_ZONE_MERGE_ENABLED: bool = True        # 中枢相邻/重叠合并为 consolidated pivot
 CHAN_ZONE_MERGE_GAP_PCT: float = 0.015      # 中枢合并的相对间距阈值（按中枢中心价百分比）
 CHAN_SIGNAL_ID_ENABLED: bool = True         # 买卖点写入 Signal Contract v2 强一致 signal_id
+SIGNAL_RULES_ENABLED: bool = False          # 信号组合规则引擎（YAML 驱动，实验性，默认关闭）
 
 # ---- Market index ----
 INDEX_CODE: str = "000852.SH"

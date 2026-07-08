@@ -83,7 +83,7 @@ def save_chip_snapshot(
     chip_result: dict[str, Any],
     trade_date: str | None = None,
 ) -> None:
-    """保存筹码分布快照到历史文件。
+    """保存筹码分布快照到历史文件（保留每个标的最近5次快照）。
 
     Parameters
     ----------
@@ -100,7 +100,18 @@ def save_chip_snapshot(
         return
 
     history = _load_history()
-    history[target] = snapshot
+    # 保留最近 5 次快照：追加新快照，超过 5 则去重裁旧
+    existing: list[dict[str, Any]] = history.get(target, [])
+    if not isinstance(existing, list):
+        existing = [existing] if isinstance(existing, dict) else []
+    # 去重：同日期已有则不重复追加
+    if existing and existing[-1].get("date") == today:
+        existing[-1] = snapshot
+    else:
+        existing.append(snapshot)
+    if len(existing) > 5:
+        existing = existing[-5:]
+    history[target] = existing
     _save_history(history)
 
 
@@ -258,6 +269,9 @@ def check_chip_migration(
     """
     history = _load_history()
     prev_snapshot = history.get(target)
+    # 兼容旧格式（单快照）和新格式（列表）
+    if isinstance(prev_snapshot, list):
+        prev_snapshot = prev_snapshot[-1] if prev_snapshot else None
 
     # 没有历史数据时尝试回填
     if not prev_snapshot or not prev_snapshot.get("peaks"):
@@ -389,4 +403,72 @@ def check_chip_migration(
         # POC 控制点 & Value Area 趋势
         "poc_migration": _calc_poc_migration(prev_snapshot, current_chip_result),
         "value_area_migration": _calc_value_area_migration(prev_snapshot, current_chip_result),
+    }
+
+
+# ── 筹码搬家趋势输出（最近5次底部峰变化趋势）────────────────────────
+
+def get_chip_migration_trend(target: str) -> dict[str, Any]:
+    """返回最近 5 次筹码快照的底部峰变化趋势。
+
+    用于在复盘报告中展示「底部筹码峰是否持续下降」的趋势线索。
+
+    Returns
+    -------
+    dict with keys:
+        trend_text : str        趋势描述文本
+        bottom_peak_pcts : list 最近各快照的底部峰占比列表
+        dates : list            对应日期
+        direction : str         "declining" / "stable" / "rising" / "insufficient_data"
+    """
+    history = _load_history()
+    snapshots = history.get(target)
+    if isinstance(snapshots, dict):
+        snapshots = [snapshots]
+    if not isinstance(snapshots, list) or len(snapshots) < 2:
+        return {"trend_text": "数据不足", "bottom_peak_pcts": [], "dates": [],
+                "direction": "insufficient_data"}
+
+    pcts: list[float] = []
+    dates: list[str] = []
+    for snap in snapshots[-5:]:
+        peaks = snap.get("peaks", [])
+        if not peaks:
+            continue
+        # 底部峰 = 价格最低的峰
+        bottom_peak = min(peaks, key=lambda p: p.get("price", 0))
+        pcts.append(bottom_peak.get("share_of_total", 0))
+        dates.append(snap.get("date", "?"))
+
+    if len(pcts) < 2:
+        return {"trend_text": "数据不足", "bottom_peak_pcts": pcts, "dates": dates,
+                "direction": "insufficient_data"}
+
+    first = pcts[0]
+    last = pcts[-1]
+    change = last - first
+
+    if abs(change) < 2:
+        direction = "stable"
+        trend_text = f"底部峰稳定在 ~{last:.1f}%"
+    elif change < 0:
+        pct_drop = abs(change) / first * 100 if first else 0
+        if pct_drop > 50:
+            direction = "declining"
+            trend_text = f"⚠️ 底部峰从 {first:.1f}% 降至 {last:.1f}%（降 {pct_drop:.0f}%），主力或已出货"
+        elif pct_drop > 30:
+            direction = "declining"
+            trend_text = f"⚡ 底部峰下降：{first:.1f}% → {last:.1f}%"
+        else:
+            direction = "declining"
+            trend_text = f"底部峰缓降：{first:.1f}% → {last:.1f}%"
+    else:
+        direction = "rising"
+        trend_text = f"底部峰上升：{first:.1f}% → {last:.1f}%（承接增强）"
+
+    return {
+        "trend_text": trend_text,
+        "bottom_peak_pcts": pcts,
+        "dates": dates,
+        "direction": direction,
     }
