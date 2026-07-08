@@ -2,9 +2,13 @@
 
 ## 代码位置与提交约定（关键）
 
-- **运行的代码**在 `~/.workbuddy/skills/trader/scripts/`（skill 副本），但它是**比仓库 HEAD 更旧**的副本。
-- **规范源码**在仓库：`02-共享模块-shared/trader_shared/`（trader_shared 包）与 `01-功能包-packages/trader/scripts/run_analysis.py`（打包副本）。
-- 仓库 `02-共享模块-shared/trader_shared/` 比 skill 副本**更新**，含 ma250 年线警告、T+1 隔离锁、重构后的 📍决策渲染等。
+- **规范源码**在仓库：`02-共享模块-shared/trader_shared/`（trader_shared 包）与 `01-功能包-packages/trader/scripts/run_analysis.py`（打包副本）。仓库比旧 skill 副本更新，含 ma250 年线警告、T+1 隔离锁、重构后的 📍决策渲染等。
+- **⚠️ skill 有 TWO 安装位，修复必须两边都打**（07-08 踩坑教训）：
+  - `~/.workbuddy/skills/trader/` —— 本 WorkBuddy 会话 agent 加载的副本。
+  - `~/.hermes/skills/trader/` —— 打包脚本 `pack_all.py` 的 `auto_install` 目标位，也是用户「另一个 agent」实际跑 skill 的位置。
+  - 07-07 只装了 workbuddy 那份 → hermes 仍 stale（带 batch-8 旧 bug `from mootdx.quotes import Q`），导致 agent 又报 `data_status=partial`。07-08 已把 4 个 zip 干净安装到 hermes，两副本现 digest 一致 (`02c554c66579b09d`) 且关键文件 diff 无差异。
+  - **正确流程**：仓库改 → commit → `pack_all.py --no-install` 出 zip → 把 zip **同时**干净安装到两个安装位（各先备份）。或 `pack_all.py`（无 --no-install）只装 hermes，再手动补 workbuddy。
+  - `trader_test`（`~/.hermes/skills/trader_test/trader`，06-09）仍是旧 `import Q` 测试副本，未修；若 agent 用它需另修。
 - **⚠️ 改完 skill 副本后提交，必须把改动回灌到仓库源码，且禁止整文件覆盖分叉文件**（会丢仓库更新功能）：
   - 纯新增/严格超集文件 → 整文件复制（先 `diff` 确认 repo 独有行=0）；
   - 已分叉文件（momentum_plugin 的 analyze 多 quote 参数、run_analysis 含 ma250/T+1/决策重构）→ 精合，保留 repo 更新部分再叠加特性。
