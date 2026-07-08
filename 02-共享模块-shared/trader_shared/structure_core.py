@@ -897,7 +897,6 @@ def find_key_levels(bars: list[BarData]) -> dict[str, float]:
         tolerance_pct = 0.015  # 触及容差 1.5%
 
         source = window_lows if find_support else window_highs
-        opposite = window_highs if find_support else window_lows
         extrema: list[tuple[int, float]] = []
 
         for i in range(swing_window, len(source) - swing_window):
@@ -927,21 +926,20 @@ def find_key_levels(bars: list[BarData]) -> dict[str, float]:
             for j in range(len(source)):
                 if band_lo <= source[j] <= band_hi:
                     touch_count += 1
-            # 还要验证「未破」：如果是支撑，opposite 不应多次大幅跌破
-            # 简化：只要触及次数 >= 2 且 price 在合理范围内即可
+            # 验证「未破」：必须用正确的序列判定突破/跌破
+            #   压力(find_support=False)：window 内最高价超过价位 3% 即视为已被有效突破 → 无效
+            #   支撑(find_support=True)：window 内最低价低于价位 3% 即视为已被有效跌破 → 无效
             if touch_count >= 2:
+                # 排序主键：优先「触碰次数最多」，平局再按「距最新价最近」
+                cand_key = (-touch_count, abs(price - source[-1]))
                 if find_support:
-                    # 验证未跌破：在 window 内，最低价没有远离 price
-                    breach_count = sum(1 for o in opposite if o < price * 0.97)
-                    if breach_count < len(opposite) * 0.3:  # 不超过 30% 的 bar 跌破 3%
-                        if best_price is None or abs(price - source[-1]) < abs(best_price - source[-1]):
+                    if min(window_lows) >= price * 0.97:
+                        if best_price is None or cand_key < (-best_count, abs(best_price - source[-1])):
                             best_price = price
                             best_count = touch_count
                 else:
-                    # 验证未突破
-                    breach_count = sum(1 for o in opposite if o > price * 1.03)
-                    if breach_count < len(opposite) * 0.3:
-                        if best_price is None or abs(price - source[-1]) < abs(best_price - source[-1]):
+                    if max(window_highs) <= price * 1.03:
+                        if best_price is None or cand_key < (-best_count, abs(best_price - source[-1])):
                             best_price = price
                             best_count = touch_count
 

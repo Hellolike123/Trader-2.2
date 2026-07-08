@@ -292,3 +292,77 @@ class TestFindKeyLevels:
         assert result["mid_resist"] > 0
         assert result["long_support"] > 0
         assert result["long_resist"] > 0
+
+    def test_broken_resistance_falls_back_to_window_high(self):
+        """已突破的压力位不应再作为有效压力，应 fallback 到周期最高价。
+
+        复现用户场景：短线压力=近10日最高(98)，但 60/120 日窗口内该价位
+        曾被触及 2 次后突破至 ~115+。修复前 _find_level_with_touches 误用最低价序列
+        判突破(且 30% 计数阈值过松)，返回已被突破的 98；修复后应 fallback 到窗口最高价。
+        """
+        bars = []
+        # 第1段（最早）：低位震荡
+        for i in range(10):
+            bars.append(_make_bar(90 + i, high=92 + i, low=88 + i))
+        # 第2段：两次触及 98 形成 swing high（两侧更低）
+        bars.append(_make_bar(96.0, high=98.0, low=94.0))
+        bars.append(_make_bar(95.0, high=96.0, low=93.0))
+        bars.append(_make_bar(95.5, high=96.5, low=93.5))
+        bars.append(_make_bar(94.0, high=95.0, low=92.0))
+        # 第3段：再次触及 98
+        bars.append(_make_bar(95.0, high=96.0, low=93.0))
+        bars.append(_make_bar(96.0, high=98.0, low=94.0))
+        bars.append(_make_bar(94.5, high=95.5, low=92.5))
+        bars.append(_make_bar(93.0, high=94.0, low=91.0))
+        bars.append(_make_bar(92.0, high=93.0, low=90.0))
+        # 第4段：突破上行至 ~115+（window 内最高价）
+        for i in range(15):
+            c = 100 + i
+            bars.append(_make_bar(c, high=c + 3, low=c - 3))
+        # 第5段：回落，近 10 日高点在 98（短线压力=98）
+        for _ in range(20):
+            bars.append(_make_bar(96.0, high=98.0, low=94.0))
+
+        result = find_key_levels(bars)
+        # 短线压力 = 近 10 日最高 = 98
+        assert abs(result["short_resist"] - 98.0) < 0.5, f"short_resist={result['short_resist']}"
+        # 中线/长线压力应是被突破后的高位，而非被突破的 98
+        assert result["mid_resist"] > 105, f"mid_resist 应为突破后的高位，实际 {result['mid_resist']}"
+        assert result["long_resist"] > 105, f"long_resist 应为突破后的高位，实际 {result['long_resist']}"
+
+    def test_broken_support_falls_back_to_window_low(self):
+        """已跌破的支撑位不应再作为有效支撑，应 fallback 到周期最低价。
+
+        镜像 test_broken_resistance_falls_back_to_window_high：某低位(98)在 60/120
+        日窗口内被触及 2 次后，价格跌破至 ~81（远低于 98*0.97），该价位应被判为
+        已有效跌破而失效，中线/长线支撑 fallback 到窗口最低价，而非失效的 98。
+        """
+        bars = []
+        # 第1段（最早）：高位震荡
+        for i in range(10):
+            bars.append(_make_bar(110 - i, high=112 - i, low=108 - i))
+        # 第2段：两次触及 98 形成 swing low（两侧更高）
+        bars.append(_make_bar(99.0, high=101.0, low=98.0))
+        bars.append(_make_bar(100.0, high=102.0, low=99.0))
+        bars.append(_make_bar(99.5, high=101.5, low=98.5))
+        bars.append(_make_bar(101.0, high=103.0, low=100.0))
+        # 第3段：再次触及 98
+        bars.append(_make_bar(100.0, high=102.0, low=99.0))
+        bars.append(_make_bar(99.0, high=101.0, low=98.0))
+        bars.append(_make_bar(100.5, high=102.5, low=99.5))
+        bars.append(_make_bar(102.0, high=104.0, low=101.0))
+        bars.append(_make_bar(103.0, high=105.0, low=102.0))
+        # 第4段：跌破下行至 ~81（window 内最低价远低于 98*0.97）
+        for i in range(15):
+            c = 98 - i * 1.1
+            bars.append(_make_bar(c, high=c + 3, low=c - 3))
+        # 第5段：回升，近 10 日低点在 98 附近（短线支撑=98）
+        for _ in range(20):
+            bars.append(_make_bar(99.0, high=101.0, low=98.0))
+
+        result = find_key_levels(bars)
+        # 短线支撑 = 近 10 日最低 = 98
+        assert abs(result["short_support"] - 98.0) < 0.5, f"short_support={result['short_support']}"
+        # 中线/长线支撑应是被跌破后的低位，而非被跌破的 98
+        assert result["mid_support"] < 95, f"mid_support 应为跌破后的低位，实际 {result['mid_support']}"
+        assert result["long_support"] < 95, f"long_support 应为跌破后的低位，实际 {result['long_support']}"

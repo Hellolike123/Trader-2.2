@@ -1953,6 +1953,8 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
 
     # P0-4: 多周期支撑压力阶梯
     key_levels = r.get("key_levels") or {}
+    support_resonance: dict[float, list[str]] = {}
+    resist_resonance: dict[float, list[str]] = {}
     if key_levels:
         # P0-5: 长线压力位动态动作
         weighted_score = r.get("weighted_score", 0) or 0
@@ -1973,6 +1975,12 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         ]:
             val = float(key_levels.get(kl_key) or 0)
             if val > 0 and val < current_price:
+                # 去重并收集「三线共振」标签：与已添加价位在 1.5% 容差内合并
+                matched = next((ep for ep, _ in all_price_lines if abs(val - ep) / max(ep, 1) < 0.015), None)
+                if matched is not None:
+                    support_resonance.setdefault(matched, []).append(label)
+                    continue
+                support_resonance[val] = [label]
                 all_price_lines.append((val, f"  {val:.2f} ← {label}（{pct}）"))
 
         # 压力位（现价上方）：短线 → 中线 → 长线
@@ -1983,6 +1991,11 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         ]:
             val = float(key_levels.get(kl_key) or 0)
             if val > 0 and val > current_price:
+                matched = next((ep for ep, _ in all_price_lines if abs(val - ep) / max(ep, 1) < 0.015), None)
+                if matched is not None:
+                    resist_resonance.setdefault(matched, []).append(label)
+                    continue
+                resist_resonance[val] = [label]
                 all_price_lines.append((val, f"  {val:.2f} → {label}（{pct}）"))
 
     exit_plan = r.get("exit_plan") or {}
@@ -2015,6 +2028,22 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         all_price_lines.append((fib_ext_1618, f"  {fib_ext_1618:.2f} ← 黄金分割161.8%目标"))
 
     all_price_lines.sort(key=lambda x: x[0])
+    # 「三线共振」标注：短/中/长线同类型算出同一价位（1.5% 容差）时，标注共振而非静默合并
+    resonance_map: dict[float, list[str]] = {}
+    for v, tags in support_resonance.items():
+        if len(tags) >= 2:
+            resonance_map[v] = tags
+    for v, tags in resist_resonance.items():
+        if len(tags) >= 2:
+            resonance_map[v] = tags
+    annotated_lines = []
+    for val, line in all_price_lines:
+        tags = resonance_map.get(val)
+        if tags:
+            suffix = "【三线共振】" if len(tags) >= 3 else "【双线共振】"
+            line = line + suffix
+        annotated_lines.append((val, line))
+    all_price_lines = annotated_lines
     for _, line in all_price_lines:
         lines.append(line)
 

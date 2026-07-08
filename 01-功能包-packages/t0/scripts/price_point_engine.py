@@ -144,7 +144,13 @@ def values(bars: list[dict[str, Any]], key: str) -> list[float]:
 def add_level(levels: list[dict[str, Any]], name: str, price_value: float | None, weight: float) -> None:
     rounded = round_price(price_value)
     if rounded is not None and rounded > 0:
-        levels.append({"name": name, "price": rounded, "weight": weight})
+        # 累积「触碰次数」：近价(1.5%)已存在则合并计数+1，用于 choose_level 优先选被多周期共同指向的价位
+        for lv in levels:
+            if abs(float(lv.get("price") or 0) - rounded) / max(rounded, 1) < 0.015:
+                lv["touches"] = int(lv.get("touches") or 1) + 1
+                break
+        else:
+            levels.append({"name": name, "price": rounded, "weight": weight, "touches": 1})
 
 
 def find_key_levels(report_data: dict[str, Any], structure_result: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -212,6 +218,27 @@ def find_key_levels(report_data: dict[str, Any], structure_result: dict[str, Any
     if bb_last.get("middle"):
         add_level(support, "布林中轨", round_price(bb_last["middle"]), 0.3)
         add_level(resistance, "布林中轨", round_price(bb_last["middle"]), 0.3)
+    # 破位过滤：剔除已有效跌破的支撑 / 已有效突破的阻力，避免把失效价位当有效位
+    BREAK_TOL = 0.015
+
+    def _filter_broken(levels: list[dict[str, Any]], below: bool) -> list[dict[str, Any]]:
+        if not (current and current > 0):
+            return list(levels)
+        kept: list[dict[str, Any]] = []
+        for lv in levels:
+            p = float(lv.get("price") or 0)
+            if p <= 0:
+                kept.append(lv)
+                continue
+            if below and p < current * (1 - BREAK_TOL):
+                continue  # 已有效跌破 → 失效支撑，剔除
+            if (not below) and p > current * (1 + BREAK_TOL):
+                continue  # 已有效突破 → 失效阻力，剔除
+            kept.append(lv)
+        return kept
+
+    support = _filter_broken(support, below=True)
+    resistance = _filter_broken(resistance, below=False)
     main_support = choose_level(support, current, below=True)
     main_resistance = choose_level(resistance, current, below=False)
     return {"support_levels": support, "resistance_levels": resistance, "main_support": main_support, "main_resistance": main_resistance, "vwap": round_price(vwap)}
@@ -230,9 +257,9 @@ def choose_level(levels: list[dict[str, Any]], current: float, *, below: bool) -
 
     primary = [item for item in candidates if float(item.get("weight") or 0) >= 0.7 and not str(item.get("name") or "").startswith("VWAP")]
     if not primary:
-        return sorted(candidates, key=lambda item: (distance(item), -float(item.get("weight") or 0)))[0]
+        return sorted(candidates, key=lambda item: (-int(item.get("touches") or 0), distance(item), -float(item.get("weight") or 0)))[0]
 
-    best_primary = sorted(primary, key=lambda item: (distance(item), -float(item.get("weight") or 0)))[0]
+    best_primary = sorted(primary, key=lambda item: (-int(item.get("touches") or 0), distance(item), -float(item.get("weight") or 0)))[0]
     vwap_items = [item for item in candidates if str(item.get("name") or "").startswith("VWAP")]
     if vwap_items:
         best_vwap = sorted(vwap_items, key=distance)[0]
