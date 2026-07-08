@@ -293,7 +293,7 @@ def build_levels(current: float, quote: dict[str, Any], daily: list[dict[str, An
     }
 
 
-def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str, Any]], intraday: dict[str, Any], levels: dict[str, Any], cost: float | None, session: str = "close") -> dict[str, Any]:
+def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str, Any]], intraday: dict[str, Any], levels: dict[str, Any], cost: float | None, session: str = "close", symbol: str | None = None, analysis_date: str | None = None) -> dict[str, Any]:
     previous = daily[-2] if len(daily) >= 2 else {}
     prev_close = to_float(quote.get("pre_close")) or to_float(previous.get("close"))
     today_low = levels.get("today_low")
@@ -345,7 +345,7 @@ def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str,
 
     from trader_shared.chan_core import chanlun_analysis
     from trader_shared.wyckoff_core import wyckoff_analysis, calculate_wyckoff_score
-    chan_r = chanlun_analysis(bars=daily, current=current, macd_hist_current=macd_hist, macd_hist_prev=macd_hist_prev)
+    chan_r = chanlun_analysis(bars=daily, current=current, macd_hist_current=macd_hist, macd_hist_prev=macd_hist_prev, symbol=symbol, analysis_date=analysis_date)
     wyck_r = wyckoff_analysis(daily)
 
     structure_score = 50
@@ -572,7 +572,8 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
         }
     else:
         chip_dist = calc_chip_distribution(daily, lookback=60)
-    theory = theory_verdicts(current, quote, daily, intraday, levels, cost, session=session)
+    theory = theory_verdicts(current, quote, daily, intraday, levels, cost, session=session,
+                            symbol=quote.get("symbol"), analysis_date=selected_date)
 
     # 威科夫分析（用于信号回顾）
     from trader_shared.wyckoff_core import wyckoff_analysis

@@ -78,6 +78,14 @@ CHANLUN_MIN_BARS: int = 20
 CHANLUN_MIN_BARS_PER_STROKE: int = 5
 CHANLUN_MIN_STROKES_PER_SEGMENT: int = 3   # 线段最少笔数
 
+# ---- Chan Theory enhancement flags (区间套 / 中枢合并 / 信号id) ----
+CHAN_MULTILEVEL_ENABLED: bool = True        # 多级别区间套确认（上级趋势过滤买卖点）
+CHAN_MULTILEVEL_CHUNK: int = 5              # 粗K线聚合粒度（每 N 根合成一根上级别K线）
+CHAN_MULTILEVEL_MIN_BARS: int = 15          # 粗K线最少根数（独立于 CHANLUN_MIN_BARS）
+CHAN_ZONE_MERGE_ENABLED: bool = True        # 中枢相邻/重叠合并为 consolidated pivot
+CHAN_ZONE_MERGE_GAP_PCT: float = 0.015      # 中枢合并的相对间距阈值（按中枢中心价百分比）
+CHAN_SIGNAL_ID_ENABLED: bool = True         # 买卖点写入 Signal Contract v2 强一致 signal_id
+
 # ---- Market index ----
 INDEX_CODE: str = "000852.SH"
 

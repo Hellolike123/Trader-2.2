@@ -3,13 +3,30 @@ from __future__ import annotations
 from typing import Any
 
 from trader_shared.light_data import to_float
+from trader_shared.signal_utils import normalize_signal_id
 
 try:
-    from trader_shared.config import CHANLUN_MIN_BARS, CHANLUN_MIN_BARS_PER_STROKE, CHANLUN_MIN_STROKES_PER_SEGMENT
+    from trader_shared.config import (
+        CHANLUN_MIN_BARS,
+        CHANLUN_MIN_BARS_PER_STROKE,
+        CHANLUN_MIN_STROKES_PER_SEGMENT,
+        CHAN_MULTILEVEL_ENABLED,
+        CHAN_MULTILEVEL_CHUNK,
+        CHAN_MULTILEVEL_MIN_BARS,
+        CHAN_ZONE_MERGE_ENABLED,
+        CHAN_ZONE_MERGE_GAP_PCT,
+        CHAN_SIGNAL_ID_ENABLED,
+    )
 except ImportError:
     CHANLUN_MIN_BARS = 20
     CHANLUN_MIN_BARS_PER_STROKE = 5
     CHANLUN_MIN_STROKES_PER_SEGMENT = 3
+    CHAN_MULTILEVEL_ENABLED = True
+    CHAN_MULTILEVEL_CHUNK = 5
+    CHAN_MULTILEVEL_MIN_BARS = 15
+    CHAN_ZONE_MERGE_ENABLED = True
+    CHAN_ZONE_MERGE_GAP_PCT = 0.015
+    CHAN_SIGNAL_ID_ENABLED = True
 
 
 def _calc_macd(bars: list[dict]) -> list[dict]:
@@ -176,6 +193,78 @@ def find_fractions(bars: list[dict]) -> list[dict]:
             })
 
     return fractions
+
+
+def _aggregate_bars(bars: list[dict], chunk: int = 5) -> list[dict]:
+    """将 bars 按 chunk 聚合为粗粒度 K 线（用于模拟上级别走势，区间套思想）。
+
+    每 chunk 根合成 1 根：open=首根开(缺省用首根收), high=最高, low=最低, close=末根收。
+    仅保留分析所需的 OHLC / date / macd_histogram（取末根）。
+    """
+    if chunk <= 1 or len(bars) < chunk:
+        return [dict(b) for b in bars]
+    coarse: list[dict[str, Any]] = []
+    i = 0
+    n = len(bars)
+    while i + chunk <= n:
+        group = bars[i:i + chunk]
+        open_p = to_float(group[0].get("open"))
+        if open_p is None:
+            open_p = to_float(group[0].get("close"))
+        highs = [to_float(b.get("high")) for b in group]
+        lows = [to_float(b.get("low")) for b in group]
+        close_p = to_float(group[-1].get("close"))
+        highs = [h for h in highs if h is not None]
+        lows = [l for l in lows if l is not None]
+        if open_p is None or not highs or not lows or close_p is None:
+            i += chunk
+            continue
+        coarse.append({
+            "open": round(open_p, 4),
+            "high": round(max(highs), 4),
+            "low": round(min(lows), 4),
+            "close": round(close_p, 4),
+            "date": group[-1].get("date"),
+            "macd_histogram": group[-1].get("macd_histogram"),
+        })
+        i += chunk
+    return coarse
+
+
+def _higher_level_trend(bars: list[dict], chunk: int = 5) -> dict:
+    """基于粗粒度 K 线估计上级别趋势方向（区间套，轻量自包含实现）。
+
+    返回 {"trend": "up"|"down"|"sideways"|None, "confidence": float, "segments_count": int}。
+    - 粗K线不足 CHAN_MULTILEVEL_MIN_BARS 或无足够线段 → trend=None, confidence=0
+    - 取末 3 段多数决；confidence = 同向段数 / 3（需 >=3 段才置信）
+    """
+    result: dict[str, Any] = {"trend": None, "confidence": 0.0, "segments_count": 0}
+    if not bars or len(bars) < CHAN_MULTILEVEL_MIN_BARS:
+        return result
+    coarse = _aggregate_bars(bars, chunk=chunk)
+    if len(coarse) < CHAN_MULTILEVEL_MIN_BARS:
+        return result
+    cleaned = handle_inclusion(coarse)
+    fractions = find_fractions(cleaned)
+    strokes = build_strokes(fractions, min_bars_per_stroke=CHANLUN_MIN_BARS_PER_STROKE)
+    segments = build_segments(strokes, min_strokes=CHANLUN_MIN_STROKES_PER_SEGMENT)
+    if len(segments) < 3:
+        result["segments_count"] = len(segments)
+        return result
+    recent3 = [seg["direction"] for seg in segments[-3:]]
+    up = recent3.count("up")
+    down = recent3.count("down")
+    result["segments_count"] = len(segments)
+    if up >= 2:
+        result["trend"] = "up"
+        result["confidence"] = up / 3.0
+    elif down >= 2:
+        result["trend"] = "down"
+        result["confidence"] = down / 3.0
+    else:
+        result["trend"] = "sideways"
+        result["confidence"] = 0.5
+    return result
 
 
 def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5) -> list[dict]:
@@ -376,16 +465,50 @@ def build_segments(strokes: list[dict], min_strokes: int = 3) -> list[dict]:
     return segments
 
 
-def build_zones(items: list[dict], level: str = "segment") -> list[dict]:
+def _merge_zones(raw_zones: list[dict], gap_pct: float) -> list[dict]:
+    """将相邻/重叠的滑动窗口中枢合并为 consolidated pivot。
+
+    合并条件：两中枢重叠，或中心间距 < gap_pct * 中枢中心价（相对阈值，避免按绝对价误判）。
+    合并后 zh_top = min, zh_bottom = max，并记录成员原始中枢到 members。
+    """
+    merged: list[dict[str, Any]] = []
+    for z in raw_zones:
+        if not merged:
+            merged.append({
+                "zh_top": z["zh_top"], "zh_bottom": z["zh_bottom"],
+                "zh_center": z["zh_center"], "members": [z], "valid": True,
+            })
+            continue
+        last = merged[-1]
+        overlap = z["zh_top"] > last["zh_bottom"] and z["zh_bottom"] < last["zh_top"]
+        center = (last["zh_top"] + last["zh_bottom"]) / 2
+        sep = min(abs(z["zh_bottom"] - last["zh_top"]), abs(last["zh_bottom"] - z["zh_top"]))
+        gap = sep / center if center else 0.0
+        if overlap or gap < gap_pct:
+            last["zh_top"] = min(last["zh_top"], z["zh_top"])
+            last["zh_bottom"] = max(last["zh_bottom"], z["zh_bottom"])
+            last["zh_center"] = round((last["zh_top"] + last["zh_bottom"]) / 2, 4)
+            last["members"].append(z)
+        else:
+            merged.append({
+                "zh_top": z["zh_top"], "zh_bottom": z["zh_bottom"],
+                "zh_center": z["zh_center"], "members": [z], "valid": True,
+            })
+    return merged
+
+
+def build_zones(items: list[dict], level: str = "segment", merge: bool = True) -> list[dict]:
     """构建中枢序列。
 
     当 level=="segment" 且 items 含 start_index/end_index 字段时，用 3 段线段构建中枢；
     否则用旧逻辑（3 笔构建中枢）。
+    merge=True（且 CHAN_ZONE_MERGE_ENABLED）时，将相邻/重叠的滑动窗口中枢
+    合并为 consolidated pivot，减少中枢数量膨胀、贴近标准缠论「中枢」对象。
     """
     if len(items) < 3:
         return []
 
-    zones: list[dict[str, Any]] = []
+    raw: list[dict[str, Any]] = []
     for i in range(0, len(items) - 2, 1):
         group = items[i:i + 3]
 
@@ -400,7 +523,7 @@ def build_zones(items: list[dict], level: str = "segment") -> list[dict]:
         valid = zh_top > zh_bottom
 
         if valid:
-            zones.append({
+            raw.append({
                 "zh_top": round(zh_top, 4),
                 "zh_bottom": round(zh_bottom, 4),
                 "zh_center": round((zh_top + zh_bottom) / 2, 4),
@@ -408,7 +531,33 @@ def build_zones(items: list[dict], level: str = "segment") -> list[dict]:
                 "valid": valid,
             })
 
-    return zones
+    if merge and CHAN_ZONE_MERGE_ENABLED:
+        return _merge_zones(raw, CHAN_ZONE_MERGE_GAP_PCT)
+    return raw
+
+
+def _has_entry_exit_segments(pivot: dict, segments: list[dict] | None) -> bool:
+    """验证中枢存在「进入段 + 离开段」结构（盘整成立的拓扑条件）。
+
+    从合并中枢的成员原始中枢中提取笔/线段索引区间，判断是否有线段在中枢之前结束、
+    且有线段在中枢之后开始。成员无索引信息（如手工构造测试数据）时返回 False，
+    调用方应回退到线段数量门槛。
+    """
+    if not segments:
+        return False
+    members = pivot.get("members") or [pivot]
+    item_indices: list[tuple[int, int]] = []
+    for m in members:
+        for s in m.get("strokes", []):
+            if isinstance(s, dict) and "start_index" in s and "end_index" in s:
+                item_indices.append((s["start_index"], s["end_index"]))
+    if not item_indices:
+        return False
+    min_idx = min(i for i, _ in item_indices)
+    max_idx = max(j for _, j in item_indices)
+    has_before = any(isinstance(s, dict) and s.get("end_index", -1) < min_idx for s in segments)
+    has_after = any(isinstance(s, dict) and s.get("start_index", 1 << 30) > max_idx for s in segments)
+    return has_before and has_after
 
 
 def _detect_unilateral(strokes: list[dict]) -> str | None:
@@ -447,57 +596,51 @@ def _detect_unilateral(strokes: list[dict]) -> str | None:
 
 
 def classify_structure(zones: list[dict], segments: list[dict] | None = None, strokes: list[dict] | None = None) -> dict:
-    """走势分类：根据中枢关系和线段数量判断盘整或趋势。
+    """走势分类：根据中枢拓扑关系和线段数量判断盘整或趋势。
 
-    线段数量要求（标准缠论）：
-    - 盘整走势 = 进入段 + 中枢(3段) + 离开段 = 最少 5 段线段
-    - 趋势走势 = 进1 + 中枢1(3段) + 离1 + 进2 + 中枢2(3段) + 离2 = 最少 11 段线段
-
-    单边走势：
-    - 线段不足但笔之间无重叠 → 单边上涨/单边下跌
+    拓扑规则（中枢合并版）：
+    - 0 个合并中枢 → 单边/线段不足
+    - 1 个合并中枢 → 验证「进入段+离开段」结构 → 盘整，否则回退到线段数量门槛
+    - 2+ 同向不重叠中枢 → 上涨/下跌趋势
+    - 重叠中枢 → 盘整
 
     输出结构类型：
     - "盘整" / "上涨趋势" / "下跌趋势" / "单边上涨" / "单边下跌"
-    - "线段不足X/Y" — 有线段但不够判定（X=当前线段数，Y=需要数）
+    - "线段不足X/Y" — 有线段但不够判定
     - "无结构" — 连笔都没有
+
+    兼容字段（不变）：structure_type, structure_segments_count, structure_zones_count
+    新增字段：merged_zones, pivot_count
     """
-    MIN_SEGMENTS_CONSOLIDATION = 5   # 盘整最少线段数
-    MIN_SEGMENTS_TREND = 11          # 趋势最少线段数
+    MIN_SEGMENTS_CONSOLIDATION = 5
+    MIN_SEGMENTS_TREND = 11
 
     valid_zones = [z for z in zones if z.get("valid")]
     seg_count = len(segments) if segments else 0
     strokes_count = len(strokes) if strokes else 0
 
-    # 笔都没有 → 无结构
-    if strokes_count < 3:
-        return {
-            "structure_type": "无结构",
-            "structure_segments_count": seg_count,
-            "structure_zones_count": 0,
-        }
+    base: dict[str, Any] = {
+        "structure_segments_count": seg_count,
+        "structure_zones_count": len(zones),
+        "merged_zones": valid_zones,
+        "pivot_count": len(valid_zones),
+    }
 
-    # 没有中枢 → 尝试检测单边走势，否则显示线段不足
+    def _ok(st: str) -> dict:
+        return {**base, "structure_type": st}
+
+    if strokes_count < 3:
+        return _ok("无结构")
+
     if not valid_zones:
         unilateral = _detect_unilateral(strokes or [])
         if unilateral:
-            return {
-                "structure_type": unilateral,
-                "structure_segments_count": seg_count,
-                "structure_zones_count": 0,
-            }
+            return _ok(unilateral)
         if seg_count > 0:
-            return {
-                "structure_type": f"线段不足{seg_count}/{MIN_SEGMENTS_CONSOLIDATION}",
-                "structure_segments_count": seg_count,
-                "structure_zones_count": 0,
-            }
-        return {
-            "structure_type": f"线段不足0/{MIN_SEGMENTS_CONSOLIDATION}",
-            "structure_segments_count": 0,
-            "structure_zones_count": 0,
-        }
+            return _ok(f"线段不足{seg_count}/{MIN_SEGMENTS_CONSOLIDATION}")
+        return _ok(f"线段不足0/{MIN_SEGMENTS_CONSOLIDATION}")
 
-    # 先判断中枢方向关系
+    # 判断中枢方向关系（拓扑：同向不重叠→趋势，重叠→盘整）
     pair_direction: str | None = None
     zones_trend = "盘整"
     for i in range(1, len(valid_zones)):
@@ -516,47 +659,25 @@ def classify_structure(zones: list[dict], segments: list[dict] | None = None, st
         pair_direction = this_dir
         zones_trend = "上涨趋势" if this_dir == "up" else "下跌趋势"
 
-    # 1 个中枢 → 盘整（需 ≥5 段线段）
+    # 1 个中枢：优先用拓扑结构（进/离段）判定盘整，否则回退到线段数量门槛
     if len(valid_zones) == 1:
-        if seg_count < MIN_SEGMENTS_CONSOLIDATION:
-            return {
-                "structure_type": f"线段不足{seg_count}/{MIN_SEGMENTS_CONSOLIDATION}",
-                "structure_segments_count": seg_count,
-                "structure_zones_count": 1,
-            }
-        return {
-            "structure_type": "盘整",
-            "structure_segments_count": seg_count,
-            "structure_zones_count": 1,
-        }
+        pivot = valid_zones[0]
+        if _has_entry_exit_segments(pivot, segments):
+            return _ok("盘整")
+        if seg_count >= MIN_SEGMENTS_CONSOLIDATION:
+            return _ok("盘整")
+        return _ok(f"线段不足{seg_count}/{MIN_SEGMENTS_CONSOLIDATION}")
 
     # 2+ 个中枢
     if zones_trend in ("上涨趋势", "下跌趋势"):
         if seg_count < MIN_SEGMENTS_TREND:
-            return {
-                "structure_type": f"线段不足{seg_count}/{MIN_SEGMENTS_TREND}",
-                "structure_segments_count": seg_count,
-                "structure_zones_count": len(valid_zones),
-            }
-        return {
-            "structure_type": zones_trend,
-            "structure_segments_count": seg_count,
-            "structure_zones_count": len(valid_zones),
-        }
+            return _ok(f"线段不足{seg_count}/{MIN_SEGMENTS_TREND}")
+        return _ok(zones_trend)
 
     # 中枢重叠 → 盘整
     if seg_count < MIN_SEGMENTS_CONSOLIDATION:
-        return {
-            "structure_type": f"线段不足{seg_count}/{MIN_SEGMENTS_CONSOLIDATION}",
-            "structure_segments_count": seg_count,
-            "structure_zones_count": len(valid_zones),
-        }
-
-    return {
-        "structure_type": "盘整",
-        "structure_segments_count": seg_count,
-        "structure_zones_count": len(valid_zones),
-    }
+        return _ok(f"线段不足{seg_count}/{MIN_SEGMENTS_CONSOLIDATION}")
+    return _ok("盘整")
 
 
 def _check_macd_for_2nd_buy(
@@ -884,6 +1005,9 @@ def chanlun_analysis(
     current: float,
     macd_hist_current: float | None = None,
     macd_hist_prev: float | None = None,
+    higher_trend: dict | None = None,
+    symbol: str | None = None,
+    analysis_date: str | None = None,
 ) -> dict:
     if len(bars) < CHANLUN_MIN_BARS:
         return {}
@@ -896,9 +1020,20 @@ def chanlun_analysis(
     fractions = find_fractions(cleaned)
     strokes = build_strokes(fractions, min_bars_per_stroke=CHANLUN_MIN_BARS_PER_STROKE)
     segments = build_segments(strokes, min_strokes=CHANLUN_MIN_STROKES_PER_SEGMENT)
-    zones = build_zones(segments if len(segments) >= 3 else strokes,
-                         level="segment" if len(segments) >= 3 else "stroke")
+
+    # --- E2: build raw zones for zones_count (兼容)，merged zones for 分类 ---
+    if len(segments) >= 3:
+        items, lvl = segments, "segment"
+    else:
+        items, lvl = strokes, "stroke"
+    raw_zones = build_zones(items, level=lvl, merge=False)
+    zones = build_zones(items, level=lvl, merge=True)  # merged if CHAN_ZONE_MERGE_ENABLED
+    zones_count = len(raw_zones)  # 保留原始滑动窗口数量，向后兼容
+
     structure = classify_structure(zones, segments, strokes)
+    merged_zones = structure.get("merged_zones", [])
+    pivot_count = structure.get("pivot_count", 0)
+
     divergence = detect_divergence(bars, strokes)
 
     # Check MACD divergence for 2nd buy point (bottom divergence)
@@ -909,8 +1044,47 @@ def chanlun_analysis(
     buy_points = detect_buy_points(strokes, zones, current, macd_hist_current, macd_hist_prev, macd_divergence_buy)
     sell_points = detect_sell_points(strokes, zones, current, macd_hist_current, macd_hist_prev, macd_divergence_sell)
 
+    # --- E1: 多级别区间套确认 ---
+    if higher_trend is None and CHAN_MULTILEVEL_ENABLED:
+        higher_trend = _higher_level_trend(bars, chunk=CHAN_MULTILEVEL_CHUNK)
+    ht: str | None = None
+    hc: float = 0.0
+    if isinstance(higher_trend, dict):
+        ht = higher_trend.get("trend")
+        hc = to_float(higher_trend.get("confidence")) or 0.0
+    confident = hc >= 0.66
+
+    # 冲突过滤：上级趋势 down 且置信 → 仅保留 二类买（已由 MACD 门控）
+    if confident and ht == "down":
+        buy_points = [bp for bp in buy_points if bp["type"] == "二类买"]
+    # 冲突过滤：上级趋势 up 且置信 → 仅保留 二类卖（已由 MACD 门控）
+    if confident and ht == "up":
+        sell_points = [sp for sp in sell_points if sp["type"] == "二类卖"]
+
+    # 顺向增强：买点与上级 up 同向 → confidence +1（cap 3）
+    if confident and ht == "up":
+        for bp in buy_points:
+            bp["confidence"] = min(3, bp["confidence"] + 1)
+            bp["multi_level_confirm"] = True
+    if confident and ht == "down":
+        for sp in sell_points:
+            sp["confidence"] = min(3, sp["confidence"] + 1)
+            sp["multi_level_confirm"] = True
+
+    # --- E4: 买卖点信号标准化（Signal Contract v2 signal_id）---
+    if CHAN_SIGNAL_ID_ENABLED and symbol and analysis_date:
+        for bp in buy_points:
+            bp["signal_id"] = normalize_signal_id(
+                symbol, analysis_date, _chan_type_canonical(bp["type"]), bp["price"],
+                source_skill="chanlun",
+            )
+        for sp in sell_points:
+            sp["signal_id"] = normalize_signal_id(
+                symbol, analysis_date, _chan_type_canonical(sp["type"]), sp["price"],
+                source_skill="chanlun",
+            )
+
     strokes_count = len(strokes)
-    zones_count = len(zones)
 
     # 优先用线段投票，不足时 fallback 到笔级别
     if len(segments) >= 3:
@@ -924,7 +1098,6 @@ def chanlun_analysis(
         else:
             trend_label = "震荡段"
     elif strokes_count >= 3:
-        # 最近3笔方向多数决：过滤单笔噪音，避免最后一笔小回调误判整段趋势
         recent3 = [s["direction"] for s in strokes[-3:]]
         up_count = recent3.count("up")
         down_count = recent3.count("down")
@@ -968,10 +1141,50 @@ def chanlun_analysis(
         "segments_count": len(segments),
         "structure_type": structure["structure_type"],
         "structure_segments_count": structure["structure_segments_count"],
+        # E1 新增字段
+        "higher_trend": ht,
+        "higher_trend_conflict": bool(confident and ht in ("up", "down")),
+        # E3 新增字段：fractions（修复 time_window_detector 死代码 bug）
+        "fractions": fractions,
+        # E2 新增字段：合并中枢信息
+        "merged_zones": merged_zones,
+        "pivot_count": pivot_count,
     }
 
 
-def chanlun_strategy(current: float, bars: list[dict], change_pct: Any = None, quote: dict | None = None) -> dict:
+_CHAN_TYPE_CANONICAL: dict[str, str] = {
+    "一类买": "chan_buy_1",
+    "二类买": "chan_buy_2",
+    "三类买": "chan_buy_3",
+    "一类卖": "chan_sell_1",
+    "二类卖": "chan_sell_2",
+    "三类卖": "chan_sell_3",
+}
+
+
+def _chan_type_canonical(cn_type: str) -> str:
+    """将中文买卖点类型映射为 Signal Contract v2 规范类型名。"""
+    return _CHAN_TYPE_CANONICAL.get(cn_type, cn_type)
+
+
+def chanlun_strategy(
+    current: float,
+    bars: list[dict],
+    change_pct: Any = None,
+    quote: dict | None = None,
+    symbol: str | None = None,
+    analysis_date: str | None = None,
+) -> dict:
     macd_h_curr = to_float(bars[-1].get("macd_histogram")) if bars else None
     macd_h_prev = to_float(bars[-2].get("macd_histogram")) if len(bars) >= 2 else None
-    return {"chanlun": chanlun_analysis(bars, current, macd_h_curr, macd_h_prev)}
+    # 从 quote 派生 symbol/date，供 signal_id 使用（向后兼容：无 quote 时不加 id）
+    if symbol is None and isinstance(quote, dict):
+        symbol = quote.get("symbol")
+    if analysis_date is None and isinstance(quote, dict):
+        analysis_date = quote.get("trade_date") or (bars[-1].get("date") if bars else None)
+    return {
+        "chanlun": chanlun_analysis(
+            bars, current, macd_h_curr, macd_h_prev,
+            symbol=symbol, analysis_date=analysis_date,
+        )
+    }

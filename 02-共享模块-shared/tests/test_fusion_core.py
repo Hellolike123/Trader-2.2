@@ -102,6 +102,23 @@ class TestChanToSignal:
         }})
         assert result["direction"] == 1  # 底背驰优先, 不是回调段
 
+    def test_signal_id_propagated(self):
+        """E4: 买点的 signal_id 应透传到统一信号。"""
+        fn = self._fn
+        result = fn({"chanlun": {
+            "buy_points": [{"type": "一类买", "price": 28.5, "confidence": 3,
+                            "signal_id": "abc1234567890def"}],
+        }})
+        assert result["signal_id"] == "abc1234567890def"
+
+    def test_signal_id_none_when_absent(self):
+        """无 signal_id 的买点，统一信号的 signal_id 应为 None。"""
+        fn = self._fn
+        result = fn({"chanlun": {
+            "buy_points": [{"type": "一类买", "price": 28.5, "confidence": 3}],
+        }})
+        assert result.get("signal_id") is None
+
 
 class TestMomentumToSignal:
     """动量信号标准化测试。"""

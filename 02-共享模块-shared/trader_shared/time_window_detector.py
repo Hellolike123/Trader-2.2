@@ -33,38 +33,48 @@ TIME_WINDOWS: dict[int, int] = {
 def _find_pivot_index(bars: list[dict[str, Any]], chan_result: dict[str, Any] | None = None) -> int | None:
     """找到最近的转折点在 bars 中的索引。
 
-    优先从缠论笔数据中提取最后一个转折点，
-    否则用简单的高低点检测作为降级方案。
+    优先级：fractions（真实转折点）> strokes（笔端点）> 极值点降级。
+    注意：fractions 的 index 字段是相对于 handle_inclusion 清洗后的 K 线，
+    不可直接索引原始 bars；必须用转折价格在 bars 中定位（low <= price <= high）。
     """
-    # 尝试从缠论笔数据中获取转折点
-    if chan_result is not None:
-        chan = chan_result.get("chanlun", {}) if isinstance(chan_result, dict) else {}
-        if isinstance(chan, dict):
-            fractions = chan.get("fractions", [])
-            # chan_core 不直接暴露 fractions 在 strategy 返回值中
-            # 降级：用 strokes 的最后一笔起止推算
-            strokes = chan.get("strokes", [])
-            if isinstance(strokes, list) and len(strokes) >= 2:
-                # 倒数第二笔的终点作为最近转折点
-                second_last = strokes[-2]
-                if isinstance(second_last, dict):
-                    # 我们只有价格没有索引，用价格在 bars 中查找
-                    target_price = float(second_last.get("end_price") or 0)
-                    if target_price > 0:
-                        # 在 bars 中找最近的匹配价
-                        for i in range(len(bars) - 1, -1, -1):
-                            bar = bars[i]
-                            high = _to_f(bar.get("high"))
-                            low = _to_f(bar.get("low"))
-                            if high is not None and low is not None:
-                                if low <= target_price <= high:
-                                    return i
+    if chan_result is not None and isinstance(chan_result, dict):
+        # 兼容两种传入形态：嵌套 {"chanlun": {...}} 或扁平 {...}
+        chan: dict[str, Any] = chan_result
+        if "chanlun" in chan_result and isinstance(chan_result["chanlun"], dict):
+            chan = chan_result["chanlun"]
 
-    # 降级方案：用最近的高点/低点作为转折点
+        # 优先：用 fractions（真实分型转折点）按价格定位
+        fractions = chan.get("fractions", []) if isinstance(chan, dict) else []
+        if isinstance(fractions, list) and len(fractions) >= 1:
+            last = fractions[-1]
+            if isinstance(last, dict):
+                price = last.get("high") if last.get("type") == "top" else last.get("low")
+                if price is not None:
+                    price = _to_f(price)
+                    if price is not None:
+                        for i in range(len(bars) - 1, -1, -1):
+                            high = _to_f(bars[i].get("high"))
+                            low = _to_f(bars[i].get("low"))
+                            if high is not None and low is not None and low <= price <= high:
+                                return i
+
+        # 降级：用 strokes 的倒数第二笔终点价格定位
+        strokes = chan.get("strokes", []) if isinstance(chan, dict) else []
+        if isinstance(strokes, list) and len(strokes) >= 2:
+            second_last = strokes[-2]
+            if isinstance(second_last, dict):
+                target_price = _to_f(second_last.get("end_price"))
+                if target_price is not None and target_price > 0:
+                    for i in range(len(bars) - 1, -1, -1):
+                        high = _to_f(bars[i].get("high"))
+                        low = _to_f(bars[i].get("low"))
+                        if high is not None and low is not None and low <= target_price <= high:
+                            return i
+
+    # 最终降级：用最近 20 根K线的极值点
     if len(bars) < 5:
         return None
 
-    # 找最近20根K线内的极值点
     recent = bars[-20:] if len(bars) >= 20 else bars
     n = len(recent)
     max_high = -1.0
@@ -75,7 +85,6 @@ def _find_pivot_index(bars: list[dict[str, Any]], chan_result: dict[str, Any] | 
             max_high = h
             max_idx = i
 
-    # 转换为在原始 bars 中的索引
     return len(bars) - n + max_idx
 
 

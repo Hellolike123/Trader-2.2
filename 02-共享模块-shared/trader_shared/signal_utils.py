@@ -79,6 +79,13 @@ _SIGNAL_TYPE_MAP: dict[str, str] = {
     "止损": "stop_loss",
     "追涨": "chase_rally",
     "背驰入场": "divergence_entry",
+    # Chan Theory buy/sell points (缠论买卖点)
+    "一类买": "chan_buy_1",
+    "二类买": "chan_buy_2",
+    "三类买": "chan_buy_3",
+    "一类卖": "chan_sell_1",
+    "二类卖": "chan_sell_2",
+    "三类卖": "chan_sell_3",
     # English legacy names
     "low_buy": "low_buy_watch",
     "high_sell": "high_sell_watch",
@@ -110,6 +117,13 @@ _SIGNAL_TYPE_MAP: dict[str, str] = {
     "low_sell_watch": "low_sell_watch",
     "completed_5m_confirm": "completed_5m_confirm",
     "price_confirm": "price_confirm",
+    # Chan Theory canonical names (idempotent pass-through)
+    "chan_buy_1": "chan_buy_1",
+    "chan_buy_2": "chan_buy_2",
+    "chan_buy_3": "chan_buy_3",
+    "chan_sell_1": "chan_sell_1",
+    "chan_sell_2": "chan_sell_2",
+    "chan_sell_3": "chan_sell_3",
 }
 
 

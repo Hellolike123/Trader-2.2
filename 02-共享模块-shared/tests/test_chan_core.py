@@ -16,7 +16,12 @@ from trader_shared.chan_core import (
     detect_buy_points,
     detect_divergence,
     chanlun_analysis,
+    chanlun_strategy,
     _check_macd_for_2nd_buy,
+    _aggregate_bars,
+    _higher_level_trend,
+    _merge_zones,
+    _chan_type_canonical,
 )
 
 
@@ -474,3 +479,209 @@ class TestChanlunAnalysisIntegration:
         ]
         for field in legacy_fields:
             assert field in result, f"缺少旧字段: {field}"
+
+    def test_new_enhancement_fields(self):
+        """验证 E1-E3 新增字段存在且类型正确。"""
+        bars = [_make_bar(10 + i * 0.1, 11 + i * 0.1, 9 + i * 0.1, 10 + i * 0.1) for i in range(30)]
+        result = chanlun_analysis(bars, 10.5)
+        # E3: fractions
+        assert "fractions" in result
+        assert isinstance(result["fractions"], list)
+        # E1: higher_trend
+        assert "higher_trend" in result
+        assert "higher_trend_conflict" in result
+        assert isinstance(result["higher_trend_conflict"], bool)
+        # E2: merged_zones / pivot_count
+        assert "merged_zones" in result
+        assert isinstance(result["merged_zones"], list)
+        assert "pivot_count" in result
+        assert isinstance(result["pivot_count"], int)
+
+
+class TestAggregateBars:
+    """E1: 粗K线聚合测试。"""
+
+    def test_basic_aggregation(self):
+        bars = [_make_bar(10 + i, 11 + i, 9 + i, 10.5 + i) for i in range(10)]
+        result = _aggregate_bars(bars, chunk=5)
+        assert len(result) == 2
+        # 第 1 组: open=10, high=max(11..15)=15, low=min(9..13)=9, close=14.5
+        assert result[0]["high"] == 15
+        assert result[0]["low"] == 9
+        assert result[0]["open"] == 10
+        assert result[0]["close"] == 14.5
+
+    def test_short_series(self):
+        bars = [_make_bar(10, 11, 9, 10) for _ in range(3)]
+        result = _aggregate_bars(bars, chunk=5)
+        assert len(result) == 3  # chunk > len → return copy
+
+    def test_chunk_1(self):
+        bars = [_make_bar(10, 11, 9, 10) for _ in range(5)]
+        result = _aggregate_bars(bars, chunk=1)
+        assert len(result) == 5
+
+
+class TestHigherLevelTrend:
+    """E1: 上级别趋势估计测试。"""
+
+    def test_short_series_returns_none(self):
+        bars = [_make_bar(10, 11, 9, 10) for _ in range(5)]
+        result = _higher_level_trend(bars, chunk=5)
+        assert result["trend"] is None
+        assert result["confidence"] == 0.0
+
+    def test_result_has_keys(self):
+        bars = [_make_bar(10 + i * 0.1, 11 + i * 0.1, 9 + i * 0.1, 10 + i * 0.1) for i in range(50)]
+        result = _higher_level_trend(bars, chunk=5)
+        assert "trend" in result
+        assert "confidence" in result
+        assert "segments_count" in result
+
+    def test_not_downweight_when_none(self):
+        """higher_trend=None 时不得抑制买点。"""
+        bars = [_make_bar(10 + i * 0.1, 11 + i * 0.1, 9 + i * 0.1, 10 + i * 0.1) for i in range(30)]
+        result = chanlun_analysis(bars, 10.5)
+        assert result["higher_trend"] is None or result["higher_trend_conflict"] is False
+
+
+class TestBuildZonesMerge:
+    """E2: 中枢合并测试。"""
+
+    def test_single_zone_no_merge(self):
+        strokes = [
+            {"start_price": 10, "end_price": 50, "direction": "up"},
+            {"start_price": 50, "end_price": 30, "direction": "down"},
+            {"start_price": 30, "end_price": 60, "direction": "up"},
+        ]
+        raw = build_zones(strokes, merge=False)
+        merged = build_zones(strokes, merge=True)
+        assert len(raw) == 1
+        assert len(merged) == 1
+        assert merged[0]["valid"] is True
+
+    def test_overlapping_zones_merge(self):
+        """两个重叠的滑动窗口中枢应合并为 1 个。"""
+        # 5 个 items → 滑动窗口产生 3 个 raw zones（重叠）
+        items = [
+            {"start_price": 10, "end_price": 30, "direction": "up"},
+            {"start_price": 30, "end_price": 15, "direction": "down"},
+            {"start_price": 15, "end_price": 35, "direction": "up"},
+            {"start_price": 35, "end_price": 18, "direction": "down"},
+            {"start_price": 18, "end_price": 40, "direction": "up"},
+        ]
+        raw = build_zones(items, merge=False)
+        merged = build_zones(items, merge=True)
+        assert len(raw) >= 2  # 至少 2 个 raw zones
+        assert len(merged) == 1  # 合并为 1 个
+        assert "members" in merged[0]
+
+    def test_merge_disabled(self):
+        items = [
+            {"start_price": 10, "end_price": 30, "direction": "up"},
+            {"start_price": 30, "end_price": 15, "direction": "down"},
+            {"start_price": 15, "end_price": 35, "direction": "up"},
+            {"start_price": 35, "end_price": 18, "direction": "down"},
+            {"start_price": 18, "end_price": 40, "direction": "up"},
+        ]
+        import trader_shared.chan_core as cc
+        orig = cc.CHAN_ZONE_MERGE_ENABLED
+        try:
+            cc.CHAN_ZONE_MERGE_ENABLED = False
+            result = build_zones(items, merge=True)
+            assert len(result) >= 2  # 不合并
+        finally:
+            cc.CHAN_ZONE_MERGE_ENABLED = orig
+
+
+class TestClassifyStructureMerged:
+    """E2: 基于合并中枢的拓扑分类测试。"""
+
+    def test_merged_zones_pivot_count_present(self):
+        zones = [{"zh_top": 20.0, "zh_bottom": 15.0, "valid": True}]
+        result = classify_structure(zones, segments=[{"direction": "up"} for _ in range(5)],
+                                    strokes=[{"direction": "up", "start_price": 10, "end_price": 15} for _ in range(6)])
+        assert "merged_zones" in result
+        assert "pivot_count" in result
+        assert result["pivot_count"] == 1
+
+    def test_structure_zones_count_raw(self):
+        """structure_zones_count 应等于输入 zones 长度（原始数量）。"""
+        zones = [
+            {"zh_top": 20.0, "zh_bottom": 15.0, "valid": True},
+            {"zh_top": 30.0, "zh_bottom": 25.0, "valid": True},
+        ]
+        result = classify_structure(zones, segments=[{"direction": "up"} for _ in range(11)],
+                                    strokes=[{"direction": "up", "start_price": 10, "end_price": 15} for _ in range(12)])
+        assert result["structure_zones_count"] == 2
+
+
+class TestFractionsBugFix:
+    """E3: fractions 暴露 + _find_pivot_index 修复测试。"""
+
+    def test_chanlun_analysis_returns_fractions(self):
+        bars = [_make_bar(10 + i * 0.1, 11 + i * 0.1, 9 + i * 0.1, 10 + i * 0.1) for i in range(30)]
+        result = chanlun_analysis(bars, 10.5)
+        assert "fractions" in result
+        assert isinstance(result["fractions"], list)
+
+    def test_fractions_have_type(self):
+        bars = [_make_bar(10 + i * 0.1, 11 + i * 0.1, 9 + i * 0.1, 10 + i * 0.1) for i in range(30)]
+        result = chanlun_analysis(bars, 10.5)
+        for frac in result["fractions"]:
+            assert "type" in frac
+            assert frac["type"] in ("top", "bottom")
+
+
+class TestSignalIdStandardization:
+    """E4: 买卖点信号标准化测试。"""
+
+    def test_signal_id_added_when_symbol_date_present(self):
+        bars = [_make_bar(10 + i * 0.1, 11 + i * 0.1, 9 + i * 0.1, 10 + i * 0.1) for i in range(30)]
+        result = chanlun_analysis(bars, 10.5, symbol="688248.SH", analysis_date="2026-07-07")
+        for bp in result["buy_points"]:
+            assert "signal_id" in bp
+            assert isinstance(bp["signal_id"], str)
+            assert len(bp["signal_id"]) == 16
+        for sp in result["sell_points"]:
+            assert "signal_id" in sp
+            assert isinstance(sp["signal_id"], str)
+
+    def test_no_signal_id_when_missing_symbol(self):
+        bars = [_make_bar(10 + i * 0.1, 11 + i * 0.1, 9 + i * 0.1, 10 + i * 0.1) for i in range(30)]
+        result = chanlun_analysis(bars, 10.5)
+        for bp in result["buy_points"]:
+            assert "signal_id" not in bp or bp.get("signal_id") is None
+
+    def test_signal_id_stable_across_runs(self):
+        bars = [_make_bar(10 + i * 0.1, 11 + i * 0.1, 9 + i * 0.1, 10 + i * 0.1) for i in range(30)]
+        r1 = chanlun_analysis(bars, 10.5, symbol="688248.SH", analysis_date="2026-07-07")
+        r2 = chanlun_analysis(bars, 10.5, symbol="688248.SH", analysis_date="2026-07-07")
+        ids1 = [bp.get("signal_id") for bp in r1["buy_points"]]
+        ids2 = [bp.get("signal_id") for bp in r2["buy_points"]]
+        assert ids1 == ids2
+
+    def test_chanlun_strategy_derives_from_quote(self):
+        bars = [_make_bar(10 + i * 0.1, 11 + i * 0.1, 9 + i * 0.1, 10 + i * 0.1) for i in range(30)]
+        quote = {"symbol": "688248.SH", "trade_date": "2026-07-07"}
+        result = chanlun_strategy(10.5, bars, quote=quote)
+        chan = result["chanlun"]
+        has_id = any(bp.get("signal_id") for bp in chan["buy_points"]) or any(sp.get("signal_id") for sp in chan["sell_points"])
+        assert has_id or chan["buy_points"] == []  # 有买卖点时应有 id
+
+
+class TestChanTypeCanonical:
+    """E4: _chan_type_canonical 映射测试。"""
+
+    def test_buy_types(self):
+        assert _chan_type_canonical("一类买") == "chan_buy_1"
+        assert _chan_type_canonical("二类买") == "chan_buy_2"
+        assert _chan_type_canonical("三类买") == "chan_buy_3"
+
+    def test_sell_types(self):
+        assert _chan_type_canonical("一类卖") == "chan_sell_1"
+        assert _chan_type_canonical("二类卖") == "chan_sell_2"
+        assert _chan_type_canonical("三类卖") == "chan_sell_3"
+
+    def test_unknown_passthrough(self):
+        assert _chan_type_canonical("未知类型") == "未知类型"
