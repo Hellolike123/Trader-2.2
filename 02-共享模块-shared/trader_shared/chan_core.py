@@ -914,11 +914,20 @@ def detect_buy_points(
         if len(down_strokes) >= 2 and len(up_strokes) >= 1:
             low_a = down_strokes[-2]["end_price"]
             low_b = down_strokes[-1]["end_price"]
-            # Find the up stroke between the two down strokes (local up-stroke high)
+            # 限定范围：只找两根 down 笔之间的 up 笔，避免跨区间误取
+            idx_a = -1
+            idx_b = -1
+            for i, s in enumerate(strokes):
+                if s is down_strokes[-2]:
+                    idx_a = i
+                if s is down_strokes[-1]:
+                    idx_b = i
             up_high = None
-            for s in strokes:
-                if s["direction"] == "up" and s.get("start_price") is not None and s["start_price"] <= low_a:
-                    up_high = s["end_price"]
+            if idx_a >= 0 and idx_b > idx_a:
+                for s in strokes[idx_a + 1:idx_b]:
+                    if s["direction"] == "up" and s.get("end_price") is not None:
+                        if up_high is None or s["end_price"] > up_high:
+                            up_high = s["end_price"]
             if up_high is None:
                 up_high = max(s["end_price"] for s in up_strokes)
             if low_b > low_a and low_b < up_high and macd_divergence_ok:
@@ -928,7 +937,7 @@ def detect_buy_points(
                     "confidence": 2,
                 })
 
-    # 三类买 confirmed
+    # 三类买: 突破中枢上沿 + 回踩不破
     if last_close > 0 and zones:
         last_valid: dict | None = None
         for z in reversed(zones):
@@ -940,11 +949,22 @@ def detect_buy_points(
             zh_top = last_valid["zh_top"]
             above_pct = (last_close - zh_top) / zh_top
             if 0 < above_pct <= 0.02:
-                buy_points.append({
-                    "type": "三类买",
-                    "price": round(last_close, 4),
-                    "confidence": 1,
-                })
+                # 回踩确认：最近一笔向下笔的低点必须在中枢上沿之上
+                pullback_ok = True
+                down_strokes = [s for s in strokes if s["direction"] == "down"]
+                if down_strokes:
+                    last_down_low = min(
+                        s["end_price"] for s in down_strokes[-2:]
+                        if s.get("end_price") is not None
+                    ) if len(down_strokes) >= 2 else down_strokes[-1].get("end_price")
+                    if last_down_low is not None and last_down_low < zh_top:
+                        pullback_ok = False
+                if pullback_ok:
+                    buy_points.append({
+                        "type": "三类买",
+                        "price": round(last_close, 4),
+                        "confidence": 1,
+                    })
 
     return buy_points
 
@@ -1006,7 +1026,7 @@ def detect_sell_points(
                     "confidence": 2,
                 })
 
-    # 三类卖: 跌破中枢下沿后反弹不回
+    # 三类卖: 跌破中枢下沿 + 反弹不回
     if last_close > 0 and zones:
         last_valid: dict | None = None
         for z in reversed(zones):
@@ -1018,11 +1038,22 @@ def detect_sell_points(
             zh_bottom = last_valid["zh_bottom"]
             below_pct = (zh_bottom - last_close) / zh_bottom
             if 0 < below_pct <= 0.05:
-                sell_points.append({
-                    "type": "三类卖",
-                    "price": round(last_close, 4),
-                    "confidence": 1,
-                })
+                # 反弹确认：最近一笔向上笔的高点必须在中枢下沿之下
+                bounce_ok = True
+                up_strokes = [s for s in strokes if s["direction"] == "up"]
+                if up_strokes:
+                    last_up_high = max(
+                        s["end_price"] for s in up_strokes[-2:]
+                        if s.get("end_price") is not None
+                    ) if len(up_strokes) >= 2 else up_strokes[-1].get("end_price")
+                    if last_up_high is not None and last_up_high > zh_bottom:
+                        bounce_ok = False
+                if bounce_ok:
+                    sell_points.append({
+                        "type": "三类卖",
+                        "price": round(last_close, 4),
+                        "confidence": 1,
+                    })
 
     return sell_points
 
