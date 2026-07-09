@@ -78,6 +78,66 @@ except ImportError:
     WYCKOFF_SCORE_LPS = 12
 
 
+# ── 动态支撑位计算（多源集成）────────────────────────────────────────
+
+def _compute_dynamic_support(
+    bars: list[dict],
+    lookback: int = 10,
+    chan_zones: list[dict] | None = None,
+    chip_peaks: list[dict] | None = None,
+) -> float | None:
+    """从多个来源计算最佳支撑位。
+
+    优先级：
+    1. 缠论中枢下沿（zh_bottom）— 最可靠的结构性支撑
+    2. 筹码密集峰价格 — 量价支撑
+    3. 最近 N 日最低价 — 简单 fallback
+
+    Returns:
+        支撑位价格，或 None（数据不足）
+    """
+    current_price = to_float(bars[-1].get("close")) if bars else None
+    if current_price is None:
+        return None
+
+    candidates: list[float] = []
+
+    # 来源1：缠论中枢下沿
+    if chan_zones:
+        for z in chan_zones:
+            if isinstance(z, dict) and z.get("valid"):
+                zh_bottom = to_float(z.get("zh_bottom"))
+                if zh_bottom is not None and zh_bottom < current_price:
+                    candidates.append(zh_bottom)
+
+    # 来源2：筹码密集峰
+    if chip_peaks:
+        for p in chip_peaks:
+            if isinstance(p, dict):
+                price = to_float(p.get("price"))
+                if price is not None and price < current_price:
+                    candidates.append(price)
+
+    # 来源3：最近 N 日最低价（排除当前 bar）
+    recent = bars[-(lookback + 1):-1] if len(bars) > lookback else bars[:-1]
+    lows = [to_float(b.get("low")) for b in recent]
+    valid_lows = [l for l in lows if l is not None]
+    if valid_lows:
+        candidates.append(min(valid_lows))
+
+    if not candidates:
+        return None
+
+    # 选择最接近当前价的支撑位（但不能太近，至少低于当前价 0.5%）
+    min_gap = current_price * 0.005
+    valid_candidates = [c for c in candidates if current_price - c >= min_gap]
+    if not valid_candidates:
+        return min(candidates)  # 所有候选都太近，取最低的
+
+    # 取最接近当前价的（最高支撑）
+    return max(valid_candidates)
+
+
 # ── BC (Buying Climax) 购买高潮检测 ──
 def _detect_buying_climax(bars: list[dict]) -> dict:
     """Detect Buying Climax (BC) — 天量滞涨，高位放量阴线。
@@ -153,11 +213,12 @@ def _detect_buying_climax(bars: list[dict]) -> dict:
 
 
 # ── SOW (Sign of Weakness) 弱势信号检测 ──
-def _detect_sign_of_weakness(bars: list[dict]) -> dict:
+def _detect_sign_of_weakness(bars: list[dict], _support: float | None = None) -> dict:
     """Detect Sign of Weakness (SOW) — 价格跌破支撑且放量。
 
     关键修复：当 WYCKOFF_SOW_CONSECUTIVE_DAYS > 1 时，支撑位从「不含连续确认窗口」
     的 K 线中计算，避免前一日 low 被纳入 support 导致 prev_low >= support 恒成立。
+    支持 _support 覆盖：提供外部计算的动态支撑位时优先使用。
 
     Returns:
         dict with keys: sow_signal (bool), sow_reason (str), sow_price (float)
@@ -167,17 +228,20 @@ def _detect_sign_of_weakness(bars: list[dict]) -> dict:
     if len(bars) < min_bars:
         return {"sow_signal": False, "sow_reason": "数据不足", "sow_price": 0.0}
 
-    # 支撑位计算：排除最后 consecutive 根（它们参与跌破确认，不应纳入 support）
-    support_end = -(consecutive) if consecutive > 0 else None
-    support_start = -(WYCKOFF_SOW_SUPPORT_LOOKBACK + consecutive)
-    support_window = bars[support_start:support_end]
-    low_values = [to_float(b.get("low")) for b in support_window]
-    valid_lows = [v for v in low_values if v is not None]
+    # 支撑位计算：优先使用外部动态支撑位
+    if _support is not None:
+        support = _support
+    else:
+        # 排除最后 consecutive 根（它们参与跌破确认，不应纳入 support）
+        support_end = -(consecutive) if consecutive > 0 else None
+        support_start = -(WYCKOFF_SOW_SUPPORT_LOOKBACK + consecutive)
+        support_window = bars[support_start:support_end]
+        low_values = [to_float(b.get("low")) for b in support_window]
+        valid_lows = [v for v in low_values if v is not None]
 
-    if not valid_lows:
-        return {"sow_signal": False, "sow_reason": "数据异常", "sow_price": 0.0}
-
-    support = min(valid_lows)
+        if not valid_lows:
+            return {"sow_signal": False, "sow_reason": "数据异常", "sow_price": 0.0}
+        support = min(valid_lows)
 
     # 当前 bar（最后一根）
     current = bars[-1]
@@ -233,7 +297,7 @@ def _detect_sign_of_weakness(bars: list[dict]) -> dict:
 
 
 # ── Spring 弹簧洗盘检测 ──
-def _detect_spring(bars: list[dict]) -> dict:
+def _detect_spring(bars: list[dict], _support: float | None = None) -> dict:
     if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1:
         return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "数据不足"}
 
@@ -246,7 +310,8 @@ def _detect_spring(bars: list[dict]) -> dict:
     current_close = to_float(current.get("close"))
     current_volume = to_float(current.get("volume"))
 
-    support = min(valid_lows) if valid_lows else None
+    # 使用动态支撑位（如果提供），否则从 bars 计算
+    support = _support if _support is not None else (min(valid_lows) if valid_lows else None)
     if current_low is None or current_close is None or support is None or current_volume is None:
         return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "数据异常"}
 
@@ -881,10 +946,13 @@ def wyckoff_analysis(bars: list[dict]) -> dict:
             "wyckoff_summary": "K线数据不足，无法进行威科夫分析",
         }
 
-    spring = _detect_spring(bars)
+    # P2-2: 动态支撑位计算（多源集成）— 仅用于 Spring 检测
+    dynamic_support = _compute_dynamic_support(bars, lookback=10)
+
+    spring = _detect_spring(bars, _support=dynamic_support)
     upthrust = _detect_upthrust(bars)
     bc = _detect_buying_climax(bars)
-    sow = _detect_sign_of_weakness(bars)
+    sow = _detect_sign_of_weakness(bars)  # SOW 使用自己的支撑位计算（处理 consecutive 逻辑）
     bearish_div, bullish_div = _detect_volume_divergence(bars)
     ar = _detect_ar(bars)
     sos = _detect_sos(bars)
