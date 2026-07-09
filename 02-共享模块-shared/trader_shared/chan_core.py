@@ -822,8 +822,9 @@ def _stroke_macd_area(bars: list[dict] | None, stroke: dict, side: str) -> float
     side='pos': 只累加正柱（顶背驰用）
     无 index / 无数据 → None（手工 stroke 可能无 index，调用方须容错）
 
-    契约：bars 必须与 start_index/end_index 同一坐标系
-    （通常为 handle_inclusion 后的 cleaned，与 build_strokes 一致）。
+    契约：bars 必须与 start_index/end_index 同一坐标系。
+    chanlun_analysis 传入的是 inclusion 后并已 _calc_macd 重算的 cleaned
+    （禁止用 raw 日线 + 笔 index，否则面积会错位）。
     """
     if not bars or not stroke:
         return None
@@ -1376,11 +1377,12 @@ def chanlun_analysis(
     if len(bars) < CHANLUN_MIN_BARS:
         return {}
 
-    has_macd = any(b.get("macd_histogram") is not None for b in bars[:5]) if len(bars) >= 5 else False
-    if not has_macd:
-        bars = _calc_macd(bars)
-
+    # 结构层：包含处理（拷贝 OHLC，不修改入参 bars）
     cleaned = handle_inclusion(bars)
+    # 力度层：在 inclusion 后序列上重算 MACD，使笔 index 与 histogram 同坐标系。
+    # _calc_macd 内部 dict 拷贝，只写 cleaned，绝不写回调用方 raw bars。
+    cleaned = _calc_macd(cleaned)
+
     fractions = find_fractions(cleaned)
     strokes = build_strokes(fractions, min_bars_per_stroke=CHANLUN_MIN_BARS_PER_STROKE)
     segments = build_segments(strokes, min_strokes=CHANLUN_MIN_STROKES_PER_SEGMENT)
@@ -1398,20 +1400,28 @@ def chanlun_analysis(
     merged_zones = structure.get("merged_zones", [])
     pivot_count = structure.get("pivot_count", 0)
 
-    # P1: 笔 start_index/end_index 相对 handle_inclusion 后序列，笔级 MACD 必须用 cleaned
-    divergence = detect_divergence(cleaned, strokes)
+    # 一类 conf=1 等 bar 级 fallback：优先用 cleaned 末两根，与笔级力度同坐标系
+    # （调用方传入的 raw 末柱仅在 cleaned 不可用时兜底）
+    cleaned_macd_curr = to_float(cleaned[-1].get("macd_histogram")) if cleaned else None
+    cleaned_macd_prev = to_float(cleaned[-2].get("macd_histogram")) if len(cleaned) >= 2 else None
+    macd_for_buy_sell_curr = (
+        cleaned_macd_curr if cleaned_macd_curr is not None else macd_hist_current
+    )
+    macd_for_buy_sell_prev = (
+        cleaned_macd_prev if cleaned_macd_prev is not None else macd_hist_prev
+    )
 
-    # Check MACD divergence for 2nd buy point (bottom divergence)
+    # 笔 start_index/end_index 相对 cleaned；背驰/二类确认/买卖点一律吃 cleaned
+    divergence = detect_divergence(cleaned, strokes)
     macd_divergence_buy = _check_macd_for_2nd_buy(cleaned, strokes)
-    # Check MACD divergence for 2nd sell point (top divergence) — P0 fix
     macd_divergence_sell = _check_macd_for_2nd_sell(cleaned, strokes)
 
     buy_points = detect_buy_points(
-        strokes, zones, current, macd_hist_current, macd_hist_prev,
+        strokes, zones, current, macd_for_buy_sell_curr, macd_for_buy_sell_prev,
         macd_divergence_buy, bars=cleaned,
     )
     sell_points = detect_sell_points(
-        strokes, zones, current, macd_hist_current, macd_hist_prev,
+        strokes, zones, current, macd_for_buy_sell_curr, macd_for_buy_sell_prev,
         macd_divergence_sell, bars=cleaned,
     )
 
