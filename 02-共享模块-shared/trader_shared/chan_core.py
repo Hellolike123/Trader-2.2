@@ -885,28 +885,74 @@ def detect_buy_points(
     macd_hist_current: float | None = None,
     macd_hist_prev: float | None = None,
     macd_divergence_ok: bool = False,
+    bars: list[dict] | None = None,
 ) -> list[dict]:
     buy_points: list[dict[str, Any]] = []
 
     if not strokes:
         return buy_points
 
+    # ── 辅助过滤器 ──
+    def _volume_confirm(idx: int, threshold: float = 1.5) -> bool:
+        """当日成交量 > 近20日均量 × threshold"""
+        if not bars or idx < 20:
+            return True  # 数据不足时放行
+        recent = bars[max(0, idx - 20):idx]
+        avg_vol = sum(to_float(b.get("volume")) or 0 for b in recent) / len(recent)
+        curr_vol = to_float(bars[idx].get("volume")) or 0
+        return avg_vol > 0 and curr_vol >= avg_vol * threshold
+
+    def _macd_consecutive_shrink(bars_data: list[dict], min_days: int = 2) -> bool:
+        """MACD 绿柱连续缩短至少 min_days 天"""
+        if not bars_data or len(bars_data) < min_days + 1:
+            return True
+        recent = [to_float(b.get("macd_histogram")) for b in bars_data[-min_days - 1:]]
+        recent = [h for h in recent if h is not None]
+        if len(recent) < min_days + 1:
+            return True
+        # 检查最近 min_days 天每对相邻值都在缩短（负值变大）
+        for i in range(1, len(recent)):
+            if recent[i] >= 0 or recent[i - 1] >= 0:
+                return False
+            if recent[i] <= recent[i - 1]:
+                return False
+        return True
+
+    def _ma20_turning_up() -> bool:
+        """MA20 拐头向上：最近3根MA20递增"""
+        if not bars or len(bars) < 25:
+            return True
+        closes = [to_float(b.get("close")) for b in bars]
+        closes = [c for c in closes if c is not None]
+        if len(closes) < 25:
+            return True
+        ma20_vals = []
+        for i in range(len(closes) - 3, len(closes)):
+            ma20_vals.append(sum(closes[i - 19:i + 1]) / 20)
+        return len(ma20_vals) >= 2 and ma20_vals[-1] > ma20_vals[0]
+
     # 一类买: 向下笔 + MACD 绿柱缩短 (底背驰信号)
+    # 过滤: MA20 拐头 + 连续缩短 + 放量确认
     last_stroke = strokes[-1]
     if last_stroke["direction"] == "down":
         if macd_hist_current is not None and macd_hist_prev is not None and macd_hist_current < 0 and macd_hist_prev < 0:
             if macd_hist_current > macd_hist_prev:
-                buy_points.append({
-                    "type": "一类买",
-                    "price": round(last_stroke["end_price"], 4),
-                    "confidence": 3,
-                })
+                # 过滤器：MACD 连续缩短 + MA20 拐头
+                if _macd_consecutive_shrink(bars, 2) and _ma20_turning_up():
+                    buy_points.append({
+                        "type": "一类买",
+                        "price": round(last_stroke["end_price"], 4),
+                        "confidence": 3,
+                    })
         elif macd_hist_current is not None and macd_hist_current < 0:
-            buy_points.append({
-                "type": "一类买",
-                "price": round(last_stroke["end_price"], 4),
-                "confidence": 2,
-            })
+            # 降级信号：MACD 为负但未确认缩短，需额外放量确认
+            if bars and len(bars) > 0 and _volume_confirm(len(bars) - 1, 1.2):
+                if _ma20_turning_up():
+                    buy_points.append({
+                        "type": "一类买",
+                        "price": round(last_stroke["end_price"], 4),
+                        "confidence": 1,
+                    })
 
     # 二类买: down_1(low_a) -> up -> down_2(low_b) 且 low_b > low_a
     # Requires MACD divergence/trend confirmation to avoid false positives in downtrends
@@ -962,11 +1008,14 @@ def detect_buy_points(
                     if last_down_low is not None and last_down_low < zh_top:
                         pullback_ok = False
                 if pullback_ok:
-                    buy_points.append({
-                        "type": "三类买",
-                        "price": round(last_close, 4),
-                        "confidence": 1,
-                    })
+                    # 放量确认：有 bars 时检查量，无 bars 时直接放行
+                    vol_ok = not bars or _volume_confirm(len(bars) - 1, 1.2)
+                    if vol_ok:
+                        buy_points.append({
+                            "type": "三类买",
+                            "price": round(last_close, 4),
+                            "confidence": 1,
+                        })
 
     return buy_points
 
@@ -978,6 +1027,7 @@ def detect_sell_points(
     macd_hist_current: float | None = None,
     macd_hist_prev: float | None = None,
     macd_divergence_ok: bool = False,
+    bars: list[dict] | None = None,
 ) -> list[dict]:
     """检测缠论卖点（与detect_buy_points对称）。
 
@@ -990,22 +1040,65 @@ def detect_sell_points(
     if not strokes:
         return sell_points
 
+    # ── 卖点辅助过滤器 ──
+    def _volume_spike(idx: int, threshold: float = 1.5) -> bool:
+        """放量确认"""
+        if not bars or idx < 20:
+            return True
+        recent = bars[max(0, idx - 20):idx]
+        avg_vol = sum(to_float(b.get("volume")) or 0 for b in recent) / len(recent)
+        curr_vol = to_float(bars[idx].get("volume")) or 0
+        return avg_vol > 0 and curr_vol >= avg_vol * threshold
+
+    def _macd_consecutive_shrink_up(bars_data: list[dict], min_days: int = 2) -> bool:
+        """MACD 红柱连续缩短至少 min_days 天"""
+        if not bars_data or len(bars_data) < min_days + 1:
+            return True
+        recent = [to_float(b.get("macd_histogram")) for b in bars_data[-min_days - 1:]]
+        recent = [h for h in recent if h is not None]
+        if len(recent) < min_days + 1:
+            return True
+        for i in range(1, len(recent)):
+            if recent[i] <= 0 or recent[i - 1] <= 0:
+                return False
+            if recent[i] >= recent[i - 1]:
+                return False
+        return True
+
+    def _ma20_turning_down() -> bool:
+        """MA20 拐头向下"""
+        if not bars or len(bars) < 25:
+            return True
+        closes = [to_float(b.get("close")) for b in bars]
+        closes = [c for c in closes if c is not None]
+        if len(closes) < 25:
+            return True
+        ma20_vals = []
+        for i in range(len(closes) - 3, len(closes)):
+            ma20_vals.append(sum(closes[i - 19:i + 1]) / 20)
+        return len(ma20_vals) >= 2 and ma20_vals[-1] < ma20_vals[0]
+
     # 一类卖: 向上笔 + MACD 红柱缩短 (顶背驰信号)
+    # 过滤: MACD 连续缩短 + MA20 拐头
     last_stroke = strokes[-1]
     if last_stroke["direction"] == "up":
         if macd_hist_current is not None and macd_hist_prev is not None and macd_hist_current > 0 and macd_hist_prev > 0:
             if macd_hist_current < macd_hist_prev:
-                sell_points.append({
-                    "type": "一类卖",
-                    "price": round(last_stroke["end_price"], 4),
-                    "confidence": 3,
-                })
+                if _macd_consecutive_shrink_up(bars, 2) and _ma20_turning_down():
+                    sell_points.append({
+                        "type": "一类卖",
+                        "price": round(last_stroke["end_price"], 4),
+                        "confidence": 3,
+                    })
         elif macd_hist_current is not None and macd_hist_current > 0:
-            sell_points.append({
-                "type": "一类卖",
-                "price": round(last_stroke["end_price"], 4),
-                "confidence": 2,
-            })
+            # 降级信号：需放量 + MA20 拐头
+            if bars and len(bars) > 0 and _volume_spike(len(bars) - 1, 1.2):
+                if _ma20_turning_down():
+                    sell_points.append({
+                        "type": "一类卖",
+                        "price": round(last_stroke["end_price"], 4),
+                        "confidence": 1,
+                    })
 
     # 二类卖: up_1(high_a) -> down -> up_2(high_b) 且 high_b < high_a
     if len(strokes) >= 3:
@@ -1147,8 +1240,8 @@ def chanlun_analysis(
     # Check MACD divergence for 2nd sell point (top divergence) — P0 fix
     macd_divergence_sell = _check_macd_for_2nd_sell(bars, strokes)
 
-    buy_points = detect_buy_points(strokes, zones, current, macd_hist_current, macd_hist_prev, macd_divergence_buy)
-    sell_points = detect_sell_points(strokes, zones, current, macd_hist_current, macd_hist_prev, macd_divergence_sell)
+    buy_points = detect_buy_points(strokes, zones, current, macd_hist_current, macd_hist_prev, macd_divergence_buy, bars=bars)
+    sell_points = detect_sell_points(strokes, zones, current, macd_hist_current, macd_hist_prev, macd_divergence_sell, bars=bars)
 
     # --- E1: 多级别区间套确认 ---
     if higher_trend is None and CHAN_MULTILEVEL_ENABLED:
