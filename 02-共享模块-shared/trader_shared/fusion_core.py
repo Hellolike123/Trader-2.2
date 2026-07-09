@@ -441,6 +441,8 @@ def merge_decisions(
     current_change_pct: float = 0.0,     # Phase 2: 个股今日涨跌幅（用于板块相对强弱）
     extend_sector: dict | None = None,   # Phase 2: 行业板块数据（A2）
     extend_concept: dict | None = None,  # Phase 2: 概念板块数据（B7）
+    extend_northbound: dict | None = None,  # Phase 2: 北向资金（A8，预留接入）
+    extend_margin: dict | None = None,      # Phase 2: 融资融券（预留接入）
 ) -> dict:
     """决策融合层核心函数。
 

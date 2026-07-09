@@ -11,7 +11,11 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 import argparse
 import json
+import traceback
 from typing import Any
+
+from trader_shared._logging import get_logger
+_logger = get_logger(__name__)
 
 SCRIPT_DIR = _SCRIPT_DIR
 if str(SCRIPT_DIR) not in sys.path:
@@ -702,7 +706,12 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             extend_northbound=snapshot.extend_northbound,
             extend_margin=snapshot.extend_margin,
         )
-    except Exception:
+    except Exception as _e:
+        _logger.warning(
+            "merge_decisions 崩溃 (data_status=%s, symbol=%s):\n%s",
+            snapshot.data_status, sec.ts_code if snapshot.security else "?",
+            traceback.format_exc(),
+        )
         report_fusion = {"action": "融合层异常", "confidence": 0, "weighted_score": 0,
                          "regime": "", "hmm_regime": "range", "disagreement": 0, "signals_detail": {}, "weights_used": {}}
 

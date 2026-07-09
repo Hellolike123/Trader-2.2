@@ -492,6 +492,27 @@ class TestMergeDecisions:
         result = merge_decisions({}, {}, {}, regime="正常")
         assert isinstance(result["action"], str)
 
+    def test_signature_accepts_all_extend_kwargs(self):
+        """回归：run_analysis.build_report 传给 merge_decisions 的全部 extend_* 参数
+        必须在签名中存在，否则会抛 TypeError 被 except 吞掉 → 融合层异常。
+        复现 Phase 2 bug: extend_northbound / extend_margin 漏加到签名。"""
+        from trader_shared.fusion_core import merge_decisions
+        chan = {"chanlun": {"buy_points": [], "divergence": {}, "trend_label": "数据不足"}}
+        mom = {"momentum": {"score": 50, "direction": "neutral", "signals": []}}
+        wyk = {"wyckoff": {}}
+        # 与 run_analysis.py:698-703 调用点完全一致的全部 kwargs
+        result = merge_decisions(
+            chan, mom, wyk, regime="正常",
+            extend_fundamental={"shareholder": {"status": "数据不足"}},
+            extend_sentiment={"unlocks": []},
+            extend_sector={"status": "无数据"},
+            extend_concept={"status": "无数据"},
+            extend_northbound={"status": "接口不可用"},
+            extend_margin={"status": "接口不可用"},
+        )
+        assert isinstance(result["action"], str)
+        assert "weighted_score" in result
+
     def test_sector_relative_strength_boost(self):
         """A3: 个股涨+板块跌 → 相对走强 → 置信度提升"""
         from trader_shared.fusion_core import merge_decisions
