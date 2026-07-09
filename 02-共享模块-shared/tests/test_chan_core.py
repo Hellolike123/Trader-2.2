@@ -340,35 +340,56 @@ class TestBuildSegments:
         assert segs[0]["end_price"] == 8
 
     def test_segment_termination(self):
-        """特征序列反转导致线段终结。"""
-        # 向上线段：特征序列取向下笔低点
-        # 第1根向下笔低点=15，第2根向下笔低点=13 < 15 → 终结
+        """特征序列反转导致线段终结（含包含处理）。
+
+        向上线段：特征序列取向下笔的 (high, low)。
+        包含处理后，如果处理后的特征序列 low 低于前一个 → 终结。
+        特征序列元素不重叠时，不会被合并，直接比较。
+        """
         strokes = [
             {"direction": "up",   "start_price": 10, "end_price": 20},  # 0
-            {"direction": "down", "start_price": 20, "end_price": 15},  # 1
+            {"direction": "down", "start_price": 20, "end_price": 15},  # 1 char: h=20,l=15
             {"direction": "up",   "start_price": 15, "end_price": 25},  # 2
-            {"direction": "down", "start_price": 25, "end_price": 13},  # 3 — 低点13 < 15 → 终结
+            {"direction": "down", "start_price": 25, "end_price": 22},  # 3 char: h=25,l=22 (不包含：22>15)
+            {"direction": "up",   "start_price": 22, "end_price": 28},  # 4
+            {"direction": "down", "start_price": 24, "end_price": 20},  # 5 char: h=24,l=20 < 22 → 终结
+            {"direction": "up",   "start_price": 20, "end_price": 24},  # 6
+        ]
+        segs = build_segments(strokes, min_strokes=3)
+        assert len(segs) >= 2
+        assert segs[0]["direction"] == "up"
+        assert segs[1]["direction"] == "down"
+
+    def test_segment_inclusion_merges(self):
+        """重叠的特征序列元素被合并，不单独触发终结。"""
+        strokes = [
+            {"direction": "up",   "start_price": 10, "end_price": 20},  # 0
+            {"direction": "down", "start_price": 20, "end_price": 15},  # 1 char: h=20,l=15
+            {"direction": "up",   "start_price": 15, "end_price": 25},  # 2
+            {"direction": "down", "start_price": 25, "end_price": 13},  # 3 char: h=25,l=13 (包含前一个→合并)
             {"direction": "up",   "start_price": 13, "end_price": 18},  # 4
         ]
         segs = build_segments(strokes, min_strokes=3)
-        # 应该有2段：第1段终结于笔2，第2段从笔2开始
-        assert len(segs) >= 2
+        # 包含处理后只有1个特征序列元素，不足以判定终结
+        # 所以只有1段（收尾段）
+        assert len(segs) == 1
         assert segs[0]["direction"] == "up"
-        assert segs[0]["end_index"] == 2
-        assert segs[1]["direction"] == "down"
 
     def test_multiple_segments(self):
-        """多段线段正确分割。"""
-        # 向上线段 1: up(10→20), down(20→15), up(15→25)
-        # 终结: down(25→14) 低点14 < 15
-        # 向下线段 2: down(25→14), up(14→18), down(18→12)
+        """多段线段正确分割（含包含处理）。
+
+        特征序列元素不重叠时，直接比较 low/high 判定终结。
+        """
         strokes = [
             {"direction": "up",   "start_price": 10, "end_price": 20},
-            {"direction": "down", "start_price": 20, "end_price": 15},
+            {"direction": "down", "start_price": 20, "end_price": 15},  # char: h=20,l=15
             {"direction": "up",   "start_price": 15, "end_price": 25},
-            {"direction": "down", "start_price": 25, "end_price": 14},
-            {"direction": "up",   "start_price": 14, "end_price": 18},
-            {"direction": "down", "start_price": 18, "end_price": 12},
+            {"direction": "down", "start_price": 25, "end_price": 22},  # char: h=25,l=22 (不包含)
+            {"direction": "up",   "start_price": 22, "end_price": 28},
+            {"direction": "down", "start_price": 28, "end_price": 20},  # char: h=28,l=20 < 22 → 终结
+            {"direction": "up",   "start_price": 20, "end_price": 24},
+            {"direction": "down", "start_price": 24, "end_price": 12},  # char: h=24,l=12
+            {"direction": "up",   "start_price": 12, "end_price": 16},
         ]
         segs = build_segments(strokes, min_strokes=3)
         assert len(segs) >= 2

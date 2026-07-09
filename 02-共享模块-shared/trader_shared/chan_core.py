@@ -347,11 +347,16 @@ def build_segments(strokes: list[dict], min_strokes: int = 3) -> list[dict]:
     """将笔序列构建为线段序列。
 
     线段是最小可递归走势单元，由至少3笔构成。
-    使用简化版特征序列法判断线段终结：
+    使用特征序列法（含包含处理）判断线段终结：
     - 向上线段中，取所有向下笔构成特征序列
-    - 如果某根向下笔的低点跌破前一根向下笔的低点，线段终结
-    - 向下线段中，取所有向上笔构成特征序列
-    - 如果某根向上笔的高点升破前一根向上笔的高点，线段终结
+    - 对特征序列做包含处理（合并重叠元素）
+    - 如果处理后的特征序列出现「跌破前一根」，线段终结
+    - 向下线段对称处理
+
+    包含处理规则（与 K 线包含一致）：
+    - 两根特征序列元素重叠时，按方向合并
+    - 趋势向上：取 max(high), max(low)
+    - 趋势向下：取 min(high), min(low)
     """
     if len(strokes) < min_strokes:
         return []
@@ -372,7 +377,6 @@ def build_segments(strokes: list[dict], min_strokes: int = 3) -> list[dict]:
             break
 
     if seg_start < 0:
-        # 所有3笔组合都没有价格重叠
         return []
 
     # 确定第一段线段方向
@@ -389,10 +393,37 @@ def build_segments(strokes: list[dict], min_strokes: int = 3) -> list[dict]:
         current_direction = strokes[seg_start]["direction"]
 
     segments: list[dict[str, Any]] = []
-    # seg_start 已在上面确定，不再重置为0
-    # 特征序列：记录与线段方向相反的笔
-    # 向上线段 → 取向下笔（用低点）；向下线段 → 取向上笔（用高点）
-    last_char_val: float | None = None  # 上一根特征序列的极值
+    # 特征序列缓存：包含处理后的元素列表，每个元素有 high/low
+    char_seq: list[dict[str, float]] = []
+    char_direction: str | None = None  # 特征序列当前趋势方向
+
+    def _merge_char_element(
+        seq: list[dict[str, float]], new_h: float, new_l: float
+    ) -> list[dict[str, float]]:
+        """对特征序列做包含处理：如果新元素与最后一个重叠，按方向合并。"""
+        if not seq:
+            return [{"high": new_h, "low": new_l}]
+
+        last = seq[-1]
+        # 检查是否包含（重叠）
+        contains = (new_h >= last["high"] and new_l <= last["low"]) or \
+                   (new_h <= last["high"] and new_l >= last["low"])
+        if not contains:
+            return seq + [{"high": new_h, "low": new_l}]
+
+        # 包含处理：按特征序列趋势方向合并
+        nonlocal char_direction
+        if char_direction == "up":
+            # 趋势向上：取 max(high), max(low)
+            merged = {"high": max(new_h, last["high"]), "low": max(new_l, last["low"])}
+        elif char_direction == "down":
+            # 趋势向下：取 min(high), min(low)
+            merged = {"high": min(new_h, last["high"]), "low": min(new_l, last["low"])}
+        else:
+            # 方向未定：取 max(high), min(low)
+            merged = {"high": max(new_h, last["high"]), "low": min(new_l, last["low"])}
+        seq[-1] = merged
+        return seq
 
     for i in range(seg_start + 1, len(strokes)):
         s = strokes[i]
@@ -400,18 +431,27 @@ def build_segments(strokes: list[dict], min_strokes: int = 3) -> list[dict]:
         if current_direction == "up":
             # 向上线段：只看向下笔作为特征序列
             if s["direction"] == "down":
-                char_val = min(s["start_price"], s["end_price"])  # 向下笔低点
-                if last_char_val is not None and char_val < last_char_val:
-                    # 线段终结：当前向下笔低点 < 前一根向下笔低点
-                    # 线段终结于前一根笔（向上笔，即 i-1）
+                char_h = max(s["start_price"], s["end_price"])
+                char_l = min(s["start_price"], s["end_price"])
+
+                # 确定特征序列趋势方向
+                if char_seq:
+                    last_h = char_seq[-1]["high"]
+                    last_l = char_seq[-1]["low"]
+                    if char_h > last_h and char_l > last_l:
+                        char_direction = "up"
+                    elif char_h < last_h and char_l < last_l:
+                        char_direction = "down"
+
+                # 包含处理
+                char_seq = _merge_char_element(char_seq, char_h, char_l)
+
+                # 检查线段终结：处理后的特征序列当前元素 low < 前一个元素 low
+                if len(char_seq) >= 2 and char_seq[-1]["low"] < char_seq[-2]["low"]:
                     end_idx = i - 1
                     seg_strokes = strokes[seg_start:end_idx + 1]
-                    seg_high = max(
-                        max(ss["start_price"], ss["end_price"]) for ss in seg_strokes
-                    )
-                    seg_low = min(
-                        min(ss["start_price"], ss["end_price"]) for ss in seg_strokes
-                    )
+                    seg_high = max(max(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
+                    seg_low = min(min(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
                     start_p = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
                     end_p = max(strokes[end_idx]["start_price"], strokes[end_idx]["end_price"])
                     segments.append({
@@ -424,28 +464,36 @@ def build_segments(strokes: list[dict], min_strokes: int = 3) -> list[dict]:
                         "end_index": end_idx,
                         "strokes_count": len(seg_strokes),
                     })
-                    # 新线段从终结点开始，方向反转
                     seg_start = end_idx
                     current_direction = "down"
-                    last_char_val = None
+                    char_seq = []
+                    char_direction = None
                     continue
-                last_char_val = char_val
 
         else:  # current_direction == "down"
             # 向下线段：只看向上笔作为特征序列
             if s["direction"] == "up":
-                char_val = max(s["start_price"], s["end_price"])  # 向上笔高点
-                if last_char_val is not None and char_val > last_char_val:
-                    # 线段终结：当前向上笔高点 > 前一根向上笔高点
-                    # 线段终结于前一根笔（向下笔，即 i-1）
+                char_h = max(s["start_price"], s["end_price"])
+                char_l = min(s["start_price"], s["end_price"])
+
+                # 确定特征序列趋势方向
+                if char_seq:
+                    last_h = char_seq[-1]["high"]
+                    last_l = char_seq[-1]["low"]
+                    if char_h > last_h and char_l > last_l:
+                        char_direction = "up"
+                    elif char_h < last_h and char_l < last_l:
+                        char_direction = "down"
+
+                # 包含处理
+                char_seq = _merge_char_element(char_seq, char_h, char_l)
+
+                # 检查线段终结：处理后的特征序列当前元素 high > 前一个元素 high
+                if len(char_seq) >= 2 and char_seq[-1]["high"] > char_seq[-2]["high"]:
                     end_idx = i - 1
                     seg_strokes = strokes[seg_start:end_idx + 1]
-                    seg_high = max(
-                        max(ss["start_price"], ss["end_price"]) for ss in seg_strokes
-                    )
-                    seg_low = min(
-                        min(ss["start_price"], ss["end_price"]) for ss in seg_strokes
-                    )
+                    seg_high = max(max(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
+                    seg_low = min(min(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
                     start_p = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
                     end_p = min(strokes[end_idx]["start_price"], strokes[end_idx]["end_price"])
                     segments.append({
@@ -458,12 +506,11 @@ def build_segments(strokes: list[dict], min_strokes: int = 3) -> list[dict]:
                         "end_index": end_idx,
                         "strokes_count": len(seg_strokes),
                     })
-                    # 新线段从终结点开始，方向反转
                     seg_start = end_idx
                     current_direction = "up"
-                    last_char_val = None
+                    char_seq = []
+                    char_direction = None
                     continue
-                last_char_val = char_val
 
     # 收尾：如果最后一段至少有 min_strokes 笔，追加
     remaining = strokes[seg_start:]
