@@ -97,3 +97,222 @@ class TestExtendDataProvider(unittest.TestCase):
         res2 = ExtendDataProvider.get_ths_hot_reason_for_stock("300750")
         self.assertEqual(res2["reason"], "锂电池龙头")
         mock_hot_reason.assert_called_once()
+
+
+class TestGetMarginData(unittest.TestCase):
+
+    @patch("trader_shared.extend_data._check_akshare", return_value=True)
+    def test_sse_stock_success(self, mock_check):
+        """沪市股票（6开头）调用 stock_margin_detail_sse"""
+        mock_ak = MagicMock()
+        mock_df = pd.DataFrame({
+            "标的证券": ["600519"],
+            "融资余额(元)": [1250000000],
+            "融资买入额(元)": [32000000],
+            "融资偿还额(元)": [28000000],
+            "融券卖出量(股)": [50000],
+            "融券余额(元)": [80000000],
+            "信用交易日期": ["2026-07-09"],
+        })
+        mock_ak.stock_margin_detail_sse.return_value = mock_df
+        mock_ak.stock_margin_detail_szse.return_value = pd.DataFrame()
+
+        with patch.dict("sys.modules", {"akshare": mock_ak}):
+            import trader_shared.extend_data as ed
+            old = ed._akshare_available
+            ed._akshare_available = True
+            try:
+                res = ExtendDataProvider.get_margin_data("600519")
+            finally:
+                ed._akshare_available = old
+
+        self.assertEqual(res["status"], "正常")
+        self.assertAlmostEqual(res["margin_balance_wan"], 125000.0)
+        self.assertAlmostEqual(res["margin_buy_wan"], 3200.0)
+        self.assertEqual(res["date"], "2026-07-09")
+
+    @patch("trader_shared.extend_data._check_akshare", return_value=True)
+    def test_szse_stock_success(self, mock_check):
+        """深市股票（0/3开头）调用 stock_margin_detail_szse"""
+        mock_ak = MagicMock()
+        mock_df = pd.DataFrame({
+            "证券代码": ["000001"],
+            "融资余额(元)": [500000000],
+            "融资买入额(元)": [15000000],
+            "融资偿还额(元)": [12000000],
+            "融券卖出量(股)": [30000],
+            "融券余额(元)": [40000000],
+            "日期": ["2026-07-09"],
+        })
+        mock_ak.stock_margin_detail_szse.return_value = mock_df
+        mock_ak.stock_margin_detail_sse.return_value = pd.DataFrame()
+
+        with patch.dict("sys.modules", {"akshare": mock_ak}):
+            import trader_shared.extend_data as ed
+            old = ed._akshare_available
+            ed._akshare_available = True
+            try:
+                res = ExtendDataProvider.get_margin_data("000001")
+            finally:
+                ed._akshare_available = old
+
+        self.assertEqual(res["status"], "正常")
+        self.assertAlmostEqual(res["margin_balance_wan"], 50000.0)
+
+    @patch("trader_shared.extend_data._check_akshare", return_value=False)
+    def test_akshare_not_available(self, mock_check):
+        """akshare 不可用时返回接口不可用"""
+        res = ExtendDataProvider.get_margin_data("600519")
+        self.assertEqual(res["status"], "接口不可用")
+        self.assertEqual(res["margin_balance_wan"], 0)
+
+    @patch("trader_shared.extend_data._check_akshare", return_value=True)
+    def test_stock_not_found(self, mock_check):
+        """股票不在融资融券列表中返回无数据"""
+        mock_ak = MagicMock()
+        mock_ak.stock_margin_detail_sse.return_value = pd.DataFrame({
+            "标的证券": ["999999"],
+            "融资余额(元)": [0],
+        })
+        mock_ak.stock_margin_detail_szse.return_value = pd.DataFrame()
+
+        with patch.dict("sys.modules", {"akshare": mock_ak}):
+            import trader_shared.extend_data as ed
+            old = ed._akshare_available
+            ed._akshare_available = True
+            try:
+                res = ExtendDataProvider.get_margin_data("600519")
+            finally:
+                ed._akshare_available = old
+
+        self.assertEqual(res["status"], "无数据")
+
+
+class TestGetNorthboundFlow(unittest.TestCase):
+
+    @patch("trader_shared.extend_data._check_akshare", return_value=True)
+    def test_success(self, mock_check):
+        mock_ak = MagicMock()
+        mock_df = pd.DataFrame({
+            "date": ["2026-07-09", "2026-07-08", "2026-07-07", "2026-07-04", "2026-07-03", "2026-07-02"],
+            "value": [820000000, -350000000, 1200000000, 600000000, -200000000, 450000000],
+        })
+        mock_ak.stock_hsgt_north_net_flow_in_em.return_value = mock_df
+
+        with patch.dict("sys.modules", {"akshare": mock_ak}):
+            import trader_shared.extend_data as ed
+            old = ed._akshare_available
+            ed._akshare_available = True
+            try:
+                res = ExtendDataProvider.get_northbound_flow()
+            finally:
+                ed._akshare_available = old
+
+        self.assertEqual(res["status"], "正常")
+        # 820000000 / 10000 = 82000 万 = 8.2 亿
+        self.assertGreater(res["north_net_flow_wan"], 0)
+        self.assertEqual(res["date"], "2026-07-09")
+
+    @patch("trader_shared.extend_data._check_akshare", return_value=False)
+    def test_akshare_not_available(self, mock_check):
+        res = ExtendDataProvider.get_northbound_flow()
+        self.assertEqual(res["status"], "接口不可用")
+        self.assertEqual(res["north_net_flow_wan"], 0)
+
+    @patch("trader_shared.extend_data._check_akshare", return_value=True)
+    def test_empty_data(self, mock_check):
+        mock_ak = MagicMock()
+        mock_ak.stock_hsgt_north_net_flow_in_em.return_value = pd.DataFrame()
+
+        with patch.dict("sys.modules", {"akshare": mock_ak}):
+            import trader_shared.extend_data as ed
+            old = ed._akshare_available
+            ed._akshare_available = True
+            try:
+                res = ExtendDataProvider.get_northbound_flow()
+            finally:
+                ed._akshare_available = old
+
+        self.assertEqual(res["status"], "无数据")
+
+
+class TestGetSectorData(unittest.TestCase):
+
+    @patch("trader_shared.extend_data._check_akshare", return_value=True)
+    def test_success(self, mock_check):
+        mock_ak = MagicMock()
+        # 板块行情数据
+        spot_df = pd.DataFrame({
+            "板块名称": ["半导体", "银行", "医药"],
+            "涨跌幅": [1.82, 0.5, -0.3],
+        })
+        mock_ak.stock_board_industry_spot_em.return_value = spot_df
+
+        # 半导体板块成分股
+        cons_df = pd.DataFrame({
+            "代码": ["688248", "600519"],
+        })
+        mock_ak.stock_board_industry_cons_em.return_value = cons_df
+
+        with patch.dict("sys.modules", {"akshare": mock_ak}):
+            import trader_shared.extend_data as ed
+            old = ed._akshare_available
+            ed._akshare_available = True
+            try:
+                res = ExtendDataProvider.get_sector_data("688248")
+            finally:
+                ed._akshare_available = old
+
+        self.assertEqual(res["status"], "正常")
+        self.assertEqual(res["sector_name"], "半导体")
+        self.assertAlmostEqual(res["sector_change_pct"], 1.82)
+        self.assertEqual(res["sector_rank"], 1)
+        self.assertEqual(res["sector_total"], 3)
+
+    @patch("trader_shared.extend_data._check_akshare", return_value=False)
+    def test_akshare_not_available(self, mock_check):
+        res = ExtendDataProvider.get_sector_data("688248")
+        self.assertEqual(res["status"], "接口不可用")
+        self.assertEqual(res["sector_name"], "")
+
+    @patch("trader_shared.extend_data._check_akshare", return_value=True)
+    def test_stock_not_in_any_sector(self, mock_check):
+        """股票不在前50板块中"""
+        mock_ak = MagicMock()
+        # 创建 60 个板块，每个都不含目标股票
+        spot_df = pd.DataFrame({
+            "板块名称": [f"板块{i}" for i in range(60)],
+            "涨跌幅": [1.0 - i * 0.1 for i in range(60)],
+        })
+        mock_ak.stock_board_industry_spot_em.return_value = spot_df
+        # 所有板块成分股都不含目标
+        mock_ak.stock_board_industry_cons_em.return_value = pd.DataFrame({"代码": ["999999"]})
+
+        with patch.dict("sys.modules", {"akshare": mock_ak}):
+            import trader_shared.extend_data as ed
+            old = ed._akshare_available
+            ed._akshare_available = True
+            try:
+                res = ExtendDataProvider.get_sector_data("688248")
+            finally:
+                ed._akshare_available = old
+
+        self.assertEqual(res["status"], "无数据")
+        self.assertEqual(res["sector_total"], 60)
+
+    @patch("trader_shared.extend_data._check_akshare", return_value=True)
+    def test_api_exception(self, mock_check):
+        """API 异常时返回无数据"""
+        mock_ak = MagicMock()
+        mock_ak.stock_board_industry_spot_em.side_effect = Exception("network error")
+
+        with patch.dict("sys.modules", {"akshare": mock_ak}):
+            import trader_shared.extend_data as ed
+            old = ed._akshare_available
+            ed._akshare_available = True
+            try:
+                res = ExtendDataProvider.get_sector_data("688248")
+            finally:
+                ed._akshare_available = old
+
+        self.assertEqual(res["status"], "无数据")

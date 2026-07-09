@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import warnings
@@ -15,6 +16,27 @@ import pandas as pd
 from trader_shared._logging import get_logger
 
 _logger = get_logger(__name__)
+
+# akshare 可用性缓存（避免重复 import 尝试）
+_akshare_available: bool | None = None
+AKSHARE_ENABLED = os.environ.get("AKSHARE_ENABLED", "true").lower() in ("true", "1", "yes")
+
+
+def _check_akshare() -> bool:
+    """检查 akshare 是否可用，结果缓存到模块级变量。"""
+    global _akshare_available
+    if _akshare_available is not None:
+        return _akshare_available
+    if not AKSHARE_ENABLED:
+        _akshare_available = False
+        return False
+    try:
+        import akshare  # noqa: F401
+        _akshare_available = True
+    except ImportError:
+        _logger.debug("akshare 未安装，跳过相关数据采集")
+        _akshare_available = False
+    return _akshare_available
 
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 DATACENTER_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
@@ -257,3 +279,266 @@ class ExtendDataProvider:
             _logger.debug("THS EPS regex parse failed for %s: %s", code, exc)
 
         return {"rows": [], "source": "ths"}
+
+    # ── Phase 1 新增：融资融券 / 北向资金 / 板块数据 ──
+
+    @staticmethod
+    def get_margin_data(code: str) -> dict[str, Any]:
+        """获取个股融资融券明细数据（via akshare）。
+
+        自动识别沪/深市，调用对应接口获取最近交易日的融资融券数据。
+
+        返回:
+            {
+                "margin_balance_wan": float,  # 融资余额（万元）
+                "margin_buy_wan": float,      # 融资买入额（万元）
+                "margin_sell_wan": float,     # 融资偿还额（万元）
+                "short_sell_vol": float,      # 融券卖出量（股）
+                "short_balance_wan": float,   # 融券余额（万元）
+                "date": str,                  # 数据日期
+                "status": str                 # "正常" | "无数据" | "接口不可用"
+            }
+        """
+        if not _check_akshare():
+            return {"margin_balance_wan": 0, "margin_buy_wan": 0, "margin_sell_wan": 0,
+                    "short_sell_vol": 0, "short_balance_wan": 0, "date": "", "status": "接口不可用"}
+
+        try:
+            import akshare as ak
+            # 识别市场：6/9 开头为沪市，其余为深市
+            is_sse = code.startswith(("6", "9"))
+            today_str = date.today().strftime("%Y%m%d")
+
+            if is_sse:
+                df = ak.stock_margin_detail_sse(date=today_str)
+            else:
+                df = ak.stock_margin_detail_szse(date=today_str)
+
+            if df is None or df.empty:
+                return {"margin_balance_wan": 0, "margin_buy_wan": 0, "margin_sell_wan": 0,
+                        "short_sell_vol": 0, "short_balance_wan": 0, "date": "", "status": "无数据"}
+
+            # 按股票代码筛选（列名可能是 "标的证券" 或 "证券代码" 或 "股票代码"）
+            code_col = None
+            for candidate in ["标的证券", "证券代码", "股票代码", "代码"]:
+                if candidate in df.columns:
+                    code_col = candidate
+                    break
+            if code_col is None:
+                _logger.debug("Margin data columns not recognized for %s: %s", code, list(df.columns))
+                return {"margin_balance_wan": 0, "margin_buy_wan": 0, "margin_sell_wan": 0,
+                        "short_sell_vol": 0, "short_balance_wan": 0, "date": "", "status": "无数据"}
+
+            # 代码匹配（akshare 返回的代码可能是纯数字或带前缀）
+            row = df[df[code_col].astype(str).str.contains(code, na=False)]
+            if row.empty:
+                return {"margin_balance_wan": 0, "margin_buy_wan": 0, "margin_sell_wan": 0,
+                        "short_sell_vol": 0, "short_balance_wan": 0, "date": "", "status": "无数据"}
+
+            r = row.iloc[0]
+
+            def _safe_float(val: Any) -> float:
+                try:
+                    return float(val) if pd.notna(val) else 0.0
+                except (ValueError, TypeError):
+                    return 0.0
+
+            # 列名兼容多种命名
+            margin_balance = _safe_float(r.get("融资余额(元)", r.get("融资余额", 0)))
+            margin_buy = _safe_float(r.get("融资买入额(元)", r.get("融资买入额", r.get("融资买入", 0))))
+            margin_sell = _safe_float(r.get("融资偿还额(元)", r.get("融资偿还额", r.get("融资偿还", 0))))
+            short_sell = _safe_float(r.get("融券卖出量(股)", r.get("融券卖出量", r.get("融券卖出", 0))))
+            short_balance = _safe_float(r.get("融券余额(元)", r.get("融券余额", 0)))
+
+            data_date = str(r.get("信用交易日期", r.get("日期", today_str)))[:10]
+
+            return {
+                "margin_balance_wan": round(margin_balance / 10000, 2),
+                "margin_buy_wan": round(margin_buy / 10000, 2),
+                "margin_sell_wan": round(margin_sell / 10000, 2),
+                "short_sell_vol": short_sell,
+                "short_balance_wan": round(short_balance / 10000, 2),
+                "date": data_date,
+                "status": "正常",
+            }
+        except Exception as exc:
+            _logger.debug("Margin data fetch failed for %s: %s", code, exc)
+            return {"margin_balance_wan": 0, "margin_buy_wan": 0, "margin_sell_wan": 0,
+                    "short_sell_vol": 0, "short_balance_wan": 0, "date": "", "status": "无数据"}
+
+    @staticmethod
+    def get_northbound_flow() -> dict[str, Any]:
+        """获取北向资金（沪深港通）当日净流入数据（via akshare）。
+
+        返回:
+            {
+                "north_net_flow_wan": float,   # 当日北向净流入（万元）
+                "north_flow_5d_wan": float,    # 近5日累计净流入（万元）
+                "date": str,                   # 数据日期
+                "status": str                  # "正常" | "无数据" | "接口不可用"
+            }
+        """
+        if not _check_akshare():
+            return {"north_net_flow_wan": 0, "north_flow_5d_wan": 0, "date": "", "status": "接口不可用"}
+
+        try:
+            import akshare as ak
+            df = ak.stock_hsgt_north_net_flow_in_em(symbol="北向资金")
+
+            if df is None or df.empty:
+                return {"north_net_flow_wan": 0, "north_flow_5d_wan": 0, "date": "", "status": "无数据"}
+
+            # 列名兼容：可能是 "value", "当日净流入", "净流入" 等
+            flow_col = None
+            for candidate in ["value", "当日净流入", "净流入", "north_net_flow_in_em"]:
+                if candidate in df.columns:
+                    flow_col = candidate
+                    break
+
+            date_col = None
+            for candidate in ["date", "日期", "datetime"]:
+                if candidate in df.columns:
+                    date_col = candidate
+                    break
+
+            if flow_col is None or date_col is None:
+                _logger.debug("Northbound flow columns not recognized: %s", list(df.columns))
+                return {"north_net_flow_wan": 0, "north_flow_5d_wan": 0, "date": "", "status": "无数据"}
+
+            # 按日期排序取最新
+            df = df.sort_values(date_col, ascending=False)
+            latest = df.iloc[0]
+
+            def _safe_float(val: Any) -> float:
+                try:
+                    return float(val) if pd.notna(val) else 0.0
+                except (ValueError, TypeError):
+                    return 0.0
+
+            # 净流入值单位可能是元或万元，akshare 北向资金通常返回元
+            net_flow_raw = _safe_float(latest[flow_col])
+            # 近5日累计
+            recent5 = df.head(5)
+            flow_5d_raw = sum(_safe_float(row[flow_col]) for _, row in recent5.iterrows())
+
+            data_date = str(latest[date_col])[:10]
+
+            return {
+                "north_net_flow_wan": round(net_flow_raw / 10000, 2) if abs(net_flow_raw) > 100000 else round(net_flow_raw, 2),
+                "north_flow_5d_wan": round(flow_5d_raw / 10000, 2) if abs(flow_5d_raw) > 100000 else round(flow_5d_raw, 2),
+                "date": data_date,
+                "status": "正常",
+            }
+        except Exception as exc:
+            _logger.debug("Northbound flow fetch failed: %s", exc)
+            return {"north_net_flow_wan": 0, "north_flow_5d_wan": 0, "date": "", "status": "无数据"}
+
+    @staticmethod
+    def get_sector_data(code: str) -> dict[str, Any]:
+        """获取个股所属行业板块及板块行情数据（via akshare）。
+
+        通过板块成分股反查个股所属板块，再获取板块实时行情。
+
+        返回:
+            {
+                "sector_name": str,             # 板块名称
+                "sector_change_pct": float,     # 板块今日涨跌幅
+                "sector_rank": int,             # 板块排名（按涨跌幅）
+                "sector_total": int,            # 板块总数
+                "stock_vs_sector": str,         # 个股 vs 板块相对强弱
+                "status": str                   # "正常" | "无数据" | "接口不可用"
+            }
+        """
+        if not _check_akshare():
+            return {"sector_name": "", "sector_change_pct": 0, "sector_rank": 0,
+                    "sector_total": 0, "stock_vs_sector": "", "status": "接口不可用"}
+
+        try:
+            import akshare as ak
+
+            # Step 1: 获取所有行业板块实时行情（含涨跌幅排名）
+            spot_df = ak.stock_board_industry_spot_em()
+            if spot_df is None or spot_df.empty:
+                return {"sector_name": "", "sector_change_pct": 0, "sector_rank": 0,
+                        "sector_total": 0, "stock_vs_sector": "", "status": "无数据"}
+
+            # 板块名称列
+            name_col = None
+            for candidate in ["板块名称", "名称"]:
+                if candidate in spot_df.columns:
+                    name_col = candidate
+                    break
+            # 涨跌幅列
+            chg_col = None
+            for candidate in ["涨跌幅", "板块涨跌幅"]:
+                if candidate in spot_df.columns:
+                    chg_col = candidate
+                    break
+
+            if name_col is None or chg_col is None:
+                _logger.debug("Sector spot columns not recognized: %s", list(spot_df.columns))
+                return {"sector_name": "", "sector_change_pct": 0, "sector_rank": 0,
+                        "sector_total": 0, "stock_vs_sector": "", "status": "无数据"}
+
+            # 按涨跌幅排序
+            spot_df = spot_df.sort_values(chg_col, ascending=False).reset_index(drop=True)
+            spot_df["_rank"] = range(1, len(spot_df) + 1)
+            sector_total = len(spot_df)
+
+            # Step 2: 遍历板块找到个股所属板块
+            # 为避免遍历全部板块（太慢），只检查涨幅前 50 的板块
+            matched_sector = ""
+            matched_chg = 0.0
+            matched_rank = 0
+
+            checked = 0
+            for _, sector_row in spot_df.iterrows():
+                if checked >= 50:
+                    break
+                sector_name = str(sector_row.get(name_col, ""))
+                if not sector_name:
+                    continue
+                try:
+                    cons_df = ak.stock_board_industry_cons_em(symbol=sector_name)
+                    checked += 1
+                    if cons_df is None or cons_df.empty:
+                        continue
+                    # 成分股代码列
+                    code_col_cons = None
+                    for c in ["代码", "股票代码", "证券代码"]:
+                        if c in cons_df.columns:
+                            code_col_cons = c
+                            break
+                    if code_col_cons is None:
+                        continue
+                    if code in cons_df[code_col_cons].astype(str).values:
+                        matched_sector = sector_name
+
+                        def _safe_float(val: Any) -> float:
+                            try:
+                                return float(val) if pd.notna(val) else 0.0
+                            except (ValueError, TypeError):
+                                return 0.0
+
+                        matched_chg = _safe_float(sector_row.get(chg_col, 0))
+                        matched_rank = int(sector_row.get("_rank", 0))
+                        break
+                except Exception:
+                    continue
+
+            if not matched_sector:
+                return {"sector_name": "", "sector_change_pct": 0, "sector_rank": 0,
+                        "sector_total": sector_total, "stock_vs_sector": "", "status": "无数据"}
+
+            return {
+                "sector_name": matched_sector,
+                "sector_change_pct": round(matched_chg, 2),
+                "sector_rank": matched_rank,
+                "sector_total": sector_total,
+                "stock_vs_sector": "",  # 需要个股涨幅才能计算，在 build_report 中填充
+                "status": "正常",
+            }
+        except Exception as exc:
+            _logger.debug("Sector data fetch failed for %s: %s", code, exc)
+            return {"sector_name": "", "sector_change_pct": 0, "sector_rank": 0,
+                    "sector_total": 0, "stock_vs_sector": "", "status": "无数据"}

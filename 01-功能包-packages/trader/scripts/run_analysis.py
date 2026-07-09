@@ -1214,6 +1214,10 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "resonance": resonance_result,
         # "extend_fundamental": snapshot.extend_fundamental,
         # "extend_sentiment": snapshot.extend_sentiment,
+        # Phase 1 新增：资金面数据（仅展示，不参与评分）
+        "extend_margin": snapshot.extend_margin,
+        "extend_northbound": snapshot.extend_northbound,
+        "extend_sector": snapshot.extend_sector,
     }
 
     # ═══ 自动同步：levels → report ═══
@@ -2210,7 +2214,62 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
     volume_vacuum = r.get("volume_vacuum") or {}
     if volume_vacuum.get("vacuum_warning"):
         lines.append(f"⚠️ 量能真空：{volume_vacuum.get('warning_text', '')}")
-        
+
+    # ── [2.6] 资金面数据（Phase 1: 融资融券 / 北向资金 / 板块） ──
+    _margin = r.get("extend_margin") or {}
+    _north = r.get("extend_northbound") or {}
+    _sector = r.get("extend_sector") or {}
+
+    # 只要有任意一路数据有效就展示
+    if (_margin.get("status") == "正常" or _north.get("status") == "正常"
+            or _sector.get("status") == "正常"):
+        lines.append("")
+        lines.append("📊 资金面")
+
+        # 融资融券
+        if _margin.get("status") == "正常":
+            _mb = _margin.get("margin_balance_wan", 0)
+            _mb_yi = _mb / 10000 if _mb else 0
+            parts = [f"融资余额 {_mb_yi:.1f}亿"]
+            _mbuy = _margin.get("margin_buy_wan", 0)
+            if _mbuy:
+                parts.append(f"买入 {_mbuy:.0f}万")
+            lines.append(f"  {'｜'.join(parts)}")
+
+        # 北向资金
+        if _north.get("status") == "正常":
+            _nn = _north.get("north_net_flow_wan", 0)
+            _n5 = _north.get("north_flow_5d_wan", 0)
+            # 单位自适应：超过 10000 万显示为亿
+            if abs(_nn) >= 10000:
+                nn_str = f"{_nn / 10000:+.1f}亿"
+            else:
+                nn_str = f"{_nn:+.0f}万"
+            if abs(_n5) >= 10000:
+                n5_str = f"{_n5 / 10000:+.1f}亿"
+            else:
+                n5_str = f"{_n5:+.0f}万"
+            lines.append(f"  北向资金 今日净流入 {nn_str}｜近5日 {n5_str}")
+
+        # 板块数据
+        if _sector.get("status") == "正常" and _sector.get("sector_name"):
+            _sn = _sector["sector_name"]
+            _sc = _sector.get("sector_change_pct", 0)
+            _sr = _sector.get("sector_rank", 0)
+            _st = _sector.get("sector_total", 0)
+            sector_line = f"  所属板块：{_sn}｜今日 {_sc:+.2f}%"
+            if _sr > 0 and _st > 0:
+                sector_line += f"｜排名 {_sr}/{_st}"
+            lines.append(sector_line)
+
+            # 个股 vs 板块相对强弱
+            _stock_chg = float(r.get("change_pct", 0) or 0)
+            _vs = _stock_chg - _sc
+            if _vs > 0:
+                lines.append(f"  个股 vs 板块：跑赢 +{_vs:.1f}%")
+            elif _vs < 0:
+                lines.append(f"  个股 vs 板块：跑弱 {_vs:.1f}%")
+
     lines.append("")
 
     pool_count = _pool_count()

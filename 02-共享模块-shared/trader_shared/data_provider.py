@@ -67,6 +67,9 @@ class MarketSnapshot:
     fetched_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
     extend_fundamental: dict[str, Any] | None = None
     extend_sentiment: dict[str, Any] | None = None
+    extend_margin: dict[str, Any] | None = None       # 融资融券（Phase 1）
+    extend_northbound: dict[str, Any] | None = None   # 北向资金（Phase 1）
+    extend_sector: dict[str, Any] | None = None       # 板块数据（Phase 1）
 
 
 # ═══════════════════════════════════════════════
@@ -143,17 +146,18 @@ class DataProvider(Protocol):
 # Default provider: Tencent + Sina (via light_data)
 # ═══════════════════════════════════════════════
 
-_ENRICH_CACHE: dict[str, tuple[float, dict, dict]] = {}
+_ENRICH_CACHE: dict[str, tuple[float, dict, dict, dict, dict, dict]] = {}
 _ENRICH_TTL = 600  # 10 分钟缓存，基本面数据不会盘中秒变
 
 
 def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
-    """Enrich the MarketSnapshot with extend_fundamental and extend_sentiment using a thread pool.
+    """Enrich the MarketSnapshot with extend_fundamental, extend_sentiment,
+    extend_margin, extend_northbound, extend_sector using a thread pool.
 
     三层缓存策略:
     1. 文件缓存 (TTL 12小时) — 盘后预缓存的数据，进程重启不丢失
     2. 内存缓存 (TTL 10分钟) — 同一进程内快速命中
-    3. 实时抓取 — 缓存全部 miss 时走 4 路 API
+    3. 实时抓取 — 缓存全部 miss 时走 7 路 API（4 原有 + 3 Phase 1 新增）
     """
     sec = snap.security
     if not sec or not sec.code or len(sec.code) != 6 or not sec.code.isdigit():
@@ -170,12 +174,19 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
         if file_cached is not None and isinstance(file_cached, dict):
             extend_fundamental = file_cached.get("extend_fundamental", {})
             extend_sentiment = file_cached.get("extend_sentiment", {})
-            if extend_fundamental or extend_sentiment:
-                _ENRICH_CACHE[sec.code] = (time.time(), extend_fundamental, extend_sentiment)
+            extend_margin = file_cached.get("extend_margin")
+            extend_northbound = file_cached.get("extend_northbound")
+            extend_sector = file_cached.get("extend_sector")
+            if extend_fundamental or extend_sentiment or extend_margin or extend_northbound or extend_sector:
+                _ENRICH_CACHE[sec.code] = (time.time(), extend_fundamental, extend_sentiment,
+                                           extend_margin or {}, extend_northbound or {}, extend_sector or {})
                 return dataclasses.replace(
                     snap,
                     extend_fundamental=extend_fundamental,
                     extend_sentiment=extend_sentiment,
+                    extend_margin=extend_margin,
+                    extend_northbound=extend_northbound,
+                    extend_sector=extend_sector,
                 )
     except (ImportError, OSError) as exc:
         _logger.debug("Enrich file cache read failed for %s: %s", sec.code, exc)
@@ -188,23 +199,34 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
             snap,
             extend_fundamental=cached[1],
             extend_sentiment=cached[2],
+            extend_margin=cached[3] if len(cached) > 3 else None,
+            extend_northbound=cached[4] if len(cached) > 4 else None,
+            extend_sector=cached[5] if len(cached) > 5 else None,
         )
 
-    # ── 层3: 实时抓取 ──
+    # ── 层3: 实时抓取（4 原有 + 3 Phase 1 新增 = 7 路并行） ──
     try:
         from trader_shared.extend_data import ExtendDataProvider
         from concurrent.futures import ThreadPoolExecutor
 
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        with ThreadPoolExecutor(max_workers=7) as executor:
+            # 原有 4 路
             f_sh = executor.submit(ExtendDataProvider.get_shareholder_trend, sec.code)
             f_eps = executor.submit(ExtendDataProvider.get_ths_consensus_eps, sec.code)
             f_unlocks = executor.submit(ExtendDataProvider.get_upcoming_unlocks, sec.code)
             f_hot = executor.submit(ExtendDataProvider.get_ths_hot_reason_for_stock, sec.code)
+            # Phase 1 新增 3 路
+            f_margin = executor.submit(ExtendDataProvider.get_margin_data, sec.code)
+            f_north = executor.submit(ExtendDataProvider.get_northbound_flow)
+            f_sector = executor.submit(ExtendDataProvider.get_sector_data, sec.code)
 
             sh_trend = f_sh.result(timeout=2.0)
             ths_eps = f_eps.result(timeout=2.0)
             unlocks = f_unlocks.result(timeout=2.0)
             hot_reason = f_hot.result(timeout=2.0)
+            margin_data = f_margin.result(timeout=2.0)
+            northbound_data = f_north.result(timeout=2.0)
+            sector_data = f_sector.result(timeout=2.0)
 
             extend_fundamental = {
                 "shareholder": sh_trend,
@@ -216,7 +238,8 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
             }
 
             # 写入内存缓存
-            _ENRICH_CACHE[sec.code] = (now, extend_fundamental, extend_sentiment)
+            _ENRICH_CACHE[sec.code] = (now, extend_fundamental, extend_sentiment,
+                                       margin_data, northbound_data, sector_data)
 
             # 写入文件缓存
             try:
@@ -224,6 +247,9 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
                 _file_set(CACHE_ENRICH, sec.code, {
                     "extend_fundamental": extend_fundamental,
                     "extend_sentiment": extend_sentiment,
+                    "extend_margin": margin_data,
+                    "extend_northbound": northbound_data,
+                    "extend_sector": sector_data,
                 })
             except (ImportError, OSError) as exc:
                 _logger.debug("Enrich file cache write failed for %s: %s", sec.code, exc)
@@ -232,6 +258,9 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
                 snap,
                 extend_fundamental=extend_fundamental,
                 extend_sentiment=extend_sentiment,
+                extend_margin=margin_data,
+                extend_northbound=northbound_data,
+                extend_sector=sector_data,
             )
     except Exception as e:
         _logger.warning("Failed to enrich snapshot with advanced metrics for %s: %s", sec.code, e)
