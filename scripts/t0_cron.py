@@ -148,6 +148,13 @@ def main() -> int:
     parser.add_argument("--verbose", action="store_true", help="输出调试信息")
     args = parser.parse_args()
 
+    # ── 缓存清理（#33：每日自动清理 30 天以上旧缓存）──
+    try:
+        from trader_shared.cache_utils import cleanup_old_cache
+        cleanup_old_cache(max_age_days=30)
+    except Exception:
+        pass  # 清理失败不影响主流程
+
     # ── 交易时间守卫（核心 —— 避免节假日发垃圾消息）──
     if not _is_trading_session():
         if args.verbose:
