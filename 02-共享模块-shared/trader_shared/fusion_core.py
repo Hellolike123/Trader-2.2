@@ -438,6 +438,9 @@ def merge_decisions(
     fetcher: DataFetcher | None = None,  # DI: 可注入数据源
     volume_warning: dict | None = None,  # 量价背离警告 (可选)
     fund_flow_data: dict | None = None,  # P1-2: 资金流向特征 (可选)
+    current_change_pct: float = 0.0,     # Phase 2: 个股今日涨跌幅（用于板块相对强弱）
+    extend_sector: dict | None = None,   # Phase 2: 行业板块数据（A2）
+    extend_concept: dict | None = None,  # Phase 2: 概念板块数据（B7）
 ) -> dict:
     """决策融合层核心函数。
 
@@ -744,6 +747,37 @@ def merge_decisions(
             action = "空仓 (限售解禁风险)"
             confidence = 0.3
             weighted_score = -0.5
+
+    # ── [Phase 2] 板块相对强弱 / 概念热点 接入评分 ──
+    # 仅在板块/概念数据 status == "正常" 时接入，缺失时退化为原行为。
+    try:
+        if extend_sector and isinstance(extend_sector, dict) and extend_sector.get("status") == "正常":
+            sec_chg = safe_float(extend_sector, "sector_change_pct")
+            # A3: 个股涨 + 板块跌 → 个股相对板块走强 → 置信度 +10%（封顶 1.0）
+            if current_change_pct > 0 and sec_chg < 0:
+                confidence *= 1.10
+            # A4: 个股跌 + 板块涨 → 个股相对板块走弱 → 若加权分>0 则减分 -0.1
+            elif current_change_pct < 0 and sec_chg > 0:
+                if weighted_score > 0:
+                    confidence = max(0.0, confidence - 0.1)
+            # A5: 板块排名前 10% → 主线板块 → 置信度 +5%
+            sec_rank = safe_float(extend_sector, "sector_rank")
+            sec_total = safe_float(extend_sector, "sector_total")
+            if sec_total > 0 and sec_rank > 0 and (sec_rank / sec_total) <= 0.1:
+                confidence *= 1.05
+            confidence = min(confidence, 1.0)
+    except (TypeError, AttributeError, ValueError) as exc:
+        _logger.debug("Sector relative strength check failed: %s", exc)
+
+    try:
+        if extend_concept and isinstance(extend_concept, dict) and extend_concept.get("status") == "正常":
+            concept_list = extend_concept.get("concept_list") or []
+            # B7: 个股命中概念（热点）板块 → 置信度 +5%
+            if concept_list:
+                confidence *= 1.05
+                confidence = min(confidence, 1.0)
+    except (TypeError, AttributeError) as exc:
+        _logger.debug("Concept hotspot check failed: %s", exc)
 
     # 6.5 🛡️ 防幻觉拦截：数据断层降级
     # 只降置信度，不 truncation 分数本身（action 已在 493 行用 _action_score 处理过）

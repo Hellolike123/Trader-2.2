@@ -668,6 +668,19 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         except Exception:
             pass
 
+        # [Phase 2 - A1] 填充 stock_vs_sector（个股涨幅 - 板块涨幅）
+        # extend_data 拿不到个股涨幅，故在 build_report 调用处补充到 extend_sector 字典。
+        _stock_chg_pct = float(quote.get("current_change_pct") or 0)
+        if snapshot.extend_sector and isinstance(snapshot.extend_sector, dict) and snapshot.extend_sector.get("status") == "正常":
+            _sector_chg_pct = float(snapshot.extend_sector.get("sector_change_pct", 0) or 0)
+            _vs = _stock_chg_pct - _sector_chg_pct
+            if _vs > 0:
+                snapshot.extend_sector["stock_vs_sector"] = f"跑赢 +{_vs:.2f}%"
+            elif _vs < 0:
+                snapshot.extend_sector["stock_vs_sector"] = f"跑弱 {_vs:.2f}%"
+            else:
+                snapshot.extend_sector["stock_vs_sector"] = "持平"
+
         report_fusion = merge_decisions(
             chan_result=chan_result,
             momentum_result=momentum_result,
@@ -681,8 +694,13 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             data_status=snapshot.data_status,
             volume_warning=volume_warning,
             fund_flow_data=fund_flow_features,
+            current_change_pct=_stock_chg_pct,
             extend_fundamental=snapshot.extend_fundamental,
             extend_sentiment=snapshot.extend_sentiment,
+            extend_sector=snapshot.extend_sector,
+            extend_concept=snapshot.extend_concept,
+            extend_northbound=snapshot.extend_northbound,
+            extend_margin=snapshot.extend_margin,
         )
     except Exception:
         report_fusion = {"action": "融合层异常", "confidence": 0, "weighted_score": 0,
@@ -1063,6 +1081,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         wyckoff_result=wyck_result,
         main_force_result=mf_result,
         chan_result=chan_result,
+        extend_sector=snapshot.extend_sector,
     )
 
     # 修复：止盈应使用保护后的阶段（与仓位/止损一致）
@@ -1218,6 +1237,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "extend_margin": snapshot.extend_margin,
         "extend_northbound": snapshot.extend_northbound,
         "extend_sector": snapshot.extend_sector,
+        # Phase 2 新增：概念板块数据（仅展示，不参与评分）
+        "extend_concept": snapshot.extend_concept,
     }
 
     # ═══ 自动同步：levels → report ═══
@@ -2221,8 +2242,9 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
     _sector = r.get("extend_sector") or {}
 
     # 只要有任意一路数据有效就展示
+    _concept = r.get("extend_concept") or {}
     if (_margin.get("status") == "正常" or _north.get("status") == "正常"
-            or _sector.get("status") == "正常"):
+            or _sector.get("status") == "正常" or _concept.get("status") == "正常"):
         lines.append("")
         lines.append("📊 资金面")
 
@@ -2269,6 +2291,18 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
                 lines.append(f"  个股 vs 板块：跑赢 +{_vs:.1f}%")
             elif _vs < 0:
                 lines.append(f"  个股 vs 板块：跑弱 {_vs:.1f}%")
+
+        # 概念板块数据（Phase 2）
+        _concept = r.get("extend_concept") or {}
+        if _concept.get("status") == "正常" and _concept.get("concept_list"):
+            _c_list = _concept["concept_list"]
+            _c_chg = _concept.get("concept_change_pct", [])
+            _c_parts = []
+            for i, cname in enumerate(_c_list[:3]):  # 最多展示 3 个概念
+                _c_chg_val = _c_chg[i] if i < len(_c_chg) else 0
+                _c_parts.append(f"{cname}{_c_chg_val:+.1f}%")
+            concept_line = "  概念板块：" + " · ".join(_c_parts)
+            lines.append(concept_line)
 
     lines.append("")
 

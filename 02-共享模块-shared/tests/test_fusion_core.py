@@ -492,6 +492,50 @@ class TestMergeDecisions:
         result = merge_decisions({}, {}, {}, regime="正常")
         assert isinstance(result["action"], str)
 
+    def test_sector_relative_strength_boost(self):
+        """A3: 个股涨+板块跌 → 相对走强 → 置信度提升"""
+        from trader_shared.fusion_core import merge_decisions
+        chan = {"chanlun": {"buy_points": [{"type": "一类买", "price": 28}], "divergence": {}, "trend_label": "拉升段"}}
+        mom = {"momentum": {"score": 60, "direction": "bullish", "signals": []}}
+        wyk = {"wyckoff": {}}
+        extend_sector = {
+            "sector_name": "半导体", "sector_change_pct": -1.5,  # 板块跌
+            "sector_rank": 50, "sector_total": 100, "status": "正常",
+        }
+        base = merge_decisions(chan, mom, wyk, regime="正常", current_change_pct=2.0)
+        boosted = merge_decisions(chan, mom, wyk, regime="正常", current_change_pct=2.0,
+                                 extend_sector=extend_sector)
+        # 板块相对走强 → 置信度应更高
+        assert boosted["confidence"] > base["confidence"]
+        assert boosted["confidence"] <= 1.0
+
+    def test_concept_hotspot_boost(self):
+        """B7: 个股命中概念热点 → 置信度提升"""
+        from trader_shared.fusion_core import merge_decisions
+        chan = {"chanlun": {"buy_points": [{"type": "一类买", "price": 28}], "divergence": {}, "trend_label": "拉升段"}}
+        mom = {"momentum": {"score": 55, "direction": "bullish", "signals": []}}
+        wyk = {"wyckoff": {}}
+        extend_concept = {
+            "concept_list": ["人工智能", "芯片"], "concept_change_pct": [3.5, 2.1],
+            "concept_rank": {"人工智能": {"rank": 1, "total": 300}}, "concept_total": 300,
+            "status": "正常",
+        }
+        base = merge_decisions(chan, mom, wyk, regime="正常")
+        boosted = merge_decisions(chan, mom, wyk, regime="正常", extend_concept=extend_concept)
+        assert boosted["confidence"] > base["confidence"]
+
+    def test_sector_concept_missing_degrades_gracefully(self):
+        """板块/概念数据缺失时退化为原行为（不崩溃、不影响基线）"""
+        from trader_shared.fusion_core import merge_decisions
+        chan = {"chanlun": {"buy_points": [{"type": "一类买", "price": 28}], "divergence": {}, "trend_label": "拉升段"}}
+        mom = {"momentum": {"score": 55, "direction": "bullish", "signals": []}}
+        wyk = {"wyckoff": {}}
+        base = merge_decisions(chan, mom, wyk, regime="正常")
+        with_sector_none = merge_decisions(chan, mom, wyk, regime="正常",
+                                        extend_sector=None, extend_concept=None)
+        assert with_sector_none["action"] == base["action"]
+        assert abs(with_sector_none["confidence"] - base["confidence"]) < 1e-9
+
     def test_exception_handling_in_standardization(self):
         from trader_shared.fusion_core import merge_decisions
         # _chan_to_signal handles invalid input gracefully (type check, no exception)

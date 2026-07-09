@@ -28,6 +28,7 @@ from typing import Any
 import numpy as np
 
 from trader_shared._logging import get_logger
+from trader_shared.safe_cast import safe_float
 from trader_shared.config import (
     ACCUMULATION_DAYS_LIMIT, MARKUP_DAYS_LIMIT,
     RALLY_REDUCE_FULL_SCORE, RALLY_REDUCE_MIN_SCORE,
@@ -1003,6 +1004,7 @@ def assess_stage(
     fusion_hint: dict[str, Any] | None = None,
     wyckoff_result: dict[str, Any] | None = None,
     main_force_result: dict[str, Any] | None = None,
+    extend_sector: dict[str, Any] | None = None,  # Phase 2: 行业板块数据交叉验证 (A6)
 ) -> dict[str, Any]:
     """四阶段定位主函数（主力行为驱动 + 量价确认 + 四层防护）
 
@@ -1037,9 +1039,27 @@ def assess_stage(
         raw_confidence = int(raw_confidence * discount)
         new_stock_warning = f"新股数据不足（{len(bars)}天），置信度打折"
 
+    # 防护说明列表需先于 A6 板块交叉验证块初始化（避免 UnboundLocalError）
+    protection_notes: list[str] = []
+
+    # ── [Phase 2 - A6] 板块数据交叉验证 ──
+    # 个股强弱 与 板块强弱 共振/背离，用于升级确认或减分。
+    # 仅在板块数据 status == "正常" 时接入，缺失时退化为原行为。
+    if extend_sector and isinstance(extend_sector, dict) and extend_sector.get("status") == "正常":
+        sec_chg = safe_float(extend_sector, "sector_change_pct")
+        if change_pct > 0 and sec_chg > 0:
+            # 个股走强 + 板块走强 → 共振 → 升级确认
+            if raw_stage in ("蓄势偏弱", "蓄势", "蓄势偏强"):
+                raw_stage = _upgrade_stage(raw_stage)
+                raw_confidence = min(100, raw_confidence + 10)
+                protection_notes.append(f"板块共振走强（{sec_chg:+.1f}%），阶段升级确认")
+        elif change_pct < 0 and sec_chg > 0:
+            # 个股走弱 + 板块走强 → 背离 → 减分存疑
+            raw_confidence = max(0, raw_confidence - 10)
+            protection_notes.append(f"个股走弱但板块走强（{sec_chg:+.1f}%），阶段判定存疑减分")
+
     # 加载阶段状态
     state = _load_stage_state(symbol=symbol)
-    protection_notes: list[str] = []
 
     # P1 Fix: 新股数据不足警告
     if new_stock_warning:

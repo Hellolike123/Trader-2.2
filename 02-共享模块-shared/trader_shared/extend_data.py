@@ -542,3 +542,115 @@ class ExtendDataProvider:
             _logger.debug("Sector data fetch failed for %s: %s", code, exc)
             return {"sector_name": "", "sector_change_pct": 0, "sector_rank": 0,
                     "sector_total": 0, "stock_vs_sector": "", "status": "无数据"}
+
+    @staticmethod
+    def get_concept_data(code: str) -> dict[str, Any]:
+        """获取个股所属概念板块及行情数据（via akshare）。
+
+        通过概念板块成分股反查个股所属概念，再获取各概念实时行情。
+        个股可同时属于多个概念板块。
+
+        返回:
+            {
+                "concept_list": [str],        # 命中概念名称列表
+                "concept_change_pct": [float],# 各概念今日涨跌幅（与 concept_list 对齐）
+                "concept_rank": dict,         # {概念名: {"rank": int, "total": int, "change_pct": float}}
+                "concept_total": int,         # 概念板块总数
+                "status": str                 # "正常" | "无数据" | "接口不可用"
+            }
+        """
+        if not _check_akshare():
+            return {"concept_list": [], "concept_change_pct": [], "concept_rank": {},
+                    "concept_total": 0, "status": "接口不可用"}
+
+        try:
+            import akshare as ak
+
+            # Step 1: 获取所有概念板块实时行情（含涨跌幅排名）
+            spot_df = ak.stock_board_concept_spot_em()
+            if spot_df is None or spot_df.empty:
+                return {"concept_list": [], "concept_change_pct": [], "concept_rank": {},
+                        "concept_total": 0, "status": "无数据"}
+
+            # 板块名称列
+            name_col = None
+            for candidate in ["板块名称", "名称"]:
+                if candidate in spot_df.columns:
+                    name_col = candidate
+                    break
+            # 涨跌幅列
+            chg_col = None
+            for candidate in ["涨跌幅", "板块涨跌幅"]:
+                if candidate in spot_df.columns:
+                    chg_col = candidate
+                    break
+
+            if name_col is None or chg_col is None:
+                _logger.debug("Concept spot columns not recognized: %s", list(spot_df.columns))
+                return {"concept_list": [], "concept_change_pct": [], "concept_rank": {},
+                        "concept_total": 0, "status": "无数据"}
+
+            # 按涨跌幅排序（热门概念优先检查）
+            spot_df = spot_df.sort_values(chg_col, ascending=False).reset_index(drop=True)
+            spot_df["_rank"] = range(1, len(spot_df) + 1)
+            concept_total = len(spot_df)
+
+            def _safe_float(val: Any) -> float:
+                try:
+                    return float(val) if pd.notna(val) else 0.0
+                except (ValueError, TypeError):
+                    return 0.0
+
+            # Step 2: 遍历概念板块找到个股所属概念（个股可命中多个）
+            concept_list: list[str] = []
+            concept_change_pct: list[float] = []
+            concept_rank: dict[str, dict[str, Any]] = {}
+
+            checked = 0
+            for _, concept_row in spot_df.iterrows():
+                if checked >= 80:
+                    break
+                concept_name = str(concept_row.get(name_col, ""))
+                if not concept_name:
+                    continue
+                try:
+                    cons_df = ak.stock_board_concept_cons_em(symbol=concept_name)
+                    checked += 1
+                    if cons_df is None or cons_df.empty:
+                        continue
+                    # 成分股代码列
+                    code_col_cons = None
+                    for c in ["代码", "股票代码", "证券代码"]:
+                        if c in cons_df.columns:
+                            code_col_cons = c
+                            break
+                    if code_col_cons is None:
+                        continue
+                    if code in cons_df[code_col_cons].astype(str).values:
+                        c_chg = _safe_float(concept_row.get(chg_col, 0))
+                        c_rank = int(concept_row.get("_rank", 0))
+                        concept_list.append(concept_name)
+                        concept_change_pct.append(round(c_chg, 2))
+                        concept_rank[concept_name] = {
+                            "rank": c_rank,
+                            "total": concept_total,
+                            "change_pct": round(c_chg, 2),
+                        }
+                except Exception:
+                    continue
+
+            if not concept_list:
+                return {"concept_list": [], "concept_change_pct": [], "concept_rank": {},
+                        "concept_total": concept_total, "status": "无数据"}
+
+            return {
+                "concept_list": concept_list,
+                "concept_change_pct": concept_change_pct,
+                "concept_rank": concept_rank,
+                "concept_total": concept_total,
+                "status": "正常",
+            }
+        except Exception as exc:
+            _logger.debug("Concept data fetch failed for %s: %s", code, exc)
+            return {"concept_list": [], "concept_change_pct": [], "concept_rank": {},
+                    "concept_total": 0, "status": "无数据"}

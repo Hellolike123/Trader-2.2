@@ -213,6 +213,32 @@ class TestAssessStage:
         assert result["major_stage"] in ("蓄势", "蓄势偏强", "蓄势偏弱", "主升", "派发", "衰退")
         assert result["momentum"] in ("走强", "修复", "震荡", "转弱")
 
+    def test_extend_sector_resonance_no_crash(self):
+        """A6 回归：板块数据正常且个股+板块同涨时，不触发 UnboundLocalError"""
+        from trader_shared.stage_positioning import assess_stage
+        # 个股上涨 + 板块上涨 → 共振升级路径
+        closes = [float(i) for i in range(11, 31)]  # 20 天上涨
+        bars = _make_bars(closes)
+        ma_values = {"ma5": 30.0, "ma10": 29.0, "ma20": 28.0, "ma30": 27.0}
+        extend_sector = {
+            "sector_name": "半导体",
+            "sector_change_pct": 1.5,   # 板块涨
+            "sector_rank": 5,
+            "sector_total": 100,
+            "stock_vs_sector": "跑赢 +0.5%",
+            "status": "正常",
+        }
+        with patch("trader_shared.stage_positioning._load_stage_state", return_value={}):
+            with patch("trader_shared.stage_positioning._save_stage_state"):
+                # change_pct > 0 且 sec_chg > 0 → 命中 A6 共振分支
+                result = assess_stage(
+                    30.0, ma_values, 2.0, bars,
+                    extend_sector=extend_sector,
+                )
+        assert "major_stage" in result
+        # 确认板块共振说明被记录（无崩溃）
+        assert any("板块共振" in n for n in result.get("protection_notes", []))
+
 
 # ── compute_exit_plan ──────────────────────────────────────────
 

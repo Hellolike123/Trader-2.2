@@ -316,3 +316,91 @@ class TestGetSectorData(unittest.TestCase):
                 ed._akshare_available = old
 
         self.assertEqual(res["status"], "无数据")
+
+
+class TestGetConceptData(unittest.TestCase):
+
+    @patch("trader_shared.extend_data._check_akshare", return_value=True)
+    def test_success(self, mock_check):
+        mock_ak = MagicMock()
+        # 概念板块行情
+        spot_df = pd.DataFrame({
+            "板块名称": ["人工智能", "芯片", "新能源"],
+            "涨跌幅": [3.5, 2.1, -0.5],
+        })
+        mock_ak.stock_board_concept_spot_em.return_value = spot_df
+
+        # 个股命中多个概念
+        cons_ai = pd.DataFrame({"代码": ["688248", "600519"]})
+        cons_chip = pd.DataFrame({"代码": ["688248"]})
+        cons_ne = pd.DataFrame({"代码": ["999999"]})
+
+        def _cons_side(symbol):
+            if symbol == "人工智能":
+                return cons_ai
+            if symbol == "芯片":
+                return cons_chip
+            return cons_ne
+
+        mock_ak.stock_board_concept_cons_em.side_effect = _cons_side
+
+        with patch.dict("sys.modules", {"akshare": mock_ak}):
+            import trader_shared.extend_data as ed
+            old = ed._akshare_available
+            ed._akshare_available = True
+            try:
+                res = ExtendDataProvider.get_concept_data("688248")
+            finally:
+                ed._akshare_available = old
+
+        self.assertEqual(res["status"], "正常")
+        self.assertIn("人工智能", res["concept_list"])
+        self.assertIn("芯片", res["concept_list"])
+        self.assertEqual(len(res["concept_list"]), 2)
+        self.assertEqual(res["concept_total"], 3)
+        # 人工智能涨 3.5% → rank 1
+        self.assertEqual(res["concept_rank"]["人工智能"]["rank"], 1)
+
+    @patch("trader_shared.extend_data._check_akshare", return_value=False)
+    def test_akshare_not_available(self, mock_check):
+        res = ExtendDataProvider.get_concept_data("688248")
+        self.assertEqual(res["status"], "接口不可用")
+        self.assertEqual(res["concept_list"], [])
+
+    @patch("trader_shared.extend_data._check_akshare", return_value=True)
+    def test_stock_not_in_any_concept(self, mock_check):
+        mock_ak = MagicMock()
+        spot_df = pd.DataFrame({
+            "板块名称": [f"概念{i}" for i in range(60)],
+            "涨跌幅": [1.0 - i * 0.1 for i in range(60)],
+        })
+        mock_ak.stock_board_concept_spot_em.return_value = spot_df
+        mock_ak.stock_board_concept_cons_em.return_value = pd.DataFrame({"代码": ["999999"]})
+
+        with patch.dict("sys.modules", {"akshare": mock_ak}):
+            import trader_shared.extend_data as ed
+            old = ed._akshare_available
+            ed._akshare_available = True
+            try:
+                res = ExtendDataProvider.get_concept_data("688248")
+            finally:
+                ed._akshare_available = old
+
+        self.assertEqual(res["status"], "无数据")
+        self.assertEqual(res["concept_total"], 60)
+
+    @patch("trader_shared.extend_data._check_akshare", return_value=True)
+    def test_api_exception(self, mock_check):
+        mock_ak = MagicMock()
+        mock_ak.stock_board_concept_spot_em.side_effect = Exception("network error")
+
+        with patch.dict("sys.modules", {"akshare": mock_ak}):
+            import trader_shared.extend_data as ed
+            old = ed._akshare_available
+            ed._akshare_available = True
+            try:
+                res = ExtendDataProvider.get_concept_data("688248")
+            finally:
+                ed._akshare_available = old
+
+        self.assertEqual(res["status"], "无数据")
