@@ -117,7 +117,8 @@ def main() -> int:
         print("Trader generated invalid output:", file=sys.stderr)
         for error in errors:
             print(error, file=sys.stderr)
-        return 2
+        # #27 修复：验证失败时仍输出报告（验证错误记为警告，不阻断输出）
+        # 之前 return 2 会跳过 print(markdown)，用户什么都看不到
 
     print(markdown)
 

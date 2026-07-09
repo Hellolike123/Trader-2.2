@@ -1361,8 +1361,9 @@ def compute_exit_plan(
         resistance_exit = round(resistance_price, 2)
     elif bars and len(bars) >= 20:
         # 动态计算阻力位：近 20 日最高价
-        highs = [float(b.get("high") or 0) for b in bars[-20:]]
-        max_high = max(highs) if highs else 0
+        # #24 修复：过滤 None/0 值，避免 max 选到 0.0 而非真实最高价
+        highs = [float(b["high"]) for b in bars[-20:] if b.get("high") is not None and float(b["high"]) > 0]
+        max_high = max(highs, default=0)
         if max_high > entry_price:
             resistance_exit = round(max_high, 2)
 
