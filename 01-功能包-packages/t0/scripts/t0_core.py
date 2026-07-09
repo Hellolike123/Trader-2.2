@@ -264,7 +264,7 @@ def render_markdown(plan: dict[str, Any]) -> str:
         trade_date = str(plan.get("analysis_time") or "").split(" ", 1)[0] or None
         tick_data = (plan.get("data") or {}).get("tick_data") or []
         has_tick_data = len(tick_data) > 0
-        big_order = analyze_big_orders(bars, tick_data=tick_data, focus_prices=focus_prices, trade_date=trade_date)
+        big_order = analyze_big_orders(bars, tick_data=tick_data, focus_prices=focus_prices, trade_date=trade_date, order_book=(plan.get("data") or {}).get("order_book"))
 
     current_action = '低吸' if buy_state == '可执行' else '高抛' if sell_state == '可执行' else '不动'
 

@@ -102,6 +102,7 @@ def build_plan(target: str) -> dict[str, Any]:
         "kline_30m": bars_30m,
         "current_price": float(current),
         "tick_data": [],
+        "order_book": quote.get("order_book"),
     }
     
     # 被动触发避险控制：当现价靠近低吸或高抛关注价 1.5% 以内时，才触发物理 Tick 盯盘抓取

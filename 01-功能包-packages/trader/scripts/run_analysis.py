@@ -854,7 +854,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         try:
             from trader_shared.big_order import analyze_big_orders
             big_order_result = analyze_big_orders(bars_5m, focus_prices=levels.get("key_pressure"),
-                                                   trade_date=quote.get("trade_date")) if bars_5m else big_order_result
+                                                   trade_date=quote.get("trade_date"),
+                                                   order_book=snapshot.order_book) if bars_5m else big_order_result
         except Exception:
             pass
 

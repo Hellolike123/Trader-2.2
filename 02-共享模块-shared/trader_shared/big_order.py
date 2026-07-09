@@ -22,6 +22,7 @@ class BigOrderEvent:
     level: str
     near_focus: bool
     focus_label: str | None = None
+    book_signal: str | None = None  # 盘口确认: "盘口同向确认" / "盘口矛盾" / None
 
 
 VOLUME_SPIKE_MULTIPLIER = 1.8
@@ -132,6 +133,48 @@ def _focus_match(close: float | None, focus_prices: list[tuple[str, float]]) -> 
     return False, None
 
 
+def _book_signal(side: str, order_book: dict[str, Any] | None) -> str | None:
+    """用盘口挂单比对大单方向，返回确认/矛盾信号。"""
+    if not order_book:
+        return None
+    bid_total = int(order_book.get("bid_total", 0))
+    ask_total = int(order_book.get("ask_total", 0))
+    if bid_total == 0 and ask_total == 0:
+        return None
+    ratio = bid_total / ask_total if ask_total > 0 else 99
+    if side == "主动买入":
+        if ratio >= 1.2:
+            return "盘口同向确认"
+        elif ratio <= 0.8:
+            return "盘口矛盾"
+    elif side == "主动卖出":
+        if ratio <= 0.8:
+            return "盘口同向确认"
+        elif ratio >= 1.2:
+            return "盘口矛盾"
+    return None
+
+
+def _book_summary(order_book: dict[str, Any] | None) -> str | None:
+    """汇总盘口方向，供最终 summary 使用。"""
+    if not order_book:
+        return None
+    bid_total = int(order_book.get("bid_total", 0))
+    ask_total = int(order_book.get("ask_total", 0))
+    if bid_total == 0 and ask_total == 0:
+        return None
+    ratio = bid_total / ask_total if ask_total > 0 else 99
+    if ratio >= 1.5:
+        return "盘口买盘强"
+    elif ratio >= 1.2:
+        return "盘口偏买"
+    elif ratio <= 0.5:
+        return "盘口卖盘强"
+    elif ratio <= 0.8:
+        return "盘口偏卖"
+    return "盘口均衡"
+
+
 def validate_big_orders(
     bars_5m: list[dict[str, Any]],
     events: list[dict[str, Any]],
@@ -219,6 +262,7 @@ def analyze_big_orders(
     focus_price: float | None = None,
     focus_prices: list[float] | list[tuple[str, float]] | None = None,
     trade_date: str | None = None,
+    order_book: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     events: list[BigOrderEvent] = []
     
@@ -325,6 +369,7 @@ def analyze_big_orders(
                     level=_level(hands, consecutive),
                     near_focus=near_focus,
                     focus_label=focus_label,
+                    book_signal=_book_signal(side, order_book),
                 )
             )
             prev_side = side
@@ -376,6 +421,7 @@ def analyze_big_orders(
                     level=_level(hands, consecutive),
                     near_focus=near_focus,
                     focus_label=focus_label,
+                    book_signal=_book_signal(side, order_book),
                 )
             )
             prev_side = side
@@ -401,6 +447,18 @@ def analyze_big_orders(
     sell_amount = round(sum(event.amount_wan or 0 for event in events if event.side == "主动卖出"), 2)
     direction_summary = "买方更强" if buy_hands > sell_hands else "卖方更强" if sell_hands > buy_hands else "买卖接近"
     summary = f"全天回溯到 {len(events)} 次大单事件，累计约 {total_hands:.0f} 手、{total_amount_wan:.0f} 万元，{direction_summary}。"
+
+    # 盘口上下文
+    book_ctx = _book_summary(order_book)
+    book_confirm_count = sum(1 for e in events if e.book_signal == "盘口同向确认")
+    book_conflict_count = sum(1 for e in events if e.book_signal == "盘口矛盾")
+    if book_ctx:
+        if book_confirm_count > book_conflict_count:
+            summary += f" {book_ctx}，{book_confirm_count} 次盘口确认。"
+        elif book_conflict_count > book_confirm_count:
+            summary += f" {book_ctx}，{book_conflict_count} 次盘口矛盾，需谨慎。"
+        else:
+            summary += f" {book_ctx}。"
     
     event_dicts = [event.__dict__ for event in events]
     

@@ -152,7 +152,13 @@ def _format_intraday_narrative(intraday: dict[str, Any], big_order: dict[str, An
             amount_wan = event.get("amount_wan")
             amount_text = f"{amount_wan:.0f} 万" if amount_wan is not None else "金额不足"
             focus_note = f"，贴近{event['focus_label']}" if event.get("near_focus") and event.get("focus_label") else ""
-            result.append(f"{event['time']}  {event['side']}  {amount_text} / {hands_text}，{event['meaning']}{focus_note}。")
+            book_note = ""
+            bs = event.get("book_signal")
+            if bs == "盘口同向确认":
+                book_note = "，盘口确认"
+            elif bs == "盘口矛盾":
+                book_note = "，盘口矛盾⚠️"
+            result.append(f"{event['time']}  {event['side']}  {amount_text} / {hands_text}，{event['meaning']}{focus_note}{book_note}。")
         result.append(f"回溯总结：{big_order.get('summary')}")
         validation = big_order.get("validation")
         if validation:
