@@ -7,7 +7,8 @@ import os
 import sys
 from typing import Any
 
-from run_analysis import build_report, build_signal, render_markdown
+from run_analysis import build_report, build_signal
+from trader_shared.report_core import render_single as render_markdown
 from validate_output import validate
 from trader_shared.fetchers import TencentFetcher
 
