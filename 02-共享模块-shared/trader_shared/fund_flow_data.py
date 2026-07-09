@@ -16,9 +16,29 @@ import warnings
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 FFLOW_URL = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
 TDX_MCP_URL = "https://txmcp.tdx.com.cn:3001/txmcp"
+
+# 加固：东方财富 API 在代理/网络不可达时，默认 urllib3 会做多次重试，
+# 单次 10s × 3 重试 = 30s 挂起才放弃。改为「不重试 + 3s 超时」，
+# 让 fund_flow_data 快速降级（返回 []），避免代理环境长时间阻塞 + warning 刷屏。
+_FAST_FAIL_SESSION = requests.Session()
+_FAST_FAIL_ADAPTER = HTTPAdapter(
+    max_retries=Retry(
+        total=0,  # 禁用重试
+        connect=0,
+        read=0,
+        other=0,
+    ),
+)
+_FAST_FAIL_SESSION.mount("https://", _FAST_FAIL_ADAPTER)
+_FAST_FAIL_SESSION.mount("http://", _FAST_FAIL_ADAPTER)
+
+# 单次请求超时（秒）：代理挡住时 3s 即放弃
+_FAST_FAIL_TIMEOUT = 3
 
 
 def _secid(symbol: str) -> str:
@@ -146,7 +166,10 @@ def _fetch_fund_flow_eastmoney(symbol: str, days: int = 30) -> list[dict[str, An
             "fields1": "f1,f2,f3,f7",
             "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65",
         }
-        r = requests.get(FFLOW_URL, params=params, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        r = _FAST_FAIL_SESSION.get(
+            FFLOW_URL, params=params, headers={"User-Agent": "Mozilla/5.0"},
+            timeout=_FAST_FAIL_TIMEOUT,
+        )
         if r.status_code != 200:
             return []
         data = r.json()
