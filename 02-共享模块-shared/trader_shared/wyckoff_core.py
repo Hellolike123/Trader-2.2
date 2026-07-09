@@ -156,43 +156,62 @@ def _detect_buying_climax(bars: list[dict]) -> dict:
 def _detect_sign_of_weakness(bars: list[dict]) -> dict:
     """Detect Sign of Weakness (SOW) — 价格跌破支撑且放量。
 
+    关键修复：当 WYCKOFF_SOW_CONSECUTIVE_DAYS > 1 时，支撑位从「不含连续确认窗口」
+    的 K 线中计算，避免前一日 low 被纳入 support 导致 prev_low >= support 恒成立。
+
     Returns:
         dict with keys: sow_signal (bool), sow_reason (str), sow_price (float)
     """
-    if len(bars) < WYCKOFF_SOW_SUPPORT_LOOKBACK + 1:
+    consecutive = WYCKOFF_SOW_CONSECUTIVE_DAYS
+    min_bars = WYCKOFF_SOW_SUPPORT_LOOKBACK + consecutive
+    if len(bars) < min_bars:
         return {"sow_signal": False, "sow_reason": "数据不足", "sow_price": 0.0}
 
-    recent = bars[-(WYCKOFF_SOW_SUPPORT_LOOKBACK + 1):-1]
-    current = bars[-1]
-
-    low_values = [to_float(b.get("low")) for b in recent]
+    # 支撑位计算：排除最后 consecutive 根（它们参与跌破确认，不应纳入 support）
+    support_end = -(consecutive) if consecutive > 0 else None
+    support_start = -(WYCKOFF_SOW_SUPPORT_LOOKBACK + consecutive)
+    support_window = bars[support_start:support_end]
+    low_values = [to_float(b.get("low")) for b in support_window]
     valid_lows = [v for v in low_values if v is not None]
-    cur_low = to_float(current.get("low"))
-    cur_close = to_float(current.get("close"))
-    cur_volume = to_float(current.get("volume"))
 
-    if cur_low is None or cur_close is None or cur_volume is None or not valid_lows:
+    if not valid_lows:
         return {"sow_signal": False, "sow_reason": "数据异常", "sow_price": 0.0}
 
     support = min(valid_lows)
 
+    # 当前 bar（最后一根）
+    current = bars[-1]
+    cur_low = to_float(current.get("low"))
+    cur_close = to_float(current.get("close"))
+    cur_volume = to_float(current.get("volume"))
+
+    if cur_low is None or cur_close is None or cur_volume is None:
+        return {"sow_signal": False, "sow_reason": "数据异常", "sow_price": 0.0}
+
     # 跌破支撑判定逻辑
-    if WYCKOFF_SOW_CONSECUTIVE_DAYS > 1:
+    if consecutive > 1:
         # 需要连续 N 天跌破才算
         if cur_low >= support:
             return {"sow_signal": False, "sow_reason": "未跌破支撑", "sow_price": 0.0}
-        
-        # 检查前一天是否也跌破
-        prev_low = to_float(bars[-2].get("low")) if len(bars) >= 2 else None
-        if prev_low is None or prev_low >= support:
-            return {"sow_signal": False, "sow_reason": f"仅单日跌破，需连续{WYCKOFF_SOW_CONSECUTIVE_DAYS}天确认", "sow_price": 0.0}
+
+        # 检查前 consecutive-1 天是否也跌破
+        for i in range(2, consecutive + 1):
+            check_bar = bars[-i]
+            check_low = to_float(check_bar.get("low"))
+            if check_low is None or check_low >= support:
+                return {
+                    "sow_signal": False,
+                    "sow_reason": f"仅 {i-1}/{consecutive} 日跌破，需连续{consecutive}天确认",
+                    "sow_price": 0.0,
+                }
     else:
         # 单日判定，最低价或收盘价跌破即可触发
         if cur_low >= support and cur_close >= support:
             return {"sow_signal": False, "sow_reason": "未跌破支撑", "sow_price": 0.0}
 
     # 放量确认
-    avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
+    vol_window = bars[-(WYCKOFF_SOW_SUPPORT_LOOKBACK + 1):-1]
+    avg_volume = sum(to_float(b.get("volume")) or 0 for b in vol_window) / max(len(vol_window), 1)
     is_high_volume = avg_volume > 0 and cur_volume >= avg_volume * WYCKOFF_SOW_VOL_RATIO_THRESHOLD
 
     if not is_high_volume:
@@ -202,7 +221,7 @@ def _detect_sign_of_weakness(bars: list[dict]) -> dict:
     if cur_close >= support:
         return {
             "sow_signal": True,
-            "sow_reason": f"放量跌破支撑 {support:.2f} 后收回，弱势警告",
+            "sow_reason": f"日内跌破支撑 {support:.2f} 后收回，弱势警告",
             "sow_price": round(support, 2),
         }
 
@@ -756,53 +775,93 @@ def _detect_effort_vs_result(bars: list[dict]) -> dict[str, bool]:
 
 # ── 积累/派发阶段状态机 ──────────────────────────────────────────────
 
+def _scan_for_signal(
+    bars: list[dict],
+    detector_fn: Any,
+    window: int = 15,
+    step: int = 5,
+) -> bool:
+    """在 bars 上滑动窗口运行检测器，找到任意窗口触发即返回 True。
+
+    解决单次调用只能检测最近几根 K 线的问题——通过滑动窗口扫描历史。
+    """
+    n = len(bars)
+    if n < window:
+        return False
+    # 从最早的位置开始，每次滑动 step 根
+    for start in range(0, n - window + 1, step):
+        sub = bars[start:start + window]
+        try:
+            result = detector_fn(sub)
+            # 检查 result 中的 signal 字段
+            for key in result:
+                if key.endswith("_signal") and result[key] is True:
+                    return True
+        except Exception:
+            continue
+    return False
+
+
 def _detect_phase(bars: list[dict], signals: dict[str, Any]) -> dict[str, Any]:
     """基于信号序列推断威科夫阶段（积累 Phase A-E / 派发 Phase A'-E'）。
 
-    扫描最近 WYCKOFF_PHASE_LOOKBACK 根 K 线，检测早期信号（BC/UT）是否在
-    较宽时间窗内出现，再结合当前窗口已检测到的后期信号（Spring/SOS/LPS）推断阶段。
+    真正扫描 WYCKOFF_PHASE_LOOKBACK 根 K 线的历史窗口，检测早期信号（BC/UT/AR）
+    是否在较宽时间窗内出现过，再结合当前窗口的后期信号（Spring/SOS/LPS）推断阶段。
 
     Returns:
-        {"phase": str, "phase_label": str}
-        phase: "accumulation_a" / "accumulation_c" / "accumulation_d"
-               / "distribution_a" / "distribution_c" / "none"
+        {"phase": str, "phase_label": str, "phase_confidence_delta": float}
+        phase_confidence_delta: 阶段上下文对当前信号置信度的修正
     """
-    lookback = WYCKOFF_PHASE_LOOKBACK
-    if len(bars) < lookback:
-        lookback = len(bars)
-
-    # 在宽窗口中扫描早期信号（BC/UT），因为它们通常发生在阶段初期
+    lookback = min(WYCKOFF_PHASE_LOOKBACK, len(bars))
     wide_bars = bars[-lookback:]
-    bc_in_wide = _detect_buying_climax(wide_bars)
-    ut_in_wide = _detect_upthrust(wide_bars)
-    sow_in_wide = _detect_sign_of_weakness(wide_bars)
-    ar_in_wide = _detect_ar(wide_bars)
 
-    # 后期信号直接用当前检测结果（通常在近期窗口内）
+    # 滑动窗口扫描早期信号（BC/UT/SOW/AR）
+    # 这些信号通常发生在阶段初期，不在最近 5 根 K 线内
+    bc_found = _scan_for_signal(wide_bars, _detect_buying_climax, window=15, step=5)
+    ar_found = _scan_for_signal(wide_bars, _detect_ar, window=18, step=5)
+    ut_found = _scan_for_signal(wide_bars, _detect_upthrust, window=15, step=5)
+    sow_found = _scan_for_signal(wide_bars, _detect_sign_of_weakness, window=16, step=5)
+
+    # 后期信号直接用当前检测结果（通常在近期窗口内触发）
     spring = signals.get("spring_signal", False)
     sos = signals.get("sos_signal", False)
     lps = signals.get("lps_signal", False)
 
-    bc = bc_in_wide.get("bc_signal", False)
-    ar = ar_in_wide.get("ar_signal", False)
-    ut = ut_in_wide.get("upthrust_signal", False)
-    sow = sow_in_wide.get("sow_signal", False)
-
     # 积累型序列：BC → AR → Spring → SOS/LPS
-    if bc and ar and spring and (sos or lps):
-        return {"phase": "accumulation_d", "phase_label": "积累期 D（确认：SOS/LPS）"}
-    if bc and ar and spring:
-        return {"phase": "accumulation_c", "phase_label": "积累期 C（测试：Spring）"}
-    if bc and ar:
-        return {"phase": "accumulation_a", "phase_label": "积累期 A（停止：BC+AR）"}
+    if bc_found and ar_found and spring and (sos or lps):
+        return {
+            "phase": "accumulation_d",
+            "phase_label": "积累期 D（确认：SOS/LPS）",
+            "phase_confidence_delta": 0.10,
+        }
+    if bc_found and ar_found and spring:
+        return {
+            "phase": "accumulation_c",
+            "phase_label": "积累期 C（测试：Spring）",
+            "phase_confidence_delta": 0.10,
+        }
+    if bc_found and ar_found:
+        return {
+            "phase": "accumulation_a",
+            "phase_label": "积累期 A（停止：BC+AR）",
+            "phase_confidence_delta": 0.05,
+        }
 
     # 派发型序列：UT + SOW → 分配
-    if ut and sow:
-        return {"phase": "distribution_c", "phase_label": "派发期 C（确认：UT+SOW）"}
-    if ut:
-        return {"phase": "distribution_a", "phase_label": "派发期 A（上冲回落：UT）"}
+    if ut_found and sow_found:
+        return {
+            "phase": "distribution_c",
+            "phase_label": "派发期 C（确认：UT+SOW）",
+            "phase_confidence_delta": -0.10,
+        }
+    if ut_found:
+        return {
+            "phase": "distribution_a",
+            "phase_label": "派发期 A（上冲回落：UT）",
+            "phase_confidence_delta": -0.05,
+        }
 
-    return {"phase": "none", "phase_label": "无明确阶段"}
+    return {"phase": "none", "phase_label": "无明确阶段", "phase_confidence_delta": 0.0}
 
 
 # ── 威科夫综合分析入口 ──
@@ -911,6 +970,7 @@ def wyckoff_analysis(bars: list[dict]) -> dict:
         # P1-1: 阶段状态机
         "phase": phase["phase"],
         "phase_label": phase["phase_label"],
+        "phase_confidence_delta": phase.get("phase_confidence_delta", 0.0),
         # P3-1: VSA 量价幅度分析
         "effort_no_result": vsa["effort_no_result"],
         "no_supply": vsa["no_supply"],

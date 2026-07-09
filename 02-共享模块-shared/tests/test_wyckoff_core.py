@@ -105,30 +105,22 @@ class TestDetectBuyingClimax:
 
 class TestDetectSignOfWeakness:
     def test_sow_detected_consecutive(self):
-        """SOW 需连续 2 日跌破支撑（注意：当前 consecutive 逻辑有局限——
-        前一日 low 被纳入 support 计算，导致 prev_low >= support 恒成立，
-        实际上 consecutive>1 的分支几乎不会触发。此测试验证当前行为。）"""
+        """SOW 需连续 2 日跌破支撑（support 从不含确认窗口的 K 线计算）。"""
         bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
-        # 连续 2 天跌破，但因 consecutive 逻辑局限，SOW 不触发
+        # 连续 2 天跌破 95（support 从 bars[2:14] 计算 = 95）
         bars.append({"open": 98, "high": 99, "low": 93, "close": 94, "volume": 130})
         bars.append({"open": 95, "high": 96, "low": 92, "close": 93, "volume": 130})
         result = wyckoff_analysis(bars)
-        # 当前逻辑：consecutive 分支中 prev_low >= support 恒成立 → 不触发
-        assert result["sow_signal"] is False
+        assert result["sow_signal"] is True
+        assert result["sow_price"] == 95.0
 
-    def test_sow_detected_single_day_relaxed(self):
-        """当 WYCKOFF_SOW_CONSECUTIVE_DAYS=1 时单日可触发（验证 fallback 分支）。"""
-        import trader_shared.wyckoff_core as wc
-        orig = wc.WYCKOFF_SOW_CONSECUTIVE_DAYS
-        try:
-            wc.WYCKOFF_SOW_CONSECUTIVE_DAYS = 1
-            bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
-            bars.append({"open": 98, "high": 99, "low": 93, "close": 94, "volume": 130})
-            result = wyckoff_analysis(bars)
-            assert result["sow_signal"] is True
-            assert result["sow_price"] == 95.0
-        finally:
-            wc.WYCKOFF_SOW_CONSECUTIVE_DAYS = orig
+    def test_sow_not_detected_single_day(self):
+        """仅 1 日跌破不足以触发 SOW（consecutive=2）。"""
+        bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
+        bars.append({"open": 98, "high": 99, "low": 93, "close": 94, "volume": 130})
+        result = wyckoff_analysis(bars)
+        assert result["sow_signal"] is False
+        assert "1/2" in result["sow_reason"]
 
     def test_sow_not_detected_due_to_volume(self):
         bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
@@ -272,19 +264,14 @@ class TestCalculateWyckoffScore:
         assert any("购买高潮" in s for s in result["signals"])
 
     def test_sow_penalty(self):
-        """弱势信号 → 扣分（单日模式验证）"""
-        import trader_shared.wyckoff_core as wc
-        orig = wc.WYCKOFF_SOW_CONSECUTIVE_DAYS
-        try:
-            wc.WYCKOFF_SOW_CONSECUTIVE_DAYS = 1
-            bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
-            bars.append({"open": 98, "high": 99, "low": 93, "close": 94, "volume": 130})
-            result = calculate_wyckoff_score(bars)
-            assert result["raw"] < 0
-            assert result["score"] <= 50
-            assert any("弱势" in s for s in result["signals"])
-        finally:
-            wc.WYCKOFF_SOW_CONSECUTIVE_DAYS = orig
+        """弱势信号 → 扣分（连续 2 日跌破确认）"""
+        bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
+        bars.append({"open": 98, "high": 99, "low": 93, "close": 94, "volume": 130})
+        bars.append({"open": 95, "high": 96, "low": 92, "close": 93, "volume": 130})
+        result = calculate_wyckoff_score(bars)
+        assert result["raw"] < 0
+        assert result["score"] <= 50
+        assert any("弱势" in s for s in result["signals"])
 
     def test_score_clamped_to_0_100(self):
         """极端情况下分数不会超出 [0, 100]"""
