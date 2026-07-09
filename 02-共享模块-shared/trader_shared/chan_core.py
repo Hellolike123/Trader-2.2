@@ -385,11 +385,12 @@ def build_segments(strokes: list[dict], min_strokes: int = 3) -> list[dict]:
     """将笔序列构建为线段序列。
 
     线段是最小可递归走势单元，由至少3笔构成。
-    使用特征序列法（含包含处理）判断线段终结：
-    - 向上线段中，取所有向下笔构成特征序列
-    - 对特征序列做包含处理（合并重叠元素）
-    - 如果处理后的特征序列出现「跌破前一根」，线段终结
-    - 向下线段对称处理
+    使用特征序列三分型（含包含处理）判断线段终结：
+    - 向上线段：取所有向下笔构成特征序列；至少 3 个特征元素，
+      且最后三根形成底分型（mid.low < left.low and mid.low < right.low）时终结
+    - 向下线段：取所有向上笔构成特征序列；至少 3 个特征元素，
+      且最后三根形成顶分型（mid.high > left.high and mid.high > right.high）时终结
+    - 默认只比 low（底分型）/ high（顶分型），与 K 线分型侧重点一致
 
     包含处理规则（与 K 线包含一致）：
     - 两根特征序列元素重叠时，按方向合并
@@ -484,29 +485,32 @@ def build_segments(strokes: list[dict], min_strokes: int = 3) -> list[dict]:
                 # 包含处理
                 char_seq = _merge_char_element(char_seq, char_h, char_l)
 
-                # 检查线段终结：处理后的特征序列当前元素 low < 前一个元素 low
-                if len(char_seq) >= 2 and char_seq[-1]["low"] < char_seq[-2]["low"]:
-                    end_idx = i - 1
-                    seg_strokes = strokes[seg_start:end_idx + 1]
-                    seg_high = max(max(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
-                    seg_low = min(min(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
-                    start_p = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
-                    end_p = max(strokes[end_idx]["start_price"], strokes[end_idx]["end_price"])
-                    segments.append({
-                        "direction": "up",
-                        "start_price": start_p,
-                        "end_price": end_p,
-                        "high": seg_high,
-                        "low": seg_low,
-                        "start_index": seg_start,
-                        "end_index": end_idx,
-                        "strokes_count": len(seg_strokes),
-                    })
-                    seg_start = end_idx
-                    current_direction = "down"
-                    char_seq = []
-                    char_direction = None
-                    continue
+                # 特征序列三分型终结：至少 3 个特征元素，最后三根底分型
+                # （默认只比 low，与 K 线底分型侧重点一致）
+                if len(char_seq) >= 3:
+                    left, mid, right = char_seq[-3], char_seq[-2], char_seq[-1]
+                    if mid["low"] < left["low"] and mid["low"] < right["low"]:
+                        end_idx = i - 1
+                        seg_strokes = strokes[seg_start:end_idx + 1]
+                        seg_high = max(max(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
+                        seg_low = min(min(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
+                        start_p = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                        end_p = max(strokes[end_idx]["start_price"], strokes[end_idx]["end_price"])
+                        segments.append({
+                            "direction": "up",
+                            "start_price": start_p,
+                            "end_price": end_p,
+                            "high": seg_high,
+                            "low": seg_low,
+                            "start_index": seg_start,
+                            "end_index": end_idx,
+                            "strokes_count": len(seg_strokes),
+                        })
+                        seg_start = end_idx
+                        current_direction = "down"
+                        char_seq = []
+                        char_direction = None
+                        continue
 
         else:  # current_direction == "down"
             # 向下线段：只看向上笔作为特征序列
@@ -526,29 +530,32 @@ def build_segments(strokes: list[dict], min_strokes: int = 3) -> list[dict]:
                 # 包含处理
                 char_seq = _merge_char_element(char_seq, char_h, char_l)
 
-                # 检查线段终结：处理后的特征序列当前元素 high > 前一个元素 high
-                if len(char_seq) >= 2 and char_seq[-1]["high"] > char_seq[-2]["high"]:
-                    end_idx = i - 1
-                    seg_strokes = strokes[seg_start:end_idx + 1]
-                    seg_high = max(max(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
-                    seg_low = min(min(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
-                    start_p = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
-                    end_p = min(strokes[end_idx]["start_price"], strokes[end_idx]["end_price"])
-                    segments.append({
-                        "direction": "down",
-                        "start_price": start_p,
-                        "end_price": end_p,
-                        "high": seg_high,
-                        "low": seg_low,
-                        "start_index": seg_start,
-                        "end_index": end_idx,
-                        "strokes_count": len(seg_strokes),
-                    })
-                    seg_start = end_idx
-                    current_direction = "up"
-                    char_seq = []
-                    char_direction = None
-                    continue
+                # 特征序列三分型终结：至少 3 个特征元素，最后三根顶分型
+                # （默认只比 high，与 K 线顶分型侧重点一致）
+                if len(char_seq) >= 3:
+                    left, mid, right = char_seq[-3], char_seq[-2], char_seq[-1]
+                    if mid["high"] > left["high"] and mid["high"] > right["high"]:
+                        end_idx = i - 1
+                        seg_strokes = strokes[seg_start:end_idx + 1]
+                        seg_high = max(max(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
+                        seg_low = min(min(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
+                        start_p = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                        end_p = min(strokes[end_idx]["start_price"], strokes[end_idx]["end_price"])
+                        segments.append({
+                            "direction": "down",
+                            "start_price": start_p,
+                            "end_price": end_p,
+                            "high": seg_high,
+                            "low": seg_low,
+                            "start_index": seg_start,
+                            "end_index": end_idx,
+                            "strokes_count": len(seg_strokes),
+                        })
+                        seg_start = end_idx
+                        current_direction = "up"
+                        char_seq = []
+                        char_direction = None
+                        continue
 
     # 收尾：如果最后一段至少有 min_strokes 笔，追加
     remaining = strokes[seg_start:]
@@ -728,14 +735,17 @@ def classify_structure(zones: list[dict], segments: list[dict] | None = None, st
     """走势分类：根据中枢拓扑关系和线段数量判断盘整或趋势。
 
     拓扑规则（中枢合并版）：
-    - 0 个合并中枢 → 单边/线段不足
-    - 1 个合并中枢 → 验证「进入段+离开段」结构 → 盘整，否则回退到线段数量门槛
-    - 2+ 同向不重叠中枢 → 上涨/下跌趋势
-    - 重叠中枢 → 盘整
+    - strokes < 3 → 无结构
+    - 0 个合并中枢 → 单边 / 有线段则盘整 / 无结构
+    - 1 个合并中枢 → 盘整（有中枢即结构；entry/exit 优先确认）
+    - 2+ 同向不重叠中枢 且 seg_count < 11 → 线段不足{seg_count}/11
+    - 2+ 同向不重叠中枢 且 seg_count >= 11 → 上涨趋势 / 下跌趋势
+    - 中枢重叠/混乱 且 seg_count < 5 → 线段不足{seg_count}/5
+    - 中枢重叠/混乱 且 seg_count >= 5 → 盘整
 
     输出结构类型：
     - "盘整" / "上涨趋势" / "下跌趋势" / "单边上涨" / "单边下跌"
-    - "线段不足X/Y" — 有线段但不够判定
+    - "线段不足X/Y" — 有中枢拓扑信号但线段不够判定
     - "无结构" — 连笔都没有
 
     兼容字段（不变）：structure_type, structure_segments_count, structure_zones_count
@@ -788,26 +798,19 @@ def classify_structure(zones: list[dict], segments: list[dict] | None = None, st
         pair_direction = this_dir
         zones_trend = "上涨趋势" if this_dir == "up" else "下跌趋势"
 
-    # 1 个中枢：优先用拓扑结构（进/离段）判定盘整，否则回退到线段数量门槛
+    # 1 个中枢：有中枢即盘整（entry/exit 优先确认，无则仍盘整）
     if len(valid_zones) == 1:
-        pivot = valid_zones[0]
-        if _has_entry_exit_segments(pivot, segments):
-            return _ok("盘整")
-        # 有中枢本身就是结构证据，线段不足时降级为盘整而非报错
-        if seg_count >= MIN_SEGMENTS_CONSOLIDATION:
-            return _ok("盘整")
         return _ok("盘整")
 
-    # 2+ 个中枢
+    # 2+ 同向不重叠中枢 → 趋势，须满 11 段；否则报线段不足
     if zones_trend in ("上涨趋势", "下跌趋势"):
         if seg_count < MIN_SEGMENTS_TREND:
-            # 有多个中枢本身就是趋势证据，降级为趋势类型而非报错
-            return _ok(zones_trend)
+            return _ok(f"线段不足{seg_count}/{MIN_SEGMENTS_TREND}")
         return _ok(zones_trend)
 
-    # 中枢重叠 → 盘整
+    # 中枢重叠/混乱 → 盘整，须满 5 段；否则报线段不足
     if seg_count < MIN_SEGMENTS_CONSOLIDATION:
-        return _ok("盘整")
+        return _ok(f"线段不足{seg_count}/{MIN_SEGMENTS_CONSOLIDATION}")
     return _ok("盘整")
 
 
@@ -1103,8 +1106,8 @@ def detect_buy_points(
                     "confidence": 2,
                 })
 
-    # ── P1 三类买：离开中枢后回踩不入（取消 0~2% 窄窗）──
-    # 时间序：先找到「离开 ZG」的 up 笔，只考察其后的回抽 down；未回踩不报三买。
+    # ── P1/P2 三类买：离开中枢后回踩不入（取消 0~2% 窄窗）──
+    # 取「最近一次有效离开」：up 且 end>ZG，且其后仍有 down（可回抽空间）；持续更新 leave_i。
     if last_close > 0 and valid_zones:
         last_valid = valid_zones[-1]
         zh_top = last_valid["zh_top"]
@@ -1118,8 +1121,12 @@ def detect_buy_points(
                         and s.get("end_price") is not None
                         and s["end_price"] > zh_top
                     ):
-                        leave_i = i
-                        break
+                        # 仅当其后仍有 down 笔时，才记为「可回抽的离开」
+                        if any(
+                            strokes[k].get("direction") == "down"
+                            for k in range(i + 1, len(strokes))
+                        ):
+                            leave_i = i  # 持续更新 → 最近一次
                 pullback_ok = False
                 if leave_i is not None:
                     downs_after = [
@@ -1237,8 +1244,8 @@ def detect_sell_points(
                     "confidence": 2,
                 })
 
-    # ── P1 三类卖：离开中枢后反弹不回 ZD（取消过窄窗口）──
-    # 时间序：先找到「离开 ZD」的 down 笔，只考察其后的反弹 up；未反弹不报三卖。
+    # ── P1/P2 三类卖：离开中枢后反弹不回 ZD（取消过窄窗口）──
+    # 取「最近一次有效离开」：down 且 end<ZD，且其后仍有 up（可反弹空间）；持续更新 leave_i。
     if last_close > 0 and valid_zones:
         last_valid = valid_zones[-1]
         zh_bottom = last_valid["zh_bottom"]
@@ -1252,8 +1259,12 @@ def detect_sell_points(
                         and s.get("end_price") is not None
                         and s["end_price"] < zh_bottom
                     ):
-                        leave_i = i
-                        break
+                        # 仅当其后仍有 up 笔时，才记为「可反弹的离开」
+                        if any(
+                            strokes[k].get("direction") == "up"
+                            for k in range(i + 1, len(strokes))
+                        ):
+                            leave_i = i  # 持续更新 → 最近一次
                 bounce_ok = False
                 if leave_i is not None:
                     ups_after = [

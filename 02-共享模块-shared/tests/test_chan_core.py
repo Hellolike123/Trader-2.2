@@ -350,6 +350,34 @@ class TestDetectBuyPoints:
         types = [bp["type"] for bp in result]
         assert "三类买" not in types
 
+    def test_buy_point_3_uses_latest_leave_ok(self):
+        """P2 三类买：早期 leave+合法回踩，后期再次 leave 更高且回踩不破 → 仍以最近 leave 为准，三买成立。"""
+        strokes = [
+            {"direction": "down", "end_price": 9.0},   # 中枢内
+            {"direction": "up", "end_price": 10.5},     # early leave
+            {"direction": "down", "end_price": 10.1},   # early 合法回踩
+            {"direction": "up", "end_price": 11.2},     # later leave 更高
+            {"direction": "down", "end_price": 10.2},   # later 回踩不破 ZG=10
+        ]
+        zones = [{"zh_top": 10.0, "zh_bottom": 8.0, "valid": True}]
+        result = detect_buy_points(strokes, zones, 10.30)
+        types = [bp["type"] for bp in result]
+        assert "三类买" in types
+
+    def test_buy_point_3_latest_leave_pullback_breaks(self):
+        """P2 三类买：早期回踩曾合法，但最近 leave 后回踩破 ZG → 不报。"""
+        strokes = [
+            {"direction": "down", "end_price": 9.0},
+            {"direction": "up", "end_price": 10.5},     # early leave
+            {"direction": "down", "end_price": 10.1},   # early 合法回踩
+            {"direction": "up", "end_price": 11.2},     # later leave
+            {"direction": "down", "end_price": 9.5},    # later 破 ZG
+        ]
+        zones = [{"zh_top": 10.0, "zh_bottom": 8.0, "valid": True}]
+        result = detect_buy_points(strokes, zones, 10.30)
+        types = [bp["type"] for bp in result]
+        assert "三类买" not in types
+
     def test_buy_point_1_area_not_weaker(self):
         """P1 一类买：面积可算但后笔力度未更弱 → 不报一类。"""
         bars, sp, ep, sc, ec = self._make_bars_with_neg_areas(area_prev=-3.0, area_curr=-10.0)
@@ -381,6 +409,20 @@ class TestDetectSellPointsP1:
     def test_sell_point_3_no_bounce_after_leave(self):
         """三类卖：仅离开未反弹 → 无。"""
         strokes = [{"direction": "down", "end_price": 7.0}]
+        zones = [{"zh_top": 10.0, "zh_bottom": 8.0, "valid": True}]
+        result = detect_sell_points(strokes, zones, 7.5)
+        types = [sp["type"] for sp in result]
+        assert "三类卖" not in types
+
+    def test_sell_point_3_uses_latest_leave(self):
+        """P2 三类卖：以最近 leave 后反弹为准；later 反弹回穿 ZD → 不报。"""
+        strokes = [
+            {"direction": "up", "end_price": 9.0},
+            {"direction": "down", "end_price": 7.5},    # early leave
+            {"direction": "up", "end_price": 7.8},      # early 合法反弹
+            {"direction": "down", "end_price": 7.0},    # later leave 更低
+            {"direction": "up", "end_price": 8.2},      # later 反弹回穿 ZD=8
+        ]
         zones = [{"zh_top": 10.0, "zh_bottom": 8.0, "valid": True}]
         result = detect_sell_points(strokes, zones, 7.5)
         types = [sp["type"] for sp in result]
@@ -617,21 +659,33 @@ class TestBuildSegments:
         assert segs[0]["start_price"] == 20
         assert segs[0]["end_price"] == 8
 
-    def test_segment_termination(self):
-        """特征序列反转导致线段终结（含包含处理）。
-
-        向上线段：特征序列取向下笔的 (high, low)。
-        包含处理后，如果处理后的特征序列 low 低于前一个 → 终结。
-        特征序列元素不重叠时，不会被合并，直接比较。
-        """
+    def test_segment_needs_three_char_elements(self):
+        """P2：仅 2 个特征元素，即使后 low 更低也不终结（仍 1 段收尾）。"""
         strokes = [
             {"direction": "up",   "start_price": 10, "end_price": 20},  # 0
             {"direction": "down", "start_price": 20, "end_price": 15},  # 1 char: h=20,l=15
             {"direction": "up",   "start_price": 15, "end_price": 25},  # 2
-            {"direction": "down", "start_price": 25, "end_price": 22},  # 3 char: h=25,l=22 (不包含：22>15)
-            {"direction": "up",   "start_price": 22, "end_price": 28},  # 4
-            {"direction": "down", "start_price": 24, "end_price": 20},  # 5 char: h=24,l=20 < 22 → 终结
-            {"direction": "up",   "start_price": 20, "end_price": 24},  # 6
+            {"direction": "down", "start_price": 25, "end_price": 12},  # 3 char: h=25,l=12 更低，但仅 2 元素
+            {"direction": "up",   "start_price": 12, "end_price": 18},  # 4
+        ]
+        segs = build_segments(strokes, min_strokes=3)
+        assert len(segs) == 1
+        assert segs[0]["direction"] == "up"
+
+    def test_segment_termination(self):
+        """P2 特征序列三分型终结：向上段特征序列最后三根底分型 → 切开。
+
+        特征序列（向下笔）不互相包含：
+        left(h=20,l=15) / mid(h=18,l=12 最低) / right(h=19,l=14) → 底分型。
+        """
+        strokes = [
+            {"direction": "up",   "start_price": 10, "end_price": 20},  # 0
+            {"direction": "down", "start_price": 20, "end_price": 15},  # 1 char left
+            {"direction": "up",   "start_price": 15, "end_price": 25},  # 2
+            {"direction": "down", "start_price": 18, "end_price": 12},  # 3 char mid（最低）
+            {"direction": "up",   "start_price": 12, "end_price": 22},  # 4
+            {"direction": "down", "start_price": 19, "end_price": 14},  # 5 char right → 底分型终结
+            {"direction": "up",   "start_price": 14, "end_price": 18},  # 6 新段
         ]
         segs = build_segments(strokes, min_strokes=3)
         assert len(segs) >= 2
@@ -639,7 +693,7 @@ class TestBuildSegments:
         assert segs[1]["direction"] == "down"
 
     def test_segment_inclusion_merges(self):
-        """重叠的特征序列元素被合并，不单独触发终结。"""
+        """重叠的特征序列元素被合并，不足 3 个特征元素不触发终结。"""
         strokes = [
             {"direction": "up",   "start_price": 10, "end_price": 20},  # 0
             {"direction": "down", "start_price": 20, "end_price": 15},  # 1 char: h=20,l=15
@@ -648,26 +702,29 @@ class TestBuildSegments:
             {"direction": "up",   "start_price": 13, "end_price": 18},  # 4
         ]
         segs = build_segments(strokes, min_strokes=3)
-        # 包含处理后只有1个特征序列元素，不足以判定终结
-        # 所以只有1段（收尾段）
+        # 包含处理后特征序列元素 < 3，不足以判定三分型终结
         assert len(segs) == 1
         assert segs[0]["direction"] == "up"
 
     def test_multiple_segments(self):
-        """多段线段正确分割（含包含处理）。
+        """P2 多段：向上段底分型切开后，向下段顶分型再切，至少 2 段。
 
-        特征序列元素不重叠时，直接比较 low/high 判定终结。
+        向上特征序列 downs：left(20/15) mid(18/12) right(19/14) → 底分型。
+        向下特征序列 ups：left(14/18) mid(11/20 最高) right(12/16) → 顶分型（可选，有收尾亦可）。
         """
         strokes = [
-            {"direction": "up",   "start_price": 10, "end_price": 20},
-            {"direction": "down", "start_price": 20, "end_price": 15},  # char: h=20,l=15
-            {"direction": "up",   "start_price": 15, "end_price": 25},
-            {"direction": "down", "start_price": 25, "end_price": 22},  # char: h=25,l=22 (不包含)
-            {"direction": "up",   "start_price": 22, "end_price": 28},
-            {"direction": "down", "start_price": 28, "end_price": 20},  # char: h=28,l=20 < 22 → 终结
-            {"direction": "up",   "start_price": 20, "end_price": 24},
-            {"direction": "down", "start_price": 24, "end_price": 12},  # char: h=24,l=12
-            {"direction": "up",   "start_price": 12, "end_price": 16},
+            {"direction": "up",   "start_price": 10, "end_price": 20},  # 0
+            {"direction": "down", "start_price": 20, "end_price": 15},  # 1 char up-seg left
+            {"direction": "up",   "start_price": 15, "end_price": 25},  # 2
+            {"direction": "down", "start_price": 18, "end_price": 12},  # 3 char mid
+            {"direction": "up",   "start_price": 12, "end_price": 22},  # 4
+            {"direction": "down", "start_price": 19, "end_price": 14},  # 5 char right → 向上段终结
+            {"direction": "up",   "start_price": 14, "end_price": 18},  # 6 down-seg char
+            {"direction": "down", "start_price": 18, "end_price": 11},  # 7
+            {"direction": "up",   "start_price": 11, "end_price": 20},  # 8 char mid 顶
+            {"direction": "down", "start_price": 20, "end_price": 10},  # 9
+            {"direction": "up",   "start_price": 10, "end_price": 16},  # 10 char right → 向下段顶分型
+            {"direction": "down", "start_price": 16, "end_price": 12},  # 11
         ]
         segs = build_segments(strokes, min_strokes=3)
         assert len(segs) >= 2
@@ -725,7 +782,18 @@ class TestClassifyStructure:
         segs = [{"direction": "up"} for _ in range(5)]
         strokes = self._make_strokes(6)
         result = classify_structure(zones, segments=segs, strokes=strokes)
-        assert result["structure_type"] == "上涨趋势"
+        assert result["structure_type"] == "线段不足5/11"
+
+    def test_insufficient_segments_for_overlapping_zones(self):
+        """重叠中枢 + 3 段 → 线段不足3/5。"""
+        zones = [
+            {"zh_top": 20.0, "zh_bottom": 15.0, "valid": True},
+            {"zh_top": 18.0, "zh_bottom": 14.0, "valid": True},  # 与前重叠
+        ]
+        segs = [{"direction": "up"} for _ in range(3)]
+        strokes = self._make_strokes(6)
+        result = classify_structure(zones, segments=segs, strokes=strokes)
+        assert result["structure_type"] == "线段不足3/5"
 
     def test_uptrend(self):
         """2 个递增中枢 + 11 段线段 → 上涨趋势。"""
