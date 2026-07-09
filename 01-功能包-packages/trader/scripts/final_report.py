@@ -28,6 +28,7 @@ def main() -> int:
     try:
         report = build_report(args.target, cost_price=args.cost)
     except Exception as exc:
+        print(f"错误: {exc}", file=sys.stderr)
         print(f"Trader skill cannot run in this environment: {exc}", file=sys.stderr)
         return 1
 

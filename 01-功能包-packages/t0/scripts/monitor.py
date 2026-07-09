@@ -576,7 +576,7 @@ def run_once(
         if reset_cache:
             targets.pop(target_key, None)
         previous = targets.get(target_key)
-        if isinstance(previous, dict) and previous.get("trade_day") != trade_day_key():
+        if isinstance(previous, dict) and previous.get("trade_day") != trade_day_key(now):
             previous = None
         events = detect_state_change(previous, plan)
         target_state = previous if isinstance(previous, dict) else {}
@@ -589,7 +589,7 @@ def run_once(
         state["targets"] = targets
         
         # Count STOP losses and check fuse trigger
-        if allowed_events and not day_fuse.get("fused", False):
+        if allowed_events and not (isinstance(day_fuse, dict) and day_fuse.get("fused", False)):
             # [P1 Fix] 熔断后不再统计 stop_count，避免计数超过阈值
             stop_count = day_fuse.get("count", 0) if isinstance(day_fuse, dict) else 0
             fused_targets = day_fuse.get("fused_targets", []) if isinstance(day_fuse, dict) else []
@@ -620,7 +620,7 @@ def run_once(
             except Exception as e:
                 warnings.warn(f"[t0-monitor] 信号持久化失败: {e}")
             allowed_events = []
-        alert = _fuse_alert(target_key, day_fuse["count"], name)
+        alert = _fuse_alert(target_key, day_fuse.get("count", 0) if isinstance(day_fuse, dict) else 0, name)
         return alert
     
     # ── 量能真空预警（独立于事件系统，每次检查都触发） ──

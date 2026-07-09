@@ -122,8 +122,8 @@ def build_plan(target: str) -> dict[str, Any]:
             save_tick_cache(sec.ts_code, ticks, trade_date=quote.get("trade_date"))
             import warnings
             warnings.warn(f"🎯 [PassiveTickTrigger] 现价 {current_val:.2f} 靠近关注价，被动激活物理 Tick 大单验证！")
-        except Exception:
-            pass
+        except Exception as e:
+            warnings.warn(f"[t0] tick fetch failed: {e}")
     # T0-1 fix: 传入 structure_result 让 T0 使用 trader 的支撑/阻力分析
     # 如果有 trader 的分析报告数据，提取其结构分析结果
     structure_result = None
