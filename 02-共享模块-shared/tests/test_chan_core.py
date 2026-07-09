@@ -14,10 +14,13 @@ from trader_shared.chan_core import (
     build_zones,
     classify_structure,
     detect_buy_points,
+    detect_sell_points,
     detect_divergence,
     chanlun_analysis,
     chanlun_strategy,
     _check_macd_for_2nd_buy,
+    _stroke_macd_area,
+    _stroke_force_weaker,
     _aggregate_bars,
     _higher_level_trend,
     _merge_zones,
@@ -120,6 +123,64 @@ class TestBuildStrokes:
         result = build_strokes(fractions)
         assert len(result) == 0
 
+    def test_stroke_skip_near_opposite_keeps_start(self):
+        """P0: 近距反向分型不得丢弃起点；应跳过 top@2 后与 top@8 成笔。"""
+        fractions = [
+            {"type": "bottom", "index": 0, "low": 10.0, "high": 10.5, "close": 10.2},
+            {"type": "top", "index": 2, "high": 12.0, "low": 11.5, "close": 11.8},  # 距起点过近
+            {"type": "top", "index": 8, "high": 15.0, "low": 14.5, "close": 14.8},  # 相对 0 足够远
+        ]
+        result = build_strokes(fractions, min_bars_per_stroke=5)
+        assert len(result) == 1
+        assert result[0]["direction"] == "up"
+        assert result[0]["start_type"] == "bottom"
+        assert result[0]["end_type"] == "top"
+        assert result[0]["end_price"] == 15.0
+
+    def test_stroke_near_only_opposite_no_stroke(self):
+        """回归：仅有近距反向分型时不成笔（距离不足）。"""
+        fractions = [
+            {"type": "bottom", "index": 0, "low": 10.0, "high": 10.5, "close": 10.2},
+            {"type": "top", "index": 2, "high": 12.0, "low": 11.5, "close": 11.8},
+        ]
+        result = build_strokes(fractions, min_bars_per_stroke=5)
+        assert len(result) == 0
+
+    def test_stroke_alternating_sequence(self):
+        """回归：多笔交替成笔仍正确（底-顶-底-顶）。"""
+        fractions = [
+            {"type": "bottom", "index": 0, "low": 10.0, "high": 10.5, "close": 10.2},
+            {"type": "top", "index": 5, "high": 15.0, "low": 14.5, "close": 14.8},
+            {"type": "bottom", "index": 10, "low": 11.0, "high": 11.5, "close": 11.2},
+            {"type": "top", "index": 15, "high": 16.0, "low": 15.5, "close": 15.8},
+        ]
+        result = build_strokes(fractions, min_bars_per_stroke=5)
+        assert len(result) == 3
+        assert result[0]["direction"] == "up"
+        assert result[1]["direction"] == "down"
+        assert result[2]["direction"] == "up"
+        assert result[0]["end_price"] == 15.0
+        assert result[1]["end_price"] == 11.0
+        assert result[2]["end_price"] == 16.0
+
+    def test_stroke_has_indices(self):
+        """P1: build_strokes 写入 start_index / end_index（分型 mid bar index）。"""
+        fractions = [
+            {"type": "bottom", "index": 0, "low": 10.0, "high": 10.5, "close": 10.2},
+            {"type": "top", "index": 5, "high": 15.0, "low": 14.5, "close": 14.8},
+            {"type": "bottom", "index": 10, "low": 11.0, "high": 11.5, "close": 11.2},
+        ]
+        result = build_strokes(fractions, min_bars_per_stroke=5)
+        assert len(result) == 2
+        assert result[0]["start_index"] == 0
+        assert result[0]["end_index"] == 5
+        assert result[1]["start_index"] == 5
+        assert result[1]["end_index"] == 10
+        # 旧字段仍保留
+        assert result[0]["direction"] == "up"
+        assert result[0]["start_price"] == 10.0
+        assert result[0]["end_price"] == 15.0
+
 
 class TestBuildZones:
     def test_zone_valid(self):
@@ -144,14 +205,76 @@ class TestBuildZones:
 
 
 class TestDetectBuyPoints:
-    def test_buy_point_1(self):
-        strokes = [{"direction": "down", "end_price": 10.0}]
-        zones = []
-        result = detect_buy_points(strokes, zones, 10.0, macd_hist_current=-0.5, macd_hist_prev=-1.0)
+    def _make_bars_with_neg_areas(self, len_prev=5, len_curr=5, area_prev=-10.0, area_curr=-3.0):
+        """构造 bars：前笔区间负柱面积 area_prev，后笔 area_curr（均匀分配）。"""
+        bars = []
+        # padding before
+        for _ in range(2):
+            bars.append({"macd_histogram": 0.0, "close": 12.0, "volume": 1000})
+        # prev down stroke bars
+        per_prev = area_prev / len_prev
+        for _ in range(len_prev):
+            bars.append({"macd_histogram": per_prev, "close": 10.0, "volume": 1000})
+        # mid (up)
+        for _ in range(3):
+            bars.append({"macd_histogram": 0.5, "close": 11.0, "volume": 1000})
+        # curr down stroke bars
+        per_curr = area_curr / len_curr
+        for _ in range(len_curr):
+            bars.append({"macd_histogram": per_curr, "close": 9.0, "volume": 1000})
+        start_prev = 2
+        end_prev = start_prev + len_prev - 1
+        start_curr = end_prev + 1 + 3
+        end_curr = start_curr + len_curr - 1
+        return bars, start_prev, end_prev, start_curr, end_curr
+
+    def test_buy_point_1_with_zone_and_stroke_divergence(self):
+        """P1 一类买：有中枢 + 两 down + 后笔负面积更弱 → 有一类买 conf=3。"""
+        bars, sp, ep, sc, ec = self._make_bars_with_neg_areas(area_prev=-10.0, area_curr=-3.0)
+        strokes = [
+            {"direction": "down", "end_price": 10.0, "start_index": sp, "end_index": ep},
+            {"direction": "up", "end_price": 12.0},
+            {"direction": "down", "end_price": 9.0, "start_index": sc, "end_index": ec},
+        ]
+        zones = [{"zh_top": 11.5, "zh_bottom": 10.5, "valid": True}]
+        result = detect_buy_points(strokes, zones, 9.0, bars=bars)
         types = [bp["type"] for bp in result]
         assert "一类买" in types
+        bp1 = next(bp for bp in result if bp["type"] == "一类买")
+        assert bp1["confidence"] == 3
+
+    def test_buy_point_1_no_zone(self):
+        """P1 一类买：无中枢 → 不报一类（删除假一类）。"""
+        strokes = [
+            {"direction": "down", "end_price": 10.0},
+            {"direction": "up", "end_price": 12.0},
+            {"direction": "down", "end_price": 9.0},
+        ]
+        zones = []
+        result = detect_buy_points(
+            strokes, zones, 9.0, macd_hist_current=-0.5, macd_hist_prev=-1.0
+        )
+        types = [bp["type"] for bp in result]
+        assert "一类买" not in types
+
+    def test_buy_point_1_fallback_no_index(self):
+        """P1 一类买：有中枢 + 创新低 + 无 index 时 bar 级绿柱缩短 → conf=1。"""
+        strokes = [
+            {"direction": "down", "end_price": 10.0},
+            {"direction": "up", "end_price": 12.0},
+            {"direction": "down", "end_price": 9.0},
+        ]
+        zones = [{"zh_top": 11.5, "zh_bottom": 10.5, "valid": True}]
+        result = detect_buy_points(
+            strokes, zones, 9.0, macd_hist_current=-0.5, macd_hist_prev=-1.0
+        )
+        types = [bp["type"] for bp in result]
+        assert "一类买" in types
+        bp1 = next(bp for bp in result if bp["type"] == "一类买")
+        assert bp1["confidence"] == 1
 
     def test_buy_point_2(self):
+        """P1 二类买：结构满足 + macd_divergence_ok → 有。"""
         strokes = [
             {"direction": "down", "end_price": 8.0},
             {"direction": "up", "end_price": 11.0},
@@ -162,25 +285,115 @@ class TestDetectBuyPoints:
         types = [bp["type"] for bp in result]
         assert "二类买" in types
 
-    def test_buy_point_2_requires_macd_divergence(self):
-        """二类买点需要 MACD 确认，否则不触发。"""
+    def test_buy_point_2_requires_macd_or_area(self):
+        """P1 二类买：ok=False 且无面积 → 无。"""
         strokes = [
             {"direction": "down", "end_price": 8.0},
             {"direction": "up", "end_price": 11.0},
             {"direction": "down", "end_price": 10.0},
         ]
         zones = []
-        # macd_divergence_ok defaults to False → should NOT trigger 二类买
-        result = detect_buy_points(strokes, zones, 10.0)
+        result = detect_buy_points(strokes, zones, 10.0, macd_divergence_ok=False)
         types = [bp["type"] for bp in result]
         assert "二类买" not in types
 
-    def test_buy_point_3(self):
-        strokes = [{"direction": "up", "end_price": 11.0}]
+    def test_buy_point_3_above_old_narrow_window(self):
+        """P1 三类买：close 在中枢上方 3%（旧逻辑 >2% 会拒）+ 回踩 down 不破 zh_top → 有。"""
+        strokes = [
+            {"direction": "up", "end_price": 11.0},
+            {"direction": "down", "end_price": 10.05},  # 回踩不破 zh_top=10.0
+        ]
         zones = [{"zh_top": 10.0, "zh_bottom": 8.0, "valid": True}]
-        result = detect_buy_points(strokes, zones, 10.15)
+        # 3% above zh_top
+        result = detect_buy_points(strokes, zones, 10.30)
         types = [bp["type"] for bp in result]
         assert "三类买" in types
+
+    def test_buy_point_3_inside_zone(self):
+        """P1 三类买：close 仍在中枢内 → 无。"""
+        strokes = [{"direction": "up", "end_price": 9.5}]
+        zones = [{"zh_top": 10.0, "zh_bottom": 8.0, "valid": True}]
+        result = detect_buy_points(strokes, zones, 9.5)
+        types = [bp["type"] for bp in result]
+        assert "三类买" not in types
+
+    def test_buy_point_3_no_pullback_after_leave(self):
+        """P1 三类买：仅突破离开、尚未回踩 → 不报。"""
+        strokes = [
+            {"direction": "down", "end_price": 8.5},  # 离开前中枢内 down，不得干扰
+            {"direction": "up", "end_price": 11.0},  # 离开
+        ]
+        zones = [{"zh_top": 10.0, "zh_bottom": 8.0, "valid": True}]
+        result = detect_buy_points(strokes, zones, 10.50)
+        types = [bp["type"] for bp in result]
+        assert "三类买" not in types
+
+    def test_buy_point_3_pullback_breaks_zg(self):
+        """P1 三类买：离开后回踩破 ZG → 不报。"""
+        strokes = [
+            {"direction": "up", "end_price": 11.0},
+            {"direction": "down", "end_price": 9.5},  # 破 zh_top=10
+        ]
+        zones = [{"zh_top": 10.0, "zh_bottom": 8.0, "valid": True}]
+        result = detect_buy_points(strokes, zones, 10.30)
+        types = [bp["type"] for bp in result]
+        assert "三类买" not in types
+
+    def test_buy_point_3_beyond_max_leave_pct(self):
+        """P1 三类买：离开超过 15% 上限 → 不报。"""
+        strokes = [
+            {"direction": "up", "end_price": 13.0},
+            {"direction": "down", "end_price": 12.0},
+        ]
+        zones = [{"zh_top": 10.0, "zh_bottom": 8.0, "valid": True}]
+        result = detect_buy_points(strokes, zones, 12.0)  # 20% above
+        types = [bp["type"] for bp in result]
+        assert "三类买" not in types
+
+    def test_buy_point_1_area_not_weaker(self):
+        """P1 一类买：面积可算但后笔力度未更弱 → 不报一类。"""
+        bars, sp, ep, sc, ec = self._make_bars_with_neg_areas(area_prev=-3.0, area_curr=-10.0)
+        strokes = [
+            {"direction": "down", "end_price": 10.0, "start_index": sp, "end_index": ep},
+            {"direction": "up", "end_price": 12.0},
+            {"direction": "down", "end_price": 9.0, "start_index": sc, "end_index": ec},
+        ]
+        zones = [{"zh_top": 11.5, "zh_bottom": 10.5, "valid": True}]
+        result = detect_buy_points(strokes, zones, 9.0, bars=bars)
+        types = [bp["type"] for bp in result]
+        assert "一类买" not in types
+
+
+class TestDetectSellPointsP1:
+    """P1 卖点对称性抽检。"""
+
+    def test_sell_point_3_after_leave_bounce(self):
+        """三类卖：离开 ZD 后反弹不回 → 有。"""
+        strokes = [
+            {"direction": "down", "end_price": 7.0},  # 离开 zh_bottom=8
+            {"direction": "up", "end_price": 7.8},  # 反弹不回 ZD
+        ]
+        zones = [{"zh_top": 10.0, "zh_bottom": 8.0, "valid": True}]
+        result = detect_sell_points(strokes, zones, 7.5)
+        types = [sp["type"] for sp in result]
+        assert "三类卖" in types
+
+    def test_sell_point_3_no_bounce_after_leave(self):
+        """三类卖：仅离开未反弹 → 无。"""
+        strokes = [{"direction": "down", "end_price": 7.0}]
+        zones = [{"zh_top": 10.0, "zh_bottom": 8.0, "valid": True}]
+        result = detect_sell_points(strokes, zones, 7.5)
+        types = [sp["type"] for sp in result]
+        assert "三类卖" not in types
+
+
+class TestStrokeForceTolerance:
+    def test_force_not_much_stronger_tol(self):
+        from trader_shared.chan_core import _stroke_force_not_much_stronger
+        # |curr| = 10.4, |prev|=10 → 1.04 <= 1.05 → True
+        assert _stroke_force_not_much_stronger(-10.0, -10.4, "down", tol=1.05) is True
+        # 1.06 > 1.05 → False
+        assert _stroke_force_not_much_stronger(-10.0, -10.6, "down", tol=1.05) is False
 
 
 class TestCheckMacdFor2ndBuy:
@@ -248,6 +461,7 @@ class TestCheckMacdFor2ndBuy:
 
 class TestDetectDivergence:
     def test_divergence_top(self):
+        """fallback 全图峰谷顶背离（无笔/无 index）。"""
         bars = [
             {"high": 10, "low": 8, "macd_histogram": 0.5},
             {"high": 11, "low": 9, "macd_histogram": 1.0},
@@ -261,6 +475,7 @@ class TestDetectDivergence:
         assert result["top_divergence"] is True
 
     def test_divergence_bottom(self):
+        """fallback 全图峰谷底背离（无笔/无 index）。"""
         bars = [
             {"high": 12, "low": 10, "macd_histogram": -0.5},
             {"high": 11, "low": 9, "macd_histogram": -1.0},
@@ -272,6 +487,69 @@ class TestDetectDivergence:
         ]
         result = detect_divergence(bars)
         assert result["bottom_divergence"] is True
+
+    def test_stroke_level_bottom_divergence(self):
+        """P1 笔级底背驰：两 down 创新低 + 负面积减弱 → bottom_divergence True。"""
+        bars = []
+        for _ in range(5):
+            bars.append({"high": 12, "low": 10, "macd_histogram": -2.0, "close": 10})
+        for _ in range(3):
+            bars.append({"high": 13, "low": 11, "macd_histogram": 0.5, "close": 12})
+        for _ in range(5):
+            bars.append({"high": 11, "low": 8, "macd_histogram": -0.5, "close": 8})
+        strokes = [
+            {"direction": "down", "end_price": 10.0, "start_index": 0, "end_index": 4},
+            {"direction": "up", "end_price": 13.0, "start_index": 5, "end_index": 7},
+            {"direction": "down", "end_price": 8.0, "start_index": 8, "end_index": 12},
+        ]
+        result = detect_divergence(bars, strokes)
+        assert result["bottom_divergence"] is True
+        # 校验辅助：后笔 |area| 更小
+        a0 = _stroke_macd_area(bars, strokes[0], "neg")
+        a1 = _stroke_macd_area(bars, strokes[2], "neg")
+        assert _stroke_force_weaker(a0, a1, "down") is True
+
+    def test_stroke_level_top_divergence(self):
+        """P1 笔级顶背驰：两 up 创新高 + 正面积减弱 → top_divergence True。"""
+        bars = []
+        for _ in range(5):
+            bars.append({"high": 12, "low": 10, "macd_histogram": 2.0, "close": 12})
+        for _ in range(3):
+            bars.append({"high": 11, "low": 9, "macd_histogram": -0.5, "close": 10})
+        for _ in range(5):
+            bars.append({"high": 15, "low": 13, "macd_histogram": 0.5, "close": 15})
+        strokes = [
+            {"direction": "up", "end_price": 12.0, "start_index": 0, "end_index": 4},
+            {"direction": "down", "end_price": 9.0, "start_index": 5, "end_index": 7},
+            {"direction": "up", "end_price": 15.0, "start_index": 8, "end_index": 12},
+        ]
+        result = detect_divergence(bars, strokes)
+        assert result["top_divergence"] is True
+
+    def test_stroke_level_not_weaker_blocks_peak_fallback(self):
+        """P1: 笔级面积可算且未更弱时，底背驰保持 False，不被峰谷 fallback 覆盖。"""
+        # 后笔负面积更强（|area| 更大）→ 笔级不背驰
+        bars = []
+        for _ in range(5):
+            bars.append({"high": 12, "low": 10, "macd_histogram": -0.5, "close": 10})
+        for _ in range(3):
+            bars.append({"high": 13, "low": 11, "macd_histogram": 0.5, "close": 12})
+        for _ in range(5):
+            bars.append({"high": 11, "low": 8, "macd_histogram": -2.0, "close": 8})
+        # 同时构造明显的峰谷底背离形态（价新低 MACD 更高）——若误走 fallback 会变 True
+        bars[2] = {"high": 12, "low": 9.5, "macd_histogram": -1.5, "close": 10}
+        bars[10] = {"high": 11, "low": 7.5, "macd_histogram": -0.3, "close": 8}
+        strokes = [
+            {"direction": "down", "end_price": 10.0, "start_index": 0, "end_index": 4},
+            {"direction": "up", "end_price": 13.0, "start_index": 5, "end_index": 7},
+            {"direction": "down", "end_price": 8.0, "start_index": 8, "end_index": 12},
+        ]
+        a0 = _stroke_macd_area(bars, strokes[0], "neg")
+        a1 = _stroke_macd_area(bars, strokes[2], "neg")
+        assert a0 is not None and a1 is not None
+        assert _stroke_force_weaker(a0, a1, "down") is False
+        result = detect_divergence(bars, strokes)
+        assert result["bottom_divergence"] is False
 
 
 class TestChanlunAnalysis:
@@ -596,6 +874,21 @@ class TestBuildZonesMerge:
         assert len(raw) >= 2  # 至少 2 个 raw zones
         assert len(merged) == 1  # 合并为 1 个
         assert "members" in merged[0]
+        assert merged[0]["zh_top"] > merged[0]["zh_bottom"]
+        assert merged[0]["valid"] is True
+
+    def test_gap_zones_not_merged_into_invalid(self):
+        """P0: 不重叠但 gap 很小的中枢不得按交集合并成 top < bottom 的非法中枢。"""
+        raw_zones = [
+            {"zh_top": 12.0, "zh_bottom": 10.0, "zh_center": 11.0, "valid": True},
+            {"zh_top": 14.0, "zh_bottom": 12.05, "zh_center": 13.025, "valid": True},
+        ]
+        merged = _merge_zones(raw_zones, gap_pct=0.015)
+        # 不应合并成非法中枢：保持两个独立，或合并后仍 valid
+        assert len(merged) == 2
+        for z in merged:
+            assert z["zh_top"] > z["zh_bottom"]
+            assert z.get("valid", True) is True
 
     def test_merge_disabled(self):
         items = [
