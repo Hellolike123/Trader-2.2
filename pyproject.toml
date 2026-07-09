@@ -14,6 +14,7 @@ full = [
     "akshare>=1.10",
     "mootdx>=0.5",
     "pandas>=2.0",
+    "lxml>=4.9",  # pandas read_html + akshare 解析需要
 ]
 async = [
     "aiohttp>=3.9",

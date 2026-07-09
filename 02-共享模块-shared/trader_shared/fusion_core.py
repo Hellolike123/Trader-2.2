@@ -626,7 +626,12 @@ def merge_decisions(
     # 6. 综合置信度
     confidence = compute_confidence(weighted_score, disagreement_for_action, weights)
 
-    # weighted_score 自然范围 [-1.35, 1.35]，无需截断
+    # #7 修复：data_status=partial 时 weighted_score 也截断，避免
+    # report 里 weighted_score 显示正数但 action 显示"持股观望"的矛盾。
+    # 截断前的原始值保留为 raw_weighted_score，供调试用。
+    _raw_weighted_score = weighted_score
+    if data_status in ("partial", "degraded", "failed"):
+        weighted_score = _action_score  # 已被截断到 min(weighted_score, 0.0)
 
     # ── [2.3新增] 贝叶斯概率决策融合 ──
     bayesian_used = False
@@ -790,6 +795,7 @@ def merge_decisions(
         "action": action,
         "confidence": round(confidence, 3),
         "weighted_score": round(weighted_score, 3),
+        "raw_weighted_score": round(_raw_weighted_score, 3),  # #7: 截断前原始值，供调试
         "regime": regime,
         "hmm_regime": hmm_regime,
         "main_force_env": main_force_env or "unknown",
