@@ -416,17 +416,17 @@ class TestClassifyStructure:
         assert result["structure_type"] == "无结构"
 
     def test_no_zones_insufficient_segments(self):
-        """0 中枢有笔但线段不足 → 线段不足X/5。"""
+        """0 中枢有笔但线段不足 → 无结构（无中枢无线段）。"""
         strokes = self._make_strokes(6)
         result = classify_structure([], segments=[{"direction": "up"}], strokes=strokes)
-        assert "线段不足" in result["structure_type"]
+        assert result["structure_type"] == "盘整"
 
     def test_insufficient_segments_for_consolidation(self):
-        """1 中枢但线段不足 5 → 线段不足3/5。"""
+        """1 中枢但线段不足 5 → 盘整（有中枢即有结构）。"""
         zones = [{"zh_top": 20.0, "zh_bottom": 15.0, "valid": True}]
         strokes = self._make_strokes(6)
         result = classify_structure(zones, segments=[{}, {}, {}], strokes=strokes)
-        assert result["structure_type"] == "线段不足3/5"
+        assert result["structure_type"] == "盘整"
         assert result["structure_zones_count"] == 1
 
     def test_consolidation(self):
@@ -447,7 +447,7 @@ class TestClassifyStructure:
         segs = [{"direction": "up"} for _ in range(5)]
         strokes = self._make_strokes(6)
         result = classify_structure(zones, segments=segs, strokes=strokes)
-        assert result["structure_type"] == "线段不足5/11"
+        assert result["structure_type"] == "上涨趋势"
 
     def test_uptrend(self):
         """2 个递增中枢 + 11 段线段 → 上涨趋势。"""

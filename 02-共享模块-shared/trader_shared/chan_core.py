@@ -709,8 +709,8 @@ def classify_structure(zones: list[dict], segments: list[dict] | None = None, st
         if unilateral:
             return _ok(unilateral)
         if seg_count > 0:
-            return _ok(f"线段不足{seg_count}/{MIN_SEGMENTS_CONSOLIDATION}")
-        return _ok(f"线段不足0/{MIN_SEGMENTS_CONSOLIDATION}")
+            return _ok("盘整")
+        return _ok("无结构")
 
     # 判断中枢方向关系（拓扑：同向不重叠→趋势，重叠→盘整）
     pair_direction: str | None = None
@@ -736,19 +736,21 @@ def classify_structure(zones: list[dict], segments: list[dict] | None = None, st
         pivot = valid_zones[0]
         if _has_entry_exit_segments(pivot, segments):
             return _ok("盘整")
+        # 有中枢本身就是结构证据，线段不足时降级为盘整而非报错
         if seg_count >= MIN_SEGMENTS_CONSOLIDATION:
             return _ok("盘整")
-        return _ok(f"线段不足{seg_count}/{MIN_SEGMENTS_CONSOLIDATION}")
+        return _ok("盘整")
 
     # 2+ 个中枢
     if zones_trend in ("上涨趋势", "下跌趋势"):
         if seg_count < MIN_SEGMENTS_TREND:
-            return _ok(f"线段不足{seg_count}/{MIN_SEGMENTS_TREND}")
+            # 有多个中枢本身就是趋势证据，降级为趋势类型而非报错
+            return _ok(zones_trend)
         return _ok(zones_trend)
 
     # 中枢重叠 → 盘整
     if seg_count < MIN_SEGMENTS_CONSOLIDATION:
-        return _ok(f"线段不足{seg_count}/{MIN_SEGMENTS_CONSOLIDATION}")
+        return _ok("盘整")
     return _ok("盘整")
 
 
