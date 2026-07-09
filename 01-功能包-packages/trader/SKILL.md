@@ -7,16 +7,16 @@
 
 | 需求 | 命令 |
 |------|------|
-| 分析一只票（渲染报告） | `python3 01-功能包-packages/trader/scripts/final_report.py --target <NAME> --output markdown` |
-| 分析一只票（纯 JSON） | `python3 01-功能包-packages/trader/scripts/final_report.py --target <NAME> --output json` |
-| 价格监控 | `python3 01-功能包-packages/trader/scripts/final_report.py --target <NAME> --output alert-text` |
-| 入池 | `python3 01-功能包-packages/trader/scripts/final_pool.py add --target <NAME>` |
-| 入池前分析 | `python3 01-功能包-packages/trader/scripts/final_pool.py analyze --target <NAME>` |
-| 作战表 | `python3 01-功能包-packages/trader/scripts/final_pool.py plan` |
-| 池子概览 | `python3 01-功能包-packages/trader/scripts/final_pool.py list` |
-| 排序 | `python3 01-功能包-packages/trader/scripts/final_pool.py rank` |
-| 多票对比 | `python3 01-功能包-packages/trader/scripts/final_pool.py compare --targets A B C` |
-| 刷新全池 | `python3 01-功能包-packages/trader/scripts/final_pool.py refresh` |
+| 分析一只票（渲染报告） | `python3 scripts/final_report.py --target <NAME> --output markdown` |
+| 分析一只票（纯 JSON） | `python3 scripts/final_report.py --target <NAME> --output json` |
+| 价格监控 | `python3 scripts/final_report.py --target <NAME> --output alert-text` |
+| 入池 | `python3 scripts/final_pool.py add --target <NAME>` |
+| 入池前分析 | `python3 scripts/final_pool.py analyze --target <NAME>` |
+| 作战表 | `python3 scripts/final_pool.py plan` |
+| 池子概览 | `python3 scripts/final_pool.py list` |
+| 排序 | `python3 scripts/final_pool.py rank` |
+| 多票对比 | `python3 scripts/final_pool.py compare --targets A B C` |
+| 刷新全池 | `python3 scripts/final_pool.py refresh` |
 
 ⚠️ **渲染优先原则**：优先用 `--output markdown` 拿脚本渲染好的完整报告。仅当 `--output markdown` 失败或需要额外判断时，才 fallback 到 `--output json` + 从字段构建。
 
@@ -28,14 +28,14 @@
 调命令获取分析结果。
 
 ```bash
-python3 01-功能包-packages/trader/scripts/final_report.py --target <NAME> --output markdown
+python3 scripts/final_report.py --target <NAME> --output markdown
 ```
 
 - 如果成功 → 输出报告，进入 Exit
 - 如果 `--output markdown` 失败但 `--output json` 成功 → 进入 Step 2
 
 ### Step 2: 解读 JSON（仅当 markdown 渲染不可用时）
-读 `build_report()` 返回的 JSON，参考 `~/.agents/skills/trader/references/anti-hallucination.md` 和 `~/.agents/skills/trader/references/fusion-guide.md`。
+读 `build_report()` 返回的 JSON，参考 `references/anti-hallucination.md` 和 `references/fusion-guide.md`。
 
 核心字段：
 
@@ -81,7 +81,7 @@ python3 01-功能包-packages/trader/scripts/final_report.py --target <NAME> --o
 **MUST NOT proceed to output until data_status 已检查并处理。**
 
 **GATE 2 — 信号矛盾检测**：
-检查以下矛盾组合（详见 `~/.agents/skills/trader/references/anti-hallucination.md` Rule 3）：
+检查以下矛盾组合（详见 `references/anti-hallucination.md` Rule 3）：
 - `major_stage=主升` + `theory_status=暂不碰` → 说明矛盾
 - `fusion.weighted_score > 0.3` + `theory_status=暂不碰` → 说明矛盾
 - `major_stage=衰退` + `fusion.weighted_score > 0.3` → 以衰退为准
@@ -90,7 +90,7 @@ python3 01-功能包-packages/trader/scripts/final_report.py --target <NAME> --o
 
 **MUST NOT output until 所有矛盾已说明，不得隐藏或选择性忽略。**
 
-**GATE 3 — 方向判断铁律**（详见 `~/.agents/skills/trader/references/fusion-guide.md`）：
+**GATE 3 — 方向判断铁律**（详见 `references/fusion-guide.md`）：
 - `weighted_score` 正 = 多方，负 = 空方。唯一方向判断依据。
 - 禁止用 `action` 字符串字面意思推断方向。
 - `confidence < 0.3` → 降级处理：`信号弱，建议轻仓`
@@ -160,8 +160,8 @@ python3 01-功能包-packages/trader/scripts/final_report.py --target <NAME> --o
 | `references/commands.md` | 所有命令示例 |
 | `references/pool-commands.md` | 选股池命令 |
 | `references/pool-output-contract.md` | 选股池输出契约 |
-| `~/.agents/skills/trader/references/anti-hallucination.md` | 数据锚定表 + 信号矛盾处理 + 禁止用语（安装后） |
-| `~/.agents/skills/trader/references/fusion-guide.md` | 融合层字段解读 + 8档阈值 + verbatim 模板（安装后） |
+| `references/anti-hallucination.md` | 数据锚定表 + 信号矛盾处理 + 禁止用语（安装后） |
+| `references/fusion-guide.md` | 融合层字段解读 + 8档阈值 + verbatim 模板（安装后） |
 
 **使用前必须先 `read` 以上文件，禁止凭记忆生成报告。**
 

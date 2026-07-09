@@ -1838,6 +1838,9 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         lines.extend(["", f"  基础状态：{bs} ｜ 体系结论：{ts}"])
 
     # ── 📊 趋势轨道（参考，展示型，不进融合）──
+    # #5: data_status=partial 时基础数据不完整，趋势带/VWAP 可能失准，加警告
+    _data_partial = r.get("data_status") == "partial"
+
     _st_dir = r.get("supertrend_direction")
     if _st_dir:
         _st_emoji = "🟢" if _st_dir == "up" else ("🔴" if _st_dir == "down" else "⚪")
@@ -1847,6 +1850,8 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         _st_atr = float(r.get("supertrend_atr") or r.get("atr14") or 0)
         lines.append("")
         lines.append("📊 趋势轨道（参考）")
+        if _data_partial:
+            lines.append("  ⚠️ 数据不完整，趋势带可能失准")
         if _st_atr and _st_atr > 0:
             lines.append(f"  ATR {_st_atr:.2f}元（{_st_vol}）")
         if _st_stop:
@@ -1865,6 +1870,8 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         _vwap_level = r.get("vwap_level") or ""
         lines.append("")
         lines.append("📈 主力成本（VWAP·当日）")
+        if _data_partial:
+            lines.append("  ⚠️ 数据不完整，VWAP 可能失准")
         lines.append(f"  今日VWAP：{_vwap:.2f}元")
         if _vwap_pos == "above":
             lines.append(f"  价格 {_vwap_emoji} 在VWAP之上（当日{_vwap_level}，{_vwap_sign}{_vwap_dev * 100:.1f}%）")
