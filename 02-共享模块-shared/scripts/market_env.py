@@ -6,7 +6,8 @@ try:
     from pipeline import write_market
 
     _HAS_PIPELINE = True
-except ImportError:
+except (ImportError, AttributeError):
+    # #26 修复：pipeline 模块不存在或 write_market 接口变更都应静默降级
     _HAS_PIPELINE = False
 
 from trader_shared._logging import get_logger
