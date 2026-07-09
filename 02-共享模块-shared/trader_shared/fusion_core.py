@@ -80,68 +80,105 @@ def _log_fusion(result: dict) -> None:
 def _chan_to_signal(chan_result: dict) -> dict:
     """将 chanlun_strategy() 的原始输出映射为统一信号。
 
-    优先级: sell_points > buy_points > divergence > trend_label
+    优先级: 卖点(按类型) > 一类买 > 顶背驰 > 二/三类买 > 底背驰 > trend_label
+    （粘滞二/三类买不得压过顶背驰）
 
     缠论输出结构 (chanlun_strategy → run_all → levels["chanlun"]):
         {"chanlun": {"buy_points": [...], "sell_points": [...], "divergence": {...}, "trend_label": "..."}}
+    也兼容扁平分析 dict。
     """
-    chan = chan_result.get("chanlun", {}) if isinstance(chan_result, dict) else {}
+    try:
+        from trader_shared.chan_core import unwrap_chan
+        chan = unwrap_chan(chan_result) if isinstance(chan_result, dict) else {}
+    except ImportError:  # pragma: no cover
+        chan = chan_result.get("chanlun", {}) if isinstance(chan_result, dict) else {}
     if not isinstance(chan, dict):
         chan = {}
 
-    buy_points = chan.get("buy_points", [])
-    sell_points = chan.get("sell_points", [])
-    divergence = chan.get("divergence", {})
+    buy_points = chan.get("buy_points", []) if isinstance(chan.get("buy_points"), list) else []
+    sell_points = chan.get("sell_points", []) if isinstance(chan.get("sell_points"), list) else []
+    divergence = chan.get("divergence", {}) if isinstance(chan.get("divergence"), dict) else {}
     trend_label = chan.get("trend_label", "数据不足")
 
-    # 优先级1: sell_points (一类卖 > 二类卖 > 三类卖) - 卖点优先于买点
-    if isinstance(sell_points, list):
-        for sp in sell_points:
-            if not isinstance(sp, dict):
+    _SELL_RANK = {"一类卖": 0, "二类卖": 1, "三类卖": 2}
+    _BUY_RANK = {"一类买": 0, "二类买": 1, "三类买": 2}
+    _CHAN_CONF = {3: 0.8, 2: 0.55, 1: 0.35}
+
+    def _best_point(points: list, rank_map: dict) -> dict | None:
+        best = None
+        best_r = 999
+        for p in points:
+            if not isinstance(p, dict):
                 continue
-            sp_type = sp.get("type", "")
-            if sp_type == "一类卖":
-                return {"direction": -1, "confidence": 0.8,
-                        "reason": "缠论一类卖 (顶背驰)", "raw_key": "chan",
-                        "signal_id": sp.get("signal_id"), "signal_type": "chan_sell_1"}
-            if sp_type == "二类卖":
-                return {"direction": -1, "confidence": 0.5,
-                        "reason": "缠论二类卖 (高点降低)", "raw_key": "chan",
-                        "signal_id": sp.get("signal_id"), "signal_type": "chan_sell_2"}
-            if sp_type == "三类卖":
-                return {"direction": -1, "confidence": 0.5,
-                        "reason": "缠论三类卖 (跌破中枢)", "raw_key": "chan",
-                        "signal_id": sp.get("signal_id"), "signal_type": "chan_sell_3"}
+            r = rank_map.get(p.get("type"), 999)
+            if r < best_r:
+                best, best_r = p, r
+        return best
 
-    # 优先级2: buy_points (一类买 > 二类买 > 三类买)
-    if isinstance(buy_points, list):
-        for bp in buy_points:
-            if not isinstance(bp, dict):
-                continue
-            bp_type = bp.get("type", "")
-            if bp_type == "一类买":
-                return {"direction": 1, "confidence": 0.8,
-                        "reason": "缠论一类买 (底背驰)", "raw_key": "chan",
-                        "signal_id": bp.get("signal_id"), "signal_type": "chan_buy_1"}
-            if bp_type == "二类买":
-                return {"direction": 1, "confidence": 0.4,
-                        "reason": "缠论二类买 (低点抬高)", "raw_key": "chan",
-                        "signal_id": bp.get("signal_id"), "signal_type": "chan_buy_2"}
-            if bp_type == "三类买":
-                return {"direction": 1, "confidence": 0.4,
-                        "reason": "缠论三类买 (突破中枢)", "raw_key": "chan",
-                        "signal_id": bp.get("signal_id"), "signal_type": "chan_buy_3"}
+    def _point_conf(p: dict, default: float) -> float:
+        try:
+            c = int(p.get("confidence") or 0)
+        except (TypeError, ValueError):
+            c = 0
+        return _CHAN_CONF.get(c, default)
 
-    # 优先级2: 背驰
-    if isinstance(divergence, dict):
-        if divergence.get("bottom_divergence"):
-            return {"direction": 1, "confidence": 0.5,
-                    "reason": "缠论底背驰", "raw_key": "chan"}
-        if divergence.get("top_divergence"):
-            return {"direction": -1, "confidence": 0.5,
-                    "reason": "缠论顶背驰", "raw_key": "chan"}
+    # 1) 卖点：按类型真优先级（不依赖 list 顺序）
+    best_sell = _best_point(sell_points, _SELL_RANK)
+    if best_sell is not None:
+        sp_type = best_sell.get("type", "")
+        conf = _point_conf(best_sell, 0.5 if sp_type != "一类卖" else 0.8)
+        reasons = {
+            "一类卖": "缠论一类卖 (顶背驰)",
+            "二类卖": "缠论二类卖 (高点降低)",
+            "三类卖": "缠论三类卖 (跌破中枢)",
+        }
+        types = {"一类卖": "chan_sell_1", "二类卖": "chan_sell_2", "三类卖": "chan_sell_3"}
+        if sp_type in reasons:
+            return {
+                "direction": -1,
+                "confidence": conf,
+                "reason": reasons[sp_type],
+                "raw_key": "chan",
+                "signal_id": best_sell.get("signal_id"),
+                "signal_type": types[sp_type],
+            }
 
-    # 优先级3: 趋势
+    best_buy = _best_point(buy_points, _BUY_RANK)
+
+    # 2) 一类买优先于顶背驰
+    if best_buy is not None and best_buy.get("type") == "一类买":
+        return {
+            "direction": 1,
+            "confidence": _point_conf(best_buy, 0.8),
+            "reason": "缠论一类买 (底背驰)",
+            "raw_key": "chan",
+            "signal_id": best_buy.get("signal_id"),
+            "signal_type": "chan_buy_1",
+        }
+
+    # 3) 顶背驰优先于粘滞二/三类买
+    if divergence.get("top_divergence"):
+        return {"direction": -1, "confidence": 0.5,
+                "reason": "缠论顶背驰", "raw_key": "chan"}
+
+    # 4) 二/三类买
+    if best_buy is not None and best_buy.get("type") in ("二类买", "三类买"):
+        bp_type = best_buy.get("type")
+        return {
+            "direction": 1,
+            "confidence": _point_conf(best_buy, 0.4),
+            "reason": "缠论二类买 (低点抬高)" if bp_type == "二类买" else "缠论三类买 (突破中枢)",
+            "raw_key": "chan",
+            "signal_id": best_buy.get("signal_id"),
+            "signal_type": "chan_buy_2" if bp_type == "二类买" else "chan_buy_3",
+        }
+
+    # 5) 底背驰
+    if divergence.get("bottom_divergence"):
+        return {"direction": 1, "confidence": 0.5,
+                "reason": "缠论底背驰", "raw_key": "chan"}
+
+    # 6) 趋势
     structure_type = chan.get("structure_type", "")
     _st_suffix = f"({structure_type})" if structure_type else ""
     if isinstance(trend_label, str):

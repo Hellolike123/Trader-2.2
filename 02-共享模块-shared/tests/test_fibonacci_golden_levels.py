@@ -54,3 +54,31 @@ def test_fibonacci_golden_levels_calculation():
 
 def test_markdown_report_displays_golden_bid():
     pass
+
+
+def test_golden_bid_unwraps_chanlun_wrapper():
+    """生产路径 chanlun_strategy 包装层 {"chanlun": {...}} 必须能算出 golden_bid。"""
+    dummy_bars = [{"close": 10.0, "high": 10.5, "low": 9.5, "open": 10.0} for _ in range(30)]
+    wrapped = {
+        "chanlun": {
+            "strokes": [
+                {"direction": "up", "start_price": 8.00, "end_price": 12.00}
+            ]
+        }
+    }
+    quote = {"low": 9.80, "high": 10.20, "current": 10.10, "pre_close": 10.00}
+    result = build_structure_context(
+        current=10.10,
+        bars=dummy_bars,
+        change_pct=1.0,
+        quote=quote,
+        fusion_result=None,
+        chan_result=wrapped,
+    )
+    fib = result.get("fib_retrace")
+    assert fib is not None
+    assert fib["swing_low"] == 8.00
+    assert fib["swing_high"] == 12.00
+    # 与扁平路径一致：至少有一个回撤位被算出
+    assert fib["retrace_500"] == 10.00
+

@@ -18,9 +18,11 @@ from trader_shared.chan_core import (
     detect_divergence,
     chanlun_analysis,
     chanlun_strategy,
+    unwrap_chan,
     _check_macd_for_2nd_buy,
     _stroke_macd_area,
     _stroke_force_weaker,
+    _stroke_force_not_much_stronger,
     _aggregate_bars,
     _higher_level_trend,
     _merge_zones,
@@ -431,11 +433,31 @@ class TestDetectSellPointsP1:
 
 class TestStrokeForceTolerance:
     def test_force_not_much_stronger_tol(self):
-        from trader_shared.chan_core import _stroke_force_not_much_stronger
         # |curr| = 10.4, |prev|=10 → 1.04 <= 1.05 → True
         assert _stroke_force_not_much_stronger(-10.0, -10.4, "down", tol=1.05) is True
         # 1.06 > 1.05 → False
         assert _stroke_force_not_much_stronger(-10.0, -10.6, "down", tol=1.05) is False
+
+    def test_zero_area_not_valid_force(self):
+        """无同侧真实柱时 area 为 None，不得用 0.0 放行 weaker / not_much_stronger。"""
+        bars = [{"macd_histogram": 0.0} for _ in range(10)]
+        stroke = {"start_index": 0, "end_index": 9, "direction": "down"}
+        assert _stroke_macd_area(bars, stroke, "neg") is None
+        assert _stroke_force_weaker(-5.0, None, "down") is False
+        assert _stroke_force_not_much_stronger(None, None, "down") is False
+        # 正柱区段对 neg 侧无效
+        bars_pos = [{"macd_histogram": 1.0} for _ in range(10)]
+        assert _stroke_macd_area(bars_pos, stroke, "neg") is None
+
+
+class TestUnwrapChan:
+    def test_nested_and_flat(self):
+        flat = {"strokes": [1], "buy_points": []}
+        nested = {"chanlun": flat}
+        assert unwrap_chan(nested) is flat
+        assert unwrap_chan(flat) is flat
+        assert unwrap_chan(None) == {}
+        assert unwrap_chan("x") == {}
 
 
 class TestCheckMacdFor2ndBuy:

@@ -167,22 +167,41 @@ def _check_theory_breakout(
     if not price_strong:
         return False
 
-    # 1. 缺论验证
+    # 1. 缠论验证（兼容 {"chanlun": {...}} 包装层）
     chan_ok = False
     if isinstance(chan_result, dict):
-        buy_point_text = str(chan_result.get("buy_point_text") or "")
-        trend_label = str(chan_result.get("trend_label") or "")
-        strokes = chan_result.get("strokes", [])
+        try:
+            from trader_shared.chan_core import unwrap_chan
+            chan = unwrap_chan(chan_result)
+        except ImportError:  # pragma: no cover
+            chan = (
+                chan_result.get("chanlun")
+                if isinstance(chan_result.get("chanlun"), dict)
+                else chan_result
+            )
+        buy_point_text = str(chan.get("buy_point_text") or "")
+        trend_label = str(chan.get("trend_label") or "")
+        strokes = chan.get("strokes", [])
 
         # 最强确认：触发三类买点（突破回踩确认）
         if "三类买" in buy_point_text:
             chan_ok = True
-        # 或是拉升段/上攻笔中
+        # 或是拉升段
         elif trend_label == "拉升段" or trend_label == "拉升窗口":
             chan_ok = True
+        # 裸「末笔 up」过松：需配合站上中枢上沿或明确买点文本
         elif isinstance(strokes, list) and len(strokes) > 0:
             if strokes[-1].get("direction") == "up":
-                chan_ok = True
+                zones = chan.get("zones") or chan.get("merged_zones") or []
+                last_zg = None
+                for z in reversed(zones) if isinstance(zones, list) else []:
+                    if isinstance(z, dict) and z.get("valid") and z.get("zh_top") is not None:
+                        last_zg = z.get("zh_top")
+                        break
+                if last_zg is not None and current >= float(last_zg):
+                    chan_ok = True
+                elif "一类买" in buy_point_text or "二类买" in buy_point_text:
+                    chan_ok = True
 
     # 2. 威科夫验证
     wyk_ok = False

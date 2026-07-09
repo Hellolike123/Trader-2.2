@@ -5,6 +5,21 @@ from typing import Any
 from trader_shared.light_data import to_float
 from trader_shared.signal_utils import normalize_signal_id
 
+
+def unwrap_chan(chan_result: Any) -> dict:
+    """剥开 chanlun_strategy 包装层，兼容嵌套与扁平两种形态。
+
+    - 嵌套: {"chanlun": {...分析字段...}}  → 内层 dict
+    - 扁平: {"strokes": ..., "buy_points": ...} → 原样返回
+    - 非法/空 → {}
+    """
+    if not isinstance(chan_result, dict):
+        return {}
+    inner = chan_result.get("chanlun")
+    if isinstance(inner, dict):
+        return inner
+    return chan_result
+
 try:
     from trader_shared.config import (
         CHANLUN_MIN_BARS,
@@ -840,17 +855,18 @@ def _stroke_macd_area(bars: list[dict] | None, stroke: dict, side: str) -> float
         return None
 
     area = 0.0
-    has_data = False
+    signed_count = 0  # 必须有同侧真实柱；预热 0.0 / 反号柱不算有效力度
     for i in range(lo, hi + 1):
         h = to_float(bars[i].get("macd_histogram"))
         if h is None:
             continue
-        has_data = True
         if side == "neg" and h < 0:
             area += h
+            signed_count += 1
         elif side == "pos" and h > 0:
             area += h
-    if not has_data:
+            signed_count += 1
+    if signed_count == 0:
         return None
     return area
 
@@ -1074,8 +1090,13 @@ def detect_buy_points(
                         "confidence": 1,
                     })
 
-    # ── P1 二类买：回抽不破前低（low_a 扮演一类低点，不要求列表里已有一类）──
-    if len(strokes) >= 3 and len(down_strokes) >= 2 and len(up_strokes) >= 1:
+    # ── P1 二类买：回抽不破前低；要求末笔即为该回抽 down（防粘滞）──
+    if (
+        len(strokes) >= 3
+        and len(down_strokes) >= 2
+        and len(up_strokes) >= 1
+        and last_stroke["direction"] == "down"
+    ):
         low_a = down_strokes[-2]["end_price"]
         low_b = down_strokes[-1]["end_price"]
         idx_a = -1
@@ -1085,30 +1106,30 @@ def detect_buy_points(
                 idx_a = i
             if s is down_strokes[-1]:
                 idx_b = i
-        up_high = None
-        if idx_a >= 0 and idx_b > idx_a:
-            for s in strokes[idx_a + 1:idx_b]:
-                if s["direction"] == "up" and s.get("end_price") is not None:
-                    if up_high is None or s["end_price"] > up_high:
-                        up_high = s["end_price"]
-        if up_high is None:
-            up_high = max(s["end_price"] for s in up_strokes)
+        # 末笔必须是最后一根 down
+        if idx_b == len(strokes) - 1:
+            up_high = None
+            if idx_a >= 0 and idx_b > idx_a:
+                for s in strokes[idx_a + 1:idx_b]:
+                    if s["direction"] == "up" and s.get("end_price") is not None:
+                        if up_high is None or s["end_price"] > up_high:
+                            up_high = s["end_price"]
+            if up_high is None:
+                up_high = max(s["end_price"] for s in up_strokes)
 
-        structure_ok = low_b > low_a and low_b < up_high
-        if structure_ok:
-            # 确认：笔级负面积不显著更强，或上游 macd_divergence_ok
-            area_prev = _stroke_macd_area(bars, down_strokes[-2], "neg")
-            area_curr = _stroke_macd_area(bars, down_strokes[-1], "neg")
-            area_ok = _stroke_force_not_much_stronger(area_prev, area_curr, "down")
-            if area_ok or macd_divergence_ok:
-                buy_points.append({
-                    "type": "二类买",
-                    "price": round(low_b, 4),
-                    "confidence": 2,
-                })
+            structure_ok = low_b > low_a and low_b < up_high
+            if structure_ok:
+                area_prev = _stroke_macd_area(bars, down_strokes[-2], "neg")
+                area_curr = _stroke_macd_area(bars, down_strokes[-1], "neg")
+                area_ok = _stroke_force_not_much_stronger(area_prev, area_curr, "down")
+                if area_ok or macd_divergence_ok:
+                    buy_points.append({
+                        "type": "二类买",
+                        "price": round(low_b, 4),
+                        "confidence": 2,
+                    })
 
-    # ── P1/P2 三类买：离开中枢后回踩不入（取消 0~2% 窄窗）──
-    # 取「最近一次有效离开」：up 且 end>ZG，且其后仍有 down（可回抽空间）；持续更新 leave_i。
+    # ── P1/P2 三类买：离开中枢后回踩不入；回抽须为近端（末 2 笔内）──
     if last_close > 0 and valid_zones:
         last_valid = valid_zones[-1]
         zh_top = last_valid["zh_top"]
@@ -1122,21 +1143,23 @@ def detect_buy_points(
                         and s.get("end_price") is not None
                         and s["end_price"] > zh_top
                     ):
-                        # 仅当其后仍有 down 笔时，才记为「可回抽的离开」
                         if any(
                             strokes[k].get("direction") == "down"
                             for k in range(i + 1, len(strokes))
                         ):
-                            leave_i = i  # 持续更新 → 最近一次
+                            leave_i = i
                 pullback_ok = False
+                last_down_i = None
                 if leave_i is not None:
-                    downs_after = [
-                        s for s in strokes[leave_i + 1 :]
-                        if s.get("direction") == "down" and s.get("end_price") is not None
-                    ]
-                    # 必须有离开后的回抽；最近一次回抽 end >= ZG（不破中枢上沿）
-                    if downs_after and downs_after[-1]["end_price"] >= zh_top:
-                        pullback_ok = True
+                    for i in range(len(strokes) - 1, leave_i, -1):
+                        s = strokes[i]
+                        if s.get("direction") == "down" and s.get("end_price") is not None:
+                            last_down_i = i
+                            if s["end_price"] >= zh_top:
+                                # 回抽在末 2 笔内才算当前三买（防粘滞）
+                                if last_down_i >= len(strokes) - 2:
+                                    pullback_ok = True
+                            break
                 if leave_i is not None and pullback_ok:
                     vol_ok = not bars or _volume_confirm(len(bars) - 1, 1.2)
                     if vol_ok:
@@ -1213,8 +1236,13 @@ def detect_sell_points(
                         "confidence": 1,
                     })
 
-    # ── P1 二类卖：回抽不过前高 ──
-    if len(strokes) >= 3 and len(up_strokes) >= 2 and len(down_strokes) >= 1:
+    # ── P1 二类卖：回抽不过前高；要求末笔即为该回抽 up（防粘滞）──
+    if (
+        len(strokes) >= 3
+        and len(up_strokes) >= 2
+        and len(down_strokes) >= 1
+        and last_stroke["direction"] == "up"
+    ):
         high_a = up_strokes[-2]["end_price"]
         high_b = up_strokes[-1]["end_price"]
         idx_a = -1
@@ -1224,29 +1252,29 @@ def detect_sell_points(
                 idx_a = i
             if s is up_strokes[-1]:
                 idx_b = i
-        down_low = None
-        if idx_a >= 0 and idx_b > idx_a:
-            for s in strokes[idx_a + 1:idx_b]:
-                if s["direction"] == "down" and s.get("end_price") is not None:
-                    if down_low is None or s["end_price"] < down_low:
-                        down_low = s["end_price"]
-        if down_low is None:
-            down_low = min(s["end_price"] for s in down_strokes)
+        if idx_b == len(strokes) - 1:
+            down_low = None
+            if idx_a >= 0 and idx_b > idx_a:
+                for s in strokes[idx_a + 1:idx_b]:
+                    if s["direction"] == "down" and s.get("end_price") is not None:
+                        if down_low is None or s["end_price"] < down_low:
+                            down_low = s["end_price"]
+            if down_low is None:
+                down_low = min(s["end_price"] for s in down_strokes)
 
-        structure_ok = high_b < high_a and high_b > down_low
-        if structure_ok:
-            area_prev = _stroke_macd_area(bars, up_strokes[-2], "pos")
-            area_curr = _stroke_macd_area(bars, up_strokes[-1], "pos")
-            area_ok = _stroke_force_not_much_stronger(area_prev, area_curr, "up")
-            if area_ok or macd_divergence_ok:
-                sell_points.append({
-                    "type": "二类卖",
-                    "price": round(high_b, 4),
-                    "confidence": 2,
-                })
+            structure_ok = high_b < high_a and high_b > down_low
+            if structure_ok:
+                area_prev = _stroke_macd_area(bars, up_strokes[-2], "pos")
+                area_curr = _stroke_macd_area(bars, up_strokes[-1], "pos")
+                area_ok = _stroke_force_not_much_stronger(area_prev, area_curr, "up")
+                if area_ok or macd_divergence_ok:
+                    sell_points.append({
+                        "type": "二类卖",
+                        "price": round(high_b, 4),
+                        "confidence": 2,
+                    })
 
-    # ── P1/P2 三类卖：离开中枢后反弹不回 ZD（取消过窄窗口）──
-    # 取「最近一次有效离开」：down 且 end<ZD，且其后仍有 up（可反弹空间）；持续更新 leave_i。
+    # ── P1/P2 三类卖：离开后反弹不回；反弹须为近端（末 2 笔内）──
     if last_close > 0 and valid_zones:
         last_valid = valid_zones[-1]
         zh_bottom = last_valid["zh_bottom"]
@@ -1260,20 +1288,19 @@ def detect_sell_points(
                         and s.get("end_price") is not None
                         and s["end_price"] < zh_bottom
                     ):
-                        # 仅当其后仍有 up 笔时，才记为「可反弹的离开」
                         if any(
                             strokes[k].get("direction") == "up"
                             for k in range(i + 1, len(strokes))
                         ):
-                            leave_i = i  # 持续更新 → 最近一次
+                            leave_i = i
                 bounce_ok = False
                 if leave_i is not None:
-                    ups_after = [
-                        s for s in strokes[leave_i + 1 :]
-                        if s.get("direction") == "up" and s.get("end_price") is not None
-                    ]
-                    if ups_after and ups_after[-1]["end_price"] <= zh_bottom:
-                        bounce_ok = True
+                    for i in range(len(strokes) - 1, leave_i, -1):
+                        s = strokes[i]
+                        if s.get("direction") == "up" and s.get("end_price") is not None:
+                            if s["end_price"] <= zh_bottom and i >= len(strokes) - 2:
+                                bounce_ok = True
+                            break
                 if leave_i is not None and bounce_ok:
                     vol_ok = not bars or _volume_spike(len(bars) - 1, 1.2)
                     if vol_ok:
@@ -1435,12 +1462,21 @@ def chanlun_analysis(
         hc = to_float(higher_trend.get("confidence")) or 0.0
     confident = hc >= 0.66
 
-    # 冲突过滤：上级趋势 down 且置信 → 仅保留 二类买（已由 MACD 门控）
+    # 多级别过滤（P1 裁定）：上级明确反向时保留「一类」背驰点，去掉二/三类粘滞点；
+    # 同步清理无对应一类时的 divergence，避免过滤买点却仍报底/顶背驰。
+    if isinstance(divergence, dict):
+        divergence = dict(divergence)
+    else:
+        divergence = {"top_divergence": False, "bottom_divergence": False}
+
     if confident and ht == "down":
-        buy_points = [bp for bp in buy_points if bp["type"] == "二类买"]
-    # 冲突过滤：上级趋势 up 且置信 → 仅保留 二类卖（已由 MACD 门控）
+        buy_points = [bp for bp in buy_points if bp["type"] == "一类买"]
+        if not buy_points:
+            divergence["bottom_divergence"] = False
     if confident and ht == "up":
-        sell_points = [sp for sp in sell_points if sp["type"] == "二类卖"]
+        sell_points = [sp for sp in sell_points if sp["type"] == "一类卖"]
+        if not sell_points:
+            divergence["top_divergence"] = False
 
     # 顺向增强：买点与上级 up 同向 → confidence +1（cap 3）
     if confident and ht == "up":
@@ -1524,7 +1560,14 @@ def chanlun_analysis(
         "structure_segments_count": structure["structure_segments_count"],
         # E1 新增字段
         "higher_trend": ht,
-        "higher_trend_conflict": bool(confident and ht in ("up", "down")),
+        # 真冲突：上级趋势明确，且本级仍留有对立方向买卖点/背驰时为 True
+        "higher_trend_conflict": bool(
+            confident
+            and (
+                (ht == "down" and (buy_points or divergence.get("bottom_divergence")))
+                or (ht == "up" and (sell_points or divergence.get("top_divergence")))
+            )
+        ),
         # E3 新增字段：fractions（修复 time_window_detector 死代码 bug）
         "fractions": fractions,
         # E2 新增字段：合并中枢信息

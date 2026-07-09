@@ -666,7 +666,13 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     golden_bid = None
 
     if isinstance(chan_result, dict):
-        strokes = chan_result.get("strokes", [])
+        # 兼容 chanlun_strategy 包装层 {"chanlun": {...}} 与扁平分析 dict
+        try:
+            from trader_shared.chan_core import unwrap_chan
+            _chan = unwrap_chan(chan_result)
+        except ImportError:  # pragma: no cover
+            _chan = chan_result.get("chanlun") if isinstance(chan_result.get("chanlun"), dict) else chan_result
+        strokes = _chan.get("strokes", []) if isinstance(_chan, dict) else []
         if isinstance(strokes, list) and len(strokes) >= 1:
             last_stroke = strokes[-1]
             direction = last_stroke.get("direction")

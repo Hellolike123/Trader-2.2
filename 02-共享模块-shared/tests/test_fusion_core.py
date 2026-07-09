@@ -28,19 +28,22 @@ class TestChanToSignal:
         fn = self._fn
         result = fn({"chanlun": {"buy_points": [{"type": "二类买", "price": 27.8, "confidence": 2}]}})
         assert result["direction"] == 1
-        assert result["confidence"] == 0.4
+        assert result["confidence"] == 0.55  # conf=2 → 0.55 映射
 
     def test_three_buy_points_priority(self):
-        """多个 buy_points 时, 第一个匹配的类型优先。"""
+        """多个 buy_points 时按类型真优先级（一类>二类>三类），不依赖 list 顺序。"""
         fn = self._fn
+        # 列表故意把三类放前、一类放后
         result = fn({"chanlun": {
             "buy_points": [
-                {"type": "二类买", "price": 27, "confidence": 2},
                 {"type": "三类买", "price": 26, "confidence": 1},
+                {"type": "二类买", "price": 27, "confidence": 2},
+                {"type": "一类买", "price": 28, "confidence": 3},
             ]
         }})
         assert result["direction"] == 1
-        assert result["confidence"] == 0.4  # 二类买优先(列表中第一个)
+        assert result["confidence"] == 0.8  # 一类买
+        assert "一类买" in result["reason"]
 
     def test_底背驰(self):
         fn = self._fn
@@ -83,15 +86,24 @@ class TestChanToSignal:
         assert result["direction"] == 0
         assert result["confidence"] == 0.3
 
-    def test_priority_buy_points_over_divergence(self):
-        """buy_points 存在时忽略 divergence。"""
+    def test_priority_top_divergence_over_weak_buy(self):
+        """粘滞二/三类买不得压过顶背驰；一类买仍优先于顶背驰。"""
         fn = self._fn
+        # 二类买 + 顶背驰 → 顶背驰
         result = fn({"chanlun": {
             "buy_points": [{"type": "二类买", "price": 27, "confidence": 2}],
             "divergence": {"top_divergence": True},
         }})
-        assert result["direction"] == 1
-        assert result["confidence"] == 0.4  # 二类买, 不是顶背驰
+        assert result["direction"] == -1
+        assert result["confidence"] == 0.5
+        assert "顶背驰" in result["reason"]
+        # 一类买 + 顶背驰 → 一类买
+        result2 = fn({"chanlun": {
+            "buy_points": [{"type": "一类买", "price": 27, "confidence": 3}],
+            "divergence": {"top_divergence": True},
+        }})
+        assert result2["direction"] == 1
+        assert result2["confidence"] == 0.8
 
     def test_priority_divergence_over_trend(self):
         """divergence 存在时忽略 trend_label。"""
@@ -667,7 +679,7 @@ class TestIntegrationDataFlow:
 
         result = _chan_to_signal(levels_chanlun)
         assert result["direction"] == 1
-        assert result["confidence"] == 0.4  # 二类买
+        assert result["confidence"] == 0.55  # 二类买 conf=2
 
     def test_momentum_nested_structure(self):
         from trader_shared.fusion_core import _momentum_to_signal
