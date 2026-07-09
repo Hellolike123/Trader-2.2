@@ -831,9 +831,13 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     levels["chan_divergence"] = chan_inner.get("divergence", {})
     levels["chan_structure_type"] = chan_inner.get("structure_type", "")
     levels["chan_segments_count"] = chan_inner.get("segments_count", 0)
-    levels["wyckoff_spring_signal"] = wyck_result.get("spring_signal", False)
-    levels["wyckoff_summary"] = wyck_result.get("wyckoff_summary", "无明显信号")
-    levels["wyckoff_upthrust_signal"] = wyck_result.get("upthrust_signal", False)
+    # wyckoff_strategy 返回 {"wyckoff": {...}}，需解包内层再取字段
+    _wyk = wyck_result.get("wyckoff", wyck_result) if isinstance(wyck_result, dict) else {}
+    if not isinstance(_wyk, dict):
+        _wyk = {}
+    levels["wyckoff_spring_signal"] = _wyk.get("spring_signal", False)
+    levels["wyckoff_summary"] = _wyk.get("wyckoff_summary", "无明显信号")
+    levels["wyckoff_upthrust_signal"] = _wyk.get("upthrust_signal", False)
     levels["base_status"] = levels.get("base_status") or levels.get("status")
     levels["theory_status"] = levels.get("theory_status") or levels.get("status")
     levels["fusion_override_used"] = levels.get("fusion_override_used", False)
@@ -1803,28 +1807,35 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         lines.append(f"🎯 {_action_word}{_veto_part}")
 
 
-    # 4. 理论状态（第二行）— 从 fusion_signals 获取
-    _theory_parts = []
-    _SIGNAL_LABELS = {
-        "chan": "缠论", "momentum": "动量", "wyckoff": "威科夫",
-    }
-    for _sig_key, _sig_label in _SIGNAL_LABELS.items():
-        if _sig_key in fusion_signals:
-            _sig = fusion_signals[_sig_key]
-            if isinstance(_sig, dict):
-                _state = str(_sig.get("reason", "") or "").strip()
-                _dir = _sig.get("direction", 0)
-                _dir_label = "看涨" if _dir > 0 else ("看跌" if _dir < 0 else "中性")
-                if not _state or _state == "无明确信号":
-                    _state = "无信号"
-                # 去掉前缀冗余
-                _state = _state.replace(_sig_label, "").strip()
-                if _state.startswith(":"):
-                    _state = _state[1:]
-                _theory_parts.append(f"{_sig_label}:{_state}·{_dir_label}")
+    # 4. 理论状态 — 缠论/动量用 fusion reason；威科夫一行人话
+    for _sig_key, _sig_label in (("chan", "缠论"), ("momentum", "动量")):
+        if _sig_key not in fusion_signals:
+            continue
+        _sig = fusion_signals[_sig_key]
+        if not isinstance(_sig, dict):
+            continue
+        _state = str(_sig.get("reason", "") or "").strip()
+        _dir = _sig.get("direction", 0)
+        _dir_label = "看涨" if _dir > 0 else ("看跌" if _dir < 0 else "中性")
+        if not _state or _state == "无明确信号":
+            _state = "无信号"
+        _state = _state.replace(_sig_label, "").strip()
+        if _state.startswith(":"):
+            _state = _state[1:]
+        lines.append(f"  {_sig_label}:{_state}·{_dir_label}")
 
-    for _tp in _theory_parts:
-        lines.append(f"  {_tp}")
+    try:
+        from trader_shared.wyckoff_core import format_wyckoff_oneline
+        _w_sig = fusion_signals.get("wyckoff") if isinstance(fusion_signals.get("wyckoff"), dict) else {}
+        _w_dir = _w_sig.get("direction") if _w_sig else None
+        _wyk_raw = r.get("wyckoff")
+        if isinstance(_wyk_raw, dict) and "wyckoff" in _wyk_raw:
+            _wyk_raw = _wyk_raw.get("wyckoff")
+        lines.append(
+            f"  {format_wyckoff_oneline(_wyk_raw if isinstance(_wyk_raw, dict) else {}, direction=_w_dir)}"
+        )
+    except Exception:
+        lines.append("  威科夫：暂无明确信号 · 中性")
 
     # 5. 冲突比（第三行，如有）
     if disagreement_count > 0 and fusion_signals:

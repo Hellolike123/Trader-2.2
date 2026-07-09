@@ -30,7 +30,8 @@
 - **性能优化（2026-06-15）**：① T0 `build_plan` 的 5 个数据请求（quote/daily/5m/15m/30m）从串行改并行，单次卡片从 0.92s 降到 0.45s（约 46%），盘中每个 monitor 循环都受益。② 单票 `build_report` 消除重复的 `get_env_for_skill` 调用与 `_load_historical_win_rate` 重复抓 300 天日线，稳态从 0.48s 降到 0.43s。③ `cache_utils.set_cached` 修复多线程 tmp 文件名竞态（原用 `os.getpid()` 导致同进程线程互相覆盖），选股池刷新的 cache warning 从每次 4 次降到 0。④ 新增 `refresh` 命令批量重跑全池 `build_report` 并行刷新（8 只票约 1.8s），解决 `plan`/`rank` 使用入池时旧数据的问题。
 - **筹码搬家监控 (Chip Migration Monitor)**：`chip_migration_monitor.py` 对每次单票分析生成的筹码峰快照进行持久化（`~/.trader/chip_history.json`），并对比前后变化。底部筹码峰下降超过 40% 触发警告、超过 50% 触发清仓信号，用于识别主力出货迹象。
 - **资金流向数据 (Fund Flow Data)**：`fund_flow_data.py` 通过东方财富 HTTP API 采集个股日线级资金流向（超大单/大单/中单/小单净流入），并计算衍生特征供主力行为识别引擎使用。
-- **Spring ATR 动态刺穿深度**：`wyckoff_core.py` 的 `_detect_spring()` 优先用 ATR 计算刺穿深度（`support - 0.5×ATR`），ATR 不可用时 fallback 到固定比例（1.5%）。配置：`WYCKOFF_SPRING_ATR_MULTIPLE=0.5`。
+- **Spring ATR 动态刺穿深度**：`wyckoff_core.py` 的 `_detect_spring()` / `_detect_st()` 共用 `_spring_breach_level()`，优先 `support - 0.5×ATR`，否则 `support × 0.985`。配置：`WYCKOFF_SPRING_ATR_MULTIPLE=0.5`。
+- **威科夫 fusion 与报告一行人话**：`_wyckoff_to_signal` 优先级 Spring → SOS → UT → BC → SOW → AR → ST → LPS → 背离；高量 Spring 降权；BC 须高位（`WYCKOFF_BC_MIN_POS_PCT=0.65`）。报告用 `format_wyckoff_oneline()` 单行白话（结论+方向+括号说明），无信号时为 `威科夫：暂无明确信号 · 中性`。`🎯` 主阶段仍是主力四阶段（major_stage），不是威科夫 A–E phase。
 - **假跌破硬性熔断**：`decision_core.py` 的 `status_layers()` 在假跌破确认之前检查单日跌幅，跌幅超 7% 直接返回"风险回避"，跳过假跌破逻辑。配置：`HARD_STOP_SINGLE_DAY_DROP=-0.07`。
 - **T+1 隔离锁**：`stage_positioning.py` 的 `evaluate_position_state()` 新增 `last_add_date` 参数，当天已加仓则返回"持仓观察（T+1冷却）"，禁止日内重复加仓。
 - **多周期支撑压力阶梯**：`structure_core.py` 新增 `find_key_levels(bars)` 函数，在 300 根数据里找短线（10日）、中线（60日）、长线（120日）三级支撑压力位。报告展示为价格阶梯（🌟当前位置）。
@@ -214,8 +215,8 @@ trailing_stop = highest_close × (1 - ATR% × 3.0)
   基础状态：防守观察 ｜ 体系结论：防守观察
 
   缠论:拉升段(盘整)·看涨
-  威科夫:无信号·中性
   动量:MACD柱为正(偏多)·看涨
+  威科夫：暂无明确信号 · 中性
   2方看多 vs 1方看空
 
 📍 决策

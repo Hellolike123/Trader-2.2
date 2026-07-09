@@ -237,6 +237,33 @@ class TestWyckoffToSignal:
         assert result["direction"] == 1
         assert result["confidence"] == 0.75  # Spring + bullish_div 叠加
 
+    def test_high_vol_spring_confidence_reduced(self):
+        """高量 Spring：confidence 从 0.7 降至 0.45"""
+        fn = self._fn
+        result = fn({
+            "wyckoff": {
+                "spring_signal": True,
+                "spring_reason": "放量弹簧",
+                "spring_vol_class": "high_vol_warning",
+            }
+        })
+        assert result["direction"] == 1
+        assert result["confidence"] == 0.45
+
+    def test_high_vol_spring_with_bullish_div(self):
+        """高量 Spring + 看多背离：confidence ≈ 0.5"""
+        fn = self._fn
+        result = fn({
+            "wyckoff": {
+                "spring_signal": True,
+                "spring_reason": "放量弹簧",
+                "spring_vol_class": "high_vol_warning",
+                "bullish_volume_divergence": True,
+            }
+        })
+        assert result["direction"] == 1
+        assert result["confidence"] == 0.5
+
     def test_bullish_divergence(self):
         fn = self._fn
         result = fn({"wyckoff": {"bullish_volume_divergence": True, "bearish_volume_divergence": False}})
@@ -254,6 +281,35 @@ class TestWyckoffToSignal:
         result = fn({"wyckoff": {"upthrust_signal": True, "upthrust_reason": "突破阻力后回落"}})
         assert result["direction"] == -1
         assert result["confidence"] == 0.6
+
+    def test_bc_signal_bearish(self):
+        """P1: BC 进入 fusion 主链，看空 conf=0.55"""
+        fn = self._fn
+        result = fn({"wyckoff": {"bc_signal": True, "bc_reason": "天量滞涨"}})
+        assert result["direction"] == -1
+        assert result["confidence"] == 0.55
+        assert "购买高潮" in result["reason"] or "天量" in result["reason"]
+
+    def test_sow_signal_bearish(self):
+        """P1: SOW 进入 fusion 主链，看空 conf=0.5"""
+        fn = self._fn
+        result = fn({"wyckoff": {"sow_signal": True, "sow_reason": "放量跌破支撑"}})
+        assert result["direction"] == -1
+        assert result["confidence"] == 0.5
+
+    def test_bc_priority_over_ar(self):
+        """BC+AR 同时时 BC 优先（净偏空，与打分一致）"""
+        fn = self._fn
+        result = fn({
+            "wyckoff": {
+                "bc_signal": True,
+                "bc_reason": "购买高潮",
+                "ar_signal": True,
+                "ar_reason": "自动反弹",
+            }
+        })
+        assert result["direction"] == -1
+        assert result["confidence"] == 0.55
 
     def test_no_signal(self):
         fn = self._fn

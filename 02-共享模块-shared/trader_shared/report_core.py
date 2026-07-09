@@ -93,20 +93,34 @@ def render_single(r: dict[str, Any]) -> str:
 
     # ── 理论信号行 ──
     fusion_signals = fusion.get("signals_detail") or {}
-    _SIGNAL_LABELS = {"chan": "缠论", "momentum": "动量", "wyckoff": "威科夫"}
-    _theory_parts = []
-    for _key, _label in _SIGNAL_LABELS.items():
-        if _key in fusion_signals:
-            _sig = fusion_signals[_key]
-            if isinstance(_sig, dict):
-                _state = str(_sig.get("reason", "") or "").replace(_label, "").strip().lstrip(":").strip()
-                _dir = _sig.get("direction", 0)
-                _dir_label = "看涨" if _dir > 0 else ("看跌" if _dir < 0 else "中性")
-                if not _state or _state == "无明确信号":
-                    _state = "无信号"
-                _theory_parts.append(f"{_label}:{_state}·{_dir_label}")
-    for _tp in _theory_parts:
-        lines.append(f"  {_tp}")
+    # 缠论 / 动量：沿用 fusion reason；威科夫：一行人话
+    for _key, _label in (("chan", "缠论"), ("momentum", "动量")):
+        if _key not in fusion_signals:
+            continue
+        _sig = fusion_signals[_key]
+        if not isinstance(_sig, dict):
+            continue
+        _state = str(_sig.get("reason", "") or "").replace(_label, "").strip().lstrip(":").strip()
+        _dir = _sig.get("direction", 0)
+        _dir_label = "看涨" if _dir > 0 else ("看跌" if _dir < 0 else "中性")
+        if not _state or _state == "无明确信号":
+            _state = "无信号"
+        lines.append(f"  {_label}:{_state}·{_dir_label}")
+
+    if "wyckoff" in fusion_signals or r.get("wyckoff"):
+        try:
+            from trader_shared.wyckoff_core import format_wyckoff_oneline
+            _w_sig = fusion_signals.get("wyckoff") if isinstance(fusion_signals.get("wyckoff"), dict) else {}
+            _w_dir = _w_sig.get("direction") if _w_sig else None
+            _wyk_raw = r.get("wyckoff")
+            if isinstance(_wyk_raw, dict) and "wyckoff" in _wyk_raw:
+                _wyk_raw = _wyk_raw.get("wyckoff")
+            lines.append(f"  {format_wyckoff_oneline(_wyk_raw if isinstance(_wyk_raw, dict) else {}, direction=_w_dir)}")
+        except Exception:
+            _sig = fusion_signals.get("wyckoff") if isinstance(fusion_signals.get("wyckoff"), dict) else {}
+            _dir = _sig.get("direction", 0) if _sig else 0
+            _dl = "偏多" if _dir > 0 else ("偏空" if _dir < 0 else "中性")
+            lines.append(f"  威科夫：暂无明确信号 · {_dl}")
 
     # ── 冲突比 ──
     disagreement = int(fusion.get("disagreement", 0))

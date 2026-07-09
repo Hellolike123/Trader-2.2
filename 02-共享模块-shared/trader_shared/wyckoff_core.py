@@ -12,6 +12,7 @@ try:
         WYCKOFF_BC_VOL_RATIO_THRESHOLD,
         WYCKOFF_BC_CHANGE_THRESHOLD,
         WYCKOFF_BC_UPPER_SHADOW_RATIO,
+        WYCKOFF_BC_MIN_POS_PCT,
         WYCKOFF_SOW_SUPPORT_LOOKBACK,
         WYCKOFF_SOW_VOL_RATIO_THRESHOLD,
         WYCKOFF_SOW_CONSECUTIVE_DAYS,
@@ -44,9 +45,10 @@ try:
     )
 except ImportError:
     WYCKOFF_MIN_BARS = 15
-    WYCKOFF_BC_VOL_RATIO_THRESHOLD = 1.8  # must match config.py:95
+    WYCKOFF_BC_VOL_RATIO_THRESHOLD = 1.8  # must match config.py
     WYCKOFF_BC_CHANGE_THRESHOLD = 1.0
     WYCKOFF_BC_UPPER_SHADOW_RATIO = 0.02
+    WYCKOFF_BC_MIN_POS_PCT = 0.65
     WYCKOFF_SOW_SUPPORT_LOOKBACK = 10
     WYCKOFF_SOW_VOL_RATIO_THRESHOLD = 1.0
     WYCKOFF_SOW_CONSECUTIVE_DAYS = 1
@@ -76,6 +78,52 @@ except ImportError:
     WYCKOFF_SCORE_SOS = 15
     WYCKOFF_SCORE_ST = 8
     WYCKOFF_SCORE_LPS = 12
+
+
+# ── 共享工具：Spring 刺穿深度 / BC 高位过滤 ─────────────────────────
+
+def _spring_breach_level(support: float, bar: dict | None = None) -> float:
+    """Spring 刺穿深度线：优先 ATR，fallback 固定比例。
+
+    与 _detect_spring / _detect_st 共用，避免 ST 回扫用固定 1.5% 而 Spring 用 ATR。
+    """
+    atr14 = to_float(bar.get("atr14")) if bar else None
+    if atr14 is not None and atr14 > 0:
+        return support - atr14 * WYCKOFF_SPRING_ATR_MULTIPLE
+    return support * WYCKOFF_SPRING_RECLAIM_RATIO
+
+
+def _price_pos_pct(bars: list[dict], idx: int, lookback: int | None = None) -> float | None:
+    """计算 bars[idx] 收盘价在近窗高低区间中的位置 (0=底, 1=顶)。"""
+    if idx < 0 or idx >= len(bars):
+        return None
+    lb = lookback or WYCKOFF_SPRING_SUPPORT_LOOKBACK
+    start = max(0, idx - lb)
+    window = bars[start:idx + 1]
+    highs = [to_float(b.get("high")) for b in window]
+    lows = [to_float(b.get("low")) for b in window]
+    valid_h = [h for h in highs if h is not None]
+    valid_l = [lo for lo in lows if lo is not None]
+    close = to_float(bars[idx].get("close"))
+    high = to_float(bars[idx].get("high"))
+    if not valid_h or not valid_l or close is None:
+        return None
+    range_hi = max(valid_h)
+    range_lo = min(valid_l)
+    span = range_hi - range_lo
+    if span <= 0:
+        return 1.0  # 无波动时视为中性高位
+    # 用 high/close 较高者判定是否在高位区
+    ref = max(close, high if high is not None else close)
+    return (ref - range_lo) / span
+
+
+def _is_bc_high_position(bars: list[dict], idx: int) -> bool:
+    """BC 高位过滤：须处于近窗价格区间上沿。"""
+    pos = _price_pos_pct(bars, idx)
+    if pos is None:
+        return False
+    return pos >= WYCKOFF_BC_MIN_POS_PCT
 
 
 # ── 动态支撑位计算（多源集成）────────────────────────────────────────
@@ -187,6 +235,10 @@ def _detect_buying_climax(bars: list[dict]) -> dict:
         if vol_ratio < WYCKOFF_BC_VOL_RATIO_THRESHOLD:
             continue
 
+        # P1: 高位过滤 — 低位天量不标 BC（派发 Phase A 须在区间上沿）
+        if not _is_bc_high_position(bars, scan_idx):
+            continue
+
         # 天量 + 滞涨（收盘接近开盘或阴线）
         is_stagnant = change_pct < WYCKOFF_BC_CHANGE_THRESHOLD
         has_upper_shadow = upper_shadow_ratio > WYCKOFF_BC_UPPER_SHADOW_RATIO
@@ -196,6 +248,9 @@ def _detect_buying_climax(bars: list[dict]) -> dict:
 
         parts = []
         parts.append(f"量比 {vol_ratio:.1f}")
+        pos = _price_pos_pct(bars, scan_idx)
+        if pos is not None:
+            parts.append(f"高位区{pos*100:.0f}%")
         if is_stagnant:
             parts.append(f"涨幅仅 {change_pct:.1f}%")
         if has_upper_shadow:
@@ -315,12 +370,8 @@ def _detect_spring(bars: list[dict], _support: float | None = None) -> dict:
     if current_low is None or current_close is None or support is None or current_volume is None:
         return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "数据异常"}
 
-    # P0-1: ATR 动态刺穿深度，优先使用 ATR，fallback 到固定比例
-    atr14 = to_float(current.get("atr14"))
-    if atr14 is not None and atr14 > 0:
-        breach_level = support - atr14 * WYCKOFF_SPRING_ATR_MULTIPLE
-    else:
-        breach_level = support * WYCKOFF_SPRING_RECLAIM_RATIO
+    # P0-1 / P1: ATR 动态刺穿深度（与 ST 共用 _spring_breach_level）
+    breach_level = _spring_breach_level(support, current)
 
     # 刺穿深度判定：最低价刺穿深度线，且收盘价收回到支撑上方
     if current_low >= breach_level or current_close < support:
@@ -464,7 +515,12 @@ def _detect_ar(bars: list[dict]) -> dict:
         has_upper_shadow = (upper_shadow / max(price_range, 0.01)) > WYCKOFF_BC_UPPER_SHADOW_RATIO if price_range > 0 else False
         is_candle = cur_close < cur_open
 
-        if vol_ratio >= WYCKOFF_BC_VOL_RATIO_THRESHOLD and (is_stagnant or is_candle):
+        # 与 _detect_buying_climax 对齐：量能 + 滞涨/阴线 + 高位过滤
+        if (
+            vol_ratio >= WYCKOFF_BC_VOL_RATIO_THRESHOLD
+            and (is_stagnant or is_candle)
+            and _is_bc_high_position(bars, scan_idx)
+        ):
             bc_bar_idx = scan_idx
             bc_close = cur_close
             bc_avg_vol = avg_volume
@@ -497,9 +553,9 @@ def _detect_sos(bars: list[dict]) -> dict:
     """Detect Sign of Strength (SOS) — 连续放量突破。
 
     触发条件（最近 5 根 K 线窗口）:
-      - 全部 5 根为阳线 (close > open)
+      - ≥4/5 阳线 (close > open)（A 股极少 5 连阳，与 LPS 对齐）
       - close[4] >= open[0] (总体抬高)
-      - 平均量比 > 1.2
+      - 平均量比 > 1.2（相对前窗基线均量）
       - 累计涨幅 >= 2%
     """
     if len(bars) < WYCKOFF_DIVERGENCE_BARS + WYCKOFF_SPRING_SUPPORT_LOOKBACK:
@@ -580,7 +636,8 @@ def _detect_st(bars: list[dict]) -> dict:
     if support is None:
         return {"st_signal": False, "st_reason": "支撑位数据异常", "st_price": None}
 
-    breach_level = support * WYCKOFF_SPRING_RECLAIM_RATIO
+    # P1: 与 Spring 共用 ATR/固定比例刺穿深度
+    breach_level = _spring_breach_level(support, current)
     cur_low = to_float(current.get("low"))
     cur_close = to_float(current.get("close"))
 
@@ -603,7 +660,7 @@ def _detect_st(bars: list[dict]) -> dict:
             if not vs:
                 continue
             sup = min(vs)
-            br = sup * WYCKOFF_SPRING_RECLAIM_RATIO
+            br = _spring_breach_level(sup, scan_range[i])
             if sl < br and sc >= sup:
                 support = sup
                 spring_detected = True
@@ -627,9 +684,10 @@ def _detect_st(bars: list[dict]) -> dict:
         if not vs:
             continue
         sup = min(vs)
-        br = sup * WYCKOFF_SPRING_RECLAIM_RATIO
+        br = _spring_breach_level(sup, bars[i])
         if sl < br and sc >= sup:
             spring_idx = i
+            support = sup
             break
 
     if spring_idx is None:
@@ -670,122 +728,106 @@ def _detect_lps(bars: list[dict]) -> dict:
     """Detect LPS (Last Point of Support) — SOS 突破后回调不破前低。
 
     威科夫阶段: ... → SOS → 回调 → LPS → 主升
-    检测窗口 (25+ 根):
-      bars[-5:]     = SOS 窗口
-      bars[-15:-5]  = 回调窗口 (5-10 根)
-      bars[-20:-15] = 前高窗口 (5 根, 用于 pre_low)
+    检测逻辑:
+      1. 从近到远找「最近一次」有效 SOS 锚点（SOS 结束后的 bar 索引）
+      2. 只评估该 SOS 之后到当前的完整回调（2–10 根），不回退到更早伪 SOS
+      3. 回调不破 SOS 前低（允许约 1% 容差）
+      4. 回调末端缩量（相对基线均量 * 0.7）
+      5. SOS 阳线标准与 _detect_sos 对齐：≥4/5 阳线
     """
-    min_bars = WYCKOFF_DIVERGENCE_BARS + 10 + WYCKOFF_SPRING_SUPPORT_LOOKBACK  # ≈25
+    sos_len = WYCKOFF_DIVERGENCE_BARS  # 5
+    min_pb = 2
+    max_pb = 10
+    baseline_len = 10
+    min_bars = sos_len + min_pb + baseline_len + WYCKOFF_SPRING_SUPPORT_LOOKBACK  # ≈27
     if len(bars) < min_bars:
         return {"lps_signal": False, "lps_reason": "数据不足", "lps_price": None}
 
-    # ── 1. 检测 SOS: bars[-5:] ──
-    sos_window = bars[-WYCKOFF_DIVERGENCE_BARS:]
-    sos_closes: list[float] = []
-    sos_opens: list[float] = []
-    sos_vols: list[float] = []
-    for b in sos_window:
-        o = to_float(b.get("open"))
-        c = to_float(b.get("close"))
-        v = to_float(b.get("volume"))
-        if o is None or c is None or v is None:
-            continue
-        sos_opens.append(o)
-        sos_closes.append(c)
-        sos_vols.append(v)
+    n = len(bars)
 
-    if len(sos_closes) != 5:
-        return {"lps_signal": False, "lps_reason": "SOS 数据不足", "lps_price": None}
-    if not all(c > o for c, o in zip(sos_closes, sos_opens)):
-        return {"lps_signal": False, "lps_reason": "SOS 非全阳线", "lps_price": None}
-    if sos_closes[4] <= sos_opens[0]:
-        return {"lps_signal": False, "lps_reason": "SOS 涨幅不足", "lps_price": None}
-    gain = (sos_closes[4] - sos_opens[0]) / max(sos_opens[0], 0.01)
-    if gain < 0.02:
-        return {"lps_signal": False, "lps_reason": "SOS 涨幅不足", "lps_price": None}
+    def _valid_sos(sos_start: int, sos_end: int) -> tuple[bool, float, float]:
+        """返回 (是否有效 SOS, 前低, 基线均量)。"""
+        if sos_start < baseline_len or sos_end - sos_start != sos_len:
+            return False, 0.0, 0.0
+        sos_window = bars[sos_start:sos_end]
+        sos_opens: list[float] = []
+        sos_closes: list[float] = []
+        sos_vols: list[float] = []
+        for b in sos_window:
+            o = to_float(b.get("open"))
+            c = to_float(b.get("close"))
+            v = to_float(b.get("volume"))
+            if o is None or c is None or v is None:
+                return False, 0.0, 0.0
+            sos_opens.append(o)
+            sos_closes.append(c)
+            sos_vols.append(v)
+        bullish_count = sum(1 for c, o in zip(sos_closes, sos_opens) if c > o)
+        if bullish_count < 4:
+            return False, 0.0, 0.0
+        if sos_closes[-1] < sos_opens[0]:
+            return False, 0.0, 0.0
+        gain = (sos_closes[-1] - sos_opens[0]) / max(sos_opens[0], 0.01)
+        if gain < 0.02:
+            return False, 0.0, 0.0
+        baseline = bars[sos_start - baseline_len:sos_start]
+        baseline_avg_vol = sum(to_float(b.get("volume")) or 0 for b in baseline) / max(len(baseline), 1)
+        if baseline_avg_vol <= 0:
+            return False, 0.0, 0.0
+        if sum(sos_vols) / sos_len < baseline_avg_vol * 1.2:
+            return False, 0.0, 0.0
+        pre_start = max(0, sos_start - 5)
+        pre_lows = [to_float(bars[i].get("low")) for i in range(pre_start, sos_start)]
+        pre_lows = [v for v in pre_lows if v is not None]
+        if not pre_lows:
+            return False, 0.0, 0.0
+        return True, min(pre_lows), baseline_avg_vol
 
-    # SOS 量能: 计算基线均量 (bars[-15:-5], SOS 之前 10 根)
-    baseline_len = WYCKOFF_DIVERGENCE_BARS + 10  # 15
-    baseline_start = max(0, len(bars) - baseline_len)
-    baseline = bars[baseline_start:-WYCKOFF_DIVERGENCE_BARS]
-    baseline_avg_vol = sum(to_float(b.get("volume")) or 0 for b in baseline) / max(len(baseline), 1)
-    if baseline_avg_vol <= 0:
-        return {"lps_signal": False, "lps_reason": "量能数据不足", "lps_price": None}
-    sos_avg_vol = sum(sos_vols) / 5
-    if sos_avg_vol < baseline_avg_vol * 1.2:
-        return {"lps_signal": False, "lps_reason": "SOS 量能不足", "lps_price": None}
-
-    # ── 2. 扫描回调窗口: bars[-10:-5] ──
-    # 窗口内滑动检测 2-10 根的缩量回调
-    pullback_start = max(0, len(bars) - WYCKOFF_DIVERGENCE_BARS - 5)  # bars[-10:-5] 的起点
-    pullback = bars[pullback_start:-WYCKOFF_DIVERGENCE_BARS]  # 最多 5 根
-    if len(pullback) < 2:
-        return {"lps_signal": False, "lps_reason": "回调窗口不足", "lps_price": None}
-
-    # 跳过 None 数据，与 _detect_spring 一致：静默变 0 会误触发信号
-    pb_closes: list[float] = []
-    pb_lows: list[float] = []
-    pb_vols: list[float] = []
-    for b in pullback:
-        c = to_float(b.get("close"))
-        lo = to_float(b.get("low"))
-        v = to_float(b.get("volume"))
-        if c is None or lo is None or v is None:
-            continue
-        pb_closes.append(c)
-        pb_lows.append(lo)
-        pb_vols.append(v)
-
-    if len(pb_closes) < 2:
-        return {"lps_signal": False, "lps_reason": "回调有效数据不足", "lps_price": None}
-
-    best_lps: dict | None = None
-
-    for end in range(1, len(pb_closes) + 1):  # 回调长度 1..5
-        seg_closes = pb_closes[:end]
-        seg_lows = pb_lows[:end]
-
-        # 回调: 价格下行或横盘 (末尾 <= 起始 * 1.01)
-        if seg_closes[-1] > seg_closes[0] * 1.01:
+    # 从近到远：sos_end = n-2, n-3, ... n-10 → 取最近一次有效 SOS 后只评估一次
+    for pb_len in range(min_pb, max_pb + 1):
+        sos_end = n - pb_len
+        sos_start = sos_end - sos_len
+        ok, pre_low, baseline_avg_vol = _valid_sos(sos_start, sos_end)
+        if not ok:
             continue
 
-        seg_low = min(seg_lows)
+        pullback = bars[sos_end:n]
+        pb_closes: list[float] = []
+        pb_lows: list[float] = []
+        pb_vols: list[float] = []
+        for b in pullback:
+            c = to_float(b.get("close"))
+            lo = to_float(b.get("low"))
+            v = to_float(b.get("volume"))
+            if c is None or lo is None or v is None:
+                continue
+            pb_closes.append(c)
+            pb_lows.append(lo)
+            pb_vols.append(v)
+        if len(pb_closes) < 2:
+            # 最近有效 SOS 已找到但回调数据不足 → 结束，不回退更早 SOS
+            return {"lps_signal": False, "lps_reason": "SOS 后回调数据不足", "lps_price": None}
 
-        # 记录最佳 LPS (最低回调点)
-        if best_lps is None or seg_low < best_lps["low"]:
-            best_lps = {
-                "low": seg_low,
-                "close": seg_closes[-1],
-                "end_idx": pullback_start + end - 1,
-                "vol": pb_vols[end - 1],
-            }
+        # 回调：价格下行或横盘（末收 ≤ 起始 * 1.01）
+        if pb_closes[-1] > pb_closes[0] * 1.01:
+            return {"lps_signal": False, "lps_reason": "SOS 后未形成有效回调", "lps_price": None}
 
-    if best_lps is None:
-        return {"lps_signal": False, "lps_reason": "未检测到有效回调", "lps_price": None}
+        pb_low = min(pb_lows)
+        # 不破 SOS 前低（允许 1% 容差）
+        if pb_low < pre_low * 0.99:
+            return {"lps_signal": False, "lps_reason": "回调跌破 SOS 前低", "lps_price": None}
 
-    # ── 3. 找前高 (回调窗口之前的 5 根: bars[-15:-10]) ──
-    pre_low_start = pullback_start - 5
-    pre_low_start = max(0, pre_low_start)
-    pre_low_end = pullback_start
-    pre_lows = [to_float(bars[i].get("low")) for i in range(pre_low_start, pre_low_end)]
-    pre_lows = [v for v in pre_lows if v is not None]
-    if not pre_lows:
-        return {"lps_signal": False, "lps_reason": "前低数据不足", "lps_price": None}
-    pre_low = min(pre_lows)
+        # 回调末端缩量
+        if pb_vols[-1] >= baseline_avg_vol * 0.7:
+            return {"lps_signal": False, "lps_reason": "回调量能不萎缩", "lps_price": None}
 
-    # 不破前低 (允许 1% 容差)
-    if best_lps["low"] < pre_low * 0.99:
-        return {"lps_signal": False, "lps_reason": "回调跌破前低", "lps_price": None}
+        return {
+            "lps_signal": True,
+            "lps_reason": f"SOS 后缩量回调，低点 {pb_low:.2f} 未破前低 {pre_low:.2f}",
+            "lps_price": round(pb_low, 2),
+        }
 
-    # 末期缩量: 回调末端成交量 < 基线均量 * 0.7
-    if best_lps["vol"] >= baseline_avg_vol * 0.7:
-        return {"lps_signal": False, "lps_reason": "回调量能不萎缩", "lps_price": None}
-
-    return {
-        "lps_signal": True,
-        "lps_reason": f"SOS 前缩量回调，低点 {best_lps['low']:.2f} 未破前低 {pre_low:.2f}",
-        "lps_price": round(best_lps["low"], 2),
-    }
+    return {"lps_signal": False, "lps_reason": "未检测到有效 LPS（需 SOS→缩量回调）", "lps_price": None}
 
 
 # ── VSA (Volume Spread Analysis) 努力 vs 结果检测 ───────────────────
@@ -849,16 +891,29 @@ def _scan_for_signal(
     """在 bars 上滑动窗口运行检测器，找到任意窗口触发即返回 True。
 
     解决单次调用只能检测最近几根 K 线的问题——通过滑动窗口扫描历史。
+    始终额外检查末尾窗口，避免 step>1 时漏掉最新信号。
     """
     n = len(bars)
     if n < window:
+        # 数据不足整窗时，仍尝试整段 bars（兼容短序列末尾信号）
+        try:
+            result = detector_fn(bars)
+            for key in result:
+                if key.endswith("_signal") and result[key] is True:
+                    return True
+        except Exception:
+            pass
         return False
-    # 从最早的位置开始，每次滑动 step 根
-    for start in range(0, n - window + 1, step):
+
+    starts = list(range(0, n - window + 1, step))
+    last_start = n - window
+    if last_start not in starts:
+        starts.append(last_start)
+
+    for start in starts:
         sub = bars[start:start + window]
         try:
             result = detector_fn(sub)
-            # 检查 result 中的 signal 字段
             for key in result:
                 if key.endswith("_signal") and result[key] is True:
                     return True
@@ -880,44 +935,66 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any]) -> dict[str, Any]:
     lookback = min(WYCKOFF_PHASE_LOOKBACK, len(bars))
     wide_bars = bars[-lookback:]
 
-    # 滑动窗口扫描早期信号（BC/UT/SOW/AR）
-    # 这些信号通常发生在阶段初期，不在最近 5 根 K 线内
-    bc_found = _scan_for_signal(wide_bars, _detect_buying_climax, window=15, step=5)
-    ar_found = _scan_for_signal(wide_bars, _detect_ar, window=18, step=5)
-    ut_found = _scan_for_signal(wide_bars, _detect_upthrust, window=15, step=5)
-    sow_found = _scan_for_signal(wide_bars, _detect_sign_of_weakness, window=16, step=5)
+    # 当前 bar 信号优先（避免 scan step 漏检末尾），再滑动扫描历史窗口
+    bc_found = bool(signals.get("bc_signal")) or _scan_for_signal(
+        wide_bars, _detect_buying_climax, window=15, step=5
+    )
+    ar_found = bool(signals.get("ar_signal")) or _scan_for_signal(
+        wide_bars, _detect_ar, window=18, step=5
+    )
+    ut_found = bool(signals.get("upthrust_signal")) or _scan_for_signal(
+        wide_bars, _detect_upthrust, window=15, step=5
+    )
+    sow_found = bool(signals.get("sow_signal")) or _scan_for_signal(
+        wide_bars, _detect_sign_of_weakness, window=16, step=5
+    )
 
     # 后期信号直接用当前检测结果（通常在近期窗口内触发）
     spring = signals.get("spring_signal", False)
     sos = signals.get("sos_signal", False)
     lps = signals.get("lps_signal", False)
 
-    # 积累型序列：BC → AR → Spring → SOS/LPS
-    if bc_found and ar_found and spring and (sos or lps):
+    # ── 积累序列：Spring 为起点（Phase C），SOS/LPS 升级到 D ──
+    # 注意：BC 是派发 Phase A 事件，绝不能标成 accumulation_a
+    if spring and (sos or lps):
         return {
             "phase": "accumulation_d",
-            "phase_label": "积累期 D（确认：SOS/LPS）",
+            "phase_label": "积累期 D（确认：Spring+SOS/LPS）",
             "phase_confidence_delta": 0.10,
         }
-    if bc_found and ar_found and spring:
+    if spring:
         return {
             "phase": "accumulation_c",
             "phase_label": "积累期 C（测试：Spring）",
             "phase_confidence_delta": 0.10,
         }
-    if bc_found and ar_found:
+    # AR 且无 BC：可能是吸筹自动反弹（尚无完整 SC 检测器，作积累辅助）
+    if ar_found and not bc_found:
         return {
-            "phase": "accumulation_a",
-            "phase_label": "积累期 A（停止：BC+AR）",
+            "phase": "accumulation_b",
+            "phase_label": "积累期 B（辅助：AR无BC）",
             "phase_confidence_delta": 0.05,
         }
 
-    # 派发型序列：UT + SOW → 分配
+    # ── 派发序列：BC（Buying Climax）= 派发 Phase A ──
     if ut_found and sow_found:
         return {
             "phase": "distribution_c",
             "phase_label": "派发期 C（确认：UT+SOW）",
             "phase_confidence_delta": -0.10,
+        }
+    # BC 或 BC+AR（无 Spring）→ 派发期 A；BC+AR 负向更强
+    if bc_found and ar_found:
+        return {
+            "phase": "distribution_a",
+            "phase_label": "派发期 A（停止：BC+AR）",
+            "phase_confidence_delta": -0.10,
+        }
+    if bc_found:
+        return {
+            "phase": "distribution_a",
+            "phase_label": "派发期 A（购买高潮：BC）",
+            "phase_confidence_delta": -0.05,
         }
     if ut_found:
         return {
@@ -1088,16 +1165,30 @@ def calculate_wyckoff_score(bars: list[dict]) -> dict:
     upthrust = analysis.get("upthrust_signal")
     bc = analysis.get("bc_signal")
     sow = analysis.get("sow_signal")
+    spring_vol_class = analysis.get("spring_vol_class")
 
-    # 1. Spring — 最强看多信号
+    # 1. Spring — 最强看多信号；高量弹簧减半（可能是真破位，非供应耗尽）
     if spring:
-        raw += WYCKOFF_SCORE_SPRING
-        signals.append(f"Spring +{WYCKOFF_SCORE_SPRING}")
+        spring_pts = WYCKOFF_SCORE_SPRING
+        if spring_vol_class == "high_vol_warning":
+            spring_pts = spring_pts // 2  # 高量 Spring 分数减半
+            signals.append(f"Spring(高量降权) +{spring_pts}")
+        else:
+            signals.append(f"Spring +{spring_pts}")
+        raw += spring_pts
 
-    # 2. Spring + 看多背离额外加分
+    # 2. Spring + 看多背离额外加分；高量 Spring 同步降权（与主分一致）
     if spring and bullish_div:
-        raw += WYCKOFF_SCORE_SPRING_BULLISH_DIV_BONUS
-        signals.append(f"Spring×看多背离 +{WYCKOFF_SCORE_SPRING_BULLISH_DIV_BONUS}")
+        bonus = WYCKOFF_SCORE_SPRING_BULLISH_DIV_BONUS
+        if spring_vol_class == "high_vol_warning":
+            bonus = bonus // 2  # 高量时背离加成减半（0 当 1 时 floor 为 0）
+            if bonus > 0:
+                signals.append(f"Spring×看多背离(高量降权) +{bonus}")
+            else:
+                signals.append("Spring×看多背离(高量降权) +0")
+        else:
+            signals.append(f"Spring×看多背离 +{bonus}")
+        raw += bonus
 
     # 3. 独立看多背离
     if bullish_div and not spring:
@@ -1165,6 +1256,16 @@ def calculate_wyckoff_score(bars: list[dict]) -> dict:
         raw -= WYCKOFF_SCORE_SOS
         signals.append(f"SOS×努力无结果 撤销 +{WYCKOFF_SCORE_SOS}")
 
+    # ── 阶段置信度修正：phase_confidence_delta * 20 取整后微调 raw ──
+    phase_delta = analysis.get("phase_confidence_delta") or 0.0
+    try:
+        phase_adj = int(round(float(phase_delta) * 20))
+    except (TypeError, ValueError):
+        phase_adj = 0
+    if phase_adj:
+        raw += phase_adj
+        signals.append(f"阶段修正 {phase_adj:+d}")
+
     # 线性映射: raw ∈ [-MAX_ABS, +MAX_ABS] → score ∈ [0, 100]
     score = max(0, min(100, 50 + raw * 50 // WYCKOFF_SCORE_MAX_ABS))
 
@@ -1185,3 +1286,70 @@ def calculate_wyckoff_score(bars: list[dict]) -> dict:
         "signals": signals,
         "summary": summary,
     }
+
+
+def format_wyckoff_oneline(
+    wyckoff: dict[str, Any] | None = None,
+    *,
+    direction: int | None = None,
+) -> str:
+    """报告用威科夫一行人话（结论 + 白话，不拆第二行）。
+
+    优先级与 fusion 主信号大致对齐：
+      Spring > SOS > UT > BC > SOW > AR > ST > LPS > 背离 > 无信号
+
+    Returns:
+        如「威科夫：低位假跌破后收回，偏多（更像洗盘，缩量较可信）」
+    """
+    wyk = wyckoff if isinstance(wyckoff, dict) else {}
+    # 兼容 strategy 包装
+    if "wyckoff" in wyk and isinstance(wyk.get("wyckoff"), dict):
+        wyk = wyk["wyckoff"]
+
+    def _dir_label(d: int) -> str:
+        if d > 0:
+            return "偏多"
+        if d < 0:
+            return "偏空"
+        return "中性"
+
+    # 按 fusion 优先级选主信号
+    if wyk.get("spring_signal"):
+        vol = wyk.get("spring_vol_class") or "normal"
+        if vol == "high_vol_warning":
+            main = "低位跌破后收回"
+            note = "放量跌破，也可能是真破位，信号偏弱"
+            d = 1
+        elif vol == "low_vol_confirm":
+            main = "低位假跌破后收回"
+            note = "更像洗盘，缩量较可信"
+            d = 1
+        else:
+            main = "低位假跌破后收回"
+            note = "更像洗盘吸筹"
+            d = 1
+    elif wyk.get("sos_signal"):
+        main, note, d = "连续放量上攻", "多头发力，趋势转强迹象", 1
+    elif wyk.get("upthrust_signal"):
+        main, note, d = "冲高回落假突破", "上方试盘失败，结构偏顶", -1
+    elif wyk.get("bc_signal"):
+        main, note, d = "高位放量滞涨", "购买高潮迹象，注意见好就收", -1
+    elif wyk.get("sow_signal"):
+        main, note, d = "放量跌破支撑", "弱势确认，防守优先", -1
+    elif wyk.get("ar_signal"):
+        main, note, d = "高潮后快速反弹", "仅反弹，还不能当反转", 1
+    elif wyk.get("st_signal"):
+        main, note, d = "回踩支撑站住", "二次确认支撑有效", 1
+    elif wyk.get("lps_signal"):
+        main, note, d = "突破后缩量回踩", "回踩不破，仍偏强", 1
+    elif wyk.get("bullish_volume_divergence") and not wyk.get("bearish_volume_divergence"):
+        main, note, d = "下跌缩量", "抛压减轻，有止跌迹象", 1
+    elif wyk.get("bearish_volume_divergence") and not wyk.get("bullish_volume_divergence"):
+        main, note, d = "上涨缩量", "上攻乏力，慎追高", -1
+    else:
+        return "威科夫：暂无明确信号 · 中性"
+
+    # 外部 fusion direction 可覆盖展示方向（保持与融合层一致）
+    if direction is not None:
+        d = int(direction)
+    return f"威科夫：{main}，{_dir_label(d)}（{note}）"

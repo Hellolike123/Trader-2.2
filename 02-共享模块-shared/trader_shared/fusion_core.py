@@ -261,11 +261,12 @@ def _wyckoff_to_signal(wyckoff_result: dict) -> dict:
 
     信号优先级（强→弱）：
       Spring + bullish_div (0.75) > Spring (0.7) > SOS (0.7) >
-      Upthrust (0.6) > AR (0.6) > ST (0.5) > LPS (0.5) >
+      Upthrust (0.6) > BC (0.55) > SOW (0.5) >
+      AR (0.6) > ST (0.5) > LPS (0.5) >
       背离 (0.5) > 无信号 (0.2)
 
-    新增: ar / sos / st / lps 信号消费原始 *_reason 字符串，
-    fusion_verbatim 渲染层直接取用，无需硬编码。
+    说明：BC/SOW 排在 AR 之前，使「BC-15+AR+10」净偏空与 fusion 方向一致。
+    ar / sos / st / lps / bc / sow 消费原始 *_reason 字符串。
     """
     wyk = wyckoff_result.get("wyckoff", {}) if isinstance(wyckoff_result, dict) else {}
     if not isinstance(wyk, dict):
@@ -276,11 +277,13 @@ def _wyckoff_to_signal(wyckoff_result: dict) -> dict:
     bearish_div = wyk.get("bearish_volume_divergence")
     upthrust = wyk.get("upthrust_signal")
 
-    # 新增信号
+    # 经典 + 看空信号
     ar = wyk.get("ar_signal")
     sos = wyk.get("sos_signal")
     st = wyk.get("st_signal")
     lps = wyk.get("lps_signal")
+    bc = wyk.get("bc_signal")
+    sow = wyk.get("sow_signal")
 
     # 从原始结果取 reason 字符串，保持可追溯
     def _reason(base_key: str, fallback: str) -> str:
@@ -291,9 +294,12 @@ def _wyckoff_to_signal(wyckoff_result: dict) -> dict:
 
     # ── Spring 系列 (最强做多信号) ──
     if spring:
-        confidence = 0.7
-        if bullish_div:
-            confidence = 0.75
+        # 高量弹簧可能是真破位：confidence 从 0.7 降到约 0.45
+        high_vol_spring = wyk.get("spring_vol_class") == "high_vol_warning"
+        if high_vol_spring:
+            confidence = 0.5 if bullish_div else 0.45
+        else:
+            confidence = 0.75 if bullish_div else 0.7
         return {
             "direction": 1,
             "confidence": confidence,
@@ -319,7 +325,26 @@ def _wyckoff_to_signal(wyckoff_result: dict) -> dict:
             "raw_key": "wyckoff",
         }
 
+    # ── BC: Buying Climax 购买高潮 (看空，P1 接入 fusion) ──
+    if bc:
+        return {
+            "direction": -1,
+            "confidence": 0.55,
+            "reason": f"威科夫 {_reason('bc', '购买高潮')}",
+            "raw_key": "wyckoff",
+        }
+
+    # ── SOW: Sign of Weakness 弱势 (看空) ──
+    if sow:
+        return {
+            "direction": -1,
+            "confidence": 0.5,
+            "reason": f"威科夫 {_reason('sow', '弱势信号')}",
+            "raw_key": "wyckoff",
+        }
+
     # ── AR: Automatic Rally (BC 后自动反弹) ──
+    # 仅当 BC 未单独占主导时到达此处（BC 已在上方优先）
     if ar:
         return {
             "direction": 1,

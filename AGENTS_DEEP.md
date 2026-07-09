@@ -347,7 +347,12 @@ T0 参考 → 低吸/高抛/止损
 
 ### 5.3 威科夫分析 (`wyckoff_core.py`)
 
-`_detect_spring()` / `_detect_upthrust()` / `_detect_volume_divergence()` / `wyckoff_analysis()`
+主入口：`wyckoff_analysis()` / `wyckoff_strategy()` / `calculate_wyckoff_score()` / `format_wyckoff_oneline()`。
+
+检测器：`_detect_spring`（ATR 刺穿，与 ST 共用 `_spring_breach_level`）/ `_detect_upthrust` / `_detect_buying_climax`（高位过滤 `WYCKOFF_BC_MIN_POS_PCT`）/ `_detect_sign_of_weakness` / `_detect_ar` / `_detect_sos`（≥4/5 阳）/ `_detect_st` / `_detect_lps`（SOS→回调时序）/ 量价背离 / VSA / `_detect_phase`（BC 归派发，Spring 起积累；phase 主要进打分修正，不直接等于 major_stage）。
+
+报告展示：`format_wyckoff_oneline()` 输出单行白话，例如  
+`威科夫：低位假跌破后收回，偏多（更像洗盘，缩量较可信）`；无信号为 `威科夫：暂无明确信号 · 中性`。
 
 ### 5.4 动量策略 (`momentum_core.py`)
 
@@ -373,7 +378,7 @@ def merge_decisions(
 融合层首先将底层各个策略子系统的原始计算结果抽象为带有方向与置信度的统一信号包（`CandidateSignal`）：
 * **缠论转换**：根据（一/二/三类买点 > 底背驰 > 顶背驰 > 趋势段）优先级映射。一类买点（底背驰极值点）置信度 0.8，二类买点置信度 0.4（需 MACD 确认），趋势拉升段置信度 0.4。
 * **动量转换**：使用独特的 **U 型置信度映射函数**。动量指标分值接近两端（极度超买/超卖，$\le 25$ 或 $\ge 75$）时置信度激增为 0.8，处于 41-59 震荡灰区时置信度跌至 0.2。
-* **威科夫转换**：Spring 弹簧信号置信度 0.70（叠加看多背离达 0.75），上冲回落（Upthrust）置信度 0.6，看多/看空量价背离置信度 0.5。
+* **威科夫转换**（`_wyckoff_to_signal` 优先级）：Spring（0.70，+看多背离 0.75；高量 Spring 降至约 0.45–0.5）→ SOS (0.7) → Upthrust (0.6) → BC 购买高潮 (0.55 看空) → SOW (0.5 看空) → AR (0.6) → ST (0.5) → LPS (0.5) → 背离 (0.5)。BC+AR 同时出现时 BC 优先（与打分净偏空一致）。
 
 #### 5.5.2 场景优先级过滤器 (Scenario Priority Filter)
 融合层摒弃了静态等权（Equal Weighting）模式，通过计算股价在 20 日高低区间的相对价格位置（$pos\_pct$），实行动态权重倾斜：

@@ -146,7 +146,7 @@
 | `gap.gap_pct` | float | 缺口幅度 % | 1.2 |
 | `time_window` | str | 时间窗口提示 | "临近财报发布" |
 | `fib_retrace` | dict | 斐波那契回调位 | {"0.382": 58.00, "0.500": 57.00, "0.618": 56.00} |
-| `wyckoff` | dict | 威科夫完整分析结果 | {"description":"...","spring_signal":true} |
+| `wyckoff` | dict | 威科夫完整分析结果（spring/bc/sos/phase 等） | `{"spring_signal":true,"phase_label":"..."}`；报告文案见 `format_wyckoff_oneline()` |
 | `market_env.level` | str | 大盘环境等级 | 正常/偏弱/很差 |
 | `market_env.hmm_regime_en` | str | HMM 大势（英文） | bull/bear/range |
 
