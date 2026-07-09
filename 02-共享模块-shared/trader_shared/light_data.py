@@ -1341,23 +1341,37 @@ def fetch_30m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[s
 
 
 def fetch_weekly(sec: Security, http: HttpClient, datalen: int = 80) -> list[dict[str, Any]]:
-    """Fetch weekly K-line bars via mootdx (Sina 不支持周线)."""
+    """Fetch weekly K-line bars. Sina HTTP first, fallback to mootdx."""
+    fallback_bars = _fetch_mins_fallback(sec, "weekly", datalen)
+    if fallback_bars and len(fallback_bars) >= 4:
+        for bar in fallback_bars:
+            bar["data_source"] = "sina"
+            bar["data_status"] = "full"
+        return fallback_bars
+
     bars = _fetch_mins_mootdx(sec, "weekly", datalen)
     if bars:
         for bar in bars:
-            bar["data_source"] = "mootdx"
-            bar["data_status"] = "full"
+            bar["data_source"] = "mootdx (fallback)"
+            bar["data_status"] = "partial"
         return bars
     return []
 
 
 def fetch_monthly(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
-    """Fetch monthly K-line bars via mootdx (Sina 不支持月线)."""
+    """Fetch monthly K-line bars. Sina HTTP first, fallback to mootdx."""
+    fallback_bars = _fetch_mins_fallback(sec, "monthly", datalen)
+    if fallback_bars and len(fallback_bars) >= 3:
+        for bar in fallback_bars:
+            bar["data_source"] = "sina"
+            bar["data_status"] = "full"
+        return fallback_bars
+
     bars = _fetch_mins_mootdx(sec, "monthly", datalen)
     if bars:
         for bar in bars:
-            bar["data_source"] = "mootdx"
-            bar["data_status"] = "full"
+            bar["data_source"] = "mootdx (fallback)"
+            bar["data_status"] = "partial"
         return bars
     return []
 
@@ -1387,7 +1401,7 @@ def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dic
     without third-party packages or proxy interference.
     """
     try:
-        period_map = {"5m": "5", "15m": "15", "30m": "30", "60m": "60", "60": "60"}
+        period_map = {"5m": "5", "15m": "15", "30m": "30", "60m": "60", "60": "60", "weekly": "1200", "monthly": "7200"}
         scale = period_map.get(interval, "5")
         
         import ssl
@@ -1445,7 +1459,7 @@ def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dic
     except ImportError:
         return []
     try:
-        period_map = {"5m": "5", "15m": "15", "30m": "30", "60": "60"}
+        period_map = {"5m": "5", "15m": "15", "30m": "30", "60": "60", "weekly": "weekly", "monthly": "monthly"}
         period = period_map.get(interval, "60")
         df = ak.stock_zh_a_hist_min_em(symbol=sec.code, period=period, adjust="qfq")
         if df is None or df.empty:
