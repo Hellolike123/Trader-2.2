@@ -145,21 +145,42 @@ def _format_intraday_narrative(intraday: dict[str, Any], big_order: dict[str, An
     lines = intraday.get("lines") or []
 
     if big_order and big_order.get("events"):
-        result.append("今日大单回溯")
+        result.append("大单回溯")
         for event in big_order["events"]:
             hands = event.get("hands")
-            hands_text = f"{hands:.0f} 手" if hands is not None else "手数不足"
+            hands_text = f"{hands:.0f}手" if hands is not None else ""
             amount_wan = event.get("amount_wan")
-            amount_text = f"{amount_wan:.0f} 万" if amount_wan is not None else "金额不足"
-            focus_note = f"，贴近{event['focus_label']}" if event.get("near_focus") and event.get("focus_label") else ""
-            book_note = ""
+            amount_text = f"{amount_wan:.0f}万" if amount_wan is not None else ""
+            side = event.get("side", "")
+            # 用自然语言替代术语
+            if side == "主动买入":
+                side_text = "买方扫货"
+            elif side == "主动卖出":
+                side_text = "卖方出货"
+            else:
+                side_text = "方向不明"
+            # 盘口信号：用一句短语说明
             bs = event.get("book_signal")
             if bs == "盘口同向确认":
-                book_note = "，盘口确认"
+                trust = "盘口也同向，信号可信"
             elif bs == "盘口矛盾":
-                book_note = "，盘口矛盾⚠️"
-            result.append(f"{event['time']}  {event['side']}  {amount_text} / {hands_text}，{event['meaning']}{focus_note}{book_note}。")
-        result.append(f"回溯总结：{big_order.get('summary')}")
+                trust = "但盘口挂单反向，信号打折"
+            else:
+                trust = ""
+            # 拼接
+            parts = [f"{event['time']}  {side_text} {amount_text}/{hands_text}"]
+            if trust:
+                parts.append(trust)
+            result.append("，".join(parts))
+
+        # 汇总：用一句话说清楚
+        summary = big_order.get("summary", "")
+        book_ctx = big_order.get("book_context")
+        if book_ctx:
+            result.append(f"结论：{book_ctx}")
+        elif summary:
+            # 精简 summary，去掉冗长的数字罗列
+            result.append(f"结论：{summary}")
         validation = big_order.get("validation")
         if validation:
             verdict_icon = "✅" if validation["verdict"] == "有效" else "⚠️" if validation["verdict"] == "背离" else "ℹ️"

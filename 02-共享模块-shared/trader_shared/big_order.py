@@ -452,13 +452,17 @@ def analyze_big_orders(
     book_ctx = _book_summary(order_book)
     book_confirm_count = sum(1 for e in events if e.book_signal == "盘口同向确认")
     book_conflict_count = sum(1 for e in events if e.book_signal == "盘口矛盾")
+
+    # 生成自然语言结论
     if book_ctx:
         if book_confirm_count > book_conflict_count:
-            summary += f" {book_ctx}，{book_confirm_count} 次盘口确认。"
+            book_context = f"买方累计 {total_amount_wan:.0f} 万，{book_ctx}，{book_confirm_count} 次大单与盘口方向一致，信号较可靠"
         elif book_conflict_count > book_confirm_count:
-            summary += f" {book_ctx}，{book_conflict_count} 次盘口矛盾，需谨慎。"
+            book_context = f"买方累计 {total_amount_wan:.0f} 万，{book_ctx}，{book_conflict_count} 次大单与盘口方向矛盾，需打折看"
         else:
-            summary += f" {book_ctx}。"
+            book_context = f"买方累计 {total_amount_wan:.0f} 万，{book_ctx}，大单与盘口方向互有印证"
+    else:
+        book_context = None
     
     event_dicts = [event.__dict__ for event in events]
     
@@ -477,4 +481,5 @@ def analyze_big_orders(
             "主动卖出": {"hands": sell_hands, "amount_wan": sell_amount},
         },
         "validation": validation,
+        "book_context": book_context,
     }
