@@ -78,6 +78,18 @@ CHANLUN_MIN_BARS: int = 20
 CHANLUN_MIN_BARS_PER_STROKE: int = 5
 CHANLUN_MIN_STROKES_PER_SEGMENT: int = 3   # 线段最少笔数
 
+# ---- Chan structure_confidence 门槛（段数只调 conf，不改主状态名）----
+# 日线短线：趋势/盘整证据强弱
+CHAN_DAILY_TREND_SEGS_HIGH: int = 8
+CHAN_DAILY_TREND_SEGS_MID: int = 5
+CHAN_DAILY_CONSOL_SEGS_HIGH: int = 5
+CHAN_DAILY_CONSOL_SEGS_MID: int = 3
+# 周线中线：门槛更低（禁止与日线共用 11 硬失败）
+CHAN_WEEKLY_TREND_SEGS_HIGH: int = 5
+CHAN_WEEKLY_TREND_SEGS_MID: int = 3
+CHAN_WEEKLY_CONSOL_SEGS_HIGH: int = 3
+CHAN_WEEKLY_CONSOL_SEGS_MID: int = 2
+
 # ---- Chan Theory enhancement flags (区间套 / 中枢合并 / 信号id) ----
 CHAN_MULTILEVEL_ENABLED: bool = True        # 多级别区间套确认（上级趋势过滤买卖点）
 CHAN_MULTILEVEL_CHUNK: int = 5              # 粗K线聚合粒度（每 N 根合成一根上级别K线）

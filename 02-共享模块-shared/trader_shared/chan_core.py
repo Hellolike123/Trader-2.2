@@ -31,6 +31,14 @@ try:
         CHAN_ZONE_MERGE_ENABLED,
         CHAN_ZONE_MERGE_GAP_PCT,
         CHAN_SIGNAL_ID_ENABLED,
+        CHAN_DAILY_TREND_SEGS_HIGH,
+        CHAN_DAILY_TREND_SEGS_MID,
+        CHAN_DAILY_CONSOL_SEGS_HIGH,
+        CHAN_DAILY_CONSOL_SEGS_MID,
+        CHAN_WEEKLY_TREND_SEGS_HIGH,
+        CHAN_WEEKLY_TREND_SEGS_MID,
+        CHAN_WEEKLY_CONSOL_SEGS_HIGH,
+        CHAN_WEEKLY_CONSOL_SEGS_MID,
     )
 except ImportError:
     CHANLUN_MIN_BARS = 20
@@ -42,6 +50,14 @@ except ImportError:
     CHAN_ZONE_MERGE_ENABLED = True
     CHAN_ZONE_MERGE_GAP_PCT = 0.015
     CHAN_SIGNAL_ID_ENABLED = True
+    CHAN_DAILY_TREND_SEGS_HIGH = 8
+    CHAN_DAILY_TREND_SEGS_MID = 5
+    CHAN_DAILY_CONSOL_SEGS_HIGH = 5
+    CHAN_DAILY_CONSOL_SEGS_MID = 3
+    CHAN_WEEKLY_TREND_SEGS_HIGH = 5
+    CHAN_WEEKLY_TREND_SEGS_MID = 3
+    CHAN_WEEKLY_CONSOL_SEGS_HIGH = 3
+    CHAN_WEEKLY_CONSOL_SEGS_MID = 2
 
 
 def _calc_macd(bars: list[dict]) -> list[dict]:
@@ -746,42 +762,84 @@ def _detect_unilateral(strokes: list[dict]) -> str | None:
     return None
 
 
-def classify_structure(zones: list[dict], segments: list[dict] | None = None, strokes: list[dict] | None = None) -> dict:
-    """走势分类：根据中枢拓扑关系和线段数量判断盘整或趋势。
+def _structure_conf_thresholds(timeframe: str) -> dict[str, int]:
+    """日线 / 周线 structure_confidence 段数门槛（禁止共用 11 硬失败）。"""
+    tf = (timeframe or "daily").lower()
+    if tf in ("weekly", "week", "w"):
+        return {
+            "trend_high": CHAN_WEEKLY_TREND_SEGS_HIGH,
+            "trend_mid": CHAN_WEEKLY_TREND_SEGS_MID,
+            "consol_high": CHAN_WEEKLY_CONSOL_SEGS_HIGH,
+            "consol_mid": CHAN_WEEKLY_CONSOL_SEGS_MID,
+        }
+    return {
+        "trend_high": CHAN_DAILY_TREND_SEGS_HIGH,
+        "trend_mid": CHAN_DAILY_TREND_SEGS_MID,
+        "consol_high": CHAN_DAILY_CONSOL_SEGS_HIGH,
+        "consol_mid": CHAN_DAILY_CONSOL_SEGS_MID,
+    }
+
+
+def _structure_confidence(
+    structure_type: str,
+    seg_count: int,
+    timeframe: str = "daily",
+) -> str:
+    """段数只影响证据强弱 high|mid|low，不改主状态名。"""
+    if structure_type == "无结构":
+        return "low"
+    th = _structure_conf_thresholds(timeframe)
+    if structure_type in ("上涨趋势", "下跌趋势", "单边上涨", "单边下跌"):
+        high, mid = th["trend_high"], th["trend_mid"]
+    else:
+        # 盘整（含 0 中枢弱盘整）
+        high, mid = th["consol_high"], th["consol_mid"]
+    if seg_count >= high:
+        return "high"
+    if seg_count >= mid:
+        return "mid"
+    return "low"
+
+
+def classify_structure(
+    zones: list[dict],
+    segments: list[dict] | None = None,
+    strokes: list[dict] | None = None,
+    timeframe: str = "daily",
+) -> dict:
+    """走势分类：主状态由中枢拓扑决定；段数只影响 structure_confidence。
 
     拓扑规则（中枢合并版）：
     - strokes < 3 → 无结构
     - 0 个合并中枢 → 单边 / 有线段则盘整 / 无结构
-    - 1 个合并中枢 → 盘整（有中枢即结构；entry/exit 优先确认）
-    - 2+ 同向不重叠中枢 且 seg_count < 11 → 线段不足{seg_count}/11
-    - 2+ 同向不重叠中枢 且 seg_count >= 11 → 上涨趋势 / 下跌趋势
-    - 中枢重叠/混乱 且 seg_count < 5 → 线段不足{seg_count}/5
-    - 中枢重叠/混乱 且 seg_count >= 5 → 盘整
+    - 1 个合并中枢 → 盘整
+    - 2+ 同向不重叠中枢 → 上涨趋势 / 下跌趋势（即使段数只有 4～6）
+    - 2+ 重叠/方向混乱 → 盘整
 
-    输出结构类型：
-    - "盘整" / "上涨趋势" / "下跌趋势" / "单边上涨" / "单边下跌"
-    - "线段不足X/Y" — 有中枢拓扑信号但线段不够判定
-    - "无结构" — 连笔都没有
+    主状态 structure_type 仅允许：
+    无结构 / 单边上涨 / 单边下跌 / 盘整 / 上涨趋势 / 下跌趋势
+    禁止返回「线段不足n/m」。
 
-    兼容字段（不变）：structure_type, structure_segments_count, structure_zones_count
-    新增字段：merged_zones, pivot_count
+    新增字段：structure_confidence (high|mid|low), structure_evidence
+    兼容字段：structure_type, structure_segments_count, structure_zones_count,
+              merged_zones, pivot_count
     """
-    MIN_SEGMENTS_CONSOLIDATION = 5
-    MIN_SEGMENTS_TREND = 11
-
     valid_zones = [z for z in zones if z.get("valid")]
     seg_count = len(segments) if segments else 0
     strokes_count = len(strokes) if strokes else 0
+    pivot_count = len(valid_zones)
 
     base: dict[str, Any] = {
         "structure_segments_count": seg_count,
         "structure_zones_count": len(zones),
         "merged_zones": valid_zones,
-        "pivot_count": len(valid_zones),
+        "pivot_count": pivot_count,
+        "structure_evidence": f"segments={seg_count},pivots={pivot_count}",
     }
 
     def _ok(st: str) -> dict:
-        return {**base, "structure_type": st}
+        conf = _structure_confidence(st, seg_count, timeframe=timeframe)
+        return {**base, "structure_type": st, "structure_confidence": conf}
 
     if strokes_count < 3:
         return _ok("无结构")
@@ -813,19 +871,15 @@ def classify_structure(zones: list[dict], segments: list[dict] | None = None, st
         pair_direction = this_dir
         zones_trend = "上涨趋势" if this_dir == "up" else "下跌趋势"
 
-    # 1 个中枢：有中枢即盘整（entry/exit 优先确认，无则仍盘整）
+    # 1 个中枢：有中枢即盘整
     if len(valid_zones) == 1:
         return _ok("盘整")
 
-    # 2+ 同向不重叠中枢 → 趋势，须满 11 段；否则报线段不足
+    # 2+ 同向不重叠中枢 → 直接趋势（段数只调 conf）
     if zones_trend in ("上涨趋势", "下跌趋势"):
-        if seg_count < MIN_SEGMENTS_TREND:
-            return _ok(f"线段不足{seg_count}/{MIN_SEGMENTS_TREND}")
         return _ok(zones_trend)
 
-    # 中枢重叠/混乱 → 盘整，须满 5 段；否则报线段不足
-    if seg_count < MIN_SEGMENTS_CONSOLIDATION:
-        return _ok(f"线段不足{seg_count}/{MIN_SEGMENTS_CONSOLIDATION}")
+    # 2+ 重叠/混乱 → 盘整
     return _ok("盘整")
 
 
@@ -1400,6 +1454,7 @@ def chanlun_analysis(
     symbol: str | None = None,
     analysis_date: str | None = None,
     weekly_bars: list[dict] | None = None,
+    timeframe: str = "daily",
 ) -> dict:
     if len(bars) < CHANLUN_MIN_BARS:
         return {}
@@ -1423,7 +1478,8 @@ def chanlun_analysis(
     zones = build_zones(items, level=lvl, merge=True)  # merged if CHAN_ZONE_MERGE_ENABLED
     zones_count = len(raw_zones)  # 保留原始滑动窗口数量，向后兼容
 
-    structure = classify_structure(zones, segments, strokes)
+    # timeframe: daily 用日线 conf 门槛；weekly 用周线门槛（段数只调 conf）
+    structure = classify_structure(zones, segments, strokes, timeframe=timeframe)
     merged_zones = structure.get("merged_zones", [])
     pivot_count = structure.get("pivot_count", 0)
 
@@ -1558,6 +1614,8 @@ def chanlun_analysis(
         "segments_count": len(segments),
         "structure_type": structure["structure_type"],
         "structure_segments_count": structure["structure_segments_count"],
+        "structure_confidence": structure.get("structure_confidence", "mid"),
+        "structure_evidence": structure.get("structure_evidence", ""),
         # E1 新增字段
         "higher_trend": ht,
         # 真冲突：上级趋势明确，且本级仍留有对立方向买卖点/背驰时为 True
@@ -1612,6 +1670,7 @@ def chanlun_strategy(
         bars, current, macd_h_curr, macd_h_prev,
         symbol=symbol, analysis_date=analysis_date,
         weekly_bars=weekly_bars,
+        timeframe="daily",
     )
     if isinstance(result, dict):
         result = {**result, "timeframe": "daily"}
@@ -1643,17 +1702,20 @@ def chanlun_strategy_midline(
     if len(weekly_bars) >= CHANLUN_MIN_BARS:
         bars = weekly_bars
         tf = "weekly"
+        conf_tf = "weekly"
         # 周线主分析不再叠 higher_trend 周线（避免双重周线）
         extra_weekly = None
     elif len(daily_bars) >= CHANLUN_MIN_BARS:
         bars = daily_bars
         tf = "daily_fallback"
+        conf_tf = "daily"
         extra_weekly = weekly_bars if weekly_bars else None
     else:
         return {
             "chanlun": {
                 "timeframe": "insufficient",
                 "structure_type": "",
+                "structure_confidence": "low",
                 "trend_label": "数据不足",
                 "divergence": {},
                 "buy_points": [],
@@ -1671,6 +1733,7 @@ def chanlun_strategy_midline(
         bars, cur, macd_h_curr, macd_h_prev,
         symbol=symbol, analysis_date=analysis_date,
         weekly_bars=extra_weekly,
+        timeframe=conf_tf,
     )
     if not isinstance(result, dict):
         result = {}
@@ -1679,16 +1742,23 @@ def chanlun_strategy_midline(
 
 
 def format_chanlun_theory_line(chan_result: Any) -> str:
-    """中线理论区用：结构 · 方向（不写「缠论：」前缀，由外层拼接）。"""
+    """中线理论区用：结构 · 方向（不写「缠论：」前缀，由外层拼接）。
+
+    conf=low 时主名旁注「段偏少」；禁止用线段不足当主显示。
+    """
     chan = unwrap_chan(chan_result) if isinstance(chan_result, dict) else {}
     if not isinstance(chan, dict) or not chan:
         return "结构未成型·中性"
 
     st = str(chan.get("structure_type") or "").strip()
-    if st and "不足" not in st:
-        main = st
-    elif st and "不足" in st:
+    # 兼容历史缓存中的「线段不足*」主状态；正常路径不再产出该值
+    if st.startswith("线段不足"):
         main = "结构未成型"
+    elif st and st != "无结构":
+        main = st
+        conf = str(chan.get("structure_confidence") or "").lower()
+        if conf == "low":
+            main = f"{st}(段偏少)"
     else:
         main = "暂无明确结构"
 

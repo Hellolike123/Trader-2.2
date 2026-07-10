@@ -820,53 +820,65 @@ class TestClassifyStructure:
         result = classify_structure([], strokes=[])
         assert result["structure_type"] == "无结构"
 
-    def test_no_zones_insufficient_segments(self):
-        """0 中枢有笔但线段不足 → 无结构（无中枢无线段）。"""
+    def test_no_zones_with_segments_is_consolidation(self):
+        """0 中枢有笔有线段 → 盘整（弱盘整，主状态不用线段不足）。"""
         strokes = self._make_strokes(6)
         result = classify_structure([], segments=[{"direction": "up"}], strokes=strokes)
         assert result["structure_type"] == "盘整"
+        assert result["structure_confidence"] == "low"
+        assert "structure_evidence" in result
 
-    def test_insufficient_segments_for_consolidation(self):
-        """1 中枢但线段不足 5 → 盘整（有中枢即有结构）。"""
+    def test_one_zone_few_segments_still_consolidation(self):
+        """1 中枢 + 少段 → 盘整（段数只调 conf）。"""
         zones = [{"zh_top": 20.0, "zh_bottom": 15.0, "valid": True}]
         strokes = self._make_strokes(6)
         result = classify_structure(zones, segments=[{}, {}, {}], strokes=strokes)
         assert result["structure_type"] == "盘整"
         assert result["structure_zones_count"] == 1
+        assert result["structure_confidence"] in ("high", "mid", "low")
+        # 日线 consol_mid=3 → 3 段为 mid
+        assert result["structure_confidence"] == "mid"
 
     def test_consolidation(self):
-        """1 中枢 + 5 段线段 → 盘整。"""
+        """1 中枢 + 5 段线段 → 盘整 high。"""
         zones = [{"zh_top": 20.0, "zh_bottom": 15.0, "valid": True}]
         segs = [{"direction": "up"} for _ in range(5)]
         strokes = self._make_strokes(6)
         result = classify_structure(zones, segments=segs, strokes=strokes)
         assert result["structure_type"] == "盘整"
         assert result["structure_zones_count"] == 1
+        assert result["structure_confidence"] == "high"
 
-    def test_insufficient_segments_for_trend(self):
-        """2 个递增中枢但线段不足 11 → 线段不足5/11。"""
+    def test_two_ascending_pivots_five_segs_is_uptrend(self):
+        """2 个上移中枢 + 5 段 → 上涨趋势（不再线段不足5/11）；日线 conf=mid。"""
         zones = [
             {"zh_top": 20.0, "zh_bottom": 15.0, "valid": True},
             {"zh_top": 30.0, "zh_bottom": 25.0, "valid": True},
         ]
         segs = [{"direction": "up"} for _ in range(5)]
         strokes = self._make_strokes(6)
-        result = classify_structure(zones, segments=segs, strokes=strokes)
-        assert result["structure_type"] == "线段不足5/11"
+        result = classify_structure(zones, segments=segs, strokes=strokes, timeframe="daily")
+        assert result["structure_type"] == "上涨趋势"
+        assert result["structure_confidence"] == "mid"  # daily trend_mid=5
+        assert "线段不足" not in result["structure_type"]
+        assert "segments=5" in result["structure_evidence"]
+        assert "pivots=2" in result["structure_evidence"]
 
-    def test_insufficient_segments_for_overlapping_zones(self):
-        """重叠中枢 + 3 段 → 线段不足3/5。"""
+    def test_overlapping_zones_few_segs_is_consolidation(self):
+        """重叠中枢 + 3 段 → 盘整（不再线段不足3/5）；日线 conf=mid。"""
         zones = [
             {"zh_top": 20.0, "zh_bottom": 15.0, "valid": True},
             {"zh_top": 18.0, "zh_bottom": 14.0, "valid": True},  # 与前重叠
         ]
         segs = [{"direction": "up"} for _ in range(3)]
         strokes = self._make_strokes(6)
-        result = classify_structure(zones, segments=segs, strokes=strokes)
-        assert result["structure_type"] == "线段不足3/5"
+        result = classify_structure(zones, segments=segs, strokes=strokes, timeframe="daily")
+        assert result["structure_type"] == "盘整"
+        assert result["structure_confidence"] == "mid"  # daily consol_mid=3
+        assert "线段不足" not in result["structure_type"]
 
     def test_uptrend(self):
-        """2 个递增中枢 + 11 段线段 → 上涨趋势。"""
+        """2 个递增中枢 + 11 段线段 → 上涨趋势 high。"""
         zones = [
             {"zh_top": 20.0, "zh_bottom": 15.0, "valid": True},
             {"zh_top": 30.0, "zh_bottom": 25.0, "valid": True},
@@ -876,9 +888,10 @@ class TestClassifyStructure:
         result = classify_structure(zones, segments=segs, strokes=strokes)
         assert result["structure_type"] == "上涨趋势"
         assert result["structure_zones_count"] == 2
+        assert result["structure_confidence"] == "high"
 
     def test_downtrend(self):
-        """2 个递减中枢 + 11 段线段 → 下跌趋势。"""
+        """2 个递减中枢 + 11 段线段 → 下跌趋势 high。"""
         zones = [
             {"zh_top": 30.0, "zh_bottom": 25.0, "valid": True},
             {"zh_top": 20.0, "zh_bottom": 15.0, "valid": True},
@@ -888,6 +901,35 @@ class TestClassifyStructure:
         result = classify_structure(zones, segments=segs, strokes=strokes)
         assert result["structure_type"] == "下跌趋势"
         assert result["structure_zones_count"] == 2
+        assert result["structure_confidence"] == "high"
+
+    def test_daily_vs_weekly_conf_thresholds(self):
+        """同一拓扑：日线/周线 conf 门槛不同。"""
+        zones = [
+            {"zh_top": 20.0, "zh_bottom": 15.0, "valid": True},
+            {"zh_top": 30.0, "zh_bottom": 25.0, "valid": True},
+        ]
+        segs = [{"direction": "up"} for _ in range(5)]
+        strokes = self._make_strokes(6)
+        daily = classify_structure(zones, segments=segs, strokes=strokes, timeframe="daily")
+        weekly = classify_structure(zones, segments=segs, strokes=strokes, timeframe="weekly")
+        assert daily["structure_type"] == weekly["structure_type"] == "上涨趋势"
+        # daily: trend_mid=5,trend_high=8 → 5 段 mid
+        assert daily["structure_confidence"] == "mid"
+        # weekly: trend_high=5 → 5 段 high
+        assert weekly["structure_confidence"] == "high"
+
+    def test_trend_low_conf_with_four_segments(self):
+        """2 上移中枢 + 4 段 → 仍是上涨趋势，日线 conf=low。"""
+        zones = [
+            {"zh_top": 20.0, "zh_bottom": 15.0, "valid": True},
+            {"zh_top": 30.0, "zh_bottom": 25.0, "valid": True},
+        ]
+        segs = [{"direction": "up"} for _ in range(4)]
+        strokes = self._make_strokes(6)
+        result = classify_structure(zones, segments=segs, strokes=strokes, timeframe="daily")
+        assert result["structure_type"] == "上涨趋势"
+        assert result["structure_confidence"] == "low"
 
 
 class TestChanlunAnalysisIntegration:
@@ -901,6 +943,10 @@ class TestChanlunAnalysisIntegration:
         assert "segments_count" in result
         assert "structure_type" in result
         assert "structure_segments_count" in result
+        assert "structure_confidence" in result
+        assert result["structure_confidence"] in ("high", "mid", "low")
+        assert "structure_evidence" in result
+        assert not str(result.get("structure_type", "")).startswith("线段不足")
         assert isinstance(result["segments"], list)
         assert isinstance(result["segments_count"], int)
 
