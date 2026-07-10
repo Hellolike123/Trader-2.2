@@ -1537,6 +1537,45 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         if not _regime:
             _regime = str((report_fusion or {}).get("regime") or "")
 
+        # 中线看法文案（与 conclusion 同源）供纪律：偏空则禁止以短线买点主开仓
+        from trader_shared.conclusion_block import _midline_view_from_theory
+        _mid_view_txt = _midline_view_from_theory(
+            chanlun_midline=report.get("chanlun_midline"),
+            wyckoff_midline=report.get("wyckoff_midline"),
+            weekly_frame=report.get("weekly_frame"),
+        )
+        _chan_u = report.get("chanlun_midline") or {}
+        if isinstance(_chan_u, dict) and "chanlun" in _chan_u:
+            _chan_inner = _chan_u.get("chanlun") or {}
+        else:
+            _chan_inner = _chan_u if isinstance(_chan_u, dict) else {}
+        _mid_struct_conf = str(
+            (_chan_inner or {}).get("structure_confidence")
+            or (report.get("chanlun_midline") or {}).get("structure_confidence")
+            or ""
+        )
+        _cm = report.get("chip_migration") if isinstance(report.get("chip_migration"), dict) else {}
+        _chip_warn = str(_cm.get("warning_level") or "") not in ("", "none", "None")
+        _fund_veto = bool((report_fusion or {}).get("fund_flow_outflow_veto"))
+        try:
+            _fusion_dis = (report_fusion or {}).get("disagreement")
+            _fusion_dis = int(_fusion_dis) if _fusion_dis is not None else 0
+        except (TypeError, ValueError):
+            _fusion_dis = 0
+        # 专家 conf 均值
+        _fconf = None
+        try:
+            _sd = (report_fusion or {}).get("signals_detail") or {}
+            _cs = []
+            for _n in ("chan", "momentum", "wyckoff"):
+                _s = _sd.get(_n) if isinstance(_sd.get(_n), dict) else {}
+                if _s.get("confidence") is not None:
+                    _cs.append(float(_s["confidence"]))
+            if _cs:
+                _fconf = sum(_cs) / len(_cs)
+        except (TypeError, ValueError):
+            _fconf = None
+
         mistery_gate = compute_mistery_gate({
             "major_stage": stage_result["major_stage"],
             "short_term_momentum": stage_result["momentum"],
@@ -1557,9 +1596,16 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             "change_pct": report.get("change_pct"),
             "min_rr": MISTERY_MIN_RR,
             "weekly_frame": report.get("weekly_frame"),
-            # 中线回踩区纪律：消费 mid 价，不改价
             "mid_pullback_low": mid_key_prices.get("pullback_low"),
             "mid_pullback_high": mid_key_prices.get("pullback_high"),
+            "mid_view": _mid_view_txt,
+            "mid_quality": mid_key_prices.get("quality"),
+            "structure_confidence": _mid_struct_conf,
+            "data_status": report.get("data_status") or snapshot.data_status,
+            "fusion_disagreement": _fusion_dis,
+            "fusion_confidence": _fconf,
+            "chip_migration_warning": _chip_warn,
+            "fund_flow_outflow_veto": _fund_veto,
         })
         report["mistery_gate"] = mistery_gate
 
@@ -1584,6 +1630,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             weekly_frame=report.get("weekly_frame"),
             chanlun_midline=report.get("chanlun_midline"),
             wyckoff_midline=report.get("wyckoff_midline"),
+            chip_migration=report.get("chip_migration"),
+            chip_migration_warning=_chip_warn,
+            fund_flow_outflow_veto=_fund_veto,
         )
         report["conclusion"] = conclusion
         report["daily_ruling"] = daily_ruling

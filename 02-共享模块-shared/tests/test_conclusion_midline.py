@@ -220,3 +220,30 @@ class TestMidlineViewB1A:
             wyckoff_midline={},
         )
         assert "不买" in c["execution"] or "不追" in c["execution"] or "观望" in c["execution"]
+
+    def test_conflict_paifa_vs_chan_bull(self):
+        """验收3：派发 + 缠论偏多 → 冲突双写 + 不新开。"""
+        c = build_conclusion_block(
+            major_stage="派发",
+            scene="冲高减仓",
+            mistery_gate={
+                "action": "观望",
+                "hard_block": "H3",
+                "notes": "派发不加仓",
+                "position_cap_pct": 0,
+            },
+            key_prices=_kp_no_chase(),
+            fusion={"weighted_score": -0.1, "action": "减仓"},
+            chanlun_midline={
+                "chanlun": {
+                    "structure_type": "上涨趋势",
+                    "buy_points": [{"type": "一类买"}],
+                    "divergence": {},
+                }
+            },
+            wyckoff_midline={},
+        )
+        assert "可跟踪" in c["midline"] or "偏多" in c["midline"]
+        assert "派发" in c["conflict"]
+        assert "风控" in c["conflict"] or "不新开" in c["conflict"]
+        assert "不买" in c["execution"] or "不追" in c["execution"] or "不新开" in c["execution"]

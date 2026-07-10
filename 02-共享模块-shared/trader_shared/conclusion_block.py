@@ -298,6 +298,14 @@ def build_conclusion_block(
     _gnotes = str(gate.get("notes") or "")
     if "不在中线回踩区" in _gnotes and not any("回踩区" in p for p in reason_parts):
         reason_parts.append("现价不在中线回踩区，不新开")
+    if "中线看法偏空" in _gnotes and not any("中线看法偏空" in p for p in reason_parts):
+        reason_parts.append("中线看法偏空，短线买点不作主开仓")
+    if "置信不足" in _gnotes and not any("置信" in p for p in reason_parts):
+        reason_parts.append("置信不足，轻仓或不动")
+    if "筹码搬家" in _gnotes and not any("筹码" in p for p in reason_parts):
+        reason_parts.append("筹码搬家警告，不新开")
+    if "主力连续流出" in _gnotes and not any("流出" in p for p in reason_parts):
+        reason_parts.append("主力连续流出，不新开")
     seen: set[str] = set()
     uniq: list[str] = []
     for p in reason_parts:
@@ -305,7 +313,6 @@ def build_conclusion_block(
             seen.add(p)
             uniq.append(p)
     reason = "；".join(uniq) if uniq else "纪律门控"
-    # 兼容旧测「，」连接风格：单段时无逗号更自然
     if len(uniq) == 1:
         reason = uniq[0]
     elif uniq:
@@ -323,9 +330,9 @@ def build_conclusion_block(
     else:
         this_week = "观察为主"
 
-    # 冲突说明（B1A 封闭）
+    # 冲突说明：中短冲突 + 验收3 缠多 vs 风控
     conflict = ""
-    mid_track = "可跟踪" in mid or "未坏" in mid
+    mid_track = "可跟踪" in mid or "未坏" in mid or "偏多" in mid
     mid_weak = any(k in mid for k in ("暂缓", "慎跟", "打架", "偏空", "破坏", "减/清"))
     short_no = (
         any(k in short for k in ("不适合追", "不宜追", "观望，不追"))
@@ -333,18 +340,43 @@ def build_conclusion_block(
         or "偏空" in ruling
         or any(k in execution for k in ("不买", "不追"))
     )
-    if mid_track and short_no:
-        conflict = "中线还能看，现价别买"
-    elif mid_weak and short_no:
-        conflict = "周线偏空，短线也不追"
 
     stage_txt = str(major_stage or "").strip()
     if stage_txt == "None":
         stage_txt = ""
+    stage_n = stage_txt
+    for base in ("蓄势", "主升", "派发", "衰退"):
+        if stage_n.startswith(base) or base in stage_n:
+            stage_n = base
+            break
+
+    risk_sides: list[str] = []
+    if stage_n in ("派发", "衰退"):
+        risk_sides.append(f"阶段{stage_n}")
+    _cm = _extra.get("chip_migration") if isinstance(_extra.get("chip_migration"), dict) else {}
+    if _extra.get("chip_migration_warning") or (
+        str(_cm.get("warning_level") or "") not in ("", "none", "None")
+    ):
+        risk_sides.append("筹码搬家警告")
+    if _extra.get("fund_flow_outflow_veto") or bool((fusion or {}).get("fund_flow_outflow_veto")):
+        risk_sides.append("主力连续流出")
+    if "筹码搬家" in _gnotes and "筹码搬家警告" not in risk_sides:
+        risk_sides.append("筹码搬家警告")
+    if "主力连续流出" in _gnotes and "主力连续流出" not in risk_sides:
+        risk_sides.append("主力连续流出")
+
+    if mid_track and risk_sides:
+        conflict = f"中线/缠论偏多，但{'/'.join(risk_sides)} → 以风控为准，不新开"
+    elif mid_track and short_no:
+        conflict = "中线还能看，现价别买"
+    elif mid_weak and short_no:
+        conflict = "周线偏空，短线也不追"
+    elif mid_weak and not short_no:
+        conflict = "中线偏空，短线信号不作主开仓"
 
     return {
         "midline": mid,
-        "stage_line": stage_txt,  # B3C：阶段行，render 用
+        "stage_line": stage_txt,
         "shortline": short,
         "execution": execution,
         "reason": reason,

@@ -337,3 +337,95 @@ class TestMidlinePullbackDiscipline:
         assert g["action"] in ("减仓", "止损离场", "观望")  # 主升转弱→减仓，区外不应把减仓洗掉
         if g["action"] == "减仓":
             assert "不在中线回踩区" not in g["notes"] or True
+
+
+class TestMidViewAndConfidence:
+    def test_mid_weak_blocks_new_open(self):
+        g = compute_mistery_gate({
+            "major_stage": "蓄势",
+            "short_term_momentum": "走强",
+            "regime": "正常",
+            "current": 55.2,
+            "stop": 54.0,
+            "support": 54.5,
+            "risk": 1.5,
+            "reward_near": 4.0,
+            "mid_pullback_low": 54.0,
+            "mid_pullback_high": 56.5,
+            "mid_view": "盘整偏空 · 暂缓跟踪",
+            "turnover_rate": 2,
+            "volume_ratio": 1,
+            "change_pct": 0.5,
+        })
+        assert g["action"] == "观望"
+        assert "中线看法偏空" in g["notes"]
+        assert "试探" not in gate_action_to_execution_text(g["action"])
+        assert "挂" not in gate_action_to_execution_text(g["action"])
+
+    def test_outside_pullback_even_with_daily_buy_setup(self):
+        """区外 + 日线买点语义（buy_ref 诱人）仍不得新开。"""
+        g = compute_mistery_gate({
+            "major_stage": "蓄势",
+            "short_term_momentum": "走强",
+            "regime": "正常",
+            "current": 58.0,
+            "stop": 54.0,
+            "support": 55.0,
+            "buy_ref": 55.5,  # 日线买点
+            "risk": 1.5,
+            "reward_near": 4.0,
+            "mid_pullback_low": 54.0,
+            "mid_pullback_high": 56.0,
+            "mid_view": "上涨趋势未坏 · 可跟踪、不加仓",
+            "turnover_rate": 2,
+            "volume_ratio": 1,
+            "change_pct": 0.5,
+        })
+        assert g["action"] in ("观望", "不做")
+        text = gate_action_to_execution_text(g["action"])
+        assert "不买" in text or "不追" in text or "不新开" in text
+        assert "可按买点挂" not in text
+
+    def test_low_confidence_downgrades(self):
+        g = compute_mistery_gate({
+            "major_stage": "蓄势",
+            "short_term_momentum": "走强",
+            "regime": "正常",
+            "current": 55.2,
+            "stop": 54.0,
+            "support": 54.5,
+            "risk": 1.5,
+            "reward_near": 4.0,
+            "mid_pullback_low": 54.0,
+            "mid_pullback_high": 56.5,
+            "mid_view": "上涨趋势未坏 · 可跟踪、不加仓",
+            "mid_quality": "partial",
+            "structure_confidence": "low",
+            "turnover_rate": 2,
+            "volume_ratio": 1,
+            "change_pct": 0.5,
+        })
+        assert g.get("low_confidence") is True
+        assert g["action"] in ("观望", "轻仓试错", "不做")
+        assert "置信" in g["notes"] or g["action"] == "观望"
+
+    def test_chip_warning_blocks_new_open(self):
+        g = compute_mistery_gate({
+            "major_stage": "蓄势",
+            "short_term_momentum": "走强",
+            "regime": "正常",
+            "current": 55.2,
+            "stop": 54.0,
+            "support": 54.5,
+            "risk": 1.5,
+            "reward_near": 4.0,
+            "mid_pullback_low": 54.0,
+            "mid_pullback_high": 56.5,
+            "mid_view": "上涨趋势未坏 · 可跟踪、不加仓",
+            "chip_migration_warning": True,
+            "turnover_rate": 2,
+            "volume_ratio": 1,
+            "change_pct": 0.5,
+        })
+        assert g["action"] == "观望"
+        assert "筹码" in g["notes"]

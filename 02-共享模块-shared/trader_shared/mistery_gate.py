@@ -333,6 +333,41 @@ def _position_cap_for(
     return round(max(0.0, min(cap, _POSITION_CAP_CEILING)), 1)
 
 
+def _detect_low_confidence(raw: dict[str, Any]) -> tuple[bool, list[str]]:
+    """验收2：融合 conf 低 / 中线证据弱 / 多空分歧 / 数据 partial。"""
+    reasons: list[str] = []
+    mid_quality = str(raw.get("mid_quality") or raw.get("mid_key_quality") or "").lower()
+    if mid_quality in ("partial", "insufficient"):
+        reasons.append(f"中线价源{mid_quality}")
+
+    conf = str(raw.get("structure_confidence") or raw.get("mid_structure_confidence") or "").lower()
+    if conf == "low":
+        reasons.append("中线缠论段偏少/低置信")
+
+    if str(raw.get("data_status") or "").lower() == "partial":
+        reasons.append("数据partial")
+
+    try:
+        dis = raw.get("fusion_disagreement")
+        if dis is not None and int(dis) >= 1:
+            reasons.append("日线多空分歧")
+    except (TypeError, ValueError):
+        pass
+
+    # 专家平均 conf < 0.45 视为低
+    try:
+        fc = raw.get("fusion_confidence")
+        if fc is not None and float(fc) < 0.45:
+            reasons.append("融合置信偏低")
+    except (TypeError, ValueError):
+        pass
+
+    if raw.get("low_confidence") is True:
+        reasons.append("低置信标记")
+
+    return (len(reasons) > 0, reasons)
+
+
 def _in_midline_pullback_zone(
     current: float | None,
     pullback_low: float | None,
@@ -487,6 +522,43 @@ def compute_mistery_gate(inputs: dict[str, Any] | None = None, **kwargs: Any) ->
             if "不在中线回踩区" not in "；".join(notes_list):
                 notes_list.append("现价不在中线回踩区，不新开")
 
+    # 验收4：中线看法偏空/暂缓 → 短线买点不作主开仓理由
+    mid_view = str(raw.get("mid_view") or raw.get("midline_view") or "")
+    mid_weak = any(
+        k in mid_view for k in ("暂缓", "偏空", "慎跟", "打架", "破坏", "战略减", "战略清")
+    )
+    if mid_weak:
+        if action in ("轻仓试错", "回踩低吸", "持有"):
+            action = "观望"
+            notes_list.append("中线看法偏空，短线买点不作主开仓")
+        elif action in ("观望", "不做") and "中线看法偏空" not in "；".join(notes_list):
+            notes_list.append("中线看法偏空，短线买点不作主开仓")
+
+    # 验收3辅助：筹码搬家/资金连续流出 → 禁止新开（减仓类保留）
+    chip_warn = bool(raw.get("chip_migration_warning"))
+    fund_veto = bool(raw.get("fund_flow_outflow_veto"))
+    if (chip_warn or fund_veto) and action in ("轻仓试错", "回踩低吸", "持有"):
+        action = "观望"
+        if chip_warn:
+            notes_list.append("筹码搬家警告，不新开")
+        if fund_veto:
+            notes_list.append("主力连续流出，不新开")
+
+    # 验收2：低置信 → 新开降档或禁止；仓位 cap 再砍
+    low_conf, conf_reasons = _detect_low_confidence(raw)
+    if low_conf:
+        if action == "回踩低吸":
+            action = "轻仓试错"
+            notes_list.append("置信不足，降一档")
+        elif action in ("轻仓试错", "持有"):
+            action = "观望"
+            notes_list.append("置信不足，轻仓或不动")
+        elif action in ("观望", "不做") and not any("置信不足" in n for n in notes_list):
+            notes_list.append("置信不足，轻仓或不动")
+        for cr in conf_reasons:
+            if cr not in "；".join(notes_list):
+                notes_list.append(cr)
+
     # 主升 + 转弱 增强（subset §5）
     if stage == "主升" and mom == "转弱" and style == "趋势":
         action = "减仓"
@@ -507,13 +579,18 @@ def compute_mistery_gate(inputs: dict[str, Any] | None = None, **kwargs: Any) ->
         action = "观望"
 
     # P1: weekly_frame 扩展点（真周 K 完好|紧张|破坏）
-    # 当 weekly_frame == "破坏" 时：战略减/清倾向；完好 + 日线偏空 → 保留中线叙事但出手不追。
-    weekly_frame = raw.get("weekly_frame")  # noqa: F841 — P1 预留
+    weekly_frame = raw.get("weekly_frame")
     if weekly_frame:
-        # P1 未完整实现：仅记录 notes，不改 action（避免静默误伤）
         notes_list.append(f"weekly_frame={weekly_frame}(P1未完全生效)")
+        if str(weekly_frame) == "破坏" and action in ("轻仓试错", "回踩低吸", "持有"):
+            action = "观望"
+            notes_list.append("中线框破坏，不新开")
 
     cap = _position_cap_for(action, suggested_pct, regime, hard_block)
+    if low_conf and cap > 0:
+        cap = round(max(0.0, cap * 0.5), 1)
+        if "置信不足" not in "；".join(notes_list):
+            notes_list.append("置信不足，仓位降档")
 
     return {
         "hard_block": hard_block,
@@ -522,6 +599,9 @@ def compute_mistery_gate(inputs: dict[str, Any] | None = None, **kwargs: Any) ->
         "invalidation": invalidation,
         "position_cap_pct": cap,
         "notes": "；".join(notes_list) if notes_list else "",
+        "low_confidence": bool(low_conf),
+        "in_midline_pullback": in_pb,
+        "mid_view_weak": bool(mid_weak),
     }
 
 
