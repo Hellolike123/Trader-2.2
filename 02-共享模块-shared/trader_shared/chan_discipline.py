@@ -229,11 +229,11 @@ def _normalize_stage(major_stage: str) -> str:
 
 # 开仓 5 项清单（C1 展示：不全绿只写缺项；全绿才可试探）
 _CHECKLIST_KEYS = (
-    ("mid_ok", "中线背景"),
-    ("in_pullback", "回踩带"),
-    ("short_trigger", "短线触发"),
-    ("conf_ok", "置信数据"),
-    ("fund_ok", "资金筹码"),
+    ("mid_ok", "中线趋势"),
+    ("in_pullback", "回踩到位"),
+    ("short_trigger", "买点信号"),
+    ("conf_ok", "信号一致"),
+    ("fund_ok", "筹码资金稳"),
 )
 
 

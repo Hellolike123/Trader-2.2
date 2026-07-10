@@ -624,7 +624,7 @@ class TestC1EntryChecklist:
         ))
         line = out.get("entry_line") or ""
         assert line.startswith("新开：否")
-        assert "回踩带" in line
+        assert "回踩到位" in line
         assert out["entry_checklist"]["all_green"] is False
 
     def test_all_green_line(self):
@@ -640,7 +640,7 @@ class TestC1EntryChecklist:
 
     def test_format_c1_helper(self):
         assert format_entry_line_c1(all_green=True) == "新开：可试探（清单全绿）"
-        assert "缺：回踩带" in format_entry_line_c1(all_green=False, missing=["回踩带"])
+        assert "缺：回踩到位" in format_entry_line_c1(all_green=False, missing=["回踩到位"])
 
     def test_merge_demotes_open_when_not_all_green(self):
         gate = {

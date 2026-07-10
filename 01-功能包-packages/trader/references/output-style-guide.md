@@ -71,11 +71,11 @@ From `chan_discipline.build_entry_checklist` / `format_entry_line_c1`:
 
 | Flag | Label in 缺： |
 |------|----------------|
-| mid_ok | 中线背景 |
-| in_pullback | 回踩带 |
-| short_trigger | 短线触发 |
-| conf_ok | 置信数据 |
-| fund_ok | 资金筹码 |
+| mid_ok | 中线趋势 |
+| in_pullback | 回踩到位 |
+| short_trigger | 买点信号 |
+| conf_ok | 信号一致 |
+| fund_ok | 筹码资金稳 |
 
 - All five True → `新开：可试探（清单全绿）`
 - Else → `新开：否（缺：A｜B）` (labels joined by `｜`)
