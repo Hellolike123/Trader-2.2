@@ -622,9 +622,25 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     stop_buffer_pct = clamp(atr_pct * 0.40 * theory.get("stop_buffer", 1.0), MIN_STOP_BUFFER_PCT, MAX_STOP_BUFFER_PCT)
     low_zone_lower = round(support_price, 2)
     low_zone_upper = round(support_price * (1 + zone_width_pct), 2)
-    # 约束：买入区不偏离现价太远
-    low_zone_lower = max(low_zone_lower, current * 0.95)    # 不超过现价下方5%
-    low_zone_upper = max(low_zone_upper, current * 0.985)   # 买入区上沿至少在现价下方1.5%
+    # ATR 动态 clamp：支撑离现价超过 1.5×ATR 时，切换到最近的真实支撑
+    atr_abs = atr_pct * current if current > 0 else 0
+    atr_floor = current - 1.5 * atr_abs if atr_abs > 0 else current * 0.85
+    if support_price < atr_floor:
+        # 支撑太远：从已有候选里找最近的 ≥ atr_floor 的真实支撑
+        _nearby = [
+            lv for lv in support_levels
+            if float(lv.get("price", 0)) >= atr_floor and float(lv.get("price", 0)) <= current
+        ]
+        if _nearby:
+            _best = sorted(_nearby, key=lambda x: float(x["price"]))[-1]
+            support_price = float(_best["price"])
+            low_zone_lower = round(support_price, 2)
+            low_zone_upper = round(support_price * (1 + zone_width_pct), 2)
+        else:
+            # 兜底：以 ATR 等距为买点区下沿
+            support_price = round(atr_floor, 2)
+            low_zone_lower = support_price
+            low_zone_upper = round(support_price * (1 + zone_width_pct), 2)
 
     # ═══════ 止损：MA20 + 前低融合 ═══════
     ma20_val = ma_values.get('ma20')
