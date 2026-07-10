@@ -657,9 +657,11 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     if major_stage in ('蓄势', '蓄势偏强'):
         take = round(resistance_price, 2) if resistance_price else round(current * 1.05, 2)
     elif major_stage == '主升':
-        take = round(resistance_price, 2) if resistance_price else round(current * 1.10, 2)
+        # 主升期有趋势加持，多看 5%
+        take = round(resistance_price * 1.05, 2) if resistance_price else round(current * 1.10, 2)
     elif major_stage == '派发':
-        take = round(current, 2)
+        # 派发期还有一段震荡出货，折价卖而非现价卖
+        take = round(resistance_price * 0.98, 2) if resistance_price else round(current, 2)
     elif major_stage == '蓄势偏弱':
         take = round(resistance_price * 0.98, 2) if resistance_price else round(current, 2)
     elif major_stage == '衰退':
