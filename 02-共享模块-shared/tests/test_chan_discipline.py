@@ -17,6 +17,8 @@ from trader_shared.chan_discipline import (  # noqa: E402
     compute_weekly_frame,
     needs_same_level_tag,
     append_same_level_tag,
+    build_entry_checklist,
+    format_entry_line_c1,
 )
 from trader_shared.mistery_gate import (  # noqa: E402
     compute_mistery_gate,
@@ -608,3 +610,55 @@ class TestR9WeeklyFrame:
         assert disc["allow_new_entry"] == (
             disc["allow_new_entry_mid"] and disc["allow_new_entry_short"]
         )
+
+
+class TestC1EntryChecklist:
+    """C1：新开：否（缺：…）｜全绿才可试探。"""
+
+    def test_missing_pullback_line(self):
+        out = apply_chan_discipline(_open_setup(
+            current=58.0,
+            mid_pullback_low=54.0,
+            mid_pullback_high=56.0,
+            buy_point_types=["二类买"],
+        ))
+        line = out.get("entry_line") or ""
+        assert line.startswith("新开：否")
+        assert "回踩带" in line
+        assert out["entry_checklist"]["all_green"] is False
+
+    def test_all_green_line(self):
+        out = apply_chan_discipline(_open_setup(
+            current=55.2,
+            buy_point_types=["二类买"],
+            mid_pullback_low=54.0,
+            mid_pullback_high=56.5,
+        ))
+        assert out["entry_checklist"]["all_green"] is True
+        assert "可试探" in (out.get("entry_line") or "")
+        assert out["entry_checklist"]["missing_labels"] == []
+
+    def test_format_c1_helper(self):
+        assert format_entry_line_c1(all_green=True) == "新开：可试探（清单全绿）"
+        assert "缺：回踩带" in format_entry_line_c1(all_green=False, missing=["回踩带"])
+
+    def test_merge_demotes_open_when_not_all_green(self):
+        gate = {
+            "action": "轻仓试错",
+            "position_cap_pct": 15.0,
+            "notes": "",
+            "hard_block": "none",
+            "invalidation": "x",
+            "style": "趋势",
+        }
+        chan = apply_chan_discipline(_open_setup(
+            current=58.0,  # 区外 → 不全绿
+            mid_pullback_low=54.0,
+            mid_pullback_high=56.0,
+            buy_point_types=["二类买"],
+        ))
+        disc = merge_discipline(gate, chan)
+        assert disc["allow_new_entry"] is False
+        assert disc["action"] == "观望"
+        assert "可试探" not in (disc.get("entry_line") or "")
+        assert "新开：否" in (disc.get("entry_line") or "")

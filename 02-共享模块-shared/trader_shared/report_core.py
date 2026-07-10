@@ -245,13 +245,40 @@ def render_short_midline(r: dict[str, Any]) -> str:
         lines.append("  动能：暂无信号 · 中性")
     lines.append(f"  裁定：{daily_ruling}")
 
+    # C1 开仓清单：新开：否（缺：…）｜可试探（清单全绿）——不逐条打勾
+    _disc = r.get("discipline") if isinstance(r.get("discipline"), dict) else {}
+    _entry_line = str(_disc.get("entry_line") or "").strip()
+    if not _entry_line:
+        _cl = _disc.get("entry_checklist") if isinstance(_disc.get("entry_checklist"), dict) else {}
+        _entry_line = str(_cl.get("entry_line") or "").strip()
+    if _entry_line:
+        lines.append(f"  {_entry_line}")
+    elif _disc.get("allow_new_entry") is False:
+        _ebr = str(_disc.get("entry_block_reason") or "").strip()
+        if _ebr.startswith("新开："):
+            lines.append(f"  {_ebr}")
+        elif _ebr:
+            lines.append(f"  新开：否（{_ebr[:40]}）")
+        else:
+            lines.append("  新开：否")
+
+    # 全绿才保留试探/挂单类出手；否则强制观察语义（展示层双保险）
+    _all_green = False
+    _cl2 = _disc.get("entry_checklist") if isinstance(_disc.get("entry_checklist"), dict) else {}
+    if _cl2:
+        _all_green = bool(_cl2.get("all_green"))
+    if not _all_green and any(k in execution for k in ("试探", "买点挂", "可按买")):
+        execution = "现价不买 · 不追"
+        if reason and "清单" not in reason:
+            reason = (reason + "，清单未全绿") if reason else "清单未全绿，不新开"
+
     if reason and reason not in execution:
         lines.append(f"  出手：{execution}（{reason}）")
     else:
         lines.append(f"  出手：{execution}")
 
     # 分仓 cap 提示（有分闸字段时）
-    _disc_early = r.get("discipline") if isinstance(r.get("discipline"), dict) else {}
+    _disc_early = _disc
     _cap_m = _disc_early.get("suggested_pct_cap_mid")
     _cap_s = _disc_early.get("suggested_pct_cap_short")
     if _cap_m is not None or _cap_s is not None:
@@ -262,7 +289,6 @@ def render_short_midline(r: dict[str, Any]) -> str:
         lines.append(f"  分仓：中线≤{_cm} ｜ 短线≤{_cs} ｜ 总≤{_ct_s}")
 
     # 纪律失效条件（优先 discipline，回退 mistery_gate；报告不出现 mi/Mistery 品牌）
-    _disc = r.get("discipline") if isinstance(r.get("discipline"), dict) else {}
     _gate = r.get("mistery_gate") if isinstance(r.get("mistery_gate"), dict) else {}
     _inv = str(_disc.get("invalidation") or _gate.get("invalidation") or "").strip()
     if _inv:

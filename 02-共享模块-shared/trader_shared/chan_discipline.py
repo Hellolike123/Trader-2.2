@@ -227,6 +227,98 @@ def _normalize_stage(major_stage: str) -> str:
     return s
 
 
+# 开仓 5 项清单（C1 展示：不全绿只写缺项；全绿才可试探）
+_CHECKLIST_KEYS = (
+    ("mid_ok", "中线背景"),
+    ("in_pullback", "回踩带"),
+    ("short_trigger", "短线触发"),
+    ("conf_ok", "置信数据"),
+    ("fund_ok", "资金筹码"),
+)
+
+
+def build_entry_checklist(
+    *,
+    stage: str = "",
+    mid_view_weak: bool = False,
+    in_pullback: bool | None = None,
+    buy_point_types: list[str] | None = None,
+    low_confidence: bool = False,
+    chip_warning: bool = False,
+    fund_veto: bool = False,
+    weekly_frame: str | None = None,
+    broke_life: bool = False,
+) -> dict[str, Any]:
+    """五项开仓清单布尔；all_green 全绿才允许试探买话术。"""
+    st = _normalize_stage(stage)
+    mid_ok = st not in ("派发", "衰退") and not mid_view_weak
+    if str(weekly_frame or "") == "破坏" or broke_life:
+        mid_ok = False
+
+    if in_pullback is True:
+        pb_ok: bool | None = True
+    elif in_pullback is False:
+        pb_ok = False
+    else:
+        pb_ok = None  # 无回踩数据：不算绿
+
+    types = buy_point_types or []
+    short_trigger = any(
+        any(k in t for k in ("一类买", "二类买", "三类买", "一买", "二买", "三买"))
+        for t in types
+    )
+
+    conf_ok = not low_confidence
+    fund_ok = not (chip_warning or fund_veto)
+
+    items = {
+        "mid_ok": mid_ok,
+        "in_pullback": pb_ok is True,  # None → 展示用 false for all_green
+        "short_trigger": short_trigger,
+        "conf_ok": conf_ok,
+        "fund_ok": fund_ok,
+    }
+    # 回踩无数据：清单 in_pullback 记 None 供展示
+    raw_flags = {
+        "mid_ok": mid_ok,
+        "in_pullback": pb_ok,  # bool | None
+        "short_trigger": short_trigger,
+        "conf_ok": conf_ok,
+        "fund_ok": fund_ok,
+    }
+
+    missing: list[str] = []
+    for key, label in _CHECKLIST_KEYS:
+        v = raw_flags[key]
+        if v is True:
+            continue
+        if v is False or v is None:
+            missing.append(label)
+
+    all_green = all(raw_flags[k] is True for k, _ in _CHECKLIST_KEYS)
+    return {
+        "items": items,
+        "flags": raw_flags,
+        "missing_labels": missing,
+        "all_green": bool(all_green),
+        "entry_line": format_entry_line_c1(all_green=all_green, missing=missing),
+    }
+
+
+def format_entry_line_c1(
+    *,
+    all_green: bool,
+    missing: list[str] | None = None,
+) -> str:
+    """C1：新开：否（缺：…）｜新开：可试探（清单全绿）。"""
+    if all_green:
+        return "新开：可试探（清单全绿）"
+    miss = missing or []
+    if miss:
+        return f"新开：否（缺：{'｜'.join(miss)}）"
+    return "新开：否"
+
+
 def _normalize_buy_types(raw_types: Any) -> list[str]:
     out: list[str] = []
     if not raw_types:
@@ -545,6 +637,25 @@ def apply_chan_discipline(inputs: dict[str, Any] | None = None, **kwargs: Any) -
             zh_bottom=zh_bottom,
         )
 
+    # C1 开仓五清单（展示）；全绿才渲染「可试探」。门禁仍由上方规则负责，此处不重复误杀「缺数跳过」。
+    entry_checklist = build_entry_checklist(
+        stage=stage,
+        mid_view_weak=bool(mid_weak),
+        in_pullback=in_pb,
+        buy_point_types=buy_pts,
+        low_confidence=bool(low_conf),
+        chip_warning=bool(raw.get("chip_migration_warning")),
+        fund_veto=bool(raw.get("fund_flow_outflow_veto")),
+        weekly_frame=str(weekly_frame) if weekly_frame is not None else None,
+        broke_life=bool(broke_life),
+    )
+    # 清单未全绿时：禁止开仓类 action_override（有仓减仓除外）；不单独因缺买点改 mid/short 分闸
+    if not entry_checklist.get("all_green"):
+        if action_override in _OPEN_ACTIONS and not (has_position and action_override == "减仓"):
+            action_override = "观望"
+        if "checklist" not in rules_fired:
+            rules_fired.append("checklist")
+
     return {
         "allow_new_entry": bool(allow_new),
         "allow_new_entry_mid": bool(allow_mid),
@@ -564,6 +675,8 @@ def apply_chan_discipline(inputs: dict[str, Any] | None = None, **kwargs: Any) -
         "pivot_position": pivot_pos,
         "broke_life_line": bool(broke_life),
         "broke_zh_bottom": bool(broke_zh),
+        "entry_checklist": entry_checklist,
+        "entry_line": entry_checklist.get("entry_line"),
     }
 
 
@@ -658,6 +771,13 @@ def merge_discipline(
     if not allow_new and action in _OPEN_ACTIONS:
         action = "观望"
 
+    # C1：清单未全绿不得保留开仓类动作（试探买话术）
+    _cl = chan.get("entry_checklist") if isinstance(chan.get("entry_checklist"), dict) else {}
+    if _cl and not _cl.get("all_green") and action in _OPEN_ACTIONS:
+        action = "观望"
+        allow_new = False
+        cap = 0.0
+
     if gate_action in ("观望", "不做") and action in _OPEN_ACTIONS:
         action = gate_action if gate_action in ("观望", "不做") else "观望"
     if gate_action in ("减仓", "止损离场") and action in _OPEN_ACTIONS:
@@ -703,6 +823,31 @@ def merge_discipline(
     invalidation = str(gate.get("invalidation") or "")
     style = str(gate.get("style") or "")
 
+    # C1 清单：透传；gate 否决时不能显示全绿可试探
+    entry_checklist = dict(chan.get("entry_checklist") or {})
+    if entry_checklist:
+        if not allow_new and entry_checklist.get("all_green"):
+            entry_checklist["all_green"] = False
+            miss = list(entry_checklist.get("missing_labels") or [])
+            if hard_block and hard_block != "none" and "门控否决" not in miss:
+                miss.append("门控否决")
+            elif "门控否决" not in miss and not gate_allow:
+                miss.append("门控否决")
+            entry_checklist["missing_labels"] = miss
+            entry_checklist["entry_line"] = format_entry_line_c1(
+                all_green=False, missing=miss
+            )
+        elif not entry_checklist.get("entry_line"):
+            entry_checklist["entry_line"] = format_entry_line_c1(
+                all_green=bool(entry_checklist.get("all_green")),
+                missing=list(entry_checklist.get("missing_labels") or []),
+            )
+    entry_line = str(
+        (entry_checklist or {}).get("entry_line")
+        or chan.get("entry_line")
+        or ""
+    )
+
     return {
         "allow_new_entry": bool(allow_new),
         "allow_new_entry_mid": bool(gate_allow and chan_mid),
@@ -727,6 +872,8 @@ def merge_discipline(
         "pivot_position": chan.get("pivot_position"),
         "broke_life_line": bool(chan.get("broke_life_line")),
         "broke_zh_bottom": bool(chan.get("broke_zh_bottom")),
+        "entry_checklist": entry_checklist,
+        "entry_line": entry_line,
     }
 
 
