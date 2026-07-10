@@ -527,13 +527,10 @@ def compute_mistery_gate(inputs: dict[str, Any] | None = None, **kwargs: Any) ->
     if missing and action in ("轻仓试错", "回踩低吸", "持有"):
         action = "观望"
 
-    # P1: weekly_frame 扩展点（真周 K 完好|紧张|破坏）
+    # weekly_frame 破坏主裁在 chan_discipline；gate 仅双保险收紧开仓类
     weekly_frame = raw.get("weekly_frame")
-    if weekly_frame:
-        notes_list.append(f"weekly_frame={weekly_frame}(P1未完全生效)")
-        if str(weekly_frame) == "破坏" and action in ("轻仓试错", "回踩低吸", "持有"):
-            action = "观望"
-            notes_list.append("中线框破坏，不新开")
+    if str(weekly_frame or "") == "破坏" and action in ("轻仓试错", "回踩低吸", "持有"):
+        action = "观望"
 
     cap = _position_cap_for(action, suggested_pct, regime, hard_block)
     if low_conf and cap > 0:

@@ -242,7 +242,8 @@ class TestNoStateRewrite:
 
 
 class TestWeeklyFrameP1Hook:
-    def test_weekly_frame_recorded_not_crash(self):
+    def test_weekly_frame_break_tightens_open_action(self):
+        """weekly_frame 破坏主裁在 chan；gate 仅双保险收紧开仓类。"""
         g = compute_mistery_gate({
             "major_stage": "主升",
             "short_term_momentum": "走强",
@@ -256,7 +257,10 @@ class TestWeeklyFrameP1Hook:
             "volume_ratio": 1,
             "change_pct": 0.5,
         })
-        assert "weekly_frame" in g["notes"]
+        # 不崩溃；若表本可开仓则收紧为观望
+        assert g["action"] in ("观望", "减仓", "止损离场", "不做", "轻仓试错", "回踩低吸", "持有")
+        # 主升×走强通常可开仓 → 破坏后应收紧
+        assert g["action"] not in ("轻仓试错", "回踩低吸", "持有") or g.get("position_cap_pct", 0) == 0
 
 
 class TestMidlinePullbackMigratedOut:

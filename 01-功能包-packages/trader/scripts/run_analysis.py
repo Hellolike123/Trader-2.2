@@ -1473,15 +1473,21 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     else:
         report["suggested_pct_context"] = f"{suggested}%（阶段×大盘环境建议）"
 
-    # ── 短中线：关键价 + Mistery 门控 + 结论块（只读，不改写 stage/fusion/stop）──
-    # P1 扩展点 weekly_frame：真周 K 完好|紧张|破坏（当前未算，置 None）
-    report["weekly_frame"] = None  # P1: compute_weekly_frame(weekly_bars) when available
+    # ── 短中线：关键价 + 纪律门控 + 结论块（只读，不改写 stage/fusion/stop）──
+    # weekly_frame 在 mid_key_prices 算出后由 compute_weekly_frame 填充
+    report["weekly_frame"] = None
     try:
         from trader_shared.key_prices import build_key_prices
         from trader_shared.mid_key_prices import build_mid_key_prices
         from trader_shared.mistery_gate import compute_mistery_gate
         from trader_shared.conclusion_block import build_conclusion_block, build_daily_ruling
         from trader_shared.config import MISTERY_MIN_RR
+        from trader_shared.chan_discipline import (
+            apply_chan_discipline,
+            merge_discipline,
+            compute_weekly_frame,
+            compute_pivot_position,
+        )
 
         _ma20 = None
         for _ma_src in (report.get("ma_raw"), report.get("ma"), report.get("mas")):
@@ -1531,6 +1537,57 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         )
         report["mid_key_prices"] = mid_key_prices
 
+        # R9 weekly_frame + R6 中枢位置（周/日）
+        _life = None
+        try:
+            _life = float(mid_key_prices.get("life_line") or 0) or None
+        except (TypeError, ValueError):
+            _life = None
+        _zones_weekly = []
+        _zones_daily = []
+        try:
+            _cmid = report.get("chanlun_midline") or {}
+            if isinstance(_cmid, dict) and "chanlun" in _cmid:
+                _cmid_inner = _cmid.get("chanlun") or {}
+            else:
+                _cmid_inner = _cmid if isinstance(_cmid, dict) else {}
+            _zones_weekly = list(_cmid_inner.get("zones") or [])
+            _st_weekly = str(_cmid_inner.get("structure_type") or "")
+        except Exception:
+            _st_weekly = ""
+            _zones_weekly = []
+        try:
+            _cday0 = report.get("chanlun") or report.get("chan") or {}
+            if isinstance(_cday0, dict) and "chanlun" in _cday0:
+                _cday_inner0 = _cday0.get("chanlun") or {}
+            else:
+                _cday_inner0 = _cday0 if isinstance(_cday0, dict) else {}
+            _zones_daily = list(_cday_inner0.get("zones") or [])
+            _st_daily = str(
+                _cday_inner0.get("structure_type")
+                or report.get("chan_structure_type")
+                or ""
+            )
+        except Exception:
+            _st_daily = str(report.get("chan_structure_type") or "")
+            _zones_daily = []
+        _zh_bottom_w = None
+        for _z in reversed(_zones_weekly):
+            if isinstance(_z, dict) and _z.get("valid") is not False:
+                try:
+                    _zb = float(_z.get("zh_bottom") or 0) or None
+                except (TypeError, ValueError):
+                    _zb = None
+                if _zb:
+                    _zh_bottom_w = _zb
+                    break
+        report["weekly_frame"] = compute_weekly_frame(
+            current, _life, zh_bottom=_zh_bottom_w, zones=_zones_weekly,
+            weekly_bars=weekly_bars or [],
+        )
+        report["pivot_position_weekly"] = compute_pivot_position(current, _zones_weekly)
+        report["pivot_position_daily"] = compute_pivot_position(current, _zones_daily)
+
         _regime = ""
         if isinstance(market_env_data, dict):
             _regime = str(market_env_data.get("level") or "")
@@ -1576,9 +1633,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         except (TypeError, ValueError):
             _fconf = None
 
-        # 通用门控（瘦身：无回踩/mid_view/筹码缠侧规则）
-        from trader_shared.chan_discipline import apply_chan_discipline, merge_discipline
-
+        # 通用门控（瘦身：无回踩/mid_view/筹码缠侧规则；weekly_frame 破坏由 chan 主裁）
         mistery_gate = compute_mistery_gate({
             "major_stage": stage_result["major_stage"],
             "short_term_momentum": stage_result["momentum"],
@@ -1625,6 +1680,14 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             "mid_quality": mid_key_prices.get("quality"),
             "structure_confidence": _mid_struct_conf,
             "buy_point_types": _buy_point_types,
+            "structure_type_daily": _st_daily,
+            "structure_type_weekly": _st_weekly,
+            "low_zone_lower": report.get("low_zone_lower"),
+            "low_zone_upper": report.get("low_zone_upper"),
+            "life_line": _life,
+            "zh_bottom": _zh_bottom_w,
+            "zones": _zones_weekly,
+            "weekly_frame": report.get("weekly_frame"),
             "data_status": report.get("data_status") or snapshot.data_status,
             "fusion_disagreement": _fusion_dis,
             "fusion_confidence": _fconf,
@@ -1640,7 +1703,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         discipline = merge_discipline(mistery_gate, chan_d, max_position_pct=50)
         report["discipline"] = discipline
 
-        # 只收紧：禁止新开时裁 suggested_pct / 出手语义
+        # 只收紧：禁止新开时裁 suggested_pct / 出手语义；R5 同步 position_info
         _disc_action = str(discipline.get("action") or mistery_gate.get("action") or "观望")
         _disc_cap = discipline.get("suggested_pct_cap")
         if _disc_cap is None:
@@ -1649,29 +1712,33 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             _disc_cap_f = float(_disc_cap if _disc_cap is not None else 0)
         except (TypeError, ValueError):
             _disc_cap_f = 0.0
+        try:
+            _sug = float(report.get("suggested_pct") if report.get("suggested_pct") is not None else suggested or 0)
+        except (TypeError, ValueError):
+            _sug = float(suggested or 0) if suggested is not None else 0.0
         if not discipline.get("allow_new_entry", True):
-            try:
-                _sug = float(report.get("suggested_pct") or suggested or 0)
-            except (TypeError, ValueError):
-                _sug = float(suggested or 0) if suggested is not None else 0.0
             if has_position:
-                report["suggested_pct"] = min(_sug, _disc_cap_f) if _disc_cap_f > 0 else 0
+                _final_sug = min(_sug, _disc_cap_f) if _disc_cap_f > 0 else 0
             else:
-                report["suggested_pct"] = 0
-            if report.get("suggested_pct") == 0:
+                _final_sug = 0
+            if _final_sug == 0:
                 if has_position:
                     report["suggested_pct_context"] = "0%（纪律禁止加仓；持仓按减仓/观察）"
                 else:
                     report["suggested_pct_context"] = "0%（纪律不新开）"
         else:
-            # 有 cap 时仍只收紧
-            try:
-                _sug = float(report.get("suggested_pct") or suggested or 0)
-            except (TypeError, ValueError):
-                _sug = float(suggested or 0) if suggested is not None else 0.0
             if _disc_cap_f >= 0 and _sug > _disc_cap_f:
-                report["suggested_pct"] = int(_disc_cap_f) if _disc_cap_f == int(_disc_cap_f) else _disc_cap_f
-                report["suggested_pct_context"] = f"{report['suggested_pct']}%（纪律 cap 收紧）"
+                _final_sug = _disc_cap_f
+                report["suggested_pct_context"] = (
+                    f"{int(_final_sug) if _final_sug == int(_final_sug) else _final_sug}%（纪律 cap 收紧）"
+                )
+            else:
+                _final_sug = _sug
+        if isinstance(_final_sug, float) and _final_sug == int(_final_sug):
+            _final_sug = int(_final_sug)
+        report["suggested_pct"] = _final_sug
+        if isinstance(report.get("position_info"), dict):
+            report["position_info"]["suggested_pct"] = _final_sug
 
         daily_ruling = build_daily_ruling(
             report_fusion,

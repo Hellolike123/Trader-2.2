@@ -163,14 +163,27 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     try:
         from trader_shared.chan_core import format_chanlun_theory_line
+        from trader_shared.chan_discipline import needs_same_level_tag, append_same_level_tag
         _chan_mid = r.get("chanlun_midline")
         if _chan_mid is None:
             _chan_compact = "数据不足·中性"
         else:
             _chan_compact = format_chanlun_theory_line(_chan_mid)
+        _chan_compact = append_same_level_tag(
+            _chan_compact, needs_same_level_tag(_chan_mid, text=_chan_compact)
+        )
     except Exception:
         _chan_compact = "数据不足·中性"
     lines.append(f"  缠论：{_chan_compact}")
+
+    # R6 中枢位置（周）
+    _pp_w = str(r.get("pivot_position_weekly") or "").strip()
+    if not _pp_w:
+        _pp_w = str((r.get("discipline") or {}).get("pivot_position") or "").strip()
+    if _pp_w and _pp_w != "未知":
+        lines.append(f"  位置：{_pp_w}")
+    elif _pp_w == "未知":
+        lines.append("  位置：未知")
 
     # 中线关键价（无 🌟）
     lines.append("")
@@ -200,9 +213,28 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _st2 = str(_csig2.get("reason") or "").replace("缠论", "").strip().lstrip(":：").strip() or "无信号"
         _cd2 = _csig2.get("direction", 0)
         _dl2 = "看涨" if _cd2 and int(_cd2) > 0 else ("看跌" if _cd2 and int(_cd2) < 0 else "中性")
-        lines.append(f"  缠论：{_st2} · {_dl2}")
+        _short_chan_line = f"{_st2} · {_dl2}"
+        try:
+            from trader_shared.chan_discipline import needs_same_level_tag, append_same_level_tag
+            _bps = r.get("chan_buy_point_types") or []
+            _need_sl = needs_same_level_tag(
+                r.get("chanlun") or r.get("chan"),
+                text=_short_chan_line,
+                buy_point_types=_bps if isinstance(_bps, list) else [],
+            )
+            _short_chan_line = append_same_level_tag(_short_chan_line, _need_sl)
+        except Exception:
+            pass
+        lines.append(f"  缠论：{_short_chan_line}")
     else:
         lines.append("  缠论：暂无信号 · 中性")
+
+    # R6 中枢位置（日）
+    _pp_d = str(r.get("pivot_position_daily") or "").strip()
+    if _pp_d and _pp_d != "未知":
+        lines.append(f"  位置：{_pp_d}")
+    elif _pp_d == "未知":
+        lines.append("  位置：未知")
     _msig = fusion_signals.get("momentum") if isinstance(fusion_signals.get("momentum"), dict) else {}
     if _msig:
         _mst = str(_msig.get("reason") or "").replace("动量", "").replace("动能", "").strip().lstrip(":：").strip() or "无信号"
@@ -217,6 +249,17 @@ def render_short_midline(r: dict[str, Any]) -> str:
         lines.append(f"  出手：{execution}（{reason}）")
     else:
         lines.append(f"  出手：{execution}")
+
+    # 分仓 cap 提示（有分闸字段时）
+    _disc_early = r.get("discipline") if isinstance(r.get("discipline"), dict) else {}
+    _cap_m = _disc_early.get("suggested_pct_cap_mid")
+    _cap_s = _disc_early.get("suggested_pct_cap_short")
+    if _cap_m is not None or _cap_s is not None:
+        _cm = f"{_cap_m}%" if _cap_m is not None else "--"
+        _cs = f"{_cap_s}%" if _cap_s is not None else "--"
+        _ct = _disc_early.get("suggested_pct_cap")
+        _ct_s = f"{_ct}%" if _ct is not None else "--"
+        lines.append(f"  分仓：中线≤{_cm} ｜ 短线≤{_cs} ｜ 总≤{_ct_s}")
 
     # 纪律失效条件（优先 discipline，回退 mistery_gate；报告不出现 mi/Mistery 品牌）
     _disc = r.get("discipline") if isinstance(r.get("discipline"), dict) else {}

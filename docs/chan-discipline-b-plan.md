@@ -1,6 +1,7 @@
 # 方案 B：缠论纪律层拆分实施计划
 
-> 状态：**P0 已实施**（B1–B6；Review APPROVE 见 docs/audit/chan-discipline-b-review.md）  
+> 状态：**P0 已实施**；**P1/P2（R1–R10）已由 Implementer 落地**（见 docs/chan-ops-remaining-backlog-plan.md）  
+> P0 Review：docs/audit/chan-discipline-b-review.md  
 
 > 日期：2026-07-10  
 > 选型：**B** — `chan_discipline` + 通用门控（mistery_gate）+ **merge 只收紧**  

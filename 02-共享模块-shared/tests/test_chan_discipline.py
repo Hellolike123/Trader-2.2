@@ -1,4 +1,4 @@
-"""chan_discipline + merge_discipline 单测（方案 B：T1–T7）。"""
+"""chan_discipline + merge_discipline 单测（方案 B：T1–T7；R1–R9）。"""
 from __future__ import annotations
 
 import sys
@@ -13,6 +13,10 @@ if str(ROOT) not in sys.path:
 from trader_shared.chan_discipline import (  # noqa: E402
     apply_chan_discipline,
     merge_discipline,
+    compute_pivot_position,
+    compute_weekly_frame,
+    needs_same_level_tag,
+    append_same_level_tag,
 )
 from trader_shared.mistery_gate import (  # noqa: E402
     compute_mistery_gate,
@@ -313,3 +317,294 @@ class TestGateNoLongerOwnsMigratedRules:
             "change_pct": 0.5,
         })
         assert "中线看法偏空" not in (g.get("notes") or "")
+
+
+
+# ── R1–R9（P1/P2 打包）──────────────────────────────────────
+
+
+class TestR1BuyPointCap:
+    """R1: 一类 cap≤5；二类≤10；三类+中线非弱可到阶段上限；有一类优先最严。"""
+
+    def test_buy1_cap_5(self):
+        out = apply_chan_discipline(_open_setup(
+            buy_point_types=["一类买"],
+            suggested_pct=20,
+            max_position_pct=50,
+        ))
+        assert out["allow_new_entry"] is True
+        assert out["suggested_pct_cap"] <= 5
+        assert out["suggested_pct_cap_short"] <= 5
+        assert "buy1_cap" in out["rules_fired"]
+
+    def test_buy2_cap_10(self):
+        out = apply_chan_discipline(_open_setup(
+            buy_point_types=["二类买"],
+            suggested_pct=30,
+        ))
+        assert out["suggested_pct_cap"] <= 10
+        assert "buy2_cap" in out["rules_fired"]
+
+    def test_buy1_strictest_over_buy3(self):
+        out = apply_chan_discipline(_open_setup(
+            buy_point_types=["三类买", "一类买"],
+            suggested_pct=40,
+        ))
+        assert out["suggested_pct_cap"] <= 5
+        assert "buy1_cap" in out["rules_fired"]
+
+    def test_buy3_main_when_mid_ok(self):
+        out = apply_chan_discipline(_open_setup(
+            buy_point_types=["三类买"],
+            suggested_pct=30,
+            max_position_pct=50,
+            mid_view="上涨趋势未坏 · 可跟踪、不加仓",
+        ))
+        # 三类不额外压到 5/10；可到 suggested 30
+        assert out["suggested_pct_cap"] >= 10 or out["suggested_pct_cap"] == 30
+        assert out["suggested_pct_cap"] <= 50
+        assert "buy3_main_cap" in out["rules_fired"]
+
+    def test_no_buy_point_no_force(self):
+        out = apply_chan_discipline(_open_setup(suggested_pct=15))
+        assert "buy1_cap" not in out["rules_fired"]
+        assert "buy2_cap" not in out["rules_fired"]
+        assert out["suggested_pct_cap"] == 15
+
+
+class TestR2PanZhengNoHeavy:
+    """R2: 盘整 → cap≤10，不做趋势重仓。"""
+
+    def test_daily_pan_zheng_cap(self):
+        out = apply_chan_discipline(_open_setup(
+            structure_type_daily="盘整",
+            suggested_pct=30,
+        ))
+        assert out["suggested_pct_cap"] <= 10
+        notes = "；".join(out["discipline_notes"])
+        assert "盘整不做趋势重仓" in notes
+        assert out["action_override"] in (None, "轻仓试错", "观望")
+        if out["allow_new_entry"]:
+            assert out["action_override"] in ("轻仓试错", None) or out["suggested_pct_cap"] <= 10
+
+    def test_weekly_pan_zheng_cap(self):
+        out = apply_chan_discipline(_open_setup(
+            structure_type_weekly="盘整",
+            suggested_pct=25,
+        ))
+        assert out["suggested_pct_cap"] <= 10
+        assert "pan_zheng_cap" in out["rules_fired"]
+
+    def test_pan_zheng_with_table_open_stays_light(self):
+        gate = {
+            "action": "轻仓试错",
+            "position_cap_pct": 15.0,
+            "notes": "",
+            "hard_block": "none",
+            "invalidation": "",
+            "style": "趋势",
+        }
+        chan = apply_chan_discipline(_open_setup(
+            structure_type_daily="盘整",
+            suggested_pct=15,
+        ))
+        disc = merge_discipline(gate, chan)
+        assert disc["suggested_pct_cap"] <= 10
+        assert disc["action"] not in ("持有", "回踩低吸") or disc["allow_new_entry"] is False
+
+
+class TestR3LowZoneShortGate:
+    """R3: 现价不在 low_zone → allow_new_entry_short=False。"""
+
+    def test_outside_low_zone_blocks_short(self):
+        out = apply_chan_discipline(_open_setup(
+            current=55.2,
+            low_zone_lower=50.0,
+            low_zone_upper=52.0,
+        ))
+        assert out["allow_new_entry_short"] is False
+        assert out["allow_new_entry"] is False
+        assert "low_zone_out" in out["rules_fired"]
+
+    def test_inside_low_zone_ok(self):
+        out = apply_chan_discipline(_open_setup(
+            current=55.2,
+            mid_pullback_low=54.0,
+            mid_pullback_high=56.5,
+            low_zone_lower=54.5,
+            low_zone_upper=55.8,
+        ))
+        assert out["allow_new_entry_short"] is True
+        assert "low_zone_out" not in out["rules_fired"]
+
+    def test_missing_low_zone_skips(self):
+        out = apply_chan_discipline(_open_setup(
+            low_zone_lower=None,
+            low_zone_upper=None,
+        ))
+        assert "low_zone_out" not in out["rules_fired"]
+        assert out["allow_new_entry_short"] is True
+
+
+class TestR4SplitGates:
+    """R4: mid/short 分闸；总闸 = mid AND short。"""
+
+    def test_total_equals_mid_and_short(self):
+        out = apply_chan_discipline(_open_setup(
+            current=58.0,  # 回踩区外 → mid False
+            mid_pullback_low=54.0,
+            mid_pullback_high=56.0,
+            low_zone_lower=57.0,
+            low_zone_upper=59.0,  # short 可 True
+        ))
+        assert out["allow_new_entry_mid"] is False
+        assert out["allow_new_entry_short"] is True
+        assert out["allow_new_entry"] == (
+            out["allow_new_entry_mid"] and out["allow_new_entry_short"]
+        )
+
+    def test_short_only_blocks_total(self):
+        out = apply_chan_discipline(_open_setup(
+            current=55.2,
+            low_zone_lower=50.0,
+            low_zone_upper=51.0,
+        ))
+        assert out["allow_new_entry_mid"] is True
+        assert out["allow_new_entry_short"] is False
+        assert out["allow_new_entry"] is False
+
+    def test_caps_split_and_total_min(self):
+        out = apply_chan_discipline(_open_setup(
+            buy_point_types=["一类买"],
+            structure_type_weekly="盘整",
+            suggested_pct=40,
+        ))
+        assert out["suggested_pct_cap_mid"] is not None
+        assert out["suggested_pct_cap_short"] is not None
+        assert out["suggested_pct_cap"] == min(
+            out["suggested_pct_cap_mid"], out["suggested_pct_cap_short"]
+        )
+
+
+class TestR6PivotPosition:
+    """R6: compute_pivot_position。"""
+
+    def test_inside(self):
+        assert compute_pivot_position(55.0, [
+            {"valid": True, "zh_top": 58.0, "zh_bottom": 51.0},
+        ]) == "中枢内"
+
+    def test_above_pullback(self):
+        pos = compute_pivot_position(59.0, [
+            {"valid": True, "zh_top": 58.0, "zh_bottom": 51.0},
+        ])
+        assert pos == "中枢上(回踩中)"
+
+    def test_below_rebound(self):
+        pos = compute_pivot_position(50.0, [
+            {"valid": True, "zh_top": 58.0, "zh_bottom": 51.0},
+        ])
+        assert pos == "中枢下(反抽中)"
+
+    def test_unknown(self):
+        assert compute_pivot_position(None, []) == "未知"
+        assert compute_pivot_position(50.0, []) == "未知"
+
+    def test_far_outside(self):
+        pos = compute_pivot_position(90.0, [
+            {"valid": True, "zh_top": 58.0, "zh_bottom": 51.0},
+        ])
+        assert pos == "中枢外"
+
+
+class TestR7SameLevelTag:
+    """R7: 买卖点/背驰加（同级）。"""
+
+    def test_divergence_text(self):
+        assert needs_same_level_tag(text="顶背驰 · 看跌") is True
+        assert "（同级）" in append_same_level_tag("顶背驰 · 看跌", True)
+
+    def test_buy_points_obj(self):
+        assert needs_same_level_tag({"buy_points": [{"type": "一类买"}]}) is True
+
+    def test_no_signal(self):
+        assert needs_same_level_tag({"structure_type": "盘整"}, text="盘整·中性") is False
+        assert append_same_level_tag("盘整·中性", False) == "盘整·中性"
+
+
+class TestR8LifeZhBreak:
+    """R8: 破生命线/中枢下沿 → 不新开；有仓倾向减仓。"""
+
+    def test_break_life_blocks(self):
+        out = apply_chan_discipline(_open_setup(
+            current=53.0,
+            life_line=54.0,
+            mid_pullback_low=52.0,
+            mid_pullback_high=56.0,
+        ))
+        assert out["allow_new_entry"] is False
+        assert out["broke_life_line"] is True
+        assert "life_break" in out["rules_fired"]
+
+    def test_break_zh_blocks(self):
+        out = apply_chan_discipline(_open_setup(
+            current=50.0,
+            zh_bottom=51.0,
+            mid_pullback_low=49.0,
+            mid_pullback_high=56.0,
+        ))
+        assert out["allow_new_entry"] is False
+        assert out["broke_zh_bottom"] is True
+
+    def test_break_life_with_position_reduce(self):
+        out = apply_chan_discipline(_open_setup(
+            current=53.0,
+            life_line=54.0,
+            has_position=True,
+            mid_pullback_low=52.0,
+            mid_pullback_high=56.0,
+        ))
+        assert out["allow_new_entry"] is False
+        assert out["action_override"] == "减仓"
+
+
+class TestR9WeeklyFrame:
+    """R9: weekly_frame 完好|紧张|破坏；破坏不新开。"""
+
+    def test_compute_break(self):
+        assert compute_weekly_frame(49.0, 50.0) == "破坏"
+
+    def test_compute_tense(self):
+        # 50 在 50 的 2% 内
+        assert compute_weekly_frame(50.5, 50.0) == "紧张"
+
+    def test_compute_ok(self):
+        assert compute_weekly_frame(55.0, 50.0) == "完好"
+
+    def test_compute_none(self):
+        assert compute_weekly_frame(50.0, None, zh_bottom=None) is None
+
+    def test_break_blocks_entry(self):
+        out = apply_chan_discipline(_open_setup(
+            current=55.2,
+            weekly_frame="破坏",
+        ))
+        assert out["allow_new_entry"] is False
+        assert "weekly_frame_break" in out["rules_fired"]
+
+    def test_merge_preserves_split_fields(self):
+        gate = {
+            "action": "轻仓试错",
+            "position_cap_pct": 10.0,
+            "notes": "",
+            "hard_block": "none",
+            "invalidation": "",
+            "style": "趋势",
+        }
+        chan = apply_chan_discipline(_open_setup(buy_point_types=["二类买"]))
+        disc = merge_discipline(gate, chan)
+        assert "allow_new_entry_mid" in disc
+        assert "allow_new_entry_short" in disc
+        assert disc["allow_new_entry"] == (
+            disc["allow_new_entry_mid"] and disc["allow_new_entry_short"]
+        )
