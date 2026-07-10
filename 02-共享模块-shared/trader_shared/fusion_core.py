@@ -458,12 +458,13 @@ def wyckoff_score_to_direction(score: int) -> dict:
 
 
 _MAIN_FORCE_WEIGHT_ADJUSTMENTS: dict[str, dict[str, float]] = {
-    "accumulation": {"chan": 0.0, "wyckoff": 0.10, "momentum": -0.10},
-    "testing":      {"chan": 0.0, "wyckoff": 0.0,  "momentum": 0.0},
-    "markup":       {"chan": -0.05, "wyckoff": 0.0,  "momentum": 0.10},
-    "distribution": {"chan": -0.10, "wyckoff": 0.10, "momentum": -0.05},
-    "markdown":     {"chan": -0.15, "wyckoff": -0.10, "momentum": -0.10},
-    "unknown":      {"chan": 0.0, "wyckoff": 0.0, "momentum": 0.0},
+    # 第三席为 vpf（价量资金）；旧 key wyckoff 不再使用
+    "accumulation": {"chan": 0.0, "vpf": 0.10, "momentum": -0.10},
+    "testing":      {"chan": 0.0, "vpf": 0.0,  "momentum": 0.0},
+    "markup":       {"chan": -0.05, "vpf": 0.0,  "momentum": 0.10},
+    "distribution": {"chan": -0.10, "vpf": 0.10, "momentum": -0.05},
+    "markdown":     {"chan": -0.15, "vpf": -0.10, "momentum": -0.10},
+    "unknown":      {"chan": 0.0, "vpf": 0.0, "momentum": 0.0},
 }
 
 
@@ -488,7 +489,7 @@ def _apply_main_force_weights(weights: dict[str, float], main_force_env: str) ->
 def merge_decisions(
     chan_result: dict,
     momentum_result: dict,
-    wyckoff_result: dict,
+    wyckoff_result: dict | None = None,
     regime: str = "正常",
     current_price: float = 0.0,
     bars: list = None,
@@ -505,32 +506,22 @@ def merge_decisions(
     extend_concept: dict | None = None,  # Phase 2: 概念板块数据（B7）
     extend_northbound: dict | None = None,  # Phase 2: 北向资金（A8，预留接入）
     extend_margin: dict | None = None,      # Phase 2: 融资融券（预留接入）
+    vpf_result: dict | None = None,         # 价量资金专家（优先）；缺省由 volume/fund 合成
 ) -> dict:
     """决策融合层核心函数。
+
+    短线三席：缠论 + 动能 + 价量资金(vpf)。
+    wyckoff_result 仅兼容旧调用签名，**不再参与短线加权**（威科夫留中线周线）。
 
     Args:
         chan_result:     chanlun_strategy() 的返回值 (levels["chanlun"])
         momentum_result: momentum_strategy() 的返回值 (levels["momentum"])
-        wyckoff_result:  wyckoff_strategy() 的返回值 (levels["wyckoff"])
+        wyckoff_result:  已弃用（短线不计分）；保留位置参数兼容旧测试/调用
         regime:          market_env assess() 返回的 level 字段
-                         ("正常" | "偏弱" | "很差" | "未知")
-        current_price:   当前价格，可选，用于动态判断价格区间
-        bars:            K线数据，可选，用于动态判断价格区间
-        hmm_regime:      HMM大势前瞻状态 ("bull" | "bear" | "range")
-        fund_flow_data:  资金流向特征字典，可选，来自 calc_fund_flow_features()
-                         需要包含 consecutive_outflow_days 和 net_flow_wan 等字段
+        volume_warning / fund_flow_data / vpf_result: 第三席 VPF 输入
 
     Returns:
-        {
-            "action": str,
-            "confidence": float,
-            "weighted_score": float,
-            "regime": str,
-            "hmm_regime": str,
-            "disagreement": float,
-            "signals_detail": {...},
-            "weights_used": {...},
-        }
+        含 signals_detail.chan / momentum / vpf；weights_used 键为 chan/momentum/vpf
     """
     from trader_shared.fusion_regime import get_regime_weights, score_to_action, compute_confidence
 
@@ -552,12 +543,41 @@ def merge_decisions(
         momentum_signal = {"direction": 0, "confidence": 0.0,
                            "reason": "动量标准化异常", "raw_key": "momentum"}
 
+    # 第三席：价量资金（VPF）；不再用日线威科夫投票
     try:
-        wyckoff_signal = _wyckoff_to_signal(wyckoff_result)
-    except (TypeError, KeyError) as exc:
-        _logger.warning("Wyckoff signal normalization failed: %s", exc)
-        wyckoff_signal = {"direction": 0, "confidence": 0.0,
-                           "reason": "威科夫标准化异常", "raw_key": "wyckoff"}
+        from trader_shared.vpf_core import build_vpf_signal, vpf_to_fusion_signal
+        if isinstance(vpf_result, dict) and vpf_result.get("raw_key") == "vpf":
+            vpf_signal = vpf_to_fusion_signal(vpf_result)
+        else:
+            # 计算近20日均成交额（万元），用于资金强度比归一化
+            _avg_turnover_wan = None
+            if bars and len(bars) >= 10:
+                _amounts = []
+                for _b in bars[-20:]:
+                    _a = _b.get("amount") if isinstance(_b, dict) else getattr(_b, "amount", None)
+                    if _a is not None:
+                        try:
+                            _amounts.append(float(str(_a).replace(",", "")))
+                        except (TypeError, ValueError):
+                            pass
+                if _amounts:
+                    _avg_turnover_wan = sum(_amounts) / len(_amounts) / 10000.0  # 元→万元
+
+            vpf_signal = build_vpf_signal(
+                volume_warning if isinstance(volume_warning, dict) else None,
+                fund_flow_data if isinstance(fund_flow_data, dict) else None,
+                bars=bars,
+                avg_daily_turnover_wan=_avg_turnover_wan,
+            )
+    except Exception as exc:
+        _logger.warning("VPF signal build failed: %s", exc)
+        vpf_signal = {
+            "direction": 0,
+            "confidence": 0.2,
+            "reason": "价量资金标准化异常",
+            "raw_key": "vpf",
+            "fund_quality": "missing",
+        }
 
     # 2. 场景优先级过滤器 (Scenario Priority Filter)
     # 计算20日高低区间位置
@@ -594,12 +614,11 @@ def merge_decisions(
         kw in chan_reason for kw in ("一类卖", "1类卖", "1st sell", "顶背驰", "top_divergence")
     )
 
-    wyk_reason = wyckoff_signal.get("reason", "")
-    strong_bullish_wyk = wyckoff_signal.get("direction") == 1 and any(
-        kw in wyk_reason for kw in ("弹簧", "Spring", "看多", "bullish")
-    )
-    strong_bearish_wyk = wyckoff_signal.get("direction") == -1 and any(
-        kw in wyk_reason for kw in ("上冲", "Upthrust", "看空", "bearish")
+    vpf_reason = str(vpf_signal.get("reason") or "")
+    strong_bullish_vpf = vpf_signal.get("direction") == 1 and float(vpf_signal.get("confidence") or 0) >= 0.45
+    strong_bearish_vpf = vpf_signal.get("direction") == -1 and (
+        float(vpf_signal.get("confidence") or 0) >= 0.5
+        or any(k in vpf_reason for k in ("天量", "滞涨", "连", "流出"))
     )
 
     mom_score = 50
@@ -613,24 +632,25 @@ def merge_decisions(
     # P2 Fix: bars < 20 时放宽阈值到 0.5，避免数据不足时误判
     _pct_threshold = 0.3 if (bars and len(bars) >= 20) else 0.5
     _pct_threshold_strong = 0.35 if (bars and len(bars) >= 20) else 0.5
-    is_breakout_or_bottom = (pos_pct is not None and pos_pct <= _pct_threshold) or ((strong_bullish_chan or strong_bullish_wyk) and pos_pct is not None and pos_pct <= _pct_threshold_strong)
+    is_breakout_or_bottom = (pos_pct is not None and pos_pct <= _pct_threshold) or (
+        (strong_bullish_chan or strong_bullish_vpf) and pos_pct is not None and pos_pct <= _pct_threshold_strong
+    )
 
     # 真正的高位超买（价格在区间上沿 + 动量极强）：动量权重最高，
     # 因为高位要看动量是否衰竭来决定去留。
     is_genuine_climax = pos_pct is not None and pos_pct >= 0.7 and mom_score >= 80
-    # 仅有强看空信号（顶背驰/上冲回落），未必处于高位：这是结构发出看空警告，
+    # 仅有强看空信号（顶背驰 / 价量资金偏空），未必处于高位：这是结构发出看空警告，
     # 应尊重结构信号而非给动量最高权重去否决它。
-    is_bearish_structure_warning = (strong_bearish_chan or strong_bearish_wyk) and not is_genuine_climax
+    is_bearish_structure_warning = (strong_bearish_chan or strong_bearish_vpf) and not is_genuine_climax
 
     if is_breakout_or_bottom:
-        weights = {"chan": 0.44, "momentum": 0.20, "wyckoff": 0.36}
+        weights = {"chan": 0.44, "momentum": 0.20, "vpf": 0.36}
     elif is_genuine_climax:
         # 高位 + 强动量：动量权重最高（56%），高位看动量衰竭
-        weights = {"chan": 0.20, "momentum": 0.56, "wyckoff": 0.24}
+        weights = {"chan": 0.20, "momentum": 0.56, "vpf": 0.24}
     elif is_bearish_structure_warning:
-        # 结构看空警告（顶背驰/上冲回落）：尊重结构，chan/wyk 权重高于动量，
-        # 避免动量噪音在结构发出撤退信号时反向主导。
-        weights = {"chan": 0.44, "momentum": 0.20, "wyckoff": 0.36}
+        # 结构/价量看空警告：尊重结构与 VPF，权重高于动量
+        weights = {"chan": 0.44, "momentum": 0.20, "vpf": 0.36}
     else:
         regime_weights = get_regime_weights(regime)
         if regime == "很差":
@@ -645,28 +665,29 @@ def merge_decisions(
     # 3. 分歧检测与置信优先级冲突消解
     directions = [chan_signal["direction"],
                   momentum_signal["direction"],
-                  wyckoff_signal["direction"]]
+                  vpf_signal["direction"]]
     disagreement = max(directions) - min(directions)
     disagreement_for_action = disagreement
 
     if disagreement > 1:
-        if strong_bullish_chan or strong_bullish_wyk:
+        if strong_bullish_chan or strong_bullish_vpf:
             if momentum_signal["direction"] == -1:
                 # 衰减动量权重而非归零方向：confidence 是连续值可真正衰减，
                 # direction 是离散值 (±1)，对它做 *0.3 会被 int() 抹成 0，
                 # 导致冲突的动量信号彻底消失而非减弱。修正后保留方向、削弱权重。
                 momentum_signal["confidence"] *= 0.3
             disagreement_for_action = 0
-        elif strong_bearish_chan or strong_bearish_wyk:
+        elif strong_bearish_chan or strong_bearish_vpf:
             if momentum_signal["direction"] == 1:
                 momentum_signal["confidence"] *= 0.3
             disagreement_for_action = 0
 
     # 4. 加权计算 (使用可能消解后的方向及权重)
+    _w_vpf = weights.get("vpf", weights.get("wyckoff", 0.25))
     weighted_score = (
         chan_signal["direction"] * chan_signal["confidence"] * weights["chan"] +
         momentum_signal["direction"] * momentum_signal["confidence"] * weights["momentum"] +
-        wyckoff_signal["direction"] * wyckoff_signal["confidence"] * weights["wyckoff"]
+        vpf_signal["direction"] * vpf_signal["confidence"] * _w_vpf
     )
 
     # 5. 决策映射
@@ -703,7 +724,7 @@ def merge_decisions(
             bayesian_res = bayesian_merge(
                 chan_signal=chan_signal,
                 momentum_signal=momentum_signal,
-                wyckoff_signal=wyckoff_signal,
+                wyckoff_signal=vpf_signal,  # 第三席：VPF 复用 bayesian 槽位
                 regime_state=hmm_regime
             )
             if bayesian_res and "action" in bayesian_res:
@@ -865,7 +886,14 @@ def merge_decisions(
         "signals_detail": {
             "chan": chan_signal,
             "momentum": momentum_signal,
-            "wyckoff": wyckoff_signal,
+            "vpf": vpf_signal,
+            # 兼容旧读方：短线威科夫已退出，占位中性
+            "wyckoff": {
+                "direction": 0,
+                "confidence": 0.0,
+                "reason": "短线已改价量资金，威科夫见中线",
+                "raw_key": "wyckoff",
+            },
         },
         "weights_used": weights,
     }
