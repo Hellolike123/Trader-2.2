@@ -39,21 +39,15 @@ def render_single(r: dict[str, Any]) -> str:
 
 
 def render_short_midline(r: dict[str, Any]) -> str:
-    """短中线报告模板（顺序冻结，见 docs/short-midline-report-and-gate-plan.md §1.1）。
+    """短中线报告模板（docs/mid-short-dual-track-plan.md §0.1）。
 
-    分析报告 — 名（码）｜短中线
-    现价 + 阶段动能大盘 + MA
-    🎯 结论
-    🗳️ 日线三专家 + 日线裁定
-    📍 关键价 + 两句亏赚
-    🗺 空间参考
-    ✅⚠️📌 T0 池
+    meta → 🧭 中线 → ⚡ 短线 → 说明 → 📌/T0/池
+    B3C 阶段+看法并列；B2A 无 🗺、🌟 仅短线。
     """
     name = r.get("name", "")
     code = str(r.get("symbol", "")).replace(".SH", "").replace(".SZ", "")
     current = float(r.get("current") or 0)
     change_pct = float(r.get("change_pct") or 0)
-    # 优先 ma_raw（数值）；ma 可能是展示用字符串 dict
     ma_raw = r.get("ma_raw") if isinstance(r.get("ma_raw"), dict) else None
     if not ma_raw:
         ma_raw = r.get("ma") if isinstance(r.get("ma"), dict) else {}
@@ -70,6 +64,8 @@ def render_short_midline(r: dict[str, Any]) -> str:
             return None
 
     major_stage = str(r.get("major_stage") or "")
+    if major_stage == "None":
+        major_stage = ""
     momentum = str(r.get("short_term_momentum") or "")
     market_env = r.get("market_env") or {}
     regime = ""
@@ -81,6 +77,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     conclusion = r.get("conclusion") or {}
     key_prices = r.get("key_prices") or {}
+    mid_key_prices = r.get("mid_key_prices") or {}
     fusion = r.get("fusion") or {}
     fusion_signals = fusion.get("signals_detail") or {}
     daily_ruling = str(
@@ -95,10 +92,8 @@ def render_short_midline(r: dict[str, Any]) -> str:
         f"现价 {current:.2f}（{change_pct:+.2f}%）",
     ]
 
-    # 阶段｜动能｜大盘
+    # meta：动能｜大盘（阶段主展示在 🧭，meta 不重复以免与中线打架）
     meta_parts = []
-    if major_stage and major_stage != "None":
-        meta_parts.append(f"阶段 {major_stage}")
     if momentum:
         meta_parts.append(f"动能 {momentum}")
     if regime:
@@ -106,7 +101,6 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if meta_parts:
         lines.append(f"  {' ｜ '.join(meta_parts)}")
 
-    # MA：契约要求同一行含 MA20 与 MA250（无值时用 --）
     ma_parts = []
     for k, label in (("ma5", "MA5"), ("ma20", "MA20"), ("ma250", "MA250")):
         fv = _ma_float(k)
@@ -121,7 +115,6 @@ def render_short_midline(r: dict[str, Any]) -> str:
         joined_ma = joined_ma + " ｜ MA250：--"
     lines.append(f"  {joined_ma}")
 
-    # 可选量比
     volume_ratio_val = float(r.get("volume_ratio") or 0)
     turnover_val = float(r.get("turnover_rate") or 0)
     vol_parts = []
@@ -137,24 +130,26 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if current > 0 and ma250_val is not None and current < ma250_val:
         lines.append(f"  ⚠️ 股价在年线（{ma250_val:.2f}）下方运行，注意风险")
 
-    # ── 🎯 结论：主中线(四阶段) + 理论(威科夫/缠论旁证) + 短线/出手 ──
-    lines.append("")
-    lines.append("🎯 结论")
-    mid = conclusion.get("midline") or "观察"
+    mid = conclusion.get("midline") or "中线观察"
     short = conclusion.get("shortline") or "观察"
     execution = conclusion.get("execution") or "现价不买 · 不追"
     reason = conclusion.get("reason") or ""
     this_week = conclusion.get("this_week") or ""
     conflict = conclusion.get("conflict") or ""
+    stage_line = str(conclusion.get("stage_line") or major_stage or "").strip()
+    if stage_line == "None":
+        stage_line = ""
 
-    # 主中线：四阶段 + 看法（驱动不变）
-    _stage_txt = major_stage if major_stage and major_stage != "None" else "未知"
-    lines.append(f"  中线：{_stage_txt} · {mid}")
+    # ── 🧭 中线（B3C）──
+    lines.append("")
+    lines.append("🧭 中线")
+    lines.append(f"  阶段：{stage_line or '未知'}")
+    lines.append(f"  看法：{mid}")
 
-    # 理论旁证一行并排（不覆盖四阶段；中线缠/威各自独立周K结果）
+    # 威科夫/缠论：严格 mid 字段，禁止回退日线
     try:
         from trader_shared.wyckoff_core import format_wyckoff_oneline
-        _wyk_raw = r.get("wyckoff_midline") or r.get("wyckoff")
+        _wyk_raw = r.get("wyckoff_midline")
         if isinstance(_wyk_raw, dict) and "wyckoff" in _wyk_raw:
             _wyk_raw = _wyk_raw.get("wyckoff")
         if not isinstance(_wyk_raw, dict):
@@ -164,10 +159,10 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _wyk_line = "威科夫：暂无明确信号 · 中性"
     _wyk_body = _wyk_line.replace("威科夫：", "").replace("威科夫:", "").strip()
     _wyk_compact = _wyk_body.replace(" · ", "·").replace(" ·", "·").replace("· ", "·")
+    lines.append(f"  威科夫：{_wyk_compact}")
 
     try:
         from trader_shared.chan_core import format_chanlun_theory_line
-        # 严格用中线缠结果，禁止回退到日线 fusion 顶背驰冒充中线
         _chan_mid = r.get("chanlun_midline")
         if _chan_mid is None:
             _chan_compact = "数据不足·中性"
@@ -175,21 +170,31 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _chan_compact = format_chanlun_theory_line(_chan_mid)
     except Exception:
         _chan_compact = "数据不足·中性"
-    lines.append(f"  理论：威科夫 {_wyk_compact} ｜ 缠论 {_chan_compact}")
+    lines.append(f"  缠论：{_chan_compact}")
 
-    lines.append(f"  短线：{short}")
-    # 出手 + 原因并一行，避免两行说同一件事
-    if reason and reason not in execution:
-        lines.append(f"  出手：{execution}（{reason}）")
-    else:
-        lines.append(f"  出手：{execution}")
-    if conflict:
-        lines.append(f"  说明：{conflict}")
-
-    # ── 🗳️ 短线专家（日线缠信号 + 动能；理论区已有结构/威科夫）──
+    # 中线关键价（无 🌟）
     lines.append("")
-    lines.append("🗳️ 短线专家")
-    # 短线缠论：事件信号（与理论区结构行区分）
+    lines.append("  关键价（中线）")
+    _ll = mid_key_prices.get("line_life") or ""
+    _lp = mid_key_prices.get("line_pullback") or ""
+    _lr = mid_key_prices.get("line_resist") or ""
+    _lt = mid_key_prices.get("line_target") or ""
+    if _ll:
+        lines.append(f"    {_ll}")
+    if _lp:
+        lines.append(f"    {_lp}")
+    if _lr:
+        lines.append(f"    {_lr}")
+    if _lt:
+        lines.append(f"    {_lt}")
+    if not any((_ll, _lp, _lr, _lt)):
+        lines.append("    数据不足")
+
+    # ── ⚡ 短线 ──
+    lines.append("")
+    lines.append("⚡ 短线")
+    lines.append(f"  看法：{short}")
+
     _csig2 = fusion_signals.get("chan") if isinstance(fusion_signals.get("chan"), dict) else {}
     if _csig2:
         _st2 = str(_csig2.get("reason") or "").replace("缠论", "").strip().lstrip(":：").strip() or "无信号"
@@ -206,9 +211,13 @@ def render_short_midline(r: dict[str, Any]) -> str:
         lines.append(f"  动能：{_mst} · {_mdl}")
     else:
         lines.append("  动能：暂无信号 · 中性")
-    lines.append(f"  短线裁定：{daily_ruling}")
+    lines.append(f"  裁定：{daily_ruling}")
 
-    # ── 📍 关键价（买卖点始终输出）──
+    if reason and reason not in execution:
+        lines.append(f"  出手：{execution}（{reason}）")
+    else:
+        lines.append(f"  出手：{execution}")
+
     stop_sell = key_prices.get("stop_sell") or r.get("stop")
     buy_low = key_prices.get("buy_zone_low")
     buy_high = key_prices.get("buy_zone_high")
@@ -218,7 +227,6 @@ def render_short_midline(r: dict[str, Any]) -> str:
     swing_sell = key_prices.get("swing_sell")
     far_sell = key_prices.get("far_sell")
 
-    # 回退：无 key_prices 时从 report 原始字段拼
     if not buy_ref:
         support = float(r.get("support") or 0)
         if support > 0:
@@ -235,26 +243,24 @@ def render_short_midline(r: dict[str, Any]) -> str:
         swing_sell = float(r.get("resistance") or 0) or None
 
     lines.append("")
-    lines.append("📍 关键价")
+    lines.append("  关键价（短线）")
     if stop_sell:
-        lines.append(f"  止损卖点 {float(stop_sell):.2f}")
+        lines.append(f"    止损 {float(stop_sell):.2f}（破则今日计划作废）")
     else:
-        lines.append("  止损卖点 未定义")
+        lines.append("    止损 未定义")
     if buy_low and buy_high:
-        lines.append(f"  买点区 {float(buy_low):.2f}-{float(buy_high):.2f}")
+        lines.append(f"    买点区 {float(buy_low):.2f}-{float(buy_high):.2f}（回这里再谈买）")
     elif buy_ref:
-        lines.append(f"  买点区 {float(buy_ref):.2f}")
+        lines.append(f"    买点区 {float(buy_ref):.2f}（回这里再谈买）")
     else:
-        lines.append("  买点区 数据不足")
+        lines.append("    买点区 数据不足")
     if current > 0:
-        lines.append(f"  🌟 现价 {current:.2f}")
+        lines.append(f"    🌟 现价 {current:.2f}")
     if short_low and short_high:
         if float(short_low) == float(short_high):
-            lines.append(f"  短线卖点区 {float(short_low):.2f}")
+            lines.append(f"    卖点区 {float(short_low):.2f}（冲到减/高抛）")
         else:
-            lines.append(f"  短线卖点区 {float(short_low):.2f}-{float(short_high):.2f}")
-    if swing_sell:
-        lines.append(f"  波段卖点区 {float(swing_sell):.2f}")
+            lines.append(f"    卖点区 {float(short_low):.2f}-{float(short_high):.2f}（冲到减/高抛）")
 
     lines.append("")
     line_buy = key_prices.get("line_buy") or ""
@@ -262,7 +268,6 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if line_buy:
         lines.append(f"  {line_buy}")
     elif buy_ref and stop_sell:
-        # 最低限度两句，保证含「买」
         risk = max(0.0, float(buy_ref) - float(stop_sell))
         tgt = float(short_high or short_low or swing_sell or buy_ref)
         rew = max(0.0, tgt - float(buy_ref))
@@ -275,55 +280,48 @@ def render_short_midline(r: dict[str, Any]) -> str:
         rew2 = max(0.0, tgt - current)
         lines.append(f"  {current:.2f} 追：亏约 {risk2:.1f} / 赚约 {rew2:.1f} → 不追")
 
-    # ── 🗺 空间参考：10/60/120 支撑地图，不用卖点冒充 ──
-    lines.append("")
-    lines.append("🗺 空间参考（不指挥下单）")
-    key_levels = r.get("key_levels") or {}
-    near = key_prices.get("space_near") or key_levels.get("short_support") or r.get("support")
-    mid_p = key_prices.get("space_mid") or key_levels.get("mid_support")
-    far = key_prices.get("space_far") or key_levels.get("long_support")
-    space_parts = []
-    if near and float(near) > 0:
-        space_parts.append(f"近端支撑 {float(near):.2f}")
-    if mid_p and float(mid_p) > 0:
-        space_parts.append(f"波段支撑 {float(mid_p):.2f}")
-    if far and float(far) > 0:
-        space_parts.append(f"远端支撑 {float(far):.2f}")
-    if space_parts:
-        lines.append(f"  {' ｜ '.join(space_parts)}")
-    else:
-        lines.append("  数据不足")
+    if conflict:
+        lines.append("")
+        lines.append(f"说明：{conflict}")
 
-    # ── 亮点 / 风险：对齐短中线叙事 ──
+    # ── 亮点 / 风险（禁止「阶段…中线故事」挂羊头）──
     support = float(r.get("support") or 0)
     confirm = float(r.get("confirm") or 0)
-    _short_resist = float(
-        key_prices.get("swing_sell")
-        or key_levels.get("short_resist")
+    key_levels = r.get("key_levels") or {}
+    _mid_resist = float(
+        mid_key_prices.get("resist")
+        or key_prices.get("swing_sell")
+        or key_levels.get("mid_resist")
         or 0
     )
     stop_v = float(stop_sell or 0)
+    life_v = float(mid_key_prices.get("life_line") or 0)
 
     lines.append("")
-    if major_stage and any(k in major_stage for k in ("蓄势", "主升")) and "派发" not in major_stage and "衰退" not in major_stage:
-        lines.append(f"✅ 亮点：阶段 {major_stage}，中线故事未到派发/衰退")
+    if "可跟踪" in mid or "未坏" in mid:
+        lines.append(f"✅ 亮点：中线看法仍可跟踪" + (f"；阶段 {stage_line}" if stage_line else ""))
     elif support > 0 and current > support * 1.005:
         lines.append(f"✅ 亮点：现价仍在支撑 {support:.2f} 上方")
+    elif stage_line and any(k in stage_line for k in ("蓄势", "主升")):
+        lines.append(f"✅ 亮点：日线阶段 {stage_line}，先看短线买点再动手")
     else:
         lines.append("✅ 亮点：先看关键价与出手，不单看远支撑")
 
     if "不追" in execution or "不买" in execution:
-        if stop_v > 0 and _short_resist > current > 0:
-            lines.append(f"⚠️ 风险：现价不宜追；止损看 {stop_v:.2f}，上方压力约 {_short_resist:.2f}")
+        if stop_v > 0:
+            extra = f"，上方压力约 {_mid_resist:.2f}" if _mid_resist > current > 0 else ""
+            lines.append(f"⚠️ 风险：现价不宜追；止损看 {stop_v:.2f}{extra}")
         else:
             lines.append("⚠️ 风险：现价不宜追，等回买点")
-    elif major_stage and "派发" in major_stage:
-        lines.append(f"⚠️ 风险：派发期注意破位" + (f"，跌破 {stop_v:.2f} 需离场" if stop_v else ""))
-    elif major_stage and "衰退" in major_stage:
-        lines.append("⚠️ 风险：趋势向下，不宜介入")
-    elif _short_resist > current > 0:
-        _dist_res = (_short_resist - current) / current * 100
-        lines.append(f"⚠️ 风险：上方压力 {_short_resist:.2f} 距现价约 {_dist_res:.0f}%")
+    elif stage_line and "派发" in stage_line:
+        lines.append("⚠️ 风险：派发阶段注意破位" + (f"，跌破 {stop_v:.2f} 需离场" if stop_v else ""))
+    elif stage_line and "衰退" in stage_line:
+        lines.append("⚠️ 风险：衰退阶段，不宜介入")
+    elif life_v > 0 and current > 0 and current < life_v * 1.02:
+        lines.append(f"⚠️ 风险：靠近/跌破中线生命线 {life_v:.2f}")
+    elif _mid_resist > current > 0:
+        _dist_res = (_mid_resist - current) / current * 100
+        lines.append(f"⚠️ 风险：上方压力 {_mid_resist:.2f} 距现价约 {_dist_res:.0f}%")
     else:
         lines.append("⚠️ 风险：未站稳前不提前加仓")
 

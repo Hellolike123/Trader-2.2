@@ -1259,14 +1259,25 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "confidence": stage_result.get("confidence", 0),
         "protection_notes": stage_result.get("protection_notes", []),
         "stop_losses": stage_result.get("stop_losses", {}),
-        # 中线理论：威科夫/缠论独立周K判断；日线结果另存供 fusion / 短线专家
+        # 中线理论：威科夫/缠论独立周K；日线另存供 fusion / 短线专家
+        # 中线字段禁止静默回退日线（R3 / 规格 B 源隔离）
         "wyckoff": (wyck_mid_result.get("wyckoff") if isinstance(wyck_mid_result, dict) else None)
         or wyck_result.get("wyckoff", wyck_result),
         "wyckoff_daily": wyck_result.get("wyckoff", wyck_result),
-        "wyckoff_midline": (wyck_mid_result.get("wyckoff") if isinstance(wyck_mid_result, dict) else None)
-        or wyck_result.get("wyckoff", wyck_result),
+        "wyckoff_midline": (
+            (wyck_mid_result.get("wyckoff") if isinstance(wyck_mid_result, dict) else None)
+            or {
+                "timeframe": "insufficient",
+                "phase": "none",
+                "wyckoff_summary": "中线数据不足",
+                "spring_signal": False,
+                "upthrust_signal": False,
+                "bc_signal": False,
+                "sow_signal": False,
+                "sos_signal": False,
+            }
+        ),
         "chanlun_daily": chan_result,
-        # 中线缠：只用独立周K结果，禁止回退日线（避免理论区冒充短线顶背驰）
         "chanlun_midline": chan_mid_result if chan_mid_result else {
             "chanlun": {"timeframe": "insufficient", "structure_type": "", "divergence": {}}
         },
@@ -1467,6 +1478,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     report["weekly_frame"] = None  # P1: compute_weekly_frame(weekly_bars) when available
     try:
         from trader_shared.key_prices import build_key_prices
+        from trader_shared.mid_key_prices import build_mid_key_prices
         from trader_shared.mistery_gate import compute_mistery_gate
         from trader_shared.conclusion_block import build_conclusion_block, build_daily_ruling
         from trader_shared.config import MISTERY_MIN_RR
@@ -1508,6 +1520,16 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             else:
                 key_prices["line_chase"] = _lc + " → 不追"
         report["key_prices"] = key_prices
+
+        # 中线关键价（独立周线引擎；与短线 key_prices 分轨）
+        # 禁止日 K key_levels 作 mid 主参（默认忽略；仅 MIDLINE_PRICE_DAILY_FALLBACK）
+        mid_key_prices = build_mid_key_prices(
+            current=current,
+            weekly_bars=weekly_bars or [],
+            chanlun_midline=report.get("chanlun_midline"),
+            wyckoff_midline=report.get("wyckoff_midline"),
+        )
+        report["mid_key_prices"] = mid_key_prices
 
         _regime = ""
         if isinstance(market_env_data, dict):
@@ -1557,18 +1579,21 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             has_position=has_position,
             daily_ruling=daily_ruling,
             weekly_frame=report.get("weekly_frame"),
+            chanlun_midline=report.get("chanlun_midline"),
+            wyckoff_midline=report.get("wyckoff_midline"),
         )
         report["conclusion"] = conclusion
         report["daily_ruling"] = daily_ruling
     except Exception as _sm_exc:
         # 短中线组装失败不阻断主报告；保留原字段
         report.setdefault("key_prices", {})
+        report.setdefault("mid_key_prices", {})
         report.setdefault("mistery_gate", {
             "hard_block": "none", "style": "不明", "action": "观望",
             "invalidation": "", "position_cap_pct": 0.0, "notes": f"gate_error:{_sm_exc}",
         })
         report.setdefault("conclusion", {
-            "midline": "数据组装异常", "shortline": "观察",
+            "midline": "数据组装异常", "stage_line": "", "shortline": "观察",
             "execution": "现价不买 · 不追", "reason": "门控组装失败",
             "this_week": "观察", "conflict": "", "daily_ruling": "中性，观望",
         })

@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from trader_shared.key_prices import build_key_prices  # noqa: E402
+from trader_shared.mid_key_prices import build_mid_key_prices  # noqa: E402
 from trader_shared.report_core import render_short_midline  # noqa: E402
 from trader_shared.schema.v1 import validate_trader  # noqa: E402
 from trader_shared.conclusion_block import build_conclusion_block  # noqa: E402
@@ -118,6 +119,21 @@ class TestRenderShortMidline:
             "volume_ratio": 1.2,
             "change_pct": 2.0,
         })
+        chan_mid = {
+            "chanlun": {
+                "structure_type": "盘整",
+                "trend_label": "下跌",
+                "divergence": {},
+                "timeframe": "weekly",
+            }
+        }
+        wyck_mid = {
+            "spring_signal": False,
+            "sos_signal": False,
+            "upthrust_signal": False,
+            "bc_signal": False,
+            "sow_signal": False,
+        }
         conclusion = build_conclusion_block(
             major_stage="蓄势偏强",
             short_term_momentum="震荡",
@@ -132,6 +148,44 @@ class TestRenderShortMidline:
                 "wyckoff": {"direction": -1, "reason": "无"},
             }},
             has_position=False,
+            chanlun_midline=chan_mid,
+            wyckoff_midline=wyck_mid,
+        )
+        _weekly = []
+        _wp = 45.0
+        for _i in range(40):
+            _c = _wp * (1.01 if _i % 3 else 0.99)
+            _weekly.append({
+                "open": _c, "high": _c * 1.02, "low": _c * 0.98,
+                "close": _c, "volume": 1000, "date": f"2024-01-{(_i % 28)+1:02d}",
+            })
+            _wp = _c
+        mk = build_mid_key_prices(
+            current=48.5,
+            weekly_bars=_weekly,
+            chanlun_midline={
+                "chanlun": {
+                    "timeframe": "weekly",
+                    "strokes": [
+                        {"direction": "up", "end_price": 55.0},
+                        {"direction": "down", "end_price": 48.0},
+                        {"direction": "up", "end_price": 62.0},
+                    ],
+                    "segments": [
+                        {"direction": "up", "high": 62.0, "low": 48.0},
+                    ],
+                    "zones": [],
+                }
+            },
+            # 日线参数默认忽略
+            key_levels={
+                "short_support": 44.0,
+                "mid_support": 40.0,
+                "mid_resist": 51.0,
+                "long_resist": 55.0,
+            },
+            ma20=46.0,
+            stop=44.0,
         )
         return {
             "name": "华工科技",
@@ -147,9 +201,12 @@ class TestRenderShortMidline:
             "confirm": 49.0,
             "resistance": 50.0,
             "key_prices": kp,
+            "mid_key_prices": mk,
             "mistery_gate": gate,
             "conclusion": conclusion,
             "daily_ruling": conclusion["daily_ruling"],
+            "chanlun_midline": chan_mid,
+            "wyckoff_midline": wyck_mid,
             "fusion": {
                 "action": "减仓",
                 "weighted_score": -0.15,
@@ -168,32 +225,32 @@ class TestRenderShortMidline:
     def test_template_keywords(self):
         md = render_short_midline(self._sample_report())
         assert "｜短中线" in md
-        assert "🎯 结论" in md
-        assert "中线：" in md
-        assert "理论：" in md
+        assert "🧭 中线" in md
+        assert "⚡ 短线" in md
+        assert "阶段：蓄势偏强" in md
+        assert "看法：" in md
+        assert "中线：蓄势" not in md
+        assert "🎯 结论" not in md
         assert "威科夫" in md
         assert "缠论" in md
         assert "出手" in md
-        assert "🗳️ 短线专家" in md
-        assert "短线裁定" in md
+        assert "裁定：" in md
         assert "日线三专家" not in md
-        assert "📍 关键价" in md
+        assert "🗳️ 短线专家" not in md
+        assert "关键价（中线）" in md
+        assert "关键价（短线）" in md
         assert "止损" in md
         assert "买" in md
-        assert "🗺 空间参考" in md
+        assert "🗺 空间参考" not in md
         assert "2.1R" not in md
         assert "不足 1R" not in md
-        # 结论里不再重复「本周：」——只在 📌
         assert "本周：" not in md or "📌 本周只做" in md
         assert md.count("本周只做") <= 1
-        # 空仓不得只写裸「减仓」作出手
         for line in md.splitlines():
             if line.strip().startswith("出手："):
                 assert line.strip() != "出手：减仓"
                 assert "不新开" in line or "不追" in line or "不买" in line
-        # 买卖点仍在；无仓不启用 T0 新开
         assert "买点区" in md
-        assert "止损卖点" in md
         assert "无底仓" in md or "T0：" in md
         errors = validate_trader(md)
         assert errors == [], errors

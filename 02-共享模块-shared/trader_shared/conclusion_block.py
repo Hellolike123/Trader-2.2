@@ -1,46 +1,151 @@
-"""短中线结论块：中线看法 / 短线看法 / 出手 / 原因 / 本周 / 冲突说明。"""
+"""短中线结论块：中线看法（周线理论）/ 短线看法 / 出手 / 原因 / 本周 / 冲突说明。
+
+规格：docs/mid-short-dual-track-plan.md（B3C / B1A）。
+"""
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from trader_shared.mistery_gate import gate_action_to_execution_text
 
-
-def _norm_stage(major_stage: str) -> str:
-    s = str(major_stage or "").strip()
-    for base in ("蓄势", "主升", "派发", "衰退"):
-        if s.startswith(base) or base in s:
-            return base
-    return s
+# 看法行禁止四阶段词（B3C）
+_STAGE_WORDS_RE = re.compile(r"蓄势|主升|派发|衰退")
 
 
-def _midline_view(major_stage: str, regime: str, weekly_frame: str | None = None) -> str:
-    """中线看法：故事在不在（阶段驱动，非日线 fusion 单独清仓）。"""
-    stage = _norm_stage(major_stage)
-    full = str(major_stage or "")
-    regime = str(regime or "")
+def _unwrap_chan(chan_result: Any) -> dict[str, Any]:
+    if not isinstance(chan_result, dict):
+        return {}
+    try:
+        from trader_shared.chan_core import unwrap_chan
+        return unwrap_chan(chan_result) or {}
+    except Exception:
+        if "chanlun" in chan_result and isinstance(chan_result.get("chanlun"), dict):
+            return chan_result["chanlun"]
+        return chan_result
 
-    # P1: weekly_frame 破坏 → 战略减/清倾向（P0 仅文案预留）
+
+def _unwrap_wyck(wyck_result: Any) -> dict[str, Any]:
+    if not isinstance(wyck_result, dict):
+        return {}
+    if "wyckoff" in wyck_result and isinstance(wyck_result.get("wyckoff"), dict):
+        return wyck_result["wyckoff"]
+    return wyck_result
+
+
+def chanlun_midline_dir(chanlun_midline: Any) -> int:
+    """与 format_chanlun_theory_line 同源方向：+1 / 0 / -1。"""
+    chan = _unwrap_chan(chanlun_midline)
+    if not chan:
+        return 0
+
+    buy_points = chan.get("buy_points") if isinstance(chan.get("buy_points"), list) else []
+    sell_points = chan.get("sell_points") if isinstance(chan.get("sell_points"), list) else []
+    divergence = chan.get("divergence") if isinstance(chan.get("divergence"), dict) else {}
+    trend_label = str(chan.get("trend_label") or "")
+    st = str(chan.get("structure_type") or "")
+
+    if any(isinstance(p, dict) and p.get("type") in ("一类卖", "二类卖", "三类卖") for p in sell_points):
+        return -1
+    if divergence.get("top_divergence"):
+        return -1
+    if any(isinstance(p, dict) and p.get("type") in ("一类买", "二类买", "三类买") for p in buy_points):
+        return 1
+    if divergence.get("bottom_divergence"):
+        return 1
+    if "上涨" in trend_label or "多" in trend_label:
+        return 1
+    if "下跌" in trend_label or "空" in trend_label:
+        return -1
+    # structure_type 兜底（与展示文案一致）
+    if "下跌" in st or "空" in st:
+        return -1
+    if "上涨" in st or "多" in st:
+        return 1
+    # 盘整且无买卖点 → 中性；若 format 行含看跌则靠 trend
+    try:
+        from trader_shared.chan_core import format_chanlun_theory_line
+        line = format_chanlun_theory_line(chanlun_midline)
+        if "看跌" in line:
+            return -1
+        if "看涨" in line:
+            return 1
+    except Exception:
+        pass
+    return 0
+
+
+def wyckoff_midline_bias(wyckoff_midline: Any) -> str:
+    """strong_bull | strong_bear | neutral（B1A）。"""
+    w = _unwrap_wyck(wyckoff_midline)
+    if not w:
+        return "neutral"
+
+    strong_bear = bool(
+        w.get("upthrust_signal") or w.get("bc_signal") or w.get("sow_signal")
+    )
+    strong_bull = bool(w.get("spring_signal") or w.get("sos_signal"))
+    # 多信号：strong_bear 优先
+    if strong_bear:
+        return "strong_bear"
+    if strong_bull:
+        return "strong_bull"
+    return "neutral"
+
+
+def midline_theory_dirs(
+    chanlun_midline: Any = None,
+    wyckoff_midline: Any = None,
+) -> tuple[int, str]:
+    """返回 (chan_dir, wyck_bias)。"""
+    return chanlun_midline_dir(chanlun_midline), wyckoff_midline_bias(wyckoff_midline)
+
+
+def _midline_view_from_theory(
+    *,
+    chanlun_midline: Any = None,
+    wyckoff_midline: Any = None,
+    weekly_frame: str | None = None,
+) -> str:
+    """中线看法：周线缠+威合成（B1A），禁止四阶段词。"""
     if weekly_frame == "破坏":
-        return "中线框破坏，战略减仓/清仓倾向"
+        return "中线框破坏 · 战略减/清倾向"
 
-    if stage == "衰退":
-        return "故事结束倾向，中线不做多"
-    if stage == "派发":
-        return "派发期，中线不加、只减"
-    if stage == "主升":
-        return "主升叙事仍在，可跟踪持有"
-    if stage == "蓄势":
-        if "偏强" in full:
-            return "可跟踪"
-        if "偏弱" in full:
-            return "偏弱，待确认"
-        return "蓄势观察"
-    if not stage:
-        return "中线数据不足，先观察"
-    if regime == "很差":
-        return "大盘很差，中线宜收缩"
+    chan_dir, wyck_bias = midline_theory_dirs(chanlun_midline, wyckoff_midline)
+    chan = _unwrap_chan(chanlun_midline)
+    st = str(chan.get("structure_type") or "").strip()
+
+    if wyck_bias == "strong_bear":
+        return "中线慎跟 · 偏空信号"
+
+    if chan_dir < 0 and wyck_bias == "strong_bull":
+        return "中线信号打架 · 暂缓跟踪"
+
+    if chan_dir < 0:
+        # 可用 structure_type 主词，不得插入 major_stage
+        if st and not st.startswith("线段不足") and st != "无结构":
+            main = st.replace("趋势", "").strip() or st
+            if "下跌" in st:
+                return f"{st} · 暂缓跟踪"
+            if "盘整" in st:
+                return "盘整偏空 · 暂缓跟踪"
+            return f"{st} · 暂缓跟踪"
+        return "盘整偏空 · 暂缓跟踪"
+
+    if chan_dir > 0 and wyck_bias != "strong_bear":
+        if "上涨" in st:
+            return "上涨趋势未坏 · 可跟踪、不加仓"
+        return "结构偏多 · 可跟踪、不加仓"
+
     return "中线观察"
+
+
+def _assert_no_stage_words(text: str) -> str:
+    """防御：看法不得含四阶段词。"""
+    if _STAGE_WORDS_RE.search(text or ""):
+        # 不应发生；若发生则降级为中性观察
+        return "中线观察"
+    return text
 
 
 def _shortline_view(
@@ -93,7 +198,6 @@ def build_daily_ruling(
     else:
         bias = "中性"
 
-    # 空仓「减仓」类 → 不宜追高/不新开
     reduce_like = any(k in action for k in ("减仓", "空仓", "止损", "观望"))
     if gate_action in ("不做", "观望", "减仓", "止损离场") or not chase_ok:
         stance = "不宜追高"
@@ -121,9 +225,14 @@ def build_conclusion_block(
     has_position: bool = False,
     daily_ruling: str | None = None,
     weekly_frame: str | None = None,
+    chanlun_midline: Any = None,
+    wyckoff_midline: Any = None,
     **_extra: Any,
 ) -> dict[str, Any]:
-    """组装结论块字段。"""
+    """组装结论块字段。
+
+    major_stage 仅用于 stage_line 展示与门控侧，不驱动 conclusion.midline。
+    """
     gate = mistery_gate or {}
     kp = key_prices or {}
     chase_ok = bool(kp.get("chase_ok"))
@@ -138,7 +247,13 @@ def build_conclusion_block(
         gate_action=gate_action,
     )
 
-    mid = _midline_view(major_stage, regime, weekly_frame=weekly_frame)
+    mid = _assert_no_stage_words(
+        _midline_view_from_theory(
+            chanlun_midline=chanlun_midline,
+            wyckoff_midline=wyckoff_midline,
+            weekly_frame=weekly_frame,
+        )
+    )
     short = _shortline_view(scene, theory_status, ruling, chase_ok)
     execution = gate_action_to_execution_text(
         gate_action,
@@ -146,7 +261,7 @@ def build_conclusion_block(
         position_cap_pct=cap,
     )
 
-    # 原因：只讲「账」与硬纪律，不与说明重复
+    # 原因：只讲「账」与硬纪律
     line_chase = str(kp.get("line_chase") or "")
     risk_c = kp.get("risk_chase")
     rew_c = kp.get("reward_chase")
@@ -158,7 +273,6 @@ def build_conclusion_block(
                 if rw <= rc:
                     reason_parts.append(f"现价追大约亏 {rc:.1f}、赚 {rw:.1f}，不划算")
                 elif not chase_ok:
-                    # 账上未必更差，但是场景/门控禁止追
                     reason_parts.append("现价偏冲高，纪律不追")
                 else:
                     reason_parts.append(f"现价追大约亏 {rc:.1f}、赚 {rw:.1f}")
@@ -181,16 +295,19 @@ def build_conclusion_block(
             reason_parts.append("派发不加仓")
         elif "H4" in hb:
             reason_parts.append("止损无法定义")
-    # 去重保序
     seen: set[str] = set()
     uniq: list[str] = []
     for p in reason_parts:
         if p not in seen:
             seen.add(p)
             uniq.append(p)
-    reason = "，".join(uniq) if uniq else "纪律门控"
+    reason = "；".join(uniq) if uniq else "纪律门控"
+    # 兼容旧测「，」连接风格：单段时无逗号更自然
+    if len(uniq) == 1:
+        reason = uniq[0]
+    elif uniq:
+        reason = "，".join(uniq)
 
-    # 本周单焦点（渲染时只在 📌 出现一次，结论里仍带字段）
     if gate_action in ("不做", "观望"):
         this_week = "不追现价；回买点再谈"
     elif gate_action in ("轻仓试错", "回踩低吸"):
@@ -203,21 +320,33 @@ def build_conclusion_block(
     else:
         this_week = "观察为主"
 
-    # 说明：仅中线可跟踪 且 日线偏空；短句，不重复原因里的亏赚
+    # 冲突说明（B1A 封闭）
     conflict = ""
-    mid_ok = any(k in mid for k in ("可跟踪", "主升", "蓄势观察", "待确认"))
-    short_no = any(k in short for k in ("不适合追", "不宜追")) or "不宜追" in ruling or "偏空" in ruling
-    if mid_ok and short_no:
-        conflict = "中线还能看，但今天这个价别买"
+    mid_track = "可跟踪" in mid or "未坏" in mid
+    mid_weak = any(k in mid for k in ("暂缓", "慎跟", "打架", "偏空", "破坏", "减/清"))
+    short_no = (
+        any(k in short for k in ("不适合追", "不宜追", "观望，不追"))
+        or "不宜追" in ruling
+        or "偏空" in ruling
+        or any(k in execution for k in ("不买", "不追"))
+    )
+    if mid_track and short_no:
+        conflict = "中线还能看，现价别买"
+    elif mid_weak and short_no:
+        conflict = "周线偏空，短线也不追"
+
+    stage_txt = str(major_stage or "").strip()
+    if stage_txt == "None":
+        stage_txt = ""
 
     return {
         "midline": mid,
+        "stage_line": stage_txt,  # B3C：阶段行，render 用
         "shortline": short,
         "execution": execution,
         "reason": reason,
         "this_week": this_week,
         "conflict": conflict,
         "daily_ruling": ruling,
-        # P1 预留
         "weekly_frame": weekly_frame,
     }
