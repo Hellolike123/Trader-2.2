@@ -246,6 +246,13 @@ class TestRenderShortMidline:
         assert "不足 1R" not in md
         assert "本周：" not in md or "📌 本周只做" in md
         assert md.count("本周只做") <= 1
+        # 纪律展示：有 invalidation 则出失效；禁止 mi 品牌
+        inv = str((self._sample_report().get("mistery_gate") or {}).get("invalidation") or "")
+        if inv.strip():
+            assert "失效：" in md
+        assert "Mistery" not in md
+        assert "mi姐" not in md
+        assert "mistery" not in md
         for line in md.splitlines():
             if line.strip().startswith("出手："):
                 assert line.strip() != "出手：减仓"

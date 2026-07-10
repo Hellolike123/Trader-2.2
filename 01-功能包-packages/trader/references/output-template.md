@@ -1,23 +1,24 @@
-# Trader 核心报告样式与文案契约 (2.6.0 中短线双轨)
+# Trader 核心报告样式与文案契约 (2.6.1 纪律展示)
 
 > **This is the absolute truth for valid output.** Never generate output format from memory.
 
 本模板为 `trader` 命令 (`final_report.py`) 的绝对输出契约。生产渲染入口：`trader_shared.report_core.render_single` → 默认 `render_short_midline`。
 
-规格真相源：`docs/mid-short-dual-track-plan.md`（B1A / B2A / B3C / B4A 已冻结）。
+规格：`docs/mid-short-dual-track-plan.md` · `docs/discipline-layer-copy-plan.md` · 中线价 `docs/midline-price-engine-plan.md`
 
+> **变更记录 (v2.6.1 纪律展示)**：
+> - 报告对外只写 **出手 / 失效 / 纪律** 白话，**禁止** mi姐、Mistery 人设或品牌词
+> - ⚡ 出手下增加可选 `失效：…`（读纪律门控 invalidation，空则省略）
+> - 对内字段可仍为 `mistery_gate`（实现细节）；Markdown 可见面不得出现该品牌
+>
 > **变更记录 (v2.6.0 中短线双轨)**：
 > - 分区：meta → 🧭 中线 → ⚡ 短线 → 说明 → 📌/T0/池
-> - **B3C**：中线内 `阶段：`（major_stage）与 `看法：`（周线缠+威）**并列**，禁止「中线：{stage} · …」揉句
-> - **B1A**：看法由周线理论可编码合成；威多+缠空 →「中线信号打架 · 暂缓跟踪」
-> - **B2A**：🌟 仅短线关键价；删除 🗺 空间参考
-> - **B4A**：中线生命线回退 mid_support → stage_based → stop
-> - 中线关键价：`mid_key_prices`；短线关键价：`key_prices`；出手仍门控驱动
+> - **B3C**：阶段 + 看法并列；**B1A** 周线看法；**B2A** 无 🗺、🌟 仅短线
+> - 中线关键价：`mid_key_prices`（周线引擎）；短线：`key_prices`；出手：纪律门控
 >
-> **变更记录 (v2.5.0 短中线 + Mistery 门控)**：
-> - Mistery 门控只作出手/仓位裁切，**禁止**改写 major_stage / fusion 分 / support / stop
-> - 买卖点始终输出，不依赖 has_position
-> - 回退：`SHORT_MIDLINE_REPORT=false` 使用旧 `render_single_legacy`
+> **变更记录 (v2.5.0 短中线 + 纪律门控)**：
+> - 纪律门控只作出手/仓位裁切，**禁止**改写 major_stage / fusion 分 / support / stop
+> - 规则源：decision-subset；买卖点始终输出
 
 ⚠️ **格式红线 (CRITICAL)**：
 1. **禁用所有 Markdown 标题与水平线**：严禁使用 `#` 级标题或 `---`。
@@ -54,6 +55,7 @@
   动能：震荡 · 中性
   裁定：偏空，不宜追高
   出手：现价不买 · 不追（现价追大约亏 4.5、赚 0.5，不划算）
+  失效：收盘有效跌破MA20(46.00)且反抽站不回；或跌破止损 44.00
 
   关键价（短线）
     止损 44.00（破则今日计划作废）
@@ -72,21 +74,22 @@ T0：无底仓，不启用（与出手一致，不新开）
 当前池 3/10，回复 1 入池
 ```
 
-## 格式规则（短中线双轨）
+## 格式规则（短中线双轨 + 纪律）
 
 - **标题**：`分析报告 — {名}（{码}）｜短中线`
-- **meta**：动能｜大盘；MA 行须含 MA20 与 MA250；阶段主展示在 🧭，meta 不重复阶段
+- **meta**：动能｜大盘；MA 行须含 MA20 与 MA250；阶段主展示在 🧭
 - **🧭 中线**
-  - `阶段：` ← major_stage（门控/入池/轮动；算法不改）
+  - `阶段：` ← major_stage（入池/轮动/纪律输入；算法不改）
   - `看法：` ← 周线 chanlun_midline + wyckoff_midline（B1A）；**禁止**四阶段词
   - 威科夫 / 缠论：只读 `*_midline`，禁止回退日线
-  - 关键价（中线）：生命线 / 回踩区 / 压力 / 目标；**无 🌟**
+  - 关键价（中线）：生命线 / 回踩区 / 压力 / 目标；**无 🌟**（周线引擎）
 - **⚡ 短线**
-  - 看法 / 日线专家缠动能 / 裁定 / 出手
+  - 看法 / 日线专家缠动能 / 裁定
+  - **出手** + 可选 **失效**（纪律门控；禁止 mi/Mistery 品牌词）
   - 关键价（短线）：止损 / 买点 / **🌟 现价** / 卖点 + 亏赚两句
 - **说明**：仅中短冲突时
-- **禁止**：🎯 结论、🗳️ 短线专家、🗺 空间参考 作为主标题
-- **出手**：Mistery 门控；中线目标不得单独放行买
+- **禁止**：🎯 结论、🗳️ 短线专家、🗺 空间参考、mi姐/Mistery 人设
+- **出手**：纪律门控裁动作；中线目标不得单独放行买；**不改价**
 - **Fixed Keywords**：必须含「止损」和「买」
 
 ## 分层语义（禁止混淆）
@@ -95,9 +98,9 @@ T0：无底仓，不启用（与出手一致，不新开）
 |----|------|--------|
 | 阶段 | 主力四阶段，中线仓位语义 | major_stage |
 | 中线看法 | 周线故事跟不跟 | chanlun_midline + wyckoff_midline |
-| 中线关键价 | 生命线/回踩/压力/目标 | mid_key_prices（P0 日K阶梯代理） |
+| 中线关键价 | 生命线/回踩/压力/目标 | mid_key_prices（周线引擎） |
 | 短线看法/专家 | 追不追 | fusion 日线 |
-| 出手 | 今天动不动手 | mistery_gate + key_prices |
+| 出手 / 失效 | 今天动不动手、何时作废 | 纪律门控 + key_prices |
 | 短线关键价 | 止损/买点/卖点 | key_prices |
 
 ## 回退

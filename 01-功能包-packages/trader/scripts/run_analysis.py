@@ -1557,6 +1557,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             "change_pct": report.get("change_pct"),
             "min_rr": MISTERY_MIN_RR,
             "weekly_frame": report.get("weekly_frame"),
+            # 中线回踩区纪律：消费 mid 价，不改价
+            "mid_pullback_low": mid_key_prices.get("pullback_low"),
+            "mid_pullback_high": mid_key_prices.get("pullback_high"),
         })
         report["mistery_gate"] = mistery_gate
 

@@ -295,6 +295,9 @@ def build_conclusion_block(
             reason_parts.append("派发不加仓")
         elif "H4" in hb:
             reason_parts.append("止损无法定义")
+    _gnotes = str(gate.get("notes") or "")
+    if "不在中线回踩区" in _gnotes and not any("回踩区" in p for p in reason_parts):
+        reason_parts.append("现价不在中线回踩区，不新开")
     seen: set[str] = set()
     uniq: list[str] = []
     for p in reason_parts:

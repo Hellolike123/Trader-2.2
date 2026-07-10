@@ -186,7 +186,8 @@ def _report() -> dict:
 
 class TestRenderDualTrack:
     def test_layout_b3c_b2a(self):
-        md = render_short_midline(_report())
+        r = _report()
+        md = render_short_midline(r)
         assert "🧭 中线" in md
         assert "⚡ 短线" in md
         assert "阶段：蓄势偏强" in md
@@ -205,6 +206,12 @@ class TestRenderDualTrack:
         assert "出手" in md
         assert "买点区" in md
         assert "止损" in md
+        inv = str((r.get("mistery_gate") or {}).get("invalidation") or "")
+        if inv.strip():
+            assert "失效：" in md
+        assert "Mistery" not in md
+        assert "mi姐" not in md
+        assert "mistery" not in md
         errors = validate_trader(md)
         assert errors == [], errors
 

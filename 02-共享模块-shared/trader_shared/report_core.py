@@ -218,6 +218,14 @@ def render_short_midline(r: dict[str, Any]) -> str:
     else:
         lines.append(f"  出手：{execution}")
 
+    # 纪律失效条件（只读 mistery_gate.invalidation；报告不出现 mi/Mistery 品牌）
+    _gate = r.get("mistery_gate") if isinstance(r.get("mistery_gate"), dict) else {}
+    _inv = str(_gate.get("invalidation") or "").strip()
+    if _inv:
+        if len(_inv) > 80:
+            _inv = _inv[:77] + "…"
+        lines.append(f"  失效：{_inv}")
+
     stop_sell = key_prices.get("stop_sell") or r.get("stop")
     buy_low = key_prices.get("buy_zone_low")
     buy_high = key_prices.get("buy_zone_high")

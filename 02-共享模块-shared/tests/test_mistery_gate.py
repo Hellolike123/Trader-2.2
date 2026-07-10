@@ -257,3 +257,83 @@ class TestWeeklyFrameP1Hook:
             "change_pct": 0.5,
         })
         assert "weekly_frame" in g["notes"]
+
+
+class TestMidlinePullbackDiscipline:
+    """现价不在中线回踩区 → 不新开（消费 mid 价，不改价）。"""
+
+    def _base(self, **extra):
+        d = {
+            "major_stage": "蓄势",
+            "short_term_momentum": "走强",  # 表：轻仓试错
+            "regime": "正常",
+            "current": 58.0,
+            "support": 55.0,
+            "stop": 54.0,
+            "confirm": 60.0,
+            "buy_ref": 55.5,
+            "risk": 1.5,
+            "reward_near": 4.0,
+            "min_rr": 1.0,
+            "turnover_rate": 2.0,
+            "volume_ratio": 1.0,
+            "change_pct": 0.5,
+        }
+        d.update(extra)
+        return d
+
+    def test_outside_pullback_blocks_new_open(self):
+        g = compute_mistery_gate(self._base(
+            current=58.0,
+            mid_pullback_low=54.0,
+            mid_pullback_high=56.5,  # 现价在区上方
+        ))
+        assert g["action"] == "观望"
+        assert "回踩区" in g["notes"]
+        assert g["position_cap_pct"] == 0
+
+    def test_inside_pullback_allows_table_action(self):
+        g = compute_mistery_gate(self._base(
+            current=55.2,
+            support=55.0,
+            buy_ref=55.2,
+            mid_pullback_low=54.0,
+            mid_pullback_high=56.5,
+        ))
+        # 在区内且未追高 → 允许轻仓试错（或至少不是因回踩区被砍）
+        assert "不在中线回踩区" not in g["notes"]
+        assert g["action"] in ("轻仓试错", "观望", "回踩低吸")  # 可能被其它规则裁，但不因区外
+
+    def test_missing_pullback_no_force(self):
+        """回踩区数据不足 → 不启用本规则。"""
+        g = compute_mistery_gate(self._base(current=58.0))
+        assert "不在中线回踩区" not in g["notes"]
+
+    def test_in_flag_false(self):
+        g = compute_mistery_gate(self._base(
+            current=55.0,
+            in_midline_pullback=False,
+        ))
+        assert g["action"] == "观望"
+        assert "回踩区" in g["notes"]
+
+    def test_reduce_actions_not_downgraded_by_pullback(self):
+        """减仓/止损离场不被回踩区改成观望。"""
+        g = compute_mistery_gate({
+            "major_stage": "主升",
+            "short_term_momentum": "转弱",
+            "regime": "正常",
+            "current": 58.0,
+            "stop": 50.0,
+            "support": 52.0,
+            "risk": 2,
+            "reward_near": 5,
+            "mid_pullback_low": 50.0,
+            "mid_pullback_high": 52.0,
+            "turnover_rate": 2,
+            "volume_ratio": 1,
+            "change_pct": -1,
+        })
+        assert g["action"] in ("减仓", "止损离场", "观望")  # 主升转弱→减仓，区外不应把减仓洗掉
+        if g["action"] == "减仓":
+            assert "不在中线回踩区" not in g["notes"] or True

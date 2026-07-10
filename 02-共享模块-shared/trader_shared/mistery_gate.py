@@ -1,10 +1,12 @@
-"""Mistery 门控层（decision-subset 冻结规格）。
+"""纪律门控层（规则源：decision-subset）。
 
-只读 Trader 已有字段 → 输出 mistery_gate。
+产品对外名称：出手 / 纪律 / 失效（报告禁止 mi姐、Mistery 人设文案）。
+实现模块名历史原因仍为 mistery_gate；只读 Trader 字段 → 输出 gate dict。
 禁止改写 major_stage / fusion 分 / support / stop 等状态数字。
 
-规格源：~/.grok/skills/mistery-core/references/decision-subset.md
-产品契约：docs/short-midline-report-and-gate-plan.md
+规则源：~/.grok/skills/mistery-core/references/decision-subset.md
+展示契约：docs/discipline-layer-copy-plan.md
+产品骨架：docs/short-midline-report-and-gate-plan.md
 
 P1 扩展点（未实现）：
   weekly_frame — 真周 K 完好/紧张/破坏，破坏后战略减/清倾向。
@@ -331,8 +333,30 @@ def _position_cap_for(
     return round(max(0.0, min(cap, _POSITION_CAP_CEILING)), 1)
 
 
+def _in_midline_pullback_zone(
+    current: float | None,
+    pullback_low: float | None,
+    pullback_high: float | None,
+) -> bool | None:
+    """现价是否在中线回踩区 [low, high]（含约 0.2% 容差）。
+
+    返回 None 表示回踩区数据不足，调用方应跳过本规则（不因缺数误杀）。
+    """
+    if current is None or pullback_low is None or pullback_high is None:
+        return None
+    if current <= 0 or pullback_low <= 0 or pullback_high <= 0:
+        return None
+    lo, hi = pullback_low, pullback_high
+    if hi < lo:
+        lo, hi = hi, lo
+    # 单点区：允许略宽
+    if abs(hi - lo) < 1e-9:
+        return abs(current - lo) / lo <= 0.005
+    return lo * 0.998 <= current <= hi * 1.002
+
+
 def compute_mistery_gate(inputs: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
-    """计算 Mistery 门控结果（纯函数，只读输入）。
+    """计算纪律门控结果（纯函数，只读输入）。
 
     输入字段（与 subset §0 对齐，均可选但缺则降档）：
       major_stage, short_term_momentum / momentum,
@@ -342,7 +366,8 @@ def compute_mistery_gate(inputs: dict[str, Any] | None = None, **kwargs: Any) ->
       risk, reward_near（来自 key_prices，用于 H5）,
       buy_ref, turnover_rate, volume_ratio, change_pct,
       wants_average_down, min_rr,
-      weekly_frame（P1 预留，当前忽略）
+      weekly_frame（P1 预留，当前忽略）,
+      in_midline_pullback 或 mid_pullback_low/high — 中线回踩区纪律
 
     输出（subset §7）：
       hard_block, style, action, invalidation, position_cap_pct, notes
@@ -444,6 +469,23 @@ def compute_mistery_gate(inputs: dict[str, Any] | None = None, **kwargs: Any) ->
     if chase and action in ("轻仓试错", "回踩低吸", "持有"):
         action = "观望"
         notes_list.append("远离买点/支撑，禁止竖着追高")
+
+    # 中线回踩区纪律：现价不在回踩区 → 禁止新开（不改价，只裁动作）
+    # 输入：in_midline_pullback=True/False，或 mid_pullback_low/high + current
+    in_pb = raw.get("in_midline_pullback")
+    if in_pb is None:
+        pb_lo = _to_float(raw.get("mid_pullback_low") or raw.get("pullback_low"))
+        pb_hi = _to_float(raw.get("mid_pullback_high") or raw.get("pullback_high"))
+        in_pb = _in_midline_pullback_zone(current, pb_lo, pb_hi)
+    if in_pb is False:
+        if action in ("轻仓试错", "回踩低吸", "持有"):
+            # 持有→观望：空仓语义由 execution 译为不新开；有仓侧不因本规则强制减仓
+            action = "观望"
+            notes_list.append("现价不在中线回踩区，不新开")
+        elif action in ("观望", "不做"):
+            # 已被追高/其它规则裁为观望时仍补一句，便于原因展示
+            if "不在中线回踩区" not in "；".join(notes_list):
+                notes_list.append("现价不在中线回踩区，不新开")
 
     # 主升 + 转弱 增强（subset §5）
     if stage == "主升" and mom == "转弱" and style == "趋势":
