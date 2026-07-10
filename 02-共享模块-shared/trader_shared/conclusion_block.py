@@ -220,6 +220,7 @@ def build_conclusion_block(
     theory_status: str = "",
     regime: str = "",
     mistery_gate: dict[str, Any] | None = None,
+    discipline: dict[str, Any] | None = None,
     key_prices: dict[str, Any] | None = None,
     fusion: dict[str, Any] | None = None,
     has_position: bool = False,
@@ -232,12 +233,24 @@ def build_conclusion_block(
     """组装结论块字段。
 
     major_stage 仅用于 stage_line 展示与门控侧，不驱动 conclusion.midline。
+    discipline 优先于 mistery_gate（merge 后主字段）；无则回退 gate。
     """
     gate = mistery_gate or {}
+    disc = discipline if isinstance(discipline, dict) else {}
+    # 优先 discipline；兼容仅传 gate
+    if disc:
+        gate_action = str(disc.get("action") or gate.get("action") or "观望")
+        try:
+            cap = float(disc.get("suggested_pct_cap") if disc.get("suggested_pct_cap") is not None
+                        else disc.get("position_cap_pct") if disc.get("position_cap_pct") is not None
+                        else gate.get("position_cap_pct") or 0)
+        except (TypeError, ValueError):
+            cap = float(gate.get("position_cap_pct") or 0)
+    else:
+        gate_action = str(gate.get("action") or "观望")
+        cap = float(gate.get("position_cap_pct") or 0)
     kp = key_prices or {}
     chase_ok = bool(kp.get("chase_ok"))
-    gate_action = str(gate.get("action") or "观望")
-    cap = float(gate.get("position_cap_pct") or 0)
 
     ruling = daily_ruling or build_daily_ruling(
         fusion,
@@ -282,8 +295,9 @@ def build_conclusion_block(
         tag = line_chase.split("→")[-1].strip()
         if tag and tag != "可考虑":
             reason_parts.append("现价" + tag)
-    if gate.get("hard_block") and gate.get("hard_block") != "none":
-        hb = str(gate["hard_block"])
+    _hb_src = disc.get("hard_block") if disc.get("hard_block") else gate.get("hard_block")
+    if _hb_src and _hb_src != "none":
+        hb = str(_hb_src)
         if "H5" in hb or "H6" in hb:
             if not any("不划算" in p for p in reason_parts):
                 reason_parts.append("近端空间不划算")
@@ -295,7 +309,30 @@ def build_conclusion_block(
             reason_parts.append("派发不加仓")
         elif "H4" in hb:
             reason_parts.append("止损无法定义")
-    _gnotes = str(gate.get("notes") or "")
+    # 纪律 notes：优先 discipline.discipline_notes / entry_block_reason
+    _dnotes_list: list[str] = []
+    if disc.get("discipline_notes"):
+        _dnotes_list = [str(x) for x in disc["discipline_notes"] if str(x).strip()]
+    _gnotes = str(disc.get("notes") or gate.get("notes") or "")
+    if not _dnotes_list and _gnotes:
+        _dnotes_list = [x.strip() for x in _gnotes.replace(";", "；").split("；") if x.strip()]
+    _entry_block = str(disc.get("entry_block_reason") or "").strip()
+    if _entry_block and _entry_block not in reason_parts:
+        # 优先展示 entry_block
+        if not any(_entry_block[:6] in p for p in reason_parts):
+            reason_parts.append(_entry_block)
+    for _dn in _dnotes_list:
+        if "不在中线回踩区" in _dn and not any("回踩区" in p for p in reason_parts):
+            reason_parts.append("现价不在中线回踩区，不新开")
+        elif "中线看法偏空" in _dn and not any("中线看法偏空" in p for p in reason_parts):
+            reason_parts.append("中线看法偏空，短线买点不作主开仓")
+        elif "置信不足" in _dn and not any("置信" in p for p in reason_parts):
+            reason_parts.append("置信不足，轻仓或不动")
+        elif "筹码搬家" in _dn and not any("筹码" in p for p in reason_parts):
+            reason_parts.append("筹码搬家警告，不新开")
+        elif "主力连续流出" in _dn and not any("流出" in p for p in reason_parts):
+            reason_parts.append("主力连续流出，不新开")
+    # 兼容仅 gate notes
     if "不在中线回踩区" in _gnotes and not any("回踩区" in p for p in reason_parts):
         reason_parts.append("现价不在中线回踩区，不新开")
     if "中线看法偏空" in _gnotes and not any("中线看法偏空" in p for p in reason_parts):

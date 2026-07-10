@@ -259,13 +259,13 @@ class TestWeeklyFrameP1Hook:
         assert "weekly_frame" in g["notes"]
 
 
-class TestMidlinePullbackDiscipline:
-    """现价不在中线回踩区 → 不新开（消费 mid 价，不改价）。"""
+class TestMidlinePullbackMigratedOut:
+    """回踩区纪律已迁至 chan_discipline；gate 不再写该 notes。"""
 
     def _base(self, **extra):
         d = {
             "major_stage": "蓄势",
-            "short_term_momentum": "走强",  # 表：轻仓试错
+            "short_term_momentum": "走强",
             "regime": "正常",
             "current": 58.0,
             "support": 55.0,
@@ -282,65 +282,22 @@ class TestMidlinePullbackDiscipline:
         d.update(extra)
         return d
 
-    def test_outside_pullback_blocks_new_open(self):
+    def test_gate_no_pullback_note(self):
         g = compute_mistery_gate(self._base(
-            current=58.0,
-            mid_pullback_low=54.0,
-            mid_pullback_high=56.5,  # 现价在区上方
-        ))
-        assert g["action"] == "观望"
-        assert "回踩区" in g["notes"]
-        assert g["position_cap_pct"] == 0
-
-    def test_inside_pullback_allows_table_action(self):
-        g = compute_mistery_gate(self._base(
-            current=55.2,
-            support=55.0,
-            buy_ref=55.2,
             mid_pullback_low=54.0,
             mid_pullback_high=56.5,
         ))
-        # 在区内且未追高 → 允许轻仓试错（或至少不是因回踩区被砍）
-        assert "不在中线回踩区" not in g["notes"]
-        assert g["action"] in ("轻仓试错", "观望", "回踩低吸")  # 可能被其它规则裁，但不因区外
+        assert "不在中线回踩区" not in (g.get("notes") or "")
 
     def test_missing_pullback_no_force(self):
-        """回踩区数据不足 → 不启用本规则。"""
         g = compute_mistery_gate(self._base(current=58.0))
-        assert "不在中线回踩区" not in g["notes"]
-
-    def test_in_flag_false(self):
-        g = compute_mistery_gate(self._base(
-            current=55.0,
-            in_midline_pullback=False,
-        ))
-        assert g["action"] == "观望"
-        assert "回踩区" in g["notes"]
-
-    def test_reduce_actions_not_downgraded_by_pullback(self):
-        """减仓/止损离场不被回踩区改成观望。"""
-        g = compute_mistery_gate({
-            "major_stage": "主升",
-            "short_term_momentum": "转弱",
-            "regime": "正常",
-            "current": 58.0,
-            "stop": 50.0,
-            "support": 52.0,
-            "risk": 2,
-            "reward_near": 5,
-            "mid_pullback_low": 50.0,
-            "mid_pullback_high": 52.0,
-            "turnover_rate": 2,
-            "volume_ratio": 1,
-            "change_pct": -1,
-        })
-        assert g["action"] in ("减仓", "止损离场", "观望")  # 主升转弱→减仓，区外不应把减仓洗掉
-        if g["action"] == "减仓":
-            assert "不在中线回踩区" not in g["notes"] or True
+        assert "不在中线回踩区" not in (g.get("notes") or "")
 
 
-class TestMidViewAndConfidence:
-    def test_mid_weak_blocks_new_open(self):
+class TestMidViewMigratedOut:
+    """mid_view / 缠侧 conf / 筹码否决已迁至 chan_discipline。"""
+
+    def test_gate_no_mid_view_note(self):
         g = compute_mistery_gate({
             "major_stage": "蓄势",
             "short_term_momentum": "走强",
@@ -350,43 +307,15 @@ class TestMidViewAndConfidence:
             "support": 54.5,
             "risk": 1.5,
             "reward_near": 4.0,
-            "mid_pullback_low": 54.0,
-            "mid_pullback_high": 56.5,
             "mid_view": "盘整偏空 · 暂缓跟踪",
             "turnover_rate": 2,
             "volume_ratio": 1,
             "change_pct": 0.5,
         })
-        assert g["action"] == "观望"
-        assert "中线看法偏空" in g["notes"]
-        assert "试探" not in gate_action_to_execution_text(g["action"])
-        assert "挂" not in gate_action_to_execution_text(g["action"])
+        assert "中线看法偏空" not in (g.get("notes") or "")
 
-    def test_outside_pullback_even_with_daily_buy_setup(self):
-        """区外 + 日线买点语义（buy_ref 诱人）仍不得新开。"""
-        g = compute_mistery_gate({
-            "major_stage": "蓄势",
-            "short_term_momentum": "走强",
-            "regime": "正常",
-            "current": 58.0,
-            "stop": 54.0,
-            "support": 55.0,
-            "buy_ref": 55.5,  # 日线买点
-            "risk": 1.5,
-            "reward_near": 4.0,
-            "mid_pullback_low": 54.0,
-            "mid_pullback_high": 56.0,
-            "mid_view": "上涨趋势未坏 · 可跟踪、不加仓",
-            "turnover_rate": 2,
-            "volume_ratio": 1,
-            "change_pct": 0.5,
-        })
-        assert g["action"] in ("观望", "不做")
-        text = gate_action_to_execution_text(g["action"])
-        assert "不买" in text or "不追" in text or "不新开" in text
-        assert "可按买点挂" not in text
-
-    def test_low_confidence_downgrades(self):
+    def test_gate_mid_quality_not_low_conf_alone(self):
+        """仅 mid_quality/structure_confidence 不再触发 gate.low_confidence。"""
         g = compute_mistery_gate({
             "major_stage": "蓄势",
             "short_term_momentum": "走强",
@@ -396,20 +325,16 @@ class TestMidViewAndConfidence:
             "support": 54.5,
             "risk": 1.5,
             "reward_near": 4.0,
-            "mid_pullback_low": 54.0,
-            "mid_pullback_high": 56.5,
-            "mid_view": "上涨趋势未坏 · 可跟踪、不加仓",
             "mid_quality": "partial",
             "structure_confidence": "low",
             "turnover_rate": 2,
             "volume_ratio": 1,
             "change_pct": 0.5,
         })
-        assert g.get("low_confidence") is True
-        assert g["action"] in ("观望", "轻仓试错", "不做")
-        assert "置信" in g["notes"] or g["action"] == "观望"
+        # 无 fusion/data 低置信时，gate 不应仅因缠侧 conf 标记 low_confidence
+        assert g.get("low_confidence") is False
 
-    def test_chip_warning_blocks_new_open(self):
+    def test_gate_no_chip_note(self):
         g = compute_mistery_gate({
             "major_stage": "蓄势",
             "short_term_momentum": "走强",
@@ -419,13 +344,9 @@ class TestMidViewAndConfidence:
             "support": 54.5,
             "risk": 1.5,
             "reward_near": 4.0,
-            "mid_pullback_low": 54.0,
-            "mid_pullback_high": 56.5,
-            "mid_view": "上涨趋势未坏 · 可跟踪、不加仓",
             "chip_migration_warning": True,
             "turnover_rate": 2,
             "volume_ratio": 1,
             "change_pct": 0.5,
         })
-        assert g["action"] == "观望"
-        assert "筹码" in g["notes"]
+        assert "筹码" not in (g.get("notes") or "")

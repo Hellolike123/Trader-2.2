@@ -1576,6 +1576,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         except (TypeError, ValueError):
             _fconf = None
 
+        # 通用门控（瘦身：无回踩/mid_view/筹码缠侧规则）
+        from trader_shared.chan_discipline import apply_chan_discipline, merge_discipline
+
         mistery_gate = compute_mistery_gate({
             "major_stage": stage_result["major_stage"],
             "short_term_momentum": stage_result["momentum"],
@@ -1596,33 +1599,103 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             "change_pct": report.get("change_pct"),
             "min_rr": MISTERY_MIN_RR,
             "weekly_frame": report.get("weekly_frame"),
+            "data_status": report.get("data_status") or snapshot.data_status,
+            "fusion_disagreement": _fusion_dis,
+            "fusion_confidence": _fconf,
+        })
+        report["mistery_gate"] = mistery_gate
+
+        # 日线买点类型（若有）供缠纪律冲突 notes
+        _buy_point_types = []
+        try:
+            _chan_day = report.get("chanlun") or report.get("chan") or {}
+            if isinstance(_chan_day, dict) and "chanlun" in _chan_day:
+                _chan_day = _chan_day.get("chanlun") or {}
+            for _bp in (_chan_day.get("buy_points") or []):
+                if isinstance(_bp, dict) and _bp.get("type"):
+                    _buy_point_types.append(str(_bp["type"]))
+        except Exception:
+            _buy_point_types = []
+
+        chan_d = apply_chan_discipline({
+            "current": current,
             "mid_pullback_low": mid_key_prices.get("pullback_low"),
             "mid_pullback_high": mid_key_prices.get("pullback_high"),
             "mid_view": _mid_view_txt,
             "mid_quality": mid_key_prices.get("quality"),
             "structure_confidence": _mid_struct_conf,
+            "buy_point_types": _buy_point_types,
             "data_status": report.get("data_status") or snapshot.data_status,
             "fusion_disagreement": _fusion_dis,
             "fusion_confidence": _fconf,
+            "major_stage": stage_result["major_stage"],
             "chip_migration_warning": _chip_warn,
             "fund_flow_outflow_veto": _fund_veto,
+            "has_position": has_position,
+            "suggested_pct": suggested,
+            "max_position_pct": 50,
         })
-        report["mistery_gate"] = mistery_gate
+        report["chan_discipline"] = chan_d
+
+        discipline = merge_discipline(mistery_gate, chan_d, max_position_pct=50)
+        report["discipline"] = discipline
+
+        # 只收紧：禁止新开时裁 suggested_pct / 出手语义
+        _disc_action = str(discipline.get("action") or mistery_gate.get("action") or "观望")
+        _disc_cap = discipline.get("suggested_pct_cap")
+        if _disc_cap is None:
+            _disc_cap = discipline.get("position_cap_pct")
+        try:
+            _disc_cap_f = float(_disc_cap if _disc_cap is not None else 0)
+        except (TypeError, ValueError):
+            _disc_cap_f = 0.0
+        if not discipline.get("allow_new_entry", True):
+            try:
+                _sug = float(report.get("suggested_pct") or suggested or 0)
+            except (TypeError, ValueError):
+                _sug = float(suggested or 0) if suggested is not None else 0.0
+            if has_position:
+                report["suggested_pct"] = min(_sug, _disc_cap_f) if _disc_cap_f > 0 else 0
+            else:
+                report["suggested_pct"] = 0
+            if report.get("suggested_pct") == 0:
+                if has_position:
+                    report["suggested_pct_context"] = "0%（纪律禁止加仓；持仓按减仓/观察）"
+                else:
+                    report["suggested_pct_context"] = "0%（纪律不新开）"
+        else:
+            # 有 cap 时仍只收紧
+            try:
+                _sug = float(report.get("suggested_pct") or suggested or 0)
+            except (TypeError, ValueError):
+                _sug = float(suggested or 0) if suggested is not None else 0.0
+            if _disc_cap_f >= 0 and _sug > _disc_cap_f:
+                report["suggested_pct"] = int(_disc_cap_f) if _disc_cap_f == int(_disc_cap_f) else _disc_cap_f
+                report["suggested_pct_context"] = f"{report['suggested_pct']}%（纪律 cap 收紧）"
 
         daily_ruling = build_daily_ruling(
             report_fusion,
             scene=str(report.get("scene") or scene),
             theory_status=theory_status,
             chase_ok=bool(key_prices.get("chase_ok")),
-            gate_action=str(mistery_gate.get("action") or ""),
+            gate_action=_disc_action,
         )
+        # 结论块：优先读 merge 后的 discipline（兼容仍传 mistery_gate 字段）
+        _gate_for_conclusion = dict(mistery_gate)
+        _gate_for_conclusion["action"] = _disc_action
+        _gate_for_conclusion["position_cap_pct"] = _disc_cap_f
+        _gate_for_conclusion["notes"] = discipline.get("notes") or mistery_gate.get("notes") or ""
+        _gate_for_conclusion["hard_block"] = discipline.get("hard_block") or mistery_gate.get("hard_block")
+        _gate_for_conclusion["invalidation"] = discipline.get("invalidation") or mistery_gate.get("invalidation")
+
         conclusion = build_conclusion_block(
             major_stage=stage_result["major_stage"],
             short_term_momentum=stage_result["momentum"],
             scene=str(report.get("scene") or scene),
             theory_status=theory_status,
             regime=_regime,
-            mistery_gate=mistery_gate,
+            mistery_gate=_gate_for_conclusion,
+            discipline=discipline,
             key_prices=key_prices,
             fusion=report_fusion,
             has_position=has_position,
@@ -1643,6 +1716,17 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         report.setdefault("mistery_gate", {
             "hard_block": "none", "style": "不明", "action": "观望",
             "invalidation": "", "position_cap_pct": 0.0, "notes": f"gate_error:{_sm_exc}",
+        })
+        report.setdefault("chan_discipline", {
+            "allow_new_entry": False, "entry_block_reason": f"gate_error:{_sm_exc}",
+            "suggested_pct_cap": 0, "action_override": "观望",
+            "discipline_notes": [], "rules_fired": [],
+        })
+        report.setdefault("discipline", {
+            "allow_new_entry": False, "action": "观望", "suggested_pct_cap": 0,
+            "position_cap_pct": 0.0, "entry_block_reason": f"gate_error:{_sm_exc}",
+            "discipline_notes": [], "notes": f"gate_error:{_sm_exc}",
+            "hard_block": "none", "invalidation": "",
         })
         report.setdefault("conclusion", {
             "midline": "数据组装异常", "stage_line": "", "shortline": "观察",
