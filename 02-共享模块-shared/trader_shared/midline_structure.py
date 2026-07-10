@@ -147,7 +147,7 @@ def find_swing_levels(
       life_support, pullback_support, resist, target_resist
       以及 min_low_pullback（近 n_pullback 最低，无 2-touch 时用）
     """
-    highs, lows, _closes = _extract_hl(bars)
+    highs, lows, closes = _extract_hl(bars)
     empty = {
         "life_support": None,
         "pullback_support": None,
@@ -158,6 +158,18 @@ def find_swing_levels(
     if not highs:
         return empty
 
+    # ATR 自适应容差：周线波动天然比日线大，用周线 ATR 计算
+    _atr_pct = 0.02
+    if len(highs) >= 5:
+        tr_vals = []
+        for i in range(1, len(highs)):
+            tr = max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
+            tr_vals.append(tr)
+        if tr_vals and closes[-1] > 0:
+            _atr_pct = (sum(tr_vals) / len(tr_vals)) / closes[-1]
+    _adapt_tol = max(TOUCH_TOL_PCT, 0.8 * _atr_pct)
+    _adapt_unbroken = max(UNBROKEN_PCT, 1.2 * _atr_pct)
+
     def _win(n: int) -> tuple[list[float], list[float]]:
         k = min(n, len(highs))
         return highs[-k:], lows[-k:]
@@ -167,20 +179,20 @@ def find_swing_levels(
     res_h, res_l = _win(n_resist)
     tgt_h, tgt_l = _win(n_target)
 
-    life_sup = _find_level_with_touches(life_h, life_l, find_support=True)
+    life_sup = _find_level_with_touches(life_h, life_l, find_support=True, tol_pct=_adapt_tol, unbroken_pct=_adapt_unbroken)
     if life_sup is None and life_l:
         life_sup = _round2(min(life_l))
 
-    pb_sup = _find_level_with_touches(pb_h, pb_l, find_support=True)
+    pb_sup = _find_level_with_touches(pb_h, pb_l, find_support=True, tol_pct=_adapt_tol, unbroken_pct=_adapt_unbroken)
     min_low_pb = _round2(min(pb_l)) if pb_l else None
     if pb_sup is None:
         pb_sup = min_low_pb
 
-    resist = _find_level_with_touches(res_h, res_l, find_support=False)
+    resist = _find_level_with_touches(res_h, res_l, find_support=False, tol_pct=_adapt_tol, unbroken_pct=_adapt_unbroken)
     if resist is None and res_h:
         resist = _round2(max(res_h))
 
-    target = _find_level_with_touches(tgt_h, tgt_l, find_support=False)
+    target = _find_level_with_touches(tgt_h, tgt_l, find_support=False, tol_pct=_adapt_tol, unbroken_pct=_adapt_unbroken)
     if target is None and tgt_h:
         target = _round2(max(tgt_h))
 

@@ -900,6 +900,11 @@ def find_key_levels(bars: list[BarData]) -> dict[str, float]:
     short_support = round(min(lows[-short_n:]), 2)
     short_resist = round(max(highs[-short_n:]), 2)
 
+    # ── ATR 自适应参数：波动大的股放宽容差，波动小的收紧 ──
+    _atr_pct = average_atr_pct(bars) or 0.02
+    _adapt_tol = max(0.015, 0.8 * _atr_pct)       # 容差：至少 1.5%，或 0.8×ATR%
+    _adapt_unbroken = max(0.03, 1.2 * _atr_pct)    # 破位阈值：至少 3%，或 1.2×ATR%
+
     # ── 辅助：在指定窗口内找局部极值 + 至少 2 次触及 ──
     def _find_level_with_touches(
         window_highs: list[float],
@@ -911,12 +916,14 @@ def find_key_levels(bars: list[BarData]) -> dict[str, float]:
 
         find_support=True  → 找支撑（局部低点，至少 2 次低点触及但未跌破）
         find_support=False → 找压力（局部高点，至少 2 次高点触及但未突破）
+        容差和破位阈值根据 ATR 自适应。
         """
         if len(window_highs) < 5:
             return None
 
         swing_window = 3  # 局部极值窗口：左右各 3 根
-        tolerance_pct = 0.015  # 触及容差 1.5%
+        tolerance_pct = _adapt_tol
+        unbroken_pct = _adapt_unbroken
 
         source = window_lows if find_support else window_highs
         extrema: list[tuple[int, float]] = []
@@ -949,18 +956,18 @@ def find_key_levels(bars: list[BarData]) -> dict[str, float]:
                 if band_lo <= source[j] <= band_hi:
                     touch_count += 1
             # 验证「未破」：必须用正确的序列判定突破/跌破
-            #   压力(find_support=False)：window 内最高价超过价位 3% 即视为已被有效突破 → 无效
-            #   支撑(find_support=True)：window 内最低价低于价位 3% 即视为已被有效跌破 → 无效
+            #   压力(find_support=False)：window 内最高价超过价位 ×(1+unbroken%) 即视为已被有效突破 → 无效
+            #   支撑(find_support=True)：window 内最低价低于价位 ×(1-unbroken%) 即视为已被有效跌破 → 无效
             if touch_count >= 2:
                 # 排序主键：优先「触碰次数最多」，平局再按「距最新价最近」
                 cand_key = (-touch_count, abs(price - source[-1]))
                 if find_support:
-                    if min(window_lows) >= price * 0.97:
+                    if min(window_lows) >= price * (1 - unbroken_pct):
                         if best_price is None or cand_key < (-best_count, abs(best_price - source[-1])):
                             best_price = price
                             best_count = touch_count
                 else:
-                    if max(window_highs) <= price * 1.03:
+                    if max(window_highs) <= price * (1 + unbroken_pct):
                         if best_price is None or cand_key < (-best_count, abs(best_price - source[-1])):
                             best_price = price
                             best_count = touch_count
