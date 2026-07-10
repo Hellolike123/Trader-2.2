@@ -205,6 +205,71 @@ def find_swing_levels(
     }
 
 
+_FIB_RETRACEMENTS = (0.382, 0.5, 0.618)
+_FIB_EXTENSION = 1.382  # 138.2% 延伸位作为目标
+
+
+def _calc_fibonacci_from_swings(
+    highs: list[float],
+    lows: list[float],
+    *,
+    lookback: int = 40,
+) -> dict[str, Any]:
+    """从周线摆动高低点计算 Fibonacci 回撤位和延伸位。
+
+    找最近一段上升浪（swing_low → swing_high），计算：
+    - 38.2%/50%/61.8% 回撤位（黄金购买点候选）
+    - 138.2% 延伸位（波段目标）
+    """
+    n = min(lookback, len(highs))
+    if n < 5:
+        return {"retracements": {}, "extension": None, "swing_low": None, "swing_high": None}
+
+    win_h = highs[-n:]
+    win_l = lows[-n:]
+
+    # 找最近一段上升浪：从最低点到最高点
+    # 先找最低点位置，再找其后最高点
+    min_idx = 0
+    min_val = win_l[0]
+    for i in range(len(win_l)):
+        if win_l[i] < min_val:
+            min_val = win_l[i]
+            min_idx = i
+
+    max_idx = min_idx
+    max_val = win_h[min_idx]
+    for i in range(min_idx, len(win_h)):
+        if win_h[i] > max_val:
+            max_val = win_h[i]
+            max_idx = i
+
+    if max_val <= min_val or max_idx <= min_idx:
+        # 没找到有效上升浪，用绝对高低点
+        min_val = min(win_l)
+        max_val = max(win_h)
+        if max_val <= min_val:
+            return {"retracements": {}, "extension": None, "swing_low": None, "swing_high": None}
+
+    swing_range = max_val - min_val
+
+    # 回撤位：从 high 往下回撤
+    retracements = {}
+    for fib in _FIB_RETRACEMENTS:
+        level = _round2(max_val - swing_range * fib)
+        retracements[f"{fib:.1%}"] = level
+
+    # 延伸位：从 low 往上延伸
+    extension = _round2(min_val + swing_range * _FIB_EXTENSION)
+
+    return {
+        "retracements": retracements,
+        "extension": extension,
+        "swing_low": _round2(min_val),
+        "swing_high": _round2(max_val),
+    }
+
+
 def _weekly_ma_or_mean5(
     closes: list[float],
 ) -> tuple[float | None, str]:
@@ -266,6 +331,7 @@ def build_midline_levels(
         "pullback_high": "none",
         "resist": "none",
         "target": "none",
+        "golden_buy": "none",
     }
 
     def _pack(
@@ -275,6 +341,7 @@ def build_midline_levels(
         pullback_high: float | None,
         resist: float | None,
         target: float | None,
+        golden_buy: float | None = None,
         components: dict[str, str],
         source: str,
         quality: str,
@@ -290,6 +357,8 @@ def build_midline_levels(
             resist = _round2(resist)
         if target is not None:
             target = _round2(target)
+        if golden_buy is not None:
+            golden_buy = _round2(golden_buy)
 
         line_life = ""
         if life_line is not None:
@@ -303,6 +372,19 @@ def build_midline_levels(
                 line_pullback = (
                     f"回踩区 {pullback_low:.2f}-{pullback_high:.2f}（到了才谈低吸）"
                 )
+
+        # 黄金购买点：50% Fibonacci 回撤位，在回踩区内才显示
+        line_golden_buy = ""
+        if golden_buy is not None:
+            in_zone = (
+                pullback_low is not None and pullback_high is not None
+                and pullback_low - 0.5 <= golden_buy <= pullback_high + 0.5
+            )
+            if in_zone:
+                line_golden_buy = f"黄金买点 {golden_buy:.2f}（50%回撤·最佳低吸位）"
+            else:
+                # 不在回踩区内，仅作为参考
+                line_golden_buy = f"黄金买点 {golden_buy:.2f}（50%回撤·参考）"
 
         line_resist = ""
         line_target = ""
@@ -329,12 +411,14 @@ def build_midline_levels(
             "pullback_high": pullback_high,
             "resist": resist,
             "target": target,
+            "golden_buy": golden_buy,
             "current": current,
             "merge_resist_target": merge_resist_target,
             "line_life": line_life,
             "line_pullback": line_pullback,
             "line_resist": line_resist,
             "line_target": line_target,
+            "line_golden_buy": line_golden_buy,
             "notes": ";".join(notes_parts),
             "engine": "weekly_v1",
             "quality": quality,
@@ -549,12 +633,34 @@ def build_midline_levels(
         # MA 降级不单独把 full 打成 partial；仅结构决定
         pass
 
+    # ── Fibonacci：黄金购买点 + 延伸目标 ────────────────────
+    golden_buy: float | None = None
+    golden_buy_comp = "none"
+    fib_result = _calc_fibonacci_from_swings(highs, lows, lookback=40)
+    fib_retrs = fib_result.get("retracements") or {}
+    fib_ext = fib_result.get("extension")
+
+    # 黄金购买点：50% 回撤位
+    gb_50 = fib_retrs.get("50.0%")
+    if gb_50 is not None and gb_50 > 0:
+        golden_buy = gb_50
+        golden_buy_comp = "fib_50_retracement"
+
+    # 目标：优先 Fibonacci 138.2% 延伸位（有预测意义），高于原历史高点目标
+    if fib_ext is not None and fib_ext > 0:
+        if target is None or fib_ext > target:
+            target = fib_ext
+            target_comp = "fib_138_extension"
+
+    components["golden_buy"] = golden_buy_comp
+
     return _pack(
         life_line=life_line,
         pullback_low=pb_lo,
         pullback_high=pb_hi,
         resist=resist,
         target=target,
+        golden_buy=golden_buy,
         components=components,
         source=source,
         quality=quality,

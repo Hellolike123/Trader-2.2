@@ -156,7 +156,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _wyk_raw = {}
         _wyk_line = format_wyckoff_oneline(_wyk_raw, direction=None)
     except Exception:
-        _wyk_line = "威科夫：暂无明确信号 · 中性"
+        _wyk_line = "威科夫：数据不足 · 中性"
     _wyk_body = _wyk_line.replace("威科夫：", "").replace("威科夫:", "").strip()
     _wyk_compact = _wyk_body.replace(" · ", "·").replace(" ·", "·").replace("· ", "·")
     lines.append(f"  威科夫：{_wyk_compact}")
@@ -176,31 +176,32 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _chan_compact = "数据不足·中性"
     lines.append(f"  缠论：{_chan_compact}")
 
-    # R6 中枢位置（周）
+    # R6 中枢位置（周）：无中枢时不写「未知」，避免误读成缺数
     _pp_w = str(r.get("pivot_position_weekly") or "").strip()
     if not _pp_w:
         _pp_w = str((r.get("discipline") or {}).get("pivot_position") or "").strip()
-    if _pp_w and _pp_w != "未知":
+    if _pp_w and _pp_w not in ("未知", "None", ""):
         lines.append(f"  位置：{_pp_w}")
-    elif _pp_w == "未知":
-        lines.append("  位置：未知")
 
     # 中线关键价（无 🌟）
     lines.append("")
     lines.append("  关键价（中线）")
     _ll = mid_key_prices.get("line_life") or ""
     _lp = mid_key_prices.get("line_pullback") or ""
+    _lgb = mid_key_prices.get("line_golden_buy") or ""
     _lr = mid_key_prices.get("line_resist") or ""
     _lt = mid_key_prices.get("line_target") or ""
     if _ll:
         lines.append(f"    {_ll}")
     if _lp:
         lines.append(f"    {_lp}")
+    if _lgb:
+        lines.append(f"    {_lgb}")
     if _lr:
         lines.append(f"    {_lr}")
     if _lt:
         lines.append(f"    {_lt}")
-    if not any((_ll, _lp, _lr, _lt)):
+    if not any((_ll, _lp, _lgb, _lr, _lt)):
         lines.append("    数据不足")
 
     # ── ⚡ 短线 ──
@@ -229,12 +230,10 @@ def render_short_midline(r: dict[str, Any]) -> str:
     else:
         lines.append("  缠论：暂无信号 · 中性")
 
-    # R6 中枢位置（日）
+    # R6 中枢位置（日）：日线无 zones 时为未知 → 省略，不吓人
     _pp_d = str(r.get("pivot_position_daily") or "").strip()
-    if _pp_d and _pp_d != "未知":
+    if _pp_d and _pp_d not in ("未知", "None", ""):
         lines.append(f"  位置：{_pp_d}")
-    elif _pp_d == "未知":
-        lines.append("  位置：未知")
     _msig = fusion_signals.get("momentum") if isinstance(fusion_signals.get("momentum"), dict) else {}
     if _msig:
         _mst = str(_msig.get("reason") or "").replace("动量", "").replace("动能", "").strip().lstrip(":：").strip() or "无信号"
@@ -243,6 +242,18 @@ def render_short_midline(r: dict[str, Any]) -> str:
         lines.append(f"  动能：{_mst} · {_mdl}")
     else:
         lines.append("  动能：暂无信号 · 中性")
+    # 短线第三席：价量资金（VPF）；优先展示价量 reason（含量比）
+    _vsig = fusion_signals.get("vpf") if isinstance(fusion_signals.get("vpf"), dict) else {}
+    if _vsig:
+        _vst = str(_vsig.get("reason") or _vsig.get("vp_reason") or "").strip() or "中性"
+        _vd = _vsig.get("direction", 0)
+        _vdl = "看涨" if _vd and int(_vd) > 0 else ("看跌" if _vd and int(_vd) < 0 else "中性")
+        # 报告行过长时截断到约 40 字
+        if len(_vst) > 42:
+            _vst = _vst[:40] + "…"
+        lines.append(f"  价量资金：{_vst} · {_vdl}")
+    else:
+        lines.append("  价量资金：暂无信号 · 中性")
     lines.append(f"  裁定：{daily_ruling}")
 
     # C1 开仓清单：新开：否（缺：…）｜可试探（清单全绿）——不逐条打勾
@@ -539,7 +550,7 @@ def render_single_legacy(r: dict[str, Any]) -> str:
             _sig = fusion_signals.get("wyckoff") if isinstance(fusion_signals.get("wyckoff"), dict) else {}
             _dir = _sig.get("direction", 0) if _sig else 0
             _dl = "偏多" if _dir > 0 else ("偏空" if _dir < 0 else "中性")
-            lines.append(f"  威科夫：暂无明确信号 · {_dl}")
+            lines.append(f"  威科夫：暂无事件 · {_dl}")
 
     disagreement = int(fusion.get("disagreement", 0))
     if disagreement > 0 and fusion_signals:
