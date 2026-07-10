@@ -207,21 +207,20 @@
 ### 3.1 trader（单票分析 + 选股池）
 
 **入口**: `scripts/final_report.py`（单票分析）/ `scripts/final_pool.py`（选股池）
-**分析模型**: `run_analysis.py::build_report()` → `final_report.py::render_markdown()` → `build_signal()`
-**策略链**: `chanlun_strategy` + `wyckoff_strategy` + `momentum_strategy` 并行执行 → 融合层合并 → `build_structure_context` 串行调用
-**输入数据**: 腾讯日线（前复权 + ATR）+ 实时快照
-**依赖共享模块**: `candidate_core`、`light_data`、`signal_contract`、`chan_core`、`wyckoff_core`
+**分析模型**: `run_analysis.py::build_report()` → `report_core.render_single`（默认 `render_short_midline`）→ 可选 `build_signal()`
+**策略链**: 日线专家并行 → fusion → structure → 周线 mid 引擎（`mid_key_prices` / midline 理论）→ `mistery_gate` + `chan_discipline` → `merge_discipline` → `conclusion_block` → 渲染
+**输入数据**: 腾讯日线（前复权 + ATR）+ 实时快照；中线关键价另用周线聚合
+**依赖共享模块**: `candidate_core`、`light_data`、`signal_contract`、`chan_core`、`wyckoff_core`、`mid_key_prices`、`chan_discipline`、`mistery_gate`、`report_core`
 
-**Output Contract（固定顺序）**:
+**Output Contract（默认短中线双轨，`SHORT_MIDLINE_REPORT=true`）**:
 ```
-分析报告 — {name}（{code}）
-现价 + MA5/MA10/MA20/MA30 + ATR 行
-🌍 中证1000 → 趋势/涨跌%/建议
-📍 决策 → 状态 + 空仓/有底仓/加仓指引
-T0 参考 → 低吸/高抛/止损
-❗ 关键价位 → 止损|减仓|止跌|支撑
-🧭 简要分析 → 基础状态/体系结论 + 结构/量价/筹码/动能
+分析报告 — {name}（{code}）｜短中线
+现价 + 动能｜大盘 + MA5/MA20/MA250 + 量比/换手
+🧭 中线 → 阶段 + 看法 + 周线威科夫/缠论 + 位置 + 关键价（生命线/回踩/压力/目标）
+⚡ 短线 → 看法 + 日线缠/动能 + 裁定 + 新开(C1) + 出手/分仓/失效 + 关键价（止损/买点/🌟/卖点）+ 买/追亏赚
+说明（可选冲突）→ ✅ 亮点 → ⚠️ 风险 → 📌 本周只做 → T0 → 入池提示
 ```
+契约全文：`01-功能包-packages/trader/references/output-template.md`。旧模板仅 `SHORT_MIDLINE_REPORT=false`。
 
 **选股池命令集**: `analyze` `add` `add-pending` `confirm-to-pool` `show` `show-pending` `rank` `plan` `review` `remove` `archive-exited`
 

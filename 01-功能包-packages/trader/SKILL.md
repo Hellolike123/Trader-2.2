@@ -3,6 +3,8 @@
 ## 我是谁
 单票分析 + 选股池管理。主力行为驱动四阶段定位（蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退 × 走强/修复/震荡/转弱），基本面+技术面三关入池。
 
+默认单票报告为**中短线双轨**（`report_core.render_short_midline`）：🧭 中线（阶段 + 周线看法 + 周线关键价）｜⚡ 短线（日线专家 + C1 新开 + 出手/分仓/失效 + 短线关键价）。纪律层只收紧仓位与出手，不改 fusion 分与关键价数字。契约见 `references/output-template.md`。
+
 ## 命令入口
 
 | 需求 | 命令 |
@@ -37,35 +39,27 @@ python3 scripts/final_report.py --target <NAME> --output markdown
 ### Step 2: 解读 JSON（仅当 markdown 渲染不可用时）
 读 `build_report()` 返回的 JSON，参考 `references/anti-hallucination.md` 和 `references/fusion-guide.md`。
 
-核心字段：
+核心字段（双轨渲染优先读这些；勿手拼 Markdown）：
 
 | 字段 | 类型 | 含义 |
 |------|------|------|
-| `current` | float | 当前价格 |
-| `change_pct` | float | 今日涨跌幅 |
-| `major_stage` | str | 大阶段：蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退 |
-| `short_term_momentum` | str | 短期动能：走强/修复/震荡/转弱 |
-| `theory_status` | str | 体系结论：突破确认/等转强/低吸观察/暂不碰 |
-| `fusion.action` | str | 融合层建议动作 |
-| `fusion.weighted_score` | float | 融合加权分 -1~+1 |
-| `fusion.confidence` | float | 置信度 0~1 |
-| `fusion.regime` | str | 大盘环境：正常/偏弱/很差 |
-| `fusion.disagreement` | float | 信号分歧度 |
-| `support` | float | 支撑位 |
-| `confirm` | float | 确认位 |
-| `stop` | float | 止损位 |
-| `position_info.suggested_pct` | int | 建议仓位 % |
-| `data_status` | str | 数据状态：full/partial/degraded |
-| `scene` | str | 场景标签：低吸观察/冲高减仓/突破确认 |
-| `exit_plan` | dict | 分批止盈计划 |
-| `low_zone` / `high_zone` | float | 低吸/高抛区间 |
-| `atr14` | float | ATR14 绝对值（元） |
-| `supertrend_direction` | str | Supertrend 趋势带方向：up/down/neutral（展示，不进融合） |
-| `supertrend_stop` | float | Supertrend 轨道价（多头下轨/空头上轨），仅参考 |
-| `supertrend_atr` / `supertrend_vol_level` | float/str | ATR 值 / 波动率分级（波动较低/正常/偏大/偏高） |
-| `vwap` / `vwap_dev` / `vwap_position` / `vwap_level` | float/float/str/str | 当日 VWAP、现价比 VWAP 偏离（小数）、位置、机构成本状态（展示，不进融合） |
+| `current` / `change_pct` | float | 现价 / 涨跌幅 |
+| `major_stage` | str | 大阶段（报告 🧭 `阶段：`） |
+| `short_term_momentum` | str | 短期动能（meta 动能行） |
+| `conclusion` | dict | 中线/短线看法、出手 execution、reason、conflict、this_week |
+| `mid_key_prices` | dict | 周线中线关键价行（生命线/回踩/压力/目标） |
+| `key_prices` | dict | 短线关键价（止损/买点/卖点/买追文案） |
+| `discipline` | dict | merge 后纪律：entry_line、caps、invalidation、allow_new_entry |
+| `discipline.entry_checklist` | dict | C1 五项 + all_green + entry_line |
+| `chanlun_midline` / `wyckoff_midline` | any | 周线理论（中线专家行，禁止回退日线） |
+| `fusion.weighted_score` | float | 方向唯一依据 -1~+1 |
+| `fusion.action` / `confidence` / `regime` | … | 融合动作/置信/大盘 |
+| `support` / `confirm` / `stop` | float | 结构位（纪律不改价） |
+| `suggested_pct` / `position_info.suggested_pct` | int | 建议仓位（已被纪律 cap） |
+| `data_status` | str | full/partial/degraded |
+| `mistery_gate` | dict | 对内通用闸（报告不出现品牌词） |
 
-> **展示增强 (v2.4.1)**：`📊 趋势轨道（参考）` 与 `📈 主力成本（VWAP·当日）` 两段均为**纯展示**，不参与融合加权、不替换止损。Supertrend 与动量**同向**时对动量置信度做 `+0.1` 封顶确认增强（方案 B，**反向不惩罚**），保护吸筹买点。报告解读时这两段仅供人的上下文参考，方向判断仍唯一以 `fusion.weighted_score` 为准。
+> 方向判断仍唯一以 `fusion.weighted_score` 为准。出手文案以 `conclusion` + `discipline` 为准，不得用 major_stage 直接推断「该买该卖」。
 
 ### Step 3: 输出报告
 使用 `--output markdown` 的已渲染结果。如需补充说明，严格遵循 references/ 中的契约。
@@ -155,8 +149,8 @@ python3 scripts/final_report.py --target <NAME> --output markdown
 
 | 文件 | 用途 |
 |------|------|
-| `references/output-template.md` | 输出结构契约（7段模板） |
-| `references/output-style-guide.md` | 格式规则 + Old Output Detection（过时格式检测） |
+| `references/output-template.md` | 输出结构契约（短中线双轨 + C1，绝对真理） |
+| `references/output-style-guide.md` | 格式规则 + Old Output Detection（拦截旧 🎯/📍 决策） |
 | `references/commands.md` | 所有命令示例 |
 | `references/pool-commands.md` | 选股池命令 |
 | `references/pool-output-contract.md` | 选股池输出契约 |
