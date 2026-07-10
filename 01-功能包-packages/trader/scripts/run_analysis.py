@@ -564,8 +564,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         snapshot.data_status = "partial"
 
     recent20 = bars[-STRUCTURE_WINDOW:] if len(bars) >= STRUCTURE_WINDOW else bars
-    from trader_shared.chan_core import chanlun_strategy
-    from trader_shared.wyckoff_core import wyckoff_strategy
+    from trader_shared.chan_core import chanlun_strategy, chanlun_strategy_midline
+    from trader_shared.wyckoff_core import wyckoff_strategy, wyckoff_strategy_midline
     from trader_shared.momentum_core import momentum_strategy
 
     # 并行运行五个独立任务：三策略 + 主力资金 + 大盘环境
@@ -602,14 +602,36 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     # cmd_refresh 内建 pool → build_report 内再建 pool → load_market_snapshot 内再建 pool
     # 现在三层共享同一个 max_workers=5 池
     pool = get_shared_build_pool()
+    # 日线缠论：fusion / 短线专家（周线仅作 higher_trend）
     f_chan = pool.submit(chanlun_strategy, current, bars, change_pct_val, quote, weekly_bars=weekly_bars)
+    # 中线缠论独立判断：优先周 K 完整笔段（与日线分离）
+    f_chan_mid = pool.submit(
+        chanlun_strategy_midline,
+        current,
+        weekly_bars,
+        bars,
+        change_pct_val,
+        quote,
+    )
+    # 日线威科夫：仍供 fusion 短线侧兼容
     f_wyk = pool.submit(wyckoff_strategy, current, bars, change_pct_val, quote)
+    # 中线威科夫独立判断：优先周 K（与日线 fusion 分离）
+    f_wyk_mid = pool.submit(
+        wyckoff_strategy_midline,
+        current,
+        weekly_bars,
+        bars,
+        change_pct_val,
+        quote,
+    )
     f_mom = pool.submit(momentum_strategy, current, bars, change_pct_val, quote)
     f_mf = pool.submit(_fetch_fund_flow)
     f_env = pool.submit(_fetch_market_env)
 
-    chan_result = f_chan.result() or {}  # 保留 chanlun 包装层，_chan_to_signal 会自己剥
+    chan_result = f_chan.result() or {}  # 日线；_chan_to_signal 会自己剥
+    chan_mid_result = f_chan_mid.result() or {}
     wyck_result = f_wyk.result() or {}
+    wyck_mid_result = f_wyk_mid.result() or {}
     momentum_result = f_mom.result() or {}
 
     # ── ATR / Supertrend / VWAP 展示增强（方案 A+B）──
@@ -1237,7 +1259,17 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "confidence": stage_result.get("confidence", 0),
         "protection_notes": stage_result.get("protection_notes", []),
         "stop_losses": stage_result.get("stop_losses", {}),
-        "wyckoff": wyck_result.get("wyckoff", wyck_result),
+        # 中线理论：威科夫/缠论独立周K判断；日线结果另存供 fusion / 短线专家
+        "wyckoff": (wyck_mid_result.get("wyckoff") if isinstance(wyck_mid_result, dict) else None)
+        or wyck_result.get("wyckoff", wyck_result),
+        "wyckoff_daily": wyck_result.get("wyckoff", wyck_result),
+        "wyckoff_midline": (wyck_mid_result.get("wyckoff") if isinstance(wyck_mid_result, dict) else None)
+        or wyck_result.get("wyckoff", wyck_result),
+        "chanlun_daily": chan_result,
+        # 中线缠：只用独立周K结果，禁止回退日线（避免理论区冒充短线顶背驰）
+        "chanlun_midline": chan_mid_result if chan_mid_result else {
+            "chanlun": {"timeframe": "insufficient", "structure_type": "", "divergence": {}}
+        },
         "expma10": expma10_val,
         "expma12": expma12_val,
         "expma20": expma20_val,
@@ -1430,6 +1462,117 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     else:
         report["suggested_pct_context"] = f"{suggested}%（阶段×大盘环境建议）"
 
+    # ── 短中线：关键价 + Mistery 门控 + 结论块（只读，不改写 stage/fusion/stop）──
+    # P1 扩展点 weekly_frame：真周 K 完好|紧张|破坏（当前未算，置 None）
+    report["weekly_frame"] = None  # P1: compute_weekly_frame(weekly_bars) when available
+    try:
+        from trader_shared.key_prices import build_key_prices
+        from trader_shared.mistery_gate import compute_mistery_gate
+        from trader_shared.conclusion_block import build_conclusion_block, build_daily_ruling
+        from trader_shared.config import MISTERY_MIN_RR
+
+        _ma20 = None
+        for _ma_src in (report.get("ma_raw"), report.get("ma"), report.get("mas")):
+            if not isinstance(_ma_src, dict):
+                continue
+            try:
+                _ma20 = float(_ma_src.get("ma20") or 0) or None
+            except (TypeError, ValueError):
+                _ma20 = None
+            if _ma20:
+                break
+
+        key_prices = build_key_prices(
+            current=current,
+            support=float(report.get("support") or 0) or None,
+            stop=float(report.get("stop") or 0) or None,
+            confirm=float(report.get("confirm") or 0) or None,
+            resistance=float(report.get("resistance") or 0) or None,
+            ma20=_ma20,
+            low_zone_lower=float(report.get("low_zone_lower") or 0) or None,
+            low_zone_upper=float(report.get("low_zone_upper") or 0) or None,
+            key_levels=report.get("key_levels") or {},
+            take=float(report.get("take") or 0) or None,
+        )
+        # 场景/融合偏空时强制「不追」，避免 RR 好看但结论打架
+        _sc = str(report.get("scene") or scene or "")
+        _fa = str((report_fusion or {}).get("action") or "")
+        _force_no_chase = any(k in _sc for k in ("冲高", "减仓", "高抛", "暂不碰")) or any(
+            k in _fa for k in ("减仓", "空仓", "止损")
+        )
+        if _force_no_chase and key_prices.get("line_chase"):
+            key_prices["chase_ok"] = False
+            _lc = str(key_prices["line_chase"])
+            if "→" in _lc:
+                key_prices["line_chase"] = _lc.split("→")[0].rstrip() + " → 不追"
+            else:
+                key_prices["line_chase"] = _lc + " → 不追"
+        report["key_prices"] = key_prices
+
+        _regime = ""
+        if isinstance(market_env_data, dict):
+            _regime = str(market_env_data.get("level") or "")
+        if not _regime:
+            _regime = str((report_fusion or {}).get("regime") or "")
+
+        mistery_gate = compute_mistery_gate({
+            "major_stage": stage_result["major_stage"],
+            "short_term_momentum": stage_result["momentum"],
+            "theory_status": theory_status,
+            "scene": str(report.get("scene") or scene),
+            "regime": _regime,
+            "current": current,
+            "support": report.get("support"),
+            "stop": report.get("stop"),
+            "confirm": report.get("confirm"),
+            "suggested_pct": suggested,
+            "ma20": _ma20,
+            "buy_ref": key_prices.get("buy_ref"),
+            "risk": key_prices.get("risk"),
+            "reward_near": key_prices.get("reward_near"),
+            "turnover_rate": report.get("turnover_rate"),
+            "volume_ratio": report.get("volume_ratio"),
+            "change_pct": report.get("change_pct"),
+            "min_rr": MISTERY_MIN_RR,
+            "weekly_frame": report.get("weekly_frame"),
+        })
+        report["mistery_gate"] = mistery_gate
+
+        daily_ruling = build_daily_ruling(
+            report_fusion,
+            scene=str(report.get("scene") or scene),
+            theory_status=theory_status,
+            chase_ok=bool(key_prices.get("chase_ok")),
+            gate_action=str(mistery_gate.get("action") or ""),
+        )
+        conclusion = build_conclusion_block(
+            major_stage=stage_result["major_stage"],
+            short_term_momentum=stage_result["momentum"],
+            scene=str(report.get("scene") or scene),
+            theory_status=theory_status,
+            regime=_regime,
+            mistery_gate=mistery_gate,
+            key_prices=key_prices,
+            fusion=report_fusion,
+            has_position=has_position,
+            daily_ruling=daily_ruling,
+            weekly_frame=report.get("weekly_frame"),
+        )
+        report["conclusion"] = conclusion
+        report["daily_ruling"] = daily_ruling
+    except Exception as _sm_exc:
+        # 短中线组装失败不阻断主报告；保留原字段
+        report.setdefault("key_prices", {})
+        report.setdefault("mistery_gate", {
+            "hard_block": "none", "style": "不明", "action": "观望",
+            "invalidation": "", "position_cap_pct": 0.0, "notes": f"gate_error:{_sm_exc}",
+        })
+        report.setdefault("conclusion", {
+            "midline": "数据组装异常", "shortline": "观察",
+            "execution": "现价不买 · 不追", "reason": "门控组装失败",
+            "this_week": "观察", "conflict": "", "daily_ruling": "中性，观望",
+        })
+
     return report
 
 
@@ -1621,9 +1764,22 @@ def _calc_volume_ratio_from_bars(bars: list[dict], window: int = 5) -> float:
 def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = None) -> str:
     """渲染 Markdown 报告。
 
+    生产入口已锁定为 trader_shared.report_core.render_single（final_report 使用）。
+    本函数保留供历史测试 / 池内旧路径兼容；短中线默认模板请走 report_core，
+    避免双源漂移。若 SHORT_MIDLINE_REPORT=true，直接委托 report_core。
+
     `_kelly_cache_only` 是内部参数，用于传入预计算的 Kelly 数据，
     避免在每只股票渲染时重复读取 signal_results.jsonl。
     """
+    # 与 final_report 对齐：短中线模式共用 render_single，消除双模板
+    try:
+        from trader_shared.config import SHORT_MIDLINE_REPORT
+        if SHORT_MIDLINE_REPORT:
+            from trader_shared.report_core import render_single
+            return render_single(r)
+    except Exception:
+        pass
+
     ma = r.get("ma") or {}
     ma_raw = r.get("ma_raw") or ma
     display_code = str(r.get("symbol", "")).replace(".SH", "").replace(".SZ", "")

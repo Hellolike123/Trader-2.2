@@ -1004,6 +1004,44 @@ class TestBCHighPosition:
         assert result["bc_signal"] is True
 
 
+class TestWyckoffMidlineTimeframe:
+    """中线威科夫：周K优先、日K回退"""
+
+    def _bars(self, n: int = 40) -> list[dict]:
+        bars = []
+        price = 100.0
+        for i in range(n):
+            o = price
+            c = price * (1.008 if i % 4 else 0.992)
+            bars.append({
+                "open": o,
+                "high": max(o, c) * 1.01,
+                "low": min(o, c) * 0.99,
+                "close": c,
+                "volume": 1000 + i * 20,
+            })
+            price = c
+        return bars
+
+    def test_prefers_weekly(self):
+        from trader_shared.wyckoff_core import wyckoff_strategy_midline
+        weekly = self._bars(30)
+        daily = self._bars(60)
+        r = wyckoff_strategy_midline(weekly[-1]["close"], weekly_bars=weekly, daily_bars=daily)
+        assert r["wyckoff"]["timeframe"] == "weekly"
+
+    def test_daily_fallback(self):
+        from trader_shared.wyckoff_core import wyckoff_strategy_midline
+        daily = self._bars(40)
+        r = wyckoff_strategy_midline(daily[-1]["close"], weekly_bars=[], daily_bars=daily)
+        assert r["wyckoff"]["timeframe"] == "daily_fallback"
+
+    def test_insufficient(self):
+        from trader_shared.wyckoff_core import wyckoff_strategy_midline
+        r = wyckoff_strategy_midline(10.0, weekly_bars=[], daily_bars=self._bars(5))
+        assert r["wyckoff"]["timeframe"] == "insufficient"
+
+
 class TestFormatWyckoffOneline:
     """报告一行人话"""
 
@@ -1018,11 +1056,13 @@ class TestFormatWyckoffOneline:
             "spring_vol_class": "low_vol_confirm",
         })
         assert line.startswith("威科夫：")
-        assert "偏多" in line
+        assert " · 偏多" in line or "· 偏多" in line
         assert "洗盘" in line or "缩量" in line
         assert "Spring" not in line
         assert "积累期" not in line
         assert "\n" not in line
+        # 句式：判断 · 多空（说明）
+        assert "，偏多" not in line
 
     def test_high_vol_spring(self):
         line = format_wyckoff_oneline({

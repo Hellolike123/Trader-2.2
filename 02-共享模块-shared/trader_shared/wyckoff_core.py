@@ -1124,7 +1124,47 @@ def wyckoff_analysis(bars: list[dict]) -> dict:
 
 
 def wyckoff_strategy(current: float, bars: list[dict], change_pct: Any = None, quote: dict | None = None) -> dict:
-    return {"wyckoff": wyckoff_analysis(bars)}
+    """日线威科夫（供 fusion / 短线侧兼容）。"""
+    result = wyckoff_analysis(bars)
+    if isinstance(result, dict):
+        result = {**result, "timeframe": "daily"}
+    return {"wyckoff": result}
+
+
+def wyckoff_strategy_midline(
+    current: float,
+    weekly_bars: list[dict] | None = None,
+    daily_bars: list[dict] | None = None,
+    change_pct: Any = None,
+    quote: dict | None = None,
+) -> dict:
+    """中线威科夫独立判断：优先周 K，不足时回退日 K。
+
+    与日线 fusion 路径分离：报告「威科夫：…」定性用本结果。
+    """
+    weekly_bars = weekly_bars or []
+    daily_bars = daily_bars or []
+    if len(weekly_bars) >= WYCKOFF_MIN_BARS:
+        bars = weekly_bars
+        tf = "weekly"
+    elif len(daily_bars) >= WYCKOFF_MIN_BARS:
+        bars = daily_bars
+        tf = "daily_fallback"
+    else:
+        return {
+            "wyckoff": {
+                "timeframe": "insufficient",
+                "spring_signal": False,
+                "upthrust_signal": False,
+                "bc_signal": False,
+                "sow_signal": False,
+                "wyckoff_summary": "K线不足，无法做中线威科夫",
+            }
+        }
+    result = wyckoff_analysis(bars)
+    if isinstance(result, dict):
+        result = {**result, "timeframe": tf}
+    return {"wyckoff": result}
 
 
 # ── Wyckoff 独立打分 ──────────────────────────────────────────────
@@ -1352,4 +1392,5 @@ def format_wyckoff_oneline(
     # 外部 fusion direction 可覆盖展示方向（保持与融合层一致）
     if direction is not None:
         d = int(direction)
-    return f"威科夫：{main}，{_dir_label(d)}（{note}）"
+    # 句式：威科夫：{判断} · {偏多|偏空|中性}（说明）
+    return f"威科夫：{main} · {_dir_label(d)}（{note}）"

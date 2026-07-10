@@ -240,6 +240,12 @@ RISK_REWARD_THRESHOLDS: dict[str, float] = {
     "很差": 1.2,    # 市场弱势/熊市，放宽盈亏比要求
 }
 
+# ---- 短中线报告 + Mistery 门控（2026-07-10）---------------------------------
+# SHORT_MIDLINE_REPORT=true（默认）使用新模板；设 false/0 回退旧 render_single 模板
+SHORT_MIDLINE_REPORT: bool = os.environ.get("SHORT_MIDLINE_REPORT", "true").lower() in ("true", "1", "yes")
+# Mistery H5 盈亏比下限（reward_near >= min_rr * risk）；默认 1.0 与 subset「目标≤止损」一致
+MISTERY_MIN_RR: float = float(os.environ.get("MISTERY_MIN_RR", "1.0"))
+
 # ---- T0 trade constants ----------------------------------------------------
 T0_MIN_SPACE_PCT: float = 1.5  # T0 最小操作空间百分比（现价与确认位的间距下限）
 

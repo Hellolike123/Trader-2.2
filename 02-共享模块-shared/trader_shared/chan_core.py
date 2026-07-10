@@ -1600,6 +1600,7 @@ def chanlun_strategy(
     analysis_date: str | None = None,
     weekly_bars: list[dict] | None = None,
 ) -> dict:
+    """日线缠论（短线 / fusion）。周线仅作 higher_trend 过滤，不是中线主分析。"""
     macd_h_curr = to_float(bars[-1].get("macd_histogram")) if bars else None
     macd_h_prev = to_float(bars[-2].get("macd_histogram")) if len(bars) >= 2 else None
     # 从 quote 派生 symbol/date，供 signal_id 使用（向后兼容：无 quote 时不加 id）
@@ -1607,10 +1608,109 @@ def chanlun_strategy(
         symbol = quote.get("symbol")
     if analysis_date is None and isinstance(quote, dict):
         analysis_date = quote.get("trade_date") or (bars[-1].get("date") if bars else None)
-    return {
-        "chanlun": chanlun_analysis(
-            bars, current, macd_h_curr, macd_h_prev,
-            symbol=symbol, analysis_date=analysis_date,
-            weekly_bars=weekly_bars,
-        )
-    }
+    result = chanlun_analysis(
+        bars, current, macd_h_curr, macd_h_prev,
+        symbol=symbol, analysis_date=analysis_date,
+        weekly_bars=weekly_bars,
+    )
+    if isinstance(result, dict):
+        result = {**result, "timeframe": "daily"}
+    return {"chanlun": result}
+
+
+def chanlun_strategy_midline(
+    current: float,
+    weekly_bars: list[dict] | None = None,
+    daily_bars: list[dict] | None = None,
+    change_pct: Any = None,
+    quote: dict | None = None,
+    symbol: str | None = None,
+    analysis_date: str | None = None,
+) -> dict:
+    """中线缠论独立判断：优先在周 K 上完整跑笔段/结构，不足则回退日 K。
+
+    与日线 chanlun_strategy 分离：
+    - 中线：本函数 → 报告「理论：缠论 …」
+    - 短线：chanlun_strategy(日线) → fusion / 短线专家
+    """
+    weekly_bars = weekly_bars or []
+    daily_bars = daily_bars or []
+    if symbol is None and isinstance(quote, dict):
+        symbol = quote.get("symbol")
+    if analysis_date is None and isinstance(quote, dict):
+        analysis_date = quote.get("trade_date")
+
+    if len(weekly_bars) >= CHANLUN_MIN_BARS:
+        bars = weekly_bars
+        tf = "weekly"
+        # 周线主分析不再叠 higher_trend 周线（避免双重周线）
+        extra_weekly = None
+    elif len(daily_bars) >= CHANLUN_MIN_BARS:
+        bars = daily_bars
+        tf = "daily_fallback"
+        extra_weekly = weekly_bars if weekly_bars else None
+    else:
+        return {
+            "chanlun": {
+                "timeframe": "insufficient",
+                "structure_type": "",
+                "trend_label": "数据不足",
+                "divergence": {},
+                "buy_points": [],
+                "sell_points": [],
+            }
+        }
+
+    if analysis_date is None and bars:
+        analysis_date = bars[-1].get("date")
+    macd_h_curr = to_float(bars[-1].get("macd_histogram")) if bars else None
+    macd_h_prev = to_float(bars[-2].get("macd_histogram")) if len(bars) >= 2 else None
+    # 现价：周线分析用当前价更贴现价位置
+    cur = float(current) if current and current > 0 else float(to_float(bars[-1].get("close")) or 0)
+    result = chanlun_analysis(
+        bars, cur, macd_h_curr, macd_h_prev,
+        symbol=symbol, analysis_date=analysis_date,
+        weekly_bars=extra_weekly,
+    )
+    if not isinstance(result, dict):
+        result = {}
+    result = {**result, "timeframe": tf}
+    return {"chanlun": result}
+
+
+def format_chanlun_theory_line(chan_result: Any) -> str:
+    """中线理论区用：结构 · 方向（不写「缠论：」前缀，由外层拼接）。"""
+    chan = unwrap_chan(chan_result) if isinstance(chan_result, dict) else {}
+    if not isinstance(chan, dict) or not chan:
+        return "结构未成型·中性"
+
+    st = str(chan.get("structure_type") or "").strip()
+    if st and "不足" not in st:
+        main = st
+    elif st and "不足" in st:
+        main = "结构未成型"
+    else:
+        main = "暂无明确结构"
+
+    # 方向：买卖点/背驰/trend_label（与 fusion 优先级类似，但只出多空标签）
+    buy_points = chan.get("buy_points") if isinstance(chan.get("buy_points"), list) else []
+    sell_points = chan.get("sell_points") if isinstance(chan.get("sell_points"), list) else []
+    divergence = chan.get("divergence") if isinstance(chan.get("divergence"), dict) else {}
+    trend_label = str(chan.get("trend_label") or "")
+
+    direction = 0
+    if any(isinstance(p, dict) and p.get("type") in ("一类卖", "二类卖", "三类卖") for p in sell_points):
+        direction = -1
+    elif divergence.get("top_divergence"):
+        direction = -1
+    elif any(isinstance(p, dict) and p.get("type") in ("一类买", "二类买", "三类买") for p in buy_points):
+        direction = 1
+    elif divergence.get("bottom_divergence"):
+        direction = 1
+    elif "上涨" in trend_label or "多" in trend_label:
+        direction = 1
+    elif "下跌" in trend_label or "空" in trend_label:
+        direction = -1
+
+    dir_label = "看涨" if direction > 0 else ("看跌" if direction < 0 else "中性")
+    return f"{main}·{dir_label}"

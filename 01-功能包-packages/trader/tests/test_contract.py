@@ -35,8 +35,13 @@ def sample_report() -> dict:
         "upward_momentum": "价格还没贴近确认区，结论：动能仍是弱修复，暂不按启动处理。",
         "range_low": 54.6,
         "range_high": 65.0,
-        "ma": {"ma5": "57.96", "ma10": "--", "ma20": "--", "ma30": "--"},
-        "ma_raw": {"ma5": 57.96, "ma10": 0, "ma20": 0, "ma30": 0, "ma250": 0},
+        "ma": {"ma5": "57.96", "ma10": "--", "ma20": "56.00", "ma30": "--", "ma250": "50.00"},
+        "ma_raw": {"ma5": 57.96, "ma10": 0, "ma20": 56.0, "ma30": 0, "ma250": 50.0},
+        "major_stage": "蓄势",
+        "short_term_momentum": "修复",
+        "market_env": {"level": "偏弱"},
+        "low_zone_lower": 55.87,
+        "low_zone_upper": 56.43,
     }
 
 
@@ -45,13 +50,12 @@ def test_render_contract() -> None:
 
     assert markdown.startswith("分析报告 — ") or markdown.startswith("📍")
     assert "MA20" in markdown
-    assert "📍 买卖点" in markdown
-    assert "📊" in markdown  # 阶段判断
-    assert "✅ 亮点" in markdown
-    assert "⚠️ 风险" in markdown
+    assert "MA250" in markdown
+    # v2.5 短中线模板（默认）；旧「📍 买卖点」已废弃
+    assert "｜短中线" in markdown or "📍 关键价" in markdown or "📍 决策" in markdown or "📍 买卖点" in markdown
     assert "止损" in markdown
-    assert "买" in markdown  # 买入点
-    assert "止损" in markdown
+    assert "买" in markdown
+    assert "✅ 亮点" in markdown or "⚠️" in markdown
     assert "执行价" not in markdown
     assert "t0-trader" not in markdown
     assert validate(markdown) == []
@@ -598,8 +602,13 @@ def test_render_markdown_contains_win_rate() -> None:
         "stop": 54.75,
         "stage": "修复",
         "scene": "防守观察",
-        "ma": {"ma5": "57.96", "ma10": "--", "ma20": "--", "ma30": "--"},
-        "ma_raw": {"ma5": 57.96, "ma10": 0, "ma20": 0, "ma30": 0, "ma250": 0},
+        "ma": {"ma5": "57.96", "ma10": "--", "ma20": "56.00", "ma30": "--", "ma250": "50.00"},
+        "ma_raw": {"ma5": 57.96, "ma10": 0, "ma20": 56.0, "ma30": 0, "ma250": 50.0},
+        "major_stage": "蓄势",
+        "short_term_momentum": "修复",
+        "market_env": {"level": "偏弱"},
+        "low_zone_lower": 55.87,
+        "low_zone_upper": 56.43,
         "risk_reward": "2.5",
         "volume_ratio": 1.2,
     }
@@ -609,12 +618,10 @@ def test_render_markdown_contains_win_rate() -> None:
          patch("trader_shared.data_provider.get_provider", return_value=_mock_provider(bars)):
         markdown = render_markdown(report)
         assert "分析报告 —" in markdown
-        assert "📍 买卖点" in markdown
         assert "止损" in markdown
-        assert "试探买" in markdown
-        assert "📊 股性" in markdown
-        assert "MA250" in markdown
-        assert "试探买" in markdown
-        assert "确认" in markdown
+        assert "买" in markdown
+        assert "MA20" in markdown and "MA250" in markdown
+        # 短中线或旧模板均可
+        assert ("📍 关键价" in markdown) or ("📍 决策" in markdown) or ("📍 买卖点" in markdown)
 
 
