@@ -372,11 +372,6 @@ def render_short_midline(r: dict[str, Any]) -> str:
     line_buy = key_prices.get("line_buy") or ""
     line_chase = key_prices.get("line_chase") or ""
     if line_buy:
-        # 买线目标优先用中线 Fibonacci 目标（有预测意义），替代短线 long_resist
-        _mid_target = mid_key_prices.get("target")
-        if _mid_target and "目标" in line_buy:
-            import re
-            line_buy = re.sub(r"目标[\d.]+", f"目标{_mid_target:.2f}", line_buy)
         lines.append(f"  {line_buy}")
     elif buy_ref and stop_sell:
         risk = max(0.0, float(buy_ref) - float(stop_sell))
