@@ -315,7 +315,18 @@ def render_short_midline(r: dict[str, Any]) -> str:
             # 去重：浪型中的信号词如果已出现在缠论reason里，不重复
             _wave_parts = [w.strip() for w in _wave.split(" · ")]
             _chan_lower = _chan_part.lower()
-            _wave_deduped = [w for w in _wave_parts if w.lower() not in _chan_lower and w not in _chan_part]
+            # 检查信号类型重叠（一类卖/二类卖/一类买/二类买/顶背驰/底背驰）
+            _sig_keywords = {"一类卖", "二类卖", "三类卖", "一类买", "二类买", "三类买", "顶背驰", "底背驰"}
+            _wave_deduped = []
+            for w in _wave_parts:
+                w_lower = w.lower()
+                # 完全子串匹配
+                if w_lower in _chan_lower or w in _chan_part:
+                    continue
+                # 信号类型关键词匹配
+                if any(kw in w for kw in _sig_keywords if kw in _chan_part):
+                    continue
+                _wave_deduped.append(w)
             if _wave_deduped:
                 lines.append(f"  缠论：{_chan_part} · {' · '.join(_wave_deduped)}")
             else:
