@@ -359,11 +359,24 @@ def render_short_midline(r: dict[str, Any]) -> str:
             lines.append(f"    卖点区 {float(short_low):.2f}（冲到减/高抛）")
         else:
             lines.append(f"    卖点区 {float(short_low):.2f}-{float(short_high):.2f}（冲到减/高抛）")
+    # 阶段止盈（如果和卖点区不同，单独显示）
+    _take = r.get("take")
+    try:
+        _take_f = float(_take) if _take is not None else None
+    except (TypeError, ValueError):
+        _take_f = None
+    if _take_f and short_high and abs(_take_f - float(short_high)) / max(float(short_high), 1) > 0.01:
+        lines.append(f"    止盈参考 {_take_f:.2f}（阶段止盈）")
 
     lines.append("")
     line_buy = key_prices.get("line_buy") or ""
     line_chase = key_prices.get("line_chase") or ""
     if line_buy:
+        # 买线目标优先用中线 Fibonacci 目标（有预测意义），替代短线 long_resist
+        _mid_target = mid_key_prices.get("target")
+        if _mid_target and "目标" in line_buy:
+            import re
+            line_buy = re.sub(r"目标[\d.]+", f"目标{_mid_target:.2f}", line_buy)
         lines.append(f"  {line_buy}")
     elif buy_ref and stop_sell:
         risk = max(0.0, float(buy_ref) - float(stop_sell))
