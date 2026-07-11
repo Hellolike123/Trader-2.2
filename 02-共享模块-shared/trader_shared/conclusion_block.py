@@ -271,8 +271,8 @@ def _midline_view_from_theory(
 
     if chan_dir > 0 and wyck_bias != "strong_bear":
         if "上涨" in st:
-            return "上涨趋势未坏 · 可跟踪、不加仓"
-        return "结构偏多 · 可跟踪、不加仓"
+            return "趋势未坏 · 可跟踪"
+        return "结构偏多 · 可跟踪"
 
     return "中线观察"
 

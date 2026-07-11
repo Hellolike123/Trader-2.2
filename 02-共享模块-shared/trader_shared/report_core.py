@@ -153,7 +153,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _sp = None
     _mid_view_positive = any(kw in mid for kw in ("可跟踪", "可关注", "趋势未坏", "看涨"))
     if _mid_view_positive and _sp is not None and _sp <= 0:
-        mid = f"{mid}，但纪律暂不允许出手"
+        mid = f"{mid}，纪律暂不放行"
     lines.append(f"  看法：{mid}")
 
     # 威科夫/缠论：严格 mid 字段，禁止回退日线
@@ -184,19 +184,51 @@ def render_short_midline(r: dict[str, Any]) -> str:
         )
     except Exception:
         _chan_compact = "数据不足·中性"
-    lines.append(f"  缠论：{_chan_compact}")
 
-    # R6 中枢位置（周）：无中枢时不写「未知」，避免误读成缺数
-    _pp_w = str(r.get("pivot_position_weekly") or "").strip()
-    if not _pp_w:
-        _pp_w = str((r.get("discipline") or {}).get("pivot_position") or "").strip()
-    if _pp_w and _pp_w not in ("未知", "None", ""):
-        lines.append(f"  位置：{_pp_w}")
-
-    # 中线浪型（波段交易提示）
+    # 缠论行：合并浪型（状态+信号）+ 方向
     _wave_mid = str(conclusion.get("wave_label_mid") or "").strip()
+    # 从缠论结果提取方向词
+    _chan_dir_mid = ""
+    try:
+        _chan_mid_raw = r.get("chanlun_midline")
+        if isinstance(_chan_mid_raw, dict):
+            _chan_inner = _chan_mid_raw.get("chanlun", _chan_mid_raw)
+            if isinstance(_chan_inner, dict):
+                _bps = _chan_inner.get("buy_points") or []
+                _sps = _chan_inner.get("sell_points") or []
+                _div = _chan_inner.get("divergence") or {}
+                if any(isinstance(p, dict) and "买" in str(p.get("type", "")) for p in _bps):
+                    _chan_dir_mid = "看涨"
+                elif any(isinstance(p, dict) and "卖" in str(p.get("type", "")) for p in _sps):
+                    _chan_dir_mid = "看跌"
+                elif _div.get("top_divergence"):
+                    _chan_dir_mid = "看跌"
+                elif _div.get("bottom_divergence"):
+                    _chan_dir_mid = "看涨"
+                else:
+                    _tl = str(_chan_inner.get("trend_label") or "")
+                    if "拉升" in _tl:
+                        _chan_dir_mid = "看涨"
+                    elif "回调" in _tl:
+                        _chan_dir_mid = "看跌"
+    except Exception:
+        pass
+
     if _wave_mid:
-        lines.append(f"  浪型：{_wave_mid}")
+        # 浪型已含状态+信号，方向插在中间
+        if _chan_dir_mid:
+            # 拆分浪型：状态 · 信号 → 状态 · 方向 · 信号
+            _wave_parts = _wave_mid.split(" · ", 1)
+            _wave_state = _wave_parts[0]
+            _wave_sig = _wave_parts[1] if len(_wave_parts) > 1 else ""
+            _chan_display = f"{_wave_state} · {_chan_dir_mid} · {_wave_sig}" if _wave_sig else f"{_wave_state} · {_chan_dir_mid}"
+        else:
+            _chan_display = _wave_mid
+    else:
+        _chan_display = _chan_compact
+    lines.append(f"  缠论：{_chan_display}")
+
+    # 中线关键价（位置行已删除，浪型已合并到缠论行）
 
     # 中线关键价
     lines.append("")
