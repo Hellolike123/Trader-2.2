@@ -35,10 +35,18 @@ def _build_wave_label(chanlun_daily: Any, current: float = 0.0) -> str:
     # ── 段数不足：1段时结合trend_label，不硬编浪型 ──
     if len(segments) < 2:
         if len(segments) == 1 and trend_label:
+            has_sell = any(
+                isinstance(p, dict) and p.get("type") and "卖" in str(p.get("type", ""))
+                for p in sell_points
+            ) or divergence.get("top_divergence", False)
+            has_buy = any(
+                isinstance(p, dict) and p.get("type") and "买" in str(p.get("type", ""))
+                for p in buy_points
+            ) or divergence.get("bottom_divergence", False)
             if trend_label == "拉升段":
-                _base = "拉升趋势中"
+                _base = "拉升遇阻" if has_sell else "拉升趋势中"
             elif trend_label == "回调段":
-                _base = "回调一笔中"
+                _base = "回调见底" if has_buy else "回调一笔中"
             elif trend_label == "震荡段":
                 _base = "震荡中"
             else:
