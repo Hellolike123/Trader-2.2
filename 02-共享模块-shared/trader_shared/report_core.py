@@ -280,6 +280,13 @@ def render_short_midline(r: dict[str, Any]) -> str:
         execution = "现价不买 · 不追"
         if reason and "清单" not in reason:
             reason = (reason + "，清单未全绿") if reason else "清单未全绿，不新开"
+    # 精简 reason：多个原因时只取前 2 个，总长限 30 字
+    if reason:
+        _parts = [p.strip() for p in re.split(r"[，,；;]", reason) if p.strip()]
+        if len(_parts) > 2:
+            reason = "，".join(_parts[:2])
+        if len(reason) > 30:
+            reason = reason[:28] + "…"
     if reason and reason not in execution:
         lines.append(f"  出手：{execution}（{reason}）{_cap_str}")
     else:
