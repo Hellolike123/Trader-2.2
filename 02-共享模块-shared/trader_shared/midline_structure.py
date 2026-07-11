@@ -373,16 +373,27 @@ def build_midline_levels(
 
         line_pullback = ""
         if pullback_low is not None and pullback_high is not None:
+            # 距离阈值：回踩区整体离现价超过30%，或现价已高于回踩区上沿，标为远期参考
+            _pb_far = (
+                current is not None and current > 0
+                and (pullback_high < current * 0.70 or current > pullback_high * 1.15)
+            )
+            _pb_tag = "（远期参考）" if _pb_far else "（到了才谈低吸）"
             if abs(pullback_high - pullback_low) < 1e-9:
-                line_pullback = f"回踩区 {pullback_low:.2f}（到了才谈低吸）"
+                line_pullback = f"回踩区 {pullback_low:.2f}{_pb_tag}"
             else:
                 line_pullback = (
-                    f"回踩区 {pullback_low:.2f}-{pullback_high:.2f}（到了才谈低吸）"
+                    f"回踩区 {pullback_low:.2f}-{pullback_high:.2f}{_pb_tag}"
                 )
 
         # 黄金购买点：50% Fibonacci 回撤位，在回踩区内才显示
         line_golden_buy = ""
         if golden_buy is not None:
+            # 距离阈值：黄金买点离现价超过30%，或现价已高于黄金买点，标为远期参考
+            _gb_far = (
+                current is not None and current > 0
+                and (golden_buy < current * 0.70 or current > golden_buy * 1.15)
+            )
             in_zone = (
                 pullback_low is not None and pullback_high is not None
                 and pullback_low - 0.5 <= golden_buy <= pullback_high + 0.5
@@ -392,7 +403,9 @@ def build_midline_levels(
                 current is not None and current > 0
                 and abs(golden_buy - current) / current < 0.02
             )
-            if _gb_near_current:
+            if _gb_far:
+                line_golden_buy = f"黄金买点 {golden_buy:.2f}（50%回撤·远期参考）"
+            elif _gb_near_current:
                 line_golden_buy = f"黄金买点 {golden_buy:.2f}（50%回撤·现价已到位，等触发信号）"
             elif in_zone:
                 line_golden_buy = f"黄金买点 {golden_buy:.2f}（50%回撤·最佳低吸位）"
@@ -403,13 +416,25 @@ def build_midline_levels(
         line_resist = ""
         line_target = ""
         merge_resist_target = False
+        # 压力距离阈值：离现价超过30%，或现价已高于压力位，标为远期
+        _resist_far = (
+            current is not None and current > 0
+            and resist is not None
+            and (resist < current * 0.70 or current > resist * 1.15)
+        )
         if resist is not None and target is not None and abs(resist - target) < 1e-9:
             merge_resist_target = True
-            line_resist = f"压力/目标 {resist:.2f}（靠近只减不加；波段上看）"
+            if _resist_far:
+                line_resist = f"压力/目标 {resist:.2f}（远期参考）"
+            else:
+                line_resist = f"压力/目标 {resist:.2f}（靠近只减不加；波段上看）"
             line_target = ""
         else:
             if resist is not None:
-                line_resist = f"压力 {resist:.2f}（靠近只减不加）"
+                if _resist_far:
+                    line_resist = f"压力 {resist:.2f}（远期参考）"
+                else:
+                    line_resist = f"压力 {resist:.2f}（靠近只减不加）"
             if target is not None:
                 line_target = f"目标 {target:.2f}（波段上看）"
 
