@@ -346,7 +346,7 @@ def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str,
     from trader_shared.chan_core import chanlun_analysis
     from trader_shared.wyckoff_core import wyckoff_analysis, calculate_wyckoff_score
     chan_r = chanlun_analysis(bars=daily, current=current, macd_hist_current=macd_hist, macd_hist_prev=macd_hist_prev, symbol=symbol, analysis_date=analysis_date)
-    wyck_r = wyckoff_analysis(daily)
+    wyck_r = wyckoff_analysis(daily, symbol=symbol)
 
     structure_score = 50
     if chan_r.get("trend_label") == "拉升段":
@@ -577,7 +577,7 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
 
     # 威科夫分析（用于信号回顾）
     from trader_shared.wyckoff_core import wyckoff_analysis
-    wyck_r = wyckoff_analysis(daily)
+    wyck_r = wyckoff_analysis(daily, symbol=symbol)
     previous_close = to_float(quote.get("pre_close")) or (to_float(daily[-2].get("close")) if len(daily) >= 2 else None)
     change_pct = to_float(quote.get("current_change_pct"))
     if change_pct is None:

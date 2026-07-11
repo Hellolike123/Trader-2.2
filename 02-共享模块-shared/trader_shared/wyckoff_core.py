@@ -126,6 +126,65 @@ def _is_bc_high_position(bars: list[dict], idx: int) -> bool:
     return pos >= WYCKOFF_BC_MIN_POS_PCT
 
 
+# ── 威科夫辅助函数（P1: 板块/一字板/TR 检测）────────────────────────
+
+def _is_frozen_board(bar: dict) -> bool:
+    """检测一字板（开=高=低=收，全天几乎无波动）。A股涨跌停制度下无效换手。"""
+    o = to_float(bar.get("open"))
+    h = to_float(bar.get("high"))
+    l = to_float(bar.get("low"))
+    c = to_float(bar.get("close"))
+    if any(v is None for v in [o, h, l, c]) or c is None or c <= 0:
+        return False
+    day_range_pct = (h - l) / c * 100
+    return day_range_pct <= 1.0 and abs(o - c) / c * 100 <= 1.0
+
+
+def _board_vol_scale(symbol: str) -> float:
+    """按涨跌停幅度返回量能阈值缩放系数。20% 板块（创业板/科创板）放大 1.41x。"""
+    code = symbol.split(".")[0] if "." in symbol else symbol
+    if code.startswith(("300", "301", "688", "689")):
+        return 1.41  # sqrt(20/10)
+    return 1.0
+
+
+def _is_trading_range(bars: list[dict], lookback: int = 20) -> bool:
+    """检查近 N 日是否处于合理交易区间（ATR 振幅不超过 4x ATR%）。"""
+    if len(bars) < lookback + 1:
+        return True
+    recent = bars[-(lookback + 1):-1]
+    highs = [to_float(b.get("high")) for b in recent]
+    lows = [to_float(b.get("low")) for b in recent]
+    closes = [to_float(b.get("close")) for b in recent]
+    valid = [h for h in highs if h is not None] + [l for l in lows if l is not None]
+    if len(valid) < lookback:
+        return True
+    h_max = max(valid)
+    l_min = min(valid)
+    if l_min <= 0:
+        return False
+    range_pct = (h_max - l_min) / l_min * 100
+    # 计算 ATR
+    trs = []
+    for i in range(1, len(recent)):
+        h = to_float(recent[i].get("high"))
+        l = to_float(recent[i].get("low"))
+        pc = to_float(recent[i - 1].get("close"))
+        if h is None or l is None or pc is None:
+            continue
+        tr = max(h - l, abs(h - pc), abs(l - pc))
+        trs.append(tr)
+    if not trs:
+        return True
+    avg_tr = sum(trs) / len(trs)
+    last_c = to_float(recent[-1].get("close"))
+    if last_c is None or last_c <= 0:
+        return True
+    atr_pct = avg_tr / last_c * 100
+    max_allowed = max(atr_pct * 4, 30.0)  # 最低 30%
+    return range_pct <= max_allowed
+
+
 # ── 动态支撑位计算（多源集成）────────────────────────────────────────
 
 def _compute_dynamic_support(
@@ -352,12 +411,22 @@ def _detect_sign_of_weakness(bars: list[dict], _support: float | None = None) ->
 
 
 # ── Spring 弹簧洗盘检测 ──
-def _detect_spring(bars: list[dict], _support: float | None = None) -> dict:
+def _detect_spring(bars: list[dict], _support: float | None = None, symbol: str = "") -> dict:
     if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1:
         return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "数据不足"}
 
     recent = bars[-(WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1):-1]
     current = bars[-1]
+
+    # P1-3: 一字板过滤
+    if _is_frozen_board(current):
+        return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "一字板无效换手"}
+    if len(recent) > 0 and _is_frozen_board(recent[-1]):
+        return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "前日一字板无效换手"}
+
+    # P1-1: 交易区间检查（ATR 振幅不超过 4x）
+    if not _is_trading_range(bars):
+        return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "非交易区间（振幅过大）"}
 
     low_values = [to_float(b.get("low")) for b in recent]
     valid_lows = [v for v in low_values if v is not None]
@@ -379,11 +448,14 @@ def _detect_spring(bars: list[dict], _support: float | None = None) -> dict:
 
     avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
 
+    # P1-2: 涨跌停板量能缩放
+    vol_scale = _board_vol_scale(symbol)
+
     # 量能分级：低量弹簧（供应耗尽）最可靠，高量弹簧可能是真破位
     if avg_volume > 0 and current_volume < avg_volume * WYCKOFF_SPRING_LOW_VOL_RATIO:
         vol_class = "low_vol_confirm"
         volume_note = "缩量洗盘（供应耗尽，可靠）"
-    elif avg_volume > 0 and current_volume >= avg_volume * WYCKOFF_SPRING_BULLISH_VOL_RATIO:
+    elif avg_volume > 0 and current_volume >= avg_volume * WYCKOFF_SPRING_BULLISH_VOL_RATIO * vol_scale:
         vol_class = "high_vol_warning"
         volume_note = "⚠️ 放量弹簧（可能是真破位）"
     else:
@@ -1007,7 +1079,7 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any]) -> dict[str, Any]:
 
 
 # ── 威科夫综合分析入口 ──
-def wyckoff_analysis(bars: list[dict]) -> dict:
+def wyckoff_analysis(bars: list[dict], symbol: str = "") -> dict:
     if len(bars) < WYCKOFF_MIN_BARS:
         return {
             "spring_signal": False, "spring_reason": "数据不足", "spring_price": None,
@@ -1026,7 +1098,7 @@ def wyckoff_analysis(bars: list[dict]) -> dict:
     # P2-2: 动态支撑位计算（多源集成）— 仅用于 Spring 检测
     dynamic_support = _compute_dynamic_support(bars, lookback=10)
 
-    spring = _detect_spring(bars, _support=dynamic_support)
+    spring = _detect_spring(bars, _support=dynamic_support, symbol=symbol)
     upthrust = _detect_upthrust(bars)
     bc = _detect_buying_climax(bars)
     sow = _detect_sign_of_weakness(bars)  # SOW 使用自己的支撑位计算（处理 consecutive 逻辑）
@@ -1123,9 +1195,9 @@ def wyckoff_analysis(bars: list[dict]) -> dict:
     }
 
 
-def wyckoff_strategy(current: float, bars: list[dict], change_pct: Any = None, quote: dict | None = None) -> dict:
+def wyckoff_strategy(current: float, bars: list[dict], change_pct: Any = None, quote: dict | None = None, symbol: str = "") -> dict:
     """日线威科夫（供 fusion / 短线侧兼容）。"""
-    result = wyckoff_analysis(bars)
+    result = wyckoff_analysis(bars, symbol=symbol)
     if isinstance(result, dict):
         result = {**result, "timeframe": "daily"}
     return {"wyckoff": result}
@@ -1137,6 +1209,7 @@ def wyckoff_strategy_midline(
     daily_bars: list[dict] | None = None,
     change_pct: Any = None,
     quote: dict | None = None,
+    symbol: str = "",
 ) -> dict:
     """中线威科夫独立判断：优先周 K，不足时回退日 K。
 
@@ -1161,7 +1234,7 @@ def wyckoff_strategy_midline(
                 "wyckoff_summary": "K线不足，无法做中线威科夫",
             }
         }
-    result = wyckoff_analysis(bars)
+    result = wyckoff_analysis(bars, symbol=symbol)
     if isinstance(result, dict):
         result = {**result, "timeframe": tf}
     return {"wyckoff": result}
@@ -1169,7 +1242,7 @@ def wyckoff_strategy_midline(
 
 # ── Wyckoff 独立打分 ──────────────────────────────────────────────
 
-def calculate_wyckoff_score(bars: list[dict]) -> dict:
+def calculate_wyckoff_score(bars: list[dict], symbol: str = "") -> dict:
     """基于 Wyckoff 信号规则的独立打分函数。
 
     先调用 wyckoff_analysis() 获取 5 路信号，按权重累加 raw_score，
@@ -1194,7 +1267,7 @@ def calculate_wyckoff_score(bars: list[dict]) -> dict:
             "summary": "K线数据不足，无法打分",
         }
 
-    analysis = wyckoff_analysis(bars)
+    analysis = wyckoff_analysis(bars, symbol=symbol)
 
     raw = 0
     signals: list[str] = []
@@ -1387,7 +1460,19 @@ def format_wyckoff_oneline(
     elif wyk.get("bearish_volume_divergence") and not wyk.get("bullish_volume_divergence"):
         main, note, d = "上涨缩量", "上攻乏力，慎追高", -1
     else:
-        return "威科夫：暂无明确信号 · 中性"
+        # 已跑完引擎但未触发 Spring/SOS/UT 等事件 → 不是「数据不全」
+        # 有 timeframe / summary 视为已计算；完全空 dict 才偏数据不足
+        has_run = bool(
+            wyk.get("timeframe")
+            or wyk.get("wyckoff_summary")
+            or any(
+                k.endswith("_signal") or k.endswith("_reason")
+                for k in wyk.keys()
+            )
+        )
+        if has_run:
+            return "威科夫：暂无事件 · 中性"
+        return "威科夫：数据不足 · 中性"
 
     # 外部 fusion direction 可覆盖展示方向（保持与融合层一致）
     if direction is not None:

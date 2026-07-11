@@ -172,7 +172,7 @@ def build_plan(target: str) -> dict[str, Any]:
     # 威科夫分析（用于实时信号提醒和止盈计划）
     try:
         from trader_shared.wyckoff_core import wyckoff_analysis
-        wyck_result = {"wyckoff": wyckoff_analysis(daily)}
+        wyck_result = {"wyckoff": wyckoff_analysis(daily, symbol=quote.get("symbol") or "")}
         result["wyckoff"] = wyck_result.get("wyckoff", {})
     except Exception:
         wyck_result = {}

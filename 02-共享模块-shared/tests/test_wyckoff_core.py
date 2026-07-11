@@ -968,8 +968,8 @@ class TestHighVolSpringDeweight:
         bars.append({"open": 89, "high": 93, "low": 85, "close": 91, "volume": 300})
         # 强制看多背离，避免构造脆弱的量价序列
         real = wyckoff_analysis
-        def _fake_analysis(b):
-            r = real(b)
+        def _fake_analysis(b, **kwargs):
+            r = real(b, **kwargs)
             r["bullish_volume_divergence"] = True
             r["bearish_volume_divergence"] = False
             return r
@@ -1047,7 +1047,13 @@ class TestFormatWyckoffOneline:
 
     def test_no_signal(self):
         line = format_wyckoff_oneline({})
-        assert line == "威科夫：暂无明确信号 · 中性"
+        assert line == "威科夫：数据不足 · 中性"
+        line2 = format_wyckoff_oneline({
+            "timeframe": "weekly",
+            "wyckoff_summary": "无明显威科夫信号",
+            "spring_signal": False,
+        })
+        assert line2 == "威科夫：暂无事件 · 中性"
         assert "\n" not in line
 
     def test_spring_low_vol_one_line(self):
@@ -1113,5 +1119,89 @@ class TestSpringBreachShared:
         # 若 ATR 路径未共用，固定 90*0.985=88.65 时 low=87 仍可检；主要断言不崩溃且有合理字段
         assert "st_signal" in result
         assert result["st_reason"] is not None
+
+
+# ── P1 新增辅助函数测试 ──
+
+from trader_shared.wyckoff_core import (
+    _is_frozen_board,
+    _board_vol_scale,
+    _is_trading_range,
+)
+
+
+class TestIsFrozenBoard:
+    def test_frozen_board_detected(self):
+        # 一字板：开=高=低=收
+        bar = {"open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0}
+        assert _is_frozen_board(bar) is True
+
+    def test_normal_board_not_frozen(self):
+        bar = {"open": 10.0, "high": 11.0, "low": 9.5, "close": 10.5}
+        assert _is_frozen_board(bar) is False
+
+    def test_small_range_not_frozen(self):
+        # 范围 > 1%，不是一字板
+        bar = {"open": 10.0, "high": 10.2, "low": 9.8, "close": 10.1}
+        assert _is_frozen_board(bar) is False
+
+    def test_missing_data_not_frozen(self):
+        bar = {"open": 10.0, "high": None, "low": 9.5, "close": 10.0}
+        assert _is_frozen_board(bar) is False
+
+
+class TestBoardVolScale:
+    def test_chinext_20pct(self):
+        assert _board_vol_scale("300001.SZ") == 1.41
+
+    def test_star_20pct(self):
+        assert _board_vol_scale("688248.SH") == 1.41
+
+    def test_main_board_10pct(self):
+        assert _board_vol_scale("000001.SZ") == 1.0
+
+    def test_bse_board_10pct(self):
+        assert _board_vol_scale("830001.BJ") == 1.0
+
+    def test_code_without_suffix(self):
+        assert _board_vol_scale("300001") == 1.41
+        assert _board_vol_scale("000001") == 1.0
+
+
+class TestIsTradingRange:
+    def test_normal_range_passes(self):
+        bars = [_make_bar(100 + i * 0.5, 102 + i * 0.5, 99 + i * 0.5, 101 + i * 0.5) for i in range(25)]
+        assert _is_trading_range(bars) is True
+
+    def test_extreme_range_fails(self):
+        # 每根 K 线振幅小（TR 小），但整体价差大（从 50 涨到 200）
+        bars = []
+        for i in range(25):
+            base = 50 + i * 6  # 50, 56, 62, ..., 200
+            bars.append({"open": base, "high": base + 1, "low": base - 1, "close": base, "volume": 1000})
+        assert _is_trading_range(bars) is False
+
+    def test_short_data_passes(self):
+        bars = [_make_bar(100, 105, 95, 102) for _ in range(5)]
+        assert _is_trading_range(bars) is True
+
+
+class TestSpringWithFrozenBoard:
+    def test_frozen_board_skips_spring(self):
+        # 正常 Spring 条件但当日一字板
+        bars = [_make_bar(100, 105, 90, 102) for _ in range(14)]
+        bars.append({"open": 85, "high": 85, "low": 85, "close": 85, "volume": 5000})  # 一字板
+        result = wyckoff_analysis(bars)
+        assert result["spring_signal"] is False
+
+    def test_star_board_volume_scaled(self):
+        # 科创板 20% 板块，量能阈值放大
+        bars = [_make_bar(100, 105, 90, 102, 1000) for _ in range(14)]
+        # Spring bar: 量比 1.35，主板会触发 high_vol_warning，科创板不触发（1.35 < 1.3*1.41）
+        bars.append(_make_bar(85, 100, 84, 92, 1350))
+        result = wyckoff_analysis(bars, symbol="688248.SH")
+        # 科创板量能缩放后不触发 high_vol_warning
+        if result["spring_signal"]:
+            assert result.get("spring_vol_class") != "high_vol_warning"
 
 
