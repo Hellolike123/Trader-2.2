@@ -1541,6 +1541,7 @@ def _chanlun_compute(
     analysis_date: str | None = None,
     weekly_bars: list[dict] | None = None,
     timeframe: str = "daily",
+    raw_bars: list[dict] | None = None,
 ) -> dict:
     """缠论分析共享内核（批量接口与增量引擎共用）。
 
@@ -1591,8 +1592,12 @@ def _chanlun_compute(
     )
 
     # --- E1: 多级别区间套确认 ---
+    # N1 加固：还原预重构行为——higher_trend 源在 chunk 回退路径（weekly_bars=None）下
+    # 必须是「原始 raw bars」而非「包含处理后的 cleaned」，否则聚合分组边界可能偏移。
+    # weekly_bars 优先路径忽略首个入参，故此处选择不影响其输出。
     if higher_trend is None and CHAN_MULTILEVEL_ENABLED:
-        higher_trend = _higher_level_trend(cleaned, chunk=CHAN_MULTILEVEL_CHUNK, weekly_bars=weekly_bars)
+        _ht_src = raw_bars if raw_bars is not None else cleaned
+        higher_trend = _higher_level_trend(_ht_src, chunk=CHAN_MULTILEVEL_CHUNK, weekly_bars=weekly_bars)
     ht: str | None = None
     hc: float = 0.0
     if isinstance(higher_trend, dict):
@@ -1745,6 +1750,7 @@ def chanlun_analysis(
         cleaned, current,
         higher_trend=higher_trend, symbol=symbol,
         analysis_date=analysis_date, weekly_bars=weekly_bars, timeframe=timeframe,
+        raw_bars=bars,
     )
 
 
@@ -1865,7 +1871,7 @@ class ChanlunEngine:
             ht = self._higher_trend
         else:
             ht = _higher_level_trend(
-                self.cleaned, chunk=CHAN_MULTILEVEL_CHUNK, weekly_bars=weekly_bars
+                self._raw, chunk=CHAN_MULTILEVEL_CHUNK, weekly_bars=weekly_bars
             )
             self._higher_trend = ht
             self._higher_trend_weekly_id = id(weekly_bars)

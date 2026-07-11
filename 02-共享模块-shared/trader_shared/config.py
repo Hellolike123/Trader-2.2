@@ -102,6 +102,11 @@ SIGNAL_RULES_ENABLED: bool = False          # 信号组合规则引擎（YAML �
 # ---- ChanlunEngine 状态持久化目录（Phase 1 新增）----
 CHANLUN_STATE_DIR: str = os.path.expanduser("~/.trader/chanlun_state")
 
+# ---- T0 实时缠论开关（Phase 2 新增，opt-in 默认关）----
+# 仅在盘中盯盘 `T0_REALTIME_CHAN=1` 时启用实时缠论增量 diff alert；
+# 未设置时 monitor.run_once 走原批量路径，控制流零改动。
+T0_REALTIME_CHAN_ENABLED: bool = os.environ.get("T0_REALTIME_CHAN") == "1"
+
 # ---- Market index ----
 INDEX_CODE: str = "000852.SH"
 

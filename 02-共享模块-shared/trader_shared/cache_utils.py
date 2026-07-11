@@ -276,6 +276,95 @@ def cleanup_old_cache(max_age_days: int = 30) -> dict[str, int]:
     return {"scanned": scanned, "deleted": deleted, "failed": failed}
 
 
+def warm_chanlun_states() -> dict[str, Any]:
+    """预建每只池内活跃票的 ``ChanlunEngine`` 状态到 ``CHANLUN_STATE_DIR/{code}.json``。
+
+    供 T0 盯盘 / 次日分析 ``ChanlunEngine.load`` 直接复用，避免重复网络抓取 300 根历史。
+    读取 ``~/.trader/pool.json`` 取 status 非「淘汰/已退出」的标的；对每个标的拉取日线
+    （``include_5m/weekly/monthly/ticks=False``，暖缓存阶段已有 CACHE_DAILY，二次调用命中缓存极快），
+    批量 build 引擎并 save。
+
+    容错：单只构建/保存异常 → ``failed += 1`` + 记 ``errors``，**不阻断其他票 / 不阻断 warm**。
+
+    Returns:
+        {"total": int, "success": int, "failed": int, "errors": list[str]}
+    """
+    from pathlib import Path
+
+    pool_path = Path.home() / ".trader" / "pool.json"
+    if not pool_path.exists():
+        return {"total": 0, "success": 0, "failed": 0, "errors": []}
+
+    try:
+        pool_data = json.loads(pool_path.read_text(encoding="utf-8"))
+        items = pool_data.get("items", [])
+        active_items = [
+            item for item in items
+            if item.get("status") not in ("淘汰", "已退出")
+        ]
+    except (json.JSONDecodeError, OSError, KeyError) as exc:
+        _logger.warning("warm_chanlun_states: failed to read pool.json: %s", exc)
+        return {"total": 0, "success": 0, "failed": 0, "errors": [str(exc)]}
+
+    if not active_items:
+        return {"total": 0, "success": 0, "failed": 0, "errors": []}
+
+    try:
+        from trader_shared.data_provider import get_provider
+        from trader_shared.config import LOOKBACK_DAYS, CHANLUN_STATE_DIR
+        from trader_shared.chan_core import ChanlunEngine
+    except ImportError as exc:
+        return {
+            "total": len(active_items), "success": 0, "failed": len(active_items),
+            "errors": [f"import failed: {exc}"],
+        }
+
+    provider = get_provider()
+    total = len(active_items)
+    success = 0
+    failed = 0
+    errors: list[str] = []
+
+    state_dir = Path(CHANLUN_STATE_DIR)
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    for item in active_items:
+        name = item.get("name")
+        if not name:
+            failed += 1
+            errors.append("item missing name")
+            continue
+        try:
+            snapshot = provider.load_market_snapshot(
+                name, days=LOOKBACK_DAYS,
+                include_5m=False, include_weekly=False, include_monthly=False, include_ticks=False,
+            )
+            daily_bars = snapshot.daily_bars or []
+            if not daily_bars:
+                failed += 1
+                errors.append(f"{name}: empty daily_bars")
+                continue
+
+            # 解析用于状态文件名的 code：snapshot 顶层 symbol/code → security.code → pool item code → name
+            code = (
+                getattr(snapshot, "code", None)
+                or getattr(snapshot, "symbol", None)
+                or getattr(getattr(snapshot, "security", None), "code", None)
+                or item.get("code")
+                or name
+            )
+            eng = ChanlunEngine()
+            for b in daily_bars:
+                eng.update_bar(b)
+            eng.save(f"{CHANLUN_STATE_DIR}/{code}.json")
+            success += 1
+        except Exception as exc:  # 容错：绝不阻断其他票
+            failed += 1
+            errors.append(f"{name}: {exc}")
+
+    return {"total": total, "success": success, "failed": failed, "errors": errors}
+
+
 def warm_pool_cache() -> dict[str, Any]:
     """Pre-cache data for all active stocks in the pool.
 
@@ -364,10 +453,14 @@ def warm_pool_cache() -> dict[str, Any]:
     # Clean up old cache files (older than 30 days)
     cleanup_result = cleanup_old_cache(max_age_days=30)
 
+    # Phase 2 接入：预建池内活跃票的缠论增量引擎状态（容错，绝不阻断 warm）
+    chanlun_result = warm_chanlun_states()
+
     return {
         "total": len(targets), "success": success, "failed": failed, "skipped": 0, "errors": errors,
         "fund_flow_success": ff_success, "fund_flow_failed": ff_failed,
         "cache_cleanup": cleanup_result,
+        "chanlun": chanlun_result,
     }
 
 

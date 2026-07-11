@@ -31,6 +31,13 @@ from price_point_engine import price
 from trader_shared.signal_store import append_signal
 from t0_run import build_plan, build_t0_event_signal
 from config import FREQUENCY_STOP_LIMIT
+
+# Phase 2 接入：T0 实时缠论（opt-in，默认关；仅 T0_REALTIME_CHAN=1 时启用）
+try:
+    from trader_shared.realtime_chan import get_realtime_chan, _chan_signature
+except ImportError:
+    get_realtime_chan = None  # type: ignore
+    _chan_signature = None  # type: ignore
 try:
     from trader_shared.trading_calendar import is_trading_time, next_trading_open
 except ImportError:
@@ -542,6 +549,67 @@ def _check_volume_vacuum_t0(plan: dict[str, Any]) -> str | None:
     return None
 
 
+def _chan_realtime_alert(result: dict | None, prev_sig) -> str | None:
+    """对比前后缠论指纹，生成人话预警行；无变化返回 None。
+
+    仅在 ``T0_REALTIME_CHAN=1`` 分支内被调用（run_once 中已比对 chan_sig != prev_sig
+    才触发），此处专注于把变化翻译成可读文本：结构/趋势变化、日内新成笔方向、出现/消失买卖点。
+    指纹可能仅在末笔端点（价格抖动）层面变化，故末尾有兜底，保证检测到变化即产出文本。
+    """
+    if not isinstance(result, dict):
+        return None
+
+    strokes = result.get("strokes") or []
+    last_dir = strokes[-1].get("direction") if strokes else None
+    last_end = strokes[-1].get("end_price") if strokes else None
+    structure_type = result.get("structure_type")
+    trend_label = result.get("trend_label")
+    buy_points = [bp.get("type") for bp in (result.get("buy_points") or [])]
+    sell_points = [sp.get("type") for sp in (result.get("sell_points") or [])]
+
+    if isinstance(prev_sig, tuple):
+        (prev_struct, prev_trend, prev_dir, prev_end, prev_buy, prev_sell) = (
+            list(prev_sig) + [None] * 6
+        )[:6]
+    else:
+        prev_struct = prev_trend = prev_dir = prev_end = prev_buy = prev_sell = None
+
+    parts: list[str] = []
+    # 结构/趋势变化
+    if prev_struct != structure_type or prev_trend != trend_label:
+        parts.append(f"结构由 {prev_trend or '未知'} 转为 {trend_label or '未知'}（{structure_type or '未知'}）")
+    # 末笔方向变化
+    if last_dir != prev_dir:
+        if last_dir == "up":
+            parts.append("日内新成上升笔")
+        elif last_dir == "down":
+            parts.append("日内新成下降笔")
+    # 买卖点出现/消失
+    if buy_points:
+        parts.append("出现买点：" + "、".join(buy_points))
+    elif prev_buy:
+        parts.append("买点消失")
+    if sell_points:
+        parts.append("出现卖点：" + "、".join(sell_points))
+    elif prev_sell:
+        parts.append("卖点消失")
+
+    # 兜底：仅末笔端点（价格抖动）变化时也给出可读提示，保证有变化即发声
+    if not parts and prev_end is not None and last_end is not None and round(float(prev_end), 2) != round(float(last_end), 2):
+        parts.append(f"末笔价格更新至 {round(float(last_end), 2)}")
+
+    if not parts:
+        return None
+    return "缠论：" + "；".join(parts)
+
+
+def _norm_sig(sig):
+    """递归将签名中的 list 归一为 tuple，抵消 JSON 往返导致的 tuple→list 差异。"""
+    if isinstance(sig, (list, tuple)):
+        return tuple(_norm_sig(x) for x in sig)
+    return sig
+
+
 def run_once(
     target: str,
     *,
@@ -560,6 +628,20 @@ def run_once(
     
     # ── [2.5] 量能真空区预警检查 ──
     vacuum_alert = _check_volume_vacuum_t0(plan)
+
+    # ── Phase 2：实时缠论 diff（opt-in，默认关，绝不改变批量路径） ──
+    # 所有改动均在 T0_REALTIME_CHAN=1 分支内；未设 env 时 chan_sig/chan_alert_line
+    # 保持默认空值，控制流与改造前逐字节等价。
+    chan_sig: Any = None
+    chan_result: dict | None = None
+    chan_alert_line = ""
+    if os.environ.get("T0_REALTIME_CHAN") == "1" and get_realtime_chan is not None:
+        try:
+            rc = get_realtime_chan(target_key, plan)
+            chan_sig = rc.get("signature")
+            chan_result = rc.get("result")
+        except Exception:
+            chan_sig = None  # 容错：绝不阻断主流程
     
     with state_lock(state_path):
         state = load_state(state_path)
@@ -584,6 +666,17 @@ def run_once(
         new_snapshot = snapshot(plan)
         new_snapshot["last_events"] = dict(target_state.get("last_events") or {})
         new_snapshot["history"] = list(target_state.get("history") or [])
+        # Phase 2：写入缠论指纹（默认值 None 不影响现有逻辑）
+        new_snapshot["chan_signature"] = chan_sig
+        if chan_sig is not None and chan_result is not None:
+            prev_sig = (previous or {}).get("chan_signature")
+            # 状态文件经 JSON 往返后 tuple→list（含嵌套），需归一后再比对，
+            # 否则下一 tick 总会因 tuple≠list 误判为变化而重复告警。
+            if _norm_sig(chan_sig) != _norm_sig(prev_sig):
+                try:
+                    chan_alert_line = _chan_realtime_alert(chan_result, prev_sig)
+                except Exception:
+                    chan_alert_line = ""
         mark_events(new_snapshot, plan, allowed_events)
         targets[target_key] = new_snapshot
         state["targets"] = targets
@@ -628,18 +721,25 @@ def run_once(
     if vacuum_alert:
         vacuum_line = vacuum_alert + "\n"
 
+    # ── 实时缠论预警（opt-in，独立于事件系统） ──
+    chan_line = ""
+    if chan_alert_line:
+        chan_line = chan_alert_line + "\n"
+
     if allowed_events:
         try:
             persist_event_signals(allowed_events, plan)
         except Exception as e:
             warnings.warn(f"[t0-monitor] 信号持久化失败: {e}")
     if not allowed_events:
-        if vacuum_alert:
-            return vacuum_line.strip()
+        prefix = (vacuum_line + chan_line).strip()
+        if prefix:
+            return prefix
         return "无新提醒" if verbose else ""
     events_text = "\n\n".join(build_alert_message(event, plan, cost=cost, position=position, previous_state=target_state) for event in allowed_events)
-    if vacuum_line:
-        return vacuum_line + events_text
+    prefix = vacuum_line + chan_line
+    if prefix:
+        return prefix + events_text
     return events_text
 
 

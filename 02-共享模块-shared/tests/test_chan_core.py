@@ -1523,3 +1523,58 @@ class TestChanlunEngineCompat:
 
     def test_unknown_passthrough(self):
         assert _chan_type_canonical("未知类型") == "未知类型"
+
+
+class TestN1RawBarsHigherTrend:
+    """N1 加固：chunk 回退路径下 higher_trend 必须以「原始 raw bars」为源（字节级一致）。
+
+    Part A 修复前 `_chanlun_compute` 在 weekly_bars=None 时用 cleaned（包含处理后）序列
+    调 `_higher_level_trend`，与预重构的 `_higher_level_trend(bars)` 口径可能存在聚合边界
+    偏移。修复后批量路径传 ``raw_bars=bars``、引擎路径用 ``self._raw``，本组测试锁定该口径。
+
+    注：``chanlun_analysis`` / ``get_analysis`` 的返回字段 ``higher_trend`` 仅存上级趋势
+    字符串（"up"/"down"/None），真正的来源口径差异体现在：默认调用应与「显式传入
+    ``_higher_level_trend(bars)`` 同口径」逐字段一致（N1 修复后即等于 raw-based 结果）。
+    """
+
+    def test_batch_default_matches_explicit_raw_trend(self):
+        from trader_shared.config import CHAN_MULTILEVEL_CHUNK
+
+        bars = _gen_bars(300, seed=7)
+        current = bars[-1]["close"]
+        # chunk 回退路径：weekly_bars=None
+        default = chanlun_analysis(bars, current, weekly_bars=None)
+        explicit = chanlun_analysis(
+            bars, current,
+            higher_trend=_higher_level_trend(bars, chunk=CHAN_MULTILEVEL_CHUNK, weekly_bars=None),
+            weekly_bars=None,
+        )
+        # N1：default 内部必须以 raw bars 计算 higher_trend，与显式 raw-based 一致
+        assert _norm(default) == _norm(explicit), (
+            "N1: 批量路径默认 higher_trend 必须与 _higher_level_trend(bars) 同口径"
+        )
+
+    def test_engine_default_matches_explicit_raw_trend(self):
+        from trader_shared.config import CHAN_MULTILEVEL_CHUNK
+
+        bars = _gen_bars(300, seed=11)
+        current = bars[-1]["close"]
+        eng = ChanlunEngine(bars)
+        incr = eng.get_analysis(current, weekly_bars=None)
+        explicit = eng.get_analysis(
+            current,
+            higher_trend=_higher_level_trend(bars, chunk=CHAN_MULTILEVEL_CHUNK, weekly_bars=None),
+            weekly_bars=None,
+        )
+        assert _norm(incr) == _norm(explicit), (
+            "N1: 引擎路径默认 higher_trend 必须以 self._raw 为源"
+        )
+
+    def test_batch_equivalent_to_engine_on_raw(self):
+        """增量≡批量主门：两者 now 都以 raw bars 驱动 higher_trend，结果仍逐字段一致。"""
+        bars = _gen_bars(300, seed=23)
+        current = bars[-1]["close"]
+        batch = chanlun_analysis(bars, current, weekly_bars=None)
+        eng = ChanlunEngine(bars)
+        incr = eng.get_analysis(current, weekly_bars=None)
+        assert _norm(incr) == _norm(batch)
