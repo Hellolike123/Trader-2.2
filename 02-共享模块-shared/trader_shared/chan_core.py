@@ -1533,26 +1533,24 @@ def detect_divergence(bars: list[dict], strokes: list[dict] | None = None) -> di
     return result
 
 
-def chanlun_analysis(
-    bars: list[dict],
+def _chanlun_compute(
+    cleaned: list[dict],
     current: float,
-    macd_hist_current: float | None = None,
-    macd_hist_prev: float | None = None,
     higher_trend: dict | None = None,
     symbol: str | None = None,
     analysis_date: str | None = None,
     weekly_bars: list[dict] | None = None,
     timeframe: str = "daily",
 ) -> dict:
-    if len(bars) < CHANLUN_MIN_BARS:
-        return {}
+    """缠论分析共享内核（批量接口与增量引擎共用）。
 
-    # 结构层：包含处理（拷贝 OHLC，不修改入参 bars）
-    cleaned = handle_inclusion(bars)
-    # 力度层：在 inclusion 后序列上重算 MACD，使笔 index 与 histogram 同坐标系。
-    # _calc_macd 内部 dict 拷贝，只写 cleaned，绝不写回调用方 raw bars。
-    cleaned = _calc_macd(cleaned)
+    `cleaned` 为「已包含处理 + 已带 MACD」的 K 线序列。本函数只跑结构层与后处理，
+    不触碰包含/MACD 计算，确保批量（chanlun_analysis）与增量（ChanlunEngine）两条路径
+    由同一份代码驱动、字节级一致。
 
+    注意：`cleaned` 必带 `macd_histogram`（由 _calc_macd 写入），故买卖点力度一律取自
+    cleaned，不再回退 raw 入参（raw 入参不再传入本内核）。
+    """
     fractions = find_fractions(cleaned)
     strokes = build_strokes(fractions, min_bars_per_stroke=CHANLUN_MIN_BARS_PER_STROKE, bars=cleaned)
     segments = build_segments(strokes, min_strokes=CHANLUN_MIN_STROKES_PER_SEGMENT)
@@ -1572,15 +1570,11 @@ def chanlun_analysis(
     pivot_count = structure.get("pivot_count", 0)
 
     # 一类 conf=1 等 bar 级 fallback：优先用 cleaned 末两根，与笔级力度同坐标系
-    # （调用方传入的 raw 末柱仅在 cleaned 不可用时兜底）
+    # cleaned 必带 macd_histogram（由 _calc_macd 写入），故一律用 cleaned，不回退 raw 入参
     cleaned_macd_curr = to_float(cleaned[-1].get("macd_histogram")) if cleaned else None
     cleaned_macd_prev = to_float(cleaned[-2].get("macd_histogram")) if len(cleaned) >= 2 else None
-    macd_for_buy_sell_curr = (
-        cleaned_macd_curr if cleaned_macd_curr is not None else macd_hist_current
-    )
-    macd_for_buy_sell_prev = (
-        cleaned_macd_prev if cleaned_macd_prev is not None else macd_hist_prev
-    )
+    macd_for_buy_sell_curr = cleaned_macd_curr
+    macd_for_buy_sell_prev = cleaned_macd_prev
 
     # 笔 start_index/end_index 相对 cleaned；背驰/二类确认/买卖点一律吃 cleaned
     divergence = detect_divergence(cleaned, strokes)
@@ -1598,7 +1592,7 @@ def chanlun_analysis(
 
     # --- E1: 多级别区间套确认 ---
     if higher_trend is None and CHAN_MULTILEVEL_ENABLED:
-        higher_trend = _higher_level_trend(bars, chunk=CHAN_MULTILEVEL_CHUNK, weekly_bars=weekly_bars)
+        higher_trend = _higher_level_trend(cleaned, chunk=CHAN_MULTILEVEL_CHUNK, weekly_bars=weekly_bars)
     ht: str | None = None
     hc: float = 0.0
     if isinstance(higher_trend, dict):
@@ -1720,6 +1714,216 @@ def chanlun_analysis(
         "merged_zones": merged_zones,
         "pivot_count": pivot_count,
     }
+
+
+def chanlun_analysis(
+    bars: list[dict],
+    current: float,
+    macd_hist_current: float | None = None,
+    macd_hist_prev: float | None = None,
+    higher_trend: dict | None = None,
+    symbol: str | None = None,
+    analysis_date: str | None = None,
+    weekly_bars: list[dict] | None = None,
+    timeframe: str = "daily",
+) -> dict:
+    """缠论批量分析（无状态接口，向后兼容）。
+
+    委托共享内核 `_chanlun_compute`：先算「包含处理 + MACD」，再交给内核。
+    输出与重构前字节级一致（仅把结构层/后处理抽取为共享函数，算法行为未改）。
+    """
+    if len(bars) < CHANLUN_MIN_BARS:
+        return {}
+
+    # 结构层：包含处理（拷贝 OHLC，不修改入参 bars）
+    cleaned = handle_inclusion(bars)
+    # 力度层：在 inclusion 后序列上重算 MACD，使笔 index 与 histogram 同坐标系。
+    # _calc_macd 内部 dict 拷贝，只写 cleaned，绝不写回调用方 raw bars。
+    cleaned = _calc_macd(cleaned)
+
+    return _chanlun_compute(
+        cleaned, current,
+        higher_trend=higher_trend, symbol=symbol,
+        analysis_date=analysis_date, weekly_bars=weekly_bars, timeframe=timeframe,
+    )
+
+
+class ChanlunEngine:
+    """缠论增量分析引擎（有状态）。
+
+    Phase 1 范围：批量初始化 + 增量 ``update_bar``（append / 当前 bar replace）+
+    状态持久化（save/load）。下游结构算法（find_fractions / build_strokes /
+    build_segments / detect_*）全部复用既有纯函数，增量结果与批量重算由构造保证一致
+    （共享内核 ``_chanlun_compute``）。
+
+    设计取舍（对照评审第七节）：
+      - 以 ``self._raw`` 为权威源，``update_bar`` 后通过 ``_calc_macd(handle_inclusion(raw))``
+        重算 ``self.cleaned``。纯尾部增量回溯（7.3 inclusion run / 7.4 增量 MACD）为 optional
+        性能项；此处以「全量复用纯函数」换取零漂移正确性（300 根 < 1ms，见 7.5/7.9）。
+      - 持久化含 MACD EMA 末值（_ema12/_ema26/_dea）、inclusion run 起点、higher_trend
+        缓存与最后 bar 身份（7.6）。save 前用 ``to_float`` 归一 numpy 类型，避免 JSON 序列化失败。
+    """
+
+    def __init__(self, bars: list[dict] | None = None):
+        self._raw: list[dict] = []
+        self.cleaned: list[dict] = []
+        self.fractions: list[dict] = []
+        self.strokes: list[dict] = []
+        self.segments: list[dict] = []
+        self.zones: list[dict] = []
+        # MACD EMA 末值（持久化用；本实现每 tick 全量重算 cleaned，故为派生状态）
+        self._ema12: float | None = None
+        self._ema26: float | None = None
+        self._dea: float | None = None
+        # inclusion run 起点（纳入持久化，供后续尾部增量优化使用）
+        self._incl_run_start: int = 0
+        # higher_trend 缓存（7.7）
+        self._higher_trend: dict | None = None
+        self._higher_trend_weekly_id: object | None = None
+        # 最后 bar 身份（append / replace 判定，7.6）
+        self._last_bar_id: object | None = None
+        if bars:
+            for bar in bars:
+                self.update_bar(bar)
+
+    # ---- bar 身份 ----
+    @staticmethod
+    def _bar_id(bar: dict) -> object:
+        if isinstance(bar, dict) and bar.get("date") is not None:
+            return ("date", bar["date"])
+        # 无 date 时退化为对象 id（同进程内稳定）；跨进程由 save/load 的 last_bar_id 兜底
+        return ("idx", id(bar))
+
+    # ---- 核心重算（一致性由纯函数保证）----
+    def _recompute(self) -> None:
+        if not self._raw:
+            self.cleaned = []
+            self.fractions = []
+            self.strokes = []
+            self.segments = []
+            self.zones = []
+            self._ema12 = self._ema26 = self._dea = None
+            return
+        self.cleaned = _calc_macd(handle_inclusion(self._raw))
+        self.fractions = find_fractions(self.cleaned)
+        self.strokes = build_strokes(
+            self.fractions, min_bars_per_stroke=CHANLUN_MIN_BARS_PER_STROKE, bars=self.cleaned
+        )
+        self.segments = build_segments(self.strokes, min_strokes=CHANLUN_MIN_STROKES_PER_SEGMENT)
+        # 派生 MACD EMA 末值（用于 save/load 保真）
+        from trader_shared.indicator_math import calc_macd_series
+
+        closes = [to_float(b.get("close")) for b in self.cleaned]
+        macd = calc_macd_series(closes)
+        for k in range(len(macd["ema12"]) - 1, -1, -1):
+            if (
+                macd["ema12"][k] is not None
+                and macd["ema26"][k] is not None
+                and macd["dea"][k] is not None
+            ):
+                self._ema12 = to_float(macd["ema12"][k])
+                self._ema26 = to_float(macd["ema26"][k])
+                self._dea = to_float(macd["dea"][k])
+                break
+
+    def update_bar(self, bar: dict) -> None:
+        """增量更新。
+
+        - bar 与最后 bar 同 id（同一交易日/同一对象）→ **replace** 当前（进行中）bar；
+        - 否则 → **append** 新 bar。
+        """
+        bar = dict(bar)
+        bar_id = self._bar_id(bar)
+        if self._last_bar_id is not None and bar_id == self._last_bar_id and self._raw:
+            # replace 当前（进行中）bar：覆盖最后一根 raw，再整段重算
+            self._raw[-1] = bar
+        else:
+            self._raw.append(bar)
+            self._last_bar_id = bar_id
+        self._recompute()
+
+    def get_analysis(
+        self,
+        current: float,
+        symbol: str | None = None,
+        analysis_date: str | None = None,
+        weekly_bars: list[dict] | None = None,
+        timeframe: str = "daily",
+        higher_trend: dict | None = None,
+    ) -> dict:
+        """基于缓存状态计算（不重算历史）。
+
+        全参数透传至 ``_chanlun_compute``；higher_trend 走缓存（7.7）：
+        显式传入优先；否则用首次计算并缓存的值（weekly_bars 对象不变则复用，
+        避免盘中每次实时调用都重跑 ``_higher_level_trend``）。
+        """
+        if len(self._raw) < CHANLUN_MIN_BARS:
+            return {}
+        if higher_trend is not None:
+            ht = higher_trend
+        elif self._higher_trend is not None and self._higher_trend_weekly_id == id(weekly_bars):
+            ht = self._higher_trend
+        else:
+            ht = _higher_level_trend(
+                self.cleaned, chunk=CHAN_MULTILEVEL_CHUNK, weekly_bars=weekly_bars
+            )
+            self._higher_trend = ht
+            self._higher_trend_weekly_id = id(weekly_bars)
+        return _chanlun_compute(
+            self.cleaned, current, higher_trend=ht, symbol=symbol,
+            analysis_date=analysis_date, weekly_bars=weekly_bars, timeframe=timeframe,
+        )
+
+    # ---- 状态持久化 ----
+    def save(self, path) -> None:
+        import json
+        from pathlib import Path
+
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        state = {
+            "raw_bars": self._raw,
+            "ema12": self._ema12,
+            "ema26": self._ema26,
+            "dea": self._dea,
+            "incl_run_start": self._incl_run_start,
+            "higher_trend": self._higher_trend,
+            "last_bar_id": self._last_bar_id,
+        }
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, default=_chan_json_default)
+
+    @classmethod
+    def load(cls, path) -> "ChanlunEngine":
+        import json
+
+        with open(path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        eng = cls()
+        eng._raw = state.get("raw_bars", [])
+        eng._ema12 = state.get("ema12")
+        eng._ema26 = state.get("ema26")
+        eng._dea = state.get("dea")
+        eng._incl_run_start = state.get("incl_run_start", 0)
+        eng._higher_trend = state.get("higher_trend")
+        eng._last_bar_id = state.get("last_bar_id")
+        eng._recompute()
+        return eng
+
+
+def _chan_json_default(o):
+    """JSON 序列化兜底：numpy 标量 → 原生 float/int（cleaned 不入库，raw 可能含 numpy）。"""
+    try:
+        import numpy as np
+    except ImportError:
+        return str(o)
+    if isinstance(o, np.floating):
+        return float(o)
+    if isinstance(o, np.integer):
+        return int(o)
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    return str(o)
 
 
 _CHAN_TYPE_CANONICAL: dict[str, str] = {

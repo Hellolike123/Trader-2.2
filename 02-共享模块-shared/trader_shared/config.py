@@ -99,6 +99,9 @@ CHAN_ZONE_MERGE_GAP_PCT: float = 0.015      # 中枢合并的相对间距阈值�
 CHAN_SIGNAL_ID_ENABLED: bool = True         # 买卖点写入 Signal Contract v2 强一致 signal_id
 SIGNAL_RULES_ENABLED: bool = False          # 信号组合规则引擎（YAML 驱动，实验性，默认关闭）
 
+# ---- ChanlunEngine 状态持久化目录（Phase 1 新增）----
+CHANLUN_STATE_DIR: str = os.path.expanduser("~/.trader/chanlun_state")
+
 # ---- Market index ----
 INDEX_CODE: str = "000852.SH"
 

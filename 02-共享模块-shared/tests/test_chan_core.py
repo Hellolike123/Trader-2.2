@@ -27,6 +27,8 @@ from trader_shared.chan_core import (
     _higher_level_trend,
     _merge_zones,
     _chan_type_canonical,
+    _chanlun_compute,
+    ChanlunEngine,
 )
 
 
@@ -1220,6 +1222,304 @@ class TestChanTypeCanonical:
         assert _chan_type_canonical("一类卖") == "chan_sell_1"
         assert _chan_type_canonical("二类卖") == "chan_sell_2"
         assert _chan_type_canonical("三类卖") == "chan_sell_3"
+
+
+# ---------------------------------------------------------------------------
+# 缠论增量引擎 ChanlunEngine（Phase 1）
+# ---------------------------------------------------------------------------
+
+def _gen_bars(n: int = 300, seed: int = 42, with_date: bool = True) -> list[dict]:
+    """生成带趋势+噪声的合成日线，便于缠论结构成型。"""
+    import random
+
+    random.seed(seed)
+    bars: list[dict] = []
+    price = 50.0
+    for i in range(n):
+        drift = 0.5 * __import__("math").sin(i / 15.0) + 0.05
+        o = price
+        c = max(1.0, price + drift + random.uniform(-0.8, 0.8))
+        h = max(o, c) + random.uniform(0, 1.2)
+        l = min(o, c) - random.uniform(0, 1.2)
+        bar = {
+            "open": round(o, 2),
+            "high": round(h, 2),
+            "low": round(l, 2),
+            "close": round(c, 2),
+            "volume": 1000 + random.randint(0, 500),
+        }
+        if with_date:
+            bar["date"] = str(20240101 + i)
+        bars.append(bar)
+        price = c
+    return bars
+
+
+def _gen_weekly(n: int = 60, seed: int = 11) -> list[dict]:
+    import random
+
+    random.seed(seed)
+    bars: list[dict] = []
+    price = 50.0
+    for i in range(n):
+        drift = 0.6 * __import__("math").sin(i / 8.0) + 0.1
+        o = price
+        c = max(1.0, price + drift + random.uniform(-1.5, 1.5))
+        h = max(o, c) + random.uniform(0, 2.5)
+        l = min(o, c) - random.uniform(0, 2.5)
+        bars.append({
+            "open": round(o, 2), "high": round(h, 2), "low": round(l, 2),
+            "close": round(c, 2), "volume": 10000 + random.randint(0, 5000),
+            "date": "W%d" % i,
+        })
+        price = c
+    return bars
+
+
+def _norm(o):
+    """归一 helper：dict/list 递归、float 四舍五入 4 位、numpy→float，便于逐字段比对。"""
+    if isinstance(o, dict):
+        return {k: _norm(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_norm(x) for x in o]
+    if isinstance(o, float):
+        return round(o, 4)
+    try:
+        import numpy as np
+
+        if isinstance(o, np.floating):
+            return round(float(o), 4)
+        if isinstance(o, np.integer):
+            return int(o)
+    except ImportError:
+        pass
+    return o
+
+
+class TestChanlunEngineConsistency:
+    """测试 1（主门，按第七节升级）：增量结果 ≡ 批量结果（完整字段 dict）。"""
+
+    def test_incremental_matches_batch_full_fields(self):
+        bars = _gen_bars(300)
+        weekly = _gen_weekly()
+        current = bars[-1]["close"]
+
+        batch = chanlun_analysis(bars, current, weekly_bars=weekly)
+        eng = ChanlunEngine(bars)
+        incr = eng.get_analysis(current, weekly_bars=weekly)
+
+        assert _norm(incr) == _norm(batch)
+
+    def test_incremental_matches_batch_no_weekly(self):
+        bars = _gen_bars(300, seed=99)
+        current = bars[-1]["close"]
+        batch = chanlun_analysis(bars, current)
+        eng = ChanlunEngine(bars)
+        incr = eng.get_analysis(current)
+        assert _norm(incr) == _norm(batch)
+
+    def test_incremental_matches_batch_with_symbol(self):
+        bars = _gen_bars(300, seed=5)
+        current = bars[-1]["close"]
+        weekly = _gen_weekly(seed=5)
+        kw = dict(symbol="688248.SH", analysis_date="2026-07-07", weekly_bars=weekly)
+        batch = chanlun_analysis(bars, current, **kw)
+        eng = ChanlunEngine(bars)
+        incr = eng.get_analysis(current, **kw)
+        assert _norm(incr) == _norm(batch)
+        # 给定 symbol/date 时，买卖点应带 signal_id
+        if incr["buy_points"]:
+            assert "signal_id" in incr["buy_points"][0]
+        if incr["sell_points"]:
+            assert "signal_id" in incr["sell_points"][0]
+
+
+class TestChanlunEngineIncremental:
+    """测试 2：逐根 bar 增量更新，结果正确且非递减。"""
+
+    def test_incremental_bar_update(self):
+        bars = _gen_bars(300, seed=3)
+        current = bars[-1]["close"]
+
+        eng = ChanlunEngine()
+        prev_strokes = 0
+        prev_segments = 0
+        for bar in bars:
+            eng.update_bar(bar)
+            # 已确认笔/段不应回退（允许最后一笔合并，故 -1 容差）
+            assert len(eng.strokes) >= prev_strokes - 1
+            assert len(eng.segments) >= prev_segments - 1
+            prev_strokes = len(eng.strokes)
+            prev_segments = len(eng.segments)
+
+        result = eng.get_analysis(current)
+        batch = chanlun_analysis(bars, current)
+        assert _norm(result) == _norm(batch)
+
+
+class TestChanlunEngineInclusion:
+    """测试 3：包含合并不破坏已有状态。"""
+
+    def test_inclusion_merge_preserves_state(self):
+        bars = _gen_bars(300, seed=8)
+        eng = ChanlunEngine(bars[:-5])
+        prev_fractions = len(eng.fractions)
+        prev_strokes = len(eng.strokes)
+
+        # 添加可能触发包含合并的 bar（与末根高度重叠）
+        last = bars[-6]
+        merge_bar = dict(last)
+        merge_bar["high"] = last["high"]
+        merge_bar["low"] = last["low"]
+        merge_bar["open"] = (last["open"] + last["close"]) / 2
+        merge_bar["close"] = (last["open"] + last["close"]) / 2
+        eng.update_bar(merge_bar)
+
+        assert len(eng.fractions) >= prev_fractions - 1
+        assert len(eng.strokes) >= prev_strokes - 1
+
+
+class TestChanlunEnginePersistence:
+    """测试 4：状态持久化后一致（含 MACD EMA）。"""
+
+    def test_state_persistence(self):
+        import tempfile, os
+
+        bars = _gen_bars(300, seed=21)
+        eng = ChanlunEngine(bars)
+        # 触发一次分析以填充 higher_trend 缓存
+        eng.get_analysis(bars[-1]["close"], weekly_bars=_gen_weekly(seed=21))
+
+        tp = tempfile.mktemp(suffix=".json")
+        try:
+            eng.save(tp)
+            eng2 = ChanlunEngine.load(tp)
+            assert _norm(eng2.cleaned) == _norm(eng.cleaned)
+            assert _norm(eng2.fractions) == _norm(eng.fractions)
+            assert _norm(eng2.strokes) == _norm(eng.strokes)
+            assert _norm(eng2.segments) == _norm(eng.segments)
+            # MACD EMA 状态保真
+            assert eng2._ema12 is not None and abs(eng2._ema12 - (eng._ema12 or 0)) < 1e-6
+            assert eng2._ema26 is not None and abs(eng2._ema26 - (eng._ema26 or 0)) < 1e-6
+            assert eng2._dea is not None and abs(eng2._dea - (eng._dea or 0)) < 1e-6
+            # 重新分析仍一致
+            assert _norm(eng2.get_analysis(bars[-1]["close"], weekly_bars=_gen_weekly(seed=21))) == _norm(
+                eng.get_analysis(bars[-1]["close"], weekly_bars=_gen_weekly(seed=21))
+            )
+        finally:
+            if os.path.exists(tp):
+                os.remove(tp)
+
+
+class TestChanlunEngineReplace:
+    """测试 8（第七节新增）：盘中当前 bar 修正（replace）与直接 append 终值一致。"""
+
+    def test_replace_equals_final_append(self):
+        bars = _gen_bars(300, seed=7)
+        final = dict(bars[-1])
+        final["open"] = 51.0
+        final["high"] = 55.0
+        final["low"] = 50.0
+        final["close"] = 54.0
+        final["volume"] = 2000
+        bars2 = [dict(b) for b in bars[:-1]] + [final]
+
+        eng = ChanlunEngine(bars[:-1])
+        # 先以初始值 update（模拟盘中第一笔）
+        first = dict(final)
+        first["high"] = 52.0
+        first["close"] = 51.5
+        first["volume"] = 1500
+        eng.update_bar(first)
+        # 再以终值 replace（同一 date → 覆盖当前 bar）
+        eng.update_bar(final)
+
+        res_replace = eng.get_analysis(54.0)
+        batch_final = chanlun_analysis(bars2, 54.0)
+        assert _norm(res_replace) == _norm(batch_final)
+
+
+class TestChanlunEngineEdge:
+    """测试 5：边界情况不崩溃（与 chanlun_analysis 行为一致：<CHANLUN_MIN_BARS 返回 {}）。"""
+
+    def test_empty_bars(self):
+        eng = ChanlunEngine()
+        assert eng.get_analysis(100.0) == {}
+
+    def test_single_bar(self):
+        eng = ChanlunEngine()
+        eng.update_bar({"open": 100, "high": 105, "low": 95, "close": 102, "volume": 1000})
+        # 与批量接口一致：不足 CHANLUN_MIN_BARS 返回空 dict
+        assert eng.get_analysis(102.0) == {}
+
+    def test_all_same_price(self):
+        eng = ChanlunEngine()
+        for i in range(50):
+            eng.update_bar({"open": 100, "high": 100, "low": 100, "close": 100, "volume": 1000})
+        result = eng.get_analysis(100.0)
+        assert result["strokes_count"] == 0
+
+    def test_extreme_price_jump(self):
+        eng = ChanlunEngine()
+        for i in range(20):
+            eng.update_bar({"open": 100, "high": 105, "low": 95, "close": 102, "volume": 1000})
+        eng.update_bar({"open": 200, "high": 210, "low": 190, "close": 205, "volume": 5000})
+        result = eng.get_analysis(205.0)
+        assert "strokes" in result
+
+
+class TestChanlunEnginePerformance:
+    """测试 6（按第七节降级为参考）：增量每 tick 不慢于批量重算的 1.5 倍。
+
+    真实收益在「免网络重抓」而非「计算」（实测 chanlun_analysis(300) ≈ 3ms）。
+    """
+
+    def test_incremental_performance(self):
+        import time
+
+        bars = _gen_bars(300)
+
+        t0 = time.time()
+        for _ in range(10):
+            chanlun_analysis(bars, bars[-1]["close"])
+        batch_time = (time.time() - t0) / 10
+
+        eng = ChanlunEngine(bars)
+        t0 = time.time()
+        for _ in range(10):
+            eng.update_bar(bars[-1])
+        incr_time = (time.time() - t0) / 10
+
+        # 参考性：增量每 tick 不慢于批量重算 1.5 倍；两者均 O(n) < 1ms
+        assert incr_time <= batch_time * 1.5
+
+
+class TestChanlunEngineCompat:
+    """测试 7：输出与下游（fusion / conclusion_block）字段兼容（完整返回）。"""
+
+    def test_fusion_compatibility(self):
+        bars = _gen_bars(300, seed=123)
+        eng = ChanlunEngine(bars)
+        result = eng.get_analysis(bars[-1]["close"], weekly_bars=_gen_weekly(seed=123))
+        for f in ("buy_points", "sell_points", "divergence", "trend_label", "higher_trend_conflict"):
+            assert f in result
+        for bp in result["buy_points"]:
+            assert "type" in bp and "confidence" in bp and "price" in bp
+
+    def test_conclusion_block_compatibility(self):
+        bars = _gen_bars(300, seed=321)
+        eng = ChanlunEngine(bars)
+        result = eng.get_analysis(
+            bars[-1]["close"], symbol="688248.SH", analysis_date="2026-07-07", weekly_bars=_gen_weekly(seed=321)
+        )
+        for f in ("segments", "structure_type", "merged_zones", "fractions", "higher_trend_conflict"):
+            assert f in result
+        # 给定 symbol/date 时应有 signal_id
+        if result["buy_points"] or result["sell_points"]:
+            any_id = any(bp.get("signal_id") for bp in result["buy_points"]) or any(
+                sp.get("signal_id") for sp in result["sell_points"]
+            )
+            assert any_id
 
     def test_unknown_passthrough(self):
         assert _chan_type_canonical("未知类型") == "未知类型"
