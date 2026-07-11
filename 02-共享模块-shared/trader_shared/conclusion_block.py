@@ -32,8 +32,19 @@ def _build_wave_label(chanlun_daily: Any, current: float = 0.0) -> str:
     divergence = chan.get("divergence") if isinstance(chan.get("divergence"), dict) else {}
     merged_zones = chan.get("merged_zones") if isinstance(chan.get("merged_zones"), list) else []
 
-    # 段数不足，无法判断浪型
+    # 段数不足：1段时用趋势标签描述，2段以上用浪型分析
     if len(segments) < 2:
+        if len(segments) == 1:
+            seg = segments[0]
+            if isinstance(seg, dict):
+                seg_dir = seg.get("direction", "")
+                seg_high = seg.get("high", 0)
+                seg_low = seg.get("low", 0)
+                if seg_dir == "up":
+                    return f"单边上涨（{seg_low:.0f}→{seg_high:.0f}）·趋势延续"
+                elif seg_dir == "down":
+                    return f"单边下跌（{seg_high:.0f}→{seg_low:.0f}）·趋势延续"
+            return trend_label if trend_label else "无明确浪型"
         return "段数不足，无明确浪型"
 
     # 提取最近的段方向序列
