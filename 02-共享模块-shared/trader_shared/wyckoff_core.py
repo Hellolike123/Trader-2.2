@@ -42,6 +42,18 @@ try:
         WYCKOFF_SCORE_SOS,
         WYCKOFF_SCORE_ST,
         WYCKOFF_SCORE_LPS,
+        # P2/P3 新增
+        WYCKOFF_SCORE_COMPRESSION,
+        WYCKOFF_SCORE_TREND_PB,
+        WYCKOFF_COMPRESSION_LOOKBACK,
+        WYCKOFF_COMPRESSION_ATR_QUANTILE,
+        WYCKOFF_COMPRESSION_VOL_RATIO,
+        WYCKOFF_COMPRESSION_VOL_REF_WINDOW,
+        WYCKOFF_TREND_PB_LOOKBACK,
+        WYCKOFF_TREND_PB_MIN_PULLBACK,
+        WYCKOFF_TREND_PB_MAX_PULLBACK,
+        WYCKOFF_TREND_PB_VOL_SHRINK,
+        WYCKOFF_TREND_PB_MA_WINDOW,
     )
 except ImportError:
     WYCKOFF_MIN_BARS = 15
@@ -78,6 +90,18 @@ except ImportError:
     WYCKOFF_SCORE_SOS = 15
     WYCKOFF_SCORE_ST = 8
     WYCKOFF_SCORE_LPS = 12
+    # P2/P3 fallback
+    WYCKOFF_SCORE_COMPRESSION = 10
+    WYCKOFF_SCORE_TREND_PB = 8
+    WYCKOFF_COMPRESSION_LOOKBACK = 20
+    WYCKOFF_COMPRESSION_ATR_QUANTILE = 0.20
+    WYCKOFF_COMPRESSION_VOL_RATIO = 0.60
+    WYCKOFF_COMPRESSION_VOL_REF_WINDOW = 60
+    WYCKOFF_TREND_PB_LOOKBACK = 10
+    WYCKOFF_TREND_PB_MIN_PULLBACK = 5.0
+    WYCKOFF_TREND_PB_MAX_PULLBACK = 20.0
+    WYCKOFF_TREND_PB_VOL_SHRINK = 0.60
+    WYCKOFF_TREND_PB_MA_WINDOW = 20
 
 
 # ── 共享工具：Spring 刺穿深度 / BC 高位过滤 ─────────────────────────
@@ -952,6 +976,168 @@ def _detect_effort_vs_result(bars: list[dict]) -> dict[str, bool]:
     return {"effort_no_result": False, "no_supply": False}
 
 
+# ── P2: Compression 压缩蓄势检测 ──────────────────────────────────
+
+def _detect_compression(bars: list[dict]) -> dict:
+    """检测压缩蓄势：振幅收窄 + 量能枯竭 = 蓄势待发。
+
+    触发条件:
+      1. 近 N 日 ATR 分位数 < 20%（振幅压缩）
+      2. 近 N 日均量 / 参考均量 < 0.6（量能枯竭）
+      3. 非下降结构（防止阴跌缩量误判）
+    """
+    lookback = WYCKOFF_COMPRESSION_LOOKBACK
+    ref_window = WYCKOFF_COMPRESSION_VOL_REF_WINDOW
+    if len(bars) < max(lookback, ref_window) + 5:
+        return {"compression_signal": False, "compression_reason": "数据不足", "compression_price": None}
+
+    recent = bars[-lookback:]
+    ref = bars[-(ref_window + lookback):-lookback] if len(bars) >= ref_window + lookback else bars[:max(1, len(bars) - lookback)]
+
+    # 计算近 N 日 ATR
+    trs = []
+    for i in range(1, len(recent)):
+        h = to_float(recent[i].get("high"))
+        l = to_float(recent[i].get("low"))
+        pc = to_float(recent[i - 1].get("close"))
+        if h is None or l is None or pc is None:
+            continue
+        tr = max(h - l, abs(h - pc), abs(l - pc))
+        trs.append(tr)
+    if not trs:
+        return {"compression_signal": False, "compression_reason": "ATR 计算失败", "compression_price": None}
+
+    current_atr = trs[-1]
+    avg_atr = sum(trs) / len(trs)
+    if avg_atr <= 0:
+        return {"compression_signal": False, "compression_reason": "ATR 为零", "compression_price": None}
+
+    # ATR 分位数检查：当前 ATR 是否处于历史低位
+    atr_values = sorted(trs)
+    atr_rank = sum(1 for t in atr_values if t <= current_atr) / len(atr_values)
+    if atr_rank > WYCKOFF_COMPRESSION_ATR_QUANTILE:
+        return {"compression_signal": False, "compression_reason": f"振幅未压缩（ATR分位 {atr_rank:.0%}）", "compression_price": None}
+
+    # 量能萎缩检查
+    recent_vols = [to_float(b.get("volume")) for b in recent if to_float(b.get("volume")) is not None]
+    ref_vols = [to_float(b.get("volume")) for b in ref if to_float(b.get("volume")) is not None]
+    if not recent_vols or not ref_vols:
+        return {"compression_signal": False, "compression_reason": "成交量数据不足", "compression_price": None}
+
+    avg_recent_vol = sum(recent_vols) / len(recent_vols)
+    avg_ref_vol = sum(ref_vols) / len(ref_vols)
+    if avg_ref_vol <= 0:
+        return {"compression_signal": False, "compression_reason": "参考量为零", "compression_price": None}
+
+    vol_ratio = avg_recent_vol / avg_ref_vol
+    if vol_ratio >= WYCKOFF_COMPRESSION_VOL_RATIO:
+        return {"compression_signal": False, "compression_reason": f"量能未萎缩（量比 {vol_ratio:.2f}）", "compression_price": None}
+
+    # 非下降结构检查：近 5 根收盘价不能持续下跌
+    recent_closes = [to_float(b.get("close")) for b in recent[-5:]]
+    recent_closes = [c for c in recent_closes if c is not None]
+    if len(recent_closes) >= 3:
+        declines = sum(1 for i in range(1, len(recent_closes)) if recent_closes[i] < recent_closes[i - 1])
+        if declines >= len(recent_closes) - 1:
+            return {"compression_signal": False, "compression_reason": "下降结构中，非蓄势", "compression_price": None}
+
+    # 找到当前价格区间
+    recent_highs = [to_float(b.get("high")) for b in recent if to_float(b.get("high")) is not None]
+    recent_lows = [to_float(b.get("low")) for b in recent if to_float(b.get("low")) is not None]
+    if recent_highs and recent_lows:
+        current_price = to_float(recent[-1].get("close"))
+        return {
+            "compression_signal": True,
+            "compression_reason": f"振幅压缩（ATR分位 {atr_rank:.0%}）+ 量能枯竭（量比 {vol_ratio:.2f}）",
+            "compression_price": round(current_price, 2) if current_price else None,
+        }
+
+    return {"compression_signal": False, "compression_reason": "数据异常", "compression_price": None}
+
+
+# ── P3: Trend Pullback 趋势回踩检测 ──────────────────────────────
+
+def _detect_trend_pullback(bars: list[dict]) -> dict:
+    """检测趋势回踩：上升趋势中回踩不破关键均线 = 买点。
+
+    触发条件:
+      1. 近 N 日有回撤（5-20%）
+      2. 回落段缩量（量比 < 0.6）
+      3. 收盘站稳 MA20 附近（±2%）
+      4. MA20 仍在上升
+    """
+    lookback = WYCKOFF_TREND_PB_LOOKBACK
+    ma_window = WYCKOFF_TREND_PB_MA_WINDOW
+    if len(bars) < max(lookback, ma_window) + 5:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": "数据不足", "trend_pullback_price": None}
+
+    recent = bars[-lookback:]
+    recent_closes = [to_float(b.get("close")) for b in recent]
+    recent_closes = [c for c in recent_closes if c is not None]
+    if len(recent_closes) < lookback:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": "收盘价数据不足", "trend_pullback_price": None}
+
+    # 计算回撤幅度
+    high_close = max(recent_closes)
+    low_close = min(recent_closes)
+    current_close = recent_closes[-1]
+    if high_close <= 0:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": "价格异常", "trend_pullback_price": None}
+
+    pullback_pct = (high_close - current_close) / high_close * 100
+    if pullback_pct < WYCKOFF_TREND_PB_MIN_PULLBACK:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": f"回撤不足（{pullback_pct:.1f}% < {WYCKOFF_TREND_PB_MIN_PULLBACK}%）", "trend_pullback_price": None}
+    if pullback_pct > WYCKOFF_TREND_PB_MAX_PULLBACK:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": f"回撤过大（{pullback_pct:.1f}% > {WYCKOFF_TREND_PB_MAX_PULLBACK}%），趋势可能已破坏", "trend_pullback_price": None}
+
+    # 计算 MA20
+    all_closes = [to_float(b.get("close")) for b in bars]
+    all_closes = [c for c in all_closes if c is not None]
+    if len(all_closes) < ma_window:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": "MA 数据不足", "trend_pullback_price": None}
+
+    ma_vals = []
+    for i in range(ma_window - 1, len(all_closes)):
+        ma_vals.append(sum(all_closes[i - ma_window + 1:i + 1]) / ma_window)
+    if len(ma_vals) < 3:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": "MA 序列不足", "trend_pullback_price": None}
+
+    ma_current = ma_vals[-1]
+    ma_prev = ma_vals[-3]
+
+    # MA20 必须在上升
+    if ma_current <= ma_prev:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": "MA20 未上升，趋势不明确", "trend_pullback_price": None}
+
+    # 收盘价在 MA20 附近（±2%）
+    if ma_current <= 0:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": "MA20 异常", "trend_pullback_price": None}
+    ma_deviation = abs(current_close - ma_current) / ma_current
+    if ma_deviation > 0.02:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": f"收盘偏离 MA20 过远（{ma_deviation:.1%} > 2%）", "trend_pullback_price": None}
+
+    # 回落段缩量检查
+    recent_vols = [to_float(b.get("volume")) for b in recent if to_float(b.get("volume")) is not None]
+    all_vols = [to_float(b.get("volume")) for b in bars if to_float(b.get("volume")) is not None]
+    if len(recent_vols) < 3 or len(all_vols) < ma_window:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": "成交量数据不足", "trend_pullback_price": None}
+
+    avg_recent_vol = sum(recent_vols) / len(recent_vols)
+    avg_ref_vol = sum(all_vols[-ma_window:]) / ma_window
+    if avg_ref_vol <= 0:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": "参考量为零", "trend_pullback_price": None}
+
+    vol_ratio = avg_recent_vol / avg_ref_vol
+    if vol_ratio >= WYCKOFF_TREND_PB_VOL_SHRINK:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": f"回踩未缩量（量比 {vol_ratio:.2f}）", "trend_pullback_price": None}
+
+    return {
+        "trend_pullback_signal": True,
+        "trend_pullback_reason": f"趋势回踩（回撤 {pullback_pct:.1f}%）+ 缩量（量比 {vol_ratio:.2f}）+ 站稳 MA20",
+        "trend_pullback_price": round(current_close, 2),
+    }
+
+
 # ── 积累/派发阶段状态机 ──────────────────────────────────────────────
 
 def _scan_for_signal(
@@ -1025,6 +1211,8 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any]) -> dict[str, Any]:
     spring = signals.get("spring_signal", False)
     sos = signals.get("sos_signal", False)
     lps = signals.get("lps_signal", False)
+    compression = signals.get("compression_signal", False)
+    trend_pullback = signals.get("trend_pullback_signal", False)
 
     # ── 积累序列：Spring 为起点（Phase C），SOS/LPS 升级到 D ──
     # 注意：BC 是派发 Phase A 事件，绝不能标成 accumulation_a
@@ -1034,11 +1222,31 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any]) -> dict[str, Any]:
             "phase_label": "积累期 D（确认：Spring+SOS/LPS）",
             "phase_confidence_delta": 0.10,
         }
+    if spring and trend_pullback:
+        return {
+            "phase": "accumulation_d",
+            "phase_label": "积累期 D（确认：Spring+趋势回踩）",
+            "phase_confidence_delta": 0.12,
+        }
     if spring:
         return {
             "phase": "accumulation_c",
             "phase_label": "积累期 C（测试：Spring）",
             "phase_confidence_delta": 0.10,
+        }
+    # P2: Compression = 积累期 B 末期（压缩蓄力）
+    if compression:
+        return {
+            "phase": "accumulation_b",
+            "phase_label": "积累期 B（压缩蓄力）",
+            "phase_confidence_delta": 0.08,
+        }
+    # P3: Trend Pullback = 积累期 D 趋势确认
+    if trend_pullback:
+        return {
+            "phase": "accumulation_d",
+            "phase_label": "积累期 D（趋势回踩确认）",
+            "phase_confidence_delta": 0.08,
         }
     # AR 且无 BC：可能是吸筹自动反弹（尚无完整 SC 检测器，作积累辅助）
     if ar_found and not bc_found:
@@ -1107,6 +1315,9 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "") -> dict:
     sos = _detect_sos(bars)
     st = _detect_st(bars)
     lps = _detect_lps(bars)
+    # P2/P3: 新增信号
+    compression = _detect_compression(bars)
+    trend_pullback = _detect_trend_pullback(bars)
 
     # P1-1: 阶段状态机 — 基于信号序列推断积累/派发阶段
     signals_dict = {
@@ -1118,6 +1329,8 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "") -> dict:
         "sos_signal": sos["sos_signal"],
         "st_signal": st["st_signal"],
         "lps_signal": lps["lps_signal"],
+        "compression_signal": compression["compression_signal"],
+        "trend_pullback_signal": trend_pullback["trend_pullback_signal"],
     }
     phase = _detect_phase(bars, signals_dict)
 
@@ -1151,6 +1364,10 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "") -> dict:
         parts.append("高量窄幅（努力无结果）")
     if vsa["no_supply"]:
         parts.append("低量窄幅（供应耗尽）")
+    if compression["compression_signal"]:
+        parts.append(f"压缩蓄势: {compression['compression_reason']}")
+    if trend_pullback["trend_pullback_signal"]:
+        parts.append(f"趋势回踩: {trend_pullback['trend_pullback_reason']}")
     if not parts:
         parts.append("无明显威科夫信号")
 
@@ -1191,6 +1408,13 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "") -> dict:
         # P3-1: VSA 量价幅度分析
         "effort_no_result": vsa["effort_no_result"],
         "no_supply": vsa["no_supply"],
+        # P2/P3: 新增信号
+        "compression_signal": compression["compression_signal"],
+        "compression_reason": compression["compression_reason"],
+        "compression_price": compression["compression_price"],
+        "trend_pullback_signal": trend_pullback["trend_pullback_signal"],
+        "trend_pullback_reason": trend_pullback["trend_pullback_reason"],
+        "trend_pullback_price": trend_pullback["trend_pullback_price"],
         "wyckoff_summary": "；".join(parts),
     }
 
@@ -1350,6 +1574,16 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "") -> dict:
         raw += WYCKOFF_SCORE_LPS
         signals.append(f"LPS +{WYCKOFF_SCORE_LPS}")
 
+    # 12. P2: Compression — 压缩蓄势
+    if analysis.get("compression_signal"):
+        raw += WYCKOFF_SCORE_COMPRESSION
+        signals.append(f"压缩蓄势 +{WYCKOFF_SCORE_COMPRESSION}")
+
+    # 13. P3: Trend Pullback — 趋势回踩
+    if analysis.get("trend_pullback_signal"):
+        raw += WYCKOFF_SCORE_TREND_PB
+        signals.append(f"趋势回踩 +{WYCKOFF_SCORE_TREND_PB}")
+
     # ── P3-1: VSA 量价幅度修正 ──
     effort_no_result = analysis.get("effort_no_result", False)
     no_supply = analysis.get("no_supply", False)
@@ -1409,7 +1643,7 @@ def format_wyckoff_oneline(
     """报告用威科夫一行人话（结论 + 白话，不拆第二行）。
 
     优先级与 fusion 主信号大致对齐：
-      Spring > SOS > UT > BC > SOW > AR > ST > LPS > 背离 > 无信号
+      Spring > SOS > UT > BC > SOW > AR > ST > LPS > Compression > TrendPullback > 背离 > 无信号
 
     Returns:
         如「威科夫：低位假跌破后收回，偏多（更像洗盘，缩量较可信）」
@@ -1455,6 +1689,11 @@ def format_wyckoff_oneline(
         main, note, d = "回踩支撑站住", "二次确认支撑有效", 1
     elif wyk.get("lps_signal"):
         main, note, d = "突破后缩量回踩", "回踩不破，仍偏强", 1
+    # P2/P3: 新增信号（优先级在 LPS 之后、divergence 之前）
+    elif wyk.get("compression_signal"):
+        main, note, d = "压缩蓄势", "振幅收窄+量能枯竭，突破在即", 1
+    elif wyk.get("trend_pullback_signal"):
+        main, note, d = "趋势回踩", "回踩不破均线，趋势延续", 1
     elif wyk.get("bullish_volume_divergence") and not wyk.get("bearish_volume_divergence"):
         main, note, d = "下跌缩量", "抛压减轻，有止跌迹象", 1
     elif wyk.get("bearish_volume_divergence") and not wyk.get("bullish_volume_divergence"):

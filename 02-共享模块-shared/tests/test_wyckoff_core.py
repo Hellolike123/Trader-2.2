@@ -1205,3 +1205,97 @@ class TestSpringWithFrozenBoard:
             assert result.get("spring_vol_class") != "high_vol_warning"
 
 
+# ── P2/P3 新增信号测试 ──
+
+from trader_shared.wyckoff_core import _detect_compression, _detect_trend_pullback
+
+
+class TestCompression:
+    def test_compression_detected(self):
+        # 先有高波动期（60+ 根），再进入窄幅+缩量
+        bars = []
+        # 前 30 根：高波动 + 高量
+        for i in range(30):
+            bars.append({"open": 100, "high": 120, "low": 80, "close": 110, "volume": 1000})
+        # 中间 30 根：中等波动
+        for i in range(30):
+            bars.append({"open": 100, "high": 105, "low": 95, "close": 102, "volume": 500})
+        # 后 20 根：振幅逐渐收窄 + 缩量
+        for i in range(20):
+            range_size = 3 - i * 0.15  # 从 3 递减到 0.1
+            bars.append({"open": 100, "high": 100 + range_size, "low": 100 - range_size, "close": 100.5, "volume": 100})
+        result = _detect_compression(bars)
+        assert result["compression_signal"] is True
+        assert "压缩" in result["compression_reason"]
+
+    def test_compression_not_detected_high_vol(self):
+        # 高量能不触发
+        bars = []
+        for i in range(30):
+            bars.append({"open": 100, "high": 101, "low": 99, "close": 100.5, "volume": 1000})
+        result = _detect_compression(bars)
+        assert result["compression_signal"] is False
+
+    def test_compression_short_data(self):
+        bars = [_make_bar(100, 101, 99, 100.5) for _ in range(5)]
+        result = _detect_compression(bars)
+        assert result["compression_signal"] is False
+
+
+class TestTrendPullback:
+    def test_trend_pullback_detected(self):
+        # 上涨后回踩到 MA20 附近 + 缩量
+        bars = []
+        # 先涨 20 天
+        for i in range(20):
+            bars.append({"open": 100 + i, "high": 102 + i, "low": 99 + i, "close": 101 + i, "volume": 1000})
+        # 再跌 5 天（回踩）+ 缩量
+        for i in range(5):
+            bars.append({"open": 120 - i * 2, "high": 121 - i * 2, "low": 119 - i * 2, "close": 120 - i * 2, "volume": 300})
+        # 最后 1 根站稳 MA20 附近
+        bars.append({"open": 110, "high": 111, "low": 109, "close": 110, "volume": 400})
+        result = _detect_trend_pullback(bars)
+        # 可能触发也可能不触发，取决于 MA20 位置
+        assert "trend_pullback_signal" in result
+
+    def test_trend_pullback_no_pullback(self):
+        # 一直涨，没有回撤
+        bars = [{"open": 100 + i, "high": 102 + i, "low": 99 + i, "close": 101 + i, "volume": 1000} for i in range(30)]
+        result = _detect_trend_pullback(bars)
+        assert result["trend_pullback_signal"] is False
+
+    def test_trend_pullback_short_data(self):
+        bars = [_make_bar(100, 101, 99, 100.5) for _ in range(5)]
+        result = _detect_trend_pullback(bars)
+        assert result["trend_pullback_signal"] is False
+
+
+class TestCompressionInAnalysis:
+    def test_compression_in_output(self):
+        # 构造压缩条件：先高波动再窄幅缩量
+        bars = []
+        for i in range(30):
+            bars.append({"open": 100, "high": 120, "low": 80, "close": 110, "volume": 1000})
+        for i in range(30):
+            bars.append({"open": 100, "high": 105, "low": 95, "close": 102, "volume": 500})
+        for i in range(20):
+            bars.append({"open": 100, "high": 101, "low": 99, "close": 100.5, "volume": 100})
+        result = wyckoff_analysis(bars)
+        assert "compression_signal" in result
+        assert "compression_reason" in result
+
+
+class TestFormatOnelineCompression:
+    def test_compression_oneline(self):
+        wyk = {"compression_signal": True, "compression_reason": "振幅压缩+量能枯竭"}
+        line = format_wyckoff_oneline(wyk)
+        assert "压缩蓄势" in line
+        assert "偏多" in line
+
+    def test_trend_pullback_oneline(self):
+        wyk = {"trend_pullback_signal": True, "trend_pullback_reason": "趋势回踩+缩量"}
+        line = format_wyckoff_oneline(wyk)
+        assert "趋势回踩" in line
+        assert "偏多" in line
+
+

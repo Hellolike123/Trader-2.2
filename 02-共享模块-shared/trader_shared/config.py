@@ -145,6 +145,19 @@ WYCKOFF_VSA_AVG_SPREAD_PERIOD: int = 20         # VSA 平均波幅计算周期
 WYCKOFF_DIVERGENCE_BARS: int = 5                # 背离比对K线窗口
 WYCKOFF_DIVERGENCE_RATIO: float = 0.85          # 背离量能萎缩比例由 80% 放宽至 85%
 
+# Compression 压缩蓄势参数
+WYCKOFF_COMPRESSION_LOOKBACK: int = 20          # 压缩检测回溯窗口
+WYCKOFF_COMPRESSION_ATR_QUANTILE: float = 0.20  # ATR 分位数阈值（低于此值 = 压缩）
+WYCKOFF_COMPRESSION_VOL_RATIO: float = 0.60     # 量能萎缩比例（近N日/参考窗口）
+WYCKOFF_COMPRESSION_VOL_REF_WINDOW: int = 60    # 量能参考窗口
+
+# Trend Pullback 趋势回踩参数
+WYCKOFF_TREND_PB_LOOKBACK: int = 10             # 回踩检测回溯窗口
+WYCKOFF_TREND_PB_MIN_PULLBACK: float = 5.0     # 最小回撤幅度 %
+WYCKOFF_TREND_PB_MAX_PULLBACK: float = 20.0    # 最大回撤幅度 %
+WYCKOFF_TREND_PB_VOL_SHRINK: float = 0.60      # 回落段缩量比例
+WYCKOFF_TREND_PB_MA_WINDOW: int = 20           # 均线窗口
+
 # ---- Wyckoff Score 独立打分权重常量（均衡型） ----
 # 基准分数 0（raw=0 → score=50），各信号权重可正可负
 # 原始权重理论最大绝对值 = 25+5+10+20+10+15+10+10+15+8+12 = 130
@@ -162,6 +175,8 @@ WYCKOFF_SCORE_AR: int = 10                      # Automatic Rally 自动反弹 �
 WYCKOFF_SCORE_SOS: int = 15                     # Sign of Strength 强势信号 — 连续放量突破
 WYCKOFF_SCORE_ST: int = 8                       # Secondary Test 二次测试 — 缩量确认支撑
 WYCKOFF_SCORE_LPS: int = 12                     # Last Point of Support 最后支撑 — SOS 后缩量回调
+WYCKOFF_SCORE_COMPRESSION: int = 10              # Compression 压缩蓄势 — 振幅收窄+量能枯竭
+WYCKOFF_SCORE_TREND_PB: int = 8                  # Trend Pullback 趋势回踩 — 回踩不破均线
 WYCKOFF_SCORE_MAX_ABS: int = 95                 # 归一化分母，raw 映射到 [-50, +50]
 
 # ---- P3 Theory Adjustment ----
@@ -309,6 +324,12 @@ __all__ = [
     # 新增经典信号权重
     "WYCKOFF_SCORE_AR", "WYCKOFF_SCORE_SOS",
     "WYCKOFF_SCORE_ST", "WYCKOFF_SCORE_LPS",
+    "WYCKOFF_SCORE_COMPRESSION", "WYCKOFF_SCORE_TREND_PB",
+    "WYCKOFF_COMPRESSION_LOOKBACK", "WYCKOFF_COMPRESSION_ATR_QUANTILE",
+    "WYCKOFF_COMPRESSION_VOL_RATIO", "WYCKOFF_COMPRESSION_VOL_REF_WINDOW",
+    "WYCKOFF_TREND_PB_LOOKBACK", "WYCKOFF_TREND_PB_MIN_PULLBACK",
+    "WYCKOFF_TREND_PB_MAX_PULLBACK", "WYCKOFF_TREND_PB_VOL_SHRINK",
+    "WYCKOFF_TREND_PB_MA_WINDOW",
     "THEORY_ADJUST_LOG_ONLY",
     "FUSION_OVERRIDE_ENABLED", "FUSION_CONFIDENCE_THRESHOLD",
     "DEFAULT_MAX_TOTAL", "DEFAULT_CASH_FLOOR", "DEFAULT_MAIN_CAP",
