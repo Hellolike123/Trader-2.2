@@ -790,9 +790,11 @@ def _detect_st(bars: list[dict]) -> dict:
         return {"st_signal": False, "st_reason": "Spring 锚点未找到", "st_price": None}
 
     # 检查 Spring 后 3-15 根 K 线
-    spring_avg_vol = sum(to_float(b.get("volume")) or 0 for b in
-                         bars[max(0, spring_idx - WYCKOFF_SPRING_SUPPORT_LOOKBACK):spring_idx]) / \
-                     max(WYCKOFF_SPRING_SUPPORT_LOOKBACK, 1)
+    _spring_vol_slice = bars[max(0, spring_idx - WYCKOFF_SPRING_SUPPORT_LOOKBACK):spring_idx]
+    spring_avg_vol = (
+        sum(to_float(b.get("volume")) or 0 for b in _spring_vol_slice)
+        / max(len(_spring_vol_slice), 1)
+    )
 
     for i in range(spring_idx + 3, min(spring_idx + 16, len(bars))):
         test_bar = bars[i]

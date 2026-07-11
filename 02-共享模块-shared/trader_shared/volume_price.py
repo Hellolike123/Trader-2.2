@@ -25,13 +25,14 @@ _CLOSE_NOISE_END = 1500   # 15:00
 
 @dataclass
 class VolumeWarning:
-    """量价背离警告。"""
-    warning_type: str = "none"      # "stagnation" | "climactic" | "none"
-    signal: int = 0                 # -1=看空, 0=无信号
+    """量价快照 / 背离警告（始终应有量比与近3日涨跌）。"""
+    warning_type: str = "none"      # "stagnation" | "climactic" | "none" | "follow" | "shrink"
+    signal: int = 0                 # -1=看空, 0=中性, +1=偏多
     confidence: float = 0.0         # 0-1
-    volume_ratio: float = 0.0       # 当前量比
-    price_change: float = 0.0       # 价格涨幅%
+    volume_ratio: float = 0.0       # 近5日均量 / 前5日均量
+    price_change: float = 0.0       # 近3日涨跌幅%
     reason: str = ""                # 人类可读描述
+    vol_label: str = ""             # 放量|缩量|平量
 
 
 def _safe_float(val: Any) -> float:
@@ -119,33 +120,37 @@ def calc_weighted_volume(bars_5m: List[Dict[str, Any]]) -> float:
 
 
 def _calc_volume_ratio(bars: List[Dict[str, Any]], window: int = 5) -> float:
-    """计算量比（近N日均量 / 前N日均量）。"""
+    """计算量比（近N日均量 / 前N日均量）。
+
+    注意：bars 从老到新遍历，前 window 根实为「前N日」，后 window 根为「近N日」。
+    变量命名以时间顺序为准（older=前段、newer=近段），return 为 newer/older。
+    """
     if len(bars) < 2 * window:
         return 1.0
 
-    recent_sum = 0.0
-    recent_count = 0
-    prev_sum = 0.0
-    prev_count = 0
+    older_sum = 0.0
+    older_count = 0
+    newer_sum = 0.0
+    newer_count = 0
 
     for b in bars[-2 * window:]:
         v = _safe_float(b.get("volume", 0))
         if v <= 0:
             continue
-        if recent_count < window:
-            recent_sum += v
-            recent_count += 1
+        if older_count < window:
+            older_sum += v
+            older_count += 1
         else:
-            prev_sum += v
-            prev_count += 1
+            newer_sum += v
+            newer_count += 1
 
-    if recent_count == 0 or prev_count == 0:
+    if older_count == 0 or newer_count == 0:
         return 1.0
 
-    avg_recent = recent_sum / recent_count
-    avg_prev = prev_sum / prev_count
+    avg_older = older_sum / older_count
+    avg_newer = newer_sum / newer_count
 
-    return avg_prev / avg_recent if avg_recent > 0 else 1.0
+    return avg_newer / avg_older if avg_older > 0 else 1.0
 
 
 def _calc_price_change(bars: List[Dict[str, Any]], days: int = 3) -> float:
@@ -179,32 +184,36 @@ def _has_upper_shadow(bar: Dict[str, Any], threshold: float = 0.3) -> bool:
     return upper_shadow / body > threshold
 
 
+def _vol_label(vol_ratio: float) -> str:
+    if vol_ratio >= 1.5:
+        return "放量"
+    if vol_ratio <= 0.7:
+        return "缩量"
+    return "平量"
+
+
 def detect_volume_divergence(
     bars: List[Dict[str, Any]],
     vol_ratio_threshold: float = 1.5,
     price_change_threshold: float = 0.01,
     climactic_threshold: float = 3.0,
 ) -> VolumeWarning:
-    """检测量价背离信号。
+    """量价快照 + 背离/配合检测（始终返回量比与近3日涨跌）。
 
-    检测条件:
-    1. 放量滞涨: 量比 > 1.5 但价格涨幅 < 1%
+    强信号:
+    1. 放量滞涨: 量比 > 1.5 但价格涨幅 < 1%（或上影）
     2. 天量天价: 量比 > 3.0 且股价创新高
-
-    Args:
-        bars: K线数据列表 (至少10根)
-        vol_ratio_threshold: 放量判定阈值 (默认1.5)
-        price_change_threshold: 涨幅判定阈值 (默认1%)
-        climactic_threshold: 天量判定阈值 (默认3.0)
-
-    Returns:
-        VolumeWarning 包含警告类型、信号方向、置信度
+    弱配合（无背离时仍给出可读结论）:
+    3. 放量跟涨 / 放量下跌 / 缩量上涨乏力 / 缩量下跌 / 平量
     """
     if len(bars) < 10:
-        return VolumeWarning(reason="数据不足，需要至少10根K线")
+        return VolumeWarning(reason="数据不足，需要至少10根K线", vol_label="")
 
     vol_ratio = _calc_volume_ratio(bars)
     price_change = _calc_price_change(bars, days=3)
+    vr = round(vol_ratio, 2)
+    pc_pct = round(price_change * 100, 2)
+    label = _vol_label(vol_ratio)
 
     # 检查近3天是否有上影线
     recent_upper_shadow = any(
@@ -215,7 +224,12 @@ def detect_volume_divergence(
     recent_highs = [_safe_float(b.get("high", 0)) for b in bars[-20:]]
     recent_highs = [h for h in recent_highs if h > 0]
     if len(recent_highs) < 2:
-        return VolumeWarning(reason="数据不足，无法判断新高")
+        return VolumeWarning(
+            volume_ratio=vr,
+            price_change=pc_pct,
+            vol_label=label,
+            reason=f"{label}（量比{vr:.1f}），高低点数据不足",
+        )
     current_high = recent_highs[-1]
     max_recent_high = max(recent_highs[:-1])
     is_new_high = current_high > max_recent_high
@@ -226,49 +240,115 @@ def detect_volume_divergence(
             warning_type="climactic",
             signal=-1,
             confidence=0.7,
-            volume_ratio=round(vol_ratio, 2),
-            price_change=round(price_change * 100, 2),
-            reason=f"天量天价（量比{vol_ratio:.1f}，创新高），注意见顶风险",
+            volume_ratio=vr,
+            price_change=pc_pct,
+            vol_label=label,
+            reason=f"天量天价（量比{vr:.1f}，近3日{pc_pct:+.1f}%创新高），注意见顶",
         )
 
-    # 放量滞涨检测
+    # 放量滞涨 / 放量弱涨
     if vol_ratio >= vol_ratio_threshold:
-        # 涨幅微弱 或 有上影线
         if abs(price_change) < price_change_threshold or recent_upper_shadow:
-            # 如果是上涨中的放量滞涨，信号更强
             if price_change >= 0:
                 return VolumeWarning(
                     warning_type="stagnation",
                     signal=-1,
                     confidence=0.5,
-                    volume_ratio=round(vol_ratio, 2),
-                    price_change=round(price_change * 100, 2),
-                    reason=f"放量滞涨（量比{vol_ratio:.1f}，涨幅{price_change*100:+.1f}%），上涨乏力",
+                    volume_ratio=vr,
+                    price_change=pc_pct,
+                    vol_label=label,
+                    reason=f"放量滞涨（量比{vr:.1f}，近3日{pc_pct:+.1f}%），上涨乏力",
                 )
-            # 下跌中的放量滞涨
-            else:
-                return VolumeWarning(
-                    warning_type="stagnation",
-                    signal=-1,
-                    confidence=0.4,
-                    volume_ratio=round(vol_ratio, 2),
-                    price_change=round(price_change * 100, 2),
-                    reason=f"放量下跌（量比{vol_ratio:.1f}，跌幅{price_change*100:+.1f}%），注意风险",
-                )
+            return VolumeWarning(
+                warning_type="stagnation",
+                signal=-1,
+                confidence=0.4,
+                volume_ratio=vr,
+                price_change=pc_pct,
+                vol_label=label,
+                reason=f"放量下跌（量比{vr:.1f}，近3日{pc_pct:+.1f}%），注意风险",
+            )
+        # 放量且有明显涨跌：配合
+        if price_change >= price_change_threshold:
+            return VolumeWarning(
+                warning_type="follow",
+                signal=1,
+                confidence=0.35,
+                volume_ratio=vr,
+                price_change=pc_pct,
+                vol_label=label,
+                reason=f"放量跟涨（量比{vr:.1f}，近3日{pc_pct:+.1f}%）",
+            )
+        if price_change <= -price_change_threshold:
+            return VolumeWarning(
+                warning_type="follow",
+                signal=-1,
+                confidence=0.4,
+                volume_ratio=vr,
+                price_change=pc_pct,
+                vol_label=label,
+                reason=f"放量下跌（量比{vr:.1f}，近3日{pc_pct:+.1f}%）",
+            )
 
+    # 缩量配合
+    if vol_ratio <= 0.7:
+        if price_change >= price_change_threshold:
+            return VolumeWarning(
+                warning_type="shrink",
+                signal=-1,
+                confidence=0.3,
+                volume_ratio=vr,
+                price_change=pc_pct,
+                vol_label=label,
+                reason=f"缩量上涨（量比{vr:.1f}，近3日{pc_pct:+.1f}%），上攻偏弱",
+            )
+        if price_change <= -price_change_threshold:
+            return VolumeWarning(
+                warning_type="shrink",
+                signal=0,
+                confidence=0.25,
+                volume_ratio=vr,
+                price_change=pc_pct,
+                vol_label=label,
+                reason=f"缩量下跌（量比{vr:.1f}，近3日{pc_pct:+.1f}%），抛压减轻中",
+            )
+        return VolumeWarning(
+            warning_type="none",
+            signal=0,
+            confidence=0.2,
+            volume_ratio=vr,
+            price_change=pc_pct,
+            vol_label=label,
+            reason=f"缩量整理（量比{vr:.1f}，近3日{pc_pct:+.1f}%）",
+        )
+
+    # 平量默认：仍带数字，便于报告展示
     return VolumeWarning(
-        volume_ratio=round(vol_ratio, 2),
-        price_change=round(price_change * 100, 2),
-        reason="量价关系正常",
+        warning_type="none",
+        signal=0,
+        confidence=0.2,
+        volume_ratio=vr,
+        price_change=pc_pct,
+        vol_label=label,
+        reason=f"平量（量比{vr:.1f}，近3日{pc_pct:+.1f}%）",
     )
+
+
+def volume_snapshot_dict(warning: VolumeWarning) -> dict:
+    """始终可序列化的价量快照（供 VPF / fusion，含无警告情况）。"""
+    return {
+        "warning_type": warning.warning_type or "none",
+        "signal": int(warning.signal or 0),
+        "direction": int(warning.signal or 0),
+        "confidence": float(warning.confidence or 0.0),
+        "volume_ratio": float(warning.volume_ratio or 0.0),
+        "price_change": float(warning.price_change or 0.0),
+        "vol_label": warning.vol_label or _vol_label(float(warning.volume_ratio or 1.0)),
+        "reason": warning.reason or "量价数据不足",
+        "raw_key": "volume_price",
+    }
 
 
 def volume_warning_to_signal(warning: VolumeWarning) -> dict:
     """将 VolumeWarning 转换为融合层信号格式。"""
-    return {
-        "direction": warning.signal,
-        "confidence": warning.confidence,
-        "reason": warning.reason,
-        "raw_key": "volume_price",
-        "warning_type": warning.warning_type,
-    }
+    return volume_snapshot_dict(warning)
