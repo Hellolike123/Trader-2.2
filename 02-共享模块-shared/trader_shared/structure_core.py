@@ -456,28 +456,9 @@ def _calc_macd_divergence(closes: list[float], bars: list[BarData]) -> float | N
         if len(closes) < 26:
             return None
 
-        n = len(closes)
-        # 计算 EMA12 和 EMA26 全序列
-        ema12_series: list[float | None] = [None] * n
-        ema26_series: list[float | None] = [None] * n
-
-        if n >= 12:
-            ema12 = sum(closes[:12]) / 12.0  # SMA seed
-            for i in range(12, n):
-                ema12 = ema12 * 11 / 13 + closes[i] * 2 / 13
-                ema12_series[i] = ema12
-
-        if n >= 26:
-            ema26 = sum(closes[:26]) / 26.0  # SMA seed
-            for i in range(26, n):
-                ema26 = ema26 * 25 / 27 + closes[i] * 2 / 27
-                ema26_series[i] = ema26
-
-        # MACD = EMA12 - EMA26
-        macd_series: list[float | None] = [None] * n
-        for i in range(26, n):
-            if ema12_series[i] is not None and ema26_series[i] is not None:
-                macd_series[i] = ema12_series[i] - ema26_series[i]
+        from trader_shared.indicator_math import calc_macd_series
+        macd_result = calc_macd_series(closes)
+        macd_series = macd_result["histogram"]
 
         # 最近 30 根 K 线的摆动低点
         lookback = 30

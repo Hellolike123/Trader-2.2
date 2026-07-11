@@ -61,57 +61,15 @@ except ImportError:
 
 
 def _calc_macd(bars: list[dict]) -> list[dict]:
+    """计算 MACD histogram 并写入 bars。使用 indicator_math.calc_macd_series 统一实现。"""
+    from trader_shared.indicator_math import calc_macd_series
+
     bars = [dict(b) for b in bars]
-    n = len(bars)
     closes = [to_float(b.get("close")) for b in bars]
+    result = calc_macd_series(closes)
 
-    ema12_val = None
-    ema26_val = None
-    dif_vals: list[float | None] = [None] * n
-
-    for i in range(n):
-        c = closes[i]
-        if c is None:
-            continue
-
-        if i == 11:
-            vals_12 = [x for x in closes[:12] if x is not None]
-            if len(vals_12) == 12:
-                ema12_val = sum(vals_12) / 12
-        elif i > 11 and ema12_val is not None:
-            ema12_val = ema12_val * 11 / 13 + c * 2 / 13
-
-        if i == 25:
-            vals_26 = [x for x in closes[:26] if x is not None]
-            if len(vals_26) == 26:
-                ema26_val = sum(vals_26) / 26
-        elif i > 25 and ema26_val is not None:
-            ema26_val = ema26_val * 25 / 27 + c * 2 / 27
-
-        if ema12_val is not None and ema26_val is not None:
-            dif_vals[i] = ema12_val - ema26_val
-
-    dea_val = None
-    dea_buffer: list[float] = []
-    for i in range(n):
-        d = dif_vals[i]
-        if d is None:
-            bars[i]["macd_histogram"] = 0.0
-            continue
-
-        dea_buffer.append(d)
-
-        if len(dea_buffer) < 9:
-            bars[i]["macd_histogram"] = 0.0
-            continue
-
-        if dea_val is None:
-            dea_val = sum(dea_buffer) / 9
-        else:
-            dea_val = dea_val * 8 / 10 + d * 2 / 10
-
-        # Keep histogram definition consistent with momentum_core: DIF - DEA (1x scale)
-        bars[i]["macd_histogram"] = round(d - dea_val, 4)
+    for i, bar in enumerate(bars):
+        bar["macd_histogram"] = result["histogram"][i] if result["histogram"][i] is not None else 0.0
 
     return bars
 

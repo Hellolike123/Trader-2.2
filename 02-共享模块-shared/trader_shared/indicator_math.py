@@ -62,6 +62,90 @@ def calc_expma_series(closes: list[float], period: int) -> list[float | None]:
     return result
 
 
+def calc_macd_series(closes: list[float | None]) -> dict[str, list]:
+    """统一 MACD 计算（EMA12/26 → DIF → DEA(9) → histogram）。
+
+    所有 MACD 消费方应调用此函数，避免重复计算和 SMA-seeding 差异。
+
+    Args:
+        closes: 收盘价序列（可含 None，None 位置跳过但保留占位）
+
+    Returns:
+        dict with keys: ema12, ema26, dif, dea, histogram
+        每个值为长度与 closes 相同的列表，数据不足的位置为 None
+    """
+    n = len(closes)
+    ema12_series: list[float | None] = [None] * n
+    ema26_series: list[float | None] = [None] * n
+    dif_series: list[float | None] = [None] * n
+    dea_series: list[float | None] = [None] * n
+    hist_series: list[float | None] = [None] * n
+
+    # EMA12: SMA seed at index 11, then exponential
+    ema12_val = None
+    for i in range(n):
+        c = closes[i]
+        if c is None:
+            continue
+        if i == 11:
+            vals = [x for x in closes[:12] if x is not None]
+            if len(vals) == 12:
+                ema12_val = sum(vals) / 12
+        elif i > 11 and ema12_val is not None:
+            ema12_val = ema12_val * 11 / 13 + c * 2 / 13
+        if ema12_val is not None:
+            ema12_series[i] = ema12_val
+
+    # EMA26: SMA seed at index 25, then exponential
+    ema26_val = None
+    for i in range(n):
+        c = closes[i]
+        if c is None:
+            continue
+        if i == 25:
+            vals = [x for x in closes[:26] if x is not None]
+            if len(vals) == 26:
+                ema26_val = sum(vals) / 26
+        elif i > 25 and ema26_val is not None:
+            ema26_val = ema26_val * 25 / 27 + c * 2 / 27
+        if ema26_val is not None:
+            ema26_series[i] = ema26_val
+
+    # DIF = EMA12 - EMA26
+    for i in range(n):
+        if ema12_series[i] is not None and ema26_series[i] is not None:
+            dif_series[i] = ema12_series[i] - ema26_series[i]
+
+    # DEA: SMA of first 9 DIF values, then exponential
+    dea_val = None
+    dea_buffer: list[float] = []
+    for i in range(n):
+        d = dif_series[i]
+        if d is None:
+            continue
+        dea_buffer.append(d)
+        if len(dea_buffer) < 9:
+            continue
+        if dea_val is None:
+            dea_val = sum(dea_buffer) / 9
+        else:
+            dea_val = dea_val * 8 / 10 + d * 2 / 10
+        dea_series[i] = dea_val
+
+    # Histogram = DIF - DEA (1x scale)
+    for i in range(n):
+        if dif_series[i] is not None and dea_series[i] is not None:
+            hist_series[i] = round(dif_series[i] - dea_series[i], 4)
+
+    return {
+        "ema12": ema12_series,
+        "ema26": ema26_series,
+        "dif": dif_series,
+        "dea": dea_series,
+        "histogram": hist_series,
+    }
+
+
 def aggregate_5m_to_60m(bars_5m: list[dict]) -> list[dict]:
     """将5分钟K线聚合为60分钟K线。
 

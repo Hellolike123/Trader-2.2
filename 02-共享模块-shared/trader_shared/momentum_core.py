@@ -52,49 +52,56 @@ def calc_rsi(closes: list[float], period: int = 14) -> list[float | None]:
 
 
 def calc_macd(closes: list[float]) -> dict[str, Any]:
+    """计算 MACD 最终值。内部使用 calc_macd_series 统一实现。"""
+    from trader_shared.indicator_math import calc_macd_series
+
     if len(closes) < 26:
         return {"macd_line": None, "dea": None, "histogram": None, "hist_prev": None, "golden_cross": False, "death_cross": False}
-    ema12 = sum(closes[:12]) / 12.0
-    ema26 = sum(closes[:26]) / 26.0
-    macd_line: float | None = None
-    macd_prev: float | None = None
-    dea: float | None = None
-    dea_prev: float | None = None
-    hist: float | None = None
-    dea_buffer: list[float] = []
-    for i in range(12, len(closes)):
-        c = closes[i]
-        ema12 = ema12 * 11 / 13 + c * 2 / 13
-        if i >= 26:
-            ema26 = ema26 * 25 / 27 + c * 2 / 27
-            curr_macd = ema12 - ema26
-            dea_buffer.append(curr_macd)
-            if len(dea_buffer) == 9:
-                dea = sum(dea_buffer) / 9.0
-                macd_line = curr_macd
-            elif len(dea_buffer) > 9 and dea is not None:
-                macd_prev = macd_line
-                dea_prev = dea
-                dea = dea * 8 / 10 + curr_macd * 2 / 10
-                macd_line = curr_macd
-    hist = macd_line - dea if (macd_line is not None and dea is not None) else None
+
+    result = calc_macd_series(closes)
+    dif = result["dif"]
+    dea = result["dea"]
+    hist = result["histogram"]
+
+    # 取最后一个有效值
+    macd_line = None
+    macd_prev = None
+    dea_val = None
+    dea_prev = None
+    hist_val = None
+    hist_prev = None
+
+    for i in range(len(closes) - 1, -1, -1):
+        if dif[i] is not None and dea[i] is not None and macd_line is None:
+            macd_line = dif[i]
+            dea_val = dea[i]
+            hist_val = hist[i]
+            # 找前一个
+            for j in range(i - 1, -1, -1):
+                if dif[j] is not None and dea[j] is not None:
+                    macd_prev = dif[j]
+                    dea_prev = dea[j]
+                    hist_prev = hist[j]
+                    break
+            break
+
     gc = (
         macd_prev is not None
         and dea_prev is not None
         and macd_line is not None
-        and dea is not None
+        and dea_val is not None
         and macd_prev <= dea_prev
-        and macd_line > dea
+        and macd_line > dea_val
     )
     dc = (
         macd_prev is not None
         and dea_prev is not None
         and macd_line is not None
-        and dea is not None
+        and dea_val is not None
         and macd_prev >= dea_prev
-        and macd_line < dea
+        and macd_line < dea_val
     )
-    return {"macd_line": macd_line, "dea": dea, "histogram": hist, "golden_cross": gc, "death_cross": dc}
+    return {"macd_line": macd_line, "dea": dea_val, "histogram": hist_val, "hist_prev": hist_prev, "golden_cross": gc, "death_cross": dc}
 
 
 def calc_adx(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> dict[str, Any]:
