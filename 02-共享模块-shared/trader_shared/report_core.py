@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime
 from typing import Any
 
@@ -225,81 +226,15 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if not any((_ll, _lp, _lgb, _lr, _lt)):
         lines.append("    数据不足")
 
-    # ── ⚡ 短线 ──
+    # ── ⚡ 短线（简化：出手→缠论+浪型→动能→失效）──
     lines.append("")
     lines.append("⚡ 短线")
-    lines.append(f"  看法：{short}")
 
-    _csig2 = fusion_signals.get("chan") if isinstance(fusion_signals.get("chan"), dict) else {}
-    if _csig2:
-        _st2 = str(_csig2.get("reason") or "").replace("缠论", "").strip().lstrip(":：").strip() or "无信号"
-        _cd2 = _csig2.get("direction", 0)
-        _dl2 = "看涨" if _cd2 and int(_cd2) > 0 else ("看跌" if _cd2 and int(_cd2) < 0 else "中性")
-        _short_chan_line = f"{_st2} · {_dl2}"
-        try:
-            from trader_shared.chan_discipline import needs_same_level_tag, append_same_level_tag
-            _bps = r.get("chan_buy_point_types") or []
-            _need_sl = needs_same_level_tag(
-                r.get("chanlun") or r.get("chan"),
-                text=_short_chan_line,
-                buy_point_types=_bps if isinstance(_bps, list) else [],
-            )
-            _short_chan_line = append_same_level_tag(_short_chan_line, _need_sl)
-        except Exception:
-            pass
-        lines.append(f"  缠论：{_short_chan_line}")
-    else:
-        lines.append("  缠论：暂无信号 · 中性")
-
-    # 浪型标注（波段交易提示）
-    _wave = str(conclusion.get("wave_label") or "").strip()
-    if _wave:
-        lines.append(f"  浪型：{_wave}")
-
-    # R6 中枢位置（日）：日线无 zones 时为未知 → 省略，不吓人
-    _pp_d = str(r.get("pivot_position_daily") or "").strip()
-    if _pp_d and _pp_d not in ("未知", "None", ""):
-        lines.append(f"  位置：{_pp_d}")
-    _msig = fusion_signals.get("momentum") if isinstance(fusion_signals.get("momentum"), dict) else {}
-    if _msig:
-        _mst = str(_msig.get("reason") or "").replace("动量", "").replace("动能", "").strip().lstrip(":：").strip() or "无信号"
-        _md = _msig.get("direction", 0)
-        _mdl = "看涨" if _md and int(_md) > 0 else ("看跌" if _md and int(_md) < 0 else "中性")
-        lines.append(f"  动能：{_mst} · {_mdl}")
-    else:
-        lines.append("  动能：暂无信号 · 中性")
-    # 短线第三席：价量资金（VPF）；优先展示价量 reason（含量比）
-    _vsig = fusion_signals.get("vpf") if isinstance(fusion_signals.get("vpf"), dict) else {}
-    if _vsig:
-        _vst = str(_vsig.get("reason") or _vsig.get("vp_reason") or "").strip() or "中性"
-        _vd = _vsig.get("direction", 0)
-        _vdl = "看涨" if _vd and int(_vd) > 0 else ("看跌" if _vd and int(_vd) < 0 else "中性")
-        # 报告行过长时截断到约 40 字
-        if len(_vst) > 42:
-            _vst = _vst[:40] + "…"
-        lines.append(f"  价量资金：{_vst} · {_vdl}")
-    else:
-        lines.append("  价量资金：暂无信号 · 中性")
-    lines.append(f"  裁定：{daily_ruling}")
-
-    # C1 开仓清单：新开：否（缺：…）｜可试探（清单全绿）——不逐条打勾
+    # 出手（合并裁定+新开+分仓，放第一行）
     _disc = r.get("discipline") if isinstance(r.get("discipline"), dict) else {}
-    _entry_line = str(_disc.get("entry_line") or "").strip()
-    if not _entry_line:
-        _cl = _disc.get("entry_checklist") if isinstance(_disc.get("entry_checklist"), dict) else {}
-        _entry_line = str(_cl.get("entry_line") or "").strip()
-    if _entry_line:
-        lines.append(f"  {_entry_line}")
-    elif _disc.get("allow_new_entry") is False:
-        _ebr = str(_disc.get("entry_block_reason") or "").strip()
-        if _ebr.startswith("新开："):
-            lines.append(f"  {_ebr}")
-        elif _ebr:
-            lines.append(f"  新开：否（{_ebr[:40]}）")
-        else:
-            lines.append("  新开：否")
-
-    # 全绿才保留试探/挂单类出手；否则强制观察语义（展示层双保险）
+    _cap_t = _disc.get("suggested_pct_cap")
+    _cap_str = f" · 分仓{_cap_t}%" if _cap_t is not None else ""
+    # 全绿才保留试探类出手；否则强制观察语义
     _all_green = False
     _cl2 = _disc.get("entry_checklist") if isinstance(_disc.get("entry_checklist"), dict) else {}
     if _cl2:
@@ -308,29 +243,67 @@ def render_short_midline(r: dict[str, Any]) -> str:
         execution = "现价不买 · 不追"
         if reason and "清单" not in reason:
             reason = (reason + "，清单未全绿") if reason else "清单未全绿，不新开"
-
     if reason and reason not in execution:
-        lines.append(f"  出手：{execution}（{reason}）")
+        lines.append(f"  出手：{execution}（{reason}）{_cap_str}")
     else:
-        lines.append(f"  出手：{execution}")
+        lines.append(f"  出手：{execution}{_cap_str}")
 
-    # 分仓 cap 提示（有分闸字段时）
-    _disc_early = _disc
-    _cap_m = _disc_early.get("suggested_pct_cap_mid")
-    _cap_s = _disc_early.get("suggested_pct_cap_short")
-    if _cap_m is not None or _cap_s is not None:
-        _cm = f"{_cap_m}%" if _cap_m is not None else "--"
-        _cs = f"{_cap_s}%" if _cap_s is not None else "--"
-        _ct = _disc_early.get("suggested_pct_cap")
-        _ct_s = f"{_ct}%" if _ct is not None else "--"
-        lines.append(f"  分仓：中线≤{_cm} ｜ 短线≤{_cs} ｜ 总≤{_ct_s}")
+    # 缠论 + 浪型（合并为一行）
+    _csig2 = fusion_signals.get("chan") if isinstance(fusion_signals.get("chan"), dict) else {}
+    _wave = str(conclusion.get("wave_label") or "").strip()
+    if _csig2:
+        _st2 = str(_csig2.get("reason") or "").replace("缠论", "").strip().lstrip(":：").strip() or "无信号"
+        _cd2 = _csig2.get("direction", 0)
+        _dl2 = "看涨" if _cd2 and int(_cd2) > 0 else ("看跌" if _cd2 and int(_cd2) < 0 else "中性")
+        _chan_part = f"{_st2} · {_dl2}"
+        try:
+            from trader_shared.chan_discipline import needs_same_level_tag, append_same_level_tag
+            _bps = r.get("chan_buy_point_types") or []
+            _need_sl = needs_same_level_tag(
+                r.get("chanlun") or r.get("chan"),
+                text=_chan_part,
+                buy_point_types=_bps if isinstance(_bps, list) else [],
+            )
+            _chan_part = append_same_level_tag(_chan_part, _need_sl)
+        except Exception:
+            pass
+        if _wave:
+            lines.append(f"  缠论：{_chan_part} · {_wave}")
+        else:
+            lines.append(f"  缠论：{_chan_part}")
+    else:
+        _chan_line = "暂无信号 · 中性"
+        if _wave:
+            _chan_line += f" · {_wave}"
+        lines.append(f"  缠论：{_chan_line}")
 
-    # 纪律失效条件（优先 discipline，回退 mistery_gate；报告不出现 mi/Mistery 品牌）
+    # 动能 + 价量资金（压缩为一行）
+    _msig = fusion_signals.get("momentum") if isinstance(fusion_signals.get("momentum"), dict) else {}
+    _vsig = fusion_signals.get("vpf") if isinstance(fusion_signals.get("vpf"), dict) else {}
+    _kn_parts = []
+    if _msig:
+        _mst = str(_msig.get("reason") or "").replace("动量", "").replace("动能", "").strip().lstrip(":：").strip() or "无信号"
+        _mst = re.sub(r"[（(][^）)]*[）)]", "", _mst).strip()
+        if len(_mst) > 20:
+            _mst = _mst[:18] + "…"
+        _kn_parts.append(_mst)
+    if _vsig:
+        _vst = str(_vsig.get("reason") or _vsig.get("vp_reason") or "").strip() or "中性"
+        _vst = re.sub(r"[（(][^）)]*[）)]", "", _vst).strip()
+        if len(_vst) > 20:
+            _vst = _vst[:18] + "…"
+        _kn_parts.append(_vst)
+    if _kn_parts:
+        lines.append(f"  动能：{' · '.join(_kn_parts)}")
+    else:
+        lines.append("  动能：暂无信号")
+
+    # 失效（保留）
     _gate = r.get("mistery_gate") if isinstance(r.get("mistery_gate"), dict) else {}
     _inv = str(_disc.get("invalidation") or _gate.get("invalidation") or "").strip()
     if _inv:
-        if len(_inv) > 80:
-            _inv = _inv[:77] + "…"
+        if len(_inv) > 60:
+            _inv = _inv[:57] + "…"
         lines.append(f"  失效：{_inv}")
 
     stop_sell = key_prices.get("stop_sell") or r.get("stop")
