@@ -919,18 +919,20 @@ def find_key_levels(bars: list[BarData]) -> dict[str, float]:
         if not extrema:
             return None
 
-        # 按触及次数排序：遍历每个极值，统计「对面数据在 tolerance 内」的次数
+        # 预排序 source 用于二分查找，将 O(E×N) 优化为 O(E×logN)
+        import bisect
+        sorted_vals = sorted(v for v in source if v is not None)
+
         best_price = None
         best_count = 0
 
         for idx, price in extrema:
             band_lo = price * (1 - tolerance_pct)
             band_hi = price * (1 + tolerance_pct)
-            # 至少 2 次：极值本身算 1 次，再加上「对面序列在 band 内」的次数
-            touch_count = 0
-            for j in range(len(source)):
-                if band_lo <= source[j] <= band_hi:
-                    touch_count += 1
+            # 二分查找 band 范围内的点数
+            lo_pos = bisect.bisect_left(sorted_vals, band_lo)
+            hi_pos = bisect.bisect_right(sorted_vals, band_hi)
+            touch_count = hi_pos - lo_pos
             # 验证「未破」：必须用正确的序列判定突破/跌破
             #   压力(find_support=False)：window 内最高价超过价位 ×(1+unbroken%) 即视为已被有效突破 → 无效
             #   支撑(find_support=True)：window 内最低价低于价位 ×(1-unbroken%) 即视为已被有效跌破 → 无效

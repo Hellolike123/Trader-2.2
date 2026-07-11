@@ -1468,7 +1468,7 @@ def wyckoff_strategy_midline(
 
 # ── Wyckoff 独立打分 ──────────────────────────────────────────────
 
-def calculate_wyckoff_score(bars: list[dict], symbol: str = "") -> dict:
+def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict | None = None) -> dict:
     """基于 Wyckoff 信号规则的独立打分函数。
 
     先调用 wyckoff_analysis() 获取 5 路信号，按权重累加 raw_score，
@@ -1476,6 +1476,7 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "") -> dict:
 
     Args:
         bars: 日线 K 线数据列表，最少 WYCKOFF_MIN_BARS 根。
+        analysis: 可选，已计算的 wyckoff_analysis 结果，避免重复调用。
 
     Returns:
         {
@@ -1493,7 +1494,7 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "") -> dict:
             "summary": "K线数据不足，无法打分",
         }
 
-    analysis = wyckoff_analysis(bars, symbol=symbol)
+    analysis = analysis if analysis is not None else wyckoff_analysis(bars, symbol=symbol)
 
     raw = 0
     signals: list[str] = []

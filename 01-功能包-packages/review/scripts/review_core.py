@@ -370,7 +370,7 @@ def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str,
 
     # ── 威科夫分：基于独立打分函数 ──
     # 基准 50，叠加 review 特有的 intraday 量价调整
-    wyckoff_result = calculate_wyckoff_score(daily)
+    wyckoff_result = calculate_wyckoff_score(daily, symbol=symbol, analysis=wyck_r)
     volume_score = 50 + (wyckoff_result["score"] - 50)  # score=50 时不偏移
     volume_score += (15 if volume_repair else 0) - (5 if afternoon_shrink else 0)
 
