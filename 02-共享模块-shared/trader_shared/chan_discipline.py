@@ -472,14 +472,14 @@ def apply_chan_discipline(inputs: dict[str, Any] | None = None, **kwargs: Any) -
         if "conf" not in rules_fired:
             rules_fired.append("conf")
         if hard_chan_conf:
-            _block_mid("置信不足，轻仓或不动", "conf_block", force_cap_zero=True)
+            _block_mid("置信不足", "conf_block", force_cap_zero=True)
             # 中线证据不足也否决短线主开仓（总闸 AND）
-            _block_short("置信不足，轻仓或不动", "conf_block", force_cap_zero=True)
+            _block_short("置信不足", "conf_block", force_cap_zero=True)
         else:
             # 仅 fusion/data 低置信：中短均降档
             _tighten_cap("both", cap_mid * 0.5, "置信不足，仓位降档", "conf_down")
             if min(cap_mid, cap_short) < 5:
-                _block_both("置信不足，轻仓或不动", "conf_block", force_cap_zero=True)
+                _block_both("置信不足", "conf_block", force_cap_zero=True)
 
     # ── 筹码 / 资金：双闸 ──
     if bool(raw.get("chip_migration_warning")):

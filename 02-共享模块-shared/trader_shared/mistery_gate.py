@@ -501,9 +501,9 @@ def compute_mistery_gate(inputs: dict[str, Any] | None = None, **kwargs: Any) ->
             notes_list.append("置信不足，降一档")
         elif action in ("轻仓试错", "持有"):
             action = "观望"
-            notes_list.append("置信不足，轻仓或不动")
+            notes_list.append("置信不足")
         elif action in ("观望", "不做") and not any("置信不足" in n for n in notes_list):
-            notes_list.append("置信不足，轻仓或不动")
+            notes_list.append("置信不足")
         for cr in conf_reasons:
             if cr not in "；".join(notes_list):
                 notes_list.append(cr)

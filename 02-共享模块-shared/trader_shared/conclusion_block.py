@@ -284,7 +284,7 @@ def build_conclusion_block(
             rc, rw = float(risk_c), float(rew_c)
             if rc > 0 or rw > 0:
                 if rw <= rc:
-                    reason_parts.append(f"现价追大约亏 {rc:.1f}、赚 {rw:.1f}，不划算")
+                    reason_parts.append(f"亏{rc:.1f}/赚{rw:.1f}，不划算")
                 elif not chase_ok:
                     reason_parts.append("现价偏冲高，纪律不追")
                 else:
@@ -327,7 +327,7 @@ def build_conclusion_block(
         elif "中线看法偏空" in _dn and not any("中线看法偏空" in p for p in reason_parts):
             reason_parts.append("中线看法偏空，短线买点不作主开仓")
         elif "置信不足" in _dn and not any("置信" in p for p in reason_parts):
-            reason_parts.append("置信不足，轻仓或不动")
+            reason_parts.append("置信不足")
         elif "筹码搬家" in _dn and not any("筹码" in p for p in reason_parts):
             reason_parts.append("筹码搬家警告，不新开")
         elif "主力连续流出" in _dn and not any("流出" in p for p in reason_parts):
@@ -338,7 +338,7 @@ def build_conclusion_block(
     if "中线看法偏空" in _gnotes and not any("中线看法偏空" in p for p in reason_parts):
         reason_parts.append("中线看法偏空，短线买点不作主开仓")
     if "置信不足" in _gnotes and not any("置信" in p for p in reason_parts):
-        reason_parts.append("置信不足，轻仓或不动")
+        reason_parts.append("置信不足")
     if "筹码搬家" in _gnotes and not any("筹码" in p for p in reason_parts):
         reason_parts.append("筹码搬家警告，不新开")
     if "主力连续流出" in _gnotes and not any("流出" in p for p in reason_parts):
