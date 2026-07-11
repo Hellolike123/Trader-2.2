@@ -402,15 +402,16 @@ def render_markdown(plan: dict[str, Any]) -> str:
             capital_lines.append(f"{title}\n全部卖出 {len(sell_events)}笔 -{sell_total}万")
 
         sorted_events = sorted(big_order["events"], key=lambda e: str(e.get("time","")))
-        for i in range(0, len(sorted_events), 3):
-            parts = []
-            for e in sorted_events[i:i+3]:
-                t = str(e.get("time",""))
-                amt = e.get("amount_wan") or 0
-                side = str(e.get("side",""))
-                sign = "+" if "买入" in side else "-"
-                parts.append(f"{t} {sign}{amt:.0f}万")
-            capital_lines.append("  ".join(parts))
+        # 只显示 TOP3 最大金额异动，不逐笔罗列
+        top_events = sorted(big_order["events"], key=lambda e: abs(e.get("amount_wan") or 0), reverse=True)[:3]
+        top_lines = []
+        for e in top_events:
+            t = str(e.get("time",""))
+            amt = e.get("amount_wan") or 0
+            side = str(e.get("side",""))
+            sign = "+" if "买入" in side else "-"
+            top_lines.append(f"  {t} {sign}{amt:.0f}万")
+        capital_lines.extend(top_lines)
 
         net = buy_total - sell_total
         capital_lines.append(f"净流入 {'+' if net >= 0 else ''}{net}万{'，主力偏多' if net > 0 else '，主力偏空' if net < 0 else ''}")
