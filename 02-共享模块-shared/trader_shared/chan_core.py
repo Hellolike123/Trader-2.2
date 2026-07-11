@@ -497,7 +497,15 @@ def build_segments(strokes: list[dict], min_strokes: int = 3) -> list[dict]:
     elif strokes[seg_start]["direction"] == "down" and third_low < first_low:
         current_direction = "down"
     else:
-        current_direction = strokes[seg_start]["direction"]
+        # P6: 第 3 笔未确认方向，根据首尾笔端点推断；若仍不明确则推迟
+        first_end = strokes[seg_start]["end_price"]
+        third_end = strokes[seg_start + 2]["end_price"]
+        if third_end > first_end:
+            current_direction = "up"
+        elif third_end < first_end:
+            current_direction = "down"
+        else:
+            current_direction = strokes[seg_start]["direction"]
 
     segments: list[dict[str, Any]] = []
     # 特征序列缓存：包含处理后的元素列表，每个元素有 high/low
@@ -1222,14 +1230,23 @@ def detect_buy_points(
                         "confidence": 3,
                     })
             else:
-                # 无 index / 无法算面积：fallback bar 级绿柱缩短，confidence 降为 1
-                bar_ok = (
-                    macd_hist_current is not None
-                    and macd_hist_prev is not None
-                    and macd_hist_current < 0
-                    and macd_hist_prev < 0
-                    and macd_hist_current > macd_hist_prev
-                )
+                # P7: 无 index / 无法算面积：fallback 要求至少 3 根连续负柱回升
+                bar_ok = False
+                if bars and len(bars) >= 3:
+                    h_vals = [to_float(b.get("macd_histogram")) for b in bars[-3:]]
+                    h_vals = [h for h in h_vals if h is not None]
+                    bar_ok = (
+                        len(h_vals) == 3
+                        and all(h < 0 for h in h_vals)
+                        and h_vals[2] > h_vals[1] > h_vals[0]
+                    )
+                elif macd_hist_current is not None and macd_hist_prev is not None:
+                    # 无 bars 时回退到 2 柱检查（兼容旧调用）
+                    bar_ok = (
+                        macd_hist_current < 0
+                        and macd_hist_prev < 0
+                        and macd_hist_current > macd_hist_prev
+                    )
                 if bar_ok:
                     buy_points.append({
                         "type": "一类买",
@@ -1262,19 +1279,20 @@ def detect_buy_points(
                         if up_high is None or s["end_price"] > up_high:
                             up_high = s["end_price"]
             if up_high is None:
-                up_high = max(s["end_price"] for s in up_strokes)
-
-            structure_ok = low_b > low_a and low_b < up_high
-            if structure_ok:
-                area_prev = _stroke_macd_area(bars, down_strokes[-2], "neg")
-                area_curr = _stroke_macd_area(bars, down_strokes[-1], "neg")
-                area_ok = _stroke_force_not_much_stronger(area_prev, area_curr, "down")
-                if area_ok or macd_divergence_ok:
-                    buy_points.append({
-                        "type": "二类买",
-                        "price": round(low_b, 4),
-                        "confidence": 2,
-                    })
+                # P8: 两笔之间无同向笔 → 结构不成立，跳过二类买
+                pass
+            else:
+                structure_ok = low_b > low_a and low_b < up_high
+                if structure_ok:
+                    area_prev = _stroke_macd_area(bars, down_strokes[-2], "neg")
+                    area_curr = _stroke_macd_area(bars, down_strokes[-1], "neg")
+                    area_ok = _stroke_force_not_much_stronger(area_prev, area_curr, "down")
+                    if area_ok or macd_divergence_ok:
+                        buy_points.append({
+                            "type": "二类买",
+                            "price": round(low_b, 4),
+                            "confidence": 2,
+                        })
 
     # ── P1/P2 三类买：离开中枢后回踩不入；回抽须为近端（末 2 笔内）──
     if last_close > 0 and valid_zones:
@@ -1369,13 +1387,22 @@ def detect_sell_points(
                         "confidence": 3,
                     })
             else:
-                bar_ok = (
-                    macd_hist_current is not None
-                    and macd_hist_prev is not None
-                    and macd_hist_current > 0
-                    and macd_hist_prev > 0
-                    and macd_hist_current < macd_hist_prev
-                )
+                # P7: 无 index / 无法算面积：fallback 要求至少 3 根连续正柱回落
+                bar_ok = False
+                if bars and len(bars) >= 3:
+                    h_vals = [to_float(b.get("macd_histogram")) for b in bars[-3:]]
+                    h_vals = [h for h in h_vals if h is not None]
+                    bar_ok = (
+                        len(h_vals) == 3
+                        and all(h > 0 for h in h_vals)
+                        and h_vals[2] < h_vals[1] < h_vals[0]
+                    )
+                elif macd_hist_current is not None and macd_hist_prev is not None:
+                    bar_ok = (
+                        macd_hist_current > 0
+                        and macd_hist_prev > 0
+                        and macd_hist_current < macd_hist_prev
+                    )
                 if bar_ok:
                     sell_points.append({
                         "type": "一类卖",
@@ -1407,19 +1434,20 @@ def detect_sell_points(
                         if down_low is None or s["end_price"] < down_low:
                             down_low = s["end_price"]
             if down_low is None:
-                down_low = min(s["end_price"] for s in down_strokes)
-
-            structure_ok = high_b < high_a and high_b > down_low
-            if structure_ok:
-                area_prev = _stroke_macd_area(bars, up_strokes[-2], "pos")
-                area_curr = _stroke_macd_area(bars, up_strokes[-1], "pos")
-                area_ok = _stroke_force_not_much_stronger(area_prev, area_curr, "up")
-                if area_ok or macd_divergence_ok:
-                    sell_points.append({
-                        "type": "二类卖",
-                        "price": round(high_b, 4),
-                        "confidence": 2,
-                    })
+                # P8: 两笔之间无同向笔 → 结构不成立，跳过二类卖
+                pass
+            else:
+                structure_ok = high_b < high_a and high_b > down_low
+                if structure_ok:
+                    area_prev = _stroke_macd_area(bars, up_strokes[-2], "pos")
+                    area_curr = _stroke_macd_area(bars, up_strokes[-1], "pos")
+                    area_ok = _stroke_force_not_much_stronger(area_prev, area_curr, "up")
+                    if area_ok or macd_divergence_ok:
+                        sell_points.append({
+                            "type": "二类卖",
+                            "price": round(high_b, 4),
+                            "confidence": 2,
+                        })
 
     # ── P1/P2 三类卖：离开后反弹不回；反弹须为近端（末 2 笔内）──
     if last_close > 0 and valid_zones:
