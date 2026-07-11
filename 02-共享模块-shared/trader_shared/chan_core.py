@@ -159,14 +159,41 @@ def handle_inclusion(bars: list[dict]) -> list[dict]:
                         direction = "down"
 
             if direction == "up":
-                curr["high"] = round(max(h_curr, h_prev), 4)
-                curr["low"] = round(max(l_curr, l_prev), 4)
+                new_high = round(max(h_curr, h_prev), 4)
+                new_low = round(max(l_curr, l_prev), 4)
             elif direction == "down":
-                curr["high"] = round(min(h_curr, h_prev), 4)
-                curr["low"] = round(min(l_curr, l_prev), 4)
+                new_high = round(min(h_curr, h_prev), 4)
+                new_low = round(min(l_curr, l_prev), 4)
             else:
-                curr["high"] = round(max(h_curr, h_prev), 4)
-                curr["low"] = round(min(l_curr, l_prev), 4)
+                new_high = round(max(h_curr, h_prev), 4)
+                new_low = round(min(l_curr, l_prev), 4)
+
+            curr["high"] = new_high
+            curr["low"] = new_low
+
+            # 重算 open/close（与 czsc 对齐）：涨 → close=high, open=low；跌 → open=high, close=low
+            o = to_float(curr.get("open"))
+            c = to_float(curr.get("close"))
+            if o is not None and c is not None:
+                if c > o:
+                    curr["close"] = new_high
+                    curr["open"] = new_low
+                else:
+                    curr["open"] = new_high
+                    curr["close"] = new_low
+
+            # 累加 volume/amount（与 czsc 对齐）
+            pv = to_float(prev.get("volume")) or to_float(prev.get("vol")) or 0
+            cv = to_float(curr.get("volume")) or to_float(curr.get("vol")) or 0
+            if pv or cv:
+                if "volume" in curr:
+                    curr["volume"] = round(pv + cv, 4)
+                if "vol" in curr:
+                    curr["vol"] = round(pv + cv, 4)
+            pa = to_float(prev.get("amount")) or 0
+            ca = to_float(curr.get("amount")) or 0
+            if pa or ca:
+                curr["amount"] = round(pa + ca, 4)
 
             result.pop()
 
@@ -319,15 +346,15 @@ def _higher_level_trend(bars: list[dict], chunk: int = 5, weekly_bars: list[dict
     return result
 
 
-def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5) -> list[dict]:
+def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5, bars: list[dict] | None = None) -> list[dict]:
     """由分型序列构建笔。
 
     成笔条件：`end.index - start.index >= min_bars_per_stroke - 1`，且方向与上一笔交替。
     连续同向分型取极值（顶取更高 high，底取更低 low）。
 
     P0：反向分型距离不够时跳过，保留 start 继续找。
-    P1：扫描所有合格反向分型，选最极端的（顶取 high 最大，底取 low 最小）作为笔端点，
-        而非遇到第一个就成笔。与 czsc check_bi 的极端值搜索策略对齐。
+    P1：扫描所有合格反向分型，选最极端的（顶取 high 最大，底取 low 最小）作为笔端点。
+    P4：返回 power_price（绝对价差）和 length（K 线根数）；传入 bars 时额外计算 power_volume。
     """
     if len(fractions) < 2:
         return []
@@ -390,15 +417,29 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5) -> list[d
                 i = best_j
                 continue
 
-            strokes.append({
+            sp = start["low"] if start["type"] == "bottom" else start["high"]
+            ep = best_end["high"] if best_end["type"] == "top" else best_end["low"]
+            si = start["index"]
+            ei = best_end["index"]
+            stroke = {
                 "start_type": start["type"],
-                "start_price": start["low"] if start["type"] == "bottom" else start["high"],
+                "start_price": sp,
                 "end_type": best_end["type"],
-                "end_price": best_end["high"] if best_end["type"] == "top" else best_end["low"],
+                "end_price": ep,
                 "direction": direction,
-                "start_index": start["index"],
-                "end_index": best_end["index"],
-            })
+                "start_index": si,
+                "end_index": ei,
+                "power_price": round(abs(ep - sp), 4),
+                "length": ei - si,
+            }
+            # P4: 传入 bars 时计算笔内成交量之和（中间 K 线）
+            if bars and ei > si + 1 and ei <= len(bars):
+                pv = 0.0
+                for bi in range(si + 1, ei):
+                    v = to_float(bars[bi].get("volume")) or to_float(bars[bi].get("vol")) or 0
+                    pv += v
+                stroke["power_volume"] = round(pv, 4)
+            strokes.append(stroke)
             last_direction = direction
             i = best_j
         else:
@@ -940,6 +981,62 @@ def _stroke_force_weaker(
     return False
 
 
+def _stroke_force_weaker_multi(
+    prev: dict,
+    curr: dict,
+    area_prev: float | None,
+    area_curr: float | None,
+    direction: str,
+) -> bool:
+    """多维力度衰减判定（P5）。
+
+    综合三个维度判断后笔是否弱于前笔：
+    1. MACD 面积（area）
+    2. 价格力度（power_price）
+    3. 持续时间（length）
+
+    至少 2 个维度显示衰减 → 判定为更弱。
+    """
+    votes = 0
+    total = 0
+
+    # 维度 1：MACD 面积
+    if area_prev is not None and area_curr is not None:
+        total += 1
+        if direction == "down":
+            if abs(area_curr) < abs(area_prev):
+                votes += 1
+        elif direction == "up":
+            if area_curr < area_prev:
+                votes += 1
+
+    # 维度 2：价格力度
+    pp_prev = prev.get("power_price")
+    pp_curr = curr.get("power_price")
+    if pp_prev is not None and pp_curr is not None and pp_prev > 0:
+        total += 1
+        if pp_curr < pp_prev:
+            votes += 1
+
+    # 维度 3：持续时间（length）
+    ln_prev = prev.get("length")
+    ln_curr = curr.get("length")
+    if ln_prev is not None and ln_curr is not None:
+        total += 1
+        if ln_curr < ln_prev:
+            votes += 1
+
+    # 至少 2 个维度衰减（或仅 1 个维度但 MACD 面积明确衰减）
+    if total == 0:
+        return False
+    if votes >= 2:
+        return True
+    # 单维度但 MACD 面积明确衰减时也算（保持向后兼容）
+    if votes == 1 and total == 1 and area_prev is not None and area_curr is not None:
+        return _stroke_force_weaker(area_prev, area_curr, direction)
+    return False
+
+
 def _stroke_force_not_much_stronger(
     area_prev: float | None,
     area_curr: float | None,
@@ -1390,7 +1487,12 @@ def detect_divergence(bars: list[dict], strokes: list[dict] | None = None) -> di
                 a_curr = _stroke_macd_area(bars, curr_d, "neg")
                 if a_prev is not None and a_curr is not None:
                     bottom_evaluated = True
-                    result["bottom_divergence"] = _stroke_force_weaker(a_prev, a_curr, "down")
+                    # P5: 有 power 数据时用多维比较，否则回退到单维
+                    if "power_price" in prev_d and "power_price" in curr_d:
+                        result["bottom_divergence"] = _stroke_force_weaker_multi(
+                            prev_d, curr_d, a_prev, a_curr, "down")
+                    else:
+                        result["bottom_divergence"] = _stroke_force_weaker(a_prev, a_curr, "down")
 
         if len(up_strokes) >= 2:
             prev_u, curr_u = up_strokes[-2], up_strokes[-1]
@@ -1399,7 +1501,11 @@ def detect_divergence(bars: list[dict], strokes: list[dict] | None = None) -> di
                 a_curr = _stroke_macd_area(bars, curr_u, "pos")
                 if a_prev is not None and a_curr is not None:
                     top_evaluated = True
-                    result["top_divergence"] = _stroke_force_weaker(a_prev, a_curr, "up")
+                    if "power_price" in prev_u and "power_price" in curr_u:
+                        result["top_divergence"] = _stroke_force_weaker_multi(
+                            prev_u, curr_u, a_prev, a_curr, "up")
+                    else:
+                        result["top_divergence"] = _stroke_force_weaker(a_prev, a_curr, "up")
 
     # ── fallback：仅对「笔级未评估」的一侧使用全图峰谷 ──
     if not top_evaluated:
@@ -1462,7 +1568,7 @@ def chanlun_analysis(
     cleaned = _calc_macd(cleaned)
 
     fractions = find_fractions(cleaned)
-    strokes = build_strokes(fractions, min_bars_per_stroke=CHANLUN_MIN_BARS_PER_STROKE)
+    strokes = build_strokes(fractions, min_bars_per_stroke=CHANLUN_MIN_BARS_PER_STROKE, bars=cleaned)
     segments = build_segments(strokes, min_strokes=CHANLUN_MIN_STROKES_PER_SEGMENT)
 
     # --- E2: build raw zones for zones_count (兼容)，merged zones for 分类 ---
