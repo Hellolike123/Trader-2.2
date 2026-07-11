@@ -361,7 +361,14 @@ def build_midline_levels(
             golden_buy = _round2(golden_buy)
 
         line_life = ""
-        if life_line is not None:
+        if life_line is not None and current is not None and current > 0:
+            _dist_pct = abs(current - life_line) / current
+            if _dist_pct > 0.30:
+                # 生命线离现价超过30%，太远无实战意义，不显示
+                line_life = ""
+            else:
+                line_life = f"生命线 {life_line:.2f}（破则中线转弱）"
+        elif life_line is not None:
             line_life = f"生命线 {life_line:.2f}（破则中线转弱）"
 
         line_pullback = ""
@@ -380,7 +387,14 @@ def build_midline_levels(
                 pullback_low is not None and pullback_high is not None
                 and pullback_low - 0.5 <= golden_buy <= pullback_high + 0.5
             )
-            if in_zone:
+            # 判断黄金买点是否和现价非常接近（<2%）
+            _gb_near_current = (
+                current is not None and current > 0
+                and abs(golden_buy - current) / current < 0.02
+            )
+            if _gb_near_current:
+                line_golden_buy = f"黄金买点 {golden_buy:.2f}（50%回撤·现价已到位，等触发信号）"
+            elif in_zone:
                 line_golden_buy = f"黄金买点 {golden_buy:.2f}（50%回撤·最佳低吸位）"
             else:
                 # 不在回踩区内，仅作为参考
