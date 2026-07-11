@@ -93,7 +93,7 @@ def _score_flow(features: dict[str, Any]) -> int:
     elif cum_5 > 500:
         score += 1  # 中等流入
     elif cum_5 > 0:
-        score += 0  # 小额流入（不加分）
+        pass  # 小额流入，不加分
 
     # 连续流入天数（2分）
     if con_in >= 5:
@@ -101,7 +101,7 @@ def _score_flow(features: dict[str, Any]) -> int:
     elif con_in >= 3:
         score += 1
     elif con_in >= 1 and cum_5 > 0:
-        score += 0  # 至少1天流入（不加分）
+        pass  # 至少1天流入，不加分
 
     # 净流入占成交额比（2分）
     if net_pct > 0.05:
@@ -109,7 +109,7 @@ def _score_flow(features: dict[str, Any]) -> int:
     elif net_pct > 0.02:
         score += 1
     elif net_pct > 0:
-        score += 0  # 正向流入（不加分）
+        pass  # 正向流入，不加分
 
     # 价资关系加分/减分
     if relation == "价跌资入":
@@ -143,7 +143,7 @@ def _score_chip(chip_migration: dict[str, Any]) -> int:
         elif diff >= 0:
             score += 1  # 支撑稳定
         elif diff >= -0.5:
-            score += 0  # 支撑小幅减弱
+            pass  # 支撑小幅减弱，不加分
         else:
             score += -1  # 支撑大幅减弱（扣分后归零）
     else:
@@ -157,7 +157,7 @@ def _score_chip(chip_migration: dict[str, Any]) -> int:
         elif diff <= 0:
             score += 1  # 阻力稳定
         elif diff <= 0.5:
-            score += 0  # 阻力小幅增加
+            pass  # 阻力小幅增加，不加分
         else:
             score += -1  # 阻力大幅增加
     else:
@@ -167,7 +167,7 @@ def _score_chip(chip_migration: dict[str, Any]) -> int:
     if warning_level == "none":
         score += 1
     elif warning_level == "warning":
-        score += 0  # 警告不加分也不减分
+        pass  # 警告不加分也不减分
     elif warning_level == "critical":
         score = max(0, score - 1)  # 危险信号
 
@@ -193,7 +193,7 @@ def _score_order(big_order: dict[str, Any]) -> int:
     if len(events) >= 3:
         score += 1
     elif len(events) >= 1:
-        score += 0  # 至少有一次记录
+        pass  # 至少有一次记录，不加分
 
     # 净买卖比（2分）
     buy_hands = (by_side.get("主动买入") or {}).get("hands", 0) or 0
@@ -206,7 +206,7 @@ def _score_order(big_order: dict[str, Any]) -> int:
         elif buy_ratio > 0.5:
             score += 1
         elif buy_ratio > 0.4:
-            score += 0  # 接近平衡
+            pass  # 接近平衡，不加分
         else:
             score = max(0, score - 1)  # 卖方主导
 

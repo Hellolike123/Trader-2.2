@@ -232,20 +232,28 @@ def _momentum_to_signal(momentum_result: dict) -> dict:
     }
 
 
+_confidence_cache: dict[str, float] | None = None
+
+
 def _load_confidence_params() -> dict[str, float]:
-    """加载置信度映射参数。优先从 calibrated_params.json 读取，fallback 到 config 默认值。"""
+    """加载置信度映射参数。优先从 calibrated_params.json 读取，fallback 到 config 默认值。带模块级缓存。"""
+    global _confidence_cache
+    if _confidence_cache is not None:
+        return _confidence_cache
+
     from trader_shared.config import CONFIDENCE_MAPPING_DEFAULTS
     try:
         from trader_shared.self_calibration import load_calibrated_params
         cal = load_calibrated_params()
         if cal and "confidence_mapping" in cal:
-            # 合并：校准值覆盖默认值
             merged = dict(CONFIDENCE_MAPPING_DEFAULTS)
             merged.update(cal["confidence_mapping"])
+            _confidence_cache = merged
             return merged
     except Exception:
         pass
-    return dict(CONFIDENCE_MAPPING_DEFAULTS)
+    _confidence_cache = dict(CONFIDENCE_MAPPING_DEFAULTS)
+    return _confidence_cache
 
 
 def _score_to_confidence(score: float) -> float:

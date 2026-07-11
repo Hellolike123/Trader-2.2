@@ -9,6 +9,22 @@ from trader_shared._logging import get_logger
 from trader_shared.interfaces import DataFetcher
 from trader_shared.fetchers import get_fetcher
 
+
+def _find_swing_lows(prices: list[float], window: int = 5) -> list[tuple[int, float]]:
+    """找摆动低点：price[i] 是 [i-window, i+window] 范围内的最小值。"""
+    swing_lows: list[tuple[int, float]] = []
+    for i in range(window, len(prices) - window):
+        price = prices[i]
+        if price is None:
+            continue
+        left = prices[i - window:i]
+        right = prices[i + 1:i + window + 1]
+        if any(p is None for p in left) or any(p is None for p in right):
+            continue
+        if price <= min(left) and price <= min(right):
+            swing_lows.append((i, price))
+    return swing_lows
+
 _logger = get_logger(__name__)
 
 # ── [2.3] HMM 大势检测器（可选导入，阵列中无则降级）──────────────────────────────
@@ -361,18 +377,9 @@ def _calc_trendline_support(bars: list[BarData]) -> float | None:
         lookback = min(60, len(bars))
         recent = bars[-lookback:]
 
-        # 找摆动低点
-        swing_lows: list[tuple[int, float]] = []
-        for i in range(window, len(recent) - window):
-            low = to_float(recent[i].get("low"))
-            if low is None:
-                continue
-            left_lows = [to_float(recent[j].get("low")) for j in range(i - window, i)]
-            right_lows = [to_float(recent[j].get("low")) for j in range(i + 1, i + window + 1)]
-            if any(l is None for l in left_lows) or any(r is None for r in right_lows):
-                continue
-            if low <= min(left_lows) and low <= min(right_lows):
-                swing_lows.append((i, low))
+        # 找摆动低点（使用公共函数）
+        recent_lows = [to_float(b.get("low")) for b in recent]
+        swing_lows = _find_swing_lows(recent_lows, window)
 
         if len(swing_lows) < 2:
             return None
@@ -421,14 +428,7 @@ def _calc_rsi_divergence(closes: list[float], bars: list[BarData]) -> float | No
             return None
 
         window = 5
-        swing_lows: list[tuple[int, float]] = []
-        for i in range(window, len(recent_lows) - window):
-            price = recent_lows[i]
-            left = recent_lows[i - window:i]
-            right = recent_lows[i + 1:i + window + 1]
-            if all(price <= (ll if ll is not None else float('inf')) for ll in left) and \
-               all(price <= (ll if ll is not None else float('inf')) for ll in right):
-                swing_lows.append((i, price))
+        swing_lows = _find_swing_lows(recent_lows, window)
 
         if len(swing_lows) < 2:
             return None
@@ -469,14 +469,7 @@ def _calc_macd_divergence(closes: list[float], bars: list[BarData]) -> float | N
             return None
 
         window = 5
-        swing_lows: list[tuple[int, float]] = []
-        for i in range(window, len(recent_lows) - window):
-            price = recent_lows[i]
-            left = recent_lows[i - window:i]
-            right = recent_lows[i + 1:i + window + 1]
-            if all(price <= (ll if ll is not None else float('inf')) for ll in left) and \
-               all(price <= (ll if ll is not None else float('inf')) for ll in right):
-                swing_lows.append((i, price))
+        swing_lows = _find_swing_lows(recent_lows, window)
 
         if len(swing_lows) < 2:
             return None

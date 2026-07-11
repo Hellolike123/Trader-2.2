@@ -1,100 +1,84 @@
-# signal_tracker.py 测试文档
+# Trader3.0 测试文档
 
-## 测试文件总览
+## 测试结构
 
-| 文件 | 测试数 | Bug 覆盖 | 类型 |
-|------|--------|----------|------|
-| `test_signal_tracker.py` | 17 | BUG-001/002/003/004/005/006/009/010/011/012 + 性能优化 | 核心修复回归 |
-| `test_signal_tracker_backfill.py` | 6 | BUG-007/067 | 已知缺陷 + 功能待实现 |
-| `test_signal_tracker_trading_day.py` | 6 | BUG-008/013/066 | 交易日偏移 + 坏行可观测 |
-| `test_signal_tracker_schema.py` | 4 | BUG-014/054 | schema_version 兼容性 |
-| `test_signal_tracker_e2e.py` | 4 | BUG-067/068/069 | 端到端全链路 |
+```
+02-共享模块-shared/tests/
+├── test_chan_core.py          # 缠论核心：分型/笔/线段/中枢/买卖点/背驰
+├── test_chan_discipline.py    # 缠论纪律层：C1清单/仓位限制/闸控
+├── test_chan_midline.py       # 中线分析：周线缠论/关键价
+├── test_fusion_core.py        # 决策融合：三路信号/大势/资金流出
+├── test_momentum_core.py      # 动量指标：MACD/RSI/ADX
+├── test_indicator_math.py     # 指标数学：EXPMA/MACD统一实现
+├── test_rule_engine.py        # 规则引擎：YAML规则/评分规则
+├── test_account_risk.py       # 账户风控：余额/交易/回撤告警
+├── test_main_force.py         # 主力行为：五阶段识别
+├── test_wyckoff_core.py       # 威科夫：BC/Spring/AR/ST
+└── accuracy/                  # 精度回归测试
+    └── test_accuracy_momentum.py
+```
 
-## 运行命令
+## 运行测试
 
 ```bash
-# 单文件快速回归
-python3 -m pytest 02-共享模块-shared/tests/test_signal_tracker.py -v
+# 运行全部测试
+python3 -m pytest 02-共享模块-shared/tests/ -v
 
-# 全量回归
-python3 -m pytest 02-共享模块-shared/tests/ -q
+# 运行单个模块
+python3 -m pytest 02-共享模块-shared/tests/test_chan_core.py -v
 
-# 包含 calibrator 的完整套件
-python3 -m pytest 02-共享模块-shared/tests/ -q -k "signal_tracker or calibrator"
+# 运行单个测试类
+python3 -m pytest 02-共享模块-shared/tests/test_chan_core.py::TestBuildStrokes -v
 
-# E2E 专项（含 mock 网络请求）
-python3 -m pytest 02-共享模块-shared/tests/test_signal_tracker_e2e.py -v
+# 运行单个测试
+python3 -m pytest 02-共享模块-shared/tests/test_chan_core.py::TestBuildStrokes::test_stroke_power_fields_always_present -v
+
+# 只跑快速测试（排除慢测试）
+python3 -m pytest 02-共享模块-shared/tests/ -v --ignore=02-共享模块-shared/tests/accuracy/
 ```
 
-## 修复 Bug 测试覆盖矩阵
+## 测试覆盖矩阵
 
-### P0 - 数据安全性
+| 模块 | 测试文件 | 用例数 | 覆盖内容 |
+|------|----------|--------|----------|
+| chan_core.py | test_chan_core.py | 97 | 分型(双侧)/笔(极端值搜索)/线段/中枢/买卖点/背驰/力度 |
+| chan_discipline.py | test_chan_discipline.py | ~30 | C1清单/仓位限制/闸控/merge_discipline |
+| chan_midline.py | test_chan_midline.py | ~15 | 周线缠论/关键价/Fibonacci |
+| fusion_core.py | test_fusion_core.py | 45 | 融合决策/大势/资金流出/情景优先/置信度 |
+| momentum_core.py | test_momentum_core.py | 18 | MACD金死叉/RSI/ADX/EMA |
+| indicator_math.py | test_indicator_math.py | 22 | EXPMA/MACD序列(含None处理/常数/单调) |
+| rule_engine.py | test_rule_engine.py | 18 | safe_eval沙箱/RuleEngine优先级/ScoreRuleEngine求和 |
+| account_risk.py | test_account_risk.py | 13 | 账户初始化/余额/交易/盈亏/风控告警 |
 
-| Bug | 测试文件 | 测试方法 | 验证内容 |
-|-----|---------|---------|----------|
-| 001 | `test_signal_tracker.py` | `TestFillByTargetPreservesBadLines::test_preserves_bad_line` | 重写文件时不丢弃损坏行 |
-| 001 | `test_signal_tracker.py` | `TestExplicitExceptHandling::test_fill_by_target_preserves_bad_line` | 同上，独立测试类 |
-| 002 | `test_signal_tracker.py` 中通过源码验证 `tuple[str, str, str]` 去重key |
-| 006 | `test_signal_tracker.py` | `TestAtomicWriteAndFsync::test_fill_by_target_uses_fsync_and_replace` | `os.fsync` + `os.replace` 被调用 |
+## 关键测试用例说明
 
-### P1 - 稳定性/正确性
+### chan_core.py
 
-| Bug | 测试文件 | 测试方法 | 验证内容 |
-|-----|---------|---------|----------|
-| 003 | `test_signal_tracker.py` | `TestUpdateSubcommandExists::test_update_calls_check_recent` | update 子命令调用 `check_recent` |
-| 005 | `test_signal_tracker.py` | `TestExplicitExceptHandling::test_compute_results_uses_explicit_valueerror` | `except ValueError` 替代裸 `except` |
-| 006 | `test_signal_tracker.py` | `TestAtomicWriteAndFsync` | RESULT_PATH 写也使用 fsync+replace |
-| 009 | `test_signal_tracker.py` | `TestExplicitExceptHandling::test_check_recent_uses_explicit_except` | `json.JSONDecodeError, ValueError` |
-| 010 | `test_signal_tracker.py` | `TestNormalizeSymbol::*` (5 个) | 数值代码→.SH/.SZ 推断，已有后缀不改写 |
-| 011 | `test_signal_tracker.py` | `TestSignalTypeDefault` | `signal_type` 默认空串不是 `"None"` |
-| 012 | `test_signal_tracker.py` | `TestShowSingleSortByResultTime` | 按 `result_time` 排序而非行顺序 |
+- `test_stroke_power_fields_always_present`: 验证 P4 笔力度字段（power_price/length）始终存在
+- `test_stroke_power_volume_with_bars`: 验证传入 bars 时计算 power_volume
+- `test_stroke_power_volume_without_bars`: 验证不传 bars 时没有 power_volume
+- `test_buy_point_1_with_zone_and_stroke_divergence`: 验证一类买点（中枢+背驰）
+- `test_segment_termination`: 验证线段特征序列三分型终结
+- `test_chanlun_analysis_integration`: 验证完整管线输出所有字段
 
-### P2 - 可观测性/兼容性
+### indicator_math.py
 
-| Bug | 测试文件 | 测试方法 | 验证内容 |
-|-----|---------|---------|----------|
-| 007 | `test_signal_tracker_backfill.py` | `TestBackfillRequires::*` | 截止边界正确，backfill 待实现 |
-| 008 | `test_signal_tracker_trading_day.py` | `TestTradingDayOffset::*` | 跨周末/长假 scan 逻辑 |
-| 013 | `test_signal_tracker_trading_day.py` | `TestBadLineObservability::*` | 坏行静默跳过（已知行为），utf-8 编码 |
-| 014 | `test_signal_tracker_schema.py` | `TestSchemaVersion::*` | 新记录含 `schema_version`，旧记录兼容读取 |
-| 067 | `test_signal_tracker_e2e.py` | `TestCliExitCodes` | CLI exit code 待实现 |
-| 068 | `test_signal_tracker_e2e.py` | `TestEndToEndPipeline::test_full_pipeline` | 全链路：信号→计算→结果→面板 |
+- `test_ema12_starts_at_index_11`: 验证 EMA12 在第 11 根 K 线初始化
+- `test_dif_equals_ema12_minus_ema26`: 验证 DIF = EMA12 - EMA26
+- `test_histogram_equals_dif_minus_dea`: 验证 histogram = DIF - DEA
+- `test_monotonic_up_dif_positive`: 验证单调上涨时 DIF 为正
 
-### 性能优化
+### rule_engine.py
 
-| 优化 | 测试方法 | 验证内容 |
-|------|---------|----------|
-| scan 循环复用 `sig_dt` 避免 42 次重复 `strptime` | `TestNoRepeatedStrptime::test_reuses_sig_dt` | `sig_dt + timedelta` 存在 |
+- `test_no_builtins_access`: 验证沙箱无法访问 `__import__`
+- `test_first_matching_rule_wins`: 验证规则优先级匹配
+- `test_sum_matching_rules`: 验证评分规则求和逻辑
 
-## 已知尚未实现的功能（pending tests）
+## 新增/修改测试的规范
 
-| Bug | 文件 | 说明 |
-|-----|-----|------|
-| 007 (backfill) | `test_signal_tracker_backfill.py` | `test_backfill_not_yet_implemented` 标记为已知限制 |
-| 067 (CLI exit code) | `test_signal_tracker_e2e.py` | `test_no_exit_code_defined` 确认当前 always return 0 |
-
-## 测试覆盖率统计
-
-```
-总计: 123 测试全部通过
-├── signal_tracker 系列: 37 测试
-│   ├── 核心修复回归: 17 测试
-│   ├── backfill/cutoff: 6 测试
-│   ├── 交易日偏移 + 坏行: 6 测试
-│   ├── schema_version: 4 测试
-│   └── E2E 全链路: 4 测试
-├── 原有: 88 测试 (calibrator/chan/wyckoff/momentum/v2_infra)
-└── 新增 __init__.py: 1 文件
-```
-
-## CI 建议
-
-```yaml
-# GitHub Actions 示例
-- name: Run signal_tracker tests
-  run: |
-    cd 02-共享模块-shared
-    python3 -m pytest tests/ -q --tb=short
-    # E2E 专项
-    python3 -m pytest tests/test_signal_tracker_e2e.py -v
-```
+1. 每个新功能必须有对应测试
+2. 测试命名格式：`test_<功能描述>`（snake_case）
+3. 测试类命名格式：`Test<模块/功能名>`
+4. 使用 `_make_bar()` 或 fixture 构造测试数据，不要硬编码真实行情
+5. 测试之间不应有顺序依赖
+6. 边界条件必须覆盖：空输入、None、极端值
