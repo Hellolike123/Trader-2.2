@@ -192,7 +192,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if _pp_w and _pp_w not in ("未知", "None", ""):
         lines.append(f"  位置：{_pp_w}")
 
-    # 中线关键价（无 🌟）
+    # 中线关键价
     lines.append("")
     lines.append("  关键价（中线）")
     _ll = mid_key_prices.get("line_life") or ""
@@ -206,6 +206,18 @@ def render_short_midline(r: dict[str, Any]) -> str:
         lines.append(f"    {_lp}")
     if _lgb:
         lines.append(f"    {_lgb}")
+    # 现价位置（按价格排序插入到正确位置）
+    if current > 0:
+        _price_line = f"    🌟 现价 {current:.2f}"
+        # 找到现价应该插入的位置：在回踩区/买点之后，压力/目标之前
+        _inserted = False
+        for _i, _l in enumerate(lines):
+            if _l.startswith("    压力") or _l.startswith("    目标"):
+                lines.insert(_i, _price_line)
+                _inserted = True
+                break
+        if not _inserted and _lr:
+            lines.append(_price_line)
     if _lr:
         lines.append(f"    {_lr}")
     if _lt:
