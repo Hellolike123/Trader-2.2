@@ -13,6 +13,148 @@ from trader_shared.mistery_gate import gate_action_to_execution_text
 _STAGE_WORDS_RE = re.compile(r"蓄势|主升|派发|衰退")
 
 
+def _build_wave_label(chanlun_daily: Any, current: float = 0.0) -> str:
+    """从日线缠论数据推导浪型叙事，用于波段交易提示。
+
+    将缠论的「段」翻译为波段交易员熟悉的浪型语言。
+    不是严格的 Elliott 波浪计数，而是基于缠论结构的浪型叙事。
+    """
+    chan = _unwrap_chan(chanlun_daily)
+    if not chan:
+        return ""
+
+    segments = chan.get("segments") if isinstance(chan.get("segments"), list) else []
+    strokes = chan.get("strokes") if isinstance(chan.get("strokes"), list) else []
+    trend_label = str(chan.get("trend_label") or "")
+    structure_type = str(chan.get("structure_type") or "")
+    buy_points = chan.get("buy_points") if isinstance(chan.get("buy_points"), list) else []
+    sell_points = chan.get("sell_points") if isinstance(chan.get("sell_points"), list) else []
+    divergence = chan.get("divergence") if isinstance(chan.get("divergence"), dict) else {}
+    merged_zones = chan.get("merged_zones") if isinstance(chan.get("merged_zones"), list) else []
+
+    # 段数不足，无法判断浪型
+    if len(segments) < 2:
+        return "段数不足，无明确浪型"
+
+    # 提取最近的段方向序列
+    recent_segs = segments[-8:] if len(segments) >= 8 else segments
+    directions = [s.get("direction", "") for s in recent_segs if isinstance(s, dict)]
+
+    if not directions:
+        return "无明确浪型"
+
+    # 统计连续段
+    def _count_consecutive(dirs: list[str], target: str) -> int:
+        count = 0
+        for d in reversed(dirs):
+            if d == target:
+                count += 1
+            else:
+                break
+        return count
+
+    up_count = _count_consecutive(directions, "up")
+    down_count = _count_consecutive(directions, "down")
+
+    # 获取最后一个有效中枢
+    last_zone = None
+    for z in reversed(merged_zones):
+        if isinstance(z, dict) and z.get("valid", True):
+            last_zone = z
+            break
+
+    # 买点/卖点摘要
+    buy_text = ""
+    if buy_points:
+        types = [p.get("type", "") for p in buy_points if isinstance(p, dict) and p.get("type")]
+        if types:
+            buy_text = types[0]  # 取最近的买点
+
+    sell_text = ""
+    if sell_points:
+        types = [p.get("type", "") for p in sell_points if isinstance(p, dict) and p.get("type")]
+        if types:
+            sell_text = types[0]
+
+    has_top_div = divergence.get("top_divergence", False)
+    has_bot_div = divergence.get("bottom_divergence", False)
+
+    # ── 浪型推导 ──
+    parts: list[str] = []
+
+    if trend_label == "拉升段":
+        if up_count >= 3:
+            if down_count >= 1:
+                parts.append(f"{up_count}浪上涨后的回调")
+            else:
+                parts.append(f"{up_count}浪连续上涨")
+        elif up_count >= 1 and down_count >= 1:
+            parts.append("上涨趋势中的短期回调")
+        elif up_count >= 1:
+            parts.append(f"{up_count}浪上涨中")
+        else:
+            parts.append("拉升趋势")
+
+    elif trend_label == "回调段":
+        if down_count >= 3:
+            parts.append(f"回调第{down_count}浪（下跌趋势）")
+        elif down_count >= 1 and up_count >= 1:
+            parts.append(f"上涨后的{down_count}浪回调")
+        elif down_count >= 1:
+            parts.append(f"回调{down_count}浪")
+        else:
+            parts.append("回调趋势")
+
+    elif trend_label == "震荡段":
+        if last_zone:
+            zt = last_zone.get("zh_top", 0)
+            zb = last_zone.get("zh_bottom", 0)
+            if current > 0 and zt > 0 and zb > 0:
+                pos = (current - zb) / (zt - zb) if zt > zb else 0.5
+                if pos > 0.7:
+                    parts.append("中枢震荡·靠近上沿")
+                elif pos < 0.3:
+                    parts.append("中枢震荡·靠近下沿")
+                else:
+                    parts.append("中枢震荡")
+            else:
+                parts.append("中枢震荡")
+        else:
+            parts.append("震荡盘整")
+
+    elif "单边上涨" in structure_type:
+        parts.append("单边上涨")
+    elif "单边下跌" in structure_type:
+        parts.append("单边下跌")
+    elif structure_type == "无结构":
+        parts.append("无明确结构")
+    else:
+        # 用 direction 序列推断
+        if up_count > down_count:
+            parts.append("偏多震荡")
+        elif down_count > up_count:
+            parts.append("偏空震荡")
+        else:
+            parts.append("多空平衡")
+
+    # 叠加信号提示
+    signal_parts: list[str] = []
+    if buy_text:
+        signal_parts.append(f"等{buy_text}确认")
+    if sell_text:
+        signal_parts.append(f"注意{sell_text}")
+    if has_top_div:
+        signal_parts.append("顶背驰")
+    if has_bot_div:
+        signal_parts.append("底背驰")
+
+    result = parts[0] if parts else ""
+    if signal_parts:
+        result += " · " + "｜".join(signal_parts[:2])  # 最多两个信号
+
+    return result
+
+
 def _unwrap_chan(chan_result: Any) -> dict[str, Any]:
     if not isinstance(chan_result, dict):
         return {}
@@ -228,6 +370,8 @@ def build_conclusion_block(
     weekly_frame: str | None = None,
     chanlun_midline: Any = None,
     wyckoff_midline: Any = None,
+    chanlun_daily: Any = None,
+    current_price: float = 0.0,
     **_extra: Any,
 ) -> dict[str, Any]:
     """组装结论块字段。
@@ -411,6 +555,9 @@ def build_conclusion_block(
     elif mid_weak and not short_no:
         conflict = "中线偏空，短线信号不作主开仓"
 
+    # 浪型标注（波段交易提示）
+    wave_label = _build_wave_label(chanlun_daily, current=current_price)
+
     return {
         "midline": mid,
         "stage_line": stage_txt,
@@ -421,4 +568,5 @@ def build_conclusion_block(
         "conflict": conflict,
         "daily_ruling": ruling,
         "weekly_frame": weekly_frame,
+        "wave_label": wave_label,
     }

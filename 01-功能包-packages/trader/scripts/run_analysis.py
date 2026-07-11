@@ -422,7 +422,7 @@ def _fusion_breakdown(fusion: dict) -> list[str]:
         hmm_cn = {"bull": "多头", "bear": "空头", "range": "震荡"}.get(hmm, hmm)
         rows.append(f"  大盘环境：{regime}（HMM: {hmm_cn}）")
 
-    for key, label in [("chan", "缠论"), ("momentum", "动量"), ("wyckoff", "威科夫")]:
+    for key, label in [("chan", "缠论"), ("momentum", "动量"), ("vpf", "价量资金")]:
         sig = signals.get(key, {})
         if not sig:
             continue
@@ -678,21 +678,15 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         from trader_shared.fusion_core import merge_decisions
         from trader_shared.volume_price import detect_volume_divergence
 
-        # 量价背离检测
+        # 价量快照：始终传入（含平量），不再仅在有背离时塞入
         volume_warning = None
         try:
+            from trader_shared.volume_price import volume_snapshot_dict
             vw = detect_volume_divergence(bars)
-            if vw and vw.warning_type != "none":
-                volume_warning = {
-                    "warning_type": vw.warning_type,
-                    "signal": vw.signal,
-                    "confidence": vw.confidence,
-                    "volume_ratio": vw.volume_ratio,
-                    "price_change": vw.price_change,
-                    "reason": vw.reason,
-                }
+            if vw:
+                volume_warning = volume_snapshot_dict(vw)
         except Exception:
-            pass
+            volume_warning = None
 
         # [Phase 2 - A1] 填充 stock_vs_sector（个股涨幅 - 板块涨幅）
         # extend_data 拿不到个股涨幅，故在 build_report 调用处补充到 extend_sector 字典。
@@ -782,7 +776,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         # 第二行：各维度状态（显示具体信号，不只方向）
         _sd = report_fusion.get("signals_detail") or {}
         _dim_parts = []
-        for key, label in [("chan", "缠论"), ("momentum", "动量"), ("wyckoff", "威科夫")]:
+        for key, label in [("chan", "缠论"), ("momentum", "动量"), ("vpf", "价量资金")]:
             _sig = _sd.get(key)
             if isinstance(_sig, dict):
                 _reason = str(_sig.get("reason", ""))
@@ -1770,6 +1764,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             weekly_frame=report.get("weekly_frame"),
             chanlun_midline=report.get("chanlun_midline"),
             wyckoff_midline=report.get("wyckoff_midline"),
+            chanlun_daily=report.get("chanlun_daily"),
+            current_price=current,
             chip_migration=report.get("chip_migration"),
             chip_migration_warning=_chip_warn,
             fund_flow_outflow_veto=_fund_veto,

@@ -239,6 +239,11 @@ def render_short_midline(r: dict[str, Any]) -> str:
     else:
         lines.append("  缠论：暂无信号 · 中性")
 
+    # 浪型标注（波段交易提示）
+    _wave = str(conclusion.get("wave_label") or "").strip()
+    if _wave:
+        lines.append(f"  浪型：{_wave}")
+
     # R6 中枢位置（日）：日线无 zones 时为未知 → 省略，不吓人
     _pp_d = str(r.get("pivot_position_daily") or "").strip()
     if _pp_d and _pp_d not in ("未知", "None", ""):
