@@ -424,14 +424,22 @@ def build_midline_levels(
         )
         if resist is not None and target is not None and abs(resist - target) < 1e-9:
             merge_resist_target = True
-            if _resist_far:
+            # 压力已被突破（低于现价）→ 不显示压力，只显示目标
+            if current is not None and resist < current:
+                line_resist = ""
+                line_target = f"目标 {target:.2f}（波段上看）"
+            elif _resist_far:
                 line_resist = f"压力/目标 {resist:.2f}（远期参考）"
+                line_target = ""
             else:
                 line_resist = f"压力/目标 {resist:.2f}（靠近只减不加；波段上看）"
-            line_target = ""
+                line_target = ""
         else:
             if resist is not None:
-                if _resist_far:
+                # 压力已被突破（低于现价）→ 不显示
+                if current is not None and resist < current:
+                    line_resist = ""
+                elif _resist_far:
                     line_resist = f"压力 {resist:.2f}（远期参考）"
                 else:
                     line_resist = f"压力 {resist:.2f}（靠近只减不加）"
