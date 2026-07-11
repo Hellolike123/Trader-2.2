@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from trader_shared.light_data import to_float
@@ -29,6 +30,7 @@ try:
         CHAN_MULTILEVEL_CHUNK,
         CHAN_MULTILEVEL_MIN_BARS,
         CHAN_ZONE_MERGE_ENABLED,
+        CHAN_SEGMENT_RELAX_OVERLAP,
         CHAN_ZONE_MERGE_GAP_PCT,
         CHAN_SIGNAL_ID_ENABLED,
         CHAN_DAILY_TREND_SEGS_HIGH,
@@ -48,6 +50,7 @@ except ImportError:
     CHAN_MULTILEVEL_CHUNK = 5
     CHAN_MULTILEVEL_MIN_BARS = 15
     CHAN_ZONE_MERGE_ENABLED = True
+    CHAN_SEGMENT_RELAX_OVERLAP = True
     CHAN_ZONE_MERGE_GAP_PCT = 0.015
     CHAN_SIGNAL_ID_ENABLED = True
     CHAN_DAILY_TREND_SEGS_HIGH = 8
@@ -407,42 +410,117 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5, bars: lis
     return strokes
 
 
-def build_segments(strokes: list[dict], min_strokes: int = 3) -> list[dict]:
+def _valid_strokes(strokes: list[dict]) -> list[dict]:
+    """过滤掉 start_price/end_price 为非有限值的笔（None/NaN/Inf）。
+
+    用于 build_segments 入口防御：坏数据（缺失价格、除零、来源异常）不应让
+    线段构建崩溃，也不应输出含 NaN/Inf 的段。保留原始 dict 引用（不拷贝），
+    仅做过滤。
+    """
+    cleaned: list[dict] = []
+    for s in strokes:
+        if not isinstance(s, dict):
+            continue
+        sp = s.get("start_price")
+        ep = s.get("end_price")
+        if sp is None or ep is None:
+            continue
+        if not (math.isfinite(sp) and math.isfinite(ep)):
+            continue
+        cleaned.append(s)
+    return cleaned
+
+
+def _merge_char_element(
+    seq: list[dict[str, float]], new_h: float, new_l: float, char_direction: str | None
+) -> tuple[list[dict[str, float]], str | None]:
+    """对特征序列做包含处理：如果新元素与最后一个重叠，按方向合并。
+
+    P-02：非合并分支原地 `seq.append`（O(1)），不再每次 O(n) 拷贝整条特征序列；
+    合并分支直接替换 `seq[-1]`（本就原地）。char_direction 仅被读取，原样返回。
+    """
+    if not seq:
+        return [{"high": new_h, "low": new_l}], char_direction
+
+    last = seq[-1]
+    # 检查是否包含（重叠）
+    contains = (new_h >= last["high"] and new_l <= last["low"]) or \
+               (new_h <= last["high"] and new_l >= last["low"])
+    if not contains:
+        seq.append({"high": new_h, "low": new_l})
+        return seq, char_direction
+
+    # 包含处理：按特征序列趋势方向合并
+    if char_direction == "up":
+        # 趋势向上：取 max(high), max(low)
+        merged = {"high": max(new_h, last["high"]), "low": max(new_l, last["low"])}
+    elif char_direction == "down":
+        # 趋势向下：取 min(high), min(low)
+        merged = {"high": min(new_h, last["high"]), "low": min(new_l, last["low"])}
+    else:
+        # 方向未定：取 max(high), min(low)
+        merged = {"high": max(new_h, last["high"]), "low": min(new_l, last["low"])}
+    seq[-1] = merged
+    return seq, char_direction
+
+
+def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: bool | None = None) -> list[dict]:
     """将笔序列构建为线段序列。
 
     线段是最小可递归走势单元，由至少3笔构成。
     使用特征序列三分型（含包含处理）判断线段终结：
     - 向上线段：取所有向下笔构成特征序列；至少 3 个特征元素，
-      且最后三根形成底分型（mid.low < left.low and mid.low < right.low）时终结
+      且最后三根形成标准双侧底分型（mid.low 三者最低 且 mid.high 三者最低，
+      即 middle 整体低于左右）时终结
     - 向下线段：取所有向上笔构成特征序列；至少 3 个特征元素，
-      且最后三根形成顶分型（mid.high > left.high and mid.high > right.high）时终结
-    - 默认只比 low（底分型）/ high（顶分型），与 K 线分型侧重点一致
+      且最后三根形成标准双侧顶分型（mid.high 三者最高 且 mid.low 三者最高，
+      即 middle 整体高于左右）时终结
+    - A-2：双侧分型（缠论 1.2 合规，与 find_fractions 一致）——底/顶分型需同时满足
+      low 与 high 两侧（middle 整体在单侧之外），单侧假分型（仅 low 达标而 high 不达标）
+      不再终结线段，减少误判与包含处理导致的假终结
 
     包含处理规则（与 K 线包含一致）：
     - 两根特征序列元素重叠时，按方向合并
     - 趋势向上：取 max(high), max(low)
     - 趋势向下：取 min(high), min(low)
+
+    B-01 健壮性：入口过滤掉 start_price/end_price 为非有限值（None/NaN/Inf）的笔，
+    过滤后不足 min_strokes 直接返回 []，避免坏数据造成崩溃或输出 NaN/Inf 段。
+    P-01 性能：段高/段低用增量 run_high/run_low 维护（随外循环推进），
+    去掉每次终结时的 O(n) 重算；P-02：特征序列非合并分支改为原地 append（O(1)）。
     """
+    if relax_overlap is None:
+        relax_overlap = CHAN_SEGMENT_RELAX_OVERLAP
+    min_strokes = max(min_strokes, 3)   # P0-2 加固：方向判定必访问 strokes[2]，防 config 配<3 时 IndexError
     if len(strokes) < min_strokes:
         return []
 
-    # 寻找第一个有价格重叠的3笔组合作为线段起点
-    seg_start = -1
-    for k in range(len(strokes) - 2):
-        h0 = max(strokes[k]["start_price"], strokes[k]["end_price"])
-        l0 = min(strokes[k]["start_price"], strokes[k]["end_price"])
-        h1 = max(strokes[k + 1]["start_price"], strokes[k + 1]["end_price"])
-        l1 = min(strokes[k + 1]["start_price"], strokes[k + 1]["end_price"])
-        h2 = max(strokes[k + 2]["start_price"], strokes[k + 2]["end_price"])
-        l2 = min(strokes[k + 2]["start_price"], strokes[k + 2]["end_price"])
-        overlap_top = min(h0, h1, h2)
-        overlap_bottom = max(l0, l1, l2)
-        if overlap_top > overlap_bottom:
-            seg_start = k
-            break
-
-    if seg_start < 0:
+    # B-01 健壮性：过滤非有限价格笔，过滤后不足 min_strokes 直接返回
+    strokes = _valid_strokes(strokes)
+    if len(strokes) < min_strokes:
         return []
+
+    # 线段起点：标准缠论从首笔起段，无需"连续3笔价格严格重叠"门槛。
+    # 旧逻辑（首个三笔严格重叠才启动）仅保留作一键回退路径。
+    if relax_overlap:
+        seg_start = 0
+    else:
+        seg_start = -1
+        for k in range(len(strokes) - 2):
+            h0 = max(strokes[k]["start_price"], strokes[k]["end_price"])
+            l0 = min(strokes[k]["start_price"], strokes[k]["end_price"])
+            h1 = max(strokes[k + 1]["start_price"], strokes[k + 1]["end_price"])
+            l1 = min(strokes[k + 1]["start_price"], strokes[k + 1]["end_price"])
+            h2 = max(strokes[k + 2]["start_price"], strokes[k + 2]["end_price"])
+            l2 = min(strokes[k + 2]["start_price"], strokes[k + 2]["end_price"])
+            overlap_top = min(h0, h1, h2)
+            overlap_bottom = max(l0, l1, l2)
+            if overlap_top > overlap_bottom:
+                seg_start = k
+                break
+
+        if seg_start < 0:
+            return []
 
     # 确定第一段线段方向
     first_high = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
@@ -470,33 +548,11 @@ def build_segments(strokes: list[dict], min_strokes: int = 3) -> list[dict]:
     char_seq: list[dict[str, float]] = []
     char_direction: str | None = None  # 特征序列当前趋势方向
 
-    def _merge_char_element(
-        seq: list[dict[str, float]], new_h: float, new_l: float
-    ) -> list[dict[str, float]]:
-        """对特征序列做包含处理：如果新元素与最后一个重叠，按方向合并。"""
-        if not seq:
-            return [{"high": new_h, "low": new_l}]
-
-        last = seq[-1]
-        # 检查是否包含（重叠）
-        contains = (new_h >= last["high"] and new_l <= last["low"]) or \
-                   (new_h <= last["high"] and new_l >= last["low"])
-        if not contains:
-            return seq + [{"high": new_h, "low": new_l}]
-
-        # 包含处理：按特征序列趋势方向合并
-        nonlocal char_direction
-        if char_direction == "up":
-            # 趋势向上：取 max(high), max(low)
-            merged = {"high": max(new_h, last["high"]), "low": max(new_l, last["low"])}
-        elif char_direction == "down":
-            # 趋势向下：取 min(high), min(low)
-            merged = {"high": min(new_h, last["high"]), "low": min(new_l, last["low"])}
-        else:
-            # 方向未定：取 max(high), min(low)
-            merged = {"high": max(new_h, last["high"]), "low": min(new_l, last["low"])}
-        seq[-1] = merged
-        return seq
+    # P-01：增量维护当前未闭合段的 high/low（run_high/run_low），
+    # 覆盖 strokes[seg_start .. i-1]（每轮迭代开始时）。段终结与尾部收尾直接使用，
+    # 去掉每次终结时的 O(n) 重算；与原 O(n) 逻辑字节级一致（max/min 对集合顺序无关）。
+    run_high = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+    run_low = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
 
     for i in range(seg_start + 1, len(strokes)):
         s = strokes[i]
@@ -517,33 +573,39 @@ def build_segments(strokes: list[dict], min_strokes: int = 3) -> list[dict]:
                         char_direction = "down"
 
                 # 包含处理
-                char_seq = _merge_char_element(char_seq, char_h, char_l)
+                char_seq, char_direction = _merge_char_element(char_seq, char_h, char_l, char_direction)
 
-                # 特征序列三分型终结：至少 3 个特征元素，最后三根底分型
-                # （默认只比 low，与 K 线底分型侧重点一致）
+                # A-2 特征序列三分型终结：至少 3 个特征元素，最后三根标准双侧底分型
+                # （mid.low 三者最低 且 mid.high 三者最低——middle 整体低于左右，与
+                #   formulas.md 1.2 / find_fractions 一致；单侧假底分型不终结）
                 if len(char_seq) >= 3:
                     left, mid, right = char_seq[-3], char_seq[-2], char_seq[-1]
-                    if mid["low"] < left["low"] and mid["low"] < right["low"]:
+                    if (mid["low"] < left["low"] and mid["low"] < right["low"]
+                            and mid["high"] < left["high"] and mid["high"] < right["high"]):
                         end_idx = i - 1
-                        seg_strokes = strokes[seg_start:end_idx + 1]
-                        seg_high = max(max(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
-                        seg_low = min(min(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
                         start_p = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
                         end_p = max(strokes[end_idx]["start_price"], strokes[end_idx]["end_price"])
                         segments.append({
                             "direction": "up",
                             "start_price": start_p,
                             "end_price": end_p,
-                            "high": seg_high,
-                            "low": seg_low,
+                            "high": run_high,
+                            "low": run_low,
                             "start_index": seg_start,
                             "end_index": end_idx,
-                            "strokes_count": len(seg_strokes),
+                            "strokes_count": end_idx - seg_start + 1,
                         })
                         seg_start = end_idx
                         current_direction = "down"
                         char_seq = []
                         char_direction = None
+                        # 新段从 seg_start（=end_idx）起；当前触发笔 i 也属于新段，纳入 run
+                        run_high = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                        run_low = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                        h_i = max(s["start_price"], s["end_price"])
+                        l_i = min(s["start_price"], s["end_price"])
+                        run_high = max(run_high, h_i)
+                        run_low = min(run_low, l_i)
                         continue
 
         else:  # current_direction == "down"
@@ -562,40 +624,50 @@ def build_segments(strokes: list[dict], min_strokes: int = 3) -> list[dict]:
                         char_direction = "down"
 
                 # 包含处理
-                char_seq = _merge_char_element(char_seq, char_h, char_l)
+                char_seq, char_direction = _merge_char_element(char_seq, char_h, char_l, char_direction)
 
-                # 特征序列三分型终结：至少 3 个特征元素，最后三根顶分型
-                # （默认只比 high，与 K 线顶分型侧重点一致）
+                # A-2 特征序列三分型终结：至少 3 个特征元素，最后三根标准双侧顶分型
+                # （mid.high 三者最高 且 mid.low 三者最高——middle 整体高于左右，与
+                #   formulas.md 1.2 / find_fractions 一致；单侧假顶分型不终结）
                 if len(char_seq) >= 3:
                     left, mid, right = char_seq[-3], char_seq[-2], char_seq[-1]
-                    if mid["high"] > left["high"] and mid["high"] > right["high"]:
+                    if (mid["high"] > left["high"] and mid["high"] > right["high"]
+                            and mid["low"] > left["low"] and mid["low"] > right["low"]):
                         end_idx = i - 1
-                        seg_strokes = strokes[seg_start:end_idx + 1]
-                        seg_high = max(max(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
-                        seg_low = min(min(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
                         start_p = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
                         end_p = min(strokes[end_idx]["start_price"], strokes[end_idx]["end_price"])
                         segments.append({
                             "direction": "down",
                             "start_price": start_p,
                             "end_price": end_p,
-                            "high": seg_high,
-                            "low": seg_low,
+                            "high": run_high,
+                            "low": run_low,
                             "start_index": seg_start,
                             "end_index": end_idx,
-                            "strokes_count": len(seg_strokes),
+                            "strokes_count": end_idx - seg_start + 1,
                         })
                         seg_start = end_idx
                         current_direction = "up"
                         char_seq = []
                         char_direction = None
+                        # 新段从 seg_start（=end_idx）起；当前触发笔 i 也属于新段，纳入 run
+                        run_high = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                        run_low = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                        h_i = max(s["start_price"], s["end_price"])
+                        l_i = min(s["start_price"], s["end_price"])
+                        run_high = max(run_high, h_i)
+                        run_low = min(run_low, l_i)
                         continue
 
-    # 收尾：如果最后一段至少有 min_strokes 笔，追加
+        # 当前笔 i 属于未闭合段（未触发终结），将其高低纳入 run（增量维护）
+        h = max(s["start_price"], s["end_price"])
+        l = min(s["start_price"], s["end_price"])
+        run_high = max(run_high, h)
+        run_low = min(run_low, l)
+
+    # 收尾：如果最后一段至少有 min_strokes 笔，追加（run 已覆盖 strokes[seg_start:]）
     remaining = strokes[seg_start:]
     if len(remaining) >= min_strokes:
-        seg_high = max(max(ss["start_price"], ss["end_price"]) for ss in remaining)
-        seg_low = min(min(ss["start_price"], ss["end_price"]) for ss in remaining)
         if current_direction == "up":
             start_p = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
             end_p = max(strokes[-1]["start_price"], strokes[-1]["end_price"])
@@ -606,8 +678,8 @@ def build_segments(strokes: list[dict], min_strokes: int = 3) -> list[dict]:
             "direction": current_direction,
             "start_price": start_p,
             "end_price": end_p,
-            "high": seg_high,
-            "low": seg_low,
+            "high": run_high,
+            "low": run_low,
             "start_index": seg_start,
             "end_index": len(strokes) - 1,
             "strokes_count": len(remaining),

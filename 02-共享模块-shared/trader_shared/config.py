@@ -95,6 +95,7 @@ CHAN_MULTILEVEL_ENABLED: bool = True        # 多级别区间套确认（上级�
 CHAN_MULTILEVEL_CHUNK: int = 5              # 粗K线聚合粒度（每 N 根合成一根上级别K线）
 CHAN_MULTILEVEL_MIN_BARS: int = 15          # 粗K线最少根数（独立于 CHANLUN_MIN_BARS）
 CHAN_ZONE_MERGE_ENABLED: bool = True        # 中枢相邻/重叠合并为 consolidated pivot
+CHAN_SEGMENT_RELAX_OVERLAP: bool = True     # 线段启动放宽：取消三笔严格重叠门槛，从首笔起段（一键回退见 chan_core.build_segments）
 CHAN_ZONE_MERGE_GAP_PCT: float = 0.015      # 中枢合并的相对间距阈值（按中枢中心价百分比）
 CHAN_SIGNAL_ID_ENABLED: bool = True         # 买卖点写入 Signal Contract v2 强一致 signal_id
 SIGNAL_RULES_ENABLED: bool = False          # 信号组合规则引擎（YAML 驱动，实验性，默认关闭）

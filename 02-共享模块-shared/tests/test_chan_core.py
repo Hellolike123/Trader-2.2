@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import sys
 
 for mod in ("trader_shared.chan_core", "light_data"):
@@ -11,6 +12,8 @@ from trader_shared.chan_core import (
     find_fractions,
     build_strokes,
     build_segments,
+    _valid_strokes,
+    _merge_char_element,
     build_zones,
     classify_structure,
     detect_buy_points,
@@ -785,10 +788,10 @@ class TestBuildSegments:
         assert segs[0]["direction"] == "up"
 
     def test_segment_termination(self):
-        """P2 特征序列三分型终结：向上段特征序列最后三根底分型 → 切开。
+        """P2 + A-2 特征序列三分型终结：向上段特征序列最后三根标准双侧底分型 → 切开。
 
-        特征序列（向下笔）不互相包含：
-        left(h=20,l=15) / mid(h=18,l=12 最低) / right(h=19,l=14) → 底分型。
+        特征序列（向下笔）不互相包含（middle 整体低于左右，故不被包含处理吞掉）：
+        left(h=20,l=15) / mid(h=18,l=12 最低 low 且最低 high) / right(h=19,l=14) → 标准双侧底分型。
         """
         strokes = [
             {"direction": "up",   "start_price": 10, "end_price": 20},  # 0
@@ -819,29 +822,482 @@ class TestBuildSegments:
         assert segs[0]["direction"] == "up"
 
     def test_multiple_segments(self):
-        """P2 多段：向上段底分型切开后，向下段顶分型再切，至少 2 段。
+        """P2 + A-2 多段：向上段标准双侧底分型切开后，向下段标准双侧顶分型再切，至少 2 段。
 
-        向上特征序列 downs：left(20/15) mid(18/12) right(19/14) → 底分型。
-        向下特征序列 ups：left(14/18) mid(11/20 最高) right(12/16) → 顶分型（可选，有收尾亦可）。
+        向上特征序列 downs：left(20/15) mid(18/12) right(19/14) → 标准双侧底分型
+            （mid.low=12 最低 且 mid.high=18 最低，整体低于左右）。
+        向下特征序列 ups：left(18/14) mid(22/17 最高) right(19/13) → 标准双侧顶分型
+            （mid.high=22 最高 且 mid.low=17 最高，整体高于左右）。
         """
         strokes = [
             {"direction": "up",   "start_price": 10, "end_price": 20},  # 0
             {"direction": "down", "start_price": 20, "end_price": 15},  # 1 char up-seg left
             {"direction": "up",   "start_price": 15, "end_price": 25},  # 2
-            {"direction": "down", "start_price": 18, "end_price": 12},  # 3 char mid
+            {"direction": "down", "start_price": 18, "end_price": 12},  # 3 char mid（双侧底）
             {"direction": "up",   "start_price": 12, "end_price": 22},  # 4
             {"direction": "down", "start_price": 19, "end_price": 14},  # 5 char right → 向上段终结
-            {"direction": "up",   "start_price": 14, "end_price": 18},  # 6 down-seg char
+            {"direction": "up",   "start_price": 14, "end_price": 18},  # 6 down-seg char left
             {"direction": "down", "start_price": 18, "end_price": 11},  # 7
-            {"direction": "up",   "start_price": 11, "end_price": 20},  # 8 char mid 顶
-            {"direction": "down", "start_price": 20, "end_price": 10},  # 9
-            {"direction": "up",   "start_price": 10, "end_price": 16},  # 10 char right → 向下段顶分型
-            {"direction": "down", "start_price": 16, "end_price": 12},  # 11
+            {"direction": "up",   "start_price": 17, "end_price": 22},  # 8 char mid（双侧顶）
+            {"direction": "down", "start_price": 22, "end_price": 13},  # 9
+            {"direction": "up",   "start_price": 13, "end_price": 19},  # 10 char right → 向下段顶分型
+            {"direction": "down", "start_price": 19, "end_price": 12},  # 11
         ]
         segs = build_segments(strokes, min_strokes=3)
         assert len(segs) >= 2
         assert segs[0]["direction"] == "up"
         assert segs[1]["direction"] == "down"
+
+    def test_unilateral_up_no_overlap_returns_one_segment(self):
+        """P0-1 固化：单边上涨、相邻三笔无共同价格区间 → relax 下产出 1 条 up 段。
+
+        旧逻辑（连续3笔严格重叠才启动）会因 seg_start=-1 返回 []，即"笔数不足"根因。
+        """
+        strokes = [
+            {"direction": "up",   "start_price": 10,  "end_price": 20},
+            {"direction": "down", "start_price": 20,  "end_price": 22},
+            {"direction": "up",   "start_price": 22,  "end_price": 35},
+            {"direction": "down", "start_price": 35,  "end_price": 37},
+            {"direction": "up",   "start_price": 37,  "end_price": 55},
+            {"direction": "down", "start_price": 55,  "end_price": 57},
+            {"direction": "up",   "start_price": 57,  "end_price": 75},
+            {"direction": "down", "start_price": 75,  "end_price": 77},
+            {"direction": "up",   "start_price": 77,  "end_price": 95},
+            {"direction": "down", "start_price": 95,  "end_price": 97},
+            {"direction": "up",   "start_price": 97,  "end_price": 115},
+            {"direction": "down", "start_price": 115, "end_price": 117},
+        ]
+        segs = build_segments(strokes, min_strokes=3)
+        assert len(segs) == 1
+        assert segs[0]["direction"] == "up"
+
+    def test_relax_off_rollback_returns_empty(self):
+        """回退验证：同序列 + relax_overlap=False 必须仍返回 []（旧行为）。"""
+        strokes = [
+            {"direction": "up",   "start_price": 10,  "end_price": 20},
+            {"direction": "down", "start_price": 20,  "end_price": 22},
+            {"direction": "up",   "start_price": 22,  "end_price": 35},
+            {"direction": "down", "start_price": 35,  "end_price": 37},
+            {"direction": "up",   "start_price": 37,  "end_price": 55},
+            {"direction": "down", "start_price": 55,  "end_price": 57},
+            {"direction": "up",   "start_price": 57,  "end_price": 75},
+            {"direction": "down", "start_price": 75,  "end_price": 77},
+            {"direction": "up",   "start_price": 77,  "end_price": 95},
+            {"direction": "down", "start_price": 95,  "end_price": 97},
+            {"direction": "up",   "start_price": 97,  "end_price": 115},
+            {"direction": "down", "start_price": 115, "end_price": 117},
+        ]
+        segs = build_segments(strokes, min_strokes=3, relax_overlap=False)
+        assert segs == []
+
+    def test_consolidation_overlapping_unchanged(self):
+        """无回归：重叠笔序列在 relax=True 与 relax=False 下段数一致。"""
+        strokes = [
+            {"direction": "up",   "start_price": 10, "end_price": 20},
+            {"direction": "down", "start_price": 20, "end_price": 15},
+            {"direction": "up",   "start_price": 15, "end_price": 25},
+            {"direction": "down", "start_price": 18, "end_price": 12},
+            {"direction": "up",   "start_price": 12, "end_price": 22},
+            {"direction": "down", "start_price": 19, "end_price": 14},
+            {"direction": "up",   "start_price": 14, "end_price": 18},
+            {"direction": "down", "start_price": 18, "end_price": 11},
+            {"direction": "up",   "start_price": 11, "end_price": 20},
+            {"direction": "down", "start_price": 20, "end_price": 10},
+            {"direction": "up",   "start_price": 10, "end_price": 16},
+            {"direction": "down", "start_price": 16, "end_price": 12},
+        ]
+        segs_relax = build_segments(strokes, min_strokes=3, relax_overlap=True)
+        segs_old = build_segments(strokes, min_strokes=3, relax_overlap=False)
+        assert len(segs_relax) == len(segs_old)
+        assert len(segs_relax) >= 2
+
+    def test_min_strokes_floor_blocks_indexerror(self):
+        """P0-2 固化：显式 min_strokes=2 也必须被硬锁为 3，避免 strokes[2] IndexError。"""
+        strokes = [
+            {"direction": "up",   "start_price": 10, "end_price": 20},
+            {"direction": "down", "start_price": 20, "end_price": 15},
+        ]
+        # 不应抛 IndexError，应安全返回 []
+        assert build_segments(strokes, min_strokes=2) == []
+
+
+class TestBuildSegmentsFollowups:
+    """A-2 缠论合规 + B-01 健壮性 + P-01/P-02 性能/不变量的补充测试。"""
+
+    # ---- 暴力参考实现：与 build_segments 同一套分段决策，但段 high/low 用 O(n) 重算 ----
+    # （逐字复刻旧逻辑），用于性质测试锁定 P-01 增量维护结果与旧 O(n) 重算字节级一致。
+    @staticmethod
+    def _brute_force_segments(strokes, min_strokes=3):
+        if len(strokes) < min_strokes:
+            return []
+        strokes = _valid_strokes(strokes)
+        if len(strokes) < min_strokes:
+            return []
+
+        seg_start = -1
+        for k in range(len(strokes) - 2):
+            h0 = max(strokes[k]["start_price"], strokes[k]["end_price"])
+            l0 = min(strokes[k]["start_price"], strokes[k]["end_price"])
+            h1 = max(strokes[k + 1]["start_price"], strokes[k + 1]["end_price"])
+            l1 = min(strokes[k + 1]["start_price"], strokes[k + 1]["end_price"])
+            h2 = max(strokes[k + 2]["start_price"], strokes[k + 2]["end_price"])
+            l2 = min(strokes[k + 2]["start_price"], strokes[k + 2]["end_price"])
+            if min(h0, h1, h2) > max(l0, l1, l2):
+                seg_start = k
+                break
+        if seg_start < 0:
+            return []
+
+        first_high = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+        first_low = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+        third_high = max(strokes[seg_start + 2]["start_price"], strokes[seg_start + 2]["end_price"])
+        third_low = min(strokes[seg_start + 2]["start_price"], strokes[seg_start + 2]["end_price"])
+        if strokes[seg_start]["direction"] == "up" and third_high > first_high:
+            current_direction = "up"
+        elif strokes[seg_start]["direction"] == "down" and third_low < first_low:
+            current_direction = "down"
+        else:
+            first_end = strokes[seg_start]["end_price"]
+            third_end = strokes[seg_start + 2]["end_price"]
+            if third_end > first_end:
+                current_direction = "up"
+            elif third_end < first_end:
+                current_direction = "down"
+            else:
+                current_direction = strokes[seg_start]["direction"]
+
+        segments = []
+        char_seq = []
+        char_direction = None
+
+        def _merge(seq, new_h, new_l):
+            if not seq:
+                return [{"high": new_h, "low": new_l}]
+            last = seq[-1]
+            contains = (new_h >= last["high"] and new_l <= last["low"]) or \
+                       (new_h <= last["high"] and new_l >= last["low"])
+            if not contains:
+                return seq + [{"high": new_h, "low": new_l}]
+            if char_direction == "up":
+                merged = {"high": max(new_h, last["high"]), "low": max(new_l, last["low"])}
+            elif char_direction == "down":
+                merged = {"high": min(new_h, last["high"]), "low": min(new_l, last["low"])}
+            else:
+                merged = {"high": max(new_h, last["high"]), "low": min(new_l, last["low"])}
+            seq[-1] = merged
+            return seq
+
+        for i in range(seg_start + 1, len(strokes)):
+            s = strokes[i]
+            if current_direction == "up":
+                if s["direction"] == "down":
+                    char_h = max(s["start_price"], s["end_price"])
+                    char_l = min(s["start_price"], s["end_price"])
+                    if char_seq:
+                        last_h = char_seq[-1]["high"]
+                        last_l = char_seq[-1]["low"]
+                        if char_h > last_h and char_l > last_l:
+                            char_direction = "up"
+                        elif char_h < last_h and char_l < last_l:
+                            char_direction = "down"
+                    char_seq = _merge(char_seq, char_h, char_l)
+                    if len(char_seq) >= 3:
+                        left, mid, right = char_seq[-3], char_seq[-2], char_seq[-1]
+                        if (mid["low"] < left["low"] and mid["low"] < right["low"]
+                                and mid["high"] < left["high"] and mid["high"] < right["high"]):
+                            end_idx = i - 1
+                            seg_strokes = strokes[seg_start:end_idx + 1]
+                            seg_high = max(max(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
+                            seg_low = min(min(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
+                            start_p = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                            end_p = max(strokes[end_idx]["start_price"], strokes[end_idx]["end_price"])
+                            segments.append({
+                                "direction": "up", "start_price": start_p, "end_price": end_p,
+                                "high": seg_high, "low": seg_low,
+                                "start_index": seg_start, "end_index": end_idx,
+                                "strokes_count": len(seg_strokes),
+                            })
+                            seg_start = end_idx
+                            current_direction = "down"
+                            char_seq = []
+                            char_direction = None
+                            continue
+            else:
+                if s["direction"] == "up":
+                    char_h = max(s["start_price"], s["end_price"])
+                    char_l = min(s["start_price"], s["end_price"])
+                    if char_seq:
+                        last_h = char_seq[-1]["high"]
+                        last_l = char_seq[-1]["low"]
+                        if char_h > last_h and char_l > last_l:
+                            char_direction = "up"
+                        elif char_h < last_h and char_l < last_l:
+                            char_direction = "down"
+                    char_seq = _merge(char_seq, char_h, char_l)
+                    if len(char_seq) >= 3:
+                        left, mid, right = char_seq[-3], char_seq[-2], char_seq[-1]
+                        if (mid["high"] > left["high"] and mid["high"] > right["high"]
+                                and mid["low"] > left["low"] and mid["low"] > right["low"]):
+                            end_idx = i - 1
+                            seg_strokes = strokes[seg_start:end_idx + 1]
+                            seg_high = max(max(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
+                            seg_low = min(min(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
+                            start_p = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                            end_p = min(strokes[end_idx]["start_price"], strokes[end_idx]["end_price"])
+                            segments.append({
+                                "direction": "down", "start_price": start_p, "end_price": end_p,
+                                "high": seg_high, "low": seg_low,
+                                "start_index": seg_start, "end_index": end_idx,
+                                "strokes_count": len(seg_strokes),
+                            })
+                            seg_start = end_idx
+                            current_direction = "up"
+                            char_seq = []
+                            char_direction = None
+                            continue
+
+        remaining = strokes[seg_start:]
+        if len(remaining) >= min_strokes:
+            if current_direction == "up":
+                start_p = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                end_p = max(strokes[-1]["start_price"], strokes[-1]["end_price"])
+            else:
+                start_p = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                end_p = min(strokes[-1]["start_price"], strokes[-1]["end_price"])
+            seg_high = max(max(ss["start_price"], ss["end_price"]) for ss in remaining)
+            seg_low = min(min(ss["start_price"], ss["end_price"]) for ss in remaining)
+            segments.append({
+                "direction": current_direction, "start_price": start_p, "end_price": end_p,
+                "high": seg_high, "low": seg_low,
+                "start_index": seg_start, "end_index": len(strokes) - 1,
+                "strokes_count": len(remaining),
+            })
+        return segments
+
+    # ---- A-2：单侧假分型不终结，标准双侧分型终结 ----
+    def test_a2_unilateral_fake_bottom_does_not_terminate(self):
+        """单侧假底分型（mid.low 最低但 mid.high 不是最低→被包含处理吞掉）不应终结。"""
+        strokes = [
+            {"direction": "up",   "start_price": 10, "end_price": 20},
+            {"direction": "down", "start_price": 20, "end_price": 15},  # left  h20 l15
+            {"direction": "up",   "start_price": 15, "end_price": 25},
+            {"direction": "down", "start_price": 22, "end_price": 12},  # mid h22 l12（high 最高→包含合并）
+            {"direction": "up",   "start_price": 12, "end_price": 22},
+            {"direction": "down", "start_price": 19, "end_price": 14},  # right h19 l14
+            {"direction": "up",   "start_price": 14, "end_price": 18},
+        ]
+        segs = build_segments(strokes, min_strokes=3)
+        # 单侧假底分型被包含处理合并，无法形成 3 元素三分型 → 仅收尾 1 段
+        assert len(segs) == 1
+        assert segs[0]["direction"] == "up"
+
+    def test_a2_bilateral_bottom_terminates(self):
+        """标准双侧底分型（mid.low 最低 且 mid.high 最低，整体低于左右）应终结。"""
+        strokes = [
+            {"direction": "up",   "start_price": 10, "end_price": 20},
+            {"direction": "down", "start_price": 20, "end_price": 15},  # left  h20 l15
+            {"direction": "up",   "start_price": 15, "end_price": 25},
+            {"direction": "down", "start_price": 17, "end_price": 12},  # mid   h17 l12（双侧底）
+            {"direction": "up",   "start_price": 12, "end_price": 22},
+            {"direction": "down", "start_price": 18, "end_price": 14},  # right h18 l14
+            {"direction": "up",   "start_price": 14, "end_price": 18},
+        ]
+        segs = build_segments(strokes, min_strokes=3)
+        assert len(segs) >= 2
+        assert segs[0]["direction"] == "up"
+        assert segs[1]["direction"] == "down"
+
+    def test_a2_unilateral_fake_top_does_not_terminate(self):
+        """单侧假顶分型（mid.high 最高但 mid.low 不是最高→包含合并）不应终结。"""
+        strokes = [
+            {"direction": "down", "start_price": 20, "end_price": 10},
+            {"direction": "up",   "start_price": 10, "end_price": 15},  # left  h15 l10
+            {"direction": "down", "start_price": 15, "end_price": 8},
+            {"direction": "up",   "start_price": 7,  "end_price": 16},  # mid h16 l7（low 最低→包含合并）
+            {"direction": "down", "start_price": 16, "end_price": 11},
+            {"direction": "up",   "start_price": 12, "end_price": 14},  # right h14 l12
+            {"direction": "down", "start_price": 14, "end_price": 9},
+        ]
+        segs = build_segments(strokes, min_strokes=3)
+        assert len(segs) == 1
+        assert segs[0]["direction"] == "down"
+
+    def test_a2_bilateral_top_terminates(self):
+        """标准双侧顶分型（mid.high 最高 且 mid.low 最高，整体高于左右）应终结。"""
+        strokes = [
+            {"direction": "down", "start_price": 20, "end_price": 10},
+            {"direction": "up",   "start_price": 10, "end_price": 15},  # left  h15 l10
+            {"direction": "down", "start_price": 15, "end_price": 8},
+            {"direction": "up",   "start_price": 13, "end_price": 18},  # mid   h18 l13（双侧顶）
+            {"direction": "down", "start_price": 18, "end_price": 9},
+            {"direction": "up",   "start_price": 12, "end_price": 16},  # right h16 l12
+            {"direction": "down", "start_price": 16, "end_price": 9},
+        ]
+        segs = build_segments(strokes, min_strokes=3)
+        assert len(segs) >= 2
+        assert segs[0]["direction"] == "down"
+        assert segs[1]["direction"] == "up"
+
+    def test_a2_bilateral_fewer_segments_than_unilateral_for_same_swing(self):
+        """同一组摆动里，单侧假分型被拒后段数应少于标准双侧分型（验证区分度）。"""
+        # 单侧（mid.high 最高）→ 被包含合并 → 1 段
+        unilateral = [
+            {"direction": "up",   "start_price": 10, "end_price": 20},
+            {"direction": "down", "start_price": 20, "end_price": 15},
+            {"direction": "up",   "start_price": 15, "end_price": 25},
+            {"direction": "down", "start_price": 22, "end_price": 12},
+            {"direction": "up",   "start_price": 12, "end_price": 22},
+            {"direction": "down", "start_price": 19, "end_price": 14},
+            {"direction": "up",   "start_price": 14, "end_price": 18},
+        ]
+        # 双侧（mid.high 最低）→ 干净三分型 → 2 段
+        bilateral = [
+            {"direction": "up",   "start_price": 10, "end_price": 20},
+            {"direction": "down", "start_price": 20, "end_price": 15},
+            {"direction": "up",   "start_price": 15, "end_price": 25},
+            {"direction": "down", "start_price": 17, "end_price": 12},
+            {"direction": "up",   "start_price": 12, "end_price": 22},
+            {"direction": "down", "start_price": 18, "end_price": 14},
+            {"direction": "up",   "start_price": 14, "end_price": 18},
+        ]
+        assert len(build_segments(unilateral, min_strokes=3)) < len(build_segments(bilateral, min_strokes=3))
+
+    # ---- B-01：NaN/Inf/None 防护 ----
+    def test_b01_valid_strokes_filters_non_finite(self):
+        raw = [
+            {"direction": "up", "start_price": 10, "end_price": 20},
+            {"direction": "down", "start_price": float("nan"), "end_price": 15},
+            {"direction": "up", "start_price": 15, "end_price": float("inf")},
+            {"direction": "down", "start_price": None, "end_price": 12},
+            {"direction": "up", "start_price": 12, "end_price": 22},
+            {"direction": "down", "start_price": 18, "end_price": 14},
+            {"direction": "up", "start_price": 14, "end_price": 18},
+        ]
+        cleaned = _valid_strokes(raw)
+        assert len(cleaned) == 4  # 仅有限价格笔保留
+        for s in cleaned:
+            assert math.isfinite(s["start_price"]) and math.isfinite(s["end_price"])
+        # 原列表不被改动（仅过滤，不拷贝元素）
+        assert raw[1]["start_price"] is not None  # 原对象保留
+
+    def test_b01_all_non_finite_returns_empty(self):
+        raw = [
+            {"direction": "up", "start_price": float("nan"), "end_price": 20},
+            {"direction": "down", "start_price": 10, "end_price": float("inf")},
+            {"direction": "up", "start_price": None, "end_price": float("-inf")},
+        ]
+        assert build_segments(raw, min_strokes=3) == []
+        assert _valid_strokes(raw) == []
+
+    def test_b01_nan_inf_does_not_crash_and_filters(self):
+        """含 NaN/Inf 的笔序列：过滤后正常产出段（或不崩溃），输出无 NaN/Inf。"""
+        raw = [
+            {"direction": "up",   "start_price": 10, "end_price": 20},
+            {"direction": "down", "start_price": float("nan"), "end_price": 15},  # 被过滤
+            {"direction": "up",   "start_price": 15, "end_price": 25},
+            {"direction": "down", "start_price": 17, "end_price": 12},            # 双边底 mid
+            {"direction": "up",   "start_price": 12, "end_price": 22},
+            {"direction": "down", "start_price": 18, "end_price": float("inf")},  # 被过滤
+            {"direction": "up",   "start_price": 14, "end_price": 18},
+        ]
+        segs = build_segments(raw, min_strokes=3)
+        # 过滤后剩余 5 笔，可构成 1 段收尾；不得含 NaN/Inf
+        assert len(segs) >= 1
+        for sg in segs:
+            assert math.isfinite(sg["high"]) and math.isfinite(sg["low"])
+            assert math.isfinite(sg["start_price"]) and math.isfinite(sg["end_price"])
+
+    # ---- P-01/P-02：增量维护与 O(n) 重算字节级一致；每段 high/low 等于构成笔极值 ----
+    @staticmethod
+    def _make_structured_inputs():
+        """返回多组结构化笔序列：多段、单边、震荡、含包含。"""
+        # 1) 多段（up 段 + down 段）
+        multi = [
+            {"direction": "up",   "start_price": 10, "end_price": 20},
+            {"direction": "down", "start_price": 20, "end_price": 15},
+            {"direction": "up",   "start_price": 15, "end_price": 25},
+            {"direction": "down", "start_price": 18, "end_price": 12},
+            {"direction": "up",   "start_price": 12, "end_price": 22},
+            {"direction": "down", "start_price": 19, "end_price": 14},
+            {"direction": "up",   "start_price": 14, "end_price": 18},
+            {"direction": "down", "start_price": 18, "end_price": 11},
+            {"direction": "up",   "start_price": 11, "end_price": 20},
+            {"direction": "down", "start_price": 20, "end_price": 10},
+            {"direction": "up",   "start_price": 10, "end_price": 16},
+            {"direction": "down", "start_price": 16, "end_price": 12},
+        ]
+        # 2) 单边上涨（几乎不终结）
+        up_only = [
+            {"direction": "up",   "start_price": 10, "end_price": 20},
+            {"direction": "down", "start_price": 20, "end_price": 19},
+            {"direction": "up",   "start_price": 19, "end_price": 30},
+            {"direction": "down", "start_price": 30, "end_price": 29},
+            {"direction": "up",   "start_price": 29, "end_price": 40},
+            {"direction": "down", "start_price": 40, "end_price": 39},
+            {"direction": "up",   "start_price": 39, "end_price": 50},
+        ]
+        # 3) 震荡（频繁顶/底分型）
+        oscill = []
+        price = 100.0
+        direction = "up"
+        for k in range(14):
+            nxt = price + (3.0 if direction == "up" else -3.0)
+            oscill.append({"direction": direction, "start_price": price, "end_price": nxt})
+            price = nxt
+            direction = "down" if direction == "up" else "up"
+        # 4) 含包含（相邻特征元素重叠）
+        inclusion = [
+            {"direction": "up",   "start_price": 10, "end_price": 20},
+            {"direction": "down", "start_price": 20, "end_price": 14},  # 与下一向下笔重叠
+            {"direction": "up",   "start_price": 14, "end_price": 22},
+            {"direction": "down", "start_price": 22, "end_price": 13},  # 合并
+            {"direction": "up",   "start_price": 13, "end_price": 24},
+            {"direction": "down", "start_price": 24, "end_price": 12},  # 新底
+            {"direction": "up",   "start_price": 12, "end_price": 21},
+            {"direction": "down", "start_price": 21, "end_price": 15},
+        ]
+        return [multi, up_only, oscill, inclusion]
+
+    def test_p01_matches_brute_force_reference(self):
+        """build_segments 输出（段数/direction/high/low/start_price/end_price/
+        start_index/end_index/strokes_count）与暴力 O(n) 重算参考实现完全一致。"""
+        for strokes in self._make_structured_inputs():
+            actual = build_segments(strokes, min_strokes=3)
+            expect = self._brute_force_segments(strokes, min_strokes=3)
+            assert actual == expect, f"mismatch:\n actual={actual}\n expect={expect}"
+
+    def test_p01_each_segment_high_low_is_constituent_extremes(self):
+        """每段 high == 构成笔 max(start,end) 的最大值；low == min(start,end) 的最小值。"""
+        for strokes in self._make_structured_inputs():
+            segs = build_segments(strokes, min_strokes=3)
+            for sg in segs:
+                cons = strokes[sg["start_index"]:sg["end_index"] + 1]
+                hi = max(max(s["start_price"], s["end_price"]) for s in cons)
+                lo = min(min(s["start_price"], s["end_price"]) for s in cons)
+                assert sg["high"] == hi
+                assert sg["low"] == lo
+                # start/end_price 方向与公式一致
+                if sg["direction"] == "up":
+                    assert sg["start_price"] == min(strokes[sg["start_index"]]["start_price"],
+                                                    strokes[sg["start_index"]]["end_price"])
+                    assert sg["end_price"] == max(strokes[sg["end_index"]]["start_price"],
+                                                  strokes[sg["end_index"]]["end_price"])
+                else:
+                    assert sg["start_price"] == max(strokes[sg["start_index"]]["start_price"],
+                                                    strokes[sg["start_index"]]["end_price"])
+                    assert sg["end_price"] == min(strokes[sg["end_index"]]["start_price"],
+                                                  strokes[sg["end_index"]]["end_price"])
+
+    def test_p02_merge_non_contain_is_inplace(self):
+        """_merge_char_element 非合并分支原地 append（O(1)），合并分支也原地修改。"""
+        seq = [{"high": 20.0, "low": 15.0}]
+        out, _ = _merge_char_element(seq, 19.0, 14.0, None)  # 不重叠 → 原地追加
+        assert out is seq  # 同一对象，无 O(n) 拷贝
+        assert out == [{"high": 20.0, "low": 15.0}, {"high": 19.0, "low": 14.0}]
+        # 合并分支：新元素被旧元素包含 → 原地合并 seq[-1]
+        out2, _ = _merge_char_element(seq, 21.0, 13.0, "up")  # 21>=20 and 13<=15 → 合并
+        assert out2 is seq
+        assert seq[-1] == {"high": 21.0, "low": 14.0}  # up 方向取 max(high),max(low)，与上一元素 {19,14} 合并
 
 
 class TestClassifyStructure:
