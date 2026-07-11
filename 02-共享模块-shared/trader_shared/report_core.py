@@ -305,7 +305,14 @@ def render_short_midline(r: dict[str, Any]) -> str:
         except Exception:
             pass
         if _wave:
-            lines.append(f"  缠论：{_chan_part} · {_wave}")
+            # 去重：浪型中的信号词如果已出现在缠论reason里，不重复
+            _wave_parts = [w.strip() for w in _wave.split(" · ")]
+            _chan_lower = _chan_part.lower()
+            _wave_deduped = [w for w in _wave_parts if w.lower() not in _chan_lower and w not in _chan_part]
+            if _wave_deduped:
+                lines.append(f"  缠论：{_chan_part} · {' · '.join(_wave_deduped)}")
+            else:
+                lines.append(f"  缠论：{_chan_part}")
         else:
             lines.append(f"  缠论：{_chan_part}")
     else:
