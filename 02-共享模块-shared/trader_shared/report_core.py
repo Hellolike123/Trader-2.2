@@ -395,31 +395,53 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     lines.append("")
     lines.append("  关键价（短线）")
+
+    # 按价格从低到高排列，每个价位一行
+    _price_items: list[tuple[float, str, str]] = []  # (price, label, action)
+
     if stop_sell:
-        lines.append(f"    止损 {float(stop_sell):.2f}（破则今日计划作废）")
-    else:
-        lines.append("    止损 未定义")
+        _price_items.append((float(stop_sell), "止损", "破就走"))
+
     if buy_low and buy_high:
-        lines.append(f"    买点区 {float(buy_low):.2f}-{float(buy_high):.2f}（回这里再谈买）")
+        _price_items.append((float(buy_low) - 0.001, f"买点区 {float(buy_low):.2f}-{float(buy_high):.2f}", "分批建仓"))
     elif buy_ref:
-        lines.append(f"    买点区 {float(buy_ref):.2f}（回这里再谈买）")
-    else:
-        lines.append("    买点区 数据不足")
+        _price_items.append((float(buy_ref), "买点区", "分批建仓"))
+
+    # MA5 支撑（如果在止损和现价之间）
+    _ma5 = _ma_float("ma5")
+    if _ma5 and stop_sell and _ma5 > float(stop_sell) and _ma5 < current:
+        _price_items.append((_ma5, "MA5 支撑", "加仓试探"))
+
     if current > 0:
-        lines.append(f"    🌟 现价 {current:.2f}")
+        _price_items.append((current, "现价", "持有，不追"))
+
+    # MA20 压力（如果在现价和卖点区之间）
+    _ma20 = _ma_float("ma20")
+    if _ma20 and _ma20 > current:
+        _price_items.append((_ma20, "MA20 压力", "靠近只减不加"))
+
     if short_low and short_high:
         if float(short_low) == float(short_high):
-            lines.append(f"    卖点区 {float(short_low):.2f}（冲到减/高抛）")
+            _price_items.append((float(short_low), "卖点区", "分批减仓"))
         else:
-            lines.append(f"    卖点区 {float(short_low):.2f}-{float(short_high):.2f}（冲到减/高抛）")
-    # 阶段止盈（如果和卖点区不同，单独显示）
+            _price_items.append((float(short_low) - 0.001, f"卖点区 {float(short_low):.2f}-{float(short_high):.2f}", "分批减仓"))
+
+    # 止盈（如果和卖点区不同）
     _take = r.get("take")
     try:
         _take_f = float(_take) if _take is not None else None
     except (TypeError, ValueError):
         _take_f = None
     if _take_f and short_high and abs(_take_f - float(short_high)) / max(float(short_high), 1) > 0.01:
-        lines.append(f"    止盈参考 {_take_f:.2f}（阶段止盈）")
+        _price_items.append((_take_f, "前高/止盈", "全部止盈"))
+
+    # 按价格排序输出
+    _price_items.sort(key=lambda x: x[0])
+    for price, label, action in _price_items:
+        if "现价" in label:
+            lines.append(f"    🌟 {current:.2f} 现价（{action}）")
+        else:
+            lines.append(f"    {price:.2f} {label}（{action}）")
 
     lines.append("")
     line_buy = key_prices.get("line_buy") or ""
