@@ -580,7 +580,8 @@ def build_midline_levels(
         down_stroke = _last_by_direction(strokes, "down")
         if down_stroke is not None:
             cand = _f(down_stroke.get("end_price"))
-            if cand is not None:
+            # 回踩位不能离现价太远（超过30%说明是老数据）
+            if cand is not None and current is not None and cand > current * 0.70:
                 pb_lo = _round2(cand)
                 pb_lo_comp = "last_down_stroke_end"
 
@@ -622,14 +623,15 @@ def build_midline_levels(
         up_stroke = _last_by_direction(strokes, "up")
         if up_stroke is not None:
             cand = _f(up_stroke.get("end_price"))
-            if cand is not None:
+            # 压力必须高于现价；已被突破的位不是压力
+            if cand is not None and current is not None and cand > current:
                 resist = _round2(cand)
                 resist_comp = "last_up_stroke_end"
         if resist is None:
             up_seg = _last_by_direction(segments, "up")
             if up_seg is not None:
                 cand = _f(up_seg.get("high"))
-                if cand is not None:
+                if cand is not None and current is not None and cand > current:
                     resist = _round2(cand)
                     resist_comp = "seg_high"
 
