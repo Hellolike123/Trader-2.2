@@ -183,6 +183,46 @@ class TestBuildStrokes:
         assert result[0]["start_price"] == 10.0
         assert result[0]["end_price"] == 15.0
 
+    def test_stroke_power_fields_always_present(self):
+        """P4: power_price 和 length 始终存在。"""
+        fractions = [
+            {"type": "bottom", "index": 0, "low": 10.0, "high": 10.5, "close": 10.2},
+            {"type": "top", "index": 5, "high": 15.0, "low": 14.5, "close": 14.8},
+        ]
+        result = build_strokes(fractions, min_bars_per_stroke=5)
+        assert len(result) == 1
+        s = result[0]
+        assert "power_price" in s
+        assert "length" in s
+        assert s["power_price"] == 5.0  # abs(15.0 - 10.0)
+        assert s["length"] == 5  # 5 - 0
+
+    def test_stroke_power_volume_with_bars(self):
+        """P4: 传入 bars 时计算 power_volume。"""
+        fractions = [
+            {"type": "bottom", "index": 0, "low": 10.0, "high": 10.5, "close": 10.2},
+            {"type": "top", "index": 5, "high": 15.0, "low": 14.5, "close": 14.8},
+        ]
+        bars = [
+            {"volume": 100} for _ in range(6)
+        ]
+        result = build_strokes(fractions, min_bars_per_stroke=5, bars=bars)
+        assert len(result) == 1
+        s = result[0]
+        assert "power_volume" in s
+        # 中间 K 线 index 1-4，共 4 根，每根 volume=100
+        assert s["power_volume"] == 400.0
+
+    def test_stroke_power_volume_without_bars(self):
+        """P4: 不传 bars 时没有 power_volume。"""
+        fractions = [
+            {"type": "bottom", "index": 0, "low": 10.0, "high": 10.5, "close": 10.2},
+            {"type": "top", "index": 5, "high": 15.0, "low": 14.5, "close": 14.8},
+        ]
+        result = build_strokes(fractions, min_bars_per_stroke=5)
+        assert len(result) == 1
+        assert "power_volume" not in result[0]
+
 
 class TestBuildZones:
     def test_zone_valid(self):
