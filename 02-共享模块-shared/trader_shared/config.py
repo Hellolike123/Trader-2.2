@@ -75,7 +75,7 @@ ATRLV_INDEX: dict[str, int] = {"数据不足": 0, "波幅偏高": 3, "波动偏�
 
 # ---- Chan Theory (缠论) constants ----
 CHANLUN_MIN_BARS: int = 20
-CHANLUN_MIN_BARS_PER_STROKE: int = 5
+CHANLUN_MIN_BARS_PER_STROKE: int = 6
 CHANLUN_MIN_STROKES_PER_SEGMENT: int = 3   # 线段最少笔数
 
 # ---- Chan structure_confidence 门槛（段数只调 conf，不改主状态名）----

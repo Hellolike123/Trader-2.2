@@ -1321,8 +1321,8 @@ def detect_buy_points(
                         if s.get("direction") == "down" and s.get("end_price") is not None:
                             last_down_i = i
                             if s["end_price"] >= zh_top:
-                                # 回抽在末 2 笔内才算当前三买（防粘滞）
-                                if last_down_i >= len(strokes) - 2:
+                                # 回抽在末 3 笔内才算当前三买（防粘滞）
+                                if last_down_i >= len(strokes) - 3:
                                     pullback_ok = True
                             break
                 if leave_i is not None and pullback_ok:
@@ -1473,7 +1473,7 @@ def detect_sell_points(
                     for i in range(len(strokes) - 1, leave_i, -1):
                         s = strokes[i]
                         if s.get("direction") == "up" and s.get("end_price") is not None:
-                            if s["end_price"] <= zh_bottom and i >= len(strokes) - 2:
+                            if s["end_price"] <= zh_bottom and i >= len(strokes) - 3:
                                 bounce_ok = True
                             break
                 if leave_i is not None and bounce_ok:
