@@ -193,6 +193,11 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if _pp_w and _pp_w not in ("未知", "None", ""):
         lines.append(f"  位置：{_pp_w}")
 
+    # 中线浪型（波段交易提示）
+    _wave_mid = str(conclusion.get("wave_label_mid") or "").strip()
+    if _wave_mid:
+        lines.append(f"  浪型：{_wave_mid}")
+
     # 中线关键价
     lines.append("")
     lines.append("  关键价（中线）")

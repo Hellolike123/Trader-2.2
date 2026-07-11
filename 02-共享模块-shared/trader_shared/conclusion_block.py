@@ -557,6 +557,7 @@ def build_conclusion_block(
 
     # 浪型标注（波段交易提示）
     wave_label = _build_wave_label(chanlun_daily, current=current_price)
+    wave_label_mid = _build_wave_label(chanlun_midline, current=current_price)
 
     return {
         "midline": mid,
@@ -569,4 +570,5 @@ def build_conclusion_block(
         "daily_ruling": ruling,
         "weekly_frame": weekly_frame,
         "wave_label": wave_label,
+        "wave_label_mid": wave_label_mid,
     }
