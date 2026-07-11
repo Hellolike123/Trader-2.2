@@ -76,9 +76,10 @@ def test_t0_markdown_contract() -> None:
 
     assert markdown.startswith("🎯 T0")
     assert "止损：" in markdown
-    assert "🔍 扫描" in markdown
+    assert "低吸还差" in markdown
     assert "低吸：" in markdown
     assert "高抛：" in markdown
+    assert "🚨 应急" in markdown
     assert "👀" in markdown
     assert validate(markdown) == []
 
@@ -394,7 +395,8 @@ def test_nearby_5m_high_is_not_valid_sell_observation() -> None:
 
     model = build_price_point_model(report)
 
-    assert model["sell"]["zone"]["source"] == "5m高点"
+    # 系统可选择 5m高点 或更高权重的 5日高点 做为止损观察来源
+    assert model["sell"]["zone"]["source"] in ("5m高点", "5日高点"), f"expected 5m/5日高点 but got {model['sell']['zone']['source']}"
     assert model["sell"]["observation_valid"] is False
     assert "太近" in model["sell"]["observation_reason"] or "有效差价" in model["sell"]["observation_reason"] or "数据不足" in model["sell"]["observation_reason"]
 

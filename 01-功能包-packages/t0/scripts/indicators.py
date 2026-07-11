@@ -222,23 +222,6 @@ def detect_bullish_divergence(bars: list[dict[str, Any]], rsi_series: list[float
     # 找 RSI 局部极小值点
     troughs = _find_local_extrema(rsi_window, mode="min")
     if len(troughs) < 2:
-        # 如果没有两个极小值点，检查窗口首尾
-        # 简化：只要 RSI 和价格在窗口两端的趋势相反就算
-        first_valid_rsi = None
-        last_valid_rsi = None
-        first_valid_close = None
-        last_valid_close = None
-        for i in range(len(rsi_window)):
-            if rsi_window[i] is not None and first_valid_rsi is None:
-                first_valid_rsi = rsi_window[i]
-                first_valid_close = closes[i]
-            if rsi_window[len(rsi_window) - 1 - i] is not None and last_valid_rsi is None:
-                last_valid_rsi = rsi_window[len(rsi_window) - 1 - i]
-                last_valid_close = closes[len(rsi_window) - 1 - i]
-        if all(v is not None for v in [first_valid_rsi, last_valid_rsi, first_valid_close, last_valid_close]):
-            # 价格创新低 but RSI 未创新低
-            if last_valid_close < first_valid_close and last_valid_rsi > first_valid_rsi:
-                return True
         return False
 
     # 取最近两个谷底
@@ -271,22 +254,6 @@ def detect_bearish_divergence(bars: list[dict[str, Any]], rsi_series: list[float
     # 找 RSI 局部极大值点
     peaks = _find_local_extrema(rsi_window, mode="max")
     if len(peaks) < 2:
-        # 简化：检查窗口首尾
-        first_valid_rsi = None
-        last_valid_rsi = None
-        first_valid_close = None
-        last_valid_close = None
-        for i in range(len(rsi_window)):
-            if rsi_window[i] is not None and first_valid_rsi is None:
-                first_valid_rsi = rsi_window[i]
-                first_valid_close = closes[i]
-            if rsi_window[len(rsi_window) - 1 - i] is not None and last_valid_rsi is None:
-                last_valid_rsi = rsi_window[len(rsi_window) - 1 - i]
-                last_valid_close = closes[len(rsi_window) - 1 - i]
-        if all(v is not None for v in [first_valid_rsi, last_valid_rsi, first_valid_close, last_valid_close]):
-            # 价格创新高 but RSI 未创新高
-            if last_valid_close > first_valid_close and last_valid_rsi < first_valid_rsi:
-                return True
         return False
 
     # 取最近两个峰顶

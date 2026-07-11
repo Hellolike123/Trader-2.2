@@ -6,6 +6,8 @@ from typing import Any
 from trader_shared.safe_cast import safe_max
 from config import (
     BUY_ACCEPT_FACTOR,
+    BUY_ACCEPT_FACTOR_AGGRESSIVE,
+    BUY_ACCEPT_FACTOR_CONSERVATIVE,
     BUY_CONFIRM_FACTOR,
     DEFAULT_ZONE_WIDTH_PCT,
     INVALID_ABOVE_RESISTANCE,
@@ -19,15 +21,24 @@ from config import (
     MIN_SELL_NET_SPACE_PCT,
     PRICE_TICK,
     SELL_ACCEPT_FACTOR,
-    SELL_CONFIRM_FACTOR,
+    SELL_ACCEPT_FACTOR_AGGRESSIVE,
+    SELL_ACCEPT_FACTOR_CONSERVATIVE,
+    SLIPPAGE_HIGH_VOLUME_RATIO,
+    SLIPPAGE_LOW_VOLUME_RATIO,
     STRONG_TRIGGER_MATCHES,
     STRUCTURE_WINDOW,
+    TREND_FILTER_DAYS,
+    TREND_FILTER_ENABLED,
+    TREND_FILTER_EXTREME_DROP_PCT,
+    TREND_FILTER_EXTREME_ONLY,
     VOLUME_EXPAND_RATIO,
     VOLUME_SHRINK_RATIO,
     ZONE_AMPLITUDE_FACTOR,
     ZONE_MAX_WIDTH_PCT,
+    ZONE_MIN_WIDTH_PCT,
     ENABLE_ICT_EXECUTION,
     ICT_RECENT_WINDOW,
+    ICT_MIN_STRENGTH,
     ICT_STRUCTURE_LOOKBACK,
     ICT_SWEEP_LOOKBACK,
     ADX_STRONG_THRESHOLD,
@@ -290,7 +301,7 @@ def space_state(amplitude_pct: float | None) -> str:
 def build_candidate_zones(report_data: dict[str, Any], key_levels: dict[str, Any]) -> dict[str, Any]:
     amplitude_pct = intraday_amplitude_pct(report_data["quote"])
     if amplitude_pct is not None:
-        width_pct = min(ZONE_MAX_WIDTH_PCT, amplitude_pct * ZONE_AMPLITUDE_FACTOR)
+        width_pct = min(ZONE_MAX_WIDTH_PCT, max(ZONE_MIN_WIDTH_PCT, amplitude_pct * ZONE_AMPLITUDE_FACTOR))
     else:
         width_pct = DEFAULT_ZONE_WIDTH_PCT
     support = key_levels["main_support"]["price"]
@@ -444,23 +455,48 @@ def _close_vals(bars: list[dict[str, Any]]) -> list[float]:
 
 
 def _trend_filter(daily_bars: list[dict[str, Any]]) -> bool:
-    if not daily_bars:
+    """趋势过滤器：T0专用，比日线级别更宽松。
+
+    TREND_FILTER_EXTREME_ONLY=True 时，仅在极端下行（N日累计跌幅超阈值）才阻断，
+    避免普通日线趋势下行时完全无法触发5分钟级别的做T信号。
+    """
+    if not TREND_FILTER_ENABLED:
         return True
     closes = _close_vals(daily_bars)
-    # T0 只抓取 30 天日线，用 15 天 vs 15 天判断短期趋势
-    if len(closes) < 30:
+    n = TREND_FILTER_DAYS
+    if len(closes) < n + 1:
         return True
-    ma15 = sum(closes[-15:]) / 15
-    long_avg = sum(closes[:-15]) / max(len(closes) - 15, 1)
-    if long_avg <= 0:
-        return True
-    return ma15 > long_avg
+    if TREND_FILTER_EXTREME_ONLY:
+        # 极端下行模式：只看最近N日累计跌幅
+        recent_start = closes[-(n + 1)]
+        recent_end = closes[-1]
+        if recent_start <= 0:
+            return True
+        drop_pct = (recent_end - recent_start) / recent_start
+        return drop_pct > TREND_FILTER_EXTREME_DROP_PCT
+    else:
+        # 传统模式：短期均线 vs 长期均线
+        if len(closes) < 30:
+            return True
+        ma_short = sum(closes[-n:]) / n
+        long_avg = sum(closes[:-n]) / max(len(closes) - n, 1)
+        if long_avg <= 0:
+            return True
+        return ma_short > long_avg
 
 
 def vwap_uptrend(state: dict[str, Any]) -> bool:
     vwap = state.get("vwap")
     prev = state.get("prev_vwap")
     return vwap is not None and prev is not None and float(vwap) > float(prev)
+
+
+def _ict_strength_meets_minimum(ict: dict[str, Any]) -> bool:
+    """检查ICT信号强度是否达到最低门槛。"""
+    strength_order = {"weak": 0, "medium": 1, "strong": 2}
+    actual = strength_order.get(str(ict.get("confirmation_strength") or "weak"), 0)
+    threshold = strength_order.get(ICT_MIN_STRENGTH, 1)
+    return actual >= threshold
 
 
 def detect_buy_trigger(report_data: dict[str, Any], zones: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
@@ -491,7 +527,9 @@ def detect_buy_trigger(report_data: dict[str, Any], zones: dict[str, Any], state
         if current < zone["main_support"] and current < (num(last.get("close")) or current):
             blocked.append("跌破主支撑后未收回")
     ict = report_data.get("ict_signal") or {}
-    if ict.get("sell_confirmed"):
+    ict_buy_valid = ict.get("buy_confirmed") and _ict_strength_meets_minimum(ict)
+    ict_sell_valid = ict.get("sell_confirmed") and _ict_strength_meets_minimum(ict)
+    if ict_sell_valid:
         blocked.append("ICT反向高抛确认")
     if blocked:
         return trigger_result("被阻断", None, [], blocked)
@@ -526,7 +564,7 @@ def detect_buy_trigger(report_data: dict[str, Any], zones: dict[str, Any], state
     if current >= zone["main_support"]:
         matched.append("支撑位收回")
         aux_count += 1
-    if ict.get("buy_confirmed"):
+    if ict_buy_valid:
         matched.append("ICT下扫后转强")
         aux_count += 1
     # Left-side: 1 core + 1 aux → 已触发
@@ -581,7 +619,9 @@ def detect_sell_trigger(report_data: dict[str, Any], zones: dict[str, Any], stat
     ):
         blocked.append("VWAP上行且放量突破主压力")
     ict = report_data.get("ict_signal") or {}
-    if ict.get("buy_confirmed"):
+    ict_buy_valid = ict.get("buy_confirmed") and _ict_strength_meets_minimum(ict)
+    ict_sell_valid = ict.get("sell_confirmed") and _ict_strength_meets_minimum(ict)
+    if ict_buy_valid:
         blocked.append("ICT反向低吸确认")
     if blocked:
         return trigger_result("被阻断", None, [], blocked)
@@ -616,7 +656,7 @@ def detect_sell_trigger(report_data: dict[str, Any], zones: dict[str, Any], stat
     if current <= zone["main_resistance"]:
         matched.append("压力位回落")
         aux_count += 1
-    if ict.get("sell_confirmed"):
+    if ict_sell_valid:
         matched.append("ICT上扫后转弱")
         aux_count += 1
     # Left-side: 1 core + 1 aux → 已触发
@@ -672,9 +712,17 @@ def calculate_buy_price_model(report_data: dict[str, Any], zones: dict[str, Any]
     acceptable = None
     status = trigger["status"]
     trigger_price = trigger.get("trigger_price")
+    # 动态滑点：根据量比调整可接受价范围
+    volume_ratio = float(report_data.get("volume_ratio") or 1.0)
+    if volume_ratio < SLIPPAGE_LOW_VOLUME_RATIO:
+        accept_factor = BUY_ACCEPT_FACTOR_CONSERVATIVE  # 低量比→流动性差→放宽滑点
+    elif volume_ratio > SLIPPAGE_HIGH_VOLUME_RATIO:
+        accept_factor = BUY_ACCEPT_FACTOR_AGGRESSIVE    # 高量比→流动性好→收紧滑点
+    else:
+        accept_factor = BUY_ACCEPT_FACTOR
     if status == "已触发" and trigger_price is not None:
         execution = round_price(trigger_price * BUY_CONFIRM_FACTOR)
-        acceptable = round_price(execution * BUY_ACCEPT_FACTOR if execution else None)
+        acceptable = round_price(execution * accept_factor if execution else None)
         if acceptable is not None and float(report_data["current_price"]) > acceptable:
             status = "触发过期"
             execution = None
@@ -713,9 +761,17 @@ def calculate_sell_price_model(report_data: dict[str, Any], zones: dict[str, Any
     acceptable = None
     status = trigger["status"]
     trigger_price = trigger.get("trigger_price")
+    # 动态滑点：根据量比调整可接受价范围
+    volume_ratio = float(report_data.get("volume_ratio") or 1.0)
+    if volume_ratio < SLIPPAGE_LOW_VOLUME_RATIO:
+        accept_factor = SELL_ACCEPT_FACTOR_CONSERVATIVE  # 低量比→流动性差→放宽滑点
+    elif volume_ratio > SLIPPAGE_HIGH_VOLUME_RATIO:
+        accept_factor = SELL_ACCEPT_FACTOR_AGGRESSIVE    # 高量比→流动性好→收紧滑点
+    else:
+        accept_factor = SELL_ACCEPT_FACTOR
     if status == "已触发" and trigger_price is not None:
         execution = round_price(trigger_price * SELL_CONFIRM_FACTOR)
-        acceptable = round_price(execution * SELL_ACCEPT_FACTOR if execution else None)
+        acceptable = round_price(execution * accept_factor if execution else None)
         if acceptable is not None and float(report_data["current_price"]) < acceptable:
             status = "触发过期"
             execution = None

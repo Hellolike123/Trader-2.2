@@ -231,6 +231,63 @@ def _build_realtime_signal_section(plan: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _build_emergency_guide(plan: dict[str, Any], buy: dict[str, Any], sell: dict[str, Any], current_price: float | None) -> list[str]:
+    """构建应急指引段：覆盖非标准场景下的操作建议。"""
+    lines: list[str] = []
+    buy_state = side_status(buy)
+    sell_state = side_status(sell)
+    data_status_value = str(plan.get("data_status") or "")
+    name = str(plan.get("name") or "")
+    buy_obs_price = numeric_or_none(buy.get("observation_price"))
+    sell_obs_price = numeric_or_none(sell.get("observation_price"))
+
+    # 场景A：突然放量拉升但未到高抛区
+    if current_price is not None and sell_obs_price is not None and current_price < sell_obs_price:
+        vol_ratio = numeric_or_none(plan.get("volume_ratio")) or 1.0
+        gap_pct = (sell_obs_price - current_price) / current_price
+        if vol_ratio > 1.5 and gap_pct < 0.01:
+            lines.append("🚨 应急：放量接近高抛区，可分批提前减仓，不必等触发")
+        elif vol_ratio > 2.0 and gap_pct < 0.02:
+            lines.append("🚨 应急：量能异常放大，接近高抛位，建议逐步减仓锁定利润")
+
+    # 场景B：突然跳水但未到低吸区
+    if current_price is not None and buy_obs_price is not None and current_price > buy_obs_price:
+        buy_gap = (current_price - buy_obs_price) / buy_obs_price
+        change_pct = numeric_or_none(plan.get("current_change_pct")) or 0
+        if change_pct < -3.0 and buy_gap < 0.02:
+            lines.append("🚨 应急：盘中急跌靠近低吸区，等5m止跌信号再动手，不接飞刀")
+        elif change_pct < -5.0:
+            lines.append("🚨 应急：跌幅超5%，暂停所有低吸计划，等企稳再评估")
+
+    # 场景C：涨停/跌停临近
+    quote = plan.get("data", {}).get("quote") or {}
+    if current_price is not None:
+        pre_close = numeric_or_none(quote.get("pre_close"))
+        if pre_close:
+           涨停价 = pre_close * 1.1
+           跌停价 = pre_close * 0.9
+           if abs(current_price - 涨停价) / 涨停价 < 0.005:
+               lines.append("🚨 应急：临近涨停，不封板则高抛，封板则持仓观察")
+           elif abs(current_price - 跌停价) / 跌停价 < 0.005:
+               lines.append("🚨 应急：临近跌停，不接货，等次日企稳再看")
+
+    # 场景D：双触发同时存在
+    if buy_state == "可执行" and sell_state == "可执行":
+        lines.append("🚨 应急：低吸高抛同时可执行，先低吸后高抛，T+0锁仓套利")
+
+    # 场景E：ICT信号辅助提示
+    ict = plan.get("ict_signal") or {}
+    if current_price is not None and ict.get("signal_grade") in ("A", "B"):
+        sweep_type = ict.get("sweep_type", "")
+        swept = ict.get("swept_level")
+        shift = ict.get("structure_shift", "")
+        if "sweep" in str(sweep_type):
+            lines.append(f"🚨 ICT: {ict.get('summary', '')}")
+
+    return lines
+
+
+
 def render_markdown(plan: dict[str, Any]) -> str:
     # 今天不做：振幅 < 1% 且量比 < 0.8，无操作价值
     amp = numeric_or_none(plan.get("amplitude_pct"))
@@ -266,9 +323,32 @@ def render_markdown(plan: dict[str, Any]) -> str:
         has_tick_data = len(tick_data) > 0
         big_order = analyze_big_orders(bars, tick_data=tick_data, focus_prices=focus_prices, trade_date=trade_date, order_book=(plan.get("data") or {}).get("order_book"))
 
+    from config import TREND_FILTER_EXTREME_ONLY
+
     current_action = '低吸' if buy_state == '可执行' else '高抛' if sell_state == '可执行' else '不动'
 
     stop_price = price(numeric_or_none(buy.get('invalid_price')))
+
+    # ── 距触发价距离计算 ──
+    distance_lines: list[str] = []
+    if current_price is not None:
+        buy_obs_price = numeric_or_none(buy.get("observation_price"))
+        sell_obs_price = numeric_or_none(sell.get("observation_price"))
+        if buy_obs_price is not None and buy_state not in ("可执行", "数据不足", ""):
+            gap_pct = (current_price - buy_obs_price) / buy_obs_price
+            # 估算5分钟K线数量（假设每根约0.3%振幅）
+            est_bars = int(gap_pct / 0.003) if gap_pct > 0 else 0
+            if gap_pct > 0.005:
+                distance_lines.append(f"低吸还差 {gap_pct*100:.1f}%（约{est_bars}根5m线）")
+            elif gap_pct > 0:
+                distance_lines.append(f"低吸接近关注价，差 {gap_pct*100:.1f}%")
+        if sell_obs_price is not None and sell_state not in ("可执行", "数据不足", ""):
+            gap_pct = (sell_obs_price - current_price) / current_price
+            est_bars = int(gap_pct / 0.003) if gap_pct > 0 else 0
+            if gap_pct > 0.005:
+                distance_lines.append(f"高抛还差 {gap_pct*100:.1f}%（约{est_bars}根5m线）")
+            elif gap_pct > 0:
+                distance_lines.append(f"高抛接近关注价，差 {gap_pct*100:.1f}%")
 
     # ── 段1: 触发价 ──
     trigger_lines = [
@@ -299,6 +379,8 @@ def render_markdown(plan: dict[str, Any]) -> str:
     level_advice = atr_info.get("level_advice")
     if level_advice:
         trigger_lines.append(f"波动：{level_advice}")
+    if distance_lines:
+        trigger_lines.extend(distance_lines)
 
     # ── 段2: 大单异动 ──
     capital_lines = []
@@ -358,6 +440,9 @@ def render_markdown(plan: dict[str, Any]) -> str:
     elif ds == "degraded":
         risk_lines.append("⚠️ 数据不足，盘中判断可能不准")
 
+    # ── 段5: 应急指引 ──
+    emergency_lines = _build_emergency_guide(plan, buy, sell, current_price)
+
     # ── 组装输出 ──
     lines = [
         "🎯 T0 盯盘助理",
@@ -372,6 +457,9 @@ def render_markdown(plan: dict[str, Any]) -> str:
         lines.append("")
         lines.append("📈 操作建议")
         lines.extend(advice_lines)
+    if emergency_lines:
+        lines.append("")
+        lines.extend(emergency_lines)
     lines.append("")
     lines.append("⚠️ 风控提醒")
     lines.extend(risk_lines)
