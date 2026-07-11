@@ -194,17 +194,13 @@ def find_fractions(bars: list[dict]) -> list[dict]:
         if any(v is None for v in [h_left, l_left, h_mid, l_mid, h_right, l_right, c_mid]):
             continue
 
-        is_top = h_mid > h_left and h_mid > h_right
-        is_bottom = l_mid < l_left and l_mid < l_right
-
-        if is_top and is_bottom:
-            # 十字星同时满足顶底条件，按极值倾向决定
-            top_margin = min(h_mid - h_left, h_mid - h_right)
-            bottom_margin = min(l_left - l_mid, l_right - l_mid)
-            if top_margin >= bottom_margin:
-                is_bottom = False
-            else:
-                is_top = False
+        # 双侧验证（与 czsc check_fx 一致）：
+        # 顶分型：high 和 low 都高于左右两侧
+        # 底分型：high 和 low 都低于左右两侧
+        is_top = (h_mid > h_left and h_mid > h_right
+                  and l_mid > l_left and l_mid > l_right)
+        is_bottom = (l_mid < l_left and l_mid < l_right
+                     and h_mid < h_left and h_mid < h_right)
 
         if is_top:
             fractions.append({
