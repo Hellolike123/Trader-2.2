@@ -325,11 +325,9 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5) -> list[d
     成笔条件：`end.index - start.index >= min_bars_per_stroke - 1`，且方向与上一笔交替。
     连续同向分型取极值（顶取更高 high，底取更低 low）。
 
-    P0 修复：反向分型距离不够时，不再把起点永久丢弃（旧逻辑 `i = j`），
-    而是跳过该近距反向分型，继续在后续分型中寻找：
-    - 同向更极端 → 更新 start
-    - 反向且距离够 → 成笔
-    - 反向仍不够 → 继续跳过
+    P0：反向分型距离不够时跳过，保留 start 继续找。
+    P1：扫描所有合格反向分型，选最极端的（顶取 high 最大，底取 low 最小）作为笔端点，
+        而非遇到第一个就成笔。与 czsc check_bi 的极端值搜索策略对齐。
     """
     if len(fractions) < 2:
         return []
@@ -358,50 +356,52 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5) -> list[d
         if j >= num:
             break
 
-        # 在后续分型中寻找合格终点；近距反向分型不丢弃 start
-        formed = False
+        # P1: 在转折点（同向不更极端的分型）之前的范围内，
+        # 扫描所有合格反向分型，选最极端的作为笔端点
+        best_end = None
+        best_j = None
         while j < num:
             f = fractions[j]
 
             if f["type"] == start["type"]:
-                # 同向更极端则更新起点
-                if start["type"] == "top" and f["high"] > start["high"]:
-                    start = f
-                elif start["type"] == "bottom" and f["low"] < start["low"]:
-                    start = f
-                j += 1
-                continue
+                # 同向分型 → 转折点，停止扫描
+                break
 
-            # 反向分型
+            # 反向分型：距离合格则跟踪最极端候选
+            if f["index"] - start["index"] >= min_bars_per_stroke - 1:
+                if best_end is None:
+                    best_end = f
+                    best_j = j
+                elif start["type"] == "bottom" and f["high"] > best_end["high"]:
+                    best_end = f
+                    best_j = j
+                elif start["type"] == "top" and f["low"] < best_end["low"]:
+                    best_end = f
+                    best_j = j
+
+            j += 1
+
+        # 扫描结束，用最极端候选成笔
+        if best_end is not None:
             direction = "up" if start["type"] == "bottom" else "down"
 
             # 强制交替：新笔方向必须与上一笔相反
             if last_direction is not None and direction == last_direction:
-                # 方向冲突：从该反向分型重新起笔（与旧语义一致）
-                i = j
-                formed = True  # 借标记跳出内层，外层 continue
-                break
+                i = best_j
+                continue
 
-            if f["index"] - start["index"] >= min_bars_per_stroke - 1:
-                strokes.append({
-                    "start_type": start["type"],
-                    "start_price": start["low"] if start["type"] == "bottom" else start["high"],
-                    "end_type": f["type"],
-                    "end_price": f["high"] if f["type"] == "top" else f["low"],
-                    "direction": direction,
-                    # P1: 分型 mid 的 bar index（handle_inclusion 后序列），供笔级 MACD 力度
-                    "start_index": start["index"],
-                    "end_index": f["index"],
-                })
-                last_direction = direction
-                i = j  # 下一笔从本笔终点起
-                formed = True
-                break
-
-            # 距离不够：跳过该反向分型，保留 start 继续找
-            j += 1
-
-        if not formed:
+            strokes.append({
+                "start_type": start["type"],
+                "start_price": start["low"] if start["type"] == "bottom" else start["high"],
+                "end_type": best_end["type"],
+                "end_price": best_end["high"] if best_end["type"] == "top" else best_end["low"],
+                "direction": direction,
+                "start_index": start["index"],
+                "end_index": best_end["index"],
+            })
+            last_direction = direction
+            i = best_j
+        else:
             # 从当前 start 无法成笔（后续无合格反向分型），推进起点防死循环
             i += 1
 
