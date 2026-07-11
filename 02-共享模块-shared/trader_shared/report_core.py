@@ -95,7 +95,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
     # meta：动能｜大盘（阶段主展示在 🧭，meta 不重复以免与中线打架）
     meta_parts = []
     if momentum:
-        meta_parts.append(f"动能 {momentum}")
+        meta_parts.append(f"综合动能 {momentum}")
     if regime:
         meta_parts.append(f"大盘 {regime}")
     if meta_parts:
@@ -144,6 +144,15 @@ def render_short_midline(r: dict[str, Any]) -> str:
     lines.append("")
     lines.append("🧭 中线")
     lines.append(f"  阶段：{stage_line or '未知'}")
+    # 中线看法与仓位衔接：结构看好但仓位为0时，加桥接说明
+    _suggested_pct = r.get("suggested_pct")
+    try:
+        _sp = int(_suggested_pct) if _suggested_pct is not None else None
+    except (TypeError, ValueError):
+        _sp = None
+    _mid_view_positive = any(kw in mid for kw in ("可跟踪", "可关注", "趋势未坏", "看涨"))
+    if _mid_view_positive and _sp is not None and _sp <= 0:
+        mid = f"{mid}，但纪律暂不允许出手"
     lines.append(f"  看法：{mid}")
 
     # 威科夫/缠论：严格 mid 字段，禁止回退日线
@@ -388,7 +397,10 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     lines.append("")
     if "可跟踪" in mid or "未坏" in mid:
-        lines.append(f"✅ 亮点：中线看法仍可跟踪" + (f"；阶段 {stage_line}" if stage_line else ""))
+        if _sp is not None and _sp <= 0:
+            lines.append(f"✅ 亮点：中线结构可跟踪，等纪律放行" + (f"；阶段 {stage_line}" if stage_line else ""))
+        else:
+            lines.append(f"✅ 亮点：中线看法仍可跟踪" + (f"；阶段 {stage_line}" if stage_line else ""))
     elif support > 0 and current > support * 1.005:
         lines.append(f"✅ 亮点：现价仍在支撑 {support:.2f} 上方")
     elif stage_line and any(k in stage_line for k in ("蓄势", "主升")):

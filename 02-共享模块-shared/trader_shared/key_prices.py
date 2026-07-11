@@ -241,8 +241,9 @@ def build_key_prices(
     if buy_ref is not None:
         r1 = _round1(risk_buy or 0)
         e1 = _round1(reward_buy or 0)
-        f1 = _round1(reward_far or 0) if reward_far is not None else e1
-        line_buy = f"{buy_ref:.2f} 买：亏约 {r1} / 赚约 {e1}（远看 {f1}）"
+        far_price = (far_sell or swing_sell) if (far_sell or swing_sell) else None
+        far_label = f"目标{far_price:.2f}" if far_price else f"远看{e1}"
+        line_buy = f"{buy_ref:.2f} 买：亏约 {r1} / 赚约 {e1}（{far_label}）"
     if current is not None:
         r2 = _round1(risk_chase or 0)
         e2 = _round1(reward_chase or 0)
