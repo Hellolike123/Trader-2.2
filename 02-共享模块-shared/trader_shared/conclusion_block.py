@@ -32,25 +32,28 @@ def _build_wave_label(chanlun_daily: Any, current: float = 0.0) -> str:
     divergence = chan.get("divergence") if isinstance(chan.get("divergence"), dict) else {}
     merged_zones = chan.get("merged_zones") if isinstance(chan.get("merged_zones"), list) else []
 
-    # 段数不足：1段时结合trend_label给提示，不硬编浪型
+    # ── 段数不足：1段时结合trend_label，不硬编浪型 ──
     if len(segments) < 2:
         if len(segments) == 1 and trend_label:
             if trend_label == "拉升段":
-                return "段数不足·拉升趋势中（需笔级别确认）"
+                _base = "拉升趋势中"
             elif trend_label == "回调段":
-                return "段数不足·回调趋势中（需笔级别确认）"
+                _base = "回调一笔中"
             elif trend_label == "震荡段":
-                return "段数不足·震荡中（需笔级别确认）"
-        return "段数不足，无明确浪型"
+                _base = "震荡中"
+            else:
+                _base = "趋势待确认"
+            _sig = _signal_overlay(buy_points, sell_points, divergence)
+            return f"{_base} · 结构待确认{_sig}" if not _sig else f"{_base} · {_sig}"
+        return "笔数不足 · 无法判断"
 
-    # 提取最近的段方向序列
+    # ── 段数足够：用缠论走势分类 ──
     recent_segs = segments[-8:] if len(segments) >= 8 else segments
     directions = [s.get("direction", "") for s in recent_segs if isinstance(s, dict)]
 
     if not directions:
-        return "无明确浪型"
+        return "无明确结构"
 
-    # 统计连续段
     def _count_consecutive(dirs: list[str], target: str) -> int:
         count = 0
         for d in reversed(dirs):
@@ -63,52 +66,28 @@ def _build_wave_label(chanlun_daily: Any, current: float = 0.0) -> str:
     up_count = _count_consecutive(directions, "up")
     down_count = _count_consecutive(directions, "down")
 
-    # 获取最后一个有效中枢
     last_zone = None
     for z in reversed(merged_zones):
         if isinstance(z, dict) and z.get("valid", True):
             last_zone = z
             break
 
-    # 买点/卖点摘要
-    buy_text = ""
-    if buy_points:
-        types = [p.get("type", "") for p in buy_points if isinstance(p, dict) and p.get("type")]
-        if types:
-            buy_text = types[0]  # 取最近的买点
-
-    sell_text = ""
-    if sell_points:
-        types = [p.get("type", "") for p in sell_points if isinstance(p, dict) and p.get("type")]
-        if types:
-            sell_text = types[0]
-
-    has_top_div = divergence.get("top_divergence", False)
-    has_bot_div = divergence.get("bottom_divergence", False)
-
-    # ── 浪型推导 ──
+    # ── 缠论走势分类输出 ──
     parts: list[str] = []
 
     if trend_label == "拉升段":
         if up_count >= 3:
-            if down_count >= 1:
-                parts.append(f"{up_count}浪上涨后的回调")
-            else:
-                parts.append(f"{up_count}浪连续上涨")
+            parts.append("趋势延续 · 笔力递增")
         elif up_count >= 1 and down_count >= 1:
-            parts.append("上涨趋势中的短期回调")
-        elif up_count >= 1:
-            parts.append(f"{up_count}浪上涨中")
+            parts.append("趋势回调确认中")
         else:
-            parts.append("拉升趋势")
+            parts.append("拉升趋势中")
 
     elif trend_label == "回调段":
-        if down_count >= 3:
-            parts.append(f"回调第{down_count}浪（下跌趋势）")
+        if down_count >= 2:
+            parts.append("回调确认中 · 关注一笔底")
         elif down_count >= 1 and up_count >= 1:
-            parts.append(f"上涨后的{down_count}浪回调")
-        elif down_count >= 1:
-            parts.append(f"回调{down_count}浪")
+            parts.append("回调一笔中")
         else:
             parts.append("回调趋势")
 
@@ -119,15 +98,15 @@ def _build_wave_label(chanlun_daily: Any, current: float = 0.0) -> str:
             if current > 0 and zt > 0 and zb > 0:
                 pos = (current - zb) / (zt - zb) if zt > zb else 0.5
                 if pos > 0.7:
-                    parts.append("中枢震荡·靠近上沿")
+                    parts.append("中枢震荡 · 靠近上沿")
                 elif pos < 0.3:
-                    parts.append("中枢震荡·靠近下沿")
+                    parts.append("中枢震荡 · 靠近下沿")
                 else:
                     parts.append("中枢震荡")
             else:
                 parts.append("中枢震荡")
         else:
-            parts.append("震荡盘整")
+            parts.append("盘整震荡")
 
     elif "单边上涨" in structure_type:
         parts.append("单边上涨")
@@ -136,7 +115,6 @@ def _build_wave_label(chanlun_daily: Any, current: float = 0.0) -> str:
     elif structure_type == "无结构":
         parts.append("无明确结构")
     else:
-        # 用 direction 序列推断
         if up_count > down_count:
             parts.append("偏多震荡")
         elif down_count > up_count:
@@ -144,22 +122,32 @@ def _build_wave_label(chanlun_daily: Any, current: float = 0.0) -> str:
         else:
             parts.append("多空平衡")
 
-    # 叠加信号提示
-    signal_parts: list[str] = []
-    if buy_text:
-        signal_parts.append(f"等{buy_text}确认")
-    if sell_text:
-        signal_parts.append(f"注意{sell_text}")
-    if has_top_div:
-        signal_parts.append("顶背驰")
-    if has_bot_div:
-        signal_parts.append("底背驰")
-
+    _sig = _signal_overlay(buy_points, sell_points, divergence)
     result = parts[0] if parts else ""
-    if signal_parts:
-        result += " · " + "｜".join(signal_parts[:2])  # 最多两个信号
+    if _sig:
+        result += f" · {_sig}"
 
     return result
+
+
+def _signal_overlay(
+    buy_points: list, sell_points: list, divergence: dict
+) -> str:
+    """从买卖点和背驰生成信号叠加文本。"""
+    parts: list[str] = []
+    if buy_points:
+        types = [p.get("type", "") for p in buy_points if isinstance(p, dict) and p.get("type")]
+        if types:
+            parts.append(f"关注{types[0]}")
+    if sell_points:
+        types = [p.get("type", "") for p in sell_points if isinstance(p, dict) and p.get("type")]
+        if types:
+            parts.append(f"注意{types[0]}")
+    if divergence.get("top_divergence"):
+        parts.append("顶背驰")
+    if divergence.get("bottom_divergence"):
+        parts.append("底背驰")
+    return "｜".join(parts[:2]) if parts else ""
 
 
 def _unwrap_chan(chan_result: Any) -> dict[str, Any]:
