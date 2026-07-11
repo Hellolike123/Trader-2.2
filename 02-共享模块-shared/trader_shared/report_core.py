@@ -277,26 +277,27 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _chan_line += f" · {_wave}"
         lines.append(f"  缠论：{_chan_line}")
 
-    # 动能 + 价量资金（压缩为一行）
+    # 动能（独立行）
     _msig = fusion_signals.get("momentum") if isinstance(fusion_signals.get("momentum"), dict) else {}
-    _vsig = fusion_signals.get("vpf") if isinstance(fusion_signals.get("vpf"), dict) else {}
-    _kn_parts = []
     if _msig:
         _mst = str(_msig.get("reason") or "").replace("动量", "").replace("动能", "").strip().lstrip(":：").strip() or "无信号"
         _mst = re.sub(r"[（(][^）)]*[）)]", "", _mst).strip()
-        if len(_mst) > 20:
-            _mst = _mst[:18] + "…"
-        _kn_parts.append(_mst)
+        if len(_mst) > 25:
+            _mst = _mst[:23] + "…"
+        lines.append(f"  动能：{_mst}")
+    else:
+        lines.append("  动能：暂无信号")
+
+    # 价量资金（独立行）
+    _vsig = fusion_signals.get("vpf") if isinstance(fusion_signals.get("vpf"), dict) else {}
     if _vsig:
         _vst = str(_vsig.get("reason") or _vsig.get("vp_reason") or "").strip() or "中性"
         _vst = re.sub(r"[（(][^）)]*[）)]", "", _vst).strip()
-        if len(_vst) > 20:
-            _vst = _vst[:18] + "…"
-        _kn_parts.append(_vst)
-    if _kn_parts:
-        lines.append(f"  动能：{' · '.join(_kn_parts)}")
+        if len(_vst) > 25:
+            _vst = _vst[:23] + "…"
+        lines.append(f"  价量资金：{_vst}")
     else:
-        lines.append("  动能：暂无信号")
+        lines.append("  价量资金：暂无信号")
 
     # 失效（保留）
     _gate = r.get("mistery_gate") if isinstance(r.get("mistery_gate"), dict) else {}
