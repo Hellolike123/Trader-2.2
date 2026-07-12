@@ -71,6 +71,7 @@ class MomentumPlugin(IndicatorPlugin):
         change_pct: float | None,
         quote: dict[str, Any],
         supertrend_direction: str | None = None,
+        weekly_bars: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         from trader_shared.momentum_core import momentum_strategy
         result = momentum_strategy(current, bars, change_pct, quote)

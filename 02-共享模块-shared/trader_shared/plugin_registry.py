@@ -34,6 +34,21 @@ def _plugin_accepts_supertrend_direction(fn) -> bool:
     return "supertrend_direction" in sig.parameters
 
 
+def _plugin_accepts_weekly_bars(fn) -> bool:
+    """检测插件 analyze 是否接受 weekly_bars 关键字参数（ADR-002 透传）。
+
+    含 **kwargs 的插件视为兼容；否则仅当签名显式声明 weekly_bars 才透传，
+    避免对未升级插件造成 TypeError。
+    """
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return False
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+        return True
+    return "weekly_bars" in sig.parameters
+
+
 class PluginRegistry:
     """Registry for indicator plugins.
 
@@ -68,6 +83,8 @@ class PluginRegistry:
         change_pct: float | None,
         quote: dict[str, Any],
         supertrend_direction: str | None = None,
+        weekly_bars: list[dict[str, Any]] | None = None,
+        midline: bool = False,
     ) -> dict[str, dict[str, Any]]:
         """Run all registered plugins and return their results.
 
@@ -80,13 +97,20 @@ class PluginRegistry:
                 用于方案 B「只确认不否决」微调：若未传入，则内部基于 bars 自动计算
                 （与 build_report 直算路径一致）。仅透传给显式声明接受该参数的插件
                 （当前为 momentum），避免破坏其他插件签名。
+            weekly_bars: 周 K 线（中线主分析 / 日线 chan 的 higher_trend 过滤）。
+                透传给所有声明接受该参数的插件（当前为 chan），保证 analyze_all 路径
+                与 build_report 直算路径日线 chan 结果等价（ADR-002 等价性闸门关键）。
+            midline: 是否额外产出中线结果（chanlun_midline / wyckoff_midline）。
+                仅 build_report 路由时传 True；fusion_core / final_pool / review 的
+                analyze_all 调用不传，故中线计算不波及这些调用方（最小爆炸半径）。
 
         Returns:
-            Dict mapping plugin name → analysis result dict
+            Dict mapping plugin name → analysis result dict。midline=True 时额外含
+            "chanlun_midline" / "wyckoff_midline" 键。
         """
         # 方案 B（P1-1）：registry 路径也应触发动量「只确认不否决」微调。
-        # build_report 走 momentum_strategy 直算 + 显式 nudge，不经 analyze_all，
-        # 故此处透传不会与 build_report 造成双重微调。
+        # build_report 现在也走 analyze_all（ADR-002），动量 nudge 由 MomentumPlugin
+        # 统一完成，避免 build_report 二次 nudge 导致 weighted_score 漂移。
         if supertrend_direction is None:
             try:
                 from trader_shared.indicator_math import calc_supertrend
@@ -97,13 +121,12 @@ class PluginRegistry:
         results: dict[str, dict[str, Any]] = {}
         for name, plugin in self._plugins.items():
             try:
+                extra = {}
                 if _plugin_accepts_supertrend_direction(plugin.analyze):
-                    result = plugin.analyze(
-                        current, bars, change_pct, quote,
-                        supertrend_direction=supertrend_direction,
-                    )
-                else:
-                    result = plugin.analyze(current, bars, change_pct, quote)
+                    extra["supertrend_direction"] = supertrend_direction
+                if _plugin_accepts_weekly_bars(plugin.analyze):
+                    extra["weekly_bars"] = weekly_bars
+                result = plugin.analyze(current, bars, change_pct, quote, **extra)
                 if isinstance(result, dict):
                     results[name] = result
                 else:
@@ -115,6 +138,32 @@ class PluginRegistry:
                     "confidence": 0.0,
                     "reason": f"{name}分析异常: {exc}",
                 }
+
+        # ── ADR-002 中线分支：仅 midline=True 时产出，避免波及 fusion_core 等调用方 ──
+        if midline:
+            try:
+                from trader_shared.chan_core import chanlun_strategy_midline
+                results["chanlun_midline"] = chanlun_strategy_midline(
+                    current, weekly_bars, bars, change_pct, quote
+                ) or {}
+            except Exception as exc:
+                _logger.warning("midline chanlun failed: %s", exc)
+                results["chanlun_midline"] = {
+                    "direction": 0, "confidence": 0.0,
+                    "reason": f"中线缠论异常: {exc}",
+                }
+            try:
+                from trader_shared.wyckoff_core import wyckoff_strategy_midline
+                results["wyckoff_midline"] = wyckoff_strategy_midline(
+                    current, weekly_bars, bars, change_pct, quote
+                ) or {}
+            except Exception as exc:
+                _logger.warning("midline wyckoff failed: %s", exc)
+                results["wyckoff_midline"] = {
+                    "direction": 0, "confidence": 0.0,
+                    "reason": f"中线威科夫异常: {exc}",
+                }
+
         return results
 
     def get_weights(self) -> dict[str, float]:

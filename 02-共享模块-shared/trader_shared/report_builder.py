@@ -301,11 +301,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         snapshot.data_status = "partial"
 
     recent20 = bars[-STRUCTURE_WINDOW:] if len(bars) >= STRUCTURE_WINDOW else bars
-    from trader_shared.chan_core import chanlun_strategy, chanlun_strategy_midline
-    from trader_shared.wyckoff_core import wyckoff_strategy, wyckoff_strategy_midline
-    from trader_shared.momentum_core import momentum_strategy
 
-    # 并行运行五个独立任务：三策略 + 主力资金 + 大盘环境
+    # 并行运行：主力资金 + 大盘环境 + 板块（策略分析经 PluginRegistry 组合点，见下文）
     change_pct_val = quote.get("current_change_pct")
 
     def _fetch_fund_flow():
@@ -419,49 +416,40 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     # cmd_refresh 内建 pool → build_report 内再建 pool → load_market_snapshot 内再建 pool
     # 现在三层共享同一个 max_workers=5 池
     pool = get_shared_build_pool()
-    # 日线缠论：fusion / 短线专家（周线仅作 higher_trend）
-    f_chan = pool.submit(chanlun_strategy, current, bars, change_pct_val, quote, weekly_bars=weekly_bars)
-    # 中线缠论独立判断：优先周 K 完整笔段（与日线分离）
-    f_chan_mid = pool.submit(
-        chanlun_strategy_midline,
-        current,
-        weekly_bars,
-        bars,
-        change_pct_val,
-        quote,
+
+    # 注入 5m 供 VwapPlugin 在 analyze_all 路径使用（与 build_report 直算结果一致）
+    quote["_bars_5m"] = bars_5m
+
+    # ── ADR-002：主路径分析统一经 PluginRegistry 组合点 ──
+    # 日线三策略（chan/wyck/mom）+ 中线两策略（chan/wyck）经 analyze_all 组合；
+    # weekly_bars 透传给 ChanlunPlugin，保证日线 chan 与直算等价（陷阱 #2 闸门）；
+    # midline=True 才产出中线，避免 fusion_core / final_pool / review 的 analyze_all
+    # 调用被波及（最小爆炸半径）。动量 nudge 由 analyze_all 内 MomentumPlugin 完成，
+    # 此处不再重复（否则双重微调导致 weighted_score 漂移）。
+    from trader_shared.plugin_registry import get_registry
+    _registry = get_registry()
+    _plugin_results = _registry.analyze_all(
+        current, bars, change_pct_val, quote,
+        weekly_bars=weekly_bars, midline=True,
     )
-    # 日线威科夫：仍供 fusion 短线侧兼容
-    f_wyk = pool.submit(wyckoff_strategy, current, bars, change_pct_val, quote)
-    # 中线威科夫独立判断：优先周 K（与日线 fusion 分离）
-    f_wyk_mid = pool.submit(
-        wyckoff_strategy_midline,
-        current,
-        weekly_bars,
-        bars,
-        change_pct_val,
-        quote,
-    )
-    f_mom = pool.submit(momentum_strategy, current, bars, change_pct_val, quote)
+    chan_result = _plugin_results.get("chanlun") or {}        # 日线；_chan_to_signal 会自己剥
+    chan_mid_result = _plugin_results.get("chanlun_midline") or {}
+    wyck_result = _plugin_results.get("wyckoff") or {}
+    wyck_mid_result = _plugin_results.get("wyckoff_midline") or {}
+    momentum_result = _plugin_results.get("momentum") or {}
+
+    # 主力资金 / 大盘环境 / 板块（与策略分析解耦，仍走共享池并行）
     f_mf = pool.submit(_fetch_fund_flow)
     f_env = pool.submit(_fetch_market_env)
     f_sector = pool.submit(_fetch_sector_data)
 
-    chan_result = f_chan.result() or {}  # 日线；_chan_to_signal 会自己剥
-    chan_mid_result = f_chan_mid.result() or {}
-    wyck_result = f_wyk.result() or {}
-    wyck_mid_result = f_wyk_mid.result() or {}
-    momentum_result = f_mom.result() or {}
-
-    # ── ATR / Supertrend / VWAP 展示增强（方案 A+B）──
-    # Supertrend 趋势带方向对动量做「只确认不否决」微调（方案 B）
-    from trader_shared.plugins.momentum_plugin import apply_supertrend_nudge
+    # ── ATR / Supertrend / VWAP 展示增强 ──
+    # Supertrend 趋势带方向（仅展示用）：动量 nudge 已由 analyze_all 内 MomentumPlugin
+    # 统一完成，此处只计算方向供报告展示，不再对 momentum_result 二次微调。
     _st = calc_supertrend(bars)
     _st_dir = _st.get("direction")
-    momentum_result = apply_supertrend_nudge(momentum_result, _st_dir)
     # VWAP：复用快照内 5 分钟 K 线，避免每次渲染重拉行情
     _vwap_res = calc_vwap(bars_5m, current_price=current)
-    # 注入 5m 供 VwapPlugin 在 analyze_all 路径使用（与 build_report 直算结果一致）
-    quote["_bars_5m"] = bars_5m
 
     # 主力引擎结果（异常降级为 unknown）
     main_force_env = "unknown"

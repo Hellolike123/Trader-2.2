@@ -27,6 +27,7 @@ class VwapPlugin(IndicatorPlugin):
         bars: list[dict[str, Any]],
         change_pct: float | None,
         quote: dict[str, Any],
+        weekly_bars: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         # 5 分钟 K 线由 build_report 注入（quote["_bars_5m"]），不在此重拉行情
         bars_5m = (quote or {}).get("_bars_5m") or []

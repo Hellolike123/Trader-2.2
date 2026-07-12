@@ -1,6 +1,6 @@
 # ADR-002: `build_report` 改走 `PluginRegistry`（中线不丢、日线等价）
 
-- **Status**: Deferred（待插件接口扩展 + 等价性验证；**本次未实现**，避免静默回归）
+- **Status**: Accepted（已在 `refactor/trader-architecture` 落地，等价性闸门全绿）
 - **Branch**: `refactor/trader-architecture`
 - **前置**: ADR-001（真库）、ADR-003（逻辑已进 `report_builder.py`）
 
@@ -55,3 +55,47 @@
 ADR-001（真库）+ ADR-003（逻辑进 `report_builder`）已为 ADR-002 铺好地基：
 `build_report` 现在在 `trader_shared` 内、可独立测试。届时 ADR-002 的改动落在
 `report_builder.py` 内，等价性验证可直接复用 `tests/test_build_report_golden.py` 扩展。
+
+---
+
+## 已落地实现（commit 见分支 `refactor/trader-architecture`）
+
+按"安全实现路径"逐步落地，两个陷阱均已堵住：
+
+1. **接口扩展**：`IndicatorPlugin.analyze` 增加 `weekly_bars` 关键字参数；
+   `ChanlunPlugin`/`WyckoffPlugin`/`MomentumPlugin`/`SupertrendPlugin`/`VwapPlugin`
+   全部接受 `weekly_bars`（未使用者忽略）。`PluginRegistry.analyze_all` 新增
+   `weekly_bars` 参数并透传给所有声明接受它的插件（`_plugin_accepts_weekly_bars`
+   守卫，向后兼容未升级插件）。
+2. **中线分支（最小爆炸半径方案）**：`analyze_all` 增加 `midline: bool = False`
+   参数，仅当 `midline=True` 时才计算 `chanlun_strategy_midline` /
+   `wyckoff_strategy_midline` 并挂到 `chanlun_midline` / `wyckoff_midline` 键。
+   **不注册全局 midline 插件**——避免 `fusion_core` / `final_pool` / `review` 的
+   `analyze_all` 调用被波及（那些调用不传 `midline=True`，行为与过去完全一致）。
+3. **`build_report` 改走 registry**：原 5 个 `pool.submit(策略函数, ...)` 直调替换为
+   单次 `registry.analyze_all(current, bars, change_pct, quote, weekly_bars=weekly_bars,
+   midline=True)`，按 key 取回 `{chanlun, chanlun_midline, wyckoff, wyckoff_midline,
+   momentum}`，喂融合层。删除了直调的 5 个策略 import。
+4. **双重 nudge 去重**：`analyze_all` 内 `MomentumPlugin` 已做 Supertrend「只确认不否决」
+   微调，故 `build_report` 移除原重复的 `apply_supertrend_nudge`（否则动量被微调两次，
+   `weighted_score` 静默漂移——正是陷阱 #2 的另一种形态）。
+
+### 等价性闸门（关键）
+新增 `tests/test_build_report_adr002_equivalence.py`：
+- `scripts/_capture_adr002_baseline.py` 先捕获改前 `build_report` 的精确字段
+  （`weighted_score` / `confidence` / `action` / `disagreement` / 两个 `midline` 字典）
+  写入 `tests/fixtures/report_baseline.json`；
+- 路由后再次运行并逐字段递归 diff（float 容差 1e-6）。只有完全一致（或浮点 epsilon
+  内）才通过。**这恰好堵住 golden 范围断言抓不到的日线 chan 等价性退化。**
+
+### 验证结果
+- `tests/test_imports_smoke.py` + `tests/test_build_report_golden.py`（5 策略调用计数 +
+  中线 key 存活）+ `tests/test_build_report_adr002_equivalence.py`：**全绿**，
+  `weighted_score=0.034` 与基线一致。
+- 既有 `test_arch_refactoring.py` / `test_indicator_enhancements.py`（含 `analyze_all`
+  调用）**39 passed**，无回归。
+
+### 未做 / 后续
+- 部署副本（`~/.hermes` / `~/.workbuddy`）**未**重打包——分支仍在重构中，待 promote 时
+  由 `pack_all.py` 从仓库统一再生，避免把半成品推入运行中的 agent。
+- `report_builder.py` 仍 2881 行，ADR-003 文档建议的 domain/presentation 再拆仍为后续项。

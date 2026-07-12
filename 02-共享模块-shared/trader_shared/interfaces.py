@@ -83,6 +83,7 @@ class IndicatorPlugin(ABC):
         bars: list[dict[str, Any]],
         change_pct: float | None,
         quote: dict[str, Any],
+        weekly_bars: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Run analysis and return standardized result.
 
@@ -91,6 +92,9 @@ class IndicatorPlugin(ABC):
             bars: Daily K-line bars
             change_pct: Today's change percentage
             quote: Real-time quote dict
+            weekly_bars: Weekly K-line bars (midline analysis / daily chan
+                higher_trend filter). Plugins that don't need it should accept
+                and ignore it so analyze_all can always forward it (ADR-002).
 
         Returns:
             Dict with at least: direction (int), confidence (float), reason (str)

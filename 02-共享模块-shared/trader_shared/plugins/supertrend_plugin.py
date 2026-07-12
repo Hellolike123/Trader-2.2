@@ -26,6 +26,7 @@ class SupertrendPlugin(IndicatorPlugin):
         bars: list[dict[str, Any]],
         change_pct: float | None,
         quote: dict[str, Any],
+        weekly_bars: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         st = calc_supertrend(bars)
         direction = st["direction"]
