@@ -18,14 +18,15 @@ from typing import Any
 
 # 权重矩阵: 每个 Regime 是一组权重, 和为 1.0
 REGIME_WEIGHTS: dict[str, dict[str, float]] = {
+    # 短线三席：缠论 / 动能 / 价量资金(vpf)；日线威科夫已退出融合
     # 大盘好 → 动量占优 (趋势延续靠动量)
-    "正常": {"chan": 0.3, "momentum": 0.45, "wyckoff": 0.25},
+    "正常": {"chan": 0.3, "momentum": 0.45, "vpf": 0.25},
     # 大盘弱 → 缠论占优 (结构更可靠)
-    "偏弱": {"chan": 0.5, "momentum": 0.15, "wyckoff": 0.35},
+    "偏弱": {"chan": 0.5, "momentum": 0.15, "vpf": 0.35},
     # 大盘很差 → 全员空仓
-    "很差": {"chan": 0.0, "momentum": 0.0, "wyckoff": 0.0},
+    "很差": {"chan": 0.0, "momentum": 0.0, "vpf": 0.0},
     # 未知 → fallback 到"正常" (保守)
-    "未知": {"chan": 0.3, "momentum": 0.45, "wyckoff": 0.25},
+    "未知": {"chan": 0.3, "momentum": 0.45, "vpf": 0.25},
 }
 
 
@@ -36,7 +37,7 @@ def get_regime_weights(regime: str) -> dict[str, float]:
         regime: "正常" | "偏弱" | "很差" | "未知"
 
     Returns:
-        {"chan": 0.3, "momentum": 0.45, "wyckoff": 0.25}
+        {"chan": 0.3, "momentum": 0.45, "vpf": 0.25}
 
     如果 Regime 不在字典中, fallback 到 "正常"。
     """

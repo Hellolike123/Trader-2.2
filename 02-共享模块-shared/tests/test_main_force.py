@@ -30,6 +30,33 @@ class TestSecidMapping:
         assert _secid("300001") == "0.300001"
 
 
+class TestParseFflowKlines:
+    """东财 daykline 行解析（元→万元），不依赖网络。"""
+
+    def test_parse_line_yuan_to_wan(self):
+        from trader_shared.fund_flow_data import _parse_fflow_kline_line
+        # 主力1000万=1e7元, 小-200万, 中-100万, 大300万, 超700万
+        line = "2026-07-01,10000000,-2000000,-1000000,3000000,7000000"
+        row = _parse_fflow_kline_line(line)
+        assert row is not None
+        assert row["date"] == "2026-07-01"
+        assert row["net_flow_wan"] == 1000.0
+        assert row["small_wan"] == -200.0
+        assert row["medium_wan"] == -100.0
+        assert row["large_wan"] == 300.0
+        assert row["super_large_wan"] == 700.0
+
+    def test_parse_klines_tail_days(self):
+        from trader_shared.fund_flow_data import _parse_fflow_klines
+        lines = [
+            f"2026-01-{i:02d},10000,0,0,5000,5000" for i in range(1, 11)
+        ]
+        rows = _parse_fflow_klines(lines, days=3)
+        assert len(rows) == 3
+        assert rows[-1]["date"] == "2026-01-10"
+        assert rows[0]["net_flow_wan"] == 1.0  # 10000元 → 1万
+
+
 class TestCalcFundFlowFeatures:
     def test_normal_features(self):
         from trader_shared.fund_flow_data import calc_fund_flow_features
@@ -197,23 +224,23 @@ class TestMainForceFusion:
     def test_no_main_force_env_unchanged(self):
         """不传 main_force_env 时行为不变"""
         from trader_shared.fusion_core import _apply_main_force_weights
-        weights = {"chan": 0.45, "momentum": 0.20, "wyckoff": 0.35}
+        weights = {"chan": 0.45, "momentum": 0.20, "vpf": 0.35}
         result = _apply_main_force_weights(weights, "unknown")
         assert result == weights
 
     def test_accumulation_adjustment(self):
         """吸筹期：wyckoff +10%, momentum -10%"""
         from trader_shared.fusion_core import _apply_main_force_weights
-        weights = {"chan": 0.40, "momentum": 0.30, "wyckoff": 0.30}
+        weights = {"chan": 0.40, "momentum": 0.30, "vpf": 0.30}
         result = _apply_main_force_weights(weights, "accumulation")
-        assert result["wyckoff"] > 0.30
+        assert result["vpf"] > 0.30
         assert result["momentum"] < 0.30
         assert abs(sum(result.values()) - 1.0) < 0.01
 
     def test_markup_adjustment(self):
         """拉升期：momentum +10%, chan -5%"""
         from trader_shared.fusion_core import _apply_main_force_weights
-        weights = {"chan": 0.40, "momentum": 0.30, "wyckoff": 0.30}
+        weights = {"chan": 0.40, "momentum": 0.30, "vpf": 0.30}
         result = _apply_main_force_weights(weights, "markup")
         assert result["momentum"] > 0.30
         assert abs(sum(result.values()) - 1.0) < 0.01
@@ -221,7 +248,7 @@ class TestMainForceFusion:
     def test_markdown_adjustment(self):
         """砸盘期：三路均下调（归一化后仍和为1）"""
         from trader_shared.fusion_core import _apply_main_force_weights
-        weights = {"chan": 0.40, "momentum": 0.30, "wyckoff": 0.30}
+        weights = {"chan": 0.40, "momentum": 0.30, "vpf": 0.30}
         result = _apply_main_force_weights(weights, "markdown")
         assert abs(sum(result.values()) - 1.0) < 0.01
         # 所有权重应 >= 0
@@ -231,7 +258,7 @@ class TestMainForceFusion:
         """修正后权重之和必须为 1.0"""
         from trader_shared.fusion_core import _apply_main_force_weights
         for stage in ("accumulation", "testing", "markup", "distribution", "markdown"):
-            weights = {"chan": 0.45, "momentum": 0.20, "wyckoff": 0.35}
+            weights = {"chan": 0.45, "momentum": 0.20, "vpf": 0.35}
             result = _apply_main_force_weights(weights, stage)
             assert abs(sum(result.values()) - 1.0) < 0.01, f"Failed for {stage}"
 

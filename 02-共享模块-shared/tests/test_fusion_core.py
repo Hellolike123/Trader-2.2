@@ -408,27 +408,27 @@ class TestRegimeWeights:
         w = self._fn("正常")
         assert w["chan"] == 0.3
         assert w["momentum"] == 0.45
-        assert w["wyckoff"] == 0.25
+        assert w["vpf"] == 0.25
         assert sum(w.values()) == 1.0
 
     def test_weak(self):
         w = self._fn("偏弱")
         assert w["chan"] == 0.5
         assert w["momentum"] == 0.15
-        assert w["wyckoff"] == 0.35
+        assert w["vpf"] == 0.35
         assert sum(w.values()) == 1.0
 
     def test_very_bad(self):
         w = self._fn("很差")
         assert w["chan"] == 0.0
         assert w["momentum"] == 0.0
-        assert w["wyckoff"] == 0.0
+        assert w["vpf"] == 0.0
 
     def test_unknown_fallback(self):
         w = self._fn("未知")
         assert w["chan"] == 0.3
         assert w["momentum"] == 0.45
-        assert w["wyckoff"] == 0.25
+        assert w["vpf"] == 0.25
 
     def test_unknown_regime_fallback(self):
         """未知 Regime 应 fallback 到默认配置。"""
@@ -497,25 +497,25 @@ class TestComputeConfidence:
         self._fn = compute_confidence
 
     def test_high_confidence(self):
-        conf = self._fn(0.5, 0, {"chan": 0.3, "momentum": 0.45, "wyckoff": 0.25})
+        conf = self._fn(0.5, 0, {"chan": 0.3, "momentum": 0.45, "vpf": 0.25})
         assert conf > 0.5
 
     def test_zero_score(self):
         # score=0, 无分歧, 等权重 → base=0, 零惩罚, 零集中 = 0
-        conf = self._fn(0.0, 0, {"chan": 0.333, "momentum": 0.333, "wyckoff": 0.334})
+        conf = self._fn(0.0, 0, {"chan": 0.333, "momentum": 0.333, "vpf": 0.334})
         assert conf >= 0.0  # 底线为 0, 不崩溃
 
     def test_high_disagreement(self):
-        conf = self._fn(0.8, 2, {"chan": 0.3, "momentum": 0.45, "wyckoff": 0.25})
+        conf = self._fn(0.8, 2, {"chan": 0.3, "momentum": 0.45, "vpf": 0.25})
         # 全部分歧 (direction -1/0/1) → 0~2 → 惩罚最大
-        assert conf < self._fn(0.8, 0, {"chan": 0.5, "momentum": 0.5, "wyckoff": 0.0})
+        assert conf < self._fn(0.8, 0, {"chan": 0.5, "momentum": 0.5, "vpf": 0.0})
 
     def test_clamped_at_095(self):
-        conf = self._fn(1.0, 0, {"chan": 0.9, "momentum": 0.05, "wyckoff": 0.05})
+        conf = self._fn(1.0, 0, {"chan": 0.9, "momentum": 0.05, "vpf": 0.05})
         assert conf <= 0.95
 
     def test_clamped_at_0(self):
-        conf = self._fn(-1.0, 2, {"chan": 0.0, "momentum": 0.0, "wyckoff": 0.0})
+        conf = self._fn(-1.0, 2, {"chan": 0.0, "momentum": 0.0, "vpf": 0.0})
         assert conf >= 0.0
 
 
@@ -526,15 +526,25 @@ class TestMergeDecisions:
         from trader_shared.fusion_core import merge_decisions
         chan = {"chanlun": {"buy_points": [{"type": "一类买", "price": 28}], "divergence": {}, "trend_label": "拉升段"}}
         mom = {"momentum": {"score": 72, "direction": "bullish", "signals": ["MACD金叉"]}}
-        wyk = {"wyckoff": {"spring_signal": True}}
-        result = merge_decisions(chan, mom, wyk, regime="正常")
+        wyk = {"wyckoff": {}}  # 短线不计分
+        # 第三席 VPF 偏多（资金连入）
+        ff = {
+            "consecutive_inflow_days": 3,
+            "consecutive_outflow_days": 0,
+            "daily_flow_5d": [100, 100, 100, 80, 90],
+            "cum_flow_5d_wan": 470,
+            "flow_price_relation": "价涨资入",
+        }
+        result = merge_decisions(chan, mom, wyk, regime="正常", fund_flow_data=ff)
 
         assert isinstance(result["action"], str)
         assert result["regime"] == "正常"
         assert result["disagreement"] == 0  # 全部看多
         assert "chan" in result["signals_detail"]
         assert "momentum" in result["signals_detail"]
-        assert "wyckoff" in result["signals_detail"]
+        assert "vpf" in result["signals_detail"]
+        assert result["signals_detail"]["vpf"]["direction"] == 1
+        assert "wyckoff" in result["signals_detail"]  # 兼容占位
 
     def test_conflict(self):
         from trader_shared.fusion_core import merge_decisions
@@ -550,8 +560,15 @@ class TestMergeDecisions:
         from trader_shared.fusion_core import merge_decisions
         chan = {"chanlun": {"buy_points": [{"type": "一类买", "price": 28}], "divergence": {}, "trend_label": "拉升段"}}
         mom = {"momentum": {"score": 80, "direction": "bullish", "signals": []}}
-        wyk = {"wyckoff": {"spring_signal": True}}
-        result = merge_decisions(chan, mom, wyk, regime="很差")
+        wyk = {"wyckoff": {}}
+        ff = {
+            "consecutive_inflow_days": 3,
+            "consecutive_outflow_days": 0,
+            "daily_flow_5d": [100, 100, 100],
+            "cum_flow_5d_wan": 300,
+            "flow_price_relation": "价涨资入",
+        }
+        result = merge_decisions(chan, mom, wyk, regime="很差", fund_flow_data=ff)
 
         assert result["disagreement"] == 0
 
@@ -702,7 +719,7 @@ class TestPhase3Features:
     """Comprehensive unit tests for Phase 3: priority overrides, conflict resolutions, and adaptive parameters."""
 
     def test_scenario_priority_filter_bottom(self):
-        """Under pos_pct <= 0.3, weights should dynamically adjust to {"chan": 0.45, "momentum": 0.20, "wyckoff": 0.35}."""
+        """Under pos_pct <= 0.3, weights should dynamically adjust to {"chan": 0.45, "momentum": 0.20, "vpf": 0.35}."""
         from trader_shared.fusion_core import merge_decisions
         chan = {"chanlun": {"buy_points": [], "divergence": {}, "trend_label": "数据不足"}}
         mom = {"momentum": {"score": 50, "direction": "neutral", "signals": []}}
@@ -715,7 +732,7 @@ class TestPhase3Features:
         ]
         # pos_pct = (11.0 - 10.0) / (21.0 - 10.0) = 1.0 / 11.0 = 0.09 <= 0.3
         result = merge_decisions(chan, mom, wyk, regime="正常", current_price=11.0, bars=bars)
-        assert result["weights_used"] == {"chan": 0.44, "momentum": 0.20, "wyckoff": 0.36}
+        assert result["weights_used"] == {"chan": 0.44, "momentum": 0.20, "vpf": 0.36}
 
     def test_scenario_priority_filter_top(self):
         """Under pos_pct >= 0.7 AND mom_score >= 80, weights should dynamically adjust."""
@@ -729,7 +746,7 @@ class TestPhase3Features:
         ]
         # pos_pct = (18.0 - 10.0) / (20.0 - 10.0) = 8.0 / 10.0 = 0.8 >= 0.7
         result = merge_decisions(chan, mom, wyk, regime="正常", current_price=18.0, bars=bars)
-        assert result["weights_used"] == {"chan": 0.20, "momentum": 0.56, "wyckoff": 0.24}
+        assert result["weights_used"] == {"chan": 0.20, "momentum": 0.56, "vpf": 0.24}
 
     def test_belief_priority_conflict_resolution_bullish_veto(self):
         """Strong bullish veto signal (Chanlun buy points / bottom divergence, Wyckoff Spring) overrides disagreement and vetos Momentum bearish noise."""

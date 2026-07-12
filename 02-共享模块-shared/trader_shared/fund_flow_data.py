@@ -3,6 +3,12 @@
 通过东方财富HTTP API获取个股日线级资金流向（超大单/大单/中单/小单净流入），
 并计算衍生特征供主力行为识别引擎使用。
 
+东财加固（对齐社区 a-stock-data 实践）：
+  - Session 复用 + 浏览器 UA/Referer/Origin
+  - 合理超时（默认 10s，可用 FUND_FLOW_TIMEOUT 覆盖）
+  - 显式 lmt（日级数）+ 429/5xx 轻量重试
+  - 代理不可达时快速降级返回 []
+
 备用数据源：通达信 MCP（当东方财富 API 不可用时自动 fallback）。
 
 用法:
@@ -12,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import os
 import warnings
 from datetime import datetime, timedelta
 from typing import Any
@@ -23,23 +30,56 @@ from urllib3.util.retry import Retry
 FFLOW_URL = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
 TDX_MCP_URL = "https://txmcp.tdx.com.cn:3001/txmcp"
 
-# 加固：东方财富 API 在代理/网络不可达时，默认 urllib3 会做多次重试，
-# 单次 10s × 3 重试 = 30s 挂起才放弃。改为「不重试 + 3s 超时」，
-# 让 fund_flow_data 快速降级（返回 []），避免代理环境长时间阻塞 + warning 刷屏。
-_FAST_FAIL_SESSION = requests.Session()
-_FAST_FAIL_ADAPTER = HTTPAdapter(
-    max_retries=Retry(
-        total=0,  # 禁用重试
-        connect=0,
-        read=0,
-        other=0,
+# 浏览器特征头：裸 UA 易被东财间歇拒/空返回（社区实测）
+_EM_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     ),
-)
-_FAST_FAIL_SESSION.mount("https://", _FAST_FAIL_ADAPTER)
-_FAST_FAIL_SESSION.mount("http://", _FAST_FAIL_ADAPTER)
+    "Referer": "https://quote.eastmoney.com/",
+    "Origin": "https://quote.eastmoney.com",
+    "Accept": "*/*",
+}
 
-# 单次请求超时（秒）：代理挡住时 3s 即放弃
-_FAST_FAIL_TIMEOUT = 3
+# Session 复用 + 对 429/5xx 轻量重试；连接失败不无限拖
+_EM_SESSION = requests.Session()
+_EM_SESSION.headers.update(_EM_HEADERS)
+try:
+    _em_retry = Retry(
+        total=2,
+        connect=1,
+        read=1,
+        backoff_factor=0.4,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset(["GET"]),
+        raise_on_status=False,
+    )
+    _em_adapter = HTTPAdapter(max_retries=_em_retry)
+    _EM_SESSION.mount("https://", _em_adapter)
+    _EM_SESSION.mount("http://", _em_adapter)
+except TypeError:  # 旧 urllib3 无 allowed_methods 等
+    _em_adapter = HTTPAdapter(max_retries=0)
+    _EM_SESSION.mount("https://", _em_adapter)
+    _EM_SESSION.mount("http://", _em_adapter)
+
+# 兼容旧名（测试/外部若引用）
+_FAST_FAIL_SESSION = _EM_SESSION
+
+
+def _em_timeout() -> float | tuple[float, float]:
+    """请求超时：默认 10s；FUND_FLOW_TIMEOUT 可覆盖（秒）。"""
+    raw = os.environ.get("FUND_FLOW_TIMEOUT", "10").strip()
+    try:
+        t = float(raw)
+        if t <= 0:
+            t = 10.0
+    except (TypeError, ValueError):
+        t = 10.0
+    # (connect, read)：连接卡住别拖满 read
+    return (min(5.0, t), t)
+
+
+_FAST_FAIL_TIMEOUT = 10  # 文档/兼容
 
 
 def _secid(symbol: str) -> str:
@@ -169,14 +209,174 @@ def _fetch_fund_flow_tushare(symbol: str, days: int = 30) -> list[dict[str, Any]
             "sell_elg_vol": r.get("sell_elg_vol", 0) or 0,
             "buy_lg_vol": r.get("buy_lg_vol", 0) or 0,
             "sell_lg_vol": r.get("sell_lg_vol", 0) or 0,
+            "source": "tushare",
         })
     return result
+
+
+def _parse_fflow_kline_line(line: str) -> dict[str, Any] | None:
+    """解析东财 daykline 单行 → 万元字段。
+
+    字段: date, 主力净流入, 小单, 中单, 大单, 超大单（API 单位：元）。
+    """
+    parts = str(line or "").split(",")
+    if len(parts) < 6:
+        return None
+    try:
+        date_str = parts[0]
+        # 元 → 万元
+        super_large = float(parts[5]) / 10000.0 if parts[5] != "-" else 0.0
+        large = float(parts[4]) / 10000.0 if parts[4] != "-" else 0.0
+        medium = float(parts[3]) / 10000.0 if parts[3] != "-" else 0.0
+        small = float(parts[2]) / 10000.0 if parts[2] != "-" else 0.0
+        main_force = (
+            float(parts[1]) / 10000.0 if parts[1] != "-" else super_large + large
+        )
+        return {
+            "date": date_str,
+            "super_large_wan": round(super_large, 2),
+            "large_wan": round(large, 2),
+            "medium_wan": round(medium, 2),
+            "small_wan": round(small, 2),
+            "net_flow_wan": round(main_force, 2),
+        }
+    except (ValueError, IndexError, TypeError):
+        return None
+
+
+def _parse_fflow_klines(klines: list[Any], days: int = 30) -> list[dict[str, Any]]:
+    """批量解析 klines，取最近 days 条。"""
+    if not klines:
+        return []
+    try:
+        n = max(1, int(days))
+    except (TypeError, ValueError):
+        n = 30
+    out: list[dict[str, Any]] = []
+    for line in klines[-n:]:
+        row = _parse_fflow_kline_line(str(line))
+        if row:
+            out.append(row)
+    return out
+
+
+def _market_for_akshare(symbol: str) -> tuple[str, str]:
+    """返回 (6位代码, market: sh|sz|bj)。"""
+    code = symbol.split(".")[0] if "." in symbol else str(symbol)
+    code = code.replace("SH", "").replace("SZ", "").replace("sh", "").replace("sz", "")
+    # 去掉前缀 sh/sz
+    if code[:2].lower() in ("sh", "sz", "bj") and len(code) > 6:
+        code = code[2:]
+    code = "".join(c for c in code if c.isdigit())[-6:].zfill(6)
+    suffix = symbol.split(".")[-1].upper() if "." in symbol else ""
+    if suffix in ("SH",) or code.startswith(("6", "9")):
+        return code, "sh"
+    if suffix in ("BJ",) or code.startswith(("8", "4")):
+        return code, "bj"
+    return code, "sz"
+
+
+def _pick_col(columns: list[Any], *candidates: str) -> str | None:
+    cols = [str(c) for c in columns]
+    for name in candidates:
+        if name in cols:
+            return name
+    # 模糊包含
+    for name in candidates:
+        for c in cols:
+            if name in c:
+                return c
+    return None
+
+
+def _to_wan_amount(val: Any) -> float:
+    """把金额统一成万元。AkShare/东财常见为元。"""
+    try:
+        x = float(val)
+    except (TypeError, ValueError):
+        return 0.0
+    if x != x:  # NaN
+        return 0.0
+    # 绝对值很大 → 元
+    if abs(x) >= 10000:
+        return round(x / 10000.0, 2)
+    return round(x, 2)
+
+
+def _fetch_fund_flow_akshare(symbol: str, days: int = 30) -> list[dict[str, Any]]:
+    """AkShare 个股资金流（底层多仍为东财；作第二通道）。
+
+    环境 FUND_FLOW_SOURCE=eastmoney 时由上层跳过。
+    """
+    try:
+        import akshare as ak  # type: ignore
+    except Exception:
+        return []
+
+    code, market = _market_for_akshare(symbol)
+    try:
+        n = max(1, int(days))
+    except (TypeError, ValueError):
+        n = 30
+
+    try:
+        df = ak.stock_individual_fund_flow(stock=code, market=market)
+    except Exception as e:
+        warnings.warn(f"[fund_flow] AkShare 失败: {e}")
+        return []
+
+    if df is None:
+        return []
+    try:
+        if getattr(df, "empty", True):
+            return []
+    except Exception:
+        return []
+
+    cols = list(df.columns)
+    c_date = _pick_col(cols, "日期", "date", "时间")
+    c_main = _pick_col(cols, "主力净流入-净额", "主力净流入", "主力净额", "main_net")
+    c_super = _pick_col(cols, "超大单净流入-净额", "超大单净流入", "超大单")
+    c_large = _pick_col(cols, "大单净流入-净额", "大单净流入", "大单")
+    c_mid = _pick_col(cols, "中单净流入-净额", "中单净流入", "中单")
+    c_small = _pick_col(cols, "小单净流入-净额", "小单净流入", "小单")
+    if not c_date or not c_main:
+        warnings.warn("[fund_flow] AkShare 列名不识别，跳过")
+        return []
+
+    rows: list[dict[str, Any]] = []
+    try:
+        tail = df.tail(n)
+    except Exception:
+        tail = df
+    for _, r in tail.iterrows():
+        try:
+            date_raw = r.get(c_date) if hasattr(r, "get") else r[c_date]
+            date_str = str(date_raw)[:10]
+            main = _to_wan_amount(r[c_main] if c_main else 0)
+            super_l = _to_wan_amount(r[c_super]) if c_super else 0.0
+            large = _to_wan_amount(r[c_large]) if c_large else 0.0
+            mid = _to_wan_amount(r[c_mid]) if c_mid else 0.0
+            small = _to_wan_amount(r[c_small]) if c_small else 0.0
+            rows.append({
+                "date": date_str,
+                "super_large_wan": super_l,
+                "large_wan": large,
+                "medium_wan": mid,
+                "small_wan": small,
+                "net_flow_wan": main,
+                "source": "akshare",
+            })
+        except Exception:
+            continue
+    return rows
 
 
 def fetch_fund_flow(symbol: str, days: int = 30) -> list[dict[str, Any]]:
     """获取个股资金流向数据。
 
-    优先使用东方财富 API，失败时自动 fallback 到通达信 MCP。
+    瀑布：东财 HTTP → AkShare（多半仍东财通道）→ 通达信 MCP。
+    FUND_FLOW_SOURCE=eastmoney|akshare|tdx|auto
 
     Args:
         symbol: 股票代码（如 "688248.SH" 或 "688248"）
@@ -185,89 +385,76 @@ def fetch_fund_flow(symbol: str, days: int = 30) -> list[dict[str, Any]]:
     Returns:
         每日资金流向列表，每条包含:
         - date: 日期
-        - super_large_wan: 超大单净流入（万元）
-        - large_wan: 大单净流入（万元）
-        - medium_wan: 中单净流入（万元）
-        - small_wan: 小单净流入（万元）
-        - net_flow_wan: 主力净流入（万元）
+        - super_large_wan / large_wan / medium_wan / small_wan / net_flow_wan（万元）
     """
-    import os
-    source = os.environ.get("FUND_FLOW_SOURCE", "auto")
+    source = os.environ.get("FUND_FLOW_SOURCE", "auto").strip().lower()
 
-    # Tushare 主源（当 token 可用时优先）
-    try:
-        from trader_shared.tushare_client import get_client as _get_ts
-        if _get_ts().available:
-            data = _fetch_fund_flow_tushare(symbol, days)
-            if data:
-                return data
-    except (ImportError, Exception):
-        pass
+    order: list[str]
+    if source == "tushare":
+        order = ["tushare"]
+    elif source == "eastmoney":
+        order = ["eastmoney"]
+    elif source == "akshare":
+        order = ["akshare"]
+    elif source == "tdx":
+        order = ["tdx"]
+    else:
+        # Tushare 优先（当 token 可用时），否则走东财 → AkShare → 通达信
+        order = ["tushare", "eastmoney", "akshare", "tdx"]
 
-    # 东方财富
-    if source != "tdx":
-        result = _fetch_fund_flow_eastmoney(symbol, days)
+    for name in order:
+        if name == "tushare":
+            result = _fetch_fund_flow_tushare(symbol, days)
+        elif name == "eastmoney":
+            result = _fetch_fund_flow_eastmoney(symbol, days)
+        elif name == "akshare":
+            result = _fetch_fund_flow_akshare(symbol, days)
+        elif name == "tdx":
+            result = _fetch_fund_flow_tdx_mcp(symbol, days)
+        else:
+            result = []
         if result:
-            return result
-
-    # TDX MCP 备用
-    if source != "eastmoney":
-        result = _fetch_fund_flow_tdx_mcp(symbol, days)
-        if result:
+            # 标注源（东财解析行无 source 时补上）
+            for row in result:
+                if isinstance(row, dict) and not row.get("source"):
+                    row["source"] = name
             return result
 
     return []
 
 
 def _fetch_fund_flow_eastmoney(symbol: str, days: int = 30) -> list[dict[str, Any]]:
-    """东方财富资金流向 API（原始实现）。"""
+    """东方财富资金流向 daykline（加固请求）。"""
     try:
+        try:
+            n = max(1, int(days))
+        except (TypeError, ValueError):
+            n = 30
+        # 显式 lmt：要 n 日则至少拉 n，上限 120（与社区实践一致）
+        lmt = min(120, max(n, 30))
         params = {
             "secid": _secid(symbol),
-            "lmt": "0",
+            "lmt": str(lmt),
             "klt": "101",
             "fields1": "f1,f2,f3,f7",
             "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65",
         }
-        r = _FAST_FAIL_SESSION.get(
-            FFLOW_URL, params=params, headers={"User-Agent": "Mozilla/5.0"},
-            timeout=_FAST_FAIL_TIMEOUT,
+        r = _EM_SESSION.get(
+            FFLOW_URL,
+            params=params,
+            timeout=_em_timeout(),
         )
         if r.status_code != 200:
+            warnings.warn(f"[fund_flow] 东方财富HTTP {r.status_code}")
             return []
         data = r.json()
-        klines = data.get("data", {}).get("klines", [])
-        if not klines:
+        payload = data.get("data") if isinstance(data, dict) else None
+        if not payload:
             return []
-
-        result = []
-        for line in klines[-days:]:
-            parts = line.split(",")
-            if len(parts) < 7:
-                continue
-            try:
-                date_str = parts[0]
-                # 东方财富 API 字段顺序: parts[1]=主力净流入(超大+大), parts[2]=小单, parts[3]=中单, parts[4]=大单, parts[5]=超大单
-                # Fix P0: 字段映射全部错位，以 parts[4]+parts[5]=parts[1] 的约束关系验证
-                # fix: unit mismatch — eastmoney API returns yuan, _wan fields require wan (÷10000)
-                super_large = float(parts[5]) / 10000.0 if parts[5] != "-" else 0.0
-                large = float(parts[4]) / 10000.0 if parts[4] != "-" else 0.0
-                medium = float(parts[3]) / 10000.0 if parts[3] != "-" else 0.0
-                small = float(parts[2]) / 10000.0 if parts[2] != "-" else 0.0
-                main_force = float(parts[1]) / 10000.0 if parts[1] != "-" else super_large + large
-                # 主力净流入 = 超大单 + 大单（用于缓存格式兼容，保留 net_flow 字段）
-                net_flow = main_force
-                result.append({
-                    "date": date_str,
-                    "super_large_wan": round(super_large, 2),
-                    "large_wan": round(large, 2),
-                    "medium_wan": round(medium, 2),
-                    "small_wan": round(small, 2),
-                    "net_flow_wan": round(net_flow, 2),
-                })
-            except (ValueError, IndexError):
-                continue
-        return result
+        klines = payload.get("klines") or []
+        if not isinstance(klines, list) or not klines:
+            return []
+        return _parse_fflow_klines(klines, days=n)
     except Exception as e:
         warnings.warn(f"[fund_flow] 东方财富API失败: {e}")
         return []
