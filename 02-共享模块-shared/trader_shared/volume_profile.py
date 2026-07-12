@@ -5,7 +5,7 @@
 识别控制节点 POC（Point of Control）与成交量密集区 Value Area（VA）。
 
 用法:
-    from volume_profile import VolumeProfile, compute_volume_profile
+    from trader_shared.volume_profile import VolumeProfile, compute_volume_profile
 
     bars = [{"high": 10.5, "low": 10.1, "close": 10.3, "volume": 1200}, ...]
     vp = compute_volume_profile(bars)

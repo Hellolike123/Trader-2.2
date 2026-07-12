@@ -8,7 +8,7 @@
   - 状态 2: 宽幅震荡 (Range)
 
 用法:
-    from hmm_regime import HMMRegimeDetector
+    from trader_shared.hmm_regime import HMMRegimeDetector
 
     detector = HMMRegimeDetector()
     returns = [0.01, -0.02, 0.005, ...]   # 日收益率序列

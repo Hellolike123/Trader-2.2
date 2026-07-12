@@ -12,7 +12,6 @@ if str(SCRIPTS) not in sys.path:
 for name in ("config", "light_data", "signal_store", "models", "pipeline", "signal_contract"):
     sys.modules.pop(name, None)
 
-import candidate_core
 from trader_shared.signal_store import append_signal, load_recent_signals, DEFAULT_SIGNAL_STORE_PATH
 from final_pool import render_compare, _latest_signal_summary
 

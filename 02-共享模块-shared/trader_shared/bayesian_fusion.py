@@ -9,7 +9,7 @@
     默认关闭，保持 Trader 2.2 的场景优先级权重行为，安全过渡。
 
 用法:
-    from bayesian_fusion import BayesianFusion, bayesian_merge
+    from trader_shared.bayesian_fusion import BayesianFusion, bayesian_merge
 
     result = bayesian_merge(
         chan_signal={"direction": 1, "confidence": 0.8},

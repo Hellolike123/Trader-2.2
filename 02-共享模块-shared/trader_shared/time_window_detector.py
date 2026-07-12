@@ -9,7 +9,7 @@
   长周期（天文年）: 360
 
 使用方式：
-    from time_window_detector import check_time_windows
+    from trader_shared.time_window_detector import check_time_windows
 
     result = check_time_windows(bars, chan_result)
     # result = {"window_active": True, "window_type": "144", "bars_since_pivot": 143, "tolerance": 3}

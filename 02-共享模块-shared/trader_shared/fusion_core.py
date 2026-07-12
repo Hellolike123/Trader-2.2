@@ -15,8 +15,8 @@
 设计文档: docs/designs/decision-fusion-layer.md
 
 调用方式:
-    from fusion_core import merge_decisions, log_only
-    from trader_shared.scripts.market_env import get_env_for_skill
+    from trader_shared.fusion_core import merge_decisions, log_only
+    from market_env import get_env_for_skill
 
     env = get_env_for_skill("trader")
     result = merge_decisions(
@@ -242,16 +242,8 @@ def _load_confidence_params() -> dict[str, float]:
         return _confidence_cache
 
     from trader_shared.config import CONFIDENCE_MAPPING_DEFAULTS
-    try:
-        from trader_shared.self_calibration import load_calibrated_params
-        cal = load_calibrated_params()
-        if cal and "confidence_mapping" in cal:
-            merged = dict(CONFIDENCE_MAPPING_DEFAULTS)
-            merged.update(cal["confidence_mapping"])
-            _confidence_cache = merged
-            return merged
-    except Exception:
-        pass
+    # NOTE: calibration capability (self_calibration) is not implemented yet;
+    # we always fall back to the config defaults below.
     _confidence_cache = dict(CONFIDENCE_MAPPING_DEFAULTS)
     return _confidence_cache
 

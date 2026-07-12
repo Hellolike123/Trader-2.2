@@ -14,7 +14,7 @@
   4. 阶段锁定期（转换后锁定 3 天，从 5 天降低）
 
 用法:
-    from stage_positioning import assess_stage
+    from trader_shared.stage_positioning import assess_stage
     result = assess_stage(current, ma_values, change_pct, bars)
 """
 
