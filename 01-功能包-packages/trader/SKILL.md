@@ -159,6 +159,37 @@ python3 scripts/final_report.py --target <NAME> --output markdown
 
 **使用前必须先 `read` 以上文件，禁止凭记忆生成报告。**
 
+## Tushare 数据源配置
+
+### 前置条件
+```bash
+pip install tushare --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org
+```
+
+### 环境变量
+
+| 变量 | 必填 | 说明 |
+|------|------|------|
+| `TUSHARE_TOKEN` | 是 | Tushare Pro API token（注册后获取） |
+| `TUSHARE_API_URL` | 否 | 日线/资金流/板块等 API 端点，默认 `https://fastapic.stockai888.top` |
+| `TUSHARE_REALTIME_URL` | 否 | 实时行情爬虫端点，默认 `https://realtime.stockai888.top` |
+
+### 数据源说明
+
+当 `TUSHARE_TOKEN` 设置时，系统自动启用 Tushare 作为主数据源：
+
+| 数据类型 | 主源 | 备注 |
+|----------|------|------|
+| 日线 K 线 | Tushare `daily` | 前复权日线，含 ATR 计算 |
+| 实时行情 | Tushare `realtime_quote` | 走实时爬虫端点 |
+| 资金流向 | Tushare `moneyflow` | 超大/大/中/小单分类 |
+| 概念/行业板块 | Tushare `concept` / `ths_index` | 带 24h 缓存 |
+| 筹码分布 | Tushare `cyq_perf` | 成本分位数、获利比例 |
+| 分钟线（5m/15m/30m） | 腾讯/mootdx | Tushare 不提供分钟线，自动 fallback |
+| 周线/月线 | 腾讯/mootdx | Tushare 周月线需高级积分，自动 fallback |
+
+未设置 `TUSHARE_TOKEN` 时，系统完全走腾讯/东方财富/通达信，行为与之前一致。
+
 ## Exit Criterion
 
 输出完成后即停止。不重新分析、不补充额外建议、不展开未在 JSON 中体现的延伸讨论。

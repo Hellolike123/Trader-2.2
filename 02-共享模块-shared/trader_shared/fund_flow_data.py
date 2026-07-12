@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import warnings
+from datetime import datetime, timedelta
 from typing import Any
 
 import requests
@@ -120,6 +121,58 @@ def _fetch_fund_flow_tdx_mcp(symbol: str, days: int = 30) -> list[dict[str, Any]
         return []
 
 
+def _symbol_to_ts_code(symbol: str) -> str:
+    """将股票代码转换为 Tushare ts_code 格式（如 '688248' → '688248.SH'）。"""
+    if "." in symbol:
+        return symbol
+    code = symbol.strip()
+    if code.startswith(("6", "5", "9")):
+        return f"{code}.SH"
+    return f"{code}.SZ"
+
+
+def _fetch_fund_flow_tushare(symbol: str, days: int = 30) -> list[dict[str, Any]]:
+    """通过 Tushare moneyflow 获取资金流向。"""
+    try:
+        from trader_shared.tushare_client import get_client
+    except ImportError:
+        return []
+    client = get_client()
+    if not client.available:
+        return []
+    ts_code = _symbol_to_ts_code(symbol)
+    end_date = datetime.now().strftime("%Y%m%d")
+    start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+    records = client.query_moneyflow(ts_code, start_date, end_date)
+    if not records:
+        return []
+    result: list[dict[str, Any]] = []
+    for r in records:
+        trade_date = str(r.get("trade_date", ""))
+        # Tushare returns YYYYMMDD, convert to YYYY-MM-DD
+        if len(trade_date) == 8:
+            trade_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+        # Tushare amounts are in 万元 already for moneyflow API
+        net_mf = r.get("net_mf_amount", 0) or 0
+        result.append({
+            "date": trade_date,
+            "net_flow_wan": net_mf,
+            "buy_elg_amount": r.get("buy_elg_amount", 0) or 0,
+            "sell_elg_amount": r.get("sell_elg_amount", 0) or 0,
+            "buy_lg_amount": r.get("buy_lg_amount", 0) or 0,
+            "sell_lg_amount": r.get("sell_lg_amount", 0) or 0,
+            "buy_md_amount": r.get("buy_md_amount", 0) or 0,
+            "sell_md_amount": r.get("sell_md_amount", 0) or 0,
+            "buy_sm_amount": r.get("buy_sm_amount", 0) or 0,
+            "sell_sm_amount": r.get("sell_sm_amount", 0) or 0,
+            "buy_elg_vol": r.get("buy_elg_vol", 0) or 0,
+            "sell_elg_vol": r.get("sell_elg_vol", 0) or 0,
+            "buy_lg_vol": r.get("buy_lg_vol", 0) or 0,
+            "sell_lg_vol": r.get("sell_lg_vol", 0) or 0,
+        })
+    return result
+
+
 def fetch_fund_flow(symbol: str, days: int = 30) -> list[dict[str, Any]]:
     """获取个股资金流向数据。
 
@@ -140,6 +193,16 @@ def fetch_fund_flow(symbol: str, days: int = 30) -> list[dict[str, Any]]:
     """
     import os
     source = os.environ.get("FUND_FLOW_SOURCE", "auto")
+
+    # Tushare 主源（当 token 可用时优先）
+    try:
+        from trader_shared.tushare_client import get_client as _get_ts
+        if _get_ts().available:
+            data = _fetch_fund_flow_tushare(symbol, days)
+            if data:
+                return data
+    except (ImportError, Exception):
+        pass
 
     # 东方财富
     if source != "tdx":

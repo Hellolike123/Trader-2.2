@@ -522,6 +522,167 @@ class UnifiedProvider:
 
 
 # ═══════════════════════════════════════════════
+# Tushare provider (primary source when token available)
+# ═══════════════════════════════════════════════
+
+class TushareProvider:
+    """Tushare Pro 数据提供器（主源）。日线/行情/资金流/板块/筹码走 Tushare；分钟线 fallback 到 light_data。"""
+
+    name = "tushare"
+
+    def __init__(self):
+        from trader_shared.tushare_client import get_client
+        self._client = get_client()
+        # fallback provider for minute data (Tushare doesn't have minute K-lines)
+        self._fallback = UnifiedProvider(backend="tencent")
+
+    def resolve_security(self, target: str) -> Security:
+        return self._fallback.resolve_security(target)
+
+    def fetch_quote(self, sec: Security) -> dict[str, Any]:
+        records = self._client.query_realtime(sec.ts_code)
+        if records:
+            r = records[0]
+            pre_close = r.get("PRE_CLOSE")
+            price = r.get("PRICE")
+            change_pct = None
+            if pre_close and price and float(pre_close) > 0:
+                change_pct = round((float(price) - float(pre_close)) / float(pre_close) * 100, 2)
+            return {
+                "name": r.get("NAME", sec.name),
+                "symbol": sec.code,
+                "current_price": float(price) if price else None,
+                "current_change_pct": change_pct,
+                "high": float(r.get("HIGH")) if r.get("HIGH") else None,
+                "low": float(r.get("LOW")) if r.get("LOW") else None,
+                "volume": float(r.get("VOLUME")) if r.get("VOLUME") else None,
+                "amount": float(r.get("AMOUNT")) if r.get("AMOUNT") else None,
+                "pre_close": float(pre_close) if pre_close else None,
+            }
+        return self._fallback.fetch_quote(sec)
+
+    def fetch_qfq_daily(self, sec: Security, days: int = 30) -> list[dict[str, Any]]:
+        from trader_shared.light_data import _compute_atr_fields
+        from datetime import timedelta
+
+        end_date = datetime.now().strftime("%Y%m%d")
+        start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+        records = self._client.query_daily(sec.ts_code, start_date=start_date, end_date=end_date)
+        if not records:
+            return self._fallback.fetch_qfq_daily(sec, days)
+
+        bars: list[dict[str, Any]] = []
+        for r in records:
+            trade_date = str(r.get("trade_date", ""))
+            # Tushare returns YYYYMMDD, convert to YYYY-MM-DD
+            if len(trade_date) == 8:
+                trade_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+            bars.append({
+                "date": trade_date,
+                "open": float(r["open"]) if r.get("open") is not None else None,
+                "close": float(r["close"]) if r.get("close") is not None else None,
+                "high": float(r["high"]) if r.get("high") is not None else None,
+                "low": float(r["low"]) if r.get("low") is not None else None,
+                "volume": float(r["vol"]) if r.get("vol") is not None else None,
+                "amount": float(r["amount"]) if r.get("amount") is not None else None,
+                "data_source": "tushare",
+                "data_status": "full",
+            })
+        _compute_atr_fields(bars)
+        return bars
+
+    def fetch_5m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
+        """Tushare 不提供分钟线，fallback 到腾讯。"""
+        return self._fallback.fetch_5m(sec, datalen)
+
+    def fetch_15m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
+        """Tushare 不提供分钟线，fallback 到腾讯。"""
+        return self._fallback.fetch_15m(sec, datalen)
+
+    def fetch_30m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
+        """Tushare 不提供分钟线，fallback 到腾讯。"""
+        return self._fallback.fetch_30m(sec, datalen)
+
+    def fetch_weekly(self, sec: Security, datalen: int = 80) -> list[dict[str, Any]]:
+        """周线 — fallback 到腾讯（Tushare 周线需高级积分）。"""
+        return self._fallback.fetch_weekly(sec, datalen)
+
+    def fetch_monthly(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
+        """月线 — fallback 到腾讯（Tushare 月线需高级积分）。"""
+        return self._fallback.fetch_monthly(sec, datalen)
+
+    def fetch_kline(self, sec: Security, scale: str, datalen: int = 60) -> list[dict[str, Any]]:
+        return self._fallback.fetch_kline(sec, scale, datalen)
+
+    def fetch_ticks(self, sec: Security, count: int = 500) -> list[dict[str, Any]]:
+        return self._fallback.fetch_ticks(sec, count)
+
+    def pct_change(self, start: float, end: float) -> float:
+        return self._fallback.pct_change(start, end)
+
+    def to_float(self, value: Any) -> float | None:
+        return self._fallback.to_float(value)
+
+    def normalize_bars(self, raw_bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return self._fallback.normalize_bars(raw_bars)
+
+    def load_market_snapshot(
+        self, target: str, days: int = 365,
+        include_5m: bool = True, include_weekly: bool = True,
+        include_monthly: bool = True, include_ticks: bool = True,
+    ) -> MarketSnapshot:
+        sec = self.resolve_security(target)
+        daily_bars: list[dict[str, Any]] = []
+        bars_5m: list[dict[str, Any]] = []
+        weekly_bars: list[dict[str, Any]] = []
+        monthly_bars: list[dict[str, Any]] = []
+        quote: dict[str, Any] = {}
+        tick_data: list[dict[str, Any]] = []
+        source_errors: dict[str, str] = {}
+
+        try:
+            daily_bars = self.fetch_qfq_daily(sec, days=days)
+        except Exception as e:
+            source_errors["daily"] = str(e)
+        try:
+            quote = self.fetch_quote(sec)
+        except Exception as e:
+            source_errors["quote"] = str(e)
+        if include_5m:
+            try:
+                bars_5m = self.fetch_5m(sec)
+            except Exception as e:
+                source_errors["5m"] = str(e)
+        if include_weekly:
+            try:
+                weekly_bars = self.fetch_weekly(sec)
+            except Exception as e:
+                source_errors["weekly"] = str(e)
+        if include_monthly:
+            try:
+                monthly_bars = self.fetch_monthly(sec)
+            except Exception as e:
+                source_errors["monthly"] = str(e)
+        if include_ticks:
+            try:
+                tick_data = self.fetch_ticks(sec)
+            except Exception as e:
+                source_errors["ticks"] = str(e)
+
+        data_status: DataStatus = (
+            "full" if (daily_bars and quote)
+            else "partial" if (daily_bars or quote)
+            else "failed"
+        )
+        res_snap = MarketSnapshot(
+            security=sec, quote=quote, daily_bars=daily_bars,
+            bars_5m=bars_5m, weekly_bars=weekly_bars, monthly_bars=monthly_bars,
+            tick_data=tick_data, data_status=data_status, source_errors=source_errors,
+        )
+        return _enrich_snapshot(res_snap)
+
+
+# ═══════════════════════════════════════════════
 # Global provider registry
 # ═══════════════════════════════════════════════
 
@@ -534,6 +695,16 @@ def get_provider() -> DataProvider:
     global _provider
     if _provider is not None:
         return _provider
+
+    # Tushare 主源（当 token 可用时默认启用）
+    try:
+        from trader_shared.tushare_client import get_client as _get_ts_client
+        if _get_ts_client().available:
+            _provider = TushareProvider()
+            print("DataProvider: using tushare (primary source)", file=sys.stderr)
+            return _provider
+    except (ImportError, Exception):
+        pass
 
     provider_name = os.environ.get("TRADER_DATA_PROVIDER", "").lower()
     if provider_name in ("mootdx", "akshare"):
