@@ -178,12 +178,23 @@ def render_short_midline(r: dict[str, Any]) -> str:
             else:
                 lines.append(f"  调整：第{_days_from_high}天")
 
-    # 相对强弱（仅 extend_sector 有数据时显示）
+    # 相对强弱（优先 extend_sector；fallback 用个股涨跌 vs 大盘环境）
     _ext_sec = r.get("extend_sector") or {}
     if isinstance(_ext_sec, dict) and _ext_sec.get("status") == "正常":
         _vs = str(_ext_sec.get("stock_vs_sector") or "").strip()
         if _vs:
             lines.append(f"  相对强弱：{_vs}")
+    elif change_pct != 0 and regime:
+        # 简易对比：个股涨跌 vs 大盘环境词
+        _regime_map = {"偏强": 0.5, "正常": 0, "偏弱": -0.5, "很差": -1.0}
+        _regime_score = _regime_map.get(regime, 0)
+        _vs_simple = change_pct - _regime_score
+        if _vs_simple > 0.5:
+            lines.append(f"  相对强弱：跑赢大盘 +{_vs_simple:.1f}%")
+        elif _vs_simple < -0.5:
+            lines.append(f"  相对强弱：跑弱 {_vs_simple:.1f}%")
+        else:
+            lines.append(f"  相对强弱：与大盘持平")
 
     ma250_val = _ma_float("ma250")
     if current > 0 and ma250_val is not None and current < ma250_val:
@@ -626,21 +637,42 @@ def render_short_midline(r: dict[str, Any]) -> str:
     else:
         lines.append("⚠️ 风险：未站稳前不提前加仓")
 
-    # ── 本周只做（唯一）+ T0 ──
-    if this_week:
+    # ── 📌 明日策略（替代"本周只做"）──
+    _buy_lo_val = float(buy_low or 0)
+    _buy_hi_val = float(buy_high or 0)
+    _sell_lo_val = float(short_low or 0)
+    _sell_hi_val = float(short_high or 0)
+    if _sell_lo_val > 0 and _buy_lo_val > 0:
+        _strategy_parts = []
+        if _sell_hi_val > 0:
+            _strategy_parts.append(f"若高开到 {_sell_lo_val:.2f} 附近减仓")
+        if _buy_lo_val > 0:
+            _strategy_parts.append(f"若低开到 {_buy_lo_val:.2f} 附近观察承接")
+        if _strategy_parts:
+            lines.append(f"📌 明日策略：{'；'.join(_strategy_parts)}")
+    elif this_week:
         lines.append(f"📌 本周只做：{this_week}")
 
+    # ── T0（三价位网格）──
     has_position = bool(r.get("has_position"))
     no_new = any(k in execution for k in ("不买", "不追", "不新开", "观望"))
     if not has_position and no_new:
-        lines.append("T0：无底仓，不启用（与出手一致，不新开）")
+        # 无底仓但有买点区时，给三价位参考（低吸/观察/高抛）
+        if _buy_lo_val > 0 and _sell_lo_val > 0:
+            _t0_mid = round((_buy_hi_val + _sell_lo_val) / 2, 2)
+            lines.append(f"T0：{_buy_lo_val:.2f} 低吸 ｜ {_t0_mid:.2f} 观察 ｜ {_sell_lo_val:.2f} 高抛")
+        else:
+            lines.append("T0：无底仓，不启用（与出手一致，不新开）")
     else:
         t0_ref = r.get("t0_ref") or {}
         t0_buy = float(t0_ref.get("low_buy") or buy_low or support or 0)
         t0_sell = float(t0_ref.get("high_sell") or swing_sell or short_high or confirm or 0)
-        # 有仓才给高低点；无仓但允许挂单时给买点参考
-        t0_parts = []
-        if has_position:
+        # 有仓时给三价位网格：低吸 / 观察 / 高抛
+        if t0_buy > 0 and t0_sell > 0:
+            _t0_mid = round((t0_buy + t0_sell) / 2, 2)
+            lines.append(f"T0：{t0_buy:.2f} 低吸 ｜ {_t0_mid:.2f} 观察 ｜ {t0_sell:.2f} 高抛")
+        elif has_position:
+            t0_parts = []
             if t0_buy > 0:
                 t0_parts.append(f"低吸参考 {t0_buy:.2f}")
             if t0_sell > 0:

@@ -598,6 +598,86 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     def _fetch_market_env():
         return get_env_for_skill("trader")
 
+    def _fetch_sector_data():
+        """从 Tushare 获取板块数据（行业分类 + 板块涨跌幅）。"""
+        try:
+            from trader_shared.tushare_client import get_client
+            client = get_client()
+            if not client.available:
+                return None
+
+            # 1. 获取个股行业
+            stock_info = client.query("stock_basic", ts_code=sec.ts_code, fields="ts_code,name,industry")
+            if not stock_info:
+                return None
+            industry = stock_info[0].get("industry", "")
+            if not industry:
+                return None
+
+            # 2. 找匹配的同花顺行业指数（优先精确匹配）
+            ths_indices = client.query_ths_index("I")  # 'I' = 行业
+
+            # 构建匹配关键词（如 "家用电器" → ["家电", "白色家电", "黑色家电", "小家电"]）
+            _sector_keywords = {
+                "家用电器": ["白色家电", "黑色家电", "小家电", "家电零部件"],
+                "电子": ["电子零部件", "电子化学品"],
+                "计算机": ["软件开发", "计算机设备"],
+                "医药": ["化学制药", "中药", "生物制品"],
+                "银行": ["国有大行", "股份制银行", "城商行"],
+                "食品饮料": ["白酒", "乳品", "调味品"],
+            }
+
+            matched_sector = None
+            # 优先：用关键词精确匹配
+            for keyword in _sector_keywords.get(industry, []):
+                for idx in ths_indices:
+                    if str(idx.get("name", "")) == keyword:
+                        matched_sector = idx
+                        break
+                if matched_sector:
+                    break
+
+            # 次选：行业名完全包含在板块名中
+            if not matched_sector:
+                for idx in ths_indices:
+                    idx_name = str(idx.get("name", ""))
+                    if industry == idx_name or industry in idx_name:
+                        matched_sector = idx
+                        break
+
+            # 兜底：板块名包含行业关键词
+            if not matched_sector:
+                for idx in ths_indices:
+                    idx_name = str(idx.get("name", ""))
+                    if "家电" in idx_name and "家电" in industry:
+                        matched_sector = idx
+                        break
+
+            if not matched_sector:
+                return {"industry": industry, "status": "未匹配板块"}
+
+            sector_code = matched_sector.get("ts_code", "")
+            sector_name = matched_sector.get("name", "")
+
+            # 3. 获取板块日线涨跌幅
+            sector_daily = client.query_ths_daily(sector_code, start_date="", end_date="")
+            if not sector_daily:
+                return {"industry": industry, "sector_name": sector_name, "sector_code": sector_code, "status": "无日线"}
+
+            latest = sector_daily[-1]
+            sector_chg_pct = float(latest.get("pct_change", 0) or 0)
+
+            return {
+                "industry": industry,
+                "sector_name": sector_name,
+                "sector_code": sector_code,
+                "sector_change_pct": sector_chg_pct,
+                "status": "正常",
+            }
+        except Exception as e:
+            _logger.debug(f"板块数据获取失败: {e}")
+            return None
+
     # 复用全局共享线程池，避免嵌套 ThreadPoolExecutor 导致线程爆炸
     # cmd_refresh 内建 pool → build_report 内再建 pool → load_market_snapshot 内再建 pool
     # 现在三层共享同一个 max_workers=5 池
@@ -627,6 +707,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     f_mom = pool.submit(momentum_strategy, current, bars, change_pct_val, quote)
     f_mf = pool.submit(_fetch_fund_flow)
     f_env = pool.submit(_fetch_market_env)
+    f_sector = pool.submit(_fetch_sector_data)
 
     chan_result = f_chan.result() or {}  # 日线；_chan_to_signal 会自己剥
     chan_mid_result = f_chan_mid.result() or {}
@@ -673,6 +754,13 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     except Exception:
         env = {"level": "未知", "hmm_regime_en": "range"}
 
+    # 板块数据结果（snapshot 是不可变对象，用临时变量存储）
+    _sector_data = None
+    try:
+        _sector_data = f_sector.result()
+    except Exception:
+        pass
+
     # === 融合层 ===
     try:
         from trader_shared.fusion_core import merge_decisions
@@ -691,15 +779,15 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         # [Phase 2 - A1] 填充 stock_vs_sector（个股涨幅 - 板块涨幅）
         # extend_data 拿不到个股涨幅，故在 build_report 调用处补充到 extend_sector 字典。
         _stock_chg_pct = float(quote.get("current_change_pct") or 0)
-        if snapshot.extend_sector and isinstance(snapshot.extend_sector, dict) and snapshot.extend_sector.get("status") == "正常":
-            _sector_chg_pct = float(snapshot.extend_sector.get("sector_change_pct", 0) or 0)
+        if _sector_data and isinstance(_sector_data, dict) and _sector_data.get("status") == "正常":
+            _sector_chg_pct = float(_sector_data.get("sector_change_pct", 0) or 0)
             _vs = _stock_chg_pct - _sector_chg_pct
             if _vs > 0:
-                snapshot.extend_sector["stock_vs_sector"] = f"跑赢 +{_vs:.2f}%"
+                _sector_data["stock_vs_sector"] = f"跑赢板块 +{_vs:.2f}%"
             elif _vs < 0:
-                snapshot.extend_sector["stock_vs_sector"] = f"跑弱 {_vs:.2f}%"
+                _sector_data["stock_vs_sector"] = f"跑弱板块 {_vs:.2f}%"
             else:
-                snapshot.extend_sector["stock_vs_sector"] = "持平"
+                _sector_data["stock_vs_sector"] = "与板块持平"
 
         report_fusion = merge_decisions(
             chan_result=chan_result,
@@ -909,7 +997,32 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     buy_scenes = {"低吸观察", "防守观察", "等转强"}
     position_cap = min(10, atr_cap) if scene in buy_scenes else 10
 
-    chip = _calc_chip(bars, lookback=60)
+    # 筹码数据：优先 Tushare cyq_perf（官方数据更准确），fallback 到内部算法
+    chip = None
+    try:
+        from trader_shared.chip_data import get_cyq_perf
+        _cyq = get_cyq_perf(sec.ts_code, start_date="", end_date="")
+        if _cyq:
+            _latest = _cyq[-1]
+            _winner_rate = float(_latest.get("winner_rate", 0) or 0)
+            _cost_50 = float(_latest.get("cost_50pct", 0) or 0)
+            # 将 cost_5/15/50/85/95pct 转为 peaks 格式
+            _peaks = []
+            for _pct_key, _share in [("cost_5pct", 5), ("cost_15pct", 15), ("cost_50pct", 50), ("cost_85pct", 85), ("cost_95pct", 95)]:
+                _price = float(_latest.get(_pct_key, 0) or 0)
+                if _price > 0:
+                    _peaks.append({"price": _price, "share_of_total": _share})
+            chip = {
+                "current_pct": _winner_rate,
+                "mid_price": _cost_50,
+                "peaks": _peaks,
+                "source": "tushare_cyq_perf",
+            }
+    except Exception:
+        pass
+    if chip is None:
+        chip = _calc_chip(bars, lookback=60)
+        chip["source"] = "internal_calc"
     chip_peaks = sorted(chip.get("peaks", []) or [], key=lambda x: x["price"])
 
     # 筹码搬家监控：保存快照 + 对比历史
@@ -1287,7 +1400,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         # Phase 1 新增：资金面数据（仅展示，不参与评分）
         "extend_margin": snapshot.extend_margin,
         "extend_northbound": snapshot.extend_northbound,
-        "extend_sector": snapshot.extend_sector,
+        "extend_sector": _sector_data,
         # Phase 2 新增：概念板块数据（仅展示，不参与评分）
         "extend_concept": snapshot.extend_concept,
     }

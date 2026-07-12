@@ -27,15 +27,39 @@ _MIN_INTERVAL = 0.6  # 100次/分钟 ≈ 0.6s/请求
 
 
 def _get_token() -> str:
-    return os.environ.get("TUSHARE_TOKEN", "").strip()
+    # 优先环境变量，其次配置文件
+    token = os.environ.get("TUSHARE_TOKEN", "").strip()
+    if token:
+        return token
+    try:
+        from trader_shared.tushare_config import TUSHARE_TOKEN
+        return str(TUSHARE_TOKEN).strip()
+    except ImportError:
+        return ""
 
 
 def _get_api_url() -> str:
-    return os.environ.get("TUSHARE_API_URL", _DEFAULT_API_URL).strip()
+    # 优先环境变量，其次配置文件
+    url = os.environ.get("TUSHARE_API_URL", "").strip()
+    if url:
+        return url
+    try:
+        from trader_shared.tushare_config import TUSHARE_API_URL
+        return str(TUSHARE_API_URL).strip()
+    except ImportError:
+        return _DEFAULT_API_URL
 
 
 def _get_realtime_url() -> str:
-    return os.environ.get("TUSHARE_REALTIME_URL", _DEFAULT_REALTIME_URL).strip()
+    # 优先环境变量，其次配置文件
+    url = os.environ.get("TUSHARE_REALTIME_URL", "").strip()
+    if url:
+        return url
+    try:
+        from trader_shared.tushare_config import TUSHARE_REALTIME_URL
+        return str(TUSHARE_REALTIME_URL).strip()
+    except ImportError:
+        return _DEFAULT_REALTIME_URL
 
 
 # ── TushareClient ─────────────────────────────────────────────────────────
