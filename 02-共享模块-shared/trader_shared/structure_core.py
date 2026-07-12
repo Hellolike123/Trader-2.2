@@ -38,7 +38,7 @@ except ImportError:  # pragma: no cover
 
 # ── [2.3] 离线自校准参数加载器（可选，无则用默认参数）───────────────────────────────
 try:
-    from self_calibration import load_calibrated_params as _load_calibrated_params
+    from trader_shared.self_calibration import load_calibrated_params as _load_calibrated_params
     _CALIBRATION_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _CALIBRATION_AVAILABLE = False

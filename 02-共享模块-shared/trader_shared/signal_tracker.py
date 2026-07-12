@@ -1627,7 +1627,7 @@ def migrate_signal_ids(store_path: Path | None = None,
     Idempotent: records that already carry correct signal_id are skipped.
 
     Usage:
-        python -c "from signal_tracker import migrate_signal_ids; migrate_signal_ids()"
+        python -c "from trader_shared.signal_tracker import migrate_signal_ids; migrate_signal_ids()"
 
     Returns:
         dict with keys "signals_migrated", "signals_skipped",

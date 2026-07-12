@@ -431,8 +431,7 @@ def warm_pool_cache() -> dict[str, Any]:
 
     # Also warm market env cache
     try:
-        sys.path.append(str(root / "scripts"))
-        from market_env import assess as _assess
+        from trader_shared.market_env import assess as _assess
         _assess()
     except (ImportError, OSError) as exc:
         _logger.debug("Market env cache warm failed: %s", exc)

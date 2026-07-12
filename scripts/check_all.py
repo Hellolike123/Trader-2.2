@@ -60,7 +60,7 @@ def check_gitignore_valid() -> str:
 
 def check_pipeline_schema() -> str:
     try:
-        from pipeline import STATE_SCHEMA
+        from trader_shared.pipeline import STATE_SCHEMA
         if not STATE_SCHEMA.get("version"):
             return "WARN (pipeline schema missing version)"
     except ImportError:

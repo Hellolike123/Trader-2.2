@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 try:
-    from pipeline import write_market
+    from trader_shared.pipeline import write_market
 
     _HAS_PIPELINE = True
 except (ImportError, AttributeError):

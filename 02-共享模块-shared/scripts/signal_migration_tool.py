@@ -12,7 +12,7 @@ from pathlib import Path
 
 import trader_shared
 
-from signal_tracker import migrate_signal_ids
+from trader_shared.signal_tracker import migrate_signal_ids
 
 
 def main() -> int:

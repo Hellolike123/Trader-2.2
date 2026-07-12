@@ -16,7 +16,7 @@
 
 调用方式:
     from trader_shared.fusion_core import merge_decisions, log_only
-    from market_env import get_env_for_skill
+    from trader_shared.market_env import get_env_for_skill
 
     env = get_env_for_skill("trader")
     result = merge_decisions(

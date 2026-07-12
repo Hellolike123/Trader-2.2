@@ -29,7 +29,7 @@ except ImportError:
     else:
         raise
 
-from signal_tracker import show_all, show_single, check_recent
+from trader_shared.signal_tracker import show_all, show_single, check_recent
 
 
 def main() -> int:
@@ -41,12 +41,12 @@ def main() -> int:
 
     # Handle subcommands from signal_tracker.py
     if hasattr(args, 'command') and args.command:
-        from signal_tracker import main as tracker_main
+        from trader_shared.signal_tracker import main as tracker_main
         return tracker_main()
 
     try:
         # 1. 先执行 backfill（宽窗口 90 天），确保 signal_results.jsonl 有数据
-        from signal_tracker import backfill
+        from trader_shared.signal_tracker import backfill
         bf_result = backfill(days_window=90)
         bf_updated = bf_result.get("updated", 0)
         if bf_updated > 0:

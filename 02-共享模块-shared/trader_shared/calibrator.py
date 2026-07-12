@@ -30,7 +30,7 @@ import trader_shared
 
 from trader_shared.candidate_core import build_candidate_levels, pct_change, to_float
 from trader_shared.data_provider import get_provider
-from trader_shared import assess as _assess_market
+from trader_shared.market_env import assess as _assess_market
 
 MAX_HOLD_DAYS = 20
 

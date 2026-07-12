@@ -1,140 +1,75 @@
-"""Trader shared modules - lazy load from scripts/ or from installed package.
+"""Trader shared modules — real library (no upward dependency on scripts/).
+
+ADR-001: pipeline / signal_tracker / market_env / calibrator / self_calibration
+have been colocated into this package. `trader_shared` is now importable as a
+standalone library: no runtime dependence on scripts/, no importlib hacks.
 
 Usage:
     from trader_shared import write_stock, log, assess, run
+    from trader_shared.pipeline import write_stock
 """
 from __future__ import annotations
 
-import importlib
-import importlib.util
 import sys
 from pathlib import Path
 
-# ── 自动路径配置（过渡期兼容层）──────────────────────────────────────
-# scripts/ 目录仍需手动加入（pipeline.py, market_env.py 等在这里）
-_HERE = Path(__file__).resolve().parent
-_SHARED_ROOT = _HERE.parent  # 02-共享模块-shared/
-_scripts = _SHARED_ROOT / "scripts"
+# ── 兼容层（过渡期）：给尚未迁移的 scripts/ 工具留 path ──────────────
+_scripts = Path(__file__).resolve().parent.parent / "scripts"
 if _scripts.exists() and str(_scripts) not in sys.path:
     sys.path.append(str(_scripts))
 
-# ── path helpers ──
+# ── 静态导入子模块（ADR-001 收编后，全部在包内，无向上依赖）─────────
+import trader_shared.pipeline as _pipeline
+import trader_shared.signal_tracker as _tracker
+import trader_shared.market_env as _market_env
+import trader_shared.calibrator as _calibrator
+import trader_shared.signal_contract as _signal_contract
+import trader_shared.signal_store as _signal_store
+import trader_shared.signal_utils as _signal_utils
+import trader_shared.interfaces as _interfaces
+import trader_shared.fetchers as _fetchers
+import trader_shared.plugin_registry as _plugin_registry
+import trader_shared.async_utils as _async_utils
 
-def _find_scripts_dir() -> Path | None:
-    """Find the scripts/ directory at runtime across repo/zip/Hermes layouts."""
-    _here = Path(__file__).resolve().parent
+# ── 公开 API：从各模块暴露已知属性（缺失则跳过，不致命）────────────
+_PUBLIC_ATTRS = {
+    # pipeline
+    "write_stock": _pipeline, "write_market": _pipeline, "write_positions": _pipeline,
+    "add_warning": _pipeline, "clear_old_warnings": _pipeline, "get_stock_weight": _pipeline,
+    "get_market_level": _pipeline, "get_market_note": _pipeline, "get_full_market": _pipeline,
+    "conflicting_signals": _pipeline, "read": _pipeline,
+    # signal_tracker
+    "log": _tracker, "log_safe": _tracker, "fill": _tracker, "fill_by_target": _tracker,
+    "load_recent": _tracker, "stats": _tracker, "stats_by_type": _tracker, "stable_id": _tracker,
+    # market_env
+    "assess": _market_env, "refresh": _market_env, "env_note_for": _market_env,
+    "get_env_for_skill": _market_env,
+    # calibrator
+    "run": _calibrator, "generate_suggestions": _calibrator,
+}
+for _name, _mod in _PUBLIC_ATTRS.items():
+    _val = getattr(_mod, _name, None)
+    if _val is not None:
+        globals()[_name] = _val
 
-    candidates = [
-        # Hermes/zip layout: .../<skill>/scripts/trader_shared/__init__.py
-        _here.parent,
-        # repo/shared layout: .../02-共享模块-shared/trader_shared/__init__.py → scripts/ co-located
-        _here.parent / "scripts",
-        # current working dir guesses
-        Path.cwd() / "scripts",
-    ]
+# 模块级 re-export（确保 `from trader_shared import signal_contract` 等可用）
+signal_contract = _signal_contract
+signal_store = _signal_store
+signal_utils = _signal_utils
+interfaces = _interfaces
+fetchers = _fetchers
+plugin_registry = _plugin_registry
+async_utils = _async_utils
 
-    # walk upwards and try sibling scripts directories
-    p = _here
-    for _ in range(8):
-        candidates.append(p / "scripts")
-        candidates.append(p.parent / "scripts")
-        p = p.parent
-
-    seen: set[str] = set()
-    for c in candidates:
-        try:
-            scripts = c.resolve()
-        except Exception:
-            continue
-        key = str(scripts)
-        if key in seen:
-            continue
-        seen.add(key)
-        if scripts.exists() and (scripts / "pipeline.py").exists() and (scripts / "market_env.py").exists():
-            return scripts
-
-    return None
-
-
-# ── pip-installed package check ──
-
-def _load_from_installed(name: str):
-    """Try loading from a pip-installed trader_shared package."""
-    try:
-        mod = importlib.import_module(f".{name}", __name__)
-        return mod
-    except (ImportError, ModuleNotFoundError):
-        return None
-
-
-# ── caches ──
-
-_pipelines: dict[str, object] = {}
-_tracker: object | None = None
-_market_env: object | None = None
-_calibrator: object | None = None
-
-# ── lazy loaders ──
-
-def _load_script(name: str):
-    """Load a module from scripts/ via importlib."""
-    cache_key = name
-    if cache_key in _pipelines:
-        return _pipelines[cache_key]
-    scripts = _find_scripts_dir()
-    if scripts is None:
-        raise RuntimeError(f"trader_shared: cannot find scripts/ directory for module '{name}'")
-    _check = scripts / "pipeline.py"
-    if not _check.exists():
-        raise RuntimeError(f"trader_shared: pipeline.py not found at {scripts}")
-    mod_path = scripts / f"{name}.py"
-    spec = importlib.util.spec_from_file_location(f"trader_shared_{name}", mod_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"trader_shared: cannot load module '{name}' from {mod_path}")
-    mod = importlib.util.module_from_spec(spec)
-    # Pre-register in sys.modules so intra-module imports work
-    sys.modules[f"trader_shared_{name}"] = mod
-    spec.loader.exec_module(mod)
-    _pipelines[cache_key] = mod
-    return mod
-
-
-def get_pipeline() -> object:
-    """Lazy load pipeline module (from scripts/)."""
-    if "pipeline" not in _pipelines:
-        _pipelines["pipeline"] = _load_script("pipeline")
-    return _pipelines["pipeline"]
-
-
-def get_signal_tracker() -> object:
-    """Lazy load signal_tracker module (from scripts/)."""
-    global _tracker
-    if _tracker is None:
-        _tracker = _load_script("signal_tracker")
-    return _tracker
-
-
-def get_market_env() -> object:
-    """Lazy load market_env module (from scripts/)."""
-    global _market_env
-    if _market_env is None:
-        _market_env = _load_script("market_env")
-    return _market_env
-
-
-def get_calibrator() -> object:
-    """Lazy load calibrator module (from scripts/)."""
-    global _calibrator
-    if _calibrator is None:
-        _calibrator = _load_script("calibrator")
-    return _calibrator
-
-
-# ── public attribute access via __getattr__ ──
+# ── 过渡期裸名别名：tests / 旧脚本仍用 `from signal_tracker import ...` ──
+# 收编后这些模块在 trader_shared/ 下，裸名不再可导入。注册 sys.modules 别名续命，
+# 统一迁移测试留待后续测试基建步。
+for _bare in ("pipeline", "signal_tracker", "market_env", "calibrator", "self_calibration"):
+    _mod = sys.modules.get(f"trader_shared.{_bare}")
+    if _mod is not None:
+        sys.modules.setdefault(_bare, _mod)
 
 __all__ = [
-    # config
-    "LOOKBACK_DAYS", "RECENT_WINDOW", "CONFIRM_BUFFER", "STOP_BUFFER", "TAKE_PROFIT_BUFFER",
     # pipeline
     "write_stock", "write_market", "write_positions", "add_warning",
     "clear_old_warnings", "get_stock_weight", "get_market_level",
@@ -146,65 +81,12 @@ __all__ = [
     "assess", "refresh", "env_note_for", "get_env_for_skill",
     # calibrator
     "run", "generate_suggestions",
-    # signal modules (migrated from 03-输出校验-contracts)
+    # signal modules
     "signal_contract", "signal_store", "signal_utils",
-    # DI & plugins (new in 2.4)
+    # DI & plugins
     "interfaces", "fetchers", "plugin_registry", "async_utils",
     # version
     "__version__",
 ]
-
-_PIPELINE_ATTRS = {
-    "write_stock", "write_market", "write_positions", "add_warning",
-    "clear_old_warnings", "get_stock_weight", "get_market_level",
-    "get_market_note", "get_full_market", "conflicting_signals", "read",
-    # internal
-    "_load", "_save",
-}
-
-_TRACKER_ATTRS = {
-    "log", "log_safe", "fill", "fill_by_target", "load_recent",
-    "stats", "stats_by_type", "stable_id",
-    "_load_all",
-}
-
-_MARKET_ATTRS = {
-    "assess", "refresh", "env_note_for", "get_env_for_skill",
-}
-
-_CALIBRATOR_ATTRS = {
-    "run", "generate_suggestions",
-}
-
-
-def __getattr__(name: str):
-    # pipeline
-    if name in _PIPELINE_ATTRS:
-        mod = get_pipeline()
-        if mod is None:
-            raise AttributeError(f"trader_shared.{name}: pipeline module not loaded")
-        return getattr(mod, name)
-    # signal_tracker
-    if name in _TRACKER_ATTRS:
-        mod = get_signal_tracker()
-        if mod is None:
-            raise AttributeError(f"trader_shared.{name}: signal_tracker module not loaded")
-        return getattr(mod, name)
-    # market_env
-    if name in _MARKET_ATTRS:
-        mod = get_market_env()
-        if mod is None:
-            raise AttributeError(f"trader_shared.{name}: market_env module not loaded")
-        return getattr(mod, name)
-    # calibrator
-    if name in _CALIBRATOR_ATTRS:
-        mod = get_calibrator()
-        if mod is None:
-            raise AttributeError(f"trader_shared.{name}: calibrator module not loaded")
-        return getattr(mod, name)
-    raise AttributeError(f"module 'trader_shared' has no attribute '{name}'")
-
-
-# ── version ──
 
 __version__ = "0.6.0"
