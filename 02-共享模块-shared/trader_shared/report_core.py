@@ -702,25 +702,27 @@ def render_short_midline(r: dict[str, Any]) -> str:
             lines.append(f"    {price:.2f} {label}（{action}）")
 
     lines.append("")
-    # 盈亏比行（用 key_prices 的 risk/reward 计算比值 + 判定符号）
+    # 盈亏比行（用阶梯里的价格保持一致：建仓用 buy_low，追涨用现价，目标用 take）
     _kp = r.get("key_prices") or {}
-    _risk = float(_kp.get("risk") or 0)
-    _rew = float(_kp.get("reward_near") or 0)
-    _risk_chase = float(_kp.get("risk_chase") or 0)
-    _rew_chase = float(_kp.get("reward_chase") or 0)
+    _target = float(r.get("take") or 0)  # 用报告的止盈价，不是 far_sell
 
-    line_buy = ""  # 不用 key_prices.line_buy 旧格式，总用新计算
-    line_chase = ""
+    # 建仓盈亏比：用 buy_low（阶梯买点区下沿）
+    if buy_low and stop_sell and _target > 0:
+        _risk_buy = max(0.0, float(buy_low) - float(stop_sell))
+        _rew_buy = max(0.0, _target - float(buy_low))
+        if _risk_buy > 0:
+            _ratio = _rew_buy / _risk_buy
+            _verdict = "✓ 值得关注" if _ratio >= 2.0 else ("✗ 不划算" if _ratio < 1.0 else "△ 一般")
+            lines.append(f"  {float(buy_low):.2f} 买：亏约 {_risk_buy:.1f} / 赚约 {_rew_buy:.1f} → 盈亏比 {_ratio:.1f}:1 {_verdict}")
 
-    if buy_ref and stop_sell and _risk > 0:
-        _ratio = _rew / _risk if _risk > 0 else 0
-        _verdict = "✓ 值得关注" if _ratio >= 2.0 else ("✗ 不划算" if _ratio < 1.0 else "△ 一般")
-        lines.append(f"  {float(buy_ref):.2f} 买：亏约 {_risk:.1f} / 赚约 {_rew:.1f} → 盈亏比 {_ratio:.1f}:1 {_verdict}")
-
-    if current > 0 and stop_sell and _risk_chase > 0:
-        _ratio_c = _rew_chase / _risk_chase if _risk_chase > 0 else 0
-        _verdict_c = "✓ 值得关注" if _ratio_c >= 2.0 else ("✗ 不划算" if _ratio_c < 1.0 else "△ 一般")
-        lines.append(f"  {current:.2f} 追：亏约 {_risk_chase:.1f} / 赚约 {_rew_chase:.1f} → 盈亏比 {_ratio_c:.1f}:1 {_verdict_c}")
+    # 追涨盈亏比：用现价
+    if current > 0 and stop_sell and _target > 0:
+        _risk_chase = max(0.0, current - float(stop_sell))
+        _rew_chase = max(0.0, _target - current)
+        if _risk_chase > 0:
+            _ratio_c = _rew_chase / _risk_chase
+            _verdict_c = "✓ 值得关注" if _ratio_c >= 2.0 else ("✗ 不划算" if _ratio_c < 1.0 else "△ 一般")
+            lines.append(f"  {current:.2f} 追：亏约 {_risk_chase:.1f} / 赚约 {_rew_chase:.1f} → 盈亏比 {_ratio_c:.1f}:1 {_verdict_c}")
 
     # 「说明」行已删除（与出手行语义重复）
 
