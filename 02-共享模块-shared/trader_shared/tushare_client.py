@@ -151,6 +151,7 @@ class TushareClient:
                 },
                 timeout=30,
                 headers={"Accept-Encoding": "gzip"},
+                proxies={"http": None, "https": None},
             )
             data = resp.json()
             if data.get("code") != 0:
@@ -171,7 +172,7 @@ class TushareClient:
         self, ts_code: str, start_date: str = "", end_date: str = ""
     ) -> list[dict[str, Any]]:
         """日线行情。ts_code 格式如 '688248.SH'。"""
-        params: dict[str, Any] = {"ts_code": ts_code}
+        params: dict[str, Any] = {"ts_code": ts_code, "adj": "qfq"}
         if start_date:
             params["start_date"] = start_date
         if end_date:
@@ -198,10 +199,20 @@ class TushareClient:
             return []
         try:
             self._rate_limit()
+            import os
             import tushare as ts
             from tushare.stock import cons as ct
             ct.verify_token_url = self._realtime_url
-            df = ts.realtime_quote(ts_code=ts_codes)
+            # 绕过系统代理（MacPacket 等本地代理会导致 503）
+            _old_no_proxy = os.environ.get("NO_PROXY")
+            os.environ["NO_PROXY"] = "*"
+            try:
+                df = ts.realtime_quote(ts_code=ts_codes)
+            finally:
+                if _old_no_proxy is None:
+                    os.environ.pop("NO_PROXY", None)
+                else:
+                    os.environ["NO_PROXY"] = _old_no_proxy
             if df is not None and len(df) > 0:
                 return df.to_dict(orient="records")
             return []

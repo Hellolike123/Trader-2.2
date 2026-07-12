@@ -30,7 +30,7 @@ from trader_shared.safe_cast import safe_dict
 from price_point_engine import price
 from trader_shared.signal_store import append_signal
 from t0_run import build_plan, build_t0_event_signal
-from config import FREQUENCY_STOP_LIMIT
+from t0_config import FREQUENCY_STOP_LIMIT
 
 # Phase 2 接入：T0 实时缠论（opt-in，默认关；仅 T0_REALTIME_CHAN=1 时启用）
 try:

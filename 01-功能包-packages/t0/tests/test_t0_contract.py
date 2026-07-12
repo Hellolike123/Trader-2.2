@@ -550,7 +550,7 @@ def test_monitor_suppresses_observation_and_reports_trigger_position(tmp_path, m
 
 
 def test_min_trigger_matches_reduced_to_3() -> None:
-    config_path = SCRIPTS / "config.py"
+    config_path = SCRIPTS / "t0_config.py"
     code = config_path.read_text(encoding="utf-8")
     import ast
     tree = ast.parse(code)
@@ -565,7 +565,7 @@ def test_min_trigger_matches_reduced_to_3() -> None:
                 if isinstance(target, ast.Name) and target.id == "MIN_TRIGGER_MATCHES":
                     assert isinstance(node.value, ast.Constant) and node.value.value == 3
                     return
-    assert False, "MIN_TRIGGER_MATCHES not found in config.py"
+    assert False, "MIN_TRIGGER_MATCHES not found in t0_config.py"
 
 
 def test_buy_trigger_reaches_confirmation_with_3_signals_after_config_change(monkeypatch: Any) -> None:
@@ -573,7 +573,7 @@ def test_buy_trigger_reaches_confirmation_with_3_signals_after_config_change(mon
     monkeypatch.setattr(indicators, "is_new_low_recent", lambda bars, lookback=6: False)
     from price_point_engine import detect_buy_trigger
     # Verify the config constant directly instead of importing through sys.modules
-    config_path = SCRIPTS / "config.py"
+    config_path = SCRIPTS / "t0_config.py"
     import ast
     code = config_path.read_text(encoding="utf-8")
     tree = ast.parse(code)
@@ -589,7 +589,7 @@ def test_buy_trigger_reaches_confirmation_with_3_signals_after_config_change(mon
                 if isinstance(target, ast.Name) and target.id == "MIN_TRIGGER_MATCHES":
                     assert isinstance(node.value, ast.Constant) and node.value.value == 3, "Config should require 3 signals"
                     found = True
-    assert found, "MIN_TRIGGER_MATCHES not found in config.py"
+    assert found, "MIN_TRIGGER_MATCHES not found in t0_config.py"
     from indicators import calculate_rsi
     closes = [10.0 - i * 0.01 for i in range(20)] + [10.0 - 0.34 + 0.05, 10.0 - 0.34 + 0.07, 10.0 - 0.34 + 0.09]
     current = closes[-1]

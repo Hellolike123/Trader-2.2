@@ -4,7 +4,7 @@ from datetime import datetime, time, timedelta
 from typing import Any
 
 from trader_shared.safe_cast import safe_max
-from config import (
+from t0_config import (
     BUY_ACCEPT_FACTOR,
     BUY_ACCEPT_FACTOR_AGGRESSIVE,
     BUY_ACCEPT_FACTOR_CONSERVATIVE,

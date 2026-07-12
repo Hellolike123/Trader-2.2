@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from config import LOOKBACK_DAYS
+from t0_config import LOOKBACK_DAYS
 
 try:
     import trader_shared

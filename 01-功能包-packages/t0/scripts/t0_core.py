@@ -323,7 +323,7 @@ def render_markdown(plan: dict[str, Any]) -> str:
         has_tick_data = len(tick_data) > 0
         big_order = analyze_big_orders(bars, tick_data=tick_data, focus_prices=focus_prices, trade_date=trade_date, order_book=(plan.get("data") or {}).get("order_book"))
 
-    from config import TREND_FILTER_EXTREME_ONLY
+    from t0_config import TREND_FILTER_EXTREME_ONLY
 
     current_action = '低吸' if buy_state == '可执行' else '高抛' if sell_state == '可执行' else '不动'
 

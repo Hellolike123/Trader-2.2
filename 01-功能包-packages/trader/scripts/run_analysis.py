@@ -825,8 +825,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
                 "peaks": _peaks,
                 "source": "tushare_cyq_perf",
             }
-    except Exception:
-        pass
+    except Exception as e:
+        _logger.warning("Tushare cyq_perf fallback to internal calc: %s", e)
 
     chip_res = analyze_chips_and_migration(
         bars=bars,

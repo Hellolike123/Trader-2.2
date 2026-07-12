@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 
-LOOKBACK_DAYS: int = 300  # 250日均线需要至少300根日K线
+LOOKBACK_DAYS: int = 370  # 300日历天≈200交易日不够MA250，370天保证≥250个交易日
 RECENT_WINDOW: int = 5
 CONFIRM_BUFFER: float = 0.02
 STOP_BUFFER: float = 0.98
