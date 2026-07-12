@@ -8,7 +8,10 @@ from __future__ import annotations
 from typing import Any
 
 from trader_shared.interfaces import IndicatorPlugin
-from trader_shared.indicator_math import calc_supertrend
+from trader_shared.display_indicators import calc_supertrend
+
+# 模块级 display_only 标记，供 plugin_registry 分层加载时识别
+display_only: bool = True
 
 
 class SupertrendPlugin(IndicatorPlugin):

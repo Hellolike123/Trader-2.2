@@ -5,9 +5,13 @@ import sys
 from pathlib import Path
 
 # 确保 trader_shared 可导入（pack 后在 scripts/ 下，hermes 运行时 sys.path 可能不包含 scripts/）
+# Ensure trader_shared package can be imported by adding workspace shared module path
 _SCRIPT_DIR = Path(__file__).resolve().parent
-if str(_SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPT_DIR))
+_WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
+_SHARED_MODULE_PATH = _WORKSPACE_ROOT / "02-共享模块-shared"
+for p in (_WORKSPACE_ROOT, _SHARED_MODULE_PATH, _SCRIPT_DIR):
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
 
 import argparse
 import json
@@ -40,19 +44,7 @@ from trader_shared.stage_positioning import assess_stage, compute_exit_plan, com
 from trader_shared.fetchers import TencentFetcher
 from trader_shared.indicator_math import aggregate_5m_to_60m, calc_supertrend, calc_vwap
 
-try:
-    from trader_shared.chip_distribution import calc_chip_distribution as _calc_chip
-except ImportError:
-    def _calc_chip(daily, lookback=60):
-        return {"peaks": [], "total_volume": 0, "current_pct": None, "mid_price": None}
-
-try:
-    from trader_shared.chip_migration_monitor import save_chip_snapshot, check_chip_migration
-    _CHIP_MIGRATION_AVAILABLE = True
-except ImportError:
-    _CHIP_MIGRATION_AVAILABLE = False
-    def save_chip_snapshot(target, chip_result, trade_date=None): pass
-    def check_chip_migration(target, chip_result): return {"migration_pct": 0, "warning_level": "none", "warning_text": "", "has_history": False}
+from trader_shared.chip_core import analyze_chips_and_migration
 from config import (
     LOOKBACK_DAYS,
     STRUCTURE_WINDOW,
@@ -102,8 +94,24 @@ except ImportError:
 
 
 from trader_shared.signal_contract import assert_valid_signal
+from trader_shared.signal_core import (
+    clear_signals_cache,
+    read_signals_for_report,
+    load_historical_win_rate,
+    get_pool_count,
+    build_signal,
+    one_sentence,
+    state_text,
+    _map_fusion_to_signal,
+)
 from datetime import date
 import os
+
+# Compatibility aliases for testing
+_clear_signals_cache = clear_signals_cache
+_read_signals_for_report = read_signals_for_report
+_load_historical_win_rate = load_historical_win_rate
+_pool_count = get_pool_count
 
 # ── Kelly cache: 读取 signal_results.jsonl 一次，按 market_env_level 缓存结果 ──
 _kelly_cache: dict[str, dict[str, float]] = {}
@@ -160,180 +168,6 @@ def _get_major_stage(r: dict[str, Any]) -> str:
         }
         major_stage = stage_map.get(old_stage, old_stage)
     return major_stage
-
-# ── 进程内 signals.jsonl 缓存（批量刷新时避免每票重读文件）──
-_signals_cache_data: list[dict] | None = None
-_signals_cache_mtime: float = 0
-_signals_cache_path: str = ""
-
-
-def _clear_signals_cache() -> None:
-    """清除 signals.jsonl 缓存（用于测试或文件变动后）"""
-    global _signals_cache_data, _signals_cache_mtime, _signals_cache_path
-    _signals_cache_data = None
-    _signals_cache_mtime = 0
-    _signals_cache_path = ""
-
-
-def _read_signals_for_report(target: str, daily_bars: list[dict[str, Any]]) -> tuple[float, dict | None]:
-    """一次性读取 signals.jsonl，同时返回成本价和历史胜率。
-
-    合并了原来的 _get_cost_from_signals + _load_historical_win_rate，
-    避免对同一文件做两次 I/O。
-    只读最近 100 条信号（足够覆盖成本推断和胜率统计）。
-
-    Returns:
-        (cost_price, win_rate_data)
-        cost_price: 最近买入信号的价格，找不到返回 0.0
-        win_rate_data: 历史胜率统计 dict 或 None
-    """
-    global _signals_cache_data, _signals_cache_mtime, _signals_cache_path
-
-    signals_path = os.path.expanduser("~/.trader/signals.jsonl")
-
-    # 进程内缓存：文件未修改则复用上次结果
-    try:
-        current_mtime = os.path.getmtime(signals_path)
-    except OSError:
-        current_mtime = 0
-
-    if (_signals_cache_data is not None and
-            _signals_cache_path == signals_path and
-            _signals_cache_mtime == current_mtime):
-        all_lines = _signals_cache_data
-    else:
-        if not os.path.exists(signals_path):
-            _signals_cache_data = []
-            _signals_cache_mtime = current_mtime
-            _signals_cache_path = signals_path
-            return 0.0, None
-        with open(signals_path, "r", encoding="utf-8") as f:
-            all_lines = f.readlines()[-100:]
-        _signals_cache_data = all_lines
-        _signals_cache_mtime = current_mtime
-        _signals_cache_path = signals_path
-
-    normalized_target = target.replace(".SH", "").replace(".SZ", "").strip()
-
-    # 构建日期→收盘价的映射（用于计算收益率）
-    sorted_bars = sorted(daily_bars, key=lambda x: str(x.get("date", ""))[:10])
-    dates = [str(b.get("date", ""))[:10] for b in sorted_bars if b.get("date")]
-    close_map: dict[str, float] = {}
-    for b in sorted_bars:
-        d = str(b.get("date", ""))[:10]
-        if d and b.get("close") is not None:
-            close_map[d] = float(b["close"])
-
-    if not close_map:
-        return 0.0, None
-
-    # 日期索引（用于计算 5 日后收益率）
-    date_to_idx: dict[str, int] = {d: i for i, d in enumerate(dates)}
-
-    buy_signals: list[float] = []
-    sell_signals: list[float] = []
-    cost_price: float = 0.0
-
-    try:
-        for line in reversed(all_lines):  # 从新到旧遍历
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    sig = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-
-                sig_symbol = str(sig.get("symbol", "")).replace(".SH", "").replace(".SZ", "").strip()
-                sig_name = str(sig.get("name", "")).strip()
-                if normalized_target not in (sig_symbol, sig_name):
-                    continue
-
-                sig_type = str(sig.get("signal_type", ""))
-                trade_date = str(sig.get("trade_date") or "")[:10]
-                analysis_time = str(sig.get("analysis_time") or "")
-                time_part = analysis_time[11:].strip() if len(analysis_time) >= 16 else ""
-
-                # ── 成本推断：从新到旧找第一个买入信号 ──
-                if cost_price == 0.0:
-                    if sig_type in ("low_buy_triggered", "track"):
-                        trigger = sig.get("trigger", {})
-                        price = trigger.get("price", 0)
-                        if price > 0:
-                            cost_price = float(price)
-                            break  # 找到最近的买入信号，停止
-
-                # ── 胜率统计：继续扫描 ──
-                if sig_type not in ("review_result", "low_buy_triggered", "high_sell_triggered"):
-                    continue
-                if sig_type == "review_result" and not (time_part >= "15:00"):
-                    continue
-                if trade_date not in date_to_idx:
-                    continue
-
-                idx = date_to_idx[trade_date]
-                if idx + 5 >= len(dates):
-                    continue
-
-                entry_price = close_map.get(trade_date, 0)
-                if entry_price <= 0:
-                    continue
-                exit_price = close_map.get(dates[idx + 5], 0)
-                if exit_price <= 0:
-                    continue
-                return_pct = round(((exit_price - entry_price) / entry_price) * 100, 2)
-
-                direction = str(sig.get("direction", ""))
-                if sig_type == "low_buy_triggered":
-                    buy_signals.append(return_pct)
-                elif sig_type == "high_sell_triggered":
-                    sell_signals.append(return_pct)
-                elif direction in ("bullish", "bullish_lean"):
-                    buy_signals.append(return_pct)
-                elif direction in ("bearish", "bearish_lean"):
-                    sell_signals.append(return_pct)
-    except Exception:
-        return cost_price, None
-
-    # 构造胜率数据
-    win_rate_data: dict | None = None
-    total = len(buy_signals) + len(sell_signals)
-    if total > 0:
-        def _stats(signals: list[float]) -> dict | None:
-            if not signals:
-                return None
-            wins = sum(1 for s in signals if s > 0)
-            n = len(signals)
-            win_rate = round((wins / n) * 100)
-            avg = round(sum(signals) / n, 2)
-            return {"count": n, "wins": wins, "win_rate": win_rate, "avg_pnl": avg}
-
-        win_rate_data = {
-            "total": total,
-            "buy": _stats(buy_signals),
-            "sell": _stats(sell_signals),
-            "sample_warning": total < 5,
-        }
-
-    return cost_price, win_rate_data
-
-
-def _load_historical_win_rate(target: str) -> dict | None:
-    """兼容旧 API：内部取日线，返回胜率数据 dict 或 None。
-
-    替代原来的独立 _load_historical_win_rate 函数，
-    底层复用已缓存的 _read_signals_for_report。
-    """
-    _clear_signals_cache()  # 每次读取都重新读取文件（测试/独立调用场景）
-    try:
-        from trader_shared.data_provider import get_provider
-        provider = get_provider()
-        sec = provider.resolve_security(target)
-        bars = provider.fetch_qfq_daily(sec)
-    except Exception:
-        bars = []
-    _, win_rate_data = _read_signals_for_report(target, bars)
-    return win_rate_data
 
 
 def _degraded_quote_report(target: str) -> dict[str, Any]:
@@ -443,31 +277,6 @@ def _fusion_breakdown(fusion: dict) -> list[str]:
     return rows
 
 
-_FUSION_ACTION_MAP: dict[str, tuple[str, str, str]] = {
-    "半仓试 (多方主导)": ("track", "bullish", "track"),
-    "半仓试 (多方主导但有分歧)": ("track", "bullish", "track"),
-    "增持": ("track", "bullish", "track"),
-    "等转强观察": ("wait_for_confirmation", "bullish_lean", "observe"),  # Fix 3: 新增
-    "持股观望": ("observe", "neutral", "observe"),
-    "减仓": ("defensive", "bearish", "wait"),
-    "空仓/止损": ("defensive", "bearish", "wait"),
-    # T-11 fix: 补全 3 个缺失的融合层 Action 映射，避免决策被静默丢弃
-    "空仓 (大盘很差, 一票否决)": ("risk_stop", "bearish", "stop"),
-    "观望 (信号冲突)": ("observe", "neutral", "observe"),
-    "等转强": ("wait_for_confirmation", "bullish_lean", "observe"),
-    "回调观望": ("wait_for_confirmation", "neutral", "observe"),
-    "高位观望": ("no_entry", "neutral", "observe"),
-    # 卖点侧补强：减1/3 中间态映射
-    "减1/3 (高位松动)": ("defensive", "bearish_lean", "wait"),
-    "高位松动": ("defensive", "bearish_lean", "wait"),
-}
-
-
-def _map_fusion_to_signal(fusion_action: str) -> tuple[str, str, str] | None:
-    if not fusion_action:
-        return None
-    return _FUSION_ACTION_MAP.get(fusion_action.strip())
-
 
 def price(value: float | None) -> str:
     return "无" if value is None else f"{value:.2f}元"
@@ -522,7 +331,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         risk_flags.append("新股")
 
     # 一次性读取 signals.jsonl：同时获取成本价和历史胜率（合并两次 I/O）
-    _signal_cost_price, _signal_win_rate = _read_signals_for_report(target, bars)
+    _signal_cost_price, _signal_win_rate = read_signals_for_report(target, bars)
 
     # 如果日线最新日期不是今天，追加今日 quote 作为当天 bar
     # （解决盘中分析时日线数据滞后导致阶段判定错误的问题）
@@ -997,8 +806,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     buy_scenes = {"低吸观察", "防守观察", "等转强"}
     position_cap = min(10, atr_cap) if scene in buy_scenes else 10
 
-    # 筹码数据：优先 Tushare cyq_perf（官方数据更准确），fallback 到内部算法
-    chip = None
+    tushare_chip_data = None
     try:
         from trader_shared.chip_data import get_cyq_perf
         _cyq = get_cyq_perf(sec.ts_code, start_date="", end_date="")
@@ -1006,13 +814,12 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             _latest = _cyq[-1]
             _winner_rate = float(_latest.get("winner_rate", 0) or 0)
             _cost_50 = float(_latest.get("cost_50pct", 0) or 0)
-            # 将 cost_5/15/50/85/95pct 转为 peaks 格式
             _peaks = []
             for _pct_key, _share in [("cost_5pct", 5), ("cost_15pct", 15), ("cost_50pct", 50), ("cost_85pct", 85), ("cost_95pct", 95)]:
                 _price = float(_latest.get(_pct_key, 0) or 0)
                 if _price > 0:
                     _peaks.append({"price": _price, "share_of_total": _share})
-            chip = {
+            tushare_chip_data = {
                 "current_pct": _winner_rate,
                 "mid_price": _cost_50,
                 "peaks": _peaks,
@@ -1020,19 +827,23 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             }
     except Exception:
         pass
-    if chip is None:
-        chip = _calc_chip(bars, lookback=60)
-        chip["source"] = "internal_calc"
-    chip_peaks = sorted(chip.get("peaks", []) or [], key=lambda x: x["price"])
 
-    # 筹码搬家监控：保存快照 + 对比历史
-    chip_migration = {"migration_pct": 0, "warning_level": "none", "warning_text": "", "has_history": False}
-    if _CHIP_MIGRATION_AVAILABLE and chip_peaks:
-        try:
-            chip_migration = check_chip_migration(target, chip, bars=bars)
-            save_chip_snapshot(target, chip, trade_date=quote.get("trade_date"))
-        except Exception:
-            pass
+    chip_res = analyze_chips_and_migration(
+        bars=bars,
+        current_price=current,
+        target=target,
+        trade_date=quote.get("trade_date"),
+        tushare_chip_data=tushare_chip_data,
+    )
+    chip = chip_res["chip"]
+    chip_peaks = chip_res["chip_peaks"]
+    chip_migration = chip_res["chip_migration"]
+    chip_support = chip_res["chip_support"]
+    chip_resistance = chip_res["chip_resistance"]
+    chip_support_lower = chip_res["chip_support_lower"]
+    chip_support_upper = chip_res["chip_support_upper"]
+    chip_resistance_lower = chip_res["chip_resistance_lower"]
+    chip_resistance_upper = chip_res["chip_resistance_upper"]
 
     # 主力行为独立评分（15分制）
     main_force_score_result: dict[str, Any] = {"total_score": 0, "flow_score": 0, "chip_score": 0,
@@ -1140,40 +951,6 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         _boost = 0.05 * _sell_timing  # +0.05 per sell_timing point
         report_fusion["confidence"] = min(0.95, report_fusion.get("confidence", 0) + _boost)
 
-    chip_support: float | None = None
-    chip_resistance: float | None = None
-    if chip_peaks:
-        support_peaks = [p for p in chip_peaks if p["price"] < current]
-        if support_peaks:
-            strong_near = sorted(
-                [p for p in support_peaks if (current - p["price"]) / current <= 0.03],
-                key=lambda p: float(p.get("share_of_total") or 0),
-                reverse=True,
-            )
-            all_by_strong = sorted(support_peaks, key=lambda p: float(p.get("share_of_total") or 0), reverse=True)
-            # If strongest > 2%, use it regardless of distance
-            # Otherwise prefer strongest within 3%
-            if all_by_strong and float(all_by_strong[0].get("share_of_total") or 0) > 2:
-                chip_support = all_by_strong[0]["price"]
-            elif strong_near:
-                chip_support = strong_near[0]["price"]
-            else:
-                chip_support = support_peaks[-1]["price"]
-        resistance_peaks = [p for p in chip_peaks if p["price"] > current]
-        if resistance_peaks:
-            strong_near = sorted(
-                [p for p in resistance_peaks if (p["price"] - current) / current <= 0.03],
-                key=lambda p: float(p.get("share_of_total") or 0),
-                reverse=True,
-            )
-            all_by_strong = sorted(resistance_peaks, key=lambda p: float(p.get("share_of_total") or 0), reverse=True)
-            if all_by_strong and float(all_by_strong[0].get("share_of_total") or 0) > 2:
-                chip_resistance = all_by_strong[0]["price"]
-            elif strong_near:
-                chip_resistance = strong_near[0]["price"]
-            else:
-                chip_resistance = resistance_peaks[0]["price"]
-
     # Inject chip resistance into resistance levels
     if chip_resistance and chip_resistance > current:
         levels["resistance_levels"].append({"name": "筹码阻力", "price": round(chip_resistance, 2), "weight": 0.95})
@@ -1225,6 +1002,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         main_force_result=mf_result,
         chan_result=chan_result,
         extend_sector=snapshot.extend_sector,
+        chip_support_lower=chip_support_lower or 0.0,
+        chip_resistance_lower=chip_resistance_lower or 0.0,
+        chip_resistance_upper=chip_resistance_upper or 0.0,
     )
 
     # 修复：止盈应使用保护后的阶段（与仓位/止损一致）
@@ -1341,6 +1121,10 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         },
         "chip_support": chip_support,
         "chip_resistance": chip_resistance,
+        "chip_support_lower": chip_support_lower,
+        "chip_support_upper": chip_support_upper,
+        "chip_resistance_lower": chip_resistance_lower,
+        "chip_resistance_upper": chip_resistance_upper,
         "chip_peaks": chip_peaks,
         "chip_current_pct": chip.get("current_pct"),
         "chip_mid_price": chip.get("mid_price"),
@@ -1395,8 +1179,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "expma_trend": expma_trend,
         "expma_status": expma_status_result,
         "resonance": resonance_result,
-        # "extend_fundamental": snapshot.extend_fundamental,
-        # "extend_sentiment": snapshot.extend_sentiment,
+        "extend_fundamental": snapshot.extend_fundamental,
+        "extend_sentiment": snapshot.extend_sentiment,
         # Phase 1 新增：资金面数据（仅展示，不参与评分）
         "extend_margin": snapshot.extend_margin,
         "extend_northbound": snapshot.extend_northbound,
@@ -1804,6 +1588,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             "has_position": has_position,
             "suggested_pct": suggested,
             "max_position_pct": 50,
+            "chip_resistance_lower": chip_resistance_lower,
+            "chip_resistance_upper": chip_resistance_upper,
         })
         report["chan_discipline"] = chan_d
 
@@ -2827,7 +2613,7 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
 
     lines.append("")
 
-    pool_count = _pool_count()
+    pool_count = get_pool_count()
     if pool_count > 0:
         lines.append(f"当前池 {pool_count}/10，回复 1 入池")
     else:
@@ -2835,80 +2621,8 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
     
     return "\n".join(lines)
 
-def _pool_count() -> int:
-    from pathlib import Path
-    path = Path.home() / ".trader" / "pool.json"
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        items = data.get("items", [])
-        return sum(1 for i in items if i.get("status") not in {"淘汰", "已退出"})
-    except Exception:
-        return 0
 
 
-def build_signal(r: dict[str, Any]) -> dict[str, Any]:
-    signal_type, direction, action, confidence = signal_state(r)
-    
-    # 融合层介入: 置信度高且有明确信号时覆盖 scene 决策
-    fusion_override = False
-    fusion = r.get("fusion")
-    if isinstance(fusion, dict):
-        fc = fusion.get("confidence", 0)
-        sd = fusion.get("signals_detail", {})
-        has_signal = isinstance(sd, dict) and any(
-            isinstance(v, dict) and v.get("direction") != 0
-            for v in sd.values()
-        )
-        # Fix 4: 门槛从 >0.2 提高到 >0.4，避免低质量灰区信号误覆盖基础决策
-        if fc > 0.4 and has_signal:
-            mapped = _map_fusion_to_signal(fusion.get("action", ""))
-            if mapped is not None:
-                ft, fd, fa = mapped
-                if fd != direction:
-                    signal_type, direction, action = ft, fd, fa
-                    fusion_override = True
-    
-    raw_time = str(r.get("analysis_time") or "") or today_text()
-    trade_date = raw_time.split(" ")[0]
-    if signal_type == "reduce":
-        trigger_price = float(r.get("resistance") or r.get("confirm") or r.get("current"))
-        invalid_price = float(r.get("stop") or r.get("support") or r.get("current"))
-    else:
-        trigger_price = float(r.get("confirm") or r.get("resistance") or r.get("current"))
-        invalid_price = float(r.get("stop") or r.get("support") or r.get("current"))
-    signal = {
-        "contract": "trader_signal_v1",
-        "source_skill": "trader",
-        "symbol": str(r.get("symbol") or ""),
-        "name": str(r.get("name") or ""),
-        "trade_date": trade_date,
-        "analysis_time": raw_time,
-        "signal_type": signal_type,
-        "direction": direction,
-        "action": action,
-        "confidence": confidence,
-        "data_status": "degraded" if r.get("data_status") is None else DATA_STATUS_MAP.get(str(r.get("data_status")), "degraded"),
-        "trigger": {
-            "type": "price_confirm",
-            "price": round(trigger_price, 2),
-            "text": f"{trigger_price:.2f}元 放量站稳并回踩不破后再评估",
-        },
-        "invalidation": {
-            "type": "price_break",
-            "price": round(invalid_price, 2),
-            "text": f"跌破 {invalid_price:.2f}元 后停止低吸",
-        },
-        "position": {
-            "max_total_pct": signal_max_total_pct(signal_type),
-            "max_single_move_pct": min(10, signal_max_total_pct(signal_type)),
-        },
-        "risk_flags": signal_risk_flags(r),
-        "summary": one_sentence(r, str(r.get("low_zone") or f"{float(r.get('support') or 0):.2f}元")),
-    }
-    if fusion_override:
-        signal["fusion_override"] = True
-    assert_valid_signal(signal)
-    return signal
 
 
 def signal_state(r: dict[str, Any]) -> tuple[str, str, str, str]:
@@ -2984,25 +2698,6 @@ def signal_risk_flags(r: dict[str, Any]) -> list[str]:
     return flags
 
 
-def state_text(stage: str, theory_status: str) -> str:
-    # Fix A3: 不再用旧 stage=="转弱"，统一依赖 theory_status
-    # 旧 stage 来自 determine_stage()（三帧轻量函数），不代表四阶段模型结论
-    if theory_status == "暂不碰":
-        return "暂不碰"
-    if theory_status == "体系转强确认":
-        return "体系转强确认"
-    if theory_status == "未确认转强":
-        return "未确认转强"
-    if theory_status == "承接存在":
-        return "承接存在"
-    if theory_status == "转强不足":
-        return "转强不足"
-    if theory_status == "修复观察":
-        return "修复观察"
-    if theory_status:
-        return theory_status
-    return "震荡观察"
-
 
 def structure_view(r: dict[str, Any]) -> str:
     base_status = str(r.get("base_status") or "")
@@ -3032,44 +2727,6 @@ def volume_view(text: str) -> str:
         return "供应仍需消化"
     return "量价确认不足"
 
-
-def one_sentence(r: dict[str, Any], low_zone: str) -> str:
-    major_stage = _get_major_stage(r)
-    momentum = str(r.get("short_term_momentum") or "")
-    confirm = float(r.get("confirm") or 0)
-    if major_stage == "衰退":
-        return "衰退期，不参与。等站上250日线再说。"
-    if major_stage == "蓄势" and momentum == "转弱":
-        return "蓄势期转弱，不碰。"
-    if major_stage == "蓄势" and momentum == "修复":
-        return f"蓄势期，不动手。等放量站稳 {confirm:.2f} 再说。"
-    if major_stage == "蓄势" and momentum in ("走强", "震荡"):
-        return f"蓄势期，等突破 {confirm:.2f} 确认后再动手。"
-    if major_stage == "主升" and momentum == "走强":
-        return "主升期走强，持有。"
-    if major_stage == "主升" and momentum == "修复":
-        return f"主升期修复，回踩可加仓。站稳 {confirm:.2f} 确认。"
-    if major_stage == "主升" and momentum == "震荡":
-        return "主升期震荡，持有底仓，回踩确认。"
-    if major_stage == "主升" and momentum == "转弱":
-        return "主升期转弱，风险信号，考虑减仓。"
-    if major_stage == "派发":
-        return "派发期，逢高减仓。"
-    # fallback to old theory_status（仅当 major_stage 为空时）
-    stage = r.get("stage") or ""
-    scene = r.get("scene") or ""
-    theory_status = str(r.get("theory_status") or r.get("state_label") or "")
-    current = float(r.get("current", 0))
-    support = float(r.get("support", 0))
-    if stage == "转弱" or theory_status == "暂不碰":
-        return f"现在先不参与；等重新站回 {support:.2f}元 上方并稳定后再看。"
-    if theory_status == "体系转强确认":
-        return f"已形成体系确认，放量站稳回踩不破可评估加仓。"
-    if scene == "冲高减仓":
-        return f"上方空间受限，有底仓的逢高减仓，空仓需等回调。"
-    if current >= confirm:
-        return f"已越过确认位，放量站稳回踩不破可评估加仓。"
-    return f"现在还不是进攻点；先守纪律等确认，跌到 {low_zone} 止跌才轻试，站不上 {confirm:.2f}元 不加仓。"
 
 
 def generate_alert(report: dict[str, Any]) -> str | None:

@@ -877,6 +877,34 @@ def merge_decisions(
     except (TypeError, AttributeError) as exc:
         _logger.debug("Concept hotspot check failed: %s", exc)
 
+    # ── [Phase 2] 融资融券 / 北向资金 接入微调置信度 ──
+    try:
+        # 1. 融资融券
+        if extend_margin and isinstance(extend_margin, dict) and extend_margin.get("status") == "正常":
+            _m_buy = safe_float(extend_margin, "margin_buy_wan")
+            _m_sell = safe_float(extend_margin, "margin_sell_wan")
+            _net_buy = _m_buy - _m_sell
+            if weighted_score > 0.1:
+                if _net_buy > 1000:
+                    confidence *= 1.02
+                elif _net_buy < -1000:
+                    confidence *= 0.98
+                    
+        # 2. 北向资金
+        if extend_northbound and isinstance(extend_northbound, dict) and extend_northbound.get("status") == "正常":
+            _n_net = safe_float(extend_northbound, "north_net_flow_wan")
+            _n_5d = safe_float(extend_northbound, "north_flow_5d_wan")
+            if weighted_score > 0.1:
+                if _n_net > 2000 or _n_5d > 10000:
+                    confidence *= 1.05
+                elif _n_net < 0 or _n_5d < 0:
+                    confidence *= 0.95
+                    
+        # Keep confidence within [0.0, 1.0]
+        confidence = max(0.0, min(confidence, 1.0))
+    except (TypeError, AttributeError, ValueError) as exc:
+        _logger.debug("Margin/Northbound confidence nudge failed: %s", exc)
+
     # 6.5 🛡️ 防幻觉拦截：数据断层降级
     # 只降置信度，不 truncation 分数本身（action 已在 493 行用 _action_score 处理过）
     if data_status in ("partial", "degraded", "failed"):

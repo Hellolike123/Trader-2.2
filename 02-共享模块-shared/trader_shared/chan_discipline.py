@@ -248,6 +248,9 @@ def build_entry_checklist(
     fund_veto: bool = False,
     weekly_frame: str | None = None,
     broke_life: bool = False,
+    current_price: float = 0.0,
+    chip_resistance_lower: float = 0.0,
+    chip_resistance_upper: float = 0.0,
 ) -> dict[str, Any]:
     """五项开仓清单布尔；all_green 全绿才允许试探买话术。"""
     st = _normalize_stage(stage)
@@ -268,8 +271,19 @@ def build_entry_checklist(
         for t in types
     )
 
+    curr_val = float(current_price) if current_price is not None else 0.0
+    res_lower_val = float(chip_resistance_lower) if chip_resistance_lower is not None else 0.0
+    res_upper_val = float(chip_resistance_upper) if chip_resistance_upper is not None else 0.0
+
+    in_resistance_zone = (
+        curr_val > 0
+        and res_lower_val > 0
+        and res_upper_val > 0
+        and res_lower_val <= curr_val <= res_upper_val
+    )
+
     conf_ok = not low_confidence
-    fund_ok = not (chip_warning or fund_veto)
+    fund_ok = not (chip_warning or fund_veto or in_resistance_zone)
 
     items = {
         "mid_ok": mid_ok,
@@ -293,7 +307,10 @@ def build_entry_checklist(
         if v is True:
             continue
         if v is False or v is None:
-            missing.append(label)
+            if key == "fund_ok" and in_resistance_zone:
+                missing.append("在阻力区内")
+            else:
+                missing.append(label)
 
     all_green = all(raw_flags[k] is True for k, _ in _CHECKLIST_KEYS)
     return {
@@ -648,6 +665,9 @@ def apply_chan_discipline(inputs: dict[str, Any] | None = None, **kwargs: Any) -
         fund_veto=bool(raw.get("fund_flow_outflow_veto")),
         weekly_frame=str(weekly_frame) if weekly_frame is not None else None,
         broke_life=bool(broke_life),
+        current_price=_to_float(current),
+        chip_resistance_lower=_to_float(raw.get("chip_resistance_lower")),
+        chip_resistance_upper=_to_float(raw.get("chip_resistance_upper")),
     )
     # 清单未全绿时：禁止开仓类 action_override（有仓减仓除外）；不单独因缺买点改 mid/short 分闸
     if not entry_checklist.get("all_green"):

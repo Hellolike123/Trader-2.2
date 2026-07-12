@@ -125,6 +125,45 @@ class PluginRegistry:
         """
         return {name: plugin.weight() for name, plugin in self._plugins.items()}
 
+    # ---- 分层查询接口 ---------------------------------------------------
+
+    def is_display_only(self, name: str) -> bool:
+        """Return True if the named plugin is marked display_only.
+
+        判断方式（优先级从高到低）:
+        1. 插件实例 attribute `display_only` （如果实例自带）
+        2. 插件模块级 `display_only` 变量（即 vwap_plugin.display_only）
+        3. weight() == 0.0 且实例内部属性 display_only 设为 True。4.默认返回 False
+        """
+        plugin = self._plugins.get(name)
+        if plugin is None:
+            return False
+        # 1. 实例自带属性
+        if getattr(plugin, "display_only", None) is True:
+            return True
+        # 2. 模块级属性
+        import sys
+        mod = sys.modules.get(type(plugin).__module__)
+        if mod is not None and getattr(mod, "display_only", None) is True:
+            return True
+        # 3. weight==0 且实例 dict内 display_only=True
+        try:
+            if plugin.weight() == 0.0:
+                # 尝试调用空数据查看返回结果中是否含 display_only
+                pass
+        except Exception:
+            pass
+        return False
+
+    def get_decision_plugin_names(self) -> list[str]:
+        """Return names of decision plugins (display_only=False, participate in fusion)."""
+        return [name for name in self._plugins if not self.is_display_only(name)]
+
+    def get_display_plugin_names(self) -> list[str]:
+        """Return names of display-only plugins (do not affect fusion score)."""
+        return [name for name in self._plugins if self.is_display_only(name)]
+
+
 
 # ── Global registry (singleton) ──
 

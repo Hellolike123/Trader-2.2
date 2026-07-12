@@ -298,6 +298,15 @@ BIG_ORDER_HANDS_RATIO: float = 0.9          # P1-1: 动态比例阈值（20日�
 FUND_FLOW_CONSECUTIVE_OUTFLOW_DAYS: int = 3     # 连续流出天数阈值
 FUND_FLOW_OUTFLOW_VETO_WAN: float = 500.0       # 每日主力净流出阈值（万元）
 
+# ---- 展示指标阈值（display_indicators.py 消费，可通过 env 覆盖）-----------------
+# VWAP 偏离度分级：低于 -1.5% 视为机构被套；高于 +1.5% 视为机构大幅盈利
+VWAP_DEVIATION_BELOW_TRAPPED: float = float(os.environ.get("VWAP_DEVIATION_BELOW_TRAPPED", "-0.015"))
+VWAP_DEVIATION_ABOVE_PROFIT: float = float(os.environ.get("VWAP_DEVIATION_ABOVE_PROFIT", "0.015"))
+# Supertrend 参数（与 indicator_math.calc_supertrend 保持一致）
+SUPERTREND_MULTIPLIER: float = float(os.environ.get("SUPERTREND_MULTIPLIER", "3.0"))
+# ATR 通用周期（indicator_math.calc_atr_series、calc_supertrend 默认值）
+ATR_PERIOD: int = int(os.environ.get("ATR_PERIOD", "14"))
+
 # ── Exports ──────────────────────────────────────────────────────────
 __all__ = [
     "LOOKBACK_DAYS", "RECENT_WINDOW", "CONFIRM_BUFFER", "STOP_BUFFER", "TAKE_PROFIT_BUFFER",
@@ -358,4 +367,7 @@ __all__ = [
     "MIN_BIG_ORDER_HANDS", "MIN_BIG_ORDER_AMOUNT_WAN", "BIG_ORDER_HANDS_RATIO",
     "FUND_FLOW_CONSECUTIVE_OUTFLOW_DAYS", "FUND_FLOW_OUTFLOW_VETO_WAN",
     "CORRELATION_THRESHOLD", "CORRELATION_LOOKBACK_DAYS",
+    # 展示指标阈值
+    "VWAP_DEVIATION_BELOW_TRAPPED", "VWAP_DEVIATION_ABOVE_PROFIT",
+    "SUPERTREND_MULTIPLIER", "ATR_PERIOD",
 ]

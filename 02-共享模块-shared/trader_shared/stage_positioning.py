@@ -1005,6 +1005,9 @@ def assess_stage(
     wyckoff_result: dict[str, Any] | None = None,
     main_force_result: dict[str, Any] | None = None,
     extend_sector: dict[str, Any] | None = None,  # Phase 2: 行业板块数据交叉验证 (A6)
+    chip_support_lower: float = 0.0,
+    chip_resistance_lower: float = 0.0,
+    chip_resistance_upper: float = 0.0,
 ) -> dict[str, Any]:
     """四阶段定位主函数（主力行为驱动 + 量价确认 + 四层防护）
 
@@ -1160,6 +1163,7 @@ def assess_stage(
         bars=bars,
         atr14=atr14,
         chip_migration=chip_migration,
+        chip_support_lower=chip_support_lower,
     )
 
     return {
@@ -1186,6 +1190,7 @@ def compute_stop_losses(
     bars: list[dict[str, Any]] | None = None,
     atr14: float = 0.0,
     chip_migration: dict[str, Any] | None = None,
+    chip_support_lower: float = 0.0,
 ) -> dict[str, Any]:
     """三层止损体系（ATR + 筹码驱动）。
 
@@ -1206,6 +1211,7 @@ def compute_stop_losses(
         bars: K线数据
         atr14: 14日ATR值
         chip_migration: 筹码搬家监控结果
+        chip_support_lower: 筹码最强支撑区下沿价格
 
     Returns:
         {
@@ -1216,10 +1222,17 @@ def compute_stop_losses(
         }
     """
     # 第一层：技术止损（ATR-based）
-    if support > 0 and atr14 > 0:
+    _chip_support_lower = chip_support_lower if chip_support_lower is not None else 0.0
+    _atr14 = atr14 if atr14 is not None else 0.0
+    _support = support if support is not None else 0.0
+
+    if _chip_support_lower > 0 and _atr14 > 0:
+        tech_stop = round(max(0.01, _chip_support_lower - 0.5 * _atr14), 2)
+        tech_reason = f"筹码下沿 {_chip_support_lower:.2f} - 0.5×ATR({_atr14:.2f})"
+    elif _support > 0 and _atr14 > 0:
         # 支撑位 - 1.5×ATR，确保止损价为正
-        tech_stop = round(max(0.01, support - 1.5 * atr14), 2)
-        tech_reason = f"支撑 {support:.2f} - 1.5×ATR({atr14:.2f})"
+        tech_stop = round(max(0.01, _support - 1.5 * _atr14), 2)
+        tech_reason = f"支撑 {_support:.2f} - 1.5×ATR({_atr14:.2f})"
     elif support > 0:
         # 无 ATR 数据，退回旧逻辑
         tech_stop = round(support * 0.975, 2)

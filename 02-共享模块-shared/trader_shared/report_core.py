@@ -162,6 +162,19 @@ def render_short_midline(r: dict[str, Any]) -> str:
         vol_parts.append(f"量比{volume_ratio_val:.1f}（{vol_label}）")
     if turnover_val > 0:
         vol_parts.append(f"换手{turnover_val:.1f}%")
+    
+    _vwap = r.get("vwap")
+    _vwap_dev = r.get("vwap_dev")
+    _vwap_lvl = r.get("vwap_level")
+    try:
+        _vwap_f = float(_vwap) if _vwap is not None else None
+    except (TypeError, ValueError):
+        _vwap_f = None
+    if _vwap_f is not None:
+        _dev_pct = float(_vwap_dev) * 100 if _vwap_dev is not None else 0.0
+        _sign = "+" if _dev_pct >= 0 else ""
+        vol_parts.append(f"VWAP {_vwap_f:.2f}（偏离 {_sign}{_dev_pct:.1f}% ｜ {_vwap_lvl or '--'}）")
+
     if vol_parts:
         lines.append(f"  {' ｜ '.join(vol_parts)}")
 
@@ -178,12 +191,25 @@ def render_short_midline(r: dict[str, Any]) -> str:
             else:
                 lines.append(f"  调整：第{_days_from_high}天")
 
-    # 相对强弱（优先 extend_sector；fallback 用个股涨跌 vs 大盘环境）
+    # 相对强弱与行业板块（优先 extend_sector；fallback 用个股涨跌 vs 大盘环境）
     _ext_sec = r.get("extend_sector") or {}
     if isinstance(_ext_sec, dict) and _ext_sec.get("status") == "正常":
+        _sec_name = _ext_sec.get("sector_name") or ""
+        _sec_chg = _ext_sec.get("sector_change_pct")
+        _sec_rank = _ext_sec.get("sector_rank") or 0
+        _sec_tot = _ext_sec.get("sector_total") or 0
         _vs = str(_ext_sec.get("stock_vs_sector") or "").strip()
+        
+        _sec_chg_str = f"{_sec_chg:+.2f}%" if isinstance(_sec_chg, (int, float)) else "--"
+        _rank_str = f"排名 {_sec_rank}/{_sec_tot}" if _sec_rank > 0 else ""
+        
+        _sector_parts = []
+        if _sec_name:
+            _sector_parts.append(f"{_sec_name}（涨幅 {_sec_chg_str}{' ｜ ' + _rank_str if _rank_str else ''}）")
         if _vs:
-            lines.append(f"  相对强弱：{_vs}")
+            _sector_parts.append(f"相对强弱：{_vs}")
+        if _sector_parts:
+            lines.append(f"  行业板块：{' ｜ '.join(_sector_parts)}")
     elif change_pct != 0 and regime:
         # 简易对比：个股涨跌 vs 大盘环境词
         _regime_map = {"偏强": 0.5, "正常": 0, "偏弱": -0.5, "很差": -1.0}
@@ -195,6 +221,52 @@ def render_short_midline(r: dict[str, Any]) -> str:
             lines.append(f"  相对强弱：跑弱 {_vs_simple:.1f}%")
         else:
             lines.append(f"  相对强弱：与大盘持平")
+
+    # 概念题材
+    _ext_concept = r.get("extend_concept") or {}
+    if isinstance(_ext_concept, dict) and (_ext_concept.get("status") == "正常" or _ext_concept.get("concept_list")):
+        _c_list = _ext_concept.get("concept_list") or []
+        _c_chgs = _ext_concept.get("concept_change_pct") or []
+        _concept_parts = []
+        for _c_name, _c_chg in zip(_c_list, _c_chgs):
+            _c_chg_str = f"{_c_chg:+.2f}%" if isinstance(_c_chg, (int, float)) else "--"
+            _concept_parts.append(f"{_c_name}（涨幅 {_c_chg_str}）")
+        if _concept_parts:
+            lines.append(f"  概念题材：{' ｜ '.join(_concept_parts[:4])}")
+
+    # 资金面
+    _ext_north = r.get("extend_northbound") or {}
+    _ext_margin = r.get("extend_margin") or {}
+    _has_north = isinstance(_ext_north, dict) and _ext_north.get("status") == "正常"
+    _has_margin = isinstance(_ext_margin, dict) and _ext_margin.get("status") == "正常"
+    if _has_north or _has_margin:
+        _north_part = ""
+        if _has_north:
+            _net = _ext_north.get("north_net_flow_wan")
+            _5d = _ext_north.get("north_flow_5d_wan")
+            def _fmt_flow(val):
+                if val is None: return "--"
+                if abs(val) >= 10000: return f"{val/10000:.2f}亿"
+                return f"{val:.2f}万"
+            _north_part = f"北向净流入 {_fmt_flow(_net)}（近5日 {_fmt_flow(_5d)}）"
+        _margin_part = ""
+        if _has_margin:
+            _bal = _ext_margin.get("margin_balance_wan")
+            _buy = _ext_margin.get("margin_buy_wan") or 0.0
+            _sell = _ext_margin.get("margin_sell_wan") or 0.0
+            _net_buy = _buy - _sell
+            def _fmt_flow(val):
+                if val is None: return "--"
+                if abs(val) >= 10000: return f"{val/10000:.2f}亿"
+                return f"{val:.2f}万"
+            _margin_part = f"融资余额 {_fmt_flow(_bal)}（本日净买入 {_fmt_flow(_net_buy)}）"
+        _cap_parts = []
+        if _north_part:
+            _cap_parts.append(_north_part)
+        if _margin_part:
+            _cap_parts.append(_margin_part)
+        if _cap_parts:
+            lines.append(f"  资金面：{' ｜ '.join(_cap_parts)}")
 
     ma250_val = _ma_float("ma250")
     if current > 0 and ma250_val is not None and current < ma250_val:
@@ -297,7 +369,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _chan_display = _chan_compact
     lines.append(f"  缠论：{_chan_display}")
 
-    # 筹码状态行（获利盘 + 上方套牢峰）
+    # 筹码状态行（获利盘 + 上方套牢峰 + 股东变动）
     _chip_pct = r.get("chip_current_pct")
     _chip_peaks = r.get("chip_peaks") or []
     _above_peaks = [p for p in _chip_peaks if isinstance(p, dict) and float(p.get("price") or 0) > current] if current > 0 else []
@@ -309,9 +381,50 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _nearest = _above_peaks[0]
         _peak_price = float(_nearest.get("price") or 0)
         _tag = "上方压力重" if _peak_price < current * 1.10 else "上方有压力"
-        _chip_parts.append(f"套牢峰 {_peak_price:.2f}（{_tag}）")
+        _lower = _nearest.get("price_lower")
+        _upper = _nearest.get("price_upper")
+        if _lower is not None and _upper is not None:
+            _chip_parts.append(f"套牢峰 {_peak_price:.2f}（阻力区 {_lower:.2f}-{_upper:.2f}，{_tag}）")
+        else:
+            _chip_parts.append(f"套牢峰 {_peak_price:.2f}（{_tag}）")
+    
+    _ext_fund = r.get("extend_fundamental") or {}
+    _sh = _ext_fund.get("shareholder") or {}
+    if isinstance(_sh, dict) and _sh.get("status") and _sh.get("status") != "数据不足":
+        _sh_chg = _sh.get("change_pct") or 0.0
+        _sh_status = _sh.get("status")
+        _chip_parts.append(f"股东户数较上期 {_sh_chg:+.2f}%（{_sh_status}）")
+        
     if _chip_parts:
         lines.append(f"  筹码：{' ｜ '.join(_chip_parts)}")
+
+    # 业绩预期
+    _eps_data = _ext_fund.get("consensus_eps") or {}
+    _eps_rows = _eps_data.get("rows") or []
+    if isinstance(_eps_rows, list) and _eps_rows:
+        _eps_26 = None
+        _eps_27 = None
+        _count_26 = "--"
+        _count_27 = "--"
+        for _row in _eps_rows:
+            _year = str(_row.get("year", ""))
+            _avg = str(_row.get("avg_eps", ""))
+            _cnt = str(_row.get("count", ""))
+            if "2026" in _year or "26" in _year:
+                _eps_26 = _avg
+                _count_26 = _cnt
+            elif "2027" in _year or "27" in _year:
+                _eps_27 = _avg
+                _count_27 = _cnt
+        if _eps_26 or _eps_27:
+            _eps_parts = []
+            if _eps_26:
+                _eps_parts.append(f"26年均值{_eps_26}元")
+            if _eps_27:
+                _eps_parts.append(f"27年均值{_eps_27}元")
+            _cnt_val = _count_27 if _count_27 != "--" else _count_26
+            _cnt_str = f"（{_cnt_val}家机构预测）" if _cnt_val != "--" else ""
+            lines.append(f"  业绩预期：{' ｜ '.join(_eps_parts)}{_cnt_str}")
 
     # 中线关键价（位置行已删除，浪型已合并到缠论行）
 
@@ -504,8 +617,26 @@ def render_short_midline(r: dict[str, Any]) -> str:
     _MA_KEYS = {"ma5", "ma10", "ma20"}
     _sup_base = _SRC_BASE.get(_sup_src.lower(), "")
     _res_base = _SRC_BASE.get(_res_src.lower(), "")
-    _sup_label = f"{_sup_base}支撑" if _sup_src.lower() in _MA_KEYS and _sup_base else _sup_base
-    _res_label = f"{_res_base}压力" if _res_src.lower() in _MA_KEYS and _res_base else _res_base
+    
+    if _sup_src.lower() == "chip_support" and "chip_support_lower" in r and "chip_support_upper" in r:
+        _sup_lower = r.get("chip_support_lower")
+        _sup_upper = r.get("chip_support_upper")
+        if _sup_lower is not None and _sup_upper is not None:
+            _sup_label = f"筹码支撑带 {_sup_lower:.2f}-{_sup_upper:.2f}"
+        else:
+            _sup_label = f"{_sup_base}支撑" if _sup_src.lower() in _MA_KEYS and _sup_base else _sup_base
+    else:
+        _sup_label = f"{_sup_base}支撑" if _sup_src.lower() in _MA_KEYS and _sup_base else _sup_base
+
+    if _res_src.lower() == "chip_resistance" and "chip_resistance_lower" in r and "chip_resistance_upper" in r:
+        _res_lower = r.get("chip_resistance_lower")
+        _res_upper = r.get("chip_resistance_upper")
+        if _res_lower is not None and _res_upper is not None:
+            _res_label = f"筹码阻力带 {_res_lower:.2f}-{_res_upper:.2f}"
+        else:
+            _res_label = f"{_res_base}压力" if _res_src.lower() in _MA_KEYS and _res_base else _res_base
+    else:
+        _res_label = f"{_res_base}压力" if _res_src.lower() in _MA_KEYS and _res_base else _res_base
 
     # 卖点区目标百分比
     _sell_tgt_pct = ""
@@ -529,6 +660,17 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     if current > 0:
         _price_items.append((current, "现价", "持有，不追"))
+
+    # VWAP 支撑/压力
+    _vwap = r.get("vwap")
+    _vwap_lvl = r.get("vwap_level")
+    try:
+        _vwap_f = float(_vwap) if _vwap is not None else None
+    except (TypeError, ValueError):
+        _vwap_f = None
+    if _vwap_f is not None:
+        _vwap_act = "日内均线支撑" if current >= _vwap_f else "日内均线压力"
+        _price_items.append((_vwap_f, f"VWAP（{_vwap_lvl or '--'}）", _vwap_act))
 
     # MA20 压力（如果在现价和卖点区之间）
     _ma20 = _ma_float("ma20")
@@ -601,7 +743,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
     _ma20_v = _ma_float("ma20")
     _ma5_v = _ma_float("ma5")
 
-    # 亮点：缠论信号 + 阶段 + MA5 上方
+    # 亮点：缠论信号 + 阶段 + MA5 上方 + 题材催化
     _hl_parts = []
     if _chan_sig and _chan_sig != "无信号":
         _chan_clean = _chan_sig.replace("缠论", "").strip() or _chan_sig
@@ -610,6 +752,12 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _hl_parts.append(f"中线阶段{stage_line}")
     if _ma5_v and current > 0 and current > _ma5_v:
         _hl_parts.append("现价在MA5上方")
+    
+    _ext_sent = r.get("extend_sentiment") or {}
+    _theme = _ext_sent.get("theme_harden") or {}
+    if isinstance(_theme, dict) and _theme.get("reason"):
+        _hl_parts.append(f"题材催化：{_theme.get('reason')}")
+
     if _hl_parts:
         lines.append(f"✅ 亮点：{'；'.join(_hl_parts)}")
     elif "可跟踪" in mid or "未坏" in mid:
@@ -620,22 +768,35 @@ def render_short_midline(r: dict[str, Any]) -> str:
     else:
         lines.append(f"✅ 亮点：阶段 {stage_line or '未知'}，等短线信号" if stage_line else "✅ 亮点：等短线买点确认")
 
-    # 风险：止损价 + 短线 MA20 压力（不用中线远压力）
+    # 风险：止损价 + 短线 MA20 压力（不用中线远压力） + 未来待解禁
+    _risk_parts = []
     if "不追" in execution or "不买" in execution:
-        _risk_parts = ["现价不宜追"]
+        _risk_parts.append("现价不宜追")
         if stop_v > 0:
             _risk_parts.append(f"止损看 {stop_v:.2f}")
         if _ma20_v and _ma20_v > current > 0:
             _risk_parts.append(f"上方MA20({_ma20_v:.2f})压力")
-        lines.append(f"⚠️ 风险：{'；'.join(_risk_parts)}")
     elif stage_line and "派发" in stage_line:
-        lines.append("⚠️ 风险：派发阶段注意破位" + (f"，跌破 {stop_v:.2f} 需离场" if stop_v else ""))
+        _risk_parts.append("派发阶段注意破位" + (f"，跌破 {stop_v:.2f} 需离场" if stop_v else ""))
     elif stage_line and "衰退" in stage_line:
-        lines.append("⚠️ 风险：衰退阶段，不宜介入")
+        _risk_parts.append("衰退阶段，不宜介入")
     elif life_v > 0 and current > 0 and current < life_v * 1.02:
-        lines.append(f"⚠️ 风险：靠近/跌破中线生命线 {life_v:.2f}")
+        _risk_parts.append(f"靠近/跌破中线生命线 {life_v:.2f}")
     else:
-        lines.append("⚠️ 风险：未站稳前不提前加仓")
+        _risk_parts.append("未站稳前不提前加仓")
+
+    _unlocks = _ext_sent.get("unlocks") or []
+    if isinstance(_unlocks, list) and _unlocks:
+        _unlock_parts = []
+        for _u in _unlocks:
+            _u_date = _u.get("date", "")
+            _u_ratio = _u.get("ratio", 0.0)
+            _u_amt = _u.get("amount_wan", 0.0)
+            _unlock_parts.append(f"{_u_date}解禁{_u_ratio:.2f}%（{_u_amt:.2f}万股）")
+        if _unlock_parts:
+            _risk_parts.append(f"待解禁：{' ｜ '.join(_unlock_parts[:3])}")
+
+    lines.append(f"⚠️ 风险：{'；'.join(_risk_parts)}")
 
     # ── 📌 明日策略（替代"本周只做"）──
     _buy_lo_val = float(buy_low or 0)

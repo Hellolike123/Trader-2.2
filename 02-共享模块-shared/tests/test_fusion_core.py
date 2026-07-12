@@ -776,6 +776,39 @@ class TestPhase3Features:
         assert mult_weak["stop_buffer"] == 0.8
         assert mult_weak["confirm_buffer"] == 1.3
 
+    def test_margin_and_northbound_confidence_nudge(self):
+        """Test margin and northbound flow confidence nudges in merge_decisions when weighted_score > 0.1."""
+        from trader_shared.fusion_core import merge_decisions
+        # Inputs resulting in high score (weighted_score > 0.1)
+        chan = {"chanlun": {"buy_points": [{"type": "一类买", "price": 28}], "divergence": {}, "trend_label": "拉升段"}}
+        mom = {"momentum": {"score": 80, "direction": "bullish", "signals": []}}
+        wyk = {"wyckoff": {}}
+
+        # Base case (no margin/northbound)
+        base = merge_decisions(chan, mom, wyk, regime="正常")
+        base_conf = base["confidence"]
+
+        # 1. Margin positive nudge (margin net buy > 1000 wan)
+        margin_pos = {"status": "正常", "margin_buy_wan": 2000.0, "margin_sell_wan": 500.0}
+        res_m_pos = merge_decisions(chan, mom, wyk, regime="正常", extend_margin=margin_pos)
+        assert res_m_pos["confidence"] > base_conf
+
+        # 2. Margin negative nudge (margin net buy < -1000 wan)
+        margin_neg = {"status": "正常", "margin_buy_wan": 500.0, "margin_sell_wan": 2000.0}
+        res_m_neg = merge_decisions(chan, mom, wyk, regime="正常", extend_margin=margin_neg)
+        assert res_m_neg["confidence"] < base_conf
+
+        # 3. Northbound positive nudge (north_net_flow_wan > 2000 or north_flow_5d_wan > 10000)
+        north_pos = {"status": "正常", "north_net_flow_wan": 2500.0, "north_flow_5d_wan": 5000.0}
+        res_n_pos = merge_decisions(chan, mom, wyk, regime="正常", extend_northbound=north_pos)
+        assert res_n_pos["confidence"] > base_conf
+
+        # 4. Northbound negative nudge (north_net_flow_wan < 0 or north_flow_5d_wan < 0)
+        north_neg = {"status": "正常", "north_net_flow_wan": -100.0, "north_flow_5d_wan": 5000.0}
+        res_n_neg = merge_decisions(chan, mom, wyk, regime="正常", extend_northbound=north_neg)
+        assert res_n_neg["confidence"] < base_conf
+
+
 
 class TestP0Regression:
     """P0 回归测试 — 覆盖关键 bug 修复路径。"""

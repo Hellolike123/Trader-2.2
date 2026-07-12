@@ -220,6 +220,27 @@ def calc_chip_distribution(
         vol = volume_map[idx]
         share_pct = vol / total_chip * 100
         
+        left = idx
+        while left > 0:
+            if volume_map[left - 1] < 0.5 * volume_map[idx]:
+                left -= 1
+                break
+            if left > 1 and volume_map[left - 1] > volume_map[left]:
+                break
+            left -= 1
+
+        right = idx
+        while right < num_bins - 1:
+            if volume_map[right + 1] < 0.5 * volume_map[idx]:
+                right += 1
+                break
+            if right < num_bins - 2 and volume_map[right + 1] > volume_map[right]:
+                break
+            right += 1
+
+        price_lower = price_bins[left] - tick * 0.5
+        price_upper = price_bins[right] + tick * 0.5
+
         is_support = price < current_price
         share_rank = next((r for r, s in enumerate(peak_shares_unique) if abs(s - share_pct) < 1e-9), 0)
         if share_rank == 0 and share_pct > 3:
@@ -234,6 +255,8 @@ def calc_chip_distribution(
             "volume": round(vol),
             "share_of_total": round(share_pct, 2),
             "support_level": level,
+            "price_lower": round(price_lower, 2),
+            "price_upper": round(price_upper, 2),
         })
 
     # BUG 15 FIX: 近端窗口 — 补齐现价附近的动态筹码峰（从已过滤去重的独立峰 selected_peaks 中提取）
@@ -248,6 +271,27 @@ def calc_chip_distribution(
         # 如果已经收录在 top 3 peaks 中，跳过
         already_in = any(p["price"] == round(price, 2) for p in peaks)
         if not already_in:
+            left = idx
+            while left > 0:
+                if volume_map[left - 1] < 0.5 * volume_map[idx]:
+                    left -= 1
+                    break
+                if left > 1 and volume_map[left - 1] > volume_map[left]:
+                    break
+                left -= 1
+
+            right = idx
+            while right < num_bins - 1:
+                if volume_map[right + 1] < 0.5 * volume_map[idx]:
+                    right += 1
+                    break
+                if right < num_bins - 2 and volume_map[right + 1] > volume_map[right]:
+                    break
+                right += 1
+
+            price_lower = price_bins[left] - tick * 0.5
+            price_upper = price_bins[right] + tick * 0.5
+
             is_support = price < current_price
             share_rank = next((r for r, s in enumerate(peak_shares_unique) if abs(s - share_pct) < 1e-9), 0)
             if share_rank == 0 and share_pct > 3:
@@ -261,6 +305,8 @@ def calc_chip_distribution(
                 "volume": round(vol),
                 "share_of_total": round(share_pct, 2),
                 "support_level": level,
+                "price_lower": round(price_lower, 2),
+                "price_upper": round(price_upper, 2),
             })
             
     if near_end_peaks:
