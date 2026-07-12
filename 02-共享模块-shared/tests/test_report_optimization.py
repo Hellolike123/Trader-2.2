@@ -64,7 +64,7 @@ def _report() -> dict:
             "fund_flow_outflow_veto_msg": None,
         },
         "key_prices": {
-            "stop_sell": 41.85,
+            "stop_sell": 41.00,
             "buy_zone_low": 41.93, "buy_zone_high": 42.98, "buy_ref": 42.46,
             "short_sell_low": 43.63, "short_sell_high": 44.19,
             "swing_sell": 46.0, "far_sell": 60.03,
@@ -86,6 +86,7 @@ def _report() -> dict:
         ],
         "support_source": "MA5", "resistance_source": "MA10",
         "support": 42.46, "confirm": 43.63,
+        "take": 44.19,
         "extend_sector": {},
         "daily_bars": _daily_bars(),
     }
@@ -94,10 +95,12 @@ def _report() -> dict:
 # ── Task 1: 盈亏比 ✓/✗ 判定 + 卖点区目标百分比 ──
 
 def test_risk_reward_ratio_with_verdict():
-    """盈亏比行带 ✓/✗ 判定符号。"""
+    """盈亏比行带 ✓/✗ 判定符号（新标签：回踩低吸 / 现价跟进）。"""
     out = render_short_midline(_report())
-    assert "盈亏比 2.8:1 ✓ 值得关注" in out
-    assert "盈亏比 0.7:1 ✗ 不划算" in out
+    assert "回踩低吸：亏约" in out
+    assert "现价跟进：亏约" in out
+    assert "盈亏比 2.4:1 ✓ 值得关注" in out
+    assert "盈亏比 0.4:1 ✗ 不划算" in out
 
 
 def test_sell_zone_with_target_pct():
@@ -237,12 +240,12 @@ def test_adjust_days_new_high():
     assert "创新高" in out
 
 
-def test_relative_strength_when_empty():
-    """extend_sector 为空时不显示相对强弱。"""
+def test_relative_strength_fallback_when_sector_empty():
+    """extend_sector 为空但 market_env 有时 fallback 显示相对强弱。"""
     r = _report()
     r["extend_sector"] = {}
     out = render_short_midline(r)
-    assert "相对强弱" not in out
+    assert "相对强弱：跑赢大盘" in out
 
 
 def test_relative_strength_when_present():

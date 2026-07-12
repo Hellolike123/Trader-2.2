@@ -426,40 +426,52 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _cnt_str = f"（{_cnt_val}家机构预测）" if _cnt_val != "--" else ""
             lines.append(f"  业绩预期：{' ｜ '.join(_eps_parts)}{_cnt_str}")
 
-    # 中线关键价（位置行已删除，浪型已合并到缠论行）
-
-    # 中线关键价
+    # 中线关键价（按价格升序排列）
     lines.append("")
     lines.append("  关键价（中线）")
-    _ll = _reformat_mid_line(mid_key_prices.get("line_life") or "")
-    _lp = _reformat_mid_line(mid_key_prices.get("line_pullback") or "")
-    _lgb = _reformat_mid_line(mid_key_prices.get("line_golden_buy") or "")
-    _lr = _reformat_mid_line(mid_key_prices.get("line_resist") or "")
-    _lt = _reformat_mid_line(mid_key_prices.get("line_target") or "")
-    if _ll:
-        lines.append(f"    {_ll}")
-    if _lp:
-        lines.append(f"    {_lp}")
-    if _lgb:
-        lines.append(f"    {_lgb}")
-    # 现价位置（按价格排序插入到正确位置）
-    _mid_kp_start = len(lines)  # 记录关键价区块起始位置
+
+    # 收集中线价位，按价格排序
+    _mid_items: list[tuple[float, str]] = []
+    _mid_fields = [
+        ("line_life", "生命线"), ("line_pullback", "回踩区"),
+        ("line_golden_buy", "黄金买点"), ("line_resist", "压力位"),
+        ("line_target", "目标位"),
+    ]
+    for _key, _name in _mid_fields:
+        _line = _reformat_mid_line(mid_key_prices.get(_key) or "")
+        if not _line:
+            continue
+        _m = re.match(r"([\d.]+)", _line)
+        if _m:
+            _mid_items.append((float(_m.group(1)), _line))
+
+    # 添加 MA 参考位（年线优先，其次 MA20）
+    _ma250_v = _ma_float("ma250")
+    _ma20_v = _ma_float("ma20")
+    if _ma250_v and _ma250_v > 0:
+        _lbl = "年线支撑" if current > _ma250_v else "年线压力"
+        _mid_items.append((_ma250_v, f"{_ma250_v:.2f} MA250（{_lbl}）"))
+    if _ma20_v and _ma20_v > 0 and abs(_ma20_v - (_ma250_v or 0)) > 0.5:
+        _lbl = "中线压力" if current < _ma20_v else "中线支撑"
+        _mid_items.append((_ma20_v, f"{_ma20_v:.2f} MA20（{_lbl}）"))
+
+    # 按价格排序
+    _mid_items.sort(key=lambda x: x[0])
+
+    # 插入现价（🌟 标记）
     if current > 0:
-        _price_line = f"    🌟 现价 {current:.2f}"
-        # 只在关键价区块内搜索压力/目标行
-        _inserted = False
-        for _i in range(_mid_kp_start, len(lines)):
-            if "压力" in lines[_i] or "目标" in lines[_i]:
-                lines.insert(_i, _price_line)
-                _inserted = True
+        _ins = False
+        for _i, (p, _) in enumerate(_mid_items):
+            if p > current:
+                _mid_items.insert(_i, (current, f"🌟 现价 {current:.2f}"))
+                _ins = True
                 break
-        if not _inserted and _lr:
-            lines.append(_price_line)
-    if _lr:
-        lines.append(f"    {_lr}")
-    if _lt:
-        lines.append(f"    {_lt}")
-    if not any((_ll, _lp, _lgb, _lr, _lt)):
+        if not _ins:
+            _mid_items.append((current, f"🌟 现价 {current:.2f}"))
+
+    for _, text in _mid_items:
+        lines.append(f"    {text}")
+    if not _mid_items:
         lines.append("    数据不足")
 
     # ── ⚡ 短线（简化：出手→缠论+浪型→动能→失效）──
@@ -713,7 +725,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
         if _risk_buy > 0:
             _ratio = _rew_buy / _risk_buy
             _verdict = "✓ 值得关注" if _ratio >= 2.0 else ("✗ 不划算" if _ratio < 1.0 else "△ 一般")
-            lines.append(f"  {float(buy_low):.2f} 买：亏约 {_risk_buy:.1f} / 赚约 {_rew_buy:.1f} → 盈亏比 {_ratio:.1f}:1 {_verdict}")
+            lines.append(f"  {float(buy_low):.2f} 回踩低吸：亏约 {_risk_buy:.1f} / 赚约 {_rew_buy:.1f} → 盈亏比 {_ratio:.1f}:1 {_verdict}")
 
     # 追涨盈亏比：用现价
     if current > 0 and stop_sell and _target > 0:
@@ -722,7 +734,46 @@ def render_short_midline(r: dict[str, Any]) -> str:
         if _risk_chase > 0:
             _ratio_c = _rew_chase / _risk_chase
             _verdict_c = "✓ 值得关注" if _ratio_c >= 2.0 else ("✗ 不划算" if _ratio_c < 1.0 else "△ 一般")
-            lines.append(f"  {current:.2f} 追：亏约 {_risk_chase:.1f} / 赚约 {_rew_chase:.1f} → 盈亏比 {_ratio_c:.1f}:1 {_verdict_c}")
+            lines.append(f"  {current:.2f} 现价跟进：亏约 {_risk_chase:.1f} / 赚约 {_rew_chase:.1f} → 盈亏比 {_ratio_c:.1f}:1 {_verdict_c}")
+
+    # ── T0（日内算法：低吸到高抛的日内差价 + 盈亏比）──
+    _t0_has_pos = bool(r.get("has_position"))
+    _t0_no_new = any(k in execution for k in ("不买", "不追", "不新开", "观望"))
+    if not _t0_has_pos and _t0_no_new:
+        _bl = float(buy_low or 0)
+        _bh = float(buy_high or 0)
+        _sl = float(short_low or 0)
+        if _bl > 0 and _sl > 0:
+            _tm = round((_bh + _sl) / 2, 2)
+            _tr = max(0.0, _bl - float(stop_sell or 0))
+            _tw = max(0.0, _sl - _bl)
+            _tr_ratio = _tw / _tr if _tr > 0 else 0
+            _tv = "✓" if _tr_ratio >= 2.0 else ("✗" if _tr_ratio < 1.0 else "△")
+            lines.append(f"  日内 T0：{_bl:.2f} 低吸 ｜ {_tm:.2f} 观察 ｜ {_sl:.2f} 高抛（差价{_tw:.2f}元，盈亏比{_tr_ratio:.1f}:1 {_tv}）")
+        else:
+            lines.append("  T0：无底仓，不启用（与出手一致，不新开）")
+    else:
+        t0_ref = r.get("t0_ref") or {}
+        _t0_buy = float(t0_ref.get("low_buy") or buy_low or r.get("support") or 0)
+        _t0_sell = float(t0_ref.get("high_sell") or swing_sell or short_high or confirm or 0)
+        if _t0_buy > 0 and _t0_sell > 0:
+            _tm = round((_t0_buy + _t0_sell) / 2, 2)
+            _tr = max(0.0, _t0_buy - float(stop_sell or 0))
+            _tw = max(0.0, _t0_sell - _t0_buy)
+            _tr_ratio = _tw / _tr if _tr > 0 else 0
+            _tv = "✓" if _tr_ratio >= 2.0 else ("✗" if _tr_ratio < 1.0 else "△")
+            lines.append(f"  日内 T0：{_t0_buy:.2f} 低吸 ｜ {_tm:.2f} 观察 ｜ {_t0_sell:.2f} 高抛（差价{_tw:.2f}元，盈亏比{_tr_ratio:.1f}:1 {_tv}）")
+        elif _t0_has_pos:
+            _tp = []
+            if _t0_buy > 0:
+                _tp.append(f"低吸参考 {_t0_buy:.2f}")
+            if _t0_sell > 0:
+                _tp.append(f"高抛参考 {_t0_sell:.2f}")
+            lines.append(f"  T0：{' ｜ '.join(_tp)}" if _tp else "T0：有底仓，按关键价做短线")
+        elif _t0_buy > 0:
+            lines.append(f"  T0：仅观察；计划买点约 {_t0_buy:.2f}（未放行不下手）")
+        else:
+            lines.append("  T0：观察关键价即可")
 
     # 「说明」行已删除（与出手行语义重复）
 
@@ -815,44 +866,6 @@ def render_short_midline(r: dict[str, Any]) -> str:
             lines.append(f"📌 明日策略：{'；'.join(_strategy_parts)}")
     elif this_week:
         lines.append(f"📌 本周只做：{this_week}")
-
-    # ── T0（日内算法：低吸到高抛的日内差价 + 盈亏比）──
-    has_position = bool(r.get("has_position"))
-    no_new = any(k in execution for k in ("不买", "不追", "不新开", "观望"))
-    if not has_position and no_new:
-        # 无底仓但有买点区时，给三价位参考（低吸/观察/高抛）+ 日内盈亏比
-        if _buy_lo_val > 0 and _sell_lo_val > 0:
-            _t0_mid = round((_buy_hi_val + _sell_lo_val) / 2, 2)
-            _t0_risk = max(0.0, _buy_lo_val - float(stop_sell or 0))
-            _t0_reward = max(0.0, _sell_lo_val - _buy_lo_val)
-            _t0_ratio = _t0_reward / _t0_risk if _t0_risk > 0 else 0
-            _t0_verdict = "✓" if _t0_ratio >= 2.0 else ("✗" if _t0_ratio < 1.0 else "△")
-            lines.append(f"T0：{_buy_lo_val:.2f} 低吸 ｜ {_t0_mid:.2f} 观察 ｜ {_sell_lo_val:.2f} 高抛（日内差价{_t0_reward:.2f}元，盈亏比{_t0_ratio:.1f}:1 {_t0_verdict}）")
-        else:
-            lines.append("T0：无底仓，不启用（与出手一致，不新开）")
-    else:
-        t0_ref = r.get("t0_ref") or {}
-        t0_buy = float(t0_ref.get("low_buy") or buy_low or support or 0)
-        t0_sell = float(t0_ref.get("high_sell") or swing_sell or short_high or confirm or 0)
-        # 有仓时给三价位网格 + 日内盈亏比
-        if t0_buy > 0 and t0_sell > 0:
-            _t0_mid = round((t0_buy + t0_sell) / 2, 2)
-            _t0_risk = max(0.0, t0_buy - float(stop_sell or 0))
-            _t0_reward = max(0.0, t0_sell - t0_buy)
-            _t0_ratio = _t0_reward / _t0_risk if _t0_risk > 0 else 0
-            _t0_verdict = "✓" if _t0_ratio >= 2.0 else ("✗" if _t0_ratio < 1.0 else "△")
-            lines.append(f"T0：{t0_buy:.2f} 低吸 ｜ {_t0_mid:.2f} 观察 ｜ {t0_sell:.2f} 高抛（日内差价{_t0_reward:.2f}元，盈亏比{_t0_ratio:.1f}:1 {_t0_verdict}）")
-        elif has_position:
-            t0_parts = []
-            if t0_buy > 0:
-                t0_parts.append(f"低吸参考 {t0_buy:.2f}")
-            if t0_sell > 0:
-                t0_parts.append(f"高抛参考 {t0_sell:.2f}")
-            lines.append(f"T0：{' ｜ '.join(t0_parts)}" if t0_parts else "T0：有底仓，按关键价做短线")
-        elif t0_buy > 0:
-            lines.append(f"T0：仅观察；计划买点约 {t0_buy:.2f}（未放行不下手）")
-        else:
-            lines.append("T0：观察关键价即可")
 
     pool_count = r.get("pool_count")
     pool_cap = r.get("pool_cap")
