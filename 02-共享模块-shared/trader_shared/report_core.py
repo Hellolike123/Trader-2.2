@@ -816,24 +816,32 @@ def render_short_midline(r: dict[str, Any]) -> str:
     elif this_week:
         lines.append(f"📌 本周只做：{this_week}")
 
-    # ── T0（三价位网格）──
+    # ── T0（日内算法：低吸到高抛的日内差价 + 盈亏比）──
     has_position = bool(r.get("has_position"))
     no_new = any(k in execution for k in ("不买", "不追", "不新开", "观望"))
     if not has_position and no_new:
-        # 无底仓但有买点区时，给三价位参考（低吸/观察/高抛）
+        # 无底仓但有买点区时，给三价位参考（低吸/观察/高抛）+ 日内盈亏比
         if _buy_lo_val > 0 and _sell_lo_val > 0:
             _t0_mid = round((_buy_hi_val + _sell_lo_val) / 2, 2)
-            lines.append(f"T0：{_buy_lo_val:.2f} 低吸 ｜ {_t0_mid:.2f} 观察 ｜ {_sell_lo_val:.2f} 高抛")
+            _t0_risk = max(0.0, _buy_lo_val - float(stop_sell or 0))
+            _t0_reward = max(0.0, _sell_lo_val - _buy_lo_val)
+            _t0_ratio = _t0_reward / _t0_risk if _t0_risk > 0 else 0
+            _t0_verdict = "✓" if _t0_ratio >= 2.0 else ("✗" if _t0_ratio < 1.0 else "△")
+            lines.append(f"T0：{_buy_lo_val:.2f} 低吸 ｜ {_t0_mid:.2f} 观察 ｜ {_sell_lo_val:.2f} 高抛（日内差价{_t0_reward:.2f}元，盈亏比{_t0_ratio:.1f}:1 {_t0_verdict}）")
         else:
             lines.append("T0：无底仓，不启用（与出手一致，不新开）")
     else:
         t0_ref = r.get("t0_ref") or {}
         t0_buy = float(t0_ref.get("low_buy") or buy_low or support or 0)
         t0_sell = float(t0_ref.get("high_sell") or swing_sell or short_high or confirm or 0)
-        # 有仓时给三价位网格：低吸 / 观察 / 高抛
+        # 有仓时给三价位网格 + 日内盈亏比
         if t0_buy > 0 and t0_sell > 0:
             _t0_mid = round((t0_buy + t0_sell) / 2, 2)
-            lines.append(f"T0：{t0_buy:.2f} 低吸 ｜ {_t0_mid:.2f} 观察 ｜ {t0_sell:.2f} 高抛")
+            _t0_risk = max(0.0, t0_buy - float(stop_sell or 0))
+            _t0_reward = max(0.0, t0_sell - t0_buy)
+            _t0_ratio = _t0_reward / _t0_risk if _t0_risk > 0 else 0
+            _t0_verdict = "✓" if _t0_ratio >= 2.0 else ("✗" if _t0_ratio < 1.0 else "△")
+            lines.append(f"T0：{t0_buy:.2f} 低吸 ｜ {_t0_mid:.2f} 观察 ｜ {t0_sell:.2f} 高抛（日内差价{_t0_reward:.2f}元，盈亏比{_t0_ratio:.1f}:1 {_t0_verdict}）")
         elif has_position:
             t0_parts = []
             if t0_buy > 0:
