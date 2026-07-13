@@ -85,6 +85,9 @@ def score_to_action(
     注：regime="很差" 时，所有模块权重为 0，weighted_score 自然为 0，
     映射到"持股观望"。不再一票否决（已移除，见 test_fusion_core.py:308）。
 
+    Regime 影响：在"偏弱"大势下，各正阈值右移 +0.10，
+    要求更强信号才确认做多，减少弱势市场中的假信号入场。
+
     Args:
         weighted_score: -1.35 ~ 1.35 之间的加权分
         disagreement:   0 (全一致) ~ 2 (完全相反)
@@ -96,9 +99,17 @@ def score_to_action(
     else:
         actions = ACTION_MAP_NORMAL
 
+    # 1b. Regime 阈值调节：偏弱大势下正阈值右移 +0.10
+    # 即比正常时要求更高分才触发做多动作，减少弱势假信号。
+    _offset = 0.0
+    if regime == "偏弱":
+        _offset = 0.10
+
     # 3. 查表 (从高到低)
     for threshold, action in actions:
-        if weighted_score >= threshold:
+        # 仅正阈值偏移（负阈值不改 — 弱势下该止损照样止损）
+        effective = threshold + (_offset if threshold > 0 else 0.0)
+        if weighted_score >= effective:
             return action
 
     # 4. fallback 到低端

@@ -222,6 +222,18 @@ def build_vpf_signal(
 
     if has_fund_series:
         fund_quality = "full"
+
+        # 资金时效性检查：latest_fund_date 超过 5 日（含周末）则降级
+        _fund_date = str(ff.get("latest_fund_date") or "")
+        if _fund_date:
+            try:
+                from datetime import date, datetime
+                _fd = datetime.strptime(_fund_date, "%Y-%m-%d").date()
+                if (date.today() - _fd).days > 5:
+                    fund_quality = "stale"
+            except (ValueError, ImportError):
+                pass
+
         src = fund_source or ff.get("source") or "fund_flow"
         if con_out >= 3:
             fund_dir = -1
@@ -279,6 +291,13 @@ def build_vpf_signal(
         fund_dir = 0
         fund_conf = 0.0
         fund_reason = "资金数据不足"
+
+    # 资金时效性降级：数据超过 5 天视为"stale"，与 "missing" 同等处理
+    if fund_quality == "stale":
+        fund_dir = 0
+        fund_conf = 0.0
+        fund_reason = "资金数据过期"
+        fund_quality = "missing"
 
     # ── 合成 ──
     # 资金强空优先

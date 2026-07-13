@@ -537,6 +537,11 @@ def calc_fund_flow_features(
     # 近5日每日净流入
     daily_flow_5d = [d.get("net_flow_wan") or 0 for d in recent5]  # fix: None guard
 
+    # 最新日期（用于 VPF 时效性检查）
+    latest_fund_date = ""
+    if daily_flow and isinstance(daily_flow[-1], dict):
+        latest_fund_date = str(daily_flow[-1].get("date") or "")
+
     return {
         "cum_flow_5d_wan": round(cum_5, 2),
         "cum_flow_10d_wan": round(cum_10, 2),
@@ -545,6 +550,7 @@ def calc_fund_flow_features(
         "net_flow_pct": net_flow_pct,
         "flow_price_relation": flow_price_relation,
         "daily_flow_5d": daily_flow_5d,
+        "latest_fund_date": latest_fund_date,
     }
 
 
