@@ -548,9 +548,22 @@ class TushareProvider:
             change_pct = None
             if pre_close and price and float(pre_close) > 0:
                 change_pct = round((float(price) - float(pre_close)) / float(pre_close) * 100, 2)
+            # trade_date: 尝试从 Tushare 字段提取, 兜底取今日(盘中 quote 就是在今天获取的)
+            _td = None
+            for _key in ("date", "DATE", "trade_date", "TRADE_DATE"):
+                _td = r.get(_key)
+                if _td:
+                    break
+            if _td:
+                _td_str = str(_td)[:10]
+                if len(_td_str) == 8 and _td_str.isdigit():  # YYYYMMDD → YYYY-MM-DD
+                    _td_str = f"{_td_str[:4]}-{_td_str[4:6]}-{_td_str[6:8]}"
+            else:
+                _td_str = datetime.now().strftime("%Y-%m-%d")
             return {
                 "name": r.get("NAME", sec.name),
                 "symbol": sec.code,
+                "trade_date": _td_str,
                 "current_price": float(price) if price else None,
                 "current_change_pct": change_pct,
                 "high": float(r.get("HIGH")) if r.get("HIGH") else None,
