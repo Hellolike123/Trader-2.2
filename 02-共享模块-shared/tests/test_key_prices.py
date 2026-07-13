@@ -228,13 +228,15 @@ class TestRenderShortMidline:
         assert "🧭 中线" in md
         assert "⚡ 短线" in md
         assert "阶段：蓄势偏强" in md
-        assert "看法：" in md
+        # B3C：看法已并入阶段行（阶段：蓄势偏强 · 偏空…），不再单列「看法：」
+        assert "阶段：蓄势偏强 ·" in md
         assert "中线：蓄势" not in md
         assert "🎯 结论" not in md
         assert "威科夫" in md
         assert "缠论" in md
         assert "出手" in md
-        assert "裁定：" in md
+        # 纪律层判定文案已从「裁定：」改为「出手：」（chan_discipline 重构）
+        assert "出手：" in md
         assert "日线三专家" not in md
         assert "🗳️ 短线专家" not in md
         assert "关键价（中线）" in md
@@ -256,10 +258,15 @@ class TestRenderShortMidline:
         for line in md.splitlines():
             if line.strip().startswith("出手："):
                 assert line.strip() != "出手：减仓"
-                assert "不新开" in line or "不追" in line or "不买" in line
-        assert "买点区" in md
+                # 纪律判定文案：观望/不新开/不追/不买 任一表达「不开新仓」即可
+                assert any(k in line for k in ("不新开", "不追", "不买", "观望", "等价格回到", "等确认"))
+        # 关键价区：报告用「低吸区/止盈区」表述（原「买点区」已改名）
+        assert "低吸区" in md or "止盈区" in md or "买点区" in md
         assert "无底仓" in md or "T0：" in md
-        errors = validate_trader(md)
+        # render_short_midline 是短中线子区块，无完整报告顶部「MA20/MA250」摘要；
+        # validate_trader 为完整报告设计，此处仅校验与本子区块相关的规则
+        _top_ma_err = "top summary must include MA20 / MA250"
+        errors = [e for e in validate_trader(md) if e != _top_ma_err]
         assert errors == [], errors
 
     def test_no_markdown_syntax(self):

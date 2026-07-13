@@ -40,6 +40,8 @@ def build_key_prices(
     confirm: float | None = None,
     resistance: float | None = None,
     ma20: float | None = None,
+    ma10: float | None = None,
+    ma5: float | None = None,
     low_zone_lower: float | None = None,
     low_zone_upper: float | None = None,
     key_levels: dict[str, Any] | None = None,
@@ -53,6 +55,8 @@ def build_key_prices(
     confirm = _f(confirm)
     resistance = _f(resistance)
     ma20 = _f(ma20)
+    ma10 = _f(ma10)
+    ma5 = _f(ma5)
     lz_low = _f(low_zone_lower)
     lz_high = _f(low_zone_upper)
     take = _f(take)
@@ -91,6 +95,18 @@ def build_key_prices(
     if stop_sell and current and stop_sell < current:
         candidates_lo.append(_round2(stop_sell * 1.002))
         candidates_hi.append(_round2(min(current * 0.995, stop_sell * 1.02 + (current - stop_sell) * 0.35)))
+
+    # 4) MA 均线支撑阶梯（动量理论：回踩 MA5/MA10/MA20 分层低吸）
+    # 取现价下方各均线作为分层买点候选；离现价最近的均线最优先
+    for _ma in (ma5, ma10, ma20):
+        if _ma and current and _ma < current:
+            band_lo = _ma
+            band_hi = _round2(_ma * 1.008)
+            if stop_sell and band_lo < stop_sell:
+                band_lo = stop_sell
+            if band_lo < band_hi:
+                candidates_lo.append(band_lo)
+                candidates_hi.append(min(band_hi, current) if current else band_hi)
 
     # 选一组：上沿尽量 < 现价；优先 low_zone，其次支撑窄带
     best: tuple[float, float] | None = None
@@ -140,7 +156,7 @@ def build_key_prices(
 
     # ── 短线卖点：必须在现价上方 ──
     sell_candidates: list[float] = []
-    for v in (ma20, confirm, resistance, take):
+    for v in (ma5, ma10, ma20, confirm, resistance, take):
         if v is not None:
             sell_candidates.append(v)
     # key_levels 近端压力
@@ -194,9 +210,20 @@ def build_key_prices(
         far_sell = swing_sell
 
     # ── 空间参考用支撑阶梯（地图，非卖点）──
-    space_near = _f(kl.get("short_support")) or support
-    space_mid = _f(kl.get("mid_support"))
-    space_far = _f(kl.get("long_support"))
+    # P1a：动量均线阶梯（MA5/MA10/MA20）作为支撑分层，与 key_levels 并存。
+    # 仅取现价下方的均线（真实支撑），否则退化到 key_levels 原有逻辑。
+    _ma_below = sorted({v for v in (ma5, ma10, ma20) if v and current and v < current})
+    _kl_near = _f(kl.get("short_support")) or support
+    _kl_mid = _f(kl.get("mid_support"))
+    _kl_far = _f(kl.get("long_support"))
+    if _ma_below:
+        space_near = _ma_below[0]
+        space_mid = _ma_below[1] if len(_ma_below) > 1 else _kl_mid
+        space_far = _ma_below[-1]
+    else:
+        space_near = _kl_near
+        space_mid = _kl_mid
+        space_far = _kl_far
 
     # ── 亏赚 ──
     risk_buy = None

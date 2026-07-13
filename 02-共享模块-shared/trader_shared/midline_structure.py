@@ -179,22 +179,22 @@ def find_swing_levels(
     res_h, res_l = _win(n_resist)
     tgt_h, tgt_l = _win(n_target)
 
-    life_sup = _find_level_with_touches(life_h, life_l, find_support=True, tol_pct=_adapt_tol, unbroken_pct=_adapt_unbroken)
-    if life_sup is None and life_l:
-        life_sup = _round2(min(life_l))
+    life_sup_raw = _find_level_with_touches(life_h, life_l, find_support=True, tol_pct=_adapt_tol, unbroken_pct=_adapt_unbroken)
+    life_sup_genuine = life_sup_raw is not None
+    life_sup = life_sup_raw if life_sup_genuine else (_round2(min(life_l)) if life_l else None)
 
-    pb_sup = _find_level_with_touches(pb_h, pb_l, find_support=True, tol_pct=_adapt_tol, unbroken_pct=_adapt_unbroken)
+    pb_sup_raw = _find_level_with_touches(pb_h, pb_l, find_support=True, tol_pct=_adapt_tol, unbroken_pct=_adapt_unbroken)
+    pb_sup_genuine = pb_sup_raw is not None
     min_low_pb = _round2(min(pb_l)) if pb_l else None
-    if pb_sup is None:
-        pb_sup = min_low_pb
+    pb_sup = pb_sup_raw if pb_sup_genuine else min_low_pb
 
-    resist = _find_level_with_touches(res_h, res_l, find_support=False, tol_pct=_adapt_tol, unbroken_pct=_adapt_unbroken)
-    if resist is None and res_h:
-        resist = _round2(max(res_h))
+    resist_raw = _find_level_with_touches(res_h, res_l, find_support=False, tol_pct=_adapt_tol, unbroken_pct=_adapt_unbroken)
+    resist_genuine = resist_raw is not None
+    resist = resist_raw if resist_genuine else (_round2(max(res_h)) if res_h else None)
 
-    target = _find_level_with_touches(tgt_h, tgt_l, find_support=False, tol_pct=_adapt_tol, unbroken_pct=_adapt_unbroken)
-    if target is None and tgt_h:
-        target = _round2(max(tgt_h))
+    target_raw = _find_level_with_touches(tgt_h, tgt_l, find_support=False, tol_pct=_adapt_tol, unbroken_pct=_adapt_unbroken)
+    target_genuine = target_raw is not None
+    target = target_raw if target_genuine else (_round2(max(tgt_h)) if tgt_h else None)
 
     return {
         "life_support": life_sup,
@@ -202,6 +202,11 @@ def find_swing_levels(
         "resist": resist,
         "target_resist": target,
         "min_low_pullback": min_low_pb,
+        # 诚实标记：值来自 genuine 2-touch 摆动还是 min/max 兜底（P0 修复标签冒充）
+        "life_support_genuine": life_sup_genuine,
+        "pullback_support_genuine": pb_sup_genuine,
+        "resist_genuine": resist_genuine,
+        "target_resist_genuine": target_genuine,
     }
 
 
@@ -574,7 +579,7 @@ def build_midline_levels(
         swing_life = swings.get("life_support")
         if swing_life is not None and swing_life > 0:
             life_line = _round2(float(swing_life))
-            life_comp = "weekly_swing_n20"
+            life_comp = "weekly_swing_n20" if swings.get("life_support_genuine") else "weekly_min_fallback"
 
     components["life_line"] = life_comp
 
@@ -592,11 +597,16 @@ def build_midline_levels(
                 pb_lo_comp = "last_down_stroke_end"
 
     if pb_lo is None:
-        pb_swing = swings.get("pullback_support") or swings.get("min_low_pullback")
+        pb_swing = swings.get("pullback_support")
+        pb_swing_genuine = swings.get("pullback_support_genuine")
+        if pb_swing is None:
+            pb_swing = swings.get("min_low_pullback")
+            pb_swing_genuine = False
         if pb_swing is not None and pb_swing > 0:
             pb_lo = _round2(float(pb_swing))
             # §9.7 闭枚举无 n12；回踩周摆动归入 weekly_swing_n20 族
-            pb_lo_comp = "weekly_swing_n20"
+            # P0：min/max 兜底时诚实标注 weekly_min_fallback，不再冒充周线摆动
+            pb_lo_comp = "weekly_swing_n20" if pb_swing_genuine else "weekly_min_fallback"
 
     if life_line is not None and pb_lo is not None:
         pb_lo = _round2(max(pb_lo, life_line))
@@ -652,13 +662,13 @@ def build_midline_levels(
         sw_r = swings.get("resist")
         if sw_r is not None and sw_r > 0:
             resist = _round2(float(sw_r))
-            resist_comp = "weekly_swing_n20_high"
+            resist_comp = "weekly_swing_n20_high" if swings.get("resist_genuine") else "weekly_max_fallback"
 
     if target is None:
         sw_t = swings.get("target_resist")
         if sw_t is not None and sw_t > 0:
             target = _round2(float(sw_t))
-            target_comp = "weekly_swing_n40_high"
+            target_comp = "weekly_swing_n40_high" if swings.get("target_resist_genuine") else "weekly_max_fallback"
 
     components["resist"] = resist_comp
     components["target"] = target_comp

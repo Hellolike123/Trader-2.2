@@ -1182,14 +1182,16 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             compute_pivot_position,
         )
 
-        _ma20 = None
+        _ma5 = _ma10 = _ma20 = None
         for _ma_src in (report.get("ma_raw"), report.get("ma"), report.get("mas")):
             if not isinstance(_ma_src, dict):
                 continue
             try:
+                _ma5 = float(_ma_src.get("ma5") or 0) or None
+                _ma10 = float(_ma_src.get("ma10") or 0) or None
                 _ma20 = float(_ma_src.get("ma20") or 0) or None
             except (TypeError, ValueError):
-                _ma20 = None
+                _ma5 = _ma10 = _ma20 = None
             if _ma20:
                 break
 
@@ -1200,6 +1202,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             confirm=float(report.get("confirm") or 0) or None,
             resistance=float(report.get("resistance") or 0) or None,
             ma20=_ma20,
+            ma10=_ma10,
+            ma5=_ma5,
             low_zone_lower=float(report.get("low_zone_lower") or 0) or None,
             low_zone_upper=float(report.get("low_zone_upper") or 0) or None,
             key_levels=report.get("key_levels") or {},

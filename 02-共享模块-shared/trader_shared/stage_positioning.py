@@ -221,6 +221,26 @@ def _save_stage_state(state: dict[str, Any], symbol: str = "") -> None:
 
 # ── 量价关系判定（兜底备用层，权重 10%）──────────────────────
 
+def _bearish_alignment(bars: list[dict[str, Any]], current: float) -> bool:
+    """空头排列：现价在所有均线下方且 MA5<MA10<MA20（确认下跌趋势）。
+
+    P1b：用于收紧蓄势判定——空头排列下缩量下跌是衰退而非筑底，
+    反弹上涨也不是蓄势偏强，禁止输出蓄势/蓄势偏强。
+    """
+    if len(bars) < 20 or current <= 0:
+        return False
+    closes = [float(b.get("close") or 0) for b in bars[-20:] if b.get("close")]
+    if len(closes) < 20:
+        return False
+    ma5 = sum(closes[-5:]) / 5
+    ma10 = sum(closes[-10:]) / 10
+    ma20 = sum(closes) / 20
+    if ma5 <= 0 or ma10 <= 0 or ma20 <= 0:
+        return False
+    # 空头排列：短期均线在下方（MA5 < MA10 < MA20）且现价跌破所有均线
+    return current < ma20 and ma5 < ma10 < ma20
+
+
 def _assess_volume_price(
     bars: list[dict[str, Any]],
     wyckoff_result: dict[str, Any] | None = None,
@@ -270,6 +290,8 @@ def _assess_volume_price(
 
     recent5 = bars[-5:]
     recent20 = bars[-20:]
+    current_price = float(bars[-1].get("close") or 0)
+    bearish_align = _bearish_alignment(bars, current_price)
 
     # 计算量能比率
     vol_5 = [float(b.get("volume") or 0) for b in recent5]
@@ -332,6 +354,8 @@ def _assess_volume_price(
     if is_high_volume and is_rising:
         return "主升", 80, f"放量上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
     if is_strong_rising:
+        if bearish_align:
+            return "蓄势", 50, f"缩量强势上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）｜空头排列反弹非蓄势偏强"
         return "蓄势偏强", 55, f"缩量强势上涨，量价不配合（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
     if is_high_volume and is_flat:
         return "派发", 65, f"放量不涨（量比{vol_ratio:.1f}，涨跌{price_change_5*100:+.1f}%）"
@@ -340,11 +364,16 @@ def _assess_volume_price(
 
     # 弱信号：缩量下跌（可能是衰退末期的缩量筑底）
     if is_low_volume and is_falling:
+        # P1b：空头排列时缩量下跌是衰退而非筑底，禁止判蓄势
+        if bearish_align:
+            return "蓄势偏弱", 35, f"缩量下跌（量比{vol_ratio:.1f}，跌{price_change_5*100:+.1f}%）｜空头排列非筑底"
         return "蓄势", 50, f"缩量下跌（量比{vol_ratio:.1f}，跌{price_change_5*100:+.1f}%），可能筑底"
 
     # 弱信号：放量但方向不明确（分涨跌处理）
     if is_high_volume:
         if price_change_5 > 0:
+            if bearish_align:
+                return "蓄势", 50, f"放量微涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）｜空头排列反弹非蓄势偏强"
             return "蓄势偏强", 50, f"放量微涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
         else:
             return "派发", 45, f"放量微跌（量比{vol_ratio:.1f}，跌{price_change_5*100:+.1f}%）"
@@ -352,12 +381,20 @@ def _assess_volume_price(
     # ── 正常量能区域分化（vol_ratio 0.8~1.2，覆盖约 65% 的交易日） ──
     if vol_ratio >= 0.8 and vol_ratio < 1.2:
         if price_change_5 > 0.03:
+            if bearish_align:
+                return "蓄势", 55, f"正常量能上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）｜空头排列反弹非蓄势偏强"
             return "蓄势偏强", 65, f"正常量能上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
         if price_change_5 > 0.01:
+            if bearish_align:
+                return "蓄势", 50, f"温和上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）｜空头排列反弹非蓄势偏强"
             return "蓄势偏强", 58, f"温和上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
         if price_change_5 < -0.03:
+            if bearish_align:
+                return "衰退", 55, f"正常量能下跌（量比{vol_ratio:.1f}，跌{price_change_5*100:+.1f}%）｜空头排列"
             return "蓄势偏弱", 55, f"正常量能下跌（量比{vol_ratio:.1f}，跌{price_change_5*100:+.1f}%）"
         if price_change_5 < -0.01:
+            if bearish_align:
+                return "衰退", 48, f"正常量能回调（量比{vol_ratio:.1f}，跌{price_change_5*100:+.1f}%）｜空头排列"
             return "蓄势偏弱", 48, f"正常量能回调（量比{vol_ratio:.1f}，跌{price_change_5*100:+.1f}%）"
         # 正常量能 + 横盘 → 真正的蓄势
         return "蓄势", 40, f"正常量能横盘（量比{vol_ratio:.1f}，涨跌{price_change_5*100:+.1f}%）"
@@ -365,8 +402,12 @@ def _assess_volume_price(
     # ── 缩量区域分化 ──
     if vol_ratio < 0.8:
         if price_change_5 > 0.01:
+            if bearish_align:
+                return "蓄势", 50, f"缩量上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）｜空头排列反弹非蓄势偏强"
             return "蓄势偏强", 58, f"缩量上涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
         if price_change_5 < -0.01:
+            if bearish_align:
+                return "衰退", 42, f"缩量下跌（量比{vol_ratio:.1f}，跌{price_change_5*100:+.1f}%）｜空头排列"
             return "蓄势偏弱", 42, f"缩量下跌（量比{vol_ratio:.1f}，跌{price_change_5*100:+.1f}%）"
         # 缩量横盘已在上面处理（is_low_volume and is_flat），这里兜底
         return "蓄势", 40, f"缩量横盘（量比{vol_ratio:.1f}，涨跌{price_change_5*100:+.1f}%）"
@@ -375,8 +416,12 @@ def _assess_volume_price(
     # 已在上面处理（is_high_volume + rising/flat/falling）
     # 这里是放量但幅度不够大的兜底
     if price_change_5 > 0:
+        if bearish_align:
+            return "蓄势", 50, f"放量微涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）｜空头排列反弹非蓄势偏强"
         return "蓄势偏强", 50, f"放量微涨（量比{vol_ratio:.1f}，涨{price_change_5*100:+.1f}%）"
     if price_change_5 < 0:
+        if bearish_align:
+            return "衰退", 48, f"放量微跌（量比{vol_ratio:.1f}，跌{price_change_5*100:+.1f}%）｜空头排列"
         return "蓄势偏弱", 48, f"放量微跌（量比{vol_ratio:.1f}，跌{price_change_5*100:+.1f}%）"
 
     # 默认

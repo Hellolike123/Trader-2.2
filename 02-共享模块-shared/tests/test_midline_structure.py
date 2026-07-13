@@ -177,6 +177,21 @@ class TestBuildMidlineLevels:
         assert r["source"] == "weekly_swing_only"
         assert r["quality"] == "partial"
 
+    def test_swing_fallback_label_honest(self):
+        # P0：单调上升无任何 2-touch 摆动 → 退化为区间最低/最高，
+        # 标签须诚实标注 weekly_min_fallback / weekly_max_fallback，不得冒充周线摆动
+        bars = []
+        p = 50.0
+        for i in range(40):
+            p = p * 1.01
+            bars.append(_bar(i, p, high=p * 1.01, low=p * 0.99))
+        chan = {"timeframe": "weekly", "strokes": [], "segments": [], "zones": []}
+        r = build_midline_levels(current=80.0, weekly_bars=bars, chanlun_midline=chan)
+        assert r["components"]["life_line"] == "weekly_min_fallback"
+        assert r["components"]["pullback_low"] == "weekly_min_fallback"
+        assert r["components"]["resist"] == "weekly_max_fallback"
+        assert r["components"]["target"] == "weekly_max_fallback"
+
     def test_insufficient_too_short(self):
         bars = _weekly_bars_n(10)
         r = build_midline_levels(
