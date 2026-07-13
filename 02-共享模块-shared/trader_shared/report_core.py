@@ -720,9 +720,13 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     if buy_low and buy_high:
         _src_suffix = f" ← {_sup_label}" if _sup_label else ""
-        _buy_annotation = f"回踩买"
-        if _risk_buy > 0 and _rew_buy > 0:
-            _buy_annotation += f"，亏{_risk_buy:.1f} 赚{_rew_buy:.1f} → 盈亏比 {_ratio_buy:.1f}:1 {_rr_buy_verdict}"
+        _allow_entry = bool(_disc.get("allow_new_entry", True))
+        if not _allow_entry:
+            _buy_annotation = "等确认"
+        else:
+            _buy_annotation = "回踩买"
+            if _risk_buy > 0 and _rew_buy > 0:
+                _buy_annotation += f"，亏{_risk_buy:.1f} 赚{_rew_buy:.1f} → 盈亏比 {_ratio_buy:.1f}:1 {_rr_buy_verdict}"
         _price_items.append((float(buy_low) - 0.001, f"低吸区 {float(buy_low):.2f}-{float(buy_high):.2f}", f"{_buy_annotation}{_src_suffix}"))
     elif buy_ref:
         _src_suffix = f" ← {_sup_label}" if _sup_label else ""
@@ -754,9 +758,13 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     if short_low and short_high:
         _res_suffix = f" ← {_res_label}" if _res_label else ""
-        _sell_annotation = "分批出"
-        if _rew_chase > 0:
-            _sell_annotation += f"，赚 {_rew_chase:.1f}"
+        _allow_entry = bool(_disc.get("allow_new_entry", True))
+        if not _allow_entry:
+            _sell_annotation = "等确认"
+        else:
+            _sell_annotation = "分批出"
+            if _rew_chase > 0:
+                _sell_annotation += f"，赚 {_rew_chase:.1f}"
         if float(short_low) == float(short_high):
             _price_items.append((float(short_low), "止盈区", f"{_sell_annotation}{_res_suffix}"))
         else:
