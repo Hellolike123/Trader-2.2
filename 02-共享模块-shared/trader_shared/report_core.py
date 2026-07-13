@@ -140,20 +140,6 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if meta_parts:
         lines.append(f"  {' ｜ '.join(meta_parts)}")
 
-    ma_parts = []
-    for k, label in (("ma5", "MA5"), ("ma20", "MA20"), ("ma250", "MA250")):
-        fv = _ma_float(k)
-        if fv is not None:
-            ma_parts.append(f"{label}：{fv:.2f}")
-        elif k in ("ma20", "ma250"):
-            ma_parts.append(f"{label}：--")
-    joined_ma = " ｜ ".join(ma_parts) if ma_parts else "MA20：-- ｜ MA250：--"
-    if "MA20" not in joined_ma:
-        joined_ma = "MA20：-- ｜ " + joined_ma
-    if "MA250" not in joined_ma:
-        joined_ma = joined_ma + " ｜ MA250：--"
-    lines.append(f"  {joined_ma}")
-
     volume_ratio_val = float(r.get("volume_ratio") or 0)
     turnover_val = float(r.get("turnover_rate") or 0)
     vol_parts = []
@@ -162,34 +148,24 @@ def render_short_midline(r: dict[str, Any]) -> str:
         vol_parts.append(f"量比{volume_ratio_val:.1f}（{vol_label}）")
     if turnover_val > 0:
         vol_parts.append(f"换手{turnover_val:.1f}%")
-    
-    _vwap = r.get("vwap")
-    _vwap_dev = r.get("vwap_dev")
-    _vwap_lvl = r.get("vwap_level")
-    try:
-        _vwap_f = float(_vwap) if _vwap is not None else None
-    except (TypeError, ValueError):
-        _vwap_f = None
-    if _vwap_f is not None:
-        _dev_pct = float(_vwap_dev) * 100 if _vwap_dev is not None else 0.0
-        _sign = "+" if _dev_pct >= 0 else ""
-        vol_parts.append(f"VWAP {_vwap_f:.2f}（偏离 {_sign}{_dev_pct:.1f}% ｜ {_vwap_lvl or '--'}）")
-
-    if vol_parts:
-        lines.append(f"  {' ｜ '.join(vol_parts)}")
-
-    # 调整天数（距近 20 日最高点的天数）
+    # 调整天数并入量价行
     _bars = r.get("daily_bars") or []
     if len(_bars) >= 20 and current > 0:
         _recent = _bars[-20:]
-        _highs = [(i, float(b.get("high") or 0)) for i, b in enumerate(_recent) if float(b.get("high") or 0) > 0]
-        if _highs:
-            _max_i, _max_h = max(_highs, key=lambda x: x[1])
-            _days_from_high = len(_recent) - 1 - _max_i
+        _high20 = max((float(b.get("high") or 0)) for b in _recent)
+        if _high20 > 0:
+            _days_from_high = 0
+            for _b in reversed(_recent):
+                if (float(_b.get("high") or 0)) >= _high20 - 0.001:
+                    break
+                _days_from_high += 1
             if _days_from_high == 0:
-                lines.append("  创新高（近20日）")
+                vol_parts.append("创新高")
             else:
-                lines.append(f"  调整：第{_days_from_high}天")
+                vol_parts.append(f"调整{_days_from_high}天")
+
+    if vol_parts:
+        lines.append(f"  {' ｜ '.join(vol_parts)}")
 
     # 相对强弱与行业板块（优先 extend_sector；fallback 用个股涨跌 vs 大盘环境）
     _ext_sec = r.get("extend_sector") or {}
@@ -205,11 +181,15 @@ def render_short_midline(r: dict[str, Any]) -> str:
         
         _sector_parts = []
         if _sec_name:
-            _sector_parts.append(f"{_sec_name}（涨幅 {_sec_chg_str}{' ｜ ' + _rank_str if _rank_str else ''}）")
+            _short_name = _sec_name.replace("(A股)", "").replace("(A)", "").strip()
+            _sector_parts.append(f"{_short_name} {_sec_chg_str}")
+        # 个股涨跌幅
+        if change_pct is not None:
+            _sector_parts.append(f"个股 {change_pct:+.2f}%")
         if _vs:
-            _sector_parts.append(f"相对强弱：{_vs}")
+            _sector_parts.append(_vs.replace("板块", "").strip())
         if _sector_parts:
-            lines.append(f"  行业板块：{' ｜ '.join(_sector_parts)}")
+            lines.append(f"  行业：{' ｜ '.join(_sector_parts)}")
     elif change_pct != 0 and regime:
         # 简易对比：个股涨跌 vs 大盘环境词
         _regime_map = {"偏强": 0.5, "正常": 0, "偏弱": -0.5, "很差": -1.0}
@@ -428,20 +408,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     # 中线关键价（按价格升序排列）
     lines.append("")
-
-    # 标题行：嵌入结构质量
-    _mid_q = str(mid_key_prices.get("quality") or "")
-    _q_label = ""
-    if _mid_q == "full":
-        _q_label = " ｜ 结构 full"
-    elif _mid_q == "partial":
-        _q_label = " ｜ 结构 partial"
-    lines.append(f"  关键价（中线）{_q_label}")
-
-    # 笔段/摆动说明 + 百分比提示
-    _q_hint = "笔段结构" if _mid_q == "full" else ("纯摆动" if _mid_q == "partial" else "")
-    if _q_hint:
-        lines.append(f"    {_q_hint}，各价位距现价 %")
+    lines.append("  关键价（中线）")
 
     # 收集中线价位，按价格排序
     _mid_items: list[tuple[float, str]] = []
