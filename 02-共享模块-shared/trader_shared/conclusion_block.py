@@ -220,14 +220,22 @@ def chanlun_midline_dir(chanlun_midline: Any) -> int:
     return 0
 
 
-def wyckoff_midline_bias(wyckoff_midline: Any) -> str:
-    """strong_bull | strong_bear | neutral（B1A）。"""
+def wyckoff_midline_bias(wyckoff_midline: Any, major_stage: str = "") -> str:
+    """strong_bull | strong_bear | neutral（B1A）。
+
+    major_stage 参与判断：主升/蓄势偏强阶段的 upthrust 视为正常洗盘，
+    不判 strong_bear（避免主升中正常回调误读为派发）。
+    """
     w = _unwrap_wyck(wyckoff_midline)
     if not w:
         return "neutral"
 
+    # 主升/蓄势偏强阶段：upthrust 可能是正常洗盘，不判 strong_bear
+    _upstage = major_stage in ("主升", "蓄势偏强")
     strong_bear = bool(
-        w.get("upthrust_signal") or w.get("bc_signal") or w.get("sow_signal")
+        (not _upstage and w.get("upthrust_signal"))
+        or w.get("bc_signal")
+        or w.get("sow_signal")
     )
     strong_bull = bool(w.get("spring_signal") or w.get("sos_signal"))
     # 多信号：strong_bear 优先
@@ -241,9 +249,10 @@ def wyckoff_midline_bias(wyckoff_midline: Any) -> str:
 def midline_theory_dirs(
     chanlun_midline: Any = None,
     wyckoff_midline: Any = None,
+    major_stage: str = "",
 ) -> tuple[int, str]:
     """返回 (chan_dir, wyck_bias)。"""
-    return chanlun_midline_dir(chanlun_midline), wyckoff_midline_bias(wyckoff_midline)
+    return chanlun_midline_dir(chanlun_midline), wyckoff_midline_bias(wyckoff_midline, major_stage=major_stage)
 
 
 def _midline_view_from_theory(
@@ -251,12 +260,13 @@ def _midline_view_from_theory(
     chanlun_midline: Any = None,
     wyckoff_midline: Any = None,
     weekly_frame: str | None = None,
+    major_stage: str = "",
 ) -> str:
     """中线看法：周线缠+威合成（B1A），禁止四阶段词。"""
     if weekly_frame == "破坏":
         return "中线框破坏 · 战略减/清倾向"
 
-    chan_dir, wyck_bias = midline_theory_dirs(chanlun_midline, wyckoff_midline)
+    chan_dir, wyck_bias = midline_theory_dirs(chanlun_midline, wyckoff_midline, major_stage=major_stage)
     chan = _unwrap_chan(chanlun_midline)
     st = str(chan.get("structure_type") or "").strip()
 
@@ -412,6 +422,7 @@ def build_conclusion_block(
             chanlun_midline=chanlun_midline,
             wyckoff_midline=wyckoff_midline,
             weekly_frame=weekly_frame,
+            major_stage=major_stage,
         )
     )
     short = _shortline_view(scene, theory_status, ruling, chase_ok)

@@ -1284,6 +1284,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             chanlun_midline=report.get("chanlun_midline"),
             wyckoff_midline=report.get("wyckoff_midline"),
             weekly_frame=report.get("weekly_frame"),
+            major_stage=stage_result["major_stage"],
         )
         _chan_u = report.get("chanlun_midline") or {}
         if isinstance(_chan_u, dict) and "chanlun" in _chan_u:
