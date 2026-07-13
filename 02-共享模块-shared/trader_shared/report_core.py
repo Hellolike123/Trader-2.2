@@ -265,17 +265,29 @@ def render_short_midline(r: dict[str, Any]) -> str:
     # ── 🧭 中线（B3C）──
     lines.append("")
     lines.append("🧭 中线")
-    lines.append(f"  阶段：{stage_line or '未知'}")
-    # 中线看法与仓位衔接：结构看好但仓位为0时，加桥接说明
+
+    # 阶段 + 中线偏多/偏空标签（合并"看法"行）
+    _stage_line = str(stage_line or '未知')
+    _mid = str(conclusion.get("midline") or "").strip()
+    if _mid and _mid != "中线观察":
+        # 提取方向标签（偏多/偏空）和短因
+        _tag = ""
+        if any(k in _mid for k in ("可跟踪", "趋势未坏", "结构偏多", "看涨")):
+            _tag = "偏多"
+        elif any(k in _mid for k in ("慎跟", "偏空", "暂缓", "信号打架", "破坏")):
+            _tag = "偏空"
+        # 提取短因（去掉标点，取前8字）
+        _short = _mid.replace("·", "").replace("，", "").replace("。", "").split("（")[0].strip()[:10]
+        if _tag:
+            _stage_line = f"{_stage_line} · {_tag}（{_short}）"
+    lines.append(f"  阶段：{_stage_line}")
+
+    # 仓位衔接：结构看好但仓位为0时，加桥接说明
     _suggested_pct = r.get("suggested_pct")
     try:
         _sp = int(_suggested_pct) if _suggested_pct is not None else None
     except (TypeError, ValueError):
         _sp = None
-    _mid_view_positive = any(kw in mid for kw in ("可跟踪", "可关注", "趋势未坏", "看涨"))
-    if _mid_view_positive and _sp is not None and _sp <= 0:
-        mid = f"{mid}，纪律暂不放行"
-    lines.append(f"  看法：{mid}")
 
     # 威科夫/缠论：严格 mid 字段，禁止回退日线
     try:
