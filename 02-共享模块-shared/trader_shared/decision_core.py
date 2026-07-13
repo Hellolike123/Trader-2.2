@@ -203,24 +203,7 @@ def _check_theory_breakout(
                 elif "一类买" in buy_point_text or "二类买" in buy_point_text:
                     chan_ok = True
 
-    # 2. 威科夫验证
-    wyk_ok = False
-    if isinstance(wyk, dict):
-        # P2 Fix: signals_detail 中的 wyckoff 是标准化信号 {direction, confidence, reason}，
-        # 不含原始 upthrust_signal/spring_signal 等字段。改用 reason 关键词匹配。
-        reason = str(wyk.get("reason", ""))
-        has_upthrust = any(kw in reason for kw in ("上冲", "Upthrust", "看空"))
-        # [P2 Fix] fusion_core 生成的 spring reason 是中文"威科夫弹簧"而非"Spring"
-        has_spring = "弹簧" in reason or "Spring" in reason or "做多" in reason or "看多" in reason
-        has_bullish_div = "看多" in reason and any(
-            kw in reason for kw in ("背离", "量价")
-        )
-
-        if not has_upthrust:
-            if has_spring or has_bullish_div:
-                wyk_ok = True
-
-    theory_ok = chan_ok or wyk_ok
+    theory_ok = chan_ok
     if not theory_ok:
         return False
 

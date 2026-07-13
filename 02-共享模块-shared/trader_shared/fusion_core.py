@@ -613,6 +613,9 @@ def merge_decisions(
     strong_bearish_chan = chan_signal.get("direction") == -1 and any(
         kw in chan_reason for kw in ("一类卖", "1类卖", "1st sell", "顶背驰", "top_divergence")
     )
+    # 注：strong_bearish_chan 仅匹配"一类卖"和"顶背驰"，二类/三类卖不视为"强"看空。
+    # 理由：二/三类卖是主升后的次级卖点，信号强度弱于一/顶背驰，不应触发冲突消解
+    # （否则动量方向的打折会过度压制趋势跟踪能力）。有意设计。
 
     vpf_reason = str(vpf_signal.get("reason") or "")
     strong_bullish_vpf = vpf_signal.get("direction") == 1 and float(vpf_signal.get("confidence") or 0) >= 0.45
@@ -653,10 +656,7 @@ def merge_decisions(
         weights = {"chan": 0.44, "momentum": 0.20, "vpf": 0.36}
     else:
         regime_weights = get_regime_weights(regime)
-        if regime == "很差":
-            weights = regime_weights
-        else:
-            weights = regime_weights
+        weights = regime_weights
 
     # 2.5 主力行为权重修正
     if main_force_env and main_force_env != "unknown":
@@ -689,6 +689,12 @@ def merge_decisions(
         momentum_signal["direction"] * momentum_signal["confidence"] * weights["momentum"] +
         vpf_signal["direction"] * vpf_signal["confidence"] * _w_vpf
     )
+
+    # 4b. 大盘"很差"默认偏斜：权重全零 → score=0 → "持股观望"
+    # 在极端弱势下"持股观望"是最危险的动作（市场可能持续下跌），
+    # 默认偏空到 -0.5 → score_to_action 映射为"空仓/止损"。
+    if regime == "很差" and abs(weighted_score) < 0.01:
+        weighted_score = -0.5
 
     # 5. 决策映射
     # 先做数据断层降级，再映射 action（避免截断前的高分触发"半仓试"、
