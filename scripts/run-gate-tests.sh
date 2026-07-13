@@ -30,6 +30,7 @@ TESTS=(
   "02-共享模块-shared/tests/test_arch_refactoring.py"
   "02-共享模块-shared/tests/test_indicator_math.py"
   "02-共享模块-shared/tests/test_box_detect.py"
+  "02-共享模块-shared/tests/test_combo_strategy.py"
   "01-功能包-packages/trader/tests/test_report_renderer.py"
 )
 
