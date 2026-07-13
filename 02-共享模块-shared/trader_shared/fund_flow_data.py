@@ -492,6 +492,9 @@ def calc_fund_flow_features(
             "daily_flow_5d": [],
         }
 
+    # 统一按日期升序（有的源返回最新在前）
+    daily_flow = sorted(daily_flow, key=lambda x: str(x.get("date") or ""))
+
     # 累计净流入
     recent5 = daily_flow[-5:]
     recent10 = daily_flow[-10:]
