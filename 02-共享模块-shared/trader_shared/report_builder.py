@@ -1391,6 +1391,27 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
 
         # 只收紧：禁止新开时裁 suggested_pct / 出手语义；R5 同步 position_info
         _disc_action = str(discipline.get("action") or mistery_gate.get("action") or "观望")
+
+        # 中短仲裁：中线偏多时削弱短线的全仓止损
+        # 场景：大盘很差→-0.5默认偏斜→"空仓/止损"，但中线周线显示独立积累行情
+        # → 降级为"减1/3"，不平掉中线看好的仓位。
+        _mid_positive = any(
+            kw in (_mid_view_txt or "")
+            for kw in ("偏多", "可跟踪", "未坏", "积累", "看涨")
+        )
+        if _mid_positive and _disc_action in ("空仓/止损", "空仓 (大盘很差, 一票否决)"):
+            _disc_action = "减1/3 (中线偏多)"
+            # 同步收紧到 discipline 输出（下游消费 _disc_action）
+            discipline["action"] = _disc_action
+            if "notes" not in discipline or not discipline["notes"]:
+                discipline["notes"] = "中线偏多，短线不减至空仓，改减1/3"
+            else:
+                _n = str(discipline["notes"])
+                if "中线偏多" not in _n:
+                    discipline["notes"] = f"{_n}；中线偏多，短线不减至空仓"
+            if "rules_fired" in discipline and isinstance(discipline["rules_fired"], list):
+                discipline["rules_fired"].append("mid_bullish_downgrade")
+
         _disc_cap = discipline.get("suggested_pct_cap")
         if _disc_cap is None:
             _disc_cap = discipline.get("position_cap_pct")
