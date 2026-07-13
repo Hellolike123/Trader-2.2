@@ -114,6 +114,11 @@ class _MockProvider:
         )
 
 
+class _UnavailableClient:
+    """Tushare client stub that reports unavailable (no real HTTP calls)."""
+    available = False
+
+
 @pytest.fixture
 def adr002_env(monkeypatch):
     """Patch provider + network branches (mirror golden_env, no call-count wrap)."""
@@ -136,6 +141,11 @@ def adr002_env(monkeypatch):
     monkeypatch.setattr(
         "trader_shared.cache_utils.fetch_fund_flow_cached", lambda *a, **k: None,
     )
+    # 堵 tushare_client / chip_data 网络泄漏(同 render 等价测试的处理方式)
+    import trader_shared.tushare_client as _tc
+    import trader_shared.chip_data as _chip
+    monkeypatch.setattr(_tc, "get_client", lambda *a, **k: _UnavailableClient())
+    monkeypatch.setattr(_chip, "get_cyq_perf", lambda *a, **k: None)
     try:
         import run_analysis as _ra2
         if hasattr(_ra2, "read_signals_for_report"):
