@@ -505,6 +505,11 @@ def render_short_midline(r: dict[str, Any]) -> str:
         if len(reason) > 30:
             reason = reason[:28] + "…"
     if reason and reason not in execution:
+        # 出手带触发价：如果观望且 confirm 存在，追加触发条件
+        _confirm_v = float(r.get("confirm") or 0)
+        if "不买" in execution or "观望" in execution:
+            if _confirm_v > 0 and _confirm_v > current:
+                execution = f"观望 · 等价格回到 {_confirm_v:.2f}（确认位）以上"
         lines.append(f"  出手：{execution}（{reason}）{_cap_str}")
     else:
         lines.append(f"  出手：{execution}{_cap_str}")
@@ -555,6 +560,14 @@ def render_short_midline(r: dict[str, Any]) -> str:
         if _wave:
             _chan_line += f" · {_wave}"
         lines.append(f"  缠论：{_chan_line}")
+
+    # 信号分歧一行：缠论 vs 动量方向相反时提醒
+    _chan_dir2 = int(_csig2.get("direction", 0)) if _csig2 else 0
+    _mom_dir2 = int(_msig.get("direction", 0)) if 'msig' in dir() and isinstance(_msig, dict) else 0
+    if _chan_dir2 * _mom_dir2 < 0:
+        _c_label = "看多" if _chan_dir2 > 0 else "看空"
+        _m_label = "看多" if _mom_dir2 > 0 else "看空"
+        lines.append(f"  ⚠️ 信号分歧：缠论{_c_label} vs 动能{_m_label} → 观望为主")
 
     # 动能（展示 reason 原文，不删括号不编造分项）
     _msig = fusion_signals.get("momentum") if isinstance(fusion_signals.get("momentum"), dict) else {}
@@ -616,6 +629,17 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if not swing_sell:
         swing_sell = float(r.get("resistance") or 0) or None
 
+    # 提前计算 RR 值（供防线标注使用）
+    _target_rr = float(r.get("take") or 0)
+    _risk_buy = max(0.0, float(buy_low or 0) - float(stop_sell or 0)) if buy_low and stop_sell else 0.0
+    _rew_buy = max(0.0, _target_rr - float(buy_low or 0)) if buy_low and _target_rr > 0 else 0.0
+    _risk_chase = max(0.0, current - float(stop_sell or 0)) if current > 0 and stop_sell else 0.0
+    _rew_chase = max(0.0, _target_rr - current) if current > 0 and _target_rr > 0 else 0.0
+    _ratio_buy = _rew_buy / _risk_buy if _risk_buy > 0 else 0.0
+    _ratio_chase = _rew_chase / _risk_chase if _risk_chase > 0 else 0.0
+    _rr_buy_verdict = "✓" if _ratio_buy >= 2.0 else ("✗" if _ratio_buy < 1.0 else "△")
+    _rr_chase_verdict = "✓" if _ratio_chase >= 2.0 else ("✗" if _ratio_chase < 1.0 else "△")
+
     lines.append("")
     lines.append("  关键价（短线）")
 
@@ -662,11 +686,17 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _sell_tgt_pct = f"，目标+{(float(short_high) - current) / current * 100:.1f}%"
 
     if stop_sell:
-        _price_items.append((float(stop_sell), "止损", "破就走"))
+        _stop_annotation = "破就走"
+        if _risk_chase > 0:
+            _stop_annotation = f"跌破亏 {_risk_chase:.1f}"
+        _price_items.append((float(stop_sell), "止损", _stop_annotation))
 
     if buy_low and buy_high:
         _src_suffix = f" ← {_sup_label}" if _sup_label else ""
-        _price_items.append((float(buy_low) - 0.001, f"买点区 {float(buy_low):.2f}-{float(buy_high):.2f}", f"分批建仓{_src_suffix}"))
+        _buy_annotation = f"回踩买"
+        if _risk_buy > 0 and _rew_buy > 0:
+            _buy_annotation += f"，亏{_risk_buy:.1f} 赚{_rew_buy:.1f} → 盈亏比 {_ratio_buy:.1f}:1 {_rr_buy_verdict}"
+        _price_items.append((float(buy_low) - 0.001, f"低吸区 {float(buy_low):.2f}-{float(buy_high):.2f}", f"{_buy_annotation}{_src_suffix}"))
     elif buy_ref:
         _src_suffix = f" ← {_sup_label}" if _sup_label else ""
         _price_items.append((float(buy_ref), "买点区", f"分批建仓{_src_suffix}"))
@@ -697,10 +727,13 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     if short_low and short_high:
         _res_suffix = f" ← {_res_label}" if _res_label else ""
+        _sell_annotation = "分批出"
+        if _rew_chase > 0:
+            _sell_annotation += f"，赚 {_rew_chase:.1f}"
         if float(short_low) == float(short_high):
-            _price_items.append((float(short_low), "卖点区", f"分批减仓{_sell_tgt_pct}{_res_suffix}"))
+            _price_items.append((float(short_low), "止盈区", f"{_sell_annotation}{_res_suffix}"))
         else:
-            _price_items.append((float(short_low) - 0.001, f"卖点区 {float(short_low):.2f}-{float(short_high):.2f}", f"分批减仓{_sell_tgt_pct}{_res_suffix}"))
+            _price_items.append((float(short_low) - 0.001, f"止盈区 {float(short_low):.2f}-{float(short_high):.2f}", f"{_sell_annotation}{_res_suffix}"))
 
     # 止盈（如果和卖点区不同）
     _take = r.get("take")
@@ -720,27 +753,6 @@ def render_short_midline(r: dict[str, Any]) -> str:
             lines.append(f"    {price:.2f} {label}（{action}）")
 
     lines.append("")
-    # 盈亏比行（用阶梯里的价格保持一致：建仓用 buy_low，追涨用现价，目标用 take）
-    _kp = r.get("key_prices") or {}
-    _target = float(r.get("take") or 0)  # 用报告的止盈价，不是 far_sell
-
-    # 建仓盈亏比：用 buy_low（阶梯买点区下沿）
-    if buy_low and stop_sell and _target > 0:
-        _risk_buy = max(0.0, float(buy_low) - float(stop_sell))
-        _rew_buy = max(0.0, _target - float(buy_low))
-        if _risk_buy > 0:
-            _ratio = _rew_buy / _risk_buy
-            _verdict = "✓ 值得关注" if _ratio >= 2.0 else ("✗ 不划算" if _ratio < 1.0 else "△ 一般")
-            lines.append(f"  {float(buy_low):.2f} 回踩低吸：亏约 {_risk_buy:.1f} / 赚约 {_rew_buy:.1f} → 盈亏比 {_ratio:.1f}:1 {_verdict}")
-
-    # 追涨盈亏比：用现价
-    if current > 0 and stop_sell and _target > 0:
-        _risk_chase = max(0.0, current - float(stop_sell))
-        _rew_chase = max(0.0, _target - current)
-        if _risk_chase > 0:
-            _ratio_c = _rew_chase / _risk_chase
-            _verdict_c = "✓ 值得关注" if _ratio_c >= 2.0 else ("✗ 不划算" if _ratio_c < 1.0 else "△ 一般")
-            lines.append(f"  {current:.2f} 现价跟进：亏约 {_risk_chase:.1f} / 赚约 {_rew_chase:.1f} → 盈亏比 {_ratio_c:.1f}:1 {_verdict_c}")
 
     # ── T0（日内算法：低吸到高抛的日内差价 + 盈亏比）──
     _t0_has_pos = bool(r.get("has_position"))
