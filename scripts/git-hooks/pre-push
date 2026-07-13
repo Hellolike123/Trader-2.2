@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# pre-push hook：push 前跑 CI 门禁，失败则阻止 push。
+# 由 `git config core.hooksPath scripts/git-hooks` 启用（已版本化提交）。
+#
+# 行为：
+#   - 每次 `git push` 触发，运行 scripts/run-gate-tests.sh（离线核心回归集，约 60s）。
+#   - 测试全绿 → 退出 0，允许 push。
+#   - 任一测试失败 → 退出 1，git 阻止本次 push。
+#
+# 跳过门禁（谨慎使用）：`git push --no-verify`
+#   skip 仅用于你明确知道测试红是预期内（如临时调参）的紧急推送，事后须补绿。
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+echo "🔒 CI 门禁：运行离线核心回归测试（约 60s）..."
+if "$REPO_ROOT/scripts/run-gate-tests.sh"; then
+  echo "✅ 门禁通过，允许 push。"
+  exit 0
+else
+  echo "❌ 门禁失败，已阻止 push。请修复测试后重试；" >&2
+  echo "   若确认需跳过，用：git push --no-verify（事后务必补绿）。" >&2
+  exit 1
+fi
