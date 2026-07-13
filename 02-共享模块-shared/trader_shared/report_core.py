@@ -305,7 +305,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _wyk_raw = _wyk_raw.get("wyckoff")
         if not isinstance(_wyk_raw, dict):
             _wyk_raw = {}
-        _wyk_line = format_wyckoff_oneline(_wyk_raw, direction=None)
+        _wyk_line = format_wyckoff_oneline(_wyk_raw, direction=None, show_phase=True)
     except Exception:
         _wyk_line = "威科夫：数据不足 · 中性"
     _wyk_body = _wyk_line.replace("威科夫：", "").replace("威科夫:", "").strip()
@@ -973,7 +973,7 @@ def render_single_legacy(r: dict[str, Any]) -> str:
             _wyk_raw = r.get("wyckoff")
             if isinstance(_wyk_raw, dict) and "wyckoff" in _wyk_raw:
                 _wyk_raw = _wyk_raw.get("wyckoff")
-            lines.append(f"  {format_wyckoff_oneline(_wyk_raw if isinstance(_wyk_raw, dict) else {}, direction=_w_dir)}")
+            lines.append(f"  {format_wyckoff_oneline(_wyk_raw if isinstance(_wyk_raw, dict) else {}, direction=_w_dir, show_phase=True)}")
         except Exception:
             _sig = fusion_signals.get("wyckoff") if isinstance(fusion_signals.get("wyckoff"), dict) else {}
             _dir = _sig.get("direction", 0) if _sig else 0

@@ -477,7 +477,7 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         if isinstance(_wyk_raw, dict) and "wyckoff" in _wyk_raw:
             _wyk_raw = _wyk_raw.get("wyckoff")
         lines.append(
-            f"  {format_wyckoff_oneline(_wyk_raw if isinstance(_wyk_raw, dict) else {}, direction=_w_dir)}"
+            f"  {format_wyckoff_oneline(_wyk_raw if isinstance(_wyk_raw, dict) else {}, direction=_w_dir, show_phase=True)}"
         )
     except Exception:
         lines.append("  威科夫：暂无明确信号 · 中性")

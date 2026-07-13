@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 from typing import Any
 
 from trader_shared.light_data import to_float
@@ -1288,6 +1290,125 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any]) -> dict[str, Any]:
     return {"phase": "none", "phase_label": "无明确阶段", "phase_confidence_delta": 0.0}
 
 
+# ── 跨日持久化 phase 状态机 ──
+
+_WYCKOFF_PHASE_FILE = os.path.expanduser("~/.trader/wyckoff_phase.json")
+
+_PHASE_ORDER = {
+    "distribution_c": -2,
+    "distribution_a": -1,
+    "none": 0,
+    "accumulation_b": 1,
+    "accumulation_c": 2,
+    "accumulation_d": 3,
+}
+
+
+def _load_phase_state(symbol: str) -> dict[str, Any] | None:
+    """从持久化文件加载该标的的 phase 状态。"""
+    if not symbol:
+        return None
+    try:
+        if os.path.exists(_WYCKOFF_PHASE_FILE):
+            with open(_WYCKOFF_PHASE_FILE) as f:
+                data = json.load(f)
+            return data.get(symbol)
+    except (json.JSONDecodeError, OSError):
+        pass
+    return None
+
+
+def _save_phase_state(symbol: str, phase_state: dict[str, Any]) -> None:
+    """将 phase 状态持久化到文件。"""
+    if not symbol:
+        return
+    try:
+        os.makedirs(os.path.dirname(_WYCKOFF_PHASE_FILE), exist_ok=True)
+        data = {}
+        if os.path.exists(_WYCKOFF_PHASE_FILE):
+            try:
+                with open(_WYCKOFF_PHASE_FILE) as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                data = {}
+        data[symbol] = phase_state
+        with open(_WYCKOFF_PHASE_FILE, "w") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
+
+
+def _transition_phase(
+    old_phase_state: dict[str, Any] | None,
+    new_phase: str,
+    new_phase_label: str,
+    new_confidence_delta: float,
+) -> dict[str, Any]:
+    """状态机：phase 只进不退，不同方向需强信号翻转。
+
+    规则：
+      - 无旧状态 → 直接使用新 phase
+      - 新 phase 为 "none" → 保持旧 phase
+      - 同方向（同为积累或同为派发）→ 只升级不降级
+      - 反方向 → 需要强信号（accumulation_c/d 或 distribution_c）才翻转
+    """
+    if old_phase_state is None:
+        return {
+            "phase": new_phase,
+            "phase_label": new_phase_label,
+            "phase_confidence_delta": new_confidence_delta,
+            "first_seen": new_phase if new_phase != "none" else None,
+        }
+
+    old_phase = old_phase_state.get("phase", "none")
+    old_order = _PHASE_ORDER.get(old_phase, 0)
+    new_order = _PHASE_ORDER.get(new_phase, 0)
+    first_seen = old_phase_state.get("first_seen")
+
+    # 新 phase 无信号 → 保持旧状态
+    if new_phase == "none":
+        return {**old_phase_state, "phase_confidence_delta": 0.0}
+
+    # 旧 phase 也是 "none" → 直接升级
+    if old_phase == "none":
+        return {
+            "phase": new_phase,
+            "phase_label": new_phase_label,
+            "phase_confidence_delta": new_confidence_delta,
+            "first_seen": new_phase,
+        }
+
+    # 同方向（同正或同负）：只升级不降级
+    if (
+        (old_order > 0 and new_order > 0)  # 积累
+        or (old_order < 0 and new_order < 0)  # 派发
+    ):
+        if new_order <= old_order:
+            # 信号弱于或持平当前 → 保持旧阶段，但更新 confidence
+            return {**old_phase_state, "phase_confidence_delta": new_confidence_delta}
+        # 升级
+        return {
+            "phase": new_phase,
+            "phase_label": new_phase_label,
+            "phase_confidence_delta": new_confidence_delta,
+            "first_seen": first_seen or new_phase,
+        }
+
+    # 反方向：从积累切到派发，或派发切到积累 → 需要强信号
+    # 新方向如果是 accumulation_c/d 或 distribution_c 才翻转
+    strong_flip = new_phase in ("accumulation_c", "accumulation_d", "distribution_c")
+    if strong_flip:
+        return {
+            "phase": new_phase,
+            "phase_label": new_phase_label,
+            "phase_confidence_delta": new_confidence_delta,
+            "first_seen": new_phase,
+        }
+
+    # 反方向但信号不强 → 保持旧阶段
+    return {**old_phase_state, "phase_confidence_delta": 0.0}
+
+
 # ── 威科夫综合分析入口 ──
 def wyckoff_analysis(bars: list[dict], symbol: str = "") -> dict:
     if len(bars) < WYCKOFF_MIN_BARS:
@@ -1335,6 +1456,18 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "") -> dict:
         "trend_pullback_signal": trend_pullback["trend_pullback_signal"],
     }
     phase = _detect_phase(bars, signals_dict)
+
+    # B: 跨日持久化状态机 — 加载旧状态、过渡、存储
+    old_state = _load_phase_state(symbol)
+    new_phase_state = _transition_phase(
+        old_state,
+        phase["phase"],
+        phase["phase_label"],
+        phase.get("phase_confidence_delta", 0.0),
+    )
+    _save_phase_state(symbol, new_phase_state)
+    # 用过渡后状态覆盖瞬时推断（phase 只进不退）
+    phase = new_phase_state
 
     # P3-1: VSA 量价幅度分析
     vsa = _detect_effort_vs_result(bars)
@@ -1642,14 +1775,21 @@ def format_wyckoff_oneline(
     wyckoff: dict[str, Any] | None = None,
     *,
     direction: int | None = None,
+    show_phase: bool = False,
 ) -> str:
     """报告用威科夫一行人话（结论 + 白话，不拆第二行）。
 
     优先级与 fusion 主信号大致对齐：
       Spring > SOS > UT > BC > SOW > AR > ST > LPS > Compression > TrendPullback > 背离 > 无信号
 
+    Args:
+        wyckoff: 威科夫分析结果 dict
+        direction: 外部覆盖方向
+        show_phase: 是否在输出中显示 phase_label
+
     Returns:
         如「威科夫：低位假跌破后收回，偏多（更像洗盘，缩量较可信）」
+        如 show_phase=True：「积累期 C（测试：Spring）· 低位假跌破后收回，偏多」
     """
     wyk = wyckoff if isinstance(wyckoff, dict) else {}
     # 兼容 strategy 包装
@@ -1713,11 +1853,20 @@ def format_wyckoff_oneline(
             )
         )
         if has_run:
+            _phase = wyk.get("phase_label") or ""
+            if show_phase and _phase and "无明确阶段" not in _phase:
+                return f"威科夫：{_phase} · 暂无事件 · 中性"
             return "威科夫：暂无事件 · 中性"
         return "威科夫：数据不足 · 中性"
 
     # 外部 fusion direction 可覆盖展示方向（保持与融合层一致）
     if direction is not None:
         d = int(direction)
+    # phase 前缀（如 show_phase=True 且 phase 非 none）
+    phase_prefix = ""
+    if show_phase:
+        _phase = wyk.get("phase_label") or ""
+        if _phase and "无明确阶段" not in _phase:
+            phase_prefix = f"{_phase} · "
     # 句式：威科夫：{判断} · {偏多|偏空|中性}（说明）
-    return f"威科夫：{main} · {_dir_label(d)}（{note}）"
+    return f"威科夫：{phase_prefix}{main} · {_dir_label(d)}（{note}）"
