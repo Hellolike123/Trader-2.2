@@ -245,11 +245,11 @@ def build_vpf_signal(
             fund_reason = f"主力连{con_out}日净流出"
         elif con_in >= 3:
             fund_dir = 1
-            fund_conf = 0.65
+            fund_conf = 0.75
             fund_reason = f"主力连{con_in}日净流入"
         elif con_in >= 2:
             fund_dir = 1
-            fund_conf = 0.45
+            fund_conf = 0.55
             fund_reason = f"主力连{con_in}日净流入"
         elif cum5_f <= -500:
             # 资金强度比归一化：相对均成交额判断信号强度
@@ -259,7 +259,7 @@ def build_vpf_signal(
                 if _strength >= 0.01:
                     fund_conf = 0.55  # 强信号：5日累计 >= 均成交额1%
                 elif _strength >= 0.003:
-                    fund_conf = 0.4   # 中信号
+                    fund_conf = 0.40   # 中信号
                 else:
                     fund_conf = 0.25  # 弱信号：相对市值太小
                 fund_reason = f"近5日主力累计流出{cum5_f:.0f}万（占比{_strength:.2%}）"
@@ -271,9 +271,9 @@ def build_vpf_signal(
             if avg_daily_turnover_wan and avg_daily_turnover_wan > 0:
                 _strength = abs(cum5_f) / avg_daily_turnover_wan
                 if _strength >= 0.01:
-                    fund_conf = 0.35  # 强信号（多头置信度天然偏低）
+                    fund_conf = 0.55  # 强信号：对称处理
                 elif _strength >= 0.003:
-                    fund_conf = 0.25
+                    fund_conf = 0.40
                 else:
                     fund_conf = 0.15
                 fund_reason = f"近5日主力累计流入{cum5_f:.0f}万（占比{_strength:.2%}）"
@@ -299,29 +299,40 @@ def build_vpf_signal(
         fund_reason = "资金数据过期"
         fund_quality = "missing"
 
-    # ── 合成 ──
-    # 资金强空优先
-    if fund_quality == "full" and fund_dir < 0 and fund_conf >= 0.55:
-        direction = -1
+    # ── 合成（多空对称）──
+    # 资金强信号（conf>=0.55）优先，多空同权
+    if fund_quality == "full" and fund_conf >= 0.55:
+        direction = fund_dir
         confidence = max(fund_conf, vp_conf * 0.5)
         parts = [fund_reason]
-        if vp_dir < 0 and vp_reason:
+        if vp_dir == fund_dir and vp_reason:
             parts.append(vp_reason)
+        elif vp_dir != 0 and vp_dir != fund_dir:
+            parts.append(f"价量{vp_reason or '分歧'}")
         reason = "；".join(parts)
-    elif fund_quality == "full" and fund_dir > 0 and vp_dir >= 0:
-        # 资金多 + 价量不空 → 偏多
-        direction = 1
-        confidence = min(0.7, 0.35 + fund_conf * 0.4)
-        if vp_dir == 0:
-            reason = f"{fund_reason}·量价正常"
+    elif fund_quality == "full" and fund_dir != 0:
+        # 资金中等信号 + 价量同向 → 合成；分歧 → 价量优先
+        if fund_dir == vp_dir:
+            direction = fund_dir
+            confidence = _clip_conf((fund_conf + vp_conf) * 0.5)
+            parts = [fund_reason]
+            if vp_reason:
+                parts.append(vp_reason)
+            reason = "；".join(parts)
+        elif vp_dir != 0:
+            # 分歧取高置信度方
+            if vp_conf >= fund_conf:
+                direction = vp_dir
+                confidence = _clip_conf(vp_conf)
+                reason = vp_reason or "价量信号"
+            else:
+                direction = fund_dir
+                confidence = _clip_conf(fund_conf)
+                reason = fund_reason
         else:
-            reason = f"{fund_reason}"
-            confidence = min(0.75, confidence + 0.05)
-    elif fund_quality == "full" and fund_dir > 0 and vp_dir < 0:
-        # 打架：偏空或中性，资金优先否决乐观
-        direction = 0
-        confidence = 0.35
-        reason = f"{fund_reason}但{vp_reason or '价量偏空'}，观望"
+            direction = fund_dir
+            confidence = _clip_conf(fund_conf * 0.8)
+            reason = f"{fund_reason}·量价中性"
     elif fund_quality == "missing":
         # 仅价量，打折；reason 仍用价量快照（含量比），并标明资金未取到
         base = vp_reason or ("价量中性" if vp_dir == 0 else "价量信号")
