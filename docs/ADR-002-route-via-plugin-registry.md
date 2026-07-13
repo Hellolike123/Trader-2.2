@@ -21,16 +21,12 @@
 
 陷阱 2 是真正危险的点：**golden 守门测试无法发现日线 chan 的等价性退化**，会变成无人察觉的静默回归。
 
-## Decision（决策：推迟）
+## Decision（执行决策）
 
-**本次不实现 ADR-002。** 理由：
+ADR-002 按安全路径完整落地。原"推迟"决策在接口扩展+等价性闸门就位后撤销，
+实际实现见下方"已落地实现"章节。
 
-1. 当前 golden 测试只能验证"形状 + 范围 + 中线 key 存在 + 5 策略被调用"，
-   **无法验证日线 chan 结果逐字段等价**——而陷阱 2 恰恰落在 golden 的盲区。
-2. 用户授权条款含"每个任务完成后需简要汇报、**遇到阻塞/无法验证需立即反馈**"。
-   ADR-002 属于"无法在不引入静默回归风险的前提下安全验证"的任务，故按该条款停下、先文档化。
-
-## 安全实现路径（待执行）
+### 安全实现路径（执行步骤，与下文"已落地实现"对应）
 
 要做到**行为等价**的 ADR-002，必须先补插件接口，使 `analyze_all` 能 1:1 复刻 `build_report` 当前的 5 次调用：
 
@@ -44,11 +40,12 @@
    对比 ADR-002 前后 `fusion.weighted_score` / 各策略 `direction` / `confidence` / 中线 key 的**精确值**（而非范围）。
    只有逐字段一致（或差异 < 浮点 epsilon）才允许通过。
 
-## Consequences（若执行）
+## Consequences（执行后果）
 
 - ✅ 插件成为真实组合点，新增指标走 `plugins/` 即被 `build_report` 自动纳入
 - ✅ 消除 `build_report` 内联策略调用，符合"可组合"架构意图
-- ⚠️ 需先扩展插件接口 + 加中线插件，工作量约 2–3h，且必须配逐字段等价验证
+- ✅ 等价性闸门（逐字段 diff）堵住了 golden 范围断言抓不到的日线 chan 等价性退化
+- ⚠️ 中线插件未注册全局（最小爆炸半径），`fusion_core`/`final_pool`/`review` 的 `analyze_all` 调用拿不到中线——有意隔离，后续如有需要可单独注册全局 midline 插件
 
 ## 与 ADR-001/003 的关系
 
@@ -96,6 +93,5 @@ ADR-001（真库）+ ADR-003（逻辑进 `report_builder`）已为 ADR-002 铺�
   调用）**39 passed**，无回归。
 
 ### 未做 / 后续
-- 部署副本（`~/.hermes` / `~/.workbuddy`）**未**重打包——分支仍在重构中，待 promote 时
-  由 `pack_all.py` 从仓库统一再生，避免把半成品推入运行中的 agent。
-- `report_builder.py` 仍 2881 行，ADR-003 文档建议的 domain/presentation 再拆仍为后续项。
+- 部署副本（`~/.hermes` / `~/.workbuddy`）已随 promote 由 `pack_all.py` 从仓库统一再生
+- `report_builder` 的 domain/presentation 再拆已由 ADR-003b 完成（见 `report_presentation.py`）

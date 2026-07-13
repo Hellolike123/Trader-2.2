@@ -17,8 +17,8 @@
 
 ## 决策框架（勿破坏）
 
-- 融合层三评委：chan / momentum / wyckoff + HMM regime 动态权重（`get_regime_weights` + `_apply_main_force_weights`）。新增指标**不要**当第 4 个固定权重评委。
-- 展示型指标（如 Supertrend/VWAP）走 `plugins/` + `display_only=True`，`merge_decisions_from_plugins` 只把 chan/mom/wyk 喂融合 → 天然污染不到 `weighted_score`。
+- 融合层三评委：chan(缠论) / momentum(动能) / vpf(价量资金) + HMM regime 动态权重（`get_regime_weights` + `_apply_main_force_weights`）。注意：**短线第三评委是 vpf，非 wyckoff**——威科夫已移至中线周线分析，不参与短线加权。新增指标**不要**当第 4 个固定权重评委。
+- 展示型指标（如 Supertrend/VWAP）走 `plugins/` + `display_only=True`，`merge_decisions_from_plugins` 只把 chan/mom/vpf 喂融合 → 天然污染不到 `weighted_score`。
 - 止损以 `structure_core` ATR trailing + `stage_positioning` 三者取高（只紧不松）为准，新增趋势带只标「参考」不替换。
 
 ## 测试
@@ -35,3 +35,9 @@
 - 拆大文件（如 report_builder 2870 行）用 **AST 精确提取**（`ast.get_source_segment` 按函数名分类），**不要**用 sed/行号区间切片——行号易错（混合带、函数边界偏移）。
 - 等价性闸门模式：分裂前后各跑一次全离线确定性 mock 桩（覆盖所有网络泄漏点：set_provider/TencentFetcher/get_env_for_skill/fetch_fund_flow_cached/tushare_client.get_client/chip_data.get_cyq_perf），日期掩码后 diff/md5，证明行为零回归。
 - 测试桩内**所有全局改写必须走 `monkeypatch.setattr`**（自动还原），否则污染后续测试（如 fetcher 全局状态测试）。裸赋值 `_fetchers.TencentFetcher = MockFetcher` 不还原会踩坑。
+
+## CI 门禁（pre-push，2026-07-13 落地）
+- **机制**：`scripts/run-gate-tests.sh` 锁定 7 个离线/无凭证/确定性测试（基线 68 passed / ~63s），由版本化 `scripts/git-hooks/pre-push` 在每次 `git push` 前调用，红则拦截。远程是 **Gitee**（非 GitHub），故用本地 hook 而非 GitHub Actions；Gitee Go 需网页配。
+- **启用**：`git config core.hooksPath scripts/git-hooks`（各机 clone 后需设一次，git 不自动应用）。`main` 已含门禁文件；切回 main 不会因缺文件报错。
+- **扩展**：新增离线测试显式加进 `run-gate-tests.sh` 的 `TESTS` 数组；**勿把网络/凭证测试塞进门禁**（会永久红、毁掉门禁可信度）。
+- **Python**：默认用本机 venv `/Users/like/.workbuddy/binaries/python/envs/default/bin/python`；CI runner 用 `TRADER_CI_PYTHON` 覆盖。`PYTHONPATH=02-共享模块-shared:01-功能包-packages/trader/scripts`（shared 必须在前）。

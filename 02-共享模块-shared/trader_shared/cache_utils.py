@@ -395,16 +395,6 @@ def warm_pool_cache() -> dict[str, Any]:
     if not targets:
         return {"total": 0, "success": 0, "failed": 0, "skipped": 0, "errors": []}
 
-    # Ensure paths
-    root = Path(__file__).resolve().parents[2]
-    for p in (
-        root / "01-行情数据-market-data",
-        root / "02-候选逻辑-candidate",
-        root / "scripts",
-    ):
-        if p.exists() and str(p) not in sys.path:
-            sys.path.append(str(p))
-
     try:
         from trader_shared.data_provider import get_provider
         from trader_shared.config import LOOKBACK_DAYS
