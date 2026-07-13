@@ -137,7 +137,7 @@ def test_breakout_entry_is_current():
         current=102.0,
     )
     assert r["entry"] == 102.0
-    assert r["take"] == 100.0  # 箱体上沿作目标
+    assert r["take"] == 110.0  # 向上突破 → 关键压力位(swing_sell) > 箱体顶
 
 
 def test_box_inside_entry_bottom():

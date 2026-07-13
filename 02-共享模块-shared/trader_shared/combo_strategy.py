@@ -288,9 +288,41 @@ def _synth_stop(box: Optional[dict], key: Optional[dict]) -> Optional[float]:
 
 
 def _synth_take(box: Optional[dict], key: Optional[dict]) -> Optional[float]:
-    """合成目标：优先箱体上沿（清晰目标），回退关键价卖点。"""
-    if box and box.get("found") and box.get("top"):
-        return _r2(box["top"])
+    """合成目标：方向感知的止盈价。
+
+    向上突破（up_confirmed/up_pending）：下一个关键压力位 > 箱体顶，
+    若无则用箱体顶 + 箱体高度（测量目标）。
+    向下突破（down_*）：箱体底 = 跌破最小目标。
+    箱体内：箱体顶作为常规高抛目标。
+    无箱体：回退关键价卖点。
+    """
+    box_found = bool(box and box.get("found"))
+    box_state = str(box.get("state") or "") if box else ""
+
+    if box_found:
+        box_top = box.get("top")
+        box_bot = box.get("bottom")
+
+        # 向上突破：目标 = 关键压力位 > 箱体顶，或测量目标
+        if box_state in ("up_confirmed", "up_pending") and box_top:
+            if key:
+                for f in ("swing_sell", "far_sell", "short_sell_high"):
+                    v = key.get(f)
+                    if v and v > box_top:
+                        return _r2(v)
+            # 测量目标：箱体顶 + 箱体高度
+            if box_bot and box_top > box_bot:
+                return _r2(box_top + (box_top - box_bot))
+            return _r2(box_top)
+
+        # 向下突破：目标 = 箱体底
+        if box_state in ("down_confirmed", "down_pending") and box_bot:
+            return _r2(box_bot)
+
+        # 箱体内：箱体顶（常规高抛位）
+        if box_top:
+            return _r2(box_top)
+
     if key:
         for f in ("swing_sell", "far_sell", "short_sell_high"):
             v = key.get(f)
