@@ -428,13 +428,20 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     # 中线关键价（按价格升序排列）
     lines.append("")
-    lines.append("  关键价（中线）")
 
-    # 结构质量展示
+    # 标题行：嵌入结构质量
     _mid_q = str(mid_key_prices.get("quality") or "")
-    if _mid_q in ("full", "partial"):
-        _q_label = "有笔段结构" if _mid_q == "full" else "纯摆动"
-        lines.append(f"    结构质量：{_q_label}")
+    _q_label = ""
+    if _mid_q == "full":
+        _q_label = " ｜ 结构 full"
+    elif _mid_q == "partial":
+        _q_label = " ｜ 结构 partial"
+    lines.append(f"  关键价（中线）{_q_label}")
+
+    # 笔段/摆动说明 + 百分比提示
+    _q_hint = "笔段结构" if _mid_q == "full" else ("纯摆动" if _mid_q == "partial" else "")
+    if _q_hint:
+        lines.append(f"    {_q_hint}，各价位距现价 %")
 
     # 收集中线价位，按价格排序
     _mid_items: list[tuple[float, str]] = []
@@ -475,8 +482,27 @@ def render_short_midline(r: dict[str, Any]) -> str:
         if not _ins:
             _mid_items.append((current, f"🌟 现价 {current:.2f}"))
 
-    for _, text in _mid_items:
-        lines.append(f"    {text}")
+    # 输出带 % 距离标注
+    for _p, _text in _mid_items:
+        if "现价" in _text:
+            lines.append(f"    {_text}")
+        else:
+            _dist_pct = (_p - current) / current * 100 if current > 0 else 0.0
+            _dist_str = f"{_dist_pct:+.0f}%" if abs(_dist_pct) >= 1 else f"{_dist_pct:+.1f}%"
+            # 如果是区间（如 61.18-72.60），计算上下界的 %
+            _range_m = re.match(r"([\d.]+)-([\d.]+)\s", _text)
+            if _range_m:
+                _hi = float(_range_m.group(2))
+                _hi_pct = (_hi - current) / current * 100 if current > 0 else 0.0
+                _hi_str = f"{_hi_pct:+.0f}%" if abs(_hi_pct) >= 1 else f"{_hi_pct:+.1f}%"
+                _dist_str = f"{_dist_str}~{_hi_str}"
+            # 在首个（前插入 % 距离
+            _insert_at = _text.find("（")
+            if _insert_at > 0:
+                _text = _text[:_insert_at] + f"（{_dist_str} · " + _text[_insert_at + 1:]
+            else:
+                _text = f"{_text}（{_dist_str}）"
+            lines.append(f"    {_text}")
     if not _mid_items:
         lines.append("    数据不足")
 

@@ -364,12 +364,9 @@ def build_midline_levels(
         if life_line is not None and current is not None and current > 0:
             _dist_pct = abs(current - life_line) / current
             if _dist_pct > 0.30:
-                # 生命线离现价超过30%，太远无实战意义，不显示
-                line_life = ""
+                line_life = f"生命线 {life_line:.2f}（破则中线转弱·远期参考）"
             else:
                 line_life = f"生命线 {life_line:.2f}（破则中线转弱）"
-        elif life_line is not None:
-            line_life = f"生命线 {life_line:.2f}（破则中线转弱）"
 
         line_pullback = ""
         if pullback_low is not None and pullback_high is not None:
