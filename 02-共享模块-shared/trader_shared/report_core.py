@@ -136,7 +136,29 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if momentum:
         meta_parts.append(f"综合动能 {momentum}")
     if regime:
-        meta_parts.append(f"大盘 {regime}")
+        _market_env_data = r.get("market_env") or {}
+        _freshness = str(_market_env_data.get("data_freshness") or "").strip()
+        _mkt_chg = _market_env_data.get("change_pct")
+        _bars_mkt = _market_env_data.get("bars") or []
+        _last_date = str(_bars_mkt[-1].get("date") if _bars_mkt else "").strip()
+        _today_str = __import__("datetime").datetime.now().strftime("%Y-%m-%d")
+        
+        _regime_display = regime
+        # data_freshness=stale 分两种情况：收盘后（最后一天=今天） vs 真过期
+        if _freshness == "stale":
+            if _last_date == _today_str:
+                # 收盘后，数据是今天的 → 正常显示，加涨跌幅
+                if _mkt_chg is not None:
+                    _regime_display = f"{regime} {_mkt_chg:+.1f}%"
+            else:
+                # 真过期（最后数据不是今天）
+                _regime_display = f"⚠️数据暂停于{_last_date[-5:]}"
+                if _mkt_chg is not None:
+                    _regime_display += f"({_mkt_chg:+.1f}%)"
+        elif _mkt_chg is not None:
+            # 盘中实时，加涨跌幅
+            _regime_display = f"{regime} {_mkt_chg:+.1f}%"
+        meta_parts.append(f"大盘 {_regime_display}")
     if meta_parts:
         lines.append(f"  {' ｜ '.join(meta_parts)}")
 

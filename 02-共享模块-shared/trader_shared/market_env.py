@@ -51,7 +51,11 @@ def _fetch_index_data() -> dict[str, Any]:
             url,
             headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.qq.com"},
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        # 腾讯 API 直连（跳过系统代理，解决代理挂掉导致行情停滞的问题）
+        import urllib.request as _ur
+        _handler = _ur.ProxyHandler({})
+        _opener = _ur.build_opener(_handler)
+        with _opener.open(req, timeout=10) as resp:
             raw = resp.read().decode("gbk")
     except Exception:
         return {}
@@ -250,6 +254,12 @@ def assess() -> dict[str, Any]:
             level = "偏弱"
         elif hmm_regime_en == "bull" and level == "偏弱":
             level = "正常"
+
+    # 日涨跌幅兜底：单日急跌 >=3% 强制降级
+    if change_pct <= -3.0 and level == "正常":
+        level = "偏弱"
+    elif change_pct <= -5.0 and level in ("正常", "偏弱"):
+        level = "很差"
 
     note = f"中证1000 MA5/MA20 {'>' if mid_term=='up' else '<'} 趋势{'偏多' if mid_term=='up' else '偏空'} 今日{change_pct:+.1f}%"
 
