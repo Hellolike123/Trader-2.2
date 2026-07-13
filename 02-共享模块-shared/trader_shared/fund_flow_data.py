@@ -43,6 +43,7 @@ _EM_HEADERS = {
 
 # Session 复用 + 对 429/5xx 轻量重试；连接失败不无限拖
 _EM_SESSION = requests.Session()
+_EM_SESSION.trust_env = False  # 跳过系统代理直连
 _EM_SESSION.headers.update(_EM_HEADERS)
 try:
     _em_retry = Retry(
