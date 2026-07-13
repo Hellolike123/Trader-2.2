@@ -3,7 +3,7 @@
 锁定 synthesize_midline_verdict 的合成矩阵、bias、兜底与注记。
 """
 import pytest
-from trader_shared.conclusion_block import synthesize_midline_verdict
+from trader_shared.conclusion_block import synthesize_midline_verdict, chanlun_midline_dir
 
 
 def _wyck(phase, **kw):
@@ -81,3 +81,31 @@ def test_independent_labels_preserved():
     assert "积累期 C" in r["wyck_label"]
     assert "盘整趋势" in r["chan_label"]
     assert r["wyck_dir"] == 1 and r["chan_dir"] == 0
+
+
+# ── P2 缠论低置信跳过生命线 ─────────────────────────────────
+
+
+def test_chanlun_midline_dir_low_conf_neutral():
+    """structure_confidence=low 时 chanlun_midline_dir 返回 0，
+    即使结构类型看涨（不靠兜底翻转方向）。"""
+    chan = _chan("上涨趋势", "low", {}, buy_points=[], sell_points=[])
+    assert chanlun_midline_dir(chan) == 0
+
+
+def test_chanlun_midline_dir_low_conf_with_buy_point():
+    """低置信但有 conf>=2 的买卖点 → 仍尊重买卖点方向（buy点门先判）。"""
+    chan = _chan("下跌趋势", "low", {}, buy_points=[{"type": "二类买", "confidence": 1}], sell_points=[])
+    # conf=1 < 2 → 不触发 buy 点门；低置信 → 中性
+    assert chanlun_midline_dir(chan) == 0
+
+
+def test_low_chan_conf_skips_lifeline_in_verdict():
+    """缠论低置信 + 威科夫看多 → 威科夫取胜但置信降低。"""
+    w = _wyck("accumulation_c", spring_signal=True)
+    c = _chan("下跌趋势", "low", {}, buy_points=[], sell_points=[])
+    r = synthesize_midline_verdict(c, w, fallback_stage="震荡")
+    # 威科夫 bull → 结果 bull，但缠论低置信且中性 → 降置信
+    assert r["bias"] == "bull"
+    assert r["confidence"] in ("low", "mid")
+    assert r["chan_dir"] == 0

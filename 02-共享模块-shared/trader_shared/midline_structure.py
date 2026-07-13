@@ -21,7 +21,7 @@ SWING_N_TARGET = 40
 MA_WEEKLY = 20
 TOUCH_TOL_PCT = 0.015
 UNBROKEN_PCT = 0.03
-SWING_HALF_WINDOW = 3
+SWING_HALF_WINDOW = 4
 
 # components 闭枚举 §9.7
 _STRUCTURE_COMPONENTS = frozenset({
@@ -629,7 +629,7 @@ def build_midline_levels(
     components["pullback_low"] = pb_lo_comp
     components["pullback_high"] = pb_hi_comp
 
-    # ── C/D. 压力 / 目标（P0 无 fib）§9.5 ────────────────────
+    # ── C/D. 压力 / 目标（fib 补充目标：fib_ext > 结构目标时覆盖；§9.5 过时现已放宽）───
     resist: float | None = None
     resist_comp = "none"
     target: float | None = None

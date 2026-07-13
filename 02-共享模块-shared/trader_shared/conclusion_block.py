@@ -198,6 +198,9 @@ def chanlun_midline_dir(chanlun_midline: Any) -> int:
         return 1
     if divergence.get("bottom_divergence"):
         return 1
+    # ── P2 缠论低置信跳过生命线：structure_confidence=low 时不靠兜底翻转方向 ──
+    if str(chan.get("structure_confidence") or "").lower() == "low":
+        return 0
     if "上涨" in trend_label or "多" in trend_label:
         return 1
     if "下跌" in trend_label or "空" in trend_label:
