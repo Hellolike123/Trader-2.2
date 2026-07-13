@@ -430,6 +430,12 @@ def render_short_midline(r: dict[str, Any]) -> str:
     lines.append("")
     lines.append("  关键价（中线）")
 
+    # 结构质量展示
+    _mid_q = str(mid_key_prices.get("quality") or "")
+    if _mid_q in ("full", "partial"):
+        _q_label = "有笔段结构" if _mid_q == "full" else "纯摆动"
+        lines.append(f"    结构质量：{_q_label}")
+
     # 收集中线价位，按价格排序
     _mid_items: list[tuple[float, str]] = []
     _mid_fields = [

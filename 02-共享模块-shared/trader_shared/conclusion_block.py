@@ -190,11 +190,11 @@ def chanlun_midline_dir(chanlun_midline: Any) -> int:
     trend_label = str(chan.get("trend_label") or "")
     st = str(chan.get("structure_type") or "")
 
-    if any(isinstance(p, dict) and p.get("type") in ("一类卖", "二类卖", "三类卖") for p in sell_points):
+    if any(isinstance(p, dict) and p.get("type") in ("一类卖", "二类卖", "三类卖") and p.get("confidence", 0) >= 2 for p in sell_points):
         return -1
     if divergence.get("top_divergence"):
         return -1
-    if any(isinstance(p, dict) and p.get("type") in ("一类买", "二类买", "三类买") for p in buy_points):
+    if any(isinstance(p, dict) and p.get("type") in ("一类买", "二类买", "三类买") and p.get("confidence", 0) >= 2 for p in buy_points):
         return 1
     if divergence.get("bottom_divergence"):
         return 1

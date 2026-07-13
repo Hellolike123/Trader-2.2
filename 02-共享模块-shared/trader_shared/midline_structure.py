@@ -452,6 +452,11 @@ def build_midline_levels(
         if current is not None and life_line is not None and current < life_line:
             notes_parts.append("already_below_life")
 
+        # 中线追高风险判断
+        _mid_risk = max(0.0, current - life_line) if (current is not None and life_line is not None) else 0.0
+        _mid_reward = max(0.0, target - current) if (current is not None and target is not None) else 0.0
+        _mid_chase = bool(_mid_risk > 0 and _mid_reward > _mid_risk * 1.2)
+
         return {
             "life_line": life_line,
             "pullback_low": pullback_low,
@@ -471,6 +476,10 @@ def build_midline_levels(
             "quality": quality,
             "components": components,
             "source": source,
+            # 中线追高风险判断（类比日线 key_prices.chase_ok）
+            "chase_ok": _mid_chase,
+            "risk_chase": _round2(_mid_risk) if _mid_risk > 0 else None,
+            "reward_chase": _round2(_mid_reward) if _mid_reward > 0 else None,
         }
 
     # ── insufficient：周线缺失 / 过短 ──────────────────────────

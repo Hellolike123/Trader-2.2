@@ -1184,17 +1184,17 @@ def _scan_for_signal(
     return False
 
 
-def _detect_phase(bars: list[dict], signals: dict[str, Any]) -> dict[str, Any]:
+def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: int | None = None) -> dict[str, Any]:
     """基于信号序列推断威科夫阶段（积累 Phase A-E / 派发 Phase A'-E'）。
 
-    真正扫描 WYCKOFF_PHASE_LOOKBACK 根 K 线的历史窗口，检测早期信号（BC/UT/AR）
-    是否在较宽时间窗内出现过，再结合当前窗口的后期信号（Spring/SOS/LPS）推断阶段。
+    Args:
+        _phase_lookback: 覆盖 WYCKOFF_PHASE_LOOKBACK（用于周线缩比）
 
     Returns:
         {"phase": str, "phase_label": str, "phase_confidence_delta": float}
         phase_confidence_delta: 阶段上下文对当前信号置信度的修正
     """
-    lookback = min(WYCKOFF_PHASE_LOOKBACK, len(bars))
+    lookback = min(_phase_lookback if _phase_lookback is not None else WYCKOFF_PHASE_LOOKBACK, len(bars))
     wide_bars = bars[-lookback:]
 
     # 当前 bar 信号优先（避免 scan step 漏检末尾），再滑动扫描历史窗口
@@ -1410,7 +1410,7 @@ def _transition_phase(
 
 
 # ── 威科夫综合分析入口 ──
-def wyckoff_analysis(bars: list[dict], symbol: str = "") -> dict:
+def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily") -> dict:
     if len(bars) < WYCKOFF_MIN_BARS:
         return {
             "spring_signal": False, "spring_reason": "数据不足", "spring_price": None,
@@ -1427,7 +1427,10 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "") -> dict:
         }
 
     # P2-2: 动态支撑位计算（多源集成）— 仅用于 Spring 检测
-    dynamic_support = _compute_dynamic_support(bars, lookback=10)
+    _weekly_scale = 0.2 if timeframe == "weekly" else 1.0
+    _phase_lb = max(10, int(WYCKOFF_PHASE_LOOKBACK * _weekly_scale))
+    _support_lb = max(3, int(10 * _weekly_scale))
+    dynamic_support = _compute_dynamic_support(bars, lookback=_support_lb)
 
     spring = _detect_spring(bars, _support=dynamic_support, symbol=symbol)
     upthrust = _detect_upthrust(bars)
@@ -1455,7 +1458,7 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "") -> dict:
         "compression_signal": compression["compression_signal"],
         "trend_pullback_signal": trend_pullback["trend_pullback_signal"],
     }
-    phase = _detect_phase(bars, signals_dict)
+    phase = _detect_phase(bars, signals_dict, _phase_lookback=_phase_lb)
 
     # B: 跨日持久化状态机 — 加载旧状态、过渡、存储
     old_state = _load_phase_state(symbol)
@@ -1593,7 +1596,7 @@ def wyckoff_strategy_midline(
                 "wyckoff_summary": "K线不足，无法做中线威科夫",
             }
         }
-    result = wyckoff_analysis(bars, symbol=symbol)
+    result = wyckoff_analysis(bars, symbol=symbol, timeframe=tf)
     if isinstance(result, dict):
         result = {**result, "timeframe": tf}
     return {"wyckoff": result}
