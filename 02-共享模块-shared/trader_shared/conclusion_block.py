@@ -295,6 +295,93 @@ def _midline_view_from_theory(
     return "中线观察"
 
 
+def synthesize_midline_verdict(
+    chanlun_midline: Any = None,
+    wyckoff_midline: Any = None,
+    fallback_stage: str = "",
+) -> dict:
+    """中线定论：威科夫中线 + 缠论中线 各自独立判定后合成（用户要求）。
+
+    两源各自负责自己的分析与输出（report_core 已分别渲染威科夫/缠论段），
+    本函数只做最后一步：把两者方向(+1/0/-1) × 置信 合成一个阶段定论。
+
+    合成矩阵（wyck_dir, chan_dir）：
+      (1,1) 主升          (1,0) 蓄势          (1,-1) 蓄势·警惕转弱
+      (0,1) 主升初期       (0,-1) 转弱         (-1,0) 派发
+      (-1,1) 派发·警惕      (-1,-1) 衰退        (0,0) 回退位置分类
+
+    Returns:
+        {"stage","bias","confidence","source","note","wyck_label","chan_label","wyck_dir","chan_dir"}
+    """
+    chan_dir = chanlun_midline_dir(chanlun_midline)      # +1/0/-1
+    wyck_bias = wyckoff_midline_bias(wyckoff_midline)    # strong_bull/strong_bear/neutral
+    wyck_dir = {"strong_bull": 1, "strong_bear": -1, "neutral": 0}.get(wyck_bias, 0)
+
+    # ── 两源各自独立输出（展示用，不参与合成）──
+    chan = _unwrap_chan(chanlun_midline)
+    w = _unwrap_wyck(wyckoff_midline)
+    _st = str(chan.get("structure_type") or "无结构") if isinstance(chan, dict) else "无结构"
+    _conf = str(chan.get("structure_confidence") or "low") if isinstance(chan, dict) else "low"
+    _div = (chan.get("divergence") or {}) if isinstance(chan, dict) else {}
+    _div_txt = "顶背驰" if _div.get("top_divergence") else ("底背驰" if _div.get("bottom_divergence") else "无背驰")
+    chan_label = f"{_st}·置信{_conf}·{_div_txt}"
+    wyck_label = str(w.get("phase_label") or "无明确阶段") if isinstance(w, dict) else "无明确阶段"
+
+    # ── 阶段词汇映射 ──
+    _PHASE_SHORT = {
+        "accumulation_a": "吸筹", "accumulation_b": "吸筹",
+        "accumulation_c": "吸筹", "accumulation_d": "吸筹",
+        "distribution_a": "派发", "distribution_c": "派发", "none": "无阶段",
+    }
+    _wp = str(w.get("phase") or "none") if isinstance(w, dict) else "none"
+    wyck_phase_short = _PHASE_SHORT.get(_wp, "无阶段")
+    _CHAN_WORD = {1: "上涨", 0: "盘整", -1: "下跌"}
+
+    # ── 合成矩阵 ──
+    key = (wyck_dir, chan_dir)
+    if key == (1, 1):
+        stage, bias, confidence = "主升", "bull", "high"
+    elif key == (1, 0):
+        stage, bias, confidence = "蓄势", "bull", "mid"
+    elif key == (1, -1):
+        stage, bias, confidence = "蓄势·警惕转弱", "bull", "low"
+    elif key == (0, 1):
+        stage, bias, confidence = "主升初期", "bull", "mid"
+    elif key == (0, -1):
+        stage, bias, confidence = "转弱", "bear", "mid"
+    elif key == (-1, 1):
+        stage, bias, confidence = "派发·警惕", "bear", "low"
+    elif key == (-1, 0):
+        stage, bias, confidence = "派发", "bear", "mid"
+    elif key == (-1, -1):
+        stage, bias, confidence = "衰退", "bear", "high"
+    else:  # (0, 0) 双源皆无明确方向
+        stage = fallback_stage or "震荡"
+        bias, confidence = "neutral", "low"
+
+    source = "fallback_position" if key == (0, 0) else "wyckoff+chanlun"
+
+    # 缠论低置信时共振档降一级（更保守）
+    if confidence == "high" and _conf == "low":
+        confidence = "mid"
+
+    # ── 合成注记 ──
+    if source == "fallback_position":
+        note = f"威科夫{wyck_phase_short} × 缠论{_CHAN_WORD[chan_dir]} → 双源无明确方向，回退位置分类（{stage}）"
+    elif confidence == "low":
+        note = f"威科夫{wyck_phase_short} × 缠论{_CHAN_WORD[chan_dir]} → 信号冲突，降置信"
+    elif key in ((1, 1), (-1, -1)):
+        note = f"威科夫{wyck_phase_short} × 缠论{_CHAN_WORD[chan_dir]} → 共振"
+    else:
+        note = f"威科夫{wyck_phase_short}领先 × 缠论{_CHAN_WORD[chan_dir]}"
+
+    return {
+        "stage": stage, "bias": bias, "confidence": confidence, "source": source,
+        "note": note, "wyck_label": wyck_label, "chan_label": chan_label,
+        "wyck_dir": wyck_dir, "chan_dir": chan_dir,
+    }
+
+
 def _assert_no_stage_words(text: str) -> str:
     """防御：看法不得含四阶段词。"""
     if _STAGE_WORDS_RE.search(text or ""):

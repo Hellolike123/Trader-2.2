@@ -1292,13 +1292,22 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             _regime = str((report_fusion or {}).get("regime") or "")
 
         # 中线看法文案（与 conclusion 同源）供纪律：偏空则禁止以短线买点主开仓
-        from trader_shared.conclusion_block import _midline_view_from_theory
+        from trader_shared.conclusion_block import _midline_view_from_theory, synthesize_midline_verdict
         _mid_view_txt = _midline_view_from_theory(
             chanlun_midline=report.get("chanlun_midline"),
             wyckoff_midline=report.get("wyckoff_midline"),
             weekly_frame=report.get("weekly_frame"),
             major_stage=stage_result["major_stage"],
         )
+        # 中线定论：威科夫中线 + 缠论中线 各自独立判定后合成（L586 的 position 分类作兜底）
+        _midline_verdict = synthesize_midline_verdict(
+            report.get("chanlun_midline"),
+            report.get("wyckoff_midline"),
+            fallback_stage=stage,
+        )
+        report["midline_verdict"] = _midline_verdict
+        report["midline_stage"] = _midline_verdict["stage"]
+        report["midline_bias"] = _midline_verdict["bias"]
         _chan_u = report.get("chanlun_midline") or {}
         if isinstance(_chan_u, dict) and "chanlun" in _chan_u:
             _chan_inner = _chan_u.get("chanlun") or {}
@@ -1409,10 +1418,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         # 中短仲裁：中线偏多时削弱短线的全仓止损
         # 场景：大盘很差→-0.5默认偏斜→"空仓/止损"，但中线周线显示独立积累行情
         # → 降级为"减1/3"，不平掉中线看好的仓位。
-        _mid_positive = any(
-            kw in (_mid_view_txt or "")
-            for kw in ("偏多", "可跟踪", "未坏", "积累", "看涨")
-        )
+        # 结构化触发：读 synthesize_midline_verdict 产出的 midline_bias（bull/bear/neutral），
+        # 不再解析阶段行文字，避免换词后静默失效。
+        _mid_positive = report.get("midline_bias") == "bull"
         if _mid_positive and _disc_action in ("空仓/止损", "空仓 (大盘很差, 一票否决)"):
             _disc_action = "减1/3 (中线偏多)"
             # 同步收紧到 discipline 输出（下游消费 _disc_action）
@@ -1499,6 +1507,10 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         )
         report["conclusion"] = conclusion
         report["daily_ruling"] = daily_ruling
+        # 中线定论：把合成阶段写入阶段行（覆盖 build_conclusion_block 的兜底），
+        # 并附双源合成注记（report_core 渲染为「定论：」行）。
+        conclusion["stage_line"] = _midline_verdict["stage"]
+        conclusion["midline_verdict_note"] = _midline_verdict["note"]
     except Exception as _sm_exc:
         # 短中线组装失败不阻断主报告；保留原字段
         report.setdefault("key_prices", {})

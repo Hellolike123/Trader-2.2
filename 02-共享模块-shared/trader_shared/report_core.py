@@ -304,6 +304,15 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _stage_line = f"{_stage_line} · {_tag}（{_short}）"
     lines.append(f"  阶段：{_stage_line}")
 
+    # 定论：威科夫中线 + 缠论中线 合成注记（各自独立输出已在下方威科夫/缠论段渲染）
+    _midline_note = str(
+        conclusion.get("midline_verdict_note")
+        or (r.get("midline_verdict") or {}).get("note")
+        or ""
+    ).strip()
+    if _midline_note:
+        lines.append(f"  定论：{_midline_note}")
+
     # 仓位衔接：结构看好但仓位为0时，加桥接说明
     _suggested_pct = r.get("suggested_pct")
     try:
