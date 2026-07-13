@@ -194,7 +194,10 @@ def _fetch_fund_flow_tushare(symbol: str, days: int = 30) -> list[dict[str, Any]
         if len(trade_date) == 8:
             trade_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
         # Tushare amounts are in 万元 already for moneyflow API
-        net_mf = r.get("net_mf_amount", 0) or 0
+        # 实测 net_mf_amount 字段不准，用成分字段自己算
+        _buy_main = (r.get("buy_elg_amount") or 0) + (r.get("buy_lg_amount") or 0)
+        _sell_main = (r.get("sell_elg_amount") or 0) + (r.get("sell_lg_amount") or 0)
+        net_mf = _buy_main - _sell_main
         result.append({
             "date": trade_date,
             "net_flow_wan": net_mf,
