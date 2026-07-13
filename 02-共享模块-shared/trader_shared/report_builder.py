@@ -1040,6 +1040,15 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     )
     report["position_info"] = position_info
 
+    # 波动率风控：高波动自动减仓（只减不加）
+    # 目标日 ATR 2.5%（A 股中位水平），实际 ATR 越高仓位越轻
+    _atr_pct = (atr14_val / current * 100) if atr14_val and current and current > 0 else None
+    if _atr_pct and _atr_pct > 0.5:
+        _vol_ratio = min(1.0, 2.5 / _atr_pct)  # 只减不加
+        _orig = int(position_info.get("suggested_pct") or 0)
+        position_info["suggested_pct"] = max(0, int(round(_orig * _vol_ratio)))
+        position_info["vol_adj_ratio"] = round(_vol_ratio, 2)
+
     # 分批止盈计划（仅在有持仓参考价时计算）
     entry_price = float(report.get("support") or current)  # 默认用支撑位作为参考买入价
     stop_price = float(report.get("stop") or 0)
