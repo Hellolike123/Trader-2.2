@@ -1,0 +1,536 @@
+{
+  "chanlun_analysis": {
+    "strokes": [],
+    "zones": [],
+    "buy_points": [],
+    "sell_points": [],
+    "trend_label": "数据不足",
+    "buy_point_text": "无",
+    "sell_point_text": "无",
+    "strokes_count": 0,
+    "zones_count": 0,
+    "divergence": {
+      "top_divergence": false,
+      "bottom_divergence": false
+    },
+    "last_valid_zone_last_price": null,
+    "last_valid_zone_first_price": null,
+    "segments": [],
+    "segments_count": 0,
+    "structure_type": "无结构",
+    "structure_segments_count": 0,
+    "structure_confidence": "low",
+    "structure_evidence": "segments=0,pivots=0",
+    "higher_trend": null,
+    "higher_trend_conflict": false,
+    "fractions": [
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 2,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.2,
+        "low": 8.8,
+        "index": 5,
+        "close": 9.05
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 8,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.15,
+        "low": 8.75,
+        "index": 11,
+        "close": 9.0
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 14,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.2,
+        "low": 8.8,
+        "index": 17,
+        "close": 9.05
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 20,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.15,
+        "low": 8.75,
+        "index": 23,
+        "close": 9.0
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 26,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.2,
+        "low": 8.8,
+        "index": 29,
+        "close": 9.05
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 32,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.15,
+        "low": 8.75,
+        "index": 35,
+        "close": 9.0
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 38,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.2,
+        "low": 8.8,
+        "index": 41,
+        "close": 9.05
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 44,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.15,
+        "low": 8.75,
+        "index": 47,
+        "close": 9.0
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 50,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.2,
+        "low": 8.8,
+        "index": 53,
+        "close": 9.05
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 56,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.15,
+        "low": 8.75,
+        "index": 59,
+        "close": 9.0
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 62,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.2,
+        "low": 8.8,
+        "index": 65,
+        "close": 9.05
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 68,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.15,
+        "low": 8.75,
+        "index": 71,
+        "close": 9.0
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 74,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.2,
+        "low": 8.8,
+        "index": 77,
+        "close": 9.05
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 80,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.15,
+        "low": 8.75,
+        "index": 83,
+        "close": 9.0
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 86,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.2,
+        "low": 8.8,
+        "index": 89,
+        "close": 9.05
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 92,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.15,
+        "low": 8.75,
+        "index": 95,
+        "close": 9.0
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 98,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.2,
+        "low": 8.8,
+        "index": 101,
+        "close": 9.05
+      }
+    ],
+    "merged_zones": [],
+    "pivot_count": 0
+  },
+  "chanlun_engine": {
+    "strokes": [],
+    "zones": [],
+    "buy_points": [],
+    "sell_points": [],
+    "trend_label": "数据不足",
+    "buy_point_text": "无",
+    "sell_point_text": "无",
+    "strokes_count": 0,
+    "zones_count": 0,
+    "divergence": {
+      "top_divergence": false,
+      "bottom_divergence": false
+    },
+    "last_valid_zone_last_price": null,
+    "last_valid_zone_first_price": null,
+    "segments": [],
+    "segments_count": 0,
+    "structure_type": "无结构",
+    "structure_segments_count": 0,
+    "structure_confidence": "low",
+    "structure_evidence": "segments=0,pivots=0",
+    "higher_trend": null,
+    "higher_trend_conflict": false,
+    "fractions": [
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 2,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.2,
+        "low": 8.8,
+        "index": 5,
+        "close": 9.05
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 8,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.15,
+        "low": 8.75,
+        "index": 11,
+        "close": 9.0
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 14,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.2,
+        "low": 8.8,
+        "index": 17,
+        "close": 9.05
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 20,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.15,
+        "low": 8.75,
+        "index": 23,
+        "close": 9.0
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 26,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.2,
+        "low": 8.8,
+        "index": 29,
+        "close": 9.05
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 32,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.15,
+        "low": 8.75,
+        "index": 35,
+        "close": 9.0
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 38,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.2,
+        "low": 8.8,
+        "index": 41,
+        "close": 9.05
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 44,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.15,
+        "low": 8.75,
+        "index": 47,
+        "close": 9.0
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 50,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.2,
+        "low": 8.8,
+        "index": 53,
+        "close": 9.05
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 56,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.15,
+        "low": 8.75,
+        "index": 59,
+        "close": 9.0
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 62,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.2,
+        "low": 8.8,
+        "index": 65,
+        "close": 9.05
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 68,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.15,
+        "low": 8.75,
+        "index": 71,
+        "close": 9.0
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 74,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.2,
+        "low": 8.8,
+        "index": 77,
+        "close": 9.05
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 80,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.15,
+        "low": 8.75,
+        "index": 83,
+        "close": 9.0
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 86,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.2,
+        "low": 8.8,
+        "index": 89,
+        "close": 9.05
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 92,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.15,
+        "low": 8.75,
+        "index": 95,
+        "close": 9.0
+      },
+      {
+        "type": "bottom",
+        "high": 8.85,
+        "low": 8.45,
+        "index": 98,
+        "close": 8.7
+      },
+      {
+        "type": "top",
+        "high": 9.2,
+        "low": 8.8,
+        "index": 101,
+        "close": 9.05
+      }
+    ],
+    "merged_zones": [],
+    "pivot_count": 0
+  }
+}
