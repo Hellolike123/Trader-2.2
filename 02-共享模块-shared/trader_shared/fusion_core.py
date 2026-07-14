@@ -59,7 +59,7 @@ FUSION_LOG_ONLY = os.environ.get("FUSION_LOG_ONLY", "false").lower() in ("true",
 
 
 def _log_fusion(result: dict) -> None:
-    """打印 FUSION 日志，方便观察融合结果。
+    """记录 FUSION 日志(debug 级别)，方便观察融合结果。
     
     只捕获 JSON 序列化错误，不吞逻辑错误。
     """
@@ -72,8 +72,7 @@ def _log_fusion(result: dict) -> None:
             "main_force_env": result.get("main_force_env", "unknown"),
             "signals": {k: v["direction"] for k, v in result["signals_detail"].items()},
         }
-        import sys
-        print(f"FUSION: {json.dumps(log_data, ensure_ascii=False)}", file=sys.stderr)
+        _logger.debug("FUSION: %s", json.dumps(log_data, ensure_ascii=False))
     except (json.JSONDecodeError, TypeError, KeyError) as exc:
         _logger.debug("Fusion log serialization failed: %s", exc)
 
