@@ -115,12 +115,20 @@ def _chanlun_compute(
     segments = build_segments(strokes, min_strokes=CHANLUN_MIN_STROKES_PER_SEGMENT)
 
     # --- E2: build raw zones for zones_count (兼容)，merged zones for 分类 ---
+    # 原典：中枢优先由次级别线段(段)重叠构成。但宽幅震荡股可能仅划分出 3 段且端点价
+    # 不重叠，段路径造不出中枢；此时回退笔路径（笔为日线内最小走势单元，笔中枢亦为
+    # 合法原典概念），避免「有真实中枢却报 0 中枢/无结构」的漏检(B修复)。
+    stroke_raw = build_zones(strokes, level="stroke", merge=False)
+    stroke_zones = build_zones(strokes, level="stroke", merge=True)
     if len(segments) >= 3:
-        items, lvl = segments, "segment"
+        seg_raw = build_zones(segments, level="segment", merge=False)
+        seg_zones = build_zones(segments, level="segment", merge=True)
+        if seg_zones:
+            raw_zones, zones, items, lvl = seg_raw, seg_zones, segments, "segment"
+        else:
+            raw_zones, zones, items, lvl = stroke_raw, stroke_zones, strokes, "stroke"
     else:
-        items, lvl = strokes, "stroke"
-    raw_zones = build_zones(items, level=lvl, merge=False)
-    zones = build_zones(items, level=lvl, merge=True)  # merged if CHAN_ZONE_MERGE_ENABLED
+        raw_zones, zones, items, lvl = stroke_raw, stroke_zones, strokes, "stroke"
     zones_count = len(raw_zones)  # 保留原始滑动窗口数量，向后兼容
 
     # timeframe: daily 用日线 conf 门槛；weekly 用周线门槛（段数只调 conf）

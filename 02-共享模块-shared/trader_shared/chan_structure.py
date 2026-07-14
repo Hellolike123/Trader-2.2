@@ -113,7 +113,7 @@ def classify_structure(
 
     拓扑规则（中枢合并版）：
     - strokes < 3 → 无结构
-    - 0 个合并中枢 → 单边 / 有线段则盘整 / 无结构
+    - 0 个合并中枢 → 单边 / 无结构（原典：0 中枢即无结构，不谎报盘整）
     - 1 个合并中枢 → 盘整
     - 2+ 同向不重叠中枢 → 上涨趋势 / 下跌趋势（即使段数只有 4～6）
     - 2+ 重叠/方向混乱 → 盘整
@@ -151,7 +151,7 @@ def classify_structure(
         if unilateral:
             return _ok(unilateral)
         if seg_count > 0:
-            return _ok("盘整")
+            return _ok("无结构")  # 原典：0 中枢即无结构，不谎报盘整
         return _ok("无结构")
 
     # 判断中枢方向关系（拓扑：同向不重叠→趋势，重叠→盘整）
