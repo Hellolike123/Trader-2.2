@@ -24,6 +24,9 @@ try:
         CHAN_WEEKLY_TREND_SEGS_MID,
         CHAN_WEEKLY_CONSOL_SEGS_HIGH,
         CHAN_WEEKLY_CONSOL_SEGS_MID,
+        CHAN_DIVERGENCE_FALLBACK_WINDOW,
+        CHAN_DROP_LEADING_DANGLING_STROKE,
+        CHAN_DIVERGENCE_ANCHOR_LAST_PIVOT,
     )
 except ImportError:
     CHANLUN_MIN_BARS = 20
@@ -44,6 +47,9 @@ except ImportError:
     CHAN_WEEKLY_TREND_SEGS_MID = 3
     CHAN_WEEKLY_CONSOL_SEGS_HIGH = 3
     CHAN_WEEKLY_CONSOL_SEGS_MID = 2
+    CHAN_DIVERGENCE_FALLBACK_WINDOW = 120
+    CHAN_DROP_LEADING_DANGLING_STROKE = True
+    CHAN_DIVERGENCE_ANCHOR_LAST_PIVOT = True
 
 from .chan_structure import (
     _THIRD_POINT_MAX_LEAVE_PCT,
@@ -66,8 +72,10 @@ from .chan_geometry import (
     _aggregate_bars,
     _calc_macd,
     _detect_unilateral,
+    _drop_leading_dangling_strokes,
     _has_entry_exit_segments,
     _higher_level_trend,
+    _last_pivot_anchor_bar,
     _merge_char_element,
     _merge_zones,
     _valid_strokes,
@@ -99,7 +107,11 @@ def _chanlun_compute(
     cleaned，不再回退 raw 入参（raw 入参不再传入本内核）。
     """
     fractions = find_fractions(cleaned)
-    strokes = build_strokes(fractions, min_bars_per_stroke=CHANLUN_MIN_BARS_PER_STROKE, bars=cleaned)
+    raw_strokes = build_strokes(fractions, min_bars_per_stroke=CHANLUN_MIN_BARS_PER_STROKE, bars=cleaned)
+    # P2：丢弃左端悬空笔（数据起点无左支点，永远不可信），从第一个完整支点起读。
+    # 影响：strokes / segments / zones / divergence / 趋势标签全部基于「去悬空」序列，
+    # 消除前导脏数据对整条走势的污染。
+    strokes = _drop_leading_dangling_strokes(raw_strokes) if CHAN_DROP_LEADING_DANGLING_STROKE else raw_strokes
     segments = build_segments(strokes, min_strokes=CHANLUN_MIN_STROKES_PER_SEGMENT)
 
     # --- E2: build raw zones for zones_count (兼容)，merged zones for 分类 ---
@@ -124,7 +136,11 @@ def _chanlun_compute(
     macd_for_buy_sell_prev = cleaned_macd_prev
 
     # 笔 start_index/end_index 相对 cleaned；背驰/二类确认/买卖点一律吃 cleaned
-    divergence = detect_divergence(cleaned, strokes)
+    # P3：背驰锚定最后中枢（而非固定窗口），只比较多级中枢之后的趋势 legs。
+    _anchor_bar = None
+    if CHAN_DIVERGENCE_ANCHOR_LAST_PIVOT:
+        _anchor_bar = _last_pivot_anchor_bar(segments, strokes, merged_zones)
+    divergence = detect_divergence(cleaned, strokes, anchor_bar=_anchor_bar)
     macd_divergence_buy = _check_macd_for_2nd_buy(cleaned, strokes)
     macd_divergence_sell = _check_macd_for_2nd_sell(cleaned, strokes)
 
@@ -356,8 +372,14 @@ class ChanlunEngine:
             return
         self.cleaned = _calc_macd(handle_inclusion(self._raw))
         self.fractions = find_fractions(self.cleaned)
-        self.strokes = build_strokes(
+        _raw_strokes = build_strokes(
             self.fractions, min_bars_per_stroke=CHANLUN_MIN_BARS_PER_STROKE, bars=self.cleaned
+        )
+        # P2：与 _chanlun_compute 一致，引擎存储的 strokes 也裁掉左端悬空笔
+        self.strokes = (
+            _drop_leading_dangling_strokes(_raw_strokes)
+            if CHAN_DROP_LEADING_DANGLING_STROKE
+            else _raw_strokes
         )
         self.segments = build_segments(self.strokes, min_strokes=CHANLUN_MIN_STROKES_PER_SEGMENT)
         # 派生 MACD EMA 末值（用于 save/load 保真）

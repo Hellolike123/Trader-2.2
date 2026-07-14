@@ -787,11 +787,20 @@ def detect_sell_points(
 
     return sell_points
 
-def detect_divergence(bars: list[dict], strokes: list[dict] | None = None) -> dict:
+def detect_divergence(
+    bars: list[dict],
+    strokes: list[dict] | None = None,
+    anchor_bar: int | None = None,
+) -> dict:
     """背驰检测（P1：优先笔级 MACD 面积；仅无笔/无 index/面积不可算时 fallback 峰谷）。
 
     某一侧（顶/底）一旦笔级面积可算，该侧以笔级结论为准，不再被峰谷覆盖。
     两侧独立评估，一侧 True 不短路另一侧。
+
+    P3（anchor_bar）：背驰锚定「最后中枢」而非固定窗口。传入最后中枢右边界的
+    bar 索引后，笔级比较只取 end_index >= anchor_bar 的趋势 legs（离开段 c 与其
+    次级别同向段），fallback 峰谷窗口也从 anchor_bar 起算，杜绝陈旧历史污染现状。
+    anchor_bar 为 None 时回退到 P0b 的近期窗口逻辑（向后兼容）。
     """
     result: dict[str, bool] = {"top_divergence": False, "bottom_divergence": False}
     # 笔级是否已对该侧给出最终结论（True/False 都算已评估）
@@ -806,6 +815,15 @@ def detect_divergence(bars: list[dict], strokes: list[dict] | None = None) -> di
     if strokes:
         down_strokes = [s for s in strokes if s["direction"] == "down"]
         up_strokes = [s for s in strokes if s["direction"] == "up"]
+
+        # P3：只保留最后中枢之后的趋势 legs；锚定后不足两段则回退全序列，避免漏判
+        if anchor_bar is not None:
+            down_anchored = [s for s in down_strokes if to_float(s.get("end_index")) >= anchor_bar]
+            up_anchored = [s for s in up_strokes if to_float(s.get("end_index")) >= anchor_bar]
+            if len(down_anchored) >= 2:
+                down_strokes = down_anchored
+            if len(up_anchored) >= 2:
+                up_strokes = up_anchored
 
         if len(down_strokes) >= 2:
             prev_d, curr_d = down_strokes[-2], down_strokes[-1]
@@ -835,8 +853,9 @@ def detect_divergence(bars: list[dict], strokes: list[dict] | None = None) -> di
                         result["top_divergence"] = _stroke_force_weaker(a_prev, a_curr, "up")
 
     # ── fallback：仅对「笔级未评估」的一侧使用【近期】峰谷（不扫全图历史）──
-    # 只扫最近 CHAN_DIVERGENCE_FALLBACK_WINDOW 根，避免把几年前的旧背离当现状。
-    _fb_start = max(2, n - CHAN_DIVERGENCE_FALLBACK_WINDOW)
+    # P3：若已锚定最后中枢，从 anchor_bar 起算；否则扫最近 CHAN_DIVERGENCE_FALLBACK_WINDOW 根，
+    # 避免把几年前的旧背离当现状。
+    _fb_start = max(2, anchor_bar) if anchor_bar is not None else max(2, n - CHAN_DIVERGENCE_FALLBACK_WINDOW)
     if not top_evaluated:
         peaks: list[dict[str, Any]] = []
         for i in range(_fb_start, n - 2):

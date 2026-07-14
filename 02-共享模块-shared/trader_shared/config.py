@@ -101,6 +101,12 @@ CHAN_SIGNAL_ID_ENABLED: bool = True         # 买卖点写入 Signal Contract v2
 # 背驰 fallback（峰谷扫描）只扫最近 N 根，杜绝拿几年前的旧背离当现状污染买卖点信号。
 # 笔级 MACD 面积背驰才是主路径；此处仅作为“无笔/无 index”时的近期兜底。
 CHAN_DIVERGENCE_FALLBACK_WINDOW: int = 120
+# P2：首笔从数据起点（无左支点）起算，属悬空不可信笔。按缠论标准丢弃，
+# 从第一个完整支点起读。关闭则回退到保留首笔的旧行为。
+CHAN_DROP_LEADING_DANGLING_STROKE: bool = True
+# P3：背驰检测锚定「最后中枢」而非固定窗口——只比较最后中枢之后的趋势 legs
+# （离开段 c 与其次级别同向段），避免把陈旧历史当现状。关闭则回退到 P0b 窗口逻辑。
+CHAN_DIVERGENCE_ANCHOR_LAST_PIVOT: bool = True
 SIGNAL_RULES_ENABLED: bool = False          # 信号组合规则引擎（YAML 驱动，实验性，默认关闭）
 
 # ---- ChanlunEngine 状态持久化目录（Phase 1 新增）----

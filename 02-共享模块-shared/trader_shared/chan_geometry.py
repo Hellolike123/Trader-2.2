@@ -395,6 +395,22 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5, bars: lis
 
     return strokes
 
+
+def _drop_leading_dangling_strokes(strokes: list[dict]) -> list[dict]:
+    """P2：丢弃左端悬空笔，从第一个完整支点起读。
+
+    缠论笔由「第一个合格反向分型」成笔，故序列首笔必从数据起点
+    （cleaned[0] 处第一个分型）起算——其左侧没有任何分型可确认起点，
+    是悬空不可信笔。标准做法（czsc 等）视首笔/首段为「不确定」，
+    不参与趋势判定与背驰比较。
+
+    此处裁掉 strokes[0]（首笔永远无左支点），保留严格交替性；
+    笔数 < 2 时不裁（无从裁剪）。
+    """
+    if len(strokes) < 2:
+        return strokes
+    return strokes[1:]
+
 def _valid_strokes(strokes: list[dict]) -> list[dict]:
     """过滤掉 start_price/end_price 为非有限值的笔（None/NaN/Inf）。
 
@@ -757,6 +773,58 @@ def build_zones(items: list[dict], level: str = "segment", merge: bool = True) -
     if merge and CHAN_ZONE_MERGE_ENABLED:
         return _merge_zones(raw, CHAN_ZONE_MERGE_GAP_PCT)
     return raw
+
+
+def _last_pivot_anchor_bar(
+    segments: list[dict] | None,
+    strokes: list[dict] | None,
+    merged_zones: list[dict] | None,
+) -> int | None:
+    """P3：定位「最后中枢」结束处的 bar 索引，作为背驰检测的锚点。
+
+    背驰只应比较最后中枢之后的趋势 legs（离开段 c 及其次级别同向段），
+    而非整段历史。返回最后中枢右边界对应的 bar 索引；无法定位时返回 None，
+    调用方回退到原行为（不锚定）。
+
+    映射逻辑：
+    - merged_zones 由 segments 或 strokes 构成。段级中枢的成员元素（segment）
+      其 start_index/end_index 是「笔索引」，需经 strokes 映射到 bar 索引；
+    - 笔级中枢（segments 不足时用 strokes 建区）的成员元素 start/end_index
+      已是 bar 索引，直接使用。
+    """
+    if not merged_zones or not strokes:
+        return None
+    valid = [z for z in merged_zones if z.get("valid")]
+    if not valid:
+        return None
+    last = valid[-1]
+    members = last.get("members") or [last]
+    if not members:
+        return None
+    last_raw = members[-1]
+    items = last_raw.get("strokes") or []
+    if not items:
+        return None
+    last_item = items[-1]
+    si = last_item.get("start_index")
+    ei = last_item.get("end_index")
+    if si is None or ei is None:
+        return None
+
+    anchor = None
+    if max(si, ei) < len(strokes):
+        # 线段索引 → 经 strokes 映射到 bar 端点（取区间最大 end_index）
+        lo, hi = min(si, ei), max(si, ei)
+        hi = min(hi, len(strokes) - 1)
+        a = to_float(strokes[hi].get("end_index"))
+        b = to_float(strokes[lo].get("end_index"))
+        if a is not None or b is not None:
+            anchor = max(v for v in (a, b) if v is not None)
+    else:
+        # 已是 bar 索引
+        anchor = max(si, ei)
+
+    return int(anchor) if anchor is not None else None
 
 def _has_entry_exit_segments(pivot: dict, segments: list[dict] | None) -> bool:
     """验证中枢存在「进入段 + 离开段」结构（盘整成立的拓扑条件）。
