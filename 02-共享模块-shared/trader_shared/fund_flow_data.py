@@ -159,8 +159,6 @@ def _fetch_from_tushare(symbol: str, days: int = 30) -> list[dict[str, Any]]:
     except ImportError:
         return []
     client = get_client()
-    if not client.available:
-        return []
     ts_code = _symbol_to_ts_code(symbol)
     end_date = datetime.now().strftime("%Y%m%d")
     start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
