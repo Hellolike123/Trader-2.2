@@ -1,0 +1,7 @@
+{
+  "check_time_stop": {
+    "triggered": false,
+    "action": "等待突破",
+    "days_left": 10
+  }
+}
