@@ -702,6 +702,19 @@ def _detect_ar(bars: list[dict]) -> dict:
             bc_close = cur_close
             bc_avg_vol = avg_volume
             break
+        # 额外检查 SC（卖力高潮）作为 AR 的前置事件
+        sc_pos = _price_pos_pct(bars, scan_idx)
+        if (
+            vol_ratio >= WYCKOFF_BC_VOL_RATIO_THRESHOLD
+            and is_candle
+            and sc_pos is not None
+            and sc_pos <= 1 - WYCKOFF_BC_MIN_POS_PCT
+            and change_pct <= -2.0
+        ):
+            bc_bar_idx = scan_idx
+            bc_close = cur_close
+            bc_avg_vol = avg_volume
+            break
 
     if bc_bar_idx is None:
         return {"ar_signal": False, "ar_reason": "未检测到 BC，无法触发 AR", "ar_price": None}
@@ -718,11 +731,11 @@ def _detect_ar(bars: list[dict]) -> dict:
             pct = (r_close / bc_close - 1) * 100
             return {
                 "ar_signal": True,
-                "ar_reason": f"BC 后自动反弹，放量 +{pct:.1f}%",
+                "ar_reason": f"高潮后自动反弹，放量 +{pct:.1f}%",
                 "ar_price": round(r_close, 2),
             }
 
-    return {"ar_signal": False, "ar_reason": "BC 后未检测到有效反弹", "ar_price": None}
+    return {"ar_signal": False, "ar_reason": "高潮后未检测到有效反弹", "ar_price": None}
 
 
 # ── SOS (Sign of Strength 强势信号) 检测 ──
@@ -1994,7 +2007,9 @@ def format_wyckoff_oneline(
     """报告用威科夫一行人话（结论 + 白话，不拆第二行）。
 
     优先级与 fusion 主信号大致对齐：
-      Spring > SOS > UT > BC > SOW > AR > ST > LPS > Compression > TrendPullback > 背离 > 无信号
+      Spring > SOS > UT > BC > SOW > LPSY > SC > AR > ST > LPS > Compression > TrendPullback > 背离 > 无信号
+    LPSY（最后供应点）在 SOW 之前：派发 D 阶段信号比 C 阶段更接近 breakdown。
+    SC（卖力高潮）在 AR 之前：SC 是积累启动的原发事件，AR 是 SC 后的跟随反弹。
 
     Args:
         wyckoff: 威科夫分析结果 dict
