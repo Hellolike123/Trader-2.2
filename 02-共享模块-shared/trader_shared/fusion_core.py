@@ -38,6 +38,7 @@ from trader_shared.safe_cast import safe_float
 from trader_shared._logging import get_logger
 from trader_shared.interfaces import DataFetcher
 from trader_shared.fetchers import get_fetcher
+from trader_shared.signal_schema import SignalTier, chan_is_strong_bull, chan_is_strong_bear, vpf_is_bearish_warning
 
 _logger = get_logger(__name__)
 
@@ -133,6 +134,7 @@ def _chan_to_signal(chan_result: dict) -> dict:
             "三类卖": "缠论三类卖 (跌破中枢)",
         }
         types = {"一类卖": "chan_sell_1", "二类卖": "chan_sell_2", "三类卖": "chan_sell_3"}
+        tiers = {"一类卖": SignalTier.CHAN_SELL_1, "二类卖": SignalTier.CHAN_SELL_2, "三类卖": SignalTier.CHAN_SELL_3}
         if sp_type in reasons:
             return {
                 "direction": -1,
@@ -141,6 +143,7 @@ def _chan_to_signal(chan_result: dict) -> dict:
                 "raw_key": "chan",
                 "signal_id": best_sell.get("signal_id"),
                 "signal_type": types[sp_type],
+                "signal_tier": tiers[sp_type],
             }
 
     best_buy = _best_point(buy_points, _BUY_RANK)
@@ -154,12 +157,14 @@ def _chan_to_signal(chan_result: dict) -> dict:
             "raw_key": "chan",
             "signal_id": best_buy.get("signal_id"),
             "signal_type": "chan_buy_1",
+            "signal_tier": SignalTier.CHAN_BUY_1,
         }
 
     # 3) 顶背驰优先于粘滞二/三类买
     if divergence.get("top_divergence"):
         return {"direction": -1, "confidence": 0.5,
-                "reason": "缠论顶背驰", "raw_key": "chan"}
+                "reason": "缠论顶背驰", "raw_key": "chan",
+                "signal_tier": SignalTier.CHAN_TOP_DIVERGENCE}
 
     # 3.5) 类二买：介于一类买与二类买之间的弱化信号
     if best_buy is not None and best_buy.get("type") == "类二买":
@@ -170,6 +175,7 @@ def _chan_to_signal(chan_result: dict) -> dict:
             "raw_key": "chan",
             "signal_id": best_buy.get("signal_id"),
             "signal_type": "chan_buy_like2",
+            "signal_tier": SignalTier.CHAN_BUY_LIKE2,
         }
 
     # 4) 二/三类买
@@ -182,12 +188,14 @@ def _chan_to_signal(chan_result: dict) -> dict:
             "raw_key": "chan",
             "signal_id": best_buy.get("signal_id"),
             "signal_type": "chan_buy_2" if bp_type == "二类买" else "chan_buy_3",
+            "signal_tier": SignalTier.CHAN_BUY_2 if bp_type == "二类买" else SignalTier.CHAN_BUY_3,
         }
 
     # 5) 底背驰
     if divergence.get("bottom_divergence"):
         return {"direction": 1, "confidence": 0.5,
-                "reason": "缠论底背驰", "raw_key": "chan"}
+                "reason": "缠论底背驰", "raw_key": "chan",
+                "signal_tier": SignalTier.CHAN_BOTTOM_DIVERGENCE}
 
     # 6) 趋势
     structure_type = chan.get("structure_type", "")
@@ -195,13 +203,16 @@ def _chan_to_signal(chan_result: dict) -> dict:
     if isinstance(trend_label, str):
         if "拉升段" in trend_label:
             return {"direction": 1, "confidence": 0.4,
-                    "reason": f"缠论:{trend_label}{_st_suffix}", "raw_key": "chan"}
+                    "reason": f"缠论:{trend_label}{_st_suffix}", "raw_key": "chan",
+                    "signal_tier": SignalTier.CHAN_TREND_UP}
         if "回调段" in trend_label:
             return {"direction": -1, "confidence": 0.4,
-                    "reason": f"缠论:{trend_label}{_st_suffix}", "raw_key": "chan"}
+                    "reason": f"缠论:{trend_label}{_st_suffix}", "raw_key": "chan",
+                    "signal_tier": SignalTier.CHAN_TREND_DOWN}
 
     return {"direction": 0, "confidence": 0.3,
-            "reason": "缠论无明确信号", "raw_key": "chan"}
+            "reason": "缠论无明确信号", "raw_key": "chan",
+            "signal_tier": SignalTier.NEUTRAL}
 
 
 def _momentum_to_signal(momentum_result: dict) -> dict:
@@ -618,22 +629,19 @@ def merge_decisions(
             if max_h > min_l:
                 pos_pct = (current_price - min_l) / (max_h - min_l)
 
-    chan_reason = chan_signal.get("reason", "")
-    strong_bullish_chan = chan_signal.get("direction") == 1 and any(
-        kw in chan_reason for kw in ("一类买", "二类买", "三类买", "1类买", "2类买", "3类买", "底背驰", "1st buy", "2nd buy", "3rd buy", "bottom divergence")
-    )
-    strong_bearish_chan = chan_signal.get("direction") == -1 and any(
-        kw in chan_reason for kw in ("一类卖", "1类卖", "1st sell", "顶背驰", "top_divergence")
-    )
+    # P0-1: 强信号判定改为读 signal_tier 结构化字段 (替换旧 reason 中文关键词匹配)
+    chan_tier = chan_signal.get("signal_tier", SignalTier.NEUTRAL)
+    strong_bullish_chan = chan_signal.get("direction") == 1 and chan_is_strong_bull(chan_tier)
+    strong_bearish_chan = chan_signal.get("direction") == -1 and chan_is_strong_bear(chan_tier)
     # 注：strong_bearish_chan 仅匹配"一类卖"和"顶背驰"，二类/三类卖不视为"强"看空。
     # 理由：二/三类卖是主升后的次级卖点，信号强度弱于一/顶背驰，不应触发冲突消解
     # （否则动量方向的打折会过度压制趋势跟踪能力）。有意设计。
 
-    vpf_reason = str(vpf_signal.get("reason") or "")
+    vpf_tier = vpf_signal.get("signal_tier", SignalTier.NEUTRAL)
     strong_bullish_vpf = vpf_signal.get("direction") == 1 and float(vpf_signal.get("confidence") or 0) >= 0.45
     strong_bearish_vpf = vpf_signal.get("direction") == -1 and (
         float(vpf_signal.get("confidence") or 0) >= 0.5
-        or any(k in vpf_reason for k in ("天量", "滞涨", "连", "流出"))
+        or vpf_is_bearish_warning(vpf_tier)
     )
 
     mom_score = 50

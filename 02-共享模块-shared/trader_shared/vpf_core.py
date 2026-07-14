@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from trader_shared.signal_schema import SignalTier, vpf_tier_from_reason
+
 
 def _clip_conf(x: float) -> float:
     try:
@@ -362,6 +364,7 @@ def build_vpf_signal(
         "confidence": round(_clip_conf(confidence), 3),
         "reason": reason or "价量资金中性",
         "raw_key": "vpf",
+        "signal_tier": vpf_tier_from_reason(reason),
         "fund_quality": fund_quality,
         "vp_direction": int(vp_dir),
         "fund_direction": int(fund_dir),
@@ -381,6 +384,7 @@ def vpf_to_fusion_signal(vpf: dict[str, Any] | None) -> dict[str, Any]:
             "confidence": 0.2,
             "reason": "价量资金无数据",
             "raw_key": "vpf",
+            "signal_tier": SignalTier.NEUTRAL,
             "fund_quality": "missing",
         }
     if vpf.get("raw_key") == "vpf" and "direction" in vpf:
@@ -389,5 +393,7 @@ def vpf_to_fusion_signal(vpf: dict[str, Any] | None) -> dict[str, Any]:
         out["confidence"] = round(_clip_conf(out.get("confidence") or 0.0), 3)
         out["reason"] = str(out.get("reason") or "价量资金中性")
         out["raw_key"] = "vpf"
+        # P0-1: 兜底重算 signal_tier (无论上游是否预填, 保证与 reason 一致)
+        out["signal_tier"] = vpf_tier_from_reason(out["reason"])
         return out
     return build_vpf_signal(vpf, None)

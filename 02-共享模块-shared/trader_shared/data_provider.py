@@ -731,8 +731,10 @@ def get_provider() -> DataProvider:
 
 
 def set_provider(p: DataProvider) -> None:
-    """Replace the global data source with a custom implementation."""
-    import os
+    """Replace the global data source with a custom implementation.
+
+    仅设置模块级 _provider 单例，不再回写 os.environ，
+    避免运行时全局副作用（并行/测试不可复现）。get_provider() 优先读 _provider。
+    """
     global _provider
     _provider = p
-    os.environ["TRADER_DATA_PROVIDER"] = p.name
