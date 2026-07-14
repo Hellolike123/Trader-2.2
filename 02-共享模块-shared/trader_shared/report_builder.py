@@ -611,7 +611,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         from trader_shared.chip_data import get_cyq_perf
         _cyq = get_cyq_perf(sec.ts_code, start_date="", end_date="")
         if _cyq:
-            _latest = _cyq[-1]
+            # cyq_perf 接口按 trade_date 降序返回（最新在前）。须取最新交易日，
+            # 不能取 _cyq[-1]（那是 2018 年的老数据，会导致获利盘数字完全失真）。
+            _latest = max(_cyq, key=lambda x: str(x.get("trade_date", "")))
             _winner_rate = float(_latest.get("winner_rate", 0) or 0)
             _cost_50 = float(_latest.get("cost_50pct", 0) or 0)
             _peaks = []
