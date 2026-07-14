@@ -1304,22 +1304,27 @@ _PHASE_ORDER = {
 }
 
 
-def _load_phase_state(symbol: str) -> dict[str, Any] | None:
-    """从持久化文件加载该标的的 phase 状态。"""
+def _phase_key(symbol: str, timeframe: str) -> str:
+    """持久化键：按 symbol + 周期维度隔离，避免日线与中线共用同一键互相污染。"""
+    return f"{symbol}::{timeframe}"
+
+
+def _load_phase_state(symbol: str, timeframe: str = "daily") -> dict[str, Any] | None:
+    """从持久化文件加载该标的在指定周期的 phase 状态。"""
     if not symbol:
         return None
     try:
         if os.path.exists(_WYCKOFF_PHASE_FILE):
             with open(_WYCKOFF_PHASE_FILE) as f:
                 data = json.load(f)
-            return data.get(symbol)
+            return data.get(_phase_key(symbol, timeframe))
     except (json.JSONDecodeError, OSError):
         pass
     return None
 
 
-def _save_phase_state(symbol: str, phase_state: dict[str, Any]) -> None:
-    """将 phase 状态持久化到文件。"""
+def _save_phase_state(symbol: str, timeframe: str, phase_state: dict[str, Any]) -> None:
+    """将 phase 状态持久化到文件（按 symbol + 周期维度写）。"""
     if not symbol:
         return
     try:
@@ -1331,7 +1336,7 @@ def _save_phase_state(symbol: str, phase_state: dict[str, Any]) -> None:
                     data = json.load(f)
             except (json.JSONDecodeError, OSError):
                 data = {}
-        data[symbol] = phase_state
+        data[_phase_key(symbol, timeframe)] = phase_state
         with open(_WYCKOFF_PHASE_FILE, "w") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except OSError:
@@ -1410,7 +1415,7 @@ def _transition_phase(
 
 
 # ── 威科夫综合分析入口 ──
-def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily") -> dict:
+def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily", use_persisted_phase: bool = True) -> dict:
     if len(bars) < WYCKOFF_MIN_BARS:
         return {
             "spring_signal": False, "spring_reason": "数据不足", "spring_price": None,
@@ -1461,16 +1466,19 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
     phase = _detect_phase(bars, signals_dict, _phase_lookback=_phase_lb)
 
     # B: 跨日持久化状态机 — 加载旧状态、过渡、存储
-    old_state = _load_phase_state(symbol)
-    new_phase_state = _transition_phase(
-        old_state,
-        phase["phase"],
-        phase["phase_label"],
-        phase.get("phase_confidence_delta", 0.0),
-    )
-    _save_phase_state(symbol, new_phase_state)
-    # 用过渡后状态覆盖瞬时推断（phase 只进不退）
-    phase = new_phase_state
+    # use_persisted_phase=False 时（如中线威科夫）跳过持久化，直接返回本次
+    # K 线的即时推断，避免「只进不退」状态机掩盖当前周期的真实阶段。
+    if use_persisted_phase:
+        old_state = _load_phase_state(symbol, timeframe)
+        new_phase_state = _transition_phase(
+            old_state,
+            phase["phase"],
+            phase["phase_label"],
+            phase.get("phase_confidence_delta", 0.0),
+        )
+        _save_phase_state(symbol, timeframe, new_phase_state)
+        # 用过渡后状态覆盖瞬时推断（phase 只进不退）
+        phase = new_phase_state
 
     # P3-1: VSA 量价幅度分析
     vsa = _detect_effort_vs_result(bars)
@@ -1596,7 +1604,7 @@ def wyckoff_strategy_midline(
                 "wyckoff_summary": "K线不足，无法做中线威科夫",
             }
         }
-    result = wyckoff_analysis(bars, symbol=symbol, timeframe=tf)
+    result = wyckoff_analysis(bars, symbol=symbol, timeframe=tf, use_persisted_phase=False)
     if isinstance(result, dict):
         result = {**result, "timeframe": tf}
     return {"wyckoff": result}

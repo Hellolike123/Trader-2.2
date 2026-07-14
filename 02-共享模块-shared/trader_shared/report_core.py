@@ -352,35 +352,41 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     # 缠论行：合并浪型（状态+信号）+ 方向
     _wave_mid = str(conclusion.get("wave_label_mid") or "").strip()
-    # 从缠论结果提取方向词
+    # 结构不足以支撑方向判断时（笔数不足/无法判断/无明确结构），禁止从
+    # trend_label 强叠方向词，否则会出现「笔数不足 · 看跌 · 无法判断」式矛盾。
+    _insufficient_struct = any(
+        k in _wave_mid for k in ("无法判断", "笔数不足", "无明确结构", "数据不足")
+    )
+
+    # 从缠论结果提取方向词（仅结构充足时）
     _chan_dir_mid = ""
-    try:
-        _chan_mid_raw = r.get("chanlun_midline")
-        if isinstance(_chan_mid_raw, dict):
-            _chan_inner = _chan_mid_raw.get("chanlun", _chan_mid_raw)
-            if isinstance(_chan_inner, dict):
-                _bps = _chan_inner.get("buy_points") or []
-                _sps = _chan_inner.get("sell_points") or []
-                _div = _chan_inner.get("divergence") or {}
-                if any(isinstance(p, dict) and "买" in str(p.get("type", "")) for p in _bps):
-                    _chan_dir_mid = "看涨"
-                elif any(isinstance(p, dict) and "卖" in str(p.get("type", "")) for p in _sps):
-                    _chan_dir_mid = "看跌"
-                elif _div.get("top_divergence"):
-                    _chan_dir_mid = "看跌"
-                elif _div.get("bottom_divergence"):
-                    _chan_dir_mid = "看涨"
-                else:
-                    _tl = str(_chan_inner.get("trend_label") or "")
-                    if "拉升" in _tl:
+    if not _insufficient_struct:
+        try:
+            _chan_mid_raw = r.get("chanlun_midline")
+            if isinstance(_chan_mid_raw, dict):
+                _chan_inner = _chan_mid_raw.get("chanlun", _chan_mid_raw)
+                if isinstance(_chan_inner, dict):
+                    _bps = _chan_inner.get("buy_points") or []
+                    _sps = _chan_inner.get("sell_points") or []
+                    _div = _chan_inner.get("divergence") or {}
+                    if any(isinstance(p, dict) and "买" in str(p.get("type", "")) for p in _bps):
                         _chan_dir_mid = "看涨"
-                    elif "回调" in _tl:
+                    elif any(isinstance(p, dict) and "卖" in str(p.get("type", "")) for p in _sps):
                         _chan_dir_mid = "看跌"
-    except Exception:
-        pass
+                    elif _div.get("top_divergence"):
+                        _chan_dir_mid = "看跌"
+                    elif _div.get("bottom_divergence"):
+                        _chan_dir_mid = "看涨"
+                    else:
+                        _tl = str(_chan_inner.get("trend_label") or "")
+                        if "拉升" in _tl:
+                            _chan_dir_mid = "看涨"
+                        elif "回调" in _tl:
+                            _chan_dir_mid = "看跌"
+        except Exception:
+            pass
 
     if _wave_mid:
-        # 浪型已含状态+信号，方向插在中间
         if _chan_dir_mid:
             # 拆分浪型：状态 · 信号 → 状态 · 方向 · 信号
             _wave_parts = _wave_mid.split(" · ", 1)
@@ -388,7 +394,8 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _wave_sig = _wave_parts[1] if len(_wave_parts) > 1 else ""
             _chan_display = f"{_wave_state} · {_chan_dir_mid} · {_wave_sig}" if _wave_sig else f"{_wave_state} · {_chan_dir_mid}"
         else:
-            _chan_display = _wave_mid
+            # 结构不足或无可叠加方向：保持原浪型文案，补「中性」避免与「无法判断」矛盾
+            _chan_display = f"{_wave_mid} · 中性" if _insufficient_struct else _wave_mid
     else:
         _chan_display = _chan_compact
     lines.append(f"  缠论：{_chan_display}")
