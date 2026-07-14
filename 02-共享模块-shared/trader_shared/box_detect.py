@@ -228,21 +228,29 @@ def detect_box(
     if ok_ma:
         valid_reasons.append("MA20 走平/向上")
 
-    # ── 3. 状态机 ──
+    # ── 3. 状态机（仅有效箱体才有状态）──
     top_break = top * (1 + BUFFER_PCT)
     bot_break = bottom * (1 - BUFFER_PCT)
 
-    state, breakout = _classify_state(
-        c_win, v_win, top, bottom, top_break, bot_break, ma20_vol
-    )
+    if valid:
+        state, breakout = _classify_state(
+            c_win, v_win, top, bottom, top_break, bot_break, ma20_vol
+        )
+    else:
+        state = "none"
+        breakout = {"direction": "none", "hold_days": 0, "vol_ratio": 0.0, "confirm": False}
 
-    # ── 4. 假突破识别 ──
-    false_risk = _detect_false_breakout(
-        h_win, c_win, v_win, top, top_break, ma20_vol
-    )
+    # ── 4. 假突破识别（仅有效箱体）──
+    false_risk = False
+    if valid:
+        false_risk = _detect_false_breakout(
+            h_win, c_win, v_win, top, top_break, ma20_vol
+        )
 
-    # ── 5. 量能上下文 ──
-    vol_ctx = _volume_context(v_win, ma20_vol, breakout["direction"])
+    # ── 5. 量能上下文（仅有效箱体）──
+    vol_ctx = "balanced"
+    if valid:
+        vol_ctx = _volume_context(v_win, ma20_vol, breakout["direction"])
 
     # ── 6. 止损位（下沿下方缓冲）──
     stop_loss = _round2(bottom * (1 - STOP_BUFFER_PCT))

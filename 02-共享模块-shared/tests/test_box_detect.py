@@ -83,7 +83,7 @@ def test_valid_inside_box():
 
 # ── 2. 向上突破确认 ─────────────────────────────────────────
 def test_up_confirmed():
-    bars = _box_bars(n_peaks=6)
+    bars = _box_bars(n_peaks=7)
     # 连续 2 日收盘站上 top_break=103，量比 ≥1.5x（ma20_vol≈1000）
     _append_close(bars, 104.0, vol=2000.0)
     _append_close(bars, 105.0, vol=2000.0)
@@ -99,7 +99,7 @@ def test_up_confirmed():
 
 # ── 3. 向上突破待确认（量能不足）───────────────────────────
 def test_up_pending_volume_gate():
-    bars = _box_bars(n_peaks=6)
+    bars = _box_bars(n_peaks=7)
     # 连续 2 日站上沿，但量能仅持平（<1.5x）→ 待确认
     _append_close(bars, 104.0, vol=1000.0)
     _append_close(bars, 105.0, vol=1000.0)
@@ -111,7 +111,7 @@ def test_up_pending_volume_gate():
 
 # ── 4. 向下破位确认 ─────────────────────────────────────────
 def test_down_confirmed():
-    bars = _box_bars(n_peaks=6)
+    bars = _box_bars(n_peaks=7)
     # 连续 2 日收盘跌破 bot_break=87.3（缩量阴跌也算有效）
     _append_close(bars, 86.0, vol=900.0)
     _append_close(bars, 85.0, vol=900.0)
@@ -124,7 +124,7 @@ def test_down_confirmed():
 
 # ── 5. 假突破识别（刺穿回落 + 单日脉冲）────────────────────
 def test_false_breakout():
-    bars = _box_bars(n_peaks=6)
+    bars = _box_bars(n_peaks=7)
     # 末根 high 刺穿上沿(>100) 但收盘回落(≤100)，量能 ≥2x 脉冲
     bars.append({
         "high": 102.0,
@@ -155,6 +155,10 @@ def test_invalid_amplitude():
     assert r["found"] is True
     assert r["valid"] is False
     assert r["amplitude_pct"] > 20.0
+    assert r["state"] == "none"          # 无效箱体不跑状态机
+    assert r["breakout"]["direction"] == "none"
+    assert r["false_breakout_risk"] is False
+    assert r["volume_context"] == "balanced"
     assert "有效性未全部满足" in r["note"] or "仅供参考" in r["note"]
 
 
