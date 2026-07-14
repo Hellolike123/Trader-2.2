@@ -10,7 +10,10 @@ Usage:
 """
 from __future__ import annotations
 
+import importlib
 import inspect
+import pkgutil
+from pathlib import Path
 from typing import Any
 
 from trader_shared.interfaces import IndicatorPlugin
@@ -236,38 +239,32 @@ def set_registry(registry: PluginRegistry) -> None:
 
 
 def _auto_register(registry: PluginRegistry) -> None:
-    """Auto-register built-in plugins if available."""
-    # Chanlun plugin
-    try:
-        from trader_shared.plugins.chan_plugin import ChanlunPlugin
-        registry.register(ChanlunPlugin())
-    except ImportError:
-        _logger.debug("ChanlunPlugin not available")
+    """Auto-discover and register all IndicatorPlugin subclasses in the
+    trader_shared.plugins package.
 
-    # Wyckoff plugin
-    try:
-        from trader_shared.plugins.wyckoff_plugin import WyckoffPlugin
-        registry.register(WyckoffPlugin())
-    except ImportError:
-        _logger.debug("WyckoffPlugin not available")
+    Replaces the previous hard-coded whitelist: adding a new indicator no
+    longer requires editing this function — drop a module into
+    trader_shared/plugins/ that defines an IndicatorPlugin subclass and it is
+    picked up automatically. Modules whose import fails are skipped silently
+    (preserving the old per-plugin ImportError tolerance).
+    """
+    plugins_pkg = Path(__file__).parent / "plugins"
+    if not plugins_pkg.is_dir():
+        return
 
-    # Momentum plugin
-    try:
-        from trader_shared.plugins.momentum_plugin import MomentumPlugin
-        registry.register(MomentumPlugin())
-    except ImportError:
-        _logger.debug("MomentumPlugin not available")
-
-    # Supertrend plugin (展示型，不进融合)
-    try:
-        from trader_shared.plugins.supertrend_plugin import SupertrendPlugin
-        registry.register(SupertrendPlugin())
-    except ImportError:
-        _logger.debug("SupertrendPlugin not available")
-
-    # VWAP plugin (展示型，不进融合)
-    try:
-        from trader_shared.plugins.vwap_plugin import VwapPlugin
-        registry.register(VwapPlugin())
-    except ImportError:
-        _logger.debug("VwapPlugin not available")
+    for mod_info in pkgutil.iter_modules([str(plugins_pkg)]):
+        mod_name = mod_info.name
+        if mod_name.startswith("_"):  # skip __init__ and private modules
+            continue
+        module = importlib.import_module(f"trader_shared.plugins.{mod_name}")
+        for _cls_name, obj in inspect.getmembers(module, inspect.isclass):
+            if (
+                issubclass(obj, IndicatorPlugin)
+                and obj is not IndicatorPlugin
+                and not inspect.isabstract(obj)
+                and obj.__module__ == module.__name__  # only classes defined here, not re-exported
+            ):
+                try:
+                    registry.register(obj())
+                except Exception as exc:
+                    _logger.warning("Failed to register plugin %s: %s", obj.__name__, exc)

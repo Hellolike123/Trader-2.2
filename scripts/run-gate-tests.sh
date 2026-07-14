@@ -32,6 +32,7 @@ TESTS=(
   "02-共享模块-shared/tests/test_fusion_regime_weights.py"
   "02-共享模块-shared/tests/test_p0_signal_structurization.py"
   "02-共享模块-shared/tests/test_p1_global_state.py"
+  "02-共享模块-shared/tests/test_plugin_autodiscovery.py"
   "02-共享模块-shared/tests/test_box_detect.py"
   "02-共享模块-shared/tests/test_combo_strategy.py"
   "01-功能包-packages/trader/tests/test_report_renderer.py"
