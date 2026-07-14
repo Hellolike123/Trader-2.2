@@ -204,13 +204,11 @@ class TushareClient:
             import tushare as ts
             from tushare.stock import cons as ct
             ct.verify_token_url = self._realtime_url
-            # 绕过系统代理（MacPacket 等本地代理会导致 503）。
-            # 用锁将「设代理→调用→还原」包成原子区，避免并发调用时 NO_PROXY
-            # 全局变量相互踩踏；还原逻辑仍保留，确保调用结束后环境无残留。
+            # 用锁保证 NO_PROXY 设/改/还原原子化，并发/测试安全
             with _no_proxy_lock:
                 _old_no_proxy = os.environ.get("NO_PROXY")
-                os.environ["NO_PROXY"] = "*"
                 try:
+                    os.environ["NO_PROXY"] = "*"
                     df = ts.realtime_quote(ts_code=ts_codes)
                 finally:
                     if _old_no_proxy is None:

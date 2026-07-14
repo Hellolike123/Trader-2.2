@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import random
 import sys
@@ -24,6 +25,8 @@ from typing import Dict, List, Any, Optional
 
 import trader_shared
 from trader_shared.light_data import to_float
+
+_logger = logging.getLogger(__name__)
 
 # ── 默认路径 ─────────────────────────────────────────────────────────────────
 TRADER_DIR = Path.home() / ".trader"
@@ -245,12 +248,12 @@ def calibrate(
     outcomes = _extract_outcomes(results)
 
     if verbose:
-        print(f"🔍 自校准开始：读取 {len(signals)} 个信号，{len(outcomes)} 个已结算结果")
+        _logger.debug("自校准开始：读取 %d 个信号，%d 个已结算结果", len(signals), len(outcomes))
 
     # 1. 新兵保护：总信号或已结算结果不足 30 次，强制直接降级采用中性出厂参数 1.0
     if len(signals) < MIN_SIGNALS_TOTAL or len(outcomes) < MIN_SIGNALS_TOTAL:
         if verbose:
-            print(f"⚠️ [DataLimiter] 历史信号({len(signals)}条)或已结算结果({len(outcomes)}条)样本不足 {MIN_SIGNALS_TOTAL} 条，强制降级使用默认安全参数")
+            _logger.debug("样本不足 %d，降级默认参数", MIN_SIGNALS_TOTAL)
         return {
             "global": DEFAULT_PARAMS.copy(),
             "bull": DEFAULT_PARAMS.copy(),
@@ -283,7 +286,7 @@ def calibrate(
         # 2. 子大势样本数保护阀：分桶信号小于 10 条，降级采用全局最优参数
         if sub_count < MIN_SIGNALS_SUB:
             if verbose:
-                print(f"  -> 大势 {regime_name:6} (样本:{sub_count:2}): 样本量不足 {MIN_SIGNALS_SUB} 条，降级继承全局最优参数")
+                _logger.debug("大势 %s 样本不足 %d，降级继承全局", regime_name, MIN_SIGNALS_SUB)
             calibrated_results[regime_name] = calibrated_results.get("global", DEFAULT_PARAMS).copy()
             continue
 
@@ -315,12 +318,12 @@ def calibrate(
 
         calibrated_results[regime_name] = blended_params
         if verbose:
-            print(f"  -> 大势 {regime_name:6} (样本:{sub_count:2}): 性能评分 {best_score:.3f} | zone_width={blended_params['zone_width']:.2f}, confirm_buffer={blended_params['confirm_buffer']:.2f}, stop_buffer={blended_params['stop_buffer']:.2f}")
+            _logger.debug("大势 %s 评分 %.3f", regime_name, best_score)
 
     # 置信度映射校准（数据充足时启用）
     if len(outcomes) >= CONFIDENCE_MIN_SIGNALS:
         if verbose:
-            print(f"\n🔍 置信度映射校准：{len(outcomes)} 个已结算结果 >= {CONFIDENCE_MIN_SIGNALS}，开始校准")
+            _logger.debug("置信度映射校准开始：%d 个已结算结果", len(outcomes))
         best_conf = CONFIDENCE_DEFAULT_PARAMS.copy()
         best_conf_score = _simulate_performance(signals, outcomes, {**DEFAULT_PARAMS, **best_conf}, None, regimes_map)
 
@@ -345,10 +348,10 @@ def calibrate(
 
         calibrated_results["confidence_mapping"] = blended_conf
         if verbose:
-            print(f"  -> 置信度映射: 性能评分 {best_conf_score:.3f} | {blended_conf}")
+            _logger.debug("置信度映射评分 %.3f", best_conf_score)
     else:
         if verbose:
-            print(f"\n⚠️ 置信度映射校准：已结算结果({len(outcomes)}条)不足 {CONFIDENCE_MIN_SIGNALS} 条，跳过")
+            _logger.debug("置信度映射跳过：样本不足 %d", CONFIDENCE_MIN_SIGNALS)
 
     return calibrated_results
 
@@ -363,7 +366,7 @@ def save_params(params: Dict[str, Dict[str, float]]) -> None:
     }
     with open(CALIBRATED_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    print(f"💾 分层自校准参数已写入 {CALIBRATED_FILE}")
+    _logger.info("分层自校准参数已写入 %s", CALIBRATED_FILE)
 
 
 def load_calibrated_params() -> Dict[str, Any]:

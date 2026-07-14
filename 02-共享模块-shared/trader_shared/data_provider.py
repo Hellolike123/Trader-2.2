@@ -27,7 +27,6 @@ _logger = get_logger(__name__)
 
 # -------- inject shared paths so we can import light_data / models --------
 _shared = Path(__file__).resolve().parents[1]
-_market_data = _shared / "01-行情数据-market-data"
 
 DataStatus = Literal["full", "partial", "degraded", "failed"]
 
