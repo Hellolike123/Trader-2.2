@@ -18,7 +18,7 @@ hook 已随仓库版本化提交，clone 后需各机执行一次上面这行（
 
 ## 门禁范围（锁定）
 
-跑以下 7 个离线、无凭证、确定性测试文件（基线：**68 passed / 1 warning / ~63s**）：
+跑以下离线、无凭证、确定性测试文件（当前基线：**128 passed / 1 warning / ~0.8s**）：
 
 | 文件 | 守护内容 |
 |---|---|
@@ -26,11 +26,22 @@ hook 已随仓库版本化提交，clone 后需各机执行一次上面这行（
 | `02-共享模块-shared/tests/test_build_report_golden.py` | `build_report` 行为回归（5 策略调用计数 + 中线 key + 形状） |
 | `02-共享模块-shared/tests/test_build_report_adr002_equivalence.py` | ADR-002 路由后逐字段等价（堵日线 chan 静默漂移） |
 | `02-共享模块-shared/tests/test_report_render_equivalence.py` | 拆分前后渲染 md5 等价 |
+| `02-共享模块-shared/tests/test_golden_diff_gate.py` | **golden-diff 闸门**（统一 seam：渲染逐字节 + 字段精确 双比对，CLI 可独立跑、`--replicas` 多副本比对） |
 | `02-共享模块-shared/tests/test_arch_refactoring.py` | 架构重构回归（PluginRegistry / 收编） |
 | `02-共享模块-shared/tests/test_indicator_math.py` | 指标计算数学正确性 |
 | `01-功能包-packages/trader/tests/test_report_renderer.py` | 旧 `report_renderer/` 包渲染（命名冲突规避） |
 
 **故意不跑全量 80+ 测试**：其中大量依赖网络/凭证（`test_tushare_integration`、`test_tdx3_provider`、`test_light_data_mootdx` 等），在 CI 与离线环境会红或超时（历史上有沙箱 SIGKILL 137 记录）。强行全量会让门禁永远红、失去报警意义。
+
+## Golden-diff 闸门（P3）
+
+`scripts/golden_diff_gate.py` 是把原先散落在 3 个测试 + 2 个 capture 脚本里的"离线确定性 seam"收编为**单一真相源**（`trader_shared/testing/mock_seam.py`）后的统一闸门：
+
+- `capture`：按 `02-共享模块-shared/tests/golden/golden_config.json` 重抓 golden 基线（`<symbol>.render.md` 掩码渲染 + `<symbol>.fields.json` 精确字段）。**仅在确认行为变更是有意的后才跑**。
+- `check`：跑 seam 比对 golden，渲染逐字节 + 字段精确双比对，exit 1 即失败。被 `test_golden_diff_gate.py` 在每次 push 强制跑。
+- `--replicas PATH...`：对每个副本子树 subprocess 跑同一 capture 并比对 primary golden，**直接抓 07-08 那种双副本安装错位**（一份 skill 改了另一份没改）。例：`python scripts/golden_diff_gate.py check --replicas ~/.hermes/skills/trader`。
+
+> 旧的 `scripts/_render_eq_capture.py` / `scripts/_capture_adr002_baseline.py` 已被本 CLI 取代；如需刷新基线请统一走 `golden_diff_gate.py capture`。
 
 ## 扩展门禁
 

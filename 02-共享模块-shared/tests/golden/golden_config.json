@@ -1,0 +1,16 @@
+{
+  "tickers": [
+    {
+      "symbol": "600000",
+      "render": true,
+      "fields": [
+        "fusion.weighted_score",
+        "fusion.confidence",
+        "fusion.action",
+        "fusion.disagreement",
+        "chanlun_midline",
+        "wyckoff_midline"
+      ]
+    }
+  ]
+}

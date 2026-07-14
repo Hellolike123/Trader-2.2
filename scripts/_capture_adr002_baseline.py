@@ -1,4 +1,6 @@
-"""Capture ADR-002 equivalence baseline from CURRENT build_report behavior.
+"""[DEPRECATED] superseded by `scripts/golden_diff_gate.py capture` (unified seam).
+
+Capture ADR-002 equivalence baseline from CURRENT build_report behavior.
 
 Run BEFORE routing build_report through PluginRegistry.analyze_all().
 Produces tests/fixtures/report_baseline.json with EXACT field values

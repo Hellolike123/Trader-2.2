@@ -6,9 +6,9 @@ functions (chan/wyck daily + midline, momentum) and return a well-shaped
 report dict.
 
 Design:
-- A MockProvider supplies a deterministic MarketSnapshot (no network).
-- All network-dependent branches (market env, fund flow, signals, fetchers)
-  are patched to safe sentinels so the run is fully offline & deterministic.
+- A single shared offline seam (trader_shared.testing.mock_seam) supplies a
+  deterministic MarketSnapshot and patches every network branch, so the run is
+  fully offline & deterministic (no copy-pasted mocks across tests).
 - The five strategy functions are wrapped to COUNT calls. This is a
   data-quality-independent guard: if a refactor routes through
   PluginRegistry.analyze_all() and silently drops the midline variants (or
@@ -22,7 +22,6 @@ from __future__ import annotations
 import faulthandler
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -43,123 +42,20 @@ except ImportError:
         sys.path.insert(0, str(_PKG_SCRIPTS))
     from run_analysis import build_report  # pre-ADR-003
 
-
-# ── synthetic market data (kept small to bound compute time) ──────────────
-
-def _gen_bars(n: int, start: float, step: float) -> list[dict[str, Any]]:
-    bars: list[dict[str, Any]] = []
-    price = start
-    for i in range(n):
-        price = price + step * (1 if i % 2 == 0 else -1) + (i % 7 - 3) * 0.05
-        o = price - 0.1
-        c = price
-        h = max(o, c) + 0.15
-        l = min(o, c) - 0.15
-        bars.append({
-            "date": f"2026-0{i // 30 + 1:02d}-{i % 28 + 1:02d}",
-            "open": round(o, 2),
-            "close": round(c, 2),
-            "high": round(h, 2),
-            "low": round(l, 2),
-            "volume": 1_000_000 + i * 1000,
-            "atr14": 0.5,
-            "atr_ratio": 0.02,
-            "atr7": 0.4,
-            "tr": 0.3,
-            "pre_close": round(price - step, 2),
-        })
-    return bars
-
-
-class _MockProvider:
-    """Implements the DataProvider protocol with canned, deterministic data."""
-
-    name = "mock"
-
-    def resolve_security(self, target: str):
-        from trader_shared.data_provider import Security
-        return Security(code=target, market="SH" if target.startswith("6") else "SZ", name="测试股")
-
-    def fetch_quote(self, sec):
-        return {
-            "name": "测试股", "symbol": sec.qq_symbol, "current_price": 10.5,
-            "pre_close": 10.3, "volume": 5_000_000, "current_change_pct": 1.94,
-            "trade_date": "2026-07-10", "trade_time": "15:00", "turnover_rate": 2.1,
-        }
-
-    def fetch_qfq_daily(self, sec, days: int = 365):
-        return _gen_bars(80, 9.0, 0.05)
-
-    def fetch_kline(self, sec, **kw):
-        return []
-
-    def load_market_snapshot(self, target, days=365, include_5m=True,
-                             include_weekly=True, include_monthly=True, include_ticks=True):
-        from trader_shared.data_provider import MarketSnapshot
-        daily = _gen_bars(80, 9.0, 0.05)
-        weekly = _gen_bars(40, 9.0, 0.12)
-        monthly = _gen_bars(16, 9.0, 0.4)
-        bars_5m = _gen_bars(10, 10.4, 0.02)
-        return MarketSnapshot(
-            security=self.resolve_security(target),
-            quote=self.fetch_quote(self.resolve_security(target)),
-            daily_bars=daily,
-            bars_5m=bars_5m,
-            weekly_bars=weekly,
-            monthly_bars=monthly,
-            data_status="full",
-        )
-
-
-class _UnavailableClient:
-    """Tushare client stub that reports unavailable (no real HTTP calls)."""
-    available = False
+from trader_shared.testing.mock_seam import apply_seam
 
 
 @pytest.fixture
 def golden_env(monkeypatch):
-    """Patch provider + network branches + count strategy calls."""
-    from trader_shared.data_provider import set_provider
-    from trader_shared import fetchers as _fetchers
+    """Patch provider + network branches via shared seam, then count strategy calls."""
+    import trader_shared.chan_core as _chan
+    import trader_shared.momentum_core as _mom
+    import trader_shared.wyckoff_core as _wyk
 
-    set_provider(_MockProvider())
-    # build_report instantiates TencentFetcher() directly; neutralize it.
-    monkeypatch.setattr(_fetchers, "TencentFetcher", _fetchers.MockFetcher)
-    try:
-        import run_analysis as _ra
-        if hasattr(_ra, "TencentFetcher"):
-            monkeypatch.setattr(_ra, "TencentFetcher", _fetchers.MockFetcher)
-    except Exception:
-        pass
-
-    # Neutralize other network branches (all are try/except in build_report,
-    # but patching keeps the run deterministic & offline).
-    monkeypatch.setattr(
-        "trader_shared.market_env.get_env_for_skill",
-        lambda *a, **k: {"level": "正常", "hmm_regime_en": "range"},
-    )
-    monkeypatch.setattr(
-        "trader_shared.cache_utils.fetch_fund_flow_cached", lambda *a, **k: None,
-    )
-    # 堵 tushare_client / chip_data 网络泄漏(使门禁真正离线确定)
-    import trader_shared.tushare_client as _tc
-    import trader_shared.chip_data as _chip
-    monkeypatch.setattr(_tc, "get_client", lambda *a, **k: _UnavailableClient())
-    monkeypatch.setattr(_chip, "get_cyq_perf", lambda *a, **k: None)
-    try:
-        import run_analysis as _ra2
-        if hasattr(_ra2, "read_signals_for_report"):
-            monkeypatch.setattr(_ra2, "read_signals_for_report", lambda *a, **k: (0.0, 0.0))
-    except Exception:
-        pass
+    apply_seam(monkeypatch)
 
     # ── wrap the five strategy functions to count calls ──
     calls: dict[str, int] = {}
-
-    import trader_shared.chan_core as _chan
-    import trader_shared.wyckoff_core as _wyk
-    import trader_shared.momentum_core as _mom
-
     _orig = {
         "chan_d": _chan.chanlun_strategy,
         "chan_mid": _chan.chanlun_strategy_midline,
@@ -184,11 +80,7 @@ def golden_env(monkeypatch):
 
 
 def test_build_report_golden(golden_env):
-    """Single comprehensive guard: shape + all 5 strategies + midline keys.
-
-    One build_report() call keeps runtime bounded; call-count assertions are
-    data-quality-independent so they catch ADR-002 midline-dropping regressions.
-    """
+    """Single comprehensive guard: shape + all 5 strategies + midline keys."""
     report = build_report("600000")
 
     # 1) shape

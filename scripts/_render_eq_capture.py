@@ -1,4 +1,6 @@
-"""Deterministic render-equivalence capture for the domain/presentation split.
+"""[DEPRECATED] superseded by `scripts/golden_diff_gate.py capture` (unified seam).
+
+Deterministic render-equivalence capture for the domain/presentation split.
 
 Runs build_report + render_markdown under a FULLY OFFLINE, deterministic mock
 seam (all network leak points patched), masks date tokens, and writes the

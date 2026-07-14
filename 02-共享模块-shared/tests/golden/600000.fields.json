@@ -1,0 +1,324 @@
+{
+  "fusion.weighted_score": -0.26,
+  "fusion.confidence": 0.382,
+  "fusion.action": "减仓",
+  "fusion.disagreement": 1,
+  "chanlun_midline": {
+    "chanlun": {
+      "strokes": [],
+      "zones": [],
+      "buy_points": [],
+      "sell_points": [],
+      "trend_label": "数据不足",
+      "buy_point_text": "无",
+      "sell_point_text": "无",
+      "strokes_count": 0,
+      "zones_count": 0,
+      "divergence": {
+        "top_divergence": false,
+        "bottom_divergence": false
+      },
+      "last_valid_zone_last_price": null,
+      "last_valid_zone_first_price": null,
+      "segments": [],
+      "segments_count": 0,
+      "structure_type": "无结构",
+      "structure_segments_count": 0,
+      "structure_confidence": "low",
+      "structure_evidence": "segments=0,pivots=0",
+      "higher_trend": null,
+      "higher_trend_conflict": false,
+      "fractions": [
+        {
+          "type": "bottom",
+          "high": 8.9,
+          "low": 8.5,
+          "index": 1,
+          "close": 8.75
+        },
+        {
+          "type": "top",
+          "high": 8.97,
+          "low": 8.57,
+          "index": 2,
+          "close": 8.82
+        },
+        {
+          "type": "bottom",
+          "high": 8.85,
+          "low": 8.45,
+          "index": 3,
+          "close": 8.7
+        },
+        {
+          "type": "top",
+          "high": 9.02,
+          "low": 8.62,
+          "index": 4,
+          "close": 8.87
+        },
+        {
+          "type": "bottom",
+          "high": 9.0,
+          "low": 8.6,
+          "index": 5,
+          "close": 8.85
+        },
+        {
+          "type": "top",
+          "high": 9.27,
+          "low": 8.87,
+          "index": 6,
+          "close": 9.12
+        },
+        {
+          "type": "bottom",
+          "high": 9.0,
+          "low": 8.6,
+          "index": 7,
+          "close": 8.85
+        },
+        {
+          "type": "top",
+          "high": 9.02,
+          "low": 8.62,
+          "index": 8,
+          "close": 8.87
+        },
+        {
+          "type": "bottom",
+          "high": 8.85,
+          "low": 8.45,
+          "index": 9,
+          "close": 8.7
+        },
+        {
+          "type": "top",
+          "high": 8.97,
+          "low": 8.57,
+          "index": 10,
+          "close": 8.82
+        },
+        {
+          "type": "bottom",
+          "high": 8.9,
+          "low": 8.5,
+          "index": 11,
+          "close": 8.75
+        },
+        {
+          "type": "top",
+          "high": 9.15,
+          "low": 8.75,
+          "index": 13,
+          "close": 9.0
+        },
+        {
+          "type": "bottom",
+          "high": 8.9,
+          "low": 8.5,
+          "index": 15,
+          "close": 8.75
+        },
+        {
+          "type": "top",
+          "high": 8.97,
+          "low": 8.57,
+          "index": 16,
+          "close": 8.82
+        },
+        {
+          "type": "bottom",
+          "high": 8.85,
+          "low": 8.45,
+          "index": 17,
+          "close": 8.7
+        },
+        {
+          "type": "top",
+          "high": 9.02,
+          "low": 8.62,
+          "index": 18,
+          "close": 8.87
+        },
+        {
+          "type": "bottom",
+          "high": 9.0,
+          "low": 8.6,
+          "index": 19,
+          "close": 8.85
+        },
+        {
+          "type": "top",
+          "high": 9.27,
+          "low": 8.87,
+          "index": 20,
+          "close": 9.12
+        },
+        {
+          "type": "bottom",
+          "high": 9.0,
+          "low": 8.6,
+          "index": 21,
+          "close": 8.85
+        },
+        {
+          "type": "top",
+          "high": 9.02,
+          "low": 8.62,
+          "index": 22,
+          "close": 8.87
+        },
+        {
+          "type": "bottom",
+          "high": 8.85,
+          "low": 8.45,
+          "index": 23,
+          "close": 8.7
+        },
+        {
+          "type": "top",
+          "high": 8.97,
+          "low": 8.57,
+          "index": 24,
+          "close": 8.82
+        },
+        {
+          "type": "bottom",
+          "high": 8.9,
+          "low": 8.5,
+          "index": 25,
+          "close": 8.75
+        },
+        {
+          "type": "top",
+          "high": 9.15,
+          "low": 8.75,
+          "index": 27,
+          "close": 9.0
+        },
+        {
+          "type": "bottom",
+          "high": 8.9,
+          "low": 8.5,
+          "index": 29,
+          "close": 8.75
+        },
+        {
+          "type": "top",
+          "high": 8.97,
+          "low": 8.57,
+          "index": 30,
+          "close": 8.82
+        },
+        {
+          "type": "bottom",
+          "high": 8.85,
+          "low": 8.45,
+          "index": 31,
+          "close": 8.7
+        },
+        {
+          "type": "top",
+          "high": 9.02,
+          "low": 8.62,
+          "index": 32,
+          "close": 8.87
+        },
+        {
+          "type": "bottom",
+          "high": 9.0,
+          "low": 8.6,
+          "index": 33,
+          "close": 8.85
+        },
+        {
+          "type": "top",
+          "high": 9.27,
+          "low": 8.87,
+          "index": 34,
+          "close": 9.12
+        },
+        {
+          "type": "bottom",
+          "high": 9.0,
+          "low": 8.6,
+          "index": 35,
+          "close": 8.85
+        },
+        {
+          "type": "top",
+          "high": 9.02,
+          "low": 8.62,
+          "index": 36,
+          "close": 8.87
+        },
+        {
+          "type": "bottom",
+          "high": 8.85,
+          "low": 8.45,
+          "index": 37,
+          "close": 8.7
+        },
+        {
+          "type": "top",
+          "high": 8.97,
+          "low": 8.57,
+          "index": 38,
+          "close": 8.82
+        }
+      ],
+      "merged_zones": [],
+      "pivot_count": 0,
+      "timeframe": "weekly"
+    }
+  },
+  "wyckoff_midline": {
+    "spring_signal": false,
+    "spring_reason": "未满足弹簧条件",
+    "spring_price": null,
+    "upthrust_signal": false,
+    "upthrust_reason": "未满足上冲回落条件",
+    "upthrust_price": null,
+    "bc_signal": false,
+    "bc_reason": "未检测到购买高潮",
+    "bc_price": null,
+    "sow_signal": false,
+    "sow_reason": "未跌破支撑",
+    "sow_price": null,
+    "sc_signal": false,
+    "sc_reason": "未检测到卖力高潮",
+    "sc_price": null,
+    "bearish_volume_divergence": false,
+    "bullish_volume_divergence": false,
+    "ar_signal": false,
+    "ar_reason": "未检测到 BC，无法触发 AR",
+    "ar_price": null,
+    "sos_signal": false,
+    "sos_reason": "量能不足",
+    "sos_price": null,
+    "st_signal": false,
+    "st_reason": "未检测到 Spring，无法触发 ST",
+    "st_price": null,
+    "lps_signal": false,
+    "lps_reason": "未检测到有效 LPS（需 SOS→缩量回调）",
+    "lps_price": null,
+    "lpsy_signal": false,
+    "lpsy_reason": "价格 8.75 不在阻力 9.27 附近",
+    "lpsy_price": null,
+    "spring_vol_class": null,
+    "phase": "none",
+    "phase_label": "无明确阶段",
+    "phase_confidence_delta": 0.0,
+    "effort_no_result": false,
+    "no_supply": false,
+    "compression_signal": false,
+    "compression_reason": "数据不足",
+    "compression_price": null,
+    "trend_pullback_signal": false,
+    "trend_pullback_reason": "回撤不足（4.1% < 5.0%）",
+    "trend_pullback_price": null,
+    "wyckoff_summary": "无明显威科夫信号",
+    "timeframe": "weekly"
+  }
+}
