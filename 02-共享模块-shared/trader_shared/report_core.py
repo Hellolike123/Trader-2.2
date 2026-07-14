@@ -420,6 +420,14 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _wave_parts = _wave_mid.split(" · ", 1)
             _wave_state = _wave_parts[0]
             _wave_sig = _wave_parts[1] if len(_wave_parts) > 1 else ""
+            # 去矛盾：顶/底背驰同框时只保留与已解析方向一致者，避免「顶背驰｜底背驰」自相矛盾
+            if "顶背驰" in _wave_sig and "底背驰" in _wave_sig:
+                if _chan_dir_mid == "看跌":
+                    _wave_sig = "顶背驰"
+                elif _chan_dir_mid == "看涨":
+                    _wave_sig = "底背驰"
+                else:
+                    _wave_sig = ""
             _point_part = f" · {_chan_point_type}" if _chan_point_type else ""
             if _wave_sig:
                 _chan_display = f"{_wave_state}{_point_part} · {_chan_dir_mid} · {_wave_sig}"

@@ -474,6 +474,18 @@ def _chan_json_default(o):
         return o.tolist()
     return str(o)
 
+# 中文买卖点类型 → Signal Contract v2 规范类型名（缺失字典导致历史 NameError）
+_CHAN_TYPE_CANONICAL = {
+    "一类买": "chan_buy_1",
+    "类二买": "chan_buy_like2",
+    "二类买": "chan_buy_2",
+    "三类买": "chan_buy_3",
+    "一类卖": "chan_sell_1",
+    "二类卖": "chan_sell_2",
+    "三类卖": "chan_sell_3",
+}
+
+
 def _chan_type_canonical(cn_type: str) -> str:
     """将中文买卖点类型映射为 Signal Contract v2 规范类型名。"""
     return _CHAN_TYPE_CANONICAL.get(cn_type, cn_type)

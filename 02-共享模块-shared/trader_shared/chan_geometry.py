@@ -335,8 +335,9 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5, bars: lis
         if j >= num:
             break
 
-        # P1: 在转折点（同向不更极端的分型）之前的范围内，
-        # 扫描所有合格反向分型，选最极端的作为笔端点
+        # 缠论笔定义：从起点出发，取【第一个】距离合格的反向分型成笔，
+        # 不往前延伸至「最极端」分型。过度延伸会吞掉本应独立的笔，
+        # 导致笔→线段→中枢→背驰→买卖点全链路失真（这是历史“胡算”根因之一）。
         best_end = None
         best_j = None
         while j < num:
@@ -346,17 +347,11 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5, bars: lis
                 # 同向分型 → 转折点，停止扫描
                 break
 
-            # 反向分型：距离合格则跟踪最极端候选
+            # 反向分型：第一个距离合格者即笔终点（缠论标准）
             if f["index"] - start["index"] >= min_bars_per_stroke - 1:
-                if best_end is None:
-                    best_end = f
-                    best_j = j
-                elif start["type"] == "bottom" and f["high"] > best_end["high"]:
-                    best_end = f
-                    best_j = j
-                elif start["type"] == "top" and f["low"] < best_end["low"]:
-                    best_end = f
-                    best_j = j
+                best_end = f
+                best_j = j
+                break
 
             j += 1
 

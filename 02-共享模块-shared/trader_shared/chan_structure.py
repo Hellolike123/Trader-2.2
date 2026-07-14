@@ -24,6 +24,7 @@ try:
         CHAN_WEEKLY_TREND_SEGS_MID,
         CHAN_WEEKLY_CONSOL_SEGS_HIGH,
         CHAN_WEEKLY_CONSOL_SEGS_MID,
+        CHAN_DIVERGENCE_FALLBACK_WINDOW,
     )
 except ImportError:
     CHANLUN_MIN_BARS = 20
@@ -44,6 +45,7 @@ except ImportError:
     CHAN_WEEKLY_TREND_SEGS_MID = 3
     CHAN_WEEKLY_CONSOL_SEGS_HIGH = 3
     CHAN_WEEKLY_CONSOL_SEGS_MID = 2
+    CHAN_DIVERGENCE_FALLBACK_WINDOW = 120
 
 from .chan_geometry import (
     _aggregate_bars,
@@ -832,10 +834,12 @@ def detect_divergence(bars: list[dict], strokes: list[dict] | None = None) -> di
                     else:
                         result["top_divergence"] = _stroke_force_weaker(a_prev, a_curr, "up")
 
-    # ── fallback：仅对「笔级未评估」的一侧使用全图峰谷 ──
+    # ── fallback：仅对「笔级未评估」的一侧使用【近期】峰谷（不扫全图历史）──
+    # 只扫最近 CHAN_DIVERGENCE_FALLBACK_WINDOW 根，避免把几年前的旧背离当现状。
+    _fb_start = max(2, n - CHAN_DIVERGENCE_FALLBACK_WINDOW)
     if not top_evaluated:
         peaks: list[dict[str, Any]] = []
-        for i in range(2, n - 2):
+        for i in range(_fb_start, n - 2):
             high = to_float(bars[i].get("high"))
             h_prev = to_float(bars[i - 1].get("high"))
             h_next = to_float(bars[i + 1].get("high"))
@@ -853,7 +857,7 @@ def detect_divergence(bars: list[dict], strokes: list[dict] | None = None) -> di
 
     if not bottom_evaluated:
         troughs: list[dict[str, Any]] = []
-        for i in range(2, n - 2):
+        for i in range(_fb_start, n - 2):
             low = to_float(bars[i].get("low"))
             l_prev = to_float(bars[i - 1].get("low"))
             l_next = to_float(bars[i + 1].get("low"))
