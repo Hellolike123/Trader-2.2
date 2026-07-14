@@ -39,46 +39,6 @@ def render_single(r: dict[str, Any]) -> str:
     return render_single_legacy(r)
 
 
-def _render_combo(r: dict[str, Any]) -> list[str]:
-    """组合策略共振段（combo）：520 + 箱体 + 缠论买卖点 + 关键价 的合成定论。
-
-    report_builder 已把 synthesize_combo_verdict 结果挂到 r["combo"]。
-    无 combo 时返回空（不渲染）。
-    """
-    _combo = r.get("combo")
-    if not isinstance(_combo, dict):
-        return []
-    _v = str(_combo.get("verdict") or "").upper()
-    _bias = {"bull": "看多", "bear": "看空", "neutral": "中性"}.get(_combo.get("bias"), "中性")
-    _conf = {"high": "高", "mid": "中", "low": "低"}.get(_combo.get("confidence"), "低")
-    _score = _combo.get("score")
-    _score_txt = f"{_score:+.2f}" if isinstance(_score, (int, float)) else "0.00"
-
-    out: list[str] = []
-    out.append("")
-    out.append("🎯 组合策略共振")
-    out.append(f"  定论：{_v}（{_bias}·共识{_conf}·净分{_score_txt}）")
-    for m in _combo.get("matrix", []):
-        _arrow = {1: "多", 0: "中", -1: "空"}.get(m.get("dir", 0), "中")
-        _w = f"{m['weight']:.2f}" if m.get("weight") else "-"
-        out.append(f"    {m['name']}：{_arrow} {m.get('label', '')}（权{_w}）")
-    _e = _combo.get("entry")
-    _s = _combo.get("stop")
-    _t = _combo.get("take")
-    _pts: list[str] = []
-    if _e:
-        _pts.append(f"入场 {_e:.2f}")
-    if _s:
-        _pts.append(f"止损 {_s:.2f}")
-    if _t:
-        _pts.append(f"目标 {_t:.2f}")
-    if _pts:
-        out.append(f"  合成价位：{' ｜ '.join(_pts)} ｜ 仓位≤{_combo.get('position_cap')}%")
-    _note = _combo.get("note")
-    if _note:
-        out.append(f"  注记：{_note}")
-    return out
-
 
 def _reformat_mid_line(line: str) -> str:
     """中线关键价行格式转换：价格前置 + 动作统一。
@@ -878,8 +838,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
         else:
             lines.append("  T0：观察关键价即可")
 
-    # ── 🎯 组合策略共振（combo）──
-    lines.extend(_render_combo(r))
+    # ── 🎯 组合策略共振（combo）已暂停渲染：箱体先做独立模块，暂不进报告 ──
 
     # 「说明」行已删除（与出手行语义重复）
 

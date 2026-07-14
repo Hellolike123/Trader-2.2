@@ -20,6 +20,9 @@
 - 融合层三评委：chan(缠论) / momentum(动能) / vpf(价量资金) + HMM regime 动态权重（`get_regime_weights` + `_apply_main_force_weights`）。注意：**短线第三评委是 vpf，非 wyckoff**——威科夫已移至中线周线分析，不参与短线加权。新增指标**不要**当第 4 个固定权重评委。
 - 展示型指标（如 Supertrend/VWAP）走 `plugins/` + `display_only=True`，`merge_decisions_from_plugins` 只把 chan/mom/vpf 喂融合 → 天然污染不到 `weighted_score`。
 - 止损以 `structure_core` ATR trailing + `stage_positioning` 三者取高（只紧不松）为准，新增趋势带只标「参考」不替换。
+- **组合共振（combo，区别于融合层）**：`combo_strategy.synthesize_combo_verdict` 消费 520(mistery)/箱体(box)/缠论买卖点(chan)/关键价(key) 四源方向×权重，合成 buy/hold/sell/watch 定论 + 共振矩阵 + 合成买卖点。它不参与 `weighted_score` 加权，是另一层「展示型共振」。
+- ⚠️ **模块边界铁律（2026-07-14 用户明确）**：`box_detect`（箱体）是**独立模块**，**绝不进本报告渲染**（用户「箱体先不进报告」）。中线只合成「威科夫中线 + 缠论中线」(synthesize_midline_verdict)，不引用 box。
+- **combo / 箱体 已暂停接入报告（2026-07-14）**：`report_builder.py` 的 combo 接线块、`report_core.py` 的 `_render_combo` 渲染均已**摘除**（仅留"暂不接入"注释）。`box_detect.py` 与 `combo_strategy.py` 两个模块 + 其单测（`test_box_detect.py`、`test_combo_strategy.py`）**保留并仍在门禁内**——箱体作为独立模块单独演进，后续若要进报告再接回。等价性基线 `report_render_baseline.txt` 已重抓（42 行，无 combo 段），门禁 87 passed。
 
 ## 测试
 

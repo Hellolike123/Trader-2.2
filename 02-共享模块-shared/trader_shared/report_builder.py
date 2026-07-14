@@ -1412,26 +1412,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         discipline = merge_discipline(mistery_gate, chan_d, max_position_pct=50)
         report["discipline"] = discipline
 
-        # ── 组合策略共振合成（combo）：520 + 箱体 + 缠论买卖点 + 关键价 ──
-        try:
-            from trader_shared.box_detect import detect_box
-            from trader_shared.combo_strategy import synthesize_combo_verdict
-            _box_r = detect_box(bars, current=current, ma20_vol=None)
-            _combo = synthesize_combo_verdict(
-                mistery=report.get("mistery_gate"),
-                box=_box_r,
-                chan={
-                    "buy_points": levels.get("chan_buy_points") or [],
-                    "sell_points": levels.get("chan_sell_points") or [],
-                },
-                key=report.get("key_prices"),
-                current=current, ma5=_ma5, ma10=_ma10, ma20=_ma20,
-            )
-            report["box"] = _box_r
-            report["combo"] = _combo
-        except Exception:
-            report.setdefault("combo", None)
-            report.setdefault("box", None)
+        # NOTE: 箱体(box_detect) / 组合共振(combo_strategy) 作为独立可测模块保留，
+        #       暂不接入本报告渲染。用户决策：箱体优先做独立模块，先不进报告；
+        #       组合报告亦暂缓。模块与单测保留，后续如需在报告呈现再接回。
 
         # 只收紧：禁止新开时裁 suggested_pct / 出手语义；R5 同步 position_info
         _disc_action = str(discipline.get("action") or mistery_gate.get("action") or "观望")
