@@ -126,10 +126,16 @@ def render_short_midline(r: dict[str, Any]) -> str:
         or "中性，观望"
     )
 
+    ma20_v = _ma_float("ma20")
+    ma250_v = _ma_float("ma250")
+    _ma20_text = f"{ma20_v:.2f}" if ma20_v else "--"
+    _ma250_text = f"{ma250_v:.2f}" if ma250_v else "--"
+    _ma250_warn = " ⚠️下方" if (current > 0 and ma250_v and current < ma250_v) else ""
+
     lines: list[str] = [
         f"分析报告 — {name}（{code}）｜短中线",
         "",
-        f"现价 {current:.2f}（{change_pct:+.2f}%）",
+        f"现价 {current:.2f}（{change_pct:+.2f}%）｜MA20 {_ma20_text}｜MA250 {_ma250_text}{_ma250_warn}",
     ]
 
     # 盘中诚实标注：实时价已锚定，但策略判定基于截至该日收盘的真实日线
@@ -276,10 +282,6 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _cap_parts.append(_margin_part)
         if _cap_parts:
             lines.append(f"  资金面：{' ｜ '.join(_cap_parts)}")
-
-    ma250_val = _ma_float("ma250")
-    if current > 0 and ma250_val is not None and current < ma250_val:
-        lines.append(f"  ⚠️ 股价在年线（{ma250_val:.2f}）下方运行，注意风险")
 
     mid = conclusion.get("midline") or "中线观察"
     short = conclusion.get("shortline") or "观察"
