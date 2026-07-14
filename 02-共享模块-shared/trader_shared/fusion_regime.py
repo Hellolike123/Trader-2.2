@@ -6,18 +6,29 @@
 
 设计文档: docs/designs/decision-fusion-layer.md
 
-未来: 权重矩阵迁移到 yaml 配置文件。
+权重矩阵已外置到 config/fusion_regime_weights.yaml（yaml 缺失/损坏自动回退内置兜底）。
 """
 
 from __future__ import annotations
 
+import logging
 import math
+from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # ── Regime → 权重映射 ──
 
 # 权重矩阵: 每个 Regime 是一组权重, 和为 1.0
-REGIME_WEIGHTS: dict[str, dict[str, float]] = {
+#
+# 已外置到 config/fusion_regime_weights.yaml（复用 rule_engine 的 yaml 加载约定）。
+# 修改 yaml 即可调参, 无需改代码、无需重新打包（覆盖同名文件热更新）。
+# yaml 缺失 / 格式错误 / pyyaml 未装时, 自动回退到下方 _FALLBACK_REGIME_WEIGHTS,
+# 行为与历史硬编码完全一致。
+
+# 内置兜底（= 历史硬编码默认值，禁止删除，作为安全网）
+_FALLBACK_REGIME_WEIGHTS: dict[str, dict[str, float]] = {
     # 短线三席：缠论 / 动能 / 价量资金(vpf)；日线威科夫已退出融合
     # 大盘好 → 动量占优 (趋势延续靠动量)
     "正常": {"chan": 0.3, "momentum": 0.45, "vpf": 0.25},
@@ -28,6 +39,50 @@ REGIME_WEIGHTS: dict[str, dict[str, float]] = {
     # 未知 → fallback 到"正常" (保守)
     "未知": {"chan": 0.3, "momentum": 0.45, "vpf": 0.25},
 }
+
+# yaml 配置文件路径（相对本模块，兼容 editable 安装与打包副本两种布局）
+_YAML_PATH = Path(__file__).parent / "config" / "fusion_regime_weights.yaml"
+
+
+def _load_regime_weights() -> dict[str, dict[str, float]]:
+    """从 yaml 加载 Regime 权重；yaml 不可用时回退内置默认值。
+
+    以 _FALLBACK_REGIME_WEIGHTS 为基底，再用 yaml 中合法条目覆盖（merge）。
+    任一 regime 若缺少 chan/momentum/vpf 三键或值非数字，则跳过该条保留兜底。
+    整个过程被 try 包裹，任何异常（文件缺失 / 损坏 / pyyaml 未装）都静默回退兜底。
+    """
+    weights: dict[str, dict[str, float]] = {
+        k: dict(v) for k, v in _FALLBACK_REGIME_WEIGHTS.items()
+    }
+    try:
+        import yaml  # 懒加载：环境无 pyyaml 时不影响模块导入
+
+        with open(_YAML_PATH, encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        yaml_weights = data.get("regime_weights") if isinstance(data, dict) else None
+        if not isinstance(yaml_weights, dict):
+            logger.debug("fusion_regime: yaml 无 regime_weights 段，使用内置兜底权重")
+            return weights
+        for regime, w in yaml_weights.items():
+            if not isinstance(w, dict) or not all(
+                k in w for k in ("chan", "momentum", "vpf")
+            ):
+                continue
+            try:
+                weights[regime] = {
+                    "chan": float(w["chan"]),
+                    "momentum": float(w["momentum"]),
+                    "vpf": float(w["vpf"]),
+                }
+            except (TypeError, ValueError):
+                continue
+    except Exception as exc:  # 文件缺失 / 损坏 / pyyaml 未装 → 兜底
+        logger.debug("fusion_regime: 权重 yaml 加载失败，回退内置兜底: %s", exc)
+    return weights
+
+
+# 运行时权重（模块加载时确定一次；测试可 monkeypatch _YAML_PATH 后重跑本函数验证回退）
+REGIME_WEIGHTS: dict[str, dict[str, float]] = _load_regime_weights()
 
 
 def get_regime_weights(regime: str) -> dict[str, float]:
