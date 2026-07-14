@@ -56,6 +56,66 @@ def _validate_plain_report_format(lines: list[str], markdown: str) -> list[str]:
     return errors
 
 
+def _validate_gates(markdown: str, report: dict | None = None) -> list[str]:
+    """GATE 1-3 enforcement: code-level gate checks that the Agent might skip.
+
+    These checks mirror the Inversion gates in AGENT.md §0 and SKILL.md §GATES.
+    If the Agent outputs a report without satisfying a gate, these produce
+    hard errors that prevent the report from being presented to the user.
+    """
+    errors: list[str] = []
+    if not report:
+        return errors  # backward compat — no facts available
+
+    data_status = str(report.get("data_status") or "")
+    theory_conflict = report.get("theory_fusion_conflict", False)
+    weighted_score = float(report.get("fusion_weighted_score") or 0)
+    confidence = float(report.get("fusion_confidence") or 0)
+    regime = str((report.get("fusion") or {}).get("regime") or report.get("market_env") or "")
+    fusion_signals = report.get("fusion_signals_detail") or {}
+    major_stage = str(report.get("major_stage") or "")
+    disagreement = sum(
+        1 for s in fusion_signals.values()
+        if isinstance(s, dict) and s.get("direction", 0) != 0
+    )
+
+    # ── GATE 1: data completeness ──
+    if data_status == "partial":
+        if "⚠️ 数据不完整" not in markdown:
+            errors.append("GATE 1 FAIL: data_status=partial but report missing '⚠️ 数据不完整' prefix")
+    elif data_status == "degraded":
+        if "数据不完整" not in markdown and "degraded" not in markdown:
+            errors.append("GATE 1 FAIL: data_status=degraded but no data-quality warning in report")
+
+    # ── GATE 2: signal contradiction ──
+    if theory_conflict:
+        if "矛盾" not in markdown and "冲突" not in markdown:
+            errors.append("GATE 2 FAIL: theory_fusion_conflict=True but no contradiction explanation in report")
+
+    if major_stage == "衰退" and weighted_score > 0.3:
+        if "衰退" not in markdown or "不参与" not in markdown:
+            errors.append("GATE 2 FAIL: major_stage=衰退 + weighted_score>0.3 but report does not state '不参与'")
+
+    if major_stage == "派发" and weighted_score > 0.25:
+        if "派发" not in markdown or ("不加仓" not in markdown and "退出" not in markdown):
+            errors.append("GATE 2 FAIL: major_stage=派发 + weighted_score>0.25 but report does not state '不加仓/退出'")
+
+    # ── GATE 3: direction rules ──
+    if isinstance(regime, str) and "很差" in regime:
+        if "暂不碰" not in markdown:
+            errors.append("GATE 3 FAIL: regime=很差 but report missing '暂不碰' veto")
+
+    if confidence < 0.3 and confidence > 0:
+        if "信号弱" not in markdown and "轻仓" not in markdown:
+            errors.append("GATE 3 FAIL: confidence<0.3 but report missing '信号弱/轻仓' downgrade")
+
+    if isinstance(disagreement, int) and disagreement > 1:
+        if "分歧" not in markdown and "谨慎" not in markdown:
+            errors.append("GATE 3 FAIL: disagreement>1 but report missing '分歧/谨慎' warning")
+
+    return errors
+
+
 def _validate_fixed_content(lines: list[str], markdown: str) -> list[str]:
     errors: list[str] = []
     for required in ("止损", "买"):
@@ -64,10 +124,11 @@ def _validate_fixed_content(lines: list[str], markdown: str) -> list[str]:
     return errors
 
 
-def validate_trader(markdown: str) -> list[str]:
+def validate_trader(markdown: str, report: dict | None = None) -> list[str]:
     errors: list[str] = []
     lines = nonempty_lines(markdown)
     errors.extend(_validate_plain_report_format(lines, markdown))
+    errors.extend(_validate_gates(markdown, report))
     
     # Refactoring in progress — headings validated only after finalized
     #errors.extend(validate_headings(lines, TRADER_HEADINGS_V2, "headings must follow Trader V2 panel order"))

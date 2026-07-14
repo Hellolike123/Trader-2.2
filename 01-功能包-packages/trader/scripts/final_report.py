@@ -114,7 +114,7 @@ def main() -> int:
     print("__CHECKLIST__:" + "\n".join(_avail), file=sys.stderr)
 
     markdown = render_markdown(report)
-    errors = validate(markdown)
+    errors = validate(markdown, report)
     if errors:
         print("Trader generated invalid output:", file=sys.stderr)
         for error in errors:
