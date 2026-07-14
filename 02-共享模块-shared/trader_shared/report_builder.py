@@ -317,6 +317,22 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         weekly_bars=weekly_bars, midline=True,
     )
     chan_result = _plugin_results.get("chanlun") or {}        # 日线；_chan_to_signal 会自己剥
+
+    # ── 区间套接入：日线买卖点经 30m 确认（门禁/网络异常时优雅降级）──
+    # 数据走 DataProvider.fetch_kline(sec, "30", datalen)，生产环境本机 eastmoney/tdx 取数；
+    # 异常（网络失败 / 门禁用 TRADER_CHAN_NESTING=0 禁用以保确定性）时跳过 →
+    # chan_result 保持原样（等价性闸门：对未启用的环境零副作用）。
+    import os
+    if os.environ.get("TRADER_CHAN_NESTING") != "0":
+        try:
+            from trader_shared.chan_nesting import confirm_daily_with_lower
+            if isinstance(chan_result, dict) and provider is not None:
+                _lower = provider.fetch_kline(snapshot.security, "30", 800)
+                if _lower:
+                    chan_result = confirm_daily_with_lower(
+                        chan_result, _lower, lower_timeframe="30m", symbol=target)
+        except Exception as _nest_e:
+            _logger.debug(f"[nesting] 30m 区间套确认跳过: {_nest_e}")
     chan_mid_result = _plugin_results.get("chanlun_midline") or {}
     wyck_result = _plugin_results.get("wyckoff") or {}
     wyck_mid_result = _plugin_results.get("wyckoff_midline") or {}

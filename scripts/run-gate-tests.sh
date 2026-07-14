@@ -20,6 +20,10 @@ PYTHON="${TRADER_CI_PYTHON:-/Users/like/.workbuddy/binaries/python/envs/default/
 # PYTHONPATH 顺序敏感：shared 必须在前，否则 config 会解析到 trader_shared/config.py 导致收集失败
 export PYTHONPATH="02-共享模块-shared:01-功能包-packages/trader/scripts"
 
+# 区间套确认需 30m 数据（生产环境本机 eastmoney/tdx 取数），CI/离线不可达；
+# 禁用以保证门禁确定性（report_builder 接入点会优雅跳过，等价性闸门成立）。
+export TRADER_CHAN_NESTING=0
+
 # 离线稳定核心回归集（锁定）。新增离线测试请显式加入此数组。
 # 当前基线：68 passed / 1 warning / ~63s
 TESTS=(
@@ -39,6 +43,7 @@ TESTS=(
   "02-共享模块-shared/tests/test_wyckoff_split_equivalence.py"
   "02-共享模块-shared/tests/test_chan_split_equivalence.py"
   "02-共享模块-shared/tests/test_stage_split_equivalence.py"
+  "02-共享模块-shared/trader_shared/test_chan_nesting.py"
   "01-功能包-packages/trader/tests/test_report_renderer.py"
 )
 
