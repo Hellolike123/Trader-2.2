@@ -15,10 +15,12 @@ Token 从环境变量 TUSHARE_TOKEN 读取；未设置时所有查询返回空�
 """
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
 import warnings
+from pathlib import Path
 from typing import Any
 
 # ── 配置 ──────────────────────────────────────────────────────────────────
@@ -28,10 +30,21 @@ _MIN_INTERVAL = 0.6  # 100次/分钟 ≈ 0.6s/请求
 
 
 def _get_token() -> str:
-    # 优先环境变量，其次配置文件
+    # 优先级: 环境变量 > skill 包内 config.json > tushare_config.py > 空
     token = os.environ.get("TUSHARE_TOKEN", "").strip()
     if token:
         return token
+    # 尝试 skill 包内的 config.json（pack_all.py 打包时自动写入）
+    _skill_root = Path(__file__).resolve().parent.parent.parent
+    _cfg = _skill_root / "config.json"
+    if _cfg.exists():
+        try:
+            cfg = json.loads(_cfg.read_text(encoding="utf-8"))
+            t = str(cfg.get("tushare_token", "")).strip()
+            if t:
+                return t
+        except Exception:
+            pass
     try:
         from trader_shared.tushare_config import TUSHARE_TOKEN
         return str(TUSHARE_TOKEN).strip()

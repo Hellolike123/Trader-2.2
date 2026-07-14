@@ -314,6 +314,21 @@ def main(args: list[str] | None = None) -> int:
         meta = meta_templates.get(skill_slug, {"name": skill_slug, "version": version})
         (staged / "_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
+        # ── Write config.json ──
+        # 打包时从环境变量读取 Tushare 配置，写入 skill 包
+        # 这样其他 Agent 拿到 skill 后开箱即用，无需手动配置
+        _cfg = {}
+        for _var in ("TUSHARE_TOKEN", "TUSHARE_API_URL", "TUSHARE_REALTIME_URL"):
+            _val = os.environ.get(_var, "").strip()
+            if _val:
+                _cfg_key = _var.lower()
+                _cfg[_cfg_key] = _val
+        if _cfg:
+            (staged / "config.json").write_text(
+                json.dumps(_cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            )
+            print(f"  [config] {len(_cfg)} vars written to config.json ({skill_slug})")
+
         # Write SKILL.md if not already present
         skill_md_path = staged / "SKILL.md"
         if not skill_md_path.exists():
