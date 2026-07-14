@@ -211,7 +211,7 @@ def _momentum_to_signal(momentum_result: dict) -> dict:
     signals_list = mom.get("signals", [])
 
     # direction 字符串决定方向 (保持原始判断)
-    dir_map = {"bullish": 1, "bearish": -1, "neutral": 0}
+    dir_map = {"bullish": 1, "bearish": -1, "neutral": 0, "insufficient": 0}
     direction = dir_map.get(direction_str, 0)
 
     # score 决定置信度
@@ -222,7 +222,8 @@ def _momentum_to_signal(momentum_result: dict) -> dict:
     if direction != 0 and score <= 45:
         confidence = min(confidence, 0.4)
 
-    reason = "、".join(signals_list[-2:]) if signals_list else "动量中性"
+    _def_reason = "动量数据不足" if direction_str == "insufficient" else "动量中性"
+    reason = "、".join(signals_list[-2:]) if signals_list else _def_reason
     return {
         "direction": direction,
         "confidence": confidence,

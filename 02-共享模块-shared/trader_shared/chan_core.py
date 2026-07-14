@@ -2181,4 +2181,8 @@ def format_chanlun_theory_line(chan_result: Any) -> str:
         direction = -1
 
     dir_label = "看涨" if direction > 0 else ("看跌" if direction < 0 else "中性")
-    return f"{main}·{dir_label}"
+    # 回退标注：周线不足时用日线分析，诚实提示
+    _tf_suffix = ""
+    if chan.get("timeframe") == "daily_fallback":
+        _tf_suffix = "（日线）"
+    return f"{main}·{dir_label}{_tf_suffix}"

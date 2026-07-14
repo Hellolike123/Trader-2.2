@@ -1865,9 +1865,10 @@ def format_wyckoff_oneline(
         )
         if has_run:
             _phase = wyk.get("phase_label") or ""
+            _tf2 = "（日线）" if wyk.get("timeframe") == "daily_fallback" else ""
             if show_phase and _phase and "无明确阶段" not in _phase:
-                return f"威科夫：{_phase} · 暂无事件 · 中性"
-            return "威科夫：暂无事件 · 中性"
+                return f"威科夫：{_phase} · 暂无事件 · 中性{_tf2}"
+            return f"威科夫：暂无事件 · 中性{_tf2}"
         return "威科夫：数据不足 · 中性"
 
     # 外部 fusion direction 可覆盖展示方向（保持与融合层一致）
@@ -1879,5 +1880,9 @@ def format_wyckoff_oneline(
         _phase = wyk.get("phase_label") or ""
         if _phase and "无明确阶段" not in _phase:
             phase_prefix = f"{_phase} · "
-    # 句式：威科夫：{判断} · {偏多|偏空|中性}（说明）
-    return f"威科夫：{phase_prefix}{main} · {_dir_label(d)}（{note}）"
+    # 回退标注：周线不足时用日线分析，诚实提示
+    _tf_suffix = ""
+    if wyk.get("timeframe") == "daily_fallback":
+        _tf_suffix = "（日线）"
+    # 句式：威科夫：{判断} · {偏多|偏空|中性}（说明）{回退标注}
+    return f"威科夫：{phase_prefix}{main} · {_dir_label(d)}（{note}）{_tf_suffix}"

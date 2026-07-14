@@ -164,7 +164,7 @@ def calc_bollinger(closes: list[float], period: int = 20, num_std: float = 2.0) 
 
 def assess_momentum(bars: list[dict]) -> dict[str, Any]:
     if len(bars) < 30:
-        return {"direction": "neutral", "score": 50, "signals": [], "rsi": None, "macd": None, "adx": None, "bollinger": None, "strength": "insufficient"}
+        return {"direction": "insufficient", "score": 50, "signals": [], "rsi": None, "macd": None, "adx": None, "bollinger": None, "strength": "insufficient"}
     closes: list[float] = []
     highs: list[float] = []
     lows: list[float] = []
@@ -178,7 +178,7 @@ def assess_momentum(bars: list[dict]) -> dict[str, Any]:
         highs.append(h)
         lows.append(l_)
     if len(closes) < 30:
-        return {"direction": "neutral", "score": 50, "signals": [], "strength": "insufficient"}
+        return {"direction": "insufficient", "score": 50, "signals": [], "strength": "insufficient"}
     rsi = calc_rsi(closes, 14)
     macd = calc_macd(closes)
     adx = calc_adx(highs, lows, closes, 14)
