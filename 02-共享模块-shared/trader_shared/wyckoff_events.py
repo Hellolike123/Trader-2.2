@@ -1,0 +1,1249 @@
+"""Wyckoff event detectors (leaf)."""
+from __future__ import annotations
+
+import json
+import os
+from typing import Any
+
+from trader_shared.light_data import to_float
+
+# ── Wyckoff 打分权重常量（均衡型） ----
+# 优雅动态导入配置，提供强兼容性的 fallback 默认值
+try:
+    from trader_shared.config import (
+        WYCKOFF_MIN_BARS,
+        WYCKOFF_BC_VOL_RATIO_THRESHOLD,
+        WYCKOFF_BC_CHANGE_THRESHOLD,
+        WYCKOFF_BC_UPPER_SHADOW_RATIO,
+        WYCKOFF_BC_MIN_POS_PCT,
+        WYCKOFF_SOW_SUPPORT_LOOKBACK,
+        WYCKOFF_SOW_VOL_RATIO_THRESHOLD,
+        WYCKOFF_SOW_CONSECUTIVE_DAYS,
+        WYCKOFF_SPRING_SUPPORT_LOOKBACK,
+        WYCKOFF_SPRING_RECLAIM_RATIO,
+        WYCKOFF_SPRING_ATR_MULTIPLE,
+        WYCKOFF_SPRING_BULLISH_VOL_RATIO,
+        WYCKOFF_SPRING_LOW_VOL_RATIO,
+        WYCKOFF_UTAD_BREAKOUT_RATIO,
+        WYCKOFF_UTAD_RECLAIM_RATIO,
+        WYCKOFF_UT_VOL_RATIO,
+        WYCKOFF_DIVERGENCE_BARS,
+        WYCKOFF_DIVERGENCE_RATIO,
+        WYCKOFF_PHASE_LOOKBACK,
+        WYCKOFF_VSA_AVG_SPREAD_PERIOD,
+        # Wyckoff Score 权重
+        WYCKOFF_SCORE_SPRING,
+        WYCKOFF_SCORE_SPRING_BULLISH_DIV_BONUS,
+        WYCKOFF_SCORE_BULLISH_DIV,
+        WYCKOFF_SCORE_UT,
+        WYCKOFF_SCORE_BEARISH_DIV,
+        WYCKOFF_SCORE_BC,
+        WYCKOFF_SCORE_SOW,
+        WYCKOFF_SCORE_MAX_ABS,
+        # 新增经典信号权重
+        WYCKOFF_SCORE_AR,
+        WYCKOFF_SCORE_SOS,
+        WYCKOFF_SCORE_ST,
+        WYCKOFF_SCORE_LPS,
+        WYCKOFF_SCORE_LPSY,
+        # P2/P3 新增
+        WYCKOFF_SCORE_COMPRESSION,
+        WYCKOFF_SCORE_TREND_PB,
+        WYCKOFF_COMPRESSION_LOOKBACK,
+        WYCKOFF_COMPRESSION_ATR_QUANTILE,
+        WYCKOFF_COMPRESSION_VOL_RATIO,
+        WYCKOFF_COMPRESSION_VOL_REF_WINDOW,
+        WYCKOFF_TREND_PB_LOOKBACK,
+        WYCKOFF_TREND_PB_MIN_PULLBACK,
+        WYCKOFF_TREND_PB_MAX_PULLBACK,
+        WYCKOFF_TREND_PB_VOL_SHRINK,
+        WYCKOFF_TREND_PB_MA_WINDOW,
+    )
+except ImportError:
+    WYCKOFF_MIN_BARS = 15
+    WYCKOFF_BC_VOL_RATIO_THRESHOLD = 1.8  # must match config.py
+    WYCKOFF_BC_CHANGE_THRESHOLD = 1.0
+    WYCKOFF_BC_UPPER_SHADOW_RATIO = 0.02
+    WYCKOFF_BC_MIN_POS_PCT = 0.65
+    WYCKOFF_SOW_SUPPORT_LOOKBACK = 10
+    WYCKOFF_SOW_VOL_RATIO_THRESHOLD = 1.0
+    WYCKOFF_SOW_CONSECUTIVE_DAYS = 1
+    WYCKOFF_SPRING_SUPPORT_LOOKBACK = 10
+    WYCKOFF_SPRING_RECLAIM_RATIO = 0.985
+    WYCKOFF_SPRING_ATR_MULTIPLE = 0.5
+    WYCKOFF_SPRING_BULLISH_VOL_RATIO = 1.3
+    WYCKOFF_SPRING_LOW_VOL_RATIO = 0.8
+    WYCKOFF_UTAD_BREAKOUT_RATIO = 1.005
+    WYCKOFF_UTAD_RECLAIM_RATIO = 0.995
+    WYCKOFF_UT_VOL_RATIO = 1.2
+    WYCKOFF_DIVERGENCE_BARS = 5
+    WYCKOFF_DIVERGENCE_RATIO = 0.85
+    WYCKOFF_PHASE_LOOKBACK = 60
+    WYCKOFF_VSA_AVG_SPREAD_PERIOD = 20
+    # Wyckoff Score 权重 fallback
+    WYCKOFF_SCORE_SPRING = 25
+    WYCKOFF_SCORE_SPRING_BULLISH_DIV_BONUS = 5
+    WYCKOFF_SCORE_BULLISH_DIV = 10
+    WYCKOFF_SCORE_UT = -20
+    WYCKOFF_SCORE_BEARISH_DIV = -10
+    WYCKOFF_SCORE_BC = -15
+    WYCKOFF_SCORE_SOW = -10
+    WYCKOFF_SCORE_MAX_ABS = 95
+    # 新增经典信号权重 fallback
+    WYCKOFF_SCORE_AR = 10
+    WYCKOFF_SCORE_SOS = 15
+    WYCKOFF_SCORE_ST = 8
+    WYCKOFF_SCORE_LPS = 12
+    # LPSY 最后供应点（负向，对称于 LPS）
+    WYCKOFF_SCORE_LPSY = -12
+    # P2/P3 fallback
+    WYCKOFF_SCORE_COMPRESSION = 10
+    WYCKOFF_SCORE_TREND_PB = 8
+    WYCKOFF_COMPRESSION_LOOKBACK = 20
+    WYCKOFF_COMPRESSION_ATR_QUANTILE = 0.20
+    WYCKOFF_COMPRESSION_VOL_RATIO = 0.60
+    WYCKOFF_COMPRESSION_VOL_REF_WINDOW = 60
+    WYCKOFF_TREND_PB_LOOKBACK = 10
+    WYCKOFF_TREND_PB_MIN_PULLBACK = 5.0
+    WYCKOFF_TREND_PB_MAX_PULLBACK = 20.0
+    WYCKOFF_TREND_PB_VOL_SHRINK = 0.60
+    WYCKOFF_TREND_PB_MA_WINDOW = 20
+
+
+# ── 共享工具：Spring 刺穿深度 / BC 高位过滤 ─────────────────────────
+
+
+def _spring_breach_level(support: float, bar: dict | None = None) -> float:
+    """Spring 刺穿深度线：优先 ATR，fallback 固定比例。
+
+    与 _detect_spring / _detect_st 共用，避免 ST 回扫用固定 1.5% 而 Spring 用 ATR。
+    """
+    atr14 = to_float(bar.get("atr14")) if bar else None
+    if atr14 is not None and atr14 > 0:
+        return support - atr14 * WYCKOFF_SPRING_ATR_MULTIPLE
+    return support * WYCKOFF_SPRING_RECLAIM_RATIO
+
+def _price_pos_pct(bars: list[dict], idx: int, lookback: int | None = None) -> float | None:
+    """计算 bars[idx] 收盘价在近窗高低区间中的位置 (0=底, 1=顶)。"""
+    if idx < 0 or idx >= len(bars):
+        return None
+    lb = lookback or WYCKOFF_SPRING_SUPPORT_LOOKBACK
+    start = max(0, idx - lb)
+    window = bars[start:idx + 1]
+    highs = [to_float(b.get("high")) for b in window]
+    lows = [to_float(b.get("low")) for b in window]
+    valid_h = [h for h in highs if h is not None]
+    valid_l = [lo for lo in lows if lo is not None]
+    close = to_float(bars[idx].get("close"))
+    high = to_float(bars[idx].get("high"))
+    if not valid_h or not valid_l or close is None:
+        return None
+    range_hi = max(valid_h)
+    range_lo = min(valid_l)
+    span = range_hi - range_lo
+    if span <= 0:
+        return 1.0  # 无波动时视为中性高位
+    # 用 high/close 较高者判定是否在高位区
+    ref = max(close, high if high is not None else close)
+    return (ref - range_lo) / span
+
+def _is_bc_high_position(bars: list[dict], idx: int) -> bool:
+    """BC 高位过滤：须处于近窗价格区间上沿。"""
+    pos = _price_pos_pct(bars, idx)
+    if pos is None:
+        return False
+    return pos >= WYCKOFF_BC_MIN_POS_PCT
+
+def _is_frozen_board(bar: dict) -> bool:
+    """检测一字板（开=高=低=收，全天几乎无波动）。A股涨跌停制度下无效换手。"""
+    o = to_float(bar.get("open"))
+    h = to_float(bar.get("high"))
+    l = to_float(bar.get("low"))
+    c = to_float(bar.get("close"))
+    if any(v is None for v in [o, h, l, c]) or c is None or c <= 0:
+        return False
+    day_range_pct = (h - l) / c * 100
+    return day_range_pct <= 1.0 and abs(o - c) / c * 100 <= 1.0
+
+def _board_vol_scale(symbol: str) -> float:
+    """按涨跌停幅度返回量能阈值缩放系数。20% 板块（创业板/科创板）放大 1.41x。"""
+    code = symbol.split(".")[0] if "." in symbol else symbol
+    if code.startswith(("300", "301", "688", "689")):
+        return 1.41  # sqrt(20/10)
+    return 1.0
+
+def _is_trading_range(bars: list[dict], lookback: int = 20) -> bool:
+    """检查近 N 日是否处于合理交易区间（ATR 振幅不超过 4x ATR%）。"""
+    if len(bars) < lookback + 1:
+        return True
+    recent = bars[-(lookback + 1):-1]
+    highs = [to_float(b.get("high")) for b in recent]
+    lows = [to_float(b.get("low")) for b in recent]
+    closes = [to_float(b.get("close")) for b in recent]
+    valid = [h for h in highs if h is not None] + [l for l in lows if l is not None]
+    if len(valid) < lookback:
+        return True
+    h_max = max(valid)
+    l_min = min(valid)
+    if l_min <= 0:
+        return False
+    range_pct = (h_max - l_min) / l_min * 100
+    # 计算 ATR
+    trs = []
+    for i in range(1, len(recent)):
+        h = to_float(recent[i].get("high"))
+        l = to_float(recent[i].get("low"))
+        pc = to_float(recent[i - 1].get("close"))
+        if h is None or l is None or pc is None:
+            continue
+        tr = max(h - l, abs(h - pc), abs(l - pc))
+        trs.append(tr)
+    if not trs:
+        return True
+    avg_tr = sum(trs) / len(trs)
+    last_c = to_float(recent[-1].get("close"))
+    if last_c is None or last_c <= 0:
+        return True
+    atr_pct = avg_tr / last_c * 100
+    max_allowed = max(atr_pct * 4, 30.0)  # 最低 30%
+    return range_pct <= max_allowed
+
+def _compute_dynamic_support(
+    bars: list[dict],
+    lookback: int = 10,
+    chan_zones: list[dict] | None = None,
+    chip_peaks: list[dict] | None = None,
+) -> float | None:
+    """从多个来源计算最佳支撑位。
+
+    优先级：
+    1. 缠论中枢下沿（zh_bottom）— 最可靠的结构性支撑
+    2. 筹码密集峰价格 — 量价支撑
+    3. 最近 N 日最低价 — 简单 fallback
+
+    Returns:
+        支撑位价格，或 None（数据不足）
+    """
+    current_price = to_float(bars[-1].get("close")) if bars else None
+    if current_price is None:
+        return None
+
+    candidates: list[float] = []
+
+    # 来源1：缠论中枢下沿
+    if chan_zones:
+        for z in chan_zones:
+            if isinstance(z, dict) and z.get("valid"):
+                zh_bottom = to_float(z.get("zh_bottom"))
+                if zh_bottom is not None and zh_bottom < current_price:
+                    candidates.append(zh_bottom)
+
+    # 来源2：筹码密集峰
+    if chip_peaks:
+        for p in chip_peaks:
+            if isinstance(p, dict):
+                price = to_float(p.get("price"))
+                if price is not None and price < current_price:
+                    candidates.append(price)
+
+    # 来源3：最近 N 日最低价（排除当前 bar）
+    recent = bars[-(lookback + 1):-1] if len(bars) > lookback else bars[:-1]
+    lows = [to_float(b.get("low")) for b in recent]
+    valid_lows = [l for l in lows if l is not None]
+    if valid_lows:
+        candidates.append(min(valid_lows))
+
+    if not candidates:
+        return None
+
+    # 选择最接近当前价的支撑位（但不能太近，至少低于当前价 0.5%）
+    min_gap = current_price * 0.005
+    valid_candidates = [c for c in candidates if current_price - c >= min_gap]
+    if not valid_candidates:
+        return min(candidates)  # 所有候选都太近，取最低的
+
+    # 取最接近当前价的（最高支撑）
+    return max(valid_candidates)
+
+def _detect_buying_climax(bars: list[dict]) -> dict:
+    """Detect Buying Climax (BC) — 天量滞涨，高位放量阴线。
+
+    P1 Fix: 扫描 bars[-5:] 而非仅 bars[-1]，任一满足 BC 条件即触发。
+    返回最近一次 BC 的信息。
+
+    Returns:
+        dict with keys: bc_signal (bool), bc_reason (str), bc_price (float)
+    """
+    if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1:
+        return {"bc_signal": False, "bc_reason": "数据不足", "bc_price": 0.0}
+
+    # P1 Fix: 扫描最近 5 根 K 线，任一满足 BC 条件即触发
+    scan_start = max(1, len(bars) - 5)
+    for scan_idx in range(len(bars) - 1, scan_start - 1, -1):
+        current = bars[scan_idx]
+        recent = bars[max(0, scan_idx - WYCKOFF_SPRING_SUPPORT_LOOKBACK):scan_idx]
+
+        cur_open = to_float(current.get("open"))
+        cur_high = to_float(current.get("high"))
+        cur_low = to_float(current.get("low"))
+        cur_close = to_float(current.get("close"))
+        cur_volume = to_float(current.get("volume"))
+
+        if any(v is None for v in [cur_open, cur_high, cur_low, cur_close, cur_volume]):
+            continue
+
+        # 量比计算
+        avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
+        if avg_volume <= 0:
+            continue
+
+        vol_ratio = cur_volume / avg_volume
+
+        # 涨幅计算（相对前收盘）
+        price_range = cur_high - cur_low if cur_high != cur_low else 1.0
+        prev_close = to_float(bars[scan_idx - 1].get("close")) if scan_idx >= 1 else cur_open
+        change_pct = (cur_close - prev_close) / max(prev_close, 0.01) * 100
+
+        # 上影线比例
+        real_body_top = max(cur_open, cur_close)
+        upper_shadow = cur_high - real_body_top
+        upper_shadow_ratio = upper_shadow / max(price_range, 0.01)
+
+        # BC 条件判断使用外置参数
+        if vol_ratio < WYCKOFF_BC_VOL_RATIO_THRESHOLD:
+            continue
+
+        # P1: 高位过滤 — 低位天量不标 BC（派发 Phase A 须在区间上沿）
+        if not _is_bc_high_position(bars, scan_idx):
+            continue
+
+        # 天量 + 滞涨（收盘接近开盘或阴线）
+        is_stagnant = change_pct < WYCKOFF_BC_CHANGE_THRESHOLD
+        has_upper_shadow = upper_shadow_ratio > WYCKOFF_BC_UPPER_SHADOW_RATIO
+
+        if not (is_stagnant or (cur_close < cur_open)):
+            continue
+
+        parts = []
+        parts.append(f"量比 {vol_ratio:.1f}")
+        pos = _price_pos_pct(bars, scan_idx)
+        if pos is not None:
+            parts.append(f"高位区{pos*100:.0f}%")
+        if is_stagnant:
+            parts.append(f"涨幅仅 {change_pct:.1f}%")
+        if has_upper_shadow:
+            parts.append("上影线明显")
+        if cur_close < cur_open:
+            parts.append("收阴")
+
+        return {
+            "bc_signal": True,
+            "bc_reason": "天量滞涨，购买高潮信号：" + "，".join(parts),
+            "bc_price": round(cur_high, 2),
+        }
+
+    return {"bc_signal": False, "bc_reason": "未检测到购买高潮", "bc_price": 0.0}
+
+def _detect_selling_climax(bars: list[dict]) -> dict:
+    """Detect Selling Climax (SC) — 天量宽幅下跌，低位抛售宣泄。
+
+    对称于 BC（Buying Climax），但方向相反：
+      - 巨量（量比 >= BC 阈值）
+      - 低位（在近窗价格区间下沿）
+      - 阴线（close < open）且跌幅显著
+      - 下影线比例低（实体占比大）
+
+    Returns:
+        dict with keys: sc_signal (bool), sc_reason (str), sc_price (float)
+    """
+    if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1:
+        return {"sc_signal": False, "sc_reason": "数据不足", "sc_price": 0.0}
+
+    scan_start = max(1, len(bars) - 5)
+    for scan_idx in range(len(bars) - 1, scan_start - 1, -1):
+        current = bars[scan_idx]
+        recent = bars[max(0, scan_idx - WYCKOFF_SPRING_SUPPORT_LOOKBACK):scan_idx]
+
+        cur_open = to_float(current.get("open"))
+        cur_high = to_float(current.get("high"))
+        cur_low = to_float(current.get("low"))
+        cur_close = to_float(current.get("close"))
+        cur_volume = to_float(current.get("volume"))
+
+        if any(v is None for v in [cur_open, cur_high, cur_low, cur_close, cur_volume]):
+            continue
+
+        avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
+        if avg_volume <= 0:
+            continue
+
+        vol_ratio = cur_volume / avg_volume
+
+        # 量比门槛（与 BC 共用阈值）
+        if vol_ratio < WYCKOFF_BC_VOL_RATIO_THRESHOLD:
+            continue
+
+        # 低位过滤：须在近窗价格区间下沿
+        pos = _price_pos_pct(bars, scan_idx)
+        if pos is None or pos > 1 - WYCKOFF_BC_MIN_POS_PCT:
+            continue
+
+        # 必须是阴线（close < open），且跌幅明显（相对前收盘）
+        if cur_close >= cur_open:
+            continue
+        prev_close = to_float(bars[scan_idx - 1].get("close")) if scan_idx >= 1 else cur_open
+        change_pct = (cur_close - prev_close) / max(prev_close, 0.01) * 100
+        if change_pct > -2.0:  # 跌幅至少 -2%
+            continue
+
+        # 下影线比例低（实体占比大，不是探底回升）
+        price_range = cur_high - cur_low if cur_high != cur_low else 1.0
+        real_body_bottom = min(cur_open, cur_close)
+        lower_shadow = real_body_bottom - cur_low
+        lower_shadow_ratio = lower_shadow / max(price_range, 0.01)
+
+        parts = [f"量比 {vol_ratio:.1f}", f"跌幅 {change_pct:.1f}%"]
+        if lower_shadow_ratio < 0.3:
+            parts.append("下影线短（实体大）")
+        else:
+            parts.append("带下影线")
+        pos_label = f"低位区{pos*100:.0f}%"
+        parts.append(pos_label)
+
+        return {
+            "sc_signal": True,
+            "sc_reason": "天量宽幅下跌，卖力高潮：" + "，".join(parts),
+            "sc_price": round(cur_low, 2),
+        }
+
+    return {"sc_signal": False, "sc_reason": "未检测到卖力高潮", "sc_price": 0.0}
+
+def _detect_sign_of_weakness(bars: list[dict], _support: float | None = None) -> dict:
+    """Detect Sign of Weakness (SOW) — 价格跌破支撑且放量。
+
+    关键修复：当 WYCKOFF_SOW_CONSECUTIVE_DAYS > 1 时，支撑位从「不含连续确认窗口」
+    的 K 线中计算，避免前一日 low 被纳入 support 导致 prev_low >= support 恒成立。
+    支持 _support 覆盖：提供外部计算的动态支撑位时优先使用。
+
+    Returns:
+        dict with keys: sow_signal (bool), sow_reason (str), sow_price (float)
+    """
+    consecutive = WYCKOFF_SOW_CONSECUTIVE_DAYS
+    min_bars = WYCKOFF_SOW_SUPPORT_LOOKBACK + consecutive
+    if len(bars) < min_bars:
+        return {"sow_signal": False, "sow_reason": "数据不足", "sow_price": 0.0}
+
+    # 支撑位计算：优先使用外部动态支撑位
+    if _support is not None:
+        support = _support
+    else:
+        # 排除最后 consecutive 根（它们参与跌破确认，不应纳入 support）
+        support_end = -(consecutive) if consecutive > 0 else None
+        support_start = -(WYCKOFF_SOW_SUPPORT_LOOKBACK + consecutive)
+        support_window = bars[support_start:support_end]
+        low_values = [to_float(b.get("low")) for b in support_window]
+        valid_lows = [v for v in low_values if v is not None]
+
+        if not valid_lows:
+            return {"sow_signal": False, "sow_reason": "数据异常", "sow_price": 0.0}
+        support = min(valid_lows)
+
+    # 当前 bar（最后一根）
+    current = bars[-1]
+    cur_low = to_float(current.get("low"))
+    cur_close = to_float(current.get("close"))
+    cur_volume = to_float(current.get("volume"))
+
+    if cur_low is None or cur_close is None or cur_volume is None:
+        return {"sow_signal": False, "sow_reason": "数据异常", "sow_price": 0.0}
+
+    # 跌破支撑判定逻辑
+    if consecutive > 1:
+        # 需要连续 N 天跌破才算
+        if cur_low >= support:
+            return {"sow_signal": False, "sow_reason": "未跌破支撑", "sow_price": 0.0}
+
+        # 检查前 consecutive-1 天是否也跌破
+        for i in range(2, consecutive + 1):
+            check_bar = bars[-i]
+            check_low = to_float(check_bar.get("low"))
+            if check_low is None or check_low >= support:
+                return {
+                    "sow_signal": False,
+                    "sow_reason": f"仅 {i-1}/{consecutive} 日跌破，需连续{consecutive}天确认",
+                    "sow_price": 0.0,
+                }
+    else:
+        # 单日判定，最低价或收盘价跌破即可触发
+        if cur_low >= support and cur_close >= support:
+            return {"sow_signal": False, "sow_reason": "未跌破支撑", "sow_price": 0.0}
+
+    # 放量确认
+    vol_window = bars[-(WYCKOFF_SOW_SUPPORT_LOOKBACK + 1):-1]
+    avg_volume = sum(to_float(b.get("volume")) or 0 for b in vol_window) / max(len(vol_window), 1)
+    is_high_volume = avg_volume > 0 and cur_volume >= avg_volume * WYCKOFF_SOW_VOL_RATIO_THRESHOLD
+
+    if not is_high_volume:
+        return {"sow_signal": False, "sow_reason": "缩量跌破，非强弱势信号", "sow_price": 0.0}
+
+    # 收盘在支撑下方（真跌破）
+    if cur_close >= support:
+        return {
+            "sow_signal": True,
+            "sow_reason": f"日内跌破支撑 {support:.2f} 后收回，弱势警告",
+            "sow_price": round(support, 2),
+        }
+
+    return {
+        "sow_signal": True,
+        "sow_reason": f"放量跌破支撑 {support:.2f}，弱势信号",
+        "sow_price": round(support, 2),
+    }
+
+def _detect_spring(bars: list[dict], _support: float | None = None, symbol: str = "") -> dict:
+    if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1:
+        return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "数据不足"}
+
+    recent = bars[-(WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1):-1]
+    current = bars[-1]
+
+    # P1-3: 一字板过滤
+    if _is_frozen_board(current):
+        return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "一字板无效换手"}
+    if len(recent) > 0 and _is_frozen_board(recent[-1]):
+        return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "前日一字板无效换手"}
+
+    # P1-1: 交易区间检查（ATR 振幅不超过 4x）
+    if not _is_trading_range(bars):
+        return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "非交易区间（振幅过大）"}
+
+    low_values = [to_float(b.get("low")) for b in recent]
+    valid_lows = [v for v in low_values if v is not None]
+    current_low = to_float(current.get("low"))
+    current_close = to_float(current.get("close"))
+    current_volume = to_float(current.get("volume"))
+
+    # 使用动态支撑位（如果提供），否则从 bars 计算
+    support = _support if _support is not None else (min(valid_lows) if valid_lows else None)
+    if current_low is None or current_close is None or support is None or current_volume is None:
+        return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "数据异常"}
+
+    # P0-1 / P1: ATR 动态刺穿深度（与 ST 共用 _spring_breach_level）
+    breach_level = _spring_breach_level(support, current)
+
+    # 刺穿深度判定：最低价刺穿深度线，且收盘价收回到支撑上方
+    if current_low >= breach_level or current_close < support:
+        return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "未满足弹簧条件"}
+
+    avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
+
+    # P1-2: 涨跌停板量能缩放
+    vol_scale = _board_vol_scale(symbol)
+
+    # 量能分级：低量弹簧（供应耗尽）最可靠，高量弹簧可能是真破位
+    if avg_volume > 0 and current_volume < avg_volume * WYCKOFF_SPRING_LOW_VOL_RATIO:
+        vol_class = "low_vol_confirm"
+        volume_note = "缩量洗盘（供应耗尽，可靠）"
+    elif avg_volume > 0 and current_volume >= avg_volume * WYCKOFF_SPRING_BULLISH_VOL_RATIO * vol_scale:
+        vol_class = "high_vol_warning"
+        volume_note = "⚠️ 放量弹簧（可能是真破位）"
+    else:
+        vol_class = "normal"
+        volume_note = "正常量能"
+
+    return {
+        "spring_signal": True,
+        "spring_price": round(breach_level, 2),
+        "spring_reason": f"跌破支撑后收回 {volume_note}",
+        "spring_vol_class": vol_class,
+    }
+
+def _detect_upthrust(bars: list[dict]) -> dict:
+    if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1:
+        return {"upthrust_signal": False, "upthrust_price": 0.0, "upthrust_reason": "数据不足"}
+
+    recent = bars[-(WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1):-1]
+    current = bars[-1]
+
+    high_values = [to_float(b.get("high")) for b in recent]
+    valid_highs = [v for v in high_values if v is not None]
+    current_high = to_float(current.get("high"))
+    current_close = to_float(current.get("close"))
+
+    resistance = max(valid_highs) if valid_highs else None
+    if current_high is None or current_close is None or resistance is None:
+        return {"upthrust_signal": False, "upthrust_price": 0.0, "upthrust_reason": "数据异常"}
+
+    breakout_level = resistance * WYCKOFF_UTAD_BREAKOUT_RATIO
+    reclaim_level = resistance * WYCKOFF_UTAD_RECLAIM_RATIO
+
+    # 最高价高过突破界限，且收盘价跌回回落界限之下
+    if current_high <= breakout_level or current_close >= reclaim_level:
+        return {"upthrust_signal": False, "upthrust_price": 0.0, "upthrust_reason": "未满足上冲回落条件"}
+
+    # P0-2: UT 需放量确认（派发需要成交量配合）
+    current_volume = to_float(current.get("volume"))
+    avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
+    if current_volume is not None and avg_volume > 0 and current_volume < avg_volume * WYCKOFF_UT_VOL_RATIO:
+        return {"upthrust_signal": False, "upthrust_price": 0.0, "upthrust_reason": "上冲未放量，非主力派发"}
+
+    return {
+        "upthrust_signal": True,
+        "upthrust_price": round(resistance, 2),
+        "upthrust_reason": "突破阻力后回落，上冲回落信号",
+    }
+
+def _detect_volume_divergence(bars: list[dict]) -> tuple[bool, bool]:
+    if len(bars) < WYCKOFF_DIVERGENCE_BARS:
+        return False, False
+
+    recent = bars[-WYCKOFF_DIVERGENCE_BARS:]
+
+    prices: list[float] = []
+    volumes: list[float] = []
+    for b in recent:
+        close_val = to_float(b.get("close"))
+        vol_val = to_float(b.get("volume"))
+        if close_val is None or vol_val is None:
+            return False, False
+        prices.append(close_val)
+        volumes.append(vol_val)
+
+    # 拆分两部分计算成交量平均值
+    mid = len(prices) // 2
+    first_half_avg_vol = sum(volumes[:mid]) / max(mid, 1)
+    second_half_avg_vol = sum(volumes[mid:]) / max(len(volumes) - mid, 1)
+
+    max_price_idx = max(range(len(prices)), key=lambda i: prices[i])
+    min_price_idx = min(range(len(prices)), key=lambda i: prices[i])
+
+    # 看空背离：价格在上升趋势中创新高（峰值高于起点），但后半段平均量萎缩至前半段比例内
+    bearish = (prices[max_price_idx] > prices[0]) and (second_half_avg_vol < first_half_avg_vol * WYCKOFF_DIVERGENCE_RATIO)
+    # 看多背离：价格在下降趋势中创新低（谷值低于起点），但后半段平均量释放或萎缩度满足抛压出清
+    bullish = (prices[min_price_idx] < prices[0]) and (second_half_avg_vol < first_half_avg_vol * WYCKOFF_DIVERGENCE_RATIO)
+
+    return bearish, bullish
+
+def _detect_ar(bars: list[dict]) -> dict:
+    """Detect Automatic Rally (AR) — BC 之后抛售枯竭的快速反弹。
+
+    触发条件:
+      1. 最近 N 根 K 线内检测到 BC 信号
+      2. BC 后 1-3 根 K 线内，存在至少 1 根满足:
+         - close > bc_close * 1.02 (上涨 >= 2%)
+         - volume > bc 前均量 * 1.2 (放量)
+    """
+    if len(bars) < WYCKOFF_MIN_BARS + 3:
+        return {"ar_signal": False, "ar_reason": "数据不足", "ar_price": None}
+
+    # 扫描最近 5 根 K 线寻找 BC
+    scan_start = max(1, len(bars) - 5)
+    bc_bar_idx = None
+    bc_close = None
+    bc_avg_vol = None
+
+    for scan_idx in range(len(bars) - 1, scan_start - 1, -1):
+        current = bars[scan_idx]
+        recent = bars[max(0, scan_idx - WYCKOFF_SPRING_SUPPORT_LOOKBACK):scan_idx]
+
+        cur_open = to_float(current.get("open"))
+        cur_close = to_float(current.get("close"))
+        cur_volume = to_float(current.get("volume"))
+
+        if any(v is None for v in [cur_open, cur_close, cur_volume]):
+            continue
+
+        avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
+        if avg_volume <= 0:
+            continue
+
+        prev_close = to_float(bars[scan_idx - 1].get("close")) if scan_idx >= 1 else cur_open
+        change_pct = (cur_close - prev_close) / max(prev_close, 0.01) * 100
+
+        vol_ratio = cur_volume / avg_volume
+        is_stagnant = change_pct < WYCKOFF_BC_CHANGE_THRESHOLD
+        cur_high = to_float(current.get("high"))
+        cur_low = to_float(current.get("low"))
+        real_body_top = max(cur_open, cur_close)
+        upper_shadow = cur_high - real_body_top if cur_high is not None and real_body_top is not None else 0
+        price_range = cur_high - cur_low if cur_high is not None and cur_low is not None else 1.0
+        has_upper_shadow = (upper_shadow / max(price_range, 0.01)) > WYCKOFF_BC_UPPER_SHADOW_RATIO if price_range > 0 else False
+        is_candle = cur_close < cur_open
+
+        # 与 _detect_buying_climax 对齐：量能 + 滞涨/阴线 + 高位过滤
+        if (
+            vol_ratio >= WYCKOFF_BC_VOL_RATIO_THRESHOLD
+            and (is_stagnant or is_candle)
+            and _is_bc_high_position(bars, scan_idx)
+        ):
+            bc_bar_idx = scan_idx
+            bc_close = cur_close
+            bc_avg_vol = avg_volume
+            break
+        # 额外检查 SC（卖力高潮）作为 AR 的前置事件
+        sc_pos = _price_pos_pct(bars, scan_idx)
+        if (
+            vol_ratio >= WYCKOFF_BC_VOL_RATIO_THRESHOLD
+            and is_candle
+            and sc_pos is not None
+            and sc_pos <= 1 - WYCKOFF_BC_MIN_POS_PCT
+            and change_pct <= -2.0
+        ):
+            bc_bar_idx = scan_idx
+            bc_close = cur_close
+            bc_avg_vol = avg_volume
+            break
+
+    if bc_bar_idx is None:
+        return {"ar_signal": False, "ar_reason": "未检测到 BC，无法触发 AR", "ar_price": None}
+
+    # 检查 BC 后 1-3 根 K 线
+    for i in range(1, min(4, len(bars) - bc_bar_idx)):
+        rally_bar = bars[bc_bar_idx + i]
+        r_close = to_float(rally_bar.get("close"))
+        r_volume = to_float(rally_bar.get("volume"))
+        if r_close is None or r_volume is None:
+            continue
+
+        if r_close > bc_close * 1.02 and r_volume > bc_avg_vol * 1.2:
+            pct = (r_close / bc_close - 1) * 100
+            return {
+                "ar_signal": True,
+                "ar_reason": f"高潮后自动反弹，放量 +{pct:.1f}%",
+                "ar_price": round(r_close, 2),
+            }
+
+    return {"ar_signal": False, "ar_reason": "高潮后未检测到有效反弹", "ar_price": None}
+
+def _detect_sos(bars: list[dict]) -> dict:
+    """Detect Sign of Strength (SOS) — 连续放量突破。
+
+    触发条件（最近 5 根 K 线窗口）:
+      - ≥4/5 阳线 (close > open)（A 股极少 5 连阳，与 LPS 对齐）
+      - close[4] >= open[0] (总体抬高)
+      - 平均量比 > 1.2（相对前窗基线均量）
+      - 累计涨幅 >= 2%
+    """
+    if len(bars) < WYCKOFF_DIVERGENCE_BARS + WYCKOFF_SPRING_SUPPORT_LOOKBACK:
+        return {"sos_signal": False, "sos_reason": "数据不足", "sos_price": None}
+
+    recent = bars[-(WYCKOFF_DIVERGENCE_BARS + WYCKOFF_SPRING_SUPPORT_LOOKBACK):-1]
+    current_window = bars[-WYCKOFF_DIVERGENCE_BARS:]
+
+    # 需要前 10 根用于均量计算
+    baseline_start = max(0, len(recent) - 10)
+    baseline = recent[baseline_start:]
+    baseline_avg_vol = sum(to_float(b.get("volume")) or 0 for b in baseline) / max(len(baseline), 1)
+    if baseline_avg_vol <= 0:
+        return {"sos_signal": False, "sos_reason": "量能数据不足", "sos_price": None}
+
+    # 检查 5 根 K 线
+    closes = []
+    opens = []
+    volumes = []
+    for b in current_window:
+        o = to_float(b.get("open"))
+        c = to_float(b.get("close"))
+        v = to_float(b.get("volume"))
+        if o is None or c is None or v is None:
+            return {"sos_signal": False, "sos_reason": "数据异常", "sos_price": None}
+        closes.append(c)
+        opens.append(o)
+        volumes.append(v)
+
+    # P1-2: 放宽为 ≥4/5 阳线（A 股连续 5 阳极罕见，4/5 + 强涨幅更实际）
+    bullish_count = sum(1 for c, o in zip(closes, opens) if c > o)
+    if bullish_count < WYCKOFF_DIVERGENCE_BARS - 1:
+        return {"sos_signal": False, "sos_reason": f"仅 {bullish_count}/{WYCKOFF_DIVERGENCE_BARS} 阳线，不足 {WYCKOFF_DIVERGENCE_BARS - 1} 根", "sos_price": None}
+
+    # 总体抬高
+    if closes[-1] < opens[0]:
+        return {"sos_signal": False, "sos_reason": "未总体抬高", "sos_price": None}
+
+    # 平均量比
+    sos_avg_vol = sum(volumes) / len(current_window)
+    if sos_avg_vol < baseline_avg_vol * 1.2:
+        return {"sos_signal": False, "sos_reason": "量能不足", "sos_price": None}
+
+    # 累计涨幅
+    gain = (closes[-1] - opens[0]) / max(opens[0], 0.01)
+    if gain < 0.02:
+        return {"sos_signal": False, "sos_reason": f"涨幅 {gain*100:.1f}% 不足 2%", "sos_price": None}
+
+    return {
+        "sos_signal": True,
+        "sos_reason": f"强势突破，{bullish_count}/5 阳线累计涨{gain*100:.1f}%，量能放大",
+        "sos_price": round(closes[-1], 2),
+    }
+
+def _detect_st(bars: list[dict]) -> dict:
+    """Detect Secondary Test (ST) — 二次测试 Spring 支撑，缩量确认。
+
+    触发条件:
+      1. 最近 N 根 K 线内检测到 Spring 信号
+      2. Spring 后 3-15 根 K 线内:
+         - 价格回到支撑区域（±1%）
+         - 成交量 < 均量 * 0.8
+         - 最低价未破支撑
+    """
+    if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 15 + 1:
+        return {"st_signal": False, "st_reason": "数据不足", "st_price": None}
+
+    # 扫描 Spring 事件
+    recent = bars[-(WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1):-1]
+    current = bars[-1]
+
+    low_values = [to_float(b.get("low")) for b in recent]
+    valid_lows = [v for v in low_values if v is not None]
+    support = min(valid_lows) if valid_lows else None
+
+    if support is None:
+        return {"st_signal": False, "st_reason": "支撑位数据异常", "st_price": None}
+
+    # P1: 与 Spring 共用 ATR/固定比例刺穿深度
+    breach_level = _spring_breach_level(support, current)
+    cur_low = to_float(current.get("low"))
+    cur_close = to_float(current.get("close"))
+
+    # 检查最近是否有 Spring
+    spring_detected = (cur_low is not None and cur_close is not None and
+                       cur_low < breach_level and cur_close >= support)
+
+    if not spring_detected:
+        # 也可能 Spring 发生在更早的 bar
+        scan_range = bars[-(WYCKOFF_SPRING_SUPPORT_LOOKBACK + 15):-1]
+        for i in range(len(scan_range) - 1, 0, -1):
+            sl = to_float(scan_range[i].get("low"))
+            sc = to_float(scan_range[i].get("close"))
+            if sl is None or sc is None:
+                continue
+            # 找 support
+            pre = scan_range[max(0, i - WYCKOFF_SPRING_SUPPORT_LOOKBACK):i]
+            pls = [to_float(b.get("low")) for b in pre]
+            vs = [v for v in pls if v is not None]
+            if not vs:
+                continue
+            sup = min(vs)
+            br = _spring_breach_level(sup, scan_range[i])
+            if sl < br and sc >= sup:
+                support = sup
+                spring_detected = True
+                break
+
+    if not spring_detected:
+        return {"st_signal": False, "st_reason": "未检测到 Spring，无法触发 ST", "st_price": None}
+
+    # 在 Spring 后 3-15 根 K 线内寻找回测
+    # 当前 bar 就是最后一个，用它检查
+    # 需要回溯查找 Spring 发生位置
+    spring_idx = None
+    for i in range(len(bars) - 2, max(0, len(bars) - WYCKOFF_SPRING_SUPPORT_LOOKBACK - 15 - 1), -1):
+        sl = to_float(bars[i].get("low"))
+        sc = to_float(bars[i].get("close"))
+        if sl is None or sc is None:
+            continue
+        pre = bars[max(0, i - WYCKOFF_SPRING_SUPPORT_LOOKBACK):i]
+        pls = [to_float(b.get("low")) for b in pre]
+        vs = [v for v in pls if v is not None]
+        if not vs:
+            continue
+        sup = min(vs)
+        br = _spring_breach_level(sup, bars[i])
+        if sl < br and sc >= sup:
+            spring_idx = i
+            support = sup
+            break
+
+    if spring_idx is None:
+        return {"st_signal": False, "st_reason": "Spring 锚点未找到", "st_price": None}
+
+    # 检查 Spring 后 3-15 根 K 线
+    _spring_vol_slice = bars[max(0, spring_idx - WYCKOFF_SPRING_SUPPORT_LOOKBACK):spring_idx]
+    spring_avg_vol = (
+        sum(to_float(b.get("volume")) or 0 for b in _spring_vol_slice)
+        / max(len(_spring_vol_slice), 1)
+    )
+
+    for i in range(spring_idx + 3, min(spring_idx + 16, len(bars))):
+        test_bar = bars[i]
+        t_low = to_float(test_bar.get("low"))
+        t_close = to_float(test_bar.get("close"))
+        t_volume = to_float(test_bar.get("volume"))
+        if t_low is None or t_close is None or t_volume is None:
+            continue
+
+        # 价格回到支撑区域（±1%）
+        if t_low > support * 1.01:
+            continue
+        # 未破支撑
+        if t_low < support * 0.99:
+            continue
+        # 成交量萎缩
+        if spring_avg_vol > 0 and t_volume < spring_avg_vol * 0.8:
+            return {
+                "st_signal": True,
+                "st_reason": f"Spring 支撑二次测试，缩量确认",
+                "st_price": round(support, 2),
+            }
+
+    return {"st_signal": False, "st_reason": "Spring 后未检测到有效二次测试", "st_price": None}
+
+def _detect_lps(bars: list[dict]) -> dict:
+    """Detect LPS (Last Point of Support) — SOS 突破后回调不破前低。
+
+    威科夫阶段: ... → SOS → 回调 → LPS → 主升
+    检测逻辑:
+      1. 从近到远找「最近一次」有效 SOS 锚点（SOS 结束后的 bar 索引）
+      2. 只评估该 SOS 之后到当前的完整回调（2–10 根），不回退到更早伪 SOS
+      3. 回调不破 SOS 前低（允许约 1% 容差）
+      4. 回调末端缩量（相对基线均量 * 0.7）
+      5. SOS 阳线标准与 _detect_sos 对齐：≥4/5 阳线
+    """
+    sos_len = WYCKOFF_DIVERGENCE_BARS  # 5
+    min_pb = 2
+    max_pb = 10
+    baseline_len = 10
+    min_bars = sos_len + min_pb + baseline_len + WYCKOFF_SPRING_SUPPORT_LOOKBACK  # ≈27
+    if len(bars) < min_bars:
+        return {"lps_signal": False, "lps_reason": "数据不足", "lps_price": None}
+
+    n = len(bars)
+
+    def _valid_sos(sos_start: int, sos_end: int) -> tuple[bool, float, float]:
+        """返回 (是否有效 SOS, 前低, 基线均量)。"""
+        if sos_start < baseline_len or sos_end - sos_start != sos_len:
+            return False, 0.0, 0.0
+        sos_window = bars[sos_start:sos_end]
+        sos_opens: list[float] = []
+        sos_closes: list[float] = []
+        sos_vols: list[float] = []
+        for b in sos_window:
+            o = to_float(b.get("open"))
+            c = to_float(b.get("close"))
+            v = to_float(b.get("volume"))
+            if o is None or c is None or v is None:
+                return False, 0.0, 0.0
+            sos_opens.append(o)
+            sos_closes.append(c)
+            sos_vols.append(v)
+        bullish_count = sum(1 for c, o in zip(sos_closes, sos_opens) if c > o)
+        if bullish_count < 4:
+            return False, 0.0, 0.0
+        if sos_closes[-1] < sos_opens[0]:
+            return False, 0.0, 0.0
+        gain = (sos_closes[-1] - sos_opens[0]) / max(sos_opens[0], 0.01)
+        if gain < 0.02:
+            return False, 0.0, 0.0
+        baseline = bars[sos_start - baseline_len:sos_start]
+        baseline_avg_vol = sum(to_float(b.get("volume")) or 0 for b in baseline) / max(len(baseline), 1)
+        if baseline_avg_vol <= 0:
+            return False, 0.0, 0.0
+        if sum(sos_vols) / sos_len < baseline_avg_vol * 1.2:
+            return False, 0.0, 0.0
+        pre_start = max(0, sos_start - 5)
+        pre_lows = [to_float(bars[i].get("low")) for i in range(pre_start, sos_start)]
+        pre_lows = [v for v in pre_lows if v is not None]
+        if not pre_lows:
+            return False, 0.0, 0.0
+        return True, min(pre_lows), baseline_avg_vol
+
+    # 从近到远：sos_end = n-2, n-3, ... n-10 → 取最近一次有效 SOS 后只评估一次
+    for pb_len in range(min_pb, max_pb + 1):
+        sos_end = n - pb_len
+        sos_start = sos_end - sos_len
+        ok, pre_low, baseline_avg_vol = _valid_sos(sos_start, sos_end)
+        if not ok:
+            continue
+
+        pullback = bars[sos_end:n]
+        pb_closes: list[float] = []
+        pb_lows: list[float] = []
+        pb_vols: list[float] = []
+        for b in pullback:
+            c = to_float(b.get("close"))
+            lo = to_float(b.get("low"))
+            v = to_float(b.get("volume"))
+            if c is None or lo is None or v is None:
+                continue
+            pb_closes.append(c)
+            pb_lows.append(lo)
+            pb_vols.append(v)
+        if len(pb_closes) < 2:
+            # 最近有效 SOS 已找到但回调数据不足 → 结束，不回退更早 SOS
+            return {"lps_signal": False, "lps_reason": "SOS 后回调数据不足", "lps_price": None}
+
+        # 回调：价格下行或横盘（末收 ≤ 起始 * 1.01）
+        if pb_closes[-1] > pb_closes[0] * 1.01:
+            return {"lps_signal": False, "lps_reason": "SOS 后未形成有效回调", "lps_price": None}
+
+        pb_low = min(pb_lows)
+        # 不破 SOS 前低（允许 1% 容差）
+        if pb_low < pre_low * 0.99:
+            return {"lps_signal": False, "lps_reason": "回调跌破 SOS 前低", "lps_price": None}
+
+        # 回调末端缩量
+        if pb_vols[-1] >= baseline_avg_vol * 0.7:
+            return {"lps_signal": False, "lps_reason": "回调量能不萎缩", "lps_price": None}
+
+        return {
+            "lps_signal": True,
+            "lps_reason": f"SOS 后缩量回调，低点 {pb_low:.2f} 未破前低 {pre_low:.2f}",
+            "lps_price": round(pb_low, 2),
+        }
+
+    return {"lps_signal": False, "lps_reason": "未检测到有效 LPS（需 SOS→缩量回调）", "lps_price": None}
+
+def _detect_lpsy(bars: list[dict]) -> dict:
+    """Detect LPSY (Last Point of Supply) — 派发末期反弹不过前高。
+
+    对称于 LPS（最后支撑点），但方向相反：
+      - 检测到 UT/SOW 事件后（派发背景）
+      - 反弹 up 走势接近前高但未突破
+      - 成交量萎缩（无需求跟进）
+      - 是 Markdown 前最后一次做多机会/最后逃命波
+
+    Returns:
+        dict with keys: lpsy_signal (bool), lpsy_reason (str), lpsy_price (float)
+    """
+    if len(bars) < 15:
+        return {"lpsy_signal": False, "lpsy_reason": "数据不足", "lpsy_price": None}
+
+    # 从近到远扫描找最近一次明显的高点（阻力位）
+    # 取近 15 根 K 线中的最高价作为阻力锚点
+    scan = bars[-15:]
+    highs = [to_float(b.get("high")) for b in scan if to_float(b.get("high")) is not None]
+    if not highs:
+        return {"lpsy_signal": False, "lpsy_reason": "无有效高点数据", "lpsy_price": None}
+
+    resistance = max(highs)
+    res_idx = highs.index(resistance)
+    # 阻力位必须距离当前至少 3 根 K 线（确保不是当前最高）
+    if len(highs) - res_idx < 3:
+        return {"lpsy_signal": False, "lpsy_reason": "阻力位在近期，未形成有效反弹结构", "lpsy_price": None}
+
+    # 当前价格从下方接近阻力位但未突破
+    last_close = to_float(bars[-1].get("close"))
+    last_high = to_float(bars[-1].get("high"))
+    if last_close is None or last_high is None:
+        return {"lpsy_signal": False, "lpsy_reason": "数据异常", "lpsy_price": None}
+
+    # 条件：当前在阻力位附近（95%-99.5%）但未突破
+    near_resistance = last_close > resistance * 0.95 and last_high < resistance * 1.005
+    if not near_resistance:
+        return {"lpsy_signal": False, "lpsy_reason": f"价格 {last_close:.2f} 不在阻力 {resistance:.2f} 附近", "lpsy_price": None}
+
+    # 缩量确认（相对于前 10 日均量）
+    recent = bars[-11:-1] if len(bars) >= 11 else bars[:-1]
+    avg_vol = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
+    cur_vol = to_float(bars[-1].get("volume")) or 0
+    if avg_vol > 0 and cur_vol > avg_vol * 0.8:
+        return {"lpsy_signal": False, "lpsy_reason": "量能未萎缩，供应未枯竭", "lpsy_price": None}
+
+    return {
+        "lpsy_signal": True,
+        "lpsy_reason": f"反弹至 {resistance:.2f} 受阻回落，缩量最后供应点",
+        "lpsy_price": round(resistance, 2),
+    }
+
+def _detect_effort_vs_result(bars: list[dict]) -> dict[str, bool]:
+    """基础量价幅度分析（Effort vs Result）。
+
+    检测最近 3 根 K 线的 spread（high-low）与 volume 的关系：
+    - 高量窄幅（Effort No Result）：vol > 1.5x avg 且 spread < 0.7x avg_spread
+      → 努力无结果，供应仍在
+    - 低量窄幅（No Supply）：vol < 0.7x avg 且 spread < 0.7x avg_spread
+      → 供应耗尽，可靠信号
+
+    Returns:
+        {"effort_no_result": bool, "no_supply": bool}
+    """
+    period = WYCKOFF_VSA_AVG_SPREAD_PERIOD
+    if len(bars) < period + 3:
+        return {"effort_no_result": False, "no_supply": False}
+
+    # 计算基线均量和平均波幅
+    baseline = bars[-(period + 3):-3]
+    volumes_b = [to_float(b.get("volume")) or 0 for b in baseline]
+    spreads_b = []
+    for b in baseline:
+        h = to_float(b.get("high"))
+        l = to_float(b.get("low"))
+        if h is not None and l is not None:
+            spreads_b.append(h - l)
+    avg_vol = sum(volumes_b) / max(len(volumes_b), 1)
+    avg_spread = sum(spreads_b) / max(len(spreads_b), 1) if spreads_b else 0
+
+    if avg_vol <= 0 or avg_spread <= 0:
+        return {"effort_no_result": False, "no_supply": False}
+
+    # 检查最近 3 根 K 线
+    recent3 = bars[-3:]
+    for b in recent3:
+        vol = to_float(b.get("volume")) or 0
+        high = to_float(b.get("high"))
+        low = to_float(b.get("low"))
+        if high is None or low is None:
+            continue
+        spread = high - low
+        if vol > avg_vol * 1.5 and spread < avg_spread * 0.7:
+            return {"effort_no_result": True, "no_supply": False}
+        if vol < avg_vol * 0.7 and spread < avg_spread * 0.7:
+            return {"effort_no_result": False, "no_supply": True}
+
+    return {"effort_no_result": False, "no_supply": False}
+
+def _detect_compression(bars: list[dict]) -> dict:
+    """检测压缩蓄势：振幅收窄 + 量能枯竭 = 蓄势待发。
+
+    触发条件:
+      1. 近 N 日 ATR 分位数 < 20%（振幅压缩）
+      2. 近 N 日均量 / 参考均量 < 0.6（量能枯竭）
+      3. 非下降结构（防止阴跌缩量误判）
+    """
+    lookback = WYCKOFF_COMPRESSION_LOOKBACK
+    ref_window = WYCKOFF_COMPRESSION_VOL_REF_WINDOW
+    if len(bars) < max(lookback, ref_window) + 5:
+        return {"compression_signal": False, "compression_reason": "数据不足", "compression_price": None}
+
+    recent = bars[-lookback:]
+    ref = bars[-(ref_window + lookback):-lookback] if len(bars) >= ref_window + lookback else bars[:max(1, len(bars) - lookback)]
+
+    # 计算近 N 日 ATR
+    trs = []
+    for i in range(1, len(recent)):
+        h = to_float(recent[i].get("high"))
+        l = to_float(recent[i].get("low"))
+        pc = to_float(recent[i - 1].get("close"))
+        if h is None or l is None or pc is None:
+            continue
+        tr = max(h - l, abs(h - pc), abs(l - pc))
+        trs.append(tr)
+    if not trs:
+        return {"compression_signal": False, "compression_reason": "ATR 计算失败", "compression_price": None}
+
+    current_atr = trs[-1]
+    avg_atr = sum(trs) / len(trs)
+    if avg_atr <= 0:
+        return {"compression_signal": False, "compression_reason": "ATR 为零", "compression_price": None}
+
+    # ATR 分位数检查：当前 ATR 是否处于历史低位
+    atr_values = sorted(trs)
+    atr_rank = sum(1 for t in atr_values if t <= current_atr) / len(atr_values)
+    if atr_rank > WYCKOFF_COMPRESSION_ATR_QUANTILE:
+        return {"compression_signal": False, "compression_reason": f"振幅未压缩（ATR分位 {atr_rank:.0%}）", "compression_price": None}
+
+    # 量能萎缩检查
+    recent_vols = [to_float(b.get("volume")) for b in recent if to_float(b.get("volume")) is not None]
+    ref_vols = [to_float(b.get("volume")) for b in ref if to_float(b.get("volume")) is not None]
+    if not recent_vols or not ref_vols:
+        return {"compression_signal": False, "compression_reason": "成交量数据不足", "compression_price": None}
+
+    avg_recent_vol = sum(recent_vols) / len(recent_vols)
+    avg_ref_vol = sum(ref_vols) / len(ref_vols)
+    if avg_ref_vol <= 0:
+        return {"compression_signal": False, "compression_reason": "参考量为零", "compression_price": None}
+
+    vol_ratio = avg_recent_vol / avg_ref_vol
+    if vol_ratio >= WYCKOFF_COMPRESSION_VOL_RATIO:
+        return {"compression_signal": False, "compression_reason": f"量能未萎缩（量比 {vol_ratio:.2f}）", "compression_price": None}
+
+    # 非下降结构检查：近 5 根收盘价不能持续下跌
+    recent_closes = [to_float(b.get("close")) for b in recent[-5:]]
+    recent_closes = [c for c in recent_closes if c is not None]
+    if len(recent_closes) >= 3:
+        declines = sum(1 for i in range(1, len(recent_closes)) if recent_closes[i] < recent_closes[i - 1])
+        if declines >= len(recent_closes) - 1:
+            return {"compression_signal": False, "compression_reason": "下降结构中，非蓄势", "compression_price": None}
+
+    # 找到当前价格区间
+    recent_highs = [to_float(b.get("high")) for b in recent if to_float(b.get("high")) is not None]
+    recent_lows = [to_float(b.get("low")) for b in recent if to_float(b.get("low")) is not None]
+    if recent_highs and recent_lows:
+        current_price = to_float(recent[-1].get("close"))
+        return {
+            "compression_signal": True,
+            "compression_reason": f"振幅压缩（ATR分位 {atr_rank:.0%}）+ 量能枯竭（量比 {vol_ratio:.2f}）",
+            "compression_price": round(current_price, 2) if current_price else None,
+        }
+
+    return {"compression_signal": False, "compression_reason": "数据异常", "compression_price": None}
+
+def _detect_trend_pullback(bars: list[dict]) -> dict:
+    """检测趋势回踩：上升趋势中回踩不破关键均线 = 买点。
+
+    触发条件:
+      1. 近 N 日有回撤（5-20%）
+      2. 回落段缩量（量比 < 0.6）
+      3. 收盘站稳 MA20 附近（±2%）
+      4. MA20 仍在上升
+    """
+    lookback = WYCKOFF_TREND_PB_LOOKBACK
+    ma_window = WYCKOFF_TREND_PB_MA_WINDOW
+    if len(bars) < max(lookback, ma_window) + 5:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": "数据不足", "trend_pullback_price": None}
+
+    recent = bars[-lookback:]
+    recent_closes = [to_float(b.get("close")) for b in recent]
+    recent_closes = [c for c in recent_closes if c is not None]
+    if len(recent_closes) < lookback:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": "收盘价数据不足", "trend_pullback_price": None}
+
+    # 计算回撤幅度
+    high_close = max(recent_closes)
+    low_close = min(recent_closes)
+    current_close = recent_closes[-1]
+    if high_close <= 0:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": "价格异常", "trend_pullback_price": None}
+
+    pullback_pct = (high_close - current_close) / high_close * 100
+    if pullback_pct < WYCKOFF_TREND_PB_MIN_PULLBACK:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": f"回撤不足（{pullback_pct:.1f}% < {WYCKOFF_TREND_PB_MIN_PULLBACK}%）", "trend_pullback_price": None}
+    if pullback_pct > WYCKOFF_TREND_PB_MAX_PULLBACK:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": f"回撤过大（{pullback_pct:.1f}% > {WYCKOFF_TREND_PB_MAX_PULLBACK}%），趋势可能已破坏", "trend_pullback_price": None}
+
+    # 计算 MA20
+    all_closes = [to_float(b.get("close")) for b in bars]
+    all_closes = [c for c in all_closes if c is not None]
+    if len(all_closes) < ma_window:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": "MA 数据不足", "trend_pullback_price": None}
+
+    ma_vals = []
+    for i in range(ma_window - 1, len(all_closes)):
+        ma_vals.append(sum(all_closes[i - ma_window + 1:i + 1]) / ma_window)
+    if len(ma_vals) < 3:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": "MA 序列不足", "trend_pullback_price": None}
+
+    ma_current = ma_vals[-1]
+    ma_prev = ma_vals[-3]
+
+    # MA20 必须在上升
+    if ma_current <= ma_prev:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": "MA20 未上升，趋势不明确", "trend_pullback_price": None}
+
+    # 收盘价在 MA20 附近（±2%）
+    if ma_current <= 0:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": "MA20 异常", "trend_pullback_price": None}
+    ma_deviation = abs(current_close - ma_current) / ma_current
+    if ma_deviation > 0.02:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": f"收盘偏离 MA20 过远（{ma_deviation:.1%} > 2%）", "trend_pullback_price": None}
+
+    # 回落段缩量检查
+    recent_vols = [to_float(b.get("volume")) for b in recent if to_float(b.get("volume")) is not None]
+    all_vols = [to_float(b.get("volume")) for b in bars if to_float(b.get("volume")) is not None]
+    if len(recent_vols) < 3 or len(all_vols) < ma_window:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": "成交量数据不足", "trend_pullback_price": None}
+
+    avg_recent_vol = sum(recent_vols) / len(recent_vols)
+    avg_ref_vol = sum(all_vols[-ma_window:]) / ma_window
+    if avg_ref_vol <= 0:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": "参考量为零", "trend_pullback_price": None}
+
+    vol_ratio = avg_recent_vol / avg_ref_vol
+    if vol_ratio >= WYCKOFF_TREND_PB_VOL_SHRINK:
+        return {"trend_pullback_signal": False, "trend_pullback_reason": f"回踩未缩量（量比 {vol_ratio:.2f}）", "trend_pullback_price": None}
+
+    return {
+        "trend_pullback_signal": True,
+        "trend_pullback_reason": f"趋势回踩（回撤 {pullback_pct:.1f}%）+ 缩量（量比 {vol_ratio:.2f}）+ 站稳 MA20",
+        "trend_pullback_price": round(current_close, 2),
+    }

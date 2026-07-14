@@ -36,6 +36,7 @@ TESTS=(
   "02-共享模块-shared/tests/test_golden_diff_gate.py"
   "02-共享模块-shared/tests/test_box_detect.py"
   "02-共享模块-shared/tests/test_combo_strategy.py"
+  "02-共享模块-shared/tests/test_wyckoff_split_equivalence.py"
   "01-功能包-packages/trader/tests/test_report_renderer.py"
 )
 
