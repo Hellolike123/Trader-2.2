@@ -1433,12 +1433,19 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
         }
 
     # ── 派发序列 ──
-    # 新增：LPSY（最后供应点）→ 派发期 D
-    if lpsy_found:
+    # LPSY（最后供应点）→ 派发期 D；需要前置派发背景（BC/UT/SOW 至少一个）
+    if lpsy_found and (bc_found or ut_found or sow_found):
         return {
             "phase": "distribution_d",
             "phase_label": "派发期 D（最后供应点：LPSY）",
             "phase_confidence_delta": -0.10,
+        }
+    # 无前置派发背景的孤立 LPSY → 可疑但不标派发 D
+    if lpsy_found:
+        return {
+            "phase": "none",
+            "phase_label": "无明确阶段（孤立 LPSY，缺派发背景）",
+            "phase_confidence_delta": 0.0,
         }
     if ut_found and sow_found:
         return {
