@@ -162,9 +162,9 @@ python3 scripts/final_report.py --target <NAME> --output markdown
 ## Tushare 数据源配置
 
 ### 前置条件
-```bash
-pip install tushare --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org
-```
+**不用安装 tushare SDK**，系统自动使用 HTTP 模式（实测 HTTP 比 SDK 快 3 倍）。
+
+只需设置环境变量即可。
 
 ### 环境变量
 
