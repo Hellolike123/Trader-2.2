@@ -6,7 +6,8 @@
   2) czsc 工程实现  —— 主流开源实现（工程共识参照，非权威裁判）
   3) 我们的实现      —— trader_shared.chan_core.chanlun_analysis
 
-对代表性 7 只标的（与 diagnose_chan_classification.py 同样本、同数据），
+对代表性 30 只跨行业标的（覆盖银行/保险/券商/能源/医药/科技/消费/新能源/
+周期/军工/家电/汽车/地产/通信/机械/科创），
 输出「原典清单口径 / czsc / 我们的实现」三角矩阵，标注共识区 vs 定义分歧区。
 
 用法：
@@ -15,8 +16,8 @@
   # 加 --probe 先打印 czsc 真实 API 结构（装包后首次校准用）
   # 加 --csv-dir <目录> 走本地 CSV（<code>.csv，网易财经格式），完全不碰网络
   #
-  # 数据源：tushare(官方 https 端点) 优先；若网络不通自动回退网易财经 CSV。
-  # 若两者皆不可达，用 --csv-dir 提供本地文件即可。
+  # 数据源：新浪财经（沙箱白名单可达）优先；若网络不通回退 tushare / 网易 CSV。
+  # 若三者皆不可达，用 --csv-dir 提供本地文件即可。
 """
 import sys
 import os
@@ -38,13 +39,36 @@ warnings.filterwarnings("ignore")
 from trader_shared.chan_core import chanlun_analysis
 
 SYMBOLS = [
-    ("688248.SH", "南网科技(科创)"),
-    ("600519.SH", "贵州茅台(消费权重)"),
-    ("000001.SZ", "平安银行(银行低波)"),
-    ("300750.SZ", "宁德时代(新能源高波)"),
-    ("002050.SZ", "三花智控(机械)"),
     ("600036.SH", "招商银行(银行)"),
-    ("000858.SZ", "五粮液(消费)"),
+    ("000001.SZ", "平安银行(银行)"),
+    ("601318.SH", "中国平安(保险)"),
+    ("600030.SH", "中信证券(券商)"),
+    ("601857.SH", "中石油(能源)"),
+    ("600900.SH", "长江电力(电力)"),
+    ("600276.SH", "恒瑞医药(医药)"),
+    ("300760.SZ", "迈瑞医疗(医疗)"),
+    ("603259.SH", "药明康德(CXO)"),
+    ("688981.SH", "中芯国际(半导体)"),
+    ("002475.SZ", "立讯精密(电子)"),
+    ("002594.SZ", "比亚迪(新能源整车)"),
+    ("600519.SH", "贵州茅台(白酒)"),
+    ("000858.SZ", "五粮液(白酒)"),
+    ("600887.SH", "伊利股份(食品)"),
+    ("603288.SH", "海天味业(调味品)"),
+    ("300750.SZ", "宁德时代(电池)"),
+    ("601012.SH", "隆基绿能(光伏)"),
+    ("300274.SZ", "阳光电源(逆变器)"),
+    ("601899.SH", "紫金矿业(有色)"),
+    ("600309.SH", "万华化学(化工)"),
+    ("600019.SH", "宝钢股份(钢铁)"),
+    ("600760.SH", "中航沈飞(军工)"),
+    ("000333.SZ", "美的集团(家电)"),
+    ("000651.SZ", "格力电器(家电)"),
+    ("601633.SH", "长城汽车(汽车)"),
+    ("000002.SZ", "万科A(地产)"),
+    ("600941.SH", "中国移动(通信)"),
+    ("600031.SH", "三一重工(机械)"),
+    ("688248.SH", "南网科技(科创储能)"),
 ]
 
 START, END = "20240101", "20260714"
@@ -330,25 +354,34 @@ def _fenlei_to_label(fenlei, bi_list):
 
 # ───────────────────────── 原典清单口径（交实战终审）─────────────────────────
 def _canonical_classify(zones_ranges):
-    """formulas.md §9.4 操作化：最后两中枢区间高低 → 趋势/盘整。
+    """formulas.md §9 严格原典口径（看全部中枢链，非只最后两中枢）。
 
-    这里只输出『机械可判』部分（区间明显不重叠且同向 → 趋势），
-    交叉/重叠 → 交实战终审（标记 '盘整/待终审'）。
-    zones_ranges: list of (bottom, top)
+    原典判定规则：
+      - 0 中枢 → 无结构
+      - 1 中枢 → 盘整 (a+A)
+      - ≥2 中枢：所有相邻中枢『同向且互不重叠』→ 趋势（上涨/下跌）；
+                 任意相邻重叠，或方向不齐 → 盘整（中枢扩展/延伸）。
+    注：原典要求趋势中两中枢不重叠且连接段不回前中枢；重叠即判盘整。
+    zones_ranges: list of (bottom, top)，已按时序排列
     """
     zs = [(b, t) for (b, t) in zones_ranges if b is not None and t is not None]
-    if len(zs) < 2:
-        return "盘整(单中枢)" if zs else "无结构"
-    a_b, a_t = zs[-2]
-    b_b, b_t = zs[-1]
-    overlap = not (b_t < a_b or a_t < b_b)
-    if overlap:
-        return "盘整(中枢重叠·待终审)"
-    if b_t > a_t and b_b > a_b:
+    if len(zs) == 0:
+        return "无结构"
+    if len(zs) == 1:
+        return "盘整(单中枢·原典)"
+    # 相邻是否重叠
+    def _overlap(a, b):
+        return not (b[1] < a[0] or a[1] < b[0])
+    overlapped = any(_overlap(zs[i], zs[i + 1]) for i in range(len(zs) - 1))
+    up = all(zs[i + 1][1] > zs[i][1] and zs[i + 1][0] > zs[i][0] for i in range(len(zs) - 1))
+    down = all(zs[i + 1][1] < zs[i][1] and zs[i + 1][0] < zs[i][0] for i in range(len(zs) - 1))
+    if overlapped:
+        return "盘整(多中枢重叠·原典)"
+    if up:
         return "上涨趋势(原典)"
-    if b_t < a_t and b_b < a_b:
+    if down:
         return "下跌趋势(原典)"
-    return "盘整(高低交叉·待终审)"
+    return "盘整(方向不齐·原典)"
 
 
 def _zone_pairs(res):
@@ -374,7 +407,7 @@ def main():
     if args.csv_dir:
         print(f"数据源：本地 CSV 目录 {args.csv_dir}")
     else:
-        print("数据源：tushare(官方) → 网易财经 CSV（自动回退）")
+        print("数据源：新浪财经（沙箱可达）→ tushare(官方) → 网易财经 CSV（自动回退）")
     print()
 
     rows = []
