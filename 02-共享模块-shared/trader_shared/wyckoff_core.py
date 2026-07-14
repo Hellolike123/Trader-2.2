@@ -400,10 +400,11 @@ def _detect_selling_climax(bars: list[dict]) -> dict:
         if pos is None or pos > 1 - WYCKOFF_BC_MIN_POS_PCT:
             continue
 
-        # 必须是阴线（close < open），且跌幅明显
+        # 必须是阴线（close < open），且跌幅明显（相对前收盘）
         if cur_close >= cur_open:
             continue
-        change_pct = (cur_close - cur_open) / max(cur_open, 0.01) * 100
+        prev_close = to_float(bars[scan_idx - 1].get("close")) if scan_idx >= 1 else cur_open
+        change_pct = (cur_close - prev_close) / max(prev_close, 0.01) * 100
         if change_pct > -2.0:  # 跌幅至少 -2%
             continue
 
@@ -2041,10 +2042,14 @@ def format_wyckoff_oneline(
         main, note, d = "放量跌破支撑", "弱势确认，防守优先", -1
     elif wyk.get("ar_signal"):
         main, note, d = "高潮后快速反弹", "仅反弹，还不能当反转", 1
+    elif wyk.get("sc_signal"):
+        main, note, d = "天量宽幅下跌", "卖力高潮，抛压宣泄后可能止跌", 1
     elif wyk.get("st_signal"):
         main, note, d = "回踩支撑站住", "二次确认支撑有效", 1
     elif wyk.get("lps_signal"):
         main, note, d = "突破后缩量回踩", "回踩不破，仍偏强", 1
+    elif wyk.get("lpsy_signal"):
+        main, note, d = "反弹受阻缩量", "最后供应点，警惕破位下行", -1
     # P2/P3: 新增信号（优先级在 LPS 之后、divergence 之前）
     elif wyk.get("compression_signal"):
         main, note, d = "压缩蓄势", "振幅收窄+量能枯竭，突破在即", 1
