@@ -1,8 +1,8 @@
 {
-  "fusion_weighted_score": 0.034,
-  "fusion_confidence": 0.08,
-  "fusion_action": "高位观望",
-  "fusion_disagreement": 2,
+  "fusion_weighted_score": -0.26,
+  "fusion_confidence": 0.382,
+  "fusion_action": "减仓",
+  "fusion_disagreement": 1,
   "chanlun_midline": {
     "chanlun": {
       "strokes": [],

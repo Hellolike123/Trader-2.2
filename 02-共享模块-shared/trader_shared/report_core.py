@@ -132,6 +132,12 @@ def render_short_midline(r: dict[str, Any]) -> str:
         f"现价 {current:.2f}（{change_pct:+.2f}%）",
     ]
 
+    # 盘中诚实标注：实时价已锚定，但策略判定基于截至该日收盘的真实日线
+    # （合成 bar 不再掺入 bars，避免 volume=0 等假数据污染策略计算）
+    _intraday_as_of = r.get("intraday_as_of")
+    if _intraday_as_of:
+        lines.append(f"  ⏱ 盘中：实时价已锚定 · 策略判定基于截至 {_intraday_as_of} 收盘")
+
     # meta：动能｜大盘（阶段主展示在 🧭，meta 不重复以免与中线打架）
     meta_parts = []
     if momentum:

@@ -143,11 +143,15 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     _today = str(quote.get("trade_date") or "")[:10]
     _last_date = str(bars[-1].get("date") or bars[-1].get("trade_date") or "")[:10] if bars else ""
     _cp = quote.get("current_price")
+    # 当日实时价锚点：仅用于价格/涨跌幅展示，绝不追加进 bars。
+    # 合成 bar 的 volume=0、high=low=close=现价 是假数据，掺入会污染威科夫量能 /
+    # 缠论笔识别 / 主力资金 K线 fallback 等策略计算（审计项：盘中合成 bar 喂入全部策略）。
+    live_bar = None
     if _today and _last_date != _today and _cp is not None and float(_cp) > 0:
         _chg = float(quote.get("current_change_pct") or 0)
         _prev_close = float(_cp) / (1 + _chg / 100) if _chg != 0 else float(_cp)
         _prev_bar = bars[-1] if bars else {}
-        bars.append({
+        live_bar = {
             "date": _today,
             "open": _prev_close,
             "close": float(_cp),
@@ -160,7 +164,10 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             "atr_ratio": _prev_bar.get("atr_ratio", 0),
             "atr7": _prev_bar.get("atr7", 0),
             "tr": _prev_bar.get("tr", 0),
-        })
+            "is_synthetic": True,
+        }
+    # 盘中诚实标注：记录真实末根日期，供报告头部说明「策略基于截至该日收盘」
+    intraday_as_of = _last_date if live_bar else None
     bars_5m = snapshot.bars_5m
     weekly_bars = snapshot.weekly_bars if hasattr(snapshot, "weekly_bars") else []
     monthly_bars = snapshot.monthly_bars if hasattr(snapshot, "monthly_bars") else []
@@ -824,6 +831,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     upward_momentum = upward_momentum_observation(stage_result["major_stage"], current, support, confirm)
 
     report = {
+        "intraday_as_of": intraday_as_of,
         "name": quote.get("name") or sec.name,
         "symbol": quote.get("symbol") or sec.ts_code,
         "analysis_time": analysis_time,
