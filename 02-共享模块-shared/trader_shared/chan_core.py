@@ -1247,53 +1247,55 @@ def detect_buy_points(
     # 严格化：一类买 = 下跌趋势背驰转折点，须趋势（≥2 个下移中枢），盘整背驰不算；
     #          且最后一段 down 必须在最后一个中枢之后（背驰发生在离开段）。
     _is_down_trend = len(valid_zones) >= 2 and valid_zones[-1]["zh_top"] < valid_zones[-2]["zh_top"]
-    _last_zone_end = max(
-        (s.get("end_index", -1) for s in (valid_zones[-1].get("strokes") or [])), default=-1
-    )
     if (
         last_stroke["direction"] == "down"
         and _is_down_trend
         and len(down_strokes) >= 2
-        and down_strokes[-1].get("start_index", 0) > _last_zone_end
     ):
-        prev_down = down_strokes[-2]
-        curr_down = down_strokes[-1]
-        price_new_low = curr_down["end_price"] <= prev_down["end_price"]
-        if price_new_low:
-            area_prev = _stroke_macd_area(bars, prev_down, "neg")
-            area_curr = _stroke_macd_area(bars, curr_down, "neg")
-            if area_prev is not None and area_curr is not None:
-                # 完整笔级背驰 → confidence 3
-                if _stroke_force_weaker(area_prev, area_curr, "down"):
-                    buy_points.append({
-                        "type": "一类买",
-                        "price": round(curr_down["end_price"], 4),
-                        "confidence": 3,
-                    })
-            else:
-                # P7: 无 index / 无法算面积：fallback 要求至少 3 根连续负柱回升
-                bar_ok = False
-                if bars and len(bars) >= 3:
-                    h_vals = [to_float(b.get("macd_histogram")) for b in bars[-3:]]
-                    h_vals = [h for h in h_vals if h is not None]
-                    bar_ok = (
-                        len(h_vals) == 3
-                        and all(h < 0 for h in h_vals)
-                        and h_vals[2] > h_vals[1] > h_vals[0]
-                    )
-                elif macd_hist_current is not None and macd_hist_prev is not None:
-                    # 无 bars 时回退到 2 柱检查（兼容旧调用）
-                    bar_ok = (
-                        macd_hist_current < 0
-                        and macd_hist_prev < 0
-                        and macd_hist_current > macd_hist_prev
-                    )
-                if bar_ok:
-                    buy_points.append({
-                        "type": "一类买",
-                        "price": round(curr_down["end_price"], 4),
-                        "confidence": 1,
-                    })
+        _last_zone_end = max(
+            (s.get("end_index", -1) for s in (valid_zones[-1].get("strokes") or [])), default=-1
+        )
+        if not (down_strokes[-1].get("start_index", 0) > _last_zone_end):
+            pass  # 最后一段不在最后中枢之后，跳过一类买
+        else:
+            prev_down = down_strokes[-2]
+            curr_down = down_strokes[-1]
+            price_new_low = curr_down["end_price"] <= prev_down["end_price"]
+            if price_new_low:
+                area_prev = _stroke_macd_area(bars, prev_down, "neg")
+                area_curr = _stroke_macd_area(bars, curr_down, "neg")
+                if area_prev is not None and area_curr is not None:
+                    # 完整笔级背驰 → confidence 3
+                    if _stroke_force_weaker(area_prev, area_curr, "down"):
+                        buy_points.append({
+                            "type": "一类买",
+                            "price": round(curr_down["end_price"], 4),
+                            "confidence": 3,
+                        })
+                else:
+                    # P7: 无 index / 无法算面积：fallback 要求至少 3 根连续负柱回升
+                    bar_ok = False
+                    if bars and len(bars) >= 3:
+                        h_vals = [to_float(b.get("macd_histogram")) for b in bars[-3:]]
+                        h_vals = [h for h in h_vals if h is not None]
+                        bar_ok = (
+                            len(h_vals) == 3
+                            and all(h < 0 for h in h_vals)
+                            and h_vals[2] > h_vals[1] > h_vals[0]
+                        )
+                    elif macd_hist_current is not None and macd_hist_prev is not None:
+                        # 无 bars 时回退到 2 柱检查（兼容旧调用）
+                        bar_ok = (
+                            macd_hist_current < 0
+                            and macd_hist_prev < 0
+                            and macd_hist_current > macd_hist_prev
+                        )
+                    if bar_ok:
+                        buy_points.append({
+                            "type": "一类买",
+                            "price": round(curr_down["end_price"], 4),
+                            "confidence": 1,
+                        })
 
     # ── P1 二类买：回抽不破前低；要求末笔即为该回抽 down（防粘滞）──
     if (
@@ -1419,51 +1421,53 @@ def detect_sell_points(
     # 删除无中枢降级一类卖
     # 严格化：一类卖 = 上涨趋势背驰，须趋势（≥2 个上移中枢）；最后 up 在最后中枢之后
     _is_up_trend = len(valid_zones) >= 2 and valid_zones[-1]["zh_bottom"] > valid_zones[-2]["zh_bottom"]
-    _last_zone_end_s = max(
-        (s.get("end_index", -1) for s in (valid_zones[-1].get("strokes") or [])), default=-1
-    )
     if (
         last_stroke["direction"] == "up"
         and _is_up_trend
         and len(up_strokes) >= 2
-        and up_strokes[-1].get("start_index", 0) > _last_zone_end_s
     ):
-        prev_up = up_strokes[-2]
-        curr_up = up_strokes[-1]
-        price_new_high = curr_up["end_price"] >= prev_up["end_price"]
-        if price_new_high:
-            area_prev = _stroke_macd_area(bars, prev_up, "pos")
-            area_curr = _stroke_macd_area(bars, curr_up, "pos")
-            if area_prev is not None and area_curr is not None:
-                if _stroke_force_weaker(area_prev, area_curr, "up"):
-                    sell_points.append({
-                        "type": "一类卖",
-                        "price": round(curr_up["end_price"], 4),
-                        "confidence": 3,
-                    })
-            else:
-                # P7: 无 index / 无法算面积：fallback 要求至少 3 根连续正柱回落
-                bar_ok = False
-                if bars and len(bars) >= 3:
-                    h_vals = [to_float(b.get("macd_histogram")) for b in bars[-3:]]
-                    h_vals = [h for h in h_vals if h is not None]
-                    bar_ok = (
-                        len(h_vals) == 3
-                        and all(h > 0 for h in h_vals)
-                        and h_vals[2] < h_vals[1] < h_vals[0]
-                    )
-                elif macd_hist_current is not None and macd_hist_prev is not None:
-                    bar_ok = (
-                        macd_hist_current > 0
-                        and macd_hist_prev > 0
-                        and macd_hist_current < macd_hist_prev
-                    )
-                if bar_ok:
-                    sell_points.append({
-                        "type": "一类卖",
-                        "price": round(curr_up["end_price"], 4),
-                        "confidence": 1,
-                    })
+        _last_zone_end_s = max(
+            (s.get("end_index", -1) for s in (valid_zones[-1].get("strokes") or [])), default=-1
+        )
+        if not (up_strokes[-1].get("start_index", 0) > _last_zone_end_s):
+            pass  # 最后一段不在最后中枢之后，跳过一类卖
+        else:
+            prev_up = up_strokes[-2]
+            curr_up = up_strokes[-1]
+            price_new_high = curr_up["end_price"] >= prev_up["end_price"]
+            if price_new_high:
+                area_prev = _stroke_macd_area(bars, prev_up, "pos")
+                area_curr = _stroke_macd_area(bars, curr_up, "pos")
+                if area_prev is not None and area_curr is not None:
+                    if _stroke_force_weaker(area_prev, area_curr, "up"):
+                        sell_points.append({
+                            "type": "一类卖",
+                            "price": round(curr_up["end_price"], 4),
+                            "confidence": 3,
+                        })
+                else:
+                    # P7: 无 index / 无法算面积：fallback 要求至少 3 根连续正柱回落
+                    bar_ok = False
+                    if bars and len(bars) >= 3:
+                        h_vals = [to_float(b.get("macd_histogram")) for b in bars[-3:]]
+                        h_vals = [h for h in h_vals if h is not None]
+                        bar_ok = (
+                            len(h_vals) == 3
+                            and all(h > 0 for h in h_vals)
+                            and h_vals[2] < h_vals[1] < h_vals[0]
+                        )
+                    elif macd_hist_current is not None and macd_hist_prev is not None:
+                        bar_ok = (
+                            macd_hist_current > 0
+                            and macd_hist_prev > 0
+                            and macd_hist_current < macd_hist_prev
+                        )
+                    if bar_ok:
+                        sell_points.append({
+                            "type": "一类卖",
+                            "price": round(curr_up["end_price"], 4),
+                            "confidence": 1,
+                        })
 
     # ── P1 二类卖：回抽不过前高；要求末笔即为该回抽 up（防粘滞）──
     if (
