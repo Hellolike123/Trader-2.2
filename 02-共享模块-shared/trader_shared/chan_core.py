@@ -1255,9 +1255,7 @@ def detect_buy_points(
         _last_zone_end = max(
             (s.get("end_index", -1) for s in (valid_zones[-1].get("strokes") or [])), default=-1
         )
-        if not (down_strokes[-1].get("start_index", 0) > _last_zone_end):
-            pass  # 最后一段不在最后中枢之后，跳过一类买
-        else:
+        if down_strokes[-1].get("start_index", 0) > _last_zone_end:
             prev_down = down_strokes[-2]
             curr_down = down_strokes[-1]
             price_new_low = curr_down["end_price"] <= prev_down["end_price"]
@@ -1429,9 +1427,7 @@ def detect_sell_points(
         _last_zone_end_s = max(
             (s.get("end_index", -1) for s in (valid_zones[-1].get("strokes") or [])), default=-1
         )
-        if not (up_strokes[-1].get("start_index", 0) > _last_zone_end_s):
-            pass  # 最后一段不在最后中枢之后，跳过一类卖
-        else:
+        if up_strokes[-1].get("start_index", 0) > _last_zone_end_s:
             prev_up = up_strokes[-2]
             curr_up = up_strokes[-1]
             price_new_high = curr_up["end_price"] >= prev_up["end_price"]
