@@ -1206,6 +1206,29 @@ def _check_macd_for_2nd_sell(
 _THIRD_POINT_MAX_LEAVE_PCT = 0.15
 
 
+def _zone_last_end_index(zone: dict) -> int:
+    """取中枢末端笔的 end_index，用于「离开段」约束判断。
+
+    兼容两种中枢结构：
+    - 合并中枢（build_zones merge=True，默认）：顶层无 strokes，末端落在 members 的最后一笔；
+    - 原始滑动窗口中枢（merge=False）：顶层直接带 strokes。
+    返回所有成员笔中最大的 end_index；无任何有效笔返回 -1。
+
+    修复 D4：旧实现直接读 zone.get("strokes")，但默认 merge=True 产出的合并中枢
+    顶层没有 strokes 字段，导致 _last_zone_end 恒为 -1，"背驰须发生在离开段"
+    的约束被静默禁用，可能产出假一类买卖。
+    """
+    candidates: list[int] = []
+    members = zone.get("members") or [zone]
+    for m in members:
+        for s in m.get("strokes", []):
+            if isinstance(s, dict):
+                e = s.get("end_index", -1)
+                if e >= 0:
+                    candidates.append(e)
+    return max(candidates) if candidates else -1
+
+
 def detect_buy_points(
     strokes: list[dict],
     zones: list[dict],
@@ -1252,10 +1275,7 @@ def detect_buy_points(
         and _is_down_trend
         and len(down_strokes) >= 2
     ):
-        _last_zone_end = (
-            max((s.get("end_index", -1) for s in (valid_zones[-1].get("strokes") or [])), default=-1)
-            if valid_zones else -1
-        )
+        _last_zone_end = _zone_last_end_index(valid_zones[-1]) if valid_zones else -1
         if down_strokes[-1].get("start_index", 0) > _last_zone_end:
             prev_down = down_strokes[-2]
             curr_down = down_strokes[-1]
@@ -1434,10 +1454,7 @@ def detect_sell_points(
         and _is_up_trend
         and len(up_strokes) >= 2
     ):
-        _last_zone_end_s = (
-            max((s.get("end_index", -1) for s in (valid_zones[-1].get("strokes") or [])), default=-1)
-            if valid_zones else -1
-        )
+        _last_zone_end_s = _zone_last_end_index(valid_zones[-1]) if valid_zones else -1
         if up_strokes[-1].get("start_index", 0) > _last_zone_end_s:
             prev_up = up_strokes[-2]
             curr_up = up_strokes[-1]

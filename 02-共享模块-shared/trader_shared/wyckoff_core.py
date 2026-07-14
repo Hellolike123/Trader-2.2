@@ -777,27 +777,27 @@ def _detect_sos(bars: list[dict]) -> dict:
 
     # P1-2: 放宽为 ≥4/5 阳线（A 股连续 5 阳极罕见，4/5 + 强涨幅更实际）
     bullish_count = sum(1 for c, o in zip(closes, opens) if c > o)
-    if bullish_count < 4:
-        return {"sos_signal": False, "sos_reason": f"仅 {bullish_count}/5 阳线，不足 4 根", "sos_price": None}
+    if bullish_count < WYCKOFF_DIVERGENCE_BARS - 1:
+        return {"sos_signal": False, "sos_reason": f"仅 {bullish_count}/{WYCKOFF_DIVERGENCE_BARS} 阳线，不足 {WYCKOFF_DIVERGENCE_BARS - 1} 根", "sos_price": None}
 
     # 总体抬高
-    if closes[4] < opens[0]:
+    if closes[-1] < opens[0]:
         return {"sos_signal": False, "sos_reason": "未总体抬高", "sos_price": None}
 
     # 平均量比
-    sos_avg_vol = sum(volumes) / 5
+    sos_avg_vol = sum(volumes) / len(current_window)
     if sos_avg_vol < baseline_avg_vol * 1.2:
         return {"sos_signal": False, "sos_reason": "量能不足", "sos_price": None}
 
     # 累计涨幅
-    gain = (closes[4] - opens[0]) / max(opens[0], 0.01)
+    gain = (closes[-1] - opens[0]) / max(opens[0], 0.01)
     if gain < 0.02:
         return {"sos_signal": False, "sos_reason": f"涨幅 {gain*100:.1f}% 不足 2%", "sos_price": None}
 
     return {
         "sos_signal": True,
         "sos_reason": f"强势突破，{bullish_count}/5 阳线累计涨{gain*100:.1f}%，量能放大",
-        "sos_price": round(closes[4], 2),
+        "sos_price": round(closes[-1], 2),
     }
 
 
@@ -1537,13 +1537,13 @@ def _transition_phase(
     new_phase_label: str,
     new_confidence_delta: float,
 ) -> dict[str, Any]:
-    """状态机：phase 只进不退，不同方向需强信号翻转。
+    """状态机：phase 平滑过渡，允许反向翻转。
 
     规则：
       - 无旧状态 → 直接使用新 phase
-      - 新 phase 为 "none" → 保持旧 phase
+      - 新 phase 为 "none" → 维持旧状态（平滑，不抖动）
       - 同方向（同为积累或同为派发）→ 只升级不降级
-      - 反方向 → 需要强信号（accumulation_c/d 或 distribution_c）才翻转
+      - 反方向（积累↔派发）→ 允许翻转（基于方向符号，不再限制白名单）
     """
     if old_phase_state is None:
         return {
@@ -1587,10 +1587,10 @@ def _transition_phase(
             "first_seen": first_seen or new_phase,
         }
 
-    # 反方向：从积累切到派发，或派发切到积累 → 需要强信号
-    # 新方向如果是 accumulation_a/c/d 或 distribution_c/d 才翻转
-    strong_flip = new_phase in ("accumulation_a", "accumulation_c", "accumulation_d", "distribution_c", "distribution_d")
-    if strong_flip:
+    # 反方向：积累切派发或派发切积累 → 允许翻转（基于方向符号，不再限制白名单）
+    # 修复「只进不退」：原 strong_flip 白名单排除 distribution_a/b、accumulation_b，
+    # 导致清晰派发信号无法翻转积累阶段（报告 phase_label 黏住旧阶段）。
+    if old_order * new_order < 0:
         return {
             "phase": new_phase,
             "phase_label": new_phase_label,
@@ -1598,7 +1598,7 @@ def _transition_phase(
             "first_seen": new_phase,
         }
 
-    # 反方向但信号不强 → 保持旧阶段
+    # 反方向但符号判定异常 → 维持旧阶段
     return {**old_phase_state, "phase_confidence_delta": 0.0}
 
 
@@ -1780,24 +1780,19 @@ def wyckoff_strategy(current: float, bars: list[dict], change_pct: Any = None, q
 def wyckoff_strategy_midline(
     current: float,
     weekly_bars: list[dict] | None = None,
-    daily_bars: list[dict] | None = None,
+    daily_bars: list[dict] | None = None,  # 保留兼容签名；中线威科夫周线独占，不再用于回退兜底
     change_pct: Any = None,
     quote: dict | None = None,
     symbol: str = "",
 ) -> dict:
-    """中线威科夫独立判断：优先周 K，不足时回退日 K。
+    """中线威科夫独立判断：仅周K（周线不足则不参与中线定论，不回退日线）。
 
     与日线 fusion 路径分离：报告「威科夫：…」定性用本结果。
     """
     weekly_bars = weekly_bars or []
-    daily_bars = daily_bars or []
-    if len(weekly_bars) >= WYCKOFF_MIN_BARS:
-        bars = weekly_bars
-        tf = "weekly"
-    elif len(daily_bars) >= WYCKOFF_MIN_BARS:
-        bars = daily_bars
-        tf = "daily_fallback"
-    else:
+    # 中线威科夫周线独占：周线不足直接返回 insufficient，不参与 🧭 中线定论，
+    # 不再回退日线（避免日线噪音稀释中线战略依据，违反 output-template.md:94）。
+    if len(weekly_bars) < WYCKOFF_MIN_BARS:
         return {
             "wyckoff": {
                 "timeframe": "insufficient",
@@ -1805,12 +1800,12 @@ def wyckoff_strategy_midline(
                 "upthrust_signal": False,
                 "bc_signal": False,
                 "sow_signal": False,
-                "wyckoff_summary": "K线不足，无法做中线威科夫",
+                "wyckoff_summary": "周线数据不足，中线威科夫不参与定论",
             }
         }
-    result = wyckoff_analysis(bars, symbol=symbol, timeframe=tf, use_persisted_phase=False)
+    result = wyckoff_analysis(weekly_bars, symbol=symbol, timeframe="weekly", use_persisted_phase=False)
     if isinstance(result, dict):
-        result = {**result, "timeframe": tf}
+        result = {**result, "timeframe": "weekly"}
     return {"wyckoff": result}
 
 
@@ -1842,7 +1837,10 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
             "summary": "K线数据不足，无法打分",
         }
 
-    analysis = analysis if analysis is not None else wyckoff_analysis(bars, symbol=symbol)
+    # 打分应为纯函数：analysis 缺失时重算，但不触发 phase 持久化写盘
+    analysis = analysis if analysis is not None else wyckoff_analysis(
+        bars, symbol=symbol, use_persisted_phase=False
+    )
 
     raw = 0
     signals: list[str] = []

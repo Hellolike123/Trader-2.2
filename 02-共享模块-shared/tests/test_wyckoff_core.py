@@ -1030,11 +1030,11 @@ class TestWyckoffMidlineTimeframe:
         r = wyckoff_strategy_midline(weekly[-1]["close"], weekly_bars=weekly, daily_bars=daily)
         assert r["wyckoff"]["timeframe"] == "weekly"
 
-    def test_daily_fallback(self):
+    def test_no_daily_fallback(self):
         from trader_shared.wyckoff_core import wyckoff_strategy_midline
         daily = self._bars(40)
         r = wyckoff_strategy_midline(daily[-1]["close"], weekly_bars=[], daily_bars=daily)
-        assert r["wyckoff"]["timeframe"] == "daily_fallback"
+        assert r["wyckoff"]["timeframe"] == "insufficient"
 
     def test_insufficient(self):
         from trader_shared.wyckoff_core import wyckoff_strategy_midline
