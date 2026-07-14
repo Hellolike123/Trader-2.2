@@ -184,6 +184,7 @@ WYCKOFF_SCORE_AR: int = 10                      # Automatic Rally 自动反弹 �
 WYCKOFF_SCORE_SOS: int = 15                     # Sign of Strength 强势信号 — 连续放量突破
 WYCKOFF_SCORE_ST: int = 8                       # Secondary Test 二次测试 — 缩量确认支撑
 WYCKOFF_SCORE_LPS: int = 12                     # Last Point of Support 最后支撑 — SOS 后缩量回调
+WYCKOFF_SCORE_LPSY: int = -12                    # Last Point of Supply 最后供应 — 反弹不过前高缩量
 WYCKOFF_SCORE_COMPRESSION: int = 10              # Compression 压缩蓄势 — 振幅收窄+量能枯竭
 WYCKOFF_SCORE_TREND_PB: int = 8                  # Trend Pullback 趋势回踩 — 回踩不破均线
 WYCKOFF_SCORE_MAX_ABS: int = 95                 # 归一化分母，raw 映射到 [-50, +50]
@@ -341,7 +342,7 @@ __all__ = [
     "WYCKOFF_SCORE_SOW", "WYCKOFF_SCORE_MAX_ABS",
     # 新增经典信号权重
     "WYCKOFF_SCORE_AR", "WYCKOFF_SCORE_SOS",
-    "WYCKOFF_SCORE_ST", "WYCKOFF_SCORE_LPS",
+    "WYCKOFF_SCORE_ST", "WYCKOFF_SCORE_LPS", "WYCKOFF_SCORE_LPSY",
     "WYCKOFF_SCORE_COMPRESSION", "WYCKOFF_SCORE_TREND_PB",
     "WYCKOFF_COMPRESSION_LOOKBACK", "WYCKOFF_COMPRESSION_ATR_QUANTILE",
     "WYCKOFF_COMPRESSION_VOL_RATIO", "WYCKOFF_COMPRESSION_VOL_REF_WINDOW",

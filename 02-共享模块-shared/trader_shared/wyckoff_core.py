@@ -44,6 +44,7 @@ try:
         WYCKOFF_SCORE_SOS,
         WYCKOFF_SCORE_ST,
         WYCKOFF_SCORE_LPS,
+        WYCKOFF_SCORE_LPSY,
         # P2/P3 新增
         WYCKOFF_SCORE_COMPRESSION,
         WYCKOFF_SCORE_TREND_PB,
@@ -92,6 +93,8 @@ except ImportError:
     WYCKOFF_SCORE_SOS = 15
     WYCKOFF_SCORE_ST = 8
     WYCKOFF_SCORE_LPS = 12
+    # LPSY 最后供应点（负向，对称于 LPS）
+    WYCKOFF_SCORE_LPSY = -12
     # P2/P3 fallback
     WYCKOFF_SCORE_COMPRESSION = 10
     WYCKOFF_SCORE_TREND_PB = 8
@@ -350,6 +353,81 @@ def _detect_buying_climax(bars: list[dict]) -> dict:
         }
 
     return {"bc_signal": False, "bc_reason": "未检测到购买高潮", "bc_price": 0.0}
+
+
+# ── SC (Selling Climax) 卖力高潮检测 ──
+def _detect_selling_climax(bars: list[dict]) -> dict:
+    """Detect Selling Climax (SC) — 天量宽幅下跌，低位抛售宣泄。
+
+    对称于 BC（Buying Climax），但方向相反：
+      - 巨量（量比 >= BC 阈值）
+      - 低位（在近窗价格区间下沿）
+      - 阴线（close < open）且跌幅显著
+      - 下影线比例低（实体占比大）
+
+    Returns:
+        dict with keys: sc_signal (bool), sc_reason (str), sc_price (float)
+    """
+    if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1:
+        return {"sc_signal": False, "sc_reason": "数据不足", "sc_price": 0.0}
+
+    scan_start = max(1, len(bars) - 5)
+    for scan_idx in range(len(bars) - 1, scan_start - 1, -1):
+        current = bars[scan_idx]
+        recent = bars[max(0, scan_idx - WYCKOFF_SPRING_SUPPORT_LOOKBACK):scan_idx]
+
+        cur_open = to_float(current.get("open"))
+        cur_high = to_float(current.get("high"))
+        cur_low = to_float(current.get("low"))
+        cur_close = to_float(current.get("close"))
+        cur_volume = to_float(current.get("volume"))
+
+        if any(v is None for v in [cur_open, cur_high, cur_low, cur_close, cur_volume]):
+            continue
+
+        avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
+        if avg_volume <= 0:
+            continue
+
+        vol_ratio = cur_volume / avg_volume
+
+        # 量比门槛（与 BC 共用阈值）
+        if vol_ratio < WYCKOFF_BC_VOL_RATIO_THRESHOLD:
+            continue
+
+        # 低位过滤：须在近窗价格区间下沿
+        pos = _price_pos_pct(bars, scan_idx)
+        if pos is None or pos > 1 - WYCKOFF_BC_MIN_POS_PCT:
+            continue
+
+        # 必须是阴线（close < open），且跌幅明显
+        if cur_close >= cur_open:
+            continue
+        change_pct = (cur_close - cur_open) / max(cur_open, 0.01) * 100
+        if change_pct > -2.0:  # 跌幅至少 -2%
+            continue
+
+        # 下影线比例低（实体占比大，不是探底回升）
+        price_range = cur_high - cur_low if cur_high != cur_low else 1.0
+        real_body_bottom = min(cur_open, cur_close)
+        lower_shadow = real_body_bottom - cur_low
+        lower_shadow_ratio = lower_shadow / max(price_range, 0.01)
+
+        parts = [f"量比 {vol_ratio:.1f}", f"跌幅 {change_pct:.1f}%"]
+        if lower_shadow_ratio < 0.3:
+            parts.append("下影线短（实体大）")
+        else:
+            parts.append("带下影线")
+        pos_label = f"低位区{pos*100:.0f}%"
+        parts.append(pos_label)
+
+        return {
+            "sc_signal": True,
+            "sc_reason": "天量宽幅下跌，卖力高潮：" + "，".join(parts),
+            "sc_price": round(cur_low, 2),
+        }
+
+    return {"sc_signal": False, "sc_reason": "未检测到卖力高潮", "sc_price": 0.0}
 
 
 # ── SOW (Sign of Weakness) 弱势信号检测 ──
@@ -930,6 +1008,60 @@ def _detect_lps(bars: list[dict]) -> dict:
     return {"lps_signal": False, "lps_reason": "未检测到有效 LPS（需 SOS→缩量回调）", "lps_price": None}
 
 
+# ── LPSY (Last Point of Supply 最后供应点) 检测 ──
+def _detect_lpsy(bars: list[dict]) -> dict:
+    """Detect LPSY (Last Point of Supply) — 派发末期反弹不过前高。
+
+    对称于 LPS（最后支撑点），但方向相反：
+      - 检测到 UT/SOW 事件后（派发背景）
+      - 反弹 up 走势接近前高但未突破
+      - 成交量萎缩（无需求跟进）
+      - 是 Markdown 前最后一次做多机会/最后逃命波
+
+    Returns:
+        dict with keys: lpsy_signal (bool), lpsy_reason (str), lpsy_price (float)
+    """
+    if len(bars) < 15:
+        return {"lpsy_signal": False, "lpsy_reason": "数据不足", "lpsy_price": None}
+
+    # 从近到远扫描找最近一次明显的高点（阻力位）
+    # 取近 15 根 K 线中的最高价作为阻力锚点
+    scan = bars[-15:]
+    highs = [to_float(b.get("high")) for b in scan if to_float(b.get("high")) is not None]
+    if not highs:
+        return {"lpsy_signal": False, "lpsy_reason": "无有效高点数据", "lpsy_price": None}
+
+    resistance = max(highs)
+    res_idx = highs.index(resistance)
+    # 阻力位必须距离当前至少 3 根 K 线（确保不是当前最高）
+    if len(highs) - res_idx < 3:
+        return {"lpsy_signal": False, "lpsy_reason": "阻力位在近期，未形成有效反弹结构", "lpsy_price": None}
+
+    # 当前价格从下方接近阻力位但未突破
+    last_close = to_float(bars[-1].get("close"))
+    last_high = to_float(bars[-1].get("high"))
+    if last_close is None or last_high is None:
+        return {"lpsy_signal": False, "lpsy_reason": "数据异常", "lpsy_price": None}
+
+    # 条件：当前在阻力位附近（95%-99.5%）但未突破
+    near_resistance = last_close > resistance * 0.95 and last_high < resistance * 1.005
+    if not near_resistance:
+        return {"lpsy_signal": False, "lpsy_reason": f"价格 {last_close:.2f} 不在阻力 {resistance:.2f} 附近", "lpsy_price": None}
+
+    # 缩量确认（相对于前 10 日均量）
+    recent = bars[-11:-1] if len(bars) >= 11 else bars[:-1]
+    avg_vol = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
+    cur_vol = to_float(bars[-1].get("volume")) or 0
+    if avg_vol > 0 and cur_vol > avg_vol * 0.8:
+        return {"lpsy_signal": False, "lpsy_reason": "量能未萎缩，供应未枯竭", "lpsy_price": None}
+
+    return {
+        "lpsy_signal": True,
+        "lpsy_reason": f"反弹至 {resistance:.2f} 受阻回落，缩量最后供应点",
+        "lpsy_price": round(resistance, 2),
+    }
+
+
 # ── VSA (Volume Spread Analysis) 努力 vs 结果检测 ───────────────────
 
 def _detect_effort_vs_result(bars: list[dict]) -> dict[str, bool]:
@@ -1149,12 +1281,19 @@ def _scan_for_signal(
     detector_fn: Any,
     window: int = 15,
     step: int = 5,
+    max_lookback_bars: int | None = None,
 ) -> bool:
     """在 bars 上滑动窗口运行检测器，找到任意窗口触发即返回 True。
 
     解决单次调用只能检测最近几根 K 线的问题——通过滑动窗口扫描历史。
     始终额外检查末尾窗口，避免 step>1 时漏掉最新信号。
+
+    Args:
+        max_lookback_bars: 限定只扫描最近 N 根 K 线（防历史幽灵信号），
+                           如 30 表示只看 bars 的最后 30 根。
     """
+    if max_lookback_bars is not None and len(bars) > max_lookback_bars:
+        bars = bars[-max_lookback_bars:]
     n = len(bars)
     if n < window:
         # 数据不足整窗时，仍尝试整段 bars（兼容短序列末尾信号）
@@ -1199,16 +1338,23 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
 
     # 当前 bar 信号优先（避免 scan step 漏检末尾），再滑动扫描历史窗口
     bc_found = bool(signals.get("bc_signal")) or _scan_for_signal(
-        wide_bars, _detect_buying_climax, window=15, step=5
+        wide_bars, _detect_buying_climax, window=15, step=5, max_lookback_bars=30
     )
     ar_found = bool(signals.get("ar_signal")) or _scan_for_signal(
-        wide_bars, _detect_ar, window=18, step=5
+        wide_bars, _detect_ar, window=18, step=5, max_lookback_bars=30
     )
     ut_found = bool(signals.get("upthrust_signal")) or _scan_for_signal(
-        wide_bars, _detect_upthrust, window=15, step=5
+        wide_bars, _detect_upthrust, window=15, step=5, max_lookback_bars=30
     )
     sow_found = bool(signals.get("sow_signal")) or _scan_for_signal(
-        wide_bars, _detect_sign_of_weakness, window=16, step=5
+        wide_bars, _detect_sign_of_weakness, window=16, step=5, max_lookback_bars=30
+    )
+    # 新增：SC（卖力高潮）和 LPSY（最后供应点）扫描
+    sc_found = bool(signals.get("sc_signal")) or _scan_for_signal(
+        wide_bars, _detect_selling_climax, window=15, step=5, max_lookback_bars=30
+    )
+    lpsy_found = bool(signals.get("lpsy_signal")) or _scan_for_signal(
+        wide_bars, _detect_lpsy, window=15, step=5, max_lookback_bars=30
     )
 
     # 后期信号直接用当前检测结果（通常在近期窗口内触发）
@@ -1218,8 +1364,7 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
     compression = signals.get("compression_signal", False)
     trend_pullback = signals.get("trend_pullback_signal", False)
 
-    # ── 积累序列：Spring 为起点（Phase C），SOS/LPS 升级到 D ──
-    # 注意：BC 是派发 Phase A 事件，绝不能标成 accumulation_a
+    # ── 积累序列 ──
     if spring and (sos or lps):
         return {
             "phase": "accumulation_d",
@@ -1252,7 +1397,20 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
             "phase_label": "积累期 D（趋势回踩确认）",
             "phase_confidence_delta": 0.08,
         }
-    # AR 且无 BC：可能是吸筹自动反弹（尚无完整 SC 检测器，作积累辅助）
+    # 新增：SC（卖力高潮）→ 积累期 A，正式识别停止行为
+    if sc_found and ar_found:
+        return {
+            "phase": "accumulation_a",
+            "phase_label": "积累期 A（停止：SC+AR）",
+            "phase_confidence_delta": 0.10,
+        }
+    if sc_found:
+        return {
+            "phase": "accumulation_a",
+            "phase_label": "积累期 A（卖力高潮：SC）",
+            "phase_confidence_delta": 0.05,
+        }
+    # AR 且无 BC/SC：可能是吸筹自动反弹
     if ar_found and not bc_found:
         return {
             "phase": "accumulation_b",
@@ -1260,7 +1418,14 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
             "phase_confidence_delta": 0.05,
         }
 
-    # ── 派发序列：BC（Buying Climax）= 派发 Phase A ──
+    # ── 派发序列 ──
+    # 新增：LPSY（最后供应点）→ 派发期 D
+    if lpsy_found:
+        return {
+            "phase": "distribution_d",
+            "phase_label": "派发期 D（最后供应点：LPSY）",
+            "phase_confidence_delta": -0.10,
+        }
     if ut_found and sow_found:
         return {
             "phase": "distribution_c",
@@ -1295,12 +1460,14 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
 _WYCKOFF_PHASE_FILE = os.path.expanduser("~/.trader/wyckoff_phase.json")
 
 _PHASE_ORDER = {
+    "distribution_d": -3,
     "distribution_c": -2,
     "distribution_a": -1,
     "none": 0,
-    "accumulation_b": 1,
-    "accumulation_c": 2,
-    "accumulation_d": 3,
+    "accumulation_a": 1,
+    "accumulation_b": 2,
+    "accumulation_c": 3,
+    "accumulation_d": 4,
 }
 
 
@@ -1400,8 +1567,8 @@ def _transition_phase(
         }
 
     # 反方向：从积累切到派发，或派发切到积累 → 需要强信号
-    # 新方向如果是 accumulation_c/d 或 distribution_c 才翻转
-    strong_flip = new_phase in ("accumulation_c", "accumulation_d", "distribution_c")
+    # 新方向如果是 accumulation_a/c/d 或 distribution_c/d 才翻转
+    strong_flip = new_phase in ("accumulation_a", "accumulation_c", "accumulation_d", "distribution_c", "distribution_d")
     if strong_flip:
         return {
             "phase": new_phase,
@@ -1421,6 +1588,7 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
             "spring_signal": False, "spring_reason": "数据不足", "spring_price": None,
             "upthrust_signal": False, "upthrust_reason": "数据不足", "upthrust_price": None,
             "bc_signal": False, "bc_reason": "数据不足", "bc_price": None,
+            "sc_signal": False, "sc_reason": "数据不足", "sc_price": None,
             "sow_signal": False, "sow_reason": "数据不足", "sow_price": None,
             "bearish_volume_divergence": False, "bullish_volume_divergence": False,
             # 新增信号
@@ -1428,6 +1596,7 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
             "sos_signal": False, "sos_reason": "数据不足", "sos_price": None,
             "st_signal": False, "st_reason": "数据不足", "st_price": None,
             "lps_signal": False, "lps_reason": "数据不足", "lps_price": None,
+            "lpsy_signal": False, "lpsy_reason": "数据不足", "lpsy_price": None,
             "wyckoff_summary": "K线数据不足，无法进行威科夫分析",
         }
 
@@ -1440,12 +1609,14 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
     spring = _detect_spring(bars, _support=dynamic_support, symbol=symbol)
     upthrust = _detect_upthrust(bars)
     bc = _detect_buying_climax(bars)
+    sc = _detect_selling_climax(bars)
     sow = _detect_sign_of_weakness(bars)  # SOW 使用自己的支撑位计算（处理 consecutive 逻辑）
     bearish_div, bullish_div = _detect_volume_divergence(bars)
     ar = _detect_ar(bars)
     sos = _detect_sos(bars)
     st = _detect_st(bars)
     lps = _detect_lps(bars)
+    lpsy = _detect_lpsy(bars)
     # P2/P3: 新增信号
     compression = _detect_compression(bars)
     trend_pullback = _detect_trend_pullback(bars)
@@ -1455,11 +1626,13 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "spring_signal": spring["spring_signal"],
         "upthrust_signal": upthrust["upthrust_signal"],
         "bc_signal": bc["bc_signal"],
+        "sc_signal": sc["sc_signal"],
         "sow_signal": sow["sow_signal"],
         "ar_signal": ar["ar_signal"],
         "sos_signal": sos["sos_signal"],
         "st_signal": st["st_signal"],
         "lps_signal": lps["lps_signal"],
+        "lpsy_signal": lpsy["lpsy_signal"],
         "compression_signal": compression["compression_signal"],
         "trend_pullback_signal": trend_pullback["trend_pullback_signal"],
     }
@@ -1490,6 +1663,8 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         parts.append(f"上冲回落信号: {upthrust['upthrust_reason']}")
     if bc["bc_signal"]:
         parts.append(f"购买高潮: {bc['bc_reason']}")
+    if sc["sc_signal"]:
+        parts.append(f"卖力高潮: {sc['sc_reason']}")
     if sow["sow_signal"]:
         parts.append(f"弱势信号: {sow['sow_reason']}")
     if ar["ar_signal"]:
@@ -1500,6 +1675,8 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         parts.append(f"二次测试: {st['st_reason']}")
     if lps["lps_signal"]:
         parts.append(f"最后支撑: {lps['lps_reason']}")
+    if lpsy["lpsy_signal"]:
+        parts.append(f"最后供应点: {lpsy['lpsy_reason']}")
     if bearish_div and bullish_div:
         parts.append("量价信号冲突，无法确定方向")
     elif bearish_div:
@@ -1530,6 +1707,9 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "sow_signal": sow["sow_signal"],
         "sow_reason": sow["sow_reason"],
         "sow_price": round(sow["sow_price"], 2) if sow["sow_signal"] else None,
+        "sc_signal": sc["sc_signal"],
+        "sc_reason": sc["sc_reason"],
+        "sc_price": round(sc["sc_price"], 2) if sc["sc_signal"] else None,
         "bearish_volume_divergence": bearish_div,
         "bullish_volume_divergence": bullish_div,
         # 新增信号
@@ -1545,6 +1725,9 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "lps_signal": lps["lps_signal"],
         "lps_reason": lps["lps_reason"],
         "lps_price": round(lps["lps_price"], 2) if lps["lps_signal"] else None,
+        "lpsy_signal": lpsy["lpsy_signal"],
+        "lpsy_reason": lpsy["lpsy_reason"],
+        "lpsy_price": round(lpsy["lpsy_price"], 2) if lpsy["lpsy_signal"] else None,
         # P0-1: 弹簧量能分级
         "spring_vol_class": spring.get("spring_vol_class", "normal") if spring["spring_signal"] else None,
         # P1-1: 阶段状态机
@@ -1731,6 +1914,16 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
         raw += WYCKOFF_SCORE_TREND_PB
         signals.append(f"趋势回踩 +{WYCKOFF_SCORE_TREND_PB}")
 
+    # 14. SC (Selling Climax) — 卖力高潮，看多
+    if analysis.get("sc_signal"):
+        raw += WYCKOFF_SCORE_AR  # SC 的看多强度与 AR 同级（+10）
+        signals.append(f"SC +{WYCKOFF_SCORE_AR}")
+
+    # 15. LPSY (Last Point of Supply) — 最后供应点，看空
+    if analysis.get("lpsy_signal"):
+        raw += WYCKOFF_SCORE_LPSY  # LPSY 负向等同 LPS 正向强度
+        signals.append(f"LPSY {WYCKOFF_SCORE_LPSY}")
+
     # ── P3-1: VSA 量价幅度修正 ──
     effort_no_result = analysis.get("effort_no_result", False)
     no_supply = analysis.get("no_supply", False)
@@ -1749,6 +1942,15 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
     if analysis.get("sos_signal") and effort_no_result:
         raw -= WYCKOFF_SCORE_SOS
         signals.append(f"SOS×努力无结果 撤销 +{WYCKOFF_SCORE_SOS}")
+
+    # VSA 单独修正：低量窄幅（供应耗尽）独立看多
+    if no_supply and not spring and not analysis.get("sos_signal"):
+        raw += 5
+        signals.append("供应耗尽 +5")
+    # VSA 单独修正：高量窄幅（努力无结果）独立看空
+    if effort_no_result and not upthrust and not analysis.get("sos_signal"):
+        raw -= 5
+        signals.append("努力无结果 -5")
 
     # ── 阶段置信度修正：phase_confidence_delta * 20 取整后微调 raw ──
     phase_delta = analysis.get("phase_confidence_delta") or 0.0
