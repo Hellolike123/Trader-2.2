@@ -364,8 +364,9 @@ def render_short_midline(r: dict[str, Any]) -> str:
         k in _wave_mid for k in ("无法判断", "笔数不足", "无明确结构", "数据不足")
     )
 
-    # 从缠论结果提取方向词（仅结构充足时）
+    # 从缠论结果提取方向词 + 买卖点类型（仅结构充足时）
     _chan_dir_mid = ""
+    _chan_point_type = ""  # 买卖点类型名，如"一类买""类二买"等
     if not _insufficient_struct:
         try:
             _chan_mid_raw = r.get("chanlun_midline")
@@ -375,10 +376,29 @@ def render_short_midline(r: dict[str, Any]) -> str:
                     _bps = _chan_inner.get("buy_points") or []
                     _sps = _chan_inner.get("sell_points") or []
                     _div = _chan_inner.get("divergence") or {}
-                    if any(isinstance(p, dict) and "买" in str(p.get("type", "")) for p in _bps):
+
+                    # 优先级：一类买 > 类二买 > 二类买 > 三类买
+                    _BUY_RANK = {"一类买": 0, "类二买": 1, "二类买": 2, "三类买": 3}
+                    _SELL_RANK = {"一类卖": 0, "二类卖": 1, "三类卖": 2}
+                    def _best_type(points: list, rank_map: dict) -> str:
+                        best, best_r = "", 999
+                        for p in points:
+                            if not isinstance(p, dict):
+                                continue
+                            r = rank_map.get(p.get("type", ""), 999)
+                            if r < best_r:
+                                best, best_r = str(p.get("type", "")), r
+                        return best
+
+                    _best_buy = _best_type(_bps, _BUY_RANK)
+                    _best_sell = _best_type(_sps, _SELL_RANK)
+
+                    if _best_buy:
                         _chan_dir_mid = "看涨"
-                    elif any(isinstance(p, dict) and "卖" in str(p.get("type", "")) for p in _sps):
+                        _chan_point_type = _best_buy
+                    elif _best_sell:
                         _chan_dir_mid = "看跌"
+                        _chan_point_type = _best_sell
                     elif _div.get("top_divergence"):
                         _chan_dir_mid = "看跌"
                     elif _div.get("bottom_divergence"):
@@ -394,11 +414,15 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     if _wave_mid:
         if _chan_dir_mid:
-            # 拆分浪型：状态 · 信号 → 状态 · 方向 · 信号
+            # 拆分浪型：状态 · 信号 → 状态 · [买卖点] · 方向 · 信号
             _wave_parts = _wave_mid.split(" · ", 1)
             _wave_state = _wave_parts[0]
             _wave_sig = _wave_parts[1] if len(_wave_parts) > 1 else ""
-            _chan_display = f"{_wave_state} · {_chan_dir_mid} · {_wave_sig}" if _wave_sig else f"{_wave_state} · {_chan_dir_mid}"
+            _point_part = f" · {_chan_point_type}" if _chan_point_type else ""
+            if _wave_sig:
+                _chan_display = f"{_wave_state}{_point_part} · {_chan_dir_mid} · {_wave_sig}"
+            else:
+                _chan_display = f"{_wave_state}{_point_part} · {_chan_dir_mid}"
         else:
             # 结构不足或无可叠加方向：保持原浪型文案，补「中性」避免与「无法判断」矛盾
             _chan_display = f"{_wave_mid} · 中性" if _insufficient_struct else _wave_mid

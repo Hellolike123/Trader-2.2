@@ -80,7 +80,7 @@ def _log_fusion(result: dict) -> None:
 def _chan_to_signal(chan_result: dict) -> dict:
     """将 chanlun_strategy() 的原始输出映射为统一信号。
 
-    优先级: 卖点(按类型) > 一类买 > 顶背驰 > 二/三类买 > 底背驰 > trend_label
+    优先级: 卖点(按类型) > 一类买 > 顶背驰 > 类二买 > 二/三类买 > 底背驰 > trend_label
     （粘滞二/三类买不得压过顶背驰）
 
     缠论输出结构 (chanlun_strategy → run_all → levels["chanlun"]):
@@ -101,7 +101,7 @@ def _chan_to_signal(chan_result: dict) -> dict:
     trend_label = chan.get("trend_label", "数据不足")
 
     _SELL_RANK = {"一类卖": 0, "二类卖": 1, "三类卖": 2}
-    _BUY_RANK = {"一类买": 0, "二类买": 1, "三类买": 2}
+    _BUY_RANK = {"一类买": 0, "类二买": 1, "二类买": 2, "三类买": 3}
     _CHAN_CONF = {3: 0.8, 2: 0.55, 1: 0.35}
 
     def _best_point(points: list, rank_map: dict) -> dict | None:
@@ -160,6 +160,17 @@ def _chan_to_signal(chan_result: dict) -> dict:
     if divergence.get("top_divergence"):
         return {"direction": -1, "confidence": 0.5,
                 "reason": "缠论顶背驰", "raw_key": "chan"}
+
+    # 3.5) 类二买：介于一类买与二类买之间的弱化信号
+    if best_buy is not None and best_buy.get("type") == "类二买":
+        return {
+            "direction": 1,
+            "confidence": _point_conf(best_buy, 0.35),
+            "reason": "缠论类二买 (回踩偏弱)",
+            "raw_key": "chan",
+            "signal_id": best_buy.get("signal_id"),
+            "signal_type": "chan_buy_like2",
+        }
 
     # 4) 二/三类买
     if best_buy is not None and best_buy.get("type") in ("二类买", "三类买"):

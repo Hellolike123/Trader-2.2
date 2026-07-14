@@ -905,7 +905,7 @@ def needs_same_level_tag(
 ) -> bool:
     """是否应在缠论文案后标注（同级）：有买卖点或背驰。"""
     t = str(text or "")
-    if any(k in t for k in ("一类", "二类", "三类", "背驰", "买点", "卖点")):
+    if any(k in t for k in ("一类", "二类", "三类", "类二", "背驰", "买点", "卖点")):
         return True
     bps = buy_point_types or []
     if any(str(x) for x in bps):

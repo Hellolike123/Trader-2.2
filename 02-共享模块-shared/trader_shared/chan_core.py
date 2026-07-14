@@ -1252,8 +1252,9 @@ def detect_buy_points(
         and _is_down_trend
         and len(down_strokes) >= 2
     ):
-        _last_zone_end = max(
-            (s.get("end_index", -1) for s in (valid_zones[-1].get("strokes") or [])), default=-1
+        _last_zone_end = (
+            max((s.get("end_index", -1) for s in (valid_zones[-1].get("strokes") or [])), default=-1)
+            if valid_zones else -1
         )
         if down_strokes[-1].get("start_index", 0) > _last_zone_end:
             prev_down = down_strokes[-2]
@@ -1336,6 +1337,15 @@ def detect_buy_points(
                                 "type": "二类买",
                                 "price": round(low_b, 4),
                                 "confidence": 2,
+                            })
+                        else:
+                            # 类二买：结构同二买（down→up→down + low抬升 + 有一买前置），
+                            # 但面积对比不满足减弱条件（area_ok=False）或 MACD 未确认，
+                            # 视为二买的弱化版。
+                            buy_points.append({
+                                "type": "类二买",
+                                "price": round(low_b, 4),
+                                "confidence": 1,
                             })
 
     # ── P1/P2 三类买：离开中枢后回踩不入；回抽须为近端（末 2 笔内）──
@@ -1424,8 +1434,9 @@ def detect_sell_points(
         and _is_up_trend
         and len(up_strokes) >= 2
     ):
-        _last_zone_end_s = max(
-            (s.get("end_index", -1) for s in (valid_zones[-1].get("strokes") or [])), default=-1
+        _last_zone_end_s = (
+            max((s.get("end_index", -1) for s in (valid_zones[-1].get("strokes") or [])), default=-1)
+            if valid_zones else -1
         )
         if up_strokes[-1].get("start_index", 0) > _last_zone_end_s:
             prev_up = up_strokes[-2]
