@@ -318,21 +318,36 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     )
     chan_result = _plugin_results.get("chanlun") or {}        # 日线；_chan_to_signal 会自己剥
 
-    # ── 区间套接入：日线买卖点经 30m 确认（门禁/网络异常时优雅降级）──
-    # 数据走 DataProvider.fetch_kline(sec, "30", datalen)，生产环境本机 eastmoney/tdx 取数；
+    # ── 区间套接入：日线买卖点经小级别（默认 30m，可扩 5m/1m 用于 T0）逐级确认 ──
+    # 数据走 DataProvider.fetch_kline(sec, code, datalen)，生产环境本机 eastmoney/tdx 取数；
     # 异常（网络失败 / 门禁用 TRADER_CHAN_NESTING=0 禁用以保确定性）时跳过 →
     # chan_result 保持原样（等价性闸门：对未启用的环境零副作用）。
+    # 层级由 TRADER_CHAN_NESTING_LEVELS 控制（逗号分隔，粗→细），默认 "30m"；
+    # 设 "30m,5m,1m" 即开启 T0 精确定位。某级别取数失败仅该级别 skipped，不连累其它级别。
     import os
     if os.environ.get("TRADER_CHAN_NESTING") != "0":
         try:
-            from trader_shared.chan_nesting import confirm_daily_with_lower
+            from trader_shared.chan_nesting import confirm_nested_chain
             if isinstance(chan_result, dict) and provider is not None:
-                _lower = provider.fetch_kline(snapshot.security, "30", 800)
-                if _lower:
-                    chan_result = confirm_daily_with_lower(
-                        chan_result, _lower, lower_timeframe="30m", symbol=target)
+                _levels = os.environ.get("TRADER_CHAN_NESTING_LEVELS", "30m").split(",")
+                _levels = [lv.strip() for lv in _levels if lv.strip()]
+                _code_map = {"30m": "30", "5m": "5", "1m": "1"}
+                _datalen_map = {"30m": 800, "5m": 1000, "1m": 1200}
+                _series = []
+                for _lv in _levels:
+                    _code = _code_map.get(_lv, _lv)
+                    _datalen = _datalen_map.get(_lv, 800)
+                    try:
+                        _lb = provider.fetch_kline(snapshot.security, _code, _datalen)
+                    except Exception as _fe:
+                        _logger.debug(f"[nesting] 取 {_lv} 失败: {_fe}")
+                        _lb = None
+                    if _lb:
+                        _series.append((_lv, _lb))
+                if _series:
+                    chan_result = confirm_nested_chain(chan_result, _series, symbol=target)
         except Exception as _nest_e:
-            _logger.debug(f"[nesting] 30m 区间套确认跳过: {_nest_e}")
+            _logger.debug(f"[nesting] 区间套确认跳过: {_nest_e}")
     chan_mid_result = _plugin_results.get("chanlun_midline") or {}
     wyck_result = _plugin_results.get("wyckoff") or {}
     wyck_mid_result = _plugin_results.get("wyckoff_midline") or {}

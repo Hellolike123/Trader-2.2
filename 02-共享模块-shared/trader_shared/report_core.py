@@ -606,14 +606,21 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _cd2 = _csig2.get("direction", 0)
         _dl2 = "看涨" if _cd2 and int(_cd2) > 0 else ("看跌" if _cd2 and int(_cd2) < 0 else "中性")
         _chan_part = f"{_st2} · {_dl2}"
-        # 区间套 30m 确认标注（仅当确认流程已跑过才显示，避免改变既有报告格式）
+        # 区间套确认标注（多级别 30m/5m/1m；仅当确认流程已跑过才显示，避免改变既有报告格式）
         try:
             _cl = r.get("chanlun") or r.get("chan")
             _cin = _cl.get("chanlun", _cl) if isinstance(_cl, dict) else {}
             _bps_n = _cin.get("buy_points", []) if isinstance(_cin, dict) else []
-            if _bps_n and any(isinstance(bp, dict) and "lower_confirmed" in bp for bp in _bps_n):
-                _conf = [bp for bp in _bps_n if isinstance(bp, dict) and bp.get("lower_confirmed")]
-                _chan_part += (" · 30m✓" if _conf else " · 30m✗")
+            _sample = next((bp for bp in _bps_n
+                            if isinstance(bp, dict) and ("nesting_chain" in bp or "lower_confirmed" in bp)),
+                           None)
+            if _sample is not None:
+                _chain = _sample.get("nesting_chain")
+                if _chain:
+                    for _lv in _chain:
+                        _chan_part += f" · {_lv['timeframe']}{'✓' if _lv.get('confirmed') else '✗'}"
+                elif _sample.get("lower_confirmed") is not None:
+                    _chan_part += (" · 30m✓" if _sample.get("lower_confirmed") else " · 30m✗")
         except Exception:
             pass
         try:

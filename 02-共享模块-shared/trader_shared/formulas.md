@@ -255,14 +255,25 @@ bar 索引 `anchor_bar`（经 `_last_pivot_anchor_bar` 映射），传入 `detec
 ### 生产接入（chan_nesting.py + report_builder.py + report_core.py）
 - 新增 `chan_nesting.confirm_daily_with_lower(daily_result, lower_bars, lower_timeframe="30m")`：
   复用 `chanlun_analysis` 跑小级别确认日线 `buy_points` / 底背驰，加 `lower_confirmed`
-  标注 + 顶层 `nesting_confirmation` 汇总。
-- `report_builder`：日线 chanlun 出结果后取 30m（`fetch_kline(sec,"30",800)`）+ confirm，
-  受 **`TRADER_CHAN_NESTING` 环境变量守卫**（= `0` 跳过）+ 异常降级保护，对未启用环境零影响。
-- `report_core`：日线缠论行末尾加 `30m✓ / 30m✗` 标注，**仅确认流程跑过才显示**，不改既有格式。
-- 等价性闸门：`lower_bars` 缺失 / 过短 / 异常时原样返回；门禁设 `TRADER_CHAN_NESTING=0`，
-  全量 **135 passed / 0 failed** 零回归。
+  标注 + 顶层 `nesting_confirmation` 汇总（单级别兼容入口）。
+- 新增 `chan_nesting.confirm_nested_chain(daily_result, lower_series, ...)`：**多级别区间套**
+  （粗→细，如 `[("30m",b30),("5m",b5),("1m",b1)]`）。每个日线买点产出
+  `nesting_chain`（各级别 `{timeframe,confirmed,type}`）+ `nesting_confirmed`（所有可用级别
+  均确认 = T0 高置信入场），底层仍复用 `chanlun_analysis`。等价性闸门：`lower_series=[]`
+  或各级均无数据 → 原样返回。
+- `report_builder`：日线 chanlun 出结果后，按 `TRADER_CHAN_NESTING_LEVELS`（逗号分隔，默认 `"30m"`；
+  设 `"30m,5m,1m"` 开启 T0）逐层 `fetch_kline(sec,code,datalen)`（`30m→800 / 5m→1000 / 1m→1200`）
+  + `confirm_nested_chain`。受 **`TRADER_CHAN_NESTING`（= `0` 跳过）** 守卫 + 异常降级；某级别
+  取数失败仅该级别 skipped，连累不到其它级别。生产环境本机 eastmoney / tdx 取数。
+- `report_core`：日线缠论行末尾加 `30m✓ 5m✓ 1m✓`（或各级 `✗`）链路标注，**仅确认流程跑过才显示**，
+  不改既有格式。
+- 等价性闸门 + 门禁：`lower_series` 为空 / 各级缺失 / 异常时原样返回；门禁设 `TRADER_CHAN_NESTING=0`，
+  新增自包含单测 `test_chan_nesting_chain.py`（monkeypatch chanlun_analysis，CI 可跑），
+  全量门禁 **0 failed** 零回归。
 
 ### 边界与下一步
-- 当前仅 **日线 + 30m** 两层，且为「标注增强」，不改任何价格 / 结构 / 评分。
-- T0 需扩至 **5m / 1m**：要把小级别二类买卖点进场 / 出场接到信号流，且需在你 Mac 本机
-  用 eastmoney / tdx 跑稳（沙箱 5m 偶发限流）。
+- 当前为「标注增强」，**不改任何价格 / 结构 / 评分**；日线 + 30m + 5m + 1m 多级别链路已打通。
+- 沙箱实测得：新浪 30m / 5m 可达（`scale=30/5&datalen=800/1000`），**1m 沙箱不可达**
+  （HTTP 000，需在你 Mac 本机 eastmoney / tdx 取 1m）；T0 实战验证请在 Mac 上跑
+  `TRADER_CHAN_NESTING_LEVELS=30m,5m,1m`。
+- 命中率结论（§12 上表）仍基于 30m 单层确认；5m / 1m 多级 AND 的命中率增益待 Mac 实盘样本积累后回填。
