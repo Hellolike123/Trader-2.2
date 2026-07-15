@@ -147,8 +147,10 @@ def assess() -> dict[str, Any]:
     idx_data = _fetch_index_data()
 
     if not idx_data:
-        # 缓存有数据但实时抓取失败 → 使用缓存
+        # 缓存有数据但实时抓取失败 → 使用缓存（标记 bars 陈旧，避免下游误判为新鲜）
         if _cached_env and isinstance(_cached_env, dict) and _cached_env.get("bars"):
+            _cached_env = dict(_cached_env)
+            _cached_env["bars_stale"] = True
             return _cached_env
         return {
             "level": "未知",
@@ -166,6 +168,7 @@ def assess() -> dict[str, Any]:
     current = idx_data.get("current", 0)
     change_pct = idx_data.get("change_pct", 0.0)
     bars = idx_data.get("bars", [])
+    bars_from_cache = False  # 本次 bars 是否纯靠旧缓存顶替（实时日K取数缺失）
 
     # ── 合并缓存的历史 bars 与当日实时数据 ──
     if _cached_env and isinstance(_cached_env, dict):
@@ -188,6 +191,7 @@ def assess() -> dict[str, Any]:
             bars = merged
         elif cached_bars and not bars:
             bars = cached_bars
+            bars_from_cache = True  # 实时日K取数失败，bars 纯靠旧缓存顶替
 
     # Volume trend: recent 5d vol / preceding 5d vol (>1 = expanding, <1 = shrinking)
     closes_vol: list[dict[str, Any]] = [b for b in bars if b.get("close") is not None and b.get("volume") is not None]
@@ -277,14 +281,18 @@ def assess() -> dict[str, Any]:
         "vol_trend": round(vol_trend, 2) if vol_trend is not None else None,
         "note": note + f" (HMM前瞻: {hmm_regime_label})",
         "bars": bars,  # 保留 bars 供缓存和下游使用
+        "bars_stale": bars_from_cache,  # True 表示 bars 来自旧缓存顶替（实时日K取数失败）
     }
 
     # ── 写入文件缓存 ──
-    try:
-        from trader_shared.cache_utils import set_cached as _file_set, CACHE_MARKET_ENV
-        _file_set(CACHE_MARKET_ENV, "index", result)
-    except Exception:
-        pass
+    # 仅当 bars 来自实时新鲜数据才写回：陈旧缓存顶替时不写回，避免旧值被反复刷 TTL 锁死
+    # （旧逻辑：bars 用旧缓存顶上后仍无条件写回，导致一次取数失败被固化为长期陈旧）。
+    if not bars_from_cache:
+        try:
+            from trader_shared.cache_utils import set_cached as _file_set, CACHE_MARKET_ENV
+            _file_set(CACHE_MARKET_ENV, "index", result)
+        except Exception:
+            pass
 
     # ── 进程内缓存 ──
     _assess_cache = result
