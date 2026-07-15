@@ -156,14 +156,30 @@ def apply_seam(patcher) -> None:
     except Exception:
         pass
 
+    import importlib
+    import trader_shared as _ts
     import trader_shared.market_env as _me
     import trader_shared.cache_utils as _cu
     import trader_shared.tushare_client as _tc
     import trader_shared.chip_data as _chip
-    patcher.setattr(
-        _me, "get_env_for_skill",
-        lambda *a, **k: {"level": "正常", "hmm_regime_en": "range"},
-    )
+
+    # ── 关键修复：get_env_for_skill 全链路 patch ──────────────────────────
+    # trader_shared/__init__.py 通过 globals()[name]=getattr(_market_env,name)
+    # 把 get_env_for_skill 在「包导入时」re-export 到包命名空间；消费者又用
+    # `from trader_shared import get_env_for_skill`（import 的 pattern 2）把函数对象
+    # 绑死到自己的模块命名空间。只打 market_env 源模块 → 那些 binding 仍是原函数对象
+    # → 真实指数数据漏入报告 → 门禁随行情漂移（"数据暂停于MM-DD(±X%)" 红）。
+    # 必须同时打：① 源模块 ② 包级 re-export ③ 所有 pattern-2 消费者模块。
+    _mock_env = lambda *a, **k: {"level": "正常", "hmm_regime_en": "range"}
+    patcher.setattr(_me, "get_env_for_skill", _mock_env)          # ① 源：覆盖 market_env.xxx / from .market_env import
+    patcher.setattr(_ts, "get_env_for_skill", _mock_env)          # ② 包级 re-export
+    for _cons_name in ("report_builder", "report_presentation"):  # ③ pattern-2 消费者
+        try:
+            _cons = importlib.import_module(f"trader_shared.{_cons_name}")
+            if hasattr(_cons, "get_env_for_skill"):
+                patcher.setattr(_cons, "get_env_for_skill", _mock_env)
+        except Exception:
+            pass
     patcher.setattr(_cu, "fetch_fund_flow_cached", lambda *a, **k: None)
     patcher.setattr(_tc, "get_client", lambda *a, **k: UnavailableClient())
     patcher.setattr(_chip, "get_cyq_perf", lambda *a, **k: None)
