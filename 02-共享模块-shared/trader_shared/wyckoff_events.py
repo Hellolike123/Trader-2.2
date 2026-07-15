@@ -58,6 +58,24 @@ try:
         WYCKOFF_TREND_PB_MAX_PULLBACK,
         WYCKOFF_TREND_PB_VOL_SHRINK,
         WYCKOFF_TREND_PB_MA_WINDOW,
+        # P0-3 Trading Range 识别层常量
+        WYCKOFF_TR_LOOKBACK,
+        WYCKOFF_TR_MIN_WIDTH,
+        WYCKOFF_TR_AMPLITUDE_MAX,
+        WYCKOFF_TR_AMPLITUDE_MIN,
+        WYCKOFF_TR_QUALITY_WIDTH_REF,
+        WYCKOFF_TR_FLOOR_PCT,
+        WYCKOFF_TR_CEIL_PCT,
+        # P0-4 Spring/Upthrust 真假分级常量
+        WYCKOFF_SPRING_STRONG_DEPTH_PCT,
+        WYCKOFF_SPRING_WEAK_DEPTH_PCT,
+        WYCKOFF_SPRING_STRONG_RECLAIM,
+        WYCKOFF_UT_STRONG_DEPTH_PCT,
+        WYCKOFF_UT_WEAK_DEPTH_PCT,
+        WYCKOFF_UT_STRONG_RECLAIM,
+        # P0-5 事件簇确认常量
+        WYCKOFF_CLUSTER_LOOKBACK,
+        WYCKOFF_CLUSTER_MIN_GAP,
     )
 except ImportError:
     WYCKOFF_MIN_BARS = 15
@@ -108,6 +126,24 @@ except ImportError:
     WYCKOFF_TREND_PB_MAX_PULLBACK = 20.0
     WYCKOFF_TREND_PB_VOL_SHRINK = 0.60
     WYCKOFF_TREND_PB_MA_WINDOW = 20
+    # P0-3 Trading Range 识别层 fallback
+    WYCKOFF_TR_LOOKBACK = 120
+    WYCKOFF_TR_MIN_WIDTH = 20
+    WYCKOFF_TR_AMPLITUDE_MAX = 30.0
+    WYCKOFF_TR_AMPLITUDE_MIN = 6.0
+    WYCKOFF_TR_QUALITY_WIDTH_REF = 60
+    WYCKOFF_TR_FLOOR_PCT = 0.15
+    WYCKOFF_TR_CEIL_PCT = 0.85
+    # P0-4 Spring/Upthrust 真假分级常量 fallback
+    WYCKOFF_SPRING_STRONG_DEPTH_PCT = 1.5
+    WYCKOFF_SPRING_WEAK_DEPTH_PCT = 0.5
+    WYCKOFF_SPRING_STRONG_RECLAIM = 1.0
+    WYCKOFF_UT_STRONG_DEPTH_PCT = 0.5
+    WYCKOFF_UT_WEAK_DEPTH_PCT = 0.1
+    WYCKOFF_UT_STRONG_RECLAIM = 1.0
+    # P0-5 事件簇确认常量 fallback
+    WYCKOFF_CLUSTER_LOOKBACK = 60
+    WYCKOFF_CLUSTER_MIN_GAP = 5
 
 
 # ── 共享工具：Spring 刺穿深度 / BC 高位过滤 ─────────────────────────
@@ -208,6 +244,155 @@ def _is_trading_range(bars: list[dict], lookback: int = 20) -> bool:
     max_allowed = max(atr_pct * 4, 30.0)  # 最低 30%
     return range_pct <= max_allowed
 
+def _detect_trading_range(
+    bars: list[dict],
+    lookback: int | None = None,
+    min_width: int = WYCKOFF_TR_MIN_WIDTH,
+    max_amplitude_pct: float = WYCKOFF_TR_AMPLITUDE_MAX,
+    min_amplitude_pct: float = WYCKOFF_TR_AMPLITUDE_MIN,
+) -> dict | None:
+    """识别当前最近的交易区间（Trading Range / TR）。
+
+    原典依据：TR 是吸筹或派发的「容器」，价格在区间内反复测试清晰的上下沿、
+    持续足够时长。因果律要求 TR 宽度决定后续行情幅度。
+
+    算法：从当前 bar 向后回溯（最多 lookback 根），逐步纳入更早 K 线，
+    维护区间 high_max / low_min。一旦区间振幅 (high_max-low_min)/low_min
+    超过 max_amplitude_pct（说明已滑入趋势段），停止回溯。
+    候选 TR 须满足：宽度 >= min_width 且振幅落入 [min_amplitude_pct, max_amplitude_pct]。
+
+    Args:
+        bars: K 线列表
+        lookback: 最大回溯根数（默认 WYCKOFF_TR_LOOKBACK）
+        min_width / max_amplitude_pct / min_amplitude_pct: 可调阈值
+
+    Returns:
+        dict | None：
+        {
+            "tr_upper": float,            # 区间上沿（反复被拒的高点）
+            "tr_lower": float,            # 区间下沿（反复被撑的地点）
+            "tr_baseline_volume": float,  # 区间内平均成交量（量能基线）
+            "tr_start": int,              # 区间起点索引（含）
+            "tr_end": int,                # 区间终点索引（= len(bars)-1）
+            "tr_width": int,              # 区间宽度（根数）
+            "tr_amplitude_pct": float,    # 区间振幅 %
+            "tr_quality": float,          # 质量评分 0~1（越宽越清晰越高）
+            "in_tr": bool,                # 当前收盘价是否在区间内
+        }
+        无有效 TR 返回 None（调用方 fallback 局部极值逻辑）。
+    """
+    n = len(bars)
+    if n < min_width:
+        return None
+    _lookback = min(lookback if lookback is not None else WYCKOFF_TR_LOOKBACK, n)
+    start_search = max(0, n - _lookback)
+
+    # 从末端向前扩展，维护区间内 high_max / low_min / 均量
+    last = bars[-1]
+    hi_max = to_float(last.get("high"))
+    lo_min = to_float(last.get("low"))
+    last_vol = to_float(last.get("volume"))
+    if hi_max is None or lo_min is None or last_vol is None or lo_min <= 0:
+        return None
+
+    vol_sum = last_vol
+    count = 1
+    best_start = n - 1
+
+    for i in range(n - 2, start_search - 1, -1):
+        h = to_float(bars[i].get("high"))
+        l = to_float(bars[i].get("low"))
+        v = to_float(bars[i].get("volume"))
+        if h is None or l is None or v is None or l <= 0:
+            continue
+        new_hi = max(hi_max, h)
+        new_lo = min(lo_min, l)
+        amp = (new_hi - new_lo) / new_lo * 100
+        # 纳入该根会让振幅超阈值 → 已进入趋势段，TR 停在此前
+        if amp > max_amplitude_pct:
+            break
+        hi_max, lo_min = new_hi, new_lo
+        vol_sum += v
+        count += 1
+        if count >= min_width:
+            best_start = i  # 持续刷新为满足条件的最早起点
+
+    width = n - best_start
+    if width < min_width:
+        return None
+    amplitude = (hi_max - lo_min) / lo_min * 100
+    if amplitude < min_amplitude_pct or amplitude > max_amplitude_pct:
+        return None
+
+    # 方向交替测试（原典核心）：TR 内价格应频繁改变方向（在区间内来回震荡、
+    # 反复测试上下沿），区别于单向趋势段（即便相对振幅落入区间也不算 TR）。
+    # 统计候选区间内 close 涨跌方向的变化次数，震荡段远多于趋势段。
+    # 注：用相邻方向交替而非全局三分位折返，避免突破段高点拉伸上界、
+    # 压低横盘段正常震荡的折返计数（T4 场景）。
+    dir_changes = 0
+    prev_dir = 0
+    for j in range(best_start + 1, n):
+        cj = to_float(bars[j].get("close"))
+        cj1 = to_float(bars[j - 1].get("close"))
+        if cj is None or cj1 is None:
+            continue
+        d = 1 if cj > cj1 else (-1 if cj < cj1 else 0)
+        if d != 0 and prev_dir != 0 and d != prev_dir:
+            dir_changes += 1
+        if d != 0:
+            prev_dir = d
+    if dir_changes < 2:
+        return None
+
+    # ── 边界用「反复测试的清晰上下沿」而非绝对极值 ──────────────────────
+    # 原典：TR 是价格反复测试清晰上下沿的容器；Spring（刺穿下沿）/Upthrust
+    # （刺穿上沿）是事件而非边界本身。若直接取区间 low/high 的极值作边界，
+    # 会把刺穿毛刺当成支撑/阻力，导致 Spring 无法「跌破」自身最低点而漏检。
+    # 故对区间内的 low/high 取分位带（默认 15/85 分位），过滤最深/最高的刺穿，
+    # 得到价格真正反复测试的水平。无效时回退绝对极值。
+    _lows = []
+    _highs = []
+    for j in range(best_start, n):
+        l = to_float(bars[j].get("low"))
+        h = to_float(bars[j].get("high"))
+        if l is not None and l > 0:
+            _lows.append(l)
+        if h is not None and h > 0:
+            _highs.append(h)
+    if _lows and _highs:
+        _lows.sort()
+        _highs.sort()
+        fl = max(0.0, min(1.0, WYCKOFF_TR_FLOOR_PCT))
+        cl = max(0.0, min(1.0, WYCKOFF_TR_CEIL_PCT))
+        _fi = min(len(_lows) - 1, int(round(fl * (len(_lows) - 1))))
+        _ci = min(len(_highs) - 1, int(round(cl * (len(_highs) - 1))))
+        _pctl_lower = _lows[_fi]
+        _pctl_upper = _highs[_ci]
+        if _pctl_upper > _pctl_lower:
+            hi_max, lo_min = _pctl_upper, _pctl_lower
+
+    tr_baseline_volume = vol_sum / count if count > 0 else 0.0
+    close_last = to_float(last.get("close"))
+    in_tr = (close_last is not None) and (lo_min <= close_last <= hi_max)
+    # 质量：宽度越大越高（封顶 1.0）；振幅越居中（远离上下限）略加权
+    width_score = min(1.0, width / max(1, WYCKOFF_TR_QUALITY_WIDTH_REF))
+    amp_mid = (min_amplitude_pct + max_amplitude_pct) / 2.0
+    amp_score = 1.0 - abs(amplitude - amp_mid) / max(amp_mid, 1e-6) * 0.5
+    amp_score = max(0.3, min(1.0, amp_score))
+    tr_quality = round(width_score * 0.7 + amp_score * 0.3, 3)
+
+    return {
+        "tr_upper": round(hi_max, 4),
+        "tr_lower": round(lo_min, 4),
+        "tr_baseline_volume": round(tr_baseline_volume, 2),
+        "tr_start": best_start,
+        "tr_end": n - 1,
+        "tr_width": width,
+        "tr_amplitude_pct": round(amplitude, 2),
+        "tr_quality": tr_quality,
+        "in_tr": bool(in_tr),
+    }
+
 def _compute_dynamic_support(
     bars: list[dict],
     lookback: int = 10,
@@ -265,7 +450,7 @@ def _compute_dynamic_support(
     # 取最接近当前价的（最高支撑）
     return max(valid_candidates)
 
-def _detect_buying_climax(bars: list[dict]) -> dict:
+def _detect_buying_climax(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     """Detect Buying Climax (BC) — 天量滞涨，高位放量阴线。
 
     P1 Fix: 扫描 bars[-5:] 而非仅 bars[-1]，任一满足 BC 条件即触发。
@@ -344,7 +529,7 @@ def _detect_buying_climax(bars: list[dict]) -> dict:
 
     return {"bc_signal": False, "bc_reason": "未检测到购买高潮", "bc_price": 0.0}
 
-def _detect_selling_climax(bars: list[dict]) -> dict:
+def _detect_selling_climax(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     """Detect Selling Climax (SC) — 天量宽幅下跌，低位抛售宣泄。
 
     对称于 BC（Buying Climax），但方向相反：
@@ -418,7 +603,7 @@ def _detect_selling_climax(bars: list[dict]) -> dict:
 
     return {"sc_signal": False, "sc_reason": "未检测到卖力高潮", "sc_price": 0.0}
 
-def _detect_sign_of_weakness(bars: list[dict], _support: float | None = None) -> dict:
+def _detect_sign_of_weakness(bars: list[dict], _support: float | None = None, tr_ctx: dict | None = None) -> dict:
     """Detect Sign of Weakness (SOW) — 价格跌破支撑且放量。
 
     关键修复：当 WYCKOFF_SOW_CONSECUTIVE_DAYS > 1 时，支撑位从「不含连续确认窗口」
@@ -433,8 +618,10 @@ def _detect_sign_of_weakness(bars: list[dict], _support: float | None = None) ->
     if len(bars) < min_bars:
         return {"sow_signal": False, "sow_reason": "数据不足", "sow_price": 0.0}
 
-    # 支撑位计算：优先使用外部动态支撑位
-    if _support is not None:
+    # 支撑位计算：TR 内用 TR 下沿（原典 SOW = 跌破 TR 下沿），否则动态支撑或局部最低
+    if tr_ctx is not None and tr_ctx.get("in_tr") and tr_ctx.get("tr_lower") is not None:
+        support = tr_ctx["tr_lower"]
+    elif _support is not None:
         support = _support
     else:
         # 排除最后 consecutive 根（它们参与跌破确认，不应纳入 support）
@@ -500,7 +687,7 @@ def _detect_sign_of_weakness(bars: list[dict], _support: float | None = None) ->
         "sow_price": round(support, 2),
     }
 
-def _detect_spring(bars: list[dict], _support: float | None = None, symbol: str = "") -> dict:
+def _detect_spring(bars: list[dict], _support: float | None = None, symbol: str = "", tr_ctx: dict | None = None) -> dict:
     if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1:
         return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "数据不足"}
 
@@ -513,8 +700,9 @@ def _detect_spring(bars: list[dict], _support: float | None = None, symbol: str 
     if len(recent) > 0 and _is_frozen_board(recent[-1]):
         return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "前日一字板无效换手"}
 
-    # P1-1: 交易区间检查（ATR 振幅不超过 4x）
-    if not _is_trading_range(bars):
+    # TR 语境优先：在 TR 内时，TR 下沿即吸筹区支撑，无需 ATR 振幅过滤（TR 本身就是横盘容器）
+    in_tr = bool(tr_ctx.get("in_tr")) if tr_ctx else False
+    if not in_tr and not _is_trading_range(bars):
         return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "非交易区间（振幅过大）"}
 
     low_values = [to_float(b.get("low")) for b in recent]
@@ -523,17 +711,28 @@ def _detect_spring(bars: list[dict], _support: float | None = None, symbol: str 
     current_close = to_float(current.get("close"))
     current_volume = to_float(current.get("volume"))
 
-    # 使用动态支撑位（如果提供），否则从 bars 计算
-    support = _support if _support is not None else (min(valid_lows) if valid_lows else None)
+    # 支撑位：TR 内用 TR 下沿（原典 Spring = 跌破 TR 下沿后收回），否则动态支撑或局部最低
+    if in_tr and tr_ctx.get("tr_lower") is not None:
+        support = tr_ctx["tr_lower"]
+    else:
+        support = _support if _support is not None else (min(valid_lows) if valid_lows else None)
     if current_low is None or current_close is None or support is None or current_volume is None:
         return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "数据异常"}
 
     # P0-1 / P1: ATR 动态刺穿深度（与 ST 共用 _spring_breach_level）
     breach_level = _spring_breach_level(support, current)
 
-    # 刺穿深度判定：最低价刺穿深度线，且收盘价收回到支撑上方
-    if current_low >= breach_level or current_close < support:
-        return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "未满足弹簧条件"}
+    # 刺穿深度判定：最低价刺穿深度线
+    if current_low >= breach_level:
+        return {"spring_signal": False, "spring_price": 0.0,
+                "spring_reason": "未刺穿支撑", "spring_strength": None}
+    # 刺穿了支撑却未收回 → 弹簧失败（派发信号），区别于普通无信号
+    if current_close < support:
+        return {
+            "spring_signal": False, "spring_price": 0.0,
+            "spring_reason": "刺穿支撑后未能收回，弹簧失败(派发信号)",
+            "spring_strength": "failure",
+        }
 
     avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
 
@@ -551,14 +750,42 @@ def _detect_spring(bars: list[dict], _support: float | None = None, symbol: str 
         vol_class = "normal"
         volume_note = "正常量能"
 
+    # ── P0-4 真假分级：刺穿深度 + 量能比(vs TR基线量) + 收回收盘位置(相对TR中轴) ──
+    baseline_vol = tr_ctx.get("tr_baseline_volume") if (in_tr and tr_ctx) else avg_volume
+    vol_ratio = (current_volume / baseline_vol) if baseline_vol and baseline_vol > 0 else 1.0
+    depth_pct = ((support - current_low) / support * 100.0) if support > 0 else 0.0
+    # TR 中轴：TR 语境用 (上沿+下沿)/2，否则用 (支撑+局部最高)/2
+    recent_highs = [to_float(b.get("high")) for b in recent]
+    valid_recent_highs = [v for v in recent_highs if v is not None]
+    local_high = max(valid_recent_highs) if valid_recent_highs else support
+    tr_upper = tr_ctx.get("tr_upper") if (in_tr and tr_ctx) else None
+    tr_mid = ((tr_upper + support) / 2.0) if tr_upper is not None else ((support + local_high) / 2.0)
+    range_mid = (tr_mid - support)
+    reclaim_ratio = ((current_close - support) / range_mid) if range_mid > 0 else 0.0
+
+    if depth_pct >= WYCKOFF_SPRING_STRONG_DEPTH_PCT and vol_ratio >= 1.0 and reclaim_ratio >= WYCKOFF_SPRING_STRONG_RECLAIM:
+        strength = "strong"
+        strength_note = "深度震仓+放量承接+坚决收回中轴，吸筹最强确认"
+    elif depth_pct < WYCKOFF_SPRING_WEAK_DEPTH_PCT or (vol_ratio < WYCKOFF_SPRING_LOW_VOL_RATIO and reclaim_ratio < 0.5):
+        strength = "weak"
+        strength_note = "刺穿过浅或缩量弱收回，可靠性低(陷阱风险)"
+    else:
+        strength = "ordinary"
+        strength_note = "标准弹簧"
+
     return {
         "spring_signal": True,
         "spring_price": round(breach_level, 2),
         "spring_reason": f"跌破支撑后收回 {volume_note}",
         "spring_vol_class": vol_class,
+        "spring_strength": strength,
+        "spring_strength_note": strength_note,
+        "spring_depth_pct": round(depth_pct, 3),
+        "spring_vol_ratio": round(vol_ratio, 3),
+        "spring_reclaim_ratio": round(reclaim_ratio, 3),
     }
 
-def _detect_upthrust(bars: list[dict]) -> dict:
+def _detect_upthrust(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1:
         return {"upthrust_signal": False, "upthrust_price": 0.0, "upthrust_reason": "数据不足"}
 
@@ -570,27 +797,68 @@ def _detect_upthrust(bars: list[dict]) -> dict:
     current_high = to_float(current.get("high"))
     current_close = to_float(current.get("close"))
 
-    resistance = max(valid_highs) if valid_highs else None
+    # 阻力位：TR 内用 TR 上沿（原典 UT = 突破 TR 上沿后回落），否则局部最高
+    if tr_ctx is not None and tr_ctx.get("in_tr") and tr_ctx.get("tr_upper") is not None:
+        resistance = tr_ctx["tr_upper"]
+    else:
+        resistance = max(valid_highs) if valid_highs else None
     if current_high is None or current_close is None or resistance is None:
         return {"upthrust_signal": False, "upthrust_price": 0.0, "upthrust_reason": "数据异常"}
 
     breakout_level = resistance * WYCKOFF_UTAD_BREAKOUT_RATIO
     reclaim_level = resistance * WYCKOFF_UTAD_RECLAIM_RATIO
 
-    # 最高价高过突破界限，且收盘价跌回回落界限之下
-    if current_high <= breakout_level or current_close >= reclaim_level:
-        return {"upthrust_signal": False, "upthrust_price": 0.0, "upthrust_reason": "未满足上冲回落条件"}
+    # 未突破阻力 → 普通无信号
+    if current_high <= breakout_level:
+        return {"upthrust_signal": False, "upthrust_price": 0.0,
+                "upthrust_reason": "未突破阻力", "upthrust_strength": None}
+    # 突破后站住未回落 → 上冲失败（可能是真突破 SOS），反向吸筹信号
+    if current_close >= reclaim_level:
+        return {
+            "upthrust_signal": False, "upthrust_price": 0.0,
+            "upthrust_reason": "突破阻力后站住未回落，上冲失败(可能是真突破)",
+            "upthrust_strength": "failure",
+        }
 
     # P0-2: UT 需放量确认（派发需要成交量配合）
     current_volume = to_float(current.get("volume"))
     avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
     if current_volume is not None and avg_volume > 0 and current_volume < avg_volume * WYCKOFF_UT_VOL_RATIO:
-        return {"upthrust_signal": False, "upthrust_price": 0.0, "upthrust_reason": "上冲未放量，非主力派发"}
+        return {"upthrust_signal": False, "upthrust_price": 0.0,
+                "upthrust_reason": "上冲未放量，非主力派发", "upthrust_strength": None}
+
+    # ── P0-4 真假分级：突破深度 + 量能比(vs TR基线量) + 跌回位置(相对TR中轴) ──
+    baseline_vol = tr_ctx.get("tr_baseline_volume") if (tr_ctx and tr_ctx.get("in_tr")) else avg_volume
+    vol_ratio = (current_volume / baseline_vol) if baseline_vol and baseline_vol > 0 else 1.0
+    depth_pct = ((current_high - resistance) / resistance * 100.0) if resistance > 0 else 0.0
+    # TR 中轴：TR 语境用 (上沿+下沿)/2，否则用 (阻力+局部最低)/2
+    tr_lower = tr_ctx.get("tr_lower") if (tr_ctx and tr_ctx.get("in_tr")) else None
+    recent_low_values = [to_float(b.get("low")) for b in recent]
+    valid_recent_lows = [v for v in recent_low_values if v is not None]
+    local_low = min(valid_recent_lows) if valid_recent_lows else resistance
+    tr_mid = ((resistance + tr_lower) / 2.0) if tr_lower is not None else ((resistance + local_low) / 2.0)
+    range_mid = (resistance - tr_mid)
+    reclaim_ratio = ((resistance - current_close) / range_mid) if range_mid > 0 else 0.0
+
+    if depth_pct >= WYCKOFF_UT_STRONG_DEPTH_PCT and vol_ratio >= WYCKOFF_UT_VOL_RATIO and reclaim_ratio >= WYCKOFF_UT_STRONG_RECLAIM:
+        strength = "strong"
+        strength_note = "深度假突破+放量派发+跌回中轴下，派发最强确认"
+    elif depth_pct < WYCKOFF_UT_WEAK_DEPTH_PCT or (vol_ratio < 1.0 and reclaim_ratio < 0.5):
+        strength = "weak"
+        strength_note = "突破过浅或量不足，噪音风险"
+    else:
+        strength = "ordinary"
+        strength_note = "标准上冲回落"
 
     return {
         "upthrust_signal": True,
         "upthrust_price": round(resistance, 2),
         "upthrust_reason": "突破阻力后回落，上冲回落信号",
+        "upthrust_strength": strength,
+        "upthrust_strength_note": strength_note,
+        "upthrust_depth_pct": round(depth_pct, 3),
+        "upthrust_vol_ratio": round(vol_ratio, 3),
+        "upthrust_reclaim_ratio": round(reclaim_ratio, 3),
     }
 
 def _detect_volume_divergence(bars: list[dict]) -> tuple[bool, bool]:
@@ -624,7 +892,7 @@ def _detect_volume_divergence(bars: list[dict]) -> tuple[bool, bool]:
 
     return bearish, bullish
 
-def _detect_ar(bars: list[dict]) -> dict:
+def _detect_ar(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     """Detect Automatic Rally (AR) — BC 之后抛售枯竭的快速反弹。
 
     触发条件:
@@ -715,7 +983,7 @@ def _detect_ar(bars: list[dict]) -> dict:
 
     return {"ar_signal": False, "ar_reason": "高潮后未检测到有效反弹", "ar_price": None}
 
-def _detect_sos(bars: list[dict]) -> dict:
+def _detect_sos(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     """Detect Sign of Strength (SOS) — 连续放量突破。
 
     触发条件（最近 5 根 K 线窗口）:
@@ -730,10 +998,13 @@ def _detect_sos(bars: list[dict]) -> dict:
     recent = bars[-(WYCKOFF_DIVERGENCE_BARS + WYCKOFF_SPRING_SUPPORT_LOOKBACK):-1]
     current_window = bars[-WYCKOFF_DIVERGENCE_BARS:]
 
-    # 需要前 10 根用于均量计算
-    baseline_start = max(0, len(recent) - 10)
-    baseline = recent[baseline_start:]
-    baseline_avg_vol = sum(to_float(b.get("volume")) or 0 for b in baseline) / max(len(baseline), 1)
+    # 基线均量：TR 内用 TR 量能基线（区间内均量，避免含趋势段失真），否则前10根均量
+    if tr_ctx is not None and tr_ctx.get("in_tr") and tr_ctx.get("tr_baseline_volume"):
+        baseline_avg_vol = tr_ctx["tr_baseline_volume"]
+    else:
+        baseline_start = max(0, len(recent) - 10)
+        baseline = recent[baseline_start:]
+        baseline_avg_vol = sum(to_float(b.get("volume")) or 0 for b in baseline) / max(len(baseline), 1)
     if baseline_avg_vol <= 0:
         return {"sos_signal": False, "sos_reason": "量能数据不足", "sos_price": None}
 
@@ -776,7 +1047,7 @@ def _detect_sos(bars: list[dict]) -> dict:
         "sos_price": round(closes[-1], 2),
     }
 
-def _detect_st(bars: list[dict]) -> dict:
+def _detect_st(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     """Detect Secondary Test (ST) — 二次测试 Spring 支撑，缩量确认。
 
     触发条件:
@@ -795,7 +1066,11 @@ def _detect_st(bars: list[dict]) -> dict:
 
     low_values = [to_float(b.get("low")) for b in recent]
     valid_lows = [v for v in low_values if v is not None]
-    support = min(valid_lows) if valid_lows else None
+    # 支撑位：TR 内用 TR 下沿，否则局部最低
+    if tr_ctx is not None and tr_ctx.get("in_tr") and tr_ctx.get("tr_lower") is not None:
+        support = tr_ctx["tr_lower"]
+    else:
+        support = min(valid_lows) if valid_lows else None
 
     if support is None:
         return {"st_signal": False, "st_reason": "支撑位数据异常", "st_price": None}
@@ -888,7 +1163,7 @@ def _detect_st(bars: list[dict]) -> dict:
 
     return {"st_signal": False, "st_reason": "Spring 后未检测到有效二次测试", "st_price": None}
 
-def _detect_lps(bars: list[dict]) -> dict:
+def _detect_lps(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     """Detect LPS (Last Point of Support) — SOS 突破后回调不破前低。
 
     威科夫阶段: ... → SOS → 回调 → LPS → 主升
@@ -908,8 +1183,13 @@ def _detect_lps(bars: list[dict]) -> dict:
         return {"lps_signal": False, "lps_reason": "数据不足", "lps_price": None}
 
     n = len(bars)
+    tr_baseline = (
+        tr_ctx.get("tr_baseline_volume")
+        if (tr_ctx and tr_ctx.get("in_tr") and tr_ctx.get("tr_baseline_volume"))
+        else None
+    )
 
-    def _valid_sos(sos_start: int, sos_end: int) -> tuple[bool, float, float]:
+    def _valid_sos(sos_start: int, sos_end: int, tr_baseline: float | None = None) -> tuple[bool, float, float]:
         """返回 (是否有效 SOS, 前低, 基线均量)。"""
         if sos_start < baseline_len or sos_end - sos_start != sos_len:
             return False, 0.0, 0.0
@@ -934,10 +1214,13 @@ def _detect_lps(bars: list[dict]) -> dict:
         gain = (sos_closes[-1] - sos_opens[0]) / max(sos_opens[0], 0.01)
         if gain < 0.02:
             return False, 0.0, 0.0
-        baseline = bars[sos_start - baseline_len:sos_start]
-        baseline_avg_vol = sum(to_float(b.get("volume")) or 0 for b in baseline) / max(len(baseline), 1)
-        if baseline_avg_vol <= 0:
-            return False, 0.0, 0.0
+        if tr_baseline:
+            baseline_avg_vol = tr_baseline
+        else:
+            baseline = bars[sos_start - baseline_len:sos_start]
+            baseline_avg_vol = sum(to_float(b.get("volume")) or 0 for b in baseline) / max(len(baseline), 1)
+            if baseline_avg_vol <= 0:
+                return False, 0.0, 0.0
         if sum(sos_vols) / sos_len < baseline_avg_vol * 1.2:
             return False, 0.0, 0.0
         pre_start = max(0, sos_start - 5)
@@ -951,7 +1234,7 @@ def _detect_lps(bars: list[dict]) -> dict:
     for pb_len in range(min_pb, max_pb + 1):
         sos_end = n - pb_len
         sos_start = sos_end - sos_len
-        ok, pre_low, baseline_avg_vol = _valid_sos(sos_start, sos_end)
+        ok, pre_low, baseline_avg_vol = _valid_sos(sos_start, sos_end, tr_baseline)
         if not ok:
             continue
 
@@ -993,7 +1276,7 @@ def _detect_lps(bars: list[dict]) -> dict:
 
     return {"lps_signal": False, "lps_reason": "未检测到有效 LPS（需 SOS→缩量回调）", "lps_price": None}
 
-def _detect_lpsy(bars: list[dict]) -> dict:
+def _detect_lpsy(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     """Detect LPSY (Last Point of Supply) — 派发末期反弹不过前高。
 
     对称于 LPS（最后支撑点），但方向相反：
@@ -1008,18 +1291,23 @@ def _detect_lpsy(bars: list[dict]) -> dict:
     if len(bars) < 15:
         return {"lpsy_signal": False, "lpsy_reason": "数据不足", "lpsy_price": None}
 
-    # 从近到远扫描找最近一次明显的高点（阻力位）
-    # 取近 15 根 K 线中的最高价作为阻力锚点
-    scan = bars[-15:]
-    highs = [to_float(b.get("high")) for b in scan if to_float(b.get("high")) is not None]
-    if not highs:
-        return {"lpsy_signal": False, "lpsy_reason": "无有效高点数据", "lpsy_price": None}
+    # 阻力位：TR 内用 TR 上沿（原典 LPSY = 反弹不过 TR 上沿），否则近15根最高
+    if tr_ctx is not None and tr_ctx.get("in_tr") and tr_ctx.get("tr_upper") is not None:
+        resistance = tr_ctx["tr_upper"]
+        res_idx = 0  # TR 上沿天然是更早的高点，跳过距离检查
+    else:
+        # 从近到远扫描找最近一次明显的高点（阻力位）
+        # 取近 15 根 K 线中的最高价作为阻力锚点
+        scan = bars[-15:]
+        highs = [to_float(b.get("high")) for b in scan if to_float(b.get("high")) is not None]
+        if not highs:
+            return {"lpsy_signal": False, "lpsy_reason": "无有效高点数据", "lpsy_price": None}
 
-    resistance = max(highs)
-    res_idx = highs.index(resistance)
-    # 阻力位必须距离当前至少 3 根 K 线（确保不是当前最高）
-    if len(highs) - res_idx < 3:
-        return {"lpsy_signal": False, "lpsy_reason": "阻力位在近期，未形成有效反弹结构", "lpsy_price": None}
+        resistance = max(highs)
+        res_idx = highs.index(resistance)
+        # 阻力位必须距离当前至少 3 根 K 线（确保不是当前最高）
+        if len(highs) - res_idx < 3:
+            return {"lpsy_signal": False, "lpsy_reason": "阻力位在近期，未形成有效反弹结构", "lpsy_price": None}
 
     # 当前价格从下方接近阻力位但未突破
     last_close = to_float(bars[-1].get("close"))
@@ -1043,6 +1331,150 @@ def _detect_lpsy(bars: list[dict]) -> dict:
         "lpsy_signal": True,
         "lpsy_reason": f"反弹至 {resistance:.2f} 受阻回落，缩量最后供应点",
         "lpsy_price": round(resistance, 2),
+    }
+
+def _scan_last_event(
+    scan_bars: list[dict],
+    detector_fn: Any,
+    tr_ctx: dict | None,
+    window: int,
+    step: int = 1,
+) -> tuple[int, dict | None]:
+    """在 scan_bars 上滑窗扫描 detector_fn，返回 (最后触发 bar 的索引, 该次检测器完整输出)。
+
+    所有事件检测器都检查子窗口最后一根 bar（bars[-1]）是否为信号，因此
+    start+window-1 即为事件触发位置。用于事件簇确认时的先后顺序判断。
+
+    Returns:
+        (index, result) —— 未找到时 (-1, None)
+    """
+    n = len(scan_bars)
+    if n < window:
+        return -1, None
+    last_idx = -1
+    last_res: dict | None = None
+    for start in range(0, n - window + 1, step):
+        sub = scan_bars[start:start + window]
+        try:
+            # 统一用关键字传 tr_ctx：各 detector 第二位置参数不同
+            # (_detect_spring / _detect_sign_of_weakness 第二参是 _support，
+            #  位置传参会把 tr_ctx 错塞进 _support 导致 tr_ctx 实际为 None 而失效)
+            res = detector_fn(sub, tr_ctx=tr_ctx)
+        except Exception:
+            continue
+        if any(k.endswith("_signal") and res.get(k) is True for k in res):
+            last_idx = start + window - 1
+            last_res = res
+    return last_idx, last_res
+
+def _detect_event_cluster(bars: list[dict], tr_ctx: dict | None = None) -> dict:
+    """事件簇确认 (Event Cluster Confirmation) — 将孤立信号升级为可信的积累/派发事件簇。
+
+    原典逻辑：
+      - 积累确认 (accumulation_confirmed)：支撑测试（Spring 或 ST）在先，随后 SOS 突破
+        → 主力吸筹完成，Markup 将启动
+      - 派发确认 (distribution_confirmed)：上冲 (Upthrust) 在先，随后 SOW 跌破
+        → 主力派发完成，Markdown 将启动
+      - 失败簇（反向信号）：
+          · accumulation_failed：Spring 后接 SOW（非 SOS）→ 假突破，实为派发
+          · distribution_failed：Upthrust 后接 SOS（非 SOW）→ 假派发，实为吸筹
+
+    与阶段机的区别：本检测器显式校验事件先后顺序（trigger bar index），
+    并用 P0-4 的 strength 字段给簇定级，输出干净的 confirmed/failed 布尔供 fusion 消费。
+
+    Args:
+        tr_ctx=None 时各检测器走原逻辑（向后兼容）。
+
+    Returns:
+        dict with keys:
+          accumulation_confirmed, distribution_confirmed,
+          accumulation_failed, distribution_failed,
+          cluster_quality ("high"/"medium"/"low"/None),
+          cluster_confidence (float 0-1),
+          cluster_reason (str)
+    """
+    if len(bars) < WYCKOFF_MIN_BARS:
+        return {
+            "accumulation_confirmed": False,
+            "distribution_confirmed": False,
+            "accumulation_failed": False,
+            "distribution_failed": False,
+            "cluster_quality": None,
+            "cluster_confidence": 0.0,
+            "cluster_reason": "数据不足",
+        }
+
+    lookback = WYCKOFF_CLUSTER_LOOKBACK
+    scan = bars[-lookback:] if len(bars) > lookback else bars
+    gap = WYCKOFF_CLUSTER_MIN_GAP
+
+    # 在 scan 内找各事件最后触发位置 + 完整输出（用于读 strength）
+    spring_idx, spring_res = _scan_last_event(scan, _detect_spring, tr_ctx, window=15, step=1)
+    st_idx, _ = _scan_last_event(scan, _detect_st, tr_ctx, window=26, step=1)
+    ut_idx, ut_res = _scan_last_event(scan, _detect_upthrust, tr_ctx, window=15, step=1)
+    sos_idx, _ = _scan_last_event(scan, _detect_sos, tr_ctx, window=15, step=1)
+    sow_idx, _ = _scan_last_event(scan, _detect_sign_of_weakness, tr_ctx, window=16, step=1)
+
+    support_idx = max(spring_idx, st_idx)  # 支撑测试 = Spring 或 ST
+
+    # 顺序确认：支撑测试必须先于 SOS（间隔 >= gap）；上冲必须先于 SOW
+    accumulation_confirmed = support_idx >= 0 and sos_idx > support_idx + gap
+    distribution_confirmed = ut_idx >= 0 and sow_idx > ut_idx + gap
+
+    # 失败簇：支撑测试后接 SOW（且 SOS 不存在或在 SOW 之前）→ 假突破实为派发
+    accumulation_failed = (
+        support_idx >= 0
+        and sow_idx > support_idx + gap
+        and (sos_idx < 0 or sow_idx > sos_idx)
+    )
+    # 失败簇：上冲后接 SOS（且 SOW 不存在或在 SOS 之前）→ 假派发实为吸筹
+    distribution_failed = (
+        ut_idx >= 0
+        and sos_idx > ut_idx + gap
+        and (sow_idx < 0 or sos_idx > sow_idx)
+    )
+
+    # 质量分级（用 P0-4 strength 字段）
+    quality = None
+    confidence = 0.0
+    reason_parts: list[str] = []
+
+    if accumulation_confirmed:
+        sp_strength = (spring_res or {}).get("spring_strength") if spring_idx >= st_idx else "ordinary"
+        if sp_strength == "strong":
+            quality, confidence = "high", 0.9
+        elif sp_strength == "ordinary":
+            quality, confidence = "medium", 0.65
+        else:  # weak / failure / None
+            quality, confidence = "low", 0.45
+        reason_parts.append(f"积累确认：支撑测试({sp_strength})→SOS 突破")
+    elif distribution_confirmed:
+        ut_strength = (ut_res or {}).get("upthrust_strength")
+        if ut_strength == "strong":
+            quality, confidence = "high", 0.9
+        elif ut_strength == "ordinary":
+            quality, confidence = "medium", 0.65
+        else:
+            quality, confidence = "low", 0.45
+        reason_parts.append(f"派发确认：上冲({ut_strength})→SOW 跌破")
+    elif accumulation_failed:
+        reason_parts.append("积累失败：Spring 后接 SOW（假突破，实为派发）")
+        confidence = 0.8
+    elif distribution_failed:
+        reason_parts.append("派发失败：上冲后接 SOS（假派发，实为吸筹）")
+        confidence = 0.8
+
+    if not reason_parts:
+        reason_parts.append("无确认事件簇")
+
+    return {
+        "accumulation_confirmed": accumulation_confirmed,
+        "distribution_confirmed": distribution_confirmed,
+        "accumulation_failed": accumulation_failed,
+        "distribution_failed": distribution_failed,
+        "cluster_quality": quality,
+        "cluster_confidence": confidence,
+        "cluster_reason": "；".join(reason_parts),
     }
 
 def _detect_effort_vs_result(bars: list[dict]) -> dict[str, bool]:

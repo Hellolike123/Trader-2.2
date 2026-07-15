@@ -44,6 +44,12 @@ from trader_shared.config import (
     WYCKOFF_SCORE_LPSY,
     WYCKOFF_SCORE_COMPRESSION,
     WYCKOFF_SCORE_TREND_PB,
+    WYCKOFF_SCORE_CLUSTER_CONFIRM,
+    WYCKOFF_SCORE_CLUSTER_DISTRIB,
+    WYCKOFF_SCORE_CLUSTER_FAIL,
+    # ① TR 质量接打分
+    WYCKOFF_TR_QUALITY_NEUTRAL,
+    WYCKOFF_SCORE_TR_QUALITY_GAIN,
     WYCKOFF_COMPRESSION_LOOKBACK,
     WYCKOFF_COMPRESSION_ATR_QUANTILE,
     WYCKOFF_COMPRESSION_VOL_RATIO,
@@ -90,6 +96,8 @@ from .wyckoff_events import (
     _is_bc_high_position,
     _is_frozen_board,
     _is_trading_range,
+    _detect_trading_range,
+    _detect_event_cluster,
     _price_pos_pct,
     _spring_breach_level
 )
@@ -110,6 +118,15 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
             "lps_signal": False, "lps_reason": "数据不足", "lps_price": None,
             "lpsy_signal": False, "lpsy_reason": "数据不足", "lpsy_price": None,
             "wyckoff_summary": "K线数据不足，无法进行威科夫分析",
+            "tr_upper": None, "tr_lower": None, "tr_baseline_volume": None,
+            "tr_width": None, "tr_amplitude_pct": None, "tr_quality": None, "tr_in_range": None,
+            # P0-5: 事件簇确认透出（数据不足全 None/False）
+            "accumulation_confirmed": False, "distribution_confirmed": False,
+            "accumulation_failed": False, "distribution_failed": False,
+            "cluster_quality": None, "cluster_confidence": 0.0, "cluster_reason": "数据不足",
+            # 五阶段机原典串联：过早信号标注（数据不足时全 False）
+            "spring_premature": False,
+            "upthrust_premature": False,
         }
 
     # P2-2: 动态支撑位计算（多源集成）— 仅用于 Spring 检测
@@ -118,20 +135,25 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
     _support_lb = max(3, int(10 * _weekly_scale))
     dynamic_support = _compute_dynamic_support(bars, lookback=_support_lb)
 
-    spring = _detect_spring(bars, _support=dynamic_support, symbol=symbol)
-    upthrust = _detect_upthrust(bars)
+    # P0-3: TR 识别层 — 先定位当前交易区间，作为事件检测的语境
+    tr_ctx = _detect_trading_range(bars)
+
+    spring = _detect_spring(bars, _support=dynamic_support, symbol=symbol, tr_ctx=tr_ctx)
+    upthrust = _detect_upthrust(bars, tr_ctx=tr_ctx)
     bc = _detect_buying_climax(bars)
     sc = _detect_selling_climax(bars)
-    sow = _detect_sign_of_weakness(bars)  # SOW 使用自己的支撑位计算（处理 consecutive 逻辑）
+    sow = _detect_sign_of_weakness(bars, tr_ctx=tr_ctx)  # SOW 使用自己的支撑位计算（处理 consecutive 逻辑）
     bearish_div, bullish_div = _detect_volume_divergence(bars)
     ar = _detect_ar(bars)
-    sos = _detect_sos(bars)
-    st = _detect_st(bars)
-    lps = _detect_lps(bars)
-    lpsy = _detect_lpsy(bars)
+    sos = _detect_sos(bars, tr_ctx=tr_ctx)
+    st = _detect_st(bars, tr_ctx=tr_ctx)
+    lps = _detect_lps(bars, tr_ctx=tr_ctx)
+    lpsy = _detect_lpsy(bars, tr_ctx=tr_ctx)
     # P2/P3: 新增信号
     compression = _detect_compression(bars)
     trend_pullback = _detect_trend_pullback(bars)
+    # P0-5: 事件簇确认 — 将孤立信号升级为可信的积累/派发事件簇（校验先后顺序 + strength 定级）
+    cluster = _detect_event_cluster(bars, tr_ctx=tr_ctx)
 
     # P1-1: 阶段状态机 — 基于信号序列推断积累/派发阶段
     signals_dict = {
@@ -148,7 +170,7 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "compression_signal": compression["compression_signal"],
         "trend_pullback_signal": trend_pullback["trend_pullback_signal"],
     }
-    phase = _detect_phase(bars, signals_dict, _phase_lookback=_phase_lb)
+    phase = _detect_phase(bars, signals_dict, _phase_lookback=_phase_lb, tr_ctx=tr_ctx)
 
     # B: 跨日持久化状态机 — 加载旧状态、过渡、存储
     # use_persisted_phase=False 时（如中线威科夫）跳过持久化，直接返回本次
@@ -213,6 +235,17 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "upthrust_signal": upthrust["upthrust_signal"],
         "upthrust_reason": upthrust["upthrust_reason"],
         "upthrust_price": round(upthrust["upthrust_price"], 2) if upthrust["upthrust_signal"] else None,
+        # P0-4 Spring/Upthrust 真假分级
+        "spring_strength": spring.get("spring_strength"),
+        "spring_strength_note": spring.get("spring_strength_note"),
+        "spring_depth_pct": spring.get("spring_depth_pct"),
+        "spring_vol_ratio": spring.get("spring_vol_ratio"),
+        "spring_reclaim_ratio": spring.get("spring_reclaim_ratio"),
+        "upthrust_strength": upthrust.get("upthrust_strength"),
+        "upthrust_strength_note": upthrust.get("upthrust_strength_note"),
+        "upthrust_depth_pct": upthrust.get("upthrust_depth_pct"),
+        "upthrust_vol_ratio": upthrust.get("upthrust_vol_ratio"),
+        "upthrust_reclaim_ratio": upthrust.get("upthrust_reclaim_ratio"),
         "bc_signal": bc["bc_signal"],
         "bc_reason": bc["bc_reason"],
         "bc_price": round(bc["bc_price"], 2) if bc["bc_signal"] else None,
@@ -246,6 +279,9 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "phase": phase["phase"],
         "phase_label": phase["phase_label"],
         "phase_confidence_delta": phase.get("phase_confidence_delta", 0.0),
+        # 五阶段机原典串联：孤立信号标注
+        "spring_premature": phase.get("spring_premature", False),
+        "upthrust_premature": phase.get("upthrust_premature", False),
         # P3-1: VSA 量价幅度分析
         "effort_no_result": vsa["effort_no_result"],
         "no_supply": vsa["no_supply"],
@@ -256,6 +292,22 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "trend_pullback_signal": trend_pullback["trend_pullback_signal"],
         "trend_pullback_reason": trend_pullback["trend_pullback_reason"],
         "trend_pullback_price": trend_pullback["trend_pullback_price"],
+        # P0-3: TR 识别层透出
+        "tr_upper": tr_ctx["tr_upper"] if tr_ctx else None,
+        "tr_lower": tr_ctx["tr_lower"] if tr_ctx else None,
+        "tr_baseline_volume": tr_ctx["tr_baseline_volume"] if tr_ctx else None,
+        "tr_width": tr_ctx["tr_width"] if tr_ctx else None,
+        "tr_amplitude_pct": tr_ctx["tr_amplitude_pct"] if tr_ctx else None,
+        "tr_quality": tr_ctx["tr_quality"] if tr_ctx else None,
+        "tr_in_range": tr_ctx["in_tr"] if tr_ctx else None,
+        # P0-5: 事件簇确认透出
+        "accumulation_confirmed": cluster["accumulation_confirmed"],
+        "distribution_confirmed": cluster["distribution_confirmed"],
+        "accumulation_failed": cluster["accumulation_failed"],
+        "distribution_failed": cluster["distribution_failed"],
+        "cluster_quality": cluster["cluster_quality"],
+        "cluster_confidence": cluster["cluster_confidence"],
+        "cluster_reason": cluster["cluster_reason"],
         "wyckoff_summary": "；".join(parts),
     }
 
@@ -339,25 +391,28 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
     sow = analysis.get("sow_signal")
     spring_vol_class = analysis.get("spring_vol_class")
 
-    # 1. Spring — 最强看多信号；高量弹簧减半（可能是真破位，非供应耗尽）
+    # 1. Spring — 最强看多信号；孤立/过早 Spring（缺 Phase B 背景）降权为噪声，分数减半
     if spring:
         spring_pts = WYCKOFF_SCORE_SPRING
-        if spring_vol_class == "high_vol_warning":
+        if analysis.get("spring_premature"):
+            spring_pts = spring_pts // 2
+            signals.append(f"Spring(孤立/过早,降权) +{spring_pts}")
+        elif spring_vol_class == "high_vol_warning":
             spring_pts = spring_pts // 2  # 高量 Spring 分数减半
             signals.append(f"Spring(高量降权) +{spring_pts}")
         else:
             signals.append(f"Spring +{spring_pts}")
         raw += spring_pts
 
-    # 2. Spring + 看多背离额外加分；高量 Spring 同步降权（与主分一致）
+    # 2. Spring + 看多背离额外加分；孤立/过早 Spring 与高量 Spring 同步降权
     if spring and bullish_div:
         bonus = WYCKOFF_SCORE_SPRING_BULLISH_DIV_BONUS
-        if spring_vol_class == "high_vol_warning":
-            bonus = bonus // 2  # 高量时背离加成减半（0 当 1 时 floor 为 0）
+        if analysis.get("spring_premature") or spring_vol_class == "high_vol_warning":
+            bonus = bonus // 2  # 孤立/高量时背离加成减半（0 当 1 时 floor 为 0）
             if bonus > 0:
-                signals.append(f"Spring×看多背离(高量降权) +{bonus}")
+                signals.append(f"Spring×看多背离(降权) +{bonus}")
             else:
-                signals.append("Spring×看多背离(高量降权) +0")
+                signals.append("Spring×看多背离(降权) +0")
         else:
             signals.append(f"Spring×看多背离 +{bonus}")
         raw += bonus
@@ -367,10 +422,15 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
         raw += WYCKOFF_SCORE_BULLISH_DIV
         signals.append(f"看多背离 +{WYCKOFF_SCORE_BULLISH_DIV}")
 
-    # 4. Upthrust — 假突破派发
+    # 4. Upthrust — 假突破派发；孤立/过早 UT（缺 Phase B 背景）降权为噪声，分数减半
     if upthrust:
-        raw += WYCKOFF_SCORE_UT
-        signals.append(f"Upthrust {WYCKOFF_SCORE_UT}")
+        ut_pts = WYCKOFF_SCORE_UT
+        if analysis.get("upthrust_premature"):
+            ut_pts = ut_pts // 2
+            signals.append(f"Upthrust(孤立/过早,降权) {ut_pts}")
+        else:
+            signals.append(f"Upthrust {ut_pts}")
+        raw += ut_pts
 
     # 5. 看空背离
     if bearish_div and not bullish_div:
@@ -425,9 +485,17 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
         signals.append(f"SC +{WYCKOFF_SCORE_AR}")
 
     # 15. LPSY (Last Point of Supply) — 最后供应点，看空
+    # P1-1 修复：只有存在派发背景（BC/UT/SOW）时才认可 LPSY
+    # 孤立 LPSY（无派发上下文）不打分，与 phase 状态机 `lpsy_found and (bc/ut/sow)` 门控一致
     if analysis.get("lpsy_signal"):
-        raw += WYCKOFF_SCORE_LPSY  # LPSY 负向等同 LPS 正向强度
-        signals.append(f"LPSY {WYCKOFF_SCORE_LPSY}")
+        has_distribution = any([
+            analysis.get("bc_signal"),
+            analysis.get("upthrust_signal"),
+            analysis.get("sow_signal"),
+        ])
+        if has_distribution:
+            raw += WYCKOFF_SCORE_LPSY
+            signals.append(f"LPSY {WYCKOFF_SCORE_LPSY}")
 
     # ── P3-1: VSA 量价幅度修正 ──
     effort_no_result = analysis.get("effort_no_result", False)
@@ -456,6 +524,33 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
     if effort_no_result and not upthrust and not analysis.get("sos_signal"):
         raw -= 5
         signals.append("努力无结果 -5")
+
+    # ── P0-5 事件簇确认打分：顺序确认的簇比孤立信号更可靠，直接抑制 fusion 误出手 ──
+    if analysis.get("accumulation_confirmed"):
+        raw += WYCKOFF_SCORE_CLUSTER_CONFIRM
+        signals.append(f"积累确认(Spring→SOS) +{WYCKOFF_SCORE_CLUSTER_CONFIRM}")
+    if analysis.get("distribution_confirmed"):
+        raw += WYCKOFF_SCORE_CLUSTER_DISTRIB
+        signals.append(f"派发确认(Upthrust→SOW) {WYCKOFF_SCORE_CLUSTER_DISTRIB}")
+    # 失败簇：Spring 后接 SOW → 假突破实为派发，强看空（覆盖孤立 Spring 的看多分）
+    if analysis.get("accumulation_failed"):
+        raw += WYCKOFF_SCORE_CLUSTER_FAIL
+        signals.append(f"积累失败(Spring→SOW) {WYCKOFF_SCORE_CLUSTER_FAIL}")
+    # 失败簇：Upthrust 后接 SOS → 假派发实为吸筹，强看多
+    if analysis.get("distribution_failed"):
+        raw += -WYCKOFF_SCORE_CLUSTER_FAIL
+        signals.append(f"派发失败(Upthrust→SOS) +{-WYCKOFF_SCORE_CLUSTER_FAIL}")
+
+    # ── ① TR 质量接打分：干净 TR 中信号更可信，高质→加分、低质→向中性回拉 ──
+    # 调整量 = (tr_quality - 0.5) * 2 * GAIN，封顶 ±GAIN。tr_quality=None(无TR)不调整。
+    tr_quality = analysis.get("tr_quality")
+    if tr_quality is not None:
+        tr_adj = int(round((tr_quality - WYCKOFF_TR_QUALITY_NEUTRAL)
+                           * 2.0 * WYCKOFF_SCORE_TR_QUALITY_GAIN))
+        tr_adj = max(-WYCKOFF_SCORE_TR_QUALITY_GAIN, min(WYCKOFF_SCORE_TR_QUALITY_GAIN, tr_adj))
+        if tr_adj != 0:
+            raw += tr_adj
+            signals.append(f"TR质量{tr_quality:.02f} {tr_adj:+d}")
 
     # ── 阶段置信度修正：phase_confidence_delta * 20 取整后微调 raw ──
     phase_delta = analysis.get("phase_confidence_delta") or 0.0

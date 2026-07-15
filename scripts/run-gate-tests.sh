@@ -40,6 +40,8 @@ TESTS=(
   "02-共享模块-shared/tests/test_golden_diff_gate.py"
   "02-共享模块-shared/tests/test_box_detect.py"
   "02-共享模块-shared/tests/test_combo_strategy.py"
+  "02-共享模块-shared/tests/test_wyckoff_core.py"
+  "02-共享模块-shared/tests/test_wyckoff_tr.py"
   "02-共享模块-shared/tests/test_wyckoff_split_equivalence.py"
   "02-共享模块-shared/tests/test_chan_split_equivalence.py"
   "02-共享模块-shared/tests/test_stage_split_equivalence.py"

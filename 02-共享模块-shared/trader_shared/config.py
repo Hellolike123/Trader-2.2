@@ -153,6 +153,21 @@ WYCKOFF_UTAD_BREAKOUT_RATIO: float = 1.005      # 假突破幅度，超出阻力
 WYCKOFF_UTAD_RECLAIM_RATIO: float = 0.995       # 假突破收回幅度（收回到阻力 99.5% 之下）
 WYCKOFF_UT_VOL_RATIO: float = 1.2               # UT 放量确认阈值（派发需放量）
 
+# ---- P0-4 Spring/Upthrust 真假分级 (Strength Grading) ----
+# 分级三维：刺穿深度(%) / 量能比(vs TR基线量) / 收回收盘位置(相对TR中轴)
+WYCKOFF_SPRING_STRONG_DEPTH_PCT: float = 2.5    # 深度刺穿阈值(%) → strong spring（>2.5% 才 strong，1.5%~2.5% 归 ordinary，因刺穿线本身即 1.5%）
+WYCKOFF_SPRING_WEAK_DEPTH_PCT: float = 0.5      # 浅刺穿阈值(%) → weak spring
+WYCKOFF_SPRING_STRONG_RECLAIM: float = 1.0      # 收回到TR中轴以上比例 → strong
+WYCKOFF_UT_STRONG_DEPTH_PCT: float = 0.5        # UT 深度突破阈值(%) → strong
+WYCKOFF_UT_WEAK_DEPTH_PCT: float = 0.1          # UT 浅突破阈值(%) → weak
+WYCKOFF_UT_STRONG_RECLAIM: float = 1.0          # UT 跌回TR中轴以下比例 → strong
+
+# ---- P0-5 事件簇确认 (Event Cluster Confirmation) ----
+# 将孤立信号升级为可信的积累/派发事件簇：支撑测试(Spring/ST)→SOS 确认吸筹；
+# 上冲(Upthrust)→SOW 确认派发；并校验事件先后顺序 + 用 P0-4 strength 定级。
+WYCKOFF_CLUSTER_LOOKBACK: int = 60           # 事件簇扫描回溯窗口（与阶段机同量级）
+WYCKOFF_CLUSTER_MIN_GAP: int = 5             # 支撑测试与 SOS 的最小间隔根数（防同根棒误判顺序）
+
 # Wyckoff 阶段状态机
 WYCKOFF_PHASE_LOOKBACK: int = 60                # 阶段序列回溯窗口（约 3 个月）
 
@@ -180,7 +195,7 @@ WYCKOFF_TREND_PB_MA_WINDOW: int = 20           # 均线窗口
 # 基准分数 0（raw=0 → score=50），各信号权重可正可负
 # 原始权重理论最大绝对值 = 25+5+10+20+10+15+10+10+15+8+12 = 130
 # 新增: AR(+10) SOS(+15) ST(+8) LPS(+12)；看空额外 -20
-# 归一化分母取 95，留一定余量
+# 归一化分母取 130，留一定余量（P1-2 修复，之前 95 被新增权重饱和）
 WYCKOFF_SCORE_SPRING: int = 25                  # Spring 弹簧洗盘 — 最强看多信号
 WYCKOFF_SCORE_SPRING_BULLISH_DIV_BONUS: int = 5 # Spring + 看多背离 — 额外加分
 WYCKOFF_SCORE_BULLISH_DIV: int = 10             # 看多量价背离 — 量能萎缩支撑止跌
@@ -196,7 +211,33 @@ WYCKOFF_SCORE_LPS: int = 12                     # Last Point of Support 最后�
 WYCKOFF_SCORE_LPSY: int = -12                    # Last Point of Supply 最后供应 — 反弹不过前高缩量
 WYCKOFF_SCORE_COMPRESSION: int = 10              # Compression 压缩蓄势 — 振幅收窄+量能枯竭
 WYCKOFF_SCORE_TREND_PB: int = 8                  # Trend Pullback 趋势回踩 — 回踩不破均线
-WYCKOFF_SCORE_MAX_ABS: int = 95                 # 归一化分母，raw 映射到 [-50, +50]
+# P0-5 事件簇确认打分权重（顺序确认的簇比孤立信号更可靠，直接抑制 fusion 误出手）
+WYCKOFF_SCORE_CLUSTER_CONFIRM: int = 15         # 积累确认(Spring→SOS 顺序) 额外加分
+WYCKOFF_SCORE_CLUSTER_DISTRIB: int = -15        # 派发确认(Upthrust→SOW 顺序) 额外扣分
+WYCKOFF_SCORE_CLUSTER_FAIL: int = -20           # 积累失败(Spring→SOW) 假突破实为派发，强看空
+WYCKOFF_SCORE_MAX_ABS: int = 130                # 归一化分母 130，raw∈[-130,+130]→score∈[0,100]（50中性）
+# 五阶段机原典串联：Spring/Upthrust 必须在 Phase B（停止后建仓区）之后才有效。
+# 孤立/早于 B 阶段的 Spring/UT 判为噪声（降权）：相位维持中性、打分减半。
+WYCKOFF_PHASE_PREMATURE_SPRING_PENALTY: float = 0.0   # 过早 Spring 相位修正（噪声=中性，降权在 score 层做）
+WYCKOFF_PHASE_PREMATURE_UT_PENALTY: float = 0.0       # 过早 UT 相位修正（噪声=中性，降权在 score 层做）
+WYCKOFF_SCORE_PREMATURE_HALF: bool = True             # 过早信号打分减半开关
+
+# ---- P0-3 Trading Range (TR) 识别层 ----
+# 原典：TR 是吸筹/派发的「容器」，价格在区间内反复震荡、上下沿清晰、持续足够时长。
+# 因果律：TR 越宽/越长，后续行情越大。以下常量驱动 _detect_trading_range。
+WYCKOFF_TR_LOOKBACK: int = 120                  # TR 识别最大回溯根数（约半年日线）
+WYCKOFF_TR_MIN_WIDTH: int = 20                  # TR 最小宽度（根数），过窄视为噪声非 TR
+WYCKOFF_TR_AMPLITUDE_MAX: float = 30.0          # TR 最大振幅 %，超过即判定已进入趋势段，停止回溯
+WYCKOFF_TR_AMPLITUDE_MIN: float = 6.0           # TR 最小振幅 %，过窄视为无意义的窄幅噪声
+WYCKOFF_TR_QUALITY_WIDTH_REF: int = 60          # TR 质量评分的宽度参考（width/该值，封顶 1.0）
+# TR 上下沿用「反复测试的清晰边界」而非绝对极值：取区间内 low/high 的分位带，
+# 排除 Spring/Upthrust 的刺穿毛刺（原典：刺穿是事件，不是边界本身）。
+WYCKOFF_TR_FLOOR_PCT: float = 0.15              # 下沿 = 区间 low 的 15 分位（过滤最深 ~15% 刺穿）
+WYCKOFF_TR_CEIL_PCT: float = 0.85               # 上沿 = 区间 high 的 85 分位（过滤最高 ~15% 刺穿）
+# ① TR 质量接打分：tr_quality(0~1) 越高=TR 越干净，信号越可信；越低=越像噪声，向中性回拉。
+# 调整量 = (tr_quality - 中性点) * 2 * GAIN，封顶 ±GAIN。无 TR(tr_quality=None)不调整。
+WYCKOFF_TR_QUALITY_NEUTRAL: float = 0.5         # tr_quality 中性点：高于此视为干净 TR，低于此视为可疑
+WYCKOFF_SCORE_TR_QUALITY_GAIN: int = 20         # TR 质量对 raw 分的最大调整幅度（quality=1→+20，quality=0→-20）
 
 # ---- P3 Theory Adjustment ----
 # THEORY_ADJUST_LOG_ONLY=true 时理论微调只记录日志不实际生效，用于首次上线观察
@@ -344,6 +385,14 @@ __all__ = [
     "WYCKOFF_SOW_VOL_RATIO_THRESHOLD", "WYCKOFF_SOW_CONSECUTIVE_DAYS",
     "WYCKOFF_SPRING_SUPPORT_LOOKBACK", "WYCKOFF_UTAD_BREAKOUT_RATIO",
     "WYCKOFF_UTAD_RECLAIM_RATIO", "WYCKOFF_DIVERGENCE_RATIO",
+    # P0-4 Spring/Upthrust 真假分级常量
+    "WYCKOFF_SPRING_STRONG_DEPTH_PCT", "WYCKOFF_SPRING_WEAK_DEPTH_PCT", "WYCKOFF_SPRING_STRONG_RECLAIM",
+    "WYCKOFF_UT_STRONG_DEPTH_PCT", "WYCKOFF_UT_WEAK_DEPTH_PCT", "WYCKOFF_UT_STRONG_RECLAIM",
+    # P0-5 事件簇确认常量
+    "WYCKOFF_CLUSTER_LOOKBACK", "WYCKOFF_CLUSTER_MIN_GAP",
+    # 五阶段机原典串联：过早信号惩罚
+    "WYCKOFF_PHASE_PREMATURE_SPRING_PENALTY", "WYCKOFF_PHASE_PREMATURE_UT_PENALTY",
+    "WYCKOFF_SCORE_PREMATURE_HALF",
     # Wyckoff Score constants
     "WYCKOFF_SCORE_SPRING", "WYCKOFF_SCORE_SPRING_BULLISH_DIV_BONUS",
     "WYCKOFF_SCORE_BULLISH_DIV", "WYCKOFF_SCORE_UT",
@@ -353,6 +402,9 @@ __all__ = [
     "WYCKOFF_SCORE_AR", "WYCKOFF_SCORE_SOS",
     "WYCKOFF_SCORE_ST", "WYCKOFF_SCORE_LPS", "WYCKOFF_SCORE_LPSY",
     "WYCKOFF_SCORE_COMPRESSION", "WYCKOFF_SCORE_TREND_PB",
+    "WYCKOFF_SCORE_CLUSTER_CONFIRM", "WYCKOFF_SCORE_CLUSTER_DISTRIB", "WYCKOFF_SCORE_CLUSTER_FAIL",
+    # ① TR 质量接打分
+    "WYCKOFF_TR_QUALITY_NEUTRAL", "WYCKOFF_SCORE_TR_QUALITY_GAIN",
     "WYCKOFF_COMPRESSION_LOOKBACK", "WYCKOFF_COMPRESSION_ATR_QUANTILE",
     "WYCKOFF_COMPRESSION_VOL_RATIO", "WYCKOFF_COMPRESSION_VOL_REF_WINDOW",
     "WYCKOFF_TREND_PB_LOOKBACK", "WYCKOFF_TREND_PB_MIN_PULLBACK",
