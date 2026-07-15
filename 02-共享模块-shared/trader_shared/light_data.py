@@ -1148,9 +1148,15 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
     try:
         from trader_shared.cache_utils import get_cached as _file_cached, CACHE_DAILY, TTL_DAILY
         _cached_result = _file_cached(CACHE_DAILY, sec.code, ttl=TTL_DAILY)
-        file_cached = _cached_result.data if _cached_result is not None else None
-        if file_cached is not None and isinstance(file_cached, list) and len(file_cached) >= 200:
-            return file_cached
+        # stale=True 表示 TTL 已过期：不视为命中，往下走回源取最新，
+        # 否则陈旧日K会被永久当真（曾导致报告日K停在 07-01 缺两周数据）。
+        if (
+            _cached_result is not None
+            and not _cached_result.stale
+            and isinstance(_cached_result.data, list)
+            and len(_cached_result.data) >= 200
+        ):
+            return _cached_result.data
     except (ImportError, OSError) as exc:
         _logger.debug("File cache read failed for %s: %s", sec.code, exc)
 

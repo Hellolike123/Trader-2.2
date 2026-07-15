@@ -222,9 +222,10 @@ def fetch_fund_flow_cached(symbol: str) -> dict[str, Any]:
     读缓存 → 过期则调API → 写缓存。
     返回 {"daily_flow": [...], "features": {...}} 或空 dict。
     """
-    cached = get_cached_data(CACHE_FUND_FLOW, symbol, ttl=TTL_FUND_FLOW)
-    if cached is not None:
-        return cached
+    cached = get_cached(CACHE_FUND_FLOW, symbol, ttl=TTL_FUND_FLOW)
+    # stale=True（TTL 过期）不视为命中，往下回源，避免陈旧资金流被永久当真
+    if cached is not None and not cached.stale:
+        return cached.data
     try:
         from trader_shared.fund_flow_data import fetch_fund_flow, calc_fund_flow_features
         daily_flow = fetch_fund_flow(symbol)

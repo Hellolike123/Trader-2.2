@@ -171,7 +171,8 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
         from trader_shared.cache_utils import get_cached as _file_cached, CACHE_ENRICH, TTL_FUNDAMENTAL
         _cached_result = _file_cached(CACHE_ENRICH, sec.code, ttl=TTL_FUNDAMENTAL)
         file_cached = _cached_result.data if _cached_result is not None else None
-        if file_cached is not None and isinstance(file_cached, dict):
+        # stale=True（TTL 过期）不视为命中，往下实时抓取，避免陈旧基本面被永久当真
+        if file_cached is not None and isinstance(file_cached, dict) and not _cached_result.stale:
             extend_fundamental = file_cached.get("extend_fundamental", {})
             extend_sentiment = file_cached.get("extend_sentiment", {})
             extend_margin = file_cached.get("extend_margin")
@@ -333,7 +334,8 @@ class UnifiedProvider:
             return self._akshare_fetch_qfq_daily(sec, days)
         from trader_shared.cache_utils import get_cached, set_cached, TTL_DAILY
         cached = get_cached("daily", sec.code, ttl=TTL_DAILY)
-        if cached is not None:
+        # stale=True（TTL 过期）不视为命中，往下回源，避免陈旧日K被永久当真
+        if cached is not None and not cached.stale:
             return cached.data
         self._ensure_http()
         from trader_shared.light_data import fetch_qfq_daily as _fetch
