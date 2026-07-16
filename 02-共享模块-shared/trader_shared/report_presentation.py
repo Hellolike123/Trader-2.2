@@ -433,7 +433,7 @@ def render_markdown(r: dict, *, _kelly_cache_only: dict[str, float] | None = Non
         if isinstance(_mom_dir, dict):
             _mom_val = _mom_dir.get("direction", "") or _mom_dir.get("label", "")
             # 英文 → 中文
-            _MOM_MAP = {"bullish": "走强", "bearish": "转弱", "neutral": "震荡", "flat": "震荡"}
+            _MOM_MAP = {"bullish": "走强", "bearish": "转弱", "neutral": "震荡", "flat": "震荡", "insufficient": "数据不足"}
             _momentum = _MOM_MAP.get(_mom_val, _mom_val)
     elif isinstance(_raw_mom, str) and _raw_mom != "None":
         _momentum = _raw_mom

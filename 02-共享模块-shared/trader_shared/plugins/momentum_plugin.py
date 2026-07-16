@@ -53,7 +53,8 @@ def apply_supertrend_nudge(
     mom_sign = _dir_to_sign(mom.get("direction"))
     # 仅当两者同向（均非零）时确认增强；反向或任一中性都不动
     if st_sign != 0 and st_sign == mom_sign:
-        score = float(mom.get("score", 50))
+        _raw_score = mom.get("score")
+        score = float(_raw_score) if isinstance(_raw_score, (int, float)) else 50.0
         mom["score"] = min(100.0, score + SUPERTREND_CONFIRM_BOOST)
     return momentum_result
 

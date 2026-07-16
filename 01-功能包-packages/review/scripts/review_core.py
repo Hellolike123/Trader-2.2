@@ -414,7 +414,7 @@ def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str,
         "wyckoff": wyckoff_text,
         "chip": (f"{cost:.2f} 是你的成本压力区；轻量估算不等同真实筹码分布。" if cost else "按近20日成交密集区做轻量估算，不等同真实筹码分布。"),
         "fund": "有吸筹/洗盘嫌疑，但证据不足以确认。" if volume_repair else "资金行为证据不足，只能按价格和量能观察。",
-        "momentum": "；".join(momentum_signals) if momentum_signals else (f"{momentum_dir.title()}，动能评分{momentum_score}/100" if session not in {"midday"} else "上午改善，午后还需确认。"),
+        "momentum": "；".join(momentum_signals) if momentum_signals else ("数据不足，动量暂不评分" if momentum_dir == "insufficient" else (f"{momentum_dir.title()}，动能评分{momentum_score}/100" if session not in {"midday"} else "上午改善，午后还需确认。")),
         "supports": [
             "结构：两次接近位置止跌" if double_low else "结构：下杀后收回，短线修复",
             "量价：开盘放量下杀后收回，不是一路放量下跌" if volume_repair else "量价：收盘修复，但分时确认不足",
