@@ -37,6 +37,7 @@
 - **Spring ATR 动态刺穿深度**：`wyckoff_core.py` 的 `_detect_spring()` / `_detect_st()` 共用 `_spring_breach_level()`，优先 `support - 0.5×ATR`，否则 `support × 0.985`。配置：`WYCKOFF_SPRING_ATR_MULTIPLE=0.5`。
 - **威科夫消费面（勿与旧 fusion 叙事混淆）**：短线 fusion 第三席是 **VPF**（`merge_decisions` 不再对 wyckoff 加权）。威科夫主消费：`calculate_wyckoff_score` → 选股池/复盘打分；`format_wyckoff_oneline` → 中线「威科夫：…」一行；`wyckoff_strategy_midline` 周线独占（不足 → `timeframe=insufficient`，展示「不参与定论」）。`_wyckoff_to_signal` 仅兼容/测试。孤立信号 `spring_premature`/`upthrust_premature` 打分降权且展示/中线 bias 不抬 strong。`阶段：` 仍是主力四阶段 major_stage，不是威科夫 A–E phase。
 - **威科夫原典补齐（2026-07）**：PS/PSY/BU/UTAD 检测 + Markup/Markdown 阶段；打分 `_resolve_score_conflicts` 抑制 SC↔SOW 等反向对冲；LPSY 无派发背景不亮灯；因果目标 `cause_effect_*`（TR 1:1 近似，非完整 P&F）。详见 `docs/wyckoff-original-gaps-fix-2026-07-16.md`。
+- **威科夫统一出口 View（A 档）**：`trader_shared/wyckoff_view.py` 的 `WyckoffStateView` + `to_wyckoff_state_view()` 从现有 analysis 薄适配；契约见 `docs/designs/wyckoff-state-view.md`。**未改**检测/fusion/纪律；生产主路径可继续读旧 dict，Agent/后续迁移优先读 View。
 - **动量第二席（2026-07 审计）**：`assess_momentum` 数据不足 → `insufficient`+`score=None`；Supertrend 只确认不否决（多头 +8 / **空头 -8**，改分后重映射 direction）；ADX 强趋势约束逆向超额；详见 `docs/audit/momentum-review-2026-07-16.md`。
 - **假跌破硬性熔断**：`decision_core.py` 的 `status_layers()` 在假跌破确认之前检查单日跌幅，跌幅超 7% 直接返回"风险回避"，跳过假跌破逻辑。配置：`HARD_STOP_SINGLE_DAY_DROP=-0.07`。
 - **T+1 隔离锁**：`stage_positioning.py` 的 `evaluate_position_state()` 新增 `last_add_date` 参数，当天已加仓则返回"持仓观察（T+1冷却）"，禁止日内重复加仓。
