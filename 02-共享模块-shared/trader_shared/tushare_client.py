@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import threading
 import time
 import warnings
@@ -76,6 +77,38 @@ def _get_realtime_url() -> str:
         return _DEFAULT_REALTIME_URL
 
 
+def _probe_reachable(url: str, timeout: float = 3.0) -> bool:
+    """快速探测 API 主机的 TCP 可达性（带硬超时，绝不挂死）。
+
+    用于避免对不可达主机（如离线/被墙的代理端点）发起无 timeout 的
+    requests 调用导致整个进程永久 hang。DNS 解析与 connect 均在独立线程中
+    受 timeout 约束；线程在 timeout 内未结束一律视为不可达。
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    host = parsed.hostname
+    if not host:
+        return False
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+
+    result: list[bool] = [False]
+
+    def _attempt() -> None:
+        try:
+            sock = socket.create_connection((host, port), timeout=timeout)
+            sock.close()
+            result[0] = True
+        except Exception:
+            result[0] = False
+
+    probe_thread = threading.Thread(target=_attempt, daemon=True)
+    probe_thread.start()
+    probe_thread.join(timeout + 1.0)
+    # 线程在超时内未结束 = 探测挂死 = 视为不可达
+    return (not probe_thread.is_alive()) and result[0]
+
+
 # ── TushareClient ─────────────────────────────────────────────────────────
 class TushareClient:
     """Tushare Pro 数据客户端，SDK 优先 + HTTP 降级。"""
@@ -91,6 +124,13 @@ class TushareClient:
 
         if not self._token:
             warnings.warn("[tushare] TUSHARE_TOKEN 未设置，Tushare 数据功能禁用")
+            return
+
+        # 快速可达性探测：避免对不可达主机发起无超时请求导致进程挂死
+        if not _probe_reachable(self._api_url):
+            warnings.warn(
+                f"[tushare] API {self._api_url} 不可达，禁用 Tushare 数据通道（将 fallback 到腾讯）"
+            )
             return
 
         # 尝试初始化 SDK
