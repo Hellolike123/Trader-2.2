@@ -485,6 +485,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         )
         report_fusion = {"action": "融合层异常", "confidence": 0, "weighted_score": 0,
                          "regime": "", "hmm_regime": "range", "disagreement": 0, "signals_detail": {}, "weights_used": {}}
+    _mark("fusion")
 
     # 生成 fusion_verbatim（AI 原话直出，不可改写）
     try:
@@ -583,6 +584,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
                                      fusion_result=report_fusion, chan_result=chan_result,
                                      fetcher=fetcher, vp_result=vp_result,
                                      major_stage=_pre_stage)
+    _mark("structure")
 
     # 将理论策略结果合并到 levels（不覆盖 structure_core 的输出）
     for key, val in {"chanlun": chan_result, "wyckoff": wyck_result, "momentum": momentum_result}.items():
@@ -704,6 +706,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     chip_support_upper = chip_res["chip_support_upper"]
     chip_resistance_lower = chip_res["chip_resistance_lower"]
     chip_resistance_upper = chip_res["chip_resistance_upper"]
+    _mark("chip")
 
     # 主力行为独立评分（15分制）
     main_force_score_result: dict[str, Any] = {"total_score": 0, "flow_score": 0, "chip_score": 0,
@@ -809,6 +812,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             )
     except Exception:
         pass
+    _mark("resonance")
 
     # 60分钟卖点确认 → 提升融合层卖方置信度
     # 注：买方 timing 信号已通过 weighted_score 正值体现，此处仅对卖方补充置信度
@@ -1240,6 +1244,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     else:
         report["suggested_pct_context"] = f"{suggested}%（阶段×大盘环境建议）"
 
+    _mark("stage_pack")
+
     # ── 短中线：关键价 + 纪律门控 + 结论块（只读，不改写 stage/fusion/stop）──
     # weekly_frame 在 mid_key_prices 算出后由 compute_weekly_frame 填充
     report["weekly_frame"] = None
@@ -1307,6 +1313,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             wyckoff_midline=report.get("wyckoff_midline"),
         )
         report["mid_key_prices"] = mid_key_prices
+        _mark("key_prices")
 
         # R9 weekly_frame + R6 中枢位置（周/日）
         _life = None
@@ -1485,6 +1492,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
 
         discipline = merge_discipline(mistery_gate, chan_d, max_position_pct=50)
         report["discipline"] = discipline
+        _mark("discipline")
 
         # NOTE: 箱体(box_detect) / 组合共振(combo_strategy) 作为独立可测模块保留，
         #       暂不接入本报告渲染。用户决策：箱体优先做独立模块，先不进报告；
@@ -1589,6 +1597,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         # 并附双源合成注记（report_core 渲染为「定论：」行）。
         conclusion["stage_line"] = _midline_verdict["stage"]
         conclusion["midline_verdict_note"] = _midline_verdict["note"]
+        _mark("conclusion")
     except Exception as _sm_exc:
         # 短中线组装失败不阻断主报告；保留原字段
         report.setdefault("key_prices", {})
@@ -1613,20 +1622,21 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             "execution": "现价不买 · 不追", "reason": "门控组装失败",
             "this_week": "观察", "conflict": "", "daily_ruling": "中性，观望",
         })
+        _mark("conclusion")
 
     _mark("assemble")
     if _prof and _marks:
-        parts = [f"{lab}={sec:.3f}s" for lab, sec in _marks]
+        # 累计 + 段耗时（后一项减前一项），便于定位 assemble 内部大头
+        prev = 0.0
+        segs: list[str] = []
+        for lab, sec in _marks:
+            delta = sec - prev
+            segs.append(f"{lab}=+{delta:.3f}s")
+            prev = sec
         total = _time.perf_counter() - _t0
-        _logger.info(
-            "TRADER_PROFILE %s total=%.3fs %s",
-            target, total, " ".join(parts),
-        )
-        # 亦写 stderr 便于 CLI 一眼看（logger 可能被屏蔽）
-        print(
-            f"[TRADER_PROFILE] {target} total={total:.3f}s " + " ".join(parts),
-            file=sys.stderr,
-        )
+        line = f"[TRADER_PROFILE] {target} total={total:.3f}s " + " ".join(segs)
+        _logger.info(line)
+        print(line, file=sys.stderr)
 
     return report
 
