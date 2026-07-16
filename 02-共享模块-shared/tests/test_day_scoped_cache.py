@@ -5,6 +5,33 @@ import trader_shared.cache_utils as cu
 import trader_shared.chip_data as chip
 
 
+def test_get_day_scoped_bars_same_day(monkeypatch):
+    calls = {"n": 0}
+    monkeypatch.setattr(cu, "cache_calendar_date", lambda: "2026-07-17")
+    store: dict = {}
+
+    def _get(key, target, ttl=None):
+        data = store.get((key, target))
+        if data is None:
+            return None
+        return cu.CacheResult(data=data, stale=False, age_seconds=1.0, source="file")
+
+    def _set(key, target, data):
+        store[(key, target)] = data
+
+    monkeypatch.setattr(cu, "get_cached", _get)
+    monkeypatch.setattr(cu, "set_cached", _set)
+
+    def _fetch():
+        calls["n"] += 1
+        return [{"date": "2026-07-16", "close": 10.0}] * 30
+
+    a = cu.get_day_scoped_bars("daily", "000988", _fetch, min_rows=20)
+    b = cu.get_day_scoped_bars("daily", "000988", _fetch, min_rows=20)
+    assert len(a) == 30 and len(b) == 30
+    assert calls["n"] == 1
+
+
 def test_is_fetch_date_today():
     assert cu.is_fetch_date_today({"fetch_date": "2026-07-17"}, "2026-07-17")
     assert not cu.is_fetch_date_today({"fetch_date": "2026-07-16"}, "2026-07-17")

@@ -1144,19 +1144,28 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
             pass
         return []
 
-    # ── 文件缓存读取（盘后预缓存的数据，TTL 24小时）──
+    # ── 文件缓存：按自然日 fetch_date 复用（与 Tushare 路径一致）──
     try:
-        from trader_shared.cache_utils import get_cached as _file_cached, CACHE_DAILY, TTL_DAILY
-        _cached_result = _file_cached(CACHE_DAILY, sec.code, ttl=TTL_DAILY)
-        # stale=True 表示 TTL 已过期：不视为命中，往下走回源取最新，
-        # 否则陈旧日K会被永久当真（曾导致报告日K停在 07-01 缺两周数据）。
-        if (
-            _cached_result is not None
-            and not _cached_result.stale
-            and isinstance(_cached_result.data, list)
-            and len(_cached_result.data) >= 200
-        ):
-            return _cached_result.data
+        from trader_shared.cache_utils import (
+            get_cached as _file_cached,
+            CACHE_DAILY,
+            TTL_BARS_DAY,
+            is_fetch_date_today,
+        )
+        _cached_result = _file_cached(CACHE_DAILY, sec.code, ttl=TTL_BARS_DAY)
+        if _cached_result is not None:
+            _data = _cached_result.data
+            if is_fetch_date_today(_data) and isinstance(_data, dict):
+                _rows = _data.get("rows")
+                if isinstance(_rows, list) and len(_rows) >= 200:
+                    return _rows
+            # 兼容旧裸 list + 未过 TTL
+            if (
+                isinstance(_data, list)
+                and len(_data) >= 200
+                and not _cached_result.stale
+            ):
+                return _data
     except (ImportError, OSError) as exc:
         _logger.debug("File cache read failed for %s: %s", sec.code, exc)
 
@@ -1212,10 +1221,20 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
         has_today = any(bar.get("date") == datetime.now().strftime("%Y-%m-%d") for bar in result)
         if not has_today:
             save_to_cache(cache_key, result, ttl_seconds=3600)
-        # ── 写入文件缓存（供盘后预缓存和下次盘中读取）──
+        # ── 写入文件缓存（带 fetch_date，同日复用）──
         try:
-            from trader_shared.cache_utils import set_cached_validated, validate_bars, CACHE_DAILY
-            set_cached_validated(CACHE_DAILY, sec.code, result, validate_bars)
+            from trader_shared.cache_utils import (
+                set_cached,
+                validate_bars,
+                CACHE_DAILY,
+                cache_calendar_date,
+            )
+            if validate_bars(result):
+                set_cached(
+                    CACHE_DAILY,
+                    sec.code,
+                    {"fetch_date": cache_calendar_date(), "rows": result},
+                )
         except (ImportError, OSError) as exc:
             _logger.debug("File cache write failed for %s: %s", sec.code, exc)
         return result
@@ -1350,6 +1369,7 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
     """Fetch weekly K-line bars. Sina HTTP first, fallback to mootdx.
 
     默认根数见 config.WEEKLY_LOOKBACK_BARS（中线缠论需要足够周线成笔/成段）。
+    当天第一次打网，同日复用。
     """
     if datalen is None:
         try:
@@ -1357,20 +1377,25 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
             datalen = int(WEEKLY_LOOKBACK_BARS)
         except Exception:
             datalen = 260
-    fallback_bars = _fetch_mins_fallback(sec, "weekly", datalen)
-    if fallback_bars and len(fallback_bars) >= 4:
-        for bar in fallback_bars:
-            bar["data_source"] = "sina"
-            bar["data_status"] = "full"
-        return fallback_bars
 
-    bars = _fetch_mins_mootdx(sec, "weekly", datalen)
-    if bars:
-        for bar in bars:
-            bar["data_source"] = "mootdx (fallback)"
-            bar["data_status"] = "partial"
-        return bars
-    return []
+    from trader_shared.cache_utils import get_day_scoped_bars, CACHE_WEEKLY
+
+    def _net() -> list[dict[str, Any]]:
+        fallback_bars = _fetch_mins_fallback(sec, "weekly", datalen)
+        if fallback_bars and len(fallback_bars) >= 4:
+            for bar in fallback_bars:
+                bar["data_source"] = "sina"
+                bar["data_status"] = "full"
+            return fallback_bars
+        bars = _fetch_mins_mootdx(sec, "weekly", datalen)
+        if bars:
+            for bar in bars:
+                bar["data_source"] = "mootdx (fallback)"
+                bar["data_status"] = "partial"
+            return bars
+        return []
+
+    return get_day_scoped_bars(CACHE_WEEKLY, sec.code, _net, min_rows=4)
 
 
 def fetch_monthly(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:

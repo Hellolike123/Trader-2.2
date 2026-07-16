@@ -71,17 +71,19 @@ CACHE_DIR = Path.home() / ".trader" / "cache"
 
 # Subdirectory constants
 CACHE_DAILY = "daily"
+CACHE_WEEKLY = "weekly"  # 周 K，按自然日 fetch_date 复用
 CACHE_ENRICH = "enrich"
 CACHE_MARKET_ENV = "market_env"
 CACHE_FUND_FLOW = "fund_flow"
 CACHE_CYQ = "cyq_perf"  # tushare 筹码日频；按自然日复用
 
 # TTL constants (seconds)
-TTL_DAILY = 86400       # 24 hours - daily bars change once per day
-TTL_WEEKLY = 604800     # 7 days - weekly bars change once per week
+TTL_DAILY = 86400       # 文件年龄兜底；日 K 真正失效看 fetch_date（同日复用）
+TTL_WEEKLY = 604800     # 7 days - weekly bars change once per week（旧 TTL；周 K 现优先 fetch_date）
 TTL_FUNDAMENTAL = 43200 # 12 hours - shareholder/unlock data updates infrequently
 TTL_FUND_FLOW = 86400   # 文件年龄兜底；真正失效看 payload.fetch_date 是否仍是「今天」
 TTL_CYQ = 86400 * 3     # 文件年龄兜底；真正失效看 fetch_date
+TTL_BARS_DAY = 86400 * 3  # 日/周 K 文件年龄兜底
 
 
 def cache_calendar_date() -> str:
@@ -100,6 +102,58 @@ def is_fetch_date_today(payload: Any, today: str | None = None) -> bool:
     day = today or cache_calendar_date()
     fd = payload.get("fetch_date")
     return bool(fd) and str(fd)[:10] == day
+
+
+def get_day_scoped_bars(
+    cache_key: str,
+    target: str,
+    fetch_fn: Callable[[], list],
+    *,
+    min_rows: int = 1,
+) -> list:
+    """日/周 K 等列表：当天第一次 fetch_fn，同日读缓存，换日回源。
+
+    存盘格式：{"fetch_date": "YYYY-MM-DD", "rows": [...]}
+    兼容旧缓存（纯 list）：若文件未过期且行数够，仍可用一次，下次写入会带 fetch_date。
+    """
+    today = cache_calendar_date()
+    cached = get_cached(cache_key, target, ttl=TTL_BARS_DAY)
+    if cached is not None:
+        data = cached.data
+        if is_fetch_date_today(data, today):
+            rows = data.get("rows") if isinstance(data, dict) else None
+            if isinstance(rows, list) and len(rows) >= min_rows:
+                return list(rows)
+        # 旧格式：裸 list + 未过 TTL → 同进程当日可先用，避免无意义回源
+        if (
+            isinstance(data, list)
+            and len(data) >= min_rows
+            and not cached.stale
+        ):
+            return list(data)
+
+    try:
+        rows = fetch_fn() or []
+    except Exception as exc:
+        _logger.debug("get_day_scoped_bars fetch failed %s/%s: %s", cache_key, target, exc)
+        if cached is not None:
+            data = cached.data
+            if isinstance(data, dict) and isinstance(data.get("rows"), list):
+                return list(data["rows"])
+            if isinstance(data, list):
+                return list(data)
+        return []
+
+    if isinstance(rows, list) and len(rows) >= min_rows:
+        try:
+            set_cached(
+                cache_key,
+                target,
+                {"fetch_date": today, "rows": rows},
+            )
+        except OSError as exc:
+            _logger.debug("get_day_scoped_bars write failed %s/%s: %s", cache_key, target, exc)
+    return list(rows) if isinstance(rows, list) else []
 
 
 @dataclass

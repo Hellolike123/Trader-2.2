@@ -597,32 +597,41 @@ class TushareProvider:
     def fetch_qfq_daily(self, sec: Security, days: int = 30) -> list[dict[str, Any]]:
         from trader_shared.light_data import _compute_atr_fields
         from datetime import timedelta
+        from trader_shared.cache_utils import get_day_scoped_bars, CACHE_DAILY
 
-        end_date = datetime.now().strftime("%Y%m%d")
-        start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
-        records = self._client.query_daily(sec.ts_code, start_date=start_date, end_date=end_date)
-        if not records:
-            return self._fallback.fetch_qfq_daily(sec, days)
+        def _net() -> list[dict[str, Any]]:
+            end_date = datetime.now().strftime("%Y%m%d")
+            start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+            records = self._client.query_daily(
+                sec.ts_code, start_date=start_date, end_date=end_date
+            )
+            if not records:
+                return self._fallback.fetch_qfq_daily(sec, days)
 
-        bars: list[dict[str, Any]] = []
-        for r in records:
-            trade_date = str(r.get("trade_date", ""))
-            # Tushare returns YYYYMMDD, convert to YYYY-MM-DD
-            if len(trade_date) == 8:
-                trade_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
-            bars.append({
-                "date": trade_date,
-                "open": float(r["open"]) if r.get("open") is not None else None,
-                "close": float(r["close"]) if r.get("close") is not None else None,
-                "high": float(r["high"]) if r.get("high") is not None else None,
-                "low": float(r["low"]) if r.get("low") is not None else None,
-                "volume": float(r["vol"]) if r.get("vol") is not None else None,
-                "amount": float(r["amount"]) if r.get("amount") is not None else None,
-                "data_source": "tushare",
-                "data_status": "full",
-            })
-        _compute_atr_fields(bars)
-        return bars
+            bars: list[dict[str, Any]] = []
+            for r in records:
+                trade_date = str(r.get("trade_date", ""))
+                # Tushare returns YYYYMMDD, convert to YYYY-MM-DD
+                if len(trade_date) == 8:
+                    trade_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+                bars.append({
+                    "date": trade_date,
+                    "open": float(r["open"]) if r.get("open") is not None else None,
+                    "close": float(r["close"]) if r.get("close") is not None else None,
+                    "high": float(r["high"]) if r.get("high") is not None else None,
+                    "low": float(r["low"]) if r.get("low") is not None else None,
+                    "volume": float(r["vol"]) if r.get("vol") is not None else None,
+                    "amount": float(r["amount"]) if r.get("amount") is not None else None,
+                    "data_source": "tushare",
+                    "data_status": "full",
+                })
+            _compute_atr_fields(bars)
+            return bars
+
+        # 日 K：当天第一次打网，同日复用（换日回源）
+        return get_day_scoped_bars(
+            CACHE_DAILY, sec.code, _net, min_rows=min(50, max(days // 3, 20))
+        )
 
     def fetch_5m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
         """Tushare 不提供分钟线，fallback 到腾讯。"""
@@ -640,45 +649,51 @@ class TushareProvider:
         """周线：优先 Tushare weekly（代理可用时），失败再 fallback 新浪/腾讯。
 
         默认根数 WEEKLY_LOOKBACK_BARS，避免 80 周过短导致中线缠论「笔数不足」。
+        当天第一次打网，同日复用。
         """
         n = _weekly_datalen(datalen)
-        try:
-            from datetime import timedelta
-            from trader_shared.light_data import _compute_atr_fields
+        from trader_shared.cache_utils import get_day_scoped_bars, CACHE_WEEKLY
 
-            end_date = datetime.now().strftime("%Y%m%d")
-            # 周线：根数 * 7 天再加缓冲，保证能取满 n 根
-            start_date = (datetime.now() - timedelta(days=max(n * 8, 400))).strftime("%Y%m%d")
-            records = self._client.query(
-                "weekly",
-                ts_code=sec.ts_code,
-                start_date=start_date,
-                end_date=end_date,
-            )
-            if records and len(records) >= 4:
-                bars: list[dict[str, Any]] = []
-                for r in sorted(records, key=lambda x: str(x.get("trade_date", ""))):
-                    trade_date = str(r.get("trade_date", ""))
-                    if len(trade_date) == 8 and trade_date.isdigit():
-                        trade_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
-                    bars.append({
-                        "date": trade_date,
-                        "open": float(r["open"]) if r.get("open") is not None else None,
-                        "close": float(r["close"]) if r.get("close") is not None else None,
-                        "high": float(r["high"]) if r.get("high") is not None else None,
-                        "low": float(r["low"]) if r.get("low") is not None else None,
-                        "volume": float(r["vol"]) if r.get("vol") is not None else None,
-                        "amount": float(r["amount"]) if r.get("amount") is not None else None,
-                        "data_source": "tushare",
-                        "data_status": "full",
-                    })
-                if len(bars) > n:
-                    bars = bars[-n:]
-                _compute_atr_fields(bars)
-                return bars
-        except Exception as e:
-            _logger.debug("tushare weekly failed, fallback: %s", e)
-        return self._fallback.fetch_weekly(sec, n)
+        def _net() -> list[dict[str, Any]]:
+            try:
+                from datetime import timedelta
+                from trader_shared.light_data import _compute_atr_fields
+
+                end_date = datetime.now().strftime("%Y%m%d")
+                # 周线：根数 * 7 天再加缓冲，保证能取满 n 根
+                start_date = (datetime.now() - timedelta(days=max(n * 8, 400))).strftime("%Y%m%d")
+                records = self._client.query(
+                    "weekly",
+                    ts_code=sec.ts_code,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+                if records and len(records) >= 4:
+                    bars: list[dict[str, Any]] = []
+                    for r in sorted(records, key=lambda x: str(x.get("trade_date", ""))):
+                        trade_date = str(r.get("trade_date", ""))
+                        if len(trade_date) == 8 and trade_date.isdigit():
+                            trade_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+                        bars.append({
+                            "date": trade_date,
+                            "open": float(r["open"]) if r.get("open") is not None else None,
+                            "close": float(r["close"]) if r.get("close") is not None else None,
+                            "high": float(r["high"]) if r.get("high") is not None else None,
+                            "low": float(r["low"]) if r.get("low") is not None else None,
+                            "volume": float(r["vol"]) if r.get("vol") is not None else None,
+                            "amount": float(r["amount"]) if r.get("amount") is not None else None,
+                            "data_source": "tushare",
+                            "data_status": "full",
+                        })
+                    if len(bars) > n:
+                        bars = bars[-n:]
+                    _compute_atr_fields(bars)
+                    return bars
+            except Exception as e:
+                _logger.debug("tushare weekly failed, fallback: %s", e)
+            return self._fallback.fetch_weekly(sec, n)
+
+        return get_day_scoped_bars(CACHE_WEEKLY, sec.code, _net, min_rows=4)
 
     def fetch_monthly(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
         """月线 — fallback 到腾讯（Tushare 月线需高级积分）。"""
@@ -704,6 +719,13 @@ class TushareProvider:
         include_5m: bool = True, include_weekly: bool = True,
         include_monthly: bool = True, include_ticks: bool = True,
     ) -> MarketSnapshot:
+        """并行拉 quote/日/周/5m（避免串行 2～3s 叠加）。
+
+        用独立小池，禁止 get_shared_build_pool：refresh 已在该池里跑 build_report 时
+        再 submit+wait 会死锁。
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         sec = self.resolve_security(target)
         daily_bars: list[dict[str, Any]] = []
         bars_5m: list[dict[str, Any]] = []
@@ -713,34 +735,38 @@ class TushareProvider:
         tick_data: list[dict[str, Any]] = []
         source_errors: dict[str, str] = {}
 
-        try:
-            daily_bars = self.fetch_qfq_daily(sec, days=days)
-        except Exception as e:
-            source_errors["daily"] = str(e)
-        try:
-            quote = self.fetch_quote(sec)
-        except Exception as e:
-            source_errors["quote"] = str(e)
+        work: list[tuple[str, Any]] = [
+            ("daily", lambda: self.fetch_qfq_daily(sec, days)),
+            ("quote", lambda: self.fetch_quote(sec)),
+        ]
         if include_5m:
-            try:
-                bars_5m = self.fetch_5m(sec)
-            except Exception as e:
-                source_errors["5m"] = str(e)
+            work.append(("bars_5m", lambda: self.fetch_5m(sec)))
         if include_weekly:
-            try:
-                weekly_bars = self.fetch_weekly(sec)
-            except Exception as e:
-                source_errors["weekly"] = str(e)
+            work.append(("weekly", lambda: self.fetch_weekly(sec)))
         if include_monthly:
-            try:
-                monthly_bars = self.fetch_monthly(sec)
-            except Exception as e:
-                source_errors["monthly"] = str(e)
+            work.append(("monthly", lambda: self.fetch_monthly(sec)))
         if include_ticks:
-            try:
-                tick_data = self.fetch_ticks(sec)
-            except Exception as e:
-                source_errors["ticks"] = str(e)
+            work.append(("ticks", lambda: self.fetch_ticks(sec)))
+
+        results: dict[str, Any] = {}
+        with ThreadPoolExecutor(
+            max_workers=min(6, len(work)), thread_name_prefix="tushare-snap"
+        ) as pool:
+            futs = {pool.submit(fn): key for key, fn in work}
+            for fut in as_completed(futs):
+                key = futs[fut]
+                try:
+                    results[key] = fut.result()
+                except Exception as e:
+                    source_errors[key] = str(e)
+                    results[key] = None
+
+        daily_bars = results.get("daily") or []
+        quote = results.get("quote") or {}
+        bars_5m = results.get("bars_5m") or []
+        weekly_bars = results.get("weekly") or []
+        monthly_bars = results.get("monthly") or []
+        tick_data = results.get("ticks") or []
 
         data_status: DataStatus = (
             "full" if (daily_bars and quote)
