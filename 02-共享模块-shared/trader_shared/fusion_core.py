@@ -227,7 +227,7 @@ def _momentum_to_signal(momentum_result: dict) -> dict:
     if not isinstance(mom, dict):
         mom = {}
 
-    score = mom.get("score", 50)
+    score = mom.get("score")
     direction_str = mom.get("direction", "neutral")
     signals_list = mom.get("signals", [])
 
@@ -235,12 +235,16 @@ def _momentum_to_signal(momentum_result: dict) -> dict:
     dir_map = {"bullish": 1, "bearish": -1, "neutral": 0, "insufficient": 0}
     direction = dir_map.get(direction_str, 0)
 
-    # score 决定置信度
-    confidence = _score_to_confidence(score)
+    # score 决定置信度；数据不足 (insufficient / score=None) 时置信度强制为 0，
+    # 不把"不知道"当成"中性 50 分"去加权（消除 score=50/neutral 双关）。
+    if direction_str == "insufficient" or score is None:
+        confidence = 0.0
+    else:
+        confidence = _score_to_confidence(score)
 
     # direction 和 score 冲突时降低置信度
     # 如 direction="bullish" 但分数很低 → 有方向感但量化分数不支持 → 保守处理
-    if direction != 0 and score <= 45:
+    if direction != 0 and score is not None and score <= 45:
         confidence = min(confidence, 0.4)
 
     _def_reason = "动量数据不足" if direction_str == "insufficient" else "动量中性"
@@ -647,7 +651,9 @@ def merge_decisions(
     if isinstance(momentum_result, dict):
         # P2 Fix: momentum 键可能值为 None，直接 .get("score") 会抛 AttributeError
         mom = momentum_result.get("momentum") or {}
-        mom_score = mom.get("score", 50) if isinstance(mom, dict) else 50
+        _raw_score = mom.get("score") if isinstance(mom, dict) else None
+        # 数据不足 (insufficient / score=None) 时不参与高位 climax 判定，置 None
+        mom_score = _raw_score if (isinstance(_raw_score, (int, float)) and mom.get("direction") != "insufficient") else None
 
     # Fix 2: 有强多信号时的低位判断从 pos_pct <= 0.5 收紧到 <= 0.35
     # 50% 中轴并非低位，中轴附近的强多信号不应触发底部权重偏置
@@ -660,7 +666,7 @@ def merge_decisions(
 
     # 真正的高位超买（价格在区间上沿 + 动量极强）：动量权重最高，
     # 因为高位要看动量是否衰竭来决定去留。
-    is_genuine_climax = pos_pct is not None and pos_pct >= 0.7 and mom_score >= 80
+    is_genuine_climax = pos_pct is not None and pos_pct >= 0.7 and (mom_score or 0) >= 80
     # 仅有强看空信号（顶背驰 / 价量资金偏空），未必处于高位：这是结构发出看空警告，
     # 应尊重结构信号而非给动量最高权重去否决它。
     is_bearish_structure_warning = (strong_bearish_chan or strong_bearish_vpf) and not is_genuine_climax

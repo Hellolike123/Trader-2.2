@@ -330,9 +330,10 @@ def score_report(report: dict[str, Any]) -> dict[str, int]:
 
     from trader_shared.momentum_core import assess_momentum
     daily_bars = report.get("bars") or report.get("daily_bars") or []
-    momentum_result = assess_momentum(daily_bars) if len(daily_bars) >= 30 else {"direction": "insufficient", "score": 0}
+    momentum_result = assess_momentum(daily_bars) if len(daily_bars) >= 30 else {"direction": "insufficient", "score": None}
     momentum_dir = momentum_result.get("direction", "insufficient")
-    momentum_score_val = min(20, max(0, momentum_result.get("score", 0) // 5))
+    # 数据不足时 score=None，(or 0) 防止 None // 5 抛错，且不贡献动量分
+    momentum_score_val = min(20, max(0, (momentum_result.get("score") or 0) // 5))
     mom_tag = {"bullish": "🟢看多", "bearish": "🔴看空", "neutral": "🟡中性"}.get(momentum_dir, "⚪数据不足")
     # [P0 Fix] momentum 独立计算后此前未计入 total → 修正
     total = max(0, min(100, chan + wyckoff + chip + fusion_bonus + momentum_score_val))

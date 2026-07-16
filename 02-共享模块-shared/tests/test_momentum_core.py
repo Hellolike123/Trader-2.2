@@ -113,7 +113,9 @@ class TestAssessMomentum:
     def test_momentum_insufficient(self):
         m = assess_momentum(_bars([10.0] * 10))
         assert m["strength"] == "insufficient"
-        assert m["direction"] == "neutral"
+        # 数据不足：方向应为 insufficient（非 neutral），分数显式 None（不再用假 50 占位）
+        assert m["direction"] == "insufficient"
+        assert m["score"] is None
 
     def test_momentum_strategy_wrapper(self):
         bars = _bars([10.0 + i * 0.1 for i in range(35)])

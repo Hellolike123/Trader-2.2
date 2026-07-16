@@ -706,6 +706,29 @@ class TestIntegrationDataFlow:
         assert result["direction"] == 1
         assert result["confidence"] == 0.6  # score 72: >= 65, < 75
 
+    def test_momentum_insufficient_has_zero_confidence(self):
+        """数据不足 (score=None / direction=insufficient) 置信度强制 0，不污染加权。"""
+        from trader_shared.fusion_core import _momentum_to_signal
+
+        # score=None 形式（assess_momentum 不足路径新约定）
+        res_none = _momentum_to_signal({"momentum": {"score": None, "direction": "insufficient", "signals": []}})
+        assert res_none["direction"] == 0
+        assert res_none["confidence"] == 0.0
+        assert res_none["reason"] == "动量数据不足"
+
+        # score=50 但实际 insufficient 形式（历史/兜底）
+        res_50 = _momentum_to_signal({"momentum": {"score": 50, "direction": "insufficient", "signals": []}})
+        assert res_50["direction"] == 0
+        assert res_50["confidence"] == 0.0
+
+    def test_momentum_insufficient_does_not_pollute_weighted_score(self):
+        """insufficient 动量的 direction=0 且 confidence=0，加权贡献必为 0。"""
+        from trader_shared.fusion_core import _momentum_to_signal
+
+        sig = _momentum_to_signal({"momentum": {"score": None, "direction": "insufficient", "signals": []}})
+        contribution = sig["direction"] * sig["confidence"] * 0.56  # 高位 climax 最大动量权重
+        assert contribution == 0.0
+
     def test_wyckoff_nested_structure(self):
         from trader_shared.fusion_core import _wyckoff_to_signal
 

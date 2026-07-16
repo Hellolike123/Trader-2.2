@@ -378,7 +378,9 @@ def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str,
 
     from trader_shared.momentum_core import assess_momentum
     momentum_result = assess_momentum(daily)
-    momentum_score = momentum_result.get("score", 50)
+    # 数据不足时 assess_momentum 返回 score=None；用 or 0 避免把"不知道"当成"中性 50 分"
+    # 注入 0.22 权重（insufficient 不贡献动量分）。
+    momentum_score = momentum_result.get("score") or 0
     momentum_dir = momentum_result.get("direction", "neutral")
     momentum_signals = momentum_result.get("signals", [])
     momentum_rsi = momentum_result.get("rsi", {})
