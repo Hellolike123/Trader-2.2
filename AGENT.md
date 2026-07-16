@@ -78,6 +78,7 @@ Step 3: 输出
 | `suggested_pct` | int | 建议仓位%（已被纪律 cap） |
 | `data_status` | str | full / partial / degraded |
 | `chanlun_midline` / `wyckoff_midline` | any | 周线理论（禁止回退日线） |
+| `WyckoffStateView`（可选） | TypedDict | 威科夫统一出口；`to_wyckoff_state_view(wyckoff_midline)`，见 `wyckoff_view.py` |
 | `market_env` | dict | 大盘环境（level + change_pct + freshness） |
 
 ### B. 开发者（改代码/加功能）
@@ -236,6 +237,7 @@ Trader3.0/
 | **禁止向上依赖** | trader_shared 不 import scripts/ | ❌ `from trader.scripts import ...` |
 | **模块边界：箱体独立** | `box_detect.py` 是独立模块，暂不接入 report_builder，保留代码和测试以备后续 | ❌ 把箱体检测结果写进报告渲染 |
 | **模块边界：威科夫周线** | 周线威科夫独占中线，数据不足直接 return insufficient（不回退日线） | ❌ 周线不足时 fallback 到日线 |
+| **威科夫出口** | Agent/新代码优先 `to_wyckoff_state_view`；不把威科夫当 fusion 总大脑 | ❌ 从 analysis 里手抄 40 个 `*_signal` 拼叙事 |
 | **周线根数** | 默认 `WEEKLY_LOOKBACK_BARS=260`，中线缠论/威科夫同用 | ❌ 仍按旧 80 周假设调试「笔数不足」 |
 | **波段标签** | 仅 strokes&lt;3 写「笔数不足」；段少写「线段偏少/未成型」 | ❌ segments&lt;2 就报「笔数不足」 |
 
@@ -495,6 +497,7 @@ python scripts/golden_diff_gate.py capture
 | Tushare SDK 初始化失败 | 系统自动降级 HTTP，可忽略 warning |
 | 股票名无法解析 | 改用 6 位代码（如 `002050` 而非 `三花智控`） |
 | 周线数据不足 | 威科夫中线返回 insufficient，不回退日线 |
+| 要读威科夫状态给 AI/复盘 | `to_wyckoff_state_view(report["wyckoff_midline"])`，契约 `docs/designs/wyckoff-state-view.md` |
 | 中线缠论「笔数不足」 | 先确认 `WEEKLY_LOOKBACK_BARS=260` 已生效；仅真笔 &lt;3 才该文案；段少应是「线段偏少」 |
 | NAME_MAP 没这个股 | 手动加映射到 `data_provider.py` 或改用代码 |
 

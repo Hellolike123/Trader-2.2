@@ -77,6 +77,14 @@
 - 周线威科夫独占中线，不足 → `timeframe=insufficient` →「周线不足 · 不参与定论」
 - 主消费：选股池/复盘打分 + 中线「威科夫：」一行
 
+**统一出口 View（A 档，2026-07）**：
+- 契约：`docs/designs/wyckoff-state-view.md`
+- 代码：`to_wyckoff_state_view(analysis)` → `WyckoffStateView`（`trader_shared/wyckoff_view.py`）
+- 从现有 `wyckoff_analysis` 大 dict **薄适配**，不重跑检测
+- 字段：`phase` / `active_events` / `bias` / `confidence` / `summary_oneline` / `tr` / `invalidation_hint` 等
+- **生产主路径**（报告渲染、fusion）仍可读旧 dict；Agent / 后续迁移**优先读 View**
+- 非目标：View 不直接下单；不替换 fusion；未做特征/原子事件大重构
+
 ### 2.3 动量（Momentum）
 
 **综合评分**：MACD + RSI + ADX + 布林 + Supertrend 确认等（见 `momentum_core` / 审计文档）
@@ -271,4 +279,4 @@ TR = max(H-L, |H-C_prev|, |L-C_prev|)
 
 ---
 
-*此文档基于 2026-07-16 代码状态。任何业务规则变更必须同步更新。*
+*此文档基于 2026-07-17 代码状态（含 WyckoffStateView A 档）。任何业务规则变更必须同步更新。*

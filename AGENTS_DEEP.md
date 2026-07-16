@@ -349,9 +349,15 @@
 - 空头排列过滤：最近5根K线收盘价均低于 MA5/MA10/MA20 则拒绝标记二类买
 - MA 计算已修复为跨窗口比较（非同窗口）
 
-### 5.3 威科夫分析 (`wyckoff_core.py`)
+### 5.3 威科夫分析 (`wyckoff_core.py` + `wyckoff_view.py`)
 
 主入口：`wyckoff_analysis()` / `wyckoff_strategy()` / `wyckoff_strategy_midline()` / `calculate_wyckoff_score()` / `format_wyckoff_oneline()`。
+
+**统一出口 View（A 档，2026-07-17）**：
+- `to_wyckoff_state_view(analysis)` → `WyckoffStateView`（`trader_shared/wyckoff_view.py`）
+- 契约：`docs/designs/wyckoff-state-view.md`
+- 薄适配既有 analysis，**不重跑** events/phase；生产报告主路径仍可直接读旧 dict
+- Agent / 复盘 / 后续迁移：**优先读 View**（phase、active_events、bias、summary_oneline…）
 
 **消费面（2026-07 对齐）**：
 - 短线 fusion 第三席是 **VPF**，威科夫**不进** `merge_decisions` 加权（`_wyckoff_to_signal` 仅兼容/测试）。

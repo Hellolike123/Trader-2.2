@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — Trader3.0 系统架构
 
-> **最后更新**：2026-07-16 | **基于**：`trader_shared/` 代码（~100+ 模块）+ 近期周线/MACD/融合契约
+> **最后更新**：2026-07-17 | **基于**：`trader_shared/` 代码 + 周线/MACD/融合/日频缓存/威科夫 View 契约
 
 ---
 
@@ -61,13 +61,16 @@ Trader3.0 采用**分层架构 + 插件化 + 融合决策**的量化分析系统
 | `realtime_chan.py` | - | T0 实时增量 diff |
 | `expma_status.py` | 327 | EXPMA 状态打分（10 分制） |
 
-#### 威科夫模块（4 文件，合计 ~2800 行）
+#### 威科夫模块（5 文件）
 | 模块 | 行数 | 角色 |
 |------|------|------|
-| `wyckoff_core.py` | 654 | 主引擎：wyckoff_strategy() / wyckoff_strategy_midline() |
-| `wyckoff_events.py` | 1249 | 事件检测：Spring/UT/BC/SOW/SOS 等 10+ 事件 |
-| `wyckoff_phase.py` | 441 | 阶段状态机：吸筹/试盘/拉升/派发/砸盘 |
-| `main_force.py` | 226 | 主力资金阶段检测 |
+| `wyckoff_core.py` | ~750+ | 主引擎：wyckoff_strategy() / midline / score / format_oneline |
+| `wyckoff_events.py` | ~1800+ | 事件检测：Spring/UT/BC/SOW/SOS/PS/UTAD 等 |
+| `wyckoff_phase.py` | ~440+ | 阶段状态机 + 持久化转移 |
+| `wyckoff_view.py` | ~250 | **A 档出口**：`WyckoffStateView` + `to_wyckoff_state_view()` |
+| `main_force.py` | 226 | 主力资金阶段检测（另线，非威科夫原典 A–E） |
+
+契约文档：`docs/designs/wyckoff-state-view.md`。分层演进方向：特征→原子事件→原典事件→phase→View（B 档未做）。
 
 #### 阶段判定模块（6 文件，合计 ~2700 行）
 | 模块 | 行数 | 角色 |

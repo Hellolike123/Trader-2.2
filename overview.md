@@ -54,6 +54,10 @@ README.md (项目入口)
 - ✅ 融合权重正常 0.30/0.45/0.25 与 yaml 一致
 - ✅ user-guide 示例切到双轨模板
 
+### 2026-07-17
+- ✅ 日频缓存（筹码/资金流/大盘/板块/日周K）+ 性能 profile
+- ✅ 威科夫 A 档出口 `WyckoffStateView`（`wyckoff_view.py` + `docs/designs/wyckoff-state-view.md`）
+
 ## 四、后续建议
 
 1. **清理技术债**：self_calibration print → logger、wyckoff 配置去重、空目录清理
