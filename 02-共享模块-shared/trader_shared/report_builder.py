@@ -240,81 +240,10 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         return get_env_for_skill("trader")
 
     def _fetch_sector_data():
-        """从 Tushare 获取板块数据（行业分类 + 板块涨跌幅）。"""
+        """个股行业 + 板块涨跌（日频缓存：当天复用、换日回源）。"""
         try:
-            from trader_shared.tushare_client import get_client
-            client = get_client()
-            if not client.available:
-                return None
-
-            # 1. 获取个股行业
-            stock_info = client.query("stock_basic", ts_code=sec.ts_code, fields="ts_code,name,industry")
-            if not stock_info:
-                return None
-            industry = stock_info[0].get("industry", "")
-            if not industry:
-                return None
-
-            # 2. 找匹配的同花顺行业指数（优先精确匹配）
-            ths_indices = client.query_ths_index("I")  # 'I' = 行业
-
-            # 构建匹配关键词（如 "家用电器" → ["家电", "白色家电", "黑色家电", "小家电"]）
-            _sector_keywords = {
-                "家用电器": ["白色家电", "黑色家电", "小家电", "家电零部件"],
-                "电子": ["电子零部件", "电子化学品"],
-                "计算机": ["软件开发", "计算机设备"],
-                "医药": ["化学制药", "中药", "生物制品"],
-                "银行": ["国有大行", "股份制银行", "城商行"],
-                "食品饮料": ["白酒", "乳品", "调味品"],
-            }
-
-            matched_sector = None
-            # 优先：用关键词精确匹配
-            for keyword in _sector_keywords.get(industry, []):
-                for idx in ths_indices:
-                    if str(idx.get("name", "")) == keyword:
-                        matched_sector = idx
-                        break
-                if matched_sector:
-                    break
-
-            # 次选：行业名完全包含在板块名中
-            if not matched_sector:
-                for idx in ths_indices:
-                    idx_name = str(idx.get("name", ""))
-                    if industry == idx_name or industry in idx_name:
-                        matched_sector = idx
-                        break
-
-            # 兜底：板块名包含行业关键词
-            if not matched_sector:
-                for idx in ths_indices:
-                    idx_name = str(idx.get("name", ""))
-                    if "家电" in idx_name and "家电" in industry:
-                        matched_sector = idx
-                        break
-
-            if not matched_sector:
-                return {"industry": industry, "status": "未匹配板块"}
-
-            sector_code = matched_sector.get("ts_code", "")
-            sector_name = matched_sector.get("name", "")
-
-            # 3. 获取板块日线涨跌幅
-            sector_daily = client.query_ths_daily(sector_code, start_date="", end_date="")
-            if not sector_daily:
-                return {"industry": industry, "sector_name": sector_name, "sector_code": sector_code, "status": "无日线"}
-
-            latest = sector_daily[-1]
-            sector_chg_pct = float(latest.get("pct_change", 0) or 0)
-
-            return {
-                "industry": industry,
-                "sector_name": sector_name,
-                "sector_code": sector_code,
-                "sector_change_pct": sector_chg_pct,
-                "status": "正常",
-            }
+            from trader_shared.sector_data import get_stock_sector_snapshot_cached
+            return get_stock_sector_snapshot_cached(sec.ts_code)
         except Exception as e:
             _logger.debug(f"板块数据获取失败: {e}")
             return None

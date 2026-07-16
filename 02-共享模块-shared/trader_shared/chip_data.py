@@ -52,20 +52,13 @@ def get_cyq_perf_cached(
 
     mock_seam 仍 patch ``get_cyq_perf``；本函数经其回源，测试零改。
     """
-    from trader_shared.cache_utils import (
-        CACHE_CYQ,
-        TTL_CYQ,
-        cache_calendar_date,
-        get_cached,
-        is_fetch_date_today,
-        set_cached,
-    )
+    import trader_shared.cache_utils as _cu
 
     code = str(ts_code or "").strip()
     if not code:
         return []
 
-    today = cache_calendar_date()
+    today = _cu.cache_calendar_date()
 
     # 1) 内存
     mem = _cyq_mem.get(code)
@@ -73,8 +66,8 @@ def get_cyq_perf_cached(
         return list(mem[1])
 
     # 2) 文件：fetch_date == 今天 → 直接用
-    cached = get_cached(CACHE_CYQ, code.replace(".", "_"), ttl=TTL_CYQ)
-    if cached is not None and is_fetch_date_today(cached.data, today):
+    cached = _cu.get_cached(_cu.CACHE_CYQ, code.replace(".", "_"), ttl=_cu.TTL_CYQ)
+    if cached is not None and _cu.is_fetch_date_today(cached.data, today):
         rows = cached.data.get("rows") if isinstance(cached.data, dict) else None
         if isinstance(rows, list):
             _cyq_mem[code] = (today, rows)
@@ -95,7 +88,7 @@ def get_cyq_perf_cached(
     if rows:
         payload = {"fetch_date": today, "rows": rows}
         try:
-            set_cached(CACHE_CYQ, code.replace(".", "_"), payload)
+            _cu.set_cached(_cu.CACHE_CYQ, code.replace(".", "_"), payload)
         except OSError as exc:
             _logger.debug("cyq cache write failed for %s: %s", code, exc)
         _cyq_mem[code] = (today, rows)

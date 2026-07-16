@@ -135,12 +135,29 @@ def assess() -> dict[str, Any]:
     if _assess_cache is not None and now - _assess_cache_time < _ASSess_CACHE_TTL:
         return _assess_cache
 
-    # ── 文件缓存读取（盘后预缓存，TTL 24小时）──
+    # ── 文件缓存：同一自然日直接复用（当天第一次之后不再打网）──
+    # 大盘 level / HMM 日频足够；换日回源。失败兜底仍用旧缓存 bars。
     _cached_env = None
     try:
-        from trader_shared.cache_utils import get_cached as _file_cached, CACHE_MARKET_ENV, TTL_DAILY
-        _cached_result = _file_cached(CACHE_MARKET_ENV, "index", ttl=TTL_DAILY)
+        from trader_shared.cache_utils import (
+            get_cached as _file_cached,
+            CACHE_MARKET_ENV,
+            TTL_DAILY,
+            cache_calendar_date,
+            is_fetch_date_today,
+        )
+        _cached_result = _file_cached(CACHE_MARKET_ENV, "index", ttl=TTL_DAILY * 3)
         _cached_env = _cached_result.data if _cached_result is not None else None
+        if (
+            _cached_env
+            and isinstance(_cached_env, dict)
+            and is_fetch_date_today(_cached_env)
+            and _cached_env.get("level")
+        ):
+            env = dict(_cached_env)
+            _assess_cache = env
+            _assess_cache_time = now
+            return env
     except Exception:
         pass
 
@@ -283,6 +300,11 @@ def assess() -> dict[str, Any]:
         "bars": bars,  # 保留 bars 供缓存和下游使用
         "bars_stale": bars_from_cache,  # True 表示 bars 来自旧缓存顶替（实时日K取数失败）
     }
+    try:
+        from trader_shared.cache_utils import cache_calendar_date as _ccd
+        result["fetch_date"] = _ccd()
+    except Exception:
+        result["fetch_date"] = ""
 
     # ── 写入文件缓存 ──
     # 仅当 bars 来自实时新鲜数据才写回：陈旧缓存顶替时不写回，避免旧值被反复刷 TTL 锁死

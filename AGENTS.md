@@ -53,7 +53,7 @@
 - **周线回看 + 波段标签（2026-07-16）**：`WEEKLY_LOOKBACK_BARS=260`（约 5 年周 K），`data_provider` / `light_data` / Tushare 周线默认统一用此根数；旧默认约 80 周在暴涨暴跌票上常只成 0～1 笔。`conclusion_block._build_wave_label`：**仅** `strokes < 3` 写「笔数不足 · 无法判断」；笔够而 `segments < 2` 写「线段偏少 / 线段未成型」+ 笔级 trend 叙事（如「拉升趋势中」），禁止再把「段少」误报成「笔数不足」。
 - **MACD 预热与背驰面积（2026-07-16）**：`indicator_math.calc_macd_series` / `chan_geometry._calc_macd` 预热不足写 `None`（禁止 `0.0` 占位）；`histogram = DIF−DEA`（×1，非通达信 2×）；笔级面积跳过 `None` 与反号柱。见 `formulas.md` §5.1。
 - **性能热路径（2026-07-17）**：`TRADER_PROFILE=1` 分段计时（stderr）；`cmd_refresh` 默认 `TRADER_CHAN_NESTING=0`；主路径 `include_monthly/ticks=False`（月线共振按需补拉）；Supertrend 只算一次并传入 `analyze_all`；fund/env/sector 与插件重叠 submit。插件并行默认关（`TRADER_PLUGIN_PARALLEL=1` 可开）。
-- **日频缓存（2026-07-17）**：筹码 `get_cyq_perf_cached`、资金流 `fetch_fund_flow_cached` 按自然日 `fetch_date`——当天第一次打网，同日再分析读缓存，换日回源。历史自然落在 payload 里一并复用。
+- **日频缓存（2026-07-17）**：筹码 `get_cyq_perf_cached`、资金流 `fetch_fund_flow_cached`、大盘 `market_env.assess`、板块 `get_stock_sector_snapshot_cached` 均按自然日 `fetch_date`——当天第一次打网，同日再分析读缓存，换日回源。
 - **主力行为五阶段识别 (Main Force)**：`main_force.py` 基于资金流向特征、价格数据和筹码信息，识别主力行为所处阶段（吸筹/试盘/拉升/派发/砸盘）。`main_force_output.py` 负责复盘输出格式化。
 - **规则引擎 (Rule Engine)**：`rule_engine.py` 基于 YAML 配置的决策规则引擎，支持比较运算和布尔表达式。`modifier_rule_engine.py` 基于评分修饰规则对候选人评分进行动态调整。
 - 真正的输出格式以 `01-功能包-packages/trader/references/output-template.md` 和 `01-功能包-packages/trader/references/output-style-guide.md` 为准（与 `report_core.render_short_midline` 同源）。

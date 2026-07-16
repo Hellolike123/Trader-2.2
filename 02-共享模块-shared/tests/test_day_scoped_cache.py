@@ -112,6 +112,73 @@ def test_fund_flow_same_day_hits(monkeypatch):
     assert calls["n"] == 1
 
 
+def test_sector_snapshot_same_day(monkeypatch):
+    import trader_shared.sector_data as sd
+
+    sd.clear_sector_mem_cache()
+    calls = {"n": 0}
+    monkeypatch.setattr(cu, "cache_calendar_date", lambda: "2026-07-17")
+    store: dict = {}
+
+    def _get(key, target, ttl=None):
+        data = store.get((key, target))
+        if data is None:
+            return None
+        return cu.CacheResult(data=data, stale=False, age_seconds=1.0, source="file")
+
+    def _set(key, target, data):
+        store[(key, target)] = data
+
+    monkeypatch.setattr(cu, "get_cached", _get)
+    monkeypatch.setattr(cu, "set_cached", _set)
+
+    def _raw(ts_code):
+        calls["n"] += 1
+        return {"industry": "专用机械", "status": "正常", "sector_change_pct": 1.2}
+
+    monkeypatch.setattr(sd, "get_stock_sector_snapshot", _raw)
+    a = sd.get_stock_sector_snapshot_cached("000988.SZ")
+    b = sd.get_stock_sector_snapshot_cached("000988.SZ")
+    assert a["status"] == "正常"
+    assert b["sector_change_pct"] == 1.2
+    assert calls["n"] == 1
+
+
+def test_market_env_same_day_skips_network(monkeypatch):
+    """文件已有今日 fetch_date 时 assess 不再 _fetch_index_data。"""
+    import trader_shared.market_env as me
+
+    me._assess_cache = None
+    me._assess_cache_time = 0
+    today = "2026-07-17"
+    payload = {
+        "level": "偏弱",
+        "change_pct": -1.0,
+        "fetch_date": today,
+        "bars": [{"date": today, "close": 5000, "volume": 1}],
+        "note": "cached",
+    }
+    monkeypatch.setattr(cu, "cache_calendar_date", lambda: today)
+    monkeypatch.setattr(
+        cu,
+        "get_cached",
+        lambda key, target, ttl=None: cu.CacheResult(
+            data=payload, stale=False, age_seconds=10.0, source="file"
+        ),
+    )
+    called = {"n": 0}
+
+    def _boom():
+        called["n"] += 1
+        raise AssertionError("should not fetch index")
+
+    monkeypatch.setattr(me, "_fetch_index_data", _boom)
+    env = me.assess()
+    assert env["level"] == "偏弱"
+    assert called["n"] == 0
+    me._assess_cache = None
+
+
 def test_fund_flow_cross_day_refetch(monkeypatch):
     calls = {"n": 0}
     day = {"v": "2026-07-16"}
