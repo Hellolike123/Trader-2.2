@@ -234,9 +234,10 @@ class TestRenderShortMidline:
         assert "🎯 结论" not in md
         assert "威科夫" in md
         assert "缠论" in md
-        assert "出手" in md
-        # 纪律层判定文案已从「裁定：」改为「出手：」（chan_discipline 重构）
-        assert "出手：" in md
+        # A 版短线：动作（不再用「出手」）
+        assert "动作：" in md
+        assert "出手：" not in md
+        assert "结构：" in md
         assert "日线三专家" not in md
         assert "🗳️ 短线专家" not in md
         assert "关键价（中线）" in md
@@ -256,10 +257,13 @@ class TestRenderShortMidline:
         assert "mi姐" not in md
         assert "mistery" not in md
         for line in md.splitlines():
-            if line.strip().startswith("出手："):
-                assert line.strip() != "出手：减仓"
-                # 纪律判定文案：观望/不新开/不追/不买 任一表达「不开新仓」即可
-                assert any(k in line for k in ("不新开", "不追", "不买", "观望", "等价格回到", "等确认"))
+            if line.strip().startswith("动作："):
+                assert line.strip() != "动作：减仓"
+                # 不新开 / 等站稳 / 试探 等均可
+                assert any(
+                    k in line
+                    for k in ("不新开", "不追", "不买", "观望", "等站稳", "等确认", "仓 ", "试探")
+                )
         # 关键价区：报告用「低吸区/止盈区」表述（原「买点区」已改名）
         assert "低吸区" in md or "止盈区" in md or "买点区" in md
         assert "无底仓" in md or "T0：" in md

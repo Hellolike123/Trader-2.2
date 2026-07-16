@@ -326,20 +326,21 @@ def render_short_midline(r: dict[str, Any]) -> str:
     except (TypeError, ValueError):
         _sp = None
 
-    # 威科夫/缠论：严格 mid 字段，禁止回退日线
+    # 威科夫中线：相位 + 英文灯 + 中文 + 约束句（周线独占，禁止回退日线）
     try:
-        from trader_shared.wyckoff_core import format_wyckoff_oneline
+        from trader_shared.wyckoff_core import format_wyckoff_midline_light
         _wyk_raw = r.get("wyckoff_midline")
         if isinstance(_wyk_raw, dict) and "wyckoff" in _wyk_raw:
             _wyk_raw = _wyk_raw.get("wyckoff")
         if not isinstance(_wyk_raw, dict):
             _wyk_raw = {}
-        _wyk_line = format_wyckoff_oneline(_wyk_raw, direction=None, show_phase=True)
+        _wyk_line = format_wyckoff_midline_light(_wyk_raw, direction=None)
     except Exception:
         _wyk_line = "威科夫：数据不足 · 中性"
-    _wyk_body = _wyk_line.replace("威科夫：", "").replace("威科夫:", "").strip()
-    _wyk_compact = _wyk_body.replace(" · ", "·").replace(" ·", "·").replace("· ", "·")
-    lines.append(f"  威科夫：{_wyk_compact}")
+    # 已是「威科夫：…」完整行
+    if not str(_wyk_line).startswith("威科夫"):
+        _wyk_line = f"威科夫：{_wyk_line}"
+    lines.append(f"  {_wyk_line}")
 
     try:
         from trader_shared.chan_core import format_chanlun_theory_line
@@ -437,34 +438,27 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _chan_display = _chan_compact
     lines.append(f"  缠论：{_chan_display}")
 
-    # 筹码状态行（获利盘 + 上方套牢峰 + 股东变动）
-    _chip_pct = r.get("chip_current_pct")
-    _chip_peaks = r.get("chip_peaks") or []
-    _above_peaks = [p for p in _chip_peaks if isinstance(p, dict) and float(p.get("price") or 0) > current] if current > 0 else []
-    _chip_parts = []
-    if _chip_pct is not None and isinstance(_chip_pct, (int, float)):
-        _chip_parts.append(f"获利盘 {_chip_pct:.1f}%")
-    if _above_peaks:
-        _above_peaks.sort(key=lambda x: float(x.get("price") or 0))
-        _nearest = _above_peaks[0]
-        _peak_price = float(_nearest.get("price") or 0)
-        _tag = "上方压力重" if _peak_price < current * 1.10 else "上方有压力"
-        _lower = _nearest.get("price_lower")
-        _upper = _nearest.get("price_upper")
-        if _lower is not None and _upper is not None:
-            _chip_parts.append(f"套牢峰 {_peak_price:.2f}（阻力区 {_lower:.2f}-{_upper:.2f}，{_tag}）")
-        else:
-            _chip_parts.append(f"套牢峰 {_peak_price:.2f}（{_tag}）")
-    
+    # 位置灯（筹码峰：下方成本 / 上方套牢 / 搬家）— 只展示，不进 fusion
+    try:
+        from trader_shared.chip_core import format_chip_position_light
+        _pos_mid = format_chip_position_light(
+            current,
+            r.get("chip_peaks") or [],
+            r.get("chip_migration") if isinstance(r.get("chip_migration"), dict) else None,
+            r.get("chip_current_pct") if isinstance(r.get("chip_current_pct"), (int, float)) else None,
+        )
+        if _pos_mid:
+            lines.append(f"  {_pos_mid}")
+    except Exception:
+        pass
+
+    # 附：股东（背景，不抢位置灯）
     _ext_fund = r.get("extend_fundamental") or {}
     _sh = _ext_fund.get("shareholder") or {}
     if isinstance(_sh, dict) and _sh.get("status") and _sh.get("status") != "数据不足":
         _sh_chg = _sh.get("change_pct") or 0.0
         _sh_status = _sh.get("status")
-        _chip_parts.append(f"股东户数较上期 {_sh_chg:+.2f}%（{_sh_status}）")
-        
-    if _chip_parts:
-        lines.append(f"  筹码：{' ｜ '.join(_chip_parts)}")
+        lines.append(f"  附：股东户数较上期 {_sh_chg:+.2f}%（{_sh_status}）")
 
     # 业绩预期
     _eps_data = _ext_fund.get("consensus_eps") or {}
@@ -561,15 +555,13 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if not _mid_items:
         lines.append("    数据不足")
 
-    # ── ⚡ 短线（简化：出手→缠论+浪型→动能→失效）──
+    # ── ⚡ 短线 A 版：结构 → 状态 → 动能｜资金 → 动作 → 失效 ──
     lines.append("")
     lines.append("⚡ 短线")
 
-    # 出手（合并裁定+新开+分仓，放第一行）
     _disc = r.get("discipline") if isinstance(r.get("discipline"), dict) else {}
     _cap_t = _disc.get("suggested_pct_cap")
-    _cap_str = f" · 分仓{_cap_t}%" if _cap_t is not None else ""
-    # 全绿才保留试探类出手；否则强制观察语义
+    # 全绿才保留试探类；否则强制观察语义
     _all_green = False
     _cl2 = _disc.get("entry_checklist") if isinstance(_disc.get("entry_checklist"), dict) else {}
     if _cl2:
@@ -585,105 +577,88 @@ def render_short_midline(r: dict[str, Any]) -> str:
             reason = "，".join(_parts[:2])
         if len(reason) > 30:
             reason = reason[:28] + "…"
-    if reason and reason not in execution:
-        # 出手带触发价：如果观望且 confirm 存在，追加触发条件
-        _confirm_v = float(r.get("confirm") or 0)
-        if "不买" in execution or "观望" in execution:
-            if _confirm_v > 0 and _confirm_v > current:
-                execution = f"观望 · 等价格回到 {_confirm_v:.2f}（确认位）以上"
-        lines.append(f"  出手：{execution}（{reason}）{_cap_str}")
-    else:
-        lines.append(f"  出手：{execution}{_cap_str}")
 
-    # 缠论 + 浪型（合并为一行）
+    # 1) 结构：缠论类型优先
     _csig2 = fusion_signals.get("chan") if isinstance(fusion_signals.get("chan"), dict) else {}
     _wave = str(conclusion.get("wave_label") or "").strip()
-    if _csig2:
-        _st2 = str(_csig2.get("reason") or "").replace("缠论", "").strip().lstrip(":：").strip() or "无信号"
-        _cd2 = _csig2.get("direction", 0)
-        _dl2 = "看涨" if _cd2 and int(_cd2) > 0 else ("看跌" if _cd2 and int(_cd2) < 0 else "中性")
-        _chan_part = f"{_st2} · {_dl2}"
-        # 区间套确认标注（多级别 30m/5m/1m；仅当确认流程已跑过才显示，避免改变既有报告格式）
-        try:
-            _cl = r.get("chanlun") or r.get("chan")
-            _cin = _cl.get("chanlun", _cl) if isinstance(_cl, dict) else {}
-            _bps_n = _cin.get("buy_points", []) if isinstance(_cin, dict) else []
-            _sample = next((bp for bp in _bps_n
-                            if isinstance(bp, dict) and ("nesting_chain" in bp or "lower_confirmed" in bp)),
-                           None)
-            if _sample is not None:
-                _chain = _sample.get("nesting_chain")
-                if _chain:
-                    for _lv in _chain:
-                        _chan_part += f" · {_lv['timeframe']}{'✓' if _lv.get('confirmed') else '✗'}"
-                elif _sample.get("lower_confirmed") is not None:
-                    _chan_part += (" · 30m✓" if _sample.get("lower_confirmed") else " · 30m✗")
-        except Exception:
-            pass
-        try:
-            from trader_shared.chan_discipline import needs_same_level_tag, append_same_level_tag
-            _bps = r.get("chan_buy_point_types") or []
-            _need_sl = needs_same_level_tag(
-                r.get("chanlun") or r.get("chan"),
-                text=_chan_part,
-                buy_point_types=_bps if isinstance(_bps, list) else [],
-            )
-            _chan_part = append_same_level_tag(_chan_part, _need_sl)
-        except Exception:
-            pass
-        if _wave:
-            # 去重：浪型中的信号词如果已出现在缠论reason里，不重复
-            _wave_parts = [w.strip() for w in _wave.split(" · ")]
-            _chan_lower = _chan_part.lower()
-            # 检查信号类型重叠（一类卖/二类卖/一类买/二类买/顶背驰/底背驰）
-            _sig_keywords = {"一类卖", "二类卖", "三类卖", "一类买", "二类买", "三类买", "顶背驰", "底背驰"}
-            _wave_deduped = []
-            for w in _wave_parts:
-                w_lower = w.lower()
-                # 完全子串匹配
-                if w_lower in _chan_lower or w in _chan_part:
-                    continue
-                # 信号类型关键词匹配
-                if any(kw in w for kw in _sig_keywords if kw in _chan_part):
-                    continue
-                _wave_deduped.append(w)
-            if _wave_deduped:
-                lines.append(f"  缠论：{_chan_part} · {' · '.join(_wave_deduped)}")
-            else:
-                lines.append(f"  缠论：{_chan_part}")
+    try:
+        from trader_shared.chan_core import format_chanlun_short_light
+        _chan_src = r.get("chanlun") or r.get("chan")
+        _chan_line = format_chanlun_short_light(
+            _chan_src,
+            fusion_chan=_csig2 or None,
+            wave_label=_wave,
+        )
+    except Exception:
+        if _csig2:
+            _st2 = str(_csig2.get("reason") or "").replace("缠论", "").strip().lstrip(":：").strip() or "无信号"
+            _cd2 = _csig2.get("direction", 0)
+            _dl2 = "看涨" if _cd2 and int(_cd2) > 0 else ("看跌" if _cd2 and int(_cd2) < 0 else "中性")
+            _chan_line = f"{_st2} · {_dl2}"
         else:
-            lines.append(f"  缠论：{_chan_part}")
-    else:
-        _chan_line = "暂无信号 · 中性"
-        if _wave:
-            _chan_line += f" · {_wave}"
-        lines.append(f"  缠论：{_chan_line}")
+            _chan_line = "暂无信号 · 中性"
+            if _wave:
+                _chan_line += f" · {_wave}"
+    lines.append(f"  结构：{_chan_line}")
 
-    # 信号分歧一行：缠论 vs 动量方向相反时提醒
-    _chan_dir2 = int(_csig2.get("direction", 0)) if _csig2 else 0
-    _mom_dir2 = int(_msig.get("direction", 0)) if 'msig' in dir() and isinstance(_msig, dict) else 0
-    if _chan_dir2 * _mom_dir2 < 0:
-        _c_label = "看多" if _chan_dir2 > 0 else "看空"
-        _m_label = "看多" if _mom_dir2 > 0 else "看空"
-        lines.append(f"  ⚠️ 信号分歧：缠论{_c_label} vs 动能{_m_label} → 观望为主")
+    # 2) 状态：日线威科夫事件灯（只展示，不进 fusion）
+    try:
+        from trader_shared.wyckoff_core import format_wyckoff_event_light
 
-    # 动能（展示 reason 原文，不删括号不编造分项）
+        def _unwrap_wyk(raw: object) -> dict:
+            if not isinstance(raw, dict):
+                return {}
+            if "wyckoff" in raw and isinstance(raw.get("wyckoff"), dict):
+                return raw["wyckoff"]  # type: ignore[index]
+            return raw
+
+        _src = r.get("wyckoff_daily")
+        _u = _unwrap_wyk(_src)
+        if not _u:
+            _fb = _unwrap_wyk(r.get("wyckoff"))
+            if _fb.get("timeframe") != "weekly":
+                _u = _fb
+        if _u:
+            _ev = format_wyckoff_event_light(_u)
+            # 统一标签「状态：」（format 内可能仍是「事件：」）
+            if _ev.startswith("事件："):
+                _ev = "状态：" + _ev[len("事件："):]
+            elif not _ev.startswith("状态："):
+                _ev = f"状态：{_ev}"
+            lines.append(f"  {_ev}")
+        else:
+            lines.append("  状态：— · 暂无日线事件 · 中性")
+    except Exception:
+        lines.append("  状态：— · 数据不足 · 中性")
+
+    # 2b) 位置灯（筹码峰）— 确认/否证结构与威科夫，不进 fusion
+    try:
+        from trader_shared.chip_core import format_chip_position_light
+        _pos_s = format_chip_position_light(
+            current,
+            r.get("chip_peaks") or [],
+            r.get("chip_migration") if isinstance(r.get("chip_migration"), dict) else None,
+            r.get("chip_current_pct") if isinstance(r.get("chip_current_pct"), (int, float)) else None,
+        )
+        if _pos_s:
+            lines.append(f"  {_pos_s}")
+    except Exception:
+        pass
+
+    # 3) 动能 ｜ 资金（合并一行，同意/不同意一眼看）
     _msig = fusion_signals.get("momentum") if isinstance(fusion_signals.get("momentum"), dict) else {}
     if _msig:
         _mst = str(_msig.get("reason") or "").strip().lstrip(":：").strip() or "无信号"
-        if len(_mst) > 40:
-            _mst = _mst[:38] + "…"
-        lines.append(f"  动能：{_mst}")
+        if len(_mst) > 28:
+            _mst = _mst[:26] + "…"
     else:
-        lines.append("  动能：暂无信号")
+        _mst = "暂无信号"
 
-    # 价量资金（展示 reason 原文 + 资金否决追加）
     _vsig = fusion_signals.get("vpf") if isinstance(fusion_signals.get("vpf"), dict) else {}
     if _vsig:
         _vst = str(_vsig.get("reason") or _vsig.get("vp_reason") or "").strip() or "中性"
-        if len(_vst) > 40:
-            _vst = _vst[:38] + "…"
-        # 有资金否决时追加（veto_msg 格式："连续 N 日主力净流出超阈值"）
+        if len(_vst) > 32:
+            _vst = _vst[:30] + "…"
         _veto = str(fusion.get("fund_flow_outflow_veto_msg") or "").strip()
         if _veto:
             _days_m = re.search(r"连续\s*(\d+)\s*日", _veto)
@@ -691,11 +666,47 @@ def render_short_midline(r: dict[str, Any]) -> str:
                 _vst = f"{_vst} ｜ 主力连续{_days_m.group(1)}日净流出"
             else:
                 _vst = f"{_vst} ｜ {_veto}"
-        lines.append(f"  价量资金：{_vst}")
     else:
-        lines.append("  价量资金：暂无信号")
+        _vst = "暂无信号"
+    lines.append(f"  动能：{_mst} ｜ 资金：{_vst}")
 
-    # 失效（保留）
+    # 信号分歧：结构 vs 动能
+    _chan_dir2 = int(_csig2.get("direction", 0)) if _csig2 else 0
+    _mom_dir2 = int(_msig.get("direction", 0)) if _msig else 0
+    if _chan_dir2 * _mom_dir2 < 0:
+        _c_label = "看多" if _chan_dir2 > 0 else "看空"
+        _m_label = "看多" if _mom_dir2 > 0 else "看空"
+        lines.append(f"  ⚠️ 信号分歧：结构{_c_label} vs 动能{_m_label} → 以不新开为主")
+
+    # 4) 动作：综合后的计划（不做「出手」措辞）
+    _confirm_v = float(r.get("confirm") or 0)
+    _wait_bits: list[str] = []
+    _is_hold_off = any(k in execution for k in ("不买", "观望", "不追", "不新开", "空仓"))
+    if _is_hold_off:
+        _action_main = "不新开"
+        if _confirm_v > 0 and _confirm_v > current:
+            _wait_bits.append(f"等站稳 {_confirm_v:.2f}")
+        elif "不追" in execution:
+            _wait_bits.append("不追现价")
+    elif any(k in execution for k in ("试探", "买点挂", "可按买", "半仓", "增持")):
+        _action_main = execution.replace(" · ", " · ").strip() or "可试探"
+        if len(_action_main) > 22:
+            _action_main = _action_main[:20] + "…"
+    else:
+        _action_main = execution.strip() or "观察"
+        if len(_action_main) > 22:
+            _action_main = _action_main[:20] + "…"
+
+    _action_parts = [_action_main]
+    _action_parts.extend(_wait_bits)
+    if _cap_t is not None:
+        _action_parts.append(f"仓 {_cap_t}%")
+    if reason and reason not in _action_main and not any(reason in p for p in _action_parts):
+        # 短因挂尾（观望类尤其需要「为何不动」）
+        _action_parts.append(reason)
+    lines.append(f"  动作：{' · '.join(_action_parts)}")
+
+    # 5) 失效
     _gate = r.get("mistery_gate") if isinstance(r.get("mistery_gate"), dict) else {}
     _inv = str(_disc.get("invalidation") or _gate.get("invalidation") or "").strip()
     if _inv:

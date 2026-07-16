@@ -14,6 +14,47 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from trader_shared.report_core import render_short_midline  # noqa: E402
+from trader_shared.wyckoff_core import (  # noqa: E402
+    format_wyckoff_event_light,
+    format_wyckoff_midline_light,
+)
+from trader_shared.chan_core import format_chanlun_short_light  # noqa: E402
+from trader_shared.chip_core import format_chip_position_light  # noqa: E402
+
+
+def test_format_chip_position_light_basic():
+    """方案 C：支撑 · 阻力 · 套牢面；无警报不写底部。"""
+    line = format_chip_position_light(
+        55.0,
+        [
+            {"price": 50.0, "share_of_total": 12},
+            {"price": 58.0, "share_of_total": 20},
+        ],
+        {"has_history": True, "warning_level": "none", "migration_pct": 0},
+        profit_pct=10.0,
+    )
+    assert line.startswith("筹码：")
+    assert "支撑 50.00" in line or "支撑弱" in line
+    assert "阻力 58.00" in line
+    assert "套牢面大" in line
+    assert "底部" not in line  # 无警报不写
+    assert "｜" not in line
+
+
+def test_format_chip_position_light_nanwang_like():
+    """跌穿成本区：支撑弱 · 阻力 · 套牢面大。"""
+    line = format_chip_position_light(
+        41.63,
+        [
+            {"price": 44.4, "share_of_total": 5},
+            {"price": 50.4, "share_of_total": 15},
+        ],
+        {"has_history": True, "warning_level": "none", "migration_pct": 0},
+        profit_pct=9.0,
+    )
+    assert "支撑弱" in line
+    assert "阻力 44.40" in line
+    assert "套牢面大" in line
 
 
 def _daily_bars() -> list[dict]:
@@ -138,6 +179,113 @@ def test_no_conflict_line():
     assert "说明：周线偏空" not in out
 
 
+# ── 短线威科夫事件灯（英文 + 中文，只展示）──
+
+def test_format_wyckoff_event_light_spring():
+    line = format_wyckoff_event_light({
+        "spring_signal": True,
+        "spring_vol_class": "low_vol_confirm",
+        "timeframe": "daily",
+    })
+    assert line.startswith("状态：Spring 弹簧")
+    assert "低位假跌破后收回" in line
+    assert "偏多" in line
+
+
+def test_format_wyckoff_midline_light_ar():
+    """中线人话：阶段白话 · 灯（中文）· 一句含义（不能当转强）。"""
+    line = format_wyckoff_midline_light({
+        "ar_signal": True,
+        "phase_label": "积累期 B（辅助：AR无BC）",
+        "timeframe": "weekly",
+    })
+    assert line.startswith("威科夫：")
+    assert "还在吸筹中" in line
+    assert "AR（自动反弹）" in line
+    assert "不能当已经转强" in line or "不能当转强" in line
+    # 不再堆「高潮后快速反弹 · 偏多」式重复
+    assert "高潮后快速反弹" not in line
+    assert not line.endswith("偏多")
+
+
+def test_format_wyckoff_event_light_none():
+    line = format_wyckoff_event_light({"timeframe": "daily", "wyckoff_summary": "无"})
+    assert "状态：—" in line
+    assert "暂无事件" in line
+
+
+def test_short_section_shows_event_light():
+    """⚡ 短线含状态行；读 wyckoff_daily，不进评分。"""
+    r = _report()
+    r["wyckoff_daily"] = {
+        "spring_signal": True,
+        "spring_vol_class": "normal",
+        "timeframe": "daily",
+    }
+    r["wyckoff_midline"] = {
+        "timeframe": "weekly",
+        "phase_label": "积累期 C",
+        "spring_signal": False,
+        "wyckoff_summary": "中线",
+    }
+    out = render_short_midline(r)
+    assert "⚡ 短线" in out
+    assert "状态：Spring 弹簧" in out
+    # 中线威科夫仍独立一行
+    assert "威科夫：" in out
+
+
+def test_format_chanlun_short_light_buy1():
+    line = format_chanlun_short_light({
+        "chanlun": {
+            "buy_points": [{"type": "一类买", "price": 10.0}],
+            "sell_points": [],
+            "divergence": {"bottom_divergence": True},
+            "trend_label": "上涨",
+        }
+    })
+    assert line.startswith("一买")
+    assert "底背驰" in line
+    assert "看涨" in line
+    assert "（同级）" in line
+
+
+def test_format_chanlun_short_light_from_fusion_reason():
+    """仅有 fusion reason 时也能解析出一买句式。"""
+    line = format_chanlun_short_light(
+        {},
+        fusion_chan={"reason": "缠论一类买 (底背驰)", "direction": 1},
+    )
+    assert "一买" in line
+    assert "看涨" in line
+
+
+def test_short_section_chan_type_first():
+    """⚡ 短线结构：类型优先（一买…）而非 reason 原文堆叠。"""
+    r = _report()
+    r["chanlun"] = {
+        "chanlun": {
+            "buy_points": [{"type": "一类买", "price": 42.0}],
+            "sell_points": [],
+            "divergence": {"bottom_divergence": True},
+            "trend_label": "上涨",
+        }
+    }
+    r["fusion"]["signals_detail"]["chan"] = {
+        "reason": "缠论一类买 (底背驰)",
+        "direction": 1,
+    }
+    out = render_short_midline(r)
+    short = out.split("⚡ 短线", 1)[-1].split("关键价", 1)[0]
+    assert "结构：一买" in short
+    assert "看涨" in short
+    # A 版读序：结构在动作前，且用「动作」不用「出手」
+    assert "动作：" in short
+    assert "出手：" not in short
+    pos_struct = short.find("结构：")
+    pos_action = short.find("动作：")
+    assert 0 <= pos_struct < pos_action
+
 # ── Task 4: ✅/⚠️ 具体化 ──
 
 def test_highlight_specific():
@@ -156,19 +304,22 @@ def test_risk_uses_short_resist():
 # ── Task 5: 中线筹码状态行 ──
 
 def test_midline_chip_status():
-    """中线区有筹码状态行。"""
+    """中线区筹码方案 C：支撑 · 阻力 · 套牢面。"""
     out = render_short_midline(_report())
-    assert "筹码：获利盘 8.3%" in out
-    assert "套牢峰 44.95" in out
+    assert "筹码：" in out
+    assert "阻力 44.95" in out or "阻力 44.9" in out
+    assert "套牢面大" in out  # profit 8.3%
 
 
 def test_midline_chip_no_above_peak_graceful():
-    """无上方峰时不显示套牢。"""
+    """无上方峰时写阻力弱，不出现旧「套牢峰」文案。"""
     r = _report()
     r["chip_peaks"] = [{"price": 40.0, "volume": 100, "support_level": "弱支撑"}]
     r["chip_current_pct"] = 95.0
     out = render_short_midline(r)
     assert "套牢峰" not in out
+    assert "阻力弱" in out
+    assert "套牢面小" in out  # 获利盘 95%
 
 
 def test_midline_chip_missing_graceful():
@@ -203,7 +354,7 @@ def test_momentum_short_reason():
 def test_vpf_reason_full():
     """价量资金行展示 vpf.reason 原文。"""
     out = render_short_midline(_report())
-    assert "价量资金：平量（量比1.1，近3日-1.4%）" in out
+    assert "资金：平量（量比1.1，近3日-1.4%）" in out
 
 
 def test_vpf_no_veto_no_append():
@@ -211,9 +362,9 @@ def test_vpf_no_veto_no_append():
     r = _report()
     r["fusion"]["fund_flow_outflow_veto_msg"] = None
     out = render_short_midline(r)
-    vpf_line = [l for l in out.split("\n") if "价量资金" in l]
-    if vpf_line:
-        assert "主力连续" not in vpf_line[0]
+    fund_line = [l for l in out.split("\n") if "资金：" in l]
+    if fund_line:
+        assert "主力连续" not in fund_line[0]
 
 
 def test_vpf_with_veto_appends():

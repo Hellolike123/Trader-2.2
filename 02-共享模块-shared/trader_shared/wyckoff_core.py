@@ -750,6 +750,314 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
         "summary": summary,
     }
 
+def _unwrap_wyckoff_dict(wyckoff: dict[str, Any] | None) -> dict[str, Any]:
+    wyk = wyckoff if isinstance(wyckoff, dict) else {}
+    if "wyckoff" in wyk and isinstance(wyk.get("wyckoff"), dict):
+        return wyk["wyckoff"]
+    return wyk
+
+
+def _wyckoff_dir_label(d: int) -> str:
+    if d > 0:
+        return "偏多"
+    if d < 0:
+        return "偏空"
+    return "中性"
+
+
+def resolve_wyckoff_primary(
+    wyckoff: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """解析当前主事件（展示用，不进 fusion 打分）。
+
+    返回字段：
+      status: event | none | insufficient | no_data
+      code: 英文灯标（Spring / UT / SOS …；无事件为 —）
+      cn_name: 中文短名（弹簧 / 假突破 …）
+      main: 主句白话
+      note: 补充说明
+      direction: +1 / 0 / -1
+      phase_label: 原 phase_label（可能空）
+      timeframe: 原 timeframe
+    """
+    wyk = _unwrap_wyckoff_dict(wyckoff)
+    phase = str(wyk.get("phase_label") or "")
+    tf = wyk.get("timeframe")
+
+    empty = {
+        "status": "no_data",
+        "code": "—",
+        "cn_name": "无",
+        "main": "数据不足",
+        "note": "中性",
+        "direction": 0,
+        "phase_label": phase,
+        "timeframe": tf,
+    }
+
+    if tf == "insufficient":
+        return {
+            **empty,
+            "status": "insufficient",
+            "code": "—",
+            "cn_name": "不足",
+            "main": "周线不足",
+            "note": "不参与定论",
+            "direction": 0,
+        }
+
+    # 优先级与 format_wyckoff_oneline 一致（含 UTAD/BU 优先于 Spring）
+    code = cn = main = note = None
+    d = 0
+
+    if wyk.get("utad_signal"):
+        code, cn, main, note, d = "UTAD", "派发末上冲", "派发末上冲回落", "警惕破位下行", -1
+    elif wyk.get("bu_signal"):
+        code, cn, main, note, d = "BU", "回踩确认", "强势后缩量回踩", "趋势启动区试探", 1
+    elif wyk.get("spring_signal"):
+        code, cn = "Spring", "弹簧"
+        vol = wyk.get("spring_vol_class") or "normal"
+        strength = wyk.get("spring_strength")
+        if wyk.get("spring_premature"):
+            main, note, d = "低位假跌破后收回", "孤立/过早信号，缺蓄势背景，当噪声看待", 0
+        elif vol == "high_vol_warning":
+            main, note, d = "低位跌破后收回", "放量跌破，也可能是真破位，信号偏弱", 1
+        elif vol == "low_vol_confirm":
+            main, note, d = "低位假跌破后收回", "更像洗盘，缩量较可信", 1
+        else:
+            main, note, d = "低位假跌破后收回", "更像洗盘吸筹", 1
+        if strength == "strong" and d > 0 and vol != "high_vol_warning":
+            note = note + "，强度偏高"
+        elif strength == "weak" and d > 0:
+            note = note + "，强度偏弱"
+        elif strength == "failure":
+            main, note, d = "低位跌破未收回", "刺穿失败，偏破位风险", -1
+    elif wyk.get("sos_signal"):
+        code, cn, main, note, d = "SOS", "强势上攻", "连续放量上攻", "多头发力，趋势转强迹象", 1
+    elif wyk.get("upthrust_signal"):
+        code, cn = "UT", "假突破"
+        if wyk.get("upthrust_premature"):
+            main, note, d = "冲高回落假突破", "孤立/过早信号，缺派发背景，当噪声看待", 0
+        else:
+            main, note, d = "冲高回落假突破", "上方试盘失败，结构偏顶", -1
+            ut_str = wyk.get("upthrust_strength")
+            if ut_str == "strong":
+                note = note + "，强度偏高"
+            elif ut_str == "weak":
+                note = note + "，强度偏弱"
+            elif ut_str == "failure":
+                note, d = "上冲未回落，突破可能有效", 1
+    elif wyk.get("bc_signal"):
+        code, cn, main, note, d = "BC", "买力高潮", "高位放量滞涨", "购买高潮迹象，注意见好就收", -1
+    elif wyk.get("sow_signal"):
+        code, cn, main, note, d = "SOW", "弱势下跌", "放量跌破支撑", "弱势确认，防守优先", -1
+    elif wyk.get("ar_signal"):
+        code, cn, main, note, d = "AR", "自动反弹", "高潮后快速反弹", "仅反弹，还不能当反转", 1
+    elif wyk.get("sc_signal"):
+        code, cn, main, note, d = "SC", "卖力高潮", "天量宽幅下跌", "卖力高潮，抛压宣泄后可能止跌", 1
+    elif wyk.get("st_signal"):
+        code, cn, main, note, d = "ST", "二次测试", "回踩支撑站住", "二次确认支撑有效", 1
+    elif wyk.get("lps_signal"):
+        code, cn, main, note, d = "LPS", "最后支撑", "突破后缩量回踩", "回踩不破，仍偏强", 1
+    elif wyk.get("lpsy_signal"):
+        code, cn, main, note, d = "LPSY", "最后供应", "反弹受阻缩量", "最后供应点，警惕破位下行", -1
+    elif wyk.get("ps_signal"):
+        code, cn, main, note, d = "PS", "初步支撑", "低位放量止跌", "尚待 SC/Spring 确认", 1
+    elif wyk.get("psy_signal"):
+        code, cn, main, note, d = "PSY", "初步供应", "高位放量滞涨", "尚待 BC/UT 确认", -1
+    elif wyk.get("compression_signal"):
+        code, cn, main, note, d = "Compression", "压缩蓄势", "压缩蓄势", "振幅收窄+量能枯竭，突破在即", 1
+    elif wyk.get("trend_pullback_signal"):
+        code, cn, main, note, d = "TrendPullback", "趋势回踩", "趋势回踩", "回踩不破均线，趋势延续", 1
+    elif wyk.get("bullish_volume_divergence") and not wyk.get("bearish_volume_divergence"):
+        code, cn, main, note, d = "BullDiv", "看多背离", "下跌缩量", "抛压减轻，有止跌迹象", 1
+    elif wyk.get("bearish_volume_divergence") and not wyk.get("bullish_volume_divergence"):
+        code, cn, main, note, d = "BearDiv", "看空背离", "上涨缩量", "上攻乏力，慎追高", -1
+    else:
+        has_run = bool(
+            tf
+            or wyk.get("wyckoff_summary")
+            or any(k.endswith("_signal") or k.endswith("_reason") for k in wyk.keys())
+        )
+        if has_run:
+            return {
+                "status": "none",
+                "code": "—",
+                "cn_name": "无事件",
+                "main": "暂无事件",
+                "note": "中性",
+                "direction": 0,
+                "phase_label": phase,
+                "timeframe": tf,
+            }
+        return empty
+
+    return {
+        "status": "event",
+        "code": code,
+        "cn_name": cn,
+        "main": main,
+        "note": note,
+        "direction": d,
+        "phase_label": phase,
+        "timeframe": tf,
+    }
+
+
+def format_wyckoff_event_light(
+    wyckoff: dict[str, Any] | None = None,
+    *,
+    direction: int | None = None,
+) -> str:
+    """短线报告：英文灯标 + 中文解释（不参与评分）。
+
+    例：
+      状态：Spring 弹簧 · 低位假跌破后收回（更像洗盘）· 偏多
+      状态：— · 暂无事件 · 中性
+    """
+    info = resolve_wyckoff_primary(wyckoff)
+    if info["status"] == "insufficient":
+        return "状态：— · 数据不足 · 不参与"
+    if info["status"] == "no_data":
+        return "状态：— · 数据不足 · 中性"
+    if info["status"] == "none":
+        return "状态：— · 暂无事件 · 中性"
+
+    d = int(direction) if direction is not None else int(info["direction"])
+    code = info["code"]
+    cn = info["cn_name"]
+    main = info["main"]
+    note = info["note"]
+    # 英文灯 + 中文短名 + 主句白话 + 方向（说明）
+    return f"状态：{code} {cn} · {main}（{note}）· {_wyckoff_dir_label(d)}"
+
+
+def _plain_phase_midline(phase_label: str) -> str:
+    """相位 → 中线人话（去掉括号里的 AR/Spring 等英文，避免和事件灯重复）。"""
+    import re
+
+    raw = str(phase_label or "").strip()
+    if not raw or "无明确阶段" in raw:
+        return ""
+    # 去掉（辅助：…）（测试：…）等，里面常塞英文事件名
+    core = re.sub(r"[（(][^）)]*[）)]", "", raw).strip()
+    core = re.sub(r"\s+", " ", core)
+
+    # 先匹配更具体的标签
+    rules: list[tuple[str, str]] = [
+        ("主升", "已离开吸筹、偏主升"),
+        ("Markup", "已离开吸筹、偏主升"),
+        ("主跌", "已离开派发、偏主跌"),
+        ("Markdown", "已离开派发、偏主跌"),
+        ("积累期 A", "吸筹早期"),
+        ("积累期 B", "还在吸筹中"),
+        ("积累期 C", "吸筹测试段"),
+        ("积累期 D", "吸筹末段、待启动"),
+        ("积累期 E", "吸筹结束、抬升中"),
+        ("派发期 A", "派发早期"),
+        ("派发期 B", "还在派发中"),
+        ("派发期 C", "派发测试段"),
+        ("派发期 D", "派发末段"),
+        ("派发期 E", "派发结束、下行中"),
+        ("积累", "吸筹阶段"),
+        ("派发", "派发阶段"),
+    ]
+    for key, plain in rules:
+        if key in core or key in raw:
+            return plain
+    return core or raw
+
+
+def _midline_meaning(code: str, cn_name: str, note: str, direction: int) -> str:
+    """中线「一句话含义」：发生了什么 + 不能误读成什么。"""
+    c = (code or "").strip()
+    by_code = {
+        "AR": "有反弹，只是反弹，不能当已经转强",
+        "PS": "刚有人接，还早，不能当已经转强",
+        "SC": "恐慌砸完一波，还要等弹簧/确认",
+        "ST": "再测支撑，还不能当主升",
+        "Spring": "假跌破后收回，更像洗盘；回踩区再谈",
+        "SOS": "放量上攻，有转强苗头；仍看回踩站不站稳",
+        "BU": "突破后回踩，勿追高",
+        "LPS": "上升中的回踩支撑，破了就不算",
+        "BC": "高位买疯了，不能当还能续涨",
+        "UT": "冲高回落，假突破，不能当突破成功",
+        "UTAD": "派发末的假突破，小心往下破",
+        "SOW": "放量跌破，偏弱，先防守",
+        "LPSY": "下跌中的反抽出货点，反抽别追",
+        "PSY": "高位开始有人出，还不能当见顶定论",
+        "Compression": "波动压窄了，等方向选择",
+        "TrendPullback": "顺势回踩，破位就算假",
+        "BullDiv": "跌时量缩，有止跌迹象，不能当反转",
+        "BearDiv": "涨时量缩，上攻乏力，别追高",
+    }
+    if c in by_code:
+        return by_code[c]
+    n = (note or "").strip()
+    if n:
+        return n
+    if direction > 0:
+        return "有点偏多线索，不能单独当开仓理由"
+    if direction < 0:
+        return "有点偏空线索，先防守"
+    return "暂无明确含义"
+
+
+def format_wyckoff_midline_light(
+    wyckoff: dict[str, Any] | None = None,
+    *,
+    direction: int | None = None,
+) -> str:
+    """中线威科夫人话版（周线；不进短线评分）。
+
+    三段式，少重复：
+      威科夫：还在吸筹中 · AR（自动反弹）· 有反弹，只是反弹，不能当已经转强
+      威科夫：周线不足 · 不参与定论
+    """
+    info = resolve_wyckoff_primary(wyckoff)
+    if info["status"] == "insufficient":
+        return "威科夫：周线不足 · 不参与定论"
+    if info["status"] == "no_data":
+        return "威科夫：数据不足 · 中性"
+
+    phase_plain = _plain_phase_midline(str(info.get("phase_label") or ""))
+    d = int(direction) if direction is not None else int(info["direction"] or 0)
+    parts: list[str] = []
+    if phase_plain:
+        parts.append(phase_plain)
+
+    if info["status"] == "none":
+        # 已跑周线引擎：不是「没算」，而是 TR/事件定不出阶段
+        wyk = _unwrap_wyckoff_dict(wyckoff)
+        tr_q = wyk.get("tr_quality")
+        if tr_q is None and not wyk.get("tr_upper") and not wyk.get("tr_lower"):
+            parts.append("周线已算")
+            parts.append("构不成清晰吸筹/派发区间")
+            parts.append("阶段暂定不出，不据此开仓")
+        else:
+            if phase_plain:
+                pass  # 已有阶段人话
+            else:
+                parts.append("阶段暂不明")
+            parts.append("暂无关键事件")
+            parts.append("不据此开仓")
+        return "威科夫：" + " · ".join(parts) if parts else "威科夫：周线已算 · 暂无定论"
+
+    code = str(info.get("code") or "—")
+    cn = str(info.get("cn_name") or "")
+    note = str(info.get("note") or "")
+    meaning = _midline_meaning(code, cn, note, d)
+
+    # 灯：AR（自动反弹）—— 英文一眼扫，中文括号解释；不再复述「高潮后快速反弹」
+    if cn and cn not in ("无", "不足", "无事件"):
+        parts.append(f"{code}（{cn}）")
+    else:
+        parts.append(code)
+
+    parts.append(meaning)
+    return "威科夫：" + " · ".join(parts)
+
+
 def format_wyckoff_oneline(
     wyckoff: dict[str, Any] | None = None,
     *,
@@ -772,128 +1080,30 @@ def format_wyckoff_oneline(
         如「威科夫：低位假跌破后收回，偏多（更像洗盘，缩量较可信）」
         如 show_phase=True：「积累期 C（测试：Spring）· 低位假跌破后收回，偏多」
     """
-    wyk = wyckoff if isinstance(wyckoff, dict) else {}
-    # 兼容 strategy 包装
-    if "wyckoff" in wyk and isinstance(wyk.get("wyckoff"), dict):
-        wyk = wyk["wyckoff"]
+    wyk = _unwrap_wyckoff_dict(wyckoff)
+    info = resolve_wyckoff_primary(wyk)
 
-    def _dir_label(d: int) -> str:
-        if d > 0:
-            return "偏多"
-        if d < 0:
-            return "偏空"
-        return "中性"
-
-    # 周线不足：诚实「不参与定论」，禁止落成「暂无事件」（has_run 误判）
-    if wyk.get("timeframe") == "insufficient":
+    if info["status"] == "insufficient":
         return "威科夫：周线不足 · 不参与定论"
-
-    # 按信号优先级选主信号（展示/旁证）
-    if wyk.get("utad_signal"):
-        main, note, d = "派发末上冲回落", "UTAD，警惕破位下行", -1
-    elif wyk.get("bu_signal"):
-        main, note, d = "强势后缩量回踩", "Backup，趋势启动区试探", 1
-    elif wyk.get("spring_signal"):
-        vol = wyk.get("spring_vol_class") or "normal"
-        strength = wyk.get("spring_strength")  # P0-4 透出；展示可选
-        if wyk.get("spring_premature"):
-            main = "低位假跌破后收回"
-            note = "孤立/过早信号，缺蓄势背景，当噪声看待"
-            d = 0  # 展示中性，与打分降权语义一致
-        elif vol == "high_vol_warning":
-            main = "低位跌破后收回"
-            note = "放量跌破，也可能是真破位，信号偏弱"
-            d = 1
-        elif vol == "low_vol_confirm":
-            main = "低位假跌破后收回"
-            note = "更像洗盘，缩量较可信"
-            d = 1
-        else:
-            main = "低位假跌破后收回"
-            note = "更像洗盘吸筹"
-            d = 1
-        # strength=strong 且非 premature/高量时略加强说明（不改方向）
-        if strength == "strong" and d > 0 and vol != "high_vol_warning":
-            note = note + "，强度偏高"
-        elif strength == "weak" and d > 0:
-            note = note + "，强度偏弱"
-        elif strength == "failure":
-            main = "低位跌破未收回"
-            note = "刺穿失败，偏破位风险"
-            d = -1
-    elif wyk.get("sos_signal"):
-        main, note, d = "连续放量上攻", "多头发力，趋势转强迹象", 1
-    elif wyk.get("upthrust_signal"):
-        if wyk.get("upthrust_premature"):
-            main, note, d = "冲高回落假突破", "孤立/过早信号，缺派发背景，当噪声看待", 0
-        else:
-            main, note, d = "冲高回落假突破", "上方试盘失败，结构偏顶", -1
-            ut_str = wyk.get("upthrust_strength")
-            if ut_str == "strong":
-                note = note + "，强度偏高"
-            elif ut_str == "weak":
-                note = note + "，强度偏弱"
-            elif ut_str == "failure":
-                note = "上冲未回落，突破可能有效"
-                d = 1
-    elif wyk.get("bc_signal"):
-        main, note, d = "高位放量滞涨", "购买高潮迹象，注意见好就收", -1
-    elif wyk.get("sow_signal"):
-        main, note, d = "放量跌破支撑", "弱势确认，防守优先", -1
-    elif wyk.get("ar_signal"):
-        main, note, d = "高潮后快速反弹", "仅反弹，还不能当反转", 1
-    elif wyk.get("sc_signal"):
-        main, note, d = "天量宽幅下跌", "卖力高潮，抛压宣泄后可能止跌", 1
-    elif wyk.get("st_signal"):
-        main, note, d = "回踩支撑站住", "二次确认支撑有效", 1
-    elif wyk.get("lps_signal"):
-        main, note, d = "突破后缩量回踩", "回踩不破，仍偏强", 1
-    elif wyk.get("lpsy_signal"):
-        main, note, d = "反弹受阻缩量", "最后供应点，警惕破位下行", -1
-    elif wyk.get("ps_signal"):
-        main, note, d = "低位放量止跌", "初步支撑 PS，尚待 SC/Spring 确认", 1
-    elif wyk.get("psy_signal"):
-        main, note, d = "高位放量滞涨", "初步供应 PSY，尚待 BC/UT 确认", -1
-    # P2/P3: 新增信号（优先级在 LPS 之后、divergence 之前）
-    elif wyk.get("compression_signal"):
-        main, note, d = "压缩蓄势", "振幅收窄+量能枯竭，突破在即", 1
-    elif wyk.get("trend_pullback_signal"):
-        main, note, d = "趋势回踩", "回踩不破均线，趋势延续", 1
-    elif wyk.get("bullish_volume_divergence") and not wyk.get("bearish_volume_divergence"):
-        main, note, d = "下跌缩量", "抛压减轻，有止跌迹象", 1
-    elif wyk.get("bearish_volume_divergence") and not wyk.get("bullish_volume_divergence"):
-        main, note, d = "上涨缩量", "上攻乏力，慎追高", -1
-    else:
-        # 已跑完引擎但未触发 Spring/SOS/UT 等事件 → 不是「数据不全」
-        # 有 timeframe / summary 视为已计算；完全空 dict 才偏数据不足
-        has_run = bool(
-            wyk.get("timeframe")
-            or wyk.get("wyckoff_summary")
-            or any(
-                k.endswith("_signal") or k.endswith("_reason")
-                for k in wyk.keys()
-            )
-        )
-        if has_run:
-            _phase = wyk.get("phase_label") or ""
-            _tf2 = "（日线）" if wyk.get("timeframe") == "daily_fallback" else ""
-            if show_phase and _phase and "无明确阶段" not in _phase:
-                return f"威科夫：{_phase} · 暂无事件 · 中性{_tf2}"
-            return f"威科夫：暂无事件 · 中性{_tf2}"
+    if info["status"] == "no_data":
         return "威科夫：数据不足 · 中性"
+    if info["status"] == "none":
+        _phase = info.get("phase_label") or ""
+        _tf2 = "（日线）" if info.get("timeframe") == "daily_fallback" else ""
+        if show_phase and _phase and "无明确阶段" not in _phase:
+            return f"威科夫：{_phase} · 暂无事件 · 中性{_tf2}"
+        return f"威科夫：暂无事件 · 中性{_tf2}"
 
-    # 外部 direction 可覆盖展示方向（兼容旧调用；短线 fusion 已不消费威科夫）
-    if direction is not None:
-        d = int(direction)
-    # phase 前缀（如 show_phase=True 且 phase 非 none）
+    main = info["main"]
+    note = info["note"]
+    d = int(direction) if direction is not None else int(info["direction"])
+
     phase_prefix = ""
     if show_phase:
-        _phase = wyk.get("phase_label") or ""
+        _phase = info.get("phase_label") or ""
         if _phase and "无明确阶段" not in _phase:
             phase_prefix = f"{_phase} · "
-    # 历史 daily_fallback 标注（中线现已禁止回退日线；保留兼容）
     _tf_suffix = ""
-    if wyk.get("timeframe") == "daily_fallback":
+    if info.get("timeframe") == "daily_fallback":
         _tf_suffix = "（日线）"
-    # 句式：威科夫：{判断} · {偏多|偏空|中性}（说明）{回退标注}
-    return f"威科夫：{phase_prefix}{main} · {_dir_label(d)}（{note}）{_tf_suffix}"
+    return f"威科夫：{phase_prefix}{main} · {_wyckoff_dir_label(d)}（{note}）{_tf_suffix}"

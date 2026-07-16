@@ -657,3 +657,272 @@ def format_chanlun_theory_line(chan_result: Any) -> str:
     if chan.get("timeframe") == "daily_fallback":
         _tf_suffix = "（日线）"
     return f"{main}·{dir_label}{_tf_suffix}"
+
+
+# 短线展示：买卖点类型短名（灯标）
+_CHAN_TYPE_SHORT = {
+    "一类买": "一买",
+    "类二买": "类二买",
+    "二类买": "二买",
+    "三类买": "三买",
+    "一类卖": "一卖",
+    "二类卖": "二卖",
+    "三类卖": "三卖",
+}
+_CHAN_TYPE_NOTE = {
+    "一类买": "底背驰",
+    "类二买": "回踩偏弱",
+    "二类买": "低点抬高",
+    "三类买": "突破中枢",
+    "一类卖": "顶背驰",
+    "二类卖": "高点降低",
+    "三类卖": "跌破中枢",
+}
+_SELL_RANK_DISP = {"一类卖": 0, "二类卖": 1, "三类卖": 2}
+_BUY_RANK_DISP = {"一类买": 0, "类二买": 1, "二类买": 2, "三类买": 3}
+
+
+def resolve_chanlun_primary(chan_result: Any = None) -> dict[str, Any]:
+    """解析日线缠论主信号（短线展示用；优先级对齐 fusion _chan_to_signal）。
+
+    返回：
+      status: point | divergence | trend | none
+      type_raw: 一类买 / 底背驰 / …
+      type_short: 一买 / 底背驰 / …
+      note: 补充白话（可空）
+      direction: +1 / 0 / -1
+      point: 原始买卖点 dict 或 None
+      same_level: 是否应标（同级）
+    """
+    chan = unwrap_chan(chan_result) if isinstance(chan_result, dict) else {}
+    if not isinstance(chan, dict):
+        chan = {}
+
+    buy_points = chan.get("buy_points") if isinstance(chan.get("buy_points"), list) else []
+    sell_points = chan.get("sell_points") if isinstance(chan.get("sell_points"), list) else []
+    divergence = chan.get("divergence") if isinstance(chan.get("divergence"), dict) else {}
+    trend_label = str(chan.get("trend_label") or "")
+
+    def _best(points: list, rank_map: dict) -> dict | None:
+        best, best_r = None, 999
+        for p in points:
+            if not isinstance(p, dict):
+                continue
+            r = rank_map.get(p.get("type"), 999)
+            if r < best_r:
+                best, best_r = p, r
+        return best
+
+    def _pack(
+        status: str,
+        type_raw: str,
+        type_short: str,
+        note: str,
+        direction: int,
+        point: dict | None = None,
+        same_level: bool = False,
+    ) -> dict[str, Any]:
+        return {
+            "status": status,
+            "type_raw": type_raw,
+            "type_short": type_short,
+            "note": note,
+            "direction": direction,
+            "point": point,
+            "same_level": same_level,
+            "chan": chan,
+        }
+
+    best_sell = _best(sell_points, _SELL_RANK_DISP)
+    if best_sell is not None:
+        t = str(best_sell.get("type") or "")
+        if t in _CHAN_TYPE_SHORT:
+            return _pack(
+                "point",
+                t,
+                _CHAN_TYPE_SHORT[t],
+                _CHAN_TYPE_NOTE.get(t, ""),
+                -1,
+                best_sell,
+                True,
+            )
+
+    best_buy = _best(buy_points, _BUY_RANK_DISP)
+
+    if best_buy is not None and best_buy.get("type") == "一类买":
+        return _pack("point", "一类买", "一买", "底背驰", 1, best_buy, True)
+
+    if divergence.get("top_divergence"):
+        return _pack("divergence", "顶背驰", "顶背驰", "上攻乏力", -1, None, True)
+
+    if best_buy is not None and best_buy.get("type") == "类二买":
+        return _pack("point", "类二买", "类二买", "回踩偏弱", 1, best_buy, True)
+
+    if best_buy is not None and best_buy.get("type") in ("二类买", "三类买"):
+        t = str(best_buy.get("type"))
+        return _pack(
+            "point",
+            t,
+            _CHAN_TYPE_SHORT[t],
+            _CHAN_TYPE_NOTE.get(t, ""),
+            1,
+            best_buy,
+            True,
+        )
+
+    if divergence.get("bottom_divergence"):
+        return _pack("divergence", "底背驰", "底背驰", "抛压减轻", 1, None, True)
+
+    # 趋势/结构兜底
+    structure_type = str(chan.get("structure_type") or "").strip()
+    note_parts = []
+    if trend_label and trend_label not in ("数据不足", "未知", ""):
+        note_parts.append(trend_label)
+    if structure_type and structure_type not in ("无结构",) and not structure_type.startswith("线段不足"):
+        note_parts.append(structure_type)
+    note = " · ".join(note_parts) if note_parts else ""
+
+    direction = 0
+    if "上涨" in trend_label or "拉升" in trend_label or "多" in trend_label:
+        direction = 1
+    elif "下跌" in trend_label or "空" in trend_label:
+        direction = -1
+
+    if note or chan:
+        return _pack("trend" if note else "none", "暂无买卖点", "暂无买卖点", note, direction, None, False)
+
+    return _pack("none", "暂无信号", "暂无信号", "", 0, None, False)
+
+
+def format_chanlun_short_light(
+    chan_result: Any = None,
+    *,
+    fusion_chan: dict | None = None,
+    wave_label: str = "",
+) -> str:
+    """短线报告缠论行：类型优先固定句式（不写「缠论：」前缀）。
+
+    例：
+      一买 · 底背驰 · 看涨（同级）
+      二卖 · 高点降低 · 看跌（同级） · 30m✗
+      暂无买卖点 · 中性 · 拉升趋势中
+    """
+    info = resolve_chanlun_primary(chan_result)
+    chan = info.get("chan") if isinstance(info.get("chan"), dict) else {}
+
+    # fusion 有更强 reason 且 resolve 无 point 时，可从 reason 补类型（兼容只有 signals_detail 的 mock）
+    if info["status"] in ("none", "trend") and isinstance(fusion_chan, dict):
+        reason = str(fusion_chan.get("reason") or "")
+        for raw, short in _CHAN_TYPE_SHORT.items():
+            if raw in reason or short in reason:
+                info = {
+                    **info,
+                    "status": "point",
+                    "type_raw": raw,
+                    "type_short": short,
+                    "note": _CHAN_TYPE_NOTE.get(raw, ""),
+                    "direction": int(fusion_chan.get("direction") or info["direction"] or 0),
+                    "same_level": True,
+                }
+                if "底背驰" in reason and "买" in short:
+                    info["note"] = "底背驰"
+                if "顶背驰" in reason and "卖" in short:
+                    info["note"] = "顶背驰"
+                break
+        else:
+            if "底背驰" in reason:
+                info = {
+                    **info,
+                    "status": "divergence",
+                    "type_raw": "底背驰",
+                    "type_short": "底背驰",
+                    "note": "抛压减轻",
+                    "direction": 1,
+                    "same_level": True,
+                }
+            elif "顶背驰" in reason:
+                info = {
+                    **info,
+                    "status": "divergence",
+                    "type_raw": "顶背驰",
+                    "type_short": "顶背驰",
+                    "note": "上攻乏力",
+                    "direction": -1,
+                    "same_level": True,
+                }
+            elif fusion_chan.get("direction") is not None and info["status"] == "none":
+                d = int(fusion_chan.get("direction") or 0)
+                info = {**info, "direction": d, "note": reason.replace("缠论", "").strip() or info["note"]}
+
+    d = int(info["direction"] or 0)
+    dir_label = "看涨" if d > 0 else ("看跌" if d < 0 else "中性")
+
+    parts: list[str] = [str(info["type_short"] or "暂无信号")]
+    note = str(info.get("note") or "").strip()
+    # 类型已含「背驰」时 note 不再重复背驰词
+    if note:
+        if note not in parts[0] and not (note in ("底背驰", "顶背驰") and note in parts[0]):
+            # 一买 的 note 是 底背驰 → 要挂上
+            if parts[0] in ("一买", "一卖", "二买", "三买", "二卖", "三卖", "类二买") or info["status"] == "point":
+                if note != parts[0]:
+                    parts.append(note)
+            elif info["status"] == "trend" and note:
+                parts.append(note)
+            elif info["status"] == "divergence" and note and note not in ("底背驰", "顶背驰"):
+                parts.append(note)
+
+    parts.append(dir_label)
+
+    # 区间套确认（仅买卖点上有字段时）
+    pt = info.get("point") if isinstance(info.get("point"), dict) else None
+    nesting_bits: list[str] = []
+    if pt is not None:
+        chain = pt.get("nesting_chain")
+        if isinstance(chain, list) and chain:
+            for lv in chain:
+                if not isinstance(lv, dict):
+                    continue
+                tf = str(lv.get("timeframe") or "")
+                if not tf:
+                    continue
+                nesting_bits.append(f"{tf}{'✓' if lv.get('confirmed') else '✗'}")
+        elif pt.get("lower_confirmed") is not None:
+            nesting_bits.append("30m✓" if pt.get("lower_confirmed") else "30m✗")
+        elif pt.get("nesting_confirmed") is False:
+            nesting_bits.append("未确认")
+
+    body = " · ".join(parts)
+    if nesting_bits:
+        body = f"{body} · {' · '.join(nesting_bits)}"
+
+    if info.get("same_level"):
+        try:
+            from trader_shared.chan_discipline import append_same_level_tag
+            body = append_same_level_tag(body, True)
+        except Exception:
+            if "（同级）" not in body:
+                body = body + "（同级）"
+
+    # 浪型补充：仅追加未在正文出现的结构词（避免一类买重复）
+    wave = str(wave_label or "").strip()
+    if wave:
+        sig_kw = {"一类卖", "二类卖", "三类卖", "一类买", "二类买", "三类买", "类二买",
+                  "一买", "二买", "三买", "一卖", "二卖", "三卖", "顶背驰", "底背驰"}
+        extra = []
+        for w in [x.strip() for x in wave.replace("｜", "·").split("·") if x.strip()]:
+            if w in body:
+                continue
+            if any(k in w for k in sig_kw if k in body):
+                continue
+            # 压缩过长浪型片段
+            if len(w) > 12:
+                w = w[:11] + "…"
+            extra.append(w)
+        if extra:
+            body = f"{body} · {' · '.join(extra[:2])}"
+
+    # 空 chan 且无 fusion
+    if not chan and info["status"] == "none" and not (fusion_chan or {}).get("reason"):
+        return "暂无信号 · 中性"
+
+    return body
