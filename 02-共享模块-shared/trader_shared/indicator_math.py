@@ -132,7 +132,8 @@ def calc_macd_series(closes: list[float | None]) -> dict[str, list]:
             dea_val = dea_val * 8 / 10 + d * 2 / 10
         dea_series[i] = dea_val
 
-    # Histogram = DIF - DEA (1x scale)
+    # Histogram = DIF - DEA（×1）。通达信常见 2×(DIF−DEA)，符号/穿越一致，柱高约一半。
+    # 预热不足处保持 None，禁止写 0.0（见 chan_geometry._calc_macd）。
     for i in range(n):
         if dif_series[i] is not None and dea_series[i] is not None:
             hist_series[i] = round(dif_series[i] - dea_series[i], 4)

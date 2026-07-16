@@ -60,7 +60,12 @@ def unwrap_chan(chan_result: Any) -> dict:
     return chan_result
 
 def _calc_macd(bars: list[dict]) -> list[dict]:
-    """计算 MACD histogram 并写入 bars。使用 indicator_math.calc_macd_series 统一实现。"""
+    """计算 MACD histogram 并写入 bars。使用 indicator_math.calc_macd_series 统一实现。
+
+    预热不足时写 ``None``（禁止用 0.0 占位）：0 柱会被当成「零面积」掺进笔级
+    MACD 面积，污染背驰力度；``_stroke_macd_area`` 已跳过 None。
+    柱线刻度 = DIF−DEA（×1），与通达信常见 2×(DIF−DEA) 差一半，符号一致。
+    """
     from trader_shared.indicator_math import calc_macd_series
 
     bars = [dict(b) for b in bars]
@@ -68,7 +73,8 @@ def _calc_macd(bars: list[dict]) -> list[dict]:
     result = calc_macd_series(closes)
 
     for i, bar in enumerate(bars):
-        bar["macd_histogram"] = result["histogram"][i] if result["histogram"][i] is not None else 0.0
+        h = result["histogram"][i] if i < len(result["histogram"]) else None
+        bar["macd_histogram"] = h  # None = 预热未完成，勿填 0.0
 
     return bars
 

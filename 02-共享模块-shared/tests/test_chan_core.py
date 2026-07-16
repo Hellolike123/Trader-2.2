@@ -709,10 +709,15 @@ class TestChanlunAnalysis:
     def test_macd_written_back_to_bars(self):
         """_calc_macd 应将 MACD 写回 bars（macd_histogram 字段）。"""
         from trader_shared.chan_core import _calc_macd
-        bars = [_make_bar(10 + i * 0.1, 11 + i * 0.1, 9 + i * 0.1, 10 + i * 0.1) for i in range(30)]
+        bars = [_make_bar(10 + i * 0.1, 11 + i * 0.1, 9 + i * 0.1, 10 + i * 0.1) for i in range(40)]
         result = _calc_macd(bars)
         has_macd = any(b.get("macd_histogram") is not None for b in result)
         assert has_macd is True, "MACD histogram should be written to returned bars"
+        # 预热段须为 None，禁止 0.0 占位（避免笔级面积把无柱当 0）
+        assert result[0].get("macd_histogram") is None
+        assert result[10].get("macd_histogram") is None
+        # DEA 约在第 26+8 根起有值；末段应有真实柱
+        assert result[-1].get("macd_histogram") is not None
 
     def test_macd_available_for_divergence(self):
         """inclusion 后重算 MACD，背驰检测应能正常返回字段。"""

@@ -100,6 +100,8 @@ raw bars
 - 向下背驰：`|area_curr| < |area_prev|`
 - 向上背驰：`area_curr < area_prev`
 - 多维（`power_price`/`length` 兼备时）用 `_stroke_force_weaker_multi`：≥2 维度衰减即判更弱
+- **MACD 柱来源**：`indicator_math.calc_macd_series` → `histogram = DIF−DEA`（×1，非通达信 2×）；
+  `_calc_macd` 预热不足写 `None`（禁止 `0.0` 占位）；面积计算跳过 `None` 与反号柱
 
 **§5.2 fallback — 峰谷（仅对笔级未评估侧）**：无笔/无 index/面积不可算时，扫近期峰谷
 （最近 `CHAN_DIVERGENCE_FALLBACK_WINDOW=120` 根），比较末两个峰/谷的价与 MACD 柱。
