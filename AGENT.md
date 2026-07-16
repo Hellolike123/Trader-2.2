@@ -52,11 +52,11 @@ Step 3: 输出
 - 禁止用 `fusion.action` 字符串字面意思推断方向
 - `confidence < 0.3` → 降级：`信号弱，建议轻仓`
 - `disagreement > 1` → 提示：`信号有分歧，建议谨慎`
-- `regime=很差` → 一票否决：`暂不碰`
-- `regime=偏弱` → 所有买入建议降一档
+- `regime=很差` → 权重全 0；若 |score|≈0 则 **强制偏空** `weighted_score=-0.5` → 动作多为「空仓/止损」（**不是**字面「暂不碰」一票否决；见 `fusion_core` 4b + `score_to_action` 注释）
+- `regime=偏弱` → 正阈值右移 +0.10，买入建议更难触发；展示层宜降一档
 
 #### 绝对优先级（冲突时逐级裁决）
-1. `regime="很差"` → 一票否决「暂不碰」（最高）
+1. `regime="很差"` → 融合偏空（权重 0 + 默认 score=-0.5 → 空仓侧动作；最高）
 2. `major_stage=衰退` → 不参与
 3. `major_stage=派发` → 不加仓
 4. `weighted_score` > `major_stage` > `theory_status`（默认）
@@ -129,9 +129,9 @@ Trader3.0/
 │       ├── models.py                ← TypedDict 数据模型
 │       │
 │       ├── plugins/                 ← 分析插件（自动发现，无需手动注册）
-│       │   ├── chan_plugin.py       ← 缠论（决策 / 权重 0.45）
-│       │   ├── momentum_plugin.py   ← 动量（决策 / 权重 0.30）
-│       │   ├── wyckoff_plugin.py    ← 威科夫（日线已退出 / 权重 0.35）
+│       │   ├── chan_plugin.py       ← 缠论（决策；正常 0.30 / 偏弱 0.50）
+│       │   ├── momentum_plugin.py   ← 动量（决策；正常 0.45 / 偏弱 0.15）
+│       │   ├── wyckoff_plugin.py    ← 威科夫（日线已退出 fusion；中线周线展示）
 │       │   ├── supertrend_plugin.py ← 展示型（display_only=True，不进融合）
 │       │   └── vwap_plugin.py       ← 展示型（display_only=True，不进融合）
 │       │
@@ -208,18 +208,21 @@ Trader3.0/
 ```
 第一席 chan     → _chan_to_signal()
                   信号层级：chan_buy_1/2/3, chan_sell_1/2/3, chan_top_div, chan_bottom_div
-                  权重：正常 0.45 / 偏弱 0.50 / 很差 0
+                  权重：正常 0.30 / 偏弱 0.50 / 很差 0
+                  （权威源：config/fusion_regime_weights.yaml；内置兜底同值）
 
 第二席 momentum  → _momentum_to_signal()
                   方向：+1(多) / 0(中性) / -1(空)
-                  权重：正常 0.30 / 偏弱 0.15 / 很差 0
+                  权重：正常 0.45 / 偏弱 0.15 / 很差 0
+                  （正常大势动量占优；偏弱则缠论占优）
 
 第三席 vpf       → vpf_core.build_vpf_signal()
                   信号层级：vpf_bearish_warning（主力净流出/天量滞涨）
                   权重：正常 0.25 / 偏弱 0.35 / 很差 0
 
 公式：weighted_score = Σ(direction × confidence × weight)
-映射：score_to_action() → 半仓试/增持/持股观望/减仓/空仓
+映射：score_to_action() → 半仓试 / 增持 / 等转强观察 / 持股观望 / 减1/3 / 减仓 / 空仓/止损
+很差：权重全 0 后若 |score|<0.01 → 强制 -0.5 → 空仓侧（非字面「暂不碰」）
 ```
 
 ### 3.4 设计原则（不可破坏）
@@ -233,6 +236,8 @@ Trader3.0/
 | **禁止向上依赖** | trader_shared 不 import scripts/ | ❌ `from trader.scripts import ...` |
 | **模块边界：箱体独立** | `box_detect.py` 是独立模块，暂不接入 report_builder，保留代码和测试以备后续 | ❌ 把箱体检测结果写进报告渲染 |
 | **模块边界：威科夫周线** | 周线威科夫独占中线，数据不足直接 return insufficient（不回退日线） | ❌ 周线不足时 fallback 到日线 |
+| **周线根数** | 默认 `WEEKLY_LOOKBACK_BARS=260`，中线缠论/威科夫同用 | ❌ 仍按旧 80 周假设调试「笔数不足」 |
+| **波段标签** | 仅 strokes&lt;3 写「笔数不足」；段少写「线段偏少/未成型」 | ❌ segments&lt;2 就报「笔数不足」 |
 
 ---
 
@@ -471,7 +476,7 @@ python scripts/golden_diff_gate.py capture
 |------|------------|------------|
 | 用户问"这只票怎么样" | 调 `final_report.py --output markdown` | 读 JSON 自己拼 Markdown |
 | 判断方向 | 唯一依据 `fusion.weighted_score` | 用 `fusion.action` 字符串推断 |
-| regime="很差" | 一票否决「暂不碰」 | 忽略 regime 给买入建议 |
+| regime="很差" | 按融合偏空（权重0 + score=-0.5 → 空仓侧）；报告勿写多 | 当「暂不碰」硬文案，或忽略 regime 给买入建议 |
 | major_stage=衰退 | 不参与，即使 fusion 偏多 | 因 fusion 看多就建议买入 |
 | 修改策略核心 | 跑等价性闸门 + 真票验证 | 只改代码不测试 |
 | 新增展示指标 | 走 Plugin，设 `display_only=True` | 直接改 fusion_core 加权重 |
@@ -490,12 +495,13 @@ python scripts/golden_diff_gate.py capture
 | Tushare SDK 初始化失败 | 系统自动降级 HTTP，可忽略 warning |
 | 股票名无法解析 | 改用 6 位代码（如 `002050` 而非 `三花智控`） |
 | 周线数据不足 | 威科夫中线返回 insufficient，不回退日线 |
+| 中线缠论「笔数不足」 | 先确认 `WEEKLY_LOOKBACK_BARS=260` 已生效；仅真笔 &lt;3 才该文案；段少应是「线段偏少」 |
 | NAME_MAP 没这个股 | 手动加映射到 `data_provider.py` 或改用代码 |
 
 ### 信号矛盾
 | 场景 | 规则 |
 |------|------|
-| `weighted_score > 0.3` 但 `regime=很差` | regime 一票否决 |
+| `weighted_score` 被 4b 压到 -0.5 且 `regime=很差` | 按空仓侧动作解读，勿再写「可试探」 |
 | `major_stage=主升` 但 `theory_status=暂不碰` | 必须说明矛盾 |
 | `confidence < 0.3` | 降级：「信号弱，建议轻仓」 |
 | `disagreement > 1` | 提示：「信号有分歧，建议谨慎」 |
@@ -565,11 +571,11 @@ python 02-共享模块-shared/scripts/pack_all.py
 
 ## 12. 版本
 
-- **当前版本**：v2.x（2026-07-14）
+- **当前版本**：v2.x（文档与代码对齐：2026-07-16；含周线 260 根 / wave_label / MACD None）
 - **仓库**：Gitee `https://gitee.com/hellolike123/Trader-2.2`
-- **CI**：pre-push hook → `scripts/run-gate-tests.sh` → 131 passed
+- **CI**：pre-push hook → `scripts/run-gate-tests.sh` → 离线门禁
 - **Python**：3.11+，venv at `~/.workbuddy/binaries/python/envs/default/`
 
 ---
 
-*AGENT.md 是项目的最高开发规范。如果规范不足，先补充本文档，再开发。文档必须始终与代码保持一致。*
+*AGENT.md 是项目的最高开发规范。如果规范不足，先补充本文档，再开发。文档必须始终与代码保持一致；冲突时以 `trader_shared/` 实现与 `formulas.md` 为准。*

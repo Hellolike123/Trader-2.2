@@ -209,8 +209,13 @@
 **入口**: `scripts/final_report.py`（单票分析）/ `scripts/final_pool.py`（选股池）
 **分析模型**: `run_analysis.py::build_report()` → `report_core.render_single`（默认 `render_short_midline`）→ 可选 `build_signal()`
 **策略链**: 日线专家并行 → fusion → structure → 周线 mid 引擎（`mid_key_prices` / midline 理论）→ `mistery_gate` + `chan_discipline` → `merge_discipline` → `conclusion_block` → 渲染
-**输入数据**: 腾讯日线（前复权 + ATR）+ 实时快照；中线关键价另用周线聚合
-**依赖共享模块**: `candidate_core`、`light_data`、`signal_contract`、`chan_core`、`wyckoff_core`、`mid_key_prices`、`chan_discipline`、`mistery_gate`、`report_core`
+**输入数据**: 腾讯日线（前复权 + ATR，默认 `LOOKBACK_DAYS=370`）+ 实时快照；周线默认 `WEEKLY_LOOKBACK_BARS=260`（中线缠论/威科夫/中线关键价）
+**依赖共享模块**: `report_builder`、`light_data`、`data_provider`、`chan_core`、`wyckoff_core`、`mid_key_prices`、`midline_structure`、`chan_discipline`、`mistery_gate`、`conclusion_block`、`report_core`、`fusion_core`
+
+**周线 / 波段标签契约（2026-07-16）**:
+- 默认拉 260 根周 K；旧 80 周在暴涨票上易假「笔数不足」
+- `wave_label`：仅 `strokes < 3` →「笔数不足」；段少 →「线段偏少/未成型」+ 笔级叙事
+- MACD 预热 `None` 禁止 `0.0` 占位（背驰面积）
 
 **Output Contract（默认短中线双轨，`SHORT_MIDLINE_REPORT=true`）**:
 ```

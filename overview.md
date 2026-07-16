@@ -1,7 +1,7 @@
 # Trader3.0 项目知识沉淀 — 交付摘要
 
-> 生成时间: 2026-07-14 22:54
-> 基于: 83 个 .py 文件的代码级分析 + 3 个并行 Agent 扫描
+> 生成时间: 2026-07-14；文档再同步: 2026-07-16（代码标杆：周线 260 / wave_label / regime 很差 / 融合权重）
+> 基于: trader_shared 代码 + 活文档（AGENT / BUSINESS / AGENTS）
 
 ---
 
@@ -46,14 +46,19 @@ README.md (项目入口)
 - 🟡 wyckoff_core + wyckoff_phase 有 ~100 行重复配置 fallback
 - 🟡 report_renderer/ 子包是 thin re-export（实现在 report_core.py）
 - 🟡 `03-输出校验-contracts/` 空目录可清理
-- 🟡 14 个模块未在架构文档中记录
+
+### 2026-07-16 文档对齐（已完成）
+- ✅ `WEEKLY_LOOKBACK_BARS=260` 写入 AGENTS/BUSINESS/ARCHITECTURE
+- ✅ wave_label「笔数不足」契约与代码一致
+- ✅ regime=很差 → 空仓侧（非字面暂不碰）写入 AGENT/BUSINESS
+- ✅ 融合权重正常 0.30/0.45/0.25 与 yaml 一致
+- ✅ user-guide 示例切到双轨模板
 
 ## 四、后续建议
 
 1. **清理技术债**：self_calibration print → logger、wyckoff 配置去重、空目录清理
-2. **完善文档**：给 14 个未记录模块补充 ARCHITECTURE.md
-3. **AGENT.md 嵌入 Skill**：将 AGENT.md 的核心规则同步到 `~/.workbuddy/skills/trader/SKILL.md`
-4. **CI 增强**：考虑加入 `golden_diff_gate.py check --replicas` 到 pre-push hook
+2. **Skill 副本**：打包后 Hermes 技能包与仓库文档定期 diff
+3. **CI 增强**：考虑加入 `golden_diff_gate.py check --replicas` 到 pre-push hook
 
 ## 五、AI Agent 如何使用这些文档
 

@@ -50,10 +50,12 @@
 - **开盘尾盘噪音过滤**：`volume_price.py` 新增 `calc_weighted_volume(bars_5m)` 函数，排除 9:30-9:45 和 14:45-15:00 的噪音数据，用 VWAP 计算加权均量。
 - **缠论走势分层重构**：`chan_core.py` 补全线段构建（`build_segments()`）和走势分类（`classify_structure()`），支持盘整/趋势/单边上涨/单边下跌（主状态禁止「线段不足」）。报告输出 `缠论:拉升段(盘整)` 格式。
 - **缠论买卖点契约（2026-07）**：一类须 ≥2 **严格不重叠**同向中枢 + 离开段背驰；二类前置一类为**时间轴历史结构**（非同帧 buy_points）；区间套 `lower_confirmed=False` 时 fusion 降权。权威规则见 `trader_shared/formulas.md` §6。
+- **周线回看 + 波段标签（2026-07-16）**：`WEEKLY_LOOKBACK_BARS=260`（约 5 年周 K），`data_provider` / `light_data` / Tushare 周线默认统一用此根数；旧默认约 80 周在暴涨暴跌票上常只成 0～1 笔。`conclusion_block._build_wave_label`：**仅** `strokes < 3` 写「笔数不足 · 无法判断」；笔够而 `segments < 2` 写「线段偏少 / 线段未成型」+ 笔级 trend 叙事（如「拉升趋势中」），禁止再把「段少」误报成「笔数不足」。
+- **MACD 预热与背驰面积（2026-07-16）**：`indicator_math.calc_macd_series` / `chan_geometry._calc_macd` 预热不足写 `None`（禁止 `0.0` 占位）；`histogram = DIF−DEA`（×1，非通达信 2×）；笔级面积跳过 `None` 与反号柱。见 `formulas.md` §5.1。
 - **主力行为五阶段识别 (Main Force)**：`main_force.py` 基于资金流向特征、价格数据和筹码信息，识别主力行为所处阶段（吸筹/试盘/拉升/派发/砸盘）。`main_force_output.py` 负责复盘输出格式化。
 - **规则引擎 (Rule Engine)**：`rule_engine.py` 基于 YAML 配置的决策规则引擎，支持比较运算和布尔表达式。`modifier_rule_engine.py` 基于评分修饰规则对候选人评分进行动态调整。
 - 真正的输出格式以 `01-功能包-packages/trader/references/output-template.md` 和 `01-功能包-packages/trader/references/output-style-guide.md` 为准（与 `report_core.render_short_midline` 同源）。
-- 需要看实现时：渲染 `trader_shared/report_core.py`；管线 `01-功能包-packages/trader/scripts/run_analysis.py`；纪律 `chan_discipline.py` / `mistery_gate.py`；中线价 `mid_key_prices.py`。
+- 需要看实现时：渲染 `trader_shared/report_core.py`；编排 `trader_shared/report_builder.py`（`run_analysis.py` 为薄壳）；纪律 `chan_discipline.py` / `mistery_gate.py`；中线价 `mid_key_prices.py` / `midline_structure.py`；波段标签 `conclusion_block._build_wave_label`；周线根数 `config.WEEKLY_LOOKBACK_BARS`。
 
 ---
 
@@ -77,7 +79,7 @@ A 股交易决策辅助系统。免费行情 API（腾讯 + 新浪），缠论 /
 
 股价在 250 日均线（年线）下方时，标记 `ma250_warning=True` 并在输出中显示警告，但继续完整分析。不再一票否决。
 
-- 配置：`TREND_FILTER_ENABLED`、`TREND_MA_LONG=250`、`LOOKBACK_DAYS=300`
+- 配置：`TREND_FILTER_ENABLED`、`TREND_MA_LONG=250`、`LOOKBACK_DAYS=370`（日历天，保证 ≥250 个交易日）
 - 位置：`decision_core.py` → `status_layers()` 入口
 - 返回值新增 `ma250_warning`（bool）和 `ma250`（float|None）
 
@@ -223,7 +225,7 @@ trailing_stop = highest_close × (1 - ATR% × 3.0)
   阶段：蓄势
   看法：上涨趋势未坏 · 可跟踪、不加仓
   威科夫：暂无明确信号·中性
-  缠论：上涨趋势(段偏少)·看涨（同级）
+  缠论：拉升趋势中 · 看涨 · 线段偏少
   位置：中枢内
 
   关键价（中线）

@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — Trader3.0 系统架构
 
-> **最后更新**：2026-07-14 | **基于**：83 个 .py 文件的代码级分析
+> **最后更新**：2026-07-16 | **基于**：`trader_shared/` 代码（~100+ 模块）+ 近期周线/MACD/融合契约
 
 ---
 
@@ -42,9 +42,9 @@ Trader3.0 采用**分层架构 + 插件化 + 融合决策**的量化分析系统
 | `__init__.py` | 93 | 公开 API（re-export 27 个符号） |
 | `interfaces.py` | 110 | 抽象接口：`DataFetcher`(ABC)、`IndicatorPlugin`(ABC) |
 | `models.py` | 224 | TypedDict：BarData、QuoteData、SignalRecord 等 15 类型 |
-| `config.py` | 374 | 全局常量池（100+ 可调参数） |
+| `config.py` | ~450 | 全局常量池：`LOOKBACK_DAYS=370`、`WEEKLY_LOOKBACK_BARS=260`、缠论 conf 门槛等 |
 | `light_data.py` | 1676 | 底层数据引擎：腾讯/新浪/mootdx/akshare 四源 fallback |
-| `data_provider.py` | 740 | 统一 DataProvider Protocol |
+| `data_provider.py` | ~800 | 统一 DataProvider；周线默认 `WEEKLY_LOOKBACK_BARS` |
 | `cache_utils.py` | 623 | 文件缓存（fcntl 锁 + 原子写 + 共享线程池） |
 | `async_utils.py` | 276 | 并发控制 |
 | `_logging.py` | - | 日志工厂 |
@@ -84,7 +84,7 @@ Trader3.0 采用**分层架构 + 插件化 + 融合决策**的量化分析系统
 | 模块 | 行数 | 角色 |
 |------|------|------|
 | `fusion_core.py` | 1033 | merge_decisions() — 信号标准化+加权+冲突消解 |
-| `fusion_regime.py` | 218 | Regime 权重映射 + score_to_action() |
+| `fusion_regime.py` | ~220 | Regime 权重（yaml + 兜底）+ score_to_action()；很差不字面「暂不碰」 |
 | `bayesian_fusion.py` | 230 | 贝叶斯融合（可选，BAYESIAN_FUSION=true 激活） |
 
 ### 2.4 报告系统层（5 文件 + 子包）
@@ -94,7 +94,7 @@ Trader3.0 采用**分层架构 + 插件化 + 融合决策**的量化分析系统
 | `report_builder.py` | 1694 | build_report() — 编排 50+ 子模块分析 |
 | `report_core.py` | 1306 | render_short_midline() + render_single_legacy() |
 | `report_presentation.py` | 1304 | render_markdown() — 纯展示层 |
-| `conclusion_block.py` | 678 | 结论块构建 |
+| `conclusion_block.py` | ~700 | 中短线看法/出手；`_build_wave_label`（笔/段标签契约） |
 | `main_force_output.py` | 233 | 主力资金输出格式化 |
 
 ### 2.5 其他重要模块
@@ -112,8 +112,9 @@ Trader3.0 采用**分层架构 + 插件化 + 融合决策**的量化分析系统
 | `chip_core.py` | 筹码分析入口 |
 | `structure_core.py` | 多周期关键价位检测 |
 | `key_prices.py` | 短线关键价构建 |
-| `mid_key_prices.py` | 中线关键价构建 |
-| `midline_structure.py` | 周线独立引擎 |
+| `mid_key_prices.py` | 中线关键价薄封装 → midline_structure |
+| `midline_structure.py` | 周线独立引擎（weekly_v1：笔/段/摆动） |
+| `formulas.md` | 缠论/背驰/买卖点公式权威说明（与代码同目录） |
 | `mistery_gate.py` | 纪律门控 |
 | `combo_strategy.py` | 组合共振（暂未接入报告） |
 | `box_detect.py` | 箱体检测（暂未接入报告） |

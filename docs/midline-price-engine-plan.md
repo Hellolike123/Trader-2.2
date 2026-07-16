@@ -46,7 +46,7 @@
 ```text
 build_midline_levels(
   current: float,
-  weekly_bars: list[Bar],          # 必填主源；建议 ≥ 40～80 根（与 data_provider 周线一致）
+  weekly_bars: list[Bar],          # 必填主源；生产默认 WEEKLY_LOOKBACK_BARS=260（config；旧文档「约 80 根」已废）
   chanlun_midline: dict,           # 已算好的周线缠结果（含 bi/segments/zones）
   wyckoff_midline: dict | None,    # 可选：spring/upthrust 价作旁证
   ma_weekly: dict | None,          # 可选：周 MA20/MA60；无则引擎内用 weekly_bars 现算
@@ -300,7 +300,7 @@ mid_key_prices = build_mid_key_prices(
 | SWING_HALF_WINDOW | 3 |
 | MIDLINE_PRICE_DAILY_FALLBACK | 默认 **false** |
 
-引擎不扩拉周线；用 provider 已有 `weekly_bars`（约 80 根）。
+引擎不扩拉周线；用 provider 已有 `weekly_bars`（默认 `WEEKLY_LOOKBACK_BARS=260`，约 5 年）。
 
 ### 9.3 生命线优先级（命中即停；候选仅要求 price>0）
 
