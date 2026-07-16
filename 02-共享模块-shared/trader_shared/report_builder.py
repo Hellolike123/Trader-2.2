@@ -91,7 +91,20 @@ def _degraded_quote_report(target: str) -> dict[str, Any]:
         "daily_bars": daily,
     }
 
+def _profile_enabled() -> bool:
+    return os.environ.get("TRADER_PROFILE", "").strip() in ("1", "true", "True", "yes")
+
+
 def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
+    import time as _time
+    _prof = _profile_enabled()
+    _t0 = _time.perf_counter()
+    _marks: list[tuple[str, float]] = []
+
+    def _mark(label: str) -> None:
+        if _prof:
+            _marks.append((label, _time.perf_counter() - _t0))
+
     try:
         from trader_shared import candidate_core as core
         from trader_shared.candidate_core import build_structure_context, atr_volatility_level
@@ -108,7 +121,17 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     # DI: 注入 TencentFetcher 供下游模块使用
     fetcher = TencentFetcher()
     provider = get_provider()
-    snapshot = provider.load_market_snapshot(target, days=LOOKBACK_DAYS, include_5m=True, include_weekly=True, include_monthly=True)
+    # 月线/ tick 默认不进主路径：月线在共振块按需补拉；tick 本报告未消费。
+    # 周线必须拉（中线缠/威 + mid_key_prices）。
+    snapshot = provider.load_market_snapshot(
+        target,
+        days=LOOKBACK_DAYS,
+        include_5m=True,
+        include_weekly=True,
+        include_monthly=False,
+        include_ticks=False,
+    )
+    _mark("snapshot")
     if not snapshot.quote or not snapshot.daily_bars:
         detail = "; ".join(f"{key}: {value}" for key, value in snapshot.source_errors.items()) or "missing required market data"
         raise RuntimeError(detail)
@@ -304,6 +327,15 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     # 注入 5m 供 VwapPlugin 在 analyze_all 路径使用（与 build_report 直算结果一致）
     quote["_bars_5m"] = bars_5m
 
+    # 主力资金 / 大盘环境 / 板块：与策略分析无依赖，尽早 submit，与 analyze_all 重叠
+    f_mf = pool.submit(_fetch_fund_flow)
+    f_env = pool.submit(_fetch_market_env)
+    f_sector = pool.submit(_fetch_sector_data)
+
+    # Supertrend 只算一次：方向给 momentum nudge，完整结果给展示
+    _st = calc_supertrend(bars)
+    _st_dir = _st.get("direction")
+
     # ── ADR-002：主路径分析统一经 PluginRegistry 组合点 ──
     # 日线三策略（chan/wyck/mom）+ 中线两策略（chan/wyck）经 analyze_all 组合；
     # weekly_bars 透传给 ChanlunPlugin，保证日线 chan 与直算等价（陷阱 #2 闸门）；
@@ -314,8 +346,11 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     _registry = get_registry()
     _plugin_results = _registry.analyze_all(
         current, bars, change_pct_val, quote,
-        weekly_bars=weekly_bars, midline=True,
+        weekly_bars=weekly_bars,
+        midline=True,
+        supertrend_direction=_st_dir,
     )
+    _mark("plugins")
     chan_result = _plugin_results.get("chanlun") or {}        # 日线；_chan_to_signal 会自己剥
 
     # ── 区间套接入：日线买卖点经小级别（默认 30m，可扩 5m/1m 用于 T0）逐级确认 ──
@@ -324,7 +359,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     # chan_result 保持原样（等价性闸门：对未启用的环境零副作用）。
     # 层级由 TRADER_CHAN_NESTING_LEVELS 控制（逗号分隔，粗→细），默认 "30m"；
     # 设 "30m,5m,1m" 即开启 T0 精确定位。某级别取数失败仅该级别 skipped，不连累其它级别。
-    import os
+    # 批量 refresh 默认关 nesting（见 final_pool.cmd_refresh），单票精看可开。
     if os.environ.get("TRADER_CHAN_NESTING") != "0":
         try:
             from trader_shared.chan_nesting import confirm_nested_chain
@@ -348,21 +383,12 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
                     chan_result = confirm_nested_chain(chan_result, _series, symbol=target)
         except Exception as _nest_e:
             _logger.debug(f"[nesting] 区间套确认跳过: {_nest_e}")
+    _mark("nesting")
     chan_mid_result = _plugin_results.get("chanlun_midline") or {}
     wyck_result = _plugin_results.get("wyckoff") or {}
     wyck_mid_result = _plugin_results.get("wyckoff_midline") or {}
     momentum_result = _plugin_results.get("momentum") or {}
 
-    # 主力资金 / 大盘环境 / 板块（与策略分析解耦，仍走共享池并行）
-    f_mf = pool.submit(_fetch_fund_flow)
-    f_env = pool.submit(_fetch_market_env)
-    f_sector = pool.submit(_fetch_sector_data)
-
-    # ── ATR / Supertrend / VWAP 展示增强 ──
-    # Supertrend 趋势带方向（仅展示用）：动量 nudge 已由 analyze_all 内 MomentumPlugin
-    # 统一完成，此处只计算方向供报告展示，不再对 momentum_result 二次微调。
-    _st = calc_supertrend(bars)
-    _st_dir = _st.get("direction")
     # VWAP：复用快照内 5 分钟 K 线，避免每次渲染重拉行情
     _vwap_res = calc_vwap(bars_5m, current_price=current)
 
@@ -400,6 +426,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         _sector_data = f_sector.result()
     except Exception:
         pass
+    _mark("fund_env_sector")
 
     # === 融合层 ===
     try:
@@ -762,8 +789,14 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         if res_d_closes and len(res_d_closes) >= 10:
             # 将5分钟线聚合为60分钟线
             bars_60m = aggregate_5m_to_60m(bars_5m) if bars_5m else []
-            # 提取月线数据
-            monthly_bars = snapshot.monthly_bars if hasattr(snapshot, "monthly_bars") else []
+            # 月线按需：主 snapshot 默认不拉；共振需要时再补（失败则空，月分记无数据）
+            monthly_bars = list(getattr(snapshot, "monthly_bars", None) or [])
+            if not monthly_bars:
+                try:
+                    monthly_bars = list(provider.fetch_monthly(snapshot.security) or [])
+                except Exception as _me:
+                    _logger.debug("monthly fetch for resonance skipped: %s", _me)
+                    monthly_bars = []
             resonance_result = calc_resonance(
                 daily_closes=res_d_closes,
                 current_price=current,
@@ -1580,6 +1613,20 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             "execution": "现价不买 · 不追", "reason": "门控组装失败",
             "this_week": "观察", "conflict": "", "daily_ruling": "中性，观望",
         })
+
+    _mark("assemble")
+    if _prof and _marks:
+        parts = [f"{lab}={sec:.3f}s" for lab, sec in _marks]
+        total = _time.perf_counter() - _t0
+        _logger.info(
+            "TRADER_PROFILE %s total=%.3fs %s",
+            target, total, " ".join(parts),
+        )
+        # 亦写 stderr 便于 CLI 一眼看（logger 可能被屏蔽）
+        print(
+            f"[TRADER_PROFILE] {target} total={total:.3f}s " + " ".join(parts),
+            file=sys.stderr,
+        )
 
     return report
 

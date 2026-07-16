@@ -293,7 +293,7 @@ class TestPluginWrappers:
         from trader_shared.plugins.momentum_plugin import MomentumPlugin
         plugin = MomentumPlugin()
         assert plugin.name() == "momentum"
-        assert plugin.weight() == 0.20
+        assert plugin.weight() == 0.30  # 与 MomentumPlugin.weight / 正常大势 mom 权重对齐
 
 
 # ── Integration: fusion_core with plugins ──

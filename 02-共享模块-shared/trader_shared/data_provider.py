@@ -221,32 +221,38 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
             extend_concept=cached[6] if len(cached) > 6 else None,
         )
 
-    # ── 层3: 实时抓取（4 原有 + 3 Phase 1 + 1 Phase 2 概念 = 8 路并行） ──
+    # ── 层3: 实时抓取（8 路并行） ──
+    # 用独立小池 max_workers=4（勿用 get_shared_build_pool）：
+    # refresh 已占用共享池时，再 submit+wait 同一池会死锁。
     try:
         from trader_shared.extend_data import ExtendDataProvider
         from concurrent.futures import ThreadPoolExecutor
 
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            # 原有 4 路
+        with ThreadPoolExecutor(max_workers=4, thread_name_prefix="trader-enrich") as executor:
+            # 原有 4 路 + Phase1 3 路 + Phase2 概念
             f_sh = executor.submit(ExtendDataProvider.get_shareholder_trend, sec.code)
             f_eps = executor.submit(ExtendDataProvider.get_ths_consensus_eps, sec.code)
             f_unlocks = executor.submit(ExtendDataProvider.get_upcoming_unlocks, sec.code)
             f_hot = executor.submit(ExtendDataProvider.get_ths_hot_reason_for_stock, sec.code)
-            # Phase 1 新增 3 路
             f_margin = executor.submit(ExtendDataProvider.get_margin_data, sec.code)
             f_north = executor.submit(ExtendDataProvider.get_northbound_flow)
             f_sector = executor.submit(ExtendDataProvider.get_sector_data, sec.code)
-            # Phase 2 新增 1 路：概念板块
             f_concept = executor.submit(ExtendDataProvider.get_concept_data, sec.code)
 
-            sh_trend = f_sh.result(timeout=2.0)
-            ths_eps = f_eps.result(timeout=2.0)
-            unlocks = f_unlocks.result(timeout=2.0)
-            hot_reason = f_hot.result(timeout=2.0)
-            margin_data = f_margin.result(timeout=2.0)
-            northbound_data = f_north.result(timeout=2.0)
-            sector_data = f_sector.result(timeout=2.0)
-            concept_data = f_concept.result(timeout=2.0)
+            def _res(fut, timeout: float = 2.0):
+                try:
+                    return fut.result(timeout=timeout)
+                except Exception:
+                    return None
+
+            sh_trend = _res(f_sh)
+            ths_eps = _res(f_eps)
+            unlocks = _res(f_unlocks)
+            hot_reason = _res(f_hot)
+            margin_data = _res(f_margin)
+            northbound_data = _res(f_north)
+            sector_data = _res(f_sector)
+            concept_data = _res(f_concept)
 
             extend_fundamental = {
                 "shareholder": sh_trend,

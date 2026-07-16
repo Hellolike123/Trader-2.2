@@ -1416,9 +1416,16 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     - 并行刷新（max_workers=5，与 build_report 内部并行一致）。
     - 单只失败 → safe_build_report 自动降级为离线 record，不中断全池。
     - 优化：复用全局共享线程池，避免嵌套 ThreadPoolExecutor 线程爆炸。
+    - 批量默认关闭区间套（TRADER_CHAN_NESTING=0），避免每票额外拉 30m 分钟线；
+      若调用方已显式设置该环境变量则尊重不覆盖。单票精看仍可 export 开启。
     """
+    import os
     from concurrent.futures import as_completed
     from trader_shared.cache_utils import get_shared_build_pool
+
+    # 批量路径：未显式配置时默认关 nesting（省 I/O）；已设置则不覆盖
+    if "TRADER_CHAN_NESTING" not in os.environ:
+        os.environ["TRADER_CHAN_NESTING"] = "0"
 
     pool = load_pool()
     all_items = list(pool.get("items", []))

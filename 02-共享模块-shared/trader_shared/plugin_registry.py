@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import os
 import pkgutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +22,12 @@ from trader_shared.interfaces import IndicatorPlugin
 from trader_shared._logging import get_logger
 
 _logger = get_logger(__name__)
+
+# 插件并行：默认关（保证 golden/ADR-002 确定性；GIL 下纯算收益有限）。
+# 批量生产可 export TRADER_PLUGIN_PARALLEL=1 打开。
+# 使用独立小池，禁止 submit 到 get_shared_build_pool，避免 refresh 嵌套死锁。
+def _plugin_parallel_enabled() -> bool:
+    return os.environ.get("TRADER_PLUGIN_PARALLEL", "0").strip() in ("1", "true", "True", "yes")
 
 
 def _plugin_accepts_supertrend_direction(fn) -> bool:
@@ -114,6 +122,7 @@ class PluginRegistry:
         # 方案 B（P1-1）：registry 路径也应触发动量「只确认不否决」微调。
         # build_report 现在也走 analyze_all（ADR-002），动量 nudge 由 MomentumPlugin
         # 统一完成，避免 build_report 二次 nudge 导致 weighted_score 漂移。
+        # 调用方若已算过 Supertrend，应传入 supertrend_direction，避免双重计算。
         if supertrend_direction is None:
             try:
                 from trader_shared.indicator_math import calc_supertrend
@@ -121,51 +130,87 @@ class PluginRegistry:
             except Exception:
                 supertrend_direction = None
 
-        results: dict[str, dict[str, Any]] = {}
-        for name, plugin in self._plugins.items():
+        def _run_one_plugin(name: str, plugin: IndicatorPlugin) -> tuple[str, dict[str, Any]]:
             try:
-                extra = {}
+                extra: dict[str, Any] = {}
                 if _plugin_accepts_supertrend_direction(plugin.analyze):
                     extra["supertrend_direction"] = supertrend_direction
                 if _plugin_accepts_weekly_bars(plugin.analyze):
                     extra["weekly_bars"] = weekly_bars
                 result = plugin.analyze(current, bars, change_pct, quote, **extra)
                 if isinstance(result, dict):
-                    results[name] = result
-                else:
-                    _logger.warning("Plugin %s returned non-dict: %s", name, type(result))
+                    return name, result
+                _logger.warning("Plugin %s returned non-dict: %s", name, type(result))
+                return name, {
+                    "direction": 0,
+                    "confidence": 0.0,
+                    "reason": f"{name}返回非 dict",
+                }
             except Exception as exc:
                 _logger.warning("Plugin %s failed: %s", name, exc)
-                results[name] = {
+                return name, {
                     "direction": 0,
                     "confidence": 0.0,
                     "reason": f"{name}分析异常: {exc}",
                 }
 
-        # ── ADR-002 中线分支：仅 midline=True 时产出，避免波及 fusion_core 等调用方 ──
-        if midline:
+        def _run_midline_chan() -> tuple[str, dict[str, Any]]:
             try:
                 from trader_shared.chan_core import chanlun_strategy_midline
-                results["chanlun_midline"] = chanlun_strategy_midline(
+                return "chanlun_midline", chanlun_strategy_midline(
                     current, weekly_bars, bars, change_pct, quote
                 ) or {}
             except Exception as exc:
                 _logger.warning("midline chanlun failed: %s", exc)
-                results["chanlun_midline"] = {
+                return "chanlun_midline", {
                     "direction": 0, "confidence": 0.0,
                     "reason": f"中线缠论异常: {exc}",
                 }
+
+        def _run_midline_wyck() -> tuple[str, dict[str, Any]]:
             try:
                 from trader_shared.wyckoff_core import wyckoff_strategy_midline
-                results["wyckoff_midline"] = wyckoff_strategy_midline(
+                return "wyckoff_midline", wyckoff_strategy_midline(
                     current, weekly_bars, bars, change_pct, quote
                 ) or {}
             except Exception as exc:
                 _logger.warning("midline wyckoff failed: %s", exc)
-                results["wyckoff_midline"] = {
+                return "wyckoff_midline", {
                     "direction": 0, "confidence": 0.0,
                     "reason": f"中线威科夫异常: {exc}",
                 }
+
+        jobs: list[tuple[str, Any]] = [
+            (name, lambda n=name, p=plugin: _run_one_plugin(n, p))
+            for name, plugin in self._plugins.items()
+        ]
+        # ── ADR-002 中线分支：仅 midline=True 时产出 ──
+        if midline:
+            jobs.append(("chanlun_midline", _run_midline_chan))
+            jobs.append(("wyckoff_midline", _run_midline_wyck))
+
+        results: dict[str, dict[str, Any]] = {}
+        if len(jobs) <= 1 or not _plugin_parallel_enabled():
+            for _key, fn in jobs:
+                name, payload = fn()
+                results[name] = payload
+        else:
+            # 独立小池：勿用 get_shared_build_pool（refresh 已占用该池时会死锁）
+            workers = min(len(jobs), 6)
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="trader-plugin") as ex:
+                futs = {ex.submit(fn): key for key, fn in jobs}
+                for fut in as_completed(futs):
+                    try:
+                        name, payload = fut.result()
+                        results[name] = payload
+                    except Exception as exc:
+                        key = futs[fut]
+                        _logger.warning("Plugin job %s failed: %s", key, exc)
+                        results[key] = {
+                            "direction": 0,
+                            "confidence": 0.0,
+                            "reason": f"{key}分析异常: {exc}",
+                        }
 
         return results
 

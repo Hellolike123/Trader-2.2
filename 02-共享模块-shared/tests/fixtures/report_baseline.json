@@ -1,6 +1,6 @@
 {
-  "fusion_weighted_score": -0.26,
-  "fusion_confidence": 0.382,
+  "fusion_weighted_score": -0.28,
+  "fusion_confidence": 0.422,
   "fusion_action": "减仓",
   "fusion_disagreement": 1,
   "chanlun_midline": {
@@ -316,6 +316,22 @@
     "lpsy_signal": false,
     "lpsy_reason": "量能未萎缩，供应未枯竭",
     "lpsy_price": null,
+    "ps_signal": false,
+    "ps_reason": "非低位，非 PS",
+    "ps_price": null,
+    "psy_signal": false,
+    "psy_reason": "非高位，非 PSY",
+    "psy_price": null,
+    "bu_signal": false,
+    "bu_reason": "近端无 SOS，无 Backup",
+    "bu_price": null,
+    "utad_signal": false,
+    "utad_reason": "无派发背景（需 BC/SOW）",
+    "utad_price": null,
+    "cause_effect_up_target": 9.74,
+    "cause_effect_down_target": 7.88,
+    "cause_effect_range": 0.62,
+    "cause_effect_note": "TR 高度 0.62 作 1:1 投射（简化因果/水平计数近似，非点数图）",
     "spring_vol_class": null,
     "phase": "none",
     "phase_label": "无明确阶段",
@@ -344,7 +360,7 @@
     "cluster_quality": null,
     "cluster_confidence": 0.0,
     "cluster_reason": "无确认事件簇",
-    "wyckoff_summary": "无明显威科夫信号",
+    "wyckoff_summary": "因果目标↑9.74/↓7.88",
     "timeframe": "weekly"
   }
 }
