@@ -1553,6 +1553,17 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
         if "order_book" in quote:
             del quote["order_book"]
 
+    def _snapshot_data_freshness(bars) -> str:
+        """基于日线最后一根日期判定数据是否最新可用（覆盖到最近交易日 → live）。"""
+        if not bars:
+            return "stale"
+        last = bars[-1].get("date") or bars[-1].get("time")
+        try:
+            from trader_shared.trading_context import compute_data_freshness
+        except ImportError:
+            return "live"
+        return compute_data_freshness(last)
+
     # ── 合并缓存日线与当日实时 quote ──
     if daily_bars and quote and isinstance(quote, dict):
         try:
@@ -1596,7 +1607,7 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
         order_book=order_book,
         tick_data=tick_data,
         data_status=data_status,
-        data_freshness="live" if is_trading_time() else "stale",
+        data_freshness=_snapshot_data_freshness(daily_bars),
         fund_flow=_fetch_fund_flow_safe(target),
         missing_sources=missing_sources,
         source_errors=source_errors,
