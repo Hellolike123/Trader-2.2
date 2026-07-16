@@ -549,6 +549,46 @@ def _check_volume_vacuum_t0(plan: dict[str, Any]) -> str | None:
     return None
 
 
+def _check_5m_chan_t0(plan: dict[str, Any]) -> tuple:
+    """T0 盘中 5m 缠论预警源（始终开启，独立于 T0_REALTIME_CHAN 与事件系统）。
+
+    复用本模块已支持的 ``ChanlunPlugin``（已支持 minute_bars 入参）：传入 5m K 线，
+    插件内部 5m 优先、日线兜底。返回 ``(signature, flat_result)``：
+    - ``signature`` 为可跨 tick 比对的指纹（来自 realtime_chan._chan_signature）；
+      5m 数据不足（<20 根）或模块不可用时返回 ``(None, None)``，不产生告警。
+    - ``flat_result`` 为解包 fusion 包装层后的扁平缠论结果（含 strokes/buy_points，
+      供 _chan_realtime_alert 复用），无则 None。
+    注意：ChanlunPlugin.analyze 返回 ``{"chanlun": result}`` 包装层，这里解包取扁平 dict，
+    才能与 _chan_signature / _chan_realtime_alert 的键约定对齐。
+    """
+    try:
+        from trader_shared.plugins.chan_plugin import ChanlunPlugin
+        from trader_shared.realtime_chan import _chan_signature as _chan_sig
+    except Exception:
+        return (None, None)
+    # 注：_chan_realtime_alert / _norm_sig 均在本模块定义，4.3 直接调用即可，
+    # 勿从 realtime_chan import。
+    data = plan.get("data") or {}
+    k5 = data.get("kline_5m") or []
+    if not isinstance(k5, list) or len(k5) < 20:
+        return (None, None)  # 早盘 5m 不足 20 根，噪声大，暂不告警
+    daily = data.get("daily_bars") or []
+    quote = data.get("quote") or plan.get("quote") or {}
+    current = float(plan.get("current_price") or 0)
+    if current <= 0:
+        return (None, None)
+    change_pct = plan.get("current_change_pct")
+    try:
+        res = ChanlunPlugin().analyze(current, daily, change_pct, quote, minute_bars=k5)
+    except Exception:
+        return (None, None)
+    if not isinstance(res, dict):
+        return (None, None)
+    flat = res.get("chanlun") or res  # 解包 fusion 包装层
+    sig = _chan_sig(flat)
+    return (sig, flat)
+
+
 def _chan_realtime_alert(result: dict | None, prev_sig) -> str | None:
     """对比前后缠论指纹，生成人话预警行；无变化返回 None。
 
@@ -629,12 +669,16 @@ def run_once(
     # ── [2.5] 量能真空区预警检查 ──
     vacuum_alert = _check_volume_vacuum_t0(plan)
 
+    # ── 5m 缠论盘中预警源（始终开启，独立于 T0_REALTIME_CHAN 与事件系统）──
+    min5_sig, min5_result = _check_5m_chan_t0(plan)
+
     # ── Phase 2：实时缠论 diff（opt-in，默认关，绝不改变批量路径） ──
     # 所有改动均在 T0_REALTIME_CHAN=1 分支内；未设 env 时 chan_sig/chan_alert_line
     # 保持默认空值，控制流与改造前逐字节等价。
     chan_sig: Any = None
     chan_result: dict | None = None
     chan_alert_line = ""
+    chan5_alert_line = ""
     if os.environ.get("T0_REALTIME_CHAN") == "1" and get_realtime_chan is not None:
         try:
             rc = get_realtime_chan(target_key, plan)
@@ -668,6 +712,8 @@ def run_once(
         new_snapshot["history"] = list(target_state.get("history") or [])
         # Phase 2：写入缠论指纹（默认值 None 不影响现有逻辑）
         new_snapshot["chan_signature"] = chan_sig
+        # 5m 缠论指纹（始终记录；默认 None 不影响逻辑）
+        new_snapshot["chan5_signature"] = min5_sig
         if chan_sig is not None and chan_result is not None:
             prev_sig = (previous or {}).get("chan_signature")
             # 状态文件经 JSON 往返后 tuple→list（含嵌套），需归一后再比对，
@@ -677,6 +723,17 @@ def run_once(
                     chan_alert_line = _chan_realtime_alert(chan_result, prev_sig)
                 except Exception:
                     chan_alert_line = ""
+        # 5m 缠论：跨 tick 指纹变化才发声（独立于日线 realtime_chan 与事件系统）
+        if min5_sig is not None and min5_result is not None:
+            prev5 = (previous or {}).get("chan5_signature")
+            # prev5 为 None 表示首轮（无基线）→ 只建基线、不发声，避免开盘第一 tick 误报
+            if prev5 is not None and _norm_sig(min5_sig) != _norm_sig(prev5):
+                try:
+                    a = _chan_realtime_alert(min5_result, prev5)
+                    if a:
+                        chan5_alert_line = "5m" + a  # 前缀 → "5m缠论：..."
+                except Exception:
+                    chan5_alert_line = ""
         mark_events(new_snapshot, plan, allowed_events)
         targets[target_key] = new_snapshot
         state["targets"] = targets
@@ -726,18 +783,23 @@ def run_once(
     if chan_alert_line:
         chan_line = chan_alert_line + "\n"
 
+    # ── 5m 缠论预警（始终开启，独立于事件系统） ──
+    chan5_line = ""
+    if chan5_alert_line:
+        chan5_line = chan5_alert_line + "\n"
+
     if allowed_events:
         try:
             persist_event_signals(allowed_events, plan)
         except Exception as e:
             warnings.warn(f"[t0-monitor] 信号持久化失败: {e}")
     if not allowed_events:
-        prefix = (vacuum_line + chan_line).strip()
+        prefix = (vacuum_line + chan_line + chan5_line).strip()
         if prefix:
             return prefix
         return "无新提醒" if verbose else ""
     events_text = "\n\n".join(build_alert_message(event, plan, cost=cost, position=position, previous_state=target_state) for event in allowed_events)
-    prefix = vacuum_line + chan_line
+    prefix = vacuum_line + chan_line + chan5_line
     if prefix:
         return prefix + events_text
     return events_text

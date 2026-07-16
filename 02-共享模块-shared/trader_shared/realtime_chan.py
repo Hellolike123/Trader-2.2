@@ -83,14 +83,17 @@ def get_realtime_chan(
 
     Args:
         symbol: 标的键（用于 load 预热状态文件）。
-        plan: ``build_plan(target)`` 返回 dict，需含 ``daily_bars`` / ``current_price`` /
-            ``quote``（兼容 ``plan["quote"]`` 与 ``plan["data"]["quote"]``）。
+        plan: ``build_plan(target)`` 返回 dict，需含 ``current_price`` / ``quote``，
+            以及日线 ``daily_bars``（位于 ``plan["data"]["daily_bars"]``，兼容顶层
+            ``plan["daily_bars"]`` 兜底；``quote`` 兼容 ``plan["data"]["quote"]`` 与
+            ``plan["quote"]``）。
         state_dir: 预热状态目录。
 
     Returns:
         {"result": <chanlun_analysis dict>, "signature": <tuple 指纹>}
     """
-    daily = plan.get("daily_bars") or []
+    # 日线：build_plan 把日线放进 plan["data"]["daily_bars"]，同时兼容顶层键兜底
+    daily = (plan.get("data") or {}).get("daily_bars") or plan.get("daily_bars") or []
     current = to_float(plan.get("current_price") or 0)
     if not current and daily:
         current = to_float((daily[-1] or {}).get("close")) or 0.0
