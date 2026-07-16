@@ -228,19 +228,29 @@ def wyckoff_midline_bias(wyckoff_midline: Any, major_stage: str = "") -> str:
 
     major_stage 参与判断：主升/蓄势偏强阶段的 upthrust 视为正常洗盘，
     不判 strong_bear（避免主升中正常回调误读为派发）。
+
+    与打分/展示对齐：
+    - timeframe=insufficient → neutral（中线威科夫不参与定论）
+    - spring_premature / upthrust_premature → 不升 strong_*（孤立噪声）
     """
     w = _unwrap_wyck(wyckoff_midline)
     if not w:
         return "neutral"
+    if w.get("timeframe") == "insufficient":
+        return "neutral"
 
     # 主升/蓄势偏强阶段：upthrust 可能是正常洗盘，不判 strong_bear
     _upstage = major_stage in ("主升", "蓄势偏强")
+    # 孤立/过早 UT 不抬空；否则主升外 UT / BC / SOW 看空
+    _ut_bear = bool(w.get("upthrust_signal")) and not w.get("upthrust_premature")
     strong_bear = bool(
-        (not _upstage and w.get("upthrust_signal"))
+        (not _upstage and _ut_bear)
         or w.get("bc_signal")
         or w.get("sow_signal")
     )
-    strong_bull = bool(w.get("spring_signal") or w.get("sos_signal"))
+    # 孤立/过早 Spring 不抬多；SOS 仍有效
+    _spring_bull = bool(w.get("spring_signal")) and not w.get("spring_premature")
+    strong_bull = bool(_spring_bull or w.get("sos_signal"))
     # 多信号：strong_bear 优先
     if strong_bear:
         return "strong_bear"

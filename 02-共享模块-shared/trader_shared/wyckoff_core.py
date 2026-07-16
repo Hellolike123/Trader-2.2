@@ -44,6 +44,10 @@ from trader_shared.config import (
     WYCKOFF_SCORE_LPSY,
     WYCKOFF_SCORE_COMPRESSION,
     WYCKOFF_SCORE_TREND_PB,
+    WYCKOFF_SCORE_PS,
+    WYCKOFF_SCORE_PSY,
+    WYCKOFF_SCORE_BU,
+    WYCKOFF_SCORE_UTAD,
     WYCKOFF_SCORE_CLUSTER_CONFIRM,
     WYCKOFF_SCORE_CLUSTER_DISTRIB,
     WYCKOFF_SCORE_CLUSTER_FAIL,
@@ -98,9 +102,89 @@ from .wyckoff_events import (
     _is_trading_range,
     _detect_trading_range,
     _detect_event_cluster,
+    _detect_preliminary_support,
+    _detect_preliminary_supply,
+    _detect_backup,
+    _detect_utad,
+    _cause_effect_targets,
     _price_pos_pct,
     _spring_breach_level
 )
+
+
+def _resolve_score_conflicts(analysis: dict) -> set[str]:
+    """同段反向极性互斥：返回应抑制打分的信号键，避免 SC+SOW 等对冲成假中性 50 分。
+
+    规则（主叙事优先）：
+    - SC vs SOW：有 AR/Spring/积累确认 → 抑 SOW；否则抑 SC（破位叙事）
+    - Spring vs UT：premature 先抑；否则积累侧/SOS 抑 UT，派发侧/SOW 抑 Spring
+    - LPS vs LPSY：有派发背景只计 LPSY，否则只计 LPS
+    - 双背离同时：都抑（冲突）
+    - UTAD 成立时普通 UT 分不再重复计（只计 UTAD）
+    """
+    suppress: set[str] = set()
+    sc = bool(analysis.get("sc_signal"))
+    sow = bool(analysis.get("sow_signal"))
+    spring = bool(analysis.get("spring_signal"))
+    ut = bool(analysis.get("upthrust_signal"))
+    lps = bool(analysis.get("lps_signal"))
+    lpsy = bool(analysis.get("lpsy_signal"))
+    bull = bool(analysis.get("bullish_volume_divergence"))
+    bear = bool(analysis.get("bearish_volume_divergence"))
+
+    if sc and sow:
+        if (
+            analysis.get("ar_signal")
+            or spring
+            or analysis.get("accumulation_confirmed")
+            or analysis.get("st_signal")
+        ):
+            suppress.add("sow_signal")
+        else:
+            suppress.add("sc_signal")
+
+    if spring and ut:
+        sp_prem = bool(analysis.get("spring_premature"))
+        ut_prem = bool(analysis.get("upthrust_premature"))
+        if sp_prem and not ut_prem:
+            suppress.add("spring_signal")
+        elif ut_prem and not sp_prem:
+            suppress.add("upthrust_signal")
+        elif (
+            analysis.get("accumulation_confirmed")
+            or analysis.get("sos_signal")
+            or analysis.get("lps_signal")
+            or analysis.get("bu_signal")
+        ):
+            suppress.add("upthrust_signal")
+        elif (
+            analysis.get("distribution_confirmed")
+            or sow
+            or analysis.get("bc_signal")
+            or analysis.get("utad_signal")
+        ):
+            suppress.add("spring_signal")
+        else:
+            # 默认保留 Spring 叙事（试探吸筹），抑 UT
+            suppress.add("upthrust_signal")
+
+    if lps and lpsy:
+        has_dist = any(
+            analysis.get(k) for k in ("bc_signal", "upthrust_signal", "sow_signal", "utad_signal")
+        )
+        if has_dist:
+            suppress.add("lps_signal")
+        else:
+            suppress.add("lpsy_signal")
+
+    if bull and bear:
+        suppress.add("bullish_volume_divergence")
+        suppress.add("bearish_volume_divergence")
+
+    if analysis.get("utad_signal") and ut:
+        suppress.add("upthrust_signal")  # UTAD 已单独计分
+
+    return suppress
 
 def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily", use_persisted_phase: bool = True) -> dict:
     if len(bars) < WYCKOFF_MIN_BARS:
@@ -117,6 +201,12 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
             "st_signal": False, "st_reason": "数据不足", "st_price": None,
             "lps_signal": False, "lps_reason": "数据不足", "lps_price": None,
             "lpsy_signal": False, "lpsy_reason": "数据不足", "lpsy_price": None,
+            "ps_signal": False, "ps_reason": "数据不足", "ps_price": None,
+            "psy_signal": False, "psy_reason": "数据不足", "psy_price": None,
+            "bu_signal": False, "bu_reason": "数据不足", "bu_price": None,
+            "utad_signal": False, "utad_reason": "数据不足", "utad_price": None,
+            "cause_effect_up_target": None, "cause_effect_down_target": None,
+            "cause_effect_range": None, "cause_effect_note": "数据不足",
             "wyckoff_summary": "K线数据不足，无法进行威科夫分析",
             "tr_upper": None, "tr_lower": None, "tr_baseline_volume": None,
             "tr_width": None, "tr_amplitude_pct": None, "tr_quality": None, "tr_in_range": None,
@@ -140,15 +230,37 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
 
     spring = _detect_spring(bars, _support=dynamic_support, symbol=symbol, tr_ctx=tr_ctx)
     upthrust = _detect_upthrust(bars, tr_ctx=tr_ctx)
-    bc = _detect_buying_climax(bars)
-    sc = _detect_selling_climax(bars)
+    bc = _detect_buying_climax(bars, tr_ctx=tr_ctx)
+    sc = _detect_selling_climax(bars, tr_ctx=tr_ctx)
     sow = _detect_sign_of_weakness(bars, tr_ctx=tr_ctx)  # SOW 使用自己的支撑位计算（处理 consecutive 逻辑）
     bearish_div, bullish_div = _detect_volume_divergence(bars)
-    ar = _detect_ar(bars)
+    ar = _detect_ar(bars, tr_ctx=tr_ctx)
     sos = _detect_sos(bars, tr_ctx=tr_ctx)
     st = _detect_st(bars, tr_ctx=tr_ctx)
     lps = _detect_lps(bars, tr_ctx=tr_ctx)
     lpsy = _detect_lpsy(bars, tr_ctx=tr_ctx)
+    # LPSY 门控与打分一致：无派发背景则不亮灯（避免展示吓人、分数不扣）
+    _has_dist_bg = bool(bc.get("bc_signal") or upthrust.get("upthrust_signal") or sow.get("sow_signal"))
+    if lpsy.get("lpsy_signal") and not _has_dist_bg:
+        lpsy = {
+            "lpsy_signal": False,
+            "lpsy_reason": "无派发背景（BC/UT/SOW），LPSY 不成立",
+            "lpsy_price": None,
+            "lpsy_gated": True,
+        }
+    # 原典补齐
+    ps = _detect_preliminary_support(bars, tr_ctx=tr_ctx)
+    psy = _detect_preliminary_supply(bars, tr_ctx=tr_ctx)
+    bu = _detect_backup(bars, tr_ctx=tr_ctx)
+    utad = _detect_utad(
+        bars,
+        tr_ctx=tr_ctx,
+        bc_signal=bool(bc.get("bc_signal")),
+        sow_signal=bool(sow.get("sow_signal")),
+        upthrust_signal=bool(upthrust.get("upthrust_signal")),
+        upthrust_result=upthrust,
+    )
+    ce = _cause_effect_targets(tr_ctx, bars)
     # P2/P3: 新增信号
     compression = _detect_compression(bars)
     trend_pullback = _detect_trend_pullback(bars)
@@ -169,6 +281,13 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "lpsy_signal": lpsy["lpsy_signal"],
         "compression_signal": compression["compression_signal"],
         "trend_pullback_signal": trend_pullback["trend_pullback_signal"],
+        "bu_signal": bu.get("bu_signal"),
+        "utad_signal": utad.get("utad_signal"),
+        "ps_signal": ps.get("ps_signal"),
+        "psy_signal": psy.get("psy_signal"),
+        "tr_in_range": bool(tr_ctx.get("in_tr")) if tr_ctx else False,
+        "tr_upper": tr_ctx.get("tr_upper") if tr_ctx else None,
+        "last_close": to_float(bars[-1].get("close")) if bars else None,
     }
     phase = _detect_phase(bars, signals_dict, _phase_lookback=_phase_lb, tr_ctx=tr_ctx)
 
@@ -211,6 +330,14 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         parts.append(f"最后支撑: {lps['lps_reason']}")
     if lpsy["lpsy_signal"]:
         parts.append(f"最后供应点: {lpsy['lpsy_reason']}")
+    if ps.get("ps_signal"):
+        parts.append(f"初步止跌: {ps['ps_reason']}")
+    if psy.get("psy_signal"):
+        parts.append(f"初步供应: {psy['psy_reason']}")
+    if bu.get("bu_signal"):
+        parts.append(f"备份买: {bu['bu_reason']}")
+    if utad.get("utad_signal"):
+        parts.append(f"UTAD: {utad['utad_reason']}")
     if bearish_div and bullish_div:
         parts.append("量价信号冲突，无法确定方向")
     elif bearish_div:
@@ -225,6 +352,10 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         parts.append(f"压缩蓄势: {compression['compression_reason']}")
     if trend_pullback["trend_pullback_signal"]:
         parts.append(f"趋势回踩: {trend_pullback['trend_pullback_reason']}")
+    if ce.get("cause_effect_up_target") is not None:
+        parts.append(
+            f"因果目标↑{ce['cause_effect_up_target']}/↓{ce['cause_effect_down_target']}"
+        )
     if not parts:
         parts.append("无明显威科夫信号")
 
@@ -272,7 +403,24 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "lps_price": round(lps["lps_price"], 2) if lps["lps_signal"] else None,
         "lpsy_signal": lpsy["lpsy_signal"],
         "lpsy_reason": lpsy["lpsy_reason"],
-        "lpsy_price": round(lpsy["lpsy_price"], 2) if lpsy["lpsy_signal"] else None,
+        "lpsy_price": round(lpsy["lpsy_price"], 2) if lpsy["lpsy_signal"] and lpsy.get("lpsy_price") is not None else None,
+        # 原典补齐 PS/PSY/BU/UTAD + 因果目标
+        "ps_signal": bool(ps.get("ps_signal")),
+        "ps_reason": ps.get("ps_reason"),
+        "ps_price": ps.get("ps_price"),
+        "psy_signal": bool(psy.get("psy_signal")),
+        "psy_reason": psy.get("psy_reason"),
+        "psy_price": psy.get("psy_price"),
+        "bu_signal": bool(bu.get("bu_signal")),
+        "bu_reason": bu.get("bu_reason"),
+        "bu_price": bu.get("bu_price"),
+        "utad_signal": bool(utad.get("utad_signal")),
+        "utad_reason": utad.get("utad_reason"),
+        "utad_price": utad.get("utad_price"),
+        "cause_effect_up_target": ce.get("cause_effect_up_target"),
+        "cause_effect_down_target": ce.get("cause_effect_down_target"),
+        "cause_effect_range": ce.get("cause_effect_range"),
+        "cause_effect_note": ce.get("cause_effect_note"),
         # P0-1: 弹簧量能分级
         "spring_vol_class": spring.get("spring_vol_class", "normal") if spring["spring_signal"] else None,
         # P1-1: 阶段状态机
@@ -312,7 +460,12 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
     }
 
 def wyckoff_strategy(current: float, bars: list[dict], change_pct: Any = None, quote: dict | None = None, symbol: str = "") -> dict:
-    """日线威科夫（供 fusion / 短线侧兼容）。"""
+    """日线威科夫（短线侧兼容 / 插件日线轨）。
+
+    注意：短线 fusion 第三席已是 VPF，本结果**不**进入 ``merge_decisions`` 加权；
+    日线威科夫主要用于 ``calculate_wyckoff_score``（池/复盘）与兼容导出字段。
+    中线展示读 ``wyckoff_strategy_midline``（周线独占）。
+    """
     result = wyckoff_analysis(bars, symbol=symbol)
     if isinstance(result, dict):
         result = {**result, "timeframe": "daily"}
@@ -382,14 +535,20 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
 
     raw = 0
     signals: list[str] = []
+    suppress = _resolve_score_conflicts(analysis)
+    if suppress:
+        signals.append("互斥抑制:" + ",".join(sorted(suppress)))
 
-    spring = analysis.get("spring_signal")
-    bullish_div = analysis.get("bullish_volume_divergence")
-    bearish_div = analysis.get("bearish_volume_divergence")
-    upthrust = analysis.get("upthrust_signal")
+    spring = analysis.get("spring_signal") and "spring_signal" not in suppress
+    bullish_div = analysis.get("bullish_volume_divergence") and "bullish_volume_divergence" not in suppress
+    bearish_div = analysis.get("bearish_volume_divergence") and "bearish_volume_divergence" not in suppress
+    upthrust = analysis.get("upthrust_signal") and "upthrust_signal" not in suppress
     bc = analysis.get("bc_signal")
-    sow = analysis.get("sow_signal")
+    sow = analysis.get("sow_signal") and "sow_signal" not in suppress
     spring_vol_class = analysis.get("spring_vol_class")
+    sc_on = analysis.get("sc_signal") and "sc_signal" not in suppress
+    lps_on = analysis.get("lps_signal") and "lps_signal" not in suppress
+    lpsy_on = analysis.get("lpsy_signal") and "lpsy_signal" not in suppress
 
     # 1. Spring — 最强看多信号；孤立/过早 Spring（缺 Phase B 背景）降权为噪声，分数减半
     if spring:
@@ -465,7 +624,7 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
         signals.append(f"ST +{WYCKOFF_SCORE_ST}")
 
     # 11. LPS (Last Point of Support) — 最后支撑点
-    if analysis.get("lps_signal"):
+    if lps_on:
         raw += WYCKOFF_SCORE_LPS
         signals.append(f"LPS +{WYCKOFF_SCORE_LPS}")
 
@@ -480,22 +639,28 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
         signals.append(f"趋势回踩 +{WYCKOFF_SCORE_TREND_PB}")
 
     # 14. SC (Selling Climax) — 卖力高潮，看多
-    if analysis.get("sc_signal"):
+    if sc_on:
         raw += WYCKOFF_SCORE_AR  # SC 的看多强度与 AR 同级（+10）
         signals.append(f"SC +{WYCKOFF_SCORE_AR}")
 
-    # 15. LPSY (Last Point of Supply) — 最后供应点，看空
-    # P1-1 修复：只有存在派发背景（BC/UT/SOW）时才认可 LPSY
-    # 孤立 LPSY（无派发上下文）不打分，与 phase 状态机 `lpsy_found and (bc/ut/sow)` 门控一致
-    if analysis.get("lpsy_signal"):
-        has_distribution = any([
-            analysis.get("bc_signal"),
-            analysis.get("upthrust_signal"),
-            analysis.get("sow_signal"),
-        ])
-        if has_distribution:
-            raw += WYCKOFF_SCORE_LPSY
-            signals.append(f"LPSY {WYCKOFF_SCORE_LPSY}")
+    # 15. LPSY — 已在 analysis 层做派发背景门控；此处再防互斥
+    if lpsy_on:
+        raw += WYCKOFF_SCORE_LPSY
+        signals.append(f"LPSY {WYCKOFF_SCORE_LPSY}")
+
+    # 16. PS / PSY / BU / UTAD
+    if analysis.get("ps_signal"):
+        raw += WYCKOFF_SCORE_PS
+        signals.append(f"PS +{WYCKOFF_SCORE_PS}")
+    if analysis.get("psy_signal"):
+        raw += WYCKOFF_SCORE_PSY
+        signals.append(f"PSY {WYCKOFF_SCORE_PSY}")
+    if analysis.get("bu_signal"):
+        raw += WYCKOFF_SCORE_BU
+        signals.append(f"BU +{WYCKOFF_SCORE_BU}")
+    if analysis.get("utad_signal"):
+        raw += WYCKOFF_SCORE_UTAD
+        signals.append(f"UTAD {WYCKOFF_SCORE_UTAD}")
 
     # ── P3-1: VSA 量价幅度修正 ──
     effort_no_result = analysis.get("effort_no_result", False)
@@ -525,7 +690,9 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
         raw -= 5
         signals.append("努力无结果 -5")
 
-    # ── P0-5 事件簇确认打分：顺序确认的簇比孤立信号更可靠，直接抑制 fusion 误出手 ──
+    # ── P0-5 事件簇确认打分：顺序确认的簇比孤立信号更可靠 ──
+    # 消费面：仅本函数 score → final_pool / review 排序；
+    # 不进短线 fusion（第三席已是 VPF，见 fusion_core.merge_decisions）。
     if analysis.get("accumulation_confirmed"):
         raw += WYCKOFF_SCORE_CLUSTER_CONFIRM
         signals.append(f"积累确认(Spring→SOS) +{WYCKOFF_SCORE_CLUSTER_CONFIRM}")
@@ -617,10 +784,23 @@ def format_wyckoff_oneline(
             return "偏空"
         return "中性"
 
-    # 按 fusion 优先级选主信号
-    if wyk.get("spring_signal"):
+    # 周线不足：诚实「不参与定论」，禁止落成「暂无事件」（has_run 误判）
+    if wyk.get("timeframe") == "insufficient":
+        return "威科夫：周线不足 · 不参与定论"
+
+    # 按信号优先级选主信号（展示/旁证）
+    if wyk.get("utad_signal"):
+        main, note, d = "派发末上冲回落", "UTAD，警惕破位下行", -1
+    elif wyk.get("bu_signal"):
+        main, note, d = "强势后缩量回踩", "Backup，趋势启动区试探", 1
+    elif wyk.get("spring_signal"):
         vol = wyk.get("spring_vol_class") or "normal"
-        if vol == "high_vol_warning":
+        strength = wyk.get("spring_strength")  # P0-4 透出；展示可选
+        if wyk.get("spring_premature"):
+            main = "低位假跌破后收回"
+            note = "孤立/过早信号，缺蓄势背景，当噪声看待"
+            d = 0  # 展示中性，与打分降权语义一致
+        elif vol == "high_vol_warning":
             main = "低位跌破后收回"
             note = "放量跌破，也可能是真破位，信号偏弱"
             d = 1
@@ -632,10 +812,30 @@ def format_wyckoff_oneline(
             main = "低位假跌破后收回"
             note = "更像洗盘吸筹"
             d = 1
+        # strength=strong 且非 premature/高量时略加强说明（不改方向）
+        if strength == "strong" and d > 0 and vol != "high_vol_warning":
+            note = note + "，强度偏高"
+        elif strength == "weak" and d > 0:
+            note = note + "，强度偏弱"
+        elif strength == "failure":
+            main = "低位跌破未收回"
+            note = "刺穿失败，偏破位风险"
+            d = -1
     elif wyk.get("sos_signal"):
         main, note, d = "连续放量上攻", "多头发力，趋势转强迹象", 1
     elif wyk.get("upthrust_signal"):
-        main, note, d = "冲高回落假突破", "上方试盘失败，结构偏顶", -1
+        if wyk.get("upthrust_premature"):
+            main, note, d = "冲高回落假突破", "孤立/过早信号，缺派发背景，当噪声看待", 0
+        else:
+            main, note, d = "冲高回落假突破", "上方试盘失败，结构偏顶", -1
+            ut_str = wyk.get("upthrust_strength")
+            if ut_str == "strong":
+                note = note + "，强度偏高"
+            elif ut_str == "weak":
+                note = note + "，强度偏弱"
+            elif ut_str == "failure":
+                note = "上冲未回落，突破可能有效"
+                d = 1
     elif wyk.get("bc_signal"):
         main, note, d = "高位放量滞涨", "购买高潮迹象，注意见好就收", -1
     elif wyk.get("sow_signal"):
@@ -650,6 +850,10 @@ def format_wyckoff_oneline(
         main, note, d = "突破后缩量回踩", "回踩不破，仍偏强", 1
     elif wyk.get("lpsy_signal"):
         main, note, d = "反弹受阻缩量", "最后供应点，警惕破位下行", -1
+    elif wyk.get("ps_signal"):
+        main, note, d = "低位放量止跌", "初步支撑 PS，尚待 SC/Spring 确认", 1
+    elif wyk.get("psy_signal"):
+        main, note, d = "高位放量滞涨", "初步供应 PSY，尚待 BC/UT 确认", -1
     # P2/P3: 新增信号（优先级在 LPS 之后、divergence 之前）
     elif wyk.get("compression_signal"):
         main, note, d = "压缩蓄势", "振幅收窄+量能枯竭，突破在即", 1
@@ -678,7 +882,7 @@ def format_wyckoff_oneline(
             return f"威科夫：暂无事件 · 中性{_tf2}"
         return "威科夫：数据不足 · 中性"
 
-    # 外部 fusion direction 可覆盖展示方向（保持与融合层一致）
+    # 外部 direction 可覆盖展示方向（兼容旧调用；短线 fusion 已不消费威科夫）
     if direction is not None:
         d = int(direction)
     # phase 前缀（如 show_phase=True 且 phase 非 none）
@@ -687,7 +891,7 @@ def format_wyckoff_oneline(
         _phase = wyk.get("phase_label") or ""
         if _phase and "无明确阶段" not in _phase:
             phase_prefix = f"{_phase} · "
-    # 回退标注：周线不足时用日线分析，诚实提示
+    # 历史 daily_fallback 标注（中线现已禁止回退日线；保留兼容）
     _tf_suffix = ""
     if wyk.get("timeframe") == "daily_fallback":
         _tf_suffix = "（日线）"

@@ -24,6 +24,18 @@ class TestChanToSignal:
         assert result["raw_key"] == "chan"
         assert "底背驰" in result["reason"]
 
+    def test_一类买_nesting_unconfirmed_demotes(self):
+        """区间套明确未确认时 fusion 置信度应降权。"""
+        fn = self._fn
+        full = fn({"chanlun": {"buy_points": [{"type": "一类买", "price": 28.5, "confidence": 3}]}})
+        demoted = fn({"chanlun": {"buy_points": [{
+            "type": "一类买", "price": 28.5, "confidence": 3,
+            "lower_confirmed": False,
+        }]}})
+        assert demoted["direction"] == 1
+        assert demoted["confidence"] < full["confidence"]
+        assert demoted["confidence"] == round(0.8 * 0.65, 4)
+
     def test_二类买(self):
         fn = self._fn
         result = fn({"chanlun": {"buy_points": [{"type": "二类买", "price": 27.8, "confidence": 2}]}})
@@ -157,8 +169,8 @@ class TestMomentumToSignal:
         fn = self._fn
         result = fn({"momentum": {"score": 25, "direction": "bearish", "signals": ["MACD死叉"]}})
         assert result["direction"] == -1
-        # score 25: <= 25 → 0.8, but direction="bearish" with score<=45 → min(0.8, 0.4) = 0.4
-        assert result["confidence"] == 0.4
+        # score 25 强空 + direction 一致 → 高置信（旧测误用「score≤45 一律 cap」会错伤真空头）
+        assert result["confidence"] == 0.8
 
     def test_neutral(self):
         fn = self._fn
@@ -173,6 +185,13 @@ class TestMomentumToSignal:
         result = fn({"momentum": {"score": 35, "direction": "bullish", "signals": ["RSI回升"]}})
         assert result["direction"] == 1  # 方向仍由 direction_str 决定
         assert result["confidence"] <= 0.4  # 冲突时降为不超过 0.4
+
+    def test_conflict_bearish_with_high_score(self):
+        """direction=bearish 但 score 偏高 → 对称降级。"""
+        fn = self._fn
+        result = fn({"momentum": {"score": 60, "direction": "bearish", "signals": ["死叉残留"]}})
+        assert result["direction"] == -1
+        assert result["confidence"] <= 0.4
 
     def test_empty_input(self):
         fn = self._fn

@@ -122,3 +122,83 @@ class TestAssessMomentum:
         result = momentum_strategy(12.0, bars)
         assert "momentum" in result
         assert "direction" in result["momentum"]
+        assert "strength" in result["momentum"]
+
+    def test_success_path_has_strength(self):
+        bars = _bars([10.0 + i * 0.1 for i in range(40)])
+        m = assess_momentum(bars)
+        assert m.get("strength") in ("strong", "moderate", "neutral")
+
+
+class TestSupertrendNudge:
+    def test_bearish_confirm_lowers_score(self):
+        """空头同向确认应减分（更空），旧逻辑误加分会推向中性。"""
+        from trader_shared.plugins.momentum_plugin import apply_supertrend_nudge
+
+        raw = {
+            "momentum": {
+                "direction": "bearish",
+                "score": 28.0,
+                "signals": ["ADX强趋势(下跌)"],
+            }
+        }
+        out = apply_supertrend_nudge(raw, "down")
+        assert out["momentum"]["score"] == 20.0  # 28 - 8
+        assert out["momentum"]["direction"] == "bearish"
+        assert out["momentum"]["supertrend_nudge"] == -8
+
+    def test_bullish_confirm_raises_score(self):
+        from trader_shared.plugins.momentum_plugin import apply_supertrend_nudge
+
+        raw = {
+            "momentum": {
+                "direction": "bullish",
+                "score": 70.0,
+                "signals": [],
+            }
+        }
+        out = apply_supertrend_nudge(raw, "up")
+        assert out["momentum"]["score"] == 78.0
+        assert out["momentum"]["direction"] == "bullish"
+
+    def test_nudge_remaps_direction_across_threshold(self):
+        """中性偏多 + ST 向上确认 → 分数跨 65 后 direction 须变为 bullish。"""
+        from trader_shared.plugins.momentum_plugin import apply_supertrend_nudge
+
+        raw = {
+            "momentum": {
+                "direction": "neutral",
+                "score": 58.0,
+                "signals": [],
+            }
+        }
+        out = apply_supertrend_nudge(raw, "up")
+        assert out["momentum"]["score"] == 66.0
+        assert out["momentum"]["direction"] == "bullish"
+
+    def test_nudge_skips_insufficient(self):
+        from trader_shared.plugins.momentum_plugin import apply_supertrend_nudge
+
+        raw = {
+            "momentum": {
+                "direction": "insufficient",
+                "score": None,
+                "signals": [],
+            }
+        }
+        out = apply_supertrend_nudge(raw, "up")
+        assert out["momentum"]["score"] is None
+        assert out["momentum"]["direction"] == "insufficient"
+
+    def test_opposite_st_no_punish(self):
+        from trader_shared.plugins.momentum_plugin import apply_supertrend_nudge
+
+        raw = {
+            "momentum": {
+                "direction": "bullish",
+                "score": 70.0,
+                "signals": [],
+            }
+        }
+        out = apply_supertrend_nudge(raw, "down")
+        assert out["momentum"]["score"] == 70.0

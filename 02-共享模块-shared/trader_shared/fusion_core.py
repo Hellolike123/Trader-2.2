@@ -120,7 +120,21 @@ def _chan_to_signal(chan_result: dict) -> dict:
             c = int(p.get("confidence") or 0)
         except (TypeError, ValueError):
             c = 0
-        return _CHAN_CONF.get(c, default)
+        base = _CHAN_CONF.get(c, default)
+        # 区间套：小级别明确未确认时降权（报告已标 30m✗，fusion 不得仍满置信）
+        if p.get("nesting_confirmed") is False:
+            base *= 0.55
+        elif p.get("lower_confirmed") is False:
+            base *= 0.65
+        return round(min(0.95, max(0.15, base)), 4)
+
+    def _div_nesting_scale() -> float:
+        """底/顶背驰的区间套确认：divergence 上的 *_lower_confirmed 字段。"""
+        if divergence.get("bottom_divergence_lower_confirmed") is False:
+            return 0.65
+        if divergence.get("top_divergence_lower_confirmed") is False:
+            return 0.65
+        return 1.0
 
     # 1) 卖点：按类型真优先级（不依赖 list 顺序）
     best_sell = _best_point(sell_points, _SELL_RANK)
@@ -161,7 +175,7 @@ def _chan_to_signal(chan_result: dict) -> dict:
 
     # 3) 顶背驰优先于粘滞二/三类买
     if divergence.get("top_divergence"):
-        return {"direction": -1, "confidence": 0.5,
+        return {"direction": -1, "confidence": round(0.5 * _div_nesting_scale(), 4),
                 "reason": "缠论顶背驰", "raw_key": "chan",
                 "signal_tier": SignalTier.CHAN_TOP_DIVERGENCE}
 
@@ -192,7 +206,7 @@ def _chan_to_signal(chan_result: dict) -> dict:
 
     # 5) 底背驰
     if divergence.get("bottom_divergence"):
-        return {"direction": 1, "confidence": 0.5,
+        return {"direction": 1, "confidence": round(0.5 * _div_nesting_scale(), 4),
                 "reason": "缠论底背驰", "raw_key": "chan",
                 "signal_tier": SignalTier.CHAN_BOTTOM_DIVERGENCE}
 
@@ -243,8 +257,10 @@ def _momentum_to_signal(momentum_result: dict) -> dict:
         confidence = _score_to_confidence(score)
 
     # direction 和 score 冲突时降低置信度
-    # 如 direction="bullish" 但分数很低 → 有方向感但量化分数不支持 → 保守处理
-    if direction != 0 and score is not None and score <= 45:
+    # bullish 但分数偏低 / bearish 但分数偏高 → 有方向感但量化不支持 → 保守
+    if direction > 0 and score is not None and score <= 45:
+        confidence = min(confidence, 0.4)
+    if direction < 0 and score is not None and score >= 55:
         confidence = min(confidence, 0.4)
 
     _def_reason = "动量数据不足" if direction_str == "insufficient" else "动量中性"
@@ -319,7 +335,11 @@ def _score_to_confidence(score: float) -> float:
 def _wyckoff_to_signal(wyckoff_result: dict) -> dict:
     """将 wyckoff_analysis() 的原始输出映射为统一信号。
 
-    威科夫输出结构 (wyckoff_strategy → run_all → levels["wyckoff"]):
+    ⚠️ 兼容/测试用：**短线 fusion 已不调用本函数**（第三席为 VPF，
+    ``merge_decisions`` 不再对 wyckoff 加权）。保留供单测与历史脚本。
+    生产消费面：中线 ``format_wyckoff_oneline`` + ``calculate_wyckoff_score``（池/复盘）。
+
+    威科夫输出结构 (wyckoff_strategy → {"wyckoff": {...}}):
         {"wyckoff": {"spring_signal": True, "bullish_volume_divergence": False, ...}}
 
     信号优先级（强→弱）：
@@ -328,17 +348,18 @@ def _wyckoff_to_signal(wyckoff_result: dict) -> dict:
       AR (0.6) > ST (0.5) > LPS (0.5) >
       背离 (0.5) > 无信号 (0.2)
 
-    说明：BC/SOW 排在 AR 之前，使「BC-15+AR+10」净偏空与 fusion 方向一致。
+    说明：BC/SOW 排在 AR 之前，使「BC-15+AR+10」净偏空与打分方向一致。
     ar / sos / st / lps / bc / sow 消费原始 *_reason 字符串。
+    孤立/过早信号（spring_premature / upthrust_premature）降置信或跳过抬分语义。
     """
     wyk = wyckoff_result.get("wyckoff", {}) if isinstance(wyckoff_result, dict) else {}
     if not isinstance(wyk, dict):
         wyk = {}
 
-    spring = wyk.get("spring_signal")
+    spring = wyk.get("spring_signal") and not wyk.get("spring_premature")
     bullish_div = wyk.get("bullish_volume_divergence")
     bearish_div = wyk.get("bearish_volume_divergence")
-    upthrust = wyk.get("upthrust_signal")
+    upthrust = wyk.get("upthrust_signal") and not wyk.get("upthrust_premature")
 
     # 经典 + 看空信号
     ar = wyk.get("ar_signal")
@@ -458,7 +479,7 @@ def wyckoff_score_to_direction(score: int) -> dict:
 
     自动受益：calculate_wyckoff_score() 新增 AR/SOS/ST/LPS 信号后，
     score 范围自动扩大，此函数无需改动即可反映新分数。
-    当前 _wyckoff_to_signal 是主线，此函数保留为 score-based 备选。
+    与 _wyckoff_to_signal 同为兼容/备选；短线 fusion 主路径不走二者。
     """
     if score >= 65:
         return {

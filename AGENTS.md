@@ -35,7 +35,9 @@
 - **筹码搬家监控 (Chip Migration Monitor)**：`chip_migration_monitor.py` 对每次单票分析生成的筹码峰快照进行持久化（`~/.trader/chip_history.json`），并对比前后变化。底部筹码峰下降超过 40% 触发警告、超过 50% 触发清仓信号，用于识别主力出货迹象。
 - **资金流向数据 (Fund Flow Data)**：`fund_flow_data.py` 通过东方财富 HTTP API 采集个股日线级资金流向（超大单/大单/中单/小单净流入），并计算衍生特征供主力行为识别引擎使用。
 - **Spring ATR 动态刺穿深度**：`wyckoff_core.py` 的 `_detect_spring()` / `_detect_st()` 共用 `_spring_breach_level()`，优先 `support - 0.5×ATR`，否则 `support × 0.985`。配置：`WYCKOFF_SPRING_ATR_MULTIPLE=0.5`。
-- **威科夫 fusion 与报告一行人话**：`_wyckoff_to_signal` 优先级 Spring → SOS → UT → BC → SOW → AR → ST → LPS → 背离；高量 Spring 降权；BC 须高位（`WYCKOFF_BC_MIN_POS_PCT=0.65`）。报告用 `format_wyckoff_oneline()` 单行白话；双轨中线读 `wyckoff_midline`，短线日线威科夫进 fusion。`阶段：` 仍是主力四阶段（major_stage），不是威科夫 A–E phase。
+- **威科夫消费面（勿与旧 fusion 叙事混淆）**：短线 fusion 第三席是 **VPF**（`merge_decisions` 不再对 wyckoff 加权）。威科夫主消费：`calculate_wyckoff_score` → 选股池/复盘打分；`format_wyckoff_oneline` → 中线「威科夫：…」一行；`wyckoff_strategy_midline` 周线独占（不足 → `timeframe=insufficient`，展示「不参与定论」）。`_wyckoff_to_signal` 仅兼容/测试。孤立信号 `spring_premature`/`upthrust_premature` 打分降权且展示/中线 bias 不抬 strong。`阶段：` 仍是主力四阶段 major_stage，不是威科夫 A–E phase。
+- **威科夫原典补齐（2026-07）**：PS/PSY/BU/UTAD 检测 + Markup/Markdown 阶段；打分 `_resolve_score_conflicts` 抑制 SC↔SOW 等反向对冲；LPSY 无派发背景不亮灯；因果目标 `cause_effect_*`（TR 1:1 近似，非完整 P&F）。详见 `docs/wyckoff-original-gaps-fix-2026-07-16.md`。
+- **动量第二席（2026-07 审计）**：`assess_momentum` 数据不足 → `insufficient`+`score=None`；Supertrend 只确认不否决（多头 +8 / **空头 -8**，改分后重映射 direction）；ADX 强趋势约束逆向超额；详见 `docs/audit/momentum-review-2026-07-16.md`。
 - **假跌破硬性熔断**：`decision_core.py` 的 `status_layers()` 在假跌破确认之前检查单日跌幅，跌幅超 7% 直接返回"风险回避"，跳过假跌破逻辑。配置：`HARD_STOP_SINGLE_DAY_DROP=-0.07`。
 - **T+1 隔离锁**：`stage_positioning.py` 的 `evaluate_position_state()` 新增 `last_add_date` 参数，当天已加仓则返回"持仓观察（T+1冷却）"，禁止日内重复加仓。
 - **多周期支撑压力阶梯**：`structure_core.py` 的 `find_key_levels(bars)` 仍供日线结构/兼容；**双轨中线关键价**以 `mid_key_prices`（周线）为准；短线 🌟 现价只出现在 ⚡ 关键价（短线）。
@@ -46,7 +48,8 @@
 - **HMM 2D 成交额特征**：`hmm_regime.py` 支持 2D 输入 `(returns, volume_ratio)`，`market_env.py` 导出 `vol_trend`。`volume_ratio=None` 时 fallback 到 1D，完全向后兼容。
 - **持仓相关性熔断**：`stage_positioning.py` 新增 `calc_portfolio_correlation()` 函数，计算持仓个股 20 日收盘价两两相关系数，R > 0.7 时合并为同一风险暴露，总仓位上限降为单票上限。
 - **开盘尾盘噪音过滤**：`volume_price.py` 新增 `calc_weighted_volume(bars_5m)` 函数，排除 9:30-9:45 和 14:45-15:00 的噪音数据，用 VWAP 计算加权均量。
-- **缠论走势分层重构**：`chan_core.py` 补全线段构建（`build_segments()`）和走势分类（`classify_structure()`），支持盘整/趋势/单边上涨/单边下跌/线段不足X/Y。报告输出 `缠论:拉升段(盘整)` 格式。
+- **缠论走势分层重构**：`chan_core.py` 补全线段构建（`build_segments()`）和走势分类（`classify_structure()`），支持盘整/趋势/单边上涨/单边下跌（主状态禁止「线段不足」）。报告输出 `缠论:拉升段(盘整)` 格式。
+- **缠论买卖点契约（2026-07）**：一类须 ≥2 **严格不重叠**同向中枢 + 离开段背驰；二类前置一类为**时间轴历史结构**（非同帧 buy_points）；区间套 `lower_confirmed=False` 时 fusion 降权。权威规则见 `trader_shared/formulas.md` §6。
 - **主力行为五阶段识别 (Main Force)**：`main_force.py` 基于资金流向特征、价格数据和筹码信息，识别主力行为所处阶段（吸筹/试盘/拉升/派发/砸盘）。`main_force_output.py` 负责复盘输出格式化。
 - **规则引擎 (Rule Engine)**：`rule_engine.py` 基于 YAML 配置的决策规则引擎，支持比较运算和布尔表达式。`modifier_rule_engine.py` 基于评分修饰规则对候选人评分进行动态调整。
 - 真正的输出格式以 `01-功能包-packages/trader/references/output-template.md` 和 `01-功能包-packages/trader/references/output-style-guide.md` 为准（与 `report_core.render_short_midline` 同源）。

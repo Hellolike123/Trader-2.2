@@ -275,16 +275,22 @@ class TestDetectBuyPoints:
         end_curr = start_curr + len_curr - 1
         return bars, start_prev, end_prev, start_curr, end_curr
 
+    def _down_trend_zones(self):
+        """两个严格不重叠的下移中枢（末中枢整体低于前中枢）。"""
+        return [
+            {"zh_top": 16.0, "zh_bottom": 14.0, "valid": True},
+            {"zh_top": 12.0, "zh_bottom": 10.0, "valid": True},
+        ]
+
     def test_buy_point_1_with_zone_and_stroke_divergence(self):
-        """P1 一类买：有中枢 + 两 down + 后笔负面积更弱 → 有一类买 conf=3。"""
+        """P1 一类买：下跌趋势(≥2 不重叠中枢) + 两 down + 后笔负面积更弱 → conf=3。"""
         bars, sp, ep, sc, ec = self._make_bars_with_neg_areas(area_prev=-10.0, area_curr=-3.0)
         strokes = [
             {"direction": "down", "end_price": 10.0, "start_index": sp, "end_index": ep},
             {"direction": "up", "end_price": 12.0},
             {"direction": "down", "end_price": 9.0, "start_index": sc, "end_index": ec},
         ]
-        zones = [{"zh_top": 11.5, "zh_bottom": 10.5, "valid": True}]
-        result = detect_buy_points(strokes, zones, 9.0, bars=bars)
+        result = detect_buy_points(strokes, self._down_trend_zones(), 9.0, bars=bars)
         types = [bp["type"] for bp in result]
         assert "一类买" in types
         bp1 = next(bp for bp in result if bp["type"] == "一类买")
@@ -304,8 +310,8 @@ class TestDetectBuyPoints:
         types = [bp["type"] for bp in result]
         assert "一类买" not in types
 
-    def test_buy_point_1_fallback_no_index(self):
-        """P1 一类买：有中枢 + 创新低 + 无 index 时 bar 级绿柱缩短 → conf=1。"""
+    def test_buy_point_1_single_zone_not_trend(self):
+        """单中枢盘整不得报趋势一类买。"""
         strokes = [
             {"direction": "down", "end_price": 10.0},
             {"direction": "up", "end_price": 12.0},
@@ -315,34 +321,63 @@ class TestDetectBuyPoints:
         result = detect_buy_points(
             strokes, zones, 9.0, macd_hist_current=-0.5, macd_hist_prev=-1.0
         )
+        assert "一类买" not in [bp["type"] for bp in result]
+
+    def test_buy_point_1_fallback_no_index(self):
+        """P1 一类买：趋势中枢 + 创新低 + 无 index 时 bar 级绿柱缩短 → conf=1。"""
+        strokes = [
+            {"direction": "down", "end_price": 10.0},
+            {"direction": "up", "end_price": 12.0},
+            {"direction": "down", "end_price": 9.0},
+        ]
+        result = detect_buy_points(
+            strokes, self._down_trend_zones(), 9.0,
+            macd_hist_current=-0.5, macd_hist_prev=-1.0,
+        )
         types = [bp["type"] for bp in result]
         assert "一类买" in types
         bp1 = next(bp for bp in result if bp["type"] == "一类买")
         assert bp1["confidence"] == 1
 
     def test_buy_point_2(self):
-        """P1 二类买：结构满足 + macd_divergence_ok → 有。"""
+        """二类买：抬高低点 + 历史一类前置（趋势+离开）+ macd_divergence_ok。"""
         strokes = [
             {"direction": "down", "end_price": 8.0},
             {"direction": "up", "end_price": 11.0},
             {"direction": "down", "end_price": 10.0},
         ]
-        zones = []
-        result = detect_buy_points(strokes, zones, 10.0, macd_divergence_ok=True)
+        result = detect_buy_points(
+            strokes, self._down_trend_zones(), 10.0, macd_divergence_ok=True
+        )
         types = [bp["type"] for bp in result]
         assert "二类买" in types
 
     def test_buy_point_2_requires_macd_or_area(self):
-        """P1 二类买：ok=False 且无面积 → 无。"""
+        """二类结构满足但力度/MACD 均未确认 → 类二买（非二类）。"""
         strokes = [
             {"direction": "down", "end_price": 8.0},
             {"direction": "up", "end_price": 11.0},
             {"direction": "down", "end_price": 10.0},
         ]
-        zones = []
-        result = detect_buy_points(strokes, zones, 10.0, macd_divergence_ok=False)
+        result = detect_buy_points(
+            strokes, self._down_trend_zones(), 10.0, macd_divergence_ok=False
+        )
         types = [bp["type"] for bp in result]
         assert "二类买" not in types
+        # 有历史一买前置 + 抬高低点 → 应落为类二买
+        assert "类二买" in types
+
+    def test_buy_point_2_no_trend_no_fire(self):
+        """无下跌趋势中枢 → 二类不得因 macd_ok 误报。"""
+        strokes = [
+            {"direction": "down", "end_price": 8.0},
+            {"direction": "up", "end_price": 11.0},
+            {"direction": "down", "end_price": 10.0},
+        ]
+        result = detect_buy_points(strokes, [], 10.0, macd_divergence_ok=True)
+        types = [bp["type"] for bp in result]
+        assert "二类买" not in types
+        assert "类二买" not in types
 
     def test_buy_point_3_above_old_narrow_window(self):
         """P1 三类买：close 在中枢上方 3%（旧逻辑 >2% 会拒）+ 回踩 down 不破 zh_top → 有。"""
@@ -433,8 +468,8 @@ class TestDetectBuyPoints:
             {"direction": "up", "end_price": 12.0},
             {"direction": "down", "end_price": 9.0, "start_index": sc, "end_index": ec},
         ]
-        zones = [{"zh_top": 11.5, "zh_bottom": 10.5, "valid": True}]
-        result = detect_buy_points(strokes, zones, 9.0, bars=bars)
+        # 即便给趋势中枢，力度未更弱也不报
+        result = detect_buy_points(strokes, self._down_trend_zones(), 9.0, bars=bars)
         types = [bp["type"] for bp in result]
         assert "一类买" not in types
 
@@ -1318,12 +1353,11 @@ class TestClassifyStructure:
         result = classify_structure([], strokes=[])
         assert result["structure_type"] == "无结构"
 
-    def test_no_zones_with_segments_is_consolidation(self):
-        """0 中枢有笔有线段 → 盘整（弱盘整，主状态不用线段不足）。"""
+    def test_no_zones_with_segments_is_no_structure(self):
+        """0 中枢有笔有线段 → 无结构（原典合规 A：0 中枢不谎报盘整）。"""
         strokes = self._make_strokes(6)
         result = classify_structure([], segments=[{"direction": "up"}], strokes=strokes)
-        assert result["structure_type"] == "盘整"
-        assert result["structure_confidence"] == "low"
+        assert result["structure_type"] == "无结构"
         assert "structure_evidence" in result
 
     def test_one_zone_few_segments_still_consolidation(self):
@@ -1580,14 +1614,21 @@ class TestBuildZonesMerge:
             {"start_price": 35, "end_price": 18, "direction": "down"},
             {"start_price": 18, "end_price": 40, "direction": "up"},
         ]
-        import trader_shared.chan_core as cc
-        orig = cc.CHAN_ZONE_MERGE_ENABLED
+        # 开关在 chan_geometry 命名空间；或 merge=False 参数直接禁用
+        import trader_shared.chan_geometry as cg
+        orig = cg.CHAN_ZONE_MERGE_ENABLED
         try:
-            cc.CHAN_ZONE_MERGE_ENABLED = False
+            cg.CHAN_ZONE_MERGE_ENABLED = False
             result = build_zones(items, merge=True)
             assert len(result) >= 2  # 不合并
+            # 未合并 raw 区无 members 字段
+            assert all("members" not in z for z in result)
         finally:
-            cc.CHAN_ZONE_MERGE_ENABLED = orig
+            cg.CHAN_ZONE_MERGE_ENABLED = orig
+        # 参数 merge=False 亦应不合并
+        result2 = build_zones(items, merge=False)
+        assert len(result2) >= 2
+        assert all("members" not in z for z in result2)
 
 
 class TestClassifyStructureMerged:

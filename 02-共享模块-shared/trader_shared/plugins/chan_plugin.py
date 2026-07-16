@@ -13,11 +13,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from trader_shared.config import CHANLUN_MIN_BARS
 from trader_shared.interfaces import IndicatorPlugin
 
-# Minimum number of minute bars required before we trust minute-level chan.
-# ~20 根 5m ≈ 100 分钟，足以成笔/分段；不足则回退日线，避免早盘噪声。
-_MINUTE_MIN_BARS = 20
+# 与引擎门槛共用，避免双份常量漂移导致「门槛过了但引擎仍返回空」
+_MINUTE_MIN_BARS = CHANLUN_MIN_BARS
 
 
 def _normalize_minute_bars(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -38,10 +38,10 @@ def _normalize_minute_bars(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         nb = dict(b)
         full_ts = nb.get("time") or nb.get("datetime") or nb.get("day") or ""
-        if full_ts and (":" in full_ts or " " in full_ts):
-            nb["date"] = full_ts  # 带时分秒的完整时间戳 → 唯一身份
+        if full_ts and (":" in str(full_ts) or " " in str(full_ts)):
+            nb["date"] = str(full_ts)  # 带时分秒的完整时间戳 → 唯一身份
         elif not nb.get("date"):
-            nb["date"] = full_ts or ""  # 兜底：完全没有时间信息才退化
+            nb["date"] = str(full_ts) if full_ts else ""  # 兜底：完全没有时间信息才退化
         norm.append(nb)
     return norm
 
@@ -71,7 +71,11 @@ class ChanlunPlugin(IndicatorPlugin):
         if minute_bars and len(minute_bars) >= _MINUTE_MIN_BARS:
             eff = _normalize_minute_bars(minute_bars)
             # 5m 路径只算分钟级买卖点，不叠加周线 overlay（避免 timeframe 错配）
-            return chanlun_strategy(current, eff, change_pct, quote)
+            out = chanlun_strategy(current, eff, change_pct, quote)
+            # 修正 strategy 默认的 timeframe=daily 标签，避免分钟结果被误标
+            if isinstance(out, dict) and isinstance(out.get("chanlun"), dict):
+                out = {**out, "chanlun": {**out["chanlun"], "timeframe": "5m"}}
+            return out
         # 日线路径：保留 weekly_bars 透传（ADR-002，中线回退依赖它，不可丢）
         return chanlun_strategy(current, bars, change_pct, quote, weekly_bars=weekly_bars)
 

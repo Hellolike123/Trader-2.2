@@ -211,11 +211,16 @@ WYCKOFF_SCORE_LPS: int = 12                     # Last Point of Support 最后�
 WYCKOFF_SCORE_LPSY: int = -12                    # Last Point of Supply 最后供应 — 反弹不过前高缩量
 WYCKOFF_SCORE_COMPRESSION: int = 10              # Compression 压缩蓄势 — 振幅收窄+量能枯竭
 WYCKOFF_SCORE_TREND_PB: int = 8                  # Trend Pullback 趋势回踩 — 回踩不破均线
-# P0-5 事件簇确认打分权重（顺序确认的簇比孤立信号更可靠，直接抑制 fusion 误出手）
+# 原典补齐：PS/PSY/BU/UTAD（弱于主事件，避免淹没 Spring/SOS）
+WYCKOFF_SCORE_PS: int = 8                       # Preliminary Support 初步止跌
+WYCKOFF_SCORE_PSY: int = -8                     # Preliminary Supply 初步供应
+WYCKOFF_SCORE_BU: int = 12                      # Backup 备份买（SOS 后缩量回踩）
+WYCKOFF_SCORE_UTAD: int = -18                   # UTAD 派发末上冲（强于普通 UT）
+# P0-5 事件簇确认打分权重（顺序确认的簇比孤立信号更可靠 → 池/复盘分）
 WYCKOFF_SCORE_CLUSTER_CONFIRM: int = 15         # 积累确认(Spring→SOS 顺序) 额外加分
 WYCKOFF_SCORE_CLUSTER_DISTRIB: int = -15        # 派发确认(Upthrust→SOW 顺序) 额外扣分
 WYCKOFF_SCORE_CLUSTER_FAIL: int = -20           # 积累失败(Spring→SOW) 假突破实为派发，强看空
-WYCKOFF_SCORE_MAX_ABS: int = 130                # 归一化分母 130，raw∈[-130,+130]→score∈[0,100]（50中性）
+WYCKOFF_SCORE_MAX_ABS: int = 140                # 归一化分母（含 PS/BU/UTAD 后略抬）
 # 五阶段机原典串联：Spring/Upthrust 必须在 Phase B（停止后建仓区）之后才有效。
 # 孤立/早于 B 阶段的 Spring/UT 判为噪声（降权）：相位维持中性、打分减半。
 WYCKOFF_PHASE_PREMATURE_SPRING_PENALTY: float = 0.0   # 过早 Spring 相位修正（噪声=中性，降权在 score 层做）
@@ -402,6 +407,7 @@ __all__ = [
     "WYCKOFF_SCORE_AR", "WYCKOFF_SCORE_SOS",
     "WYCKOFF_SCORE_ST", "WYCKOFF_SCORE_LPS", "WYCKOFF_SCORE_LPSY",
     "WYCKOFF_SCORE_COMPRESSION", "WYCKOFF_SCORE_TREND_PB",
+    "WYCKOFF_SCORE_PS", "WYCKOFF_SCORE_PSY", "WYCKOFF_SCORE_BU", "WYCKOFF_SCORE_UTAD",
     "WYCKOFF_SCORE_CLUSTER_CONFIRM", "WYCKOFF_SCORE_CLUSTER_DISTRIB", "WYCKOFF_SCORE_CLUSTER_FAIL",
     # ① TR 质量接打分
     "WYCKOFF_TR_QUALITY_NEUTRAL", "WYCKOFF_SCORE_TR_QUALITY_GAIN",

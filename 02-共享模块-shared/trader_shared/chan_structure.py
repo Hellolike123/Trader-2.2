@@ -444,6 +444,97 @@ def _zone_last_end_index(zone: dict) -> int:
                     candidates.append(e)
     return max(candidates) if candidates else -1
 
+
+def _strict_down_trend_zones(valid_zones: list[dict]) -> bool:
+    """下跌趋势：≥2 中枢且末中枢整体在前中枢下方（严格不重叠，与 classify 拓扑一致）。"""
+    if len(valid_zones) < 2:
+        return False
+    a, b = valid_zones[-2], valid_zones[-1]
+    try:
+        return float(b["zh_top"]) < float(a["zh_bottom"])
+    except (TypeError, ValueError, KeyError):
+        return False
+
+
+def _strict_up_trend_zones(valid_zones: list[dict]) -> bool:
+    """上涨趋势：≥2 中枢且末中枢整体在前中枢上方（严格不重叠）。"""
+    if len(valid_zones) < 2:
+        return False
+    a, b = valid_zones[-2], valid_zones[-1]
+    try:
+        return float(b["zh_bottom"]) > float(a["zh_top"])
+    except (TypeError, ValueError, KeyError):
+        return False
+
+
+def _stroke_leaves_after_zone(stroke: dict, zone: dict) -> bool:
+    """笔是否从中枢之后离开（无 index 时放行，兼容手工 stroke 单测）。"""
+    z_end = _zone_last_end_index(zone)
+    si = stroke.get("start_index")
+    if si is None or z_end < 0:
+        return True
+    try:
+        return int(si) > z_end
+    except (TypeError, ValueError):
+        return True
+
+
+def _historical_type1_buy_ok(
+    down_strokes: list[dict],
+    valid_zones: list[dict],
+    bars: list[dict] | None,
+) -> bool:
+    """二类买时刻：末笔是抬高低点回抽，一类低点在 down_strokes[-2]。
+
+    禁止「同帧 buy_points 里已有一类」——一类要创新低、二类要不破前低，
+    同一末笔几何互斥，旧逻辑导致二类永假。
+    """
+    if len(down_strokes) < 2 or not _strict_down_trend_zones(valid_zones):
+        return False
+    first = down_strokes[-2]
+    if not _stroke_leaves_after_zone(first, valid_zones[-1]):
+        return False
+    if len(down_strokes) >= 3:
+        prior = down_strokes[-3]
+        try:
+            if float(first["end_price"]) > float(prior["end_price"]):
+                return False
+        except (TypeError, ValueError, KeyError):
+            return False
+        area_prev = _stroke_macd_area(bars, prior, "neg")
+        area_curr = _stroke_macd_area(bars, first, "neg")
+        if area_prev is not None and area_curr is not None:
+            if not _stroke_force_weaker(area_prev, area_curr, "down"):
+                return False
+    return True
+
+
+def _historical_type1_sell_ok(
+    up_strokes: list[dict],
+    valid_zones: list[dict],
+    bars: list[dict] | None,
+) -> bool:
+    """二类卖时刻：末笔是降低高点反抽，一类高点在 up_strokes[-2]。"""
+    if len(up_strokes) < 2 or not _strict_up_trend_zones(valid_zones):
+        return False
+    first = up_strokes[-2]
+    if not _stroke_leaves_after_zone(first, valid_zones[-1]):
+        return False
+    if len(up_strokes) >= 3:
+        prior = up_strokes[-3]
+        try:
+            if float(first["end_price"]) < float(prior["end_price"]):
+                return False
+        except (TypeError, ValueError, KeyError):
+            return False
+        area_prev = _stroke_macd_area(bars, prior, "pos")
+        area_curr = _stroke_macd_area(bars, first, "pos")
+        if area_prev is not None and area_curr is not None:
+            if not _stroke_force_weaker(area_prev, area_curr, "up"):
+                return False
+    return True
+
+
 def detect_buy_points(
     strokes: list[dict],
     zones: list[dict],
@@ -455,9 +546,10 @@ def detect_buy_points(
 ) -> list[dict]:
     """检测缠论买点（P1 定义纠偏）。
 
-    一类买: 最后一笔 down + valid 中枢 + 至少两段 down + 笔级底背驰
-    二类买: down_a→up→down_b 且 low_b>low_a 且 low_b<up_high + 笔级力度/MACD 确认
-    三类买: 离开 ZG 之后出现回抽 down 且 end>=ZG；未回踩不报（取消 0~2% 窄窗，上限 15%）
+    一类买: 下跌趋势（≥2 不重叠下移中枢）+ 离开段末 down 创新低 + 笔级底背驰
+    二类买: down_a→up→down_b 且 low_b>low_a 且 low_b<up_high；
+           前置一类 = 时间轴上 down_a 满足历史一类结构（非同帧 buy_points）
+    三类买: 离开 ZG 之后出现回抽 down 且 end>=ZG；未回踩不报（上限 15%）
     bars 须为与 stroke index 对齐的序列（chanlun_analysis 传入 handle_inclusion 后的 cleaned）。
     """
     buy_points: list[dict[str, Any]] = []
@@ -481,17 +573,15 @@ def detect_buy_points(
     up_strokes = [s for s in strokes if s["direction"] == "up"]
 
     # ── P1 一类买：下跌趋势背驰（严格缠论）──
-    # 删除旧「仅 MACD 为负 + 放量 + MA20」无中枢假一类
-    # 严格化：一类买 = 下跌趋势背驰转折点，须趋势（≥2 个下移中枢），盘整背驰不算；
-    #          且最后一段 down 必须在最后一个中枢之后（背驰发生在离开段）。
-    _is_down_trend = len(valid_zones) >= 2 and valid_zones[-1]["zh_top"] < valid_zones[-2]["zh_top"]
+    # 须趋势（≥2 个严格不重叠下移中枢），盘整背驰不算；
+    # 且最后一段 down 必须在最后一个中枢之后（背驰发生在离开段）。
+    _is_down_trend = _strict_down_trend_zones(valid_zones)
     if (
         last_stroke["direction"] == "down"
         and _is_down_trend
         and len(down_strokes) >= 2
     ):
-        _last_zone_end = _zone_last_end_index(valid_zones[-1]) if valid_zones else -1
-        if down_strokes[-1].get("start_index", 0) > _last_zone_end:
+        if _stroke_leaves_after_zone(down_strokes[-1], valid_zones[-1]):
             prev_down = down_strokes[-2]
             curr_down = down_strokes[-1]
             price_new_low = curr_down["end_price"] <= prev_down["end_price"]
@@ -559,29 +649,25 @@ def detect_buy_points(
                 # P8: 两笔之间无同向笔 → 结构不成立，跳过二类买
                 pass
             else:
-                # 严格缠论二类买：必须前置一类买（无一类买则无二类买），且回抽不破一类买低点
-                _first_buy = next((bp for bp in buy_points if bp["type"] == "一类买"), None)
-                if _first_buy is not None:
-                    structure_ok = low_b > low_a and low_b < up_high
-                    if structure_ok:
-                        area_prev = _stroke_macd_area(bars, down_strokes[-2], "neg")
-                        area_curr = _stroke_macd_area(bars, down_strokes[-1], "neg")
-                        area_ok = _stroke_force_not_much_stronger(area_prev, area_curr, "down")
-                        if area_ok or macd_divergence_ok:
-                            buy_points.append({
-                                "type": "二类买",
-                                "price": round(low_b, 4),
-                                "confidence": 2,
-                            })
-                        else:
-                            # 类二买：结构同二买（down→up→down + low抬升 + 有一买前置），
-                            # 但面积对比不满足减弱条件（area_ok=False）或 MACD 未确认，
-                            # 视为二买的弱化版。
-                            buy_points.append({
-                                "type": "类二买",
-                                "price": round(low_b, 4),
-                                "confidence": 1,
-                            })
+                # 前置一类：时间轴上 down_a 为历史一类低点（非同帧 buy_points）
+                structure_ok = low_b > low_a and low_b < up_high
+                if structure_ok and _historical_type1_buy_ok(down_strokes, valid_zones, bars):
+                    area_prev = _stroke_macd_area(bars, down_strokes[-2], "neg")
+                    area_curr = _stroke_macd_area(bars, down_strokes[-1], "neg")
+                    area_ok = _stroke_force_not_much_stronger(area_prev, area_curr, "down")
+                    if area_ok or macd_divergence_ok:
+                        buy_points.append({
+                            "type": "二类买",
+                            "price": round(low_b, 4),
+                            "confidence": 2,
+                        })
+                    else:
+                        # 类二买：结构同二买 + 有历史一买前置，但力度/MACD 未确认
+                        buy_points.append({
+                            "type": "类二买",
+                            "price": round(low_b, 4),
+                            "confidence": 1,
+                        })
 
     # ── P1/P2 三类买：离开中枢后回踩不入；回抽须为近端（末 2 笔内）──
     if last_close > 0 and valid_zones:
@@ -660,16 +746,14 @@ def detect_sell_points(
     down_strokes = [s for s in strokes if s["direction"] == "down"]
 
     # ── P1 一类卖：上涨趋势背驰（严格缠论）──
-    # 删除无中枢降级一类卖
-    # 严格化：一类卖 = 上涨趋势背驰，须趋势（≥2 个上移中枢）；最后 up 在最后中枢之后
-    _is_up_trend = len(valid_zones) >= 2 and valid_zones[-1]["zh_bottom"] > valid_zones[-2]["zh_bottom"]
+    # 须趋势（≥2 个严格不重叠上移中枢）；最后 up 在最后中枢之后
+    _is_up_trend = _strict_up_trend_zones(valid_zones)
     if (
         last_stroke["direction"] == "up"
         and _is_up_trend
         and len(up_strokes) >= 2
     ):
-        _last_zone_end_s = _zone_last_end_index(valid_zones[-1]) if valid_zones else -1
-        if up_strokes[-1].get("start_index", 0) > _last_zone_end_s:
+        if _stroke_leaves_after_zone(up_strokes[-1], valid_zones[-1]):
             prev_up = up_strokes[-2]
             curr_up = up_strokes[-1]
             price_new_high = curr_up["end_price"] >= prev_up["end_price"]
@@ -734,20 +818,18 @@ def detect_sell_points(
                 # P8: 两笔之间无同向笔 → 结构不成立，跳过二类卖
                 pass
             else:
-                # 严格缠论二类卖：必须前置一类卖（无一类卖则无二类卖），且反弹不过一类卖高点
-                _first_sell = next((bp for bp in sell_points if bp["type"] == "一类卖"), None)
-                if _first_sell is not None:
-                    structure_ok = high_b < high_a and high_b > down_low
-                    if structure_ok:
-                        area_prev = _stroke_macd_area(bars, up_strokes[-2], "pos")
-                        area_curr = _stroke_macd_area(bars, up_strokes[-1], "pos")
-                        area_ok = _stroke_force_not_much_stronger(area_prev, area_curr, "up")
-                        if area_ok or macd_divergence_ok:
-                            sell_points.append({
-                                "type": "二类卖",
-                                "price": round(high_b, 4),
-                                "confidence": 2,
-                            })
+                # 前置一类：时间轴上 up_a 为历史一类高点（非同帧 sell_points）
+                structure_ok = high_b < high_a and high_b > down_low
+                if structure_ok and _historical_type1_sell_ok(up_strokes, valid_zones, bars):
+                    area_prev = _stroke_macd_area(bars, up_strokes[-2], "pos")
+                    area_curr = _stroke_macd_area(bars, up_strokes[-1], "pos")
+                    area_ok = _stroke_force_not_much_stronger(area_prev, area_curr, "up")
+                    if area_ok or macd_divergence_ok:
+                        sell_points.append({
+                            "type": "二类卖",
+                            "price": round(high_b, 4),
+                            "confidence": 2,
+                        })
 
     # ── P1/P2 三类卖：离开后反弹不回；反弹须为近端（末 2 笔内）──
     if last_close > 0 and valid_zones:

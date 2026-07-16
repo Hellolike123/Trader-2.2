@@ -1078,6 +1078,25 @@ class TestFormatWyckoffOneline:
         assert line2 == "威科夫：暂无事件 · 中性"
         assert "\n" not in line
 
+    def test_insufficient_timeframe_honest(self):
+        """周线不足不得伪装成「暂无事件」."""
+        line = format_wyckoff_oneline({
+            "timeframe": "insufficient",
+            "wyckoff_summary": "周线数据不足，中线威科夫不参与定论",
+            "spring_signal": False,
+        })
+        assert "不参与定论" in line
+        assert "暂无事件" not in line
+
+    def test_spring_premature_not_bullish(self):
+        line = format_wyckoff_oneline({
+            "spring_signal": True,
+            "spring_premature": True,
+            "spring_vol_class": "low_vol_confirm",
+        })
+        assert "噪声" in line or "孤立" in line or "过早" in line
+        assert "偏多" not in line  # premature → 中性展示
+
     def test_spring_low_vol_one_line(self):
         line = format_wyckoff_oneline({
             "spring_signal": True,

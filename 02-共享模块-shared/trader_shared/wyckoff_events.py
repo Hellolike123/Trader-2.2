@@ -904,8 +904,8 @@ def _detect_ar(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     if len(bars) < WYCKOFF_MIN_BARS + 3:
         return {"ar_signal": False, "ar_reason": "数据不足", "ar_price": None}
 
-    # 扫描最近 5 根 K 线寻找 BC
-    scan_start = max(1, len(bars) - 5)
+    # 扫描最近 15 根寻找 BC/SC 锚点（原 5 根过短，A 股高潮后 1 周才反弹会漏 AR）
+    scan_start = max(1, len(bars) - 15)
     bc_bar_idx = None
     bc_close = None
     bc_avg_vol = None
@@ -1678,4 +1678,214 @@ def _detect_trend_pullback(bars: list[dict]) -> dict:
         "trend_pullback_signal": True,
         "trend_pullback_reason": f"趋势回踩（回撤 {pullback_pct:.1f}%）+ 缩量（量比 {vol_ratio:.2f}）+ 站稳 MA20",
         "trend_pullback_price": round(current_close, 2),
+    }
+
+
+# ── 原典补齐：PS / PSY / BU / UTAD / 因果目标 ──────────────────────────────
+
+
+def _detect_preliminary_support(bars: list[dict], tr_ctx: dict | None = None) -> dict:
+    """PS (Preliminary Support) — SC 之前的初步止跌：低位放量阴/十字，跌幅弱于 SC。
+
+    与 SC 区分：不要求「高潮级」宽幅暴跌，只要求低位 + 量能放大 + 收盘未创新低塌陷。
+    若当日已是 SC 则不重复报 PS。
+    """
+    if len(bars) < 12:
+        return {"ps_signal": False, "ps_reason": "数据不足", "ps_price": None}
+    sc = _detect_selling_climax(bars, tr_ctx=tr_ctx)
+    if sc.get("sc_signal"):
+        return {"ps_signal": False, "ps_reason": "当日已是 SC，PS 让位", "ps_price": None}
+
+    cur = bars[-1]
+    recent = bars[-11:-1]
+    avg_vol = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
+    cur_vol = to_float(cur.get("volume")) or 0
+    cur_open = to_float(cur.get("open"))
+    cur_close = to_float(cur.get("close"))
+    cur_low = to_float(cur.get("low"))
+    prev_close = to_float(bars[-2].get("close")) if len(bars) >= 2 else cur_open
+    if not avg_vol or cur_close is None or prev_close is None or cur_open is None:
+        return {"ps_signal": False, "ps_reason": "数据异常", "ps_price": None}
+
+    pos = _price_pos_pct(bars, len(bars) - 1)
+    if pos is None or pos > 0.45:
+        return {"ps_signal": False, "ps_reason": "非低位，非 PS", "ps_price": None}
+    if cur_vol < avg_vol * 1.4:
+        return {"ps_signal": False, "ps_reason": "量能不足", "ps_price": None}
+    chg = (cur_close - prev_close) / max(abs(prev_close), 0.01) * 100
+    # 下跌但非崩盘（崩盘归 SC）：-0.5% ~ -6%，或阴线收在区间中上部
+    if chg > -0.3:
+        return {"ps_signal": False, "ps_reason": "未体现止跌抛压", "ps_price": None}
+    if chg < -7.0:
+        return {"ps_signal": False, "ps_reason": "跌幅过大，更接近 SC", "ps_price": None}
+    body_ok = cur_close >= cur_open or (cur_low is not None and cur_close > cur_low * 1.005)
+    if not body_ok:
+        return {"ps_signal": False, "ps_reason": "收盘过弱", "ps_price": None}
+    return {
+        "ps_signal": True,
+        "ps_reason": f"低位放量初步止跌（量比 {cur_vol / avg_vol:.1f}，{chg:.1f}%）",
+        "ps_price": round(cur_close, 2),
+    }
+
+
+def _detect_preliminary_supply(bars: list[dict], tr_ctx: dict | None = None) -> dict:
+    """PSY (Preliminary Supply) — BC 之前的初步供应：高位放量滞涨/上影。"""
+    if len(bars) < 12:
+        return {"psy_signal": False, "psy_reason": "数据不足", "psy_price": None}
+    bc = _detect_buying_climax(bars, tr_ctx=tr_ctx)
+    if bc.get("bc_signal"):
+        return {"psy_signal": False, "psy_reason": "当日已是 BC，PSY 让位", "psy_price": None}
+
+    cur = bars[-1]
+    recent = bars[-11:-1]
+    avg_vol = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
+    cur_vol = to_float(cur.get("volume")) or 0
+    cur_open = to_float(cur.get("open"))
+    cur_close = to_float(cur.get("close"))
+    cur_high = to_float(cur.get("high"))
+    cur_low = to_float(cur.get("low"))
+    prev_close = to_float(bars[-2].get("close")) if len(bars) >= 2 else cur_open
+    if not avg_vol or cur_close is None or prev_close is None or cur_open is None:
+        return {"psy_signal": False, "psy_reason": "数据异常", "psy_price": None}
+
+    pos = _price_pos_pct(bars, len(bars) - 1)
+    if pos is None or pos < 0.55:
+        return {"psy_signal": False, "psy_reason": "非高位，非 PSY", "psy_price": None}
+    if cur_vol < avg_vol * 1.4:
+        return {"psy_signal": False, "psy_reason": "量能不足", "psy_price": None}
+    chg = (cur_close - prev_close) / max(abs(prev_close), 0.01) * 100
+    rng = (cur_high - cur_low) if cur_high is not None and cur_low is not None else 0
+    upper = (cur_high - max(cur_open, cur_close)) if cur_high is not None else 0
+    has_upper = rng > 0 and upper / rng > 0.35
+    stagnant = chg < 1.5
+    if not (stagnant or has_upper or cur_close < cur_open):
+        return {"psy_signal": False, "psy_reason": "无滞涨/上影特征", "psy_price": None}
+    return {
+        "psy_signal": True,
+        "psy_reason": f"高位放量初步供应（量比 {cur_vol / avg_vol:.1f}）",
+        "psy_price": round(cur_close, 2),
+    }
+
+
+def _detect_backup(bars: list[dict], tr_ctx: dict | None = None) -> dict:
+    """BU (Backup) — SOS 突破后缩量回踩不破突破位/TR 上沿（Markup 初期买点）。"""
+    if len(bars) < 20:
+        return {"bu_signal": False, "bu_reason": "数据不足", "bu_price": None}
+
+    # 在近 12 根内找 SOS 锚点
+    sos_idx = -1
+    sos_low = None
+    for i in range(len(bars) - 2, max(0, len(bars) - 13), -1):
+        sub = bars[: i + 1]
+        if len(sub) < 15:
+            continue
+        try:
+            r = _detect_sos(sub, tr_ctx=tr_ctx)
+        except Exception:
+            continue
+        if r.get("sos_signal"):
+            sos_idx = i
+            lows = [to_float(b.get("low")) for b in sub[-5:] if to_float(b.get("low")) is not None]
+            sos_low = min(lows) if lows else to_float(bars[i].get("close"))
+            break
+    if sos_idx < 0 or sos_low is None:
+        return {"bu_signal": False, "bu_reason": "近端无 SOS，无 Backup", "bu_price": None}
+
+    # 当前须在 SOS 之后至少 2 根，且为回踩（close < 近高）
+    if len(bars) - 1 - sos_idx < 2:
+        return {"bu_signal": False, "bu_reason": "SOS 过新，尚未回踩", "bu_price": None}
+
+    cur = bars[-1]
+    cur_close = to_float(cur.get("close"))
+    cur_low = to_float(cur.get("low"))
+    if cur_close is None or cur_low is None:
+        return {"bu_signal": False, "bu_reason": "数据异常", "bu_price": None}
+
+    # 支撑：TR 上沿优先，否则 SOS 窗口低点
+    floor = sos_low
+    if tr_ctx and tr_ctx.get("tr_upper") is not None:
+        floor = max(floor, float(tr_ctx["tr_upper"]) * 0.995)
+
+    if cur_low < floor * 0.985:
+        return {"bu_signal": False, "bu_reason": "回踩跌破突破位", "bu_price": None}
+    if cur_close < floor * 0.99:
+        return {"bu_signal": False, "bu_reason": "收盘未守住突破区", "bu_price": None}
+
+    recent = bars[sos_idx:len(bars) - 1] or bars[-6:-1]
+    avg_vol = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
+    cur_vol = to_float(cur.get("volume")) or 0
+    if avg_vol > 0 and cur_vol > avg_vol * 0.85:
+        return {"bu_signal": False, "bu_reason": "回踩未缩量", "bu_price": None}
+
+    return {
+        "bu_signal": True,
+        "bu_reason": f"SOS 后缩量回踩不破 {floor:.2f}（Backup）",
+        "bu_price": round(cur_close, 2),
+    }
+
+
+def _detect_utad(
+    bars: list[dict],
+    tr_ctx: dict | None = None,
+    *,
+    bc_signal: bool = False,
+    sow_signal: bool = False,
+    upthrust_signal: bool = False,
+    upthrust_result: dict | None = None,
+) -> dict:
+    """UTAD — 派发区末端上冲：须有派发背景（BC 或 SOW）且当日 UT 成立。"""
+    has_dist = bool(bc_signal or sow_signal)
+    if not has_dist:
+        # 滑窗弱扫描：近端是否有 BC
+        if len(bars) >= 15:
+            try:
+                has_dist = bool(_detect_buying_climax(bars).get("bc_signal"))
+            except Exception:
+                has_dist = False
+    if not has_dist:
+        return {"utad_signal": False, "utad_reason": "无派发背景（需 BC/SOW）", "utad_price": None}
+
+    ut = upthrust_result if upthrust_result is not None else _detect_upthrust(bars, tr_ctx=tr_ctx)
+    if not (upthrust_signal or ut.get("upthrust_signal")):
+        return {"utad_signal": False, "utad_reason": "无上冲回落，非 UTAD", "utad_price": None}
+    if ut.get("upthrust_strength") == "failure":
+        return {"utad_signal": False, "utad_reason": "上冲未收回，非 UTAD", "utad_price": None}
+
+    price = ut.get("upthrust_price") or to_float(bars[-1].get("close"))
+    return {
+        "utad_signal": True,
+        "utad_reason": "派发背景上的上冲回落（UTAD）",
+        "utad_price": round(price, 2) if price else None,
+    }
+
+
+def _cause_effect_targets(tr_ctx: dict | None, bars: list[dict] | None = None) -> dict:
+    """因果律简化执行：用 TR 高度 1:1 投射目标（水平计数近似，非完整 P&F）。
+
+    上升目标 ≈ tr_upper + (tr_upper - tr_lower)
+    下降目标 ≈ tr_lower - (tr_upper - tr_lower)
+    """
+    empty = {
+        "cause_effect_up_target": None,
+        "cause_effect_down_target": None,
+        "cause_effect_range": None,
+        "cause_effect_note": "无有效 TR，无法做因果目标",
+    }
+    if not tr_ctx:
+        return empty
+    try:
+        upper = float(tr_ctx["tr_upper"])
+        lower = float(tr_ctx["tr_lower"])
+    except (TypeError, ValueError, KeyError):
+        return empty
+    if upper <= lower:
+        return empty
+    height = upper - lower
+    return {
+        "cause_effect_up_target": round(upper + height, 2),
+        "cause_effect_down_target": round(lower - height, 2),
+        "cause_effect_range": round(height, 2),
+        "cause_effect_note": (
+            f"TR 高度 {height:.2f} 作 1:1 投射（简化因果/水平计数近似，非点数图）"
+        ),
     }

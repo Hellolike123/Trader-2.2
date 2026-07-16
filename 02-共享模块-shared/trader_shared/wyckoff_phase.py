@@ -88,6 +88,7 @@ from .wyckoff_events import (
 )
 
 _PHASE_ORDER = {
+    "markdown": -4,           # 主跌（派发完成后）
     "distribution_d": -3,
     "distribution_c": -2,
     "distribution_a": -1,
@@ -96,6 +97,7 @@ _PHASE_ORDER = {
     "accumulation_b": 2,
     "accumulation_c": 3,
     "accumulation_d": 4,
+    "markup": 5,              # 主升（积累完成后）
 }
 
 _WYCKOFF_PHASE_FILE = os.path.expanduser("~/.trader/wyckoff_phase.json")
@@ -243,6 +245,42 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
         upthrust_premature = not dist_b_ctx
     else:
         upthrust_premature = False
+
+    # ── Markup / Markdown（E 后主升/主跌标签）──
+    last_close = signals.get("last_close")
+    tr_upper = signals.get("tr_upper")
+    bu = bool(signals.get("bu_signal"))
+    utad = bool(signals.get("utad_signal"))
+    # Markup：积累 D 确认后 + 站上 TR 上沿，或 BU（SOS 后备份买）
+    if (not spring_premature and spring and (sos or lps)) or bu:
+        if bu or (
+            last_close is not None
+            and tr_upper is not None
+            and float(last_close) > float(tr_upper)
+            and sos
+        ):
+            return {
+                "phase": "markup",
+                "phase_label": "主升 Markup（离开积累区）",
+                "phase_confidence_delta": 0.12,
+                "spring_premature": False,
+                "upthrust_premature": upthrust_premature,
+            }
+    # Markdown：派发确认后跌破 / UTAD+SOW
+    if utad or (not upthrust_premature and ut_found and sow_found):
+        tr_lower = (tr_ctx or {}).get("tr_lower") if tr_ctx else None
+        if utad or (
+            last_close is not None
+            and tr_lower is not None
+            and float(last_close) < float(tr_lower)
+        ):
+            return {
+                "phase": "markdown",
+                "phase_label": "主跌 Markdown（离开派发区）",
+                "phase_confidence_delta": -0.12,
+                "spring_premature": spring_premature,
+                "upthrust_premature": False if ut_found else upthrust_premature,
+            }
 
     # ── 积累序列（原典：A停止→B建仓→C弹簧→D确认→E趋势） ──
     # Spring 必须先经 Phase B（有 SC+AR 停止行为或压缩蓄力）才有效

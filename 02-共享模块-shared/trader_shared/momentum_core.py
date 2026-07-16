@@ -231,7 +231,8 @@ def assess_momentum(bars: list[dict]) -> dict[str, Any]:
     if macd_death and rsi_falling and not bearish_rsi_handled:
         signals.append("MACD死叉+RSI下降(偏空)")
         score -= 12
-    if macd_positive and not rsi_falling:
+    # 死叉当根 hist 仍可能为正：禁止与死叉同帧再加「柱为正」
+    if macd_positive and not rsi_falling and not macd_death:
         signals.append("MACD柱为正(偏多)")
         score += 8
     if strong_trend:
@@ -250,6 +251,18 @@ def assess_momentum(bars: list[dict]) -> dict[str, Any]:
     if macd_death and not macd_positive and rsi_falling and not di_up:
         signals.append("多指标共振(强烈看空)")
         score -= 10
+
+    # ── 极性冲突：强 ADX 趋势与反向超买超卖修复对冲时，削减逆向超额分 ──
+    # 避免「ADX 强下跌 + RSI 超卖反弹」打成假中性/假偏多
+    if strong_trend and not di_up and score > 50:
+        excess = score - 50
+        score = 50 + excess // 2
+        signals.append("ADX空头约束(多头超额减半)")
+    if strong_trend and di_up and score < 50:
+        deficit = 50 - score
+        score = 50 - deficit // 2
+        signals.append("ADX多头约束(空头超额减半)")
+
     score = max(0, min(100, round(score)))
     if score >= 65:
         direction = "bullish"
@@ -257,10 +270,18 @@ def assess_momentum(bars: list[dict]) -> dict[str, Any]:
         direction = "bearish"
     else:
         direction = "neutral"
+    # strength 与 direction 对齐，补全 insufficient 路径的对称字段
+    if score >= 75 or score <= 25:
+        strength = "strong"
+    elif direction == "neutral":
+        strength = "neutral"
+    else:
+        strength = "moderate"
     return {
         "direction": direction,
         "score": score,
         "signals": signals,
+        "strength": strength,
         "rsi": {"last": last_rsi, "prev": prev_rsi, "rising": rsi_rising, "oversold": rsi_oversold, "overbought": rsi_overbought},
         "macd": {"golden_cross": macd_golden, "death_cross": macd_death, "histogram": macd_hist, "positive": macd_positive},
         "adx": {"value": adx.get("adx"), "strong_trend": strong_trend, "di_uptrend": di_up},

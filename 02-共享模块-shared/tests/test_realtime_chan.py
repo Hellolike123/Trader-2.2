@@ -215,6 +215,50 @@ class TestRealtimeChan:
         assert _norm_sig(sig) == _norm_sig(as_list)
         assert _norm_sig(sig) == sig
 
+    def test_alert_tip_only_change_does_not_claim_new_buy(self):
+        """末笔价微动 + 旧买点仍在 → 不得误报「出现买点」，应走价格兜底文案。"""
+        assert _chan_realtime_alert is not None, "monitor._chan_realtime_alert 应可导入"
+        prev_sig = ("up", "上涨", "up", 10.0, ("一买",), ())
+        result = {
+            "structure_type": "up",
+            "trend_label": "上涨",
+            "strokes": [{"direction": "up", "end_price": 10.5}],
+            "buy_points": [{"type": "一买"}],
+            "sell_points": [],
+        }
+        alert = _chan_realtime_alert(result, prev_sig)
+        assert alert is not None
+        assert "出现买点" not in alert
+        assert "末笔价格更新" in alert
+
+    def test_alert_reports_buy_only_when_types_change(self):
+        assert _chan_realtime_alert is not None
+        prev_sig = ("up", "上涨", "up", 10.0, (), ())
+        result = {
+            "structure_type": "up",
+            "trend_label": "上涨",
+            "strokes": [{"direction": "up", "end_price": 10.0}],
+            "buy_points": [{"type": "一买"}],
+            "sell_points": [],
+        }
+        alert = _chan_realtime_alert(result, prev_sig)
+        assert alert is not None and "出现买点" in alert
+
+    def test_alert_accepts_list_prev_sig_from_json(self):
+        """JSON 往返后 prev_sig 为 list，买卖点差分仍应正确。"""
+        assert _chan_realtime_alert is not None
+        prev_sig = ["up", "上涨", "up", 10.0, ["一买"], []]
+        result = {
+            "structure_type": "up",
+            "trend_label": "上涨",
+            "strokes": [{"direction": "up", "end_price": 10.0}],
+            "buy_points": [{"type": "一买"}],
+            "sell_points": [],
+        }
+        alert = _chan_realtime_alert(result, prev_sig)
+        # 买卖点 type 集合未变、结构未变 → None 或仅无实质文案
+        assert alert is None
+
     def test_load_or_build_falls_back_to_batch(self, tmp_path):
         bars = _gen_bars(80, seed=3)
         # 不存在的预热文件 → 静默回退批量 build，结果应当与直接 build 一致

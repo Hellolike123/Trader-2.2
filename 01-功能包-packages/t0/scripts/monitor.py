@@ -584,7 +584,11 @@ def _check_5m_chan_t0(plan: dict[str, Any]) -> tuple:
         return (None, None)
     if not isinstance(res, dict):
         return (None, None)
-    flat = res.get("chanlun") or res  # 解包 fusion 包装层
+    # 解包 fusion 包装层；空 dict 也是合法结果，不能用 `or`（否则落到外层包装）
+    if isinstance(res.get("chanlun"), dict):
+        flat = res["chanlun"]
+    else:
+        flat = res
     sig = _chan_sig(flat)
     return (sig, flat)
 
@@ -592,9 +596,10 @@ def _check_5m_chan_t0(plan: dict[str, Any]) -> tuple:
 def _chan_realtime_alert(result: dict | None, prev_sig) -> str | None:
     """对比前后缠论指纹，生成人话预警行；无变化返回 None。
 
-    仅在 ``T0_REALTIME_CHAN=1`` 分支内被调用（run_once 中已比对 chan_sig != prev_sig
-    才触发），此处专注于把变化翻译成可读文本：结构/趋势变化、日内新成笔方向、出现/消失买卖点。
-    指纹可能仅在末笔端点（价格抖动）层面变化，故末尾有兜底，保证检测到变化即产出文本。
+    在日线 ``T0_REALTIME_CHAN=1`` 与 5m 始终开启路径中复用。专注把变化翻译成可读文本：
+    结构/趋势变化、日内新成笔方向、买卖点 type 集合变化。
+    买卖点文案必须对比 prev_buy/prev_sell，禁止「末笔价微动 + 旧买点仍在」误报「出现买点」。
+    指纹可能仅在末笔端点（价格抖动）层面变化，故末尾有兜底。
     """
     if not isinstance(result, dict):
         return None
@@ -604,15 +609,29 @@ def _chan_realtime_alert(result: dict | None, prev_sig) -> str | None:
     last_end = strokes[-1].get("end_price") if strokes else None
     structure_type = result.get("structure_type")
     trend_label = result.get("trend_label")
-    buy_points = [bp.get("type") for bp in (result.get("buy_points") or [])]
-    sell_points = [sp.get("type") for sp in (result.get("sell_points") or [])]
+    # 过滤 None，避免 "、".join 因 type 缺失抛 TypeError
+    buy_points = [bp.get("type") for bp in (result.get("buy_points") or []) if bp.get("type")]
+    sell_points = [sp.get("type") for sp in (result.get("sell_points") or []) if sp.get("type")]
 
-    if isinstance(prev_sig, tuple):
+    if isinstance(prev_sig, (tuple, list)):
         (prev_struct, prev_trend, prev_dir, prev_end, prev_buy, prev_sell) = (
             list(prev_sig) + [None] * 6
         )[:6]
     else:
         prev_struct = prev_trend = prev_dir = prev_end = prev_buy = prev_sell = None
+
+    def _types_tuple(x) -> tuple:
+        """归一为排序后的 type 元组，与 _chan_signature 的 sorted 约定对齐。"""
+        if x is None:
+            return ()
+        if isinstance(x, (list, tuple)):
+            return tuple(sorted(t for t in x if t is not None))
+        return ()
+
+    prev_buy_t = _types_tuple(prev_buy)
+    prev_sell_t = _types_tuple(prev_sell)
+    cur_buy_t = _types_tuple(buy_points)
+    cur_sell_t = _types_tuple(sell_points)
 
     parts: list[str] = []
     # 结构/趋势变化
@@ -624,15 +643,17 @@ def _chan_realtime_alert(result: dict | None, prev_sig) -> str | None:
             parts.append("日内新成上升笔")
         elif last_dir == "down":
             parts.append("日内新成下降笔")
-    # 买卖点出现/消失
-    if buy_points:
-        parts.append("出现买点：" + "、".join(buy_points))
-    elif prev_buy:
-        parts.append("买点消失")
-    if sell_points:
-        parts.append("出现卖点：" + "、".join(sell_points))
-    elif prev_sell:
-        parts.append("卖点消失")
+    # 买卖点：仅 type 集合变化时提示（避免 tip 微动误报「出现买点」）
+    if cur_buy_t != prev_buy_t:
+        if cur_buy_t:
+            parts.append("出现买点：" + "、".join(str(t) for t in cur_buy_t))
+        elif prev_buy_t:
+            parts.append("买点消失")
+    if cur_sell_t != prev_sell_t:
+        if cur_sell_t:
+            parts.append("出现卖点：" + "、".join(str(t) for t in cur_sell_t))
+        elif prev_sell_t:
+            parts.append("卖点消失")
 
     # 兜底：仅末笔端点（价格抖动）变化时也给出可读提示，保证有变化即发声
     if not parts and prev_end is not None and last_end is not None and round(float(prev_end), 2) != round(float(last_end), 2):
@@ -712,8 +733,13 @@ def run_once(
         new_snapshot["history"] = list(target_state.get("history") or [])
         # Phase 2：写入缠论指纹（默认值 None 不影响现有逻辑）
         new_snapshot["chan_signature"] = chan_sig
-        # 5m 缠论指纹（始终记录；默认 None 不影响逻辑）
-        new_snapshot["chan5_signature"] = min5_sig
+        # 5m 指纹：仅在本轮算成功时更新；失败保留上一轮，避免闪断抹掉基线导致下一 tick 漏报
+        if min5_sig is not None:
+            new_snapshot["chan5_signature"] = min5_sig
+        else:
+            new_snapshot["chan5_signature"] = (
+                (previous or {}).get("chan5_signature") if isinstance(previous, dict) else None
+            )
         if chan_sig is not None and chan_result is not None:
             prev_sig = (previous or {}).get("chan_signature")
             # 状态文件经 JSON 往返后 tuple→list（含嵌套），需归一后再比对，

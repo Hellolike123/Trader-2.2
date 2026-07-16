@@ -4,7 +4,7 @@
 > 
 > 标注：✅ 已实现  ⚠️ 部分实现/有差距  ❌ 未实现
 >
-> 审计日期：2026-07-16
+> 审计日期：2026-07-16（同日二次更新：互斥打分 + 原典缺口补齐）
 
 ---
 
@@ -13,7 +13,7 @@
 | 概念 | 状态 | 代码落点 |
 |------|------|---------|
 | 供求律 (Supply & Demand) | ✅ | SC/BC/Spring/Upthrust/量比检测 |
-| 因果律 (Cause & Effect) | ❌ | P&F 计数推算目标价：完全未实现 |
+| 因果律 (Cause & Effect) | ⚠️ | TR 高度 1:1 投射 `cause_effect_*`（非完整 P&F 点数图） |
 | 努力结果律 (Effort vs Result) | ✅ | `_detect_effort_vs_result` (VSA) |
 
 ---
@@ -24,8 +24,8 @@
 |------|------|---------|
 | Accumulation A-E | ✅ | `wyckoff_phase._detect_phase` |
 | Distribution A-E | ✅ | `wyckoff_phase._detect_phase` |
-| **Markup（上升趋势阶段）** | ❌ | 无显式阶段标签（accumulation_d 之后没有标记） |
-| **Markdown（下降趋势阶段）** | ❌ | 无显式阶段标签（distribution_d 之后没有标记） |
+| **Markup（上升趋势阶段）** | ✅ | `phase=markup`（BU 或 SOS+站上 TR 上沿） |
+| **Markdown（下降趋势阶段）** | ✅ | `phase=markdown`（UTAD 或 UT+SOW+破 TR 下沿） |
 
 ---
 
@@ -33,16 +33,16 @@
 
 | 事件 | 状态 | 说明 |
 |------|------|------|
-| **PS (Preliminary Support 初步止跌)** | ❌ | 积累区最早信号，SC 之前的放量止跌。未独立实现 |
+| **PS (Preliminary Support 初步止跌)** | ✅ | `_detect_preliminary_support`；与 SC 互斥让位 |
 | SC (Selling Climax 卖力高潮) | ✅ | |
-| AR (Automatic Rally 自动反弹) | ✅ | |
-| ST (Secondary Test 二次测试) | ⚠️ | 支撑位是近10根最低价重算而非 Spring 记录的 support（P2-3） |
+| AR (Automatic Rally 自动反弹) | ✅ | 锚点扫描窗已扩至 15 根 |
+| ST (Secondary Test 二次测试) | ⚠️ | TR 内用 tr_lower；非 TR 仍局部支撑 |
 | Spring (弹簧/震仓) | ✅ | |
-| Test of Spring (Spring 后确认测试) | ❌ | 代码用 ST 覆盖，但语义是"二次测试"而非"弹簧后确认" |
+| Test of Spring (Spring 后确认测试) | ⚠️ | 仍用 ST 覆盖语义 |
 | SOS (Sign of Strength 强势信号) | ✅ | |
-| **BU (Back Up 回调买入)** | ❌ | **SOS 突破后缩量回调不破突破位。** 与 LPS 不同：BU 在 Markup 初期，LPS 在积累期末端 |
-| LPS (Last Point of Support 最后支撑点) | ⚠️ | 与 LPSY 同时触发抵消，已修（P1-1） |
-| **Jump Across the Creek (跳溪)** | ❌ | 放量突破 TR 上沿启动 Markup，比 SOS 更急、更连续 |
+| **BU (Back Up 回调买入)** | ✅ | `_detect_backup`（SOS 后缩量回踩） |
+| LPS (Last Point of Support 最后支撑点) | ✅ | 与 LPSY 打分互斥 + LPSY 分析层门控 |
+| **Jump Across the Creek (跳溪)** | ⚠️ | 未专名；强 SOS + Markup/BU 近似表达 |
 
 ---
 
@@ -50,13 +50,13 @@
 
 | 事件 | 状态 | 说明 |
 |------|------|------|
-| **Preliminary Supply (PSY 初步供应)** | ❌ | 派发区最早信号，BC 前的放量滞涨。未独立实现 |
+| **Preliminary Supply (PSY 初步供应)** | ✅ | `_detect_preliminary_supply` |
 | BC (Buying Climax 购买高潮) | ✅ | |
 | AR (Automatic Rally after BC) | ✅ | |
-| **UTAD (Upthrust After Distribution)** | ❌ | Upthrust 已实现但通用，UTAD（派发区末端最后假突破）需派发背景（BC/SOW 已存在）才应计数 |
+| **UTAD (Upthrust After Distribution)** | ✅ | `_detect_utad`（须 BC/SOW 背景 + UT） |
 | SOW (Sign of Weakness 弱势信号) | ✅ | |
-| LPSY (Last Point of Supply 最后供应点) | ⚠️ | 已加派发背景门控（P1-1） |
-| **Stopping Volume (止跌量)** | ❌ | 下跌末端"天量但不继续跌"的量价行为，未独立实现 |
+| LPSY (Last Point of Supply 最后供应点) | ✅ | 分析层+打分层派发背景门控；与 LPS 互斥 |
+| **Stopping Volume (止跌量)** | ⚠️ | 与 SC/VSA 部分重叠，未独立命名 |
 
 ---
 
@@ -66,22 +66,22 @@
 
 | 概念 | 状态 | 说明 |
 |------|------|------|
-| TR 识别（成交密集区判定） | ❌ | `_is_trading_range` 只是波动过滤器（近20根ATR振幅≤4×ATR%），不是真正的 TR 识别 |
-| TR 上下沿计算 | ❌ | 代码用局部滑动极值代替 TR 边界（P0-3） |
-| TR 量能基线 | ❌ | 代码用固定窗口均量代替 TR 内的正常量能——窗口含趋势段时基线失真 |
-| TR 持续时间（因果律的基础） | ❌ | 代码未将横盘宽度与目标价关联（因果律缺执行层） |
+| TR 识别（成交密集区判定） | ✅ | `_detect_trading_range` 宽度/振幅/质量 |
+| TR 上下沿计算 | ✅ | 分位带 tr_upper/tr_lower（刺穿毛刺过滤） |
+| TR 量能基线 | ✅ | `tr_baseline_volume` |
+| TR 持续时间（因果律的基础） | ⚠️ | `tr_width` 透出；目标用高度 1:1 投射，非 P&F 格数 |
 
 ---
 
 ## 六、点数图（Point & Figure）
 
-> 因果律的量化执行工具。原典第三大定律的实践。**完全未实现。**
+> 完整 P&F 仍未做；用 TR 高度 1:1 投射作**工程近似**。
 
-| 概念 | 状态 |
-|------|------|
-| P&F 点数图绘制 | ❌ |
-| 垂直计数 (Vertical Count) — 反弹高度1:1映射目标位 | ❌ |
-| 水平计数 (Horizontal Count) — 横盘宽度×每格值算目标 | ❌ |
+| 概念 | 状态 | 说明 |
+|------|------|------|
+| P&F 点数图绘制 | ❌ | 未实现 |
+| 垂直计数 (Vertical Count) | ⚠️ | 近似：`cause_effect_up/down_target` = 边界 ± TR 高度 |
+| 水平计数 (Horizontal Count) | ⚠️ | 同上（用高度而非横盘格数×box） |
 
 ---
 
@@ -89,7 +89,7 @@
 
 | 概念 | 状态 | 说明 |
 |------|------|------|
-| 个股 vs 大盘价量对比 | ❌ | 原典要求始终对比个股与大盘的价量表现来判断 CM 真正意图：强于大盘=吸筹，弱于大盘=派发 |
+| 个股 vs 大盘价量对比 | ❌ | 需大盘序列注入 `wyckoff_analysis`；尚未接数据管线 |
 
 ---
 
@@ -107,9 +107,9 @@
 |------|------|------|
 | Effort vs Result | ✅ | |
 | No Supply（供应耗尽） | ✅ | |
-| **No Demand（无需求）** | ❌ | 未作为独立信号实现 |
-| Stopping Volume | ❌ | 见派发链 |
-| Ultimate Climax | ❌ | 与 SC/BC 有重叠但侧重"终极量"概念 |
+| **No Demand（无需求）** | ⚠️ | 高位缩量滞涨可部分由 PSY/BC 覆盖，未独立命名 |
+| Stopping Volume | ⚠️ | 与 SC/VSA 重叠，未独立命名 |
+| Ultimate Climax | ⚠️ | 与 SC/BC 重叠，未独立命名 |
 
 ---
 

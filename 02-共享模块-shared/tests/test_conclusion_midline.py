@@ -57,6 +57,21 @@ class TestMidlineTheoryDirs:
         w = {"spring_signal": True, "sos_signal": False, "upthrust_signal": False, "bc_signal": False, "sow_signal": False}
         assert wyckoff_midline_bias(w) == "strong_bull"
 
+    def test_wyck_premature_spring_not_strong_bull(self):
+        w = {
+            "spring_signal": True,
+            "spring_premature": True,
+            "sos_signal": False,
+            "upthrust_signal": False,
+            "bc_signal": False,
+            "sow_signal": False,
+        }
+        assert wyckoff_midline_bias(w) == "neutral"
+
+    def test_wyck_insufficient_neutral(self):
+        w = {"timeframe": "insufficient", "spring_signal": True, "sos_signal": True}
+        assert wyckoff_midline_bias(w) == "neutral"
+
 
 class TestMidlineViewB1A:
     def test_stage_does_not_drive_midline(self):
