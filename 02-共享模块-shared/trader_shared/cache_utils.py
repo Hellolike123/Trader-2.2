@@ -74,12 +74,32 @@ CACHE_DAILY = "daily"
 CACHE_ENRICH = "enrich"
 CACHE_MARKET_ENV = "market_env"
 CACHE_FUND_FLOW = "fund_flow"
+CACHE_CYQ = "cyq_perf"  # tushare 筹码日频；按自然日复用
 
 # TTL constants (seconds)
 TTL_DAILY = 86400       # 24 hours - daily bars change once per day
 TTL_WEEKLY = 604800     # 7 days - weekly bars change once per week
 TTL_FUNDAMENTAL = 43200 # 12 hours - shareholder/unlock data updates infrequently
-TTL_FUND_FLOW = 86400   # 24 hours - fund flow data updates daily after market close
+TTL_FUND_FLOW = 86400   # 文件年龄兜底；真正失效看 payload.fetch_date 是否仍是「今天」
+TTL_CYQ = 86400 * 3     # 文件年龄兜底；真正失效看 fetch_date
+
+
+def cache_calendar_date() -> str:
+    """本地自然日 YYYY-MM-DD（日频缓存的「今天」）。
+
+    前一天的数据可以一直用到换日；换日后再拉网。
+    不用交易所日历：周末/节假日首次会多拉一次，拿到仍是上一交易日数据，可接受。
+    """
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def is_fetch_date_today(payload: Any, today: str | None = None) -> bool:
+    """payload 是否带有 fetch_date 且等于今天（同日缓存命中）。"""
+    if not isinstance(payload, dict):
+        return False
+    day = today or cache_calendar_date()
+    fd = payload.get("fetch_date")
+    return bool(fd) and str(fd)[:10] == day
 
 
 @dataclass
@@ -219,12 +239,17 @@ def invalidate(key: str, target: str) -> None:
 def fetch_fund_flow_cached(symbol: str) -> dict[str, Any]:
     """获取资金流向数据（带缓存）。
 
-    读缓存 → 过期则调API → 写缓存。
-    返回 {"daily_flow": [...], "features": {...}} 或空 dict。
+    规则（用户约定）：
+    - 同一自然日：第一次打网，之后直接读缓存
+    - 换日：重新打网
+    - 文件 TTL 仅作兜底，防止极旧文件
+
+    返回 {"daily_flow": [...], "features": {...}, "fetch_date": "YYYY-MM-DD"} 或空 dict。
     """
-    cached = get_cached(CACHE_FUND_FLOW, symbol, ttl=TTL_FUND_FLOW)
-    # stale=True（TTL 过期）不视为命中，往下回源，避免陈旧资金流被永久当真
-    if cached is not None and not cached.stale:
+    today = cache_calendar_date()
+    # TTL 放宽到 3 天：真正是否可用看 fetch_date，避免「刚好 24h 跨日」误伤
+    cached = get_cached(CACHE_FUND_FLOW, symbol, ttl=TTL_FUND_FLOW * 3)
+    if cached is not None and is_fetch_date_today(cached.data, today):
         return cached.data
     try:
         from trader_shared.fund_flow_data import fetch_fund_flow, calc_fund_flow_features
@@ -232,11 +257,20 @@ def fetch_fund_flow_cached(symbol: str) -> dict[str, Any]:
         if not daily_flow:
             return {}
         features = calc_fund_flow_features(daily_flow)
-        result = {"daily_flow": daily_flow, "features": features}
+        result = {
+            "daily_flow": daily_flow,
+            "features": features,
+            "fetch_date": today,
+        }
         set_cached(CACHE_FUND_FLOW, symbol, result)
         return result
     except (ImportError, OSError, ValueError) as exc:
         _logger.debug("Fund flow fetch/cache failed for %s: %s", symbol, exc)
+        # 跨日 miss 但回源失败时：若有旧缓存且仅过了一天，仍返回旧数据并打标
+        if cached is not None and isinstance(cached.data, dict) and cached.data.get("daily_flow"):
+            out = dict(cached.data)
+            out.setdefault("fetch_date", "stale")
+            return out
         return {}
 
 

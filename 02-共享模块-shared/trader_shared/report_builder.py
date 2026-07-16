@@ -668,8 +668,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
 
     tushare_chip_data = None
     try:
-        from trader_shared.chip_data import get_cyq_perf
-        _cyq = get_cyq_perf(sec.ts_code, start_date="", end_date="")
+        from trader_shared.chip_data import get_cyq_perf_cached
+        # 日频：当天第一次拉网，同日再分析直接读缓存（换日失效）
+        _cyq = get_cyq_perf_cached(sec.ts_code, start_date="", end_date="")
         if _cyq:
             # cyq_perf 接口按 trade_date 降序返回（最新在前）。须取最新交易日，
             # 不能取 _cyq[-1]（那是 2018 年的老数据，会导致获利盘数字完全失真）。
