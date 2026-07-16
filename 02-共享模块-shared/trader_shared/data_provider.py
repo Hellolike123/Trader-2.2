@@ -25,6 +25,18 @@ from trader_shared.light_data import to_float
 
 _logger = get_logger(__name__)
 
+
+def _weekly_datalen(datalen: int | None = None) -> int:
+    """周线默认根数：中线缠论成笔/成段需要足够历史（见 config.WEEKLY_LOOKBACK_BARS）。"""
+    if datalen is not None and datalen > 0:
+        return int(datalen)
+    try:
+        from trader_shared.config import WEEKLY_LOOKBACK_BARS
+        return int(WEEKLY_LOOKBACK_BARS)
+    except Exception:
+        return 260
+
+
 # -------- inject shared paths so we can import light_data / models --------
 _shared = Path(__file__).resolve().parents[1]
 
@@ -104,8 +116,8 @@ class DataProvider(Protocol):
         """Sina 15-minute K-line."""
         ...
 
-    def fetch_weekly(self, sec: Security, datalen: int = 80) -> list[dict[str, Any]]:
-        """Weekly K-line bars."""
+    def fetch_weekly(self, sec: Security, datalen: int | None = None) -> list[dict[str, Any]]:
+        """Weekly K-line bars（默认 WEEKLY_LOOKBACK_BARS，供中线缠论）。"""
         ...
 
     def fetch_monthly(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
@@ -364,13 +376,14 @@ class UnifiedProvider:
         from trader_shared.light_data import fetch_30m as _fetch
         return _fetch(self._to_sec(sec), self._http, datalen=datalen)
 
-    def fetch_weekly(self, sec: Security, datalen: int = 80) -> list[dict[str, Any]]:
+    def fetch_weekly(self, sec: Security, datalen: int | None = None) -> list[dict[str, Any]]:
         """Fetch weekly K-line bars via mootdx or kline endpoint."""
+        n = _weekly_datalen(datalen)
         if self._backend == "akshare":
-            return self._akshare_fetch_kline(sec, "weekly", datalen)
+            return self._akshare_fetch_kline(sec, "weekly", n)
         self._ensure_http()
         from trader_shared.light_data import fetch_kline as _fetch
-        return _fetch(self._to_sec(sec), self._http, interval="weekly", datalen=datalen)
+        return _fetch(self._to_sec(sec), self._http, interval="weekly", datalen=n)
 
     def fetch_monthly(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
         """Fetch monthly K-line bars via mootdx or kline endpoint."""
@@ -617,9 +630,49 @@ class TushareProvider:
         """Tushare 不提供分钟线，fallback 到腾讯。"""
         return self._fallback.fetch_30m(sec, datalen)
 
-    def fetch_weekly(self, sec: Security, datalen: int = 80) -> list[dict[str, Any]]:
-        """周线 — fallback 到腾讯（Tushare 周线需高级积分）。"""
-        return self._fallback.fetch_weekly(sec, datalen)
+    def fetch_weekly(self, sec: Security, datalen: int | None = None) -> list[dict[str, Any]]:
+        """周线：优先 Tushare weekly（代理可用时），失败再 fallback 新浪/腾讯。
+
+        默认根数 WEEKLY_LOOKBACK_BARS，避免 80 周过短导致中线缠论「笔数不足」。
+        """
+        n = _weekly_datalen(datalen)
+        try:
+            from datetime import timedelta
+            from trader_shared.light_data import _compute_atr_fields
+
+            end_date = datetime.now().strftime("%Y%m%d")
+            # 周线：根数 * 7 天再加缓冲，保证能取满 n 根
+            start_date = (datetime.now() - timedelta(days=max(n * 8, 400))).strftime("%Y%m%d")
+            records = self._client.query(
+                "weekly",
+                ts_code=sec.ts_code,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            if records and len(records) >= 4:
+                bars: list[dict[str, Any]] = []
+                for r in sorted(records, key=lambda x: str(x.get("trade_date", ""))):
+                    trade_date = str(r.get("trade_date", ""))
+                    if len(trade_date) == 8 and trade_date.isdigit():
+                        trade_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+                    bars.append({
+                        "date": trade_date,
+                        "open": float(r["open"]) if r.get("open") is not None else None,
+                        "close": float(r["close"]) if r.get("close") is not None else None,
+                        "high": float(r["high"]) if r.get("high") is not None else None,
+                        "low": float(r["low"]) if r.get("low") is not None else None,
+                        "volume": float(r["vol"]) if r.get("vol") is not None else None,
+                        "amount": float(r["amount"]) if r.get("amount") is not None else None,
+                        "data_source": "tushare",
+                        "data_status": "full",
+                    })
+                if len(bars) > n:
+                    bars = bars[-n:]
+                _compute_atr_fields(bars)
+                return bars
+        except Exception as e:
+            _logger.debug("tushare weekly failed, fallback: %s", e)
+        return self._fallback.fetch_weekly(sec, n)
 
     def fetch_monthly(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
         """月线 — fallback 到腾讯（Tushare 月线需高级积分）。"""

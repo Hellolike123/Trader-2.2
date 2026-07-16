@@ -62,6 +62,22 @@ class TestChanMidline:
 
     def test_theory_line_low_conf_annotation(self):
         """conf=low 时旁注段偏少，主名仍是趋势/盘整。"""
+        # 笔级够、线段不足时不应显示「笔数不足」
+        from trader_shared.conclusion_block import _build_wave_label
+        wave = _build_wave_label({
+            "chanlun": {
+                "segments": [],
+                "strokes": [{"direction": "up"}, {"direction": "down"}, {"direction": "up"}],
+                "trend_label": "拉升段",
+                "structure_type": "上涨趋势",
+                "buy_points": [],
+                "sell_points": [],
+                "divergence": {},
+            }
+        }, 10.0)
+        assert "笔数不足" not in wave
+        assert "拉升" in wave or "上涨" in wave
+
         line = format_chanlun_theory_line({
             "structure_type": "上涨趋势",
             "structure_confidence": "low",

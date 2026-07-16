@@ -1346,8 +1346,17 @@ def fetch_30m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[s
     return []
 
 
-def fetch_weekly(sec: Security, http: HttpClient, datalen: int = 80) -> list[dict[str, Any]]:
-    """Fetch weekly K-line bars. Sina HTTP first, fallback to mootdx."""
+def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) -> list[dict[str, Any]]:
+    """Fetch weekly K-line bars. Sina HTTP first, fallback to mootdx.
+
+    默认根数见 config.WEEKLY_LOOKBACK_BARS（中线缠论需要足够周线成笔/成段）。
+    """
+    if datalen is None:
+        try:
+            from trader_shared.config import WEEKLY_LOOKBACK_BARS
+            datalen = int(WEEKLY_LOOKBACK_BARS)
+        except Exception:
+            datalen = 260
     fallback_bars = _fetch_mins_fallback(sec, "weekly", datalen)
     if fallback_bars and len(fallback_bars) >= 4:
         for bar in fallback_bars:
