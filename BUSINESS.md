@@ -101,6 +101,16 @@
 
 **权重**：正常 0.25 / 偏弱 0.35 / 很差 0
 
+**合成口径（P0 冻结，与代码一致）**：资金 `fund_quality=full` 且 `confidence≥0.55` 时**资金方向优先**于价量，可不归中性；天量空 + 资金流入是否强制观望 **另开任务**（见 `docs/designs/analysis-opinion-cards.md` §9）。
+
+### 2.5 单日跌幅硬熔断
+
+`decision_core.status_layers`：`change_pct < -7.0`（百分比）触发「风险回避」，**刚好 -7.0 不触发**。若产品要「满 7% 熔断」需改 `<=` 并同步测试。
+
+### 2.6 分析意见卡（策略匹配输入）
+
+策略层只读意见卡，不扫原始大 dict。契约与构建：`docs/designs/analysis-opinion-cards.md`、`trader_shared/analysis_cards.py`。
+
 ---
 
 ## 3. 融合决策规则

@@ -11,7 +11,7 @@
 
 | 阶段 | 主题 | 产出 | 完成定义（含测试） |
 |------|------|------|-------------------|
-| **P0** | 分析契约 | 意见卡字段表；可单独读威/缠 | 契约文档 + 字段存在性/边界单测 |
+| **P0** | 分析契约 | 意见卡字段表；可单独读威/缠 | ✅ 见 `analysis-opinion-cards.md` + `analysis_cards.py` + A-01～A-06 |
 | **P1** | 闸口契约 | 6 闸口 IO + 互斥（可无代码） | 文档评审通过 |
 | **P2** | 策略最小集 | G/E + entry 一包 + manage A 预案 + stop 全清 | `test_strategy_match` 绿 + 真票 1 只 |
 | **P3** | 报告 📐 | 闸口展示；plan vs active | 渲染单测 + 微信红线检查 |
@@ -58,9 +58,9 @@ python3 -m pytest 02-共享模块-shared/tests/test_wyckoff_core.py \
 
 ### 2.3 DoD
 
-- [ ] `docs/designs/` 意见卡表与代码键一致  
-- [ ] 上表 A-01～A-06 有对应测或明确 skip 原因  
-- [ ] 7% / VPF 口径写入 BUSINESS 或本文 §6  
+- [x] `docs/designs/analysis-opinion-cards.md` + `trader_shared/analysis_cards.py` 字段一致  
+- [x] A-01～A-06：`tests/test_analysis_opinion_cards_p0.py`  
+- [x] 7% / VPF 口径写入 `analysis-opinion-cards.md` §9（维持现行代码，改行为另开任务）  
 
 ---
 

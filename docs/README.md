@@ -24,12 +24,13 @@
 | 主题 | 文档 |
 |------|------|
 | **策略分层 · 6 闸口** | [designs/strategy-layered-architecture.md](./designs/strategy-layered-architecture.md) |
+| **分析意见卡（P0 ✅）** | [designs/analysis-opinion-cards.md](./designs/analysis-opinion-cards.md) |
 | 策略包契约 | [designs/strategy-pack.md](./designs/strategy-pack.md) |
 | **落地 + 测试 P0～P4** | [designs/strategy-roadmap-and-tests.md](./designs/strategy-roadmap-and-tests.md) |
 | 策略菜单（缠/威/mi） | [designs/strategy-menu.md](./designs/strategy-menu.md) |
 | 威科夫 StateView | [designs/wyckoff-state-view.md](./designs/wyckoff-state-view.md) |
 
-**开发节奏**：先分析契约（P0）→ 策略闸口（P1–P2）→ 报告 📐（P3）。见 roadmap。
+**开发节奏**：分析契约（P0 ✅）→ 策略闸口（P1–P2）→ 报告 📐（P3）。见 roadmap。
 
 ---
 

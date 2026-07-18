@@ -7,12 +7,13 @@
 | 文档 | 用途 |
 |------|------|
 | [strategy-layered-architecture.md](./strategy-layered-architecture.md) | 分析 / 策略 / 决策三层 + **6 闸口** |
+| [analysis-opinion-cards.md](./analysis-opinion-cards.md) | **P0 分析意见卡**字段冻结 |
 | [strategy-pack.md](./strategy-pack.md) | 策略包字段、匹配、展示契约 |
 | [strategy-roadmap-and-tests.md](./strategy-roadmap-and-tests.md) | **落地分期 + 测试清单**（P0～P4） |
 | [strategy-menu.md](./strategy-menu.md) | 缠/威/mi 菜单与包映射（思路） |
 | [wyckoff-state-view.md](./wyckoff-state-view.md) | 威科夫 StateView 契约（已实现 A 档） |
 
-**推荐阅读顺序**：architecture → pack → roadmap（测试）→ menu。
+**推荐阅读顺序**：architecture → **analysis-opinion-cards（P0）** → pack → roadmap → menu。
 
 **原则**：以本目录为准；桌面草稿仅作备份，不作为开发契约。
 
