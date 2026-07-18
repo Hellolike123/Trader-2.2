@@ -1648,6 +1648,22 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
                 )
             report["strategy_match"] = match_strategies(report)
             _mark("strategy_match")
+            # 阶段 3：薄决策视图（共振∧策略∧纪律）；只收紧 allow_new，不改 fusion 分
+            try:
+                from trader_shared.decision_view import apply_decision_view
+
+                apply_decision_view(report, tighten_discipline=True)
+                _mark("decision_view")
+            except Exception as _dv_exc:
+                _logger.debug("decision_view skip: %s", _dv_exc)
+                report.setdefault(
+                    "decision_view",
+                    {
+                        "schema_version": "decision_view_v1",
+                        "allow_new_recommend": False,
+                        "summary_line": "决策：跳过",
+                    },
+                )
         except Exception as _st_exc:
             _logger.debug("strategy_match skip: %s", _st_exc)
             try:

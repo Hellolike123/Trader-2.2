@@ -1,0 +1,181 @@
+# -*- coding: utf-8 -*-
+"""薄决策视图（阶段 3）：共振 ∧ 策略 ∧ 纪律 → 是否推荐新开。
+
+契约：docs/designs/resonance-and-orchestration.md
+铁律：可推荐新开 ⇔ 共振齐 ∧ 主入场策略亮 ∧ 纪律允许
+只收紧、不放松 discipline.allow_new_entry。
+"""
+from __future__ import annotations
+
+from typing import Any
+
+SCHEMA = "decision_view_v1"
+
+# 入场闸 primary 存在即视为「策略亮」（mode 可为 plan/active；off 时 primary 已被清空）
+_ENTRY_GATES = ("entry",)
+
+
+def _disc(report: dict[str, Any]) -> dict[str, Any]:
+    d = report.get("discipline")
+    return d if isinstance(d, dict) else {}
+
+
+def _res(report: dict[str, Any]) -> dict[str, Any]:
+    r = report.get("resonance")
+    return r if isinstance(r, dict) else {}
+
+
+def _sm(report: dict[str, Any]) -> dict[str, Any]:
+    s = report.get("strategy_match")
+    return s if isinstance(s, dict) else {}
+
+
+def _entry_primary(strategy_match: dict[str, Any]) -> dict[str, Any] | None:
+    gates = strategy_match.get("gates") if isinstance(strategy_match.get("gates"), dict) else {}
+    ent = gates.get("entry") if isinstance(gates.get("entry"), dict) else {}
+    primary = ent.get("primary")
+    return primary if isinstance(primary, dict) and primary.get("id") else None
+
+
+def build_decision_view(report: dict[str, Any] | None) -> dict[str, Any]:
+    """纯函数：从 report 聚合决策视图。"""
+    if not isinstance(report, dict):
+        return {
+            "schema_version": SCHEMA,
+            "allow_new_recommend": False,
+            "discipline_allow": False,
+            "resonance_ok": False,
+            "strategy_entry_lit": False,
+            "resonance_grade": "",
+            "primary_entry_id": None,
+            "primary_entry_name": None,
+            "block_reasons": ["无报告"],
+            "summary_line": "决策：数据不足，不推荐新开",
+            "applied_tighten": False,
+        }
+
+    disc = _disc(report)
+    res = _res(report)
+    sm = _sm(report)
+
+    discipline_allow = bool(disc.get("allow_new_entry", False))
+    grade = str(res.get("grade") or "")
+    resonance_ok = grade == "aligned"
+    primary = _entry_primary(sm)
+    strategy_entry_lit = primary is not None
+    primary_id = str(primary.get("id")) if primary else None
+    primary_name = str(primary.get("name") or primary_id or "") if primary else None
+
+    block_reasons: list[str] = []
+    if not discipline_allow:
+        block_reasons.append("纪律不允许新开")
+    if not resonance_ok:
+        if grade == "conflict":
+            block_reasons.append("共振冲突")
+        elif grade.startswith("missing_"):
+            block_reasons.append(f"共振缺岗({grade})")
+        elif grade == "momentum_veto":
+            block_reasons.append("动能拆台")
+        elif grade == "empty" or not grade:
+            block_reasons.append("共振不足")
+        else:
+            block_reasons.append(f"共振未齐({grade})")
+    if not strategy_entry_lit:
+        block_reasons.append("无入场策略")
+
+    allow = discipline_allow and resonance_ok and strategy_entry_lit
+
+    if allow:
+        summary = f"决策：可试探新开"
+        if primary_name:
+            summary += f"（{primary_name}）"
+    else:
+        summary = "决策：不推荐新开"
+        if block_reasons:
+            summary += f"（{'｜'.join(block_reasons)}）"
+
+    return {
+        "schema_version": SCHEMA,
+        "allow_new_recommend": bool(allow),
+        "discipline_allow": discipline_allow,
+        "resonance_ok": resonance_ok,
+        "strategy_entry_lit": strategy_entry_lit,
+        "resonance_grade": grade,
+        "primary_entry_id": primary_id,
+        "primary_entry_name": primary_name,
+        "block_reasons": block_reasons,
+        "summary_line": summary,
+        "applied_tighten": False,
+    }
+
+
+def apply_decision_view(
+    report: dict[str, Any],
+    *,
+    tighten_discipline: bool = True,
+) -> dict[str, Any]:
+    """写入 report['decision_view']；可选只收紧 discipline / conclusion 新开相关字段。
+
+    返回 decision_view dict。
+    """
+    view = build_decision_view(report)
+    applied = False
+
+    if tighten_discipline and not view.get("allow_new_recommend"):
+        disc = _disc(report)
+        if disc and disc.get("allow_new_entry"):
+            disc["allow_new_entry"] = False
+            # 短/中线新开一并收紧（若存在）
+            if "allow_new_entry_short" in disc:
+                disc["allow_new_entry_short"] = False
+            reasons = list(view.get("block_reasons") or [])
+            # 合并 entry_checklist 缺项
+            cl = disc.get("entry_checklist") if isinstance(disc.get("entry_checklist"), dict) else None
+            if cl is not None:
+                cl["all_green"] = False
+                miss = list(cl.get("missing_labels") or [])
+                for label in reasons:
+                    if label and label not in miss:
+                        miss.append(label)
+                cl["missing_labels"] = miss
+                try:
+                    from trader_shared.chan_discipline import format_entry_line_c1
+
+                    cl["entry_line"] = format_entry_line_c1(all_green=False, missing=miss)
+                    disc["entry_line"] = cl["entry_line"]
+                except Exception:
+                    disc["entry_line"] = f"新开：否（缺：{'｜'.join(miss) or '决策收紧'}）"
+            else:
+                try:
+                    from trader_shared.chan_discipline import format_entry_line_c1
+
+                    disc["entry_line"] = format_entry_line_c1(
+                        all_green=False, missing=reasons or ["决策收紧"]
+                    )
+                except Exception:
+                    disc["entry_line"] = "新开：否（决策收紧）"
+            note = disc.get("entry_block_reason") or ""
+            extra = "；".join(reasons)
+            if extra and extra not in str(note):
+                disc["entry_block_reason"] = f"{note}；{extra}".strip("；") if note else extra
+            report["discipline"] = disc
+            applied = True
+
+            # 同步 conclusion 出手文案：若原先偏「可买」则压成不买（只收紧）
+            conc = report.get("conclusion") if isinstance(report.get("conclusion"), dict) else None
+            if conc is not None:
+                exe = str(conc.get("execution") or "")
+                soft_buy = any(k in exe for k in ("试探", "可买", "轻仓买", "半仓", "低吸"))
+                hard_off = any(k in exe for k in ("不买", "不追", "不新开", "观望", "空仓"))
+                if soft_buy and not hard_off:
+                    conc["execution"] = "现价不买 · 不追"
+                    reason = str(conc.get("reason") or "")
+                    tag = "共振/策略/纪律未齐"
+                    if tag not in reason:
+                        conc["reason"] = f"{reason}；{tag}".strip("；") if reason else tag
+                    report["conclusion"] = conc
+                    applied = True
+
+    view["applied_tighten"] = applied
+    report["decision_view"] = view
+    return view

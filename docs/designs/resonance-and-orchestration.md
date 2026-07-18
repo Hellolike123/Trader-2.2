@@ -1,7 +1,7 @@
 # 目标架构法源：五层 + 编排 · 岗位共振 · 多场景
 
 > **状态**：产品方向已定 · 分支 `feat/resonance-orchestration`  
-> **版本**：v0.3 · 2026-07-19（阶段 2：策略 context 可读共振）  
+> **版本**：v0.4 · 2026-07-19（阶段 3：decision_view 新开铁律）  
 > **读者**：**所有后续 Agent / 人类**——只读本文 + `AGENT.md` 即可接上方向  
 > **报告/T0/池面板版式**：未定（本文只定职责与字段，不定 emoji 排版）  
 > **冲突时**：以本文产品铁律 + `trader_shared/` 实现为准；旧文若写「fusion 打分当总司令」视为过时  
@@ -16,7 +16,7 @@
 2. **不当**：厚 `weighted_score` 加权融合当分王；策略/展示层重跑缠论威科夫检测。  
 3. **架构**：数据 / 分析 / 共振+策略+决策 / 展示 + **编排总管**（只排队）。  
 4. **可扩展**：新理论→分析卡；新原典→策略 YAML；新用法→新编排入口（T0/池/候选池/仓位）读同一字段。  
-5. **代码现状**：阶段 1 已落地 `report["resonance"]`（`resonance.py`），**尚未**改出手逻辑。  
+5. **代码现状**：阶段 1～3 已落地：`resonance` + 策略 context + `decision_view`（新开只收紧）。fusion 分仍存在，目标继续降权。  
 6. **详细边界**：`analysis-strategy-boundaries.md`；意见卡：`analysis-opinion-cards.md`。
 
 ---
@@ -148,7 +148,7 @@ CLI / Skill（trader · t0 · review · portfolio …）
 | **0** | 本文法源 | 不变 | ✅ |
 | **1** | `build_resonance` + builder 挂载 + 单测 | **不变** | ✅ `resonance.py` / `test_resonance_pullback.py` |
 | **2** | strategy context 可读共振；包可 match grade | 可选更严（旧包不变） | ✅ `build_match_context` 暴露 `resonance_*`；YAML `field: resonance_grade` |
-| **3** | decision_view：新开听 共振∧策略∧纪律 | **改变** | 待做 |
+| **3** | decision_view：新开听 共振∧策略∧纪律 | **改变**（只收紧） | ✅ `decision_view.py`；builder 挂载；不改 fusion 分 |
 | **4** | fusion 退居仪表；展示主叙事跟 decision_view | 改变因果 | 待做 |
 | **5** | `build_report` 拆阶段函数（总管变瘦） | 行为冻结重构 | 待做 |
 
@@ -189,6 +189,7 @@ report["resonance"] = {
 | 意见卡字段 | `docs/designs/analysis-opinion-cards.md` |
 | 策略包 / 六闸 | `strategy-pack.md` / `strategy-gates.md` |
 | 共振实现 | `trader_shared/resonance.py` |
+| 薄决策视图 | `trader_shared/decision_view.py` → `report["decision_view"]` |
 | 单票编排 | `trader_shared/report_builder.py` |
 | 策略匹配 | `trader_shared/strategy/match.py` |
 | T0 | `01-功能包-packages/t0/` |
