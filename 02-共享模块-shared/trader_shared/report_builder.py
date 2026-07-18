@@ -1626,6 +1626,26 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
                 ac.update(_pre)
                 report["analysis_cards"] = ac
             ensure_report_analysis_cards(report)
+            # 阶段 1：岗位共振局面图（只写 report['resonance']，不改出手/纪律）
+            try:
+                from trader_shared.resonance import attach_resonance
+
+                attach_resonance(report)
+                _mark("resonance")
+            except Exception as _res_exc:
+                _logger.debug("resonance skip: %s", _res_exc)
+                report.setdefault(
+                    "resonance",
+                    {
+                        "schema_version": "resonance_v1",
+                        "scene": "pullback_probe",
+                        "grade": "empty",
+                        "posts": {},
+                        "missing": [],
+                        "conflict": False,
+                        "summary_line": "共振：跳过",
+                    },
+                )
             report["strategy_match"] = match_strategies(report)
             _mark("strategy_match")
         except Exception as _st_exc:
@@ -1636,6 +1656,12 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
                 ensure_report_analysis_cards(report)
             except Exception:
                 report.setdefault("analysis_cards", {})
+            try:
+                from trader_shared.resonance import attach_resonance
+
+                attach_resonance(report)
+            except Exception:
+                report.setdefault("resonance", {"schema_version": "resonance_v1", "grade": "empty"})
     except Exception as _sm_exc:
         # 短中线组装失败不阻断主报告；保留原字段
         report.setdefault("key_prices", {})

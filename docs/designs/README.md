@@ -15,13 +15,15 @@
 | [strategy-roadmap-and-tests.md](./strategy-roadmap-and-tests.md) | **落地分期 + 测试清单**（P0～P4） |
 | [strategy-menu.md](./strategy-menu.md) | 缠/威/mi 菜单与包映射（思路） |
 | [wyckoff-state-view.md](./wyckoff-state-view.md) | 威科夫 StateView 契约（已实现 A 档） |
+| [resonance-and-orchestration.md](./resonance-and-orchestration.md) | **岗位共振 + 编排总管**（五层+总管；fusion 降权路线；阶段 1 已挂字段） |
 
 **推荐阅读顺序（开发 Agent）**：  
-`analysis-strategy-boundaries` → analysis-opinion-cards → strategy-gates → strategy-pack → roadmap。
+`analysis-strategy-boundaries` → **resonance-and-orchestration** → analysis-opinion-cards → strategy-gates → strategy-pack → roadmap。
 
 **原则**：以本目录为准；桌面草稿仅作备份，不作为开发契约。
 
-**Fusion 默认（与代码一致）**：`FUSION_FROM_CARDS` **缺省 = cards**；`classic` 强制原路径。见 `analysis-strategy-boundaries.md` §5。
+**Fusion 默认（与代码一致）**：`FUSION_FROM_CARDS` **缺省 = cards**；`classic` 强制原路径。见 `analysis-strategy-boundaries.md` §5。  
+**产品方向**：主路径走向「共振 + 策略 + 纪律」；fusion 分不作总司令。见 resonance 文档。
 
 ## 其它
 
