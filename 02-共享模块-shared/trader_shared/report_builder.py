@@ -1614,70 +1614,15 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             _logger.debug("buy_point_lifecycle skip: %s", _life_exc)
             report.setdefault("buy_point_lifecycle", {"status": "none", "display_line": ""})
 
-        # 架构加固 B：完整意见卡 + 策略匹配（失败不阻断主报告）
+        # 阶段 5：卡→共振→策略→决策 收口到 pipeline（行为不变）
         try:
-            from trader_shared.analysis_cards import ensure_report_analysis_cards
-            from trader_shared.strategy_match import match_strategies
+            from trader_shared.report_pipeline import attach_analysis_decision_stack
 
-            # 合并融合前预产卡，再补 chip 等后置字段
-            _pre = report.pop("_fusion_pre_cards", None)
-            if isinstance(_pre, dict):
-                ac = report.get("analysis_cards") if isinstance(report.get("analysis_cards"), dict) else {}
-                ac.update(_pre)
-                report["analysis_cards"] = ac
-            ensure_report_analysis_cards(report)
-            # 阶段 1：岗位共振局面图（只写 report['resonance']，不改出手/纪律）
-            try:
-                from trader_shared.resonance import attach_resonance
-
-                attach_resonance(report)
-                _mark("resonance")
-            except Exception as _res_exc:
-                _logger.debug("resonance skip: %s", _res_exc)
-                report.setdefault(
-                    "resonance",
-                    {
-                        "schema_version": "resonance_v1",
-                        "scene": "pullback_probe",
-                        "grade": "empty",
-                        "posts": {},
-                        "missing": [],
-                        "conflict": False,
-                        "summary_line": "共振：跳过",
-                    },
-                )
-            report["strategy_match"] = match_strategies(report)
-            _mark("strategy_match")
-            # 阶段 3：薄决策视图（共振∧策略∧纪律）；只收紧 allow_new，不改 fusion 分
-            try:
-                from trader_shared.decision_view import apply_decision_view
-
-                apply_decision_view(report, tighten_discipline=True)
-                _mark("decision_view")
-            except Exception as _dv_exc:
-                _logger.debug("decision_view skip: %s", _dv_exc)
-                report.setdefault(
-                    "decision_view",
-                    {
-                        "schema_version": "decision_view_v1",
-                        "allow_new_recommend": False,
-                        "summary_line": "决策：跳过",
-                    },
-                )
-        except Exception as _st_exc:
-            _logger.debug("strategy_match skip: %s", _st_exc)
-            try:
-                from trader_shared.analysis_cards import ensure_report_analysis_cards
-                report.pop("_fusion_pre_cards", None)
-                ensure_report_analysis_cards(report)
-            except Exception:
-                report.setdefault("analysis_cards", {})
-            try:
-                from trader_shared.resonance import attach_resonance
-
-                attach_resonance(report)
-            except Exception:
-                report.setdefault("resonance", {"schema_version": "resonance_v1", "grade": "empty"})
+            attach_analysis_decision_stack(report, mark=_mark)
+        except Exception as _pipe_exc:
+            _logger.debug("analysis_decision_stack skip: %s", _pipe_exc)
+            report.setdefault("analysis_cards", {})
+            report.setdefault("resonance", {"schema_version": "resonance_v1", "grade": "empty"})
     except Exception as _sm_exc:
         # 短中线组装失败不阻断主报告；保留原字段
         report.setdefault("key_prices", {})
