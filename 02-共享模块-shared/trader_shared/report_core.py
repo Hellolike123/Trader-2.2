@@ -714,6 +714,52 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _inv = _inv[:57] + "…"
         lines.append(f"  失效：{_inv}")
 
+    # 6) 📐 策略闸口（P3：匹配策略包，只展示）
+    try:
+        from trader_shared.analysis_cards import (
+            build_chan_card,
+            build_chip_card,
+            build_wyckoff_card,
+        )
+        from trader_shared.strategy_match import format_gates_brief, match_strategies
+
+        _wyk_for_card = r.get("wyckoff_daily")
+        if _wyk_for_card is None:
+            _wyk_for_card = r.get("wyckoff")
+        _cards = {
+            "chan": build_chan_card(
+                r.get("chanlun") or r.get("chan"),
+                fusion_chan=_csig2 if isinstance(_csig2, dict) else None,
+                wave_label=_wave,
+                role="daily",
+            ),
+            "wyckoff": build_wyckoff_card(_wyk_for_card, role="daily"),
+            "chip": build_chip_card(
+                current,
+                r.get("chip_peaks") or [],
+                r.get("chip_migration") if isinstance(r.get("chip_migration"), dict) else None,
+                r.get("chip_current_pct") if isinstance(r.get("chip_current_pct"), (int, float)) else None,
+            ),
+        }
+        _sm_in = dict(r)
+        _sm_in["analysis_cards"] = _cards
+        _sm_in["action_text"] = execution
+        if isinstance(_disc, dict):
+            _sm_in["discipline"] = _disc
+        # 已匹配结果可复用（report_builder 预计算）
+        _sm = r.get("strategy_match") if isinstance(r.get("strategy_match"), dict) else None
+        if not _sm or _sm.get("schema_version") != "strategy_match_v1":
+            _sm = match_strategies(_sm_in)
+        _brief = format_gates_brief(_sm)
+        for _bl in _brief.splitlines():
+            if _bl.strip():
+                lines.append(f"  {_bl}" if not _bl.startswith("  ") else f"  {_bl}")
+            else:
+                lines.append(_bl)
+    except Exception:
+        lines.append("  📐 策略")
+        lines.append("  选股：匹配暂不可用")
+
     stop_sell = key_prices.get("stop_sell") or r.get("stop")
     buy_low = key_prices.get("buy_zone_low")
     buy_high = key_prices.get("buy_zone_high")

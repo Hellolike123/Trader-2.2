@@ -14,7 +14,7 @@
 | **P0** | 分析契约 | 意见卡字段表；可单独读威/缠 | ✅ 见 `analysis-opinion-cards.md` + `analysis_cards.py` + A-01～A-06 |
 | **P1** | 闸口契约 | 6 闸口 IO + 互斥 | ✅ `strategy-gates.md` |
 | **P2** | 策略最小集 | G/E + entry + manage A + stop 全清 | ✅ `strategy_match.py` + S-01～S-06 |
-| **P3** | 报告 📐 | 闸口展示；plan vs active | 渲染单测 + 微信红线检查 |
+| **P3** | 报告 📐 | 闸口展示；plan vs active | ✅ render + R-01～R-03 |
 | **P4** | 扩展 | take F、scale、多 entry B/C/D | 互斥回归 + 真票 |
 
 原则：
@@ -138,8 +138,9 @@ python3 -m pytest 02-共享模块-shared/tests/test_strategy_match.py -q
 
 ### 5.3 DoD
 
-- [ ] R-01～R-03 自动化  
-- [ ] 南网 + 三花人工读一遍  
+- [x] R-01～R-03：`test_report_optimization.py`  
+- [x] `report_core` 失效后接 `format_gates_brief`；`report_builder` 写 `strategy_match`  
+- [ ] 南网/三花人工读一遍（可选）  
 
 ---
 

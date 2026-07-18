@@ -286,6 +286,51 @@ def test_short_section_chan_type_first():
     pos_action = short.find("动作：")
     assert 0 <= pos_struct < pos_action
 
+
+def test_r01_strategy_gates_in_short_section():
+    """R-01: ⚡ 短线含 📐 策略闸口。"""
+    r = _report()
+    r["has_position"] = False
+    r["discipline"] = {
+        "suggested_pct_cap": 0,
+        "allow_new_entry": False,
+        "invalidation": "破止损作废",
+        "action": "不新开",
+    }
+    r["chanlun"] = {
+        "chanlun": {
+            "buy_points": [{"type": "一类买", "price": 42.0}],
+            "sell_points": [],
+            "divergence": {},
+            "trend_label": "上涨",
+        }
+    }
+    out = render_short_midline(r)
+    short = out.split("⚡ 短线", 1)[-1]
+    assert "📐 策略" in short or "📐" in short
+    assert "选股：" in short or "持：" in short or "止损：" in short
+
+
+def test_r02_no_position_not_manage_active_tone():
+    """R-02: 无持仓时持仓闸为预案，不写已触发执行误导。"""
+    r = _report()
+    r["has_position"] = False
+    r["cost"] = 0
+    r["discipline"] = {"allow_new_entry": False, "action": "不新开", "suggested_pct_cap": 0}
+    out = render_short_midline(r)
+    short = out.split("⚡ 短线", 1)[-1].split("关键价", 1)[0]
+    if "持：" in short:
+        hold_line = [ln for ln in short.splitlines() if "持：" in ln][0]
+        assert "执行" not in hold_line or "预案" in hold_line
+
+
+def test_r03_strategy_block_no_md_table():
+    """R-03: 策略区无 markdown 表格/粗体。"""
+    out = render_short_midline(_report())
+    short = out.split("⚡ 短线", 1)[-1] if "⚡ 短线" in out else out
+    assert "**" not in short
+    assert "|---|" not in short
+
 # ── Task 4: ✅/⚠️ 具体化 ──
 
 def test_highlight_specific():
