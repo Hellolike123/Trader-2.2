@@ -103,6 +103,15 @@ def test_no_tighten_when_recommend_true():
     assert v["allow_new_recommend"] is True
     assert r["discipline"]["allow_new_entry"] is True
     assert v["applied_tighten"] is False
+    assert r.get("decision") is v
+
+
+def test_tag_fusion_instrument():
+    from trader_shared.report_pipeline import tag_fusion_as_instrument
+
+    f = tag_fusion_as_instrument({"weighted_score": 0.1, "action": "观望"})
+    assert f.get("product_role") == "instrument"
+    assert "decision_view" in str(f.get("product_role_note") or "")
 
 
 def test_format_narrative_includes_resonance_decision_gauge():

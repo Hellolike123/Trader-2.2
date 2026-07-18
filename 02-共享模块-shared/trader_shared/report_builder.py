@@ -142,57 +142,20 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     quote = snapshot.quote
     bars = list(snapshot.daily_bars)  # copy to avoid mutating snapshot
 
-    # ═══════ ST / 退市风险 / 新股 / 停牌 检测 ═══════
+    from trader_shared.report_pipeline import (
+        build_live_bar_anchor,
+        detect_risk_flags,
+        tag_fusion_as_instrument,
+    )
+
     stock_name = str(quote.get("name") or sec.name or target)
-    is_st = "ST" in stock_name or "*ST" in stock_name
-    # 停牌：现价等于昨收且成交量为 0（或极小）
-    cp = to_float(quote.get("current_price"))
-    pc = to_float(quote.get("pre_close"))
-    vol = to_float(quote.get("volume"))
-    is_suspended = cp is not None and pc is not None and vol is not None and cp > 0 and abs(cp - pc) < 1e-6 and vol < 1
-    bar_count = len(bars)
-    is_new_stock = bar_count < 60  # 上市不足 60 个交易日
-    risk_flags: list[str] = []
-    if is_st:
-        risk_flags.append("ST")
-    if is_suspended:
-        risk_flags.append("停牌")
-    if is_new_stock:
-        risk_flags.append("新股")
+    risk_flags = detect_risk_flags(stock_name, quote, bars)
 
     # 一次性读取 signals.jsonl：同时获取成本价和历史胜率（合并两次 I/O）
     _signal_cost_price, _signal_win_rate = read_signals_for_report(target, bars)
 
-    # 如果日线最新日期不是今天，追加今日 quote 作为当天 bar
-    # （解决盘中分析时日线数据滞后导致阶段判定错误的问题）
-    _today = str(quote.get("trade_date") or "")[:10]
-    _last_date = str(bars[-1].get("date") or bars[-1].get("trade_date") or "")[:10] if bars else ""
-    _cp = quote.get("current_price")
-    # 当日实时价锚点：仅用于价格/涨跌幅展示，绝不追加进 bars。
-    # 合成 bar 的 volume=0、high=low=close=现价 是假数据，掺入会污染威科夫量能 /
-    # 缠论笔识别 / 主力资金 K线 fallback 等策略计算（审计项：盘中合成 bar 喂入全部策略）。
-    live_bar = None
-    if _today and _last_date != _today and _cp is not None and float(_cp) > 0:
-        _chg = float(quote.get("current_change_pct") or 0)
-        _prev_close = float(_cp) / (1 + _chg / 100) if _chg != 0 else float(_cp)
-        _prev_bar = bars[-1] if bars else {}
-        live_bar = {
-            "date": _today,
-            "open": _prev_close,
-            "close": float(_cp),
-            "high": float(_cp),
-            "low": float(_cp),
-            "volume": 0,
-            "data_source": "quote-today",
-            "data_status": "full",
-            "atr14": _prev_bar.get("atr14", 0),
-            "atr_ratio": _prev_bar.get("atr_ratio", 0),
-            "atr7": _prev_bar.get("atr7", 0),
-            "tr": _prev_bar.get("tr", 0),
-            "is_synthetic": True,
-        }
-    # 盘中诚实标注：记录真实末根日期，供报告头部说明「策略基于截至该日收盘」
-    intraday_as_of = _last_date if live_bar else None
+    # 当日实时价锚点：仅展示用，绝不并入 bars（避免污染策略计算）
+    live_bar, intraday_as_of = build_live_bar_anchor(quote, bars)
     bars_5m = snapshot.bars_5m
     weekly_bars = snapshot.weekly_bars if hasattr(snapshot, "weekly_bars") else []
     monthly_bars = snapshot.monthly_bars if hasattr(snapshot, "monthly_bars") else []
@@ -978,7 +941,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         "chip_peaks": chip_peaks,
         "chip_current_pct": chip.get("current_pct"),
         "chip_mid_price": chip.get("mid_price"),
-        "fusion": report_fusion,
+        "fusion": tag_fusion_as_instrument(
+            report_fusion if isinstance(report_fusion, dict) else {}
+        ),
         "gap": levels.get("gap"),
         "time_window": levels.get("time_window"),
         "fib_retrace": levels.get("fib_retrace"),
@@ -1069,164 +1034,34 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         if _key not in _INTERNAL_LEVELS:
             report.setdefault(_key, _val)
 
-    # 已有持仓模式：确定成本价和持仓状态
-    # 必须在 compute_position_with_env() 之前，以便传入正确的 pnl_pct
-    # 成本价已在 bars 获取后从 signals.jsonl 读取（与胜率合并为一次 I/O）
-    if cost_price <= 0:
-        cost_price = _signal_cost_price
-    
-    has_position = cost_price > 0
-    report["has_position"] = has_position
-    report["cost_price"] = cost_price
-    
-    # 如果有持仓，计算盈亏比例
-    pnl_pct = 0.0
-    if has_position and cost_price > 0:
-        pnl_pct = (current - cost_price) / cost_price * 100
-        report["pnl_pct"] = pnl_pct
-        report["pnl_text"] = f"盈 {pnl_pct:+.1f}%" if pnl_pct >= 0 else f"亏 {abs(pnl_pct):.1f}%"
+    from trader_shared.report_pipeline import attach_stage_position_pack
 
-    # 仓位计算（阶段 + 大盘环境）
-    from trader_shared.stage_positioning import compute_position_with_env
-    market_env_level = market_env_data.get("level", "震荡市")
-    env_map = {"正常": "牛市", "偏弱": "震荡市", "很差": "熊市"}
-    mapped_env = env_map.get(market_env_level, "震荡市")
-    position_info = compute_position_with_env(
-        stage=stage_result["major_stage"],
-        momentum=stage_result["momentum"],
-        market_env=mapped_env,
-        pnl_pct=pnl_pct,
-        total_position_pct=0.0,
-    )
-    report["position_info"] = position_info
-
-    # 波动率风控：高波动自动减仓（只减不加）
-    # 目标日 ATR 2.5%（A 股中位水平），实际 ATR 越高仓位越轻
-    _atr_pct = (atr14_val / current * 100) if atr14_val and current and current > 0 else None
-    if _atr_pct and _atr_pct > 0.5:
-        _vol_ratio = min(1.0, 2.5 / _atr_pct)  # 只减不加
-        _orig = int(position_info.get("suggested_pct") or 0)
-        position_info["suggested_pct"] = max(0, int(round(_orig * _vol_ratio)))
-        position_info["vol_adj_ratio"] = round(_vol_ratio, 2)
-
-    # 分批止盈计划（仅在有持仓参考价时计算）
-    entry_price = float(report.get("support") or current)  # 默认用支撑位作为参考买入价
-    stop_price = float(report.get("stop") or 0)
-    resistance_val = float(report.get("resistance") or 0)
-    exit_plan = compute_exit_plan(
-        entry_price=entry_price,
-        stop_price=stop_price,
-        resistance_price=resistance_val if resistance_val > 0 else None,
-        current_stage=stage_result["major_stage"],
+    report, cost_price, has_position, suggested = attach_stage_position_pack(
+        report,
+        cost_price=float(cost_price or 0),
+        current=float(current or 0),
+        market_env_data=market_env_data if isinstance(market_env_data, dict) else {},
+        stage_result=stage_result,
+        atr14_val=atr14_val,
         bars=bars,
-        wyckoff_result=wyck_result,
-        atr14=atr14_val,
-    )
-    report["exit_plan"] = exit_plan
-    report["chip_migration"] = chip_migration
-
-    # 使用成本价作为 entry_price（有持仓时），否则用支撑位
-    entry_price_for_state = cost_price if has_position else float(report.get("support") or current)
-
-    position_state = evaluate_position_state(
-        current_price=current,
+        wyck_result=wyck_result,
         support=support,
-        resistance=float(report.get("resistance") or 0),
-        stop_price=float(report.get("stop") or 0),
-        confirm_price=confirm,
-        atr14=atr14_val,
-        major_stage=stage_result["major_stage"],
-        momentum=stage_result["momentum"],
-        bars=bars,
-        wyckoff_result=wyck_result,
-        has_position=has_position,
-        entry_price=entry_price_for_state,
-        highest_close=max([float(b.get("close") or 0) for b in bars[-20:]]) if bars else current,
-        expma10=expma10_val,
+        confirm=confirm,
+        expma10_val=expma10_val,
+        expma20_val=expma20_val,
         chip_migration=chip_migration,
-        high_zone_lower=float(levels.get("high_zone_lower") or 0),
-        trailing_stop=levels.get("trailing_stop"),
-        last_add_date=bars_date,
+        levels=levels,
+        bars_date=bars_date,
+        base_status=str(base_status or ""),
+        theory_status=str(theory_status or ""),
+        scene=str(scene or ""),
+        report_fusion=report_fusion if isinstance(report_fusion, dict) else {},
+        signal_win_rate=_signal_win_rate,
+        signal_cost_price=float(_signal_cost_price or 0),
+        stage=str(stage or ""),
+        mark=_mark,
     )
-    report["position_state"] = position_state
 
-    # 阶段止损
-    ma20_val = levels["ma_values"].get("ma20")
-    stage_stop_info = compute_stage_stop(
-        stage=stage_result["major_stage"],
-        ma20=ma20_val,
-        range_low=float(report.get("range_low") or 0),
-        atr_pct=float(levels.get("atr_pct") or 0.02),
-        expma20=expma20_val,
-    )
-    report["stage_stop"] = stage_stop_info
-    
-    # 补全 JSON 输出需要的字段
-    report = sync_report_with_data(report, levels)
-
-    # structure_note: 在 sync_report_with_data 之后计算，使用已修正的 scene
-    structure_note = structure_view({
-        "current": current, "confirm": confirm, "stage": stage,
-        "base_status": base_status, "theory_status": theory_status,
-        "scene": str(report.get("scene") or scene),
-    })
-    report["structure_note"] = structure_note
-
-    # one_liner: 一句话总结
-    _support = report.get("support")
-    low_zone = str(report.get("low_zone") or (f"{_support*0.98:.2f}-{_support*1.02:.2f}元" if _support else "数据不足"))
-    report["one_liner"] = one_sentence(report, low_zone)
-
-    # t0_ref: T0 参考价位（high_sell 用阻力位而非 confirm，避免 T0 卖价高于报告显示的压力位）
-    report["t0_ref"] = {
-        "low_buy": float(report.get("support") or 0),
-        "high_sell": float(report.get("resistance") or 0),
-        "stop": float(report.get("stop") or 0),
-    }
-
-    # macd_status: MACD 方向
-    mom = levels.get("momentum", {})
-    if isinstance(mom, dict):
-        macd = mom.get("macd", {})
-        if isinstance(macd, dict):
-            report["macd_status"] = {
-                "histogram": macd.get("histogram"),
-                "golden_cross": macd.get("golden_cross", False),
-                "death_cross": macd.get("death_cross", False),
-                "positive": macd.get("positive", False),
-            }
-
-    # ── [2.5] 量能真空区检查 ──
-    try:
-        from trader_shared.volume_profile import check_volume_vacuum
-        volume_vacuum = check_volume_vacuum(bars, current)
-        report["volume_vacuum"] = volume_vacuum
-    except Exception:
-        report["volume_vacuum"] = {"vacuum_warning": False, "warning_text": ""}
-
-    # 个股股性透视卡：历史胜率（与成本推断合并为一次 I/O，已在上面读取）
-    report["win_rate_data"] = _signal_win_rate
-
-    # ── 一致性仲裁：给 fusion action + suggested_pct 加持仓场景标签 ──
-    # 四个字段（theory_status / fusion.action / suggested_pct / stop）来自独立模块，
-    # 可能互斥（如 fusion 说「减仓」但 suggested_pct=0%）。
-    # 通过 holding_hint + suggested_pct_context 消除互斥语义，让 AI 事实表不再打架。
-    from trader_shared.stage_positioning import action_for_holding_state
-    fusion_action_str = str((report_fusion or {}).get("action") or "").strip()
-    holding_state = action_for_holding_state(fusion_action_str, has_position)
-    report["fusion_holding_hint"] = holding_state.get("holding_hint", "待定")
-
-    suggested = int((report.get("position_info") or {}).get("suggested_pct") or 0)
-    _reduce_set = {"减仓", "空仓/止损", "空仓 (大盘很差, 一票否决)"}
-    if suggested == 0:
-        if fusion_action_str in _reduce_set:
-            report["suggested_pct_context"] = "0%（未持仓者不参与；已有仓位者执行减仓）"
-        else:
-            report["suggested_pct_context"] = "0%（阶段建议空仓观望）"
-    else:
-        report["suggested_pct_context"] = f"{suggested}%（阶段×大盘环境建议）"
-
-    _mark("stage_pack")
 
     from trader_shared.report_pipeline import attach_short_midline_and_decision
 
@@ -1298,51 +1133,11 @@ def structure_replay(bars: list[dict[str, Any]]) -> str:
     return "；".join(parts[:4])
 
 def sync_report_with_data(report: dict, levels: dict) -> dict:
-    """脚本自洽校验：修正数据与文字标签的矛盾"""
-    current  = float(report.get("current") or 0)
-    support  = float(report.get("support") or 0)
-    resistance = float(report.get("resistance") or 0)
-    confirm  = float(report.get("confirm") or 0)
-    stop     = float(report.get("stop") or 0)
-    take     = float(report.get("take") or 0)
-    scene    = str(report.get("scene") or "")
-    state_label  = str(report.get("state_label") or "")
-    ma5  = to_float(levels.get("ma_values", {}).get("ma5"))
-    ma10 = to_float(levels.get("ma_values", {}).get("ma10"))
-    # MA 趋势与文字标签
-    if ma5 is not None and ma10 is not None and current > 0:
-        if ma5 > ma10 and "空头" in state_label:
-            report["state_label"] = state_label.replace("空头", "多头")
-        elif ma5 < ma10 and "多头" in state_label:
-            report["state_label"] = state_label.replace("多头", "空头")
-    # support > resistance → 筹码与 ATR 模块打架
-    if support > 0 and resistance > 0 and support >= resistance:
-        report["resistance"] = support * 1.03
-        report["support"]    = resistance * 0.97
-    # stop < support（止损永远在支撑下方）
-    if stop > 0 and support > 0 and stop >= support:
-        report["stop"] = round(support * 0.97, 2)
-    # take < confirm（止盈永远高于确认位）
-    if take > 0 and confirm > 0 and take <= confirm:
-        _zw = float(levels.get("zone_width_pct", 0.02) or 0.02)
-        report["take"] = round(confirm * (1 + _zw), 2)
-    # 场景与数值的逻辑一致性
-    if scene in ("突破确认", "突破观察") and round(current, 2) < round(confirm, 2):
-        report["scene"]        = "观望"
-        report["state_label"]  = "未确认"
-    elif scene in ("低吸观察", "防守观察") and current < support and support > 0:
-        report["scene"]        = "破位下行"
-        report["state_label"]  = "破位下行"
-    elif scene == "冲高减仓" and current < support and support > 0:
-        report["scene"]        = "低吸观察"
-        report["state_label"]  = "低吸观察"
-    elif scene == "突破观察" and current >= confirm and confirm > 0:
-        report["scene"]        = "突破确认"
-        report["state_label"]  = "趋势走强"
-    elif scene in ("空间不足",) and current < support and support > 0:
-        report["scene"]        = "修复观察"
-        report["state_label"]  = "修复观察"
-    return report
+    """兼容 re-export：实现已迁至 report_pipeline。"""
+    from trader_shared.report_pipeline import sync_report_with_data as _sync
+    return _sync(report, levels)
+
+
 
 def _calc_volume_ratio_from_bars(bars: list[dict], window: int = 5) -> float:
     """从日K线计算量比（近N日均量 / 前N日均量）。"""

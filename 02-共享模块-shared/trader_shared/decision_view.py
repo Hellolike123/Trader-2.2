@@ -178,6 +178,8 @@ def apply_decision_view(
 
     view["applied_tighten"] = applied
     report["decision_view"] = view
+    # 统一出口别名：新代码可读 report["decision"]
+    report["decision"] = view
     return view
 
 

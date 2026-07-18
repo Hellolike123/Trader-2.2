@@ -15,6 +15,21 @@ from trader_shared.report_pipeline import (  # noqa: E402
 )
 
 
+def test_detect_risk_flags_and_live_bar():
+    from trader_shared.report_pipeline import build_live_bar_anchor, detect_risk_flags
+
+    flags = detect_risk_flags("ST测试", {"current_price": 10, "pre_close": 10, "volume": 0}, [])
+    assert "ST" in flags
+    assert "停牌" in flags or "新股" in flags
+    live, as_of = build_live_bar_anchor(
+        {"trade_date": "2099-01-02", "current_price": 11.0, "current_change_pct": 1.0},
+        [{"date": "2099-01-01", "close": 10.0}],
+    )
+    assert live is not None
+    assert live.get("is_synthetic") is True
+    assert as_of == "2099-01-01"
+
+
 def test_apply_buy_point_lifecycle_sets_field():
     report = {
         "discipline": {"allow_new_entry": True, "entry_checklist": {"all_green": True, "missing_labels": []}},
