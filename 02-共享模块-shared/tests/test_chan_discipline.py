@@ -642,6 +642,20 @@ class TestC1EntryChecklist:
         assert format_entry_line_c1(all_green=True) == "新开：可试探（清单全绿）"
         assert "缺：回踩到位" in format_entry_line_c1(all_green=False, missing=["回踩到位"])
 
+    def test_c1_conf_ok_label_is_fusion_confidence(self):
+        """C1 conf_ok 展示为「融合置信」，不是误导性的「信号一致」。"""
+        from trader_shared.chan_discipline import build_entry_checklist
+
+        cl = build_entry_checklist(
+            stage="蓄势",
+            in_pullback=True,
+            buy_point_types=["二类买"],
+            low_confidence=True,
+        )
+        assert cl["all_green"] is False
+        assert "融合置信" in (cl.get("missing_labels") or [])
+        assert "信号一致" not in (cl.get("missing_labels") or [])
+
     def test_merge_demotes_open_when_not_all_green(self):
         gate = {
             "action": "轻仓试错",

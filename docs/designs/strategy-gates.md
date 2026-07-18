@@ -39,6 +39,16 @@ select → entry → manage → scale → take → stop
 | **包** | `entry.chan_buy1_probe` 等 |
 | **规则** | has_position → off；veto 或 not allow_new_entry 或 not all_green → 最多 plan |
 
+#### 2.2.1 买点「盖」生命周期（规格 · 实现见 `buy-point-lid-lifecycle.md`）
+
+| 规则 | entry 约束（落地后） |
+|------|----------------------|
+| 收盘盖下 → 买点 failed | 不得 `executable=true`；文案「买点已失效」 |
+| 盘中破盖、收盘回盖上 | 不因盘中刺穿关 entry |
+| 失败后次日大阳站回 | **新**生命周期；禁止沿用旧 signal_id 当仍有效 |
+
+P2 当前：`strategy_match` **尚未**读 lifecycle 字段；纪律 C1 仍只看买点类型字符串。L2/L3 实现前不得假装已拦。
+
 ### 2.3 `manage` 持/管单
 
 | | |

@@ -749,21 +749,25 @@ def merge_decisions(
         (strong_bullish_chan or strong_bullish_vpf) and pos_pct is not None and pos_pct <= _pct_threshold_strong
     )
 
-    # 真正的高位超买（价格在区间上沿 + 动量极强）：动量权重最高，
-    # 因为高位要看动量是否衰竭来决定去留。
-    is_genuine_climax = pos_pct is not None and pos_pct >= 0.7 and (mom_score or 0) >= 80
-    # 仅有强看空信号（顶背驰 / 价量资金偏空），未必处于高位：这是结构发出看空警告，
-    # 应尊重结构信号而非给动量最高权重去否决它。
-    is_bearish_structure_warning = (strong_bearish_chan or strong_bearish_vpf) and not is_genuine_climax
+    # 强看空结构（一类卖 / 顶背驰 / VPF 空警）：优先于 climax。
+    # 旧逻辑「climax 且 mom≥80」会先抢 0.56 动量权，冲淡一类卖（2026-07 裁定 P1）。
+    is_bearish_structure_warning = bool(strong_bearish_chan or strong_bearish_vpf)
+    # 真正的高位超买（上沿 + 极强动量）且**无**强空结构：才抬动量权重看衰竭。
+    is_genuine_climax = (
+        pos_pct is not None
+        and pos_pct >= 0.7
+        and (mom_score or 0) >= 80
+        and not is_bearish_structure_warning
+    )
 
     if is_breakout_or_bottom:
         weights = {"chan": 0.44, "momentum": 0.20, "vpf": 0.36}
-    elif is_genuine_climax:
-        # 高位 + 强动量：动量权重最高（56%），高位看动量衰竭
-        weights = {"chan": 0.20, "momentum": 0.56, "vpf": 0.24}
     elif is_bearish_structure_warning:
-        # 结构/价量看空警告：尊重结构与 VPF，权重高于动量
+        # 结构/价量看空警告：尊重结构与 VPF，权重高于动量（即使高位强动量）
         weights = {"chan": 0.44, "momentum": 0.20, "vpf": 0.36}
+    elif is_genuine_climax:
+        # 高位 + 强动量、无强空结构：动量权重最高（56%），看动量是否衰竭
+        weights = {"chan": 0.20, "momentum": 0.56, "vpf": 0.24}
     else:
         regime_weights = get_regime_weights(regime)
         weights = regime_weights

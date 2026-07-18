@@ -10,6 +10,7 @@
 | [analysis-strategy-boundaries.md](./analysis-strategy-boundaries.md) | **架构边界（Agent 必读）** 依赖方向 / `analysis/`·`strategy/` 包 / 加减模块菜谱 |
 | [analysis-opinion-cards.md](./analysis-opinion-cards.md) | **P0 分析意见卡**字段冻结 |
 | [strategy-gates.md](./strategy-gates.md) | **P1 六闸口 IO / 互斥** |
+| [buy-point-lid-lifecycle.md](./buy-point-lid-lifecycle.md) | **买点「盖」生命周期**（规格；实现分期 L1–L3） |
 | [strategy-pack.md](./strategy-pack.md) | 策略包字段、匹配、展示契约 |
 | [strategy-roadmap-and-tests.md](./strategy-roadmap-and-tests.md) | **落地分期 + 测试清单**（P0～P4） |
 | [strategy-menu.md](./strategy-menu.md) | 缠/威/mi 菜单与包映射（思路） |

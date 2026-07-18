@@ -228,11 +228,12 @@ def _normalize_stage(major_stage: str) -> str:
 
 
 # 开仓 5 项清单（C1 展示：不全绿只写缺项；全绿才可试探）
+# conf_ok 语义 = 融合置信够（not low_confidence），不是三席方向一致——文案勿写「信号一致」
 _CHECKLIST_KEYS = (
     ("mid_ok", "中线趋势"),
     ("in_pullback", "回踩到位"),
     ("short_trigger", "买点信号"),
-    ("conf_ok", "信号一致"),
+    ("conf_ok", "融合置信"),
     ("fund_ok", "筹码资金稳"),
 )
 

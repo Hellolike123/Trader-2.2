@@ -777,7 +777,7 @@ class TestPhase3Features:
         assert result["weights_used"] == {"chan": 0.44, "momentum": 0.20, "vpf": 0.36}
 
     def test_scenario_priority_filter_top(self):
-        """Under pos_pct >= 0.7 AND mom_score >= 80, weights should dynamically adjust."""
+        """Under pos_pct >= 0.7 AND mom_score >= 80（无强空结构）, climax 抬动量权。"""
         from trader_shared.fusion_core import merge_decisions
         chan = {"chanlun": {"buy_points": [], "divergence": {}, "trend_label": "数据不足"}}
         mom = {"momentum": {"score": 85, "direction": "bullish", "signals": ["多指标共振(强烈看多)"]}}
@@ -789,6 +789,25 @@ class TestPhase3Features:
         # pos_pct = (18.0 - 10.0) / (20.0 - 10.0) = 8.0 / 10.0 = 0.8 >= 0.7
         result = merge_decisions(chan, mom, wyk, regime="正常", current_price=18.0, bars=bars)
         assert result["weights_used"] == {"chan": 0.20, "momentum": 0.56, "vpf": 0.24}
+
+    def test_structure_sell_outranks_climax_weights(self):
+        """高位强动量 + 一类卖 → 结构卖权重，禁止 climax 抬 mom 权。"""
+        from trader_shared.fusion_core import merge_decisions
+
+        chan = {
+            "chanlun": {
+                "buy_points": [],
+                "sell_points": [{"type": "一类卖", "price": 19.0, "confidence": 3}],
+                "divergence": {},
+                "trend_label": "数据不足",
+            }
+        }
+        mom = {"momentum": {"score": 85, "direction": "bullish", "signals": ["多指标共振(强烈看多)"]}}
+        bars = [{"low": 10.0, "high": 20.0}]
+        result = merge_decisions(chan, mom, {}, regime="正常", current_price=18.0, bars=bars)
+        assert result["weights_used"] == {"chan": 0.44, "momentum": 0.20, "vpf": 0.36}
+        # 一类卖方向应仍进 signals_detail
+        assert result["signals_detail"]["chan"]["direction"] == -1
 
     def test_belief_priority_conflict_resolution_bullish_veto(self):
         """Strong bullish veto signal (Chanlun buy points / bottom divergence, Wyckoff Spring) overrides disagreement and vetos Momentum bearish noise."""
