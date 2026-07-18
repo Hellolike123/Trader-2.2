@@ -1,7 +1,8 @@
 # 买点「盖」生命周期（产品契约）
 
-> **状态**：规格冻结 · **实现未落地**（纪律/闸口后续接）  
-> **版本**：v0.1 · 2026-07-18  
+> **状态**：L1 已落地（展示 + failed 收紧新开）· L2/L3 待做  
+> **版本**：v0.2 · 2026-07-18  
+> **实现**：`trader_shared/buy_point_lifecycle.py` + `report_builder` / `report_core`
 > **读者**：策略 / 纪律 / Agent  
 > **边界**：不进入 `assess_momentum` 打分；不改 `weighted_score` 公式。
 
@@ -84,9 +85,10 @@ buy_point_lifecycle:
 | 阶段 | 内容 | 完成定义 |
 |------|------|----------|
 | **Spec** | 本文 | ✅ |
-| **L1 展示** | 报告一行：买点有效/已失效（盖 xx） | 有字段 + 渲染，不改融合分 |
-| **L2 纪律** | C1 / allow_new 吃 `status` | failed 不全绿、不新开 |
-| **L3 闸口** | entry pack 匹配读 lifecycle | S 测 + 真票 |
+| **L1 展示** | 报告一行：买点有效/已失效（盖 xx） | ✅ `buy_point_lifecycle` + 短线区渲染 |
+| **L1b 纪律** | failed → allow_new=False、清单缺「买点已失效」 | ✅ report_builder |
+| **L2 持久化** | failed 后跨日禁止接旧 signal_id | 待做 |
+| **L3 闸口** | entry pack 匹配读 lifecycle | 待做 |
 
 ---
 

@@ -1581,6 +1581,39 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         conclusion["midline_verdict_note"] = _midline_verdict["note"]
         _mark("conclusion")
 
+        # L1 买点盖生命周期（展示 + 失败时收紧新开；不进 fusion 分）
+        try:
+            from trader_shared.buy_point_lifecycle import build_buy_point_lifecycle_for_report
+            from trader_shared.chan_discipline import format_entry_line_c1
+
+            _life = build_buy_point_lifecycle_for_report(report)
+            report["buy_point_lifecycle"] = _life
+            if _life.get("status") == "failed":
+                _disc = report.get("discipline") if isinstance(report.get("discipline"), dict) else {}
+                _disc["allow_new_entry"] = False
+                _cl = _disc.get("entry_checklist") if isinstance(_disc.get("entry_checklist"), dict) else {}
+                if _cl:
+                    _cl["all_green"] = False
+                    _flags = _cl.get("flags") if isinstance(_cl.get("flags"), dict) else {}
+                    _flags["short_trigger"] = False
+                    _cl["flags"] = _flags
+                    _items = _cl.get("items") if isinstance(_cl.get("items"), dict) else {}
+                    _items["short_trigger"] = False
+                    _cl["items"] = _items
+                    _miss = list(_cl.get("missing_labels") or [])
+                    if "买点已失效" not in _miss:
+                        _miss.append("买点已失效")
+                    _cl["missing_labels"] = _miss
+                    _cl["entry_line"] = format_entry_line_c1(
+                        all_green=False, missing=_miss
+                    )
+                    _disc["entry_checklist"] = _cl
+                    _disc["entry_line"] = _cl["entry_line"]
+                report["discipline"] = _disc
+        except Exception as _life_exc:
+            _logger.debug("buy_point_lifecycle skip: %s", _life_exc)
+            report.setdefault("buy_point_lifecycle", {"status": "none", "display_line": ""})
+
         # 架构加固 B：完整意见卡 + 策略匹配（失败不阻断主报告）
         try:
             from trader_shared.analysis_cards import ensure_report_analysis_cards

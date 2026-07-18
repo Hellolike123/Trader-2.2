@@ -606,6 +606,12 @@ def render_short_midline(r: dict[str, Any]) -> str:
                 _chan_line += f" · {_wave}"
     lines.append(f"  结构：{_chan_line}")
 
+    # 1b) 买点盖生命周期（L1 展示）
+    _life = r.get("buy_point_lifecycle") if isinstance(r.get("buy_point_lifecycle"), dict) else {}
+    _life_line = str(_life.get("display_line") or "").strip()
+    if _life_line:
+        lines.append(f"  {_life_line}")
+
     # 2) 状态：日线威科夫事件灯（只展示，不进 fusion）
     try:
         from trader_shared.wyckoff_core import format_wyckoff_event_light
@@ -875,6 +881,8 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _sell_annotation = "分批出"
             if _rew_chase > 0:
                 _sell_annotation += f"，赚 {_rew_chase:.1f}"
+            if _sell_tgt_pct:
+                _sell_annotation += _sell_tgt_pct
         if float(short_low) == float(short_high):
             _price_items.append((float(short_low), "止盈区", f"{_sell_annotation}{_res_suffix}"))
         else:

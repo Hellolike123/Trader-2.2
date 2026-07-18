@@ -82,8 +82,13 @@ def test_i1_merge_cards_path_uses_live_momentum_shape(monkeypatch):
     assert mom_sig["confidence"] > 0.3
 
 
-def test_default_fusion_mode_is_classic(monkeypatch):
+def test_default_fusion_mode_is_cards(monkeypatch):
     monkeypatch.delenv("FUSION_FROM_CARDS", raising=False)
+    assert _fusion_input_mode() == "cards"
+
+
+def test_fusion_mode_classic_explicit(monkeypatch):
+    monkeypatch.setenv("FUSION_FROM_CARDS", "classic")
     assert _fusion_input_mode() == "classic"
 
 

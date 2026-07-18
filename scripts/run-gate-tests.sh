@@ -52,6 +52,8 @@ TESTS=(
   # Arch C/D：cards / fusion-from-cards / 六闸策略（防动量席静音、cost_price 等契约）
   "02-共享模块-shared/tests/test_fusion_cards_parity_bugs.py"
   "02-共享模块-shared/tests/test_fusion_path_compare.py"
+  "02-共享模块-shared/tests/test_buy_point_lifecycle.py"
+  "02-共享模块-shared/tests/test_report_optimization.py"
   "02-共享模块-shared/tests/test_fusion_from_cards.py"
   "02-共享模块-shared/tests/test_strategy_match.py"
   "02-共享模块-shared/tests/test_analysis_opinion_cards_p0.py"

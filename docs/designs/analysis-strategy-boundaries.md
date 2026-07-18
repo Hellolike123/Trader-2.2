@@ -118,8 +118,8 @@ report_builder→  全部层
 
 | 变量 | 值 | 行为 |
 |------|-----|------|
-| `FUSION_FROM_CARDS` | **缺省** / `classic` / `false` / `0` / `off` | **生产默认**：仅原 `_chan_to_signal` / `_momentum_to_signal` / VPF 路径 |
-| | `cards` / `true` / `1` / `on` / `auto` | 三席优先意见卡，不足回退 classic |
+| `FUSION_FROM_CARDS` | **缺省** / `cards` / `true` / `1` / `on` / `auto` | **生产默认**：三席优先意见卡，不足回退 classic |
+| | `classic` / `false` / `0` / `off` | 仅原 `_chan_to_signal` / `_momentum_to_signal` / VPF 路径 |
 | | `compare` / `both` / `dual` | 两路都算；主结果用 cards；写入 `fusion_compare` |
 
 结果字段：`fusion_input_path` = `classic` \| `cards`；可选 `fusion_compare`。

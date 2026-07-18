@@ -136,18 +136,19 @@ def _report() -> dict:
 # ── Task 1: 盈亏比 ✓/✗ 判定 + 卖点区目标百分比 ──
 
 def test_risk_reward_ratio_with_verdict():
-    """盈亏比行带 ✓/✗ 判定符号（新标签：回踩低吸 / 现价跟进）。"""
+    """短线关键价低吸区带盈亏比 ✓（现版：回踩买 · 盈亏比 x:1）。"""
     out = render_short_midline(_report())
-    assert "回踩低吸：亏约" in out
-    assert "现价跟进：亏约" in out
-    assert "盈亏比 2.4:1 ✓ 值得关注" in out
-    assert "盈亏比 0.4:1 ✗ 不划算" in out
+    assert "回踩买" in out
+    assert "盈亏比 2.4:1 ✓" in out
+    # 现价不宜追：动作区「不划算」
+    assert "不划算" in out
 
 
 def test_sell_zone_with_target_pct():
-    """卖点区行带目标百分比。"""
+    """止盈区行带目标百分比。"""
     out = render_short_midline(_report())
-    assert "目标+2.3%" in out
+    assert "止盈区" in out
+    assert "目标+" in out
 
 
 # ── Task 2: 价格阶梯来源标注 ──
@@ -423,9 +424,9 @@ def test_vpf_with_veto_appends():
 # ── Task 8: 调整天数 + 相对强弱降级 ──
 
 def test_adjust_days():
-    """meta 区显示调整天数。"""
+    """meta 量价行并入调整天数（现版：调整N天）。"""
     out = render_short_midline(_report())
-    assert "调整：第19天" in out
+    assert "调整19天" in out
 
 
 def test_adjust_days_new_high():
@@ -445,11 +446,12 @@ def test_relative_strength_fallback_when_sector_empty():
 
 
 def test_relative_strength_when_present():
-    """extend_sector 有数据时显示相对强弱。"""
+    """extend_sector 有数据时在行业行展示 stock_vs_sector。"""
     r = _report()
     r["extend_sector"] = {"status": "正常", "stock_vs_sector": "跑赢 +1.50%"}
     out = render_short_midline(r)
-    assert "相对强弱：跑赢 +1.50%" in out
+    assert "跑赢 +1.50%" in out
+    assert "行业：" in out
 
 
 # ── Task 9: 中线关键价格式统一 ──

@@ -113,12 +113,12 @@
 
 ### 2.7 Fusion 输入路径（Arch C）
 
-短线三席（缠/动量/VPF）**生产默认 classic**（`_chan_to_signal` / `_momentum_to_signal` / VPF 原路径）。
+短线三席（缠/动量/VPF）**生产默认 cards**（意见卡 → `fusion_card_signals`；不足回退 classic）。
 
 | `FUSION_FROM_CARDS` | 行为 |
 |---------------------|------|
-| 缺省 / `classic` / `false` / `0` | **默认**：三席走 classic 标准化 |
-| `cards` / `true` / `1` | 三席优先意见卡（`analysis_cards` → `fusion_card_signals`），不足回退 classic |
+| 缺省 / `cards` / `true` / `1` | **默认**：三席优先意见卡 |
+| `classic` / `false` / `0` | 强制 classic 标准化 |
 | `compare` / `dual` | 两路都算；主结果用 cards；写入 `fusion_compare` 供对账 |
 
 报告路径仍会预产 `analysis_cards`（策略 📐 / ensure 用），与 fusion 默认输入解耦。  

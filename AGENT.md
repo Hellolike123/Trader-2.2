@@ -233,12 +233,12 @@ Trader3.0/
 
 | `FUSION_FROM_CARDS` | 行为 |
 |---------------------|------|
-| **缺省 / classic** | **生产默认**：classic 三席标准化 |
-| `cards` | 优先 `analysis_cards` → `fusion_card_signals`；不足回退 classic |
+| **缺省 / cards** | **生产默认**：意见卡三席（不足回退 classic） |
+| `classic` | 强制 classic 三席标准化 |
 | `compare` | 双轨对账；主结果 cards + `fusion_compare` |
 
-- 报告仍预产 `analysis_cards`（策略 📐 / Skill 读卡），**与 fusion 默认 classic 解耦**。
-- **禁止**假设「默认已是 cards」。切默认前须真票 compare + 门禁内 parity 仍绿。
+- 报告预产 `analysis_cards` 供 📐 / Skill；默认 fusion 也读卡。
+- 回退：`FUSION_FROM_CARDS=classic`。
 - 详：`docs/designs/analysis-strategy-boundaries.md` §5、`BUSINESS.md` §2.7。
 
 ### 3.4 设计原则（不可破坏）
@@ -252,7 +252,7 @@ Trader3.0/
 | **禁止向上依赖** | trader_shared 不 import scripts/ | ❌ `from trader.scripts import ...` |
 | **模块边界：箱体独立** | `box_detect.py` 是独立模块，暂不接入 report_builder，保留代码和测试以备后续 | ❌ 把箱体检测结果写进报告渲染 |
 | **模块边界：威科夫周线** | 周线威科夫独占中线，数据不足直接 return insufficient（不回退日线） | ❌ 周线不足时 fallback 到日线 |
-| **Fusion 默认 classic** | 缺省不走 cards 三席；切 cards 须显式 env + parity | ❌ 默认改回 cards 且不跑真票 compare |
+| **Fusion 默认 cards** | 缺省走 cards；`classic` 强制原路径 | ❌ 擅自改默认且不跑 parity/对账 |
 | **威科夫出口** | Agent/新代码优先 `to_wyckoff_state_view`；不把威科夫当 fusion 总大脑 | ❌ 从 analysis 里手抄 40 个 `*_signal` 拼叙事 |
 | **周线根数** | 默认 `WEEKLY_LOOKBACK_BARS=260`，中线缠论/威科夫同用 | ❌ 仍按旧 80 周假设调试「笔数不足」 |
 | **波段标签** | 仅 strokes&lt;3 写「笔数不足」；段少写「线段偏少/未成型」 | ❌ segments&lt;2 就报「笔数不足」 |
