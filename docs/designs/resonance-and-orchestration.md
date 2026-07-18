@@ -1,165 +1,211 @@
-# 岗位共振 + 编排总管（业务与改造路线）
+# 目标架构法源：五层 + 编排 · 岗位共振 · 多场景
 
-> **状态**：已立项 · 分支 `feat/resonance-orchestration`  
-> **版本**：v0.1 · 2026-07-19  
-> **报告版式**：未定（本文件不规定 emoji/排版）  
-> **读者**：人类决策 + 开发 Agent
+> **状态**：产品方向已定 · 分支 `feat/resonance-orchestration`  
+> **版本**：v0.2 · 2026-07-19  
+> **读者**：**所有后续 Agent / 人类**——只读本文 + `AGENT.md` 即可接上方向  
+> **报告/T0/池面板版式**：未定（本文只定职责与字段，不定 emoji 排版）  
+> **冲突时**：以本文产品铁律 + `trader_shared/` 实现为准；旧文若写「fusion 打分当总司令」视为过时  
+
+**备份**：本文件在 git 版本库内（`docs/designs/`）；合入 main 前以分支提交为准。勿只写在对话里。
 
 ---
 
-## 0. 一句话目标
+## 0. 给下一个 Agent 的 30 秒摘要
 
-多理论各自分析 → **岗位互补看齐不齐（共振）** → 原典策略自动亮 → **薄决策（纪律 + 主策略）** → 报告讲因果。
+1. **产品**：多理论分析 → 岗位互补（共振）→ 原典策略自动触发 → 薄决策（纪律+主策略）→ 各场景展示。  
+2. **不当**：厚 `weighted_score` 加权融合当分王；策略/展示层重跑缠论威科夫检测。  
+3. **架构**：数据 / 分析 / 共振+策略+决策 / 展示 + **编排总管**（只排队）。  
+4. **可扩展**：新理论→分析卡；新原典→策略 YAML；新用法→新编排入口（T0/池/候选池/仓位）读同一字段。  
+5. **代码现状**：阶段 1 已落地 `report["resonance"]`（`resonance.py`），**尚未**改出手逻辑。  
+6. **详细边界**：`analysis-strategy-boundaries.md`；意见卡：`analysis-opinion-cards.md`。
 
-**不当**厚加权打分（fusion score）当总司令。
+---
 
-新开铁律（产品，阶段 3 才接到出手）：
+## 1. 一句话目标与铁律
+
+```text
+数据 → 各理论分析（意见卡）→ 岗位共振（齐不齐）→ 原典策略亮不亮
+    → 纪律允不允许 → 报告 / T0 / 池 / 仓位 各取所需
+```
+
+**新开铁律**（产品；阶段 3 才接到出手代码）：
 
 ```text
 可推荐新开  ⇔  共振齐  ∧  主入场策略亮  ∧  纪律允许
 ```
 
+**纪律铁律**（已有，保持）：只收紧出手/仓位/失效，**不改** `weighted_score` / support / stop。
+
+**方向铁律**（过渡期）：未接 decision_view 前，主报告仍可能受 fusion 影响；**目标**改为听共振+策略+纪律。新 Agent 勿再加厚 fusion 权重矩阵当产品主路径。
+
 ---
 
-## 1. 架构：五层 + 编排
+## 2. 架构：五层 + 编排
+
+### 2.1 总图
 
 ```text
-编排层  build_report（只排队调用，不算理论、不写加权公式）
-    │
+CLI / Skill（trader · t0 · review · portfolio …）
+    ↓
+编排层（多个入口，同一底座）
+    · build_report          单票中短线
+    · t0 build_plan/monitor 盘中执行卡
+    · final_pool            选股池 / 候选池批量
+    · final_portfolio       仓位轮动
+    │  只调度，不算理论、不写加权公式
     ▼
-数据层  data_provider / cache / 多源
+数据层  data_provider / cache / 多源 fallback
     ▼
-分析层  cores + plugins → analysis_cards
+分析层  cores + plugins → analysis_cards（各理论各说各话）
     ▼
-    ├─→ 共振     局面图 posts / grade（读卡，不重跑检测）
-    ├─→ 策略层   packs YAML + 六闸 match
-    └─→ 决策层   discipline 只收紧 +（阶段 3）主策略择一
+    ├─→ 共振     posts / grade（读卡；岗位互补，非计票打分）
+    ├─→ 策略层   strategy/packs/*.yaml + 六闸 match
+    └─→ 决策层   discipline 只收紧 +（将来）主策略择一 / decision_view
     ▼
-展示层  render（版式 TBD；只读 report）
+展示层  各场景纯展示（版式 TBD）
 ```
 
-| 层 | 职责 |
-|----|------|
-| **编排** | 串阶段；现实现：`report_builder.build_report`（目标变瘦） |
-| **数据** | 行情与快照 |
-| **分析** | 各理论出意见卡；不互相加权成「真理」 |
-| **共振** | 岗位 ✓/✗ 与档；服务策略/出手，不是计票打分 |
-| **策略** | 原典剧本自动触发；不改 `weighted_score` |
-| **决策** | 纪律硬闸 + 薄仲裁；fusion 分降为可选仪表 |
-| **展示** | 纯展示 |
+### 2.2 各层职责（Agent 挂模块时认层）
 
-依赖：箭头只能向下或「分析 → 共振/策略/决策」分叉。策略/展示禁止重跑检测。
+| 层 | 干什么 | 不干什么 | 代码锚点（现行） |
+|----|--------|----------|------------------|
+| **编排** | 按序调用各层，写 report/卡片 dict | 内嵌检测、加权公式、人话业务堆砌 | `report_builder.build_report`；t0/pool/portfolio scripts |
+| **数据** | 行情、快照、缓存、HA | 理论判断 | `data_provider` / `light_data` / `cache_utils` |
+| **分析** | 理论计算 → **意见卡** | 互相加权成唯一真理；直接写「买30%」 | `analysis/`、`plugins/`、各 `*_core` |
+| **共振** | 岗位 ✓/✗、档、冲突、缺岗 | 计票打分；重跑检测 | `resonance.py` → `report["resonance"]` |
+| **策略** | 原典剧本自动 match | 改 weighted_score；import 检测实现 | `strategy/match.py` + `strategy/packs/` |
+| **决策** | 纪律硬闸 + 薄仲裁 | 用分数平均抹掉冲突 | `mistery_gate` / `chan_discipline`；将来 decision_view |
+| **展示** | 渲染 | if Spring 则建议买入 | `report_core` / t0 输出 / pool 面板 |
+
+### 2.3 为何要有编排层（给听不懂的人）
+
+五层是**工种**；编排是**总管喊开工顺序**。  
+没有编排，模块不会自己串起来。现有总管偏胖（`build_report` ~1800 行）——**目标变瘦**，不是取消总管。
 
 ---
 
-## 2. 场景：回踩试探（pullback_probe）
+## 3. 业务选择：共振，不是厚打分
 
-### 2.1 四岗
+| | 厚融合打分 | 岗位共振（本方向） |
+|--|------------|-------------------|
+| 问题 | 各席多少分加总？ | 各岗位是否合格、是否互补、哪里冲突？ |
+| 输出 | 连续分 → 映射动作 | 档 + 缺岗 + 冲突 + 是否可推策略 |
+| 风险 | 强信号被平均掉 | 做成计票/加权换皮则退化 |
 
-| 岗位 | id | 理论 | 绿灯（v0 启发式，可迭代） |
-|------|-----|------|---------------------------|
-| 背景 | `background` | 阶段 + 威科夫中线观感 | 非派发/衰退；中线观感非明确空 |
-| 结构 | `structure` | 缠论买点/回踩 | 有买点类型或 price 在回踩/买点区 |
-| 筹码 | `chip` | 筹码峰/搬家 | 无清仓级搬家警告；峰信息可用 |
-| 动能 | `momentum` | 动量 | **确认岗**：direction 非强空则「不拆台」 |
+**四岗（场景 `pullback_probe` 回踩试探）**：
 
-原则：A/B/C 门闩；D 否决/降档，不强多单独开仓。
+| 岗位 | id | 角色 |
+|------|-----|------|
+| 背景 | background | 阶段/威科夫中线：能不能谈试探 |
+| 结构 | structure | 缠论买点/回踩区：位到了没有 |
+| 筹码 | chip | 峰/搬家：成本稳不稳 |
+| 动能 | momentum | **确认/否决**：不拆台即可，不强多单独开仓 |
 
-### 2.2 共振档 `grade`
+**grade**：`aligned` / `momentum_veto` / `missing_*` / `conflict` / `empty`（见 `resonance.py`）。
 
-| grade | 含义 |
-|-------|------|
-| `aligned` | A✓ B✓ C✓ 且 D 不拆台 |
-| `momentum_veto` | A✓ B✓ C✓ 但 D 拆台 |
-| `missing_structure` | 缺结构 |
-| `missing_chip` | 缺筹码（结构有） |
-| `missing_background` | 缺背景 |
-| `conflict` | 结构偏多但背景否决等 |
-| `empty` | 信息不足或均未形成 |
+---
 
-### 2.3 报告字段（版式未定，先定 JSON）
+## 4. 多场景消费者（计划时必须考虑）
+
+底座统一；**禁止** T0/池/仓位各自重写缠论。
+
+| 场景 | 入口（参考） | 编排角色 | 备注 |
+|------|--------------|----------|------|
+| 单票中短线 | `final_report` → `build_report` | 主路径；阶段 1 已写 resonance | 报告版式 TBD |
+| **T0 交易卡片** | `01-功能包-packages/t0/` | 盘中：quote/分钟 + 关键价/纪律 | 有底仓执行 ≠ 新开试探；可另 scene 或只消费短线闸+纪律 |
+| **选股池** | `final_pool`、`~/.trader/pool.json` | 多票批量分析 → rank/plan | 共振档可过滤/排序（离散），不作厚打分王 |
+| **候选池** | 自建名单 → 同一分析底座 | 批量筛选后再入正式池 | 与正式池同构，不同名单源 |
+| **仓位轮动** | portfolio、`stage_positioning` | 组合 cap、T+1、相关性 | 读多票阶段/纪律/将来 decision_view |
+
+持久化参考：`pool.json`、`signals.jsonl`、T0 state 等见 `AGENTS.md`。
+
+---
+
+## 5. 如何加模块（菜谱）
+
+| 你要加 | 挂哪一层 | 怎么做 |
+|--------|----------|--------|
+| 新数据源 | 数据 | Fetcher + provider；分析只吃 snapshot |
+| 新理论/指标 | 分析 | core/plugin → `build_xxx_card` → 卡契约文档 |
+| 新岗位/场景共振 | 共振 | `build_resonance(..., scene=)` 读卡；禁检测 import |
+| 新原典剧本 | 策略 | `strategy/packs/*.yaml` + context 字段 |
+| 新硬规矩 | 决策/纪律 | gate 只收紧 |
+| 新用法（T0/池/候选） | **新编排入口** | 调底座，拼自己的展示；不复制 cores |
+| 新面板文案 | 展示 | 只读字段 |
+
+**红线**（与 `analysis-strategy-boundaries` 一致）：
+
+- 策略/展示禁止 import `wyckoff_events` / `chan_geometry` 等检测实现  
+- 禁止为加包去改 `weighted_score` 公式  
+- 编排禁止无限堆业务 if；业务进对应层  
+
+---
+
+## 6. 改造阶段与代码现状
+
+| 阶段 | 内容 | 出手行为 | 状态 |
+|------|------|----------|------|
+| **0** | 本文法源 | 不变 | ✅ |
+| **1** | `build_resonance` + builder 挂载 + 单测 | **不变** | ✅ `resonance.py` / `test_resonance_pullback.py` |
+| **2** | strategy context 可读共振；包可 match grade | 可选更严 | 待做 |
+| **3** | decision_view：新开听 共振∧策略∧纪律 | **改变** | 待做 |
+| **4** | fusion 退居仪表；展示主叙事跟 decision_view | 改变因果 | 待做 |
+| **5** | `build_report` 拆阶段函数（总管变瘦） | 行为冻结重构 | 待做 |
+
+**阶段 1 字段**：
 
 ```text
 report["resonance"] = {
-  "schema_version": "resonance_v1",
-  "scene": "pullback_probe",
-  "grade": "aligned" | ...,
-  "posts": {
-    "background": {"ok": bool, "note": str},
-    "structure":  {"ok": bool, "note": str},
-    "chip":       {"ok": bool, "note": str},
-    "momentum":   {"ok": bool, "note": str},  # ok=不拆台
-  },
-  "missing": ["structure", ...],
-  "conflict": bool,
-  "summary_line": str,   # 一句人话，渲染可选
+  schema_version, scene, grade, posts{background,structure,chip,momentum},
+  missing, conflict, summary_line
 }
 ```
 
-**阶段 2（当前代码）**：只写入 `report["resonance"]`，**不改** discipline / conclusion / fusion 出手。
+实现：`trader_shared/resonance.py`  
+挂载：`report_builder` 在 `ensure_report_analysis_cards` 之后、`match_strategies` 之前。
+
+**1800 行 builder**：要拆，但不做当前第一步；阶段 5 或穿插「只抽函数、行为不变」小拆。
 
 ---
 
-## 3. 改造阶段
+## 7. 额外建议（给产品/工程，非强制立刻做）
 
-| 阶段 | 内容 | 出手行为 |
-|------|------|----------|
-| **0** | 本文 + 索引 | 不变 |
-| **1** | `build_resonance` + builder 挂载 + 单测 | **不变**（并行观察） |
-| **2** | strategy context 可读共振；入场包可 match grade | 可选更严 |
-| **3** | `decision_view`：新开听 共振∧策略∧纪律 | **改变** |
-| **4** | fusion 退居仪表；报告主叙事改听 decision_view | 改变展示因果 |
-| **5** | `build_report` 拆阶段函数（总管变瘦） | 行为冻结下重构 |
-
-`report_builder` ~1800 行：**要拆，但不做第一步**；阶段 5 或阶段 1 后仅做「抽函数、行为不变」的小拆。
+1. **先字段契约、后版式**：单票/T0/池面板都可以后画皮。  
+2. **候选池与正式池同构**：只换名单与过滤阈值，共用 `build_report`/共振。  
+3. **T0 场景独立**：勿强行套 `pullback_probe`；可共享纪律与关键价。  
+4. **decision_view 一处出口**：减少 fusion/conclusion/discipline 多嘴。  
+5. **门禁**：新测无网；全量历史红项勿塞 pre-push。  
+6. **文档单一法源**：产品方向以**本文**为准；boundaries 管 import 红线；AGENT 链到本文。  
+7. **fusion**：兼容与回测可留；新功能默认不依赖加厚权重。  
 
 ---
 
-## 4. 代码落点（阶段 1）
+## 8. 相关文件速查
 
-| 路径 | 角色 |
+| 用途 | 路径 |
 |------|------|
-| `trader_shared/resonance.py` | `build_resonance(report) → dict` |
-| `report_builder.build_report` | cards 齐后调用，写入 `report["resonance"]` |
-| `tests/test_resonance_pullback.py` | 四岗/分档离线单测 |
-
-禁止：在 `resonance.py` 内 import 缠/威**检测实现**重算 K 线；只读 report / cards。
-
----
-
-## 5. 与现有模块关系
-
-| 现有 | 关系 |
-|------|------|
-| `analysis_cards` | 共振主输入 |
-| `strategy_match` | 阶段 2 起可读共振 |
-| `fusion_core` | 阶段 1 不动；阶段 3+ 降权 |
-| `discipline` / C1 | 阶段 3 与共振对齐「缺岗」话术 |
-| `render_short_midline` | 版式 TBD；勿过早绑死 |
-
-### 5.1 多场景消费者（计划时必须考虑，阶段 1 不实现）
-
-底座是同一套「数据 → 分析 → 共振 → 策略 → 纪律」；**T0 / 选股池 / 仓位是不同编排入口 + 展示**，禁止各写一套理论。
-
-| 场景 | 已有入口（参考） | 与共振/决策的关系（规划约束） |
-|------|------------------|-------------------------------|
-| 单票中短线 | `build_report` / final_report | 主挂载点（阶段 1 已写 `resonance`） |
-| **T0 交易卡片** | `01-功能包-packages/t0/`、monitor、`t0_candidate_core` | 盘中执行卡：触发价/大单/风控；可读短线关键价与纪律。场景可不同于 `pullback_probe`（有底仓 T0 ≠ 新开试探），后续可 `scene=t0_*` 或只消费纪律+短线策略闸 |
-| **选股池** | `final_pool`、`~/.trader/pool.json`、rank/plan/refresh | 多票批量分析；共振档可作过滤/排序离散信号，不作厚打分王 |
-| **仓位轮动** | portfolio 技能、`stage_positioning`（T+1、相关性等） | 组合层决策扩展；读多票阶段/纪律/（将来）decision_view，不重跑检测 |
-
-写阶段 2～5 与拆 `build_report` 的计划时：**默认检查**「池批量、T0 卡片、仓位是否仍只消费统一字段、有无分叉智商」。  
-版式（单票报告 / T0 卡 / 池面板）均可后定；**先字段契约，后展示。**
+| **本文（产品+架构法源）** | `docs/designs/resonance-and-orchestration.md` |
+| 分析/策略 import 红线 | `docs/designs/analysis-strategy-boundaries.md` |
+| 意见卡字段 | `docs/designs/analysis-opinion-cards.md` |
+| 策略包 / 六闸 | `strategy-pack.md` / `strategy-gates.md` |
+| 共振实现 | `trader_shared/resonance.py` |
+| 单票编排 | `trader_shared/report_builder.py` |
+| 策略匹配 | `trader_shared/strategy/match.py` |
+| T0 | `01-功能包-packages/t0/` |
+| 选股池 | `01-功能包-packages/trader/scripts/final_pool.py` |
+| Agent 总入口 | `AGENT.md` / `AGENTS.md` |
 
 ---
 
-## 6. 验收（阶段 1）
+## 9. Agent 自检清单
 
-- [ ] `build_resonance` 纯函数，无网  
-- [ ] builder 失败不阻断主报告  
-- [ ] 出手/仓位/文案与改前一致（golden 可选：字段新增允许）  
-- [ ] 门禁相关单测绿  
+- [ ] 我加的是理论/策略/编排/展示中的哪一种？  
+- [ ] 是否只通过卡/共振/纪律字段下传？  
+- [ ] 是否重跑了检测或加厚了 fusion？  
+- [ ] 若动出手：是否仍满足 共振齐∧策略亮∧纪律过？  
+- [ ] 是否考虑 T0/池/仓位仍能只读同一字段？  
+- [ ] 是否更新了本文或 boundaries（若改了契约）？  
 
 ---
 
-*冲突时以产品铁律与本文为准；实现细节以 `resonance.py` 为准并回写本文。*
+*写计划、拆 builder、接 T0/池时：打开本文。对话结论以 git 中本文为准。*

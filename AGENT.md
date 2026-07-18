@@ -170,23 +170,27 @@ Trader3.0/
 
 ## 3. 核心架构
 
-### 3.1 分层架构
+### 3.0 目标架构（产品方向 · Agent 必读）
+
+> **法源**：`docs/designs/resonance-and-orchestration.md`  
+> 五层（数据→分析→共振/策略/决策→展示）+ **编排总管**；主路径走向**岗位共振 + 原典策略 + 纪律**，fusion 厚打分不作总司令。  
+> 可挂：新理论（分析卡）、新原典（策略包）、T0/选股池/候选池/仓位（不同编排入口，同一底座）。  
+> 阶段 1：`report["resonance"]` 已写入，**尚未**改出手。报告版式 TBD。
+
+### 3.1 分层架构（现行代码 + 目标对照）
 
 ```
 ┌─────────────────────────────────────────┐
-│  Skill Layer           ← Agent ↔ Python 桥接
+│ Skill / CLI            ← trader · t0 · pool · portfolio
 ├─────────────────────────────────────────┤
-│  CLI Layer             ← 命令行入口
+│ 编排层                 ← build_report / t0 / pool（只调度）
 ├─────────────────────────────────────────┤
-│  Domain Layer          ← build_report() 总编排器
-│  ├─ Strategy Plugins   ← 缠论/动量/威科夫（自动发现）
-│  ├─ Fusion Layer       ← 三评委加权 + 风控否决
-│  ├─ Structure/Chip/Stage ← 结构/筹码/阶段分析
-│  └─ Discipline/Gate    ← 纪律门控
+│ 分析 → 共振/策略/决策  ← cards · resonance · packs · discipline
+│ （过渡）Fusion 三席    ← 仍存在；目标降为仪表，见法源文档
 ├─────────────────────────────────────────┤
-│  Data Layer            ← 统一数据入口
+│ 数据层                 ← data_provider / cache
 ├─────────────────────────────────────────┤
-│  Presentation Layer    ← 纯展示，无策略逻辑
+│ 展示层                 ← report_core / T0 卡 / 池面板（纯展示）
 └─────────────────────────────────────────┘
 ```
 

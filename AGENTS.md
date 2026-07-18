@@ -2,8 +2,9 @@
 
 ## 接手先看
 
+- **目标架构法源（新 Agent 先读）**：`docs/designs/resonance-and-orchestration.md` — 五层+编排、岗位共振、T0/池/仓位多场景、如何加理论/策略/模块；fusion 不作总司令。
 - **版本升级**：当前版本为 Trader 2.4+（三大技能整合 + 四阶段定位）。单票报告默认已切到**中短线双轨**（`SHORT_MIDLINE_REPORT=true`）。
-- **Fusion 默认 cards（Arch C）**：`FUSION_FROM_CARDS` **缺省 = cards**（意见卡三席）；`classic` 强制原路径；`compare` 双轨对账。详见 `BUSINESS.md` §2.7。
+- **Fusion 默认 cards（Arch C）**：`FUSION_FROM_CARDS` **缺省 = cards**（意见卡三席）；`classic` 强制原路径；`compare` 双轨对账。详见 `BUSINESS.md` §2.7。产品方向上 fusion 分将降为仪表，见共振法源文档。
 - **门禁只跑离线子集**：`scripts/run-gate-tests.sh`（含 cards/strategy parity）；**禁止**把全量 pytest 历史红项硬塞进门禁。说明：`docs/architecture/ci-gate.md`。
 - **技能整合**：6 个技能合并为 3 个——`trader`（单票分析 + 选股池）、`t0`（盘中盯盘）、`review`（盘后复盘 + 仓位轮动 + 信号追踪）。
 - **中短线双轨报告（默认）**：`report_core.render_short_midline` —— 标题带 `｜短中线`；分区 meta → 🧭 中线 → ⚡ 短线 → 说明/亮点风险 → T0/池。旧 `🎯`+`📍 决策` 模板仅 `SHORT_MIDLINE_REPORT=false` 回退。

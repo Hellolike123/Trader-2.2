@@ -15,10 +15,10 @@
 | [strategy-roadmap-and-tests.md](./strategy-roadmap-and-tests.md) | **落地分期 + 测试清单**（P0～P4） |
 | [strategy-menu.md](./strategy-menu.md) | 缠/威/mi 菜单与包映射（思路） |
 | [wyckoff-state-view.md](./wyckoff-state-view.md) | 威科夫 StateView 契约（已实现 A 档） |
-| [resonance-and-orchestration.md](./resonance-and-orchestration.md) | **岗位共振 + 编排总管**（五层+总管；fusion 降权路线；阶段 1 已挂字段） |
+| [resonance-and-orchestration.md](./resonance-and-orchestration.md) | **目标架构法源**：五层+编排、共振非厚打分、T0/池/候选池/仓位、加模块菜谱、阶段 0～5 |
 
 **推荐阅读顺序（开发 Agent）**：  
-`analysis-strategy-boundaries` → **resonance-and-orchestration** → analysis-opinion-cards → strategy-gates → strategy-pack → roadmap。
+**resonance-and-orchestration（产品方向）** → `analysis-strategy-boundaries`（import 红线）→ analysis-opinion-cards → strategy-gates → strategy-pack → roadmap。
 
 **原则**：以本目录为准；桌面草稿仅作备份，不作为开发契约。
 

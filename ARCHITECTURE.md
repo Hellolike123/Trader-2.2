@@ -1,27 +1,30 @@
 # ARCHITECTURE.md — Trader3.0 系统架构
 
-> **最后更新**：2026-07-17 | **基于**：`trader_shared/` 代码 + 周线/MACD/融合/日频缓存/威科夫 View 契约
+> **最后更新**：2026-07-19 | **基于**：`trader_shared/` 代码 + 目标架构法源  
+> **产品方向法源**：`docs/designs/resonance-and-orchestration.md`（五层+编排、共振、多场景）
 
 ---
 
 ## 1. 架构概览
 
-Trader3.0 采用**分层架构 + 插件化 + 融合决策**的量化分析系统设计。
+Trader3.0 采用**分层 + 编排总管 + 插件化**设计。  
+**目标主路径**：数据 → 分析（意见卡）→ 岗位共振 / 原典策略 / 纪律 → 多场景展示（单票、T0、池、仓位）。  
+厚 fusion 加权为过渡能力，不作长期总司令（详见法源文档）。
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ 入口层      │ final_report.py / final_pool.py / pool_briefing.py
+│ 入口层      │ final_report / final_pool / t0 / portfolio
 ├──────────────────────────────────────────────────────────┤
-│ 编排层      │ report_builder.py (build_report — 总编排器)
-├────────────┬─────────────────────────────────────────────┤
-│ 策略层     │ PluginRegistry → 缠论/动量/威科夫 (plugins/)
-│ 融合层     │ fusion_core.py → 三评委加权 + 风控否决
-│ 分析层     │ structure_core / chip_core / stage_positioning
-│ 纪律层     │ mistery_gate / chan_discipline
-├────────────┴─────────────────────────────────────────────┤
-│ 数据层      │ data_provider.py → light_data / cache / tushare
+│ 编排层      │ build_report · t0 plan · pool 批量（只调度）
 ├──────────────────────────────────────────────────────────┤
-│ 展示层      │ report_core.py / report_presentation.py
+│ 分析层      │ cores/plugins → analysis_cards
+│ 共振/策略   │ resonance · strategy packs · 六闸 match
+│ 决策/纪律   │ mistery_gate / chan_discipline（只收紧）
+│ （过渡）融合 │ fusion_core 三席 — 目标降为仪表
+├──────────────────────────────────────────────────────────┤
+│ 数据层      │ data_provider → light_data / cache / tushare
+├──────────────────────────────────────────────────────────┤
+│ 展示层      │ report_core / T0 卡 / 池面板（纯展示）
 └──────────────────────────────────────────────────────────┘
 ```
 

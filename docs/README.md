@@ -23,6 +23,7 @@
 
 | 主题 | 文档 |
 |------|------|
+| **目标架构法源（Agent 必读）** | [designs/resonance-and-orchestration.md](./designs/resonance-and-orchestration.md) — 五层+编排、共振、T0/池/仓位、加模块 |
 | **架构边界（Agent 必读）** | [designs/analysis-strategy-boundaries.md](./designs/analysis-strategy-boundaries.md) |
 | **策略分层 · 6 闸口** | [designs/strategy-layered-architecture.md](./designs/strategy-layered-architecture.md) |
 | **分析意见卡（P0 ✅）** | [designs/analysis-opinion-cards.md](./designs/analysis-opinion-cards.md) |
