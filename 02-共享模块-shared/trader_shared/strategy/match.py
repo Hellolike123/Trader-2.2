@@ -148,7 +148,10 @@ def build_match_context(report: dict[str, Any] | None = None, **overrides: Any) 
     except (TypeError, ValueError):
         support_f = None
 
+    # 实盘 report 写 cost_price；测试桩可能写 cost
     cost = r.get("cost")
+    if cost is None:
+        cost = r.get("cost_price")
     try:
         cost_f = float(cost) if cost is not None and float(cost) > 0 else None
     except (TypeError, ValueError):
@@ -335,6 +338,16 @@ def match_strategies(
         stop_price = round(floor - buf, 2)
     elif ctx.get("stop") is not None:
         stop_price = float(ctx["stop"])
+    # 策略止损不得松于结构 hard stop（取更严 = 更高的止损价对多头而言是更紧）
+    # 对多头：止损价越高越紧；若 trail 算出更低（更松），抬到 structure stop
+    struct_stop = ctx.get("stop")
+    if stop_price is not None and struct_stop is not None:
+        try:
+            ss = float(struct_stop)
+            if ss > 0:
+                stop_price = round(max(float(stop_price), ss), 2)
+        except (TypeError, ValueError):
+            pass
     stage = _manage_stage(ctx)
     manage_mode = "active" if ctx.get("has_position") else "plan"
     manage_out = {

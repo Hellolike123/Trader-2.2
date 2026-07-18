@@ -25,6 +25,23 @@ def _finite(x: Any, default: float | None = None) -> float | None:
 
 
 def _as_dir(x: Any) -> int:
+    """int 或生产动量字符串 bullish/bearish/neutral/insufficient → ±1/0。"""
+    if isinstance(x, str):
+        key = x.strip().lower()
+        str_map = {
+            "bullish": 1,
+            "bearish": -1,
+            "neutral": 0,
+            "insufficient": 0,
+            "多": 1,
+            "空": -1,
+            "中性": 0,
+        }
+        if key in str_map:
+            return str_map[key]
+        # 中文原样
+        if x.strip() in str_map:
+            return str_map[x.strip()]
     try:
         d = int(x)
     except (TypeError, ValueError):
@@ -167,6 +184,31 @@ def build_chan_card(
                     "same_level": True,
                 }
 
+    point = info.get("point") if isinstance(info.get("point"), dict) else None
+    # fusion 契约字段：与 classic _point_conf 对齐
+    point_confidence = None
+    lower_confirmed = None
+    nesting_confirmed = None
+    if point is not None:
+        try:
+            pc = point.get("confidence")
+            if pc is not None:
+                point_confidence = int(pc)
+        except (TypeError, ValueError):
+            point_confidence = None
+        if "lower_confirmed" in point:
+            lower_confirmed = point.get("lower_confirmed")
+        if "nesting_confirmed" in point:
+            nesting_confirmed = point.get("nesting_confirmed")
+    # 背驰区间套：挂在 divergence 上
+    chan_raw = info.get("chan") if isinstance(info.get("chan"), dict) else {}
+    div = chan_raw.get("divergence") if isinstance(chan_raw.get("divergence"), dict) else {}
+    if info.get("status") == "divergence":
+        if info.get("type_raw") == "底背驰" and "bottom_divergence_lower_confirmed" in div:
+            lower_confirmed = div.get("bottom_divergence_lower_confirmed")
+        if info.get("type_raw") == "顶背驰" and "top_divergence_lower_confirmed" in div:
+            lower_confirmed = div.get("top_divergence_lower_confirmed")
+
     return {
         "schema_version": "chan_card_v1",
         "source": "chan",
@@ -179,6 +221,9 @@ def build_chan_card(
         "note": str(info.get("note") or ""),
         "same_level": bool(info.get("same_level")),
         "summary_line": line,
+        "point_confidence": point_confidence,
+        "lower_confirmed": lower_confirmed,
+        "nesting_confirmed": nesting_confirmed,
     }
 
 
@@ -187,27 +232,67 @@ def build_momentum_card(
     *,
     role: str = "daily",
 ) -> dict[str, Any]:
-    """动量意见卡 schema_version=momentum_card_v1。"""
+    """动量意见卡 schema_version=momentum_card_v1。
+
+    兼容两种输入：
+    - 生产：assess_momentum → {score, direction: bullish|bearish|…, signals}
+    - 测试桩：{direction: ±1, confidence, reason}
+    """
     m = momentum_result if isinstance(momentum_result, dict) else {}
     if "momentum" in m and isinstance(m.get("momentum"), dict):
         inner = m["momentum"]
+        payload = m
     else:
         inner = m
-    direction = _as_dir(inner.get("direction", m.get("direction")))
-    conf = _finite(inner.get("confidence", m.get("confidence")), 0.0) or 0.0
+        payload = {"momentum": m}
+
+    # 优先复用 classic 映射（字符串方向 + score U 型置信）
+    from trader_shared.fusion_core import _momentum_to_signal
+
+    sig = _momentum_to_signal(payload)
+    direction = int(sig.get("direction") or 0)
+    conf = float(sig.get("confidence") or 0.0)
+
+    # 显式 confidence 优先（测试桩 / 已标准化信号）
+    explicit_conf = _finite(inner.get("confidence", m.get("confidence")), None)
+    if explicit_conf is not None and inner.get("score") is None and m.get("score") is None:
+        # 无 score 时保留桩上的 confidence；有 score 时以 classic 为准
+        conf = max(0.0, min(1.0, explicit_conf))
+        # 桩若给了 int direction 且 classic 因字符串缺失得到 0，补方向
+        if direction == 0 and inner.get("direction") is not None:
+            direction = _as_dir(inner.get("direction"))
+
+    # 若 classic 仍为中性但内层有 int 方向
+    if direction == 0 and inner.get("direction") is not None:
+        d2 = _as_dir(inner.get("direction"))
+        if d2 != 0:
+            direction = d2
+
+    reason = str(sig.get("reason") or inner.get("reason") or m.get("reason") or "")
+    if not reason or reason in ("动量中性", "动量数据不足"):
+        signals_list = inner.get("signals") or m.get("signals") or []
+        if isinstance(signals_list, list) and signals_list:
+            reason = "、".join(str(x) for x in signals_list[-2:])
+    strength = str(inner.get("strength") or m.get("strength") or sig.get("strength") or "")
     conf = max(0.0, min(1.0, conf))
-    reason = str(inner.get("reason") or m.get("reason") or "")
-    strength = str(inner.get("strength") or m.get("strength") or "")
+    has_score = inner.get("score") is not None or m.get("score") is not None
+    raw_ok = bool(inner) and (
+        has_score
+        or explicit_conf is not None
+        or bool(reason)
+        or str(inner.get("direction") or "") not in ("", "insufficient")
+    )
     return {
         "schema_version": "momentum_card_v1",
         "source": "momentum",
         "role": role,
-        "raw_available": bool(inner) or bool(reason),
+        "raw_available": raw_ok,
         "direction": direction,
         "confidence": conf,
         "strength": strength,
         "reason": reason,
         "summary_line": reason or "动量中性",
+        "score": _finite(inner.get("score", m.get("score")), None),
     }
 
 

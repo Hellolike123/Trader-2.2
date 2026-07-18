@@ -57,16 +57,17 @@ except ImportError:  # pragma: no cover
 FUSION_LOG_ONLY = os.environ.get("FUSION_LOG_ONLY", "false").lower() in ("true", "1", "yes")
 
 # Arch C：fusion 三席输入来源
-# - classic：仅原路径 _chan_to_signal / _momentum_to_signal / build_vpf_signal（默认兼容）
+# - classic：仅原路径 _chan_to_signal / _momentum_to_signal / build_vpf_signal
 # - cards：优先 analysis_cards → fusion_card_signals（不足则回退 classic）
 # - compare：两路都算，主结果用 cards（可回退），并写入 fusion_compare
+# 默认 classic：cards 契约未与 classic 全量对等前不静音动量席；修完 parity 后可 FUSION_FROM_CARDS=cards
 def _fusion_input_mode() -> str:
-    v = (os.environ.get("FUSION_FROM_CARDS") or "cards").strip().lower()
-    if v in ("0", "false", "no", "classic", "off"):
-        return "classic"
+    v = (os.environ.get("FUSION_FROM_CARDS") or "classic").strip().lower()
+    if v in ("1", "true", "yes", "cards", "on", "auto"):
+        return "cards"
     if v in ("compare", "both", "dual"):
         return "compare"
-    return "cards"  # true / 1 / cards / auto
+    return "classic"  # 0 / false / no / classic / off / 缺省
 
 
 
@@ -581,7 +582,7 @@ def merge_decisions(
         regime:          market_env assess() 返回的 level 字段
         volume_warning / fund_flow_data / vpf_result: 第三席 VPF 输入
         analysis_cards:  Arch C 意见卡；与 fusion_from_cards 联用
-        fusion_from_cards: classic|cards|compare；None 读环境 FUSION_FROM_CARDS（默认 cards）
+        fusion_from_cards: classic|cards|compare；None 读环境 FUSION_FROM_CARDS（默认 classic）
 
     Returns:
         含 signals_detail.chan / momentum / vpf；weights_used 键为 chan/momentum/vpf

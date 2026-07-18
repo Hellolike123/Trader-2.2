@@ -783,9 +783,10 @@ def resolve_chanlun_primary(chan_result: Any = None) -> dict[str, Any]:
     note = " · ".join(note_parts) if note_parts else ""
 
     direction = 0
+    # 与 fusion_core 趋势兜底对称：拉升段 / 回调段 两侧都要有方向
     if "上涨" in trend_label or "拉升" in trend_label or "多" in trend_label:
         direction = 1
-    elif "下跌" in trend_label or "空" in trend_label:
+    elif "下跌" in trend_label or "回调" in trend_label or "空" in trend_label:
         direction = -1
 
     if note or chan:
