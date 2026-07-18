@@ -25,7 +25,7 @@ export PYTHONPATH="02-共享模块-shared:01-功能包-packages/trader/scripts"
 export TRADER_CHAN_NESTING=0
 
 # 离线稳定核心回归集（锁定）。新增离线测试请显式加入此数组。
-# 当前基线：68 passed / 1 warning / ~63s
+# 基线以实际 pytest 计数为准；扩展原则：只加离线/无凭证/确定性用例。
 TESTS=(
   "02-共享模块-shared/tests/test_imports_smoke.py"
   "02-共享模块-shared/tests/test_build_report_golden.py"
@@ -49,6 +49,12 @@ TESTS=(
   "02-共享模块-shared/trader_shared/test_chan_nesting_chain.py"
   "02-共享模块-shared/trader_shared/test_cache_stale_revalidation.py"
   "01-功能包-packages/trader/tests/test_report_renderer.py"
+  # Arch C/D：cards / fusion-from-cards / 六闸策略（防动量席静音、cost_price 等契约）
+  "02-共享模块-shared/tests/test_fusion_cards_parity_bugs.py"
+  "02-共享模块-shared/tests/test_fusion_from_cards.py"
+  "02-共享模块-shared/tests/test_strategy_match.py"
+  "02-共享模块-shared/tests/test_analysis_opinion_cards_p0.py"
+  "02-共享模块-shared/tests/test_arch_boundaries.py"
 )
 
 exec "$PYTHON" -m pytest -q -p no:cacheprovider "${TESTS[@]}"
