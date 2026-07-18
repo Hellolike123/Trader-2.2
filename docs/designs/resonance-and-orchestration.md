@@ -150,7 +150,7 @@ CLI / Skill（trader · t0 · review · portfolio …）
 | **2** | strategy context 可读共振；包可 match grade | 可选更严（旧包不变） | ✅ `build_match_context` 暴露 `resonance_*`；YAML `field: resonance_grade` |
 | **3** | decision_view：新开听 共振∧策略∧纪律 | **改变**（只收紧） | ✅ `decision_view.py`；builder 挂载；不改 fusion 分 |
 | **4** | fusion 退居仪表；展示主叙事跟 decision_view | 改变因果 | ✅ `format_decision_narrative_lines` + `render_short_midline` 共振/决策/新开/仪表 |
-| **5** | `build_report` 拆阶段函数（总管变瘦） | 行为冻结重构 | 🚧 已抽 `report_pipeline.attach_analysis_decision_stack`；builder 其余段可续拆 |
+| **5** | `build_report` 拆阶段函数（总管变瘦） | 行为冻结重构 | 🚧 分支 `refactor/build-report-pipeline`：`attach_analysis_decision_stack` + `apply_buy_point_lifecycle`；计划见 `docs/plans/active/build-report-pipeline-refactor.md` |
 
 **阶段 1 字段**：
 

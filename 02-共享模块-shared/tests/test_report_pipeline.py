@@ -9,7 +9,21 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from trader_shared.report_pipeline import attach_analysis_decision_stack  # noqa: E402
+from trader_shared.report_pipeline import (  # noqa: E402
+    apply_buy_point_lifecycle,
+    attach_analysis_decision_stack,
+)
+
+
+def test_apply_buy_point_lifecycle_sets_field():
+    report = {
+        "discipline": {"allow_new_entry": True, "entry_checklist": {"all_green": True, "missing_labels": []}},
+        "chanlun": {},
+        "current": 10.0,
+    }
+    apply_buy_point_lifecycle(report)
+    assert "buy_point_lifecycle" in report
+    assert isinstance(report["buy_point_lifecycle"], dict)
 
 
 def test_attach_stack_writes_resonance_strategy_decision():
