@@ -503,8 +503,8 @@ python scripts/golden_diff_gate.py capture
 | 周线数据不足 | 威科夫中线返回 insufficient，不回退日线 |
 | 要读威科夫状态给 AI/复盘 | `to_wyckoff_state_view(report["wyckoff_midline"])`，契约 `docs/designs/wyckoff-state-view.md` |
 | 策略分层 / 6 闸口 / 策略包 | 见 `docs/designs/`：先读 **analysis-strategy-boundaries.md**（架构红线），再 cards/gates/pack/roadmap |
-| 加分析模块 | `analysis_cards.build_*` + 契约文档；禁止策略层 import 检测实现 |
-| 加策略包 | 只加 `config/strategy_packs/*.yaml` + `build_match_context` 字段；见 boundaries 菜谱 |
+| 加分析模块 | `trader_shared.analysis`（`build_*_card`）+ 契约文档；禁止策略层 import 检测实现 |
+| 加策略包 | 只加 `trader_shared/strategy/packs/*.yaml` + context 字段；见 `analysis-strategy-boundaries.md` |
 | 中线缠论「笔数不足」 | 先确认 `WEEKLY_LOOKBACK_BARS=260` 已生效；仅真笔 &lt;3 才该文案；段少应是「线段偏少」 |
 | NAME_MAP 没这个股 | 手动加映射到 `data_provider.py` 或改用代码 |
 

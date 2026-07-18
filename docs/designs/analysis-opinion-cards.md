@@ -2,7 +2,7 @@
 
 > **状态**：P0 冻结  
 > **版本**：v0.1 · 2026-07-18  
-> **代码**：`trader_shared/analysis_cards.py`（含 `ensure_report_analysis_cards`）  
+> **代码**：`trader_shared/analysis/cards.py`（兼容 re-export `analysis_cards`；含 `ensure_report_analysis_cards`）  
 > **测试**：`tests/test_analysis_opinion_cards_p0.py`（A-01～A-06）· `tests/test_arch_boundaries.py`  
 > **上级**：`analysis-strategy-boundaries.md` · `strategy-layered-architecture.md` · `strategy-roadmap-and-tests.md`
 

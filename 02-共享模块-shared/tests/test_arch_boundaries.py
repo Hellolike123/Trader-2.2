@@ -26,7 +26,8 @@ _STRATEGY_FORBIDDEN_IMPORTS = frozenset({
 })
 
 _STRATEGY_FILES = [
-    PKG / "strategy_match.py",
+    PKG / "strategy" / "match.py",
+    PKG / "strategy_match.py",  # 兼容 re-export 桩（不得含检测 import）
 ]
 
 
@@ -58,12 +59,21 @@ def test_strategy_match_file_no_forbidden_analysis_impl_imports():
 
 
 def test_strategy_match_does_not_import_chan_core_detect():
-    """允许文档提及；源码 import 列表不应含 chan_core（检测在 analysis_cards）。"""
-    text = (PKG / "strategy_match.py").read_text(encoding="utf-8")
-    # 静态：无 from trader_shared.chan_core import
-    assert "from trader_shared.chan_core" not in text
-    assert "from trader_shared.wyckoff_core" not in text
-    assert "from trader_shared.wyckoff_events" not in text
+    """允许文档提及；源码 import 列表不应含 chan_core（检测在 analysis）。"""
+    for rel in ("strategy/match.py", "strategy_match.py"):
+        text = (PKG / rel).read_text(encoding="utf-8")
+        assert "from trader_shared.chan_core" not in text
+        assert "from trader_shared.wyckoff_core" not in text
+        assert "from trader_shared.wyckoff_events" not in text
+
+
+def test_analysis_and_strategy_packages_exist():
+    """Arch D：物理包目录存在。"""
+    assert (PKG / "analysis" / "cards.py").is_file()
+    assert (PKG / "analysis" / "fusion_card_signals.py").is_file()
+    assert (PKG / "strategy" / "match.py").is_file()
+    assert (PKG / "strategy" / "packs").is_dir()
+    assert list((PKG / "strategy" / "packs").glob("*.yaml"))
 
 
 def test_ensure_report_analysis_cards_keys():

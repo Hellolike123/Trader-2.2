@@ -27,13 +27,19 @@
 
 ## 1. 分层与代码落点
 
-| 层 | 职责 | 代码位置（现行） | 对外 API |
-|----|------|------------------|----------|
-| **分析 Analysis** | 算结构/事件/动量/筹码等 | `chan_core` / `wyckoff_*` / `momentum_core` / `chip_*` / `plugins/*` | **`analysis_cards.build_*_card`** |
-| **策略 Strategy** | 闸口匹配、填止损剧本 | `strategy_match.py` + `config/strategy_packs/*.yaml` | **`match_strategies` / `format_gates_brief`** |
+| 层 | 职责 | 代码位置（Arch D） | 对外 API |
+|----|------|---------------------|----------|
+| **分析 Analysis** | 意见卡 + 读卡适配；底层检测仍在 cores/plugins | **`trader_shared/analysis/`**（`cards.py` / `fusion_card_signals.py`）；cores 仍 `chan_core` 等 | `from trader_shared.analysis import build_*_card, ensure_report_analysis_cards` |
+| **策略 Strategy** | 闸口匹配、填止损剧本 | **`trader_shared/strategy/`**（`match.py` + `packs/*.yaml`） | `from trader_shared.strategy import match_strategies, format_gates_brief` |
 | **决策 Decision** | 融合打分、纪律收紧 | `fusion_core` / `mistery_gate` / `chan_discipline` | `merge_decisions` / gate 结果 |
 | **编排 Orchestration** | 串起来写 report | `report_builder.build_report` | report dict |
 | **展示 Presentation** | Markdown | `report_core.render_short_midline` | 纯展示 |
+
+**兼容 re-export（旧 import 仍可用，新代码请用包路径）：**
+
+- `trader_shared.analysis_cards` → `analysis.cards`
+- `trader_shared.strategy_match` → `strategy.match`
+- `trader_shared.fusion_card_signals` → `analysis.fusion_card_signals`
 
 ### 1.1 依赖方向（箭头只能向下或同层工具）
 
@@ -103,7 +109,7 @@ report_builder→  全部层
 | **A** | 边界文档 + import 红线单测 | ✅ 本文 + `test_arch_boundaries.py` |
 | **B** | report 必出完整 cards + context 优先读卡 | ✅ `ensure_report_analysis_cards` |
 | **C** | fusion 读卡（可回退 classic / compare） | ✅ 默认 `FUSION_FROM_CARDS=cards`；`fusion_card_signals.py` |
-| **D** | 物理目录 `analysis/` `strategy/` | **未做** |
+| **D** | 物理目录 `analysis/` `strategy/` | ✅ 2026-07-18；旧模块路径 re-export 兼容 |
 
 ### 阶段 C 环境变量
 
@@ -131,9 +137,10 @@ report_builder→  全部层
 
 | 用途 | 路径 |
 |------|------|
-| 意见卡实现 | `trader_shared/analysis_cards.py` |
-| 策略匹配 | `trader_shared/strategy_match.py` |
-| 策略包 YAML | `trader_shared/config/strategy_packs/` |
+| 意见卡实现 | `trader_shared/analysis/cards.py`（兼容 `analysis_cards`） |
+| 策略匹配 | `trader_shared/strategy/match.py`（兼容 `strategy_match`） |
+| 策略包 YAML | `trader_shared/strategy/packs/*.yaml` |
+| 读卡→fusion | `trader_shared/analysis/fusion_card_signals.py` |
 | 报告编排 | `trader_shared/report_builder.py` |
 | 报告渲染 | `trader_shared/report_core.py` |
 | 架构单测 | `tests/test_arch_boundaries.py` |

@@ -36,10 +36,10 @@
 | `lineage` | 血统标签 | `wyckoff` \| `chan` \| `mi` |
 | `motto` | 可选口诀 | 逃生全清 · 收成分批 |
 
-存放建议（实现时二选一或并存）：
+存放（Arch D）：
 
-- 仓库：`02-共享模块-shared/trader_shared/config/strategy_packs/`  
-- 用户覆盖：`~/.trader/strategy_packs/`
+- 仓库：`trader_shared/strategy/packs/*.yaml`  
+- 用户覆盖（可选后续）：`~/.trader/strategy_packs/`
 
 ---
 
@@ -159,9 +159,9 @@ exclude:
 
 | 内容 | 路径 |
 |------|------|
-| 匹配 | `trader_shared/strategy_match.py` |
-| 运行时填数 | `trader_shared/strategy_runtime.py` |
-| 渲染 | `report_core` 增加 📐 |
+| 匹配 | `trader_shared/strategy/match.py` |
+| 包 YAML | `trader_shared/strategy/packs/` |
+| 渲染 | `report_core` 📐 闸口 |
 | 单测 | `tests/test_strategy_match.py` 等 |
 
 ```text

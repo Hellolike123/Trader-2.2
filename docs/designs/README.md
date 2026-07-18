@@ -7,7 +7,7 @@
 | 文档 | 用途 |
 |------|------|
 | [strategy-layered-architecture.md](./strategy-layered-architecture.md) | 分析 / 策略 / 决策三层 + **6 闸口** |
-| [analysis-strategy-boundaries.md](./analysis-strategy-boundaries.md) | **架构边界（Agent 必读）** 依赖方向 / 加减模块菜谱 |
+| [analysis-strategy-boundaries.md](./analysis-strategy-boundaries.md) | **架构边界（Agent 必读）** 依赖方向 / `analysis/`·`strategy/` 包 / 加减模块菜谱 |
 | [analysis-opinion-cards.md](./analysis-opinion-cards.md) | **P0 分析意见卡**字段冻结 |
 | [strategy-gates.md](./strategy-gates.md) | **P1 六闸口 IO / 互斥** |
 | [strategy-pack.md](./strategy-pack.md) | 策略包字段、匹配、展示契约 |
