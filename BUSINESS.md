@@ -111,6 +111,12 @@
 
 策略层只读意见卡，不扫原始大 dict。契约与构建：`docs/designs/analysis-opinion-cards.md`、`trader_shared/analysis_cards.py`。
 
+### 2.7 Fusion 输入路径（Arch C）
+
+短线三席（缠/动量/VPF）默认经 **意见卡** 标准化（`FUSION_FROM_CARDS=cards`，可用 `classic` 回退或 `compare` 双轨）。  
+实现：`fusion_card_signals.py` + `merge_decisions(..., analysis_cards=...)`。  
+边界：`docs/designs/analysis-strategy-boundaries.md`。
+
 ---
 
 ## 3. 融合决策规则

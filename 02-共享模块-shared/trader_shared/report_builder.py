@@ -385,6 +385,46 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             else:
                 _sector_data["stock_vs_sector"] = "与板块持平"
 
+        # Arch C：融合前先产分析卡（策略/fusion 读卡入口）
+        _pre_cards: dict = {}
+        try:
+            from trader_shared.analysis_cards import (
+                build_chan_card,
+                build_momentum_card,
+                build_vpf_card,
+                build_wyckoff_card,
+            )
+            from trader_shared.vpf_core import build_vpf_signal
+
+            _pre_cards["chan"] = build_chan_card(chan_result, role="daily")
+            _pre_cards["momentum"] = build_momentum_card(momentum_result, role="daily")
+            _pre_cards["wyckoff"] = build_wyckoff_card(
+                wyck_result, role="daily", symbol=str(getattr(sec, "ts_code", "") or target or ""),
+            )
+            # VPF 卡：与 merge 内 classic 路径同源输入，避免双源不一致
+            _avg_to = None
+            if bars and len(bars) >= 10:
+                _amts = []
+                for _b in bars[-20:]:
+                    _a = _b.get("amount") if isinstance(_b, dict) else None
+                    if _a is not None:
+                        try:
+                            _amts.append(float(str(_a).replace(",", "")))
+                        except (TypeError, ValueError):
+                            pass
+                if _amts:
+                    _avg_to = sum(_amts) / len(_amts) / 10000.0
+            _vpf_raw = build_vpf_signal(
+                volume_warning if isinstance(volume_warning, dict) else None,
+                fund_flow_features if isinstance(fund_flow_features, dict) else None,
+                bars=bars,
+                avg_daily_turnover_wan=_avg_to,
+            )
+            _pre_cards["vpf"] = build_vpf_card(_vpf_raw, role="daily")
+        except Exception as _pc_exc:
+            _logger.debug("pre-fusion analysis_cards skip: %s", _pc_exc)
+            _pre_cards = {}
+
         report_fusion = merge_decisions(
             chan_result=chan_result,
             momentum_result=momentum_result,
@@ -405,7 +445,12 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             extend_concept=snapshot.extend_concept,
             extend_northbound=snapshot.extend_northbound,
             extend_margin=snapshot.extend_margin,
+            analysis_cards=_pre_cards or None,
+            # 默认 cards（环境 FUSION_FROM_CARDS=classic 可回退）
         )
+        # 预产卡留给 ensure 合并（不污染 fusion 对外字段）
+        if _pre_cards:
+            report["_fusion_pre_cards"] = _pre_cards
     except Exception as _e:
         _logger.warning(
             "merge_decisions 崩溃 (data_status=%s, symbol=%s):\n%s",
@@ -1534,6 +1579,12 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             from trader_shared.analysis_cards import ensure_report_analysis_cards
             from trader_shared.strategy_match import match_strategies
 
+            # 合并融合前预产卡，再补 chip 等后置字段
+            _pre = report.pop("_fusion_pre_cards", None)
+            if isinstance(_pre, dict):
+                ac = report.get("analysis_cards") if isinstance(report.get("analysis_cards"), dict) else {}
+                ac.update(_pre)
+                report["analysis_cards"] = ac
             ensure_report_analysis_cards(report)
             report["strategy_match"] = match_strategies(report)
             _mark("strategy_match")
@@ -1541,6 +1592,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             _logger.debug("strategy_match skip: %s", _st_exc)
             try:
                 from trader_shared.analysis_cards import ensure_report_analysis_cards
+                report.pop("_fusion_pre_cards", None)
                 ensure_report_analysis_cards(report)
             except Exception:
                 report.setdefault("analysis_cards", {})

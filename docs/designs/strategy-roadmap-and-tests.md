@@ -17,7 +17,7 @@
 | **P3** | 报告 📐 | 闸口展示；plan vs active | ✅ render + R-01～R-03 |
 | **P4** | 扩展 | take F、scale、多 entry B/C/D | 互斥回归 + 真票 |
 | **Arch A+B** | 边界+产卡 | boundaries 文档 + import 红线 + ensure cards | ✅ 2026-07-18 |
-| **Arch C** | fusion 读卡 | 双轨对比后默认 | 未做 |
+| **Arch C** | fusion 读卡 | 默认 cards；classic/compare 可配 | ✅ 2026-07-18 |
 | **Arch D** | 目录物理分离 | analysis/ strategy/ | 未做 |
 
 原则：

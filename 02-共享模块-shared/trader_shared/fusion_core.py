@@ -56,6 +56,18 @@ except ImportError:  # pragma: no cover
 
 FUSION_LOG_ONLY = os.environ.get("FUSION_LOG_ONLY", "false").lower() in ("true", "1", "yes")
 
+# Arch C：fusion 三席输入来源
+# - classic：仅原路径 _chan_to_signal / _momentum_to_signal / build_vpf_signal（默认兼容）
+# - cards：优先 analysis_cards → fusion_card_signals（不足则回退 classic）
+# - compare：两路都算，主结果用 cards（可回退），并写入 fusion_compare
+def _fusion_input_mode() -> str:
+    v = (os.environ.get("FUSION_FROM_CARDS") or "cards").strip().lower()
+    if v in ("0", "false", "no", "classic", "off"):
+        return "classic"
+    if v in ("compare", "both", "dual"):
+        return "compare"
+    return "cards"  # true / 1 / cards / auto
+
 
 
 def _log_fusion(result: dict) -> None:
@@ -554,6 +566,8 @@ def merge_decisions(
     extend_northbound: dict | None = None,  # Phase 2: 北向资金（A8，预留接入）
     extend_margin: dict | None = None,      # Phase 2: 融资融券（预留接入）
     vpf_result: dict | None = None,         # 价量资金专家（优先）；缺省由 volume/fund 合成
+    analysis_cards: dict | None = None,     # Arch C：意见卡（优先三席）
+    fusion_from_cards: str | bool | None = None,  # None→环境变量；True/cards/compare/classic
 ) -> dict:
     """决策融合层核心函数。
 
@@ -566,65 +580,114 @@ def merge_decisions(
         wyckoff_result:  已弃用（短线不计分）；保留位置参数兼容旧测试/调用
         regime:          market_env assess() 返回的 level 字段
         volume_warning / fund_flow_data / vpf_result: 第三席 VPF 输入
+        analysis_cards:  Arch C 意见卡；与 fusion_from_cards 联用
+        fusion_from_cards: classic|cards|compare；None 读环境 FUSION_FROM_CARDS（默认 cards）
 
     Returns:
         含 signals_detail.chan / momentum / vpf；weights_used 键为 chan/momentum/vpf
+        另：fusion_input_path、可选 fusion_compare
     """
     from trader_shared.fusion_regime import get_regime_weights, score_to_action, compute_confidence
 
     if fetcher is None:
         fetcher = get_fetcher()
 
-    # 1. 信号标准化 (只读, 不修改输入)
-    try:
-        chan_signal = _chan_to_signal(chan_result)
-    except (TypeError, KeyError) as exc:
-        _logger.warning("Chanlun signal normalization failed: %s", exc)
-        chan_signal = {"direction": 0, "confidence": 0.0,
-                       "reason": "缠论标准化异常", "raw_key": "chan"}
+    # ── 解析 fusion 输入模式 ──
+    if fusion_from_cards is None:
+        _mode = _fusion_input_mode()
+    elif isinstance(fusion_from_cards, bool):
+        _mode = "cards" if fusion_from_cards else "classic"
+    else:
+        _m = str(fusion_from_cards).strip().lower()
+        _mode = "classic" if _m in ("0", "false", "classic", "off") else (
+            "compare" if _m in ("compare", "both", "dual") else "cards"
+        )
 
-    try:
-        momentum_signal = _momentum_to_signal(momentum_result)
-    except (TypeError, KeyError) as exc:
-        _logger.warning("Momentum signal normalization failed: %s", exc)
-        momentum_signal = {"direction": 0, "confidence": 0.0,
-                           "reason": "动量标准化异常", "raw_key": "momentum"}
+    def _classic_three() -> tuple[dict, dict, dict]:
+        try:
+            _cs = _chan_to_signal(chan_result)
+        except (TypeError, KeyError) as exc:
+            _logger.warning("Chanlun signal normalization failed: %s", exc)
+            _cs = {"direction": 0, "confidence": 0.0,
+                   "reason": "缠论标准化异常", "raw_key": "chan"}
+        try:
+            _ms = _momentum_to_signal(momentum_result)
+        except (TypeError, KeyError) as exc:
+            _logger.warning("Momentum signal normalization failed: %s", exc)
+            _ms = {"direction": 0, "confidence": 0.0,
+                   "reason": "动量标准化异常", "raw_key": "momentum"}
+        try:
+            from trader_shared.vpf_core import build_vpf_signal, vpf_to_fusion_signal
+            if isinstance(vpf_result, dict) and vpf_result.get("raw_key") == "vpf":
+                _vs = vpf_to_fusion_signal(vpf_result)
+            else:
+                _avg_turnover_wan = None
+                if bars and len(bars) >= 10:
+                    _amounts = []
+                    for _b in bars[-20:]:
+                        _a = _b.get("amount") if isinstance(_b, dict) else getattr(_b, "amount", None)
+                        if _a is not None:
+                            try:
+                                _amounts.append(float(str(_a).replace(",", "")))
+                            except (TypeError, ValueError):
+                                pass
+                    if _amounts:
+                        _avg_turnover_wan = sum(_amounts) / len(_amounts) / 10000.0
+                _vs = build_vpf_signal(
+                    volume_warning if isinstance(volume_warning, dict) else None,
+                    fund_flow_data if isinstance(fund_flow_data, dict) else None,
+                    bars=bars,
+                    avg_daily_turnover_wan=_avg_turnover_wan,
+                )
+        except Exception as exc:
+            _logger.warning("VPF signal build failed: %s", exc)
+            _vs = {
+                "direction": 0,
+                "confidence": 0.2,
+                "reason": "价量资金标准化异常",
+                "raw_key": "vpf",
+                "fund_quality": "missing",
+            }
+        return _cs, _ms, _vs
 
-    # 第三席：价量资金（VPF）；不再用日线威科夫投票
-    try:
-        from trader_shared.vpf_core import build_vpf_signal, vpf_to_fusion_signal
-        if isinstance(vpf_result, dict) and vpf_result.get("raw_key") == "vpf":
-            vpf_signal = vpf_to_fusion_signal(vpf_result)
-        else:
-            # 计算近20日均成交额（万元），用于资金强度比归一化
-            _avg_turnover_wan = None
-            if bars and len(bars) >= 10:
-                _amounts = []
-                for _b in bars[-20:]:
-                    _a = _b.get("amount") if isinstance(_b, dict) else getattr(_b, "amount", None)
-                    if _a is not None:
-                        try:
-                            _amounts.append(float(str(_a).replace(",", "")))
-                        except (TypeError, ValueError):
-                            pass
-                if _amounts:
-                    _avg_turnover_wan = sum(_amounts) / len(_amounts) / 10000.0  # 元→万元
+    # 1. 信号标准化
+    chan_signal, momentum_signal, vpf_signal = _classic_three()
+    _path = "classic"
+    _compare: dict[str, Any] | None = None
 
-            vpf_signal = build_vpf_signal(
-                volume_warning if isinstance(volume_warning, dict) else None,
-                fund_flow_data if isinstance(fund_flow_data, dict) else None,
-                bars=bars,
-                avg_daily_turnover_wan=_avg_turnover_wan,
-            )
-    except Exception as exc:
-        _logger.warning("VPF signal build failed: %s", exc)
-        vpf_signal = {
-            "direction": 0,
-            "confidence": 0.2,
-            "reason": "价量资金标准化异常",
-            "raw_key": "vpf",
-            "fund_quality": "missing",
+    _card_signals = None
+    if _mode in ("cards", "compare") and isinstance(analysis_cards, dict):
+        try:
+            from trader_shared.fusion_card_signals import fusion_signals_from_cards
+            _card_signals = fusion_signals_from_cards(analysis_cards)
+        except Exception as exc:
+            _logger.debug("fusion_signals_from_cards failed: %s", exc)
+            _card_signals = None
+
+    if _card_signals and _mode == "compare":
+        _compare = {
+            "classic": {
+                "chan_dir": chan_signal.get("direction"),
+                "mom_dir": momentum_signal.get("direction"),
+                "vpf_dir": vpf_signal.get("direction"),
+            },
+            "cards": {
+                "chan_dir": _card_signals["chan"].get("direction"),
+                "mom_dir": _card_signals["momentum"].get("direction"),
+                "vpf_dir": _card_signals["vpf"].get("direction"),
+            },
         }
+        # compare 默认主路径用 cards（与 cards 模式一致）
+        chan_signal = _card_signals["chan"]
+        momentum_signal = _card_signals["momentum"]
+        vpf_signal = _card_signals["vpf"]
+        _path = "cards"
+    elif _card_signals and _mode == "cards":
+        chan_signal = _card_signals["chan"]
+        momentum_signal = _card_signals["momentum"]
+        vpf_signal = _card_signals["vpf"]
+        _path = "cards"
+    # classic 模式保持 _classic_three 结果
 
     # 2. 场景优先级过滤器 (Scenario Priority Filter)
     # 计算20日高低区间位置
@@ -976,7 +1039,10 @@ def merge_decisions(
             },
         },
         "weights_used": weights,
+        "fusion_input_path": _path,  # Arch C: classic | cards
     }
+    if _compare is not None:
+        result["fusion_compare"] = _compare
     if volume_warning:
         result["volume_warning"] = volume_warning
     if bayesian_used:

@@ -100,10 +100,20 @@ report_builder→  全部层
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
-| **A** | 边界文档 + import 红线单测 | 本文 + `test_arch_boundaries.py` |
-| **B** | report 必出完整 cards + context 优先读卡 | `ensure_report_analysis_cards` |
-| **C** | fusion 双轨读卡 → 默认读卡 | **未做**（下阶段） |
+| **A** | 边界文档 + import 红线单测 | ✅ 本文 + `test_arch_boundaries.py` |
+| **B** | report 必出完整 cards + context 优先读卡 | ✅ `ensure_report_analysis_cards` |
+| **C** | fusion 读卡（可回退 classic / compare） | ✅ 默认 `FUSION_FROM_CARDS=cards`；`fusion_card_signals.py` |
 | **D** | 物理目录 `analysis/` `strategy/` | **未做** |
+
+### 阶段 C 环境变量
+
+| 变量 | 值 | 行为 |
+|------|-----|------|
+| `FUSION_FROM_CARDS` | `cards` / `true` / 缺省 | 三席优先意见卡，不足回退 classic |
+| | `classic` / `false` | 仅原 `_chan_to_signal` 等路径 |
+| | `compare` | 两路都算；主结果用 cards；写入 `fusion_compare` |
+
+结果字段：`fusion_input_path` = `cards` \| `classic`；可选 `fusion_compare`。
 
 ---
 
