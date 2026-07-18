@@ -414,7 +414,7 @@ def format_gates_brief(result: dict[str, Any]) -> str:
         lines.append(f"  选股：{sel['primary'].get('name')}（{sel['primary'].get('id')}）")
     ent = g.get("entry") or {}
     if ent.get("mode") == "off":
-        lines.append("  买：关闭（已持仓或不适用）")
+        lines.append("  买：关闭（已持仓或无开仓匹配）")
     elif ent.get("primary"):
         tag = "执行" if ent.get("mode") == "active" else "预案"
         lines.append(f"  买：{ent['primary'].get('name')} · {tag}")
