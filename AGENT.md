@@ -114,18 +114,18 @@ Trader3.0/
 ├── README.md / ARCHITECTURE.md / BUSINESS.md
 │
 ├── 02-共享模块-shared/               ← ★ 核心共享库（所有代码的真实来源）
-│   └── trader_shared/               ← Python 包（83 个 .py 文件）
+│   └── trader_shared/               ← Python 包（行数以仓库为准，勿钉死文档数字）
 │       ├── __init__.py              ← 公开 API
-│       ├── report_builder.py        ← ★ build_report() 总编排器（1694 行）
-│       ├── report_core.py           ← 报告渲染核心（1306 行）
-│       ├── report_presentation.py   ← 展示层（1304 行，纯展示/无业务逻辑）
-│       ├── fusion_core.py           ← ★ merge_decisions() 融合层（1033 行）
+│       ├── report_builder.py        ← ★ build_report() 总编排器
+│       ├── report_core.py           ← 报告渲染核心
+│       ├── report_presentation.py   ← 展示层（纯展示/无业务逻辑）
+│       ├── fusion_core.py           ← ★ merge_decisions() 融合层（默认 cards）
 │       ├── fusion_regime.py         ← 大盘环境权重
 │       ├── data_provider.py         ← 统一数据入口
 │       ├── plugin_registry.py       ← 插件注册表（自动发现）
 │       ├── signal_schema.py         ← SignalTier 枚举
 │       ├── cache_utils.py           ← 文件缓存（fcntl 锁 + 原子写）
-│       ├── config.py                ← 全局可调参数（374 行 / 100+ 常量）
+│       ├── config.py                ← 全局可调参数（100+ 常量）
 │       ├── interfaces.py            ← DataFetcher / IndicatorPlugin 抽象接口
 │       ├── models.py                ← TypedDict 数据模型
 │       │
@@ -142,8 +142,8 @@ Trader3.0/
 │
 ├── 01-功能包-packages/trader/scripts/  ← CLI 入口
 │   ├── final_report.py              ← 单票分析
-│   ├── final_pool.py               ← 选股池管理（2000 行）
-│   ├── run_analysis.py             ← 分析执行器（207 行壳层）
+│   ├── final_pool.py               ← 选股池管理
+│   ├── run_analysis.py             ← 分析执行器（薄壳）
 │   └── pool_briefing.py            ← 日报分类
 │
 ├── scripts/                         ← 项目级脚本
@@ -161,7 +161,7 @@ Trader3.0/
 │   ├── reviews/                     ← 审查归档
 │   └── guide/                       ← 用户手册等
 │
-└── 02-共享模块-shared/tests/        ← 测试（70 个文件）
+└── 02-共享模块-shared/tests/        ← 测试（规模以 pytest collect 为准）
     ├── golden/                      ← Golden 基线
     └── fixtures/                    ← 测试 fixture
 ```
@@ -594,7 +594,7 @@ python 02-共享模块-shared/scripts/pack_all.py
 
 ## 12. 版本
 
-- **当前版本**：v2.x（文档与代码对齐：2026-07-18；含 Arch C/D + fusion 默认 classic）
+- **当前版本**：v2.x（文档与代码对齐：2026-07-19；含 Arch C/D + fusion 默认 cards）
 - **仓库**：Gitee `https://gitee.com/hellolike123/Trader-2.2`
 - **CI**：pre-push hook → `scripts/run-gate-tests.sh` → 离线门禁（含 cards/strategy 契约；**勿**把全量历史红项塞进门禁）
 - **Python**：3.11+，venv at `~/.workbuddy/binaries/python/envs/default/`

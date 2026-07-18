@@ -1,6 +1,6 @@
 # BUSINESS.md — Trader3.0 业务逻辑
 
-> **最后更新**：2026-07-16 | **标杆**：`trader_shared/` 代码 + `formulas.md` + `output-template.md`  
+> **最后更新**：2026-07-19 | **标杆**：`trader_shared/` 代码 + `formulas.md` + `output-template.md`  
 > 冲突时以代码为准，再回写本文。
 
 ---
@@ -123,7 +123,7 @@
 
 报告路径仍会预产 `analysis_cards`（策略 📐 / ensure 用），与 fusion 默认输入解耦。  
 实现：`fusion_core._fusion_input_mode` + `analysis/fusion_card_signals.py` + `merge_decisions(..., analysis_cards=...)`。  
-边界与何时切默认 cards：`docs/designs/analysis-strategy-boundaries.md`。
+边界与 classic/compare 回退对账：`docs/designs/analysis-strategy-boundaries.md` §5。
 
 ---
 

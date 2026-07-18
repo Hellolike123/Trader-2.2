@@ -1,7 +1,7 @@
 # 分析 / 策略 / 决策 架构边界（给开发 Agent）
 
-> **状态**：架构加固 A–D 已落地；fusion **默认 classic**  
-> **版本**：v0.2 · 2026-07-18  
+> **状态**：架构加固 A–D 已落地；fusion **默认 cards**（与 `fusion_core._fusion_input_mode` 一致）  
+> **版本**：v0.3 · 2026-07-19  
 > **读者**：所有改 Trader 代码的 Agent / 人类  
 > **必读顺序**：本文 → `analysis-opinion-cards.md` → `strategy-gates.md` → `strategy-pack.md` → `strategy-roadmap-and-tests.md`
 
@@ -15,7 +15,7 @@
 策略层 只读 意见卡 + 公共上下文 → 六闸口匹配 strategy_match
     ↓
 决策层 fusion / discipline 消费信号
-    · fusion **默认 classic**（原三席标准化）；可选 `FUSION_FROM_CARDS=cards` 读卡
+    · fusion **默认 cards**（意见卡三席；不足回退 classic）；`FUSION_FROM_CARDS=classic` 强制原路径
     · discipline 只收紧出手/仓位，不改 weighted_score
     ↓
 展示层 report_core 展示状态灯 + 动作 + 📐 闸口
@@ -24,7 +24,7 @@
 **禁止**：策略包或 `strategy_match` 内重跑缠论笔、威科夫 Spring 检测、筹码直方图。  
 **禁止**：为加一个包去改 `weighted_score` 公式。  
 **禁止**：报告里手写第二套开仓逻辑绕过闸口。  
-**禁止**：文档或 Agent 假设「默认已是 cards」——**当前默认 classic**（见 §5）。
+**禁止**：文档或 Agent 写成「默认 classic」——**当前代码与单测缺省均为 cards**（见 §5）。
 
 ---
 
@@ -50,7 +50,7 @@
 presentation  →  report dict 字段
 strategy      →  analysis_cards + context（禁止 → wyckoff_events / detect_buy_points）
 analysis_cards→  analysis cores（适配层，允许）
-decision      →  默认 classic cores 标准化；可选 cards（`FUSION_FROM_CARDS=cards`）
+decision      →  默认 cards（意见卡三席）；`FUSION_FROM_CARDS=classic` 走 cores 标准化
 report_builder→  全部层
 ```
 
@@ -111,7 +111,7 @@ report_builder→  全部层
 |------|------|------|
 | **A** | 边界文档 + import 红线单测 | ✅ 本文 + `test_arch_boundaries.py` |
 | **B** | report 必出完整 cards + context 优先读卡 | ✅ `ensure_report_analysis_cards` |
-| **C** | fusion 可读卡（classic / cards / compare） | ✅ **默认 classic**；`fusion_card_signals.py`；parity 测入门禁 |
+| **C** | fusion 可读卡（classic / cards / compare） | ✅ **默认 cards**；`fusion_card_signals.py`；parity 测入门禁（`test_default_fusion_mode_is_cards`） |
 | **D** | 物理目录 `analysis/` `strategy/` | ✅ 2026-07-18；旧模块路径 re-export 兼容 |
 
 ### 阶段 C 环境变量（与代码 `fusion_core._fusion_input_mode` 一致）
@@ -124,11 +124,12 @@ report_builder→  全部层
 
 结果字段：`fusion_input_path` = `classic` \| `cards`；可选 `fusion_compare`。
 
-**为何默认 classic（2026-07 契约回归后钉死）**
+**默认 cards（与实现钉死）**
 
-- 早期默认 cards 时，动量卡未映射 `bullish`+`score`，导致第二席静音。
-- 已修 parity（见 `test_fusion_cards_parity_bugs.py`），但默认仍 classic，直到真票 `compare` 稳定后再考虑切默认。
-- **Agent 禁止**在未改环境变量的情况下假设 fusion 已走 cards。
+- 缺省：`os.environ.get("FUSION_FROM_CARDS") or "cards"` → `cards`。
+- 动量卡生产形态已与 classic 对齐（见 `test_fusion_cards_parity_bugs.py`）。
+- 回退：`FUSION_FROM_CARDS=classic`；对账：`compare` 或 `scripts/compare_fusion_paths.py`。
+- **Agent 禁止**再写「默认 classic」；改默认须同步改 `_fusion_input_mode` + 单测 + 本文。
 
 ### 真票 classic vs cards 对账
 
@@ -141,7 +142,7 @@ python scripts/compare_fusion_paths.py --targets 002050 688248 --json /tmp/fusio
 ```
 
 逻辑库：`trader_shared/fusion_path_compare.py`（stable / mild / unstable + 批末建议）。  
-**不稳** → 继续默认 classic，修 cards；**本批全 stable** → 才讨论默认 cards。
+**不稳** → 优先修 cards；必要时临时 `classic` 回退对照。
 
 ---
 

@@ -450,7 +450,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             extend_northbound=snapshot.extend_northbound,
             extend_margin=snapshot.extend_margin,
             analysis_cards=_pre_cards or None,
-            # 默认 classic（环境 FUSION_FROM_CARDS=cards 启用卡路径）
+            # fusion 输入：缺省 cards（见 fusion_core._fusion_input_mode）；classic 强制回退
         )
         # 预产卡留给 ensure 合并（不污染 fusion 对外字段）
         if _pre_cards:

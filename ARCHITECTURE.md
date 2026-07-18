@@ -86,7 +86,7 @@ Trader3.0 采用**分层架构 + 插件化 + 融合决策**的量化分析系统
 
 | 模块 | 行数 | 角色 |
 |------|------|------|
-| `fusion_core.py` | 1033 | merge_decisions() — 信号标准化+加权+冲突消解 |
+| `fusion_core.py` | ~1100+ | merge_decisions() — 信号标准化+加权+冲突消解；**默认 cards** |
 | `fusion_regime.py` | ~220 | Regime 权重（yaml + 兜底）+ score_to_action()；很差不字面「暂不碰」 |
 | `bayesian_fusion.py` | 230 | 贝叶斯融合（可选，BAYESIAN_FUSION=true 激活） |
 
@@ -94,8 +94,8 @@ Trader3.0 采用**分层架构 + 插件化 + 融合决策**的量化分析系统
 
 | 模块 | 行数 | 角色 |
 |------|------|------|
-| `report_builder.py` | 1694 | build_report() — 编排 50+ 子模块分析 |
-| `report_core.py` | 1306 | render_short_midline() + render_single_legacy() |
+| `report_builder.py` | ~1800+ | build_report() — 编排 50+ 子模块分析 |
+| `report_core.py` | ~1300+ | render_short_midline() + render_single_legacy() |
 | `report_presentation.py` | 1304 | render_markdown() — 纯展示层 |
 | `conclusion_block.py` | ~700 | 中短线看法/出手；`_build_wave_label`（笔/段标签契约） |
 | `main_force_output.py` | 233 | 主力资金输出格式化 |

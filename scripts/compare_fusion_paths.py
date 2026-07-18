@@ -19,9 +19,9 @@
   python scripts/compare_fusion_paths.py --pool --limit 5 --json /tmp/fusion_compare.json
 
 说明：
-  - 生产默认仍是 classic；本脚本只做观测，不改默认。
+  - 生产默认已是 cards；本脚本对 classic vs cards 做观测，不改默认。
   - 需要行情网络；失败单票记 error 继续。
-  - 判定：stable / mild / unstable，批末给是否可讨论默认 cards 的建议。
+  - 判定：stable / mild / unstable；偏差大时建议修 cards 或临时 classic 回退。
 """
 from __future__ import annotations
 

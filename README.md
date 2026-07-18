@@ -39,7 +39,7 @@ Trader3.0/
 ├── README.md                   ← 本文件
 │
 ├── 02-共享模块-shared/         ← 核心共享库
-│   ├── trader_shared/          ← Python 包（83 个 .py 文件）
+│   ├── trader_shared/          ← Python 包（核心共享库）
 │   │   ├── report_builder.py   ← 总编排器
 │   │   ├── fusion_core.py      ← 融合决策
 │   │   ├── plugins/            ← 分析插件

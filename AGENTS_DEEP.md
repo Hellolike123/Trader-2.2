@@ -582,8 +582,8 @@ trader add → pool.json → plan → last_plan.json
 | trader | `tests/test_contract.py` + `tests/test_compare_signals.py` + `test_fusion_integration.py` + `test_pool_contract.py` + `test_self_consistency.py` + `test_skill_redesign.py` | 6 |
 | t0 | `tests/test_t0_contract.py` + `test_adx_extended.py` + `test_indicators_comprehensive.py` + `test_monitor_fuse.py` | 4 |
 | review | `tests/test_portfolio_signals.py` + `tests/test_review_backtrack.py` + `tests/test_portfolio_contract.py` + `tests/test_portfolio_allocation.py` + `tests/test_review_contract.py` | 5 |
-| shared | 54 个测试文件（含 `test_bayesian_fusion.py`、`test_big_order_validation.py`、`test_calibrator.py`、`test_signal_tracker_*.py` 等） | 718 |
-| 总计 | 70 个测试文件，718 个核心计算类测试用例 | — |
+| shared | `02-共享模块-shared/tests/`（含 fusion/cards/bayesian 等） | 以 pytest collect 为准 |
+| 总计 | 离线门禁见 `scripts/run-gate-tests.sh`；全量规模勿钉死文档 | — |
 
 ### 9.2 测试命令
 
@@ -748,10 +748,11 @@ Trader 2.4/
 
 **触发条件**：环境变量 `BAYESIAN_FUSION=true` 时激活，默认关闭（保持 2.2 场景权重行为）。
 
-**算法**：贝叶斯乘积规则（Naïve Bayes Product Rule）融合三路专家似然。
+**算法**：贝叶斯乘积规则（Naïve Bayes Product Rule）融合三路专家似然。  
+短线三席与 fusion 一致：**chan / momentum / vpf**（威科夫不进融合加权）。
 
 ```
-P(action | chan, mom, wyk, regime) ∝ L(chan) × L(mom) × L(wyk)
+P(action | chan, mom, vpf, regime) ∝ L(chan) × L(mom) × L(vpf)
 ```
 
 - 每个专家的似然 `L` 由 `direction × confidence × regime_prior_matrix` 计算
@@ -761,7 +762,8 @@ P(action | chan, mom, wyk, regime) ∝ L(chan) × L(mom) × L(wyk)
 
 **动作标签**（按 action_score 排序）：空仓观望(-1.0) / 减仓防守(-0.5) / 持仓观察(0.0) / 半仓试多(0.5) / 加仓做多(1.0)
 
-**关键函数**：`bayesian_merge(chan_signal, momentum_signal, wyckoff_signal, regime_state)`
+**关键函数**：`bayesian_merge(chan_signal, momentum_signal, wyckoff_signal, regime_state)`  
+（参数名 `wyckoff_signal` 为历史槽位名；`fusion_core` 传入的是 **VPF** 信号。）
 
 ---
 
@@ -826,7 +828,7 @@ params = load_calibrated_params()  # 返回 { "global": {...}, "bull": {...}, "b
 
 2. **HMM 与贝叶斯概率融合的“决策升级”**：
    - 融合入口 `fusion_core.py` 中的 `merge_decisions()` 新增 `hmm_regime` 接收参数，并直接在融合结果中向下游广播该字段。
-   - 当环境变量 `BAYESIAN_FUSION=true` 时，`bayesian_fusion.py` 一键接管传统基于固定权重的分类映射决策。它消费标准化后的缠论、动能、威科夫专家信号，根据当前 HMM 解码的 `hmm_regime`（`bull`/`bear`/`range`）动态调整先验条件概率矩阵，利用贝叶斯乘积法则计算 5 个动作的后验分布，决策出最优 action 与置信度。
+   - 当环境变量 `BAYESIAN_FUSION=true` 时，`bayesian_fusion.py` 一键接管传统基于固定权重的分类映射决策。它消费标准化后的缠论、动能、**VPF** 三席信号（API 第三参历史名 `wyckoff_signal`），根据当前 HMM 解码的 `hmm_regime`（`bull`/`bear`/`range`）动态调整先验条件概率矩阵，利用贝叶斯乘积法则计算 5 个动作的后验分布，决策出最优 action 与置信度。
 
 3. **三层叠加的自适应“自校准+前瞻”微调**：
    - `structure_core.py` 的参数微调器 `_theory_multipliers()` 被彻底重构，升级为极其优美的三层叠加结构：

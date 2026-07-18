@@ -41,7 +41,7 @@ hook 已随仓库版本化提交，clone 后需各机执行一次上面这行（
 
 | 文件 | 守护内容 |
 |---|---|
-| `test_fusion_cards_parity_bugs.py` | 动量卡生产形态、默认 classic、类二买、nesting、cost_price、止损不松于结构 |
+| `test_fusion_cards_parity_bugs.py` | 动量卡生产形态、**默认 cards**、类二买、nesting、cost_price、止损不松于结构 |
 | `test_fusion_path_compare.py` | classic vs cards 对账纯逻辑（无网） |
 | `test_fusion_from_cards.py` | cards / classic / compare 输入路径 |
 | `test_strategy_match.py` | 六闸匹配契约 |
@@ -80,7 +80,7 @@ bash scripts/run-gate-tests.sh
 3. **`test_contract.py` 等契约债不在门禁内**：勿盲目纳入导致永久红。
 4. **耗时**：当前门禁为数秒级（视机器而定）；若变重，再考虑「仅跑改动相关」分层，不急着拆。
 5. **PYTHONPATH 顺序敏感**：`02-共享模块-shared` 必须在前。
-6. **Fusion 默认**：门禁不强制 `FUSION_FROM_CARDS=cards`；生产与测默认 **classic**（见 `analysis-strategy-boundaries.md` §5）。
+6. **Fusion 默认**：生产与测缺省 **cards**（`FUSION_FROM_CARDS` 未设）；`classic` 为强制回退。见 `analysis-strategy-boundaries.md` §5、`test_default_fusion_mode_is_cards`。
 
 ## 跳过门禁（谨慎）
 

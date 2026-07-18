@@ -21,7 +21,7 @@
 
 **原则**：以本目录为准；桌面草稿仅作备份，不作为开发契约。
 
-**Fusion 默认（2026-07 钉死）**：`FUSION_FROM_CARDS` **缺省 = classic**，不是 cards。见 `analysis-strategy-boundaries.md` §5。
+**Fusion 默认（与代码一致）**：`FUSION_FROM_CARDS` **缺省 = cards**；`classic` 强制原路径。见 `analysis-strategy-boundaries.md` §5。
 
 ## 其它
 
