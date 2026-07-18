@@ -283,6 +283,13 @@ def render_short_midline(r: dict[str, Any]) -> str:
     mid = conclusion.get("midline") or "中线观察"
     short = conclusion.get("shortline") or "观察"
     execution = conclusion.get("execution") or "现价不买 · 不追"
+    # 阶段 4：主叙事听 decision_view（不推荐则压偏买出手）
+    try:
+        from trader_shared.decision_view import apply_decision_to_execution
+
+        execution = apply_decision_to_execution(execution, r)
+    except Exception:
+        pass
     reason = conclusion.get("reason") or ""
     this_week = conclusion.get("this_week") or ""
     conflict = conclusion.get("conflict") or ""
@@ -689,7 +696,17 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _m_label = "看多" if _mom_dir2 > 0 else "看空"
         lines.append(f"  ⚠️ 信号分歧：结构{_c_label} vs 动能{_m_label} → 以不新开为主")
 
-    # 4) 动作：综合后的计划（不做「出手」措辞）
+    # 阶段 4：共振 / 决策 / 新开 / fusion 仪表（主叙事；融合分仅参考）
+    try:
+        from trader_shared.decision_view import format_decision_narrative_lines
+
+        for _nl in format_decision_narrative_lines(r):
+            if _nl and _nl not in lines:
+                lines.append(_nl)
+    except Exception:
+        pass
+
+    # 4) 动作：综合后的计划（不做「出手」措辞）；以 decision_view 收紧后的 execution 为准
     _confirm_v = float(r.get("confirm") or 0)
     _wait_bits: list[str] = []
     _is_hold_off = any(k in execution for k in ("不买", "观望", "不追", "不新开", "空仓"))

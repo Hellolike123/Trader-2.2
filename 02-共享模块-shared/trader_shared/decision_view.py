@@ -179,3 +179,80 @@ def apply_decision_view(
     view["applied_tighten"] = applied
     report["decision_view"] = view
     return view
+
+
+def format_decision_narrative_lines(report: dict[str, Any] | None) -> list[str]:
+    """展示层用：共振 / 决策 / 新开 / fusion 仪表（阶段 4）。
+
+    只读字段，不改 report。返回已带两空格缩进的行（可直接 append）。
+    """
+    if not isinstance(report, dict):
+        return []
+    lines: list[str] = []
+
+    res = report.get("resonance") if isinstance(report.get("resonance"), dict) else {}
+    res_line = str(res.get("summary_line") or "").strip()
+    if res_line:
+        if not res_line.startswith("共振"):
+            res_line = f"共振：{res_line}"
+        lines.append(f"  {res_line}")
+
+    dv = report.get("decision_view") if isinstance(report.get("decision_view"), dict) else {}
+    dv_line = str(dv.get("summary_line") or "").strip()
+    if dv_line:
+        if not dv_line.startswith("决策"):
+            dv_line = f"决策：{dv_line}"
+        lines.append(f"  {dv_line}")
+
+    disc = report.get("discipline") if isinstance(report.get("discipline"), dict) else {}
+    entry_line = str(disc.get("entry_line") or "").strip()
+    if not entry_line:
+        cl = disc.get("entry_checklist") if isinstance(disc.get("entry_checklist"), dict) else {}
+        entry_line = str(cl.get("entry_line") or "").strip()
+    if entry_line:
+        if not entry_line.startswith("新开"):
+            entry_line = f"新开：{entry_line}"
+        lines.append(f"  {entry_line}")
+
+    # fusion 退居仪表：有分才写，标明非出手依据
+    fusion = report.get("fusion") if isinstance(report.get("fusion"), dict) else {}
+    score = fusion.get("weighted_score")
+    if score is None:
+        score = report.get("weighted_score")
+    try:
+        score_f = float(score) if score is not None else None
+    except (TypeError, ValueError):
+        score_f = None
+    if score_f is not None:
+        action = str(fusion.get("action") or "").strip()
+        action_short = action.split("（")[0].split("(")[0].strip() if action else ""
+        if len(action_short) > 12:
+            action_short = action_short[:10] + "…"
+        bit = f"仪表：融合分 {score_f:+.2f}"
+        if action_short:
+            bit += f" · {action_short}"
+        bit += "（仅参考）"
+        lines.append(f"  {bit}")
+
+    return lines
+
+
+def apply_decision_to_execution(
+    execution: str,
+    report: dict[str, Any] | None,
+) -> str:
+    """展示前：若 decision_view 不推荐新开，把偏买 execution 压成不买。"""
+    exe = str(execution or "")
+    if not isinstance(report, dict):
+        return exe
+    dv = report.get("decision_view") if isinstance(report.get("decision_view"), dict) else {}
+    if dv.get("allow_new_recommend") is True:
+        return exe
+    # 无 decision_view 时不强制改（兼容旧 fixture）
+    if not dv:
+        return exe
+    soft_buy = any(k in exe for k in ("试探", "可买", "轻仓买", "半仓", "增持", "买点挂", "可按买"))
+    hard_off = any(k in exe for k in ("不买", "不追", "不新开", "观望", "空仓"))
+    if soft_buy and not hard_off:
+        return "现价不买 · 不追"
+    return exe

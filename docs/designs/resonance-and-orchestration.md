@@ -1,7 +1,7 @@
 # 目标架构法源：五层 + 编排 · 岗位共振 · 多场景
 
 > **状态**：产品方向已定 · 分支 `feat/resonance-orchestration`  
-> **版本**：v0.4 · 2026-07-19（阶段 3：decision_view 新开铁律）  
+> **版本**：v0.5 · 2026-07-19（阶段 4：报告主叙事跟 decision_view，fusion 仪表）  
 > **读者**：**所有后续 Agent / 人类**——只读本文 + `AGENT.md` 即可接上方向  
 > **报告/T0/池面板版式**：未定（本文只定职责与字段，不定 emoji 排版）  
 > **冲突时**：以本文产品铁律 + `trader_shared/` 实现为准；旧文若写「fusion 打分当总司令」视为过时  
@@ -149,7 +149,7 @@ CLI / Skill（trader · t0 · review · portfolio …）
 | **1** | `build_resonance` + builder 挂载 + 单测 | **不变** | ✅ `resonance.py` / `test_resonance_pullback.py` |
 | **2** | strategy context 可读共振；包可 match grade | 可选更严（旧包不变） | ✅ `build_match_context` 暴露 `resonance_*`；YAML `field: resonance_grade` |
 | **3** | decision_view：新开听 共振∧策略∧纪律 | **改变**（只收紧） | ✅ `decision_view.py`；builder 挂载；不改 fusion 分 |
-| **4** | fusion 退居仪表；展示主叙事跟 decision_view | 改变因果 | 待做 |
+| **4** | fusion 退居仪表；展示主叙事跟 decision_view | 改变因果 | ✅ `format_decision_narrative_lines` + `render_short_midline` 共振/决策/新开/仪表 |
 | **5** | `build_report` 拆阶段函数（总管变瘦） | 行为冻结重构 | 待做 |
 
 **阶段 1 字段**：

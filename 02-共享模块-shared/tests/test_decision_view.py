@@ -103,3 +103,81 @@ def test_no_tighten_when_recommend_true():
     assert v["allow_new_recommend"] is True
     assert r["discipline"]["allow_new_entry"] is True
     assert v["applied_tighten"] is False
+
+
+def test_format_narrative_includes_resonance_decision_gauge():
+    from trader_shared.decision_view import format_decision_narrative_lines
+
+    r = _report(grade="missing_structure")
+    apply_decision_view(r)
+    r["fusion"] = {"weighted_score": 0.22, "action": "半仓试"}
+    r["resonance"]["summary_line"] = "共振：缺结构"
+    lines = format_decision_narrative_lines(r)
+    text = "\n".join(lines)
+    assert "共振" in text
+    assert "决策" in text
+    assert "新开" in text
+    assert "仪表" in text and "仅参考" in text
+    assert "0.22" in text or "+0.22" in text
+
+
+def test_apply_decision_to_execution_presses_soft_buy():
+    from trader_shared.decision_view import apply_decision_to_execution
+
+    r = _report(grade="empty")
+    apply_decision_view(r)
+    out = apply_decision_to_execution("回踩轻仓试探", r)
+    assert "不买" in out or "不追" in out
+
+
+def test_render_short_midline_shows_decision_narrative():
+    from trader_shared.report_core import render_short_midline
+
+    r = {
+        "name": "测",
+        "symbol": "000001",
+        "current": 10.0,
+        "change_pct": 0.0,
+        "major_stage": "蓄势",
+        "short_term_momentum": "震荡",
+        "conclusion": {
+            "midline": "观察",
+            "shortline": "观察",
+            "execution": "回踩轻仓试探",
+            "reason": "单测",
+            "stage_line": "蓄势",
+        },
+        "discipline": {
+            "allow_new_entry": False,
+            "suggested_pct_cap": 0,
+            "entry_line": "新开：否（缺：共振不足）",
+            "entry_checklist": {"all_green": False, "missing_labels": ["共振不足"]},
+        },
+        "resonance": {
+            "grade": "empty",
+            "summary_line": "共振：空窗/不足",
+            "posts": {},
+            "missing": [],
+            "conflict": False,
+            "scene": "pullback_probe",
+        },
+        "decision_view": {
+            "allow_new_recommend": False,
+            "summary_line": "决策：不推荐新开（共振不足｜无入场策略）",
+            "block_reasons": ["共振不足", "无入场策略"],
+        },
+        "fusion": {
+            "weighted_score": 0.18,
+            "action": "半仓试",
+            "regime": "正常",
+            "confidence": 0.4,
+            "signals_detail": {},
+        },
+        "key_prices": {},
+        "mid_key_prices": {},
+    }
+    md = render_short_midline(r)
+    assert "共振" in md
+    assert "决策" in md
+    assert "仪表" in md and "仅参考" in md
+    assert "半仓试" in md or "0.18" in md or "+0.18" in md
