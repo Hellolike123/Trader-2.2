@@ -1,6 +1,15 @@
 """策略闸口匹配（P2）：纯函数，无网络。
 
-契约：docs/designs/strategy-gates.md · strategy-pack.md
+契约：
+- docs/designs/strategy-gates.md
+- docs/designs/strategy-pack.md
+- docs/designs/analysis-strategy-boundaries.md
+
+架构红线：
+- 本模块禁止 import 缠/威检测实现（wyckoff_events、detect_buy_points 等）。
+- 只读 report['analysis_cards'] + 公共上下文字段。
+- 允许 import analysis_cards 仅作文档级依赖时由调用方先 ensure_report_analysis_cards。
+
 输入：report-like dict 或已展平的 context。
 输出：每闸 primary / mode / 填数后的执行视图。
 """
@@ -63,14 +72,18 @@ def _builtin_packs() -> list[dict[str, Any]]:
 
 
 def build_match_context(report: dict[str, Any] | None = None, **overrides: Any) -> dict[str, Any]:
-    """从 report-like dict 抽取匹配上下文；overrides 优先。"""
+    """从 report-like dict 抽取匹配上下文；**优先 analysis_cards**，overrides 最高。
+
+    架构：策略层不读原始 chanlun/wyckoff 大 dict；仅 cards + 标量上下文。
+    兼容：cards 缺失时可用顶层 chan_type_short 等测试桩字段。
+    """
     r = report if isinstance(report, dict) else {}
     disc = r.get("discipline") if isinstance(r.get("discipline"), dict) else {}
     cl = disc.get("entry_checklist") if isinstance(disc.get("entry_checklist"), dict) else {}
     fusion = r.get("fusion") if isinstance(r.get("fusion"), dict) else {}
     sig = fusion.get("signals_detail") if isinstance(fusion.get("signals_detail"), dict) else {}
 
-    # 意见卡（若已挂在 report）
+    # 意见卡优先（调用方应 ensure_report_analysis_cards）
     cards = r.get("analysis_cards") if isinstance(r.get("analysis_cards"), dict) else {}
     chan_c = cards.get("chan") if isinstance(cards.get("chan"), dict) else {}
     wyk_c = cards.get("wyckoff") if isinstance(cards.get("wyckoff"), dict) else {}

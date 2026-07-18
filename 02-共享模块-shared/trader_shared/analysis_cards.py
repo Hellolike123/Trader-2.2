@@ -1,7 +1,12 @@
-"""分析层意见卡（P0）：稳定小 dict，供策略匹配 / Skill 只读。
+"""分析层意见卡（P0 + 架构加固 B）：稳定小 dict，供策略匹配 / Skill 只读。
 
-契约：docs/designs/analysis-opinion-cards.md
-不重算缠/威/筹，只适配现有 resolve_* / format_* / strategy 输出。
+契约：
+- docs/designs/analysis-opinion-cards.md
+- docs/designs/analysis-strategy-boundaries.md
+
+规则：
+- 本模块是分析对外主出口；可适配 cores，但 strategy 不得绕过本模块去调检测实现。
+- ensure_report_analysis_cards(report) 保证 report['analysis_cards'] 键齐全。
 """
 from __future__ import annotations
 
@@ -31,6 +36,17 @@ def _as_dir(x: Any) -> int:
     return 0
 
 
+def _empty_card(source: str, schema: str, role: str = "daily") -> dict[str, Any]:
+    return {
+        "schema_version": schema,
+        "source": source,
+        "role": role,
+        "raw_available": False,
+        "direction": 0,
+        "summary_line": "",
+    }
+
+
 def build_wyckoff_card(
     wyckoff: dict[str, Any] | None = None,
     *,
@@ -52,22 +68,27 @@ def build_wyckoff_card(
         and raw.get("tr_lower") is not None
         and raw.get("tr_quality") is not None
     )
-    if role == "midline":
+    if role in ("midline", "weekly"):
         summary = format_wyckoff_midline_light(wyckoff)
     else:
         summary = format_wyckoff_event_light(wyckoff)
 
     bias = "neutral"
+    phase = str(raw.get("phase") or "")
+    phase_label = str(info.get("phase_label") or "")
     try:
         from trader_shared.wyckoff_view import to_wyckoff_state_view
 
-        view = to_wyckoff_state_view(wyckoff, symbol=symbol or "", timeframe=str(info.get("timeframe") or "unknown"))
+        view = to_wyckoff_state_view(
+            wyckoff,
+            symbol=symbol or "",
+            timeframe=str(info.get("timeframe") or "unknown"),
+        )
         bias = str(view.get("bias") or "neutral")
-        phase = str(view.get("phase") or "")
-        phase_label = str(view.get("phase_label") or info.get("phase_label") or "")
+        phase = str(view.get("phase") or phase)
+        phase_label = str(view.get("phase_label") or phase_label)
     except Exception:
-        phase = str(raw.get("phase") or "")
-        phase_label = str(info.get("phase_label") or "")
+        pass
 
     return {
         "schema_version": "wyckoff_card_v1",
@@ -100,16 +121,12 @@ def build_chan_card(
     from trader_shared.chan_core import format_chanlun_short_light, resolve_chanlun_primary
 
     info = resolve_chanlun_primary(chan_result)
-    # fusion 补强（与 short light 一致）
     line = format_chanlun_short_light(
         chan_result,
         fusion_chan=fusion_chan,
         wave_label=wave_label,
     )
-    # 若 fusion 改写了类型，再 resolve 一次展示用字段
     if info.get("status") in ("none", "trend") and isinstance(fusion_chan, dict):
-        info2 = resolve_chanlun_primary(chan_result)
-        # format 已处理 fusion；用 line 反推 type 不可靠，保留 resolve + fusion 扫描
         reason = str(fusion_chan.get("reason") or "")
         for raw, short in (
             ("一类买", "一买"),
@@ -121,15 +138,14 @@ def build_chan_card(
             ("三类卖", "三卖"),
         ):
             if raw in reason or short in reason:
-                info2 = {
-                    **info2,
+                info = {
+                    **info,
                     "status": "point",
                     "type_raw": raw,
                     "type_short": short,
                     "direction": _as_dir(fusion_chan.get("direction")),
                     "same_level": True,
                 }
-                info = info2
                 break
         else:
             if "底背驰" in reason:
@@ -173,7 +189,6 @@ def build_momentum_card(
 ) -> dict[str, Any]:
     """动量意见卡 schema_version=momentum_card_v1。"""
     m = momentum_result if isinstance(momentum_result, dict) else {}
-    # strategy 包装 {"momentum": {...}} 或 fusion 扁平
     if "momentum" in m and isinstance(m.get("momentum"), dict):
         inner = m["momentum"]
     else:
@@ -296,6 +311,86 @@ def build_vpf_card(
         "fund_quality": str(v.get("fund_quality") or ""),
         "summary_line": str(v.get("reason") or "价量资金中性"),
     }
+
+
+def ensure_report_analysis_cards(report: dict[str, Any]) -> dict[str, Any]:
+    """保证 report['analysis_cards'] 键齐全（架构加固 B）。
+
+    幂等：已有合法卡则保留并补缺键。
+    返回 analysis_cards 引用。
+    """
+    if not isinstance(report, dict):
+        return {}
+
+    existing = report.get("analysis_cards") if isinstance(report.get("analysis_cards"), dict) else {}
+    cards: dict[str, Any] = dict(existing)
+
+    fusion = report.get("fusion") if isinstance(report.get("fusion"), dict) else {}
+    sig = fusion.get("signals_detail") if isinstance(fusion.get("signals_detail"), dict) else {}
+    conclusion = report.get("conclusion") if isinstance(report.get("conclusion"), dict) else {}
+    current = _finite(report.get("current"), 0.0) or 0.0
+    symbol = str(report.get("symbol") or "")
+
+    try:
+        if "chan" not in cards or not isinstance(cards.get("chan"), dict):
+            cards["chan"] = build_chan_card(
+                report.get("chanlun") or report.get("chan"),
+                fusion_chan=sig.get("chan") if isinstance(sig.get("chan"), dict) else None,
+                wave_label=str(conclusion.get("wave_label") or ""),
+                role="daily",
+            )
+    except Exception:
+        cards["chan"] = _empty_card("chan", "chan_card_v1")
+
+    try:
+        if "wyckoff" not in cards or not isinstance(cards.get("wyckoff"), dict):
+            cards["wyckoff"] = build_wyckoff_card(
+                report.get("wyckoff_daily") or report.get("wyckoff"),
+                role="daily",
+                symbol=symbol,
+            )
+    except Exception:
+        cards["wyckoff"] = _empty_card("wyckoff", "wyckoff_card_v1")
+
+    try:
+        if "wyckoff_midline" not in cards or not isinstance(cards.get("wyckoff_midline"), dict):
+            cards["wyckoff_midline"] = build_wyckoff_card(
+                report.get("wyckoff_midline") or report.get("wyckoff"),
+                role="midline",
+                symbol=symbol,
+            )
+    except Exception:
+        cards["wyckoff_midline"] = _empty_card("wyckoff", "wyckoff_card_v1", role="midline")
+
+    try:
+        if "momentum" not in cards or not isinstance(cards.get("momentum"), dict):
+            cards["momentum"] = build_momentum_card(
+                sig.get("momentum") if isinstance(sig.get("momentum"), dict) else report.get("momentum"),
+            )
+    except Exception:
+        cards["momentum"] = _empty_card("momentum", "momentum_card_v1")
+
+    try:
+        if "vpf" not in cards or not isinstance(cards.get("vpf"), dict):
+            cards["vpf"] = build_vpf_card(
+                sig.get("vpf") if isinstance(sig.get("vpf"), dict) else None,
+            )
+    except Exception:
+        cards["vpf"] = _empty_card("vpf", "vpf_card_v1")
+
+    try:
+        if "chip" not in cards or not isinstance(cards.get("chip"), dict):
+            cards["chip"] = build_chip_card(
+                current,
+                report.get("chip_peaks") or [],
+                report.get("chip_migration") if isinstance(report.get("chip_migration"), dict) else None,
+                report.get("chip_current_pct") if isinstance(report.get("chip_current_pct"), (int, float)) else None,
+            )
+    except Exception:
+        cards["chip"] = _empty_card("chip", "chip_card_v1", role="report")
+
+    report["analysis_cards"] = cards
+    return cards
 
 
 def assert_card_numeric_finite(card: dict[str, Any]) -> None:

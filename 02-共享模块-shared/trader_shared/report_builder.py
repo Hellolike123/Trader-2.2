@@ -1529,43 +1529,21 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         conclusion["midline_verdict_note"] = _midline_verdict["note"]
         _mark("conclusion")
 
-        # P3：策略闸口匹配（供 render 与 JSON 消费）
+        # 架构加固 B：完整意见卡 + 策略匹配（失败不阻断主报告）
         try:
-            from trader_shared.analysis_cards import (
-                build_chan_card,
-                build_chip_card,
-                build_momentum_card,
-                build_vpf_card,
-                build_wyckoff_card,
-            )
+            from trader_shared.analysis_cards import ensure_report_analysis_cards
             from trader_shared.strategy_match import match_strategies
 
-            _fs = (report_fusion or {}).get("signals_detail") or {}
-            report["analysis_cards"] = {
-                "chan": build_chan_card(
-                    report.get("chanlun") or report.get("chan"),
-                    fusion_chan=_fs.get("chan") if isinstance(_fs.get("chan"), dict) else None,
-                    wave_label=str((conclusion or {}).get("wave_label") or ""),
-                    role="daily",
-                ),
-                "wyckoff": build_wyckoff_card(
-                    report.get("wyckoff_daily") or report.get("wyckoff"),
-                    role="daily",
-                    symbol=str(report.get("symbol") or ""),
-                ),
-                "chip": build_chip_card(
-                    float(report.get("current") or current or 0),
-                    report.get("chip_peaks") or [],
-                    report.get("chip_migration") if isinstance(report.get("chip_migration"), dict) else None,
-                    report.get("chip_current_pct") if isinstance(report.get("chip_current_pct"), (int, float)) else None,
-                ),
-                "momentum": build_momentum_card(_fs.get("momentum") if isinstance(_fs.get("momentum"), dict) else {}),
-                "vpf": build_vpf_card(_fs.get("vpf") if isinstance(_fs.get("vpf"), dict) else {}),
-            }
+            ensure_report_analysis_cards(report)
             report["strategy_match"] = match_strategies(report)
             _mark("strategy_match")
         except Exception as _st_exc:
             _logger.debug("strategy_match skip: %s", _st_exc)
+            try:
+                from trader_shared.analysis_cards import ensure_report_analysis_cards
+                ensure_report_analysis_cards(report)
+            except Exception:
+                report.setdefault("analysis_cards", {})
     except Exception as _sm_exc:
         # 短中线组装失败不阻断主报告；保留原字段
         report.setdefault("key_prices", {})
@@ -1590,6 +1568,11 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             "execution": "现价不买 · 不追", "reason": "门控组装失败",
             "this_week": "观察", "conflict": "", "daily_ruling": "中性，观望",
         })
+        try:
+            from trader_shared.analysis_cards import ensure_report_analysis_cards
+            ensure_report_analysis_cards(report)
+        except Exception:
+            report.setdefault("analysis_cards", {})
         _mark("conclusion")
 
     _mark("assemble")
