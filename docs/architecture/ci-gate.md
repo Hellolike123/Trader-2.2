@@ -42,6 +42,7 @@ hook 已随仓库版本化提交，clone 后需各机执行一次上面这行（
 | 文件 | 守护内容 |
 |---|---|
 | `test_fusion_cards_parity_bugs.py` | 动量卡生产形态、默认 classic、类二买、nesting、cost_price、止损不松于结构 |
+| `test_fusion_path_compare.py` | classic vs cards 对账纯逻辑（无网） |
 | `test_fusion_from_cards.py` | cards / classic / compare 输入路径 |
 | `test_strategy_match.py` | 六闸匹配契约 |
 | `test_analysis_opinion_cards_p0.py` | 意见卡 shape / 数值有限 |

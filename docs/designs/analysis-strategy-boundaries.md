@@ -130,6 +130,19 @@ report_builder→  全部层
 - 已修 parity（见 `test_fusion_cards_parity_bugs.py`），但默认仍 classic，直到真票 `compare` 稳定后再考虑切默认。
 - **Agent 禁止**在未改环境变量的情况下假设 fusion 已走 cards。
 
+### 真票 classic vs cards 对账
+
+```bash
+export PYTHONPATH=02-共享模块-shared:01-功能包-packages/trader/scripts
+# 选股池前 8 只（各跑 2 次 build_report，需网络）
+python scripts/compare_fusion_paths.py --pool --limit 8
+# 指定票 + JSON
+python scripts/compare_fusion_paths.py --targets 002050 688248 --json /tmp/fusion_cmp.json
+```
+
+逻辑库：`trader_shared/fusion_path_compare.py`（stable / mild / unstable + 批末建议）。  
+**不稳** → 继续默认 classic，修 cards；**本批全 stable** → 才讨论默认 cards。
+
 ---
 
 ## 6. 红线清单（Agent 自检）
