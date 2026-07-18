@@ -16,6 +16,8 @@ import os
 
 import json
 
+import traceback
+
 from trader_shared._logging import get_logger
 
 _logger = get_logger(__name__)
@@ -358,6 +360,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     _mark("fund_env_sector")
 
     # === 融合层 ===
+    # 预产卡先挂本地变量：report dict 更晚才组装，禁止在此写 report[...]
+    _fusion_pre_cards_pending: dict[str, Any] = {}
     try:
         from trader_shared.fusion_core import merge_decisions
         from trader_shared.volume_price import detect_volume_divergence
@@ -450,7 +454,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         )
         # 预产卡留给 ensure 合并（不污染 fusion 对外字段）
         if _pre_cards:
-            report["_fusion_pre_cards"] = _pre_cards
+            _fusion_pre_cards_pending = _pre_cards
     except Exception as _e:
         _logger.warning(
             "merge_decisions 崩溃 (data_status=%s, symbol=%s):\n%s",
@@ -875,7 +879,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     # 用 major_stage 替代旧 stage 计算 upward_momentum（修复 P1-4）
     upward_momentum = upward_momentum_observation(stage_result["major_stage"], current, support, confirm)
 
-    report = {
+    report: dict[str, Any] = {
         "intraday_as_of": intraday_as_of,
         "name": quote.get("name") or sec.name,
         "symbol": quote.get("symbol") or sec.ts_code,
@@ -1034,6 +1038,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         # Phase 2 新增：概念板块数据（仅展示，不参与评分）
         "extend_concept": snapshot.extend_concept,
     }
+    # 融合前预产卡（ensure 阶段再 merge 进 analysis_cards）
+    if _fusion_pre_cards_pending:
+        report["_fusion_pre_cards"] = _fusion_pre_cards_pending
 
     # ═══ 自动同步：levels → report ═══
     # INTERNAL_LEVELS 只用于 build_report 内部计算，不应暴露给下游
