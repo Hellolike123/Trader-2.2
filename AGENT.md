@@ -498,6 +498,7 @@ python scripts/golden_diff_gate.py capture
 | 股票名无法解析 | 改用 6 位代码（如 `002050` 而非 `三花智控`） |
 | 周线数据不足 | 威科夫中线返回 insufficient，不回退日线 |
 | 要读威科夫状态给 AI/复盘 | `to_wyckoff_state_view(report["wyckoff_midline"])`，契约 `docs/designs/wyckoff-state-view.md` |
+| 策略分层 / 6 闸口 / 策略包 | 见 `docs/designs/strategy-layered-architecture.md` + `strategy-pack.md` + `strategy-roadmap-and-tests.md`（索引 `docs/designs/README.md`） |
 | 中线缠论「笔数不足」 | 先确认 `WEEKLY_LOOKBACK_BARS=260` 已生效；仅真笔 &lt;3 才该文案；段少应是「线段偏少」 |
 | NAME_MAP 没这个股 | 手动加映射到 `data_provider.py` 或改用代码 |
 
