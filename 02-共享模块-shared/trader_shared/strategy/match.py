@@ -7,8 +7,9 @@
 
 架构红线：
 - 本模块禁止 import 缠/威检测实现（wyckoff_events、detect_buy_points 等）。
-- 只读 report['analysis_cards'] + 公共上下文字段。
+- 只读 report['analysis_cards'] + 公共上下文字段 + report['resonance']（阶段 2）。
 - 允许 import analysis_cards 仅作文档级依赖时由调用方先 ensure_report_analysis_cards。
+- 禁止 import 检测实现；共振只读已算好的 report['resonance']（缺则薄调用 build_resonance）。
 
 输入：report-like dict 或已展平的 context。
 输出：每闸 primary / mode / 填数后的执行视图。
@@ -161,6 +162,28 @@ def build_match_context(report: dict[str, Any] | None = None, **overrides: Any) 
     if cost_f and not has_pos and r.get("has_position") is None:
         has_pos = True
 
+    # 阶段 2：共振局面图进 context，供 packs match 字段使用（不改出手逻辑）
+    res = r.get("resonance") if isinstance(r.get("resonance"), dict) else None
+    if res is None and r:
+        try:
+            from trader_shared.resonance import build_resonance
+
+            res = build_resonance(r)
+        except Exception as exc:
+            _logger.debug("build_resonance in context skip: %s", exc)
+            res = {}
+    if not isinstance(res, dict):
+        res = {}
+    posts = res.get("posts") if isinstance(res.get("posts"), dict) else {}
+    res_grade = str(res.get("grade") or "")
+    res_scene = str(res.get("scene") or "")
+    res_conflict = bool(res.get("conflict"))
+    res_aligned = res_grade == "aligned"
+    post_bg = bool((posts.get("background") or {}).get("ok")) if isinstance(posts.get("background"), dict) else False
+    post_st = bool((posts.get("structure") or {}).get("ok")) if isinstance(posts.get("structure"), dict) else False
+    post_chip = bool((posts.get("chip") or {}).get("ok")) if isinstance(posts.get("chip"), dict) else False
+    post_mom = bool((posts.get("momentum") or {}).get("ok")) if isinstance(posts.get("momentum"), dict) else False
+
     ctx = {
         "current": current,
         "stop": stop_f,
@@ -177,6 +200,15 @@ def build_match_context(report: dict[str, Any] | None = None, **overrides: Any) 
         "chip_support_weak": chip_weak,
         "chip_trapped_tag": trapped,
         "block_new": any(k in action for k in ("不新开", "不买", "空仓")) or not bool(allow),
+        # resonance_*：策略包 match 可用 field: resonance_grade / eq / in
+        "resonance_grade": res_grade,
+        "resonance_scene": res_scene,
+        "resonance_aligned": res_aligned,
+        "resonance_conflict": res_conflict,
+        "resonance_post_background": post_bg,
+        "resonance_post_structure": post_st,
+        "resonance_post_chip": post_chip,
+        "resonance_post_momentum": post_mom,
     }
     ctx.update(overrides)
     return ctx

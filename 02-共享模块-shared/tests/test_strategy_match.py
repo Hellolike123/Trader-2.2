@@ -25,6 +25,82 @@ def test_g01_six_gates_present():
         assert g in r["gates"]
 
 
+def test_context_includes_resonance_fields():
+    """阶段 2：match context 暴露共振字段，供 YAML match。"""
+    report = {
+        "current": 10.0,
+        "major_stage": "蓄势",
+        "resonance": {
+            "schema_version": "resonance_v1",
+            "scene": "pullback_probe",
+            "grade": "aligned",
+            "conflict": False,
+            "posts": {
+                "background": {"ok": True, "note": "x"},
+                "structure": {"ok": True, "note": "x"},
+                "chip": {"ok": True, "note": "x"},
+                "momentum": {"ok": True, "note": "x"},
+            },
+        },
+        "analysis_cards": {"chan": {"type_short": "一买", "type_raw": "一类买"}},
+    }
+    ctx = build_match_context(report)
+    assert ctx["resonance_grade"] == "aligned"
+    assert ctx["resonance_aligned"] is True
+    assert ctx["resonance_scene"] == "pullback_probe"
+    assert ctx["resonance_post_structure"] is True
+    assert ctx["resonance_conflict"] is False
+
+
+def test_entry_pack_can_require_resonance_aligned():
+    """策略包 match 可用 resonance_grade；未齐时不入选该包。"""
+    pack = {
+        "id": "entry.resonance_aligned_probe",
+        "name": "共振齐试探",
+        "gate": "entry",
+        "priority": 99,
+        "match": {
+            "all": [
+                {"field": "resonance_grade", "in": ["aligned"]},
+                {"field": "chan_type_short", "in": ["一买"]},
+            ]
+        },
+    }
+    base = {
+        "current": 15,
+        "has_position": False,
+        "allow_new_entry": True,
+        "checklist_all_green": True,
+        "chan_type_short": "一买",
+        "chan_type_raw": "一类买",
+        "resonance": {
+            "grade": "missing_structure",
+            "scene": "pullback_probe",
+            "conflict": False,
+            "posts": {},
+        },
+    }
+    r_miss = match_strategies(base, packs=[pack])
+    assert r_miss["gates"]["entry"]["primary"] is None or (
+        r_miss["gates"]["entry"]["primary"] or {}
+    ).get("id") != "entry.resonance_aligned_probe"
+
+    base["resonance"] = {
+        "grade": "aligned",
+        "scene": "pullback_probe",
+        "conflict": False,
+        "posts": {
+            "background": {"ok": True},
+            "structure": {"ok": True},
+            "chip": {"ok": True},
+            "momentum": {"ok": True},
+        },
+    }
+    r_ok = match_strategies(base, packs=[pack])
+    assert r_ok["gates"]["entry"]["primary"] is not None
+    assert r_ok["gates"]["entry"]["primary"]["id"] == "entry.resonance_aligned_probe"
+
+
 def test_g02_stop_policy_full_clear():
     r = match_strategies({"current": 10, "support": 9.5, "has_position": True, "cost": 10})
     assert r["gates"]["stop"]["stop_policy"] == "全清"
