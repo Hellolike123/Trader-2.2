@@ -113,8 +113,8 @@ def _chan_to_signal(chan_result: dict) -> dict:
     divergence = chan.get("divergence", {}) if isinstance(chan.get("divergence"), dict) else {}
     trend_label = chan.get("trend_label", "数据不足")
 
-    _SELL_RANK = {"一类卖": 0, "二类卖": 1, "三类卖": 2}
-    _BUY_RANK = {"一类买": 0, "类二买": 1, "二类买": 2, "三类买": 3}
+    _SELL_RANK = {"一类卖": 0, "类一卖": 1, "二类卖": 2, "三类卖": 3}
+    _BUY_RANK = {"一类买": 0, "类二买": 1, "类一买": 2, "二类买": 3, "三类买": 4}
     _CHAN_CONF = {3: 0.8, 2: 0.55, 1: 0.35}
 
     def _best_point(points: list, rank_map: dict) -> dict | None:
@@ -156,12 +156,25 @@ def _chan_to_signal(chan_result: dict) -> dict:
         conf = _point_conf(best_sell, 0.5 if sp_type != "一类卖" else 0.8)
         reasons = {
             "一类卖": "缠论一类卖 (顶背驰)",
+            "类一卖": "缠论类一卖 (柱弱确认·非面积背驰)",
             "二类卖": "缠论二类卖 (高点降低)",
             "三类卖": "缠论三类卖 (跌破中枢)",
         }
-        types = {"一类卖": "chan_sell_1", "二类卖": "chan_sell_2", "三类卖": "chan_sell_3"}
-        tiers = {"一类卖": SignalTier.CHAN_SELL_1, "二类卖": SignalTier.CHAN_SELL_2, "三类卖": SignalTier.CHAN_SELL_3}
+        types = {
+            "一类卖": "chan_sell_1",
+            "类一卖": "chan_sell_soft1",
+            "二类卖": "chan_sell_2",
+            "三类卖": "chan_sell_3",
+        }
+        tiers = {
+            "一类卖": SignalTier.CHAN_SELL_1,
+            "类一卖": SignalTier.CHAN_SELL_SOFT1,
+            "二类卖": SignalTier.CHAN_SELL_2,
+            "三类卖": SignalTier.CHAN_SELL_3,
+        }
         if sp_type in reasons:
+            if sp_type == "类一卖":
+                conf = _point_conf(best_sell, 0.35)
             return {
                 "direction": -1,
                 "confidence": conf,
@@ -191,6 +204,18 @@ def _chan_to_signal(chan_result: dict) -> dict:
         return {"direction": -1, "confidence": round(0.5 * _div_nesting_scale(), 4),
                 "reason": "缠论顶背驰", "raw_key": "chan",
                 "signal_tier": SignalTier.CHAN_TOP_DIVERGENCE}
+
+    # 3.4) 类一买：柱序列弱确认，不强多
+    if best_buy is not None and best_buy.get("type") == "类一买":
+        return {
+            "direction": 1,
+            "confidence": _point_conf(best_buy, 0.35),
+            "reason": "缠论类一买 (柱弱确认·非面积背驰)",
+            "raw_key": "chan",
+            "signal_id": best_buy.get("signal_id"),
+            "signal_type": "chan_buy_soft1",
+            "signal_tier": SignalTier.CHAN_BUY_SOFT1,
+        }
 
     # 3.5) 类二买：介于一类买与二类买之间的弱化信号
     if best_buy is not None and best_buy.get("type") == "类二买":

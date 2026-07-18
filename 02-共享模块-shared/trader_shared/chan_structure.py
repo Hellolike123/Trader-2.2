@@ -615,10 +615,12 @@ def detect_buy_points(
                             and macd_hist_current > macd_hist_prev
                         )
                     if bar_ok:
+                        # 柱序列弱确认：禁止冒充「一类买」（面积背驰才是真一类）
                         buy_points.append({
-                            "type": "一类买",
+                            "type": "类一买",
                             "price": round(curr_down["end_price"], 4),
                             "confidence": 1,
+                            "force_source": "hist_bar_fallback",
                         })
 
     # ── P1 二类买：回抽不破前低；要求末笔即为该回抽 down（防粘滞）──
@@ -785,10 +787,12 @@ def detect_sell_points(
                             and macd_hist_current < macd_hist_prev
                         )
                     if bar_ok:
+                        # 柱序列弱确认：禁止冒充「一类卖」
                         sell_points.append({
-                            "type": "一类卖",
+                            "type": "类一卖",
                             "price": round(curr_up["end_price"], 4),
                             "confidence": 1,
+                            "force_source": "hist_bar_fallback",
                         })
 
     # ── P1 二类卖：回抽不过前高；要求末笔即为该回抽 up（防粘滞）──

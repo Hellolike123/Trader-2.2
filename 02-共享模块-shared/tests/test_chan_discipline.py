@@ -520,11 +520,11 @@ class TestR6PivotPosition:
 
 
 class TestR7SameLevelTag:
-    """R7: 买卖点/背驰加（同级）。"""
+    """R7: 买卖点/背驰加（本周期）——非区间套确认。"""
 
     def test_divergence_text(self):
         assert needs_same_level_tag(text="顶背驰 · 看跌") is True
-        assert "（同级）" in append_same_level_tag("顶背驰 · 看跌", True)
+        assert "（本周期）" in append_same_level_tag("顶背驰 · 看跌", True)
 
     def test_buy_points_obj(self):
         assert needs_same_level_tag({"buy_points": [{"type": "一类买"}]}) is True

@@ -377,9 +377,14 @@ def render_short_midline(r: dict[str, Any]) -> str:
                     _sps = _chan_inner.get("sell_points") or []
                     _div = _chan_inner.get("divergence") or {}
 
-                    # 优先级：一类买 > 类二买 > 二类买 > 三类买
-                    _BUY_RANK = {"一类买": 0, "类二买": 1, "二类买": 2, "三类买": 3}
-                    _SELL_RANK = {"一类卖": 0, "二类卖": 1, "三类卖": 2}
+                    # 与 fusion / resolve_chanlun_primary 一致：卖优先 > 顶背驰 > 买 > 底背驰
+                    _BUY_RANK = {
+                        "一类买": 0, "类二买": 1, "类一买": 2, "二类买": 3, "三类买": 4,
+                    }
+                    _SELL_RANK = {
+                        "一类卖": 0, "类一卖": 1, "二类卖": 2, "三类卖": 3,
+                    }
+
                     def _best_type(points: list, rank_map: dict) -> str:
                         best, best_r = "", 999
                         for p in points:
@@ -393,14 +398,14 @@ def render_short_midline(r: dict[str, Any]) -> str:
                     _best_buy = _best_type(_bps, _BUY_RANK)
                     _best_sell = _best_type(_sps, _SELL_RANK)
 
-                    if _best_buy:
-                        _chan_dir_mid = "看涨"
-                        _chan_point_type = _best_buy
-                    elif _best_sell:
+                    if _best_sell:
                         _chan_dir_mid = "看跌"
                         _chan_point_type = _best_sell
                     elif _div.get("top_divergence"):
                         _chan_dir_mid = "看跌"
+                    elif _best_buy:
+                        _chan_dir_mid = "看涨"
+                        _chan_point_type = _best_buy
                     elif _div.get("bottom_divergence"):
                         _chan_dir_mid = "看涨"
                     else:

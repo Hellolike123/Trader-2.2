@@ -324,7 +324,7 @@ class TestDetectBuyPoints:
         assert "一类买" not in [bp["type"] for bp in result]
 
     def test_buy_point_1_fallback_no_index(self):
-        """P1 一类买：趋势中枢 + 创新低 + 无 index 时 bar 级绿柱缩短 → conf=1。"""
+        """柱序列弱确认 → 类一买 conf=1，禁止冒充一类买。"""
         strokes = [
             {"direction": "down", "end_price": 10.0},
             {"direction": "up", "end_price": 12.0},
@@ -335,9 +335,11 @@ class TestDetectBuyPoints:
             macd_hist_current=-0.5, macd_hist_prev=-1.0,
         )
         types = [bp["type"] for bp in result]
-        assert "一类买" in types
-        bp1 = next(bp for bp in result if bp["type"] == "一类买")
+        assert "一类买" not in types
+        assert "类一买" in types
+        bp1 = next(bp for bp in result if bp["type"] == "类一买")
         assert bp1["confidence"] == 1
+        assert bp1.get("force_source") == "hist_bar_fallback"
 
     def test_buy_point_2(self):
         """二类买：抬高低点 + 历史一类前置（趋势+离开）+ macd_divergence_ok。"""

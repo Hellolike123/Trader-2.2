@@ -22,13 +22,15 @@ class SignalTier:
     """信号层级枚举 (字符串常量, 兼容普通 dict 存取)。"""
 
     # ── 缠论 ──
-    CHAN_BUY_1 = "chan_buy_1"                 # 一类买 (底背驰)
+    CHAN_BUY_1 = "chan_buy_1"                 # 一类买 (底背驰·面积)
     CHAN_BUY_2 = "chan_buy_2"                 # 二类买 (低点抬高)
     CHAN_BUY_3 = "chan_buy_3"                 # 三类买 (突破中枢)
     CHAN_BUY_LIKE2 = "chan_buy_like2"         # 类二买 (回踩偏弱) —— 不强多
-    CHAN_SELL_1 = "chan_sell_1"               # 一类卖 (顶背驰)
+    CHAN_BUY_SOFT1 = "chan_buy_soft1"         # 类一买 (柱序列弱确认) —— 不强多
+    CHAN_SELL_1 = "chan_sell_1"               # 一类卖 (顶背驰·面积)
     CHAN_SELL_2 = "chan_sell_2"               # 二类卖
     CHAN_SELL_3 = "chan_sell_3"               # 三类卖
+    CHAN_SELL_SOFT1 = "chan_sell_soft1"       # 类一卖 (柱序列弱确认) —— 不强空
     CHAN_TOP_DIVERGENCE = "chan_top_div"      # 顶背驰
     CHAN_BOTTOM_DIVERGENCE = "chan_bottom_div"  # 底背驰
     CHAN_TREND_UP = "chan_trend_up"           # 拉升段 (不强多)

@@ -247,7 +247,7 @@ def test_format_chanlun_short_light_buy1():
     assert line.startswith("一买")
     assert "底背驰" in line
     assert "看涨" in line
-    assert "（同级）" in line
+    assert "（本周期）" in line  # 本周期信号标记（非区间套确认）
 
 
 def test_format_chanlun_short_light_from_fusion_reason():

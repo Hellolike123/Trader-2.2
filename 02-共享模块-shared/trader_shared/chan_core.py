@@ -507,10 +507,12 @@ def _chan_json_default(o):
 # 中文买卖点类型 → Signal Contract v2 规范类型名（缺失字典导致历史 NameError）
 _CHAN_TYPE_CANONICAL = {
     "一类买": "chan_buy_1",
+    "类一买": "chan_buy_soft1",
     "类二买": "chan_buy_like2",
     "二类买": "chan_buy_2",
     "三类买": "chan_buy_3",
     "一类卖": "chan_sell_1",
+    "类一卖": "chan_sell_soft1",
     "二类卖": "chan_sell_2",
     "三类卖": "chan_sell_3",
 }
@@ -638,11 +640,18 @@ def format_chanlun_theory_line(chan_result: Any) -> str:
     trend_label = str(chan.get("trend_label") or "")
 
     direction = 0
-    if any(isinstance(p, dict) and p.get("type") in ("一类卖", "二类卖", "三类卖") for p in sell_points):
+    # 卖优先（含类一卖弱确认），对齐 fusion
+    if any(
+        isinstance(p, dict) and p.get("type") in ("一类卖", "类一卖", "二类卖", "三类卖")
+        for p in sell_points
+    ):
         direction = -1
     elif divergence.get("top_divergence"):
         direction = -1
-    elif any(isinstance(p, dict) and p.get("type") in ("一类买", "二类买", "三类买") for p in buy_points):
+    elif any(
+        isinstance(p, dict) and p.get("type") in ("一类买", "类一买", "二类买", "三类买", "类二买")
+        for p in buy_points
+    ):
         direction = 1
     elif divergence.get("bottom_divergence"):
         direction = 1
@@ -662,24 +671,28 @@ def format_chanlun_theory_line(chan_result: Any) -> str:
 # 短线展示：买卖点类型短名（灯标）
 _CHAN_TYPE_SHORT = {
     "一类买": "一买",
+    "类一买": "类一买",
     "类二买": "类二买",
     "二类买": "二买",
     "三类买": "三买",
     "一类卖": "一卖",
+    "类一卖": "类一卖",
     "二类卖": "二卖",
     "三类卖": "三卖",
 }
 _CHAN_TYPE_NOTE = {
     "一类买": "底背驰",
+    "类一买": "柱弱确认",
     "类二买": "回踩偏弱",
     "二类买": "低点抬高",
     "三类买": "突破中枢",
     "一类卖": "顶背驰",
+    "类一卖": "柱弱确认",
     "二类卖": "高点降低",
     "三类卖": "跌破中枢",
 }
-_SELL_RANK_DISP = {"一类卖": 0, "二类卖": 1, "三类卖": 2}
-_BUY_RANK_DISP = {"一类买": 0, "类二买": 1, "二类买": 2, "三类买": 3}
+_SELL_RANK_DISP = {"一类卖": 0, "类一卖": 1, "二类卖": 2, "三类卖": 3}
+_BUY_RANK_DISP = {"一类买": 0, "类二买": 1, "类一买": 2, "二类买": 3, "三类买": 4}
 
 
 def resolve_chanlun_primary(chan_result: Any = None) -> dict[str, Any]:
@@ -864,7 +877,9 @@ def format_chanlun_short_light(
     if note:
         if note not in parts[0] and not (note in ("底背驰", "顶背驰") and note in parts[0]):
             # 一买 的 note 是 底背驰 → 要挂上
-            if parts[0] in ("一买", "一卖", "二买", "三买", "二卖", "三卖", "类二买") or info["status"] == "point":
+            if parts[0] in (
+                "一买", "一卖", "二买", "三买", "二卖", "三卖", "类二买", "类一买", "类一卖",
+            ) or info["status"] == "point":
                 if note != parts[0]:
                     parts.append(note)
             elif info["status"] == "trend" and note:
@@ -901,17 +916,26 @@ def format_chanlun_short_light(
             from trader_shared.chan_discipline import append_same_level_tag
             body = append_same_level_tag(body, True)
         except Exception:
-            if "（同级）" not in body:
-                body = body + "（同级）"
+            if "（本周期）" not in body and "（同级）" not in body:
+                body = body + "（本周期）"
 
     # 浪型补充：仅追加未在正文出现的结构词（避免一类买重复）
+    # 已有买卖点/背驰时，禁止再拼「笔数不足/无法判断」造成自相矛盾
     wave = str(wave_label or "").strip()
     if wave:
-        sig_kw = {"一类卖", "二类卖", "三类卖", "一类买", "二类买", "三类买", "类二买",
-                  "一买", "二买", "三买", "一卖", "二卖", "三卖", "顶背驰", "底背驰"}
+        sig_kw = {
+            "一类卖", "类一卖", "二类卖", "三类卖", "一类买", "类一买", "二类买", "三类买", "类二买",
+            "一买", "二买", "三买", "一卖", "二卖", "三卖", "顶背驰", "底背驰",
+        }
+        _struct_noise = ("笔数不足", "无法判断", "无明确结构", "数据不足", "线段不足")
+        _has_sig = info.get("status") in ("point", "divergence") or any(
+            k in body for k in ("一买", "一卖", "二买", "二卖", "三买", "三卖", "类二", "类一", "背驰")
+        )
         extra = []
         for w in [x.strip() for x in wave.replace("｜", "·").split("·") if x.strip()]:
             if w in body:
+                continue
+            if _has_sig and any(n in w for n in _struct_noise):
                 continue
             if any(k in w for k in sig_kw if k in body):
                 continue

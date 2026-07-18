@@ -64,6 +64,10 @@ def chan_card_to_fusion_signal(card: dict[str, Any] | None) -> dict[str, Any]:
         conf, tier = 0.8, SignalTier.CHAN_BUY_1
         d = 1
         conf = _apply_point_conf_scales(c, conf)
+    elif t_raw == "类一买" or t_short == "类一买":
+        conf, tier = 0.35, SignalTier.CHAN_BUY_SOFT1
+        d = 1
+        conf = _apply_point_conf_scales(c, conf)
     elif t_raw == "类二买" or t_short == "类二买":
         conf, tier = 0.35, SignalTier.CHAN_BUY_LIKE2
         d = 1
@@ -78,6 +82,10 @@ def chan_card_to_fusion_signal(card: dict[str, Any] | None) -> dict[str, Any]:
         conf = _apply_point_conf_scales(c, conf)
     elif t_raw == "一类卖" or t_short == "一卖":
         conf, tier = 0.8, SignalTier.CHAN_SELL_1
+        d = -1
+        conf = _apply_point_conf_scales(c, conf)
+    elif t_raw == "类一卖" or t_short == "类一卖":
+        conf, tier = 0.35, SignalTier.CHAN_SELL_SOFT1
         d = -1
         conf = _apply_point_conf_scales(c, conf)
     elif t_raw == "二类卖" or t_short == "二卖":

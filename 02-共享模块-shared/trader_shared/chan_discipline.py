@@ -268,7 +268,13 @@ def build_entry_checklist(
 
     types = buy_point_types or []
     short_trigger = any(
-        any(k in t for k in ("一类买", "二类买", "三类买", "一买", "二买", "三买"))
+        any(
+            k in t
+            for k in (
+                "一类买", "类一买", "二类买", "三类买", "类二买",
+                "一买", "二买", "三买",
+            )
+        )
         for t in types
     )
 
@@ -904,9 +910,9 @@ def needs_same_level_tag(
     text: str = "",
     buy_point_types: list[str] | None = None,
 ) -> bool:
-    """是否应在缠论文案后标注（同级）：有买卖点或背驰。"""
+    """是否应在缠论文案后标注「本周期」：有买卖点或背驰（≠区间套已确认）。"""
     t = str(text or "")
-    if any(k in t for k in ("一类", "二类", "三类", "类二", "背驰", "买点", "卖点")):
+    if any(k in t for k in ("一类", "二类", "三类", "类二", "类一", "背驰", "买点", "卖点")):
         return True
     bps = buy_point_types or []
     if any(str(x) for x in bps):
@@ -928,10 +934,13 @@ def needs_same_level_tag(
 
 
 def append_same_level_tag(text: str, need: bool) -> str:
-    """在缠论行末追加（同级）。"""
+    """在缠论行末追加（本周期）——本周期信号，非小级别区间套确认。
+
+    兼容旧文案「（同级）」：已含本周期/同级则不再追加。
+    """
     s = str(text or "")
     if not need or not s:
         return s
-    if "（同级）" in s or "(同级)" in s:
+    if "（本周期）" in s or "(本周期)" in s or "（同级）" in s or "(同级)" in s:
         return s
-    return s + "（同级）"
+    return s + "（本周期）"
