@@ -26,6 +26,41 @@ def test_apply_buy_point_lifecycle_sets_field():
     assert isinstance(report["buy_point_lifecycle"], dict)
 
 
+def test_attach_short_midline_importable():
+    from trader_shared.report_pipeline import attach_short_midline_and_decision
+
+    report = {
+        "current": 10.0,
+        "support": 9.0,
+        "stop": 8.5,
+        "confirm": 10.5,
+        "resistance": 11.0,
+        "scene": "观察",
+        "suggested_pct": 0,
+        "ma": {"ma5": 10, "ma10": 9.5, "ma20": 9},
+        "chanlun_midline": {},
+        "wyckoff_midline": {},
+        "chanlun": {},
+    }
+    out = attach_short_midline_and_decision(
+        report,
+        current=10.0,
+        scene="观察",
+        report_fusion={"action": "观望", "regime": "正常", "signals_detail": {}},
+        stage_result={"major_stage": "蓄势", "momentum": "震荡"},
+        weekly_bars=[],
+        suggested=0,
+        theory_status="观察",
+        market_env_data={"level": "正常"},
+        has_position=False,
+        data_status="full",
+        chip_resistance_lower=None,
+        chip_resistance_upper=None,
+        stage="蓄势",
+    )
+    assert "key_prices" in out or "conclusion" in out or "discipline" in out
+
+
 def test_attach_stack_writes_resonance_strategy_decision():
     report = {
         "current": 10.0,

@@ -12,17 +12,18 @@
 
 | 块 | 函数 | 状态 |
 |----|------|------|
-| 卡→共振→策略→决策 | `attach_analysis_decision_stack` | ✅ main |
-| 买点盖生命周期 | `apply_buy_point_lifecycle` | ✅ 本分支 |
+| 卡→共振→策略→决策 | `attach_analysis_decision_stack` | ✅ |
+| 买点盖生命周期 | `apply_buy_point_lifecycle` | ✅ |
+| 关键价+周框+纪律+结论+上两者 | `attach_short_midline_and_decision` | ✅ 大门禁 354 绿 |
 
-## 建议续拆顺序（由边界清晰 → 难）
+`report_builder.py` 自 ~1800 行降至 ~1400 行；尾部短中线整段已出总管。
 
-1. **discipline + conclusion 组装尾段**（门控后写 report 字段）  
-2. **key_prices / mid_key_prices / weekly_frame**  
-3. **stage_pack / position_state / suggested_pct**  
-4. **structure / chip**  
-5. **plugins + fusion**（注意 pre_cards）  
-6. **load snapshot + risk_flags + live_bar**（最前）
+## 可选续拆（非阻塞）
+
+1. **stage_pack**（持仓/仓位/exit_plan/suggested_pct_context）— 注意与 `sync_report_with_data` 循环 import，宜 lazy import  
+2. **structure / chip**  
+3. **plugins + fusion**  
+4. **load snapshot + risk_flags**  
 
 每抽一块：`bash scripts/run-gate-tests.sh` 绿再 commit。
 
