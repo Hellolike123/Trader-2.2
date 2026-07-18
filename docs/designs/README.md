@@ -8,6 +8,7 @@
 |------|------|
 | [strategy-layered-architecture.md](./strategy-layered-architecture.md) | 分析 / 策略 / 决策三层 + **6 闸口** |
 | [analysis-opinion-cards.md](./analysis-opinion-cards.md) | **P0 分析意见卡**字段冻结 |
+| [strategy-gates.md](./strategy-gates.md) | **P1 六闸口 IO / 互斥** |
 | [strategy-pack.md](./strategy-pack.md) | 策略包字段、匹配、展示契约 |
 | [strategy-roadmap-and-tests.md](./strategy-roadmap-and-tests.md) | **落地分期 + 测试清单**（P0～P4） |
 | [strategy-menu.md](./strategy-menu.md) | 缠/威/mi 菜单与包映射（思路） |

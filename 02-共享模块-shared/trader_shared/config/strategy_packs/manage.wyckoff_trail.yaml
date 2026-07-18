@@ -1,0 +1,12 @@
+id: manage.wyckoff_trail
+name: 威科夫移动止损
+gate: manage
+version: "1.0"
+priority: 90
+lineage: wyckoff
+summary: 波谷地板跟踪；止损全清；止盈可分仓
+match: always
+exclude: []
+stages: [S1, S2, S3]
+stop_policy: 全清
+motto: 逃生全清 · 收成分批

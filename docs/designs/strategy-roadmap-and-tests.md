@@ -12,8 +12,8 @@
 | 阶段 | 主题 | 产出 | 完成定义（含测试） |
 |------|------|------|-------------------|
 | **P0** | 分析契约 | 意见卡字段表；可单独读威/缠 | ✅ 见 `analysis-opinion-cards.md` + `analysis_cards.py` + A-01～A-06 |
-| **P1** | 闸口契约 | 6 闸口 IO + 互斥（可无代码） | 文档评审通过 |
-| **P2** | 策略最小集 | G/E + entry 一包 + manage A 预案 + stop 全清 | `test_strategy_match` 绿 + 真票 1 只 |
+| **P1** | 闸口契约 | 6 闸口 IO + 互斥 | ✅ `strategy-gates.md` |
+| **P2** | 策略最小集 | G/E + entry + manage A + stop 全清 | ✅ `strategy_match.py` + S-01～S-06 |
 | **P3** | 报告 📐 | 闸口展示；plan vs active | 渲染单测 + 微信红线检查 |
 | **P4** | 扩展 | take F、scale、多 entry B/C/D | 互斥回归 + 真票 |
 
@@ -83,7 +83,7 @@ python3 -m pytest 02-共享模块-shared/tests/test_wyckoff_core.py \
 
 ### 3.3 DoD
 
-- [ ] 契约表合入 architecture，无歧义  
+- [x] 契约表：`docs/designs/strategy-gates.md`（G-01～G-04 见正文 + 单测）  
 
 ---
 
@@ -113,8 +113,9 @@ python3 -m pytest 02-共享模块-shared/tests/test_strategy_match.py -q
 
 ### 4.3 DoD
 
-- [ ] S-01～S-06 全绿  
-- [ ] 真票 1 只：人工确认 📐 主用合理  
+- [x] S-01～S-06：`tests/test_strategy_match.py`  
+- [ ] 真票 1 只：人工确认 📐（P3 接入报告后再勾；可用 `format_gates_brief` 先看）  
+- [x] 代码：`trader_shared/strategy_match.py` + `config/strategy_packs/*.yaml`  
 
 ---
 

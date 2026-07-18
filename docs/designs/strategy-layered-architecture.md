@@ -68,6 +68,9 @@
 4. **已持仓**：entry 关闭或只读；主战场 manage + take + stop  
 5. **每闸最多 1 个主用**；候选最多 1 行  
 
+**P1 完整 IO 表**：见 [strategy-gates.md](./strategy-gates.md)。  
+**P2 实现**：`trader_shared/strategy_match.py` + `config/strategy_packs/*.yaml`。
+
 ---
 
 ## 4. 分析层：理论包（意见卡）

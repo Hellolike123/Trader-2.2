@@ -25,6 +25,8 @@
 |------|------|
 | **策略分层 · 6 闸口** | [designs/strategy-layered-architecture.md](./designs/strategy-layered-architecture.md) |
 | **分析意见卡（P0 ✅）** | [designs/analysis-opinion-cards.md](./designs/analysis-opinion-cards.md) |
+| **六闸口（P1 ✅）** | [designs/strategy-gates.md](./designs/strategy-gates.md) |
+| **策略匹配（P2 ✅）** | `trader_shared/strategy_match.py` |
 | 策略包契约 | [designs/strategy-pack.md](./designs/strategy-pack.md) |
 | **落地 + 测试 P0～P4** | [designs/strategy-roadmap-and-tests.md](./designs/strategy-roadmap-and-tests.md) |
 | 策略菜单（缠/威/mi） | [designs/strategy-menu.md](./designs/strategy-menu.md) |

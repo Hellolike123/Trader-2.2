@@ -1,0 +1,11 @@
+id: select.observe_G
+name: 空仓观察
+gate: select
+version: "1.0"
+priority: 10
+lineage: system
+summary: 默认观察兜底，不构成开仓理由
+match: always
+exclude: []
+veto_entry: false
+motto: 先看状态，不急动手

@@ -1,0 +1,16 @@
+# 仅用于同闸多包 priority 测试与二期；match 条件窄
+id: entry.chan_buy2_add
+name: 结构·二买加仓叙事
+gate: entry
+version: "1.0"
+priority: 50
+lineage: chan
+summary: 二类买/二买（优先级低于一买试探）
+match:
+  any:
+    - field: chan_type_short
+      in: [二买, 一买]
+    - field: chan_type_raw
+      in: [二类买, 一类买]
+exclude: []
+motto: 二买加，勿抢一买主用

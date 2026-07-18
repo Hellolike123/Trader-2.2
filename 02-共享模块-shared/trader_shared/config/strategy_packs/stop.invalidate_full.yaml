@@ -1,0 +1,11 @@
+id: stop.invalidate_full
+name: 证伪全清
+gate: stop
+version: "1.0"
+priority: 100
+lineage: system
+summary: 破止损/地板即逻辑证伪，一次性全清
+match: always
+exclude: []
+stop_policy: 全清
+motto: 火警全家撤

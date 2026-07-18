@@ -1,0 +1,19 @@
+id: select.defense_E
+name: 防守否决
+gate: select
+version: "1.0"
+priority: 100
+lineage: wyckoff
+summary: 破位/弱势/大盘很差时否决开仓执行
+match:
+  any:
+    - field: wyckoff_event
+      in: [SOW, UT, UTAD, LPSY]
+    - field: regime
+      in: [很差]
+    - field: chip_support_weak
+      eq: true
+      and_trapped: 套牢面大
+exclude: []
+veto_entry: true
+motto: 危险时先活下来

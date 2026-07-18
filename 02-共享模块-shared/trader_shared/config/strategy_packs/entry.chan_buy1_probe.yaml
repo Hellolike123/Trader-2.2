@@ -1,0 +1,15 @@
+id: entry.chan_buy1_probe
+name: 结构试探·一买
+gate: entry
+version: "1.0"
+priority: 80
+lineage: chan
+summary: 一类买/一买结构试探，清单未全绿仅预案
+match:
+  any:
+    - field: chan_type_short
+      in: [一买]
+    - field: chan_type_raw
+      in: [一类买]
+exclude: []
+motto: 一买试，不全绿不执行
