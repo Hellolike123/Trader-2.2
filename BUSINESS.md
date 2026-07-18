@@ -113,9 +113,17 @@
 
 ### 2.7 Fusion 输入路径（Arch C）
 
-短线三席（缠/动量/VPF）默认经 **意见卡** 标准化（`FUSION_FROM_CARDS=cards`，可用 `classic` 回退或 `compare` 双轨）。  
-实现：`fusion_card_signals.py` + `merge_decisions(..., analysis_cards=...)`。  
-边界：`docs/designs/analysis-strategy-boundaries.md`。
+短线三席（缠/动量/VPF）**生产默认 classic**（`_chan_to_signal` / `_momentum_to_signal` / VPF 原路径）。
+
+| `FUSION_FROM_CARDS` | 行为 |
+|---------------------|------|
+| 缺省 / `classic` / `false` / `0` | **默认**：三席走 classic 标准化 |
+| `cards` / `true` / `1` | 三席优先意见卡（`analysis_cards` → `fusion_card_signals`），不足回退 classic |
+| `compare` / `dual` | 两路都算；主结果用 cards；写入 `fusion_compare` 供对账 |
+
+报告路径仍会预产 `analysis_cards`（策略 📐 / ensure 用），与 fusion 默认输入解耦。  
+实现：`fusion_core._fusion_input_mode` + `analysis/fusion_card_signals.py` + `merge_decisions(..., analysis_cards=...)`。  
+边界与何时切默认 cards：`docs/designs/analysis-strategy-boundaries.md`。
 
 ---
 

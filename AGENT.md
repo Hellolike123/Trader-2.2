@@ -147,7 +147,7 @@ Trader3.0/
 │   └── pool_briefing.py            ← 日报分类
 │
 ├── scripts/                         ← 项目级脚本
-│   ├── run-gate-tests.sh            ← ★ CI 门禁（131 passed）
+│   ├── run-gate-tests.sh            ← ★ CI 门禁（离线子集；见 docs/architecture/ci-gate.md）
 │   ├── golden_diff_gate.py          ← Golden 基线闸门
 │   ├── git-hooks/pre-push           ← pre-push hook（版本化）
 │   └── pack_all.py                  ← 打包发布
@@ -210,12 +210,12 @@ Trader3.0/
 ### 3.3 融合层三评委
 
 ```
-第一席 chan     → _chan_to_signal()
+第一席 chan     → _chan_to_signal()  （cards 模式：chan_card_to_fusion_signal）
                   信号层级：chan_buy_1/2/3, chan_sell_1/2/3, chan_top_div, chan_bottom_div
                   权重：正常 0.30 / 偏弱 0.50 / 很差 0
                   （权威源：config/fusion_regime_weights.yaml；内置兜底同值）
 
-第二席 momentum  → _momentum_to_signal()
+第二席 momentum  → _momentum_to_signal()  （生产：direction 字符串 + score；cards 须同映射）
                   方向：+1(多) / 0(中性) / -1(空)
                   权重：正常 0.45 / 偏弱 0.15 / 很差 0
                   （正常大势动量占优；偏弱则缠论占优）
@@ -229,6 +229,18 @@ Trader3.0/
 很差：权重全 0 后若 |score|<0.01 → 强制 -0.5 → 空仓侧（非字面「暂不碰」）
 ```
 
+#### Fusion 输入路径（Arch C · Agent 必读）
+
+| `FUSION_FROM_CARDS` | 行为 |
+|---------------------|------|
+| **缺省 / classic** | **生产默认**：classic 三席标准化 |
+| `cards` | 优先 `analysis_cards` → `fusion_card_signals`；不足回退 classic |
+| `compare` | 双轨对账；主结果 cards + `fusion_compare` |
+
+- 报告仍预产 `analysis_cards`（策略 📐 / Skill 读卡），**与 fusion 默认 classic 解耦**。
+- **禁止**假设「默认已是 cards」。切默认前须真票 compare + 门禁内 parity 仍绿。
+- 详：`docs/designs/analysis-strategy-boundaries.md` §5、`BUSINESS.md` §2.7。
+
 ### 3.4 设计原则（不可破坏）
 
 | 原则 | 说明 | 违规示例 |
@@ -240,6 +252,7 @@ Trader3.0/
 | **禁止向上依赖** | trader_shared 不 import scripts/ | ❌ `from trader.scripts import ...` |
 | **模块边界：箱体独立** | `box_detect.py` 是独立模块，暂不接入 report_builder，保留代码和测试以备后续 | ❌ 把箱体检测结果写进报告渲染 |
 | **模块边界：威科夫周线** | 周线威科夫独占中线，数据不足直接 return insufficient（不回退日线） | ❌ 周线不足时 fallback 到日线 |
+| **Fusion 默认 classic** | 缺省不走 cards 三席；切 cards 须显式 env + parity | ❌ 默认改回 cards 且不跑真票 compare |
 | **威科夫出口** | Agent/新代码优先 `to_wyckoff_state_view`；不把威科夫当 fusion 总大脑 | ❌ 从 analysis 里手抄 40 个 `*_signal` 拼叙事 |
 | **周线根数** | 默认 `WEEKLY_LOOKBACK_BARS=260`，中线缠论/威科夫同用 | ❌ 仍按旧 80 周假设调试「笔数不足」 |
 | **波段标签** | 仅 strokes&lt;3 写「笔数不足」；段少写「线段偏少/未成型」 | ❌ segments&lt;2 就报「笔数不足」 |
@@ -581,9 +594,9 @@ python 02-共享模块-shared/scripts/pack_all.py
 
 ## 12. 版本
 
-- **当前版本**：v2.x（文档与代码对齐：2026-07-16；含周线 260 根 / wave_label / MACD None）
+- **当前版本**：v2.x（文档与代码对齐：2026-07-18；含 Arch C/D + fusion 默认 classic）
 - **仓库**：Gitee `https://gitee.com/hellolike123/Trader-2.2`
-- **CI**：pre-push hook → `scripts/run-gate-tests.sh` → 离线门禁
+- **CI**：pre-push hook → `scripts/run-gate-tests.sh` → 离线门禁（含 cards/strategy 契约；**勿**把全量历史红项塞进门禁）
 - **Python**：3.11+，venv at `~/.workbuddy/binaries/python/envs/default/`
 
 ---

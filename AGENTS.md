@@ -3,6 +3,8 @@
 ## 接手先看
 
 - **版本升级**：当前版本为 Trader 2.4+（三大技能整合 + 四阶段定位）。单票报告默认已切到**中短线双轨**（`SHORT_MIDLINE_REPORT=true`）。
+- **Fusion 默认 classic（Arch C）**：`FUSION_FROM_CARDS` **缺省 = classic**（`_chan_to_signal` / `_momentum_to_signal` / VPF）。设 `cards` 才走意见卡三席；`compare` 双轨对账。报告仍预产 `analysis_cards` 供 📐 策略闸与 Skill，**不等于 fusion 默认读卡**。禁止按旧文档「默认 cards」改生产路径。详见 `BUSINESS.md` §2.7、`docs/designs/analysis-strategy-boundaries.md` §5。
+- **门禁只跑离线子集**：`scripts/run-gate-tests.sh`（含 cards/strategy parity）；**禁止**把全量 pytest 历史红项硬塞进门禁。说明：`docs/architecture/ci-gate.md`。
 - **技能整合**：6 个技能合并为 3 个——`trader`（单票分析 + 选股池）、`t0`（盘中盯盘）、`review`（盘后复盘 + 仓位轮动 + 信号追踪）。
 - **中短线双轨报告（默认）**：`report_core.render_short_midline` —— 标题带 `｜短中线`；分区 meta → 🧭 中线 → ⚡ 短线 → 说明/亮点风险 → T0/池。旧 `🎯`+`📍 决策` 模板仅 `SHORT_MIDLINE_REPORT=false` 回退。
 - **中线关键价独立引擎**：`mid_key_prices.py` 基于周线笔/段/中枢（生命线/回踩区/压力/目标），禁止用日线 `key_levels` 冒充中线成功路径。

@@ -1,7 +1,7 @@
 # 分析 / 策略 / 决策 架构边界（给开发 Agent）
 
-> **状态**：架构加固 A+B（进行中）  
-> **版本**：v0.1 · 2026-07-18  
+> **状态**：架构加固 A–D 已落地；fusion **默认 classic**  
+> **版本**：v0.2 · 2026-07-18  
 > **读者**：所有改 Trader 代码的 Agent / 人类  
 > **必读顺序**：本文 → `analysis-opinion-cards.md` → `strategy-gates.md` → `strategy-pack.md` → `strategy-roadmap-and-tests.md`
 
@@ -14,14 +14,17 @@
     ↓
 策略层 只读 意见卡 + 公共上下文 → 六闸口匹配 strategy_match
     ↓
-决策层 fusion / discipline 消费信号（加固目标：逐步只读卡；当前 fusion 仍可读原路径）
+决策层 fusion / discipline 消费信号
+    · fusion **默认 classic**（原三席标准化）；可选 `FUSION_FROM_CARDS=cards` 读卡
+    · discipline 只收紧出手/仓位，不改 weighted_score
     ↓
 展示层 report_core 展示状态灯 + 动作 + 📐 闸口
 ```
 
 **禁止**：策略包或 `strategy_match` 内重跑缠论笔、威科夫 Spring 检测、筹码直方图。  
 **禁止**：为加一个包去改 `weighted_score` 公式。  
-**禁止**：报告里手写第二套开仓逻辑绕过闸口。
+**禁止**：报告里手写第二套开仓逻辑绕过闸口。  
+**禁止**：文档或 Agent 假设「默认已是 cards」——**当前默认 classic**（见 §5）。
 
 ---
 
@@ -47,7 +50,7 @@
 presentation  →  report dict 字段
 strategy      →  analysis_cards + context（禁止 → wyckoff_events / detect_buy_points）
 analysis_cards→  analysis cores（适配层，允许）
-decision      →  当前可 cores；目标 → cards（阶段 C）
+decision      →  默认 classic cores 标准化；可选 cards（`FUSION_FROM_CARDS=cards`）
 report_builder→  全部层
 ```
 
@@ -108,18 +111,24 @@ report_builder→  全部层
 |------|------|------|
 | **A** | 边界文档 + import 红线单测 | ✅ 本文 + `test_arch_boundaries.py` |
 | **B** | report 必出完整 cards + context 优先读卡 | ✅ `ensure_report_analysis_cards` |
-| **C** | fusion 读卡（可回退 classic / compare） | ✅ 默认 `FUSION_FROM_CARDS=cards`；`fusion_card_signals.py` |
+| **C** | fusion 可读卡（classic / cards / compare） | ✅ **默认 classic**；`fusion_card_signals.py`；parity 测入门禁 |
 | **D** | 物理目录 `analysis/` `strategy/` | ✅ 2026-07-18；旧模块路径 re-export 兼容 |
 
-### 阶段 C 环境变量
+### 阶段 C 环境变量（与代码 `fusion_core._fusion_input_mode` 一致）
 
 | 变量 | 值 | 行为 |
 |------|-----|------|
-| `FUSION_FROM_CARDS` | `cards` / `true` / 缺省 | 三席优先意见卡，不足回退 classic |
-| | `classic` / `false` | 仅原 `_chan_to_signal` 等路径 |
-| | `compare` | 两路都算；主结果用 cards；写入 `fusion_compare` |
+| `FUSION_FROM_CARDS` | **缺省** / `classic` / `false` / `0` / `off` | **生产默认**：仅原 `_chan_to_signal` / `_momentum_to_signal` / VPF 路径 |
+| | `cards` / `true` / `1` / `on` / `auto` | 三席优先意见卡，不足回退 classic |
+| | `compare` / `both` / `dual` | 两路都算；主结果用 cards；写入 `fusion_compare` |
 
-结果字段：`fusion_input_path` = `cards` \| `classic`；可选 `fusion_compare`。
+结果字段：`fusion_input_path` = `classic` \| `cards`；可选 `fusion_compare`。
+
+**为何默认 classic（2026-07 契约回归后钉死）**
+
+- 早期默认 cards 时，动量卡未映射 `bullish`+`score`，导致第二席静音。
+- 已修 parity（见 `test_fusion_cards_parity_bugs.py`），但默认仍 classic，直到真票 `compare` 稳定后再考虑切默认。
+- **Agent 禁止**在未改环境变量的情况下假设 fusion 已走 cards。
 
 ---
 
