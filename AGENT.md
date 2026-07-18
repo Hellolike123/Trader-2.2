@@ -586,13 +586,13 @@ python 02-共享模块-shared/scripts/pack_all.py
 
 ## 11. 已知技术债
 
-| 项目 | 影响 |
-|------|------|
-| `self_calibration.py` 有 ~10 个 `print()` 在生产路径 | stdout 污染 |
-| `wyckoff_core` + `wyckoff_phase` 有 ~100 行重复配置 fallback | 维护不一致风险 |
-| `report_renderer/` 子包是 thin re-export（实现在 `report_core.py`） | 结构混乱 |
-| `03-输出校验-contracts/` 空目录（仅 .gitkeep） | 清理即可 |
-| `tushare_client` 仍写 `os.environ["NO_PROXY"]` | 并行/测试风险 |
+| 项目 | 影响 | 状态 |
+|------|------|------|
+| `self_calibration` CLI `print` | stdout | ✅ CLI 改 logging（2026-07） |
+| `report_renderer` 假分包 | 结构混乱 | ✅ 实现迁入 renderer，`report_core` 兼容 re-export |
+| `tushare` `NO_PROXY` | 并发踩踏 | ✅ 锁 + `_no_proxy_star` contextmanager，finally 还原 |
+| `wyckoff_core`/`phase` 配置重复 | 维护成本 | 可选续拆（行为敏感，非阻塞） |
+| builder 前半 plugins/structure | 总管仍偏长 | 可选；主段已在 pipeline |
 
 ---
 

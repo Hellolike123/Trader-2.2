@@ -20,11 +20,20 @@
 
 `report_builder` 主路径仍负责：snapshot 拉取、plugins、fusion 计算、structure/chip 拼装（计算热路径，抽函数收益低于耦合成本，保留在总管前半段）。
 
+## 工程债补完（2026-07）
+
+| 项 | 状态 |
+|----|------|
+| report_renderer 真实现 | ✅ 实现在 renderer/，report_core 兼容 re-export |
+| self_calibration CLI print | ✅ → logging |
+| tushare NO_PROXY | ✅ `_no_proxy_star` contextmanager |
+
 ## 刻意不做（非工程债 / 产品债）
 
 - 删除 fusion 计算路径（回测/兼容仍需要）  
 - 默认策略包强制共振齐（会改匹配结果，需产品拍板）  
 - T0/池/仓位接线（产品延伸，见法源 §5.1）  
+- wyckoff 配置重复大拆（行为敏感）  
 
 ## 验收
 

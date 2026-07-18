@@ -1,18 +1,997 @@
-"""report_renderer/short_midline.py — 中短线双轨报告渲染
-
-主力报告模板：meta → 🧭 中线 → ⚡ 短线 → 说明/亮点风险 → T0/池。
-
-此模块是 report_core.render_short_midline 的直接 re-export，
-在保持功能完全一致的同时使代码结构更清晰。
-
-未来若需更换输出格式（如 HTML），只需在此文件中替换实现，
-report_core 的兼容层不受影响。
-"""
+"""短中线双轨报告渲染（实现本体）。"""
 from __future__ import annotations
 
+import os
+import re
+from datetime import datetime
 from typing import Any
 
-# re-export：功能实现保留在 report_core 中（单一真实来源）
-from trader_shared.report_core import render_short_midline
+from trader_shared.report_renderer._helpers import _reformat_mid_line, _short_midline_enabled
 
-__all__ = ["render_short_midline"]
+def render_short_midline(r: dict[str, Any]) -> str:
+    """短中线报告模板（docs/mid-short-dual-track-plan.md §0.1）。
+
+    meta → 🧭 中线 → ⚡ 短线 → 说明 → 📌/T0/池
+    B3C 阶段+看法并列；B2A 无 🗺、🌟 仅短线。
+    """
+    name = r.get("name", "")
+    code = str(r.get("symbol", "")).replace(".SH", "").replace(".SZ", "")
+    current = float(r.get("current") or 0)
+    change_pct = float(r.get("change_pct") or 0)
+    ma_raw = r.get("ma_raw") if isinstance(r.get("ma_raw"), dict) else None
+    if not ma_raw:
+        ma_raw = r.get("ma") if isinstance(r.get("ma"), dict) else {}
+    ma_raw = ma_raw or {}
+
+    def _ma_float(key: str) -> float | None:
+        v = ma_raw.get(key)
+        if v is None or v == "" or v == "--":
+            return None
+        try:
+            f = float(v)
+            return f if f > 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    major_stage = str(r.get("major_stage") or "")
+    if major_stage == "None":
+        major_stage = ""
+    momentum = str(r.get("short_term_momentum") or "")
+    market_env = r.get("market_env") or {}
+    regime = ""
+    if isinstance(market_env, dict):
+        regime = str(market_env.get("level") or "")
+    if not regime:
+        fusion = r.get("fusion") or {}
+        regime = str(fusion.get("regime") or "")
+
+    conclusion = r.get("conclusion") or {}
+    key_prices = r.get("key_prices") or {}
+    mid_key_prices = r.get("mid_key_prices") or {}
+    fusion = r.get("fusion") or {}
+    fusion_signals = fusion.get("signals_detail") or {}
+    daily_ruling = str(
+        conclusion.get("daily_ruling")
+        or r.get("daily_ruling")
+        or "中性，观望"
+    )
+
+    ma20_v = _ma_float("ma20")
+    ma250_v = _ma_float("ma250")
+    _ma20_text = f"{ma20_v:.2f}" if ma20_v else "--"
+    _ma250_text = f"{ma250_v:.2f}" if ma250_v else "--"
+    _ma250_warn = " ⚠️下方" if (current > 0 and ma250_v and current < ma250_v) else ""
+
+    lines: list[str] = [
+        f"分析报告 — {name}（{code}）｜短中线",
+        "",
+        f"现价 {current:.2f}（{change_pct:+.2f}%）｜MA20 {_ma20_text}｜MA250 {_ma250_text}{_ma250_warn}",
+    ]
+
+    # 盘中诚实标注：实时价已锚定，但策略判定基于截至该日收盘的真实日线
+    # （合成 bar 不再掺入 bars，避免 volume=0 等假数据污染策略计算）
+    _intraday_as_of = r.get("intraday_as_of")
+    if _intraday_as_of:
+        lines.append(f"  ⏱ 盘中：实时价已锚定 · 策略判定基于截至 {_intraday_as_of} 收盘")
+
+    # meta：动能｜大盘（阶段主展示在 🧭，meta 不重复以免与中线打架）
+    meta_parts = []
+    if momentum:
+        meta_parts.append(f"综合动能 {momentum}")
+    if regime:
+        _market_env_data = r.get("market_env") or {}
+        _freshness = str(_market_env_data.get("data_freshness") or "").strip()
+        _mkt_chg = _market_env_data.get("change_pct")
+        _bars_mkt = _market_env_data.get("bars") or []
+        _last_date = str(_bars_mkt[-1].get("date") if _bars_mkt else "").strip()
+        # 由 market_env 明确标记：bars 是否来自旧缓存顶替（实时日K取数失败）
+        # 用此标志而非末日日期判断：源滞后（上游慢，末日≠今天但 bars 新鲜）不应误报暂停
+        _bars_stale = bool(_market_env_data.get("bars_stale"))
+
+        _regime_display = regime
+        if _bars_stale:
+            # 真过期：bars 来自旧缓存顶替（实时日K取数失败），明确提示数据暂停
+            _regime_display = f"⚠️数据暂停于{_last_date[-5:]}"
+            if _mkt_chg is not None:
+                _regime_display += f"({_mkt_chg:+.1f}%)"
+        else:
+            # bars 新鲜（含源滞后场景：实时取数成功但上游源本身慢，末日≠今天）→ 诚实显示涨跌幅，不误报暂停
+            if _mkt_chg is not None:
+                _regime_display = f"{regime} {_mkt_chg:+.1f}%"
+        meta_parts.append(f"大盘 {_regime_display}")
+    if meta_parts:
+        lines.append(f"  {' ｜ '.join(meta_parts)}")
+
+    volume_ratio_val = float(r.get("volume_ratio") or 0)
+    turnover_val = float(r.get("turnover_rate") or 0)
+    vol_parts = []
+    if volume_ratio_val > 0:
+        vol_label = "放量" if volume_ratio_val >= 1.5 else ("缩量" if volume_ratio_val <= 0.7 else "平量")
+        vol_parts.append(f"量比{volume_ratio_val:.1f}（{vol_label}）")
+    if turnover_val > 0:
+        vol_parts.append(f"换手{turnover_val:.1f}%")
+    # 调整天数并入量价行
+    _bars = r.get("daily_bars") or []
+    if len(_bars) >= 20 and current > 0:
+        _recent = _bars[-20:]
+        _high20 = max((float(b.get("high") or 0)) for b in _recent)
+        if _high20 > 0:
+            _days_from_high = 0
+            for _b in reversed(_recent):
+                if (float(_b.get("high") or 0)) >= _high20 - 0.001:
+                    break
+                _days_from_high += 1
+            if _days_from_high == 0:
+                vol_parts.append("创新高")
+            else:
+                vol_parts.append(f"调整{_days_from_high}天")
+
+    if vol_parts:
+        lines.append(f"  {' ｜ '.join(vol_parts)}")
+
+    # 相对强弱与行业板块（优先 extend_sector；fallback 用个股涨跌 vs 大盘环境）
+    _ext_sec = r.get("extend_sector") or {}
+    if isinstance(_ext_sec, dict) and _ext_sec.get("status") == "正常":
+        _sec_name = _ext_sec.get("sector_name") or ""
+        _sec_chg = _ext_sec.get("sector_change_pct")
+        _sec_rank = _ext_sec.get("sector_rank") or 0
+        _sec_tot = _ext_sec.get("sector_total") or 0
+        _vs = str(_ext_sec.get("stock_vs_sector") or "").strip()
+        
+        _sec_chg_str = f"{_sec_chg:+.2f}%" if isinstance(_sec_chg, (int, float)) else "--"
+        _rank_str = f"排名 {_sec_rank}/{_sec_tot}" if _sec_rank > 0 else ""
+        
+        _sector_parts = []
+        if _sec_name:
+            _short_name = _sec_name.replace("(A股)", "").replace("(A)", "").strip()
+            _sector_parts.append(f"{_short_name} {_sec_chg_str}")
+        # 个股涨跌幅
+        if change_pct is not None:
+            _sector_parts.append(f"个股 {change_pct:+.2f}%")
+        if _vs:
+            _sector_parts.append(_vs.replace("板块", "").strip())
+        if _sector_parts:
+            lines.append(f"  行业：{' ｜ '.join(_sector_parts)}")
+    elif change_pct != 0 and regime:
+        # 简易对比：个股涨跌 vs 大盘环境词
+        _regime_map = {"偏强": 0.5, "正常": 0, "偏弱": -0.5, "很差": -1.0}
+        _regime_score = _regime_map.get(regime, 0)
+        _vs_simple = change_pct - _regime_score
+        if _vs_simple > 0.5:
+            lines.append(f"  相对强弱：跑赢大盘 +{_vs_simple:.1f}%")
+        elif _vs_simple < -0.5:
+            lines.append(f"  相对强弱：跑弱 {_vs_simple:.1f}%")
+        else:
+            lines.append(f"  相对强弱：与大盘持平")
+
+    # 概念题材
+    _ext_concept = r.get("extend_concept") or {}
+    if isinstance(_ext_concept, dict) and (_ext_concept.get("status") == "正常" or _ext_concept.get("concept_list")):
+        _c_list = _ext_concept.get("concept_list") or []
+        _c_chgs = _ext_concept.get("concept_change_pct") or []
+        _concept_parts = []
+        for _c_name, _c_chg in zip(_c_list, _c_chgs):
+            _c_chg_str = f"{_c_chg:+.2f}%" if isinstance(_c_chg, (int, float)) else "--"
+            _concept_parts.append(f"{_c_name}（涨幅 {_c_chg_str}）")
+        if _concept_parts:
+            lines.append(f"  概念题材：{' ｜ '.join(_concept_parts[:4])}")
+
+    # 资金面
+    _ext_north = r.get("extend_northbound") or {}
+    _ext_margin = r.get("extend_margin") or {}
+    _has_north = isinstance(_ext_north, dict) and _ext_north.get("status") == "正常"
+    _has_margin = isinstance(_ext_margin, dict) and _ext_margin.get("status") == "正常"
+    if _has_north or _has_margin:
+        _north_part = ""
+        if _has_north:
+            _net = _ext_north.get("north_net_flow_wan")
+            _5d = _ext_north.get("north_flow_5d_wan")
+            def _fmt_flow(val):
+                if val is None: return "--"
+                if abs(val) >= 10000: return f"{val/10000:.2f}亿"
+                return f"{val:.2f}万"
+            _north_part = f"北向净流入 {_fmt_flow(_net)}（近5日 {_fmt_flow(_5d)}）"
+        _margin_part = ""
+        if _has_margin:
+            _bal = _ext_margin.get("margin_balance_wan")
+            _buy = _ext_margin.get("margin_buy_wan") or 0.0
+            _sell = _ext_margin.get("margin_sell_wan") or 0.0
+            _net_buy = _buy - _sell
+            def _fmt_flow(val):
+                if val is None: return "--"
+                if abs(val) >= 10000: return f"{val/10000:.2f}亿"
+                return f"{val:.2f}万"
+            _margin_part = f"融资余额 {_fmt_flow(_bal)}（本日净买入 {_fmt_flow(_net_buy)}）"
+        _cap_parts = []
+        if _north_part:
+            _cap_parts.append(_north_part)
+        if _margin_part:
+            _cap_parts.append(_margin_part)
+        if _cap_parts:
+            lines.append(f"  资金面：{' ｜ '.join(_cap_parts)}")
+
+    mid = conclusion.get("midline") or "中线观察"
+    short = conclusion.get("shortline") or "观察"
+    execution = conclusion.get("execution") or "现价不买 · 不追"
+    # 阶段 4：主叙事听 decision_view（不推荐则压偏买出手）
+    try:
+        from trader_shared.decision_view import apply_decision_to_execution
+
+        execution = apply_decision_to_execution(execution, r)
+    except Exception:
+        pass
+    reason = conclusion.get("reason") or ""
+    this_week = conclusion.get("this_week") or ""
+    conflict = conclusion.get("conflict") or ""
+    stage_line = str(conclusion.get("stage_line") or major_stage or "").strip()
+    if stage_line == "None":
+        stage_line = ""
+
+    # ── 🧭 中线（B3C）──
+    lines.append("")
+    lines.append("🧭 中线")
+
+    # 阶段 + 中线偏多/偏空标签（合并"看法"行）
+    _stage_line = str(stage_line or '未知')
+    _mid = str(conclusion.get("midline") or "").strip()
+    if _mid and _mid != "中线观察":
+        # 提取方向标签（偏多/偏空）和短因
+        _tag = ""
+        if any(k in _mid for k in ("可跟踪", "趋势未坏", "结构偏多", "看涨")):
+            _tag = "偏多"
+        elif any(k in _mid for k in ("慎跟", "偏空", "暂缓", "信号打架", "破坏")):
+            _tag = "偏空"
+        # 提取短因（去掉标点，取前8字）
+        _short = _mid.replace("·", "").replace("，", "").replace("。", "").split("（")[0].strip()[:10]
+        if _tag:
+            _stage_line = f"{_stage_line} · {_tag}（{_short}）"
+    lines.append(f"  阶段：{_stage_line}")
+
+    # 定论：威科夫中线 + 缠论中线 合成注记（各自独立输出已在下方威科夫/缠论段渲染）
+    _midline_note = str(
+        conclusion.get("midline_verdict_note")
+        or (r.get("midline_verdict") or {}).get("note")
+        or ""
+    ).strip()
+    if _midline_note:
+        lines.append(f"  定论：{_midline_note}")
+
+    # 仓位衔接：结构看好但仓位为0时，加桥接说明
+    _suggested_pct = r.get("suggested_pct")
+    try:
+        _sp = int(_suggested_pct) if _suggested_pct is not None else None
+    except (TypeError, ValueError):
+        _sp = None
+
+    # 威科夫中线：相位 + 英文灯 + 中文 + 约束句（周线独占，禁止回退日线）
+    try:
+        from trader_shared.wyckoff_core import format_wyckoff_midline_light
+        _wyk_raw = r.get("wyckoff_midline")
+        if isinstance(_wyk_raw, dict) and "wyckoff" in _wyk_raw:
+            _wyk_raw = _wyk_raw.get("wyckoff")
+        if not isinstance(_wyk_raw, dict):
+            _wyk_raw = {}
+        _wyk_line = format_wyckoff_midline_light(_wyk_raw, direction=None)
+    except Exception:
+        _wyk_line = "威科夫：数据不足 · 中性"
+    # 已是「威科夫：…」完整行
+    if not str(_wyk_line).startswith("威科夫"):
+        _wyk_line = f"威科夫：{_wyk_line}"
+    lines.append(f"  {_wyk_line}")
+
+    try:
+        from trader_shared.chan_core import format_chanlun_theory_line
+        from trader_shared.chan_discipline import needs_same_level_tag, append_same_level_tag
+        _chan_mid = r.get("chanlun_midline")
+        if _chan_mid is None:
+            _chan_compact = "数据不足·中性"
+        else:
+            _chan_compact = format_chanlun_theory_line(_chan_mid)
+        _chan_compact = append_same_level_tag(
+            _chan_compact, needs_same_level_tag(_chan_mid, text=_chan_compact)
+        )
+    except Exception:
+        _chan_compact = "数据不足·中性"
+
+    # 缠论行：合并浪型（状态+信号）+ 方向
+    _wave_mid = str(conclusion.get("wave_label_mid") or "").strip()
+    # 结构不足以支撑方向判断时（笔数不足/无法判断/无明确结构），禁止从
+    # trend_label 强叠方向词，否则会出现「笔数不足 · 看跌 · 无法判断」式矛盾。
+    _insufficient_struct = any(
+        k in _wave_mid for k in ("无法判断", "笔数不足", "无明确结构", "数据不足")
+    )
+
+    # 从缠论结果提取方向词 + 买卖点类型（仅结构充足时）
+    _chan_dir_mid = ""
+    _chan_point_type = ""  # 买卖点类型名，如"一类买""类二买"等
+    if not _insufficient_struct:
+        try:
+            _chan_mid_raw = r.get("chanlun_midline")
+            if isinstance(_chan_mid_raw, dict):
+                _chan_inner = _chan_mid_raw.get("chanlun", _chan_mid_raw)
+                if isinstance(_chan_inner, dict):
+                    _bps = _chan_inner.get("buy_points") or []
+                    _sps = _chan_inner.get("sell_points") or []
+                    _div = _chan_inner.get("divergence") or {}
+
+                    # 与 fusion / resolve_chanlun_primary 一致：卖优先 > 顶背驰 > 买 > 底背驰
+                    _BUY_RANK = {
+                        "一类买": 0, "类二买": 1, "类一买": 2, "二类买": 3, "三类买": 4,
+                    }
+                    _SELL_RANK = {
+                        "一类卖": 0, "类一卖": 1, "二类卖": 2, "三类卖": 3,
+                    }
+
+                    def _best_type(points: list, rank_map: dict) -> str:
+                        best, best_r = "", 999
+                        for p in points:
+                            if not isinstance(p, dict):
+                                continue
+                            r = rank_map.get(p.get("type", ""), 999)
+                            if r < best_r:
+                                best, best_r = str(p.get("type", "")), r
+                        return best
+
+                    _best_buy = _best_type(_bps, _BUY_RANK)
+                    _best_sell = _best_type(_sps, _SELL_RANK)
+
+                    if _best_sell:
+                        _chan_dir_mid = "看跌"
+                        _chan_point_type = _best_sell
+                    elif _div.get("top_divergence"):
+                        _chan_dir_mid = "看跌"
+                    elif _best_buy:
+                        _chan_dir_mid = "看涨"
+                        _chan_point_type = _best_buy
+                    elif _div.get("bottom_divergence"):
+                        _chan_dir_mid = "看涨"
+                    else:
+                        _tl = str(_chan_inner.get("trend_label") or "")
+                        if "拉升" in _tl:
+                            _chan_dir_mid = "看涨"
+                        elif "回调" in _tl:
+                            _chan_dir_mid = "看跌"
+        except Exception:
+            pass
+
+    if _wave_mid:
+        if _chan_dir_mid:
+            # 拆分浪型：状态 · 信号 → 状态 · [买卖点] · 方向 · 信号
+            _wave_parts = _wave_mid.split(" · ", 1)
+            _wave_state = _wave_parts[0]
+            _wave_sig = _wave_parts[1] if len(_wave_parts) > 1 else ""
+            # 去矛盾：顶/底背驰同框时只保留与已解析方向一致者，避免「顶背驰｜底背驰」自相矛盾
+            if "顶背驰" in _wave_sig and "底背驰" in _wave_sig:
+                if _chan_dir_mid == "看跌":
+                    _wave_sig = "顶背驰"
+                elif _chan_dir_mid == "看涨":
+                    _wave_sig = "底背驰"
+                else:
+                    _wave_sig = ""
+            _point_part = f" · {_chan_point_type}" if _chan_point_type else ""
+            if _wave_sig:
+                _chan_display = f"{_wave_state}{_point_part} · {_chan_dir_mid} · {_wave_sig}"
+            else:
+                _chan_display = f"{_wave_state}{_point_part} · {_chan_dir_mid}"
+        else:
+            # 结构不足或无可叠加方向：保持原浪型文案，补「中性」避免与「无法判断」矛盾
+            _chan_display = f"{_wave_mid} · 中性" if _insufficient_struct else _wave_mid
+    else:
+        _chan_display = _chan_compact
+    lines.append(f"  缠论：{_chan_display}")
+
+    # 位置灯（筹码峰：下方成本 / 上方套牢 / 搬家）— 只展示，不进 fusion
+    try:
+        from trader_shared.chip_core import format_chip_position_light
+        _pos_mid = format_chip_position_light(
+            current,
+            r.get("chip_peaks") or [],
+            r.get("chip_migration") if isinstance(r.get("chip_migration"), dict) else None,
+            r.get("chip_current_pct") if isinstance(r.get("chip_current_pct"), (int, float)) else None,
+        )
+        if _pos_mid:
+            lines.append(f"  {_pos_mid}")
+    except Exception:
+        pass
+
+    # 附：股东（背景，不抢位置灯）
+    _ext_fund = r.get("extend_fundamental") or {}
+    _sh = _ext_fund.get("shareholder") or {}
+    if isinstance(_sh, dict) and _sh.get("status") and _sh.get("status") != "数据不足":
+        _sh_chg = _sh.get("change_pct") or 0.0
+        _sh_status = _sh.get("status")
+        lines.append(f"  附：股东户数较上期 {_sh_chg:+.2f}%（{_sh_status}）")
+
+    # 业绩预期
+    _eps_data = _ext_fund.get("consensus_eps") or {}
+    _eps_rows = _eps_data.get("rows") or []
+    if isinstance(_eps_rows, list) and _eps_rows:
+        _eps_26 = None
+        _eps_27 = None
+        _count_26 = "--"
+        _count_27 = "--"
+        for _row in _eps_rows:
+            _year = str(_row.get("year", ""))
+            _avg = str(_row.get("avg_eps", ""))
+            _cnt = str(_row.get("count", ""))
+            if "2026" in _year or "26" in _year:
+                _eps_26 = _avg
+                _count_26 = _cnt
+            elif "2027" in _year or "27" in _year:
+                _eps_27 = _avg
+                _count_27 = _cnt
+        if _eps_26 or _eps_27:
+            _eps_parts = []
+            if _eps_26:
+                _eps_parts.append(f"26年均值{_eps_26}元")
+            if _eps_27:
+                _eps_parts.append(f"27年均值{_eps_27}元")
+            _cnt_val = _count_27 if _count_27 != "--" else _count_26
+            _cnt_str = f"（{_cnt_val}家机构预测）" if _cnt_val != "--" else ""
+            lines.append(f"  业绩预期：{' ｜ '.join(_eps_parts)}{_cnt_str}")
+
+    # 中线关键价（按价格升序排列）
+    lines.append("")
+    lines.append("  关键价（中线）")
+
+    # 收集中线价位，按价格排序
+    _mid_items: list[tuple[float, str]] = []
+    _mid_fields = [
+        ("line_life", "生命线"), ("line_pullback", "回踩区"),
+        ("line_golden_buy", "黄金买点"), ("line_resist", "压力位"),
+        ("line_target", "目标位"),
+    ]
+    for _key, _name in _mid_fields:
+        _line = _reformat_mid_line(mid_key_prices.get(_key) or "")
+        if not _line:
+            continue
+        _m = re.match(r"([\d.]+)", _line)
+        if _m:
+            _mid_items.append((float(_m.group(1)), _line))
+
+    # 添加 MA 参考位（年线优先，其次 MA20）
+    _ma250_v = _ma_float("ma250")
+    _ma20_v = _ma_float("ma20")
+    if _ma250_v and _ma250_v > 0:
+        _lbl = "年线支撑" if current > _ma250_v else "年线压力"
+        _mid_items.append((_ma250_v, f"{_ma250_v:.2f} MA250（{_lbl}）"))
+    if _ma20_v and _ma20_v > 0 and abs(_ma20_v - (_ma250_v or 0)) > 0.5:
+        _lbl = "中线压力" if current < _ma20_v else "中线支撑"
+        _mid_items.append((_ma20_v, f"{_ma20_v:.2f} MA20（{_lbl}）"))
+
+    # 按价格排序
+    _mid_items.sort(key=lambda x: x[0])
+
+    # 插入现价（🌟 标记）
+    if current > 0:
+        _ins = False
+        for _i, (p, _) in enumerate(_mid_items):
+            if p > current:
+                _mid_items.insert(_i, (current, f"🌟 现价 {current:.2f}"))
+                _ins = True
+                break
+        if not _ins:
+            _mid_items.append((current, f"🌟 现价 {current:.2f}"))
+
+    # 输出带 % 距离标注
+    for _p, _text in _mid_items:
+        if "现价" in _text:
+            lines.append(f"    {_text}")
+        else:
+            _dist_pct = (_p - current) / current * 100 if current > 0 else 0.0
+            _dist_str = f"{_dist_pct:+.0f}%" if abs(_dist_pct) >= 1 else f"{_dist_pct:+.1f}%"
+            # 如果是区间（如 61.18-72.60），计算上下界的 %
+            _range_m = re.match(r"([\d.]+)-([\d.]+)\s", _text)
+            if _range_m:
+                _hi = float(_range_m.group(2))
+                _hi_pct = (_hi - current) / current * 100 if current > 0 else 0.0
+                _hi_str = f"{_hi_pct:+.0f}%" if abs(_hi_pct) >= 1 else f"{_hi_pct:+.1f}%"
+                _dist_str = f"{_dist_str}~{_hi_str}"
+            # 在首个（前插入 % 距离
+            _insert_at = _text.find("（")
+            if _insert_at > 0:
+                _text = _text[:_insert_at] + f"（{_dist_str} · " + _text[_insert_at + 1:]
+            else:
+                _text = f"{_text}（{_dist_str}）"
+            lines.append(f"    {_text}")
+    if not _mid_items:
+        lines.append("    数据不足")
+
+    # ── ⚡ 短线 A 版：结构 → 状态 → 动能｜资金 → 动作 → 失效 ──
+    lines.append("")
+    lines.append("⚡ 短线")
+
+    _disc = r.get("discipline") if isinstance(r.get("discipline"), dict) else {}
+    _cap_t = _disc.get("suggested_pct_cap")
+    # 全绿才保留试探类；否则强制观察语义
+    _all_green = False
+    _cl2 = _disc.get("entry_checklist") if isinstance(_disc.get("entry_checklist"), dict) else {}
+    if _cl2:
+        _all_green = bool(_cl2.get("all_green"))
+    if not _all_green and any(k in execution for k in ("试探", "买点挂", "可按买")):
+        execution = "现价不买 · 不追"
+        if reason and "清单" not in reason:
+            reason = (reason + "，清单未全绿") if reason else "清单未全绿，不新开"
+    # 精简 reason：多个原因时只取前 2 个，总长限 30 字
+    if reason:
+        _parts = [p.strip() for p in re.split(r"[，,；;]", reason) if p.strip()]
+        if len(_parts) > 2:
+            reason = "，".join(_parts[:2])
+        if len(reason) > 30:
+            reason = reason[:28] + "…"
+
+    # 1) 结构：缠论类型优先
+    _csig2 = fusion_signals.get("chan") if isinstance(fusion_signals.get("chan"), dict) else {}
+    _wave = str(conclusion.get("wave_label") or "").strip()
+    try:
+        from trader_shared.chan_core import format_chanlun_short_light
+        _chan_src = r.get("chanlun") or r.get("chan")
+        _chan_line = format_chanlun_short_light(
+            _chan_src,
+            fusion_chan=_csig2 or None,
+            wave_label=_wave,
+        )
+    except Exception:
+        if _csig2:
+            _st2 = str(_csig2.get("reason") or "").replace("缠论", "").strip().lstrip(":：").strip() or "无信号"
+            _cd2 = _csig2.get("direction", 0)
+            _dl2 = "看涨" if _cd2 and int(_cd2) > 0 else ("看跌" if _cd2 and int(_cd2) < 0 else "中性")
+            _chan_line = f"{_st2} · {_dl2}"
+        else:
+            _chan_line = "暂无信号 · 中性"
+            if _wave:
+                _chan_line += f" · {_wave}"
+    lines.append(f"  结构：{_chan_line}")
+
+    # 1b) 买点盖生命周期（L1 展示）
+    _life = r.get("buy_point_lifecycle") if isinstance(r.get("buy_point_lifecycle"), dict) else {}
+    _life_line = str(_life.get("display_line") or "").strip()
+    if _life_line:
+        lines.append(f"  {_life_line}")
+
+    # 2) 状态：日线威科夫事件灯（只展示，不进 fusion）
+    try:
+        from trader_shared.wyckoff_core import format_wyckoff_event_light
+
+        def _unwrap_wyk(raw: object) -> dict:
+            if not isinstance(raw, dict):
+                return {}
+            if "wyckoff" in raw and isinstance(raw.get("wyckoff"), dict):
+                return raw["wyckoff"]  # type: ignore[index]
+            return raw
+
+        _src = r.get("wyckoff_daily")
+        _u = _unwrap_wyk(_src)
+        if not _u:
+            _fb = _unwrap_wyk(r.get("wyckoff"))
+            if _fb.get("timeframe") != "weekly":
+                _u = _fb
+        if _u:
+            _ev = format_wyckoff_event_light(_u)
+            # 统一标签「状态：」（format 内可能仍是「事件：」）
+            if _ev.startswith("事件："):
+                _ev = "状态：" + _ev[len("事件："):]
+            elif not _ev.startswith("状态："):
+                _ev = f"状态：{_ev}"
+            lines.append(f"  {_ev}")
+        else:
+            lines.append("  状态：— · 暂无日线事件 · 中性")
+    except Exception:
+        lines.append("  状态：— · 数据不足 · 中性")
+
+    # 2b) 位置灯（筹码峰）— 确认/否证结构与威科夫，不进 fusion
+    try:
+        from trader_shared.chip_core import format_chip_position_light
+        _pos_s = format_chip_position_light(
+            current,
+            r.get("chip_peaks") or [],
+            r.get("chip_migration") if isinstance(r.get("chip_migration"), dict) else None,
+            r.get("chip_current_pct") if isinstance(r.get("chip_current_pct"), (int, float)) else None,
+        )
+        if _pos_s:
+            lines.append(f"  {_pos_s}")
+    except Exception:
+        pass
+
+    # 3) 动能 ｜ 资金（合并一行，同意/不同意一眼看）
+    _msig = fusion_signals.get("momentum") if isinstance(fusion_signals.get("momentum"), dict) else {}
+    if _msig:
+        _mst = str(_msig.get("reason") or "").strip().lstrip(":：").strip() or "无信号"
+        if len(_mst) > 28:
+            _mst = _mst[:26] + "…"
+    else:
+        _mst = "暂无信号"
+
+    _vsig = fusion_signals.get("vpf") if isinstance(fusion_signals.get("vpf"), dict) else {}
+    if _vsig:
+        _vst = str(_vsig.get("reason") or _vsig.get("vp_reason") or "").strip() or "中性"
+        if len(_vst) > 32:
+            _vst = _vst[:30] + "…"
+        _veto = str(fusion.get("fund_flow_outflow_veto_msg") or "").strip()
+        if _veto:
+            _days_m = re.search(r"连续\s*(\d+)\s*日", _veto)
+            if _days_m:
+                _vst = f"{_vst} ｜ 主力连续{_days_m.group(1)}日净流出"
+            else:
+                _vst = f"{_vst} ｜ {_veto}"
+    else:
+        _vst = "暂无信号"
+    lines.append(f"  动能：{_mst} ｜ 资金：{_vst}")
+
+    # 信号分歧：结构 vs 动能
+    _chan_dir2 = int(_csig2.get("direction", 0)) if _csig2 else 0
+    _mom_dir2 = int(_msig.get("direction", 0)) if _msig else 0
+    if _chan_dir2 * _mom_dir2 < 0:
+        _c_label = "看多" if _chan_dir2 > 0 else "看空"
+        _m_label = "看多" if _mom_dir2 > 0 else "看空"
+        lines.append(f"  ⚠️ 信号分歧：结构{_c_label} vs 动能{_m_label} → 以不新开为主")
+
+    # 阶段 4：共振 / 决策 / 新开 / fusion 仪表（主叙事；融合分仅参考）
+    try:
+        from trader_shared.decision_view import format_decision_narrative_lines
+
+        for _nl in format_decision_narrative_lines(r):
+            if _nl and _nl not in lines:
+                lines.append(_nl)
+    except Exception:
+        pass
+
+    # 4) 动作：综合后的计划（不做「出手」措辞）；以 decision_view 收紧后的 execution 为准
+    _confirm_v = float(r.get("confirm") or 0)
+    _wait_bits: list[str] = []
+    _is_hold_off = any(k in execution for k in ("不买", "观望", "不追", "不新开", "空仓"))
+    if _is_hold_off:
+        _action_main = "不新开"
+        if _confirm_v > 0 and _confirm_v > current:
+            _wait_bits.append(f"等站稳 {_confirm_v:.2f}")
+        elif "不追" in execution:
+            _wait_bits.append("不追现价")
+    elif any(k in execution for k in ("试探", "买点挂", "可按买", "半仓", "增持")):
+        _action_main = execution.replace(" · ", " · ").strip() or "可试探"
+        if len(_action_main) > 22:
+            _action_main = _action_main[:20] + "…"
+    else:
+        _action_main = execution.strip() or "观察"
+        if len(_action_main) > 22:
+            _action_main = _action_main[:20] + "…"
+
+    _action_parts = [_action_main]
+    _action_parts.extend(_wait_bits)
+    if _cap_t is not None:
+        _action_parts.append(f"仓 {_cap_t}%")
+    if reason and reason not in _action_main and not any(reason in p for p in _action_parts):
+        # 短因挂尾（观望类尤其需要「为何不动」）
+        _action_parts.append(reason)
+    lines.append(f"  动作：{' · '.join(_action_parts)}")
+
+    # 5) 失效
+    _gate = r.get("mistery_gate") if isinstance(r.get("mistery_gate"), dict) else {}
+    _inv = str(_disc.get("invalidation") or _gate.get("invalidation") or "").strip()
+    if _inv:
+        if len(_inv) > 60:
+            _inv = _inv[:57] + "…"
+        lines.append(f"  失效：{_inv}")
+
+    # 6) 📐 策略闸口（P3：只展示；优先 report 预计算）
+    try:
+        from trader_shared.analysis_cards import ensure_report_analysis_cards
+        from trader_shared.strategy_match import format_gates_brief, match_strategies
+
+        _sm_in = dict(r)
+        _sm_in["action_text"] = execution
+        if isinstance(_disc, dict):
+            _sm_in["discipline"] = _disc
+        ensure_report_analysis_cards(_sm_in)
+        _sm = r.get("strategy_match") if isinstance(r.get("strategy_match"), dict) else None
+        if not _sm or _sm.get("schema_version") != "strategy_match_v1":
+            _sm = match_strategies(_sm_in)
+        _brief = format_gates_brief(_sm)
+        for _bl in _brief.splitlines():
+            if _bl.strip():
+                lines.append(f"  {_bl}" if not _bl.startswith("  ") else f"  {_bl}")
+            else:
+                lines.append(_bl)
+    except Exception:
+        lines.append("  📐 策略")
+        lines.append("  选股：匹配暂不可用")
+
+    stop_sell = key_prices.get("stop_sell") or r.get("stop")
+    buy_low = key_prices.get("buy_zone_low")
+    buy_high = key_prices.get("buy_zone_high")
+    buy_ref = key_prices.get("buy_ref")
+    short_low = key_prices.get("short_sell_low")
+    short_high = key_prices.get("short_sell_high")
+    swing_sell = key_prices.get("swing_sell")
+    far_sell = key_prices.get("far_sell")
+
+    if not buy_ref:
+        support = float(r.get("support") or 0)
+        if support > 0:
+            buy_ref = support
+            buy_low = buy_low or support
+            buy_high = buy_high or round(support * 1.005, 2)
+    if not stop_sell:
+        stop_sell = float(r.get("stop") or 0) or None
+    if not short_high and not short_low:
+        confirm = float(r.get("confirm") or 0)
+        if confirm > 0:
+            short_low = short_high = confirm
+    if not swing_sell:
+        swing_sell = float(r.get("resistance") or 0) or None
+
+    # 提前计算 RR 值（供防线标注使用）
+    _target_rr = float(r.get("take") or 0)
+    _risk_buy = max(0.0, float(buy_low or 0) - float(stop_sell or 0)) if buy_low and stop_sell else 0.0
+    _rew_buy = max(0.0, _target_rr - float(buy_low or 0)) if buy_low and _target_rr > 0 else 0.0
+    _risk_chase = max(0.0, current - float(stop_sell or 0)) if current > 0 and stop_sell else 0.0
+    _rew_chase = max(0.0, _target_rr - current) if current > 0 and _target_rr > 0 else 0.0
+    _ratio_buy = _rew_buy / _risk_buy if _risk_buy > 0 else 0.0
+    _ratio_chase = _rew_chase / _risk_chase if _risk_chase > 0 else 0.0
+    _rr_buy_verdict = "✓" if _ratio_buy >= 2.0 else ("✗" if _ratio_buy < 1.0 else "△")
+    _rr_chase_verdict = "✓" if _ratio_chase >= 2.0 else ("✗" if _ratio_chase < 1.0 else "△")
+
+    lines.append("")
+    lines.append("  关键价（短线）")
+
+    # 按价格从低到高排列，每个价位一行
+    _price_items: list[tuple[float, str, str]] = []  # (price, label, action)
+
+    # 来源标注映射（MA 类区分支撑/压力后缀）
+    _sup_src = str(r.get("support_source") or "").strip()
+    _res_src = str(r.get("resistance_source") or "").strip()
+    _SRC_BASE = {
+        "low_5d": "近5日低点", "low_20d": "近20日低点",
+        "ma5": "MA5", "ma10": "MA10", "ma20": "MA20",
+        "chip_support": "筹码密集区", "chip_resistance": "筹码密集区",
+        "high_5d": "近5日高点", "high_20d": "近20日高点",
+        "pivot_61.8": "黄金分割位",
+    }
+    _MA_KEYS = {"ma5", "ma10", "ma20"}
+    _sup_base = _SRC_BASE.get(_sup_src.lower(), "")
+    _res_base = _SRC_BASE.get(_res_src.lower(), "")
+    
+    if _sup_src.lower() == "chip_support" and "chip_support_lower" in r and "chip_support_upper" in r:
+        _sup_lower = r.get("chip_support_lower")
+        _sup_upper = r.get("chip_support_upper")
+        if _sup_lower is not None and _sup_upper is not None:
+            _sup_label = f"筹码支撑带 {_sup_lower:.2f}-{_sup_upper:.2f}"
+        else:
+            _sup_label = f"{_sup_base}支撑" if _sup_src.lower() in _MA_KEYS and _sup_base else _sup_base
+    else:
+        _sup_label = f"{_sup_base}支撑" if _sup_src.lower() in _MA_KEYS and _sup_base else _sup_base
+
+    if _res_src.lower() == "chip_resistance" and "chip_resistance_lower" in r and "chip_resistance_upper" in r:
+        _res_lower = r.get("chip_resistance_lower")
+        _res_upper = r.get("chip_resistance_upper")
+        if _res_lower is not None and _res_upper is not None:
+            _res_label = f"筹码阻力带 {_res_lower:.2f}-{_res_upper:.2f}"
+        else:
+            _res_label = f"{_res_base}压力" if _res_src.lower() in _MA_KEYS and _res_base else _res_base
+    else:
+        _res_label = f"{_res_base}压力" if _res_src.lower() in _MA_KEYS and _res_base else _res_base
+
+    # 卖点区目标百分比
+    _sell_tgt_pct = ""
+    if current > 0 and short_high and float(short_high) > current:
+        _sell_tgt_pct = f"，目标+{(float(short_high) - current) / current * 100:.1f}%"
+
+    if stop_sell:
+        _stop_annotation = "破就走"
+        if _risk_chase > 0:
+            _stop_annotation = f"跌破亏 {_risk_chase:.1f}"
+        _price_items.append((float(stop_sell), "止损", _stop_annotation))
+
+    if buy_low and buy_high:
+        _src_suffix = f" ← {_sup_label}" if _sup_label else ""
+        _allow_entry = bool(_disc.get("allow_new_entry", True))
+        if not _allow_entry:
+            _buy_annotation = "等确认"
+        else:
+            _buy_annotation = "回踩买"
+            if _risk_buy > 0 and _rew_buy > 0:
+                _buy_annotation += f"，亏{_risk_buy:.1f} 赚{_rew_buy:.1f} → 盈亏比 {_ratio_buy:.1f}:1 {_rr_buy_verdict}"
+        _price_items.append((float(buy_low) - 0.001, f"低吸区 {float(buy_low):.2f}-{float(buy_high):.2f}", f"{_buy_annotation}{_src_suffix}"))
+    elif buy_ref:
+        _src_suffix = f" ← {_sup_label}" if _sup_label else ""
+        _price_items.append((float(buy_ref), "买点区", f"分批建仓{_src_suffix}"))
+
+    # MA5 支撑（如果在止损和现价之间）
+    _ma5 = _ma_float("ma5")
+    if _ma5 and stop_sell and _ma5 > float(stop_sell) and _ma5 < current:
+        _price_items.append((_ma5, "MA5 支撑", "加仓试探"))
+
+    if current > 0:
+        _price_items.append((current, "现价", "持有，不追"))
+
+    # VWAP 支撑/压力
+    _vwap = r.get("vwap")
+    _vwap_lvl = r.get("vwap_level")
+    try:
+        _vwap_f = float(_vwap) if _vwap is not None else None
+    except (TypeError, ValueError):
+        _vwap_f = None
+    if _vwap_f is not None:
+        _vwap_act = "日内均线支撑" if current >= _vwap_f else "日内均线压力"
+        _price_items.append((_vwap_f, f"VWAP（{_vwap_lvl or '--'}）", _vwap_act))
+
+    # MA20 压力（如果在现价和卖点区之间）
+    _ma20 = _ma_float("ma20")
+    if _ma20 and _ma20 > current:
+        _price_items.append((_ma20, "MA20 压力", "靠近只减不加"))
+
+    if short_low and short_high:
+        _res_suffix = f" ← {_res_label}" if _res_label else ""
+        _allow_entry = bool(_disc.get("allow_new_entry", True))
+        if not _allow_entry:
+            _sell_annotation = "等确认"
+        else:
+            _sell_annotation = "分批出"
+            if _rew_chase > 0:
+                _sell_annotation += f"，赚 {_rew_chase:.1f}"
+            if _sell_tgt_pct:
+                _sell_annotation += _sell_tgt_pct
+        if float(short_low) == float(short_high):
+            _price_items.append((float(short_low), "止盈区", f"{_sell_annotation}{_res_suffix}"))
+        else:
+            _price_items.append((float(short_low) - 0.001, f"止盈区 {float(short_low):.2f}-{float(short_high):.2f}", f"{_sell_annotation}{_res_suffix}"))
+
+    # 止盈（如果和卖点区不同）
+    _take = r.get("take")
+    try:
+        _take_f = float(_take) if _take is not None else None
+    except (TypeError, ValueError):
+        _take_f = None
+    if _take_f and short_high and abs(_take_f - float(short_high)) / max(float(short_high), 1) > 0.01:
+        _price_items.append((_take_f, "前高/止盈", "全部止盈"))
+
+    # 按价格排序输出
+    _price_items.sort(key=lambda x: x[0])
+    for price, label, action in _price_items:
+        if "现价" in label:
+            lines.append(f"    🌟 {current:.2f} 现价（{action}）")
+        else:
+            lines.append(f"    {price:.2f} {label}（{action}）")
+
+    lines.append("")
+
+    # ── T0（日内算法：低吸到高抛的日内差价 + 盈亏比）──
+    _t0_has_pos = bool(r.get("has_position"))
+    _t0_no_new = any(k in execution for k in ("不买", "不追", "不新开", "观望"))
+    if not _t0_has_pos and _t0_no_new:
+        _bl = float(buy_low or 0)
+        _bh = float(buy_high or 0)
+        _sl = float(short_low or 0)
+        if _bl > 0 and _sl > 0:
+            _tm = round((_bh + _sl) / 2, 2)
+            _tr = max(0.0, _bl - float(stop_sell or 0))
+            _tw = max(0.0, _sl - _bl)
+            _tr_ratio = _tw / _tr if _tr > 0 else 0
+            _tv = "✓" if _tr_ratio >= 2.0 else ("✗" if _tr_ratio < 1.0 else "△")
+            lines.append(f"  日内 T0：{_bl:.2f} 低吸 ｜ {_tm:.2f} 观察 ｜ {_sl:.2f} 高抛（差价{_tw:.2f}元，盈亏比{_tr_ratio:.1f}:1 {_tv}）")
+        else:
+            lines.append("  T0：无底仓，不启用（与出手一致，不新开）")
+    else:
+        t0_ref = r.get("t0_ref") or {}
+        _t0_buy = float(t0_ref.get("low_buy") or buy_low or r.get("support") or 0)
+        _t0_sell = float(t0_ref.get("high_sell") or swing_sell or short_high or confirm or 0)
+        if _t0_buy > 0 and _t0_sell > 0:
+            _tm = round((_t0_buy + _t0_sell) / 2, 2)
+            _tr = max(0.0, _t0_buy - float(stop_sell or 0))
+            _tw = max(0.0, _t0_sell - _t0_buy)
+            _tr_ratio = _tw / _tr if _tr > 0 else 0
+            _tv = "✓" if _tr_ratio >= 2.0 else ("✗" if _tr_ratio < 1.0 else "△")
+            lines.append(f"  日内 T0：{_t0_buy:.2f} 低吸 ｜ {_tm:.2f} 观察 ｜ {_t0_sell:.2f} 高抛（差价{_tw:.2f}元，盈亏比{_tr_ratio:.1f}:1 {_tv}）")
+        elif _t0_has_pos:
+            _tp = []
+            if _t0_buy > 0:
+                _tp.append(f"低吸参考 {_t0_buy:.2f}")
+            if _t0_sell > 0:
+                _tp.append(f"高抛参考 {_t0_sell:.2f}")
+            lines.append(f"  T0：{' ｜ '.join(_tp)}" if _tp else "T0：有底仓，按关键价做短线")
+        elif _t0_buy > 0:
+            lines.append(f"  T0：仅观察；计划买点约 {_t0_buy:.2f}（未放行不下手）")
+        else:
+            lines.append("  T0：观察关键价即可")
+
+    # ── 🎯 组合策略共振（combo）已暂停渲染：箱体先做独立模块，暂不进报告 ──
+
+    # 「说明」行已删除（与出手行语义重复）
+
+    # ── 亮点 / 风险（禁止「阶段…中线故事」挂羊头）──
+    support = float(r.get("support") or 0)
+    confirm = float(r.get("confirm") or 0)
+    key_levels = r.get("key_levels") or {}
+    _mid_resist = float(
+        mid_key_prices.get("resist")
+        or key_prices.get("swing_sell")
+        or key_levels.get("mid_resist")
+        or 0
+    )
+    stop_v = float(stop_sell or 0)
+    life_v = float(mid_key_prices.get("life_line") or 0)
+
+    lines.append("")
+    # ── 亮点 / 风险（具体数据驱动，禁模板空话）──
+    _chan_sig = str((fusion_signals.get("chan") or {}).get("reason") or "")
+    _ma20_v = _ma_float("ma20")
+    _ma5_v = _ma_float("ma5")
+
+    # 亮点：缠论信号 + 阶段 + MA5 上方 + 题材催化
+    _hl_parts = []
+    if _chan_sig and _chan_sig != "无信号":
+        _chan_clean = _chan_sig.replace("缠论", "").strip() or _chan_sig
+        _hl_parts.append(f"缠论{_chan_clean}")
+    if stage_line and any(k in stage_line for k in ("蓄势", "主升")):
+        _hl_parts.append(f"中线阶段{stage_line}")
+    if _ma5_v and current > 0 and current > _ma5_v:
+        _hl_parts.append("现价在MA5上方")
+    
+    _ext_sent = r.get("extend_sentiment") or {}
+    _theme = _ext_sent.get("theme_harden") or {}
+    if isinstance(_theme, dict) and _theme.get("reason"):
+        _hl_parts.append(f"题材催化：{_theme.get('reason')}")
+
+    if _hl_parts:
+        lines.append(f"✅ 亮点：{'；'.join(_hl_parts)}")
+    elif "可跟踪" in mid or "未坏" in mid:
+        if _sp is not None and _sp <= 0:
+            lines.append(f"✅ 亮点：中线结构可跟踪，等纪律放行" + (f"；阶段 {stage_line}" if stage_line else ""))
+        else:
+            lines.append(f"✅ 亮点：中线看法仍可跟踪" + (f"；阶段 {stage_line}" if stage_line else ""))
+    else:
+        lines.append(f"✅ 亮点：阶段 {stage_line or '未知'}，等短线信号" if stage_line else "✅ 亮点：等短线买点确认")
+
+    # 风险：止损价 + 短线 MA20 压力（不用中线远压力） + 未来待解禁
+    _risk_parts = []
+    if "不追" in execution or "不买" in execution:
+        _risk_parts.append("现价不宜追")
+        if stop_v > 0:
+            _risk_parts.append(f"止损看 {stop_v:.2f}")
+        if _ma20_v and _ma20_v > current > 0:
+            _risk_parts.append(f"上方MA20({_ma20_v:.2f})压力")
+    elif stage_line and "派发" in stage_line:
+        _risk_parts.append("派发阶段注意破位" + (f"，跌破 {stop_v:.2f} 需离场" if stop_v else ""))
+    elif stage_line and "衰退" in stage_line:
+        _risk_parts.append("衰退阶段，不宜介入")
+    elif life_v > 0 and current > 0 and current < life_v * 1.02:
+        _risk_parts.append(f"靠近/跌破中线生命线 {life_v:.2f}")
+    else:
+        _risk_parts.append("未站稳前不提前加仓")
+
+    _unlocks = _ext_sent.get("unlocks") or []
+    if isinstance(_unlocks, list) and _unlocks:
+        _unlock_parts = []
+        for _u in _unlocks:
+            _u_date = _u.get("date", "")
+            _u_ratio = _u.get("ratio", 0.0)
+            _u_amt = _u.get("amount_wan", 0.0)
+            _unlock_parts.append(f"{_u_date}解禁{_u_ratio:.2f}%（{_u_amt:.2f}万股）")
+        if _unlock_parts:
+            _risk_parts.append(f"待解禁：{' ｜ '.join(_unlock_parts[:3])}")
+
+    lines.append(f"⚠️ 风险：{'；'.join(_risk_parts)}")
+
+    # ── 📌 明日策略（替代"本周只做"）──
+    _buy_lo_val = float(buy_low or 0)
+    _buy_hi_val = float(buy_high or 0)
+    _sell_lo_val = float(short_low or 0)
+    _sell_hi_val = float(short_high or 0)
+    if _sell_lo_val > 0 and _buy_lo_val > 0:
+        _strategy_parts = []
+        if _sell_hi_val > 0:
+            _strategy_parts.append(f"若高开到 {_sell_lo_val:.2f} 附近减仓")
+        if _buy_lo_val > 0:
+            _strategy_parts.append(f"若低开到 {_buy_lo_val:.2f} 附近观察承接")
+        if _strategy_parts:
+            lines.append(f"📌 明日策略：{'；'.join(_strategy_parts)}")
+    elif this_week:
+        lines.append(f"📌 本周只做：{this_week}")
+
+    pool_count = r.get("pool_count")
+    pool_cap = r.get("pool_cap")
+    if pool_count is not None and pool_cap is not None:
+        lines.append(f"当前池 {pool_count}/{pool_cap}，回复 1 入池")
+
+    return "\n".join(lines)
+
+

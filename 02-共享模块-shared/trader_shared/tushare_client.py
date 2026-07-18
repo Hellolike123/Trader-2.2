@@ -21,6 +21,7 @@ import socket
 import threading
 import time
 import warnings
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -257,17 +258,9 @@ class TushareClient:
             import tushare as ts
             from tushare.stock import cons as ct
             ct.verify_token_url = self._realtime_url
-            # 用锁保证 NO_PROXY 设/改/还原原子化，并发/测试安全
-            with _no_proxy_lock:
-                _old_no_proxy = os.environ.get("NO_PROXY")
-                try:
-                    os.environ["NO_PROXY"] = "*"
-                    df = ts.realtime_quote(ts_code=ts_codes)
-                finally:
-                    if _old_no_proxy is None:
-                        os.environ.pop("NO_PROXY", None)
-                    else:
-                        os.environ["NO_PROXY"] = _old_no_proxy
+            # 持锁临时 NO_PROXY=*，finally 还原（见 _no_proxy_star）
+            with _no_proxy_star():
+                df = ts.realtime_quote(ts_code=ts_codes)
             if df is not None and len(df) > 0:
                 return df.to_dict(orient="records")
             return []
@@ -329,7 +322,23 @@ _client: TushareClient | None = None
 
 # NO_PROXY 全局切换的并发锁：将「设代理→调用→还原」包成原子区，
 # 避免并发 realtime_quote 时 os.environ["NO_PROXY"] 相互踩踏。
+# 说明：tushare SDK 无独立 proxy 参数时只能临时改 env；锁 + finally 还原已防泄漏。
 _no_proxy_lock = threading.Lock()
+
+
+@contextmanager
+def _no_proxy_star():
+    """临时 NO_PROXY=*（持锁）；退出时还原，不残留。"""
+    with _no_proxy_lock:
+        old = os.environ.get("NO_PROXY")
+        try:
+            os.environ["NO_PROXY"] = "*"
+            yield
+        finally:
+            if old is None:
+                os.environ.pop("NO_PROXY", None)
+            else:
+                os.environ["NO_PROXY"] = old
 
 
 def get_client() -> TushareClient:

@@ -386,13 +386,17 @@ def load_calibrated_params() -> Dict[str, Any]:
 
 def main() -> None:
     """CLI 入口：盘后/周末离线执行。"""
-    print("=" * 60)
-    print("Trader 2.3 — 嵌套分层自校准引擎")
-    print("=" * 60)
+    import logging
+    log = logging.getLogger("trader_shared.self_calibration")
+    if not log.handlers:
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+    log.info("=" * 60)
+    log.info("Trader 2.3 — 嵌套分层自校准引擎")
+    log.info("=" * 60)
     best = calibrate(n_trials=200, verbose=True)
     save_params(best)
-    print("=" * 60)
-    print("校准完成，交易系统将根据当前 HMM 大势自适应采用对应参数。")
+    log.info("=" * 60)
+    log.info("校准完成，交易系统将根据当前 HMM 大势自适应采用对应参数。")
 
 
 if __name__ == "__main__":
