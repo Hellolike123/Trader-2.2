@@ -182,16 +182,11 @@ python3 01-功能包-packages/trader/scripts/final_report.py --target 002050 --o
 
 ---
 
-## 9. 与桌面旧稿
+## 9. 文档位置
 
-原桌面讨论稿《Trader策略包设计》《思路总结》内容已吸收进：
-
-- `strategy-layered-architecture.md`  
-- `strategy-pack.md`  
-- 本文  
-- （可选）`strategy-menu.md`  
-
-**以仓库 `docs/designs/` 为准。**
+- 总入口：[`docs/README.md`](../README.md)  
+- 架构 / 包契约 / 本文 / 菜单：均在 `docs/designs/`  
+- **以仓库为准**，勿以桌面草稿为契约。
 
 ---
 

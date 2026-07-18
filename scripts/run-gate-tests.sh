@@ -3,7 +3,7 @@
 # 跑离线、无凭证、确定性的核心回归集。
 # 被 scripts/git-hooks/pre-push 调用，也可被 CI 工作流直接调用。
 #
-# 设计取舍（详见 docs/ci-gate.md）：
+# 设计取舍（详见 docs/architecture/ci-gate.md）：
 #   - 不跑全量 80+ 测试：其中大量依赖网络/凭证（tushare / tdx / 腾讯），
 #     在 CI 与离线环境会红或超时（历史上有沙箱 SIGKILL 137 记录）。
 #   - 门禁守的是"行为不变"（等价性闸门），不是"行为正确"——

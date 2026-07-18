@@ -154,9 +154,12 @@ Trader3.0/
 │
 ├── docs/                            ← 设计文档
 │   ├── ADR-001/002/003-*.md         ← 架构决策记录
-│   ├── designs/                     ← P0/P1/P3 设计文档
-│   ├── ci-gate.md                   ← CI 门禁说明
-│   └── output-redux-plan.md         ← 输出模板规范
+│   ├── README.md                    ← 文档总入口
+│   ├── designs/                     ← 现行设计（含策略分层）
+│   ├── architecture/                ← ADR + ci-gate
+│   ├── plans/{active,done}/         ← 实施计划
+│   ├── reviews/                     ← 审查归档
+│   └── guide/                       ← 用户手册等
 │
 └── 02-共享模块-shared/tests/        ← 测试（70 个文件）
     ├── golden/                      ← Golden 基线
@@ -248,7 +251,8 @@ Trader3.0/
 ### Step 1: 阅读文档
 ```
 必读：AGENT.md（本文）→ ARCHITECTURE.md → BUSINESS.md
-按需：docs/designs/ 下的具体设计文档
+文档导航：docs/README.md
+按需：docs/designs/（策略分层见 strategy-roadmap-and-tests.md）
 ```
 
 ### Step 2: 理解需求
