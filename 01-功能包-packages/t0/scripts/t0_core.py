@@ -664,7 +664,7 @@ def _build_resonance_section(plan: dict[str, Any]) -> list[str]:
         wyck_status = "✅ 卖"
     else:
         wyck_status = "❌ 未亮"
-    wyck_reason = wyck_info.get("reason", "无信号")
+    wyck_reason = wyck_info.get("reason") or "无信号"
     lines.append(f"  威科夫 {wyck_status}（{wyck_reason}）")
 
     # ── 动量详情 ──
