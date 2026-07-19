@@ -79,7 +79,7 @@ CHANLUN_MIN_BARS_PER_STROKE: int = 5
 CHANLUN_MIN_STROKES_PER_SEGMENT: int = 3   # 线段最少笔数
 # 周线回溯根数：中线缠论成笔/成段需要足够历史。默认 80 周(~1.5年) 在暴涨暴跌票上
 # 常只成 0～1 笔 → 报告误显示「笔数不足」。260 周≈5 年，与周线 conf 门槛匹配。
-WEEKLY_LOOKBACK_BARS: int = 40
+WEEKLY_LOOKBACK_BARS: int = 260
 
 # ---- Chan structure_confidence 门槛（段数只调 conf，不改主状态名）----
 # 日线短线：趋势/盘整证据强弱

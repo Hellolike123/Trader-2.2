@@ -71,7 +71,7 @@ def build_plan(target: str) -> dict[str, Any]:
     with ThreadPoolExecutor(max_workers=5) as ex:
         f_quote = ex.submit(provider.fetch_quote, sec)
         f_daily = ex.submit(provider.fetch_qfq_daily, sec, days=LOOKBACK_DAYS)
-        f_5m = ex.submit(provider.fetch_5m, sec, datalen=240)
+        f_5m = ex.submit(provider.fetch_5m, sec, datalen=800)
         f_15m = ex.submit(provider.fetch_15m, sec, datalen=60)
         f_30m = ex.submit(provider.fetch_30m, sec, datalen=60)
         # quote/daily 是必需的，立即取（失败抛异常）
@@ -133,9 +133,13 @@ def build_plan(target: str) -> dict[str, Any]:
     elif isinstance(report_data.get("structure_result"), dict):
         structure_result = report_data["structure_result"]
 
-    # 5m 缠论已关闭：5m 噪音太大，缠论只在日线/周线上跑
-    # T0 执行层只用威科夫 + 动量
-    report_data["chan_5m"] = {}
+    # 5 分钟级实时缠论（T0 主路径）
+    try:
+        from trader_shared.realtime_chan import get_realtime_chan_5m
+        rc5 = get_realtime_chan_5m(target, bars_5m, current_price=float(current))
+        report_data["chan_5m"] = rc5.get("result") or {}
+    except Exception:
+        report_data["chan_5m"] = {}
 
     model = build_price_point_model(report_data, structure_result=structure_result)
     buy_display_status = side_status(model["buy"])
@@ -195,8 +199,7 @@ def build_plan(target: str) -> dict[str, Any]:
         wyckoff_result=wyck_result,
     )
 
-    # 5m 缠论已关闭
-    result["chan_5m"] = {}
+    result["chan_5m"] = report_data.get("chan_5m") or {}
 
     # 筹码搬家监控
     try:
