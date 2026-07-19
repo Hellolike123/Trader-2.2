@@ -360,24 +360,15 @@ def render_markdown(plan: dict[str, Any]) -> str:
     _mzones = (plan.get("model") or {}).get("zones") or {}
     _res = plan.get("resonance") or {}
 
-    # 低吸价位：价区 + 缠论 + 威科夫
-    if buy_state in ("",):
-        trigger_lines.append("低吸：暂无")
-    elif buy_state == "数据不足":
-        _parts = []
-        _zone_buy = _mzones.get("buy_zone", {}).get("main_support")
-        if _zone_buy:
-            _parts.append(f"价区{_zone_buy:.2f}")
-        _chan_bp = (_res.get("lights") or {}).get("chan", {}).get("buy_price")
-        if _chan_bp:
-            _parts.append(f"缠论{_chan_bp:.2f}")
-        _wyck_bp = (_res.get("lights") or {}).get("wyckoff", {}).get("buy_price")
-        if _wyck_bp:
-            _parts.append(f"威科夫{_wyck_bp:.2f}")
-        _ref_str = "｜".join(_parts) if _parts else "数据不足"
-        trigger_lines.append(f"低吸：{_ref_str}")
-    elif buy_state == "可执行":
-        # 已触发：显示执行价 + 可接受价范围
+    # 低吸价位
+    _cur = numeric_or_none(plan.get("current_price")) or 0
+    _zone_buy = _mzones.get("buy_zone", {}).get("main_support")
+    _chan_bp_raw = (_res.get("lights") or {}).get("chan", {}).get("buy_price")
+    _chan_bp = None
+    if _chan_bp_raw and _cur and abs(_chan_bp_raw - _cur) / _cur <= 0.2:
+        _chan_bp = _chan_bp_raw
+    _wyck_bp = (_res.get("lights") or {}).get("wyckoff", {}).get("buy_price")
+    if buy_state == "可执行":
         _exec = numeric_or_none(buy.get("execution_price"))
         _acc = numeric_or_none(buy.get("acceptable_price"))
         if _exec and _acc:
@@ -385,26 +376,24 @@ def render_markdown(plan: dict[str, Any]) -> str:
         else:
             trigger_lines.append(f"低吸：{buy_state}，{buy_obs}")
     else:
-        trigger_lines.append(f"低吸：{buy_state}，{buy_obs}")
-
-    # 高抛价位：价区 + 缠论 + 威科夫
-    if sell_state in ("",):
-        trigger_lines.append("高抛：暂无")
-    elif sell_state == "数据不足":
         _parts = []
-        _zone_sell = _mzones.get("sell_zone", {}).get("main_resistance")
-        if _zone_sell:
-            _parts.append(f"价区{_zone_sell:.2f}")
-        _chan_sp = (_res.get("lights") or {}).get("chan", {}).get("sell_price")
-        if _chan_sp:
-            _parts.append(f"缠论{_chan_sp:.2f}")
-        _wyck_sp = (_res.get("lights") or {}).get("wyckoff", {}).get("sell_price")
-        if _wyck_sp:
-            _parts.append(f"威科夫{_wyck_sp:.2f}")
-        _ref_str = "｜".join(_parts) if _parts else "数据不足"
-        trigger_lines.append(f"高抛：{_ref_str}")
-    elif sell_state == "可执行":
-        # 已触发：显示执行价 + 可接受价范围
+        if _zone_buy:
+            _parts.append(f"价区{_zone_buy:.2f}")
+        if _chan_bp:
+            _parts.append(f"缠论{_chan_bp:.2f}")
+        if _wyck_bp:
+            _parts.append(f"威科夫{_wyck_bp:.2f}")
+        _ref_str = "｜".join(_parts) if _parts else "暂无"
+        trigger_lines.append(f"低吸：{_ref_str}")
+
+    # 高抛价位
+    _zone_sell = _mzones.get("sell_zone", {}).get("main_resistance")
+    _chan_sp_raw = (_res.get("lights") or {}).get("chan", {}).get("sell_price")
+    _chan_sp = None
+    if _chan_sp_raw and _cur and abs(_chan_sp_raw - _cur) / _cur <= 0.2:
+        _chan_sp = _chan_sp_raw
+    _wyck_sp = (_res.get("lights") or {}).get("wyckoff", {}).get("sell_price")
+    if sell_state == "可执行":
         _exec = numeric_or_none(sell.get("execution_price"))
         _acc = numeric_or_none(sell.get("acceptable_price"))
         if _exec and _acc:
@@ -412,7 +401,15 @@ def render_markdown(plan: dict[str, Any]) -> str:
         else:
             trigger_lines.append(f"高抛：{sell_state}，{sell_obs}")
     else:
-        trigger_lines.append(f"高抛：{sell_state}，{sell_obs}")
+        _parts = []
+        if _zone_sell:
+            _parts.append(f"价区{_zone_sell:.2f}")
+        if _chan_sp:
+            _parts.append(f"缠论{_chan_sp:.2f}")
+        if _wyck_sp:
+            _parts.append(f"威科夫{_wyck_sp:.2f}")
+        _ref_str = "｜".join(_parts) if _parts else "暂无"
+        trigger_lines.append(f"高抛：{_ref_str}")
 
     exit_plan = plan.get("exit_plan") or {}
     exit_items = exit_plan.get("exit_plan") or []
@@ -606,32 +603,30 @@ def _build_resonance_section(plan: dict[str, Any]) -> list[str]:
     c15_sell_pts = chan15.get("sell_points") or []
     c15_buy_price = None
     if c15_buy_pts:
-        strokes = chan15.get("strokes") or []
-        down_s = [s for s in strokes if s.get("direction") == "down"]
-        if down_s:
-            c15_buy_price = down_s[-1].get("end_price")
+        # 用买点自带的 price 字段（更准确）
+        c15_buy_price = c15_buy_pts[-1].get("price")
+        # 如果价格远离现价（>20%），不用
+        if c15_buy_price and plan.get("current_price") and abs(c15_buy_price - plan.get("current_price")) / plan.get("current_price") > 0.2:
+            c15_buy_price = None
     c15_sell_price = None
     if c15_sell_pts:
-        strokes = chan15.get("strokes") or []
-        up_s = [s for s in strokes if s.get("direction") == "up"]
-        if up_s:
-            c15_sell_price = up_s[-1].get("end_price")
+        c15_sell_price = c15_sell_pts[-1].get("price")
+        if c15_sell_price and plan.get("current_price") and abs(c15_sell_price - plan.get("current_price")) / plan.get("current_price") > 0.2:
+            c15_sell_price = None
 
     # 5m 提供精确入场价
     c5_buy_pts = chan5.get("buy_points") or []
     c5_sell_pts = chan5.get("sell_points") or []
     c5_buy_price = None
     if c5_buy_pts:
-        strokes = chan5.get("strokes") or []
-        down_s = [s for s in strokes if s.get("direction") == "down"]
-        if down_s:
-            c5_buy_price = down_s[-1].get("end_price")
+        c5_buy_price = c5_buy_pts[-1].get("price")
+        if c5_buy_price and plan.get("current_price") and abs(c5_buy_price - plan.get("current_price")) / plan.get("current_price") > 0.2:
+            c5_buy_price = None
     c5_sell_price = None
     if c5_sell_pts:
-        strokes = chan5.get("strokes") or []
-        up_s = [s for s in strokes if s.get("direction") == "up"]
-        if up_s:
-            c5_sell_price = up_s[-1].get("end_price")
+        c5_sell_price = c5_sell_pts[-1].get("price")
+        if c5_sell_price and plan.get("current_price") and abs(c5_sell_price - plan.get("current_price")) / plan.get("current_price") > 0.2:
+            c5_sell_price = None
 
     # 合并方向：15m 决定，5m 补充
     if c15_buy_pts:
