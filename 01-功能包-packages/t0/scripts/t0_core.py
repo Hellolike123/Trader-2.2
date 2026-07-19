@@ -597,88 +597,69 @@ def _build_resonance_section(plan: dict[str, Any]) -> list[str]:
     sell_count = sum(1 for v in lights.values() if v.get("sell"))
     max_count = max(buy_count, sell_count)
 
-    # ── 缠论详情 ──
-    chan = plan.get("chan_5m") or {}
-    chan_info = lights.get("chan", {})
-    if chan_info.get("buy"):
-        chan_status = "✅ 买"
-    elif chan_info.get("sell"):
-        chan_status = "✅ 卖"
-    elif not chan_info.get("ok"):
-        chan_status = "❓ 无数据"
-    else:
-        chan_status = "❌ 未亮"
-    # 缠论结构详情
-    chan_parts = []
-    structure = chan.get("structure_type") or ""
-    trend = chan.get("trend_label") or ""
-    if structure and structure != "无结构":
-        chan_parts.append(f"结构{structure}")
-    elif trend and trend != "数据不足":
-        chan_parts.append(trend)
-    # 中枢
-    zs_count = chan.get("zones_count") or chan.get("pivot_count") or 0
-    if zs_count:
-        chan_parts.append(f"{zs_count}中枢")
-    # 线段
-    seg_count = chan.get("segments_count") or 0
-    if seg_count:
-        chan_parts.append(f"{seg_count}段")
-    # 笔
-    stroke_count = chan.get("strokes_count") or len(chan.get("strokes") or [])
-    if stroke_count:
-        chan_parts.append(f"{stroke_count}笔")
-    # 买卖点
-    buy_pts = [bp.get("type", "") for bp in (chan.get("buy_points") or [])]
-    sell_pts = [sp.get("type", "") for sp in (chan.get("sell_points") or [])]
-    if buy_pts:
-        chan_parts.append(f"买:{'+'.join(buy_pts)}")
-    if sell_pts:
-        chan_parts.append(f"卖:{'+'.join(sell_pts)}")
-    # 背离
-    div = chan.get("divergence") or {}
-    if div.get("bottom_divergence"):
-        chan_parts.append("底背离")
-    if div.get("top_divergence"):
-        chan_parts.append("顶背离")
-
-    chan_detail = " · ".join(chan_parts) if chan_parts else chan_info.get("reason", "无信号")
-    lines = ["🔗 三重共振"]
-    lines.append(f"  缠论(5m) {chan_status}（{chan_detail}）")
-
-    # 15m 缠论（日线级别结构）
+    # ── 缠论合并（15m 定方向 + 5m 定时机）──
     chan15 = plan.get("chan_15m") or {}
-    if chan15:
-        c15_parts = []
-        c15_struct = chan15.get("structure_type") or ""
-        c15_trend = chan15.get("trend_label") or ""
-        if c15_struct and c15_struct != "无结构":
-            c15_parts.append(f"结构{c15_struct}")
-        elif c15_trend and c15_trend != "数据不足":
-            c15_parts.append(c15_trend)
-        c15_zs = chan15.get("zones_count") or chan15.get("pivot_count") or 0
-        if c15_zs:
-            c15_parts.append(f"{c15_zs}中枢")
-        c15_strokes = chan15.get("strokes_count") or len(chan15.get("strokes") or [])
-        if c15_strokes:
-            c15_parts.append(f"{c15_strokes}笔")
-        c15_buy = [bp.get("type", "") for bp in (chan15.get("buy_points") or [])]
-        c15_sell = [sp.get("type", "") for sp in (chan15.get("sell_points") or [])]
-        if c15_buy:
-            c15_parts.append(f"买:{'+'.join(c15_buy)}")
-        if c15_sell:
-            c15_parts.append(f"卖:{'+'.join(c15_sell)}")
-        c15_detail = " · ".join(c15_parts) if c15_parts else "无信号"
-        # 15m 买卖点状态
-        c15_buy_pts = chan15.get("buy_points") or []
-        c15_sell_pts = chan15.get("sell_points") or []
-        if c15_buy_pts:
-            c15_status = "✅ 买"
-        elif c15_sell_pts:
-            c15_status = "✅ 卖"
-        else:
-            c15_status = "❌ 未亮"
-        lines.append(f"  缠论(15m) {c15_status}（{c15_detail}）")
+    chan5 = plan.get("chan_5m") or {}
+
+    # 15m 决定方向
+    c15_buy_pts = chan15.get("buy_points") or []
+    c15_sell_pts = chan15.get("sell_points") or []
+    c15_buy_price = None
+    if c15_buy_pts:
+        strokes = chan15.get("strokes") or []
+        down_s = [s for s in strokes if s.get("direction") == "down"]
+        if down_s:
+            c15_buy_price = down_s[-1].get("end_price")
+    c15_sell_price = None
+    if c15_sell_pts:
+        strokes = chan15.get("strokes") or []
+        up_s = [s for s in strokes if s.get("direction") == "up"]
+        if up_s:
+            c15_sell_price = up_s[-1].get("end_price")
+
+    # 5m 提供精确入场价
+    c5_buy_pts = chan5.get("buy_points") or []
+    c5_sell_pts = chan5.get("sell_points") or []
+    c5_buy_price = None
+    if c5_buy_pts:
+        strokes = chan5.get("strokes") or []
+        down_s = [s for s in strokes if s.get("direction") == "down"]
+        if down_s:
+            c5_buy_price = down_s[-1].get("end_price")
+    c5_sell_price = None
+    if c5_sell_pts:
+        strokes = chan5.get("strokes") or []
+        up_s = [s for s in strokes if s.get("direction") == "up"]
+        if up_s:
+            c5_sell_price = up_s[-1].get("end_price")
+
+    # 合并方向：15m 决定，5m 补充
+    if c15_buy_pts:
+        chan_dir = "买"
+        chan_price = c15_buy_price or c5_buy_price
+        chan_detail = f"买:{'+'.join(bp.get('type','') for bp in c15_buy_pts)}"
+    elif c15_sell_pts:
+        chan_dir = "卖"
+        chan_price = c15_sell_price or c5_sell_price
+        chan_detail = f"卖:{'+'.join(sp.get('type','') for sp in c15_sell_pts)}"
+    else:
+        chan_dir = ""
+        chan_price = None
+        chan_detail = "无信号"
+
+    # 结构信息（取 15m）
+    c15_struct = chan15.get("structure_type") or ""
+    c15_trend = chan15.get("trend_label") or ""
+    c15_zs = chan15.get("zones_count") or chan15.get("pivot_count") or 0
+    c15_strokes_n = chan15.get("strokes_count") or len(chan15.get("strokes") or [])
+
+    lines = ["🔗 三重共振"]
+    # 缠论一行：方向 + 结构 + 价格
+    chan_price_str = f" 价格{chan_price:.2f}" if chan_price else ""
+    if chan_dir:
+        lines.append(f"  缠论 {'✅ ' + chan_dir}（{chan_detail}{chan_price_str}）")
+    else:
+        lines.append(f"  缠论 ❌ 未亮（{c15_struct or c15_trend or '无数据'}）")
 
     # ── 威科夫详情 ──
     wyck_info = lights.get("wyckoff", {})
