@@ -411,16 +411,23 @@ def render_markdown(plan: dict[str, Any]) -> str:
         _ref_str = "｜".join(_parts) if _parts else "暂无"
         trigger_lines.append(f"高抛：{_ref_str}")
 
+    # 止盈价：拆分低吸止盈（高于现价）和高抛止盈（低于现价）
     exit_plan = plan.get("exit_plan") or {}
     exit_items = exit_plan.get("exit_plan") or []
-    if exit_items and exit_plan.get("risk_r", 0) > 0:
-        exit_parts = []
+    if exit_items and exit_plan.get("risk_r", 0) > 0 and _cur:
+        buy_tp = []  # 低吸止盈（高于现价）
+        sell_tp = []  # 高抛止盈（低于现价）
         for item in exit_items:
             p = item.get("price")
             if p is not None:
-                exit_parts.append(f"{p:.2f}")
-        if exit_parts:
-            trigger_lines.append(f"止盈：{'｜'.join(exit_parts)}")
+                if p > _cur:
+                    buy_tp.append(f"{p:.2f}")
+                else:
+                    sell_tp.append(f"{p:.2f}")
+        if buy_tp:
+            trigger_lines.append(f"低吸止盈：{'｜'.join(buy_tp)}")
+        if sell_tp:
+            trigger_lines.append(f"高抛止盈：{'｜'.join(sell_tp)}")
 
     atr_info = plan.get("atr_info") or {}
     level_advice = atr_info.get("level_advice")
