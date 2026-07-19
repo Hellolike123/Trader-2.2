@@ -71,7 +71,7 @@ def build_plan(target: str) -> dict[str, Any]:
     with ThreadPoolExecutor(max_workers=5) as ex:
         f_quote = ex.submit(provider.fetch_quote, sec)
         f_daily = ex.submit(provider.fetch_qfq_daily, sec, days=LOOKBACK_DAYS)
-        f_5m = ex.submit(provider.fetch_5m, sec, datalen=96)
+        f_5m = ex.submit(provider.fetch_5m, sec, datalen=240)
         f_15m = ex.submit(provider.fetch_15m, sec, datalen=60)
         f_30m = ex.submit(provider.fetch_30m, sec, datalen=60)
         # quote/daily 是必需的，立即取（失败抛异常）
