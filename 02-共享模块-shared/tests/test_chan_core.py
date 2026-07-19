@@ -369,8 +369,8 @@ class TestDetectBuyPoints:
         # 有历史一买前置 + 抬高低点 → 应落为类二买
         assert "类二买" in types
 
-    def test_buy_point_2_no_trend_no_fire(self):
-        """无下跌趋势中枢 → 二类不得因 macd_ok 误报。"""
+    def test_buy_point_2_no_trend_still_fire(self):
+        """无下跌趋势中枢 → 二类买仍可独立触发（结构满足即可）。"""
         strokes = [
             {"direction": "down", "end_price": 8.0},
             {"direction": "up", "end_price": 11.0},
@@ -378,8 +378,8 @@ class TestDetectBuyPoints:
         ]
         result = detect_buy_points(strokes, [], 10.0, macd_divergence_ok=True)
         types = [bp["type"] for bp in result]
-        assert "二类买" not in types
-        assert "类二买" not in types
+        # 二类买或类二买应触发（low_b=10 > low_a=8, 且 up_high=11）
+        assert "二类买" in types or "类二买" in types
 
     def test_buy_point_3_above_old_narrow_window(self):
         """P1 三类买：close 在中枢上方 3%（旧逻辑 >2% 会拒）+ 回踩 down 不破 zh_top → 有。"""
@@ -424,7 +424,7 @@ class TestDetectBuyPoints:
         assert "三类买" not in types
 
     def test_buy_point_3_beyond_max_leave_pct(self):
-        """P1 三类买：离开超过 15% 上限 → 不报。"""
+        """三类买：原典无幅度限制，离开超过 15% 仍报三买。"""
         strokes = [
             {"direction": "up", "end_price": 13.0},
             {"direction": "down", "end_price": 12.0},
@@ -432,7 +432,7 @@ class TestDetectBuyPoints:
         zones = [{"zh_top": 10.0, "zh_bottom": 8.0, "valid": True}]
         result = detect_buy_points(strokes, zones, 12.0)  # 20% above
         types = [bp["type"] for bp in result]
-        assert "三类买" not in types
+        assert "三类买" in types
 
     def test_buy_point_3_uses_latest_leave_ok(self):
         """P2 三类买：早期 leave+合法回踩，后期再次 leave 更高且回踩不破 → 仍以最近 leave 为准，三买成立。"""

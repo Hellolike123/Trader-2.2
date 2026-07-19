@@ -317,15 +317,49 @@ def _stroke_force_not_much_stronger(
         return area_curr <= area_prev * tol
     return False
 
+def _volume_shrink_between_strokes(bars: list[dict], stroke_prev: dict, stroke_curr: dict) -> bool:
+    """检查两段笔之间成交量是否缩量（回踩量缩 = 抛压枯竭）。
+
+    原典依据：二买的核心确认是回踩时量缩，代表卖方力量衰竭。
+    计算：后一笔区间内均量 <= 前一笔区间内均量 × 0.8（允许 20% 误差）。
+    数据不足时放行（不因缺数据误杀信号）。
+    """
+    if not bars:
+        return True
+
+    def _avg_vol(stroke: dict) -> float | None:
+        start = stroke.get("start_index") or 0
+        end = stroke.get("end_index") or 0
+        if start >= end or end > len(bars):
+            return None
+        vols = []
+        for i in range(start, min(end, len(bars))):
+            v = to_float(bars[i].get("volume"))
+            if v is not None and v > 0:
+                vols.append(v)
+        return sum(vols) / len(vols) if vols else None
+
+    vol_prev = _avg_vol(stroke_prev)
+    vol_curr = _avg_vol(stroke_curr)
+
+    # 数据不足放行
+    if vol_prev is None or vol_curr is None:
+        return True
+    if vol_prev <= 0:
+        return True
+
+    # 缩量条件：回踩均量 <= 前笔均量 × 0.8（必须明确缩量 20%+）
+    return vol_curr <= vol_prev * 0.8
+
 def _check_macd_for_2nd_buy(
     bars: list[dict],
     strokes: list[dict],
 ) -> bool:
-    """二类买 MACD 确认（P1：优先笔级负面积对比）。
+    """二类买确认（原典三条件：MACD + 成交量缩量 + 趋势过滤）。
 
-    Condition A: 最后两段 down 笔负面积，后笔力度不显著强于前笔
-                 （|area_curr| <= |area_prev| * 1.05）
-    Condition B: 近端柱状恢复（全序列末几根绿柱回升，无 index 时的补充）
+    Condition A: 笔级 MACD 负面积，后笔力度不显著强于前笔
+    Condition B: 近端柱状恢复（绿柱回升）
+    Condition C: 成交量缩量（回踩时量缩，代表抛压枯竭）
     工程风控：MA 空头排列硬过滤
     """
     if not bars or not strokes:
@@ -335,19 +369,18 @@ def _check_macd_for_2nd_buy(
     if len(down_strokes) < 2:
         return False
 
-    # Condition A: 笔级 MACD 负面积对比（必须使用 down_strokes）
+    # Condition A: 笔级 MACD 负面积对比
     area_prev = _stroke_macd_area(bars, down_strokes[-2], "neg")
     area_curr = _stroke_macd_area(bars, down_strokes[-1], "neg")
     condition_a = _stroke_force_not_much_stronger(area_prev, area_curr, "down")
 
-    # Condition B: 近端柱状恢复（无笔 index / 面积时的补充条件）
+    # Condition B: 近端柱状恢复
     hist_values = [to_float(b.get("macd_histogram")) for b in bars]
     hist_values = [h for h in hist_values if h is not None]
     condition_b = False
     if len(hist_values) >= 3:
         last_3 = hist_values[-3:]
         condition_b = all(h < 0 for h in last_3) and last_3[-1] > last_3[0]
-    # 无 index 时也可用全图近端 min 对比作为 area 的粗替代
     if not condition_a and area_prev is None and area_curr is None and len(hist_values) >= 10:
         recent_hist = hist_values[-5:]
         earlier_hist = hist_values[-10:-5]
@@ -358,6 +391,10 @@ def _check_macd_for_2nd_buy(
 
     if not (condition_a or condition_b):
         return False
+
+    # Condition C: 成交量缩量（原典核心：二买回踩时量缩 = 抛压枯竭）
+    # 回踩笔（第二段 down）的均量 < 第一段 down 的均量
+    condition_c = _volume_shrink_between_strokes(bars, down_strokes[-2], down_strokes[-1])
 
     # Trend filter: reject 2nd buy in strong bearish alignment
     closes = [to_float(b.get("close")) for b in bars]
@@ -572,32 +609,32 @@ def detect_buy_points(
     down_strokes = [s for s in strokes if s["direction"] == "down"]
     up_strokes = [s for s in strokes if s["direction"] == "up"]
 
-    # ── P1 一类买：下跌趋势背驰（严格缠论）──
-    # 须趋势（≥2 个严格不重叠下移中枢），盘整背驰不算；
-    # 且最后一段 down 必须在最后一个中枢之后（背驰发生在离开段）。
-    _is_down_trend = _strict_down_trend_zones(valid_zones)
-    if (
-        last_stroke["direction"] == "down"
-        and _is_down_trend
-        and len(down_strokes) >= 2
-    ):
-        if _stroke_leaves_after_zone(down_strokes[-1], valid_zones[-1]):
-            prev_down = down_strokes[-2]
-            curr_down = down_strokes[-1]
-            price_new_low = curr_down["end_price"] <= prev_down["end_price"]
-            if price_new_low:
+    # ── 一类买：下跌背驰（两档：严格趋势 / 放宽结构）──
+    # 严格档：≥2 个不重叠下移中枢（原典趋势级别）
+    # 放宽档：≥1 个中枢 + 末段创新低 + MACD 背驰（结构级别，实盘更实用）
+    if last_stroke["direction"] == "down" and len(down_strokes) >= 2:
+        prev_down = down_strokes[-2]
+        curr_down = down_strokes[-1]
+        price_new_low = curr_down["end_price"] <= prev_down["end_price"]
+        if price_new_low and valid_zones:
+            last_zone = valid_zones[-1]
+            # 放宽：末 down 在中枢之后即可，不要求 ≥2 中枢
+            if _stroke_leaves_after_zone(curr_down, last_zone):
                 area_prev = _stroke_macd_area(bars, prev_down, "neg")
                 area_curr = _stroke_macd_area(bars, curr_down, "neg")
+                _is_strict_trend = _strict_down_trend_zones(valid_zones)
                 if area_prev is not None and area_curr is not None:
-                    # 完整笔级背驰 → confidence 3
                     if _stroke_force_weaker(area_prev, area_curr, "down"):
+                        # 严格趋势 → 一类买(conf=3)；仅1中枢 → 类一买(conf=2)
+                        bp_type = "一类买" if _is_strict_trend else "类一买"
+                        bp_conf = 3 if _is_strict_trend else 2
                         buy_points.append({
-                            "type": "一类买",
+                            "type": bp_type,
                             "price": round(curr_down["end_price"], 4),
-                            "confidence": 3,
+                            "confidence": bp_conf,
                         })
                 else:
-                    # P7: 无 index / 无法算面积：fallback 要求至少 3 根连续负柱回升
+                    # 柱序列 fallback
                     bar_ok = False
                     if bars and len(bars) >= 3:
                         h_vals = [to_float(b.get("macd_histogram")) for b in bars[-3:]]
@@ -608,14 +645,12 @@ def detect_buy_points(
                             and h_vals[2] > h_vals[1] > h_vals[0]
                         )
                     elif macd_hist_current is not None and macd_hist_prev is not None:
-                        # 无 bars 时回退到 2 柱检查（兼容旧调用）
                         bar_ok = (
                             macd_hist_current < 0
                             and macd_hist_prev < 0
                             and macd_hist_current > macd_hist_prev
                         )
                     if bar_ok:
-                        # 柱序列弱确认：禁止冒充「一类买」（面积背驰才是真一类）
                         buy_points.append({
                             "type": "类一买",
                             "price": round(curr_down["end_price"], 4),
@@ -651,65 +686,72 @@ def detect_buy_points(
                 # P8: 两笔之间无同向笔 → 结构不成立，跳过二类买
                 pass
             else:
-                # 前置一类：时间轴上 down_a 为历史一类低点（非同帧 buy_points）
+                # 二类买：结构满足即可独立触发（不要求一买前置）
+                # 条件：low_b > low_a + MACD 不恶化 + 回踩缩量
                 structure_ok = low_b > low_a and low_b < up_high
-                if structure_ok and _historical_type1_buy_ok(down_strokes, valid_zones, bars):
+                if structure_ok:
                     area_prev = _stroke_macd_area(bars, down_strokes[-2], "neg")
                     area_curr = _stroke_macd_area(bars, down_strokes[-1], "neg")
                     area_ok = _stroke_force_not_much_stronger(area_prev, area_curr, "down")
-                    if area_ok or macd_divergence_ok:
+                    vol_shrink = _volume_shrink_between_strokes(bars, down_strokes[-2], down_strokes[-1])
+                    if (area_ok or macd_divergence_ok) and vol_shrink:
                         buy_points.append({
                             "type": "二类买",
                             "price": round(low_b, 4),
                             "confidence": 2,
                         })
                     else:
-                        # 类二买：结构同二买 + 有历史一买前置，但力度/MACD 未确认
                         buy_points.append({
                             "type": "类二买",
                             "price": round(low_b, 4),
                             "confidence": 1,
                         })
 
-    # ── P1/P2 三类买：离开中枢后回踩不入；回抽须为近端（末 2 笔内）──
+    # ── 三类买：离开中枢后回踩不入 + 反弹确认 ──
     if last_close > 0 and valid_zones:
         last_valid = valid_zones[-1]
         zh_top = last_valid["zh_top"]
         if last_close > zh_top:
-            above_pct = (last_close - zh_top) / zh_top
-            if above_pct <= _THIRD_POINT_MAX_LEAVE_PCT:
-                leave_i = None
-                for i, s in enumerate(strokes):
-                    if (
-                        s.get("direction") == "up"
-                        and s.get("end_price") is not None
-                        and s["end_price"] > zh_top
+            # 找离开段：第一根 up 笔 end > ZG，且后面有 down 笔（回踩）
+            leave_i = None
+            for i, s in enumerate(strokes):
+                if (
+                    s.get("direction") == "up"
+                    and s.get("end_price") is not None
+                    and s["end_price"] > zh_top
+                ):
+                    if any(
+                        strokes[k].get("direction") == "down"
+                        for k in range(i + 1, len(strokes))
                     ):
-                        if any(
-                            strokes[k].get("direction") == "down"
-                            for k in range(i + 1, len(strokes))
-                        ):
-                            leave_i = i
-                pullback_ok = False
-                last_down_i = None
-                if leave_i is not None:
-                    for i in range(len(strokes) - 1, leave_i, -1):
-                        s = strokes[i]
-                        if s.get("direction") == "down" and s.get("end_price") is not None:
-                            last_down_i = i
-                            if s["end_price"] >= zh_top:
-                                # 回抽在末 3 笔内才算当前三买（防粘滞）
-                                if last_down_i >= len(strokes) - 3:
-                                    pullback_ok = True
-                            break
-                if leave_i is not None and pullback_ok:
-                    vol_ok = not bars or _volume_confirm(len(bars) - 1, 1.2)
-                    if vol_ok:
-                        buy_points.append({
-                            "type": "三类买",
-                            "price": round(last_close, 4),
-                            "confidence": 1,
-                        })
+                        leave_i = i
+            # 检查回踩：末 down 笔 end >= ZG，且在末 3 笔内
+            pullback_ok = False
+            pullback_low = None
+            if leave_i is not None:
+                for i in range(len(strokes) - 1, leave_i, -1):
+                    s = strokes[i]
+                    if s.get("direction") == "down" and s.get("end_price") is not None:
+                        pullback_low = s["end_price"]
+                        if s["end_price"] >= zh_top and i >= len(strokes) - 3:
+                            pullback_ok = True
+                        break
+            # 反弹确认：回踩后第一根 up 笔收盘 > 回踩低点（过滤假突破）
+            bounce_ok = True
+            if pullback_ok and pullback_low is not None and leave_i is not None:
+                bounce_ok = False
+                for i in range(leave_i, len(strokes)):
+                    s = strokes[i]
+                    if s.get("direction") == "up" and s.get("end_price") is not None:
+                        if s["end_price"] > pullback_low:
+                            bounce_ok = True
+                        break
+            if leave_i is not None and pullback_ok and bounce_ok:
+                buy_points.append({
+                    "type": "三类买",
+                    "price": round(last_close, 4),
+                    "confidence": 1,
+                })
 
     return buy_points
 

@@ -133,17 +133,9 @@ def build_plan(target: str) -> dict[str, Any]:
     elif isinstance(report_data.get("structure_result"), dict):
         structure_result = report_data["structure_result"]
 
-    # 5 分钟级实时缠论（提前到 model 构建前，供共振检查使用）
-    try:
-        from trader_shared.realtime_chan import get_realtime_chan_5m
-        rc5 = get_realtime_chan_5m(
-            target,
-            bars_5m,
-            current_price=float(current),
-        )
-        report_data["chan_5m"] = rc5.get("result") or {}
-    except Exception:
-        report_data["chan_5m"] = {}
+    # 5m 缠论已关闭：5m 噪音太大，缠论只在日线/周线上跑
+    # T0 执行层只用威科夫 + 动量
+    report_data["chan_5m"] = {}
 
     model = build_price_point_model(report_data, structure_result=structure_result)
     buy_display_status = side_status(model["buy"])
@@ -203,8 +195,8 @@ def build_plan(target: str) -> dict[str, Any]:
         wyckoff_result=wyck_result,
     )
 
-    # 5m 缠论：已提前到 report_data 构建阶段，这里直接复制到 result
-    result["chan_5m"] = report_data.get("chan_5m") or {}
+    # 5m 缠论已关闭
+    result["chan_5m"] = {}
 
     # 筹码搬家监控
     try:
