@@ -1,7 +1,37 @@
 # T0 — AI 盘中执行助手
 
 ## 我是谁
-盘中盯盘 + 执行卡。实时监控买卖触发、大单异动、止损预警。
+盘中盯盘 + 执行卡。实时监控买卖触发、大单异动、止损预警。支持三重共振（缠论+威科夫+动量）硬判定和降本 T 模式。
+
+## 首次使用引导
+
+**当用户第一次调用 T0 功能时**，检查 `~/.trader/position.json` 是否存在。
+
+如果不存在，**主动询问以下信息**并写入：
+
+```
+你是第一次使用 T0 功能，需要先配置持仓信息：
+1. 标的名称/代码？（如：南网科技 / 688248）
+2. 持仓成本（每股）？
+3. 底仓股数？
+4. 是否有现金做倒 T？（默认没有，只做正 T）
+```
+
+收到回复后，写入 `~/.trader/position.json`：
+```json
+{
+  "positions": {
+    "688248": {
+      "avg_cost": 50.00,
+      "total_shares": 5000,
+      "has_cash": false,
+      "updated_at": "2026-07-17 10:00:00"
+    }
+  }
+}
+```
+
+如果文件已存在，直接读取，不再询问。
 
 ## 命令入口（统一入口）
 
@@ -10,101 +40,94 @@
 | 需求 | 命令 |
 |------|------|
 | 单次检查（渲染报告） | `final_t0.py --target <NAME>` |
+| 带持仓成本 | `final_t0.py --target <NAME> --cost 50 --position 5000` |
+| 降本模式 | `final_t0.py --target <NAME> --cost 50 --position 5000 --t-mode cost_cut` |
 | 单次监控检查（预警文本） | `final_t0.py --target <NAME> --monitor --once` |
 | 持续监控 | `final_t0.py --target <NAME> --monitor` |
-| 带成本监控 | `final_t0.py --target <NAME> --monitor --cost 15.50` |
+| 查看台账 | `final_t0.py --target <NAME> --ledger` |
+| 记录一笔 T | `final_t0.py --target <NAME> --ledger-add 卖价 买价 股数 成本` |
 
 参数：
 - `--monitor` → 持续监控模式，只在状态变化时输出
 - `--once` → 单次监控检查（供定时任务用）
-- `--cost` → 持仓成本（用于个性化预警）
+- `--cost` → 持仓成本（用于个性化预警和降本计算）
 - `--position` → 做T底仓股数
+- `--t-mode` → T 模式：`cost_cut`（先卖后买降本）/ `grid`（标准网格）/ `reduce`（减仓）
+- `--min-edge-pct` → 费后最小净空间 %（默认 0.8）
+- `--cash` → 可用于倒 T 的现金
+- `--day-loss-pct` → 当日 T 亏损停机线 %（默认 1.0）
+- `--ledger` → 查看台账汇总
+- `--ledger-add` → 记录一笔 T（参数：卖价 买价 股数 原成本）
+- `--ledger-days` → 台账筛选最近 N 天
 - `--verbose` → 无变化时也打印状态
 - `--reset-cache` → 清空缓存状态
 - `--interval` → 监控间隔分钟数（默认 3）
+- `--output` → `markdown`（默认）或 `json`
 
 ⚠️ **渲染优先原则**：优先用 `final_t0.py` 默认输出的渲染报告。仅在需要程序化处理时读 JSON。
 
 ## 工作流程（Pipeline + Inversion Gates）
 
-### Step 1: 拿数据
-调命令获取 T0 数据。
+### Step 0: 检查持仓（自动注入）
+读取 `~/.trader/position.json`，如果有该标的的持仓信息，自动注入到 plan 中：
+- `t0_account.mode` → cost_cut / grid / reduce / none
+- `t0_account.avg_cost` → 成本
+- `t0_account.total_shares` → 底仓股数
+- `t0_account.allow_reverse_t` → 是否允许倒 T
 
+### Step 1: 拿数据
 ```bash
 python3 01-功能包-packages/t0/scripts/final_t0.py --target <NAME>
 ```
 
-### Step 2: 判断状态（中间状态传递）
-读 JSON 或渲染报告，提取状态摘要。
+### Step 2: 三重共振判定（核心）
+卡片输出中的 `🔗 三重共振` 区块展示三套理论的亮灯状态：
 
-**必须输出的中间状态（内部推理用，不一定要展示给用户）：**
+| 缠论 5m | 威科夫 5m | 动量 | 灯色 | 动作 |
+|---------|----------|------|------|------|
+| ✅买 | ✅买 | ✅买 | 🟢 | 三重共振买 → 可执行 |
+| ✅卖 | ✅卖 | ✅卖 | 🟢 | 三重共振卖 → 可执行 |
+| 任意两盏亮 | - | - | 🟡 | 部分共振 → 关注，等第三盏灯 |
+| 亮零到一盏 | - | - | 🔴 | 未共振 → 暂不操作 |
 
-```
-State Summary:
-  buy={buy.status} | 观察价={buy.observation_price} | 执行价={buy.execution_price} | 最高可接受={buy.acceptable_price}
-  sell={sell.status} | 观察价={sell.observation_price} | 执行价={sell.execution_price} | 最低可接受={sell.acceptable_price}
-  position_score={position_score}/10 | volume_score={volume_score}/10
-  space_state={space_state} | amplitude={amplitude_pct}%
-  wyckoff={has_wyckoff_signal} | chip_migration={chip_migration.warning_level}
-  data_status={data_status}
-```
+**硬共振规则**：三盏灯必须同时亮才可操作。不打分，不加权，缺一个就不做。
 
-### Step 3: 给操作建议
-基于 Step 2 的状态摘要给建议。
+### Step 3: 触发价（多理论参考）
+触发价区块同时展示三套理论的参考价位：
+- `价区XX.XX` — 价区引擎算的支撑/压力位
+- `缠论XX.XX` — 缠论 5m 买卖点价位
+- `威科夫XX.XX` — 威科夫 Spring/UT 价位
 
-**操作建议规则**：
+### Step 4: 操作建议
+基于共振灯色 + 触发价给建议。
 
-| buy.status | sell.status | 建议 |
-|------------|-------------|------|
-| 已触发 / 买 10% / 买 23% | 任何 | 低吸优先：参考 execution_price ~ acceptable_price |
-| 已触发 | 已触发 | 先低后高：先买后卖，注意仓位控制 |
-| 观察中 | 任何 | 等待：不操作，等待触发 |
-| 被阻断 | 任何 | 不接：不买入，等待解除阻断 |
-| 触发过期 | 任何 | 不追：错过买点，等待下一次 |
-| 任何 | 已触发 | 高抛优先：参考 execution_price ~ acceptable_price |
-| 任何 | 被阻断 | 不动 |
-
-**Wyckoff 信号覆盖**：
-- `wyckoff.bc_signal = true` → 购买高潮，减仓 1/3
-- `wyckoff.upthrust_signal = true` → 上冲回落，减仓
-- `chip_migration.warning_level = critical` → 清仓
+**降本模式（cost_cut）特殊规则**：
+- 默认**先卖后买**（正 T）
+- 倒 T 被禁止（除非有现金且非深套）
+- 费后空间 < min_edge_pct 时不操作
+- 当日 T 亏损达 day_loss_pct 时停机
 
 **GATE 1 — 价位引用检查**：
-建议中必须引用具体价位（observation_price / execution_price / invalid_price）。
-**MUST NOT give an action recommendation without specific price levels.**
+建议中必须引用具体价位。MUST NOT give an action recommendation without specific price levels.
 
 **GATE 2 — 数据完备度检查**：
-检查 `data_status`：
 - `full` → 正常
-- `partial` → 提示：`⚠️ 数据不完整，盘中判断可能不准`
-- `degraded` → 提示：`⚠️ 数据不足，盘中判断可能不准`
+- `partial` / `degraded` → 提示：`⚠️ 数据不足，盘中判断可能不准`
 
-**MUST NOT output until data_status 已检查。**
-
-### Step 4: 输出报告
-使用 Step 3 的建议 + Step 2 的状态，输出 T0 盯盘面板。
-
-## Pre-Flight Checklist（输出前自检）
-
-在输出任何内容前，验证以下每项：
-
-□ 调了命令吗？没调 → 不能回答
-□ 我引用的价位来自 JSON 哪个字段？说不出来 → 不要用
-□ data_status 是什么？degraded/partial → 已提示数据不足
-□ buy.status 和 sell.status 的判断是否与 JSON 一致？
-□ 建议中是否引用了具体价位？
-□ 我有没有编造价格或信号？全部来自 JSON
-□ 格式符合 output-style-guide.md（无 Markdown 标题/表格/加粗/列表）
+### Step 5: 输出报告
+使用以上步骤的信息，输出 T0 盯盘面板。
 
 ## 什么时候先问用户
 
 直接执行：
 - "南网科技盘中" → `final_t0.py --target 南网科技`
 - "帮我盯南网科技" → `final_t0.py --target 南网科技 --monitor`
+- "南网科技做 T" → 检查 position.json，有持仓直接带 cost_cut 模式
 
 先澄清：
 - "盯一下" → 盯哪只？
 - "要不要卖" → 卖哪只？什么价位触发了？
+- 首次调用且无 position.json → 引导填写持仓信息
 
 ## Installed Skill References（Agent 必读）
 

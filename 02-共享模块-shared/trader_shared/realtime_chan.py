@@ -1,17 +1,19 @@
-"""T0 盘中实时缠论增量引擎（Phase 2 接入，opt-in 默认关）。
+"""T0 盘中实时缠论增量引擎。
+
+两个入口：
+- ``get_realtime_chan``  — 日线级（opt-in，默认关，需 T0_REALTIME_CHAN=1）。
+- ``get_realtime_chan_5m`` — 5 分钟级（T0 主路径，始终可用）。
 
 设计要点：
-- 复用 Phase 1 的 ``ChanlunEngine``（``update_bar`` append/replace + ``get_analysis``），
+- 复用 ``ChanlunEngine``（``update_bar`` append/replace + ``get_analysis``），
   不重实现任何缠论算法。
-- 基于 ``build_plan`` 的结果（``daily_bars`` + ``current_price`` + ``quote``）合成
-  当日 forming bar，盘中价格变动即时反映到笔/段/买卖点。
-- 优先 ``ChanlunEngine.load`` 预热状态（``cache warm`` 预建），失败（无预热/版本不符）
-  则静默回退到从 ``daily`` 批量 build。
-- ``get_realtime_chan`` 返回 ``{result, signature}``；``signature`` 为可跨 tick 比对
-  的指纹，供 monitor 检测「日内新成笔 / 新买卖点」。
-
-⚠️ 本模块所有对外调用方（monitor.run_once）必须用 ``T0_REALTIME_CHAN=1`` 环境变量
-开关包裹，默认未设时绝不改变现有批量路径。
+- 5m 路径：直接用 ``kline_5m`` bars 喂入引擎，每根 bar 有独立时间戳，
+  盘中价格变动即时反映到笔/段/买卖点。
+- 日线路径（遗留）：基于 ``daily_bars`` + ``quote`` 合成当日 forming bar。
+- 优先 ``ChanlunEngine.load`` 预热状态（``cache warm`` 预建），失败则静默回退
+  到从 bars 批量 build。
+- 返回 ``{result, signature}``；``signature`` 为可跨 tick 比对的指纹，
+  供 monitor 检测「日内新成笔 / 新买卖点」。
 """
 from __future__ import annotations
 
@@ -113,5 +115,79 @@ def get_realtime_chan(
     eng = _load_or_build(symbol, daily, state_dir)
     eng.update_bar(today_bar)  # 同 date → replace 语义
     result = eng.get_analysis(current, symbol=symbol)
+    signature = _chan_signature(result)
+    return {"result": result, "signature": signature}
+
+
+def _normalize_5m_bars(bars: list[dict]) -> list[dict]:
+    """将 5m bars 的 ``date`` 归一化为带时分秒的唯一时间戳。
+
+    上游 ``light_data`` 把分钟 K 的 ``date`` 截断成日（如 "2026-07-16"），
+    完整时间戳放在 ``time`` 字段。ChanlunEngine 以 ``bar['date']`` 作唯一身份，
+    同日所有 5m 棒 date 相同会导致后一根覆盖前一根，引擎塌缩成 1 根。
+    """
+    norm: list[dict] = []
+    for b in bars:
+        if not isinstance(b, dict):
+            continue
+        nb = dict(b)
+        full_ts = nb.get("time") or nb.get("datetime") or nb.get("day") or ""
+        if full_ts and (":" in str(full_ts) or " " in str(full_ts)):
+            nb["date"] = str(full_ts)
+        elif not nb.get("date"):
+            nb["date"] = str(full_ts) if full_ts else ""
+        norm.append(nb)
+    return norm
+
+
+def get_realtime_chan_5m(
+    symbol: str,
+    kline_5m: list[dict],
+    current_price: float = 0.0,
+    state_dir: str = CHANLUN_STATE_DIR,
+) -> dict:
+    """5 分钟级实时缠论增量更新，T0 主路径。
+
+    直接用 5m bars 喂入 ChanlunEngine，不依赖日线。
+    bars 不足 ``CHANLUN_MIN_BARS`` 根时返回空结果（不报错）。
+
+    Args:
+        symbol: 标的键（用于 load 预热状态文件）。
+        kline_5m: 5 分钟 K 线列表（需含 OHLCV + 时间字段）。
+        current_price: 当前价（用于 get_analysis）。
+        state_dir: 预热状态目录。
+
+    Returns:
+        {"result": <chanlun_analysis dict>, "signature": <tuple 指纹>}
+    """
+    if not kline_5m or len(kline_5m) < 20:
+        return {"result": None, "signature": ("insufficient_data",)}
+
+    bars = _normalize_5m_bars(kline_5m)
+
+    # 5m 预热状态文件名加后缀，避免与日线状态冲突
+    candidates: list[str] = [str(symbol), str(symbol).replace(".", "")]
+    m = re.search(r"\d{6}", str(symbol))
+    if m:
+        candidates.append(m.group(0))
+
+    eng: ChanlunEngine | None = None
+    for cand in candidates:
+        if not cand:
+            continue
+        path = f"{state_dir}/{cand}_5m.json"
+        if os.path.exists(path):
+            try:
+                eng = ChanlunEngine.load(path)
+                break
+            except Exception:
+                break
+
+    if eng is None:
+        eng = ChanlunEngine()
+        for b in bars:
+            eng.update_bar(b)
+
+    result = eng.get_analysis(current_price, symbol=symbol)
     signature = _chan_signature(result)
     return {"result": result, "signature": signature}

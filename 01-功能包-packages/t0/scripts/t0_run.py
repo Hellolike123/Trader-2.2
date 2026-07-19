@@ -71,7 +71,7 @@ def build_plan(target: str) -> dict[str, Any]:
     with ThreadPoolExecutor(max_workers=5) as ex:
         f_quote = ex.submit(provider.fetch_quote, sec)
         f_daily = ex.submit(provider.fetch_qfq_daily, sec, days=LOOKBACK_DAYS)
-        f_5m = ex.submit(provider.fetch_5m, sec, datalen=60)
+        f_5m = ex.submit(provider.fetch_5m, sec, datalen=800)
         f_15m = ex.submit(provider.fetch_15m, sec, datalen=60)
         f_30m = ex.submit(provider.fetch_30m, sec, datalen=60)
         # quote/daily 是必需的，立即取（失败抛异常）
@@ -91,7 +91,7 @@ def build_plan(target: str) -> dict[str, Any]:
         except Exception:
             bars_30m = []
     _cp = quote.get("current_price")
-    current = _cp if _cp is not None else daily[-1].get("close")
+    current = _cp if _cp is not None else (daily[-1].get("close") if daily else None)
     if current is None:
         raise RuntimeError("current price unavailable")
     report_data = {
@@ -132,6 +132,19 @@ def build_plan(target: str) -> dict[str, Any]:
         structure_result = report_data["structure"]
     elif isinstance(report_data.get("structure_result"), dict):
         structure_result = report_data["structure_result"]
+
+    # 5 分钟级实时缠论（提前到 model 构建前，供共振检查使用）
+    try:
+        from trader_shared.realtime_chan import get_realtime_chan_5m
+        rc5 = get_realtime_chan_5m(
+            target,
+            bars_5m,
+            current_price=float(current),
+        )
+        report_data["chan_5m"] = rc5.get("result") or {}
+    except Exception:
+        report_data["chan_5m"] = {}
+
     model = build_price_point_model(report_data, structure_result=structure_result)
     buy_display_status = side_status(model["buy"])
     sell_display_status = side_status(model["sell"])
@@ -161,6 +174,7 @@ def build_plan(target: str) -> dict[str, Any]:
         "vwap": model.get("vwap"),
         "ict_signal": model.get("ict_signal") or {},
         "atr_info": model.get("atr_info") or {},
+        "resonance": model.get("resonance") or {},
         "order_book": quote.get("order_book"),
         "data": report_data,
         "model": model,
@@ -188,6 +202,9 @@ def build_plan(target: str) -> dict[str, Any]:
         bars=daily,
         wyckoff_result=wyck_result,
     )
+
+    # 5m 缠论：已提前到 report_data 构建阶段，这里直接复制到 result
+    result["chan_5m"] = report_data.get("chan_5m") or {}
 
     # 筹码搬家监控
     try:

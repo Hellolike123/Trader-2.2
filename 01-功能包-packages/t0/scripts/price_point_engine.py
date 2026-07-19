@@ -499,6 +499,139 @@ def _ict_strength_meets_minimum(ict: dict[str, Any]) -> bool:
     return actual >= threshold
 
 
+# ── 5m 威科夫形态检测（T0 专用，轻量级）──────────────────────────────────
+
+def detect_spring_5m(bars: list[dict], support: float) -> dict[str, Any]:
+    """Spring 检测（5m 级别）：价格跌破支撑后快速收回，V 型反转。
+
+    条件：
+    1. 最近 3 根 bar 中有 1 根最低价 < support（刺穿）
+    2. 该根 bar 收盘价 >= support（收回）
+    3. 当前价 > support（确认站回）
+    """
+    if len(bars) < 5 or support <= 0:
+        return {"detected": False}
+
+    recent = bars[-5:]
+    for b in recent[-3:]:
+        low = num(b.get("low"))
+        close = num(b.get("close"))
+        if low is None or close is None:
+            continue
+        if low < support and close >= support:
+            vol = num(b.get("volume")) or 0
+            avg_vol = sum(num(x.get("volume")) or 0 for x in bars[-12:]) / max(len(bars[-12:]), 1)
+            vol_ratio = vol / avg_vol if avg_vol > 0 else 1.0
+            strength = "strong" if vol_ratio >= 1.2 and close > support * 1.002 else "ordinary"
+            return {
+                "detected": True,
+                "strength": strength,
+                "reason": f"5m刺穿{support:.2f}后收回，量比{vol_ratio:.1f}",
+                "vol_ratio": round(vol_ratio, 2),
+            }
+    return {"detected": False}
+
+
+def detect_no_supply_pullback_5m(bars: list[dict], support: float) -> dict[str, Any]:
+    """无供给回调（5m 级别）：价格回踩支撑区但成交量明显萎缩，抛压枯竭。
+
+    条件：
+    1. 最近 3 根 bar 中有 1 根最低价接近支撑（±1%）
+    2. 该根 bar 成交量 < 均量的 0.6 倍（缩量）
+    3. 收盘价未跌破支撑
+    """
+    if len(bars) < 10 or support <= 0:
+        return {"detected": False}
+
+    avg_vol = sum(num(x.get("volume")) or 0 for x in bars[-12:]) / max(len(bars[-12:]), 1)
+    if avg_vol <= 0:
+        return {"detected": False}
+
+    for b in bars[-3:]:
+        low = num(b.get("low"))
+        close = num(b.get("close"))
+        vol = num(b.get("volume"))
+        if low is None or close is None or vol is None:
+            continue
+        near_support = abs(low - support) / support < 0.01
+        shrinking = vol < avg_vol * 0.6
+        held = close >= support
+        if near_support and shrinking and held:
+            return {
+                "detected": True,
+                "reason": f"回踩{support:.2f}附近缩量（量比{vol/avg_vol:.2f}），抛压枯竭",
+                "vol_ratio": round(vol / avg_vol, 2),
+            }
+    return {"detected": False}
+
+
+def detect_upthrust_5m(bars: list[dict], resistance: float) -> dict[str, Any]:
+    """UT 诱多（5m 级别）：价格突破阻力后快速回落，假突破。
+
+    条件：
+    1. 最近 3 根 bar 中有 1 根最高价 > resistance（突破）
+    2. 该根 bar 收盘价 < resistance（跌回）
+    3. 当前价 < resistance（确认回落）
+    """
+    if len(bars) < 5 or resistance <= 0:
+        return {"detected": False}
+
+    for b in bars[-3:]:
+        high = num(b.get("high"))
+        close = num(b.get("close"))
+        vol = num(b.get("volume"))
+        if high is None or close is None:
+            continue
+        if high > resistance and close < resistance:
+            avg_vol = sum(num(x.get("volume")) or 0 for x in bars[-12:]) / max(len(bars[-12:]), 1)
+            vol_ratio = vol / avg_vol if avg_vol > 0 else 1.0
+            strength = "strong" if vol_ratio >= 1.3 else "ordinary"
+            return {
+                "detected": True,
+                "strength": strength,
+                "reason": f"5m突破{resistance:.2f}后跌回，假突破，量比{vol_ratio:.1f}",
+                "vol_ratio": round(vol_ratio, 2),
+            }
+    return {"detected": False}
+
+
+def detect_volume_stop_5m(bars: list[dict]) -> dict[str, Any]:
+    """放量滞涨（5m 级别）：成交量创新高但价格未创新高。
+
+    条件：
+    1. 当前 bar 成交量 > 近 12 根均量的 1.5 倍
+    2. 当前 bar 收盘价 <= 前一根收盘价（价格未涨）
+    3. 最近 3 根 bar 出现上影线或实体缩小
+    """
+    if len(bars) < 12:
+        return {"detected": False}
+
+    last = bars[-1]
+    prev = bars[-2] if len(bars) >= 2 else {}
+    vol = num(last.get("volume")) or 0
+    avg_vol = sum(num(x.get("volume")) or 0 for x in bars[-12:]) / 12
+
+    if avg_vol <= 0 or vol < avg_vol * 1.5:
+        return {"detected": False}
+
+    last_close = num(last.get("close"))
+    last_high = num(last.get("high"))
+    prev_close = num(prev.get("close"))
+    if last_close is None or prev_close is None or last_high is None:
+        return {"detected": False}
+
+    price_stagnant = last_close <= prev_close
+    has_upper_shadow = last_high is not None and last_close is not None and (last_high - last_close) > (last_close - (num(last.get("open")) or last_close)) * 0.5
+
+    if price_stagnant and has_upper_shadow:
+        return {
+            "detected": True,
+            "reason": f"放量（量比{vol/avg_vol:.1f}）但价格滞涨+上影线",
+            "vol_ratio": round(vol / avg_vol, 2),
+        }
+    return {"detected": False}
+
+
 def detect_buy_trigger(report_data: dict[str, Any], zones: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     bars = report_data["kline_5m_completed"]
     current = float(report_data["current_price"])
@@ -567,6 +700,16 @@ def detect_buy_trigger(report_data: dict[str, Any], zones: dict[str, Any], state
     if ict_buy_valid:
         matched.append("ICT下扫后转强")
         aux_count += 1
+    # 威科夫 5m 形态：Spring（刺穿后收回）
+    spring = detect_spring_5m(bars, zone["main_support"])
+    if spring.get("detected"):
+        matched.append(f"威科夫Spring({spring['reason']})")
+        core_count += 1
+    # 威科夫 5m 形态：无供给回调（缩量回踩支撑）
+    no_supply = detect_no_supply_pullback_5m(bars, zone["main_support"])
+    if no_supply.get("detected"):
+        matched.append(f"威科夫无供给({no_supply['reason']})")
+        core_count += 1
     # Left-side: 1 core + 1 aux → 已触发
     if LEFT_NO_SUPPORT_BLOCK:
         if core_count >= LEFT_TRIGGER_CORE and aux_count >= LEFT_TRIGGER_AUX:
@@ -659,6 +802,16 @@ def detect_sell_trigger(report_data: dict[str, Any], zones: dict[str, Any], stat
     if ict_sell_valid:
         matched.append("ICT上扫后转弱")
         aux_count += 1
+    # 威科夫 5m 形态：UT 诱多（突破后跌回）
+    ut = detect_upthrust_5m(bars, zone["main_resistance"])
+    if ut.get("detected"):
+        matched.append(f"威科夫UT({ut['reason']})")
+        core_count += 1
+    # 威科夫 5m 形态：放量滞涨（量创新高但价未新高）
+    vstop = detect_volume_stop_5m(bars)
+    if vstop.get("detected"):
+        matched.append(f"威科夫放量滞涨({vstop['reason']})")
+        core_count += 1
     # Left-side: 1 core + 1 aux → 已触发
     if LEFT_NO_SUPPORT_BLOCK:
         if core_count >= LEFT_TRIGGER_CORE and aux_count >= LEFT_TRIGGER_AUX:
@@ -819,15 +972,34 @@ def choose_today_action(report_data: dict[str, Any], buy: dict[str, Any], sell: 
         return "等待，不主动操作"
     if "触发过期" in {buy["status"], sell["status"]}:
         return "等待下一次触发"
+
+    # 三重共振灯色：绿灯才给操作建议，黄灯/红灯只观察
+    resonance = report_data.get("resonance") or {}
+    buy_green = resonance.get("buy_green", False)
+    sell_red = resonance.get("sell_red", False)
+
+    # cost_cut 模式：优先高抛（先卖后买降本）
+    t_mode = (report_data.get("t0_account") or {}).get("mode", "")
+    is_cost_cut = t_mode == "cost_cut"
+
     if buy["status"] == "已触发" and sell["status"] != "已触发":
-        return "低吸优先"
+        if buy_green:
+            return "低吸优先"
+        return "等共振确认再低吸"
     if sell["status"] == "已触发" and buy["status"] != "已触发":
-        return "高抛优先"
+        if sell_red:
+            return "高抛优先"
+        return "等共振确认再高抛"
     if buy["status"] == "已触发" and sell["status"] == "已触发":
+        # 双触发：cost_cut 优先高抛，否则按距离选
+        if is_cost_cut:
+            return "高抛优先（降本模式）"
         current = float(report_data["current_price"])
         buy_mid = (buy["zone"]["lower"] + buy["zone"]["upper"]) / 2
         sell_mid = (sell["zone"]["lower"] + sell["zone"]["upper"]) / 2
-        return "低吸优先" if abs(current - buy_mid) <= abs(current - sell_mid) else "高抛优先"
+        if buy_green and sell_red:
+            return "低吸优先" if abs(current - buy_mid) <= abs(current - sell_mid) else "高抛优先"
+        return "等共振确认"
     return "等待，不主动操作"
 
 
@@ -882,6 +1054,139 @@ def score_volume(state: dict[str, Any]) -> int:
     return max(1, min(10, score))
 
 
+# ── 三重硬共振（T0 核心判定）─────────────────────────────────────────────
+
+def check_resonance(report_data: dict[str, Any], zones: dict[str, Any],
+                    state: dict[str, Any], chan_5m: dict | None = None) -> dict[str, Any]:
+    """三重硬共振检查：缠论 + 威科夫 + 动量，三个同时亮灯才可操作。
+
+    三个条件都是纯 bool（亮灯/不亮灯），不打分，不加权。
+    """
+    bars = report_data["kline_5m_completed"]
+    current = float(report_data["current_price"])
+
+    # ── 1. 缠论 5m：买点或卖点 + 关键价位 ──
+    chan_buy = False
+    chan_sell = False
+    chan_reason = ""
+    chan_buy_price = None
+    chan_sell_price = None
+    if chan_5m:
+        buy_points = chan_5m.get("buy_points") or []
+        sell_points = chan_5m.get("sell_points") or []
+        if buy_points:
+            chan_buy = True
+            bp_types = [bp.get("type", "") for bp in buy_points]
+            chan_reason = f"买点:{'+'.join(bp_types)}"
+            # 缠论买点价位：取最后一笔的低点
+            strokes = chan_5m.get("strokes") or []
+            down_strokes = [s for s in strokes if s.get("direction") == "down"]
+            if down_strokes:
+                chan_buy_price = to_float(down_strokes[-1].get("end_price"))
+        if sell_points:
+            chan_sell = True
+            sp_types = [sp.get("type", "") for sp in sell_points]
+            chan_reason = f"卖点:{'+'.join(sp_types)}"
+            # 缠论卖点价位：取最后一笔的高点
+            strokes = chan_5m.get("strokes") or []
+            up_strokes = [s for s in strokes if s.get("direction") == "up"]
+            if up_strokes:
+                chan_sell_price = to_float(up_strokes[-1].get("end_price"))
+
+    # ── 2. 威科夫：Spring(买) / UT(卖) / 无供给(买) / 放量滞涨(卖) + 关键价位 ──
+    wyckoff_buy = False
+    wyckoff_sell = False
+    wyckoff_reason = ""
+    wyckoff_buy_price = None
+    wyckoff_sell_price = None
+    buy_zone = zones.get("buy_zone") or {}
+    sell_zone = zones.get("sell_zone") or {}
+    buy_support = float(buy_zone.get("main_support") or 0)
+    sell_resistance = float(sell_zone.get("main_resistance") or 0)
+
+    if buy_support > 0:
+        spring = detect_spring_5m(bars, buy_support)
+        if spring.get("detected"):
+            wyckoff_buy = True
+            wyckoff_reason = spring.get("reason", "Spring")
+            wyckoff_buy_price = buy_support  # Spring 价位 = 支撑位
+        if not wyckoff_buy:
+            no_supply = detect_no_supply_pullback_5m(bars, buy_support)
+            if no_supply.get("detected"):
+                wyckoff_buy = True
+                wyckoff_reason = no_supply.get("reason", "无供给")
+                wyckoff_buy_price = buy_support
+
+    if sell_resistance > 0:
+        ut = detect_upthrust_5m(bars, sell_resistance)
+        if ut.get("detected"):
+            wyckoff_sell = True
+            wyckoff_reason = ut.get("reason", "UT")
+            wyckoff_sell_price = sell_resistance  # UT 价位 = 压力位
+        if not wyckoff_sell:
+            vstop = detect_volume_stop_5m(bars)
+            if vstop.get("detected"):
+                wyckoff_sell = True
+                wyckoff_reason = vstop.get("reason", "放量滞涨")
+
+    # ── 3. 动量：RSI 背离检测 ──
+    momentum_buy = False
+    momentum_sell = False
+    momentum_reason = ""
+    rsi_series = state.get("rsi") or []
+    if detect_bullish_divergence(bars, rsi_series, lookback=12):
+        momentum_buy = True
+        momentum_reason = "RSI底背离"
+    if detect_bearish_divergence(bars, rsi_series, lookback=12):
+        momentum_sell = True
+        momentum_reason = "RSI顶背离"
+
+    # ── 共振判定 ──
+    buy_green = chan_buy and wyckoff_buy and momentum_buy
+    sell_red = chan_sell and wyckoff_sell and momentum_sell
+
+    # 亮灯状态（用于显示，不用于判定）
+    lights = {
+        "chan": {"buy": chan_buy, "sell": chan_sell, "reason": chan_reason, "ok": bool(chan_5m),
+                 "buy_price": chan_buy_price, "sell_price": chan_sell_price},
+        "wyckoff": {"buy": wyckoff_buy, "sell": wyckoff_sell, "reason": wyckoff_reason, "ok": True,
+                    "buy_price": wyckoff_buy_price, "sell_price": wyckoff_sell_price},
+        "momentum": {"buy": momentum_buy, "sell": momentum_sell, "reason": momentum_reason, "ok": True},
+    }
+
+    # 三套理论的参考价位汇总
+    buy_prices = [p for p in [chan_buy_price, wyckoff_buy_price] if p and p > 0]
+    sell_prices = [p for p in [chan_sell_price, wyckoff_sell_price] if p and p > 0]
+
+    return {
+        "buy_green": buy_green,
+        "sell_red": sell_red,
+        "lights": lights,
+        "summary": _resonance_summary(lights, buy_green, sell_red),
+        "ref_buy_price": round(min(buy_prices), 2) if buy_prices else None,
+        "ref_sell_price": round(max(sell_prices), 2) if sell_prices else None,
+    }
+
+
+def _resonance_summary(lights: dict, buy_green: bool, sell_red: bool) -> str:
+    """生成共振状态一行摘要（红黄绿灯）。"""
+    if buy_green:
+        return "🟢 三重共振买"
+    if sell_red:
+        return "🟢 三重共振卖"
+    buy_count = sum(1 for v in lights.values() if v.get("buy"))
+    sell_count = sum(1 for v in lights.values() if v.get("sell"))
+    max_count = max(buy_count, sell_count)
+    if max_count >= 2:
+        return "🟡 部分共振"
+    off = []
+    for name, info in lights.items():
+        label = {"chan": "缠论", "wyckoff": "威科夫", "momentum": "动量"}[name]
+        if not info["buy"] and not info["sell"]:
+            off.append(label)
+    return f"🔴 未共振（缺：{'、'.join(off)}）"
+
+
 def build_price_point_model(report_data: dict[str, Any], structure_result: dict[str, Any] | None = None) -> dict[str, Any]:
     data = dict(report_data)  # copy 防止副作用
     now = data.get("now") or datetime.now()
@@ -926,6 +1231,12 @@ def build_price_point_model(report_data: dict[str, Any], structure_result: dict[
     if atr14_val > 0 and atr_ratio_val > 0:
         level_name, level_advice = _atr_volatility_label(atr_ratio_val)
         atr_info = {"atr14": atr14_val, "atr_ratio": atr_ratio_val, "level": level_name, "level_advice": level_advice}
+
+    # 三重硬共振检查（缠论 + 威科夫 + 动量，三亮灯才可操作）
+    # chan_5m 由 t0_run.py 注入到 report_data["chan_5m"]
+    chan_5m = data.get("chan_5m") or report_data.get("chan_5m")
+    resonance = check_resonance(data, zones, indicator_state, chan_5m)
+
     return {
         "data_status": status_value,
         "amplitude_pct": zones.get("amplitude_pct"),
@@ -942,4 +1253,5 @@ def build_price_point_model(report_data: dict[str, Any], structure_result: dict[
         "vwap": round_price(indicator_state.get("vwap")),
         "ict_signal": ict_signal,
         "atr_info": atr_info,
+        "resonance": resonance,
     }
