@@ -502,33 +502,65 @@ def _ict_strength_meets_minimum(ict: dict[str, Any]) -> bool:
 # ── 5m 威科夫形态检测（T0 专用，轻量级）──────────────────────────────────
 
 def detect_spring_5m(bars: list[dict], support: float) -> dict[str, Any]:
-    """Spring 检测（5m 级别）：价格跌破支撑后快速收回，V 型反转。
+    """Spring 检测（5m 级别）：假跌破后快速有力收回。
 
     条件：
-    1. 最近 3 根 bar 中有 1 根最低价 < support（刺穿）
-    2. 该根 bar 收盘价 >= support（收回）
-    3. 当前价 > support（确认站回）
+    1. 最近 5 根 bar 中有跌破支撑
+    2. 1-2 根内收回支撑上方
+    3. 收回幅度 ≥ 跌幅 × 50%
+    4. 跌破时量缩（< 均量 × 0.8）
+    5. 排除放量弹簧（量 > 均量 × 1.5）
     """
-    if len(bars) < 5 or support <= 0:
+    if len(bars) < 10 or support <= 0:
+        return {"detected": False}
+
+    avg_vol = sum(num(x.get("volume")) or 0 for x in bars[-12:]) / max(len(bars[-12:]), 1)
+    if avg_vol <= 0:
         return {"detected": False}
 
     recent = bars[-5:]
-    for b in recent[-3:]:
+    for i, b in enumerate(recent):
         low = num(b.get("low"))
         close = num(b.get("close"))
+        vol = num(b.get("volume")) or 0
         if low is None or close is None:
             continue
-        if low < support and close >= support:
-            vol = num(b.get("volume")) or 0
-            avg_vol = sum(num(x.get("volume")) or 0 for x in bars[-12:]) / max(len(bars[-12:]), 1)
-            vol_ratio = vol / avg_vol if avg_vol > 0 else 1.0
-            strength = "strong" if vol_ratio >= 1.2 and close > support * 1.002 else "ordinary"
-            return {
-                "detected": True,
-                "strength": strength,
-                "reason": f"5m刺穿{support:.2f}后收回，量比{vol_ratio:.1f}",
-                "vol_ratio": round(vol_ratio, 2),
-            }
+        # 条件1：跌破支撑
+        if low >= support:
+            continue
+        # 条件5：放量弹簧 → 直接排除
+        if avg_vol > 0 and vol > avg_vol * 1.5:
+            continue
+        # 条件2：1-2 根内收回
+        recharged = False
+        for j in range(i + 1, min(i + 3, len(recent))):
+            c = num(recent[j].get("close"))
+            if c is not None and c >= support:
+                recharged = True
+                break
+        if not recharged:
+            # 检查当前 bar 本身是否收回
+            if close < support:
+                continue
+            recharged = True
+        if not recharged:
+            continue
+        # 条件3：收回幅度 ≥ 50%
+        drop_depth = support - low
+        if drop_depth <= 0:
+            continue
+        reclaim = close - support
+        if reclaim / drop_depth < 0.5:
+            continue
+        # 条件4：量缩确认
+        vol_ratio = vol / avg_vol if avg_vol > 0 else 1.0
+        strength = "strong" if vol_ratio < 0.6 and close > support * 1.002 else "ordinary"
+        return {
+            "detected": True,
+            "strength": strength,
+            "reason": f"5m刺穿{support:.2f}后收回{reclaim/drop_depth*100:.0f}%，量比{vol_ratio:.1f}",
+            "vol_ratio": round(vol_ratio, 2),
+        }
     return {"detected": False}
 
 

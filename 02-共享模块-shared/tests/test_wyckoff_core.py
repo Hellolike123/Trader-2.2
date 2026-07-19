@@ -22,8 +22,9 @@ def _make_bar(open_, high, low, close, volume=1000):
 
 class TestDetectSpring:
     def test_spring_detected(self):
+        """Spring: 跌破90后收回97（收回力度117%），满足50%门槛。"""
         bars = [_make_bar(100, 105, 90, 102) for _ in range(14)]
-        bars.append(_make_bar(85, 100, 84, 92))
+        bars.append(_make_bar(85, 100, 84, 97))  # close=97, reclaim=7/6=117%
         result = wyckoff_analysis(bars)
         assert result["spring_signal"] is True
         assert result["spring_price"] is not None
@@ -177,9 +178,9 @@ class TestCalculateWyckoffScore:
         """
         # 前 14 根: low=90, volume=200 → support=90, avg=200
         bars = [_make_bar(100, 105, 90, 102, 200) for _ in range(14)]
-        # Spring: low=85 < 88.65, close=91 >= 90 → Spring ✓
+        # Spring: low=85, close=97 → reclaim=7/6=117% ≥ 50% ✓
         # volume=150 < 200 → 不触发 SOW ✓
-        bars.append(_make_bar(85, 95, 85, 91, 150))
+        bars.append(_make_bar(85, 95, 85, 97, 150))
         result = calculate_wyckoff_score(bars)
         # Spring 过早减半 25//2=12，无 phase 修正（孤立 Spring 无 B 背景）
         assert result["raw"] == 12, f"Expected 12 (Spring premature 25//2), got {result['raw']}"
@@ -199,7 +200,7 @@ class TestCalculateWyckoffScore:
             {"open": 99, "high": 100, "low": 96, "close": 97, "volume": 600},
             {"open": 97, "high": 95, "low": 90, "close": 91, "volume": 500},  # 逐步下跌
             {"open": 91, "high": 96, "low": 88, "close": 92, "volume": 100},  # 跌破支撑后收回
-            {"open": 90, "high": 95, "low": 85, "close": 91, "volume": 80},   # Spring: low=85<88.65, close=91>=90 + 缩量
+            {"open": 90, "high": 95, "low": 85, "close": 97, "volume": 80},   # Spring: low=85, close=97, reclaim=7/6=117% + 缩量
         ])
         # 验证 Spring 和看多背离都被检测到
         analysis = wyckoff_analysis(bars)
@@ -729,8 +730,8 @@ class TestWyckoffScoreWithClassicSignals:
         15 base(low=90) + 1 Spring(low=85, close=91) = 16 根
         """
         bars = [_make_bar(100, 105, 90, 102, 200) for _ in range(15)]
-        # Spring bar: low=85 < 90*0.985=88.65, close=91 >= 90, vol=150 < 200 (avoid SOW)
-        bars.append({"open": 89, "high": 93, "low": 85, "close": 91, "volume": 150})
+        # Spring bar: low=85, close=97 → reclaim=7/6=117% ≥ 50%, vol=150 < 200
+        bars.append({"open": 89, "high": 97, "low": 85, "close": 97, "volume": 150})
         result = calculate_wyckoff_score(bars)
         spring_signals = [s for s in result["signals"] if "Spring" in s]
         assert len(spring_signals) >= 1, f"Spring not detected: {result['signals']}"
@@ -794,8 +795,8 @@ class TestWyckoffScoreWithClassicSignals:
         # 收尾 bars (index 19-25): low≥90, 确保不被误判为 Spring
         for i in range(7):
             bars.append(_make_bar(90 + i * 0.1, 91 + i * 0.1, 90, 90.5, 150))
-        # bars[-1] (index 26): Spring bar
-        bars.append(_make_bar(89, 91, 88, 90, 150))
+        # bars[-1] (index 26): Spring bar, close=97 → reclaim=7/2=350% ≥ 50%
+        bars.append(_make_bar(89, 97, 88, 97, 150))
         result = calculate_wyckoff_score(bars)
         # Spring 过早(12)+ST(8)+TR质量(4)=24
         assert result["raw"] == 24, f"Expected raw=24 (Spring12+ST8+TR4), got {result['raw']}"
@@ -943,7 +944,7 @@ class TestDetectPhaseSemantics:
         """phase_confidence_delta 在 calculate_wyckoff_score 中被消费"""
         bars = [_make_bar(100, 105, 90, 102, 200) for _ in range(15)]
         # 正常量 Spring（非高量），通过传递 analysis dict 覆盖 phase 确保 delta 存在
-        bars.append({"open": 89, "high": 93, "low": 85, "close": 91, "volume": 150})
+        bars.append({"open": 89, "high": 97, "low": 85, "close": 97, "volume": 150})
         base = wyckoff_analysis(bars)
         # 覆盖 phase 为 accumulation_c 以提供 phase_confidence_delta=0.10，
         # 并确保 spring 不被判过早（spring_premature=False）
@@ -968,38 +969,33 @@ class TestHighVolSpringDeweight:
         a["spring_premature"] = False
         return a
 
-    def test_high_vol_spring_score_halved(self):
-        """spring_vol_class=high_vol_warning 时 Spring 分数减半"""
+    def test_high_vol_spring_filtered(self):
+        """高量 Spring 直接过滤，不报信号（原典：放量跌破 = 真破位）"""
         bars = [_make_bar(100, 105, 90, 102, 200) for _ in range(15)]
-        # vol=300 >= 200*1.3 → high_vol_warning；low 刺穿支撑后收回
-        bars.append({"open": 89, "high": 93, "low": 85, "close": 91, "volume": 300})
+        # vol=300 >= 200*1.5 → 直接过滤
+        bars.append({"open": 89, "high": 97, "low": 85, "close": 97, "volume": 300})
         analysis = self._spring_analysis(bars)
-        assert analysis["spring_signal"] is True
-        assert analysis["spring_vol_class"] == "high_vol_warning"
-        result = calculate_wyckoff_score(bars, analysis=analysis)
-        assert any("高量降权" in s for s in result["signals"])
-        assert any("孤立/过早" not in s for s in result["signals"]), "不应有过早降权"
-        # Spring 减半 +12，无 phase 修正（隔离 Spring 无 B 背景）
-        assert result["raw"] == 12, f"Expected raw=12 (Spring high-vol halved), got {result['raw']}"
+        assert analysis["spring_signal"] is False, "高量 Spring 应被过滤"
+        assert "真破位" in analysis.get("spring_reason", "")
 
-    def test_high_vol_spring_bullish_div_bonus_halved(self):
-        """高量 Spring + 看多背离：背离加成同步减半（5//2=2）"""
+    def test_high_vol_spring_no_score(self):
+        """高量 Spring 被过滤后，即使有看多背离也不计分"""
         from unittest.mock import patch
 
         bars = [_make_bar(100, 105, 90, 102, 200) for _ in range(15)]
-        bars.append({"open": 89, "high": 93, "low": 85, "close": 91, "volume": 300})
+        bars.append({"open": 89, "high": 97, "low": 85, "close": 97, "volume": 300})
         real = wyckoff_analysis
         def _fake_analysis(b, **kwargs):
             r = real(b, **kwargs)
             r["bullish_volume_divergence"] = True
             r["bearish_volume_divergence"] = False
-            r["spring_premature"] = False  # 覆盖 B 背景
+            r["spring_premature"] = False
             return r
         with patch("trader_shared.wyckoff_core.wyckoff_analysis", side_effect=_fake_analysis):
             result = calculate_wyckoff_score(bars)
-        # Spring(高量)12 + 背离加成2 = 14（无 phase 修正在 override 中）
-        assert result["raw"] == 14, f"Expected 14 (12+2), got {result['raw']}: {result['signals']}"
-        assert any("看多背离" in s for s in result["signals"]), "应有看多背离加成"
+        # 高量 Spring 被过滤 → spring_signal=False → 无 Spring 加分
+        spring_signals = [s for s in result["signals"] if "Spring" in s]
+        assert len(spring_signals) == 0, f"高量 Spring 不应计分: {result['signals']}"
 
 
 class TestBCHighPosition:

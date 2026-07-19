@@ -739,22 +739,46 @@ def _detect_spring(bars: list[dict], _support: float | None = None, symbol: str 
     # P1-2: 涨跌停板量能缩放
     vol_scale = _board_vol_scale(symbol)
 
-    # 量能分级：低量弹簧（供应耗尽）最可靠，高量弹簧可能是真破位
+    # ── 收回速度检查：Spring 必须在 1-2 根内收回支撑上方 ──
+    # 回溯 recent 找跌破点，检查是否在 1-2 根内收回
+    breach_bar_i = None
+    for j in range(len(recent)):
+        b_low = to_float(recent[j].get("low"))
+        b_close = to_float(recent[j].get("close"))
+        if b_low is not None and b_low < support:
+            breach_bar_i = j
+            break
+    if breach_bar_i is not None:
+        # 检查跌破后 1-2 根内是否收回
+        recharged = False
+        for k in range(breach_bar_i + 1, min(breach_bar_i + 3, len(recent))):
+            if to_float(recent[k].get("close")) is not None and to_float(recent[k].get("close")) >= support:
+                recharged = True
+                break
+        if not recharged:
+            return {"spring_signal": False, "spring_price": 0.0,
+                    "spring_reason": "跌破支撑后未在2根内收回，非Spring"}
+    # 当前价也必须在支撑上方
+    if current_close < support:
+        return {"spring_signal": False, "spring_price": 0.0,
+                "spring_reason": "刺穿支撑后未能收回，弹簧失败(派发信号)", "spring_strength": "failure"}
+
+    # ── 量能分级 + 过滤 ──
     if avg_volume > 0 and current_volume < avg_volume * WYCKOFF_SPRING_LOW_VOL_RATIO:
         vol_class = "low_vol_confirm"
         volume_note = "缩量洗盘（供应耗尽，可靠）"
     elif avg_volume > 0 and current_volume >= avg_volume * WYCKOFF_SPRING_BULLISH_VOL_RATIO * vol_scale:
-        vol_class = "high_vol_warning"
-        volume_note = "⚠️ 放量弹簧（可能是真破位）"
+        # 放量弹簧：直接过滤，不报信号
+        return {"spring_signal": False, "spring_price": 0.0,
+                "spring_reason": "放量跌破支撑，可能是真破位", "spring_strength": "failure"}
     else:
         vol_class = "normal"
         volume_note = "正常量能"
 
-    # ── P0-4 真假分级：刺穿深度 + 量能比(vs TR基线量) + 收回收盘位置(相对TR中轴) ──
+    # ── 收回力度检查：必须收回跌幅的 50%+ ──
     baseline_vol = tr_ctx.get("tr_baseline_volume") if (in_tr and tr_ctx) else avg_volume
     vol_ratio = (current_volume / baseline_vol) if baseline_vol and baseline_vol > 0 else 1.0
     depth_pct = ((support - current_low) / support * 100.0) if support > 0 else 0.0
-    # TR 中轴：TR 语境用 (上沿+下沿)/2，否则用 (支撑+局部最高)/2
     recent_highs = [to_float(b.get("high")) for b in recent]
     valid_recent_highs = [v for v in recent_highs if v is not None]
     local_high = max(valid_recent_highs) if valid_recent_highs else support
@@ -763,12 +787,17 @@ def _detect_spring(bars: list[dict], _support: float | None = None, symbol: str 
     range_mid = (tr_mid - support)
     reclaim_ratio = ((current_close - support) / range_mid) if range_mid > 0 else 0.0
 
+    # 收回力度 < 50% → 弱弹簧，不可靠
+    if reclaim_ratio < 0.5:
+        return {"spring_signal": False, "spring_price": 0.0,
+                "spring_reason": f"收回力度不足（{reclaim_ratio*100:.0f}% < 50%），弱弹簧", "spring_strength": "weak"}
+
     if depth_pct >= WYCKOFF_SPRING_STRONG_DEPTH_PCT and vol_ratio >= 1.0 and reclaim_ratio >= WYCKOFF_SPRING_STRONG_RECLAIM:
         strength = "strong"
         strength_note = "深度震仓+放量承接+坚决收回中轴，吸筹最强确认"
-    elif depth_pct < WYCKOFF_SPRING_WEAK_DEPTH_PCT or (vol_ratio < WYCKOFF_SPRING_LOW_VOL_RATIO and reclaim_ratio < 0.5):
+    elif depth_pct < WYCKOFF_SPRING_WEAK_DEPTH_PCT:
         strength = "weak"
-        strength_note = "刺穿过浅或缩量弱收回，可靠性低(陷阱风险)"
+        strength_note = "刺穿过浅，可靠性低"
     else:
         strength = "ordinary"
         strength_note = "标准弹簧"
@@ -776,7 +805,7 @@ def _detect_spring(bars: list[dict], _support: float | None = None, symbol: str 
     return {
         "spring_signal": True,
         "spring_price": round(breach_level, 2),
-        "spring_reason": f"跌破支撑后收回 {volume_note}",
+        "spring_reason": f"跌破支撑后收回 {volume_note}，收回{reclaim_ratio*100:.0f}%",
         "spring_vol_class": vol_class,
         "spring_strength": strength,
         "spring_strength_note": strength_note,
