@@ -686,8 +686,9 @@ def detect_buy_points(
                 # P8: 两笔之间无同向笔 → 结构不成立，跳过二类买
                 pass
             else:
-                # 二类买：结构满足即可独立触发（不要求一买前置）
-                # 条件：low_b > low_a + MACD 不恶化 + 回踩缩量
+                # 二类买：结构 + MACD + 缩量 三条件
+                # 类二买：结构满足 + (MACD 或 缩量 至少一个)
+                # 裸结构（无 MACD 无缩量）不报任何信号
                 structure_ok = low_b > low_a and low_b < up_high
                 if structure_ok:
                     area_prev = _stroke_macd_area(bars, down_strokes[-2], "neg")
@@ -700,7 +701,7 @@ def detect_buy_points(
                             "price": round(low_b, 4),
                             "confidence": 2,
                         })
-                    else:
+                    elif area_ok or macd_divergence_ok or vol_shrink:
                         buy_points.append({
                             "type": "类二买",
                             "price": round(low_b, 4),
