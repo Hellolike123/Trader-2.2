@@ -514,34 +514,112 @@ def render_markdown(plan: dict[str, Any]) -> str:
     # ── 段6: 降本模式（仅 cost_cut 时显示） ──
     account_lines = _build_account_section(plan)
 
-    # ── 组装输出 ──
+    # ── 组装输出：执行卡风格 ──
     lines = [
-        "🎯 T0 盯盘助理",
-        f"{plan.get('name','')}（{plan.get('symbol','')}）｜现价 {current_text}（{pct_text(numeric_or_none(plan.get('current_change_pct')))}）",
-        "",
+        f"🎯 {plan.get('name','')}（{plan.get('symbol','')}）{current_text}（{pct_text(numeric_or_none(plan.get('current_change_pct')))}）",
     ]
-    lines.extend(trigger_lines)
-    if resonance_lines:
-        lines.append("")
-        lines.extend(resonance_lines)
-    if capital_lines:
-        lines.append("")
-        lines.extend(capital_lines)
-    if advice_lines:
-        lines.append("")
-        lines.append("📈 操作建议")
-        lines.extend(advice_lines)
-    if emergency_lines:
-        lines.append("")
-        lines.extend(emergency_lines)
-    if account_lines:
-        lines.append("")
-        lines.extend(account_lines)
+
+    # 结论：一句话告诉用户做什么
+    conclusion = _build_conclusion(plan, buy_state, sell_state)
+    lines.append(f"  → {conclusion}")
+
+    # 执行价
     lines.append("")
-    lines.append("⚠️ 风控提醒")
-    lines.extend(risk_lines)
+    lines.append("📌 执行")
+    lines.extend(trigger_lines[1:])  # 跳过 "📌 触发价" 标题
+
+    # VWAP（只在距现价±20%内显示）
+    vwap = plan.get("vwap")
+    if vwap and current_price and abs(vwap - current_price) / current_price <= 0.2:
+        lines.append(f"VWAP {vwap:.2f}")
+
+    # 信号状态（一行）
+    lines.append("")
+    lines.append("🔗 信号")
+    resonance_lines_short = _build_resonance_section(plan)
+    if resonance_lines_short:
+        lines.extend(resonance_lines_short)
+
+    # 失效条件
+    failure = _build_failure_conditions(plan, buy, sell, stop_price, buy_state, sell_state)
+    if failure:
+        lines.append(f"  失效：{failure}")
+
+    # 资金（一行）
+    if capital_lines:
+        # 只取净流入那行
+        for cl in capital_lines:
+            if "净流入" in cl:
+                lines.append(f"💰 {cl}")
+                break
+
+    # 降本模式
+    if account_lines:
+        lines.extend(account_lines)
 
     return "\n".join(lines)
+
+
+def _build_conclusion(plan: dict[str, Any], buy_state: str, sell_state: str) -> str:
+    """一句话结论：告诉用户现在该干什么。"""
+    resonance = plan.get("resonance") or {}
+    buy_green = resonance.get("buy_green", False)
+    sell_red = resonance.get("sell_red", False)
+
+    if buy_state == "可执行" and buy_green:
+        return "三重共振买 → 可低吸"
+    if sell_state == "可执行" and sell_red:
+        return "三重共振卖 → 可高抛"
+    if buy_state == "可执行" and not buy_green:
+        return "触发但未共振 → 等确认再操作"
+    if sell_state == "可执行" and not sell_red:
+        return "触发但未共振 → 等确认再操作"
+
+    # 未触发
+    lights = resonance.get("lights", {})
+    buy_count = sum(1 for v in lights.values() if v.get("buy"))
+    sell_count = sum(1 for v in lights.values() if v.get("sell"))
+    if buy_count >= 2:
+        return "部分共振（买）→ 关注，等第三盏灯"
+    if sell_count >= 2:
+        return "部分共振（卖）→ 关注，等第三盏灯"
+
+    return "暂不操作"
+
+
+def _build_failure_conditions(plan: dict[str, Any], buy: dict, sell: dict,
+                               stop_price: str, buy_state: str, sell_state: str) -> str:
+    """生成失效条件：什么时候放弃当前计划。"""
+    parts = []
+    parts.append(f"跌破{stop_price}")
+
+    resonance = plan.get("resonance") or {}
+    lights = resonance.get("lights", {})
+
+    # 缠论反转
+    chan_info = lights.get("chan", {})
+    if chan_info.get("buy"):
+        parts.append("缠论转卖")
+    elif chan_info.get("sell"):
+        parts.append("缠论转买")
+
+    # 威科夫反转
+    wyck_info = lights.get("wyckoff", {})
+    if wyck_info.get("buy"):
+        parts.append("威科夫转卖")
+    elif wyck_info.get("sell"):
+        parts.append("威科夫转买")
+
+    # VWAP
+    vwap = plan.get("vwap")
+    current = numeric_or_none(plan.get("current_price"))
+    if vwap and current:
+        if current < vwap:
+            parts.append("跌破VWAP")
+        else:
+            parts.append("跌回VWAP")
+
+    return " / ".join(parts) if parts else "无"
 
 
 def _build_account_section(plan: dict[str, Any]) -> list[str]:
@@ -648,7 +726,7 @@ def _build_resonance_section(plan: dict[str, Any]) -> list[str]:
     c15_zs = chan15.get("zones_count") or chan15.get("pivot_count") or 0
     c15_strokes_n = chan15.get("strokes_count") or len(chan15.get("strokes") or [])
 
-    lines = ["🔗 三重共振"]
+    lines = []
     # 缠论一行：方向 + 结构 + 价格
     chan_price_str = f" 价格{chan_price:.2f}" if chan_price else ""
     if chan_dir:
