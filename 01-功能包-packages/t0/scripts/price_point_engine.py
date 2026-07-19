@@ -1089,41 +1089,40 @@ def score_volume(state: dict[str, Any]) -> int:
 # ── 三重硬共振（T0 核心判定）─────────────────────────────────────────────
 
 def check_resonance(report_data: dict[str, Any], zones: dict[str, Any],
-                    state: dict[str, Any], chan_5m: dict | None = None) -> dict[str, Any]:
-    """三重硬共振检查：缠论 + 威科夫 + 动量，三个同时亮灯才可操作。
+                    state: dict[str, Any], chan_5m: dict | None = None,
+                    chan_15m: dict | None = None) -> dict[str, Any]:
+    """三重硬共振检查：缠论(15m) + 威科夫(5m) + 动量(5m)，三个同时亮灯才可操作。
 
-    三个条件都是纯 bool（亮灯/不亮灯），不打分，不加权。
+    缠论用 15m（日线级别结构），威科夫和动量用 5m（T0 执行层）。
     """
     bars = report_data["kline_5m_completed"]
     current = float(report_data["current_price"])
 
-    # ── 1. 缠论 5m：买点或卖点 + 关键价位 ──
+    # ── 1. 缠论：优先 15m（日线级别），fallback 5m ──
     chan_buy = False
     chan_sell = False
     chan_reason = ""
     chan_buy_price = None
     chan_sell_price = None
-    if chan_5m:
-        buy_points = chan_5m.get("buy_points") or []
-        sell_points = chan_5m.get("sell_points") or []
+    chan_src = chan_15m or chan_5m or {}
+    if chan_src:
+        buy_points = chan_src.get("buy_points") or []
+        sell_points = chan_src.get("sell_points") or []
         if buy_points:
             chan_buy = True
             bp_types = [bp.get("type", "") for bp in buy_points]
             chan_reason = f"买点:{'+'.join(bp_types)}"
-            # 缠论买点价位：取最后一笔的低点
-            strokes = chan_5m.get("strokes") or []
+            strokes = chan_src.get("strokes") or []
             down_strokes = [s for s in strokes if s.get("direction") == "down"]
             if down_strokes:
-                chan_buy_price = to_float(down_strokes[-1].get("end_price"))
+                chan_buy_price = num(down_strokes[-1].get("end_price"))
         if sell_points:
             chan_sell = True
             sp_types = [sp.get("type", "") for sp in sell_points]
             chan_reason = f"卖点:{'+'.join(sp_types)}"
-            # 缠论卖点价位：取最后一笔的高点
-            strokes = chan_5m.get("strokes") or []
             up_strokes = [s for s in strokes if s.get("direction") == "up"]
             if up_strokes:
-                chan_sell_price = to_float(up_strokes[-1].get("end_price"))
+                chan_sell_price = num(up_strokes[-1].get("end_price"))
 
     # ── 2. 威科夫：Spring(买) / UT(卖) / 无供给(买) / 放量滞涨(卖) + 关键价位 ──
     wyckoff_buy = False
@@ -1265,9 +1264,10 @@ def build_price_point_model(report_data: dict[str, Any], structure_result: dict[
         atr_info = {"atr14": atr14_val, "atr_ratio": atr_ratio_val, "level": level_name, "level_advice": level_advice}
 
     # 三重硬共振检查（缠论 + 威科夫 + 动量，三亮灯才可操作）
-    # chan_5m 由 t0_run.py 注入到 report_data["chan_5m"]
+    # 缠论优先 15m（日线级别），fallback 5m
     chan_5m = data.get("chan_5m") or report_data.get("chan_5m")
-    resonance = check_resonance(data, zones, indicator_state, chan_5m)
+    chan_15m = data.get("chan_15m") or report_data.get("chan_15m")
+    resonance = check_resonance(data, zones, indicator_state, chan_5m, chan_15m)
 
     return {
         "data_status": status_value,

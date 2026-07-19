@@ -643,9 +643,42 @@ def _build_resonance_section(plan: dict[str, Any]) -> list[str]:
         chan_parts.append("顶背离")
 
     chan_detail = " · ".join(chan_parts) if chan_parts else chan_info.get("reason", "无信号")
-    reason = chan_info.get("reason", "")
     lines = ["🔗 三重共振"]
-    lines.append(f"  缠论 {chan_status}（{chan_detail}）")
+    lines.append(f"  缠论(5m) {chan_status}（{chan_detail}）")
+
+    # 15m 缠论（日线级别结构）
+    chan15 = plan.get("chan_15m") or {}
+    if chan15:
+        c15_parts = []
+        c15_struct = chan15.get("structure_type") or ""
+        c15_trend = chan15.get("trend_label") or ""
+        if c15_struct and c15_struct != "无结构":
+            c15_parts.append(f"结构{c15_struct}")
+        elif c15_trend and c15_trend != "数据不足":
+            c15_parts.append(c15_trend)
+        c15_zs = chan15.get("zones_count") or chan15.get("pivot_count") or 0
+        if c15_zs:
+            c15_parts.append(f"{c15_zs}中枢")
+        c15_strokes = chan15.get("strokes_count") or len(chan15.get("strokes") or [])
+        if c15_strokes:
+            c15_parts.append(f"{c15_strokes}笔")
+        c15_buy = [bp.get("type", "") for bp in (chan15.get("buy_points") or [])]
+        c15_sell = [sp.get("type", "") for sp in (chan15.get("sell_points") or [])]
+        if c15_buy:
+            c15_parts.append(f"买:{'+'.join(c15_buy)}")
+        if c15_sell:
+            c15_parts.append(f"卖:{'+'.join(c15_sell)}")
+        c15_detail = " · ".join(c15_parts) if c15_parts else "无信号"
+        # 15m 买卖点状态
+        c15_buy_pts = chan15.get("buy_points") or []
+        c15_sell_pts = chan15.get("sell_points") or []
+        if c15_buy_pts:
+            c15_status = "✅ 买"
+        elif c15_sell_pts:
+            c15_status = "✅ 卖"
+        else:
+            c15_status = "❌ 未亮"
+        lines.append(f"  缠论(15m) {c15_status}（{c15_detail}）")
 
     # ── 威科夫详情 ──
     wyck_info = lights.get("wyckoff", {})
