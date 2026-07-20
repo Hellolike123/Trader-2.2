@@ -135,6 +135,21 @@ def completed_5m_bars(bars: list[dict[str, Any]], now: datetime | None = None) -
     return completed
 
 
+def today_bars(bars: list[dict[str, Any]], now: datetime | None = None) -> list[dict[str, Any]]:
+    """只保留今日的 bar（VWAP 是日内指标，不能跨日计算）。"""
+    if not bars:
+        return []
+    now = now or datetime.now()
+    result: list[dict[str, Any]] = []
+    for bar in bars:
+        if bar is None:
+            continue
+        dt = parse_dt(bar.get("time") or bar.get("date"))
+        if dt is None or dt.date() == now.date():
+            result.append(bar)
+    return result
+
+
 def data_status(quote: dict[str, Any], daily: list[dict[str, Any]], bars_5m: list[dict[str, Any]], now: datetime | None = None) -> str:
     now = now or datetime.now()
     if not quote or not daily or len(bars_5m) < MIN_5M_BARS:
@@ -171,7 +186,7 @@ def find_key_levels(report_data: dict[str, Any], structure_result: dict[str, Any
     bars_15m = report_data.get("kline_15m") or []
     bars_30m = report_data.get("kline_30m") or []
     current = float(report_data["current_price"])
-    vwap = calculate_vwap_from_bars(bars_5m)
+    vwap = calculate_vwap_from_bars(today_bars(bars_5m))
     recent5 = daily[-5:] if len(daily) >= 5 else daily
     recent20 = daily[-STRUCTURE_WINDOW:] if len(daily) >= STRUCTURE_WINDOW else daily
     support: list[dict[str, Any]] = []
@@ -331,8 +346,8 @@ def latest_indicator_state(bars: list[dict[str, Any]]) -> dict[str, Any]:
     macd = calculate_macd(closes)
     rsi = calculate_rsi(closes)
     hist = macd.get("hist") or []
-    vwap = calculate_vwap_from_bars(bars)
-    prev_vwap = calculate_vwap_from_bars(bars[:-1]) if len(bars) >= 2 else None
+    vwap = calculate_vwap_from_bars(today_bars(bars))
+    prev_vwap = calculate_vwap_from_bars(today_bars(bars[:-1])) if len(bars) >= 2 else None
     bb = calculate_bollinger_bands(closes, period=20, num_std=2.0)
     bb_last = bb.get(safe_max(bb.keys())) if bb else {}
     bb_pct_b = bb_last.get("pct_b")

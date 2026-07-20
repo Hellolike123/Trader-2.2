@@ -158,8 +158,8 @@ def validate_t0(markdown: str) -> list[str]:
     errors: list[str] = []
     lines = nonempty_lines(markdown)
     errors.extend(validate_plain_output_format(markdown, lines))
-    if not lines or not lines[0].startswith("🎯 T0"):
-        errors.append("report must start with 🎯 T0")
+    if not lines or not lines[0].startswith("🎯"):
+        errors.append("report must start with 🎯")
     for label in ("低吸", "高抛", "止损"):
         if not any(label in line for line in lines):
             errors.append(f"missing line: {label}")

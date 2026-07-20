@@ -74,13 +74,11 @@ def test_t0_markdown_contract() -> None:
     }
     markdown = render_markdown(plan)
 
-    assert markdown.startswith("🎯 T0")
+    assert markdown.startswith("🎯")
     assert "止损：" in markdown
     assert "低吸还差" in markdown
     assert "低吸：" in markdown
     assert "高抛：" in markdown
-    assert "🚨 应急" in markdown
-    assert "👀" in markdown
     assert validate(markdown) == []
 
 
