@@ -185,10 +185,9 @@ def test_strong_spring_grading():
     assert "吸筹最强确认" in sp["spring_strength_note"]
 
 
-# ── 9. Weak Spring：刺穿过浅（depth < 0.5%=WEAK_DEPTH_PCT） ─────────────────
+# ── 9. Weak Spring：缩量无承接，可靠性低 ──────────────────────────────────────
 def test_weak_spring_grading():
-    # 用极小 ATR(0.03) 使刺穿线贴近支撑(8.5-0.03×0.5=8.485)
-    # low=8.48 刚刺穿、depth≈0.24% < 0.5% → weak
+    # 缩量（600k << 基线109万）+ depth=0.24% → vol_ratio<0.8 → weak
     bar = mk(8.9, 8.95, 8.48, 8.75, 600_000)
     bar["atr14"] = 0.03
     bars = build_flat_tr(with_spikes=True) + [bar]
@@ -196,7 +195,7 @@ def test_weak_spring_grading():
     sp2 = we._detect_spring(bars, tr_ctx=tr)
     assert sp2["spring_signal"] is True, f"应触发 spring, got {sp2.get('spring_reason')}"
     assert sp2["spring_strength"] == "weak", f"应判 weak, got {sp2.get('spring_strength')}"
-    assert "刺穿过浅" in sp2["spring_strength_note"]
+    assert "无主动承接" in sp2["spring_strength_note"]
 
 
 # ── 10. Ordinary Spring：标准刺穿，深度/量/收回未同时达 strong ───────────────

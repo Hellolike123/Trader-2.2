@@ -787,17 +787,18 @@ def _detect_spring(bars: list[dict], _support: float | None = None, symbol: str 
     range_mid = (tr_mid - support)
     reclaim_ratio = ((current_close - support) / range_mid) if range_mid > 0 else 0.0
 
-    # 收回力度 < 50% → 弱弹簧，不可靠
+    # ── 收回力度 < 50% → 弱弹簧，不可靠 ──
     if reclaim_ratio < 0.5:
         return {"spring_signal": False, "spring_price": 0.0,
                 "spring_reason": f"收回力度不足（{reclaim_ratio*100:.0f}% < 50%），弱弹簧", "spring_strength": "weak"}
 
+    # ── 分级：强 = 量价齐振；弱 = 缩量无确认；其他 = 标准 ──
     if depth_pct >= WYCKOFF_SPRING_STRONG_DEPTH_PCT and vol_ratio >= 1.0 and reclaim_ratio >= WYCKOFF_SPRING_STRONG_RECLAIM:
         strength = "strong"
         strength_note = "深度震仓+放量承接+坚决收回中轴，吸筹最强确认"
-    elif depth_pct < WYCKOFF_SPRING_WEAK_DEPTH_PCT:
+    elif vol_ratio < WYCKOFF_SPRING_LOW_VOL_RATIO:
         strength = "weak"
-        strength_note = "刺穿过浅，可靠性低"
+        strength_note = f"缩量（量比{vol_ratio:.1f}），无主动承接确认，可靠性低"
     else:
         strength = "ordinary"
         strength_note = "标准弹簧"
