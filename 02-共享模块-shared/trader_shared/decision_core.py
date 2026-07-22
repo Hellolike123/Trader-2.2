@@ -308,7 +308,7 @@ def status_layers(
     # P0-2: 单日跌幅硬性熔断 — 跌幅超阈值直接"风险回避"，跳过假跌破逻辑
     # 注: HARD_STOP_SINGLE_DAY_DROP 是小数(-0.07)，change 是百分比(-7.0)
     # 用 round 避免浮点精度问题 (-0.07*100 = -7.000000000000001)
-    if round(change, 4) < round(HARD_STOP_SINGLE_DAY_DROP * 100, 4):  # fix: "超7%" means strictly greater than
+    if round(change, 4) <= round(HARD_STOP_SINGLE_DAY_DROP * 100, 4):  # 跌幅 >= 7% 触发熔断
         return {
             "base_status": "风险回避",
             "theory_status": "风险回避",

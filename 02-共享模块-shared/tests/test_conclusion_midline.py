@@ -118,7 +118,8 @@ class TestMidlineViewB1A:
             wyckoff_midline=wyck,
         )
         assert c["stage_line"] == "蓄势偏强"
-        assert "暂缓" in c["midline"] or "偏空" in c["midline"]
+        # P2：缠论 low 置信 → chanlun_midline_dir 返回 0（中性），不靠兜底翻转方向
+        # 下跌 + low 置信 → 中线观察（非暂缓/偏空，因为低置信不驱动方向）
         assert "可跟踪" not in c["midline"]
         assert not _STAGE_RE.search(c["midline"])
 
@@ -128,7 +129,7 @@ class TestMidlineViewB1A:
                 "structure_type": "上涨趋势",
                 "structure_confidence": "low",
                 "trend_label": "回调段",
-                "buy_points": [{"type": "二类买"}],
+                "buy_points": [{"type": "二类买", "confidence": 2}],
                 "divergence": {},
             }
         }
@@ -173,6 +174,8 @@ class TestMidlineViewB1A:
         assert not _STAGE_RE.search(c["midline"])
 
     def test_strong_bear_first(self):
+        """主升阶段 upthrust 视为正常洗盘，不判偏空（P2 设计）。
+        要触发 strong_bear 需要 bc_signal 或 sow_signal，或 major_stage 非主升。"""
         chan = {
             "chanlun": {
                 "structure_type": "上涨趋势",
@@ -187,6 +190,7 @@ class TestMidlineViewB1A:
             "sow_signal": False,
             "sos_signal": False,
         }
+        # 主升 + upthrust → 正常洗盘，不偏空
         c = build_conclusion_block(
             major_stage="主升",
             mistery_gate={"action": "观望", "hard_block": "none", "position_cap_pct": 0},
@@ -195,8 +199,20 @@ class TestMidlineViewB1A:
             chanlun_midline=chan,
             wyckoff_midline=wyck,
         )
-        assert "慎跟" in c["midline"] or "偏空" in c["midline"]
+        # 主升阶段 upthrust 不判 strong_bear，chan 上涨 → 可跟踪
+        assert "可跟踪" in c["midline"]
         assert not _STAGE_RE.search(c["midline"])
+
+        # 非主升阶段 upthrust → strong_bear
+        c2 = build_conclusion_block(
+            major_stage="蓄势",
+            mistery_gate={"action": "观望", "hard_block": "none", "position_cap_pct": 0},
+            key_prices=_kp_no_chase(),
+            fusion={},
+            chanlun_midline=chan,
+            wyckoff_midline=wyck,
+        )
+        assert "慎跟" in c2["midline"] or "偏空" in c2["midline"]
 
     def test_conflict_track_vs_no_chase(self):
         chan = {
