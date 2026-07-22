@@ -1104,40 +1104,26 @@ def score_volume(state: dict[str, Any]) -> int:
 # ── 三重硬共振（T0 核心判定）─────────────────────────────────────────────
 
 def check_resonance(report_data: dict[str, Any], zones: dict[str, Any],
-                    state: dict[str, Any], chan_5m: dict | None = None,
-                    chan_15m: dict | None = None) -> dict[str, Any]:
-    """三重硬共振检查：缠论(15m) + 威科夫(5m) + 动量(5m)，三个同时亮灯才可操作。
+                    state: dict[str, Any], ab_result: dict | None = None) -> dict[str, Any]:
+    """三重硬共振检查：Al Brooks(5m) + 威科夫(5m) + 动量(5m)，三个同时亮灯才可操作。
 
-    缠论用 15m（日线级别结构），威科夫和动量用 5m（T0 执行层）。
+    Al Brooks 价格行为替换缠论作为第一席位。
     """
     bars = report_data["kline_5m_completed"]
     current = float(report_data["current_price"])
 
-    # ── 1. 缠论：优先 15m（日线级别），fallback 5m ──
-    chan_buy = False
-    chan_sell = False
-    chan_reason = ""
-    chan_buy_price = None
-    chan_sell_price = None
-    chan_src = chan_15m or chan_5m or {}
-    if chan_src:
-        buy_points = chan_src.get("buy_points") or []
-        sell_points = chan_src.get("sell_points") or []
-        if buy_points:
-            chan_buy = True
-            bp_types = [bp.get("type", "") for bp in buy_points]
-            chan_reason = f"买点:{'+'.join(bp_types)}"
-            strokes = chan_src.get("strokes") or []
-            down_strokes = [s for s in strokes if s.get("direction") == "down"]
-            if down_strokes:
-                chan_buy_price = num(down_strokes[-1].get("end_price"))
-        if sell_points:
-            chan_sell = True
-            sp_types = [sp.get("type", "") for sp in sell_points]
-            chan_reason = f"卖点:{'+'.join(sp_types)}"
-            up_strokes = [s for s in strokes if s.get("direction") == "up"]
-            if up_strokes:
-                chan_sell_price = num(up_strokes[-1].get("end_price"))
+    # ── 1. Al Brooks 价格行为 ──
+    ab_buy = False
+    ab_sell = False
+    ab_reason = ""
+    ab_buy_price = None
+    ab_sell_price = None
+    if ab_result:
+        ab_buy = ab_result.get("buy_signal", False)
+        ab_sell = ab_result.get("sell_signal", False)
+        ab_reason = ab_result.get("buy_reason", "") if ab_buy else ab_result.get("sell_reason", "")
+        ab_buy_price = ab_result.get("buy_price")
+        ab_sell_price = ab_result.get("sell_price")
 
     # ── 2. 威科夫：Spring(买) / UT(卖) / 无供给(买) / 放量滞涨(卖) + 关键价位 ──
     wyckoff_buy = False
@@ -1188,21 +1174,23 @@ def check_resonance(report_data: dict[str, Any], zones: dict[str, Any],
         momentum_reason = "RSI顶背离"
 
     # ── 共振判定 ──
-    buy_green = chan_buy and wyckoff_buy and momentum_buy
-    sell_red = chan_sell and wyckoff_sell and momentum_sell
+    buy_green = ab_buy and wyckoff_buy and momentum_buy
+    sell_red = ab_sell and wyckoff_sell and momentum_sell
 
     # 亮灯状态（用于显示，不用于判定）
     lights = {
-        "chan": {"buy": chan_buy, "sell": chan_sell, "reason": chan_reason, "ok": bool(chan_5m),
-                 "buy_price": chan_buy_price, "sell_price": chan_sell_price},
+        "ab": {"buy": ab_buy, "sell": ab_sell, "reason": ab_reason, "ok": bool(ab_result),
+               "buy_price": ab_buy_price, "sell_price": ab_sell_price,
+               "quality": ab_result.get("signal_bar_quality", "none") if ab_result else "none",
+               "always_in": ab_result.get("always_in", "neutral") if ab_result else "neutral"},
         "wyckoff": {"buy": wyckoff_buy, "sell": wyckoff_sell, "reason": wyckoff_reason, "ok": True,
                     "buy_price": wyckoff_buy_price, "sell_price": wyckoff_sell_price},
         "momentum": {"buy": momentum_buy, "sell": momentum_sell, "reason": momentum_reason, "ok": True},
     }
 
     # 三套理论的参考价位汇总
-    buy_prices = [p for p in [chan_buy_price, wyckoff_buy_price] if p and p > 0]
-    sell_prices = [p for p in [chan_sell_price, wyckoff_sell_price] if p and p > 0]
+    buy_prices = [p for p in [ab_buy_price, wyckoff_buy_price] if p and p > 0]
+    sell_prices = [p for p in [ab_sell_price, wyckoff_sell_price] if p and p > 0]
 
     return {
         "buy_green": buy_green,
@@ -1227,7 +1215,7 @@ def _resonance_summary(lights: dict, buy_green: bool, sell_red: bool) -> str:
         return "🟡 部分共振"
     off = []
     for name, info in lights.items():
-        label = {"chan": "缠论", "wyckoff": "威科夫", "momentum": "动量"}[name]
+        label = {"ab": "价格行为", "wyckoff": "威科夫", "momentum": "动量"}[name]
         if not info["buy"] and not info["sell"]:
             off.append(label)
     return f"🔴 未共振（缺：{'、'.join(off)}）"
@@ -1278,11 +1266,14 @@ def build_price_point_model(report_data: dict[str, Any], structure_result: dict[
         level_name, level_advice = _atr_volatility_label(atr_ratio_val)
         atr_info = {"atr14": atr14_val, "atr_ratio": atr_ratio_val, "level": level_name, "level_advice": level_advice}
 
-    # 三重硬共振检查（缠论 + 威科夫 + 动量，三亮灯才可操作）
-    # 缠论优先 15m（日线级别），fallback 5m
-    chan_5m = data.get("chan_5m") or report_data.get("chan_5m")
-    chan_15m = data.get("chan_15m") or report_data.get("chan_15m")
-    resonance = check_resonance(data, zones, indicator_state, chan_5m, chan_15m)
+    # 三重硬共振检查（Al Brooks + 威科夫 + 动量，三亮灯才可操作）
+    from trader_shared.ab_price_action import analyze_ab
+    ab_result = analyze_ab(
+        bars_5m=completed,
+        bars_15m=report_data.get("kline_15m") or [],
+        current_price=float(data["current_price"]),
+    )
+    resonance = check_resonance(data, zones, indicator_state, ab_result=ab_result)
 
     return {
         "data_status": status_value,
@@ -1301,4 +1292,5 @@ def build_price_point_model(report_data: dict[str, Any], structure_result: dict[
         "ict_signal": ict_signal,
         "atr_info": atr_info,
         "resonance": resonance,
+        "ab_result": ab_result,
     }

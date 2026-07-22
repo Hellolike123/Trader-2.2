@@ -363,10 +363,10 @@ def render_markdown(plan: dict[str, Any]) -> str:
     # 低吸价位
     _cur = numeric_or_none(plan.get("current_price")) or 0
     _zone_buy = _mzones.get("buy_zone", {}).get("main_support")
-    _chan_bp_raw = (_res.get("lights") or {}).get("chan", {}).get("buy_price")
-    _chan_bp = None
-    if _chan_bp_raw and _cur and abs(_chan_bp_raw - _cur) / _cur <= 0.2:
-        _chan_bp = _chan_bp_raw
+    _ab_bp_raw = (_res.get("lights") or {}).get("ab", {}).get("buy_price")
+    _ab_bp = None
+    if _ab_bp_raw and _cur and abs(_ab_bp_raw - _cur) / _cur <= 0.2:
+        _ab_bp = _ab_bp_raw
     _wyck_bp = (_res.get("lights") or {}).get("wyckoff", {}).get("buy_price")
     if buy_state == "可执行":
         _exec = numeric_or_none(buy.get("execution_price"))
@@ -379,8 +379,8 @@ def render_markdown(plan: dict[str, Any]) -> str:
         _parts = []
         if _zone_buy:
             _parts.append(f"价区{_zone_buy:.2f}")
-        if _chan_bp:
-            _parts.append(f"缠论{_chan_bp:.2f}")
+        if _ab_bp:
+            _parts.append(f"价格行为{_ab_bp:.2f}")
         if _wyck_bp:
             _parts.append(f"威科夫{_wyck_bp:.2f}")
         _ref_str = "｜".join(_parts) if _parts else "暂无"
@@ -388,10 +388,10 @@ def render_markdown(plan: dict[str, Any]) -> str:
 
     # 高抛价位
     _zone_sell = _mzones.get("sell_zone", {}).get("main_resistance")
-    _chan_sp_raw = (_res.get("lights") or {}).get("chan", {}).get("sell_price")
-    _chan_sp = None
-    if _chan_sp_raw and _cur and abs(_chan_sp_raw - _cur) / _cur <= 0.2:
-        _chan_sp = _chan_sp_raw
+    _ab_sp_raw = (_res.get("lights") or {}).get("ab", {}).get("sell_price")
+    _ab_sp = None
+    if _ab_sp_raw and _cur and abs(_ab_sp_raw - _cur) / _cur <= 0.2:
+        _ab_sp = _ab_sp_raw
     _wyck_sp = (_res.get("lights") or {}).get("wyckoff", {}).get("sell_price")
     if sell_state == "可执行":
         _exec = numeric_or_none(sell.get("execution_price"))
@@ -404,8 +404,8 @@ def render_markdown(plan: dict[str, Any]) -> str:
         _parts = []
         if _zone_sell:
             _parts.append(f"价区{_zone_sell:.2f}")
-        if _chan_sp:
-            _parts.append(f"缠论{_chan_sp:.2f}")
+        if _ab_sp:
+            _parts.append(f"价格行为{_ab_sp:.2f}")
         if _wyck_sp:
             _parts.append(f"威科夫{_wyck_sp:.2f}")
         _ref_str = "｜".join(_parts) if _parts else "暂无"
@@ -477,23 +477,22 @@ def render_markdown(plan: dict[str, Any]) -> str:
     if order_book_analyze and plan.get("order_book"):
         ob = order_book_analyze(plan["order_book"])
         advice_lines.append(ob["line"])
-    # 5m 缠论一行摘要
-    chan5 = plan.get("chan_5m") or {}
-    if chan5:
-        _c5_trend = chan5.get("trend_label") or chan5.get("structure_type") or ""
-        _c5_strokes = len(chan5.get("strokes") or [])
-        _c5_buy = [bp.get("type", "") for bp in (chan5.get("buy_points") or [])]
-        _c5_sell = [sp.get("type", "") for sp in (chan5.get("sell_points") or [])]
-        _c5_parts = ["缠论(5m)"]
-        if _c5_trend:
-            _c5_parts.append(_c5_trend)
-        if _c5_strokes:
-            _c5_parts.append(f"{_c5_strokes}笔")
-        if _c5_buy:
-            _c5_parts.append(f"买点:{'+'.join(_c5_buy)}")
-        if _c5_sell:
-            _c5_parts.append(f"卖点:{'+'.join(_c5_sell)}")
-        advice_lines.append("  ".join(_c5_parts))
+    # Al Brooks 价格行为摘要
+    ab_res = plan.get("ab_result") or {}
+    if ab_res:
+        _ab_parts = ["价格行为"]
+        _ai = ab_res.get("always_in", "neutral")
+        if _ai != "neutral":
+            _ab_parts.append(f"Always-In{'多' if _ai == 'bull' else '空'}")
+        _q = ab_res.get("signal_bar_quality", "none")
+        if _q != "none":
+            _ab_parts.append(f"信号棒{_q}")
+        _hl = (ab_res.get("hl_count") or {}).get("type", "none")
+        if _hl != "none":
+            _ab_parts.append(_hl)
+        if ab_res.get("breakout_mode"):
+            _ab_parts.append("突破模式")
+        advice_lines.append("  ".join(_ab_parts))
     history_lines = review_lines(plan.get("history"))
     if history_lines and history_lines != ["暂无关键事件。"]:
         advice_lines.extend(history_lines)
@@ -603,12 +602,12 @@ def _build_failure_conditions(plan: dict[str, Any], buy: dict, sell: dict,
     resonance = plan.get("resonance") or {}
     lights = resonance.get("lights", {})
 
-    # 缠论反转
-    chan_info = lights.get("chan", {})
-    if chan_info.get("buy"):
-        parts.append("缠论转卖")
-    elif chan_info.get("sell"):
-        parts.append("缠论转买")
+    # 价格行为反转
+    ab_info = lights.get("ab", {})
+    if ab_info.get("buy"):
+        parts.append("价格行为转卖")
+    elif ab_info.get("sell"):
+        parts.append("价格行为转买")
 
     # 威科夫反转
     wyck_info = lights.get("wyckoff", {})
@@ -679,67 +678,41 @@ def _build_resonance_section(plan: dict[str, Any]) -> list[str]:
     sell_count = sum(1 for v in lights.values() if v.get("sell"))
     max_count = max(buy_count, sell_count)
 
-    # ── 缠论合并（15m 定方向 + 5m 定时机）──
-    chan15 = plan.get("chan_15m") or {}
-    chan5 = plan.get("chan_5m") or {}
-
-    # 15m 决定方向
-    c15_buy_pts = chan15.get("buy_points") or []
-    c15_sell_pts = chan15.get("sell_points") or []
-    c15_buy_price = None
-    if c15_buy_pts:
-        # 用买点自带的 price 字段（更准确）
-        c15_buy_price = c15_buy_pts[-1].get("price")
-        # 如果价格远离现价（>20%），不用
-        if c15_buy_price and plan.get("current_price") and abs(c15_buy_price - plan.get("current_price")) / plan.get("current_price") > 0.2:
-            c15_buy_price = None
-    c15_sell_price = None
-    if c15_sell_pts:
-        c15_sell_price = c15_sell_pts[-1].get("price")
-        if c15_sell_price and plan.get("current_price") and abs(c15_sell_price - plan.get("current_price")) / plan.get("current_price") > 0.2:
-            c15_sell_price = None
-
-    # 5m 提供精确入场价
-    c5_buy_pts = chan5.get("buy_points") or []
-    c5_sell_pts = chan5.get("sell_points") or []
-    c5_buy_price = None
-    if c5_buy_pts:
-        c5_buy_price = c5_buy_pts[-1].get("price")
-        if c5_buy_price and plan.get("current_price") and abs(c5_buy_price - plan.get("current_price")) / plan.get("current_price") > 0.2:
-            c5_buy_price = None
-    c5_sell_price = None
-    if c5_sell_pts:
-        c5_sell_price = c5_sell_pts[-1].get("price")
-        if c5_sell_price and plan.get("current_price") and abs(c5_sell_price - plan.get("current_price")) / plan.get("current_price") > 0.2:
-            c5_sell_price = None
-
-    # 合并方向：15m 决定，5m 补充
-    if c15_buy_pts:
-        chan_dir = "买"
-        chan_price = c15_buy_price or c5_buy_price
-        chan_detail = f"买:{'+'.join(bp.get('type','') for bp in c15_buy_pts)}"
-    elif c15_sell_pts:
-        chan_dir = "卖"
-        chan_price = c15_sell_price or c5_sell_price
-        chan_detail = f"卖:{'+'.join(sp.get('type','') for sp in c15_sell_pts)}"
+    # ── Al Brooks 价格行为详情 ──
+    ab_info = lights.get("ab", {})
+    ab_result = plan.get("ab_result") or {}
+    if ab_info.get("buy"):
+        ab_status = "✅ 买"
+    elif ab_info.get("sell"):
+        ab_status = "✅ 卖"
+    elif not ab_info.get("ok"):
+        ab_status = "❓ 无数据"
     else:
-        chan_dir = ""
-        chan_price = None
-        chan_detail = "无信号"
-
-    # 结构信息（取 15m）
-    c15_struct = chan15.get("structure_type") or ""
-    c15_trend = chan15.get("trend_label") or ""
-    c15_zs = chan15.get("zones_count") or chan15.get("pivot_count") or 0
-    c15_strokes_n = chan15.get("strokes_count") or len(chan15.get("strokes") or [])
+        ab_status = "❌ 未亮"
+    ab_detail = ab_info.get("reason") or "无信号"
 
     lines = []
-    # 缠论一行：方向 + 结构 + 价格
-    chan_price_str = f" 价格{chan_price:.2f}" if chan_price else ""
-    if chan_dir:
-        lines.append(f"  缠论 {'✅ ' + chan_dir}（{chan_detail}{chan_price_str}）")
+    # Al Brooks 一行：状态 + Always-In + 信号棒质量
+    ai = ab_result.get("always_in", "neutral")
+    quality = ab_result.get("signal_bar_quality", "none")
+    hl = ab_result.get("hl_count") or {}
+    hl_type = hl.get("type", "none")
+
+    # 构建详情文本
+    parts = []
+    if ai != "neutral":
+        ai_label = "多头" if ai == "bull" else "空头"
+        parts.append(f"Always-In{ai_label}")
+    if quality != "none":
+        parts.append(f"信号棒{quality}")
+    if hl_type != "none":
+        parts.append(hl_type)
+    ab_detail_text = "·".join(parts) if parts else ab_detail
+
+    if ab_info.get("buy") or ab_info.get("sell"):
+        lines.append(f"  价格行为 {ab_status}（{ab_detail_text}）")
     else:
-        lines.append(f"  缠论 ❌ 未亮（{c15_struct or c15_trend or '无数据'}）")
+        lines.append(f"  价格行为 {ab_status}（{ab_detail_text or '无信号'}）")
 
     # ── 威科夫详情 ──
     wyck_info = lights.get("wyckoff", {})
@@ -773,7 +746,7 @@ def _build_resonance_section(plan: dict[str, Any]) -> list[str]:
     elif max_count >= 2:
         # 找出没亮的那盏灯
         off = []
-        for key, label in [("chan", "缠论"), ("wyckoff", "威科夫"), ("momentum", "动量")]:
+        for key, label in [("ab", "价格行为"), ("wyckoff", "威科夫"), ("momentum", "动量")]:
             info = lights.get(key, {})
             if not info.get("buy") and not info.get("sell"):
                 off.append(label)

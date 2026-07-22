@@ -133,25 +133,6 @@ def build_plan(target: str) -> dict[str, Any]:
     elif isinstance(report_data.get("structure_result"), dict):
         structure_result = report_data["structure_result"]
 
-    # 5 分钟级实时缠论（T0 执行层）
-    try:
-        from trader_shared.realtime_chan import get_realtime_chan_5m
-        rc5 = get_realtime_chan_5m(target, bars_5m, current_price=float(current))
-        report_data["chan_5m"] = rc5.get("result") or {}
-    except Exception:
-        report_data["chan_5m"] = {}
-
-    # 15 分钟缠论（日线级别结构分析，替代日线缠论）
-    try:
-        from trader_shared.chan_core import chanlun_analysis as _chan_analysis
-        if bars_15m and len(bars_15m) >= 20:
-            rc15 = _chan_analysis(bars_15m, current, symbol=target, timeframe='5m')
-            report_data["chan_15m"] = rc15 if rc15 else {}
-        else:
-            report_data["chan_15m"] = {}
-    except Exception:
-        report_data["chan_15m"] = {}
-
     model = build_price_point_model(report_data, structure_result=structure_result)
     buy_display_status = side_status(model["buy"])
     sell_display_status = side_status(model["sell"])
@@ -210,8 +191,7 @@ def build_plan(target: str) -> dict[str, Any]:
         wyckoff_result=wyck_result,
     )
 
-    result["chan_5m"] = report_data.get("chan_5m") or {}
-    result["chan_15m"] = report_data.get("chan_15m") or {}
+    result["ab_result"] = model.get("ab_result") or {}
 
     # 筹码搬家监控
     try:
