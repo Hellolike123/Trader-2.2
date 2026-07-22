@@ -1161,36 +1161,71 @@ def check_resonance(report_data: dict[str, Any], zones: dict[str, Any],
                 wyckoff_sell = True
                 wyckoff_reason = vstop.get("reason", "放量滞涨")
 
-    # ── 3. 动量：RSI 背离检测 ──
+    # ── 3. 动量：RSI 背离检测 + 入场/出场价 ──
     momentum_buy = False
     momentum_sell = False
     momentum_reason = ""
+    momentum_buy_price = None
+    momentum_sell_price = None
+    momentum_exit_price = None
     rsi_series = state.get("rsi") or []
+    rsi_last = rsi_series[-1] if rsi_series else None
     if detect_bullish_divergence(bars, rsi_series, lookback=12):
         momentum_buy = True
         momentum_reason = "RSI底背离"
+        # 入场价 = 最近低点（背离确认的支撑位）
+        momentum_buy_price = float(bars[-1].get("low", 0)) if bars else None
+        # 出场价 = RSI 回到 50 中轴时对应的价格区域（用近期高点估算）
+        if len(bars) >= 12:
+            recent_highs = [float(b.get("high", 0)) for b in bars[-12:]]
+            momentum_exit_price = round(min(recent_highs[-3:]), 2) if recent_highs else None
     if detect_bearish_divergence(bars, rsi_series, lookback=12):
         momentum_sell = True
         momentum_reason = "RSI顶背离"
+        momentum_sell_price = float(bars[-1].get("high", 0)) if bars else None
+        if len(bars) >= 12:
+            recent_lows = [float(b.get("low", 0)) for b in bars[-12:]]
+            momentum_exit_price = round(max(recent_lows[-3:]), 2) if recent_lows else None
 
     # ── 共振判定 ──
     buy_green = ab_buy and wyckoff_buy and momentum_buy
     sell_red = ab_sell and wyckoff_sell and momentum_sell
 
+    # Al Brooks 出场价：信号棒反向极端 或 H2/L2 回调位
+    ab_exit_price = None
+    if ab_result:
+        hl = ab_result.get("hl_count") or {}
+        hl_price = hl.get("last_pullback_price")
+        if ab_buy and hl_price:
+            ab_exit_price = hl_price  # L2 回调低点作为加仓位
+        elif ab_sell and hl_price:
+            ab_exit_price = hl_price  # H2 回调高点作为减仓位
+
+    # 威科夫出场价：Spring→下一压力位，UT→下一支撑位
+    wyckoff_exit_price = None
+    if wyckoff_buy and sell_resistance > 0:
+        wyckoff_exit_price = sell_resistance  # Spring 目标 = 压力位
+    elif wyckoff_sell and buy_support > 0:
+        wyckoff_exit_price = buy_support  # UT 目标 = 支撑位
+
     # 亮灯状态（用于显示，不用于判定）
     lights = {
         "ab": {"buy": ab_buy, "sell": ab_sell, "reason": ab_reason, "ok": bool(ab_result),
                "buy_price": ab_buy_price, "sell_price": ab_sell_price,
+               "exit_price": ab_exit_price,
                "quality": ab_result.get("signal_bar_quality", "none") if ab_result else "none",
                "always_in": ab_result.get("always_in", "neutral") if ab_result else "neutral"},
         "wyckoff": {"buy": wyckoff_buy, "sell": wyckoff_sell, "reason": wyckoff_reason, "ok": True,
-                    "buy_price": wyckoff_buy_price, "sell_price": wyckoff_sell_price},
-        "momentum": {"buy": momentum_buy, "sell": momentum_sell, "reason": momentum_reason, "ok": True},
+                    "buy_price": wyckoff_buy_price, "sell_price": wyckoff_sell_price,
+                    "exit_price": wyckoff_exit_price},
+        "momentum": {"buy": momentum_buy, "sell": momentum_sell, "reason": momentum_reason, "ok": True,
+                     "buy_price": momentum_buy_price, "sell_price": momentum_sell_price,
+                     "exit_price": momentum_exit_price},
     }
 
     # 三套理论的参考价位汇总
-    buy_prices = [p for p in [ab_buy_price, wyckoff_buy_price] if p and p > 0]
-    sell_prices = [p for p in [ab_sell_price, wyckoff_sell_price] if p and p > 0]
+    buy_prices = [p for p in [ab_buy_price, wyckoff_buy_price, momentum_buy_price] if p and p > 0]
+    sell_prices = [p for p in [ab_sell_price, wyckoff_sell_price, momentum_sell_price] if p and p > 0]
 
     return {
         "buy_green": buy_green,

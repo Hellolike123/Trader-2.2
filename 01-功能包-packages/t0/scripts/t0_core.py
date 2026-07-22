@@ -663,6 +663,25 @@ def _build_account_section(plan: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _format_theory_price_line(name: str, status: str, info: dict, reason: str) -> str:
+    """格式化单个理论的价格行：状态 + 原因 + 入场/出场价。"""
+    buy_price = info.get("buy_price")
+    sell_price = info.get("sell_price")
+    exit_price = info.get("exit_price")
+
+    # 构建价格信息
+    price_parts = []
+    if buy_price and buy_price > 0:
+        price_parts.append(f"入场{buy_price:.2f}")
+    if sell_price and sell_price > 0:
+        price_parts.append(f"入场{sell_price:.2f}")
+    if exit_price and exit_price > 0:
+        price_parts.append(f"出场{exit_price:.2f}")
+
+    price_str = f" {'｜'.join(price_parts)}" if price_parts else ""
+    return f"  {name} {status}（{reason}{price_str}）"
+
+
 def _build_resonance_section(plan: dict[str, Any]) -> list[str]:
     """构建三重共振状态输出段（红黄绿灯风格）。"""
     resonance = plan.get("resonance")
@@ -709,10 +728,9 @@ def _build_resonance_section(plan: dict[str, Any]) -> list[str]:
         parts.append(hl_type)
     ab_detail_text = "·".join(parts) if parts else ab_detail
 
-    if ab_info.get("buy") or ab_info.get("sell"):
-        lines.append(f"  价格行为 {ab_status}（{ab_detail_text}）")
-    else:
-        lines.append(f"  价格行为 {ab_status}（{ab_detail_text or '无信号'}）")
+    # Al Brooks 价格行
+    ab_price_line = _format_theory_price_line("价格行为", ab_status, ab_info, ab_detail_text)
+    lines.append(ab_price_line)
 
     # ── 威科夫详情 ──
     wyck_info = lights.get("wyckoff", {})
@@ -723,7 +741,8 @@ def _build_resonance_section(plan: dict[str, Any]) -> list[str]:
     else:
         wyck_status = "❌ 未亮"
     wyck_reason = wyck_info.get("reason") or "无信号"
-    lines.append(f"  威科夫 {wyck_status}（{wyck_reason}）")
+    wyck_price_line = _format_theory_price_line("威科夫", wyck_status, wyck_info, wyck_reason)
+    lines.append(wyck_price_line)
 
     # ── 动量详情 ──
     mom_info = lights.get("momentum", {})
@@ -736,10 +755,8 @@ def _build_resonance_section(plan: dict[str, Any]) -> list[str]:
     else:
         mom_status = "❌ 未亮"
     mom_reason = mom_info.get("reason", "")
-    if mom_reason:
-        lines.append(f"  动量 {mom_status}（{mom_reason}）")
-    else:
-        lines.append(f"  动量 {mom_status}")
+    mom_price_line = _format_theory_price_line("动量", mom_status, mom_info, mom_reason)
+    lines.append(mom_price_line)
 
     if buy_green or sell_red:
         lines.append("  🟢 三重共振 → 可执行")
