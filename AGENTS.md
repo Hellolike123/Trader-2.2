@@ -18,7 +18,7 @@
 - **250日线趋势提醒**：年线下方标记 `ma250_warning=True` 并在输出中显示警告，但继续完整分析，不再一票否决。
 - **分析引擎并行化**：多票分析场景下缠论/威科夫/筹码等模块并行执行，显著提升选股池批量分析速度。
 - **选股池四阶段挂钩**：入池三关（阶段匹配 + 基本面 + 技术面）自动筛选，回复 `1` 一步完成入池。
-- **T0 输出精简**：从原有冗长格式精简为 4 部分（触发价 / 大单异动 / 操作建议 / 风控提醒）。
+- **T0 执行卡风格（2026-07-20）**：T0 输出从 4 段式改为执行卡风格——标题 → 结论（一句话）→ 执行价（低吸/高抛/止盈）→ 信号（三重共振）→ 失效条件 → 资金 → 降本模式。缠论改为 15m 定方向 + 5m 定时机（合并一行），VWAP 只用今日数据（避免跨日高价拉高），止盈按方向拆分（低吸止盈高于现价 / 高抛止盈低于现价），缠论价格远离现价 >20% 自动过滤。数据长度：日线 120 根（原 30）、15m 800 根（原 60）。
 - **仓位轮动跟着阶段走**：根据四阶段定位动态调整仓位分配策略，不再单纯依赖评分排序。
 - **单票分析双层状态模型**：`base_status` 负责结构位置层，`theory_status` 负责理论结论层；`state_label` 仅作兼容/展示摘要。
 - **信号唯一性契约 (Signal Contract v2)**：基于 SHA256 deterministic hash 的 16 位 Hex 强一致 UUID (`normalize_signal_id`)，严格规避任何时区/数据抖动造成的重复结算。
@@ -39,6 +39,7 @@
 - **筹码搬家监控 (Chip Migration Monitor)**：`chip_migration_monitor.py` 对每次单票分析生成的筹码峰快照进行持久化（`~/.trader/chip_history.json`），并对比前后变化。底部筹码峰下降超过 40% 触发警告、超过 50% 触发清仓信号，用于识别主力出货迹象。
 - **资金流向数据 (Fund Flow Data)**：`fund_flow_data.py` 通过东方财富 HTTP API 采集个股日线级资金流向（超大单/大单/中单/小单净流入），并计算衍生特征供主力行为识别引擎使用。
 - **Spring ATR 动态刺穿深度**：`wyckoff_core.py` 的 `_detect_spring()` / `_detect_st()` 共用 `_spring_breach_level()`，优先 `support - 0.5×ATR`，否则 `support × 0.985`。配置：`WYCKOFF_SPRING_ATR_MULTIPLE=0.5`。
+- **Spring 弱分级（2026-07-20）**：弱弹簧判定从「浅刺穿」改为「缩量无承接」——`vol_ratio < WYCKOFF_SPRING_LOW_VOL_RATIO` 时标记 weak（量比不足，无主动承接确认），不再用 `depth_pct < WYCKOFF_SPRING_WEAK_DEPTH_PCT`。强弹簧仍为深度震仓+放量承接+坚决收回中轴。
 - **威科夫消费面（勿与旧 fusion 叙事混淆）**：短线 fusion 第三席是 **VPF**（`merge_decisions` 不再对 wyckoff 加权）。威科夫主消费：`calculate_wyckoff_score` → 选股池/复盘打分；`format_wyckoff_oneline` → 中线「威科夫：…」一行；`wyckoff_strategy_midline` 周线独占（不足 → `timeframe=insufficient`，展示「不参与定论」）。`_wyckoff_to_signal` 仅兼容/测试。孤立信号 `spring_premature`/`upthrust_premature` 打分降权且展示/中线 bias 不抬 strong。`阶段：` 仍是主力四阶段 major_stage，不是威科夫 A–E phase。
 - **威科夫原典补齐（2026-07）**：PS/PSY/BU/UTAD 检测 + Markup/Markdown 阶段；打分 `_resolve_score_conflicts` 抑制 SC↔SOW 等反向对冲；LPSY 无派发背景不亮灯；因果目标 `cause_effect_*`（TR 1:1 近似，非完整 P&F）。详见 `docs/wyckoff-original-gaps-fix-2026-07-16.md`。
 - **威科夫统一出口 View（A 档）**：`trader_shared/wyckoff_view.py` 的 `WyckoffStateView` + `to_wyckoff_state_view()` 从现有 analysis 薄适配；契约见 `docs/designs/wyckoff-state-view.md`。**未改**检测/fusion/纪律；生产主路径可继续读旧 dict，Agent/后续迁移优先读 View。
@@ -271,13 +272,23 @@ T0：无底仓，不启用（与出手一致，不新开）
 ### 2. 盘中盯盘预警
 * 动作命令：`python 01-功能包-packages/t0/scripts/final_t0.py --target <NAME> --monitor`
 * 用途：盘中实时大单异动，谁在买谁在卖，价格到没到触发位。
-* 满分标准输出示例（非交易时间输出为空）：
+* 满分标准输出示例（执行卡风格；非交易时间输出为空）：
 
-🎯 南网科技（688248） 现价 59.33 靠近关注价
+🎯 南网科技（688248）59.33（+2.70%）
+  → 三重共振买 → 可低吸
 
-09:35 主动买入 1752万 / 3000手
-09:40 主动卖出 2777万 / 4774手
-14:35 主动买入 4178万 / 6939手（大单异动）
+📌 执行
+低吸：可执行 58.50～59.00
+高抛：价区62.50｜缠论63.20
+低吸止盈：63.46
+
+🔗 信号
+  缠论 ✅ 买（15m） ｜ 威科夫 ✅ 买（Spring） ｜ 动量 ✅ 买
+  失效：跌破55.51 / 缠论转卖 / 威科夫转卖 / 跌破VWAP
+
+💰 净流入 +1752万
+  09:35 主动买入 1752万 / 3000手
+  14:35 主动买入 4178万 / 6939手（大单异动）
 
 ### 3. 盘后单票复盘
 * 动作命令：`python 01-功能包-packages/review/scripts/final_review.py --target <NAME>`

@@ -2,63 +2,91 @@
 
 > **This is the absolute truth for valid output.** Never generate output format from memory.
 
-## Manual Card Output
+## Execution Card Output
 
 Markdown output from `render_markdown()` — used when `final_t0.py` is invoked without `--monitor`.
 
-Must start with `🎯 T0 盯盘助理`:
+Must start with `🎯`:
 
 ```text
-🎯 T0 盯盘助理
-{name}（{symbol}）｜现价 xx.xx（+x.xx%）
+🎯 {name}（{symbol}）{current_price}（{change_pct}）
+  → {conclusion}
 
-📌 触发价
-当前：{低吸/高抛/不动} ｜ 止损：xx.xx元
-低吸：{状态}，{观察价以下}
-高抛：{状态}，{观察价附近}
-止盈：xx.xx｜xx.xx｜xx.xx
-波动：{level_advice}
-低吸还差 x.x%（约N根5m线）    （← 新增：距触发价量化提示）
+📌 执行
+低吸：{buy_display}
+高抛：{sell_display}
+{buy_tp_line}
+{sell_tp_line}
+VWAP {vwap}
 
-💰 大单异动
-买入 X笔 Y万 ｜ 卖出 X笔 Z万
-09:35 +2202万  09:40 -1664万  09:45 -1404万
-净流入 -802万，主力偏空
+🔗 信号
+  缠论 {chan_status}（{chan_timeframe}） ｜ 威科夫 {wyck_status}（{wyck_type}） ｜ 动量 {mom_status}
+  失效：{failure_conditions}
 
-或（使用5m分时估算时，无Tick数据）
+💰 {capital_line}
+  {tick_details}
 
-💰 分时估算
-全部买入 X笔 +Y万
-09:35 +2202万  09:40 +1664万  09:45 +1404万
-净流入 +527万，主力偏多
-（5m分时估算，非真实Tick数据）
-
-📈 操作建议
-{order_book line}
-{time} {level}｜{description}，现价xx.xx元。
-🔴 购买高潮（BC）信号 {reason} 动作：减仓 1/3
-⚠️ 弱势信号（SOW）{reason} 动作：关注，准备减仓
-🔴 筹码搬家清仓信号 {warning_text} 动作：清仓
-
-🚨 应急指引                                          （← 新增段：非标准场景）
-放量接近高抛区，可分批提前减仓
-盘中急跌靠近低吸区，等5m止跌信号再动手
-ICT: 下扫 xx.xx 后收回，辅助低吸确认
-
-⚠️ 风控提醒
-跌破 xx.xx元 止损退出
-⚠️ 数据不完整，盘中判断可能不准
+{account_section}
 ```
 
-### Sections（条件显示规则）
+### Conclusion（一句话结论）
 
-> 五段精简结构（触发价 / 大单异动 / 操作建议 / 应急指引 / 风控提醒）。
+由 `_build_conclusion()` 根据三重共振状态生成：
 
-- `📌 触发价` — 始终显示。含当前动作、止损价、低吸/高抛观察价；有止盈计划且 `risk_r > 0` 时显示止盈；有 ATR 波动提示时显示波动。**新增**：距触发价距离量化提示（% + 估算5m K线根数）。
-- `💰 大单异动` — 有 tick 数据且存在大单事件时显示；无 tick 数据时显示 `💰 分时估算`（互斥）。
-- `📈 操作建议` — 有 `order_book` 动态、盘中关键事件(`history`) 或 实时信号(BC/UTAD/SOW/筹码搬家) 时显示，合并原「盘中动态」与「实时信号」两段。
-- `🚨 应急指引` — **新增**：覆盖非标准场景（放量未到高抛区/急跌未到低吸区/临近涨跌停/双触发并存/ICT辅助提示），有场景触发时显示。
-- `⚠️ 风控提醒` — 始终显示。含止损退出/不再低吸；`data_status` 为 `partial`/`degraded` 时追加数据提示。
+| 条件 | 结论 |
+|------|------|
+| 买状态=可执行 + 三重共振买 | 三重共振买 → 可低吸 |
+| 卖状态=可执行 + 三重共振卖 | 三重共振卖 → 可高抛 |
+| 买/卖状态=可执行 + 未共振 | 触发但未共振 → 等确认再操作 |
+| ≥2 盏买灯 | 部分共振（买）→ 关注，等第三盏灯 |
+| ≥2 盏卖灯 | 部分共振（卖）→ 关注，等第三盏灯 |
+| 其他 | 暂不操作 |
+
+### 执行价（低吸/高抛）
+
+- 状态为"可执行"时：显示 `可执行 {exec_price}～{acceptable_price}`
+- 其他状态：显示 `价区{zone}｜缠论{chan}｜威科夫{wyck}`（参考价）
+- 缠论价格远离现价 >20% 自动过滤
+
+### 止盈（按方向拆分）
+
+- 低吸止盈：高于现价的止盈价，显示 `低吸止盈：{prices}`
+- 高抛止盈：低于现价的止盈价，显示 `高抛止盈：{prices}`
+- 有 risk_r > 0 且有 exit_items 时才显示
+
+### 三重共振（信号区）
+
+- 缠论：优先 15m（日线级别结构）fallback 5m
+- 威科夫：5m（Spring/UT/无供给/放量滞涨）
+- 动量：5m（RSI/MACD/ADX）
+- 价格远离现价 >20% 自动过滤
+
+### 失效条件
+
+由 `_build_failure_conditions()` 生成：
+- 跌破止损
+- 缠论反转（当前买→转卖 / 当前卖→转买）
+- 威科夫反转（当前买→转卖 / 当前卖→转买）
+- 跌回/跌破 VWAP
+
+### 条件显示规则
+
+- `🎯 标题 + 结论` — 始终显示
+- `📌 执行` — 始终显示（低吸/高抛/止盈/VWAP）
+- `🔗 信号` — 始终显示（三重共振状态 + 失效条件）
+- `💰 资金` — 有净流入数据时显示
+- `降本模式` — 有持仓信息时显示（`--t-mode cost_cut`）
+
+### VWAP
+
+- 只用今日数据（`today_bars()` 过滤跨日 bar）
+- 距现价 ±20% 内才显示
+
+### 数据长度
+
+- 日线：120 根（`t0_config.LOOKBACK_DAYS`）
+- 15m：800 根
+- 5m：800 根
 
 ## Monitor Alert Output
 

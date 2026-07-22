@@ -1,11 +1,22 @@
 # Trader 2.4 — 架构文档（深挖参考）
 
-> 最后更新：2026-06-07
+> 最后更新：2026-07-20
 > **注意**: AGENTS.md 是 Agent 快速参考，本文档用于开发调试/架构深挖。
 
 ---
 
 ## 变更日志
+
+### 2026-07-20 — T0 执行卡 + Wyckoff Spring 弱分级 + 缠论 15m
+
+- **T0 执行卡风格**：输出从 4 段式改为执行卡风格——标题 → 结论（一句话）→ 执行价（低吸/高抛/止盈）→ 信号（三重共振）→ 失效条件 → 资金 → 降本模式。`_build_conclusion()` 根据三重共振状态生成结论，`_build_failure_conditions()` 生成失效条件（跌破止损/缠论反转/威科夫反转/跌破VWAP）
+- **三重共振缠论升级**：缠论从纯 5m 升级为 15m 定方向（日线级别结构）+ 5m 定时机（T0 执行层），合并一行展示。15m 数据从 60 根扩至 800 根
+- **VWAP 今日数据**：`today_bars()` 过滤跨日 bar，避免历史高价拉高 VWAP
+- **止盈方向拆分**：低吸止盈（高于现价）和高抛止盈（低于现价）分开显示
+- **缠论价格过滤**：远离现价 >20% 的缠论买/卖价自动过滤，不显示
+- **低吸/高抛可执行时**：显示执行价～可接受价范围，不再显示"数据不足"
+- **日线回溯扩至 120 根**：`t0_config.LOOKBACK_DAYS` 从 30 改为 120，匹配威科夫/缠论原典需求
+- **Wyckoff Spring 弱分级**：弱弹簧判定从「浅刺穿」（`depth_pct < WYCKOFF_SPRING_WEAK_DEPTH_PCT`）改为「缩量无承接」（`vol_ratio < WYCKOFF_SPRING_LOW_VOL_RATIO`）。强弹簧仍为深度震仓+放量承接+坚决收回中轴
 
 ### 2026-05-31 — 数据消费 Bug 修复 + 性能优化批次
 
@@ -27,7 +38,7 @@
 - **四阶段定位模型**：蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退 × 走强/修复/震荡/转弱，贯穿选股池入池三关、仓位轮动、盘后复盘全链路
 - **分析引擎并行化**：多票分析场景下缠论/威科夫/筹码等模块并行执行，显著提升选股池批量分析速度
 - **入池三关规则**：阶段匹配 + 基本面 + 技术面自动筛选
-- **T0 输出精简**：从原有冗长格式精简为 4 部分（触发价 / 大单异动 / 操作建议 / 风控提醒）
+- **T0 输出精简**：从原有冗长格式精简为 4 部分（触发价 / 大单异动 / 操作建议 / 风控提醒）。后改为执行卡风格（结论→执行价→信号→失效→资金→降本）
 - **仓位轮动四阶段逻辑**：根据四阶段定位动态调整仓位分配策略，不再单纯依赖评分排序
 
 ### 2026-05-23 — Trader 2.3：四大高级统计模块上线
@@ -252,6 +263,17 @@
 - 操作建议
 - 风控提醒
 
+**T0 执行卡风格（2026-07-20）**：
+输出从 4 段式改为执行卡风格：标题 → 结论（一句话）→ 执行价（低吸/高抛/止盈）→ 信号（三重共振）→ 失效条件 → 资金 → 降本模式。
+- 结论由 `_build_conclusion()` 根据三重共振状态生成（三重共振买→可低吸 / 三重共振卖→可高抛 / 触发未共振→等确认 / 部分共振→关注 / 暂不操作）
+- 失效条件由 `_build_failure_conditions()` 生成：跌破止损 / 缠论反转 / 威科夫反转 / 跌破VWAP
+- 三重共振：缠论优先 15m（日线级别结构）fallback 5m，威科夫和动量用 5m（T0 执行层）
+- 缠论价格远离现价 >20% 自动过滤（`price_point_engine.py`）
+- VWAP 只用今日数据（`today_bars()` 过滤跨日 bar，避免历史高价拉高 VWAP）
+- 止盈按方向拆分：低吸止盈（高于现价）和高抛止盈（低于现价）
+- 低吸/高抛状态为"可执行"时显示执行价～可接受价范围，否则显示价区｜缠论｜威科夫参考价
+- 数据长度：日线 120 根（原 30）、15m 800 根（原 60）、5m 800 根（不变）
+
 ### 3.3 review（盘后复盘 + 仓位轮动 + 信号追踪）
 
 **入口**: `scripts/final_review.py`（盘后复盘）/ `scripts/final_portfolio.py`（仓位轮动）/ `scripts/final_tracker.py`（信号追踪）
@@ -365,7 +387,7 @@
 - 中线报告：`wyckoff_strategy_midline` 周线独占；不足 → `timeframe=insufficient` → oneline「周线不足 · 不参与定论」。
 - 孤立信号：`spring_premature` / `upthrust_premature` 打分减半；oneline 中性+噪声说明；`wyckoff_midline_bias` 不抬 strong_*。
 
-检测器：`_detect_spring`（ATR 刺穿，与 ST 共用 `_spring_breach_level`）/ `_detect_upthrust` / `_detect_buying_climax`（高位过滤 `WYCKOFF_BC_MIN_POS_PCT`）/ `_detect_sign_of_weakness` / `_detect_ar` / `_detect_sos` / `_detect_st` / `_detect_lps` / 量价背离 / VSA / phase 状态机（phase ≠ major_stage）。
+检测器：`_detect_spring`（ATR 刺穿，与 ST 共用 `_spring_breach_level`；弱分级：`vol_ratio < WYCKOFF_SPRING_LOW_VOL_RATIO` → weak，不再用 depth_pct 判定弱弹簧）/ `_detect_upthrust` / `_detect_buying_climax`（高位过滤 `WYCKOFF_BC_MIN_POS_PCT`）/ `_detect_sign_of_weakness` / `_detect_ar` / `_detect_sos` / `_detect_st` / `_detect_lps` / 量价背离 / VSA / phase 状态机（phase ≠ major_stage）。
 
 报告展示：`format_wyckoff_oneline()` 输出单行白话，例如  
 `威科夫：低位假跌破后收回 · 偏多（更像洗盘，缩量较可信）`；无事件 `威科夫：暂无事件 · 中性`；周线不足 `威科夫：周线不足 · 不参与定论`。
