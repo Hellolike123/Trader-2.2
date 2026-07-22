@@ -199,14 +199,17 @@ def compute_exit_plan(
 
     # 阻力位退出价
     resistance_exit: float | None = None
+    # 过滤阈值：阻力位超过入场价 50% 视为无效（历史高位不适用于日内交易）
+    _max_resistance_ratio = 1.5
     if resistance_price is not None and resistance_price > entry_price:
-        resistance_exit = round(resistance_price, 2)
+        if resistance_price <= entry_price * _max_resistance_ratio:
+            resistance_exit = round(resistance_price, 2)
     elif bars and len(bars) >= 20:
         # 动态计算阻力位：近 20 日最高价
         # #24 修复：过滤 None/0 值，避免 max 选到 0.0 而非真实最高价
         highs = [float(b["high"]) for b in bars[-20:] if b.get("high") is not None and float(b["high"]) > 0]
         max_high = max(highs, default=0)
-        if max_high > entry_price:
+        if max_high > entry_price and max_high <= entry_price * _max_resistance_ratio:
             resistance_exit = round(max_high, 2)
 
     # 阶段退出条件
