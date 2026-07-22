@@ -1160,6 +1160,7 @@ def check_resonance(report_data: dict[str, Any], zones: dict[str, Any],
             if vstop.get("detected"):
                 wyckoff_sell = True
                 wyckoff_reason = vstop.get("reason", "放量滞涨")
+                wyckoff_sell_price = sell_resistance  # 放量滞涨入场价 = 压力位
 
     # ── 3. 动量：RSI 背离检测 + 入场/出场价 ──
     momentum_buy = False
