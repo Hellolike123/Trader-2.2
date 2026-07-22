@@ -20,7 +20,7 @@ Must start with `🎯`:
 VWAP {vwap}
 
 🔗 信号
-  缠论 {chan_status}（{chan_timeframe}） ｜ 威科夫 {wyck_status}（{wyck_type}） ｜ 动量 {mom_status}
+  价格行为 {ab_status}（{ab_detail}） ｜ 威科夫 {wyck_status}（{wyck_type}） ｜ 动量 {mom_status}
   失效：{failure_conditions}
 
 💰 {capital_line}
@@ -45,8 +45,8 @@ VWAP {vwap}
 ### 执行价（低吸/高抛）
 
 - 状态为"可执行"时：显示 `可执行 {exec_price}～{acceptable_price}`
-- 其他状态：显示 `价区{zone}｜缠论{chan}｜威科夫{wyck}`（参考价）
-- 缠论价格远离现价 >20% 自动过滤
+- 其他状态：显示 `价区{zone}｜价格行为{ab}｜威科夫{wyck}`（参考价）
+- 信号棒价格远离现价 >20% 自动过滤
 
 ### 止盈（按方向拆分）
 
@@ -56,16 +56,16 @@ VWAP {vwap}
 
 ### 三重共振（信号区）
 
-- 缠论：优先 15m（日线级别结构）fallback 5m
+- Al Brooks 价格行为：Always-In 方向 + 信号棒 + follow-through + H/L 回调计数
 - 威科夫：5m（Spring/UT/无供给/放量滞涨）
 - 动量：5m（RSI/MACD/ADX）
-- 价格远离现价 >20% 自动过滤
+- 信号棒价格远离现价 >20% 自动过滤
 
 ### 失效条件
 
 由 `_build_failure_conditions()` 生成：
 - 跌破止损
-- 缠论反转（当前买→转卖 / 当前卖→转买）
+- 价格行为反转（当前买→转卖 / 当前卖→转买）
 - 威科夫反转（当前买→转卖 / 当前卖→转买）
 - 跌回/跌破 VWAP
 
