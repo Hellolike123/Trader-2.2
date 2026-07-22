@@ -193,8 +193,11 @@ def compute_exit_plan(
             "wyckoff_signals": {},
         }
 
-    # 1R 计算
-    risk_r = round(entry_price - stop_price, 2)
+    # 1R 计算：ATR 自适应（T0 用 0.15×日ATR ≈ 0.5×5mATR）
+    if atr14 > 0:
+        risk_r = round(atr14 * 0.15, 2)
+    else:
+        risk_r = round(entry_price - stop_price, 2)
     target_1r = round(entry_price + risk_r, 2)
 
     # 阻力位退出价

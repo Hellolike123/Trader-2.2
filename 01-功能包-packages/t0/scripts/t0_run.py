@@ -182,6 +182,8 @@ def build_plan(target: str) -> dict[str, Any]:
 
     # 取融合层或报告中的阶段，避免硬编码"主升"导致衰退期仍激进
     _stage = result.get("major_stage") or result.get("stage") or "蓄势"
+    # ATR 自适应止盈止损（取 model 中的 atr14，或从日线计算）
+    model_atr = (model.get("atr_info") or {}).get("atr14", 0)
     result["exit_plan"] = compute_exit_plan(
         entry_price=float(buy_price),
         stop_price=float(stop_price),
@@ -189,6 +191,7 @@ def build_plan(target: str) -> dict[str, Any]:
         current_stage=_stage,
         bars=daily,
         wyckoff_result=wyck_result,
+        atr14=float(model_atr),
     )
 
     result["ab_result"] = model.get("ab_result") or {}
