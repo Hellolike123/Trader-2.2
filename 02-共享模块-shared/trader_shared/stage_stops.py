@@ -199,8 +199,8 @@ def compute_exit_plan(
 
     # 阻力位退出价
     resistance_exit: float | None = None
-    # 过滤阈值：阻力位超过入场价 50% 视为无效（历史高位不适用于日内交易）
-    _max_resistance_ratio = 1.5
+    # 过滤阈值：阻力位超过入场价 20% 视为无效（T0 日内交易不需要太远的目标）
+    _max_resistance_ratio = 1.2
     if resistance_price is not None and resistance_price > entry_price:
         if resistance_price <= entry_price * _max_resistance_ratio:
             resistance_exit = round(resistance_price, 2)
