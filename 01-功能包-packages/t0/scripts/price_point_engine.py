@@ -1169,22 +1169,26 @@ def check_resonance(report_data: dict[str, Any], zones: dict[str, Any],
     momentum_buy_price = None
     momentum_sell_price = None
     momentum_exit_price = None
+    # 动量 ATR 自适应出场价
+    _mom_atr14 = float((report_data.get("daily_bars") or [{}])[-1].get("atr14", 0)) if report_data.get("daily_bars") else 0
     rsi_series = state.get("rsi") or []
     rsi_last = rsi_series[-1] if rsi_series else None
     if detect_bullish_divergence(bars, rsi_series, lookback=12):
         momentum_buy = True
         momentum_reason = "RSI底背离"
-        # 入场价 = 最近低点（背离确认的支撑位）
         momentum_buy_price = float(bars[-1].get("low", 0)) if bars else None
-        # 出场价 = RSI 回到 50 中轴时对应的价格区域（用近期高点估算）
-        if len(bars) >= 12:
+        if _mom_atr14 > 0:
+            momentum_exit_price = round(current + _mom_atr14 * 0.15, 2)
+        elif len(bars) >= 12:
             recent_highs = [float(b.get("high", 0)) for b in bars[-12:]]
             momentum_exit_price = round(min(recent_highs[-3:]), 2) if recent_highs else None
     if detect_bearish_divergence(bars, rsi_series, lookback=12):
         momentum_sell = True
         momentum_reason = "RSI顶背离"
         momentum_sell_price = float(bars[-1].get("high", 0)) if bars else None
-        if len(bars) >= 12:
+        if _mom_atr14 > 0:
+            momentum_exit_price = round(current - _mom_atr14 * 0.15, 2)
+        elif len(bars) >= 12:
             recent_lows = [float(b.get("low", 0)) for b in bars[-12:]]
             momentum_exit_price = round(max(recent_lows[-3:]), 2) if recent_lows else None
 
@@ -1192,22 +1196,25 @@ def check_resonance(report_data: dict[str, Any], zones: dict[str, Any],
     buy_green = ab_buy and wyckoff_buy and momentum_buy
     sell_red = ab_sell and wyckoff_sell and momentum_sell
 
-    # Al Brooks 出场价：H2/L2 回调位 > 信号棒反向极端 > 当前价±ATR
+    # Al Brooks 出场价：买→上方阻力/高点上边界，卖→下方支撑/低点下边界
     ab_exit_price = None
     if ab_result:
         hl = ab_result.get("hl_count") or {}
         hl_price = hl.get("last_pullback_price")
-        if ab_buy and hl_price:
-            ab_exit_price = hl_price  # L2 回调低点作为加仓位
-        elif ab_sell and hl_price:
-            ab_exit_price = hl_price  # H2 回调高点作为减仓位
-        else:
-            # 回退：用信号棒的反向极端
-            last_bar = bars[-1] if bars else {}
-            if ab_buy:
-                ab_exit_price = float(last_bar.get("low", 0)) or None  # 信号棒低点作为止损参考
-            elif ab_sell:
-                ab_exit_price = float(last_bar.get("high", 0)) or None
+        if ab_buy:
+            # 买出场：看上方近端压力 / 信号棒高点
+            if sell_resistance > 0 and sell_resistance > current:
+                ab_exit_price = sell_resistance  # 上方压力位
+            else:
+                last_bar = bars[-1] if bars else {}
+                ab_exit_price = round(float(last_bar.get("high", current)) * 1.005, 2) if last_bar else None
+        elif ab_sell:
+            # 卖出场：看下方近端支撑 / 信号棒低点
+            if buy_support > 0 and buy_support < current:
+                ab_exit_price = buy_support  # 下方支撑位
+            else:
+                last_bar = bars[-1] if bars else {}
+                ab_exit_price = round(float(last_bar.get("low", current)) * 0.995, 2) if last_bar else None
 
     # 威科夫出场价：Spring→下一压力位，UT→下一支撑位
     wyckoff_exit_price = None
