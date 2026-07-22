@@ -663,6 +663,37 @@ def _build_account_section(plan: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _build_theory_diagnostics(plan: dict[str, Any]) -> str:
+    """各理论检测摘要：威科夫 Spring/UT 检测 + 动量 RSI。"""
+    model = plan.get("model") or {}
+    zones = model.get("zones") or {}
+    cur = plan.get("current_price") or 0
+    from t0_config import VOLUME_SHRINK_RATIO, VOLUME_EXPAND_RATIO
+
+    vol_ratio = model.get("volume_ratio") or 0
+    buy_support = (zones.get("buy_zone") or {}).get("main_support") or 0
+    sell_res = (zones.get("sell_zone") or {}).get("main_resistance") or 0
+
+    # 威科夫
+    w = ["威科夫"]
+    if buy_support and cur:
+        w.append(f"Spring(支{buy_support:.2f})")
+    if sell_res and cur:
+        w.append(f"UT(压{sell_res:.2f})")
+    if vol_ratio:
+        lbl = "缩" if vol_ratio < VOLUME_SHRINK_RATIO else ("放" if vol_ratio > VOLUME_EXPAND_RATIO else "平")
+        w.append(f"量比{vol_ratio:.1f}({lbl})")
+    parts = [" ".join(w)]
+
+    # 动量
+    m = ["动量"]
+    if cur:
+        m.append(f"现价{cur:.2f}")
+    parts.append(" ".join(m))
+
+    return f"  {' | '.join(parts)}"
+
+
 def _format_theory_price_line(name: str, status: str, info: dict, reason: str) -> str:
     """格式化单个理论的价格行：状态 + 原因 + 入场/出场价。"""
     buy_price = info.get("buy_price")
@@ -757,6 +788,11 @@ def _build_resonance_section(plan: dict[str, Any]) -> list[str]:
     mom_reason = mom_info.get("reason", "")
     mom_price_line = _format_theory_price_line("动量", mom_status, mom_info, mom_reason)
     lines.append(mom_price_line)
+
+    # ── 各理论检测项诊断 ──
+    diag = _build_theory_diagnostics(plan)
+    if diag:
+        lines.append(diag)
 
     if buy_green or sell_red:
         lines.append("  🟢 三重共振 → 可执行")
