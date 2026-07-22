@@ -77,14 +77,40 @@ def _ema(values: list[float], period: int) -> float | None:
     return ema
 
 
+def _calc_atr(bars: list[dict], period: int = 14) -> float:
+    """计算 ATR（平均真实范围）。"""
+    if len(bars) < period + 1:
+        return 0.0
+    trs = []
+    for i in range(1, len(bars)):
+        h = float(bars[i].get("high", 0))
+        l = float(bars[i].get("low", 0))
+        prev_c = float(bars[i - 1].get("close", 0))
+        tr = max(h - l, abs(h - prev_c), abs(l - prev_c))
+        trs.append(tr)
+    if len(trs) < period:
+        return 0.0
+    return sum(trs[-period:]) / period
+
+
 # ── 信号棒检测 ──────────────────────────────────────────────────────────────
 
-def detect_signal_bar(bar: dict) -> dict[str, Any]:
+def detect_signal_bar(bar: dict, prev_bar: dict | None = None, atr: float = 0) -> dict[str, Any]:
     """检测单根棒线是否为 Al Brooks 信号棒。
 
     强信号棒（区间篇 Ch26 "做一笔交易需要两个理由"）：
     - 多头：收盘在高点附近（close_position > 0.7），实体占比 > 50%，下影线 > 10%
     - 空头：收盘在低点附近（close_position < 0.3），实体占比 > 50%，上影线 > 10%
+
+    附加过滤（原典要求）：
+    - 棒线范围应与近期 ATR 相当（太小的棒不是有效信号棒）
+    - 内包棒（inside bar）不是好的信号棒
+    - 十字星（body_pct < 0.1）不是信号棒
+
+    Args:
+        bar: 待检测的棒线
+        prev_bar: 前一根棒线（用于内包棒检测）
+        atr: 近期 ATR 值（用于波动率过滤）
 
     Returns:
         {"type": "bull"|"bear"|"none", "quality": "strong"|"weak"|"none", "score": float}
@@ -94,6 +120,25 @@ def detect_signal_bar(bar: dict) -> dict[str, Any]:
     upper = _upper_shadow_pct(bar)
     lower = _lower_shadow_pct(bar)
     direction = _bar_direction(bar)
+
+    # 基础过滤：十字星不是信号棒
+    if body_pct < 0.1:
+        return {"type": "none", "quality": "none", "score": 0.0}
+
+    # 内包棒过滤（原典：inside bar 不是好的信号棒）
+    if prev_bar:
+        bar_h = float(bar.get("high", 0))
+        bar_l = float(bar.get("low", 0))
+        prev_h = float(prev_bar.get("high", 0))
+        prev_l = float(prev_bar.get("low", 0))
+        is_inside = bar_h <= prev_h and bar_l >= prev_l
+        if is_inside:
+            return {"type": "none", "quality": "none", "score": 0.0}
+
+    # ATR 过滤：棒线范围太小不是有效信号棒
+    bar_range = float(bar.get("high", 0)) - float(bar.get("low", 0))
+    if atr > 0 and bar_range < atr * 0.3:
+        return {"type": "none", "quality": "none", "score": 0.0}
 
     if direction == 1 and body_pct > 0.3:
         score = 0.0
@@ -172,10 +217,11 @@ def determine_always_in(bars: list[dict], lookback: int = 20) -> dict[str, Any]:
 
     趋势篇 Ch18: "如果你不得不一直在市场中，那么当前头寸就是你的 Always-In 头寸"。
 
-    判定方法：
-    - 最近 N 根棒中，多头趋势棒数量 vs 空头趋势棒数量
-    - 收盘价相对 20 EMA 的位置
-    - 趋势棒的连续性
+    判定方法（贴近原典）：
+    1. 趋势棒计数 + 连续性（最近 5 根是否呈趋势）
+    2. 收盘价相对 EMA20 的位置
+    3. 是否有 follow-through（突破后有确认棒）
+    4. 是否在创更高的高点/更低的低点
 
     Returns:
         {"direction": "bull"|"bear"|"neutral", "score": float, "detail": str}
@@ -185,44 +231,79 @@ def determine_always_in(bars: list[dict], lookback: int = 20) -> dict[str, Any]:
 
     recent = bars[-lookback:]
 
+    # 1. 趋势棒计数
     bull_count = sum(1 for b in recent if _bar_direction(b) == 1)
     bear_count = sum(1 for b in recent if _bar_direction(b) == -1)
     total = len(recent)
-
     bull_ratio = bull_count / total
     bear_ratio = bear_count / total
 
+    # 2. EMA20 位置
     closes = [float(b.get("close", 0)) for b in bars]
     ema20 = _ema(closes, 20)
     current_close = closes[-1] if closes else 0
     above_ema = current_close > ema20 if ema20 else None
 
+    # 3. 最近 5 根的趋势连续性（原典强调 follow-through）
     recent5 = bars[-5:] if len(bars) >= 5 else bars
-    recent5_bull = sum(1 for b in recent5 if _bar_direction(b) == 1)
-    recent5_bear = sum(1 for b in recent5 if _bar_direction(b) == -1)
+    recent5_dirs = [_bar_direction(b) for b in recent5]
+    recent5_bull = sum(1 for d in recent5_dirs if d == 1)
+    recent5_bear = sum(1 for d in recent5_dirs if d == -1)
+    # 连续性：最近 3 根同向
+    last3_dirs = recent5_dirs[-3:] if len(recent5_dirs) >= 3 else recent5_dirs
+    consec_bull = sum(1 for d in last3_dirs if d == 1)
+    consec_bear = sum(1 for d in last3_dirs if d == -1)
 
+    # 4. 更高的高点/更低的低点（趋势延续信号）
+    highs = [float(b.get("high", 0)) for b in recent]
+    lows = [float(b.get("low", 0)) for b in recent]
+    making_higher_highs = len(highs) >= 5 and highs[-1] > max(highs[-5:-1])
+    making_lower_lows = len(lows) >= 5 and lows[-1] < min(lows[-5:-1])
+
+    # 综合评分
     score = 0.0
+    # 趋势棒占比
     if bull_ratio > 0.55:
         score += (bull_ratio - 0.5) * 2
     elif bear_ratio > 0.55:
         score -= (bear_ratio - 0.5) * 2
 
+    # EMA 位置
     if above_ema is True:
         score += 0.15
     elif above_ema is False:
         score -= 0.15
 
-    if recent5_bull >= 3:
+    # 连续性（原典强调的 follow-through）
+    if consec_bull >= 3:
+        score += 0.15
+    elif consec_bear >= 3:
+        score -= 0.15
+
+    # 更高的高点/更低的低点
+    if making_higher_highs:
         score += 0.1
-    elif recent5_bear >= 3:
+    if making_lower_lows:
         score -= 0.1
 
     if score > 0.2:
-        return {"direction": "bull", "score": round(score, 2),
-                "detail": f"多头棒{bull_count}/{total} 收盘{'>' if above_ema else '<'}EMA"}
+        detail = f"多头棒{bull_count}/{total}"
+        if above_ema:
+            detail += " 收盘>EMA"
+        if consec_bull >= 3:
+            detail += f" 连续{consec_bull}根"
+        if making_higher_highs:
+            detail += " 创新高"
+        return {"direction": "bull", "score": round(score, 2), "detail": detail}
     if score < -0.2:
-        return {"direction": "bear", "score": round(score, 2),
-                "detail": f"空头棒{bear_count}/{total} 收盘{'>' if above_ema else '<'}EMA"}
+        detail = f"空头棒{bear_count}/{total}"
+        if not above_ema:
+            detail += " 收盘<EMA"
+        if consec_bear >= 3:
+            detail += f" 连续{consec_bear}根"
+        if making_lower_lows:
+            detail += " 创新低"
+        return {"direction": "bear", "score": round(score, 2), "detail": detail}
     return {"direction": "neutral", "score": round(score, 2),
             "detail": f"多{bull_count}:空{bear_count} 未明确"}
 
@@ -440,9 +521,13 @@ def analyze_ab(
     result["always_in"] = ai["direction"]
     result["details"]["always_in"] = ai
 
-    # 2. 最后一根棒的信号棒检测
+    # 计算 ATR（用于信号棒过滤）
+    atr = _calc_atr(bars_5m, period=14)
+
+    # 2. 最后一根棒的信号棒检测（传入前一根棒和 ATR）
     last_bar = bars_5m[-1]
-    sig = detect_signal_bar(last_bar)
+    prev_bar = bars_5m[-2] if len(bars_5m) >= 2 else None
+    sig = detect_signal_bar(last_bar, prev_bar=prev_bar, atr=atr)
     result["signal_bar_quality"] = sig["quality"]
     result["details"]["signal_bar"] = sig
 
