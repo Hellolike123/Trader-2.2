@@ -1191,7 +1191,7 @@ def check_resonance(report_data: dict[str, Any], zones: dict[str, Any],
     buy_green = ab_buy and wyckoff_buy and momentum_buy
     sell_red = ab_sell and wyckoff_sell and momentum_sell
 
-    # Al Brooks 出场价：信号棒反向极端 或 H2/L2 回调位
+    # Al Brooks 出场价：H2/L2 回调位 > 信号棒反向极端 > 当前价±ATR
     ab_exit_price = None
     if ab_result:
         hl = ab_result.get("hl_count") or {}
@@ -1200,6 +1200,13 @@ def check_resonance(report_data: dict[str, Any], zones: dict[str, Any],
             ab_exit_price = hl_price  # L2 回调低点作为加仓位
         elif ab_sell and hl_price:
             ab_exit_price = hl_price  # H2 回调高点作为减仓位
+        else:
+            # 回退：用信号棒的反向极端
+            last_bar = bars[-1] if bars else {}
+            if ab_buy:
+                ab_exit_price = float(last_bar.get("low", 0)) or None  # 信号棒低点作为止损参考
+            elif ab_sell:
+                ab_exit_price = float(last_bar.get("high", 0)) or None
 
     # 威科夫出场价：Spring→下一压力位，UT→下一支撑位
     wyckoff_exit_price = None

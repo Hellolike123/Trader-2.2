@@ -711,22 +711,22 @@ def _build_resonance_section(plan: dict[str, Any]) -> list[str]:
     ab_detail = ab_info.get("reason") or "无信号"
 
     lines = []
-    # Al Brooks 一行：状态 + Always-In + 信号棒质量
+    # Al Brooks 简化详情
     ai = ab_result.get("always_in", "neutral")
     quality = ab_result.get("signal_bar_quality", "none")
     hl = ab_result.get("hl_count") or {}
     hl_type = hl.get("type", "none")
 
-    # 构建详情文本
-    parts = []
+    # 简化文案：只保留方向 + 关键信号
+    ab_detail_text = ab_detail
     if ai != "neutral":
-        ai_label = "多头" if ai == "bull" else "空头"
-        parts.append(f"Always-In{ai_label}")
-    if quality != "none":
-        parts.append(f"信号棒{quality}")
-    if hl_type != "none":
-        parts.append(hl_type)
-    ab_detail_text = "·".join(parts) if parts else ab_detail
+        ai_label = "多" if ai == "bull" else "空"
+        if quality != "none":
+            ab_detail_text = f"{ai_label}头·{quality}信号棒"
+        else:
+            ab_detail_text = f"{ai_label}头趋势"
+    elif quality != "none":
+        ab_detail_text = f"{quality}信号棒"
 
     # Al Brooks 价格行
     ab_price_line = _format_theory_price_line("价格行为", ab_status, ab_info, ab_detail_text)
