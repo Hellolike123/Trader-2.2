@@ -13,6 +13,40 @@ from __future__ import annotations
 # display_only 标记，供 plugin_registry 分层加载时识别
 display_only: bool = True
 
+import logging
+
+_logger = logging.getLogger(__name__)
+
+
+def _session_5m_bars(bars: list) -> list:
+    """只保留最新交易日（当日）的 5m bar，避免跨日旧高价污染 VWAP/区间。
+
+    5m bar 由 light_data 构造，带 date(YYYY-MM-DD) / time(HH:MM) 字段；
+    新浪源有时把完整 datetime 放进 time。统一取前 10 字符作为交易日。
+    无日期信息或全为空时原样返回（保守，不误删）。
+    """
+    if not bars:
+        return bars
+
+    def _day(b):
+        if isinstance(b, dict):
+            for k in ("datetime", "date", "time"):
+                v = b.get(k)
+                if isinstance(v, str) and len(v) >= 10:
+                    return v[:10]
+        else:
+            for k in ("datetime", "date", "time"):
+                v = getattr(b, k, None)
+                if isinstance(v, str) and len(v) >= 10:
+                    return v[:10]
+        return None
+
+    days = [d for d in (_day(b) for b in bars) if d]
+    if not days:
+        return bars
+    latest = max(days)
+    return [b for b in bars if _day(b) == latest]
+
 # 重新导出纯数学内核（避免下游需要同时 import 两个模块）
 from trader_shared.indicator_math import (  # noqa: F401
     calc_atr_series,
@@ -42,6 +76,9 @@ def calc_vwap(bars_5m: list, current_price: float | None = None) -> dict:
     if not bars_5m:
         return {"vwap": None, "deviation_pct": None, "position": None, "level": None}
 
+    # 只算当日 session，避免 fetch_5m(datalen=800) 拉回多日旧高价 bar 污染 VWAP
+    bars_5m = _session_5m_bars(bars_5m)
+
     try:
         from trader_shared.config import VWAP_DEVIATION_BELOW_TRAPPED, VWAP_DEVIATION_ABOVE_PROFIT
     except ImportError:
@@ -69,6 +106,17 @@ def calc_vwap(bars_5m: list, current_price: float | None = None) -> dict:
         return {"vwap": None, "deviation_pct": None, "position": None, "level": None}
 
     vwap = cum_pv / cum_vol
+    # 越界 sanity：VWAP 必须落在当日区间，否则说明仍被跨日数据污染
+    try:
+        _day_low = min(_bar_values(b)[1] for b in bars_5m)
+        _day_high = max(_bar_values(b)[0] for b in bars_5m)
+        if not (_day_low <= vwap <= _day_high):
+            _logger.warning(
+                "VWAP %.2f 超出当日区间 [%.2f, %.2f]，疑似跨日数据污染",
+                vwap, _day_low, _day_high,
+            )
+    except Exception:
+        pass
     if current_price is None:
         _, _, current_price = _bar_values(bars_5m[-1])
     if current_price is None or current_price <= 0:
