@@ -242,12 +242,19 @@ CTX_15M = 400    # 15m 上下文棒数 (~33 交易日)
 
 
 def make_signal_fn(code: str, sec, bars_5m: list[dict], bars_15m: list[dict],
-                  daily: list[dict], use_structure: bool = True):
+                  daily: list[dict], use_structure: bool = True,
+                  theory_mode: str = "all3"):
     """闭包：给定 5m 棒全局下标 t_idx，返回无前视的 t0 plan。
 
     use_structure=True 时，按 t0 设计（t0_run.py "T0-1 fix"）注入 trader 日线
     结构支撑/阻力 (build_structure_context, 用 D 之前日线 = 无前视)，使买/卖区
     宽到日线级；否则退化为仅日内近价位（net_space 常为负 -> 几乎不触发）。
+
+    theory_mode 控制共振门控：
+      "all3"    — 三重全亮（原版，默认）
+      "ab"      — 仅 Al Brooks 价格行为
+      "wyckoff" — 仅威科夫
+      "momentum" — 仅动量 RSI 背离
     """
     m15_dt = [parse_dt(b.get("time") or b.get("date")) for b in bars_15m]
     daily_dates = [str(b.get("date") or "") for b in daily]
@@ -303,6 +310,18 @@ def make_signal_fn(code: str, sec, bars_5m: list[dict], bars_15m: list[dict],
             except Exception:
                 structure_result = None
         model = build_price_point_model(report_data, structure_result=structure_result)
+        # 单理论模式：覆盖三重共振门控，按指定席位独立判定
+        if theory_mode != "all3":
+            lights = (model.get("resonance") or {}).get("lights") or {}
+            if theory_mode == "ab":
+                model["resonance"]["buy_green"] = bool(lights.get("ab", {}).get("buy"))
+                model["resonance"]["sell_red"] = bool(lights.get("ab", {}).get("sell"))
+            elif theory_mode == "wyckoff":
+                model["resonance"]["buy_green"] = bool(lights.get("wyckoff", {}).get("buy"))
+                model["resonance"]["sell_red"] = bool(lights.get("wyckoff", {}).get("sell"))
+            elif theory_mode == "momentum":
+                model["resonance"]["buy_green"] = bool(lights.get("momentum", {}).get("buy"))
+                model["resonance"]["sell_red"] = bool(lights.get("momentum", {}).get("sell"))
         return model, now_bar
 
     return signal_fn
@@ -317,7 +336,7 @@ def size_qty(capital: float, price: float) -> int:
 
 def run_one_day(code: str, day: str, capital: float, plan_every: int,
                 use_cache: bool = True, force_refresh: bool = False,
-                use_structure: bool = True) -> dict:
+                use_structure: bool = True, theory_mode: str = "all3") -> dict:
     """只处理「单交易日」，在独立子进程里跑以保证 t0 大脑内存可回收。
 
     返回紧凑结果 dict，由父进程聚合成权益曲线与绩效。
@@ -325,7 +344,8 @@ def run_one_day(code: str, day: str, capital: float, plan_every: int,
     """
     daily, bars_5m, bars_15m, sec, _ = load_data(code, use_cache, force_refresh)
     signal_fn = make_signal_fn(code, sec, bars_5m, bars_15m, daily,
-                                  use_structure=use_structure)
+                                  use_structure=use_structure,
+                                  theory_mode=theory_mode)
     lim = board_limit(code)
     idxs = [i for i, b in enumerate(bars_5m)
             if (b.get("time") or b.get("date") or "").split(" ")[0] == day]
@@ -447,7 +467,7 @@ def run_one_day(code: str, day: str, capital: float, plan_every: int,
 
 def run_backtest(code: str, capital: float = 100000.0, use_cache: bool = True,
                 force_refresh: bool = False, plan_every: int = PLAN_EVERY,
-                use_structure: bool = True):
+                use_structure: bool = True, theory_mode: str = "all3"):
     """协调器：每天起一个独立子进程跑 run_one_day，避免 t0 大脑内存累计 OOM。
 
     子进程每跑完一天即退出，内存回收；父进程只做聚合。
@@ -494,7 +514,7 @@ def run_backtest(code: str, capital: float = 100000.0, use_cache: bool = True,
         out.close()
         cmd = [py, script, "--target", code, "--worker-day", D,
                "--capital", str(capital), "--plan-every", str(plan_every),
-               "--worker-out", out_path]
+               "--theory", theory_mode, "--worker-out", out_path]
         if not use_cache:
             cmd.append("--no-cache")
         if not use_structure:
@@ -592,6 +612,7 @@ def run_backtest(code: str, capital: float = 100000.0, use_cache: bool = True,
         "total_buy_opp": total_buy_opp,
         "total_sell_opp": total_sell_opp,
         "status_total": status_total,
+        "theory_mode": theory_mode,
     }
 
 
@@ -605,6 +626,8 @@ def _print_report(r: dict) -> None:
     lines = []
     lines.append("=" * 60)
     lines.append("日内 T0 无前视回测报告")
+    mode_label = {"all3": "三重共振", "ab": "仅 Al Brooks", "wyckoff": "仅威科夫", "momentum": "仅动量"}
+    lines.append("共振模式        : %s" % mode_label.get(r.get("theory_mode","all3"), r.get("theory_mode","all3")))
     lines.append("=" * 60)
     lines.append("标的            : %s" % r["code"])
     lines.append("窗口            : %s -> %s  (约 %d 交易日)" % (r["first_day"], r["last_day"], r["n_days"]))
@@ -642,6 +665,8 @@ def main():
     ap.add_argument("--refresh-cache", action="store_true", help="强制重抓并刷新缓存")
     ap.add_argument("--plan-every", type=int, default=PLAN_EVERY, help="每 N 根 5m 棒评估一次 plan")
     ap.add_argument("--no-structure", action="store_true", help="不注入日线结构支撑/阻力（退化为仅日内近价位）")
+    ap.add_argument("--theory", default="all3", choices=["all3","ab","wyckoff","momentum"],
+                    help="共振门控模式：all3 三灯全亮 / ab 仅 Al Brooks / wyckoff 仅威科夫 / momentum 仅动量")
     ap.add_argument("--worker-day", default=None, help="(内部)子进程模式：只处理该交易日")
     ap.add_argument("--worker-out", default=None, help="(内部)子进程结果写出 JSON 路径")
     args = ap.parse_args()
@@ -651,7 +676,7 @@ def main():
             args.target, args.worker_day, capital=args.capital,
             plan_every=args.plan_every,
             use_cache=not args.no_cache, force_refresh=args.refresh_cache,
-            use_structure=not args.no_structure)
+            use_structure=not args.no_structure, theory_mode=args.theory)
         if args.worker_out:
             try:
                 with open(args.worker_out, "w", encoding="utf-8") as fh:
@@ -667,6 +692,7 @@ def main():
         force_refresh=args.refresh_cache,
         plan_every=args.plan_every,
         use_structure=not args.no_structure,
+        theory_mode=args.theory,
     )
     _print_report(r)
 
