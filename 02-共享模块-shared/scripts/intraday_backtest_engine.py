@@ -59,6 +59,9 @@ LOT = 100                  # 一手
 MAX_RT_PER_DAY = 3          # 每日最多回合交易数 (防过度交易噪声)
 PLAN_EVERY = 1             # 每 N 根 5m 棒评估一次 plan (1=每棒)
 
+# T0 追踪止损（替代固定止盈止损，让利润奔跑）
+TRAILING_STOP_PCT = 0.005  # 从最高价回撤 0.5% 即出场（初始止损靠信号棒，追踪只紧不松）
+
 
 def _cache_dir() -> str:
     d = os.path.expanduser("~/.trader/intraday_cache")
@@ -310,18 +313,30 @@ def make_signal_fn(code: str, sec, bars_5m: list[dict], bars_15m: list[dict],
             except Exception:
                 structure_result = None
         model = build_price_point_model(report_data, structure_result=structure_result)
-        # 单理论模式：覆盖三重共振门控，按指定席位独立判定
+        # 单理论 / 组合模式：覆盖三重共振门控
         if theory_mode != "all3":
             lights = (model.get("resonance") or {}).get("lights") or {}
+            ab_b = bool(lights.get("ab", {}).get("buy"))
+            ab_s = bool(lights.get("ab", {}).get("sell"))
+            wy_b = bool(lights.get("wyckoff", {}).get("buy"))
+            wy_s = bool(lights.get("wyckoff", {}).get("sell"))
+            mo_b = bool(lights.get("momentum", {}).get("buy"))
+            mo_s = bool(lights.get("momentum", {}).get("sell"))
             if theory_mode == "ab":
-                model["resonance"]["buy_green"] = bool(lights.get("ab", {}).get("buy"))
-                model["resonance"]["sell_red"] = bool(lights.get("ab", {}).get("sell"))
+                model["resonance"]["buy_green"] = ab_b
+                model["resonance"]["sell_red"] = ab_s
             elif theory_mode == "wyckoff":
-                model["resonance"]["buy_green"] = bool(lights.get("wyckoff", {}).get("buy"))
-                model["resonance"]["sell_red"] = bool(lights.get("wyckoff", {}).get("sell"))
+                model["resonance"]["buy_green"] = wy_b
+                model["resonance"]["sell_red"] = wy_s
             elif theory_mode == "momentum":
-                model["resonance"]["buy_green"] = bool(lights.get("momentum", {}).get("buy"))
-                model["resonance"]["sell_red"] = bool(lights.get("momentum", {}).get("sell"))
+                model["resonance"]["buy_green"] = mo_b
+                model["resonance"]["sell_red"] = mo_s
+            elif theory_mode == "any":
+                model["resonance"]["buy_green"] = ab_b or wy_b or mo_b
+                model["resonance"]["sell_red"] = ab_s or wy_s or mo_s
+            elif theory_mode == "2of3":
+                model["resonance"]["buy_green"] = sum([ab_b, wy_b, mo_b]) >= 2
+                model["resonance"]["sell_red"] = sum([ab_s, wy_s, mo_s]) >= 2
         return model, now_bar
 
     return signal_fn
@@ -368,6 +383,8 @@ def run_one_day(code: str, day: str, capital: float, plan_every: int,
 
     pos = 0
     entry = 0.0
+    peak_price = 0.0         # 持仓期间最高价（用于追踪止损）
+    trailing_stop = 0.0      # 当前追踪止损价
     day_pnl = 0.0
     rt = 0
     trades = 0
@@ -393,48 +410,76 @@ def run_one_day(code: str, day: str, capital: float, plan_every: int,
         sstat = sell.get("status")
         status_counts["B:" + str(bstat)] = status_counts.get("B:" + str(bstat), 0) + 1
         status_counts["S:" + str(sstat)] = status_counts.get("S:" + str(sstat), 0) + 1
-        # 买 (空仓 + 已触发 + 绿灯 + 不在涨停)
+        # 买 (空仓) — 信号棒突破入场，不用限价等回落
         if pos == 0 and rt < MAX_RT_PER_DAY:
-            be = buy.get("execution_price")
-            if bstat == "已触发" and buy_green and be is not None:
-                be = float(be)
-                if be < limit_up:
+            if bstat == "已触发" and buy_green:
+                # 信号棒 = 当前这根 5m 棒（buy_price = AB 买点 = 信号棒高位）
+                signal_bar = bars_5m[gi]
+                signal_high = float(signal_bar.get("high") or 0)
+                signal_low = float(signal_bar.get("low") or 0)
+                # 突破入场：价格高于信号棒最高价 + 滑点
+                entry_target = signal_high * (1 + SLIP_BUY)
+                # 信号棒止损：跌破信号棒最低价 - 滑点
+                signal_stop = signal_low * (1 - SLIP_SELL)
+                if entry_target < limit_up and signal_stop > limit_dn:
                     for j in range(k + 1, len(idxs)):
-                        low = float(bars_5m[idxs[j]].get("low") or 0)
-                        if low <= be * (1 + SLIP_BUY):
-                            fill = be * (1 + SLIP_BUY)
+                        high = float(bars_5m[idxs[j]].get("high") or 0)
+                        if high >= entry_target:
+                            fill = entry_target
                             q = size_qty(capital, fill)
                             if q <= 0:
                                 break
                             pos = q
                             entry = fill
+                            # 初始止损 = 信号棒最低点下方（随后可被追踪上移）
+                            trailing_stop = signal_stop
+                            peak_price = fill
                             day_pnl -= fill * q * COMMISSION
                             n_buy_opp += 1
                             break
-        # 卖 (持仓 + 已触发 + 红灯 + 不在跌停)
+        # 卖 (持仓) — 信号棒止损 + 追踪止损 + 信号出场
         elif pos > 0:
-            se = sell.get("execution_price")
-            if sstat == "已触发" and sell_red and se is not None:
-                se = float(se)
-                if se > limit_dn:
-                    for j in range(k + 1, len(idxs)):
-                        high = float(bars_5m[idxs[j]].get("high") or 0)
-                        if high >= se * (1 - SLIP_SELL):
-                            fill = se * (1 - SLIP_SELL)
-                            proceeds = fill * pos * (1 - COMMISSION - STAMP)
-                            cost = entry * pos * (1 + COMMISSION)
-                            pnl = proceeds - cost
-                            day_pnl += pnl
-                            trades += 1
-                            rt += 1
-                            if pnl >= 0:
-                                wins += 1
-                            pf_num += max(pnl, 0.0)
-                            pf_den += max(-pnl, 0.0)
-                            pos = 0
-                            entry = 0.0
-                            n_sell_opp += 1
-                            break
+            cur_high = float(bars_5m[gi].get("high") or 0)
+            cur_low = float(bars_5m[gi].get("low") or 0)
+            exited = False
+            pnl = 0.0
+            fill = 0.0
+
+            # 峰值追踪：持仓期间最高价上移 -> 止损跟着上移
+            peak_price = max(peak_price, cur_high)
+            # 初始止损靠信号棒，之后靠追踪（取更高者，只紧不松）
+            trailing_stop = max(trailing_stop, peak_price * (1 - TRAILING_STOP_PCT))
+            if cur_low <= trailing_stop:
+                fill = trailing_stop * (1 - SLIP_SELL)
+                exited = True
+
+            # 信号出场
+            if not exited:
+                se = sell.get("execution_price")
+                if sstat == "已触发" and sell_red and se is not None:
+                    se = float(se)
+                    if se > limit_dn:
+                        for j in range(k + 1, len(idxs)):
+                            high = float(bars_5m[idxs[j]].get("high") or 0)
+                            if high >= se * (1 - SLIP_SELL):
+                                fill = se * (1 - SLIP_SELL)
+                                exited = True
+                                break
+
+            if exited and fill > 0:
+                proceeds = fill * pos * (1 - COMMISSION - STAMP)
+                cost = entry * pos * (1 + COMMISSION)
+                pnl = proceeds - cost
+                day_pnl += pnl
+                trades += 1
+                rt += 1
+                if pnl >= 0:
+                    wins += 1
+                pf_num += max(pnl, 0.0)
+                pf_den += max(-pnl, 0.0)
+                pos = 0
+                entry = 0.0
+                n_sell_opp += 1
         # 每根棒后清理 transient，避免子进程内堆积
         if (k % 8 == 0):
             gc.collect()
@@ -626,7 +671,8 @@ def _print_report(r: dict) -> None:
     lines = []
     lines.append("=" * 60)
     lines.append("日内 T0 无前视回测报告")
-    mode_label = {"all3": "三重共振", "ab": "仅 Al Brooks", "wyckoff": "仅威科夫", "momentum": "仅动量"}
+    mode_label = {"all3": "三重共振", "ab": "仅 Al Brooks", "wyckoff": "仅威科夫",
+                  "momentum": "仅动量", "any": "任意一灯", "2of3": "至少两灯"}
     lines.append("共振模式        : %s" % mode_label.get(r.get("theory_mode","all3"), r.get("theory_mode","all3")))
     lines.append("=" * 60)
     lines.append("标的            : %s" % r["code"])
@@ -665,8 +711,8 @@ def main():
     ap.add_argument("--refresh-cache", action="store_true", help="强制重抓并刷新缓存")
     ap.add_argument("--plan-every", type=int, default=PLAN_EVERY, help="每 N 根 5m 棒评估一次 plan")
     ap.add_argument("--no-structure", action="store_true", help="不注入日线结构支撑/阻力（退化为仅日内近价位）")
-    ap.add_argument("--theory", default="all3", choices=["all3","ab","wyckoff","momentum"],
-                    help="共振门控模式：all3 三灯全亮 / ab 仅 Al Brooks / wyckoff 仅威科夫 / momentum 仅动量")
+    ap.add_argument("--theory", default="all3", choices=["all3","ab","wyckoff","momentum","any","2of3"],
+                    help="共振门控：all3全亮 / ab仅AlBrooks / wyckoff仅威科夫 / momentum仅动量 / any任意一灯 / 2of3至少两灯")
     ap.add_argument("--worker-day", default=None, help="(内部)子进程模式：只处理该交易日")
     ap.add_argument("--worker-out", default=None, help="(内部)子进程结果写出 JSON 路径")
     args = ap.parse_args()

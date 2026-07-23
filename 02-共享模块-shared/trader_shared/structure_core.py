@@ -774,6 +774,7 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
 
     return {
         "main_support": round(support_price, 2),
+        "main_resistance": round(resistance_price, 2),
         "support": round(support_price, 2),
         "support_source": support["name"],
         "resistance": round(resistance_price, 2),

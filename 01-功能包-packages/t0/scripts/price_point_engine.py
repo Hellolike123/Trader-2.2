@@ -1115,173 +1115,76 @@ def score_volume(state: dict[str, Any]) -> int:
 
 # ── 三重硬共振（T0 核心判定）─────────────────────────────────────────────
 
-def check_resonance(report_data: dict[str, Any], zones: dict[str, Any],
-                    state: dict[str, Any], ab_result: dict | None = None) -> dict[str, Any]:
-    """三重硬共振检查：Al Brooks(5m) + 威科夫(5m) + 动量(5m)，三个同时亮灯才可操作。
+def check_resonance(report_data, zones, state, ab_result=None):
+    """T0 核心判定：VWAP + 9/21 EMA + 成交量确认。
 
-    Al Brooks 价格行为替换缠论作为第一席位。
+    替代旧的 Al Brooks + 威科夫 + 动量三层共振。
+    2026-07-24 用户拍板：T0 用 VWAP/EMA/Volume，不用三理论。
     """
-    bars = report_data["kline_5m_completed"]
+    from indicators import calculate_vwap_from_bars, calculate_ema
+
+    bars = report_data.get("kline_5m_completed") or report_data.get("kline_5m") or []
     current = float(report_data["current_price"])
 
-    # ── 1. Al Brooks 价格行为 ──
-    ab_buy = False
-    ab_sell = False
-    ab_reason = ""
-    ab_buy_price = None
-    ab_sell_price = None
-    if ab_result:
-        ab_buy = ab_result.get("buy_signal", False)
-        ab_sell = ab_result.get("sell_signal", False)
-        ab_reason = ab_result.get("buy_reason", "") if ab_buy else ab_result.get("sell_reason", "")
-        ab_buy_price = ab_result.get("buy_price")
-        ab_sell_price = ab_result.get("sell_price")
+    vwap = calculate_vwap_from_bars(bars)
+    vwap_bull = vwap is not None and current > vwap
+    vwap_bear = vwap is not None and current < vwap
+    vwap_reason = f"VWAP{vwap:.2f}" if vwap else "VWAP无数据"
+    vwap_entry = round(vwap, 2) if vwap else None
 
-    # ── 2. 威科夫：Spring(买) / UT(卖) / 无供给(买) / 放量滞涨(卖) + 关键价位 ──
-    wyckoff_buy = False
-    wyckoff_sell = False
-    wyckoff_reason = ""
-    wyckoff_buy_price = None
-    wyckoff_sell_price = None
-    buy_zone = zones.get("buy_zone") or {}
-    sell_zone = zones.get("sell_zone") or {}
-    buy_support = float(buy_zone.get("main_support") or 0)
-    sell_resistance = float(sell_zone.get("main_resistance") or 0)
+    closes = [float(b.get("close", 0)) for b in bars if b.get("close")]
+    ema_bull = False; ema_bear = False; ema_reason = ""; ema_entry = None
+    if len(closes) >= 21:
+        ema9 = calculate_ema(closes, 9)
+        ema21 = calculate_ema(closes, 21)
+        e9 = ema9[-1] if ema9 and len(ema9) > 0 else None
+        e21 = ema21[-1] if ema21 and len(ema21) > 0 else None
+        if e9 is not None and e21 is not None:
+            ema_bull = e9 > e21; ema_bear = e9 < e21
+            ema_reason = f"9EMA{e9:.2f}/21EMA{e21:.2f}"
+            ema_entry = round(e9, 2)
+    else:
+        ema_reason = "EMA数据不足"
 
-    if buy_support > 0:
-        spring = detect_spring_5m(bars, buy_support)
-        if spring.get("detected"):
-            wyckoff_buy = True
-            wyckoff_reason = spring.get("reason", "Spring")
-            wyckoff_buy_price = buy_support  # Spring 价位 = 支撑位
-        if not wyckoff_buy:
-            no_supply = detect_no_supply_pullback_5m(bars, buy_support)
-            if no_supply.get("detected"):
-                wyckoff_buy = True
-                wyckoff_reason = no_supply.get("reason", "无供给")
-                wyckoff_buy_price = buy_support
+    volumes = [float(b.get("volume", 0)) for b in bars if b.get("volume")]
+    avg_vol = sum(volumes[-20:]) / max(len(volumes[-20:]), 1) if len(volumes) >= 5 else 0
+    last_vol = volumes[-1] if volumes else 0
+    vol_ok = last_vol >= avg_vol * 0.7 if avg_vol > 0 else True
+    vol_reason = f"量{int(last_vol)}/均{int(avg_vol)}" if avg_vol > 0 else "量无数据"
 
-    if sell_resistance > 0:
-        ut = detect_upthrust_5m(bars, sell_resistance)
-        if ut.get("detected"):
-            wyckoff_sell = True
-            wyckoff_reason = ut.get("reason", "UT")
-            wyckoff_sell_price = sell_resistance  # UT 价位 = 压力位
-        if not wyckoff_sell:
-            vstop = detect_volume_stop_5m(bars)
-            if vstop.get("detected"):
-                wyckoff_sell = True
-                wyckoff_reason = vstop.get("reason", "放量滞涨")
-                wyckoff_sell_price = sell_resistance  # 放量滞涨入场价 = 压力位
+    buy_green = vwap_bull and ema_bull and vol_ok
+    sell_red = vwap_bear and ema_bear and vol_ok
 
-    # ── 3. 动量：RSI 背离检测 + 入场/出场价 ──
-    momentum_buy = False
-    momentum_sell = False
-    momentum_reason = ""
-    momentum_buy_price = None
-    momentum_sell_price = None
-    momentum_exit_price = None
-    # 动量 ATR 自适应出场价
-    _mom_atr14 = float((report_data.get("daily_bars") or [{}])[-1].get("atr14", 0)) if report_data.get("daily_bars") else 0
-    rsi_series = state.get("rsi") or []
-    rsi_last = rsi_series[-1] if rsi_series else None
-    if detect_bullish_divergence(bars, rsi_series, lookback=12):
-        momentum_buy = True
-        momentum_reason = "RSI底背离"
-        momentum_buy_price = float(bars[-1].get("low", 0)) if bars else None
-        if _mom_atr14 > 0:
-            momentum_exit_price = round(current + _mom_atr14 * 0.15, 2)
-        elif len(bars) >= 12:
-            recent_highs = [float(b.get("high", 0)) for b in bars[-12:]]
-            momentum_exit_price = round(min(recent_highs[-3:]), 2) if recent_highs else None
-    if detect_bearish_divergence(bars, rsi_series, lookback=12):
-        momentum_sell = True
-        momentum_reason = "RSI顶背离"
-        momentum_sell_price = float(bars[-1].get("high", 0)) if bars else None
-        if _mom_atr14 > 0:
-            momentum_exit_price = round(current - _mom_atr14 * 0.15, 2)
-        elif len(bars) >= 12:
-            recent_lows = [float(b.get("low", 0)) for b in bars[-12:]]
-            momentum_exit_price = round(max(recent_lows[-3:]), 2) if recent_lows else None
+    exit_price = vwap if vwap else None
 
-    # ── 共振判定 ──
-    buy_green = ab_buy and wyckoff_buy and momentum_buy
-    sell_red = ab_sell and wyckoff_sell and momentum_sell
-
-    # Al Brooks 出场价：买→上方阻力/高点上边界，卖→下方支撑/低点下边界
-    ab_exit_price = None
-    if ab_result:
-        hl = ab_result.get("hl_count") or {}
-        hl_price = hl.get("last_pullback_price")
-        if ab_buy:
-            # 买出场：看上方近端压力 / 信号棒高点
-            if sell_resistance > 0 and sell_resistance > current:
-                ab_exit_price = sell_resistance  # 上方压力位
-            else:
-                last_bar = bars[-1] if bars else {}
-                ab_exit_price = round(float(last_bar.get("high", current)) * 1.005, 2) if last_bar else None
-        elif ab_sell:
-            # 卖出场：看下方近端支撑 / 信号棒低点
-            if buy_support > 0 and buy_support < current:
-                ab_exit_price = buy_support  # 下方支撑位
-            else:
-                last_bar = bars[-1] if bars else {}
-                ab_exit_price = round(float(last_bar.get("low", current)) * 0.995, 2) if last_bar else None
-
-    # 威科夫出场价：Spring→下一压力位，UT→下一支撑位
-    wyckoff_exit_price = None
-    if wyckoff_buy and sell_resistance > 0:
-        wyckoff_exit_price = sell_resistance  # Spring 目标 = 压力位
-    elif wyckoff_sell and buy_support > 0:
-        wyckoff_exit_price = buy_support  # UT 目标 = 支撑位
-
-    # 亮灯状态（用于显示，不用于判定）
     lights = {
-        "ab": {"buy": ab_buy, "sell": ab_sell, "reason": ab_reason, "ok": bool(ab_result),
-               "buy_price": ab_buy_price, "sell_price": ab_sell_price,
-               "exit_price": ab_exit_price,
-               "quality": ab_result.get("signal_bar_quality", "none") if ab_result else "none",
-               "always_in": ab_result.get("always_in", "neutral") if ab_result else "neutral"},
-        "wyckoff": {"buy": wyckoff_buy, "sell": wyckoff_sell, "reason": wyckoff_reason, "ok": True,
-                    "buy_price": wyckoff_buy_price, "sell_price": wyckoff_sell_price,
-                    "exit_price": wyckoff_exit_price},
-        "momentum": {"buy": momentum_buy, "sell": momentum_sell, "reason": momentum_reason, "ok": True,
-                     "buy_price": momentum_buy_price, "sell_price": momentum_sell_price,
-                     "exit_price": momentum_exit_price},
+        "vwap": {"buy": vwap_bull, "sell": vwap_bear, "reason": vwap_reason, "ok": vwap is not None,
+                 "buy_price": vwap_entry, "sell_price": vwap_entry, "exit_price": exit_price},
+        "ema": {"buy": ema_bull, "sell": ema_bear, "reason": ema_reason, "ok": len(closes) >= 21,
+                "buy_price": ema_entry, "sell_price": ema_entry, "exit_price": exit_price},
+        "volume": {"buy": vol_ok, "sell": vol_ok, "reason": vol_reason, "ok": avg_vol > 0},
     }
-
-    # 三套理论的参考价位汇总
-    buy_prices = [p for p in [ab_buy_price, wyckoff_buy_price, momentum_buy_price] if p and p > 0]
-    sell_prices = [p for p in [ab_sell_price, wyckoff_sell_price, momentum_sell_price] if p and p > 0]
-
+    buy_prices = [p for p in [vwap_entry, ema_entry] if p and p > 0]
+    sell_prices = [p for p in [vwap_entry, ema_entry] if p and p > 0]
     return {
-        "buy_green": buy_green,
-        "sell_red": sell_red,
-        "lights": lights,
+        "buy_green": buy_green, "sell_red": sell_red, "lights": lights,
         "summary": _resonance_summary(lights, buy_green, sell_red),
         "ref_buy_price": round(min(buy_prices), 2) if buy_prices else None,
         "ref_sell_price": round(max(sell_prices), 2) if sell_prices else None,
     }
 
 
-def _resonance_summary(lights: dict, buy_green: bool, sell_red: bool) -> str:
-    """生成共振状态一行摘要（红黄绿灯）。"""
-    if buy_green:
-        return "🟢 三重共振买"
-    if sell_red:
-        return "🟢 三重共振卖"
-    buy_count = sum(1 for v in lights.values() if v.get("buy"))
-    sell_count = sum(1 for v in lights.values() if v.get("sell"))
-    max_count = max(buy_count, sell_count)
-    if max_count >= 2:
-        return "🟡 部分共振"
+def _resonance_summary(lights, buy_green, sell_red):
+    if buy_green: return "绿灯 VWAP+EMA+量 多头"
+    if sell_red: return "绿灯 VWAP+EMA+量 空头"
     off = []
     for name, info in lights.items():
-        label = {"ab": "价格行为", "wyckoff": "威科夫", "momentum": "动量"}[name]
-        if not info["buy"] and not info["sell"]:
-            off.append(label)
-    return f"🔴 未共振（缺：{'、'.join(off)}）"
-
+        label = {"vwap":"VWAP","ema":"EMA","volume":"量能"}.get(name, name)
+        if name == "volume":
+            if not info.get("buy"): off.append(label)
+        else:
+            if not info.get("buy") and not info.get("sell"): off.append(label)
+    return "红灯 未共振" + (f"(缺:{','.join(off)})" if off else "")
 
 def build_price_point_model(report_data: dict[str, Any], structure_result: dict[str, Any] | None = None) -> dict[str, Any]:
     data = dict(report_data)  # copy 防止副作用
