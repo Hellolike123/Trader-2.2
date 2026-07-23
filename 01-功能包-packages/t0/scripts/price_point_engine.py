@@ -1116,76 +1116,147 @@ def score_volume(state: dict[str, Any]) -> int:
 # ── 三重硬共振（T0 核心判定）─────────────────────────────────────────────
 
 def check_resonance(report_data, zones, state, ab_result=None):
-    """T0 核心判定：VWAP + 9/21 EMA + 成交量确认。
+    """T0 评分系统（V1.0）：五条件各20分，总分100。
 
-    替代旧的 Al Brooks + 威科夫 + 动量三层共振。
-    2026-07-24 用户拍板：T0 用 VWAP/EMA/Volume，不用三理论。
+    条件1: EMA5 > EMA10 > EMA20         20分 多头趋势
+    条件2: Close > VWAP                  20分 高于主力成本
+    条件3: Close near Box Low            20分 靠近箱体底部
+    条件4: Volume > MA5 * 1.5            20分 放量确认
+    条件5: ATR / Close > 2%              20分 波动足够
+
+    买入: >= 60分
+    卖出: EMA5死叉EMA10 或 Close<VWAP 或 接近箱体顶
     """
     from indicators import calculate_vwap_from_bars, calculate_ema
 
     bars = report_data.get("kline_5m_completed") or report_data.get("kline_5m") or []
     current = float(report_data["current_price"])
-
-    vwap = calculate_vwap_from_bars(bars)
-    vwap_bull = vwap is not None and current > vwap
-    vwap_bear = vwap is not None and current < vwap
-    vwap_reason = f"VWAP{vwap:.2f}" if vwap else "VWAP无数据"
-    vwap_entry = round(vwap, 2) if vwap else None
-
     closes = [float(b.get("close", 0)) for b in bars if b.get("close")]
-    ema_bull = False; ema_bear = False; ema_reason = ""; ema_entry = None
-    if len(closes) >= 21:
-        ema9 = calculate_ema(closes, 9)
-        ema21 = calculate_ema(closes, 21)
-        e9 = ema9[-1] if ema9 and len(ema9) > 0 else None
-        e21 = ema21[-1] if ema21 and len(ema21) > 0 else None
-        if e9 is not None and e21 is not None:
-            ema_bull = e9 > e21; ema_bear = e9 < e21
-            ema_reason = f"9EMA{e9:.2f}/21EMA{e21:.2f}"
-            ema_entry = round(e9, 2)
-    else:
-        ema_reason = "EMA数据不足"
-
     volumes = [float(b.get("volume", 0)) for b in bars if b.get("volume")]
-    avg_vol = sum(volumes[-20:]) / max(len(volumes[-20:]), 1) if len(volumes) >= 5 else 0
-    last_vol = volumes[-1] if volumes else 0
-    vol_ok = last_vol >= avg_vol * 0.7 if avg_vol > 0 else True
-    vol_reason = f"量{int(last_vol)}/均{int(avg_vol)}" if avg_vol > 0 else "量无数据"
+    n = len(closes)
 
-    buy_green = vwap_bull and ema_bull and vol_ok
-    sell_red = vwap_bear and ema_bear and vol_ok
+    # 条件1: EMA 排列
+    score_ema = 0
+    ema_reason = "EMA数据不足"
+    if n >= 20:
+        ema5 = calculate_ema(closes, 5)
+        ema10 = calculate_ema(closes, 10)
+        ema20 = calculate_ema(closes, 20)
+        e5 = ema5[-1] if ema5 else 0
+        e10 = ema10[-1] if ema10 else 0
+        e20 = ema20[-1] if ema20 else 0
+        e5_p = ema5[-2] if len(ema5) >= 2 else e5
+        e10_p = ema10[-2] if len(ema10) >= 2 else e10
+        if e5 > e10 > e20:
+            score_ema = 20; ema_reason = f"EMA5>{e5:.2f}>EMA10>{e10:.2f}>EMA20>{e20:.2f} 多头"
+        elif e5 < e10 < e20:
+            ema_reason = f"EMA5<EMA10<EMA20 空头"
+        else:
+            ema_reason = f"EMA排列不整"
+        # 死叉检测（用于卖出）
+        ema_death_cross = e5_p > e10_p and e5 <= e10
+    else:
+        ema_death_cross = False
+
+    # 条件2: VWAP
+    vwap = calculate_vwap_from_bars(bars)
+    score_vwap = 20 if vwap and current > vwap else 0
+    vwap_reason = f"VWAP{vwap:.2f} {'上方' if vwap and current > vwap else '下方'}" if vwap else "VWAP无数据"
+
+    # 条件3: 箱体（最近20根5m的高低）
+    box_reason = "箱体数据不足"
+    score_box = 0
+    box_high = box_low = 0
+    if n >= 20:
+        recent = bars[-20:]
+        box_high = max(float(b.get("high", 0)) for b in recent if b.get("high"))
+        box_low = min(float(b.get("low", 0)) for b in recent if b.get("low"))
+        # ATR
+        atr = _calc_atr_from_closes(closes, 14)
+        dist_to_low = (current - box_low) / box_low if box_low > 0 else 1
+        dist_to_high = (box_high - current) / box_high if box_high > 0 else 1
+        if dist_to_low <= (atr / box_low * 0.5) if atr and box_low else False:
+            score_box = 20
+            box_reason = f"箱底{box_low:.2f} 距{dist_to_low*100:.1f}%"
+        elif dist_to_high <= (atr / box_high * 0.5) if atr and box_high else False:
+            box_reason = f"箱顶{box_high:.2f} 距{dist_to_high*100:.1f}%"
+        else:
+            box_reason = f"箱体{box_low:.2f}-{box_high:.2f}"
+    else:
+        atr = 0
+
+    # 条件4: 成交量
+    score_vol = 0
+    vol_reason = "量数据不足"
+    if len(volumes) >= 5:
+        vol_ma5 = sum(volumes[-5:]) / 5
+        last_vol = volumes[-1] if volumes else 0
+        vol_ratio = last_vol / vol_ma5 if vol_ma5 > 0 else 1
+        if last_vol > vol_ma5 * 1.5:
+            score_vol = 20
+            vol_reason = f"放量{vol_ratio:.1f}x"
+        else:
+            vol_reason = f"量{vol_ratio:.1f}x"
+
+    # 条件5: ATR 波动
+    score_atr = 0
+    atr_reason = "ATR数据不足"
+    if atr > 0 and current > 0:
+        atr_pct = atr / current * 100
+        if atr_pct > 2:
+            score_atr = 20
+            atr_reason = f"ATR{atr_pct:.1f}%"
+        else:
+            atr_reason = f"ATR{atr_pct:.1f}% 波动不足"
+
+    # 总分
+    buy_score = score_ema + score_vwap + score_box + score_vol + score_atr
+    buy_green = buy_score >= 40
+
+    # 卖出: 死叉 OR 低于VWAP OR 接近箱顶
+    sell_ema = 20 if (n >= 20 and e5 < e10 if n >= 20 else False) else 0
+    sell_vwap = 20 if vwap and current < vwap else 0
+    if n >= 20 and atr and box_high > 0:
+        dist_to_high_s = (box_high - current) / box_high
+        sell_box = 20 if dist_to_high_s <= (atr / box_high * 0.5) else 0
+    else:
+        sell_box = 0
+    sell_score = sell_ema + sell_vwap + sell_box + score_vol + score_atr
+    sell_red = sell_score >= 60
 
     exit_price = vwap if vwap else None
-
     lights = {
-        "vwap": {"buy": vwap_bull, "sell": vwap_bear, "reason": vwap_reason, "ok": vwap is not None,
-                 "buy_price": vwap_entry, "sell_price": vwap_entry, "exit_price": exit_price},
-        "ema": {"buy": ema_bull, "sell": ema_bear, "reason": ema_reason, "ok": len(closes) >= 21,
-                "buy_price": ema_entry, "sell_price": ema_entry, "exit_price": exit_price},
-        "volume": {"buy": vol_ok, "sell": vol_ok, "reason": vol_reason, "ok": avg_vol > 0},
+        "ema": {"buy": score_ema >= 20, "sell": sell_ema >= 20, "reason": ema_reason, "ok": n >= 20},
+        "vwap": {"buy": score_vwap >= 20, "sell": sell_vwap >= 20, "reason": vwap_reason, "ok": vwap is not None,
+                 "buy_price": round(vwap,2) if vwap else None, "sell_price": round(vwap,2) if vwap else None},
+        "box": {"buy": score_box >= 20, "sell": sell_box >= 20, "reason": box_reason, "ok": n >= 20},
+        "volume": {"buy": score_vol >= 20, "sell": score_vol >= 20, "reason": vol_reason, "ok": len(volumes) >= 5},
+        "atr": {"buy": score_atr >= 20, "sell": score_atr >= 20, "reason": atr_reason, "ok": atr > 0},
     }
-    buy_prices = [p for p in [vwap_entry, ema_entry] if p and p > 0]
-    sell_prices = [p for p in [vwap_entry, ema_entry] if p and p > 0]
+    summary = f"评分{buy_score}/100 " + ("买入" if buy_green else "等待" if buy_score >= 40 else "不交易")
     return {
-        "buy_green": buy_green, "sell_red": sell_red, "lights": lights,
-        "summary": _resonance_summary(lights, buy_green, sell_red),
-        "ref_buy_price": round(min(buy_prices), 2) if buy_prices else None,
-        "ref_sell_price": round(max(sell_prices), 2) if sell_prices else None,
+        "buy_green": buy_green, "sell_red": sell_red,
+        "score": buy_score, "sell_score": sell_score,
+        "lights": lights, "summary": summary,
+        "ref_buy_price": round(box_low, 2) if box_low > 0 else None,
+        "ref_sell_price": round(box_high, 2) if box_high > 0 else None,
     }
+
+
+def _calc_atr_from_closes(closes, period=14):
+    """简单 ATR 计算（用收盘价近似）。"""
+    if len(closes) < period + 1:
+        return 0
+    trs = []
+    for i in range(1, period + 1):
+        trs.append(abs(closes[-i] - closes[-i-1]))
+    return sum(trs) / len(trs)
 
 
 def _resonance_summary(lights, buy_green, sell_red):
-    if buy_green: return "绿灯 VWAP+EMA+量 多头"
-    if sell_red: return "绿灯 VWAP+EMA+量 空头"
-    off = []
-    for name, info in lights.items():
-        label = {"vwap":"VWAP","ema":"EMA","volume":"量能"}.get(name, name)
-        if name == "volume":
-            if not info.get("buy"): off.append(label)
-        else:
-            if not info.get("buy") and not info.get("sell"): off.append(label)
-    return "红灯 未共振" + (f"(缺:{','.join(off)})" if off else "")
-
+    if buy_green: return "绿灯 可交易"
+    if sell_red: return "红灯 应卖出"
+    return "灰灯 等待"
 def build_price_point_model(report_data: dict[str, Any], structure_result: dict[str, Any] | None = None) -> dict[str, Any]:
     data = dict(report_data)  # copy 防止副作用
     now = data.get("now") or datetime.now()

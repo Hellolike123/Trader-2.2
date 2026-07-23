@@ -567,30 +567,26 @@ def render_markdown(plan: dict[str, Any]) -> str:
 
 
 def _build_conclusion(plan: dict[str, Any], buy_state: str, sell_state: str) -> str:
-    """一句话结论：告诉用户现在该干什么。"""
+    """一句话结论：基于评分系统输出操作建议。"""
     resonance = plan.get("resonance") or {}
+    score = resonance.get("score", 0)
     buy_green = resonance.get("buy_green", False)
-    sell_red = resonance.get("sell_red", False)
 
-    if buy_state == "可执行" and buy_green:
-        return "三重共振买 → 可低吸"
-    if sell_state == "可执行" and sell_red:
-        return "三重共振卖 → 可高抛"
-    if buy_state == "可执行" and not buy_green:
-        return "触发但未共振 → 等确认再操作"
-    if sell_state == "可执行" and not sell_red:
-        return "触发但未共振 → 等确认再操作"
+    if buy_green:
+        if score >= 80:
+            return "极强信号 → 可加仓"
+        elif score >= 60:
+            return "强信号 → 可低吸"
+        else:
+            return "弱信号 → 轻仓试探"
+    elif buy_state == "可执行":
+        return "触发但评分不足 → 等条件改善"
 
-    # 未触发
-    lights = resonance.get("lights", {})
-    buy_count = sum(1 for v in lights.values() if v.get("buy"))
-    sell_count = sum(1 for v in lights.values() if v.get("sell"))
-    if buy_count >= 2:
-        return "部分共振（买）→ 关注，等第三盏灯"
-    if sell_count >= 2:
-        return "部分共振（卖）→ 关注，等第三盏灯"
-
-    return "暂不操作"
+    if score >= 60:
+        return "评分充足 → 等触发价到位"
+    elif score >= 40:
+        return "观察中 → 评分尚可，等信号"
+    return "暂不操作 → 条件不满足"
 
 
 def _build_failure_conditions(plan: dict[str, Any], buy: dict, sell: dict,

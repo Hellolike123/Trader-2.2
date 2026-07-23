@@ -410,33 +410,31 @@ def run_one_day(code: str, day: str, capital: float, plan_every: int,
         sstat = sell.get("status")
         status_counts["B:" + str(bstat)] = status_counts.get("B:" + str(bstat), 0) + 1
         status_counts["S:" + str(sstat)] = status_counts.get("S:" + str(sstat), 0) + 1
-        # 买 (空仓) — 信号棒突破入场，不用限价等回落
+        # 买 (空仓) — 均值回归入场：信号棒确认后，下一棒开盘入场
         if pos == 0 and rt < MAX_RT_PER_DAY:
             if bstat == "已触发" and buy_green:
-                # 信号棒 = 当前这根 5m 棒（buy_price = AB 买点 = 信号棒高位）
                 signal_bar = bars_5m[gi]
-                signal_high = float(signal_bar.get("high") or 0)
+                signal_close = float(signal_bar.get("close") or 0)
                 signal_low = float(signal_bar.get("low") or 0)
-                # 突破入场：价格高于信号棒最高价 + 滑点
-                entry_target = signal_high * (1 + SLIP_BUY)
-                # 信号棒止损：跌破信号棒最低价 - 滑点
+                # 均值回归：在信号棒收盘价附近入场（不在突破高点）
+                entry_target = signal_close * (1 + SLIP_BUY)
+                # 止损：跌破信号棒最低点
                 signal_stop = signal_low * (1 - SLIP_SELL)
                 if entry_target < limit_up and signal_stop > limit_dn:
+                    # 下一棒开盘即入场（均值回归不等突破）
                     for j in range(k + 1, len(idxs)):
-                        high = float(bars_5m[idxs[j]].get("high") or 0)
-                        if high >= entry_target:
-                            fill = entry_target
-                            q = size_qty(capital, fill)
-                            if q <= 0:
-                                break
-                            pos = q
-                            entry = fill
-                            # 初始止损 = 信号棒最低点下方（随后可被追踪上移）
-                            trailing_stop = signal_stop
-                            peak_price = fill
-                            day_pnl -= fill * q * COMMISSION
-                            n_buy_opp += 1
+                        open_price = float(bars_5m[idxs[j]].get("open") or 0)
+                        fill = min(entry_target, open_price * (1 + SLIP_BUY))
+                        q = size_qty(capital, fill)
+                        if q <= 0:
                             break
+                        pos = q
+                        entry = fill
+                        trailing_stop = signal_stop
+                        peak_price = fill
+                        day_pnl -= fill * q * COMMISSION
+                        n_buy_opp += 1
+                        break
         # 卖 (持仓) — 信号棒止损 + 追踪止损 + 信号出场
         elif pos > 0:
             cur_high = float(bars_5m[gi].get("high") or 0)
