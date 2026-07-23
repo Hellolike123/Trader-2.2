@@ -687,6 +687,12 @@ def detect_buy_trigger(report_data: dict[str, Any], zones: dict[str, Any], state
         return trigger_result("数据不足", None, [], ["5m数据不足或非交易时段"])
     if report_data.get("space_state") == "too_small":
         return trigger_result("被阻断", None, [], ["日内振幅不足"])
+    # 数据合法性守卫：买区主支撑高于卖区主压力（区间倒置），说明 VWAP/区间被跨日旧数据污染，
+    # 应报"数据异常"而非伪装成"净空间不足"
+    _buy_ms = (zones.get("buy_zone") or {}).get("main_support")
+    _sell_mr = (zones.get("sell_zone") or {}).get("main_resistance")
+    if _buy_ms is not None and _sell_mr is not None and _buy_ms >= _sell_mr:
+        return trigger_result("数据异常", None, [], ["买区高于卖区，VWAP/区间疑似跨日污染"])
     net_space = report_data.get("t0_net_space_pct")
     if net_space is not None and net_space < MIN_T_NET_SPACE_PCT:
         return trigger_result("被阻断", None, [], ["T0净空间不足"])
@@ -786,6 +792,12 @@ def detect_sell_trigger(report_data: dict[str, Any], zones: dict[str, Any], stat
         return trigger_result("数据不足", None, [], ["5m数据不足或非交易时段"])
     if report_data.get("space_state") == "too_small":
         return trigger_result("被阻断", None, [], ["日内振幅不足"])
+    # 数据合法性守卫：买区主支撑高于卖区主压力（区间倒置），说明 VWAP/区间被跨日旧数据污染，
+    # 应报"数据异常"而非伪装成"净空间不足"
+    _buy_ms = (zones.get("buy_zone") or {}).get("main_support")
+    _sell_mr = (zones.get("sell_zone") or {}).get("main_resistance")
+    if _buy_ms is not None and _sell_mr is not None and _buy_ms >= _sell_mr:
+        return trigger_result("数据异常", None, [], ["买区高于卖区，VWAP/区间疑似跨日污染"])
     net_space = report_data.get("t0_net_space_pct")
     if net_space is not None and net_space < MIN_T_NET_SPACE_PCT:
         return trigger_result("被阻断", None, [], ["T0净空间不足"])
