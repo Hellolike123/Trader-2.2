@@ -59,8 +59,19 @@ LOT = 100                  # 一手
 MAX_RT_PER_DAY = 3          # 每日最多回合交易数 (防过度交易噪声)
 PLAN_EVERY = 1             # 每 N 根 5m 棒评估一次 plan (1=每棒)
 
-# T0 追踪止损（替代固定止盈止损，让利润奔跑）
-TRAILING_STOP_PCT = 0.005  # 从最高价回撤 0.5% 即出场（初始止损靠信号棒，追踪只紧不松）
+# T0 自适应止损：由 daily ATR 在 run_one_day 内计算，替代固定百分比
+
+def _atr_stop_pct(daily: list[dict]) -> float:
+    """从日线 ATR 计算自适应止损比例 = ATR×1.5 / close，上限 2%。"""
+    if not daily:
+        return 0.005
+    last = daily[-1]
+    atr = float(last.get("atr14") or 0)
+    close = float(last.get("close") or 1)
+    if atr <= 0 or close <= 0:
+        return 0.005
+    pct = atr / close * 1.5
+    return min(pct, 0.02)  # 上限 2%，防止科创板极端波动
 
 
 def _cache_dir() -> str:
@@ -361,6 +372,8 @@ def run_one_day(code: str, day: str, capital: float, plan_every: int,
     signal_fn = make_signal_fn(code, sec, bars_5m, bars_15m, daily,
                                   use_structure=use_structure,
                                   theory_mode=theory_mode)
+    # ATR 自适应止损
+    atr_stop = _atr_stop_pct(daily)
     lim = board_limit(code)
     idxs = [i for i, b in enumerate(bars_5m)
             if (b.get("time") or b.get("date") or "").split(" ")[0] == day]
@@ -446,7 +459,7 @@ def run_one_day(code: str, day: str, capital: float, plan_every: int,
             # 峰值追踪：持仓期间最高价上移 -> 止损跟着上移
             peak_price = max(peak_price, cur_high)
             # 初始止损靠信号棒，之后靠追踪（取更高者，只紧不松）
-            trailing_stop = max(trailing_stop, peak_price * (1 - TRAILING_STOP_PCT))
+            trailing_stop = max(trailing_stop, peak_price * (1 - atr_stop))
             if cur_low <= trailing_stop:
                 fill = trailing_stop * (1 - SLIP_SELL)
                 exited = True
