@@ -1175,10 +1175,10 @@ def check_resonance(report_data, zones, state, ab_result=None):
         atr = _calc_atr_from_closes(closes, 14)
         dist_to_low = (current - box_low) / box_low if box_low > 0 else 1
         dist_to_high = (box_high - current) / box_high if box_high > 0 else 1
-        if dist_to_low <= (atr / box_low * 0.5) if atr and box_low else False:
+        if dist_to_low <= (atr / box_low * 0.8) if atr and box_low else False:
             score_box = 20
             box_reason = f"箱底{box_low:.2f} 距{dist_to_low*100:.1f}%"
-        elif dist_to_high <= (atr / box_high * 0.5) if atr and box_high else False:
+        elif dist_to_high <= (atr / box_high * 0.8) if atr and box_high else False:
             box_reason = f"箱顶{box_high:.2f} 距{dist_to_high*100:.1f}%"
         else:
             box_reason = f"箱体{box_low:.2f}-{box_high:.2f}"
@@ -1218,7 +1218,7 @@ def check_resonance(report_data, zones, state, ab_result=None):
     sell_vwap = 20 if vwap and current < vwap else 0
     if n >= 20 and atr and box_high > 0:
         dist_to_high_s = (box_high - current) / box_high
-        sell_box = 20 if dist_to_high_s <= (atr / box_high * 0.5) else 0
+        sell_box = 20 if dist_to_high_s <= (atr / box_high * 0.8) else 0
     else:
         sell_box = 0
     sell_score = sell_ema + sell_vwap + sell_box + score_vol + score_atr

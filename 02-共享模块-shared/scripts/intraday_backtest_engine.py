@@ -423,7 +423,8 @@ def run_one_day(code: str, day: str, capital: float, plan_every: int,
         sstat = sell.get("status")
         status_counts["B:" + str(bstat)] = status_counts.get("B:" + str(bstat), 0) + 1
         status_counts["S:" + str(sstat)] = status_counts.get("S:" + str(sstat), 0) + 1
-        # 买 (空仓) — 均值回归入场：信号棒确认后，下一棒开盘入场
+        # 买 (空仓) — 均值回归：信号棒确认后，下一棒开盘入场模拟收盘价成交
+        # 回测无法在信号棒收盘瞬间成交，用下一棒开盘价近似（跳空风险存在）
         if pos == 0 and rt < MAX_RT_PER_DAY:
             if bstat == "已触发" and buy_green:
                 signal_bar = bars_5m[gi]
