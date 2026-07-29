@@ -98,10 +98,9 @@ def test_merge_decisions_classic_path(monkeypatch):
         },
         fusion_from_cards="classic",
     )
-    assert out.get("fusion_input_path") == "classic"
-    # classic 应看多（一类买），不应被错误卡带偏
+    # classic 已收敛为 raw→卡→card_signals（classic_via_cards）；仍须忽略错误预产卡
+    assert out.get("fusion_input_path") in ("classic", "classic_via_cards")
     assert out["signals_detail"]["chan"]["direction"] == 1
-    assert out["signals_detail"]["chan"].get("from_card") is not True
 
 
 def test_merge_compare_attaches_fusion_compare(monkeypatch):

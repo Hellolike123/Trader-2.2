@@ -30,7 +30,8 @@ def pool_file(tmp_path: Path) -> Path:
 
 
 def test_analyze_outputs_admission_suggestion_without_writing_pool(tmp_path: Path) -> None:
-    result = run_pool(tmp_path, "analyze", "--target", "南网科技")
+    # 契约测走离线占位，避免依赖实时行情/评分门槛
+    result = run_pool(tmp_path, "analyze", "--target", "南网科技", "--offline")
 
     assert result.returncode == 0, result.stderr
     assert "入池建议" in result.stdout
@@ -39,11 +40,11 @@ def test_analyze_outputs_admission_suggestion_without_writing_pool(tmp_path: Pat
 
 
 def test_add_writes_pool_and_repeated_add_updates_same_record(tmp_path: Path) -> None:
-    first = run_pool(tmp_path, "add", "--target", "南网科技")
-    second = run_pool(tmp_path, "add", "--target", "南网科技")
+    first = run_pool(tmp_path, "add", "--target", "南网科技", "--offline")
+    second = run_pool(tmp_path, "add", "--target", "南网科技", "--offline")
 
-    assert first.returncode == 0, first.stderr
-    assert second.returncode == 0, second.stderr
+    assert first.returncode == 0, first.stderr + "\n" + first.stdout
+    assert second.returncode == 0, second.stderr + "\n" + second.stdout
     assert "已加入选股池" in second.stdout
     data = json.loads(pool_file(tmp_path).read_text(encoding="utf-8"))
     assert len(data["items"]) == 1
@@ -54,7 +55,7 @@ def test_add_writes_pool_and_repeated_add_updates_same_record(tmp_path: Path) ->
 def test_pool_capacity_rejects_eleventh_unique_record(tmp_path: Path) -> None:
     for index in range(20):
         item = run_pool(tmp_path, "add", "--target", f"测试{index}", "--offline")
-        assert item.returncode == 0, item.stderr
+        assert item.returncode == 0, item.stderr + "\n" + item.stdout
 
     extra = run_pool(tmp_path, "add", "--target", "测试20", "--offline")
 
@@ -65,8 +66,8 @@ def test_pool_capacity_rejects_eleventh_unique_record(tmp_path: Path) -> None:
 
 
 def test_show_plan_and_review_contracts(tmp_path: Path) -> None:
-    add = run_pool(tmp_path, "add", "--target", "南网科技")
-    assert add.returncode == 0, add.stderr
+    add = run_pool(tmp_path, "add", "--target", "南网科技", "--offline")
+    assert add.returncode == 0, add.stderr + "\n" + add.stdout
 
     show = run_pool(tmp_path, "list")
     assert show.returncode == 0, show.stderr
@@ -79,7 +80,7 @@ def test_show_plan_and_review_contracts(tmp_path: Path) -> None:
     assert "交易指导" in plan.stdout
     assert (tmp_path / ".trader" / "last_plan.json").exists()
 
-    review = run_pool(tmp_path, "review")
+    review = run_pool(tmp_path, "review", "--offline")
     assert review.returncode == 0, review.stderr
     assert "选股池次日复盘" in review.stdout
     assert "复盘命中表" in review.stdout
@@ -88,8 +89,8 @@ def test_show_plan_and_review_contracts(tmp_path: Path) -> None:
 def test_rank_outputs_pool_action_comparison(tmp_path: Path) -> None:
     first = run_pool(tmp_path, "add", "--target", "测试A", "--offline")
     second = run_pool(tmp_path, "add", "--target", "测试B", "--offline")
-    assert first.returncode == 0, first.stderr
-    assert second.returncode == 0, second.stderr
+    assert first.returncode == 0, first.stderr + "\n" + first.stdout
+    assert second.returncode == 0, second.stderr + "\n" + second.stdout
 
     rank = run_pool(tmp_path, "list")
 
@@ -98,8 +99,8 @@ def test_rank_outputs_pool_action_comparison(tmp_path: Path) -> None:
 
 
 def test_remove_deletes_record(tmp_path: Path) -> None:
-    add = run_pool(tmp_path, "add", "--target", "南网科技")
-    assert add.returncode == 0, add.stderr
+    add = run_pool(tmp_path, "add", "--target", "南网科技", "--offline")
+    assert add.returncode == 0, add.stderr + "\n" + add.stdout
 
     removed = run_pool(tmp_path, "remove", "--target", "南网科技")
 

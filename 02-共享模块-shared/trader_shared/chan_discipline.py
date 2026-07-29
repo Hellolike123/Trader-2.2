@@ -336,7 +336,10 @@ def format_entry_line_c1(
     all_green: bool,
     missing: list[str] | None = None,
 ) -> str:
-    """C1：新开：否（缺：…）｜新开：可试探（清单全绿）。"""
+    """C1 新开行唯一出口：`新开：否（缺：…）`｜`新开：可试探（清单全绿）`。
+
+    报告渲染只打印 ``discipline.entry_line`` / checklist 中本函数产物，勿手写平行文案。
+    """
     if all_green:
         return "新开：可试探（清单全绿）"
     miss = missing or []

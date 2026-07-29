@@ -21,7 +21,19 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..
 
 class TestCalcVwap:
     def _make_bars(self, close=10.3, volume=1000, n=5):
-        return [{"high": close * 1.02, "low": close * 0.98, "close": close, "volume": volume}] * n
+        from datetime import date
+
+        day = date.today().isoformat()
+        return [
+            {
+                "date": day,
+                "datetime": f"{day} 10:00:00",
+                "high": close * 1.02,
+                "low": close * 0.98,
+                "close": close,
+                "volume": volume,
+            }
+        ] * n
 
     def test_empty_input(self):
         from trader_shared.display_indicators import calc_vwap
@@ -73,7 +85,12 @@ class TestCalcVwap:
     def test_no_volume_returns_none(self):
         """成交量为 0 时返回 None"""
         from trader_shared.display_indicators import calc_vwap
-        bars = [{"high": 10.5, "low": 9.5, "close": 10.0, "volume": 0}] * 3
+        bars = self._make_bars(close=10.0, volume=0, n=3)
+        # 覆盖 high/low 保持典型价可算，但 volume=0
+        bars = [
+            {**b, "high": 10.5, "low": 9.5, "close": 10.0, "volume": 0}
+            for b in bars
+        ]
         r = calc_vwap(bars)
         assert r["vwap"] is None
 

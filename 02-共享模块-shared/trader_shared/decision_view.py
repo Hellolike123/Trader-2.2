@@ -138,22 +138,16 @@ def apply_decision_view(
                     if label and label not in miss:
                         miss.append(label)
                 cl["missing_labels"] = miss
-                try:
-                    from trader_shared.chan_discipline import format_entry_line_c1
+                from trader_shared.chan_discipline import format_entry_line_c1
 
-                    cl["entry_line"] = format_entry_line_c1(all_green=False, missing=miss)
-                    disc["entry_line"] = cl["entry_line"]
-                except Exception:
-                    disc["entry_line"] = f"新开：否（缺：{'｜'.join(miss) or '决策收紧'}）"
+                cl["entry_line"] = format_entry_line_c1(all_green=False, missing=miss)
+                disc["entry_line"] = cl["entry_line"]
             else:
-                try:
-                    from trader_shared.chan_discipline import format_entry_line_c1
+                from trader_shared.chan_discipline import format_entry_line_c1
 
-                    disc["entry_line"] = format_entry_line_c1(
-                        all_green=False, missing=reasons or ["决策收紧"]
-                    )
-                except Exception:
-                    disc["entry_line"] = "新开：否（决策收紧）"
+                disc["entry_line"] = format_entry_line_c1(
+                    all_green=False, missing=reasons or ["决策收紧"]
+                )
             note = disc.get("entry_block_reason") or ""
             extra = "；".join(reasons)
             if extra and extra not in str(note):
@@ -212,8 +206,11 @@ def format_decision_narrative_lines(report: dict[str, Any] | None) -> list[str]:
         cl = disc.get("entry_checklist") if isinstance(disc.get("entry_checklist"), dict) else {}
         entry_line = str(cl.get("entry_line") or "").strip()
     if entry_line:
+        # SSOT：规范化为 format_entry_line_c1 形态，禁止渲染层另写「新开」文案
         if not entry_line.startswith("新开"):
-            entry_line = f"新开：{entry_line}"
+            from trader_shared.chan_discipline import format_entry_line_c1
+
+            entry_line = format_entry_line_c1(all_green=False, missing=[entry_line])
         lines.append(f"  {entry_line}")
 
     # fusion 退居仪表：有分才写，标明非出手依据

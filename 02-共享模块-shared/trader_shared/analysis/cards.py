@@ -248,8 +248,8 @@ def build_momentum_card(
         inner = m
         payload = {"momentum": m}
 
-    # 优先复用 classic 映射（字符串方向 + score U 型置信）
-    from trader_shared.fusion_core import _momentum_to_signal
+    # 优先复用 classic 映射（字符串方向 + score U 型置信；实现已隔离）
+    from trader_shared.fusion_classic_mappers import _momentum_to_signal
 
     sig = _momentum_to_signal(payload)
     direction = int(sig.get("direction") or 0)

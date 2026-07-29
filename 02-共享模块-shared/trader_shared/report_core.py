@@ -1,6 +1,7 @@
 """统一报告渲染模块（兼容层）。
 
 实现位于 report_renderer/；本模块 re-export 保持 import 路径稳定。
+生产唯一路径：短中线双轨（``render_short_midline``）。
 """
 from __future__ import annotations
 
@@ -17,10 +18,8 @@ from trader_shared.report_renderer.backtest import render_backtest
 
 
 def render_single(r: dict[str, Any]) -> str:
-    """渲染单票分析报告（生产入口）。"""
-    if _short_midline_enabled():
-        return render_short_midline(r)
-    return render_single_legacy(r)
+    """渲染单票分析报告（生产入口 → 短中线）。"""
+    return render_short_midline(r)
 
 
 __all__ = [

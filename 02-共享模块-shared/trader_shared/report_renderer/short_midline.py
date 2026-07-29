@@ -263,15 +263,19 @@ def render_short_midline(r: dict[str, Any]) -> str:
     except (TypeError, ValueError):
         _sp = None
 
-    # 威科夫中线：相位 + 英文灯 + 中文 + 约束句（周线独占，禁止回退日线）
+    # 威科夫中线：报告边界只经 wyckoff_view（周线独占，禁止回退日线）
     try:
-        from trader_shared.wyckoff_core import format_wyckoff_midline_light
+        from trader_shared.wyckoff_view import format_midline_display
         _wyk_raw = r.get("wyckoff_midline")
         if isinstance(_wyk_raw, dict) and "wyckoff" in _wyk_raw:
             _wyk_raw = _wyk_raw.get("wyckoff")
         if not isinstance(_wyk_raw, dict):
             _wyk_raw = {}
-        _wyk_line = format_wyckoff_midline_light(_wyk_raw, direction=None)
+        _wyk_line = format_midline_display(
+            _wyk_raw,
+            symbol=str(r.get("ts_code") or r.get("code") or ""),
+            direction=None,
+        )
     except Exception:
         _wyk_line = "威科夫：数据不足 · 中性"
     # 已是「威科夫：…」完整行
@@ -549,9 +553,9 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if _life_line:
         lines.append(f"  {_life_line}")
 
-    # 2) 状态：日线威科夫事件灯（只展示，不进 fusion）
+    # 2) 状态：日线威科夫事件灯（报告边界经 wyckoff_view；不进 fusion）
     try:
-        from trader_shared.wyckoff_core import format_wyckoff_event_light
+        from trader_shared.wyckoff_view import format_event_display
 
         def _unwrap_wyk(raw: object) -> dict:
             if not isinstance(raw, dict):
@@ -567,7 +571,9 @@ def render_short_midline(r: dict[str, Any]) -> str:
             if _fb.get("timeframe") != "weekly":
                 _u = _fb
         if _u:
-            _ev = format_wyckoff_event_light(_u)
+            _ev = format_event_display(
+                _u, symbol=str(r.get("ts_code") or r.get("code") or "")
+            )
             # 统一标签「状态：」（format 内可能仍是「事件：」）
             if _ev.startswith("事件："):
                 _ev = "状态：" + _ev[len("事件："):]

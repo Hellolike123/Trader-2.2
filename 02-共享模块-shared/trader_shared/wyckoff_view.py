@@ -270,3 +270,33 @@ def to_wyckoff_state_view(
         "raw_available": bool(wyk),
     }
     return view
+
+
+def format_midline_display(
+    wyckoff: dict[str, Any] | None,
+    *,
+    symbol: str = "",
+    direction: int | None = None,
+) -> str:
+    """报告边界威科夫中线展示：经 View 适配后再格式化（render 勿直接调 wyckoff_core）。"""
+    from trader_shared.wyckoff_core import format_wyckoff_midline_light
+
+    view = to_wyckoff_state_view(wyckoff, symbol=symbol, timeframe="weekly")
+    # 中线 light 仍需引擎 dict 字段；View 保证已 unwrap / 可追溯
+    raw = _unwrap_wyckoff(wyckoff) if wyckoff else {}
+    if not raw and view.get("raw_available"):
+        raw = {"phase": view.get("phase"), "phase_label": view.get("phase_label")}
+    line = format_wyckoff_midline_light(raw or wyckoff, direction=direction)
+    return line
+
+
+def format_event_display(
+    wyckoff: dict[str, Any] | None,
+    *,
+    symbol: str = "",
+) -> str:
+    """短线威科夫事件轻量行：报告边界统一经 View。"""
+    from trader_shared.wyckoff_core import format_wyckoff_event_light
+
+    to_wyckoff_state_view(wyckoff, symbol=symbol, timeframe="daily")
+    return format_wyckoff_event_light(wyckoff if isinstance(wyckoff, dict) else {})

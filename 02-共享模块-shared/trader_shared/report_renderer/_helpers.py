@@ -3,17 +3,20 @@ from __future__ import annotations
 
 import os
 import re
+import warnings
+
 
 def _short_midline_enabled() -> bool:
-    # 优先读 env，其次 config 常量
+    """生产始终短中线；SHORT_MIDLINE_REPORT=false 仅告警后仍返回 True。"""
     env = os.environ.get("SHORT_MIDLINE_REPORT")
-    if env is not None:
-        return env.lower() in ("true", "1", "yes")
-    try:
-        from trader_shared.config import SHORT_MIDLINE_REPORT
-        return bool(SHORT_MIDLINE_REPORT)
-    except Exception:
-        return True
+    if env is not None and env.lower() not in ("true", "1", "yes"):
+        warnings.warn(
+            "SHORT_MIDLINE_REPORT=false is deprecated and ignored; "
+            "production render is always report_renderer.short_midline.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+    return True
 
 
 def _reformat_mid_line(line: str) -> str:
@@ -52,5 +55,3 @@ def _reformat_mid_line(line: str) -> str:
     if m:
         return f"{m.group(1)} 黄金买点（{m.group(2)}）"
     return line
-
-

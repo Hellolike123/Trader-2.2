@@ -223,12 +223,34 @@ def read_signals_for_report(target: str, daily_bars: list[dict[str, Any]]) -> tu
     return cost_price, win_rate_data
 
 def load_historical_win_rate(target: str) -> dict | None:
-    # For compatibility, returns the win_rate_data from signals log
-    # run_analysis.py previously read signals to load win_rate
-    # We can implement this simply by calling read_signals_for_report with an empty daily_bars list, 
-    # but win rate calculations require close_map, so it needs real bars. 
-    # We let read_signals_for_report handle the actual parsing.
-    return None
+    """从 signals.jsonl + 日线回算历史胜率（供报告/复盘展示）。"""
+    signals_path = os.path.expanduser("~/.trader/signals.jsonl")
+    if not os.path.exists(signals_path):
+        return None
+    normalized = str(target or "").replace(".SH", "").replace(".SZ", "").strip()
+    if not normalized:
+        return None
+    try:
+        from trader_shared.data_provider import get_provider
+
+        provider = get_provider()
+        sec = provider.resolve_security(normalized)
+        daily = provider.fetch_qfq_daily(sec, days=300)
+    except Exception:
+        return None
+    if not isinstance(daily, list):
+        return None
+    bar_dicts = [b for b in daily if isinstance(b, dict)]
+    if not bar_dicts:
+        return None
+    # 避免同进程内 mtime 未变时吃到旧缓存（单测 mock_open 常见）
+    clear_signals_cache()
+    _, win_rate_data = read_signals_for_report(normalized, bar_dicts)
+    if not win_rate_data:
+        return None
+    win_rate_data = dict(win_rate_data)
+    win_rate_data["sample_warning"] = int(win_rate_data.get("total") or 0) < 5
+    return win_rate_data
 
 def get_pool_count() -> int:
     from pathlib import Path

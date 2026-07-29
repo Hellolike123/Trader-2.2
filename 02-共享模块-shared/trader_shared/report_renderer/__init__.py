@@ -1,6 +1,7 @@
 """report_renderer — 报告渲染实现包。
 
 实现在此；report_core 为兼容 re-export。
+生产唯一路径：``render_short_midline``（via ``render_single``）。
 """
 from __future__ import annotations
 
@@ -12,9 +13,8 @@ from trader_shared.report_renderer.backtest import render_backtest
 
 
 def render_single(r: dict) -> str:
-    if _short_midline_enabled():
-        return render_short_midline(r)
-    return render_single_legacy(r)
+    """生产入口：始终短中线双轨。"""
+    return render_short_midline(r)
 
 
 __all__ = [

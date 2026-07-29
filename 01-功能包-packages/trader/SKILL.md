@@ -5,7 +5,8 @@ description: Use when analyzing a single A-share, managing the stock pool, or pr
 
 # Trader — AI 分析师
 
-单票分析 + 选股池。默认中短线双轨报告（🧭 中线｜⚡ 短线）。纪律只收紧出手/仓位，不改 fusion 分与关键价数字。
+单票分析 + 选股池。默认中短线双轨报告（🧭 中线｜⚡ 短线）。纪律只收紧出手/仓位，不改 fusion 分与关键价数字。  
+共用硬规则：`references/agent-rules.md`。
 
 ## 快路径（先做这个）
 
@@ -47,7 +48,7 @@ JSON 仅当 markdown 失败或需额外字段判断时使用。
 
 | 文件 | 何时读 |
 |------|--------|
-| `agent-quickstart.md` | 首次使用本 skill |
+| `agent-quickstart.md` / `agent-rules.md` | 首次使用本 skill |
 | `output-template.md` / `output-style-guide.md` | 校验或怀疑格式不对 |
 | `pool-commands.md` / `pool-output-contract.md` | 选股池操作 |
 | `anti-hallucination.md` / `fusion-guide.md` | JSON 回退 |

@@ -151,7 +151,9 @@ def test_dynamic_low_zone_and_stop_use_volatility_buffer() -> None:
     assert 0.005 <= levels["zone_width_pct"] <= 0.012
     assert 0.008 <= levels["stop_buffer_pct"] <= 0.025
     assert levels["low_zone_upper"] == round(levels["main_support"] * (1 + levels["zone_width_pct"]), 2)
-    assert levels["hard_stop"] == round(levels["main_support"] * (1 - levels["stop_buffer_pct"]), 2)
+    # hard_stop 由 MA20/前低融合 support_ref 推导，不必等于 main_support 公式
+    assert levels["hard_stop"] > 0
+    assert levels["hard_stop"] <= levels["main_support"] * 1.001
     assert levels["hard_stop"] != round(levels["main_support"] * 0.98, 2)
 
 
@@ -198,7 +200,8 @@ def test_validate_rejects_agent_reformatted_output() -> None:
 
 def test_build_signal_for_scene_转弱() -> None:
     report = sample_report()
-    report.update({"stage": "转弱", "scene": "防守观察"})
+    # major_stage 优先；转弱应对齐衰退 → defensive
+    report.update({"stage": "转弱", "major_stage": "衰退", "scene": "防守观察"})
 
     signal = build_signal(report)
 
@@ -248,7 +251,7 @@ def test_build_signal_for_scene_低吸观察() -> None:
 
 def test_build_signal_risk_flags_structure_weak() -> None:
     report = sample_report()
-    report.update({"stage": "转弱", "scene": "低吸观察"})
+    report.update({"stage": "转弱", "major_stage": "衰退", "scene": "低吸观察"})
 
     signal = build_signal(report)
 
@@ -621,7 +624,14 @@ def test_render_markdown_contains_win_rate() -> None:
         assert "止损" in markdown
         assert "买" in markdown
         assert "MA20" in markdown and "MA250" in markdown
-        # 短中线或旧模板均可
-        assert ("📍 关键价" in markdown) or ("📍 决策" in markdown) or ("📍 买卖点" in markdown)
+        # 短中线默认；兼容旧模板关键词
+        assert (
+            "｜短中线" in markdown
+            or "关键价（短线）" in markdown
+            or "关键价（中线）" in markdown
+            or "📍 关键价" in markdown
+            or "📍 决策" in markdown
+            or "📍 买卖点" in markdown
+        )
 
 

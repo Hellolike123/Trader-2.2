@@ -114,9 +114,12 @@ def append_signal(signal: dict[str, Any], path: Path | None = None) -> str:
                 _logger.debug("Duplicate signal_id %s, skipping write", working["signal_id"])
                 return working["signal_id"]
 
-            # Write signal atomically under lock
-            from trader_shared.data_manager import DataManager
-            DataManager.append_signal(working, path=store_path)
+            # 直接写行：禁止再调 DataManager.append_signal（其对同文件二次 flock，
+            # 在部分平台会自死锁）。本段已持有 LOCK_EX。
+            store_path.parent.mkdir(parents=True, exist_ok=True)
+            f.write(json.dumps(working, ensure_ascii=False, default=str) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
 
             # Update in-memory UUID cache
             uuid_cache.add(working["signal_id"])

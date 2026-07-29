@@ -662,12 +662,18 @@ class TestMergeDecisions:
         assert abs(with_sector_none["confidence"] - base["confidence"]) < 1e-9
 
     def test_exception_handling_in_standardization(self):
+        from trader_shared.fusion_classic_mappers import _chan_to_signal
         from trader_shared.fusion_core import merge_decisions
-        # _chan_to_signal handles invalid input gracefully (type check, no exception)
-        # so confidence stays 0.3 (default "no signal"), not 0.0
+
+        # classic mapper：非法输入 → 中性、置信 0.3
+        classic = _chan_to_signal("not_a_dict")  # type: ignore[arg-type]
+        assert classic["direction"] == 0
+        assert classic["confidence"] == 0.3
+
+        # 生产 cards 路径同样不崩；中性置信可能为卡路径默认（0.3/0.35）
         result = merge_decisions("not_a_dict", {}, {}, regime="正常")
         assert result["signals_detail"]["chan"]["direction"] == 0
-        assert result["signals_detail"]["chan"]["confidence"] == 0.3  # 无信号默认值
+        assert result["signals_detail"]["chan"]["confidence"] in (0.3, 0.35)
 
     def test_log_only_action(self):
         import os

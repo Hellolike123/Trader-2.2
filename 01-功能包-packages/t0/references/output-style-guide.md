@@ -32,8 +32,9 @@ T0 执行卡
 🔗 信号
 ```
 
-v2 合法骨架：`🎯` + 结构结论 + `📌 结构` + `🔗 参考` + 可选 `💰` / 降本。
+v2.1 合法骨架：`🎯` + 短结论 + `📌 盘面` + `📌 买卖价` + 失效 + 可选清单/`💰`/持仓纪律。
 
 ## Additional Rules
 
 - Valid manual output has no markdown tables, bullet lists, bold markers, blockquotes, or `##/###` headings.
+- WeChat: prefer short lines; fullwidth `｜` ok; avoid long `·` chains and 5m-distance noise.

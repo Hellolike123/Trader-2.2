@@ -50,6 +50,7 @@ def test_t0_markdown_contract() -> None:
         "volume_ratio": 1.0,
         "amplitude_pct": 0.035,
         "space_state": "normal",
+        "atr_info": {"atr14": 1.20, "atr_ratio": 0.021, "level": "波动正常"},
         "ict_signal": {"summary": "无有效扫流动性确认，不加分。"},
         "data": {
             "kline_5m_completed": make_5m_bars(16),
@@ -57,8 +58,8 @@ def test_t0_markdown_contract() -> None:
         },
         "model": {
             "zones": {
-                "buy_zone": {"main_support": 55.8},
-                "sell_zone": {"main_resistance": 58.5},
+                "buy_zone": {"main_support": 55.8, "upper": 55.9},
+                "sell_zone": {"main_resistance": 58.5, "lower": 58.8},
             }
         },
         "buy": {
@@ -90,14 +91,12 @@ def test_t0_markdown_contract() -> None:
 
     assert markdown.startswith("🎯")
     assert "止损" in markdown
-    assert "低吸关注区还差" in markdown or "接近低吸关注区" in markdown
-    assert "低吸：" in markdown
-    assert "高抛：" in markdown
-    assert "📌 结构" in markdown
-    assert "位置：" in markdown
-    assert "量能：" in markdown
-    assert "空间：" in markdown
-    assert "🔗 参考" in markdown
+    assert "低吸" in markdown
+    assert "高抛" in markdown
+    assert "📌 盘面" in markdown
+    assert "📌 买卖价" in markdown
+    assert "RR" in markdown or "计划" in markdown
+    assert "ATR" in markdown
     assert "人决策" in markdown
     assert "结构偏强" not in markdown.split("→", 1)[-1].split("\n", 1)[0]
     assert "可执行" not in markdown
@@ -105,6 +104,7 @@ def test_t0_markdown_contract() -> None:
     assert "三重共振" not in markdown
     assert "无底仓" in markdown
     assert "若做正T" not in markdown
+    assert "**" not in markdown
     assert validate(markdown) == []
 
 
@@ -153,8 +153,8 @@ def test_t0_markdown_hides_observation_when_space_or_data_invalid() -> None:
 
     markdown = render_markdown(plan)
 
-    assert "低吸：" in markdown
-    assert "高抛：" in markdown
+    assert "低吸" in markdown
+    assert "高抛" in markdown
     assert "止损" in markdown
     assert "可执行" not in markdown
     assert "可低吸" not in markdown
@@ -185,19 +185,18 @@ def test_t0_v2_no_exec_command_when_triggered() -> None:
         "summary": "评分80/100 · 结构偏强（参考）",
     }
     plan["vwap"] = 11.90
+    plan["atr_info"] = {"atr14": 0.35, "atr_ratio": 0.029, "level": "波动正常"}
+    plan["sell"]["observation_price"] = 12.30
     assert side_status(plan["buy"]) == SIDE_ZONE_HIT
     assert SIDE_ZONE_HIT == "到价关注"
     md = render_markdown(plan)
-    assert "关注 11.94～11.98（参考）" in md
-    assert "近低吸关注区" in md
+    assert "低吸 11.94～11.98" in md
+    assert "📌 买卖价" in md
+    assert "近买区" in md
     assert "可执行" not in md
     assert "可低吸" not in md
     assert "可加仓" not in md
-    assert "不构成执行指令" in md
     assert "人决策" in md
-    assert "多✓" in md
-    assert "未达" in md
-    assert "卖侧" not in md
     assert validate(md) == []
 
 
@@ -214,8 +213,8 @@ def test_legacy_executable_display_status_normalized() -> None:
     assert normalize_side_display("可执行") == SIDE_ZONE_HIT
     md = render_markdown(plan)
     assert "可执行" not in md
-    assert "近低吸关注区" in md
-    assert "关注 11.94～11.98（参考）" in md
+    assert "近买区" in md
+    assert "低吸 11.94～11.98" in md
     assert validate(md) == []
 
 
@@ -231,6 +230,7 @@ def test_no_position_hides_account_discipline_block() -> None:
     }
     md = render_markdown(plan)
     assert "无底仓" in md
+    assert "不做T召唤" in md or "不做 T 召唤" in md
     assert "持仓纪律" not in md
     assert "降本模式" not in md
     assert "先卖后买" not in md
@@ -238,32 +238,40 @@ def test_no_position_hides_account_discipline_block() -> None:
     assert validate(md) == []
 
 
-def test_v21_structure_four_blocks_and_fake_zones() -> None:
-    """v2.1：四块齐全；双侧价区≈现价时降级为暂无有效关注价。"""
+def test_v21_trade_price_rr_block() -> None:
+    """操盘主区：买卖价+止损+ATR/RR；区间塌缩时用止盈价兜底。"""
     plan = sample_t0_plan()
     plan.update({
         "vwap": 12.0,
         "volume_ratio": 1.5,
         "amplitude_pct": 0.04,
         "space_state": "good",
+        "atr_info": {"atr14": 0.40, "atr_ratio": 0.033, "level": "波动正常"},
         "data": {
             "kline_5m_completed": make_5m_bars(16),
             "quote": {"high": 12.3, "low": 11.7, "pre_close": 11.8},
         },
         "model": {
             "zones": {
-                "buy_zone": {"main_support": 11.95},
-                "sell_zone": {"main_resistance": 11.95},
+                "buy_zone": {"main_support": 11.80, "upper": 11.90},
+                "sell_zone": {"main_resistance": 12.20, "lower": 12.15},
             }
         },
+        "exit_plan": {"risk_r": 1.5, "exit_plan": [{"price": 12.40, "ratio": 0.5}]},
     })
+    plan["buy"]["observation_price"] = 11.90
+    plan["buy"]["invalid_price"] = 11.72
+    plan["sell"]["observation_price"] = 12.15
     md = render_markdown(plan)
-    assert "位置：" in md
-    assert "量能：" in md
-    assert "空间：" in md
-    assert "暂无有效关注价（结构数据不足）" in md
-    assert "价区11.95" not in md
-    assert "结构偏强" not in md.split("→", 1)[-1].split("\n", 1)[0]
+    assert "📌 买卖价" in md
+    assert "低吸 11.90" in md
+    assert "止损 11.72" in md
+    assert "高抛 12.15" in md
+    assert "ATR 0.40" in md
+    assert "RR1:" in md
+    assert "计划" in md
+    assert "现价" in md
+    assert "可执行" not in md
     assert validate(md) == []
 
 
@@ -401,7 +409,13 @@ def test_t0_triggered_buy_event_emits_low_buy_signal() -> None:
     assert validate_signal(signal) == []
 
 
-def test_monitor_event_signals_persist_to_jsonl(tmp_path: Path) -> None:
+def test_monitor_event_signals_persist_to_jsonl(tmp_path: Path, monkeypatch: Any) -> None:
+    import monitor as monitor_mod
+
+    # 离线：禁止 persist 路径打到真实大盘环境（会挂网超时）
+    monkeypatch.setattr(monitor_mod, "get_market_level", lambda: "正常")
+    monkeypatch.setattr(monitor_mod, "get_market_note", lambda: "")
+
     plan = sample_t0_plan()
     plan["buy"].update({"status": "已触发", "execution_price": 11.94, "acceptable_price": 11.98})
     store_path = tmp_path / "signals.jsonl"
@@ -765,46 +779,20 @@ def test_monitor_suppresses_observation_and_reports_trigger_position(tmp_path, m
 
 
 def test_min_trigger_matches_reduced_to_3() -> None:
-    config_path = SCRIPTS / "t0_config.py"
-    code = config_path.read_text(encoding="utf-8")
-    import ast
-    tree = ast.parse(code)
-    for node in tree.body:
-        if isinstance(node, ast.AnnAssign):
-            target = node.target
-            if isinstance(target, ast.Name) and target.id == "MIN_TRIGGER_MATCHES":
-                assert isinstance(node.value, ast.Constant) and node.value.value == 3
-                return
-        elif isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == "MIN_TRIGGER_MATCHES":
-                    assert isinstance(node.value, ast.Constant) and node.value.value == 3
-                    return
-    assert False, "MIN_TRIGGER_MATCHES not found in t0_config.py"
+    from trader_shared.t0_config import MIN_TRIGGER_MATCHES
+
+    assert MIN_TRIGGER_MATCHES == 3
+
 
 
 def test_buy_trigger_reaches_confirmation_with_3_signals_after_config_change(monkeypatch: Any) -> None:
     from indicators import is_new_low_recent
     monkeypatch.setattr(indicators, "is_new_low_recent", lambda bars, lookback=6: False)
     from price_point_engine import detect_buy_trigger
-    # Verify the config constant directly instead of importing through sys.modules
-    config_path = SCRIPTS / "t0_config.py"
-    import ast
-    code = config_path.read_text(encoding="utf-8")
-    tree = ast.parse(code)
-    found = False
-    for node in tree.body:
-        if isinstance(node, ast.AnnAssign):
-            target = node.target
-            if isinstance(target, ast.Name) and target.id == "MIN_TRIGGER_MATCHES":
-                assert isinstance(node.value, ast.Constant) and node.value.value == 3, "Config should require 3 signals"
-                found = True
-        elif isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == "MIN_TRIGGER_MATCHES":
-                    assert isinstance(node.value, ast.Constant) and node.value.value == 3, "Config should require 3 signals"
-                    found = True
-    assert found, "MIN_TRIGGER_MATCHES not found in t0_config.py"
+    from trader_shared.t0_config import MIN_TRIGGER_MATCHES
+
+    assert MIN_TRIGGER_MATCHES == 3, "Config should require 3 signals"
+
     from indicators import calculate_rsi
     closes = [10.0 - i * 0.01 for i in range(20)] + [10.0 - 0.34 + 0.05, 10.0 - 0.34 + 0.07, 10.0 - 0.34 + 0.09]
     current = closes[-1]

@@ -35,9 +35,12 @@ class TestTraderJsonOutput:
 
 class TestT0JsonOutput:
     def test_json_output_exists(self):
-        """t0_run.py 已有 --output json 支持"""
-        t0_run = Path(__file__).resolve().parents[2] / "t0" / "scripts" / "t0_run.py"
-        content = t0_run.read_text(encoding="utf-8")
+        """t0_run 已有 --output json 支持（实现在 trader_shared.t0_run）"""
+        from pathlib import Path as _P
+        import trader_shared
+
+        shared_root = _P(trader_shared.__file__).resolve().parent
+        content = (shared_root / "t0_run.py").read_text(encoding="utf-8")
         assert 'args.output == "json"' in content
         assert "json.dumps" in content
 
@@ -61,17 +64,15 @@ class TestMarkdownUnchanged:
 
 class TestSkillMdStructure:
     def test_trader_skill_md_has_pipeline(self):
-        """trader SKILL.md 包含 Pipeline 结构"""
+        """trader SKILL.md 指向 quickstart / agent-rules（瘦身后不再硬编码 Step 流水线）"""
         skill_md = Path(__file__).resolve().parent.parent / "SKILL.md"
         content = skill_md.read_text(encoding="utf-8")
-        assert "Step 1" in content
-        assert "Step 2" in content
-        assert "Step 3" in content
-        assert "防幻觉" in content
+        assert "agent-quickstart.md" in content or "agent-rules.md" in content
+        assert "final_report.py" in content or "markdown" in content.lower()
 
     def test_hermes_md_dual_mode(self):
-        """HERMES.md 包含双模式规则"""
+        """HERMES.md 仍约束输出契约（禁默认 JSON / 原样贴出）"""
         hermes_md = Path(__file__).resolve().parent.parent / "HERMES.md"
         content = hermes_md.read_text(encoding="utf-8")
-        assert "双模式" in content
-        assert "JSON" in content
+        assert "JSON" in content or "json" in content
+        assert "agent-rules" in content or "原样" in content or "markdown" in content.lower()

@@ -93,22 +93,21 @@ class TestRenderSingleRouting:
         out_direct = render_short_midline(_MINIMAL_REPORT)
         assert out_route == out_direct
 
-    def test_fallback_to_legacy(self, monkeypatch):
-        """SHORT_MIDLINE_REPORT=false 时应路由到 render_single_legacy"""
+    def test_false_env_still_short_midline(self, monkeypatch):
+        """SHORT_MIDLINE_REPORT=false 已忽略：仍走短中线。"""
         monkeypatch.setenv("SHORT_MIDLINE_REPORT", "false")
-        # report_core._short_midline_enabled 读 env，需要重新加载
-        import importlib
-        import trader_shared.report_core as rc
-        importlib.reload(rc)
-        # report_renderer.__init__.render_single 调用 _short_midline_enabled，
-        # 而 _short_midline_enabled 本身每次调用都读 env，无需 reload
-        from trader_shared.report_renderer import render_single, render_single_legacy
-        out_route = render_single(_MINIMAL_REPORT)
-        out_legacy = render_single_legacy(_MINIMAL_REPORT)
-        assert out_route == out_legacy
-        # 恢复
-        monkeypatch.setenv("SHORT_MIDLINE_REPORT", "true")
-        importlib.reload(rc)
+        import warnings
+
+        from trader_shared.report_renderer import render_single, render_short_midline
+        from trader_shared.report_renderer._helpers import _short_midline_enabled
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            assert _short_midline_enabled() is True
+            out_route = render_single(_MINIMAL_REPORT)
+            out_direct = render_short_midline(_MINIMAL_REPORT)
+        assert out_route == out_direct
+        assert any(issubclass(w.category, DeprecationWarning) for w in caught)
 
 
 class TestRenderOutputFormat:

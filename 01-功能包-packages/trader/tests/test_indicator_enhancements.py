@@ -51,10 +51,13 @@ def test_supertrend_flips_in_choppy_market():
 
 
 def test_vwap_basic():
+    from datetime import date
+
+    day = date.today().isoformat()
     bars5 = [
-        {"high": 10.2, "low": 9.8, "close": 10.0, "volume": 1000},
-        {"high": 10.3, "low": 10.0, "close": 10.1, "volume": 1200},
-        {"high": 10.4, "low": 10.1, "close": 10.3, "volume": 1500},
+        {"date": day, "high": 10.2, "low": 9.8, "close": 10.0, "volume": 1000},
+        {"date": day, "high": 10.3, "low": 10.0, "close": 10.1, "volume": 1200},
+        {"date": day, "high": 10.4, "low": 10.1, "close": 10.3, "volume": 1500},
     ]
     v = calc_vwap(bars5, current_price=10.3)
     assert v["vwap"] is not None

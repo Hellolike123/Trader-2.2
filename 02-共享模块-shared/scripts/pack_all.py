@@ -271,6 +271,12 @@ def main(args: list[str] | None = None) -> int:
 
         # Copy shared modules into each skill
         copy_shared(staged, skill_name)
+        # Agent 共用硬规则 SSOT → references/agent-rules.md
+        common_rules = packages_dir / "_common" / "agent-rules.md"
+        if common_rules.exists():
+            refs = staged / "references"
+            refs.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(common_rules, refs / "agent-rules.md")
         stages.append((skill_name, "2.4.0", staged))
 
     # Copy extra files to trader

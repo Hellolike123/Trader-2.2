@@ -1,8 +1,9 @@
 # Trader Agent 快路径
 
-目标：1 条命令 → 原样贴出 → 停。禁止先批量读 references。
+目标：1 条命令 → 原样贴出 → 停。禁止先批量读 references。  
+硬规则详见同目录 `agent-rules.md`。
 
-## 单票分析（默认）
+## 单票分析（默认 · cwd = 本 skill 根目录）
 
 ```bash
 python3 scripts/final_report.py --target <NAME> --output markdown
@@ -32,7 +33,7 @@ Agent **不必**再 export token，也**不必**手写 `env -u http_proxy ...`�
 1. 未跑脚本 → 不回答行情/出手结论
 2. 能出 markdown → 原样输出，停
 3. 不补充脚本未写的买卖建议；不出现 mi姐/Mistery 人设
-4. 微信红线：无 `#` 标题、无 `**`、无 `|` 表格、无 `---`、无 `*/-` 列表
+4. 遵守 `agent-rules.md` 微信红线
 
 ## JSON 失败回退时（才读）
 
