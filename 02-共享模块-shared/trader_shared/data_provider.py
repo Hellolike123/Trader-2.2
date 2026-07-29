@@ -642,20 +642,28 @@ class TushareProvider:
                 return self._fallback.fetch_qfq_daily(sec, days)
 
             bars: list[dict[str, Any]] = []
+            def _safe_float(v, mul=1.0):
+                """安全转换 Tushare 字段，兜底 None/空/脏字符串。"""
+                if v is None:
+                    return None
+                try:
+                    return float(v) * mul
+                except (TypeError, ValueError):
+                    return None
             for r in records:
                 trade_date = str(r.get("trade_date", ""))
                 # Tushare returns YYYYMMDD, convert to YYYY-MM-DD
                 if len(trade_date) == 8:
                     trade_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
                 # Tushare daily amount 单位为千元 → 统一成元（与腾讯/mootdx 一致）
-                _amt = float(r["amount"]) * 1000.0 if r.get("amount") is not None else None
+                _amt = _safe_float(r.get("amount"), 1000.0)
                 bars.append({
                     "date": trade_date,
-                    "open": float(r["open"]) if r.get("open") is not None else None,
-                    "close": float(r["close"]) if r.get("close") is not None else None,
-                    "high": float(r["high"]) if r.get("high") is not None else None,
-                    "low": float(r["low"]) if r.get("low") is not None else None,
-                    "volume": float(r["vol"]) if r.get("vol") is not None else None,
+                    "open": _safe_float(r.get("open")),
+                    "close": _safe_float(r.get("close")),
+                    "high": _safe_float(r.get("high")),
+                    "low": _safe_float(r.get("low")),
+                    "volume": _safe_float(r.get("vol")),
                     "amount": _amt,
                     "data_source": "tushare",
                     "data_status": "full",
@@ -704,6 +712,13 @@ class TushareProvider:
                     end_date=end_date,
                 )
                 if records and len(records) >= 4:
+                    def _sf(v, mul=1.0):
+                        if v is None:
+                            return None
+                        try:
+                            return float(v) * mul
+                        except (TypeError, ValueError):
+                            return None
                     bars: list[dict[str, Any]] = []
                     for r in sorted(records, key=lambda x: str(x.get("trade_date", ""))):
                         trade_date = str(r.get("trade_date", ""))
@@ -711,13 +726,12 @@ class TushareProvider:
                             trade_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
                         bars.append({
                             "date": trade_date,
-                            "open": float(r["open"]) if r.get("open") is not None else None,
-                            "close": float(r["close"]) if r.get("close") is not None else None,
-                            "high": float(r["high"]) if r.get("high") is not None else None,
-                            "low": float(r["low"]) if r.get("low") is not None else None,
-                            "volume": float(r["vol"]) if r.get("vol") is not None else None,
-                            # weekly amount 亦为千元 → 元
-                            "amount": float(r["amount"]) * 1000.0 if r.get("amount") is not None else None,
+                            "open": _sf(r.get("open")),
+                            "close": _sf(r.get("close")),
+                            "high": _sf(r.get("high")),
+                            "low": _sf(r.get("low")),
+                            "volume": _sf(r.get("vol")),
+                            "amount": _sf(r.get("amount"), 1000.0),
                             "data_source": "tushare",
                             "data_status": "full",
                         })
@@ -836,19 +850,19 @@ def get_provider() -> DataProvider:
         from trader_shared.tushare_client import get_client as _get_ts_client
         if _get_ts_client().available:
             _provider = TushareProvider()
-            print("DataProvider: using tushare (primary source)", file=sys.stderr)
+            _logger.info("DataProvider: using tushare (primary source)")
             return _provider
-    except (ImportError, Exception):
+    except Exception:
         pass
 
     provider_name = os.environ.get("TRADER_DATA_PROVIDER", "").lower()
     if provider_name in ("mootdx", "akshare"):
         _provider = UnifiedProvider(backend=provider_name)
-        print(f"DataProvider: using {provider_name} (via TRADER_DATA_PROVIDER)", file=sys.stderr)
+        _logger.info("DataProvider: using %s (via TRADER_DATA_PROVIDER)", provider_name)
         return _provider
 
     _provider = UnifiedProvider(backend="tencent")
-    print(f"DataProvider: using tencent", file=sys.stderr)
+    _logger.info("DataProvider: using tencent")
     return _provider
 
 

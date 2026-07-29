@@ -1251,7 +1251,10 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
         result = retry(do_fetch)
         _circuit_tencent_daily.record_success()
         _compute_atr_fields(result)
-        has_today = any(bar.get("date") == datetime.now().strftime("%Y-%m-%d") for bar in result)
+        # 用数据中最新交易日代替墙钟，避免盘前/回测日期错位
+        _dates = [b.get("date") for b in result if b.get("date")]
+        _latest_date = max(_dates) if _dates else datetime.now().strftime("%Y-%m-%d")
+        has_today = _latest_date >= datetime.now().strftime("%Y-%m-%d")
         if not has_today:
             save_to_cache(cache_key, result, ttl_seconds=3600)
         # ── 写入文件缓存（带 fetch_date，同日复用）──
@@ -1352,7 +1355,7 @@ def fetch_5m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[st
             bar["data_status"] = "full"
         return fallback_bars
     
-    warnings.warn(f"⚠️ Sina HTTP fetch_5m failed or incomplete. Falling back to Mootdx Quote client.")
+    _logger.warning("Sina HTTP fetch_5m failed or incomplete for %s, falling back to Mootdx", sec.qq_symbol)
     bars = _fetch_mins_mootdx(sec, "5m", datalen)
     if bars:
         for bar in bars:
@@ -1370,7 +1373,7 @@ def fetch_15m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[s
             bar["data_status"] = "full"
         return fallback_bars
     
-    warnings.warn(f"⚠️ Sina HTTP fetch_15m failed or incomplete. Falling back to Mootdx Quote client.")
+    _logger.warning("Sina HTTP fetch_15m failed or incomplete for %s, falling back to Mootdx", sec.qq_symbol)
     bars = _fetch_mins_mootdx(sec, "15m", datalen)
     if bars:
         for bar in bars:
@@ -1388,7 +1391,7 @@ def fetch_30m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[s
             bar["data_status"] = "full"
         return fallback_bars
     
-    warnings.warn(f"⚠️ Sina HTTP fetch_30m failed or incomplete. Falling back to Mootdx Quote client.")
+    _logger.warning("Sina HTTP fetch_30m failed or incomplete for %s, falling back to Mootdx", sec.qq_symbol)
     bars = _fetch_mins_mootdx(sec, "30m", datalen)
     if bars:
         for bar in bars:
@@ -1509,7 +1512,7 @@ def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dic
 
         raw_data = json.loads(text or "[]")
             
-        if raw_data and isinstance(raw_data, list) and not isinstance(raw_data, dict):
+        if raw_data and isinstance(raw_data, list):
             bars: list[dict[str, Any]] = []
             for row in raw_data:
                 dt_str = str(row.get("day", ""))
@@ -1609,6 +1612,11 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
             missing_sources.append(key)
 
     quote = results.get("quote") or {}
+    # 空 {} 引致 "quote and ..." 为 False，到第 3 分支 degraded。但 missing_sources 未含 "quote"，
+    # 且下游 quote.get("current_price") 为 None。显式补录 missing_sources。
+    if isinstance(quote, dict) and not quote.get("current_price"):
+        if "quote" not in missing_sources:
+            missing_sources.append("quote")
     daily_bars = results.get("daily") or []
     bars_5m = results.get("bars_5m") or []
     weekly_bars = results.get("weekly_bars") or []
