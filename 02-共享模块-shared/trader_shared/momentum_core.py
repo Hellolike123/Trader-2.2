@@ -23,20 +23,10 @@ def calc_expma(closes: list[float], period: int = 10) -> list[float | None]:
 
 
 def calc_rsi(closes: list[float], period: int = 14) -> list[float | None]:
-    if len(closes) < period + 1:
-        return [None] * len(closes)
-    diffs: list[float] = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
-    gains: list[float] = [max(d, 0.0) for d in diffs]
-    losses: list[float] = [abs(min(d, 0.0)) for d in diffs]
-    result: list[float | None] = [None] * len(closes)
-    avg_g = sum(gains[:period]) / period
-    avg_l = sum(losses[:period]) / period
-    for i in range(period, len(closes)):
-        if i > period:
-            avg_g = (avg_g * (period - 1) + gains[i - 1]) / period
-            avg_l = (avg_l * (period - 1) + losses[i - 1]) / period
-        result[i] = 50.0 if avg_l < 1e-10 and avg_g < 1e-10 else 100.0 if avg_l < 1e-10 else 100 - 100 / (1 + avg_g / avg_l)
-    return result
+    """RSI 薄封装 → ``indicator_math.calc_rsi_series``（SSOT）。"""
+    from trader_shared.indicator_math import calc_rsi_series
+
+    return calc_rsi_series(closes, period)
 
 
 def calc_macd(closes: list[float]) -> dict[str, Any]:

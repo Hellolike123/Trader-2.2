@@ -12,7 +12,9 @@ from trader_shared.indicator_math import (
     calc_expma,
     calc_expma_series,
     calc_macd_series,
+    calc_rsi_series,
 )
+from trader_shared.momentum_core import calc_rsi
 
 
 class TestCalcExpma:
@@ -80,6 +82,30 @@ class TestCalcExpmaSeries:
         # After initialization, all values should be 50.0
         for v in result[9:]:
             assert v == 50.0
+
+
+class TestCalcRsiSeries:
+    def test_length_and_warmup(self):
+        closes = [10.0 + i * 0.1 for i in range(30)]
+        rsi = calc_rsi_series(closes, 14)
+        assert len(rsi) == 30
+        assert all(v is None for v in rsi[:14])
+        assert rsi[14] is not None
+
+    def test_matches_momentum_wrapper(self):
+        closes = [50.0 + ((-1) ** i) * i * 0.3 for i in range(40)]
+        assert calc_rsi(closes) == calc_rsi_series(closes)
+
+    def test_none_holes_return_all_none(self):
+        closes: list[float | None] = [10.0] * 20
+        closes[5] = None
+        assert all(v is None for v in calc_rsi_series(closes))
+
+    def test_oversold_downtrend(self):
+        closes = [100.0 - i for i in range(30)]
+        rsi = calc_rsi_series(closes)
+        last = next(v for v in reversed(rsi) if v is not None)
+        assert last < 30
 
 
 class TestCalcMacdSeries:

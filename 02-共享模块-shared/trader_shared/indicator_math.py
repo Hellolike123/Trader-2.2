@@ -3,8 +3,9 @@
 提供统一的技术指标计算实现，避免各模块各自实现导致的不一致问题。
 
 主要函数：
-  - calc_expma: 计算EXPMA值（SMA初始化 + 指数递推）
-  - calc_expma_series: 计算完整的EXPMA序列
+  - calc_expma / calc_expma_series
+  - calc_macd_series / calc_atr_series
+  - calc_rsi_series（Wilder 平滑 RSI）
 """
 
 from __future__ import annotations
@@ -201,6 +202,41 @@ def _bar_values(bar: dict) -> tuple[float, float, float]:
     if not isinstance(bar, dict):
         return float(getattr(bar, "high", 0)), float(getattr(bar, "low", 0)), float(getattr(bar, "close", 0))
     return float(bar.get("high", 0) or 0), float(bar.get("low", 0) or 0), float(bar.get("close", 0) or 0)
+
+
+def calc_rsi_series(closes: list[float | None], period: int = 14) -> list[float | None]:
+    """统一 RSI（Wilder 平滑）。所有消费方应调用此函数。
+
+    Args:
+        closes: 收盘价序列（含 None 时整段不计算，返回全 None——Wilder 需连续序列）
+        period: 默认 14
+
+    Returns:
+        与 closes 等长；前 ``period`` 个为 None（与历史 momentum_core 行为一致）
+    """
+    n = len(closes)
+    if period <= 0 or n < period + 1:
+        return [None] * n
+    if any(c is None for c in closes):
+        return [None] * n
+    xs = [float(c) for c in closes]  # type: ignore[arg-type]
+    diffs = [xs[i] - xs[i - 1] for i in range(1, n)]
+    gains = [max(d, 0.0) for d in diffs]
+    losses = [abs(min(d, 0.0)) for d in diffs]
+    result: list[float | None] = [None] * n
+    avg_g = sum(gains[:period]) / period
+    avg_l = sum(losses[:period]) / period
+    for i in range(period, n):
+        if i > period:
+            avg_g = (avg_g * (period - 1) + gains[i - 1]) / period
+            avg_l = (avg_l * (period - 1) + losses[i - 1]) / period
+        if avg_l < 1e-10 and avg_g < 1e-10:
+            result[i] = 50.0
+        elif avg_l < 1e-10:
+            result[i] = 100.0
+        else:
+            result[i] = 100.0 - 100.0 / (1.0 + avg_g / avg_l)
+    return result
 
 
 def calc_atr_series(bars: list, period: int = 14) -> list[float | None]:

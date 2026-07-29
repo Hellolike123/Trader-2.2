@@ -82,9 +82,13 @@ class TestTushareClientNoToken:
 class TestTushareClientWithSDK:
     """Tests that mock the tushare SDK to verify query/query_daily/query_moneyflow."""
 
-    def _make_client_with_mock_sdk(self, monkeypatch, mock_pro):
+    def _make_client_with_mock_sdk(self, monkeypatch, mock_pro, *, sdk_first: bool = True):
         """Helper: create a TushareClient with a mocked tushare SDK."""
         monkeypatch.setenv("TUSHARE_TOKEN", "fake-token")
+        if sdk_first:
+            monkeypatch.setenv("TUSHARE_SDK_FIRST", "1")
+        else:
+            monkeypatch.delenv("TUSHARE_SDK_FIRST", raising=False)
         monkeypatch.setattr(
             "trader_shared.tushare_client._probe_reachable", lambda *a, **k: True
         )
@@ -176,7 +180,8 @@ class TestTushareClientWithSDK:
         assert result == []
 
     def test_query_falls_back_http_when_sdk_empty(self, monkeypatch):
-        """SDK 空表时应降 HTTP，而不是直接返回 []."""
+        """SDK 优先且空表时应降 HTTP。"""
+        monkeypatch.setenv("TUSHARE_SDK_FIRST", "1")
         mock_pro = MagicMock()
         empty_df = MagicMock()
         empty_df.__len__ = MagicMock(return_value=0)
@@ -191,6 +196,19 @@ class TestTushareClientWithSDK:
         result = client.query("daily", ts_code="000001.SZ")
         assert len(result) == 1
         assert result[0]["close"] == 11.46
+
+    def test_query_http_first_by_default(self, monkeypatch):
+        """默认 HTTP 优先：HTTP 有数据时不打 SDK。"""
+        mock_pro = MagicMock()
+        client = self._make_client_with_mock_sdk(monkeypatch, mock_pro, sdk_first=False)
+        monkeypatch.setattr(
+            client,
+            "_query_http",
+            lambda api_name, **params: [{"ts_code": "000001.SZ", "close": 12.0}],
+        )
+        result = client.query("daily", ts_code="000001.SZ")
+        assert result[0]["close"] == 12.0
+        mock_pro.daily.assert_not_called()
 
     def test_query_realtime(self, monkeypatch):
         """query_realtime should call tushare.realtime_quote()."""

@@ -1,12 +1,13 @@
 """Tushare Pro 数据客户端（SDK + HTTP 双通道）。
 
-主用 tushare SDK 走代理端点；SDK 初始化失败时降级到 HTTP 直调。
-Token 从环境变量 TUSHARE_TOKEN 读取；未设置时所有查询返回空，不崩溃。
+默认 HTTP 优先（stockai888 代理上 SDK 常空表）；``TUSHARE_SDK_FIRST=1`` 恢复 SDK 优先。
+Token：环境变量 / tushare_config.local.py；未设置时查询返回空，不崩溃。
 
 环境变量：
     TUSHARE_TOKEN       必填，Tushare Pro API token
-    TUSHARE_API_URL     可选，默认 https://fastapic.stockai888.top（日线/资金流/板块等）
-    TUSHARE_REALTIME_URL 可选，默认 https://realtime.stockai888.top（实时爬虫）
+    TUSHARE_API_URL     可选，默认 https://fastapic.stockai888.top
+    TUSHARE_REALTIME_URL 可选，默认 https://realtime.stockai888.top
+    TUSHARE_SDK_FIRST   可选，1=SDK 优先；默认 0（HTTP 优先）
 
 使用方式：
     from trader_shared.tushare_client import get_client
@@ -28,7 +29,30 @@ from typing import Any
 # ── 配置 ──────────────────────────────────────────────────────────────────
 _DEFAULT_API_URL = "https://fastapic.stockai888.top"
 _DEFAULT_REALTIME_URL = "https://realtime.stockai888.top"
-_MIN_INTERVAL = 0.6  # 100次/分钟 ≈ 0.6s/请求
+# 代理限流约 120 次/分钟；全局节流略留余量
+_MIN_INTERVAL = 0.55
+_RATE_LOCK = threading.Lock()
+_LAST_CALL_MONO = 0.0
+
+
+def _sdk_first_enabled() -> bool:
+    return os.environ.get("TUSHARE_SDK_FIRST", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _global_rate_limit() -> None:
+    """进程级限速（多 Client / 多线程共用）。"""
+    global _LAST_CALL_MONO
+    with _RATE_LOCK:
+        now = time.monotonic()
+        wait = _MIN_INTERVAL - (now - _LAST_CALL_MONO)
+        if wait > 0:
+            time.sleep(wait)
+        _LAST_CALL_MONO = time.monotonic()
 
 
 def bypass_http_proxy_for_market() -> None:
@@ -207,12 +231,26 @@ class TushareClient:
         return bool(self._token) and (self._sdk_ok or self._http_ok)
 
     def _rate_limit(self) -> None:
-        """简单限速：确保两次调用间隔 ≥ _MIN_INTERVAL 秒。"""
-        now = time.monotonic()
-        elapsed = now - self._last_call
-        if elapsed < _MIN_INTERVAL:
-            time.sleep(_MIN_INTERVAL - elapsed)
+        """进程级限速（兼容旧调用点）。"""
+        _global_rate_limit()
         self._last_call = time.monotonic()
+
+    def _query_sdk(self, api_name: str, **params: Any) -> list[dict[str, Any]] | None:
+        """SDK 查询。成功非空返回 list；失败/空表返回 None（交给 HTTP）。"""
+        if not self._sdk_ok or self._pro is None:
+            return None
+        try:
+            self._rate_limit()
+            func = getattr(self._pro, api_name, None)
+            if func is None:
+                return None
+            df = func(**params)
+            if df is not None and len(df) > 0:
+                return df.to_dict(orient="records")
+            return None
+        except Exception as e:
+            warnings.warn(f"[tushare] SDK {api_name} 失败，尝试 HTTP: {e}")
+            return None
 
     # ── 通用查询 ──────────────────────────────────────────────────────────
     def query(self, api_name: str, **params: Any) -> list[dict[str, Any]]:
@@ -220,53 +258,62 @@ class TushareClient:
         if not self.available:
             return []
 
-        # SDK 优先；空结果 / 失败再降 HTTP（stockai888 代理偶发 SDK 空表）
-        if self._sdk_ok and self._pro is not None:
-            try:
-                self._rate_limit()
-                func = getattr(self._pro, api_name, None)
-                if func is not None:
-                    df = func(**params)
-                    if df is not None and len(df) > 0:
-                        return df.to_dict(orient="records")
-                # 空表或无此接口 → 继续 HTTP，勿直接 []
-            except Exception as e:
-                warnings.warn(f"[tushare] SDK {api_name} 失败，尝试 HTTP: {e}")
+        # 默认 HTTP 优先；TUSHARE_SDK_FIRST=1 时 SDK → HTTP
+        if _sdk_first_enabled():
+            sdk_rows = self._query_sdk(api_name, **params)
+            if sdk_rows is not None:
+                return sdk_rows
+            return self._query_http(api_name, **params)
 
-        # HTTP 降级
-        return self._query_http(api_name, **params)
+        http_rows = self._query_http(api_name, **params)
+        if http_rows:
+            return http_rows
+        sdk_rows = self._query_sdk(api_name, **params)
+        return sdk_rows if sdk_rows is not None else []
 
     def _query_http(self, api_name: str, **params: Any) -> list[dict[str, Any]]:
-        """HTTP 直调降级。"""
+        """HTTP 直调；遇分钟限流睡 1s 再试一次。"""
         if not self._http_ok:
             return []
         try:
             import requests
-            self._rate_limit()
-            resp = requests.post(
-                self._api_url,
-                json={
-                    "api_name": api_name,
-                    "token": self._token,
-                    "params": params,
-                },
-                timeout=30,
-                headers={"Accept-Encoding": "gzip"},
-                proxies={"http": None, "https": None},
-            )
-            data = resp.json()
-            if data.get("code") != 0:
-                msg = data.get("msg", "")
-                warnings.warn(f"[tushare] HTTP {api_name} 错误: {msg}")
-                return []
-            items = data.get("data", {}).get("items", [])
-            fields = data.get("data", {}).get("fields", [])
-            if not items or not fields:
-                return []
-            return [dict(zip(fields, row)) for row in items]
-        except Exception as e:
-            warnings.warn(f"[tushare] HTTP {api_name} 失败: {e}")
+        except ImportError:
             return []
+
+        last_msg = ""
+        for attempt in range(2):
+            try:
+                self._rate_limit()
+                resp = requests.post(
+                    self._api_url,
+                    json={
+                        "api_name": api_name,
+                        "token": self._token,
+                        "params": params,
+                    },
+                    timeout=30,
+                    headers={"Accept-Encoding": "gzip"},
+                    proxies={"http": None, "https": None},
+                )
+                data = resp.json()
+                if data.get("code") != 0:
+                    last_msg = str(data.get("msg", "") or "")
+                    if attempt == 0 and ("超限" in last_msg or "限流" in last_msg):
+                        time.sleep(1.0)
+                        continue
+                    warnings.warn(f"[tushare] HTTP {api_name} 错误: {last_msg}")
+                    return []
+                items = data.get("data", {}).get("items", [])
+                fields = data.get("data", {}).get("fields", [])
+                if not items or not fields:
+                    return []
+                return [dict(zip(fields, row)) for row in items]
+            except Exception as e:
+                warnings.warn(f"[tushare] HTTP {api_name} 失败: {e}")
+                return []
+        if last_msg:
+            warnings.warn(f"[tushare] HTTP {api_name} 错误: {last_msg}")
+        return []
 
     # ── 便捷方法 ──────────────────────────────────────────────────────────
     def query_daily(
