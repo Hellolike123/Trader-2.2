@@ -347,6 +347,31 @@ class TestR1BuyPointCap:
         assert out["suggested_pct_cap"] <= 10
         assert "buy2_cap" in out["rules_fired"]
 
+    def test_like2_buy_no_buy2_cap(self):
+        """类二买不进正式二买仓位帽（买侧放宽档）。"""
+        out = apply_chan_discipline(_open_setup(
+            buy_point_types=["类二买"],
+            suggested_pct=30,
+        ))
+        assert "buy2_cap" not in out["rules_fired"]
+        assert out["suggested_pct_cap"] == 30
+
+    def test_like2_buy_not_c1_short_trigger(self):
+        """C1 买点信号不因类二买点绿。"""
+        cl = build_entry_checklist(
+            stage="蓄势",
+            buy_point_types=["类二买"],
+            in_pullback=True,
+        )
+        assert cl["items"]["short_trigger"] is False
+        assert "买点信号" in (cl.get("missing_labels") or [])
+        cl2 = build_entry_checklist(
+            stage="蓄势",
+            buy_point_types=["二类买"],
+            in_pullback=True,
+        )
+        assert cl2["items"]["short_trigger"] is True
+
     def test_buy1_strictest_over_buy3(self):
         out = apply_chan_discipline(_open_setup(
             buy_point_types=["三类买", "一类买"],

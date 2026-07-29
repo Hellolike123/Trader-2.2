@@ -216,16 +216,22 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
     ar_idx, _ = _scan_last_event(wide_bars, _detect_ar, tr_ctx, window=18, step=1)
     comp_idx, _ = _scan_last_event(wide_bars, _detect_compression, tr_ctx, window=20, step=1)
 
-    # Phase B（建仓区）背景：停止行为（SC+AR 或 BC+AR）已完成，或出现压缩蓄力
-    # 这意味着价格已在 TR 内反复测试，Spring/UT 才具有原典 C 阶段的意义
+    # Phase B（建仓区）背景：
+    #   积累：SC+AR（原典 Automatic Rally）或压缩蓄力
+    #   派发（⑥B）：不再用 BC+AR（AR 已只绑 SC）；改靠 BC+(压缩/SOW) 或压缩蓄力
     # 判断来源：bar 索引（_scan_last_event）+ signals dict（信号覆盖）双源合并
     sc_ar_b_ctx = (sc_idx >= 0 and ar_idx >= 0) or \
                   (signals.get("sc_signal") and signals.get("ar_signal"))
-    bc_ar_b_ctx = (bc_idx >= 0 and ar_idx >= 0) or \
-                  (signals.get("bc_signal") and signals.get("ar_signal"))
     has_compression = comp_idx >= 0 or signals.get("compression_signal")
+    bc_dist_b_ctx = (
+        (bc_idx >= 0 and (comp_idx >= 0 or sow_found))
+        or (
+            signals.get("bc_signal")
+            and (signals.get("compression_signal") or signals.get("sow_signal"))
+        )
+    )
     acc_b_ctx = sc_ar_b_ctx or has_compression           # 积累 B 背景
-    dist_b_ctx = (bc_ar_b_ctx or has_compression)        # 派发 B 背景
+    dist_b_ctx = bc_dist_b_ctx or has_compression        # 派发 B 背景
 
     # Spring/UT 有效性（孤立性校验）：
     #   spring_idx>=0：有 bar 位置 → 在 B 背景之后才算有效
@@ -239,7 +245,7 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
         spring_premature = False
 
     if ut_idx >= 0:
-        dist_b_ctx_idx = max(bc_idx, ar_idx, comp_idx)
+        dist_b_ctx_idx = max(bc_idx, comp_idx)
         upthrust_premature = not (dist_b_ctx and ut_idx > dist_b_ctx_idx)
     elif ut_found:
         upthrust_premature = not dist_b_ctx
@@ -372,7 +378,7 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
             "spring_premature": spring_premature,
             "upthrust_premature": upthrust_premature,
         }
-    # UT 必须先经 Phase B（有 BC+AR 停止行为或压缩蓄力）才有效
+    # UT 必须先经 Phase B（BC+压缩/SOW 或压缩蓄力）才有效
     if not upthrust_premature and ut_found and sow_found:
         return {
             "phase": "distribution_c",
@@ -381,11 +387,11 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
             "spring_premature": spring_premature,
             "upthrust_premature": False,
         }
-    # BC 或 BC+AR（无 Spring）→ 派发期 A；BC+AR 负向更强
-    if bc_found and ar_found:
+    # ⑥B：派发 A 加强靠 BC+压缩/SOW，不再用 BC+AR（AR 只服务积累）
+    if bc_found and (has_compression or sow_found):
         return {
             "phase": "distribution_a",
-            "phase_label": "派发期 A（停止：BC+AR）",
+            "phase_label": "派发期 A（停止：BC+蓄势/弱势）",
             "phase_confidence_delta": -0.10,
             "spring_premature": spring_premature,
             "upthrust_premature": upthrust_premature,

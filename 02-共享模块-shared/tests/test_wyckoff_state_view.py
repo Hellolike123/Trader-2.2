@@ -70,3 +70,44 @@ def test_bear_utad():
     )
     assert v["bias"] == "bear"
     assert "utad" in v["active_events"]
+
+
+def test_phase_prefix_bias_accumulation_b():
+    """生产 phase 为 accumulation_a/b/...，阶段兜底 bias 须命中。"""
+    v = to_wyckoff_state_view(
+        {
+            "phase": "accumulation_b",
+            "phase_label": "积累B",
+            "spring_signal": False,
+            "sos_signal": False,
+        }
+    )
+    assert v["bias"] == "bull"
+
+
+def test_phase_prefix_bias_distribution_c():
+    v = to_wyckoff_state_view(
+        {
+            "phase": "distribution_c",
+            "phase_label": "派发C",
+            "utad_signal": False,
+            "sow_signal": False,
+            "lpsy_signal": False,
+            "bc_signal": False,
+            "upthrust_signal": False,
+        }
+    )
+    assert v["bias"] == "bear"
+
+
+def test_weak_spring_neutral_bias():
+    v = to_wyckoff_state_view(
+        {
+            "spring_signal": True,
+            "spring_strength": "weak",
+            "spring_vol_class": "low_vol_confirm",
+            "spring_premature": False,
+            "phase": "none",
+        }
+    )
+    assert v["bias"] == "neutral"

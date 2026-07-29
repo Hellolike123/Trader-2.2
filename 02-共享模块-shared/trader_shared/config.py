@@ -207,7 +207,7 @@ WYCKOFF_SCORE_BEARISH_DIV: int = -10            # 看空量价背离 — 量能�
 WYCKOFF_SCORE_BC: int = -15                     # Buying Climax 购买高潮 — 天量滞涨
 WYCKOFF_SCORE_SOW: int = -10                    # Sign of Weakness 弱势信号 — 放量跌破
 # 新增经典威科夫信号权重
-WYCKOFF_SCORE_AR: int = 10                      # Automatic Rally 自动反弹 — BC 后放量反弹
+WYCKOFF_SCORE_AR: int = 10                      # Automatic Rally 自动反弹 — SC 后放量反弹
 WYCKOFF_SCORE_SOS: int = 15                     # Sign of Strength 强势信号 — 连续放量突破
 WYCKOFF_SCORE_ST: int = 8                       # Secondary Test 二次测试 — 缩量确认支撑
 WYCKOFF_SCORE_LPS: int = 12                     # Last Point of Support 最后支撑 — SOS 后缩量回调

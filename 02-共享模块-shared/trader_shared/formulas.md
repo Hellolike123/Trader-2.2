@@ -129,7 +129,11 @@ bar 索引 `anchor_bar`（经 `_last_pivot_anchor_bar` 映射），传入 `detec
   **且前置一类在时间轴上成立**——`down_a`/`up_a` 须满足历史一类结构
   （趋势 + 离开中枢 + 若存在更早同向笔则曾创新低/高 + 力度不更强），
   **禁止**用「同帧 `buy_points` 里已有一类」判定（一类要创新低、二类要不破前低，
-  同一末笔几何互斥，旧实现导致二类永假）。面积/MACD 不满足 → 买点降级「类二买」
+  同一末笔几何互斥，旧实现导致二类永假）。
+- **买侧分层（产品 C）**：正式「二类买」必须 `_historical_type1_buy_ok` + 力度/缩量齐备；
+  历史一类不满足或力度未齐 → 降级「类二买」（无趋势中枢仍可出类二买）。
+  fusion 强多 / C1「买点信号」/ 买点阶梯二档 **只认正式二类买**，不认类二买。
+  卖侧「二类卖」仍要求历史一类（对称严格）。
 - **三类买/卖**：离开中枢后回抽不入（末 3 笔内，上限 15%）
 
 实现辅助：`_strict_down_trend_zones` / `_strict_up_trend_zones`、
@@ -156,7 +160,7 @@ bar 索引 `anchor_bar`（经 `_last_pivot_anchor_bar` 映射），传入 `detec
 | 线段启动门槛 | 默认从首笔起段（放宽） | `CHAN_SEGMENT_RELAX_OVERLAP` |
 | 背驰 fallback 窗口 | 最近 120 根（P3 锚定后从中枢起） | `CHAN_DIVERGENCE_FALLBACK_WINDOW` |
 | 买卖信号合成 | 只走严格 detect_buy/sell_points | — |
-| 二类前置一类 | 时间轴历史一类，非同帧列表 | — |
+| 二类前置一类 | 正式二类买/二类卖须时间轴历史一类；买侧无趋势可降级类二买 | — |
 | 区间套未确认 | fusion 置信度降权（×0.65 / nesting ×0.55） | `TRADER_CHAN_NESTING` |
 
 > 所有行为变更须在 `test_chanlun_correctness.py` / `test_chan_core` 增补语义 golden，并刷新

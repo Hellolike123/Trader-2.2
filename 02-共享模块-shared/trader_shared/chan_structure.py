@@ -585,7 +585,9 @@ def detect_buy_points(
 
     一类买: 下跌趋势（≥2 不重叠下移中枢）+ 离开段末 down 创新低 + 笔级底背驰
     二类买: down_a→up→down_b 且 low_b>low_a 且 low_b<up_high；
-           前置一类 = 时间轴上 down_a 满足历史一类结构（非同帧 buy_points）
+           且前置一类 = 时间轴上 down_a 满足历史一类结构（非同帧 buy_points）
+    类二买: 同上结构几何，但历史一类不满足或力度/缩量未齐——买侧放宽试探档
+           （fusion/C1 只认正式「二类买」，类二买不进强多/买点阶梯二档）
     三类买: 离开 ZG 之后出现回抽 down 且 end>=ZG；未回踩不报（上限 15%）
     bars 须为与 stroke index 对齐的序列（chanlun_analysis 传入 handle_inclusion 后的 cleaned）。
     """
@@ -686,22 +688,28 @@ def detect_buy_points(
                 # P8: 两笔之间无同向笔 → 结构不成立，跳过二类买
                 pass
             else:
-                # 二类买：结构 + MACD + 缩量 三条件
-                # 类二买：结构满足 + (MACD 或 缩量 至少一个)
-                # 裸结构（无 MACD 无缩量）不报任何信号
+                # 正式二类买：历史一类 + 结构 + (面积/MACD) + 缩量
+                # 类二买：仅结构 + (面积/MACD/缩量任一项)；无趋势中枢也可（买侧放宽）
+                # 裸结构（无力度也无缩量）不报任何信号
                 structure_ok = low_b > low_a and low_b < up_high
                 if structure_ok:
+                    hist_type1_ok = _historical_type1_buy_ok(
+                        down_strokes, valid_zones, bars
+                    )
                     area_prev = _stroke_macd_area(bars, down_strokes[-2], "neg")
                     area_curr = _stroke_macd_area(bars, down_strokes[-1], "neg")
                     area_ok = _stroke_force_not_much_stronger(area_prev, area_curr, "down")
-                    vol_shrink = _volume_shrink_between_strokes(bars, down_strokes[-2], down_strokes[-1])
-                    if (area_ok or macd_divergence_ok) and vol_shrink:
+                    vol_shrink = _volume_shrink_between_strokes(
+                        bars, down_strokes[-2], down_strokes[-1]
+                    )
+                    force_ok = area_ok or macd_divergence_ok
+                    if hist_type1_ok and force_ok and vol_shrink:
                         buy_points.append({
                             "type": "二类买",
                             "price": round(low_b, 4),
                             "confidence": 2,
                         })
-                    elif area_ok or macd_divergence_ok or vol_shrink:
+                    elif force_ok or vol_shrink:
                         buy_points.append({
                             "type": "类二买",
                             "price": round(low_b, 4),

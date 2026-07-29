@@ -364,7 +364,7 @@ class TestWyckoffToSignal:
     def test_ar_signal_mapping(self):
         """AR (Automatic Rally) 信号映射。"""
         fn = self._fn
-        result = fn({"wyckoff": {"ar_signal": True, "ar_reason": "BC 后自动反弹，放量+3.1%"}})
+        result = fn({"wyckoff": {"ar_signal": True, "ar_reason": "SC 后自动反弹，放量+3.1%"}})
         assert result["direction"] == 1
         assert result["confidence"] == 0.6
         assert "自动反弹" in result["reason"]

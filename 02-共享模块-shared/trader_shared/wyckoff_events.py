@@ -604,19 +604,26 @@ def _detect_selling_climax(bars: list[dict], tr_ctx: dict | None = None) -> dict
     return {"sc_signal": False, "sc_reason": "未检测到卖力高潮", "sc_price": 0.0}
 
 def _detect_sign_of_weakness(bars: list[dict], _support: float | None = None, tr_ctx: dict | None = None) -> dict:
-    """Detect Sign of Weakness (SOW) — 价格跌破支撑且放量。
+    """Detect Sign of Weakness (SOW) — 收盘有效跌破支撑且放量。
+
+    产品 ⑤B：
+      - sow_signal：收盘仍在支撑下方（计分 / 阶段 / fusion）
+      - sow_intraday_warn：放量刺穿后收盘收回（仅展示，不计分；字段名故意不含 _signal，避免阶段滑窗误吸）
 
     关键修复：当 WYCKOFF_SOW_CONSECUTIVE_DAYS > 1 时，支撑位从「不含连续确认窗口」
     的 K 线中计算，避免前一日 low 被纳入 support 导致 prev_low >= support 恒成立。
     支持 _support 覆盖：提供外部计算的动态支撑位时优先使用。
-
-    Returns:
-        dict with keys: sow_signal (bool), sow_reason (str), sow_price (float)
     """
+    _empty = {
+        "sow_signal": False,
+        "sow_intraday_warn": False,
+        "sow_reason": "",
+        "sow_price": 0.0,
+    }
     consecutive = WYCKOFF_SOW_CONSECUTIVE_DAYS
     min_bars = WYCKOFF_SOW_SUPPORT_LOOKBACK + consecutive
     if len(bars) < min_bars:
-        return {"sow_signal": False, "sow_reason": "数据不足", "sow_price": 0.0}
+        return {**_empty, "sow_reason": "数据不足"}
 
     # 支撑位计算：TR 内用 TR 下沿（原典 SOW = 跌破 TR 下沿），否则动态支撑或局部最低
     if tr_ctx is not None and tr_ctx.get("in_tr") and tr_ctx.get("tr_lower") is not None:
@@ -632,7 +639,7 @@ def _detect_sign_of_weakness(bars: list[dict], _support: float | None = None, tr
         valid_lows = [v for v in low_values if v is not None]
 
         if not valid_lows:
-            return {"sow_signal": False, "sow_reason": "数据异常", "sow_price": 0.0}
+            return {**_empty, "sow_reason": "数据异常"}
         support = min(valid_lows)
 
     # 当前 bar（最后一根）
@@ -642,13 +649,13 @@ def _detect_sign_of_weakness(bars: list[dict], _support: float | None = None, tr
     cur_volume = to_float(current.get("volume"))
 
     if cur_low is None or cur_close is None or cur_volume is None:
-        return {"sow_signal": False, "sow_reason": "数据异常", "sow_price": 0.0}
+        return {**_empty, "sow_reason": "数据异常"}
 
     # 跌破支撑判定逻辑
     if consecutive > 1:
-        # 需要连续 N 天跌破才算
+        # 需要连续 N 天最低价刺穿才进入量能确认
         if cur_low >= support:
-            return {"sow_signal": False, "sow_reason": "未跌破支撑", "sow_price": 0.0}
+            return {**_empty, "sow_reason": "未跌破支撑"}
 
         # 检查前 consecutive-1 天是否也跌破
         for i in range(2, consecutive + 1):
@@ -656,14 +663,13 @@ def _detect_sign_of_weakness(bars: list[dict], _support: float | None = None, tr
             check_low = to_float(check_bar.get("low"))
             if check_low is None or check_low >= support:
                 return {
-                    "sow_signal": False,
+                    **_empty,
                     "sow_reason": f"仅 {i-1}/{consecutive} 日跌破，需连续{consecutive}天确认",
-                    "sow_price": 0.0,
                 }
     else:
-        # 单日判定，最低价或收盘价跌破即可触发
+        # 单日判定，最低价或收盘价跌破即可进入量能确认
         if cur_low >= support and cur_close >= support:
-            return {"sow_signal": False, "sow_reason": "未跌破支撑", "sow_price": 0.0}
+            return {**_empty, "sow_reason": "未跌破支撑"}
 
     # 放量确认
     vol_window = bars[-(WYCKOFF_SOW_SUPPORT_LOOKBACK + 1):-1]
@@ -671,18 +677,20 @@ def _detect_sign_of_weakness(bars: list[dict], _support: float | None = None, tr
     is_high_volume = avg_volume > 0 and cur_volume >= avg_volume * WYCKOFF_SOW_VOL_RATIO_THRESHOLD
 
     if not is_high_volume:
-        return {"sow_signal": False, "sow_reason": "缩量跌破，非强弱势信号", "sow_price": 0.0}
+        return {**_empty, "sow_reason": "缩量跌破，非强弱势信号"}
 
-    # 收盘在支撑下方（真跌破）
+    # ⑤B：收盘站上支撑 → 仅日内警告；收盘仍破 → 正式 SOW
     if cur_close >= support:
         return {
-            "sow_signal": True,
-            "sow_reason": f"日内跌破支撑 {support:.2f} 后收回，弱势警告",
+            "sow_signal": False,
+            "sow_intraday_warn": True,
+            "sow_reason": f"日内跌破支撑 {support:.2f} 后收回，弱势警告（未确认）",
             "sow_price": round(support, 2),
         }
 
     return {
         "sow_signal": True,
+        "sow_intraday_warn": False,
         "sow_reason": f"放量跌破支撑 {support:.2f}，弱势信号",
         "sow_price": round(support, 2),
     }
@@ -768,9 +776,14 @@ def _detect_spring(bars: list[dict], _support: float | None = None, symbol: str 
         vol_class = "low_vol_confirm"
         volume_note = "缩量洗盘（供应耗尽，可靠）"
     elif avg_volume > 0 and current_volume >= avg_volume * WYCKOFF_SPRING_BULLISH_VOL_RATIO * vol_scale:
-        # 放量弹簧：直接过滤，不报信号
-        return {"spring_signal": False, "spring_price": 0.0,
-                "spring_reason": "放量跌破支撑，可能是真破位", "spring_strength": "failure"}
+        # 放量弹簧：直接过滤，不报信号；仍透传 vol_class 供展示/审计（打分只在 signal=True 时消费降权分支）
+        return {
+            "spring_signal": False,
+            "spring_price": 0.0,
+            "spring_reason": "放量跌破支撑，可能是真破位",
+            "spring_strength": "failure",
+            "spring_vol_class": "high_vol_warning",
+        }
     else:
         vol_class = "normal"
         volume_note = "正常量能"
@@ -793,7 +806,13 @@ def _detect_spring(bars: list[dict], _support: float | None = None, symbol: str 
                 "spring_reason": f"收回力度不足（{reclaim_ratio*100:.0f}% < 50%），弱弹簧", "spring_strength": "weak"}
 
     # ── 分级：强 = 量价齐振；弱 = 缩量无确认；其他 = 标准 ──
-    if depth_pct >= WYCKOFF_SPRING_STRONG_DEPTH_PCT and vol_ratio >= 1.0 and reclaim_ratio >= WYCKOFF_SPRING_STRONG_RECLAIM:
+    # high_vol_warning 已在上方硬过滤；此处不再标 strong（避免与放量真破位语义冲突）
+    if (
+        vol_class != "high_vol_warning"
+        and depth_pct >= WYCKOFF_SPRING_STRONG_DEPTH_PCT
+        and vol_ratio >= 1.0
+        and reclaim_ratio >= WYCKOFF_SPRING_STRONG_RECLAIM
+    ):
         strength = "strong"
         strength_note = "深度震仓+放量承接+坚决收回中轴，吸筹最强确认"
     elif vol_ratio < WYCKOFF_SPRING_LOW_VOL_RATIO:
@@ -923,22 +942,24 @@ def _detect_volume_divergence(bars: list[dict]) -> tuple[bool, bool]:
     return bearish, bullish
 
 def _detect_ar(bars: list[dict], tr_ctx: dict | None = None) -> dict:
-    """Detect Automatic Rally (AR) — BC 之后抛售枯竭的快速反弹。
+    """Detect Automatic Rally (AR) — SC 之后抛售枯竭的快速反弹（原典）。
+
+    产品 ⑥B：AR 只绑 SC；BC 后不再产 AR（派发侧 Automatic Reaction 未单独建模）。
 
     触发条件:
-      1. 最近 N 根 K 线内检测到 BC 信号
-      2. BC 后 1-3 根 K 线内，存在至少 1 根满足:
-         - close > bc_close * 1.02 (上涨 >= 2%)
-         - volume > bc 前均量 * 1.2 (放量)
+      1. 最近 N 根 K 线内检测到 SC（卖力高潮）
+      2. SC 后 1-3 根 K 线内，存在至少 1 根满足:
+         - close > sc_close * 1.02 (上涨 >= 2%)
+         - volume > sc 前均量 * 1.2 (放量)
     """
     if len(bars) < WYCKOFF_MIN_BARS + 3:
         return {"ar_signal": False, "ar_reason": "数据不足", "ar_price": None}
 
-    # 扫描最近 15 根寻找 BC/SC 锚点（原 5 根过短，A 股高潮后 1 周才反弹会漏 AR）
+    # 扫描最近 15 根寻找 SC 锚点（原 5 根过短，A 股高潮后 1 周才反弹会漏 AR）
     scan_start = max(1, len(bars) - 15)
-    bc_bar_idx = None
-    bc_close = None
-    bc_avg_vol = None
+    sc_bar_idx = None
+    sc_close = None
+    sc_avg_vol = None
 
     for scan_idx in range(len(bars) - 1, scan_start - 1, -1):
         current = bars[scan_idx]
@@ -957,28 +978,10 @@ def _detect_ar(bars: list[dict], tr_ctx: dict | None = None) -> dict:
 
         prev_close = to_float(bars[scan_idx - 1].get("close")) if scan_idx >= 1 else cur_open
         change_pct = (cur_close - prev_close) / max(prev_close, 0.01) * 100
-
         vol_ratio = cur_volume / avg_volume
-        is_stagnant = change_pct < WYCKOFF_BC_CHANGE_THRESHOLD
-        cur_high = to_float(current.get("high"))
-        cur_low = to_float(current.get("low"))
-        real_body_top = max(cur_open, cur_close)
-        upper_shadow = cur_high - real_body_top if cur_high is not None and real_body_top is not None else 0
-        price_range = cur_high - cur_low if cur_high is not None and cur_low is not None else 1.0
-        has_upper_shadow = (upper_shadow / max(price_range, 0.01)) > WYCKOFF_BC_UPPER_SHADOW_RATIO if price_range > 0 else False
         is_candle = cur_close < cur_open
 
-        # 与 _detect_buying_climax 对齐：量能 + 滞涨/阴线 + 高位过滤
-        if (
-            vol_ratio >= WYCKOFF_BC_VOL_RATIO_THRESHOLD
-            and (is_stagnant or is_candle)
-            and _is_bc_high_position(bars, scan_idx)
-        ):
-            bc_bar_idx = scan_idx
-            bc_close = cur_close
-            bc_avg_vol = avg_volume
-            break
-        # 额外检查 SC（卖力高潮）作为 AR 的前置事件
+        # 仅 SC：低位 + 阴线 + 跌幅显著 + 天量（与 _detect_selling_climax 对齐）
         sc_pos = _price_pos_pct(bars, scan_idx)
         if (
             vol_ratio >= WYCKOFF_BC_VOL_RATIO_THRESHOLD
@@ -987,31 +990,31 @@ def _detect_ar(bars: list[dict], tr_ctx: dict | None = None) -> dict:
             and sc_pos <= 1 - WYCKOFF_BC_MIN_POS_PCT
             and change_pct <= -2.0
         ):
-            bc_bar_idx = scan_idx
-            bc_close = cur_close
-            bc_avg_vol = avg_volume
+            sc_bar_idx = scan_idx
+            sc_close = cur_close
+            sc_avg_vol = avg_volume
             break
 
-    if bc_bar_idx is None:
-        return {"ar_signal": False, "ar_reason": "未检测到 BC，无法触发 AR", "ar_price": None}
+    if sc_bar_idx is None:
+        return {"ar_signal": False, "ar_reason": "未检测到 SC，无法触发 AR", "ar_price": None}
 
-    # 检查 BC 后 1-3 根 K 线
-    for i in range(1, min(4, len(bars) - bc_bar_idx)):
-        rally_bar = bars[bc_bar_idx + i]
+    # 检查 SC 后 1-3 根 K 线
+    for i in range(1, min(4, len(bars) - sc_bar_idx)):
+        rally_bar = bars[sc_bar_idx + i]
         r_close = to_float(rally_bar.get("close"))
         r_volume = to_float(rally_bar.get("volume"))
         if r_close is None or r_volume is None:
             continue
 
-        if r_close > bc_close * 1.02 and r_volume > bc_avg_vol * 1.2:
-            pct = (r_close / bc_close - 1) * 100
+        if r_close > sc_close * 1.02 and r_volume > sc_avg_vol * 1.2:
+            pct = (r_close / sc_close - 1) * 100
             return {
                 "ar_signal": True,
-                "ar_reason": f"高潮后自动反弹，放量 +{pct:.1f}%",
+                "ar_reason": f"SC 后自动反弹，放量 +{pct:.1f}%",
                 "ar_price": round(r_close, 2),
             }
 
-    return {"ar_signal": False, "ar_reason": "高潮后未检测到有效反弹", "ar_price": None}
+    return {"ar_signal": False, "ar_reason": "SC 后未检测到有效反弹", "ar_price": None}
 
 def _detect_sos(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     """Detect Sign of Strength (SOS) — 连续放量突破。

@@ -476,12 +476,21 @@ def test_phase_ut_isolated():
     assert ph["phase"] == "none", f"孤立 UT phase 应为 none，实得 {ph['phase']}"
 
 
-def test_phase_ut_bc_ar_valid():
-    """UT 在 BC+AR 之后 → 有效"""
+def test_phase_ut_bc_sow_valid():
+    """⑥B：UT 在 BC+SOW（派发 B）之后 → 有效；不再依赖 BC+AR"""
+    b = _super_flat(50)
+    ph = _detect_phase(
+        b, _sig(upthrust_signal=True, bc_signal=True, sow_signal=True)
+    )
+    assert ph.get("upthrust_premature") is False, "BC+SOW 后 UT 不应过早"
+    assert "distribution" in ph["phase"]
+
+
+def test_phase_ut_bc_ar_alone_not_dist_b():
+    """⑥B：仅 BC+AR 不再构成派发 B（AR 只服务积累 SC）"""
     b = _super_flat(50)
     ph = _detect_phase(b, _sig(upthrust_signal=True, bc_signal=True, ar_signal=True))
-    assert ph.get("upthrust_premature") is False, "BC+AR 后 UT 不应过早"
-    assert "distribution" in ph["phase"]
+    assert ph.get("upthrust_premature") is True, "无压缩/SOW 时 BC+AR 不应让 UT 生效"
 
 
 def test_phase_spring_ut_both_isolated():
@@ -530,6 +539,19 @@ def test_tr_quality_score_adjustment():
     assert s_high["raw"] > s_neu["raw"], "高质 TR 应加分"
     assert s_neu["raw"] > s_low["raw"], "低质 TR 应减分"
     assert s_none["raw"] == s_neu["raw"], "tr_quality=None 应无调整"
+
+
+def test_weak_spring_half_score():
+    """弱弹簧（缩量无承接）打分减半，与 premature 同级。"""
+    b = _flat(30)
+    s_norm = calculate_wyckoff_score(b, analysis=_fa_spring(tr_quality=0.5, spring_premature=False))
+    weak = _fa_spring(tr_quality=0.5, spring_premature=False)
+    weak["spring_strength"] = "weak"
+    weak["spring_vol_class"] = "low_vol_confirm"
+    s_weak = calculate_wyckoff_score(b, analysis=weak)
+    assert s_norm["raw"] > s_weak["raw"], "弱弹簧 raw 应更低"
+    assert s_weak["raw"] == 12, f"弱弹簧 raw 应为 12 (25//2)，实得 {s_weak['raw']}"
+    assert any("弱" in s or "降权" in s for s in s_weak["signals"])
 
 
 def test_spring_premature_half_score():

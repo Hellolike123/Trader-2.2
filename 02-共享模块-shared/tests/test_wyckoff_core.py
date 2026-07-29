@@ -113,14 +113,36 @@ class TestDetectBuyingClimax:
 
 class TestDetectSignOfWeakness:
     def test_sow_detected_consecutive(self):
-        """SOW 需连续 2 日跌破支撑（support 从不含确认窗口的 K 线计算）。"""
+        """SOW 需连续 2 日跌破支撑且收盘仍破（support 从不含确认窗口的 K 线计算）。"""
         bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
-        # 连续 2 天跌破 95（support 从 bars[2:14] 计算 = 95）
+        # 连续 2 天跌破 95（support 从 bars[2:14] 计算 = 95），收盘仍在下方
         bars.append({"open": 98, "high": 99, "low": 93, "close": 94, "volume": 130})
         bars.append({"open": 95, "high": 96, "low": 92, "close": 93, "volume": 130})
         result = wyckoff_analysis(bars)
         assert result["sow_signal"] is True
+        assert result.get("sow_intraday_warn") is False
         assert result["sow_price"] == 95.0
+
+    def test_sow_intraday_warn_reclaim_not_signal(self):
+        """⑤B：连续刺穿但末日收盘收回 → 仅 warn，不计正式 SOW。"""
+        bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
+        bars.append({"open": 98, "high": 99, "low": 93, "close": 94, "volume": 130})
+        # 刺穿 support=95 后收盘收回
+        bars.append({"open": 94, "high": 98, "low": 92, "close": 96, "volume": 130})
+        result = wyckoff_analysis(bars)
+        assert result["sow_signal"] is False
+        assert result.get("sow_intraday_warn") is True
+        assert "警告" in (result.get("sow_reason") or "")
+        # 不计分：注入 warn 不应出现 SOW 扣分字样
+        scored = calculate_wyckoff_score(bars, analysis={
+            **result,
+            "spring_signal": False,
+            "upthrust_signal": False,
+            "bc_signal": False,
+            "sow_signal": False,
+            "sow_intraday_warn": True,
+        })
+        assert not any("SOW" in s or "弱势" in s for s in scored["signals"])
 
     def test_sow_not_detected_single_day(self):
         """仅 1 日跌破不足以触发 SOW（consecutive=2）。"""
@@ -128,6 +150,7 @@ class TestDetectSignOfWeakness:
         bars.append({"open": 98, "high": 99, "low": 93, "close": 94, "volume": 130})
         result = wyckoff_analysis(bars)
         assert result["sow_signal"] is False
+        assert result.get("sow_intraday_warn") is False
         assert "1/2" in result["sow_reason"]
 
     def test_sow_not_detected_due_to_volume(self):
@@ -136,6 +159,7 @@ class TestDetectSignOfWeakness:
         bars.append({"open": 98, "high": 99, "low": 93, "close": 94, "volume": 90})
         result = wyckoff_analysis(bars)
         assert result["sow_signal"] is False
+        assert result.get("sow_intraday_warn") is False
 
 
 class TestCalculateWyckoffScore:
@@ -320,47 +344,64 @@ class TestCalculateWyckoffScore:
 
 
 class TestDetectAR:
-    """AR (Automatic Rally) 自动反弹 检测测试"""
+    """AR (Automatic Rally) 自动反弹 — ⑥B 只绑 SC"""
 
-    def test_ar_detected(self):
-        """BC 后 1-3 根放量反弹 → AR 触发
+    def _sc_then_rally_bars(self, rally_close: float, rally_vol: int) -> list[dict]:
+        """构造低位 SC + 随后反弹（SC close 固定 98，rally 相对 98 判断 2%）。"""
+        bars = []
+        for i in range(20):
+            base = 150 - i * 2  # 150 → 112，抬高近窗上沿
+            bars.append(_make_bar(base, base + 3, base - 3, base, 10))
+        prev = bars[-1]["close"]
+        # SC：天量阴线、深跌、低位 pos
+        bars.append({"open": prev - 1, "high": 99, "low": 95, "close": 98, "volume": 250})
+        bars.append({
+            "open": 98,
+            "high": max(rally_close + 1, 100),
+            "low": 97,
+            "close": rally_close,
+            "volume": rally_vol,
+        })
+        bars.extend([
+            _make_bar(rally_close, rally_close + 1, rally_close - 1, rally_close, 10)
+            for _ in range(2)
+        ])
+        return bars
 
-        需要 >= 18 根 (WYCKOFF_MIN_BARS+3) 才能触发 AR 检测。
-        使用 volume=10 的 base 避免 BC 被额外 bars 误触发。
-        """
-        # 前 16 根: 中性 K 线，低 volume=10
-        bars = [_make_bar(100, 105, 95, 102, 10) for _ in range(16)]
-        # BC bar: 天量 (190) + 滞涨 → BC 触发 (vol_ratio = 190/10 = 19)
-        bars.append({"open": 101, "high": 105, "low": 99, "close": 100.5, "volume": 190})
-        # AR bar: close=103 > 100.5*1.02=102.51, vol=130 > 10*1.2=12
-        bars.append({"open": 101, "high": 104, "low": 100, "close": 103, "volume": 130})
-        # 再加 3 根凑够 20 根
-        bars.extend([{"open": 103, "high": 105, "low": 102, "close": 104, "volume": 10} for _ in range(3)])
-        # 总计 20 根
+    def test_ar_detected_after_sc(self):
+        """SC 后 1-3 根放量反弹 → AR 触发"""
+        # 98*1.02=99.96；rally close=104, vol=80 > 10*1.2
+        bars = self._sc_then_rally_bars(rally_close=104, rally_vol=80)
         result = wyckoff_analysis(bars)
         assert result["ar_signal"] is True, f"AR not detected: {result.get('ar_reason')}"
+        assert "SC" in (result.get("ar_reason") or "")
 
-    def test_ar_not_detected_no_bc(self):
-        """无 BC 事件 → AR 不触发"""
+    def test_ar_not_detected_bc_only(self):
+        """⑥B：仅有 BC（无 SC）→ 即使放量上弹也不出 AR"""
+        bars = [_make_bar(100, 105, 95, 102, 10) for _ in range(16)]
+        # 高位 BC
+        bars.append({"open": 101, "high": 105, "low": 99, "close": 100.5, "volume": 190})
+        bars.append({"open": 101, "high": 104, "low": 100, "close": 103, "volume": 130})
+        bars.extend([_make_bar(103, 105, 102, 104, 10) for _ in range(3)])
+        result = wyckoff_analysis(bars)
+        assert result["ar_signal"] is False
+
+    def test_ar_not_detected_no_sc(self):
+        """无 SC 事件 → AR 不触发"""
         bars = [_make_bar(100, 105, 95, 102, 100) for _ in range(16)]
         result = wyckoff_analysis(bars)
         assert result["ar_signal"] is False
 
     def test_ar_not_detected_weak_rally(self):
-        """BC 后反弹不足 2% → AR 不触发"""
-        bars = [_make_bar(100, 105, 95, 102, 100) for _ in range(14)]
-        bars.append(_make_bar(101, 105, 99, 100.5, 190))  # BC
-        # close=101 不满足 > 100.5*1.02=102.51
-        bars.append({"open": 100, "high": 102, "low": 99, "close": 101, "volume": 130})
+        """SC 后反弹不足 2% → AR 不触发"""
+        # 98*1.02=99.96；close=99 不足
+        bars = self._sc_then_rally_bars(rally_close=99, rally_vol=80)
         result = wyckoff_analysis(bars)
         assert result["ar_signal"] is False
 
     def test_ar_not_detected_low_volume(self):
-        """BC 后反弹涨幅够但量能不足 → AR 不触发"""
-        bars = [_make_bar(100, 105, 95, 102, 100) for _ in range(14)]
-        bars.append(_make_bar(101, 105, 99, 100.5, 190))  # BC
-        # close=103 > 102.51 ✓, 但 vol=100 < 120 ✗
-        bars.append({"open": 101, "high": 104, "low": 100, "close": 103, "volume": 100})
+        """SC 后反弹涨幅够但量能不足 → AR 不触发"""
+        bars = self._sc_then_rally_bars(rally_close=104, rally_vol=11)
         result = wyckoff_analysis(bars)
         assert result["ar_signal"] is False
 
@@ -738,18 +779,25 @@ class TestWyckoffScoreWithClassicSignals:
         assert result["score"] > 50  # Spring=+25 → 50+25*50//130=59，仍看多（P1-2 分母130调整）
 
     def test_ar_adds_10(self):
-        """AR 信号贡献 +10。BC=-15 + AR=+10 + 派发阶段修正=-2 → raw=-7。"""
+        """AR 信号贡献 +10（⑥B：挂在 SC 后）。SC=+10 + AR=+10 + 积累阶段修正=+2 → raw=22。"""
         from trader_shared.wyckoff_core import calculate_wyckoff_score
-        # BC bar: vol_ratio=1000/10=100>>1.8, change=0.5%<1%
-        bars = [_make_bar(100, 105, 95, 102, 10) for _ in range(16)]
-        bars.append(_make_bar(101, 105, 100, 100.5, 1000))  # BC at bar 17
-        # 阴线缓冲：避免最后5根4/5阳线触发 SOS
-        bars.append(_make_bar(100, 101, 99, 99.5, 100))
-        # AR bar: close=103 > 100.5*1.02=102.51, vol=300 > 10*1.2=12
-        bars.append(_make_bar(101, 103, 101, 103, 300))  # AR trigger
-        result = calculate_wyckoff_score(bars)
-        # BC-15 + AR+10 + phase(distribution_a BC+AR) delta=-0.10 → -2
-        assert result["raw"] == -7, f"Expected raw=-7 (BC-15+AR+10+阶段-2), got {result['raw']}"
+        bars = [_make_bar(100, 105, 95, 102, 10) for _ in range(20)]
+        analysis = {
+            "spring_signal": False, "upthrust_signal": False,
+            "bc_signal": False, "sc_signal": True, "sow_signal": False,
+            "ar_signal": True, "sos_signal": False, "st_signal": False,
+            "lps_signal": False, "lpsy_signal": False,
+            "compression_signal": False, "trend_pullback_signal": False,
+            "bearish_volume_divergence": False, "bullish_volume_divergence": False,
+            "effort_no_result": False, "no_supply": False,
+            "accumulation_confirmed": False, "distribution_confirmed": False,
+            "phase_confidence_delta": 0.10,  # accumulation_a SC+AR
+            "spring_premature": False, "upthrust_premature": False,
+            "tr_quality": None,
+        }
+        result = calculate_wyckoff_score(bars, analysis=analysis)
+        assert result["raw"] == 22, f"Expected raw=22 (SC+10+AR+10+阶段+2), got {result['raw']}"
+        assert any("AR" in s for s in result["signals"])
         assert any("阶段修正" in s for s in result["signals"])
 
     def test_sos_adds_15(self):
@@ -953,6 +1001,9 @@ class TestDetectPhaseSemantics:
             "phase_label": "积累期 C（测试：Spring）",
             "phase_confidence_delta": 0.10,
             "spring_premature": False,
+            # 固定 ordinary，避免缩量 weak 降权干扰「阶段修正」断言
+            "spring_strength": "ordinary",
+            "spring_vol_class": "normal",
         }
         result = calculate_wyckoff_score(bars, analysis=override)
         # Spring +25 + 阶段修正 +2 = 27
@@ -977,6 +1028,8 @@ class TestHighVolSpringDeweight:
         analysis = self._spring_analysis(bars)
         assert analysis["spring_signal"] is False, "高量 Spring 应被过滤"
         assert "真破位" in analysis.get("spring_reason", "")
+        assert analysis.get("spring_vol_class") == "high_vol_warning"
+        assert analysis.get("spring_strength") == "failure"
 
     def test_high_vol_spring_no_score(self):
         """高量 Spring 被过滤后，即使有看多背离也不计分"""

@@ -370,7 +370,7 @@ class TestDetectBuyPoints:
         assert "类二买" in types
 
     def test_buy_point_2_no_trend_still_fire(self):
-        """无下跌趋势中枢 → 二类买仍可独立触发（结构满足即可）。"""
+        """无下跌趋势中枢 → 不得出正式二类买；结构+力度可降级类二买（买侧放宽）。"""
         strokes = [
             {"direction": "down", "end_price": 8.0},
             {"direction": "up", "end_price": 11.0},
@@ -378,8 +378,25 @@ class TestDetectBuyPoints:
         ]
         result = detect_buy_points(strokes, [], 10.0, macd_divergence_ok=True)
         types = [bp["type"] for bp in result]
-        # 二类买或类二买应触发（low_b=10 > low_a=8, 且 up_high=11）
-        assert "二类买" in types or "类二买" in types
+        assert "二类买" not in types
+        assert "类二买" in types
+
+    def test_buy_point_2_requires_historical_type1(self):
+        """有趋势中枢但历史一类不成立（离开段未创新低）→ 仅类二买。"""
+        # down_a=10 未低于更早 down=9 → _historical_type1_buy_ok 失败
+        strokes = [
+            {"direction": "down", "end_price": 9.0},
+            {"direction": "up", "end_price": 12.0},
+            {"direction": "down", "end_price": 10.0},
+            {"direction": "up", "end_price": 11.5},
+            {"direction": "down", "end_price": 10.5},
+        ]
+        result = detect_buy_points(
+            strokes, self._down_trend_zones(), 10.5, macd_divergence_ok=True
+        )
+        types = [bp["type"] for bp in result]
+        assert "二类买" not in types
+        assert "类二买" in types
 
     def test_buy_point_3_above_old_narrow_window(self):
         """P1 三类买：close 在中枢上方 3%（旧逻辑 >2% 会拒）+ 回踩 down 不破 zh_top → 有。"""

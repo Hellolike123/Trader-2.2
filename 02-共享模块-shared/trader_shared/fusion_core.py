@@ -465,13 +465,12 @@ def _wyckoff_to_signal(wyckoff_result: dict) -> dict:
             "raw_key": "wyckoff",
         }
 
-    # ── AR: Automatic Rally (BC 后自动反弹) ──
-    # 仅当 BC 未单独占主导时到达此处（BC 已在上方优先）
+    # ── AR: Automatic Rally (SC 后自动反弹；⑥B 不再绑 BC) ──
     if ar:
         return {
             "direction": 1,
             "confidence": 0.6,
-            "reason": f"威科夫 {_reason('ar', '自动反弹')}",
+            "reason": f"威科夫 {_reason('ar', 'SC后自动反弹')}",
             "raw_key": "wyckoff",
         }
 

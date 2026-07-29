@@ -123,6 +123,12 @@ def _bias_from_analysis(wyk: dict[str, Any]) -> Bias:
     if wyk.get("spring_signal") and not wyk.get("spring_premature"):
         if wyk.get("spring_strength") == "failure":
             return "bear"
+        # 弱弹簧/高量警告：事件存在但不抬偏多（与打分降权对齐）
+        if (
+            wyk.get("spring_strength") == "weak"
+            or wyk.get("spring_vol_class") == "high_vol_warning"
+        ):
+            return "neutral"
         return "bull"
     if wyk.get("sos_signal") or wyk.get("bu_signal") or wyk.get("lps_signal"):
         return "bull"
@@ -130,10 +136,11 @@ def _bias_from_analysis(wyk: dict[str, Any]) -> Bias:
         return "bull"
     if wyk.get("spring_premature") or wyk.get("upthrust_premature"):
         return "neutral"
-    phase = str(wyk.get("phase") or "")
-    if phase in ("markup", "accumulation"):
+    phase = str(wyk.get("phase") or "").strip().lower()
+    # 生产枚举为 accumulation_a/b/c/d、distribution_a/c/d、markup/markdown
+    if phase in ("markup", "accumulation") or phase.startswith("accumulation"):
         return "bull"
-    if phase in ("markdown", "distribution"):
+    if phase in ("markdown", "distribution") or phase.startswith("distribution"):
         return "bear"
     return "neutral"
 

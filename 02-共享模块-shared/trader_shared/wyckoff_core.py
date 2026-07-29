@@ -193,7 +193,8 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
             "upthrust_signal": False, "upthrust_reason": "数据不足", "upthrust_price": None,
             "bc_signal": False, "bc_reason": "数据不足", "bc_price": None,
             "sc_signal": False, "sc_reason": "数据不足", "sc_price": None,
-            "sow_signal": False, "sow_reason": "数据不足", "sow_price": None,
+            "sow_signal": False, "sow_intraday_warn": False,
+            "sow_reason": "数据不足", "sow_price": None,
             "bearish_volume_divergence": False, "bullish_volume_divergence": False,
             # 新增信号
             "ar_signal": False, "ar_reason": "数据不足", "ar_price": None,
@@ -320,6 +321,8 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         parts.append(f"卖力高潮: {sc['sc_reason']}")
     if sow["sow_signal"]:
         parts.append(f"弱势信号: {sow['sow_reason']}")
+    elif sow.get("sow_intraday_warn"):
+        parts.append(f"弱势警告(不计分): {sow['sow_reason']}")
     if ar["ar_signal"]:
         parts.append(f"自动反弹: {ar['ar_reason']}")
     if sos["sos_signal"]:
@@ -381,8 +384,13 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "bc_reason": bc["bc_reason"],
         "bc_price": round(bc["bc_price"], 2) if bc["bc_signal"] else None,
         "sow_signal": sow["sow_signal"],
+        "sow_intraday_warn": bool(sow.get("sow_intraday_warn")),
         "sow_reason": sow["sow_reason"],
-        "sow_price": round(sow["sow_price"], 2) if sow["sow_signal"] else None,
+        "sow_price": (
+            round(sow["sow_price"], 2)
+            if (sow["sow_signal"] or sow.get("sow_intraday_warn")) and sow.get("sow_price")
+            else None
+        ),
         "sc_signal": sc["sc_signal"],
         "sc_reason": sc["sc_reason"],
         "sc_price": round(sc["sc_price"], 2) if sc["sc_signal"] else None,
@@ -421,8 +429,10 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "cause_effect_down_target": ce.get("cause_effect_down_target"),
         "cause_effect_range": ce.get("cause_effect_range"),
         "cause_effect_note": ce.get("cause_effect_note"),
-        # P0-1: 弹簧量能分级
-        "spring_vol_class": spring.get("spring_vol_class", "normal") if spring["spring_signal"] else None,
+        # P0-1: 弹簧量能分级（signal=False 时仍透传 high_vol_warning 等审计字段）
+        "spring_vol_class": spring.get("spring_vol_class")
+        if spring.get("spring_vol_class") is not None
+        else ("normal" if spring["spring_signal"] else None),
         # P1-1: 阶段状态机
         "phase": phase["phase"],
         "phase_label": phase["phase_label"],
@@ -550,24 +560,33 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
     lps_on = analysis.get("lps_signal") and "lps_signal" not in suppress
     lpsy_on = analysis.get("lpsy_signal") and "lpsy_signal" not in suppress
 
-    # 1. Spring — 最强看多信号；孤立/过早 Spring（缺 Phase B 背景）降权为噪声，分数减半
+    # 1. Spring — 最强看多信号；孤立/过早、高量警告、弱弹簧（缩量无承接）均降权减半
+    spring_strength = analysis.get("spring_strength")
+    spring_deweight = bool(
+        analysis.get("spring_premature")
+        or spring_vol_class == "high_vol_warning"
+        or spring_strength == "weak"
+    )
     if spring:
         spring_pts = WYCKOFF_SCORE_SPRING
         if analysis.get("spring_premature"):
             spring_pts = spring_pts // 2
             signals.append(f"Spring(孤立/过早,降权) +{spring_pts}")
         elif spring_vol_class == "high_vol_warning":
-            spring_pts = spring_pts // 2  # 高量 Spring 分数减半
+            spring_pts = spring_pts // 2  # 高量 Spring 分数减半（注入 analysis 时）
             signals.append(f"Spring(高量降权) +{spring_pts}")
+        elif spring_strength == "weak":
+            spring_pts = spring_pts // 2
+            signals.append(f"Spring(弱/缩量无承接,降权) +{spring_pts}")
         else:
             signals.append(f"Spring +{spring_pts}")
         raw += spring_pts
 
-    # 2. Spring + 看多背离额外加分；孤立/过早 Spring 与高量 Spring 同步降权
+    # 2. Spring + 看多背离额外加分；与 Spring 本体同步降权
     if spring and bullish_div:
         bonus = WYCKOFF_SCORE_SPRING_BULLISH_DIV_BONUS
-        if analysis.get("spring_premature") or spring_vol_class == "high_vol_warning":
-            bonus = bonus // 2  # 孤立/高量时背离加成减半（0 当 1 时 floor 为 0）
+        if spring_deweight:
+            bonus = bonus // 2  # 孤立/高量/弱弹簧时背离加成减半（0 当 1 时 floor 为 0）
             if bonus > 0:
                 signals.append(f"Spring×看多背离(降权) +{bonus}")
             else:
@@ -608,7 +627,7 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
 
     # ── 新增经典信号 ──
 
-    # 8. AR (Automatic Rally) — BC 后自动反弹
+    # 8. AR (Automatic Rally) — SC 后自动反弹（⑥B）
     if analysis.get("ar_signal"):
         raw += WYCKOFF_SCORE_AR
         signals.append(f"AR 反弹 +{WYCKOFF_SCORE_AR}")
@@ -851,8 +870,10 @@ def resolve_wyckoff_primary(
         code, cn, main, note, d = "BC", "买力高潮", "高位放量滞涨", "购买高潮迹象，注意见好就收", -1
     elif wyk.get("sow_signal"):
         code, cn, main, note, d = "SOW", "弱势下跌", "放量跌破支撑", "弱势确认，防守优先", -1
+    elif wyk.get("sow_intraday_warn"):
+        code, cn, main, note, d = "SOWw", "弱势警告", "日内刺穿支撑后收回", "仅警告，未收盘确认，不计分", 0
     elif wyk.get("ar_signal"):
-        code, cn, main, note, d = "AR", "自动反弹", "高潮后快速反弹", "仅反弹，还不能当反转", 1
+        code, cn, main, note, d = "AR", "自动反弹", "SC后快速反弹", "仅反弹，还不能当反转", 1
     elif wyk.get("sc_signal"):
         code, cn, main, note, d = "SC", "卖力高潮", "天量宽幅下跌", "卖力高潮，抛压宣泄后可能止跌", 1
     elif wyk.get("st_signal"):

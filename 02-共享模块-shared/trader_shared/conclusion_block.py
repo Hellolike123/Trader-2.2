@@ -260,8 +260,13 @@ def wyckoff_midline_bias(wyckoff_midline: Any, major_stage: str = "") -> str:
         or w.get("bc_signal")
         or w.get("sow_signal")
     )
-    # 孤立/过早 Spring 不抬多；SOS 仍有效
-    _spring_bull = bool(w.get("spring_signal")) and not w.get("spring_premature")
+    # 孤立/过早/弱弹簧/高量警告不抬 strong_bull；SOS 仍有效
+    _spring_bull = (
+        bool(w.get("spring_signal"))
+        and not w.get("spring_premature")
+        and w.get("spring_strength") != "weak"
+        and w.get("spring_vol_class") != "high_vol_warning"
+    )
     strong_bull = bool(_spring_bull or w.get("sos_signal"))
     # 多信号：strong_bear 优先
     if strong_bear:

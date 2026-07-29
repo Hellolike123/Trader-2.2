@@ -267,15 +267,17 @@ def build_entry_checklist(
         pb_ok = None  # 无回踩数据：不算绿
 
     types = buy_point_types or []
+    # C1「买点信号」只认正式档；类二买为买侧放宽试探，不点绿清单
     short_trigger = any(
         any(
             k in t
             for k in (
-                "一类买", "类一买", "二类买", "三类买", "类二买",
+                "一类买", "类一买", "二类买", "三类买",
                 "一买", "二买", "三买",
             )
         )
         for t in types
+        if "类二买" not in t
     )
 
     curr_val = float(current_price) if current_price is not None else 0.0
@@ -375,7 +377,10 @@ def _buy_point_cap(
         return None, None
     joined = " ".join(buy_types)
     has1 = any("一类" in t for t in buy_types) or "一类" in joined
-    has2 = any("二类" in t for t in buy_types) or "二类" in joined
+    # 正式二类买才进 buy2 阶梯；「类二买」含子串「二类」但属放宽档，不套买二仓位帽
+    has2 = any(t in ("二类买", "二买") for t in buy_types) or (
+        "二类买" in joined and "类二买" not in joined
+    )
     has3 = any("三类" in t for t in buy_types) or "三类" in joined
     if has1:
         return _BUY1_CAP, "buy1_cap"

@@ -68,6 +68,18 @@ class TestMidlineTheoryDirs:
         }
         assert wyckoff_midline_bias(w) == "neutral"
 
+    def test_wyck_weak_spring_not_strong_bull(self):
+        w = {
+            "spring_signal": True,
+            "spring_strength": "weak",
+            "spring_vol_class": "low_vol_confirm",
+            "sos_signal": False,
+            "upthrust_signal": False,
+            "bc_signal": False,
+            "sow_signal": False,
+        }
+        assert wyckoff_midline_bias(w) == "neutral"
+
     def test_wyck_insufficient_neutral(self):
         w = {"timeframe": "insufficient", "spring_signal": True, "sos_signal": True}
         assert wyckoff_midline_bias(w) == "neutral"
