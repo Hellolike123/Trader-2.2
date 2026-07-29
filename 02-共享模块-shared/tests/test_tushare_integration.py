@@ -27,8 +27,17 @@ def _reset_client():
 
 @pytest.fixture()
 def _no_token(monkeypatch):
-    """Ensure TUSHARE_TOKEN is not set."""
+    """Ensure no token from env / local file / config."""
     monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "trader_shared.tushare_client._load_local_tushare_token",
+        lambda: "",
+    )
+    monkeypatch.setattr(
+        "trader_shared.tushare_config.TUSHARE_TOKEN",
+        "",
+        raising=False,
+    )
 
 
 @pytest.fixture()
@@ -76,6 +85,9 @@ class TestTushareClientWithSDK:
     def _make_client_with_mock_sdk(self, monkeypatch, mock_pro):
         """Helper: create a TushareClient with a mocked tushare SDK."""
         monkeypatch.setenv("TUSHARE_TOKEN", "fake-token")
+        monkeypatch.setattr(
+            "trader_shared.tushare_client._probe_reachable", lambda *a, **k: True
+        )
         mock_ts = MagicMock()
         mock_ts.pro_api.return_value = mock_pro
         # patch the import so `import tushare as ts` returns our mock
@@ -83,7 +95,9 @@ class TestTushareClientWithSDK:
         monkeypatch.setitem(sys.modules, "tushare.stock", MagicMock())
         monkeypatch.setitem(sys.modules, "tushare.stock.cons", MagicMock())
 
-        from trader_shared.tushare_client import TushareClient
+        from trader_shared.tushare_client import TushareClient, reset_client
+
+        reset_client()
         return TushareClient()
 
     def test_query_daily(self, monkeypatch):
@@ -152,13 +166,31 @@ class TestTushareClientWithSDK:
         mock_pro.concept.assert_called_once()
 
     def test_query_returns_empty_on_sdk_exception(self, monkeypatch):
-        """When SDK throws, query should catch and return []."""
+        """SDK 抛错后降 HTTP；HTTP 也失败则 []."""
         mock_pro = MagicMock()
         mock_pro.daily.side_effect = RuntimeError("API limit exceeded")
 
         client = self._make_client_with_mock_sdk(monkeypatch, mock_pro)
+        client._http_ok = False  # 禁止再打真实 HTTP
         result = client.query("daily", ts_code="000001.SZ")
         assert result == []
+
+    def test_query_falls_back_http_when_sdk_empty(self, monkeypatch):
+        """SDK 空表时应降 HTTP，而不是直接返回 []."""
+        mock_pro = MagicMock()
+        empty_df = MagicMock()
+        empty_df.__len__ = MagicMock(return_value=0)
+        mock_pro.daily.return_value = empty_df
+
+        client = self._make_client_with_mock_sdk(monkeypatch, mock_pro)
+        monkeypatch.setattr(
+            client,
+            "_query_http",
+            lambda api_name, **params: [{"ts_code": "000001.SZ", "close": 11.46}],
+        )
+        result = client.query("daily", ts_code="000001.SZ")
+        assert len(result) == 1
+        assert result[0]["close"] == 11.46
 
     def test_query_realtime(self, monkeypatch):
         """query_realtime should call tushare.realtime_quote()."""
@@ -172,11 +204,15 @@ class TestTushareClientWithSDK:
         mock_ts.pro_api.return_value = MagicMock()
         mock_ts.realtime_quote.return_value = mock_df
         monkeypatch.setenv("TUSHARE_TOKEN", "fake-token")
+        monkeypatch.setattr(
+            "trader_shared.tushare_client._probe_reachable", lambda *a, **k: True
+        )
         monkeypatch.setitem(sys.modules, "tushare", mock_ts)
         monkeypatch.setitem(sys.modules, "tushare.stock", MagicMock())
         monkeypatch.setitem(sys.modules, "tushare.stock.cons", MagicMock())
 
-        from trader_shared.tushare_client import TushareClient
+        from trader_shared.tushare_client import TushareClient, reset_client
+        reset_client()
         client = TushareClient()
         result = client.query_realtime("000001.SZ")
         assert len(result) == 1

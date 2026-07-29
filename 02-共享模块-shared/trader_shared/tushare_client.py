@@ -220,21 +220,18 @@ class TushareClient:
         if not self.available:
             return []
 
-        # SDK 优先
+        # SDK 优先；空结果 / 失败再降 HTTP（stockai888 代理偶发 SDK 空表）
         if self._sdk_ok and self._pro is not None:
             try:
                 self._rate_limit()
                 func = getattr(self._pro, api_name, None)
-                if func is None:
-                    warnings.warn(f"[tushare] SDK 无此接口: {api_name}")
-                    return []
-                df = func(**params)
-                if df is not None and len(df) > 0:
-                    return df.to_dict(orient="records")
-                return []
+                if func is not None:
+                    df = func(**params)
+                    if df is not None and len(df) > 0:
+                        return df.to_dict(orient="records")
+                # 空表或无此接口 → 继续 HTTP，勿直接 []
             except Exception as e:
                 warnings.warn(f"[tushare] SDK {api_name} 失败，尝试 HTTP: {e}")
-                # 降级到 HTTP
 
         # HTTP 降级
         return self._query_http(api_name, **params)
@@ -275,8 +272,12 @@ class TushareClient:
     def query_daily(
         self, ts_code: str, start_date: str = "", end_date: str = ""
     ) -> list[dict[str, Any]]:
-        """日线行情。ts_code 格式如 '688248.SH'。"""
-        params: dict[str, Any] = {"ts_code": ts_code, "adj": "qfq"}
+        """日线行情。ts_code 格式如 '688248.SH'。
+
+        注意：stockai888 代理的 ``daily`` 不接受 ``adj``；带 adj 会空结果。
+        复权请走单独接口 / 下游字段，勿在此塞 adj。
+        """
+        params: dict[str, Any] = {"ts_code": ts_code}
         if start_date:
             params["start_date"] = start_date
         if end_date:
