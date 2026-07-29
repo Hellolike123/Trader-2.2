@@ -3,6 +3,8 @@
 ## 我是谁
 盘后复盘 + 仓位轮动 + 信号追踪。五层打分（结构/量价/筹码/动能）、大单回溯、明日策略。
 
+快路径：只读 `references/agent-quickstart.md` → 跑脚本 → 原样贴出 → 停。禁止预读全部 references；禁止默认 JSON。
+
 ## 命令入口
 
 | 需求 | 命令 |
@@ -118,21 +120,18 @@ python3 01-功能包-packages/review/scripts/final_review.py --target <NAME>
 □ 没有列表（*/-）
 □ 首行格式：`盘后复盘 — {名称}（{代码}）`
 
-## Installed Skill References（Agent 必读）
+## 快路径与按需 references
 
-项目 `references/` 目录下的文件是 **绝对真理**：
+首次使用只读 `references/agent-quickstart.md`。跑脚本拿渲染输出，原样贴出后停。
 
-| 文件 | 用途 |
-|------|------|
-| `references/review_output-contract.md` | 复盘输出结构契约（单票 + 多票） |
-| `references/portfolio_output-contract.md` | 仓位轮动输出契约 |
-| `references/tracking_output-contract.md` | 信号追踪输出契约 |
-| `references/ai-guide.md` | JSON 字段详细说明 |
-| `references/commands.md` | 所有命令示例 |
-| `references/portfolio_commands.md` | 仓位轮动命令 |
-| `references/tracking_commands.md` | 信号追踪命令 |
+| 文件 | 何时读 |
+|------|--------|
+| `agent-quickstart.md` | 首次使用 |
+| `review_output-contract.md` 等契约 | 校验或改输出格式时 |
+| `ai-guide.md` | 需要 JSON 字段时 |
+| `commands.md` / `portfolio_commands.md` / `tracking_commands.md` | 需要命令细节时 |
 
-**使用前必须先 read 以上文件，禁止凭记忆生成报告。**
+`references/` 仍是契约真理；**按需 read，禁止开工前批量读完。**
 
 ## Exit Criterion
 

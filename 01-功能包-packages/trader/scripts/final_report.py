@@ -24,6 +24,13 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    # 单票保持区间套默认开启（30m×800 确认日线买点）；要省时再 TRADER_CHAN_NESTING=0
+    try:
+        from trader_shared.tushare_client import bypass_http_proxy_for_market
+
+        bypass_http_proxy_for_market()
+    except Exception:
+        pass
     # DI: 创建 TencentFetcher 实例供下游使用
     fetcher = TencentFetcher()
     try:

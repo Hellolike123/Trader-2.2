@@ -292,25 +292,61 @@ def _get_tdx3_client() -> TdxHq_API | None:
     return None
 
 
+_TDX3_HARD_TIMEOUT_S = 2.0
+
+
+def _run_with_hard_timeout(func, timeout_s: float, *args, **kwargs) -> Any:
+    """Run ``func`` in a daemon thread; raise ``TimeoutError`` if over ``timeout_s``.
+
+    Daemon threads will not block process exit if abandoned after timeout.
+    """
+    box: dict[str, Any] = {}
+    done = threading.Event()
+
+    def _call() -> None:
+        try:
+            box["result"] = func(*args, **kwargs)
+        except BaseException as exc:  # noqa: BLE001 — surface to caller thread
+            box["error"] = exc
+        finally:
+            done.set()
+
+    threading.Thread(target=_call, name="hard-timeout-worker", daemon=True).start()
+    if not done.wait(timeout=timeout_s):
+        raise TimeoutError(f"hard-timeout after {timeout_s:.1f}s")
+    if "error" in box:
+        raise box["error"]
+    return box.get("result")
+
+
 def run_tdx3_with_timeout(func, *args, **kwargs) -> Any:
-    """Execute a pytdx3 API call with socket timeout and auto-reconnection on failure."""
+    """Execute a pytdx3 API call with a hard wall-clock timeout (default 2.0s).
+
+    socket.setdefaulttimeout alone cannot abort hung pytdx reads; we run the
+    call in a worker and abandon it after the deadline so callers can fallback.
+    """
     global _TDX3_CLIENT
     api = _get_tdx3_client()
     if api is None:
         return None
-        
-    orig_timeout = socket.getdefaulttimeout()
-    socket.setdefaulttimeout(2.0)
+
+    def _call():
+        orig_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(_TDX3_HARD_TIMEOUT_S)
+        try:
+            return func(api, *args, **kwargs)
+        finally:
+            socket.setdefaulttimeout(orig_timeout)
+
     try:
-        start_time = time.time()
-        res = func(api, *args, **kwargs)
-        duration = time.time() - start_time
-        if duration > 2.0:
-            warnings.warn(f"⚠️ pytdx3 call exceeded execution time limit of 2.0s (took {duration:.2f}s)")
-            _TDX3_CLIENT = None
-            return None
-        return res
-    except (socket.timeout, TimeoutError) as exc:
+        return _run_with_hard_timeout(_call, _TDX3_HARD_TIMEOUT_S)
+    except TimeoutError:
+        _TDX3_CLIENT = None
+        warnings.warn(
+            f"⚠️ pytdx3 call hard-timeout after {_TDX3_HARD_TIMEOUT_S:.1f}s; abandoning worker"
+        )
+        return None
+    except (socket.timeout,) as exc:
         warnings.warn(f"⚠️ pytdx3 call timed out: {exc}")
         _TDX3_CLIENT = None
         return None
@@ -318,8 +354,6 @@ def run_tdx3_with_timeout(func, *args, **kwargs) -> Any:
         warnings.warn(f"⚠️ pytdx3 call failed: {exc}")
         _TDX3_CLIENT = None
         return None
-    finally:
-        socket.setdefaulttimeout(orig_timeout)
 
 
 def _fetch_qfq_tdx3(sec: Security, days: int = 300) -> list[dict[str, Any]] | None:
@@ -498,8 +532,26 @@ class MarketDataSourceController:
                     f"consecutive failures. Isolated for {self.cooldown_seconds} seconds."
                 )
 
+    def report_hard_timeout(self) -> None:
+        """Hard wall-clock timeout: isolate immediately so callers fallback in seconds."""
+        with self._lock:
+            self.total_calls += 1
+            self.total_failures += 1
+            self.consecutive_failures = self.max_failures
+            self.last_failure_time = time.time()
+            self.healthy = False
+            self.cool_down_until = time.time() + self.cooldown_seconds
+            warnings.warn(
+                f"⚠️ mootdx client marked as UNHEALTHY after hard timeout. "
+                f"Isolated for {self.cooldown_seconds} seconds."
+            )
+
 
 _DATA_SOURCE_CONTROLLER = MarketDataSourceController()
+
+# Wall-clock hard timeout for mootdx. socket.setdefaulttimeout alone does NOT
+# abort hung pytdx/mootdx reads (observed ~38s despite "1.5s limit").
+_MOOTDX_HARD_TIMEOUT_S = 1.5
 
 
 class _CircuitBreaker:
@@ -547,26 +599,35 @@ _circuit_tencent_daily = _CircuitBreaker(threshold=5, cooldown_seconds=60.0)
 
 
 def run_mootdx_with_timeout(func, *args, **kwargs) -> Any:
-    """Execute a mootdx connection or call with a strict 1.5-second socket timeout."""
+    """Execute a mootdx call with a hard wall-clock timeout (default 1.5s).
+
+    Runs the call in a daemon worker so a hung TCP read cannot block the caller
+    for tens of seconds. On hard timeout the client is discarded and the source
+    controller isolates immediately for cooldown.
+    """
     global _MOOTDX_CLIENT
     if not _DATA_SOURCE_CONTROLLER.is_healthy():
         return None
 
-    orig_timeout = socket.getdefaulttimeout()
-    socket.setdefaulttimeout(1.5)
+    def _call():
+        orig_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(_MOOTDX_HARD_TIMEOUT_S)
+        try:
+            return func(*args, **kwargs)
+        finally:
+            socket.setdefaulttimeout(orig_timeout)
+
     try:
-        start_time = time.time()
-        res = func(*args, **kwargs)
-        duration = time.time() - start_time
-        if duration > 1.5:
-            # Enforce strict 1.5s execution limit even if socket doesn't raise timeout
-            _MOOTDX_CLIENT = None
-            _DATA_SOURCE_CONTROLLER.report_failure()
-            warnings.warn(f"⚠️ mootdx call exceeded execution time limit of 1.5s (took {duration:.2f}s)")
-            return None
-        _DATA_SOURCE_CONTROLLER.report_success()
-        return res
-    except (socket.timeout, TimeoutError) as exc:
+        res = _run_with_hard_timeout(_call, _MOOTDX_HARD_TIMEOUT_S)
+    except TimeoutError:
+        _MOOTDX_CLIENT = None
+        _DATA_SOURCE_CONTROLLER.report_hard_timeout()
+        warnings.warn(
+            f"⚠️ mootdx call hard-timeout after {_MOOTDX_HARD_TIMEOUT_S:.1f}s; "
+            "abandoning worker and falling back"
+        )
+        return None
+    except (socket.timeout,) as exc:
         _MOOTDX_CLIENT = None
         _DATA_SOURCE_CONTROLLER.report_failure()
         warnings.warn(f"⚠️ mootdx call timed out: {exc}")
@@ -576,8 +637,9 @@ def run_mootdx_with_timeout(func, *args, **kwargs) -> Any:
         _DATA_SOURCE_CONTROLLER.report_failure()
         warnings.warn(f"⚠️ mootdx call failed with exception: {exc}")
         return None
-    finally:
-        socket.setdefaulttimeout(orig_timeout)
+
+    _DATA_SOURCE_CONTROLLER.report_success()
+    return res
 
 
 def _get_mootdx_client() -> Quotes | None:

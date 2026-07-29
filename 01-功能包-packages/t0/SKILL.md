@@ -5,6 +5,8 @@
 **不做**机械信号下单指令；评分与灯色仅供参考。有持仓时可展示降本纪律与台账。  
 法源：`docs/t0-strategy-v2.md`。
 
+快路径：只读 `references/agent-quickstart.md` → 跑脚本 → 原样贴出 → 停。禁止预读全部 references；禁止默认 JSON。
+
 ## 首次使用引导
 
 **当用户第一次调用 T0 功能时**，检查 `~/.trader/position.json` 是否存在。
@@ -125,18 +127,18 @@ python3 01-功能包-packages/t0/scripts/final_t0.py --target <NAME>
 - "要不要卖" → 卖哪只？什么价位触发了？
 - 首次调用且无 position.json → 引导填写持仓信息
 
-## Installed Skill References（Agent 必读）
+## 快路径与按需 references
 
-项目 `references/` 目录下的文件是 **绝对真理**：
+首次使用只读 `references/agent-quickstart.md`。跑脚本拿渲染输出，原样贴出后停。
 
-| 文件 | 用途 |
-|------|------|
-| `references/output-template.md` | T0 输出结构契约（盯盘面板格式） |
-| `references/output-style-guide.md` | 格式规则 + Old Output Detection（过时格式检测） |
-| `references/ai-guide.md` | JSON 字段详细说明 |
-| `references/commands.md` | 所有命令示例 |
+| 文件 | 何时读 |
+|------|--------|
+| `agent-quickstart.md` | 首次使用 |
+| `output-template.md` / `output-style-guide.md` | 校验或怀疑格式不对 |
+| `ai-guide.md` | 需要 JSON 字段时 |
+| `commands.md` | 需要完整命令表 |
 
-**使用前必须先 read 以上文件，禁止凭记忆生成报告。**
+`references/` 仍是契约真理；**按需 read，禁止开工前批量读完。**
 
 ## Exit Criterion
 

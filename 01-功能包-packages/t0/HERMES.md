@@ -1,17 +1,18 @@
 # t0
 
-盘中盯盘 + T0 执行卡。
+盘中盯盘 + T0 结构参考卡。
 
 ## ⚠️ 输出规则（最高优先级）
 
-双模式输出：
-- 给人看时：脚本输出即最终格式，不要修改（保持原样）
-- 给 AI 用时：读 JSON 输出，基于数据做解读和建议
-- 解读时每个建议必须引用 JSON 中的具体字段
-- 禁止从 Markdown 输出解析数据做判断
+1. **默认**：跑脚本渲染输出，stdout **原样输出**，不要改写
+2. **禁止默认 `--output json`**；仅需要额外字段时才用 JSON
+3. 产品定位为人读结构仪表盘，禁止「可执行/可低吸/三重共振买」指令叙事
+4. 微信格式红线：无 `#`、无 `**`、无 `|` 表格、无 `---`、无 `*/-` 列表
 
 ## 入口脚本
 
-- `scripts/t0_run.py --target <股票名> --once --output json` — 单次检查（AI 消费）
-- `scripts/t0_run.py --target <股票名> --once` — 单次检查（给人看）
-- `scripts/t0_run.py --target <股票名> --monitor` — 持续监控
+- `scripts/final_t0.py --target <股票名>` — 单次结构卡（默认）
+- `scripts/final_t0.py --target <股票名> --monitor --once` — 盯盘单次
+- `scripts/final_t0.py --target <股票名> --monitor` — 持续监控
+
+Agent 编排见 `references/agent-quickstart.md`。

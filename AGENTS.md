@@ -7,6 +7,7 @@
 - **Fusion 默认 cards（Arch C）**：`FUSION_FROM_CARDS` **缺省 = cards**（意见卡三席）；`classic` 强制原路径；`compare` 双轨对账。详见 `BUSINESS.md` §2.7。产品方向上 fusion 分将降为仪表，见共振法源文档。
 - **门禁只跑离线子集**：`scripts/run-gate-tests.sh`（含 cards/strategy parity）；**禁止**把全量 pytest 历史红项硬塞进门禁。说明：`docs/architecture/ci-gate.md`。
 - **技能整合**：6 个技能合并为 3 个——`trader`（单票分析 + 选股池）、`t0`（盘中盯盘）、`review`（盘后复盘 + 仓位轮动 + 信号追踪）。
+- **Agent 快路径（防反馈慢）**：各 skill 只预读 `references/agent-quickstart.md`；默认 `--output markdown` 原样贴出，**禁止**开工前批量读 references、**禁止**默认 `--output json`。契约细节按需再读。`final_report`/`final_pool` 入口会 `bypass_http_proxy_for_market()`，Tushare 用包内 `tushare_config.py`，Agent 不必再配 token/代理。
 - **中短线双轨报告（默认）**：`report_core.render_short_midline` —— 标题带 `｜短中线`；分区 meta → 🧭 中线 → ⚡ 短线 → 说明/亮点风险 → T0/池。旧 `🎯`+`📍 决策` 模板仅 `SHORT_MIDLINE_REPORT=false` 回退。
 - **中线关键价独立引擎**：`mid_key_prices.py` 基于周线笔/段/中枢（生命线/回踩区/压力/目标），禁止用日线 `key_levels` 冒充中线成功路径。
 - **纪律层只收紧**：`mistery_gate`（通用闸）+ `chan_discipline`（缠/回踩/买点阶梯）→ `merge_discipline` 取更严；只裁出手/仓位，**不改** major_stage / fusion 分 / support / stop。报告只写出手/失效/新开/分仓，禁止 mi姐/Mistery 人设。
@@ -22,7 +23,7 @@
 - **仓位轮动跟着阶段走**：根据四阶段定位动态调整仓位分配策略，不再单纯依赖评分排序。
 - **单票分析双层状态模型**：`base_status` 负责结构位置层，`theory_status` 负责理论结论层；`state_label` 仅作兼容/展示摘要。
 - **信号唯一性契约 (Signal Contract v2)**：基于 SHA256 deterministic hash 的 16 位 Hex 强一致 UUID (`normalize_signal_id`)，严格规避任何时区/数据抖动造成的重复结算。
-- **双源热备行情 HA**：`MarketDataSourceController` 接管行情数据通道，mootdx 发生 1.5 秒硬超时或连续 3 次失败时，秒级自动 fallback 至 Tencent HTTP / Sina API，以 `data_status="partial"` 标注数据完备度。
+- **双源热备行情 HA**：`MarketDataSourceController` 接管行情数据通道；mootdx/pytdx 用 **daemon 线程墙钟硬超时**（1.5s / 2.0s，非仅 `setdefaulttimeout`——后者挡不住卡住的读）。硬超时立即隔离；或连续 3 次失败后冷却。调用方秒级 fallback 至 Tencent HTTP / Sina，`data_status="partial"`。
 - **智能决策融合层 (Decision Fusion Core)**：通过 Scenario Priority Filter 动态分配结构与动量权重（极值区 80% 权重偏斜），且基于 Belief Priority 冲突消解机制过滤动量噪音。
 - **大势参数自适应 (Regime Multipliers)**：根据 `market_env` 大盘牛熊环境因子动态缩放 `zone_width` / `confirm_buffer` / `stop_buffer`。
 - **HMM 大势状态检测器**：`hmm_regime.py` 基于纯 numpy Baum-Welch + Viterbi。已深度整合进 `market_env.py` 及下游 `fusion_core.py` / `structure_core.py`。大势判定从纯均线驱动升级为「均线 + HMM 前瞻」双效驱动（高置信度 HMM 状态会自动前瞻修正 `level`，且 `structure_core` 直接复用避免重复抓包）。
@@ -58,7 +59,7 @@
 - **缠论买卖点契约（2026-07）**：一类须 ≥2 **严格不重叠**同向中枢 + 离开段背驰；二类前置一类为**时间轴历史结构**（非同帧 buy_points）；区间套 `lower_confirmed=False` 时 fusion 降权。权威规则见 `trader_shared/formulas.md` §6。
 - **周线回看 + 波段标签（2026-07-16）**：`WEEKLY_LOOKBACK_BARS=260`（约 5 年周 K），`data_provider` / `light_data` / Tushare 周线默认统一用此根数；旧默认约 80 周在暴涨暴跌票上常只成 0～1 笔。`conclusion_block._build_wave_label`：**仅** `strokes < 3` 写「笔数不足 · 无法判断」；笔够而 `segments < 2` 写「线段偏少 / 线段未成型」+ 笔级 trend 叙事（如「拉升趋势中」），禁止再把「段少」误报成「笔数不足」。
 - **MACD 预热与背驰面积（2026-07-16）**：`indicator_math.calc_macd_series` / `chan_geometry._calc_macd` 预热不足写 `None`（禁止 `0.0` 占位）；`histogram = DIF−DEA`（×1，非通达信 2×）；笔级面积跳过 `None` 与反号柱。见 `formulas.md` §5.1。
-- **性能热路径（2026-07-17）**：`TRADER_PROFILE=1` 分段计时（stderr）；`cmd_refresh` 默认 `TRADER_CHAN_NESTING=0`；主路径 `include_monthly/ticks=False`（月线共振按需补拉）；Supertrend 只算一次并传入 `analyze_all`；fund/env/sector 与插件重叠 submit。插件并行默认关（`TRADER_PLUGIN_PARALLEL=1` 可开）。
+- **性能热路径（2026-07-17）**：`TRADER_PROFILE=1` 分段计时（stderr）；单票 `final_report` **默认开区间套**（30m×800，缠论看清楚）；仅 `cmd_refresh` 批量默认 `TRADER_CHAN_NESTING=0`；主路径 `include_monthly/ticks=False`（月线共振按需补拉）；Supertrend 只算一次并传入 `analyze_all`；fund/env/sector 与插件重叠 submit。插件并行默认关（`TRADER_PLUGIN_PARALLEL=1` 可开）。
 - **日频缓存（2026-07-17）**：筹码 / 资金流 / 大盘 / 板块 / **日 K·周 K**（`get_day_scoped_bars`）均按自然日 `fetch_date`——当天第一次打网，同日再分析读缓存，换日回源。Tushare `load_market_snapshot` 并行拉 quote/日/周/5m（独立小池防 refresh 死锁）。
 - **主力行为五阶段识别 (Main Force)**：`main_force.py` 基于资金流向特征、价格数据和筹码信息，识别主力行为所处阶段（吸筹/试盘/拉升/派发/砸盘）。`main_force_output.py` 负责复盘输出格式化。
 - **规则引擎 (Rule Engine)**：`rule_engine.py` 基于 YAML 配置的决策规则引擎，支持比较运算和布尔表达式。`modifier_rule_engine.py` 基于评分修饰规则对候选人评分进行动态调整。

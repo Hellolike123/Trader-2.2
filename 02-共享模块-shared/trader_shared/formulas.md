@@ -289,7 +289,9 @@ bar 索引 `anchor_bar`（经 `_last_pivot_anchor_bar` 映射），传入 `detec
 - `report_builder`：日线 chanlun 出结果后，按 `TRADER_CHAN_NESTING_LEVELS`（逗号分隔，默认 `"30m"`；
   设 `"30m,5m,1m"` 开启 T0）逐层 `fetch_kline(sec,code,datalen)`（`30m→800 / 5m→1000 / 1m→1200`）
   + `confirm_nested_chain`。受 **`TRADER_CHAN_NESTING`（= `0` 跳过）** 守卫 + 异常降级；某级别
-  取数失败仅该级别 skipped，连累不到其它级别。生产环境本机 eastmoney / tdx 取数。
+  取数失败仅该级别 skipped，连累不到其它级别。单票 `final_report` **默认开启**（30m×800
+  看清区间套）；仅 `final_pool refresh` 批量默认写入 `0` 保吞吐。显式 `TRADER_CHAN_NESTING=0`
+  可关。生产取数走 provider（腾讯 / mootdx 等）。
 - `report_core`：日线缠论行末尾加 `30m✓ 5m✓ 1m✓`（或各级 `✗`）链路标注，**仅确认流程跑过才显示**，
   不改既有格式。
 - 等价性闸门 + 门禁：`lower_series` 为空 / 各级缺失 / 异常时原样返回；门禁设 `TRADER_CHAN_NESTING=0`，

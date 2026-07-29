@@ -31,6 +31,32 @@ _DEFAULT_REALTIME_URL = "https://realtime.stockai888.top"
 _MIN_INTERVAL = 0.6  # 100次/分钟 ≈ 0.6s/请求
 
 
+def bypass_http_proxy_for_market() -> None:
+    """Clear process HTTP(S) proxy so Tushare/腾讯不被系统代理隧道 403。
+
+    Agent / IDE 沙箱常注入 http_proxy；对 stockai888 探测与 POST 会误伤。
+    行情通道一律直连。可用 TRADER_KEEP_HTTP_PROXY=1 保留代理（调试用）。
+    """
+    if os.environ.get("TRADER_KEEP_HTTP_PROXY", "").strip() in ("1", "true", "True", "yes"):
+        return
+    for key in (
+        "http_proxy",
+        "https_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "all_proxy",
+        "ALL_PROXY",
+    ):
+        os.environ.pop(key, None)
+    # 兜底：即便残留代理库读到旧值，也让直连主机走 NO_PROXY
+    for key in ("NO_PROXY", "no_proxy"):
+        cur = os.environ.get(key, "")
+        if "*" in cur:
+            continue
+        extra = "fastapic.stockai888.top,realtime.stockai888.top,.stockai888.top"
+        os.environ[key] = f"{cur},{extra}" if cur else extra
+
+
 def _get_token() -> str:
     # 优先级: 环境变量 > skill 包内 config.json > tushare_config.py > 空
     token = os.environ.get("TUSHARE_TOKEN", "").strip()
@@ -344,6 +370,7 @@ def _no_proxy_star():
 def get_client() -> TushareClient:
     """获取全局 TushareClient 单例。"""
     global _client
+    bypass_http_proxy_for_market()
     if _client is None:
         _client = TushareClient()
     return _client

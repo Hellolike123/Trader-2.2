@@ -2368,6 +2368,13 @@ def _cmd_quick_add(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    try:
+        from trader_shared.tushare_client import bypass_http_proxy_for_market
+
+        bypass_http_proxy_for_market()
+    except Exception:
+        pass
+
     args = parse_args()
     handlers = {
         "analyze": cmd_analyze,

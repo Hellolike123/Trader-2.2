@@ -5,8 +5,41 @@ Tests verify field mapping, date formatting, and fallback behavior.
 """
 from __future__ import annotations
 
-import pandas as pd
+import time
+import warnings
 from unittest.mock import MagicMock, patch
+
+import pandas as pd
+import pytest
+
+from trader_shared import light_data
+
+
+@pytest.fixture(autouse=True)
+def _reset_mootdx_controller():
+    """Isolate health / client globals between tests."""
+    ctrl = light_data._DATA_SOURCE_CONTROLLER
+    saved = (
+        ctrl.healthy,
+        ctrl.consecutive_failures,
+        ctrl.cool_down_until,
+        ctrl.total_calls,
+        ctrl.total_failures,
+        light_data._MOOTDX_CLIENT,
+    )
+    ctrl.healthy = True
+    ctrl.consecutive_failures = 0
+    ctrl.cool_down_until = 0.0
+    light_data._MOOTDX_CLIENT = None
+    yield
+    (
+        ctrl.healthy,
+        ctrl.consecutive_failures,
+        ctrl.cool_down_until,
+        ctrl.total_calls,
+        ctrl.total_failures,
+        light_data._MOOTDX_CLIENT,
+    ) = saved
 
 
 def _make_bars_df(n=3, symbol="600036"):
@@ -29,17 +62,15 @@ def _make_quotes_df(symbol="600036"):
     }])
 
 
-@patch("trader_shared.light_data._get_mootdx_client")
+@patch.object(light_data, "_get_mootdx_client")
 def test_fetch_qfq_mootdx_fields(mock_get_client):
     """Verify mootdx K-line fields are correctly mapped to BarData format."""
     mock_client = MagicMock()
     mock_client.bars.return_value = _make_bars_df()
     mock_get_client.return_value = mock_client
 
-    from light_data import resolve_security, _fetch_qfq_mootdx
-
-    sec = resolve_security("600036")
-    bars = _fetch_qfq_mootdx(sec, days=5)
+    sec = light_data.resolve_security("600036")
+    bars = light_data._fetch_qfq_mootdx(sec, days=5)
 
     assert bars is not None
     assert len(bars) == 3
@@ -56,33 +87,29 @@ def test_fetch_qfq_mootdx_fields(mock_get_client):
     assert bars[-1]["close"] == 37.6
 
 
-@patch("trader_shared.light_data._get_mootdx_client")
+@patch.object(light_data, "_get_mootdx_client")
 def test_fetch_qfq_mootdx_ascending_order(mock_get_client):
     """Verify bars are returned in chronological order (oldest first)."""
     mock_client = MagicMock()
     mock_client.bars.return_value = _make_bars_df()
     mock_get_client.return_value = mock_client
 
-    from light_data import resolve_security, _fetch_qfq_mootdx
-
-    sec = resolve_security("600036")
-    bars = _fetch_qfq_mootdx(sec, days=5)
+    sec = light_data.resolve_security("600036")
+    bars = light_data._fetch_qfq_mootdx(sec, days=5)
 
     dates = [b["date"] for b in bars]
     assert dates == sorted(dates)
 
 
-@patch("trader_shared.light_data._get_mootdx_client")
+@patch.object(light_data, "_get_mootdx_client")
 def test_fetch_quote_mootdx_fields(mock_get_client):
     """Verify mootdx quote fields are correctly mapped to QuoteData format."""
     mock_client = MagicMock()
     mock_client.quotes.return_value = _make_quotes_df()
     mock_get_client.return_value = mock_client
 
-    from light_data import resolve_security, _fetch_quote_mootdx
-
-    sec = resolve_security("600036")
-    q = _fetch_quote_mootdx(sec)
+    sec = light_data.resolve_security("600036")
+    q = light_data._fetch_quote_mootdx(sec)
 
     assert q is not None
     assert q["symbol"] == "600036.SH"
@@ -99,39 +126,34 @@ def test_fetch_quote_mootdx_fields(mock_get_client):
 
 def test_mootdx_import_fallback():
     """Verify light_data handles mootdx import failure gracefully."""
-    from trader_shared.light_data import _check_mootdx
-    result = _check_mootdx()
+    result = light_data._check_mootdx()
     assert isinstance(result, bool)
 
 
-@patch("trader_shared.light_data._get_mootdx_client", return_value=None)
+@patch.object(light_data, "_get_mootdx_client", return_value=None)
 def test_fetch_qfq_mootdx_returns_none_when_unavailable(mock_get_client):
     """When mootdx client unavailable, _fetch_qfq_mootdx returns None."""
-    from light_data import resolve_security, _fetch_qfq_mootdx
-
-    sec = resolve_security("600036")
-    bars = _fetch_qfq_mootdx(sec, days=5)
+    sec = light_data.resolve_security("600036")
+    bars = light_data._fetch_qfq_mootdx(sec, days=5)
 
     assert bars is None
 
 
-@patch("trader_shared.light_data._get_mootdx_client")
+@patch.object(light_data, "_get_mootdx_client")
 def test_fetch_qfq_mootdx_returns_none_on_error(mock_get_client):
     """When mootdx.bars() raises, _fetch_qfq_mootdx returns None."""
     mock_client = MagicMock()
     mock_client.bars.side_effect = Exception("connection error")
     mock_get_client.return_value = mock_client
 
-    from light_data import resolve_security, _fetch_qfq_mootdx
-
-    sec = resolve_security("600036")
-    bars = _fetch_qfq_mootdx(sec, days=5)
+    sec = light_data.resolve_security("600036")
+    bars = light_data._fetch_qfq_mootdx(sec, days=5)
 
     assert bars is None
 
 
-@patch("trader_shared.light_data._fetch_mins_fallback", return_value=None)
-@patch("trader_shared.light_data._get_mootdx_client")
+@patch.object(light_data, "_fetch_mins_fallback", return_value=None)
+@patch.object(light_data, "_get_mootdx_client")
 def test_fetch_5m_from_mootdx(mock_get_client, mock_fallback):
     """fetch_5m should use mootdx 5-minute bars when available."""
     mock_client = MagicMock()
@@ -142,11 +164,9 @@ def test_fetch_5m_from_mootdx(mock_get_client, mock_fallback):
     mock_client.bars.return_value = df_5m
     mock_get_client.return_value = mock_client
 
-    from light_data import resolve_security, fetch_5m, HttpClient
-
-    sec = resolve_security("600036")
-    http = HttpClient()
-    bars = fetch_5m(sec, http, datalen=5)
+    sec = light_data.resolve_security("600036")
+    http = light_data.HttpClient()
+    bars = light_data.fetch_5m(sec, http, datalen=5)
 
     assert len(bars) == 2
     assert bars[0]["open"] == 38.0
@@ -154,14 +174,12 @@ def test_fetch_5m_from_mootdx(mock_get_client, mock_fallback):
     assert bars[0]["volume"] == 50000.0
 
 
-@patch("trader_shared.light_data._get_mootdx_client", return_value=None)
+@patch.object(light_data, "_get_mootdx_client", return_value=None)
 def test_fetch_quote_fast_path_with_tencent(mock_get_client):
     """fetch_quote tries Tencent HTTP first (new order).
     We mock the Tencent HTTP call so the fast path succeeds immediately.
     Tencent HTTP quote format: prefix="field0~field1~..."  (re.search(r'="([^"]*)")' captures body)
     """
-    from light_data import resolve_security, fetch_quote, HttpClient
-
     fake_content = ["0"] * 41
     fake_content[1] = "平安银行"
     fake_content[3] = "38.50"
@@ -180,15 +198,61 @@ def test_fetch_quote_fast_path_with_tencent(mock_get_client):
     def fake_get_text(url, encoding="gbk"):
         return fake_text
 
-    sec = resolve_security("600036")
-    http = HttpClient()
+    sec = light_data.resolve_security("600036")
+    http = light_data.HttpClient()
     with patch.object(http, "get_text", fake_get_text):
-        q = fetch_quote(sec, http)
+        q = light_data.fetch_quote(sec, http)
 
     assert q["current_price"] == 38.5
     assert q["turnover_rate"] == 0.35
     assert q["data_source"] == "tencent-http"
     assert q["data_status"] == "full"
+
+
+def test_run_mootdx_hard_timeout_returns_within_budget():
+    """Hung mootdx calls must not block the caller beyond the hard timeout."""
+    light_data._MOOTDX_CLIENT = object()  # non-None sentinel to verify clear
+
+    def hang():
+        time.sleep(5.0)
+        return "late"
+
+    t0 = time.perf_counter()
+    with warnings.catch_warnings(record=True):
+        warnings.simplefilter("always")
+        res = light_data.run_mootdx_with_timeout(hang)
+    elapsed = time.perf_counter() - t0
+
+    assert res is None
+    assert elapsed < 2.5, f"hard timeout took {elapsed:.2f}s (expected ~1.5s)"
+    assert light_data._MOOTDX_CLIENT is None
+    assert light_data._DATA_SOURCE_CONTROLLER.is_healthy() is False
+
+
+def test_run_mootdx_skips_when_unhealthy():
+    """Unhealthy controller must short-circuit without invoking the callable."""
+    ctrl = light_data._DATA_SOURCE_CONTROLLER
+    ctrl.healthy = False
+    ctrl.cool_down_until = time.time() + 60.0
+    called = {"n": 0}
+
+    def boom():
+        called["n"] += 1
+        return 1
+
+    assert light_data.run_mootdx_with_timeout(boom) is None
+    assert called["n"] == 0
+
+
+def test_run_mootdx_success_resets_health():
+    ctrl = light_data._DATA_SOURCE_CONTROLLER
+    ctrl.healthy = True
+    ctrl.consecutive_failures = 2
+    ctrl.cool_down_until = 0.0
+
+    assert light_data.run_mootdx_with_timeout(lambda: 42) == 42
+    assert ctrl.consecutive_failures == 0
+    assert ctrl.is_healthy() is True
 
 
 def test_api_rate_limiter_in_memory_cache():
@@ -200,13 +264,10 @@ def test_api_rate_limiter_in_memory_cache():
     take 1.5-3 seconds.
     """
     import tempfile
-    import time
-
-    from trader_shared.light_data import APIRequestRateLimiter
 
     with tempfile.TemporaryDirectory() as tmpdir:
         limit_file = f"{tmpdir}/api_limits.json"
-        limiter = APIRequestRateLimiter(limit_file=limit_file)
+        limiter = light_data.APIRequestRateLimiter(limit_file=limit_file)
         # Prime the cache by doing one call (loads from disk) — use a high
         # per-minute cap so the 100-iteration loop never hits the throttle.
         assert limiter.check_and_record(max_per_min=10000, max_per_hour=100000) is True
@@ -233,9 +294,6 @@ def test_api_rate_limiter_first_call_loads_from_disk():
     """First check_and_record() should lazy-load from disk; subsequent calls use cache."""
     import json
     import tempfile
-    import time
-
-    from trader_shared.light_data import APIRequestRateLimiter
 
     with tempfile.TemporaryDirectory() as tmpdir:
         limit_file = f"{tmpdir}/api_limits.json"
@@ -245,7 +303,7 @@ def test_api_rate_limiter_first_call_loads_from_disk():
         with open(limit_file, "w") as f:
             json.dump(seed, f)
 
-        limiter = APIRequestRateLimiter(limit_file=limit_file)
+        limiter = light_data.APIRequestRateLimiter(limit_file=limit_file)
         # 14 prior calls → 15th call should still pass (under 15/min threshold)
         # but the in-memory cache must reflect the 14 pre-seeded calls.
         assert limiter._cache is None  # not yet loaded
