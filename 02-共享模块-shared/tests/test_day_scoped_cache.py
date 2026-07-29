@@ -39,6 +39,53 @@ def test_is_fetch_date_today():
     assert not cu.is_fetch_date_today([1, 2], "2026-07-17")
 
 
+def test_unwrap_bars_payload():
+    rows = [{"close": 1.0}]
+    assert cu.unwrap_bars_payload({"fetch_date": "2026-07-17", "rows": rows}) == rows
+    assert cu.unwrap_bars_payload(rows) == rows
+    assert cu.unwrap_bars_payload({"fetch_date": "2026-07-17"}) is None
+    assert cu.unwrap_bars_payload(None) is None
+
+
+def test_get_day_scoped_bars_fetch_fail_rejects_cross_day(monkeypatch):
+    """拉源失败时不得用跨日 {fetch_date, rows} 冒充可用。"""
+    monkeypatch.setattr(cu, "cache_calendar_date", lambda: "2026-07-18")
+    old = {"fetch_date": "2026-07-17", "rows": [{"close": 1.0}] * 30}
+
+    def _get(key, target, ttl=None):
+        return cu.CacheResult(data=old, stale=False, age_seconds=1.0, source="file")
+
+    monkeypatch.setattr(cu, "get_cached", _get)
+    monkeypatch.setattr(cu, "set_cached", lambda *a, **k: None)
+
+    def _boom():
+        raise RuntimeError("net down")
+
+    out = cu.get_day_scoped_bars("daily", "000988", _boom, min_rows=20)
+    assert out == []
+
+
+def test_get_day_scoped_bars_unwraps_same_day_payload(monkeypatch):
+    """同日 ``{fetch_date, rows}`` 解包为 list，不回源。"""
+    monkeypatch.setattr(cu, "cache_calendar_date", lambda: "2026-07-17")
+    payload = {"fetch_date": "2026-07-17", "rows": [{"close": 2.0}] * 30}
+    calls = {"n": 0}
+
+    def _get(key, target, ttl=None):
+        return cu.CacheResult(data=payload, stale=False, age_seconds=1.0, source="file")
+
+    monkeypatch.setattr(cu, "get_cached", _get)
+    monkeypatch.setattr(cu, "set_cached", lambda *a, **k: None)
+
+    def _boom():
+        calls["n"] += 1
+        raise RuntimeError("net down")
+
+    out = cu.get_day_scoped_bars("daily", "000988", _boom, min_rows=20)
+    assert len(out) == 30
+    assert calls["n"] == 0
+
+
 def test_cyq_same_day_hits_cache(monkeypatch):
     chip.clear_cyq_mem_cache()
     calls = {"n": 0}

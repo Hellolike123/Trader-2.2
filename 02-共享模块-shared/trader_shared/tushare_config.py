@@ -1,19 +1,18 @@
-"""Tushare 配置 — 直接填写 token 即可使用。
+"""Tushare 配置 — token 请用环境变量或本地文件，勿把密钥写入本文件并提交。
 
-使用方式：
-    1. 在 TUSHARE_TOKEN 处填入你的 token
-    2. 其他配置保持默认即可
+优先级见 tushare_client._get_token：
+    TUSHARE_TOKEN 环境变量
+    > tushare_config.local.py（gitignore）
+    > skill config.json
+    > 本文件 TUSHARE_TOKEN（应始终为空）
+
+获取 token: https://tushare.pro
+示例见 tushare_config.example.py
 """
 from __future__ import annotations
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Tushare Token（必填）
-# 获取地址: https://tushare.pro 注册后获取
-# ══════════════════════════════════════════════════════════════════════════════
-TUSHARE_TOKEN = "e1yGJM1SI3jPoozWOvTDY8zvN0j6Y2sCIEnjAmimOrjvIBs6Igm0UUi5OmjPEB30OhDiYpyuOJTsEDxjOwTilW9"
+# 留空；生产请设置环境变量 TUSHARE_TOKEN 或本地 tushare_config.local.py
+TUSHARE_TOKEN = ""
 
-# ══════════════════════════════════════════════════════════════════════════════
-# API 地址（一般不需要改）
-# ══════════════════════════════════════════════════════════════════════════════
 TUSHARE_API_URL = "https://fastapic.stockai888.top"
 TUSHARE_REALTIME_URL = "https://realtime.stockai888.top"

@@ -44,3 +44,8 @@ id_rsa.pub
 # 环境变量（包含敏感信息）
 .env
 .mimocode
+
+# 本地 Tushare 密钥覆盖（勿提交）；仓库内 tushare_config.py 只留空 token
+**/tushare_config.local.py
+**/config.json
+

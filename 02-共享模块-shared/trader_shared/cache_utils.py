@@ -104,6 +104,16 @@ def is_fetch_date_today(payload: Any, today: str | None = None) -> bool:
     return bool(fd) and str(fd)[:10] == day
 
 
+def unwrap_bars_payload(data: Any) -> list | None:
+    """统一解包日缓存：``{fetch_date, rows}`` → list；裸 list 原样返回。"""
+    if isinstance(data, dict):
+        rows = data.get("rows")
+        return list(rows) if isinstance(rows, list) else None
+    if isinstance(data, list):
+        return list(data)
+    return None
+
+
 def get_day_scoped_bars(
     cache_key: str,
     target: str,
@@ -121,10 +131,10 @@ def get_day_scoped_bars(
     if cached is not None:
         data = cached.data
         if is_fetch_date_today(data, today):
-            rows = data.get("rows") if isinstance(data, dict) else None
-            if isinstance(rows, list) and len(rows) >= min_rows:
-                return list(rows)
-        # 旧格式：裸 list + 未过 TTL → 同进程当日可先用，避免无意义回源
+            rows = unwrap_bars_payload(data)
+            if rows is not None and len(rows) >= min_rows:
+                return rows
+        # 旧格式：裸 list + 未过 TTL → 可先用，避免无意义回源
         if (
             isinstance(data, list)
             and len(data) >= min_rows
@@ -135,12 +145,21 @@ def get_day_scoped_bars(
     try:
         rows = fetch_fn() or []
     except Exception as exc:
-        _logger.debug("get_day_scoped_bars fetch failed %s/%s: %s", cache_key, target, exc)
+        _logger.warning(
+            "get_day_scoped_bars fetch failed %s/%s: %s", cache_key, target, exc
+        )
+        # 失败时只允许「同日」缓存；禁止跨日陈粮冒充 full
         if cached is not None:
             data = cached.data
-            if isinstance(data, dict) and isinstance(data.get("rows"), list):
-                return list(data["rows"])
-            if isinstance(data, list):
+            if is_fetch_date_today(data, today):
+                hit = unwrap_bars_payload(data)
+                if hit is not None and len(hit) >= min_rows:
+                    return hit
+            if (
+                isinstance(data, list)
+                and len(data) >= min_rows
+                and not cached.stale
+            ):
                 return list(data)
         return []
 

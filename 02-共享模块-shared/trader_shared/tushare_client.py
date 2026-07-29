@@ -57,12 +57,35 @@ def bypass_http_proxy_for_market() -> None:
         os.environ[key] = f"{cur},{extra}" if cur else extra
 
 
+def _load_local_tushare_token() -> str:
+    """从同目录 ``tushare_config.local.py`` 读 token（文件名含点，用 importlib）。"""
+    local_path = Path(__file__).resolve().parent / "tushare_config.local.py"
+    if not local_path.is_file():
+        return ""
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "trader_shared_tushare_config_local", local_path
+        )
+        if spec is None or spec.loader is None:
+            return ""
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return str(getattr(mod, "TUSHARE_TOKEN", "") or "").strip()
+    except Exception:
+        return ""
+
+
 def _get_token() -> str:
-    # 优先级: 环境变量 > skill 包内 config.json > tushare_config.py > 空
+    # 优先级: 环境变量 > 本地 tushare_config.local.py > skill config.json > tushare_config.py > 空
     token = os.environ.get("TUSHARE_TOKEN", "").strip()
     if token:
         return token
-    # 尝试 skill 包内的 config.json（pack_all.py 打包时自动写入）
+    local_token = _load_local_tushare_token()
+    if local_token:
+        return local_token
+    # 尝试 skill 包内的 config.json（pack_all.py 打包时自动写入；勿把含密钥的 zip 公开分发）
     _skill_root = Path(__file__).resolve().parent.parent.parent
     _cfg = _skill_root / "config.json"
     if _cfg.exists():

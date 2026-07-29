@@ -23,45 +23,52 @@ LEDGER_FILE = Path.home() / ".trader" / "t0_ledger.jsonl"
 
 
 # ── 持仓管理 ──────────────────────────────────────────────────────────────
+def _load_position_file() -> dict[str, Any]:
+    """读取整份 position.json（经 DataManager 读锁）。"""
+    try:
+        from trader_shared.data_manager import DataManager
+
+        data = DataManager.load_state("position", {"positions": {}})
+        if not isinstance(data, dict):
+            return {"positions": {}}
+        data.setdefault("positions", {})
+        return data
+    except Exception:
+        if not POSITION_FILE.exists():
+            return {"positions": {}}
+        try:
+            data = json.loads(POSITION_FILE.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return {"positions": {}}
+            data.setdefault("positions", {})
+            return data
+        except Exception:
+            return {"positions": {}}
+
+
 def load_position(symbol: str) -> dict[str, Any] | None:
     """读取指定标的的持仓信息。"""
-    if not POSITION_FILE.exists():
-        return None
-    try:
-        data = json.loads(POSITION_FILE.read_text(encoding="utf-8"))
-        positions = data.get("positions", {})
-        return positions.get(symbol)
-    except Exception:
-        return None
+    positions = _load_position_file().get("positions", {})
+    return positions.get(symbol)
 
 
 def save_position(symbol: str, pos: dict[str, Any]) -> None:
-    """保存指定标的的持仓信息。"""
-    POSITION_FILE.parent.mkdir(parents=True, exist_ok=True)
-    data: dict[str, Any] = {}
-    if POSITION_FILE.exists():
-        try:
-            data = json.loads(POSITION_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    if "positions" not in data:
-        data["positions"] = {}
-    data["positions"][symbol] = {
-        **pos,
-        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    POSITION_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    """保存指定标的的持仓信息（DataManager 锁内 RMW + tmp+rename）。"""
+    from trader_shared.data_manager import DataManager
+
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def _mutate(data: dict[str, Any]) -> None:
+        if not isinstance(data.get("positions"), dict):
+            data["positions"] = {}
+        data["positions"][symbol] = {**pos, "updated_at": stamp}
+
+    DataManager.update_state("position", _mutate)
 
 
 def list_positions() -> dict[str, dict[str, Any]]:
     """读取所有持仓。"""
-    if not POSITION_FILE.exists():
-        return {}
-    try:
-        data = json.loads(POSITION_FILE.read_text(encoding="utf-8"))
-        return data.get("positions", {})
-    except Exception:
-        return {}
+    return dict(_load_position_file().get("positions") or {})
 
 
 # ── 费用计算 ──────────────────────────────────────────────────────────────

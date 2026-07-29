@@ -55,22 +55,33 @@ LAST_PLAN_FILE = POOLS_DIR / "last_plan.json"
 
 # ── Pool helpers ─────────────────────────────────────────────────────────
 def load_pool() -> dict[str, Any]:
-    """Load pool.json, returning empty dict if missing."""
-    if not POOL_FILE.exists():
-        return {"items": []}
+    """Load pool.json via DataManager（与 pool_io 同锁，避免双写竞态）。"""
     try:
-        with open(POOL_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError):
-        return {"items": []}
+        from trader_shared.data_manager import DataManager
+
+        data = DataManager.load_state("pool", {"items": []})
+        if not isinstance(data, dict):
+            return {"items": []}
+        data.setdefault("items", [])
+        return data
+    except Exception:
+        if not POOL_FILE.exists():
+            return {"items": []}
+        try:
+            with open(POOL_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return {"items": []}
 
 
 def save_pool(data: dict[str, Any]) -> None:
-    """Save pool.json."""
-    POOLS_DIR.mkdir(parents=True, exist_ok=True)
-    data["updated_at"] = datetime.now().strftime("%Y-%m-%d")
-    with open(POOL_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """Save pool.json via DataManager（tmp+rename + state_lock，禁止裸 truncate 写）。"""
+    from trader_shared.data_manager import DataManager
+
+    payload = dict(data) if isinstance(data, dict) else {"items": []}
+    payload["updated_at"] = datetime.now().strftime("%Y-%m-%d")
+    with DataManager.state_lock("pool"):
+        DataManager.save_state("pool", payload)
 
 
 # ── Build report (parallel) ─────────────────────────────────────────────

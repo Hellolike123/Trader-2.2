@@ -315,16 +315,19 @@ class UnifiedProvider:
     def fetch_qfq_daily(self, sec: Security, days: int = 30) -> list[dict[str, Any]]:
         if self._backend == "akshare":
             return self._akshare_fetch_qfq_daily(sec, days)
-        from trader_shared.cache_utils import get_cached, set_cached, TTL_DAILY
-        cached = get_cached("daily", sec.code, ttl=TTL_DAILY)
-        # stale=True（TTL 过期）不视为命中，往下回源，避免陈旧日K被永久当真
-        if cached is not None and not cached.stale:
-            return cached.data
+        # 与 Tushare/light_data 统一：日 scoped + {fetch_date, rows}，禁止裸 list 脏读
+        from trader_shared.cache_utils import CACHE_DAILY, get_day_scoped_bars
+
         self._ensure_http()
         from trader_shared.light_data import fetch_qfq_daily as _fetch
-        bars = _fetch(self._to_sec(sec), self._http, days=days)
-        set_cached("daily", sec.code, bars)
-        return bars
+
+        http = self._http
+        ld_sec = self._to_sec(sec)
+
+        def _net() -> list:
+            return list(_fetch(ld_sec, http, days=days) or [])
+
+        return get_day_scoped_bars(CACHE_DAILY, sec.code, _net, min_rows=min(20, max(days, 1)))
 
     def fetch_5m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
         if self._backend == "akshare":
@@ -798,15 +801,49 @@ class TushareProvider:
         monthly_bars = results.get("monthly") or []
         tick_data = results.get("ticks") or []
 
-        data_status: DataStatus = (
-            "full" if (daily_bars and quote)
-            else "partial" if (daily_bars or quote)
-            else "failed"
-        )
+        # 与 light_data.load_market_snapshot 对齐：按分项缺失 + quote 降级判完备度
+        _key_to_missing = {
+            "daily": "daily",
+            "quote": "quote",
+            "bars_5m": "bars_5m",
+            "weekly": "weekly_bars",
+            "monthly": "monthly_bars",
+            "ticks": "tick_data",
+        }
+        missing_sources: list[str] = []
+        for err_key in source_errors:
+            ms = _key_to_missing.get(err_key, err_key)
+            if ms not in missing_sources:
+                missing_sources.append(ms)
+        if isinstance(quote, dict) and not quote.get("current_price"):
+            if "quote" not in missing_sources:
+                missing_sources.append("quote")
+        if not daily_bars and "daily" not in missing_sources:
+            missing_sources.append("daily")
+        if include_5m and not bars_5m and "bars_5m" not in missing_sources:
+            missing_sources.append("bars_5m")
+        if include_weekly and not weekly_bars and "weekly_bars" not in missing_sources:
+            missing_sources.append("weekly_bars")
+        if include_monthly and not monthly_bars and "monthly_bars" not in missing_sources:
+            missing_sources.append("monthly_bars")
+
+        if quote and daily_bars and not missing_sources:
+            if isinstance(quote, dict) and quote.get("data_status") == "partial":
+                data_status: DataStatus = "partial"
+            else:
+                data_status = "full"
+        elif quote and daily_bars:
+            data_status = "partial"
+        elif quote or daily_bars:
+            data_status = "degraded"
+        else:
+            data_status = "failed"
+
         res_snap = MarketSnapshot(
             security=sec, quote=quote, daily_bars=daily_bars,
             bars_5m=bars_5m, weekly_bars=weekly_bars, monthly_bars=monthly_bars,
-            tick_data=tick_data, data_status=data_status, source_errors=source_errors,
+            tick_data=tick_data, data_status=data_status,
+            missing_sources=missing_sources, source_errors=source_errors,
         )
         return _enrich_snapshot(res_snap)
 

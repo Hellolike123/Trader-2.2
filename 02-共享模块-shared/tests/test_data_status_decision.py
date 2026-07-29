@@ -76,3 +76,65 @@ def test_data_status_full_when_quote_full_all_sources_present(monkeypatch):
     snap = ld.load_market_snapshot("688248")
     assert snap.data_status == "full"
     assert snap.quote.get("data_status") == "full"
+
+
+def _make_tushare_provider(monkeypatch):
+    """构造可注入 fetch_* 的 TushareProvider（跳过真实 client）。"""
+    from trader_shared.data_provider import TushareProvider
+    from trader_shared.market_types import Security
+
+    provider = TushareProvider.__new__(TushareProvider)
+    provider._client = None
+    provider._fallback = SimpleNamespace()
+    provider.resolve_security = lambda t: Security(code="688248", market="SH", name="南网科技")
+
+    def _enrich(snap):
+        return snap
+
+    monkeypatch.setattr(
+        "trader_shared.data_provider._enrich_snapshot",
+        _enrich,
+    )
+    return provider
+
+
+def test_tushare_data_status_partial_when_weekly_missing(monkeypatch):
+    """Tushare 路径：周线缺失应 partial，且写入 missing_sources（与 light_data 对齐）。"""
+    provider = _make_tushare_provider(monkeypatch)
+    provider.fetch_qfq_daily = lambda sec, days=365: [{"close": 10.0} for _ in range(50)]
+    provider.fetch_quote = lambda sec: {"current_price": 10.0, "data_status": "full"}
+    provider.fetch_5m = lambda sec, datalen=60: [{"close": 10.0} for _ in range(20)]
+    provider.fetch_weekly = lambda sec, n=80: []
+    provider.fetch_monthly = lambda sec, datalen=60: [{"close": 10.0}]
+    provider.fetch_ticks = lambda sec, count=500: []
+
+    snap = provider.load_market_snapshot(
+        "南网科技",
+        include_5m=True,
+        include_weekly=True,
+        include_monthly=False,
+        include_ticks=False,
+    )
+    assert snap.data_status == "partial"
+    assert "weekly_bars" in snap.missing_sources
+
+
+def test_tushare_data_status_full_when_requested_sources_ok(monkeypatch):
+    """Tushare 路径：请求的源齐全 → full。"""
+    provider = _make_tushare_provider(monkeypatch)
+    provider.fetch_qfq_daily = lambda sec, days=365: [{"close": 10.0} for _ in range(50)]
+    provider.fetch_quote = lambda sec: {"current_price": 10.0, "data_status": "full"}
+    provider.fetch_5m = lambda sec, datalen=60: [{"close": 10.0} for _ in range(20)]
+    provider.fetch_weekly = lambda sec, n=80: [{"close": 10.0} for _ in range(20)]
+    provider.fetch_monthly = lambda sec, datalen=60: []
+    provider.fetch_ticks = lambda sec, count=500: []
+
+    snap = provider.load_market_snapshot(
+        "南网科技",
+        include_5m=True,
+        include_weekly=True,
+        include_monthly=False,
+        include_ticks=False,
+    )
+    assert snap.data_status == "full"
+    assert snap.missing_sources == []

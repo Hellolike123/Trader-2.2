@@ -1194,12 +1194,23 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
     # ── Circuit breaker check — return cached data if paused ──
     if _circuit_tencent_daily.is_open:
         _logger.debug("Circuit breaker open for daily bars, returning cached data for %s", sec.code)
-        # 尝试返回缓存数据（即使过期）
         try:
-            from trader_shared.cache_utils import get_cached as _file_cached, CACHE_DAILY
-            _cached_result = _file_cached(CACHE_DAILY, sec.code, ttl=86400 * 7)  # 7天内都可用
-            if _cached_result is not None and isinstance(_cached_result.data, list):
-                return _cached_result.data
+            from trader_shared.cache_utils import (
+                get_cached as _file_cached,
+                CACHE_DAILY,
+                is_fetch_date_today,
+                unwrap_bars_payload,
+            )
+            _cached_result = _file_cached(CACHE_DAILY, sec.code, ttl=86400 * 7)
+            if _cached_result is not None:
+                _data = _cached_result.data
+                # 熔断时优先同日包装缓存；裸 list 仅未过 TTL 可用
+                if is_fetch_date_today(_data):
+                    _rows = unwrap_bars_payload(_data)
+                    if _rows:
+                        return _rows
+                if isinstance(_data, list) and not _cached_result.stale:
+                    return _data
         except (ImportError, OSError):
             pass
         return []
@@ -1211,12 +1222,13 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
             CACHE_DAILY,
             TTL_BARS_DAY,
             is_fetch_date_today,
+            unwrap_bars_payload,
         )
         _cached_result = _file_cached(CACHE_DAILY, sec.code, ttl=TTL_BARS_DAY)
         if _cached_result is not None:
             _data = _cached_result.data
-            if is_fetch_date_today(_data) and isinstance(_data, dict):
-                _rows = _data.get("rows")
+            if is_fetch_date_today(_data):
+                _rows = unwrap_bars_payload(_data)
                 if isinstance(_rows, list) and len(_rows) >= 200:
                     return _rows
             # 兼容旧裸 list + 未过 TTL
