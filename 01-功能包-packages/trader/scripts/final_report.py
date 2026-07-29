@@ -17,9 +17,25 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate and validate the final Trader report.")
     parser.add_argument("--target", required=True, help="A-share name or code, for example 南网科技 or 688248")
     parser.add_argument("--output", choices=["markdown", "json", "signal-json", "alert-text", "watch"], default="markdown")
-    parser.add_argument("--write-signal", action="store_true", help="Write triggered signals to signals.jsonl")
+    parser.add_argument(
+        "--write-signal",
+        action="store_true",
+        help="将 build_signal（含 allow_new_recommend）写入 ~/.trader/signals.jsonl；watch 模式下仅在触发告警时写",
+    )
     parser.add_argument("--cost", type=float, default=0.0, help="Cost price for existing position (e.g., --cost 60.00)")
     return parser.parse_args()
+
+
+def _maybe_write_signal(report: dict[str, Any], *, enabled: bool) -> None:
+    """落盘决策字段，供决策体检分组。失败不阻断主输出。"""
+    if not enabled:
+        return
+    try:
+        from trader_shared.signal_store import append_signal
+
+        append_signal(build_signal(report))
+    except Exception as exc:
+        print(f"⚠️ 信号落盘失败: {exc}", file=sys.stderr)
 
 
 def main() -> int:
@@ -48,12 +64,14 @@ def main() -> int:
         return 0
 
     if args.output == "signal-json":
-        markdown = render_markdown(report)
-        print(json.dumps(build_signal(report), ensure_ascii=False, indent=2, default=str))
+        sig = build_signal(report)
+        print(json.dumps(sig, ensure_ascii=False, indent=2, default=str))
+        _maybe_write_signal(report, enabled=args.write_signal)
         return 0
 
     if args.output == "json":
         print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+        _maybe_write_signal(report, enabled=args.write_signal)
         return 0
 
     if args.output == "watch":
@@ -130,6 +148,7 @@ def main() -> int:
         # 之前 return 2 会跳过 print(markdown)，用户什么都看不到
 
     print(markdown)
+    _maybe_write_signal(report, enabled=args.write_signal)
 
     # ── AI 事实表 (供 Hermes 解析，不展示给用户) ──
     # 上面已在验证前输出完整 facts（含 NEVER_COMPUTE），此处仅写 last_target。

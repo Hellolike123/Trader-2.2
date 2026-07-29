@@ -281,16 +281,6 @@ def active_items(pool: dict[str, Any]) -> list[dict[str, Any]]:
     return [item for item in pool.get("items", []) if item.get("status") in {"执行", "观察", "淘汰"}]
 
 
-def _fusion_confidence_rank(value: Any) -> int:
-    if value is None:
-        return 0
-    try:
-        return int(round(float(value)))
-    except (TypeError, ValueError):
-        text = str(value).strip().lower()
-        return {"low": 1, "medium": 2, "high": 3}.get(text, 0)
-
-
 STAGE_STRENGTH = {"主升": 1.0, "拉升": 0.9, "蓄势偏强": 0.8, "蓄势": 0.5, "蓄势偏弱": 0.3, "派发": 0.2, "衰退": 0.0}
 
 
@@ -399,6 +389,5 @@ __all__ = list(_pool_io.__all__) + [
     "structure_summary",
     "to_float",
     "_evaluate_admission",
-    "_fusion_confidence_rank",
     "_tighten_status_by_resonance",
 ]

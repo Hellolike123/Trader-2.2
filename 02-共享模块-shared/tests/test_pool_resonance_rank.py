@@ -163,3 +163,111 @@ def test_sort_tightens_stale_execution_conflict():
     assert ordered[0]["name"] == "真观察齐"
     fake = next(x for x in ordered if x["name"] == "假执行")
     assert fake["status"] == "观察"
+
+
+def _scripts_path() -> Path:
+    return (
+        Path(__file__).resolve().parents[2]
+        / "01-功能包-packages"
+        / "trader"
+        / "scripts"
+    )
+
+
+def _ensure_scripts_path() -> None:
+    p = str(_scripts_path())
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+
+def test_admission_for_ignores_fusion_weighted_score():
+    """同结构分时，仅改 fusion.weighted_score → admission_for 结果不变。"""
+    _ensure_scripts_path()
+    from pool_cmds.scoring import admission_for, score_report
+
+    base = {
+        "current": 10.0,
+        "confirm": 10.1,
+        "stop": 9.0,
+        "support": 9.5,
+        "take": 11.0,
+        "stage": "走强",
+        "scene": "等转强",
+        "major_stage": "蓄势",
+        "chan_buy_point_types": [],
+        "chan_strokes_count": 3,
+        "chan_trend_label": "上行",
+        "bars": [],
+        "resonance": {"grade": "aligned"},
+    }
+    high = {**base, "fusion": {"weighted_score": 1.0, "disagreement": 0.0}}
+    low = {**base, "fusion": {"weighted_score": -1.0, "disagreement": 0.0}}
+    scores_high = score_report(high)
+    scores_low = score_report(low)
+    assert scores_high["total_score"] == scores_low["total_score"]
+    assert scores_high["fusion_score"] != scores_low["fusion_score"]
+    assert admission_for(high, scores_high) == admission_for(low, scores_low)
+
+
+def test_sort_items_unified_ignores_fusion_confidence():
+    """同 status/共振/总分/阶段时，仅改 fusion_confidence → 顺序不变。"""
+    _ensure_scripts_path()
+    from pool_cmds.scoring import sort_items_unified
+
+    a = {
+        "name": "A",
+        "status": "观察",
+        "resonance_grade": "aligned",
+        "total_score": 70,
+        "major_stage": "蓄势",
+        "fusion_confidence": 0.95,
+    }
+    b = {
+        "name": "B",
+        "status": "观察",
+        "resonance_grade": "aligned",
+        "total_score": 70,
+        "major_stage": "蓄势",
+        "fusion_confidence": 0.1,
+    }
+    names = [x["name"] for x in sort_items_unified([a, b])]
+    swapped = [
+        {**a, "fusion_confidence": 0.1},
+        {**b, "fusion_confidence": 0.95},
+    ]
+    assert [x["name"] for x in sort_items_unified(swapped)] == names == ["A", "B"]
+    # 高 confidence 不得单独把后票抬前（并列保输入顺序）
+    assert [x["name"] for x in sort_items_unified([b, a])] == ["B", "A"]
+
+
+def test_pool_briefing_group_sort_ignores_fusion_score():
+    """组内排序：同共振/结构时仅改 fusion.weighted_score 不改相对顺序。"""
+    _ensure_scripts_path()
+    from pool_briefing import sort_group_items
+
+    def _report(name: str, ws: float) -> dict:
+        return {
+            "name": name,
+            "major_stage": "蓄势",
+            "stage": "走强",
+            "scene": "等转强",
+            "current": 10.0,
+            "confirm": 10.1,
+            "stop": 9.0,
+            "support": 9.5,
+            "take": 11.0,
+            "chan_buy_point_types": [],
+            "chan_strokes_count": 3,
+            "chan_trend_label": "上行",
+            "bars": [],
+            "resonance": {"grade": "aligned"},
+            "fusion": {"weighted_score": ws, "disagreement": 0.0},
+        }
+
+    items = [(_report("高融合", 1.0), ""), (_report("低融合", -1.0), "")]
+    ordered = sort_group_items(items)
+    names = [r["name"] for r, _ in ordered]
+    # 结构键相同 → 保输入顺序，高融合分不得把后者抬前
+    assert names == ["高融合", "低融合"]
+    flipped = [(_report("低融合", -1.0), ""), (_report("高融合", 1.0), "")]
+    assert [r["name"] for r, _ in sort_group_items(flipped)] == ["低融合", "高融合"]

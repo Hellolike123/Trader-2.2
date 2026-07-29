@@ -10,7 +10,8 @@ python3 scripts/final_review.py --target <NAME>
 ```
 
 仓位轮动：`python3 scripts/final_portfolio.py --targets A B`  
-信号追踪：`python3 scripts/final_tracker.py`
+信号追踪：`python3 scripts/final_tracker.py`  
+决策体检：`python3 scripts/final_tracker.py checkup --days 90`
 
 成功 → stdout 原样输出 → 停。  
 优先渲染输出；仅需要时再 `--output json`。

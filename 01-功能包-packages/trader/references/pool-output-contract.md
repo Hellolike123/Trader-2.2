@@ -4,6 +4,8 @@
 
 Common rules: no markdown tables in rank/show/plan outputs; use indented alignment; no `##/###` headings.
 
+评分：`total_score` = 缠+威+筹+动（入池门槛/排序用）；`fusion_score` 仅仪表，不进总分。
+
 ## rank output
 
 ```text

@@ -553,6 +553,9 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
             "summary": ("  ".join(alerts_found[:2])) if alerts_found else "无触发",
         }
         try:
+            from trader_shared.signal_core import decision_persist_fields
+
+            signal.update(decision_persist_fields(report))
             assert_valid_signal(signal)
             append_signal(signal)
             lines.append(f"  信号已记录：{_signal_type_label(sig_type)}（置信度{confidence}）")

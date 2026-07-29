@@ -339,6 +339,42 @@ def state_text(stage: str, theory_status: str) -> str:
         return theory_status
     return "震荡观察"
 
+def decision_persist_fields(report: dict[str, Any] | None) -> dict[str, Any]:
+    """从报告提取写入 signals.jsonl 的决策字段（体检分组用）。
+
+    有 decision_view.allow_new_recommend 优先；否则用 discipline.allow_new_entry。
+    两者都没有则返回空 dict（保持「未知」，不伪造）。
+    """
+    if not isinstance(report, dict):
+        return {}
+    dv = report.get("decision_view") if isinstance(report.get("decision_view"), dict) else {}
+    disc = report.get("discipline") if isinstance(report.get("discipline"), dict) else {}
+    res = report.get("resonance") if isinstance(report.get("resonance"), dict) else {}
+
+    allow: bool | None = None
+    if "allow_new_recommend" in dv and dv.get("allow_new_recommend") is not None:
+        allow = bool(dv.get("allow_new_recommend"))
+    elif "allow_new_entry" in disc and disc.get("allow_new_entry") is not None:
+        allow = bool(disc.get("allow_new_entry"))
+
+    if allow is None:
+        return {}
+
+    grade = str(dv.get("resonance_grade") or res.get("grade") or "").strip()
+    out: dict[str, Any] = {
+        "allow_new_recommend": allow,
+        "decision_view": {
+            "allow_new_recommend": allow,
+            "resonance_grade": grade,
+        },
+    }
+    if "allow_new_entry" in disc and disc.get("allow_new_entry") is not None:
+        out["discipline"] = {"allow_new_entry": bool(disc.get("allow_new_entry"))}
+    if grade:
+        out["resonance_grade"] = grade
+    return out
+
+
 def build_signal(r: dict[str, Any]) -> dict[str, Any]:
     signal_type, direction, action, confidence = signal_state(r)
 
@@ -398,5 +434,6 @@ def build_signal(r: dict[str, Any]) -> dict[str, Any]:
     }
     if fusion_override:
         signal["fusion_override"] = True
+    signal.update(decision_persist_fields(r))
     assert_valid_signal(signal)
     return signal

@@ -1711,6 +1711,229 @@ def backfill_signal_status() -> dict[str, int]:
     return {"updated": updated}
 
 
+# ═══════ 决策体检 (checkup) ═══════
+
+CHECKUP_MIN_ALLOWED = 10
+CHECKUP_WIN_RATE_GAP_PP = 5.0  # 允许组胜率需高于禁止组至少 5 个百分点
+
+
+def _as_tri_bool(value: Any) -> bool | None:
+    """True/False/None；避免 bool('false')==True。"""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y"}:
+        return True
+    if text in {"0", "false", "no", "n"}:
+        return False
+    return None
+
+
+def resolve_allow_new_recommend(
+    record: dict[str, Any],
+    signal_lookup: dict[str, dict[str, Any]] | None = None,
+) -> bool | None:
+    """解析「系统是否允许买」：True=允许，False=禁止，None=未知。"""
+    if "allow_new_recommend" in record:
+        parsed = _as_tri_bool(record.get("allow_new_recommend"))
+        if parsed is not None:
+            return parsed
+
+    sig = signal_lookup.get(record.get("signal_id", ""), {}) if signal_lookup else {}
+    sources: list[dict[str, Any]] = [record]
+    if sig:
+        sources.insert(0, sig)
+
+    for src in sources:
+        if "allow_new_recommend" in src:
+            parsed = _as_tri_bool(src.get("allow_new_recommend"))
+            if parsed is not None:
+                return parsed
+
+    for src in sources:
+        dv = src.get("decision_view")
+        if isinstance(dv, dict) and "allow_new_recommend" in dv:
+            parsed = _as_tri_bool(dv.get("allow_new_recommend"))
+            if parsed is not None:
+                return parsed
+
+    for src in sources:
+        disc = src.get("discipline")
+        if isinstance(disc, dict) and "allow_new_entry" in disc:
+            parsed = _as_tri_bool(disc.get("allow_new_entry"))
+            if parsed is not None:
+                return parsed
+
+    return None
+
+
+def is_win_5d(record: dict[str, Any]) -> bool:
+    """5 日后是否「赚」：outcome=up 或 r_5d>0（与 tracker 口径一致）。"""
+    if record.get("outcome") == "up":
+        return True
+    r5 = record.get("r_5d")
+    if r5 is not None and float(r5) > 0:
+        return True
+    return False
+
+
+def has_5d_outcome(record: dict[str, Any]) -> bool:
+    """是否有可统计的 5 日结果。"""
+    if record.get("r_5d") is not None:
+        return True
+    return record.get("outcome") in {"up", "down", "flat"}
+
+
+def compute_group_stats(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """对一组已结算记录计算胜率与平均收益。"""
+    valid = [r for r in records if has_5d_outcome(r)]
+    total = len(valid)
+    wins = sum(1 for r in valid if is_win_5d(r))
+    win_rate = round(wins / total * 100, 1) if total else 0.0
+    r5_vals = [float(r["r_5d"]) for r in valid if r.get("r_5d") is not None]
+    avg_r5 = round(sum(r5_vals) / len(r5_vals), 1) if r5_vals else 0.0
+    return {"total": total, "wins": wins, "win_rate": win_rate, "avg_r5": avg_r5}
+
+
+def build_checkup_conclusion(
+    allowed: dict[str, Any],
+    denied: dict[str, Any],
+    *,
+    unknown_count: int = 0,
+    total_with_outcome: int = 0,
+) -> str:
+    """根据分组统计生成结论文案。"""
+    if total_with_outcome == 0:
+        return "样本不足，暂不调闸。"
+
+    known = allowed["total"] + denied["total"]
+    if known == 0:
+        return "多数信号无决策字段，需后续落盘。"
+
+    if unknown_count > 0 and known < max(1, total_with_outcome // 2):
+        return "多数信号无决策字段，需后续落盘。"
+
+    if allowed["total"] < CHECKUP_MIN_ALLOWED or denied["total"] < CHECKUP_MIN_ALLOWED:
+        return "样本不足，暂不调闸。"
+
+    gap = allowed["win_rate"] - denied["win_rate"]
+    if gap < CHECKUP_WIN_RATE_GAP_PP:
+        return "闸门区分度不足，先查信号落盘字段再谈加场景。"
+
+    return "听系统的，比瞎买强。继续严闸。"
+
+
+def _build_signal_lookup() -> dict[str, dict[str, Any]]:
+    lookup: dict[str, dict[str, Any]] = {}
+    for sig in _load_signals():
+        sid = sig.get("signal_id")
+        if sid:
+            lookup[sid] = sig
+    return lookup
+
+
+def _load_checkup_records(days: int) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    """合并双源并附加 allow 字段，按 days 过滤。"""
+    results = _load_results()
+    outcomes = _load_signal_outcomes()
+    merged = _merge_dual_source(results, outcomes)
+    signal_lookup = _build_signal_lookup()
+
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    enriched: list[dict[str, Any]] = []
+    for rec in merged:
+        sig_date = _norm_date(str(rec.get("signal_date") or rec.get("trade_date") or ""))
+        if sig_date and sig_date < cutoff:
+            continue
+        row = dict(rec)
+        row["_allow"] = resolve_allow_new_recommend(row, signal_lookup)
+        enriched.append(row)
+    return enriched, signal_lookup
+
+
+def render_checkup_panel(
+    allowed: dict[str, Any],
+    denied: dict[str, Any],
+    *,
+    days: int,
+    unknown_count: int = 0,
+    conclusion: str,
+) -> str:
+    """渲染决策体检面板（微信友好：无 #/**/|/列表符）。"""
+    lines = [f"决策体检 — 近{days}日", ""]
+
+    if allowed["total"] > 0:
+        lines.append(
+            f"系统允许买：{allowed['total']}次，"
+            f"5天后赚的有 {allowed['wins']}次（{allowed['win_rate']:.0f}%），"
+            f"平均 {allowed['avg_r5']:+.1f}%"
+        )
+    if denied["total"] > 0:
+        lines.append(
+            f"系统不让买：{denied['total']}次，"
+            f"5天后赚的有 {denied['wins']}次（{denied['win_rate']:.0f}%），"
+            f"平均 {denied['avg_r5']:+.1f}%"
+        )
+
+    if allowed["total"] == 0 and denied["total"] == 0:
+        if unknown_count > 0:
+            lines.append(f"暂无允许/禁止分组（{unknown_count}条缺决策字段）。")
+        else:
+            lines.append("暂无有效样本（近{}日内无已结算信号）。".format(days))
+    elif unknown_count > 0:
+        lines.append("")
+        lines.append(f"注：{unknown_count}条缺决策字段，未计入上述分组。")
+
+    lines.extend(["", f"结论：{conclusion}"])
+    return "\n".join(lines)
+
+
+def show_checkup(days: int = 90, verbose: bool = False) -> str:
+    """决策体检主入口。"""
+    records, _ = _load_checkup_records(days)
+    with_outcome = [r for r in records if has_5d_outcome(r)]
+    unknown = [r for r in with_outcome if r.get("_allow") is None]
+    allowed_recs = [r for r in with_outcome if r.get("_allow") is True]
+    denied_recs = [r for r in with_outcome if r.get("_allow") is False]
+
+    allowed = compute_group_stats(allowed_recs)
+    denied = compute_group_stats(denied_recs)
+    conclusion = build_checkup_conclusion(
+        allowed,
+        denied,
+        unknown_count=len(unknown),
+        total_with_outcome=len(with_outcome),
+    )
+    panel = render_checkup_panel(
+        allowed,
+        denied,
+        days=days,
+        unknown_count=len(unknown),
+        conclusion=conclusion,
+    )
+
+    if verbose and with_outcome:
+        by_skill: dict[str, list] = {}
+        for r in with_outcome:
+            sk = str(r.get("source_skill") or "unknown")
+            by_skill.setdefault(sk, []).append(r)
+        extra = ["", "详情（按数据源）"]
+        for sk, recs in sorted(by_skill.items()):
+            a = compute_group_stats([x for x in recs if x.get("_allow") is True])
+            d = compute_group_stats([x for x in recs if x.get("_allow") is False])
+            extra.append(
+                f"  {sk}：允许{a['total']}次/{a['win_rate']:.0f}%  "
+                f"禁止{d['total']}次/{d['win_rate']:.0f}%"
+            )
+        panel = panel + "\n" + "\n".join(extra)
+
+    return panel
+
+
 # ═══════ CLI ═══════
 
 # FIX-T-BIAS-03: backfill — 强制回溯历史过期信号
@@ -1804,6 +2027,9 @@ def main(args: list[str] | None = None) -> int:
     p4.add_argument("--batch", type=int, default=100, help="批处理大小")
     p5 = sub.add_parser("migrate", help="迁移和修复 signals.jsonl 与 signal_results.jsonl 中的 signal_id")
     p5.add_argument("--force", action="store_true", help="强制矫正/更新已存在但不正确的 ID")
+    p6 = sub.add_parser("checkup", help="决策体检：允许买 vs 禁止买 5日胜率")
+    p6.add_argument("--days", type=int, default=90)
+    p6.add_argument("--verbose", action="store_true", help="展开数据源分层")
     args = parser.parse_args(args)
 
     if args.command == "check":
@@ -1842,6 +2068,8 @@ def main(args: list[str] | None = None) -> int:
         print("信号 ID 迁移与重组完成：")
         print(f"  signals.jsonl        : 已处理/转换 {result['signals_migrated']} 条记录，跳过 {result['signals_skipped']} 条记录")
         print(f"  signal_results.jsonl : 已处理/转换 {result['results_migrated']} 条记录，跳过 {result['results_skipped']} 条记录")
+    elif args.command == "checkup":
+        print(show_checkup(days=args.days, verbose=getattr(args, "verbose", False)))
     else:
         parser.print_help()
         return 1

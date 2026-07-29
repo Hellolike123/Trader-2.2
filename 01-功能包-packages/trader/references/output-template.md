@@ -141,6 +141,7 @@ SHORT_MIDLINE_REPORT=false python 01-功能包-packages/trader/scripts/final_rep
 当用户要求批量分析多只股票时，输出选股日报。脚本入口: `pool_briefing.py`。
 
 格式：竖排，每只 2-3 行，按推荐买入/重点关注/暂时不看分组。
+组内排序：共振档 → 结构总分+阶段（与选股池 `sort_items_unified` 对齐）；`fusion.weighted_score` 仅展示，不参与排序。
 
 ```text
 选股日报 — 2026-06-17 ｜ 大盘偏弱

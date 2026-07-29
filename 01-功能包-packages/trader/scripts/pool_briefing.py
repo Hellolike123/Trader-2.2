@@ -138,6 +138,30 @@ def signal_tags(r: dict) -> tuple[str, str]:
     return (buy_tag, risk_tag)
 
 
+# ── Within-group sort（与 pool_cmds.scoring.sort_items_unified 对齐）──
+
+def within_group_sort_key(report: dict) -> tuple:
+    """组内排序键：共振档 → 结构总分+阶段；fusion 仅仪表不参与。
+
+    与 `sort_items_unified` 次键/再次键一致（组已由 classify 分好，无 status 主键）。
+    """
+    from trader_shared.resonance import extract_resonance_grade, resonance_pool_rank
+    from pool_cmds.scoring import STAGE_STRENGTH, score_report
+
+    grade = extract_resonance_grade(report)
+    scores = score_report(report)
+    score = int(scores.get("total_score") or 0)
+    stage = str(report.get("major_stage") or "蓄势")
+    stage_str = STAGE_STRENGTH.get(stage, 0.5)
+    composite = (score / 100.0) * 0.5 + stage_str * 0.5
+    return (resonance_pool_rank(grade), composite)
+
+
+def sort_group_items(items: list) -> list:
+    """组内排序：(report, rec) 列表，共振档优先，其次结构复合分。"""
+    return sorted(items, key=lambda item: within_group_sort_key(item[0]), reverse=True)
+
+
 # ── Output formatting ──────────────────────────────────────────────
 
 def fmt_pool_briefing(stocks: list[str]) -> str:
@@ -167,15 +191,10 @@ def fmt_pool_briefing(stocks: list[str]) -> str:
         else:
             skip_list.append((r, rec))
 
-    # Sort each group by fusion weighted_score desc
-    def sort_key(item):
-        r = item[0]
-        f = r.get("fusion") or {}
-        return f.get("weighted_score") or 0
-
-    buy_list.sort(key=sort_key, reverse=True)
-    watch_list.sort(key=sort_key, reverse=True)
-    skip_list.sort(key=sort_key, reverse=True)
+    # 组内：共振档 → 结构总分+阶段（勿用 fusion.weighted_score）
+    buy_list = sort_group_items(buy_list)
+    watch_list = sort_group_items(watch_list)
+    skip_list = sort_group_items(skip_list)
 
     # Market environment
     today = date.today().isoformat()

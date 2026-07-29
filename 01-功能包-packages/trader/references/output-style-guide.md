@@ -98,5 +98,5 @@ From `chan_discipline.build_entry_checklist` / `format_entry_line_c1`:
 ## Additional Rules
 
 - Prefer script markdown; do not re-compose from memory
-- Direction for fusion still uses `fusion.weighted_score`; stage/momentum are inputs not final direction
+- Direction / new entries follow `decision_view` (resonance ∧ strategy ∧ discipline); `fusion.weighted_score` is instrument-only
 - Mid key prices come from weekly engine (`mid_key_prices.py`), not daily `find_key_levels` success path

@@ -6,41 +6,32 @@ from typing import Any
 from pool_cmds.verify import *  # noqa: F403
 
 def edge_reason(item: dict[str, Any], all_items: list[dict[str, Any]]) -> str:
-    """返回排名的核心优势/劣势一句话。从 pool item 字段推导。"""
-    confidences = [it.get("fusion_confidence", 0) or 0 for it in all_items]
-    item_conf = float(item.get("fusion_confidence") or 0)
-    top_conf = max(confidences) if confidences else 1
+    """返回排名的核心优势/劣势一句话。从结构分与共振档推导（fusion 不参与）。"""
+    from trader_shared.resonance import extract_resonance_grade, resonance_grade_label
 
-    # 优势：从得分最高的维度提取
+    grade = extract_resonance_grade(item)
+    grade_label = resonance_grade_label(grade)
+
     scores = {}
-    for key, max_s in [("chanlun_score", 45), ("wyckoff_score", 30), ("chip_score", 25), ("momentum_score", 20)]:
-        v = float(item.get(key) or 0)
-        scores[key] = v
-    best_dim = max(scores, key=scores.get)
+    for key in ("chanlun_score", "wyckoff_score", "chip_score", "momentum_score"):
+        scores[key] = float(item.get(key) or 0)
     dim_labels = {"chanlun_score": "结构", "wyckoff_score": "量价", "chip_score": "筹码", "momentum_score": "动能"}
-    ratio = scores[best_dim] / max(max(scores.values()), 0.01)
-    if ratio >= 0.85:
-        advantage = dim_labels.get(best_dim, best_dim) + "突出"
-    else:
-        advantage = ""
+    best_dim = max(scores, key=scores.get) if scores else ""
+    ratio = scores[best_dim] / max(max(scores.values()), 0.01) if best_dim else 0
+    advantage = dim_labels.get(best_dim, best_dim) + "突出" if ratio >= 0.85 and best_dim else ""
 
-    # 置信度分位
-    if top_conf > 0:
-        conf_pct = item_conf / top_conf
-    else:
-        conf_pct = 1.0
+    parts: list[str] = []
+    if grade == "aligned":
+        parts.append("共振齐")
+    elif grade in ("conflict", "momentum_veto"):
+        parts.append(f"共振{grade_label}")
+    elif grade not in ("empty", ""):
+        parts.append(f"共振{grade_label}")
 
-    if conf_pct >= 0.9 and advantage:
-        return f"置信最高｜{advantage}"
-    elif conf_pct >= 0.7:
-        return f"置信较高｜{advantage}" if advantage else "置信较高"
-    elif conf_pct < 0.4:
-        return "置信偏低"
-    elif conf_pct < 0.6:
-        return "置信中等"
-    elif advantage:
-        return advantage
-    return ""
+    if advantage:
+        parts.append(advantage)
+
+    return "｜".join(parts) if parts else ""
 
 
 def render_rank(items: list[dict[str, Any]]) -> str:
@@ -67,8 +58,7 @@ def render_rank(items: list[dict[str, Any]]) -> str:
         # 按阶段 × ATR × 置信度差异化仓位
         major_stage = str(item.get("major_stage") or "蓄势")
         stage_mult = STAGE_STRENGTH.get(major_stage, 0.5)
-        conf = float(item.get("fusion_confidence") or 0.5)
-        final_cap = round(base_cap * stage_mult * conf)
+        final_cap = round(base_cap * stage_mult)
         final_cap = max(2, min(final_cap, 25))  # 夹在 2%-25%
         # 仓位理由
         cap_reason_parts = []
@@ -80,8 +70,9 @@ def render_rank(items: list[dict[str, Any]]) -> str:
             cap_reason_parts.append(major_stage)
         if atr_ratio >= 0.03:
             cap_reason_parts.append("波幅偏高")
-        if conf < 0.4:
-            cap_reason_parts.append(f"置信{conf:.1f}")
+        res_grade = extract_resonance_grade(item)
+        if res_grade in ("conflict", "momentum_veto"):
+            cap_reason_parts.append(resonance_grade_label(res_grade))
         cap_reason = " × ".join(cap_reason_parts) if cap_reason_parts else ""
         atr_pct = (atr_ratio or 0) * 100
 
@@ -117,9 +108,9 @@ def render_rank(items: list[dict[str, Any]]) -> str:
             buy_text = f"买入区已过期（{buy_low:.2f}）"
 
         res_label = resonance_grade_label(extract_resonance_grade(item))
-        lines.append(f"{medal}  {name}  {rs}  {current:.2f}  {atr_text}  共振{res_label}")
+        lines.append(f"{medal}  {name}  {rs}  {current:.2f}  {atr_text}  {res_label}")
         if reason_line:
-            lines.append(f"    {reason_line}")
+            lines.append(reason_line)
         cap_display = f"仓位 {final_cap}%"
         if cap_reason:
             cap_display += f"（{cap_reason}）"
@@ -165,6 +156,10 @@ def render_rank(items: list[dict[str, Any]]) -> str:
         "",
         "    不抢跑，等止跌确认再动手。",
     ])
+
+    if any(float(it.get("fusion_confidence") or 0) > 0 for it in sorted_items):
+        lines.append("")
+        lines.append("    fusion 分仅参考，不参与仓位与排序。")
 
     # 信号回测段
     verifications, summary = _pool_signal_verifications(sorted_items)

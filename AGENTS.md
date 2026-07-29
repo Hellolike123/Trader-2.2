@@ -65,7 +65,7 @@ A 股交易决策辅助系统。免费行情 + 缠论 / 威科夫 / 筹码 / ATR
 |-------|--------|----------------|
 | `trader` | 单票分析 + 选股池 | `01-功能包-packages/trader/scripts/final_report.py` / `final_pool.py` |
 | `t0` | 盘中结构参考卡 + 盯盘 | `01-功能包-packages/t0/scripts/final_t0.py` |
-| `review` | 盘后复盘 + 仓位轮动 + 信号追踪 | `01-功能包-packages/review/scripts/final_review.py` / `final_portfolio.py` / `final_tracker.py` |
+| `review` | 盘后复盘 + 仓位轮动 + 信号追踪 + 决策体检 | `01-功能包-packages/review/scripts/final_review.py` / `final_portfolio.py` / `final_tracker.py`（`checkup`） |
 
 运维（非 Skill）：`scripts/run_trader.py`、`scripts/t0_cron.py`、`scripts/wechat_monitor.py`。
 

@@ -7,6 +7,8 @@
   python3 final_tracker.py --check   # 先检查更新信号结果
   python3 final_tracker.py --stock 南网科技      # 单只
   python3 final_tracker.py --days 30           # 天数
+  python3 final_tracker.py checkup --days 90   # 决策体检
+  python3 final_tracker.py --checkup --days 90 # 同上
   python3 final_tracker.py self_check          # 自检
 """
 from __future__ import annotations
@@ -20,6 +22,12 @@ try:
 except ImportError:
     _d = Path(__file__).resolve().parent
     for _ in range(8):
+        _shared = _d / "02-共享模块-shared"
+        if (_shared / "trader_shared").is_dir():
+            if str(_shared) not in sys.path:
+                sys.path.insert(0, str(_shared))
+            import trader_shared
+            break
         if (_d / "trader_shared").is_dir():
             if str(_d) not in sys.path:
                 sys.path.insert(0, str(_d))
@@ -29,20 +37,28 @@ except ImportError:
     else:
         raise
 
-from trader_shared.signal_tracker import show_all, show_single, check_recent
+from trader_shared.signal_tracker import show_all, show_single, check_recent, show_checkup
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Trader Tracking — 信号追踪面板")
+    parser.add_argument("command", nargs="?", default=None, help="子命令: checkup")
     parser.add_argument("--check", action="store_true", help="先检查更新信号结果")
+    parser.add_argument("--checkup", action="store_true", help="决策体检（允许买 vs 禁止买）")
     parser.add_argument("--days", type=int, default=90, help="回溯 N 天（默认90天）")
     parser.add_argument("--stock", default=None, help="查看单只股票")
+    parser.add_argument("--verbose", action="store_true", help="体检展开详情")
     args = parser.parse_args()
 
-    # Handle subcommands from signal_tracker.py
-    if hasattr(args, 'command') and args.command:
-        from trader_shared.signal_tracker import main as tracker_main
-        return tracker_main()
+    is_checkup = args.checkup or args.command == "checkup"
+
+    if is_checkup:
+        try:
+            print(show_checkup(days=args.days, verbose=args.verbose))
+        except Exception as exc:
+            print(f"决策体检失败：{exc}", file=sys.stderr)
+            return 1
+        return 0
 
     try:
         # 1. 先执行 backfill（宽窗口 90 天），确保 signal_results.jsonl 有数据
