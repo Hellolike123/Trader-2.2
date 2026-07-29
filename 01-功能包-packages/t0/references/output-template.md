@@ -1,10 +1,11 @@
-# Output Template — t0
+# Output Template — t0（策略 v2）
 
-> **This is the absolute truth for valid output.** Never generate output format from memory.
+> **This is the absolute truth for valid output.** Never generate output format from memory.  
+> 产品法源：`docs/t0-strategy-v2.md` — 结构参考卡 · 人决策 · 不做机械可执行指令。
 
-## Execution Card Output
+## Structure Card Output
 
-Markdown output from `render_markdown()` — used when `final_t0.py` is invoked without `--monitor`.
+Markdown from `render_markdown()` — `final_t0.py` without `--monitor`.
 
 Must start with `🎯`:
 
@@ -12,88 +13,76 @@ Must start with `🎯`:
 🎯 {name}（{symbol}）{current_price}（{change_pct}）
   → {conclusion}
 
-📌 执行
+📌 结构
+当前：观望 ｜ 止损参考：{stop}
+{no_position_line}
 低吸：{buy_display}
 高抛：{sell_display}
 {buy_tp_line}
 {sell_tp_line}
 VWAP {vwap}
 
-🔗 信号
-  价格行为 {ab_status}（{ab_detail}） ｜ 威科夫 {wyck_status}（{wyck_type}） ｜ 动量 {mom_status}
-  失效：{failure_conditions}
+🔗 参考
+  评分 {score}/100 · 仅供结构参考，不构成执行指令
+  {lights_line}
+  看法失效：{failure_conditions}
 
 💰 {capital_line}
-  {tick_details}
 
 {account_section}
 ```
 
-### Conclusion（一句话结论）
+### Conclusion（一句话，结构态）
 
-由 `_build_conclusion()` 根据三重共振状态生成：
+由 `_build_conclusion()` 生成，**只描述位置/强弱**，禁止买卖指令句。
 
-| 条件 | 结论 |
+| 元素 | 示例 |
 |------|------|
-| 买状态=可执行 + 三重共振买 | 三重共振买 → 可低吸 |
-| 卖状态=可执行 + 三重共振卖 | 三重共振卖 → 可高抛 |
-| 买/卖状态=可执行 + 未共振 | 触发但未共振 → 等确认再操作 |
-| ≥2 盏买灯 | 部分共振（买）→ 关注，等第三盏灯 |
-| ≥2 盏卖灯 | 部分共振（卖）→ 关注，等第三盏灯 |
-| 其他 | 暂不操作 |
+| vs VWAP | 价在VWAP上 / 价在VWAP下 / 价近VWAP |
+| 评分带 | 结构偏强(n) / 结构中性偏上(n) / 结构偏弱(n) |
+| 关注区 | 近低吸关注区 / 近高抛关注区（若状态命中） |
+| 持仓 | 无底仓（无持仓时） |
+| 收尾 | 宜观察 · 人决策 |
 
-### 执行价（低吸/高抛）
+禁止结论出现：`可低吸` / `可加仓` / `可执行` / `三重共振买` / `轻仓试探`（作为系统指令）。
 
-- 状态为"可执行"时：显示 `可执行 {exec_price}～{acceptable_price}`
-- 其他状态：显示 `价区{zone}｜价格行为{ab}｜威科夫{wyck}`（参考价）
-- 信号棒价格远离现价 >20% 自动过滤
+### 结构区（原「执行」）
 
-### 止盈（按方向拆分）
+- 标题固定 `📌 结构`（不再用「📌 执行」作默认主标题）。
+- 价到关注区：显示 `关注 a～b（参考）`，**禁止** `可执行 a～b`。
+- 无底仓：必须有一行 `持仓：无底仓 · 仅结构参考，不做 T 召唤`。
+- 止盈行若有：仍可写低吸止盈/高抛止盈价，语义为参考。
 
-- 低吸止盈：高于现价的止盈价，显示 `低吸止盈：{prices}`
-- 高抛止盈：低于现价的止盈价，显示 `高抛止盈：{prices}`
-- 有 risk_r > 0 且有 exit_items 时才显示
+### 参考区（原「信号/三重共振」）
 
-### 三重共振（信号区）
+- 标题 `🔗 参考`。
+- 五条件评分或旧理论灯均可展示，句末或独立行必须含：  
+  `仅供结构参考，不构成执行指令`
+- **禁止**：`三重共振 → 可执行` / `部分共振 → 等第三盏灯` 等交易许可叙事。
 
-- Al Brooks 价格行为：Always-In 方向 + 信号棒 + follow-through + H/L 回调计数
-- 威科夫：5m（Spring/UT/无供给/放量滞涨）
-- 动量：5m（RSI/MACD/ADX）
-- 信号棒价格远离现价 >20% 自动过滤
+### 看法失效
 
-### 失效条件
+- 前缀：`看法失效：`（非「止损必须卖」指令）。
 
-由 `_build_failure_conditions()` 生成：
-- 跌破止损
-- 价格行为反转（当前买→转卖 / 当前卖→转买）
-- 威科夫反转（当前买→转卖 / 当前卖→转买）
-- 跌回/跌破 VWAP
+### 账户区
 
-### 条件显示规则
+- 仅有持仓/`t0_account` 时显示。
+- 费后空间：用「够门槛/不够门槛（纪律提醒）」，不用「可做/不可做」当下单许可。
 
-- `🎯 标题 + 结论` — 始终显示
-- `📌 执行` — 始终显示（低吸/高抛/止盈/VWAP）
-- `🔗 信号` — 始终显示（三重共振状态 + 失效条件）
-- `💰 资金` — 有净流入数据时显示
-- `降本模式` — 有持仓信息时显示（`--t-mode cost_cut`）
+### VWAP / 数据长度
 
-### VWAP
-
-- 只用今日数据（`today_bars()` 过滤跨日 bar）
-- 距现价 ±20% 内才显示
-
-### 数据长度
-
-- 日线：120 根（`t0_config.LOOKBACK_DAYS`）
-- 15m：800 根
-- 5m：800 根
+- VWAP 只用今日 bar；距现价 ±20% 内才显示。
+- 日线 120；5m/15m 800。
 
 ## Monitor Alert Output
 
-Appears only on state changes from `final_t0.py --monitor`:
+状态变化时推送；话术为 **结构提醒**，禁止「做T指令/可执行」。
 
 ```
-{name} {低吸触发/高抛触发/止损退出} | 现价 xx.xx | {buysell} xx.xx 附近
+🎯 {name} ({symbol}) ─ 盘中结构卡
+🟢 结构提醒：【近低吸关注区】（参考 · 人决策）
+...
+  📥 关注区（参考）：a～b · 是否动手由人决定
 ```
 
-Valid alert patterns: `低吸触发`, `高抛触发`, `止损退出`.
+Valid alert themes: 近低吸关注区 / 近高抛关注区 / 已远离 / 被阻断 / 看法失效。

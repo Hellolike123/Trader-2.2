@@ -390,16 +390,16 @@ def build_alert_message(event: str, plan: dict[str, Any], cost: float | None = N
     current = plan.get("current_price", 0.0)
     
     header_map = {
-        BUY_TRIGGERED: "🟢 今日决策：【低吸已触发】 (共振完美，可执行)",
-        SELL_TRIGGERED: "🟢 今日决策：【高抛已触发】 (压力显现，请止盈)",
-        BUY_EXPIRED: "⏸️ 今日决策：【已错过】 (价格已涨超，勿追)",
-        SELL_EXPIRED: "⏸️ 今日决策：【已错过】 (价格已回落)",
-        BUY_BLOCKED: "🚨 今日决策：【被阻断】 (禁止接飞刀！)",
-        SELL_BLOCKED: "🚨 今日决策：【被阻断】 (高抛失效！)",
-        BUY_INVALIDATED: "⚠️ 今日决策：【支撑跌破】 (已失效)",
-        SELL_INVALIDATED: "⚠️ 今日决策：【阻力突破】 (已失效)",
+        BUY_TRIGGERED: "🟢 结构提醒：【近低吸关注区】（参考 · 人决策）",
+        SELL_TRIGGERED: "🟢 结构提醒：【近高抛关注区】（参考 · 人决策）",
+        BUY_EXPIRED: "⏸️ 结构提醒：【低吸关注区已远离】（勿追）",
+        SELL_EXPIRED: "⏸️ 结构提醒：【高抛关注区已回落】",
+        BUY_BLOCKED: "🚨 结构提醒：【低吸侧被阻断】（风险偏高）",
+        SELL_BLOCKED: "🚨 结构提醒：【高抛侧被阻断】",
+        BUY_INVALIDATED: "⚠️ 结构提醒：【支撑参考跌破】（看法失效）",
+        SELL_INVALIDATED: "⚠️ 结构提醒：【阻力参考突破】（看法失效）",
     }
-    header = f"🎯 {name} ({symbol}) ─ 盘中极简导航\n{header_map.get(event, '🔍 今日决策：【观察中】')}"
+    header = f"🎯 {name} ({symbol}) ─ 盘中结构卡\n{header_map.get(event, '🔍 结构提醒：【观察中】')}"
     
     levels = _build_ladder_levels(plan)
     ladder = _render_price_ladder(current, levels)
@@ -411,28 +411,36 @@ def build_alert_message(event: str, plan: dict[str, Any], cost: float | None = N
     tape_reason = tape.get("reason", "")
     
     if event == BUY_TRIGGERED:
-        summary.append(f"价格在 {price(model.get('observation_price'))} 企稳，{tape_reason or '多头反攻确认'}！")
-        summary.append(f"* 📥 【做T指令】：动用部分现金，在 **{(model.get('execution_price') or current):.2f} - {(model.get('acceptable_price') or current):.2f}** 之间分批低吸。")
+        summary.append(f"价格在 {price(model.get('observation_price'))} 一带，{tape_reason or '结构触及低吸关注区'}。")
+        summary.append(
+            f"  📥 关注区（参考）：{(model.get('execution_price') or current):.2f}"
+            f"～{(model.get('acceptable_price') or current):.2f} · 是否动手由人决定"
+        )
         if model.get("acceptable_price"):
-            summary.append(f"* 🚫 【追高防线】：最高不超 **{model.get('acceptable_price'):.2f}**，再高不追。")
+            summary.append(f"  🚫 追高参考上限：{model.get('acceptable_price'):.2f}")
         if model.get("invalid_price"):
-            summary.append(f"* ⚠️ 【日内止损】：跌破 **{model.get('invalid_price'):.2f}** 做T单必须止损。")
+            summary.append(f"  ⚠️ 看法失效参考：跌破 {model.get('invalid_price'):.2f}")
     elif event == SELL_TRIGGERED:
-        summary.append(f"价格接近 {price(model.get('observation_price'))} 压力位，{tape_reason or '空头压制明显'}！")
-        summary.append(f"* 📤 【做T指令】：在 **{(model.get('acceptable_price') or current):.2f} - {(model.get('execution_price') or current):.2f}** 之间分批高抛。")
+        summary.append(f"价格接近 {price(model.get('observation_price'))} 压力参考，{tape_reason or '结构触及高抛关注区'}。")
+        summary.append(
+            f"  📤 关注区（参考）：{(model.get('acceptable_price') or current):.2f}"
+            f"～{(model.get('execution_price') or current):.2f} · 是否动手由人决定"
+        )
     elif event == BUY_BLOCKED:
         reasons = model.get("blocked_reasons") or ["强阻断"]
-        summary.append(f"盘中发现抛压：{'、'.join(str(r) for r in reasons)}。")
-        summary.append("目前空头力量较大，千万不要伸手接飞刀！底仓卧倒，做T现金锁死，今天直接放弃低吸。")
+        summary.append(f"盘中抛压偏重：{'、'.join(str(r) for r in reasons)}。")
+        summary.append("结构偏空 · 不宜抄 · 人决策")
     elif event == BUY_INVALIDATED:
-        summary.append(f"价格放量跌破了 **{model.get('invalid_price', '支撑线')}**。")
-        summary.append("该位置已失效，多头防线失守，今天放弃该位置的低吸计划。")
+        summary.append(f"价格跌破支撑参考 {model.get('invalid_price', '—')}。")
+        summary.append("该低吸看法失效 · 人决策是否离场")
     elif event == BUY_EXPIRED:
-        summary.append(f"价格已反弹至 **{current:.2f}**，超过了我们的最高心理价位 **{model.get('acceptable_price', '上限')}**。")
-        summary.append("虽然错过了最低点，但不要追高，宁可错过也不要做错。")
+        summary.append(
+            f"价格已至 {current:.2f}，高于关注上限 {model.get('acceptable_price', '—')}。"
+        )
+        summary.append("关注区已远离 · 勿追 · 人决策")
     else:
-        summary.append(f"触发了 {event}，请根据交易纪律严格执行。")
-        
+        summary.append(f"结构事件 {event} · 仅供参考，不构成执行指令")
+
     return f"{header}\n{ladder}\n" + "\n".join(summary)
 
 

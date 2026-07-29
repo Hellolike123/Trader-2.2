@@ -4,7 +4,7 @@
 
 ## Old Output Detection
 
-If output contains any of these, rerun the script:
+If output contains any of these, rerun the script（含 v1 指令叙事与旧四段式）:
 
 ```
 T0 执行卡
@@ -21,7 +21,18 @@ T0 执行卡
 🕒 今日关键事件
 💰 仓位管控
 👀 下一步只盯
+三重共振买
+三重共振卖
+三重共振 → 可执行
+可执行 
+可低吸
+可加仓
+做T指令
+📌 执行
+🔗 信号
 ```
+
+v2 合法骨架：`🎯` + 结构结论 + `📌 结构` + `🔗 参考` + 可选 `💰` / 降本。
 
 ## Additional Rules
 

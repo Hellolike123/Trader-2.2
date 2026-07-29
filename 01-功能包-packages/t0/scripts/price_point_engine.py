@@ -1032,34 +1032,14 @@ def choose_today_action(report_data: dict[str, Any], buy: dict[str, Any], sell: 
     if "触发过期" in {buy["status"], sell["status"]}:
         return "等待下一次触发"
 
-    # 三重共振灯色：绿灯才给操作建议，黄灯/红灯只观察
-    resonance = report_data.get("resonance") or {}
-    buy_green = resonance.get("buy_green", False)
-    sell_red = resonance.get("sell_red", False)
-
-    # cost_cut 模式：优先高抛（先卖后买降本）
-    t_mode = (report_data.get("t0_account") or {}).get("mode", "")
-    is_cost_cut = t_mode == "cost_cut"
-
+    # v2：today_action 只描述结构，不因 buy_green 下达交易指令
     if buy["status"] == "已触发" and sell["status"] != "已触发":
-        if buy_green:
-            return "低吸优先"
-        return "等共振确认再低吸"
+        return "价近低吸关注区 · 人决策"
     if sell["status"] == "已触发" and buy["status"] != "已触发":
-        if sell_red:
-            return "高抛优先"
-        return "等共振确认再高抛"
+        return "价近高抛关注区 · 人决策"
     if buy["status"] == "已触发" and sell["status"] == "已触发":
-        # 双触发：cost_cut 优先高抛，否则按距离选
-        if is_cost_cut:
-            return "高抛优先（降本模式）"
-        current = float(report_data["current_price"])
-        buy_mid = (buy["zone"]["lower"] + buy["zone"]["upper"]) / 2
-        sell_mid = (sell["zone"]["lower"] + sell["zone"]["upper"]) / 2
-        if buy_green and sell_red:
-            return "低吸优先" if abs(current - buy_mid) <= abs(current - sell_mid) else "高抛优先"
-        return "等共振确认"
-    return "等待，不主动操作"
+        return "双侧关注区皆近 · 人决策"
+    return "等待，结构观察 · 人决策"
 
 
 def _atr_volatility_label(atr_ratio: float) -> tuple[str, str]:
@@ -1138,6 +1118,7 @@ def check_resonance(report_data, zones, state, ab_result=None):
     # 条件1: EMA 排列
     score_ema = 0
     ema_reason = "EMA数据不足"
+    e5 = e10 = e20 = 0.0
     if n >= 20:
         ema5 = calculate_ema(closes, 5)
         ema10 = calculate_ema(closes, 10)
@@ -1148,20 +1129,26 @@ def check_resonance(report_data, zones, state, ab_result=None):
         e5_p = ema5[-2] if len(ema5) >= 2 else e5
         e10_p = ema10[-2] if len(ema10) >= 2 else e10
         if e5 > e10 > e20:
-            score_ema = 20; ema_reason = f"EMA5>{e5:.2f}>EMA10>{e10:.2f}>EMA20>{e20:.2f} 多头"
+            score_ema = 20
+            ema_reason = f"EMA5>{e5:.2f}>EMA10>{e10:.2f}>EMA20 多头"
         elif e5 < e10 < e20:
             ema_reason = f"EMA5<EMA10<EMA20 空头"
         else:
-            ema_reason = f"EMA排列不整"
+            ema_reason = "EMA排列不整"
         # 死叉检测（用于卖出）
         ema_death_cross = e5_p > e10_p and e5 <= e10
     else:
         ema_death_cross = False
 
-    # 条件2: VWAP
-    vwap = calculate_vwap_from_bars(bars)
+    # 条件2: VWAP — 必须与结构区同源：仅今日 session（禁止跨日把 VWAP 拉飞）
+    session = today_bars(bars)
+    vwap = calculate_vwap_from_bars(session) if session else calculate_vwap_from_bars(bars)
     score_vwap = 20 if vwap and current > vwap else 0
-    vwap_reason = f"VWAP{vwap:.2f} {'上方' if vwap and current > vwap else '下方'}" if vwap else "VWAP无数据"
+    if vwap:
+        side = "上方" if current > vwap else ("下方" if current < vwap else "附近")
+        vwap_reason = f"今日VWAP{vwap:.2f}{side}"
+    else:
+        vwap_reason = "VWAP无数据"
 
     # 条件3: 箱体（最近20根5m的高低）
     box_reason = "箱体数据不足"
@@ -1198,42 +1185,64 @@ def check_resonance(report_data, zones, state, ab_result=None):
         else:
             vol_reason = f"量{vol_ratio:.1f}x"
 
-    # 条件5: ATR 波动
+    # 条件5: ATR 波动（5m 上 >2% 很严，常不达标，文案标明门槛）
     score_atr = 0
     atr_reason = "ATR数据不足"
     if atr > 0 and current > 0:
         atr_pct = atr / current * 100
         if atr_pct > 2:
             score_atr = 20
-            atr_reason = f"ATR{atr_pct:.1f}%"
+            atr_reason = f"ATR{atr_pct:.1f}%够"
         else:
-            atr_reason = f"ATR{atr_pct:.1f}% 波动不足"
+            atr_reason = f"ATR{atr_pct:.1f}%<2%门槛(5m常不达标)"
 
-    # 总分
+    # 总分（偏多五条件）
     buy_score = score_ema + score_vwap + score_box + score_vol + score_atr
     buy_green = buy_score >= 40
 
-    # 卖出: 死叉 OR 低于VWAP OR 接近箱顶
-    sell_ema = 20 if (n >= 20 and e5 < e10 if n >= 20 else False) else 0
+    # 偏空检查分（内部统计用；展示层不当「卖出指令」）
+    sell_ema = 20 if (n >= 20 and e5 < e10) else 0
     sell_vwap = 20 if vwap and current < vwap else 0
     if n >= 20 and atr and box_high > 0:
         dist_to_high_s = (box_high - current) / box_high
         sell_box = 20 if dist_to_high_s <= (atr / box_high * 0.8) else 0
     else:
         sell_box = 0
-    sell_score = sell_ema + sell_vwap + sell_box + score_vol + score_atr
-    sell_red = sell_score >= 60
+    # 量/ATR 不重复计入偏空分（避免与偏多分混读）；只计方向性三项
+    sell_score = sell_ema + sell_vwap + sell_box
+    sell_red = sell_score >= 40
 
-    exit_price = vwap if vwap else None
     lights = {
-        "ema": {"buy": score_ema >= 20, "sell": sell_ema >= 20, "reason": ema_reason, "ok": n >= 20},
-        "vwap": {"buy": score_vwap >= 20, "sell": sell_vwap >= 20, "reason": vwap_reason, "ok": vwap is not None,
-                 "buy_price": round(vwap,2) if vwap else None, "sell_price": round(vwap,2) if vwap else None},
-        "box": {"buy": score_box >= 20, "sell": sell_box >= 20, "reason": box_reason, "ok": n >= 20},
-        "volume": {"buy": score_vol >= 20, "sell": score_vol >= 20, "reason": vol_reason, "ok": len(volumes) >= 5},
-        "atr": {"buy": score_atr >= 20, "sell": score_atr >= 20, "reason": atr_reason, "ok": atr > 0},
+        "ema": {
+            "buy": score_ema >= 20, "sell": sell_ema >= 20,
+            "reason": ema_reason, "ok": n >= 20,
+        },
+        "vwap": {
+            "buy": score_vwap >= 20, "sell": sell_vwap >= 20,
+            "reason": vwap_reason, "ok": vwap is not None,
+            "buy_price": round(vwap, 2) if vwap else None,
+            "sell_price": round(vwap, 2) if vwap else None,
+        },
+        "box": {
+            "buy": score_box >= 20, "sell": sell_box >= 20,
+            "reason": box_reason, "ok": n >= 20,
+        },
+        "volume": {
+            "buy": score_vol >= 20, "sell": False,  # 量能只作偏多确认，不标「空」
+            "reason": vol_reason, "ok": len(volumes) >= 5,
+        },
+        "atr": {
+            "buy": score_atr >= 20, "sell": False,
+            "reason": atr_reason, "ok": atr > 0,
+        },
     }
-    summary = f"评分{buy_score}/100 " + ("买入" if buy_green else "等待" if buy_score >= 40 else "不交易")
+    # buy_green/sell_red 仅供结构偏强偏弱标签，不驱动「可交易」叙事（v2）
+    if buy_score >= 60:
+        summary = f"评分{buy_score}/100 · 结构偏强（参考）"
+    elif buy_score >= 40:
+        summary = f"评分{buy_score}/100 · 结构中性偏上（参考）"
+    else:
+        summary = f"评分{buy_score}/100 · 结构偏弱（参考）"
     return {
         "buy_green": buy_green, "sell_red": sell_red,
         "score": buy_score, "sell_score": sell_score,
@@ -1254,9 +1263,11 @@ def _calc_atr_from_closes(closes, period=14):
 
 
 def _resonance_summary(lights, buy_green, sell_red):
-    if buy_green: return "绿灯 可交易"
-    if sell_red: return "红灯 应卖出"
-    return "灰灯 等待"
+    if buy_green:
+        return "结构偏强（参考）"
+    if sell_red:
+        return "结构偏弱/卖侧偏强（参考）"
+    return "结构中性（参考）"
 def build_price_point_model(report_data: dict[str, Any], structure_result: dict[str, Any] | None = None) -> dict[str, Any]:
     data = dict(report_data)  # copy 防止副作用
     now = data.get("now") or datetime.now()

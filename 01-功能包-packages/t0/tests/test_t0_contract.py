@@ -75,10 +75,17 @@ def test_t0_markdown_contract() -> None:
     markdown = render_markdown(plan)
 
     assert markdown.startswith("🎯")
-    assert "止损：" in markdown
-    assert "低吸还差" in markdown
+    assert "止损" in markdown
+    assert "低吸关注区还差" in markdown or "接近低吸关注区" in markdown
     assert "低吸：" in markdown
     assert "高抛：" in markdown
+    assert "📌 结构" in markdown
+    assert "🔗 参考" in markdown
+    assert "人决策" in markdown
+    assert "可执行" not in markdown
+    assert "可低吸" not in markdown
+    assert "三重共振" not in markdown
+    assert "无底仓" in markdown
     assert validate(markdown) == []
 
 
@@ -129,8 +136,88 @@ def test_t0_markdown_hides_observation_when_space_or_data_invalid() -> None:
 
     assert "低吸：" in markdown
     assert "高抛：" in markdown
-    assert "止损：" in markdown
+    assert "止损" in markdown
+    assert "可执行" not in markdown
+    assert "可低吸" not in markdown
     assert validate(markdown) == []
+
+
+def test_t0_v2_no_exec_command_when_triggered() -> None:
+    """价到关注区时仍禁止「可执行/可低吸」指令句。"""
+    plan = sample_t0_plan()
+    plan["buy"].update({
+        "status": "已触发",
+        "execution_price": 11.94,
+        "acceptable_price": 11.98,
+        "invalid_price": 11.72,
+    })
+    plan["resonance"] = {
+        "score": 80,
+        "sell_score": 20,
+        "buy_green": True,
+        "sell_red": False,
+        "lights": {
+            "ema": {"buy": True, "sell": False, "reason": "多头", "ok": True},
+            "vwap": {"buy": True, "sell": False, "reason": "今日VWAP11.90上方", "ok": True},
+            "box": {"buy": True, "sell": False, "reason": "近底", "ok": True},
+            "volume": {"buy": True, "sell": False, "reason": "放量", "ok": True},
+            "atr": {"buy": False, "sell": False, "reason": "ATR0.3%<2%门槛(5m常不达标)", "ok": True},
+        },
+        "summary": "评分80/100 · 结构偏强（参考）",
+    }
+    plan["vwap"] = 11.90
+    md = render_markdown(plan)
+    assert "关注 11.94～11.98（参考）" in md
+    assert "可执行" not in md
+    assert "可低吸" not in md
+    assert "可加仓" not in md
+    assert "不构成执行指令" in md
+    assert "人决策" in md
+    assert "多✓" in md
+    assert "未达" in md
+    assert "卖侧" not in md
+    assert validate(md) == []
+
+
+def test_check_resonance_uses_today_vwap() -> None:
+    """评分 VWAP 必须用今日 session，与结构区同源。"""
+    from datetime import datetime, timedelta
+    from price_point_engine import check_resonance
+
+    # 构造：昨日高价 bar + 今日低位 session → 跨日 VWAP 会被拉高，今日 VWAP 应偏低
+    now = datetime(2026, 7, 29, 11, 0, 0)
+    bars = []
+    # 昨日 10 根，高价 50
+    for i in range(10):
+        t = now.replace(day=28, hour=10) + timedelta(minutes=5 * i)
+        bars.append({
+            "time": t.strftime("%Y-%m-%d %H:%M:%S"),
+            "open": 50.0, "high": 50.5, "low": 49.5, "close": 50.0, "volume": 1000,
+        })
+    # 今日 30 根，价约 40，均量
+    for i in range(30):
+        t = now.replace(hour=9, minute=35) + timedelta(minutes=5 * i)
+        px = 40.0 + (i % 3) * 0.1
+        bars.append({
+            "time": t.strftime("%Y-%m-%d %H:%M:%S"),
+            "open": px, "high": px + 0.2, "low": px - 0.2, "close": px, "volume": 1000,
+        })
+    current = 40.2
+    report = {
+        "current_price": current,
+        "kline_5m_completed": bars,
+        "kline_5m": bars,
+    }
+    res = check_resonance(report, {}, {})
+    vwap_reason = (res.get("lights") or {}).get("vwap", {}).get("reason") or ""
+    assert "今日VWAP" in vwap_reason
+    # 今日 VWAP 应在 ~40 一带，不应被昨日 50 拉到 45+
+    vwap_price = (res.get("lights") or {}).get("vwap", {}).get("buy_price")
+    assert vwap_price is not None
+    assert 39.0 <= float(vwap_price) <= 42.0, vwap_price
+    # 现价在今日 VWAP 上 → 偏多条件应亮
+    assert res["lights"]["vwap"]["buy"] is True
+    assert res["lights"]["vwap"]["sell"] is False
 
 
 def sample_t0_plan() -> dict:

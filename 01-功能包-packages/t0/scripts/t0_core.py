@@ -325,42 +325,46 @@ def render_markdown(plan: dict[str, Any]) -> str:
         has_tick_data = len(tick_data) > 0
         big_order = analyze_big_orders(bars, tick_data=tick_data, focus_prices=focus_prices, trade_date=trade_date, order_book=(plan.get("data") or {}).get("order_book"))
 
-    from t0_config import TREND_FILTER_EXTREME_ONLY
+    from t0_config import TREND_FILTER_EXTREME_ONLY  # noqa: F401 — keep import side for config loaders
 
-    current_action = '低吸' if buy_state == '可执行' else '高抛' if sell_state == '可执行' else '不动'
+    has_pos = _has_position(plan)
+    # v2：不做「系统让你低吸/高抛」；状态只服务结构描述
+    current_action = "观望"
 
-    stop_price = price(numeric_or_none(buy.get('invalid_price')))
+    stop_price = price(numeric_or_none(buy.get("invalid_price")))
 
-    # ── 距触发价距离计算 ──
+    # ── 距关注价距离（提示，非指令） ──
     distance_lines: list[str] = []
     if current_price is not None:
         buy_obs_price = numeric_or_none(buy.get("observation_price"))
         sell_obs_price = numeric_or_none(sell.get("observation_price"))
         if buy_obs_price is not None and buy_state not in ("可执行", "数据不足", ""):
             gap_pct = (current_price - buy_obs_price) / buy_obs_price
-            # 估算5分钟K线数量（假设每根约0.3%振幅）
             est_bars = int(gap_pct / 0.003) if gap_pct > 0 else 0
             if gap_pct > 0.005:
-                distance_lines.append(f"低吸还差 {gap_pct*100:.1f}%（约{est_bars}根5m线）")
+                distance_lines.append(f"低吸关注区还差 {gap_pct*100:.1f}%（约{est_bars}根5m线）")
             elif gap_pct > 0:
-                distance_lines.append(f"低吸接近关注价，差 {gap_pct*100:.1f}%")
+                distance_lines.append(f"接近低吸关注区，差 {gap_pct*100:.1f}%")
         if sell_obs_price is not None and sell_state not in ("可执行", "数据不足", ""):
             gap_pct = (sell_obs_price - current_price) / current_price
             est_bars = int(gap_pct / 0.003) if gap_pct > 0 else 0
             if gap_pct > 0.005:
-                distance_lines.append(f"高抛还差 {gap_pct*100:.1f}%（约{est_bars}根5m线）")
+                distance_lines.append(f"高抛关注区还差 {gap_pct*100:.1f}%（约{est_bars}根5m线）")
             elif gap_pct > 0:
-                distance_lines.append(f"高抛接近关注价，差 {gap_pct*100:.1f}%")
+                distance_lines.append(f"接近高抛关注区，差 {gap_pct*100:.1f}%")
 
-    # ── 段1: 触发价（多理论参考价位） ──
+    # ── 段1: 结构参考价（非执行指令） ──
     trigger_lines = [
-        "📌 触发价",
-        f"当前：{current_action} ｜ 止损：{stop_price}",
+        "📌 结构",
+        f"当前：{current_action} ｜ 止损参考：{stop_price}",
     ]
+    if not has_pos:
+        trigger_lines.append("持仓：无底仓 · 仅结构参考，不做 T 召唤")
+
     _mzones = (plan.get("model") or {}).get("zones") or {}
     _res = plan.get("resonance") or {}
 
-    # 低吸价位
+    # 低吸关注价
     _cur = numeric_or_none(plan.get("current_price")) or 0
     _zone_buy = _mzones.get("buy_zone", {}).get("main_support")
     _ab_bp_raw = (_res.get("lights") or {}).get("ab", {}).get("buy_price")
@@ -372,9 +376,9 @@ def render_markdown(plan: dict[str, Any]) -> str:
         _exec = numeric_or_none(buy.get("execution_price"))
         _acc = numeric_or_none(buy.get("acceptable_price"))
         if _exec and _acc:
-            trigger_lines.append(f"低吸：可执行 {_exec:.2f}～{_acc:.2f}")
+            trigger_lines.append(f"低吸：关注 {_exec:.2f}～{_acc:.2f}（参考）")
         else:
-            trigger_lines.append(f"低吸：{buy_state}，{buy_obs}")
+            trigger_lines.append(f"低吸：价近关注区 · {buy_obs}")
     else:
         _parts = []
         if _zone_buy:
@@ -386,7 +390,7 @@ def render_markdown(plan: dict[str, Any]) -> str:
         _ref_str = "｜".join(_parts) if _parts else "暂无"
         trigger_lines.append(f"低吸：{_ref_str}")
 
-    # 高抛价位
+    # 高抛关注价
     _zone_sell = _mzones.get("sell_zone", {}).get("main_resistance")
     _ab_sp_raw = (_res.get("lights") or {}).get("ab", {}).get("sell_price")
     _ab_sp = None
@@ -397,9 +401,9 @@ def render_markdown(plan: dict[str, Any]) -> str:
         _exec = numeric_or_none(sell.get("execution_price"))
         _acc = numeric_or_none(sell.get("acceptable_price"))
         if _exec and _acc:
-            trigger_lines.append(f"高抛：可执行 {_exec:.2f}～{_acc:.2f}")
+            trigger_lines.append(f"高抛：关注 {_exec:.2f}～{_acc:.2f}（参考）")
         else:
-            trigger_lines.append(f"高抛：{sell_state}，{sell_obs}")
+            trigger_lines.append(f"高抛：价近关注区 · {sell_obs}")
     else:
         _parts = []
         if _zone_sell:
@@ -520,73 +524,91 @@ def render_markdown(plan: dict[str, Any]) -> str:
     # ── 段6: 降本模式（仅 cost_cut 时显示） ──
     account_lines = _build_account_section(plan)
 
-    # ── 组装输出：执行卡风格 ──
+    # ── 组装输出：结构参考卡（v2，人决策） ──
     lines = [
         f"🎯 {plan.get('name','')}（{plan.get('symbol','')}）{current_text}（{pct_text(numeric_or_none(plan.get('current_change_pct')))}）",
     ]
 
-    # 结论：一句话告诉用户做什么
     conclusion = _build_conclusion(plan, buy_state, sell_state)
     lines.append(f"  → {conclusion}")
 
-    # 执行价
     lines.append("")
-    lines.append("📌 执行")
-    lines.extend(trigger_lines[1:])  # 跳过 "📌 触发价" 标题
+    lines.append("📌 结构")
+    lines.extend(trigger_lines[1:])  # 跳过段内标题
 
     # VWAP（只在距现价±20%内显示）
     vwap = plan.get("vwap")
     if vwap and current_price and abs(vwap - current_price) / current_price <= 0.2:
         lines.append(f"VWAP {vwap:.2f}")
 
-    # 信号状态（一行）
     lines.append("")
-    lines.append("🔗 信号")
+    lines.append("🔗 参考")
     resonance_lines_short = _build_resonance_section(plan)
     if resonance_lines_short:
         lines.extend(resonance_lines_short)
+    else:
+        lines.append("  暂无评分/结构明细 · 仅供参考，不构成执行指令")
 
-    # 失效条件
     failure = _build_failure_conditions(plan, buy, sell, stop_price, buy_state, sell_state)
     if failure:
-        lines.append(f"  失效：{failure}")
+        lines.append(f"  看法失效：{failure}")
 
-    # 资金（一行）
     if capital_lines:
-        # 只取净流入那行
         for cl in capital_lines:
             if "净流入" in cl:
                 lines.append(f"💰 {cl}")
                 break
 
-    # 降本模式
     if account_lines:
         lines.extend(account_lines)
 
     return "\n".join(lines)
 
 
-def _build_conclusion(plan: dict[str, Any], buy_state: str, sell_state: str) -> str:
-    """一句话结论：基于评分系统输出操作建议。"""
-    resonance = plan.get("resonance") or {}
-    score = resonance.get("score", 0)
-    buy_green = resonance.get("buy_green", False)
+def _has_position(plan: dict[str, Any]) -> bool:
+    acct = plan.get("t0_account") or {}
+    try:
+        return int(acct.get("total_shares") or 0) > 0
+    except (TypeError, ValueError):
+        return False
 
-    if buy_green:
-        if score >= 80:
-            return "极强信号 → 可加仓"
-        elif score >= 60:
-            return "强信号 → 可低吸"
+
+def _build_conclusion(plan: dict[str, Any], buy_state: str, sell_state: str) -> str:
+    """一句话结构结论（v2）：只描述位置/强弱，不下达买卖指令。"""
+    resonance = plan.get("resonance") or {}
+    score = int(resonance.get("score") or 0)
+    vwap = plan.get("vwap")
+    current = numeric_or_none(plan.get("current_price"))
+    parts: list[str] = []
+
+    if vwap and current and vwap > 0:
+        rel = (current - vwap) / vwap
+        if rel > 0.005:
+            parts.append("价在VWAP上")
+        elif rel < -0.005:
+            parts.append("价在VWAP下")
         else:
-            return "弱信号 → 轻仓试探"
-    elif buy_state == "可执行":
-        return "触发但评分不足 → 等条件改善"
+            parts.append("价近VWAP")
 
     if score >= 60:
-        return "评分充足 → 等触发价到位"
+        parts.append(f"结构偏强({score})")
     elif score >= 40:
-        return "观察中 → 评分尚可，等信号"
-    return "暂不操作 → 条件不满足"
+        parts.append(f"结构中性偏上({score})")
+    elif score > 0:
+        parts.append(f"结构偏弱({score})")
+    else:
+        parts.append("结构观察")
+
+    if buy_state == "可执行":
+        parts.append("近低吸关注区")
+    if sell_state == "可执行":
+        parts.append("近高抛关注区")
+
+    if not _has_position(plan):
+        parts.append("无底仓")
+
+    parts.append("宜观察 · 人决策")
+    return " · ".join(parts)
 
 
 def _build_failure_conditions(plan: dict[str, Any], buy: dict, sell: dict,
@@ -646,7 +668,7 @@ def _build_account_section(plan: dict[str, Any]) -> list[str]:
     if worth:
         net_pct = worth.get("net_pct", 0)
         min_edge = worth.get("min_edge_pct", 0.8)
-        worth_text = "可做" if worth.get("worth") else "不可做"
+        worth_text = "够门槛（纪律提醒）" if worth.get("worth") else "不够门槛（慎动）"
         lines.append(f"  费后空间：约 {net_pct:.1f}%（门槛 {min_edge}%）→ {worth_text}")
 
     if not acct.get("allow_reverse_t", True):
@@ -709,101 +731,107 @@ def _format_theory_price_line(name: str, status: str, info: dict, reason: str) -
     return f"  {name} {status}（{reason}{price_str}）"
 
 
+def _format_score_light(label: str, info: dict[str, Any]) -> str:
+    """五条件灯：多✓ / 空✓ / 未达 —— 禁止「卖=下单」误读。"""
+    reason = str(info.get("reason") or "").strip()
+    # 原因过长时截断，避免刷屏
+    if len(reason) > 28:
+        reason = reason[:26] + "…"
+    if info.get("buy"):
+        mark = "多✓"
+    elif info.get("sell"):
+        mark = "空✓"
+    else:
+        mark = "未达"
+    return f"{label}{mark}" + (f"({reason})" if reason else "")
+
+
 def _build_resonance_section(plan: dict[str, Any]) -> list[str]:
-    """构建三重共振状态输出段（红黄绿灯风格）。"""
+    """结构/评分参考段（v2）：只展示，不映射为可执行指令。"""
     resonance = plan.get("resonance")
     if not resonance:
         return []
 
-    lights = resonance.get("lights", {})
-    buy_green = resonance.get("buy_green", False)
-    sell_red = resonance.get("sell_red", False)
-
-    # 统计亮灯数
-    buy_count = sum(1 for v in lights.values() if v.get("buy"))
-    sell_count = sum(1 for v in lights.values() if v.get("sell"))
-    max_count = max(buy_count, sell_count)
-
-    # ── Al Brooks 价格行为详情 ──
-    ab_info = lights.get("ab", {})
-    ab_result = plan.get("ab_result") or {}
-    if ab_info.get("buy"):
-        ab_status = "✅ 买"
-    elif ab_info.get("sell"):
-        ab_status = "✅ 卖"
-    elif not ab_info.get("ok"):
-        ab_status = "❓ 无数据"
-    else:
-        ab_status = "❌ 未亮"
-    ab_detail = ab_info.get("reason") or "无信号"
-
-    lines = []
-    # Al Brooks 简化详情
-    ai = ab_result.get("always_in", "neutral")
-    quality = ab_result.get("signal_bar_quality", "none")
-    hl = ab_result.get("hl_count") or {}
-    hl_type = hl.get("type", "none")
-
-    # 简化文案：只保留方向 + 关键信号
-    ab_detail_text = ab_detail
-    if ai != "neutral":
-        ai_label = "多" if ai == "bull" else "空"
-        if quality != "none":
-            ab_detail_text = f"{ai_label}头·{quality}信号棒"
+    lights = resonance.get("lights") or {}
+    lines: list[str] = []
+    score = resonance.get("score")
+    if score is not None:
+        if score >= 60:
+            band = "偏强"
+        elif score >= 40:
+            band = "中性偏上"
         else:
-            ab_detail_text = f"{ai_label}头趋势"
-    elif quality != "none":
-        ab_detail_text = f"{quality}信号棒"
+            band = "偏弱"
+        lines.append(
+            f"  结构分 {score}/100（{band}）· EMA/VWAP/箱体/量/ATR 各20 · 仅供结构参考，不构成执行指令"
+        )
 
-    # Al Brooks 价格行
-    ab_price_line = _format_theory_price_line("价格行为", ab_status, ab_info, ab_detail_text)
-    lines.append(ab_price_line)
-
-    # ── 威科夫详情 ──
-    wyck_info = lights.get("wyckoff", {})
-    if wyck_info.get("buy"):
-        wyck_status = "✅ 买"
-    elif wyck_info.get("sell"):
-        wyck_status = "✅ 卖"
+    # 五条件评分灯（生产 check_resonance）
+    score_keys = [
+        ("ema", "EMA"),
+        ("vwap", "VWAP"),
+        ("box", "箱体"),
+        ("volume", "量能"),
+        ("atr", "ATR"),
+    ]
+    if any(k in lights for k, _ in score_keys):
+        parts = []
+        for key, label in score_keys:
+            info = lights.get(key) or {}
+            if not info:
+                continue
+            parts.append(_format_score_light(label, info))
+        if parts:
+            # 两行更易扫：前三项位置类 / 后两项确认类
+            lines.append("  " + " ｜ ".join(parts[:3]))
+            if len(parts) > 3:
+                lines.append("  " + " ｜ ".join(parts[3:]))
+        lines.append("  读法：多✓=偏多条件成立 空✓=偏空检查成立 未达=本项没亮 · 非买卖指令")
     else:
-        wyck_status = "❌ 未亮"
-    wyck_reason = wyck_info.get("reason") or "无信号"
-    wyck_price_line = _format_theory_price_line("威科夫", wyck_status, wyck_info, wyck_reason)
-    lines.append(wyck_price_line)
+        # 兼容旧 ab/威科夫/动量灯：降级为参考文案
+        ab_info = lights.get("ab", {})
+        ab_result = plan.get("ab_result") or {}
+        if ab_info or ab_result:
+            if ab_info.get("buy"):
+                ab_status = "偏多"
+            elif ab_info.get("sell"):
+                ab_status = "偏空"
+            elif ab_info and not ab_info.get("ok"):
+                ab_status = "无数据"
+            else:
+                ab_status = "中性"
+            ab_detail = ab_info.get("reason") or "—"
+            ai = ab_result.get("always_in", "neutral")
+            if ai == "bull":
+                ab_detail = "Always-In多 · " + str(ab_detail)
+            elif ai == "bear":
+                ab_detail = "Always-In空 · " + str(ab_detail)
+            lines.append(f"  价格行为 {ab_status}（{ab_detail}）")
 
-    # ── 动量详情 ──
-    mom_info = lights.get("momentum", {})
-    if mom_info.get("buy"):
-        mom_status = "✅ 买"
-    elif mom_info.get("sell"):
-        mom_status = "✅ 卖"
-    elif not mom_info.get("ok"):
-        mom_status = "❓ 无数据"
-    else:
-        mom_status = "❌ 未亮"
-    mom_reason = mom_info.get("reason", "")
-    mom_price_line = _format_theory_price_line("动量", mom_status, mom_info, mom_reason)
-    lines.append(mom_price_line)
+        wyck_info = lights.get("wyckoff", {})
+        if wyck_info:
+            if wyck_info.get("buy"):
+                wyck_status = "偏多"
+            elif wyck_info.get("sell"):
+                wyck_status = "偏空"
+            else:
+                wyck_status = "中性"
+            lines.append(f"  威科夫 {wyck_status}（{wyck_info.get('reason') or '—'}）")
 
-    # ── 各理论检测项诊断 ──
-    diag = _build_theory_diagnostics(plan)
-    if diag:
-        lines.append(diag)
+        mom_info = lights.get("momentum", {})
+        if mom_info:
+            if mom_info.get("buy"):
+                mom_status = "偏多"
+            elif mom_info.get("sell"):
+                mom_status = "偏空"
+            elif not mom_info.get("ok"):
+                mom_status = "无数据"
+            else:
+                mom_status = "中性"
+            lines.append(f"  动量 {mom_status}（{mom_info.get('reason') or '—'}）")
 
-    if buy_green or sell_red:
-        lines.append("  🟢 三重共振 → 可执行")
-    elif max_count >= 2:
-        # 找出没亮的那盏灯
-        off = []
-        for key, label in [("ab", "价格行为"), ("wyckoff", "威科夫"), ("momentum", "动量")]:
-            info = lights.get(key, {})
-            if not info.get("buy") and not info.get("sell"):
-                off.append(label)
-        hint = "等" + "+".join(off) + "确认" if off else "等第三盏灯"
-        lines.append(f"  🟡 部分共振 → {hint}")
-    else:
-        lines.append("  🔴 未共振 → 暂不操作")
-
+    if not any("不构成执行" in ln for ln in lines):
+        lines.append("  仅供结构参考，不构成执行指令")
     return lines
 
 
