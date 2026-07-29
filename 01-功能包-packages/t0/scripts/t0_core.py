@@ -327,7 +327,6 @@ def render_markdown(plan: dict[str, Any]) -> str:
     current_price = numeric_or_none(plan.get('current_price'))
     current_text = "无" if current_price is None else f"{current_price:.2f}"
     big_order = None
-    has_tick_data = False
     if analyze_big_orders and plan.get("data"):
         focus_prices = []
         buy_focus = numeric_or_none(buy.get("observation_price"))
@@ -339,14 +338,15 @@ def render_markdown(plan: dict[str, Any]) -> str:
         bars = (plan.get("data") or {}).get("kline_5m") or []
         trade_date = str(plan.get("analysis_time") or "").split(" ", 1)[0] or None
         tick_data = (plan.get("data") or {}).get("tick_data") or []
-        has_tick_data = len(tick_data) > 0
-        big_order = analyze_big_orders(bars, tick_data=tick_data, focus_prices=focus_prices, trade_date=trade_date, order_book=(plan.get("data") or {}).get("order_book"))
+        big_order = analyze_big_orders(
+            bars,
+            tick_data=tick_data,
+            focus_prices=focus_prices,
+            trade_date=trade_date,
+            order_book=(plan.get("data") or {}).get("order_book"),
+        )
 
     from t0_config import TREND_FILTER_EXTREME_ONLY  # noqa: F401 — keep import side for config loaders
-
-    has_pos = _has_position(plan)
-    # v2：不做「系统让你低吸/高抛」；状态只服务结构描述
-    current_action = "观望"
 
     stop_price = price(numeric_or_none(buy.get("invalid_price")))
 
@@ -355,14 +355,22 @@ def render_markdown(plan: dict[str, Any]) -> str:
     if current_price is not None:
         buy_obs_price = numeric_or_none(buy.get("observation_price"))
         sell_obs_price = numeric_or_none(sell.get("observation_price"))
-        if buy_obs_price is not None and buy_state not in (SIDE_ZONE_HIT, "数据不足", ""):
+        if (
+            buy_obs_price is not None
+            and buy_state not in (SIDE_ZONE_HIT, "数据不足", "")
+            and not _is_fake_zone_price(buy_obs_price, current_price)
+        ):
             gap_pct = (current_price - buy_obs_price) / buy_obs_price
             est_bars = int(gap_pct / 0.003) if gap_pct > 0 else 0
             if gap_pct > 0.005:
                 distance_lines.append(f"低吸关注区还差 {gap_pct*100:.1f}%（约{est_bars}根5m线）")
             elif gap_pct > 0:
                 distance_lines.append(f"接近低吸关注区，差 {gap_pct*100:.1f}%")
-        if sell_obs_price is not None and sell_state not in (SIDE_ZONE_HIT, "数据不足", ""):
+        if (
+            sell_obs_price is not None
+            and sell_state not in (SIDE_ZONE_HIT, "数据不足", "")
+            and not _is_fake_zone_price(sell_obs_price, current_price)
+        ):
             gap_pct = (sell_obs_price - current_price) / current_price
             est_bars = int(gap_pct / 0.003) if gap_pct > 0 else 0
             if gap_pct > 0.005:
@@ -370,178 +378,36 @@ def render_markdown(plan: dict[str, Any]) -> str:
             elif gap_pct > 0:
                 distance_lines.append(f"接近高抛关注区，差 {gap_pct*100:.1f}%")
 
-    # ── 段1: 结构参考价（非执行指令） ──
-    trigger_lines = [
-        "📌 结构",
-        f"当前：{current_action} ｜ 止损参考：{stop_price}",
-    ]
-    if not has_pos:
-        trigger_lines.append("持仓：无底仓 · 仅结构参考，不做 T 召唤")
+    structure_lines = _build_structure_block(
+        plan,
+        buy=buy,
+        sell=sell,
+        buy_state=buy_state,
+        sell_state=sell_state,
+        buy_obs=buy_obs,
+        sell_obs=sell_obs,
+        stop_price=stop_price,
+        distance_lines=distance_lines,
+    )
+    checklist_lines = _build_human_checklist(plan, buy=buy, sell=sell)
 
-    _mzones = (plan.get("model") or {}).get("zones") or {}
-    _res = plan.get("resonance") or {}
-
-    # 低吸关注价
-    _cur = numeric_or_none(plan.get("current_price")) or 0
-    _zone_buy = _mzones.get("buy_zone", {}).get("main_support")
-    _ab_bp_raw = (_res.get("lights") or {}).get("ab", {}).get("buy_price")
-    _ab_bp = None
-    if _ab_bp_raw and _cur and abs(_ab_bp_raw - _cur) / _cur <= 0.2:
-        _ab_bp = _ab_bp_raw
-    _wyck_bp = (_res.get("lights") or {}).get("wyckoff", {}).get("buy_price")
-    if is_zone_hit(buy_state):
-        _exec = numeric_or_none(buy.get("execution_price"))
-        _acc = numeric_or_none(buy.get("acceptable_price"))
-        if _exec and _acc:
-            trigger_lines.append(f"低吸：关注 {_exec:.2f}～{_acc:.2f}（参考）")
-        else:
-            trigger_lines.append(f"低吸：价近关注区 · {buy_obs}")
-    else:
-        _parts = []
-        if _zone_buy:
-            _parts.append(f"价区{_zone_buy:.2f}")
-        if _ab_bp:
-            _parts.append(f"价格行为{_ab_bp:.2f}")
-        if _wyck_bp:
-            _parts.append(f"威科夫{_wyck_bp:.2f}")
-        _ref_str = "｜".join(_parts) if _parts else "暂无"
-        trigger_lines.append(f"低吸：{_ref_str}")
-
-    # 高抛关注价
-    _zone_sell = _mzones.get("sell_zone", {}).get("main_resistance")
-    _ab_sp_raw = (_res.get("lights") or {}).get("ab", {}).get("sell_price")
-    _ab_sp = None
-    if _ab_sp_raw and _cur and abs(_ab_sp_raw - _cur) / _cur <= 0.2:
-        _ab_sp = _ab_sp_raw
-    _wyck_sp = (_res.get("lights") or {}).get("wyckoff", {}).get("sell_price")
-    if is_zone_hit(sell_state):
-        _exec = numeric_or_none(sell.get("execution_price"))
-        _acc = numeric_or_none(sell.get("acceptable_price"))
-        if _exec and _acc:
-            trigger_lines.append(f"高抛：关注 {_exec:.2f}～{_acc:.2f}（参考）")
-        else:
-            trigger_lines.append(f"高抛：价近关注区 · {sell_obs}")
-    else:
-        _parts = []
-        if _zone_sell:
-            _parts.append(f"价区{_zone_sell:.2f}")
-        if _ab_sp:
-            _parts.append(f"价格行为{_ab_sp:.2f}")
-        if _wyck_sp:
-            _parts.append(f"威科夫{_wyck_sp:.2f}")
-        _ref_str = "｜".join(_parts) if _parts else "暂无"
-        trigger_lines.append(f"高抛：{_ref_str}")
-
-    # 止盈价：拆分低吸止盈（高于现价）和高抛止盈（低于现价）
-    exit_plan = plan.get("exit_plan") or {}
-    exit_items = exit_plan.get("exit_plan") or []
-    if exit_items and exit_plan.get("risk_r", 0) > 0 and _cur:
-        buy_tp = []  # 低吸止盈（高于现价）
-        sell_tp = []  # 高抛止盈（低于现价）
-        for item in exit_items:
-            p = item.get("price")
-            if p is not None:
-                if p > _cur:
-                    buy_tp.append(f"{p:.2f}")
-                else:
-                    sell_tp.append(f"{p:.2f}")
-        if buy_tp:
-            trigger_lines.append(f"低吸止盈：{'｜'.join(buy_tp)}")
-        if sell_tp:
-            trigger_lines.append(f"高抛止盈：{'｜'.join(sell_tp)}")
-
-    atr_info = plan.get("atr_info") or {}
-    level_advice = atr_info.get("level_advice")
-    if level_advice:
-        trigger_lines.append(f"波动：{level_advice}")
-    if distance_lines:
-        trigger_lines.extend(distance_lines)
-
-    # ── 段2: 大单异动 ──
+    # ── 资金：大单异动（仅净流入进主卡） ──
     capital_lines = []
     if big_order and big_order.get("events"):
-        title = "💰 大单异动" if has_tick_data else "💰 分时估算"
         by_side = big_order.get("by_side") or {}
         buy_info = by_side.get("主动买入") or {}
         sell_info = by_side.get("主动卖出") or {}
-        buy_events = [e for e in big_order["events"] if "买入" in str(e.get("side",""))]
-        sell_events = [e for e in big_order["events"] if "卖出" in str(e.get("side",""))]
         buy_total = round(buy_info.get("amount_wan") or 0)
         sell_total = round(sell_info.get("amount_wan") or 0)
-
-        if buy_events and sell_events:
-            capital_lines.append(f"{title}\n买入 {len(buy_events)}笔 {buy_total}万 ｜ 卖出 {len(sell_events)}笔 {sell_total}万")
-        elif buy_events:
-            capital_lines.append(f"{title}\n全部买入 {len(buy_events)}笔 +{buy_total}万")
-        elif sell_events:
-            capital_lines.append(f"{title}\n全部卖出 {len(sell_events)}笔 -{sell_total}万")
-
-        sorted_events = sorted(big_order["events"], key=lambda e: str(e.get("time","")))
-        # 只显示 TOP3 最大金额异动，不逐笔罗列
-        top_events = sorted(big_order["events"], key=lambda e: abs(e.get("amount_wan") or 0), reverse=True)[:3]
-        top_lines = []
-        for e in top_events:
-            t = str(e.get("time",""))
-            amt = e.get("amount_wan") or 0
-            side = str(e.get("side",""))
-            sign = "+" if "买入" in side else "-"
-            top_lines.append(f"  {t} {sign}{amt:.0f}万")
-        capital_lines.extend(top_lines)
-
         net = buy_total - sell_total
-        capital_lines.append(f"净流入 {'+' if net >= 0 else ''}{net}万{'，主力偏多' if net > 0 else '，主力偏空' if net < 0 else ''}")
-        if not has_tick_data:
-            capital_lines.append("（5m分时估算，非真实Tick数据）")
+        capital_lines.append(
+            f"净流入 {'+' if net >= 0 else ''}{net}万"
+            f"{'，主力偏多' if net > 0 else '，主力偏空' if net < 0 else ''}"
+        )
 
-    # ── 段3: 操作建议（盘中动态 + 实时信号） ──
-    advice_lines = []
-    if order_book_analyze and plan.get("order_book"):
-        ob = order_book_analyze(plan["order_book"])
-        advice_lines.append(ob["line"])
-    # Al Brooks 价格行为摘要
-    ab_res = plan.get("ab_result") or {}
-    if ab_res:
-        _ab_parts = ["价格行为"]
-        _ai = ab_res.get("always_in", "neutral")
-        if _ai != "neutral":
-            _ab_parts.append(f"Always-In{'多' if _ai == 'bull' else '空'}")
-        _q = ab_res.get("signal_bar_quality", "none")
-        if _q != "none":
-            _ab_parts.append(f"信号棒{_q}")
-        _hl = (ab_res.get("hl_count") or {}).get("type", "none")
-        if _hl != "none":
-            _ab_parts.append(_hl)
-        if ab_res.get("breakout_mode"):
-            _ab_parts.append("突破模式")
-        advice_lines.append("  ".join(_ab_parts))
-    history_lines = review_lines(plan.get("history"))
-    if history_lines and history_lines != ["暂无关键事件。"]:
-        advice_lines.extend(history_lines)
-    signal_lines = _build_realtime_signal_section(plan)
-    if signal_lines:
-        # 跳过段内标题行（🔔 实时信号），并入统一「操作建议」段
-        advice_lines.extend(signal_lines[1:])
-
-    # ── 段4: 风控提醒 ──
-    risk_lines = [
-        f"👀 跌破 {stop_price} 看法失效" if is_zone_hit(buy_state) else f"👀 跌破 {stop_price} 后低吸关注取消"
-    ]
-    ds = str(plan.get("data_status") or "")
-    if ds == "partial":
-        risk_lines.append("⚠️ 数据不完整，盘中判断可能不准")
-    elif ds == "degraded":
-        risk_lines.append("⚠️ 数据不足，盘中判断可能不准")
-
-    # ── 段5: 应急指引 ──
-    emergency_lines = _build_emergency_guide(plan, buy, sell, current_price)
-
-    # ── 段5.5: 三重共振状态 ──
-    resonance_lines = _build_resonance_section(plan)
-
-    # ── 段6: 降本模式（仅 cost_cut 时显示） ──
     account_lines = _build_account_section(plan)
 
-    # ── 组装输出：结构参考卡（v2，人决策） ──
+    # ── 组装输出：结构参考卡（v2.1，人决策） ──
     lines = [
         f"🎯 {plan.get('name','')}（{plan.get('symbol','')}）{current_text}（{pct_text(numeric_or_none(plan.get('current_change_pct')))}）",
     ]
@@ -550,13 +416,11 @@ def render_markdown(plan: dict[str, Any]) -> str:
     lines.append(f"  → {conclusion}")
 
     lines.append("")
-    lines.append("📌 结构")
-    lines.extend(trigger_lines[1:])  # 跳过段内标题
+    lines.extend(structure_lines)
 
-    # VWAP（只在距现价±20%内显示）
-    vwap = plan.get("vwap")
-    if vwap and current_price and abs(vwap - current_price) / current_price <= 0.2:
-        lines.append(f"VWAP {vwap:.2f}")
+    if checklist_lines:
+        lines.append("")
+        lines.extend(checklist_lines)
 
     lines.append("")
     lines.append("🔗 参考")
@@ -571,12 +435,10 @@ def render_markdown(plan: dict[str, Any]) -> str:
         lines.append(f"  看法失效：{failure}")
 
     if capital_lines:
-        for cl in capital_lines:
-            if "净流入" in cl:
-                lines.append(f"💰 {cl}")
-                break
+        lines.append(f"💰 {capital_lines[0]}")
 
     if account_lines:
+        lines.append("")
         lines.extend(account_lines)
 
     return "\n".join(lines)
@@ -590,31 +452,114 @@ def _has_position(plan: dict[str, Any]) -> bool:
         return False
 
 
-def _build_conclusion(plan: dict[str, Any], buy_state: str, sell_state: str) -> str:
-    """一句话结构结论（v2）：只描述位置/强弱，不下达买卖指令。"""
-    resonance = plan.get("resonance") or {}
-    score = int(resonance.get("score") or 0)
-    vwap = plan.get("vwap")
+# 价区与现价过近视为「假结构」（数据不足时常见：低吸=高抛=现价）
+_FAKE_ZONE_EPS = 0.002
+
+
+def _amplitude_pct_display(plan: dict[str, Any]) -> float | None:
+    """振幅统一为百分点（如 3.2）；amplitude_pct 可能是小数或已是百分数。"""
+    amp = numeric_or_none(plan.get("amplitude_pct"))
+    if amp is None:
+        return None
+    return amp * 100 if amp < 1 else amp
+
+
+def _quote_day_range(plan: dict[str, Any]) -> tuple[float | None, float | None]:
+    quote = (plan.get("data") or {}).get("quote") or {}
+    high = numeric_or_none(quote.get("high"))
+    low = numeric_or_none(quote.get("low"))
+    return high, low
+
+
+def _is_fake_zone_price(zone_px: float | None, current: float | None) -> bool:
+    if zone_px is None or current is None or current <= 0:
+        return False
+    return abs(zone_px - current) / current < _FAKE_ZONE_EPS
+
+
+def _vwap_rel_text(plan: dict[str, Any]) -> str | None:
+    vwap = numeric_or_none(plan.get("vwap"))
     current = numeric_or_none(plan.get("current_price"))
+    if not vwap or not current or vwap <= 0:
+        return None
+    if abs(vwap - current) / current > 0.2:
+        return None
+    rel = (current - vwap) / vwap
+    if rel > 0.005:
+        return "价在VWAP上"
+    if rel < -0.005:
+        return "价在VWAP下"
+    return "价近VWAP"
+
+
+def _box_position_text(plan: dict[str, Any]) -> str | None:
+    current = numeric_or_none(plan.get("current_price"))
+    high, low = _quote_day_range(plan)
+    if current is None or high is None or low is None or high <= low:
+        return None
+    span = high - low
+    if span <= 0:
+        return None
+    pos = (current - low) / span
+    if pos >= 0.7:
+        return "靠近今日高区"
+    if pos <= 0.3:
+        return "靠近今日低区"
+    return "靠近今日中轴"
+
+
+def _volume_label(plan: dict[str, Any]) -> str:
+    try:
+        from t0_config import VOLUME_EXPAND_RATIO, VOLUME_SHRINK_RATIO
+    except Exception:
+        VOLUME_EXPAND_RATIO, VOLUME_SHRINK_RATIO = 1.2, 0.8
+    vol = numeric_or_none(plan.get("volume_ratio"))
+    if vol is None:
+        return "量能不足"
+    if vol >= VOLUME_EXPAND_RATIO:
+        return f"量比{vol:.1f}（放量）"
+    if vol <= VOLUME_SHRINK_RATIO:
+        return f"量比{vol:.1f}（缩量）"
+    return f"量比{vol:.1f}（平量）"
+
+
+def _data_thin(plan: dict[str, Any]) -> bool:
+    ds = str(plan.get("data_status") or "")
+    if ds in {"degraded", "insufficient", "non_trading"}:
+        return True
+    vwap = numeric_or_none(plan.get("vwap"))
+    current = numeric_or_none(plan.get("current_price"))
+    if vwap is None or current is None:
+        return True
+    return False
+
+
+def _build_conclusion(plan: dict[str, Any], buy_state: str, sell_state: str) -> str:
+    """一句话结构结论（v2.1）：位置叙事优先；评分不进主语。"""
     parts: list[str] = []
+    thin = _data_thin(plan)
 
-    if vwap and current and vwap > 0:
-        rel = (current - vwap) / vwap
-        if rel > 0.005:
-            parts.append("价在VWAP上")
-        elif rel < -0.005:
-            parts.append("价在VWAP下")
-        else:
-            parts.append("价近VWAP")
-
-    if score >= 60:
-        parts.append(f"结构偏强({score})")
-    elif score >= 40:
-        parts.append(f"结构中性偏上({score})")
-    elif score > 0:
-        parts.append(f"结构偏弱({score})")
+    if thin and not _vwap_rel_text(plan) and _box_position_text(plan) is None:
+        parts.append("数据不足，仅现价")
     else:
-        parts.append("结构观察")
+        vwap_txt = _vwap_rel_text(plan)
+        parts.append(vwap_txt if vwap_txt else "VWAP不足")
+        box_txt = _box_position_text(plan)
+        if box_txt:
+            parts.append(box_txt)
+        else:
+            high, low = _quote_day_range(plan)
+            if high is None or low is None:
+                parts.append("今日高低不足")
+        vol_txt = _volume_label(plan)
+        if "不足" in vol_txt:
+            parts.append("量不足")
+        elif "放量" in vol_txt:
+            parts.append("量放")
+        elif "缩量" in vol_txt:
+            parts.append("量缩")
+        else:
+            parts.append("量平")
 
     if is_zone_hit(buy_state):
         parts.append("近低吸关注区")
@@ -626,6 +571,246 @@ def _build_conclusion(plan: dict[str, Any], buy_state: str, sell_state: str) -> 
 
     parts.append("宜观察 · 人决策")
     return " · ".join(parts)
+
+
+def _format_zone_ref_line(
+    side: str,
+    *,
+    state: str,
+    model: dict[str, Any],
+    obs_text: str,
+    zone_px: float | None,
+    ab_px: float | None,
+    wyck_px: float | None,
+    current: float | None,
+) -> str:
+    """关注价行；假价区（≈现价）不展示，避免低吸=高抛=现价假结构。"""
+    label = "低吸" if side == "buy" else "高抛"
+    if is_zone_hit(state):
+        _exec = numeric_or_none(model.get("execution_price"))
+        _acc = numeric_or_none(model.get("acceptable_price"))
+        if _exec and _acc and not (
+            _is_fake_zone_price(_exec, current) and _is_fake_zone_price(_acc, current)
+        ):
+            return f"{label}：关注 {_exec:.2f}～{_acc:.2f}（参考）"
+        return f"{label}：价近关注区 · {obs_text}"
+
+    parts: list[str] = []
+    if zone_px is not None and not _is_fake_zone_price(zone_px, current):
+        parts.append(f"价区{zone_px:.2f}")
+    if ab_px is not None and not _is_fake_zone_price(ab_px, current):
+        parts.append(f"价格行为{ab_px:.2f}")
+    if wyck_px is not None and not _is_fake_zone_price(wyck_px, current):
+        parts.append(f"威科夫{wyck_px:.2f}")
+    if not parts:
+        # 双侧价区都塌到现价 → 诚实降级
+        if zone_px is not None and _is_fake_zone_price(zone_px, current):
+            return f"{label}：暂无有效关注价（结构数据不足）"
+        return f"{label}：暂无"
+    return f"{label}：{'｜'.join(parts)}"
+
+
+def _build_structure_block(
+    plan: dict[str, Any],
+    *,
+    buy: dict[str, Any],
+    sell: dict[str, Any],
+    buy_state: str,
+    sell_state: str,
+    buy_obs: str,
+    sell_obs: str,
+    stop_price: str,
+    distance_lines: list[str],
+) -> list[str]:
+    """📌 结构四块：位置 / 量能 / 空间 / 关注价。"""
+    has_pos = _has_position(plan)
+    current = numeric_or_none(plan.get("current_price"))
+    lines = ["📌 结构"]
+
+    # 1) 位置
+    pos_parts: list[str] = []
+    vwap = numeric_or_none(plan.get("vwap"))
+    vwap_txt = _vwap_rel_text(plan)
+    if vwap_txt and vwap is not None:
+        pos_parts.append(f"{vwap_txt}（VWAP {vwap:.2f}）")
+    else:
+        pos_parts.append("VWAP不足")
+    high, low = _quote_day_range(plan)
+    if high is not None and low is not None and high >= low:
+        pos_parts.append(f"今日 {low:.2f}-{high:.2f}")
+        box = _box_position_text(plan)
+        if box:
+            pos_parts.append(box)
+    else:
+        pos_parts.append("今日高低不足")
+    lines.append("位置：" + " · ".join(pos_parts))
+
+    # 2) 量能
+    lines.append(f"量能：{_volume_label(plan)}")
+
+    # 3) 空间
+    amp_pct = _amplitude_pct_display(plan)
+    space_state = str(plan.get("space_state") or "unknown")
+    space_map = {"too_small": "偏小", "normal": "正常", "good": "够用", "unknown": "未知"}
+    space_lbl = space_map.get(space_state, space_state)
+    if amp_pct is not None:
+        space_line = f"空间：振幅 {amp_pct:.2f}%（{space_lbl}）"
+    else:
+        space_line = "空间：振幅不足"
+    if has_pos:
+        worth = (plan.get("t0_account") or {}).get("worth_t") or {}
+        if worth:
+            if worth.get("worth"):
+                space_line += " · 费后约盖住门槛（纪律提醒）"
+            else:
+                space_line += " · 空间可能盖不住费用（纪律提醒）"
+        elif space_state == "too_small":
+            space_line += " · 空间可能盖不住费用（纪律提醒）"
+    lines.append(space_line)
+
+    if not has_pos:
+        lines.append("持仓：无底仓 · 仅结构参考，不做 T 召唤")
+
+    lines.append(f"当前：观望 ｜ 止损参考：{stop_price}")
+
+    # 4) 关注价
+    _mzones = (plan.get("model") or {}).get("zones") or {}
+    _res = plan.get("resonance") or {}
+    _lights = _res.get("lights") or {}
+    _cur = current or 0
+    _zone_buy = _mzones.get("buy_zone", {}).get("main_support")
+    _zone_sell = _mzones.get("sell_zone", {}).get("main_resistance")
+    _ab_bp_raw = (_lights.get("ab") or {}).get("buy_price")
+    _ab_sp_raw = (_lights.get("ab") or {}).get("sell_price")
+    _ab_bp = None
+    _ab_sp = None
+    if _ab_bp_raw and _cur and abs(_ab_bp_raw - _cur) / _cur <= 0.2:
+        _ab_bp = _ab_bp_raw
+    if _ab_sp_raw and _cur and abs(_ab_sp_raw - _cur) / _cur <= 0.2:
+        _ab_sp = _ab_sp_raw
+    _wyck_bp = (_lights.get("wyckoff") or {}).get("buy_price")
+    _wyck_sp = (_lights.get("wyckoff") or {}).get("sell_price")
+
+    # 双侧价区同时塌到现价 → 统一降级一行说明即可
+    buy_fake = _is_fake_zone_price(
+        numeric_or_none(_zone_buy) if _zone_buy is not None else None, current
+    )
+    sell_fake = _is_fake_zone_price(
+        numeric_or_none(_zone_sell) if _zone_sell is not None else None, current
+    )
+    if (
+        not is_zone_hit(buy_state)
+        and not is_zone_hit(sell_state)
+        and buy_fake
+        and sell_fake
+    ):
+        lines.append("低吸：暂无有效关注价（结构数据不足）")
+        lines.append("高抛：暂无有效关注价（结构数据不足）")
+    else:
+        lines.append(
+            _format_zone_ref_line(
+                "buy",
+                state=buy_state,
+                model=buy,
+                obs_text=buy_obs,
+                zone_px=numeric_or_none(_zone_buy) if _zone_buy is not None else None,
+                ab_px=_ab_bp,
+                wyck_px=numeric_or_none(_wyck_bp) if _wyck_bp is not None else None,
+                current=current,
+            )
+        )
+        lines.append(
+            _format_zone_ref_line(
+                "sell",
+                state=sell_state,
+                model=sell,
+                obs_text=sell_obs,
+                zone_px=numeric_or_none(_zone_sell) if _zone_sell is not None else None,
+                ab_px=_ab_sp,
+                wyck_px=numeric_or_none(_wyck_sp) if _wyck_sp is not None else None,
+                current=current,
+            )
+        )
+
+    exit_plan = plan.get("exit_plan") or {}
+    exit_items = exit_plan.get("exit_plan") or []
+    if exit_items and exit_plan.get("risk_r", 0) > 0 and current:
+        buy_tp = []
+        sell_tp = []
+        for item in exit_items:
+            p = item.get("price")
+            if p is not None:
+                if p > current:
+                    buy_tp.append(f"{p:.2f}")
+                else:
+                    sell_tp.append(f"{p:.2f}")
+        if buy_tp:
+            lines.append(f"低吸止盈：{'｜'.join(buy_tp)}")
+        if sell_tp:
+            lines.append(f"高抛止盈：{'｜'.join(sell_tp)}")
+
+    atr_info = plan.get("atr_info") or {}
+    level_advice = atr_info.get("level_advice")
+    if level_advice:
+        lines.append(f"波动：{level_advice}")
+    if distance_lines:
+        lines.extend(distance_lines)
+    return lines
+
+
+def _build_human_checklist(
+    plan: dict[str, Any],
+    *,
+    buy: dict[str, Any],
+    sell: dict[str, Any],
+) -> list[str]:
+    """有底仓才展示：若做正T（人勾选）。系统只列条件，不下令。"""
+    if not _has_position(plan):
+        return []
+
+    lines = ["📋 若做正T（人勾选）"]
+    sell_obs = numeric_or_none(sell.get("observation_price"))
+    buy_obs = numeric_or_none(buy.get("observation_price"))
+    current = numeric_or_none(plan.get("current_price"))
+    stop = numeric_or_none(buy.get("invalid_price"))
+
+    if sell_obs is not None and not _is_fake_zone_price(sell_obs, current):
+        lines.append(f"  · 先确认卖点关注区（参考 {sell_obs:.2f} 一带/冲高乏力）")
+    else:
+        lines.append("  · 先确认卖点关注区（上方/冲高乏力；当前暂无有效卖点参考）")
+
+    worth = (plan.get("t0_account") or {}).get("worth_t") or {}
+    if buy_obs is not None and sell_obs is not None and sell_obs > buy_obs:
+        edge = "费后够门槛" if worth.get("worth") else ("费后不够门槛" if worth else "费后未计")
+        lines.append(
+            f"  · 买回区低于卖点（买回参考 {buy_obs:.2f} < 卖 {sell_obs:.2f}），且{edge}（纪律提醒）"
+        )
+    else:
+        lines.append("  · 买回区低于卖点，且费后空间盖住门槛（当前区间未齐，慎动）")
+
+    if stop is not None:
+        broken = current is not None and current < stop
+        lines.append(
+            f"  · 未破看法失效价 {stop:.2f}"
+            + ("（现价已低于参考，今日宜停）" if broken else "")
+        )
+    else:
+        lines.append("  · 未破看法失效价")
+
+    space_state = str(plan.get("space_state") or "")
+    if space_state == "too_small":
+        lines.append("  · 非破位日 / 非空间不足日（今日空间偏小，宜不做）")
+    else:
+        lines.append("  · 非破位日 / 非空间不足日")
+
+    acct = plan.get("t0_account") or {}
+    if acct.get("allow_reverse_t"):
+        lines.append("  · 倒T：仅自担风险（已声明有现金且非深套）；默认仍不鼓励")
+    else:
+        lines.append("  · 倒T：默认不鼓励")
+
+    lines.append("  · 是否动手由人决定，不构成执行指令")
+    return lines
 
 
 def _build_failure_conditions(plan: dict[str, Any], buy: dict, sell: dict,

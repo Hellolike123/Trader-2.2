@@ -46,8 +46,21 @@ def test_t0_markdown_contract() -> None:
         "max_move": "不动",
         "position_score": 6,
         "volume_score": 5,
+        "vwap": 57.0,
+        "volume_ratio": 1.0,
+        "amplitude_pct": 0.035,
+        "space_state": "normal",
         "ict_signal": {"summary": "无有效扫流动性确认，不加分。"},
-        "data": {"kline_5m_completed": make_5m_bars(16)},
+        "data": {
+            "kline_5m_completed": make_5m_bars(16),
+            "quote": {"high": 58.0, "low": 55.5, "pre_close": 59.6},
+        },
+        "model": {
+            "zones": {
+                "buy_zone": {"main_support": 55.8},
+                "sell_zone": {"main_resistance": 58.5},
+            }
+        },
         "buy": {
             "status": "观察中",
             "zone": {"lower": 55.5, "upper": 55.9},
@@ -81,12 +94,17 @@ def test_t0_markdown_contract() -> None:
     assert "低吸：" in markdown
     assert "高抛：" in markdown
     assert "📌 结构" in markdown
+    assert "位置：" in markdown
+    assert "量能：" in markdown
+    assert "空间：" in markdown
     assert "🔗 参考" in markdown
     assert "人决策" in markdown
+    assert "结构偏强" not in markdown.split("→", 1)[-1].split("\n", 1)[0]
     assert "可执行" not in markdown
     assert "可低吸" not in markdown
     assert "三重共振" not in markdown
     assert "无底仓" in markdown
+    assert "若做正T" not in markdown
     assert validate(markdown) == []
 
 
@@ -202,7 +220,7 @@ def test_legacy_executable_display_status_normalized() -> None:
 
 
 def test_no_position_hides_account_discipline_block() -> None:
-    """无底仓不展示持仓纪律/降本块，即使误注入 t0_account。"""
+    """无底仓不展示持仓纪律/降本块/做人清单，即使误注入 t0_account。"""
     plan = sample_t0_plan()
     plan["t0_account"] = {
         "avg_cost": 12.0,
@@ -216,6 +234,76 @@ def test_no_position_hides_account_discipline_block() -> None:
     assert "持仓纪律" not in md
     assert "降本模式" not in md
     assert "先卖后买" not in md
+    assert "若做正T" not in md
+    assert validate(md) == []
+
+
+def test_v21_structure_four_blocks_and_fake_zones() -> None:
+    """v2.1：四块齐全；双侧价区≈现价时降级为暂无有效关注价。"""
+    plan = sample_t0_plan()
+    plan.update({
+        "vwap": 12.0,
+        "volume_ratio": 1.5,
+        "amplitude_pct": 0.04,
+        "space_state": "good",
+        "data": {
+            "kline_5m_completed": make_5m_bars(16),
+            "quote": {"high": 12.3, "low": 11.7, "pre_close": 11.8},
+        },
+        "model": {
+            "zones": {
+                "buy_zone": {"main_support": 11.95},
+                "sell_zone": {"main_resistance": 11.95},
+            }
+        },
+    })
+    md = render_markdown(plan)
+    assert "位置：" in md
+    assert "量能：" in md
+    assert "空间：" in md
+    assert "暂无有效关注价（结构数据不足）" in md
+    assert "价区11.95" not in md
+    assert "结构偏强" not in md.split("→", 1)[-1].split("\n", 1)[0]
+    assert validate(md) == []
+
+
+def test_v21_position_shows_human_checklist() -> None:
+    """有底仓才出做人清单；结论不含评分主语。"""
+    plan = sample_t0_plan()
+    plan.update({
+        "vwap": 11.90,
+        "volume_ratio": 0.9,
+        "amplitude_pct": 0.025,
+        "space_state": "normal",
+        "data": {
+            "kline_5m_completed": make_5m_bars(16),
+            "quote": {"high": 12.2, "low": 11.7, "pre_close": 11.8},
+        },
+        "model": {
+            "zones": {
+                "buy_zone": {"main_support": 11.80},
+                "sell_zone": {"main_resistance": 12.20},
+            }
+        },
+        "t0_account": {
+            "avg_cost": 11.5,
+            "total_shares": 1000,
+            "mode": "grid",
+            "allow_reverse_t": False,
+            "worth_t": {"worth": True, "net_pct": 1.5, "min_edge_pct": 0.8},
+        },
+        "resonance": {"score": 80, "lights": {}},
+    })
+    plan["buy"]["observation_price"] = 11.80
+    plan["sell"]["observation_price"] = 12.20
+    md = render_markdown(plan)
+    assert "若做正T（人勾选）" in md
+    assert "是否动手由人决定" in md
+    assert "无底仓" not in md
+    conclusion = md.split("→", 1)[-1].split("\n", 1)[0]
+    assert "结构偏强" not in conclusion
+    assert "80" not in conclusion
+    assert "可执行" not in md
     assert validate(md) == []
 
 
