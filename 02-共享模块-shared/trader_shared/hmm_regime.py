@@ -365,7 +365,8 @@ class HMMRegimeDetector:
         self.fit(returns, volume_ratio=volume_ratio)
 
         obs = self._build_obs(returns, volume_ratio)
-        if len(obs) < 3:
+        # <3：无状态；<30：fit 未跑 EM，先验 Viterbi 不可靠 → 低置信震荡兜底
+        if len(obs) < 30:
             return {
                 "state_id": 1, "state_label": "宽幅震荡",
                 "state_en": "range", "confidence": 0.4,
@@ -412,17 +413,20 @@ _HMM_CACHE_DATE: str = ""
 def detect_regime(
     returns: List[float],
     volume_ratio: float | List[float] | None = None,
+    as_of: date | str | None = None,
 ) -> dict:
     """一站式大势状态检测函数。
 
-    P1 Fix: 增加内存缓存，key = (data_hash, date)，
-    同一交易日内相同输入不重复计算。
+    P1 Fix: 增加内存缓存，key = (data_hash, as_of)，
+    同一 as_of 日内相同输入不重复计算。
     P1-3: 支持 2D 输入 (returns + volume_ratio)。
 
     Args:
         returns: 最近 N 日的指数日收益率序列（建议 60~200 个交易日）
         volume_ratio: 近 5 日均成交额 / 前 5 日均成交额（>1 放量，<1 缩量）。
                       None 时回退到 1D 模型（向后兼容）。
+        as_of: 会话日（YYYY-MM-DD 或 date）；回测/复盘传入数据日，避免墙钟串缓存。
+               缺省为 date.today()。
 
     Returns:
         与 HMMRegimeDetector.fit_predict() 相同的结果字典
@@ -432,8 +436,13 @@ def detect_regime(
     # P2 Fix: 入口清洗 None/NaN，避免缓存 key 格式化与 np.array 双重崩溃
     returns = _clean_floats(returns)
 
-    today_str = date.today().isoformat()
-    # 跨日清缓存
+    if as_of is None:
+        today_str = date.today().isoformat()
+    elif isinstance(as_of, date):
+        today_str = as_of.isoformat()
+    else:
+        today_str = str(as_of)[:10] or date.today().isoformat()
+    # 跨会话日清缓存
     if _HMM_CACHE_DATE != today_str:
         _HMM_CACHE.clear()
         _HMM_CACHE_DATE = today_str
@@ -451,7 +460,7 @@ def detect_regime(
     else:
         vr_prefix = f"vr{volume_ratio:.4f}:"
     data_hash = hashlib.md5(
-        f"{len(returns)}:{vr_prefix}".encode("utf-8")
+        f"{today_str}:{len(returns)}:{vr_prefix}".encode("utf-8")
         + ",".join(f"{r:.6f}" for r in returns[-50:]).encode("utf-8")
     ).hexdigest()[:12]
     cache_key = f"{data_hash}"

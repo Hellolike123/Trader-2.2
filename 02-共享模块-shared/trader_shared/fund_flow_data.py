@@ -413,12 +413,8 @@ def calc_fund_flow_features(
             else:
                 break
         else:
-            if consecutive_in > 0:
-                consecutive_in += 1
-            elif consecutive_out > 0:
-                consecutive_out += 1
-            else:
-                break
+            # 零流入打断连续，不计入流出/流入天数
+            break
 
     # 净流入占成交额比
     net_flow_pct = 0.0
@@ -482,12 +478,8 @@ def calc_fund_flow_features_from_bars(
             else:
                 break
         else:
-            if consecutive_in > 0:
-                consecutive_in += 1
-            elif consecutive_out > 0:
-                consecutive_out += 1
-            else:
-                break
+            # 零流入打断连续，不计入流出/流入天数
+            break
 
     total_amount_5d = sum(
         float(bars[-(i+1)].get("close", 0) or 0) * float(bars[-(i+1)].get("volume", 0) or 0)

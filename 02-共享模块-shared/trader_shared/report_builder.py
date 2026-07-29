@@ -493,11 +493,12 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     except Exception:
         report_fusion["fusion_verbatim"] = "🎯 数据异常"
 
-    # Volume Profile 计算
+    # Volume Profile：必须用日内分钟线（POC/VA）；日线会拟合成多月分布，污染突破门控
     vp_result = None
     try:
         from trader_shared.volume_profile import compute_volume_profile
-        vp_result = compute_volume_profile(bars)
+        if bars_5m and len(bars_5m) >= 10:
+            vp_result = compute_volume_profile(bars_5m)
     except Exception:
         pass  # VP 可选，失败不影响主流程
 

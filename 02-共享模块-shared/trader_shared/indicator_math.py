@@ -81,34 +81,36 @@ def calc_macd_series(closes: list[float | None]) -> dict[str, list]:
     dea_series: list[float | None] = [None] * n
     hist_series: list[float | None] = [None] * n
 
-    # EMA12: SMA seed at index 11, then exponential
+    # EMA12: 攒满 12 个非 None 收盘再 SMA 播种（勿用绝对下标 i==11，空洞序列会错位）
     ema12_val = None
+    ema12_seed: list[float] = []
     for i in range(n):
         c = closes[i]
         if c is None:
             continue
-        if i == 11:
-            vals = [x for x in closes[:12] if x is not None]
-            if len(vals) == 12:
-                ema12_val = sum(vals) / 12
-        elif i > 11 and ema12_val is not None:
+        if ema12_val is None:
+            ema12_seed.append(c)
+            if len(ema12_seed) == 12:
+                ema12_val = sum(ema12_seed) / 12
+                ema12_series[i] = ema12_val
+        else:
             ema12_val = ema12_val * 11 / 13 + c * 2 / 13
-        if ema12_val is not None:
             ema12_series[i] = ema12_val
 
-    # EMA26: SMA seed at index 25, then exponential
+    # EMA26: 攒满 26 个非 None 收盘再 SMA 播种
     ema26_val = None
+    ema26_seed: list[float] = []
     for i in range(n):
         c = closes[i]
         if c is None:
             continue
-        if i == 25:
-            vals = [x for x in closes[:26] if x is not None]
-            if len(vals) == 26:
-                ema26_val = sum(vals) / 26
-        elif i > 25 and ema26_val is not None:
+        if ema26_val is None:
+            ema26_seed.append(c)
+            if len(ema26_seed) == 26:
+                ema26_val = sum(ema26_seed) / 26
+                ema26_series[i] = ema26_val
+        else:
             ema26_val = ema26_val * 25 / 27 + c * 2 / 27
-        if ema26_val is not None:
             ema26_series[i] = ema26_val
 
     # DIF = EMA12 - EMA26

@@ -1251,10 +1251,14 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
         result = retry(do_fetch)
         _circuit_tencent_daily.record_success()
         _compute_atr_fields(result)
-        # 用数据中最新交易日代替墙钟，避免盘前/回测日期错位
+        # 是否覆盖「应有最新交易日」：用 trading_context，勿比墙钟日历日
         _dates = [b.get("date") for b in result if b.get("date")]
-        _latest_date = max(_dates) if _dates else datetime.now().strftime("%Y-%m-%d")
-        has_today = _latest_date >= datetime.now().strftime("%Y-%m-%d")
+        _latest_date = max(_dates) if _dates else None
+        try:
+            from trader_shared.trading_context import compute_data_freshness
+            has_today = bool(_latest_date) and compute_data_freshness(_latest_date) == "live"
+        except Exception:
+            has_today = bool(_latest_date) and _latest_date >= datetime.now().strftime("%Y-%m-%d")
         if not has_today:
             save_to_cache(cache_key, result, ttl_seconds=3600)
         # ── 写入文件缓存（带 fetch_date，同日复用）──

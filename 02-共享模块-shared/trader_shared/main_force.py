@@ -52,14 +52,18 @@ def detect_main_force_stage(
             "consecutive_outflow_days": int,
         }
     """
-    # ── fallback: fund flow 不可用时从 bars 推导近似特征 ──
+    # ── fallback: 仅当真实资金流缺失时从 bars 推导；cum_flow==0 是合法平坦，禁止覆盖 ──
     if bars:
-        has_real_flow = any(features.get(k) for k in ("cum_flow_5d_wan", "daily_flow_5d", "flow_price_relation"))
-        if not has_real_flow or features.get("cum_flow_5d_wan", 0) == 0:
+        has_real_flow = (
+            bool(features.get("daily_flow_5d"))
+            or bool(features.get("latest_fund_date"))
+            or bool(features.get("data_source"))
+            or (features.get("flow_price_relation") not in (None, "", "无数据"))
+        )
+        if not has_real_flow:
             try:
                 from trader_shared.fund_flow_data import calc_fund_flow_features_from_bars
                 derived = calc_fund_flow_features_from_bars(bars)
-                # 合并: 有真实数据用真实的, 没有的用推导的
                 features = {**features, **derived}
             except Exception:
                 pass  # 推导失败, 继续使用空 features

@@ -296,7 +296,8 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None, index_returns: lis
         multipliers["confirm_buffer"] = multipliers["confirm_buffer"] * 0.8
 
     # 层-2：[2.3新增] HMM 前瞻 Regime 进一步徣化（50% 叠加）
-    if _HMM_AVAILABLE and _HMM_REGIME_ENABLED and (hmm_state or (index_returns and len(index_returns) >= 20)):
+    # fit() 需 ≥30 根才做 Baum-Welch；短序列先验 Viterbi 不可靠，与 market_env 对齐
+    if _HMM_AVAILABLE and _HMM_REGIME_ENABLED and (hmm_state or (index_returns and len(index_returns) >= 30)):
         try:
             if hmm_state:
                 hmm_result = {"state_en": hmm_state, "confidence": 0.8}
@@ -739,7 +740,9 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
     trailing_stop = None
     highest_close = None
     if ENABLE_TRAILING_STOP and atr_pct and atr_pct > 0:
-        closes = [v for b in bars if (v := to_float(b.get("close"))) is not None]
+        # 近 STRUCTURE_WINDOW 窗内最高收（勿用全历史高点，否则回撤票止损远高于现价误触发）
+        recent_bars = bars[-STRUCTURE_WINDOW:] if bars else []
+        closes = [v for b in recent_bars if (v := to_float(b.get("close"))) is not None]
         if closes:
             highest_close = max(closes)
             trailing_stop = round(highest_close * (1 - atr_pct * TRAILING_STOP_ATR_MULTIPLE), 2)

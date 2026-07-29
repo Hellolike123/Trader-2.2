@@ -232,9 +232,23 @@ def assess() -> dict[str, Any]:
         if len(closes_vol) >= 6:
             closes = [float(b["close"]) for b in closes_vol]
             volumes = [float(b["volume"]) for b in closes_vol]
-            if current > 0 and (not closes or abs(closes[-1] - current) > 1e-5):
+            # 现价：今日 bar 已在序列末则原地更新；否则追加一日（勿对已有今日 bar 再 append）
+            if current > 0 and closes:
+                last_d = str(closes_vol[-1].get("date") or closes_vol[-1].get("time") or "")[:10]
+                try:
+                    from trader_shared.trading_context import _last_trading_day
+                    from datetime import date as _date
+                    expected_d = _last_trading_day(_date.today()).isoformat()
+                except Exception:
+                    expected_d = last_d
+                if last_d == expected_d:
+                    closes[-1] = current
+                elif abs(closes[-1] - current) > 1e-5:
+                    closes.append(current)
+                    volumes.append(volumes[-1] if volumes else 0.0)
+            elif current > 0:
                 closes.append(current)
-                volumes.append(volumes[-1] if volumes else 0.0)
+                volumes.append(0.0)
             index_returns = [(closes[i] - closes[i-1]) / closes[i-1] for i in range(1, len(closes))]
             # 每日量比序列：当日量 / 近5日均量（非正值兜底为 1.0，避免 inf/nan）
             vol_series = []
@@ -244,9 +258,11 @@ def assess() -> dict[str, Any]:
                     vol_series.append(1.0)
                 else:
                     vol_series.append(volumes[i] / (sum(window) / len(window)))
-                if len(index_returns) >= 5 and len(vol_series) == len(index_returns):
-                    from trader_shared.hmm_regime import detect_regime
-                    hmm_res = detect_regime(index_returns, volume_ratio=vol_series)
+            # fit 需 ≥30；短序列先验 Viterbi 不可靠
+            if len(index_returns) >= 30 and len(vol_series) == len(index_returns):
+                from trader_shared.hmm_regime import detect_regime
+                _as_of = str(closes_vol[-1].get("date") or closes_vol[-1].get("time") or "")[:10] or None
+                hmm_res = detect_regime(index_returns, volume_ratio=vol_series, as_of=_as_of)
                 hmm_regime_en = hmm_res.get("state_en", "range")
                 hmm_regime_label = hmm_res.get("state_label", "宽幅震荡")
                 hmm_confidence = hmm_res.get("confidence", 0.5)
@@ -278,11 +294,11 @@ def assess() -> dict[str, Any]:
         elif hmm_regime_en == "bull" and level == "偏弱":
             level = "正常"
 
-    # 日涨跌幅兜底：单日急跌 >=3% 强制降级
-    if change_pct <= -3.0 and level == "正常":
-        level = "偏弱"
-    elif change_pct <= -5.0 and level in ("正常", "偏弱"):
+    # 日涨跌幅兜底：先判 -5%（很差），再判 -3%（偏弱）；勿用 if/elif 让 -5 卡在偏弱
+    if change_pct <= -5.0:
         level = "很差"
+    elif change_pct <= -3.0 and level == "正常":
+        level = "偏弱"
 
     note = f"中证1000 MA5/MA20 {'>' if mid_term=='up' else '<'} 趋势{'偏多' if mid_term=='up' else '偏空'} 今日{change_pct:+.1f}%"
 

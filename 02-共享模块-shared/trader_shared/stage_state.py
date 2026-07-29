@@ -34,7 +34,7 @@ def calc_portfolio_correlation(
                    code 为股票代码，position_pct 为仓位百分比。
         bars_map:  {code: bars} 字典，bars 为 K 线列表（含 "close" 键）。
         threshold: 相关系数阈值，默认 0.7。
-        lookback:  收价回溯天数，默认 20。
+        lookback:  收益率回溯天数，默认 20（需 lookback+1 根收盘）。
 
     Returns:
         {
@@ -52,22 +52,29 @@ def calc_portfolio_correlation(
             "adjusted_total_limit": None,
         }
 
-    # 提取各持仓的 20 日收盘价序列
+    # 提取各持仓近 lookback 日收益率（非价格水平，避免共趋势抬高 R）
     codes: list[str] = []
-    close_arrays: list[list[float]] = []
+    return_arrays: list[list[float]] = []
     for pos in positions:
         code = pos.get("code", "")
         bars = bars_map.get(code, [])
-        if not bars or len(bars) < 2:
+        if not bars or len(bars) < 3:
             # 数据不足，跳过该票（不参与相关性计算）
             _logger.debug("correlation: %s bars不足，跳过", code)
             continue
-        recent = bars[-lookback:]
-        closes = [float(b.get("close") or 0) for b in recent]
-        if len(closes) < 2:
+        recent = bars[-(lookback + 1):]
+        closes = [float(b.get("close") or 0) for b in recent if float(b.get("close") or 0) > 0]
+        if len(closes) < 3:
+            continue
+        rets = [
+            (closes[i] - closes[i - 1]) / closes[i - 1]
+            for i in range(1, len(closes))
+            if closes[i - 1] > 0
+        ]
+        if len(rets) < 2:
             continue
         codes.append(code)
-        close_arrays.append(closes)
+        return_arrays.append(rets)
 
     if len(codes) < 2:
         return {
@@ -78,10 +85,10 @@ def calc_portfolio_correlation(
         }
 
     # 对齐长度（取最短序列长度）
-    min_len = min(len(arr) for arr in close_arrays)
-    aligned = [arr[-min_len:] for arr in close_arrays]
+    min_len = min(len(arr) for arr in return_arrays)
+    aligned = [arr[-min_len:] for arr in return_arrays]
 
-    # 计算两两相关系数矩阵
+    # 计算两两相关系数矩阵（收益率）
     n = len(codes)
     matrix = np.array(aligned, dtype=np.float64)  # shape: (n, min_len)
     corr = np.corrcoef(matrix)  # shape: (n, n)
