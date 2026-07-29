@@ -66,15 +66,15 @@ buy_point_lifecycle:
 
 ---
 
-## 4. 闸口契约挂钩（P1 扩展 · 未实现）
+## 4. 闸口契约挂钩（L3 已落地 · select 笔记可选）
 
-见 `strategy-gates.md` §2.2 增补。摘要：
+见 `strategy-gates.md` §2.2。摘要：
 
-| 闸 | 读 | 写/约束 |
-|----|-----|---------|
-| **entry** | `buy_point_lifecycle.status`, `lid_price` | failed → 禁止 executable；文案区分「无买点」vs「买点已失效」 |
-| **select** | 可选：连续 failed 记观察 | 不否决全池，仅笔记 |
-| **stop** | 无直接绑定盖 | 持仓止损仍走结构 stop |
+| 闸 | 读 | 写/约束 | 状态 |
+|----|-----|---------|------|
+| **entry** | `buy_point_lifecycle.status`, `lid_price` | failed → 不得 `executable`；`reason=买点已失效` | ✅ `strategy/match.py` |
+| **select** | 可选：连续 failed 记观察 | 不否决全池，仅笔记 | 可选，未做 |
+| **stop** | 无直接绑定盖 | 持仓止损仍走结构 stop | 不适用 |
 
 **禁止**：策略包内重算笔/盖价；只读分析层给出的 `lid_price` + status。
 

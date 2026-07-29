@@ -1,9 +1,9 @@
 # 分析 · 策略 · 决策 分层架构
 
-> **状态**：已定方向（设计稿）  
-> **版本**：v0.1 · 2026-07-18  
+> **状态**：方向已定 · 六闸匹配已落地（见 `strategy/match.py`）  
+> **版本**：v0.2 · 2026-07-29  
 > **读者**：开发 Agent / 本人  
-> **关联**：`strategy-pack.md`（策略包契约）· `strategy-roadmap-and-tests.md`（落地+测试）· `wyckoff-state-view.md`
+> **关联**：`strategy-gates.md` · `strategy-pack.md` · `resonance-and-orchestration.md` · `wyckoff-state-view.md`
 
 ---
 
@@ -31,14 +31,14 @@
 
 ### 2.1 与现状对照
 
-| 能力 | 现状 | 目标 |
-|------|------|------|
-| 缠/动量/威插件 | `plugins/` 部分具备 | 统一「意见卡」schema |
-| 筹码 | `chip_core` + 报告方案 C | 分析/展示包，默认不进 fusion |
-| fusion | 缠+动+VPF 加权 | 保留为意见合成；逐步不替代闸口策略 |
-| mistery_gate | 已收紧动作/仓 | 总纪律闸，展示脱敏（无 mi 品牌） |
-| 策略包匹配 | **未落地** | 6 闸口 + 包库 |
-| 报告 📐 | **未系统化** | 闸口主用/预案展示 |
+| 能力 | 现状（2026-07-29） | 目标/备注 |
+|------|-------------------|-----------|
+| 缠/动量/威插件 | `analysis_cards` + `plugins/` | 意见卡为策略输入 SSOT |
+| 筹码 | `chip_core`；展示/共振岗 | 默认不进短线 fusion 加权 |
+| fusion | cards 路径生产；仪表角色 | 不替代闸口策略 / decision_view |
+| mistery_gate + chan_discipline | 已收紧动作/仓 | 展示脱敏（无 mi 品牌） |
+| 策略包匹配 | ✅ `strategy/match.py` + `strategy/packs/*.yaml` | 六闸；entry 读买点盖 lifecycle |
+| 报告 📐 | ✅ `format_gates_brief` / 短中线挂策略摘要 | 继续只读闸口结果 |
 
 ---
 

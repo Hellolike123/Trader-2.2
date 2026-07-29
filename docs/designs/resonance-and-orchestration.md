@@ -1,7 +1,7 @@
 # 目标架构法源：五层 + 编排 · 岗位共振 · 多场景
 
 > **状态**：产品方向已定 · 已合入 `main`  
-> **版本**：v0.7 · 2026-07-29（阶段 5：`report_pipeline/` 分包 + t0/review/portfolio 引擎下沉 `trader_shared`）  
+> **版本**：v0.8 · 2026-07-29（阶段 5 分包之后：买点盖 L2/L3、池/仓位吃共振档、T0 结构分边界、日线裁定听 decision_view）  
 > **读者**：**所有后续 Agent / 人类**——只读本文 + `AGENTS.md`（含「改代码去哪」）即可接上方向  
 > **报告/T0/池面板版式**：单票短中线双轨 + T0 结构参考卡 v2 已定；本文仍以职责与字段为主  
 > **冲突时**：以本文产品铁律 + `trader_shared/` 实现为准；旧文若写「fusion 打分当总司令」视为过时  
@@ -16,7 +16,7 @@
 2. **不当**：厚 `weighted_score` 加权融合当分王；策略/展示层重跑缠论威科夫检测。  
 3. **架构**：数据 / 分析 / 共振+策略+决策 / 展示 + **编排总管**（只排队）。  
 4. **可扩展**：新理论→分析卡；新原典→策略 YAML；新用法→新编排入口（T0/池/候选池/仓位）读同一字段。  
-5. **代码现状**：阶段 1～3 已落地：`resonance` + 策略 context + `decision_view`（新开只收紧）。阶段 5：`report_pipeline/` 分包、引擎下沉、`pool_cmds/` 拆分已合入。fusion 分仍存在，目标继续降权（生产路径 = cards）。  
+5. **代码现状**：阶段 1～5 已落地（共振/策略/decision_view/流水线分包）。续：买点盖 L2/L3；选股池与仓位轮动读共振档（离散）；T0 的 `resonance` 是结构分非 `pullback_probe`；日线裁定出手听 decision_view。fusion 分仍作仪表（生产路径 = cards）。  
 6. **详细边界**：`analysis-strategy-boundaries.md`；意见卡：`analysis-opinion-cards.md`。改实现见 `AGENTS.md`「改代码去哪」。
 
 ---
@@ -36,7 +36,7 @@
 
 **纪律铁律**（已有，保持）：只收紧出手/仓位/失效，**不改** `weighted_score` / support / stop。
 
-**方向铁律**（过渡期）：未接 decision_view 前，主报告仍可能受 fusion 影响；**目标**改为听共振+策略+纪律。新 Agent 勿再加厚 fusion 权重矩阵当产品主路径。
+**方向铁律**：出手/新开听共振∧策略∧纪律（`decision_view`）；fusion `weighted_score` 仅仪表。新 Agent 勿再加厚 fusion 权重矩阵当产品主路径。
 
 ---
 
@@ -60,7 +60,7 @@ CLI / Skill（trader · t0 · review · portfolio …）
     ▼
     ├─→ 共振     posts / grade（读卡；岗位互补，非计票打分）
     ├─→ 策略层   strategy/packs/*.yaml + 六闸 match
-    └─→ 决策层   discipline 只收紧 +（将来）主策略择一 / decision_view
+    └─→ 决策层   discipline 只收紧 + decision_view（新开只收紧）
     ▼
 展示层  各场景纯展示（版式 TBD）
 ```
@@ -74,13 +74,13 @@ CLI / Skill（trader · t0 · review · portfolio …）
 | **分析** | 理论计算 → **意见卡** | 互相加权成唯一真理；直接写「买30%」 | `analysis/`、`plugins/`、各 `*_core` |
 | **共振** | 岗位 ✓/✗、档、冲突、缺岗 | 计票打分；重跑检测 | `resonance.py` → `report["resonance"]` |
 | **策略** | 原典剧本自动 match | 改 weighted_score；import 检测实现 | `strategy/match.py` + `strategy/packs/` |
-| **决策** | 纪律硬闸 + 薄仲裁 | 用分数平均抹掉冲突 | `mistery_gate` / `chan_discipline`；将来 decision_view |
+| **决策** | 纪律硬闸 + 薄仲裁 | 用分数平均抹掉冲突 | `mistery_gate` / `chan_discipline`；`decision_view.py`（已挂载） |
 | **展示** | 渲染 | if Spring 则建议买入 | `report_core` / t0 输出 / pool 面板 |
 
 ### 2.3 为何要有编排层（给听不懂的人）
 
 五层是**工种**；编排是**总管喊开工顺序**。  
-没有编排，模块不会自己串起来。现有总管偏胖（`build_report` ~1800 行）——**目标变瘦**，不是取消总管。
+没有编排，模块不会自己串起来。总管（`build_report`）只排队；胖逻辑已下沉 `report_pipeline/`——**保持瘦**，勿堆回 monolith。
 
 ---
 
@@ -164,7 +164,7 @@ report["resonance"] = {
 实现：`trader_shared/resonance.py`  
 挂载：`report_builder` 在 `ensure_report_analysis_cards` 之后、`match_strategies` 之前。
 
-**1800 行 builder**：要拆，但不做当前第一步；阶段 5 或穿插「只抽函数、行为不变」小拆。
+**编排瘦身**：阶段 5 已把短中线挂接拆进 `report_pipeline/attach_*.py`；`report_builder` 以排队为主，勿再堆回 monolith。
 
 ---
 
