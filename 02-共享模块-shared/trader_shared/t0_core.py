@@ -427,22 +427,21 @@ def render_markdown(plan: dict[str, Any]) -> str:
         lines.append("")
         lines.extend(checklist_lines)
 
-    # 失效压成短行；评分默认不占屏（有分且非薄数据才一行）
+    # ⑤ 边界：失效 + 参考分（与买卖价四类分开）
     stop_num = numeric_or_none(buy.get("invalid_price"))
-    fail_short = f"失效：破{stop_num:.2f}" if stop_num is not None else ""
+    fail_bits: list[str] = []
+    if stop_num is not None:
+        fail_bits.append(f"跌破止损{stop_num:.2f}")
     vwap = numeric_or_none(plan.get("vwap"))
-    current = current_price
-    if vwap and current and current < vwap:
-        fail_short = (fail_short + " / 破VWAP") if fail_short else "失效：破VWAP"
-    if fail_short:
-        lines.append(fail_short)
+    if vwap and current_price and current_price < vwap:
+        fail_bits.append("跌破VWAP")
+    if fail_bits:
+        lines.append(f"看法失效：{' / '.join(fail_bits)}")
 
     resonance = plan.get("resonance") or {}
     score = resonance.get("score")
     if score is not None and int(score) > 0 and not _data_thin(plan):
-        lines.append(f"参考分 {int(score)} · 非指令")
-    elif capital_lines:
-        pass
+        lines.append(f"参考分 {int(score)} · 仅供结构对照，非下单指令")
 
     if capital_lines:
         lines.append(f"💰 {capital_lines[0]}")
@@ -640,21 +639,45 @@ def _resolve_sell_px(sell: dict[str, Any], plan: dict[str, Any], buy_px: float |
 
 
 def _rr_verdict(rr: float | None, net_space_pct: float | None) -> str:
+    """盈亏比白话判定（不用 RR 缩写）。"""
     if rr is None:
-        return "RR无效"
-    if net_space_pct is not None and net_space_pct < _ROUND_TRIP_COST_PCT:
+        return "算不出"
+    if net_space_pct is not None and net_space_pct < 0:
         return "盖不住费用"
     if rr >= 2.0:
-        return "RR够用"
+        return "够用"
     if rr >= 1.0:
-        return "RR一般"
-    return "RR偏弱"
+        return "一般"
+    return "偏弱"
 
 
-def _fmt_atr_mult(move: float, atr: float | None) -> str:
+def _atr_pair_txt(risk: float, reward: float, atr: float | None) -> str:
+    """亏/赚相对 ATR 的短注，如（0.1/0.4倍ATR）。"""
     if atr is None or atr <= 0:
         return ""
-    return f"/{move / atr:.1f}A"
+    return f"（{risk / atr:.1f}/{reward / atr:.1f}倍ATR）"
+
+
+def _ledger_one_line(
+    *,
+    title: str,
+    risk: float,
+    reward: float,
+    atr: float | None,
+    rr: float,
+    net_space: float | None = None,
+    verdict: str | None = None,
+) -> str:
+    """一本账压成一行：亏｜赚｜盈亏比｜费后。"""
+    judge = verdict if verdict is not None else _rr_verdict(rr, net_space)
+    bits = [
+        f"{title}：亏约{risk:.2f}｜赚约{reward:.2f}{_atr_pair_txt(risk, reward, atr)}",
+        f"1比{rr:.1f} · {judge}",
+    ]
+    if net_space is not None:
+        fee_txt = "盖得住" if net_space >= 0 else "盖不住费"
+        bits.append(f"费后{net_space * 100:.1f}%{fee_txt}")
+    return "｜".join(bits)
 
 
 def _build_trade_price_rr_block(
@@ -663,7 +686,7 @@ def _build_trade_price_rr_block(
     buy: dict[str, Any],
     sell: dict[str, Any],
 ) -> list[str]:
-    """微信短行：买卖价 + ATR/RR（参考，非下单指令）。"""
+    """买卖价四行：价位｜波动｜计划账｜现价账（参考，非指令）。"""
     current = numeric_or_none(plan.get("current_price"))
     buy_px = _resolve_buy_px(buy, plan)
     sell_px = _resolve_sell_px(sell, plan, buy_px)
@@ -685,45 +708,49 @@ def _build_trade_price_rr_block(
             lo, hi = sorted([sell_px, acc])
             sell_txt = f"{lo:.2f}～{hi:.2f}"
 
-    # 契约关键字：低吸/高抛/止损
-    lines.append(f"低吸 {buy_txt}｜止损 {stop_txt}｜高抛 {sell_txt}")
+    # ① 价位一行
+    lines.append(f"低吸买入：{buy_txt}｜止损：{stop_txt}｜高抛卖出：{sell_txt}")
 
+    # ② 波动一行
     if atr is not None and atr > 0:
         atr_pct = (atr_ratio * 100) if atr_ratio is not None and atr_ratio < 1 else atr_ratio
         if atr_pct is None and current:
             atr_pct = atr / current * 100
-        atr_line = f"ATR {atr:.2f}"
+        atr_bits = [f"波动：ATR {atr:.2f}元"]
         if atr_pct is not None:
-            atr_line += f"（{atr_pct:.1f}%）"
-        level = str(atr_info.get("level") or "")
+            atr_bits.append(f"占现价{atr_pct:.1f}%")
+        level = str(atr_info.get("level") or "").strip()
         if level:
-            atr_line += f" {level}"
-        lines.append(atr_line)
+            atr_bits.append(level)
+        lines.append("｜".join(atr_bits))
+    else:
+        lines.append("波动：ATR暂无")
 
-    net_space = None
+    # ③ 计划账一行
     if buy_px is not None and sell_px is not None and stop is not None and buy_px > stop:
         risk = buy_px - stop
         reward = sell_px - buy_px
         if risk > 0 and reward > 0:
             plan_rr = reward / risk
             net_space = (sell_px - buy_px) / buy_px - _ROUND_TRIP_COST_PCT
-            # 一行装完：亏/赚/RR/判定
             lines.append(
-                f"计划 亏{risk:.2f}{_fmt_atr_mult(risk, atr)} "
-                f"赚{reward:.2f}{_fmt_atr_mult(reward, atr)} "
-                f"→ RR1:{plan_rr:.1f} {_rr_verdict(plan_rr, net_space)}"
+                _ledger_one_line(
+                    title="计划账",
+                    risk=risk,
+                    reward=reward,
+                    atr=atr,
+                    rr=plan_rr,
+                    net_space=net_space,
+                )
             )
         elif reward <= 0:
-            lines.append("计划 区间未拉开 RR无效")
+            lines.append("计划账：高低未拉开，盈亏比无效")
         else:
-            lines.append("计划 止损无效 RR不算")
+            lines.append("计划账：止损无效，盈亏比不算")
     else:
-        lines.append("计划 价位未齐 RR暂无")
+        lines.append("计划账：价位未齐，盈亏比暂无")
 
-    if net_space is not None:
-        fee_txt = "够费用" if net_space >= 0 else "盖不住费"
-        lines.append(f"费后约{net_space * 100:.1f}% {fee_txt}")
-
+    # ④ 现价账一行
     if current is not None and sell_px is not None and stop is not None and current > stop:
         risk_c = current - stop
         reward_c = sell_px - current
@@ -732,12 +759,20 @@ def _build_trade_price_rr_block(
             net_c = (sell_px - current) / current - _ROUND_TRIP_COST_PCT
             chase = "偏弱" if rr_c < 1.0 or net_c < 0 else "可看"
             lines.append(
-                f"现价 亏{risk_c:.2f}{_fmt_atr_mult(risk_c, atr)} "
-                f"赚{reward_c:.2f}{_fmt_atr_mult(reward_c, atr)} "
-                f"→ RR1:{rr_c:.1f} {chase}"
+                _ledger_one_line(
+                    title="现价账",
+                    risk=risk_c,
+                    reward=reward_c,
+                    atr=atr,
+                    rr=rr_c,
+                    net_space=net_c,
+                    verdict=chase,
+                )
             )
         elif reward_c <= 0:
-            lines.append("现价 已近/超卖点 不追")
+            lines.append("现价账：已近/超过卖点，不宜追")
+    else:
+        lines.append("现价账：相对止损无效，暂不算")
 
     return lines
 
