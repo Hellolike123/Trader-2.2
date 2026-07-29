@@ -180,17 +180,9 @@ def layer_items(items: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
 
 # ── Sorting ──────────────────────────────────────────────────────────────
 def sort_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Sort: status > 共振档 > total_score > -atr；fusion_confidence 仅末位仪表。"""
+    """Sort: status > 共振档 > 阶段 > total_score > -atr。fusion 不参与排序。"""
     status_rank = {"执行": 4, "观察": 3, "待补": 2, "放弃": 1}
     stage_priority = {"主升": 1, "蓄势": 2, "派发": 3, "衰退": 4}
-
-    def _fusion_rank(fc: Any) -> int:
-        if isinstance(fc, str):
-            return {"high": 3, "medium": 2, "low": 1}.get(fc, 0)
-        try:
-            return int(float(fc) * 100) if fc is not None else 0
-        except (TypeError, ValueError):
-            return 0
 
     try:
         from trader_shared.resonance import extract_resonance_grade, resonance_pool_rank
@@ -209,7 +201,6 @@ def sort_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         -stage_priority.get(item.get("major_stage", ""), 5),
         int(item.get("total_score") or 0),
         -float(item.get("atr_ratio") or 0),
-        _fusion_rank(item.get("fusion_confidence", "")),
     ), reverse=True)
 
 

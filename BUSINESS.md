@@ -1,6 +1,6 @@
 # BUSINESS.md — Trader3.0 业务逻辑
 
-> **最后更新**：2026-07-19 | **标杆**：`trader_shared/` 代码 + `formulas.md` + `output-template.md`  
+> **最后更新**：2026-07-29 | **标杆**：`trader_shared/` 代码 + `formulas.md` + `output-template.md`  
 > 冲突时以代码为准，再回写本文。
 
 ---
@@ -21,9 +21,10 @@
 |------|------|------|------|
 | 1. 数据获取 | data_provider | stock code | Security + Quote + Bars + FundFlow + **weekly_bars**（默认 `WEEKLY_LOOKBACK_BARS=260`） |
 | 2. 策略分析 | PluginRegistry | daily_bars, weekly_bars | chan/momentum/wyckoff results |
-| 3. 融合决策 | fusion_core | 三路信号 + regime | weighted_score + action + confidence |
+| 3. 融合仪表 | fusion_core | 三路信号 + regime | weighted_score + action + confidence（**仅仪表**） |
 | 4. 结构筹码阶段 | structure/chip/stage | daily_bars, fund_flow | support/resistance/stage/chips |
-| 5. 纪律门控 | mistery_gate + chan_discipline | fusion + structure | allow_new_entry/action/cap/invalidation |
+| 5. 纪律门控 | mistery_gate + chan_discipline | structure + 纪律 | allow_new_entry/action/cap/invalidation |
+| 5b. 薄决策 | decision_view | 共振 ∧ 策略 ∧ 纪律 | allow_new_recommend（新开只收紧） |
 | 6. 结论构建 | conclusion_block | 以上全部 | 中线看法/短线看法/出手/wave_label/原因 |
 | 7. 报告渲染 | report_core.render_short_midline | report dict | Markdown |
 
@@ -200,13 +201,15 @@ Agent 展示层仍应：**不给买入建议**；文案对齐 fusion action / �
 | **派发** | 高位放量滞涨 | 诱多，逐步退出 |
 | **衰退** | 跌破生命线持续新低 | 不参与 |
 
-方向仍以 `fusion.weighted_score` 为准，不得只从阶段推断多空。
+**方向 / 新开**听 `decision_view`（共振齐 ∧ 主策略亮 ∧ 纪律允许）；`fusion.weighted_score` **仅仪表**。不得只从阶段或融合分推断多空/宜买。
 
 ### 4.2 选股池三关筛选
 
 **第一关 — 阶段筛选**：衰退期 → 直接拒绝  
 
-**第二关 — 评分门槛**：按 `major_stage` 查表 `ADMISSION_SCORE_*`  
+**第二关 — 结构评分门槛**：按 `major_stage` 查表 `ADMISSION_SCORE_*`。  
+`total_score` = 缠 + 威 + 筹 + 动（封顶 100）。**`fusion_score` 仅仪表，不进总分、不抬/压入池门槛、不参与排序加权。**  
+入池后共振档离散收紧：冲突 / 动能拆台不得标「执行」。
 
 **第三关 — 风控检查**：现价跌破止损 → 拒绝  
 

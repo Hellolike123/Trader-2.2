@@ -121,7 +121,7 @@ CHIP_ABOVE_STOP_BONUS: int = 5
 CHIP_IN_ZONE_BONUS: int = 4
 CHIP_UPSIDE_BONUS: int = 3
 
-# 融合层 bonus
+# 融合层仪表分（仅展示；不计入 total_score / 入池门槛 / 排序）
 FUSION_BONUS_SCALE: int = 15           # weighted_score × 15 → -20~+20
-FUSION_DISAGREEMENT_CAP: int = 10      # 高分歧时 bonus 上限
+FUSION_DISAGREEMENT_CAP: int = 10      # 高分歧时仪表分上限
 

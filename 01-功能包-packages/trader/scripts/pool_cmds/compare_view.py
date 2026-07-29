@@ -130,12 +130,15 @@ def render_compare(reports: list[dict[str, Any]]) -> str:
         lines.append(f"{i}. {name}（{code}）  {scene}  {current:.2f}元  {atr_text}")
         lines.append(f"   阶段：{major_stage} ｜ 动能：{momentum} ｜ 综合评分：{total}")
 
-        # 五层打分
-        lines.append(f"   五层打分：缠{chan}/{chan_max} 威{wyck}/{wyck_max} 筹{chip}/{chip_max} 融{fus}/{fus_max} 动{mom}/{mom_max}")
+        # 结构四席 + 融合仪表（融合不进总分/入池门槛）
+        lines.append(
+            f"   结构分：缠{chan}/{chan_max} 威{wyck}/{wyck_max} 筹{chip}/{chip_max} 动{mom}/{mom_max}"
+            f"｜融合仪表 {fus:+d}/{fus_max}"
+        )
 
         # 融合 + 主力
         if fusion_action:
-            lines.append(f"   融合：{fusion_action}（得分 {fusion_ws:+.2f}，置信度 {fusion_conf:.0%}）")
+            lines.append(f"   融合仪表：{fusion_action}（得分 {fusion_ws:+.2f}，置信度 {fusion_conf:.0%}，仅参考）")
         if mf_total > 0:
             lines.append(f"   主力评分：{mf_total}分（{mf.get('label', '')}）")
 

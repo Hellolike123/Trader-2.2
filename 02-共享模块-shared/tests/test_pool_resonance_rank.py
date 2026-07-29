@@ -54,6 +54,46 @@ def test_label_zh():
     assert "拆台" in resonance_grade_label("momentum_veto")
 
 
+def test_score_report_excludes_fusion_from_total():
+    """fusion 仪表分可记录，但不计入 total_score（入池门槛）。"""
+    scripts = (
+        Path(__file__).resolve().parents[2]
+        / "01-功能包-packages"
+        / "trader"
+        / "scripts"
+    )
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    from pool_cmds.scoring import score_report
+
+    base = {
+        "current": 10.0,
+        "confirm": 10.1,
+        "stop": 9.0,
+        "support": 9.5,
+        "take": 11.0,
+        "stage": "走强",
+        "scene": "等转强",
+        "chan_buy_point_types": [],
+        "chan_strokes_count": 3,
+        "chan_trend_label": "上行",
+        "bars": [],
+        "fusion": {"weighted_score": 1.0, "disagreement": 0.0},
+    }
+    with_fusion = score_report(base)
+    without = score_report({**base, "fusion": {"weighted_score": 0.0, "disagreement": 0.0}})
+    assert with_fusion["fusion_score"] > 0
+    assert without["fusion_score"] == 0
+    assert with_fusion["total_score"] == without["total_score"]
+    structure = (
+        with_fusion["chanlun_score"]
+        + with_fusion["wyckoff_score"]
+        + with_fusion["chip_score"]
+        + with_fusion["momentum_score"]
+    )
+    assert with_fusion["total_score"] == min(100, structure)
+
+
 def test_sort_items_unified_prefers_aligned():
     """同 status 下 aligned 排在 conflict 前（经 pool_cmds.scoring）。"""
     scripts = (

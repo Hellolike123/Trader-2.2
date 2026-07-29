@@ -100,15 +100,16 @@ def score_report(report: dict[str, Any]) -> dict[str, int]:
     wyckoff = max(0, min(30, wyckoff))
     chip = max(0, min(25, chip))
 
-    # ── 融合层 bonus: weighted_score(-1.35~1.35) → -20~+20 分 ──
+    # ── 融合层仪表分（仅展示；不进 total_score / 入池门槛）──
+    # weighted_score(-1.35~1.35) → -20~+20；高分歧时收窄到 ±cap
     fusion = report.get("fusion", {}) or {}
     fw = to_float(fusion.get("weighted_score")) if isinstance(fusion, dict) else None
     fd = to_float(fusion.get("disagreement")) if isinstance(fusion, dict) else None
     fw = fw or 0.0
     fd = fd or 0.0
-    fusion_bonus = max(-20, min(20, round(fw * FUSION_BONUS_SCALE)))
+    fusion_score = max(-20, min(20, round(fw * FUSION_BONUS_SCALE)))
     if fd > 1:
-        fusion_bonus = max(-FUSION_DISAGREEMENT_CAP, min(FUSION_DISAGREEMENT_CAP, fusion_bonus))
+        fusion_score = max(-FUSION_DISAGREEMENT_CAP, min(FUSION_DISAGREEMENT_CAP, fusion_score))
 
     from trader_shared.momentum_core import assess_momentum
     daily_bars = report.get("bars") or report.get("daily_bars") or []
@@ -117,13 +118,23 @@ def score_report(report: dict[str, Any]) -> dict[str, int]:
     # 数据不足时 score=None，(or 0) 防止 None // 5 抛错，且不贡献动量分
     momentum_score_val = min(20, max(0, (momentum_result.get("score") or 0) // 5))
     mom_tag = {"bullish": "🟢看多", "bearish": "🔴看空", "neutral": "🟡中性"}.get(momentum_dir, "⚪数据不足")
-    # [P0 Fix] momentum 独立计算后此前未计入 total → 修正
-    total = max(0, min(100, chan + wyckoff + chip + fusion_bonus + momentum_score_val))
-    return {"chanlun_score": chan, "wyckoff_score": wyckoff, "chip_score": chip, "fusion_score": fusion_bonus, "total_score": total, "momentum_score": momentum_score_val, "momentum_tag": mom_tag}
+    # 入池总分 = 结构四席（缠/威/筹/动）；融合分仅仪表，不抬/压门槛
+    total = max(0, min(100, chan + wyckoff + chip + momentum_score_val))
+    return {
+        "chanlun_score": chan,
+        "wyckoff_score": wyckoff,
+        "chip_score": chip,
+        "fusion_score": fusion_score,
+        "total_score": total,
+        "momentum_score": momentum_score_val,
+        "momentum_tag": mom_tag,
+    }
 
 
 def _evaluate_admission(major_stage: str, total_score: int, current: float, confirm: float, stop: float) -> dict[str, str]:
-    """三关筛选统一实现：阶段筛选 → 评分门槛 → 风控检查。
+    """三关筛选统一实现：阶段筛选 → 结构评分门槛 → 风控检查。
+
+    total_score 不含 fusion 仪表分；融合分不得抬高/压低入池门槛。
 
     Returns:
         {"result": "入池"|"待补"|"拒绝", "reason": str, "status": "执行"|"观察"|"淘汰"}
@@ -132,7 +143,7 @@ def _evaluate_admission(major_stage: str, total_score: int, current: float, conf
     if major_stage == "衰退":
         return {"result": "拒绝", "reason": "衰退期，直接拒绝入池。", "status": "淘汰"}
 
-    # 第二关：评分门槛（查表）
+    # 第二关：结构评分门槛（查表；不含 fusion）
     exec_threshold = ADMISSION_SCORE_EXECUTE.get(major_stage, 999)
     obs_threshold = ADMISSION_SCORE_OBSERVE.get(major_stage, 999)
 
@@ -243,7 +254,7 @@ def record_from_report(target: str, report: dict[str, Any], offline: bool = Fals
         "atr_cap": atr_cap,  # ATR 波动率决定的单票最大仓位（硬上限）
         "fusion_action": (report.get("fusion") or {}).get("action"),
         "fusion_confidence": (report.get("fusion") or {}).get("confidence"),
-        # fusion_score 由 **scores 提供（已做 -20~20 变换），与 total_score 一致
+        # fusion_score 由 **scores 提供（-20~20 仪表）；不计入 total_score
         "major_stage": major_stage,
         "momentum": momentum,
         "stage_status": stage_status,
@@ -308,7 +319,7 @@ def sort_items_unified(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     主键：status（执行 > 观察 > 淘汰）
     次键：共振档（离散，aligned > 缺岗 > empty > 拆台/冲突）
-    再次：融合置信度 × 40% + 总分归一化 × 30% + 阶段强度 × 30%
+    再次：结构总分归一化 × 50% + 阶段强度 × 50%（fusion 置信度不参与排序）
     附加：盈亏比提权（评分 × (1 + min(盈亏比-1,2) × 0.1)）
     """
     from trader_shared.resonance import extract_resonance_grade, resonance_pool_rank
@@ -317,12 +328,11 @@ def sort_items_unified(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     items = _tighten_status_by_resonance(items)
 
     def _composite(item: dict[str, Any]) -> float:
-        conf = float(item.get("fusion_confidence") or 0)
         score = int(item.get("total_score") or 0)
         stage = str(item.get("major_stage") or "蓄势")
         stage_str = STAGE_STRENGTH.get(stage, 0.5)
-        # fusion conf 降权：主键已是 status+共振档，此处仅作弱仪表
-        composite = conf * 0.2 + (score / 100.0) * 0.4 + stage_str * 0.4
+        # 结构分 + 阶段；fusion 仅仪表，不参与排序加权
+        composite = (score / 100.0) * 0.5 + stage_str * 0.5
         # R4: 盈亏比排序加分
         rr = to_float(item.get("risk_reward")) or 0
         if rr > 1.0 and ENABLE_RISK_REWARD_FILTER:
@@ -342,6 +352,7 @@ def sort_items_unified(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def sort_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """status → 结构总分 → 低波动优先。fusion 不参与排序。"""
     status_rank = {"执行": 3, "观察": 2, "淘汰": 1}
     return sorted(
         items,
@@ -349,7 +360,6 @@ def sort_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             status_rank.get(str(item.get("status")), 0),
             int(item.get("total_score") or 0),
             -float(item.get("atr_ratio") or 0),
-            _fusion_confidence_rank(item.get("fusion_confidence")),
         ),
         reverse=True,
     )
