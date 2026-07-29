@@ -711,48 +711,24 @@ def enrich_with_signal_backtrack(review: dict[str, Any], *, limit: int = 10) -> 
 
 
 def calc_macd(bars: list[dict[str, Any]]) -> None:
-    if not bars or len(bars) < 26:
+    """原地写入 macd_line / dea / macd_histogram；统一走 indicator_math.calc_macd_series。"""
+    if not bars:
         return
 
-    closes: list[float] = []
-    for bar in bars:
-        c = to_float(bar.get("close"))
-        if c is not None:
-            closes.append(c)
+    from trader_shared.indicator_math import calc_macd_series
 
-    if len(closes) < 26:
-        return
-
-    fast_alpha = 2.0 / 13.0
-    slow_alpha = 2.0 / 27.0
-    signal_alpha = 2.0 / 10.0
-
-    ema12 = sum(closes[:12]) / 12.0
-    ema26 = sum(closes[:26]) / 26.0
-
-    dea_values: list[float] = []
-
-    # BUG #16 FIX: iterate over closes (not bars) since closes may be shorter
-    # when some bars have missing close values. Use enumerate to get the
-    # index into closes AND map back to bars for storage.
-    for ci, c in enumerate(closes):
-        if ci < 12:
-            continue
-        i = ci  # maps closes index → bars index (both have same length when close is present)
-        ema12 = ema12 * fast_alpha + c * (1.0 - fast_alpha)
-        if i >= 26:
-            ema26 = ema26 * slow_alpha + c * (1.0 - slow_alpha)
-            macd_line = ema12 - ema26
-            dea_values.append(macd_line)
-            if len(dea_values) == 9:
-                dea = sum(dea_values) / 9.0
-            elif len(dea_values) > 9:
-                dea = dea * signal_alpha + macd_line * (1.0 - signal_alpha)
-            else:
-                dea = macd_line
-            bars[i]["macd_line"] = round(macd_line, 4)
-            bars[i]["dea"] = round(dea, 4)
-            bars[i]["macd_histogram"] = round(macd_line - dea, 4)
+    closes: list[float | None] = [to_float(bar.get("close")) for bar in bars]
+    series = calc_macd_series(closes)
+    for i, bar in enumerate(bars):
+        dif = series["dif"][i]
+        dea = series["dea"][i]
+        hist = series["histogram"][i]
+        if dif is not None:
+            bar["macd_line"] = round(dif, 4)
+        if dea is not None:
+            bar["dea"] = round(dea, 4)
+        if hist is not None:
+            bar["macd_histogram"] = round(hist, 4)
 
 
 def calc_macd_params(bars: list[dict[str, Any]]) -> dict[str, Any]:

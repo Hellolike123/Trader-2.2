@@ -29,23 +29,52 @@ def calculate_sma(values: list[float], period: int) -> list[float | None]:
 
 
 def calculate_ema(values: list[float | None], period: int) -> list[float | None]:
+    """EMA/EXPMA：SMA(period) 播种后指数递推（与 indicator_math.calc_expma_series 一致）。
+
+    序列含 None 时跳过空洞再播种；无空洞时直接转发 calc_expma_series。
+    """
     if period <= 0 or not values:
         return [None for _ in values]
-    alpha = 2 / (period + 1)
-    result: list[float | None] = []
+    if all(v is not None for v in values):
+        from trader_shared.indicator_math import calc_expma_series
+
+        return calc_expma_series([float(v) for v in values], period)  # type: ignore[arg-type]
+
+    k = 2.0 / (period + 1)
+    result: list[float | None] = [None] * len(values)
     ema: float | None = None
-    for value in values:
+    seed: list[float] = []
+    for i, value in enumerate(values):
         if value is None:
-            result.append(ema)
             continue
-        ema = value if ema is None else value * alpha + ema * (1 - alpha)
-        result.append(ema)
+        if ema is None:
+            seed.append(float(value))
+            if len(seed) == period:
+                ema = sum(seed) / period
+                result[i] = round(ema, 4)
+        else:
+            ema = float(value) * k + ema * (1.0 - k)
+            result[i] = round(ema, 4)
     return result
 
 
 def calculate_macd(closes: list[float], fast: int = 12, slow: int = 26, signal: int = 9) -> dict[str, list[float | None]]:
+    """MACD 序列；统一走 indicator_math.calc_macd_series（SMA 播种，柱=DIF−DEA×1）。
+
+    ``fast/slow/signal`` 保留签名兼容；非默认参数时仍用本模块 EMA 回退（生产固定 12/26/9）。
+    """
     if not closes:
         return {"dif": [], "dea": [], "hist": []}
+    if fast == 12 and slow == 26 and signal == 9:
+        from trader_shared.indicator_math import calc_macd_series
+
+        series = calc_macd_series(list(closes))
+        return {
+            "dif": series["dif"],
+            "dea": series["dea"],
+            "hist": series["histogram"],
+        }
+    # 非标准周期：兼容旧调用，仍用首价播种 EMA（仅测试/罕见路径）
     ema_fast = calculate_ema(closes, fast)
     ema_slow = calculate_ema(closes, slow)
     dif: list[float | None] = []
@@ -54,7 +83,6 @@ def calculate_macd(closes: list[float], fast: int = 12, slow: int = 26, signal: 
     dea = calculate_ema(dif, signal)
     hist: list[float | None] = []
     for d, e in zip(dif, dea):
-        # histogram = DIF−DEA（×1，与 shared indicator_math / formulas.md 一致；非通达信 2×）
         hist.append(None if d is None or e is None else (d - e))
     return {"dif": dif, "dea": dea, "hist": hist}
 
@@ -166,7 +194,8 @@ def calculate_bollinger_bands(
             continue
         window = closes[i + 1 - period : i + 1]
         middle = sum(window) / period
-        variance = sum((x - middle) ** 2 for x in window) / period
+        # 样本标准差（÷N−1），与 momentum_core.calc_bollinger 一致
+        variance = sum((x - middle) ** 2 for x in window) / max(period - 1, 1)
         std = math.sqrt(variance)
         upper = middle + num_std * std
         lower = middle - num_std * std

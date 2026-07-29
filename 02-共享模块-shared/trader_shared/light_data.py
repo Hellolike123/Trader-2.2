@@ -1092,8 +1092,10 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
 
 def _compute_atr_fields(bars: list[dict[str, Any]]) -> None:
     """对日线 bar 列表原地附加 TR / ATR14 / ATR7 / ATR_ratio 字段。
+
     需要至少 8 根 bar 才能计算 atr7，15 根才能计算 atr14。
-    不足时字段值为 0.0，不会报错。
+    不足时字段为 None（与 indicator_math.calc_atr_series 预热语义一致）。
+    下游请用 ``(atr14 or 0)`` / ``atr14 is not None``；勿把不足当成 ATR=0。
     """
     if not bars:
         return
@@ -1113,17 +1115,17 @@ def _compute_atr_fields(bars: list[dict[str, Any]]) -> None:
         if i >= 6:
             bar["atr7"] = round(sum(trs[i - 6 : i + 1]) / 7, 4)
         else:
-            bar["atr7"] = 0.0
+            bar["atr7"] = None
         if i >= 13:
             bar["atr14"] = round(sum(trs[i - 13 : i + 1]) / 14, 4)
         else:
-            bar["atr14"] = 0.0
+            bar["atr14"] = None
         close = bar.get("close")
-        atr14 = bar.get("atr14", 0.0) or 0.0
-        if close and atr14 > 0:
-            bar["atr_ratio"] = round(atr14 / float(close), 4)
+        atr14 = bar.get("atr14")
+        if close and atr14 is not None and atr14 > 0:
+            bar["atr_ratio"] = round(float(atr14) / float(close), 4)
         else:
-            bar["atr_ratio"] = 0.0
+            bar["atr_ratio"] = None
 
 
 def _fetch_daily_sina(sec: Security, days: int = 300) -> list[dict[str, Any]] | None:

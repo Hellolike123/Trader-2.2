@@ -1178,8 +1178,8 @@ def check_resonance(report_data, zones, state, ab_result=None):
         recent = bars[-20:]
         box_high = max(float(b.get("high", 0)) for b in recent if b.get("high"))
         box_low = min(float(b.get("low", 0)) for b in recent if b.get("low"))
-        # ATR
-        atr = _calc_atr_from_closes(closes, 14)
+        # ATR：真 TR 序列（indicator_math），用完整 5m bars，不用收盘差近似
+        atr = _latest_atr(bars, period=14)
         dist_to_low = (current - box_low) / box_low if box_low > 0 else 1
         dist_to_high = (box_high - current) / box_high if box_high > 0 else 1
         if dist_to_low <= (atr / box_low * 0.8) if atr and box_low else False:
@@ -1190,7 +1190,7 @@ def check_resonance(report_data, zones, state, ab_result=None):
         else:
             box_reason = f"箱体{box_low:.2f}-{box_high:.2f}"
     else:
-        atr = 0
+        atr = 0.0
 
     # 条件4: 成交量
     score_vol = 0
@@ -1272,14 +1272,17 @@ def check_resonance(report_data, zones, state, ab_result=None):
     }
 
 
-def _calc_atr_from_closes(closes, period=14):
-    """简单 ATR 计算（用收盘价近似）。"""
-    if len(closes) < period + 1:
-        return 0
-    trs = []
-    for i in range(1, period + 1):
-        trs.append(abs(closes[-i] - closes[-i-1]))
-    return sum(trs) / len(trs)
+def _latest_atr(bars: list[dict], period: int = 14) -> float:
+    """取 bars 上 calc_atr_series 最后一个有效 ATR；不足则 0。"""
+    if not bars or len(bars) < period + 1:
+        return 0.0
+    from trader_shared.indicator_math import calc_atr_series
+
+    series = calc_atr_series(bars, period=period)
+    for value in reversed(series):
+        if value is not None and value > 0:
+            return float(value)
+    return 0.0
 
 
 def _resonance_summary(lights, buy_green, sell_red):

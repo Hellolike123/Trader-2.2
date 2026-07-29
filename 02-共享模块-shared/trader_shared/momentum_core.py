@@ -6,18 +6,6 @@ from typing import Any
 from trader_shared.light_data import to_float
 
 
-def _ema(values: list[float], period: int) -> list[float | None]:
-    if not values or period <= 0:
-        return [None] * len(values)
-    alpha = 2 / (period + 1)
-    result: list[float | None] = []
-    ema: float | None = None
-    for v in values:
-        ema = v if ema is None else v * alpha + ema * (1 - alpha)
-        result.append(ema)
-    return result
-
-
 def calc_expma(closes: list[float], period: int = 10) -> list[float | None]:
     """计算 EXPMA（指数移动平均线）。
 

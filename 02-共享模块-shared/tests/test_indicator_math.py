@@ -159,3 +159,100 @@ class TestCalcMacdSeries:
         for i in range(35, 50):
             if result["dif"][i] is not None:
                 assert result["dif"][i] > 0
+
+
+class TestMacdSsotAlignment:
+    """T0 / review MACD 必须与 indicator_math.calc_macd_series 对齐。"""
+
+    def test_t0_calculate_macd_matches_ssot(self):
+        from trader_shared.t0_indicators import calculate_macd
+
+        closes = [10.0 + i * 0.3 for i in range(60)]
+        ssot = calc_macd_series(closes)
+        t0 = calculate_macd(closes)
+        assert t0["dif"] == ssot["dif"]
+        assert t0["dea"] == ssot["dea"]
+        assert t0["hist"] == ssot["histogram"]
+
+    def test_t0_constant_series_aligned(self):
+        from trader_shared.t0_indicators import calculate_macd
+
+        closes = [100.0] * 50
+        ssot = calc_macd_series(closes)
+        t0 = calculate_macd(closes)
+        for i in range(50):
+            if ssot["dif"][i] is not None:
+                assert abs(t0["dif"][i] - ssot["dif"][i]) < 1e-9
+
+    def test_review_calc_macd_matches_ssot(self):
+        from trader_shared.review_core import calc_macd
+
+        closes = [10.0 + i * 0.2 for i in range(60)]
+        bars = [{"close": c, "high": c + 0.5, "low": c - 0.5} for c in closes]
+        calc_macd(bars)
+        ssot = calc_macd_series(closes)
+        for i, bar in enumerate(bars):
+            if ssot["dif"][i] is not None:
+                assert bar["macd_line"] == round(ssot["dif"][i], 4)
+            if ssot["dea"][i] is not None:
+                assert bar["dea"] == round(ssot["dea"][i], 4)
+            if ssot["histogram"][i] is not None:
+                assert bar["macd_histogram"] == round(ssot["histogram"][i], 4)
+                assert abs(bar["macd_histogram"] - (bar["macd_line"] - bar["dea"])) < 1e-6
+
+
+class TestT0AtrSsot:
+    def test_latest_atr_matches_calc_atr_series(self):
+        from trader_shared.indicator_math import calc_atr_series
+        from trader_shared.t0_price_point_engine import _latest_atr
+
+        bars = []
+        price = 100.0
+        for i in range(40):
+            high = price + 3.0
+            low = price - 3.0
+            close = price + (0.2 if i % 2 == 0 else -0.1)
+            bars.append({"open": price, "high": high, "low": low, "close": close, "volume": 1000})
+            price = close
+
+        atr = _latest_atr(bars, 14)
+        series = calc_atr_series(bars, 14)
+        expected = next(v for v in reversed(series) if v is not None)
+        assert abs(atr - expected) < 1e-9
+        assert atr > 0
+
+
+class TestEmaBollingerAtrWarmup:
+    def test_calculate_ema_matches_calc_expma_series(self):
+        from trader_shared.t0_indicators import calculate_ema
+
+        closes = [10.0 + i * 0.4 for i in range(30)]
+        assert calculate_ema(closes, 10) == calc_expma_series(closes, 10)
+
+    def test_bollinger_sample_std_matches_momentum(self):
+        from trader_shared.momentum_core import calc_bollinger
+        from trader_shared.t0_indicators import calculate_bollinger_bands
+
+        closes = [10.0 + (i % 5) * 0.3 + i * 0.05 for i in range(40)]
+        mom = calc_bollinger(closes, 20, 2.0)
+        t0 = calculate_bollinger_bands(closes, 20, 2.0)
+        last = t0[len(closes) - 1]
+        assert last["middle"] == mom["middle"]
+        assert last["upper"] == mom["upper"]
+        assert last["lower"] == mom["lower"]
+
+    def test_compute_atr_fields_warmup_none(self):
+        from trader_shared.light_data import _compute_atr_fields
+
+        bars = [
+            {"open": 10, "high": 11, "low": 9, "close": 10.5}
+            for _ in range(20)
+        ]
+        _compute_atr_fields(bars)
+        for i in range(6):
+            assert bars[i]["atr7"] is None
+        for i in range(13):
+            assert bars[i]["atr14"] is None
+            assert bars[i]["atr_ratio"] is None
+        assert bars[13]["atr14"] is not None and bars[13]["atr14"] > 0
+        assert bars[13]["atr_ratio"] is not None
