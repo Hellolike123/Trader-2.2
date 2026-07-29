@@ -273,7 +273,7 @@ target="南网科技"
 - 盈亏比门槛：MIN_RISK_REWARD / IDEAL_RISK_REWARD
 - 威科夫参数：WYCKOFF_DIVERGENCE_BARS / WYCKOFF_SPRING_THRESHOLD 等 40+ 常量
 - 仓位管理：KELLY_MAX_TOTAL_POSITIONS / MAX_SINGLE_POSITION_PCT
-- 三关评分：ADMISSION_SCORE_EXECUTE / ADMISSION_SCORE_OBSERVE
+- 三关评分：ADMISSION_SCORE_EXECUTE / ADMISSION_SCORE_OBSERVE（`total_score`=缠+威+筹+动；fusion 仅仪表）
 
 外置配置：`trader_shared/config/fusion_regime_weights.yaml`（Regime 权重矩阵）
 
