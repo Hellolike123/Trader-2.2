@@ -30,24 +30,28 @@ def apply_buy_point_lifecycle(
         if _life.get("status") == "failed":
             _disc = report.get("discipline") if isinstance(report.get("discipline"), dict) else {}
             _disc["allow_new_entry"] = False
-            _cl = _disc.get("entry_checklist") if isinstance(_disc.get("entry_checklist"), dict) else {}
-            if _cl:
-                _cl["all_green"] = False
-                _flags = _cl.get("flags") if isinstance(_cl.get("flags"), dict) else {}
-                _flags["short_trigger"] = False
-                _cl["flags"] = _flags
-                _items = _cl.get("items") if isinstance(_cl.get("items"), dict) else {}
-                _items["short_trigger"] = False
-                _cl["items"] = _items
-                _miss = list(_cl.get("missing_labels") or [])
-                if "买点已失效" not in _miss:
-                    _miss.append("买点已失效")
-                _cl["missing_labels"] = _miss
-                _cl["entry_line"] = format_entry_line_c1(
-                    all_green=False, missing=_miss
-                )
-                _disc["entry_checklist"] = _cl
-                _disc["entry_line"] = _cl["entry_line"]
+            _cl = (
+                _disc.get("entry_checklist")
+                if isinstance(_disc.get("entry_checklist"), dict)
+                else {}
+            )
+            _cl = dict(_cl)
+            _cl["all_green"] = False
+            _flags = _cl.get("flags") if isinstance(_cl.get("flags"), dict) else {}
+            _flags = dict(_flags)
+            _flags["short_trigger"] = False
+            _cl["flags"] = _flags
+            _items = _cl.get("items") if isinstance(_cl.get("items"), dict) else {}
+            _items = dict(_items)
+            _items["short_trigger"] = False
+            _cl["items"] = _items
+            _miss = list(_cl.get("missing_labels") or [])
+            if "买点已失效" not in _miss:
+                _miss.append("买点已失效")
+            _cl["missing_labels"] = _miss
+            _cl["entry_line"] = format_entry_line_c1(all_green=False, missing=_miss)
+            _disc["entry_checklist"] = _cl
+            _disc["entry_line"] = _cl["entry_line"]
             report["discipline"] = _disc
         _mark("buy_point_lifecycle")
     except Exception as _life_exc:

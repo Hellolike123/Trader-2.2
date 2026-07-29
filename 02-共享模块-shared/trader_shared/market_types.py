@@ -11,6 +11,14 @@ from typing import Any, Literal
 
 DataStatus = Literal["full", "partial", "degraded", "failed"]
 
+# 纪律/融合侧：非 full 一律按低完备度收紧出手（与 fusion_core 截断集合一致）
+DATA_STATUS_LOW_CONFIDENCE: frozenset[str] = frozenset({"partial", "degraded", "failed"})
+
+
+def is_data_status_low_confidence(status: object) -> bool:
+    """data_status 是否应触发低置信（partial / degraded / failed）。"""
+    return str(status or "").lower() in DATA_STATUS_LOW_CONFIDENCE
+
 
 @dataclass(frozen=True)
 class Security:

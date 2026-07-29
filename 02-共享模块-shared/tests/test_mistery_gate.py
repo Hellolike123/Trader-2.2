@@ -354,3 +354,42 @@ class TestMidViewMigratedOut:
             "change_pct": 0.5,
         })
         assert "筹码" not in (g.get("notes") or "")
+
+
+class TestDataStatusLowConfidence:
+    """partial / degraded / failed 均应触发 gate 低置信。"""
+
+    def _base(self, **extra):
+        raw = {
+            "major_stage": "蓄势",
+            "short_term_momentum": "走强",
+            "regime": "正常",
+            "current": 55.2,
+            "stop": 54.0,
+            "support": 54.5,
+            "risk": 1.5,
+            "reward_near": 4.0,
+            "turnover_rate": 2,
+            "volume_ratio": 1,
+            "change_pct": 0.5,
+        }
+        raw.update(extra)
+        return raw
+
+    def test_partial(self):
+        g = compute_mistery_gate(self._base(data_status="partial"))
+        assert g.get("low_confidence") is True
+
+    def test_degraded(self):
+        g = compute_mistery_gate(self._base(data_status="degraded"))
+        assert g.get("low_confidence") is True
+        assert "数据degraded" in str(g.get("notes") or "")
+
+    def test_failed(self):
+        g = compute_mistery_gate(self._base(data_status="failed"))
+        assert g.get("low_confidence") is True
+        assert "数据failed" in str(g.get("notes") or "")
+
+    def test_full_not_alone(self):
+        g = compute_mistery_gate(self._base(data_status="full"))
+        assert g.get("low_confidence") is False

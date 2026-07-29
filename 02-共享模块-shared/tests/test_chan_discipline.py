@@ -256,6 +256,15 @@ class TestT7LowConfidence:
         notes = "；".join(out["discipline_notes"])
         assert "置信" in notes or out["action_override"] == "观望"
 
+    def test_data_status_degraded_low_conf(self):
+        out = apply_chan_discipline(_open_setup(data_status="degraded"))
+        assert out["low_confidence"] is True
+        assert any("degraded" in str(n) for n in (out.get("discipline_notes") or []))
+
+    def test_data_status_failed_low_conf(self):
+        out = apply_chan_discipline(_open_setup(data_status="failed"))
+        assert out["low_confidence"] is True
+
     def test_chip_blocks(self):
         out = apply_chan_discipline(_open_setup(chip_migration_warning=True))
         assert out["allow_new_entry"] is False

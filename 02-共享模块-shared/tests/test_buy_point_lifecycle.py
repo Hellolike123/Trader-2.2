@@ -195,3 +195,42 @@ def test_l2_failed_writes_store(tmp_path: Path):
     assert rec["signal_id"] == life["signal_id"]
     clear_failed_record(symbol, path=store)
     assert load_failed_record(symbol, path=store) is None
+
+
+def test_l04_failed_tightens_checklist_even_if_empty():
+    """L-04：failed 时无清单也要写出 entry_line，且不允许新开。"""
+    from trader_shared.report_pipeline.attach_buy_point import apply_buy_point_lifecycle
+
+    report = {
+        "current": 9.0,
+        "support": 10.0,
+        "chan_buy_point_types": ["一类买"],
+        "daily_bars": [{"close": 9.0}],
+        "key_prices": {"buy_zone_low": 10.0},
+        "discipline": {
+            "allow_new_entry": True,
+            "entry_checklist": {
+                "all_green": True,
+                "flags": {
+                    "mid_trend": True,
+                    "pullback": True,
+                    "short_trigger": True,
+                    "fusion_conf": True,
+                    "chip_fund": True,
+                },
+                "items": {},
+                "missing_labels": [],
+                "entry_line": "新开：可试探（清单全绿）",
+            },
+            "entry_line": "新开：可试探（清单全绿）",
+        },
+    }
+    apply_buy_point_lifecycle(report)
+    assert report["buy_point_lifecycle"]["status"] == "failed"
+    disc = report["discipline"]
+    assert disc["allow_new_entry"] is False
+    cl = disc["entry_checklist"]
+    assert cl["all_green"] is False
+    assert cl["flags"]["short_trigger"] is False
+    assert "买点已失效" in cl["missing_labels"]
+    assert disc["entry_line"].startswith("新开：否")

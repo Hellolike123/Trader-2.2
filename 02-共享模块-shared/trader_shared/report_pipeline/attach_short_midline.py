@@ -352,6 +352,25 @@ def attach_short_midline_and_decision(
         if isinstance(report.get("position_info"), dict):
             report["position_info"]["suggested_pct"] = _final_sug
 
+        # 买点盖须在结论块之前：失败只收紧 discipline C1，避免结论/清单滞后
+        try:
+            apply_buy_point_lifecycle(report, mark=_mark)
+            discipline = (
+                report.get("discipline")
+                if isinstance(report.get("discipline"), dict)
+                else discipline
+            )
+            if not discipline.get("allow_new_entry", True):
+                _disc_action = str(discipline.get("action") or _disc_action)
+                if not has_position:
+                    _final_sug = 0
+                    report["suggested_pct"] = _final_sug
+                    report["suggested_pct_context"] = "0%（纪律不新开）"
+                    if isinstance(report.get("position_info"), dict):
+                        report["position_info"]["suggested_pct"] = _final_sug
+        except Exception as _bp_exc:
+            _logger.debug("buy_point_lifecycle pre-conclusion: %s", _bp_exc)
+
         daily_ruling = build_daily_ruling(
             report_fusion,
             scene=str(report.get("scene") or scene),
@@ -396,9 +415,8 @@ def attach_short_midline_and_decision(
         conclusion["midline_verdict_note"] = _midline_verdict["note"]
         _mark("conclusion")
 
-        # pipeline：买点盖 → 卡/共振/策略/决策（行为不变）
+        # pipeline：卡/共振/策略/决策（买点盖已在结论前执行）
         try:
-            apply_buy_point_lifecycle(report, mark=_mark)
             attach_analysis_decision_stack(report, mark=_mark)
             # 日线裁定重算：出手听 decision_view/纪律/共振，fusion 仅偏多偏空仪表
             _dv = report.get("decision_view") if isinstance(report.get("decision_view"), dict) else {}

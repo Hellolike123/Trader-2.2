@@ -194,8 +194,11 @@ def _chan_low_confidence(raw: dict[str, Any]) -> tuple[bool, list[str]]:
     if conf == "low":
         reasons.append("中线缠论段偏少/低置信")
 
-    if str(raw.get("data_status") or "").lower() == "partial":
-        reasons.append("数据partial")
+    from trader_shared.market_types import is_data_status_low_confidence
+
+    ds = str(raw.get("data_status") or "").lower()
+    if is_data_status_low_confidence(ds):
+        reasons.append(f"数据{ds}")
 
     try:
         dis = raw.get("fusion_disagreement")

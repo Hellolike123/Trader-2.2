@@ -336,7 +336,7 @@ def _position_cap_for(
 
 
 def _detect_low_confidence(raw: dict[str, Any]) -> tuple[bool, list[str]]:
-    """通用低置信：融合 conf / 多空分歧 / 数据 partial。
+    """通用低置信：融合 conf / 多空分歧 / 数据 partial|degraded|failed。
 
     缠侧 mid_quality / structure_confidence 已迁至 chan_discipline（避免双砍矛盾）。
     """
@@ -345,8 +345,11 @@ def _detect_low_confidence(raw: dict[str, Any]) -> tuple[bool, list[str]]:
     # migrated → chan_discipline:
     # mid_quality partial/insufficient, structure_confidence=low
 
-    if str(raw.get("data_status") or "").lower() == "partial":
-        reasons.append("数据partial")
+    from trader_shared.market_types import is_data_status_low_confidence
+
+    ds = str(raw.get("data_status") or "").lower()
+    if is_data_status_low_confidence(ds):
+        reasons.append(f"数据{ds}")
 
     try:
         dis = raw.get("fusion_disagreement")
