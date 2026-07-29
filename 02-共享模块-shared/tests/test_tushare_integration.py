@@ -337,8 +337,48 @@ class TestSymbolToTsCode:
 
 
 class TestTushareProviderFetchQuote:
-    def test_fetch_quote_maps_fields(self, monkeypatch):
-        """TushareProvider.fetch_quote should correctly map realtime_quote fields."""
+    def test_fetch_quote_prefers_tencent(self, monkeypatch):
+        """实时现价优先腾讯；腾讯有效时不走 Tushare 爬虫。"""
+        mock_client = MagicMock()
+        mock_client.available = True
+        mock_client.query_realtime.return_value = [
+            {"NAME": "南网科技", "PRICE": 99.0, "PRE_CLOSE": 24.0,
+             "HIGH": 100.0, "LOW": 90.0, "VOLUME": 1, "AMOUNT": 1}
+        ]
+
+        mock_module = MagicMock()
+        mock_module.get_client.return_value = mock_client
+        monkeypatch.setitem(sys.modules, "trader_shared.tushare_client", mock_module)
+        from trader_shared import tushare_client as real_tc
+        real_tc._client = mock_client
+
+        import importlib
+        import trader_shared.data_provider as dp
+        importlib.reload(dp)
+
+        provider = dp.TushareProvider()
+        tencent_quote = {
+            "name": "南网科技",
+            "symbol": "688248",
+            "current_price": 25.5,
+            "pre_close": 24.0,
+            "high": 26.0,
+            "low": 24.5,
+            "volume": 500000,
+            "amount": 12750000,
+            "data_source": "tencent-http",
+        }
+        provider._fallback.fetch_quote = MagicMock(return_value=tencent_quote)
+
+        sec = dp.Security(code="688248", market="SH", name="南网科技")
+        quote = provider.fetch_quote(sec)
+
+        assert quote["current_price"] == 25.5
+        assert quote.get("data_source") == "tencent-http"
+        mock_client.query_realtime.assert_not_called()
+
+    def test_fetch_quote_maps_tushare_when_tencent_empty(self, monkeypatch):
+        """腾讯无有效价时，映射 Tushare realtime 字段并标记 data_source。"""
         mock_records = [
             {"NAME": "南网科技", "TS_CODE": "688248.SH", "PRICE": 25.5, "PRE_CLOSE": 24.0,
              "HIGH": 26.0, "LOW": 24.5, "VOLUME": 500000, "AMOUNT": 12750000}
@@ -347,20 +387,19 @@ class TestTushareProviderFetchQuote:
         mock_client.available = True
         mock_client.query_realtime.return_value = mock_records
 
-        # Mock tushare_client module
         mock_module = MagicMock()
         mock_module.get_client.return_value = mock_client
         monkeypatch.setitem(sys.modules, "trader_shared.tushare_client", mock_module)
-        # Make the real module importable by data_provider
         from trader_shared import tushare_client as real_tc
         real_tc._client = mock_client
 
-        # Import after patching
         import importlib
         import trader_shared.data_provider as dp
         importlib.reload(dp)
 
         provider = dp.TushareProvider()
+        provider._fallback.fetch_quote = MagicMock(return_value={})
+
         sec = dp.Security(code="688248", market="SH", name="南网科技")
         quote = provider.fetch_quote(sec)
 
@@ -372,11 +411,11 @@ class TestTushareProviderFetchQuote:
         assert quote["low"] == 24.5
         assert quote["volume"] == 500000
         assert quote["amount"] == 12750000
-        # change_pct = (25.5 - 24.0) / 24.0 * 100 = 6.25
         assert quote["current_change_pct"] == 6.25
+        assert quote["data_source"] == "tushare-realtime"
 
     def test_fetch_quote_fallback_on_empty(self, monkeypatch):
-        """When Tushare returns no records, should fallback to UnifiedProvider."""
+        """腾讯与 Tushare 皆空时返回 dict，不抛异常。"""
         mock_client = MagicMock()
         mock_client.available = True
         mock_client.query_realtime.return_value = []
@@ -392,16 +431,10 @@ class TestTushareProviderFetchQuote:
         importlib.reload(dp)
 
         provider = dp.TushareProvider()
-        # The fallback provider will also fail (no HTTP in test), but we verify it doesn't crash
+        provider._fallback.fetch_quote = MagicMock(return_value={})
         sec = dp.Security(code="688248", market="SH", name="南网科技")
-        # Should not raise, returns empty dict or fallback result
-        try:
-            quote = provider.fetch_quote(sec)
-            # If it returns, it should be a dict
-            assert isinstance(quote, dict)
-        except Exception:
-            # Fallback may fail in test env (no HTTP), that's acceptable
-            pass
+        quote = provider.fetch_quote(sec)
+        assert isinstance(quote, dict)
 
 
 # ── TushareProvider.fetch_qfq_daily ────────────────────────────────────────

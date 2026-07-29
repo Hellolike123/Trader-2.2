@@ -546,53 +546,86 @@ class UnifiedProvider:
 # ═══════════════════════════════════════════════
 
 class TushareProvider:
-    """Tushare Pro 数据提供器（主源）。日线/行情/资金流/板块/筹码走 Tushare；分钟线 fallback 到 light_data。"""
+    """Tushare Pro 数据提供器（主源）。
+
+    日线/周线/资金流/板块/筹码走 Tushare；**实时现价优先腾讯**（公开盘口更稳），
+    仅腾讯失败时才降级到 Tushare realtime 爬虫。分钟线仍走 light_data。
+    """
 
     name = "tushare"
 
     def __init__(self):
         from trader_shared.tushare_client import get_client
         self._client = get_client()
-        # fallback provider for minute data (Tushare doesn't have minute K-lines)
+        # fallback：腾讯实时 + 分钟线（Tushare 无分钟 K）
         self._fallback = UnifiedProvider(backend="tencent")
 
     def resolve_security(self, target: str) -> Security:
         return self._fallback.resolve_security(target)
 
+    @staticmethod
+    def _map_tushare_realtime_record(r: dict[str, Any], sec: Security) -> dict[str, Any]:
+        """把 realtime_quote 一行映射成统一 quote 字段（降级用）。"""
+        pre_close = r.get("PRE_CLOSE")
+        price = r.get("PRICE")
+        change_pct = None
+        if pre_close and price and float(pre_close) > 0:
+            change_pct = round((float(price) - float(pre_close)) / float(pre_close) * 100, 2)
+        _td = None
+        for _key in ("date", "DATE", "trade_date", "TRADE_DATE"):
+            _td = r.get(_key)
+            if _td:
+                break
+        if _td:
+            _td_str = str(_td)[:10]
+            if len(_td_str) == 8 and _td_str.isdigit():  # YYYYMMDD → YYYY-MM-DD
+                _td_str = f"{_td_str[:4]}-{_td_str[4:6]}-{_td_str[6:8]}"
+        else:
+            _td_str = datetime.now().strftime("%Y-%m-%d")
+        return {
+            "name": r.get("NAME", sec.name),
+            "symbol": sec.code,
+            "trade_date": _td_str,
+            "current_price": float(price) if price else None,
+            "current_change_pct": change_pct,
+            "high": float(r.get("HIGH")) if r.get("HIGH") else None,
+            "low": float(r.get("LOW")) if r.get("LOW") else None,
+            "volume": float(r.get("VOLUME")) if r.get("VOLUME") else None,
+            "amount": float(r.get("AMOUNT")) if r.get("AMOUNT") else None,
+            "pre_close": float(pre_close) if pre_close else None,
+            "data_source": "tushare-realtime",
+            "data_status": "partial",  # 爬虫源：字段/时效弱于腾讯盘口
+        }
+
     def fetch_quote(self, sec: Security) -> dict[str, Any]:
+        """实时现价：腾讯第一；仅腾讯无有效价时才用 Tushare realtime 爬虫。
+
+        不做双源同时请求：腾讯成功即返回，避免多一次爬虫 RTT 与限流。
+        日线/周线等仍走 Tushare，与现价解耦。
+        """
+        from trader_shared.light_data import sanitize_quote
+
+        tencent_q: dict[str, Any] = {}
+        try:
+            tencent_q = self._fallback.fetch_quote(sec) or {}
+        except Exception as e:
+            _logger.debug("tencent quote failed for %s: %s", sec.code, e)
+            tencent_q = {}
+
+        tencent_price = to_float(tencent_q.get("current_price")) if tencent_q else None
+        if tencent_price is not None and tencent_price > 0:
+            return sanitize_quote(tencent_q) or tencent_q
+
+        # 腾讯失败：降级 Tushare 爬虫
         records = self._client.query_realtime(sec.ts_code)
         if records:
-            r = records[0]
-            pre_close = r.get("PRE_CLOSE")
-            price = r.get("PRICE")
-            change_pct = None
-            if pre_close and price and float(pre_close) > 0:
-                change_pct = round((float(price) - float(pre_close)) / float(pre_close) * 100, 2)
-            # trade_date: 尝试从 Tushare 字段提取, 兜底取今日(盘中 quote 就是在今天获取的)
-            _td = None
-            for _key in ("date", "DATE", "trade_date", "TRADE_DATE"):
-                _td = r.get(_key)
-                if _td:
-                    break
-            if _td:
-                _td_str = str(_td)[:10]
-                if len(_td_str) == 8 and _td_str.isdigit():  # YYYYMMDD → YYYY-MM-DD
-                    _td_str = f"{_td_str[:4]}-{_td_str[4:6]}-{_td_str[6:8]}"
-            else:
-                _td_str = datetime.now().strftime("%Y-%m-%d")
-            return {
-                "name": r.get("NAME", sec.name),
-                "symbol": sec.code,
-                "trade_date": _td_str,
-                "current_price": float(price) if price else None,
-                "current_change_pct": change_pct,
-                "high": float(r.get("HIGH")) if r.get("HIGH") else None,
-                "low": float(r.get("LOW")) if r.get("LOW") else None,
-                "volume": float(r.get("VOLUME")) if r.get("VOLUME") else None,
-                "amount": float(r.get("AMOUNT")) if r.get("AMOUNT") else None,
-                "pre_close": float(pre_close) if pre_close else None,
-            }
-        return self._fallback.fetch_quote(sec)
+            mapped = self._map_tushare_realtime_record(records[0], sec)
+            _logger.warning(
+                "quote fallback to tushare-realtime for %s (tencent empty/invalid)",
+                sec.code,
+            )
+            return sanitize_quote(mapped) or mapped
+        return tencent_q if isinstance(tencent_q, dict) else {}
 
     def fetch_qfq_daily(self, sec: Security, days: int = 30) -> list[dict[str, Any]]:
         from trader_shared.light_data import _compute_atr_fields
