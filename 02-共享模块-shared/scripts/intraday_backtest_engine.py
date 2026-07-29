@@ -45,6 +45,7 @@ from trader_shared.light_data import _fetch_mins_fallback, resolve_security  # n
 from trader_shared.fetchers import TencentFetcher  # noqa: E402
 from price_point_engine import build_price_point_model, completed_5m_bars  # noqa: E402
 from trader_shared.structure_core import build_structure_context  # noqa: E402
+from indicators import calculate_ema, calculate_vwap_from_bars  # noqa: E402
 # 注：2026-07-23 起 t0 三重共振第一席位 = Al Brooks 价格行为（analyze_ab，
 # build_price_point_model 内部自算），缠论 chan_5m/chan_15m 不再消费，已裁掉。
 
@@ -255,6 +256,265 @@ CTX_5M = 400     # 5m 上下文棒数 (Al Brooks 结构，~8 交易日足够)
 CTX_15M = 400    # 15m 上下文棒数 (~33 交易日)
 
 
+# ── bb_vwap 模式参数（EMA+布林+VWAP+威科夫 正T，移植自 backtrader T0InnerTrade）──
+# 注：原 backtrader 门槛 (BB宽2%/EMA粘合1.5%) 面向日线/小时级，5m 上会过滤 99.8%
+# 棒。已按 5m 实测分布重标定：BB宽 p10≈0.007、EMA gap p10≈0.0008，门槛取 p10 附近
+# 仅过滤最压缩的 ~10%，避免一刀切杀光信号。
+BB_EMA_FAST = 13
+BB_EMA_SLOW = 50
+BB_PERIOD = 20
+BB_STD = 2.0
+BB_WIDTH_MIN = 0.006     # 布林收口过滤（5m 标定，过滤最压缩 ~10%）
+EMA_GAP_MIN = 0.0008     # EMA 粘合过滤（5m 标定）
+VWAP_OFFSET = 0.03       # 回踩VWAP容差 3%
+WYCKOFF_VOL_MULT = 1.3   # 威科夫放量阈值
+
+# ── vwap_mr 模式参数（VWAP 均值回归正T，用户拍板 2026-07-26）──
+# 入场: 价<VWAP×(1-DEV) + 企稳(收>前收) + 非自由落体 + 布林宽>阈值
+# 止盈: 回归 VWAP；时间止损: 仅本模式启用，持 TIME_STOP_BARS 根未平则市价平
+VWAP_MR_DEV = 0.01       # 入场偏差 1.0%（低于费用平衡点，盈亏平衡胜率~50%）
+TIME_STOP_BARS = 6       # 时间止损 6 根 5m = 30 分钟（仅 vwap_mr / momentum_t0）
+FREEFALL_VOL_MULT = 1.3  # 自由落体判定：连跌 + 放量>1.3x
+MR_BB_WIDTH_MIN = 0.006  # 布林宽下限，过窄无波动不做
+
+# ── momentum_t0 模式参数（顺势正T，吃日内惯性，用户拍板 2026-07-26 转方向）──
+# 入场: 价 > VWAP×(1+DEV) 突破 + 近3棒收盘递增(动量) + EMA13>EMA50(多头) + 创N棒新高
+# 止盈: 价 >= VWAP×(1+TARGET_DEV) ride 目标
+# 止损: 紧追踪 0.8% + 10 棒时间止损（动量忌扛单，但需给趋势展开空间）
+MOM_DEV = 0.004           # 入场突破阈值 0.4%
+MOM_TARGET_DEV = 0.02     # 止盈目标 +2%（ride the trend）
+MOM_EMA_FAST = 13
+MOM_EMA_SLOW = 50
+MOM_TIME_BARS = 10        # 时间止损 10 根 5m = 50 分钟
+MOM_TRAIL = 0.008         # 追踪止损 0.8%（紧锁利润）
+MOM_LOOKBACK = 10         # 突破参考窗口（N 棒新高）
+
+
+def _bb_vwap_eval(completed: list[dict], current: float) -> dict:
+    """EMA13/50 + 布林(20,2) + VWAP + 威科夫 SOW/LPS/Spring 正T信号脑。
+
+    纯多头回合（正T）：多头趋势中回踩 VWAP 且处于布林中下轨时买入，
+    触布林上轨止盈；威科夫 SOW/LPS 拦截；布林收口/EMA粘合过滤。
+    反T（需底仓+做空）不适用于纯T0引擎，故不实现。
+
+    返回 dict: buy_green / sell_red / exit_price / status_buy / status_sell / info。
+    """
+    n = len(completed)
+    closes = [float(b.get("close") or 0) for b in completed]
+    highs = [float(b.get("high") or 0) for b in completed]
+    lows = [float(b.get("low") or 0) for b in completed]
+    vols = [float(b.get("volume") or 0) for b in completed]
+    res = {"buy_green": False, "sell_red": False, "exit_price": None,
+           "status_buy": "数据不足", "status_sell": "数据不足", "info": {}}
+    if n < BB_EMA_SLOW or current <= 0:
+        return res
+
+    # EMA 13/50
+    ema13 = calculate_ema(closes, BB_EMA_FAST)
+    ema50 = calculate_ema(closes, BB_EMA_SLOW)
+    e13 = ema13[-1] if ema13 and ema13[-1] is not None else 0
+    e50 = ema50[-1] if ema50 and ema50[-1] is not None else 0
+    uptrend = e13 > e50
+    ema_gap = abs(e13 - e50) / e50 if e50 > 0 else 0
+
+    # 布林 20,2
+    if n < BB_PERIOD:
+        return res
+    rec = closes[-BB_PERIOD:]
+    mid = sum(rec) / BB_PERIOD
+    var = sum((x - mid) ** 2 for x in rec) / BB_PERIOD
+    std = var ** 0.5
+    up = mid + BB_STD * std
+    dn = mid - BB_STD * std
+    boll_width = (up - dn) / mid if mid > 0 else 0
+
+    # VWAP（session 当日，calculate_vwap_from_bars 内部已过滤跨日）
+    vwap = calculate_vwap_from_bars(completed)
+
+    # 威科夫 SOW / LPS / Spring
+    sow = lps = spring = False
+    if n >= 3 and len(vols) >= 3:
+        c0, c1, c2 = closes[-1], closes[-2], closes[-3]
+        h0, h1, h2 = highs[-1], highs[-2], highs[-3]
+        v0, v1, v2 = vols[-1], vols[-2], vols[-3]
+        avg_vol = (v1 + v2) / 2 if (v1 + v2) > 0 else 0
+        vol_surge = v0 > avg_vol * WYCKOFF_VOL_MULT if avg_vol > 0 else False
+        # SOW 高位派发：创新高(用 high 修正 backtrader 原码 close 自相矛盾)但收盘回落 + 放量
+        if h0 > max(h1, h2) and c0 < c1 and vol_surge:
+            sow = True
+        # LPS 供给低点：试探前低 + 放量抛压
+        if c0 <= min(c1, c2) and vol_surge:
+            lps = True
+        # Spring 弹簧底：击穿布林下轨但收回(收盘高于前收) + 放量
+        if c0 < dn and c0 > c1 and vol_surge:
+            spring = True
+
+    # 过滤：布林收口 / EMA 粘合 → 停止交易
+    if boll_width < BB_WIDTH_MIN or ema_gap < EMA_GAP_MIN:
+        res.update({"status_buy": "过滤(收口/粘合)", "status_sell": "过滤",
+                    "info": {"uptrend": uptrend, "ema_gap": ema_gap, "boll_width": boll_width,
+                             "vwap": vwap, "sow": sow, "lps": lps, "spring": spring}})
+        return res
+
+    # 正T买入：多头 + 非SOW/LPS + 回踩VWAP + 布林中下轨
+    buy_green = (uptrend and not sow and not lps and vwap is not None
+                 and current <= vwap * (1 + VWAP_OFFSET)
+                 and dn <= current <= mid)
+    # 正T止盈：触布林上轨
+    sell_red = current >= up
+    exit_price = up if sell_red else None
+
+    res.update({
+        "buy_green": buy_green,
+        "sell_red": sell_red,
+        "exit_price": exit_price,
+        "status_buy": "正T买点" if buy_green else ("SOW/LPS拦截" if (sow or lps) else "等待回踩"),
+        "status_sell": "止盈(触上轨)" if sell_red else "持有",
+        "info": {"uptrend": uptrend, "ema_gap": ema_gap, "boll_width": boll_width,
+                 "vwap": vwap, "up": up, "mid": mid, "dn": dn,
+                 "sow": sow, "lps": lps, "spring": spring},
+    })
+    return res
+
+
+def _vwap_mr_eval(completed: list[dict], current: float) -> dict:
+    """VWAP 均值回归正T 信号脑（用户拍板规格 2026-07-26）。
+
+    入场: 价 < VWAP×(1-DEV) + 企稳(收盘>前收) + 非自由落体 + 布林宽>阈值
+    止盈: 回归 VWAP (exit_price = vwap；原布林上轨过远已弃用)
+    时间止损/价格止损由 run_one_day 处理（TIME_STOP_BARS + 信号棒低点）。
+
+    全 regime 都做（含跌日），靠企稳确认 + 时间止损防守，不靠趋势过滤。
+    """
+    n = len(completed)
+    closes = [float(b.get("close") or 0) for b in completed]
+    vols = [float(b.get("volume") or 0) for b in completed]
+    res = {"buy_green": False, "sell_red": False, "exit_price": None,
+           "status_buy": "数据不足", "status_sell": "数据不足", "info": {}}
+    if n < BB_PERIOD or current <= 0:
+        return res
+
+    # 布林 20,2
+    rec = closes[-BB_PERIOD:]
+    mid = sum(rec) / BB_PERIOD
+    var = sum((x - mid) ** 2 for x in rec) / BB_PERIOD
+    std = var ** 0.5
+    up = mid + BB_STD * std
+    dn = mid - BB_STD * std
+    boll_width = (up - dn) / mid if mid > 0 else 0
+
+    # VWAP（session 当日）
+    vwap = calculate_vwap_from_bars(completed)
+
+    # 企稳确认：当根收盘 > 前收
+    prev_close = closes[-2] if n >= 2 else current
+    stabilized = current > prev_close
+
+    # 自由落体判定：连跌(收<前两收最低) + 放量 → 抄底危险，拦截
+    freefall = False
+    if n >= 3 and len(vols) >= 3:
+        c0, c1, c2 = closes[-1], closes[-2], closes[-3]
+        v0, v1, v2 = vols[-1], vols[-2], vols[-3]
+        avg_vol = (v1 + v2) / 2 if (v1 + v2) > 0 else 0
+        vol_surge = v0 > avg_vol * FREEFALL_VOL_MULT if avg_vol > 0 else False
+        if c0 < min(c1, c2) and vol_surge:
+            freefall = True
+
+    # 过滤：布林过窄无波动
+    if boll_width < MR_BB_WIDTH_MIN:
+        res.update({"status_buy": "过滤(布林窄)", "status_sell": "过滤",
+                    "info": {"vwap": vwap, "boll_width": boll_width, "up": up}})
+        return res
+    if vwap is None:
+        res.update({"status_buy": "VWAP无数据", "status_sell": "等待",
+                    "info": {"boll_width": boll_width, "up": up}})
+        return res
+
+    # 入场：价<VWAP×(1-DEV) + 企稳 + 非自由落体
+    dev = (vwap - current) / vwap if vwap > 0 else 0
+    buy_green = (current < vwap * (1 - VWAP_MR_DEV)
+                 and stabilized
+                 and not freefall)
+    # 止盈：价格回归到 VWAP（均值回归的自然目标，近且高概率成交）。
+    # 注：原实现误用布林上轨作止盈(距入场 2.5~3%)，6 棒内几乎到不了 → 胜率崩塌。
+    # 对齐策略文档的盈亏数学：−1% 偏离回归均值 = 赢 +1%−费用。
+    sell_red = current >= vwap
+    exit_price = vwap if sell_red else None
+
+    res.update({
+        "buy_green": buy_green,
+        "sell_red": sell_red,
+        "exit_price": exit_price,
+        "status_buy": "MR买点" if buy_green else (
+            "自由落体拦截" if freefall else ("未企稳" if not stabilized else "等待深偏离")),
+        "status_sell": "止盈(回VWAP)" if sell_red else "持有",
+        "info": {"vwap": vwap, "dev": dev, "boll_width": boll_width,
+                 "up": up, "mid": mid, "dn": dn, "stabilized": stabilized, "freefall": freefall},
+    })
+    return res
+
+
+def _momentum_eval(completed: list[dict], current: float) -> dict:
+    """顺势正T 信号脑（用户拍板转方向 2026-07-26）。
+
+    逻辑依据：vwap_mr 回测证伪 MAE(-0.9%) > MFE(+0.5%) → 日内惯性市，fade 必亏。
+    顺势策略反过来吃惯性：突破 VWAP+DEV 且短期动量向上且多头排列 → 买入做正T；
+    紧追踪止损(0.8%)锁利 + 目标(+2%)止盈 + 10棒时间止损。
+
+    胜率预期高于均值回归：趋势延续时 MFE(有利偏移) > MAE(不利偏移)，
+    盈亏比天然利于顺势方。
+    """
+    n = len(completed)
+    closes = [float(b.get("close") or 0) for b in completed]
+    highs = [float(b.get("high") or 0) for b in completed]
+    res = {"buy_green": False, "sell_red": False, "exit_price": None,
+           "status_buy": "数据不足", "status_sell": "数据不足", "info": {}}
+    if n < MOM_EMA_SLOW or current <= 0:
+        return res
+
+    ema13 = calculate_ema(closes, MOM_EMA_FAST)
+    ema50 = calculate_ema(closes, MOM_EMA_SLOW)
+    e13 = ema13[-1] if ema13 and ema13[-1] is not None else 0
+    e50 = ema50[-1] if ema50 and ema50[-1] is not None else 0
+    uptrend = e13 > e50
+
+    vwap = calculate_vwap_from_bars(completed)
+    if vwap is None:
+        res["status_buy"] = "VWAP无数据"
+        return res
+
+    # 短期动量：最近 3 根收盘递增
+    mom_up = (n >= 3 and closes[-1] > closes[-2] > closes[-3])
+    # 突破：当前价站稳 VWAP 上方 +DEV
+    breakout = current > vwap * (1 + MOM_DEV)
+    # 未过度延伸：不在 VWAP + 2*DEV 以上追高（避免买在尖顶）
+    not_extended = current < vwap * (1 + 2 * MOM_DEV)
+    # N 棒新高突破（确认非毛刺）
+    look = highs[-(MOM_LOOKBACK + 1):-1] if n > MOM_LOOKBACK else highs[:-1]
+    recent_high = max(look) if look else current
+    new_high = current >= recent_high * (1 - 0.0005)
+
+    buy_green = uptrend and mom_up and breakout and not_extended and new_high
+
+    # 止盈目标：VWAP + TARGET_DEV（ride the trend）
+    target = vwap * (1 + MOM_TARGET_DEV)
+    sell_red = current >= target
+    exit_price = target if sell_red else None
+
+    res.update({
+        "buy_green": buy_green,
+        "sell_red": sell_red,
+        "exit_price": exit_price,
+        "status_buy": "动量买点" if buy_green else (
+            "非多头" if not uptrend else ("未突破" if not breakout else (
+                "已延伸" if not not_extended else ("非新高" if not new_high else "等待动量")))),
+        "status_sell": "止盈(目标)" if sell_red else "持有",
+        "info": {"vwap": vwap, "uptrend": uptrend, "mom_up": mom_up,
+                 "breakout": breakout, "target": target},
+    })
+    return res
+
+
 def make_signal_fn(code: str, sec, bars_5m: list[dict], bars_15m: list[dict],
                   daily: list[dict], use_structure: bool = True,
                   theory_mode: str = "all3"):
@@ -316,6 +576,37 @@ def make_signal_fn(code: str, sec, bars_5m: list[dict], bars_15m: list[dict],
             "order_book": None,
         }
         # t0 设计：注入 trader 日线结构支撑/阻力（用 D 之前日线 = 无前视）
+        # bb_vwap 模式：EMA13/50+布林+VWAP+威科夫正T，不走 build_price_point_model
+        if theory_mode == "bb_vwap":
+            ev = _bb_vwap_eval(completed, cur)
+            model = {
+                "resonance": {"buy_green": ev["buy_green"], "sell_red": ev["sell_red"],
+                              "exit_price": ev["exit_price"], "lights": {},
+                              "summary": "bb_vwap " + ev["status_buy"]},
+                "buy": {"status": ev["status_buy"]},
+                "sell": {"status": ev["status_sell"]},
+            }
+            return model, now_bar
+        if theory_mode == "vwap_mr":
+            ev = _vwap_mr_eval(completed, cur)
+            model = {
+                "resonance": {"buy_green": ev["buy_green"], "sell_red": ev["sell_red"],
+                              "exit_price": ev["exit_price"], "lights": {},
+                              "summary": "vwap_mr " + ev["status_buy"]},
+                "buy": {"status": ev["status_buy"]},
+                "sell": {"status": ev["status_sell"]},
+            }
+            return model, now_bar
+        if theory_mode == "momentum_t0":
+            ev = _momentum_eval(completed, cur)
+            model = {
+                "resonance": {"buy_green": ev["buy_green"], "sell_red": ev["sell_red"],
+                              "exit_price": ev["exit_price"], "lights": {},
+                              "summary": "momentum_t0 " + ev["status_buy"]},
+                "buy": {"status": ev["status_buy"]},
+                "sell": {"status": ev["status_sell"]},
+            }
+            return model, now_bar
         structure_result = None
         if use_structure:
             try:
@@ -362,7 +653,8 @@ def size_qty(capital: float, price: float) -> int:
 
 def run_one_day(code: str, day: str, capital: float, plan_every: int,
                 use_cache: bool = True, force_refresh: bool = False,
-                use_structure: bool = True, theory_mode: str = "all3") -> dict:
+                use_structure: bool = True, theory_mode: str = "all3",
+                scale_out: bool = False) -> dict:
     """只处理「单交易日」，在独立子进程里跑以保证 t0 大脑内存可回收。
 
     返回紧凑结果 dict，由父进程聚合成权益曲线与绩效。
@@ -374,6 +666,9 @@ def run_one_day(code: str, day: str, capital: float, plan_every: int,
                                   theory_mode=theory_mode)
     # ATR 自适应止损
     atr_stop = _atr_stop_pct(daily)
+    # 时间止损仅 vwap_mr / momentum_t0；动量模式更宽(50m)，均值回归 30m
+    use_time_stop = theory_mode in ("vwap_mr", "momentum_t0")
+    tsb = MOM_TIME_BARS if theory_mode == "momentum_t0" else TIME_STOP_BARS
     lim = board_limit(code)
     idxs = [i for i, b in enumerate(bars_5m)
             if (b.get("time") or b.get("date") or "").split(" ")[0] == day]
@@ -396,8 +691,11 @@ def run_one_day(code: str, day: str, capital: float, plan_every: int,
 
     pos = 0
     entry = 0.0
+    entry_k = None        # 入场棒下标(用于时间止损)
     peak_price = 0.0         # 持仓期间最高价（用于追踪止损）
     trailing_stop = 0.0      # 当前追踪止损价
+    scaled_out = False   # scale_out 模式：是否已做部分止盈（平一半）
+    scale_stop = 0.0      # 部分止盈后剩余仓的保本止损价
     day_pnl = 0.0
     rt = 0
     trades = 0
@@ -423,10 +721,11 @@ def run_one_day(code: str, day: str, capital: float, plan_every: int,
         sstat = sell.get("status")
         status_counts["B:" + str(bstat)] = status_counts.get("B:" + str(bstat), 0) + 1
         status_counts["S:" + str(sstat)] = status_counts.get("S:" + str(sstat), 0) + 1
-        # 买 (空仓) — 均值回归：信号棒确认后，下一棒开盘入场模拟收盘价成交
-        # 回测无法在信号棒收盘瞬间成交，用下一棒开盘价近似（跳空风险存在）
+        # 买 (空仓) — 评分系统策略：buy_green(5条件评分>=40) 即触发，
+        # 不再叠加旧的 detect_buy_trigger 状态门控（那套是三理论/威科夫遗留，
+        # 与最终评分策略冲突导致几乎不出信号）。均值回归：信号棒收盘价附近入场。
         if pos == 0 and rt < MAX_RT_PER_DAY:
-            if bstat == "已触发" and buy_green:
+            if buy_green:
                 signal_bar = bars_5m[gi]
                 signal_close = float(signal_bar.get("close") or 0)
                 signal_low = float(signal_bar.get("low") or 0)
@@ -444,9 +743,12 @@ def run_one_day(code: str, day: str, capital: float, plan_every: int,
                             break
                         pos = q
                         entry = fill
+                        entry_k = j            # 成交棒下标（非信号棒），时间止损从持仓起算
                         trailing_stop = signal_stop
                         peak_price = fill
-                        day_pnl -= fill * q * COMMISSION
+                        scaled_out = False     # 新 round-trip，重置部分止盈标记
+                        scale_stop = 0.0
+                        # 买佣金只在出场 cost=entry*(1+COMMISSION) 扣一次，此处不再预扣
                         n_buy_opp += 1
                         break
         # 卖 (持仓) — 信号棒止损 + 追踪止损 + 信号出场
@@ -457,26 +759,77 @@ def run_one_day(code: str, day: str, capital: float, plan_every: int,
             pnl = 0.0
             fill = 0.0
 
-            # 峰值追踪：持仓期间最高价上移 -> 止损跟着上移
-            peak_price = max(peak_price, cur_high)
-            # 初始止损靠信号棒，之后靠追踪（取更高者，只紧不松）
-            trailing_stop = max(trailing_stop, peak_price * (1 - atr_stop))
-            if cur_low <= trailing_stop:
-                fill = trailing_stop * (1 - SLIP_SELL)
-                exited = True
-
-            # 信号出场
-            if not exited:
-                se = sell.get("execution_price")
-                if sstat == "已触发" and sell_red and se is not None:
+            # ── 部分止盈（scale_out 模式，仅 vwap_mr 有意义）──
+            # 首次触 VWAP：平一半锁定 +DEV 利润，剩余仓止损抬到保本(含费+滑点)，
+            # 之后靠追踪止损吃后续涨幅。每 round-trip 只做一次；不足一手则走常规全平。
+            if scale_out and not scaled_out and sell_red and pos > 0:
+                se = res.get("exit_price") or float(bars_5m[gi].get("close") or 0)
+                if se and se > limit_dn:
                     se = float(se)
-                    if se > limit_dn:
+                    half_q = (pos // (2 * LOT)) * LOT
+                    if half_q > 0:
                         for j in range(k + 1, len(idxs)):
                             high = float(bars_5m[idxs[j]].get("high") or 0)
                             if high >= se * (1 - SLIP_SELL):
                                 fill = se * (1 - SLIP_SELL)
-                                exited = True
+                                proceeds = fill * half_q * (1 - COMMISSION - STAMP)
+                                cost = entry * half_q * (1 + COMMISSION)
+                                pnl = proceeds - cost
+                                day_pnl += pnl
+                                trades += 1
+                                # 半仓是同一回合的一部分，不占 MAX_RT_PER_DAY；rt 等全平再计
+                                if pnl >= 0:
+                                    wins += 1
+                                pf_num += max(pnl, 0.0)
+                                pf_den += max(-pnl, 0.0)
+                                pos -= half_q
+                                n_sell_opp += 1
+                                if pos <= 0:
+                                    pos = 0
+                                    entry = 0.0
+                                    entry_k = None
+                                    scaled_out = False
+                                    rt += 1  # 半仓把仓位打光，算完成 1 回合
+                                else:
+                                    scaled_out = True
+                                    # 剩余仓止损抬到保本价（入场价 + 双边费用 + 卖滑点）
+                                    be = entry * (1 + COMMISSION + STAMP + SLIP_SELL)
+                                    scale_stop = be
+                                    trailing_stop = max(trailing_stop, be)
                                 break
+
+            # 峰值追踪：持仓期间最高价上移 -> 止损跟着上移
+            peak_price = max(peak_price, cur_high)
+            # 初始止损靠信号棒，之后靠追踪（取更高者，只紧不松）
+            # 动量模式用更紧的追踪(0.8%)锁利；其他模式用 ATR 自适应
+            trail_f = MOM_TRAIL if theory_mode == "momentum_t0" else atr_stop
+            trailing_stop = max(trailing_stop, peak_price * (1 - trail_f))
+            if cur_low <= trailing_stop:
+                fill = trailing_stop * (1 - SLIP_SELL)
+                exited = True
+
+            # 信号出场（评分系统 sell_red：触 VWAP 均值回归）。
+            # 出场价优先用评分系统给的 exit_price(VWAP)，缺失则退回信号棒收盘。
+            # scale_out 已部分止盈后(剩余仓在保本以上追踪)，不再重复触发全平。
+            if not exited and sell_red and not (scale_out and scaled_out):
+                se = res.get("exit_price") or float(bars_5m[gi].get("close") or 0)
+                if se and se > limit_dn:
+                    se = float(se)
+                    for j in range(k + 1, len(idxs)):
+                        high = float(bars_5m[idxs[j]].get("high") or 0)
+                        if high >= se * (1 - SLIP_SELL):
+                            fill = se * (1 - SLIP_SELL)
+                            exited = True
+                            break
+
+            # 时间止损：仅 vwap_mr / momentum_t0；持仓满 tsb 根未平 → 市价平
+            if (use_time_stop and not exited and entry_k is not None
+                    and (k - entry_k) >= tsb):
+                cur_close = float(bars_5m[gi].get("close") or 0)
+                if cur_close > limit_dn:
+                    fill = cur_close * (1 - SLIP_SELL)
+                    exited = True
+                    status_counts["S:时间止损"] = status_counts.get("S:时间止损", 0) + 1
 
             if exited and fill > 0:
                 proceeds = fill * pos * (1 - COMMISSION - STAMP)
@@ -491,6 +844,8 @@ def run_one_day(code: str, day: str, capital: float, plan_every: int,
                 pf_den += max(-pnl, 0.0)
                 pos = 0
                 entry = 0.0
+                entry_k = None
+                scaled_out = False
                 n_sell_opp += 1
         # 每根棒后清理 transient，避免子进程内堆积
         if (k % 8 == 0):
@@ -509,6 +864,7 @@ def run_one_day(code: str, day: str, capital: float, plan_every: int,
         pf_num += max(pnl, 0.0)
         pf_den += max(-pnl, 0.0)
         pos = 0
+        scaled_out = False
         n_sell_opp += 1
     last_close = float(bars_5m[idxs[-1]].get("close") or 0)
 
@@ -524,7 +880,8 @@ def run_one_day(code: str, day: str, capital: float, plan_every: int,
 
 def run_backtest(code: str, capital: float = 100000.0, use_cache: bool = True,
                 force_refresh: bool = False, plan_every: int = PLAN_EVERY,
-                use_structure: bool = True, theory_mode: str = "all3"):
+                use_structure: bool = True, theory_mode: str = "all3",
+                scale_out: bool = False):
     """协调器：每天起一个独立子进程跑 run_one_day，避免 t0 大脑内存累计 OOM。
 
     子进程每跑完一天即退出，内存回收；父进程只做聚合。
@@ -576,6 +933,8 @@ def run_backtest(code: str, capital: float = 100000.0, use_cache: bool = True,
             cmd.append("--no-cache")
         if not use_structure:
             cmd.append("--no-structure")
+        if scale_out:
+            cmd.append("--scale-out")
         # 注意：--refresh-cache 只在父进程抓一次，子进程一律走缓存，避免重复抓网。
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=900)
@@ -684,7 +1043,10 @@ def _print_report(r: dict) -> None:
     lines.append("=" * 60)
     lines.append("日内 T0 无前视回测报告")
     mode_label = {"all3": "三重共振", "ab": "仅 Al Brooks", "wyckoff": "仅威科夫",
-                  "momentum": "仅动量", "any": "任意一灯", "2of3": "至少两灯"}
+                  "momentum": "仅动量", "any": "任意一灯", "2of3": "至少两灯",
+                  "bb_vwap": "EMA+布林+VWAP+威科夫正T",
+                  "vwap_mr": "VWAP均值回归正T(1%偏离+6棒时间止损)",
+                  "momentum_t0": "顺势正T(突破VWAP+0.4%+紧追踪0.8%+目标2%)"}
     lines.append("共振模式        : %s" % mode_label.get(r.get("theory_mode","all3"), r.get("theory_mode","all3")))
     lines.append("=" * 60)
     lines.append("标的            : %s" % r["code"])
@@ -723,8 +1085,9 @@ def main():
     ap.add_argument("--refresh-cache", action="store_true", help="强制重抓并刷新缓存")
     ap.add_argument("--plan-every", type=int, default=PLAN_EVERY, help="每 N 根 5m 棒评估一次 plan")
     ap.add_argument("--no-structure", action="store_true", help="不注入日线结构支撑/阻力（退化为仅日内近价位）")
-    ap.add_argument("--theory", default="all3", choices=["all3","ab","wyckoff","momentum","any","2of3"],
-                    help="共振门控：all3全亮 / ab仅AlBrooks / wyckoff仅威科夫 / momentum仅动量 / any任意一灯 / 2of3至少两灯")
+    ap.add_argument("--theory", default="all3", choices=["all3","ab","wyckoff","momentum","any","2of3","bb_vwap","vwap_mr","momentum_t0"],
+                    help="共振门控：all3全亮 / ab仅AlBrooks / wyckoff仅威科夫 / momentum仅动量 / any任意一灯 / 2of3至少两灯 / bb_vwap=EMA+布林+VWAP+威科夫正T / vwap_mr=VWAP均值回归正T(含时间止损) / momentum_t0=顺势正T(突破+紧追踪)")
+    ap.add_argument("--scale-out", action="store_true", help="vwap_mr 部分止盈：触 VWAP 平一半，剩余仓抬保本追踪")
     ap.add_argument("--worker-day", default=None, help="(内部)子进程模式：只处理该交易日")
     ap.add_argument("--worker-out", default=None, help="(内部)子进程结果写出 JSON 路径")
     args = ap.parse_args()
@@ -734,7 +1097,8 @@ def main():
             args.target, args.worker_day, capital=args.capital,
             plan_every=args.plan_every,
             use_cache=not args.no_cache, force_refresh=args.refresh_cache,
-            use_structure=not args.no_structure, theory_mode=args.theory)
+            use_structure=not args.no_structure, theory_mode=args.theory,
+            scale_out=args.scale_out)
         if args.worker_out:
             try:
                 with open(args.worker_out, "w", encoding="utf-8") as fh:
@@ -751,6 +1115,7 @@ def main():
         plan_every=args.plan_every,
         use_structure=not args.no_structure,
         theory_mode=args.theory,
+        scale_out=args.scale_out,
     )
     _print_report(r)
 
