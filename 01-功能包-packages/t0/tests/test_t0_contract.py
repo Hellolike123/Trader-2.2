@@ -27,6 +27,7 @@ from price_point_engine import (
     position_size,
     t0_net_space_pct,
 )
+from t0_core import SIDE_ZONE_HIT, normalize_side_display, side_status
 from t0_run import build_t0_event_signal, build_t0_signals, render_markdown, segment_avg_volume
 from monitor import BUY_TRIGGERED, detect_state_change, persist_event_signals
 from trader_shared.signal_contract import validate_signal
@@ -166,8 +167,11 @@ def test_t0_v2_no_exec_command_when_triggered() -> None:
         "summary": "评分80/100 · 结构偏强（参考）",
     }
     plan["vwap"] = 11.90
+    assert side_status(plan["buy"]) == SIDE_ZONE_HIT
+    assert SIDE_ZONE_HIT == "到价关注"
     md = render_markdown(plan)
     assert "关注 11.94～11.98（参考）" in md
+    assert "近低吸关注区" in md
     assert "可执行" not in md
     assert "可低吸" not in md
     assert "可加仓" not in md
@@ -176,6 +180,42 @@ def test_t0_v2_no_exec_command_when_triggered() -> None:
     assert "多✓" in md
     assert "未达" in md
     assert "卖侧" not in md
+    assert validate(md) == []
+
+
+def test_legacy_executable_display_status_normalized() -> None:
+    """旧 buy_display_status=可执行 不得泄露到 markdown。"""
+    plan = sample_t0_plan()
+    plan["buy"].update({
+        "status": "已触发",
+        "execution_price": 11.94,
+        "acceptable_price": 11.98,
+    })
+    plan["buy_display_status"] = "可执行"
+    plan["vwap"] = 11.90
+    assert normalize_side_display("可执行") == SIDE_ZONE_HIT
+    md = render_markdown(plan)
+    assert "可执行" not in md
+    assert "近低吸关注区" in md
+    assert "关注 11.94～11.98（参考）" in md
+    assert validate(md) == []
+
+
+def test_no_position_hides_account_discipline_block() -> None:
+    """无底仓不展示持仓纪律/降本块，即使误注入 t0_account。"""
+    plan = sample_t0_plan()
+    plan["t0_account"] = {
+        "avg_cost": 12.0,
+        "total_shares": 0,
+        "mode": "cost_cut",
+        "allow_reverse_t": False,
+        "worth_t": {"worth": True, "net_pct": 1.2, "min_edge_pct": 0.8},
+    }
+    md = render_markdown(plan)
+    assert "无底仓" in md
+    assert "持仓纪律" not in md
+    assert "降本模式" not in md
+    assert "先卖后买" not in md
     assert validate(md) == []
 
 
@@ -628,7 +668,9 @@ def test_monitor_suppresses_observation_and_reports_trigger_position(tmp_path, m
     monkeypatch.setattr(monitor, "build_plan", lambda _target: triggered)
 
     alert = monitor.run_once("中国铝业", cost=11.50, position=10000, state_path=state_path)
-    assert "低吸已触发" in alert
+    assert "近低吸关注区" in alert
+    assert "人决策" in alert
+    assert "可执行" not in alert
     assert "11.94" in alert
     assert "11.98" in alert
     assert "11.72" in alert

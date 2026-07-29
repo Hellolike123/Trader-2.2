@@ -39,6 +39,8 @@ from t0_core import (
     render_markdown,
     review_lines,
     segment_avg_volume,
+    SIDE_ZONE_HIT,
+    is_zone_hit,
     side_status,
     summarize_intraday_segment,
 )
@@ -211,20 +213,20 @@ def build_plan(target: str) -> dict[str, Any]:
 
 
 def current_action_text(plan: dict[str, Any]) -> str:
-    if side_status(plan["buy"]) == "可执行":
-        return "低吸"
-    if side_status(plan["sell"]) == "可执行":
-        return "高抛"
-    return "不动"
+    if is_zone_hit(side_status(plan["buy"])):
+        return "近低吸关注区"
+    if is_zone_hit(side_status(plan["sell"])):
+        return "近高抛关注区"
+    return "观望"
 
 
 def reminder_level(plan: dict[str, Any]) -> str:
     buy_state = side_status(plan["buy"])
     sell_state = side_status(plan["sell"])
-    if "可执行" in {buy_state, sell_state}:
+    if SIDE_ZONE_HIT in {buy_state, sell_state}:
         if plan.get("max_move") == "底仓的 20%-30%" and str(plan.get("data_status")) == "fresh":
-            return "可执行"
-        return "轻仓做"
+            return SIDE_ZONE_HIT
+        return "轻关注"
     if {buy_state, sell_state} & {"已错过", "被阻断"}:
         return "别犯错"
     return "无"
@@ -232,32 +234,38 @@ def reminder_level(plan: dict[str, Any]) -> str:
 
 def buy_status_line(buy: dict[str, Any]) -> str:
     state = side_status(buy)
-    if state == "可执行":
-        return f"买入：可执行，{price(buy['execution_price'])}附近，最高不超过{price(buy['acceptable_price'])}。"
+    if is_zone_hit(state):
+        return (
+            f"买入：到价关注，{price(buy['execution_price'])}附近，"
+            f"最高不超过{price(buy['acceptable_price'])}；是否动手由人决定。"
+        )
     if state == "已错过":
         return f"买入：已错过，当前价高于{price(buy.get('acceptable_price'))}，不追。"
     if state == "被阻断":
         return f"买入：被阻断，{'、'.join(buy.get('blocked_reasons') or ['强阻断'])}。"
     if state == "数据不足":
-        return "买入：数据不足，不能生成执行价。"
+        return "买入：数据不足，暂无关注价。"
     if observation_valid(buy):
-        return f"买入：未触发，等{price(buy['observation_price'])}以下5m止跌。"
-    return "买入：未触发，暂无有效观察价。"
+        return f"买入：未到价，等{price(buy['observation_price'])}以下5m止跌。"
+    return "买入：未到价，暂无有效观察价。"
 
 
 def sell_status_line(sell: dict[str, Any]) -> str:
     state = side_status(sell)
-    if state == "可执行":
-        return f"卖出：可执行，{price(sell['execution_price'])}附近，最低不低于{price(sell['acceptable_price'])}。"
+    if is_zone_hit(state):
+        return (
+            f"卖出：到价关注，{price(sell['execution_price'])}附近，"
+            f"最低不低于{price(sell['acceptable_price'])}；是否动手由人决定。"
+        )
     if state == "已错过":
         return f"卖出：已错过，当前价低于{price(sell.get('acceptable_price'))}，不砸。"
     if state == "被阻断":
         return f"卖出：被阻断，{'、'.join(sell.get('blocked_reasons') or ['强阻断'])}。"
     if state == "数据不足":
-        return "卖出：数据不足，不能生成执行价。"
+        return "卖出：数据不足，暂无关注价。"
     if observation_valid(sell):
-        return f"卖出：未触发，等{price(sell['observation_price'])}附近冲高失败。"
-    return "卖出：未触发，暂无有效观察价。"
+        return f"卖出：未到价，等{price(sell['observation_price'])}附近冲高失败。"
+    return "卖出：未到价，暂无有效观察价。"
 
 
 def intraday_story_lines(plan: dict[str, Any]) -> list[str]:

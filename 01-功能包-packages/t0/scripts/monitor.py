@@ -183,8 +183,14 @@ def event_id(event: str, plan: dict[str, Any]) -> str:
     return f"{event}:{model.get('trigger_time', '')}:{source}"
 
 
-def is_executable(model: dict[str, Any]) -> bool:
+def is_zone_hit(model: dict[str, Any]) -> bool:
+    """价到关注区（已触发且有参考价）。旧名 is_executable 已废弃。"""
     return model.get("status") == "已触发" and model.get("execution_price") is not None
+
+
+def is_executable(model: dict[str, Any]) -> bool:
+    """兼容别名 → is_zone_hit。"""
+    return is_zone_hit(model)
 
 
 def is_expired(model: dict[str, Any]) -> bool:
@@ -221,9 +227,9 @@ def detect_state_change(previous_state: dict[str, Any] | None, plan: dict[str, A
         events.append(SELL_INVALIDATED)
     buy_event = side_event("buy", previous_state.get("buy_status"), buy, first_run=first_run)
     sell_event = side_event("sell", previous_state.get("sell_status"), sell, first_run=first_run)
-    if buy_event and (buy_event != BUY_TRIGGERED or is_executable(buy)):
+    if buy_event and (buy_event != BUY_TRIGGERED or is_zone_hit(buy)):
         events.append(buy_event)
-    if sell_event and (sell_event != SELL_TRIGGERED or is_executable(sell)):
+    if sell_event and (sell_event != SELL_TRIGGERED or is_zone_hit(sell)):
         events.append(sell_event)
     return events
 
@@ -246,8 +252,8 @@ def alert_level(event: str, plan: dict[str, Any]) -> str:
         return "别犯错"
     model = plan["buy"] if event.startswith("BUY") else plan["sell"]
     if str(plan.get("data_status")) == "delayed" or str(plan.get("space_state")) != "good" or int(model.get("matched_count") or 0) <= 4:
-        return "轻仓做"
-    return "可执行"
+        return "轻关注"
+    return "到价关注"
 
 
 def event_action_text(event: str) -> str:

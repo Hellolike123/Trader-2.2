@@ -17,8 +17,8 @@
 | `space_state` | str | 振幅状态 | too_small/normal/good |
 | `vwap` | float | VWAP | 14.25 |
 | `volume_ratio` | float | 量比 | 1.5 |
-| `buy_display_status` | str | 低吸显示状态 | 可执行/未触发/已错过/被阻断/数据不足/买 10%/买 23% |
-| `sell_display_status` | str | 高抛显示状态 | 可执行/未触发/已错过/被阻断/数据不足 |
+| `buy_display_status` | str | 低吸显示状态 | 到价关注/未触发/已错过/被阻断/数据不足（旧「可执行」已废弃，读入归一化为到价关注） |
+| `sell_display_status` | str | 高抛显示状态 | 到价关注/未触发/已错过/被阻断/数据不足 |
 | `atr_info.atr14` | float | ATR | 0.35 |
 | `atr_info.atr_ratio` | float | ATR 占比 | 0.025 |
 | `atr_info.level` | str | 波动率级别 | 波动正常/波幅偏高 |

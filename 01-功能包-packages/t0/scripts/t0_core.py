@@ -87,10 +87,15 @@ def numeric_or_none(value: Any) -> float | None:
         return None
 
 
+# v2 价到关注区状态：只表示「价近关注区」，不构成下单许可
+SIDE_ZONE_HIT = "到价关注"
+_LEGACY_ZONE_HIT = "可执行"  # 旧枚举，读入时归一化为 SIDE_ZONE_HIT
+
+
 def side_status(model: dict[str, Any]) -> str:
     status = str(model.get("status") or "")
     if status == "已触发" and model.get("execution_price") is not None:
-        return "可执行"
+        return SIDE_ZONE_HIT
     if status == "触发过期":
         return "已错过"
     if status == "被阻断":
@@ -98,6 +103,18 @@ def side_status(model: dict[str, Any]) -> str:
     if status == "数据不足":
         return "数据不足"
     return "未触发"
+
+
+def normalize_side_display(state: str) -> str:
+    """Normalize display status; map legacy 可执行 → 到价关注."""
+    text = str(state or "")
+    if text == _LEGACY_ZONE_HIT:
+        return SIDE_ZONE_HIT
+    return text
+
+
+def is_zone_hit(state: str) -> bool:
+    return normalize_side_display(state) == SIDE_ZONE_HIT
 
 
 def side_display(model: dict[str, Any]) -> str:
@@ -144,10 +161,10 @@ def build_side_signal(plan: dict[str, Any], side: str) -> dict[str, Any]:
         "signal_type": signal_type,
         "direction": direction,
         "action": action,
-        "confidence": "high" if side_state == "可执行" else "medium",
+        "confidence": "high" if is_zone_hit(side_state) else "medium",
         "data_status": normalize_t0_data_status(str(plan.get("data_status") or "partial")),
         "trigger": {
-            "type": "completed_5m_confirm" if side_state == "可执行" else "watch_price",
+            "type": "completed_5m_confirm" if is_zone_hit(side_state) else "watch_price",
             "price": numeric_or_none(trigger_price),
             "text": trigger_text,
         },
@@ -271,9 +288,9 @@ def _build_emergency_guide(plan: dict[str, Any], buy: dict[str, Any], sell: dict
            elif abs(current_price - 跌停价) / 跌停价 < 0.005:
                lines.append("🚨 应急：临近跌停，不接货，等次日企稳再看")
 
-    # 场景D：双触发同时存在
-    if buy_state == "可执行" and sell_state == "可执行":
-        lines.append("🚨 应急：低吸高抛同时可执行，先低吸后高抛，T+0锁仓套利")
+    # 场景D：双侧关注区同时触及（仅结构提醒，非指令）
+    if is_zone_hit(buy_state) and is_zone_hit(sell_state):
+        lines.append("🚨 结构：低吸与高抛关注区同时触及 · 是否动手由人决定")
 
     # 场景E：ICT信号辅助提示
     ict = plan.get("ict_signal") or {}
@@ -302,8 +319,8 @@ def render_markdown(plan: dict[str, Any]) -> str:
 
     buy = plan["buy"]
     sell = plan["sell"]
-    buy_state = str(plan.get("buy_display_status") or side_display(buy))
-    sell_state = str(plan.get("sell_display_status") or side_display(sell))
+    buy_state = normalize_side_display(str(plan.get("buy_display_status") or side_display(buy)))
+    sell_state = normalize_side_display(str(plan.get("sell_display_status") or side_display(sell)))
     buy_obs = str(plan.get("buy_display_obs") or observation_value(buy, "以下"))
     sell_obs = str(plan.get("sell_display_obs") or observation_value(sell, "附近"))
 
@@ -338,14 +355,14 @@ def render_markdown(plan: dict[str, Any]) -> str:
     if current_price is not None:
         buy_obs_price = numeric_or_none(buy.get("observation_price"))
         sell_obs_price = numeric_or_none(sell.get("observation_price"))
-        if buy_obs_price is not None and buy_state not in ("可执行", "数据不足", ""):
+        if buy_obs_price is not None and buy_state not in (SIDE_ZONE_HIT, "数据不足", ""):
             gap_pct = (current_price - buy_obs_price) / buy_obs_price
             est_bars = int(gap_pct / 0.003) if gap_pct > 0 else 0
             if gap_pct > 0.005:
                 distance_lines.append(f"低吸关注区还差 {gap_pct*100:.1f}%（约{est_bars}根5m线）")
             elif gap_pct > 0:
                 distance_lines.append(f"接近低吸关注区，差 {gap_pct*100:.1f}%")
-        if sell_obs_price is not None and sell_state not in ("可执行", "数据不足", ""):
+        if sell_obs_price is not None and sell_state not in (SIDE_ZONE_HIT, "数据不足", ""):
             gap_pct = (sell_obs_price - current_price) / current_price
             est_bars = int(gap_pct / 0.003) if gap_pct > 0 else 0
             if gap_pct > 0.005:
@@ -372,7 +389,7 @@ def render_markdown(plan: dict[str, Any]) -> str:
     if _ab_bp_raw and _cur and abs(_ab_bp_raw - _cur) / _cur <= 0.2:
         _ab_bp = _ab_bp_raw
     _wyck_bp = (_res.get("lights") or {}).get("wyckoff", {}).get("buy_price")
-    if buy_state == "可执行":
+    if is_zone_hit(buy_state):
         _exec = numeric_or_none(buy.get("execution_price"))
         _acc = numeric_or_none(buy.get("acceptable_price"))
         if _exec and _acc:
@@ -397,7 +414,7 @@ def render_markdown(plan: dict[str, Any]) -> str:
     if _ab_sp_raw and _cur and abs(_ab_sp_raw - _cur) / _cur <= 0.2:
         _ab_sp = _ab_sp_raw
     _wyck_sp = (_res.get("lights") or {}).get("wyckoff", {}).get("sell_price")
-    if sell_state == "可执行":
+    if is_zone_hit(sell_state):
         _exec = numeric_or_none(sell.get("execution_price"))
         _acc = numeric_or_none(sell.get("acceptable_price"))
         if _exec and _acc:
@@ -507,7 +524,7 @@ def render_markdown(plan: dict[str, Any]) -> str:
 
     # ── 段4: 风控提醒 ──
     risk_lines = [
-        f"👀 跌破 {stop_price} 止损退出" if buy_state == "可执行" else f"👀 跌破 {stop_price} 后不再低吸"
+        f"👀 跌破 {stop_price} 看法失效" if is_zone_hit(buy_state) else f"👀 跌破 {stop_price} 后低吸关注取消"
     ]
     ds = str(plan.get("data_status") or "")
     if ds == "partial":
@@ -599,9 +616,9 @@ def _build_conclusion(plan: dict[str, Any], buy_state: str, sell_state: str) -> 
     else:
         parts.append("结构观察")
 
-    if buy_state == "可执行":
+    if is_zone_hit(buy_state):
         parts.append("近低吸关注区")
-    if sell_state == "可执行":
+    if is_zone_hit(sell_state):
         parts.append("近高抛关注区")
 
     if not _has_position(plan):
@@ -647,7 +664,9 @@ def _build_failure_conditions(plan: dict[str, Any], buy: dict, sell: dict,
 
 
 def _build_account_section(plan: dict[str, Any]) -> list[str]:
-    """构建降本模式输出段。无持仓信息时不显示。"""
+    """持仓纪律段（v2）。无底仓不展示，避免「做 T 召唤」。"""
+    if not _has_position(plan):
+        return []
     acct = plan.get("t0_account")
     if not acct:
         return []
@@ -655,9 +674,13 @@ def _build_account_section(plan: dict[str, Any]) -> list[str]:
     if mode == "none":
         return []
 
-    lines = ["📉 降本模式"]
-    mode_label = {"cost_cut": "cost_cut（先卖后买）", "grid": "grid（标准网格）", "reduce": "reduce（减仓）"}.get(mode, mode)
-    lines.append(f"  模式：{mode_label}")
+    lines = ["📉 持仓纪律"]
+    mode_label = {
+        "cost_cut": "先卖后买（降本参考）",
+        "grid": "网格参考",
+        "reduce": "边做 T 边减仓（参考）",
+    }.get(mode, mode)
+    lines.append(f"  纪律：{mode_label} · 是否动手由人决定")
 
     avg_cost = acct.get("avg_cost", 0)
     new_cost = acct.get("new_cost_estimate")
@@ -836,7 +859,7 @@ def _build_resonance_section(plan: dict[str, Any]) -> list[str]:
 
 
 def side_signal_type(side: str, side_state: str) -> str:
-    if side_state == "可执行":
+    if is_zone_hit(side_state):
         return "low_buy_triggered" if side == "buy" else "high_sell_triggered"
     if side_state == "已错过":
         return "trigger_expired"
@@ -846,7 +869,7 @@ def side_signal_type(side: str, side_state: str) -> str:
 
 
 def side_action(side: str, side_state: str) -> str:
-    if side_state == "可执行":
+    if is_zone_hit(side_state):
         return "low_buy" if side == "buy" else "high_sell"
     if side_state == "被阻断":
         return "stop_low_buy" if side == "buy" else "stop_high_sell"
@@ -854,21 +877,20 @@ def side_action(side: str, side_state: str) -> str:
 
 
 def side_trigger_price(model: dict[str, Any], side_state: str) -> Any:
-    if side_state == "可执行":
+    if is_zone_hit(side_state):
         return model.get("execution_price")
     return model.get("observation_price")
 
 
 def side_summary(model: dict[str, Any], side: str, trigger_price: Any) -> str:
-    raw_status = str(model.get("status") or "")
     side_state = side_status(model)
     if side == "buy":
-        if side_state == "可执行":
-            return f"低吸已触发，参考 {price(trigger_price)}，超过可接受价不追。"
-        return f"低吸未触发，只盯 {price(trigger_price)} 以下是否 5m 止跌。"
-    if side_state == "可执行":
-        return f"高抛已触发，参考 {price(trigger_price)}，低于可接受价不砸。"
-    return f"高抛未触发，只盯 {price(trigger_price)} 附近是否冲高失败。"
+        if is_zone_hit(side_state):
+            return f"低吸到价关注，参考 {price(trigger_price)}，超过可接受价不追；是否动手由人决定。"
+        return f"低吸未到价，只盯 {price(trigger_price)} 以下是否 5m 止跌。"
+    if is_zone_hit(side_state):
+        return f"高抛到价关注，参考 {price(trigger_price)}，低于可接受价不砸；是否动手由人决定。"
+    return f"高抛未到价，只盯 {price(trigger_price)} 附近是否冲高失败。"
 
 
 def side_risk_flags(model: dict[str, Any]) -> list[str]:

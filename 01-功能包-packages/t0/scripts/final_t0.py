@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--verbose", action="store_true", help="Print no-alert status in monitor mode")
     parser.add_argument("--reset-cache", action="store_true", help="Clear cached state for this target before checking")
     parser.add_argument("--t-mode", choices=["cost_cut", "grid", "reduce"], default=None,
-                        help="T mode: cost_cut (先卖后买降本), grid (标准网格), reduce (边做T边减仓)")
+                        help="持仓纪律参考（需有底仓）：cost_cut/grid/reduce；不构成自动做 T 指令")
     parser.add_argument("--min-edge-pct", type=float, default=0.8,
                         help="Minimum net edge %% after fees to allow T (default: 0.8)")
     parser.add_argument("--cash", type=float, default=None,
