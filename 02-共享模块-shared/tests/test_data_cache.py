@@ -131,3 +131,18 @@ class TestMergeDailyBarsWithQuote:
         from trader_shared.cache_utils import merge_daily_bars_with_quote
         result = merge_daily_bars_with_quote([], {"current_price": "10.0"})
         assert result == []
+
+    def test_uses_quote_trade_date(self):
+        from trader_shared.cache_utils import merge_daily_bars_with_quote
+        bars = _make_bars(3, start_date="2026-07-25")
+        quote = {
+            "trade_date": "2026-07-28",
+            "current_price": "12.5",
+            "open": "12.0",
+            "high": "12.8",
+            "low": "11.9",
+            "volume": "1000",
+        }
+        result = merge_daily_bars_with_quote(bars, quote)
+        assert result[-1]["date"] == "2026-07-28"
+        assert result[-1]["close"] == 12.5

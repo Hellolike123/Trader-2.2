@@ -601,22 +601,37 @@ def get_cached_batches(
     return batches
 
 
+def _normalize_bar_date(raw: Any) -> str:
+    """统一为 YYYY-MM-DD；无法解析返回空串。"""
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    # YYYYMMDD
+    if len(s) >= 8 and s[:8].isdigit() and "-" not in s[:10]:
+        return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+    # YYYY-MM-DD...
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        return s[:10]
+    return s[:10] if len(s) >= 10 else s
+
+
 def merge_daily_bars_with_quote(
     cached_bars: list[dict],
     quote: dict[str, Any],
 ) -> list[dict]:
-    """Merge cached historical daily bars with today's real-time quote.
+    """Merge cached historical daily bars with session quote into one partial daily bar.
+
+    注意：主分析路径（report_builder / load_market_snapshot）默认 **不** 调用本函数，
+    以免 partial 今日 K 污染策略。仅供缓存预热/显式需要「日K含今日」的调用方。
 
     Strategy:
-    - Use cached bars as base (historical data, immutable after close)
-    - Build today's bar from quote data
-    - If today's date already exists in cached bars, replace it (quote is more recent)
-    - Otherwise append today's bar at the end
+    - 交易日优先 quote.trade_date，否则日历 today
+    - bar 日期统一 YYYY-MM-DD 再比较，避免重复「今日」
     """
     if not cached_bars or not quote:
         return cached_bars
 
-    today_str = datetime.now().strftime("%Y-%m-%d")
+    session_str = _normalize_bar_date(quote.get("trade_date")) or datetime.now().strftime("%Y-%m-%d")
 
     def _to_float(v: Any) -> float | None:
         if v in (None, "", "-", "--"):
@@ -631,14 +646,14 @@ def merge_daily_bars_with_quote(
         return cached_bars
 
     today_bar = {
-        "date": today_str,
-        "time": today_str,
+        "date": session_str,
+        "time": session_str,
         "open": _to_float(quote.get("open")) or current_price,
         "high": _to_float(quote.get("high")) or current_price,
         "low": _to_float(quote.get("low")) or current_price,
         "close": current_price,
         "volume": _to_float(quote.get("volume")),
-        "amount": None,
+        "amount": _to_float(quote.get("amount")),
         "data_source": "realtime-merge",
         "data_status": "partial",
     }
@@ -650,12 +665,12 @@ def merge_daily_bars_with_quote(
             if prev_bar.get(atr_key) is not None:
                 today_bar[atr_key] = prev_bar[atr_key]
 
-    # Check if today already exists in cached bars
+    # Check if session day already exists in cached bars
     result = []
     today_replaced = False
     for bar in cached_bars:
-        bar_date = str(bar.get("date") or bar.get("time") or "")
-        if bar_date == today_str:
+        bar_date = _normalize_bar_date(bar.get("date") or bar.get("time") or "")
+        if bar_date and bar_date == session_str:
             result.append(today_bar)
             today_replaced = True
         else:

@@ -64,18 +64,43 @@ def build_live_bar_anchor(
     _cp = quote.get("current_price")
     live_bar = None
     if _today and _last_date != _today and _cp is not None and float(_cp) > 0:
-        _chg = float(quote.get("current_change_pct") or 0)
-        _prev_close = float(_cp) / (1 + _chg / 100) if _chg != 0 else float(_cp)
+        _cp_f = float(_cp)
+        _pre = quote.get("pre_close")
+        try:
+            _prev_close = float(_pre) if _pre is not None and float(_pre) > 0 else None
+        except (TypeError, ValueError):
+            _prev_close = None
+        if _prev_close is None:
+            _chg = float(quote.get("current_change_pct") or 0)
+            _prev_close = _cp_f / (1 + _chg / 100) if _chg != 0 else _cp_f
+        def _qf(key: str, default: float) -> float:
+            v = quote.get(key)
+            try:
+                f = float(v) if v is not None else default
+                return f if f > 0 else default
+            except (TypeError, ValueError):
+                return default
+        _open = _qf("open", _prev_close)
+        _high = _qf("high", max(_cp_f, _open))
+        _low = _qf("low", min(_cp_f, _open))
+        # 保证 high/low 包住现价
+        _high = max(_high, _cp_f, _open)
+        _low = min(_low, _cp_f, _open)
         _prev_bar = bars[-1] if bars else {}
+        _vol = quote.get("volume")
+        try:
+            _vol_f = float(_vol) if _vol is not None else 0.0
+        except (TypeError, ValueError):
+            _vol_f = 0.0
         live_bar = {
             "date": _today,
-            "open": _prev_close,
-            "close": float(_cp),
-            "high": float(_cp),
-            "low": float(_cp),
-            "volume": 0,
+            "open": _open,
+            "close": _cp_f,
+            "high": _high,
+            "low": _low,
+            "volume": _vol_f,
             "data_source": "quote-today",
-            "data_status": "full",
+            "data_status": "partial",
             "atr14": _prev_bar.get("atr14", 0),
             "atr_ratio": _prev_bar.get("atr_ratio", 0),
             "atr7": _prev_bar.get("atr7", 0),

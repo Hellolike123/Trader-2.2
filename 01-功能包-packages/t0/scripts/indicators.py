@@ -52,7 +52,8 @@ def calculate_macd(closes: list[float], fast: int = 12, slow: int = 26, signal: 
     dea = calculate_ema(dif, signal)
     hist: list[float | None] = []
     for d, e in zip(dif, dea):
-        hist.append(None if d is None or e is None else (d - e) * 2)
+        # histogram = DIF−DEA（×1，与 shared indicator_math / formulas.md 一致；非通达信 2×）
+        hist.append(None if d is None or e is None else (d - e))
     return {"dif": dif, "dea": dea, "hist": hist}
 
 

@@ -41,6 +41,18 @@ class TestPriceOverflowGuard(unittest.TestCase):
         self.assertEqual(sanitized["high"], 62.20)
         self.assertEqual(sanitized["low"], 58.10)
 
+    def test_sanitize_keeps_twenty_pct_move(self):
+        """科创/创业板约 20% 涨跌停日不得被 clamp。"""
+        q = {
+            "current_price": 12.0,
+            "pre_close": 10.0,
+            "high": 12.0,
+            "low": 9.5,
+        }
+        sanitized = sanitize_quote(q)
+        self.assertEqual(sanitized["high"], 12.0)
+        self.assertEqual(sanitized["low"], 9.5)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -647,6 +647,8 @@ class TushareProvider:
                 # Tushare returns YYYYMMDD, convert to YYYY-MM-DD
                 if len(trade_date) == 8:
                     trade_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+                # Tushare daily amount 单位为千元 → 统一成元（与腾讯/mootdx 一致）
+                _amt = float(r["amount"]) * 1000.0 if r.get("amount") is not None else None
                 bars.append({
                     "date": trade_date,
                     "open": float(r["open"]) if r.get("open") is not None else None,
@@ -654,7 +656,7 @@ class TushareProvider:
                     "high": float(r["high"]) if r.get("high") is not None else None,
                     "low": float(r["low"]) if r.get("low") is not None else None,
                     "volume": float(r["vol"]) if r.get("vol") is not None else None,
-                    "amount": float(r["amount"]) if r.get("amount") is not None else None,
+                    "amount": _amt,
                     "data_source": "tushare",
                     "data_status": "full",
                 })
@@ -714,7 +716,8 @@ class TushareProvider:
                             "high": float(r["high"]) if r.get("high") is not None else None,
                             "low": float(r["low"]) if r.get("low") is not None else None,
                             "volume": float(r["vol"]) if r.get("vol") is not None else None,
-                            "amount": float(r["amount"]) if r.get("amount") is not None else None,
+                            # weekly amount 亦为千元 → 元
+                            "amount": float(r["amount"]) * 1000.0 if r.get("amount") is not None else None,
                             "data_source": "tushare",
                             "data_status": "full",
                         })

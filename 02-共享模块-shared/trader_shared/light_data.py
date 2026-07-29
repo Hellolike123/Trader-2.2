@@ -118,7 +118,8 @@ def _search_code_by_name(name: str) -> str | None:
     try:
         from urllib.parse import quote as _quote
         # 新浪联想词搜索接口（支持 A 股 type=11/12）
-        url = f"http://suggest3.sinais.cn/suggest/type=11,12&key={_quote(name)}"
+        # 新浪联想接口主机名为 sinajs.cn（非 sinus/sinais 拼写）
+        url = f"http://suggest3.sinajs.cn/suggest/type=11,12&key={_quote(name)}"
         req = Request(
             url,
             headers={
@@ -900,10 +901,25 @@ def resolve_security(target: str) -> Security:
         code = digits
     code = code[-6:].zfill(6)
     if not market:
-        market = "SH" if code.startswith(("6", "688", "689")) else "BJ" if code.startswith(("8", "4")) else "SZ"
+        market = infer_a_share_market(code)
     # 名称：已知 NAME_MAP > 在线搜索成功 > 回退到代码
     display_name = raw if (raw in NAME_MAP or not re.sub(r"\D", "", raw)) else code
     return Security(code=code, market=market, name=display_name)
+
+
+def infer_a_share_market(code: str) -> str:
+    """由 6 位代码推断交易所，与 signal_utils.normalize_symbol 对齐。
+
+    SH: 6xxxxx 主板/科创, 5xxxxx 沪 ETF/基金, 9xxxxx 沪 B
+    SZ: 0/1/2/3 开头（含深 ETF 15/16/18 等）
+    BJ: 4/8 开头北交所
+    """
+    c = str(code or "").strip().zfill(6)[-6:]
+    if c.startswith(("8", "4")):
+        return "BJ"
+    if c.startswith(("5", "6", "9")):
+        return "SH"
+    return "SZ"
 
 
 def extract_jsonp(text: str) -> Any:
@@ -941,6 +957,20 @@ def parse_trade_datetime(fields: list[str]) -> tuple[str, str | None]:
     return trade_date, trade_time
 
 
+def _hl_is_data_glitch(val: float, current: float, pre_close: float | None) -> bool:
+    """仅拦截明显脏高低价；真实涨跌停日（约 ±10%/±20%）不得误杀。"""
+    if val <= 0 or current <= 0:
+        return True
+    ref = pre_close if pre_close and pre_close > 0 else current
+    # 绝对溢出（通达信/脏字段常见百万级）
+    if val > max(ref * 5.0, current * 5.0) or val > 100_000:
+        return True
+    # 相对现价离谱（>3 倍或 <1/3）才改；20% 宽幅日保留
+    if val > current * 3.0 or val < current * (1.0 / 3.0):
+        return True
+    return False
+
+
 def sanitize_quote(q: dict[str, Any] | None) -> dict[str, Any] | None:
     if q is None:
         return None
@@ -949,18 +979,20 @@ def sanitize_quote(q: dict[str, Any] | None) -> dict[str, Any] | None:
         return q
     try:
         current = float(curr)
-        if current > 0:
-            # 价格偏离防线：若今日低点/高点偏离当前现价超过 20%，截断并降级自愈为当前现价本身
-            low_val = q.get("low")
-            if low_val is not None:
-                fl = float(low_val)
-                if fl < current * 0.80 or fl > current * 1.20:
-                    q["low"] = current
-            high_val = q.get("high")
-            if high_val is not None:
-                fh = float(high_val)
-                if fh < current * 0.80 or fh > current * 1.20:
-                    q["high"] = current
+        if current <= 0:
+            return q
+        pre = q.get("pre_close")
+        pre_f = float(pre) if pre is not None else None
+        low_val = q.get("low")
+        if low_val is not None:
+            fl = float(low_val)
+            if _hl_is_data_glitch(fl, current, pre_f):
+                q["low"] = current
+        high_val = q.get("high")
+        if high_val is not None:
+            fh = float(high_val)
+            if _hl_is_data_glitch(fh, current, pre_f):
+                q["high"] = current
     except (TypeError, ValueError):
         pass
     return q
@@ -1599,13 +1631,10 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
             return "live"
         return compute_data_freshness(last)
 
-    # ── 合并缓存日线与当日实时 quote ──
-    if daily_bars and quote and isinstance(quote, dict):
-        try:
-            from trader_shared.cache_utils import merge_daily_bars_cached
-            daily_bars = merge_daily_bars_cached(daily_bars, quote)
-        except (ImportError, OSError) as exc:
-            _logger.debug("Daily bars merge failed: %s", exc)
+    # ── 日 K 不与实时 quote 合并 ──
+    # 与 report_builder / TushareProvider 一致：策略用 bars 保持收盘序列；
+    # 盘中现价走 quote + build_live_bar_anchor，避免 partial 今日 bar 污染 MA/ATR。
+    # 若调用方显式需要 merge，请用 cache_utils.merge_daily_bars_with_quote。
 
     if include_5m and not bars_5m and "bars_5m" not in missing_sources:
         missing_sources.append("bars_5m")

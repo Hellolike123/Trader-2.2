@@ -18,34 +18,42 @@ import logging
 _logger = logging.getLogger(__name__)
 
 
-def _session_5m_bars(bars: list) -> list:
-    """只保留最新交易日（当日）的 5m bar，避免跨日旧高价污染 VWAP/区间。
+def _bar_session_day(b) -> str | None:
+    """从 bar 提取交易日 YYYY-MM-DD；无法解析返回 None（不计入 session）。"""
+    if isinstance(b, dict):
+        for k in ("datetime", "date", "time"):
+            v = b.get(k)
+            if isinstance(v, str) and len(v) >= 10 and v[4] == "-":
+                return v[:10]
+            if isinstance(v, str) and len(v) >= 8 and v[:8].isdigit():
+                return f"{v[:4]}-{v[4:6]}-{v[6:8]}"
+    else:
+        for k in ("datetime", "date", "time"):
+            v = getattr(b, k, None)
+            if isinstance(v, str) and len(v) >= 10 and v[4] == "-":
+                return v[:10]
+    return None
 
-    5m bar 由 light_data 构造，带 date(YYYY-MM-DD) / time(HH:MM) 字段；
-    新浪源有时把完整 datetime 放进 time。统一取前 10 字符作为交易日。
-    无日期信息或全为空时原样返回（保守，不误删）。
+
+def session_5m_bars(bars: list) -> list:
+    """只保留最新交易日（session）的 5m bar，避免跨日污染 VWAP。
+
+    规则：
+    - 取所有可解析交易日中的 max 作为 session
+    - **无日期字段的 bar 一律丢弃**（禁止把脏 bar 当「今日」）
+    - 全无可解析日时返回 []（调用方按无数据降级）
     """
     if not bars:
-        return bars
-
-    def _day(b):
-        if isinstance(b, dict):
-            for k in ("datetime", "date", "time"):
-                v = b.get(k)
-                if isinstance(v, str) and len(v) >= 10:
-                    return v[:10]
-        else:
-            for k in ("datetime", "date", "time"):
-                v = getattr(b, k, None)
-                if isinstance(v, str) and len(v) >= 10:
-                    return v[:10]
-        return None
-
-    days = [d for d in (_day(b) for b in bars) if d]
+        return []
+    days = [d for d in (_bar_session_day(b) for b in bars) if d]
     if not days:
-        return bars
+        return []
     latest = max(days)
-    return [b for b in bars if _day(b) == latest]
+    return [b for b in bars if _bar_session_day(b) == latest]
+
+
+# 兼容旧私有名
+_session_5m_bars = session_5m_bars
 
 # 重新导出纯数学内核（避免下游需要同时 import 两个模块）
 from trader_shared.indicator_math import (  # noqa: F401

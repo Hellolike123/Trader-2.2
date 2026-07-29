@@ -136,18 +136,33 @@ def completed_5m_bars(bars: list[dict[str, Any]], now: datetime | None = None) -
 
 
 def today_bars(bars: list[dict[str, Any]], now: datetime | None = None) -> list[dict[str, Any]]:
-    """只保留今日的 bar（VWAP 是日内指标，不能跨日计算）。"""
+    """只保留最新 session 的 5m bar（与 trader display_indicators.session_5m_bars 同源）。
+
+    - 用 bars 内可解析交易日的 max，而非墙钟日历（避免盘后/周一脏混）
+    - 无日期 bar 丢弃（禁止误入「今日」）
+    """
     if not bars:
         return []
-    now = now or datetime.now()
-    result: list[dict[str, Any]] = []
-    for bar in bars:
-        if bar is None:
-            continue
-        dt = parse_dt(bar.get("time") or bar.get("date"))
-        if dt is None or dt.date() == now.date():
-            result.append(bar)
-    return result
+    try:
+        from trader_shared.display_indicators import session_5m_bars
+        return session_5m_bars([b for b in bars if b is not None])
+    except ImportError:
+        # 降级：可解析日期中的最新日
+        days: list[str] = []
+        parsed: list[tuple[str, dict]] = []
+        for bar in bars:
+            if bar is None:
+                continue
+            dt = parse_dt(bar.get("time") or bar.get("date"))
+            if dt is None:
+                continue
+            d = dt.strftime("%Y-%m-%d")
+            days.append(d)
+            parsed.append((d, bar))
+        if not days:
+            return []
+        latest = max(days)
+        return [b for d, b in parsed if d == latest]
 
 
 def data_status(quote: dict[str, Any], daily: list[dict[str, Any]], bars_5m: list[dict[str, Any]], now: datetime | None = None) -> str:
@@ -966,9 +981,13 @@ def calculate_sell_price_model(report_data: dict[str, Any], zones: dict[str, Any
         pct_max = float(report_data.get("current_price", 0)) * ATR_STOP_MAX_PCT
         if atr_distance > pct_max:
             atr_distance = pct_max
+        # 高抛失效是天花板：取「阻力失效位」与「现价+ATR」的更紧（更低）一侧
         atr_invalid = round_price(float(report_data["current_price"]) + atr_distance)
         if atr_invalid is not None and atr_invalid > 0:
-            invalid = max(invalid, atr_invalid)
+            if invalid is not None and invalid > 0:
+                invalid = min(invalid, atr_invalid)
+            else:
+                invalid = atr_invalid
     execution = None
     acceptable = None
     status = trigger["status"]
