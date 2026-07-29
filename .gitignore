@@ -19,6 +19,10 @@ env/
 coverage.xml
 htmlcov/
 
+# Setuptools / editable install metadata
+trader.egg-info/
+*.egg-info/
+
 # IDE/editor
 .vscode/
 .idea/

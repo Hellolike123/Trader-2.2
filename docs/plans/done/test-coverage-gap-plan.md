@@ -1,3 +1,5 @@
+> **已归档（2026-07-29）**：历史计划/摘要，勿按本文施工。现行法源见 `AGENTS.md` + `docs/designs/resonance-and-orchestration.md`。
+
 # Test Coverage Gap Modification Plan
 
 Generated: 2026-06-25 | Source: Agent 49 + Agent 50 reports | All gaps verified against source code.

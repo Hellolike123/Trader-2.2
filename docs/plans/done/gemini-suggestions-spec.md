@@ -1,3 +1,5 @@
+> **已归档（2026-07-29）**：历史计划/摘要，勿按本文施工。现行法源见 `AGENTS.md` + `docs/designs/resonance-and-orchestration.md`。
+
 # Gemini 建议实现规格文档
 
 ## P0-1：Spring 改 ATR 动态比例

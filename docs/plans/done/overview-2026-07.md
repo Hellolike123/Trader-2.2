@@ -1,3 +1,5 @@
+> **已归档（2026-07-29）**：历史计划/摘要，勿按本文施工。现行法源见 `AGENTS.md` + `docs/designs/resonance-and-orchestration.md`。
+
 # Trader3.0 项目知识沉淀 — 交付摘要
 
 > 生成时间: 2026-07-14；文档再同步: 2026-07-16（代码标杆：周线 260 / wave_label / regime 很差 / 融合权重）

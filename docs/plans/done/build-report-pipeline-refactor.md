@@ -1,3 +1,5 @@
+> **已归档（2026-07-29）**：历史计划/摘要，勿按本文施工。现行法源见 `AGENTS.md` + `docs/designs/resonance-and-orchestration.md`。
+
 # build_report 流水线拆分（行为冻结）— 工程债收口
 
 > **分支**：`refactor/build-report-debt` → 合 main  

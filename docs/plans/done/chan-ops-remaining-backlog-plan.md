@@ -1,3 +1,5 @@
+> **已归档（2026-07-29）**：历史计划/摘要，勿按本文施工。现行法源见 `AGENTS.md` + `docs/designs/resonance-and-orchestration.md`。
+
 # 缠论操盘剩余项实施计划（P1/P2 打包）
 
 > 状态：**Implementer 已完成 R1–R10**（待 Reviewer 审计）  

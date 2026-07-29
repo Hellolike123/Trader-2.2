@@ -1,6 +1,7 @@
 # Trader3.0 文档入口
 
-> **从这里开始。** 根目录一堆历史 plan 已按生命周期归类；现行契约在 `designs/` 与仓库根 `AGENT.md` / `ARCHITECTURE.md` / `BUSINESS.md`。
+> **从这里开始。** 历史 plan 在 `plans/done/`；现行契约在 `designs/` 与仓库根 `AGENTS.md` / `ARCHITECTURE.md` / `BUSINESS.md`。  
+> 其他 Agent 工具目录（`.opencode` / `.mimocode` / `.trellis` 等）属本地协同环境，**勿当业务代码清理**。
 
 ---
 
@@ -8,10 +9,11 @@
 
 | 文档 | 用途 |
 |------|------|
-| [../AGENT.md](../AGENT.md) | **Agent 开发主入口** |
-| [../AGENTS.md](../AGENTS.md) | 业务速查、命令、微信输出红线 |
+| [../AGENTS.md](../AGENTS.md) | **Agent 主入口**（改代码地图、命令、微信红线） |
+| [designs/resonance-and-orchestration.md](./designs/resonance-and-orchestration.md) | **产品/架构法源** |
 | [../ARCHITECTURE.md](../ARCHITECTURE.md) | 架构 |
 | [../BUSINESS.md](../BUSINESS.md) | 业务规则 |
+| [../AGENT.md](../AGENT.md) | 短跳转（兼容旧链接） |
 | [../README.md](../README.md) | 项目简介 |
 | [guide/user-guide.md](./guide/user-guide.md) | 用户操作手册 |
 
@@ -56,10 +58,11 @@
 
 | 目录 | 含义 |
 |------|------|
-| [plans/active/](./plans/active/) | 尚未做完 / 仍可能执行 |
+| [plans/active/](./plans/active/) | 尚未做完 / 仍可能执行（空则表示无在施计划） |
 | [plans/done/](./plans/done/) | 已落地或历史方案（考古用） |
+| [methodology/calc-audit-plan.md](./methodology/calc-audit-plan.md) | 可复用计算审查方法（非施工单） |
 
-新计划请直接建在 `plans/active/`，**不要**再丢到 `docs/` 根目录。
+新计划请直接建在 `plans/active/`，**不要**再丢到仓库根目录。
 
 ---
 
@@ -90,11 +93,12 @@
 
 ## 仓库根文档（勿重复发明）
 
-- `AGENT.md` — Agent 主规范  
-- `AGENTS.md` / `AGENTS_DEEP.md` — 业务与深文档  
+- `AGENTS.md` — Agent 主规范 + 改代码地图  
+- `AGENTS_DEEP.md` — 深文档  
+- `AGENT.md` — 短跳转（兼容）  
 - `ARCHITECTURE.md` / `BUSINESS.md` — 架构与业务  
 
-Agent 改架构/业务规则时：**先改这两份 + designs，再改代码。**
+Agent 改架构/业务规则时：**先改 `AGENTS.md` + `designs/`，再改代码。**
 
 ---
 
