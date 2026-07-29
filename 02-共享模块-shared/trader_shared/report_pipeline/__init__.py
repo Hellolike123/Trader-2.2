@@ -27,10 +27,12 @@ from trader_shared.report_pipeline.assemble_stage import (
     run_stage_positioning_stage,
 )
 from trader_shared.report_pipeline.context_stage import run_analysis_context_stage
+from trader_shared.report_pipeline.stage_context import StageContext
 
 __all__ = [
     "MarkFn",
     "_noop_mark",
+    "StageContext",
     "detect_risk_flags",
     "build_live_bar_anchor",
     "tag_fusion_as_instrument",

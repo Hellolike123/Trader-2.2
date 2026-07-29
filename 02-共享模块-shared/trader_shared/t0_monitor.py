@@ -6,6 +6,7 @@ import fcntl
 import json
 import os
 import sys
+import threading
 import time
 import warnings
 from datetime import datetime, timedelta
@@ -689,6 +690,36 @@ def _norm_sig(sig):
     return sig
 
 
+# build_plan TTL 缓存：盯盘循环避免每 tick 全量重拉多周期
+_PLAN_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_PLAN_CACHE_LOCK = threading.Lock()
+
+
+def _plan_ttl_sec() -> float:
+    try:
+        return max(5.0, float(os.environ.get("T0_PLAN_TTL_SEC", "45")))
+    except (TypeError, ValueError):
+        return 45.0
+
+
+def _cached_build_plan(target: str, *, force: bool = False) -> dict[str, Any]:
+    """TTL 内复用 build_plan；``T0_PLAN_TTL_SEC`` 可调（默认 45s）。"""
+    import time as _time
+
+    key = str(target).strip()
+    now = _time.time()
+    ttl = _plan_ttl_sec()
+    if not force:
+        with _PLAN_CACHE_LOCK:
+            hit = _PLAN_CACHE.get(key)
+            if hit and (now - hit[0]) < ttl:
+                return hit[1]
+    plan = build_plan(target)
+    with _PLAN_CACHE_LOCK:
+        _PLAN_CACHE[key] = (now, plan)
+    return plan
+
+
 def run_once(
     target: str,
     *,
@@ -701,7 +732,7 @@ def run_once(
     # 非交易时间直接静默退出，避免周末/节假日发垃圾消息
     if not is_trading_time():
         return ""
-    plan = build_plan(target)
+    plan = _cached_build_plan(target, force=reset_cache)
     target_key = str(plan.get("symbol") or target)
     now = datetime.now()
     

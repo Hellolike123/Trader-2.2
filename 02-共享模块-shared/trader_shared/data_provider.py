@@ -16,12 +16,12 @@ import os
 import sys
 import warnings
 from pathlib import Path
-from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from trader_shared._logging import get_logger
 from trader_shared.light_data import to_float
+from trader_shared.market_types import DataStatus, MarketSnapshot, Security
 
 _logger = get_logger(__name__)
 
@@ -40,48 +40,8 @@ def _weekly_datalen(datalen: int | None = None) -> int:
 # -------- inject shared paths so we can import light_data / models --------
 _shared = Path(__file__).resolve().parents[1]
 
-DataStatus = Literal["full", "partial", "degraded", "failed"]
 
-
-@dataclass(frozen=True)
-class Security:
-    code: str
-    market: str = ""
-    name: str = ""
-
-    @property
-    def ts_code(self) -> str:
-        m = self.market.upper() if self.market else ("SH" if self.code.startswith(("6", "5", "9")) else "SZ")
-        return f"{self.code}.{m}"
-
-    @property
-    def qq_symbol(self) -> str:
-        m = self.market.lower() if self.market else ("sh" if self.code.startswith(("6", "5", "9")) else "sz")
-        return f"{m}{self.code}"
-
-
-@dataclass(frozen=True)
-class MarketSnapshot:
-    security: Security
-    quote: dict[str, Any]
-    daily_bars: list[dict[str, Any]]
-    bars_5m: list[dict[str, Any]] = field(default_factory=list)
-    weekly_bars: list[dict[str, Any]] = field(default_factory=list)
-    monthly_bars: list[dict[str, Any]] = field(default_factory=list)
-    order_book: dict[str, Any] | None = None
-    tick_data: list[dict[str, Any]] = field(default_factory=list)
-    data_status: DataStatus = "full"
-    data_freshness: str = "live"  # "live" 或 "stale"，用于停牌/离线检测
-    fund_flow: dict[str, Any] = field(default_factory=dict)
-    missing_sources: list[str] = field(default_factory=list)
-    source_errors: dict[str, str] = field(default_factory=dict)
-    fetched_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
-    extend_fundamental: dict[str, Any] | None = None
-    extend_sentiment: dict[str, Any] | None = None
-    extend_margin: dict[str, Any] | None = None       # 融资融券（Phase 1）
-    extend_northbound: dict[str, Any] | None = None   # 北向资金（Phase 1）
-    extend_sector: dict[str, Any] | None = None       # 行业板块数据（Phase 1）
-    extend_concept: dict[str, Any] | None = None      # 概念板块数据（Phase 2）
+# Security / MarketSnapshot / DataStatus → market_types（SSOT）
 
 
 # ═══════════════════════════════════════════════
@@ -170,7 +130,12 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
     1. 文件缓存 (TTL 12小时) — 盘后预缓存的数据，进程重启不丢失
     2. 内存缓存 (TTL 10分钟) — 同一进程内快速命中
     3. 实时抓取 — 缓存全部 miss 时走 8 路 API（4 原有 + 3 Phase 1 + 1 Phase 2 概念）
+
+    环境变量 ``TRADER_SNAPSHOT_ENRICH=0`` 时跳过扩展字段（短中线热路径可加速）。
     """
+    _enrich_flag = os.environ.get("TRADER_SNAPSHOT_ENRICH", "1").strip().lower()
+    if _enrich_flag in ("0", "false", "no", "off"):
+        return snap
     sec = snap.security
     if not sec or not sec.code or len(sec.code) != 6 or not sec.code.isdigit():
         return snap
@@ -421,8 +386,23 @@ class UnifiedProvider:
         if self._backend == "akshare":
             return self._akshare_load_snapshot(target, days, include_5m, include_weekly, include_monthly, include_ticks)
         from trader_shared.light_data import load_market_snapshot as _load
-        snap = _load(target, days=days, include_5m=include_5m, include_weekly=include_weekly, include_monthly=include_monthly, include_ticks=include_ticks)
-        sec = Security(code=snap.security.code, market=snap.security.market, name=snap.security.name)
+        snap = _load(
+            target,
+            days=days,
+            include_5m=include_5m,
+            include_weekly=include_weekly,
+            include_monthly=include_monthly,
+            include_ticks=include_ticks,
+        )
+        # light_data 与本模块共用 market_types.MarketSnapshot，无需 copy-convert
+        if isinstance(snap, MarketSnapshot):
+            return _enrich_snapshot(snap)
+        # 兼容旧快照对象（缺字段时再组装）
+        sec = Security(
+            code=snap.security.code,
+            market=getattr(snap.security, "market", "") or "",
+            name=getattr(snap.security, "name", "") or "",
+        )
         res_snap = MarketSnapshot(
             security=sec,
             quote=snap.quote,

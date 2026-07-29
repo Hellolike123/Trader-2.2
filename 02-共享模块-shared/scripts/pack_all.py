@@ -391,7 +391,15 @@ def main(args: list[str] | None = None) -> int:
             has_scripts = any(n.startswith(f"{prefix}scripts/") or n.startswith("scripts/") for n in names)
             has_hermes = f"{prefix}HERMES.md" in names or "HERMES.md" in names
             has_skill = f"{prefix}SKILL.md" in names or "SKILL.md" in names
-            empty_py = [n for n in names if n.endswith(".py") and archive.getinfo(n).file_size == 0]
+            # 忽略空的 __init__.py（包标记文件常为 0 字节，非真正缺失实现）
+            empty_py = [
+                n
+                for n in names
+                if n.endswith(".py")
+                and archive.getinfo(n).file_size == 0
+                and not n.endswith("/__init__.py")
+                and not n.endswith("__init__.py")
+            ]
             empty_status = "EMPTY!" if empty_py else ""
 
             # Verify DI architecture files

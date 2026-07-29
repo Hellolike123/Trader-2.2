@@ -6,9 +6,23 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, TypeVar
 
 T = TypeVar("T")
+
+
+def to_float(value: Any) -> float | None:
+    """标量安全转 float（None / 空串 / NaN / Inf → None）。"""
+    if value in (None, "", "-", "--", "null", "None"):
+        return None
+    try:
+        number = float(str(value).replace(",", ""))
+    except Exception:
+        return None
+    if math.isnan(number) or math.isinf(number):
+        return None
+    return number
 
 
 def safe_float(d: dict[str, Any], key: str, default: float = 0.0) -> float:

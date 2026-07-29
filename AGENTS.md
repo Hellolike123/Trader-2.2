@@ -25,9 +25,12 @@
 |----------|----------------|------|
 | 单票编排顺序 | `report_builder.py` | 在 stage 里堆无关业务 |
 | 流水线阶段 | `report_pipeline/{fusion,structure,chip,assemble,context}_stage.py` 等 | 把大段逻辑塞回 builder |
+| 短中线挂接 | `report_pipeline/attach_*.py`（facade=`attach.py`） | 把胶水写回 monolith `attach.py` |
 | 短中线文案 | `report_renderer/short_midline.py` | 手拼面板 / 改旧 `📍 决策` |
-| Fusion 生产路径 | `fusion_core.py` + `analysis/cards.py` | 加厚 classic 当主路径 |
-| Classic 映射（对照） | `fusion_classic_mappers.py` | 在 cards 路径复制一份映射 |
+| 行情类型 SSOT | `market_types.py`（`Security`/`MarketSnapshot`） | 在 light_data/data_provider 再各造一份 |
+| Fusion 生产路径 | `fusion_core.py` + `analysis/cards.py` + `fusion_card_signals.py` | 加厚 classic 当主路径 |
+| Classic 映射（对照） | `fusion_classic_mappers.py`（动量已委托 cards） | 在 cards 路径复制一份映射 |
+| T0 盯盘缓存 | `t0_monitor._cached_build_plan`（`T0_PLAN_TTL_SEC`） | 每 tick 无脑全量 `build_plan` |
 | 选股池逻辑 | `01-功能包-packages/trader/scripts/pool_cmds/*` | 把逻辑写回 `final_pool.py` |
 | T0 引擎 | `t0_core.py` / `t0_run.py` / `t0_monitor.py` / `t0_*.py` | 只改包内 shim 正文 |
 | 复盘 / 仓位 | `review_core.py` / `review_render.py` / `portfolio_*.py` | 在 skill 包复制实现 |

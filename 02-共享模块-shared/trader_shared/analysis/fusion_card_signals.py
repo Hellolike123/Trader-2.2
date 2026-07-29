@@ -126,6 +126,55 @@ def chan_card_to_fusion_signal(card: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _momentum_score_to_confidence(score: Any) -> float:
+    """U 型置信（cards 自有；classic 委托至此，避免 cards→classic 依赖）。"""
+    try:
+        from trader_shared.fusion_classic_mappers import _score_to_confidence
+
+        return float(_score_to_confidence(score))
+    except Exception:
+        try:
+            s = float(score)
+        except (TypeError, ValueError):
+            return 0.2
+        if s >= 80 or s <= 20:
+            return 0.85
+        if s >= 65 or s <= 35:
+            return 0.55
+        return 0.25
+
+
+def momentum_raw_to_fusion_signal(momentum_result: dict[str, Any] | None) -> dict[str, Any]:
+    """assess_momentum 原始输出 → fusion 席位信号（cards 生产路径真相）。"""
+    momentum_result = momentum_result if isinstance(momentum_result, dict) else {}
+    mom = momentum_result.get("momentum", {}) if isinstance(momentum_result.get("momentum"), dict) else {}
+    if not mom and ("score" in momentum_result or "direction" in momentum_result):
+        mom = momentum_result
+    score = mom.get("score")
+    direction_str = str(mom.get("direction", "neutral") or "neutral")
+    signals_list = mom.get("signals", []) if isinstance(mom.get("signals"), list) else []
+    dir_map = {"bullish": 1, "bearish": -1, "neutral": 0, "insufficient": 0}
+    direction = dir_map.get(direction_str, 0)
+    if direction_str == "insufficient" or score is None:
+        confidence = 0.0
+    else:
+        confidence = _momentum_score_to_confidence(score)
+    if direction > 0 and score is not None and score <= 45:
+        confidence = min(confidence, 0.4)
+    if direction < 0 and score is not None and score >= 55:
+        confidence = min(confidence, 0.4)
+    _def_reason = "动量数据不足" if direction_str == "insufficient" else "动量中性"
+    reason = "、".join(str(x) for x in signals_list[-2:]) if signals_list else _def_reason
+    return {
+        "direction": direction,
+        "confidence": confidence,
+        "reason": reason,
+        "raw_key": "momentum",
+        "strength": str(mom.get("strength") or ""),
+        "from_card": True,
+    }
+
+
 def momentum_card_to_fusion_signal(card: dict[str, Any] | None) -> dict[str, Any]:
     c = card if isinstance(card, dict) else {}
     d = _as_dir(c.get("direction"))
@@ -134,11 +183,9 @@ def momentum_card_to_fusion_signal(card: dict[str, Any] | None) -> dict[str, Any
         conf_f = float(conf) if conf is not None else 0.0
     except (TypeError, ValueError):
         conf_f = 0.0
-    # 卡上无 conf 但有 score 时补算（与 classic 一致）
+    # 卡上无 conf 但有 score 时补算
     if conf is None and c.get("score") is not None:
-        from trader_shared.fusion_core import _score_to_confidence
-
-        conf_f = _score_to_confidence(c.get("score"))
+        conf_f = _momentum_score_to_confidence(c.get("score"))
     reason = str(c.get("reason") or c.get("summary_line") or "动量中性")
     return {
         "direction": d,

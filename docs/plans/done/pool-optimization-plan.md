@@ -1,6 +1,7 @@
 # Pool + T0 输出优化方案
 
-> 创建日期：2026-06-25 | 改造范围：`final_pool.py` / `pool_briefing.py` / `t0_core.py`
+> **已归档（2026-07-29）**：路径过时。选股池实现在 `pool_cmds/`；T0 引擎在 `trader_shared/t0_*.py`。勿按本文 `final_pool.py` 行号施工。  
+> 创建日期：2026-06-25 | 原改造范围：`final_pool.py` / `pool_briefing.py` / `t0_core.py`
 
 ---
 

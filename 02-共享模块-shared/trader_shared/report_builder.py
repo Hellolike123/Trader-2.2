@@ -102,46 +102,48 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     bars = list(snapshot.daily_bars)  # copy to avoid mutating snapshot
 
     # === 上下文：信号/插件/区间套/资金环境（report_pipeline.run_analysis_context_stage）===
-    from trader_shared.report_pipeline import run_analysis_context_stage
+    from trader_shared.report_pipeline import StageContext, run_analysis_context_stage
 
-    _ctx = run_analysis_context_stage(
-        target=target,
-        snapshot=snapshot,
-        bars=bars,
-        quote=quote,
-        sec=sec,
-        provider=provider,
-        mark=_mark,
+    _ctx = StageContext.from_mapping(
+        run_analysis_context_stage(
+            target=target,
+            snapshot=snapshot,
+            bars=bars,
+            quote=quote,
+            sec=sec,
+            provider=provider,
+            mark=_mark,
+        )
     )
-    risk_flags = _ctx["risk_flags"]
-    _signal_cost_price = _ctx["signal_cost_price"]
-    _signal_win_rate = _ctx["signal_win_rate"]
-    live_bar = _ctx["live_bar"]
-    intraday_as_of = _ctx["intraday_as_of"]
-    bars_5m = _ctx["bars_5m"]
-    weekly_bars = _ctx["weekly_bars"]
-    monthly_bars = _ctx["monthly_bars"]
-    atr14_val = _ctx["atr14_val"]
-    atr_ratio_val = _ctx["atr_ratio_val"]
-    atr_level = _ctx["atr_level"]
-    atr_cap = _ctx["atr_cap"]
-    current = _ctx["current"]
-    recent20 = _ctx["recent20"]
-    change_pct_val = _ctx["change_pct_val"]
-    _st = _ctx["st"]
-    _st_dir = _ctx["st_dir"]
-    chan_result = _ctx["chan_result"]
-    chan_mid_result = _ctx["chan_mid_result"]
-    wyck_result = _ctx["wyck_result"]
-    wyck_mid_result = _ctx["wyck_mid_result"]
-    momentum_result = _ctx["momentum_result"]
-    _vwap_res = _ctx["vwap_res"]
-    main_force_env = _ctx["main_force_env"]
-    mf_result = _ctx["mf_result"]
-    fund_flow_features = _ctx["fund_flow_features"]
-    big_order_result = _ctx["big_order_result"]
-    env = _ctx["env"]
-    _sector_data = _ctx["sector_data"]
+    risk_flags = _ctx.risk_flags
+    _signal_cost_price = _ctx.signal_cost_price
+    _signal_win_rate = _ctx.signal_win_rate
+    live_bar = _ctx.live_bar
+    intraday_as_of = _ctx.intraday_as_of
+    bars_5m = _ctx.bars_5m
+    weekly_bars = _ctx.weekly_bars
+    monthly_bars = _ctx.monthly_bars
+    atr14_val = _ctx.atr14_val
+    atr_ratio_val = _ctx.atr_ratio_val
+    atr_level = _ctx.atr_level
+    atr_cap = _ctx.atr_cap
+    current = _ctx.current
+    recent20 = _ctx.recent20
+    change_pct_val = _ctx.change_pct_val
+    _st = _ctx.st
+    _st_dir = _ctx.st_dir
+    chan_result = _ctx.chan_result
+    chan_mid_result = _ctx.chan_mid_result
+    wyck_result = _ctx.wyck_result
+    wyck_mid_result = _ctx.wyck_mid_result
+    momentum_result = _ctx.momentum_result
+    _vwap_res = _ctx.vwap_res
+    main_force_env = _ctx.main_force_env
+    mf_result = _ctx.mf_result
+    fund_flow_features = _ctx.fund_flow_features
+    big_order_result = _ctx.big_order_result
+    env = _ctx.env
+    _sector_data = _ctx.sector_data
 
     # === 融合层（阶段函数：report_pipeline.run_fusion_stage）===
     from trader_shared.report_pipeline import run_fusion_stage
@@ -216,44 +218,46 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     position_cap = min(10, atr_cap) if scene in buy_scenes else 10
 
     # === 筹码/EXPMA/共振（阶段函数：report_pipeline.run_chip_enrichment_stage）===
-    from trader_shared.report_pipeline import run_chip_enrichment_stage
+    from trader_shared.report_pipeline import StageContext, run_chip_enrichment_stage
 
-    _enrich = run_chip_enrichment_stage(
-        bars=bars,
-        bars_5m=bars_5m,
-        current=current,
-        target=target,
-        quote=quote,
-        ts_code=sec.ts_code,
-        support=support,
-        resistance=resistance,
-        weekly_bars=weekly_bars,
-        weekly_proxy_close=weekly_proxy_close,
-        mf_result=mf_result,
-        big_order_result=big_order_result,
-        levels=levels,
-        report_fusion=report_fusion,
-        provider=provider,
-        snapshot=snapshot,
-        mark=_mark,
+    _enrich = StageContext.from_mapping(
+        run_chip_enrichment_stage(
+            bars=bars,
+            bars_5m=bars_5m,
+            current=current,
+            target=target,
+            quote=quote,
+            ts_code=sec.ts_code,
+            support=support,
+            resistance=resistance,
+            weekly_bars=weekly_bars,
+            weekly_proxy_close=weekly_proxy_close,
+            mf_result=mf_result,
+            big_order_result=big_order_result,
+            levels=levels,
+            report_fusion=report_fusion,
+            provider=provider,
+            snapshot=snapshot,
+            mark=_mark,
+        )
     )
-    chip = _enrich["chip"]
-    chip_peaks = _enrich["chip_peaks"]
-    chip_migration = _enrich["chip_migration"]
-    chip_support = _enrich["chip_support"]
-    chip_resistance = _enrich["chip_resistance"]
-    chip_support_lower = _enrich["chip_support_lower"]
-    chip_support_upper = _enrich["chip_support_upper"]
-    chip_resistance_lower = _enrich["chip_resistance_lower"]
-    chip_resistance_upper = _enrich["chip_resistance_upper"]
-    main_force_score_result = _enrich["main_force_score_result"]
-    expma10_val = _enrich["expma10_val"]
-    expma12_val = _enrich["expma12_val"]
-    expma20_val = _enrich["expma20_val"]
-    expma50_val = _enrich["expma50_val"]
-    expma_trend = _enrich["expma_trend"]
-    expma_status_result = _enrich["expma_status_result"]
-    resonance_result = _enrich["resonance_result"]
+    chip = _enrich.chip
+    chip_peaks = _enrich.chip_peaks
+    chip_migration = _enrich.chip_migration
+    chip_support = _enrich.chip_support
+    chip_resistance = _enrich.chip_resistance
+    chip_support_lower = _enrich.chip_support_lower
+    chip_support_upper = _enrich.chip_support_upper
+    chip_resistance_lower = _enrich.chip_resistance_lower
+    chip_resistance_upper = _enrich.chip_resistance_upper
+    main_force_score_result = _enrich.main_force_score_result
+    expma10_val = _enrich.expma10_val
+    expma12_val = _enrich.expma12_val
+    expma20_val = _enrich.expma20_val
+    expma50_val = _enrich.expma50_val
+    expma_trend = _enrich.expma_trend
+    expma_status_result = _enrich.expma_status_result
+    resonance_result = _enrich.resonance_result
 
     # === 四阶段定位（阶段函数：report_pipeline.run_stage_positioning_stage）===
     from trader_shared.report_pipeline import (
@@ -261,31 +265,33 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         run_stage_positioning_stage,
     )
 
-    _stage_pack = run_stage_positioning_stage(
-        bars=bars,
-        current=current,
-        quote=quote,
-        levels=levels,
-        atr14_val=atr14_val,
-        chip_migration=chip_migration,
-        chip_support_lower=chip_support_lower,
-        chip_resistance_lower=chip_resistance_lower,
-        chip_resistance_upper=chip_resistance_upper,
-        report_fusion=report_fusion,
-        wyck_result=wyck_result,
-        mf_result=mf_result,
-        chan_result=chan_result,
-        ts_code=sec.ts_code,
-        extend_sector=snapshot.extend_sector,
-        pre_stage=_pre_stage,
-        support=support,
-        confirm=confirm,
+    _stage_pack = StageContext.from_mapping(
+        run_stage_positioning_stage(
+            bars=bars,
+            current=current,
+            quote=quote,
+            levels=levels,
+            atr14_val=atr14_val,
+            chip_migration=chip_migration,
+            chip_support_lower=chip_support_lower,
+            chip_resistance_lower=chip_resistance_lower,
+            chip_resistance_upper=chip_resistance_upper,
+            report_fusion=report_fusion,
+            wyck_result=wyck_result,
+            mf_result=mf_result,
+            chan_result=chan_result,
+            ts_code=sec.ts_code,
+            extend_sector=snapshot.extend_sector,
+            pre_stage=_pre_stage,
+            support=support,
+            confirm=confirm,
+        )
     )
-    stage_result = _stage_pack["stage_result"]
-    ma250 = _stage_pack["ma250"]
-    bars_date = _stage_pack["bars_date"]
-    upward_momentum = _stage_pack["upward_momentum"]
-    take = _stage_pack["take"]
+    stage_result = _stage_pack.stage_result
+    ma250 = _stage_pack.ma250
+    bars_date = _stage_pack.bars_date
+    upward_momentum = _stage_pack.upward_momentum
+    take = _stage_pack.take
 
     report = assemble_base_report(
         intraday_as_of=intraday_as_of,

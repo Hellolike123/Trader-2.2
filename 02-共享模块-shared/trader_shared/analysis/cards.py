@@ -248,10 +248,10 @@ def build_momentum_card(
         inner = m
         payload = {"momentum": m}
 
-    # 优先复用 classic 映射（字符串方向 + score U 型置信；实现已隔离）
-    from trader_shared.fusion_classic_mappers import _momentum_to_signal
+    # cards 生产路径自有映射（不再依赖 classic 实现）
+    from trader_shared.analysis.fusion_card_signals import momentum_raw_to_fusion_signal
 
-    sig = _momentum_to_signal(payload)
+    sig = momentum_raw_to_fusion_signal(payload)
     direction = int(sig.get("direction") or 0)
     conf = float(sig.get("confidence") or 0.0)
 

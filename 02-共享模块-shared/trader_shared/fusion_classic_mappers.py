@@ -248,49 +248,14 @@ def _chan_to_signal(chan_result: dict) -> dict:
 
 
 def _momentum_to_signal(momentum_result: dict) -> dict:
-    """将 assess_momentum() 的原始输出映射为统一信号。
+    """compare / 旧测试兼容：委托 cards 侧 ``momentum_raw_to_fusion_signal``。"""
+    from trader_shared.analysis.fusion_card_signals import momentum_raw_to_fusion_signal
 
-    动量输出结构 (momentum_strategy → run_all → levels["momentum"]):
-        {"momentum": {"score": 72, "direction": "bullish", "signals": [...]}}
-
-    综合 direction (bullish/neutral/bearish) + score (0-100) → 统一信号。
-    direction 决定方向，score 决定置信度幅度。
-    """
-    mom = momentum_result.get("momentum", {}) if isinstance(momentum_result, dict) else {}
-    if not isinstance(mom, dict):
-        mom = {}
-
-    score = mom.get("score")
-    direction_str = mom.get("direction", "neutral")
-    signals_list = mom.get("signals", [])
-
-    # direction 字符串决定方向 (保持原始判断)
-    dir_map = {"bullish": 1, "bearish": -1, "neutral": 0, "insufficient": 0}
-    direction = dir_map.get(direction_str, 0)
-
-    # score 决定置信度；数据不足 (insufficient / score=None) 时置信度强制为 0，
-    # 不把"不知道"当成"中性 50 分"去加权（消除 score=50/neutral 双关）。
-    if direction_str == "insufficient" or score is None:
-        confidence = 0.0
-    else:
-        confidence = _score_to_confidence(score)
-
-    # direction 和 score 冲突时降低置信度
-    # bullish 但分数偏低 / bearish 但分数偏高 → 有方向感但量化不支持 → 保守
-    if direction > 0 and score is not None and score <= 45:
-        confidence = min(confidence, 0.4)
-    if direction < 0 and score is not None and score >= 55:
-        confidence = min(confidence, 0.4)
-
-    _def_reason = "动量数据不足" if direction_str == "insufficient" else "动量中性"
-    reason = "、".join(signals_list[-2:]) if signals_list else _def_reason
-    return {
-        "direction": direction,
-        "confidence": confidence,
-        "reason": reason,
-        "raw_key": "momentum",
-        "strength": mom.get("strength", ""),
-    }
+    out = momentum_raw_to_fusion_signal(momentum_result if isinstance(momentum_result, dict) else {})
+    # classic 调用方不要求 from_card 标记
+    out = dict(out)
+    out.pop("from_card", None)
+    return out
 
 
 

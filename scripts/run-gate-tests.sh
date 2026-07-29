@@ -60,6 +60,10 @@ TESTS=(
   "02-共享模块-shared/tests/test_arch_boundaries.py"
   "02-共享模块-shared/tests/test_output_template_contract.py"
   "02-共享模块-shared/tests/test_production_path_defaults.py"
+  # 架构瘦身后缝：pipeline / attach / t0 引擎（纯离线）
+  "02-共享模块-shared/tests/test_report_pipeline.py"
+  "02-共享模块-shared/tests/test_attach_offline.py"
+  "02-共享模块-shared/tests/test_t0_engine_offline.py"
 )
 
 exec "$PYTHON" -m pytest -q -p no:cacheprovider "${TESTS[@]}"

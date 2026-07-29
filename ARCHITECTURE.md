@@ -1,7 +1,8 @@
 # ARCHITECTURE.md — Trader3.0 系统架构
 
-> **最后更新**：2026-07-19 | **基于**：`trader_shared/` 代码 + 目标架构法源  
-> **产品方向法源**：`docs/designs/resonance-and-orchestration.md`（五层+编排、共振、多场景）
+> **最后更新**：2026-07-29 | **基于**：`trader_shared/` 代码 + 目标架构法源  
+> **产品方向法源**：`docs/designs/resonance-and-orchestration.md`  
+> **改代码地图**：[`AGENTS.md`](AGENTS.md)「改代码去哪」（优先于本文行数表）
 
 ---
 
@@ -13,18 +14,19 @@ Trader3.0 采用**分层 + 编排总管 + 插件化**设计。
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ 入口层      │ final_report / final_pool / t0 / portfolio
+│ 入口层      │ final_report / final_pool(薄) / t0 / review
 ├──────────────────────────────────────────────────────────┤
-│ 编排层      │ build_report · t0 plan · pool 批量（只调度）
+│ 编排层      │ report_builder · report_pipeline/*_stage
+│             │ pool_cmds · t0_run/monitor（引擎在 shared）
 ├──────────────────────────────────────────────────────────┤
 │ 分析层      │ cores/plugins → analysis_cards
 │ 共振/策略   │ resonance · strategy packs · 六闸 match
 │ 决策/纪律   │ mistery_gate / chan_discipline（只收紧）
-│ （过渡）融合 │ fusion_core 三席 — 目标降为仪表
+│ Fusion      │ 生产 = cards；classic 仅对照（deprecated）
 ├──────────────────────────────────────────────────────────┤
-│ 数据层      │ data_provider → light_data / cache / tushare
+│ 数据层      │ market_types SSOT → data_provider / light_data
 ├──────────────────────────────────────────────────────────┤
-│ 展示层      │ report_core / T0 卡 / 池面板（纯展示）
+│ 展示层      │ report_renderer/short_midline · T0 结构卡 · 池面板
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -32,7 +34,8 @@ Trader3.0 采用**分层 + 编排总管 + 插件化**设计。
 - ADR-001: trader_shared 收编为真 Python 库（消除向上依赖）
 - ADR-002: build_report 统一经 PluginRegistry 路由
 - ADR-003: 分析逻辑与 CLI 分离（run_analysis.py → report_builder.py）
-- ADR-003b: 领域层与展示层分离（report_builder vs report_presentation）
+- ADR-003b: 领域层与展示层分离（report_builder vs report_renderer）
+- 2026-07: `report_pipeline/` 分包；t0/review 引擎下沉；`pool_cmds/` 拆分
 
 ---
 
@@ -93,15 +96,18 @@ Trader3.0 采用**分层 + 编排总管 + 插件化**设计。
 | `fusion_regime.py` | ~220 | Regime 权重（yaml + 兜底）+ score_to_action()；很差不字面「暂不碰」 |
 | `bayesian_fusion.py` | 230 | 贝叶斯融合（可选，BAYESIAN_FUSION=true 激活） |
 
-### 2.4 报告系统层（5 文件 + 子包）
+### 2.4 报告系统层（编排 + pipeline + 渲染）
 
-| 模块 | 行数 | 角色 |
-|------|------|------|
-| `report_builder.py` | ~1800+ | build_report() — 编排 50+ 子模块分析 |
-| `report_core.py` | ~1300+ | render_short_midline() + render_single_legacy() |
-| `report_presentation.py` | 1304 | render_markdown() — 纯展示层 |
-| `conclusion_block.py` | ~700 | 中短线看法/出手；`_build_wave_label`（笔/段标签契约） |
-| `main_force_output.py` | 233 | 主力资金输出格式化 |
+| 模块 | 角色 |
+|------|------|
+| `report_builder.py` | `build_report()` 只排队；用 `StageContext` 接阶段结果 |
+| `report_pipeline/` | `*_stage.py` + `attach_*.py`（短中线/纪律/决策挂接） |
+| `report_core.py` | 渲染入口；默认委托 `report_renderer/short_midline.py` |
+| `report_renderer/short_midline.py` | **短中线双轨文案真相**（改输出先改这里） |
+| `report_presentation.py` | 兼容/辅助展示（非主改路径） |
+| `conclusion_block.py` | 中短线看法/出手；`_build_wave_label` |
+| `market_types.py` | `Security` / `MarketSnapshot` SSOT |
+| `main_force_output.py` | 主力资金输出格式化 |
 
 ### 2.5 其他重要模块
 
@@ -136,17 +142,17 @@ Trader3.0 采用**分层 + 编排总管 + 插件化**设计。
 ```
 trader_shared/__init__.py (公开 API)
   ├── report_builder.py
-  │   ├── data_provider.py → light_data / cache_utils / tushare_client
-  │   ├── plugin_registry.py → plugins/ (chan/momentum/wyckoff/supertrend/vwap)
-  │   ├── fusion_core.py → vpf_core / volume_price / bayesian_fusion
-  │   ├── structure_core.py / chip_core.py / stage_positioning.py
-  │   ├── key_prices.py / mid_key_prices.py / midline_structure.py
-  │   ├── mistery_gate.py / chan_discipline.py
-  │   ├── conclusion_block.py
-  │   └── multi_timeframe_resonance.py
+  │   ├── report_pipeline/ (context/fusion/structure/chip/assemble + attach_*)
+  │   ├── data_provider.py → market_types + light_data / cache / tushare
+  │   ├── plugin_registry.py → plugins/
+  │   ├── fusion_core.py (cards) + analysis/fusion_card_signals.py
+  │   ├── structure_core / chip_core / stage_positioning
+  │   ├── key_prices / mid_key_prices / midline_structure
+  │   └── mistery_gate / chan_discipline / conclusion_block
   │
-  ├── report_core.py (render_short_midline / render_single_legacy)
-  └── report_presentation.py (render_markdown)
+  ├── report_core.py → report_renderer/short_midline.py
+  ├── t0_*.py / review_*.py / portfolio_*.py（skill 包内为 shim）
+  └── 选股池实现在 packages/trader/scripts/pool_cmds/
 ```
 
 ### 3.2 接口抽象与实现

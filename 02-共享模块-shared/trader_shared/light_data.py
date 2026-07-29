@@ -20,6 +20,7 @@ from urllib.request import Request, urlopen
 
 from trader_shared._logging import get_logger
 from trader_shared.cache_utils import get_shared_build_pool
+from trader_shared.market_types import DataStatus, MarketSnapshot, Security
 
 _logger = get_logger(__name__)
 
@@ -474,8 +475,6 @@ def _fetch_ticks_tdx3(sec: Security, count: int = 500) -> list[dict[str, Any]] |
         })
     return norm_ticks
 
-DataStatus = Literal["full", "partial", "degraded", "failed"]
-
 _MOOTDX_CLIENT: Quotes | None = None
 
 
@@ -762,26 +761,7 @@ def _extract_order_book(q: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-@dataclass(frozen=True)
-class MarketSnapshot:
-    security: "Security"
-    quote: dict[str, Any]
-    daily_bars: list[dict[str, Any]]
-    bars_5m: list[dict[str, Any]] = field(default_factory=list)
-    weekly_bars: list[dict[str, Any]] = field(default_factory=list)
-    monthly_bars: list[dict[str, Any]] = field(default_factory=list)
-    order_book: dict[str, Any] | None = None
-    tick_data: list[dict[str, Any]] = field(default_factory=list)
-    data_status: DataStatus = "full"
-    data_freshness: str = "live"
-    fund_flow: dict[str, Any] = field(default_factory=dict)
-    missing_sources: list[str] = field(default_factory=list)
-    source_errors: dict[str, str] = field(default_factory=dict)
-    fetched_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
-
-    @property
-    def is_usable(self) -> bool:
-        return bool(self.quote and self.daily_bars)
+# MarketSnapshot → market_types
 
 
 def is_trading_time() -> bool:
@@ -841,19 +821,7 @@ def save_realtime_cache(key: str, data: Any) -> None:
     _realtime_cache[key] = (data, time.time())
 
 
-@dataclass(frozen=True)
-class Security:
-    code: str
-    market: str
-    name: str
-
-    @property
-    def ts_code(self) -> str:
-        return f"{self.code}.{self.market}"
-
-    @property
-    def qq_symbol(self) -> str:
-        return f"{self.market.lower()}{self.code}"
+# Security → market_types
 
 
 class HttpClient:
@@ -927,15 +895,10 @@ def retry(fn, url: str = ""):
 
 
 def to_float(value: Any) -> float | None:
-    if value in (None, "", "-", "--", "null", "None"):
-        return None
-    try:
-        number = float(str(value).replace(",", ""))
-    except Exception:
-        return None
-    if math.isnan(number) or math.isinf(number):
-        return None
-    return number
+    """兼容入口；实现见 ``trader_shared.safe_cast.to_float``。"""
+    from trader_shared.safe_cast import to_float as _to_float
+
+    return _to_float(value)
 
 
 def resolve_security(target: str) -> Security:
