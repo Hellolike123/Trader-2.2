@@ -166,4 +166,106 @@ def score_for(status: str, current: float, defense: float, confirm: float, rr: f
 
 
 def sort_candidates(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return sorted(items, key=lambda item: (STATUS_PRIORITY.get(str(item.get("status")), 0), float(item.get("score") or -999)), reverse=True)
+    """排序：结构 status → 共振离散档 → score（不作厚 fusion 加权）。"""
+    from trader_shared.resonance import extract_resonance_grade, resonance_pool_rank
+
+    return sorted(
+        items,
+        key=lambda item: (
+            STATUS_PRIORITY.get(str(item.get("status")), 0),
+            resonance_pool_rank(extract_resonance_grade(item)),
+            float(item.get("score") or -999),
+        ),
+        reverse=True,
+    )
+
+
+def enrich_portfolio_resonance(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """从选股池读共振档/决策提示，离散收紧仓位权重（无网、不重跑 build_report）。
+
+    - conflict / momentum_veto：权重 ×0.5，激进 status 降为防守观察
+    - aligned：权重 ×1.15
+    - 其余：×1.0
+    """
+    from trader_shared.resonance import (
+        demote_execution_for_resonance,
+        extract_resonance_grade,
+        resonance_grade_label,
+    )
+
+    idx = _pool_resonance_index()
+    out: list[dict[str, Any]] = []
+    for item in items:
+        it = dict(item)
+        if not it.get("ok"):
+            out.append(it)
+            continue
+        meta = _match_pool_meta(it, idx)
+        grade = str((meta or {}).get("resonance_grade") or it.get("resonance_grade") or "empty")
+        if meta and meta.get("resonance_grade"):
+            grade = str(meta["resonance_grade"])
+        it["resonance_grade"] = grade
+        if meta and meta.get("resonance_summary"):
+            it["resonance_summary"] = meta["resonance_summary"]
+        # decision_view 若池内将来有字段也可读；当前仅用共振档
+        if demote_execution_for_resonance(grade):
+            it["resonance_weight"] = 0.5
+            st = str(it.get("status") or "")
+            if st in {"低吸观察", "等转强", "优先候选"}:
+                it["status"] = "防守观察"
+            it["resonance_note"] = f"共振{resonance_grade_label(grade)}，仓位降权"
+        elif grade == "aligned":
+            it["resonance_weight"] = 1.15
+            it["resonance_note"] = "共振齐，略提权"
+        else:
+            it["resonance_weight"] = 1.0
+        # 兼容 extract_resonance_grade(item)
+        it.setdefault("resonance", {"grade": grade})
+        out.append(it)
+    return out
+
+
+def _pool_resonance_index() -> dict[str, dict[str, Any]]:
+    """~/.trader/pool.json → key(name/symbol/target) → meta。失败返回空。"""
+    try:
+        from pathlib import Path
+        import json
+        import os
+
+        from trader_shared.resonance import extract_resonance_grade
+
+        path = Path(os.path.expanduser("~/.trader/pool.json"))
+        if not path.exists():
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+        items = data.get("items") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            return {}
+        idx: dict[str, dict[str, Any]] = {}
+        for raw in items:
+            if not isinstance(raw, dict):
+                continue
+            meta = {
+                "resonance_grade": raw.get("resonance_grade") or extract_resonance_grade(raw),
+                "resonance_summary": raw.get("resonance_summary") or "",
+            }
+            for k in ("name", "symbol", "target"):
+                v = str(raw.get(k) or "").strip()
+                if v:
+                    idx[v] = meta
+                    idx[v.upper()] = meta
+        return idx
+    except Exception:
+        return {}
+
+
+def _match_pool_meta(item: dict[str, Any], idx: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    for k in ("name", "symbol", "target"):
+        v = str(item.get(k) or "").strip()
+        if not v:
+            continue
+        if v in idx:
+            return idx[v]
+        if v.upper() in idx:
+            return idx[v.upper()]
+    return None

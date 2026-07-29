@@ -112,10 +112,10 @@ CLI / Skill（trader · t0 · review · portfolio …）
 | 场景 | 入口（参考） | 编排角色 | 备注 |
 |------|--------------|----------|------|
 | 单票中短线 | `final_report` → `build_report` | 主路径；阶段 1 已写 resonance | 报告版式 TBD |
-| **T0 交易卡片** | `01-功能包-packages/t0/` | 盘中：quote/分钟 + 关键价/纪律 | 有底仓执行 ≠ 新开试探；可另 scene 或只消费短线闸+纪律 |
-| **选股池** | `final_pool`、`~/.trader/pool.json` | 多票批量分析 → rank/plan | ✅ 共振档离散：入池冲突/拆台降观察；`sort_items_unified` 次键 `resonance_pool_rank`；rank/plan 展示档位 |
+| **T0 交易卡片** | `01-功能包-packages/t0/` | 盘中：quote/分钟 + 关键价/纪律 | ✅ 禁止 `attach_resonance`/`pullback_probe`；plan.`resonance`=`t0_structure_score_v1`（非岗位共振） |
+| **选股池** | `final_pool`、`~/.trader/pool.json` | 多票批量分析 → rank/plan | ✅ 共振档离散；refresh 写回降级；rank/plan 展示档位 |
 | **候选池** | 自建名单 → 同一分析底座 | 批量筛选后再入正式池 | 与正式池同构，不同名单源 |
-| **仓位轮动** | portfolio、`stage_positioning` | 组合 cap、T+1、相关性 | 读多票阶段/纪律/将来 decision_view |
+| **仓位轮动** | portfolio、`stage_positioning` | 组合 cap、T+1、相关性 | ✅ 读池内 `resonance_grade` 离散提权/降权；排序次键共振档 |
 
 持久化参考：`pool.json`、`signals.jsonl`、T0 state 等见 `AGENTS.md`。
 

@@ -23,7 +23,11 @@ except ImportError:
     else:
         raise
 
-from trader_shared.portfolio_core import analyze_target, sort_candidates
+from trader_shared.portfolio_core import (
+    analyze_target,
+    enrich_portfolio_resonance,
+    sort_candidates,
+)
 from trader_shared.config import DEFAULT_CASH_FLOOR, DEFAULT_MAIN_CAP, DEFAULT_MAX_TOTAL, LOOKBACK_DAYS
 from trader_shared.data_provider import get_provider
 from trader_shared.signal_contract import assert_valid_signal
@@ -267,9 +271,10 @@ def allocate_weights(
     for item, score in zip(tradable, scores):
         raw_w = round(score / total_score * alloc_pool) if total_score > 0 else 0
         raw_w = max(raw_w, 0)
-        # 筹码降权（套牢盘越重，仓位越低）
+        # 筹码降权 × 共振离散提权/降权（conflict/拆台 0.5，aligned 1.15）
         cw = float(item.get("chip_weight") or 1.0)
-        weight = round(raw_w * cw)
+        rw = float(item.get("resonance_weight") or 1.0)
+        weight = round(raw_w * cw * rw)
         # [P1 Fix] 负分标的（weight=0）仍给予 1% 最低仓位，避免完全忽略
         if score < 1 and weight == 0:
             weight = 1
@@ -853,6 +858,8 @@ def build_portfolio(
                 if h.get("cost") is not None:
                     item["cost"] = float(h["cost"])
                 item["shares"] = int(h.get("shares", 0))
+    # 读选股池共振档：离散提权/降权（不重跑 build_report、不加厚 fusion）
+    items = enrich_portfolio_resonance(items)
     sorted_items = sort_candidates(items)
 
     market_level_raw = get_market_level() or ""

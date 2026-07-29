@@ -448,10 +448,13 @@ def build_daily_ruling(
     theory_status: str = "",
     chase_ok: bool = False,
     gate_action: str = "",
+    decision_view: dict[str, Any] | None = None,
+    resonance: dict[str, Any] | None = None,
 ) -> str:
     """日线裁定人话：偏多/偏空/中性 + 宜追|不宜追高|观望。
 
-    主报告不展示 raw weighted_score。
+    出手姿态优先听纪律 / decision_view / 共振档；fusion 分仅作偏多偏空仪表，
+    不得单独把 stance 推成「宜追」。
     """
     fusion = fusion or {}
     score = fusion.get("weighted_score")
@@ -462,6 +465,9 @@ def build_daily_ruling(
 
     action = str(fusion.get("action") or "")
     sc = str(scene or theory_status or "")
+    dv = decision_view if isinstance(decision_view, dict) else {}
+    res = resonance if isinstance(resonance, dict) else {}
+    grade = str(res.get("grade") or "")
 
     if score_f >= 0.15:
         bias = "偏多"
@@ -471,9 +477,13 @@ def build_daily_ruling(
         bias = "中性"
 
     reduce_like = any(k in action for k in ("减仓", "空仓", "止损", "观望"))
-    if gate_action in ("不做", "观望", "减仓", "止损离场") or not chase_ok:
+    disc_block = gate_action in ("不做", "观望", "减仓", "止损离场", "不新开")
+    dv_block = bool(dv) and dv.get("allow_new_recommend") is False
+    res_block = grade in ("conflict", "momentum_veto")
+
+    if disc_block or not chase_ok or dv_block or res_block:
         stance = "不宜追高"
-    elif bias == "偏多" and chase_ok:
+    elif bias == "偏多" and chase_ok and dv.get("allow_new_recommend") is True:
         stance = "宜追" if "突破" in sc else "观望"
     else:
         stance = "观望"
@@ -532,6 +542,8 @@ def build_conclusion_block(
         theory_status=theory_status,
         chase_ok=chase_ok,
         gate_action=gate_action,
+        decision_view=_extra.get("decision_view") if isinstance(_extra.get("decision_view"), dict) else None,
+        resonance=_extra.get("resonance") if isinstance(_extra.get("resonance"), dict) else None,
     )
 
     mid = _assert_no_stage_words(

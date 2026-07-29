@@ -400,6 +400,38 @@ def attach_short_midline_and_decision(
         try:
             apply_buy_point_lifecycle(report, mark=_mark)
             attach_analysis_decision_stack(report, mark=_mark)
+            # 日线裁定重算：出手听 decision_view/纪律/共振，fusion 仅偏多偏空仪表
+            _dv = report.get("decision_view") if isinstance(report.get("decision_view"), dict) else {}
+            _res = report.get("resonance") if isinstance(report.get("resonance"), dict) else {}
+            _disc = report.get("discipline") if isinstance(report.get("discipline"), dict) else {}
+            daily_ruling = build_daily_ruling(
+                report.get("fusion") if isinstance(report.get("fusion"), dict) else report_fusion,
+                scene=str(report.get("scene") or scene),
+                theory_status=theory_status,
+                chase_ok=bool(key_prices.get("chase_ok")),
+                gate_action=str(_disc.get("action") or _disc_action or ""),
+                decision_view=_dv,
+                resonance=_res,
+            )
+            report["daily_ruling"] = daily_ruling
+            _conc = report.get("conclusion") if isinstance(report.get("conclusion"), dict) else None
+            if _conc is not None:
+                _conc["daily_ruling"] = daily_ruling
+            try:
+                from trader_shared.stage_positioning import action_for_holding_state
+
+                _hint_action = str(
+                    _disc.get("action")
+                    or (report.get("fusion") or {}).get("action")
+                    or ""
+                ).strip()
+                _hs = action_for_holding_state(_hint_action, bool(report.get("has_position")))
+                report["fusion_holding_hint"] = _hs.get(
+                    "holding_hint", report.get("fusion_holding_hint", "待定")
+                )
+            except Exception:
+                pass
+            _mark("daily_ruling_dv")
         except Exception as _pipe_exc:
             _logger.debug("report_pipeline skip: %s", _pipe_exc)
             report.setdefault("analysis_cards", {})

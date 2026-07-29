@@ -33,7 +33,10 @@
 | Classic 映射（对照） | `fusion_classic_mappers.py`（动量已委托 cards） | 在 cards 路径复制一份映射 |
 | T0 盯盘缓存 | `t0_monitor._cached_build_plan`（`T0_PLAN_TTL_SEC`） | 每 tick 无脑全量 `build_plan` |
 | 选股池逻辑 | `01-功能包-packages/trader/scripts/pool_cmds/*` | 把逻辑写回 `final_pool.py` |
-| 选股池共振档 | `resonance.py`（`resonance_pool_rank` / `apply_resonance_admission`）+ `pool_cmds/scoring.py` | 用 fusion 分当池排序王；冲突票仍标「执行」 |
+| 选股池共振档 | `resonance.py`（`resonance_pool_rank` / `apply_resonance_admission`）+ `pool_cmds/scoring.py`；refresh 写回 | 用 fusion 分当池排序王；冲突票仍标「执行」 |
+| 仓位轮动共振 | `portfolio_core.enrich_portfolio_resonance` | 在 portfolio 里重跑 build_report / 加厚 fusion |
+| T0 vs 岗位共振 | T0 `plan.resonance`=`t0_structure_score_v1`；报告共振才是 `pullback_probe` | 在 T0 调 `attach_resonance` |
+| 日线裁定出手 | `build_daily_ruling` + attach 后按 decision_view 重算 | 用 fusion.action 单独推「宜追」 |
 | T0 引擎 | `t0_core.py` / `t0_run.py` / `t0_monitor.py` / `t0_*.py` | 只改包内 shim 正文 |
 | 复盘 / 仓位 | `review_core.py` / `review_render.py` / `portfolio_*.py` | 在 skill 包复制实现 |
 | Skill 包内 `scripts/*.py` | identity shim（`sys.modules[__name__] = _impl`） | 复制一份完整引擎 |

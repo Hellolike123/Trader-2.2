@@ -65,6 +65,14 @@ CONTRACT_VERSION = "t0_price_point_v2"
 
 
 def build_plan(target: str) -> dict[str, Any]:
+    """组装 T0 结构参考卡。
+
+    产品边界（法源 resonance-and-orchestration）：
+    - 本路径只做盘中结构/关键价/纪律参考，**禁止**调用
+      ``trader_shared.resonance.attach_resonance`` / ``pullback_probe``。
+    - plan[\"resonance\"] 是 T0 引擎 VWAP/EMA 结构分（``t0_structure_score_v1``），
+      与单票报告岗位共振同名不同物；新开试探听报告 decision_view，不听本字段。
+    """
     from concurrent.futures import ThreadPoolExecutor
 
     provider = get_provider()
@@ -165,7 +173,10 @@ def build_plan(target: str) -> dict[str, Any]:
         "vwap": model.get("vwap"),
         "ict_signal": model.get("ict_signal") or {},
         "atr_info": model.get("atr_info") or {},
+        # T0 结构分（非 pullback 岗位共振）；保留 resonance 键兼容旧渲染
         "resonance": model.get("resonance") or {},
+        "resonance_schema": "t0_structure_score_v1",
+        "structure_ref": model.get("resonance") or {},
         "order_book": quote.get("order_book"),
         "data": report_data,
         "model": model,

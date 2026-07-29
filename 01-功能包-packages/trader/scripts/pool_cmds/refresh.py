@@ -89,6 +89,14 @@ def cmd_refresh(args: argparse.Namespace) -> int:
         all_items[idx] = new_record
         refreshed += 1
 
+    # 共振档落盘：冲突/拆台若仍标执行 → 收紧为观察（与 rank/plan 展示一致）
+    try:
+        from pool_cmds.scoring import _tighten_status_by_resonance
+
+        all_items = _tighten_status_by_resonance(all_items)
+    except Exception:
+        pass
+
     pool["items"] = all_items
     save_pool(pool)
 
