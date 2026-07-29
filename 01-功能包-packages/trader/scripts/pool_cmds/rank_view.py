@@ -45,6 +45,7 @@ def edge_reason(item: dict[str, Any], all_items: list[dict[str, Any]]) -> str:
 
 def render_rank(items: list[dict[str, Any]]) -> str:
     from trader_shared.candidate_core import atr_volatility_level
+    from trader_shared.resonance import extract_resonance_grade, resonance_grade_label
 
     items = _apply_signal_adjustments(items)
     sorted_items = sort_items_unified(items)
@@ -115,7 +116,8 @@ def render_rank(items: list[dict[str, Any]]) -> str:
         if buy_low > 0 and current_price_val > 0 and buy_low > current_price_val * 1.05:
             buy_text = f"买入区已过期（{buy_low:.2f}）"
 
-        lines.append(f"{medal}  {name}  {rs}  {current:.2f}  {atr_text}")
+        res_label = resonance_grade_label(extract_resonance_grade(item))
+        lines.append(f"{medal}  {name}  {rs}  {current:.2f}  {atr_text}  共振{res_label}")
         if reason_line:
             lines.append(f"    {reason_line}")
         cap_display = f"仓位 {final_cap}%"

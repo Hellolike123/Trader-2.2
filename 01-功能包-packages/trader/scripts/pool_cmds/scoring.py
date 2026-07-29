@@ -154,13 +154,23 @@ def _evaluate_admission(major_stage: str, total_score: int, current: float, conf
 
 
 def admission_for(report: dict[str, Any], scores: dict[str, int]) -> dict[str, str]:
-    """三关筛选入口（从 report/scores 提取参数后委托 _evaluate_admission）。"""
+    """三关筛选入口（从 report/scores 提取参数后委托 _evaluate_admission）。
+
+    共振档只做离散收紧：冲突 / 动能拆台不得入「执行」。
+    """
+    from trader_shared.resonance import apply_resonance_admission, extract_resonance_grade
+
     current = to_float(report.get("current")) or 0.0
     confirm = to_float(report.get("confirm")) or current
     stop = to_float(report.get("stop")) or current
     major_stage = str(report.get("major_stage") or "蓄势")
     total_score = scores["total_score"]
-    return _evaluate_admission(major_stage, total_score, current, confirm, stop)
+    out = _evaluate_admission(major_stage, total_score, current, confirm, stop)
+    grade = extract_resonance_grade(report)
+    status, reason = apply_resonance_admission(out["status"], out["reason"], grade)
+    out["status"] = status
+    out["reason"] = reason
+    return out
 
 
 def structure_summary(report: dict[str, Any]) -> str:
@@ -197,9 +207,17 @@ def record_from_report(target: str, report: dict[str, Any], offline: bool = Fals
     atr14 = to_float(report.get("atr14")) or 0.0
     atr_ratio = to_float(report.get("atr_ratio")) or 0.0
     atr_level, atr_cap = core.atr_volatility_level(atr_ratio) if atr14 > 0 and atr_ratio > 0 else ("", 0)
+    from trader_shared.resonance import (
+        extract_resonance_grade,
+        resonance_grade_label,
+    )
+
     major_stage = str(report.get("major_stage") or "蓄势")
     momentum = str(report.get("short_term_momentum") or "震荡")
     stage_status = str(report.get("stage_label") or f"{major_stage}期+{momentum}")
+    res = report.get("resonance") if isinstance(report.get("resonance"), dict) else {}
+    resonance_grade = extract_resonance_grade(report)
+    resonance_summary = str(res.get("summary_line") or "") or f"共振：{resonance_grade_label(resonance_grade)}"
     record = {
         "target": target,
         "name": report.get("name") or target,
@@ -229,6 +247,8 @@ def record_from_report(target: str, report: dict[str, Any], offline: bool = Fals
         "major_stage": major_stage,
         "momentum": momentum,
         "stage_status": stage_status,
+        "resonance_grade": resonance_grade,
+        "resonance_summary": resonance_summary,
         "risk_flags": report.get("risk_flags", []) or [],
         **scores,
     }
@@ -263,14 +283,39 @@ def _fusion_confidence_rank(value: Any) -> int:
 STAGE_STRENGTH = {"主升": 1.0, "拉升": 0.9, "蓄势偏强": 0.8, "蓄势": 0.5, "蓄势偏弱": 0.3, "派发": 0.2, "衰退": 0.0}
 
 
+def _tighten_status_by_resonance(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """展示/排序前：冲突·拆台票若仍标执行则收紧为观察（不写回 pool.json）。"""
+    from trader_shared.resonance import apply_resonance_admission, extract_resonance_grade
+
+    out: list[dict[str, Any]] = []
+    for item in items:
+        it = dict(item)
+        grade = extract_resonance_grade(it)
+        st, reason = apply_resonance_admission(
+            str(it.get("status") or ""),
+            str(it.get("admission_reason") or ""),
+            grade,
+        )
+        it["status"] = st
+        if reason:
+            it["admission_reason"] = reason
+        out.append(it)
+    return out
+
+
 def sort_items_unified(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """统一排序：plan 和 rank 共用同一个排序逻辑。
-    
+
     主键：status（执行 > 观察 > 淘汰）
-    次键：融合置信度 × 40% + 总分归一化 × 30% + 阶段强度 × 30%
+    次键：共振档（离散，aligned > 缺岗 > empty > 拆台/冲突）
+    再次：融合置信度 × 40% + 总分归一化 × 30% + 阶段强度 × 30%
     附加：盈亏比提权（评分 × (1 + min(盈亏比-1,2) × 0.1)）
     """
+    from trader_shared.resonance import extract_resonance_grade, resonance_pool_rank
+
     status_rank = {"执行": 3, "观察": 2, "淘汰": 1}
+    items = _tighten_status_by_resonance(items)
+
     def _composite(item: dict[str, Any]) -> float:
         conf = float(item.get("fusion_confidence") or 0)
         score = int(item.get("total_score") or 0)
@@ -283,11 +328,12 @@ def sort_items_unified(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             rr_bonus = min(rr - 1.0, 2.0) * 0.1
             composite *= (1.0 + rr_bonus)
         return composite
-    
+
     return sorted(
         items,
         key=lambda item: (
             status_rank.get(str(item.get("status")), 0),
+            resonance_pool_rank(extract_resonance_grade(item)),
             _composite(item),
         ),
         reverse=True,
@@ -343,4 +389,5 @@ __all__ = list(_pool_io.__all__) + [
     "to_float",
     "_evaluate_admission",
     "_fusion_confidence_rank",
+    "_tighten_status_by_resonance",
 ]

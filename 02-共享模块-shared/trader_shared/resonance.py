@@ -257,6 +257,72 @@ _GRADE_ZH = {
     "empty": "空窗/不足",
 }
 
+# 选股池离散排序档（越高越优先）；禁止当厚加权分王
+_GRADE_POOL_RANK = {
+    "aligned": 40,
+    "missing_chip": 25,
+    "missing_structure": 20,
+    "missing_background": 18,
+    "empty": 10,
+    "momentum_veto": 5,
+    "conflict": 0,
+}
+
+# 执行档硬降级：冲突 / 动能拆台不得占「执行」优先
+_GRADE_DEMOTE_EXECUTION = frozenset({"conflict", "momentum_veto"})
+
+
+def resonance_grade_label(grade: str | None) -> str:
+    g = str(grade or "empty").strip() or "empty"
+    if g.startswith("missing_") and g not in _GRADE_ZH:
+        return f"缺{g[8:]}" if len(g) > 8 else "缺岗"
+    return _GRADE_ZH.get(g, g or "空窗/不足")
+
+
+def resonance_pool_rank(grade: str | None) -> int:
+    """池排序用离散档；未知 / missing_* 回退到 empty 档附近。"""
+    g = str(grade or "empty").strip() or "empty"
+    if g in _GRADE_POOL_RANK:
+        return _GRADE_POOL_RANK[g]
+    if g.startswith("missing_"):
+        return _GRADE_POOL_RANK["missing_structure"]
+    return _GRADE_POOL_RANK["empty"]
+
+
+def demote_execution_for_resonance(grade: str | None) -> bool:
+    """True → 不得以「执行」优先（降为观察）。"""
+    return str(grade or "").strip() in _GRADE_DEMOTE_EXECUTION
+
+
+def extract_resonance_grade(report_or_item: dict[str, Any] | None) -> str:
+    """从 report 或 pool item 取 grade；缺省 empty。"""
+    if not isinstance(report_or_item, dict):
+        return "empty"
+    direct = report_or_item.get("resonance_grade")
+    if direct:
+        return str(direct).strip() or "empty"
+    res = report_or_item.get("resonance")
+    if isinstance(res, dict) and res.get("grade"):
+        return str(res.get("grade")).strip() or "empty"
+    return "empty"
+
+
+def apply_resonance_admission(
+    status: str,
+    reason: str,
+    grade: str | None,
+) -> tuple[str, str]:
+    """入池状态只收紧：执行 + 冲突/拆台 → 观察。"""
+    st = str(status or "")
+    why = str(reason or "")
+    if st == "执行" and demote_execution_for_resonance(grade):
+        label = resonance_grade_label(grade)
+        note = f"共振{label}，降为观察"
+        if note not in why:
+            why = f"{why}；{note}" if why else note
+        return "观察", why
+    return st, why
+
 
 def build_resonance(
     report: dict[str, Any] | None,

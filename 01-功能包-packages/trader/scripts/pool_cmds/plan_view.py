@@ -48,6 +48,8 @@ def position_for(item: dict[str, Any]) -> str:
 
 
 def render_plan(items: list[dict[str, Any]]) -> str:
+    from trader_shared.resonance import extract_resonance_grade, resonance_grade_label
+
     items = _apply_signal_adjustments(items)
     sorted_items = sort_items_unified(items)
     # 分离触发价过期的票（距现价 > 5%）
@@ -68,7 +70,8 @@ def render_plan(items: list[dict[str, Any]]) -> str:
         for i, item in enumerate(top_items[:3], 1):
             rank_emoji = ["🥇", "🥈", "🥉"][i - 1]
             stage_str = str(item.get("stage_status") or item.get("major_stage", "蓄势") + "+" + item.get("momentum", "震荡"))
-            lines.append(f"{rank_emoji} {item['name']}（{stage_str} {item['status']}）")
+            res_label = resonance_grade_label(extract_resonance_grade(item))
+            lines.append(f"{rank_emoji} {item['name']}（{stage_str} {item['status']}｜共振{res_label}）")
             lines.append(f"  {action_for(item)}")
             # R4: 计划页显示盈亏比
             rr_val = to_float(item.get("risk_reward")) or 0

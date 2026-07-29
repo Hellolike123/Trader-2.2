@@ -64,6 +64,7 @@ TESTS=(
   "02-共享模块-shared/tests/test_report_pipeline.py"
   "02-共享模块-shared/tests/test_attach_offline.py"
   "02-共享模块-shared/tests/test_t0_engine_offline.py"
+  "02-共享模块-shared/tests/test_pool_resonance_rank.py"
 )
 
 exec "$PYTHON" -m pytest -q -p no:cacheprovider "${TESTS[@]}"
