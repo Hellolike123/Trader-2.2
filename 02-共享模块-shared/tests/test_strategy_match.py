@@ -166,6 +166,60 @@ def test_s03_buy1_checklist_not_green_plan_only():
     assert ent["executable"] is False
 
 
+def test_l3_buy_point_failed_blocks_executable():
+    """L3：lifecycle failed → entry 不得 executable，reason=买点已失效。"""
+    r = match_strategies({
+        "current": 15,
+        "support": 14,
+        "has_position": False,
+        "allow_new_entry": True,  # 即使纪律未收紧，闸口仍拦
+        "checklist_all_green": True,
+        "chan_type_short": "一买",
+        "chan_type_raw": "一类买",
+        "regime": "正常",
+        "buy_point_lifecycle": {
+            "status": "failed",
+            "lid_price": 14.0,
+            "signal_id": "deadbeefdeadbeef",
+            "failed_date": "2026-07-28",
+            "display_line": "买点：已失效（盖 14.00）",
+        },
+    })
+    ent = r["gates"]["entry"]
+    assert ent["mode"] == "plan"
+    assert ent["executable"] is False
+    assert ent.get("reason") == "买点已失效"
+    assert ent.get("buy_point_status") == "failed"
+    assert r["context"].get("buy_point_failed") is True
+    brief = format_gates_brief(r)
+    assert "买点已失效" in brief
+
+
+def test_l3_watching_does_not_block_entry():
+    """L3：watching（盘中破盖收盘收回）不关 entry executable。"""
+    r = match_strategies({
+        "current": 15,
+        "support": 14,
+        "has_position": False,
+        "allow_new_entry": True,
+        "checklist_all_green": True,
+        "chan_type_short": "一买",
+        "chan_type_raw": "一类买",
+        "regime": "正常",
+        "buy_point_lifecycle": {
+            "status": "watching",
+            "lid_price": 14.0,
+            "signal_id": "watchwatchwatch1",
+            "display_line": "买点：观察中",
+        },
+    })
+    ent = r["gates"]["entry"]
+    assert ent["mode"] == "active"
+    assert ent["executable"] is True
+    assert ent.get("buy_point_status") == "watching"
+    assert ent.get("reason") != "买点已失效"
+
+
 def test_s04_position_floor_stop_full_clear():
     """S-04: 持仓 + floor → manage 止损价 + 全清。"""
     r = match_strategies({

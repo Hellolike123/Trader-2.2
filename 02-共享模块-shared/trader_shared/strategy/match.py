@@ -184,6 +184,22 @@ def build_match_context(report: dict[str, Any] | None = None, **overrides: Any) 
     post_chip = bool((posts.get("chip") or {}).get("ok")) if isinstance(posts.get("chip"), dict) else False
     post_mom = bool((posts.get("momentum") or {}).get("ok")) if isinstance(posts.get("momentum"), dict) else False
 
+    # L3：只读 buy_point_lifecycle（禁止在此重算盖价/笔）
+    life = r.get("buy_point_lifecycle") if isinstance(r.get("buy_point_lifecycle"), dict) else {}
+    bp_status = str(life.get("status") or "none")
+    if bp_status not in ("none", "active", "failed", "watching"):
+        bp_status = "none"
+    bp_failed = bp_status == "failed"
+    # watching=盘中刺穿收盘收回：不判死，不关 entry
+    bp_valid = bp_status in ("active", "watching")
+    try:
+        bp_lid = float(life["lid_price"]) if life.get("lid_price") is not None else None
+    except (TypeError, ValueError):
+        bp_lid = None
+    bp_signal_id = life.get("signal_id")
+    if bp_signal_id is not None:
+        bp_signal_id = str(bp_signal_id)
+
     ctx = {
         "current": current,
         "stop": stop_f,
@@ -209,6 +225,12 @@ def build_match_context(report: dict[str, Any] | None = None, **overrides: Any) 
         "resonance_post_structure": post_st,
         "resonance_post_chip": post_chip,
         "resonance_post_momentum": post_mom,
+        # buy_point_lifecycle（L3）
+        "buy_point_status": bp_status,
+        "buy_point_failed": bp_failed,
+        "buy_point_valid": bp_valid,
+        "buy_lid_price": bp_lid,
+        "buy_point_signal_id": bp_signal_id,
     }
     ctx.update(overrides)
     return ctx
@@ -336,26 +358,38 @@ def match_strategies(
 
     # entry
     entry_mode = "off"
+    entry_reason = ""
     ent_p, ent_c = None, []
     if ctx.get("has_position"):
         entry_mode = "off"
+        entry_reason = "已持仓"
         ent_p, ent_c = None, []
     else:
         ent_p, ent_c = _pick_primary(by_gate["entry"])
         if ent_p is None:
             entry_mode = "off"
+            entry_reason = "无开仓匹配"
+        elif ctx.get("buy_point_failed"):
+            # L3：买点盖 failed → 不得 executable；与「无买点」文案区分
+            entry_mode = "plan"
+            entry_reason = "买点已失效"
         elif veto_entry or ctx.get("block_new") or not ctx.get("allow_new_entry"):
             entry_mode = "plan"
+            entry_reason = "否决或不允许新开"
         elif not ctx.get("checklist_all_green"):
             entry_mode = "plan"  # S-03 不全绿不可执行
+            entry_reason = "清单未全绿"
         else:
             entry_mode = "active"
+            entry_reason = "可执行"
 
     entry_out = {
         "primary": _pack_summary(ent_p) if entry_mode != "off" or ent_p else _pack_summary(ent_p),
         "candidates": [_pack_summary(x) for x in ent_c],
         "mode": entry_mode,
         "executable": entry_mode == "active",
+        "reason": entry_reason,
+        "buy_point_status": ctx.get("buy_point_status") or "none",
     }
     if entry_mode == "off":
         entry_out["primary"] = None
@@ -439,6 +473,8 @@ def match_strategies(
             "allow_new_entry": ctx.get("allow_new_entry"),
             "checklist_all_green": ctx.get("checklist_all_green"),
             "regime": ctx.get("regime"),
+            "buy_point_status": ctx.get("buy_point_status") or "none",
+            "buy_point_failed": bool(ctx.get("buy_point_failed")),
         },
         "gates": {
             "select": select_out,
@@ -474,6 +510,9 @@ def format_gates_brief(result: dict[str, Any]) -> str:
     ent = g.get("entry") or {}
     if ent.get("mode") == "off":
         lines.append("  买：关闭（已持仓或无开仓匹配）")
+    elif ent.get("reason") == "买点已失效" or ent.get("buy_point_status") == "failed":
+        name = (ent.get("primary") or {}).get("name") or "开仓包"
+        lines.append(f"  买：{name} · 预案（买点已失效）")
     elif ent.get("primary"):
         tag = "执行" if ent.get("mode") == "active" else "预案"
         lines.append(f"  买：{ent['primary'].get('name')} · {tag}")

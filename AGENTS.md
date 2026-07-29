@@ -28,6 +28,7 @@
 | 短中线挂接 | `report_pipeline/attach_*.py`（facade=`attach.py`） | 把胶水写回 monolith `attach.py` |
 | 短中线文案 | `report_renderer/short_midline.py` | 手拼面板 / 改旧 `📍 决策` |
 | 行情类型 SSOT | `market_types.py`（`Security`/`MarketSnapshot`） | 在 light_data/data_provider 再各造一份 |
+| 买点盖生命周期 | `buy_point_lifecycle.py` + `attach_buy_point.py`；策略闸读字段在 `strategy/match.py` | 在策略层重算盖价/笔；接旧 failed `signal_id` |
 | Fusion 生产路径 | `fusion_core.py` + `analysis/cards.py` + `fusion_card_signals.py` | 加厚 classic 当主路径 |
 | Classic 映射（对照） | `fusion_classic_mappers.py`（动量已委托 cards） | 在 cards 路径复制一份映射 |
 | T0 盯盘缓存 | `t0_monitor._cached_build_plan`（`T0_PLAN_TTL_SEC`） | 每 tick 无脑全量 `build_plan` |

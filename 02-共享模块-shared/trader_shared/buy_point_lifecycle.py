@@ -1,4 +1,4 @@
-"""买点「盖」生命周期 L1：状态机 + 展示字段（不进 fusion 分数）。
+"""买点「盖」生命周期：L1 当日判定 + L2 跨日持久化。
 
 契约：docs/designs/buy-point-lid-lifecycle.md
 - 收盘 < 盖 → failed
@@ -6,11 +6,22 @@
 - 收盘 ≥ 盖 且有买点 → active
 - 无买点 → none
 
-L1 不持久化 failed 后的「重走站上→回踩」序列（L2）；仅当根/当日判定。
+L2：failed 写入 ~/.trader/buy_point_lifecycle.json；跨日禁止接旧 signal_id；
+站回后只允许新 signal_id（新序列），不得复活失败记录里的旧 id。
 """
 from __future__ import annotations
 
+import json
+import os
+import uuid
+from datetime import date
+from pathlib import Path
 from typing import Any
+
+from trader_shared.signal_utils import normalize_signal_id
+
+_STORE_ENV = "TRADER_BUY_POINT_LIFECYCLE_PATH"
+_DEFAULT_STORE = Path(os.path.expanduser("~/.trader/buy_point_lifecycle.json"))
 
 
 def _f(x: Any) -> float | None:
@@ -23,6 +34,11 @@ def _f(x: Any) -> float | None:
         return v
     except (TypeError, ValueError):
         return None
+
+
+def store_path() -> Path:
+    override = (os.environ.get(_STORE_ENV) or "").strip()
+    return Path(override) if override else _DEFAULT_STORE
 
 
 def _has_buy_signal(
@@ -71,7 +87,7 @@ def evaluate_buy_point_lifecycle(
     has_buy_signal: bool = False,
     intraday: bool = False,
 ) -> dict[str, Any]:
-    """返回 buy_point_lifecycle 字段。"""
+    """返回 buy_point_lifecycle 字段（当日判定，不含持久化）。"""
     lid = _f(lid_price)
     cur = _f(current)
     close = _f(last_close)
@@ -128,16 +144,260 @@ def evaluate_buy_point_lifecycle(
     }
 
 
-def build_buy_point_lifecycle_for_report(report: dict[str, Any] | None = None) -> dict[str, Any]:
-    """从 report-like dict 组装 lifecycle（report_builder / ensure 调用）。"""
+def _load_store(path: Path | None = None) -> dict[str, Any]:
+    p = path or store_path()
+    try:
+        if p.exists():
+            data = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+    except (json.JSONDecodeError, OSError):
+        pass
+    return {}
+
+
+def _save_store(data: dict[str, Any], path: Path | None = None) -> None:
+    p = path or store_path()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        with tmp.open("rb") as f:
+            os.fsync(f.fileno())
+        tmp.replace(p)
+    except OSError:
+        pass
+
+
+def load_failed_record(symbol: str, *, path: Path | None = None) -> dict[str, Any] | None:
+    key = _symbol_key(symbol)
+    if not key:
+        return None
+    rec = _load_store(path).get(key)
+    if not isinstance(rec, dict):
+        return None
+    if str(rec.get("status") or "") != "failed":
+        return None
+    return rec
+
+
+def save_failed_record(
+    symbol: str,
+    *,
+    signal_id: str,
+    lid_price: float | None,
+    failed_date: str,
+    path: Path | None = None,
+) -> None:
+    key = _symbol_key(symbol)
+    if not key or not signal_id:
+        return
+    store = _load_store(path)
+    store[key] = {
+        "status": "failed",
+        "signal_id": str(signal_id),
+        "lid_price": _f(lid_price),
+        "failed_date": str(failed_date),
+    }
+    _save_store(store, path)
+
+
+def clear_failed_record(symbol: str, *, path: Path | None = None) -> None:
+    key = _symbol_key(symbol)
+    if not key:
+        return
+    store = _load_store(path)
+    if key in store:
+        store.pop(key, None)
+        _save_store(store, path)
+
+
+def mint_lifecycle_signal_id(
+    symbol: str,
+    trade_date: str,
+    lid_price: float | None,
+) -> str:
+    """生命周期自有 signal_id（与缠论 bp id 隔离，source_skill=buy_lid）。"""
+    return normalize_signal_id(
+        symbol,
+        trade_date,
+        "buy_point_lid",
+        lid_price if lid_price is not None else 0,
+        source_skill="buy_lid",
+    )
+
+
+def _symbol_key(symbol: Any) -> str:
+    s = str(symbol or "").strip().upper()
+    if not s:
+        return ""
+    # 统一 6 位.SH/SZ 或纯代码
+    try:
+        from trader_shared.signal_utils import normalize_symbol
+        return normalize_symbol(s)
+    except Exception:
+        return s
+
+
+def _trade_date_from_report(report: dict[str, Any]) -> str:
+    for key in ("trade_date", "analysis_date", "intraday_as_of"):
+        v = report.get(key)
+        if v:
+            return str(v)[:10]
+    bars = report.get("daily_bars") or report.get("bars") or []
+    if bars and isinstance(bars[-1], dict):
+        d = bars[-1].get("date") or bars[-1].get("trade_date")
+        if d:
+            return str(d)[:10]
+    return date.today().isoformat()
+
+
+def _symbol_from_report(report: dict[str, Any]) -> str:
+    for key in ("symbol", "ts_code", "code"):
+        v = report.get(key)
+        if v:
+            return _symbol_key(v)
+    return ""
+
+
+def extract_candidate_signal_id(report: dict[str, Any] | None = None) -> str | None:
+    """优先取缠论买点上的 signal_id。"""
+    r = report if isinstance(report, dict) else {}
+    chan = r.get("chanlun") or r.get("chanlun_daily") or {}
+    if isinstance(chan, dict) and isinstance(chan.get("chanlun"), dict):
+        chan = chan["chanlun"]
+    if not isinstance(chan, dict):
+        return None
+    for bp in chan.get("buy_points") or []:
+        if not isinstance(bp, dict):
+            continue
+        sid = bp.get("signal_id")
+        if sid:
+            return str(sid)
+    return None
+
+
+def reconcile_with_store(
+    life: dict[str, Any],
+    *,
+    symbol: str,
+    trade_date: str,
+    candidate_signal_id: str | None = None,
+    persist: bool = True,
+    path: Path | None = None,
+) -> dict[str, Any]:
+    """L2：对照持久化失败记录，禁止接旧 signal_id；站回签发新 id。"""
+    out = dict(life) if isinstance(life, dict) else {}
+    sym = _symbol_key(symbol)
+    td = str(trade_date or "")[:10] or date.today().isoformat()
+    lid = _f(out.get("lid_price"))
+    status = str(out.get("status") or "none")
+    prev = load_failed_record(sym, path=path) if sym else None
+    cand = (candidate_signal_id or out.get("signal_id") or None)
+    if cand is not None:
+        cand = str(cand)
+
+    def _failed_payload(
+        *,
+        signal_id: str | None,
+        failed_date: str | None,
+        note: str,
+        display: str,
+        blocked: bool = False,
+    ) -> dict[str, Any]:
+        return {
+            "status": "failed",
+            "lid_price": lid if lid is not None else _f((prev or {}).get("lid_price")),
+            "signal_id": signal_id,
+            "failed_date": failed_date,
+            "note": note,
+            "display_line": display,
+            "blocked_reuse": blocked,
+        }
+
+    # 当日失败 → 落盘
+    if status == "failed":
+        sid = cand or mint_lifecycle_signal_id(sym or "UNKNOWN", td, lid)
+        out["signal_id"] = sid
+        out["failed_date"] = td
+        if persist and sym:
+            save_failed_record(
+                sym, signal_id=sid, lid_price=lid, failed_date=td, path=path
+            )
+        return out
+
+    # 无本地失败记录：active/watching 补 id
+    if not prev:
+        if status in ("active", "watching"):
+            out["signal_id"] = cand or mint_lifecycle_signal_id(sym or "UNKNOWN", td, lid)
+        return out
+
+    old_sid = str(prev.get("signal_id") or "")
+    old_failed = str(prev.get("failed_date") or "")[:10]
+    prev_lid = _f(prev.get("lid_price"))
+    show_lid = lid if lid is not None else prev_lid
+
+    # 仍无当日买点/盖：继续展示历史失败（跨日记忆）
+    if status == "none":
+        lid_txt = f"{show_lid:.2f}" if show_lid is not None else "?"
+        return _failed_payload(
+            signal_id=old_sid or None,
+            failed_date=old_failed or None,
+            note=f"旧买点已于 {old_failed or '?'} 作废，须重走站上→回踩",
+            display=f"买点：已失效（盖 {lid_txt}，须重走）",
+            blocked=True,
+        )
+
+    # 站回 active/watching：仅允许新 id，且须跨过失败日
+    if status in ("active", "watching"):
+        cross_day = bool(old_failed and td > old_failed)
+        new_sid = cand
+        if not new_sid or new_sid == old_sid:
+            if cross_day:
+                new_sid = mint_lifecycle_signal_id(sym or "UNKNOWN", td, show_lid)
+            else:
+                new_sid = None
+
+        if cross_day and new_sid and new_sid != old_sid:
+            out["signal_id"] = new_sid
+            out["failed_date"] = None
+            out["note"] = (
+                f"新序列（旧信号已作废于 {old_failed}）；" + str(out.get("note") or "")
+            ).rstrip("；")
+            out["blocked_reuse"] = False
+            if persist and sym:
+                clear_failed_record(sym, path=path)
+            return out
+
+        lid_txt = f"{show_lid:.2f}" if show_lid is not None else "?"
+        return _failed_payload(
+            signal_id=old_sid or None,
+            failed_date=old_failed or None,
+            note=(
+                f"禁止接旧信号 {old_sid[:8] + '…' if len(old_sid) > 8 else old_sid}；"
+                f"须重走站上→回踩（失败日 {old_failed or '?'}）"
+            ),
+            display=f"买点：已失效（盖 {lid_txt}，须重走）",
+            blocked=True,
+        )
+
+    return out
+
+
+def build_buy_point_lifecycle_for_report(
+    report: dict[str, Any] | None = None,
+    *,
+    persist: bool = True,
+    store: Path | None = None,
+) -> dict[str, Any]:
+    """从 report-like dict 组装 lifecycle（含 L2 持久化对账）。"""
     r = report if isinstance(report, dict) else {}
     kp = r.get("key_prices") if isinstance(r.get("key_prices"), dict) else {}
     mid = r.get("mid_key_prices") if isinstance(r.get("mid_key_prices"), dict) else {}
     disc = r.get("discipline") if isinstance(r.get("discipline"), dict) else {}
-    cl = disc.get("entry_checklist") if isinstance(disc.get("entry_checklist"), dict) else {}
+    _ = disc  # 保留读取点，避免误删 checklist 扩展位
 
     types: list[str] = list(r.get("chan_buy_point_types") or [])
-    # checklist / conclusion 无 types 时扫 chanlun
     chan = r.get("chanlun") or r.get("chanlun_daily")
     has = _has_buy_signal(types, chan)
 
@@ -153,7 +413,6 @@ def build_buy_point_lifecycle_for_report(report: dict[str, Any] | None = None) -
     if bars and isinstance(bars[-1], dict):
         last_close = _f(bars[-1].get("close"))
     current = _f(r.get("current"))
-    # 有 live 价且不同于 last_close 视为盘中
     intraday = bool(
         r.get("intraday_as_of")
         or (
@@ -163,10 +422,24 @@ def build_buy_point_lifecycle_for_report(report: dict[str, Any] | None = None) -
         )
     )
 
-    return evaluate_buy_point_lifecycle(
+    life = evaluate_buy_point_lifecycle(
         current=current,
         last_close=last_close if last_close is not None else current,
         lid_price=lid,
         has_buy_signal=has,
         intraday=intraday,
     )
+
+    symbol = _symbol_from_report(r)
+    trade_date = _trade_date_from_report(r)
+    candidate = extract_candidate_signal_id(r)
+    if symbol or persist:
+        life = reconcile_with_store(
+            life,
+            symbol=symbol,
+            trade_date=trade_date,
+            candidate_signal_id=candidate,
+            persist=bool(persist and symbol),
+            path=store,
+        )
+    return life

@@ -14,7 +14,7 @@ def apply_buy_point_lifecycle(
     *,
     mark: MarkFn | None = None,
 ) -> dict[str, Any]:
-    """L1 买点盖生命周期：写 buy_point_lifecycle；失败则只收紧 discipline 新开。
+    """买点盖生命周期（L1 判定 + L2 持久化）：写字段；失败则只收紧 discipline 新开。
 
     与 build_report 原逻辑一致；失败不抛。
     """
@@ -25,7 +25,7 @@ def apply_buy_point_lifecycle(
         from trader_shared.buy_point_lifecycle import build_buy_point_lifecycle_for_report
         from trader_shared.chan_discipline import format_entry_line_c1
 
-        _life = build_buy_point_lifecycle_for_report(report)
+        _life = build_buy_point_lifecycle_for_report(report, persist=True)
         report["buy_point_lifecycle"] = _life
         if _life.get("status") == "failed":
             _disc = report.get("discipline") if isinstance(report.get("discipline"), dict) else {}

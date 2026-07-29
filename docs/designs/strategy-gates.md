@@ -34,20 +34,20 @@ select → entry → manage → scale → take → stop
 | | |
 |--|--|
 | **只回答** | 未持仓是否试探、价区与初始风险叙事 |
-| **输入** | `has_position`, `allow_new_entry`, `checklist_all_green`, `chan.type_short`, select.veto |
-| **输出** | `primary`, `mode=plan\|active\|off` |
+| **输入** | `has_position`, `allow_new_entry`, `checklist_all_green`, `chan.type_short`, select.veto, `buy_point_lifecycle.status` |
+| **输出** | `primary`, `mode=plan\|active\|off`, `executable`, `reason` |
 | **包** | `entry.chan_buy1_probe` 等 |
-| **规则** | has_position → off；veto 或 not allow_new_entry 或 not all_green → 最多 plan |
+| **规则** | has_position → off；`buy_point_failed` → 最多 plan（reason=买点已失效）；veto 或 not allow_new_entry 或 not all_green → 最多 plan |
 
-#### 2.2.1 买点「盖」生命周期（规格 · 实现见 `buy-point-lid-lifecycle.md`）
+#### 2.2.1 买点「盖」生命周期（实现见 `buy-point-lid-lifecycle.md`）
 
-| 规则 | entry 约束（落地后） |
-|------|----------------------|
-| 收盘盖下 → 买点 failed | 不得 `executable=true`；文案「买点已失效」 |
-| 盘中破盖、收盘回盖上 | 不因盘中刺穿关 entry |
-| 失败后次日大阳站回 | **新**生命周期；禁止沿用旧 signal_id 当仍有效 |
+| 规则 | entry 约束 |
+|------|-------------|
+| 收盘盖下 → 买点 failed | 不得 `executable=true`；`reason=买点已失效` |
+| 盘中破盖、收盘回盖上（watching） | **不**因盘中刺穿关 entry |
+| 失败后次日大阳站回 | **新** lifecycle / signal_id（L2 store）；禁止沿用旧 id |
 
-P2 当前：`strategy_match` **尚未**读 lifecycle 字段；纪律 C1 仍只看买点类型字符串。L2/L3 实现前不得假装已拦。
+L3：`build_match_context` 读 `report.buy_point_lifecycle` → `buy_point_failed` / `buy_point_valid`；禁止在策略层重算盖价。
 
 ### 2.3 `manage` 持/管单
 
