@@ -38,7 +38,7 @@ Agent **不必**再 export token，也**不必**手写 `env -u http_proxy ...`�
 ## JSON 失败回退时（才读）
 
 1. 查 `data_status`：`partial` 加警告前缀；`degraded` 只出基础行情
-2. 方向唯一看 `fusion.weighted_score`；出手以 `conclusion` + `discipline` 为准
+2. 出手以 `decision_view`（共振∧策略∧纪律）为准；`fusion.weighted_score` 仅仪表；`conclusion` / `discipline` 只收紧
 3. 再读：`anti-hallucination.md`、`fusion-guide.md`
 
 ## 按需文档（勿预读）

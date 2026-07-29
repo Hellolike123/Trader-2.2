@@ -125,8 +125,18 @@ ADMISSION_SCORE_OBSERVE = {
 }
 
 
-def evaluate_admission(major_stage: str, total_score: int, current: float, stop: float) -> dict[str, Any]:
-    """Evaluate admission and determine layer."""
+def evaluate_admission(
+    major_stage: str,
+    total_score: int,
+    current: float,
+    stop: float,
+    *,
+    resonance_grade: str | None = None,
+) -> dict[str, Any]:
+    """Evaluate admission and determine layer.
+
+    共振档只收紧：冲突/拆台不得以「执行」优先（与选股池 admission_for 对齐）。
+    """
     # Layer 1: stage screening
     if major_stage == "衰退":
         return {"result": "拒绝", "reason": "衰退期，直接拒绝入池。", "status": "放弃"}
@@ -146,7 +156,14 @@ def evaluate_admission(major_stage: str, total_score: int, current: float, stop:
     if stop > 0 and current <= stop:
         return {"result": "拒绝", "reason": "破防守位。", "status": "放弃"}
 
-    return {"result": "入池", "reason": "结构成立，触发位和防守位清楚。", "status": status}
+    reason = "结构成立，触发位和防守位清楚。"
+    try:
+        from trader_shared.resonance import apply_resonance_admission
+
+        status, reason = apply_resonance_admission(status, reason, resonance_grade)
+    except ImportError:
+        pass
+    return {"result": "入池", "reason": reason, "status": status}
 
 
 def layer_items(items: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
@@ -163,17 +180,32 @@ def layer_items(items: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
 
 # ── Sorting ──────────────────────────────────────────────────────────────
 def sort_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Sort items by: status_rank > total_score > -atr_ratio > fusion_confidence."""
+    """Sort: status > 共振档 > total_score > -atr；fusion_confidence 仅末位仪表。"""
     status_rank = {"执行": 4, "观察": 3, "待补": 2, "放弃": 1}
     stage_priority = {"主升": 1, "蓄势": 2, "派发": 3, "衰退": 4}
 
     def _fusion_rank(fc: Any) -> int:
         if isinstance(fc, str):
             return {"high": 3, "medium": 2, "low": 1}.get(fc, 0)
-        return 0
+        try:
+            return int(float(fc) * 100) if fc is not None else 0
+        except (TypeError, ValueError):
+            return 0
+
+    try:
+        from trader_shared.resonance import extract_resonance_grade, resonance_pool_rank
+    except ImportError:
+        extract_resonance_grade = None  # type: ignore
+        resonance_pool_rank = None  # type: ignore
+
+    def _res_rank(item: dict[str, Any]) -> int:
+        if extract_resonance_grade is None or resonance_pool_rank is None:
+            return 0
+        return resonance_pool_rank(extract_resonance_grade(item))
 
     return sorted(items, key=lambda item: (
         status_rank.get(item.get("status", "放弃"), 0),
+        _res_rank(item),
         -stage_priority.get(item.get("major_stage", ""), 5),
         int(item.get("total_score") or 0),
         -float(item.get("atr_ratio") or 0),
@@ -515,7 +547,7 @@ def _analysis_lines(item: dict[str, Any]) -> list[str]:
     if current > 0 and chip_support > 0 and current < chip_support * 0.97:
         risks.append("跌破筹码密集区")
     if fusion_action in ("减仓", "空仓/止损"):
-        risks.append(f"融合层{fusion_action}")
+        risks.append(f"融合仪表{fusion_action}")
 
     # 至少显示一个亮点或风险
     if highlights or risks:
@@ -523,10 +555,14 @@ def _analysis_lines(item: dict[str, Any]) -> list[str]:
         rl_text = "；".join(risks[:2]) if risks else "无显著风险"
         lines.append(f"亮点/风险：{hl_text} ｜ {rl_text}")
 
-    # ── 决策线（价格位置 + 理论交叉验证）──
+    # ── 决策线（价格/结构为主；fusion 仅仪表脚注）──
+    _dv = item.get("decision_view") if isinstance(item.get("decision_view"), dict) else {}
+    _dv_summary = str(_dv.get("summary_line") or "").strip()
     if status == "执行":
-        if fusion_action == "减仓" or "减仓" in scene_label:
+        if "减仓" in scene_label:
             lines.append(f"决策：{scene_label}，逢高减一部分")
+        elif _dv_summary and not _dv.get("allow_new_recommend", True):
+            lines.append(f"决策：{_dv_summary}")
         elif current > 0 and support > 0 and confirm > 0:
             if current >= confirm:
                 lines.append(f"决策：现价{current:.2f}站稳确认位{confirm:.2f}，结构成立")
@@ -537,9 +573,11 @@ def _analysis_lines(item: dict[str, Any]) -> list[str]:
                 lines.append(f"决策：现价{current:.2f}跌破支撑{support:.2f}，注意防守")
         else:
             lines.append("决策：在支撑区间等信号")
+        if fusion_action in ("减仓", "空仓/止损"):
+            lines.append(f"参考：融合仪表{fusion_action}")
     elif status == "观察":
-        if fusion_action in ("空仓/止损", "减仓"):
-            lines.append("决策：融合层提示减仓，短期动能不足")
+        if _dv_summary and not _dv.get("allow_new_recommend", True):
+            lines.append(f"决策：{_dv_summary}")
         elif current > 0 and confirm > 0:
             gap = _gap_pct(current, confirm)
             if gap <= 2:
@@ -552,6 +590,8 @@ def _analysis_lines(item: dict[str, Any]) -> list[str]:
             lines.append(f"决策：现价{current:.2f}在支撑附近，等止跌确认")
         else:
             lines.append("决策：还没到触发位，先观望")
+        if fusion_action in ("减仓", "空仓/止损"):
+            lines.append(f"参考：融合仪表{fusion_action}")
     elif status == "待补":
         if current > 0 and support > 0 and current < support:
             lines.append(f"决策：现价{current:.2f}跌破支撑{support:.2f}，结构未稳")
@@ -590,11 +630,16 @@ def _briefing_one_liner(item: dict[str, Any]) -> str:
     wy_v = _theory_verdict(wy / 30)
     cp_v = _theory_verdict(cp / 25)
 
+    _dv = item.get("decision_view") if isinstance(item.get("decision_view"), dict) else {}
+    _dv_line = str(_dv.get("summary_line") or "").strip()
+
     # ── 执行区：为什么可以做 ──────────────────────────────────────────
     if status == "执行":
-        # 减仓场景
-        if "减仓" in scene_label or fusion_action == "减仓":
+        # 减仓场景（scene，非 fusion 司令）
+        if "减仓" in scene_label:
             return "冲高到压力位，逢高减一部分"
+        if _dv_line and not _dv.get("allow_new_recommend", True):
+            return _dv_line
         # 有结构备注 → 用结构备注（技术分析结论）
         if structure_note:
             return f"缠论结构{cl_v}，{structure_note}"
@@ -614,11 +659,8 @@ def _briefing_one_liner(item: dict[str, Any]) -> str:
     # ── 观察区：为什么还不做 ──────────────────────────────────────────
     elif status == "观察":
         gap = _gap_pct(current, confirm) if confirm > 0 else 999
-        # fusion 给出负面信号
-        if fusion_action == "减仓":
-            return "冲不上去，逢高减一部分"
-        if fusion_action == "空仓/止损":
-            return "转弱信号，减仓观望"
+        if _dv_line and not _dv.get("allow_new_recommend", True):
+            return _dv_line
         # 有结构备注 → 用结构备注解释
         if structure_note:
             return f"结构{structure_note}，等确认"
@@ -837,7 +879,21 @@ def cmd_briefing(args: argparse.Namespace) -> None:
         stop = to_float(report.get("stop")) or 0
 
         # Evaluate admission
-        admission = evaluate_admission(major_stage, total_score, current, stop)
+        try:
+            from trader_shared.resonance import extract_resonance_grade
+
+            _res_grade = extract_resonance_grade(report)
+        except ImportError:
+            _res_grade = "empty"
+        admission = evaluate_admission(
+            major_stage, total_score, current, stop, resonance_grade=_res_grade
+        )
+        _resonance = report.get("resonance") if isinstance(report.get("resonance"), dict) else {}
+        _decision_view = (
+            report.get("decision_view")
+            if isinstance(report.get("decision_view"), dict)
+            else report.get("decision") if isinstance(report.get("decision"), dict) else {}
+        )
 
         item = {
             "target": target,
@@ -868,6 +924,9 @@ def cmd_briefing(args: argparse.Namespace) -> None:
             "fusion_confidence": (report.get("fusion") or {}).get("confidence", ""),
             "fusion_score_val": report.get("fusion_score", 0),
             "fusion": report.get("fusion") or {},
+            "resonance": _resonance,
+            "resonance_grade": _res_grade,
+            "decision_view": _decision_view,
             "one_liner": report.get("one_liner", ""),
             "scene": report.get("scene", ""),
             "structure_note": report.get("structure_note", ""),

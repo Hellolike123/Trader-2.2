@@ -8,7 +8,7 @@
 - **命令 cwd**：Skill 包内用 `python3 scripts/...`；仓库根用 `python3 01-功能包-packages/<skill>/scripts/...`。仓位轮动在 **review** 包（无独立 `portfolio/` 包）。
 - **中短线双轨**：`report_core.render_short_midline`；中线关键价用 `mid_key_prices`（周线），禁止日线 `key_levels` 冒充。
 - **纪律只收紧**：`mistery_gate` + `chan_discipline` → `merge_discipline`；不改 major_stage / fusion 分 / support / stop。开仓清单 C1 见 `chan_discipline.format_entry_line_c1`。
-- **方向**：以 `fusion.weighted_score` / decision_view 为准，不得从阶段/动能直接推断方向。
+- **方向/出手**：以 `decision_view`（共振 ∧ 策略 ∧ 纪律）为准；`fusion.weighted_score` 仅仪表。不得从阶段/动能直接推断方向。
 - **T0 v2**：人读结构仪表盘（`docs/t0-strategy-v2.md`），禁止「可执行/可低吸/三重共振买」指令叙事。
 - **输出契约**：`01-功能包-packages/trader/references/output-template.md` 与 `render_short_midline` 同源。实现锚点：`report_core` / `report_builder` / `report_pipeline`。
 - **深度与满分示例**：性能史、算法细节、微信端满分范例 → [`AGENTS_DEEP.md`](AGENTS_DEEP.md)。

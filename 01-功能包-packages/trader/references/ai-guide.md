@@ -68,7 +68,7 @@
 |------|------|------|------|
 | `fusion.action` | str | 融合层建议 | 半仓试 (多方主导) |
 | `fusion.confidence` | float | 融合置信度 0-1 | 0.65 |
-| `fusion.weighted_score` | float | 加权分 -1~+1 | 0.35 |
+| `fusion.weighted_score` | float | 加权分仪表 -1~+1（出手听 decision_view） | 0.35 |
 | `fusion.regime` | str | 大盘环境 | 正常/偏弱/很差 |
 | `fusion.main_force_env` | str | 主力行为阶段 | accumulation/markup/unknown |
 | `fusion.hmm_regime` | str | HMM大势前瞻 | bull/bear/range |

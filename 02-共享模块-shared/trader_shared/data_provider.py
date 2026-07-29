@@ -122,6 +122,23 @@ _ENRICH_CACHE: dict[str, tuple[float, dict, dict, dict, dict, dict]] = {}
 _ENRICH_TTL = 600  # 10 分钟缓存，基本面数据不会盘中秒变
 
 
+def _enrich_payload_useful(*parts: Any) -> bool:
+    """扩展字段是否含真实载荷（全 None / 空 dict 不算成功）。"""
+
+    def _useful(x: Any) -> bool:
+        if x is None:
+            return False
+        if isinstance(x, dict):
+            return any(_useful(v) for v in x.values())
+        if isinstance(x, (list, tuple, set)):
+            return len(x) > 0
+        if isinstance(x, str):
+            return bool(x.strip())
+        return True
+
+    return any(_useful(p) for p in parts)
+
+
 def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
     """Enrich the MarketSnapshot with extend_fundamental, extend_sentiment,
     extend_margin, extend_northbound, extend_sector using a thread pool.
@@ -156,7 +173,14 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
             extend_northbound = file_cached.get("extend_northbound")
             extend_sector = file_cached.get("extend_sector")
             extend_concept = file_cached.get("extend_concept")
-            if extend_fundamental or extend_sentiment or extend_margin or extend_northbound or extend_sector or extend_concept:
+            if _enrich_payload_useful(
+                extend_fundamental,
+                extend_sentiment,
+                extend_margin,
+                extend_northbound,
+                extend_sector,
+                extend_concept,
+            ):
                 _ENRICH_CACHE[sec.code] = (time.time(), extend_fundamental, extend_sentiment,
                                            extend_margin or {}, extend_northbound or {},
                                            extend_sector or {}, extend_concept or {})
@@ -227,6 +251,18 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
                 "unlocks": unlocks,
                 "theme_harden": hot_reason,
             }
+
+            # 超时/全空不落盘：禁止把 None 壳缓存 12h 冒充成功
+            if not _enrich_payload_useful(
+                extend_fundamental,
+                extend_sentiment,
+                margin_data,
+                northbound_data,
+                sector_data,
+                concept_data,
+            ):
+                _logger.debug("Enrich empty/timeout for %s, skip cache", sec.code)
+                return snap
 
             # 写入内存缓存
             _ENRICH_CACHE[sec.code] = (now, extend_fundamental, extend_sentiment,

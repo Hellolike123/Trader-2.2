@@ -65,8 +65,24 @@ def render_short_midline(r: dict[str, Any]) -> str:
     lines: list[str] = [
         f"分析报告 — {name}（{code}）｜短中线",
         "",
-        f"现价 {current:.2f}（{change_pct:+.2f}%）｜MA20 {_ma20_text}｜MA250 {_ma250_text}{_ma250_warn}",
     ]
+
+    # GATE 1 / 防幻觉：非 full 必须在标题后立刻标数据完备度
+    _ds = str(r.get("data_status") or "").lower()
+    if _ds in ("partial", "degraded", "failed"):
+        _miss = r.get("missing_sources") or []
+        if isinstance(_miss, (list, tuple)) and _miss:
+            _miss_txt = "、".join(str(x) for x in _miss if x)
+            lines.append(f"⚠️ 数据不完整（缺：{_miss_txt}），建议仅供参考")
+        elif _ds == "partial":
+            lines.append("⚠️ 数据不完整，建议仅供参考")
+        else:
+            lines.append(f"⚠️ 数据不完整（{_ds}），仅基础行情参考")
+        lines.append("")
+
+    lines.append(
+        f"现价 {current:.2f}（{change_pct:+.2f}%）｜MA20 {_ma20_text}｜MA250 {_ma250_text}{_ma250_warn}"
+    )
 
     # 盘中诚实标注：实时价已锚定，但策略判定基于截至该日收盘的真实日线
     # （合成 bar 不再掺入 bars，避免 volume=0 等假数据污染策略计算）
@@ -466,16 +482,16 @@ def render_short_midline(r: dict[str, Any]) -> str:
     # 按价格排序
     _mid_items.sort(key=lambda x: x[0])
 
-    # 插入现价（🌟 标记）
+    # 中线关键价插入现价锚点（无 🌟；🌟 仅短线关键价）
     if current > 0:
         _ins = False
         for _i, (p, _) in enumerate(_mid_items):
             if p > current:
-                _mid_items.insert(_i, (current, f"🌟 现价 {current:.2f}"))
+                _mid_items.insert(_i, (current, f"现价 {current:.2f}"))
                 _ins = True
                 break
         if not _ins:
-            _mid_items.append((current, f"🌟 现价 {current:.2f}"))
+            _mid_items.append((current, f"现价 {current:.2f}"))
 
     # 输出带 % 距离标注
     for _p, _text in _mid_items:

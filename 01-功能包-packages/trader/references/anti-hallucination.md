@@ -57,7 +57,7 @@
 
 ## Rule 4: 方向判断铁律
 
-唯一方向判断依据：`fusion.weighted_score`
+出手依据：`decision_view`（共振∧策略∧纪律）。fusion 仪表参考：`fusion.weighted_score`（禁止当总司令）
 
 - 正值 = 多方，负值 = 空方
 - 禁止用 `action` 字符串字面意思推断方向（action 是融合层内部映射，可能因 veto 机制被覆盖）

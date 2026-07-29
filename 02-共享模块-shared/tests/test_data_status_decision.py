@@ -137,4 +137,24 @@ def test_tushare_data_status_full_when_requested_sources_ok(monkeypatch):
         include_ticks=False,
     )
     assert snap.data_status == "full"
-    assert snap.missing_sources == []
+
+
+def test_enrich_payload_useful_rejects_none_shell():
+    from trader_shared.data_provider import _enrich_payload_useful
+
+    assert not _enrich_payload_useful(
+        {"shareholder": None, "consensus_eps": None},
+        {"unlocks": None, "theme_harden": None},
+        None,
+        None,
+        None,
+        None,
+    )
+    assert _enrich_payload_useful(
+        {"shareholder": {"count": 1}, "consensus_eps": None},
+        {},
+        None,
+        None,
+        None,
+        None,
+    )

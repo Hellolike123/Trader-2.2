@@ -35,7 +35,7 @@ action 由 `score_to_action(weighted_score, disagreement, regime)` 生成：
 - `regime=很差` → "暂不碰"
 - `regime=偏弱` → 所有买入建议降一档
 
-**禁止用 action 字符串推断方向**——方向唯一以 weighted_score 为准。
+**禁止用 action 字符串推断方向**。产品出手听 `decision_view`（共振∧策略∧纪律）；`weighted_score` 仅 fusion 仪表偏多/偏空，不作总司令。
 
 ## 覆盖机制（Post-Processing Overrides）
 

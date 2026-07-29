@@ -321,7 +321,8 @@ def sort_items_unified(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         score = int(item.get("total_score") or 0)
         stage = str(item.get("major_stage") or "蓄势")
         stage_str = STAGE_STRENGTH.get(stage, 0.5)
-        composite = conf * 0.4 + (score / 100.0) * 0.3 + stage_str * 0.3
+        # fusion conf 降权：主键已是 status+共振档，此处仅作弱仪表
+        composite = conf * 0.2 + (score / 100.0) * 0.4 + stage_str * 0.4
         # R4: 盈亏比排序加分
         rr = to_float(item.get("risk_reward")) or 0
         if rr > 1.0 and ENABLE_RISK_REWARD_FILTER:

@@ -80,7 +80,10 @@ def test_unified_provider_fetch_qfq_daily_skips_stale(monkeypatch):
     sec = Security(code="688248", market="sh", name="南网科技")
     result = provider.fetch_qfq_daily(sec, days=300)
     # 必须回源得到新鲜数据，而非把陈旧缓存当真返回
-    assert result is fresh_bars
+    # get_day_scoped_bars 解包后返回 list 拷贝，故用内容相等而非 identity
+    assert result == fresh_bars
+    assert result[0]["close"] == 48.05
+    assert result[0]["date"] != "2026-07-01"
 
 
 def test_light_data_fetch_qfq_daily_skips_stale(monkeypatch):

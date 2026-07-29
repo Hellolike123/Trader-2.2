@@ -191,20 +191,21 @@ class TestRenderDualTrack:
         assert "🧭 中线" in md
         assert "⚡ 短线" in md
         assert "阶段：蓄势偏强" in md
-        assert "看法：" in md
+        # 看法已并入「阶段：… · 偏多/偏空」；短线仍可单独有看法行
         assert "中线：蓄势" not in md
         assert "🎯 结论" not in md
         assert "🗳️ 短线专家" not in md
         assert "🗺 空间参考" not in md
         mid_block = md.split("⚡ 短线")[0]
         short_block = md.split("⚡ 短线")[1]
+        # 🌟 现价只允许出现在短线关键价（中线禁止）
         assert "🌟" not in mid_block
         assert "🌟" in short_block
         assert "关键价（中线）" in md
         assert "关键价（短线）" in md
         assert "生命线" in md
-        assert "出手" in md
-        assert "买点区" in md
+        assert "动作：" in md or "出手" in md
+        assert "低吸区" in md or "买点区" in md
         assert "止损" in md
         inv = str((r.get("mistery_gate") or {}).get("invalidation") or "")
         if inv.strip():
@@ -260,3 +261,19 @@ class TestMidShortPriceIsolation:
         kp = r["key_prices"]
         assert kp["stop_sell"] == pytest.approx(44.0)
         assert kp["space_mid"] == pytest.approx(40.0)  # 短线仍可读日线 mid_support
+
+    def test_data_status_warning_after_title(self):
+        r = _report()
+        r["data_status"] = "partial"
+        r["missing_sources"] = ["weekly_bars", "bars_5m"]
+        md = render_short_midline(r)
+        head = md.split("现价")[0]
+        assert "⚠️ 数据不完整" in head
+        assert "weekly_bars" in head
+        assert head.index("分析报告") < head.index("数据不完整")
+
+    def test_data_status_full_no_warning(self):
+        r = _report()
+        r["data_status"] = "full"
+        md = render_short_midline(r)
+        assert "⚠️ 数据不完整" not in md
