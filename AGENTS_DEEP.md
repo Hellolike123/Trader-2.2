@@ -217,11 +217,12 @@
 
 ### 3.1 trader（单票分析 + 选股池）
 
-**入口**: `scripts/final_report.py`（单票分析）/ `scripts/final_pool.py`（选股池）
-**分析模型**: `run_analysis.py::build_report()` → `report_core.render_single`（默认 `render_short_midline`）→ 可选 `build_signal()`
-**策略链**: 日线专家并行 → fusion → structure → 周线 mid 引擎（`mid_key_prices` / midline 理论）→ `mistery_gate` + `chan_discipline` → `merge_discipline` → `conclusion_block` → 渲染
+**入口**: `scripts/final_report.py`（单票分析）/ `scripts/final_pool.py`（选股池薄 CLI）
+**分析模型**: `report_builder.build_report()`（`run_analysis` 薄壳 re-export）→ `report_pipeline/` 各 stage → `report_core.render_single`（默认 `render_short_midline`）→ 可选 `build_signal()`
+**策略链**: 日线专家并行 → fusion（cards）→ structure → 周线 mid 引擎（`mid_key_prices` / midline 理论）→ `mistery_gate` + `chan_discipline` → `merge_discipline` → `conclusion_block` → 渲染
+**选股池实现**: `scripts/pool_cmds/`（`scoring` / `add` / `plan_view` / `rank_view` / …）；**勿**把逻辑写回 `final_pool.py`
 **输入数据**: 腾讯日线（前复权 + ATR，默认 `LOOKBACK_DAYS=370`）+ 实时快照；周线默认 `WEEKLY_LOOKBACK_BARS=260`（中线缠论/威科夫/中线关键价）
-**依赖共享模块**: `report_builder`、`light_data`、`data_provider`、`chan_core`、`wyckoff_core`、`mid_key_prices`、`midline_structure`、`chan_discipline`、`mistery_gate`、`conclusion_block`、`report_core`、`fusion_core`
+**依赖共享模块**: `report_builder`、`report_pipeline`、`light_data`、`data_provider`、`chan_core`、`wyckoff_core`、`mid_key_prices`、`midline_structure`、`chan_discipline`、`mistery_gate`、`conclusion_block`、`report_core`、`fusion_core`
 
 **周线 / 波段标签契约（2026-07-16）**:
 - 默认拉 260 根周 K；旧 80 周在暴涨票上易假「笔数不足」
@@ -236,7 +237,7 @@
 ⚡ 短线 → 看法 + 日线缠/动能 + 裁定 + 新开(C1) + 出手/分仓/失效 + 关键价（止损/买点/🌟/卖点）+ 买/追亏赚
 说明（可选冲突）→ ✅ 亮点 → ⚠️ 风险 → 📌 本周只做 → T0 → 入池提示
 ```
-契约全文：`01-功能包-packages/trader/references/output-template.md`。旧模板仅 `SHORT_MIDLINE_REPORT=false`。
+契约全文：`01-功能包-packages/trader/references/output-template.md`。单票始终双轨（`SHORT_MIDLINE_REPORT=false` 已忽略）。
 
 **选股池命令集**: `analyze` `add` `add-pending` `confirm-to-pool` `show` `show-pending` `rank` `plan` `review` `remove` `archive-exited`
 
@@ -249,35 +250,26 @@
   - 筹码子分（max 25）: 15 基础 + 止损/支撑/止盈加分
   - 综合 ≥ 70 → 执行; ≥ 55 → 观察；触及防守线 → 拒绝/淘汰
 
-### 3.2 t0（盘中T0）
+### 3.2 t0（盘中结构参考卡）
 
-**入口**: `scripts/final_t0.py`
-**子模块**: `t0_run.py` / `price_point_engine.py` / `monitor.py` / `indicators.py` / `ict_execution.py`
+**入口**: `01-功能包-packages/t0/scripts/final_t0.py`（包内 `t0_*.py` / `monitor.py` 等为 identity shim）
+**引擎（改这里）**: `trader_shared/t0_run.py` / `t0_core.py` / `t0_monitor.py` / `t0_price_point_engine.py` / `t0_indicators.py` / `t0_ict_execution.py` / `t0_config.py`
 **输入数据**: 腾讯实时快照 + 新浪 5m/15m/30m K线
+**产品法源**: `docs/t0-strategy-v2.md` — **人读结构仪表盘**，禁止「可执行 / 可低吸 / 三重共振买」指令叙事
 
-**Monitor Mode**: 3 分钟轮询 → `detect_state_change()` → 15 分钟 cooldown → 输出告警文本 + 追加 `signals.jsonl`。单次 `--once` 适合 cron 调度。
+**Monitor Mode**: 轮询 → `detect_state_change()` → cooldown → 告警文本 + 追加 `signals.jsonl`。单次 `--once` 适合 cron。
 
-**T0 输出精简为 4 部分**:
-- 触发价
-- 大单异动
-- 操作建议
-- 风控提醒
-
-**T0 执行卡风格（2026-07-20）**：
-输出从 4 段式改为执行卡风格：标题 → 结论（一句话）→ 执行价（低吸/高抛/止盈）→ 信号（三重共振）→ 失效条件 → 资金 → 降本模式。
-- 结论由 `_build_conclusion()` 根据三重共振状态生成（三重共振买→可低吸 / 三重共振卖→可高抛 / 触发未共振→等确认 / 部分共振→关注 / 暂不操作）
-- 失效条件由 `_build_failure_conditions()` 生成：跌破止损 / 缠论反转 / 威科夫反转 / 跌破VWAP
-- 三重共振：缠论优先 15m（日线级别结构）fallback 5m，威科夫和动量用 5m（T0 执行层）
-- 缠论价格远离现价 >20% 自动过滤（`price_point_engine.py`）
-- VWAP 只用今日数据（`today_bars()` 过滤跨日 bar，避免历史高价拉高 VWAP）
-- 止盈按方向拆分：低吸止盈（高于现价）和高抛止盈（低于现价）
-- 低吸/高抛状态为"可执行"时显示执行价～可接受价范围，否则显示价区｜缠论｜威科夫参考价
-- 数据长度：日线 120 根（原 30）、15m 800 根（原 60）、5m 800 根（不变）
+**T0 结构参考卡 v2（现行）**：
+标题 → 结构结论（位置/强弱 · 人决策）→ `📌 结构`（关注价，非下单）→ `🔗 参考`（评分仅参考）→ 看法失效 → 资金 → 有持仓才降本。
+- VWAP 只用今日 session（`session_5m_bars` / 当日过滤，避免跨日污染）
+- 数据长度：日线 120 / 5m 800（及配置约定的 15m 等）
+- 机械 5m 信号回测已收工，不进自动执行
+- 契约模板：`01-功能包-packages/t0/references/output-template.md`
 
 ### 3.3 review（盘后复盘 + 仓位轮动 + 信号追踪）
 
-**入口**: `scripts/final_review.py`（盘后复盘）/ `scripts/final_portfolio.py`（仓位轮动）/ `scripts/final_tracker.py`（信号追踪）
-**子模块**: `review_model.py` / `review_render.py` / `review_single.py` / `review_compare.py` / `review_store.py` / `candidate_model.py` / `portfolio_run.py`
+**入口**: `scripts/final_review.py` / `scripts/final_portfolio.py` / `scripts/final_tracker.py`（包内引擎文件多为 shim）
+**引擎（改这里）**: `trader_shared/review_core.py` / `review_render.py` / `portfolio_core.py` / `portfolio_run.py`；包内可保留 `review_model.py` / `candidate_model.py` 等薄适配
 
 **五层理论分析** (`theory_verdicts()`):
 

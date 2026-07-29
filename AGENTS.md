@@ -17,6 +17,31 @@
 
 ---
 
+## 改代码去哪（编程 Agent）
+
+路径均相对 `02-共享模块-shared/trader_shared/`，除非另写包路径。
+
+| 要改什么 | 改哪里（真相） | 勿改 |
+|----------|----------------|------|
+| 单票编排顺序 | `report_builder.py` | 在 stage 里堆无关业务 |
+| 流水线阶段 | `report_pipeline/{fusion,structure,chip,assemble,context}_stage.py` 等 | 把大段逻辑塞回 builder |
+| 短中线文案 | `report_renderer/short_midline.py` | 手拼面板 / 改旧 `📍 决策` |
+| Fusion 生产路径 | `fusion_core.py` + `analysis/cards.py` | 加厚 classic 当主路径 |
+| Classic 映射（对照） | `fusion_classic_mappers.py` | 在 cards 路径复制一份映射 |
+| 选股池逻辑 | `01-功能包-packages/trader/scripts/pool_cmds/*` | 把逻辑写回 `final_pool.py` |
+| T0 引擎 | `t0_core.py` / `t0_run.py` / `t0_monitor.py` / `t0_*.py` | 只改包内 shim 正文 |
+| 复盘 / 仓位 | `review_core.py` / `review_render.py` / `portfolio_*.py` | 在 skill 包复制实现 |
+| Skill 包内 `scripts/*.py` | identity shim（`sys.modules[__name__] = _impl`） | 复制一份完整引擎 |
+
+铁律：
+
+1. **引擎只在 `trader_shared/`**；`01-功能包-packages/{t0,review}/scripts/` 下同名文件是 shim，靠模块身份替换保证 monkeypatch。
+2. **`final_pool.py` 只做 CLI 薄入口**；入池/评分/plan/rank 进 `pool_cmds/`（如 `scoring.py`、`plan_view.py`）。
+3. **改输出**：`short_midline.py` → 刷新 golden → 骨架变了再动 `output-template.md`。
+4. **运行侧 Agent** 仍只读 `agent-quickstart.md`（跑脚本贴 markdown）；**改实现**以本表 + 法源为准。
+
+---
+
 ## 业务全景
 
 A 股交易决策辅助系统。免费行情 + 缠论 / 威科夫 / 筹码 / ATR，输出标准化 Markdown 面板。

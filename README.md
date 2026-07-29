@@ -33,39 +33,47 @@ bash scripts/run-gate-tests.sh
 
 ```
 Trader3.0/
-├── AGENT.md                    ← AI Agent 开发宪法（最高规范）
-├── ARCHITECTURE.md             ← 系统架构
+├── AGENTS.md                   ← Agent 入口（含「改代码去哪」）
+├── AGENTS_DEEP.md              ← 算法 / 满分示例 / 深度契约
 ├── BUSINESS.md                 ← 业务逻辑
 ├── README.md                   ← 本文件
 │
-├── 02-共享模块-shared/         ← 核心共享库
-│   ├── trader_shared/          ← Python 包（核心共享库）
-│   │   ├── report_builder.py   ← 总编排器
-│   │   ├── fusion_core.py      ← 融合决策
+├── 02-共享模块-shared/         ← 核心共享库（引擎真相）
+│   ├── trader_shared/
+│   │   ├── report_builder.py   ← 单票编排（只排队）
+│   │   ├── report_pipeline/    ← 流水线各 stage
+│   │   ├── fusion_core.py      ← 融合（生产 = cards）
+│   │   ├── t0_*.py             ← T0 引擎
+│   │   ├── review_*.py / portfolio_*.py
 │   │   ├── plugins/            ← 分析插件
-│   │   ├── config.py           ← 全局配置
-│   │   └── testing/            ← 测试 mock
-│   └── tests/                  ← 测试（~70 文件）
+│   │   └── config.py
+│   └── tests/
 │
-├── 01-功能包-packages/         ← CLI 入口
-│   └── trader/scripts/
-│       ├── final_report.py     ← 单票分析
-│       ├── final_pool.py       ← 选股池
-│       └── run_analysis.py     ← 分析执行器
+├── 01-功能包-packages/         ← Skill CLI + shim
+│   ├── _common/agent-rules.md
+│   ├── trader/scripts/
+│   │   ├── final_report.py     ← 单票分析入口
+│   │   ├── final_pool.py       ← 选股池薄入口
+│   │   └── pool_cmds/          ← 选股池实现
+│   ├── t0/scripts/             ← final_t0 + identity shim → trader_shared
+│   └── review/scripts/         ← final_review / portfolio + shim
 │
 ├── scripts/                    ← 项目级脚本
 │   ├── run-gate-tests.sh       ← CI 门禁
-│   └── golden_diff_gate.py    ← Golden 闸门
+│   └── golden_diff_gate.py
 │
-└── docs/                       ← 设计文档 + ADR
+└── docs/designs/               ← 法源（含 resonance-and-orchestration.md）
 ```
+
+改实现优先读 `AGENTS.md`「改代码去哪」，不要在 skill shim 里复制引擎。
 
 ## 文档体系
 
 | 文档 | 读者 | 内容 |
 |------|------|------|
-| **AGENT.md** | AI Agent | 开发宪法：架构、流程、规范、速查 |
-| **ARCHITECTURE.md** | 开发者 / Agent | 系统架构、模块清单、依赖关系 |
+| **AGENTS.md** | AI Agent | 快路径 + 改代码地图 + 红线摘要 |
+| **AGENTS_DEEP.md** | 开发者 / Agent | 算法细节、满分示例、深度契约 |
+| **docs/designs/resonance-and-orchestration.md** | Agent | 五层+编排法源 |
 | **BUSINESS.md** | 开发者 / 业务人员 | 业务逻辑、计算规则、报告规则 |
 | **README.md** | 所有人 | 项目简介、快速开始 |
 
@@ -78,7 +86,7 @@ Trader3.0/
 
 ## 开发方式
 
-1. **阅读**：`AGENT.md`（最高规范）→ `ARCHITECTURE.md` → `BUSINESS.md`；冲突以 `trader_shared/` 代码为准
-2. **开发**：遵守分层架构 + 插件化
+1. **阅读**：`AGENTS.md`（含「改代码去哪」）→ 法源 `docs/designs/resonance-and-orchestration.md` → 按需 `AGENTS_DEEP.md` / `BUSINESS.md`；冲突以 `trader_shared/` 代码为准。旧 `AGENT.md` 已降级，勿当主入口。
+2. **开发**：引擎改 `trader_shared/`；选股池改 `pool_cmds/`；skill 包内同名脚本多为 shim
 3. **测试**：`bash scripts/run-gate-tests.sh`
 4. **推送**：`git push`（自动触发门禁）

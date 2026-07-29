@@ -1,12 +1,12 @@
 # 目标架构法源：五层 + 编排 · 岗位共振 · 多场景
 
-> **状态**：产品方向已定 · 分支 `feat/resonance-orchestration`  
-> **版本**：v0.6 · 2026-07-19（阶段 5 起步：pipeline 抽出卡→决策栈）  
-> **读者**：**所有后续 Agent / 人类**——只读本文 + `AGENT.md` 即可接上方向  
-> **报告/T0/池面板版式**：未定（本文只定职责与字段，不定 emoji 排版）  
+> **状态**：产品方向已定 · 已合入 `main`  
+> **版本**：v0.7 · 2026-07-29（阶段 5：`report_pipeline/` 分包 + t0/review/portfolio 引擎下沉 `trader_shared`）  
+> **读者**：**所有后续 Agent / 人类**——只读本文 + `AGENTS.md`（含「改代码去哪」）即可接上方向  
+> **报告/T0/池面板版式**：单票短中线双轨 + T0 结构参考卡 v2 已定；本文仍以职责与字段为主  
 > **冲突时**：以本文产品铁律 + `trader_shared/` 实现为准；旧文若写「fusion 打分当总司令」视为过时  
 
-**备份**：本文件在 git 版本库内（`docs/designs/`）；合入 main 前以分支提交为准。勿只写在对话里。
+**备份**：本文件在 git 版本库内（`docs/designs/`）。勿只写在对话里。
 
 ---
 
@@ -16,8 +16,8 @@
 2. **不当**：厚 `weighted_score` 加权融合当分王；策略/展示层重跑缠论威科夫检测。  
 3. **架构**：数据 / 分析 / 共振+策略+决策 / 展示 + **编排总管**（只排队）。  
 4. **可扩展**：新理论→分析卡；新原典→策略 YAML；新用法→新编排入口（T0/池/候选池/仓位）读同一字段。  
-5. **代码现状**：阶段 1～3 已落地：`resonance` + 策略 context + `decision_view`（新开只收紧）。fusion 分仍存在，目标继续降权。  
-6. **详细边界**：`analysis-strategy-boundaries.md`；意见卡：`analysis-opinion-cards.md`。
+5. **代码现状**：阶段 1～3 已落地：`resonance` + 策略 context + `decision_view`（新开只收紧）。阶段 5：`report_pipeline/` 分包、引擎下沉、`pool_cmds/` 拆分已合入。fusion 分仍存在，目标继续降权（生产路径 = cards）。  
+6. **详细边界**：`analysis-strategy-boundaries.md`；意见卡：`analysis-opinion-cards.md`。改实现见 `AGENTS.md`「改代码去哪」。
 
 ---
 
@@ -69,7 +69,7 @@ CLI / Skill（trader · t0 · review · portfolio …）
 
 | 层 | 干什么 | 不干什么 | 代码锚点（现行） |
 |----|--------|----------|------------------|
-| **编排** | 按序调用各层，写 report/卡片 dict | 内嵌检测、加权公式、人话业务堆砌 | `report_builder.build_report`；t0/pool/portfolio scripts |
+| **编排** | 按序调用各层，写 report/卡片 dict | 内嵌检测、加权公式、人话业务堆砌 | `report_builder.build_report`；`pool_cmds`；t0/review CLI 入口（引擎在 shared） |
 | **数据** | 行情、快照、缓存、HA | 理论判断 | `data_provider` / `light_data` / `cache_utils` |
 | **分析** | 理论计算 → **意见卡** | 互相加权成唯一真理；直接写「买30%」 | `analysis/`、`plugins/`、各 `*_core` |
 | **共振** | 岗位 ✓/✗、档、冲突、缺岗 | 计票打分；重跑检测 | `resonance.py` → `report["resonance"]` |
@@ -190,12 +190,13 @@ report["resonance"] = {
 | 策略包 / 六闸 | `strategy-pack.md` / `strategy-gates.md` |
 | 共振实现 | `trader_shared/resonance.py` |
 | 薄决策视图 | `trader_shared/decision_view.py` → `report["decision_view"]` |
-| 阶段函数 | `trader_shared/report_pipeline.py`（卡→共振→策略→决策） |
-| 单票编排 | `trader_shared/report_builder.py` |
+| 流水线阶段包 | `trader_shared/report_pipeline/`（`fusion_stage` / `structure_stage` / `chip_stage` / `assemble_stage` / `attach` 等） |
+| 单票编排 | `trader_shared/report_builder.py`（只排队） |
 | 策略匹配 | `trader_shared/strategy/match.py` |
-| T0 | `01-功能包-packages/t0/` |
-| 选股池 | `01-功能包-packages/trader/scripts/final_pool.py` |
-| Agent 总入口 | `AGENT.md` / `AGENTS.md` |
+| T0 引擎 | `trader_shared/t0_*.py`；包内 `01-功能包-packages/t0/scripts/` 为 identity shim |
+| 复盘 / 仓位引擎 | `trader_shared/review_*.py` / `portfolio_*.py`；包内 scripts 为 shim |
+| 选股池 | `trader/scripts/final_pool.py`（薄入口）+ `trader/scripts/pool_cmds/` |
+| Agent 总入口 | `AGENTS.md`（改代码地图）/ `AGENTS_DEEP.md` |
 
 ---
 

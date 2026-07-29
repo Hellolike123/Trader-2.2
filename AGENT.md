@@ -1,8 +1,8 @@
-# AGENT.md — Trader3.0 AI Agent 开发宪法
+# AGENT.md — 已降级（勿当主入口）
 
-> **读者**：所有进入本项目的 AI Agent。
-> **目的**：仅通过阅读本文档，Agent 即可理解项目全貌、掌握开发规范、独立继续开发。
-> **优先级**：本文档是项目最高规范。任何 Agent 必须先读本文档再动手。
+> **停**：改代码 / 接任务请先读 [`AGENTS.md`](AGENTS.md)（含「改代码去哪」）与法源 [`docs/designs/resonance-and-orchestration.md`](docs/designs/resonance-and-orchestration.md)。  
+> **本文档已过时**：目录树、选股池、T0 路径等可能仍写 monolith；**冲突时以 `AGENTS.md` + `trader_shared/` 实现为准**。  
+> 下文仅作历史参考，禁止再按「修改 `final_pool.py` 整文件」等旧指引施工。
 
 ---
 
@@ -409,7 +409,7 @@ python scripts/golden_diff_gate.py capture
 
 ### 5.5 新增选股池功能
 
-修改 `final_pool.py`，遵守三关筛选门控（阶段→评分→风控）。评分阈值在 `config.py`。
+> **已过时**：实现在 `01-功能包-packages/trader/scripts/pool_cmds/`；`final_pool.py` 仅薄 CLI。见 `AGENTS.md`「改代码去哪」。
 
 ---
 
