@@ -16,7 +16,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
 import random
 import sys
@@ -24,9 +23,10 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 import trader_shared
+from trader_shared._logging import get_logger
 from trader_shared.light_data import to_float
 
-_logger = logging.getLogger(__name__)
+_logger = get_logger(__name__)
 
 # ── 默认路径 ─────────────────────────────────────────────────────────────────
 TRADER_DIR = Path.home() / ".trader"
@@ -387,7 +387,7 @@ def load_calibrated_params() -> Dict[str, Any]:
 def main() -> None:
     """CLI 入口：盘后/周末离线执行。"""
     import logging
-    log = logging.getLogger("trader_shared.self_calibration")
+    log = _logger
     if not log.handlers:
         logging.basicConfig(level=logging.INFO, format="%(message)s")
     log.info("=" * 60)

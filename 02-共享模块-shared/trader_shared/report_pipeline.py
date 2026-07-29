@@ -6,10 +6,11 @@
 """
 from __future__ import annotations
 
-import logging
 from typing import Any, Callable
 
-_logger = logging.getLogger(__name__)
+from trader_shared._logging import get_logger
+
+_logger = get_logger(__name__)
 
 MarkFn = Callable[[str], None]
 

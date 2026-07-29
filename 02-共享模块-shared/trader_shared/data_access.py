@@ -14,12 +14,12 @@
 """
 from __future__ import annotations
 
-import logging
 from typing import Any
 
+from trader_shared._logging import get_logger
 from trader_shared.data_provider import get_provider
 
-_logger = logging.getLogger(__name__)
+_logger = get_logger(__name__)
 
 
 def _provider_and_sec(target: str):

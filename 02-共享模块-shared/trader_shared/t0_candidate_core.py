@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from trader_shared._logging import get_logger
 from trader_shared.light_data import pct_change, to_float
 from trader_shared.safe_cast import safe_float
+
+_logger = get_logger(__name__)
 
 try:
     from trader_shared.config import CONFIRM_BUFFER
@@ -151,7 +154,7 @@ def status_for(current: float, support: float, low_zone_upper: float, confirm: f
         )
     except ImportError:
         import logging
-        logging.getLogger(__name__).debug("decision_core unavailable, using T0 fallback status_for")
+        _logger.debug("decision_core unavailable, using T0 fallback status_for")
     # Fallback: original T0-only logic (T0 skill may lack decision_core)
     _FUSION_STATUS_MAP: dict[str, str] = {
         "半仓试 (多方主导)": "低吸观察",

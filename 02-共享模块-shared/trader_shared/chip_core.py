@@ -1,9 +1,9 @@
 from __future__ import annotations
 from typing import Any
-import logging
+from trader_shared._logging import get_logger
 from trader_shared.light_data import to_float
 
-_logger = logging.getLogger(__name__)
+_logger = get_logger(__name__)
 
 try:
     from trader_shared.chip_distribution import calc_chip_distribution

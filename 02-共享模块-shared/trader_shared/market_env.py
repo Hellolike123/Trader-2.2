@@ -192,7 +192,9 @@ def assess() -> dict[str, Any]:
         cached_bars = _cached_env.get("bars", [])
         if cached_bars and bars:
             # 用缓存的历史 bars 替代（更完整），追加今天的实时 bar
-            today_str = __import__("datetime").datetime.now().strftime("%Y-%m-%d")
+            # 用 bars 中最新交易日而非墙钟，避免 backtest / 盘前用错"今天"
+            _dates = [b.get("date") or b.get("time") or "" for b in bars if b.get("date") or b.get("time")]
+            today_str = max(_dates) if _dates else __import__("datetime").datetime.now().strftime("%Y-%m-%d")
             # 去重：保留缓存中非今日的数据 + 实时数据
             merged = [b for b in cached_bars if b.get("date") != today_str]
             merged.extend(bars)  # bars 里有今天的实时数据
@@ -242,9 +244,9 @@ def assess() -> dict[str, Any]:
                     vol_series.append(1.0)
                 else:
                     vol_series.append(volumes[i] / (sum(window) / len(window)))
-            if len(index_returns) >= 5 and len(vol_series) == len(index_returns):
-                from trader_shared.hmm_regime import detect_regime
-                hmm_res = detect_regime(index_returns, volume_ratio=vol_series)
+                if len(index_returns) >= 5 and len(vol_series) == len(index_returns):
+                    from trader_shared.hmm_regime import detect_regime
+                    hmm_res = detect_regime(index_returns, volume_ratio=vol_series)
                 hmm_regime_en = hmm_res.get("state_en", "range")
                 hmm_regime_label = hmm_res.get("state_label", "宽幅震荡")
                 hmm_confidence = hmm_res.get("confidence", 0.5)

@@ -13,9 +13,9 @@ from __future__ import annotations
 # display_only 标记，供 plugin_registry 分层加载时识别
 display_only: bool = True
 
-import logging
+from trader_shared._logging import get_logger
 
-_logger = logging.getLogger(__name__)
+_logger = get_logger(__name__)
 
 
 def _bar_session_day(b) -> str | None:

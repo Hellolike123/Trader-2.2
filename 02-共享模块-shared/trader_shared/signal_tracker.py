@@ -610,7 +610,7 @@ try:
         def to_float(v):
             if v is None: return None
             try: return float(str(v).replace(",", ""))
-            except: return None
+            except Exception: return None
 except ImportError:
     HttpClient = None
     resolve_security = None

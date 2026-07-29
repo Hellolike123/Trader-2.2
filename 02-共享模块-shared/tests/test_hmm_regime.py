@@ -369,23 +369,31 @@ class TestMarketEnvHMMFallback:
         import logging
         from unittest.mock import patch
 
-        from market_env import assess
+        from trader_shared.market_env import assess
 
         # Force detect_regime to raise an exception (simulating garbage closes / NaN)
         def _boom(_returns):
             raise ZeroDivisionError("simulated closes[i-1] == 0")
 
+        # caplog 默认只附在 root logger 上。trader.market_env 的 DEBUG 消息
+        # 传播到 root 时，如果 root logger 级别高于 DEBUG 则 caplog 收不到。
+        # 因此同时设置 root logger 和 trader.market_env 的级别。
+        # 另：文件缓存（~/.trader/cache/）可能已有今日数据，会短路 assess() 的
+        # _fetch_index_data() 调用，使 mock detect_regime_boom 永不触发。
+        # 因此同时 mock cache_utils.get_cached → None 以绕过文件缓存。
         with caplog.at_level(logging.DEBUG, logger="trader.market_env"), \
+             caplog.at_level(logging.DEBUG), \
              patch.dict("os.environ", {"TRADER_LOG_LEVEL": "DEBUG"}), \
+             patch("trader_shared.cache_utils.get_cached", return_value=None), \
              patch("trader_shared.hmm_regime.detect_regime", _boom):
-            with patch("market_env._fetch_index_data") as mock_fetch, \
-                 patch("market_env._is_market_open_now", return_value=False):
+            with patch("trader_shared.market_env._fetch_index_data") as mock_fetch, \
+                 patch("trader_shared.market_env._is_market_open_now", return_value=False):
                 mock_fetch.return_value = {
                     "current": 5000.0,
                     "pre_close": 4900.0,
                     "change_pct": 2.04,
                     "bars": [
-                        {"date": f"2026-05-{(i % 28) + 1:02d}", "close": 4900.0 + i}
+                        {"date": f"2026-05-{(i % 28) + 1:02d}", "close": 4900.0 + i, "volume": 1000000}
                         for i in range(60)
                     ],
                 }
