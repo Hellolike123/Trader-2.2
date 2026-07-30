@@ -3,22 +3,24 @@ name: t0
 description: Use for intraday A-share T0 structure reference cards and monitoring. Run the script and paste markdown; do not hand-write panels or issue executable order language.
 ---
 
-# T0 — AI 盘中结构参考
+# T0 — 执行包装器（盘中结构参考）
 
 盘中结构参考卡（策略 v2.4 行动卡）。顺序：基调 → 点位仓位 → 盈亏测算 → 风控。  
 **不做**机械下单指令；禁止「可执行/可低吸/三重共振买」叙事。  
 法源：`docs/t0-strategy-v2.md`。共用硬规则：`references/agent-rules.md`。
 
-## 快路径（先做这个）
+## 做且只做
 
-只读 `references/agent-quickstart.md`（若尚未读过）。然后：
+1. 只读 `references/agent-quickstart.md`（若尚未读过）
+2. 跑入口脚本
+3. 成功 → stdout **整段放进 fenced code block 原样贴出** → Exit
+4. 失败 → 只报错误/降级；禁止手写/编造面板
 
 ```bash
 python3 scripts/final_t0.py --target <NAME>
 ```
 
-成功 → 原样贴出 stdout → 停。  
-禁止预读全部 references；禁止默认 `--output json`；禁止手写面板。
+禁止预读全部 references；禁止默认 `--output json`。
 
 ## 今天可不做（使用纪律，不是信号）
 
@@ -42,13 +44,14 @@ python3 scripts/final_t0.py --target <NAME>
 | 带持仓 / 纪律 | 加 `--cost` `--position`；`--t-mode` 仅为持仓纪律参考 |
 | 台账 | `--ledger` / `--ledger-add ...` |
 
+仓库根 cwd 时前缀改为 `python3 01-功能包-packages/t0/scripts/...`。
 JSON 仅当渲染失败或需额外字段时使用。
 
 ## 工作流
 
-1. 跑命令拿 stdout  
-2. markdown 成功 → 输出并 Exit  
-3. 仅失败时用 `--output json`，再按需读 `ai-guide.md`  
+1. 跑命令拿 stdout
+2. markdown 成功 → 整段 code fence 贴出并 Exit
+3. 仅失败时用 `--output json`，再按需读 `ai-guide.md`
 4. 门控见 quickstart
 
 ## 什么时候先问用户

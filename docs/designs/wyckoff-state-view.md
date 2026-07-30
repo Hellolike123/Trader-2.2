@@ -63,7 +63,7 @@ print(view["phase"], view["bias"], view["summary_oneline"])
 2. 报告渲染改为优先读 View  
 3. `calculate_wyckoff_score` 输入 View  
 
-在此之前：**生产主路径可继续只读旧 dict**；View 供文档、Agent、渐进迁移。
+现状：**单票 🧭 威科夫行与 wyckoff skill 卡已读 View**（`format_midline_display` / `to_wyckoff_state_view`）；仅少数 legacy 路径仍消费旧 dict。新 Agent/渲染优先 View。
 
 ## 非目标
 

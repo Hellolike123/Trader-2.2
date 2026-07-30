@@ -13,6 +13,9 @@
 | `max_move` | str | 建议仓位（`position_size` 认 v2 today_action + 旧枚举） | 底仓的 10%-20%/底仓的 20%-30%/不动 |
 | `position_score` | int | 多空位置评分 1-10 | 5 |
 | `volume_score` | int | 量价评分 1-10 | 6 |
+| `resonance` | dict | T0 **结构评分卡**（`t0_structure_score_v1`）；**不是**单票报告的 `pullback_probe` / `attach_resonance` | `{"schema":"t0_structure_score_v1","score":60,"buy_green":false,…}` |
+| `resonance_schema` | str | 固定 `t0_structure_score_v1`（与报告侧共振命名隔离） | t0_structure_score_v1 |
+| `structure_ref` | dict\|null | 结构参考摘要（可选）；供人读，不构成下单指令 | `{"vwap":14.25,"bias":"偏强"}` |
 | `amplitude_pct` | float | 日内振幅 | 0.025 |
 | `space_state` | str | 振幅状态 | too_small/normal/good |
 | `vwap` | float | VWAP | 14.25 |

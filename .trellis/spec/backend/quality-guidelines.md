@@ -214,7 +214,7 @@ except ImportError:
 ### 7. Env-Var Feature Flags
 
 ```python
-FUSION_OVERRIDE_ENABLED: bool = os.environ.get("FUSION_OVERRIDE_ENABLED", "true").lower() in ("true", "1", "yes")
+FUSION_OVERRIDE_ENABLED: bool = os.environ.get("FUSION_OVERRIDE_ENABLED", "false").lower() in ("true", "1", "yes")
 ```
 
 Pattern: `os.environ.get("KEY", "default").lower() in ("true", "1", "yes")`

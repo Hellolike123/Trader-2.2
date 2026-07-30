@@ -2,10 +2,11 @@
 """隐马尔可夫模型大势状态检测器 (HMM Regime Detector)
 
 完全基于 numpy 实现，零重量级依赖。
-用于将大盘指数收益率与波动率序列映射为三种隐藏市场状态：
+用于将大盘指数收益率与波动率序列映射为三种隐藏市场状态
+（与 REGIME_LABELS / REGIME_EN 及 fit 后按 mu 排序一致）：
   - 状态 0: 低波上涨 (Bull)
-  - 状态 1: 高波下跌 (Bear)
-  - 状态 2: 宽幅震荡 (Range)
+  - 状态 1: 宽幅震荡 (Range)
+  - 状态 2: 高波下跌 (Bear)
 
 用法:
     from trader_shared.hmm_regime import HMMRegimeDetector

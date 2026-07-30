@@ -941,30 +941,71 @@ _provider: DataProvider | None = None
 _provider_set = False
 
 
+def _tushare_available() -> bool:
+    try:
+        from trader_shared.tushare_client import get_client as _get_ts_client
+
+        return bool(_get_ts_client().available)
+    except Exception:
+        return False
+
+
+def _provider_from_name(name: str) -> DataProvider | None:
+    """按名字构造 Provider。tdx = 本地 mootdx/pytdx 链（全量 Tdx MCP 行情尚未单立 Provider）。"""
+    n = (name or "").strip().lower()
+    if n == "tushare":
+        if _tushare_available():
+            return TushareProvider()
+        _logger.warning("TRADER_DATA_PROVIDER=tushare but token unavailable")
+        return None
+    if n == "tdx":
+        # 第一期：行情侧用 mootdx（通达信系本地源）；资金流另走 fund_flow tdx HTTP
+        return UnifiedProvider(backend="mootdx")
+    if n in ("mootdx", "akshare", "tencent"):
+        return UnifiedProvider(backend=n)
+    return None
+
+
 def get_provider() -> DataProvider:
-    """Return the current DataProvider instance (lazy init via TRADER_DATA_PROVIDER env var)."""
+    """Return the current DataProvider instance.
+
+    选源顺序：
+    1. set_provider 注入
+    2. TRADER_DATA_PROVIDER 强制（修：有 Tushare token 时也会生效）
+    3. 按 TRADER_HOST / 探测：WorkBuddy 优先 tushare→mootdx→tencent（资金流另优先 tdx）
+       Hermes/local：tushare→tencent
+    """
     global _provider
     if _provider is not None:
         return _provider
 
-    # Tushare 主源（当 token 可用时默认启用）
-    try:
-        from trader_shared.tushare_client import get_client as _get_ts_client
-        if _get_ts_client().available:
-            _provider = TushareProvider()
-            _logger.info("DataProvider: using tushare (primary source)")
+    forced = os.environ.get("TRADER_DATA_PROVIDER", "").strip().lower()
+    if forced:
+        built = _provider_from_name(forced)
+        if built is not None:
+            _provider = built
+            _logger.info("DataProvider: using %s (via TRADER_DATA_PROVIDER)", forced)
             return _provider
-    except Exception:
-        pass
+        _logger.warning(
+            "TRADER_DATA_PROVIDER=%s unavailable; falling back to host defaults", forced
+        )
 
-    provider_name = os.environ.get("TRADER_DATA_PROVIDER", "").lower()
-    if provider_name in ("mootdx", "akshare"):
-        _provider = UnifiedProvider(backend=provider_name)
-        _logger.info("DataProvider: using %s (via TRADER_DATA_PROVIDER)", provider_name)
+    from trader_shared.trader_host import HOST_WORKBUDDY, detect_trader_host
+
+    host = detect_trader_host()
+    if _tushare_available():
+        _provider = TushareProvider()
+        _logger.info("DataProvider: using tushare (host=%s)", host)
+        return _provider
+
+    if host == HOST_WORKBUDDY:
+        # 无 Tushare 时 WorkBuddy 走本地通达信系，再降级腾讯
+        _provider = UnifiedProvider(backend="mootdx")
+        _logger.info("DataProvider: using mootdx (host=workbuddy, no tushare)")
         return _provider
 
     _provider = UnifiedProvider(backend="tencent")
-    _logger.info("DataProvider: using tencent")
+    _logger.info("DataProvider: using tencent (host=%s)", host)
     return _provider
 
 
@@ -976,3 +1017,9 @@ def set_provider(p: DataProvider) -> None:
     """
     global _provider
     _provider = p
+
+
+def clear_provider() -> None:
+    """测试用：清空全局 Provider，下次 get_provider 重新选源。"""
+    global _provider
+    _provider = None

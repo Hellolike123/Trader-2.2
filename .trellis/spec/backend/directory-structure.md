@@ -153,7 +153,7 @@ for p in (ROOT / "01-行情数据-market-data", ROOT / "02-候选逻辑-candidat
 
 ```python
 # Pattern for env-var controlled features
-FUSION_OVERRIDE_ENABLED: bool = os.environ.get("FUSION_OVERRIDE_ENABLED", "true").lower() in ("true", "1", "yes")
+FUSION_OVERRIDE_ENABLED: bool = os.environ.get("FUSION_OVERRIDE_ENABLED", "false").lower() in ("true", "1", "yes")
 ```
 
 ---

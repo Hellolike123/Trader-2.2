@@ -175,12 +175,17 @@ class VolumeProfile:
         }
 
 
-def compute_volume_profile(bars: List[Dict[str, Any]], n_bins: int = 50) -> Dict[str, Any]:
+def compute_volume_profile(
+    bars: List[Dict[str, Any]],
+    n_bins: int = 50,
+    value_area_ratio: float = 0.70,
+) -> Dict[str, Any]:
     """一站式日内成交量分布计算函数。
 
     Args:
         bars:   分钟 K 线列表（5m / 15m / 30m 均可）
         n_bins: 价格网格分辨率
+        value_area_ratio: 价值区覆盖比例（默认 70%）
 
     Returns:
         {
@@ -195,6 +200,7 @@ def compute_volume_profile(bars: List[Dict[str, Any]], n_bins: int = 50) -> Dict
         }
     """
     vp = VolumeProfile(n_bins=n_bins)
+    vp.value_area_ratio = float(value_area_ratio) if value_area_ratio else 0.70
     vp.fit(bars)
 
     result = vp.to_dict()

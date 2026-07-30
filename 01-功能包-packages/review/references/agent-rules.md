@@ -1,18 +1,23 @@
 # Agent 共用硬规则（SSOT）
 
-四 Skill（trader / t0 / review / wyckoff）共用。改红线只改本文件；各 skill `references/agent-rules.md` 由本文件同步（或 `pack_all` 复制）。
+五 Skill（trader / t0 / review / wyckoff / daily_briefing）共用。改红线只改本文件；各 skill `references/agent-rules.md` 由本文件同步（或 `pack_all` 复制）。
 
-## 快路径
+## 执行契约（CRITICAL）
+
+本 skill 是**命令包装器**，不是分析知识库。
 
 1. 只预读该 skill 的 `references/agent-quickstart.md`
 2. 跑入口脚本，默认渲染输出（markdown）
-3. stdout **原样贴出** → 停
+3. stdout **原样贴出**（整段放进 fenced code block）→ 停
 4. 禁止开工前批量读 references
 5. **禁止默认 `--output json`**（整包可达数百 KB）；仅 markdown 失败或确需字段时再开 JSON
+6. **禁止**改写、摘要、润色、补买卖建议、补脚本未写的价位/阶段/出手
+7. **脚本未成功产出面板** → 只报失败/降级原因；**禁止**凭记忆或训练数据编完整报告
+8. markdown 成功时**不要读** `anti-hallucination.md` / 字段指南（那些只服务 JSON 回退）
 
 ## 微信 / 移动端红线
 
-最终面板会进微信。生成或转述输出时禁止：
+最终面板会进微信。贴出脚本面板时禁止改写成：
 
 - `#` / `##` 等 Markdown 标题
 - `---` / `***` 水平线
@@ -22,6 +27,7 @@
 - `*` / `-` 列表符与带圈数字
 
 分节用 emoji + 普通文本独立成行（如 `🧭 中线`、`⚡ 短线`）。
+脚本已按红线渲染时：原样贴即可，不要「再排版」。
 
 ## 命令 cwd
 
@@ -44,6 +50,6 @@
 | Fusion 席位（生产） | `analysis/fusion_card_signals.py`（cards 路径；失败 warning→classic） |
 | ATR 移动止损水位 | `structure_core`（持仓票 `~/.trader/trailing_stop_watermark.json`，只紧不松） |
 | 买点盖价 | `buy_point_lifecycle.resolve_lid_price`（显式>回踩下沿>买区下沿>支撑；不用 life_line 当回踩） |
-| 微信红线本身 | 只改本文件，再 sync 三 Skill 的 `references/agent-rules.md` |
+| 微信红线本身 | 只改本文件，再 sync 各 Skill 的 `references/agent-rules.md` |
 
 生产唯一渲染：短中线（`SHORT_MIDLINE_REPORT=false` 已忽略）。Fusion 默认 `cards`；classic 仅对照（deprecated）。出手听 `decision_view`（entry 须 executable），fusion 分仅仪表；`FUSION_OVERRIDE_ENABLED` 默认 false。

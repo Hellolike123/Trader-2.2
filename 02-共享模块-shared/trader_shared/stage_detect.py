@@ -157,7 +157,8 @@ def _assess_volume_price(
     avg_vol_5 = sum(vol_5) / max(len(vol_5), 1)
     avg_vol_20 = sum(vol_20) / max(len(vol_20), 1)
     if avg_vol_20 <= 0:
-        return 0.0, "", ""
+        # 须返回 (str, float, str)；旧 (0.0,"","") 会污染 major_stage / 打崩 assess_stage
+        return "蓄势", 30.0, "量能缺失，默认蓄势"
     vol_ratio = avg_vol_5 / avg_vol_20
 
     # P1 Fix: 计算 5 日涨幅时，剔除历史单日涨跌幅 > 7% 的跳空缺口日，

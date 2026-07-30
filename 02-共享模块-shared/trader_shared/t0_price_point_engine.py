@@ -138,7 +138,7 @@ def completed_5m_bars(bars: list[dict[str, Any]], now: datetime | None = None) -
             continue
         dt = parse_dt(bar.get("time") or bar.get("date"))
         if dt is None:
-            completed.append(bar)
+            # 无时间戳的棒不可判定是否收盘完成，丢弃（与 today_bars 一致，防前视）
             continue
         if dt.date() < now.date():
             completed.append(bar)

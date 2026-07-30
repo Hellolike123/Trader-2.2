@@ -73,6 +73,21 @@ class TestAssessVolumePrice:
         assert stage == "蓄势"
         assert score == 30
 
+    def test_zero_volume_returns_string_stage(self):
+        """20 日均量=0 不得返回 float stage（防污染 major_stage / 打崩 assess_stage）"""
+        from trader_shared.stage_positioning import _assess_volume_price, assess_stage
+        bars = _make_bars([10.0] * 25, [0.0] * 25)
+        stage, score, reason = _assess_volume_price(bars)
+        assert isinstance(stage, str)
+        assert stage == "蓄势"
+        assert isinstance(score, (int, float)) and score == 30
+        # assess_stage 不得因 confidence="" 而 TypeError
+        ma_values = {"ma5": 10.0, "ma10": 10.0, "ma20": 10.0, "ma30": 10.0}
+        with patch("trader_shared.stage_detect._load_stage_state", return_value={}):
+            result = assess_stage(10.0, ma_values, 0.0, bars)
+        assert isinstance(result.get("major_stage"), str)
+        assert result["major_stage"] in ("蓄势", "蓄势偏强", "蓄势偏弱", "主升", "派发", "衰退")
+
 
 # ── _detect_major_stage ──────────────────────────────────────────
 

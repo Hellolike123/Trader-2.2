@@ -45,7 +45,7 @@
 | 模块 | 关系 |
 |------|------|
 | `detect_buy_points` / 缠论 | 产「类型/价」；**不**管失效日 |
-| `chan_discipline` C1 `short_trigger` | 今日是否「有买点类型」；**应**将来叠加 `buy_point_valid` |
+| `chan_discipline` C1 `short_trigger` | 今日是否「有买点类型」；**已**由 `attach_buy_point_lifecycle` 在 `failed` 时强制 `short_trigger=False` / 重写 `entry_line` |
 | `mistery_gate` 失效文案 | 持仓/止损叙事；**不是**买点盖 FSM |
 | `decision_core` 假跌破 | 止损层；**不是**开仓买点盖 |
 | `assess_momentum` | **禁止**用 RSI 分数代替盖生命周期 |
@@ -73,8 +73,8 @@ buy_point_lifecycle:
   note: str                        # 人话一行
 ```
 
-- `short_trigger` 真绿条件建议：`有买点类型 AND status==active`（失败日不得绿）。  
-- 策略闸 `entry`：`status==failed` → 不得 `active` 执行（最多 plan 文案「买点已失效，须重走」）。
+- `short_trigger` 真绿：`有买点类型 AND status==active`（失败日不得绿）— **已落地**于 `attach_buy_point.py`。  
+- 策略闸 `entry`：`status==failed` → 不得 `executable`（`strategy/match.py` L3）— **已落地**。
 
 ---
 

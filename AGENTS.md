@@ -82,12 +82,12 @@ A 股交易决策辅助系统。免费行情 + 缠论 / 威科夫 / 筹码 / ATR
 入池 → python 01-功能包-packages/trader/scripts/final_pool.py add --target <NAME>
 排序 → python 01-功能包-packages/trader/scripts/final_pool.py rank
 明日作战表 → python 01-功能包-packages/trader/scripts/final_pool.py plan
-盘中执行 → python 01-功能包-packages/t0/scripts/final_t0.py --target <NAME> --monitor
+盘中结构参考 → python 01-功能包-packages/t0/scripts/final_t0.py --target <NAME> --monitor
 威科夫卡 → python 01-功能包-packages/wyckoff/scripts/final_wyckoff.py --target <NAME>
 威科夫池链 → python 01-功能包-packages/wyckoff/scripts/final_wyckoff.py rank
 盘后复盘 → python 01-功能包-packages/review/scripts/final_review.py --target <NAME>
 仓位轮动 → python 01-功能包-packages/review/scripts/final_portfolio.py --targets A B
-信号回溯 → python 01-功能包-packages/review/scripts/final_review.py --target <NAME>
+信号回溯 → python 01-功能包-packages/review/scripts/final_tracker.py --stock <NAME>
 ```
 
 Skill 包内把路径换成 `python3 scripts/<同名入口>.py ...`。完整命令映射与自然触发词见 `AGENTS_DEEP.md`。

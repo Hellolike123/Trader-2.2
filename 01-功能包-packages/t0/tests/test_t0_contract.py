@@ -580,6 +580,18 @@ def test_completed_5m_bars_excludes_current_unfinished_bar() -> None:
     ]
 
 
+def test_completed_5m_bars_drops_undated_bars() -> None:
+    """无时间戳棒不得当已完成，防前视。"""
+    bars = [
+        {"time": "2026-04-27 10:00", "close": 1},
+        {"close": 99},  # no time/date
+        {"time": "2026-04-27 10:05", "close": 2},
+    ]
+    out = completed_5m_bars(bars, datetime(2026, 4, 27, 10, 10, 1))
+    assert [bar.get("time") for bar in out] == ["2026-04-27 10:00", "2026-04-27 10:05"]
+    assert all(bar.get("close") != 99 for bar in out)
+
+
 def test_vwap_does_not_steal_main_resistance_when_price_level_is_reasonable() -> None:
     levels = [
         {"name": "5日高点", "price": 12.60, "weight": 1.0},

@@ -43,33 +43,32 @@ Valid first line must look like:
 分析报告 — {名}（{码}）｜短中线
 ```
 
-(Legacy only when `SHORT_MIDLINE_REPORT=false`; do not treat legacy as current product default.)
+(`SHORT_MIDLINE_REPORT=false` **已忽略**，无法回退旧 `🎯`+`📍 决策`；始终 `render_short_midline`。)
 
 ## Short-midline Layout (code order)
 
-Matches `report_core.render_short_midline`:
+Matches `report_renderer/short_midline.py` (`render_short_midline`):
 
 1. Title: `分析报告 — {name}（{code}）｜短中线`
 2. Meta: 现价；`动能 … ｜ 大盘 …`；`MA5 ｜ MA20 ｜ MA250`；可选量比/换手；年线下方警告
 3. `🧭 中线`
-   - `阶段：` ← major_stage（入池/轮动/纪律输入）
-   - `看法：` ← 周线结论（conclusion.midline；非四阶段词）
-   - `威科夫：` / `缠论：` ← `wyckoff_midline` / `chanlun_midline` only
+   - `阶段：` ← major_stage + 可选 `· 偏多/偏空（短因）`（B3C；**无**独立 `看法：` 行）
+   - optional `定论：` ← midline_verdict_note
+   - `威科夫：` / `缠论：` ← View / `*_midline` only
    - optional `位置：` ← pivot_position_weekly
    - `关键价（中线）` 生命线 / 回踩区 / 压力 / 目标 ← `mid_key_prices`（周线引擎，无 🌟）
-4. `⚡ 短线`
-   - `看法：` / 日线缠论 / optional `位置：` / 动能 / `裁定：`
-   - **C1** `新开：否（缺：…）` 或 `新开：可试探（清单全绿）`
-   - `出手：` + optional `分仓：` + optional `失效：`
+4. `⚡ 短线`（A 版读序）
+   - `结构：` → optional 买点 → `状态：` → `动能：` → `资金：`
+   - （空行）→ `共振：` → `新开：` → `动作：` → optional `原因：` → `破位看：`
    - `关键价（短线）` 止损 / 买点区 / `🌟 现价` / 卖点区 + 买/追亏赚两行 ← `key_prices`
 5. optional `说明：` when mid/short conflict
 6. `✅ 亮点` / `⚠️ 风险` / optional `📌 本周只做` / `T0：…` / 入池提示
 
 ## C1 Entry Line
 
-From `chan_discipline.build_entry_checklist` / `format_entry_line_c1`:
+From `chan_discipline.build_entry_checklist` / `format_entry_line_c1`（买点盖失败时由 `attach_buy_point` 强制收紧）:
 
-| Flag | Label in 缺： |
+| Flag | Label |
 |------|----------------|
 | mid_ok | 中线趋势 |
 | in_pullback | 回踩到位 |
@@ -77,17 +76,15 @@ From `chan_discipline.build_entry_checklist` / `format_entry_line_c1`:
 | conf_ok | 融合置信（非「方向一致」） |
 | fund_ok | 筹码资金稳 |
 
-- All five True → `新开：可试探（清单全绿）`
-- Else → `新开：否（缺：A｜B）` (labels joined by `｜`)
+- All five True → `新开：可试探 · 五项齐了`
+- Else → `新开：先别买 · …`（人话缺项，非旧版「否（缺：…）」模板）
 - Display is compact one line; do not expand five ticks unless debugging JSON
-- Render also demotes trial wording in `出手` if checklist not all_green
 
-## Discipline (出手 / 分仓 / 失效)
+## Discipline (动作 / 新开 / 破位看)
 
 - Merge: `mistery_gate` + `chan_discipline` via `merge_discipline` — **only tighten** caps/actions
 - Never rewrite major_stage / fusion scores / support / stop prices via discipline
-- User-facing words: 出手 / 失效 / 纪律 / 新开 / 分仓 — not mi/Mistery
-- `分仓：中线≤x% ｜ 短线≤y% ｜ 总≤z%` when cap fields present
+- User-facing: `动作` / `新开` / `破位看` / 纪律 — not mi/Mistery；**不用「出手」作主标签**
 - Mid target alone must not greenlight a buy; need short trigger + checklist
 
 ## Fixed Keywords
