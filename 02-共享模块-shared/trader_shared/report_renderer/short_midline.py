@@ -393,10 +393,14 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     # 缠论行：合并浪型（状态+信号）+ 方向
     _wave_mid = str(conclusion.get("wave_label_mid") or "").strip()
-    # 结构不足以支撑方向判断时（笔数不足/无法判断/无明确结构），禁止从
-    # trend_label 强叠方向词，否则会出现「笔数不足 · 看跌 · 无法判断」式矛盾。
+    # 结构不足以支撑方向判断时，禁止从 trend_label 强叠看涨/看跌
+    # （历史曾产出「笔数不足 · 看跌 · 无法判断」式矛盾）。
     _insufficient_struct = any(
-        k in _wave_mid for k in ("无法判断", "笔数不足", "无明确结构", "数据不足")
+        k in _wave_mid
+        for k in (
+            "无法判断", "笔数不足", "无明确结构", "数据不足",
+            "先观望", "中枢未成型", "线段不足", "结构待确认",
+        )
     )
 
     # 从缠论结果提取方向词 + 买卖点类型（仅结构充足时）
@@ -472,8 +476,14 @@ def render_short_midline(r: dict[str, Any]) -> str:
             else:
                 _chan_display = f"{_wave_state}{_point_part} · {_chan_dir_mid}"
         else:
-            # 结构不足或无可叠加方向：保持原浪型文案，补「中性」避免与「无法判断」矛盾
-            _chan_display = f"{_wave_mid} · 中性" if _insufficient_struct else _wave_mid
+            # 结构不足且无方向：浪型里已有「先观望/中性」则原样；否则补「先观望」（可执行立场）
+            if _insufficient_struct:
+                if any(k in _wave_mid for k in ("观望", "中性")):
+                    _chan_display = _wave_mid
+                else:
+                    _chan_display = f"{_wave_mid} · 先观望"
+            else:
+                _chan_display = _wave_mid
     else:
         _chan_display = _chan_compact
     lines.append(f"  缠论：{_chan_display}")

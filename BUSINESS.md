@@ -56,12 +56,13 @@
 **报告波段标签**（`conclusion_block._build_wave_label`）：
 | 条件 | 文案 |
 |------|------|
-| strokes &lt; 3 | `笔数不足 · 无法判断` |
-| segments == 1 且有 trend/structure | 笔级叙事 + `线段偏少`（如 `拉升趋势中 · 线段偏少`） |
-| segments == 0 且 strokes ≥ 3 有 trend | 笔级叙事 + `线段未成型` |
+| strokes &lt; 3 | `笔数不足 · 先观望` |
+| segments == 1 且 strokes ≥ 3 | 笔级/结构叙事 + `线段偏少`（如 `拉升趋势中 · 线段偏少`） |
+| segments == 0 且 strokes ≥ 3 有结构/浪型 | 笔级/结构叙事 + `线段未成型` |
+| segments == 0 且 strokes ≥ 3 无结构 | `中枢未成型 · 先观望` |
 | segments ≥ 2 | 按走势分类 / 买卖点 overlay |
 
-**禁止**：`segments < 2` 时仍写「笔数不足」（历史 bug，已修）。
+**禁止**：写「线段不足」或「无法判断」当主结论。段少也要给立场：有结构用结构，没有就「先观望」。
 
 **MACD 与背驰**（`formulas.md` §5.1）：
 - `histogram = DIF − DEA`（×1，非通达信 2×）

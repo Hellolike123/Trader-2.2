@@ -32,8 +32,8 @@ def _build_wave_label(chanlun_daily: Any, current: float = 0.0) -> str:
     divergence = chan.get("divergence") if isinstance(chan.get("divergence"), dict) else {}
     merged_zones = chan.get("merged_zones") if isinstance(chan.get("merged_zones"), list) else []
 
-    # ── 段数不足（<2）：优先用 trend_label / 笔级叙事，禁止误报「笔数不足」──
-    # 历史 bug：条件是 segments<2，文案却写「笔数不足」——有笔无线段时会误导。
+    # ── 段数不足（<2）：优先用 trend_label / structure / 笔级叙事 ──
+    # 禁止「笔数不足」误报（有笔无线段）；禁止「线段不足/无法判断」——段少也要给可执行立场。
     if len(segments) < 2:
         has_sell = any(
             isinstance(p, dict) and p.get("type") and "卖" in str(p.get("type", ""))
@@ -52,20 +52,21 @@ def _build_wave_label(chanlun_daily: Any, current: float = 0.0) -> str:
                 return "回调见底" if has_buy else "回调一笔中"
             if trend_label == "震荡段":
                 return "震荡中"
-            if structure_type and structure_type not in ("", "无结构"):
+            if structure_type and structure_type not in ("", "无结构") and not structure_type.startswith("线段不足"):
                 return structure_type
-            return "趋势待确认"
+            # 真没结构：立场仍是「先观望」，不是「无法判断」
+            return "中枢未成型"
 
-        if len(segments) == 1 and (trend_label or structure_type):
-            _base = _thin_struct_label()
-            return f"{_base} · {_sig}" if _sig else f"{_base} · 线段偏少"
-        # 0 段：若笔足够且有 trend_label（_chanlun_compute 笔级投票），仍可叙事
-        if len(strokes) >= 3 and trend_label and trend_label != "数据不足":
-            _base = _thin_struct_label()
-            return f"{_base} · {_sig}" if _sig else f"{_base} · 线段未成型"
         if len(strokes) < 3:
-            return "笔数不足 · 无法判断"
-        return "线段不足 · 结构待确认"
+            return "笔数不足 · 先观望"
+
+        _base = _thin_struct_label()
+        if _sig:
+            return f"{_base} · {_sig}"
+        if _base == "中枢未成型":
+            return "中枢未成型 · 先观望"
+        _seg_note = "线段偏少" if len(segments) == 1 else "线段未成型"
+        return f"{_base} · {_seg_note}"
 
     # ── 段数足够：用缠论走势分类 ──
     recent_segs = segments[-8:] if len(segments) >= 8 else segments

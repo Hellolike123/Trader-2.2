@@ -90,7 +90,7 @@ def _report() -> dict:
             "this_week": "不追现价；回买点再谈",
             "conflict": "周线偏空，短线也不追",
             "wave_label": "回调见底 · 关注一类买｜底背驰",
-            "wave_label_mid": "笔数不足 · 无法判断",
+            "wave_label_mid": "笔数不足 · 先观望",
         },
         "discipline": {
             "suggested_pct_cap": 0,

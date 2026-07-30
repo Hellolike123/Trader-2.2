@@ -619,19 +619,18 @@ def format_chanlun_theory_line(chan_result: Any) -> str:
     """
     chan = unwrap_chan(chan_result) if isinstance(chan_result, dict) else {}
     if not isinstance(chan, dict) or not chan:
-        return "结构未成型·中性"
+        return "中枢未成型·先观望"
 
     st = str(chan.get("structure_type") or "").strip()
     # 兼容历史缓存中的「线段不足*」主状态；正常路径不再产出该值
-    if st.startswith("线段不足"):
-        main = "结构未成型"
-    elif st and st != "无结构":
+    # 无结构时写「中枢未成型」——立场后续用先观望/方向词，禁止甩「无法判断」
+    if st.startswith("线段不足") or not st or st == "无结构":
+        main = "中枢未成型"
+    else:
         main = st
         conf = str(chan.get("structure_confidence") or "").lower()
         if conf == "low":
             main = f"{st}(段偏少)"
-    else:
-        main = "暂无明确结构"
 
     # 方向：买卖点/背驰/trend_label（与 fusion 优先级类似，但只出多空标签）
     buy_points = chan.get("buy_points") if isinstance(chan.get("buy_points"), list) else []
@@ -660,7 +659,14 @@ def format_chanlun_theory_line(chan_result: Any) -> str:
     elif "下跌" in trend_label or "空" in trend_label:
         direction = -1
 
-    dir_label = "看涨" if direction > 0 else ("看跌" if direction < 0 else "中性")
+    if direction > 0:
+        dir_label = "看涨"
+    elif direction < 0:
+        dir_label = "看跌"
+    elif main == "中枢未成型":
+        dir_label = "先观望"  # 无方向也给出立场，不用「无法判断」
+    else:
+        dir_label = "中性"
     # 回退标注：周线不足时用日线分析，诚实提示
     _tf_suffix = ""
     if chan.get("timeframe") == "daily_fallback":
@@ -927,7 +933,10 @@ def format_chanlun_short_light(
             "一类卖", "类一卖", "二类卖", "三类卖", "一类买", "类一买", "二类买", "三类买", "类二买",
             "一买", "二买", "三买", "一卖", "二卖", "三卖", "顶背驰", "底背驰",
         }
-        _struct_noise = ("笔数不足", "无法判断", "无明确结构", "数据不足", "线段不足")
+        _struct_noise = (
+            "笔数不足", "无法判断", "无明确结构", "数据不足", "线段不足",
+            "中枢未成型", "先观望", "结构待确认",
+        )
         _has_sig = info.get("status") in ("point", "divergence") or any(
             k in body for k in ("一买", "一卖", "二买", "二卖", "三买", "三卖", "类二", "类一", "背驰")
         )
