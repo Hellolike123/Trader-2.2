@@ -51,3 +51,27 @@ def test_t0_package_shim_identity():
     # 再加载不应产生第二份逻辑副本（name 稳定）
     again = importlib.import_module("trader_shared.t0_core")
     assert again is shared
+
+
+def test_position_size_accepts_v2_action_strings():
+    from trader_shared.t0_price_point_engine import position_size
+
+    buy_triggered = {"status": "已触发", "matched_count": 3}
+    sell_obs = {"status": "观察中", "matched_count": 0}
+    sell_triggered = {"status": "已触发", "matched_count": 3}
+    buy_obs = {"status": "观察中", "matched_count": 0}
+
+    assert position_size("full", "价近低吸关注区 · 人决策", buy_triggered, sell_obs, "good") != "不动"
+    assert position_size("full", "价近高抛关注区 · 人决策", buy_obs, sell_triggered, "good") != "不动"
+    assert position_size("full", "双侧关注区皆近 · 人决策", buy_triggered, sell_triggered, "good") == "不动"
+    assert position_size("full", "等待，结构观察 · 人决策", buy_obs, sell_obs, "good") == "不动"
+    # legacy enums still work
+    assert position_size("full", "低吸优先", buy_triggered, sell_obs, "good") != "不动"
+
+
+def test_trigger_result_preserves_risk_statuses():
+    from trader_shared.t0_price_point_engine import trigger_result
+
+    assert trigger_result("趋势下行暂不低吸", None, [], [])["status"] == "趋势下行暂不低吸"
+    assert trigger_result("趋势下行暂不高抛", None, [], [])["status"] == "趋势下行暂不高抛"
+    assert trigger_result("数据异常", None, [], [])["status"] == "数据异常"

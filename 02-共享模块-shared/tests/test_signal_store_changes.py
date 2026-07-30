@@ -250,3 +250,41 @@ class TestBadLineObservability:
         from trader_shared.signal_store import _bad_line_last_reason, _bad_line_last_path
         assert _bad_line_last_reason != "", "Reason should be set"
         assert _bad_line_last_path == str(self.store_path)
+
+
+class TestAppendSignalCreatesParentDir:
+    """First write must create missing parent directory."""
+
+    def setup_method(self):
+        self.tmpdir = tempfile.mkdtemp()
+        from trader_shared.signal_store import _sig_cache
+        _sig_cache.clear()
+
+    def _make_full_signal(self):
+        return {
+            "source_skill": "trader",
+            "symbol": "688248",
+            "name": "南网科技",
+            "trade_date": "2025-05-02",
+            "analysis_time": "2025-05-02 10:00",
+            "signal_type": "low_buy_watch",
+            "direction": "bullish_lean",
+            "action": "observe",
+            "confidence": "medium",
+            "data_status": "degraded",
+            "trigger": {"price": 55.9, "text": "test"},
+            "invalidation": {"price": 54.0, "text": "stop"},
+            "position": {"max_total_pct": 30, "max_single_move_pct": 10},
+            "risk_flags": ["test"],
+            "summary": "test summary",
+        }
+
+    def test_append_creates_missing_parent(self):
+        from trader_shared.signal_store import append_signal
+
+        nested = Path(self.tmpdir) / "nested_missing" / "signals.jsonl"
+        assert not nested.parent.exists()
+        sid = append_signal(self._make_full_signal(), path=nested)
+        assert isinstance(sid, str)
+        assert nested.exists()
+        assert nested.read_text(encoding="utf-8").strip()

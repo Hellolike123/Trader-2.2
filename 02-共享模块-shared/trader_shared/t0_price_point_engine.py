@@ -68,7 +68,18 @@ from trader_shared.t0_indicators import (
 )
 
 
-STATUSES = {"已触发", "观察中", "未进入候选区", "被阻断", "数据不足", "触发过期", "熔断中"}
+STATUSES = {
+    "已触发",
+    "观察中",
+    "未进入候选区",
+    "被阻断",
+    "数据不足",
+    "触发过期",
+    "熔断中",
+    "数据异常",
+    "趋势下行暂不低吸",
+    "趋势下行暂不高抛",
+}
 MIN_OBSERVE_SPREAD_ABS = 0.05
 MIN_OBSERVE_SPREAD_PCT = 0.005
 
@@ -1075,9 +1086,15 @@ def _atr_volatility_label(atr_ratio: float) -> tuple[str, str]:
 
 
 def position_size(data_status_value: str, action: str, buy: dict[str, Any], sell: dict[str, Any], space_state_value: str, atr_ratio: float = 0.0) -> str:
-    if action not in {"低吸优先", "高抛优先"}:
+    # v2 today_action 为人读结构文案；同时兼容旧枚举
+    _buy_actions = {"低吸优先", "价近低吸关注区 · 人决策"}
+    _sell_actions = {"高抛优先", "价近高抛关注区 · 人决策"}
+    if action in _buy_actions:
+        model = buy
+    elif action in _sell_actions:
+        model = sell
+    else:
         return "不动"
-    model = buy if action == "低吸优先" else sell
     if model["status"] != "已触发":
         return "不动"
     if space_state_value == "too_small":
