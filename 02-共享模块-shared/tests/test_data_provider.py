@@ -34,3 +34,153 @@ def test_akshare_class_method_uses_top_level_to_float() -> None:
     assert provider.to_float("3.14") == 3.14
     assert provider.to_float(None) is None
     assert provider.to_float("--") is None
+
+
+def test_normalize_bars_sorts_ascending() -> None:
+    """倒序原始行经 normalize_bars 后 bars[-1] 为最新。"""
+    from trader_shared.light_data import normalize_bars
+
+    raw = [
+        {"date": "2026-07-29", "open": 3, "close": 3, "high": 3, "low": 3, "volume": 1},
+        {"date": "2026-07-28", "open": 2, "close": 2, "high": 2, "low": 2, "volume": 1},
+        {"date": "2025-07-25", "open": 1, "close": 1, "high": 1, "low": 1, "volume": 1},
+    ]
+    bars = normalize_bars(raw)
+    dates = [b["date"] for b in bars]
+    assert dates == sorted(dates)
+    assert bars[-1]["date"] == "2026-07-29"
+    assert bars[0]["date"] == "2025-07-25"
+
+
+def test_ensure_bars_ascending_recomputes_atr() -> None:
+    """倒序输入纠正后，TR 使用时间上的前一日收盘。"""
+    from trader_shared.light_data import ensure_bars_ascending
+
+    # newest-first（毒序）
+    bars = [
+        {"date": "2026-07-10", "open": 10.0, "close": 10.5, "high": 10.6, "low": 9.9, "volume": 1},
+        {"date": "2026-07-09", "open": 9.8, "close": 10.0, "high": 10.1, "low": 9.7, "volume": 1},
+        {"date": "2026-07-08", "open": 9.5, "close": 9.8, "high": 9.9, "low": 9.4, "volume": 1},
+    ]
+    fixed, rewritten = ensure_bars_ascending(bars)
+    assert rewritten is True
+    assert [b["date"] for b in fixed] == ["2026-07-08", "2026-07-09", "2026-07-10"]
+    # 中间日 TR：相对 07-08 收盘 9.8
+    assert fixed[1]["tr"] == round(max(10.1 - 9.7, abs(10.1 - 9.8), abs(9.7 - 9.8)), 4)
+    again, rewritten2 = ensure_bars_ascending(fixed)
+    assert rewritten2 is False
+    assert again[-1]["date"] == "2026-07-10"
+
+
+def test_ensure_bars_ascending_intraday_timestamps() -> None:
+    """同日内分钟线倒序也能纠正（勿只按日期截断）。"""
+    from trader_shared.light_data import ensure_bars_ascending
+
+    bars = [
+        {"date": "2026-07-30 10:10", "open": 3, "close": 3, "high": 3, "low": 3, "volume": 1},
+        {"date": "2026-07-30 10:00", "open": 1, "close": 1, "high": 1, "low": 1, "volume": 1},
+        {"date": "2026-07-30 10:05", "open": 2, "close": 2, "high": 2, "low": 2, "volume": 1},
+    ]
+    fixed, rewritten = ensure_bars_ascending(bars, recompute_atr=False)
+    assert rewritten is True
+    assert [b["date"] for b in fixed] == [
+        "2026-07-30 10:00",
+        "2026-07-30 10:05",
+        "2026-07-30 10:10",
+    ]
+
+
+def test_aggregate_5m_to_60m_sorts_within_hour() -> None:
+    from trader_shared.indicator_math import aggregate_5m_to_60m
+
+    # 故意打乱同小时内顺序
+    bars = [
+        {"date": "2026-07-30 10:55", "open": 12, "high": 13, "low": 11, "close": 12.5, "volume": 1},
+        {"date": "2026-07-30 10:05", "open": 10, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 2},
+        {"date": "2026-07-30 10:30", "open": 11, "high": 11.5, "low": 10.8, "close": 11.2, "volume": 3},
+    ]
+    out = aggregate_5m_to_60m(bars)
+    assert len(out) == 1
+    assert out[0]["open"] == 10.0  # 最早 10:05
+    assert out[0]["close"] == 12.5  # 最晚 10:55
+
+
+def test_parse_em_klines_takes_latest_n_after_sort() -> None:
+    from trader_shared.fund_flow_data import _parse_em_klines
+
+    # 倒序源：最新在前；取 days=2 应得到最近两天
+    klines = [
+        "2026-07-10,100,0,0,0,0",
+        "2026-07-09,90,0,0,0,0",
+        "2026-07-08,80,0,0,0,0",
+    ]
+    out = _parse_em_klines(klines, days=2)
+    assert [r["date"] for r in out] == ["2026-07-09", "2026-07-10"]
+
+
+def test_get_day_scoped_bars_fixes_reversed_cache(monkeypatch) -> None:
+    """同日倒序缓存经 get_day_scoped_bars 纠正为正序并回写。"""
+    import trader_shared.cache_utils as cu
+
+    monkeypatch.setattr(cu, "cache_calendar_date", lambda: "2026-07-17")
+    store: dict = {}
+    reversed_rows = [
+        {"date": "2026-07-16", "open": 3, "close": 3, "high": 3, "low": 3, "volume": 1},
+        {"date": "2026-07-15", "open": 2, "close": 2, "high": 2, "low": 2, "volume": 1},
+        {"date": "2026-07-14", "open": 1, "close": 1, "high": 1, "low": 1, "volume": 1},
+    ] * 10  # 30 rows, still newest-block first pattern — use unique desc
+    reversed_rows = [
+        {"date": f"2026-06-{d:02d}", "open": float(d), "close": float(d),
+         "high": float(d), "low": float(d), "volume": 1}
+        for d in range(30, 0, -1)
+    ]
+
+    def _get(key, target, ttl=None):
+        data = store.get((key, target))
+        if data is None:
+            return cu.CacheResult(
+                data={"fetch_date": "2026-07-17", "rows": list(reversed_rows)},
+                stale=False,
+                age_seconds=1.0,
+                source="file",
+            )
+        return cu.CacheResult(data=data, stale=False, age_seconds=1.0, source="file")
+
+    def _set(key, target, data):
+        store[(key, target)] = data
+
+    monkeypatch.setattr(cu, "get_cached", _get)
+    monkeypatch.setattr(cu, "set_cached", _set)
+
+    def _boom():
+        raise RuntimeError("should not fetch")
+
+    out = cu.get_day_scoped_bars("daily", "000988", _boom, min_rows=20)
+    dates = [b["date"] for b in out]
+    assert dates == sorted(dates)
+    assert out[-1]["date"] == "2026-06-30"
+    assert out[0]["date"] == "2026-06-01"
+    # 已回写正序
+    written = store[("daily", "000988")]["rows"]
+    assert [b["date"] for b in written] == sorted(b["date"] for b in written)
+
+
+def test_get_ths_daily_sorts_ascending(monkeypatch) -> None:
+    from trader_shared import sector_data as sd
+
+    monkeypatch.setattr(sd._cu, "cache_calendar_date", lambda: "2026-07-17")
+    monkeypatch.setattr(sd._cu, "get_cached", lambda *a, **k: None)
+    monkeypatch.setattr(sd._cu, "set_cached", lambda *a, **k: None)
+
+    class _C:
+        def query_ths_daily(self, *a, **k):
+            return [
+                {"trade_date": "20260710", "pct_change": 1.0},
+                {"trade_date": "20260708", "pct_change": -0.5},
+                {"trade_date": "20260709", "pct_change": 0.2},
+            ]
+
+    monkeypatch.setattr(sd, "get_client", lambda: _C())
+    rows = sd.get_ths_daily("885800.TI")
+    assert [r["trade_date"] for r in rows] == ["20260708", "20260709", "20260710"]
+    assert rows[-1]["pct_change"] == 1.0

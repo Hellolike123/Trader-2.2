@@ -99,20 +99,72 @@ class TestFindSwingLevels:
 
 
 class TestBuildMidlineLevels:
-    def test_life_priority_up_seg_low(self):
+    def test_life_priority_zone_before_seg(self):
+        """近端中枢下沿优先于上涨线段 low。"""
         bars = _weekly_bars_n(40)
         r = build_midline_levels(
             current=58.0,
             weekly_bars=bars,
             chanlun_midline=_CHAN_WEEKLY_FULL,
         )
-        # 最近 up seg low = 48.0
-        assert r["life_line"] == pytest.approx(48.0)
-        assert r["components"]["life_line"] == "seg_low"
+        # 最近 valid zone zh_bottom = 51.0（优于 up seg low 48）
+        assert r["life_line"] == pytest.approx(51.0)
+        assert r["components"]["life_line"] == "zone_zh_bottom"
         assert r["engine"] == "weekly_v1"
         assert r["source"] == "weekly_structure"
         assert r["quality"] == "full"
         assert "daily_key_levels_proxy" not in r["notes"]
+
+    def test_life_priority_up_seg_low_when_no_zone(self):
+        bars = _weekly_bars_n(40)
+        chan = {
+            "timeframe": "weekly",
+            "strokes": [
+                {"direction": "up", "end_price": 62.0},
+                {"direction": "down", "end_price": 52.5},
+            ],
+            "segments": [
+                {"direction": "up", "high": 62.0, "low": 48.0},
+            ],
+            "zones": [],
+        }
+        r = build_midline_levels(current=58.0, weekly_bars=bars, chanlun_midline=chan)
+        # down stroke 52.5 在近端窗内，优先于 up seg low
+        assert r["life_line"] == pytest.approx(52.5)
+        assert r["components"]["life_line"] == "last_down_stroke_end"
+
+    def test_life_rejects_far_up_seg_low(self):
+        """远古升浪底（如 12.54 vs 现价 41）不得当生命线。"""
+        bars = _weekly_bars_n(80, base=40.0)
+        chan = {
+            "timeframe": "weekly",
+            "strokes": [
+                {"direction": "down", "end_price": 42.34, "start_index": 70, "end_index": 75},
+                {"direction": "up", "end_price": 63.58, "start_index": 60, "end_index": 70},
+            ],
+            "segments": [
+                {
+                    "direction": "up",
+                    "low": 12.54,
+                    "high": 65.34,
+                    "start_index": 0,
+                    "end_index": 6,
+                },
+                {
+                    "direction": "down",
+                    "low": 27.78,
+                    "high": 63.58,
+                    "start_index": 6,
+                    "end_index": 8,
+                },
+            ],
+            "zones": [],
+        }
+        r = build_midline_levels(current=41.73, weekly_bars=bars, chanlun_midline=chan)
+        assert r["life_line"] != pytest.approx(12.54)
+        # 近端下跌笔终点 42.34（远古 up seg low 被近端窗/优先级挡掉）
+        assert r["life_line"] == pytest.approx(42.34)
+        assert r["components"]["life_line"] == "last_down_stroke_end"
 
     def test_life_priority_down_stroke_when_no_up_seg(self):
         bars = _weekly_bars_n(40)
@@ -178,8 +230,8 @@ class TestBuildMidlineLevels:
         assert r["quality"] == "partial"
 
     def test_swing_fallback_label_honest(self):
-        # P0：单调上升无任何 2-touch 摆动 → 退化为区间最低/最高，
-        # 标签须诚实标注 weekly_min_fallback / weekly_max_fallback，不得冒充周线摆动
+        # P0：单调上升无任何 2-touch 摆动 → 退化为区间最低/最高；
+        # 若最低点已落出近端窗，生命线省略（不得用远古 min 冒充防守）。
         bars = []
         p = 50.0
         for i in range(40):
@@ -187,7 +239,13 @@ class TestBuildMidlineLevels:
             bars.append(_bar(i, p, high=p * 1.01, low=p * 0.99))
         chan = {"timeframe": "weekly", "strokes": [], "segments": [], "zones": []}
         r = build_midline_levels(current=80.0, weekly_bars=bars, chanlun_midline=chan)
-        assert r["components"]["life_line"] == "weekly_min_fallback"
+        # 区间最低约 50，相对现价 80 超出近端窗 → life 省略
+        if r["life_line"] is None:
+            assert r["components"]["life_line"] == "none"
+            assert "far_swing_life_skipped" in r["notes"]
+        else:
+            assert r["components"]["life_line"] == "weekly_min_fallback"
+            assert r["life_line"] >= 80.0 * 0.70
         assert r["components"]["pullback_low"] == "weekly_min_fallback"
         assert r["components"]["resist"] == "weekly_max_fallback"
         assert r["components"]["target"] == "weekly_max_fallback"
@@ -211,21 +269,22 @@ class TestBuildMidlineLevels:
 
     def test_pullback_clamped_to_life(self):
         bars = _weekly_bars_n(40)
-        # down stroke end 远低于 life(seg low=48)
+        # 中枢底=生命线；下跌笔终点更低 → 回踩下沿抬到 life
         chan = {
             "timeframe": "weekly",
             "strokes": [
                 {"direction": "up", "end_price": 62.0},
-                {"direction": "down", "end_price": 40.0},  # 低于 life
+                {"direction": "down", "end_price": 42.0},
             ],
-            "segments": [
-                {"direction": "up", "high": 62.0, "low": 48.0},
+            "segments": [],
+            "zones": [
+                {"valid": True, "zh_bottom": 51.0, "zh_top": 58.0, "zh_center": 54.5},
             ],
-            "zones": [],
         }
         r = build_midline_levels(current=55.0, weekly_bars=bars, chanlun_midline=chan)
-        assert r["life_line"] == pytest.approx(48.0)
-        assert r["pullback_low"] == pytest.approx(48.0)  # 强制夹 life
+        assert r["life_line"] == pytest.approx(51.0)
+        assert r["components"]["life_line"] == "zone_zh_bottom"
+        assert r["pullback_low"] == pytest.approx(51.0)  # max(42, life)
         assert r["pullback_high"] >= r["pullback_low"]
 
     def test_resist_target_no_fib_from_structure(self):
@@ -247,10 +306,11 @@ class TestBuildMidlineLevels:
     def test_already_below_life(self):
         bars = _weekly_bars_n(40)
         r = build_midline_levels(
-            current=40.0,
+            current=50.0,  # 略低于近端中枢底 51
             weekly_bars=bars,
             chanlun_midline=_CHAN_WEEKLY_FULL,
         )
+        assert r["life_line"] == pytest.approx(51.0)
         assert "already_below_life" in r["notes"]
 
     def test_ignore_daily_key_levels_by_default(self):
@@ -269,7 +329,7 @@ class TestBuildMidlineLevels:
             stop=1.0,
             stop_losses={"stage_based": {"price": 0.5}},
         )
-        assert r["life_line"] == pytest.approx(48.0)
+        assert r["life_line"] == pytest.approx(51.0)
         assert r["life_line"] != pytest.approx(1.11)
         assert "daily_key_levels_proxy" not in r["notes"]
         assert r["source"] == "weekly_structure"

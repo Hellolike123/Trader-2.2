@@ -524,19 +524,23 @@ class TestTushareProviderFetchQfqDaily:
         bars = provider.fetch_qfq_daily(sec, days=30)
 
         assert len(bars) == 3
-        # Check date format conversion
-        assert bars[0]["date"] == "2026-07-10"
+        # Tushare 常倒序返回；契约为正序，bars[-1]=最新
+        assert bars[0]["date"] == "2026-07-08"
         assert bars[1]["date"] == "2026-07-09"
-        # Check field mapping
-        assert bars[0]["open"] == 10.0
-        assert bars[0]["close"] == 10.5
-        assert bars[0]["high"] == 10.6
-        assert bars[0]["low"] == 9.9
-        assert bars[0]["volume"] == 100000
-        assert bars[0]["amount"] == 1050000
-        assert bars[0]["data_source"] == "tushare"
-        # ATR fields should be computed
-        assert "tr" in bars[0]
+        assert bars[2]["date"] == "2026-07-10"
+        # Check field mapping on latest bar
+        assert bars[-1]["open"] == 10.0
+        assert bars[-1]["close"] == 10.5
+        assert bars[-1]["high"] == 10.6
+        assert bars[-1]["low"] == 9.9
+        assert bars[-1]["volume"] == 100000
+        assert bars[-1]["amount"] == 1_050_000_000  # Tushare 千元 → 元 ×1000
+        assert bars[-1]["data_source"] == "tushare"
+        # ATR fields should be computed；正序后第2根 TR 用第1根收盘作昨收
+        assert "tr" in bars[-1]
+        assert bars[1]["tr"] == round(
+            max(10.1 - 9.7, abs(10.1 - 9.8), abs(9.7 - 9.8)), 4
+        )
         assert "atr7" in bars[0]
         assert "atr14" in bars[0]
 

@@ -758,24 +758,25 @@ def calc_macd_params(bars: list[dict[str, Any]]) -> dict[str, Any]:
         below_zero = None
 
     check = bars[-5:] if len(bars) >= 5 else bars
+    offset = len(bars) - len(check)
     golden_cross = False
     death_cross = False
     cross_idx = -1
 
     for i in range(1, len(check)):
-        prev_m = to_float(bars[i - 1].get("macd_line"))
-        prev_d = to_float(bars[i - 1].get("dea"))
-        cur_m = to_float(bars[i].get("macd_line"))
-        cur_d = to_float(bars[i].get("dea"))
+        prev_m = to_float(check[i - 1].get("macd_line"))
+        prev_d = to_float(check[i - 1].get("dea"))
+        cur_m = to_float(check[i].get("macd_line"))
+        cur_d = to_float(check[i].get("dea"))
         if prev_m is not None and prev_d is not None and cur_m is not None and cur_d is not None:
             prev_diff = prev_m - prev_d
             cur_diff = cur_m - cur_d
             if prev_diff <= 0 and cur_diff > 0:
                 golden_cross = True
-                cross_idx = i
+                cross_idx = offset + i
             elif prev_diff >= 0 and cur_diff < 0:
                 death_cross = True
-                cross_idx = i
+                cross_idx = offset + i
 
     return {
         "macd_line": m,

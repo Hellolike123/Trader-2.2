@@ -205,6 +205,24 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if vol_parts:
         lines.append(f"  {' ｜ '.join(vol_parts)}")
 
+    # ATR 复权口径：日线 ATR 依赖 OHLC 尺度，前复权/未复权不可混读
+    _atr_adj = str(r.get("atr_adjust") or "").strip().lower()
+    _atr_adj_label = {
+        "qfq": "前复权",
+        "hfq": "后复权",
+        "none": "未复权",
+    }.get(_atr_adj)
+    if _atr_adj_label:
+        _atr14 = r.get("atr14")
+        try:
+            _atr14_f = float(_atr14) if _atr14 is not None else None
+        except (TypeError, ValueError):
+            _atr14_f = None
+        if _atr14_f is not None and _atr14_f > 0:
+            lines.append(f"  ATR14 {_atr14_f:.2f}（{_atr_adj_label}）")
+        else:
+            lines.append(f"  ATR口径 {_atr_adj_label}")
+
     # 相对强弱与行业板块（优先 extend_sector；fallback 用个股涨跌 vs 大盘环境）
     _ext_sec = r.get("extend_sector") or {}
     if isinstance(_ext_sec, dict) and _ext_sec.get("status") == "正常":

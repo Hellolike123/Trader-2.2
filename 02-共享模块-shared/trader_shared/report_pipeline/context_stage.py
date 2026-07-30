@@ -45,9 +45,19 @@ def run_analysis_context_stage(
     weekly_bars = snapshot.weekly_bars if hasattr(snapshot, "weekly_bars") else []
     monthly_bars = snapshot.monthly_bars if hasattr(snapshot, "monthly_bars") else []
     last_bar = bars[-1] if bars else {}
-    atr14_val = float(last_bar.get("atr14", 0) or 0)
-    atr_ratio_val = float(last_bar.get("atr_ratio", 0) or 0)
+    _atr14_raw = last_bar.get("atr14")
+    _atr_ratio_raw = last_bar.get("atr_ratio")
+    try:
+        atr14_val = float(_atr14_raw) if _atr14_raw is not None else 0.0
+    except (TypeError, ValueError):
+        atr14_val = 0.0
+    try:
+        atr_ratio_val = float(_atr_ratio_raw) if _atr_ratio_raw is not None else 0.0
+    except (TypeError, ValueError):
+        atr_ratio_val = 0.0
     atr_level, atr_cap = atr_volatility_level(atr_ratio_val) if atr14_val > 0 else ("数据不足", 10)
+    atr_adjust = str(last_bar.get("adjust") or "unknown")
+    atr_data_source = str(last_bar.get("data_source") or "")
     _cp = quote.get("current_price")
     current = _cp if _cp is not None else bars[-1]["close"]
     if current is None:
@@ -198,6 +208,8 @@ def run_analysis_context_stage(
         "atr_ratio_val": atr_ratio_val,
         "atr_level": atr_level,
         "atr_cap": atr_cap,
+        "atr_adjust": atr_adjust,
+        "atr_data_source": atr_data_source,
         "current": current,
         "recent20": recent20,
         "change_pct_val": change_pct_val,

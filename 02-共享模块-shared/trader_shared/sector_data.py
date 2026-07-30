@@ -94,10 +94,17 @@ def get_ths_daily(
     """获取同花顺板块指数日线。
 
     无起止日期时按自然日缓存（报告只读最新一根涨跌）；带日期范围则直连不缓存。
+    返回时间正序，[-1]=最新（Tushare ths_daily 常倒序）。
     """
+    def _sort_asc(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return sorted(
+            rows or [],
+            key=lambda r: str(r.get("trade_date") or r.get("date") or ""),
+        )
+
     if start_date or end_date:
         client = get_client()
-        return client.query_ths_daily(ts_code, start_date, end_date) or []
+        return _sort_asc(client.query_ths_daily(ts_code, start_date, end_date) or [])
 
     today = _cu.cache_calendar_date()
     key = str(ts_code).replace(".", "_")
@@ -105,10 +112,10 @@ def get_ths_daily(
     if cached is not None and _cu.is_fetch_date_today(cached.data, today):
         rows = cached.data.get("rows") if isinstance(cached.data, dict) else None
         if isinstance(rows, list):
-            return list(rows)
+            return _sort_asc(list(rows))
 
     client = get_client()
-    data = client.query_ths_daily(ts_code, start_date="", end_date="") or []
+    data = _sort_asc(client.query_ths_daily(ts_code, start_date="", end_date="") or [])
     if data:
         try:
             _cu.set_cached(

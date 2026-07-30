@@ -3,6 +3,10 @@
 规格真理：docs/midline-price-engine-plan.md（含 §9 全 A 冻结补丁）。
 主路径仅消费 weekly_bars + chanlun_midline（timeframe==weekly 的 strokes/segments/zones）。
 禁止成功路径用日线 key_levels / find_key_levels(daily) / stop / stage_based 填四价。
+
+生命线（近端防守，非 §9.3 旧「升浪底命中即停」）：
+  近端窗 current×[0.70, 1.02] 内，优先 中枢底 → 下跌笔终点 → 下跌线段低
+  →（新鲜）上涨线段低 → 周摆动低；窗外候选一律丢弃。
 """
 from __future__ import annotations
 
@@ -23,10 +27,17 @@ TOUCH_TOL_PCT = 0.015
 UNBROKEN_PCT = 0.03
 SWING_HALF_WINDOW = 4
 
-# components 闭枚举 §9.7
+# 生命线近端窗：中线防守位，禁止远古升浪底冒充（如现价 41、浪底 12）
+# 下沿与展示「距现价>30%→远期参考」对齐：超出则不作防守生命线
+LIFE_NEAR_FLOOR = 0.70  # price >= current * 0.70（距现价下不超过约 30%）
+LIFE_NEAR_CEIL = 1.02  # price <= current * 1.02（略上方仍可作「已破」判定）
+LIFE_SEG_MAX_AGE_BARS = 40  # 上涨线段 end_index 须落在近 N 根周线内
+
+# components 闭枚举 §9.7（+ last_down_seg_low：近端下跌线段低）
 _STRUCTURE_COMPONENTS = frozenset({
     "seg_low",
     "last_down_stroke_end",
+    "last_down_seg_low",
     "zone_zh_bottom",
     "last_up_stroke_end",
     "seg_high",
@@ -310,6 +321,23 @@ def _last_valid_zone_zh_bottom(zones: list[Any]) -> float | None:
     return None
 
 
+def _life_in_near_window(price: float | None, current: float | None) -> bool:
+    """生命线候选须落在现价近端窗内，否则不作防守位。"""
+    if price is None or current is None or current <= 0 or price <= 0:
+        return False
+    return current * LIFE_NEAR_FLOOR <= price <= current * LIFE_NEAR_CEIL
+
+
+def _up_seg_fresh_for_life(seg: dict[str, Any], n_bars: int) -> bool:
+    """上涨线段作生命线：有 end_index 时须足够新；无索引则仅靠近端价窗把关。"""
+    if n_bars <= 0:
+        return True
+    ei = seg.get("end_index")
+    if not isinstance(ei, int):
+        return True
+    return ei >= max(0, n_bars - LIFE_SEG_MAX_AGE_BARS)
+
+
 def build_midline_levels(
     *,
     current: float | None = None,
@@ -549,37 +577,60 @@ def build_midline_levels(
     components = dict(empty_components)
     notes_extra: list[str] = []
 
-    # ── A. 生命线（§9.3 命中即停；候选仅 price>0）────────────
+    # ── A. 生命线：近端防守（中枢/本轮回调优先；远古升浪底丢弃）──
+    # 旧 §9.3「上涨线段 low 命中即停、无距离过滤」已废止：会把上市浪底
+    # （如 12.54 vs 现价 41）当成「跌破则减仓」。
     life_line: float | None = None
     life_comp = "none"
 
     if use_structure:
-        up_seg = _last_by_direction(segments, "up")
-        if up_seg is not None:
-            cand = _f(up_seg.get("low"))
-            if cand is not None:
-                life_line = _round2(cand)
-                life_comp = "seg_low"
+        zb = _last_valid_zone_zh_bottom(zones)
+        if zb is not None and _life_in_near_window(zb, current):
+            life_line = zb
+            life_comp = "zone_zh_bottom"
 
         if life_line is None:
             down_stroke = _last_by_direction(strokes, "down")
             if down_stroke is not None:
                 cand = _f(down_stroke.get("end_price"))
-                if cand is not None:
+                if cand is not None and _life_in_near_window(cand, current):
                     life_line = _round2(cand)
                     life_comp = "last_down_stroke_end"
 
         if life_line is None:
-            zb = _last_valid_zone_zh_bottom(zones)
-            if zb is not None:
-                life_line = zb
-                life_comp = "zone_zh_bottom"
+            down_seg = _last_by_direction(segments, "down")
+            if down_seg is not None:
+                cand = _f(down_seg.get("low"))
+                if cand is not None and _life_in_near_window(cand, current):
+                    life_line = _round2(cand)
+                    life_comp = "last_down_seg_low"
+
+        if life_line is None:
+            up_seg = _last_by_direction(segments, "up")
+            if up_seg is not None:
+                cand = _f(up_seg.get("low"))
+                if cand is not None and _life_in_near_window(cand, current):
+                    if _up_seg_fresh_for_life(up_seg, len(bars)):
+                        life_line = _round2(cand)
+                        life_comp = "seg_low"
+                    else:
+                        notes_extra.append("stale_up_seg_low_skipped")
+                elif cand is not None and not _life_in_near_window(cand, current):
+                    notes_extra.append("far_up_seg_low_skipped")
 
     if life_line is None:
         swing_life = swings.get("life_support")
         if swing_life is not None and swing_life > 0:
-            life_line = _round2(float(swing_life))
-            life_comp = "weekly_swing_n20" if swings.get("life_support_genuine") else "weekly_min_fallback"
+            sl = _round2(float(swing_life))
+            if _life_in_near_window(sl, current):
+                life_line = sl
+                life_comp = (
+                    "weekly_swing_n20"
+                    if swings.get("life_support_genuine")
+                    else "weekly_min_fallback"
+                )
+            else:
+                notes_extra.append("far_swing_life_skipped")
 
     components["life_line"] = life_comp
 

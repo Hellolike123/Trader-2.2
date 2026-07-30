@@ -226,6 +226,43 @@ class TestMacdSsotAlignment:
                 assert bar["macd_histogram"] == round(ssot["histogram"][i], 4)
                 assert abs(bar["macd_histogram"] - (bar["macd_line"] - bar["dea"])) < 1e-6
 
+    def test_calc_macd_params_cross_uses_recent_window(self):
+        """金叉/死叉必须扫 bars[-5:]，不能误扫最早几根。"""
+        from trader_shared.review_core import calc_macd_params
+
+        # 构造 10 根：最旧有金叉，最近 5 根无交叉 → 旧 bug 会误报 golden
+        bars = []
+        for i in range(10):
+            bars.append({
+                "close": 10.0 + i,
+                "macd_line": 0.0,
+                "dea": 0.0,
+            })
+        # 最早：空头→多头金叉（索引 1）
+        bars[0]["macd_line"], bars[0]["dea"] = -1.0, 0.0
+        bars[1]["macd_line"], bars[1]["dea"] = 1.0, 0.0
+        # 中间保持 DIF>DEA
+        for i in range(2, 8):
+            bars[i]["macd_line"], bars[i]["dea"] = 1.0, 0.0
+        # 最近：死叉（索引 9）
+        bars[8]["macd_line"], bars[8]["dea"] = 1.0, 0.0
+        bars[9]["macd_line"], bars[9]["dea"] = -1.0, 0.0
+
+        # 跳过 calc_macd 重算：直接测交叉窗口（传入已有 macd 字段）
+        # calc_macd_params 会先 calc_macd 覆盖 — 用 monkeypatch 绕过
+        import trader_shared.review_core as rc
+
+        orig = rc.calc_macd
+        rc.calc_macd = lambda b: None
+        try:
+            out = rc.calc_macd_params(bars)
+        finally:
+            rc.calc_macd = orig
+
+        assert out["golden_cross"] is False
+        assert out["death_cross"] is True
+        assert out["cross_bar_index"] == 9
+
 
 class TestT0AtrSsot:
     def test_latest_atr_matches_calc_atr_series(self):
@@ -282,3 +319,31 @@ class TestEmaBollingerAtrWarmup:
             assert bars[i]["atr_ratio"] is None
         assert bars[13]["atr14"] is not None and bars[13]["atr14"] > 0
         assert bars[13]["atr_ratio"] is not None
+
+    def test_missing_ohlc_does_not_become_zero_atr(self):
+        """None/缺失 OHLC 不得当 0 参与 TR，窗口含 None 时 ATR 也为 None。"""
+        from trader_shared.indicator_math import calc_atr_series
+        from trader_shared.light_data import _compute_atr_fields
+
+        bars = [
+            {"open": 10, "high": 11, "low": 9, "close": 10.5}
+            for _ in range(30)
+        ]
+        bars[5]["high"] = None
+        bars[5]["low"] = None
+        bars[8]["high"] = "--"
+
+        _compute_atr_fields(bars)
+        assert bars[5]["tr"] is None
+        assert bars[8]["tr"] is None
+        # 窗口含缺失 TR → ATR 为 None（不是 0）
+        assert bars[13]["atr14"] is None
+        assert bars[18]["atr14"] is None  # 窗口 [5..18] 仍含 bars[5]
+        # 窗口完全离开缺失点后恢复
+        assert bars[22]["atr14"] is not None and bars[22]["atr14"] > 0
+        assert bars[22]["atr_ratio"] is not None
+
+        series = calc_atr_series(bars, 14)
+        assert series[13] is None
+        assert series[18] is None
+        assert series[22] is not None and series[22] > 0

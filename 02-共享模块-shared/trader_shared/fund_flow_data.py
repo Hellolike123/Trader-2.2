@@ -182,6 +182,7 @@ def _fetch_from_tushare(symbol: str, days: int = 30) -> list[dict[str, Any]]:
             small_wan=(r.get("buy_sm_amount") or 0) - (r.get("sell_sm_amount") or 0),
             source="tushare",
         ))
+    result.sort(key=lambda x: str(x.get("date") or ""))
     return result
 
 
@@ -244,7 +245,14 @@ def _fetch_from_akshare(symbol: str, days: int = 30) -> list[dict[str, Any]]:
     if not c_date or not c_main:
         return []
     rows: list[dict[str, Any]] = []
-    for _, r in df.tail(n).iterrows():
+    # 先按日期正序再取最近 n 行，避免 DF 倒序时 tail 拿到最旧段
+    try:
+        df = df.copy()
+        df["__flow_date"] = df[c_date].astype(str).str[:10]
+        df = df.sort_values("__flow_date", ascending=True).tail(n)
+    except Exception:
+        df = df.tail(n)
+    for _, r in df.iterrows():
         try:
             date_str = str(r.get(c_date) if hasattr(r, "get") else r[c_date])[:10]
             rows.append(_make_record(
@@ -258,6 +266,7 @@ def _fetch_from_akshare(symbol: str, days: int = 30) -> list[dict[str, Any]]:
             ))
         except Exception:
             continue
+    rows.sort(key=lambda x: str(x.get("date") or ""))
     return rows
 
 
@@ -311,9 +320,14 @@ def load_fund_flow(symbol: str, max_age_hours: float = 6) -> list[dict[str, Any]
                     return []
             except Exception:
                 pass
-        return record.get("daily_flow", [])
+        rows = record.get("daily_flow", [])
+        return _sort_fund_flow_asc(rows) if isinstance(rows, list) else []
     except Exception:
         return []
+
+
+def _sort_fund_flow_asc(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(rows or [], key=lambda x: str(x.get("date") or ""))
 
 
 # ══════════════════════════════════════════════════════════════
@@ -598,11 +612,13 @@ def _parse_em_klines(klines: list[Any], days: int = 30) -> list[dict[str, Any]]:
         return []
     n = max(1, int(days))
     out: list[dict[str, Any]] = []
-    for line in klines[-n:]:
+    for line in klines:
         row = _parse_em_kline_line(str(line))
         if row:
             out.append(row)
-    return out
+    # 先正序再取最近 n 根，避免源倒序时 [-n:] 拿到最旧段
+    out.sort(key=lambda x: str(x.get("date") or ""))
+    return out[-n:] if len(out) > n else out
 
 
 def _parse_em_kline_line(line: str) -> dict[str, Any] | None:

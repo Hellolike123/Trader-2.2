@@ -69,8 +69,8 @@ class TestMidKeyPricesWeekly:
         )
         assert mk["engine"] == "weekly_v1"
         assert mk["source"] == "weekly_structure"
-        assert mk["life_line"] == pytest.approx(48.0)
-        assert mk["components"]["life_line"] == "seg_low"
+        assert mk["life_line"] == pytest.approx(51.0)
+        assert mk["components"]["life_line"] == "zone_zh_bottom"
         assert "破则中线转弱" in mk["line_life"]
         assert "到了才谈低吸" in mk["line_pullback"]
         assert "daily_key_levels_proxy" not in mk["notes"]
@@ -92,7 +92,7 @@ class TestMidKeyPricesWeekly:
         )
         # 不得等于日线 mid_support
         assert mk["life_line"] != pytest.approx(46.88)
-        assert mk["life_line"] == pytest.approx(48.0)
+        assert mk["life_line"] == pytest.approx(51.0)
         assert "daily_key_levels_proxy" not in mk["notes"]
 
     def test_omit_life_when_insufficient(self):

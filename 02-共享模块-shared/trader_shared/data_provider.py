@@ -515,15 +515,24 @@ class UnifiedProvider:
             start_date = (pd.Timestamp.today() - timedelta(days=days)).strftime("%Y%m%d")
         df = ak.stock_zh_a_hist(symbol=sec.code, period="daily", start_date=start_date, end_date="", adjust="qfq")
         bars = [bar for _, row in df.iterrows() if (bar := self._akshare_to_bar(row.to_dict()))]
-        from trader_shared.light_data import _compute_atr_fields
-        _compute_atr_fields(bars)
-        return bars
+        from trader_shared.light_data import ensure_bars_ascending
+        fixed, _ = ensure_bars_ascending(bars)
+        return fixed
 
     def _akshare_fetch_kline(self, sec: Security, scale: str, datalen: int = 60) -> list[dict[str, Any]]:
         self._akshare_ensure()
         import akshare as ak
         df = ak.stock_zh_a_hist_min_em(symbol=sec.code, period=scale)
-        return [bar for _, row in df.tail(datalen).iterrows() if (bar := self._akshare_to_bar(row.to_dict(), dt_key="时间"))]
+        # 先正序再取尾部，避免源倒序时 tail 截到最旧
+        try:
+            if "时间" in df.columns:
+                df = df.sort_values("时间", ascending=True)
+        except Exception:
+            pass
+        bars = [bar for _, row in df.tail(datalen).iterrows() if (bar := self._akshare_to_bar(row.to_dict(), dt_key="时间"))]
+        from trader_shared.light_data import ensure_bars_ascending
+        fixed, _ = ensure_bars_ascending(bars, recompute_atr=False)
+        return fixed
 
     def _akshare_load_snapshot(self, target: str, days: int, include_5m: bool, include_weekly: bool, include_monthly: bool, include_ticks: bool) -> MarketSnapshot:
         sec = self.resolve_security(target)
@@ -553,6 +562,11 @@ class UnifiedProvider:
             except Exception as e:
                 source_errors["monthly"] = str(e)
         data_status = "full" if (daily_bars and quote) else "partial" if (daily_bars or quote) else "failed"
+        from trader_shared.light_data import ensure_bars_ascending
+        daily_bars, _ = ensure_bars_ascending(daily_bars)
+        weekly_bars, _ = ensure_bars_ascending(weekly_bars)
+        monthly_bars, _ = ensure_bars_ascending(monthly_bars)
+        bars_5m, _ = ensure_bars_ascending(bars_5m, recompute_atr=False)
         res_snap = MarketSnapshot(
             security=sec, quote=quote, daily_bars=daily_bars, bars_5m=bars_5m, weekly_bars=weekly_bars, monthly_bars=monthly_bars,
             tick_data=tick_data, data_status=data_status, source_errors=source_errors,
@@ -669,7 +683,8 @@ class TushareProvider:
                     return float(v) * mul
                 except (TypeError, ValueError):
                     return None
-            for r in records:
+            # Tushare daily 常倒序；正序后再算 ATR（昨收=前一根）
+            for r in sorted(records, key=lambda x: str(x.get("trade_date", ""))):
                 trade_date = str(r.get("trade_date", ""))
                 # Tushare returns YYYYMMDD, convert to YYYY-MM-DD
                 if len(trade_date) == 8:
@@ -686,11 +701,13 @@ class TushareProvider:
                     "amount": _amt,
                     "data_source": "tushare",
                     "data_status": "full",
+                    # 代理 daily 不接受 adj：价格为未复权；ATR 与策略价同源
+                    "adjust": "none",
                 })
             _compute_atr_fields(bars)
             return bars
 
-        # 日 K：当天第一次打网，同日复用（换日回源）
+        # 日 K：当天第一次打网，同日复用；出口正序由 get_day_scoped_bars 统一保证
         return get_day_scoped_bars(
             CACHE_DAILY, sec.code, _net, min_rows=min(50, max(days // 3, 20))
         )
@@ -837,6 +854,30 @@ class TushareProvider:
         monthly_bars = results.get("monthly") or []
         tick_data = results.get("ticks") or []
 
+        # 与 light_data 一致：入口再兜正序（fetch 侧已保证，防缓存漏网）
+        from trader_shared.light_data import ensure_bars_ascending
+        daily_bars, _ = ensure_bars_ascending(daily_bars)
+        weekly_bars, _ = ensure_bars_ascending(weekly_bars)
+        monthly_bars, _ = ensure_bars_ascending(monthly_bars)
+        bars_5m, _ = ensure_bars_ascending(bars_5m, recompute_atr=False)
+
+        def _snapshot_freshness(bars: list) -> str:
+            if not bars:
+                return "stale"
+            dates = [
+                str(b.get("date") or b.get("time") or "")[:10]
+                for b in bars
+                if b.get("date") or b.get("time")
+            ]
+            last = max(dates) if dates else None
+            if not last:
+                return "stale"
+            try:
+                from trader_shared.trading_context import compute_data_freshness
+                return compute_data_freshness(last)
+            except Exception:
+                return "live"
+
         # 与 light_data.load_market_snapshot 对齐：按分项缺失 + quote 降级判完备度
         _key_to_missing = {
             "daily": "daily",
@@ -880,6 +921,7 @@ class TushareProvider:
             bars_5m=bars_5m, weekly_bars=weekly_bars, monthly_bars=monthly_bars,
             tick_data=tick_data, data_status=data_status,
             missing_sources=missing_sources, source_errors=source_errors,
+            data_freshness=_snapshot_freshness(daily_bars),
         )
         return _enrich_snapshot(res_snap)
 

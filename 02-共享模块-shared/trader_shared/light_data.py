@@ -1090,42 +1090,113 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
     return {}
 
 
+def _ohlc_float(v: Any) -> float | None:
+    """OHLC 安全转 float；None/空/非数 → None（禁止当成 0 参与 ATR）。"""
+    if v is None or v == "" or v == "--":
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    if f != f:  # NaN
+        return None
+    return f
+
+
 def _compute_atr_fields(bars: list[dict[str, Any]]) -> None:
     """对日线 bar 列表原地附加 TR / ATR14 / ATR7 / ATR_ratio 字段。
 
     需要至少 8 根 bar 才能计算 atr7，15 根才能计算 atr14。
-    不足时字段为 None（与 indicator_math.calc_atr_series 预热语义一致）。
+    不足或 OHLC 缺失时字段为 None（与 indicator_math.calc_atr_series 预热语义一致）。
     下游请用 ``(atr14 or 0)`` / ``atr14 is not None``；勿把不足当成 ATR=0。
     """
     if not bars:
         return
     for i, bar in enumerate(bars):
-        h: float = bar.get("high") or 0.0
-        l: float = bar.get("low") or 0.0
+        h = _ohlc_float(bar.get("high"))
+        l = _ohlc_float(bar.get("low"))
+        if h is None or l is None or h < l:
+            bar["tr"] = None
+            continue
         if i == 0:
             bar["tr"] = round(h - l, 4)
-        else:
-            pc: float = bars[i - 1].get("close") or bars[i - 1].get("open") or 0.0
-            h_l = h - l
-            h_pc = abs(h - pc)
-            l_pc = abs(l - pc)
-            bar["tr"] = round(max(h_l, h_pc, l_pc), 4)
-    trs = [b.get("tr", 0.0) or 0.0 for b in bars]
+            continue
+        pc = _ohlc_float(bars[i - 1].get("close"))
+        if pc is None:
+            pc = _ohlc_float(bars[i - 1].get("open"))
+        if pc is None:
+            bar["tr"] = None
+            continue
+        bar["tr"] = round(max(h - l, abs(h - pc), abs(l - pc)), 4)
+
+    def _sma_atr(i: int, period: int) -> float | None:
+        if i < period - 1:
+            return None
+        window = [bars[j].get("tr") for j in range(i - period + 1, i + 1)]
+        if any(t is None for t in window):
+            return None
+        return round(sum(float(t) for t in window) / period, 4)
+
     for i, bar in enumerate(bars):
-        if i >= 6:
-            bar["atr7"] = round(sum(trs[i - 6 : i + 1]) / 7, 4)
-        else:
-            bar["atr7"] = None
-        if i >= 13:
-            bar["atr14"] = round(sum(trs[i - 13 : i + 1]) / 14, 4)
-        else:
-            bar["atr14"] = None
-        close = bar.get("close")
+        bar["atr7"] = _sma_atr(i, 7)
+        bar["atr14"] = _sma_atr(i, 14)
+        close = _ohlc_float(bar.get("close"))
         atr14 = bar.get("atr14")
-        if close and atr14 is not None and atr14 > 0:
+        if close is not None and close > 0 and atr14 is not None and atr14 > 0:
             bar["atr_ratio"] = round(float(atr14) / float(close), 4)
         else:
             bar["atr_ratio"] = None
+
+
+def ensure_bars_ascending(
+    bars: list[dict[str, Any]] | None,
+    *,
+    recompute_atr: bool = True,
+) -> tuple[list[dict[str, Any]], bool]:
+    """K 线契约：时间正序，bars[-1]=最新。
+
+    Tushare 等源常倒序；倒序下 ATR（用 bars[i-1].close 作昨收）、MA、
+    lookback ``[-n:]``、intraday_as_of 全会错。
+
+    日线用日期键；分钟线保留完整 ``date``/``datetime`` 字符串（勿截成日，
+    否则同日内倒序无法纠正）。
+
+    Returns:
+        (bars, rewritten) — rewritten=True 表示曾重排；若 recompute_atr 则已重算 ATR。
+    """
+    rows = list(bars or [])
+    if len(rows) < 2:
+        return rows, False
+
+    def _d(b: dict[str, Any]) -> str:
+        # 完整时间戳优先，保证 5m/15m/30m 同日内也能正序
+        raw = str(
+            b.get("datetime")
+            or b.get("date")
+            or b.get("trade_date")
+            or b.get("time")
+            or ""
+        ).strip()
+        # Tushare 等源常见 YYYYMMDD：规范化后再比，避免与 YYYY-MM-DD 混排错位
+        if len(raw) == 8 and raw.isdigit():
+            return f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}"
+        if len(raw) >= 8 and raw[:8].isdigit() and (len(raw) == 8 or raw[8] in " T"):
+            # 20260728 / 20260728 10:00
+            head, _, rest = raw.partition(" ")
+            if len(head) == 8 and head.isdigit():
+                norm = f"{head[:4]}-{head[4:6]}-{head[6:8]}"
+                return f"{norm} {rest}".rstrip() if rest else norm
+        return raw
+
+    dates = [_d(b) for b in rows]
+    if not all(dates):
+        return rows, False
+    if dates == sorted(dates):
+        return rows, False
+    rows.sort(key=_d)
+    if recompute_atr:
+        _compute_atr_fields(rows)
+    return rows, True
 
 
 def _fetch_daily_sina(sec: Security, days: int = 300) -> list[dict[str, Any]] | None:
@@ -1191,6 +1262,13 @@ def _fetch_daily_sina(sec: Security, days: int = 300) -> list[dict[str, Any]] | 
 
 
 def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[dict[str, Any]]:
+    """拉取日线（腾讯优先）。出口保证时间正序，bars[-1]=最新。"""
+    bars = _fetch_qfq_daily_raw(sec, http, days=days)
+    fixed, _ = ensure_bars_ascending(bars if isinstance(bars, list) else [])
+    return fixed
+
+
+def _fetch_qfq_daily_raw(sec: Security, http: HttpClient, days: int = 300) -> list[dict[str, Any]]:
     # ── Circuit breaker check — return cached data if paused ──
     if _circuit_tencent_daily.is_open:
         _logger.debug("Circuit breaker open for daily bars, returning cached data for %s", sec.code)
@@ -1267,6 +1345,7 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
                     "volume": to_float(row[5]),
                     "data_source": "tencent-http",
                     "data_status": "full",
+                    "adjust": "qfq",
                 })
         if not bars:
             day_rows = sec_data.get("day") or []
@@ -1281,6 +1360,7 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
                         "volume": to_float(row[5]),
                         "data_source": "tencent-http",
                         "data_status": "partial",  # 非前复权数据，标记为 partial
+                        "adjust": "none",
                     })
         if not bars:
             raise RuntimeError("Tencent qfq daily bars unavailable")
@@ -1396,7 +1476,8 @@ def fetch_5m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[st
         for bar in fallback_bars:
             bar["data_source"] = "sina"
             bar["data_status"] = "full"
-        return fallback_bars
+        fixed, _ = ensure_bars_ascending(fallback_bars, recompute_atr=False)
+        return fixed
     
     _logger.warning("Sina HTTP fetch_5m failed or incomplete for %s, falling back to Mootdx", sec.qq_symbol)
     bars = _fetch_mins_mootdx(sec, "5m", datalen)
@@ -1404,7 +1485,8 @@ def fetch_5m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[st
         for bar in bars:
             bar["data_source"] = "mootdx (fallback)"
             bar["data_status"] = "partial"
-        return bars
+        fixed, _ = ensure_bars_ascending(bars, recompute_atr=False)
+        return fixed
     return []
 
 
@@ -1414,7 +1496,8 @@ def fetch_15m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[s
         for bar in fallback_bars:
             bar["data_source"] = "sina"
             bar["data_status"] = "full"
-        return fallback_bars
+        fixed, _ = ensure_bars_ascending(fallback_bars, recompute_atr=False)
+        return fixed
     
     _logger.warning("Sina HTTP fetch_15m failed or incomplete for %s, falling back to Mootdx", sec.qq_symbol)
     bars = _fetch_mins_mootdx(sec, "15m", datalen)
@@ -1422,7 +1505,8 @@ def fetch_15m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[s
         for bar in bars:
             bar["data_source"] = "mootdx (fallback)"
             bar["data_status"] = "partial"
-        return bars
+        fixed, _ = ensure_bars_ascending(bars, recompute_atr=False)
+        return fixed
     return []
 
 
@@ -1432,7 +1516,8 @@ def fetch_30m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[s
         for bar in fallback_bars:
             bar["data_source"] = "sina"
             bar["data_status"] = "full"
-        return fallback_bars
+        fixed, _ = ensure_bars_ascending(fallback_bars, recompute_atr=False)
+        return fixed
     
     _logger.warning("Sina HTTP fetch_30m failed or incomplete for %s, falling back to Mootdx", sec.qq_symbol)
     bars = _fetch_mins_mootdx(sec, "30m", datalen)
@@ -1440,7 +1525,8 @@ def fetch_30m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[s
         for bar in bars:
             bar["data_source"] = "mootdx (fallback)"
             bar["data_status"] = "partial"
-        return bars
+        fixed, _ = ensure_bars_ascending(bars, recompute_atr=False)
+        return fixed
     return []
 
 
@@ -1484,14 +1570,16 @@ def fetch_monthly(sec: Security, http: HttpClient, datalen: int = 60) -> list[di
         for bar in fallback_bars:
             bar["data_source"] = "sina"
             bar["data_status"] = "full"
-        return fallback_bars
+        fixed, _ = ensure_bars_ascending(fallback_bars)
+        return fixed
 
     bars = _fetch_mins_mootdx(sec, "monthly", datalen)
     if bars:
         for bar in bars:
             bar["data_source"] = "mootdx (fallback)"
             bar["data_status"] = "partial"
-        return bars
+        fixed, _ = ensure_bars_ascending(bars)
+        return fixed
     return []
 
 
@@ -1501,15 +1589,17 @@ def fetch_kline(sec: Security, http: HttpClient, datalen: int = 60, interval: st
         for bar in fallback_bars:
             bar["data_source"] = "sina"
             bar["data_status"] = "full"
-        return fallback_bars
-    
+        fixed, _ = ensure_bars_ascending(fallback_bars, recompute_atr=False)
+        return fixed
+
     warnings.warn(f"⚠️ Sina HTTP fetch_kline (interval {interval}) failed or incomplete. Falling back to Mootdx Quote client.")
     bars = _fetch_mins_mootdx(sec, interval, datalen)
     if bars:
         for bar in bars:
             bar["data_source"] = "mootdx (fallback)"
             bar["data_status"] = "partial"
-        return bars
+        fixed, _ = ensure_bars_ascending(bars, recompute_atr=False)
+        return fixed
     return []
 
 
@@ -1664,6 +1754,11 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
     bars_5m = results.get("bars_5m") or []
     weekly_bars = results.get("weekly_bars") or []
     monthly_bars = results.get("monthly_bars") or []
+    # 快照边界：统一正序，防止任一源/缓存倒序污染 ATR/MA/缠论 lookback
+    daily_bars, _ = ensure_bars_ascending(daily_bars)
+    weekly_bars, _ = ensure_bars_ascending(weekly_bars)
+    monthly_bars, _ = ensure_bars_ascending(monthly_bars)
+    bars_5m, _ = ensure_bars_ascending(bars_5m, recompute_atr=False)
     tick_data = results.get("tick_data") or []
     order_book = quote.get("order_book")
     if isinstance(quote, dict):
@@ -1672,10 +1767,20 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
             del quote["order_book"]
 
     def _snapshot_data_freshness(bars) -> str:
-        """基于日线最后一根日期判定数据是否最新可用（覆盖到最近交易日 → live）。"""
+        """基于日线最新日期判定数据是否最新可用（覆盖到最近交易日 → live）。
+
+        用 max(date) 而非 bars[-1]，防止偶发倒序误判 stale/live。
+        """
         if not bars:
             return "stale"
-        last = bars[-1].get("date") or bars[-1].get("time")
+        dates = [
+            str(b.get("date") or b.get("time") or "")[:10]
+            for b in bars
+            if b.get("date") or b.get("time")
+        ]
+        last = max(dates) if dates else None
+        if not last:
+            return "stale"
         try:
             from trader_shared.trading_context import compute_data_freshness
         except ImportError:
@@ -1751,6 +1856,8 @@ def normalize_bars(raw_bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
         normalized = normalize_bar(row)
         if normalized:
             bars.append(normalized)
+    # 契约：时间正序，bars[-1]=最新（部分源如 Tushare 可能倒序）
+    bars.sort(key=lambda b: str(b.get("date") or b.get("trade_date") or "")[:10])
     return bars
 
 

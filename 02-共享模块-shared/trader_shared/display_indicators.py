@@ -104,7 +104,7 @@ def calc_vwap(bars_5m: list, current_price: float | None = None) -> dict:
         if vol <= 0:
             continue
         h, l, c = _bar_values(bar)
-        if h <= 0 or l <= 0 or c <= 0:
+        if h is None or l is None or c is None or h <= 0 or l <= 0 or c <= 0:
             continue
         typical = (h + l + c) / 3
         cum_pv += typical * vol
@@ -116,13 +116,16 @@ def calc_vwap(bars_5m: list, current_price: float | None = None) -> dict:
     vwap = cum_pv / cum_vol
     # 越界 sanity：VWAP 必须落在当日区间，否则说明仍被跨日数据污染
     try:
-        _day_low = min(_bar_values(b)[1] for b in bars_5m)
-        _day_high = max(_bar_values(b)[0] for b in bars_5m)
-        if not (_day_low <= vwap <= _day_high):
-            _logger.warning(
-                "VWAP %.2f 超出当日区间 [%.2f, %.2f]，疑似跨日数据污染",
-                vwap, _day_low, _day_high,
-            )
+        lows = [v for v in (_bar_values(b)[1] for b in bars_5m) if v is not None]
+        highs = [v for v in (_bar_values(b)[0] for b in bars_5m) if v is not None]
+        if lows and highs:
+            _day_low = min(lows)
+            _day_high = max(highs)
+            if not (_day_low <= vwap <= _day_high):
+                _logger.warning(
+                    "VWAP %.2f 超出当日区间 [%.2f, %.2f]，疑似跨日数据污染",
+                    vwap, _day_low, _day_high,
+                )
     except Exception:
         pass
     if current_price is None:
@@ -199,6 +202,10 @@ def calc_supertrend(bars: list, atr_period: int | None = None, multiplier: float
             basic_lower.append(None)
             continue
         h, l, c = _bar_values(bar)
+        if h is None or l is None:
+            basic_upper.append(None)
+            basic_lower.append(None)
+            continue
         hl2 = (h + l) / 2.0
         basic_upper.append(hl2 + multiplier * atr_list[i])
         basic_lower.append(hl2 - multiplier * atr_list[i])
@@ -210,6 +217,8 @@ def calc_supertrend(bars: list, atr_period: int | None = None, multiplier: float
         if basic_upper[i] is None:
             continue
         _, _, c = _bar_values(bars[i])
+        if c is None:
+            continue
         if i == atr_period - 1 or direction_list[i - 1] is None:
             final_lower[i] = basic_lower[i]
             final_upper[i] = basic_upper[i]
@@ -242,8 +251,8 @@ def calc_supertrend(bars: list, atr_period: int | None = None, multiplier: float
             break
 
     last_atr = atr_list[-1] or 0.0
-    _, _, last_close = _bar_values(bars[-1]) if bars else (0.0, 0.0, 0.0)
-    atr_pct = (last_atr / last_close) if last_close > 0 else 0.0
+    _, _, last_close = _bar_values(bars[-1]) if bars else (None, None, None)
+    atr_pct = (last_atr / last_close) if last_close is not None and last_close > 0 else 0.0
     if atr_pct < 0.03:
         vol_level = "波动较低"
     elif atr_pct < 0.05:

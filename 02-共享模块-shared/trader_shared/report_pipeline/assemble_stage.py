@@ -200,6 +200,8 @@ def assemble_base_report(
     expma_status_result: dict[str, Any],
     resonance_result: dict[str, Any],
     sector_data: Any,
+    atr_adjust: str = "unknown",
+    atr_data_source: str = "",
     fusion_pre_cards: Any = None,
 ) -> dict[str, Any]:
     """组装 build_report 基础 dict，并 sync 非内部 levels 字段。"""
@@ -262,6 +264,8 @@ def assemble_base_report(
         "atr_ratio": atr_ratio_val,
         "atr_level": atr_level,
         "atr_cap": atr_cap,
+        "atr_adjust": atr_adjust,
+        "atr_data_source": atr_data_source,
         "supertrend_direction": st_dir,
         "supertrend_stop": (
             st.get("stop_long")

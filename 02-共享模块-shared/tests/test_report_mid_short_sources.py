@@ -40,7 +40,7 @@ def _weekly_bars(n: int = 40, base: float = 50.0) -> list[dict]:
     return out
 
 
-# 周线结构：life=48.0（刻意与日线 mid_support=40.0 不同）
+# 周线结构：近端生命线 ≠ 日线 mid_support=40.0（隔离断言）
 _CHAN_MID = {
     "chanlun": {
         "structure_type": "盘整",
@@ -65,7 +65,7 @@ _CHAN_MID = {
     }
 }
 
-# 日线 key_levels：mid_support=40.0 与周 life=48 故意相反
+# 日线 key_levels：mid_support=40.0 与周线近端 life 故意相反
 _DAILY_KL = {
     "short_support": 44.0,
     "mid_support": 40.0,

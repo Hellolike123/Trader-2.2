@@ -125,22 +125,57 @@ def get_day_scoped_bars(
 
     存盘格式：{"fetch_date": "YYYY-MM-DD", "rows": [...]}
     兼容旧缓存（纯 list）：若文件未过期且行数够，仍可用一次，下次写入会带 fetch_date。
+
+    出口统一时间正序（bars[-1]=最新）；倒序缓存会纠正并回写，避免 ATR/MA 中毒。
     """
     today = cache_calendar_date()
+
+    def _finalize(rows: list | None) -> list:
+        if not isinstance(rows, list):
+            return []
+        if len(rows) < min_rows:
+            return list(rows)
+        try:
+            from trader_shared.light_data import ensure_bars_ascending
+        except ImportError:
+            return list(rows)
+        fixed, rewritten = ensure_bars_ascending(rows)
+        if rewritten and fixed:
+            _logger.info(
+                "bars reordered ascending cache=%s target=%s n=%s",
+                cache_key,
+                target,
+                len(fixed),
+            )
+            try:
+                set_cached(
+                    cache_key,
+                    target,
+                    {"fetch_date": today, "rows": fixed},
+                )
+            except OSError as exc:
+                _logger.debug(
+                    "get_day_scoped_bars rewrite failed %s/%s: %s",
+                    cache_key,
+                    target,
+                    exc,
+                )
+        return fixed
+
     cached = get_cached(cache_key, target, ttl=TTL_BARS_DAY)
     if cached is not None:
         data = cached.data
         if is_fetch_date_today(data, today):
             rows = unwrap_bars_payload(data)
             if rows is not None and len(rows) >= min_rows:
-                return rows
+                return _finalize(rows)
         # 旧格式：裸 list + 未过 TTL → 可先用，避免无意义回源
         if (
             isinstance(data, list)
             and len(data) >= min_rows
             and not cached.stale
         ):
-            return list(data)
+            return _finalize(list(data))
 
     try:
         rows = fetch_fn() or []
@@ -154,24 +189,31 @@ def get_day_scoped_bars(
             if is_fetch_date_today(data, today):
                 hit = unwrap_bars_payload(data)
                 if hit is not None and len(hit) >= min_rows:
-                    return hit
+                    return _finalize(hit)
             if (
                 isinstance(data, list)
                 and len(data) >= min_rows
                 and not cached.stale
             ):
-                return list(data)
+                return _finalize(list(data))
         return []
 
     if isinstance(rows, list) and len(rows) >= min_rows:
+        fixed, _rewritten = (rows, False)
+        try:
+            from trader_shared.light_data import ensure_bars_ascending
+            fixed, _rewritten = ensure_bars_ascending(rows)
+        except ImportError:
+            fixed = list(rows)
         try:
             set_cached(
                 cache_key,
                 target,
-                {"fetch_date": today, "rows": rows},
+                {"fetch_date": today, "rows": fixed},
             )
         except OSError as exc:
             _logger.debug("get_day_scoped_bars write failed %s/%s: %s", cache_key, target, exc)
+        return list(fixed) if isinstance(fixed, list) else []
     return list(rows) if isinstance(rows, list) else []
 
 
@@ -679,7 +721,11 @@ def merge_daily_bars_with_quote(
 
     # Copy ATR fields from the last cached bar (ATR is a slow variable, previous day's value is a good approximation)
     if cached_bars:
-        prev_bar = cached_bars[-1]
+        # 取日期最新一根，勿假定列表已正序
+        def _bar_d(b: dict) -> str:
+            return _normalize_bar_date(b.get("date") or b.get("time") or b.get("trade_date") or "") or ""
+
+        prev_bar = max(cached_bars, key=_bar_d)
         for atr_key in ("atr14", "atr_ratio", "atr7", "tr"):
             if prev_bar.get(atr_key) is not None:
                 today_bar[atr_key] = prev_bar[atr_key]
@@ -698,7 +744,27 @@ def merge_daily_bars_with_quote(
     if not today_replaced:
         result.append(today_bar)
 
-    return result
+    # 统一日期为 YYYY-MM-DD，再正序（避免 20260725 与 2026-07-28 字典序错乱）
+    for bar in result:
+        if not isinstance(bar, dict):
+            continue
+        nd = _normalize_bar_date(bar.get("date") or bar.get("time") or bar.get("trade_date") or "")
+        if nd:
+            bar["date"] = nd
+
+    # 合并后强制正序（输入可能倒序）；ATR 按正序重算
+    try:
+        from trader_shared.light_data import ensure_bars_ascending
+        fixed, _ = ensure_bars_ascending(result)
+        return fixed
+    except ImportError:
+        result.sort(
+            key=lambda b: _normalize_bar_date(
+                b.get("date") or b.get("time") or b.get("trade_date") or ""
+            )
+            or ""
+        )
+        return result
 
 
 # ── 内存缓存：merge_daily_bars_with_quote ──────────────────────

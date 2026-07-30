@@ -186,6 +186,11 @@ def aggregate_5m_to_60m(bars_5m: list[dict]) -> list[dict]:
         group = groups[key]
         if not group:
             continue
+        # 组内按时间正序，保证 open=首根、close=末根
+        group = sorted(
+            group,
+            key=lambda b: str(b.get("date") or b.get("datetime") or b.get("time") or ""),
+        )
         result.append({
             "date": key,
             "open": float(group[0].get("open", 0)),
@@ -197,11 +202,20 @@ def aggregate_5m_to_60m(bars_5m: list[dict]) -> list[dict]:
     return result
 
 
-def _bar_values(bar: dict) -> tuple[float, float, float]:
-    """兼容 dict / 对象两种 bar 形态，提取 (high, low, close)。"""
+def _bar_values(bar: dict) -> tuple[float | None, float | None, float | None]:
+    """兼容 dict / 对象两种 bar 形态，提取 (high, low, close)；缺失为 None。"""
+    def _f(v: object) -> float | None:
+        if v is None or v == "" or v == "--":
+            return None
+        try:
+            f = float(v)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return None
+        return None if f != f else f
+
     if not isinstance(bar, dict):
-        return float(getattr(bar, "high", 0)), float(getattr(bar, "low", 0)), float(getattr(bar, "close", 0))
-    return float(bar.get("high", 0) or 0), float(bar.get("low", 0) or 0), float(bar.get("close", 0) or 0)
+        return _f(getattr(bar, "high", None)), _f(getattr(bar, "low", None)), _f(getattr(bar, "close", None))
+    return _f(bar.get("high")), _f(bar.get("low")), _f(bar.get("close"))
 
 
 def calc_rsi_series(closes: list[float | None], period: int = 14) -> list[float | None]:
@@ -247,25 +261,36 @@ def calc_atr_series(bars: list, period: int = 14) -> list[float | None]:
         period: ATR 周期
 
     Returns:
-        与 bars 等长的序列，前 period-1 个为 None
+        与 bars 等长的序列；预热不足或 OHLC/TR 缺失处为 None（不用 0 冒充）。
     """
-    if not bars or len(bars) < 2:
+    if not bars or period <= 0:
         return [None] * len(bars)
 
-    tr_list: list[float] = []
+    tr_list: list[float | None] = []
     for i, bar in enumerate(bars):
-        h, l, c = _bar_values(bar)
+        h, l, _c = _bar_values(bar)
+        if h is None or l is None or h < l:
+            tr_list.append(None)
+            continue
         if i == 0:
-            tr = h - l
-        else:
-            hp, _, cp = _bar_values(bars[i - 1])
-            tr = max(h - l, abs(h - cp), abs(l - cp))
-        tr_list.append(tr)
+            tr_list.append(h - l)
+            continue
+        _ph, _pl, cp = _bar_values(bars[i - 1])
+        if cp is None:
+            tr_list.append(None)
+            continue
+        tr_list.append(max(h - l, abs(h - cp), abs(l - cp)))
 
-    atr_list: list[float | None] = [None] * (period - 1)
-    for i in range(period - 1, len(tr_list)):
+    atr_list: list[float | None] = []
+    for i in range(len(tr_list)):
+        if i < period - 1:
+            atr_list.append(None)
+            continue
         window = tr_list[i - period + 1 : i + 1]
-        atr_list.append(sum(window) / period)
+        if any(t is None for t in window):
+            atr_list.append(None)
+        else:
+            atr_list.append(sum(float(t) for t in window) / period)
     return atr_list
 
 
