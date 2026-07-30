@@ -180,7 +180,7 @@ def test_no_conflict_line():
     assert "说明：周线偏空" not in out
 
 
-# ── 短线威科夫事件灯（英文 + 中文，只展示）──
+# ── 短线威科夫事件灯（英文灯 + 中文括号，只展示）──
 
 def test_format_wyckoff_event_light_spring():
     line = format_wyckoff_event_light({
@@ -188,13 +188,13 @@ def test_format_wyckoff_event_light_spring():
         "spring_vol_class": "low_vol_confirm",
         "timeframe": "daily",
     })
-    assert line.startswith("状态：Spring 弹簧")
+    assert line.startswith("状态：Spring（弹簧）")
     assert "低位假跌破后收回" in line
     assert "偏多" in line
 
 
 def test_format_wyckoff_midline_light_ar():
-    """中线人话：阶段白话 · 灯（中文）· 一句含义（不能当转强）。"""
+    """中线人话：阶段白话 · 灯（中文括号）· 防误读短句。"""
     line = format_wyckoff_midline_light({
         "ar_signal": True,
         "phase_label": "积累期 B（辅助：AR无BC）",
@@ -203,10 +203,19 @@ def test_format_wyckoff_midline_light_ar():
     assert line.startswith("威科夫：")
     assert "还在吸筹中" in line
     assert "AR（自动反弹）" in line
-    assert "不能当已经转强" in line or "不能当转强" in line
-    # 不再堆「高潮后快速反弹 · 偏多」式重复
+    assert "不能当已经转强" in line
     assert "高潮后快速反弹" not in line
     assert not line.endswith("偏多")
+
+
+def test_format_wyckoff_midline_light_event_without_phase():
+    """有事件、无阶段时阶段位为「无」；事件 Code（中文）+ 短防误读。"""
+    line = format_wyckoff_midline_light({
+        "bullish_volume_divergence": True,
+        "timeframe": "weekly",
+        "wyckoff_summary": "中线",
+    })
+    assert line == "威科夫：无 · BullDiv（看多背离） · 不能当反转"
 
 
 def test_format_wyckoff_event_light_none():
@@ -231,9 +240,33 @@ def test_short_section_shows_event_light():
     }
     out = render_short_midline(r)
     assert "⚡ 短线" in out
-    assert "状态：Spring 弹簧" in out
+    assert "状态：Spring（弹簧）" in out
     # 中线威科夫仍独立一行
     assert "威科夫：" in out
+
+
+def test_short_section_omits_empty_status_and_compacts_structure():
+    """无威科夫事件不占状态行；结构过长压缩；资金去掉「未取到」。"""
+    r = _report()
+    r["wyckoff_daily"] = {"timeframe": "daily", "wyckoff_summary": "无"}
+    r["conclusion"]["wave_label"] = "回调段 · 盘整 · 回调一笔中 · 线段偏少"
+    r["fusion"]["signals_detail"]["chan"] = {
+        "direction": -1,
+        "reason": "暂无买卖点 · 回调段 · 盘整 · 看跌",
+    }
+    r["fusion"]["signals_detail"]["vpf"] = {
+        "direction": 0,
+        "reason": "平量（量比1.3）（资金未取到）",
+    }
+    out = render_short_midline(r)
+    short = out.split("⚡ 短线", 1)[-1]
+    assert "状态：" not in short.split("关键价", 1)[0]
+    assert "结构：" in short
+    struct = [ln for ln in short.splitlines() if "结构：" in ln][0]
+    assert struct.count("·") <= 3 or "（暂无买卖点）" in struct
+    assert "资金未取到" not in short
+    assert "仪表：" not in short
+    assert "决策：不推荐" not in short
 
 
 def test_format_chanlun_short_light_buy1():
@@ -288,8 +321,8 @@ def test_short_section_chan_type_first():
     assert 0 <= pos_struct < pos_action
 
 
-def test_r01_strategy_gates_in_short_section():
-    """R-01: ⚡ 短线含 📐 策略闸口。"""
+def test_r01_strategy_gates_omitted_from_report():
+    """R-01: 人读报告省略 📐 策略（决策/动作已覆盖；闸口仍在 strategy_match）。"""
     r = _report()
     r["has_position"] = False
     r["discipline"] = {
@@ -308,25 +341,27 @@ def test_r01_strategy_gates_in_short_section():
     }
     out = render_short_midline(r)
     short = out.split("⚡ 短线", 1)[-1]
-    assert "📐 策略" in short or "📐" in short
-    assert "选股：" in short or "持：" in short or "止损：" in short
+    assert "📐 策略" not in short
+    assert "选股：" not in short
+    assert "动作：" in short or "决策：" in short or "新开：" in short
 
 
 def test_r02_no_position_not_manage_active_tone():
-    """R-02: 无持仓时持仓闸为预案，不写已触发执行误导。"""
+    """R-02: 人读报告无 📐；若残留「持：」行不得写成已触发执行。"""
     r = _report()
     r["has_position"] = False
     r["cost"] = 0
     r["discipline"] = {"allow_new_entry": False, "action": "不新开", "suggested_pct_cap": 0}
     out = render_short_midline(r)
     short = out.split("⚡ 短线", 1)[-1].split("关键价", 1)[0]
+    assert "📐 策略" not in short
     if "持：" in short:
         hold_line = [ln for ln in short.splitlines() if "持：" in ln][0]
         assert "执行" not in hold_line or "预案" in hold_line
 
 
 def test_r03_strategy_block_no_md_table():
-    """R-03: 策略区无 markdown 表格/粗体。"""
+    """R-03: 短线区无 markdown 表格/粗体（含省略 📐 后仍成立）。"""
     out = render_short_midline(_report())
     short = out.split("⚡ 短线", 1)[-1] if "⚡ 短线" in out else out
     assert "**" not in short

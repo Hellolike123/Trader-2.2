@@ -257,6 +257,20 @@ _GRADE_ZH = {
     "empty": "空窗/不足",
 }
 
+# 岗位英文键 → 报告可见面中文（missing 列表上屏用）
+_POST_ZH = {
+    "background": "背景",
+    "structure": "结构",
+    "chip": "筹码",
+    "momentum": "动能",
+}
+
+
+def resonance_post_label(post: str | None) -> str:
+    """岗位 id → 中文；未知键原样返回。"""
+    p = str(post or "").strip()
+    return _POST_ZH.get(p, p)
+
 # 选股池离散排序档（越高越优先）；禁止当厚加权分王
 _GRADE_POOL_RANK = {
     "aligned": 40,
@@ -373,7 +387,8 @@ def build_resonance(
     zh = _GRADE_ZH.get(grade, grade)
     summary = f"共振：{zh}"
     if missing:
-        summary += f"（缺：{'｜'.join(missing)}）"
+        miss_zh = [resonance_post_label(m) for m in missing]
+        summary += f"（缺：{'｜'.join(miss_zh)}）"
 
     return {
         "schema_version": SCHEMA,

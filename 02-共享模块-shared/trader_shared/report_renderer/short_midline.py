@@ -8,6 +8,66 @@ from typing import Any
 
 from trader_shared.report_renderer._helpers import _reformat_mid_line, _short_midline_enabled
 
+
+def _compact_short_structure_line(line: str) -> str:
+    """短线结构行压缩：仅收拾「暂无买卖点」类堆叠；买卖点句式保持类型优先。"""
+    raw = str(line or "").strip()
+    if not raw:
+        return raw
+    if "暂无买卖点" not in raw and "暂无信号" not in raw:
+        return raw
+
+    tag = ""
+    for t in ("（同级）", "（本周期）"):
+        if raw.endswith(t):
+            tag = t
+            raw = raw[: -len(t)].rstrip()
+            break
+    parts = [p.strip() for p in raw.split("·") if p.strip()]
+    if len(parts) <= 3:
+        return line
+
+    _dirs = {"看涨", "看跌", "中性"}
+    _nop = {"暂无买卖点", "暂无信号"}
+    dirs = [p for p in parts if p in _dirs]
+    nops = [p for p in parts if p in _nop]
+    nest = [
+        p
+        for p in parts
+        if p.endswith("✓") or p.endswith("✗") or p == "未确认" or re.match(r"^\d+m", p)
+    ]
+    rest = [p for p in parts if p not in _dirs and p not in _nop and p not in nest]
+
+    # 同类「回调*」只留一条
+    deduped: list[str] = []
+    saw_pull = False
+    for p in rest:
+        if "回调" in p:
+            if saw_pull:
+                continue
+            saw_pull = True
+        deduped.append(p)
+    # 优先保留盘整/线段/背驰/趋势类词
+    _prio = ("盘整", "线段", "背驰", "拉升", "下跌", "中枢", "趋势")
+    ranked = sorted(
+        enumerate(deduped),
+        key=lambda iv: (0 if any(k in iv[1] for k in _prio) else 1, iv[0]),
+    )
+    rest = [p for _, p in ranked[:2]]
+
+    out: list[str] = []
+    out.extend(rest)
+    if dirs:
+        out.append(dirs[0])
+    out.extend(nest)
+    body = " · ".join(out) if out else (nops[0] if nops else raw)
+    if nops and nops[0] not in body:
+        body = f"{body}（{nops[0]}）" if body else nops[0]
+    if tag and tag not in body:
+        body = f"{body}{tag}"
+    return body
+
+
 def render_short_midline(r: dict[str, Any]) -> str:
     """短中线报告模板（docs/mid-short-dual-track-plan.md §0.1）。
 
@@ -401,6 +461,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
     lines.append(f"  缠论：{_chan_display}")
 
     # 位置灯（筹码峰：下方成本 / 上方套牢 / 搬家）— 只展示，不进 fusion
+    _pos_mid = ""
     try:
         from trader_shared.chip_core import format_chip_position_light
         _pos_mid = format_chip_position_light(
@@ -412,7 +473,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
         if _pos_mid:
             lines.append(f"  {_pos_mid}")
     except Exception:
-        pass
+        _pos_mid = ""
 
     # 附：股东（背景，不抢位置灯）
     _ext_fund = r.get("extend_fundamental") or {}
@@ -561,7 +622,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _chan_line = "暂无信号 · 中性"
             if _wave:
                 _chan_line += f" · {_wave}"
-    lines.append(f"  结构：{_chan_line}")
+    lines.append(f"  结构：{_compact_short_structure_line(_chan_line)}")
 
     # 1b) 买点盖生命周期（L1 展示）
     _life = r.get("buy_point_lifecycle") if isinstance(r.get("buy_point_lifecycle"), dict) else {}
@@ -569,7 +630,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if _life_line:
         lines.append(f"  {_life_line}")
 
-    # 2) 状态：日线威科夫事件灯（报告边界经 wyckoff_view；不进 fusion）
+    # 2) 状态：日线威科夫事件灯（仅有真实事件时输出；暂无事件省略）
     try:
         from trader_shared.wyckoff_view import format_event_display
 
@@ -595,13 +656,13 @@ def render_short_midline(r: dict[str, Any]) -> str:
                 _ev = "状态：" + _ev[len("事件："):]
             elif not _ev.startswith("状态："):
                 _ev = f"状态：{_ev}"
-            lines.append(f"  {_ev}")
-        else:
-            lines.append("  状态：— · 暂无日线事件 · 中性")
+            # 空事件不占行
+            if "暂无事件" not in _ev and "数据不足" not in _ev:
+                lines.append(f"  {_ev}")
     except Exception:
-        lines.append("  状态：— · 数据不足 · 中性")
+        pass
 
-    # 2b) 位置灯（筹码峰）— 确认/否证结构与威科夫，不进 fusion
+    # 2b) 位置灯（筹码峰）— 与中线相同则省略，避免双抄
     try:
         from trader_shared.chip_core import format_chip_position_light
         _pos_s = format_chip_position_light(
@@ -610,7 +671,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
             r.get("chip_migration") if isinstance(r.get("chip_migration"), dict) else None,
             r.get("chip_current_pct") if isinstance(r.get("chip_current_pct"), (int, float)) else None,
         )
-        if _pos_s:
+        if _pos_s and _pos_s != _pos_mid:
             lines.append(f"  {_pos_s}")
     except Exception:
         pass
@@ -627,6 +688,10 @@ def render_short_midline(r: dict[str, Any]) -> str:
     _vsig = fusion_signals.get("vpf") if isinstance(fusion_signals.get("vpf"), dict) else {}
     if _vsig:
         _vst = str(_vsig.get("reason") or _vsig.get("vp_reason") or "").strip() or "中性"
+        # 缺资金时省略抱怨括号，保留量价主句
+        _vst = re.sub(r"（资金未取到）", "", _vst)
+        _vst = re.sub(r"资金未取到", "", _vst)
+        _vst = re.sub(r"\s{2,}", " ", _vst).strip(" ·｜|")
         if len(_vst) > 32:
             _vst = _vst[:30] + "…"
         _veto = str(fusion.get("fund_flow_outflow_veto_msg") or "").strip()
@@ -694,28 +759,8 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _inv = _inv[:57] + "…"
         lines.append(f"  失效：{_inv}")
 
-    # 6) 📐 策略闸口（P3：只展示；优先 report 预计算）
-    try:
-        from trader_shared.analysis_cards import ensure_report_analysis_cards
-        from trader_shared.strategy_match import format_gates_brief, match_strategies
-
-        _sm_in = dict(r)
-        _sm_in["action_text"] = execution
-        if isinstance(_disc, dict):
-            _sm_in["discipline"] = _disc
-        ensure_report_analysis_cards(_sm_in)
-        _sm = r.get("strategy_match") if isinstance(r.get("strategy_match"), dict) else None
-        if not _sm or _sm.get("schema_version") != "strategy_match_v1":
-            _sm = match_strategies(_sm_in)
-        _brief = format_gates_brief(_sm)
-        for _bl in _brief.splitlines():
-            if _bl.strip():
-                lines.append(f"  {_bl}" if not _bl.startswith("  ") else f"  {_bl}")
-            else:
-                lines.append(_bl)
-    except Exception:
-        lines.append("  📐 策略")
-        lines.append("  选股：匹配暂不可用")
+    # 策略闸口仍由 pipeline 写入 strategy_match（供 decision_view）；
+    # 人读报告省略 📐——日常以 决策/动作/新开/失效 为准。
 
     stop_sell = key_prices.get("stop_sell") or r.get("stop")
     buy_low = key_prices.get("buy_zone_low")

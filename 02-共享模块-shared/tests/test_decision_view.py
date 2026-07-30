@@ -64,6 +64,8 @@ def test_block_when_resonance_not_aligned():
     v = build_decision_view(r)
     assert v["allow_new_recommend"] is False
     assert any("共振" in x for x in v["block_reasons"])
+    assert not any("missing_structure" in x for x in v["block_reasons"])
+    assert any("缺结构" in x for x in v["block_reasons"])
 
 
 def test_block_when_no_entry_strategy():
@@ -121,13 +123,32 @@ def test_format_narrative_includes_resonance_decision_gauge():
     apply_decision_view(r)
     r["fusion"] = {"weighted_score": 0.22, "action": "半仓试"}
     r["resonance"]["summary_line"] = "共振：缺结构"
+    # 默认：不推荐时无决策行、无仪表
     lines = format_decision_narrative_lines(r)
     text = "\n".join(lines)
     assert "共振" in text
-    assert "决策" in text
+    assert "决策" not in text
     assert "新开" in text
-    assert "仪表" in text and "仅参考" in text
-    assert "0.22" in text or "+0.22" in text
+    assert "仪表" not in text
+
+    # 可试探时出决策；仪表需显式开关
+    r2 = _report()
+    apply_decision_view(r2)
+    r2["fusion"] = {"weighted_score": 0.22, "action": "半仓试"}
+    lines2 = format_decision_narrative_lines(r2)
+    text2 = "\n".join(lines2)
+    assert "决策" in text2 and "可试探" in text2
+
+    import os
+
+    os.environ["TRADER_SHOW_FUSION_GAUGE"] = "1"
+    try:
+        lines3 = format_decision_narrative_lines(r)
+        text3 = "\n".join(lines3)
+        assert "仪表" in text3 and "仅参考" in text3
+        assert "0.22" in text3 or "+0.22" in text3
+    finally:
+        os.environ.pop("TRADER_SHOW_FUSION_GAUGE", None)
 
 
 def test_apply_decision_to_execution_presses_soft_buy():
@@ -187,6 +208,8 @@ def test_render_short_midline_shows_decision_narrative():
     }
     md = render_short_midline(r)
     assert "共振" in md
-    assert "决策" in md
-    assert "仪表" in md and "仅参考" in md
-    assert "半仓试" in md or "0.18" in md or "+0.18" in md
+    assert "新开" in md
+    # 不推荐场景：决策/仪表默认不上屏
+    assert "决策：不推荐" not in md
+    assert "仪表：" not in md
+    assert "动作：" in md

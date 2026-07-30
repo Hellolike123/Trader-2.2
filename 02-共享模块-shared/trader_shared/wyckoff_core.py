@@ -930,10 +930,10 @@ def format_wyckoff_event_light(
     *,
     direction: int | None = None,
 ) -> str:
-    """短线报告：英文灯标 + 中文解释（不参与评分）。
+    """短线报告：英文灯 + 中文括号解释（不参与评分）。
 
     例：
-      状态：Spring 弹簧 · 低位假跌破后收回（更像洗盘）· 偏多
+      状态：Spring（弹簧）· 低位假跌破后收回（更像洗盘）· 偏多
       状态：— · 暂无事件 · 中性
     """
     info = resolve_wyckoff_primary(wyckoff)
@@ -945,12 +945,12 @@ def format_wyckoff_event_light(
         return "状态：— · 暂无事件 · 中性"
 
     d = int(direction) if direction is not None else int(info["direction"])
-    code = info["code"]
-    cn = info["cn_name"]
+    code = str(info.get("code") or "—").strip() or "—"
+    cn = str(info.get("cn_name") or "").strip()
     main = info["main"]
     note = info["note"]
-    # 英文灯 + 中文短名 + 主句白话 + 方向（说明）
-    return f"状态：{code} {cn} · {main}（{note}）· {_wyckoff_dir_label(d)}"
+    event = f"{code}（{cn}）" if cn and cn not in ("无", "不足", "无事件") else code
+    return f"状态：{event} · {main}（{note}）· {_wyckoff_dir_label(d)}"
 
 
 def _plain_phase_midline(phase_label: str) -> str:
@@ -990,27 +990,27 @@ def _plain_phase_midline(phase_label: str) -> str:
 
 
 def _midline_meaning(code: str, cn_name: str, note: str, direction: int) -> str:
-    """中线「一句话含义」：发生了什么 + 不能误读成什么。"""
+    """中线含义：只留防误读短句（事件名已在 Code（中文）里，不重复叙述）。"""
     c = (code or "").strip()
     by_code = {
-        "AR": "有反弹，只是反弹，不能当已经转强",
-        "PS": "刚有人接，还早，不能当已经转强",
-        "SC": "恐慌砸完一波，还要等弹簧/确认",
-        "ST": "再测支撑，还不能当主升",
-        "Spring": "假跌破后收回，更像洗盘；回踩区再谈",
-        "SOS": "放量上攻，有转强苗头；仍看回踩站不站稳",
-        "BU": "突破后回踩，勿追高",
-        "LPS": "上升中的回踩支撑，破了就不算",
-        "BC": "高位买疯了，不能当还能续涨",
-        "UT": "冲高回落，假突破，不能当突破成功",
-        "UTAD": "派发末的假突破，小心往下破",
-        "SOW": "放量跌破，偏弱，先防守",
-        "LPSY": "下跌中的反抽出货点，反抽别追",
-        "PSY": "高位开始有人出，还不能当见顶定论",
-        "Compression": "波动压窄了，等方向选择",
-        "TrendPullback": "顺势回踩，破位就算假",
-        "BullDiv": "跌时量缩，有止跌迹象，不能当反转",
-        "BearDiv": "涨时量缩，上攻乏力，别追高",
+        "AR": "不能当已经转强",
+        "PS": "不能当已经转强",
+        "SC": "还要等弹簧/确认",
+        "ST": "还不能当主升",
+        "Spring": "回踩区再谈",
+        "SOS": "仍看回踩站不站稳",
+        "BU": "勿追高",
+        "LPS": "破了就不算",
+        "BC": "不能当还能续涨",
+        "UT": "不能当突破成功",
+        "UTAD": "小心往下破",
+        "SOW": "先防守",
+        "LPSY": "反抽别追",
+        "PSY": "还不能当见顶定论",
+        "Compression": "等方向选择",
+        "TrendPullback": "破位就算假",
+        "BullDiv": "不能当反转",
+        "BearDiv": "别追高",
     }
     if c in by_code:
         return by_code[c]
@@ -1018,9 +1018,9 @@ def _midline_meaning(code: str, cn_name: str, note: str, direction: int) -> str:
     if n:
         return n
     if direction > 0:
-        return "有点偏多线索，不能单独当开仓理由"
+        return "不能单独当开仓理由"
     if direction < 0:
-        return "有点偏空线索，先防守"
+        return "先防守"
     return "暂无明确含义"
 
 
@@ -1031,8 +1031,9 @@ def format_wyckoff_midline_light(
 ) -> str:
     """中线威科夫人话版（周线；不进短线评分）。
 
-    三段式，少重复：
-      威科夫：还在吸筹中 · AR（自动反弹）· 有反弹，只是反弹，不能当已经转强
+    三段式固定「阶段 · 事件 · 含义」（阶段不明用「无」，不跳段）：
+      威科夫：还在吸筹中 · AR（自动反弹）· 不能当已经转强
+      威科夫：无 · BullDiv（看多背离）· 不能当反转
       威科夫：周线不足 · 不参与定论
     """
     info = resolve_wyckoff_primary(wyckoff)
@@ -1043,9 +1044,9 @@ def format_wyckoff_midline_light(
 
     phase_plain = _plain_phase_midline(str(info.get("phase_label") or ""))
     d = int(direction) if direction is not None else int(info["direction"] or 0)
+    # 契约：中线威科夫始终「阶段 · 事件」；阶段定不出时用「无」，禁止直接跳到事件灯
+    phase_slot = phase_plain or "无"
     parts: list[str] = []
-    if phase_plain:
-        parts.append(phase_plain)
 
     if info["status"] == "none":
         # 已跑周线引擎：不是「没算」，而是 TR/事件定不出阶段
@@ -1056,20 +1057,18 @@ def format_wyckoff_midline_light(
             parts.append("构不成清晰吸筹/派发区间")
             parts.append("阶段暂定不出，不据此开仓")
         else:
-            if phase_plain:
-                pass  # 已有阶段人话
-            else:
-                parts.append("阶段暂不明")
+            parts.append(phase_slot)
             parts.append("暂无关键事件")
             parts.append("不据此开仓")
         return "威科夫：" + " · ".join(parts) if parts else "威科夫：周线已算 · 暂无定论"
 
-    code = str(info.get("code") or "—")
-    cn = str(info.get("cn_name") or "")
+    code = str(info.get("code") or "—").strip() or "—"
+    cn = str(info.get("cn_name") or "").strip()
     note = str(info.get("note") or "")
     meaning = _midline_meaning(code, cn, note, d)
 
-    # 灯：AR（自动反弹）—— 英文一眼扫，中文括号解释；不再复述「高潮后快速反弹」
+    parts.append(phase_slot)
+    # 灯：Spring（弹簧）—— 英文 + 中文括号，与短线状态行一致
     if cn and cn not in ("无", "不足", "无事件"):
         parts.append(f"{code}（{cn}）")
     else:

@@ -68,7 +68,10 @@ def test_missing_structure_when_no_buy_and_far_from_zone():
     res = build_resonance(r)
     assert res["grade"] == "missing_structure"
     assert res["posts"]["structure"]["ok"] is False
-    assert "structure" in res["missing"]
+    assert "structure" in res["missing"]  # 内部键仍英文
+    assert "缺结构" in res["summary_line"]
+    assert "structure" not in res["summary_line"]  # 可见面中文
+    assert "momentum" not in res["summary_line"]
 
 
 def test_conflict_when_structure_ok_but_stage_distribution():

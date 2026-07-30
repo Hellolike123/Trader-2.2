@@ -72,14 +72,26 @@ def build_decision_view(report: dict[str, Any] | None) -> dict[str, Any]:
     if not resonance_ok:
         if grade == "conflict":
             block_reasons.append("共振冲突")
-        elif grade.startswith("missing_"):
-            block_reasons.append(f"共振缺岗({grade})")
         elif grade == "momentum_veto":
             block_reasons.append("动能拆台")
         elif grade == "empty" or not grade:
             block_reasons.append("共振不足")
+        elif grade.startswith("missing_"):
+            try:
+                from trader_shared.resonance import resonance_grade_label
+
+                # 「缺结构」→「共振缺结构」；禁止 missing_structure 英文上屏
+                label = resonance_grade_label(grade)
+            except Exception:
+                label = "缺岗"
+            block_reasons.append(f"共振{label}" if not str(label).startswith("共振") else label)
         else:
-            block_reasons.append(f"共振未齐({grade})")
+            try:
+                from trader_shared.resonance import resonance_grade_label
+
+                block_reasons.append(f"共振未齐（{resonance_grade_label(grade)}）")
+            except Exception:
+                block_reasons.append("共振未齐")
     if not strategy_entry_lit:
         block_reasons.append("无入场策略")
 
@@ -178,10 +190,14 @@ def apply_decision_view(
 
 
 def format_decision_narrative_lines(report: dict[str, Any] | None) -> list[str]:
-    """展示层用：共振 / 决策 / 新开 / fusion 仪表（阶段 4）。
+    """展示层用：共振 /（可试探时）决策 / 新开；（仪表默认隐藏）。
 
     只读字段，不改 report。返回已带两空格缩进的行（可直接 append）。
+    「不推荐新开」与下方「新开/动作」重复，默认不输出决策行。
+    融合分仪表默认隐藏；设 TRADER_SHOW_FUSION_GAUGE=1 才展示。
     """
+    import os
+
     if not isinstance(report, dict):
         return []
     lines: list[str] = []
@@ -194,11 +210,13 @@ def format_decision_narrative_lines(report: dict[str, Any] | None) -> list[str]:
         lines.append(f"  {res_line}")
 
     dv = report.get("decision_view") if isinstance(report.get("decision_view"), dict) else {}
-    dv_line = str(dv.get("summary_line") or "").strip()
-    if dv_line:
-        if not dv_line.startswith("决策"):
-            dv_line = f"决策：{dv_line}"
-        lines.append(f"  {dv_line}")
+    # 仅可试探时展示决策行；否决场景交给「新开」+「动作」
+    if dv.get("allow_new_recommend") is True:
+        dv_line = str(dv.get("summary_line") or "").strip()
+        if dv_line:
+            if not dv_line.startswith("决策"):
+                dv_line = f"决策：{dv_line}"
+            lines.append(f"  {dv_line}")
 
     disc = report.get("discipline") if isinstance(report.get("discipline"), dict) else {}
     entry_line = str(disc.get("entry_line") or "").strip()
@@ -213,25 +231,32 @@ def format_decision_narrative_lines(report: dict[str, Any] | None) -> list[str]:
             entry_line = format_entry_line_c1(all_green=False, missing=[entry_line])
         lines.append(f"  {entry_line}")
 
-    # fusion 退居仪表：有分才写，标明非出手依据
-    fusion = report.get("fusion") if isinstance(report.get("fusion"), dict) else {}
-    score = fusion.get("weighted_score")
-    if score is None:
-        score = report.get("weighted_score")
-    try:
-        score_f = float(score) if score is not None else None
-    except (TypeError, ValueError):
-        score_f = None
-    if score_f is not None:
-        action = str(fusion.get("action") or "").strip()
-        action_short = action.split("（")[0].split("(")[0].strip() if action else ""
-        if len(action_short) > 12:
-            action_short = action_short[:10] + "…"
-        bit = f"仪表：融合分 {score_f:+.2f}"
-        if action_short:
-            bit += f" · {action_short}"
-        bit += "（仅参考）"
-        lines.append(f"  {bit}")
+    # fusion 仪表：默认不上屏（避免与决策叙事抢位）
+    _show_gauge = os.environ.get("TRADER_SHOW_FUSION_GAUGE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if _show_gauge:
+        fusion = report.get("fusion") if isinstance(report.get("fusion"), dict) else {}
+        score = fusion.get("weighted_score")
+        if score is None:
+            score = report.get("weighted_score")
+        try:
+            score_f = float(score) if score is not None else None
+        except (TypeError, ValueError):
+            score_f = None
+        if score_f is not None:
+            action = str(fusion.get("action") or "").strip()
+            action_short = action.split("（")[0].split("(")[0].strip() if action else ""
+            if len(action_short) > 12:
+                action_short = action_short[:10] + "…"
+            bit = f"仪表：融合分 {score_f:+.2f}"
+            if action_short:
+                bit += f" · {action_short}"
+            bit += "（仅参考）"
+            lines.append(f"  {bit}")
 
     return lines
 
