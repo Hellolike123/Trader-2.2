@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-import config
+from trader_shared import config
 
 from trader_shared.structure_core import (
     moving_average,
