@@ -266,9 +266,10 @@ def test_v21_trade_price_rr_block() -> None:
     assert "📌 买卖价" in md
     assert "低吸买入：11.90｜止损：11.72｜高抛卖出：12.15" in md
     assert "波动：ATR 0.40" in md
-    assert "计划账：" in md
-    assert "现价账：" in md
+    assert "计划账（按低吸" in md
+    assert "现价账（按现价" in md
     assert "1比" in md
+    assert "费后约" in md
     assert "RR1:" not in md
     assert "可执行" not in md
     assert validate(md) == []
