@@ -104,6 +104,7 @@ def test_t0_markdown_contract() -> None:
     assert "三重共振" not in markdown
     assert "无底仓" in markdown
     assert "若做正T" not in markdown
+    assert "做T清单" not in markdown
     assert "**" not in markdown
     assert validate(markdown) == []
 
@@ -235,6 +236,7 @@ def test_no_position_hides_account_discipline_block() -> None:
     assert "降本模式" not in md
     assert "先卖后买" not in md
     assert "若做正T" not in md
+    assert "做T清单" not in md
     assert validate(md) == []
 
 
@@ -276,13 +278,14 @@ def test_v21_trade_price_rr_block() -> None:
 
 
 def test_v21_position_shows_human_checklist() -> None:
-    """有底仓才出做人清单；结论不含评分主语。"""
+    """有底仓才出做T清单；结论不含评分主语；含T仓/收盘纪律。"""
     plan = sample_t0_plan()
     plan.update({
         "vwap": 11.90,
         "volume_ratio": 0.9,
         "amplitude_pct": 0.025,
         "space_state": "normal",
+        "current_price": 12.05,
         "data": {
             "kline_5m_completed": make_5m_bars(16),
             "quote": {"high": 12.2, "low": 11.7, "pre_close": 11.8},
@@ -305,12 +308,81 @@ def test_v21_position_shows_human_checklist() -> None:
     plan["buy"]["observation_price"] = 11.80
     plan["sell"]["observation_price"] = 12.20
     md = render_markdown(plan)
-    assert "若做正T（人勾选）" in md
+    assert "做T清单（人勾选）" in md
+    assert "反T" in md
+    assert "T仓上限" in md or "T仓：" in md
+    assert "14:50" in md
     assert "是否动手由人决定" in md
     assert "无底仓" not in md
+    assert "宜不做" not in md.split("→", 1)[-1].split("\n", 1)[0]
     conclusion = md.split("→", 1)[-1].split("\n", 1)[0]
     assert "结构偏强" not in conclusion
     assert "80" not in conclusion
+    assert "可执行" not in md
+    assert validate(md) == []
+
+
+def test_v22_near_low_shows_zheng_t_checklist() -> None:
+    """近低区出正T备选清单，且不含禁词先买后卖/先卖后买。"""
+    plan = sample_t0_plan()
+    plan.update({
+        "vwap": 11.90,
+        "volume_ratio": 0.9,
+        "amplitude_pct": 0.03,
+        "space_state": "normal",
+        "current_price": 11.75,
+        "max_move": "底仓的 20%-30%",
+        "data": {
+            "kline_5m_completed": make_5m_bars(16),
+            "quote": {"high": 12.2, "low": 11.7, "pre_close": 11.8},
+        },
+        "t0_account": {
+            "avg_cost": 11.5,
+            "total_shares": 1000,
+            "mode": "grid",
+            "allow_reverse_t": False,
+            "worth_t": {"worth": True, "net_pct": 1.5, "min_edge_pct": 0.8},
+        },
+        "atr_info": {"atr14": 0.30, "atr_ratio": 0.025, "level": "波动正常"},
+    })
+    plan["buy"]["observation_price"] = 11.80
+    plan["sell"]["observation_price"] = 12.20
+    md = render_markdown(plan)
+    assert "做T清单（人勾选）" in md
+    assert "才考虑正T" in md
+    assert "先买后卖" not in md
+    assert "先卖后买" not in md
+    assert "14:50" in md
+    assert validate(md) == []
+
+
+def test_v22_skip_gate_collapses_checklist() -> None:
+    """空间不足 → 结论宜不做，清单折叠为今日宜不做。"""
+    plan = sample_t0_plan()
+    plan.update({
+        "vwap": 11.90,
+        "volume_ratio": 1.0,
+        "amplitude_pct": 0.012,
+        "space_state": "too_small",
+        "current_price": 11.95,
+        "data": {
+            "kline_5m_completed": make_5m_bars(16),
+            "quote": {"high": 12.0, "low": 11.85, "pre_close": 11.9},
+        },
+        "t0_account": {
+            "avg_cost": 11.5,
+            "total_shares": 1000,
+            "mode": "grid",
+            "allow_reverse_t": True,
+            "worth_t": {"worth": True, "net_pct": 0.5, "min_edge_pct": 0.8},
+        },
+    })
+    md = render_markdown(plan)
+    conclusion = md.split("→", 1)[-1].split("\n", 1)[0]
+    assert "宜不做" in conclusion
+    assert "今日宜不做" in md
+    assert "原因：空间不足" in md
+    assert "优先考虑反T" not in md
     assert "可执行" not in md
     assert validate(md) == []
 

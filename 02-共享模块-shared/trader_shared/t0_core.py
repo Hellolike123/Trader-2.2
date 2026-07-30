@@ -306,16 +306,44 @@ def _build_emergency_guide(plan: dict[str, Any], buy: dict[str, Any], sell: dict
 
 
 
+# 单边日：|涨跌|≥此阈值（百分点）→ 结论宜不做
+_EXTREME_DAY_CHANGE_PCT = 8.0
+
+
+def t_skip_reason(plan: dict[str, Any]) -> str | None:
+    """今日不宜做 T 的原因；None=不劝退。供卡片结论/清单/监控共用。"""
+    if str(plan.get("space_state") or "") == "too_small":
+        return "空间不足"
+
+    worth = (plan.get("t0_account") or {}).get("worth_t") or {}
+    if worth and worth.get("worth") is False:
+        return "费后盖不住"
+
+    chg = numeric_or_none(plan.get("current_change_pct"))
+    if chg is not None and abs(chg) >= _EXTREME_DAY_CHANGE_PCT:
+        return "单边日"
+
+    quote = (plan.get("data") or {}).get("quote") or {}
+    current = numeric_or_none(plan.get("current_price"))
+    pre_close = numeric_or_none(quote.get("pre_close"))
+    if current is not None and pre_close is not None and pre_close > 0:
+        up_lim = pre_close * 1.1
+        dn_lim = pre_close * 0.9
+        if abs(current - up_lim) / up_lim < 0.005:
+            return "临近涨停"
+        if abs(current - dn_lim) / dn_lim < 0.005:
+            return "临近跌停"
+    return None
+
+
 def render_markdown(plan: dict[str, Any]) -> str:
-    # 今天不做：振幅 < 1% 且量比 < 0.8，无操作价值
-    # amplitude_pct 是小数（0.089 = 8.9%），比较时转为百分比
-    amp = numeric_or_none(plan.get("amplitude_pct"))
-    amp_pct = amp * 100 if amp is not None and amp < 1 else amp
+    # 今天不做短卡：振幅过小且量能不足（与 space_state=too_small≈1.5% 对齐）
+    amp_pct = _amplitude_pct_display(plan)
     vol_ratio = numeric_or_none(plan.get("volume_ratio"))
-    if amp_pct is not None and amp_pct < 1.0 and (vol_ratio is None or vol_ratio < 0.8):
+    if amp_pct is not None and amp_pct < 1.5 and (vol_ratio is None or vol_ratio < 0.8):
         return (
             f"{plan.get('name','')}（{plan.get('symbol','')}）"
-            f"｜现价 {plan.get('current_price','?')}｜振幅 {amp:.2f}% 量能不足，今天不做"
+            f"｜现价 {plan.get('current_price','?')}｜振幅 {amp_pct:.2f}% 量能不足，今天不做"
         )
 
     buy = plan["buy"]
@@ -572,7 +600,11 @@ def _build_conclusion(plan: dict[str, Any], buy_state: str, sell_state: str) -> 
         parts.append("近买区")
     if is_zone_hit(sell_state):
         parts.append("近卖区")
-    if not _has_position(plan):
+
+    skip = t_skip_reason(plan)
+    if skip:
+        parts.append("宜不做")
+    elif not _has_position(plan):
         parts.append("无底仓")
     parts.append("人决策")
     return " · ".join(parts)
@@ -834,35 +866,93 @@ def _build_structure_block(
     return lines
 
 
+def _box_zone_bias(plan: dict[str, Any]) -> str:
+    """今日箱位偏向：high / low / mid / unknown。"""
+    box = _box_position_text(plan)
+    if box == "靠近今日高区":
+        return "high"
+    if box == "靠近今日低区":
+        return "low"
+    if box == "靠近今日中轴":
+        return "mid"
+    return "unknown"
+
+
+def _t_size_discipline_line(plan: dict[str, Any]) -> str:
+    max_move = str(plan.get("max_move") or "").strip()
+    if max_move and max_move != "不动":
+        return f"  · T仓上限：{max_move}（纪律：建议底仓20%-30%，最多一半）"
+    return "  · T仓上限：建议底仓20%-30%，最多一半；未到价时默认不动"
+
+
 def _build_human_checklist(
     plan: dict[str, Any],
     *,
     buy: dict[str, Any],
     sell: dict[str, Any],
 ) -> list[str]:
-    """有底仓才展示：若做正T（人勾选）。系统只列条件，不下令。"""
+    """有底仓才展示：反T优先 / 正T备选场景清单。系统只列条件，不下令。"""
     if not _has_position(plan):
         return []
 
-    lines = ["📋 若做正T（人勾选）"]
+    skip = t_skip_reason(plan)
+    if skip:
+        return [
+            "📋 今日宜不做（人确认）",
+            f"  · 原因：{skip}",
+            "  · 只看失效条件，不展开做T清单",
+            "  · 是否动手由人决定，不构成执行指令",
+        ]
+
     sell_obs = numeric_or_none(sell.get("observation_price"))
     buy_obs = numeric_or_none(buy.get("observation_price"))
     current = numeric_or_none(plan.get("current_price"))
     stop = numeric_or_none(buy.get("invalid_price"))
-
-    if sell_obs is not None and not _is_fake_zone_price(sell_obs, current):
-        lines.append(f"  · 先确认卖点关注区（参考 {sell_obs:.2f} 一带/冲高乏力）")
-    else:
-        lines.append("  · 先确认卖点关注区（上方/冲高乏力；当前暂无有效卖点参考）")
-
     worth = (plan.get("t0_account") or {}).get("worth_t") or {}
-    if buy_obs is not None and sell_obs is not None and sell_obs > buy_obs:
-        edge = "费后够门槛" if worth.get("worth") else ("费后不够门槛" if worth else "费后未计")
-        lines.append(
-            f"  · 买回区低于卖点（买回参考 {buy_obs:.2f} < 卖 {sell_obs:.2f}），且{edge}（纪律提醒）"
-        )
+    bias = _box_zone_bias(plan)
+    vol = _volume_label(plan)
+    shrink = "缩量" in vol
+    flat = "平量" in vol
+
+    lines = ["📋 做T清单（人勾选）"]
+
+    if bias == "high":
+        lines.append("  · 场景：近高区 → 优先考虑反T（高抛再接回）")
+        if sell_obs is not None and not _is_fake_zone_price(sell_obs, current):
+            tip = "冲高乏力/缩量" if (shrink or flat) else "冲高乏力"
+            lines.append(f"  · 反T卖点关注：{sell_obs:.2f} 一带（{tip}）")
+        else:
+            lines.append("  · 反T卖点关注：上方/冲高乏力（当前暂无有效卖点参考）")
+        if buy_obs is not None and sell_obs is not None and sell_obs > buy_obs:
+            edge = "费后够门槛" if worth.get("worth") else ("费后不够门槛" if worth else "费后未计")
+            lines.append(
+                f"  · 接回参考：{buy_obs:.2f}（须低于卖点 {sell_obs:.2f}），且{edge}"
+            )
+        else:
+            lines.append("  · 接回须低于卖点，且费后空间盖住门槛（区间未齐则慎动）")
+        lines.append("  · 正T备选：仅急跌企稳后再评估，不主动抄")
+    elif bias == "low":
+        lines.append("  · 场景：近低区 → 才考虑正T（低吸再卖回）")
+        if buy_obs is not None and not _is_fake_zone_price(buy_obs, current):
+            tip = "缩量企稳/双底" if shrink else "急跌后企稳"
+            lines.append(f"  · 正T买点关注：{buy_obs:.2f} 一带（{tip}）")
+        else:
+            lines.append("  · 正T买点关注：下方支撑/企稳（当前暂无有效买点参考）")
+        if buy_obs is not None and sell_obs is not None and sell_obs > buy_obs:
+            edge = "费后够门槛" if worth.get("worth") else ("费后不够门槛" if worth else "费后未计")
+            lines.append(
+                f"  · 卖回参考：{sell_obs:.2f}（须高于买点 {buy_obs:.2f}），且{edge}"
+            )
+        else:
+            lines.append("  · 卖回须高于买点，且费后空间盖住门槛（区间未齐则慎动）")
+        lines.append("  · 反T：近低区不优先；除非先有明确冲高再回落")
     else:
-        lines.append("  · 买回区低于卖点，且费后空间盖住门槛（当前区间未齐，慎动）")
+        lines.append("  · 场景：中轴/不明 → 默认观望")
+        lines.append("  · 有冲高乏力再评估反T；有急跌企稳再评估正T")
+        if sell_obs is not None and not _is_fake_zone_price(sell_obs, current):
+            lines.append(f"  · 高抛关注参考：{sell_obs:.2f}")
+        if buy_obs is not None and not _is_fake_zone_price(buy_obs, current):
+            lines.append(f"  · 低吸关注参考：{buy_obs:.2f}")
 
     if stop is not None:
         broken = current is not None and current < stop
@@ -873,17 +963,14 @@ def _build_human_checklist(
     else:
         lines.append("  · 未破看法失效价")
 
-    space_state = str(plan.get("space_state") or "")
-    if space_state == "too_small":
-        lines.append("  · 非破位日 / 非空间不足日（今日空间偏小，宜不做）")
-    else:
-        lines.append("  · 非破位日 / 非空间不足日")
+    lines.append(_t_size_discipline_line(plan))
+    lines.append("  · 收盘纪律：约14:50前平当日T仓，禁止T仓变底仓")
 
     acct = plan.get("t0_account") or {}
     if acct.get("allow_reverse_t"):
-        lines.append("  · 倒T：仅自担风险（已声明有现金且非深套）；默认仍不鼓励")
+        lines.append("  · 倒T（无仓先买）：仅自担风险（已声明有现金且非深套）；默认仍不鼓励")
     else:
-        lines.append("  · 倒T：默认不鼓励")
+        lines.append("  · 倒T（无仓先买）：默认不鼓励")
 
     lines.append("  · 是否动手由人决定，不构成执行指令")
     return lines
@@ -937,11 +1024,18 @@ def _build_account_section(plan: dict[str, Any]) -> list[str]:
 
     lines = ["📉 持仓纪律"]
     mode_label = {
-        "cost_cut": "先卖后买（降本参考）",
+        "cost_cut": "降本参考（高抛再接回）",
         "grid": "网格参考",
         "reduce": "边做 T 边减仓（参考）",
     }.get(mode, mode)
     lines.append(f"  纪律：{mode_label} · 是否动手由人决定")
+
+    max_move = str(plan.get("max_move") or "").strip()
+    if max_move and max_move != "不动":
+        lines.append(f"  T仓：{max_move}（建议底仓20%-30%，最多一半）")
+    else:
+        lines.append("  T仓：建议底仓20%-30%，最多一半；未到价默认不动")
+    lines.append("  收盘：约14:50前平当日T仓，禁止T仓变底仓")
 
     avg_cost = acct.get("avg_cost", 0)
     new_cost = acct.get("new_cost_estimate")
@@ -961,6 +1055,10 @@ def _build_account_section(plan: dict[str, Any]) -> list[str]:
     float_pnl = acct.get("float_pnl_pct", 0)
     if float_pnl < 0:
         lines.append(f"  浮亏：{float_pnl:.1f}%")
+
+    skip = t_skip_reason(plan)
+    if skip:
+        lines.append(f"  今日宜不做：{skip}")
 
     return lines
 
