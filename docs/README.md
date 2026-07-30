@@ -15,7 +15,8 @@
 | [../BUSINESS.md](../BUSINESS.md) | 业务规则 |
 | [../AGENT.md](../AGENT.md) | 短跳转（兼容旧链接） |
 | [../README.md](../README.md) | 项目简介 |
-| [guide/user-guide.md](./guide/user-guide.md) | 用户操作手册 |
+| [guide/skill-usage.md](./guide/skill-usage.md) | **Skill 使用指南**（操盘手节奏 + 命令速查） |
+| [guide/user-guide.md](./guide/user-guide.md) | 用户操作手册（对话示例与面板样例） |
 
 ---
 

@@ -1,5 +1,6 @@
 # Trader 用户操作手册
 
+> 先看岗位与一天节奏：[skill-usage.md](./skill-usage.md)。  
 > 输出格式以代码渲染为准：`report_core.render_short_midline` + `01-功能包-packages/trader/references/output-template.md`。  
 > 下文示例结构已对齐 **短中线双轨**（旧版 `📍 决策` 示例已废弃）。
 

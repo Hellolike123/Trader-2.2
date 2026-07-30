@@ -64,6 +64,8 @@ A 股交易决策辅助系统。免费行情 + 缠论 / 威科夫 / 筹码 / ATR
 
 ## Skill 速查表
 
+操盘手视角的一天节奏与用法：[`docs/guide/skill-usage.md`](docs/guide/skill-usage.md)。对话样例见 [`docs/guide/user-guide.md`](docs/guide/user-guide.md)。
+
 | Skill | 一句话 | 入口（仓库根） |
 |-------|--------|----------------|
 | `trader` | 单票分析 + 选股池 | `01-功能包-packages/trader/scripts/final_report.py` / `final_pool.py` |
@@ -142,6 +144,7 @@ python3 02-共享模块-shared/scripts/pack_all.py
 
 | 需要了解 | 去哪里找 |
 |---------|----------|
+| Skill 怎么用（操盘手） | `docs/guide/skill-usage.md` |
 | 架构 / 算法 / 满分示例 | `AGENTS_DEEP.md` |
 | Skill 契约 | 各 `SKILL.md` + `references/` |
 | 输出格式 | `output-template.md` / `output-style-guide.md` |

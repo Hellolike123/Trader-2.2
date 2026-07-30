@@ -13,6 +13,8 @@
 
 ## 快速开始
 
+Skill 怎么用（操盘手节奏 + 命令）：[`docs/guide/skill-usage.md`](docs/guide/skill-usage.md)。
+
 ```bash
 # 1. 设置环境
 export PYTHONPATH=02-共享模块-shared:01-功能包-packages/trader/scripts
