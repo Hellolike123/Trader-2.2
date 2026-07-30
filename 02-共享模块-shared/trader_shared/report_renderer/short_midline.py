@@ -10,11 +10,9 @@ from trader_shared.report_renderer._helpers import _reformat_mid_line, _short_mi
 
 
 def _compact_short_structure_line(line: str) -> str:
-    """短线结构行压缩：仅收拾「暂无买卖点」类堆叠；买卖点句式保持类型优先。"""
+    """短线结构行压缩：最多保留「主信号 · 注 · 方向」三段，避免浪型堆叠难扫读。"""
     raw = str(line or "").strip()
     if not raw:
-        return raw
-    if "暂无买卖点" not in raw and "暂无信号" not in raw:
         return raw
 
     tag = ""
@@ -25,7 +23,10 @@ def _compact_short_structure_line(line: str) -> str:
             break
     parts = [p.strip() for p in raw.split("·") if p.strip()]
     if len(parts) <= 3:
-        return line
+        body = " · ".join(parts)
+        if tag and tag not in body:
+            body = f"{body}{tag}"
+        return body
 
     _dirs = {"看涨", "看跌", "中性"}
     _nop = {"暂无买卖点", "暂无信号"}
@@ -47,25 +48,46 @@ def _compact_short_structure_line(line: str) -> str:
                 continue
             saw_pull = True
         deduped.append(p)
-    # 优先保留盘整/线段/背驰/趋势类词
-    _prio = ("盘整", "线段", "背驰", "拉升", "下跌", "中枢", "趋势")
-    ranked = sorted(
-        enumerate(deduped),
-        key=lambda iv: (0 if any(k in iv[1] for k in _prio) else 1, iv[0]),
-    )
-    rest = [p for _, p in ranked[:2]]
+    # 有背驰/买卖点主词时优先它，丢掉浪型旁枝（拉升趋势中等）
+    _sig_keys = ("背驰", "一买", "二买", "三买", "一卖", "二卖", "三卖", "类一", "类二")
+    _has_sig = any(any(k in p for k in _sig_keys) for p in deduped)
+    if _has_sig:
+        rest = [p for p in deduped if any(k in p for k in _sig_keys) or p in ("抛压减轻", "上攻乏力", "低点抬高", "突破中枢", "高点降低", "柱弱确认", "回踩偏弱")][:2]
+    else:
+        _prio = ("盘整", "线段", "背驰", "拉升", "下跌", "中枢", "趋势")
+        ranked = sorted(
+            enumerate(deduped),
+            key=lambda iv: (0 if any(k in iv[1] for k in _prio) else 1, iv[0]),
+        )
+        rest = [p for _, p in ranked[:2]]
 
     out: list[str] = []
     out.extend(rest)
     if dirs:
         out.append(dirs[0])
-    out.extend(nest)
+    out.extend(nest[:1])  # 区间套最多留一个
     body = " · ".join(out) if out else (nops[0] if nops else raw)
     if nops and nops[0] not in body:
         body = f"{body}（{nops[0]}）" if body else nops[0]
     if tag and tag not in body:
         body = f"{body}{tag}"
     return body
+
+
+def _short_fund_display(vsig: dict[str, Any]) -> str:
+    """资金行短文案：取主句、压「近5日主力累计*」前缀，避免截成「价量近…」。"""
+    reason = str(vsig.get("reason") or vsig.get("vp_reason") or "").strip() or "中性"
+    reason = re.sub(r"（资金未取到）", "", reason)
+    reason = re.sub(r"资金未取到", "", reason)
+    primary = reason.split("；")[0].strip()
+    primary = re.sub(r"近5日主力累计流出", "主力5日流出", primary)
+    primary = re.sub(r"近5日主力累计流入", "主力5日流入", primary)
+    primary = re.sub(r"\s{2,}", " ", primary).strip(" ·｜|")
+    if len(primary) > 28:
+        primary = re.sub(r"（占比[^）]*）", "", primary).strip()
+    if len(primary) > 28:
+        primary = primary[:26] + "…"
+    return primary or "中性"
 
 
 def render_short_midline(r: dict[str, Any]) -> str:
@@ -684,6 +706,10 @@ def render_short_midline(r: dict[str, Any]) -> str:
                 _ev = "状态：" + _ev[len("事件："):]
             elif not _ev.startswith("状态："):
                 _ev = f"状态：{_ev}"
+            # 去掉「主句（复述注）」长括号，保留灯码 + 主句 + 方向
+            _ev = re.sub(r"(· [^·（]{2,16})（[^）]{6,}）", r"\1", _ev)
+            _ev = re.sub(r"\s*·\s*", " · ", _ev)
+            _ev = re.sub(r"\s{2,}", " ", _ev).strip()
             # 空事件不占行
             if "暂无事件" not in _ev and "数据不足" not in _ev:
                 lines.append(f"  {_ev}")
@@ -704,7 +730,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
     except Exception:
         pass
 
-    # 3) 动能 ｜ 资金（合并一行，同意/不同意一眼看）
+    # 3) 动能 / 资金分行（微信窄屏一长行会糊成一团）
     _msig = fusion_signals.get("momentum") if isinstance(fusion_signals.get("momentum"), dict) else {}
     if _msig:
         _mst = str(_msig.get("reason") or "").strip().lstrip(":：").strip() or "无信号"
@@ -715,23 +741,18 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     _vsig = fusion_signals.get("vpf") if isinstance(fusion_signals.get("vpf"), dict) else {}
     if _vsig:
-        _vst = str(_vsig.get("reason") or _vsig.get("vp_reason") or "").strip() or "中性"
-        # 缺资金时省略抱怨括号，保留量价主句
-        _vst = re.sub(r"（资金未取到）", "", _vst)
-        _vst = re.sub(r"资金未取到", "", _vst)
-        _vst = re.sub(r"\s{2,}", " ", _vst).strip(" ·｜|")
-        if len(_vst) > 32:
-            _vst = _vst[:30] + "…"
+        _vst = _short_fund_display(_vsig)
         _veto = str(fusion.get("fund_flow_outflow_veto_msg") or "").strip()
         if _veto:
             _days_m = re.search(r"连续\s*(\d+)\s*日", _veto)
             if _days_m:
-                _vst = f"{_vst} ｜ 主力连续{_days_m.group(1)}日净流出"
-            else:
-                _vst = f"{_vst} ｜ {_veto}"
+                _vst = f"{_vst} · 连{_days_m.group(1)}日流出"
+            elif len(_veto) <= 16:
+                _vst = f"{_vst} · {_veto}"
     else:
         _vst = "暂无信号"
-    lines.append(f"  动能：{_mst} ｜ 资金：{_vst}")
+    lines.append(f"  动能：{_mst}")
+    lines.append(f"  资金：{_vst}")
 
     # 信号分歧：结构 vs 动能
     _chan_dir2 = int(_csig2.get("direction", 0)) if _csig2 else 0
@@ -741,7 +762,8 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _m_label = "看多" if _mom_dir2 > 0 else "看空"
         lines.append(f"  ⚠️ 信号分歧：结构{_c_label} vs 动能{_m_label} → 以不新开为主")
 
-    # 阶段 4：共振 / 决策 / 新开 / fusion 仪表（主叙事；融合分仅参考）
+    # 阶段 4：决策块（空行分隔，扫读：看盘 ↑ / 能不能做 ↓）
+    lines.append("")
     try:
         from trader_shared.decision_view import format_decision_narrative_lines
 
@@ -751,7 +773,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
     except Exception:
         pass
 
-    # 4) 动作：综合后的计划（不做「出手」措辞）；以 decision_view 收紧后的 execution 为准
+    # 4) 动作：主计划一行；原因过长则另起「原因：」避免动作行糊死
     _confirm_v = float(r.get("confirm") or 0)
     _wait_bits: list[str] = []
     _is_hold_off = any(k in execution for k in ("不买", "观望", "不追", "不新开", "空仓"))
@@ -774,18 +796,28 @@ def render_short_midline(r: dict[str, Any]) -> str:
     _action_parts.extend(_wait_bits)
     if _cap_t is not None:
         _action_parts.append(f"仓 {_cap_t}%")
+    # 亏赚/不划算类原因一律另起，动作行只留「做什么」
+    _reason_line = ""
     if reason and reason not in _action_main and not any(reason in p for p in _action_parts):
-        # 短因挂尾（观望类尤其需要「为何不动」）
-        _action_parts.append(reason)
+        if any(k in reason for k in ("亏", "赚", "不划算", "偏冲高", "置信")) or len(
+            " · ".join(_action_parts + [reason])
+        ) > 28:
+            _reason_line = reason
+        else:
+            _action_parts.append(reason)
     lines.append(f"  动作：{' · '.join(_action_parts)}")
+    if _reason_line:
+        lines.append(f"  原因：{_reason_line}")
 
-    # 5) 失效
+    # 5) 破位线（有仓/盯盘看；无仓=计划作废线，不是今天必卖指令）
     _gate = r.get("mistery_gate") if isinstance(r.get("mistery_gate"), dict) else {}
     _inv = str(_disc.get("invalidation") or _gate.get("invalidation") or "").strip()
     if _inv:
-        if len(_inv) > 60:
-            _inv = _inv[:57] + "…"
-        lines.append(f"  失效：{_inv}")
+        _inv = _inv.replace("收盘有效跌破", "跌破").replace("且反抽站不回", "站不回")
+        _inv = _inv.replace("或跌破止损", "或破止损")
+        if len(_inv) > 52:
+            _inv = _inv[:49] + "…"
+        lines.append(f"  破位看：{_inv}")
 
     # 策略闸口仍由 pipeline 写入 strategy_match（供 decision_view）；
     # 人读报告省略 📐——日常以 决策/动作/新开/失效 为准。

@@ -925,10 +925,12 @@ def format_chanlun_short_light(
             if "（本周期）" not in body and "（同级）" not in body:
                 body = body + "（本周期）"
 
-    # 浪型补充：仅追加未在正文出现的结构词（避免一类买重复）
-    # 已有买卖点/背驰时，禁止再拼「笔数不足/无法判断」造成自相矛盾
+    # 浪型补充：仅在无买卖点/背驰时追加，避免「底背驰·看涨·拉升趋势中」堆叠难扫读
     wave = str(wave_label or "").strip()
-    if wave:
+    _has_sig = info.get("status") in ("point", "divergence") or any(
+        k in body for k in ("一买", "一卖", "二买", "二卖", "三买", "三卖", "类二", "类一", "背驰")
+    )
+    if wave and not _has_sig:
         sig_kw = {
             "一类卖", "类一卖", "二类卖", "三类卖", "一类买", "类一买", "二类买", "三类买", "类二买",
             "一买", "二买", "三买", "一卖", "二卖", "三卖", "顶背驰", "底背驰",
@@ -937,18 +939,14 @@ def format_chanlun_short_light(
             "笔数不足", "无法判断", "无明确结构", "数据不足", "线段不足",
             "中枢未成型", "先观望", "结构待确认",
         )
-        _has_sig = info.get("status") in ("point", "divergence") or any(
-            k in body for k in ("一买", "一卖", "二买", "二卖", "三买", "三卖", "类二", "类一", "背驰")
-        )
         extra = []
         for w in [x.strip() for x in wave.replace("｜", "·").split("·") if x.strip()]:
             if w in body:
                 continue
-            if _has_sig and any(n in w for n in _struct_noise):
+            if any(n in w for n in _struct_noise):
                 continue
             if any(k in w for k in sig_kw if k in body):
                 continue
-            # 压缩过长浪型片段
             if len(w) > 12:
                 w = w[:11] + "…"
             extra.append(w)

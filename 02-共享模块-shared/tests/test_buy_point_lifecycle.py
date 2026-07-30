@@ -233,4 +233,4 @@ def test_l04_failed_tightens_checklist_even_if_empty():
     assert cl["all_green"] is False
     assert cl["flags"]["short_trigger"] is False
     assert "买点已失效" in cl["missing_labels"]
-    assert disc["entry_line"].startswith("新开：否")
+    assert disc["entry_line"].startswith("新开：先别买") or disc["entry_line"].startswith("新开：否")

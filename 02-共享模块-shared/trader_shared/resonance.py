@@ -248,19 +248,19 @@ def _grade_posts(
 
 
 _GRADE_ZH = {
-    "aligned": "共振齐",
-    "momentum_veto": "动能拆台",
-    "missing_structure": "缺结构",
-    "missing_chip": "缺筹码",
-    "missing_background": "缺背景",
-    "conflict": "冲突（结构vs背景）",
-    "empty": "空窗/不足",
+    "aligned": "四岗齐了",
+    "momentum_veto": "动能唱反调",
+    "missing_structure": "缠论未点亮",
+    "missing_chip": "筹码未配合",
+    "missing_background": "背景未配合",
+    "conflict": "结构与背景打架",
+    "empty": "条件不足",
 }
 
 # 岗位英文键 → 报告可见面中文（missing 列表上屏用）
 _POST_ZH = {
-    "background": "背景",
-    "structure": "结构",
+    "background": "中线背景",
+    "structure": "缠论结构",
     "chip": "筹码",
     "momentum": "动能",
 }
@@ -385,10 +385,14 @@ def build_resonance(
     momentum = _eval_momentum(report, cards)
     grade, missing, conflict = _grade_posts(background, structure, chip, momentum)
     zh = _GRADE_ZH.get(grade, grade)
-    summary = f"共振：{zh}"
-    if missing:
+    # 白话：避免「缺结构（缺：结构）」叠床架屋；缺岗直接说「还差谁」
+    if grade == "aligned":
+        summary = f"共振：{zh} · 可谈试探"
+    elif missing:
         miss_zh = [resonance_post_label(m) for m in missing]
-        summary += f"（缺：{'｜'.join(miss_zh)}）"
+        summary = f"共振：未齐 · 还差{'｜'.join(miss_zh)}"
+    else:
+        summary = f"共振：{zh}"
 
     return {
         "schema_version": SCHEMA,

@@ -449,11 +449,11 @@ def test_vpf_no_veto_no_append():
 
 
 def test_vpf_with_veto_appends():
-    """有 veto 时追加到价量资金行。"""
+    """有 veto 时追加到资金行（短标注）。"""
     r = _report()
     r["fusion"]["fund_flow_outflow_veto_msg"] = "连续 3 日主力净流出超阈值"
     out = render_short_midline(r)
-    assert "主力连续3日净流出" in out or "连续 3 日主力净流出" in out
+    assert "连3日流出" in out or "主力连续3日净流出" in out or "连续 3 日主力净流出" in out
 
 
 # ── Task 8: 调整天数 + 相对强弱降级 ──

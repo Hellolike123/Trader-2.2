@@ -57,7 +57,7 @@ def test_aligned_when_abc_ok_momentum_neutral():
     assert res["posts"]["chip"]["ok"] is True
     assert res["posts"]["momentum"]["ok"] is True
     assert res["missing"] == []
-    assert "共振齐" in res["summary_line"]
+    assert "四岗齐了" in res["summary_line"] or "共振齐" in res["summary_line"]
 
 
 def test_missing_structure_when_no_buy_and_far_from_zone():
@@ -69,7 +69,7 @@ def test_missing_structure_when_no_buy_and_far_from_zone():
     assert res["grade"] == "missing_structure"
     assert res["posts"]["structure"]["ok"] is False
     assert "structure" in res["missing"]  # 内部键仍英文
-    assert "缺结构" in res["summary_line"]
+    assert "还差" in res["summary_line"] or "缠论" in res["summary_line"]
     assert "structure" not in res["summary_line"]  # 可见面中文
     assert "momentum" not in res["summary_line"]
 

@@ -51,7 +51,7 @@ def test_extract_grade_from_item_or_report():
 
 def test_label_zh():
     assert "齐" in resonance_grade_label("aligned")
-    assert "拆台" in resonance_grade_label("momentum_veto")
+    assert "反调" in resonance_grade_label("momentum_veto") or "拆台" in resonance_grade_label("momentum_veto")
 
 
 def test_score_report_excludes_fusion_from_total():

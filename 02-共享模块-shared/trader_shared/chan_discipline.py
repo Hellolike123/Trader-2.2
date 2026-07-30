@@ -232,6 +232,7 @@ def _normalize_stage(major_stage: str) -> str:
 
 # 开仓 5 项清单（C1 展示：不全绿只写缺项；全绿才可试探）
 # conf_ok 语义 = 融合置信够（not low_confidence），不是三席方向一致——文案勿写「信号一致」
+# missing_labels 仍用左列正式名（供逻辑/测试）；上屏经 format_entry_line_c1 转白话
 _CHECKLIST_KEYS = (
     ("mid_ok", "中线趋势"),
     ("in_pullback", "回踩到位"),
@@ -239,6 +240,24 @@ _CHECKLIST_KEYS = (
     ("conf_ok", "融合置信"),
     ("fund_ok", "筹码资金稳"),
 )
+
+# 正式缺项名 → 人话（微信扫读）
+_MISS_PLAIN = {
+    "中线趋势": "中线未确认",
+    "回踩到位": "未回到买区",
+    "买点信号": "无有效买点",
+    "融合置信": "把握不够",
+    "筹码资金稳": "筹码资金不稳",
+    "在阻力区内": "现价卡在阻力区",
+    "买点已失效": "旧买点已作废",
+    "共振缺结构": "缠论未点亮",
+    "共振不足": "共振未齐",
+    "共振冲突": "共振打架",
+    "动能拆台": "动能唱反调",
+    "纪律不允许新开": "纪律拦着",
+    "无入场策略": "没有入场策略",
+    "决策收紧": "决策未放行",
+}
 
 
 def build_entry_checklist(
@@ -334,21 +353,42 @@ def build_entry_checklist(
     }
 
 
+def _plain_missing_label(label: str) -> str:
+    s = str(label or "").strip()
+    if not s:
+        return s
+    if s in _MISS_PLAIN:
+        return _MISS_PLAIN[s]
+    # 「共振缺结构」等：去前缀再映射
+    if s.startswith("共振"):
+        rest = s[2:].lstrip("：:")
+        if rest in _MISS_PLAIN:
+            return _MISS_PLAIN[rest]
+        if rest.startswith("缺"):
+            return rest  # 缺结构 → 保留短词；展示层共振行已更白话
+    return s
+
+
 def format_entry_line_c1(
     *,
     all_green: bool,
     missing: list[str] | None = None,
 ) -> str:
-    """C1 新开行唯一出口：`新开：否（缺：…）`｜`新开：可试探（清单全绿）`。
+    """C1 新开行唯一出口（白话）：`新开：先别买 · …`｜`新开：可试探 · 五项齐了`。
 
     报告渲染只打印 ``discipline.entry_line`` / checklist 中本函数产物，勿手写平行文案。
     """
     if all_green:
-        return "新开：可试探（清单全绿）"
-    miss = missing or []
+        return "新开：可试探 · 五项齐了"
+    miss = [str(x).strip() for x in (missing or []) if str(x).strip()]
     if miss:
-        return f"新开：否（缺：{'｜'.join(miss)}）"
-    return "新开：否"
+        plain = [_plain_missing_label(x) for x in miss]
+        # 窄屏：缺项超过 3 个时折叠
+        if len(plain) > 3:
+            shown = "｜".join(plain[:3])
+            return f"新开：先别买 · {shown}｜另{len(plain) - 3}项"
+        return f"新开：先别买 · {'｜'.join(plain)}"
+    return "新开：先别买"
 
 
 def _normalize_buy_types(raw_types: Any) -> list[str]:

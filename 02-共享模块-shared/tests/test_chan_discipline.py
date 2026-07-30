@@ -647,7 +647,7 @@ class TestR9WeeklyFrame:
 
 
 class TestC1EntryChecklist:
-    """C1：新开：否（缺：…）｜全绿才可试探。"""
+    """C1：新开：先别买 · 人话缺项｜全绿才可试探。"""
 
     def test_missing_pullback_line(self):
         out = apply_chan_discipline(_open_setup(
@@ -657,9 +657,11 @@ class TestC1EntryChecklist:
             buy_point_types=["二类买"],
         ))
         line = out.get("entry_line") or ""
-        assert line.startswith("新开：否")
-        assert "回踩到位" in line
+        assert line.startswith("新开：先别买")
+        assert "未回到买区" in line or "回踩到位" in line
         assert out["entry_checklist"]["all_green"] is False
+        # 内部缺项仍用正式名
+        assert "回踩到位" in (out["entry_checklist"].get("missing_labels") or [])
 
     def test_all_green_line(self):
         out = apply_chan_discipline(_open_setup(
@@ -673,8 +675,8 @@ class TestC1EntryChecklist:
         assert out["entry_checklist"]["missing_labels"] == []
 
     def test_format_c1_helper(self):
-        assert format_entry_line_c1(all_green=True) == "新开：可试探（清单全绿）"
-        assert "缺：回踩到位" in format_entry_line_c1(all_green=False, missing=["回踩到位"])
+        assert format_entry_line_c1(all_green=True) == "新开：可试探 · 五项齐了"
+        assert "未回到买区" in format_entry_line_c1(all_green=False, missing=["回踩到位"])
 
     def test_c1_conf_ok_label_is_fusion_confidence(self):
         """C1 conf_ok 展示为「融合置信」，不是误导性的「信号一致」。"""
@@ -709,4 +711,4 @@ class TestC1EntryChecklist:
         assert disc["allow_new_entry"] is False
         assert disc["action"] == "观望"
         assert "可试探" not in (disc.get("entry_line") or "")
-        assert "新开：否" in (disc.get("entry_line") or "")
+        assert "新开：先别买" in (disc.get("entry_line") or "") or "新开：否" in (disc.get("entry_line") or "")

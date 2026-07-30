@@ -252,7 +252,7 @@ class TestRenderShortMidline:
         # 纪律展示：有 invalidation 则出失效；禁止 mi 品牌
         inv = str((self._sample_report().get("mistery_gate") or {}).get("invalidation") or "")
         if inv.strip():
-            assert "失效：" in md
+            assert "破位看：" in md or "失效：" in md
         assert "Mistery" not in md
         assert "mi姐" not in md
         assert "mistery" not in md

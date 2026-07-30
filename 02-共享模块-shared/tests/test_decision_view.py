@@ -65,7 +65,7 @@ def test_block_when_resonance_not_aligned():
     assert v["allow_new_recommend"] is False
     assert any("共振" in x for x in v["block_reasons"])
     assert not any("missing_structure" in x for x in v["block_reasons"])
-    assert any("缺结构" in x for x in v["block_reasons"])
+    assert any(("缺结构" in x or "缠论" in x or "未点亮" in x) for x in v["block_reasons"])
 
 
 def test_block_when_no_entry_strategy():
