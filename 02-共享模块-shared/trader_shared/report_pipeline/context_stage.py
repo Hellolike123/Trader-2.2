@@ -24,7 +24,8 @@ def run_analysis_context_stage(
 ) -> dict[str, Any]:
     """自 snapshot 就绪后至融合前的上下文打包。
 
-    会就地改 quote（注入 _bars_5m）及 snapshot.data_status（现价缺失时）。
+    会就地改 quote（注入 _bars_5m）。
+    现价缺失时在返回字段 ``data_status='partial'``（不改 frozen MarketSnapshot）。
     返回供融合/结构/组装使用的上下文字段。
     """
     from trader_shared import get_env_for_skill
@@ -59,12 +60,14 @@ def run_analysis_context_stage(
     atr_adjust = str(last_bar.get("adjust") or "unknown")
     atr_data_source = str(last_bar.get("data_source") or "")
     _cp = quote.get("current_price")
-    current = _cp if _cp is not None else bars[-1]["close"]
+    current = _cp if _cp is not None else (bars[-1]["close"] if bars else None)
     if current is None:
         raise RuntimeError("current price unavailable")
     current = float(current)
+    # MarketSnapshot 为 frozen，禁止赋值；降级状态走返回字段
+    data_status = str(getattr(snapshot, "data_status", None) or "full")
     if _cp is None:
-        snapshot.data_status = "partial"
+        data_status = "partial"
 
     recent20 = bars[-STRUCTURE_WINDOW:] if len(bars) >= STRUCTURE_WINDOW else bars
     change_pct_val = quote.get("current_change_pct")
@@ -210,6 +213,7 @@ def run_analysis_context_stage(
         "atr_cap": atr_cap,
         "atr_adjust": atr_adjust,
         "atr_data_source": atr_data_source,
+        "data_status": data_status,
         "current": current,
         "recent20": recent20,
         "change_pct_val": change_pct_val,

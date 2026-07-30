@@ -146,6 +146,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     big_order_result = _ctx.big_order_result
     env = _ctx.env
     _sector_data = _ctx.sector_data
+    # 现价缺失等降级由 context 返回，不改 frozen snapshot
+    data_status = str(getattr(_ctx, "data_status", None) or getattr(snapshot, "data_status", None) or "full")
 
     # === 融合层（阶段函数：report_pipeline.run_fusion_stage）===
     from trader_shared.report_pipeline import run_fusion_stage
@@ -160,7 +162,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         current=current,
         main_force_env=main_force_env,
         fetcher=fetcher,
-        data_status=snapshot.data_status,
+        data_status=data_status,
         fund_flow_features=fund_flow_features,
         snapshot=snapshot,
         target=target,
@@ -366,6 +368,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         sector_data=_sector_data,
         fusion_pre_cards=_fusion_pre_cards_pending,
     )
+    # context 降级（如现价缺失）覆盖 assemble 从 frozen snapshot 抄来的 data_status
+    report["data_status"] = data_status
 
     from trader_shared.report_pipeline import attach_stage_position_pack
 
@@ -410,7 +414,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         theory_status=str(theory_status or ""),
         market_env_data=market_env_data if isinstance(market_env_data, dict) else {},
         has_position=has_position,
-        data_status=str(getattr(snapshot, "data_status", None) or report.get("data_status") or ""),
+        data_status=str(data_status or report.get("data_status") or ""),
         chip_resistance_lower=chip_resistance_lower,
         chip_resistance_upper=chip_resistance_upper,
         stage=str(stage or ""),

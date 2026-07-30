@@ -72,6 +72,8 @@ TESTS=(
   # bugfix 回归：review symbol 次序 / signal 首写 mkdir
   "02-共享模块-shared/tests/test_review_core_offline.py"
   "02-共享模块-shared/tests/test_signal_store_changes.py"
+  "02-共享模块-shared/tests/test_data_provider.py"
+  "02-共享模块-shared/tests/test_context_stage_offline.py"
 )
 
 exec "$PYTHON" -m pytest -q -p no:cacheprovider "${TESTS[@]}"
