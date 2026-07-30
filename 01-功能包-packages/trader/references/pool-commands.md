@@ -2,9 +2,13 @@
 
 > **This file is the absolute truth for all commands.** Do not generate commands from memory.
 
+池定位：用户自选名单。`add` 容量内均可入库（软门槛）；分类分道为 **可盯 / 等齐 / 先别碰 / 计划过时**（`refresh`/`plan`/`rank`）。  
+`plan` 明日只盯 = 可盯前 N；评分仅附录。
+
 ```bash
 python3 scripts/final_pool.py analyze --target 南网科技
 python3 scripts/final_pool.py add --target 南网科技
+python3 scripts/final_pool.py refresh
 python3 scripts/final_pool.py add-pending --target 南网科技
 python3 scripts/final_pool.py compare --targets 南网科技 中国铝业
 python3 scripts/final_pool.py show

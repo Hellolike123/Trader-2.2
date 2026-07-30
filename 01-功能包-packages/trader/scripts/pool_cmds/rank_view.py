@@ -6,31 +6,33 @@ from typing import Any
 from pool_cmds.verify import *  # noqa: F403
 
 def edge_reason(item: dict[str, Any], all_items: list[dict[str, Any]]) -> str:
-    """返回排名的核心优势/劣势一句话。从结构分与共振档推导（fusion 不参与）。"""
+    """排名近因：分道 + 共振 + 买点有效/失效 + 威科夫链（fusion 不参与）。"""
+    from pool_cmds.classify import ensure_lane
+    from pool_cmds.wyckoff_rank import format_wyckoff_chain_plain
     from trader_shared.resonance import extract_resonance_grade, resonance_grade_label
 
-    grade = extract_resonance_grade(item)
-    grade_label = resonance_grade_label(grade)
-
-    scores = {}
-    for key in ("chanlun_score", "wyckoff_score", "chip_score", "momentum_score"):
-        scores[key] = float(item.get(key) or 0)
-    dim_labels = {"chanlun_score": "结构", "wyckoff_score": "量价", "chip_score": "筹码", "momentum_score": "动能"}
-    best_dim = max(scores, key=scores.get) if scores else ""
-    ratio = scores[best_dim] / max(max(scores.values()), 0.01) if best_dim else 0
-    advantage = dim_labels.get(best_dim, best_dim) + "突出" if ratio >= 0.85 and best_dim else ""
-
+    it = ensure_lane(item)
     parts: list[str] = []
+    lane_zh = it.get("lane_zh")
+    if lane_zh:
+        parts.append(str(lane_zh))
+    grade = extract_resonance_grade(it)
     if grade == "aligned":
         parts.append("共振齐")
-    elif grade in ("conflict", "momentum_veto"):
-        parts.append(f"共振{grade_label}")
     elif grade not in ("empty", ""):
-        parts.append(f"共振{grade_label}")
-
-    if advantage:
-        parts.append(advantage)
-
+        parts.append(f"共振{resonance_grade_label(grade)}")
+    bp = it.get("buy_point_valid")
+    if bp is True:
+        parts.append("买点有效")
+    elif bp is False:
+        parts.append("买点失效")
+    wyk_plain = format_wyckoff_chain_plain(it)
+    if wyk_plain:
+        parts.append(wyk_plain)
+    reason = str(it.get("lane_reason") or "").strip()
+    joined = "｜".join(parts)
+    if reason and reason not in joined:
+        parts.append(reason)
     return "｜".join(parts) if parts else ""
 
 

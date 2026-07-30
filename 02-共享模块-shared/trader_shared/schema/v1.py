@@ -171,9 +171,8 @@ def validate_t0(markdown: str) -> list[str]:
 # 03-trader (pool)  (no banned list, special logic)
 # ═══════════════════════════════════════════════
 
-# plan 新骨架（作战表）；旧「盘后分析」标题仅作兼容探测
-# 「结构短板」可选（全员无短板则省略）；禁止再要求总分榜
-POOL_REQUIRED_PLAN = ("选股池作战表", "明日只盯", "仓位纪律")
+# plan 新骨架：分道作战表；评分参考为诊断附录（不决定盯谁）
+POOL_REQUIRED_PLAN = ("选股池作战表", "明日只盯", "评分参考（缠/威/筹/动", "仓位纪律")
 POOL_REQUIRED_REVIEW = ("选股池次日复盘", "复盘命中表", "复盘短评", "明日调整")
 
 
@@ -181,17 +180,19 @@ def validate_pool(markdown: str) -> list[str]:
     errors: list[str] = []
     if "选股池作战表" in markdown or "选股池盘后分析" in markdown:
         required_headings = POOL_REQUIRED_PLAN
-        # 兼容旧标题：若仍是盘后分析则接受「明日优先级」替代「明日只盯」
         for item in required_headings:
             if item == "选股池作战表" and "选股池盘后分析" in markdown:
                 continue
             if item == "明日只盯" and ("明日只盯" in markdown or "明日优先级" in markdown):
                 continue
+            if item.startswith("评分参考") and (
+                "评分参考（缠/威/筹/动" in markdown
+                or "评分（缠/威/筹/动）" in markdown
+                or "评分总览" in markdown
+            ):
+                continue
             if item not in markdown:
                 errors.append(f"plan output missing section: {item}")
-        # 作战表禁止再贴总分榜（评分已退回后台）
-        if "评分参考（缠/威/筹/动" in markdown or "评分（缠/威/筹/动）" in markdown:
-            errors.append("plan output must not include score leaderboard section")
     elif "选股池次日复盘" in markdown:
         required_headings = ("选股池次日复盘", "复盘命中表", "复盘短评", "明日调整")
         for item in required_headings:

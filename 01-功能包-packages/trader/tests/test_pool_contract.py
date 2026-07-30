@@ -79,9 +79,8 @@ def test_show_plan_and_review_contracts(tmp_path: Path) -> None:
     assert "明日只盯" in plan.stdout or "明日优先级" in plan.stdout
     assert "仓位纪律" in plan.stdout
     assert "交易指导" not in plan.stdout  # 已并入动作行
-    assert "评分参考（缠/威/筹/动" not in plan.stdout
-    assert "评分（缠/威/筹/动）" not in plan.stdout
-    assert "评分总览" not in plan.stdout
+    assert "评分参考（缠/威/筹/动" in plan.stdout
+    assert "可盯" in plan.stdout or "等齐" in plan.stdout or "明日只盯" in plan.stdout
     assert (tmp_path / ".trader" / "last_plan.json").exists()
 
     review = run_pool(tmp_path, "review", "--offline")

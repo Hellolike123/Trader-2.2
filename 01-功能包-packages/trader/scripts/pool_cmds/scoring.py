@@ -204,8 +204,10 @@ def momentum_text(report: dict[str, Any]) -> str:
 
 
 def record_from_report(target: str, report: dict[str, Any], offline: bool = False) -> dict[str, Any]:
+    from pool_cmds.classify import classify_lane
+
     scores = score_report(report)
-    # 显式 --offline 占位：跳过三关，供容量/CRUD 契约与自检使用（非实时分析）
+    # 旧三关仅作诊断标签；入池不再硬拒（容量除外）。分类以 lane 为准。
     if offline:
         admission = {
             "result": "入池",
@@ -229,6 +231,7 @@ def record_from_report(target: str, report: dict[str, Any], offline: bool = Fals
     res = report.get("resonance") if isinstance(report.get("resonance"), dict) else {}
     resonance_grade = extract_resonance_grade(report)
     resonance_summary = str(res.get("summary_line") or "") or f"共振：{resonance_grade_label(resonance_grade)}"
+    life = report.get("buy_point_lifecycle") if isinstance(report.get("buy_point_lifecycle"), dict) else {}
     record = {
         "target": target,
         "name": report.get("name") or target,
@@ -236,8 +239,9 @@ def record_from_report(target: str, report: dict[str, Any], offline: bool = Fals
         "added_at": now,
         "updated_at": now,
         "status": admission["status"],
-        "admission_result": admission["result"],
+        "admission_result": "入池",  # 软门槛：容量内均可进；坏票靠 lane=先别碰
         "admission_reason": admission["reason"],
+        "admission_diag": admission["result"],  # 旧三关诊断：入池/待补/拒绝
         "structure_summary": structure_summary(report),
         "trigger": round(float(report.get("confirm") or 0), 2),
         "defense": round(float(report.get("stop") or 0), 2),
@@ -251,29 +255,51 @@ def record_from_report(target: str, report: dict[str, Any], offline: bool = Fals
         "atr14": atr14,
         "atr_ratio": atr_ratio,
         "atr_level": atr_level,
-        "atr_cap": atr_cap,  # ATR 波动率决定的单票最大仓位（硬上限）
+        "atr_cap": atr_cap,
         "fusion_action": (report.get("fusion") or {}).get("action"),
         "fusion_confidence": (report.get("fusion") or {}).get("confidence"),
-        # fusion_score 由 **scores 提供（-20~20 仪表）；不计入 total_score
         "major_stage": major_stage,
         "momentum": momentum,
         "stage_status": stage_status,
         "resonance_grade": resonance_grade,
         "resonance_summary": resonance_summary,
         "risk_flags": report.get("risk_flags", []) or [],
+        "buy_point_status": str(life.get("status") or ""),
+        "buy_point_lid": life.get("lid_price"),
         **scores,
     }
-    # 计算盈亏比存入记录
-    # 使用 trigger（确认位/实际执行入场价）而非 support（支撑位）作为入场价，
-    # 因为当 trigger > support 时（突破策略），用 support 会虚增盈亏比。
     trigger_val = record.get("trigger") or 0.0
     stop_val = record.get("defense", 0.0)
     take_val = round(float(report.get("take") or 0), 2)
-    risk_reward = None  # None 表示无法计算，0.0 表示计算为 0
+    risk_reward = None
     if stop_val > 0 and trigger_val > stop_val and take_val > trigger_val:
         risk_reward = round((take_val - trigger_val) / (trigger_val - stop_val), 1)
     record["take"] = take_val
     record["risk_reward"] = risk_reward
+
+    # 策略分道（短线同源）；覆盖 status。离线/失败占位由 classify 强制等齐。
+    if offline:
+        record["offline"] = True
+        record["data_freshness"] = record.get("data_freshness") or "offline"
+        record["data_note"] = record.get("data_note") or "离线占位，跳过三关。"
+    classified = classify_lane({**report, **record})
+    record["lane"] = classified["lane"]
+    record["lane_zh"] = classified["lane_zh"]
+    record["lane_reason"] = classified["lane_reason"]
+    record["buy_point_valid"] = classified["buy_point_valid"]
+    record["decision_allow"] = classified["decision_allow"]
+    record["discipline_allow"] = classified["discipline_allow"]
+    record["strategy_entry_lit"] = classified["strategy_entry_lit"]
+    record["chan_followable"] = classified["chan_followable"]
+    record["status"] = classified["status"]
+    try:
+        from pool_cmds.wyckoff_rank import attach_wyckoff_chain_fields
+
+        attach_wyckoff_chain_fields(record, report)
+    except Exception:
+        record.setdefault("wyckoff_chain", [])
+        record.setdefault("wyckoff_chain_plain", "威：吸筹链未成型")
+        record.setdefault("wyckoff_chain_rank", 0)
     return record
 
 
@@ -339,24 +365,27 @@ def _score_tiebreak(item: dict[str, Any]) -> float:
 
 
 def sort_items_unified(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """统一排序：plan 和 rank 共用。
+    """统一排序：plan / rank / list 共用。
 
-    主键：status（执行 > 观察 > 淘汰）
-    次键：共振档（齐了 > 缺岗 > empty > 拆台/冲突）——注意力排序王
-    再次：可碰性（计划买点未过期；盈亏比达标）
-    末键：结构总分弱决胜（入池门槛仍用分；排序不靠分抢头条）
-    fusion 置信度 / weighted_score 不参与。
+    主键：lane（可盯 > 等齐 > 先别碰 > 计划过时）
+    次键：共振档
+    再次：威科夫吸筹链完整度（同道内）
+    再次：可碰性（盈亏比）
+    末键：结构总分弱决胜
+    fusion 不参与。
     """
+    from pool_cmds.classify import ensure_lane, lane_rank
+    from pool_cmds.wyckoff_rank import wyckoff_chain_rank
     from trader_shared.resonance import extract_resonance_grade, resonance_pool_rank
 
-    status_rank = {"执行": 3, "观察": 2, "淘汰": 1}
-    items = _tighten_status_by_resonance(items)
+    prepared = [ensure_lane(it) for it in items]
 
     return sorted(
-        items,
+        prepared,
         key=lambda item: (
-            status_rank.get(str(item.get("status")), 0),
+            lane_rank(item.get("lane")),
             resonance_pool_rank(extract_resonance_grade(item)),
+            wyckoff_chain_rank(item),
             _actionability_rank(item),
             _score_tiebreak(item),
         ),
@@ -365,17 +394,8 @@ def sort_items_unified(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def sort_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """status → 结构总分 → 低波动优先。fusion 不参与排序。"""
-    status_rank = {"执行": 3, "观察": 2, "淘汰": 1}
-    return sorted(
-        items,
-        key=lambda item: (
-            status_rank.get(str(item.get("status")), 0),
-            int(item.get("total_score") or 0),
-            -float(item.get("atr_ratio") or 0),
-        ),
-        reverse=True,
-    )
+    """兼容旧名：委托 sort_items_unified（lane 主轴，不再用分数双轨）。"""
+    return sort_items_unified(items)
 
 
 def sort_items_by_stage(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -391,11 +411,16 @@ def sort_items_by_stage(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def counts(items: list[dict[str, Any]]) -> dict[str, int]:
-    return {
+    """兼容旧计数 + lane 计数。"""
+    from pool_cmds.classify import counts_by_lane, ensure_lane
+
+    base = {
         "执行": len([item for item in items if item.get("status") == "执行"]),
         "观察": len([item for item in items if item.get("status") == "观察"]),
         "淘汰": len([item for item in items if item.get("status") == "淘汰"]),
     }
+    base.update(counts_by_lane([ensure_lane(it) for it in items]))
+    return base
 
 __all__ = list(_pool_io.__all__) + [
     "STAGE_STRENGTH",

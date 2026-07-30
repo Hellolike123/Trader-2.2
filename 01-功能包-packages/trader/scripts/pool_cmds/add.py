@@ -10,13 +10,18 @@ from pool_cmds.common import *  # noqa: F403
 def cmd_analyze(args: argparse.Namespace) -> int:
     report = safe_build_report(args.target, args.offline)
     record = record_from_report(args.target, report, args.offline)
+    lane_zh = record.get("lane_zh") or "等齐"
+    reason = record.get("lane_reason") or record.get("admission_reason") or "—"
     print("入池建议")
     print("")
-    print(f"结果：{record['admission_result']}")
-    print(f"理由：{record['admission_reason']}")
-    print(f"建议状态：{record['status']}")
-    print(f"触发：{price_yuan(record['trigger'])}")
+    print(f"结果：可入库")
+    print(f"理由：{reason}")
+    print(f"建议状态：{lane_zh}")
+    print(f"计划买点：{price_yuan(record['trigger'])}")
     print(f"防守：{price_yuan(record['defense'])}")
+    diag = record.get("admission_diag")
+    if diag and diag != "入池":
+        print(f"结构诊断：{diag}（{record.get('admission_reason')}）")
     print("下一步：如确认，请说“加入选股池”")
     if record.get("atr14") and record.get("atr14") > 0:
         atr14 = record["atr14"]
@@ -34,25 +39,20 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_add(args: argparse.Namespace) -> int:
+def _upsert_pool_record(target: str, record: dict[str, Any]) -> tuple[bool, str, list[dict[str, Any]]]:
+    """容量内写入/更新；返回 (ok, reason, items)。"""
     pool = load_pool()
-    report = safe_build_report(args.target, args.offline)
-    record = record_from_report(args.target, report, args.offline)
-
-    # admission 门控：拒绝/待补的票不允许入池
-    admission_result = record.get("admission_result", "入池")
-    if admission_result in ("拒绝", "待补"):
-        reason = record.get("admission_reason", "未通过筛选")
-        print(f"入池被拒：{reason}")
-        print(f"当前状态：{record['status']}  评分：{record['total_score']}  阶段：{record.get('major_stage', '?')}")
-        return 3
-
     items = list(pool.get("items", []))
-    existing_index = next((index for index, item in enumerate(items) if args.target in {str(item.get("target")), str(item.get("name")), str(item.get("symbol"))}), None)
+    existing_index = next(
+        (
+            i
+            for i, item in enumerate(items)
+            if target in {str(item.get("target")), str(item.get("name")), str(item.get("symbol"))}
+        ),
+        None,
+    )
     if existing_index is None and len(items) >= POOL_LIMIT:
-        print(f"候选池容量已满：{len(items)}/{POOL_LIMIT}")
-        print("新票入池前，请先移除、淘汰或替换一只旧票。")
-        return 3
+        return False, f"候选池容量已满：{len(items)}/{POOL_LIMIT}", items
     if existing_index is None:
         items.append(record)
     else:
@@ -64,48 +64,48 @@ def cmd_add(args: argparse.Namespace) -> int:
         write_stock(record["name"], record["status"], record["total_score"], "pool")
     except Exception:
         pass
+    return True, "ok", items
+
+
+def cmd_add(args: argparse.Namespace) -> int:
+    report = safe_build_report(args.target, args.offline)
+    record = record_from_report(args.target, report, args.offline)
+    # 软门槛：容量外不拒；坏票以分道「先别碰」入库
+    ok, reason, items = _upsert_pool_record(args.target, record)
+    if not ok:
+        print(reason)
+        print("新票入池前，请先移除、淘汰或替换一只旧票。")
+        return 3
+    lane_zh = record.get("lane_zh") or record.get("status") or "等齐"
     print("已加入选股池")
     print(f"当前容量：{len(items)}/{POOL_LIMIT}")
-    print(f"状态：{record['status']}")
-    print(f"触发：{price(record['trigger'])}")
+    print(f"分道：{lane_zh}")
+    if record.get("lane_reason"):
+        print(f"近因：{record['lane_reason']}")
+    print(f"计划买点：{price(record['trigger'])}")
     print(f"防守：{price(record['defense'])}")
+    diag = record.get("admission_diag")
+    if diag in {"待补", "拒绝"}:
+        print(f"提示：结构诊断为{diag}（{record.get('admission_reason')}），已入库供对比")
     print("下一步：盘后可说“生成明日作战表”。")
     return 0
 
 
 def quick_add(target: str, offline: bool = False) -> dict[str, Any]:
-    """One-step add: run analysis, check 三关, add to pool if passes."""
+    """一步入池：与 cmd_add 同路径（软门槛 + 策略分道），不绕过共振/决策。"""
     report = safe_build_report(target, offline)
     record = record_from_report(target, report, offline)
     major_stage = str(record.get("major_stage") or "蓄势")
     total_score = int(record.get("total_score") or 0)
-    current = to_float(record.get("current")) or 0.0
-    confirm = to_float(record.get("confirm")) or 0.0
-    stop = to_float(record.get("defense")) or 0.0
-
-    # 统一三关筛选
-    admission = _evaluate_admission(major_stage, total_score, current, confirm, stop)
-    if admission["result"] != "入池":
-        return {"ok": False, "reason": f"{admission['reason']}（{major_stage}，评分{total_score}）", "record": record}
-
-    record["status"] = admission["status"]
-    pool = load_pool()
-    items = list(pool.get("items", []))
-    existing_index = next((i for i, item in enumerate(items) if target in {str(item.get("target")), str(item.get("name")), str(item.get("symbol"))}), None)
-    if existing_index is None and len(items) >= POOL_LIMIT:
-        return {"ok": False, "reason": f"池容量已满 {len(items)}/{POOL_LIMIT}", "record": record}
-    if existing_index is None:
-        items.append(record)
-    else:
-        record["added_at"] = items[existing_index].get("added_at") or record["added_at"]
-        items[existing_index] = record
-    pool["items"] = items
-    save_pool(pool)
-    try:
-        write_stock(record["name"], record["status"], record["total_score"], "pool")
-    except Exception:
-        pass
-    return {"ok": True, "reason": f"已加入选股池（{major_stage}+{record.get('momentum', '震荡')}，评分{total_score}）", "record": record}
+    ok, reason, _items = _upsert_pool_record(target, record)
+    if not ok:
+        return {"ok": False, "reason": reason, "record": record}
+    lane_zh = record.get("lane_zh") or "等齐"
+    return {
+        "ok": True,
+        "reason": f"已加入选股池（{lane_zh}｜{major_stage}+{record.get('momentum', '震荡')}，评分{total_score}）",
+        "record": record,
+    }
 
 
 def cmd_add_last(args: argparse.Namespace) -> int:
@@ -129,25 +129,15 @@ def cmd_add_last(args: argparse.Namespace) -> int:
         return 2
     report = safe_build_report(target, False)
     record = record_from_report(target, report, False)
-
-    # admission 门控：拒绝/待补的票不允许入池
-    admission_result = record.get("admission_result", "入池")
-    if admission_result in ("拒绝", "待补"):
-        reason = record.get("admission_reason", "未通过筛选")
-        print(f"入池被拒：{reason}")
-        print(f"当前状态：{record['status']}  评分：{record['total_score']}  阶段：{record.get('major_stage', '?')}")
-        return 3
-
-    items.append(record)
-    pool["items"] = items
-    save_pool(pool)
-    try:
-        write_stock(record["name"], record["status"], record["total_score"], "pool")
-    except Exception:
-        pass
+    ok, reason, items = _upsert_pool_record(target, record)
+    if not ok:
+        print(reason)
+        print("新票入池前，请先移除或替换一只旧票。")
+        return 2
+    lane_zh = record.get("lane_zh") or record.get("status")
     print(f"已加入选股池：{target}")
     print(f"容量：{len(items)}/{POOL_LIMIT}")
-    print(f"状态：{record['status']}  触发：{price(record['trigger'])}  防守：{price(record['defense'])}")
+    print(f"分道：{lane_zh}  计划买点：{price(record['trigger'])}  防守：{price(record['defense'])}")
     return 0
 
 

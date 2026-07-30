@@ -33,7 +33,7 @@
 | Classic 映射（对照） | `fusion_classic_mappers.py`（动量已委托 cards） | 在 cards 路径复制一份映射 |
 | T0 盯盘缓存 | `t0_monitor._cached_build_plan`（`T0_PLAN_TTL_SEC`） | 每 tick 无脑全量 `build_plan` |
 | 选股池逻辑 | `01-功能包-packages/trader/scripts/pool_cmds/*` | 把逻辑写回 `final_pool.py` |
-| 选股池共振档 | `resonance.py` + `pool_cmds/scoring.sort_items_unified`（状态→共振→可碰→分弱决胜）；refresh 写回 | 用 fusion/`total_score` 当排序王；冲突票仍标「执行」 |
+| 选股池分道 | `classify.py` 分道 + `wyckoff_rank.py` 同道链（`威：SC→…还差SOS`）+ `sort_items_unified`（lane→共振→链→可碰→分）；入池软门槛 | 用分数/「执行」/事件n/5当注意力王；S/A/B/C 替换分道 |
 | 仓位轮动共振 | `portfolio_core.enrich_portfolio_resonance` | 在 portfolio 里重跑 build_report / 加厚 fusion |
 | T0 vs 岗位共振 | T0 `plan.resonance`=`t0_structure_score_v1`；报告共振才是 `pullback_probe` | 在 T0 调 `attach_resonance` |
 | 日线裁定出手 | `build_daily_ruling` + attach 后按 decision_view 重算 | 用 fusion.action 单独推「宜追」 |

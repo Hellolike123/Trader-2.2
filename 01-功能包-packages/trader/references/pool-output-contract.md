@@ -4,20 +4,21 @@
 
 Common rules: no markdown tables in rank/show/plan outputs; use indented alignment; no `##/###` headings.
 
-评分：`total_score` = 缠+威+筹+动（入池门槛 + 同档弱决胜，**作战表不展示总分榜**）；池排序主轴是 **状态 → 共振档 → 可碰性（买点未过期/盈亏比）→ 分数**。`fusion_score` 仅仪表，不进总分、不进排序。
+池定位：用户自选名单 + 短线策略分道（可盯/等齐/先别碰/计划过时）。  
+排序：`lane` → 共振档 → **威科夫吸筹链完整度** → 可碰性（盈亏比）→ `total_score` 弱决胜。  
+`total_score`（缠+威+筹+动）仅诊断附录；`fusion_score` 仅仪表。  
+对外用词：**买点有效** / **买点失效**；计划价漂太远称**计划过时**。  
+威科夫链文案（同道近因）：`威：SC→AR→ST→LPS，还差SOS`；全齐写满链；禁止「事件 n/5」、S级/星级。
 
 ## rank output
 
 ```text
-选股池  ｜  大盘{环境}，{建议}
+选股日报 — {date}  ｜  大盘{环境}，{建议}
 
-🥇  ⭐ {name}  {status}  {price}  {atr_text}
+🥇  {name}  {price}  {atr_text}
+    {分道｜共振｜买点有效/失效｜近因}
     买  {buy_low}-{buy_high} 止跌确认  ｜  仓位 {cap}%  ｜  止损 {stop}
 ...
-
-👉 首选{name}。...
-📊 信号回测
-  {name}    {sig_text}    {verify_status}
 ```
 
 ## show output
@@ -32,11 +33,14 @@ Common rules: no markdown tables in rank/show/plan outputs; use indented alignme
 ```text
 已加入选股池
 当前容量：{n}/{POOL_LIMIT}
-状态：{status}
-触发：{price}
+分道：{lane_zh}
+近因：{lane_reason}
+计划买点：{price}
 防守：{price}
 下一步：盘后可说"生成明日作战表"。
 ```
+
+容量满才拒；结构差票仍入库，分道标「先别碰」。
 
 ## add-pending output
 
@@ -51,38 +55,44 @@ Common rules: no markdown tables in rank/show/plan outputs; use indented alignme
 
 ```text
 选股池作战表 — {date}
-池内 {n}/{limit}｜明日可盯 {k}｜观察 {o}｜过期待刷 {s}｜淘汰 {t}
+池内 {n}/{limit}｜可盯 {k}｜等齐 {w}｜先别碰 {a}｜计划过时 {s}
 
 明日只盯
-🥇 {name} · {status} · {共振白话}
+🥇 {name} · 可盯 · {共振} · {买点有效} · 威：SC→AR→ST→LPS，还差SOS
   现价{p}｜计划买点{p}｜防守{p}｜仓1→3成
   动作：放量站上计划买点 {p} 才考虑
   注意：盈亏比 {r}R 偏弱 · 宁可不追   ← 仅盈亏比低于门槛时
 
-过期待刷（{s}只，计划买点与现价差太远）
-  {name}  现价{p}｜计划买点{p}｜已涨过约{n}% · 需重算   ← 或「买点还高约n%」
+等齐（{w}只）
+  {name}  {近因}
+
+先别碰（{a}只）
+  {name}  {近因}
+
+计划过时（{s}只，计划买点与现价差太远）
+  {name}  现价{p}｜计划买点{p}｜已涨过约{n}% · 需重算
   其余跑：final_pool.py refresh 重算买点                 ← 仅 s>3
 
-说明：字段 `trigger` 对人话统一称「计划买点」；禁止再写难懂的「偏离±xx%」。
+评分参考（缠/威/筹/动 · 不决定盯谁）
+  {name}  总{s}  缠{n} 威{n} 筹{n} 动{n}  {lane_zh}
 
-结构短板                         ← 仅执行/观察且买点未过期、确有短板才出；全正常则整段省略
-  {name}  还差缠论 · 赔率偏弱
-  {name}  缠偏弱
-
-池内警示                         ← 有待补/拒绝/淘汰才出
+池内警示                         ← 先别碰/淘汰/结构诊断才出
   {name}：{reason}
 
 仓位纪律 执行首次1成 确认加至3成 单票风险1R 总仓位≤5成
 {one_sentence}
 ```
 
-禁止：整段「交易指导」（已并入动作行）；「评分参考/总分榜」`总xx 缠x 威x…`；「缺结构（缺：结构）」叠词；过期票写进结构短板（已有过期待刷）；淘汰原因写进结构短板（已有池内警示）。
+禁止：整段「交易指导」；「执行」当注意力主语言（用分道）；「盖未过期」jargon；「事件 4/5」分数式链文案。
 
 ## analyze output
 
 ```text
 入池建议
-结果：通过/观察/拒绝  理由：...
-触发：{price}  防守：{price}
+结果：可入库
+理由：{lane_reason}
+建议状态：{lane_zh}
+计划买点：{price}  防守：{price}
+下一步：如确认，请说“加入选股池”
 📊 ATR入池检查  建议首仓：≤{cap}%
 ```

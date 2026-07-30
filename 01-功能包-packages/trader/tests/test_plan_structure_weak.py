@@ -1,4 +1,4 @@
-"""作战表「结构短板」：只报拖后腿，不贴总分榜。"""
+"""作战表分道骨架：可盯 / 等齐 / 先别碰 / 计划过时 + 评分参考附录。"""
 from __future__ import annotations
 
 import sys
@@ -11,74 +11,15 @@ for p in (str(SCRIPTS), str(SHARED)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from pool_cmds.plan_view import (  # noqa: E402
-    _structure_weak_lines,
-    _structure_weak_parts,
-    render_plan,
-)
+from pool_cmds.plan_view import render_plan  # noqa: E402
 
 
-def test_weak_parts_resonance_and_rr():
-    item = {
-        "name": "天齐",
-        "status": "执行",
-        "resonance_grade": "missing_structure",
-        "chanlun_score": 33,
-        "chip_score": 25,
-        "risk_reward": 0.1,
-        "current": 45.0,
-        "trigger": 47.0,
-    }
-    parts = _structure_weak_parts(item)
-    assert "还差缠论" in parts
-    assert "缠偏弱" not in parts  # 与还差缠论不叠
-    assert "赔率偏弱" in parts
-
-
-def test_weak_lines_skips_stale_and_eliminated():
+def test_render_plan_lanes_and_score_appendix():
     items = [
         {
-            "name": "过期票",
+            "name": "可盯票",
             "status": "执行",
-            "resonance_grade": "missing_structure",
-            "chanlun_score": 20,
-            "chip_score": 25,
-            "current": 12.0,
-            "trigger": 10.0,
-            "risk_reward": 2.0,
-        },
-        {
-            "name": "淘汰票",
-            "status": "淘汰",
             "resonance_grade": "aligned",
-            "chanlun_score": 20,
-            "chip_score": 25,
-            "current": 10.0,
-            "trigger": 10.1,
-        },
-        {
-            "name": "观察弱缠",
-            "status": "观察",
-            "resonance_grade": "aligned",
-            "chanlun_score": 20,
-            "chip_score": 25,
-            "current": 10.0,
-            "trigger": 10.1,
-            "risk_reward": 2.0,
-        },
-    ]
-    lines = _structure_weak_lines(items)
-    assert len(lines) == 1
-    assert "观察弱缠" in lines[0]
-    assert "缠偏弱" in lines[0]
-
-
-def test_render_plan_has_weak_section_not_scoreboard():
-    items = [
-        {
-            "name": "南网科技",
-            "status": "执行",
-            "resonance_grade": "missing_structure",
             "chanlun_score": 32,
             "wyckoff_score": 14,
             "chip_score": 25,
@@ -86,13 +27,104 @@ def test_render_plan_has_weak_section_not_scoreboard():
             "total_score": 79,
             "current": 10.0,
             "trigger": 10.2,
+            "confirm": 10.2,
             "defense": 9.0,
-            "risk_reward": 0.5,
+            "risk_reward": 2.0,
             "major_stage": "蓄势",
-        }
+            "buy_point_lifecycle": {"status": "active", "lid_price": 9.8},
+            "decision_view": {
+                "discipline_allow": True,
+                "strategy_entry_lit": True,
+                "allow_new_recommend": True,
+            },
+            "chan_buy_point_types": ["一买"],
+            "wyckoff": {
+                "sc_signal": True,
+                "ar_signal": True,
+                "st_signal": True,
+                "lps_signal": True,
+                "sos_signal": False,
+            },
+        },
+        {
+            "name": "等齐票",
+            "status": "观察",
+            "resonance_grade": "missing_structure",
+            "total_score": 70,
+            "chanlun_score": 20,
+            "wyckoff_score": 14,
+            "chip_score": 20,
+            "momentum_score": 8,
+            "current": 10.0,
+            "trigger": 10.1,
+            "confirm": 10.1,
+            "defense": 9.0,
+            "major_stage": "蓄势",
+            "buy_point_lifecycle": {"status": "none"},
+            "decision_view": {
+                "discipline_allow": True,
+                "strategy_entry_lit": False,
+                "allow_new_recommend": False,
+            },
+            "chan_buy_point_types": [],
+        },
+        {
+            "name": "先别碰票",
+            "status": "观察",
+            "resonance_grade": "aligned",
+            "total_score": 80,
+            "chanlun_score": 30,
+            "wyckoff_score": 14,
+            "chip_score": 20,
+            "momentum_score": 10,
+            "current": 10.0,
+            "trigger": 10.1,
+            "confirm": 10.1,
+            "defense": 9.0,
+            "buy_point_lifecycle": {"status": "failed", "lid_price": 10.2},
+            "decision_view": {
+                "discipline_allow": True,
+                "strategy_entry_lit": True,
+                "allow_new_recommend": False,
+            },
+            "major_stage": "蓄势",
+        },
+        {
+            "name": "过时票",
+            "status": "观察",
+            "resonance_grade": "aligned",
+            "total_score": 75,
+            "chanlun_score": 30,
+            "wyckoff_score": 14,
+            "chip_score": 20,
+            "momentum_score": 10,
+            "current": 12.0,
+            "trigger": 10.0,
+            "confirm": 10.0,
+            "defense": 9.0,
+            "major_stage": "蓄势",
+            "buy_point_lifecycle": {"status": "active", "lid_price": 9.5},
+            "decision_view": {
+                "discipline_allow": True,
+                "strategy_entry_lit": True,
+                "allow_new_recommend": True,
+            },
+        },
     ]
     md = render_plan(items)
-    assert "结构短板" in md
-    assert "还差缠论" in md
-    assert "评分参考" not in md
-    assert "总79" not in md
+    assert "选股池作战表" in md
+    assert "可盯 1" in md
+    assert "等齐 1" in md
+    assert "先别碰 1" in md
+    assert "计划过时 1" in md
+    assert "明日只盯" in md
+    assert "可盯票" in md
+    assert "威：SC→AR→ST→LPS，还差SOS" in md
+    assert "事件 4/5" not in md
+    assert "事件4/5" not in md
+    assert "等齐（1只）" in md
+    assert "先别碰（1只）" in md
+    assert "计划过时（1只" in md
+    assert "评分参考（缠/威/筹/动 · 不决定盯谁）" in md
+    assert "总79" in md
+    assert "结构短板" not in md

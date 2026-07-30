@@ -75,27 +75,12 @@ def cmd_refresh(args: argparse.Namespace) -> int:
         # 保留原入池时间，更新本次刷新时间
         new_record["added_at"] = item.get("added_at") or new_record["added_at"]
         new_record["updated_at"] = today_text()
-        # 检查 admission_result：拒绝则直接淘汰
-        if str(new_record.get("admission_result")) == "拒绝":
+        # 分道/衰退：record_from_report 已写入 lane+status；衰退保持淘汰
+        if str(new_record.get("major_stage")) == "衰退" or new_record.get("status") == "淘汰":
             new_record["status"] = "淘汰"
             declined.append(str(new_record.get("name") or key))
-        # 衰退自动淘汰
-        elif str(new_record.get("major_stage")) == "衰退":
-            new_record["status"] = "淘汰"
-            declined.append(str(new_record.get("name") or key))
-        else:
-            # 用新 record 的 admission 结果，而非保留旧 status
-            pass  # new_record["status"] 已由 record_from_report → admission_for 正确设置
         all_items[idx] = new_record
         refreshed += 1
-
-    # 共振档落盘：冲突/拆台若仍标执行 → 收紧为观察（与 rank/plan 展示一致）
-    try:
-        from pool_cmds.scoring import _tighten_status_by_resonance
-
-        all_items = _tighten_status_by_resonance(all_items)
-    except Exception:
-        pass
 
     pool["items"] = all_items
     save_pool(pool)

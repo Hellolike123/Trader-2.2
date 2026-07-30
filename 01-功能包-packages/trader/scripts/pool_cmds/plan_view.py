@@ -35,17 +35,24 @@ def priority_block(items: list[dict[str, Any]]) -> list[str]:
 
 
 def action_for(item: dict[str, Any]) -> str:
-    # 「触发」对人话＝计划买点（站上才谈买）
-    buy = price(item.get("trigger"))
-    if item.get("status") == "执行":
+    from pool_cmds.classify import ensure_lane
+
+    it = ensure_lane(item)
+    buy = price(it.get("trigger"))
+    lane = str(it.get("lane") or "")
+    if lane == "ready":
         return f"放量站上计划买点 {buy} 才考虑"
-    if item.get("status") == "观察":
-        return f"只看计划买点 {buy} 是否站稳，不买"
-    return "不参与，保留复盘记录"
+    if lane == "wait":
+        return f"只看计划买点 {buy} 是否站稳，条件未齐不买"
+    if lane == "stale":
+        return "计划过时，先 refresh 重算再看"
+    return "先别碰，保留复盘记录"
 
 
 def position_for(item: dict[str, Any]) -> str:
-    if item.get("status") == "执行":
+    from pool_cmds.classify import ensure_lane
+
+    if ensure_lane(item).get("lane") == "ready":
         return "1→3成"
     return "0"
 
@@ -108,96 +115,90 @@ def _status_sort_key(item: dict[str, Any]) -> int:
     return {"执行": 0, "观察": 1, "淘汰": 2}.get(st, 9)
 
 
-def _structure_weak_parts(item: dict[str, Any]) -> list[str]:
-    """结构短板白话零件；无短板返回空。不过期/淘汰（另有专节）。"""
-    from trader_shared.resonance import extract_resonance_grade
-
-    parts: list[str] = []
-    grade = extract_resonance_grade(item)
-    if grade == "missing_structure":
-        parts.append("还差缠论")
-    elif grade == "missing_chip":
-        parts.append("还差筹码")
-    elif grade == "missing_background":
-        parts.append("还差背景")
-    elif grade == "momentum_veto":
-        parts.append("动能唱反调")
-    elif grade == "conflict":
-        parts.append("结构与背景打架")
-    elif grade not in ("aligned", "empty", ""):
-        parts.append("共振未齐")
-
-    chan = float(item.get("chanlun_score") or 0)
-    # 共振已点名缠论时不再叠「缠偏弱」
-    if chan < 25 and grade != "missing_structure":
-        parts.append("缠偏弱")
-
-    chip = float(item.get("chip_score") or 0)
-    if chip < 15 and grade != "missing_chip":
-        parts.append("筹偏弱")
-
-    if item.get("status") == "执行":
-        _, rr_weak = _rr_below_threshold(item)
-        if rr_weak:
-            parts.append("赔率偏弱")
-
-    return parts
-
-
-def _structure_weak_lines(items: list[dict[str, Any]]) -> list[str]:
-    """仅列执行/观察且买点未过期、确有短板的票；无则空列表。"""
+def _lane_fold_lines(items: list[dict[str, Any]], *, limit: int = 3) -> list[str]:
+    """折叠短列表：名 · 近因。"""
     lines: list[str] = []
-    for item in items:
-        if item.get("status") not in {"执行", "观察"}:
-            continue
-        if _is_trigger_stale(item):
-            continue
-        parts = _structure_weak_parts(item)
-        if not parts:
-            continue
+    for item in items[:limit]:
         name = item.get("name") or "?"
-        lines.append(f"  {name}  {' · '.join(parts)}")
+        reason = str(item.get("lane_reason") or _plan_resonance_plain(item) or "").strip()
+        if reason:
+            lines.append(f"  {name}  {reason}")
+        else:
+            lines.append(f"  {name}")
+    if len(items) > limit:
+        lines.append(f"  其余 {len(items) - limit} 只略")
     return lines
 
 
+def _bp_plain(item: dict[str, Any]) -> str:
+    v = item.get("buy_point_valid")
+    if v is True:
+        return "买点有效"
+    if v is False:
+        return "买点失效"
+    return ""
+
+
 def render_plan(items: list[dict[str, Any]]) -> str:
+    from pool_cmds.classify import ensure_lane
+
     items = _apply_signal_adjustments(items)
     sorted_items = sort_items_unified(items)
-    # 分离触发价过期的票（距现价 > 5%）
-    active_plan_items = [it for it in sorted_items if not _is_trigger_stale(it)]
-    stale_plan_items = [it for it in sorted_items if _is_trigger_stale(it)]
-    count = counts(sorted_items)
-    watchable_exec = [item for item in active_plan_items if item.get("status") == "执行"]
-    execution_items = watchable_exec[:EXECUTION_LIMIT]
-    top_items = execution_items + [
-        item for item in active_plan_items if item.get("status") != "执行"
-    ]
+    ready = [it for it in sorted_items if it.get("lane") == "ready"]
+    wait = [it for it in sorted_items if it.get("lane") == "wait"]
+    avoid = [it for it in sorted_items if it.get("lane") == "avoid"]
+    stale = [it for it in sorted_items if it.get("lane") == "stale"]
+    # 无 lane 的旧票：按计划过时拆分
+    for it in sorted_items:
+        if it.get("lane") in {"ready", "wait", "avoid", "stale"}:
+            continue
+        it2 = ensure_lane(it)
+        if it2.get("lane") == "stale":
+            stale.append(it2)
+        elif it2.get("lane") == "ready":
+            ready.append(it2)
+        elif it2.get("lane") == "avoid":
+            avoid.append(it2)
+        else:
+            wait.append(it2)
+
+    top_ready = ready[:EXECUTION_LIMIT]
 
     lines = [
         f"选股池作战表 — {today_text()}",
         (
             f"池内 {len(sorted_items)}/{POOL_LIMIT}"
-            f"｜明日可盯 {len(watchable_exec)}"
-            f"｜观察 {count['观察']}"
-            f"｜过期待刷 {len(stale_plan_items)}"
-            f"｜淘汰 {count['淘汰']}"
+            f"｜可盯 {len(ready)}"
+            f"｜等齐 {len(wait)}"
+            f"｜先别碰 {len(avoid)}"
+            f"｜计划过时 {len(stale)}"
         ),
         "",
     ]
 
-    if top_items:
+    if top_ready:
+        from pool_cmds.wyckoff_rank import format_wyckoff_chain_plain
+
         lines.append("明日只盯")
-        for i, item in enumerate(top_items[:3], 1):
+        for i, item in enumerate(top_ready, 1):
             rank_emoji = ["🥇", "🥈", "🥉"][i - 1]
-            status = str(item.get("status") or "")
             res_plain = _plan_resonance_plain(item)
-            lines.append(f"{rank_emoji} {item['name']} · {status} · {res_plain}")
-            pos = position_for(item)
+            bp = _bp_plain(item)
+            wyk_plain = format_wyckoff_chain_plain(item)
+            tags = " · ".join(
+                x for x in (res_plain, bp, wyk_plain, str(item.get("lane_reason") or "")) if x
+            )
+            # 避免近因与共振完全重复
+            if item.get("lane_reason") and res_plain and res_plain in str(item.get("lane_reason")):
+                tags = " · ".join(
+                    x for x in (str(item.get("lane_reason")), bp, wyk_plain) if x
+                )
+            lines.append(f"{rank_emoji} {item['name']} · 可盯 · {tags}" if tags else f"{rank_emoji} {item['name']} · 可盯")
             lines.append(
                 f"  现价{price(item.get('current'))}"
                 f"｜计划买点{price(item.get('trigger'))}"
                 f"｜防守{price(item.get('defense'))}"
-                f"｜仓{pos}"
+                f"｜仓{position_for(item)}"
             )
             lines.append(f"  动作：{action_for(item)}")
             rr_val, rr_weak = _rr_below_threshold(item)
@@ -206,50 +207,61 @@ def render_plan(items: list[dict[str, Any]]) -> str:
             fw = _price_freshness_warning(item)
             if fw:
                 lines.append(f"  {fw}")
-
-        # 过期待刷：计划买点与现价差太远；只展差得最大的 3 只
-        if stale_plan_items:
-            n_stale = len(stale_plan_items)
-            lines.append("")
-            lines.append(f"过期待刷（{n_stale}只，计划买点与现价差太远）")
-            ranked_stale = sorted(
-                stale_plan_items,
-                key=lambda it: abs(_trigger_dev_pct(it)),
-                reverse=True,
-            )
-            for item in ranked_stale[:3]:
-                lines.append(_stale_watch_line(item))
-            if n_stale > 3:
-                lines.append("  其余跑：final_pool.py refresh 重算买点")
-
-        # 结构短板：只报拖后腿；过期→过期待刷，淘汰→池内警示，不在此重复
-        weak_lines = _structure_weak_lines(sorted_items)
-        if weak_lines:
-            lines.append("")
-            lines.append("结构短板")
-            lines.extend(weak_lines)
-
-        # 池内警示（待补/拒绝/淘汰一句原因）；无则省略
-        warned = [
-            item
-            for item in sorted_items
-            if item.get("admission_result") in {"待补", "拒绝"}
-            or item.get("status") == "淘汰"
-        ]
-        if warned:
-            lines.append("")
-            lines.append("池内警示")
-            for item in warned:
-                reason = str(item.get("admission_reason") or item.get("status") or "").strip()
-                lines.append(f"  {item.get('name')}：{reason or '需关注'}")
-
-        lines.append("")
-        lines.append("仓位纪律 执行首次1成 确认加至3成 单票风险1R 总仓位≤5成")
-        lines.append(one_sentence(top_items))
     else:
-        lines.append("当前选股池没有可盯对象，今天不主动处理。")
-        if stale_plan_items:
-            lines.append(f"过期待刷 {len(stale_plan_items)} 只，先跑 final_pool.py refresh")
+        lines.append("明日只盯")
+        lines.append("  暂无可盯，先看等齐或跑 refresh")
+
+    if wait:
+        lines.append("")
+        lines.append(f"等齐（{len(wait)}只）")
+        lines.extend(_lane_fold_lines(wait))
+
+    if avoid:
+        lines.append("")
+        lines.append(f"先别碰（{len(avoid)}只）")
+        lines.extend(_lane_fold_lines(avoid))
+
+    if stale:
+        lines.append("")
+        lines.append(f"计划过时（{len(stale)}只，计划买点与现价差太远）")
+        ranked_stale = sorted(stale, key=lambda it: abs(_trigger_dev_pct(it)), reverse=True)
+        for item in ranked_stale[:3]:
+            lines.append(_stale_watch_line(item))
+        if len(stale) > 3:
+            lines.append("  其余跑：final_pool.py refresh 重算买点")
+
+    # 评分参考：诊断附录，不决定盯谁
+    lines.append("")
+    lines.append("评分参考（缠/威/筹/动 · 不决定盯谁）")
+    for item in sorted(
+        sorted_items,
+        key=lambda it: (
+            {"ready": 0, "wait": 1, "avoid": 2, "stale": 3}.get(str(it.get("lane")), 9),
+            -float(it.get("total_score") or 0),
+        ),
+    ):
+        lane_zh = item.get("lane_zh") or item.get("lane") or item.get("status") or "?"
+        lines.append(f"  {item.get('name')}  {score_summary(item)}  {lane_zh}")
+
+    warned = [
+        item
+        for item in sorted_items
+        if item.get("admission_diag") in {"待补", "拒绝"}
+        or item.get("status") == "淘汰"
+        or item.get("lane") == "avoid"
+    ]
+    if warned:
+        lines.append("")
+        lines.append("池内警示")
+        for item in warned[:6]:
+            reason = str(
+                item.get("lane_reason") or item.get("admission_reason") or item.get("status") or ""
+            ).strip()
+            lines.append(f"  {item.get('name')}：{reason or '需关注'}")
+
+    lines.append("")
+    lines.append("仓位纪律 执行首次1成 确认加至3成 单票风险1R 总仓位≤5成")
+    lines.append(one_sentence(top_ready))
 
     return "\n".join(lines)
 
@@ -266,12 +278,14 @@ def score_summary(item: dict[str, Any]) -> str:
 
 def trade_hint(item: dict[str, Any]) -> str:
     """保留给其它调用方；plan 页已不再单独输出交易指导段。"""
+    from pool_cmds.classify import ensure_lane
+
     buy = price(item.get("trigger"))
     if item.get("_signal_triggered"):
         return f"信号已触发，按计划执行（防守{price(item.get('defense'))}元）"
     if item.get("_signal_downgrade"):
         return f"近期信号失败，暂不介入，等新信号"
-    if item.get("status") == "执行":
+    if ensure_lane(item).get("lane") == "ready":
         return f"放量站稳计划买点{buy}才买 → 回踩不破可加至3成"
     return f"计划买点{buy}站稳再看，防守{price(item.get('defense'))}元"
 
@@ -279,7 +293,7 @@ def trade_hint(item: dict[str, Any]) -> str:
 def one_sentence(items: list[dict[str, Any]]) -> str:
     top = [str(item.get("name")) for item in items[:2]]
     if not top:
-        return "当前选股池没有可执行对象，明天不主动处理。"
+        return "当前选股池没有可盯对象，明天不主动处理。"
     return f"明天只重点盯 {' 和 '.join(top)}；不触发不买，其他只盘后更新。"
 
 
@@ -353,7 +367,6 @@ __all__ = [
     "_check_stale_items",
     "_match_item",
     "_plan_resonance_plain",
-    "_structure_weak_lines",
-    "_structure_weak_parts",
+    "_lane_fold_lines",
     "_refresh_pool_prices",
 ]

@@ -18,7 +18,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
             print(w)
     markdown = render_plan(items)
     execution = [
-        item for item in sort_items_unified(items) if item.get("status") == "执行"
+        item for item in sort_items_unified(items) if item.get("lane") == "ready"
     ][:EXECUTION_LIMIT]
     with DataManager.state_lock("last_plan"):
         DataManager.save_state("last_plan", {"contract_version": CONTRACT_VERSION, "date": today_text(), "execution_items": execution, "markdown": markdown})
