@@ -31,12 +31,16 @@
 **新开铁律**（产品；阶段 3 才接到出手代码）：
 
 ```text
-可推荐新开  ⇔  共振齐  ∧  主入场策略亮  ∧  纪律允许
+可推荐新开  ⇔  共振齐  ∧  主入场策略可执行(executable)  ∧  纪律允许
 ```
+
+- 「策略亮」= `strategy_match.gates.entry.executable is True`（mode=active）  
+- `mode=plan`（清单未齐 / 买点失效 / 否决）**不算**可推荐新开  
 
 **纪律铁律**（已有，保持）：只收紧出手/仓位/失效，**不改** `weighted_score` / support / stop。
 
-**方向铁律**：出手/新开听共振∧策略∧纪律（`decision_view`）；fusion `weighted_score` 仅仪表。新 Agent 勿再加厚 fusion 权重矩阵当产品主路径。
+**方向铁律**：出手/新开听共振∧策略∧纪律（`decision_view`）；fusion `weighted_score` 仅仪表。  
+`FUSION_OVERRIDE_ENABLED` **默认 false**（不覆盖 `theory_status`）。新 Agent 勿再加厚 fusion 权重矩阵当产品主路径。
 
 ---
 

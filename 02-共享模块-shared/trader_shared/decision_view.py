@@ -11,7 +11,7 @@ from typing import Any
 
 SCHEMA = "decision_view_v1"
 
-# 入场闸 primary 存在即视为「策略亮」（mode 可为 plan/active；off 时 primary 已被清空）
+# 入场闸「策略亮」= primary 存在且 executable（mode=active）；plan 仅计划，不算可出手
 _ENTRY_GATES = ("entry",)
 
 
@@ -30,11 +30,30 @@ def _sm(report: dict[str, Any]) -> dict[str, Any]:
     return s if isinstance(s, dict) else {}
 
 
-def _entry_primary(strategy_match: dict[str, Any]) -> dict[str, Any] | None:
+def _entry_gate(strategy_match: dict[str, Any]) -> dict[str, Any]:
     gates = strategy_match.get("gates") if isinstance(strategy_match.get("gates"), dict) else {}
     ent = gates.get("entry") if isinstance(gates.get("entry"), dict) else {}
+    return ent
+
+
+def _entry_primary(strategy_match: dict[str, Any]) -> dict[str, Any] | None:
+    ent = _entry_gate(strategy_match)
     primary = ent.get("primary")
     return primary if isinstance(primary, dict) and primary.get("id") else None
+
+
+def _strategy_entry_lit(strategy_match: dict[str, Any]) -> bool:
+    """可出手策略亮：须有 primary 且 entry.executable（active）；plan 不算 lit。"""
+    ent = _entry_gate(strategy_match)
+    primary = ent.get("primary")
+    if not (isinstance(primary, dict) and primary.get("id")):
+        return False
+    if ent.get("executable") is True:
+        return True
+    # 兼容旧字段：未写 executable 时用 mode==active
+    if "executable" not in ent and str(ent.get("mode") or "") == "active":
+        return True
+    return False
 
 
 def build_decision_view(report: dict[str, Any] | None) -> dict[str, Any]:
@@ -62,9 +81,11 @@ def build_decision_view(report: dict[str, Any] | None) -> dict[str, Any]:
     grade = str(res.get("grade") or "")
     resonance_ok = grade == "aligned"
     primary = _entry_primary(sm)
-    strategy_entry_lit = primary is not None
+    strategy_entry_lit = _strategy_entry_lit(sm)
     primary_id = str(primary.get("id")) if primary else None
     primary_name = str(primary.get("name") or primary_id or "") if primary else None
+    entry_gate = _entry_gate(sm)
+    entry_mode = str(entry_gate.get("mode") or "")
 
     block_reasons: list[str] = []
     if not discipline_allow:
@@ -93,7 +114,11 @@ def build_decision_view(report: dict[str, Any] | None) -> dict[str, Any]:
             except Exception:
                 block_reasons.append("共振未齐")
     if not strategy_entry_lit:
-        block_reasons.append("无入场策略")
+        if primary is not None and entry_mode == "plan":
+            reason = str(entry_gate.get("reason") or "").strip()
+            block_reasons.append(f"入场仅计划（{reason}）" if reason else "入场仅计划，未可执行")
+        else:
+            block_reasons.append("无入场策略")
 
     allow = discipline_allow and resonance_ok and strategy_entry_lit
 

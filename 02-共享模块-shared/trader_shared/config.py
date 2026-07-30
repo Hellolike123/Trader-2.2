@@ -252,9 +252,9 @@ WYCKOFF_SCORE_TR_QUALITY_GAIN: int = 20         # TR 质量对 raw 分的最大�
 THEORY_ADJUST_LOG_ONLY: bool = os.environ.get("THEORY_ADJUST_LOG_ONLY", "false").lower() in ("true", "1", "yes")
 
 # ---- S-2 Fusion Override (Phase 2) ----
-# FUSION_OVERRIDE_ENABLED=true 时融合层覆盖 status_for() 的决策，默认开启
-# 验证几个股票没问题后改为 False 即可关闭
-FUSION_OVERRIDE_ENABLED: bool = os.environ.get("FUSION_OVERRIDE_ENABLED", "true").lower() in ("true", "1", "yes")
+# 默认关闭：fusion 仅仪表，不覆盖 theory_status（与 decision_view 权威一致）
+# 需要对照旧行为时显式设 FUSION_OVERRIDE_ENABLED=true
+FUSION_OVERRIDE_ENABLED: bool = os.environ.get("FUSION_OVERRIDE_ENABLED", "false").lower() in ("true", "1", "yes")
 # 融合层置信度低于此值时降级回旧逻辑（0-1，建议 0.6）
 FUSION_CONFIDENCE_THRESHOLD: float = float(os.environ.get("FUSION_CONFIDENCE_THRESHOLD", "0.6"))
 

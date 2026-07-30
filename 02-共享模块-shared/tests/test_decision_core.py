@@ -225,8 +225,13 @@ class TestTheoryFusionConflict:
         )
         assert result["theory_fusion_conflict"] is True
 
-    def test_high_confidence_override_no_conflict(self):
-        """高置信度（触发 override）→ conflict=False"""
+    def test_high_confidence_override_no_conflict(self, monkeypatch):
+        """高置信度（显式开启 override）→ conflict=False"""
+        import trader_shared.decision_core as dc
+        import trader_shared.config as _cfg
+
+        monkeypatch.setattr(dc, "FUSION_OVERRIDE_ENABLED", True)
+        monkeypatch.setattr(_cfg, "FUSION_OVERRIDE_ENABLED", True)
         fusion_result = {"action": "减仓", "confidence": 0.7}
         result = status_layers(
             current=10.05, support=10.0, low_zone_upper=10.1, confirm=10.5,
@@ -237,6 +242,22 @@ class TestTheoryFusionConflict:
         # 高置信度触发 override，fusion_override_used=True，conflict=False
         assert result["fusion_override_used"] is True
         assert result["theory_fusion_conflict"] is False
+
+    def test_override_disabled_by_default(self):
+        """默认关闭 fusion override：高置信也不覆盖 theory_status。"""
+        import trader_shared.config as _cfg
+        import trader_shared.decision_core as dc
+
+        assert _cfg.FUSION_OVERRIDE_ENABLED is False
+        assert dc.FUSION_OVERRIDE_ENABLED is False
+        fusion_result = {"action": "减仓", "confidence": 0.7}
+        result = status_layers(
+            current=10.05, support=10.0, low_zone_upper=10.1, confirm=10.5,
+            hard_stop=9.5, position_ratio=0.0, change_pct=0.0,
+            ma_values=_make_ma_values(), pressure_space_pct=0.0,
+            fusion_result=fusion_result,
+        )
+        assert result["fusion_override_used"] is False
 
     def test_add_action_no_conflict(self):
         """增持动作不触发冲突（只有减仓/空仓类才标记）"""

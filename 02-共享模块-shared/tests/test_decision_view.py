@@ -75,6 +75,21 @@ def test_block_when_no_entry_strategy():
     assert any("策略" in x for x in v["block_reasons"])
 
 
+def test_block_when_entry_plan_not_executable():
+    """plan-mode / executable=False 不算策略亮，不得推荐新开。"""
+    r = _report()
+    r["strategy_match"]["gates"]["entry"] = {
+        "primary": {"id": "entry.chan_buy1_probe", "name": "结构试探·一买"},
+        "mode": "plan",
+        "executable": False,
+        "reason": "清单未全绿",
+    }
+    v = build_decision_view(r)
+    assert v["strategy_entry_lit"] is False
+    assert v["allow_new_recommend"] is False
+    assert any("计划" in x or "可执行" in x for x in v["block_reasons"])
+
+
 def test_block_when_discipline_forbids():
     r = _report(discipline_allow=False)
     v = build_decision_view(r)

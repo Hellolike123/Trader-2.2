@@ -40,10 +40,10 @@
 | 改什么 | 认准一处 |
 |--------|----------|
 | 中短线面板文案 | 上面三步 |
-| 新开 / 出手收紧 | `chan_discipline` / `mistery_gate` / `decision_view`（C1 用 `format_entry_line_c1`；禁止新开时 caps/`suggested_pct` 归零） |
+| 新开 / 出手收紧 | `chan_discipline` / `mistery_gate` / `decision_view`（须 entry.executable；C1 用 `format_entry_line_c1`；禁止新开时 caps/`suggested_pct` 归零） |
 | Fusion 席位（生产） | `analysis/fusion_card_signals.py`（cards 路径；失败 warning→classic） |
 | ATR 移动止损水位 | `structure_core`（持仓票 `~/.trader/trailing_stop_watermark.json`，只紧不松） |
 | 买点盖价 | `buy_point_lifecycle.resolve_lid_price`（显式>回踩下沿>买区下沿>支撑；不用 life_line 当回踩） |
 | 微信红线本身 | 只改本文件，再 sync 三 Skill 的 `references/agent-rules.md` |
 
-生产唯一渲染：短中线（`SHORT_MIDLINE_REPORT=false` 已忽略）。Fusion 默认 `cards`；classic 仅对照（deprecated）。出手听 `decision_view`，fusion 分仅仪表。
+生产唯一渲染：短中线（`SHORT_MIDLINE_REPORT=false` 已忽略）。Fusion 默认 `cards`；classic 仅对照（deprecated）。出手听 `decision_view`（entry 须 executable），fusion 分仅仪表；`FUSION_OVERRIDE_ENABLED` 默认 false。
