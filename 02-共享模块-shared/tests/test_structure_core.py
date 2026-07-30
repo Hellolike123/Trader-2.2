@@ -190,6 +190,31 @@ class TestTrailingStop:
         assert result_30.get("trailing_stop") is not None
         assert result_40.get("trailing_stop") is not None
 
+    def test_trailing_stop_ratchet_with_prev(self):
+        closes = [10.0 + i * 0.1 for i in range(30)]
+        bars = _make_bars(closes)
+        fresh = build_structure_context(current=12.0, bars=bars)
+        assert fresh.get("trailing_stop") is not None
+        higher_prev = round(float(fresh["trailing_stop"]) + 1.0, 2)
+        ratcheted = build_structure_context(
+            current=12.0,
+            bars=bars,
+            prev_trailing_stop=higher_prev,
+        )
+        assert ratcheted["trailing_stop"] == higher_prev
+        assert ratcheted["price_levels"]["trailing_stop"] == higher_prev
+
+    def test_trailing_stop_watermark_persist(self, tmp_path):
+        from trader_shared.structure_core import (
+            load_trailing_watermark,
+            save_trailing_watermark,
+        )
+
+        store = tmp_path / "trailing_stop_watermark.json"
+        save_trailing_watermark("600000.SH", 11.5, path=store)
+        save_trailing_watermark("600000.SH", 11.0, path=store)  # 不得回松
+        assert load_trailing_watermark("600000.SH", path=store) == 11.5
+
 
 # ── find_key_levels (P0-4) ──────────────────────────────────────────
 

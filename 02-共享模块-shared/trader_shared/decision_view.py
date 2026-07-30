@@ -164,7 +164,20 @@ def apply_decision_view(
             extra = "；".join(reasons)
             if extra and extra not in str(note):
                 disc["entry_block_reason"] = f"{note}；{extra}".strip("；") if note else extra
+            # 不新开时清零仓位建议，避免「不新开 · 仓 15%」陈旧展示
+            disc["suggested_pct_cap"] = 0
+            disc["position_cap_pct"] = 0
+            if "suggested_pct_cap_short" in disc:
+                disc["suggested_pct_cap_short"] = 0
+            if "suggested_pct_cap_mid" in disc:
+                disc["suggested_pct_cap_mid"] = 0
             report["discipline"] = disc
+            report["suggested_pct"] = 0
+            report["suggested_pct_context"] = "0%（决策不推荐新开）"
+            pos_info = report.get("position_info")
+            if isinstance(pos_info, dict):
+                pos_info["suggested_pct"] = 0
+                report["position_info"] = pos_info
             applied = True
 
             # 同步 conclusion 出手文案：若原先偏「可买」则压成不买（只收紧）

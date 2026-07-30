@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 from typing import Any
 
 from trader_shared.light_data import pct_change, to_float
@@ -8,6 +10,49 @@ from trader_shared.safe_cast import safe_float
 from trader_shared._logging import get_logger
 from trader_shared.interfaces import DataFetcher
 from trader_shared.fetchers import get_fetcher
+
+_logger = get_logger(__name__)
+_TRAILING_WATERMARK_PATH = Path(os.path.expanduser("~/.trader/trailing_stop_watermark.json"))
+
+
+def load_trailing_watermark(symbol: str, path: Path | None = None) -> float | None:
+    """读取持仓票的移动止损水位（跨次分析只紧不松）。"""
+    sym = str(symbol or "").strip()
+    if not sym:
+        return None
+    store = path or _TRAILING_WATERMARK_PATH
+    try:
+        if not store.exists():
+            return None
+        data = json.loads(store.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return None
+        return to_float((data.get(sym) or {}).get("trailing_stop") if isinstance(data.get(sym), dict) else data.get(sym))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+
+
+def save_trailing_watermark(symbol: str, value: float, path: Path | None = None) -> None:
+    """写入/抬高持仓票移动止损水位。"""
+    sym = str(symbol or "").strip()
+    fv = to_float(value)
+    if not sym or fv is None or fv <= 0:
+        return
+    store = path or _TRAILING_WATERMARK_PATH
+    try:
+        store.parent.mkdir(parents=True, exist_ok=True)
+        data: dict[str, Any] = {}
+        if store.exists():
+            raw = json.loads(store.read_text(encoding="utf-8") or "{}")
+            if isinstance(raw, dict):
+                data = raw
+        prev = to_float((data.get(sym) or {}).get("trailing_stop") if isinstance(data.get(sym), dict) else data.get(sym))
+        if prev is not None and prev > fv:
+            fv = prev
+        data[sym] = {"trailing_stop": round(fv, 2)}
+        store.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        _logger.debug("trailing watermark save failed: %s", exc)
 
 
 def _find_swing_lows(prices: list[float], window: int = 5) -> list[tuple[int, float]]:
@@ -24,8 +69,6 @@ def _find_swing_lows(prices: list[float], window: int = 5) -> list[tuple[int, fl
         if price <= min(left) and price <= min(right):
             swing_lows.append((i, price))
     return swing_lows
-
-_logger = get_logger(__name__)
 
 # ── [2.3] HMM 大势检测器（可选导入，阵列中无则降级）──────────────────────────────
 try:
@@ -491,7 +534,20 @@ def _calc_macd_divergence(closes: list[float], bars: list[BarData]) -> float | N
         return None
 
 
-def build_structure_context(current: float, bars: list[BarData], change_pct: Any = None, quote: QuoteData | None = None, fusion_result: dict[str, Any] | None = None, chan_result: dict[str, Any] | None = None, fetcher: DataFetcher | None = None, pnl_pct: float | None = None, vp_result: dict[str, Any] | None = None, major_stage: str | None = None) -> dict[str, Any]:
+def build_structure_context(
+    current: float,
+    bars: list[BarData],
+    change_pct: Any = None,
+    quote: QuoteData | None = None,
+    fusion_result: dict[str, Any] | None = None,
+    chan_result: dict[str, Any] | None = None,
+    fetcher: DataFetcher | None = None,
+    pnl_pct: float | None = None,
+    vp_result: dict[str, Any] | None = None,
+    major_stage: str | None = None,
+    prev_trailing_stop: float | None = None,
+    trailing_ratchet_symbol: str | None = None,
+) -> dict[str, Any]:
     if fetcher is None:
         fetcher = get_fetcher()
     recent5 = bars[-RECENT_WINDOW:] if len(bars) >= RECENT_WINDOW else bars
@@ -749,6 +805,14 @@ def build_structure_context(current: float, bars: list[BarData], change_pct: Any
             # 移动止损不应低于原始 hard_stop（不扩大亏损）
             if trailing_stop is not None:
                 trailing_stop = max(trailing_stop, stop)
+            # 持仓水位/显式 prev：只紧不松（窗口滚出旧高时不得回松）
+            prev_ts = to_float(prev_trailing_stop)
+            if prev_ts is None and trailing_ratchet_symbol:
+                prev_ts = load_trailing_watermark(trailing_ratchet_symbol)
+            if trailing_stop is not None and prev_ts is not None and prev_ts > 0:
+                trailing_stop = max(trailing_stop, round(prev_ts, 2))
+            if trailing_ratchet_symbol and trailing_stop is not None and trailing_stop > 0:
+                save_trailing_watermark(trailing_ratchet_symbol, trailing_stop)
 
     # keep compatibility for callers that expect status from structure payload
     from trader_shared.decision_core import status_layers  # local import to avoid tighter module coupling

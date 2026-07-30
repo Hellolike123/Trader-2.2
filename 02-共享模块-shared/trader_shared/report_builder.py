@@ -172,6 +172,10 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     # === 结构层（阶段函数：report_pipeline.run_structure_stage）===
     from trader_shared.report_pipeline import run_structure_stage
 
+    # 持仓票启用移动止损水位（只紧不松）；无持仓不落水位，避免无仓误抬止损
+    _trail_sym = None
+    if float(cost_price or 0) > 0 or float(_signal_cost_price or 0) > 0:
+        _trail_sym = str(quote.get("symbol") or getattr(sec, "ts_code", "") or "").strip() or None
     levels, big_order_result, _pre_stage = run_structure_stage(
         current=current,
         bars=bars,
@@ -187,6 +191,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         big_order_result=big_order_result,
         order_book=snapshot.order_book,
         mark=_mark,
+        trailing_ratchet_symbol=_trail_sym,
     )
 
     support = levels["main_support"]
