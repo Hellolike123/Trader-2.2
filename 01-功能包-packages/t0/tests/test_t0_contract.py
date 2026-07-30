@@ -93,11 +93,11 @@ def test_t0_markdown_contract() -> None:
     assert "止损" in markdown
     assert "低吸" in markdown
     assert "高抛" in markdown
-    assert "📌 盘面" in markdown
-    assert "📌 买卖价" in markdown
-    assert "RR" in markdown or "计划" in markdown
-    assert "ATR" in markdown
-    assert "人决策" in markdown
+    assert "【策略基调】" in markdown
+    assert "【执行点位与仓位】" in markdown
+    assert "【盈亏测算】" in markdown
+    assert "【风控】" in markdown
+    assert "人确认" in markdown
     assert "结构偏强" not in markdown.split("→", 1)[-1].split("\n", 1)[0]
     assert "可执行" not in markdown
     assert "可低吸" not in markdown
@@ -105,6 +105,7 @@ def test_t0_markdown_contract() -> None:
     assert "无底仓" in markdown
     assert "若做正T" not in markdown
     assert "做T清单" not in markdown
+    assert "⚡ 今日剧本" not in markdown
     assert "**" not in markdown
     assert validate(markdown) == []
 
@@ -191,13 +192,13 @@ def test_t0_v2_no_exec_command_when_triggered() -> None:
     assert side_status(plan["buy"]) == SIDE_ZONE_HIT
     assert SIDE_ZONE_HIT == "到价关注"
     md = render_markdown(plan)
-    assert "低吸买入：11.94～11.98" in md
-    assert "📌 买卖价" in md
+    assert "低吸关注：11.94～11.98" in md
+    assert "【执行点位与仓位】" in md
     assert "近买区" in md
     assert "可执行" not in md
     assert "可低吸" not in md
     assert "可加仓" not in md
-    assert "人决策" in md
+    assert "人确认" in md
     assert validate(md) == []
 
 
@@ -215,12 +216,12 @@ def test_legacy_executable_display_status_normalized() -> None:
     md = render_markdown(plan)
     assert "可执行" not in md
     assert "近买区" in md
-    assert "低吸买入：11.94～11.98" in md
+    assert "低吸关注：11.94～11.98" in md
     assert validate(md) == []
 
 
 def test_no_position_hides_account_discipline_block() -> None:
-    """无底仓不展示持仓纪律/降本块/做人清单，即使误注入 t0_account。"""
+    """无底仓不展示剧本/持仓纪律，即使误注入 t0_account。"""
     plan = sample_t0_plan()
     plan["t0_account"] = {
         "avg_cost": 12.0,
@@ -233,6 +234,7 @@ def test_no_position_hides_account_discipline_block() -> None:
     assert "无底仓" in md
     assert "不做T召唤" in md or "不做 T 召唤" in md
     assert "持仓纪律" not in md
+    assert "⚡ 今日剧本" not in md
     assert "降本模式" not in md
     assert "先卖后买" not in md
     assert "若做正T" not in md
@@ -241,7 +243,7 @@ def test_no_position_hides_account_discipline_block() -> None:
 
 
 def test_v21_trade_price_rr_block() -> None:
-    """操盘主区：买卖价+止损+ATR/RR；区间塌缩时用止盈价兜底。"""
+    """行动卡盈亏测算：按低吸算止损/兑现空间与盈亏比。"""
     plan = sample_t0_plan()
     plan.update({
         "vwap": 12.0,
@@ -265,11 +267,10 @@ def test_v21_trade_price_rr_block() -> None:
     plan["buy"]["invalid_price"] = 11.72
     plan["sell"]["observation_price"] = 12.15
     md = render_markdown(plan)
-    assert "📌 买卖价" in md
-    assert "低吸买入：11.90｜止损：11.72｜高抛卖出：12.15" in md
-    assert "波动：ATR 0.40" in md
-    assert "计划账（按低吸" in md
-    assert "现价账（按现价" in md
+    assert "【盈亏测算】按低吸11.90算" in md
+    assert "低吸关注：11.90" in md
+    assert "止损参考：11.72" in md
+    assert "高抛兑现：12.15" in md
     assert "1比" in md
     assert "费后约" in md
     assert "RR1:" not in md
@@ -278,7 +279,7 @@ def test_v21_trade_price_rr_block() -> None:
 
 
 def test_v21_position_shows_human_checklist() -> None:
-    """有底仓才出做T清单；结论不含评分主语；含T仓/收盘纪律。"""
+    """有底仓出行动卡；近高区看反T；含T仓/14:50。"""
     plan = sample_t0_plan()
     plan.update({
         "vwap": 11.90,
@@ -286,6 +287,7 @@ def test_v21_position_shows_human_checklist() -> None:
         "amplitude_pct": 0.025,
         "space_state": "normal",
         "current_price": 12.05,
+        "atr_info": {"atr14": 0.30, "atr_ratio": 0.025, "level": "波动正常"},
         "data": {
             "kline_5m_completed": make_5m_bars(16),
             "quote": {"high": 12.2, "low": 11.7, "pre_close": 11.8},
@@ -308,14 +310,17 @@ def test_v21_position_shows_human_checklist() -> None:
     plan["buy"]["observation_price"] = 11.80
     plan["sell"]["observation_price"] = 12.20
     md = render_markdown(plan)
-    assert "做T清单（人勾选）" in md
-    assert "反T" in md
-    assert "T仓上限" in md or "T仓：" in md
+    assert "【策略基调】" in md
+    assert "看反T" in md
+    assert "T仓上限" in md
     assert "14:50" in md
-    assert "是否动手由人决定" in md
+    assert "人确认" in md
+    assert "持仓纪律" not in md
     assert "无底仓" not in md
-    assert "宜不做" not in md.split("→", 1)[-1].split("\n", 1)[0]
+    assert md.find("【策略基调】") < md.find("【执行点位与仓位】") < md.find("【盈亏测算】")
     conclusion = md.split("→", 1)[-1].split("\n", 1)[0]
+    assert "宜不做" not in conclusion
+    assert "看反T" in conclusion
     assert "结构偏强" not in conclusion
     assert "80" not in conclusion
     assert "可执行" not in md
@@ -323,7 +328,7 @@ def test_v21_position_shows_human_checklist() -> None:
 
 
 def test_v22_near_low_shows_zheng_t_checklist() -> None:
-    """近低区出正T备选清单，且不含禁词先买后卖/先卖后买。"""
+    """近低区看正T行动卡，点位同源，且不含禁词。"""
     plan = sample_t0_plan()
     plan.update({
         "vwap": 11.90,
@@ -348,16 +353,18 @@ def test_v22_near_low_shows_zheng_t_checklist() -> None:
     plan["buy"]["observation_price"] = 11.80
     plan["sell"]["observation_price"] = 12.20
     md = render_markdown(plan)
-    assert "做T清单（人勾选）" in md
-    assert "才考虑正T" in md
+    assert "【策略基调】" in md
+    assert "看正T（低吸再卖回）" in md
+    assert "低吸关注：11.80" in md
     assert "先买后卖" not in md
     assert "先卖后买" not in md
     assert "14:50" in md
+    assert "看正T" in md.split("→", 1)[-1].split("\n", 1)[0]
     assert validate(md) == []
 
 
 def test_v22_skip_gate_collapses_checklist() -> None:
-    """空间不足 → 结论宜不做，清单折叠为今日宜不做。"""
+    """空间不足 → 结论宜不做，基调写今日宜不做。"""
     plan = sample_t0_plan()
     plan.update({
         "vwap": 11.90,
@@ -380,9 +387,9 @@ def test_v22_skip_gate_collapses_checklist() -> None:
     md = render_markdown(plan)
     conclusion = md.split("→", 1)[-1].split("\n", 1)[0]
     assert "宜不做" in conclusion
-    assert "今日宜不做" in md
-    assert "原因：空间不足" in md
-    assert "优先考虑反T" not in md
+    assert "今日宜不做：空间不足" in md
+    assert "看正T（低吸再卖回）" not in md
+    assert "看反T（高抛再接回）" not in md
     assert "可执行" not in md
     assert validate(md) == []
 
