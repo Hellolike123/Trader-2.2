@@ -5,8 +5,8 @@ description: Use for intraday A-share T0 structure reference cards and monitorin
 
 # T0 — AI 盘中结构参考
 
-盘中结构参考卡（策略 v2.2）。看位置/量能/空间/关注价/失效；评分仅供参考。  
-**不做**机械下单指令；禁止「可执行/可低吸/三重共振买」叙事。有持仓时展示做T清单（反T优先）与持仓纪律。  
+盘中结构参考卡（策略 v2.3）。顺序：结论 → 今日剧本 → 盘面 → 买卖价；评分仅供参考。  
+**不做**机械下单指令；禁止「可执行/可低吸/三重共振买」叙事。有持仓时展示今日剧本（反T/正T场景）。  
 法源：`docs/t0-strategy-v2.md`。共用硬规则：`references/agent-rules.md`。
 
 ## 快路径（先做这个）
