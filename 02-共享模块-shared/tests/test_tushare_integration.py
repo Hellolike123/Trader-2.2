@@ -496,7 +496,7 @@ class TestTushareProviderFetchQuote:
 
 class TestTushareProviderFetchQfqDaily:
     def test_fetch_qfq_daily_maps_fields(self, monkeypatch):
-        """fetch_qfq_daily should map Tushare daily fields to bar format with ATR."""
+        """qfq 不可用时：Tushare daily 映射为未复权 partial + ATR。"""
         mock_records = [
             {"ts_code": "000001.SZ", "trade_date": "20260710", "open": 10.0, "close": 10.5,
              "high": 10.6, "low": 9.9, "vol": 100000, "amount": 1050000},
@@ -516,10 +516,25 @@ class TestTushareProviderFetchQfqDaily:
         real_tc._client = mock_client
 
         import importlib
+        import trader_shared.cache_utils as cu
         import trader_shared.data_provider as dp
         importlib.reload(dp)
 
+        # 跳过日频文件缓存，直接打 _net；并记录分桶 key
+        seen: dict = {}
+
+        def _scoped(key, target, fetch_fn, min_rows=1):
+            seen["key"] = key
+            seen["target"] = target
+            return list(fetch_fn() or [])
+
+        monkeypatch.setattr(cu, "get_day_scoped_bars", _scoped)
+        # 强制走未复权兜底（模拟腾讯 qfq 不可用）
         provider = dp.TushareProvider()
+        monkeypatch.setattr(
+            provider._fallback, "fetch_qfq_daily", lambda *a, **k: []
+        )
+
         sec = dp.Security(code="000001", market="SZ", name="平安银行")
         bars = provider.fetch_qfq_daily(sec, days=30)
 
@@ -536,6 +551,9 @@ class TestTushareProviderFetchQfqDaily:
         assert bars[-1]["volume"] == 100000
         assert bars[-1]["amount"] == 1_050_000_000  # Tushare 千元 → 元 ×1000
         assert bars[-1]["data_source"] == "tushare"
+        assert bars[-1]["adjust"] == "none"
+        assert bars[-1]["data_status"] == "partial"
+        assert seen.get("target") == "tushare/none/000001"
         # ATR fields should be computed；正序后第2根 TR 用第1根收盘作昨收
         assert "tr" in bars[-1]
         assert bars[1]["tr"] == round(
@@ -543,6 +561,46 @@ class TestTushareProviderFetchQfqDaily:
         )
         assert "atr7" in bars[0]
         assert "atr14" in bars[0]
+
+    def test_fetch_qfq_daily_prefers_tencent_qfq(self, monkeypatch):
+        """有腾讯前复权时不得用 Tushare 未复权。"""
+        mock_client = MagicMock()
+        mock_client.available = True
+        mock_client.query_daily.return_value = [
+            {"ts_code": "000001.SZ", "trade_date": "20260710", "open": 1.0, "close": 1.0,
+             "high": 1.0, "low": 1.0, "vol": 1, "amount": 1},
+        ]
+        mock_module = MagicMock()
+        mock_module.get_client.return_value = mock_client
+        monkeypatch.setitem(sys.modules, "trader_shared.tushare_client", mock_module)
+        from trader_shared import tushare_client as real_tc
+        real_tc._client = mock_client
+
+        import importlib
+        import trader_shared.data_provider as dp
+        importlib.reload(dp)
+
+        qfq = [
+            {
+                "date": "2026-07-10",
+                "open": 10.0,
+                "close": 10.5,
+                "high": 10.6,
+                "low": 9.9,
+                "volume": 1000,
+                "adjust": "qfq",
+                "data_source": "tencent-http",
+                "data_status": "full",
+            }
+        ]
+        provider = dp.TushareProvider()
+        monkeypatch.setattr(
+            provider._fallback, "fetch_qfq_daily", lambda *a, **k: qfq
+        )
+        sec = dp.Security(code="000001", market="SZ", name="平安银行")
+        bars = provider.fetch_qfq_daily(sec, days=30)
+        assert bars == qfq
+        mock_client.query_daily.assert_not_called()
 
 
 # ── TushareProvider integration: get_provider ───────────────────────────────

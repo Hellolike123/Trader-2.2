@@ -86,6 +86,32 @@ TTL_CYQ = 86400 * 3     # 文件年龄兜底；真正失效看 fetch_date
 TTL_BARS_DAY = 86400 * 3  # 日/周 K 文件年龄兜底
 
 
+def _safe_cache_seg(value: str, *, default: str = "unknown") -> str:
+    """缓存路径片段：去空白、禁目录穿越，斜杠替换为下划线。"""
+    s = str(value or "").strip().replace("/", "_").replace("\\", "_")
+    if not s or s in (".", ".."):
+        return default
+    return s
+
+
+def daily_bars_cache_target(
+    code: str,
+    *,
+    provider: str,
+    adjust: str,
+) -> str:
+    """日 K 缓存 target：``{provider}/{adjust}/{code}``。
+
+    未复权（tushare daily）与前复权（tencent/akshare qfq）必须分桶，
+    禁止共用裸 ``{code}.json`` 互相覆盖。
+    """
+    return (
+        f"{_safe_cache_seg(provider)}/"
+        f"{_safe_cache_seg(adjust, default='none')}/"
+        f"{_safe_cache_seg(code)}"
+    )
+
+
 def cache_calendar_date() -> str:
     """本地自然日 YYYY-MM-DD（日频缓存的「今天」）。
 

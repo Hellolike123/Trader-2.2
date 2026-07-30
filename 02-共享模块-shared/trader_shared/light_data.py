@@ -1269,6 +1269,10 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
 
 
 def _fetch_qfq_daily_raw(sec: Security, http: HttpClient, days: int = 300) -> list[dict[str, Any]]:
+    from trader_shared.cache_utils import daily_bars_cache_target as _daily_cache_target
+
+    _qfq_cache_target = _daily_cache_target(sec.code, provider="tencent", adjust="qfq")
+
     # ── Circuit breaker check — return cached data if paused ──
     if _circuit_tencent_daily.is_open:
         _logger.debug("Circuit breaker open for daily bars, returning cached data for %s", sec.code)
@@ -1279,8 +1283,11 @@ def _fetch_qfq_daily_raw(sec: Security, http: HttpClient, days: int = 300) -> li
                 is_fetch_date_today,
                 unwrap_bars_payload,
             )
-            _cached_result = _file_cached(CACHE_DAILY, sec.code, ttl=86400 * 7)
-            if _cached_result is not None:
+            # 熔断：先读分桶 qfq；兼容旧裸 code 缓存
+            for _ck in (_qfq_cache_target, sec.code):
+                _cached_result = _file_cached(CACHE_DAILY, _ck, ttl=86400 * 7)
+                if _cached_result is None:
+                    continue
                 _data = _cached_result.data
                 # 熔断时优先同日包装缓存；裸 list 仅未过 TTL 可用
                 if is_fetch_date_today(_data):
@@ -1302,7 +1309,7 @@ def _fetch_qfq_daily_raw(sec: Security, http: HttpClient, days: int = 300) -> li
             is_fetch_date_today,
             unwrap_bars_payload,
         )
-        _cached_result = _file_cached(CACHE_DAILY, sec.code, ttl=TTL_BARS_DAY)
+        _cached_result = _file_cached(CACHE_DAILY, _qfq_cache_target, ttl=TTL_BARS_DAY)
         if _cached_result is not None:
             _data = _cached_result.data
             if is_fetch_date_today(_data):
@@ -1380,18 +1387,29 @@ def _fetch_qfq_daily_raw(sec: Security, http: HttpClient, days: int = 300) -> li
             has_today = bool(_latest_date) and _latest_date >= datetime.now().strftime("%Y-%m-%d")
         if not has_today:
             save_to_cache(cache_key, result, ttl_seconds=3600)
-        # ── 写入文件缓存（带 fetch_date，同日复用）──
+        # ── 写入文件缓存（带 fetch_date，同日复用；按 adjust 分桶）──
         try:
             from trader_shared.cache_utils import (
                 set_cached,
                 validate_bars,
                 CACHE_DAILY,
                 cache_calendar_date,
+                daily_bars_cache_target,
             )
             if validate_bars(result):
+                _adj = (
+                    "qfq"
+                    if any(
+                        isinstance(b, dict) and b.get("adjust") == "qfq"
+                        for b in result[-min(5, len(result)) :]
+                    )
+                    else "none"
+                )
                 set_cached(
                     CACHE_DAILY,
-                    sec.code,
+                    daily_bars_cache_target(
+                        sec.code, provider="tencent", adjust=_adj
+                    ),
                     {"fetch_date": cache_calendar_date(), "rows": result},
                 )
         except (ImportError, OSError) as exc:

@@ -253,6 +253,20 @@ def test_market_env_same_day_skips_network(monkeypatch):
     me._assess_cache = None
 
 
+def test_daily_bars_cache_target_buckets():
+    assert cu.daily_bars_cache_target("688248", provider="tencent", adjust="qfq") == (
+        "tencent/qfq/688248"
+    )
+    assert cu.daily_bars_cache_target("000001", provider="tushare", adjust="none") == (
+        "tushare/none/000001"
+    )
+    # 路径分隔符不得穿透缓存目录
+    assert "/" not in cu._safe_cache_seg("a/b")
+    assert cu.daily_bars_cache_target("a/b", provider="x\\y", adjust="qfq") == (
+        "x_y/qfq/a_b"
+    )
+
+
 def test_fund_flow_cross_day_refetch(monkeypatch):
     calls = {"n": 0}
     day = {"v": "2026-07-16"}

@@ -352,18 +352,29 @@ class UnifiedProvider:
         if self._backend == "akshare":
             return self._akshare_fetch_qfq_daily(sec, days)
         # 与 Tushare/light_data 统一：日 scoped + {fetch_date, rows}，禁止裸 list 脏读
-        from trader_shared.cache_utils import CACHE_DAILY, get_day_scoped_bars
+        from trader_shared.cache_utils import (
+            CACHE_DAILY,
+            daily_bars_cache_target,
+            get_day_scoped_bars,
+        )
 
         self._ensure_http()
         from trader_shared.light_data import fetch_qfq_daily as _fetch
 
         http = self._http
         ld_sec = self._to_sec(sec)
+        # tencent/mootdx 均走 light_data 前复权路径；缓存按 provider+adjust 分桶
+        cache_provider = "mootdx" if self._backend == "mootdx" else "tencent"
+        cache_target = daily_bars_cache_target(
+            sec.code, provider=cache_provider, adjust="qfq"
+        )
 
         def _net() -> list:
             return list(_fetch(ld_sec, http, days=days) or [])
 
-        return get_day_scoped_bars(CACHE_DAILY, sec.code, _net, min_rows=min(20, max(days, 1)))
+        return get_day_scoped_bars(
+            CACHE_DAILY, cache_target, _net, min_rows=min(20, max(days, 1))
+        )
 
     def fetch_5m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
         if self._backend == "akshare":
@@ -581,6 +592,33 @@ class UnifiedProvider:
         return _enrich_snapshot(res_snap)
 
 
+def _daily_bars_look_qfq(bars: list[dict[str, Any]] | None) -> bool:
+    """样本 bar 是否像前复权日 K（用于 Tushare 路径决定是否采用 fallback）。"""
+    if not bars:
+        return False
+    sample = bars[-min(10, len(bars)) :]
+    qfq_n = sum(1 for b in sample if isinstance(b, dict) and b.get("adjust") == "qfq")
+    none_n = sum(1 for b in sample if isinstance(b, dict) and b.get("adjust") == "none")
+    if qfq_n > 0 and qfq_n >= none_n:
+        return True
+    qfq_sources = ("tencent-http", "akshare", "mootdx", "pytdx3")
+    if none_n == 0 and any(
+        isinstance(b, dict) and b.get("data_source") in qfq_sources for b in sample
+    ):
+        return True
+    return False
+
+
+def _daily_bars_are_unadjusted(bars: list[dict[str, Any]] | None) -> bool:
+    """日 K 是否整体为未复权（缺真·qfq）。"""
+    if not bars:
+        return False
+    sample = bars[-min(10, len(bars)) :]
+    return bool(sample) and all(
+        isinstance(b, dict) and b.get("adjust") == "none" for b in sample
+    )
+
+
 # ═══════════════════════════════════════════════
 # Tushare provider (primary source when token available)
 # ═══════════════════════════════════════════════
@@ -588,7 +626,8 @@ class UnifiedProvider:
 class TushareProvider:
     """Tushare Pro 数据提供器（主源）。
 
-    日线/周线/资金流/板块/筹码走 Tushare；**实时现价优先腾讯**（公开盘口更稳），
+    日线优先腾讯前复权；Tushare daily 仅未复权兜底。
+    周线/资金流/板块/筹码走 Tushare；**实时现价优先腾讯**（公开盘口更稳），
     仅腾讯失败时才降级到 Tushare realtime 爬虫。分钟线仍走 light_data。
     """
 
@@ -668,10 +707,28 @@ class TushareProvider:
         return tencent_q if isinstance(tencent_q, dict) else {}
 
     def fetch_qfq_daily(self, sec: Security, days: int = 30) -> list[dict[str, Any]]:
+        """日线：优先腾讯/Unified 前复权；Tushare daily 仅未复权兜底。
+
+        Tushare Pro ``daily`` 接口不带复权因子，不得写入 qfq 缓存桶，
+        也不得标 ``data_status=full`` 冒充前复权。
+        """
         from trader_shared.light_data import _compute_atr_fields
         from datetime import timedelta
-        from trader_shared.cache_utils import get_day_scoped_bars, CACHE_DAILY
+        from trader_shared.cache_utils import (
+            CACHE_DAILY,
+            daily_bars_cache_target,
+            get_day_scoped_bars,
+        )
 
+        # 1) 真·前复权优先（tencent/qfq 分桶，不与未复权混写）
+        try:
+            qfq_bars = self._fallback.fetch_qfq_daily(sec, days)
+            if qfq_bars and _daily_bars_look_qfq(qfq_bars):
+                return qfq_bars
+        except Exception as e:
+            _logger.debug("qfq fallback failed for %s: %s", sec.code, e)
+
+        # 2) Tushare 未复权兜底 → tushare/none/{code}；bar 标 partial
         def _net() -> list[dict[str, Any]]:
             end_date = datetime.now().strftime("%Y%m%d")
             start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
@@ -679,7 +736,7 @@ class TushareProvider:
                 sec.ts_code, start_date=start_date, end_date=end_date
             )
             if not records:
-                return self._fallback.fetch_qfq_daily(sec, days)
+                return []
 
             bars: list[dict[str, Any]] = []
             def _safe_float(v, mul=1.0):
@@ -707,16 +764,23 @@ class TushareProvider:
                     "volume": _safe_float(r.get("vol")),
                     "amount": _amt,
                     "data_source": "tushare",
-                    "data_status": "full",
-                    # 代理 daily 不接受 adj：价格为未复权；ATR 与策略价同源
+                    # 未复权：完备度降级，禁止冒充 full/qfq
+                    "data_status": "partial",
                     "adjust": "none",
                 })
             _compute_atr_fields(bars)
+            _logger.warning(
+                "daily fallback to tushare-unadjusted for %s (qfq unavailable)",
+                sec.code,
+            )
             return bars
 
+        cache_target = daily_bars_cache_target(
+            sec.code, provider="tushare", adjust="none"
+        )
         # 日 K：当天第一次打网，同日复用；出口正序由 get_day_scoped_bars 统一保证
         return get_day_scoped_bars(
-            CACHE_DAILY, sec.code, _net, min_rows=min(50, max(days // 3, 20))
+            CACHE_DAILY, cache_target, _net, min_rows=min(50, max(days // 3, 20))
         )
 
     def fetch_5m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
@@ -904,6 +968,10 @@ class TushareProvider:
                 missing_sources.append("quote")
         if not daily_bars and "daily" not in missing_sources:
             missing_sources.append("daily")
+        # 有日 K 但是未复权：标明缺真·前复权，整体不得标 full
+        if daily_bars and _daily_bars_are_unadjusted(daily_bars):
+            if "daily_qfq" not in missing_sources:
+                missing_sources.append("daily_qfq")
         if include_5m and not bars_5m and "bars_5m" not in missing_sources:
             missing_sources.append("bars_5m")
         if include_weekly and not weekly_bars and "weekly_bars" not in missing_sources:
