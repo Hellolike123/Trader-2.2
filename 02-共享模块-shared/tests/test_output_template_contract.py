@@ -59,7 +59,7 @@ def test_agent_rules_synced_across_skills() -> None:
     common = REPO / "01-功能包-packages" / "_common" / "agent-rules.md"
     assert common.is_file()
     body = common.read_text(encoding="utf-8")
-    for skill in ("trader", "t0", "review"):
+    for skill in ("trader", "t0", "review", "wyckoff", "daily_briefing"):
         p = REPO / "01-功能包-packages" / skill / "references" / "agent-rules.md"
         assert p.is_file(), f"missing {p}"
         assert p.read_text(encoding="utf-8") == body, (

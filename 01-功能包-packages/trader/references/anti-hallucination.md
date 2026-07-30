@@ -1,6 +1,8 @@
 # Anti-Hallucination Rules
 
-数据锚定、信号矛盾处理、禁止用语。Agent 生成报告前必读。
+仅在 **markdown 失败、走 JSON 回退** 时使用。markdown 成功时不要读本文——直接原样贴脚本 stdout。
+
+数据锚定、信号矛盾处理、禁止用语。
 
 ## 数据锚定表
 

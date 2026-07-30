@@ -98,3 +98,32 @@ def test_build_rank_rows_sort_by_chain():
     rows = build_wyckoff_rank_rows(items)
     assert rows[0]["name"] == "强"
     assert rows[0]["chain_rank"] >= rows[1]["chain_rank"]
+
+
+def test_main_exits_1_when_card_data_fails(monkeypatch, capsys):
+    from trader_shared import wyckoff_run as wr
+
+    monkeypatch.setattr(
+        wr,
+        "build_wyckoff_plan",
+        lambda target: {
+            "target": target,
+            "name": target,
+            "data_ok": False,
+            "error": "取数失败：无法解析股票名称",
+        },
+    )
+    code = wr.main(["--target", "__NO_SUCH__"])
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "取数失败" in out
+    assert "数据不足" in out
+
+
+def test_main_exits_0_when_card_ok(monkeypatch, capsys):
+    from trader_shared import wyckoff_run as wr
+
+    monkeypatch.setattr(wr, "build_wyckoff_plan", lambda target: _sample_plan())
+    code = wr.main(["--target", "测试股"])
+    assert code == 0
+    assert "威科夫 — 测试股" in capsys.readouterr().out

@@ -1,9 +1,9 @@
 # T0 Agent 快路径
 
-目标：1 条命令 → 原样贴出结构参考卡 → 停。禁止先批量读 references。  
-硬规则详见同目录 `agent-rules.md`。
+目标：1 条命令 → code fence 原样贴出结构参考卡 → 停。禁止先批量读 references。  
+硬规则：同目录 `agent-rules.md`。
 
-## 默认命令（cwd = 本 skill 根目录）
+## 默认（cwd = 本 skill 根）
 
 ```bash
 python3 scripts/final_t0.py --target <NAME>
@@ -12,18 +12,23 @@ python3 scripts/final_t0.py --target <NAME>
 盯盘单次：`--monitor --once`。持续：`--monitor`。  
 有持仓可加 `--cost` / `--position`；降本：`--t-mode cost_cut`。
 
-成功 → stdout 原样输出 → 停。  
-禁止手写面板；禁止把评分写成「可执行/可低吸/三重共振买」指令。
+- 成功：stdout 整段 code fence 贴出 → Exit
+- 禁止改写、手写面板、补「可执行/可低吸/三重共振买」
+- 失败：只报失败原因；禁止凭记忆补结构
 
-## 硬门控（markdown 成功时）
+## 首次持仓引导
+
+若 `~/.trader/position.json` 不存在：先问标的/成本/底仓股数/倒 T 现金并写入，再跑脚本。文件已存在则直接读。
+
+## 硬门控
 
 1. 未跑脚本 → 不报盘中结论
 2. 产品定位：人读结构仪表盘，不是自动下单指令
-3. 遵守 `agent-rules.md` 微信红线
+3. 遵守 `agent-rules.md` 微信红线（脚本已渲染则勿再排版）
 
-## JSON 失败回退时（才读）
+## JSON 回退（仅渲染失败时）
 
-再读 `ai-guide.md`。`partial` / `degraded` 须提示数据不足。
+才读 `ai-guide.md`。`partial` / `degraded` 须提示数据不足。
 
 ## 按需文档（勿预读）
 

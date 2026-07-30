@@ -359,10 +359,15 @@ def fetch_fund_flow(symbol: str, days: int = 30) -> list[dict[str, Any]]:
     if cached:
         return cached
 
-    # 2. 瀑布调度
+    # 2. 瀑布调度（WorkBuddy：tdx 优先；Hermes：tushare 优先）
     source = os.environ.get("FUND_FLOW_SOURCE", "auto").strip().lower()
     if source == "auto":
-        order = ["tushare", "tdx", "eastmoney", "akshare"]
+        try:
+            from trader_shared.trader_host import fund_flow_source_order
+
+            order = fund_flow_source_order()
+        except Exception:
+            order = ["tushare", "tdx", "eastmoney", "akshare"]
     else:
         order = [source]
 

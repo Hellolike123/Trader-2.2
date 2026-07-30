@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Pack A-Share Trader into exactly ONE single consolidated super-skill zip.
+"""打包各 Skill zip，按宿主分目录输出。
 
-Produces archives in 03-安装包-dist/<timestamp>/:
-   - trader.zip (The ONLY unified A-Share Trader Commander skill)
+默认一次打两套（推荐）：
+  03-安装包-dist/releases/<时间戳>/
+    hermes/trader.zip …          ← 交给 Hermes；可自动装到 ~/.hermes/skills
+    workbuddy/trader.zip …       ← 交给 WorkBuddy（不自动装）
+    怎么用.txt
 
-Run from anywhere in the repo:
-    python3 02-共享模块-shared/scripts/pack_all.py
+只打一套：
+    python3 …/pack_all.py --host hermes
+    python3 …/pack_all.py --host workbuddy --no-install
 """
 from __future__ import annotations
 
@@ -184,22 +188,28 @@ def add_to_zip(staged: Path, archive: zipfile.ZipFile, arc_prefix: str = "") -> 
 
 
 def auto_install(stages: list[tuple[str, str, Path]]) -> None:
+    """仅安装 Hermes 宿主包到 ~/.hermes/skills（WorkBuddy 包不自动装）。"""
     hermes_dir = Path.home() / ".hermes" / "skills"
     hermes_dir.mkdir(parents=True, exist_ok=True)
     backup_dir = hermes_dir / ".backup"
-    
-    # Clean up all obsolete directories to guarantee a single-skill workspace
-    for old_skill in ("trader-pool", "trader-portfolio", "review-trader", "trader-tracking", 
-                      "t0-trader", "live-trader", "review-commander"):
+
+    for old_skill in (
+        "trader-pool",
+        "trader-portfolio",
+        "review-trader",
+        "trader-tracking",
+        "t0-trader",
+        "live-trader",
+        "review-commander",
+    ):
         dest = hermes_dir / old_skill
         if dest.exists():
             shutil.rmtree(dest)
-            
-    print("\n--- Auto-install (ONE Unified Super-Skill) ---")
-    for skill_slug, version, staged in stages:
+
+    print("\n--- Auto-install → ~/.hermes/skills (host=hermes only) ---")
+    for skill_slug, _version, staged in stages:
         dest = hermes_dir / skill_slug
         if dest.exists():
-            # Backup existing skill before overwriting
             backup_dir.mkdir(parents=True, exist_ok=True)
             backup_dest = backup_dir / f"{skill_slug}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
             shutil.copytree(dest, backup_dest)
@@ -211,18 +221,140 @@ def auto_install(stages: list[tuple[str, str, Path]]) -> None:
             meta_name = json.loads(meta_path.read_text(encoding="utf-8")).get("name", skill_slug)
         else:
             meta_name = skill_slug
-        print(f"  [The Only Super-Skill] {meta_name} -> {dest}")
+        print(f"  [hermes] {meta_name} -> {dest}")
+
+
+META_TEMPLATES = {
+    "trader": {
+        "name": "trader",
+        "version": "2.4.0",
+        "description": "A股单票分析 + 选股池管理（四阶段定位）",
+    },
+    "t0": {
+        "name": "t0",
+        "version": "2.4.0",
+        "description": "A股盘中T0盯盘助理",
+    },
+    "review": {
+        "name": "review",
+        "version": "2.4.0",
+        "description": "A股盘后复盘 + 仓位轮动 + 信号统计",
+    },
+    "daily_briefing": {
+        "name": "daily_briefing",
+        "version": "1.0.0",
+        "description": "A股每日简报 — 从候选池批量分析、排序、分层，输出操作建议",
+    },
+    "wyckoff": {
+        "name": "wyckoff",
+        "version": "1.0.0",
+        "description": "A股威科夫结构参考卡 + 池内吸筹链排序（人读，不作交易总司令）",
+    },
+}
+
+
+def _write_skill_config(staged: Path, host: str) -> None:
+    """写入 config.json：Tushare 密钥（若有）+ 明确 trader_host。"""
+    cfg: dict[str, str] = {"trader_host": host}
+    for var in ("TUSHARE_TOKEN", "TUSHARE_API_URL", "TUSHARE_REALTIME_URL"):
+        val = os.environ.get(var, "").strip()
+        if val:
+            cfg[var.lower()] = val
+    (staged / "config.json").write_text(
+        json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def _write_howto(release_dir: Path, hosts: list[str]) -> None:
+    lines = [
+        "Skill 安装包说明",
+        "",
+        "目录 hermes/     → 只给 Hermes Agent 用（Tushare 主源）",
+        "目录 workbuddy/  → 只给 WorkBuddy Agent 用（资金流优先 Tdx）",
+        "",
+        "两套 zip 内容相同，仅 config.json 里的 trader_host 不同。",
+        "Agent 都是：跑脚本 → 原样贴面板。",
+        "",
+        "Hermes：本机打包默认会自动装到 ~/.hermes/skills/",
+        "WorkBuddy：把 workbuddy/ 下对应 zip 解压/导入到 WorkBuddy 技能目录。",
+        "",
+        f"本次打包宿主: {', '.join(hosts)}",
+        "",
+    ]
+    (release_dir / "怎么用.txt").write_text("\n".join(lines), encoding="utf-8")
+
+
+def _verify_zip(zip_path: Path, skill_slug: str) -> str:
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        names = archive.namelist()
+        prefix = f"{skill_slug}/"
+        has_meta = f"{prefix}_meta.json" in names or "_meta.json" in names
+        has_scripts = any(
+            n.startswith(f"{prefix}scripts/") or n.startswith("scripts/") for n in names
+        )
+        has_hermes = f"{prefix}HERMES.md" in names or "HERMES.md" in names
+        has_skill = f"{prefix}SKILL.md" in names or "SKILL.md" in names
+        empty_py = [
+            n
+            for n in names
+            if n.endswith(".py")
+            and archive.getinfo(n).file_size == 0
+            and not n.endswith("/__init__.py")
+            and not n.endswith("__init__.py")
+        ]
+        empty_status = "EMPTY!" if empty_py else ""
+        has_interfaces = any("interfaces.py" in n for n in names)
+        has_fetchers = any("fetchers.py" in n for n in names)
+        has_async_utils = any("async_utils.py" in n for n in names)
+        has_plugins = any("plugins/" in n for n in names)
+        meta_digest = "unknown"
+        meta_path = f"{prefix}_meta.json" if f"{prefix}_meta.json" in names else "_meta.json"
+        if meta_path in names:
+            try:
+                meta = json.loads(archive.read(meta_path).decode("utf-8"))
+                meta_digest = meta.get("shared_bundle", "unknown")
+            except Exception:
+                meta_digest = "bad_meta"
+        di_status = (
+            "DI=ok"
+            if has_interfaces and has_fetchers and has_async_utils and has_plugins
+            else "DI=MISSING"
+        )
+        status = (
+            "ok"
+            if has_meta and has_scripts and has_hermes and has_skill and empty_status != "EMPTY!"
+            else "MISSING"
+        )
+        return (
+            f"  [{skill_slug}] {zip_path.name}  meta={has_meta} scripts={has_scripts} "
+            f"hermes={has_hermes} skill={has_skill} digest={meta_digest[:8]} "
+            f"{di_status} {status} {empty_status}"
+        )
 
 
 def main(args: list[str] | None = None) -> int:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Pack trader into exactly ONE single super-skill zip")
-    parser.add_argument("--no-install", action="store_true", help="Skip auto-install to ~/.hermes/skills/")
+    parser = argparse.ArgumentParser(
+        description="打包 Skill：默认一次输出 hermes/ 与 workbuddy/ 两套"
+    )
+    parser.add_argument(
+        "--host",
+        choices=("hermes", "workbuddy", "both"),
+        default="both",
+        help="打包宿主：hermes / workbuddy / both（默认 both）",
+    )
+    parser.add_argument(
+        "--no-install",
+        action="store_true",
+        help="跳过自动安装到 ~/.hermes/skills/（WorkBuddy 包本来就不自动装）",
+    )
     parsed, _ = parser.parse_known_args(args if args is not None else None)
 
     if os.environ.get("PACK_NO_INSTALL") or "pytest" in sys.modules:
         parsed.no_install = True
+
+    hosts = ["hermes", "workbuddy"] if parsed.host == "both" else [parsed.host]
 
     root = repo_root()
     packages_dir = root / "01-功能包-packages"
@@ -235,12 +367,10 @@ def main(args: list[str] | None = None) -> int:
     removed = cleanup_old_releases(output_dir / "releases")
     if removed:
         print(f"Cleaned up {removed} old release(s), keeping {MAX_RELEASES} latest")
-    print(f"Release dir: {release_dir_name}/")
+    print(f"Release dir: {release_dir_name}/  hosts={hosts}")
 
     stages: list[tuple[str, str, Path]] = []
-
-    # Stage the 4 skills: trader, t0, review, daily_briefing
-    skills_to_pack = ["trader", "t0", "review", "daily_briefing"]
+    skills_to_pack = ["trader", "t0", "review", "daily_briefing", "wyckoff"]
 
     for skill_name in skills_to_pack:
         print(f"\nStage skill: {skill_name}")
@@ -265,13 +395,17 @@ def main(args: list[str] | None = None) -> int:
                             if not sub_item.is_dir():
                                 shutil.copy2(sub_item, sub_dst)
                     else:
-                        shutil.copytree(item, dst_item, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "*.pyc", ".DS_Store"))
+                        shutil.copytree(
+                            item,
+                            dst_item,
+                            ignore=shutil.ignore_patterns(
+                                "__pycache__", ".pytest_cache", "*.pyc", ".DS_Store"
+                            ),
+                        )
                 else:
                     shutil.copy2(item, dst_item)
 
-        # Copy shared modules into each skill
         copy_shared(staged, skill_name)
-        # Agent 共用硬规则 SSOT → references/agent-rules.md
         common_rules = packages_dir / "_common" / "agent-rules.md"
         if common_rules.exists():
             refs = staged / "references"
@@ -279,152 +413,79 @@ def main(args: list[str] | None = None) -> int:
             shutil.copy2(common_rules, refs / "agent-rules.md")
         stages.append((skill_name, "2.4.0", staged))
 
-    # Copy extra files to trader
     if stages:
         trader_staged = stages[0][2]
-        _EXTRA_FILES = {
-            root / "scripts" / "t0_cron.py": "scripts/t0_cron.py",
-        }
-        for _src, _rel in _EXTRA_FILES.items():
-            if _src.exists():
-                _dst = trader_staged / _rel
-                _dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(_src, _dst)
+        extra = root / "scripts" / "t0_cron.py"
+        if extra.exists():
+            dst = trader_staged / "scripts" / "t0_cron.py"
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(extra, dst)
 
-    # --- Generate _meta.json and SKILL.md for each skill ---
-    meta_templates = {
-        "trader": {
-            "name": "trader",
-            "version": "2.4.0",
-            "description": "A股单票分析 + 选股池管理（四阶段定位）",
-        },
-        "t0": {
-            "name": "t0",
-            "version": "2.4.0",
-            "description": "A股盘中T0盯盘助理",
-        },
-        "review": {
-            "name": "review",
-            "version": "2.4.0",
-            "description": "A股盘后复盘 + 仓位轮动 + 信号统计",
-        },
-        "daily_briefing": {
-            "name": "daily_briefing",
-            "version": "1.0.0",
-            "description": "A股每日简报 — 从候选池批量分析、排序、分层，输出操作建议",
-        },
-    }
-
+    # meta / SKILL / digest（与宿主无关，只做一次）
     for skill_slug, version, staged in stages:
-        # Write _meta.json
-        meta = meta_templates.get(skill_slug, {"name": skill_slug, "version": version})
-        (staged / "_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-        # ── Write config.json ──
-        # 打包时从环境变量读取 Tushare 配置，写入 skill 包
-        # 这样其他 Agent 拿到 skill 后开箱即用，无需手动配置
-        _cfg = {}
-        for _var in ("TUSHARE_TOKEN", "TUSHARE_API_URL", "TUSHARE_REALTIME_URL"):
-            _val = os.environ.get(_var, "").strip()
-            if _val:
-                _cfg_key = _var.lower()
-                _cfg[_cfg_key] = _val
-        if _cfg:
-            (staged / "config.json").write_text(
-                json.dumps(_cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-            )
-            print(f"  [config] {len(_cfg)} vars written to config.json ({skill_slug})")
-
-        # Write SKILL.md if not already present
+        meta = dict(META_TEMPLATES.get(skill_slug, {"name": skill_slug, "version": version}))
+        (staged / "_meta.json").write_text(
+            json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
         skill_md_path = staged / "SKILL.md"
         if not skill_md_path.exists():
-            skill_md = f"---\nname: {skill_slug}\ndescription: {meta.get('description', '')}\nversion: {version}\n---\n\n# {skill_slug}\n\n{meta.get('description', '')}\n"
-            skill_md_path.write_text(skill_md, encoding="utf-8")
+            skill_md_path.write_text(
+                f"---\nname: {skill_slug}\ndescription: {meta.get('description', '')}\n"
+                f"version: {version}\n---\n\n# {skill_slug}\n\n{meta.get('description', '')}\n",
+                encoding="utf-8",
+            )
 
-    # --- Compute shared bundle digest ---
     bundle_digests: dict[str, str] = {}
     for skill_slug, _, staged in stages:
-        shares = shared_files_for_skill(staged)
-        dig = concat_digest(shares)
-        bundle_digests[skill_slug] = dig
-
-    # --- Update _meta.json with bundle digest ---
+        bundle_digests[skill_slug] = concat_digest(shared_files_for_skill(staged))
     for skill_slug, _, staged in stages:
         meta_path = staged / "_meta.json"
-        if meta_path.exists():
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            meta["shared_bundle"] = bundle_digests.get(skill_slug, "unknown")
-            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["shared_bundle"] = bundle_digests.get(skill_slug, "unknown")
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-    # --- Build skill zips ---
-    print("\n--- Packing Skills ---")
-    for skill_slug, version, staged in stages:
-        zip_name = f"{skill_slug}.zip"
-        zip_path = release_dir / zip_name
-        if zip_path.exists():
-            zip_path.unlink()
-        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            add_to_zip(staged, archive, arc_prefix=skill_slug)
-        print(f"  -> {zip_path.relative_to(output_dir)}  ({zip_path.stat().st_size / 1024:.0f} KB)")
+    # 按宿主写 config 并分别打 zip（同一份 staged，换 config 再打）
+    for host in hosts:
+        host_dir = release_dir / host
+        host_dir.mkdir(parents=True, exist_ok=True)
+        print(f"\n--- Packing host={host} → {host_dir.relative_to(output_dir)} ---")
+        for skill_slug, _version, staged in stages:
+            _write_skill_config(staged, host)
+            print(f"  [config] trader_host={host} ({skill_slug})")
+            zip_path = host_dir / f"{skill_slug}.zip"
+            if zip_path.exists():
+                zip_path.unlink()
+            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                add_to_zip(staged, archive, arc_prefix=skill_slug)
+            print(f"  -> {zip_path.relative_to(output_dir)}  ({zip_path.stat().st_size / 1024:.0f} KB)")
 
-    # Clean up legacy zips
-    for old_zip in ("trader-pool.zip", "trader-portfolio.zip", "review-trader.zip",
-                    "trader-tracking.zip", "t0-trader.zip", "live-trader.zip",
-                    "review-commander.zip"):
-        p = release_dir / old_zip
-        if p.exists():
-            p.unlink()
+    _write_howto(release_dir, hosts)
 
-    if parsed.no_install:
-        print("\n[no-install] skipped auto-install")
-    else:
-        auto_install(stages)
+    # 自动安装：仅 hermes 宿主，且 staged 上留下 hermes 的 config
+    if "hermes" in hosts:
+        for _slug, _ver, staged in stages:
+            _write_skill_config(staged, "hermes")
+        if parsed.no_install:
+            print("\n[no-install] skipped auto-install")
+        else:
+            auto_install(stages)
+    elif not parsed.no_install:
+        print("\n[no-install] host=workbuddy only — 不装 ~/.hermes（请把 workbuddy/ 交给 WorkBuddy）")
 
-    # --- Verify ---
     print("\n--- Verification ---")
-    for skill_slug, _, _ in stages:
-        zip_path = release_dir / f"{skill_slug}.zip"
-        with zipfile.ZipFile(zip_path, "r") as archive:
-            names = archive.namelist()
-            prefix = f"{skill_slug}/"
-            has_meta = f"{prefix}_meta.json" in names or "_meta.json" in names
-            has_scripts = any(n.startswith(f"{prefix}scripts/") or n.startswith("scripts/") for n in names)
-            has_hermes = f"{prefix}HERMES.md" in names or "HERMES.md" in names
-            has_skill = f"{prefix}SKILL.md" in names or "SKILL.md" in names
-            # 忽略空的 __init__.py（包标记文件常为 0 字节，非真正缺失实现）
-            empty_py = [
-                n
-                for n in names
-                if n.endswith(".py")
-                and archive.getinfo(n).file_size == 0
-                and not n.endswith("/__init__.py")
-                and not n.endswith("__init__.py")
-            ]
-            empty_status = "EMPTY!" if empty_py else ""
+    for host in hosts:
+        host_dir = release_dir / host
+        for skill_slug, _, _ in stages:
+            zip_path = host_dir / f"{skill_slug}.zip"
+            print(_verify_zip(zip_path, skill_slug))
 
-            # Verify DI architecture files
-            has_interfaces = any("interfaces.py" in n for n in names)
-            has_fetchers = any("fetchers.py" in n for n in names)
-            has_async_utils = any("async_utils.py" in n for n in names)
-            has_plugins = any("plugins/" in n for n in names)
-            
-            meta_digest = "unknown"
-            meta_path = f"{prefix}_meta.json" if f"{prefix}_meta.json" in names else "_meta.json"
-            if meta_path in names:
-                try:
-                    meta = json.loads(archive.read(meta_path).decode("utf-8"))
-                    meta_digest = meta.get("shared_bundle", "unknown")
-                except Exception:
-                    meta_digest = "bad_meta"
-            
-            di_status = "DI=ok" if has_interfaces and has_fetchers and has_async_utils and has_plugins else "DI=MISSING"
-            status = "ok" if has_meta and has_scripts and has_hermes and has_skill and empty_status != "EMPTY!" else "MISSING"
-            print(f"  [{skill_slug}] {zip_path.name}  meta={has_meta} scripts={has_scripts} hermes={has_hermes} skill={has_skill} digest={meta_digest[:8]} {di_status} {empty_status}")
-
-    # Cleanup temp dirs
     for _, _, staged in stages:
         shutil.rmtree(staged.parent, ignore_errors=True)
 
+    print(f"\nDone. 给 Hermes → {release_dir / 'hermes'}")
+    if "workbuddy" in hosts:
+        print(f"给 WorkBuddy → {release_dir / 'workbuddy'}")
+    print(f"说明 → {release_dir / '怎么用.txt'}")
     return 0
 
 

@@ -149,13 +149,20 @@ def build_wyckoff_rank_rows(
     return rows
 
 
-def run_card(target: str, *, output: str = "markdown") -> str:
+def _card_ok(plan: dict[str, Any]) -> bool:
+    """取数/日线不足等降级卡：仍打印面板，但对 CLI 视为失败。"""
+    return bool(plan.get("data_ok")) and not plan.get("error")
+
+
+def run_card(target: str, *, output: str = "markdown") -> tuple[str, bool]:
     plan = build_wyckoff_plan(target)
     if output == "json":
         # 去掉过大 raw，便于调试
         slim = {k: v for k, v in plan.items() if k not in ("daily_raw", "weekly_raw")}
-        return json.dumps(slim, ensure_ascii=False, indent=2, default=str)
-    return render_wyckoff_card(plan)
+        text = json.dumps(slim, ensure_ascii=False, indent=2, default=str)
+    else:
+        text = render_wyckoff_card(plan)
+    return text, _card_ok(plan)
 
 
 def run_rank(*, output: str = "markdown") -> str:
@@ -187,16 +194,17 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "rank":
             text = run_rank(output=args.output)
-        elif args.target:
-            text = run_card(args.target, output=args.output)
-        else:
-            print("需要 --target <NAME> 或子命令 rank", file=sys.stderr)
-            return 2
+            print(text)
+            return 0
+        if args.target:
+            text, ok = run_card(args.target, output=args.output)
+            print(text)
+            return 0 if ok else 1
+        print("需要 --target <NAME> 或子命令 rank", file=sys.stderr)
+        return 2
     except Exception as exc:
         print(f"Wyckoff skill cannot run: {exc}", file=sys.stderr)
         return 1
-    print(text)
-    return 0
 
 
 if __name__ == "__main__":

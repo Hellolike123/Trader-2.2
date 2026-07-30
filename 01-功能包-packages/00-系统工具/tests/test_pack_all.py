@@ -83,30 +83,37 @@ def _get_release_dirs() -> list[Path]:
     return sorted(d for d in RELEASES_DIR.iterdir() if d.is_dir() and RELEASE_DIR_PATTERN.match(d.name))
 
 
+def _host_dir(release_dir: Path, host: str = "hermes") -> Path:
+    """新布局：releases/<ts>/hermes|workbuddy/<skill>.zip"""
+    return release_dir / host
+
+
 def test_pack_all_creates_individual_zips() -> None:
     _clean_stale_releases()
     with mock.patch.object(pack_all, "repo_root") as mock_root:
         mock_root.return_value = SCRIPTS_DIR
-        pack_all.main()
+        pack_all.main(["--host", "both", "--no-install"])
     release_dirs = _get_release_dirs()
     assert len(release_dirs) >= 1, "No release dir found"
     release_dir = release_dirs[-1]
-    for _, slug, _ in EXPECTED_SKILLS:
-        zip_path = release_dir / f"{slug}.zip"
-        assert zip_path.exists(), f"No zip found for {slug}"
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            assert len(zf.namelist()) > 0, f"{zip_path.name} is empty"
+    assert (release_dir / "怎么用.txt").exists()
+    for host in ("hermes", "workbuddy"):
+        for _, slug, _ in EXPECTED_SKILLS:
+            zip_path = _host_dir(release_dir, host) / f"{slug}.zip"
+            assert zip_path.exists(), f"No zip found for {host}/{slug}"
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                assert len(zf.namelist()) > 0, f"{zip_path.name} is empty"
 
 
 def test_pack_all_creates_combined_zip() -> None:
     _clean_stale_releases()
     with mock.patch.object(pack_all, "repo_root") as mock_root:
         mock_root.return_value = SCRIPTS_DIR
-        pack_all.main()
+        pack_all.main(["--host", "hermes", "--no-install"])
     release_dirs = _get_release_dirs()
     assert len(release_dirs) >= 1, "No release dir found"
     for _, slug, _ in EXPECTED_SKILLS:
-        zip_path = release_dirs[-1] / f"{slug}.zip"
+        zip_path = _host_dir(release_dirs[-1], "hermes") / f"{slug}.zip"
         assert zip_path.exists(), f"No zip found for {slug}"
         with zipfile.ZipFile(zip_path, "r") as zf:
             assert len(zf.namelist()) > 0, f"{zip_path.name} is empty"
@@ -122,30 +129,45 @@ def test_pack_all_individual_structure() -> None:
     _clean_stale_releases()
     with mock.patch.object(pack_all, "repo_root") as mock_root:
         mock_root.return_value = SCRIPTS_DIR
-        pack_all.main()
+        pack_all.main(["--host", "hermes", "--no-install"])
     release_dirs = _get_release_dirs()
     assert len(release_dirs) >= 1, "No release dir found"
     release_dir = release_dirs[-1]
-    for dir_name, slug, expected_script in EXPECTED_SKILLS:
-        zip_path = release_dir / f"{slug}.zip"
-        assert zip_path.exists(), f"Expected {slug}.zip not found"
+    for _dir_name, slug, expected_script in EXPECTED_SKILLS:
+        zip_path = _host_dir(release_dir, "hermes") / f"{slug}.zip"
+        assert zip_path.exists(), f"Expected hermes/{slug}.zip not found"
         with zipfile.ZipFile(zip_path, "r") as zf:
             _verify_skill_zip(zf, slug, expected_script)
 
 
+def test_pack_all_host_config_differs() -> None:
+    """hermes / workbuddy 包内 config.json 的 trader_host 必须分开。"""
+    import json
+
+    _clean_stale_releases()
+    with mock.patch.object(pack_all, "repo_root") as mock_root:
+        mock_root.return_value = SCRIPTS_DIR
+        pack_all.main(["--host", "both", "--no-install"])
+    release_dir = _get_release_dirs()[-1]
+    for host in ("hermes", "workbuddy"):
+        zip_path = _host_dir(release_dir, host) / "trader.zip"
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            raw = zf.read("trader/config.json").decode("utf-8")
+            cfg = json.loads(raw)
+            assert cfg.get("trader_host") == host, cfg
 
 
 def test_pack_all_no_package_skill() -> None:
     _clean_stale_releases()
     with mock.patch.object(pack_all, "repo_root") as mock_root:
         mock_root.return_value = SCRIPTS_DIR
-        pack_all.main()
+        pack_all.main(["--host", "hermes", "--no-install"])
     release_dirs = _get_release_dirs()
     assert len(release_dirs) >= 1, "No release dir found"
     release_dir = release_dirs[-1]
 
     for _, slug, _ in EXPECTED_SKILLS:
-        zip_path = release_dir / f"{slug}.zip"
+        zip_path = _host_dir(release_dir, "hermes") / f"{slug}.zip"
         if zip_path.exists():
             with zipfile.ZipFile(zip_path, "r") as zf:
                 for name in zf.namelist():
@@ -156,13 +178,13 @@ def test_pack_all_skips_irrelevant_skills() -> None:
     _clean_stale_releases()
     with mock.patch.object(pack_all, "repo_root") as mock_root:
         mock_root.return_value = SCRIPTS_DIR
-        pack_all.main()
+        pack_all.main(["--host", "hermes", "--no-install"])
     release_dirs = _get_release_dirs()
     assert len(release_dirs) >= 1, "No release dir found"
     release_dir = release_dirs[-1]
 
     for _, slug, _ in EXPECTED_SKILLS:
-        zip_path = release_dir / f"{slug}.zip"
+        zip_path = _host_dir(release_dir, "hermes") / f"{slug}.zip"
         if zip_path.exists():
             with zipfile.ZipFile(zip_path, "r") as zf:
                 has_compare = any("trader-compare" in n for n in zf.namelist())

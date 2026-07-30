@@ -1,45 +1,39 @@
-# daily-briefing — AI 每日简报
+---
+name: daily-briefing
+description: Use when producing the daily A-share briefing from pool/candidates. Run briefing.py and paste stdout; do not hand-write layered panels.
+---
 
-## 我是谁
-从大量候选池中自动分析、排序、分层，输出每只票的次日操作建议。
+# daily-briefing — 执行包装器
 
-## 怎么调命令
+候选池分析、排序、分层简报。硬规则：`references/agent-rules.md`。
+
+## 做且只做
+
+1. 读 `references/agent-quickstart.md`（若未读）
+2. 跑下表命令
+3. 成功 → stdout 整段放进 code fence 原样贴出 → Exit
+4. 失败 → 只报错误；禁止手写/编造分层面板
+
+```bash
+python3 scripts/briefing.py
+```
 
 | 需求 | 命令 |
 |------|------|
-| 刷新选股池 | `python3 scripts/briefing.py` |
-| 只分析指定票 | `python3 scripts/briefing.py --watch A B C` |
-| 分析候选文件 | `python3 scripts/briefing.py --candidates candidates.json` |
-| 刷新全池数据 | `python3 scripts/briefing.py --refresh` |
-| 快速分析并加入池 | `python3 scripts/briefing.py --candidate A --add` |
-| JSON 输出 | `python3 scripts/briefing.py --json` |
+| 默认简报 | `python3 scripts/briefing.py` |
+| 指定票 | `python3 scripts/briefing.py --watch A B C` |
+| 候选文件 | `python3 scripts/briefing.py --candidates candidates.json` |
+| 刷新全池 | `python3 scripts/briefing.py --refresh` |
+| 分析并入池 | `python3 scripts/briefing.py --candidate A --add` |
 
-## 输出格式
+仓库根 cwd 时前缀改为 `python3 01-功能包-packages/daily_briefing/scripts/...`。
 
-分层全显示：
-- 🔥 执行区（可交易）
-- 👀 观察区（只看不买）
-- ⏳ 待补区（评分不足）
-- 🚫 放弃区
+## 硬停
 
-每只显示：名称、总分、阶段、买卖区间、止损、操作建议
+- 未跑脚本 → 不回答分层/次日操作结论
+- 禁止默认 `--json` / `--output json`；禁止手写面板
+- 禁止预读策略说明；禁止补脚本未写的买卖建议
 
-## 工作流程
+## 先问用户
 
-Step 1: 收集标的（pool + candidates + watch）
-Step 2: 并行分析（build_report）
-Step 3: 评分排序（score_report）
-Step 4: 分层（执行/观察/待补/放弃）
-Step 5: 渲染输出
-
-## 文件结构
-
-```
-daily_briefing/
-├── SKILL.md
-├── scripts/
-│   ├── __init__.py
-│   └── briefing.py       # 主入口
-└── tests/
-    └── test_briefing.py   # 单元测试
-```
+名单范围不清（无池、无 watch、无 candidates）→ 先澄清。否则直接执行。

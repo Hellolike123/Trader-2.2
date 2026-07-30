@@ -574,6 +574,8 @@ class TestGetProviderTushare:
     def test_get_provider_falls_back_when_no_token(self, monkeypatch, _no_token):
         """get_provider() should fall back to UnifiedProvider when no token."""
         monkeypatch.delenv("TRADER_DATA_PROVIDER", raising=False)
+        # pin hermes：本机若有 WorkBuddy connectors，无 token 会走 mootdx
+        monkeypatch.setenv("TRADER_HOST", "hermes")
 
         from trader_shared.tushare_client import reset_client
         reset_client()
