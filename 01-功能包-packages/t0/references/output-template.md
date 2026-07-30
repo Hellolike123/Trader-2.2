@@ -1,4 +1,4 @@
-# Output Template — t0（策略 v2.1 · 微信短卡）
+# Output Template — t0（策略 v2.2 · 微信短卡）
 
 > **This is the absolute truth for valid output.** Never generate output format from memory.  
 > 产品法源：`docs/t0-strategy-v2.md`。微信红线见 AGENTS「微信红线」。
@@ -24,7 +24,13 @@
 看法失效：跌破止损{stop}
 ```
 
-有底仓时在买卖价后可接 `📋 若做正T（人勾选）` / `📉 持仓纪律`。
+有底仓时在买卖价后可接：
+
+- `📋 做T清单（人勾选）`：反T优先 / 正T备选 / 中轴观望；含 T仓上限与约14:50收盘纪律
+- 或 `📋 今日宜不做（人确认）`：空间不足 / 费后盖不住 / 单边日 / 临近涨跌停时折叠清单
+- `📉 持仓纪律`：T仓比例 + 收盘平仓 + 费后空间
+
+结论遇劝退时带 `宜不做`；仍禁止 `可执行` / `可低吸` / `三重共振买`。
 
 ### 微信排版规则（本卡）
 

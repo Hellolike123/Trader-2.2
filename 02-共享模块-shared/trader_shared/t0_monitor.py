@@ -421,12 +421,19 @@ def build_alert_message(event: str, plan: dict[str, Any], cost: float | None = N
     tape = model.get("t0_tape", {}).get("buy_tape" if is_buy else "sell_tape", {})
     tape_reason = tape.get("reason", "")
     
+    from trader_shared.t0_core import t_skip_reason
+
+    skip = t_skip_reason(plan)
     if event == BUY_TRIGGERED:
         summary.append(f"价格在 {price(model.get('observation_price'))} 一带，{tape_reason or '结构触及低吸关注区'}。")
         summary.append(
             f"  📥 关注区（参考）：{(model.get('execution_price') or current):.2f}"
             f"～{(model.get('acceptable_price') or current):.2f} · 是否动手由人决定"
         )
+        if skip:
+            summary.append(f"  场景标签：今日宜不做（{skip}）· 仅结构提醒")
+        else:
+            summary.append("  场景标签：正T备选 · T仓≤底仓30% · 人决策")
         if model.get("acceptable_price"):
             summary.append(f"  🚫 追高参考上限：{model.get('acceptable_price'):.2f}")
         if model.get("invalid_price"):
@@ -437,6 +444,10 @@ def build_alert_message(event: str, plan: dict[str, Any], cost: float | None = N
             f"  📤 关注区（参考）：{(model.get('acceptable_price') or current):.2f}"
             f"～{(model.get('execution_price') or current):.2f} · 是否动手由人决定"
         )
+        if skip:
+            summary.append(f"  场景标签：今日宜不做（{skip}）· 仅结构提醒")
+        else:
+            summary.append("  场景标签：反T优先 · T仓≤底仓30% · 人决策")
     elif event == BUY_BLOCKED:
         reasons = model.get("blocked_reasons") or ["强阻断"]
         summary.append(f"盘中抛压偏重：{'、'.join(str(r) for r in reasons)}。")
@@ -490,11 +501,12 @@ def _monitor_position_lines(plan: dict[str, Any], position: int | None) -> list[
         pos_range = "不动"
     else:
         pos_range = max_move.replace("底仓的 ", "") if "底仓的" in max_move else max_move
-    lines = [f"仓位 {pos_range}"]
+    lines = [f"T仓 {pos_range}（建议底仓20%-30%，最多一半）"]
     if position:
         try:
-            lot = round_lot(position * 0.1)
-            lines[-1] += f"，最多{lot}股"
+            # 纪律上限：底仓 30%
+            lot = round_lot(position * 0.3)
+            lines[-1] += f"，最多约{lot}股"
         except Exception:
             pass
     return lines
