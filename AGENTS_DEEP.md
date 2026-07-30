@@ -284,6 +284,13 @@
 
 **信号追踪**: 从 `~/.trader/signal_results.jsonl` 生成信号准确率面板（胜率、涨跌比、盈亏比）
 
+### 3.4 wyckoff（威科夫结构卡 + 池链排序）
+
+**入口**: `01-功能包-packages/wyckoff/scripts/final_wyckoff.py`（`--target` / `rank`；包内 `wyckoff_*.py` 为 identity shim）  
+**引擎（改这里）**: `trader_shared/wyckoff_run.py` / `wyckoff_render.py` / `wyckoff_chain.py`；检测仍走 `wyckoff_core` / 出口走 `wyckoff_view`  
+**产品定位**: 人读结构参考卡；**不作**交易总司令；池 `rank` 仅吸筹链视角，不改 trader 分道  
+**数据**: `light_data.load_market_snapshot`（日+周，无 5m/tick）；池排序读 `~/.trader/pool.json` 缓存字段  
+
 ---
 
 ## 四、依赖拓扑图
@@ -729,6 +736,7 @@ Trader 2.4/
 | `trader` | 分析 XX / 看看 XX / XX 怎么样 / 单票分析 / 盯盘 XX / 加入选股池 / 入池 / 对比 / 比较 / 池内排序 / 生成作战表 / 这个不错 / 可以关注 / 明天看看 |
 | `t0` | T0 / 做T / 盘中T / 什么价买 / 什么价卖 / 盯盘 |
 | `review` | 复盘 XX / 盘后复盘 / 午间复盘 / 仓位分配 / 轮动 / 仓位计划 / 2-3 只比一下 |
+| `wyckoff` | 威科夫 / Wyckoff / 吸筹链 / SC AR ST / 弹簧 / 看威科夫结构 / 池里威科夫排序 |
 
 ---
 

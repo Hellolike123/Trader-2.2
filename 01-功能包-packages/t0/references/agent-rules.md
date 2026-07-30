@@ -1,6 +1,6 @@
 # Agent 共用硬规则（SSOT）
 
-三 Skill（trader / t0 / review）共用。改红线只改本文件；各 skill `references/agent-rules.md` 由本文件同步（或 `pack_all` 复制）。
+四 Skill（trader / t0 / review / wyckoff）共用。改红线只改本文件；各 skill `references/agent-rules.md` 由本文件同步（或 `pack_all` 复制）。
 
 ## 快路径
 

@@ -1,7 +1,7 @@
 ## 接手先看
 
 - **目标架构法源**：`docs/designs/resonance-and-orchestration.md` — 五层+编排、岗位共振；fusion 不作总司令。
-- **版本**：Trader 2.4+（三技能：`trader` / `t0` / `review`）。单票**始终**中短线双轨（`render_short_midline`；`SHORT_MIDLINE_REPORT=false` 已忽略）。
+- **版本**：Trader 2.4+（技能：`trader` / `t0` / `review` / `wyckoff`）。单票**始终**中短线双轨（`render_short_midline`；`SHORT_MIDLINE_REPORT=false` 已忽略）。
 - **Fusion 生产路径**：`FUSION_FROM_CARDS` 缺省 = `cards`；`classic` / `compare` 仅对照（classic deprecated）。详见 `BUSINESS.md` §2.7。
 - **门禁**：`scripts/run-gate-tests.sh`（离线子集）；禁止把全量历史红项塞进门禁。说明：`docs/architecture/ci-gate.md`。
 - **Agent 快路径**：各 skill **只预读** `references/agent-quickstart.md` + 共用 `references/agent-rules.md`；跑脚本 → 原样贴 markdown → 停。禁止开工前批量读 references、禁止默认 `--output json`。
@@ -33,7 +33,8 @@
 | Classic 映射（对照） | `fusion_classic_mappers.py`（动量已委托 cards） | 在 cards 路径复制一份映射 |
 | T0 盯盘缓存 | `t0_monitor._cached_build_plan`（`T0_PLAN_TTL_SEC`） | 每 tick 无脑全量 `build_plan` |
 | 选股池逻辑 | `01-功能包-packages/trader/scripts/pool_cmds/*` | 把逻辑写回 `final_pool.py` |
-| 选股池分道 | `classify.py` 分道 + `wyckoff_rank.py` 同道链（`威：SC→…还差SOS`）+ `sort_items_unified`（lane→共振→链→可碰→分）；入池软门槛 | 用分数/「执行」/事件n/5当注意力王；S/A/B/C 替换分道 |
+| 选股池分道 | `classify.py` 分道 + `wyckoff_chain` 同道链（`威：SC→…还差SOS`）+ `sort_items_unified`（lane→共振→链→可碰→分）；入池软门槛 | 用分数/「执行」/事件n/5当注意力王；S/A/B/C 替换分道 |
+| 威科夫 Skill | `wyckoff_run.py` / `wyckoff_render.py` / `wyckoff_chain.py`；包入口 `wyckoff/scripts/final_wyckoff.py` | 在 skill 包复制引擎；用链排序顶替池分道 / 出手指令 |
 | 仓位轮动共振 | `portfolio_core.enrich_portfolio_resonance` | 在 portfolio 里重跑 build_report / 加厚 fusion |
 | T0 vs 岗位共振 | T0 `plan.resonance`=`t0_structure_score_v1`；报告共振才是 `pullback_probe` | 在 T0 调 `attach_resonance` |
 | 日线裁定出手 | `build_daily_ruling` + attach 后按 decision_view 重算 | 用 fusion.action 单独推「宜追」 |
@@ -43,7 +44,7 @@
 
 铁律：
 
-1. **引擎只在 `trader_shared/`**；`01-功能包-packages/{t0,review}/scripts/` 下同名文件是 shim，靠模块身份替换保证 monkeypatch。
+1. **引擎只在 `trader_shared/`**；`01-功能包-packages/{t0,review,wyckoff}/scripts/` 下同名文件是 shim，靠模块身份替换保证 monkeypatch。
 2. **`final_pool.py` 只做 CLI 薄入口**；入池/评分/plan/rank 进 `pool_cmds/`（如 `scoring.py`、`plan_view.py`）。
 3. **改输出**：`short_midline.py` → 刷新 golden → 骨架变了再动 `output-template.md`。
 4. **运行侧 Agent** 仍只读 `agent-quickstart.md`（跑脚本贴 markdown）；**改实现**以本表 + 法源为准。
@@ -66,6 +67,7 @@ A 股交易决策辅助系统。免费行情 + 缠论 / 威科夫 / 筹码 / ATR
 | `trader` | 单票分析 + 选股池 | `01-功能包-packages/trader/scripts/final_report.py` / `final_pool.py` |
 | `t0` | 盘中结构参考卡 + 盯盘 | `01-功能包-packages/t0/scripts/final_t0.py` |
 | `review` | 盘后复盘 + 仓位轮动 + 信号追踪 + 决策体检 | `01-功能包-packages/review/scripts/final_review.py` / `final_portfolio.py` / `final_tracker.py`（`checkup`） |
+| `wyckoff` | 威科夫结构卡 + 池内吸筹链排序 | `01-功能包-packages/wyckoff/scripts/final_wyckoff.py`（`--target` / `rank`） |
 
 运维（非 Skill）：`scripts/run_trader.py`、`scripts/t0_cron.py`、`scripts/wechat_monitor.py`。
 
@@ -79,6 +81,8 @@ A 股交易决策辅助系统。免费行情 + 缠论 / 威科夫 / 筹码 / ATR
 排序 → python 01-功能包-packages/trader/scripts/final_pool.py rank
 明日作战表 → python 01-功能包-packages/trader/scripts/final_pool.py plan
 盘中执行 → python 01-功能包-packages/t0/scripts/final_t0.py --target <NAME> --monitor
+威科夫卡 → python 01-功能包-packages/wyckoff/scripts/final_wyckoff.py --target <NAME>
+威科夫池链 → python 01-功能包-packages/wyckoff/scripts/final_wyckoff.py rank
 盘后复盘 → python 01-功能包-packages/review/scripts/final_review.py --target <NAME>
 仓位轮动 → python 01-功能包-packages/review/scripts/final_portfolio.py --targets A B
 信号回溯 → python 01-功能包-packages/review/scripts/final_review.py --target <NAME>
