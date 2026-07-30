@@ -240,6 +240,95 @@ def test_sort_items_unified_ignores_fusion_confidence():
     assert [x["name"] for x in sort_items_unified([b, a])] == ["B", "A"]
 
 
+def test_sort_items_unified_rr_beats_high_score():
+    """同 status/共振时：盈亏比达标优先于高分。"""
+    _ensure_scripts_path()
+    from pool_cmds.scoring import sort_items_unified
+
+    high_score_weak_rr = {
+        "name": "高分弱赔率",
+        "status": "执行",
+        "resonance_grade": "aligned",
+        "total_score": 95,
+        "major_stage": "主升",
+        "current": 10.0,
+        "trigger": 10.1,
+        "risk_reward": 0.3,
+    }
+    ok_rr = {
+        "name": "中分好赔率",
+        "status": "执行",
+        "resonance_grade": "aligned",
+        "total_score": 65,
+        "major_stage": "蓄势",
+        "current": 10.0,
+        "trigger": 10.1,
+        "risk_reward": 2.2,
+    }
+    ordered = sort_items_unified([high_score_weak_rr, ok_rr])
+    assert ordered[0]["name"] == "中分好赔率"
+    assert ordered[1]["name"] == "高分弱赔率"
+
+
+def test_sort_items_unified_fresh_trigger_beats_stale():
+    """同 status/共振/盈亏比时：计划买点未过期优先于过期高分票。"""
+    _ensure_scripts_path()
+    from pool_cmds.scoring import sort_items_unified
+
+    stale = {
+        "name": "过期高分",
+        "status": "执行",
+        "resonance_grade": "aligned",
+        "total_score": 90,
+        "major_stage": "主升",
+        "current": 12.0,
+        "trigger": 10.0,  # 已涨过买点 >5%
+        "risk_reward": 1.8,
+    }
+    fresh = {
+        "name": "未过期中分",
+        "status": "执行",
+        "resonance_grade": "aligned",
+        "total_score": 60,
+        "major_stage": "蓄势",
+        "current": 10.0,
+        "trigger": 10.2,
+        "risk_reward": 1.8,
+    }
+    ordered = sort_items_unified([stale, fresh])
+    assert ordered[0]["name"] == "未过期中分"
+    assert ordered[1]["name"] == "过期高分"
+
+
+def test_sort_items_unified_score_is_weak_tiebreak():
+    """同 status/共振/可碰时，分数高者排前（弱决胜）。"""
+    _ensure_scripts_path()
+    from pool_cmds.scoring import sort_items_unified
+
+    low = {
+        "name": "低分",
+        "status": "观察",
+        "resonance_grade": "missing_structure",
+        "total_score": 50,
+        "major_stage": "蓄势",
+        "current": 10.0,
+        "trigger": 10.1,
+        "risk_reward": 1.6,
+    }
+    high = {
+        "name": "高分",
+        "status": "观察",
+        "resonance_grade": "missing_structure",
+        "total_score": 80,
+        "major_stage": "蓄势",
+        "current": 10.0,
+        "trigger": 10.1,
+        "risk_reward": 1.6,
+    }
+    ordered = sort_items_unified([low, high])
+    assert ordered[0]["name"] == "高分"
+
+
 def test_pool_briefing_group_sort_ignores_fusion_score():
     """组内排序：同共振/结构时仅改 fusion.weighted_score 不改相对顺序。"""
     _ensure_scripts_path()

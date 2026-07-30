@@ -304,38 +304,61 @@ def _tighten_status_by_resonance(items: list[dict[str, Any]]) -> list[dict[str, 
     return out
 
 
+def _trigger_stale_for_sort(item: dict[str, Any]) -> bool:
+    """计划买点相对现价偏离 >5% 视为过期（与 verify._is_trigger_stale 同口径）。"""
+    current = to_float(item.get("current"))
+    trigger = to_float(item.get("trigger"))
+    if not current or not trigger or current <= 0 or trigger <= 0:
+        return False
+    return abs((trigger - current) / current) > 0.05
+
+
+def _actionability_rank(item: dict[str, Any]) -> tuple[int, int]:
+    """可碰性：未过期优先；盈亏比分档（未知中性）。越高越优先。"""
+    fresh = 0 if _trigger_stale_for_sort(item) else 1
+    rr = to_float(item.get("risk_reward")) or 0.0
+    if not ENABLE_RISK_REWARD_FILTER or rr <= 0:
+        rr_band = 1  # 过滤关 / 算不出 → 不抬不压
+    elif rr >= 2.0:
+        rr_band = 3
+    elif rr >= 1.5:
+        rr_band = 2
+    elif rr >= 1.0:
+        rr_band = 1
+    else:
+        rr_band = 0
+    return (fresh, rr_band)
+
+
+def _score_tiebreak(item: dict[str, Any]) -> float:
+    """同共振、同可碰时的弱决胜：结构分主、阶段辅。fusion 不参与。"""
+    score = int(item.get("total_score") or 0)
+    stage = str(item.get("major_stage") or "蓄势")
+    stage_str = STAGE_STRENGTH.get(stage, 0.5)
+    return (score / 100.0) * 0.7 + stage_str * 0.3
+
+
 def sort_items_unified(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """统一排序：plan 和 rank 共用同一个排序逻辑。
+    """统一排序：plan 和 rank 共用。
 
     主键：status（执行 > 观察 > 淘汰）
-    次键：共振档（离散，aligned > 缺岗 > empty > 拆台/冲突）
-    再次：结构总分归一化 × 50% + 阶段强度 × 50%（fusion 置信度不参与排序）
-    附加：盈亏比提权（评分 × (1 + min(盈亏比-1,2) × 0.1)）
+    次键：共振档（齐了 > 缺岗 > empty > 拆台/冲突）——注意力排序王
+    再次：可碰性（计划买点未过期；盈亏比达标）
+    末键：结构总分弱决胜（入池门槛仍用分；排序不靠分抢头条）
+    fusion 置信度 / weighted_score 不参与。
     """
     from trader_shared.resonance import extract_resonance_grade, resonance_pool_rank
 
     status_rank = {"执行": 3, "观察": 2, "淘汰": 1}
     items = _tighten_status_by_resonance(items)
 
-    def _composite(item: dict[str, Any]) -> float:
-        score = int(item.get("total_score") or 0)
-        stage = str(item.get("major_stage") or "蓄势")
-        stage_str = STAGE_STRENGTH.get(stage, 0.5)
-        # 结构分 + 阶段；fusion 仅仪表，不参与排序加权
-        composite = (score / 100.0) * 0.5 + stage_str * 0.5
-        # R4: 盈亏比排序加分
-        rr = to_float(item.get("risk_reward")) or 0
-        if rr > 1.0 and ENABLE_RISK_REWARD_FILTER:
-            rr_bonus = min(rr - 1.0, 2.0) * 0.1
-            composite *= (1.0 + rr_bonus)
-        return composite
-
     return sorted(
         items,
         key=lambda item: (
             status_rank.get(str(item.get("status")), 0),
             resonance_pool_rank(extract_resonance_grade(item)),
-            _composite(item),
+            _actionability_rank(item),
+            _score_tiebreak(item),
         ),
         reverse=True,
     )
