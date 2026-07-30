@@ -194,7 +194,7 @@
 
 `status_layers()` 判定顺序:
 1. `_ma250_check()` — 年线下方标记警告 `ma250_warning=True`，不再一票否决
-2. 融合层覆盖（`FUSION_OVERRIDE_ENABLED` + 置信度阈值）
+2. 融合层覆盖（`FUSION_OVERRIDE_ENABLED`，**默认 false**；开启时才按置信度阈值覆盖）
 3. 假跌破确认（`_fake_break`）
 4. 分阶段退出（`_near_stop`）
 5. 原有状态级联：暂不碰 > 低吸观察 > 冲高减仓/等转强 > 空间不足 > 防守观察

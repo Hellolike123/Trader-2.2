@@ -127,6 +127,9 @@
 实现：`fusion_core._fusion_input_mode` + `analysis/fusion_card_signals.py` + `merge_decisions(..., analysis_cards=...)`。  
 边界与 classic/compare 回退对账：`docs/designs/analysis-strategy-boundaries.md` §5。
 
+`FUSION_OVERRIDE_ENABLED` **默认 false**：融合分不覆盖 `theory_status`；出手听 `decision_view`。  
+`decision_view` 策略亮条件：entry `executable=True`（`plan` 不算可新开）。
+
 ---
 
 ## 3. 融合决策规则
