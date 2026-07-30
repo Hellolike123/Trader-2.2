@@ -103,7 +103,8 @@ Skill 包内把路径换成 `python3 scripts/<同名入口>.py ...`。完整命�
 ## 趋势与退出（摘要）
 
 - 年线下方：`ma250_warning=True`，继续分析（不否决）
-- ATR 移动止损：只紧不松（`structure_core`）
+- ATR 移动止损：只紧不松（`structure_core`）；**持仓票**水位 `~/.trader/trailing_stop_watermark.json`（无仓不落）
+- `decision_view` 收紧不新开时：`suggested_pct` / 仓位 cap 归零（避免「不新开 · 仓 x%」）
 - 假跌破 + 分阶段退出 / fusion 覆盖：`decision_core.status_layers`
 - 细节与配置项：`AGENTS_DEEP.md`
 
@@ -117,6 +118,8 @@ Skill 包内把路径换成 `python3 scripts/<同名入口>.py ...`。完整命�
 | `~/.trader/pool.json` / `pending.json` / `last_plan.json` | 选股池 |
 | `~/.trader/calibrated_params.json` | 自校准参数 |
 | `~/.trader/chip_history.json` | 筹码搬家快照 |
+| `~/.trader/trailing_stop_watermark.json` | ATR 移动止损水位（仅持仓票，只紧不松） |
+| `~/.trader/buy_point_lifecycle.json` | 买点盖失败记录（跨日禁止接旧 signal_id） |
 | `~/.t0-trader/state.json` / `~/.review-trader/state.json` | 技能缓存 |
 
 完整读写表见 `AGENTS_DEEP.md`。

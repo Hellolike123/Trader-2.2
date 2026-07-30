@@ -1,21 +1,35 @@
 # Fusion Guide — 融合层字段解读
 
-merge_decisions() 返回的融合字段解读规则。
+`merge_decisions()` 返回的融合字段解读规则。
+
+> **产品边界**：出手 / 新开听 `decision_view`（共振 ∧ 策略 ∧ 纪律）。  
+> `weighted_score` / `action` 仅仪表，不作总司令。
 
 ## 融合字段速查
 
 | 字段 | 类型 | 范围 | 含义 |
 |------|------|------|------|
-| `weighted_score` | float | [-1.35, 1.35] | 融合加权分。正=多方，负=空方 |
+| `weighted_score` | float | [-1.35, 1.35] | 融合加权分仪表。正=多方，负=空方 |
 | `confidence` | float | [0, 1] | 综合置信度 |
-| `action` | str | — | 建议动作（由 weighted_score + regime 映射） |
+| `action` | str | — | 仪表动作文案（由 weighted_score + regime 映射） |
 | `regime` | str | 正常/偏弱/很差/未知 | 大盘环境 |
 | `hmm_regime` | str | bull/bear/range | HMM 前瞻大势状态 |
 | `disagreement` | float | [0, 3] | 三路信号分歧度（max - min direction） |
-| `signals_detail` | dict | — | chan/momentum/wyckoff 各自的 direction + confidence |
-| `weights_used` | dict | — | 实际使用的权重分配 |
+| `signals_detail` | dict | — | **chan / momentum / vpf** 各自的 direction + confidence |
+| `weights_used` | dict | — | 实际权重（键为 chan/momentum/vpf） |
+| `fusion_input_path` | str | cards/classic/... | 本次三席输入路径 |
 
-## 8 档阈值（weighted_score → 方向强度）
+## 输入路径（`FUSION_FROM_CARDS`）
+
+短线三席：**缠论 + 动能 + 价量资金(VPF)**。日线威科夫**不进**短线加权。
+
+| 模式 | 行为 |
+|------|------|
+| 缺省 / `cards` | **生产默认**：意见卡 → `fusion_card_signals`；失败打 **warning** 后回退 classic |
+| `classic` | 强制 classic（deprecated，仅对照） |
+| `compare` | 两路都算；主结果用 cards；写入 `fusion_compare` |
+
+## 8 档阈值（weighted_score → 方向强度，仪表用语）
 
 | weighted_score | 方向 | 输出用语 |
 |----------------|------|---------|
@@ -31,11 +45,11 @@ merge_decisions() 返回的融合字段解读规则。
 ## action 字段映射（score_to_action）
 
 action 由 `score_to_action(weighted_score, disagreement, regime)` 生成：
-- `disagreement > 1` 且无强信号 → "观望 (信号冲突)"
-- `regime=很差` → "暂不碰"
-- `regime=偏弱` → 所有买入建议降一档
+- `disagreement > 1` 且无强信号 → 分歧降档映射
+- `regime=偏弱` → 正阈值右移 +0.10（更难触发做多）
+- `regime=很差` → 三席权重归零，分数偏中性/空仓侧（**不是**固定写死「暂不碰」）
 
-**禁止用 action 字符串推断方向**。产品出手听 `decision_view`（共振∧策略∧纪律）；`weighted_score` 仅 fusion 仪表偏多/偏空，不作总司令。
+**禁止用 action 字符串推断方向**。产品出手听 `decision_view`。
 
 ## 覆盖机制（Post-Processing Overrides）
 
@@ -54,33 +68,28 @@ build_report() 会生成 `fusion_verbatim` 字段，AI 输出时必须逐字引�
 
 格式：`{emoji} {action}｜置信{confidence}%｜加权分{weighted_score}｜{regime}`
 
-示例：
-- 🟢 增持｜置信 62%｜加权分 0.28｜正常
-- 🟡 等转强｜置信 41%｜加权分 0.08｜偏弱
-- 🔴 暂不碰｜置信 85%｜加权分 -0.35｜很差
-- ⚪ 观望｜置信 30%｜加权分 -0.02｜正常
-
 emoji 由 weighted_score 决定：≥0.25 🟢 / ≥0.10 🟡 / ≥-0.05 ⚪ / ≥-0.12 🟠 / else 🔴
 
-## 权重分配
+## 权重分配（chan / momentum / vpf）
 
-### 默认权重（由 regime 决定）
-| regime | chan | momentum | wyckoff |
-|--------|------|----------|---------|
-| 正常 | 0.33 | 0.34 | 0.33 |
-| 偏弱 | 0.40 | 0.20 | 0.40 |
-| 很差 | 0.50 | 0.10 | 0.40 |
+### 默认权重（由 regime 决定；见 `fusion_regime.py`）
+| regime | chan | momentum | vpf |
+|--------|------|----------|-----|
+| 正常 | 0.30 | 0.45 | 0.25 |
+| 偏弱 | 0.50 | 0.15 | 0.35 |
+| 很差 | 0.00 | 0.00 | 0.00 |
+| 未知 | 0.30 | 0.45 | 0.25 |
 
 ### 场景偏置（覆盖默认）
-| 场景 | chan | momentum | wyckoff |
-|------|------|----------|---------|
+| 场景 | chan | momentum | vpf |
+|------|------|----------|-----|
 | 低位突破 (pos_pct ≤ 0.3) | 0.44 | 0.20 | 0.36 |
 | 高位超买 (pos_pct ≥ 0.7 + mom≥80) | 0.20 | 0.56 | 0.24 |
 | 结构看空警告 | 0.44 | 0.20 | 0.36 |
 
-### 主力行为修正
-| main_force_env | chan | momentum | wyckoff |
-|----------------|------|----------|---------|
+### 主力行为修正（键为 vpf，不是 wyckoff）
+| main_force_env | chan | momentum | vpf |
+|----------------|------|----------|-----|
 | accumulation (吸筹) | +0.00 | -0.10 | +0.10 |
 | testing (试盘) | +0.00 | +0.00 | +0.00 |
 | markup (拉升) | -0.05 | +0.10 | +0.00 |

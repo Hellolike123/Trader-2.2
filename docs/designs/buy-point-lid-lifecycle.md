@@ -28,6 +28,18 @@
 - **证伪只看收盘**：盘中刺穿不单独判失败（与表第 2 行一致）。  
 - **站回不算复活旧买点**：失败日之后的任何收盘站上，只允许开**新**生命周期。
 
+### 2.1b 盖价来源优先级（SSOT：`resolve_lid_price`）
+
+```text
+显式 lid（buy_lid_price）
+  > mid_key_prices.pullback_low（回踩下沿）
+  > key_prices.buy_zone_low / buy_ref（买点区下沿）
+  > support（结构支撑）
+```
+
+- `mid.life_line`（生命线）是中线结构支撑叙事，**不得**当作 `mid_pullback_low` 抢在买点区之前。  
+- 实现：`build_buy_point_lifecycle_for_report` 只传 `mid.get("pullback_low")`。
+
 ### 2.2 与现有模块的关系
 
 | 模块 | 关系 |

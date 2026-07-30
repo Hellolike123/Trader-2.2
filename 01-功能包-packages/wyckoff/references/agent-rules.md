@@ -1,6 +1,6 @@
 # Agent 共用硬规则（SSOT）
 
-四 Skill（trader / t0 / review / wyckoff）共用。改红线只改 `_common/agent-rules.md`；各 skill `references/agent-rules.md` 由该文件同步（或 `pack_all` 复制）。
+四 Skill（trader / t0 / review / wyckoff）共用。改红线只改本文件；各 skill `references/agent-rules.md` 由本文件同步（或 `pack_all` 复制）。
 
 ## 快路径
 
@@ -21,7 +21,7 @@
 - `>` 块引用
 - `*` / `-` 列表符与带圈数字
 
-分节用 emoji + 普通文本独立成行（如 `🧭 阶段`、`📎 链`）。
+分节用 emoji + 普通文本独立成行（如 `🧭 中线`、`⚡ 短线`）。
 
 ## 命令 cwd
 
@@ -29,8 +29,21 @@
 - 仓库根（Cursor always-on）：`python3 01-功能包-packages/<skill>/scripts/<入口>.py ...`
 - 仓位轮动在 **review** 包：`scripts/final_portfolio.py`（无独立 `portfolio/` 包）
 
-## 威科夫 Skill 补充
+## 防漏改清单（改代码时）
 
-- 人读结构卡，不作交易总司令
-- `rank` 仅链视角排序，不改 trader 分道
-- 禁止「可执行 / 宜买 / 可低吸 / 三重共振买」
+改单票报告格式时固定三步（勿改 legacy / 勿手改 AGENTS 满分示例）：
+
+1. 改 `trader_shared/report_renderer/short_midline.py`
+2. 刷新 `02-共享模块-shared/tests/golden/*.render.md`
+3. 分区骨架变了再同步 `trader/references/output-template.md`（门禁会查分区头）
+
+| 改什么 | 认准一处 |
+|--------|----------|
+| 中短线面板文案 | 上面三步 |
+| 新开 / 出手收紧 | `chan_discipline` / `mistery_gate` / `decision_view`（C1 用 `format_entry_line_c1`；禁止新开时 caps/`suggested_pct` 归零） |
+| Fusion 席位（生产） | `analysis/fusion_card_signals.py`（cards 路径；失败 warning→classic） |
+| ATR 移动止损水位 | `structure_core`（持仓票 `~/.trader/trailing_stop_watermark.json`，只紧不松） |
+| 买点盖价 | `buy_point_lifecycle.resolve_lid_price`（显式>回踩下沿>买区下沿>支撑；不用 life_line 当回踩） |
+| 微信红线本身 | 只改本文件，再 sync 三 Skill 的 `references/agent-rules.md` |
+
+生产唯一渲染：短中线（`SHORT_MIDLINE_REPORT=false` 已忽略）。Fusion 默认 `cards`；classic 仅对照（deprecated）。出手听 `decision_view`，fusion 分仅仪表。

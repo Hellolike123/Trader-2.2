@@ -41,7 +41,7 @@
 | `pnl_pct` | float | 盈亏比例 % | 2.5 |
 | `pnl_text` | str | 盈亏描述文本 | "盈 +2.5%" |
 | `position_info.stage_position_pct` | int | 阶段仓位上限 % | 70 |
-| `position_info.suggested_pct` | int | 建议仓位 % | 30 |
+| `position_info.suggested_pct` | int | 建议仓位 %（decision_view 禁止新开时归零） | 30 |
 | `position_info.hard_rule_blocked` | bool | 硬规则阻止 | false |
 | `position_info.hard_rule_reason` | str | 阻止原因 | "持仓亏损，禁止加仓" |
 | `position_state.state` | str | 仓位状态机状态 | 回踩加仓/阻力位分歧/空仓 |
@@ -56,7 +56,7 @@
 | 字段 | 类型 | 含义 | 示例 |
 |------|------|------|------|
 | `stop` | float | 硬止损位 | 13.20 |
-| `trailing_stop` | float | 移动止损（只紧不松） | 14.50 |
+| `trailing_stop` | float | 移动止损（只紧不松；持仓票水位 `trailing_stop_watermark.json`） | 14.50 |
 | `take` | float | 第一止盈位 | 15.50 |
 | `exit_plan.exit_plan` | list | 分批止盈列表 | [{"price":14.80,"ratio":0.33,"reason":"阻力位"}] |
 | `exit_plan.stage_exit` | str | 阶段转换清仓条件 | 派发 |
@@ -73,9 +73,10 @@
 | `fusion.main_force_env` | str | 主力行为阶段 | accumulation/markup/unknown |
 | `fusion.hmm_regime` | str | HMM大势前瞻 | bull/bear/range |
 | `fusion.disagreement` | float | 多信号分歧度 | 1.5 |
-| `fusion.weights_used.chan` | float | 缠论权重 | 0.35 |
-| `fusion.weights_used.momentum` | float | 动量权重 | 0.25 |
-| `fusion.weights_used.wyckoff` | float | 威科夫权重 | 0.40 |
+| `fusion.weights_used.chan` | float | 缠论权重 | 0.30 |
+| `fusion.weights_used.momentum` | float | 动量权重 | 0.45 |
+| `fusion.weights_used.vpf` | float | 价量资金权重（第三席；非威科夫） | 0.25 |
+| `fusion.fusion_input_path` | str | 三席输入路径 | cards / classic |
 
 ## MA 和 ATR 字段
 

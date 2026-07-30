@@ -6,11 +6,11 @@
 |------|------|------|------|
 | `current_price` | float | 当前价格 | 14.29 |
 | `current_change_pct` | float | 今日涨跌幅 % | 1.5 |
-| `today_action` | str | 今日操作 | 低吸优先/高抛优先/等待，不主动操作/等待下一次触发 |
+| `today_action` | str | 今日结构文案（v2，人决策） | 价近低吸关注区 · 人决策 / 价近高抛关注区 · 人决策 / 双侧关注区皆近 · 人决策 / 等待，结构观察 · 人决策 |
 | `data_status` | str | 数据状态 | full/partial/degraded |
 | `name` | str | 股票名称 | 南网科技 |
 | `symbol` | str | 股票代码 | 688248.SH |
-| `max_move` | str | 建议仓位 | 底仓的 10%-20%/底仓的 20%-30%/不动 |
+| `max_move` | str | 建议仓位（`position_size` 认 v2 today_action + 旧枚举） | 底仓的 10%-20%/底仓的 20%-30%/不动 |
 | `position_score` | int | 多空位置评分 1-10 | 5 |
 | `volume_score` | int | 量价评分 1-10 | 6 |
 | `amplitude_pct` | float | 日内振幅 | 0.025 |
@@ -33,7 +33,7 @@
 
 | 字段 | 类型 | 含义 | 示例 |
 |------|------|------|------|
-| `buy.status` | str | 低吸状态 | 已触发/观察中/未进入候选区/被阻断/数据不足/触发过期/买 10%/买 23%/熔断中 |
+| `buy.status` | str | 低吸状态 | 已触发/观察中/未进入候选区/被阻断/数据不足/触发过期/熔断中/数据异常/趋势下行暂不低吸 |
 | `buy.observation_price` | float | 低吸观察价 | 13.50 |
 | `buy.execution_price` | float | 低吸执行价 | 13.40 |
 | `buy.acceptable_price` | float | 最高可接受价 | 13.80 |
@@ -50,7 +50,7 @@
 
 | 字段 | 类型 | 含义 | 示例 |
 |------|------|------|------|
-| `sell.status` | str | 高抛状态 | 已触发/观察中/未进入候选区/被阻断/数据不足/触发过期 |
+| `sell.status` | str | 高抛状态 | 已触发/观察中/未进入候选区/被阻断/数据不足/触发过期/熔断中/数据异常/趋势下行暂不高抛 |
 | `sell.observation_price` | float | 高抛观察价 | 14.80 |
 | `sell.execution_price` | float | 高抛执行价 | 14.90 |
 | `sell.acceptable_price` | float | 最低可接受价 | 14.50 |

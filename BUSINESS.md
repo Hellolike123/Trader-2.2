@@ -115,12 +115,12 @@
 
 ### 2.7 Fusion 输入路径（Arch C）
 
-短线三席（缠/动量/VPF）**生产默认 cards**（意见卡 → `fusion_card_signals`；不足回退 classic）。
+短线三席（缠/动量/VPF）**生产默认 cards**（意见卡 → `fusion_card_signals`；不足则 **warning 后**回退 classic）。
 
 | `FUSION_FROM_CARDS` | 行为 |
 |---------------------|------|
-| 缺省 / `cards` / `true` / `1` | **默认**：三席优先意见卡 |
-| `classic` / `false` / `0` | 强制 classic 标准化 |
+| 缺省 / `cards` / `true` / `1` | **默认**：三席优先意见卡；失败打 warning 再 classic |
+| `classic` / `false` / `0` | 强制 classic 标准化（deprecated，仅对照） |
 | `compare` / `dual` | 两路都算；主结果用 cards；写入 `fusion_compare` 供对账 |
 
 报告路径仍会预产 `analysis_cards`（策略 📐 / ensure 用），与 fusion 默认输入解耦。  
@@ -269,8 +269,9 @@ T0：…
 |------|------|------|
 | 出手 / 新开清单 C1 | mistery_gate + chan_discipline | 五项不全绿 → 新开否 |
 | 仓位上限 | merge 取更严 | 只裁 cap，不改 major_stage / fusion 分 / support / stop |
+| 决策收紧清零 | `decision_view.apply_decision_view` | 禁止新开时 `suggested_pct` / 仓位 cap 归零 |
 | 失效 | chan_discipline | 跌破 MA20 反抽不回 / 跌破止损等 |
-| regime 很差 | fusion_core 4b | 偏空到空仓侧动作 |
+| regime 很差 | fusion_regime 权重归零 | 加权分偏中性/空仓侧动作（非固定「暂不碰」文案） |
 
 报告可见面禁止 mi姐 / Mistery 品牌词。
 
