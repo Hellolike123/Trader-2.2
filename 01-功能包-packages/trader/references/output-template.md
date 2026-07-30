@@ -115,10 +115,10 @@ T0：无底仓，不启用（与出手一致，不新开）
 - **纪律（只收紧）**
   - 开仓清单：中线趋势｜回踩到位｜买点信号｜融合置信｜筹码资金稳（全绿才可试探；融合置信≠方向一致）
   - 一买试/二买加/三买主仓阶梯；盘整禁趋势重仓；短线 low_zone 门禁；破生命线/中枢/周框破坏不新开
-  - `suggested_pct` 与 `position_info.suggested_pct` 同步被 cap 裁切
+  - `suggested_pct` 与 `position_info.suggested_pct` 先被 merge cap 裁切；若 `decision_view` 禁止新开则**归零**（展示「仓 0%」）
 - **说明**：仅中短冲突时
 - **禁止**：🎯 结论、🗳️ 短线专家、🗺 空间参考、mi姐/Mistery 人设
-- **出手**：纪律门控裁动作；中线目标不得单独放行买；**不改价**
+- **出手**：听 `decision_view`（共振∧策略∧纪律）；中线目标不得单独放行买；**不改价**
 - **Fixed Keywords**：必须含「止损」和「买」
 
 ## 分层语义（禁止混淆）
@@ -128,15 +128,13 @@ T0：无底仓，不启用（与出手一致，不新开）
 | 阶段 | 主力四阶段，中线仓位语义 | major_stage |
 | 中线看法 | 周线故事跟不跟 | chanlun_midline + wyckoff_midline |
 | 中线关键价 | 生命线/回踩/压力/目标 | mid_key_prices（周线引擎） |
-| 短线看法/专家 | 追不追 | fusion 日线 |
-| 出手 / 失效 | 今天动不动手、何时作废 | 纪律门控 + key_prices |
+| 短线看法/专家 | 追不追 | fusion 日线（仪表；出手听 decision_view） |
+| 出手 / 失效 | 今天动不动手、何时作废 | decision_view + 纪律门控 + key_prices |
 | 短线关键价 | 止损/买点/卖点 | key_prices |
 
 ## 回退
 
-```bash
-SHORT_MIDLINE_REPORT=false python 01-功能包-packages/trader/scripts/final_report.py --target 华工科技 --output markdown
-```
+单票**始终**中短线双轨（`render_short_midline`）。`SHORT_MIDLINE_REPORT=false` **已忽略**，无法回退旧 `🎯`+`📍 决策` 面板。
 
 ## 选股日报格式 (pool briefing / daily report)
 

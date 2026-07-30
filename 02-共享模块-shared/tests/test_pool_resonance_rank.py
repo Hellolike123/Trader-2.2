@@ -360,3 +360,21 @@ def test_pool_briefing_group_sort_ignores_fusion_score():
     assert names == ["高融合", "低融合"]
     flipped = [(_report("低融合", -1.0), ""), (_report("高融合", 1.0), "")]
     assert [r["name"] for r, _ in sort_group_items(flipped)] == ["低融合", "高融合"]
+
+
+def test_rank_status_stop_broken_label():
+    import sys
+    from pathlib import Path
+
+    pool_scripts = (
+        Path(__file__).resolve().parents[2]
+        / "01-功能包-packages"
+        / "trader"
+        / "scripts"
+    )
+    if str(pool_scripts) not in sys.path:
+        sys.path.insert(0, str(pool_scripts))
+    from pool_cmds.verify import rank_status
+
+    assert rank_status({"_stop_broken": True, "status": "执行"}) == "已破止损"
+    assert rank_status({"status": "执行", "momentum_state": "通过"}) == "低吸观察"

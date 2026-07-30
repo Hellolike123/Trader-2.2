@@ -22,6 +22,8 @@ def run_structure_stage(
     big_order_result: dict[str, Any],
     order_book: Any = None,
     mark: MarkFn | None = None,
+    prev_trailing_stop: float | None = None,
+    trailing_ratchet_symbol: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], Any]:
     """结构阶段：VP → pre_stage → build_structure_context → 合并理论字段 → 大单补全。
 
@@ -78,6 +80,8 @@ def run_structure_stage(
         fetcher=fetcher,
         vp_result=vp_result,
         major_stage=_pre_stage,
+        prev_trailing_stop=prev_trailing_stop,
+        trailing_ratchet_symbol=trailing_ratchet_symbol,
     )
     _mark("structure")
 

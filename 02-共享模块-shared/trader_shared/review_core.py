@@ -578,7 +578,9 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
     theory = theory_verdicts(current, quote, daily, intraday, levels, cost, session=session,
                             symbol=quote.get("symbol"), analysis_date=selected_date)
 
-    # 威科夫分析（用于信号回顾）
+    name = quote.get("name") or sec.name
+    symbol = quote.get("symbol") or sec.ts_code
+    # 威科夫分析（用于信号回顾）；symbol 须在调用前赋值
     from trader_shared.wyckoff_core import wyckoff_analysis
     wyck_r = wyckoff_analysis(daily, symbol=symbol)
     previous_close = to_float(quote.get("pre_close")) or (to_float(daily[-2].get("close")) if len(daily) >= 2 else None)
@@ -586,8 +588,6 @@ def build_review(target: str, cost: float | None = None, trade_date: str | None 
     if change_pct is None:
         change_pct = pct_change(previous_close, current)
     pnl_pct = pct_change(cost, current) if cost else None
-    name = quote.get("name") or sec.name
-    symbol = quote.get("symbol") or sec.ts_code
     review_date = intraday.get("trade_date") or selected_date or datetime.now().strftime("%Y-%m-%d")
     return {
         "contract": "review_trader_v1",

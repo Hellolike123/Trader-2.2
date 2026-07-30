@@ -390,6 +390,10 @@ def merge_decisions(
             chan_signal, momentum_signal, vpf_signal = _via
             _path = "cards"
         else:
+            _logger.warning(
+                "FUSION cards path failed; falling back to classic (fusion_from_cards=%s)",
+                _mode,
+            )
             chan_signal, momentum_signal, vpf_signal = _classic_three()
             _path = "classic"
 

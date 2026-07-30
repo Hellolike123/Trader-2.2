@@ -68,3 +68,18 @@ def test_sort_prefers_aligned_same_status():
     ]
     ordered = sort_candidates(items)
     assert ordered[0]["name"] == "齐"
+
+
+def test_allocate_weights_no_debug_stdout(capsys):
+    from trader_shared.portfolio_run import allocate_weights
+
+    weights = allocate_weights(
+        [
+            {"ok": True, "name": "甲", "status": "低吸观察", "score": 80},
+            {"ok": True, "name": "乙", "status": "等转强", "score": 40},
+        ]
+    )
+    out = capsys.readouterr().out
+    assert "[ALLOC DEBUG]" not in out
+    assert weights
+    assert sum(weights.values()) > 0

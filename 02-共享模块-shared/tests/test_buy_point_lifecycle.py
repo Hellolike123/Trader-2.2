@@ -234,3 +234,30 @@ def test_l04_failed_tightens_checklist_even_if_empty():
     assert cl["flags"]["short_trigger"] is False
     assert "买点已失效" in cl["missing_labels"]
     assert disc["entry_line"].startswith("新开：先别买") or disc["entry_line"].startswith("新开：否")
+
+
+def test_life_line_not_preferred_over_buy_zone_low():
+    """life_line 是中线结构支撑，不得当作 mid_pullback_low 抢先于 buy_zone_low。"""
+    from trader_shared.buy_point_lifecycle import resolve_lid_price
+
+    lid = resolve_lid_price(
+        support=8.0,
+        mid_pullback_low=None,  # pullback_low 缺失时不应塞 life_line
+        buy_zone_low=9.80,
+        explicit_lid=None,
+    )
+    assert lid == 9.8
+
+    life = build_buy_point_lifecycle_for_report(
+        {
+            "current": 10.5,
+            "support": 8.0,
+            "chan_buy_point_types": ["一类买"],
+            "daily_bars": [{"close": 10.5}],
+            "key_prices": {"buy_zone_low": 9.80},
+            "mid_key_prices": {"life_line": 8.50, "pullback_low": None},
+        },
+        persist=False,
+    )
+    assert life["lid_price"] == 9.8
+    assert life["status"] == "active"

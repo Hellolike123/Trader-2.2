@@ -403,7 +403,8 @@ def build_buy_point_lifecycle_for_report(
 
     lid = resolve_lid_price(
         support=_f(r.get("support")),
-        mid_pullback_low=_f(mid.get("pullback_low") or mid.get("life_line")),
+        # life_line 是中线结构支撑，不是回踩下沿；不得抢在 buy_zone_low 之前
+        mid_pullback_low=_f(mid.get("pullback_low")),
         buy_zone_low=_f(kp.get("buy_zone_low") or kp.get("buy_ref")),
         explicit_lid=_f(r.get("buy_lid_price")),
     )

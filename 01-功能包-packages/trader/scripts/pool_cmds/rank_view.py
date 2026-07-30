@@ -48,6 +48,14 @@ def render_rank(items: list[dict[str, Any]]) -> str:
     lines.append("")
 
     for i, item in enumerate(sorted_items):
+        # 止损 > 现价时须先于 rank_status（其读取 _stop_broken）
+        current_price_val = to_float(item.get("current")) or to_float(item.get("price")) or 0
+        stop_val = to_float(item.get("stop")) or to_float(item.get("defense")) or 0
+        if stop_val > 0 and current_price_val > 0 and stop_val > current_price_val:
+            item = dict(item)  # shallow copy to avoid mutating original
+            item["_stop_broken"] = True
+            sorted_items[i] = item
+
         rs = rank_status(item)
         medal = ["🥇", "🥈", "🥉"][i] if i < 3 else f" {i+1}."
         reason = edge_reason(item, sorted_items)
@@ -89,14 +97,7 @@ def render_rank(items: list[dict[str, Any]]) -> str:
 
         buy_low = to_float(item.get("buy_low")) or to_float(item.get("support")) or 0
         buy_high = to_float(item.get("buy_high")) or (buy_low * 1.01 if buy_low else 0)
-        stop_val = to_float(item.get("stop")) or to_float(item.get("defense")) or 0
         confirm = to_float(item.get("confirm")) or to_float(item.get("trigger")) or 0
-
-        # 止损 > 现价时标记已破止损
-        current_price_val = to_float(item.get("current")) or to_float(item.get("price")) or 0
-        if stop_val > 0 and current_price_val > 0 and stop_val > current_price_val:
-            item = dict(item)  # shallow copy to avoid mutating original
-            item["_stop_broken"] = True
 
         if buy_low and buy_high:
             buy_text = f"买(观察区)  {buy_low:.2f}-{buy_high:.2f} 止跌确认"

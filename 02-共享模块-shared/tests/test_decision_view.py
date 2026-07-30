@@ -93,6 +93,23 @@ def test_apply_tightens_discipline_only():
     assert "不买" in r["conclusion"]["execution"] or "不追" in r["conclusion"]["execution"]
 
 
+def test_apply_zeros_stale_caps_when_tightening():
+    r = _report(grade="empty", execution="回踩轻仓试探")
+    r["discipline"]["suggested_pct_cap"] = 30
+    r["discipline"]["position_cap_pct"] = 30
+    r["discipline"]["suggested_pct_cap_short"] = 15
+    r["suggested_pct"] = 30
+    r["position_info"] = {"suggested_pct": 30}
+    v = apply_decision_view(r, tighten_discipline=True)
+    assert v["applied_tighten"] is True
+    assert r["discipline"]["allow_new_entry"] is False
+    assert r["discipline"]["suggested_pct_cap"] == 0
+    assert r["discipline"]["position_cap_pct"] == 0
+    assert r["discipline"]["suggested_pct_cap_short"] == 0
+    assert r["suggested_pct"] == 0
+    assert r["position_info"]["suggested_pct"] == 0
+
+
 def test_apply_does_not_loosen():
     r = _report(discipline_allow=False, grade="aligned")
     apply_decision_view(r, tighten_discipline=True)

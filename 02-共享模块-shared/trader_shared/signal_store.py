@@ -103,6 +103,8 @@ def append_signal(signal: dict[str, Any], path: Path | None = None) -> str:
     store_path = path or _get_default_store_path()
 
     # ── Cross-process dedup + append: use fcntl.flock for atomicity ──
+    # mkdir 必须在 open 之前，否则首次写入 ~/.trader/ 等缺失目录会 FileNotFoundError
+    store_path.parent.mkdir(parents=True, exist_ok=True)
     _maybe_rotate(store_path)
     with open(store_path, "a") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
@@ -116,7 +118,6 @@ def append_signal(signal: dict[str, Any], path: Path | None = None) -> str:
 
             # 直接写行：禁止再调 DataManager.append_signal（其对同文件二次 flock，
             # 在部分平台会自死锁）。本段已持有 LOCK_EX。
-            store_path.parent.mkdir(parents=True, exist_ok=True)
             f.write(json.dumps(working, ensure_ascii=False, default=str) + "\n")
             f.flush()
             os.fsync(f.fileno())

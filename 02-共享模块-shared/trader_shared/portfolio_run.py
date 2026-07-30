@@ -254,8 +254,6 @@ def allocate_weights(
         if s < 0:
             s = 0.0
         scores.append(s)
-    print(f"[ALLOC DEBUG] tradable={[(i['name'], i.get('score')) for i in tradable]}")
-    print(f"[ALLOC DEBUG] scores={scores}")
 
     total_score = sum(scores)
     if total_score <= 0:

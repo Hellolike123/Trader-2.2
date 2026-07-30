@@ -1,22 +1,29 @@
 # Trader 2.4 — 架构文档（深挖参考）
 
-> 最后更新：2026-07-20
-> **注意**: AGENTS.md 是 Agent 快速参考，本文档用于开发调试/架构深挖。
+> 最后更新：2026-07-30
+> **注意**: AGENTS.md 是 Agent 快速参考，本文档用于开发调试/架构深挖。  
+> T0 产品契约以 `docs/t0-strategy-v2.md` 为准（人读结构仪表盘；禁止「可执行/三重共振买」指令叙事）。
 
 ---
 
 ## 变更日志
 
-### 2026-07-20 — T0 执行卡 + Wyckoff Spring 弱分级 + 缠论 15m
+### 2026-07-30 — 文档以代码为准同步 + 确认 bugfix
 
-- **T0 执行卡风格**：输出从 4 段式改为执行卡风格——标题 → 结论（一句话）→ 执行价（低吸/高抛/止盈）→ 信号（三重共振）→ 失效条件 → 资金 → 降本模式。`_build_conclusion()` 根据三重共振状态生成结论，`_build_failure_conditions()` 生成失效条件（跌破止损/缠论反转/威科夫反转/跌破VWAP）
-- **三重共振缠论升级**：缠论从纯 5m 升级为 15m 定方向（日线级别结构）+ 5m 定时机（T0 执行层），合并一行展示。15m 数据从 60 根扩至 800 根
-- **VWAP 今日数据**：`today_bars()` 过滤跨日 bar，避免历史高价拉高 VWAP
-- **止盈方向拆分**：低吸止盈（高于现价）和高抛止盈（低于现价）分开显示
-- **缠论价格过滤**：远离现价 >20% 的缠论买/卖价自动过滤，不显示
-- **低吸/高抛可执行时**：显示执行价～可接受价范围，不再显示"数据不足"
-- **日线回溯扩至 120 根**：`t0_config.LOOKBACK_DAYS` 从 30 改为 120，匹配威科夫/缠论原典需求
-- **Wyckoff Spring 弱分级**：弱弹簧判定从「浅刺穿」（`depth_pct < WYCKOFF_SPRING_WEAK_DEPTH_PCT`）改为「缩量无承接」（`vol_ratio < WYCKOFF_SPRING_LOW_VOL_RATIO`）。强弹簧仍为深度震仓+放量承接+坚决收回中轴
+- **decision_view**：禁止新开时清零 `suggested_pct` / 仓位 cap
+- **ATR trailing**：持仓票水位 `~/.trader/trailing_stop_watermark.json`（只紧不松；无仓不落）
+- **买点盖价**：`mid.pullback_low` > `buy_zone_low` > support；**不用** `life_line` 当回踩下沿
+- **T0 v2**：`today_action` 为人读结构文案；`position_size` 认 v2 + 旧枚举；风险状态含「数据异常/趋势下行暂不…」
+- **Fusion**：默认 cards；失败 warning 后 classic；三席 chan/momentum/**vpf**
+- 历史条目「T0 执行卡/三重共振」仅为变更史，**不再**描述当前产品输出
+
+### 2026-07-20 — T0 执行卡 + Wyckoff Spring 弱分级 + 缠论 15m（历史）
+
+- 当时引入执行卡/三重共振叙事；**已被 T0 v2 取代**（见 `docs/t0-strategy-v2.md`）
+- **三重共振缠论升级**：缠论从纯 5m 升级为 15m 定方向 + 5m 定时机
+- **VWAP 今日数据**：`today_bars()` 过滤跨日 bar
+- **止盈方向拆分** / **缠论价格过滤** / **日线回溯扩至 120 根**
+- **Wyckoff Spring 弱分级**：缩量无承接弱弹簧判定
 
 ### 2026-05-31 — 数据消费 Bug 修复 + 性能优化批次
 
@@ -209,7 +216,8 @@
 }
 ```
 
-> **注意**：`trailing_stop`（移动止损价）不在 `status_layers()` 返回中，它由 `structure_core.py` 的 `build_structure_context()` 返回（字段名 `trailing_stop`）。
+> **注意**：`trailing_stop`（移动止损价）不在 `status_layers()` 返回中，它由 `structure_core.py` 的 `build_structure_context()` 返回（字段名 `trailing_stop`）。  
+> **只紧不松**：可选 `prev_trailing_stop`；**持仓票**（cost>0）按 `trailing_ratchet_symbol` 读写 `~/.trader/trailing_stop_watermark.json`；无仓不落水位（避免无仓误抬止损）。
 
 ---
 
@@ -229,15 +237,16 @@
 - `wave_label`：仅 `strokes < 3` →「笔数不足」；段少 →「线段偏少/未成型」+ 笔级叙事
 - MACD 预热 `None` 禁止 `0.0` 占位（背驰面积）
 
-**Output Contract（默认短中线双轨，`SHORT_MIDLINE_REPORT=true`）**:
+**Output Contract（始终中短线双轨；`SHORT_MIDLINE_REPORT=false` 已忽略）**:
 ```
 分析报告 — {name}（{code}）｜短中线
 现价 + 动能｜大盘 + MA5/MA20/MA250 + 量比/换手
 🧭 中线 → 阶段 + 看法 + 周线威科夫/缠论 + 位置 + 关键价（生命线/回踩/压力/目标）
-⚡ 短线 → 看法 + 日线缠/动能 + 裁定 + 新开(C1) + 出手/分仓/失效 + 关键价（止损/买点/🌟/卖点）+ 买/追亏赚
+⚡ 短线 → 看法 + 日线缠/动能 + 共振 + 新开(C1) + 动作/原因/破位 + 关键价（止损/买点/🌟/卖点）
 说明（可选冲突）→ ✅ 亮点 → ⚠️ 风险 → 📌 本周只做 → T0 → 入池提示
 ```
-契约全文：`01-功能包-packages/trader/references/output-template.md`。单票始终双轨（`SHORT_MIDLINE_REPORT=false` 已忽略）。
+出手听 `decision_view`（共振∧策略∧纪律）；禁止新开时 `suggested_pct`/仓位 cap 归零。  
+契约全文：`01-功能包-packages/trader/references/output-template.md`。
 
 **选股池命令集**: `analyze` `add` `add-pending` `confirm-to-pool` `show` `show-pending` `rank` `plan` `review` `remove` `archive-exited`
 
@@ -282,7 +291,7 @@
 
 **仓位轮动四阶段逻辑**: 根据四阶段定位（蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退 × 走强/修复/震荡/转弱）动态调整仓位分配策略，不再单纯依赖评分排序。
 
-**信号追踪**: 从 `~/.trader/signal_results.jsonl` 生成信号准确率面板（胜率、涨跌比、盈亏比）
+**信号追踪**: 以 `~/.trader/signals.jsonl` 为主事件流；结算/准确率面板可读配套结果文件（若存在 `signal_results.jsonl`）
 
 ### 3.4 wyckoff（威科夫结构卡 + 池链排序）
 
@@ -565,13 +574,15 @@ ThreadPoolExecutor 并行执行策略（run_analysis.py）
   ├── _fetch_fund_flow()        ← 资金流向
   ├── _fetch_market_env()       ← 大盘环境
   ↓
-  build_structure_context()     ← ATR + 移动止损 + 支撑/阻力（串行，依赖前序结果）
+  build_structure_context()     ← ATR + 移动止损(+持仓水位) + 支撑/阻力（串行）
   ↓
-  merge_decisions(chan, momentum, wyckoff, regime, hmm_regime, ...)
+  merge_decisions(chan, momentum, vpf, regime, hmm_regime, analysis_cards=...)
+  ├── 默认 cards 路径（失败 warning → classic）
   ├── Scenario Priority Filter (pos_pct → 动态权重)
   ├── Veto 噪声消解
-  ├── 贝叶斯融合 (可选)
-  → {action, confidence, signals_detail, hmm_regime}
+  → {action, confidence, signals_detail.chan/momentum/vpf, fusion_input_path}
+  ↓
+  decision_view（共振∧策略∧纪律；禁止新开时 caps/suggested_pct 归零）
   ↓
   status_layers(current, bars, structure_ctx, fusion, ...)
   ├── _ma250_check()        ← 年线下方标记警告
