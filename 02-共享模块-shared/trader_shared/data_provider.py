@@ -515,8 +515,15 @@ class UnifiedProvider:
             start_date = (pd.Timestamp.today() - timedelta(days=days)).strftime("%Y%m%d")
         df = ak.stock_zh_a_hist(symbol=sec.code, period="daily", start_date=start_date, end_date="", adjust="qfq")
         bars = [bar for _, row in df.iterrows() if (bar := self._akshare_to_bar(row.to_dict()))]
-        from trader_shared.light_data import ensure_bars_ascending
-        fixed, _ = ensure_bars_ascending(bars)
+        from trader_shared.light_data import _compute_atr_fields, ensure_bars_ascending
+        fixed, rewritten = ensure_bars_ascending(bars)
+        # ensure_bars_ascending 仅在重排时重算 ATR；AkShare 常已升序，须显式补算
+        if not rewritten:
+            _compute_atr_fields(fixed)
+        for b in fixed:
+            b.setdefault("data_source", "akshare")
+            b.setdefault("adjust", "qfq")
+            b.setdefault("data_status", "full")
         return fixed
 
     def _akshare_fetch_kline(self, sec: Security, scale: str, datalen: int = 60) -> list[dict[str, Any]]:

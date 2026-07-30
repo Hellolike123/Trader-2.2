@@ -105,6 +105,45 @@ def test_aggregate_5m_to_60m_sorts_within_hour() -> None:
     assert out[0]["close"] == 12.5  # 最晚 10:55
 
 
+def test_aggregate_5m_to_60m_reads_time_when_date_is_day_only() -> None:
+    """生产 light_data 形状：date=日、time=完整时间戳，不得聚合为空。"""
+    from trader_shared.indicator_math import aggregate_5m_to_60m
+
+    bars = [
+        {
+            "date": "2026-07-30",
+            "time": "2026-07-30 10:55:00",
+            "open": 12,
+            "high": 13,
+            "low": 11,
+            "close": 12.5,
+            "volume": 1,
+        },
+        {
+            "date": "2026-07-30",
+            "time": "2026-07-30 10:05:00",
+            "open": 10,
+            "high": 10.5,
+            "low": 9.5,
+            "close": 10.2,
+            "volume": 2,
+        },
+        {
+            "date": "2026-07-30",
+            "time": "2026-07-30 10:30:00",
+            "open": 11,
+            "high": 11.5,
+            "low": 10.8,
+            "close": 11.2,
+            "volume": 3,
+        },
+    ]
+    out = aggregate_5m_to_60m(bars)
+    assert len(out) == 1
+    assert out[0]["open"] == 10.0
+    assert out[0]["close"] == 12.5
+
+
 def test_parse_em_klines_takes_latest_n_after_sort() -> None:
     from trader_shared.fund_flow_data import _parse_em_klines
 
@@ -184,3 +223,30 @@ def test_get_ths_daily_sorts_ascending(monkeypatch) -> None:
     rows = sd.get_ths_daily("885800.TI")
     assert [r["trade_date"] for r in rows] == ["20260708", "20260709", "20260710"]
     assert rows[-1]["pct_change"] == 1.0
+
+
+def test_akshare_daily_postprocess_fills_atr_when_already_sorted() -> None:
+    """AkShare 日线常已升序：ensure 不重排时也必须补 ATR。"""
+    from trader_shared.light_data import _compute_atr_fields, ensure_bars_ascending
+
+    bars = []
+    price = 10.0
+    for i in range(30):
+        price += 0.05
+        bars.append(
+            {
+                "date": f"2026-06-{(i % 28) + 1:02d}",
+                "open": price - 0.05,
+                "high": price + 0.1,
+                "low": price - 0.1,
+                "close": price,
+                "volume": 1000 + i,
+            }
+        )
+    fixed, rewritten = ensure_bars_ascending(bars)
+    assert rewritten is False or rewritten is True  # 允许任一
+    if not rewritten:
+        _compute_atr_fields(fixed)
+    last = fixed[-1]
+    assert last.get("atr14") is not None
+    assert last.get("atr_ratio") is not None

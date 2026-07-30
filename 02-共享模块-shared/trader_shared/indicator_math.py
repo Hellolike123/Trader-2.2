@@ -166,14 +166,23 @@ def aggregate_5m_to_60m(bars_5m: list[dict]) -> list[dict]:
 
     groups: dict[str, list[dict]] = {}
     for bar in bars_5m:
-        dt_str = str(bar.get("date") or bar.get("datetime") or "")
+        # 生产 5m：date=日、time/datetime=完整时间戳；优先读完整字段
+        raw_dt = bar.get("datetime") or bar.get("time") or bar.get("date") or ""
+        dt_str = str(raw_dt).strip()
         if not dt_str:
             continue
+        # 仅日期（YYYY-MM-DD）无法分桶到小时，跳过
+        if len(dt_str) <= 10 and " " not in dt_str and "T" not in dt_str:
+            continue
         try:
-            if len(dt_str) > 16:
-                dt = datetime.fromisoformat(dt_str)
+            if "T" in dt_str or len(dt_str) > 16:
+                dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00").split("+")[0])
             else:
-                dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+                # "YYYY-MM-DD HH:MM" 或 "YYYY-MM-DD HH:MM:SS"
+                try:
+                    dt = datetime.strptime(dt_str[:19], "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    dt = datetime.strptime(dt_str[:16], "%Y-%m-%d %H:%M")
             # 向下取整到60分钟边界
             hour_bucket = dt.replace(minute=0, second=0, microsecond=0)
             key = hour_bucket.strftime("%Y-%m-%d %H:%M")
@@ -186,10 +195,10 @@ def aggregate_5m_to_60m(bars_5m: list[dict]) -> list[dict]:
         group = groups[key]
         if not group:
             continue
-        # 组内按时间正序，保证 open=首根、close=末根
+        # 组内按时间正序，保证 open=首根、close=末根（与分桶一致：优先完整时间戳）
         group = sorted(
             group,
-            key=lambda b: str(b.get("date") or b.get("datetime") or b.get("time") or ""),
+            key=lambda b: str(b.get("datetime") or b.get("time") or b.get("date") or ""),
         )
         result.append({
             "date": key,
