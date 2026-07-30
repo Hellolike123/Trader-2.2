@@ -93,10 +93,10 @@ def test_t0_markdown_contract() -> None:
     assert "止损" in markdown
     assert "低吸" in markdown
     assert "高抛" in markdown
-    assert "📌 盘面" in markdown
-    assert "📌 买卖价" in markdown
-    assert "RR" in markdown or "计划" in markdown
-    assert "ATR" in markdown
+    assert "【策略基调】" in markdown
+    assert "【执行点位与仓位】" in markdown
+    assert "【盈亏测算】" in markdown
+    assert "【风控】" in markdown
     assert "人确认" in markdown
     assert "结构偏强" not in markdown.split("→", 1)[-1].split("\n", 1)[0]
     assert "可执行" not in markdown
@@ -192,8 +192,8 @@ def test_t0_v2_no_exec_command_when_triggered() -> None:
     assert side_status(plan["buy"]) == SIDE_ZONE_HIT
     assert SIDE_ZONE_HIT == "到价关注"
     md = render_markdown(plan)
-    assert "低吸：11.94～11.98" in md
-    assert "📌 买卖价" in md
+    assert "低吸关注：11.94～11.98" in md
+    assert "【执行点位与仓位】" in md
     assert "近买区" in md
     assert "可执行" not in md
     assert "可低吸" not in md
@@ -216,7 +216,7 @@ def test_legacy_executable_display_status_normalized() -> None:
     md = render_markdown(plan)
     assert "可执行" not in md
     assert "近买区" in md
-    assert "低吸：11.94～11.98" in md
+    assert "低吸关注：11.94～11.98" in md
     assert validate(md) == []
 
 
@@ -243,7 +243,7 @@ def test_no_position_hides_account_discipline_block() -> None:
 
 
 def test_v21_trade_price_rr_block() -> None:
-    """操盘主区：买卖价+止损+ATR/RR；区间塌缩时用止盈价兜底。"""
+    """行动卡盈亏测算：按低吸算止损/兑现空间与盈亏比。"""
     plan = sample_t0_plan()
     plan.update({
         "vwap": 12.0,
@@ -267,11 +267,10 @@ def test_v21_trade_price_rr_block() -> None:
     plan["buy"]["invalid_price"] = 11.72
     plan["sell"]["observation_price"] = 12.15
     md = render_markdown(plan)
-    assert "📌 买卖价" in md
-    assert "低吸：11.90｜止损：11.72｜高抛：12.15" in md
-    assert "波动：ATR 0.40" in md
-    assert "计划账（按低吸" in md
-    assert "现价账（按现价" in md
+    assert "【盈亏测算】按低吸11.90算" in md
+    assert "低吸关注：11.90" in md
+    assert "止损参考：11.72" in md
+    assert "高抛兑现：12.15" in md
     assert "1比" in md
     assert "费后约" in md
     assert "RR1:" not in md
@@ -280,7 +279,7 @@ def test_v21_trade_price_rr_block() -> None:
 
 
 def test_v21_position_shows_human_checklist() -> None:
-    """有底仓才出今日剧本；顺序剧本→盘面→买卖价；结论含看反T。"""
+    """有底仓出行动卡；近高区看反T；含T仓/14:50。"""
     plan = sample_t0_plan()
     plan.update({
         "vwap": 11.90,
@@ -311,14 +310,14 @@ def test_v21_position_shows_human_checklist() -> None:
     plan["buy"]["observation_price"] = 11.80
     plan["sell"]["observation_price"] = 12.20
     md = render_markdown(plan)
-    assert "⚡ 今日剧本" in md
-    assert "反T" in md
-    assert "T仓：" in md
+    assert "【策略基调】" in md
+    assert "看反T" in md
+    assert "T仓上限" in md
     assert "14:50" in md
     assert "人确认" in md
     assert "持仓纪律" not in md
     assert "无底仓" not in md
-    assert md.find("⚡ 今日剧本") < md.find("📌 盘面") < md.find("📌 买卖价")
+    assert md.find("【策略基调】") < md.find("【执行点位与仓位】") < md.find("【盈亏测算】")
     conclusion = md.split("→", 1)[-1].split("\n", 1)[0]
     assert "宜不做" not in conclusion
     assert "看反T" in conclusion
@@ -329,7 +328,7 @@ def test_v21_position_shows_human_checklist() -> None:
 
 
 def test_v22_near_low_shows_zheng_t_checklist() -> None:
-    """近低区出正T剧本，价与买卖价同源，且不含禁词。"""
+    """近低区看正T行动卡，点位同源，且不含禁词。"""
     plan = sample_t0_plan()
     plan.update({
         "vwap": 11.90,
@@ -354,9 +353,9 @@ def test_v22_near_low_shows_zheng_t_checklist() -> None:
     plan["buy"]["observation_price"] = 11.80
     plan["sell"]["observation_price"] = 12.20
     md = render_markdown(plan)
-    assert "⚡ 今日剧本" in md
-    assert "正T优先" in md
-    assert "正T看：11.80" in md
+    assert "【策略基调】" in md
+    assert "看正T（低吸再卖回）" in md
+    assert "低吸关注：11.80" in md
     assert "先买后卖" not in md
     assert "先卖后买" not in md
     assert "14:50" in md
@@ -365,7 +364,7 @@ def test_v22_near_low_shows_zheng_t_checklist() -> None:
 
 
 def test_v22_skip_gate_collapses_checklist() -> None:
-    """空间不足 → 结论宜不做，剧本折叠为今日宜不做。"""
+    """空间不足 → 结论宜不做，基调写今日宜不做。"""
     plan = sample_t0_plan()
     plan.update({
         "vwap": 11.90,
@@ -389,8 +388,8 @@ def test_v22_skip_gate_collapses_checklist() -> None:
     conclusion = md.split("→", 1)[-1].split("\n", 1)[0]
     assert "宜不做" in conclusion
     assert "今日宜不做：空间不足" in md
-    assert "正T优先" not in md
-    assert "反T优先" not in md
+    assert "看正T（低吸再卖回）" not in md
+    assert "看反T（高抛再接回）" not in md
     assert "可执行" not in md
     assert validate(md) == []
 
