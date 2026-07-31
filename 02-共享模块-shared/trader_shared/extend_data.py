@@ -89,7 +89,11 @@ _hot_reason_cache: dict[str, pd.DataFrame] = {}
 def ths_hot_reason(date_str: str | None = None) -> pd.DataFrame:
     """同花顺当日强势股归因（直连无鉴权接口）"""
     if date_str is None:
-        date_str = date.today().strftime("%Y-%m-%d")
+        try:
+            from trader_shared.cn_time import today_cn
+            date_str = today_cn().isoformat()
+        except Exception:
+            date_str = date.today().strftime("%Y-%m-%d")
 
     url = (
         f"http://zx.10jqka.com.cn/event/api/getharden/"
@@ -317,7 +321,11 @@ class ExtendDataProvider:
             import akshare as ak
             # 识别市场：6/9 开头为沪市，其余为深市
             is_sse = code.startswith(("5", "6", "9"))  # 含沪市 ETF 51xxxx
-            today_str = date.today().strftime("%Y%m%d")
+            try:
+                from trader_shared.cn_time import today_cn
+                today_str = today_cn().strftime("%Y%m%d")
+            except Exception:
+                today_str = date.today().strftime("%Y%m%d")
 
             if is_sse:
                 df = ak.stock_margin_detail_sse(date=today_str)

@@ -76,7 +76,7 @@ try:
     _HMM_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _HMM_AVAILABLE = False
-    def _hmm_detect_regime(returns): return {"state_en": "range", "confidence": 0.5}
+    def _hmm_detect_regime(returns, as_of=None, **_kw): return {"state_en": "range", "confidence": 0.5}
     def _hmm_multiplier(r): return {"zone_width": 1.0, "confirm_buffer": 1.0, "stop_buffer": 1.0}
 
 # ── [2.3] 离线自校准参数加载器（可选，无则用默认参数）───────────────────────────────
@@ -356,7 +356,12 @@ def _theory_multipliers(fusion_result: dict[str, Any] | None, index_returns: lis
             if hmm_state:
                 hmm_result = {"state_en": hmm_state, "confidence": 0.8}
             else:
-                hmm_result = _hmm_detect_regime(index_returns)
+                try:
+                    from trader_shared.cn_time import today_cn
+                    _as_of = today_cn()
+                except Exception:
+                    _as_of = None
+                hmm_result = _hmm_detect_regime(index_returns, as_of=_as_of)
             hmm_mult = _hmm_multiplier(hmm_result)
             for k in ("zone_width", "confirm_buffer", "stop_buffer"):
                 base = multipliers.get(k, 1.0)

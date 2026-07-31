@@ -160,8 +160,13 @@ def _fetch_from_tushare(symbol: str, days: int = 30) -> list[dict[str, Any]]:
         return []
     client = get_client()
     ts_code = _symbol_to_ts_code(symbol)
-    end_date = datetime.now().strftime("%Y%m%d")
-    start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+    try:
+        from trader_shared.cn_time import today_cn
+        _end = today_cn()
+    except Exception:
+        _end = datetime.now().date()
+    end_date = _end.strftime("%Y%m%d")
+    start_date = (_end - timedelta(days=days)).strftime("%Y%m%d")
     records = client.query_moneyflow(ts_code, start_date, end_date)
     if not records:
         return []

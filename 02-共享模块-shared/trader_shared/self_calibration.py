@@ -153,7 +153,8 @@ def _load_historical_regimes(signals: List[Dict[str, Any]]) -> Dict[str, str]:
         if len(slice_closes) >= 5:
             returns = [(slice_closes[i] - slice_closes[i-1]) / slice_closes[i-1] for i in range(1, len(slice_closes)) if slice_closes[i-1] != 0]
             try:
-                hmm_res = detect_regime(returns)
+                # 按历史交易日分桶，禁止共用墙钟 as_of 串缓存
+                hmm_res = detect_regime(returns, as_of=d)
                 regimes[d] = hmm_res.get("state_en", "range")
             except Exception:
                 regimes[d] = "range"
