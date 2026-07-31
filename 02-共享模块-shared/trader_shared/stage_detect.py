@@ -78,7 +78,15 @@ _ENV_LIMITS: dict[str, dict[str, int]] = {
     "熊市": {"single": 20, "total": 30, "init": 10},
 }
 
-_REDUCE_ACTIONS = frozenset({"减仓", "空仓/止损", "空仓 (大盘很差, 一票否决)"})
+_REDUCE_ACTIONS = frozenset({
+    "减仓",
+    "空仓/止损",
+    "空仓 (大盘很差, 一票否决)",
+    "天量天价，减仓观望",
+    "资金流出，减仓观望",
+    "空仓 (限售解禁风险)",
+    "减1/3 (高位松动)",
+})
 
 def _bearish_alignment(bars: list[dict[str, Any]], current: float) -> bool:
     """空头排列：现价在所有均线下方且 MA5<MA10<MA20（确认下跌趋势）。

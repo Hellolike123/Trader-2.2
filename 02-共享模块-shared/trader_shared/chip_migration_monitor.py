@@ -18,6 +18,26 @@ from trader_shared._logging import get_logger
 
 _logger = get_logger(__name__)
 
+
+def _today_iso() -> str:
+    try:
+        from trader_shared.cn_time import today_cn
+        return today_cn().isoformat()
+    except Exception:
+        return date.today().isoformat()
+
+
+def _prev_trading_day_iso(as_of: date | None = None) -> str:
+    """上一交易日（非日历 yesterday），供回填键查找。"""
+    try:
+        from trader_shared.cn_time import today_cn
+        from trader_shared.trading_context import _last_trading_day
+        d = as_of or today_cn()
+        return _last_trading_day(d - timedelta(days=1)).isoformat()
+    except Exception:
+        base = as_of or date.today()
+        return (base - timedelta(days=1)).isoformat()
+
 _CHIP_HISTORY_PATH = Path(os.path.expanduser("~/.trader/chip_history.json"))
 
 # 搬家警告阈值
@@ -94,7 +114,7 @@ def save_chip_snapshot(
     trade_date : str | None
         交易日期，默认今天
     """
-    today = trade_date or date.today().isoformat()
+    today = trade_date or _today_iso()
     snapshot = _build_snapshot(chip_result, today)
     if snapshot is None:
         return
@@ -150,8 +170,8 @@ def backfill_history(
     """
     history = _load_history()
 
-    # 如果已有昨天的回填数据，跳过
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    # 如果已有上一交易日的回填数据，跳过（勿用日历 yesterday：周一会 miss）
+    yesterday = _prev_trading_day_iso()
     yesterday_key = f"{target}_{yesterday}"
     if yesterday_key in history:
         _logger.debug("Chip history backfill skipped for %s: yesterday data exists", target)
@@ -280,9 +300,9 @@ def check_chip_migration(
             history = _load_history()
             prev_snapshot = history.get(target)
 
-    # 如果还是没有，尝试找昨天的回填数据
+    # 如果还是没有，尝试找上一交易日的回填数据
     if not prev_snapshot or not prev_snapshot.get("peaks"):
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        yesterday = _prev_trading_day_iso()
         yesterday_key = f"{target}_{yesterday}"
         prev_snapshot = history.get(yesterday_key)
 

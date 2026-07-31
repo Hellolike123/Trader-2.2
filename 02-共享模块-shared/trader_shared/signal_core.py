@@ -23,6 +23,9 @@ _FUSION_ACTION_MAP: dict[str, tuple[str, str, str]] = {
     "减仓": ("defensive", "bearish", "wait"),
     "空仓/止损": ("defensive", "bearish", "wait"),
     "空仓 (大盘很差, 一票否决)": ("risk_stop", "bearish", "stop"),
+    "天量天价，减仓观望": ("defensive", "bearish", "wait"),
+    "资金流出，减仓观望": ("defensive", "bearish", "wait"),
+    "空仓 (限售解禁风险)": ("risk_stop", "bearish", "stop"),
     "观望 (信号冲突)": ("observe", "neutral", "observe"),
     "等转强": ("wait_for_confirmation", "bullish_lean", "observe"),
     "回调观望": ("wait_for_confirmation", "neutral", "observe"),
@@ -397,12 +400,20 @@ def build_signal(r: dict[str, Any]) -> dict[str, Any]:
 
     raw_time = str(r.get("analysis_time") or "") or today_text()
     trade_date = raw_time.split(" ")[0]
+    try:
+        from trader_shared.structure_core import effective_stop_price
+        _eff_inv = effective_stop_price(
+            r.get("effective_stop") or r.get("stop"),
+            r.get("trailing_stop"),
+        )
+    except Exception:
+        _eff_inv = None
+    _inv_fallback = float(r.get("stop") or r.get("support") or r.get("current") or 0)
+    invalid_price = float(_eff_inv) if _eff_inv is not None else _inv_fallback
     if signal_type == "reduce":
         trigger_price = float(r.get("resistance") or r.get("confirm") or r.get("current"))
-        invalid_price = float(r.get("stop") or r.get("support") or r.get("current"))
     else:
         trigger_price = float(r.get("confirm") or r.get("resistance") or r.get("current"))
-        invalid_price = float(r.get("stop") or r.get("support") or r.get("current"))
     signal = {
         "contract": "trader_signal_v1",
         "source_skill": "trader",

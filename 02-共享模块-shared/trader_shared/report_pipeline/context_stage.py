@@ -156,7 +156,16 @@ def run_analysis_context_stage(
                         _logger.debug("[nesting] 取 %s 失败: %s", _lv, _fe)
                         _lb = None
                     if _lb:
-                        _series.append((_lv, _lb))
+                        # 区间套只用已收盘分钟棒，避免 forming OHLC 假确认/假否决
+                        try:
+                            from trader_shared.t0_price_point_engine import completed_bars
+
+                            _mins = {"30m": 30, "5m": 5, "1m": 1}.get(_lv, 5)
+                            _lb = completed_bars(_lb, _mins)
+                        except Exception as _ce:
+                            _logger.debug("[nesting] 完成棒过滤跳过 %s: %s", _lv, _ce)
+                        if _lb:
+                            _series.append((_lv, _lb))
                 if _series:
                     chan_result = confirm_nested_chain(chan_result, _series, symbol=target)
         except Exception as _nest_e:

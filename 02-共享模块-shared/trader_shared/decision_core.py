@@ -138,12 +138,26 @@ _FUSION_STATUS_MAP: dict[str, str] = {
     "减仓": "冲高减仓",
     "空仓/止损": "暂不碰",
     "空仓 (大盘很差, 一票否决)": "暂不碰",
+    "天量天价，减仓观望": "冲高减仓",
+    "资金流出，减仓观望": "冲高减仓",
+    "空仓 (限售解禁风险)": "暂不碰",
     "观望 (信号冲突)": "防守观察",
     "等转强": "等转强",
     "等转强 (多方主导但有分歧)": "等转强",  # 兼容旧版
     "回调观望": "防守观察",
     "高位观望": "暂不碰",
 }
+
+# 融合否决/减仓类 action（与 fusion_core 产出字符串对齐）
+_FUSION_REDUCE_ACTIONS = frozenset({
+    "减仓",
+    "空仓/止损",
+    "空仓 (大盘很差, 一票否决)",
+    "天量天价，减仓观望",
+    "资金流出，减仓观望",
+    "空仓 (限售解禁风险)",
+    "减1/3 (高位松动)",
+})
 
 
 def _check_theory_breakout(
@@ -437,13 +451,12 @@ def status_layers(
 
     # ── 低置信度冲突标记 ──
     # fusion 说减仓但置信度不够覆盖 theory_status 时，标记冲突让下游感知
-    _reduce_action_set = {"减仓", "空仓/止损", "空仓 (大盘很差, 一票否决)"}
     _neutral_theory_set = {"修复观察", "承接存在", "未确认转强", "等转强"}
     theory_fusion_conflict = (
         not fusion_override_used
         and isinstance(fusion_result, dict)
         and safe_float(fusion_result, "confidence") < FUSION_CONFIDENCE_THRESHOLD
-        and str(fusion_result.get("action") or "").strip() in _reduce_action_set
+        and str(fusion_result.get("action") or "").strip() in _FUSION_REDUCE_ACTIONS
         and theory_status in _neutral_theory_set
     )
 

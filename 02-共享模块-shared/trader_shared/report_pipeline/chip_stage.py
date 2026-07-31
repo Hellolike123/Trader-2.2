@@ -186,7 +186,14 @@ def run_chip_enrichment_stage(
         _support_f = float(support) if support else 0
         _resistance_f = float(resistance) if resistance else 0
         if res_d_closes and len(res_d_closes) >= 10:
-            bars_60m = aggregate_5m_to_60m(bars_5m) if bars_5m else []
+            # 60m 只用已收盘 5m，避免未完成棒抬高卖出 timing → fusion 置信
+            _bars_5m_done = bars_5m or []
+            try:
+                from trader_shared.t0_price_point_engine import completed_5m_bars
+                _bars_5m_done = completed_5m_bars(_bars_5m_done) if _bars_5m_done else []
+            except Exception:
+                pass
+            bars_60m = aggregate_5m_to_60m(_bars_5m_done) if _bars_5m_done else []
             monthly_bars = list(getattr(snapshot, "monthly_bars", None) or []) if snapshot else []
             if not monthly_bars and provider is not None and snapshot is not None:
                 try:

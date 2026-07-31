@@ -579,8 +579,20 @@ def _check_volume_vacuum_t0(plan: dict[str, Any]) -> str | None:
     try:
         from trader_shared.volume_profile import check_volume_vacuum
         data = plan.get("data") or {}
-        # 优先用 30m 线（日内视角好），其次用 15m
-        bars = data.get("kline_30m") or data.get("kline_15m") or data.get("kline_5m")
+        # 优先用已收盘 30m（日内视角好），其次 15m / 5m
+        try:
+            from trader_shared.t0_price_point_engine import (
+                completed_5m_bars,
+                completed_15m_bars,
+                completed_30m_bars,
+            )
+            bars = (
+                completed_30m_bars(data.get("kline_30m") or [])
+                or completed_15m_bars(data.get("kline_15m") or [])
+                or completed_5m_bars(data.get("kline_5m") or [])
+            )
+        except Exception:
+            bars = data.get("kline_30m") or data.get("kline_15m") or data.get("kline_5m")
         if not bars:
             return None
         current = float(plan.get("current_price") or 0)

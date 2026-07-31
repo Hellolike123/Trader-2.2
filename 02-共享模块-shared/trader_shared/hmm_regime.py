@@ -427,7 +427,7 @@ def detect_regime(
         volume_ratio: 近 5 日均成交额 / 前 5 日均成交额（>1 放量，<1 缩量）。
                       None 时回退到 1D 模型（向后兼容）。
         as_of: 会话日（YYYY-MM-DD 或 date）；回测/复盘传入数据日，避免墙钟串缓存。
-               缺省为 date.today()。
+               缺省为 today_cn()（上海自然日）。
 
     Returns:
         与 HMMRegimeDetector.fit_predict() 相同的结果字典
@@ -437,12 +437,19 @@ def detect_regime(
     # P2 Fix: 入口清洗 None/NaN，避免缓存 key 格式化与 np.array 双重崩溃
     returns = _clean_floats(returns)
 
+    def _default_today() -> str:
+        try:
+            from trader_shared.cn_time import today_cn
+            return today_cn().isoformat()
+        except Exception:
+            return date.today().isoformat()
+
     if as_of is None:
-        today_str = date.today().isoformat()
+        today_str = _default_today()
     elif isinstance(as_of, date):
         today_str = as_of.isoformat()
     else:
-        today_str = str(as_of)[:10] or date.today().isoformat()
+        today_str = str(as_of)[:10] or _default_today()
     # 跨会话日清缓存
     if _HMM_CACHE_DATE != today_str:
         _HMM_CACHE.clear()

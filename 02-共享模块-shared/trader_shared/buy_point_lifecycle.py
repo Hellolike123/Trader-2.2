@@ -249,7 +249,11 @@ def _trade_date_from_report(report: dict[str, Any]) -> str:
         d = bars[-1].get("date") or bars[-1].get("trade_date")
         if d:
             return str(d)[:10]
-    return date.today().isoformat()
+    try:
+        from trader_shared.cn_time import today_cn
+        return today_cn().isoformat()
+    except Exception:
+        return date.today().isoformat()
 
 
 def _symbol_from_report(report: dict[str, Any]) -> str:
@@ -289,7 +293,14 @@ def reconcile_with_store(
     """L2：对照持久化失败记录，禁止接旧 signal_id；站回签发新 id。"""
     out = dict(life) if isinstance(life, dict) else {}
     sym = _symbol_key(symbol)
-    td = str(trade_date or "")[:10] or date.today().isoformat()
+    if str(trade_date or "").strip()[:10]:
+        td = str(trade_date)[:10]
+    else:
+        try:
+            from trader_shared.cn_time import today_cn
+            td = today_cn().isoformat()
+        except Exception:
+            td = date.today().isoformat()
     lid = _f(out.get("lid_price"))
     status = str(out.get("status") or "none")
     prev = load_failed_record(sym, path=path) if sym else None

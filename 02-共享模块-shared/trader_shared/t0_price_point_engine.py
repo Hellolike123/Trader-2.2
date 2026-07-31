@@ -128,15 +128,25 @@ def is_trade_time(now: datetime) -> bool:
     return (time(9, 30) <= current <= time(11, 30)) or (time(13, 0) <= current <= time(15, 0))
 
 
-def completed_5m_bars(bars: list[dict[str, Any]], now: datetime | None = None) -> list[dict[str, Any]]:
+def completed_bars(
+    bars: list[dict[str, Any]],
+    bar_minutes: int,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """只保留已收盘完成的分钟棒（防未收盘 OHLC 污染结构/区间套）。
+
+    bar 时间戳视为该棒起点；起点 + bar_minutes <= now 才算完成。
+    """
     if not bars:
         return []
+    minutes = max(int(bar_minutes or 0), 1)
     if now is None:
         try:
             from trader_shared.cn_time import now_cn
             now = now_cn()
         except Exception:
             now = datetime.now()
+    cutoff = now.replace(second=0, microsecond=0)
     completed: list[dict[str, Any]] = []
     for bar in bars:
         if bar is None:
@@ -147,9 +157,21 @@ def completed_5m_bars(bars: list[dict[str, Any]], now: datetime | None = None) -
             continue
         if dt.date() < now.date():
             completed.append(bar)
-        elif dt + timedelta(minutes=5) <= now.replace(second=0, microsecond=0):
+        elif dt + timedelta(minutes=minutes) <= cutoff:
             completed.append(bar)
     return completed
+
+
+def completed_5m_bars(bars: list[dict[str, Any]], now: datetime | None = None) -> list[dict[str, Any]]:
+    return completed_bars(bars, 5, now)
+
+
+def completed_15m_bars(bars: list[dict[str, Any]], now: datetime | None = None) -> list[dict[str, Any]]:
+    return completed_bars(bars, 15, now)
+
+
+def completed_30m_bars(bars: list[dict[str, Any]], now: datetime | None = None) -> list[dict[str, Any]]:
+    return completed_bars(bars, 30, now)
 
 
 def today_bars(bars: list[dict[str, Any]], now: datetime | None = None) -> list[dict[str, Any]]:
@@ -220,8 +242,15 @@ def find_key_levels(report_data: dict[str, Any], structure_result: dict[str, Any
     quote = report_data["quote"]
     daily = report_data["daily_bars"]
     bars_5m = report_data["kline_5m_completed"]
-    bars_15m = report_data.get("kline_15m") or []
-    bars_30m = report_data.get("kline_30m") or []
+    # 15m/30m 与 5m 同口径：只用已收盘棒，避免未完成 OHLC 抬拉 S/R
+    if "kline_15m_completed" in report_data:
+        bars_15m = report_data.get("kline_15m_completed") or []
+    else:
+        bars_15m = completed_15m_bars(report_data.get("kline_15m") or [])
+    if "kline_30m_completed" in report_data:
+        bars_30m = report_data.get("kline_30m_completed") or []
+    else:
+        bars_30m = completed_30m_bars(report_data.get("kline_30m") or [])
     current = float(report_data["current_price"])
     vwap = calculate_vwap_from_bars(today_bars(bars_5m))
     recent5 = daily[-5:] if len(daily) >= 5 else daily
@@ -1330,6 +1359,8 @@ def build_price_point_model(report_data: dict[str, Any], structure_result: dict[
             now = datetime.now()
     completed = completed_5m_bars(data.get("kline_5m") or [], now)
     data["kline_5m_completed"] = completed
+    data["kline_15m_completed"] = completed_15m_bars(data.get("kline_15m") or [], now)
+    data["kline_30m_completed"] = completed_30m_bars(data.get("kline_30m") or [], now)
     status_value = data_status(data.get("quote") or {}, data.get("daily_bars") or [], completed, now)
     data["data_status"] = status_value
     key_levels = find_key_levels(data, structure_result=structure_result)
