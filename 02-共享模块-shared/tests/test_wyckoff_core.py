@@ -1295,9 +1295,50 @@ class TestSpringWithFrozenBoard:
             assert result.get("spring_vol_class") != "high_vol_warning"
 
 
+class TestUpthrustSpringSymmetry:
+    """Upthrust 与 Spring 对齐：一字板 / 区间闸 / 2 根内回落。"""
+
+    def test_frozen_board_skips_upthrust(self):
+        bars = [_make_bar(100, 110, 95, 105) for _ in range(14)]
+        # 本可构成 UT 的高点，但一字板
+        bars.append({"open": 113, "high": 113, "low": 113, "close": 113, "volume": 5000})
+        from trader_shared.wyckoff_events import _detect_upthrust
+        ut = _detect_upthrust(bars)
+        assert ut["upthrust_signal"] is False
+        assert "一字板" in (ut.get("upthrust_reason") or "")
+
+    def test_upthrust_rejects_slow_fallback(self):
+        """TR 上沿被突破后未在 2 根内回落 → 即使日后跌回也不算 UT。"""
+        from trader_shared.wyckoff_events import _detect_upthrust
+        bars = [_make_bar(100, 105, 98, 102) for _ in range(12)]
+        bars.append(_make_bar(104, 112, 103, 111, 2000))  # 突破
+        bars.append(_make_bar(111, 113, 110, 112, 2000))  # 仍站上
+        bars.append(_make_bar(112, 114, 111, 113, 2000))  # 仍站上
+        bars.append(_make_bar(110, 112, 99, 100, 2000))   # 才跌回
+        tr_ctx = {"tr_upper": 105.0, "tr_lower": 98.0, "in_tr": False}
+        ut = _detect_upthrust(bars, tr_ctx=tr_ctx)
+        assert ut["upthrust_signal"] is False
+        assert "2根内" in (ut.get("upthrust_reason") or "")
+
+    def test_upthrust_accepts_next_day_reclaim(self):
+        """昨突破站上、今再刺穿并收回收 → 当前棒计入 2 根窗口，应报 UT。"""
+        from trader_shared.wyckoff_events import _detect_upthrust
+        bars = [_make_bar(100, 105, 98, 102, 1000) for _ in range(12)]
+        bars.append(_make_bar(104, 112, 103, 111, 2500))  # 昨：突破站上
+        bars.append(_make_bar(110, 113, 99, 100, 2500))   # 今：再刺穿后回落
+        tr_ctx = {"tr_upper": 105.0, "tr_lower": 98.0, "in_tr": False, "tr_baseline_volume": 1000}
+        ut = _detect_upthrust(bars, tr_ctx=tr_ctx)
+        assert ut["upthrust_signal"] is True, ut.get("upthrust_reason")
+
+
 # ── P2/P3 新增信号测试 ──
 
-from trader_shared.wyckoff_core import _detect_compression, _detect_trend_pullback
+from trader_shared.wyckoff_core import (
+    _detect_are,
+    _detect_compression,
+    _detect_trend_pullback,
+    _detect_trend_rally,
+)
 
 
 class TestCompression:
@@ -1387,5 +1428,63 @@ class TestFormatOnelineCompression:
         line = format_wyckoff_oneline(wyk)
         assert "趋势回踩" in line
         assert "偏多" in line
+
+    def test_are_and_trend_rally_oneline(self):
+        are_line = format_wyckoff_oneline({"are_signal": True})
+        assert "BC后快速回落" in are_line
+        assert "偏空" in are_line
+        rally_line = format_wyckoff_oneline({"trend_rally_signal": True})
+        assert "趋势反抽" in rally_line
+        assert "偏空" in rally_line
+
+
+class TestAutomaticReaction:
+    """ARE：BC 后自动回落，对称 AR。"""
+
+    def test_are_after_bc(self):
+        bars = []
+        # 低位垫底 → 拉到高位
+        for i in range(20):
+            base = 80 + i
+            bars.append(_make_bar(base, base + 2, base - 1, base + 1, 1000))
+        # BC：高位天量滞涨/收阴
+        bars.append(_make_bar(105, 108, 104, 104.5, 5000))
+        # ARE：随后 1–3 根放量跌 ≥2%
+        bars.append(_make_bar(104, 104.5, 100, 101, 4000))
+        are = _detect_are(bars)
+        assert are["are_signal"] is True, are.get("are_reason")
+        assert are["are_price"] is not None
+
+    def test_are_requires_bc(self):
+        bars = [_make_bar(100, 101, 99, 100, 1000) for _ in range(25)]
+        bars.append(_make_bar(100, 101, 95, 96, 2000))  # 普跌无 BC
+        assert _detect_are(bars)["are_signal"] is False
+
+
+class TestTrendRally:
+    """趋势反抽：对称 Trend Pullback。"""
+
+    def test_trend_rally_no_rally(self):
+        # 一直跌，没有反抽
+        bars = [
+            {"open": 150 - i, "high": 151 - i, "low": 148 - i, "close": 149 - i, "volume": 1000}
+            for i in range(30)
+        ]
+        assert _detect_trend_rally(bars)["trend_rally_signal"] is False
+
+    def test_trend_rally_short_data(self):
+        bars = [_make_bar(100, 101, 99, 100.5) for _ in range(5)]
+        assert _detect_trend_rally(bars)["trend_rally_signal"] is False
+
+    def test_trend_rally_fields_present(self):
+        bars = []
+        for i in range(20):
+            bars.append({"open": 150 - i, "high": 151 - i, "low": 148 - i, "close": 149 - i, "volume": 1000})
+        for i in range(5):
+            bars.append({"open": 130 + i * 2, "high": 131 + i * 2, "low": 129 + i * 2, "close": 130 + i * 2, "volume": 300})
+        bars.append({"open": 138, "high": 139, "low": 137, "close": 138, "volume": 400})
+        result = _detect_trend_rally(bars)
+        assert "trend_rally_signal" in result
+        assert "trend_rally_reason" in result
 
 

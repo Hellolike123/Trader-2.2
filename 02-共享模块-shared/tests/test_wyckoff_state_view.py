@@ -72,6 +72,16 @@ def test_bear_utad():
     assert "utad" in v["active_events"]
 
 
+def test_bias_are_and_trend_rally_bear():
+    assert to_wyckoff_state_view({"are_signal": True, "phase": "none"})["bias"] == "bear"
+    assert to_wyckoff_state_view({"trend_rally_signal": True, "phase": "none"})["bias"] == "bear"
+
+
+def test_bias_ar_and_trend_pullback_bull():
+    assert to_wyckoff_state_view({"ar_signal": True, "phase": "none"})["bias"] == "bull"
+    assert to_wyckoff_state_view({"trend_pullback_signal": True, "phase": "none"})["bias"] == "bull"
+
+
 def test_phase_prefix_bias_accumulation_b():
     """生产 phase 为 accumulation_a/b/...，阶段兜底 bias 须命中。"""
     v = to_wyckoff_state_view(

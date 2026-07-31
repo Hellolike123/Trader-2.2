@@ -38,12 +38,14 @@ from trader_shared.config import (
     WYCKOFF_SCORE_SOW,
     WYCKOFF_SCORE_MAX_ABS,
     WYCKOFF_SCORE_AR,
+    WYCKOFF_SCORE_ARE,
     WYCKOFF_SCORE_SOS,
     WYCKOFF_SCORE_ST,
     WYCKOFF_SCORE_LPS,
     WYCKOFF_SCORE_LPSY,
     WYCKOFF_SCORE_COMPRESSION,
     WYCKOFF_SCORE_TREND_PB,
+    WYCKOFF_SCORE_TREND_RALLY,
     WYCKOFF_SCORE_PS,
     WYCKOFF_SCORE_PSY,
     WYCKOFF_SCORE_BU,
@@ -84,6 +86,7 @@ from .wyckoff_events import (
     _board_vol_scale,
     _compute_dynamic_support,
     _detect_ar,
+    _detect_are,
     _detect_buying_climax,
     _detect_compression,
     _detect_effort_vs_result,
@@ -95,6 +98,7 @@ from .wyckoff_events import (
     _detect_spring,
     _detect_st,
     _detect_trend_pullback,
+    _detect_trend_rally,
     _detect_upthrust,
     _detect_volume_divergence,
     _is_bc_high_position,
@@ -119,6 +123,7 @@ def _resolve_score_conflicts(analysis: dict) -> set[str]:
     - SC vs SOW：有 AR/Spring/积累确认 → 抑 SOW；否则抑 SC（破位叙事）
     - Spring vs UT：premature 先抑；否则积累侧/SOS 抑 UT，派发侧/SOW 抑 Spring
     - LPS vs LPSY：有派发背景只计 LPSY，否则只计 LPS
+    - AR vs ARE / TrendPB vs TrendRally：按积累/派发极性抑一侧；两边都有或都无则双侧抑
     - 双背离同时：都抑（冲突）
     - UTAD 成立时普通 UT 分不再重复计（只计 UTAD）
     """
@@ -131,6 +136,32 @@ def _resolve_score_conflicts(analysis: dict) -> set[str]:
     lpsy = bool(analysis.get("lpsy_signal"))
     bull = bool(analysis.get("bullish_volume_divergence"))
     bear = bool(analysis.get("bearish_volume_divergence"))
+    ar = bool(analysis.get("ar_signal"))
+    are = bool(analysis.get("are_signal"))
+    tpb = bool(analysis.get("trend_pullback_signal"))
+    trally = bool(analysis.get("trend_rally_signal"))
+
+    has_acc = any(
+        analysis.get(k)
+        for k in (
+            "sc_signal",
+            "spring_signal",
+            "sos_signal",
+            "st_signal",
+            "bu_signal",
+            "accumulation_confirmed",
+        )
+    )
+    has_dist = any(
+        analysis.get(k)
+        for k in (
+            "bc_signal",
+            "upthrust_signal",
+            "sow_signal",
+            "utad_signal",
+            "distribution_confirmed",
+        )
+    )
 
     if sc and sow:
         if (
@@ -169,13 +200,28 @@ def _resolve_score_conflicts(analysis: dict) -> set[str]:
             suppress.add("upthrust_signal")
 
     if lps and lpsy:
-        has_dist = any(
-            analysis.get(k) for k in ("bc_signal", "upthrust_signal", "sow_signal", "utad_signal")
-        )
         if has_dist:
             suppress.add("lps_signal")
         else:
             suppress.add("lpsy_signal")
+
+    if ar and are:
+        if has_dist and not has_acc:
+            suppress.add("ar_signal")
+        elif has_acc and not has_dist:
+            suppress.add("are_signal")
+        else:
+            suppress.add("ar_signal")
+            suppress.add("are_signal")
+
+    if tpb and trally:
+        if has_dist and not has_acc:
+            suppress.add("trend_pullback_signal")
+        elif has_acc and not has_dist:
+            suppress.add("trend_rally_signal")
+        else:
+            suppress.add("trend_pullback_signal")
+            suppress.add("trend_rally_signal")
 
     if bull and bear:
         suppress.add("bullish_volume_divergence")
@@ -198,6 +244,7 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
             "bearish_volume_divergence": False, "bullish_volume_divergence": False,
             # 新增信号
             "ar_signal": False, "ar_reason": "数据不足", "ar_price": None,
+            "are_signal": False, "are_reason": "数据不足", "are_price": None,
             "sos_signal": False, "sos_reason": "数据不足", "sos_price": None,
             "st_signal": False, "st_reason": "数据不足", "st_price": None,
             "lps_signal": False, "lps_reason": "数据不足", "lps_price": None,
@@ -218,6 +265,9 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
             # 五阶段机原典串联：过早信号标注（数据不足时全 False）
             "spring_premature": False,
             "upthrust_premature": False,
+            "compression_signal": False, "compression_reason": "数据不足", "compression_price": None,
+            "trend_pullback_signal": False, "trend_pullback_reason": "数据不足", "trend_pullback_price": None,
+            "trend_rally_signal": False, "trend_rally_reason": "数据不足", "trend_rally_price": None,
         }
 
     # P2-2: 动态支撑位计算（多源集成）— 仅用于 Spring 检测
@@ -236,6 +286,7 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
     sow = _detect_sign_of_weakness(bars, tr_ctx=tr_ctx)  # SOW 使用自己的支撑位计算（处理 consecutive 逻辑）
     bearish_div, bullish_div = _detect_volume_divergence(bars)
     ar = _detect_ar(bars, tr_ctx=tr_ctx)
+    are = _detect_are(bars, tr_ctx=tr_ctx)
     sos = _detect_sos(bars, tr_ctx=tr_ctx)
     st = _detect_st(bars, tr_ctx=tr_ctx)
     lps = _detect_lps(bars, tr_ctx=tr_ctx)
@@ -265,6 +316,7 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
     # P2/P3: 新增信号
     compression = _detect_compression(bars)
     trend_pullback = _detect_trend_pullback(bars)
+    trend_rally = _detect_trend_rally(bars)
     # P0-5: 事件簇确认 — 将孤立信号升级为可信的积累/派发事件簇（校验先后顺序 + strength 定级）
     cluster = _detect_event_cluster(bars, tr_ctx=tr_ctx)
 
@@ -276,12 +328,14 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "sc_signal": sc["sc_signal"],
         "sow_signal": sow["sow_signal"],
         "ar_signal": ar["ar_signal"],
+        "are_signal": are["are_signal"],
         "sos_signal": sos["sos_signal"],
         "st_signal": st["st_signal"],
         "lps_signal": lps["lps_signal"],
         "lpsy_signal": lpsy["lpsy_signal"],
         "compression_signal": compression["compression_signal"],
         "trend_pullback_signal": trend_pullback["trend_pullback_signal"],
+        "trend_rally_signal": trend_rally["trend_rally_signal"],
         "bu_signal": bu.get("bu_signal"),
         "utad_signal": utad.get("utad_signal"),
         "ps_signal": ps.get("ps_signal"),
@@ -325,6 +379,8 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         parts.append(f"弱势警告(不计分): {sow['sow_reason']}")
     if ar["ar_signal"]:
         parts.append(f"自动反弹: {ar['ar_reason']}")
+    if are["are_signal"]:
+        parts.append(f"自动回落: {are['are_reason']}")
     if sos["sos_signal"]:
         parts.append(f"强势信号: {sos['sos_reason']}")
     if st["st_signal"]:
@@ -355,6 +411,8 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         parts.append(f"压缩蓄势: {compression['compression_reason']}")
     if trend_pullback["trend_pullback_signal"]:
         parts.append(f"趋势回踩: {trend_pullback['trend_pullback_reason']}")
+    if trend_rally["trend_rally_signal"]:
+        parts.append(f"趋势反抽: {trend_rally['trend_rally_reason']}")
     if ce.get("cause_effect_up_target") is not None:
         parts.append(
             f"因果目标↑{ce['cause_effect_up_target']}/↓{ce['cause_effect_down_target']}"
@@ -400,6 +458,9 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "ar_signal": ar["ar_signal"],
         "ar_reason": ar["ar_reason"],
         "ar_price": round(ar["ar_price"], 2) if ar["ar_signal"] else None,
+        "are_signal": are["are_signal"],
+        "are_reason": are["are_reason"],
+        "are_price": round(are["are_price"], 2) if are["are_signal"] else None,
         "sos_signal": sos["sos_signal"],
         "sos_reason": sos["sos_reason"],
         "sos_price": round(sos["sos_price"], 2) if sos["sos_signal"] else None,
@@ -450,6 +511,9 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "trend_pullback_signal": trend_pullback["trend_pullback_signal"],
         "trend_pullback_reason": trend_pullback["trend_pullback_reason"],
         "trend_pullback_price": trend_pullback["trend_pullback_price"],
+        "trend_rally_signal": trend_rally["trend_rally_signal"],
+        "trend_rally_reason": trend_rally["trend_rally_reason"],
+        "trend_rally_price": trend_rally["trend_rally_price"],
         # P0-3: TR 识别层透出
         "tr_upper": tr_ctx["tr_upper"] if tr_ctx else None,
         "tr_lower": tr_ctx["tr_lower"] if tr_ctx else None,
@@ -627,10 +691,15 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
 
     # ── 新增经典信号 ──
 
-    # 8. AR (Automatic Rally) — SC 后自动反弹（⑥B）
-    if analysis.get("ar_signal"):
+    # 8. AR (Automatic Rally) — SC 后自动反弹
+    if analysis.get("ar_signal") and "ar_signal" not in suppress:
         raw += WYCKOFF_SCORE_AR
         signals.append(f"AR 反弹 +{WYCKOFF_SCORE_AR}")
+
+    # 8b. ARE (Automatic Reaction) — BC 后自动回落（对称 AR）
+    if analysis.get("are_signal") and "are_signal" not in suppress:
+        raw += WYCKOFF_SCORE_ARE
+        signals.append(f"ARE 回落 {WYCKOFF_SCORE_ARE}")
 
     # 9. SOS (Sign of Strength) — 强势突破
     if analysis.get("sos_signal"):
@@ -652,10 +721,15 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
         raw += WYCKOFF_SCORE_COMPRESSION
         signals.append(f"压缩蓄势 +{WYCKOFF_SCORE_COMPRESSION}")
 
-    # 13. P3: Trend Pullback — 趋势回踩
-    if analysis.get("trend_pullback_signal"):
+    # 13. P3: Trend Pullback — 趋势回踩（多）
+    if analysis.get("trend_pullback_signal") and "trend_pullback_signal" not in suppress:
         raw += WYCKOFF_SCORE_TREND_PB
         signals.append(f"趋势回踩 +{WYCKOFF_SCORE_TREND_PB}")
+
+    # 13b. Trend Rally — 趋势反抽（空，对称回踩）
+    if analysis.get("trend_rally_signal") and "trend_rally_signal" not in suppress:
+        raw += WYCKOFF_SCORE_TREND_RALLY
+        signals.append(f"趋势反抽 {WYCKOFF_SCORE_TREND_RALLY}")
 
     # 14. SC (Selling Climax) — 卖力高潮，看多
     if sc_on:
@@ -874,6 +948,8 @@ def resolve_wyckoff_primary(
         code, cn, main, note, d = "SOWw", "弱势警告", "日内刺穿支撑后收回", "仅警告，未收盘确认，不计分", 0
     elif wyk.get("ar_signal"):
         code, cn, main, note, d = "AR", "自动反弹", "SC后快速反弹", "仅反弹，还不能当反转", 1
+    elif wyk.get("are_signal"):
+        code, cn, main, note, d = "ARE", "自动回落", "BC后快速回落", "仅回落，还不能当反转空", -1
     elif wyk.get("sc_signal"):
         code, cn, main, note, d = "SC", "卖力高潮", "天量宽幅下跌", "卖力高潮，抛压宣泄后可能止跌", 1
     elif wyk.get("st_signal"):
@@ -890,6 +966,8 @@ def resolve_wyckoff_primary(
         code, cn, main, note, d = "Compression", "压缩蓄势", "压缩蓄势", "振幅收窄+量能枯竭，突破在即", 1
     elif wyk.get("trend_pullback_signal"):
         code, cn, main, note, d = "TrendPullback", "趋势回踩", "趋势回踩", "回踩不破均线，趋势延续", 1
+    elif wyk.get("trend_rally_signal"):
+        code, cn, main, note, d = "TrendRally", "趋势反抽", "趋势反抽", "反抽不过均线，跌势延续", -1
     elif wyk.get("bullish_volume_divergence") and not wyk.get("bearish_volume_divergence"):
         code, cn, main, note, d = "BullDiv", "看多背离", "下跌缩量", "抛压减轻，有止跌迹象", 1
     elif wyk.get("bearish_volume_divergence") and not wyk.get("bullish_volume_divergence"):
@@ -1087,9 +1165,11 @@ def format_wyckoff_oneline(
     """报告用威科夫一行人话（结论 + 白话，不拆第二行）。
 
     优先级与 fusion 主信号大致对齐：
-      Spring > SOS > UT > BC > SOW > LPSY > SC > AR > ST > LPS > Compression > TrendPullback > 背离 > 无信号
+      Spring > SOS > UT > BC > SOW > LPSY > SC > AR/ARE > ST > LPS > Compression >
+      TrendPullback/TrendRally > 背离 > 无信号
     LPSY（最后供应点）在 SOW 之前：派发 D 阶段信号比 C 阶段更接近 breakdown。
     SC（卖力高潮）在 AR 之前：SC 是积累启动的原发事件，AR 是 SC 后的跟随反弹。
+    ARE / TrendRally 为派发侧对称（BC 后回落 / 跌势中反抽不过均线）。
 
     Args:
         wyckoff: 威科夫分析结果 dict

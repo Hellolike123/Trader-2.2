@@ -66,6 +66,7 @@ from .wyckoff_events import (
     _board_vol_scale,
     _compute_dynamic_support,
     _detect_ar,
+    _detect_are,
     _detect_buying_climax,
     _detect_compression,
     _detect_effort_vs_result,
@@ -77,6 +78,7 @@ from .wyckoff_events import (
     _detect_spring,
     _detect_st,
     _detect_trend_pullback,
+    _detect_trend_rally,
     _detect_upthrust,
     _detect_volume_divergence,
     _is_bc_high_position,
@@ -189,6 +191,9 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
     ar_found = bool(signals.get("ar_signal")) or _scan_for_signal(
         wide_bars, _detect_ar, window=18, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
     )
+    are_found = bool(signals.get("are_signal")) or _scan_for_signal(
+        wide_bars, _detect_are, window=18, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
+    )
     ut_found = bool(signals.get("upthrust_signal")) or _scan_for_signal(
         wide_bars, _detect_upthrust, window=15, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
     )
@@ -219,6 +224,9 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
     trend_pullback = bool(signals.get("trend_pullback_signal")) or _scan_for_signal(
         wide_bars, _detect_trend_pullback, window=15, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
     )
+    trend_rally = bool(signals.get("trend_rally_signal")) or _scan_for_signal(
+        wide_bars, _detect_trend_rally, window=15, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
+    )
 
     # ── 原典顺序校验：事件索引 — Spring/UT 必须在 Phase B 之后才有效 ────────
     # 计算各事件在 wide_bars 中的最后触发索引（若索引数组已排序则取最后出现位置）
@@ -227,17 +235,21 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
     sc_idx, _ = _scan_last_event(wide_bars, _detect_selling_climax, tr_ctx, window=15, step=1)
     bc_idx, _ = _scan_last_event(wide_bars, _detect_buying_climax, tr_ctx, window=15, step=1)
     ar_idx, _ = _scan_last_event(wide_bars, _detect_ar, tr_ctx, window=18, step=1)
+    are_idx, _ = _scan_last_event(wide_bars, _detect_are, tr_ctx, window=18, step=1)
     comp_idx, _ = _scan_last_event(wide_bars, _detect_compression, tr_ctx, window=20, step=1)
 
     # Phase B（建仓区）背景：
     #   积累：SC+AR（原典 Automatic Rally）或压缩蓄力
-    #   派发（⑥B）：不再用 BC+AR（AR 已只绑 SC）；改靠 BC+(压缩/SOW) 或压缩蓄力
+    #   派发：BC+ARE（Automatic Reaction）或 BC+(压缩/SOW) 或压缩蓄力
     # 判断来源：bar 索引（_scan_last_event）+ signals dict（信号覆盖）双源合并
     sc_ar_b_ctx = (sc_idx >= 0 and ar_idx >= 0) or \
                   (signals.get("sc_signal") and signals.get("ar_signal"))
     has_compression = comp_idx >= 0 or signals.get("compression_signal")
+    bc_are_b_ctx = (bc_idx >= 0 and are_idx >= 0) or \
+                   (signals.get("bc_signal") and signals.get("are_signal"))
     bc_dist_b_ctx = (
-        (bc_idx >= 0 and (comp_idx >= 0 or sow_found))
+        bc_are_b_ctx
+        or (bc_idx >= 0 and (comp_idx >= 0 or sow_found))
         or (
             signals.get("bc_signal")
             and (signals.get("compression_signal") or signals.get("sow_signal"))
@@ -258,7 +270,7 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
         spring_premature = False
 
     if ut_idx >= 0:
-        dist_b_ctx_idx = max(bc_idx, comp_idx)
+        dist_b_ctx_idx = max(bc_idx, are_idx, comp_idx)
         upthrust_premature = not (dist_b_ctx and ut_idx > dist_b_ctx_idx)
     elif ut_found:
         upthrust_premature = not dist_b_ctx
@@ -328,7 +340,15 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
             "upthrust_premature": upthrust_premature,
         }
     # P2: Compression = 积累期 B 末期（压缩蓄力）
-    if compression:
+    # 有派发极性时不得抢在 BC/ARE/SOW/UT 之前盖成积累 B（否则派发 A 永远到不了）
+    _dist_polarity = bool(
+        bc_found
+        or are_found
+        or sow_found
+        or (ut_found and not upthrust_premature)
+        or signals.get("distribution_confirmed")
+    )
+    if compression and not _dist_polarity:
         return {
             "phase": "accumulation_b",
             "phase_label": "积累期 B（压缩蓄力）",
@@ -336,16 +356,8 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
             "spring_premature": spring_premature,
             "upthrust_premature": upthrust_premature,
         }
-    # P3: Trend Pullback = 积累期 D 趋势确认
-    if trend_pullback:
-        return {
-            "phase": "accumulation_d",
-            "phase_label": "积累期 D（趋势回踩确认）",
-            "phase_confidence_delta": 0.08,
-            "spring_premature": spring_premature,
-            "upthrust_premature": upthrust_premature,
-        }
     # 新增：SC（卖力高潮）→ 积累期 A，正式识别停止行为
+    # （须在裸 TrendPullback 之前，避免 SC/AR 被回踩盖成 D）
     if sc_found and ar_found:
         return {
             "phase": "accumulation_a",
@@ -371,6 +383,15 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
             "spring_premature": spring_premature,
             "upthrust_premature": upthrust_premature,
         }
+    # P3: Trend Pullback = 积累期 D 趋势确认（停止行为之后）
+    if trend_pullback:
+        return {
+            "phase": "accumulation_d",
+            "phase_label": "积累期 D（趋势回踩确认）",
+            "phase_confidence_delta": 0.08,
+            "spring_premature": spring_premature,
+            "upthrust_premature": upthrust_premature,
+        }
 
     # ── 派发序列 ──
     # LPSY（最后供应点）→ 派发期 D；需要前置派发背景（BC/UT/SOW 至少一个）
@@ -391,7 +412,7 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
             "spring_premature": spring_premature,
             "upthrust_premature": upthrust_premature,
         }
-    # UT 必须先经 Phase B（BC+压缩/SOW 或压缩蓄力）才有效
+    # UT 必须先经 Phase B（BC+ARE/压缩/SOW 或压缩蓄力）才有效
     if not upthrust_premature and ut_found and sow_found:
         return {
             "phase": "distribution_c",
@@ -400,7 +421,25 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
             "spring_premature": spring_premature,
             "upthrust_premature": False,
         }
-    # ⑥B：派发 A 加强靠 BC+压缩/SOW，不再用 BC+AR（AR 只服务积累）
+    # 对称 Spring+TrendPullback：UT+TrendRally → 派发 D
+    if not upthrust_premature and ut_found and trend_rally:
+        return {
+            "phase": "distribution_d",
+            "phase_label": "派发期 D（确认：UT+趋势反抽）",
+            "phase_confidence_delta": -0.12,
+            "spring_premature": spring_premature,
+            "upthrust_premature": False,
+        }
+    # 派发 A：BC+ARE（对称 SC+AR），或 BC+压缩/SOW
+    # （须在裸 TrendRally 之前，避免 BC/ARE 被反抽盖成 D）
+    if bc_found and are_found:
+        return {
+            "phase": "distribution_a",
+            "phase_label": "派发期 A（停止：BC+ARE）",
+            "phase_confidence_delta": -0.10,
+            "spring_premature": spring_premature,
+            "upthrust_premature": upthrust_premature,
+        }
     if bc_found and (has_compression or sow_found):
         return {
             "phase": "distribution_a",
@@ -414,6 +453,24 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
             "phase": "distribution_a",
             "phase_label": "派发期 A（购买高潮：BC）",
             "phase_confidence_delta": -0.05,
+            "spring_premature": spring_premature,
+            "upthrust_premature": upthrust_premature,
+        }
+    # ARE 且无 BC：可能是派发自动回落（弱背景）
+    if are_found and not sc_found:
+        return {
+            "phase": "distribution_b",
+            "phase_label": "派发期 B（辅助：ARE无BC）",
+            "phase_confidence_delta": -0.05,
+            "spring_premature": spring_premature,
+            "upthrust_premature": upthrust_premature,
+        }
+    # Trend Rally：跌势中反抽不过均线 → 派发 D（停止行为之后）
+    if trend_rally:
+        return {
+            "phase": "distribution_d",
+            "phase_label": "派发期 D（趋势反抽确认）",
+            "phase_confidence_delta": -0.08,
             "spring_premature": spring_premature,
             "upthrust_premature": upthrust_premature,
         }

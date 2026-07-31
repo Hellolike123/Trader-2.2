@@ -19,6 +19,7 @@ _EVENT_SPECS: list[tuple[str, str, str]] = [
     ("ps", "ps_signal", "ps_reason"),
     ("sc", "sc_signal", "sc_reason"),
     ("ar", "ar_signal", "ar_reason"),
+    ("are", "are_signal", "are_reason"),
     ("st", "st_signal", "st_reason"),
     ("spring", "spring_signal", "spring_reason"),
     ("sos", "sos_signal", "sos_reason"),
@@ -32,6 +33,7 @@ _EVENT_SPECS: list[tuple[str, str, str]] = [
     ("lpsy", "lpsy_signal", "lpsy_reason"),
     ("compression", "compression_signal", "compression_reason"),
     ("trend_pullback", "trend_pullback_signal", "trend_pullback_reason"),
+    ("trend_rally", "trend_rally_signal", "trend_rally_reason"),
 ]
 
 Bias = Literal["bull", "bear", "neutral"]
@@ -120,6 +122,8 @@ def _bias_from_analysis(wyk: dict[str, Any]) -> Bias:
         return "bear"
     if wyk.get("upthrust_signal") and not wyk.get("upthrust_premature"):
         return "bear"
+    if wyk.get("are_signal") or wyk.get("trend_rally_signal"):
+        return "bear"
     if wyk.get("spring_signal") and not wyk.get("spring_premature"):
         if wyk.get("spring_strength") == "failure":
             return "bear"
@@ -131,6 +135,8 @@ def _bias_from_analysis(wyk: dict[str, Any]) -> Bias:
             return "neutral"
         return "bull"
     if wyk.get("sos_signal") or wyk.get("bu_signal") or wyk.get("lps_signal"):
+        return "bull"
+    if wyk.get("ar_signal") or wyk.get("trend_pullback_signal"):
         return "bull"
     if wyk.get("ps_signal") or wyk.get("sc_signal"):
         return "bull"

@@ -135,6 +135,8 @@ raw bars
 
 - **一类买/卖**：下跌/上涨趋势（≥2 个**严格不重叠**同向中枢，与 `classify_structure` 拓扑一致）
   + 最后中枢**离开段**背驰 + 末两段同向笔价格新低/高 + MACD 面积减弱
+  + 离开段须**价格穿出**中枢（down 破 ZD / up 破 ZG），禁止仅时间在 `zone_end` 之后
+    （否则会出现中枢在 32、信号价在 51 的假一类买）
 - **二类买/卖**：`down_a→up→down_b` 且 `low_b>low_a` 且 `low_b<up_high`（卖点对称），
   **且前置一类在时间轴上成立**——`down_a`/`up_a` 须满足历史一类结构
   （趋势 + 离开中枢 + 若存在更早同向笔则曾创新低/高 + 力度不更强），
@@ -145,7 +147,8 @@ raw bars
   fusion 强多/强空 / C1「买点信号」/ 买点阶梯二档 **只认正式二类**，不认类二。
   一类同理：严格趋势 → 一类买/卖（conf=3）；单中枢盘整背驰 → 类一买/卖（conf=2）；
   柱序列弱确认 → 类一（conf=1）。
-- **三类买/卖**：离开中枢后回抽不入（末 3 笔内，上限 15%）
+- **三类买/卖**：离开中枢后回抽不入（末 3 笔内）；现价相对 ZG/ZD 离开幅度 **≤15%**
+  （买卖对称；超过则视为陈旧中枢，不报三买/三卖）；量能 ≥ 近20均量 ×1.2（不足放行）
 
 实现辅助：`_strict_down_trend_zones` / `_strict_up_trend_zones`、
 `_historical_type1_buy_ok` / `_historical_type1_sell_ok`（`chan_structure.py`）。
@@ -172,6 +175,10 @@ raw bars
 | 背驰 fallback 窗口 | 最近 120 根（P3 锚定后从中枢起） | `CHAN_DIVERGENCE_FALLBACK_WINDOW` |
 | 买卖信号合成 | 只走严格 detect_buy/sell_points | — |
 | 二类前置一类 | 正式二类买/卖须时间轴历史一类；无趋势可降级类二买/类二卖 | — |
+| 离开段假信号 | 一类/类一及历史一类前置：须价格破 ZD/ZG，不仅时间离开 | — |
+| 三类离开过远 | 现价相对 ZG/ZD >15% 不报三买/三卖（买卖对称） | `_THIRD_POINT_MAX_LEAVE_PCT` |
+| 三类量能 | 买/卖均要求末棒 ≥ 近20均量 ×1.2（bars 不足放行） | — |
+| 信号粘滞 | 买卖点带 `anchor_index`；`signal_id` 用锚点日；回测按结构键只计首次 | — |
 | 区间套未确认 | 买卖点 + 顶底背驰均写 `*_lower_confirmed`；fusion 降权（×0.65 / nesting ×0.55） | `TRADER_CHAN_NESTING` |
 
 > 所有行为变更须在 `test_chanlun_correctness.py` / `test_chan_core` 增补语义 golden，并刷新

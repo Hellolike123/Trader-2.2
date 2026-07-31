@@ -432,9 +432,10 @@ def test_cluster_without_tr_ctx_no_crash():
 def _sig(**kw):
     """构造 signals dict 辅助。参数名 = 信号 key（如 spring_signal=True）"""
     d = {k: False for k in ("spring_signal", "upthrust_signal", "sc_signal",
-                             "ar_signal", "bc_signal", "sos_signal", "sow_signal",
-                             "lps_signal", "lpsy_signal", "compression_signal",
-                             "trend_pullback_signal")}
+                             "ar_signal", "are_signal", "bc_signal", "sos_signal",
+                             "sow_signal", "lps_signal", "lpsy_signal",
+                             "compression_signal", "trend_pullback_signal",
+                             "trend_rally_signal")}
     d.update(kw)
     return d
 
@@ -528,6 +529,49 @@ def test_phase_ut_bc_ar_alone_not_dist_b():
     b = _super_flat(50)
     ph = _detect_phase(b, _sig(upthrust_signal=True, bc_signal=True, ar_signal=True))
     assert ph.get("upthrust_premature") is True, "无压缩/SOW 时 BC+AR 不应让 UT 生效"
+
+
+def test_phase_bc_are_not_overridden_by_compression():
+    """压缩不得把 BC+ARE 盖成积累 B。"""
+    b = _super_flat(50)
+    ph = _detect_phase(
+        b, _sig(bc_signal=True, are_signal=True, compression_signal=True)
+    )
+    assert ph["phase"] == "distribution_a"
+    assert "积累" not in ph.get("phase_label", "")
+
+
+def test_phase_bc_not_masked_by_bare_trend_rally():
+    """裸 TrendRally 不得把 BC 盖成派发 D。"""
+    b = _super_flat(50)
+    ph = _detect_phase(b, _sig(bc_signal=True, trend_rally_signal=True))
+    assert ph["phase"] == "distribution_a"
+    assert "购买高潮" in ph.get("phase_label", "") or "BC" in ph.get("phase_label", "")
+
+
+def test_phase_sc_not_masked_by_bare_trend_pullback():
+    """裸 TrendPullback 不得把 SC+AR 盖成积累 D。"""
+    b = _super_flat(50)
+    ph = _detect_phase(
+        b, _sig(sc_signal=True, ar_signal=True, trend_pullback_signal=True)
+    )
+    assert ph["phase"] == "accumulation_a"
+
+
+def test_phase_ut_trend_rally_is_distribution_d():
+    """UT+TrendRally（有派发 B）→ 派发 D，对称 Spring+回踩。"""
+    b = _super_flat(50)
+    ph = _detect_phase(
+        b,
+        _sig(
+            upthrust_signal=True,
+            bc_signal=True,
+            are_signal=True,
+            trend_rally_signal=True,
+        ),
+    )
+    assert ph.get("upthrust_premature") is False
+    assert ph["phase"] == "distribution_d"
 
 
 def test_phase_spring_ut_both_isolated():

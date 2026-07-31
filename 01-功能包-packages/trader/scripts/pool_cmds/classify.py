@@ -39,7 +39,21 @@ _WYCKOFF_EVENT_VETO = frozenset({
     "sow",
     "distribution",
     "lpsy",
+    "bc",
+    "are",
+    "trend_rally",
+    "trendrally",
 })
+
+# 分析 dict 上的 live 信号键（wyckoff_core 输出）；孤立 UT 不否决
+_WYCKOFF_SIGNAL_VETO_KEYS = (
+    "utad_signal",
+    "sow_signal",
+    "are_signal",
+    "bc_signal",
+    "lpsy_signal",
+    "trend_rally_signal",
+)
 
 
 def _f(value: Any) -> float | None:
@@ -133,14 +147,20 @@ def _chan_signal(report: dict[str, Any], *, strategy_entry_lit: bool) -> bool:
 
 
 def _wyckoff_veto(report: dict[str, Any]) -> bool:
-    """日威否决：派发阶段或结构化事件码；禁止「缺派发背景」类中文误伤。"""
+    """日威否决：派发阶段或结构化事件码 / live *_signal；禁止「缺派发背景」类中文误伤。"""
     if str(report.get("major_stage") or "") == "派发":
         return True
     wyk = report.get("wyckoff") if isinstance(report.get("wyckoff"), dict) else {}
-    if wyk.get("upthrust_premature"):
-        return False
-    if wyk.get("distribution_confirmed") or wyk.get("utad") is True:
+    # 孤立/过早 UT 不否决；有效 UT 否决
+    if wyk.get("upthrust_signal") and not wyk.get("upthrust_premature"):
         return True
+    if wyk.get("upthrust_premature") and not any(wyk.get(k) for k in _WYCKOFF_SIGNAL_VETO_KEYS):
+        return False
+    if wyk.get("distribution_confirmed") or wyk.get("utad") is True or wyk.get("utad_signal"):
+        return True
+    for key in _WYCKOFF_SIGNAL_VETO_KEYS:
+        if wyk.get(key):
+            return True
     for key in ("event_type", "primary_event", "event_code"):
         raw = str(wyk.get(key) or "").strip().lower()
         if not raw:
@@ -149,7 +169,7 @@ def _wyckoff_veto(report: dict[str, Any]) -> bool:
         # 完整码或首段
         if raw in _WYCKOFF_EVENT_VETO or token in _WYCKOFF_EVENT_VETO:
             return True
-        if raw in {"sign_of_weakness", "upthrust_after_distribution"}:
+        if raw in {"sign_of_weakness", "upthrust_after_distribution", "automatic_reaction"}:
             return True
     # 扁平字段若是英文事件码
     flat = str(report.get("wyckoff_event") or "").strip().lower()

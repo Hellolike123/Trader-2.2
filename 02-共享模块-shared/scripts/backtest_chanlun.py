@@ -92,12 +92,24 @@ def _load_bars(target: str, days: int) -> tuple[list[dict] | None, str | None]:
     return _calc_macd(bars), None
 
 
+def _structure_key(side: str, point: dict) -> tuple:
+    """粘滞去重键：同侧同类型同锚点笔只计首次出现。"""
+    ai = point.get("anchor_index")
+    if ai is not None:
+        try:
+            return (side, point.get("type"), int(ai))
+        except (TypeError, ValueError):
+            pass
+    return (side, point.get("type"), round(float(point.get("price") or 0), 4))
+
+
 def _collect_signals(
     bars: list[dict],
     forward: int,
     divergence_bc: str,
 ) -> list[dict[str, Any]]:
     signals: list[dict[str, Any]] = []
+    seen_structures: set[tuple] = set()
     for i in range(MIN_BARS, len(bars)):
         window = bars[: i + 1]
         current = to_float(window[-1].get("close"))
@@ -115,15 +127,20 @@ def _collect_signals(
 
         date_str = str(window[-1].get("date", ""))
         for bp in result.get("buy_points", []):
+            key = _structure_key("buy", bp)
+            if key in seen_structures:
+                continue
             fwd = _forward_return(bars, i, forward)
             mdd = _max_drawdown_after(bars, i, forward)
             if fwd is not None:
+                seen_structures.add(key)
                 signals.append({
                     "date": date_str,
                     "type": bp["type"],
                     "price": bp["price"],
                     "confidence": bp.get("confidence", 0),
                     "divergence_kind": bp.get("divergence_kind"),
+                    "anchor_index": bp.get("anchor_index"),
                     "forward_return_pct": round(fwd, 2),
                     "max_drawdown_pct": round(mdd, 2) if mdd is not None else None,
                     "win": fwd >= WIN_THRESHOLD * 100,
@@ -133,15 +150,20 @@ def _collect_signals(
                 })
 
         for sp in result.get("sell_points", []):
+            key = _structure_key("sell", sp)
+            if key in seen_structures:
+                continue
             fwd = _forward_return(bars, i, forward)
             mdd = _max_drawdown_after(bars, i, forward)
             if fwd is not None:
+                seen_structures.add(key)
                 signals.append({
                     "date": date_str,
                     "type": sp["type"],
                     "price": sp["price"],
                     "confidence": sp.get("confidence", 0),
                     "divergence_kind": sp.get("divergence_kind"),
+                    "anchor_index": sp.get("anchor_index"),
                     "forward_return_pct": round(-fwd, 2),
                     "max_drawdown_pct": round(-mdd, 2) if mdd is not None else None,
                     "win": fwd <= -WIN_THRESHOLD * 100,

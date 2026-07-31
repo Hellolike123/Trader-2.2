@@ -205,15 +205,29 @@ def _chanlun_compute(
             sp["multi_level_confirm"] = True
 
     # --- E4: 买卖点信号标准化（Signal Contract v2 signal_id）---
+    # 日期用结构锚点笔所在 bar（非分析日），结构未变时跨日 id 稳定，避免粘滞重复入库。
+    def _point_signal_date(point: dict) -> str | None:
+        ai = point.get("anchor_index")
+        if ai is not None and cleaned:
+            try:
+                i = int(ai)
+                if 0 <= i < len(cleaned):
+                    d = cleaned[i].get("date")
+                    if d:
+                        return str(d)
+            except (TypeError, ValueError):
+                pass
+        return analysis_date
+
     if CHAN_SIGNAL_ID_ENABLED and symbol and analysis_date:
         for bp in buy_points:
             bp["signal_id"] = normalize_signal_id(
-                symbol, analysis_date, _chan_type_canonical(bp["type"]), bp["price"],
+                symbol, _point_signal_date(bp), _chan_type_canonical(bp["type"]), bp["price"],
                 source_skill="chanlun",
             )
         for sp in sell_points:
             sp["signal_id"] = normalize_signal_id(
-                symbol, analysis_date, _chan_type_canonical(sp["type"]), sp["price"],
+                symbol, _point_signal_date(sp), _chan_type_canonical(sp["type"]), sp["price"],
                 source_skill="chanlun",
             )
 
@@ -780,6 +794,18 @@ def resolve_chanlun_primary(chan_result: Any = None) -> dict[str, Any]:
 
     if divergence.get("top_divergence"):
         return _pack("divergence", "顶背驰", "顶背驰", "上攻乏力", -1, None, True)
+
+    # 类一买：对齐 fusion_classic_mappers（顶背驰之后、类二买之前）
+    if best_buy is not None and best_buy.get("type") == "类一买":
+        return _pack(
+            "point",
+            "类一买",
+            _CHAN_TYPE_SHORT["类一买"],
+            _CHAN_TYPE_NOTE.get("类一买", "柱弱确认"),
+            1,
+            best_buy,
+            True,
+        )
 
     if best_buy is not None and best_buy.get("type") == "类二买":
         return _pack("point", "类二买", "类二买", "回踩偏弱", 1, best_buy, True)

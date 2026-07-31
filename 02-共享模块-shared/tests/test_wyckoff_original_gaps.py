@@ -55,6 +55,30 @@ def test_score_conflict_spring_ut_with_sos_keeps_spring():
     assert "upthrust_signal" in suppress
 
 
+def test_score_conflict_ar_are_prefers_dist_when_bc():
+    suppress = _resolve_score_conflicts(
+        {"ar_signal": True, "are_signal": True, "bc_signal": True}
+    )
+    assert "ar_signal" in suppress
+    assert "are_signal" not in suppress
+
+
+def test_score_conflict_ar_are_prefers_acc_when_sc():
+    suppress = _resolve_score_conflicts(
+        {"ar_signal": True, "are_signal": True, "sc_signal": True}
+    )
+    assert "are_signal" in suppress
+    assert "ar_signal" not in suppress
+
+
+def test_score_conflict_trend_twins_ambiguous_suppress_both():
+    suppress = _resolve_score_conflicts(
+        {"trend_pullback_signal": True, "trend_rally_signal": True}
+    )
+    assert "trend_pullback_signal" in suppress
+    assert "trend_rally_signal" in suppress
+
+
 def test_calculate_score_applies_suppress():
     """SC+SOW+AR 时不应因 SOW 负分把 raw 抹平到接近 0。"""
     bars = [

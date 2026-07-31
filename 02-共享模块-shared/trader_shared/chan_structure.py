@@ -519,6 +519,42 @@ def _stroke_leaves_after_zone(stroke: dict, zone: dict) -> bool:
         return True
 
 
+def _with_anchor(point: dict[str, Any], stroke: dict | None) -> dict[str, Any]:
+    """给买卖点挂上结构锚点（定义笔 end_index），供粘滞去重 / 稳定 signal_id。"""
+    if not isinstance(stroke, dict):
+        return point
+    ei = stroke.get("end_index")
+    if ei is None:
+        return point
+    try:
+        point["anchor_index"] = int(ei)
+    except (TypeError, ValueError):
+        return point
+    return point
+
+
+def _stroke_leaves_zone(stroke: dict, zone: dict, direction: str) -> bool:
+    """离开段须同时满足：时间在中枢之后 + 价格穿出中枢。
+
+    仅「start_index > zone_end」会把远高于/低于中枢的后续笔误判为离开段
+    （例：中枢在 32，后续 down 在 51 仍被当成一类买离开段）。
+    - down：end_price < zh_bottom（破 ZD）
+    - up：end_price > zh_top（破 ZG）
+    缺价位字段时回退为时间离开（兼容残缺单测）。
+    """
+    if not _stroke_leaves_after_zone(stroke, zone):
+        return False
+    try:
+        end_price = float(stroke["end_price"])
+        if direction == "down":
+            return end_price < float(zone["zh_bottom"])
+        if direction == "up":
+            return end_price > float(zone["zh_top"])
+    except (TypeError, ValueError, KeyError):
+        return True
+    return True
+
+
 def _historical_type1_buy_ok(
     down_strokes: list[dict],
     valid_zones: list[dict],
@@ -532,7 +568,7 @@ def _historical_type1_buy_ok(
     if len(down_strokes) < 2 or not _strict_down_trend_zones(valid_zones):
         return False
     first = down_strokes[-2]
-    if not _stroke_leaves_after_zone(first, valid_zones[-1]):
+    if not _stroke_leaves_zone(first, valid_zones[-1], "down"):
         return False
     if len(down_strokes) >= 3:
         prior = down_strokes[-3]
@@ -558,7 +594,7 @@ def _historical_type1_sell_ok(
     if len(up_strokes) < 2 or not _strict_up_trend_zones(valid_zones):
         return False
     first = up_strokes[-2]
-    if not _stroke_leaves_after_zone(first, valid_zones[-1]):
+    if not _stroke_leaves_zone(first, valid_zones[-1], "up"):
         return False
     if len(up_strokes) >= 3:
         prior = up_strokes[-3]
@@ -681,7 +717,8 @@ def detect_buy_points(
            且前置一类 = 时间轴上 down_a 满足历史一类结构（非同帧 buy_points）
     类二买: 同上结构几何，但历史一类不满足或力度/缩量未齐——买侧放宽试探档
            （fusion/C1 只认正式「二类买」，类二买不进强多/买点阶梯二档）
-    三类买: 离开 ZG 之后出现回抽 down 且 end>=ZG；未回踩不报（上限 15%）
+    三类买: 离开 ZG 之后出现回抽 down 且 end>=ZG；未回踩不报（上限 15%）；
+           量能确认与三类卖对称（近20日均量 ×1.2，数据不足放行）
     bars 须为与 stroke index 对齐的序列（chanlun_analysis 传入 handle_inclusion 后的 cleaned）。
     """
     buy_points: list[dict[str, Any]] = []
@@ -689,9 +726,9 @@ def detect_buy_points(
     if not strokes:
         return buy_points
 
-    # ── 辅助过滤器（增强项，不替代中枢+背驰主条件）──
-    def _volume_confirm(idx: int, threshold: float = 1.5) -> bool:
-        """当日成交量 > 近20日均量 × threshold；数据不足放行"""
+    # ── 辅助过滤器（增强项，不替代中枢+背驰主条件；与卖侧 _volume_spike 同口径）──
+    def _volume_confirm(idx: int, threshold: float = 1.2) -> bool:
+        """当日成交量 ≥ 近20日均量 × threshold；数据不足放行"""
         if not bars or idx < 20:
             return True
         recent = bars[max(0, idx - 20):idx]
@@ -715,7 +752,7 @@ def detect_buy_points(
         if prev_down is not None and curr_down is not None:
             price_new_low = curr_down["end_price"] <= prev_down["end_price"]
             last_zone = valid_zones[-1]
-            if price_new_low and _stroke_leaves_after_zone(curr_down, last_zone):
+            if price_new_low and _stroke_leaves_zone(curr_down, last_zone, "down"):
                 area_prev = _stroke_macd_area(bars, prev_down, "neg")
                 area_curr = _stroke_macd_area(bars, curr_down, "neg")
                 _is_strict_trend = force_kind == "trend"
@@ -723,12 +760,12 @@ def detect_buy_points(
                     if _stroke_force_weaker(area_prev, area_curr, "down"):
                         bp_type = "一类买" if _is_strict_trend else "类一买"
                         bp_conf = 3 if _is_strict_trend else 2
-                        buy_points.append({
+                        buy_points.append(_with_anchor({
                             "type": bp_type,
                             "price": round(curr_down["end_price"], 4),
                             "confidence": bp_conf,
                             "divergence_kind": force_kind,
-                        })
+                        }, curr_down))
                 else:
                     # 柱序列 fallback（strict 无 b/c 面积时仍可弱确认）
                     bar_ok = False
@@ -747,13 +784,13 @@ def detect_buy_points(
                             and macd_hist_current > macd_hist_prev
                         )
                     if bar_ok:
-                        buy_points.append({
+                        buy_points.append(_with_anchor({
                             "type": "类一买",
                             "price": round(curr_down["end_price"], 4),
                             "confidence": 1,
                             "force_source": "hist_bar_fallback",
                             "divergence_kind": "range",
-                        })
+                        }, curr_down))
         elif resolve_divergence_bc_mode(bc_mode) == "legacy":
             # legacy 且 resolve 失败时不应到此（有 ≥2 down）；strict 无 b/c 则静默
             pass
@@ -802,63 +839,73 @@ def detect_buy_points(
                     )
                     force_ok = area_ok or macd_divergence_ok
                     if hist_type1_ok and force_ok and vol_shrink:
-                        buy_points.append({
+                        buy_points.append(_with_anchor({
                             "type": "二类买",
                             "price": round(low_b, 4),
                             "confidence": 2,
-                        })
+                        }, down_strokes[-1]))
                     elif force_ok or vol_shrink:
-                        buy_points.append({
+                        buy_points.append(_with_anchor({
                             "type": "类二买",
                             "price": round(low_b, 4),
                             "confidence": 1,
-                        })
+                        }, down_strokes[-1]))
 
-    # ── 三类买：离开中枢后回踩不入 + 反弹确认 ──
+    # ── 三类买：离开中枢后回踩不入 + 反弹确认（与三类卖对称：离开幅度 ≤15%）──
     if last_close > 0 and valid_zones:
         last_valid = valid_zones[-1]
         zh_top = last_valid["zh_top"]
         if last_close > zh_top:
-            # 找离开段：第一根 up 笔 end > ZG，且后面有 down 笔（回踩）
-            leave_i = None
-            for i, s in enumerate(strokes):
-                if (
-                    s.get("direction") == "up"
-                    and s.get("end_price") is not None
-                    and s["end_price"] > zh_top
-                ):
-                    if any(
-                        strokes[k].get("direction") == "down"
-                        for k in range(i + 1, len(strokes))
+            above_pct = (last_close - zh_top) / zh_top if zh_top else 999.0
+            if above_pct <= _THIRD_POINT_MAX_LEAVE_PCT:
+                # 找离开段：最近一根 up 笔 end > ZG，且后面有 down 笔（回踩）
+                leave_i = None
+                for i, s in enumerate(strokes):
+                    if (
+                        s.get("direction") == "up"
+                        and s.get("end_price") is not None
+                        and s["end_price"] > zh_top
                     ):
-                        leave_i = i
-            # 检查回踩：末 down 笔 end >= ZG，且在末 3 笔内
-            pullback_ok = False
-            pullback_low = None
-            if leave_i is not None:
-                for i in range(len(strokes) - 1, leave_i, -1):
-                    s = strokes[i]
-                    if s.get("direction") == "down" and s.get("end_price") is not None:
-                        pullback_low = s["end_price"]
-                        if s["end_price"] >= zh_top and i >= len(strokes) - 3:
-                            pullback_ok = True
-                        break
-            # 反弹确认：回踩后第一根 up 笔收盘 > 回踩低点（过滤假突破）
-            bounce_ok = True
-            if pullback_ok and pullback_low is not None and leave_i is not None:
-                bounce_ok = False
-                for i in range(leave_i, len(strokes)):
-                    s = strokes[i]
-                    if s.get("direction") == "up" and s.get("end_price") is not None:
-                        if s["end_price"] > pullback_low:
-                            bounce_ok = True
-                        break
-            if leave_i is not None and pullback_ok and bounce_ok:
-                buy_points.append({
-                    "type": "三类买",
-                    "price": round(last_close, 4),
-                    "confidence": 1,
-                })
+                        if any(
+                            strokes[k].get("direction") == "down"
+                            for k in range(i + 1, len(strokes))
+                        ):
+                            leave_i = i
+                # 检查回踩：末 down 笔 end >= ZG，且在末 3 笔内
+                pullback_ok = False
+                pullback_low = None
+                if leave_i is not None:
+                    for i in range(len(strokes) - 1, leave_i, -1):
+                        s = strokes[i]
+                        if s.get("direction") == "down" and s.get("end_price") is not None:
+                            pullback_low = s["end_price"]
+                            if s["end_price"] >= zh_top and i >= len(strokes) - 3:
+                                pullback_ok = True
+                            break
+                # 反弹确认：回踩后第一根 up 笔收盘 > 回踩低点（过滤假突破）
+                bounce_ok = True
+                if pullback_ok and pullback_low is not None and leave_i is not None:
+                    bounce_ok = False
+                    for i in range(leave_i, len(strokes)):
+                        s = strokes[i]
+                        if s.get("direction") == "up" and s.get("end_price") is not None:
+                            if s["end_price"] > pullback_low:
+                                bounce_ok = True
+                            break
+                if leave_i is not None and pullback_ok and bounce_ok:
+                    vol_ok = not bars or _volume_confirm(len(bars) - 1, 1.2)
+                    if vol_ok:
+                        # 锚在回踩笔：现价日日变，但结构未变时应同一 anchor
+                        pb_stroke = None
+                        for i in range(len(strokes) - 1, leave_i, -1):
+                            if strokes[i].get("direction") == "down":
+                                pb_stroke = strokes[i]
+                                break
+                        buy_points.append(_with_anchor({
+                            "type": "三类买",
+                            "price": round(last_close, 4),
+                            "confidence": 1,
+                        }, pb_stroke or strokes[leave_i]))
 
     return buy_points
 
@@ -910,7 +957,7 @@ def detect_sell_points(
         if prev_up is not None and curr_up is not None:
             price_new_high = curr_up["end_price"] >= prev_up["end_price"]
             last_zone = valid_zones[-1]
-            if price_new_high and _stroke_leaves_after_zone(curr_up, last_zone):
+            if price_new_high and _stroke_leaves_zone(curr_up, last_zone, "up"):
                 area_prev = _stroke_macd_area(bars, prev_up, "pos")
                 area_curr = _stroke_macd_area(bars, curr_up, "pos")
                 _is_strict_trend = force_kind == "trend"
@@ -918,12 +965,12 @@ def detect_sell_points(
                     if _stroke_force_weaker(area_prev, area_curr, "up"):
                         sp_type = "一类卖" if _is_strict_trend else "类一卖"
                         sp_conf = 3 if _is_strict_trend else 2
-                        sell_points.append({
+                        sell_points.append(_with_anchor({
                             "type": sp_type,
                             "price": round(curr_up["end_price"], 4),
                             "confidence": sp_conf,
                             "divergence_kind": force_kind,
-                        })
+                        }, curr_up))
                 else:
                     bar_ok = False
                     if bars and len(bars) >= 3:
@@ -941,13 +988,13 @@ def detect_sell_points(
                             and macd_hist_current < macd_hist_prev
                         )
                     if bar_ok:
-                        sell_points.append({
+                        sell_points.append(_with_anchor({
                             "type": "类一卖",
                             "price": round(curr_up["end_price"], 4),
                             "confidence": 1,
                             "force_source": "hist_bar_fallback",
                             "divergence_kind": "range",
-                        })
+                        }, curr_up))
 
     # ── 二类卖：回抽不过前高；要求末笔即为该回抽 up（防粘滞）──
     if (
@@ -991,17 +1038,17 @@ def detect_sell_points(
                     )
                     force_ok = area_ok or macd_divergence_ok
                     if hist_type1_ok and force_ok and vol_shrink:
-                        sell_points.append({
+                        sell_points.append(_with_anchor({
                             "type": "二类卖",
                             "price": round(high_b, 4),
                             "confidence": 2,
-                        })
+                        }, up_strokes[-1]))
                     elif force_ok or vol_shrink:
-                        sell_points.append({
+                        sell_points.append(_with_anchor({
                             "type": "类二卖",
                             "price": round(high_b, 4),
                             "confidence": 1,
-                        })
+                        }, up_strokes[-1]))
 
     # ── P1/P2 三类卖：离开后反弹不回；反弹须为近端（末 2 笔内）──
     if last_close > 0 and valid_zones:
@@ -1033,11 +1080,16 @@ def detect_sell_points(
                 if leave_i is not None and bounce_ok:
                     vol_ok = not bars or _volume_spike(len(bars) - 1, 1.2)
                     if vol_ok:
-                        sell_points.append({
+                        bounce_stroke = None
+                        for i in range(len(strokes) - 1, leave_i, -1):
+                            if strokes[i].get("direction") == "up":
+                                bounce_stroke = strokes[i]
+                                break
+                        sell_points.append(_with_anchor({
                             "type": "三类卖",
                             "price": round(last_close, 4),
                             "confidence": 1,
-                        })
+                        }, bounce_stroke or strokes[leave_i]))
 
     return sell_points
 

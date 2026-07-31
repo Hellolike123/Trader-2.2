@@ -142,6 +142,20 @@ def test_wyckoff_event_code_vetoes():
     assert _wyckoff_veto({"major_stage": "蓄势", "wyckoff": {"event_type": "utad"}}) is True
 
 
+def test_wyckoff_live_signal_vetoes():
+    assert _wyckoff_veto({"major_stage": "蓄势", "wyckoff": {"are_signal": True}}) is True
+    assert _wyckoff_veto({"major_stage": "蓄势", "wyckoff": {"bc_signal": True}}) is True
+    assert _wyckoff_veto(
+        {"major_stage": "蓄势", "wyckoff": {"upthrust_signal": True, "upthrust_premature": False}}
+    ) is True
+    assert _wyckoff_veto(
+        {"major_stage": "蓄势", "wyckoff": {"upthrust_signal": True, "upthrust_premature": True}}
+    ) is False
+    assert _wyckoff_veto(
+        {"major_stage": "蓄势", "wyckoff": {"trend_rally_signal": True}}
+    ) is True
+
+
 def test_ready_with_chan_and_active_bp():
     out = classify_lane(
         {

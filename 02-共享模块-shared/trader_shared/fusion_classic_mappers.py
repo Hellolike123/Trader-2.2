@@ -293,6 +293,7 @@ def _wyckoff_to_signal(wyckoff_result: dict) -> dict:
 
     # 经典 + 看空信号
     ar = wyk.get("ar_signal")
+    are = wyk.get("are_signal")
     sos = wyk.get("sos_signal")
     st = wyk.get("st_signal")
     lps = wyk.get("lps_signal")
@@ -363,6 +364,31 @@ def _wyckoff_to_signal(wyckoff_result: dict) -> dict:
             "direction": 1,
             "confidence": 0.6,
             "reason": f"威科夫 {_reason('ar', 'SC后自动反弹')}",
+            "raw_key": "wyckoff",
+        }
+
+    # ── ARE: Automatic Reaction (BC 后自动回落，对称 AR) ──
+    if are:
+        return {
+            "direction": -1,
+            "confidence": 0.6,
+            "reason": f"威科夫 {_reason('are', 'BC后自动回落')}",
+            "raw_key": "wyckoff",
+        }
+
+    # ── Trend Rally / Trend Pullback（对称）──
+    if wyk.get("trend_rally_signal"):
+        return {
+            "direction": -1,
+            "confidence": 0.5,
+            "reason": f"威科夫 {_reason('trend_rally', '趋势反抽')}",
+            "raw_key": "wyckoff",
+        }
+    if wyk.get("trend_pullback_signal"):
+        return {
+            "direction": 1,
+            "confidence": 0.5,
+            "reason": f"威科夫 {_reason('trend_pullback', '趋势回踩')}",
             "raw_key": "wyckoff",
         }
 

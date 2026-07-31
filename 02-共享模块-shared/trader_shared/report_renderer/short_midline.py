@@ -443,7 +443,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
                         "一类买": 0, "类二买": 1, "类一买": 2, "二类买": 3, "三类买": 4,
                     }
                     _SELL_RANK = {
-                        "一类卖": 0, "类一卖": 1, "二类卖": 2, "三类卖": 3,
+                        "一类卖": 0, "类二卖": 1, "类一卖": 2, "二类卖": 3, "三类卖": 4,
                     }
 
                     def _best_type(points: list, rank_map: dict) -> str:

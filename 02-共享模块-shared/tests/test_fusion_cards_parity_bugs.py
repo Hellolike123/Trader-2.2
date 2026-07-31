@@ -150,6 +150,22 @@ def test_i2_i3_nesting_and_point_conf_on_card():
     assert demoted["confidence"] <= 0.8 * 0.55 + 0.01
 
 
+def test_i5b_soft1_buy_resolve():
+    """类一买不得被 resolve_chanlun_primary 丢掉（cards 生产路径）。"""
+    from trader_shared.chan_core import resolve_chanlun_primary
+
+    info = resolve_chanlun_primary({
+        "buy_points": [{"type": "类一买", "price": 10.0, "confidence": 1.0}],
+        "sell_points": [],
+        "divergence": {},
+        "trend_label": "盘整",
+        "structure_type": "盘整",
+    })
+    assert info["status"] == "point"
+    assert info["type_raw"] == "类一买"
+    assert info["direction"] == 1
+
+
 def test_i5_callback_trend_direction():
     """I5: 回调段 resolve → direction -1，卡→fusion 有空向。"""
     from trader_shared.chan_core import resolve_chanlun_primary

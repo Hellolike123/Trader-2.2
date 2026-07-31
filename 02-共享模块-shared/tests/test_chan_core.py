@@ -441,7 +441,7 @@ class TestDetectBuyPoints:
         assert "三类买" not in types
 
     def test_buy_point_3_beyond_max_leave_pct(self):
-        """三类买：原典无幅度限制，离开超过 15% 仍报三买。"""
+        """三类买：与三类卖对称，离开超过 15% 不报（防陈旧中枢假三买）。"""
         strokes = [
             {"direction": "up", "end_price": 13.0},
             {"direction": "down", "end_price": 12.0},
@@ -449,7 +449,35 @@ class TestDetectBuyPoints:
         zones = [{"zh_top": 10.0, "zh_bottom": 8.0, "valid": True}]
         result = detect_buy_points(strokes, zones, 12.0)  # 20% above
         types = [bp["type"] for bp in result]
-        assert "三类买" in types
+        assert "三类买" not in types
+
+    def test_buy_point_3_rejects_stale_zone_far_above(self):
+        """立讯式：末中枢在 32、现价 52（远超 15%）→ 不得报三类买。"""
+        strokes = [
+            {"direction": "up", "end_price": 32.54},
+            {"direction": "down", "end_price": 58.36},
+            {"direction": "up", "end_price": 59.95},
+            {"direction": "down", "end_price": 51.02},
+        ]
+        zones = [{"zh_top": 32.18, "zh_bottom": 31.7, "valid": True}]
+        result = detect_buy_points(strokes, zones, 52.22)
+        types = [bp["type"] for bp in result]
+        assert "三类买" not in types
+
+    def test_buy_point_3_requires_volume_like_sell(self):
+        """三类买与三类卖对称：有足量 bars 时缩量不报。"""
+        strokes = [
+            {"direction": "up", "end_price": 11.0},
+            {"direction": "down", "end_price": 10.05},
+        ]
+        zones = [{"zh_top": 10.0, "zh_bottom": 8.0, "valid": True}]
+        bars = [{"volume": 1000, "close": 10.3} for _ in range(25)]
+        bars[-1] = {"volume": 100, "close": 10.3}  # << 均量 ×1.2
+        result = detect_buy_points(strokes, zones, 10.30, bars=bars)
+        assert "三类买" not in [bp["type"] for bp in result]
+        bars[-1] = {"volume": 2000, "close": 10.3}
+        result_ok = detect_buy_points(strokes, zones, 10.30, bars=bars)
+        assert "三类买" in [bp["type"] for bp in result_ok]
 
     def test_buy_point_3_uses_latest_leave_ok(self):
         """P2 三类买：早期 leave+合法回踩，后期再次 leave 更高且回踩不破 → 仍以最近 leave 为准，三买成立。"""
@@ -492,6 +520,20 @@ class TestDetectBuyPoints:
         types = [bp["type"] for bp in result]
         assert "一类买" not in types
 
+    def test_buy_point_1_rejects_leave_above_zone(self):
+        """立讯式假离开：末两 down 创新低，但均远高于末中枢 → 不得报一类/类一买。"""
+        bars, sp, ep, sc, ec = self._make_bars_with_neg_areas(area_prev=-10.0, area_curr=-3.0)
+        strokes = [
+            {"direction": "down", "end_price": 58.0, "start_index": sp, "end_index": ep},
+            {"direction": "up", "end_price": 62.0},
+            {"direction": "down", "end_price": 51.0, "start_index": sc, "end_index": ec},
+        ]
+        # 末中枢在 10–12，离开段在 51 — 仅时间离开、未破 ZD
+        result = detect_buy_points(strokes, self._down_trend_zones(), 51.0, bars=bars)
+        types = [bp["type"] for bp in result]
+        assert "一类买" not in types
+        assert "类一买" not in types
+
 
 class TestDetectSellPointsP1:
     """P1 卖点对称性抽检。"""
@@ -504,14 +546,17 @@ class TestDetectSellPointsP1:
         ]
 
     def test_sell_point_2(self):
-        """二类卖：降低高点 + 历史一类前置 + macd_divergence_ok。"""
+        """二类卖：降低高点 + 历史一类前置 + macd_divergence_ok。
+
+        历史一类离开段须价格破末中枢 ZG（zh_top=16）。
+        """
         strokes = [
-            {"direction": "up", "end_price": 12.0},
-            {"direction": "down", "end_price": 9.0},
-            {"direction": "up", "end_price": 11.0},
+            {"direction": "up", "end_price": 18.0},
+            {"direction": "down", "end_price": 15.0},
+            {"direction": "up", "end_price": 17.0},
         ]
         result = detect_sell_points(
-            strokes, self._up_trend_zones(), 11.0, macd_divergence_ok=True
+            strokes, self._up_trend_zones(), 17.0, macd_divergence_ok=True
         )
         types = [sp["type"] for sp in result]
         assert "二类卖" in types
@@ -519,12 +564,12 @@ class TestDetectSellPointsP1:
     def test_sell_point_2_requires_macd_or_area(self):
         """二类结构满足但力度/MACD 均未确认 → 类二卖（非二类）。"""
         strokes = [
-            {"direction": "up", "end_price": 12.0},
-            {"direction": "down", "end_price": 9.0},
-            {"direction": "up", "end_price": 11.0},
+            {"direction": "up", "end_price": 18.0},
+            {"direction": "down", "end_price": 15.0},
+            {"direction": "up", "end_price": 17.0},
         ]
         result = detect_sell_points(
-            strokes, self._up_trend_zones(), 11.0, macd_divergence_ok=False
+            strokes, self._up_trend_zones(), 17.0, macd_divergence_ok=False
         )
         types = [sp["type"] for sp in result]
         assert "二类卖" not in types
@@ -533,26 +578,27 @@ class TestDetectSellPointsP1:
     def test_sell_point_2_no_trend_still_fire(self):
         """无上涨趋势中枢 → 不得出正式二类卖；结构+力度可降级类二卖。"""
         strokes = [
-            {"direction": "up", "end_price": 12.0},
-            {"direction": "down", "end_price": 9.0},
-            {"direction": "up", "end_price": 11.0},
+            {"direction": "up", "end_price": 18.0},
+            {"direction": "down", "end_price": 15.0},
+            {"direction": "up", "end_price": 17.0},
         ]
-        result = detect_sell_points(strokes, [], 11.0, macd_divergence_ok=True)
+        result = detect_sell_points(strokes, [], 17.0, macd_divergence_ok=True)
         types = [sp["type"] for sp in result]
         assert "二类卖" not in types
         assert "类二卖" in types
 
     def test_sell_point_2_requires_historical_type1(self):
         """有趋势中枢但历史一类不成立（离开段未创新高）→ 仅类二卖。"""
+        # up_a=17 未高于更早 up=18 → _historical_type1_sell_ok 失败
         strokes = [
-            {"direction": "up", "end_price": 13.0},
-            {"direction": "down", "end_price": 10.0},
-            {"direction": "up", "end_price": 12.0},
-            {"direction": "down", "end_price": 10.5},
-            {"direction": "up", "end_price": 11.5},
+            {"direction": "up", "end_price": 18.0},
+            {"direction": "down", "end_price": 14.5},
+            {"direction": "up", "end_price": 17.0},
+            {"direction": "down", "end_price": 15.5},
+            {"direction": "up", "end_price": 16.5},
         ]
         result = detect_sell_points(
-            strokes, self._up_trend_zones(), 11.5, macd_divergence_ok=True
+            strokes, self._up_trend_zones(), 16.5, macd_divergence_ok=True
         )
         types = [sp["type"] for sp in result]
         assert "二类卖" not in types
@@ -561,17 +607,32 @@ class TestDetectSellPointsP1:
     def test_sell_point_1_fallback_no_index(self):
         """柱序列弱确认 → 类一卖 conf=1，禁止冒充一类卖。"""
         strokes = [
-            {"direction": "up", "end_price": 10.0},
-            {"direction": "down", "end_price": 8.0},
-            {"direction": "up", "end_price": 11.0},
+            {"direction": "up", "end_price": 15.0},
+            {"direction": "down", "end_price": 14.5},
+            {"direction": "up", "end_price": 17.0},  # 价格离开末中枢 ZG=16
         ]
         result = detect_sell_points(
-            strokes, self._up_trend_zones(), 11.0,
+            strokes, self._up_trend_zones(), 17.0,
             macd_hist_current=0.5, macd_hist_prev=1.0,
         )
         types = [sp["type"] for sp in result]
         assert "一类卖" not in types
         assert "类一卖" in types
+
+    def test_sell_point_1_rejects_leave_below_zone(self):
+        """离开段仅时间在中枢后、价格未破 ZG → 不得报一类/类一卖。"""
+        strokes = [
+            {"direction": "up", "end_price": 15.0},
+            {"direction": "down", "end_price": 14.2},
+            {"direction": "up", "end_price": 15.5},  # 仍在末中枢 zh_top=16 下方
+        ]
+        result = detect_sell_points(
+            strokes, self._up_trend_zones(), 15.5,
+            macd_hist_current=0.5, macd_hist_prev=1.0,
+        )
+        types = [sp["type"] for sp in result]
+        assert "一类卖" not in types
+        assert "类一卖" not in types
 
     def test_sell_point_3_after_leave_bounce(self):
         """三类卖：离开 ZD 后反弹不回 → 有。"""
@@ -711,6 +772,43 @@ class TestBcStrokePairStrict:
         assert "一类买" in types
         bp = next(bp for bp in result if bp["type"] == "一类买")
         assert bp.get("divergence_kind") == "trend"
+
+    def test_sell_point_1_strict_uses_bc(self):
+        """strict 一类卖：力度对为 b/c（与买侧对称）。"""
+        bars = []
+        for _ in range(3):
+            bars.append({"macd_histogram": 0.0, "close": 10, "volume": 100})
+        for _ in range(5):  # older up（不应被当成 b）
+            bars.append({"macd_histogram": 3.0, "close": 13, "volume": 100})
+        for _ in range(3):
+            bars.append({"macd_histogram": -0.5, "close": 12, "volume": 100})
+        for _ in range(5):  # b area +10
+            bars.append({"macd_histogram": 2.0, "close": 14, "volume": 100})
+        for _ in range(3):
+            bars.append({"macd_histogram": -0.5, "close": 13, "volume": 100})
+        for _ in range(5):  # c area +3
+            bars.append({"macd_histogram": 0.6, "close": 15, "volume": 100})
+        strokes = [
+            {"direction": "up", "end_price": 13.0, "start_index": 3, "end_index": 7},
+            {"direction": "down", "end_price": 12.0, "start_index": 8, "end_index": 10},
+            {"direction": "up", "end_price": 14.0, "start_index": 11, "end_index": 15},  # b
+            {"direction": "down", "end_price": 12.5, "start_index": 16, "end_index": 18},
+            {"direction": "up", "end_price": 15.0, "start_index": 19, "end_index": 23},  # c
+        ]
+        zones = [
+            {"valid": True, "zh_top": 8.0, "zh_bottom": 6.0, "strokes": [{"end_index": 2}]},
+            {
+                "valid": True,
+                "zh_top": 12.0,
+                "zh_bottom": 10.0,
+                "strokes": [{"start_index": 11, "end_index": 18}],
+            },
+        ]
+        result = detect_sell_points(strokes, zones, 15.0, bars=bars, bc_mode="strict")
+        types = [sp["type"] for sp in result]
+        assert "一类卖" in types
+        sp = next(sp for sp in result if sp["type"] == "一类卖")
+        assert sp.get("divergence_kind") == "trend"
 
 
 class TestStrokeForceTolerance:
@@ -1904,6 +2002,57 @@ class TestSignalIdStandardization:
         ids1 = [bp.get("signal_id") for bp in r1["buy_points"]]
         ids2 = [bp.get("signal_id") for bp in r2["buy_points"]]
         assert ids1 == ids2
+
+    def test_anchor_index_on_type1_buy(self):
+        """一类买应挂定义笔 end_index，供粘滞去重。"""
+        from trader_shared.chan_structure import detect_buy_points
+
+        bars = []
+        for _ in range(5):
+            bars.append({"macd_histogram": -2.0, "close": 10, "volume": 100})
+        for _ in range(3):
+            bars.append({"macd_histogram": 0.5, "close": 11, "volume": 100})
+        for _ in range(5):
+            bars.append({"macd_histogram": -0.6, "close": 9, "volume": 100})
+        strokes = [
+            {"direction": "down", "end_price": 10.0, "start_index": 0, "end_index": 4},
+            {"direction": "up", "end_price": 12.0, "start_index": 5, "end_index": 7},
+            {"direction": "down", "end_price": 9.0, "start_index": 8, "end_index": 12},
+        ]
+        zones = [
+            {"valid": True, "zh_top": 16.0, "zh_bottom": 14.0},
+            {"valid": True, "zh_top": 12.0, "zh_bottom": 10.0},
+        ]
+        result = detect_buy_points(strokes, zones, 9.0, bars=bars)
+        bp1 = next(bp for bp in result if bp["type"] == "一类买")
+        assert bp1.get("anchor_index") == 12
+
+    def test_signal_id_stable_when_analysis_date_moves(self):
+        """结构未变时，分析日推进不得换 signal_id（防粘滞重复入库）。"""
+        # 构造足够长、含 date 的序列；窗口多一天后若仍出同价同锚点信号，id 应不变
+        bars = []
+        for i in range(80):
+            b = _make_bar(10 + (i % 7) * 0.05, 10.5 + (i % 7) * 0.05, 9.5, 10 + (i % 5) * 0.02)
+            b["date"] = f"2025-{(i // 28) + 1:02d}-{(i % 28) + 1:02d}"
+            bars.append(b)
+        r1 = chanlun_analysis(
+            bars[:-1], bars[-2]["close"], symbol="002475.SZ", analysis_date=bars[-2]["date"]
+        )
+        r2 = chanlun_analysis(
+            bars, bars[-1]["close"], symbol="002475.SZ", analysis_date=bars[-1]["date"]
+        )
+        keyed1 = {
+            (bp.get("type"), bp.get("anchor_index"), round(float(bp["price"]), 4)): bp.get("signal_id")
+            for bp in r1.get("buy_points", [])
+            if bp.get("anchor_index") is not None
+        }
+        for bp in r2.get("buy_points", []):
+            ai = bp.get("anchor_index")
+            if ai is None:
+                continue
+            key = (bp.get("type"), ai, round(float(bp["price"]), 4))
+            if key in keyed1:
+                assert bp.get("signal_id") == keyed1[key]
 
     def test_chanlun_strategy_derives_from_quote(self):
         bars = [_make_bar(10 + i * 0.1, 11 + i * 0.1, 9 + i * 0.1, 10 + i * 0.1) for i in range(30)]
