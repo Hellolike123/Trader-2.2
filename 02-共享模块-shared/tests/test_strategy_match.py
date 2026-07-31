@@ -182,7 +182,7 @@ def test_l3_buy_point_failed_blocks_executable():
             "lid_price": 14.0,
             "signal_id": "deadbeefdeadbeef",
             "failed_date": "2026-07-28",
-            "display_line": "买点：已失效（盖 14.00）",
+            "display_line": "买点：已失效（破 14.00，须重走）",
         },
     })
     ent = r["gates"]["entry"]

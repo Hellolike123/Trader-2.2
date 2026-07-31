@@ -135,6 +135,8 @@ T0_ROUND_TRIP_COST_PCT: float = (
 )
 
 # ---- Market index ----
+# 宽基回退（北交所等无板块映射、选股池无个股上下文）。
+# 单票报告环境档跟所属板块指数走，见 market_env.resolve_board_index。
 INDEX_CODE: str = "000852.SH"
 
 # ---- Trend filter constants (long-term MA filter) ----
@@ -146,6 +148,14 @@ TREND_MA_LOOKBACK: int = 300  # 至少取 300 天数据才能算出可靠的 MA2
 # ---- Wyckoff constants ----
 # ⚠️ WYCKOFF_SPRING_RECLAIM_RATIO 每年年底需检查是否需要更新
 WYCKOFF_MIN_BARS: int = 15
+# SC/AR（及对称 BC/ARE）锚点搜索上限；仅搜索/超时，不定义 TR 周期
+WYCKOFF_CLIMAX_ANCHOR_BARS: int = 15
+# 广义 ST（Secondary Test of SC）：SC 后回测 SC 区，量须明显低于 SC 棒
+WYCKOFF_ST_SC_VOL_RATIO: float = 0.60           # 测试棒量 < SC 量 × 此比例
+WYCKOFF_ST_SC_MAX_BARS: int = 15                # SC 后最多扫描根数（= anchor 上限）
+WYCKOFF_ST_SC_PROXIMITY: float = 0.02          # 测试 low 须在 sc_low 上方此比例内
+WYCKOFF_ST_SC_MAX_PIERCE: float = 0.005         # 允许刺穿 sc_low 的最大比例（快速收回仍有效）
+WYCKOFF_PHASE_A_SEED_MIN_QUALITY: float = 0.40  # established 种子箱最低 tr_quality（避免永久 gated）
 
 # BC (Buying Climax) 购买高潮相关参数
 WYCKOFF_BC_VOL_RATIO_THRESHOLD: float = 1.8     # BC 购买高潮量比阈值（原 2.0，方案 B 调至 1.8）
@@ -405,7 +415,10 @@ __all__ = [
     "T0_COMMISSION_RATE", "T0_STAMP_TAX_RATE", "T0_SLIP_RATE", "T0_ROUND_TRIP_COST_PCT",
     "INDEX_CODE",
     "TREND_MA_SHORT", "TREND_MA_LONG", "TREND_FILTER_ENABLED", "TREND_MA_LOOKBACK",
-    "WYCKOFF_MIN_BARS", "WYCKOFF_SPRING_SUPPORT_LOOKBACK",
+    "WYCKOFF_MIN_BARS", "WYCKOFF_CLIMAX_ANCHOR_BARS",
+    "WYCKOFF_ST_SC_VOL_RATIO", "WYCKOFF_ST_SC_MAX_BARS", "WYCKOFF_ST_SC_PROXIMITY",
+    "WYCKOFF_ST_SC_MAX_PIERCE", "WYCKOFF_PHASE_A_SEED_MIN_QUALITY",
+    "WYCKOFF_SPRING_SUPPORT_LOOKBACK",
     "WYCKOFF_SPRING_RECLAIM_RATIO", "WYCKOFF_SPRING_ATR_MULTIPLE", "WYCKOFF_SPRING_BULLISH_VOL_RATIO",
     "WYCKOFF_DIVERGENCE_BARS",
     "WYCKOFF_BC_VOL_RATIO_THRESHOLD", "WYCKOFF_BC_CHANGE_THRESHOLD",

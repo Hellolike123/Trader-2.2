@@ -93,11 +93,42 @@ def test_chanlun_midline_dir_low_conf_neutral():
     assert chanlun_midline_dir(chan) == 0
 
 
+def test_chanlun_midline_dir_soft_sell_beats_bottom_div():
+    """类二卖（观察档）须驱动定论看空，不得被底背驰翻成上涨。"""
+    chan = _chan(
+        "盘整",
+        "low",
+        {"bottom_divergence": True},
+        buy_points=[],
+        sell_points=[{"type": "类二卖", "confidence": 1, "price": 49.41}],
+    )
+    assert chanlun_midline_dir(chan) == -1
+
+
 def test_chanlun_midline_dir_low_conf_with_buy_point():
-    """低置信但有 conf>=2 的买卖点 → 仍尊重买卖点方向（buy点门先判）。"""
+    """有买卖点时跟主解析（含 conf=1）；与短线灯标同源。"""
     chan = _chan("下跌趋势", "low", {}, buy_points=[{"type": "二类买", "confidence": 1}], sell_points=[])
-    # conf=1 < 2 → 不触发 buy 点门；低置信 → 中性
-    assert chanlun_midline_dir(chan) == 0
+    assert chanlun_midline_dir(chan) == 1
+
+
+def test_verdict_note_soft_sell_and_wyck_no_phase():
+    """三花类场景：威科夫无阶段 × 缠论类二卖 → 转弱，注记不写「上涨/领先」。"""
+    w = _wyck("none", phase_tr_gated=True, phase_tr_gate_reason="no_tr")
+    c = _chan(
+        "盘整",
+        "low",
+        {"bottom_divergence": True},
+        sell_points=[{"type": "类二卖", "confidence": 1}],
+    )
+    r = synthesize_midline_verdict(c, w, fallback_stage="震荡")
+    assert r["chan_dir"] == -1
+    assert r["wyck_dir"] == 0
+    assert r["stage"] == "转弱"
+    assert r["bias"] == "bear"
+    assert "上涨" not in r["note"]
+    assert "类二卖" in r["note"]
+    assert "无阶段" in r["note"]
+    assert "领先" not in r["note"].split("×")[0]  # 威科夫侧不称领先
 
 
 def test_low_chan_conf_skips_lifeline_in_verdict():

@@ -10,6 +10,7 @@ from trader_shared.light_data import to_float
 # ── Wyckoff 常量（唯一来源：trader_shared.config） ----
 from trader_shared.config import (
     WYCKOFF_MIN_BARS,
+    WYCKOFF_CLIMAX_ANCHOR_BARS,
     WYCKOFF_BC_VOL_RATIO_THRESHOLD,
     WYCKOFF_BC_CHANGE_THRESHOLD,
     WYCKOFF_BC_UPPER_SHADOW_RATIO,
@@ -28,6 +29,8 @@ from trader_shared.config import (
     WYCKOFF_DIVERGENCE_BARS,
     WYCKOFF_DIVERGENCE_RATIO,
     WYCKOFF_PHASE_LOOKBACK,
+    WYCKOFF_PHASE_MIN_TR_QUALITY,
+    WYCKOFF_PHASE_A_SEED_MIN_QUALITY,
     WYCKOFF_VSA_AVG_SPREAD_PERIOD,
     WYCKOFF_SCORE_SPRING,
     WYCKOFF_SCORE_SPRING_BULLISH_DIV_BONUS,
@@ -98,6 +101,7 @@ from .wyckoff_events import (
     _detect_spring,
     _detect_st,
     _spring_test_fields_from_st,
+    _detect_secondary_test_sc,
     _detect_trend_pullback,
     _detect_trend_rally,
     _detect_upthrust,
@@ -233,6 +237,109 @@ def _resolve_score_conflicts(analysis: dict) -> set[str]:
 
     return suppress
 
+
+def _build_phase_a_range(sc: dict, ar: dict) -> dict:
+    """Phase A 区间边界：SC 低点 + AR 高点；status 诚实透出 forming/established。"""
+    sc_low = sc.get("sc_low") if sc.get("sc_signal") else None
+    if sc_low is None and sc.get("sc_signal") and sc.get("sc_price"):
+        sc_low = sc.get("sc_price")
+    ar_high = ar.get("ar_high") if ar.get("ar_signal") else None
+    sc_bar_idx = sc.get("sc_bar_idx") if sc.get("sc_signal") else ar.get("sc_bar_idx")
+    ar_bar_idx = ar.get("ar_bar_idx") if ar.get("ar_signal") else None
+
+    if not sc.get("sc_signal"):
+        status = "none"
+    elif ar.get("ar_signal") and ar_high is not None:
+        status = "established"
+    else:
+        status = "forming"
+
+    return {
+        "sc_low": sc_low,
+        "ar_high": ar_high,
+        "sc_bar_idx": sc_bar_idx,
+        "ar_bar_idx": ar_bar_idx,
+        "status": status,
+        "anchor_bars": WYCKOFF_CLIMAX_ANCHOR_BARS,
+        "st_sc_low": None,
+    }
+
+
+def _refine_phase_a_sc_low(phase_a_range: dict, st_sc: dict) -> dict:
+    """若广义 ST 有效，用更低的 st_sc_low refine phase_a sc_low（status 不变）。"""
+    if not st_sc.get("secondary_test_sc_signal"):
+        return phase_a_range
+    st_low = st_sc.get("st_sc_low")
+    sc_low = phase_a_range.get("sc_low")
+    if st_low is None or sc_low is None:
+        return phase_a_range
+    out = dict(phase_a_range)
+    out["st_sc_low"] = st_low
+    if st_low < sc_low:
+        out["sc_low"] = st_low
+    return out
+
+
+def _seed_tr_quality_from_bounds(sc_low: float, ar_high: float) -> float:
+    """established 种子箱宽度 → tr_quality（避免分位 TR 缺失时永久 gated）。"""
+    if sc_low <= 0 or ar_high <= sc_low:
+        return WYCKOFF_PHASE_A_SEED_MIN_QUALITY
+    width_pct = (ar_high - sc_low) / sc_low * 100
+    if 3.0 <= width_pct <= 25.0:
+        return min(1.0, 0.45 + width_pct / 40.0)
+    if width_pct > 0:
+        return max(WYCKOFF_PHASE_A_SEED_MIN_QUALITY, min(0.55, width_pct / 50.0))
+    return WYCKOFF_PHASE_A_SEED_MIN_QUALITY
+
+
+def _overlay_phase_a_seed_tr_ctx(
+    tr_ctx: dict | None,
+    phase_a_range: dict,
+) -> dict | None:
+    """P2：established 时用 sc_low/ar_high overlay tr_ctx；forming/none 仅透传 status。"""
+    status = phase_a_range.get("status") or "none"
+    ctx: dict = dict(tr_ctx) if tr_ctx else {}
+    ctx["phase_a_status"] = status
+    if status != "established":
+        if ctx and ctx.get("tr_lower") is not None and not ctx.get("tr_seed_source"):
+            ctx["tr_seed_source"] = "percentile"
+        return ctx or None
+
+    sc_low = phase_a_range.get("sc_low")
+    ar_high = phase_a_range.get("ar_high")
+    if sc_low is None or ar_high is None or float(sc_low) >= float(ar_high):
+        return ctx or None
+
+    ctx["tr_lower_ref"] = ctx.get("tr_lower")
+    ctx["tr_upper_ref"] = ctx.get("tr_upper")
+    ctx["tr_quality_ref"] = ctx.get("tr_quality")
+    ctx["tr_lower"] = float(sc_low)
+    ctx["tr_upper"] = float(ar_high)
+    ctx["tr_amplitude_pct"] = round((float(ar_high) - float(sc_low)) / float(sc_low) * 100, 2)
+    ctx["tr_width"] = int(phase_a_range.get("anchor_bars") or WYCKOFF_CLIMAX_ANCHOR_BARS)
+    seed_q = _seed_tr_quality_from_bounds(float(sc_low), float(ar_high))
+    prev_q = ctx.get("tr_quality")
+    try:
+        prev_q_f = float(prev_q) if prev_q is not None else None
+    except (TypeError, ValueError):
+        prev_q_f = None
+    if prev_q_f is None or prev_q_f < float(WYCKOFF_PHASE_MIN_TR_QUALITY):
+        ctx["tr_quality"] = max(seed_q, float(WYCKOFF_PHASE_A_SEED_MIN_QUALITY))
+    else:
+        ctx["tr_quality"] = max(prev_q_f, seed_q)
+    ctx["phase_a_seed"] = True
+    ctx["tr_seed_source"] = "phase_a_seed"
+    ctx["phase_a_status"] = "established"
+    if ctx.get("tr_baseline_volume") is None:
+        ctx["tr_baseline_volume"] = 0.0
+    last_close = ctx.get("last_close")
+    if last_close is not None:
+        ctx["in_tr"] = float(sc_low) <= float(last_close) <= float(ar_high)
+    elif ctx.get("in_tr") is None:
+        ctx["in_tr"] = True
+    return ctx
+
+
 def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily", use_persisted_phase: bool = True) -> dict:
     if len(bars) < WYCKOFF_MIN_BARS:
         return {
@@ -271,6 +378,13 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
             "trend_rally_signal": False, "trend_rally_reason": "数据不足", "trend_rally_price": None,
             "spring_test_signal": False, "spring_test_reason": "数据不足", "spring_test_price": None,
             "phase_tr_gated": False, "phase_tr_gate_reason": "",
+            "phase_a_status": "none",
+            "phase_a_range": {
+                "sc_low": None, "ar_high": None, "sc_bar_idx": None, "ar_bar_idx": None,
+                "status": "none", "anchor_bars": WYCKOFF_CLIMAX_ANCHOR_BARS, "st_sc_low": None,
+            },
+            "sc_low": None, "ar_high": None,
+            "secondary_test_sc_signal": False, "secondary_test_sc_reason": "数据不足", "st_sc_low": None,
         }
 
     # P2-2: 动态支撑位计算（多源集成）— 仅用于 Spring 检测
@@ -316,13 +430,20 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         upthrust_signal=bool(upthrust.get("upthrust_signal")),
         upthrust_result=upthrust,
     )
-    ce = _cause_effect_targets(tr_ctx, bars)
     # P2/P3: 新增信号
     compression = _detect_compression(bars)
     trend_pullback = _detect_trend_pullback(bars)
     trend_rally = _detect_trend_rally(bars)
     # P0-5: 事件簇确认 — 将孤立信号升级为可信的积累/派发事件簇（校验先后顺序 + strength 定级）
     cluster = _detect_event_cluster(bars, tr_ctx=tr_ctx)
+    phase_a_range = _build_phase_a_range(sc, ar)
+    st_sc = _detect_secondary_test_sc(bars, tr_ctx=tr_ctx, phase_a_range=phase_a_range)
+    phase_a_range = _refine_phase_a_sc_low(phase_a_range, st_sc)
+    phase_tr_ctx = _overlay_phase_a_seed_tr_ctx(tr_ctx, phase_a_range)
+    if phase_tr_ctx is not None:
+        phase_tr_ctx["last_close"] = to_float(bars[-1].get("close")) if bars else None
+    # P2-R6：因果目标在种子 overlay（+ST refine）之后重算，宽度用 sc_low/ar_high
+    ce = _cause_effect_targets(phase_tr_ctx or tr_ctx, bars)
 
     # P1-1: 阶段状态机 — 基于信号序列推断积累/派发阶段
     signals_dict = {
@@ -336,6 +457,7 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "sos_signal": sos["sos_signal"],
         "st_signal": st["st_signal"],
         "spring_test_signal": spring_test["spring_test_signal"],
+        "secondary_test_sc_signal": st_sc["secondary_test_sc_signal"],
         "lps_signal": lps["lps_signal"],
         "lpsy_signal": lpsy["lpsy_signal"],
         "compression_signal": compression["compression_signal"],
@@ -345,11 +467,11 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "utad_signal": utad.get("utad_signal"),
         "ps_signal": ps.get("ps_signal"),
         "psy_signal": psy.get("psy_signal"),
-        "tr_in_range": bool(tr_ctx.get("in_tr")) if tr_ctx else False,
-        "tr_upper": tr_ctx.get("tr_upper") if tr_ctx else None,
+        "tr_in_range": bool(phase_tr_ctx.get("in_tr")) if phase_tr_ctx else False,
+        "tr_upper": phase_tr_ctx.get("tr_upper") if phase_tr_ctx else None,
         "last_close": to_float(bars[-1].get("close")) if bars else None,
     }
-    phase = _detect_phase(bars, signals_dict, _phase_lookback=_phase_lb, tr_ctx=tr_ctx)
+    phase = _detect_phase(bars, signals_dict, _phase_lookback=_phase_lb, tr_ctx=phase_tr_ctx)
 
     # B: 跨日持久化状态机 — 加载旧状态、过渡、存储
     # use_persisted_phase=False 时（如中线威科夫）跳过持久化，直接返回本次
@@ -390,6 +512,8 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         parts.append(f"强势信号: {sos['sos_reason']}")
     if spring_test["spring_test_signal"] or st["st_signal"]:
         parts.append(f"Spring确认: {spring_test.get('spring_test_reason') or st.get('st_reason')}")
+    if st_sc["secondary_test_sc_signal"]:
+        parts.append(f"SC二次测试: {st_sc['secondary_test_sc_reason']}")
     if lps["lps_signal"]:
         parts.append(f"最后支撑: {lps['lps_reason']}")
     if lpsy["lpsy_signal"]:
@@ -457,12 +581,17 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "sc_signal": sc["sc_signal"],
         "sc_reason": sc["sc_reason"],
         "sc_price": round(sc["sc_price"], 2) if sc["sc_signal"] else None,
+        "sc_low": phase_a_range.get("sc_low") if sc.get("sc_signal") else None,
+        "sc_bar_idx": sc.get("sc_bar_idx"),
         "bearish_volume_divergence": bearish_div,
         "bullish_volume_divergence": bullish_div,
         # 新增信号
         "ar_signal": ar["ar_signal"],
         "ar_reason": ar["ar_reason"],
         "ar_price": round(ar["ar_price"], 2) if ar["ar_signal"] else None,
+        "ar_high": ar.get("ar_high") if ar.get("ar_signal") else None,
+        "ar_bar_idx": ar.get("ar_bar_idx"),
+        "ar_volume_soft": bool(ar.get("ar_volume_soft")),
         "are_signal": are["are_signal"],
         "are_reason": are["are_reason"],
         "are_price": round(are["are_price"], 2) if are["are_signal"] else None,
@@ -530,14 +659,20 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "trend_rally_signal": trend_rally["trend_rally_signal"],
         "trend_rally_reason": trend_rally["trend_rally_reason"],
         "trend_rally_price": trend_rally["trend_rally_price"],
-        # P0-3: TR 识别层透出
-        "tr_upper": tr_ctx["tr_upper"] if tr_ctx else None,
-        "tr_lower": tr_ctx["tr_lower"] if tr_ctx else None,
-        "tr_baseline_volume": tr_ctx["tr_baseline_volume"] if tr_ctx else None,
-        "tr_width": tr_ctx["tr_width"] if tr_ctx else None,
-        "tr_amplitude_pct": tr_ctx["tr_amplitude_pct"] if tr_ctx else None,
-        "tr_quality": tr_ctx["tr_quality"] if tr_ctx else None,
-        "tr_in_range": tr_ctx["in_tr"] if tr_ctx else None,
+        # P0-3: TR 识别层透出（established 时 tr_* 优先种子箱 overlay）
+        "tr_upper": (phase_tr_ctx or tr_ctx or {}).get("tr_upper"),
+        "tr_lower": (phase_tr_ctx or tr_ctx or {}).get("tr_lower"),
+        "tr_baseline_volume": (phase_tr_ctx or tr_ctx or {}).get("tr_baseline_volume"),
+        "tr_width": (phase_tr_ctx or tr_ctx or {}).get("tr_width"),
+        "tr_amplitude_pct": (phase_tr_ctx or tr_ctx or {}).get("tr_amplitude_pct"),
+        "tr_quality": (phase_tr_ctx or tr_ctx or {}).get("tr_quality"),
+        "tr_in_range": (phase_tr_ctx or tr_ctx or {}).get("in_tr"),
+        "tr_upper_ref": (phase_tr_ctx or {}).get("tr_upper_ref"),
+        "tr_lower_ref": (phase_tr_ctx or {}).get("tr_lower_ref"),
+        "tr_seed_source": (
+            (phase_tr_ctx or {}).get("tr_seed_source")
+            or ("percentile" if tr_ctx else None)
+        ),
         # P0-5: 事件簇确认透出
         "accumulation_confirmed": cluster["accumulation_confirmed"],
         "distribution_confirmed": cluster["distribution_confirmed"],
@@ -546,6 +681,15 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "cluster_quality": cluster["cluster_quality"],
         "cluster_confidence": cluster["cluster_confidence"],
         "cluster_reason": cluster["cluster_reason"],
+        # P1: Phase A 区间边界（SC low + AR high）
+        "phase_a_status": phase_a_range["status"],
+        "phase_a_range": phase_a_range,
+        "secondary_test_sc_signal": st_sc["secondary_test_sc_signal"],
+        "secondary_test_sc_reason": st_sc["secondary_test_sc_reason"],
+        "secondary_test_sc_price": st_sc.get("secondary_test_sc_price"),
+        "secondary_test_sc_bar_idx": st_sc.get("secondary_test_sc_bar_idx"),
+        "st_sc_low": st_sc.get("st_sc_low"),
+        "secondary_test_sc_low": st_sc.get("st_sc_low"),
         "wyckoff_summary": "；".join(parts),
     }
 
@@ -963,7 +1107,9 @@ def resolve_wyckoff_primary(
     elif wyk.get("sow_intraday_warn"):
         code, cn, main, note, d = "SOWw", "弱势警告", "日内刺穿支撑后收回", "仅警告，未收盘确认，不计分", 0
     elif wyk.get("ar_signal"):
-        code, cn, main, note, d = "AR", "自动反弹", "SC后快速反弹", "仅反弹，还不能当反转", 1
+        code, cn, main, note, d = (
+            "AR", "自动反弹", "SC后快速反弹", "钉潜在上沿，仅反弹不能当反转", 1
+        )
     elif wyk.get("are_signal"):
         code, cn, main, note, d = "ARE", "自动回落", "BC后快速回落", "仅回落，还不能当反转空", -1
     elif wyk.get("sc_signal"):
@@ -1118,6 +1264,55 @@ def _midline_meaning(code: str, cn_name: str, note: str, direction: int) -> str:
     if direction < 0:
         return "先防守"
     return "暂无明确含义"
+
+
+def format_wyckoff_daily_phase_light(
+    wyckoff: dict[str, Any] | None = None,
+) -> str:
+    """短线威科夫阶段只读展示（标签由渲染层加「威科夫：」；与中线同构诚实无箱）。
+
+    产品契约（BUSINESS §2.2）：
+      - 只给人看；不进中线定论 / fusion / 共振背景岗 / 单独开仓
+      - 无箱体：无清晰区间 · 暂不出阶段
+      - forming：区间未钉；established：箱体已钉
+    """
+    wyk = _unwrap_wyckoff_dict(wyckoff)
+    if not wyk:
+        return "数据不足 · 仅对照"
+
+    if wyk.get("timeframe") == "insufficient":
+        return "数据不足 · 仅对照"
+
+    phase_a = str(wyk.get("phase_a_status") or "").strip() or "none"
+    phase = str(wyk.get("phase") or "none").strip() or "none"
+    label = str(wyk.get("phase_label") or "").strip()
+    gate_r = str(wyk.get("phase_tr_gate_reason") or "").strip()
+    gated = bool(wyk.get("phase_tr_gated"))
+    plain = _plain_phase_midline(label)
+
+    # P0-B 无/低质量 TR：与中线「构不成区间」同构（优先于 forming 文案）
+    if gated and gate_r in ("no_tr", "low_quality"):
+        if gate_r == "low_quality":
+            return "无 · 区间质量差 · 暂不出阶段 · 仅对照"
+        return "无 · 无清晰区间 · 暂不出阶段 · 仅对照"
+
+    # forming：有 SC、箱未钉满
+    if phase_a == "forming" or "区间未钉" in label:
+        slot = plain or "吸筹早期"
+        return f"{slot} · 区间未钉 · 仅对照"
+
+    # 有明确阶段（箱体已钉或过门控后的 A–E / markup…）
+    if phase != "none" and plain:
+        if phase_a == "established":
+            return f"{plain} · 箱体已钉 · 仅对照"
+        return f"{plain} · 仅对照"
+
+    # 无 SC、无阶段：与中线 none 同构
+    has_bounds = wyk.get("tr_upper") is not None or wyk.get("tr_lower") is not None
+    if not has_bounds and wyk.get("tr_quality") is None:
+        return "无 · 无清晰区间 · 暂不出阶段 · 仅对照"
+
+    return "无 · 暂无阶段 · 仅对照"
 
 
 def format_wyckoff_midline_light(

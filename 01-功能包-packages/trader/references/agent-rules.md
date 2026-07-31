@@ -37,15 +37,19 @@
 
 ## 防漏改清单（改代码时）
 
-改单票报告格式时固定三步（勿改 legacy / 勿手改 AGENTS 满分示例）：
+改单票报告格式时固定步骤（勿改 legacy / 勿手改 AGENTS 满分示例数字）：
 
 1. 改 `trader_shared/report_renderer/short_midline.py`
-2. 刷新 `02-共享模块-shared/tests/golden/*.render.md`
+2. 刷新 `02-共享模块-shared/tests/golden/*.render.md` + `fixtures/report_render_baseline.txt`
 3. 分区骨架变了再同步 `trader/references/output-template.md`（门禁会查分区头）
+4. 契约/业务同步：`BUSINESS.md` §5.1（及涉及的 §3.x）+ `AGENTS_DEEP.md` 微信满分骨架 + `output-style-guide.md`
+
+meta 纯 D（现行）：`综合动能 … ｜ {科创/创业板/上证/深成} ±% ｜ {行业短名} ±% ｜ 个股 ±%`；禁止再写「大盘 正常/偏弱」或单独「行业：…｜跑赢…」行。量价行可含量比/换手/调整天数/`ATR14 x.xx（复权口径）`（ATR 并入同行，非独立行）。
 
 | 改什么 | 认准一处 |
 |--------|----------|
-| 中短线面板文案 | 上面三步 |
+| 中短线面板文案 | 上面步骤 |
+| 板块对照指数 / 环境档 | `market_env.resolve_board_index` + `assess(index_code=)`；接线 `context_stage` |
 | 新开 / 出手收紧 | `chan_discipline` / `mistery_gate` / `decision_view`（须 entry.executable；C1 用 `format_entry_line_c1`；禁止新开时 caps/`suggested_pct` 归零） |
 | Fusion 席位（生产） | `analysis/fusion_card_signals.py`（cards 路径；失败 warning→classic） |
 | ATR 移动止损水位 | `structure_core`（持仓票 `~/.trader/trailing_stop_watermark.json`，只紧不松） |

@@ -399,11 +399,13 @@ class TestDetectAR:
         result = wyckoff_analysis(bars)
         assert result["ar_signal"] is False
 
-    def test_ar_not_detected_low_volume(self):
-        """SC 后反弹涨幅够但量能不足 → AR 不触发"""
+    def test_ar_low_volume_soft_still_triggers(self):
+        """SC 后反弹涨幅够但量能不足 → AR 仍触发，标 ar_volume_soft"""
         bars = self._sc_then_rally_bars(rally_close=104, rally_vol=11)
         result = wyckoff_analysis(bars)
-        assert result["ar_signal"] is False
+        assert result["ar_signal"] is True
+        assert result.get("ar_volume_soft") is True
+        assert "soft" in (result.get("ar_reason") or "")
 
 
 class TestDetectSOS:
@@ -935,6 +937,7 @@ class TestDetectPhaseSemantics:
         "tr_lower": 95.0,
         "in_tr": True,
         "tr_width": 40,
+        "phase_a_status": "established",
     }
 
     def test_bc_ar_is_distribution_a_not_accumulation(self):
@@ -1500,3 +1503,391 @@ class TestTrendRally:
         assert "trend_rally_reason" in result
 
 
+class TestPhaseARangeP1:
+    """P1: SC/AR 锚点对齐 + phase_a_range 边界字段。"""
+
+    def _decline_base(self, n: int = 14, start: float = 100.0, vol: int = 100) -> list[dict]:
+        """横盘基底，便于 SC 棒整体处于近窗低位。"""
+        bars = []
+        for _ in range(n):
+            bars.append(_make_bar(90.0, 91.0, 89.0, 90.0, vol))
+        return bars
+
+    def _nanwang_like_bars(self) -> list[dict]:
+        """瀑布 SC 后隔数根才 AR（南网类），均在 15 根 anchor 内。"""
+        bars = self._decline_base(14, vol=100)
+        # SC：跳空大跌，棒体整体在低位（high 勿拉回近窗上沿）
+        bars.append(_make_bar(84.0, 85.0, 82.0, 83.0, 2500))
+        # 中间整理 4 根
+        for i in range(4):
+            bars.append(_make_bar(83.2 + i * 0.1, 83.6 + i * 0.1, 82.8 + i * 0.1, 83.3 + i * 0.1, 120))
+        # AR：反弹 +2.5%+，high 钉上沿
+        bars.append(_make_bar(83.5, 87.0, 83.0, 86.0, 130))
+        return bars
+
+    def test_r1_nanwang_sc_ar_within_anchor(self):
+        from trader_shared.wyckoff_events import _detect_ar, _detect_selling_climax
+
+        bars = self._nanwang_like_bars()
+        sc = _detect_selling_climax(bars)
+        ar = _detect_ar(bars)
+        assert sc["sc_signal"] is True
+        assert ar["ar_signal"] is True
+        assert sc["sc_low"] == 82.0
+        assert ar["ar_high"] == 87.0
+        assert sc["sc_low"] < ar["ar_high"]
+
+    def test_r2_sc_ar_share_anchor(self):
+        from trader_shared.wyckoff_events import _detect_ar, _detect_selling_climax
+
+        bars = self._nanwang_like_bars()
+        sc = _detect_selling_climax(bars)
+        ar = _detect_ar(bars)
+        assert sc["sc_bar_idx"] == ar["sc_bar_idx"]
+        assert sc["sc_low"] == ar["sc_low"]
+
+    def test_r3_sc_only_forming_not_established(self):
+        bars = self._decline_base(14)
+        bars.append(_make_bar(84.0, 85.0, 82.0, 83.0, 2500))
+        # 无有效 AR（反弹不足 2%）
+        bars.append(_make_bar(83.2, 83.6, 83.0, 83.5, 120))
+        result = wyckoff_analysis(bars, use_persisted_phase=False)
+        assert result["sc_signal"] is True
+        assert result["ar_signal"] is False
+        assert result["phase_a_status"] == "forming"
+        assert result["phase_a_range"]["status"] == "forming"
+        assert result["phase_a_range"]["ar_high"] is None
+
+    def test_r4_sc_ar_established(self):
+        bars = self._nanwang_like_bars()
+        result = wyckoff_analysis(bars, use_persisted_phase=False)
+        assert result["phase_a_status"] == "established"
+        assert result["phase_a_range"]["status"] == "established"
+        assert result["sc_low"] < result["ar_high"]
+        assert result["phase_a_range"]["anchor_bars"] == 15
+
+    def test_r5_sc_window_matches_ar_no_fight(self):
+        """同一 fixture：AR 亮则 SC 必亮（消除 5 vs 15 根不一致）。"""
+        from trader_shared.wyckoff_events import _detect_ar, _detect_selling_climax
+
+        bars = self._nanwang_like_bars()
+        sc = _detect_selling_climax(bars)
+        ar = _detect_ar(bars)
+        if ar["ar_signal"]:
+            assert sc["sc_signal"] is True
+
+    def test_r6_weekly_midline_has_phase_a_range(self):
+        from trader_shared.wyckoff_core import wyckoff_strategy_midline
+
+        weekly = self._nanwang_like_bars()
+        while len(weekly) < 20:
+            weekly.insert(0, _make_bar(105.0, 106.0, 104.0, 104.5, 100))
+        r = wyckoff_strategy_midline(weekly[-1]["close"], weekly_bars=weekly, daily_bars=weekly)
+        wyk = r["wyckoff"]
+        assert wyk["timeframe"] == "weekly"
+        assert "phase_a_range" in wyk
+        assert "phase_a_status" in wyk
+
+    def test_ar_volume_soft_still_signals(self):
+        """量能不足 1.2× 时结构满足仍亮 AR，标 soft。"""
+        bars = self._decline_base(16)
+        bars.append(_make_bar(84.0, 85.0, 82.0, 83.0, 2500))
+        bars.append(_make_bar(83.2, 87.0, 83.0, 86.0, 80))  # +3.6%，缩量
+        from trader_shared.wyckoff_events import _detect_ar
+
+        ar = _detect_ar(bars)
+        assert ar["ar_signal"] is True
+        assert ar["ar_volume_soft"] is True
+        assert "soft" in ar["ar_reason"]
+
+    def test_ar_event_light_note(self):
+        from trader_shared.wyckoff_core import format_wyckoff_event_light
+
+        line = format_wyckoff_event_light({"ar_signal": True, "timeframe": "daily"})
+        assert "钉潜在上沿" in line
+        assert "仅反弹不能当反转" in line
+
+    def test_config_exports_climax_anchor_bars(self):
+        from trader_shared import config
+
+        assert hasattr(config, "WYCKOFF_CLIMAX_ANCHOR_BARS")
+        assert config.WYCKOFF_CLIMAX_ANCHOR_BARS == 15
+        assert "WYCKOFF_CLIMAX_ANCHOR_BARS" in config.__all__
+
+
+class TestPhaseARangeP2:
+    """P2: 种子箱门控 + 广义 ST（测 SC）。"""
+
+    def _decline_base(self, n: int = 14, vol: int = 100) -> list[dict]:
+        bars = []
+        for _ in range(n):
+            bars.append(_make_bar(90.0, 91.0, 89.0, 90.0, vol))
+        return bars
+
+    def _sc_only_bars(self) -> list[dict]:
+        bars = self._decline_base(14)
+        bars.append(_make_bar(84.0, 85.0, 82.0, 83.0, 2500))
+        bars.append(_make_bar(83.2, 83.6, 83.0, 83.5, 120))
+        return bars
+
+    def _nanwang_like_bars(self) -> list[dict]:
+        bars = self._decline_base(14, vol=100)
+        bars.append(_make_bar(84.0, 85.0, 82.0, 83.0, 2500))
+        for i in range(4):
+            bars.append(_make_bar(83.2 + i * 0.1, 83.6 + i * 0.1, 82.8 + i * 0.1, 83.3 + i * 0.1, 120))
+        bars.append(_make_bar(83.5, 87.0, 83.0, 86.0, 130))
+        return bars
+
+    def _nanwang_with_st_bars(self) -> list[dict]:
+        """SC + 缩量二次测试 + AR（established + secondary ST）。"""
+        bars = self._decline_base(14, vol=100)
+        bars.append(_make_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC low=82
+        bars.append(_make_bar(83.0, 83.4, 81.8, 82.5, 800))   # ST: 近 sc_low, 量缩
+        for i in range(3):
+            bars.append(_make_bar(82.6 + i * 0.1, 83.0 + i * 0.1, 82.4 + i * 0.1, 82.7 + i * 0.1, 120))
+        bars.append(_make_bar(83.0, 87.0, 82.8, 86.0, 130))   # AR
+        return bars
+
+    def _forming_good_tr_bars(self) -> list[dict]:
+        """forming（SC 无 AR）+ 分位 TR 达标；SC 落在 anchor 窗内。"""
+        pre = []
+        for i in range(25):
+            b = 88.0 + (i % 6) * 0.25
+            pre.append(_make_bar(b, b + 0.5, b - 0.4, b + 0.1, 120))
+        decline = [_make_bar(90.0, 91.0, 89.0, 90.0, 100) for _ in range(14)]
+        sc = [_make_bar(84.0, 85.0, 82.0, 83.0, 2500)]
+        post = []
+        for i in range(8):
+            b = 83.0 + (i % 4) * 0.12
+            post.append(_make_bar(b, b + 0.35, b - 0.22, b + 0.05, 125))
+        comp = [_make_bar(83.1, 83.25, 83.05, 83.12, 50) for _ in range(6)]
+        return pre + decline + sc + post + comp
+
+    def test_p2_r_forming_does_not_reach_b_plus(self):
+        """forming（仅 SC）+ 高质量 TR + 压缩 → 阶段最高 A，闸 forming_phase_a。"""
+        from trader_shared.wyckoff_phase import _detect_phase
+
+        bars = self._forming_good_tr_bars()
+        tr = {
+            "tr_quality": 0.7,
+            "tr_upper": 89.5,
+            "tr_lower": 82.5,
+            "in_tr": True,
+            "phase_a_status": "forming",
+        }
+        ph = _detect_phase(
+            bars,
+            {
+                "compression_signal": True,
+                "sc_signal": True,
+                "ar_signal": False,
+                "spring_signal": True,
+                "spring_test_signal": False,
+                "st_signal": False,
+                "upthrust_signal": False,
+                "bc_signal": False,
+                "sow_signal": False,
+                "are_signal": False,
+                "sos_signal": False,
+                "secondary_test_sc_signal": False,
+                "lps_signal": False,
+                "lpsy_signal": False,
+                "trend_pullback_signal": False,
+                "trend_rally_signal": False,
+                "bu_signal": False,
+                "utad_signal": False,
+                "tr_upper": 89.5,
+                "last_close": 83.1,
+            },
+            tr_ctx=tr,
+        )
+        assert ph["phase"] == "accumulation_a"
+        assert "区间未钉" in ph["phase_label"]
+        assert ph["phase"] not in (
+            "accumulation_b", "accumulation_c", "accumulation_d", "markup",
+            "distribution_a", "distribution_b", "distribution_c", "distribution_d", "markdown",
+        )
+        assert ph.get("phase_tr_gated") is True
+        assert ph.get("phase_tr_gate_reason") == "forming_phase_a"
+
+        result = wyckoff_analysis(bars, use_persisted_phase=False)
+        assert result["phase_a_status"] == "forming"
+        assert result["sc_signal"] is True
+        assert result["phase"] == "accumulation_a"
+        assert float(result.get("tr_quality") or 0) >= 0.35
+
+    def test_p2_established_seed_overlays_tr_bounds(self):
+        bars = self._nanwang_like_bars()
+        while len(bars) < 25:
+            bars.insert(0, _make_bar(90.0, 91.0, 89.0, 90.0, 100))
+        result = wyckoff_analysis(bars, use_persisted_phase=False)
+        assert result["phase_a_status"] == "established"
+        assert result["tr_lower"] == result["sc_low"]
+        assert result["tr_upper"] == result["ar_high"]
+        assert result.get("phase_tr_gated") is not True
+
+    def test_p2_established_low_percentile_tr_not_gated(self):
+        """established 时分位 TR 差也不应永久 phase_tr_gated。"""
+        from trader_shared.wyckoff_core import _overlay_phase_a_seed_tr_ctx
+
+        phase_a = {
+            "status": "established",
+            "sc_low": 82.0,
+            "ar_high": 87.0,
+            "anchor_bars": 15,
+        }
+        bad_tr = {"tr_quality": 0.1, "tr_lower": 80.0, "tr_upper": 95.0}
+        ctx = _overlay_phase_a_seed_tr_ctx(bad_tr, phase_a)
+        assert ctx["tr_lower"] == 82.0
+        assert ctx["tr_upper"] == 87.0
+        assert float(ctx["tr_quality"]) >= 0.35
+        assert ctx.get("phase_a_seed") is True
+
+    def test_p2_secondary_test_sc_distinct_from_spring_test(self):
+        from trader_shared.wyckoff_events import _detect_secondary_test_sc, _detect_st
+
+        bars = self._nanwang_with_st_bars()
+        while len(bars) < 25:
+            bars.insert(0, _make_bar(90.0, 91.0, 89.0, 90.0, 100))
+        st_sc = _detect_secondary_test_sc(bars)
+        st_spring = _detect_st(bars, tr_ctx={"tr_lower": 82.0, "tr_upper": 87.0})
+        assert st_sc["secondary_test_sc_signal"] is True
+        assert st_sc["st_sc_low"] is not None
+        assert st_sc["st_sc_low"] <= 82.0
+        assert st_spring["st_signal"] is False
+
+    def test_p2_established_sc_ar_st_label(self):
+        bars = self._nanwang_with_st_bars()
+        while len(bars) < 25:
+            bars.insert(0, _make_bar(90.0, 91.0, 89.0, 90.0, 100))
+        result = wyckoff_analysis(bars, use_persisted_phase=False)
+        assert result["phase_a_status"] == "established"
+        assert result["secondary_test_sc_signal"] is True
+        assert "SC+AR+ST" in result["phase_label"]
+        assert result["phase_a_range"].get("st_sc_low") is not None
+
+    def test_p2_no_established_seed_blocks_b_on_good_tr(self):
+        """无 established + 分位 TR 达标 + 压缩 → no_established_seed，不进 B。"""
+        from trader_shared.wyckoff_phase import _detect_phase
+
+        bars = [_make_bar(10.0, 10.01, 9.99, 10.0, 30000) for _ in range(60)]
+        tr = {
+            "tr_quality": 0.7,
+            "tr_upper": 10.2,
+            "tr_lower": 9.8,
+            "in_tr": True,
+            "phase_a_status": "none",
+        }
+        ph = _detect_phase(
+            bars,
+            {
+                "compression_signal": True,
+                "sc_signal": False,
+                "ar_signal": False,
+                "spring_signal": False,
+                "upthrust_signal": False,
+                "bc_signal": False,
+                "sow_signal": False,
+                "are_signal": False,
+                "sos_signal": False,
+                "st_signal": False,
+                "spring_test_signal": False,
+                "secondary_test_sc_signal": False,
+                "lps_signal": False,
+                "lpsy_signal": False,
+                "trend_pullback_signal": False,
+                "trend_rally_signal": False,
+                "bu_signal": False,
+                "utad_signal": False,
+                "tr_upper": 10.2,
+                "last_close": 10.0,
+            },
+            tr_ctx=tr,
+        )
+        assert ph["phase"] == "none"
+        assert ph.get("phase_tr_gated") is True
+        assert ph.get("phase_tr_gate_reason") == "no_established_seed"
+
+    def test_p2_gate_reason_enum_values(self):
+        """gate_reason 枚举稳定可测。"""
+        expected = {"no_tr", "low_quality", "forming_phase_a", "no_established_seed"}
+        from trader_shared.wyckoff_phase import _apply_p2_phase_a_gates
+
+        blocked = _apply_p2_phase_a_gates(
+            {"phase": "accumulation_b", "phase_label": "x"},
+            "forming",
+            True,
+        )
+        assert blocked["phase_tr_gate_reason"] in expected
+
+        no_seed = _apply_p2_phase_a_gates(
+            {"phase": "accumulation_c", "phase_label": "x"},
+            "none",
+            False,
+        )
+        assert no_seed["phase_tr_gate_reason"] == "no_established_seed"
+
+    def test_p2_r6_cause_effect_uses_seed_width(self):
+        """established + ST：tr_lower≤sc_low（refine），cause_effect_range = 种子宽。"""
+        bars = self._nanwang_with_st_bars()
+        while len(bars) < 25:
+            bars.insert(0, _make_bar(90.0, 91.0, 89.0, 90.0, 100))
+        result = wyckoff_analysis(bars, use_persisted_phase=False)
+        assert result["phase_a_status"] == "established"
+        assert result["secondary_test_sc_signal"] is True
+        sc_low = float(result["sc_low"])
+        ar_high = float(result["ar_high"])
+        tr_lo = float(result["tr_lower"])
+        tr_hi = float(result["tr_upper"])
+        assert tr_lo <= sc_low + 1e-9
+        assert tr_hi == ar_high
+        assert result.get("tr_seed_source") == "phase_a_seed"
+        ce_range = result.get("cause_effect_range")
+        assert ce_range is not None
+        expected = round(ar_high - tr_lo, 2)
+        assert abs(float(ce_range) - expected) < 0.02
+        # 因果目标基于种子上下沿 1:1
+        assert abs(float(result["cause_effect_up_target"]) - (ar_high + expected)) < 0.05
+        assert abs(float(result["cause_effect_down_target"]) - (tr_lo - expected)) < 0.05
+
+    def test_p2_r4_forming_low_quality_p0b_wins(self):
+        """forming + tr_quality=0.2 → P0-B 优先：none + low_quality（严于 forming A）。"""
+        from trader_shared.wyckoff_phase import _detect_phase
+
+        bars = [_make_bar(10.0, 10.01, 9.99, 10.0, 30000) for _ in range(60)]
+        tr = {
+            "tr_quality": 0.2,
+            "tr_upper": 10.2,
+            "tr_lower": 9.8,
+            "in_tr": True,
+            "phase_a_status": "forming",
+        }
+        ph = _detect_phase(
+            bars,
+            {
+                "sc_signal": True,
+                "ar_signal": False,
+                "compression_signal": False,
+                "spring_signal": False,
+                "upthrust_signal": False,
+                "bc_signal": False,
+                "sow_signal": False,
+                "are_signal": False,
+                "sos_signal": False,
+                "st_signal": False,
+                "spring_test_signal": False,
+                "secondary_test_sc_signal": False,
+                "lps_signal": False,
+                "lpsy_signal": False,
+                "trend_pullback_signal": False,
+                "trend_rally_signal": False,
+                "bu_signal": False,
+                "utad_signal": False,
+                "tr_upper": 10.2,
+                "last_close": 10.0,
+            },
+            tr_ctx=tr,
+        )
+        assert ph["phase"] == "none"
+        assert ph.get("phase_tr_gated") is True
+        assert ph.get("phase_tr_gate_reason") == "low_quality"

@@ -13,7 +13,7 @@
 | `current` | fetch_quote() | 实时报价 |
 | `change_pct` | fetch_quote() | 今日涨跌幅 % |
 | `ma5/10/20/30/250` | 日线 bars 计算 | 均线 |
-| `atr14` | 日线 bars 计算 | ATR14（元） |
+| `atr14` | 日线 bars 计算 | ATR14（元）；面板并入量价行，写 `ATR14 x.xx（前/后/未复权）`，勿独立成行、勿写成 ATR15 |
 | `support` / `resistance` | build_structure_context() | 结构支撑/压力位 |
 | `confirm` / `stop` | build_structure_context() | 确认位/止损位 |
 | `major_stage` | assess_stage() | 蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退 |
@@ -21,7 +21,7 @@
 | `fusion.weighted_score` | merge_decisions() | 融合加权分 -1~+1 |
 | `fusion.confidence` | merge_decisions() | 置信度 0~1 |
 | `fusion.action` | merge_decisions() | 融合层建议动作 |
-| `fusion.regime` | merge_decisions() | 大盘环境：正常/偏弱/很差 |
+| `fusion.regime` | merge_decisions() | 板块环境档（跟所属板块指数；面板 meta 不写）：正常/偏弱/很差 |
 | `data_status` | load_market_snapshot() | full/partial/degraded |
 
 ## Rule 1: 数据缺失处理

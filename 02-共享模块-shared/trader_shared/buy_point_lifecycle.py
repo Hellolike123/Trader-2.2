@@ -113,7 +113,7 @@ def evaluate_buy_point_lifecycle(
             "signal_id": None,
             "failed_date": None,
             "note": note,
-            "display_line": f"买点：已失效（盖 {lid:.2f}）",
+            "display_line": f"买点：已失效（破 {lid:.2f}，须重走）",
         }
 
     # 盘中刺穿、收盘仍在盖上
@@ -130,7 +130,7 @@ def evaluate_buy_point_lifecycle(
             "signal_id": None,
             "failed_date": None,
             "note": note,
-            "display_line": f"买点：观察中（盘中破盖 {lid:.2f}，收盘收回）",
+            "display_line": f"买点：观察中（刺穿 {lid:.2f} 已收回）",
         }
 
     note = f"买点有效，盖 {lid:.2f}"
@@ -140,7 +140,7 @@ def evaluate_buy_point_lifecycle(
         "signal_id": None,
         "failed_date": None,
         "note": note,
-        "display_line": f"买点：有效（盖 {lid:.2f}）",
+        "display_line": f"买点：有效（守 {lid:.2f}）",
     }
 
 
@@ -355,7 +355,7 @@ def reconcile_with_store(
             signal_id=old_sid or None,
             failed_date=old_failed or None,
             note=f"旧买点已于 {old_failed or '?'} 作废，须重走站上→回踩",
-            display=f"买点：已失效（盖 {lid_txt}，须重走）",
+            display=f"买点：已失效（破 {lid_txt}，须重走）",
             blocked=True,
         )
 
@@ -388,7 +388,7 @@ def reconcile_with_store(
                 f"禁止接旧信号 {old_sid[:8] + '…' if len(old_sid) > 8 else old_sid}；"
                 f"须重走站上→回踩（失败日 {old_failed or '?'}）"
             ),
-            display=f"买点：已失效（盖 {lid_txt}，须重走）",
+            display=f"买点：已失效（破 {lid_txt}，须重走）",
             blocked=True,
         )
 

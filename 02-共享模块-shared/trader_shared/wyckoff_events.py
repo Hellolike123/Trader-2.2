@@ -12,6 +12,11 @@ from trader_shared.light_data import to_float
 try:
     from trader_shared.config import (
         WYCKOFF_MIN_BARS,
+        WYCKOFF_CLIMAX_ANCHOR_BARS,
+        WYCKOFF_ST_SC_VOL_RATIO,
+        WYCKOFF_ST_SC_MAX_BARS,
+        WYCKOFF_ST_SC_PROXIMITY,
+        WYCKOFF_ST_SC_MAX_PIERCE,
         WYCKOFF_BC_VOL_RATIO_THRESHOLD,
         WYCKOFF_BC_CHANGE_THRESHOLD,
         WYCKOFF_BC_UPPER_SHADOW_RATIO,
@@ -81,6 +86,7 @@ try:
     )
 except ImportError:
     WYCKOFF_MIN_BARS = 15
+    WYCKOFF_CLIMAX_ANCHOR_BARS = 15
     WYCKOFF_BC_VOL_RATIO_THRESHOLD = 1.8  # must match config.py
     WYCKOFF_BC_CHANGE_THRESHOLD = 1.0
     WYCKOFF_BC_UPPER_SHADOW_RATIO = 0.02
@@ -533,22 +539,16 @@ def _detect_buying_climax(bars: list[dict], tr_ctx: dict | None = None) -> dict:
 
     return {"bc_signal": False, "bc_reason": "未检测到购买高潮", "bc_price": 0.0}
 
-def _detect_selling_climax(bars: list[dict], tr_ctx: dict | None = None) -> dict:
-    """Detect Selling Climax (SC) — 天量宽幅下跌，低位抛售宣泄。
 
-    对称于 BC（Buying Climax），但方向相反：
-      - 巨量（量比 >= BC 阈值）
-      - 低位（在近窗价格区间下沿）
-      - 阴线（close < open）且跌幅显著
-      - 下影线比例低（实体占比大）
+def _find_sc_anchor(bars: list[dict], tr_ctx: dict | None = None) -> dict | None:
+    """在最近 WYCKOFF_CLIMAX_ANCHOR_BARS 根内找最近一次 SC 锚点（SSOT）。
 
     Returns:
-        dict with keys: sc_signal (bool), sc_reason (str), sc_price (float)
+        dict | None: sc_bar_idx, sc_low, sc_close, sc_avg_vol, vol_ratio, change_pct, pos
     """
     if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1:
-        return {"sc_signal": False, "sc_reason": "数据不足", "sc_price": 0.0}
-
-    scan_start = max(1, len(bars) - 5)
+        return None
+    scan_start = max(1, len(bars) - WYCKOFF_CLIMAX_ANCHOR_BARS)
     for scan_idx in range(len(bars) - 1, scan_start - 1, -1):
         current = bars[scan_idx]
         recent = bars[max(0, scan_idx - WYCKOFF_SPRING_SUPPORT_LOOKBACK):scan_idx]
@@ -567,45 +567,99 @@ def _detect_selling_climax(bars: list[dict], tr_ctx: dict | None = None) -> dict
             continue
 
         vol_ratio = cur_volume / avg_volume
-
-        # 量比门槛（与 BC 共用阈值）
         if vol_ratio < WYCKOFF_BC_VOL_RATIO_THRESHOLD:
             continue
 
-        # 低位过滤：须在近窗价格区间下沿
         pos = _price_pos_pct(bars, scan_idx)
         if pos is None or pos > 1 - WYCKOFF_BC_MIN_POS_PCT:
             continue
 
-        # 必须是阴线（close < open），且跌幅明显（相对前收盘）
         if cur_close >= cur_open:
             continue
         prev_close = to_float(bars[scan_idx - 1].get("close")) if scan_idx >= 1 else cur_open
         change_pct = (cur_close - prev_close) / max(prev_close, 0.01) * 100
-        if change_pct > -2.0:  # 跌幅至少 -2%
+        if change_pct > -2.0:
             continue
 
-        # 下影线比例低（实体占比大，不是探底回升）
-        price_range = cur_high - cur_low if cur_high != cur_low else 1.0
-        real_body_bottom = min(cur_open, cur_close)
-        lower_shadow = real_body_bottom - cur_low
-        lower_shadow_ratio = lower_shadow / max(price_range, 0.01)
-
-        parts = [f"量比 {vol_ratio:.1f}", f"跌幅 {change_pct:.1f}%"]
-        if lower_shadow_ratio < 0.3:
-            parts.append("下影线短（实体大）")
-        else:
-            parts.append("带下影线")
-        pos_label = f"低位区{pos*100:.0f}%"
-        parts.append(pos_label)
-
         return {
-            "sc_signal": True,
-            "sc_reason": "天量宽幅下跌，卖力高潮：" + "，".join(parts),
-            "sc_price": round(cur_low, 2),
+            "sc_bar_idx": scan_idx,
+            "sc_low": round(cur_low, 2),
+            "sc_close": cur_close,
+            "sc_avg_vol": avg_volume,
+            "vol_ratio": vol_ratio,
+            "change_pct": change_pct,
+            "pos": pos,
+            "cur_high": cur_high,
+            "cur_open": cur_open,
         }
+    return None
 
-    return {"sc_signal": False, "sc_reason": "未检测到卖力高潮", "sc_price": 0.0}
+
+def _sc_empty() -> dict:
+    return {
+        "sc_signal": False,
+        "sc_reason": "未检测到卖力高潮",
+        "sc_price": 0.0,
+        "sc_low": None,
+        "sc_bar_idx": None,
+    }
+
+
+def _detect_selling_climax(bars: list[dict], tr_ctx: dict | None = None) -> dict:
+    """Detect Selling Climax (SC) — 天量宽幅下跌，低位抛售宣泄。
+
+    对称于 BC（Buying Climax），但方向相反：
+      - 巨量（量比 >= BC 阈值）
+      - 低位（在近窗价格区间下沿）
+      - 阴线（close < open）且跌幅显著
+      - 下影线比例低（实体占比大）
+
+    Returns:
+        dict with keys: sc_signal (bool), sc_reason (str), sc_price (float),
+        sc_low (float|None), sc_bar_idx (int|None)
+    """
+    if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1:
+        return {**_sc_empty(), "sc_reason": "数据不足"}
+
+    anchor = _find_sc_anchor(bars, tr_ctx=tr_ctx)
+    if anchor is None:
+        return _sc_empty()
+
+    price_range = (anchor["cur_high"] - anchor["sc_low"]) if anchor["cur_high"] is not None else 1.0
+    if price_range <= 0:
+        price_range = 1.0
+    real_body_bottom = min(anchor["cur_open"], anchor["sc_close"])
+    lower_shadow = real_body_bottom - anchor["sc_low"]
+    lower_shadow_ratio = lower_shadow / max(price_range, 0.01)
+
+    parts = [f"量比 {anchor['vol_ratio']:.1f}", f"跌幅 {anchor['change_pct']:.1f}%"]
+    if lower_shadow_ratio < 0.3:
+        parts.append("下影线短（实体大）")
+    else:
+        parts.append("带下影线")
+    parts.append(f"低位区{anchor['pos']*100:.0f}%")
+
+    sc_low = anchor["sc_low"]
+    return {
+        "sc_signal": True,
+        "sc_reason": "天量宽幅下跌，卖力高潮：" + "，".join(parts),
+        "sc_price": sc_low,
+        "sc_low": sc_low,
+        "sc_bar_idx": anchor["sc_bar_idx"],
+    }
+
+
+def _ar_empty(reason: str = "未检测到 SC，无法触发 AR") -> dict:
+    return {
+        "ar_signal": False,
+        "ar_reason": reason,
+        "ar_price": None,
+        "ar_high": None,
+        "ar_bar_idx": None,
+        "ar_volume_soft": False,
+        "sc_low": None,
+        "sc_bar_idx": None,
+    }
 
 def _detect_sign_of_weakness(bars: list[dict], _support: float | None = None, tr_ctx: dict | None = None) -> dict:
     """Detect Sign of Weakness (SOW) — 收盘有效跌破支撑且放量。
@@ -1009,77 +1063,134 @@ def _detect_volume_divergence(bars: list[dict]) -> tuple[bool, bool]:
 def _detect_ar(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     """Detect Automatic Rally (AR) — SC 之后抛售枯竭的快速反弹（原典）。
 
-    只绑 SC。派发侧对称事件见 `_detect_are`（Automatic Reaction，BC 后回落）。
-
-    触发条件:
-      1. 最近 N 根 K 线内检测到 SC（卖力高潮）
-      2. SC 后 1-3 根 K 线内，存在至少 1 根满足:
-         - close > sc_close * 1.02 (上涨 >= 2%)
-         - volume > sc 前均量 * 1.2 (放量)
+    只绑 SC。与 `_detect_selling_climax` 共用 `_find_sc_anchor`。
+    边界价用 ar_high（反弹棒最高价）；ar_price 保留 close 供旧消费。
+    量能 1.2× 为 soft：涨幅/结构为主，弱量仍可为 ar_signal 并标 ar_volume_soft。
     """
     if len(bars) < WYCKOFF_MIN_BARS + 3:
-        return {"ar_signal": False, "ar_reason": "数据不足", "ar_price": None}
+        return {**_ar_empty(), "ar_reason": "数据不足"}
 
-    # 扫描最近 15 根寻找 SC 锚点（原 5 根过短，A 股高潮后 1 周才反弹会漏 AR）
-    scan_start = max(1, len(bars) - 15)
-    sc_bar_idx = None
-    sc_close = None
-    sc_avg_vol = None
+    anchor = _find_sc_anchor(bars, tr_ctx=tr_ctx)
+    if anchor is None:
+        return _ar_empty()
 
-    for scan_idx in range(len(bars) - 1, scan_start - 1, -1):
-        current = bars[scan_idx]
-        recent = bars[max(0, scan_idx - WYCKOFF_SPRING_SUPPORT_LOOKBACK):scan_idx]
+    sc_bar_idx = anchor["sc_bar_idx"]
+    sc_close = anchor["sc_close"]
+    sc_avg_vol = anchor["sc_avg_vol"]
+    sc_low = anchor["sc_low"]
 
-        cur_open = to_float(current.get("open"))
-        cur_close = to_float(current.get("close"))
-        cur_volume = to_float(current.get("volume"))
-
-        if any(v is None for v in [cur_open, cur_close, cur_volume]):
-            continue
-
-        avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
-        if avg_volume <= 0:
-            continue
-
-        prev_close = to_float(bars[scan_idx - 1].get("close")) if scan_idx >= 1 else cur_open
-        change_pct = (cur_close - prev_close) / max(prev_close, 0.01) * 100
-        vol_ratio = cur_volume / avg_volume
-        is_candle = cur_close < cur_open
-
-        # 仅 SC：低位 + 阴线 + 跌幅显著 + 天量（与 _detect_selling_climax 对齐）
-        sc_pos = _price_pos_pct(bars, scan_idx)
-        if (
-            vol_ratio >= WYCKOFF_BC_VOL_RATIO_THRESHOLD
-            and is_candle
-            and sc_pos is not None
-            and sc_pos <= 1 - WYCKOFF_BC_MIN_POS_PCT
-            and change_pct <= -2.0
-        ):
-            sc_bar_idx = scan_idx
-            sc_close = cur_close
-            sc_avg_vol = avg_volume
-            break
-
-    if sc_bar_idx is None:
-        return {"ar_signal": False, "ar_reason": "未检测到 SC，无法触发 AR", "ar_price": None}
-
-    # 检查 SC 后 1-3 根 K 线
-    for i in range(1, min(4, len(bars) - sc_bar_idx)):
+    rally_max = min(max(3, WYCKOFF_CLIMAX_ANCHOR_BARS // 2), len(bars) - sc_bar_idx - 1)
+    for i in range(1, rally_max + 1):
         rally_bar = bars[sc_bar_idx + i]
         r_close = to_float(rally_bar.get("close"))
+        r_high = to_float(rally_bar.get("high"))
         r_volume = to_float(rally_bar.get("volume"))
-        if r_close is None or r_volume is None:
+        if r_close is None or r_high is None or r_volume is None:
             continue
 
-        if r_close > sc_close * 1.02 and r_volume > sc_avg_vol * 1.2:
-            pct = (r_close / sc_close - 1) * 100
-            return {
-                "ar_signal": True,
-                "ar_reason": f"SC 后自动反弹，放量 +{pct:.1f}%",
-                "ar_price": round(r_close, 2),
-            }
+        if r_close <= sc_close * 1.02:
+            continue
 
-    return {"ar_signal": False, "ar_reason": "SC 后未检测到有效反弹", "ar_price": None}
+        vol_ok = r_volume > sc_avg_vol * 1.2
+        pct = (r_close / sc_close - 1) * 100
+        vol_note = "放量" if vol_ok else "量能偏弱(soft)"
+        return {
+            "ar_signal": True,
+            "ar_reason": f"SC 后自动反弹，{vol_note} +{pct:.1f}%",
+            "ar_price": round(r_close, 2),
+            "ar_high": round(r_high, 2),
+            "ar_bar_idx": sc_bar_idx + i,
+            "ar_volume_soft": not vol_ok,
+            "sc_low": sc_low,
+            "sc_bar_idx": sc_bar_idx,
+        }
+
+    return {
+        **_ar_empty("SC 后未检测到有效反弹"),
+        "sc_low": sc_low,
+        "sc_bar_idx": sc_bar_idx,
+    }
+
+
+def _st_sc_empty(reason: str = "未检测到 SC 锚点") -> dict:
+    return {
+        "secondary_test_sc_signal": False,
+        "secondary_test_sc_reason": reason,
+        "st_sc_low": None,
+        "secondary_test_sc_low": None,
+        "secondary_test_sc_price": None,
+        "secondary_test_sc_bar_idx": None,
+    }
+
+
+def _detect_secondary_test_sc(
+    bars: list[dict],
+    tr_ctx: dict | None = None,
+    phase_a_range: dict | None = None,
+) -> dict:
+    """广义 Secondary Test — SC 后二次回测 SC 区（非 Spring Test / st_*）。
+
+    前提：已有 SC 锚点；SC 后若干根内 low 接近 sc_low、量较 SC 明显缩小、
+    未有效破新低（或刺穿后收盘收回）。字段独立，不覆盖 spring_test_* / st_*。
+    """
+    if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 2:
+        return _st_sc_empty("数据不足")
+
+    anchor = _find_sc_anchor(bars, tr_ctx=tr_ctx)
+    if anchor is None:
+        return _st_sc_empty()
+
+    sc_bar_idx = anchor["sc_bar_idx"]
+    sc_low = anchor["sc_low"]
+    sc_vol = to_float(bars[sc_bar_idx].get("volume")) or anchor.get("sc_avg_vol") or 0
+    if sc_vol <= 0 or sc_low is None:
+        return _st_sc_empty("SC 量能数据异常")
+
+    max_after = min(WYCKOFF_ST_SC_MAX_BARS, len(bars) - sc_bar_idx - 1)
+    if max_after < 1:
+        return _st_sc_empty("SC 后无足够 K 线")
+
+    best_low: float | None = None
+    best_vol: float | None = None
+    best_close: float | None = None
+    best_idx: int | None = None
+    for i in range(sc_bar_idx + 1, sc_bar_idx + max_after + 1):
+        bar = bars[i]
+        t_low = to_float(bar.get("low"))
+        t_close = to_float(bar.get("close"))
+        t_vol = to_float(bar.get("volume"))
+        if t_low is None or t_vol is None:
+            continue
+
+        # 回测 SC 区：low 须在 sc_low 上方 proximity 内，或轻微刺穿后收回
+        upper = sc_low * (1.0 + WYCKOFF_ST_SC_PROXIMITY)
+        if t_low > upper:
+            continue
+        pierce = t_low < sc_low * (1.0 - WYCKOFF_ST_SC_MAX_PIERCE)
+        if pierce and (t_close is None or t_close < sc_low):
+            continue
+
+        if t_vol >= sc_vol * WYCKOFF_ST_SC_VOL_RATIO:
+            continue
+
+        if best_low is None or t_low < best_low:
+            best_low = t_low
+            best_vol = t_vol
+            best_close = t_close
+            best_idx = i
+
+    if best_low is None:
+        return _st_sc_empty("SC 后未检测到有效二次测试")
+
+    vol_pct = (best_vol / sc_vol * 100) if best_vol and sc_vol else 0
+    return {
+        "secondary_test_sc_signal": True,
+        "secondary_test_sc_reason": f"SC 区二次测试，量 {vol_pct:.0f}% SC",
+        "st_sc_low": round(best_low, 2),
+        "secondary_test_sc_low": round(best_low, 2),
+        "secondary_test_sc_price": round(best_close, 2) if best_close is not None else round(best_low, 2),
+        "secondary_test_sc_bar_idx": best_idx,
+    }
 
 
 def _detect_are(bars: list[dict], tr_ctx: dict | None = None) -> dict:
@@ -1097,7 +1208,7 @@ def _detect_are(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     if len(bars) < WYCKOFF_MIN_BARS + 3:
         return {"are_signal": False, "are_reason": "数据不足", "are_price": None}
 
-    scan_start = max(1, len(bars) - 15)
+    scan_start = max(1, len(bars) - WYCKOFF_CLIMAX_ANCHOR_BARS)
     saw_bc = False
 
     for scan_idx in range(len(bars) - 1, scan_start - 1, -1):
@@ -1132,19 +1243,24 @@ def _detect_are(bars: list[dict], tr_ctx: dict | None = None) -> dict:
             continue
 
         saw_bc = True
-        for i in range(1, min(4, len(bars) - scan_idx)):
+        react_max = min(max(3, WYCKOFF_CLIMAX_ANCHOR_BARS // 2), len(bars) - scan_idx - 1)
+        for i in range(1, react_max + 1):
             react_bar = bars[scan_idx + i]
             r_close = to_float(react_bar.get("close"))
             r_volume = to_float(react_bar.get("volume"))
             if r_close is None or r_volume is None:
                 continue
-            if r_close < cur_close * 0.98 and r_volume > avg_volume * 1.2:
-                pct = (r_close / cur_close - 1) * 100
-                return {
-                    "are_signal": True,
-                    "are_reason": f"BC 后自动回落，放量 {pct:.1f}%",
-                    "are_price": round(r_close, 2),
-                }
+            if r_close >= cur_close * 0.98:
+                continue
+            vol_ok = r_volume > avg_volume * 1.2
+            pct = (r_close / cur_close - 1) * 100
+            vol_note = "放量" if vol_ok else "量能偏弱(soft)"
+            return {
+                "are_signal": True,
+                "are_reason": f"BC 后自动回落，{vol_note} {pct:.1f}%",
+                "are_price": round(r_close, 2),
+                "are_volume_soft": not vol_ok,
+            }
 
     if not saw_bc:
         return {"are_signal": False, "are_reason": "未检测到 BC，无法触发 ARE", "are_price": None}

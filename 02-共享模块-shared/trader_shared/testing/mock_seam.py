@@ -170,16 +170,52 @@ def apply_seam(patcher) -> None:
     # 绑死到自己的模块命名空间。只打 market_env 源模块 → 那些 binding 仍是原函数对象
     # → 真实指数数据漏入报告 → 门禁随行情漂移（"数据暂停于MM-DD(±X%)" 红）。
     # 必须同时打：① 源模块 ② 包级 re-export ③ 所有 pattern-2 消费者模块。
-    _mock_env = lambda *a, **k: {"level": "正常", "hmm_regime_en": "range"}
+    def _mock_env(skill: str = "trader", index_code: str | None = None, **_k):
+        idx = (index_code or getattr(_me, "INDEX_CODE", "000852.SH") or "000852.SH").strip()
+        try:
+            label = _me._label_for_index(idx)
+        except Exception:
+            label = "中证1000"
+        return {
+            "level": "正常",
+            "hmm_regime_en": "range",
+            "change_pct": 0.50,
+            "index_code": idx,
+            "index_label": label,
+            "skill_note": "正常建仓",
+        }
+
     patcher.setattr(_me, "get_env_for_skill", _mock_env)          # ① 源：覆盖 market_env.xxx / from .market_env import
     patcher.setattr(_ts, "get_env_for_skill", _mock_env)          # ② 包级 re-export
-    for _cons_name in ("report_builder", "report_presentation"):  # ③ pattern-2 消费者
+    for _cons_name in (
+        "report_builder",
+        "report_presentation",
+        "report_pipeline.context_stage",
+    ):  # ③ pattern-2 消费者
         try:
             _cons = importlib.import_module(f"trader_shared.{_cons_name}")
             if hasattr(_cons, "get_env_for_skill"):
                 patcher.setattr(_cons, "get_env_for_skill", _mock_env)
         except Exception:
             pass
+
+    # 板块快照：离线确定性（避免 ~/.trader/cache 渗入 golden）
+    try:
+        import trader_shared.sector_data as _sd
+
+        def _mock_sector(ts_code: str = "", **_k):
+            return {
+                "industry": "银行",
+                "sector_name": "股份制银行",
+                "sector_code": "mock",
+                "sector_change_pct": -0.89,
+                "status": "正常",
+            }
+
+        patcher.setattr(_sd, "get_stock_sector_snapshot_cached", _mock_sector)
+        patcher.setattr(_sd, "get_stock_sector_snapshot", _mock_sector)
+    except Exception:
+        pass
     patcher.setattr(_cu, "fetch_fund_flow_cached", lambda *a, **k: None)
     patcher.setattr(_tc, "get_client", lambda *a, **k: UnavailableClient())
     patcher.setattr(_chip, "get_cyq_perf", lambda *a, **k: None)

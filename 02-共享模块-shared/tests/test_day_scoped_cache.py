@@ -224,6 +224,7 @@ def test_market_env_same_day_skips_network(monkeypatch):
 
     me._assess_cache = None
     me._assess_cache_time = 0
+    me._assess_cache_by_index = {}
     today = "2026-07-17"
     payload = {
         "level": "偏弱",
@@ -251,6 +252,7 @@ def test_market_env_same_day_skips_network(monkeypatch):
     assert env["level"] == "偏弱"
     assert called["n"] == 0
     me._assess_cache = None
+    me._assess_cache_by_index = {}
 
 
 def test_fund_flow_cross_day_refetch(monkeypatch):

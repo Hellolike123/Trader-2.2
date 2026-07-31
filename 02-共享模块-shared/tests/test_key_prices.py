@@ -237,7 +237,7 @@ class TestRenderShortMidline:
         # A 版短线：动作（不再用「出手」）
         assert "动作：" in md
         assert "出手：" not in md
-        assert "结构：" in md
+        assert "缠论：" in md
         assert "日线三专家" not in md
         assert "🗳️ 短线专家" not in md
         assert "关键价（中线）" in md

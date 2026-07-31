@@ -43,7 +43,7 @@ _PUBLIC_ATTRS = {
     "load_recent": _tracker, "stats": _tracker, "stats_by_type": _tracker, "stable_id": _tracker,
     # market_env
     "assess": _market_env, "refresh": _market_env, "env_note_for": _market_env,
-    "get_env_for_skill": _market_env,
+    "get_env_for_skill": _market_env, "resolve_board_index": _market_env,
     # calibrator
     "run": _calibrator, "generate_suggestions": _calibrator,
 }
@@ -78,7 +78,7 @@ __all__ = [
     "log", "log_safe", "fill", "fill_by_target", "load_recent",
     "stats", "stats_by_type", "stable_id",
     # market_env
-    "assess", "refresh", "env_note_for", "get_env_for_skill",
+    "assess", "refresh", "env_note_for", "get_env_for_skill", "resolve_board_index",
     # calibrator
     "run", "generate_suggestions",
     # signal modules

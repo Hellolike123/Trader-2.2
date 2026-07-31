@@ -69,7 +69,7 @@
 | `fusion.action` | str | 融合层建议 | 半仓试 (多方主导) |
 | `fusion.confidence` | float | 融合置信度 0-1 | 0.65 |
 | `fusion.weighted_score` | float | 加权分仪表 -1~+1（出手听 decision_view） | 0.35 |
-| `fusion.regime` | str | 大盘环境 | 正常/偏弱/很差 |
+| `fusion.regime` | str | 板块环境档（跟所属板块指数；meta 不露） | 正常/偏弱/很差 |
 | `fusion.main_force_env` | str | 主力行为阶段 | accumulation/markup/unknown |
 | `fusion.hmm_regime` | str | HMM大势前瞻 | bull/bear/range |
 | `fusion.disagreement` | float | 多信号分歧度 | 1.5 |
@@ -148,7 +148,10 @@
 | `time_window` | str | 时间窗口提示 | "临近财报发布" |
 | `fib_retrace` | dict | 斐波那契回调位 | {"0.382": 58.00, "0.500": 57.00, "0.618": 56.00} |
 | `wyckoff` | dict | 威科夫完整分析结果（spring/bc/sos/phase 等） | `{"spring_signal":true,"phase_label":"..."}`；报告文案见 `format_wyckoff_oneline()` |
-| `market_env.level` | str | 大盘环境等级 | 正常/偏弱/很差 |
+| `market_env.level` | str | 板块环境档（内部；meta 纯 D 不写） | 正常/偏弱/很差 |
+| `market_env.index_code` | str | 对照指数 ts 代码 | 000688.SH |
+| `market_env.index_label` | str | meta 短名 | 科创/创业板/上证/深成 |
+| `market_env.change_pct` | float | 对照指数当日涨跌 % | 2.99 |
 | `market_env.hmm_regime_en` | str | HMM 大势（英文） | bull/bear/range |
 
 ## 信号字段

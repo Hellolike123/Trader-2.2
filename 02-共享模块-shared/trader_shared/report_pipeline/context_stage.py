@@ -102,7 +102,10 @@ def run_analysis_context_stage(
         return mf, features
 
     def _fetch_market_env():
-        return get_env_for_skill("trader")
+        from trader_shared.market_env import resolve_board_index
+
+        idx_code, _idx_label = resolve_board_index(sec)
+        return get_env_for_skill("trader", index_code=idx_code)
 
     def _fetch_sector_data():
         # enrich 已写入 extend_sector（同源 tushare 快照）时直接复用，避免同票双拉

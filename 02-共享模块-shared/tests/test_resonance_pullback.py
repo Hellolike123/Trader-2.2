@@ -10,6 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from trader_shared.resonance import (  # noqa: E402
+    _chan_buy_like,
     attach_resonance,
     build_resonance,
 )
@@ -114,3 +115,55 @@ def test_empty_report_safe():
     res = build_resonance(None)
     assert res["grade"] == "empty"
     assert "background" in res["posts"]
+
+
+def test_chan_buy_like_rejects_soft_sell_substring():
+    """「类二」不得子串命中「类二卖」；卖点/空向一律非买点。"""
+    assert _chan_buy_like("类二卖") is False
+    assert _chan_buy_like("类二卖", direction=-1) is False
+    assert _chan_buy_like("一卖") is False
+    assert _chan_buy_like("二卖") is False
+    assert _chan_buy_like("类二买") is True
+    assert _chan_buy_like("二买") is True
+    assert _chan_buy_like("二买", direction=-1) is False
+
+
+def test_soft_sell_does_not_green_structure_post():
+    """三花类：类二卖看跌 → 结构岗不得因买点子串 / 价在买区变绿 → 缺结构。"""
+    r = _base_report()
+    r["analysis_cards"]["chan"] = {
+        "type_short": "类二卖",
+        "type_raw": "类二卖",
+        "direction": -1,
+        "summary_line": "类二卖 · 反抽偏弱 · 看跌",
+    }
+    # 即使现价落在买点区，卖点也不得把结构岗点绿
+    r["current"] = 10.0
+    r["key_prices"] = {"buy_zone_low": 9.5, "buy_zone_high": 10.2}
+    res = build_resonance(r)
+    assert res["posts"]["structure"]["ok"] is False
+    assert "类二卖" in res["posts"]["structure"]["note"] or "偏空" in res["posts"]["structure"]["note"]
+    assert res["grade"] == "missing_structure"
+    assert "四岗齐了" not in res["summary_line"]
+    assert "共振齐" not in res["summary_line"]
+
+
+def test_background_prefers_midline_stage_over_major_xushi():
+    """报告阶段=转弱时，不得因 major_stage=蓄势把背景岗洗白。"""
+    r = _base_report(major_stage="蓄势", midline_stage="转弱", midline_bias="bear")
+    res = build_resonance(r)
+    assert res["posts"]["background"]["ok"] is False
+    assert "转弱" in res["posts"]["background"]["note"]
+    assert res["conflict"] is True or res["grade"] == "conflict"
+
+
+def test_background_midline_verdict_stage_when_no_midline_stage():
+    """无 midline_stage 时可读 midline_verdict.stage。"""
+    r = _base_report(
+        major_stage="蓄势",
+        midline_verdict={"stage": "派发·警惕", "bias": "bear"},
+        midline_bias="bear",
+    )
+    res = build_resonance(r)
+    assert res["posts"]["background"]["ok"] is False
+    assert "派发" in res["posts"]["background"]["note"] or "不宜" in res["posts"]["background"]["note"]

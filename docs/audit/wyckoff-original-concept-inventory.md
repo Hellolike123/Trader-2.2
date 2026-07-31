@@ -35,8 +35,8 @@
 |------|------|------|
 | **PS (Preliminary Support 初步止跌)** | ✅ | `_detect_preliminary_support`；与 SC 互斥让位 |
 | SC (Selling Climax 卖力高潮) | ✅ | |
-| AR (Automatic Rally 自动反弹) | ✅ | 锚点扫描窗已扩至 15 根 |
-| ST (Secondary Test 二次测试) | ⚠️ | 字段 `st_*` 仍保留；语义上现为 Spring 后确认（见下行）。SC 后广义 ST **未**独立实现 |
+| AR (Automatic Rally 自动反弹) | ⚠️ | P1 已落地：`_find_sc_anchor` SSOT + `ar_high` 边界价 + `ar_volume_soft`（弱量仍亮）。**余缺口**：AR 后窗仍 ≤7 根（`anchor//2`），延迟 AR 可能 forming；原典「弱于 SC」量能规则 P2 再 soft 化 |
+| ST (Secondary Test 二次测试) | ✅ | Phase A 广义 ST（测 SC/AR）→ 独立 `_detect_secondary_test_sc` + `secondary_test_sc_*`（§4.4）。字段 `st_*` 仍保留；语义上现为 Spring 后确认。**禁止**与 Spring Test 混名/混检 |
 | Spring (弹簧/震仓) | ✅ | |
 | Test of Spring (Spring 后确认测试) | ✅ | `spring_test_*` 与 `st_*` 双写（`_spring_test_fields_from_st`）；阶段机 C→D 认 Test |
 | SOS (Sign of Strength 强势信号) | ✅ | |
@@ -62,14 +62,15 @@
 
 ## 五、交易区间（TR）分析
 
-> TR 识别层已落地（✅）。阶段机读 `WYCKOFF_PHASE_MIN_TR_QUALITY`（默认 0.35）：低质量/无 TR 时事件可亮、阶段不抬升（`phase_tr_gated`）。更大缺口见 §七 RS、§六 P&F。
+> TR 识别层已落地（✅）。阶段机读 `WYCKOFF_PHASE_MIN_TR_QUALITY`（默认 0.35）：低质量/无 TR 时事件可亮、阶段不抬升（`phase_tr_gated`）。**P1**：`phase_a_range`（`sc_low`/`ar_high`/`forming`|`established`）已透出；**P2 已落地**：分位 TR 与 established 种子箱挂门控（forming / 无 established 叠加 P0-B）+ 广义 ST refine 下沿。更大缺口见 §七 RS、§六 P&F。
 
 | 概念 | 状态 | 说明 |
 |------|------|------|
 | TR 识别（成交密集区判定） | ✅ | `_detect_trading_range` 宽度/振幅/质量 |
-| TR 上下沿计算 | ✅ | 分位带 tr_upper/tr_lower（刺穿毛刺过滤） |
+| TR 上下沿计算 | ⚠️ | 分位带 tr_upper/tr_lower（刺穿毛刺过滤）与 `phase_a_range` **并存**；established 前分位 TR 不得冒充原典 TR 种子抬阶段；established 时种子 SC/AR 优先 overlay |
 | TR 量能基线 | ✅ | `tr_baseline_volume` |
 | TR 质量门控阶段 | ✅ | `_detect_phase` 读 `MIN_TR_QUALITY`；透出 `phase_tr_gated` |
+| TR 种子箱门控（Phase A） | ✅ | `forming` / 无 `established` 叠加 P0-B；禁止借分位 TR 抬 B/C/D；established 时种子边界 overlay。规格：`wyckoff-phase-a-range-handoff.md` §4.3 |
 | TR 持续时间（因果律的基础） | ⚠️ | `tr_width` 透出；目标用高度 1:1 投射，非 P&F 格数 |
 
 ---

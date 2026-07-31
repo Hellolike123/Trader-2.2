@@ -16,6 +16,41 @@ from trader_shared.data_provider import get_provider
 
 _logger = get_logger(__name__)
 
+# 板块对照指数：展示短名 + ts 代码（环境档与涨跌同源）
+_BOARD_INDEX_BY_PREFIX: tuple[tuple[tuple[str, ...], str, str], ...] = (
+    (("688",), "000688.SH", "科创"),
+    (("300", "301"), "399006.SZ", "创业板"),
+    (("60",), "000001.SH", "上证"),
+    (("000", "001", "002", "003"), "399001.SZ", "深成"),
+)
+
+
+def resolve_board_index(code_or_sec: Any = None) -> tuple[str, str]:
+    """个股 → (指数 ts_code, 短标签)。
+
+    688→科创50；30x→创业板指；60→上证；00/001/002→深成；其余回退 INDEX_CODE。
+    """
+    raw = ""
+    if code_or_sec is None:
+        return INDEX_CODE, "中证1000"
+    if hasattr(code_or_sec, "code"):
+        raw = str(getattr(code_or_sec, "code", "") or "")
+        ts = str(getattr(code_or_sec, "ts_code", "") or "")
+        if not raw and ts:
+            raw = ts.split(".")[0]
+    else:
+        raw = str(code_or_sec or "").strip().upper()
+        raw = raw.replace("SH", "").replace("SZ", "").replace("BJ", "")
+        raw = raw.split(".")[0]
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if len(digits) >= 6:
+        digits = digits[-6:]
+    for prefixes, idx, label in _BOARD_INDEX_BY_PREFIX:
+        if any(digits.startswith(p) for p in prefixes):
+            return idx, label
+    # 北交所等：暂回退宽基，避免无源
+    return INDEX_CODE, "中证1000"
+
 
 def _is_market_open_now() -> bool:
     """判断当前是否是交易时段（用于 data_freshness 标记）。"""
@@ -35,7 +70,7 @@ def _tencent_index_code(raw_code: str) -> str:
     return f"{market}{code}"
 
 
-def _fetch_index_data() -> dict[str, Any]:
+def _fetch_index_data(index_code: str | None = None) -> dict[str, Any]:
     """Fetch current index data via Tencent real-time quote API.
 
     Tencent index response format (after =quote):
@@ -44,7 +79,8 @@ def _fetch_index_data() -> dict[str, Any]:
     """
     import urllib.request
 
-    tencent_code = _tencent_index_code(INDEX_CODE)
+    idx = (index_code or INDEX_CODE).strip() or INDEX_CODE
+    tencent_code = _tencent_index_code(idx)
     url = f"http://qt.gtimg.cn/q={tencent_code}"
     try:
         req = urllib.request.Request(
@@ -97,7 +133,7 @@ def _fetch_index_data() -> dict[str, Any]:
     # For MA calculations we still need daily K-line bars, fetch 90 days for stable HMM
     try:
         provider = get_provider()
-        sec = provider.resolve_security(INDEX_CODE)
+        sec = provider.resolve_security(idx)
         bars = provider.fetch_qfq_daily(sec, days=90) or []
     except Exception:
         bars = []
@@ -107,6 +143,7 @@ def _fetch_index_data() -> dict[str, Any]:
         "pre_close": pre_close,
         "change_pct": round(change_pct, 2),
         "bars": bars,
+        "index_code": idx,
     }
 
 
@@ -121,23 +158,44 @@ def _ma(bars: list[dict[str, Any]], period: int) -> float | None:
     return sum(closes[-period:]) / period
 
 
-# ── 进程内缓存（批量刷新时避免每票重复 HTTP + HMM 计算）──
+# ── 进程内缓存（按指数代码分桶；批量同板块票复用）──
+_assess_cache_by_index: dict[str, tuple[float, dict[str, Any]]] = {}
+_ASSESS_CACHE_TTL = 60  # 1 分钟内复用进程内结果
+
+# 兼容旧测：单槽镜像（默认 INDEX_CODE）
 _assess_cache: dict[str, Any] | None = None
 _assess_cache_time: float = 0
-_ASSess_CACHE_TTL = 60  # 1 分钟内复用进程内结果
 
 
-def assess() -> dict[str, Any]:
-    global _assess_cache, _assess_cache_time
-    # 进程内缓存：同一进程内 60 秒内复用
+def _index_cache_target(index_code: str) -> str:
+    return f"index_{(index_code or INDEX_CODE).strip().replace('.', '_')}"
+
+
+def _label_for_index(index_code: str) -> str:
+    for _, idx, label in _BOARD_INDEX_BY_PREFIX:
+        if idx == index_code:
+            return label
+    if index_code == INDEX_CODE:
+        return "中证1000"
+    return "指数"
+
+
+def assess(index_code: str | None = None) -> dict[str, Any]:
+    """评估市场环境。index_code 缺省为全局 INDEX_CODE；单票报告应传所属板块指数。"""
+    global _assess_cache, _assess_cache_time, _assess_cache_by_index
     import time as _time
+
+    idx = (index_code or INDEX_CODE).strip() or INDEX_CODE
+    idx_label = _label_for_index(idx)
     now = _time.time()
-    if _assess_cache is not None and now - _assess_cache_time < _ASSess_CACHE_TTL:
-        return _assess_cache
+    cached_hit = _assess_cache_by_index.get(idx)
+    if cached_hit is not None and now - cached_hit[0] < _ASSESS_CACHE_TTL:
+        return dict(cached_hit[1])
 
     # ── 文件缓存：同一自然日直接复用（当天第一次之后不再打网）──
-    # 大盘 level / HMM 日频足够；换日回源。失败兜底仍用旧缓存 bars。
+    # level / HMM 日频足够；换日回源。失败兜底仍用旧缓存 bars。
     _cached_env = None
+    _cache_target = _index_cache_target(idx)
     try:
         from trader_shared.cache_utils import (
             get_cached as _file_cached,
@@ -146,8 +204,12 @@ def assess() -> dict[str, Any]:
             cache_calendar_date,
             is_fetch_date_today,
         )
-        _cached_result = _file_cached(CACHE_MARKET_ENV, "index", ttl=TTL_DAILY * 3)
+        _cached_result = _file_cached(CACHE_MARKET_ENV, _cache_target, ttl=TTL_DAILY * 3)
         _cached_env = _cached_result.data if _cached_result is not None else None
+        # 兼容旧缓存键 "index"（仅默认宽基）
+        if _cached_env is None and idx == INDEX_CODE:
+            _cached_result = _file_cached(CACHE_MARKET_ENV, "index", ttl=TTL_DAILY * 3)
+            _cached_env = _cached_result.data if _cached_result is not None else None
         if (
             _cached_env
             and isinstance(_cached_env, dict)
@@ -155,19 +217,25 @@ def assess() -> dict[str, Any]:
             and _cached_env.get("level")
         ):
             env = dict(_cached_env)
-            _assess_cache = env
-            _assess_cache_time = now
+            env.setdefault("index_code", idx)
+            env.setdefault("index_label", idx_label)
+            _assess_cache_by_index[idx] = (now, env)
+            if idx == INDEX_CODE:
+                _assess_cache = env
+                _assess_cache_time = now
             return env
     except Exception:
         pass
 
-    idx_data = _fetch_index_data()
+    idx_data = _fetch_index_data(idx)
 
     if not idx_data:
         # 缓存有数据但实时抓取失败 → 使用缓存（标记 bars 陈旧，避免下游误判为新鲜）
         if _cached_env and isinstance(_cached_env, dict) and _cached_env.get("bars"):
             _cached_env = dict(_cached_env)
             _cached_env["bars_stale"] = True
+            _cached_env.setdefault("index_code", idx)
+            _cached_env.setdefault("index_label", idx_label)
             return _cached_env
         return {
             "level": "未知",
@@ -179,7 +247,9 @@ def assess() -> dict[str, Any]:
             "hmm_regime_en": "range",
             "hmm_regime_label": "宽幅震荡",
             "hmm_confidence": 0.5,
-            "note": "中证1000数据不足",
+            "note": f"{idx_label}数据不足",
+            "index_code": idx,
+            "index_label": idx_label,
         }
 
     current = idx_data.get("current", 0)
@@ -300,7 +370,10 @@ def assess() -> dict[str, Any]:
     elif change_pct <= -3.0 and level == "正常":
         level = "偏弱"
 
-    note = f"中证1000 MA5/MA20 {'>' if mid_term=='up' else '<'} 趋势{'偏多' if mid_term=='up' else '偏空'} 今日{change_pct:+.1f}%"
+    note = (
+        f"{idx_label} MA5/MA20 {'>' if mid_term == 'up' else '<'} "
+        f"趋势{'偏多' if mid_term == 'up' else '偏空'} 今日{change_pct:+.1f}%"
+    )
 
     result = {
         "level": level,
@@ -317,6 +390,8 @@ def assess() -> dict[str, Any]:
         "note": note + f" (HMM前瞻: {hmm_regime_label})",
         "bars": bars,  # 保留 bars 供缓存和下游使用
         "bars_stale": bars_from_cache,  # True 表示 bars 来自旧缓存顶替（实时日K取数失败）
+        "index_code": idx,
+        "index_label": idx_label,
     }
     try:
         from trader_shared.cache_utils import cache_calendar_date as _ccd
@@ -330,19 +405,24 @@ def assess() -> dict[str, Any]:
     if not bars_from_cache:
         try:
             from trader_shared.cache_utils import set_cached as _file_set, CACHE_MARKET_ENV
-            _file_set(CACHE_MARKET_ENV, "index", result)
+            _file_set(CACHE_MARKET_ENV, _cache_target, result)
+            # 默认宽基同时写旧键，兼容未升级读侧
+            if idx == INDEX_CODE:
+                _file_set(CACHE_MARKET_ENV, "index", result)
         except Exception:
             pass
 
     # ── 进程内缓存 ──
-    _assess_cache = result
-    _assess_cache_time = now
+    _assess_cache_by_index[idx] = (now, result)
+    if idx == INDEX_CODE:
+        _assess_cache = result
+        _assess_cache_time = now
 
     return result
 
 
-def refresh(write_pipeline: bool = True) -> dict[str, Any]:
-    env = assess()
+def refresh(write_pipeline: bool = True, index_code: str | None = None) -> dict[str, Any]:
+    env = assess(index_code=index_code)
     if write_pipeline and _HAS_PIPELINE:
         write_market(env.get("level", "未知"), env.get("note", ""))
     return env
@@ -374,11 +454,19 @@ def env_note_for(env: dict[str, Any], skill: str) -> str:
     return skill_mapping.get(level, "")
 
 
-def get_env_for_skill(skill: str) -> dict[str, Any]:
+def get_env_for_skill(skill: str, index_code: str | None = None) -> dict[str, Any]:
+    """skill 环境注记。单票报告应传所属板块指数代码（见 resolve_board_index）。"""
     try:
-        env = assess()
+        env = assess(index_code=index_code)
     except Exception:
-        env = {"level": "未知", "data_status": "degraded", "note": "大盘数据暂不可用"}
+        idx = (index_code or INDEX_CODE).strip() or INDEX_CODE
+        env = {
+            "level": "未知",
+            "data_status": "degraded",
+            "note": "大盘数据暂不可用",
+            "index_code": idx,
+            "index_label": _label_for_index(idx),
+        }
     env["skill_note"] = env_note_for(env, skill)
     return env
 
@@ -390,6 +478,7 @@ if __name__ == "__main__":
     print("change_pct:", env["change_pct"])
     print("current:", env["current"])
     print("ma5:", env["ma5"])
+    print("index:", env.get("index_code"), env.get("index_label"))
     print("t0:", env_note_for(env, "t0"))
     print("trader:", env_note_for(env, "trader"))
     print("portfolio:", env_note_for(env, "portfolio"))

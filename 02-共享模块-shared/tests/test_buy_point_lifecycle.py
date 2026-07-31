@@ -91,7 +91,7 @@ def test_l2_persist_failed_and_block_old_signal_id(tmp_path: Path):
             "signal_id": None,
             "failed_date": None,
             "note": "买点有效",
-            "display_line": "买点：有效（盖 10.00）",
+            "display_line": "买点：有效（守 10.00）",
         },
         symbol=symbol,
         trade_date="2026-07-28",

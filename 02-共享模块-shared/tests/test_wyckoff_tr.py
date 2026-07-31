@@ -436,12 +436,13 @@ def _sig(**kw):
                              "sow_signal", "lps_signal", "lpsy_signal",
                              "compression_signal", "trend_pullback_signal",
                              "trend_rally_signal", "st_signal", "spring_test_signal",
-                             "bu_signal", "utad_signal")}
+                             "secondary_test_sc_signal", "bu_signal", "utad_signal")}
     d.update(kw)
     return d
 
 
 # P0-B：阶段机要求 TR 质量达标；单测注入干净 TR，避免超平坦 bars 被门控
+# P2：含 sc+ar 的用例默认 established，否则 B+ 会被 no_established_seed 闸住
 _OK_TR = {
     "tr_quality": 0.7,
     "tr_upper": 10.2,
@@ -450,6 +451,7 @@ _OK_TR = {
     "tr_width": 40,
     "tr_amplitude_pct": 8.0,
     "tr_baseline_volume": 30_000.0,
+    "phase_a_status": "established",
 }
 
 

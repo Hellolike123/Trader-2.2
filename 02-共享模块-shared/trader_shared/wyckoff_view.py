@@ -20,6 +20,7 @@ _EVENT_SPECS: list[tuple[str, str, str]] = [
     ("sc", "sc_signal", "sc_reason"),
     ("ar", "ar_signal", "ar_reason"),
     ("are", "are_signal", "are_reason"),
+    ("secondary_test_sc", "secondary_test_sc_signal", "secondary_test_sc_reason"),
     ("spring_test", "spring_test_signal", "spring_test_reason"),
     ("st", "st_signal", "st_reason"),  # 兼容；与 spring_test 同亮时下方去重
     ("spring", "spring_signal", "spring_reason"),
@@ -81,6 +82,7 @@ class WyckoffStateView(TypedDict, total=False):
 
     phase: str
     phase_label: str
+    phase_a_status: str  # none | forming | established
     confidence: float  # 0~1，启发式，非概率校准
     premature: WyckoffPrematureView
 
@@ -96,6 +98,14 @@ class WyckoffStateView(TypedDict, total=False):
 
     # 透传：需要原始 bool 时用，View 消费者应优先用上面字段
     raw_available: bool
+
+
+_GATE_REASON_NOTES: dict[str, str] = {
+    "no_tr": "无清晰TR，阶段不参与定论",
+    "low_quality": "TR质量不足，阶段不参与定论",
+    "forming_phase_a": "区间未钉，阶段不抬升",
+    "no_established_seed": "无Phase A种子箱，阶段不抬升",
+}
 
 
 def _unwrap_wyckoff(wyckoff: dict[str, Any] | None) -> dict[str, Any]:
@@ -236,6 +246,12 @@ def to_wyckoff_state_view(
             price = wyk.get("compression_price")
         if price is None and eid == "spring_test":
             price = wyk.get("spring_test_price") or wyk.get("st_price")
+        if price is None and eid == "secondary_test_sc":
+            price = (
+                wyk.get("secondary_test_sc_price")
+                or wyk.get("secondary_test_sc_low")
+                or wyk.get("st_sc_low")
+            )
         item: WyckoffEventItem = {
             "id": eid,
             "reason": str(wyk.get(reason_k) or ""),
@@ -249,10 +265,18 @@ def to_wyckoff_state_view(
 
     bias = _bias_from_analysis(wyk)
     oneline = format_wyckoff_oneline(wyk, show_phase=False)
+    phase_a_status = str(wyk.get("phase_a_status") or "").strip() or "none"
+    phase_label = str(wyk.get("phase_label") or "")
+    # forming：摘要补「区间未钉」（微信红线：无 #/**/表格）
+    if phase_a_status == "forming" or "区间未钉" in phase_label:
+        if oneline and "区间未钉" not in oneline:
+            oneline = f"{oneline} · 区间未钉"
+        elif not oneline:
+            oneline = "区间未钉"
     if wyk.get("phase_tr_gated"):
         reason = str(wyk.get("phase_tr_gate_reason") or "")
-        note = "TR质量不足，阶段不参与定论" if reason == "low_quality" else "无清晰TR，阶段不参与定论"
-        if oneline and "不参与定论" not in oneline:
+        note = _GATE_REASON_NOTES.get(reason) or "阶段不参与定论"
+        if oneline and note not in oneline and "不参与定论" not in oneline and "不抬升" not in oneline:
             oneline = f"{oneline} · {note}"
 
     view: WyckoffStateView = {
@@ -260,7 +284,8 @@ def to_wyckoff_state_view(
         "symbol": str(symbol or wyk.get("symbol") or ""),
         "timeframe": tf,
         "phase": str(wyk.get("phase") or "none"),
-        "phase_label": str(wyk.get("phase_label") or ""),
+        "phase_label": phase_label,
+        "phase_a_status": phase_a_status,
         "confidence": _confidence(wyk, active),
         "premature": {
             "spring": bool(wyk.get("spring_premature")),
@@ -319,3 +344,24 @@ def format_event_display(
 
     to_wyckoff_state_view(wyckoff, symbol=symbol, timeframe="daily")
     return format_wyckoff_event_light(wyckoff if isinstance(wyckoff, dict) else {})
+
+
+def format_daily_phase_display(
+    wyckoff: dict[str, Any] | None,
+    *,
+    symbol: str = "",
+) -> str:
+    """短线「威科夫：」日线阶段只读展示：报告边界经 View 再格式化。
+
+    不进背景岗 / fusion / 出手；与中线阶段同构诚实无箱。
+    """
+    from trader_shared.wyckoff_core import format_wyckoff_daily_phase_light
+
+    to_wyckoff_state_view(wyckoff, symbol=symbol, timeframe="daily")
+    body = format_wyckoff_daily_phase_light(wyckoff if isinstance(wyckoff, dict) else {})
+    body = str(body or "").strip()
+    if body.startswith("威科夫："):
+        return body
+    if body.startswith("日线阶段："):
+        body = body[len("日线阶段："):].strip()
+    return f"威科夫：{body or '数据不足 · 仅对照'}"

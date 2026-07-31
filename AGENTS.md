@@ -14,9 +14,10 @@
 - **策略亮**：entry 须 `executable=True`（active）；`plan` 仅计划，不算可推荐新开。
 - **T0 v2**：人读结构仪表盘（`docs/t0-strategy-v2.md`），禁止「可执行/可低吸/三重共振买」指令叙事。
 - **输出契约**：`01-功能包-packages/trader/references/output-template.md` 与 `render_short_midline` 同源。实现锚点：`report_core` / `report_builder` / `report_pipeline`。
+- **meta 纯 D**：`综合动能 … ｜ {科创/创业板/上证/深成} ±% ｜ {行业短名} ±% ｜ 个股 ±%`；环境档跟板块指数算但不写「正常/偏弱/跑赢」。法源 `BUSINESS.md` §3.4。
 - **深度与满分示例**：性能史、算法细节、微信端满分范例 → [`AGENTS_DEEP.md`](AGENTS_DEEP.md)。
 
-改报告格式：`short_midline.py` → 刷新 golden →（骨架变了再）`output-template.md`。完整防漏清单：`01-功能包-packages/_common/agent-rules.md`。
+改报告格式：`short_midline.py` → 刷新 golden →（骨架变了再）`output-template.md` + `BUSINESS.md` §5.1。完整防漏清单：`01-功能包-packages/_common/agent-rules.md`。
 
 ---
 
@@ -29,7 +30,8 @@
 | 单票编排顺序 | `report_builder.py` | 在 stage 里堆无关业务 |
 | 流水线阶段 | `report_pipeline/{fusion,structure,chip,assemble,context}_stage.py` 等 | 把大段逻辑塞回 builder |
 | 短中线挂接 | `report_pipeline/attach_*.py`（facade=`attach.py`） | 把胶水写回 monolith `attach.py` |
-| 短中线文案 | `report_renderer/short_midline.py` | 手拼面板 / 改旧 `📍 决策` |
+| 短中线文案 | `report_renderer/short_midline.py` | 手拼面板 / 改旧 `📍 决策` / 旧「大盘 正常」meta |
+| 板块对照指数 / 环境档 | `market_env.py`（`resolve_board_index` + `assess(index_code=)`）+ `context_stage` | 展示写死中证1000；meta 露正常/偏弱 |
 | 行情类型 SSOT | `market_types.py`（`Security`/`MarketSnapshot`） | 在 light_data/data_provider 再各造一份 |
 | 买点盖生命周期 | `buy_point_lifecycle.py` + `attach_buy_point.py`；策略闸读字段在 `strategy/match.py` | 在策略层重算盖价/笔；接旧 failed `signal_id` |
 | Fusion 生产路径 | `fusion_core.py` + `analysis/cards.py` + `fusion_card_signals.py` | 加厚 classic 当主路径 |

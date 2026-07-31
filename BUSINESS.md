@@ -111,10 +111,15 @@
 - 开口：≥ `WYCKOFF_MIN_BARS=15` 根周 K；不足 → `timeframe=insufficient` →「周线不足 · 不参与定论」
 - 阶段叙事：约近 **12 根周 K**（`WYCKOFF_PHASE_LOOKBACK=60` × 周线缩比 0.2）
 - 读法：优先 `phase` + 事件链（如「还差 SOS」）+ `WyckoffStateView`；**不以**单事件亮灯或打分均值当状态
+- **Phase A 区间边界**（原典）：TR 种子由 **SC 低点 + AR 高点**（理想再加 ST 测 SC）钉定；`WYCKOFF_CLIMAX_ANCHOR_BARS` 等固定窗仅作 SC/AR **搜索/超时**，不定义 TR 周期。`forming`=有 SC；`established`=SC+AR（无 AR 不得假 established）。规格：`docs/plans/wyckoff-phase-a-range-handoff.md`
+- **日线威科夫（短线展示双轨）**：
+  - 短线 `威科夫：` ← 日线跑**同一套**阶段/种子箱机，**只给人看**（与中线点名同构；无箱体诚实写「无 / 区间未钉 / 暂定不出」）
+  - 短线 `事件：` ← 事件灯（`format_wyckoff_event_light` / `format_event_display`）
+  - **不进**中线定论、**不进** fusion、**不进**共振背景岗、**不单独开仓**
 
 **约束**：
 - 日线威科夫**已退出**短线 fusion（第三席为 VPF）；日线结果不得写入中线定论
-- 主消费：中线「威科夫：」一行 + 选股池/复盘吸筹链排序；背景岗共振读周线威科夫
+- 主消费：中线「威科夫：」一行 + 选股池/复盘吸筹链排序；背景岗共振**只读周线**威科夫；短线「威科夫：」仅对照阅读
 
 **统一出口 View（A 档，2026-07）**：
 - 契约：`docs/designs/wyckoff-state-view.md`
@@ -128,7 +133,8 @@
 1. 个股 vs 大盘相对强弱（RS）接入周线阶段（P1，另开）
 2. Spring 后确认测试与 ST 语义分离 → **已落地**（`spring_test_*` 双写 + 阶段 C/D；规格见 `docs/plans/wyckoff-phase-accuracy-handoff-2026-07-31.md` §2）
 3. 低质量 TR 不进阶段机 → **已落地**（`WYCKOFF_PHASE_MIN_TR_QUALITY` + `phase_tr_gated`；同上 handoff §3）
-4. 完整 P&F 非优先（目标价近似已有 TR 1:1 投射）
+4. Phase A 边界 SC/AR 钉 TR 种子 → **P1 已落地**（`phase_a_range`/`forming`/`established`）；**P2 已落地**（种子箱门控 + 广义 ST → `docs/plans/wyckoff-phase-a-range-handoff.md` §4）
+5. 完整 P&F 非优先（目标价近似已有 TR 1:1 投射）
 
 原典落地盘点：`docs/audit/wyckoff-original-concept-inventory.md`。
 
@@ -218,9 +224,24 @@ weighted_score  →  action（正常表摘要）
 - `disagreement > 1` → 用分歧降级表
 - `regime=偏弱` → **正阈值**右移 +0.10（负阈值不改）
 
-### 3.4 大盘「很差」实际行为（非字面「暂不碰」）
+### 3.4 板块环境与「很差」实际行为
 
-代码路径（`fusion_core.merge_decisions` + `score_to_action`）：
+**对照指数（单票）**：环境档（正常/偏弱/很差）跟**所属板块指数**走，不是固定中证1000。
+
+| 个股前缀 | 对照指数 | meta 短名 |
+|----------|----------|-----------|
+| `688` | 科创50 `000688.SH` | 科创 |
+| `300`/`301` | 创业板指 `399006.SZ` | 创业板 |
+| `60` | 上证指数 `000001.SH` | 上证 |
+| `000`/`001`/`002`/`003` | 深证成指 `399001.SZ` | 深成 |
+| 其余（含北交所） | 回退 `INDEX_CODE`（中证1000） | 中证1000 |
+
+实现：`market_env.resolve_board_index` → `get_env_for_skill(..., index_code=)`（`context_stage`）。  
+`INDEX_CODE` 仅作无映射时的宽基回退；选股池日报等无个股上下文时仍可用宽基。
+
+**人读 meta（纯 D）**：只写板块指数涨跌 + 行业短名涨跌 + 个股涨跌；**不写**正常/偏弱、不写跑赢。环境档仍进 `market_env.level` / fusion `regime`（内部风控），面板不露。
+
+**「很差」实际行为**（非字面「暂不碰」）— 代码路径 `fusion_core.merge_decisions` + `score_to_action`：
 
 1. 权重全 0 → 加权分自然为 0  
 2. 若 `|weighted_score| < 0.01` → **强制** `weighted_score = -0.5`  
@@ -275,14 +296,14 @@ Agent 展示层仍应：**不给买入建议**；文案对齐 fusion action / �
 ```
 分析报告 — {name}（{code}）｜短中线
 
-现价 {price}（{change_pct}）
-  动能 {momentum} ｜ 大盘 {regime}
-  MA5：… ｜ MA20：… ｜ MA250：…
-  量比… ｜ 换手…
+现价 {price}（{change_pct}）｜MA20 …｜MA250 …
+  综合动能 {momentum} ｜ {板块短名} ±x% ｜ {行业短名} ±x% ｜ 个股 ±x%
+  量比… ｜ 换手… ｜ 调整N天 ｜ ATR14 x.xx（前/后/未复权）
+  ← meta 纯 D：不写正常/偏弱/跑赢；无单独「行业：」行；ATR 并入量价行（非独立行）；映射见 §3.4
 
 🧭 中线
   阶段：{major_stage}
-  看法：{midline_view}          ← 禁止塞阶段词
+  定论：…                       ← 中线合成；禁止塞阶段词冒充看法
   威科夫：{wyckoff_midline}     ← 中线状态岗：仅周线，不回退日线
   缠论：{chanlun_midline}       ← 结构副读；周不足可 daily_fallback+「（日线）」；不定阶段
   位置：…
@@ -290,10 +311,10 @@ Agent 展示层仍应：**不给买入建议**；文案对齐 fusion action / �
     生命线 / 回踩区 / 压力 / 目标   ← mid_key_prices（周线引擎）
 
 ⚡ 短线
-  看法：…
-  缠论 / 位置 / 动能 / 价量资金 / 裁定
-  新开：否（缺：…）或 可试探（清单全绿）
-  出手 / 分仓 / 失效
+  缠论：…（日线缠论扳机）
+  威科夫：…（日线阶段只对照；无箱同构「无/区间未钉」；不进背景岗）
+  事件：…（日线威科夫事件灯；无事件可省略）
+  动能 / 资金 / 共振 / 新开 / 动作
   关键价（短线）
     止损 / 买点区 / 🌟 现价 / 卖点区
   {买价} 买：亏约… / 赚约…
@@ -349,6 +370,8 @@ WEEKLY_LOOKBACK_BARS = 260   # 中线缠论/威科夫成笔成段
 ATR14 = SMA(TR, 14)
 TR = max(H-L, |H-C_prev|, |L-C_prev|)
 ```
+
+人读展示：与量比/换手/调整天数同一行，形如 `ATR14 3.84（未复权）`；口径取 `atr_adjust`（qfq/hfq/none）。无有效 `atr14` 时退化为 `ATR口径 {复权标签}`。系统固定 **14 日** ATR，勿写成 ATR15。
 
 ### 6.4 盈亏比（纪律 / 出手文案）
 

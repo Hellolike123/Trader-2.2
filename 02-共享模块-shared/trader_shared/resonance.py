@@ -12,11 +12,14 @@ from typing import Any
 SCHEMA = "resonance_v1"
 SCENE_PULLBACK = "pullback_probe"
 
-# 阶段明确否决试探背景
-_BG_HARD_NO = frozenset({"派发", "衰退", "派发期", "衰退期"})
+# 阶段明确否决试探背景（含中线定论词 + major_stage 四阶段词）
+_BG_HARD_NO = frozenset({
+    "派发", "衰退", "派发期", "衰退期",
+    "转弱", "派发·警惕",
+})
 # 仍允许讨论回踩试探的阶段（宽松，可后续收紧）
 _BG_SOFT_OK = frozenset({
-    "蓄势", "蓄势偏强", "蓄势偏弱", "主升",
+    "蓄势", "蓄势偏强", "蓄势偏弱", "主升", "主升初期",
     "积累", "上涨", "观察",
 })
 
@@ -34,8 +37,21 @@ def _post(ok: bool, note: str) -> dict[str, Any]:
     return {"ok": bool(ok), "note": _s(note) or ("通过" if ok else "未通过")}
 
 
+def _background_stage(report: dict[str, Any]) -> tuple[str, str]:
+    """背景岗阶段：优先中线定论（与报告「阶段：」同源），再回退 major_stage。"""
+    mid = _s(report.get("midline_stage"))
+    if not mid:
+        mv = report.get("midline_verdict")
+        if isinstance(mv, dict):
+            mid = _s(mv.get("stage"))
+    if mid:
+        return mid, "midline"
+    return _s(report.get("major_stage")), "major"
+
+
 def _eval_background(report: dict[str, Any], cards: dict[str, Any]) -> dict[str, Any]:
-    stage = _s(report.get("major_stage"))
+    stage, stage_src = _background_stage(report)
+    mid_bias = _s(report.get("midline_bias")).lower()
     w = _card(cards, "wyckoff_midline") or _card(cards, "wyckoff")
     bias = _s(w.get("bias") or w.get("direction_label")).lower()
     summary = _s(w.get("summary_line"))
@@ -45,6 +61,11 @@ def _eval_background(report: dict[str, Any], cards: dict[str, Any]) -> dict[str,
     except (TypeError, ValueError):
         dir_i = 0
 
+    # 中线定论偏空 / 转弱：与报告阶段行对齐，不得再用 major_stage=蓄势洗白
+    if mid_bias == "bear" or any(k in stage for k in ("转弱", "派发", "衰退")):
+        label = stage or "偏空"
+        return _post(False, f"中线阶段 {label} 不宜试探")
+
     if any(k in stage for k in _BG_HARD_NO):
         return _post(False, f"阶段 {stage or '未知'} 不宜试探")
 
@@ -52,7 +73,11 @@ def _eval_background(report: dict[str, Any], cards: dict[str, Any]) -> dict[str,
     if dir_i < 0 and any(k in summary for k in ("派发", "砸盘", "Markdown", "markdown")):
         return _post(False, "威科夫中线偏空/派发叙事")
 
-    if stage and any(k in stage for k in _BG_SOFT_OK):
+    if stage and any(stage == k or stage.startswith(k) for k in _BG_SOFT_OK):
+        src_note = "中线" if stage_src == "midline" else ""
+        return _post(True, f"{src_note}阶段 {stage}".strip() if src_note else f"阶段 {stage}")
+    # 「蓄势·警惕转弱」含蓄势但已在上面转弱硬否；其余子串软通过
+    if stage and any(k in stage for k in _BG_SOFT_OK) and "转弱" not in stage:
         return _post(True, f"阶段 {stage}")
     if stage:
         # 未知阶段：不轻易绿灯
@@ -62,6 +87,40 @@ def _eval_background(report: dict[str, Any], cards: dict[str, Any]) -> dict[str,
     if summary:
         return _post(False, "阶段缺失，背景不足")
     return _post(False, "背景数据不足")
+
+
+# 结构岗「买点像」：精确类型（禁止「类二」子串命中「类二卖」）
+_CHAN_BUY_TYPES = frozenset({
+    "一买", "二买", "三买",
+    "一类买", "二类买", "三类买",
+    "类一买", "类二买",
+})
+
+
+def _chan_buy_like(type_short: str, direction: Any = None) -> bool:
+    """是否为可试探买点信号。含「卖」或 direction<0 → 否。"""
+    ts = _s(type_short)
+    if not ts or "卖" in ts:
+        return False
+    try:
+        if direction is not None and int(direction) < 0:
+            return False
+    except (TypeError, ValueError):
+        pass
+    return ts in _CHAN_BUY_TYPES
+
+
+def _chan_sell_like(type_short: str, direction: Any = None) -> bool:
+    """主信号偏空/卖点：结构岗不得因「价在买区」单独变绿。"""
+    ts = _s(type_short)
+    if "卖" in ts:
+        return True
+    try:
+        if direction is not None and int(direction) < 0:
+            return True
+    except (TypeError, ValueError):
+        pass
+    return False
 
 
 def _price_in_zones(current: float, report: dict[str, Any]) -> bool:
@@ -100,10 +159,9 @@ def _price_in_zones(current: float, report: dict[str, Any]) -> bool:
 def _eval_structure(report: dict[str, Any], cards: dict[str, Any]) -> dict[str, Any]:
     ch = _card(cards, "chan")
     type_short = _s(ch.get("type_short") or ch.get("type_raw"))
-    buy_like = any(
-        k in type_short
-        for k in ("一买", "二买", "三买", "类二", "买点", "buy")
-    )
+    dir_ch = ch.get("direction")
+    buy_like = _chan_buy_like(type_short, dir_ch)
+    sell_like = _chan_sell_like(type_short, dir_ch)
     try:
         current = float(report.get("current") or 0)
     except (TypeError, ValueError):
@@ -121,6 +179,11 @@ def _eval_structure(report: dict[str, Any], cards: dict[str, Any]) -> dict[str, 
         or items.get("pullback")
         or items.get("retrace")
     )
+
+    # 卖点/空向：结构岗红灯（价在买区也不能洗白）
+    if sell_like and not buy_like:
+        note = f"结构 {type_short or '偏空'}，非买点试探" if type_short else "缠论偏空，非买点试探"
+        return _post(False, note)
 
     if buy_like and in_zone:
         return _post(True, f"买点 {type_short} 且价在回踩/买点区")

@@ -12,7 +12,7 @@
 | `weighted_score` | float | [-1.35, 1.35] | 融合加权分仪表。正=多方，负=空方 |
 | `confidence` | float | [0, 1] | 综合置信度 |
 | `action` | str | — | 仪表动作文案（由 weighted_score + regime 映射） |
-| `regime` | str | 正常/偏弱/很差/未知 | 大盘环境 |
+| `regime` | str | 正常/偏弱/很差/未知 | 板块环境档（跟所属板块指数；面板 meta 不写，只进内部风控） |
 | `hmm_regime` | str | bull/bear/range | HMM 前瞻大势状态 |
 | `disagreement` | float | [0, 3] | 三路信号分歧度（max - min direction） |
 | `signals_detail` | dict | — | **chan / momentum / vpf** 各自的 direction + confidence |

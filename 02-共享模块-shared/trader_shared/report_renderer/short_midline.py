@@ -8,6 +8,27 @@ from typing import Any
 
 from trader_shared.report_renderer._helpers import _reformat_mid_line, _short_midline_enabled
 
+# 行业短名：电气设备→电气；其余去常见后缀 / 别名
+_INDUSTRY_SHORT_ALIAS: dict[str, str] = {
+    "电气设备": "电气",
+    "股份制银行": "银行",
+    "国有大行": "大行",
+    "城商行": "城商",
+}
+_INDUSTRY_SUFFIXES = ("设备", "制造", "制品", "材料", "工程", "服务", "产业", "股份")
+
+
+def _short_industry_name(name: str) -> str:
+    s = str(name or "").replace("(A股)", "").replace("(A)", "").strip()
+    if not s:
+        return s
+    if s in _INDUSTRY_SHORT_ALIAS:
+        return _INDUSTRY_SHORT_ALIAS[s]
+    for suf in _INDUSTRY_SUFFIXES:
+        if s.endswith(suf) and len(s) > len(suf) + 1:
+            return s[: -len(suf)]
+    return s
+
 
 def _compact_short_structure_line(line: str) -> str:
     """短线结构行压缩：最多保留「主信号 · 注 · 方向」三段，避免浪型堆叠难扫读。"""
@@ -172,31 +193,53 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if _intraday_as_of:
         lines.append(f"  ⏱ 盘中：实时价已锚定 · 策略判定基于截至 {_intraday_as_of} 收盘")
 
-    # meta：动能｜大盘（阶段主展示在 🧭，meta 不重复以免与中线打架）
+    # meta 纯 D：动能｜板块指数涨跌｜行业短名涨跌｜个股（不写正常/偏弱、不写跑赢）
+    # 阶段主展示在 🧭；环境档仍跟板块指数算，仅内部逻辑用，meta 不露
     meta_parts = []
     if momentum:
         meta_parts.append(f"综合动能 {momentum}")
-    if regime:
-        _market_env_data = r.get("market_env") or {}
-        _freshness = str(_market_env_data.get("data_freshness") or "").strip()
-        _mkt_chg = _market_env_data.get("change_pct")
-        _bars_mkt = _market_env_data.get("bars") or []
-        _last_date = str(_bars_mkt[-1].get("date") if _bars_mkt else "").strip()
-        # 由 market_env 明确标记：bars 是否来自旧缓存顶替（实时日K取数失败）
-        # 用此标志而非末日日期判断：源滞后（上游慢，末日≠今天但 bars 新鲜）不应误报暂停
-        _bars_stale = bool(_market_env_data.get("bars_stale"))
 
-        _regime_display = regime
-        if _bars_stale:
-            # 真过期：bars 来自旧缓存顶替（实时日K取数失败），明确提示数据暂停
-            _regime_display = f"⚠️数据暂停于{_last_date[-5:]}"
-            if _mkt_chg is not None:
-                _regime_display += f"({_mkt_chg:+.1f}%)"
-        else:
-            # bars 新鲜（含源滞后场景：实时取数成功但上游源本身慢，末日≠今天）→ 诚实显示涨跌幅，不误报暂停
-            if _mkt_chg is not None:
-                _regime_display = f"{regime} {_mkt_chg:+.1f}%"
-        meta_parts.append(f"大盘 {_regime_display}")
+    _market_env_data = r.get("market_env") if isinstance(r.get("market_env"), dict) else {}
+    _mkt_chg = _market_env_data.get("change_pct")
+    _bars_mkt = _market_env_data.get("bars") or []
+    _last_date = str(_bars_mkt[-1].get("date") if _bars_mkt else "").strip()
+    _bars_stale = bool(_market_env_data.get("bars_stale"))
+    _idx_label = str(_market_env_data.get("index_label") or "").strip()
+    if not _idx_label:
+        try:
+            from trader_shared.market_env import resolve_board_index
+
+            _sym = str(r.get("symbol") or code or "")
+            _idx_label = resolve_board_index(_sym)[1]
+        except Exception:
+            _idx_label = "指数"
+    if _bars_stale and _last_date:
+        meta_parts.append(f"{_idx_label} ⚠️暂停于{_last_date[-5:]}")
+    elif _mkt_chg is not None:
+        try:
+            meta_parts.append(f"{_idx_label} {float(_mkt_chg):+.2f}%")
+        except (TypeError, ValueError):
+            meta_parts.append(_idx_label)
+    elif regime or _idx_label:
+        # 无涨跌幅时仍标板块名（离线 mock）；不写正常/偏弱
+        meta_parts.append(_idx_label)
+
+    _ext_sec = r.get("extend_sector") or {}
+    if isinstance(_ext_sec, dict) and _ext_sec.get("status") == "正常":
+        _sec_name = str(_ext_sec.get("sector_name") or _ext_sec.get("industry") or "").strip()
+        _sec_chg = _ext_sec.get("sector_change_pct")
+        if _sec_name:
+            _short_ind = _short_industry_name(_sec_name)
+            if isinstance(_sec_chg, (int, float)):
+                meta_parts.append(f"{_short_ind} {float(_sec_chg):+.2f}%")
+            else:
+                meta_parts.append(_short_ind)
+    if change_pct is not None:
+        try:
+            meta_parts.append(f"个股 {float(change_pct):+.2f}%")
+        except (TypeError, ValueError):
+            pass
+
     if meta_parts:
         lines.append(f"  {' ｜ '.join(meta_parts)}")
 
@@ -224,10 +267,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
             else:
                 vol_parts.append(f"调整{_days_from_high}天")
 
-    if vol_parts:
-        lines.append(f"  {' ｜ '.join(vol_parts)}")
-
-    # ATR 复权口径：日线 ATR 依赖 OHLC 尺度，前复权/未复权不可混读
+    # ATR 复权口径并入量价行（日线 ATR 依赖 OHLC 尺度，前复权/未复权不可混读）
     _atr_adj = str(r.get("atr_adjust") or "").strip().lower()
     _atr_adj_label = {
         "qfq": "前复权",
@@ -241,44 +281,14 @@ def render_short_midline(r: dict[str, Any]) -> str:
         except (TypeError, ValueError):
             _atr14_f = None
         if _atr14_f is not None and _atr14_f > 0:
-            lines.append(f"  ATR14 {_atr14_f:.2f}（{_atr_adj_label}）")
+            vol_parts.append(f"ATR14 {_atr14_f:.2f}（{_atr_adj_label}）")
         else:
-            lines.append(f"  ATR口径 {_atr_adj_label}")
+            vol_parts.append(f"ATR口径 {_atr_adj_label}")
 
-    # 相对强弱与行业板块（优先 extend_sector；fallback 用个股涨跌 vs 大盘环境）
-    _ext_sec = r.get("extend_sector") or {}
-    if isinstance(_ext_sec, dict) and _ext_sec.get("status") == "正常":
-        _sec_name = _ext_sec.get("sector_name") or ""
-        _sec_chg = _ext_sec.get("sector_change_pct")
-        _sec_rank = _ext_sec.get("sector_rank") or 0
-        _sec_tot = _ext_sec.get("sector_total") or 0
-        _vs = str(_ext_sec.get("stock_vs_sector") or "").strip()
-        
-        _sec_chg_str = f"{_sec_chg:+.2f}%" if isinstance(_sec_chg, (int, float)) else "--"
-        _rank_str = f"排名 {_sec_rank}/{_sec_tot}" if _sec_rank > 0 else ""
-        
-        _sector_parts = []
-        if _sec_name:
-            _short_name = _sec_name.replace("(A股)", "").replace("(A)", "").strip()
-            _sector_parts.append(f"{_short_name} {_sec_chg_str}")
-        # 个股涨跌幅
-        if change_pct is not None:
-            _sector_parts.append(f"个股 {change_pct:+.2f}%")
-        if _vs:
-            _sector_parts.append(_vs.replace("板块", "").strip())
-        if _sector_parts:
-            lines.append(f"  行业：{' ｜ '.join(_sector_parts)}")
-    elif change_pct != 0 and regime:
-        # 简易对比：个股涨跌 vs 大盘环境词
-        _regime_map = {"偏强": 0.5, "正常": 0, "偏弱": -0.5, "很差": -1.0}
-        _regime_score = _regime_map.get(regime, 0)
-        _vs_simple = change_pct - _regime_score
-        if _vs_simple > 0.5:
-            lines.append(f"  相对强弱：跑赢大盘 +{_vs_simple:.1f}%")
-        elif _vs_simple < -0.5:
-            lines.append(f"  相对强弱：跑弱 {_vs_simple:.1f}%")
-        else:
-            lines.append(f"  相对强弱：与大盘持平")
+    if vol_parts:
+        lines.append(f"  {' ｜ '.join(vol_parts)}")
+
+    # 行业/个股已并入上方 meta（纯 D）；不再单独「行业：…｜跑赢…」行
 
     # 概念题材
     _ext_concept = r.get("extend_concept") or {}
@@ -425,56 +435,22 @@ def render_short_midline(r: dict[str, Any]) -> str:
         )
     )
 
-    # 从缠论结果提取方向词 + 买卖点类型（仅结构充足时）
+    # 方向/点类型与 resolve_chanlun_primary 同源（禁再手写一套卖买优先级）
     _chan_dir_mid = ""
     _chan_point_type = ""  # 买卖点类型名，如"一类买""类二买"等
     if not _insufficient_struct:
         try:
-            _chan_mid_raw = r.get("chanlun_midline")
-            if isinstance(_chan_mid_raw, dict):
-                _chan_inner = _chan_mid_raw.get("chanlun", _chan_mid_raw)
-                if isinstance(_chan_inner, dict):
-                    _bps = _chan_inner.get("buy_points") or []
-                    _sps = _chan_inner.get("sell_points") or []
-                    _div = _chan_inner.get("divergence") or {}
-
-                    # 与 fusion / resolve_chanlun_primary 一致：卖优先 > 顶背驰 > 买 > 底背驰
-                    _BUY_RANK = {
-                        "一类买": 0, "类二买": 1, "类一买": 2, "二类买": 3, "三类买": 4,
-                    }
-                    _SELL_RANK = {
-                        "一类卖": 0, "类二卖": 1, "类一卖": 2, "二类卖": 3, "三类卖": 4,
-                    }
-
-                    def _best_type(points: list, rank_map: dict) -> str:
-                        best, best_r = "", 999
-                        for p in points:
-                            if not isinstance(p, dict):
-                                continue
-                            r = rank_map.get(p.get("type", ""), 999)
-                            if r < best_r:
-                                best, best_r = str(p.get("type", "")), r
-                        return best
-
-                    _best_buy = _best_type(_bps, _BUY_RANK)
-                    _best_sell = _best_type(_sps, _SELL_RANK)
-
-                    if _best_sell:
-                        _chan_dir_mid = "看跌"
-                        _chan_point_type = _best_sell
-                    elif _div.get("top_divergence"):
-                        _chan_dir_mid = "看跌"
-                    elif _best_buy:
-                        _chan_dir_mid = "看涨"
-                        _chan_point_type = _best_buy
-                    elif _div.get("bottom_divergence"):
-                        _chan_dir_mid = "看涨"
-                    else:
-                        _tl = str(_chan_inner.get("trend_label") or "")
-                        if "拉升" in _tl:
-                            _chan_dir_mid = "看涨"
-                        elif "回调" in _tl:
-                            _chan_dir_mid = "看跌"
+            from trader_shared.chan_core import resolve_chanlun_primary
+            _prim = resolve_chanlun_primary(r.get("chanlun_midline"))
+            _pd = int(_prim.get("direction") or 0)
+            if _pd < 0:
+                _chan_dir_mid = "看跌"
+            elif _pd > 0:
+                _chan_dir_mid = "看涨"
+            if _prim.get("status") == "point":
+                _chan_point_type = str(
+                    _prim.get("type_raw") or _prim.get("type_short") or ""
+                ).strip()
         except Exception:
             pass
 
@@ -484,7 +460,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _wave_parts = _wave_mid.split(" · ", 1)
             _wave_state = _wave_parts[0]
             _wave_sig = _wave_parts[1] if len(_wave_parts) > 1 else ""
-            # 去矛盾：顶/底背驰同框时只保留与已解析方向一致者，避免「顶背驰｜底背驰」自相矛盾
+            # 去矛盾：顶/底背驰同框时只保留与已解析方向一致者；卖点行不挂底背驰
             if "顶背驰" in _wave_sig and "底背驰" in _wave_sig:
                 if _chan_dir_mid == "看跌":
                     _wave_sig = "顶背驰"
@@ -492,6 +468,20 @@ def render_short_midline(r: dict[str, Any]) -> str:
                     _wave_sig = "底背驰"
                 else:
                     _wave_sig = ""
+            if _chan_dir_mid == "看跌" and "底背驰" in _wave_sig:
+                _wave_sig = (
+                    _wave_sig.replace("｜底背驰", "")
+                    .replace("底背驰｜", "")
+                    .replace("底背驰", "")
+                    .strip("｜ ·")
+                )
+            if _chan_dir_mid == "看涨" and "顶背驰" in _wave_sig:
+                _wave_sig = (
+                    _wave_sig.replace("｜顶背驰", "")
+                    .replace("顶背驰｜", "")
+                    .replace("顶背驰", "")
+                    .strip("｜ ·")
+                )
             _point_part = f" · {_chan_point_type}" if _chan_point_type else ""
             if _wave_sig:
                 _chan_display = f"{_wave_state}{_point_part} · {_chan_dir_mid} · {_wave_sig}"
@@ -672,40 +662,62 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _chan_line = "暂无信号 · 中性"
             if _wave:
                 _chan_line += f" · {_wave}"
-    lines.append(f"  结构：{_compact_short_structure_line(_chan_line)}")
+    # 与中线同构：学说点名「缠论：」「威科夫：」
+    lines.append(f"  缠论：{_compact_short_structure_line(_chan_line)}")
 
-    # 1b) 买点盖生命周期（L1 展示）
+    # 1b) 买点生命周期（L1 展示；挂在缠论下）
     _life = r.get("buy_point_lifecycle") if isinstance(r.get("buy_point_lifecycle"), dict) else {}
     _life_line = str(_life.get("display_line") or "").strip()
     if _life_line:
         lines.append(f"  {_life_line}")
 
-    # 2) 状态：日线威科夫事件灯（仅有真实事件时输出；暂无事件省略）
+    def _unwrap_wyk_daily(raw: object) -> dict:
+        if not isinstance(raw, dict):
+            return {}
+        if "wyckoff" in raw and isinstance(raw.get("wyckoff"), dict):
+            return raw["wyckoff"]  # type: ignore[index]
+        return raw
+
+    _wyk_daily_u: dict = {}
+    _src_d = r.get("wyckoff_daily")
+    _wyk_daily_u = _unwrap_wyk_daily(_src_d)
+    if not _wyk_daily_u:
+        _fb_d = _unwrap_wyk_daily(r.get("wyckoff"))
+        if _fb_d.get("timeframe") != "weekly":
+            _wyk_daily_u = _fb_d
+
+    # 1c) 威科夫：日线阶段只对照（与中线同构；不进背景岗/出手）
+    try:
+        from trader_shared.wyckoff_view import format_daily_phase_display
+
+        _phase_d = format_daily_phase_display(
+            _wyk_daily_u or None,
+            symbol=str(r.get("ts_code") or r.get("code") or ""),
+        )
+        _phase_body = str(_phase_d).strip()
+        for _pfx in ("日线阶段：", "威科夫："):
+            if _phase_body.startswith(_pfx):
+                _phase_body = _phase_body[len(_pfx):].strip()
+                break
+        lines.append(f"  威科夫：{_phase_body or '数据不足 · 仅对照'}")
+    except Exception:
+        lines.append("  威科夫：数据不足 · 仅对照")
+
+    # 2) 事件：日线威科夫事件灯（仅有真实事件时输出；暂无事件省略）
     try:
         from trader_shared.wyckoff_view import format_event_display
 
-        def _unwrap_wyk(raw: object) -> dict:
-            if not isinstance(raw, dict):
-                return {}
-            if "wyckoff" in raw and isinstance(raw.get("wyckoff"), dict):
-                return raw["wyckoff"]  # type: ignore[index]
-            return raw
-
-        _src = r.get("wyckoff_daily")
-        _u = _unwrap_wyk(_src)
-        if not _u:
-            _fb = _unwrap_wyk(r.get("wyckoff"))
-            if _fb.get("timeframe") != "weekly":
-                _u = _fb
-        if _u:
+        if _wyk_daily_u:
             _ev = format_event_display(
-                _u, symbol=str(r.get("ts_code") or r.get("code") or "")
+                _wyk_daily_u, symbol=str(r.get("ts_code") or r.get("code") or "")
             )
-            # 统一标签「状态：」（format 内可能仍是「事件：」）
-            if _ev.startswith("事件："):
-                _ev = "状态：" + _ev[len("事件："):]
-            elif not _ev.startswith("状态："):
-                _ev = f"状态：{_ev}"
+            # 统一标签「事件：」（format 内可能仍是「状态：/事件：」）
+            if _ev.startswith("状态："):
+                _ev = "事件：" + _ev[len("状态："):]
+            elif _ev.startswith("事件："):
+                pass
+            else:
+                _ev = f"事件：{_ev}"
             # 去掉「主句（复述注）」长括号，保留灯码 + 主句 + 方向
             _ev = re.sub(r"(· [^·（]{2,16})（[^）]{6,}）", r"\1", _ev)
             _ev = re.sub(r"\s*·\s*", " · ", _ev)
@@ -1050,16 +1062,28 @@ def render_short_midline(r: dict[str, Any]) -> str:
     _ma20_v = _ma_float("ma20")
     _ma5_v = _ma_float("ma5")
 
-    # 亮点：缠论信号 + 阶段 + MA5 上方 + 题材催化
+    # 亮点：仅偏多/中性结构；卖点/看跌/转弱不得进 ✅
     _hl_parts = []
-    if _chan_sig and _chan_sig != "无信号":
-        _chan_clean = _chan_sig.replace("缠论", "").strip() or _chan_sig
+    _chan_clean = _chan_sig.replace("缠论", "").strip() or _chan_sig if _chan_sig else ""
+    try:
+        _chan_dir_hl = int((fusion_signals.get("chan") or {}).get("direction") or 0)
+    except (TypeError, ValueError):
+        _chan_dir_hl = 0
+    _chan_bear_hl = _chan_dir_hl < 0 or any(
+        k in _chan_sig for k in ("卖", "看跌", "顶背驰", "偏空", "减仓")
+    )
+    if _chan_sig and _chan_sig != "无信号" and not _chan_bear_hl:
         _hl_parts.append(f"缠论{_chan_clean}")
-    if stage_line and any(k in stage_line for k in ("蓄势", "主升")):
+    _stage_bull_hl = bool(
+        stage_line
+        and any(k in stage_line for k in ("蓄势", "主升"))
+        and not any(k in stage_line for k in ("转弱", "派发", "衰退"))
+    )
+    if _stage_bull_hl:
         _hl_parts.append(f"中线阶段{stage_line}")
-    if _ma5_v and current > 0 and current > _ma5_v:
+    if _ma5_v and current > 0 and current > _ma5_v and not _chan_bear_hl:
         _hl_parts.append("现价在MA5上方")
-    
+
     _ext_sent = r.get("extend_sentiment") or {}
     _theme = _ext_sent.get("theme_harden") or {}
     if isinstance(_theme, dict) and _theme.get("reason"):
@@ -1067,29 +1091,35 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     if _hl_parts:
         lines.append(f"✅ 亮点：{'；'.join(_hl_parts)}")
-    elif "可跟踪" in mid or "未坏" in mid:
+    elif ("可跟踪" in mid or "未坏" in mid) and not _chan_bear_hl and _stage_bull_hl:
         if _sp is not None and _sp <= 0:
-            lines.append(f"✅ 亮点：中线结构可跟踪，等纪律放行" + (f"；阶段 {stage_line}" if stage_line else ""))
+            lines.append(f"✅ 亮点：中线结构可跟踪，等纪律放行；阶段 {stage_line}")
         else:
-            lines.append(f"✅ 亮点：中线看法仍可跟踪" + (f"；阶段 {stage_line}" if stage_line else ""))
+            lines.append(f"✅ 亮点：中线看法仍可跟踪；阶段 {stage_line}")
+    elif _stage_bull_hl:
+        lines.append(f"✅ 亮点：阶段 {stage_line}，等短线信号")
     else:
-        lines.append(f"✅ 亮点：阶段 {stage_line or '未知'}，等短线信号" if stage_line else "✅ 亮点：等短线买点确认")
+        lines.append("✅ 亮点：暂无，先看纪律与风险")
 
     # 风险：止损价 + 短线 MA20 压力（不用中线远压力） + 未来待解禁
     _risk_parts = []
+    if _chan_bear_hl and _chan_clean:
+        _risk_parts.append(f"缠论{_chan_clean}")
+    if stage_line and any(k in stage_line for k in ("转弱", "派发", "衰退")):
+        _risk_parts.append(f"中线阶段{stage_line}")
     if "不追" in execution or "不买" in execution:
         _risk_parts.append("现价不宜追")
         if stop_v > 0:
             _risk_parts.append(f"止损看 {stop_v:.2f}")
         if _ma20_v and _ma20_v > current > 0:
             _risk_parts.append(f"上方MA20({_ma20_v:.2f})压力")
-    elif stage_line and "派发" in stage_line:
+    elif stage_line and "派发" in stage_line and f"中线阶段{stage_line}" not in _risk_parts:
         _risk_parts.append("派发阶段注意破位" + (f"，跌破 {stop_v:.2f} 需离场" if stop_v else ""))
-    elif stage_line and "衰退" in stage_line:
+    elif stage_line and "衰退" in stage_line and f"中线阶段{stage_line}" not in _risk_parts:
         _risk_parts.append("衰退阶段，不宜介入")
     elif life_v > 0 and current > 0 and current < life_v * 1.02:
         _risk_parts.append(f"靠近/跌破中线生命线 {life_v:.2f}")
-    else:
+    elif not _risk_parts:
         _risk_parts.append("未站稳前不提前加仓")
 
     _unlocks = _ext_sent.get("unlocks") or []

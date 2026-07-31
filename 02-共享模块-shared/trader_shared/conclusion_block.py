@@ -154,19 +154,28 @@ def _build_wave_label(chanlun_daily: Any, current: float = 0.0) -> str:
 def _signal_overlay(
     buy_points: list, sell_points: list, divergence: dict
 ) -> str:
-    """从买卖点和背驰生成信号叠加文本。"""
+    """从买卖点和背驰生成信号叠加文本。
+
+    有卖点时不叠底背驰、有买点时不叠顶背驰，避免「类二卖｜底背驰」自相矛盾。
+    """
     parts: list[str] = []
-    if buy_points:
-        types = [p.get("type", "") for p in buy_points if isinstance(p, dict) and p.get("type")]
-        if types:
-            parts.append(f"关注{types[0]}")
-    if sell_points:
-        types = [p.get("type", "") for p in sell_points if isinstance(p, dict) and p.get("type")]
-        if types:
-            parts.append(f"注意{types[0]}")
-    if divergence.get("top_divergence"):
+    buy_types = [
+        str(p.get("type", ""))
+        for p in (buy_points or [])
+        if isinstance(p, dict) and p.get("type")
+    ]
+    sell_types = [
+        str(p.get("type", ""))
+        for p in (sell_points or [])
+        if isinstance(p, dict) and p.get("type")
+    ]
+    if buy_types:
+        parts.append(f"关注{buy_types[0]}")
+    if sell_types:
+        parts.append(f"注意{sell_types[0]}")
+    if divergence.get("top_divergence") and not buy_types:
         parts.append("顶背驰")
-    if divergence.get("bottom_divergence"):
+    if divergence.get("bottom_divergence") and not sell_types:
         parts.append("底背驰")
     return "｜".join(parts[:2]) if parts else ""
 
@@ -192,47 +201,40 @@ def _unwrap_wyck(wyck_result: Any) -> dict[str, Any]:
 
 
 def chanlun_midline_dir(chanlun_midline: Any) -> int:
-    """与 format_chanlun_theory_line 同源方向：+1 / 0 / -1。"""
+    """中线定论用缠论方向：与 resolve_chanlun_primary / 短线灯标同源。
+
+    - 买卖点（含类一/类二）与背驰：一律跟主解析，避免「行文类二卖、定论却上涨」。
+    - 仅 trend/structure 兜底时：structure_confidence=low → 0（不靠结构词硬翻方向）。
+    """
     chan = _unwrap_chan(chanlun_midline)
     if not chan:
         return 0
 
-    buy_points = chan.get("buy_points") if isinstance(chan.get("buy_points"), list) else []
-    sell_points = chan.get("sell_points") if isinstance(chan.get("sell_points"), list) else []
-    divergence = chan.get("divergence") if isinstance(chan.get("divergence"), dict) else {}
-    trend_label = str(chan.get("trend_label") or "")
-    st = str(chan.get("structure_type") or "")
+    try:
+        from trader_shared.chan_core import resolve_chanlun_primary
+        prim = resolve_chanlun_primary(chan)
+    except Exception:
+        prim = {}
+    status = str(prim.get("status") or "none")
+    direction = int(prim.get("direction") or 0)
 
-    if any(isinstance(p, dict) and p.get("type") in ("一类卖", "二类卖", "三类卖") and p.get("confidence", 0) >= 2 for p in sell_points):
-        return -1
-    if divergence.get("top_divergence"):
-        return -1
-    if any(isinstance(p, dict) and p.get("type") in ("一类买", "二类买", "三类买") and p.get("confidence", 0) >= 2 for p in buy_points):
-        return 1
-    if divergence.get("bottom_divergence"):
-        return 1
-    # ── P2 缠论低置信跳过生命线：structure_confidence=low 时不靠兜底翻转方向 ──
+    # 点/背驰 = 引擎真值，定论必须一致（含 conf=1 的类二卖）
+    if status in ("point", "divergence"):
+        return direction
+
+    # ── P2：无点无背驰时，低置信不靠拉升段/上涨趋势兜底翻转 ──
     if str(chan.get("structure_confidence") or "").lower() == "low":
         return 0
-    if "上涨" in trend_label or "多" in trend_label:
-        return 1
-    if "下跌" in trend_label or "空" in trend_label:
+    if direction != 0:
+        return direction
+
+    # primary 的 trend 路径主要吃 trend_label；补 structure_type 兜底（矩阵单测/无点场景）
+    trend_label = str(chan.get("trend_label") or "")
+    st = str(chan.get("structure_type") or "")
+    if "下跌" in trend_label or "空" in trend_label or "下跌" in st or "空" in st:
         return -1
-    # structure_type 兜底（与展示文案一致）
-    if "下跌" in st or "空" in st:
-        return -1
-    if "上涨" in st or "多" in st:
+    if "上涨" in trend_label or "拉升" in trend_label or "多" in trend_label or "上涨" in st or "多" in st:
         return 1
-    # 盘整且无买卖点 → 中性；若 format 行含看跌则靠 trend
-    try:
-        from trader_shared.chan_core import format_chanlun_theory_line
-        line = format_chanlun_theory_line(chanlun_midline)
-        if "看跌" in line:
-            return -1
-        if "看涨" in line:
-            return 1
-    except Exception:
-        pass
     return 0
 
 
@@ -249,7 +251,8 @@ def wyckoff_midline_bias(wyckoff_midline: Any, major_stage: str = "") -> str:
     w = _unwrap_wyck(wyckoff_midline)
     if not w:
         return "neutral"
-    if w.get("timeframe") == "insufficient":
+    # 周线不足 / TR 门控：阶段不参与定论 → 偏置亦中性（与展示「阶段暂定不出」一致）
+    if w.get("timeframe") == "insufficient" or w.get("phase_tr_gated"):
         return "neutral"
 
     # 主升/蓄势偏强阶段：upthrust 可能是正常洗盘，不判 strong_bear
@@ -353,20 +356,49 @@ def synthesize_midline_verdict(
     w = _unwrap_wyck(wyckoff_midline)
     _st = str(chan.get("structure_type") or "无结构") if isinstance(chan, dict) else "无结构"
     _conf = str(chan.get("structure_confidence") or "low") if isinstance(chan, dict) else "low"
-    _div = (chan.get("divergence") or {}) if isinstance(chan, dict) else {}
-    _div_txt = "顶背驰" if _div.get("top_divergence") else ("底背驰" if _div.get("bottom_divergence") else "无背驰")
-    chan_label = f"{_st}·置信{_conf}·{_div_txt}"
+    _chan_sig = ""
+    try:
+        from trader_shared.chan_core import resolve_chanlun_primary
+        _prim = resolve_chanlun_primary(chan) if chan else {}
+        _chan_sig = str(_prim.get("type_short") or _prim.get("type_raw") or "").strip()
+    except Exception:
+        _prim = {}
+    if not _chan_sig:
+        _div = (chan.get("divergence") or {}) if isinstance(chan, dict) else {}
+        _chan_sig = (
+            "顶背驰" if _div.get("top_divergence")
+            else ("底背驰" if _div.get("bottom_divergence") else "无背驰")
+        )
+    chan_label = f"{_st}·置信{_conf}·{_chan_sig}"
     wyck_label = str(w.get("phase_label") or "无明确阶段") if isinstance(w, dict) else "无明确阶段"
 
     # ── 阶段词汇映射 ──
     _PHASE_SHORT = {
         "accumulation_a": "吸筹", "accumulation_b": "吸筹",
         "accumulation_c": "吸筹", "accumulation_d": "吸筹",
-        "distribution_a": "派发", "distribution_c": "派发", "none": "无阶段",
+        "markup": "主升", "markdown": "主跌",
+        "distribution_a": "派发", "distribution_c": "派发", "distribution_d": "派发",
+        "none": "无阶段",
     }
     _wp = str(w.get("phase") or "none") if isinstance(w, dict) else "none"
-    wyck_phase_short = _PHASE_SHORT.get(_wp, "无阶段")
+    # 无清晰 TR / 周线不足：阶段不参与定论，文案钉死「无阶段」（勿写「领先」）
+    _wyck_gated = bool(
+        isinstance(w, dict)
+        and (
+            w.get("phase_tr_gated")
+            or w.get("timeframe") == "insufficient"
+            or _wp in ("", "none")
+        )
+    )
+    wyck_phase_short = "无阶段" if _wyck_gated else _PHASE_SHORT.get(_wp, "无阶段")
     _CHAN_WORD = {1: "上涨", 0: "盘整", -1: "下跌"}
+    _chan_word = _CHAN_WORD[chan_dir]
+    if (
+        _chan_sig
+        and _chan_sig not in ("无背驰", "暂无买卖点", "暂无信号")
+        and chan_dir != 0
+    ):
+        _chan_word = f"{_chan_word}（{_chan_sig}）"
 
     # ── 合成矩阵 ──
     key = (wyck_dir, chan_dir)
@@ -396,15 +428,19 @@ def synthesize_midline_verdict(
     if confidence == "high" and _conf == "low":
         confidence = "mid"
 
-    # ── 合成注记 ──
+    # ── 合成注记（谁真有方向谁「领先」；无阶段勿伪称领先）──
     if source == "fallback_position":
-        note = f"威科夫{wyck_phase_short} × 缠论{_CHAN_WORD[chan_dir]} → 双源无明确方向，回退位置分类（{stage}）"
+        note = f"威科夫{wyck_phase_short} × 缠论{_chan_word} → 双源无明确方向，回退位置分类（{stage}）"
     elif confidence == "low":
-        note = f"威科夫{wyck_phase_short} × 缠论{_CHAN_WORD[chan_dir]} → 信号冲突，降置信"
+        note = f"威科夫{wyck_phase_short} × 缠论{_chan_word} → 信号冲突，降置信"
     elif key in ((1, 1), (-1, -1)):
-        note = f"威科夫{wyck_phase_short} × 缠论{_CHAN_WORD[chan_dir]} → 共振"
+        note = f"威科夫{wyck_phase_short} × 缠论{_chan_word} → 共振"
+    elif wyck_dir == 0 and chan_dir != 0:
+        note = f"威科夫{wyck_phase_short} × 缠论{_chan_word}领先"
+    elif chan_dir == 0 and wyck_dir != 0:
+        note = f"威科夫{wyck_phase_short}领先 × 缠论{_chan_word}"
     else:
-        note = f"威科夫{wyck_phase_short}领先 × 缠论{_CHAN_WORD[chan_dir]}"
+        note = f"威科夫{wyck_phase_short} × 缠论{_chan_word}"
 
     return {
         "stage": stage, "bias": bias, "confidence": confidence, "source": source,

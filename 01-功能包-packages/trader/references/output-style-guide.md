@@ -50,7 +50,7 @@ Valid first line must look like:
 Matches `report_renderer/short_midline.py` (`render_short_midline`):
 
 1. Title: `分析报告 — {name}（{code}）｜短中线`
-2. Meta: 现价；`动能 … ｜ 大盘 …`；`MA5 ｜ MA20 ｜ MA250`；可选量比/换手；年线下方警告
+2. Meta: 现价（含 MA20/MA250）；`综合动能 … ｜ {板块指数} ±x% ｜ {行业短名} ±x% ｜ 个股 ±x%`（不写正常/偏弱/跑赢）；量价行可选量比/换手/调整天数，ATR14（含复权口径）并入同行列；年线下方警告
 3. `🧭 中线`
    - `阶段：` ← major_stage + 可选 `· 偏多/偏空（短因）`（B3C；**无**独立 `看法：` 行）
    - optional `定论：` ← midline_verdict_note
@@ -58,7 +58,7 @@ Matches `report_renderer/short_midline.py` (`render_short_midline`):
    - optional `位置：` ← pivot_position_weekly
    - `关键价（中线）` 生命线 / 回踩区 / 压力 / 目标 ← `mid_key_prices`（周线引擎，无 🌟）
 4. `⚡ 短线`（A 版读序）
-   - `结构：` → optional 买点 → `状态：` → `动能：` → `资金：`
+   - `缠论：` → optional 买点 → `威科夫：`（日线阶段只对照）→ optional `事件：` → `动能：` → `资金：`
    - （空行）→ `共振：` → `新开：` → `动作：` → optional `原因：` → `破位看：`
    - `关键价（短线）` 止损 / 买点区 / `🌟 现价` / 卖点区 + 买/追亏赚两行 ← `key_prices`
 5. optional `说明：` when mid/short conflict

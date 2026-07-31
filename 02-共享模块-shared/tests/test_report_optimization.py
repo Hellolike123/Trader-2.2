@@ -81,6 +81,7 @@ def _report() -> dict:
         "market_env": {"level": "偏弱"},
         "ma_raw": {"ma5": 43.14, "ma10": 43.50, "ma20": 44.65, "ma250": 42.75},
         "volume_ratio": 1.0, "turnover_rate": 3.0,
+        "atr14": 1.85, "atr_adjust": "none",
         "major_stage": "蓄势",
         "conclusion": {
             "midline": "盘整偏空 · 暂缓跟踪",
@@ -240,13 +241,13 @@ def test_short_section_shows_event_light():
     }
     out = render_short_midline(r)
     assert "⚡ 短线" in out
-    assert "状态：Spring（弹簧）" in out
-    # 中线威科夫仍独立一行
-    assert "威科夫：" in out
+    assert "事件：Spring（弹簧）" in out
+    # 中线 + 短线均有「威科夫：」点名行
+    assert out.count("威科夫：") >= 2
 
 
 def test_short_section_omits_empty_status_and_compacts_structure():
-    """无威科夫事件不占状态行；结构过长压缩；资金去掉「未取到」。"""
+    """无威科夫事件不占事件行；缠论过长压缩；资金去掉「未取到」。"""
     r = _report()
     r["wyckoff_daily"] = {"timeframe": "daily", "wyckoff_summary": "无"}
     r["conclusion"]["wave_label"] = "回调段 · 盘整 · 回调一笔中 · 线段偏少"
@@ -260,9 +261,11 @@ def test_short_section_omits_empty_status_and_compacts_structure():
     }
     out = render_short_midline(r)
     short = out.split("⚡ 短线", 1)[-1]
-    assert "状态：" not in short.split("关键价", 1)[0]
-    assert "结构：" in short
-    struct = [ln for ln in short.splitlines() if "结构：" in ln][0]
+    head = short.split("关键价", 1)[0]
+    assert "事件：" not in head
+    assert "状态：" not in head
+    assert "缠论：" in short
+    struct = [ln for ln in short.splitlines() if "缠论：" in ln][0]
     assert struct.count("·") <= 3 or "（暂无买卖点）" in struct
     assert "资金未取到" not in short
     assert "仪表：" not in short
@@ -311,12 +314,12 @@ def test_short_section_chan_type_first():
     }
     out = render_short_midline(r)
     short = out.split("⚡ 短线", 1)[-1].split("关键价", 1)[0]
-    assert "结构：一买" in short
+    assert "缠论：一买" in short
     assert "看涨" in short
-    # A 版读序：结构在动作前，且用「动作」不用「出手」
+    # A 版读序：缠论在动作前，且用「动作」不用「出手」
     assert "动作：" in short
     assert "出手：" not in short
-    pos_struct = short.find("结构：")
+    pos_struct = short.find("缠论：")
     pos_action = short.find("动作：")
     assert 0 <= pos_struct < pos_action
 
@@ -373,6 +376,46 @@ def test_highlight_specific():
     """亮点用具体数据，不用模板空话。"""
     out = render_short_midline(_report())
     assert "先看关键价与出手" not in out
+
+
+def test_highlight_excludes_bearish_chan_and_weak_stage():
+    """类二卖/看跌与转弱不得进 ✅ 亮点，应落在风险。"""
+    r = _report()
+    r["conclusion"]["stage_line"] = "转弱"
+    r["fusion"]["signals_detail"]["chan"] = {
+        "reason": "类二卖 · 反抽偏弱 · 看跌",
+        "direction": -1,
+    }
+    out = render_short_midline(r)
+    hl = next(ln for ln in out.splitlines() if "✅ 亮点" in ln)
+    assert "类二卖" not in hl
+    assert "看跌" not in hl
+    assert "转弱" not in hl
+    risk = next(ln for ln in out.splitlines() if "⚠️ 风险" in ln or ln.startswith("风险：") or "风险：" in ln)
+    assert "类二卖" in risk or "看跌" in risk
+    assert "转弱" in risk
+
+
+def test_short_section_has_daily_phase_line():
+    """短线区必有「威科夫：」只读行（与中线点名同构）；无箱诚实文案。"""
+    r = _report()
+    r["wyckoff_daily"] = {
+        "timeframe": "daily",
+        "phase": "none",
+        "phase_a_status": "none",
+        "phase_tr_gated": True,
+        "phase_tr_gate_reason": "no_tr",
+    }
+    out = render_short_midline(r)
+    short = out.split("⚡ 短线", 1)[-1]
+    assert "缠论：" in short
+    assert "威科夫：" in short
+    assert "无清晰区间" in short or "仅对照" in short
+    # 仍在短线块内，且在缠论之后
+    lines = [ln.strip() for ln in short.splitlines() if ln.strip()]
+    struct_i = next(i for i, ln in enumerate(lines) if ln.startswith("缠论："))
+    phase_i = next(i for i, ln in enumerate(lines) if ln.startswith("威科夫："))
+    assert phase_i > struct_i
 
 
 def test_risk_uses_short_resist():
@@ -464,6 +507,33 @@ def test_adjust_days():
     assert "调整19天" in out
 
 
+def test_atr_merged_into_volume_line():
+    """ATR14（含复权口径）并入量比/换手/调整同行，禁止独立成行。"""
+    out = render_short_midline(_report())
+    assert "ATR14 1.85（未复权）" in out
+    vol_line = next(
+        ln for ln in out.splitlines()
+        if "量比" in ln and "ATR14" in ln
+    )
+    assert "调整19天" in vol_line
+    assert "换手3.0%" in vol_line
+    # 不得再有仅含 ATR 的独立缩进行
+    atr_only = [
+        ln for ln in out.splitlines()
+        if ln.strip().startswith("ATR14") or ln.strip().startswith("ATR口径")
+    ]
+    assert atr_only == []
+
+
+def test_atr_adjust_label_only_when_atr_missing():
+    """有复权口径但无有效 atr14 时写 ATR口径，仍并入量价行。"""
+    r = _report()
+    r["atr14"] = 0
+    out = render_short_midline(r)
+    assert "ATR口径 未复权" in out
+    assert any("量比" in ln and "ATR口径" in ln for ln in out.splitlines())
+
+
 def test_adjust_days_new_high():
     """创新高时显示「创新高」。"""
     r = _report()
@@ -472,21 +542,48 @@ def test_adjust_days_new_high():
     assert "创新高" in out
 
 
-def test_relative_strength_fallback_when_sector_empty():
-    """extend_sector 为空但 market_env 有时 fallback 显示相对强弱。"""
+def test_meta_pure_d_board_without_sector():
+    """无行业时 meta 仍标板块指数涨跌 + 个股；不写大盘/正常偏弱/跑赢。"""
     r = _report()
+    r["symbol"] = "002050.SZ"
     r["extend_sector"] = {}
+    r["market_env"] = {
+        "level": "偏弱",
+        "change_pct": 1.25,
+        "index_label": "深成",
+        "index_code": "399001.SZ",
+    }
     out = render_short_midline(r)
-    assert "相对强弱：跑赢大盘" in out
+    head = out.split("🧭")[0]
+    assert "综合动能 转弱 ｜ 深成 +1.25% ｜ 个股 +0.82%" in out
+    assert "大盘" not in head
+    assert " 偏弱" not in head and "正常" not in head
+    assert "相对强弱" not in out
+    assert "行业：" not in out
+    assert "跑赢" not in head
 
 
-def test_relative_strength_when_present():
-    """extend_sector 有数据时在行业行展示 stock_vs_sector。"""
+def test_meta_pure_d_with_sector():
+    """有行业时并入 meta 短名；不单独行业行、不写跑赢。"""
     r = _report()
-    r["extend_sector"] = {"status": "正常", "stock_vs_sector": "跑赢 +1.50%"}
+    r["symbol"] = "688248.SH"
+    r["market_env"] = {
+        "level": "正常",
+        "change_pct": 2.99,
+        "index_label": "科创",
+        "index_code": "000688.SH",
+    }
+    r["extend_sector"] = {
+        "status": "正常",
+        "sector_name": "电气设备",
+        "sector_change_pct": -3.44,
+        "stock_vs_sector": "跑赢 +4.28%",
+    }
+    r["change_pct"] = 0.84
     out = render_short_midline(r)
-    assert "跑赢 +1.50%" in out
-    assert "行业：" in out
+    assert "综合动能 转弱 ｜ 科创 +2.99% ｜ 电气 -3.44% ｜ 个股 +0.84%" in out
+    assert "行业：" not in out
+    assert "跑赢" not in out.split("🧭")[0]
 
 
 # ── Task 9: 中线关键价格式统一 ──

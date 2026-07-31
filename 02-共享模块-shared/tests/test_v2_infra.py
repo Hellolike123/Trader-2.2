@@ -180,13 +180,27 @@ def test_market_env_pipeline_import_available(tmp_state, _inject_market_env_path
     assert "market" in data
 
 
+def test_resolve_board_index_mapping():
+    import market_env as me
+
+    assert me.resolve_board_index("688248") == ("000688.SH", "科创")
+    assert me.resolve_board_index("300750.SZ") == ("399006.SZ", "创业板")
+    assert me.resolve_board_index("600000") == ("000001.SH", "上证")
+    assert me.resolve_board_index("002050") == ("399001.SZ", "深成")
+    assert me.resolve_board_index("830799")[1] == "中证1000"
+
+
 def test_market_env_assess_no_net():
     import market_env as me
+    me._assess_cache = None
+    me._assess_cache_time = 0
+    me._assess_cache_by_index = {}
     with patch.object(me, "_fetch_index_data", return_value={}), \
          patch("trader_shared.cache_utils.get_cached", return_value=None):
         env = me.assess()
     assert env["level"] == "未知"
     assert env["data_status"] == "degraded"
+    assert env.get("index_label")
 
 
 def test_market_env_note_for_all_skills():

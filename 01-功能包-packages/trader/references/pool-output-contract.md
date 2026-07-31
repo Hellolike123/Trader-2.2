@@ -12,6 +12,8 @@ Common rules: no markdown tables in rank/show/plan outputs; use indented alignme
 
 ## rank output
 
+池日报「大盘{环境}」用宽基 `INDEX_CODE`（中证1000）；与单票报告 meta 纯 D（板块对照指数、不写正常/偏弱）不同，见 `BUSINESS.md` §3.4。
+
 ```text
 选股日报 — {date}  ｜  大盘{环境}，{建议}
 
