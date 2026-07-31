@@ -1,6 +1,7 @@
 # 威科夫阶段辨识准确度 — Agent Handoff
 
-> **status**: active  
+> **status**: done（P0-A / P0-B 已落地；P1-RS 仍另开）  
+
 > **日期**: 2026-07-31  
 > **产品法源**: `BUSINESS.md` §2.0 / §2.2（中线状态 = **仅周线威科夫**）  
 > **目标**: 提升中线阶段辨识，不是加分、不是改短线 fusion  
@@ -178,11 +179,11 @@ python -m pytest 02-共享模块-shared/tests/test_wyckoff_*.py -q
 
 ## 6. 完成定义（DoD）
 
-- [ ] P0-A / P0-B 验收表全绿  
-- [ ] 中线仍周线独占（`test_no_daily_fallback` 类不回归）  
-- [ ] inventory：`Test of Spring` → ✅；§五 TR 门控阶段可注一句「阶段机读 MIN_TR_QUALITY」  
-- [ ] `BUSINESS.md` §2.2 演进清单 2、3 可标「已落地」或链到本文件 done  
-- [ ] 不扩大 scope 到 RS/P&F  
+- [x] P0-A / P0-B 验收表全绿  
+- [x] 中线仍周线独占（`test_no_daily_fallback` 类不回归）  
+- [x] inventory：`Test of Spring` → ✅；§五 TR 门控阶段可注一句「阶段机读 MIN_TR_QUALITY」  
+- [x] `BUSINESS.md` §2.2 演进清单 2、3 可标「已落地」或链到本文件 done  
+- [x] 不扩大 scope 到 RS/P&F  
 
 ---
 

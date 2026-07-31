@@ -36,9 +36,9 @@
 | **PS (Preliminary Support 初步止跌)** | ✅ | `_detect_preliminary_support`；与 SC 互斥让位 |
 | SC (Selling Climax 卖力高潮) | ✅ | |
 | AR (Automatic Rally 自动反弹) | ✅ | 锚点扫描窗已扩至 15 根 |
-| ST (Secondary Test 二次测试) | ⚠️ | TR 内用 tr_lower；非 TR 仍局部支撑 |
+| ST (Secondary Test 二次测试) | ⚠️ | 字段 `st_*` 仍保留；语义上现为 Spring 后确认（见下行）。SC 后广义 ST **未**独立实现 |
 | Spring (弹簧/震仓) | ✅ | |
-| Test of Spring (Spring 后确认测试) | ⚠️ | 仍用 ST 覆盖语义 |
+| Test of Spring (Spring 后确认测试) | ✅ | `spring_test_*` 与 `st_*` 双写（`_spring_test_fields_from_st`）；阶段机 C→D 认 Test |
 | SOS (Sign of Strength 强势信号) | ✅ | |
 | **BU (Back Up 回调买入)** | ✅ | `_detect_backup`（SOS 后缩量回踩） |
 | LPS (Last Point of Support 最后支撑点) | ✅ | 与 LPSY 打分互斥 + LPSY 分析层门控 |
@@ -62,13 +62,14 @@
 
 ## 五、交易区间（TR）分析
 
-> TR 识别层已落地（✅）。当前更大的状态准确度缺口见 §七 RS、§六 P&F，以及 `BUSINESS.md` §2.2 演进清单。
+> TR 识别层已落地（✅）。阶段机读 `WYCKOFF_PHASE_MIN_TR_QUALITY`（默认 0.35）：低质量/无 TR 时事件可亮、阶段不抬升（`phase_tr_gated`）。更大缺口见 §七 RS、§六 P&F。
 
 | 概念 | 状态 | 说明 |
 |------|------|------|
 | TR 识别（成交密集区判定） | ✅ | `_detect_trading_range` 宽度/振幅/质量 |
 | TR 上下沿计算 | ✅ | 分位带 tr_upper/tr_lower（刺穿毛刺过滤） |
 | TR 量能基线 | ✅ | `tr_baseline_volume` |
+| TR 质量门控阶段 | ✅ | `_detect_phase` 读 `MIN_TR_QUALITY`；透出 `phase_tr_gated` |
 | TR 持续时间（因果律的基础） | ⚠️ | `tr_width` 透出；目标用高度 1:1 投射，非 P&F 格数 |
 
 ---

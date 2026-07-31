@@ -435,9 +435,26 @@ def _sig(**kw):
                              "ar_signal", "are_signal", "bc_signal", "sos_signal",
                              "sow_signal", "lps_signal", "lpsy_signal",
                              "compression_signal", "trend_pullback_signal",
-                             "trend_rally_signal")}
+                             "trend_rally_signal", "st_signal", "spring_test_signal",
+                             "bu_signal", "utad_signal")}
     d.update(kw)
     return d
+
+
+# P0-B：阶段机要求 TR 质量达标；单测注入干净 TR，避免超平坦 bars 被门控
+_OK_TR = {
+    "tr_quality": 0.7,
+    "tr_upper": 10.2,
+    "tr_lower": 9.8,
+    "in_tr": True,
+    "tr_width": 40,
+    "tr_amplitude_pct": 8.0,
+    "tr_baseline_volume": 30_000.0,
+}
+
+
+def _ph(bars, signals, tr_ctx=None):
+    return _detect_phase(bars, signals, tr_ctx=tr_ctx if tr_ctx is not None else _OK_TR)
 
 
 def _super_flat(n):
@@ -448,7 +465,7 @@ def _super_flat(n):
 def test_phase_spring_valid_ac_full():
     """完整积累链 SC+AR+压缩+Spring → spring 有效（accumulation_c, prem=False）"""
     b = _super_flat(50)
-    ph = _detect_phase(b, _sig(spring_signal=True, sc_signal=True, ar_signal=True, compression_signal=True))
+    ph = _ph(b, _sig(spring_signal=True, sc_signal=True, ar_signal=True, compression_signal=True))
     assert ph.get("spring_premature") is False
     assert "accumulation" in ph["phase"], f"期望积累 phase，实得 {ph['phase']}"
 
@@ -456,7 +473,7 @@ def test_phase_spring_valid_ac_full():
 def test_phase_spring_isolated():
     """孤立 Spring（无 B 背景）→ 判过早"""
     b = _super_flat(50)
-    ph = _detect_phase(b, _sig(spring_signal=True))
+    ph = _ph(b, _sig(spring_signal=True))
     assert ph.get("spring_premature") is True, "孤立 Spring 应判过早"
     assert ph["phase"] == "none", f"孤立 Spring phase 应为 none，实得 {ph['phase']}"
 
@@ -464,7 +481,7 @@ def test_phase_spring_isolated():
 def test_phase_spring_sc_ar_valid():
     """Spring 在 SC+AR 之后 → 有效（B 背景完整）"""
     b = _super_flat(50)
-    ph = _detect_phase(b, _sig(spring_signal=True, sc_signal=True, ar_signal=True))
+    ph = _ph(b, _sig(spring_signal=True, sc_signal=True, ar_signal=True))
     assert ph.get("spring_premature") is False, "SC+AR 后 Spring 不应过早"
     assert "accumulation" in ph["phase"]
 
@@ -472,7 +489,7 @@ def test_phase_spring_sc_ar_valid():
 def test_phase_ut_isolated():
     """孤立 UT（无 B 背景）→ 判过早"""
     b = _super_flat(50)
-    ph = _detect_phase(b, _sig(upthrust_signal=True))
+    ph = _ph(b, _sig(upthrust_signal=True))
     assert ph.get("upthrust_premature") is True, "孤立 UT 应判过早"
     assert ph["phase"] == "none", f"孤立 UT phase 应为 none，实得 {ph['phase']}"
 
@@ -480,7 +497,7 @@ def test_phase_ut_isolated():
 def test_phase_ut_bc_sow_valid():
     """⑥B：UT 在 BC+SOW（派发 B）之后 → 有效；不再依赖 BC+AR"""
     b = _super_flat(50)
-    ph = _detect_phase(
+    ph = _ph(
         b, _sig(upthrust_signal=True, bc_signal=True, sow_signal=True)
     )
     assert ph.get("upthrust_premature") is False, "BC+SOW 后 UT 不应过早"
@@ -527,14 +544,14 @@ def test_scan_for_signal_passes_tr_ctx_keyword():
 def test_phase_ut_bc_ar_alone_not_dist_b():
     """⑥B：仅 BC+AR 不再构成派发 B（AR 只服务积累 SC）"""
     b = _super_flat(50)
-    ph = _detect_phase(b, _sig(upthrust_signal=True, bc_signal=True, ar_signal=True))
+    ph = _ph(b, _sig(upthrust_signal=True, bc_signal=True, ar_signal=True))
     assert ph.get("upthrust_premature") is True, "无压缩/SOW 时 BC+AR 不应让 UT 生效"
 
 
 def test_phase_bc_are_not_overridden_by_compression():
     """压缩不得把 BC+ARE 盖成积累 B。"""
     b = _super_flat(50)
-    ph = _detect_phase(
+    ph = _ph(
         b, _sig(bc_signal=True, are_signal=True, compression_signal=True)
     )
     assert ph["phase"] == "distribution_a"
@@ -544,7 +561,7 @@ def test_phase_bc_are_not_overridden_by_compression():
 def test_phase_bc_not_masked_by_bare_trend_rally():
     """裸 TrendRally 不得把 BC 盖成派发 D。"""
     b = _super_flat(50)
-    ph = _detect_phase(b, _sig(bc_signal=True, trend_rally_signal=True))
+    ph = _ph(b, _sig(bc_signal=True, trend_rally_signal=True))
     assert ph["phase"] == "distribution_a"
     assert "购买高潮" in ph.get("phase_label", "") or "BC" in ph.get("phase_label", "")
 
@@ -552,7 +569,7 @@ def test_phase_bc_not_masked_by_bare_trend_rally():
 def test_phase_sc_not_masked_by_bare_trend_pullback():
     """裸 TrendPullback 不得把 SC+AR 盖成积累 D。"""
     b = _super_flat(50)
-    ph = _detect_phase(
+    ph = _ph(
         b, _sig(sc_signal=True, ar_signal=True, trend_pullback_signal=True)
     )
     assert ph["phase"] == "accumulation_a"
@@ -561,7 +578,7 @@ def test_phase_sc_not_masked_by_bare_trend_pullback():
 def test_phase_ut_trend_rally_is_distribution_d():
     """UT+TrendRally（有派发 B）→ 派发 D，对称 Spring+回踩。"""
     b = _super_flat(50)
-    ph = _detect_phase(
+    ph = _ph(
         b,
         _sig(
             upthrust_signal=True,
@@ -577,10 +594,160 @@ def test_phase_ut_trend_rally_is_distribution_d():
 def test_phase_spring_ut_both_isolated():
     """Spring+UT 双孤立（都缺 B 背景）→ 都判过早, phase=none"""
     b = _super_flat(50)
-    ph = _detect_phase(b, _sig(spring_signal=True, upthrust_signal=True))
+    ph = _ph(b, _sig(spring_signal=True, upthrust_signal=True))
     assert ph.get("spring_premature") is True, "孤立 Spring 应判过早"
     assert ph.get("upthrust_premature") is True, "孤立 UT 应判过早"
     assert ph["phase"] == "none", f"双孤立 phase 应为 none，实得 {ph['phase']}"
+
+
+# ── P0-A / P0-B 验收（handoff 2026-07-31）──────────────────────────────
+
+def test_a1_spring_without_test_stays_c():
+    """A1: 有效 Spring，无缩量回测 → accumulation_c；spring_test=False"""
+    b = _super_flat(50)
+    ph = _ph(
+        b,
+        _sig(
+            spring_signal=True,
+            sc_signal=True,
+            ar_signal=True,
+            spring_test_signal=False,
+            st_signal=False,
+        ),
+    )
+    assert ph["phase"] == "accumulation_c"
+    assert ph.get("spring_premature") is False
+
+
+def test_a2_spring_plus_test_goes_d():
+    """A2: 有效 Spring + Test → accumulation_d（Spring+Test）"""
+    b = _super_flat(50)
+    ph = _ph(
+        b,
+        _sig(
+            spring_signal=True,
+            sc_signal=True,
+            ar_signal=True,
+            spring_test_signal=True,
+            st_signal=True,
+        ),
+    )
+    assert ph["phase"] == "accumulation_d"
+    assert "Spring+Test" in ph.get("phase_label", "")
+
+
+def test_a3_premature_spring_not_washed_by_test():
+    """A3: spring_premature + 假确认 → 不进 accumulation_c/d"""
+    b = _super_flat(50)
+    ph = _ph(
+        b,
+        _sig(spring_signal=True, spring_test_signal=True, st_signal=True),
+    )
+    assert ph.get("spring_premature") is True
+    assert ph["phase"] not in ("accumulation_c", "accumulation_d", "markup")
+
+
+def test_a4_spring_sos_without_test_still_d():
+    """A4: Spring + SOS，无 test → 仍可 D；文案走 SOS 路径"""
+    b = _super_flat(50)
+    ph = _ph(
+        b,
+        _sig(
+            spring_signal=True,
+            sc_signal=True,
+            ar_signal=True,
+            sos_signal=True,
+            spring_test_signal=False,
+            st_signal=False,
+        ),
+    )
+    assert ph["phase"] == "accumulation_d"
+    assert "SOS/LPS" in ph.get("phase_label", "")
+
+
+def test_a5_st_and_spring_test_dual_write():
+    """A5: st_signal 与 spring_test_signal 一致"""
+    from trader_shared.wyckoff_events import _spring_test_fields_from_st
+
+    for on in (True, False):
+        st = {
+            "st_signal": on,
+            "st_reason": "Spring 支撑二次测试，缩量确认" if on else "未检测到",
+            "st_price": 10.0 if on else None,
+        }
+        st_fields = _spring_test_fields_from_st(st)
+        assert st_fields["spring_test_signal"] is on
+        assert bool(st_fields["spring_test_signal"]) == bool(st["st_signal"])
+
+
+def test_b1_low_tr_quality_gates_phase():
+    """B1: tr_quality=0.2 + Spring 形态 → 可有事件语义，phase 不进积累 C/D/markup"""
+    b = _super_flat(50)
+    low = {**_OK_TR, "tr_quality": 0.2}
+    ph = _detect_phase(
+        b,
+        _sig(spring_signal=True, sc_signal=True, ar_signal=True, spring_test_signal=True),
+        tr_ctx=low,
+    )
+    assert ph["phase"] == "none"
+    assert ph.get("phase_tr_gated") is True
+    assert ph.get("phase_tr_gate_reason") == "low_quality"
+
+
+def test_b2_good_tr_allows_spring_test_d():
+    """B2: tr_quality=0.6 + 有效 Spring+test → 可按 P0-A 进 D"""
+    b = _super_flat(50)
+    good = {**_OK_TR, "tr_quality": 0.6}
+    ph = _ph(
+        b,
+        _sig(
+            spring_signal=True,
+            sc_signal=True,
+            ar_signal=True,
+            spring_test_signal=True,
+        ),
+        tr_ctx=good,
+    )
+    assert ph["phase"] == "accumulation_d"
+    assert not ph.get("phase_tr_gated")
+
+
+def test_b3_no_tr_ctx_gates_phase():
+    """B3: tr_ctx=None + 一堆事件 → phase 不进明确 A–E"""
+    b = _super_flat(50)
+    ph = _detect_phase(
+        b,
+        _sig(
+            spring_signal=True,
+            sc_signal=True,
+            ar_signal=True,
+            sos_signal=True,
+            bc_signal=True,
+        ),
+        tr_ctx=None,
+    )
+    assert ph["phase"] == "none"
+    assert ph.get("phase_tr_gated") is True
+    assert ph.get("phase_tr_gate_reason") == "no_tr"
+
+
+def test_b4_midline_weekly_path_still_runs():
+    """B4: 周线 wyckoff_strategy_midline 路径跑通门控；不足仍 insufficient"""
+    from trader_shared.wyckoff_core import wyckoff_strategy_midline
+
+    daily = [mk(10.0, 10.1, 9.9, 10.0, 100_000) for _ in range(40)]
+    r = wyckoff_strategy_midline(10.0, weekly_bars=[], daily_bars=daily)
+    assert r["wyckoff"].get("timeframe") == "insufficient"
+
+    # 构造有振幅震荡的周线，足以形成 TR
+    weekly = []
+    for i in range(40):
+        base = 10.0 + (0.3 if i % 4 < 2 else -0.2)
+        weekly.append(mk(base, base + 0.4, base - 0.4, base + 0.1, 200_000 + i * 1000))
+    r2 = wyckoff_strategy_midline(weekly[-1]["close"], weekly_bars=weekly, daily_bars=daily)
+    assert r2["wyckoff"].get("timeframe") == "weekly"
+    assert "phase" in r2["wyckoff"]
+    assert "phase_tr_gated" in r2["wyckoff"] or r2["wyckoff"].get("phase") is not None
 
 
 # ── 27～29：Feature ① TR 质量接打分 + 过早信号降权 ───────────────────

@@ -262,6 +262,8 @@ WYCKOFF_TR_CEIL_PCT: float = 0.85               # 上沿 = 区间 high 的 85 �
 # 调整量 = (tr_quality - 中性点) * 2 * GAIN，封顶 ±GAIN。无 TR(tr_quality=None)不调整。
 WYCKOFF_TR_QUALITY_NEUTRAL: float = 0.5         # tr_quality 中性点：高于此视为干净 TR，低于此视为可疑
 WYCKOFF_SCORE_TR_QUALITY_GAIN: int = 20         # TR 质量对 raw 分的最大调整幅度（quality=1→+20，quality=0→-20）
+# 阶段机门控：低于此质量的 TR（或无 TR）上事件可亮灯，但不得抬升明确积累/派发/Markup/Markdown
+WYCKOFF_PHASE_MIN_TR_QUALITY: float = 0.35
 
 # ---- P3 Theory Adjustment ----
 # THEORY_ADJUST_LOG_ONLY=true 时理论微调只记录日志不实际生效，用于首次上线观察
@@ -433,6 +435,7 @@ __all__ = [
     "WYCKOFF_SCORE_CLUSTER_CONFIRM", "WYCKOFF_SCORE_CLUSTER_DISTRIB", "WYCKOFF_SCORE_CLUSTER_FAIL",
     # ① TR 质量接打分
     "WYCKOFF_TR_QUALITY_NEUTRAL", "WYCKOFF_SCORE_TR_QUALITY_GAIN",
+    "WYCKOFF_PHASE_MIN_TR_QUALITY",
     "WYCKOFF_COMPRESSION_LOOKBACK", "WYCKOFF_COMPRESSION_ATR_QUANTILE",
     "WYCKOFF_COMPRESSION_VOL_RATIO", "WYCKOFF_COMPRESSION_VOL_REF_WINDOW",
     "WYCKOFF_TREND_PB_LOOKBACK", "WYCKOFF_TREND_PB_MIN_PULLBACK",

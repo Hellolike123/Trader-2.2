@@ -124,10 +124,10 @@
 - **生产主路径**（报告渲染）优先读 View；旧 dict 仅兼容
 - 非目标：View 不直接下单；不替换 fusion；未做特征/原子事件大重构
 
-**状态准确度演进（指导后续代码，非已实现承诺）**：
+**状态准确度演进**：
 1. 个股 vs 大盘相对强弱（RS）接入周线阶段（P1，另开）
-2. Spring 后确认测试与 ST 语义分离 → **实现规格**：`docs/plans/wyckoff-phase-accuracy-handoff-2026-07-31.md` §2（P0-A）
-3. 低质量 TR 不进阶段机 → 同上 handoff §3（P0-B）
+2. Spring 后确认测试与 ST 语义分离 → **已落地**（`spring_test_*` 双写 + 阶段 C/D；规格见 `docs/plans/wyckoff-phase-accuracy-handoff-2026-07-31.md` §2）
+3. 低质量 TR 不进阶段机 → **已落地**（`WYCKOFF_PHASE_MIN_TR_QUALITY` + `phase_tr_gated`；同上 handoff §3）
 4. 完整 P&F 非优先（目标价近似已有 TR 1:1 投射）
 
 原典落地盘点：`docs/audit/wyckoff-original-concept-inventory.md`。

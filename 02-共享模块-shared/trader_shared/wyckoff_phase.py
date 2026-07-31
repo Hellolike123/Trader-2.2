@@ -28,6 +28,7 @@ from trader_shared.config import (
     WYCKOFF_DIVERGENCE_BARS,
     WYCKOFF_DIVERGENCE_RATIO,
     WYCKOFF_PHASE_LOOKBACK,
+    WYCKOFF_PHASE_MIN_TR_QUALITY,
     WYCKOFF_VSA_AVG_SPREAD_PERIOD,
     WYCKOFF_SCORE_SPRING,
     WYCKOFF_SCORE_SPRING_BULLISH_DIV_BONUS,
@@ -184,6 +185,35 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
     lookback = min(_phase_lookback if _phase_lookback is not None else WYCKOFF_PHASE_LOOKBACK, len(bars))
     wide_bars = bars[-lookback:]
 
+    # P0-B：低质量 / 无 TR → 事件可亮，阶段不抬升
+    tr_q = None
+    if tr_ctx is not None and tr_ctx.get("tr_quality") is not None:
+        try:
+            tr_q = float(tr_ctx["tr_quality"])
+        except (TypeError, ValueError):
+            tr_q = None
+    if tr_ctx is None or tr_q is None:
+        gate_reason = "no_tr"
+    elif tr_q < float(WYCKOFF_PHASE_MIN_TR_QUALITY):
+        gate_reason = "low_quality"
+    else:
+        gate_reason = ""
+    if gate_reason:
+        label = (
+            "无明确阶段（TR质量不足，阶段不参与定论）"
+            if gate_reason == "low_quality"
+            else "无明确阶段（无TR，阶段不参与定论）"
+        )
+        return {
+            "phase": "none",
+            "phase_label": label,
+            "phase_confidence_delta": 0.0,
+            "spring_premature": bool(signals.get("spring_signal")),
+            "upthrust_premature": bool(signals.get("upthrust_signal")),
+            "phase_tr_gated": True,
+            "phase_tr_gate_reason": gate_reason,
+        }
+
     # 当前 bar 信号优先（避免 scan step 漏检末尾），再滑动扫描历史窗口
     bc_found = bool(signals.get("bc_signal")) or _scan_for_signal(
         wide_bars, _detect_buying_climax, window=15, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
@@ -226,6 +256,12 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
     )
     trend_rally = bool(signals.get("trend_rally_signal")) or _scan_for_signal(
         wide_bars, _detect_trend_rally, window=15, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
+    )
+    # Test of Spring（与 st_* 同源）
+    spring_test = bool(
+        signals.get("spring_test_signal") or signals.get("st_signal")
+    ) or _scan_for_signal(
+        wide_bars, _detect_st, window=20, step=5, max_lookback_bars=40, tr_ctx=tr_ctx
     )
 
     # ── 原典顺序校验：事件索引 — Spring/UT 必须在 Phase B 之后才有效 ────────
@@ -315,6 +351,17 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
 
     # ── 积累序列（原典：A停止→B建仓→C弹簧→D确认→E趋势） ──
     # Spring 必须先经 Phase B（有 SC+AR 停止行为或压缩蓄力）才有效
+    # P0-A：Spring+Test 优先进 D；裸 Spring 只到 C；premature 不得被 test 洗白
+    if not spring_premature and spring and spring_test:
+        return {
+            "phase": "accumulation_d",
+            "phase_label": "积累期 D（确认：Spring+Test）",
+            "phase_confidence_delta": 0.12,
+            "spring_premature": False,
+            "upthrust_premature": upthrust_premature,
+            "phase_tr_gated": False,
+            "phase_tr_gate_reason": "",
+        }
     if not spring_premature and spring and (sos or lps):
         return {
             "phase": "accumulation_d",
@@ -322,6 +369,8 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
             "phase_confidence_delta": 0.10,
             "spring_premature": False,
             "upthrust_premature": upthrust_premature,
+            "phase_tr_gated": False,
+            "phase_tr_gate_reason": "",
         }
     if not spring_premature and spring and trend_pullback:
         return {
@@ -330,6 +379,8 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
             "phase_confidence_delta": 0.12,
             "spring_premature": False,
             "upthrust_premature": upthrust_premature,
+            "phase_tr_gated": False,
+            "phase_tr_gate_reason": "",
         }
     if not spring_premature and spring:
         return {
@@ -338,6 +389,8 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
             "phase_confidence_delta": 0.10,
             "spring_premature": False,
             "upthrust_premature": upthrust_premature,
+            "phase_tr_gated": False,
+            "phase_tr_gate_reason": "",
         }
     # P2: Compression = 积累期 B 末期（压缩蓄力）
     # 有派发极性时不得抢在 BC/ARE/SOW/UT 之前盖成积累 B（否则派发 A 永远到不了）

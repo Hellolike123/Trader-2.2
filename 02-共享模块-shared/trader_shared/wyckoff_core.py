@@ -97,6 +97,7 @@ from .wyckoff_events import (
     _detect_sos,
     _detect_spring,
     _detect_st,
+    _spring_test_fields_from_st,
     _detect_trend_pullback,
     _detect_trend_rally,
     _detect_upthrust,
@@ -268,6 +269,8 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
             "compression_signal": False, "compression_reason": "数据不足", "compression_price": None,
             "trend_pullback_signal": False, "trend_pullback_reason": "数据不足", "trend_pullback_price": None,
             "trend_rally_signal": False, "trend_rally_reason": "数据不足", "trend_rally_price": None,
+            "spring_test_signal": False, "spring_test_reason": "数据不足", "spring_test_price": None,
+            "phase_tr_gated": False, "phase_tr_gate_reason": "",
         }
 
     # P2-2: 动态支撑位计算（多源集成）— 仅用于 Spring 检测
@@ -289,6 +292,7 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
     are = _detect_are(bars, tr_ctx=tr_ctx)
     sos = _detect_sos(bars, tr_ctx=tr_ctx)
     st = _detect_st(bars, tr_ctx=tr_ctx)
+    spring_test = _spring_test_fields_from_st(st)
     lps = _detect_lps(bars, tr_ctx=tr_ctx)
     lpsy = _detect_lpsy(bars, tr_ctx=tr_ctx)
     # LPSY 门控与打分一致：无派发背景则不亮灯（避免展示吓人、分数不扣）
@@ -331,6 +335,7 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "are_signal": are["are_signal"],
         "sos_signal": sos["sos_signal"],
         "st_signal": st["st_signal"],
+        "spring_test_signal": spring_test["spring_test_signal"],
         "lps_signal": lps["lps_signal"],
         "lpsy_signal": lpsy["lpsy_signal"],
         "compression_signal": compression["compression_signal"],
@@ -383,8 +388,8 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         parts.append(f"自动回落: {are['are_reason']}")
     if sos["sos_signal"]:
         parts.append(f"强势信号: {sos['sos_reason']}")
-    if st["st_signal"]:
-        parts.append(f"二次测试: {st['st_reason']}")
+    if spring_test["spring_test_signal"] or st["st_signal"]:
+        parts.append(f"Spring确认: {spring_test.get('spring_test_reason') or st.get('st_reason')}")
     if lps["lps_signal"]:
         parts.append(f"最后支撑: {lps['lps_reason']}")
     if lpsy["lpsy_signal"]:
@@ -467,6 +472,14 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "st_signal": st["st_signal"],
         "st_reason": st["st_reason"],
         "st_price": round(st["st_price"], 2) if st["st_signal"] else None,
+        # P0-A: Test of Spring 与 st_* 双写（打分只计 st 一次）
+        "spring_test_signal": spring_test["spring_test_signal"],
+        "spring_test_reason": spring_test["spring_test_reason"],
+        "spring_test_price": (
+            round(spring_test["spring_test_price"], 2)
+            if spring_test["spring_test_signal"] and spring_test.get("spring_test_price") is not None
+            else None
+        ),
         "lps_signal": lps["lps_signal"],
         "lps_reason": lps["lps_reason"],
         "lps_price": round(lps["lps_price"], 2) if lps["lps_signal"] else None,
@@ -501,6 +514,9 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         # 五阶段机原典串联：孤立信号标注
         "spring_premature": phase.get("spring_premature", False),
         "upthrust_premature": phase.get("upthrust_premature", False),
+        # P0-B: TR 质量门控透出
+        "phase_tr_gated": bool(phase.get("phase_tr_gated", False)),
+        "phase_tr_gate_reason": phase.get("phase_tr_gate_reason") or "",
         # P3-1: VSA 量价幅度分析
         "effort_no_result": vsa["effort_no_result"],
         "no_supply": vsa["no_supply"],
@@ -706,10 +722,10 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
         raw += WYCKOFF_SCORE_SOS
         signals.append(f"SOS +{WYCKOFF_SCORE_SOS}")
 
-    # 10. ST (Secondary Test) — 二次测试支撑
-    if analysis.get("st_signal"):
+    # 10. Spring确认 / ST — 同源只计一次（spring_test_* 与 st_* 双写）
+    if analysis.get("st_signal") or analysis.get("spring_test_signal"):
         raw += WYCKOFF_SCORE_ST
-        signals.append(f"ST +{WYCKOFF_SCORE_ST}")
+        signals.append(f"Spring确认 +{WYCKOFF_SCORE_ST}")
 
     # 11. LPS (Last Point of Support) — 最后支撑点
     if lps_on:
@@ -952,8 +968,10 @@ def resolve_wyckoff_primary(
         code, cn, main, note, d = "ARE", "自动回落", "BC后快速回落", "仅回落，还不能当反转空", -1
     elif wyk.get("sc_signal"):
         code, cn, main, note, d = "SC", "卖力高潮", "天量宽幅下跌", "卖力高潮，抛压宣泄后可能止跌", 1
-    elif wyk.get("st_signal"):
-        code, cn, main, note, d = "ST", "二次测试", "回踩支撑站住", "二次确认支撑有效", 1
+    elif wyk.get("spring_test_signal") or wyk.get("st_signal"):
+        code, cn, main, note, d = (
+            "SpringTest", "Spring确认", "Spring后缩量回测", "确认测试有效，非笼统ST", 1
+        )
     elif wyk.get("lps_signal"):
         code, cn, main, note, d = "LPS", "最后支撑", "突破后缩量回踩", "回踩不破，仍偏强", 1
     elif wyk.get("lpsy_signal"):

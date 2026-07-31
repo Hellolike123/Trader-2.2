@@ -20,7 +20,8 @@ _EVENT_SPECS: list[tuple[str, str, str]] = [
     ("sc", "sc_signal", "sc_reason"),
     ("ar", "ar_signal", "ar_reason"),
     ("are", "are_signal", "are_reason"),
-    ("st", "st_signal", "st_reason"),
+    ("spring_test", "spring_test_signal", "spring_test_reason"),
+    ("st", "st_signal", "st_reason"),  # 兼容；与 spring_test 同亮时下方去重
     ("spring", "spring_signal", "spring_reason"),
     ("sos", "sos_signal", "sos_reason"),
     ("bu", "bu_signal", "bu_reason"),
@@ -192,6 +193,8 @@ def _confidence(wyk: dict[str, Any], active: list[str]) -> float:
                 base -= 0.08
         except (TypeError, ValueError):
             pass
+    if wyk.get("phase_tr_gated"):
+        base = min(base, 0.35)
     return round(_clip01(base), 3)
 
 
@@ -218,6 +221,9 @@ def to_wyckoff_state_view(
     for eid, sig_k, reason_k in _EVENT_SPECS:
         if not wyk.get(sig_k):
             continue
+        # spring_test 与 st 同源双写：只展示 Spring确认
+        if eid == "st" and wyk.get("spring_test_signal"):
+            continue
         active.append(eid)
         price_key = f"{eid}_price"
         # spring/upthrust/compression 等同名；部分用完整前缀
@@ -228,6 +234,8 @@ def to_wyckoff_state_view(
             price = wyk.get("trend_pullback_price")
         if price is None and eid == "compression":
             price = wyk.get("compression_price")
+        if price is None and eid == "spring_test":
+            price = wyk.get("spring_test_price") or wyk.get("st_price")
         item: WyckoffEventItem = {
             "id": eid,
             "reason": str(wyk.get(reason_k) or ""),
@@ -241,6 +249,11 @@ def to_wyckoff_state_view(
 
     bias = _bias_from_analysis(wyk)
     oneline = format_wyckoff_oneline(wyk, show_phase=False)
+    if wyk.get("phase_tr_gated"):
+        reason = str(wyk.get("phase_tr_gate_reason") or "")
+        note = "TR质量不足，阶段不参与定论" if reason == "low_quality" else "无清晰TR，阶段不参与定论"
+        if oneline and "不参与定论" not in oneline:
+            oneline = f"{oneline} · {note}"
 
     view: WyckoffStateView = {
         "schema_version": "wyckoff_state_v1",

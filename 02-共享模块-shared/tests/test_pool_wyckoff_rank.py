@@ -33,7 +33,7 @@ def test_format_chain_with_gap():
             "sos_signal": False,
         }
     }
-    assert format_wyckoff_chain_plain(item) == "威：SC→AR→ST→LPS，还差SOS"
+    assert format_wyckoff_chain_plain(item) == "威：SC→AR→Spring确认→LPS，还差SOS"
     assert extract_accum_events(item) == ["SC", "AR", "ST", "LPS"]
 
 
@@ -47,13 +47,13 @@ def test_format_chain_complete():
             "sos_signal": True,
         }
     }
-    assert format_wyckoff_chain_plain(item) == "威：SC→AR→ST→LPS→SOS"
+    assert format_wyckoff_chain_plain(item) == "威：SC→AR→Spring确认→LPS→SOS"
     assert "事件" not in format_wyckoff_chain_plain(item)
 
 
 def test_format_short_chain():
     item = {"wyckoff": {"sc_signal": True, "ar_signal": True}}
-    assert format_wyckoff_chain_plain(item) == "威：SC→AR，还差ST"
+    assert format_wyckoff_chain_plain(item) == "威：SC→AR，还差Spring确认"
 
 
 def test_format_empty():
@@ -68,7 +68,7 @@ def test_bc_cooldown_plain():
 
 def test_bc_with_sc_ar_uses_chain_not_bc_watch():
     item = {"wyckoff": {"bc_signal": True, "sc_signal": True, "ar_signal": True}}
-    assert format_wyckoff_chain_plain(item) == "威：SC→AR，还差ST"
+    assert format_wyckoff_chain_plain(item) == "威：SC→AR，还差Spring确认"
     assert wyckoff_chain_rank(item) == 2
 
 
@@ -85,7 +85,7 @@ def test_stale_cache_ignored_when_signals_update():
             "sos_signal": False,
         },
     }
-    assert format_wyckoff_chain_plain(item) == "威：SC→AR→ST→LPS，还差SOS"
+    assert format_wyckoff_chain_plain(item) == "威：SC→AR→Spring确认→LPS，还差SOS"
     assert wyckoff_chain_rank(item) == 4
 
 
@@ -98,7 +98,7 @@ def test_nested_emptyish_wyckoff_merges_flats():
         "wyckoff_st_signal": True,
     }
     assert extract_accum_events(item) == ["SC", "AR", "ST"]
-    assert format_wyckoff_chain_plain(item) == "威：SC→AR→ST，还差LPS"
+    assert format_wyckoff_chain_plain(item) == "威：SC→AR→Spring确认，还差LPS"
 
 
 def test_attach_report_overrides_stale_record_cache():
@@ -119,7 +119,7 @@ def test_attach_report_overrides_stale_record_cache():
         }
     }
     attach_wyckoff_chain_fields(record, report)
-    assert record["wyckoff_chain_plain"] == "威：SC→AR→ST→LPS→SOS"
+    assert record["wyckoff_chain_plain"] == "威：SC→AR→Spring确认→LPS→SOS"
     assert record["wyckoff_chain_rank"] == 5
 
 

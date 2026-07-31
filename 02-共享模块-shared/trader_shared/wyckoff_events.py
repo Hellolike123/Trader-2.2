@@ -1333,6 +1333,42 @@ def _detect_st(bars: list[dict], tr_ctx: dict | None = None) -> dict:
 
     return {"st_signal": False, "st_reason": "Spring 后未检测到有效二次测试", "st_price": None}
 
+
+def _spring_test_fields_from_st(st: dict) -> dict:
+    """将 `_detect_st` 结果双写为 Test of Spring 显式字段（与 st_* 同源，避免双计分）。"""
+    on = bool(st.get("st_signal"))
+    raw_reason = str(st.get("st_reason") or "")
+    if on:
+        reason = "Spring确认：缩量回测未破支撑"
+    elif "未检测到 Spring" in raw_reason:
+        reason = "未检测到 Spring，无法触发 Spring确认"
+    elif "数据不足" in raw_reason:
+        reason = "数据不足"
+    elif "锚点" in raw_reason:
+        reason = "Spring 锚点未找到"
+    else:
+        reason = "Spring 后未检测到有效确认测试" if raw_reason else "未检测到 Spring确认"
+    return {
+        "spring_test_signal": on,
+        "spring_test_reason": reason,
+        "spring_test_price": st.get("st_price"),
+    }
+
+
+def _detect_spring_test(bars: list[dict], tr_ctx: dict | None = None) -> dict:
+    """Detect Test of Spring — Spring 后缩量确认回测（薄封装 `_detect_st`）。
+
+    与 `st_*` 双写兼容一版；语义上本字段才是「Spring确认」，广义 SC 后 ST 本 PR 不做。
+    """
+    st = _detect_st(bars, tr_ctx=tr_ctx)
+    out = _spring_test_fields_from_st(st)
+    # 兼容：同步带回 st_*，调用方可只跑一次
+    out["st_signal"] = bool(st.get("st_signal"))
+    out["st_reason"] = st.get("st_reason")
+    out["st_price"] = st.get("st_price")
+    return out
+
+
 def _detect_lps(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     """Detect LPS (Last Point of Support) — SOS 突破后回调不破前低。
 

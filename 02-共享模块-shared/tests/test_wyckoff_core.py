@@ -929,6 +929,14 @@ class TestDetectSOSFourOfFive:
 class TestDetectPhaseSemantics:
     """phase 语义纠偏：BC+AR 不得进 accumulation_a"""
 
+    _OK_TR = {
+        "tr_quality": 0.7,
+        "tr_upper": 105.0,
+        "tr_lower": 95.0,
+        "in_tr": True,
+        "tr_width": 40,
+    }
+
     def test_bc_ar_is_distribution_a_not_accumulation(self):
         from unittest.mock import patch
 
@@ -936,6 +944,7 @@ class TestDetectPhaseSemantics:
             "spring_signal": False,
             "sos_signal": False,
             "lps_signal": False,
+            "bc_signal": True,  # 派发极性；AR 不再构成派发 B，但 BC alone → distribution_a
         }
         bars = [_make_bar(100, 105, 95, 102, 100) for _ in range(40)]
 
@@ -948,7 +957,7 @@ class TestDetectPhaseSemantics:
             return False
 
         with patch("trader_shared.wyckoff_phase._scan_for_signal", side_effect=fake_scan):
-            result = _detect_phase(bars, signals)
+            result = _detect_phase(bars, signals, tr_ctx=self._OK_TR)
 
         assert result["phase"] == "distribution_a"
         assert "accumulation" not in result["phase"]
@@ -964,10 +973,12 @@ class TestDetectPhaseSemantics:
             "ar_signal": True,  # 提供 B 背景
             "sos_signal": False,
             "lps_signal": False,
+            "spring_test_signal": False,
+            "st_signal": False,
         }
         bars = [_make_bar(100, 105, 95, 102, 100) for _ in range(40)]
         with patch("trader_shared.wyckoff_phase._scan_for_signal", return_value=False):
-            result = _detect_phase(bars, signals)
+            result = _detect_phase(bars, signals, tr_ctx=self._OK_TR)
         assert result["phase"] == "accumulation_c"
         assert result.get("spring_premature") is False
         assert result["phase_confidence_delta"] > 0
@@ -985,8 +996,9 @@ class TestDetectPhaseSemantics:
         }
         bars = [_make_bar(100, 105, 95, 102, 100) for _ in range(40)]
         with patch("trader_shared.wyckoff_phase._scan_for_signal", return_value=False):
-            result = _detect_phase(bars, signals)
+            result = _detect_phase(bars, signals, tr_ctx=self._OK_TR)
         assert result["phase"] == "accumulation_d"
+        assert "SOS/LPS" in result.get("phase_label", "")
 
     def test_phase_delta_consumed_in_score(self):
         """phase_confidence_delta 在 calculate_wyckoff_score 中被消费"""

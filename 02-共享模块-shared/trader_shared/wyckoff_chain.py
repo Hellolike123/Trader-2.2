@@ -1,4 +1,4 @@
-"""威科夫吸筹链：同道内排序 + 链文案（威：SC→AR→ST→LPS，还差SOS）。
+"""威科夫吸筹链：同道内排序 + 链文案（威：SC→AR→Spring确认→LPS，还差SOS）。
 
 禁止「事件 n/5」、S级/星级。派发侧不进此链（由分道先别碰处理）。
 SSOT：池排序与 wyckoff Skill 共用本模块。
@@ -7,15 +7,23 @@ from __future__ import annotations
 
 from typing import Any
 
-# 吸筹链固定顺序
+# 吸筹链固定顺序（ST 槽位 = Test of Spring / spring_test_*，展示名见 _CHAIN_DISPLAY）
 ACCUM_CHAIN = ("SC", "AR", "ST", "LPS", "SOS")
 
 _SIGNAL_KEYS = {
     "SC": "sc_signal",
     "AR": "ar_signal",
-    "ST": "st_signal",
+    "ST": "st_signal",  # 兼容；提取时亦认 spring_test_signal
     "LPS": "lps_signal",
     "SOS": "sos_signal",
+}
+
+_CHAIN_DISPLAY = {
+    "SC": "SC",
+    "AR": "AR",
+    "ST": "Spring确认",
+    "LPS": "LPS",
+    "SOS": "SOS",
 }
 
 
@@ -52,7 +60,10 @@ def extract_accum_events(report_or_item: dict[str, Any] | None) -> list[str]:
     out: list[str] = []
     for label in ACCUM_CHAIN:
         key = _SIGNAL_KEYS[label]
-        if wyk.get(key):
+        lit = bool(wyk.get(key))
+        if label == "ST":
+            lit = lit or bool(wyk.get("spring_test_signal"))
+        if lit:
             out.append(label)
     return out
 
@@ -64,6 +75,10 @@ def first_missing_accum(events: list[str] | None) -> str | None:
         if label not in have:
             return label
     return None
+
+
+def _chain_label(label: str) -> str:
+    return _CHAIN_DISPLAY.get(label, label)
 
 
 def _bc_watch_only(wyk: dict[str, Any], events: list[str]) -> bool:
@@ -90,13 +105,18 @@ def format_wyckoff_chain_plain(report_or_item: dict[str, Any] | list[str] | None
             return "威：BC后观望"
 
     if not events:
+        # Spring 已亮但无确认测试 → 点名缺口（可选增强）
+        if wyk.get("spring_signal") and not (
+            wyk.get("st_signal") or wyk.get("spring_test_signal")
+        ):
+            return "威：吸筹链未成型，还差Spring确认"
         return "威：吸筹链未成型"
 
     miss = first_missing_accum(events)
-    chain = "→".join(events)
+    chain = "→".join(_chain_label(e) for e in events)
     if miss is None:
         return f"威：{chain}"
-    return f"威：{chain}，还差{miss}"
+    return f"威：{chain}，还差{_chain_label(miss)}"
 
 
 def wyckoff_chain_rank(report_or_item: dict[str, Any] | list[str] | None) -> int:
