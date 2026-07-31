@@ -195,9 +195,22 @@ def run_chip_enrichment_stage(
                 pass
             bars_60m = aggregate_5m_to_60m(_bars_5m_done) if _bars_5m_done else []
             monthly_bars = list(getattr(snapshot, "monthly_bars", None) or []) if snapshot else []
+            # 主路径 snapshot 默认 include_monthly=False；补拉走日缓存，避免每票打网
             if not monthly_bars and provider is not None and snapshot is not None:
                 try:
-                    monthly_bars = list(provider.fetch_monthly(snapshot.security) or [])
+                    from trader_shared.cache_utils import CACHE_MONTHLY, get_day_scoped_bars
+
+                    _sec = snapshot.security
+                    _mkey = getattr(_sec, "ts_code", None) or getattr(_sec, "code", "") or target
+                    monthly_bars = list(
+                        get_day_scoped_bars(
+                            CACHE_MONTHLY,
+                            str(_mkey),
+                            lambda: list(provider.fetch_monthly(_sec) or []),
+                            min_rows=1,
+                        )
+                        or []
+                    )
                 except Exception as _me:
                     _log.debug("monthly fetch for resonance skipped: %s", _me)
                     monthly_bars = []

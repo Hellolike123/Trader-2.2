@@ -102,6 +102,7 @@ def run_stage_positioning_stage(
         chip_support_lower=chip_support_lower or 0.0,
         chip_resistance_lower=chip_resistance_lower or 0.0,
         chip_resistance_upper=chip_resistance_upper or 0.0,
+        major_stage_seed=levels.get("major_stage_seed"),
     )
 
     take = levels.get("take")

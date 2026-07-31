@@ -565,11 +565,8 @@ class TestT1Cooldown:
         from unittest.mock import patch
         from trader_shared.stage_positioning import evaluate_position_state
 
-        mock_dt = patch(
-            "trader_shared.stage_positioning.datetime",
-            **{"now.return_value.strftime.return_value": "2026-07-02"},
-        )
-        with mock_dt:
+        # today 走 cn_time.today_cn（不再用 stage_positioning.datetime.now）
+        with patch("trader_shared.cn_time.today_cn", return_value=__import__("datetime").date(2026, 7, 2)):
             result = evaluate_position_state(
                 **self._base_kwargs(),
                 last_add_date="2026-07-02",
@@ -584,11 +581,7 @@ class TestT1Cooldown:
         from unittest.mock import patch
         from trader_shared.stage_positioning import evaluate_position_state
 
-        mock_dt = patch(
-            "trader_shared.stage_positioning.datetime",
-            **{"now.return_value.strftime.return_value": "2026-07-02"},
-        )
-        with mock_dt:
+        with patch("trader_shared.cn_time.today_cn", return_value=__import__("datetime").date(2026, 7, 2)):
             result = evaluate_position_state(
                 **self._base_kwargs(),
                 last_add_date="2026-07-01",
@@ -660,14 +653,26 @@ class TestCalcPortfolioCorrelation:
         assert len(result["risk_groups"]) == 1
         assert result["adjusted_total_limit"] is None
 
+    @staticmethod
+    def _closes_from_returns(rets: list[float], p0: float = 10.0) -> list[float]:
+        """由日收益率还原收盘价（实现按收益率相关，勿用对冲漂移冒充低相关）。"""
+        closes = [p0]
+        for r in rets:
+            closes.append(closes[-1] * (1.0 + r))
+        return closes
+
     def test_two_uncorrelated_stocks(self):
         """两只不相关股票 → 不触发熔断"""
+        import random
         from trader_shared.stage_positioning import calc_portfolio_correlation
         positions = self._make_positions("000001.SZ", "000002.SZ")
-        # 一只涨，一只跌 → 负相关
+        # 独立高斯收益（价格对冲漂移在收益空间仍可高度相关）
+        rng_a, rng_b = random.Random(1), random.Random(2)
+        ra = [rng_a.gauss(0, 0.015) for _ in range(24)]
+        rb = [rng_b.gauss(0, 0.015) for _ in range(24)]
         bars_map = {
-            "000001.SZ": _make_bars([10.0 + i * 0.5 for i in range(25)]),
-            "000002.SZ": _make_bars([20.0 - i * 0.3 for i in range(25)]),
+            "000001.SZ": _make_bars(self._closes_from_returns(ra, 10.0)),
+            "000002.SZ": _make_bars(self._closes_from_returns(rb, 20.0)),
         }
         result = calc_portfolio_correlation(positions, bars_map)
         assert result["triggered"] is False
@@ -676,13 +681,15 @@ class TestCalcPortfolioCorrelation:
 
     def test_two_highly_correlated_stocks(self):
         """两只高相关股票 → 触发熔断，合并为同一风险组"""
+        import random
         from trader_shared.stage_positioning import calc_portfolio_correlation
         positions = self._make_positions("000001.SZ", "000002.SZ")
-        # 同方向漂移，高度相关
-        base_closes = [10.0 + i * 0.5 for i in range(25)]
+        rng = random.Random(42)
+        base_rets = [rng.gauss(0.001, 0.012) for _ in range(24)]
+        noisy = [r + rng.gauss(0, 0.0005) for r in base_rets]
         bars_map = {
-            "000001.SZ": _make_bars(base_closes),
-            "000002.SZ": _make_bars([c * 1.01 + 0.1 for c in base_closes]),
+            "000001.SZ": _make_bars(self._closes_from_returns(base_rets, 10.0)),
+            "000002.SZ": _make_bars(self._closes_from_returns(noisy, 20.0)),
         }
         result = calc_portfolio_correlation(positions, bars_map)
         assert result["triggered"] is True
@@ -694,13 +701,17 @@ class TestCalcPortfolioCorrelation:
 
     def test_three_stocks_two_correlated(self):
         """三只股票，其中两只高相关 → 触发，组数为 2"""
+        import random
         from trader_shared.stage_positioning import calc_portfolio_correlation
         positions = self._make_positions("000001.SZ", "000002.SZ", "000003.SZ")
-        base_closes = [10.0 + i * 0.5 for i in range(25)]
+        rng = random.Random(7)
+        base_rets = [rng.gauss(0.001, 0.012) for _ in range(24)]
+        noisy = [r + rng.gauss(0, 0.0005) for r in base_rets]
+        indep = [rng.gauss(0, 0.015) for _ in range(24)]
         bars_map = {
-            "000001.SZ": _make_bars(base_closes),
-            "000002.SZ": _make_bars([c * 1.01 + 0.1 for c in base_closes]),
-            "000003.SZ": _make_bars([20.0 - i * 0.3 for i in range(25)]),
+            "000001.SZ": _make_bars(self._closes_from_returns(base_rets, 10.0)),
+            "000002.SZ": _make_bars(self._closes_from_returns(noisy, 15.0)),
+            "000003.SZ": _make_bars(self._closes_from_returns(indep, 20.0)),
         }
         result = calc_portfolio_correlation(positions, bars_map)
         assert result["triggered"] is True

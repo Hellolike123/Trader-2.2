@@ -836,6 +836,7 @@ def assess_stage(
     chip_support_lower: float = 0.0,
     chip_resistance_lower: float = 0.0,
     chip_resistance_upper: float = 0.0,
+    major_stage_seed: tuple | None = None,
 ) -> dict[str, Any]:
     """四阶段定位主函数（主力行为驱动 + 量价确认 + 四层防护）
 
@@ -858,10 +859,24 @@ def assess_stage(
     ma20 = ma_values.get("ma20")
 
     # 第一步：综合阶段判定（主力行为优先 + 量价确认 + 结构兜底）
-    raw_stage, raw_confidence, raw_reason, vp_stage = _detect_major_stage(
-        current, ma_values, bars, fusion_hint=fusion_hint, wyckoff_result=wyckoff_result,
-        chan_result=chan_result, main_force_result=main_force_result,
-    )
+    # build_report 可传入 structure_stage 已算好的 seed，避免同票双算
+    if (
+        isinstance(major_stage_seed, tuple)
+        and len(major_stage_seed) >= 4
+        and major_stage_seed[0]
+    ):
+        raw_stage = str(major_stage_seed[0])
+        try:
+            raw_confidence = float(major_stage_seed[1])
+        except (TypeError, ValueError):
+            raw_confidence = 50.0
+        raw_reason = str(major_stage_seed[2] or "")
+        vp_stage = str(major_stage_seed[3] or "")
+    else:
+        raw_stage, raw_confidence, raw_reason, vp_stage = _detect_major_stage(
+            current, ma_values, bars, fusion_hint=fusion_hint, wyckoff_result=wyckoff_result,
+            chan_result=chan_result, main_force_result=main_force_result,
+        )
 
     # P1 Fix: 新股置信度打折 — 当数据不足 60 天时，置信度按比例折扣
     new_stock_warning = ""

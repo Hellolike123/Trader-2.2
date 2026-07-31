@@ -144,7 +144,11 @@ def build_plan(target: str) -> dict[str, Any]:
     elif isinstance(report_data.get("structure_result"), dict):
         structure_result = report_data["structure_result"]
 
-    model = build_price_point_model(report_data, structure_result=structure_result)
+    # 本路径通常无 structure；价位模型与上方 temp_model 同入参，禁止整引擎重跑
+    if structure_result is None:
+        model = temp_model
+    else:
+        model = build_price_point_model(report_data, structure_result=structure_result)
     buy_display_status = side_status(model["buy"])
     sell_display_status = side_status(model["sell"])
     buy_display_obs = observation_value(model["buy"], "以下")

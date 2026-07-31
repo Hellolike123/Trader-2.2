@@ -606,6 +606,23 @@ def _check_volume_vacuum_t0(plan: dict[str, Any]) -> str | None:
     return None
 
 
+# 5m 缠论：按「已收盘末棒」指纹缓存，同棒多 tick 不重跑 ChanlunPlugin
+_CHAN5_CACHE: dict[str, tuple[str, Any, Any]] = {}
+_CHAN5_CACHE_LOCK = threading.Lock()
+
+
+def _k5_bar_fingerprint(k5: list) -> str:
+    """末根已收盘 5m 的时间+OHLC 指纹；棒未变则缠论结构不应变。"""
+    if not k5:
+        return ""
+    last = k5[-1] if isinstance(k5[-1], dict) else {}
+    t = str(last.get("time") or last.get("date") or "")
+    return (
+        f"{len(k5)}|{t}|{last.get('open')}|{last.get('high')}|"
+        f"{last.get('low')}|{last.get('close')}|{last.get('volume') or last.get('vol')}"
+    )
+
+
 def _check_5m_chan_t0(plan: dict[str, Any]) -> tuple:
     """T0 盘中 5m 缠论预警源（始终开启，独立于 T0_REALTIME_CHAN 与事件系统）。
 
@@ -640,6 +657,15 @@ def _check_5m_chan_t0(plan: dict[str, Any]) -> tuple:
             k5 = []
     if not isinstance(k5, list) or len(k5) < 20:
         return (None, None)  # 早盘 5m 不足 20 根，噪声大，暂不告警
+
+    cache_key = str(plan.get("symbol") or plan.get("target") or "")
+    bar_fp = _k5_bar_fingerprint(k5)
+    if cache_key and bar_fp:
+        with _CHAN5_CACHE_LOCK:
+            hit = _CHAN5_CACHE.get(cache_key)
+            if hit and hit[0] == bar_fp:
+                return (hit[1], hit[2])
+
     daily = data.get("daily_bars") or []
     quote = data.get("quote") or plan.get("quote") or {}
     current = float(plan.get("current_price") or 0)
@@ -658,6 +684,9 @@ def _check_5m_chan_t0(plan: dict[str, Any]) -> tuple:
     else:
         flat = res
     sig = _chan_sig(flat)
+    if cache_key and bar_fp:
+        with _CHAN5_CACHE_LOCK:
+            _CHAN5_CACHE[cache_key] = (bar_fp, sig, flat)
     return (sig, flat)
 
 

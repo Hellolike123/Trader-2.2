@@ -38,7 +38,6 @@ from typing import Any
 from trader_shared.safe_cast import safe_float
 from trader_shared._logging import get_logger
 from trader_shared.interfaces import DataFetcher
-from trader_shared.fetchers import get_fetcher
 from trader_shared.signal_schema import SignalTier, chan_is_strong_bull, chan_is_strong_bear, vpf_is_bearish_warning
 
 _logger = get_logger(__name__)
@@ -151,13 +150,21 @@ def _log_fusion(result: dict) -> None:
 
 
 
-# Classic mappers：已迁至 fusion_classic_mappers（compare / 单测 / cards 兼容）
-from trader_shared.fusion_classic_mappers import (  # noqa: E402
-    _chan_to_signal,
-    _momentum_to_signal,
-    _score_to_confidence,
-    _wyckoff_to_signal,
-)
+# Classic mappers：生产 cards 路径不加载；compare/classic 回退与测试经 __getattr__ 懒导入
+_CLASSIC_MAPPER_NAMES = frozenset({
+    "_chan_to_signal",
+    "_momentum_to_signal",
+    "_score_to_confidence",
+    "_wyckoff_to_signal",
+})
+
+
+def __getattr__(name: str):
+    if name in _CLASSIC_MAPPER_NAMES:
+        import trader_shared.fusion_classic_mappers as _m
+        return getattr(_m, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 def wyckoff_score_to_direction(score: int) -> dict:
     """将 WyckoffScore.score (0-100) 映射为统一信号。
@@ -267,8 +274,8 @@ def merge_decisions(
     """
     from trader_shared.fusion_regime import get_regime_weights, score_to_action, compute_confidence
 
-    if fetcher is None:
-        fetcher = get_fetcher()
+    # fetcher 参数仅保留调用方兼容；本函数体内不再使用（避免无意义 get_fetcher）
+    _ = fetcher
 
     # ── 解析 fusion 输入模式 ──
     if fusion_from_cards is None:
@@ -282,6 +289,10 @@ def merge_decisions(
         )
 
     def _classic_three() -> tuple[dict, dict, dict]:
+        from trader_shared.fusion_classic_mappers import (
+            _chan_to_signal,
+            _momentum_to_signal,
+        )
         try:
             _cs = _chan_to_signal(chan_result)
         except (TypeError, KeyError) as exc:

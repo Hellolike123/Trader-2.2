@@ -30,34 +30,57 @@ def _plugin_parallel_enabled() -> bool:
     return os.environ.get("TRADER_PLUGIN_PARALLEL", "0").strip() in ("1", "true", "True", "yes")
 
 
+_ACCEPTS_ST_CACHE: dict[int, bool] = {}
+_ACCEPTS_WB_CACHE: dict[int, bool] = {}
+
+
+def _callable_cache_key(fn) -> int:
+    """bound method 用底层 __func__，避免临时 bound 对象 id 复用串缓存。"""
+    return id(getattr(fn, "__func__", fn))
+
+
 def _plugin_accepts_supertrend_direction(fn) -> bool:
     """检测插件 analyze 是否接受 supertrend_direction 关键字参数。
 
     旧插件（如 chan/wyckoff 展示插件）签名不含该参数，不能透传，否则 TypeError。
-    含 **kwargs 的插件视为兼容。
+    含 **kwargs 的插件视为兼容。结果按函数对象缓存。
     """
+    key = _callable_cache_key(fn)
+    hit = _ACCEPTS_ST_CACHE.get(key)
+    if hit is not None:
+        return hit
     try:
         sig = inspect.signature(fn)
     except (TypeError, ValueError):
+        _ACCEPTS_ST_CACHE[key] = False
         return False
-    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-        return True
-    return "supertrend_direction" in sig.parameters
+    ok = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()) or (
+        "supertrend_direction" in sig.parameters
+    )
+    _ACCEPTS_ST_CACHE[key] = ok
+    return ok
 
 
 def _plugin_accepts_weekly_bars(fn) -> bool:
     """检测插件 analyze 是否接受 weekly_bars 关键字参数（ADR-002 透传）。
 
     含 **kwargs 的插件视为兼容；否则仅当签名显式声明 weekly_bars 才透传，
-    避免对未升级插件造成 TypeError。
+    避免对未升级插件造成 TypeError。结果按函数对象缓存。
     """
+    key = _callable_cache_key(fn)
+    hit = _ACCEPTS_WB_CACHE.get(key)
+    if hit is not None:
+        return hit
     try:
         sig = inspect.signature(fn)
     except (TypeError, ValueError):
+        _ACCEPTS_WB_CACHE[key] = False
         return False
-    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-        return True
-    return "weekly_bars" in sig.parameters
+    ok = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()) or (
+        "weekly_bars" in sig.parameters
+    )
+    _ACCEPTS_WB_CACHE[key] = ok
+    return ok
 
 
 class PluginRegistry:
@@ -96,6 +119,7 @@ class PluginRegistry:
         supertrend_direction: str | None = None,
         weekly_bars: list[dict[str, Any]] | None = None,
         midline: bool = False,
+        include_display: bool = True,
     ) -> dict[str, dict[str, Any]]:
         """Run all registered plugins and return their results.
 
@@ -114,6 +138,9 @@ class PluginRegistry:
             midline: 是否额外产出中线结果（chanlun_midline / wyckoff_midline）。
                 仅 build_report 路由时传 True；fusion_core / final_pool / review 的
                 analyze_all 调用不传，故中线计算不波及这些调用方（最小爆炸半径）。
+            include_display: 是否跑 display_only 插件（vwap/supertrend）。
+                build_report 已在 context 直算 VWAP/Supertrend 写入报告，应传 False
+                避免重复算力；默认 True 保持旧调用方/单测兼容。
 
         Returns:
             Dict mapping plugin name → analysis result dict。midline=True 时额外含
@@ -180,9 +207,16 @@ class PluginRegistry:
                     "reason": f"中线威科夫异常: {exc}",
                 }
 
+        plugin_items = list(self._plugins.items())
+        if not include_display:
+            plugin_items = [
+                (name, plugin)
+                for name, plugin in plugin_items
+                if not self.is_display_only(name)
+            ]
         jobs: list[tuple[str, Any]] = [
             (name, lambda n=name, p=plugin: _run_one_plugin(n, p))
-            for name, plugin in self._plugins.items()
+            for name, plugin in plugin_items
         ]
         # ── ADR-002 中线分支：仅 midline=True 时产出 ──
         if midline:

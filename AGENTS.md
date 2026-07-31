@@ -3,6 +3,7 @@
 - **目标架构法源**：`docs/designs/resonance-and-orchestration.md` — 五层+编排、岗位共振；fusion 不作总司令。
 - **版本**：Trader 2.4+（技能：`trader` / `t0` / `review` / `wyckoff`）。单票**始终**中短线双轨（`render_short_midline`；`SHORT_MIDLINE_REPORT=false` 已忽略）。
 - **Fusion 生产路径**：`FUSION_FROM_CARDS` 缺省 = `cards`；`classic` / `compare` 仅对照（classic deprecated）。详见 `BUSINESS.md` §2.7。
+- **快照 enrich**：`TRADER_SNAPSHOT_ENRICH=0` 可整段关掉；`TRADER_ENRICH_BOARDS` **默认关**（不用 akshare 成分股扫板，行业走 tushare 日缓存；概念软加成需显式 `=1`）。
 - **门禁**：`scripts/run-gate-tests.sh`（离线子集）；禁止把全量历史红项塞进门禁。说明：`docs/architecture/ci-gate.md`。
 - **Agent 快路径**：各 skill **只预读** `references/agent-quickstart.md` + 共用 `references/agent-rules.md`；跑脚本 → 原样贴 markdown → 停。禁止开工前批量读 references、禁止默认 `--output json`。
 - **命令 cwd**：Skill 包内用 `python3 scripts/...`；仓库根用 `python3 01-功能包-packages/<skill>/scripts/...`。仓位轮动在 **review** 包（无独立 `portfolio/` 包）。

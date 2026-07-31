@@ -72,6 +72,7 @@ CACHE_DIR = Path.home() / ".trader" / "cache"
 # Subdirectory constants
 CACHE_DAILY = "daily"
 CACHE_WEEKLY = "weekly"  # 周 K，按自然日 fetch_date 复用
+CACHE_MONTHLY = "monthly"  # 月 K，按自然日 fetch_date 复用（共振补拉）
 CACHE_ENRICH = "enrich"
 CACHE_MARKET_ENV = "market_env"
 CACHE_FUND_FLOW = "fund_flow"

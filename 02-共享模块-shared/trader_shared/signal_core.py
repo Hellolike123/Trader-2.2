@@ -64,7 +64,11 @@ def _map_fusion_to_signal(fusion_action: str) -> tuple[str, str, str] | None:
     return _FUSION_ACTION_MAP.get(fusion_action.strip())
 
 def today_text() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        from trader_shared.cn_time import now_cn
+        return now_cn().strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 def one_sentence(r: dict[str, Any], low_zone: str) -> str:
     major_stage = _get_major_stage(r)

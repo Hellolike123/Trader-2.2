@@ -61,7 +61,7 @@ def run_structure_stage(
         "ma20": _quick_ma(20),
         "ma30": _quick_ma(30),
     }
-    _pre_stage, _, _, _ = _detect_major_stage(
+    _pre_stage, _pre_conf, _pre_reason, _pre_vp = _detect_major_stage(
         current,
         _pre_ma,
         bars,
@@ -74,6 +74,7 @@ def run_structure_stage(
         chan_result=chan_result,
         main_force_result=mf_result,
     )
+    _major_stage_seed = (_pre_stage, _pre_conf, _pre_reason, _pre_vp)
     levels = build_structure_context(
         current,
         bars,
@@ -124,6 +125,7 @@ def run_structure_stage(
     levels["main_force"] = mf_result
     levels["main_force_env"] = main_force_env
     levels["pre_stage"] = _pre_stage
+    levels["major_stage_seed"] = _major_stage_seed
 
     try:
         levels["key_levels"] = find_key_levels(bars)

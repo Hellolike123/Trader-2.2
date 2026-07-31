@@ -146,9 +146,11 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
     三层缓存策略:
     1. 文件缓存 (TTL 12小时) — 盘后预缓存的数据，进程重启不丢失
     2. 内存缓存 (TTL 10分钟) — 同一进程内快速命中
-    3. 实时抓取 — 缓存全部 miss 时走 8 路 API（4 原有 + 3 Phase 1 + 1 Phase 2 概念）
+    3. 实时抓取 — 缓存 miss 时并行拉股东/EPS/解禁/热点/两融/北向 + 行业快照
 
     环境变量 ``TRADER_SNAPSHOT_ENRICH=0`` 时跳过扩展字段（短中线热路径可加速）。
+    ``TRADER_ENRICH_BOARDS=1`` 时才启用 akshare 行业/概念成分股扫板（默认关：
+    行业改 tushare ``get_stock_sector_snapshot_cached``；概念软加成默认不生效）。
     """
     _enrich_flag = os.environ.get("TRADER_SNAPSHOT_ENRICH", "1").strip().lower()
     if _enrich_flag in ("0", "false", "no", "off"):
@@ -217,18 +219,50 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
         from trader_shared.extend_data import ExtendDataProvider
         from concurrent.futures import ThreadPoolExecutor
 
+        # 板块/概念：默认不用 akshare 成分股扫板（最多数十次 HTTP）；
+        # 行业用 tushare 日缓存快照（与 context_stage 同源），概念扫板 opt-in。
+        _boards_flag = os.environ.get("TRADER_ENRICH_BOARDS", "0").strip().lower()
+        _enrich_boards = _boards_flag in ("1", "true", "yes", "on")
+
+        def _sector_via_tushare() -> dict | None:
+            try:
+                from trader_shared.sector_data import get_stock_sector_snapshot_cached
+                ts = getattr(sec, "ts_code", None) or sec.code
+                snap_sec = get_stock_sector_snapshot_cached(str(ts))
+                if not isinstance(snap_sec, dict) or snap_sec.get("status") != "正常":
+                    return snap_sec if isinstance(snap_sec, dict) else None
+                # 对齐 ExtendDataProvider.get_sector_data 字段，供 fusion/assess_stage 消费
+                return {
+                    "sector_name": snap_sec.get("sector_name") or snap_sec.get("industry") or "",
+                    "sector_change_pct": float(snap_sec.get("sector_change_pct") or 0),
+                    "sector_rank": int(snap_sec.get("sector_rank") or 0),
+                    "sector_total": int(snap_sec.get("sector_total") or 0),
+                    "stock_vs_sector": snap_sec.get("stock_vs_sector") or "",
+                    "status": "正常",
+                    "industry": snap_sec.get("industry") or "",
+                    "sector_code": snap_sec.get("sector_code") or "",
+                }
+            except Exception:
+                return None
+
         with ThreadPoolExecutor(max_workers=4, thread_name_prefix="trader-enrich") as executor:
-            # 原有 4 路 + Phase1 3 路 + Phase2 概念
+            # 原有 4 路 + Phase1 3 路；板块/概念默认轻量
             f_sh = executor.submit(ExtendDataProvider.get_shareholder_trend, sec.code)
             f_eps = executor.submit(ExtendDataProvider.get_ths_consensus_eps, sec.code)
             f_unlocks = executor.submit(ExtendDataProvider.get_upcoming_unlocks, sec.code)
             f_hot = executor.submit(ExtendDataProvider.get_ths_hot_reason_for_stock, sec.code)
             f_margin = executor.submit(ExtendDataProvider.get_margin_data, sec.code)
             f_north = executor.submit(ExtendDataProvider.get_northbound_flow)
-            f_sector = executor.submit(ExtendDataProvider.get_sector_data, sec.code)
-            f_concept = executor.submit(ExtendDataProvider.get_concept_data, sec.code)
+            if _enrich_boards:
+                f_sector = executor.submit(ExtendDataProvider.get_sector_data, sec.code)
+                f_concept = executor.submit(ExtendDataProvider.get_concept_data, sec.code)
+            else:
+                f_sector = executor.submit(_sector_via_tushare)
+                f_concept = None
 
             def _res(fut, timeout: float = 2.0):
+                if fut is None:
+                    return None
                 try:
                     return fut.result(timeout=timeout)
                 except Exception:

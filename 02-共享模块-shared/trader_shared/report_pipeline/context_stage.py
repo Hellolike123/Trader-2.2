@@ -105,6 +105,17 @@ def run_analysis_context_stage(
         return get_env_for_skill("trader")
 
     def _fetch_sector_data():
+        # enrich 已写入 extend_sector（同源 tushare 快照）时直接复用，避免同票双拉
+        ext = getattr(snapshot, "extend_sector", None)
+        if isinstance(ext, dict) and ext.get("status") == "正常":
+            return {
+                "industry": ext.get("industry") or "",
+                "sector_name": ext.get("sector_name") or "",
+                "sector_code": ext.get("sector_code") or "",
+                "sector_change_pct": float(ext.get("sector_change_pct") or 0),
+                "status": "正常",
+                "stock_vs_sector": ext.get("stock_vs_sector") or "",
+            }
         try:
             from trader_shared.sector_data import get_stock_sector_snapshot_cached
 
@@ -125,6 +136,7 @@ def run_analysis_context_stage(
     from trader_shared.plugin_registry import get_registry
 
     _registry = get_registry()
+    # VWAP/Supertrend 已在本 stage 直算写入报告；跳过 display_only 插件避免双算
     _plugin_results = _registry.analyze_all(
         current,
         bars,
@@ -133,6 +145,7 @@ def run_analysis_context_stage(
         weekly_bars=weekly_bars,
         midline=True,
         supertrend_direction=_st_dir,
+        include_display=False,
     )
     _mark("plugins")
     chan_result = _plugin_results.get("chanlun") or {}
@@ -151,7 +164,11 @@ def run_analysis_context_stage(
                     _code = _code_map.get(_lv, _lv)
                     _datalen = _datalen_map.get(_lv, 800)
                     try:
-                        _lb = provider.fetch_kline(snapshot.security, _code, _datalen)
+                        # 快照已有 5m 时复用，少一次分钟线请求
+                        if _lv == "5m" and bars_5m:
+                            _lb = list(bars_5m)
+                        else:
+                            _lb = provider.fetch_kline(snapshot.security, _code, _datalen)
                     except Exception as _fe:
                         _logger.debug("[nesting] 取 %s 失败: %s", _lv, _fe)
                         _lb = None
