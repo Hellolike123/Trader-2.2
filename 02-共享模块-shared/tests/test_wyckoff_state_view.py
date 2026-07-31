@@ -275,3 +275,20 @@ def test_format_daily_phase_legacy_unpinned_label():
     assert "箱体未成形" in line
     assert "下沿 21.50（上沿未出）" in line
     assert "区间未钉" not in line
+
+
+def test_confidence_rs_merged_delta_strong_gt_neutral_gt_weak():
+    """R11：合并 RS 后的 phase_confidence_delta → View confidence 排序 strong>neutral>weak。"""
+    base = {
+        "timeframe": "weekly",
+        "phase": "accumulation_b",
+        "phase_label": "积累B",
+        "spring_premature": False,
+        "upthrust_premature": False,
+        "phase_tr_gated": False,
+        "tr_quality": 0.5,
+    }
+    strong = to_wyckoff_state_view({**base, "phase_confidence_delta": 0.08})
+    neutral = to_wyckoff_state_view({**base, "phase_confidence_delta": 0.0})
+    weak = to_wyckoff_state_view({**base, "phase_confidence_delta": -0.08})
+    assert strong["confidence"] > neutral["confidence"] > weak["confidence"]

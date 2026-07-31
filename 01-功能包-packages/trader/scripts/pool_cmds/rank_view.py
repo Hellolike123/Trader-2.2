@@ -8,7 +8,7 @@ from pool_cmds.verify import *  # noqa: F403
 def edge_reason(item: dict[str, Any], all_items: list[dict[str, Any]]) -> str:
     """排名近因：分道 + 共振 + 买点有效/失效 + 威科夫链（fusion 不参与）。"""
     from pool_cmds.classify import ensure_lane
-    from pool_cmds.wyckoff_rank import format_wyckoff_chain_plain
+    from pool_cmds.wyckoff_rank import format_rs_plain, format_wyckoff_chain_plain
     from trader_shared.resonance import extract_resonance_grade, resonance_grade_label
 
     it = ensure_lane(item)
@@ -29,6 +29,9 @@ def edge_reason(item: dict[str, Any], all_items: list[dict[str, Any]]) -> str:
     wyk_plain = format_wyckoff_chain_plain(it)
     if wyk_plain:
         parts.append(wyk_plain)
+    rs_plain = format_rs_plain(it) or str(it.get("rs_plain") or "")
+    if rs_plain:
+        parts.append(rs_plain)
     reason = str(it.get("lane_reason") or "").strip()
     joined = "｜".join(parts)
     if reason and reason not in joined:

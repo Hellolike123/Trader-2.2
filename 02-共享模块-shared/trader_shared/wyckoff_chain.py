@@ -2,6 +2,8 @@
 
 禁止「事件 n/5」、S级/星级。派发侧不进此链（由分道先别碰处理）。
 SSOT：池排序与 wyckoff Skill 共用本模块。
+
+周线 RS（相对强弱）：原典选股过滤器，不改 phase；同道内排序 + 弱 RS 谨慎。
 """
 from __future__ import annotations
 
@@ -9,6 +11,15 @@ from typing import Any
 
 # 吸筹链固定顺序（ST 槽位 = Test of Spring / spring_test_*，展示名见 _CHAIN_DISPLAY）
 ACCUM_CHAIN = ("SC", "AR", "ST", "LPS", "SOS")
+
+# 同道内 RS 排序档：弱侧更重（原典：弱相对强弱更常用来降级）
+# strong=3 > neutral/missing=1 > weak=0
+_RS_RANK = {
+    "strong": 3,
+    "neutral": 1,
+    "missing": 1,
+    "weak": 0,
+}
 
 _SIGNAL_KEYS = {
     "SC": "sc_signal",
@@ -143,11 +154,63 @@ def wyckoff_chain_rank(report_or_item: dict[str, Any] | list[str] | None) -> int
     return n
 
 
+def _rs_source_dict(report_or_item: dict[str, Any] | None) -> dict[str, Any]:
+    """从扁平 / 顶层 wyckoff / wyckoff_midline 取周线 RS 字段。"""
+    if not isinstance(report_or_item, dict):
+        return {}
+    # 扁平优先（池缓存）
+    if report_or_item.get("rs_label") is not None or report_or_item.get("rs_gate"):
+        return report_or_item
+    wyk = report_or_item.get("wyckoff")
+    if isinstance(wyk, dict) and (
+        wyk.get("rs_label") is not None or wyk.get("timeframe") == "weekly"
+    ):
+        return wyk
+    mid = report_or_item.get("wyckoff_midline")
+    if isinstance(mid, dict):
+        inner = mid.get("wyckoff") if isinstance(mid.get("wyckoff"), dict) else mid
+        if isinstance(inner, dict):
+            return inner
+    return {}
+
+
+def extract_rs_label(report_or_item: dict[str, Any] | None) -> str:
+    """返回 strong|neutral|weak|missing；缺省/日线 disabled → neutral。"""
+    src = _rs_source_dict(report_or_item)
+    gate = str(src.get("rs_gate") or "")
+    if gate == "disabled":
+        return "neutral"
+    label = str(src.get("rs_label") or "neutral").lower()
+    if label in _RS_RANK:
+        return label
+    if gate in {"missing", "insufficient_bars"}:
+        return "missing"
+    return "neutral"
+
+
+def wyckoff_rs_rank(report_or_item: dict[str, Any] | None) -> int:
+    """同道内 RS 排序分：strong=3 > neutral=1 > weak=0（弱侧降权更重）。"""
+    return _RS_RANK.get(extract_rs_label(report_or_item), 1)
+
+
+def format_rs_plain(report_or_item: dict[str, Any] | None) -> str:
+    """池/作战表短句；neutral/missing 空串；weak 带「慎跟」。"""
+    src = _rs_source_dict(report_or_item)
+    label = extract_rs_label(report_or_item)
+    note = str(src.get("rs_note") or "").strip()
+    if label == "weak":
+        base = note if note.startswith("弱于") else (note or "弱于对照指数")
+        return f"{base} · 慎跟"
+    if label == "strong":
+        return note if note.startswith("强于") else (note or "强于对照指数")
+    return ""
+
+
 def attach_wyckoff_chain_fields(record: dict[str, Any], report: dict[str, Any] | None = None) -> dict[str, Any]:
     """写入 pool record 缓存字段；report 信号覆盖 record 旧缓存。"""
     # report 在后，覆盖同名；去掉派生缓存以免自引用脏读
     src = {**record, **(report or {})}
-    for k in ("wyckoff_chain", "wyckoff_chain_plain", "wyckoff_chain_rank"):
+    for k in ("wyckoff_chain", "wyckoff_chain_plain", "wyckoff_chain_rank", "wyckoff_rs_rank"):
         src.pop(k, None)
     events = extract_accum_events(src)
     record["wyckoff_chain"] = events
@@ -159,6 +222,17 @@ def attach_wyckoff_chain_fields(record: dict[str, Any], report: dict[str, Any] |
             record[f"wyckoff_{label.lower()}_signal"] = bool(wyk.get(key))
     if wyk.get("bc_signal") is not None:
         record["wyckoff_bc_signal"] = bool(wyk.get("bc_signal"))
+    # 周线 RS 扁平透传（操盘排序 / 分道谨慎）
+    rs_src = _rs_source_dict(src)
+    rs_label = extract_rs_label(src)
+    record["rs_label"] = rs_label
+    record["rs_score"] = rs_src.get("rs_score")
+    record["rs_note"] = rs_src.get("rs_note") or ""
+    record["rs_gate"] = rs_src.get("rs_gate") or ""
+    record["rs_index"] = rs_src.get("rs_index") or ""
+    record["rs_index_label"] = rs_src.get("rs_index_label") or ""
+    record["rs_plain"] = format_rs_plain(src)
+    record["wyckoff_rs_rank"] = wyckoff_rs_rank(src)
     # 轻量保留嵌套，便于后续 refresh 前读
     if isinstance(report, dict) and isinstance(report.get("wyckoff"), dict):
         record["wyckoff"] = report["wyckoff"]
@@ -169,7 +243,10 @@ __all__ = [
     "ACCUM_CHAIN",
     "attach_wyckoff_chain_fields",
     "extract_accum_events",
+    "extract_rs_label",
     "first_missing_accum",
+    "format_rs_plain",
     "format_wyckoff_chain_plain",
     "wyckoff_chain_rank",
+    "wyckoff_rs_rank",
 ]

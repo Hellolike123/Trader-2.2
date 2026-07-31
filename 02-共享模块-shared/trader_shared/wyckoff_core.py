@@ -340,7 +340,7 @@ def _overlay_phase_a_seed_tr_ctx(
     return ctx
 
 
-def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily", use_persisted_phase: bool = True) -> dict:
+def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily", use_persisted_phase: bool = True, index_weekly_bars: list[dict] | None = None) -> dict:
     if len(bars) < WYCKOFF_MIN_BARS:
         return {
             "spring_signal": False, "spring_reason": "数据不足", "spring_price": None,
@@ -472,6 +472,26 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "last_close": to_float(bars[-1].get("close")) if bars else None,
     }
     phase = _detect_phase(bars, signals_dict, _phase_lookback=_phase_lb, tr_ctx=phase_tr_ctx)
+
+    # 周线 RS：仅修正 phase_confidence_delta，不改 phase；日线显式 disabled
+    rs_fields: dict[str, Any] = {}
+    if timeframe == "weekly" and symbol:
+        from trader_shared.wyckoff_rs import compute_and_apply_weekly_rs
+
+        phase, rs_fields = compute_and_apply_weekly_rs(
+            bars,
+            phase,
+            signals_dict,
+            symbol,
+            index_weekly_bars=index_weekly_bars,
+        )
+    elif timeframe != "weekly":
+        rs_fields = {
+            "rs_label": "neutral",
+            "rs_gate": "disabled",
+            "rs_confidence_delta": 0.0,
+            "rs_note": "日线不接 RS",
+        }
 
     # B: 跨日持久化状态机 — 加载旧状态、过渡、存储
     # use_persisted_phase=False 时（如中线威科夫）跳过持久化，直接返回本次
@@ -691,6 +711,19 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "st_sc_low": st_sc.get("st_sc_low"),
         "secondary_test_sc_low": st_sc.get("st_sc_low"),
         "wyckoff_summary": "；".join(parts),
+        # 周线 RS（仅置信修正；缺省 neutral）
+        "rs_score": rs_fields.get("rs_score"),
+        "rs_label": rs_fields.get("rs_label", "neutral"),
+        "rs_index": rs_fields.get("rs_index", ""),
+        "rs_index_label": rs_fields.get("rs_index_label", ""),
+        "rs_note": rs_fields.get("rs_note", ""),
+        "rs_gate": rs_fields.get("rs_gate", ""),
+        "rs_window_weeks": rs_fields.get("rs_window_weeks", 0),
+        "rs_confidence_delta": rs_fields.get("rs_confidence_delta", 0.0),
+        "rs_stock_return": rs_fields.get("rs_stock_return"),
+        "rs_index_return": rs_fields.get("rs_index_return"),
+        "rs_relative_return": rs_fields.get("rs_relative_return"),
+        "phase_confidence_delta_event": phase.get("phase_confidence_delta_event"),
     }
 
 def wyckoff_strategy(current: float, bars: list[dict], change_pct: Any = None, quote: dict | None = None, symbol: str = "") -> dict:
@@ -718,6 +751,8 @@ def wyckoff_strategy_midline(
     与日线 fusion 路径分离：报告「威科夫：…」定性用本结果。
     """
     weekly_bars = weekly_bars or []
+    if not symbol and isinstance(quote, dict):
+        symbol = str(quote.get("symbol") or quote.get("code") or "").strip()
     # 中线威科夫周线独占：周线不足直接返回 insufficient，不参与 🧭 中线定论，
     # 不再回退日线（避免日线噪音稀释中线战略依据，违反 output-template.md:94）。
     if len(weekly_bars) < WYCKOFF_MIN_BARS:
@@ -1426,6 +1461,10 @@ def format_wyckoff_midline_light(
         parts.append(code)
 
     parts.append(meaning)
+    rs_note = str(wyk.get("rs_note") or "").strip()
+    rs_label = str(wyk.get("rs_label") or "neutral")
+    if rs_note and rs_label in ("strong", "weak"):
+        parts.append(rs_note)
     return "威科夫：" + " · ".join(parts)
 
 

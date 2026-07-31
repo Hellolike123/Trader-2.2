@@ -394,12 +394,13 @@ def sort_items_unified(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     主键：lane（可盯 > 等齐 > 先别碰 > 计划过时）
     次键：共振档
     再次：威科夫吸筹链完整度（同道内）
+    再次：周线 RS 相对强弱（同道同链内选股；弱侧降权更重）
     再次：可碰性（盈亏比）
     末键：结构总分弱决胜
     fusion 不参与。
     """
     from pool_cmds.classify import ensure_lane, lane_rank
-    from pool_cmds.wyckoff_rank import wyckoff_chain_rank
+    from pool_cmds.wyckoff_rank import wyckoff_chain_rank, wyckoff_rs_rank
     from trader_shared.resonance import extract_resonance_grade, resonance_pool_rank
 
     prepared = [ensure_lane(it) for it in items]
@@ -410,6 +411,7 @@ def sort_items_unified(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             lane_rank(item.get("lane")),
             resonance_pool_rank(extract_resonance_grade(item)),
             wyckoff_chain_rank(item),
+            wyckoff_rs_rank(item),
             _actionability_rank(item),
             _score_tiebreak(item),
         ),

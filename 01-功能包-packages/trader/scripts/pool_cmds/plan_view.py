@@ -177,7 +177,7 @@ def render_plan(items: list[dict[str, Any]]) -> str:
     ]
 
     if top_ready:
-        from pool_cmds.wyckoff_rank import format_wyckoff_chain_plain
+        from pool_cmds.wyckoff_rank import format_rs_plain, format_wyckoff_chain_plain
 
         lines.append("明日只盯")
         for i, item in enumerate(top_ready, 1):
@@ -185,13 +185,14 @@ def render_plan(items: list[dict[str, Any]]) -> str:
             res_plain = _plan_resonance_plain(item)
             bp = _bp_plain(item)
             wyk_plain = format_wyckoff_chain_plain(item)
+            rs_plain = format_rs_plain(item) or str(item.get("rs_plain") or "")
             tags = " · ".join(
-                x for x in (res_plain, bp, wyk_plain, str(item.get("lane_reason") or "")) if x
+                x for x in (res_plain, bp, wyk_plain, rs_plain, str(item.get("lane_reason") or "")) if x
             )
             # 避免近因与共振完全重复
             if item.get("lane_reason") and res_plain and res_plain in str(item.get("lane_reason")):
                 tags = " · ".join(
-                    x for x in (str(item.get("lane_reason")), bp, wyk_plain) if x
+                    x for x in (str(item.get("lane_reason")), bp, wyk_plain, rs_plain) if x
                 )
             lines.append(f"{rank_emoji} {item['name']} · 可盯 · {tags}" if tags else f"{rank_emoji} {item['name']} · 可盯")
             lines.append(

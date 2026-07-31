@@ -138,7 +138,7 @@ def test_rank_caps_without_st():
     assert wyckoff_chain_rank(with_st) > wyckoff_chain_rank(no_st)
 
 
-def test_sort_within_ready_prefers_longer_chain():
+def _ready_base(**extra):
     base = {
         "lane": "ready",
         "lane_zh": "可盯",
@@ -159,25 +159,108 @@ def test_sort_within_ready_prefers_longer_chain():
             "allow_new_recommend": True,
         },
         "chan_buy_point_types": ["一买"],
+        "rs_label": "neutral",
     }
-    short = {
-        **base,
-        "name": "链短",
-        "wyckoff": {"sc_signal": True, "ar_signal": True},
-        "wyckoff_chain_rank": None,
-    }
-    long = {
-        **base,
-        "name": "链长",
-        "total_score": 60,  # 分更低仍应因链更长排前
-        "wyckoff": {
+    base.update(extra)
+    return base
+
+
+def test_sort_within_ready_prefers_longer_chain():
+    short = _ready_base(
+        name="链短",
+        wyckoff={"sc_signal": True, "ar_signal": True},
+        wyckoff_chain_rank=None,
+    )
+    long = _ready_base(
+        name="链长",
+        total_score=60,  # 分更低仍应因链更长排前
+        wyckoff={
             "sc_signal": True,
             "ar_signal": True,
             "st_signal": True,
             "lps_signal": True,
             "sos_signal": True,
         },
-        "wyckoff_chain_rank": None,
-    }
+        wyckoff_chain_rank=None,
+    )
     ordered = sort_items_unified([short, long])
     assert ordered[0]["name"] == "链长"
+
+
+def test_sort_same_chain_prefers_strong_rs_over_neutral():
+    """同道同链：强 RS 排前于中性（弱 RS 会降道，另测）。"""
+    chain = {
+        "sc_signal": True,
+        "ar_signal": True,
+        "st_signal": True,
+        "lps_signal": True,
+        "sos_signal": True,
+    }
+    neutral = _ready_base(
+        name="中性RS",
+        total_score=80,
+        wyckoff={**chain, "rs_label": "neutral"},
+        rs_label="neutral",
+    )
+    strong = _ready_base(
+        name="强RS",
+        total_score=50,
+        wyckoff={**chain, "rs_label": "strong", "rs_note": "强于科创"},
+        rs_label="strong",
+        rs_note="强于科创",
+    )
+    ordered = sort_items_unified([neutral, strong])
+    assert ordered[0]["name"] == "强RS"
+
+
+def test_attach_copies_weekly_rs_fields():
+    from pool_cmds.wyckoff_rank import attach_wyckoff_chain_fields, format_rs_plain, wyckoff_rs_rank
+
+    record: dict = {}
+    report = {
+        "wyckoff": {
+            "timeframe": "weekly",
+            "sc_signal": True,
+            "ar_signal": True,
+            "rs_label": "strong",
+            "rs_score": 0.75,
+            "rs_note": "强于科创",
+            "rs_index": "000688.SH",
+            "rs_index_label": "科创",
+            "rs_gate": "",
+        }
+    }
+    attach_wyckoff_chain_fields(record, report)
+    assert record["rs_label"] == "strong"
+    assert record["rs_score"] == 0.75
+    assert record["wyckoff_rs_rank"] == 3
+    assert format_rs_plain(record) == "强于科创"
+    assert wyckoff_rs_rank({"rs_label": "weak"}) == 0
+    assert format_rs_plain({"rs_label": "weak", "rs_note": "弱于上证"}) == "弱于上证 · 慎跟"
+
+
+def test_weak_rs_downgrades_ready_to_wait():
+    from pool_cmds.classify import classify_lane
+
+    report = {
+        "current": 10.0,
+        "trigger": 10.1,
+        "confirm": 10.1,
+        "support": 9.8,
+        "defense": 9.0,
+        "major_stage": "蓄势",
+        "resonance_grade": "aligned",
+        "buy_point_lifecycle": {"status": "active", "lid_price": 9.8},
+        "decision_view": {
+            "allow_new_recommend": True,
+            "discipline_allow": True,
+            "strategy_entry_lit": True,
+        },
+        "chan_buy_point_types": ["一买"],
+        "rs_label": "weak",
+        "rs_note": "弱于创业板",
+        "wyckoff": {"rs_label": "weak", "timeframe": "weekly"},
+    }
+    out = classify_lane(report)
+    assert out["lane"] == "wait"
+    assert "慎跟" in out["lane_reason"]

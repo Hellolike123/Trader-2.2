@@ -91,7 +91,7 @@
 
 | 概念 | 状态 | 说明 |
 |------|------|------|
-| 个股 vs 大盘价量对比 | ❌ | 需大盘序列注入 `wyckoff_analysis`；尚未接数据管线 |
+| 个股 vs 对照指数价量对比（RS） | ✅ | 周线阶段**置信修正**（非新阶段）；对照指数 = `resolve_board_index`；`WYCKOFF_RS_ENABLED` 总开关；规格 `docs/plans/wyckoff-rs-phase-handoff.md` |
 
 ---
 
@@ -123,6 +123,6 @@
 | **P1** | Markup / Markdown 阶段标签 | 五阶段循环不完整 |
 | **P1** | BU (Back Up) | SOS 确认后缺失最后一个买点信号 |
 | **P2** | P&F 计数（目标价） | 因果律执行工具，影响操作目标位 |
-| **P2** | RS 相对强弱 vs 大盘 | 影响 CM 意图判断 |
+| **P2** | RS 相对强弱 vs 对照指数 | ✅ 已落地（见 §七）；影响阶段置信 / CM 意图判断 |
 | **P3** | UTAD / PS / PSY / Stopping Volume | 增强完整度 |
 | **P3** | CM 行为模式显式建模 | 设计层增强 |
