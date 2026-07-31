@@ -221,6 +221,7 @@ def assemble_base_report(
         "confirm": confirm,
         "stop": stop,
         "trailing_stop": levels.get("trailing_stop"),
+        "effective_stop": levels.get("effective_stop") or stop,
         "take": take,
         "stage": stage,
         "scene": scene,

@@ -98,7 +98,13 @@ def attach_stage_position_pack(
 
     # 分批止盈计划（仅在有持仓参考价时计算）
     entry_price = float(report.get("support") or current)  # 默认用支撑位作为参考买入价
-    stop_price = float(report.get("stop") or 0)
+    from trader_shared.structure_core import effective_stop_price
+
+    stop_price = float(
+        effective_stop_price(report.get("stop"), levels.get("trailing_stop"))
+        or report.get("stop")
+        or 0
+    )
     resistance_val = float(report.get("resistance") or 0)
     exit_plan = compute_exit_plan(
         entry_price=entry_price,
@@ -119,7 +125,7 @@ def attach_stage_position_pack(
         current_price=current,
         support=support,
         resistance=float(report.get("resistance") or 0),
-        stop_price=float(report.get("stop") or 0),
+        stop_price=stop_price,  # 与 exit_plan 同源有效止损
         confirm_price=confirm,
         atr14=atr14_val,
         major_stage=stage_result["major_stage"],
@@ -168,7 +174,7 @@ def attach_stage_position_pack(
     report["t0_ref"] = {
         "low_buy": float(report.get("support") or 0),
         "high_sell": float(report.get("resistance") or 0),
-        "stop": float(report.get("stop") or 0),
+        "stop": stop_price,
     }
 
     # macd_status: MACD 方向

@@ -72,10 +72,17 @@ def attach_short_midline_and_decision(
             if _ma20:
                 break
 
+        # 关键价/亏赚/纪律破位用有效止损（hard ∪ trailing）；report.stop 仍保留 hard
+        from trader_shared.structure_core import effective_stop_price
+
+        _eff_stop = effective_stop_price(
+            report.get("stop"),
+            report.get("trailing_stop"),
+        ) or effective_stop_price(report.get("effective_stop"), None)
         key_prices = build_key_prices(
             current=current,
             support=float(report.get("support") or 0) or None,
-            stop=float(report.get("stop") or 0) or None,
+            stop=_eff_stop,
             confirm=float(report.get("confirm") or 0) or None,
             resistance=float(report.get("resistance") or 0) or None,
             ma20=_ma20,
@@ -227,7 +234,7 @@ def attach_short_midline_and_decision(
             "regime": _regime,
             "current": current,
             "support": report.get("support"),
-            "stop": report.get("stop"),
+            "stop": _eff_stop if _eff_stop is not None else report.get("stop"),
             "confirm": report.get("confirm"),
             "suggested_pct": suggested,
             "ma20": _ma20,

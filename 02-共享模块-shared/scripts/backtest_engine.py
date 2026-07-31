@@ -85,11 +85,14 @@ SELL_ACTIONS = {
 class BTParams:
     """撮合层参数（不含信号逻辑，信号与这些无关 → 可并行扫描）。"""
     atr_period: int = 14
-    atr_mult: float = 2.5
+    # 默认对齐生产 TRAILING_STOP_ATR_MULTIPLE=3.0
+    atr_mult: float = 3.0
     initial_stop_pct: float = 0.08   # 初始硬止损（trailing 的地板）
     position_frac: float = 1.0        # 仓位比例（1.0=满仓；<1=部分仓位）
     use_limit: bool = True             # 涨停买不进 / 跌停卖不出
     limit_pct: float = 0.10           # 涨跌停幅度（创业板/科创板自动调 0.20）
+    # 近窗最高收窗口，对齐生产 STRUCTURE_WINDOW
+    trail_window: int = 20
 
 
 # ── 冻结 market_env：切片指数历史 → 复算 level + HMM ─────────────────────────
@@ -554,11 +557,20 @@ def match_and_score(bars: list[dict], signals: list[dict | None],
             want_exit = True
             exit_reason = "stop"
 
-        # 3) ATR trailing 更新（只上移，地板 = 初始硬止损）
+        # 3) ATR trailing 更新（对齐生产：近窗最高收 × (1 − ATR%×倍数)，只上移）
         if shares > 0 and position["entry_day"] < t:
             cand = [position["hard"], position["stop"]]
-            if atr[t] is not None and c:
-                cand.append(c - atr[t] * params.atr_mult)
+            if atr[t] is not None and c and c > 0:
+                w = max(1, int(params.trail_window or 20))
+                win = bars[max(0, t - w + 1) : t + 1]
+                highs = [
+                    v for b in win
+                    if (v := _to_float(b.get("close"))) is not None and v > 0
+                ]
+                if highs:
+                    atr_pct = float(atr[t]) / c
+                    trail = max(highs) * (1.0 - atr_pct * params.atr_mult)
+                    cand.append(trail)
             position["stop"] = max(cand)
 
         # 4) 执行卖出（T+1；信号或止损；跌停卖不出则等次日）
@@ -904,6 +916,7 @@ def _build_grid(base: BTParams) -> list[BTParams]:
                     position_frac=base.position_frac,
                     use_limit=base.use_limit,
                     limit_pct=base.limit_pct,
+                    trail_window=base.trail_window,
                 )
                 # step 作为撮合参数传入（信号已算好，不影响）
                 grid.append((p, sp))
@@ -1028,7 +1041,10 @@ def main() -> int:
     parser.add_argument("--no-cards", action="store_true",
                         help="退回 classic 融合（不造三席卡，提速；默认 cards 对齐实盘）")
     parser.add_argument("--scan", action="store_true", help="参数扫描（多进程并行）")
-    parser.add_argument("--atr-mult", type=float, default=2.5, help="ATR 止损倍数")
+    parser.add_argument(
+        "--atr-mult", type=float, default=3.0,
+        help="ATR 止损倍数（默认 3.0，对齐生产 TRAILING_STOP_ATR_MULTIPLE）",
+    )
     parser.add_argument("--stop-pct", type=float, default=0.08, help="初始硬止损比例")
     parser.add_argument("--frac", type=float, default=1.0, help="仓位比例 0~1")
     parser.add_argument("--no-limit", action="store_true", help="关闭涨跌停约束")

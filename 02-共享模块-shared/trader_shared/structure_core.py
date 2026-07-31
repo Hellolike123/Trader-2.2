@@ -167,6 +167,17 @@ def average_amplitude_pct(bars: list[BarData]) -> float | None:
     return sum(values) / len(values) if values else None
 
 
+def effective_stop_price(
+    hard_stop: float | None,
+    trailing_stop: float | None = None,
+) -> float | None:
+    """有效止损 = max(硬止损, 移动止损)；只紧不松。两者皆无效时返回 None。"""
+    h = to_float(hard_stop) or 0.0
+    t = to_float(trailing_stop) or 0.0
+    eff = max(h, t)
+    return round(eff, 2) if eff > 0 else None
+
+
 def average_atr_pct(bars: list[BarData], period: int | None = None) -> float | None:
     """计算近 period 根K线的平均真实波幅百分比 (ATR/close)。
 
@@ -652,7 +663,8 @@ def build_structure_context(
     if _bar_atr_r is not None and _bar_atr_r > 0:
         atr_pct = float(_bar_atr_r)
     else:
-        atr_pct = average_atr_pct(recent20) or 0.02
+        # fallback 用 14 期，与 light_data atr_ratio（14-SMA）同窗
+        atr_pct = average_atr_pct(recent20, period=14) or 0.02
     zone_width_pct = clamp(atr_pct * 0.25 * theory["zone_width"], MIN_ZONE_WIDTH_PCT, MAX_ZONE_WIDTH_PCT)
     stop_buffer_pct = clamp(atr_pct * 0.40 * theory.get("stop_buffer", 1.0), MIN_STOP_BUFFER_PCT, MAX_STOP_BUFFER_PCT)
     low_zone_lower = round(support_price, 2)
@@ -818,6 +830,9 @@ def build_structure_context(
             if trailing_ratchet_symbol and trailing_stop is not None and trailing_stop > 0:
                 save_trailing_watermark(trailing_ratchet_symbol, trailing_stop)
 
+    # 状态机 / 近止损：用有效止损（hard ∪ trailing），与告警/仓位状态机一致
+    eff_stop = effective_stop_price(stop, trailing_stop) or stop
+
     # keep compatibility for callers that expect status from structure payload
     from trader_shared.decision_core import status_layers  # local import to avoid tighter module coupling
 
@@ -829,7 +844,7 @@ def build_structure_context(
         support=support_price,
         low_zone_upper=low_zone_upper,
         confirm=confirm_price,
-        hard_stop=stop,
+        hard_stop=eff_stop,
         position_ratio=position,
         change_pct=change_pct,
         ma_values=ma_values,
@@ -869,10 +884,11 @@ def build_structure_context(
         "confirm_note": "需放量站稳阻力上方" if current >= resistance_price * 0.97 else "",
         "sell_observe_price": round(resistance_price, 2),
         "hard_stop": stop,
+        "effective_stop": eff_stop,
         "take": take,
         # fix: guard against inf from pct_change when current=0
         "upside_pct": round(pct_change(current, confirm_price), 2) if current > 0 else 0.0,
-        "downside_pct": round(abs(pct_change(current, stop)), 2) if current > 0 else 0.0,
+        "downside_pct": round(abs(pct_change(current, eff_stop)), 2) if current > 0 else 0.0,
         "position_ratio": round(position, 3),
         "pressure_space_pct": round(pressure_space_pct, 4),
         "status": status,
@@ -891,6 +907,7 @@ def build_structure_context(
         # 单一可信源：所有视图（单票/T0/Review/Pool）共用此价位字典
         "price_levels": {
             "stop": stop,
+            "effective_stop": eff_stop,
             "defense": round(support_price, 2),
             "confirm": round(confirm_price, 2),
             "buy_low": low_zone_lower,
@@ -950,7 +967,11 @@ def find_key_levels(bars: list[BarData]) -> dict[str, float]:
 
     # ── ATR 自适应参数：优先 bar.atr_ratio（与波动分级同源），否则近窗均值 ──
     _bar_atr = to_float(bars[-1].get("atr_ratio")) if bars else None
-    _atr_pct = float(_bar_atr) if (_bar_atr is not None and _bar_atr > 0) else (average_atr_pct(bars) or 0.02)
+    _atr_pct = (
+        float(_bar_atr)
+        if (_bar_atr is not None and _bar_atr > 0)
+        else (average_atr_pct(bars, period=14) or 0.02)
+    )
     _adapt_tol = max(0.015, 0.8 * _atr_pct)       # 容差：至少 1.5%，或 0.8×ATR%
     _adapt_unbroken = max(0.03, 1.2 * _atr_pct)    # 破位阈值：至少 3%，或 1.2×ATR%
 

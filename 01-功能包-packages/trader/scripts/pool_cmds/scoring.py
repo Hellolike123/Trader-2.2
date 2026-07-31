@@ -52,7 +52,13 @@ def momentum_passes(report: dict[str, Any]) -> bool:
 def score_report(report: dict[str, Any]) -> dict[str, int]:
     current = to_float(report.get("current")) or 0.0
     confirm = to_float(report.get("confirm")) or current
-    stop = to_float(report.get("stop")) or current
+    from trader_shared.structure_core import effective_stop_price
+
+    stop = (
+        effective_stop_price(report.get("stop"), report.get("trailing_stop"))
+        or to_float(report.get("stop"))
+        or current
+    )
     support = to_float(report.get("support")) or current
     take = to_float(report.get("take")) or confirm
     stage = str(report.get("stage") or "")
@@ -173,7 +179,13 @@ def admission_for(report: dict[str, Any], scores: dict[str, int]) -> dict[str, s
 
     current = to_float(report.get("current")) or 0.0
     confirm = to_float(report.get("confirm")) or current
-    stop = to_float(report.get("stop")) or current
+    from trader_shared.structure_core import effective_stop_price
+
+    stop = (
+        effective_stop_price(report.get("stop"), report.get("trailing_stop"))
+        or to_float(report.get("stop"))
+        or current
+    )
     major_stage = str(report.get("major_stage") or "蓄势")
     total_score = scores["total_score"]
     out = _evaluate_admission(major_stage, total_score, current, confirm, stop)

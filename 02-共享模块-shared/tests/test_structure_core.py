@@ -13,6 +13,7 @@ from trader_shared.structure_core import (
     average_atr_pct,
     average_amplitude_pct,
     build_structure_context,
+    effective_stop_price,
     find_key_levels,
 )
 
@@ -155,6 +156,19 @@ class TestAverageAmplitudePct:
 
     def test_empty_bars(self):
         assert average_amplitude_pct([]) is None
+
+
+class TestEffectiveStopPrice:
+    def test_max_of_hard_and_trailing(self):
+        assert effective_stop_price(10.0, 11.5) == 11.5
+        assert effective_stop_price(12.0, 11.5) == 12.0
+
+    def test_none_when_both_invalid(self):
+        assert effective_stop_price(None, None) is None
+        assert effective_stop_price(0, 0) is None
+
+    def test_trailing_alone(self):
+        assert effective_stop_price(None, 9.8) == 9.8
 
 
 class TestTrailingStop:

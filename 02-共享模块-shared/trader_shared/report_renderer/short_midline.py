@@ -822,7 +822,14 @@ def render_short_midline(r: dict[str, Any]) -> str:
     # 策略闸口仍由 pipeline 写入 strategy_match（供 decision_view）；
     # 人读报告省略 📐——日常以 决策/动作/新开/失效 为准。
 
-    stop_sell = key_prices.get("stop_sell") or r.get("stop")
+    stop_sell = key_prices.get("stop_sell") or r.get("effective_stop") or r.get("stop")
+    try:
+        _trail_v = float(r.get("trailing_stop") or 0)
+        _hard_v = float(stop_sell or r.get("stop") or 0)
+        if _trail_v > 0:
+            stop_sell = max(_hard_v, _trail_v)
+    except (TypeError, ValueError):
+        pass
     buy_low = key_prices.get("buy_zone_low")
     buy_high = key_prices.get("buy_zone_high")
     buy_ref = key_prices.get("buy_ref")
