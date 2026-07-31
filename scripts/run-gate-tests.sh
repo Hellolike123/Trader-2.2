@@ -75,6 +75,7 @@ TESTS=(
   "02-共享模块-shared/tests/test_signal_store_changes.py"
   "02-共享模块-shared/tests/test_data_provider.py"
   "02-共享模块-shared/tests/test_context_stage_offline.py"
+  "02-共享模块-shared/tests/test_position_add_store.py"
 )
 
 exec "$PYTHON" -m pytest -q -p no:cacheprovider "${TESTS[@]}"

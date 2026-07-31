@@ -121,6 +121,22 @@ def attach_stage_position_pack(
     # 使用成本价作为 entry_price（有持仓时），否则用支撑位
     entry_price_for_state = cost_price if has_position else float(report.get("support") or current)
 
+    # T+1：从持久化/池解析上次加仓日（禁止用 K 线日冒充）
+    _last_add = report.get("last_add_date")
+    try:
+        from trader_shared.position_add_store import resolve_last_add_date
+
+        _resolved = resolve_last_add_date(
+            report.get("symbol") or report.get("ts_code"),
+            name=report.get("name"),
+            report=report,
+        )
+        if _resolved:
+            _last_add = _resolved
+            report["last_add_date"] = _resolved
+    except Exception as _la_exc:
+        _logger.debug("resolve last_add_date skipped: %s", _la_exc)
+
     position_state = evaluate_position_state(
         current_price=current,
         support=support,
@@ -139,10 +155,26 @@ def attach_stage_position_pack(
         chip_migration=chip_migration,
         high_zone_lower=float(levels.get("high_zone_lower") or 0),
         trailing_stop=levels.get("trailing_stop"),
-        # T+1 冷却须用真实「上次加仓日」；bars_date=最新K日会在每个交易日误触发冷却
-        last_add_date=report.get("last_add_date"),
+        last_add_date=_last_add,
     )
     report["position_state"] = position_state
+    # 刚给出「回踩加仓」→ 记今日，同日再分析进入 T+1 冷却
+    try:
+        from trader_shared.position_add_store import (
+            get_last_add_date,
+            maybe_record_from_report,
+        )
+
+        maybe_record_from_report(report)
+        if isinstance(position_state, dict) and position_state.get("state") == "回踩加仓":
+            _recorded = get_last_add_date(
+                report.get("symbol") or report.get("ts_code"),
+                name=report.get("name"),
+            )
+            if _recorded:
+                report["last_add_date"] = _recorded
+    except Exception as _rec_exc:
+        _logger.debug("record last_add_date skipped: %s", _rec_exc)
 
     # 阶段止损
     ma20_val = levels["ma_values"].get("ma20")

@@ -34,6 +34,12 @@ def _maybe_write_signal(report: dict[str, Any], *, enabled: bool) -> None:
         from trader_shared.signal_store import append_signal
 
         append_signal(build_signal(report))
+        # 回踩加仓意图已在 attach 记日；此处再兜底一次（幂等）
+        try:
+            from trader_shared.position_add_store import maybe_record_from_report
+            maybe_record_from_report(report)
+        except Exception:
+            pass
     except Exception as exc:
         print(f"⚠️ 信号落盘失败: {exc}", file=sys.stderr)
 
