@@ -753,7 +753,10 @@ def _build_action_card(
 
 
 # 单回合费用粗估（佣金+印花+滑点），用于 RR/空间是否盖住费用
-_ROUND_TRIP_COST_PCT = 0.0035
+try:
+    from trader_shared.config import T0_ROUND_TRIP_COST_PCT as _ROUND_TRIP_COST_PCT
+except Exception:
+    _ROUND_TRIP_COST_PCT = 0.0032  # 万1×2 + 印花千1 + 滑点0.1%×2
 
 
 def _first_exit_above(plan: dict[str, Any], floor: float | None) -> float | None:

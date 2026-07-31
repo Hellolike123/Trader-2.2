@@ -120,6 +120,16 @@ CHANLUN_STATE_DIR: str = os.path.expanduser("~/.trader/chanlun_state")
 # 未设置时 monitor.run_once 走原批量路径，控制流零改动。
 T0_REALTIME_CHAN_ENABLED: bool = os.environ.get("T0_REALTIME_CHAN") == "1"
 
+# ---- T0 / 回测费用（账户口径 SSOT）----
+# 佣金万分之一单边；印花税千分之一仅卖；滑点为结构卡/回测粗估（可 env 覆盖）
+T0_COMMISSION_RATE: float = float(os.environ.get("T0_COMMISSION_RATE", "0.0001"))
+T0_STAMP_TAX_RATE: float = float(os.environ.get("T0_STAMP_TAX_RATE", "0.001"))
+T0_SLIP_RATE: float = float(os.environ.get("T0_SLIP_RATE", "0.001"))
+# 单回合粗估：佣金×2 + 印花 + 滑点×2 ≈ 0.32%
+T0_ROUND_TRIP_COST_PCT: float = (
+    T0_COMMISSION_RATE * 2.0 + T0_STAMP_TAX_RATE + T0_SLIP_RATE * 2.0
+)
+
 # ---- Market index ----
 INDEX_CODE: str = "000852.SH"
 
@@ -383,6 +393,8 @@ __all__ = [
     "PYRAMID_SCALES", "BASE_WEIGHTS", "ATRLV_INDEX",
     "CHANLUN_MIN_BARS", "CHANLUN_MIN_BARS_PER_STROKE", "CHANLUN_MIN_STROKES_PER_SEGMENT",
     "WEEKLY_LOOKBACK_BARS",
+    "T0_REALTIME_CHAN_ENABLED",
+    "T0_COMMISSION_RATE", "T0_STAMP_TAX_RATE", "T0_SLIP_RATE", "T0_ROUND_TRIP_COST_PCT",
     "INDEX_CODE",
     "TREND_MA_SHORT", "TREND_MA_LONG", "TREND_FILTER_ENABLED", "TREND_MA_LOOKBACK",
     "WYCKOFF_MIN_BARS", "WYCKOFF_SPRING_SUPPORT_LOOKBACK",

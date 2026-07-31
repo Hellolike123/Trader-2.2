@@ -51,10 +51,21 @@ from indicators import calculate_ema, calculate_vwap_from_bars  # noqa: E402
 
 
 # ── 撮合/费用参数 ───────────────────────────────────────────────
-COMMISSION = 0.00025      # 万 2.5 双边
-STAMP = 0.001             # 印花税 仅卖
-SLIP_BUY = 0.001          # 买方向滑点 (限价单劣化成交)
-SLIP_SELL = 0.001         # 卖方向滑点
+try:
+    from trader_shared.config import (
+        T0_COMMISSION_RATE,
+        T0_STAMP_TAX_RATE,
+        T0_SLIP_RATE,
+    )
+    COMMISSION = T0_COMMISSION_RATE   # 单边万1（买卖各收）
+    STAMP = T0_STAMP_TAX_RATE         # 印花税 仅卖
+    SLIP_BUY = T0_SLIP_RATE
+    SLIP_SELL = T0_SLIP_RATE
+except Exception:
+    COMMISSION = 0.0001
+    STAMP = 0.001
+    SLIP_BUY = 0.001
+    SLIP_SELL = 0.001
 INTRADAY_FRACTION = 0.2     # 单笔占日内资金比例
 LOT = 100                  # 一手
 MAX_RT_PER_DAY = 3          # 每日最多回合交易数 (防过度交易噪声)

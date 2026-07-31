@@ -12,9 +12,14 @@ from pathlib import Path
 from typing import Any
 
 
-# ── 默认配置 ──────────────────────────────────────────────────────────────
-DEFAULT_FEE_RATE = 0.00025       # 佣金单边万2.5（买卖各收）
-DEFAULT_STAMP_TAX_RATE = 0.0005  # 印花税万5（仅卖出收）
+# ── 默认配置（费率 SSOT：trader_shared.config）────────────────────────────
+try:
+    from trader_shared.config import T0_COMMISSION_RATE, T0_STAMP_TAX_RATE
+    DEFAULT_FEE_RATE = T0_COMMISSION_RATE          # 佣金单边万1
+    DEFAULT_STAMP_TAX_RATE = T0_STAMP_TAX_RATE      # 印花千1（仅卖）
+except Exception:
+    DEFAULT_FEE_RATE = 0.0001
+    DEFAULT_STAMP_TAX_RATE = 0.001
 DEFAULT_MIN_EDGE_PCT = 0.8       # 费后最小净空间 %
 DEFAULT_DAY_LOSS_PCT = 1.0       # 当日 T 亏损占市值上限则停
 DEFAULT_MAX_T_COUNT = 5          # 当日 T 操作次数上限

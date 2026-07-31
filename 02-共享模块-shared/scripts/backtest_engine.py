@@ -8,7 +8,7 @@
 3. 复用生产 signal 大脑：plugin_registry.analyze_all + fusion_core.merge_decisions，
    与实盘同一套逻辑。fusion 默认走 cards（意见卡三席），与实盘 build_report 完全一致
    （可选 --no-cards 退回 classic 提速）。
-4. 撮合：次日开盘成交 + 滑点 + 费（万 2.5 佣 + 0.1% 印花）+ T+1
+4. 撮合：次日开盘成交 + 滑点 + 费（万 1 佣 + 0.1% 印花）+ T+1
    + ATR trailing 止损（替代固定 8%）+ 涨停买不进 / 跌停卖不出约束。
 
 关键架构（v2）：信号生成与撮合解耦。
@@ -60,8 +60,13 @@ def _to_float(v) -> float | None:
 
 # ── 撮合参数（A 股单边手续费模型） ────────────────────────────────────────
 SLIP = 0.001        # 滑点 0.1%
-FEE_BUY = 0.00025    # 佣金 万 2.5
-FEE_SELL = 0.00025 + 0.001  # 佣金 + 印花税 0.1%
+try:
+    from trader_shared.config import T0_COMMISSION_RATE, T0_STAMP_TAX_RATE
+    FEE_BUY = T0_COMMISSION_RATE                    # 佣金 万 1
+    FEE_SELL = T0_COMMISSION_RATE + T0_STAMP_TAX_RATE  # 佣金 + 印花
+except Exception:
+    FEE_BUY = 0.0001
+    FEE_SELL = 0.0001 + 0.001
 WARMUP = 120          # 预热根数（够缠论/中线周线出结构）
 
 # 动作映射（取自 fusion_regime.ACTION_MAP_NORMAL / DISAGREE）
