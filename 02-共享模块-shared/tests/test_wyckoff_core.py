@@ -1702,7 +1702,7 @@ class TestPhaseARangeP2:
             tr_ctx=tr,
         )
         assert ph["phase"] == "accumulation_a"
-        assert "区间未钉" in ph["phase_label"]
+        assert "箱体未成形" in ph["phase_label"]
         assert ph["phase"] not in (
             "accumulation_b", "accumulation_c", "accumulation_d", "markup",
             "distribution_a", "distribution_b", "distribution_c", "distribution_d", "markdown",

@@ -209,6 +209,69 @@ def test_format_wyckoff_midline_light_ar():
     assert not line.endswith("偏多")
 
 
+def test_format_wyckoff_midline_light_shows_box():
+    """中线与短线同款写出箱体上下沿。"""
+    line = format_wyckoff_midline_light({
+        "ar_signal": True,
+        "phase": "accumulation_a",
+        "phase_label": "积累期 A（停止：SC+AR）",
+        "phase_a_status": "established",
+        "sc_low": 40.3,
+        "ar_high": 43.0,
+        "timeframe": "weekly",
+    })
+    assert "箱体 40.30-43.00" in line
+    assert "AR（自动反弹）" in line
+
+
+def test_format_wyckoff_midline_light_forming_lower():
+    line = format_wyckoff_midline_light({
+        "sc_signal": True,
+        "phase": "accumulation_a",
+        "phase_label": "积累期 A（卖力高潮：SC，箱体未成形）",
+        "phase_a_status": "forming",
+        "sc_low": 38.14,
+        "timeframe": "weekly",
+    })
+    assert "箱体未成形" in line
+    assert "下沿 38.14（上沿未出）" in line
+
+
+def test_format_wyckoff_midline_light_gated_no_tr_suppresses_box():
+    """中线与短线同构：no_tr 门控时不写 forming 箱体。"""
+    line = format_wyckoff_midline_light({
+        "sc_signal": True,
+        "phase": "none",
+        "phase_label": "",
+        "phase_a_status": "forming",
+        "phase_tr_gated": True,
+        "phase_tr_gate_reason": "no_tr",
+        "sc_low": 38.14,
+        "timeframe": "weekly",
+        "wyckoff_summary": "中线",
+    })
+    assert "箱体" not in line
+    assert "下沿" not in line
+    assert "SC（卖力高潮）" in line  # 事件灯可保留；只禁箱体
+
+
+def test_phase_a_box_bounds_prefers_seed_over_tr():
+    from trader_shared.wyckoff_core import _phase_a_box_bounds, _phase_a_box_phrase
+
+    lo, hi = _phase_a_box_bounds({
+        "tr_lower": 9.0,
+        "tr_upper": 15.0,
+        "phase_a_range": {"sc_low": 10.5, "ar_high": 12.5, "status": "established"},
+        "phase_a_status": "established",
+    })
+    assert (lo, hi) == (10.5, 12.5)
+    assert _phase_a_box_phrase({
+        "phase_a_status": "established",
+        "sc_low": 12.0,
+        "ar_high": 10.0,
+    }) == ""
+
+
 def test_format_wyckoff_midline_light_event_without_phase():
     """有事件、无阶段时阶段位为「无」；事件 Code（中文）+ 短防误读。"""
     line = format_wyckoff_midline_light({
@@ -397,7 +460,7 @@ def test_highlight_excludes_bearish_chan_and_weak_stage():
 
 
 def test_short_section_has_daily_phase_line():
-    """短线区必有「威科夫：」只读行（与中线点名同构）；无箱诚实文案。"""
+    """短线区必有「威科夫：」只读行（与中线点名同构）；禁止「日线阶段：」。"""
     r = _report()
     r["wyckoff_daily"] = {
         "timeframe": "daily",
@@ -410,7 +473,9 @@ def test_short_section_has_daily_phase_line():
     short = out.split("⚡ 短线", 1)[-1]
     assert "缠论：" in short
     assert "威科夫：" in short
-    assert "无清晰区间" in short or "仅对照" in short
+    assert "日线阶段：" not in short
+    assert "暂定不出" in short or "仅对照" in short
+    assert "暂不出阶段" not in short
     # 仍在短线块内，且在缠论之后
     lines = [ln.strip() for ln in short.splitlines() if ln.strip()]
     struct_i = next(i for i, ln in enumerate(lines) if ln.startswith("缠论："))

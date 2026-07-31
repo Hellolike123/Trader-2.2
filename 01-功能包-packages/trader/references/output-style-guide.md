@@ -58,7 +58,7 @@ Matches `report_renderer/short_midline.py` (`render_short_midline`):
    - optional `位置：` ← pivot_position_weekly
    - `关键价（中线）` 生命线 / 回踩区 / 压力 / 目标 ← `mid_key_prices`（周线引擎，无 🌟）
 4. `⚡ 短线`（A 版读序）
-   - `缠论：` → optional 买点 → `威科夫：`（日线阶段只对照）→ optional `事件：` → `动能：` → `资金：`
+   - `缠论：` → optional 买点 → `威科夫：`（日线只对照；禁止「日线阶段：」；箱体 lo-hi / 箱体未成形）→ optional `事件：` → `动能：` → `资金：`
    - （空行）→ `共振：` → `新开：` → `动作：` → optional `原因：` → `破位看：`
    - `关键价（短线）` 止损 / 买点区 / `🌟 现价` / 卖点区 + 买/追亏赚两行 ← `key_prices`
 5. optional `说明：` when mid/short conflict

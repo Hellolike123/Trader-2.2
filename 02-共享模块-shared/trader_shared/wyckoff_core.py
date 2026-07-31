@@ -1266,15 +1266,59 @@ def _midline_meaning(code: str, cn_name: str, note: str, direction: int) -> str:
     return "暂无明确含义"
 
 
+def _phase_a_box_bounds(wyk: dict[str, Any]) -> tuple[float | None, float | None]:
+    """Phase A 箱体下沿/上沿：优先 sc_low/ar_high（顶层再 phase_a_range），再 tr_lower/tr_upper。"""
+    pa = wyk.get("phase_a_range") if isinstance(wyk.get("phase_a_range"), dict) else {}
+
+    def _num(keys: tuple[str, ...], sources: tuple[dict, ...]) -> float | None:
+        for src in sources:
+            for k in keys:
+                v = src.get(k)
+                if v is None:
+                    continue
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    continue
+        return None
+
+    sources = (wyk, pa)
+    lo = _num(("sc_low",), sources)
+    if lo is None:
+        lo = _num(("tr_lower",), sources)
+    hi = _num(("ar_high",), sources)
+    if hi is None:
+        hi = _num(("tr_upper",), sources)
+    if lo is not None and hi is not None and lo >= hi:
+        return None, None
+    return lo, hi
+
+
+def _phase_a_box_phrase(wyk: dict[str, Any]) -> str:
+    """箱体人话片段（中短线共用）：established → 箱体 lo-hi；forming → 未成形/上沿未出；否则空。"""
+    phase_a = str(wyk.get("phase_a_status") or "").strip() or "none"
+    label = str(wyk.get("phase_label") or "").strip()
+    lo, hi = _phase_a_box_bounds(wyk)
+    if phase_a == "forming" or "箱体未成形" in label or "区间未钉" in label:
+        if lo is not None:
+            return f"箱体未成形 · 下沿 {lo:.2f}（上沿未出）"
+        return "箱体未成形 · 上沿未出"
+    if phase_a == "established":
+        if lo is not None and hi is not None:
+            return f"箱体 {lo:.2f}-{hi:.2f}"
+        return ""
+    return ""
+
+
 def format_wyckoff_daily_phase_light(
     wyckoff: dict[str, Any] | None = None,
 ) -> str:
-    """短线威科夫阶段只读展示（标签由渲染层加「威科夫：」；与中线同构诚实无箱）。
+    """短线威科夫只读展示正文（标签由渲染层统一加「威科夫：」；禁止「日线阶段：」）。
 
     产品契约（BUSINESS §2.2）：
       - 只给人看；不进中线定论 / fusion / 共振背景岗 / 单独开仓
-      - 无箱体：无清晰区间 · 暂不出阶段
-      - forming：区间未钉；established：箱体已钉
+      - 无箱体：无清晰区间 · 暂定不出
+      - forming：箱体未成形 / 上沿未出（有下沿则写出）；established：箱体 下沿-上沿
     """
     wyk = _unwrap_wyckoff_dict(wyckoff)
     if not wyk:
@@ -1289,30 +1333,31 @@ def format_wyckoff_daily_phase_light(
     gate_r = str(wyk.get("phase_tr_gate_reason") or "").strip()
     gated = bool(wyk.get("phase_tr_gated"))
     plain = _plain_phase_midline(label)
+    box = _phase_a_box_phrase(wyk)
 
     # P0-B 无/低质量 TR：与中线「构不成区间」同构（优先于 forming 文案）
     if gated and gate_r in ("no_tr", "low_quality"):
         if gate_r == "low_quality":
-            return "无 · 区间质量差 · 暂不出阶段 · 仅对照"
-        return "无 · 无清晰区间 · 暂不出阶段 · 仅对照"
+            return "无 · 区间质量差 · 暂定不出 · 仅对照"
+        return "无 · 无清晰区间 · 暂定不出 · 仅对照"
 
-    # forming：有 SC、箱未钉满
-    if phase_a == "forming" or "区间未钉" in label:
+    # forming：有 SC、尚无 AR 定上沿（有下沿则带出）
+    if phase_a == "forming" or "箱体未成形" in label or "区间未钉" in label:
         slot = plain or "吸筹早期"
-        return f"{slot} · 区间未钉 · 仅对照"
+        return f"{slot} · {box or '箱体未成形 · 上沿未出'} · 仅对照"
 
-    # 有明确阶段（箱体已钉或过门控后的 A–E / markup…）
+    # 有明确叙事（箱体 lo-hi 或过门控后的 A–E / markup…）
     if phase != "none" and plain:
-        if phase_a == "established":
-            return f"{plain} · 箱体已钉 · 仅对照"
+        if phase_a == "established" and box:
+            return f"{plain} · {box} · 仅对照"
         return f"{plain} · 仅对照"
 
-    # 无 SC、无阶段：与中线 none 同构
+    # 无 SC、无叙事：与中线 none 同构
     has_bounds = wyk.get("tr_upper") is not None or wyk.get("tr_lower") is not None
     if not has_bounds and wyk.get("tr_quality") is None:
-        return "无 · 无清晰区间 · 暂不出阶段 · 仅对照"
+        return "无 · 无清晰区间 · 暂定不出 · 仅对照"
 
-    return "无 · 暂无阶段 · 仅对照"
+    return "无 · 暂无定论 · 仅对照"
 
 
 def format_wyckoff_midline_light(
@@ -1322,8 +1367,9 @@ def format_wyckoff_midline_light(
 ) -> str:
     """中线威科夫人话版（周线；不进短线评分）。
 
-    三段式固定「阶段 · 事件 · 含义」（阶段不明用「无」，不跳段）：
-      威科夫：还在吸筹中 · AR（自动反弹）· 不能当已经转强
+    结构「阶段 · [箱体] · 事件 · 含义」（阶段不明用「无」，不跳段；箱体与短线同款）：
+      威科夫：还在吸筹中 · 箱体 40.30-43.00 · AR（自动反弹）· 不能当已经转强
+      威科夫：吸筹早期 · 箱体未成形 · 下沿 38.14（上沿未出） · SC（卖力高潮）· 还要等弹簧/确认
       威科夫：无 · BullDiv（看多背离）· 不能当反转
       威科夫：周线不足 · 不参与定论
     """
@@ -1333,22 +1379,32 @@ def format_wyckoff_midline_light(
     if info["status"] == "no_data":
         return "威科夫：数据不足 · 中性"
 
+    wyk = _unwrap_wyckoff_dict(wyckoff)
     phase_plain = _plain_phase_midline(str(info.get("phase_label") or ""))
     d = int(direction) if direction is not None else int(info["direction"] or 0)
     # 契约：中线威科夫始终「阶段 · 事件」；阶段定不出时用「无」，禁止直接跳到事件灯
     phase_slot = phase_plain or "无"
     parts: list[str] = []
+    gate_r = str(wyk.get("phase_tr_gate_reason") or "").strip()
+    gated = bool(wyk.get("phase_tr_gated"))
+    # 与短线同构：无/低质量 TR 时阶段不参与定论，禁止再写 forming 箱体
+    suppress_box = gated and gate_r in ("no_tr", "low_quality")
 
     if info["status"] == "none":
         # 已跑周线引擎：不是「没算」，而是 TR/事件定不出阶段
-        wyk = _unwrap_wyckoff_dict(wyckoff)
         tr_q = wyk.get("tr_quality")
-        if tr_q is None and not wyk.get("tr_upper") and not wyk.get("tr_lower"):
+        if suppress_box or (tr_q is None and not wyk.get("tr_upper") and not wyk.get("tr_lower")):
             parts.append("周线已算")
-            parts.append("构不成清晰吸筹/派发区间")
+            if gate_r == "low_quality":
+                parts.append("区间质量差")
+            else:
+                parts.append("构不成清晰吸筹/派发区间")
             parts.append("阶段暂定不出，不据此开仓")
         else:
             parts.append(phase_slot)
+            box = _phase_a_box_phrase(wyk)
+            if box:
+                parts.append(box)
             parts.append("暂无关键事件")
             parts.append("不据此开仓")
         return "威科夫：" + " · ".join(parts) if parts else "威科夫：周线已算 · 暂无定论"
@@ -1359,6 +1415,10 @@ def format_wyckoff_midline_light(
     meaning = _midline_meaning(code, cn, note, d)
 
     parts.append(phase_slot)
+    if not suppress_box:
+        box = _phase_a_box_phrase(wyk)
+        if box:
+            parts.append(box)
     # 灯：Spring（弹簧）—— 英文 + 中文括号，与短线状态行一致
     if cn and cn not in ("无", "不足", "无事件"):
         parts.append(f"{code}（{cn}）")

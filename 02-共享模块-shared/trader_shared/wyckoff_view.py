@@ -103,7 +103,7 @@ class WyckoffStateView(TypedDict, total=False):
 _GATE_REASON_NOTES: dict[str, str] = {
     "no_tr": "无清晰TR，阶段不参与定论",
     "low_quality": "TR质量不足，阶段不参与定论",
-    "forming_phase_a": "区间未钉，阶段不抬升",
+    "forming_phase_a": "箱体未成形，阶段不抬升",
     "no_established_seed": "无Phase A种子箱，阶段不抬升",
 }
 
@@ -267,12 +267,16 @@ def to_wyckoff_state_view(
     oneline = format_wyckoff_oneline(wyk, show_phase=False)
     phase_a_status = str(wyk.get("phase_a_status") or "").strip() or "none"
     phase_label = str(wyk.get("phase_label") or "")
-    # forming：摘要补「区间未钉」（微信红线：无 #/**/表格）
-    if phase_a_status == "forming" or "区间未钉" in phase_label:
-        if oneline and "区间未钉" not in oneline:
-            oneline = f"{oneline} · 区间未钉"
+    # forming：摘要补「箱体未成形」（微信红线：无 #/**/表格）
+    if (
+        phase_a_status == "forming"
+        or "箱体未成形" in phase_label
+        or "区间未钉" in phase_label
+    ):
+        if oneline and "箱体未成形" not in oneline and "区间未钉" not in oneline:
+            oneline = f"{oneline} · 箱体未成形"
         elif not oneline:
-            oneline = "区间未钉"
+            oneline = "箱体未成形"
     if wyk.get("phase_tr_gated"):
         reason = str(wyk.get("phase_tr_gate_reason") or "")
         note = _GATE_REASON_NOTES.get(reason) or "阶段不参与定论"
@@ -351,7 +355,7 @@ def format_daily_phase_display(
     *,
     symbol: str = "",
 ) -> str:
-    """短线「威科夫：」日线阶段只读展示：报告边界经 View 再格式化。
+    """短线「威科夫：」只读展示：报告边界经 View 再格式化（禁止「日线阶段：」标签）。
 
     不进背景岗 / fusion / 出手；与中线阶段同构诚实无箱。
     """

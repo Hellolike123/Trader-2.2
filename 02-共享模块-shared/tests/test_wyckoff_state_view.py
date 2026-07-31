@@ -129,28 +129,28 @@ def test_forming_summary_mentions_unpinned_range():
             "sc_signal": True,
             "sc_reason": "卖力高潮",
             "phase": "accumulation_a",
-            "phase_label": "积累期 A（卖力高潮：SC，区间未钉）",
+            "phase_label": "积累期 A（卖力高潮：SC，箱体未成形）",
             "phase_a_status": "forming",
             "timeframe": "weekly",
         }
     )
     assert v["phase_a_status"] == "forming"
-    assert "区间未钉" in v["summary_oneline"]
+    assert "箱体未成形" in v["summary_oneline"]
 
 
 def test_gate_reason_forming_phase_a_in_summary():
     v = to_wyckoff_state_view(
         {
             "phase": "accumulation_a",
-            "phase_label": "积累期 A（卖力高潮：SC，区间未钉）",
+            "phase_label": "积累期 A（卖力高潮：SC，箱体未成形）",
             "phase_a_status": "forming",
             "phase_tr_gated": True,
             "phase_tr_gate_reason": "forming_phase_a",
             "sc_signal": True,
         }
     )
-    assert "区间未钉" in v["summary_oneline"]
-    assert "不抬升" in v["summary_oneline"] or "区间未钉" in v["summary_oneline"]
+    assert "箱体未成形" in v["summary_oneline"]
+    assert "不抬升" in v["summary_oneline"] or "箱体未成形" in v["summary_oneline"]
 
 
 def test_secondary_test_sc_in_active_events():
@@ -180,7 +180,9 @@ def test_format_daily_phase_no_tr_isomorphic():
         }
     )
     assert line.startswith("威科夫：")
+    assert "日线阶段：" not in line
     assert "无清晰区间" in line
+    assert "暂定不出" in line
     assert "仅对照" in line
 
 
@@ -191,13 +193,14 @@ def test_format_daily_phase_forming():
         {
             "timeframe": "daily",
             "phase": "accumulation_a",
-            "phase_label": "积累期 A（卖力高潮：SC，区间未钉）",
+            "phase_label": "积累期 A（卖力高潮：SC，箱体未成形）",
             "phase_a_status": "forming",
             "phase_tr_gated": False,
         }
     )
     assert line.startswith("威科夫：")
-    assert "区间未钉" in line
+    assert "箱体未成形" in line
+    assert "上沿未出" in line
     assert "仅对照" in line
 
 
@@ -217,5 +220,58 @@ def test_format_daily_phase_established():
         }
     )
     assert line.startswith("威科夫：")
-    assert "箱体已钉" in line
+    assert "箱体 10.00-12.00" in line
     assert "仅对照" in line
+
+
+def test_format_daily_phase_forming_shows_lower():
+    from trader_shared.wyckoff_view import format_daily_phase_display
+
+    line = format_daily_phase_display(
+        {
+            "timeframe": "daily",
+            "phase": "accumulation_a",
+            "phase_label": "积累期 A（卖力高潮：SC，箱体未成形）",
+            "phase_a_status": "forming",
+            "sc_low": 38.14,
+        }
+    )
+    assert "箱体未成形" in line
+    assert "下沿 38.14（上沿未出）" in line
+
+
+def test_format_daily_phase_established_invalid_bounds_no_pinned_fallback():
+    """lo>=hi 时不写「箱体已钉」假已钉。"""
+    from trader_shared.wyckoff_view import format_daily_phase_display
+
+    line = format_daily_phase_display(
+        {
+            "timeframe": "daily",
+            "phase": "accumulation_a",
+            "phase_label": "积累期 A（停止：SC+AR）",
+            "phase_a_status": "established",
+            "sc_low": 12.0,
+            "ar_high": 10.0,
+        }
+    )
+    assert "箱体已钉" not in line
+    assert "箱体 12" not in line
+    assert "仅对照" in line
+
+
+def test_format_daily_phase_legacy_unpinned_label():
+    """旧 phase_label「区间未钉」仍映射为箱体未成形人话。"""
+    from trader_shared.wyckoff_view import format_daily_phase_display
+
+    line = format_daily_phase_display(
+        {
+            "timeframe": "daily",
+            "phase": "accumulation_a",
+            "phase_label": "积累期 A（卖力高潮：SC，区间未钉）",
+            "phase_a_status": "forming",
+            "sc_low": 21.5,
+        }
+    )
+    assert "箱体未成形" in line
+    assert "下沿 21.50（上沿未出）" in line
+    assert "区间未钉" not in line

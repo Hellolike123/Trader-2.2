@@ -1,22 +1,23 @@
 # 威科夫 Phase A 区间边界（SC/AR）— Agent Handoff
 
-> **status**: p2_done（含短线「威科夫：」日线阶段只读展示）  
+> **status**: p2_done（含短线「威科夫：」日线只读展示）  
 > **日期**: 2026-07-31  
-> **产品法源**: `BUSINESS.md` §2.0 / §2.2（中线状态 = **仅周线威科夫**；短线日线阶段只对照）  
+> **产品法源**: `BUSINESS.md` §2.0 / §2.2（中线状态 = **仅周线威科夫**；短线日线威科夫只对照）  
 > **目标**: 按 Wyckoff Analytics 原典，用 **SC 低点 + AR 高点**（理想再加 ST 测 SC）钉 Phase A / TR 种子边界；固定 15 根只作搜索/超时，**不定义周期**  
 > **读者**: 下一任实现 Agent（只读本文 + 法源 + 下列代码锚点即可动手）
 
 ---
 
-## 短线「威科夫：」日线阶段（展示合同，2026-07-31）
+## 短线「威科夫：」（展示合同，2026-07-31）
 
 | 项 | 合同 |
 |----|------|
 | 用途 | **只给人看**；与中线同构算法（日线 K），分开展示 |
-| 标签 | 短线 `威科夫：`（与中线点名同构；正文带「仅对照」）；事件另起 `事件：` |
-| 无箱体 | 与中线同构：诚实「无 · 无清晰区间 · 暂不出阶段 · 仅对照」；forming 写「区间未钉」 |
-| 禁止 | 进共振背景岗 / fusion / 中线定论 / 单独开仓 |
+| 标签 | 短线 `威科夫：`（与中线点名同构；**禁止**「日线阶段：」；正文带「仅对照」）；事件另起 `事件：` |
+| 无箱体 | 与中线同构：诚实「无 · 无清晰区间 · 暂定不出 · 仅对照」；forming 写「箱体未成形 · 下沿 xx（上沿未出）」；established 写「箱体 lo-hi」 |
+| 禁止 | 进共振背景岗 / fusion / 中线定论 / 单独开仓；面板写「日线阶段：」 |
 | 实现 | `format_wyckoff_daily_phase_light` / `format_daily_phase_display` + `short_midline` 在「缠论：」后、「事件：」前 |
+| 中线箱体 | 中线 `format_wyckoff_midline_light` **也**展示同款箱体价（结构「阶段 · [箱体] · 事件 · 含义」；共用 `_phase_a_box_phrase`） |
 
 ---
 
@@ -26,7 +27,7 @@
 2. **P1（本迭代）**：透出 `sc_low` / `ar_high`（及可选 `phase_a_range` 状态）；SC 与 AR **共用同一 SC 锚点扫描**；`forming` = 仅有 SC；`established` = SC+AR（无 AR 不得假 established）；AR 放量 1.2× 标为 **soft**，文档/后续可降级。  
 3. **P2（已完成）**：种子箱挂 `phase_tr_gated`（forming / 无 established 叠加 P0-B）；广义 ST（测 SC）独立 `_detect_secondary_test_sc`。  
 4. **禁止**：日线威科夫进中线定论 / fusion；用固定 N 日窗**定义** TR 周期；无 AR 仍输出 established。  
-5. 日线威科夫：短线「威科夫：」阶段对照 +「事件：」灯（`format_wyckoff_event_light`），与中线阶段无关、不进 fusion。
+5. 日线威科夫：短线「威科夫：」对照 +「事件：」灯（`format_wyckoff_event_light`），与中线无关、不进 fusion。
 
 ---
 
@@ -40,13 +41,13 @@
 | AR 价字段 | `ar_high` 边界价；`ar_price` 保留 close 供旧消费 | 同上 |
 | Phase A 边界 | `phase_a_range` + 顶栏 `phase_a_status`；`forming`/`established`/`none` | `wyckoff_core._build_phase_a_range` |
 | TR 边界 | 分位带 `tr_upper`/`tr_lower` **并存**；established 前不得借假 TR 抬 B/C/D（**P2-A 已落地**） | `_detect_trading_range` |
-| 阶段文案 | SC+AR →「停止：SC+AR」；仅 SC →「卖力高潮：SC，区间未钉」（须过 P0-B TR 门控才赋 accumulation_a） | `wyckoff_phase._detect_phase` |
+| 阶段文案 | SC+AR →「停止：SC+AR」；仅 SC →「卖力高潮：SC，箱体未成形」（须过 P0-B TR 门控才赋 accumulation_a） | `wyckoff_phase._detect_phase` |
 | AR 量能 | 结构满足仍亮；`ar_volume_soft=True` 标弱量（非唯一硬否决） | `_detect_ar` |
 | 常量 | `WYCKOFF_CLIMAX_ANCHOR_BARS=15`；SC/AR/阶段扫描共用 | `config.py` |
 | 日线事件灯 | AR 文案「钉潜在上沿，仅反弹不能当反转」；**不参与**中线阶段 | `format_wyckoff_event_light` |
 
 **P1 已解（原 §6）**：SC/AR 锚点窗一致；`ar_high` 透出；无 AR 不假 `established`；AR 量能标 soft。  
-**P2 已落地**：分位 TR 与 `phase_a_range` 种子箱门控（§4.3）；广义 ST `_detect_secondary_test_sc`（§4.4）；`wyckoff_view` 可选「区间未钉」/ gate_reason 摘要。  
+**P2 已落地**：分位 TR 与 `phase_a_range` 种子箱门控（§4.3）；广义 ST `_detect_secondary_test_sc`（§4.4）；`wyckoff_view` 可选「箱体未成形」/ gate_reason 摘要。  
 
 ---
 
@@ -108,7 +109,7 @@ WYCKOFF_CLIMAX_ANCHOR_BARS = 15   # SC/AR 共用锚点扫描上限（搜索/超�
 4. **`wyckoff_core.wyckoff_analysis`**：组装 `phase_a_range`；`status` 规则见 §3.4。  
 5. **`_detect_phase`**（可选 P1 小改）：  
    - `established` 才允许 SC+AR 标签为「停止：SC+AR」并参与 `acc_b_ctx` 的 **边界语义**（信号 bool 可仍亮）。  
-   - 仅 SC（forming）→ 积累 A 文案区分「卖力高潮：SC（区间未钉）」；**禁止**文案/View 写「TR 已建立」。  
+   - 仅 SC（forming）→ 积累 A 文案区分「卖力高潮：SC（箱体未成形）」；**禁止**文案/View 写「TR 已建立」。  
 6. **不改** fusion / 日线中线 fallback / `format_wyckoff_event_light` 主路径（仍日线灯）。
 
 ### 3.4 status 规则
@@ -142,7 +143,7 @@ WYCKOFF_CLIMAX_ANCHOR_BARS = 15   # SC/AR 共用锚点扫描上限（搜索/超�
 2) wyckoff_events：_find_sc_anchor；对齐 _detect_selling_climax / _detect_ar
 3) wyckoff_core：phase_a_range 组装
 4) wyckoff_phase：forming/established 文案与 acc_b_ctx 边界语义（最小）
-5) wyckoff_view：summary 可选反映「区间未钉」（微信红线）
+5) wyckoff_view：summary 可选反映「箱体未成形」（微信红线）
 6) tests
 ```
 
@@ -175,7 +176,7 @@ python -m pytest 02-共享模块-shared/tests/test_wyckoff_*.py -q
 
 | 方案 | 行为 | 结论 |
 |------|------|------|
-| A | `phase=accumulation_a`，文案「卖力高潮：SC，区间未钉」 | ✅ **选用** |
+| A | `phase=accumulation_a`，文案「卖力高潮：SC，箱体未成形」 | ✅ **选用** |
 | B | `phase=none` + `phase_tr_gated=True`，gate_reason=`forming_phase_a` | ❌ 不选 |
 
 **选用 A 的理由**：SC 是原典 Phase A 停止行为，P1 已诚实透出；P2 要禁的是**借假 TR 抬 B/C/D**，不是抹掉 SC 语义；若改 B 会与 P0-B「无 TR → none」混淆，且 View/链排序丢失「有 SC 待 AR」可读性。
@@ -211,7 +212,7 @@ secondary_test_sc_bar_idx: int | None    # 可选，调试
 | `phase_a_status` | 分位 TR | 事件灯（SC/AR/Spring…） | 允许阶段 | 禁止阶段 |
 |------------------|---------|-------------------------|----------|----------|
 | `none` | 任意 | 可亮 | 依 P0-B + 现逻辑 | — |
-| `forming` | 任意（含高质量分位 TR） | **可亮** | **`accumulation_a`（区间未钉）仅此** | `accumulation_b/c/d`、`distribution_*`、`markup`、`markdown` |
+| `forming` | 任意（含高质量分位 TR） | **可亮** | **`accumulation_a`（箱体未成形）仅此** | `accumulation_b/c/d`、`distribution_*`、`markup`、`markdown` |
 | `forming` | 无 / 低质量 | 可亮 | 同上或 P0-B 早退 `none`（取更严） | 同上 + P0-B 禁止项 |
 | 非 `established` | 仅有分位 TR（`tr_quality ≥ MIN`） | 可亮 | 最高 `accumulation_a`（若 SC）或 P0-B 允许的 `none` | **不得**因分位 TR alone 进 B/C/D / 派发 / markup/markdown |
 | `established` | 分位 TR 并存 | 可亮 | 正常阶段机（P0-B 通过后） | — |
@@ -230,7 +231,7 @@ secondary_test_sc_bar_idx: int | None    # 可选，调试
    - P0-B：`no_tr` / `low_quality` → 现有 gated 早退（保留）。  
    - P2-A：`forming` → 允许落到 §4.3.1 允许的 `accumulation_a` 分支；**在** B/C/D / markup / markdown / distribution 分支前 **短路**（或统一后置 clamp：`forming` 时 phase 最高 `accumulation_a`）。  
    - P2-A：`phase_a_status != established` 且试图进 B/C/D（含 compression→B、Spring→C/D、SOS→D、markup 等）→ gated，`gate_reason=no_established_seed`。  
-3. **forming + SC**：保留现文案「积累期 A（卖力高潮：SC，区间未钉）」；`phase_tr_gated=False`（forming 本身不是 gate，而是阶段上限）。  
+3. **forming + SC**：保留现文案「积累期 A（卖力高潮：SC，箱体未成形）」；`phase_tr_gated=False`（forming 本身不是 gate，而是阶段上限）。  
 4. **SC+AR + established**：保留「停止：SC+AR」→ `accumulation_a`；并可作为 `acc_b_ctx` 边界语义（P1 已部分落地）。
 
 #### 4.3.3 `phase_tr_gate_reason` 枚举（P0-B + P2-A 叠加）
@@ -304,15 +305,16 @@ tr_upper_seed = ar_high
 
 ### 4.5 View / 报告（最小）
 
-- `wyckoff_view`：`phase_a_status=forming` → summary 可含「区间未钉」；`phase_tr_gated` + reason 映射人话（微信红线）。  
+- `wyckoff_view`：`phase_a_status=forming` → summary 可含「箱体未成形」；`phase_tr_gated` + reason 映射人话（微信红线）。  
 - `tr` 子对象：established 时优先展示种子 `sc_low`/`ar_high`（及 refine 下沿），分位带来源标注可选。  
-- 日线 `format_wyckoff_event_light`：**不改**主路径；广义 ST 若亮灯用独立文案（非「Spring确认」）。
+- 日线 `format_wyckoff_event_light`：**不改**主路径；广义 ST 若亮灯用独立文案（非「Spring确认」）。  
+- 中线 `format_wyckoff_midline_light` / 短线 `format_wyckoff_daily_phase_light`：共用 `_phase_a_box_phrase` 写出箱体上下沿（`箱体 lo-hi` / `箱体未成形 · 下沿…（上沿未出）`）。
 
 ### 4.6 验收用例（必须有测）
 
 | ID | 用例 | 期望 |
 |----|------|------|
-| P2-R1 | **forming**：SC 无 AR + 高质量分位 TR + Spring 形态 | `spring_signal` 可 True；`phase` **仅** `accumulation_a`（区间未钉）；**非** b/c/d/markup |
+| P2-R1 | **forming**：SC 无 AR + 高质量分位 TR + Spring 形态 | `spring_signal` 可 True；`phase` **仅** `accumulation_a`（箱体未成形）；**非** b/c/d/markup |
 | P2-R2 | **无 established**：`tr_quality=0.6` 分位 TR + SC+AR 信号但 `phase_a_status=forming`（无 ar_high） | `gate_reason` 含 `no_established_seed` 或 phase clamp；**非** accumulation_b/c/d |
 | P2-R3 | **established**：SC+AR + 种子 overlay | `phase_a_status=established`；`tr_lower`/`tr_upper` 来自 `sc_low`/`ar_high`（`tr_seed_source=phase_a_seed`）；可进 accumulation_b（若有 B 事件） |
 | P2-R4 | P0-B 叠加：forming + `tr_quality=0.2` | P0-B 优先：`phase=none`，`gate_reason=low_quality`（严于 forming 的 A） |
@@ -373,7 +375,7 @@ python -m pytest 02-共享模块-shared/tests/test_wyckoff_*.py -q
 |---|--------|---------|
 | 1 | SC 5 根 vs AR 15 根 | ✅ `_find_sc_anchor` + `WYCKOFF_CLIMAX_ANCHOR_BARS` |
 | 2 | `ar_price`=close | ✅ `ar_high` 边界价；close 保留 alias |
-| 3 | 仅 SC 即 accumulation_a / 无 forming | ✅ `phase_a_range.status=forming`；文案「区间未钉」（须过 TR 门控才赋 A） |
+| 3 | 仅 SC 即 accumulation_a / 无 forming | ✅ `phase_a_range.status=forming`；文案「箱体未成形」（须过 TR 门控才赋 A） |
 | 4 | 分位 TR ≠ SC/AR | ✅ 并存；P2-A 种子 overlay + forming/no_established 门控 |
 | 5 | AR 放量 1.2× hard | ✅ 结构为主 + `ar_volume_soft`；P2-C 可选 soft 化 |
 | 6 | AR 后窗 1–7 根 | ⚠️ 现为 1–7 根（`max(3, anchor//2)`）；超长延迟仍 forming |
@@ -391,6 +393,9 @@ python -m pytest 02-共享模块-shared/tests/test_wyckoff_*.py -q
 | AR | `wyckoff_events._detect_ar` |
 | 阶段机 | `wyckoff_phase._detect_phase` |
 | 日线事件灯 | `wyckoff_core.format_wyckoff_event_light` |
+| 短线威科夫只读 | `format_wyckoff_daily_phase_light` / `format_daily_phase_display` |
+| 中线威科夫+箱体 | `format_wyckoff_midline_light`（阶段 · [箱体] · 事件 · 含义） |
+| 箱体人话片段 | `_phase_a_box_phrase`（中短线共用；旧词「区间未钉」仅兼容） |
 | TR 分位 | `wyckoff_events._detect_trading_range` |
 | 中线入口 | `wyckoff_strategy_midline`（weekly only） |
 

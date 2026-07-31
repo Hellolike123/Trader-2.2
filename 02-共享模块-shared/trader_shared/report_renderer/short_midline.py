@@ -686,7 +686,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
         if _fb_d.get("timeframe") != "weekly":
             _wyk_daily_u = _fb_d
 
-    # 1c) 威科夫：日线阶段只对照（与中线同构；不进背景岗/出手）
+    # 1c) 威科夫：日线只对照（标签固定「威科夫：」，禁止「日线阶段：」；不进背景岗/出手）
     try:
         from trader_shared.wyckoff_view import format_daily_phase_display
 
@@ -695,6 +695,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
             symbol=str(r.get("ts_code") or r.get("code") or ""),
         )
         _phase_body = str(_phase_d).strip()
+        # 兼容旧前缀；面板只出「威科夫：」
         for _pfx in ("日线阶段：", "威科夫："):
             if _phase_body.startswith(_pfx):
                 _phase_body = _phase_body[len(_pfx):].strip()

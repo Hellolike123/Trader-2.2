@@ -146,7 +146,7 @@ def _apply_p2_phase_a_gates(
     if phase_a_status == "forming" and sc_found:
         out.update({
             "phase": "accumulation_a",
-            "phase_label": "积累期 A（卖力高潮：SC，区间未钉）",
+            "phase_label": "积累期 A（卖力高潮：SC，箱体未成形）",
             "phase_confidence_delta": min(float(out.get("phase_confidence_delta") or 0.0), 0.05),
             "phase_tr_gated": True,
             "phase_tr_gate_reason": "forming_phase_a",
@@ -491,7 +491,7 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
     if sc_found:
         return _finish({
             "phase": "accumulation_a",
-            "phase_label": "积累期 A（卖力高潮：SC，区间未钉）",
+            "phase_label": "积累期 A（卖力高潮：SC，箱体未成形）",
             "phase_confidence_delta": 0.05,
             "spring_premature": spring_premature,
             "upthrust_premature": upthrust_premature,
