@@ -94,7 +94,7 @@ def _chan_to_signal(chan_result: dict) -> dict:
     divergence = chan.get("divergence", {}) if isinstance(chan.get("divergence"), dict) else {}
     trend_label = chan.get("trend_label", "数据不足")
 
-    _SELL_RANK = {"一类卖": 0, "类一卖": 1, "二类卖": 2, "三类卖": 3}
+    _SELL_RANK = {"一类卖": 0, "类二卖": 1, "类一卖": 2, "二类卖": 3, "三类卖": 4}
     _BUY_RANK = {"一类买": 0, "类二买": 1, "类一买": 2, "二类买": 3, "三类买": 4}
     _CHAN_CONF = {3: 0.8, 2: 0.55, 1: 0.35}
 
@@ -138,23 +138,26 @@ def _chan_to_signal(chan_result: dict) -> dict:
         reasons = {
             "一类卖": "缠论一类卖 (顶背驰)",
             "类一卖": "缠论类一卖 (柱弱确认·非面积背驰)",
+            "类二卖": "缠论类二卖 (反抽偏弱)",
             "二类卖": "缠论二类卖 (高点降低)",
             "三类卖": "缠论三类卖 (跌破中枢)",
         }
         types = {
             "一类卖": "chan_sell_1",
             "类一卖": "chan_sell_soft1",
+            "类二卖": "chan_sell_like2",
             "二类卖": "chan_sell_2",
             "三类卖": "chan_sell_3",
         }
         tiers = {
             "一类卖": SignalTier.CHAN_SELL_1,
             "类一卖": SignalTier.CHAN_SELL_SOFT1,
+            "类二卖": SignalTier.CHAN_SELL_LIKE2,
             "二类卖": SignalTier.CHAN_SELL_2,
             "三类卖": SignalTier.CHAN_SELL_3,
         }
         if sp_type in reasons:
-            if sp_type == "类一卖":
+            if sp_type in ("类一卖", "类二卖"):
                 conf = _point_conf(best_sell, 0.35)
             return {
                 "direction": -1,

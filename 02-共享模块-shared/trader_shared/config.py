@@ -110,6 +110,10 @@ CHAN_DROP_LEADING_DANGLING_STROKE: bool = True
 # P3：背驰检测锚定「最后中枢」而非固定窗口——只比较最后中枢之后的趋势 legs
 # （离开段 c 与其次级别同向段），避免把陈旧历史当现状。关闭则回退到 P0b 窗口逻辑。
 CHAN_DIVERGENCE_ANCHOR_LAST_PIVOT: bool = True
+# 背驰力度比较模式（运行时也可被 CHAN_DIVERGENCE_BC 环境变量覆盖）：
+#   legacy — 锚定后末两同向笔（现行默认，生产不变）
+#   strict — 最后中枢进入段 b vs 离开段 c（回测对照用；过闸后再考虑切默认）
+CHAN_DIVERGENCE_BC: str = os.environ.get("CHAN_DIVERGENCE_BC", "legacy").strip().lower()
 SIGNAL_RULES_ENABLED: bool = False          # 信号组合规则引擎（YAML 驱动，实验性，默认关闭）
 
 # ---- ChanlunEngine 状态持久化目录（Phase 1 新增）----

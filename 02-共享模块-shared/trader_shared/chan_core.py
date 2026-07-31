@@ -96,6 +96,7 @@ def _chanlun_compute(
     weekly_bars: list[dict] | None = None,
     timeframe: str = "daily",
     raw_bars: list[dict] | None = None,
+    divergence_bc: str | None = None,
 ) -> dict:
     """缠论分析共享内核（批量接口与增量引擎共用）。
 
@@ -148,17 +149,19 @@ def _chanlun_compute(
     _anchor_bar = None
     if CHAN_DIVERGENCE_ANCHOR_LAST_PIVOT:
         _anchor_bar = _last_pivot_anchor_bar(segments, strokes, merged_zones)
-    divergence = detect_divergence(cleaned, strokes, anchor_bar=_anchor_bar)
+    divergence = detect_divergence(
+        cleaned, strokes, anchor_bar=_anchor_bar, zones=zones, bc_mode=divergence_bc,
+    )
     macd_divergence_buy = _check_macd_for_2nd_buy(cleaned, strokes)
     macd_divergence_sell = _check_macd_for_2nd_sell(cleaned, strokes)
 
     buy_points = detect_buy_points(
         strokes, zones, current, macd_for_buy_sell_curr, macd_for_buy_sell_prev,
-        macd_divergence_buy, bars=cleaned,
+        macd_divergence_buy, bars=cleaned, bc_mode=divergence_bc,
     )
     sell_points = detect_sell_points(
         strokes, zones, current, macd_for_buy_sell_curr, macd_for_buy_sell_prev,
-        macd_divergence_sell, bars=cleaned,
+        macd_divergence_sell, bars=cleaned, bc_mode=divergence_bc,
     )
 
     # --- E1: 多级别区间套确认 ---
@@ -300,11 +303,12 @@ def chanlun_analysis(
     analysis_date: str | None = None,
     weekly_bars: list[dict] | None = None,
     timeframe: str = "daily",
+    divergence_bc: str | None = None,
 ) -> dict:
     """缠论批量分析（无状态接口，向后兼容）。
 
     委托共享内核 `_chanlun_compute`：先算「包含处理 + MACD」，再交给内核。
-    输出与重构前字节级一致（仅把结构层/后处理抽取为共享函数，算法行为未改）。
+    divergence_bc: None 跟环境/配置（默认 legacy）；回测可显式传 \"strict\"/\"legacy\"。
     """
     if len(bars) < CHANLUN_MIN_BARS:
         return {}
@@ -319,7 +323,7 @@ def chanlun_analysis(
         cleaned, current,
         higher_trend=higher_trend, symbol=symbol,
         analysis_date=analysis_date, weekly_bars=weekly_bars, timeframe=timeframe,
-        raw_bars=bars,
+        raw_bars=bars, divergence_bc=divergence_bc,
     )
 
 class ChanlunEngine:
@@ -513,6 +517,7 @@ _CHAN_TYPE_CANONICAL = {
     "三类买": "chan_buy_3",
     "一类卖": "chan_sell_1",
     "类一卖": "chan_sell_soft1",
+    "类二卖": "chan_sell_like2",
     "二类卖": "chan_sell_2",
     "三类卖": "chan_sell_3",
 }
@@ -641,7 +646,7 @@ def format_chanlun_theory_line(chan_result: Any) -> str:
     direction = 0
     # 卖优先（含类一卖弱确认），对齐 fusion
     if any(
-        isinstance(p, dict) and p.get("type") in ("一类卖", "类一卖", "二类卖", "三类卖")
+        isinstance(p, dict) and p.get("type") in ("一类卖", "类一卖", "类二卖", "二类卖", "三类卖")
         for p in sell_points
     ):
         direction = -1
@@ -683,6 +688,7 @@ _CHAN_TYPE_SHORT = {
     "三类买": "三买",
     "一类卖": "一卖",
     "类一卖": "类一卖",
+    "类二卖": "类二卖",
     "二类卖": "二卖",
     "三类卖": "三卖",
 }
@@ -694,10 +700,11 @@ _CHAN_TYPE_NOTE = {
     "三类买": "突破中枢",
     "一类卖": "顶背驰",
     "类一卖": "柱弱确认",
+    "类二卖": "反抽偏弱",
     "二类卖": "高点降低",
     "三类卖": "跌破中枢",
 }
-_SELL_RANK_DISP = {"一类卖": 0, "类一卖": 1, "二类卖": 2, "三类卖": 3}
+_SELL_RANK_DISP = {"一类卖": 0, "类二卖": 1, "类一卖": 2, "二类卖": 3, "三类卖": 4}
 _BUY_RANK_DISP = {"一类买": 0, "类二买": 1, "类一买": 2, "二类买": 3, "三类买": 4}
 
 
@@ -884,7 +891,8 @@ def format_chanlun_short_light(
         if note not in parts[0] and not (note in ("底背驰", "顶背驰") and note in parts[0]):
             # 一买 的 note 是 底背驰 → 要挂上
             if parts[0] in (
-                "一买", "一卖", "二买", "三买", "二卖", "三卖", "类二买", "类一买", "类一卖",
+                "一买", "一卖", "二买", "三买", "二卖", "三卖",
+                "类二买", "类二卖", "类一买", "类一卖",
             ) or info["status"] == "point":
                 if note != parts[0]:
                     parts.append(note)
@@ -932,7 +940,8 @@ def format_chanlun_short_light(
     )
     if wave and not _has_sig:
         sig_kw = {
-            "一类卖", "类一卖", "二类卖", "三类卖", "一类买", "类一买", "二类买", "三类买", "类二买",
+            "一类卖", "类一卖", "类二卖", "二类卖", "三类卖",
+            "一类买", "类一买", "二类买", "三类买", "类二买",
             "一买", "二买", "三买", "一卖", "二卖", "三卖", "顶背驰", "底背驰",
         }
         _struct_noise = (

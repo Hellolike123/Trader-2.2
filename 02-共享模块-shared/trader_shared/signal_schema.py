@@ -30,7 +30,8 @@ class SignalTier:
     CHAN_SELL_1 = "chan_sell_1"               # 一类卖 (顶背驰·面积)
     CHAN_SELL_2 = "chan_sell_2"               # 二类卖
     CHAN_SELL_3 = "chan_sell_3"               # 三类卖
-    CHAN_SELL_SOFT1 = "chan_sell_soft1"       # 类一卖 (柱序列弱确认) —— 不强空
+    CHAN_SELL_LIKE2 = "chan_sell_like2"       # 类二卖 (反抽偏弱) —— 不强空
+    CHAN_SELL_SOFT1 = "chan_sell_soft1"       # 类一卖 (柱序列弱确认/盘整背驰) —— 不强空
     CHAN_TOP_DIVERGENCE = "chan_top_div"      # 顶背驰
     CHAN_BOTTOM_DIVERGENCE = "chan_bottom_div"  # 底背驰
     CHAN_TREND_UP = "chan_trend_up"           # 拉升段 (不强多)

@@ -1,6 +1,7 @@
 """Chan structure classification + buy/sell points + divergence."""
 from __future__ import annotations
 import math
+import os
 from typing import Any
 from trader_shared.light_data import to_float
 from trader_shared.signal_utils import normalize_signal_id
@@ -25,6 +26,7 @@ try:
         CHAN_WEEKLY_CONSOL_SEGS_HIGH,
         CHAN_WEEKLY_CONSOL_SEGS_MID,
         CHAN_DIVERGENCE_FALLBACK_WINDOW,
+        CHAN_DIVERGENCE_BC,
     )
 except ImportError:
     CHANLUN_MIN_BARS = 20
@@ -46,6 +48,7 @@ except ImportError:
     CHAN_WEEKLY_CONSOL_SEGS_HIGH = 3
     CHAN_WEEKLY_CONSOL_SEGS_MID = 2
     CHAN_DIVERGENCE_FALLBACK_WINDOW = 120
+    CHAN_DIVERGENCE_BC = "legacy"
 
 from .chan_geometry import (
     _aggregate_bars,
@@ -572,6 +575,95 @@ def _historical_type1_sell_ok(
     return True
 
 
+def resolve_divergence_bc_mode(bc_mode: str | None = None) -> str:
+    """背驰比较模式：legacy（末两同向笔）| strict（中枢 b vs c）。默认 legacy。"""
+    raw = (bc_mode if bc_mode is not None else os.environ.get("CHAN_DIVERGENCE_BC", CHAN_DIVERGENCE_BC))
+    mode = str(raw or "legacy").strip().lower()
+    return mode if mode in ("legacy", "strict") else "legacy"
+
+
+def _bc_stroke_pair(
+    strokes: list[dict],
+    zone: dict,
+    direction: str,
+) -> tuple[dict | None, dict | None]:
+    """最后中枢的进入段 b 与离开段 c（同方向笔）。
+
+    规则（formulas.md §5.4）：
+      - c：中枢之后（start_index > zone_end）同向笔的末笔
+      - b：中枢结束前（end_index <= zone_end）同向笔的最近一笔
+      - 缺 index / 缺 b 或 c → (None, None)
+    """
+    if not strokes or not isinstance(zone, dict):
+        return None, None
+    z_end = _zone_last_end_index(zone)
+    if z_end < 0:
+        return None, None
+
+    same = [s for s in strokes if isinstance(s, dict) and s.get("direction") == direction]
+    after: list[dict] = []
+    before: list[dict] = []
+    for s in same:
+        try:
+            si = s.get("start_index")
+            ei = s.get("end_index")
+            if si is not None and int(si) > z_end:
+                after.append(s)
+            elif ei is not None and int(ei) <= z_end:
+                before.append(s)
+        except (TypeError, ValueError):
+            continue
+    if not after or not before:
+        return None, None
+    return before[-1], after[-1]
+
+
+def _divergence_kind_for_zones(valid_zones: list[dict], direction: str) -> str:
+    """有 b/c 可比较时的 kind：严格趋势中枢 → trend，否则 range。"""
+    if direction == "down" and _strict_down_trend_zones(valid_zones):
+        return "trend"
+    if direction == "up" and _strict_up_trend_zones(valid_zones):
+        return "trend"
+    if valid_zones:
+        return "range"
+    return "none"
+
+
+def resolve_force_stroke_pair(
+    strokes: list[dict],
+    valid_zones: list[dict],
+    direction: str,
+    *,
+    bc_mode: str | None = None,
+    anchor_bar: int | None = None,
+) -> tuple[dict | None, dict | None, str]:
+    """解析用于力度比较的 (prev/b, curr/c, kind)。
+
+    legacy：锚定后（或全序列）末两同向笔；kind 由中枢拓扑标。
+    strict：必须能解析最后中枢 b/c；否则返回 (None, None, "none")。
+    """
+    mode = resolve_divergence_bc_mode(bc_mode)
+    same = [s for s in strokes if isinstance(s, dict) and s.get("direction") == direction]
+    if mode == "strict":
+        if not valid_zones:
+            return None, None, "none"
+        b, c = _bc_stroke_pair(strokes, valid_zones[-1], direction)
+        if b is None or c is None:
+            return None, None, "none"
+        return b, c, _divergence_kind_for_zones(valid_zones, direction)
+
+    # legacy：可选锚定过滤（与 detect_divergence 旧行为一致）
+    if anchor_bar is not None:
+        anchored = [s for s in same if to_float(s.get("end_index")) is not None
+                    and float(s.get("end_index")) >= anchor_bar]
+        if len(anchored) >= 2:
+            same = anchored
+    if len(same) < 2:
+        return None, None, "none"
+    kind = _divergence_kind_for_zones(valid_zones, direction) if valid_zones else "none"
+    return same[-2], same[-1], kind
+
+
 def detect_buy_points(
     strokes: list[dict],
     zones: list[dict],
@@ -580,6 +672,7 @@ def detect_buy_points(
     macd_hist_prev: float | None = None,
     macd_divergence_ok: bool = False,
     bars: list[dict] | None = None,
+    bc_mode: str | None = None,
 ) -> list[dict]:
     """检测缠论买点（P1 定义纠偏）。
 
@@ -614,29 +707,30 @@ def detect_buy_points(
     # ── 一类买：下跌背驰（两档：严格趋势 / 放宽结构）──
     # 严格档：≥2 个不重叠下移中枢（原典趋势级别）
     # 放宽档：≥1 个中枢 + 末段创新低 + MACD 背驰（结构级别，实盘更实用）
-    if last_stroke["direction"] == "down" and len(down_strokes) >= 2:
-        prev_down = down_strokes[-2]
-        curr_down = down_strokes[-1]
-        price_new_low = curr_down["end_price"] <= prev_down["end_price"]
-        if price_new_low and valid_zones:
+    # strict 模式：力度对用最后中枢 b/c；legacy：末两同向 down
+    if last_stroke["direction"] == "down" and len(down_strokes) >= 2 and valid_zones:
+        prev_down, curr_down, force_kind = resolve_force_stroke_pair(
+            strokes, valid_zones, "down", bc_mode=bc_mode
+        )
+        if prev_down is not None and curr_down is not None:
+            price_new_low = curr_down["end_price"] <= prev_down["end_price"]
             last_zone = valid_zones[-1]
-            # 放宽：末 down 在中枢之后即可，不要求 ≥2 中枢
-            if _stroke_leaves_after_zone(curr_down, last_zone):
+            if price_new_low and _stroke_leaves_after_zone(curr_down, last_zone):
                 area_prev = _stroke_macd_area(bars, prev_down, "neg")
                 area_curr = _stroke_macd_area(bars, curr_down, "neg")
-                _is_strict_trend = _strict_down_trend_zones(valid_zones)
+                _is_strict_trend = force_kind == "trend"
                 if area_prev is not None and area_curr is not None:
                     if _stroke_force_weaker(area_prev, area_curr, "down"):
-                        # 严格趋势 → 一类买(conf=3)；仅1中枢 → 类一买(conf=2)
                         bp_type = "一类买" if _is_strict_trend else "类一买"
                         bp_conf = 3 if _is_strict_trend else 2
                         buy_points.append({
                             "type": bp_type,
                             "price": round(curr_down["end_price"], 4),
                             "confidence": bp_conf,
+                            "divergence_kind": force_kind,
                         })
                 else:
-                    # 柱序列 fallback
+                    # 柱序列 fallback（strict 无 b/c 面积时仍可弱确认）
                     bar_ok = False
                     if bars and len(bars) >= 3:
                         h_vals = [to_float(b.get("macd_histogram")) for b in bars[-3:]]
@@ -658,7 +752,11 @@ def detect_buy_points(
                             "price": round(curr_down["end_price"], 4),
                             "confidence": 1,
                             "force_source": "hist_bar_fallback",
+                            "divergence_kind": "range",
                         })
+        elif resolve_divergence_bc_mode(bc_mode) == "legacy":
+            # legacy 且 resolve 失败时不应到此（有 ≥2 down）；strict 无 b/c 则静默
+            pass
 
     # ── P1 二类买：回抽不破前低；要求末笔即为该回抽 down（防粘滞）──
     if (
@@ -772,11 +870,16 @@ def detect_sell_points(
     macd_hist_prev: float | None = None,
     macd_divergence_ok: bool = False,
     bars: list[dict] | None = None,
+    bc_mode: str | None = None,
 ) -> list[dict]:
     """检测缠论卖点（与 detect_buy_points 对称，P1 定义）。
 
-    一类卖: 最后一笔 up + valid 中枢 + 两 up + 笔级顶背驰
-    二类卖: up_a→down→up_b 且 high_b<high_a 且 high_b>down_low + 力度/MACD 确认
+    一类卖: 上涨趋势（≥2 不重叠上移中枢）+ 离开段末 up 创新高 + 笔级顶背驰
+    类一卖: 单中枢盘整背驰（conf=2）或柱序列弱确认（conf=1）
+    二类卖: up_a→down→up_b 且 high_b<high_a 且 high_b>down_low；
+           且前置一类 = 时间轴上 up_a 满足历史一类结构（非同帧 sell_points）
+    类二卖: 同上结构几何，但历史一类不满足或力度/缩量未齐——卖侧放宽试探档
+           （fusion 不强空；正式「二类卖」才进强空路径）
     三类卖: 离开 ZD 之后出现反弹 up 且 end<=ZD；未反弹不报（上限 15%）
     bars 须为与 stroke index 对齐的序列（chanlun_analysis 传入 cleaned）。
     """
@@ -798,30 +901,30 @@ def detect_sell_points(
     up_strokes = [s for s in strokes if s["direction"] == "up"]
     down_strokes = [s for s in strokes if s["direction"] == "down"]
 
-    # ── P1 一类卖：上涨趋势背驰（严格缠论）──
-    # 须趋势（≥2 个严格不重叠上移中枢）；最后 up 在最后中枢之后
-    _is_up_trend = _strict_up_trend_zones(valid_zones)
-    if (
-        last_stroke["direction"] == "up"
-        and _is_up_trend
-        and len(up_strokes) >= 2
-    ):
-        if _stroke_leaves_after_zone(up_strokes[-1], valid_zones[-1]):
-            prev_up = up_strokes[-2]
-            curr_up = up_strokes[-1]
+    # ── 一类卖：上涨背驰（两档：严格趋势 / 放宽结构）──
+    # strict：力度对用最后中枢 b/c；legacy：末两同向 up
+    if last_stroke["direction"] == "up" and len(up_strokes) >= 2 and valid_zones:
+        prev_up, curr_up, force_kind = resolve_force_stroke_pair(
+            strokes, valid_zones, "up", bc_mode=bc_mode
+        )
+        if prev_up is not None and curr_up is not None:
             price_new_high = curr_up["end_price"] >= prev_up["end_price"]
-            if price_new_high:
+            last_zone = valid_zones[-1]
+            if price_new_high and _stroke_leaves_after_zone(curr_up, last_zone):
                 area_prev = _stroke_macd_area(bars, prev_up, "pos")
                 area_curr = _stroke_macd_area(bars, curr_up, "pos")
+                _is_strict_trend = force_kind == "trend"
                 if area_prev is not None and area_curr is not None:
                     if _stroke_force_weaker(area_prev, area_curr, "up"):
+                        sp_type = "一类卖" if _is_strict_trend else "类一卖"
+                        sp_conf = 3 if _is_strict_trend else 2
                         sell_points.append({
-                            "type": "一类卖",
+                            "type": sp_type,
                             "price": round(curr_up["end_price"], 4),
-                            "confidence": 3,
+                            "confidence": sp_conf,
+                            "divergence_kind": force_kind,
                         })
                 else:
-                    # P7: 无 index / 无法算面积：fallback 要求至少 3 根连续正柱回落
                     bar_ok = False
                     if bars and len(bars) >= 3:
                         h_vals = [to_float(b.get("macd_histogram")) for b in bars[-3:]]
@@ -838,15 +941,15 @@ def detect_sell_points(
                             and macd_hist_current < macd_hist_prev
                         )
                     if bar_ok:
-                        # 柱序列弱确认：禁止冒充「一类卖」
                         sell_points.append({
                             "type": "类一卖",
                             "price": round(curr_up["end_price"], 4),
                             "confidence": 1,
                             "force_source": "hist_bar_fallback",
+                            "divergence_kind": "range",
                         })
 
-    # ── P1 二类卖：回抽不过前高；要求末笔即为该回抽 up（防粘滞）──
+    # ── 二类卖：回抽不过前高；要求末笔即为该回抽 up（防粘滞）──
     if (
         len(strokes) >= 3
         and len(up_strokes) >= 2
@@ -873,17 +976,31 @@ def detect_sell_points(
                 # P8: 两笔之间无同向笔 → 结构不成立，跳过二类卖
                 pass
             else:
-                # 前置一类：时间轴上 up_a 为历史一类高点（非同帧 sell_points）
+                # 正式二类卖：历史一类 + 结构 + (面积/MACD) + 缩量
+                # 类二卖：仅结构 + (面积/MACD/缩量任一项)；无趋势中枢也可（卖侧放宽）
                 structure_ok = high_b < high_a and high_b > down_low
-                if structure_ok and _historical_type1_sell_ok(up_strokes, valid_zones, bars):
+                if structure_ok:
+                    hist_type1_ok = _historical_type1_sell_ok(
+                        up_strokes, valid_zones, bars
+                    )
                     area_prev = _stroke_macd_area(bars, up_strokes[-2], "pos")
                     area_curr = _stroke_macd_area(bars, up_strokes[-1], "pos")
                     area_ok = _stroke_force_not_much_stronger(area_prev, area_curr, "up")
-                    if area_ok or macd_divergence_ok:
+                    vol_shrink = _volume_shrink_between_strokes(
+                        bars, up_strokes[-2], up_strokes[-1]
+                    )
+                    force_ok = area_ok or macd_divergence_ok
+                    if hist_type1_ok and force_ok and vol_shrink:
                         sell_points.append({
                             "type": "二类卖",
                             "price": round(high_b, 4),
                             "confidence": 2,
+                        })
+                    elif force_ok or vol_shrink:
+                        sell_points.append({
+                            "type": "类二卖",
+                            "price": round(high_b, 4),
+                            "confidence": 1,
                         })
 
     # ── P1/P2 三类卖：离开后反弹不回；反弹须为近端（末 2 笔内）──
@@ -928,105 +1045,121 @@ def detect_divergence(
     bars: list[dict],
     strokes: list[dict] | None = None,
     anchor_bar: int | None = None,
+    zones: list[dict] | None = None,
+    bc_mode: str | None = None,
 ) -> dict:
     """背驰检测（P1：优先笔级 MACD 面积；仅无笔/无 index/面积不可算时 fallback 峰谷）。
 
     某一侧（顶/底）一旦笔级面积可算，该侧以笔级结论为准，不再被峰谷覆盖。
     两侧独立评估，一侧 True 不短路另一侧。
 
-    P3（anchor_bar）：背驰锚定「最后中枢」而非固定窗口。传入最后中枢右边界的
-    bar 索引后，笔级比较只取 end_index >= anchor_bar 的趋势 legs（离开段 c 与其
-    次级别同向段），fallback 峰谷窗口也从 anchor_bar 起算，杜绝陈旧历史污染现状。
-    anchor_bar 为 None 时回退到 P0b 的近期窗口逻辑（向后兼容）。
+    P3（anchor_bar）：legacy 模式锚定最后中枢后的趋势 legs。
+    strict 模式（CHAN_DIVERGENCE_BC=strict）：用最后中枢进入段 b vs 离开段 c；
+    缺 b/c 不报该侧笔级背驰，且不做峰谷 fallback（对照更干净）。
+
+    额外字段：bottom_kind / top_kind / kind ∈ {trend, range, none}
     """
-    result: dict[str, bool] = {"top_divergence": False, "bottom_divergence": False}
-    # 笔级是否已对该侧给出最终结论（True/False 都算已评估）
+    result: dict[str, Any] = {
+        "top_divergence": False,
+        "bottom_divergence": False,
+        "bottom_kind": "none",
+        "top_kind": "none",
+        "kind": "none",
+        "bc_mode": resolve_divergence_bc_mode(bc_mode),
+    }
     bottom_evaluated = False
     top_evaluated = False
+    mode = result["bc_mode"]
 
     n = len(bars)
     if n < 5:
         return result
 
-    # ── P1 优先：最后两段同向笔的面积背驰 ──
+    valid_zones = [z for z in (zones or []) if isinstance(z, dict) and z.get("valid")]
+
     if strokes:
-        down_strokes = [s for s in strokes if s["direction"] == "down"]
-        up_strokes = [s for s in strokes if s["direction"] == "up"]
-
-        # P3：只保留最后中枢之后的趋势 legs；锚定后不足两段则回退全序列，避免漏判
-        if anchor_bar is not None:
-            down_anchored = [s for s in down_strokes if to_float(s.get("end_index")) >= anchor_bar]
-            up_anchored = [s for s in up_strokes if to_float(s.get("end_index")) >= anchor_bar]
-            if len(down_anchored) >= 2:
-                down_strokes = down_anchored
-            if len(up_anchored) >= 2:
-                up_strokes = up_anchored
-
-        if len(down_strokes) >= 2:
-            prev_d, curr_d = down_strokes[-2], down_strokes[-1]
+        prev_d, curr_d, b_kind = resolve_force_stroke_pair(
+            strokes, valid_zones, "down", bc_mode=mode, anchor_bar=anchor_bar
+        )
+        if prev_d is not None and curr_d is not None:
             if curr_d["end_price"] <= prev_d["end_price"]:
                 a_prev = _stroke_macd_area(bars, prev_d, "neg")
                 a_curr = _stroke_macd_area(bars, curr_d, "neg")
                 if a_prev is not None and a_curr is not None:
                     bottom_evaluated = True
-                    # P5: 有 power 数据时用多维比较，否则回退到单维
                     if "power_price" in prev_d and "power_price" in curr_d:
-                        result["bottom_divergence"] = _stroke_force_weaker_multi(
+                        weak = _stroke_force_weaker_multi(
                             prev_d, curr_d, a_prev, a_curr, "down")
                     else:
-                        result["bottom_divergence"] = _stroke_force_weaker(a_prev, a_curr, "down")
+                        weak = _stroke_force_weaker(a_prev, a_curr, "down")
+                    result["bottom_divergence"] = bool(weak)
+                    if weak:
+                        result["bottom_kind"] = b_kind if b_kind != "none" else "range"
 
-        if len(up_strokes) >= 2:
-            prev_u, curr_u = up_strokes[-2], up_strokes[-1]
+        prev_u, curr_u, t_kind = resolve_force_stroke_pair(
+            strokes, valid_zones, "up", bc_mode=mode, anchor_bar=anchor_bar
+        )
+        if prev_u is not None and curr_u is not None:
             if curr_u["end_price"] >= prev_u["end_price"]:
                 a_prev = _stroke_macd_area(bars, prev_u, "pos")
                 a_curr = _stroke_macd_area(bars, curr_u, "pos")
                 if a_prev is not None and a_curr is not None:
                     top_evaluated = True
                     if "power_price" in prev_u and "power_price" in curr_u:
-                        result["top_divergence"] = _stroke_force_weaker_multi(
+                        weak = _stroke_force_weaker_multi(
                             prev_u, curr_u, a_prev, a_curr, "up")
                     else:
-                        result["top_divergence"] = _stroke_force_weaker(a_prev, a_curr, "up")
+                        weak = _stroke_force_weaker(a_prev, a_curr, "up")
+                    result["top_divergence"] = bool(weak)
+                    if weak:
+                        result["top_kind"] = t_kind if t_kind != "none" else "range"
 
-    # ── fallback：仅对「笔级未评估」的一侧使用【近期】峰谷（不扫全图历史）──
-    # P3：若已锚定最后中枢，从 anchor_bar 起算；否则扫最近 CHAN_DIVERGENCE_FALLBACK_WINDOW 根，
-    # 避免把几年前的旧背离当现状。
-    _fb_start = max(2, anchor_bar) if anchor_bar is not None else max(2, n - CHAN_DIVERGENCE_FALLBACK_WINDOW)
-    if not top_evaluated:
-        peaks: list[dict[str, Any]] = []
-        for i in range(_fb_start, n - 2):
-            high = to_float(bars[i].get("high"))
-            h_prev = to_float(bars[i - 1].get("high"))
-            h_next = to_float(bars[i + 1].get("high"))
-            macd = to_float(bars[i].get("macd_histogram"))
+    # strict：不做峰谷 fallback，避免与 b/c 口径混杂
+    if mode != "strict":
+        _fb_start = max(2, anchor_bar) if anchor_bar is not None else max(2, n - CHAN_DIVERGENCE_FALLBACK_WINDOW)
+        if not top_evaluated:
+            peaks: list[dict[str, Any]] = []
+            for i in range(_fb_start, n - 2):
+                high = to_float(bars[i].get("high"))
+                h_prev = to_float(bars[i - 1].get("high"))
+                h_next = to_float(bars[i + 1].get("high"))
+                macd = to_float(bars[i].get("macd_histogram"))
 
-            if high is not None and h_prev is not None and h_next is not None and macd is not None:
-                if high > h_prev and high > h_next:
-                    peaks.append({"index": i, "price": high, "macd": macd})
+                if high is not None and h_prev is not None and h_next is not None and macd is not None:
+                    if high > h_prev and high > h_next:
+                        peaks.append({"index": i, "price": high, "macd": macd})
 
-        if len(peaks) >= 2:
-            p1 = peaks[-2]
-            p2 = peaks[-1]
-            if p2["price"] > p1["price"] and p2["macd"] < p1["macd"]:
-                result["top_divergence"] = True
+            if len(peaks) >= 2:
+                p1 = peaks[-2]
+                p2 = peaks[-1]
+                if p2["price"] > p1["price"] and p2["macd"] < p1["macd"]:
+                    result["top_divergence"] = True
+                    result["top_kind"] = "range"
 
-    if not bottom_evaluated:
-        troughs: list[dict[str, Any]] = []
-        for i in range(_fb_start, n - 2):
-            low = to_float(bars[i].get("low"))
-            l_prev = to_float(bars[i - 1].get("low"))
-            l_next = to_float(bars[i + 1].get("low"))
-            macd = to_float(bars[i].get("macd_histogram"))
+        if not bottom_evaluated:
+            troughs: list[dict[str, Any]] = []
+            for i in range(_fb_start, n - 2):
+                low = to_float(bars[i].get("low"))
+                l_prev = to_float(bars[i - 1].get("low"))
+                l_next = to_float(bars[i + 1].get("low"))
+                macd = to_float(bars[i].get("macd_histogram"))
 
-            if low is not None and l_prev is not None and l_next is not None and macd is not None:
-                if low < l_prev and low < l_next:
-                    troughs.append({"index": i, "price": low, "macd": macd})
+                if low is not None and l_prev is not None and l_next is not None and macd is not None:
+                    if low < l_prev and low < l_next:
+                        troughs.append({"index": i, "price": low, "macd": macd})
 
-        if len(troughs) >= 2:
-            t1 = troughs[-2]
-            t2 = troughs[-1]
-            if t2["price"] < t1["price"] and t2["macd"] > t1["macd"]:
-                result["bottom_divergence"] = True
+            if len(troughs) >= 2:
+                t1 = troughs[-2]
+                t2 = troughs[-1]
+                if t2["price"] < t1["price"] and t2["macd"] > t1["macd"]:
+                    result["bottom_divergence"] = True
+                    result["bottom_kind"] = "range"
+
+    if result["bottom_kind"] == "trend" or result["top_kind"] == "trend":
+        result["kind"] = "trend"
+    elif result["bottom_kind"] == "range" or result["top_kind"] == "range":
+        result["kind"] = "range"
+    else:
+        result["kind"] = "none"
 
     return result

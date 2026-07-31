@@ -496,6 +496,83 @@ class TestDetectBuyPoints:
 class TestDetectSellPointsP1:
     """P1 卖点对称性抽检。"""
 
+    def _up_trend_zones(self):
+        """两个严格不重叠的上移中枢（末中枢整体高于前中枢）。"""
+        return [
+            {"zh_top": 12.0, "zh_bottom": 10.0, "valid": True},
+            {"zh_top": 16.0, "zh_bottom": 14.0, "valid": True},
+        ]
+
+    def test_sell_point_2(self):
+        """二类卖：降低高点 + 历史一类前置 + macd_divergence_ok。"""
+        strokes = [
+            {"direction": "up", "end_price": 12.0},
+            {"direction": "down", "end_price": 9.0},
+            {"direction": "up", "end_price": 11.0},
+        ]
+        result = detect_sell_points(
+            strokes, self._up_trend_zones(), 11.0, macd_divergence_ok=True
+        )
+        types = [sp["type"] for sp in result]
+        assert "二类卖" in types
+
+    def test_sell_point_2_requires_macd_or_area(self):
+        """二类结构满足但力度/MACD 均未确认 → 类二卖（非二类）。"""
+        strokes = [
+            {"direction": "up", "end_price": 12.0},
+            {"direction": "down", "end_price": 9.0},
+            {"direction": "up", "end_price": 11.0},
+        ]
+        result = detect_sell_points(
+            strokes, self._up_trend_zones(), 11.0, macd_divergence_ok=False
+        )
+        types = [sp["type"] for sp in result]
+        assert "二类卖" not in types
+        assert "类二卖" in types
+
+    def test_sell_point_2_no_trend_still_fire(self):
+        """无上涨趋势中枢 → 不得出正式二类卖；结构+力度可降级类二卖。"""
+        strokes = [
+            {"direction": "up", "end_price": 12.0},
+            {"direction": "down", "end_price": 9.0},
+            {"direction": "up", "end_price": 11.0},
+        ]
+        result = detect_sell_points(strokes, [], 11.0, macd_divergence_ok=True)
+        types = [sp["type"] for sp in result]
+        assert "二类卖" not in types
+        assert "类二卖" in types
+
+    def test_sell_point_2_requires_historical_type1(self):
+        """有趋势中枢但历史一类不成立（离开段未创新高）→ 仅类二卖。"""
+        strokes = [
+            {"direction": "up", "end_price": 13.0},
+            {"direction": "down", "end_price": 10.0},
+            {"direction": "up", "end_price": 12.0},
+            {"direction": "down", "end_price": 10.5},
+            {"direction": "up", "end_price": 11.5},
+        ]
+        result = detect_sell_points(
+            strokes, self._up_trend_zones(), 11.5, macd_divergence_ok=True
+        )
+        types = [sp["type"] for sp in result]
+        assert "二类卖" not in types
+        assert "类二卖" in types
+
+    def test_sell_point_1_fallback_no_index(self):
+        """柱序列弱确认 → 类一卖 conf=1，禁止冒充一类卖。"""
+        strokes = [
+            {"direction": "up", "end_price": 10.0},
+            {"direction": "down", "end_price": 8.0},
+            {"direction": "up", "end_price": 11.0},
+        ]
+        result = detect_sell_points(
+            strokes, self._up_trend_zones(), 11.0,
+            macd_hist_current=0.5, macd_hist_prev=1.0,
+        )
+        types = [sp["type"] for sp in result]
+        assert "一类卖" not in types
+        assert "类一卖" in types
+
     def test_sell_point_3_after_leave_bounce(self):
         """三类卖：离开 ZD 后反弹不回 → 有。"""
         strokes = [
@@ -528,6 +605,112 @@ class TestDetectSellPointsP1:
         result = detect_sell_points(strokes, zones, 7.5)
         types = [sp["type"] for sp in result]
         assert "三类卖" not in types
+
+
+class TestBcStrokePairStrict:
+    """CHAN_DIVERGENCE_BC=strict：最后中枢 b/c 配对。"""
+
+    def test_bc_pair_picks_enter_and_leave(self):
+        from trader_shared.chan_structure import _bc_stroke_pair
+
+        strokes = [
+            {"direction": "down", "end_price": 11.0, "start_index": 0, "end_index": 5},
+            {"direction": "up", "end_price": 13.0, "start_index": 5, "end_index": 12},
+            {"direction": "down", "end_price": 10.0, "start_index": 12, "end_index": 18},  # b
+            {"direction": "up", "end_price": 12.5, "start_index": 18, "end_index": 22},
+            {"direction": "down", "end_price": 9.0, "start_index": 23, "end_index": 30},  # c
+        ]
+        zone = {
+            "valid": True,
+            "zh_top": 12.0,
+            "zh_bottom": 10.0,
+            "strokes": [{"start_index": 12, "end_index": 22}],
+        }
+        b, c = _bc_stroke_pair(strokes, zone, "down")
+        assert b is strokes[2]
+        assert c is strokes[4]
+
+    def test_strict_no_pair_no_divergence(self):
+        """strict 且无法解析 b/c → 不报笔级底背驰，也不走峰谷。"""
+        bars = [{"high": 10, "low": 9, "close": 9.5, "macd_histogram": -1.0} for _ in range(30)]
+        strokes = [
+            {"direction": "down", "end_price": 10.0},
+            {"direction": "up", "end_price": 12.0},
+            {"direction": "down", "end_price": 9.0},
+        ]
+        res = detect_divergence(bars, strokes, zones=[], bc_mode="strict")
+        assert res["bottom_divergence"] is False
+        assert res["bc_mode"] == "strict"
+        assert res["kind"] == "none"
+
+    def test_strict_bc_bottom_divergence(self):
+        """strict：b/c 创新低且负面积减弱 → bottom + kind。"""
+        bars = []
+        for _ in range(5):
+            bars.append({"macd_histogram": 0.0, "close": 12.0, "high": 12, "low": 11})
+        for _ in range(5):  # b: area -10
+            bars.append({"macd_histogram": -2.0, "close": 10.0, "high": 11, "low": 10})
+        for _ in range(4):
+            bars.append({"macd_histogram": 0.5, "close": 11.0, "high": 12, "low": 10})
+        for _ in range(5):  # c: area -3
+            bars.append({"macd_histogram": -0.6, "close": 9.0, "high": 10, "low": 9})
+        strokes = [
+            {"direction": "down", "end_price": 10.0, "start_index": 5, "end_index": 9},
+            {"direction": "up", "end_price": 12.0, "start_index": 10, "end_index": 13},
+            {"direction": "down", "end_price": 9.0, "start_index": 14, "end_index": 18},
+        ]
+        zone = {
+            "valid": True,
+            "zh_top": 12.0,
+            "zh_bottom": 10.5,
+            "strokes": [{"start_index": 5, "end_index": 13}],
+        }
+        # 再加一个更高/更早中枢使 kind=trend
+        zones = [
+            {"valid": True, "zh_top": 16.0, "zh_bottom": 14.0, "strokes": [{"end_index": 4}]},
+            zone,
+        ]
+        res = detect_divergence(bars, strokes, zones=zones, bc_mode="strict")
+        assert res["bottom_divergence"] is True
+        assert res["bottom_kind"] == "trend"
+        assert res["kind"] == "trend"
+
+    def test_buy_point_1_strict_uses_bc(self):
+        """strict 一类买：力度对为 b/c，非任意末两 down。"""
+        bars = []
+        for _ in range(3):
+            bars.append({"macd_histogram": 0.0, "close": 14, "volume": 100})
+        for _ in range(5):  # older down (不应被当成 b)
+            bars.append({"macd_histogram": -3.0, "close": 11, "volume": 100})
+        for _ in range(3):
+            bars.append({"macd_histogram": 0.5, "close": 12, "volume": 100})
+        for _ in range(5):  # b area -10
+            bars.append({"macd_histogram": -2.0, "close": 10, "volume": 100})
+        for _ in range(3):
+            bars.append({"macd_histogram": 0.5, "close": 11, "volume": 100})
+        for _ in range(5):  # c area -3
+            bars.append({"macd_histogram": -0.6, "close": 9, "volume": 100})
+        strokes = [
+            {"direction": "down", "end_price": 11.0, "start_index": 3, "end_index": 7},
+            {"direction": "up", "end_price": 12.0, "start_index": 8, "end_index": 10},
+            {"direction": "down", "end_price": 10.0, "start_index": 11, "end_index": 15},  # b
+            {"direction": "up", "end_price": 11.5, "start_index": 16, "end_index": 18},
+            {"direction": "down", "end_price": 9.0, "start_index": 19, "end_index": 23},  # c
+        ]
+        zones = [
+            {"valid": True, "zh_top": 16.0, "zh_bottom": 14.0, "strokes": [{"end_index": 2}]},
+            {
+                "valid": True,
+                "zh_top": 12.0,
+                "zh_bottom": 10.0,
+                "strokes": [{"start_index": 11, "end_index": 18}],
+            },
+        ]
+        result = detect_buy_points(strokes, zones, 9.0, bars=bars, bc_mode="strict")
+        types = [bp["type"] for bp in result]
+        assert "一类买" in types
+        bp = next(bp for bp in result if bp["type"] == "一类买")
+        assert bp.get("divergence_kind") == "trend"
 
 
 class TestStrokeForceTolerance:
@@ -1741,6 +1924,7 @@ class TestChanTypeCanonical:
 
     def test_sell_types(self):
         assert _chan_type_canonical("一类卖") == "chan_sell_1"
+        assert _chan_type_canonical("类二卖") == "chan_sell_like2"
         assert _chan_type_canonical("二类卖") == "chan_sell_2"
         assert _chan_type_canonical("三类卖") == "chan_sell_3"
 

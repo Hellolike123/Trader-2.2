@@ -114,3 +114,57 @@ def test_nested_chain_bottom_divergence_and_logic(fake_chanlun, monkeypatch):
     div = out["chanlun"]["divergence"]
     assert div["bottom_divergence_lower_confirmed"] is False
     assert out["nesting_confirmation"]["bottom_divergence_confirmed"] is False
+
+
+_DAILY_SELL = {
+    "chanlun": {
+        "buy_points": [],
+        "sell_points": [{"price": 100.0, "type": "一类卖"}],
+        "divergence": {"top_divergence": True},
+    }
+}
+
+
+def test_nested_chain_sell_points_confirmed(fake_chanlun, monkeypatch):
+    """卖点区间套：小级别同价一类卖 → lower_confirmed=True。"""
+    def _ctl(bars, current=None, symbol=None, timeframe=None):
+        return {
+            "chanlun": {
+                "buy_points": [],
+                "sell_points": [{"price": 100.2, "type": "一类卖"}],
+                "divergence": {"top_divergence": True},
+            }
+        }
+    monkeypatch.setattr("trader_shared.chan_nesting.chanlun_analysis", _ctl)
+
+    out = confirm_nested_chain(copy.deepcopy(_DAILY_SELL), [("30m", _series(80))], symbol="X")
+    sp = out["chanlun"]["sell_points"][0]
+    assert sp["lower_confirmed"] is True
+    assert sp["lower_confirm_type"] == "一类卖"
+    assert out["nesting_confirmation"]["sell_confirmed_count"] == 1
+    assert out["chanlun"]["divergence"]["top_divergence_lower_confirmed"] is True
+    assert out["nesting_confirmation"]["top_divergence_confirmed"] is True
+
+
+def test_nested_chain_top_divergence_and_logic(fake_chanlun, monkeypatch):
+    """顶背驰需所有级别确认：30m✓ + 5m✗ → top_divergence_lower_confirmed=False。"""
+    def _ctl(bars, current=None, symbol=None, timeframe=None):
+        if timeframe == "30m":
+            return {
+                "chanlun": {
+                    "buy_points": [],
+                    "sell_points": [],
+                    "divergence": {"top_divergence": True},
+                }
+            }
+        return {"chanlun": {"buy_points": [], "sell_points": [], "divergence": {}}}
+    monkeypatch.setattr("trader_shared.chan_nesting.chanlun_analysis", _ctl)
+
+    out = confirm_nested_chain(
+        copy.deepcopy(_DAILY_SELL),
+        [("30m", _series(80)), ("5m", _series(80))],
+        symbol="X",
+    )
+    div = out["chanlun"]["divergence"]
+    assert div["top_divergence_lower_confirmed"] is False
+    assert out["nesting_confirmation"]["top_divergence_confirmed"] is False

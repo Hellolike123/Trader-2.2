@@ -311,7 +311,7 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5, bars: lis
     连续同向分型取极值（顶取更高 high，底取更低 low）。
 
     P0：反向分型距离不够时跳过，保留 start 继续找。
-    P1：扫描所有合格反向分型，选最极端的（顶取 high 最大，底取 low 最小）作为笔端点。
+    P1：取【第一个】距离合格的反向分型成笔（非「最极端」延伸；与 formulas.md §2.1 一致）。
     P4：返回 power_price（绝对价差）和 length（K 线根数）；传入 bars 时额外计算 power_volume。
     """
     if len(fractions) < 2:
@@ -361,7 +361,7 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5, bars: lis
 
             j += 1
 
-        # 扫描结束，用最极端候选成笔
+        # 扫描结束：用第一个合格反向分型成笔
         if best_end is not None:
             direction = "up" if start["type"] == "bottom" else "down"
 

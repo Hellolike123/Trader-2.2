@@ -95,7 +95,7 @@ raw bars
 
 ## 5. 背驰（detect_divergence）
 
-**§5.1 主路径 — 笔级 MACD 面积**：比较**最后两段同向笔**的 MACD 柱面积
+**§5.1 主路径 — 笔级 MACD 面积**：比较力度对的 MACD 柱面积
 （`_stroke_macd_area`，只累加同侧柱；`side='neg'` 底背驰 / `'pos'` 顶背驰）。
 - 向下背驰：`|area_curr| < |area_prev|`
 - 向上背驰：`area_curr < area_prev`
@@ -103,16 +103,26 @@ raw bars
 - **MACD 柱来源**：`indicator_math.calc_macd_series` → `histogram = DIF−DEA`（×1，非通达信 2×）；
   `_calc_macd` 预热不足写 `None`（禁止 `0.0` 占位）；面积计算跳过 `None` 与反号柱
 
-**§5.2 fallback — 峰谷（仅对笔级未评估侧）**：无笔/无 index/面积不可算时，扫近期峰谷
+**§5.2 fallback — 峰谷（仅 legacy 且笔级未评估侧）**：无笔/无 index/面积不可算时，扫近期峰谷
 （最近 `CHAN_DIVERGENCE_FALLBACK_WINDOW=120` 根），比较末两个峰/谷的价与 MACD 柱。
+`strict` 模式关闭峰谷 fallback，避免与 b/c 口径混杂。
 
-**§5.3 P3 边界处理 — 锚定最后中枢**：背驰只应反映**最后中枢之后的趋势 legs**
-（离开段 c 及其次级别同向段），而非整段历史。`_chanlun_compute` 计算最后中枢右边界的
-bar 索引 `anchor_bar`（经 `_last_pivot_anchor_bar` 映射），传入 `detect_divergence`：
-- 笔级比较只取 `end_index >= anchor_bar` 的 legs（不足两段则回退全序列，避免漏判）
-- fallback 窗口从 `anchor_bar` 起算（替代固定 120 根窗口）
+**§5.3 P3 边界处理 — 锚定最后中枢（legacy）**：背驰只应反映**最后中枢之后的趋势 legs**，
+而非整段历史。`_chanlun_compute` 计算最后中枢右边界 `anchor_bar`：
+- legacy 笔级比较只取 `end_index >= anchor_bar` 的 legs（不足两段则回退全序列）
+- fallback 窗口从 `anchor_bar` 起算
 
-开关：`CHAN_DIVERGENCE_ANCHOR_LAST_PIVOT`（默认开）。`anchor_bar=None` 时回退到 §5.2 窗口逻辑。
+开关：`CHAN_DIVERGENCE_ANCHOR_LAST_PIVOT`（默认开）。
+
+**§5.4 力度对选取（`CHAN_DIVERGENCE_BC`，默认 `legacy`）**：
+- `legacy`：锚定后末两同向笔（现行生产行为）。
+- `strict`：最后 valid 中枢进入段 **b**（`end_index <= zone_end` 最近同向笔）vs
+  离开段 **c**（`start_index > zone_end` 末同向笔）；缺 b/c 不报该侧笔级背驰。
+  正式一类买卖在 strict 下也吃同一对 b/c。
+- 输出 `bottom_kind` / `top_kind` / `kind` ∈ {`trend`,`range`,`none`}：
+  严格不重叠同向中枢 ≥2 → `trend`，否则有中枢可比较 → `range`。
+- 回测对照：`python3 02-共享模块-shared/scripts/backtest_chanlun.py --mode compare`；
+  **生产默认保持 legacy**，过闸后再议切换。
 
 > ⚠️ 历史上背驰曾用「全图扫描」fallback 直接 gate 买卖信号，导致陈旧历史背离污染买卖点
 > （见 P0b/P0c 修复）。现背驰仅作展示标签与严格买卖点判定的辅助，信号合成以 `detect_buy/sell_points` 为准。
@@ -130,10 +140,11 @@ bar 索引 `anchor_bar`（经 `_last_pivot_anchor_bar` 映射），传入 `detec
   （趋势 + 离开中枢 + 若存在更早同向笔则曾创新低/高 + 力度不更强），
   **禁止**用「同帧 `buy_points` 里已有一类」判定（一类要创新低、二类要不破前低，
   同一末笔几何互斥，旧实现导致二类永假）。
-- **买侧分层（产品 C）**：正式「二类买」必须 `_historical_type1_buy_ok` + 力度/缩量齐备；
-  历史一类不满足或力度未齐 → 降级「类二买」（无趋势中枢仍可出类二买）。
-  fusion 强多 / C1「买点信号」/ 买点阶梯二档 **只认正式二类买**，不认类二买。
-  卖侧「二类卖」仍要求历史一类（对称严格）。
+- **买卖侧分层（产品 C 对称）**：正式「二类买/卖」必须历史一类 + 力度/缩量齐备；
+  历史一类不满足或力度未齐 → 降级「类二买/类二卖」（无趋势中枢仍可出类二）。
+  fusion 强多/强空 / C1「买点信号」/ 买点阶梯二档 **只认正式二类**，不认类二。
+  一类同理：严格趋势 → 一类买/卖（conf=3）；单中枢盘整背驰 → 类一买/卖（conf=2）；
+  柱序列弱确认 → 类一（conf=1）。
 - **三类买/卖**：离开中枢后回抽不入（末 3 笔内，上限 15%）
 
 实现辅助：`_strict_down_trend_zones` / `_strict_up_trend_zones`、
@@ -160,8 +171,8 @@ bar 索引 `anchor_bar`（经 `_last_pivot_anchor_bar` 映射），传入 `detec
 | 线段启动门槛 | 默认从首笔起段（放宽） | `CHAN_SEGMENT_RELAX_OVERLAP` |
 | 背驰 fallback 窗口 | 最近 120 根（P3 锚定后从中枢起） | `CHAN_DIVERGENCE_FALLBACK_WINDOW` |
 | 买卖信号合成 | 只走严格 detect_buy/sell_points | — |
-| 二类前置一类 | 正式二类买/二类卖须时间轴历史一类；买侧无趋势可降级类二买 | — |
-| 区间套未确认 | fusion 置信度降权（×0.65 / nesting ×0.55） | `TRADER_CHAN_NESTING` |
+| 二类前置一类 | 正式二类买/卖须时间轴历史一类；无趋势可降级类二买/类二卖 | — |
+| 区间套未确认 | 买卖点 + 顶底背驰均写 `*_lower_confirmed`；fusion 降权（×0.65 / nesting ×0.55） | `TRADER_CHAN_NESTING` |
 
 > 所有行为变更须在 `test_chanlun_correctness.py` / `test_chan_core` 增补语义 golden，并刷新
 > `chan_split_baseline.json` / `report_render_baseline.txt` 等价闸门基线。
@@ -279,7 +290,7 @@ bar 索引 `anchor_bar`（经 `_last_pivot_anchor_bar` 映射），传入 `detec
 
 ### 生产接入（chan_nesting.py + report_builder.py + report_core.py）
 - 新增 `chan_nesting.confirm_daily_with_lower(daily_result, lower_bars, lower_timeframe="30m")`：
-  复用 `chanlun_analysis` 跑小级别确认日线 `buy_points` / 底背驰，加 `lower_confirmed`
+  复用 `chanlun_analysis` 跑小级别确认日线 `buy_points` / `sell_points` / 顶底背驰，加 `lower_confirmed`
   标注 + 顶层 `nesting_confirmation` 汇总（单级别兼容入口）。
 - 新增 `chan_nesting.confirm_nested_chain(daily_result, lower_series, ...)`：**多级别区间套**
   （粗→细，如 `[("30m",b30),("5m",b5),("1m",b1)]`）。每个日线买点产出

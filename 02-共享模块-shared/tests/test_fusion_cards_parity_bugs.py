@@ -106,6 +106,20 @@ def test_i4_like2_not_buy2():
     assert sig["confidence"] <= 0.4
 
 
+def test_i4_like2_sell_not_sell2():
+    """I4 对称：类二卖 不得 命中 二卖 子串。"""
+    sig = chan_card_to_fusion_signal({
+        "type_short": "类二卖",
+        "type_raw": "类二卖",
+        "direction": -1,
+        "raw_available": True,
+        "summary_line": "类二卖 · 反抽偏弱",
+    })
+    assert sig["direction"] == -1
+    assert "like2" in str(sig.get("signal_tier") or "").lower()
+    assert sig["confidence"] <= 0.4
+
+
 def test_i2_i3_nesting_and_point_conf_on_card():
     """I2/I3: 卡携带 nesting + point conf，fusion 降权。"""
     chan = {

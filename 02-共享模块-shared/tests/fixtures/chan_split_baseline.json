@@ -11,7 +11,11 @@
     "zones_count": 0,
     "divergence": {
       "top_divergence": false,
-      "bottom_divergence": false
+      "bottom_divergence": false,
+      "bottom_kind": "none",
+      "top_kind": "none",
+      "kind": "none",
+      "bc_mode": "legacy"
     },
     "last_valid_zone_last_price": null,
     "last_valid_zone_first_price": null,
@@ -278,7 +282,11 @@
     "zones_count": 0,
     "divergence": {
       "top_divergence": false,
-      "bottom_divergence": false
+      "bottom_divergence": false,
+      "bottom_kind": "none",
+      "top_kind": "none",
+      "kind": "none",
+      "bc_mode": "legacy"
     },
     "last_valid_zone_last_price": null,
     "last_valid_zone_first_price": null,
