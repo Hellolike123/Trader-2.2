@@ -663,7 +663,12 @@ def merge_decisions(
         _logger.debug("Unlock risk check failed: %s", exc)
 
     if has_risk_unlock:
-        positive_actions = {"半仓试 (多方主导)", "半仓试 (多方主导但有分歧)", "增持", "等转强"}
+        # 与资金流出否决对齐：含「等转强观察」等常见偏多/观望多动作
+        positive_actions = {
+            "半仓试 (多方主导)", "半仓试 (多方主导但有分歧)",
+            "增持", "等转强", "等转强观察", "回调观望",
+            "持股观望", "高位观望",
+        }
         if action in positive_actions:
             action = "空仓 (限售解禁风险)"
             confidence = 0.3

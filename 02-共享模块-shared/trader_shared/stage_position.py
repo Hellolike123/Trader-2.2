@@ -220,9 +220,13 @@ def evaluate_position_state(
 
     # 回踩加仓（蓄势期+回踩支撑+条件满足）
     if conditions["stage_accumulation"] and conditions["pullback_to_support"]:
-        # T+1 隔离锁：当天已加仓则冷却，不重复加仓
-        today = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
-        if last_add_date is not None and last_add_date == today:
+        # T+1 隔离锁：当天已加仓则冷却，不重复加仓（须传入真实加仓日，禁止用K线日期冒充）
+        try:
+            from trader_shared.cn_time import today_cn
+            today = today_cn().isoformat()
+        except Exception:
+            today = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
+        if last_add_date is not None and str(last_add_date)[:10] == today:
             return _make_position_state(
                 "持仓观察", "T+1冷却，今日已加仓，等待明日再评估",
                 0, conditions,

@@ -174,7 +174,11 @@ class ExtendDataProvider:
             sort_types="1"
         )
         unlocks = []
-        today_str = date.today().strftime("%Y-%m-%d")
+        try:
+            from trader_shared.cn_time import today_cn
+            today_str = today_cn().isoformat()
+        except Exception:
+            today_str = date.today().strftime("%Y-%m-%d")
         for row in data:
             free_date = (row.get("FREE_DATE") or "")[:10]
             if free_date and free_date >= today_str:
@@ -195,15 +199,21 @@ class ExtendDataProvider:
     @staticmethod
     def get_ths_hot_reason_for_stock(code: str) -> dict[str, Any]:
         """获取特定股票的同花顺题材催化归因，采用每日内存缓存设计"""
-        today_str = date.today().strftime("%Y-%m-%d")
-        
+        try:
+            from trader_shared.cn_time import today_cn, now_cn
+            today_str = today_cn().isoformat()
+            _now = now_cn()
+        except Exception:
+            today_str = date.today().strftime("%Y-%m-%d")
+            _now = datetime.now()
+
         # 懒加载 / 缓存
         if today_str not in _hot_reason_cache:
             df = ths_hot_reason(today_str)
             if df.empty:
                 # 尝试昨天数据作为 fallback
                 from datetime import timedelta
-                yesterday_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+                yesterday_str = (_now - timedelta(days=1)).strftime("%Y-%m-%d")
                 df = ths_hot_reason(yesterday_str)
             _hot_reason_cache[today_str] = df
 
@@ -306,7 +316,7 @@ class ExtendDataProvider:
         try:
             import akshare as ak
             # 识别市场：6/9 开头为沪市，其余为深市
-            is_sse = code.startswith(("6", "9"))
+            is_sse = code.startswith(("5", "6", "9"))  # 含沪市 ETF 51xxxx
             today_str = date.today().strftime("%Y%m%d")
 
             if is_sse:

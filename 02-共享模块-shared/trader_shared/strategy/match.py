@@ -138,12 +138,20 @@ def build_match_context(report: dict[str, Any] | None = None, **overrides: Any) 
     chip_weak = bool(r.get("chip_support_weak")) or ("支撑弱" in support_tag)
 
     current = float(r.get("current") or 0)
-    stop = r.get("stop")
-    support = r.get("support")
+    # 策略止损用有效止损（hard ∪ trailing），与报告/纪律一致
     try:
-        stop_f = float(stop) if stop is not None else None
-    except (TypeError, ValueError):
+        from trader_shared.structure_core import effective_stop_price
+
+        stop_f = effective_stop_price(r.get("stop"), r.get("trailing_stop") or r.get("effective_stop"))
+    except Exception:
         stop_f = None
+    if stop_f is None:
+        stop = r.get("effective_stop") or r.get("stop")
+        try:
+            stop_f = float(stop) if stop is not None else None
+        except (TypeError, ValueError):
+            stop_f = None
+    support = r.get("support")
     try:
         support_f = float(support) if support is not None else None
     except (TypeError, ValueError):

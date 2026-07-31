@@ -76,7 +76,14 @@ def run_analysis_context_stage(
         from trader_shared.cache_utils import fetch_fund_flow_cached
         from trader_shared.main_force import detect_main_force_stage
 
-        ff_data = fetch_fund_flow_cached(target)
+        # 必须用代码/ts_code；中文名会让资金流接口空返回 → 主力阶段退化合成
+        _ff_key = (
+            getattr(sec, "ts_code", None)
+            or getattr(sec, "code", None)
+            or quote.get("symbol")
+            or target
+        )
+        ff_data = fetch_fund_flow_cached(str(_ff_key))
         if ff_data:
             daily_flow = ff_data.get("daily_flow", [])
             features = ff_data.get("features", {})

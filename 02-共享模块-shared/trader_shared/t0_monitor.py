@@ -109,7 +109,13 @@ def reset_target_cache(target_key: str | None = None, path: Path = CACHE_PATH) -
 
 
 def trade_day_key(now: datetime | None = None) -> str:
-    return (now or datetime.now()).strftime("%Y-%m-%d")
+    if now is None:
+        try:
+            from trader_shared.cn_time import now_cn
+            now = now_cn()
+        except Exception:
+            now = datetime.now()
+    return now.strftime("%Y-%m-%d")
 
 
 def target_state_for(symbol: str, path: Path = CACHE_PATH, now: datetime | None = None) -> dict[str, Any]:
@@ -236,8 +242,16 @@ def detect_state_change(previous_state: dict[str, Any] | None, plan: dict[str, A
     return events
 
 
+def _now_cn_or_local() -> datetime:
+    try:
+        from trader_shared.cn_time import now_cn
+        return now_cn()
+    except Exception:
+        return datetime.now()
+
+
 def is_in_cooldown(target_state: dict[str, Any], event_key: str, now: datetime | None = None, cooldown_minutes: int = COOLDOWN_MINUTES) -> bool:
-    now = now or datetime.now()
+    now = now or _now_cn_or_local()
     last_events = target_state.get("last_events") if isinstance(target_state.get("last_events"), dict) else {}
     last_text = last_events.get(event_key)
     if not last_text:
@@ -272,7 +286,7 @@ def event_action_text(event: str) -> str:
 
 
 def mark_events(target_state: dict[str, Any], plan: dict[str, Any], events: list[str], now: datetime | None = None) -> None:
-    now = now or datetime.now()
+    now = now or _now_cn_or_local()
     last_events = target_state.get("last_events") if isinstance(target_state.get("last_events"), dict) else {}
     history = target_state.get("history") if isinstance(target_state.get("history"), list) else []
     for event in events:
@@ -327,7 +341,7 @@ def snapshot(plan: dict[str, Any], now: datetime | None = None) -> dict[str, Any
         "sell_observation": sell.get("observation_price"),
         "buy_invalid": buy.get("invalid_price"),
         "sell_invalid": sell.get("invalid_price"),
-        "updated_at": (now or datetime.now()).isoformat(timespec="seconds"),
+        "updated_at": (now or _now_cn_or_local()).isoformat(timespec="seconds"),
     }
 
 
@@ -600,7 +614,18 @@ def _check_5m_chan_t0(plan: dict[str, Any]) -> tuple:
     # 注：_chan_realtime_alert / _norm_sig 均在本模块定义，4.3 直接调用即可，
     # 勿从 realtime_chan import。
     data = plan.get("data") or {}
-    k5 = data.get("kline_5m") or []
+    # 只用已收盘 5m，避免盘中未完成棒造成缠论买卖点假跳变
+    k5 = data.get("kline_5m_completed")
+    if not isinstance(k5, list) or len(k5) < 20:
+        raw = data.get("kline_5m") or []
+        if isinstance(raw, list) and raw:
+            try:
+                from trader_shared.t0_price_point_engine import completed_5m_bars
+                k5 = completed_5m_bars(raw)
+            except Exception:
+                k5 = []
+        else:
+            k5 = []
     if not isinstance(k5, list) or len(k5) < 20:
         return (None, None)  # 早盘 5m 不足 20 根，噪声大，暂不告警
     daily = data.get("daily_bars") or []
@@ -746,7 +771,7 @@ def run_once(
         return ""
     plan = _cached_build_plan(target, force=reset_cache)
     target_key = str(plan.get("symbol") or target)
-    now = datetime.now()
+    now = _now_cn_or_local()
     
     # ── [2.5] 量能真空区预警检查 ──
     vacuum_alert = _check_volume_vacuum_t0(plan)

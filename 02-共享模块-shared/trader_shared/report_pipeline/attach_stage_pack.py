@@ -139,7 +139,8 @@ def attach_stage_position_pack(
         chip_migration=chip_migration,
         high_zone_lower=float(levels.get("high_zone_lower") or 0),
         trailing_stop=levels.get("trailing_stop"),
-        last_add_date=bars_date,
+        # T+1 冷却须用真实「上次加仓日」；bars_date=最新K日会在每个交易日误触发冷却
+        last_add_date=report.get("last_add_date"),
     )
     report["position_state"] = position_state
 
@@ -156,6 +157,14 @@ def attach_stage_position_pack(
     
     # 补全 JSON 输出需要的字段
     report = sync_report_with_data(report, levels)
+    # sync 可能改 hard stop；t0_ref/展示用同步后的有效止损
+    _eff_after = effective_stop_price(
+        report.get("stop"),
+        report.get("trailing_stop") or levels.get("trailing_stop"),
+    )
+    if _eff_after is not None:
+        stop_price = float(_eff_after)
+        report["effective_stop"] = stop_price
 
     # structure_note: 在 sync_report_with_data 之后计算，使用已修正的 scene
     structure_note = structure_view({

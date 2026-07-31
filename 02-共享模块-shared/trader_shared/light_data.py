@@ -397,7 +397,11 @@ def _fetch_quote_tdx3(sec: Security) -> dict[str, Any] | None:
         if qs is None or len(qs) == 0:
             return None
         q = dict(qs[0])
-        now = datetime.now()
+        try:
+            from trader_shared.cn_time import now_cn
+            now = now_cn()
+        except Exception:
+            now = datetime.now()
         price_v = to_float(q.get("price"))
         last_close_v = to_float(q.get("last_close"))
         result: dict[str, Any] = {
@@ -710,7 +714,11 @@ def _fetch_quote_mootdx(sec: Security) -> dict[str, Any] | None:
         if qs is None or len(qs) == 0:
             return None
         q = dict(qs.iloc[0])
-        now = datetime.now()
+        try:
+            from trader_shared.cn_time import now_cn
+            now = now_cn()
+        except Exception:
+            now = datetime.now()
         price_v = to_float(q.get("price"))
         last_close_v = to_float(q.get("last_close"))
         result: dict[str, Any] = {

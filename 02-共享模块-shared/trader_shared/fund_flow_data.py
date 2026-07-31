@@ -600,7 +600,8 @@ def _secid(symbol: str) -> str:
         return f"1.{code}"
     if suffix in ("SZ", "sz"):
         return f"0.{code}"
-    return f"1.{code}" if code.startswith(("6", "9")) else f"0.{code}"
+    # 沪市：主板6/ETF基金5/B股9；勿把 51xxxx ETF 判成深市
+    return f"1.{code}" if code.startswith(("5", "6", "9")) else f"0.{code}"
 
 
 def _symbol_to_ts_code(symbol: str) -> str:
@@ -660,7 +661,7 @@ def _market_for_akshare(symbol: str) -> tuple[str, str]:
         code = code[2:]
     code = "".join(c for c in code if c.isdigit())[-6:].zfill(6)
     suffix = symbol.split(".")[-1].upper() if "." in symbol else ""
-    if suffix in ("SH",) or code.startswith(("6", "9")):
+    if suffix in ("SH",) or code.startswith(("5", "6", "9")):
         return code, "sh"
     if suffix in ("BJ",) or code.startswith(("8", "4")):
         return code, "bj"

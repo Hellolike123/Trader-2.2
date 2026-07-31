@@ -27,6 +27,14 @@ from trader_shared.config import CHANLUN_STATE_DIR
 from trader_shared.chan_core import ChanlunEngine
 
 
+def _today_cn_str() -> str:
+    try:
+        from trader_shared.cn_time import today_cn
+        return today_cn().isoformat()
+    except Exception:
+        return datetime.now().strftime("%Y-%m-%d")
+
+
 def _load_or_build(symbol: str, daily: list[dict], state_dir: str = CHANLUN_STATE_DIR) -> ChanlunEngine:
     """优先 load 预热状态，失败（无预热/反序列化异常）则静默回退到批量 build。
 
@@ -109,7 +117,7 @@ def get_realtime_chan(
         "low": to_float(quote.get("low") if quote.get("low") is not None else last.get("low")),
         "close": current,
         "volume": to_float(quote.get("volume")) or 0,
-        "date": datetime.now().strftime("%Y-%m-%d"),
+        "date": _today_cn_str(),
     }
 
     eng = _load_or_build(symbol, daily, state_dir)
