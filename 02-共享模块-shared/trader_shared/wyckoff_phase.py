@@ -122,10 +122,23 @@ def _scan_for_signal(
     if max_lookback_bars is not None and len(bars) > max_lookback_bars:
         bars = bars[-max_lookback_bars:]
     n = len(bars)
+    def _call_detector(sub: list[dict]) -> dict:
+        """统一关键字传 tr_ctx（与 _scan_last_event 一致）。
+
+        Spring/SOW 第二位置参是 _support，位置传 tr_ctx 会错塞；
+        compression 等无 tr_ctx 形参时 TypeError → 回退无参调用。
+        """
+        if tr_ctx is None:
+            return detector_fn(sub)
+        try:
+            return detector_fn(sub, tr_ctx=tr_ctx)
+        except TypeError:
+            return detector_fn(sub)
+
     if n < window:
         # 数据不足整窗时，仍尝试整段 bars（兼容短序列末尾信号）
         try:
-            result = detector_fn(bars)
+            result = _call_detector(bars)
             for key in result:
                 if key.endswith("_signal") and result[key] is True:
                     return True
@@ -141,7 +154,7 @@ def _scan_for_signal(
     for start in starts:
         sub = bars[start:start + window]
         try:
-            result = detector_fn(sub, tr_ctx) if tr_ctx is not None else detector_fn(sub)
+            result = _call_detector(sub)
             for key in result:
                 if key.endswith("_signal") and result[key] is True:
                     return True

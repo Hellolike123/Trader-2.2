@@ -625,8 +625,9 @@ def _detect_sign_of_weakness(bars: list[dict], _support: float | None = None, tr
     if len(bars) < min_bars:
         return {**_empty, "sow_reason": "数据不足"}
 
-    # 支撑位计算：TR 内用 TR 下沿（原典 SOW = 跌破 TR 下沿），否则动态支撑或局部最低
-    if tr_ctx is not None and tr_ctx.get("in_tr") and tr_ctx.get("tr_lower") is not None:
+    # 支撑位：有 TR 下沿则始终用它（原典 SOW = 跌破 TR 下沿）。
+    # 勿绑 in_tr：收盘已破下沿时 in_tr=False，仍须按 tr_lower 判定正式 SOW。
+    if tr_ctx is not None and tr_ctx.get("tr_lower") is not None:
         support = tr_ctx["tr_lower"]
     elif _support is not None:
         support = _support
@@ -708,9 +709,10 @@ def _detect_spring(bars: list[dict], _support: float | None = None, symbol: str 
     if len(recent) > 0 and _is_frozen_board(recent[-1]):
         return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "前日一字板无效换手"}
 
-    # TR 语境优先：在 TR 内时，TR 下沿即吸筹区支撑，无需 ATR 振幅过滤（TR 本身就是横盘容器）
+    # TR 语境：有正式 tr_lower 即视为区间事件容器（不强制当日 in_tr）
+    has_tr_lower = bool(tr_ctx and tr_ctx.get("tr_lower") is not None)
     in_tr = bool(tr_ctx.get("in_tr")) if tr_ctx else False
-    if not in_tr and not _is_trading_range(bars):
+    if not has_tr_lower and not in_tr and not _is_trading_range(bars):
         return {"spring_signal": False, "spring_price": 0.0, "spring_reason": "非交易区间（振幅过大）"}
 
     low_values = [to_float(b.get("low")) for b in recent]
@@ -719,8 +721,8 @@ def _detect_spring(bars: list[dict], _support: float | None = None, symbol: str 
     current_close = to_float(current.get("close"))
     current_volume = to_float(current.get("volume"))
 
-    # 支撑位：TR 内用 TR 下沿（原典 Spring = 跌破 TR 下沿后收回），否则动态支撑或局部最低
-    if in_tr and tr_ctx.get("tr_lower") is not None:
+    # 支撑位：有 TR 下沿则用它（原典 Spring = 跌破 TR 下沿后收回）
+    if has_tr_lower:
         support = tr_ctx["tr_lower"]
     else:
         support = _support if _support is not None else (min(valid_lows) if valid_lows else None)
@@ -789,13 +791,17 @@ def _detect_spring(bars: list[dict], _support: float | None = None, symbol: str 
         volume_note = "正常量能"
 
     # ── 收回力度检查：必须收回跌幅的 50%+ ──
-    baseline_vol = tr_ctx.get("tr_baseline_volume") if (in_tr and tr_ctx) else avg_volume
+    baseline_vol = (
+        tr_ctx.get("tr_baseline_volume")
+        if (has_tr_lower and tr_ctx and tr_ctx.get("tr_baseline_volume"))
+        else avg_volume
+    )
     vol_ratio = (current_volume / baseline_vol) if baseline_vol and baseline_vol > 0 else 1.0
     depth_pct = ((support - current_low) / support * 100.0) if support > 0 else 0.0
     recent_highs = [to_float(b.get("high")) for b in recent]
     valid_recent_highs = [v for v in recent_highs if v is not None]
     local_high = max(valid_recent_highs) if valid_recent_highs else support
-    tr_upper = tr_ctx.get("tr_upper") if (in_tr and tr_ctx) else None
+    tr_upper = tr_ctx.get("tr_upper") if (has_tr_lower and tr_ctx) else None
     tr_mid = ((tr_upper + support) / 2.0) if tr_upper is not None else ((support + local_high) / 2.0)
     range_mid = (tr_mid - support)
     reclaim_ratio = ((current_close - support) / range_mid) if range_mid > 0 else 0.0
@@ -846,8 +852,9 @@ def _detect_upthrust(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     current_high = to_float(current.get("high"))
     current_close = to_float(current.get("close"))
 
-    # 阻力位：TR 内用 TR 上沿（原典 UT = 突破 TR 上沿后回落），否则局部最高
-    if tr_ctx is not None and tr_ctx.get("in_tr") and tr_ctx.get("tr_upper") is not None:
+    # 阻力位：有 TR 上沿则始终用它（原典 UT = 突破 TR 上沿后回落；勿绑 in_tr）
+    has_tr_upper = bool(tr_ctx and tr_ctx.get("tr_upper") is not None)
+    if has_tr_upper:
         resistance = tr_ctx["tr_upper"]
     else:
         resistance = max(valid_highs) if valid_highs else None
@@ -877,11 +884,15 @@ def _detect_upthrust(bars: list[dict], tr_ctx: dict | None = None) -> dict:
                 "upthrust_reason": "上冲未放量，非主力派发", "upthrust_strength": None}
 
     # ── P0-4 真假分级：突破深度 + 量能比(vs TR基线量) + 跌回位置(相对TR中轴) ──
-    baseline_vol = tr_ctx.get("tr_baseline_volume") if (tr_ctx and tr_ctx.get("in_tr")) else avg_volume
+    baseline_vol = (
+        tr_ctx.get("tr_baseline_volume")
+        if (has_tr_upper and tr_ctx and tr_ctx.get("tr_baseline_volume"))
+        else avg_volume
+    )
     vol_ratio = (current_volume / baseline_vol) if baseline_vol and baseline_vol > 0 else 1.0
     depth_pct = ((current_high - resistance) / resistance * 100.0) if resistance > 0 else 0.0
-    # TR 中轴：TR 语境用 (上沿+下沿)/2，否则用 (阻力+局部最低)/2
-    tr_lower = tr_ctx.get("tr_lower") if (tr_ctx and tr_ctx.get("in_tr")) else None
+    # TR 中轴：有正式下沿时用 (上沿+下沿)/2
+    tr_lower = tr_ctx.get("tr_lower") if (has_tr_upper and tr_ctx) else None
     recent_low_values = [to_float(b.get("low")) for b in recent]
     valid_recent_lows = [v for v in recent_low_values if v is not None]
     local_low = min(valid_recent_lows) if valid_recent_lows else resistance
@@ -1031,8 +1042,8 @@ def _detect_sos(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     recent = bars[-(WYCKOFF_DIVERGENCE_BARS + WYCKOFF_SPRING_SUPPORT_LOOKBACK):-1]
     current_window = bars[-WYCKOFF_DIVERGENCE_BARS:]
 
-    # 基线均量：TR 内用 TR 量能基线（区间内均量，避免含趋势段失真），否则前10根均量
-    if tr_ctx is not None and tr_ctx.get("in_tr") and tr_ctx.get("tr_baseline_volume"):
+    # 基线均量：有 TR 基线量则用它（勿绑 in_tr），否则前10根均量
+    if tr_ctx is not None and tr_ctx.get("tr_baseline_volume"):
         baseline_avg_vol = tr_ctx["tr_baseline_volume"]
     else:
         baseline_start = max(0, len(recent) - 10)
@@ -1099,8 +1110,9 @@ def _detect_st(bars: list[dict], tr_ctx: dict | None = None) -> dict:
 
     low_values = [to_float(b.get("low")) for b in recent]
     valid_lows = [v for v in low_values if v is not None]
-    # 支撑位：TR 内用 TR 下沿，否则局部最低
-    if tr_ctx is not None and tr_ctx.get("in_tr") and tr_ctx.get("tr_lower") is not None:
+    # 支撑位：有 TR 下沿则固定用它（ST 与 Spring 同锚），否则局部最低
+    has_tr_lower = bool(tr_ctx and tr_ctx.get("tr_lower") is not None)
+    if has_tr_lower:
         support = tr_ctx["tr_lower"]
     else:
         support = min(valid_lows) if valid_lows else None
@@ -1112,6 +1124,13 @@ def _detect_st(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     breach_level = _spring_breach_level(support, current)
     cur_low = to_float(current.get("low"))
     cur_close = to_float(current.get("close"))
+
+    def _st_support_for_bar(bar: dict, pre_bars: list[dict]) -> float | None:
+        if has_tr_lower:
+            return float(tr_ctx["tr_lower"])
+        pls = [to_float(b.get("low")) for b in pre_bars]
+        vs = [v for v in pls if v is not None]
+        return min(vs) if vs else None
 
     # 检查最近是否有 Spring
     spring_detected = (cur_low is not None and cur_close is not None and
@@ -1125,13 +1144,10 @@ def _detect_st(bars: list[dict], tr_ctx: dict | None = None) -> dict:
             sc = to_float(scan_range[i].get("close"))
             if sl is None or sc is None:
                 continue
-            # 找 support
             pre = scan_range[max(0, i - WYCKOFF_SPRING_SUPPORT_LOOKBACK):i]
-            pls = [to_float(b.get("low")) for b in pre]
-            vs = [v for v in pls if v is not None]
-            if not vs:
+            sup = _st_support_for_bar(scan_range[i], pre)
+            if sup is None:
                 continue
-            sup = min(vs)
             br = _spring_breach_level(sup, scan_range[i])
             if sl < br and sc >= sup:
                 support = sup
@@ -1151,11 +1167,9 @@ def _detect_st(bars: list[dict], tr_ctx: dict | None = None) -> dict:
         if sl is None or sc is None:
             continue
         pre = bars[max(0, i - WYCKOFF_SPRING_SUPPORT_LOOKBACK):i]
-        pls = [to_float(b.get("low")) for b in pre]
-        vs = [v for v in pls if v is not None]
-        if not vs:
+        sup = _st_support_for_bar(bars[i], pre)
+        if sup is None:
             continue
-        sup = min(vs)
         br = _spring_breach_level(sup, bars[i])
         if sl < br and sc >= sup:
             spring_idx = i
@@ -1218,7 +1232,7 @@ def _detect_lps(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     n = len(bars)
     tr_baseline = (
         tr_ctx.get("tr_baseline_volume")
-        if (tr_ctx and tr_ctx.get("in_tr") and tr_ctx.get("tr_baseline_volume"))
+        if (tr_ctx and tr_ctx.get("tr_baseline_volume"))
         else None
     )
 
@@ -1324,8 +1338,8 @@ def _detect_lpsy(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     if len(bars) < 15:
         return {"lpsy_signal": False, "lpsy_reason": "数据不足", "lpsy_price": None}
 
-    # 阻力位：TR 内用 TR 上沿（原典 LPSY = 反弹不过 TR 上沿），否则近15根最高
-    if tr_ctx is not None and tr_ctx.get("in_tr") and tr_ctx.get("tr_upper") is not None:
+    # 阻力位：有 TR 上沿则用它（原典 LPSY = 反弹不过 TR 上沿；勿绑 in_tr）
+    if tr_ctx is not None and tr_ctx.get("tr_upper") is not None:
         resistance = tr_ctx["tr_upper"]
         res_idx = 0  # TR 上沿天然是更早的高点，跳过距离检查
     else:

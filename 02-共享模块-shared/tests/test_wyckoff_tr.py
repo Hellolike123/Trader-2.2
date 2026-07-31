@@ -486,6 +486,43 @@ def test_phase_ut_bc_sow_valid():
     assert "distribution" in ph["phase"]
 
 
+def test_sow_uses_tr_lower_when_close_below_range():
+    """收盘已破 TR 下沿（in_tr=False）时，SOW 仍须按 tr_lower 判定，不退回近窗最低。"""
+    bars = build_flat_tr(n=40, with_spikes=False)
+    tr = we._detect_trading_range(bars)
+    assert tr is not None and tr["tr_lower"] is not None
+    lo = float(tr["tr_lower"])
+    # 两日刺穿并收在下沿下方 → in_tr=False，但正式 SOW
+    bars.append(mk(lo + 0.05, lo + 0.1, lo - 0.15, lo - 0.05, 2_500_000))
+    bars.append(mk(lo - 0.02, lo + 0.05, lo - 0.2, lo - 0.08, 2_500_000))
+    tr2 = we._detect_trading_range(bars)
+    assert tr2 is not None
+    assert tr2["in_tr"] is False, "收盘破下沿后 in_tr 应为 False"
+    sow = we._detect_sign_of_weakness(bars, tr_ctx=tr2)
+    assert sow["sow_signal"] is True, f"应正式 SOW, got {sow}"
+    assert abs(float(sow["sow_price"]) - float(tr2["tr_lower"])) < 1e-6
+
+
+def test_scan_for_signal_passes_tr_ctx_keyword():
+    """阶段滑窗须关键字传 tr_ctx，避免塞进 Spring/SOW 的 _support。"""
+    from trader_shared.wyckoff_phase import _scan_for_signal
+
+    bars = build_flat_tr(n=40, with_spikes=False)
+    tr = we._detect_trading_range(bars)
+    assert tr is not None
+    # 末根 Spring：刺穿下沿后收回
+    lo = float(tr["tr_lower"])
+    bars.append(mk(lo + 0.1, lo + 0.2, lo - 0.25, lo + 0.15, 1_200_000))
+    tr2 = we._detect_trading_range(bars) or tr
+    found = _scan_for_signal(
+        bars, we._detect_spring, window=16, step=1, max_lookback_bars=30, tr_ctx=tr2
+    )
+    # 至少不应因 TypeError/错参静默全灭；直接检测末窗应能 Spring
+    direct = we._detect_spring(bars, tr_ctx=tr2)
+    if direct.get("spring_signal"):
+        assert found is True, "滑窗应在 TR 语境下扫到 Spring"
+
+
 def test_phase_ut_bc_ar_alone_not_dist_b():
     """⑥B：仅 BC+AR 不再构成派发 B（AR 只服务积累 SC）"""
     b = _super_flat(50)
