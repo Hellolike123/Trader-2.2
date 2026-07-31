@@ -98,14 +98,15 @@ CLI / Skill（trader · t0 · review · portfolio …）
 
 **四岗（场景 `pullback_probe` 回踩试探）**：
 
-| 岗位 | id | 角色 |
-|------|-----|------|
-| 背景 | background | 阶段/威科夫中线：能不能谈试探 |
-| 结构 | structure | 缠论买点/回踩区：位到了没有 |
-| 筹码 | chip | 峰/搬家：成本稳不稳 |
-| 动能 | momentum | **确认/否决**：不拆台即可，不强多单独开仓 |
+| 岗位 | id | 角色 | 时框（与 `BUSINESS.md` §2.0 一致） |
+|------|-----|------|-----------------------------------|
+| 背景 | background | 阶段/威科夫中线：能不能谈试探 | **周线威科夫**（不足不参与；禁日线冒充） |
+| 结构 | structure | 缠论买点/回踩区：位到了没有 | **日线缠论**（短线扳机；可加小级别确认） |
+| 筹码 | chip | 峰/搬家：成本稳不稳 | 日线筹码 |
+| 动能 | momentum | **确认/否决**：不拆台即可，不强多单独开仓 | 日线动量；不改阶段、不单独开仓 |
 
-**grade**：`aligned` / `momentum_veto` / `missing_*` / `conflict` / `empty`（见 `resonance.py`）。
+**grade**：`aligned` / `momentum_veto` / `missing_*` / `conflict` / `empty`（见 `resonance.py`）。  
+产品法源互链：`BUSINESS.md` §2.0（中线状态=威科夫周线；短线交易=缠论日线）。
 
 ---
 

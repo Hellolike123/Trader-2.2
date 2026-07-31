@@ -1,7 +1,7 @@
 # BUSINESS.md — Trader3.0 业务逻辑
 
-> **最后更新**：2026-07-29 | **标杆**：`trader_shared/` 代码 + `formulas.md` + `output-template.md`  
-> 冲突时以代码为准，再回写本文。
+> **最后更新**：2026-07-31 | **标杆**：`trader_shared/` 代码 + `formulas.md` + `output-template.md`  
+> 冲突时：以本文 **§2.0 岗位合同** 与代码为准；算法细则以 `formulas.md` 为准，再回写本文。
 
 ---
 
@@ -38,7 +38,29 @@
 
 ## 2. 策略业务规则
 
-### 2.1 缠论（Chanlun）
+### 2.0 岗位 × 时框合同（产品法源）
+
+> 后续改代码 / 写 Agent 规则 **必须先满足本小节**。算法细节见各 § 与 `formulas.md`。
+
+| 岗位 | 理论 | 时框 | 回答的问题 | 不做什么 |
+|------|------|------|------------|----------|
+| **中线状态** | 威科夫 | **仅周线** | 现在处在什么阶段/背景？能不能谈试探？ | 不定短线买卖价；日线不得冒充中线状态 |
+| **短线交易** | 缠论 | **日线**（可加 30m/5m 区间套确认） | 位到了没有？何时何价可扳机？ | 不定中线阶段；不覆盖威科夫背景 |
+| **短线参考** | 动量 / VPF | 日线 | 动能/价量是否拆台或顺风？ | 不改威科夫阶段；不单独构成开仓理由 |
+
+**铁律**：
+
+1. 中线「现在什么阶段」**只听周线威科夫**；周线不足 → `timeframe=insufficient` → **不参与定论**，禁止日线回退定中线。
+2. 短线「何时何价出手」听**日线缠论**买卖点；须中线背景允许（威科夫未否决试探）才可推荐新开。
+3. 动量 / VPF 只做确认或否决；同向加信心，反向推迟；**不得**改写阶段或单独开仓。
+4. Fusion `weighted_score` **仅仪表**；出手听 `decision_view`（共振 ∧ 策略可执行 ∧ 纪律）。
+5. 报告中线「缠论：」行为**结构副读**，不得覆盖威科夫状态定论（见 §2.1）。
+
+与岗位共振对齐：`docs/designs/resonance-and-orchestration.md`（background=周线威科夫，structure=日线缠论，momentum=确认/否决）。
+
+### 2.1 缠论（Chanlun）— 短线交易扳机
+
+**角色**：短线交易岗（位到了没有）。算法权威：`formulas.md`。
 
 **核心概念**：分型 → 笔 → 线段 → 中枢 → 买卖点 → 背驰。
 
@@ -47,11 +69,18 @@
 - 二类买点：回调不破前低，且前置一类为**时间轴历史结构**
 - 三类买点：中枢上方回踩不破
 - 卖点对称
+- 执行优先认正式「一/二/三类」；「类一/类二」为观察档，不进强扳机
+- 一类买优先配合小级别确认（区间套 `30m✓` 等）；背驰生产默认 `legacy`，严格 b/c 见 `CHAN_DIVERGENCE_BC=strict`
 
-**中线 / 周线**：
-- 周线默认根数：`WEEKLY_LOOKBACK_BARS=260`（`config.py`；`data_provider` / `light_data` 统一默认）
-- 周线缠论独立运行，不回退日线
+**短线（日线）**：
+- `chanlun_strategy` 跑日线 → fusion / 短线专家 / 出手扳机
 - 段数只调 `structure_confidence`，不把主状态改成「线段不足」
+
+**中线「缠论：」行（结构副读，方案 A）**：
+- 周线默认根数：`WEEKLY_LOOKBACK_BARS=260`（`config.py`；`data_provider` / `light_data` 统一默认）
+- `chanlun_strategy_midline`：**优先周 K**；周线不足且日线够 → `timeframe=daily_fallback`，展示追加「（日线）」
+- **允许**日线回退作结构展示；**禁止**该结果参与中线阶段/定论（中线状态只认周线威科夫，§2.0 / §2.2）
+- 中线关键价仍只认周线引擎（`mid_key_prices`）；`daily_fallback` 笔段**不得**进中线价主路径
 
 **报告波段标签**（`conclusion_block._build_wave_label`）：
 | 条件 | 文案 |
@@ -70,24 +99,42 @@
 
 **评分权重**（选股池）：chanlun_score max 45
 
-### 2.2 威科夫（Wyckoff）
+### 2.2 威科夫（Wyckoff）— 中线状态岗
+
+**角色**：中线状态岗（阶段/背景能不能谈试探）。**不定**短线买卖价。
 
 **阶段状态机**：吸筹 → 试盘 → 拉升 → 派发 → 砸盘（另有 Markup/Markdown 与原典事件 PS/PSY/BU/UTAD 等）
 
+**时框与窗口（中线）**：
+- **仅周线**；`wyckoff_strategy_midline` 周线独占，**禁止**日线回退
+- 取数：`WEEKLY_LOOKBACK_BARS=260`（约 5 年周 K 背景）
+- 开口：≥ `WYCKOFF_MIN_BARS=15` 根周 K；不足 → `timeframe=insufficient` →「周线不足 · 不参与定论」
+- 阶段叙事：约近 **12 根周 K**（`WYCKOFF_PHASE_LOOKBACK=60` × 周线缩比 0.2）
+- 读法：优先 `phase` + 事件链（如「还差 SOS」）+ `WyckoffStateView`；**不以**单事件亮灯或打分均值当状态
+
 **约束**：
-- 日线威科夫**已退出**短线 fusion（第三席为 VPF）
-- 周线威科夫独占中线，不足 → `timeframe=insufficient` →「周线不足 · 不参与定论」
-- 主消费：选股池/复盘打分 + 中线「威科夫：」一行
+- 日线威科夫**已退出**短线 fusion（第三席为 VPF）；日线结果不得写入中线定论
+- 主消费：中线「威科夫：」一行 + 选股池/复盘吸筹链排序；背景岗共振读周线威科夫
 
 **统一出口 View（A 档，2026-07）**：
 - 契约：`docs/designs/wyckoff-state-view.md`
 - 代码：`to_wyckoff_state_view(analysis)` → `WyckoffStateView`（`trader_shared/wyckoff_view.py`）
 - 从现有 `wyckoff_analysis` 大 dict **薄适配**，不重跑检测
 - 字段：`phase` / `active_events` / `bias` / `confidence` / `summary_oneline` / `tr` / `invalidation_hint` 等
-- **生产主路径**（报告渲染、fusion）仍可读旧 dict；Agent / 后续迁移**优先读 View**
+- **生产主路径**（报告渲染）优先读 View；旧 dict 仅兼容
 - 非目标：View 不直接下单；不替换 fusion；未做特征/原子事件大重构
 
-### 2.3 动量（Momentum）
+**状态准确度演进（指导后续代码，非已实现承诺）**：
+1. 个股 vs 大盘相对强弱（RS）接入周线阶段
+2. Spring 后确认测试与普通 ST 语义分离
+3. 低质量 TR 不进阶段机
+4. 完整 P&F 非优先（目标价近似已有 TR 1:1 投射）
+
+原典落地盘点：`docs/audit/wyckoff-original-concept-inventory.md`。
+
+### 2.3 动量（Momentum）— 短线确认/否决
+
+**角色**：短线参考岗；**不是**学说原典体系。同向加信心，反向推迟；**不得**改写威科夫阶段，**不得**单独构成开仓理由。
 
 **综合评分**：MACD + RSI + ADX + 布林 + Supertrend 确认等（见 `momentum_core` / 审计文档）
 
@@ -96,6 +143,8 @@
 **评分权重**（选股池）：momentum_score max 20
 
 ### 2.4 价量资金（VPF — 融合第三席）
+
+**角色**：短线参考岗（与动量同属确认/否决侧）；**不定**中线状态。
 
 **替代**：日线威科夫在短线融合中的位置。
 
@@ -234,8 +283,8 @@ Agent 展示层仍应：**不给买入建议**；文案对齐 fusion action / �
 🧭 中线
   阶段：{major_stage}
   看法：{midline_view}          ← 禁止塞阶段词
-  威科夫：{wyckoff_midline}     ← 仅周线，不回退日线
-  缠论：{chanlun_midline}       ← 可含「拉升趋势中 · 线段偏少」等 wave_label
+  威科夫：{wyckoff_midline}     ← 中线状态岗：仅周线，不回退日线
+  缠论：{chanlun_midline}       ← 结构副读；周不足可 daily_fallback+「（日线）」；不定阶段
   位置：…
   关键价（中线）
     生命线 / 回踩区 / 压力 / 目标   ← mid_key_prices（周线引擎）

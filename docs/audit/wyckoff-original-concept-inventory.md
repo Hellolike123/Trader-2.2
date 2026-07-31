@@ -52,7 +52,7 @@
 |------|------|------|
 | **Preliminary Supply (PSY 初步供应)** | ✅ | `_detect_preliminary_supply` |
 | BC (Buying Climax 购买高潮) | ✅ | |
-| AR (Automatic Rally after BC) | ✅ | |
+| ARE (Automatic Reaction 自动回落) | ✅ | `_detect_are`（BC 后放量回落，对称 AR） |
 | **UTAD (Upthrust After Distribution)** | ✅ | `_detect_utad`（须 BC/SOW 背景 + UT） |
 | SOW (Sign of Weakness 弱势信号) | ✅ | |
 | LPSY (Last Point of Supply 最后供应点) | ✅ | 分析层+打分层派发背景门控；与 LPS 互斥 |
@@ -62,7 +62,7 @@
 
 ## 五、交易区间（TR）分析
 
-> **这是当前最大的功能缺口（P0-3 的基础）。**
+> TR 识别层已落地（✅）。当前更大的状态准确度缺口见 §七 RS、§六 P&F，以及 `BUSINESS.md` §2.2 演进清单。
 
 | 概念 | 状态 | 说明 |
 |------|------|------|
