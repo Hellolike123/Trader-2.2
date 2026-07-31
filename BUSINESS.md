@@ -125,9 +125,9 @@
 - 非目标：View 不直接下单；不替换 fusion；未做特征/原子事件大重构
 
 **状态准确度演进（指导后续代码，非已实现承诺）**：
-1. 个股 vs 大盘相对强弱（RS）接入周线阶段
-2. Spring 后确认测试与普通 ST 语义分离
-3. 低质量 TR 不进阶段机
+1. 个股 vs 大盘相对强弱（RS）接入周线阶段（P1，另开）
+2. Spring 后确认测试与 ST 语义分离 → **实现规格**：`docs/plans/wyckoff-phase-accuracy-handoff-2026-07-31.md` §2（P0-A）
+3. 低质量 TR 不进阶段机 → 同上 handoff §3（P0-B）
 4. 完整 P&F 非优先（目标价近似已有 TR 1:1 投射）
 
 原典落地盘点：`docs/audit/wyckoff-original-concept-inventory.md`。
