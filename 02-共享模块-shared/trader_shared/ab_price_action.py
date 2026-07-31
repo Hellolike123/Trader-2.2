@@ -78,19 +78,14 @@ def _ema(values: list[float], period: int) -> float | None:
 
 
 def _calc_atr(bars: list[dict], period: int = 14) -> float:
-    """计算 ATR（平均真实范围）。"""
-    if len(bars) < period + 1:
-        return 0.0
-    trs = []
-    for i in range(1, len(bars)):
-        h = float(bars[i].get("high", 0))
-        l = float(bars[i].get("low", 0))
-        prev_c = float(bars[i - 1].get("close", 0))
-        tr = max(h - l, abs(h - prev_c), abs(l - prev_c))
-        trs.append(tr)
-    if len(trs) < period:
-        return 0.0
-    return sum(trs[-period:]) / period
+    """计算 ATR（与生产同源 SMA；脏 OHLC 跳过，不用 0 冒充）。"""
+    from trader_shared.indicator_math import calc_atr_series
+
+    series = calc_atr_series(bars, period=period)
+    for v in reversed(series):
+        if v is not None and v > 0:
+            return float(v)
+    return 0.0
 
 
 # ── 信号棒检测 ──────────────────────────────────────────────────────────────

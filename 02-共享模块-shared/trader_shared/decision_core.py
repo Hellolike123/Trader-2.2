@@ -342,10 +342,20 @@ def status_layers(
                 break
 
     if EXIT_PHASED_ENABLED and not _fake_break and current > hard_stop:
-        # Fix A6: hard_stop 和 support 可能极近（如止损就在支撑位附近），
-        # 导致 atr_est 接近0，几乎所有价格都误触发 _near_stop
-        # 用当前价×1.5%（约1个ATR）作为下限，确保合理触发距离
-        atr_est = max(current * 0.015 if current > 0 else 0.01, abs(hard_stop - support) / 2 if support > 0 else 0.01)
+        # Fix A6: hard_stop 和 support 可能极近时 atr_est≈0 会误触发 _near_stop。
+        # 优先用 bar.atr_ratio（真 ATR%），缺省再退回 1.5%。
+        _atr_r = None
+        if isinstance(bars, list) and bars:
+            _atr_r = to_float(bars[-1].get("atr_ratio"))
+            if (_atr_r is None or _atr_r <= 0) and current > 0:
+                _a14 = to_float(bars[-1].get("atr14"))
+                if _a14 and _a14 > 0:
+                    _atr_r = _a14 / current
+        _ratio = _atr_r if (_atr_r is not None and _atr_r > 0) else 0.015
+        atr_est = max(
+            current * _ratio if current > 0 else 0.01,
+            abs(hard_stop - support) / 2 if support > 0 else 0.01,
+        )
         if current - hard_stop < atr_est * 2:
             _near_stop = True
 

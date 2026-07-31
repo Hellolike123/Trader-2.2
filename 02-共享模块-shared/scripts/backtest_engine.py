@@ -173,40 +173,16 @@ def assess_as_of(index_bars: list[dict]) -> dict[str, Any]:
             "change_pct": change_pct, "current": closes[-1]}
 
 
-# ── ATR（Wilder 平滑）───────────────────────────────────────────────────────
+# ── ATR（与生产同源：indicator_math.calc_atr_series，SMA 非 Wilder）────────
 def compute_atr(bars: list[dict], period: int = 14) -> list[float | None]:
-    """返回与 bars 等长的 ATR 序列（预热期前为 None）。"""
-    n = len(bars)
-    atr: list[float | None] = [None] * n
-    trs: list[float | None] = []
-    prev_close = None
-    for b in bars:
-        h = _to_float(b.get("high"))
-        l = _to_float(b.get("low"))
-        if h is None or l is None:
-            trs.append(None)
-            prev_close = _to_float(b.get("close"))
-            continue
-        if prev_close is None:
-            trs.append(h - l)
-        else:
-            trs.append(max(h - l, abs(h - prev_close), abs(l - prev_close)))
-        prev_close = _to_float(b.get("close"))
-    # 种子：第一个满足「连续 period 个有效 TR」的位置做 SMA
-    seed_idx = None
-    for i in range(period - 1, n):
-        window = trs[i - period + 1:i + 1]
-        if all(x is not None for x in window):
-            atr[i] = sum(window) / period
-            seed_idx = i
-            break
-    if seed_idx is None:
-        return atr
-    for i in range(seed_idx + 1, n):
-        if trs[i] is None or atr[i - 1] is None:
-            continue
-        atr[i] = (atr[i - 1] * (period - 1) + trs[i]) / period
-    return atr
+    """返回与 bars 等长的 ATR 序列（预热期前为 None）。
+
+    对齐实盘 light_data / structure_core 的 14 期 SMA ATR，避免回测用 Wilder
+    而生产用 SMA 导致 trailing 止损口径分裂。
+    """
+    from trader_shared.indicator_math import calc_atr_series
+
+    return calc_atr_series(bars, period=period)
 
 
 # ── 风控历史数据：一次性拉取，循环内按 t 切片（point-in-time，无前视） ──

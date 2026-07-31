@@ -214,7 +214,7 @@ def offline_report(target: str) -> dict[str, Any]:
         "fib_ext_1618": round(base * 1.618, 2),
         "position_cap": {"sector_cap": 10, "score_cap": 10},
         "atr14": round(base * 0.03, 2),
-        "atr_ratio": 1.0,
+        "atr_ratio": 0.03,  # 与 atr14≈3%×price 一致（旧值 1.0 会误判波幅偏高）
         "stage_status": "蓄势期+震荡",
         "data_note": "离线占位数据（offline_report），非实时分析结果。",
         "data_status": "offline",

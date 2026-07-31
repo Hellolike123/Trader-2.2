@@ -646,9 +646,13 @@ def build_structure_context(
     # resistance: 实际阻力位，用于减仓参考
     resistance_price = float(resistance["price"])
 
-    # 使用 ATR 替代振幅，ATR 能捕捉跳空缺口，对"买入位到不了"的跳空场景更敏感
-    # P3: zone_width 受缠论信号影响，上攻笔/三买时放大，下跌笔时收窄
-    atr_pct = average_atr_pct(recent20) or 0.02
+    # ATR% SSOT：优先日线 bar.atr_ratio（与 atr_level/atr_cap 同源 14-SMA），
+    # 缺省再退回近窗 average_atr_pct，避免 trailing 与波动分级口径分裂。
+    _bar_atr_r = to_float(bars[-1].get("atr_ratio")) if bars else None
+    if _bar_atr_r is not None and _bar_atr_r > 0:
+        atr_pct = float(_bar_atr_r)
+    else:
+        atr_pct = average_atr_pct(recent20) or 0.02
     zone_width_pct = clamp(atr_pct * 0.25 * theory["zone_width"], MIN_ZONE_WIDTH_PCT, MAX_ZONE_WIDTH_PCT)
     stop_buffer_pct = clamp(atr_pct * 0.40 * theory.get("stop_buffer", 1.0), MIN_STOP_BUFFER_PCT, MAX_STOP_BUFFER_PCT)
     low_zone_lower = round(support_price, 2)
@@ -944,8 +948,9 @@ def find_key_levels(bars: list[BarData]) -> dict[str, float]:
     short_support = round(min(lows[-short_n:]), 2)
     short_resist = round(max(highs[-short_n:]), 2)
 
-    # ── ATR 自适应参数：波动大的股放宽容差，波动小的收紧 ──
-    _atr_pct = average_atr_pct(bars) or 0.02
+    # ── ATR 自适应参数：优先 bar.atr_ratio（与波动分级同源），否则近窗均值 ──
+    _bar_atr = to_float(bars[-1].get("atr_ratio")) if bars else None
+    _atr_pct = float(_bar_atr) if (_bar_atr is not None and _bar_atr > 0) else (average_atr_pct(bars) or 0.02)
     _adapt_tol = max(0.015, 0.8 * _atr_pct)       # 容差：至少 1.5%，或 0.8×ATR%
     _adapt_unbroken = max(0.03, 1.2 * _atr_pct)    # 破位阈值：至少 3%，或 1.2×ATR%
 

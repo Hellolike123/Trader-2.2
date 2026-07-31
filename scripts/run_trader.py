@@ -174,6 +174,9 @@ def handle_live_show(args: argparse.Namespace) -> int:
         current = float(item.get("current") or 0.0)
         trigger = float(item.get("trigger") or 0.0)
         defense = float(item.get("defense") or 0.0)
+        trail = float(item.get("trailing_stop") or 0.0)
+        if trail > 0:
+            defense = max(defense, trail)
         support = float(item.get("support") or 0.0)
         scene = str(item.get("scene") or "")
         status = str(item.get("status") or "?")
@@ -190,12 +193,16 @@ def handle_live_show(args: argparse.Namespace) -> int:
         except Exception:
             pass
             
+        # 阈值用 ATR 比例（atr_ratio），勿把 atr14（元）当比例
+        atr_ratio = float(item.get("atr_ratio") or 0.0)
         atr14 = float(item.get("atr14") or 0.0)
-        thresh_pct = min(atr14 * 2, 0.03) if atr14 > 0 else 0.02
-        atr_note = f" (日幅±{atr14:.2f})" if atr14 > 0 else ""
+        if atr_ratio <= 0 and atr14 > 0 and current > 0:
+            atr_ratio = atr14 / current
+        thresh_pct = min(atr_ratio * 2, 0.03) if atr_ratio > 0 else 0.02
+        atr_note = f" (ATR {atr_ratio * 100:.1f}%)" if atr_ratio > 0 else ""
         
         stock_alerts = []
-        # 1. 破防守位
+        # 1. 破防守位（含 trailing）
         if defense > 0 and current < defense:
             stock_alerts.append("🛑 跌破防守！跌破防守" + atr_note)
         # 2. 靠近防守

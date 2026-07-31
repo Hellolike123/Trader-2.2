@@ -363,6 +363,9 @@ def generate_alert(report: dict[str, Any]) -> str | None:
     support = float(report.get("support") or 0)
     low_zone = str(report.get("low_zone") or "")
     stop = float(report.get("stop") or 0)
+    trailing = float(report.get("trailing_stop") or 0)
+    # 有效止损 = hard/结构止损 与 ATR 移动止损取更高（只紧不松）
+    eff_stop = max(stop, trailing) if (stop > 0 or trailing > 0) else 0.0
     confirm = float(report.get("confirm") or 0)
     resistance = float(report.get("resistance") or 0)
     scene = str(report.get("scene") or "")
@@ -371,11 +374,12 @@ def generate_alert(report: dict[str, Any]) -> str | None:
     atr14 = float(report.get("atr14", 0) or 0)
     thresh = max(atr14 * 0.35, current * 0.006) if atr14 > 0 else current * 0.008
 
-    if stop > 0:
-        if current <= stop:
-            return f"⚠️ {name}｜现价{current:.2f}元 跌破止损 {stop:.2f}元 注意控制风险"
-        if current <= stop + thresh:
-            return f"⚠️ {name}｜现价{current:.2f}元 接近止损 {stop:.2f}元 留意防守"
+    if eff_stop > 0:
+        label = "移动止损" if trailing > stop > 0 else "止损"
+        if current <= eff_stop:
+            return f"⚠️ {name}｜现价{current:.2f}元 跌破{label} {eff_stop:.2f}元 注意控制风险"
+        if current <= eff_stop + thresh:
+            return f"⚠️ {name}｜现价{current:.2f}元 接近{label} {eff_stop:.2f}元 留意防守"
 
     if support > 0 and abs(current - support) <= thresh:
         if stop > 0 and abs(current - stop) <= abs(current - support):
@@ -404,6 +408,8 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
     symbol = str(report.get("symbol", ""))
     current = float(report["current"])
     stop = float(report.get("stop") or 0)
+    trailing = float(report.get("trailing_stop") or 0)
+    eff_stop = max(stop, trailing) if (stop > 0 or trailing > 0) else 0.0
     support = float(report.get("support") or 0)
     low_zone = str(report.get("low_zone") or f"{support:.2f}-{support * 1.01:.2f}元")
     confirm = float(report.get("confirm") or 0)
@@ -424,10 +430,10 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
     thresh = max(atr14 * 0.35, current * 0.006) if atr14 > 0 else current * 0.008
 
     # === DETERMINE ACTION CATEGORY ===
-    # 1. 硬止损破位（最优先）
-    is_stop_broken = stop > 0 and current < stop
-    # 2. 接近止损线
-    is_near_stop = not is_stop_broken and stop > 0 and (current - stop) < thresh * 3
+    # 1. 有效止损破位（hard ∪ trailing，最优先）
+    is_stop_broken = eff_stop > 0 and current < eff_stop
+    # 2. 接近有效止损线
+    is_near_stop = not is_stop_broken and eff_stop > 0 and (current - eff_stop) < thresh * 3
     # 3. 进入止跌区
     is_at_support = support > 0 and abs(current - support) <= thresh * 2 and current <= support
     # 4. 接近启动确认价
@@ -439,10 +445,10 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
 
     # === BUILD ALERT TEXT ===
     if is_stop_broken:
-        break_pct = (current - stop) / stop * 100 if stop > 0 else 0
-        alerts_found.append(f"已破防守位 {stop:.2f}")
+        break_pct = (current - eff_stop) / eff_stop * 100 if eff_stop > 0 else 0
+        alerts_found.append(f"已破防守位 {eff_stop:.2f}")
     elif is_near_stop:
-        dist = (current - stop) / stop * 100
+        dist = (current - eff_stop) / eff_stop * 100
         alerts_found.append(f"距止损仅 {dist:.1f}%")
 
     if is_at_support:
@@ -494,7 +500,8 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
 
     # Show key levels reference
     lines.append("")
-    lines.append(f"  防守 {stop:.2f}  |  支撑 {support:.2f}  |  启动 {confirm:.2f}  |  减仓 {resistance:.2f}  |  止盈 {take:.2f}")
+    stop_label = eff_stop if eff_stop > 0 else stop
+    lines.append(f"  防守 {stop_label:.2f}  |  支撑 {support:.2f}  |  启动 {confirm:.2f}  |  减仓 {resistance:.2f}  |  止盈 {take:.2f}")
 
     # ATR + position cap
     if atr14 > 0:
@@ -510,7 +517,7 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
     # Write signal if triggered
     if alerts_found and write_signal:
         if is_stop_broken:
-            sig_type, direction, action_sig, confidence, trigger_price = "risk_stop", "bearish", "stop", "high", stop
+            sig_type, direction, action_sig, confidence, trigger_price = "risk_stop", "bearish", "stop", "high", eff_stop
         elif is_at_support:
             sig_type, direction, action_sig, confidence, trigger_price = "low_buy_triggered", "bullish_lean", "low_buy", "medium", support
         elif is_near_confirm:
@@ -528,8 +535,7 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
         if trigger_price <= 0:
             lines.append("  ⚠️ 信号跳过：当前价无效")
             return "\n".join(lines)
-        if stop <= 0:
-            stop = None  # invalidation 会跳过
+        inv_stop = eff_stop if eff_stop > 0 else None
 
         signal = {
             "contract": "trader_signal_v1",
@@ -544,7 +550,7 @@ def build_watch_alert(report: dict[str, Any], write_signal: bool = False) -> str
             "confidence": confidence,
             "data_status": "degraded" if report.get("data_status") is None else DATA_STATUS_MAP.get(str(report.get("data_status")), "degraded"),
             "trigger": {"type": "price_level", "price": round(trigger_price, 2), "text": f"{trigger_price:.2f}元 触发{sig_type}"},
-            "invalidation": {"type": "price_break", "price": round(stop, 2), "text": f"跌破 {stop:.2f}元"} if stop else None,
+            "invalidation": {"type": "price_break", "price": round(inv_stop, 2), "text": f"跌破 {inv_stop:.2f}元"} if inv_stop else None,
             "position": {
                 "max_total_pct": signal_max_total_pct(sig_type),
                 "max_single_move_pct": min(10, signal_max_total_pct(sig_type)),

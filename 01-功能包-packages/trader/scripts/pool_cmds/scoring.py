@@ -244,7 +244,19 @@ def record_from_report(target: str, report: dict[str, Any], offline: bool = Fals
         "admission_diag": admission["result"],  # 旧三关诊断：入池/待补/拒绝
         "structure_summary": structure_summary(report),
         "trigger": round(float(report.get("confirm") or 0), 2),
-        "defense": round(float(report.get("stop") or 0), 2),
+        # defense = 有效止损（hard ∪ trailing），盯盘破位与状态机一致
+        "defense": round(
+            max(
+                float(report.get("stop") or 0),
+                float(report.get("trailing_stop") or 0),
+            ),
+            2,
+        ),
+        "trailing_stop": (
+            round(float(report.get("trailing_stop")), 2)
+            if report.get("trailing_stop")
+            else None
+        ),
         "confirm": round(float(report.get("confirm") or 0), 2),
         "support": round(float(report.get("support") or 0), 2),
         "current": round(float(report.get("current") or 0), 2),
