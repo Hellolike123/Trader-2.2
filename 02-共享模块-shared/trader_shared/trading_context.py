@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 
 # 复用 trading_calendar 的节假日数据和基础判断
+from trader_shared.cn_time import CN_TZ, now_cn, today_cn  # noqa: F401 — 再导出给调用方
 from trader_shared.trading_calendar import (
     CHINA_HOLIDAYS_2025_2027,
     is_trading_day,
@@ -18,7 +19,7 @@ from trader_shared.trading_calendar import (
 
 def is_trading_time() -> bool:
     """判断当前是否是交易时间（9:25-11:30, 13:00-15:00，非交易日返回 False）。"""
-    now = datetime.now()
+    now = now_cn()
     if not is_trading_day(now.date()):
         return False
     t = now.hour * 100 + now.minute
@@ -35,7 +36,7 @@ def current_session() -> str:
         "post_market"  — 盘后（15:01-23:59）
         "non_trading"  — 非交易日
     """
-    now = datetime.now()
+    now = now_cn()
     if not is_trading_day(now.date()):
         return "non_trading"
     t = now.hour * 100 + now.minute
@@ -84,7 +85,7 @@ def compute_data_freshness(last_data_date: date | str | None, as_of: date | date
             last_data_date = datetime.strptime(last_data_date[:10], "%Y-%m-%d").date()
         except (ValueError, TypeError):
             return "stale"
-    as_of = as_of or datetime.now()
+    as_of = as_of or now_cn()
     as_of_date = as_of.date() if isinstance(as_of, datetime) else as_of
     # 盘前：今天尚未开盘，允许数据停留在昨天
     if isinstance(as_of, datetime) and is_trading_day(as_of_date):

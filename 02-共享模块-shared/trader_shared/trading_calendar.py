@@ -109,12 +109,14 @@ def is_trading_day(d: date | None = None) -> bool:
     """判断指定日期是否是交易日（非周末且非节假日）。
 
     Args:
-        d: 要检查的日期，默认今天
+        d: 要检查的日期，默认今天（上海时区）
 
     Returns:
         True 如果是交易日
     """
-    d = d or date.today()
+    if d is None:
+        from trader_shared.cn_time import today_cn
+        d = today_cn()
     if d.weekday() >= 5:
         return False
     return d not in CHINA_HOLIDAYS_2025_2027
@@ -125,7 +127,8 @@ def is_trading_time() -> bool:
 
     与 light_data.is_trading_time() 语义一致，但增加了节假日检查。
     """
-    now = datetime.now()
+    from trader_shared.cn_time import now_cn
+    now = now_cn()
     if not is_trading_day(now.date()):
         return False
     current_time = now.hour * 100 + now.minute
@@ -136,13 +139,17 @@ def next_trading_open(from_dt: datetime | None = None) -> datetime:
     """计算下一个交易日开盘时间（9:25）。
 
     Args:
-        from_dt: 起始时间，默认当前时间
+        from_dt: 起始时间，默认当前时间（上海时区）
 
     Returns:
         下一个交易日 9:25 的 datetime
     """
     from datetime import timedelta
-    now = from_dt or datetime.now()
+    if from_dt is None:
+        from trader_shared.cn_time import now_cn
+        now = now_cn()
+    else:
+        now = from_dt
     # 如果今天是交易日且还没到 9:25，返回今天 9:25
     if is_trading_day(now.date()) and now.hour * 100 + now.minute < 925:
         return now.replace(hour=9, minute=25, second=0, microsecond=0)

@@ -515,10 +515,15 @@ class UnifiedProvider:
             start_date = (pd.Timestamp.today() - timedelta(days=days)).strftime("%Y%m%d")
         df = ak.stock_zh_a_hist(symbol=sec.code, period="daily", start_date=start_date, end_date="", adjust="qfq")
         bars = [bar for _, row in df.iterrows() if (bar := self._akshare_to_bar(row.to_dict()))]
-        from trader_shared.light_data import _compute_atr_fields, ensure_bars_ascending
+        from trader_shared.light_data import (
+            _compute_atr_fields,
+            ensure_bars_ascending,
+            fix_daily_scale_glitches,
+        )
         fixed, rewritten = ensure_bars_ascending(bars)
         # ensure_bars_ascending 仅在重排时重算 ATR；AkShare 常已升序，须显式补算
-        if not rewritten:
+        _scaled = fix_daily_scale_glitches(fixed)
+        if not rewritten or _scaled:
             _compute_atr_fields(fixed)
         for b in fixed:
             b.setdefault("data_source", "akshare")
@@ -673,8 +678,13 @@ class TushareProvider:
         from trader_shared.cache_utils import get_day_scoped_bars, CACHE_DAILY
 
         def _net() -> list[dict[str, Any]]:
-            end_date = datetime.now().strftime("%Y%m%d")
-            start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+            try:
+                from trader_shared.cn_time import now_cn
+                _now = now_cn()
+            except Exception:
+                _now = datetime.now()
+            end_date = _now.strftime("%Y%m%d")
+            start_date = (_now - timedelta(days=days)).strftime("%Y%m%d")
             records = self._client.query_daily(
                 sec.ts_code, start_date=start_date, end_date=end_date
             )
@@ -711,6 +721,8 @@ class TushareProvider:
                     # 代理 daily 不接受 adj：价格为未复权；ATR 与策略价同源
                     "adjust": "none",
                 })
+            from trader_shared.light_data import fix_daily_scale_glitches
+            fix_daily_scale_glitches(bars)
             _compute_atr_fields(bars)
             return bars
 

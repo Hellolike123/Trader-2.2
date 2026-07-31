@@ -641,7 +641,11 @@ def merge_decisions(
         unlocks = (extend_sentiment or {}).get("unlocks", [])
         if unlocks:
             from datetime import datetime
-            today_dt = datetime.now().date()
+            try:
+                from trader_shared.cn_time import today_cn
+                today_dt = today_cn()
+            except Exception:
+                today_dt = datetime.now().date()
             for u in unlocks:
                 u_date_str = u.get("date", "")
                 try:

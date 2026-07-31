@@ -229,9 +229,10 @@ def build_vpf_signal(
         _fund_date = str(ff.get("latest_fund_date") or "")
         if _fund_date:
             try:
-                from datetime import date, datetime
+                from datetime import datetime
+                from trader_shared.cn_time import today_cn
                 _fd = datetime.strptime(_fund_date, "%Y-%m-%d").date()
-                if (date.today() - _fd).days > 5:
+                if (today_cn() - _fd).days > 5:
                     fund_quality = "stale"
             except (ValueError, ImportError):
                 pass

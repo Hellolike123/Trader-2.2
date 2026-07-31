@@ -159,7 +159,7 @@ python3 -m pytest 02-共享模块-shared/tests/test_strategy_match.py -q
 
 | 项 | 现状 | 建议 |
 |----|------|------|
-| 单日 -7% 熔断 | 代码 `change < -7`（刚好 -7 不触发） | 产品定 `<=` 或改测 |
+| 单日 -7% 熔断 | 代码 `change <= -7`（满 7% 熔断） | 已对齐 |
 | VPF 冲突 | 资金 conf≥0.55 可压过价量空 | 定 climactic 例外或改测 |
 | 周线威无 TR | 定不出阶段 | 保持诚实文案 |
 | main_force 解析测试 | 旧 API import 失败 | 修测或删 |

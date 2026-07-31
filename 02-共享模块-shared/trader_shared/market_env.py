@@ -237,8 +237,8 @@ def assess() -> dict[str, Any]:
                 last_d = str(closes_vol[-1].get("date") or closes_vol[-1].get("time") or "")[:10]
                 try:
                     from trader_shared.trading_context import _last_trading_day
-                    from datetime import date as _date
-                    expected_d = _last_trading_day(_date.today()).isoformat()
+                    from trader_shared.cn_time import today_cn
+                    expected_d = _last_trading_day(today_cn()).isoformat()
                 except Exception:
                     expected_d = last_d
                 if last_d == expected_d:

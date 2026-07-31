@@ -131,7 +131,12 @@ def is_trade_time(now: datetime) -> bool:
 def completed_5m_bars(bars: list[dict[str, Any]], now: datetime | None = None) -> list[dict[str, Any]]:
     if not bars:
         return []
-    now = now or datetime.now()
+    if now is None:
+        try:
+            from trader_shared.cn_time import now_cn
+            now = now_cn()
+        except Exception:
+            now = datetime.now()
     completed: list[dict[str, Any]] = []
     for bar in bars:
         if bar is None:
@@ -178,7 +183,12 @@ def today_bars(bars: list[dict[str, Any]], now: datetime | None = None) -> list[
 
 
 def data_status(quote: dict[str, Any], daily: list[dict[str, Any]], bars_5m: list[dict[str, Any]], now: datetime | None = None) -> str:
-    now = now or datetime.now()
+    if now is None:
+        try:
+            from trader_shared.cn_time import now_cn
+            now = now_cn()
+        except Exception:
+            now = datetime.now()
     if not quote or not daily or len(bars_5m) < MIN_5M_BARS:
         return "degraded"
     last_dt = parse_dt((bars_5m[-1] or {}).get("time") or (bars_5m[-1] or {}).get("date"))
@@ -1310,7 +1320,14 @@ def _resonance_summary(lights, buy_green, sell_red):
     return "结构中性（参考）"
 def build_price_point_model(report_data: dict[str, Any], structure_result: dict[str, Any] | None = None) -> dict[str, Any]:
     data = dict(report_data)  # copy 防止副作用
-    now = data.get("now") or datetime.now()
+    if data.get("now") is not None:
+        now = data["now"]
+    else:
+        try:
+            from trader_shared.cn_time import now_cn
+            now = now_cn()
+        except Exception:
+            now = datetime.now()
     completed = completed_5m_bars(data.get("kline_5m") or [], now)
     data["kline_5m_completed"] = completed
     status_value = data_status(data.get("quote") or {}, data.get("daily_bars") or [], completed, now)

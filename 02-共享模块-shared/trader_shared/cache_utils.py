@@ -87,12 +87,16 @@ TTL_BARS_DAY = 86400 * 3  # 日/周 K 文件年龄兜底
 
 
 def cache_calendar_date() -> str:
-    """本地自然日 YYYY-MM-DD（日频缓存的「今天」）。
+    """上海自然日 YYYY-MM-DD（日频缓存的「今天」）。
 
     前一天的数据可以一直用到换日；换日后再拉网。
     不用交易所日历：周末/节假日首次会多拉一次，拿到仍是上一交易日数据，可接受。
     """
-    return datetime.now().strftime("%Y-%m-%d")
+    try:
+        from trader_shared.cn_time import today_cn
+        return today_cn().isoformat()
+    except Exception:
+        return datetime.now().strftime("%Y-%m-%d")
 
 
 def is_fetch_date_today(payload: Any, today: str | None = None) -> bool:

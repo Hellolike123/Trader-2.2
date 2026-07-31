@@ -119,7 +119,13 @@ def run(target: str, days: int = 365, signal_types: tuple[str, ...] | None = Non
             continue
 
         status = levels.get("status", "")
-        hard_stop = float(levels.get("hard_stop") or 0)
+        from trader_shared.structure_core import effective_stop_price
+
+        stop_px = float(
+            effective_stop_price(levels.get("hard_stop"), levels.get("trailing_stop"))
+            or levels.get("hard_stop")
+            or 0
+        )
         take = float(levels.get("take") or 0)
         low = float(day_bars[-1].get("low") or current)
 
@@ -141,14 +147,14 @@ def run(target: str, days: int = 365, signal_types: tuple[str, ...] | None = Non
         else:
             hold_days += 1
             exit_reason = ""
-            if hard_stop > 0 and low <= hard_stop:
-                pnl = round((hard_stop - entry_price) / entry_price * 100, 2)
+            if stop_px > 0 and low <= stop_px:
+                pnl = round((stop_px - entry_price) / entry_price * 100, 2)
                 trades.append({
                     "entry_date": entry_date,
                     "exit_date": str(day_bars[-1].get("date") or ""),
                     "signal_type": entry_signal,
                     "entry_price": round(entry_price, 2),
-                    "exit_price": round(hard_stop, 2),
+                    "exit_price": round(stop_px, 2),
                     "pnl_pct": pnl,
                     "days_held": hold_days,
                     "stopped_out": True,

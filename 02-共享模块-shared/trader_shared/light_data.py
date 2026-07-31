@@ -770,7 +770,11 @@ def is_trading_time() -> bool:
         from trader_shared.trading_context import is_trading_time as _itt
         return _itt()
     except ImportError:
-        now = datetime.now()
+        try:
+            from trader_shared.cn_time import now_cn
+            now = now_cn()
+        except Exception:
+            now = datetime.now()
         if now.weekday() >= 5:
             return False
         current_time = now.hour * 100 + now.minute
@@ -1148,6 +1152,35 @@ def _compute_atr_fields(bars: list[dict[str, Any]]) -> None:
             bar["atr_ratio"] = None
 
 
+def fix_daily_scale_glitches(bars: list[dict[str, Any]] | None) -> int:
+    """原地修复腾讯日线偶发 ~100× OHLC 缩放坏点。
+
+    相对昨收 ≥50× 或 ≤1/50 时按 100 缩放 OHLC（A 股单日涨跌不可能到此量级）。
+    返回修复根数。
+    """
+    rows = bars or []
+    fixed_n = 0
+    for i in range(1, len(rows)):
+        prev = to_float(rows[i - 1].get("close"))
+        c = to_float(rows[i].get("close"))
+        if prev is None or c is None or prev <= 0 or c <= 0:
+            continue
+        ratio = c / prev
+        factor = None
+        if ratio >= 50.0:
+            factor = 0.01
+        elif ratio <= 1.0 / 50.0:
+            factor = 100.0
+        if factor is None:
+            continue
+        for k in ("open", "high", "low", "close"):
+            v = to_float(rows[i].get(k))
+            if v is not None and v > 0:
+                rows[i][k] = round(v * factor, 4)
+        fixed_n += 1
+    return fixed_n
+
+
 def ensure_bars_ascending(
     bars: list[dict[str, Any]] | None,
     *,
@@ -1191,12 +1224,13 @@ def ensure_bars_ascending(
     dates = [_d(b) for b in rows]
     if not all(dates):
         return rows, False
-    if dates == sorted(dates):
-        return rows, False
-    rows.sort(key=_d)
-    if recompute_atr:
+    rewritten = False
+    if dates != sorted(dates):
+        rows.sort(key=_d)
+        rewritten = True
+    if recompute_atr and rewritten:
         _compute_atr_fields(rows)
-    return rows, True
+    return rows, rewritten
 
 
 def _fetch_daily_sina(sec: Security, days: int = 300) -> list[dict[str, Any]] | None:
@@ -1265,6 +1299,8 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
     """拉取日线（腾讯优先）。出口保证时间正序，bars[-1]=最新。"""
     bars = _fetch_qfq_daily_raw(sec, http, days=days)
     fixed, _ = ensure_bars_ascending(bars if isinstance(bars, list) else [])
+    if fix_daily_scale_glitches(fixed):
+        _compute_atr_fields(fixed)
     return fixed
 
 

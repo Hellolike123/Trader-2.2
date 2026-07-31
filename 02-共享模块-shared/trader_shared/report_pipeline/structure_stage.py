@@ -38,8 +38,12 @@ def run_structure_stage(
     vp_result = None
     try:
         from trader_shared.volume_profile import compute_volume_profile
-        if bars_5m and len(bars_5m) >= 10:
-            vp_result = compute_volume_profile(bars_5m)
+        from trader_shared.t0_price_point_engine import completed_5m_bars
+
+        # 只用已收盘 5m，避免盘中未完成棒污染 POC/VA
+        _vp_bars = completed_5m_bars(bars_5m) if bars_5m else []
+        if _vp_bars and len(_vp_bars) >= 10:
+            vp_result = compute_volume_profile(_vp_bars)
     except Exception:
         pass
 

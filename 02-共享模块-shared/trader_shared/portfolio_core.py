@@ -6,7 +6,7 @@ from typing import Any
 from trader_shared import candidate_core as core
 from trader_shared.light_data import pct_change, to_float
 from trader_shared.stage_positioning import assess_stage
-from trader_shared.structure_core import moving_average
+from trader_shared.structure_core import effective_stop_price, moving_average
 
 try:
     from trader_shared.chip_distribution import calc_chip_distribution
@@ -38,6 +38,10 @@ def analyze_target(target: str, provider: Any, lookback_days: int) -> dict[str, 
         change_pct = quote.get("current_change_pct")
         levels = core.build_structure_context(current, bars, change_pct)
         status = levels["status"]
+        eff_stop = (
+            effective_stop_price(levels.get("hard_stop"), levels.get("trailing_stop"))
+            or float(levels.get("hard_stop") or 0)
+        )
         downside_pct = abs(pct_change(current, levels["main_support"]))
         risk_reward = levels["upside_pct"] / max(downside_pct, 0.2)
         last_bar = bars[-1] if bars else {}
@@ -69,7 +73,7 @@ def analyze_target(target: str, provider: Any, lookback_days: int) -> dict[str, 
                     "current": current,
                     "low_zone_upper": levels["low_zone_upper"],
                     "confirm_price": levels["confirm_price"],
-                    "hard_stop": levels["hard_stop"],
+                    "hard_stop": eff_stop,
                     "position_ratio": levels["position_ratio"],
                     "change_pct": change_pct,
                     "low_zone": levels["low_zone"],
@@ -100,7 +104,10 @@ def analyze_target(target: str, provider: Any, lookback_days: int) -> dict[str, 
             "defense": levels["main_support"],
             "support": levels["support"],
             "resistance": levels["resistance"],
-            "stop": levels["hard_stop"],
+            "stop": eff_stop,
+            "hard_stop": levels["hard_stop"],
+            "trailing_stop": levels.get("trailing_stop"),
+            "effective_stop": eff_stop,
             "buy_low": levels["low_zone_lower"],
             "buy_high": levels["low_zone_upper"],
             "confirm": levels["confirm_price"],

@@ -107,7 +107,7 @@
 
 ### 2.5 单日跌幅硬熔断
 
-`decision_core.status_layers`：`change_pct < -7.0`（百分比）触发「风险回避」，**刚好 -7.0 不触发**。若产品要「满 7% 熔断」需改 `<=` 并同步测试。
+`decision_core.status_layers`：`change_pct <= -7.0`（百分比）触发「风险回避」（满 7% 即熔断，与 `HARD_STOP_SINGLE_DAY_DROP` 一致）。
 
 ### 2.6 分析意见卡（策略匹配输入）
 
