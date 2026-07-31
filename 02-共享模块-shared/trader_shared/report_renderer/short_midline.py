@@ -1075,19 +1075,26 @@ def render_short_midline(r: dict[str, Any]) -> str:
     )
     if _chan_sig and _chan_sig != "无信号" and not _chan_bear_hl:
         _hl_parts.append(f"缠论{_chan_clean}")
+    # 亮点阶段：看面板「阶段：」行（含偏空标签）+ midline_bias，勿把偏空主升当亮点
+    _stage_disp_hl = str(_stage_line or stage_line or "").strip()
+    _mid_bias_hl = str(r.get("midline_bias") or "").strip().lower()
+    _stage_bear_hl = bool(
+        _mid_bias_hl == "bear"
+        or any(k in _stage_disp_hl for k in ("转弱", "派发", "衰退", "偏空", "慎跟", "暂缓"))
+    )
     _stage_bull_hl = bool(
-        stage_line
-        and any(k in stage_line for k in ("蓄势", "主升"))
-        and not any(k in stage_line for k in ("转弱", "派发", "衰退"))
+        _stage_disp_hl
+        and any(k in _stage_disp_hl for k in ("蓄势", "主升"))
+        and not _stage_bear_hl
     )
     if _stage_bull_hl:
-        _hl_parts.append(f"中线阶段{stage_line}")
-    if _ma5_v and current > 0 and current > _ma5_v and not _chan_bear_hl:
+        _hl_parts.append(f"中线阶段{stage_line or _stage_disp_hl}")
+    if _ma5_v and current > 0 and current > _ma5_v and not _chan_bear_hl and not _stage_bear_hl:
         _hl_parts.append("现价在MA5上方")
 
     _ext_sent = r.get("extend_sentiment") or {}
     _theme = _ext_sent.get("theme_harden") or {}
-    if isinstance(_theme, dict) and _theme.get("reason"):
+    if isinstance(_theme, dict) and _theme.get("reason") and not _stage_bear_hl:
         _hl_parts.append(f"题材催化：{_theme.get('reason')}")
 
     if _hl_parts:
@@ -1106,7 +1113,9 @@ def render_short_midline(r: dict[str, Any]) -> str:
     _risk_parts = []
     if _chan_bear_hl and _chan_clean:
         _risk_parts.append(f"缠论{_chan_clean}")
-    if stage_line and any(k in stage_line for k in ("转弱", "派发", "衰退")):
+    if _stage_bear_hl and (_stage_disp_hl or stage_line):
+        _risk_parts.append(f"中线阶段{_stage_disp_hl or stage_line}")
+    elif stage_line and any(k in stage_line for k in ("转弱", "派发", "衰退")):
         _risk_parts.append(f"中线阶段{stage_line}")
     if "不追" in execution or "不买" in execution:
         _risk_parts.append("现价不宜追")

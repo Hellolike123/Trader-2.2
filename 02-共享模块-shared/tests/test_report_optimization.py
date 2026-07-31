@@ -459,6 +459,24 @@ def test_highlight_excludes_bearish_chan_and_weak_stage():
     assert "转弱" in risk
 
 
+def test_highlight_excludes_bearish_midline_stage_tag():
+    """面板阶段带「偏空」或 midline_bias=bear 时，不得进 ✅ 亮点。"""
+    r = _report()
+    r["conclusion"]["stage_line"] = "主升初期"
+    r["conclusion"]["midline"] = "盘整偏空 · 暂缓跟踪"
+    r["midline_bias"] = "bear"
+    r["fusion"]["signals_detail"]["chan"] = {
+        "reason": "暂无买卖点 · 回调段 · 看跌",
+        "direction": -1,
+    }
+    out = render_short_midline(r)
+    hl = next(ln for ln in out.splitlines() if "✅ 亮点" in ln)
+    assert "主升初期" not in hl
+    assert "偏空" not in hl
+    risk = next(ln for ln in out.splitlines() if "⚠️ 风险" in ln)
+    assert "偏空" in risk or "主升初期" in risk
+
+
 def test_short_section_has_daily_phase_line():
     """短线区必有「威科夫：」只读行（与中线点名同构）；禁止「日线阶段：」。"""
     r = _report()
