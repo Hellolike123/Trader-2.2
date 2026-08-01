@@ -149,7 +149,7 @@ def _short_theory_block(text: str) -> str:
 
 
 def _decision_block(text: str) -> str:
-    return _between(text, "✅ 出手", "✅ 亮点")
+    return _between(text, "✅ 门禁", "✅ 亮点")
 
 
 # ── Task 1: 盈亏比 ✓/✗ 判定 + 卖点区目标百分比 ──
@@ -405,12 +405,12 @@ def test_short_section_chan_type_first():
     decision = _decision_block(out)
     assert "缠论：一买" in short
     assert "看涨" in short
-    # 新骨架：缠论在理论区，动作在出手区；仍不用旧「出手：」行
-    assert "动作：" in decision
+    # 新骨架：缠论在理论区，结论在门禁区；仍不用旧「出手：」行
+    assert "结论：" in decision
     assert "出手：" not in short
     pos_struct = out.find("缠论：")
-    pos_action = out.find("动作：")
-    assert 0 <= pos_struct < pos_action
+    pos_gate = out.find("结论：")
+    assert 0 <= pos_struct < pos_gate
 
 
 def test_r01_strategy_gates_omitted_from_report():
@@ -435,7 +435,7 @@ def test_r01_strategy_gates_omitted_from_report():
     short = _decision_block(out)
     assert "📐 策略" not in short
     assert "选股：" not in short
-    assert "动作：" in short or "决策：" in short or "新开：" in short
+    assert "结论：" in short or "作废：" in short
 
 
 def test_r02_no_position_not_manage_active_tone():
@@ -594,7 +594,7 @@ def test_wyckoff_l3_measure_stays_under_theory():
     }
     out = render_short_midline(r)
     theory = _between(out, "📐 理论分析", "🎯 支撑阻力")
-    support = _between(out, "🎯 支撑阻力", "✅ 出手")
+    support = _between(out, "🎯 支撑阻力", "✅ 门禁")
     assert "下沿 10.00｜上沿 12.00（L3）" in theory
     assert "量度目标：上 14.00｜下 8.00（高度1:1，非出手）" in theory
     assert "下沿 40.00｜上沿 44.00（L3）" in theory
@@ -604,10 +604,11 @@ def test_wyckoff_l3_measure_stays_under_theory():
 
 
 def test_risk_uses_short_resist():
-    """风险行用短线 MA20 压力，不用中线远压力。"""
+    """风险行用短线 MA20 压力，不用中线远压力；止损看展示止损。"""
     out = render_short_midline(_report())
-    assert "41.85" in out
-    assert "44.65" in out
+    assert "止损看 41.00" in out
+    assert "上方MA20(44.65)压力" in out
+    assert "56.00" not in out.split("⚠️ 风险：", 1)[-1].split("\n", 1)[0]
 
 
 def test_rr11_empty_position_uses_hard_stop_when_trailing_above_current():
@@ -650,7 +651,7 @@ def test_rr11_empty_position_uses_hard_stop_when_trailing_above_current():
         "invalidation": f"跌破止损 {hard_stop:.2f}",
     }
     out = render_short_midline(r)
-    support = _between(out, "🎯 支撑阻力", "✅ 出手")
+    support = _between(out, "🎯 支撑阻力", "✅ 门禁")
     assert f"{hard_stop:.2f} 止损" in support
     assert f"{invalid_trailing:.2f} 止损" not in out
 
@@ -674,7 +675,7 @@ def test_rr12_point_buy_zone_renders_as_support_not_range():
         "buy_ref": 41.82,
     }
     out = render_short_midline(r)
-    support = _between(out, "🎯 支撑阻力", "✅ 出手")
+    support = _between(out, "🎯 支撑阻力", "✅ 门禁")
     assert "41.82 支撑" in support
     assert "低吸区 41.82-41.82" not in support
 
@@ -849,3 +850,89 @@ def test_mid_key_price_format():
     assert "41.14-46.69 回踩区" in out
     assert "56.00 压力位" in out or "56.00 压力" in out
     assert "68.82 目标位" in out or "68.82 目标" in out
+
+
+# ── 门禁 A 版（handoff §0.1-10 / R-R7 / R-R13）──
+
+def test_gate_block_layout_a():
+    """门禁：结论/还差?/等待?/作废/附?；不再用旧出手骨架。"""
+    r = _report()
+    r["has_position"] = False
+    r["resonance"] = {
+        "grade": "empty",
+        "missing": ["background", "structure", "momentum"],
+        "summary_line": "共振：未齐 · 还差中线背景｜缠论结构｜动能",
+    }
+    r["discipline"] = {
+        "suggested_pct_cap": 0,
+        "allow_new_entry": False,
+        "invalidation": "收盘有效跌破MA20(44.65)且反抽站不回；或跌破止损 41.85",
+        "entry_checklist": {
+            "all_green": False,
+            "missing_labels": ["中线趋势", "回踩到位", "买点信号", "融合置信", "筹码资金稳"],
+            "entry_line": "新开：先别买 · 中线未确认｜未回到买区｜无有效买点｜另2项",
+        },
+        "entry_line": "新开：先别买 · 中线未确认｜未回到买区｜无有效买点｜另2项",
+    }
+    r["decision_view"] = {"allow_new_recommend": False}
+    out = render_short_midline(r)
+    gate = _decision_block(out)
+    assert "✅ 门禁" in out
+    assert "✅ 出手" not in out
+    assert "结论：不新开 · 仓 0%" in gate
+    assert "还差：" in gate
+    assert "中线背景" in gate and "缠论" in gate and "买区" in gate and "买点" in gate
+    assert "中线未确认" not in gate  # 与中线背景去重
+    assert "等待：" in gate
+    assert "作废：破止损" in gate
+    assert "跌破MA20" not in gate  # 空仓不作废 MA20
+    assert "共振：" not in gate
+    assert "新开：" not in gate
+    assert "动作：" not in gate
+    assert "破位看：" not in gate
+    assert "附：" in gate and "不划算" in gate
+
+
+def test_gate_wait_prefers_broken_life_line():
+    """R-R13：现价已破生命线 → 等待收回生命线；中线提示已跌破。"""
+    r = _report()
+    r["has_position"] = False
+    r["current"] = 40.50
+    r["confirm"] = 43.63
+    r["mid_key_prices"] = {
+        "line_life": "42.34 生命线（跌破则减仓）",
+        "line_pullback": "42.34-55.00 回踩区（到了分批低吸）",
+        "line_resist": "56.00 压力位（靠近分批减仓）",
+        "line_target": "65.00 目标位（到了分批止盈）",
+        "life_line": 42.34,
+        "resist": 56.00,
+    }
+    r["decision_view"] = {"allow_new_recommend": False}
+    r["discipline"] = {
+        "suggested_pct_cap": 0,
+        "allow_new_entry": False,
+        "invalidation": "跌破MA20(44.65)站不回；或破止损 41.00",
+    }
+    out = render_short_midline(r)
+    gate = _decision_block(out)
+    support = _between(out, "🎯 支撑阻力", "✅ 门禁")
+    assert "等待：收回生命线 42.34（现价已破）" in gate
+    assert "站稳 43.63" not in gate
+    assert "已跌破" in support
+    assert "跌破则减仓" not in support
+    assert "作废：破止损" in gate
+    assert "MA20" not in gate
+    assert "已跌破中线生命线 42.34" in out
+    # 同号可在支撑阻力找到
+    assert "42.34" in support
+    assert "41.00" in support or "止损" in support
+
+
+def test_gate_missing_fold_over_five():
+    """还差超过 5 项折叠为另N项。"""
+    from trader_shared.report_renderer.short_midline import _format_gate_missing_line
+
+    txt = _format_gate_missing_line(
+        ["中线背景", "缠论", "动能", "买区", "买点", "把握不够", "筹码资金"]
+    )
+    assert txt == "中线背景｜缠论｜动能｜买区｜买点｜另2项"

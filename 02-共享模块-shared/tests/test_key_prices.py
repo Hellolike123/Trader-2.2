@@ -228,7 +228,8 @@ class TestRenderShortMidline:
         assert "📊 价格状态" in md
         assert "📐 理论分析" in md
         assert "🎯 支撑阻力" in md
-        assert "✅ 出手" in md
+        assert "✅ 门禁" in md
+        assert "✅ 出手" not in md
         assert "🧭 中线" not in md
         assert "⚡ 短线" not in md
         # 中线「阶段：/定论：」独立行已删除；禁止日线 major_stage=蓄势偏强 冒充上屏
@@ -239,8 +240,8 @@ class TestRenderShortMidline:
         assert "🎯 结论" not in md
         assert "威科夫" in md
         assert "缠论" in md
-        # A 版短线：动作（不再用「出手」）
-        assert "动作：" in md
+        # 门禁 A 版：结论/作废（不再用「出手：」）
+        assert "结论：" in md
         assert "出手：" not in md
         assert "缠论：" in md
         assert "日线三专家" not in md
@@ -254,20 +255,18 @@ class TestRenderShortMidline:
         assert "不足 1R" not in md
         assert "本周：" not in md or "📌 本周只做" in md
         assert md.count("本周只做") <= 1
-        # 纪律展示：有 invalidation 则出失效；禁止 mi 品牌
+        # 纪律展示：有 invalidation 则出作废；禁止 mi 品牌
         inv = str((self._sample_report().get("mistery_gate") or {}).get("invalidation") or "")
         if inv.strip():
-            assert "破位看：" in md or "失效：" in md
+            assert "作废：" in md or "破止损" in md
         assert "Mistery" not in md
         assert "mi姐" not in md
         assert "mistery" not in md
         for line in md.splitlines():
-            if line.strip().startswith("动作："):
-                assert line.strip() != "动作：减仓"
-                # 不新开 / 等站稳 / 试探 等均可
+            if line.strip().startswith("结论："):
                 assert any(
                     k in line
-                    for k in ("不新开", "不追", "不买", "观望", "等站稳", "等确认", "仓 ", "试探")
+                    for k in ("不新开", "可试探", "仓 ")
                 )
         # 关键价区：报告用「低吸区/止盈区」表述（原「买点区」已改名）
         assert "低吸区" in md or "止盈区" in md or "买点区" in md

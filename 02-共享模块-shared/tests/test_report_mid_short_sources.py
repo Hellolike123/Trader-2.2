@@ -191,7 +191,8 @@ class TestRenderDualTrack:
         assert "📊 价格状态" in md
         assert "📐 理论分析" in md
         assert "🎯 支撑阻力" in md
-        assert "✅ 出手" in md
+        assert "✅ 门禁" in md
+        assert "✅ 出手" not in md
         assert "🧭 中线" not in md
         assert "⚡ 短线" not in md
         # 中线「阶段：/定论：」独立行已删除；禁止日线 major_stage 冒充上屏
@@ -203,7 +204,7 @@ class TestRenderDualTrack:
         assert "🎯 结论" not in md
         assert "🗳️ 短线专家" not in md
         assert "🗺 空间参考" not in md
-        support_block = md.split("🎯 支撑阻力", 1)[1].split("✅ 出手", 1)[0]
+        support_block = md.split("🎯 支撑阻力", 1)[1].split("✅ 门禁", 1)[0]
         mid_block = support_block.split("\n  短线", 1)[0]
         short_block = support_block.split("\n  短线", 1)[1]
         # 🌟 现价只允许出现在短线关键价（中线禁止）
@@ -212,12 +213,12 @@ class TestRenderDualTrack:
         assert "关键价（中线）" not in md
         assert "关键价（短线）" not in md
         assert "生命线" in md
-        assert "动作：" in md
+        assert "结论：" in md
         assert "低吸区" in md or "买点区" in md
         assert "止损" in md
         inv = str((r.get("mistery_gate") or {}).get("invalidation") or "")
         if inv.strip():
-            assert "破位看：" in md or "失效：" in md
+            assert "作废：" in md or "破止损" in md
         assert "Mistery" not in md
         assert "mi姐" not in md
         assert "mistery" not in md
@@ -259,7 +260,7 @@ class TestMidShortPriceIsolation:
         assert "daily_key_levels_proxy" not in mk["notes"]
 
         md = render_short_midline(r)
-        support_block = md.split("🎯 支撑阻力", 1)[1].split("✅ 出手", 1)[0]
+        support_block = md.split("🎯 支撑阻力", 1)[1].split("✅ 门禁", 1)[0]
         mid_block = support_block.split("\n  短线", 1)[0]
         assert "48.00" in mid_block or "生命线 48" in mid_block
         # 日线 mid_support 40 不应出现在中线关键价

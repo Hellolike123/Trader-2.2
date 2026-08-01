@@ -196,8 +196,239 @@ def _wyckoff_l3_bounds_line(raw: object) -> str:
     return f"下沿 {lower:.2f}｜上沿 {upper:.2f}（L3）"
 
 
+# 共振岗位 → 门禁「还差」短名（展示合并，不改判定）
+_GATE_POST_SHORT = {
+    "background": "中线背景",
+    "structure": "缠论",
+    "chip": "筹码",
+    "momentum": "动能",
+}
+
+
+def _gate_missing_items(report: dict[str, Any]) -> list[str]:
+    """合并共振缺岗 + C1 缺项（去重），供门禁「还差」行。"""
+    res = report.get("resonance") if isinstance(report.get("resonance"), dict) else {}
+    missing_posts = [str(x).strip() for x in (res.get("missing") or []) if str(x).strip()]
+    out: list[str] = []
+    for post in missing_posts:
+        label = _GATE_POST_SHORT.get(post) or post
+        if label and label not in out:
+            out.append(label)
+
+    has_bg = "中线背景" in out
+    has_chip = "筹码" in out
+    disc = report.get("discipline") if isinstance(report.get("discipline"), dict) else {}
+    cl = disc.get("entry_checklist") if isinstance(disc.get("entry_checklist"), dict) else {}
+    miss_labels = [str(x).strip() for x in (cl.get("missing_labels") or []) if str(x).strip()]
+
+    try:
+        from trader_shared.chan_discipline import _plain_missing_label
+    except Exception:
+        def _plain_missing_label(label: str) -> str:  # type: ignore[misc]
+            return str(label or "").strip()
+
+    for label in miss_labels:
+        plain = _plain_missing_label(label)
+        # 与共振岗位去重
+        if label in ("中线趋势",) or plain == "中线未确认":
+            if has_bg:
+                continue
+            bit = "中线"
+        elif label == "回踩到位" or plain == "未回到买区":
+            bit = "买区"
+        elif label == "买点信号" or plain == "无有效买点":
+            bit = "买点"
+        elif label == "融合置信" or plain == "把握不够":
+            bit = "把握不够"
+        elif label == "在阻力区内" or plain == "现价卡在阻力区":
+            bit = "卡阻力"
+        elif label == "筹码资金稳" or plain == "筹码资金不稳":
+            if has_chip:
+                continue
+            bit = "筹码资金"
+        elif plain.startswith("共振") or plain in ("动能唱反调", "纪律拦着", "决策未放行"):
+            # 决策层附带否决语不进「还差」价位清单
+            continue
+        else:
+            bit = plain
+        if bit and bit not in out:
+            out.append(bit)
+    return out
+
+
+def _format_gate_missing_line(items: list[str], *, max_show: int = 5) -> str:
+    if not items:
+        return ""
+    if len(items) > max_show:
+        return "｜".join(items[:max_show]) + f"｜另{len(items) - max_show}项"
+    return "｜".join(items)
+
+
+def _gate_wait_line(
+    *,
+    current: float,
+    life_line: float,
+    confirm: float,
+    execution: str,
+) -> str:
+    """门禁等待价：已破生命线优先；否则 confirm；再否则不追语义。"""
+    if life_line > 0 and current > 0 and current < life_line:
+        return f"收回生命线 {life_line:.2f}（现价已破）"
+    if confirm > 0 and current > 0 and confirm > current:
+        return f"站稳 {confirm:.2f}"
+    if "不追" in (execution or ""):
+        return "不追现价"
+    return ""
+
+
+def _gate_void_line(
+    *,
+    current: float,
+    stop: float | None,
+    has_position: bool,
+    invalidation: str,
+    ma20: float | None,
+) -> str:
+    """门禁作废线：空仓只留止损；剥离已过期的 MA20 跌破话术。"""
+    stop_f = float(stop or 0)
+    ma20_f = float(ma20 or 0)
+    already_below_ma20 = bool(current > 0 and ma20_f > 0 and current < ma20_f)
+
+    def _stop_bit() -> str:
+        return f"破止损 {stop_f:.2f}" if stop_f > 0 else ""
+
+    if not has_position:
+        return _stop_bit()
+
+    inv = str(invalidation or "").strip()
+    if inv:
+        inv = inv.replace("收盘有效跌破", "跌破").replace("且反抽站不回", "站不回")
+        inv = inv.replace("或跌破止损", "或破止损").replace("或破止损", "；破止损")
+        if already_below_ma20:
+            # 去掉「跌破MA20…」整段，保留止损等其余子句
+            parts = [p.strip() for p in re.split(r"[；;]", inv) if p.strip()]
+            kept = [p for p in parts if "MA20" not in p and "均线" not in p]
+            if kept:
+                inv = "；".join(kept)
+            else:
+                inv = _stop_bit()
+        if len(inv) > 52:
+            inv = inv[:49] + "…"
+        return inv
+
+    bits: list[str] = []
+    if ma20_f > 0 and current > 0 and not already_below_ma20:
+        bits.append(f"跌破MA20({ma20_f:.2f})站不回")
+    stop_bit = _stop_bit()
+    if stop_bit:
+        bits.append(stop_bit)
+    return "；".join(bits)
+
+
+def _build_gate_decision_lines(
+    report: dict[str, Any],
+    *,
+    current: float,
+    execution: str,
+    reason: str,
+    mid_key_prices: dict[str, Any],
+    key_prices: dict[str, Any],
+    cap_pct: Any,
+    ma20: float | None,
+) -> list[str]:
+    """门禁块正文（不含标题）：结论 / 还差 / 等待 / 作废 / 附。"""
+    lines: list[str] = []
+    dv = report.get("decision_view") if isinstance(report.get("decision_view"), dict) else {}
+    allow = bool(dv.get("allow_new_recommend"))
+    hold_off = (not allow) or any(
+        k in (execution or "") for k in ("不买", "观望", "不追", "不新开", "空仓")
+    )
+    try:
+        cap_i = int(float(cap_pct)) if cap_pct is not None else 0
+    except (TypeError, ValueError):
+        cap_i = 0
+    if hold_off:
+        cap_i = 0
+        lines.append(f"  结论：不新开 · 仓 {cap_i}%")
+    else:
+        lines.append(f"  结论：可试探 · 仓 {cap_i}%")
+
+    missing = _gate_missing_items(report)
+    miss_txt = _format_gate_missing_line(missing)
+    if miss_txt and hold_off:
+        lines.append(f"  还差：{miss_txt}")
+
+    life = 0.0
+    try:
+        life = float(mid_key_prices.get("life_line") or 0)
+    except (TypeError, ValueError):
+        life = 0.0
+    confirm = 0.0
+    try:
+        confirm = float(report.get("confirm") or 0)
+    except (TypeError, ValueError):
+        confirm = 0.0
+    wait = _gate_wait_line(
+        current=current, life_line=life, confirm=confirm, execution=execution or ""
+    )
+    if wait:
+        lines.append(f"  等待：{wait}")
+
+    stop = _select_display_stop(report, current=current, key_prices=key_prices)
+    disc = report.get("discipline") if isinstance(report.get("discipline"), dict) else {}
+    gate = report.get("mistery_gate") if isinstance(report.get("mistery_gate"), dict) else {}
+    inv = str(disc.get("invalidation") or gate.get("invalidation") or "").strip()
+    has_pos = bool(report.get("has_position"))
+    void = _gate_void_line(
+        current=current,
+        stop=stop,
+        has_position=has_pos,
+        invalidation=inv,
+        ma20=ma20,
+    )
+    if void:
+        lines.append(f"  作废：{void}")
+
+    reason_s = str(reason or "").strip()
+    if reason_s and any(k in reason_s for k in ("亏", "赚", "不划算", "偏冲高", "置信")):
+        if len(reason_s) > 36:
+            reason_s = reason_s[:34] + "…"
+        lines.append(f"  附：{reason_s}")
+    elif reason_s and hold_off and len(reason_s) <= 28:
+        # 短原因也挂附，避免结论行糊死
+        lines.append(f"  附：{reason_s}")
+
+    # 融合分仪表（默认关）
+    _show_gauge = os.environ.get("TRADER_SHOW_FUSION_GAUGE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if _show_gauge:
+        fusion = report.get("fusion") if isinstance(report.get("fusion"), dict) else {}
+        score = fusion.get("weighted_score")
+        if score is None:
+            score = report.get("weighted_score")
+        try:
+            score_f = float(score) if score is not None else None
+        except (TypeError, ValueError):
+            score_f = None
+        if score_f is not None:
+            action = str(fusion.get("action") or "").strip()
+            action_short = action.split("（")[0].split("(")[0].strip() if action else ""
+            if len(action_short) > 12:
+                action_short = action_short[:10] + "…"
+            bit = f"仪表：融合分 {score_f:+.2f}"
+            if action_short:
+                bit += f" · {action_short}"
+            bit += "（仅参考）"
+            lines.append(f"  {bit}")
+    return lines
+
+
 def render_short_midline(r: dict[str, Any]) -> str:
-    """短中线报告模板（主题四区：价格状态 → 理论 → 支撑阻力 → 出手）。"""
+    """短中线报告模板（主题四区：价格状态 → 理论 → 支撑阻力 → 门禁）。"""
     name = r.get("name", "")
     code = str(r.get("symbol", "")).replace(".SH", "").replace(".SZ", "")
     current = float(r.get("current") or 0)
@@ -689,6 +920,13 @@ def render_short_midline(r: dict[str, Any]) -> str:
                 _text = _text[:_insert_at] + f"（{_dist_str} · " + _text[_insert_at + 1:]
             else:
                 _text = f"{_text}（{_dist_str}）"
+            # 现价已破生命线：禁止再写「跌破则…」未来时
+            if "生命线" in _text and current > 0 and _p > 0 and current < _p:
+                _text = (
+                    _text.replace("跌破则减仓", "已跌破")
+                    .replace("破则中线转弱·远期参考", "已跌破·远期参考")
+                    .replace("破则中线转弱", "已跌破")
+                )
             support_lines.append(f"    {_text}")
     if not _mid_items:
         support_lines.append("    数据不足")
@@ -861,86 +1099,29 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _m_label = "看多" if _mom_dir2 > 0 else "看空"
         lines.append(f"    ⚠️ 信号分歧：结构{_c_label} vs 动能{_m_label} → 以不新开为主")
 
-    # 阶段 4：决策块（迁入 ✅ 出手）
+    # 阶段 4：门禁块（示意 A：结论/还差/等待/作废/附；判定仍听 decision_view）
     try:
-        from trader_shared.decision_view import format_decision_narrative_lines
+        from trader_shared.decision_view import build_decision_view
 
-        for _nl in format_decision_narrative_lines(r):
-            if _nl and _nl not in decision_lines:
-                decision_lines.append(_nl)
+        if not isinstance(r.get("decision_view"), dict):
+            r["decision_view"] = build_decision_view(r)
     except Exception:
         pass
-
-    # 4) 动作：主计划一行；原因过长则另起「原因：」避免动作行糊死
-    _confirm_v = float(r.get("confirm") or 0)
-    _wait_bits: list[str] = []
-    _is_hold_off = any(k in execution for k in ("不买", "观望", "不追", "不新开", "空仓"))
-    if _is_hold_off:
-        _action_main = "不新开"
-        if _confirm_v > 0 and _confirm_v > current:
-            _wait_bits.append(f"等站稳 {_confirm_v:.2f}")
-        elif "不追" in execution:
-            _wait_bits.append("不追现价")
-    elif any(k in execution for k in ("试探", "买点挂", "可按买", "半仓", "增持")):
-        _action_main = execution.replace(" · ", " · ").strip() or "可试探"
-        if len(_action_main) > 22:
-            _action_main = _action_main[:20] + "…"
-    else:
-        _action_main = execution.strip() or "观察"
-        if len(_action_main) > 22:
-            _action_main = _action_main[:20] + "…"
-
-    if not any("新开：" in _dl for _dl in decision_lines):
-        _entry_state = "先别买" if _is_hold_off else "按纪律"
-        _entry_reasons: list[str] = []
-        if not _all_green:
-            _entry_reasons.append("清单未全绿")
-        if "不追" in execution:
-            _entry_reasons.append("不追现价")
-        if "门控组装失败" in str(reason):
-            _entry_reasons.append("门控组装失败")
-        _entry_tail = f" · {'｜'.join(_entry_reasons[:3])}" if _entry_reasons else ""
-        decision_lines.append(f"  新开：{_entry_state}{_entry_tail}")
-
-    _action_parts = [_action_main]
-    _action_parts.extend(_wait_bits)
-    if _cap_t is not None:
-        _action_parts.append(f"仓 {_cap_t}%")
-    # 亏赚/不划算类原因一律另起，动作行只留「做什么」
-    _reason_line = ""
-    if reason and reason not in _action_main and not any(reason in p for p in _action_parts):
-        if any(k in reason for k in ("亏", "赚", "不划算", "偏冲高", "置信")) or len(
-            " · ".join(_action_parts + [reason])
-        ) > 28:
-            _reason_line = reason
-        else:
-            _action_parts.append(reason)
-    decision_lines.append(f"  动作：{' · '.join(_action_parts)}")
-    if _reason_line:
-        decision_lines.append(f"  原因：{_reason_line}")
-
-    # 5) 破位线（有仓/盯盘看；无仓=计划作废线，不是今天必卖指令）
-    _gate = r.get("mistery_gate") if isinstance(r.get("mistery_gate"), dict) else {}
-    _inv = str(_disc.get("invalidation") or _gate.get("invalidation") or "").strip()
-    if _inv:
-        _inv = _inv.replace("收盘有效跌破", "跌破").replace("且反抽站不回", "站不回")
-        _inv = _inv.replace("或跌破止损", "或破止损")
-        if len(_inv) > 52:
-            _inv = _inv[:49] + "…"
-        decision_lines.append(f"  破位看：{_inv}")
-    elif not any("破位看：" in _dl for _dl in decision_lines):
-        _break_bits: list[str] = []
-        _ma20_break = _ma_float("ma20")
-        if current > 0 and _ma20_break:
-            _break_bits.append(f"跌破MA20({_ma20_break:.2f})站不回")
-        _stop_preview = _select_display_stop(r, current=current, key_prices=key_prices)
-        if _stop_preview and _stop_preview > 0:
-            _break_bits.append(f"或破止损 {_stop_preview:.2f}")
-        if _break_bits:
-            decision_lines.append(f"  破位看：{'；'.join(_break_bits)}")
+    decision_lines.extend(
+        _build_gate_decision_lines(
+            r,
+            current=current,
+            execution=execution,
+            reason=reason,
+            mid_key_prices=mid_key_prices if isinstance(mid_key_prices, dict) else {},
+            key_prices=key_prices if isinstance(key_prices, dict) else {},
+            cap_pct=_cap_t,
+            ma20=_ma_float("ma20"),
+        )
+    )
 
     # 策略闸口仍由 pipeline 写入 strategy_match（供 decision_view）；
-    # 人读报告省略 📐——日常以 决策/动作/新开/失效 为准。
+    # 人读报告以门禁结论/还差/等待/作废为准。
 
     stop_sell = _select_display_stop(r, current=current, key_prices=key_prices)
     buy_low = key_prices.get("buy_zone_low")
@@ -1119,7 +1300,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _tv = "✓" if _tr_ratio >= 2.0 else ("✗" if _tr_ratio < 1.0 else "△")
             support_lines.append(f"    日内 T0：{_bl:.2f} 低吸 ｜ {_tm:.2f} 观察 ｜ {_sl:.2f} 高抛（差价{_tw:.2f}元，盈亏比{_tr_ratio:.1f}:1 {_tv}）")
         else:
-            support_lines.append("    T0：无底仓，不启用（与出手一致，不新开）")
+            support_lines.append("    T0：无底仓，不启用（与门禁一致，不新开）")
     else:
         t0_ref = r.get("t0_ref") or {}
         _t0_buy = float(t0_ref.get("low_buy") or buy_low or r.get("support") or 0)
@@ -1154,7 +1335,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     if decision_lines:
         lines.append("")
-        lines.append("✅ 出手")
+        lines.append("✅ 门禁")
         lines.extend(decision_lines)
 
     # ── 亮点 / 风险（禁止「阶段…中线故事」挂羊头）──
@@ -1234,6 +1415,10 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _risk_parts.append(_mid_view.split("·")[0].strip() or _mid_view)
         elif stage_line and stage_line not in ("无阶段", "未知", ""):
             _risk_parts.append(f"中线{stage_line}")
+    if life_v > 0 and current > 0 and current < life_v:
+        _risk_parts.append(f"已跌破中线生命线 {life_v:.2f}")
+    elif life_v > 0 and current > 0 and current < life_v * 1.02:
+        _risk_parts.append(f"靠近中线生命线 {life_v:.2f}")
     if "不追" in execution or "不买" in execution:
         _risk_parts.append("现价不宜追")
         if stop_v > 0:
@@ -1244,8 +1429,6 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _risk_parts.append("派发注意破位" + (f"，跌破 {stop_v:.2f} 需离场" if stop_v else ""))
     elif stage_line == "衰退" and not any("衰退" in p for p in _risk_parts):
         _risk_parts.append("衰退中，不宜介入")
-    elif life_v > 0 and current > 0 and current < life_v * 1.02:
-        _risk_parts.append(f"靠近/跌破中线生命线 {life_v:.2f}")
     elif not _risk_parts:
         _risk_parts.append("未站稳前不提前加仓")
 

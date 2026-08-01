@@ -345,12 +345,12 @@ Agent 展示层仍应：**不给买入建议**；文案对齐 fusion action / �
     {现价} 追：亏约… / 赚约… → 不追?
     日内 T0：…                    ← 可选；挂短线支撑阻力后（已输出则尾部不重复）
 
-✅ 出手
-  共振：…
-  新开：…
-  动作：…
-  原因：…
-  破位看：…
+✅ 门禁
+  结论：…                  ← 不新开/可试探 · 仓 x%（听 decision_view）
+  还差：…                  ← 共振缺岗 + C1 缺项合并去重；全齐省略
+  等待：…                  ← 已破生命线优先「收回生命线」；否则站稳 confirm；可省略
+  作废：…                  ← 空仓只写破止损（与短线止损同号）；禁过期 MA20 跌破语
+  附：…                    ← 亏赚/不划算等；可省略
 
 ✅ 亮点：…
 ⚠️ 风险：…
@@ -370,10 +370,10 @@ Agent 展示层仍应：**不给买入建议**；文案对齐 fusion action / �
 
 | 规则 | 来源 | 效果 |
 |------|------|------|
-| 出手 / 新开清单 C1 | mistery_gate + chan_discipline | 五项不全绿 → 新开否 |
+| 门禁展示 / 新开清单 C1 | mistery_gate + chan_discipline；面板 `✅ 门禁` | 五项不全绿 → 新开否；展示合并见 §5.1 |
 | 仓位上限 | merge 取更严 | 只裁 cap，不改 major_stage / fusion 分 / support / stop |
 | 决策收紧清零 | `decision_view.apply_execution_caps`（DV 之后单一出口；含 fail-closed） | 禁止新开时 `suggested_pct` / 仓位 cap 归零 |
-| 失效 | chan_discipline | 跌破 MA20 反抽不回 / 跌破止损等 |
+| 作废 | chan_discipline / 展示协调 | 空仓作废=破止损；有仓可用 invalidation，剥离已破 MA20 话术 |
 | regime 很差 | fusion_regime 权重归零 | 加权分偏中性/空仓侧动作（非固定「暂不碰」文案） |
 
 报告可见面禁止 mi姐 / Mistery 品牌词。

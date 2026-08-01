@@ -263,9 +263,9 @@ def test_render_short_midline_shows_decision_narrative():
         "mid_key_prices": {},
     }
     md = render_short_midline(r)
-    assert "共振" in md
-    assert "新开" in md
-    # 不推荐场景：决策/仪表默认不上屏
+    assert "✅ 门禁" in md
+    assert "结论：" in md
+    # 不推荐场景：决策/仪表默认不上屏；旧共振/新开行不再作主骨架
     assert "决策：不推荐" not in md
     assert "仪表：" not in md
-    assert "动作：" in md
+    assert "不新开" in md
