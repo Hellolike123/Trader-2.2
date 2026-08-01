@@ -138,12 +138,13 @@ def signal_tags(r: dict) -> tuple[str, str]:
     return (buy_tag, risk_tag)
 
 
-# ── Within-group sort（与 pool_cmds.scoring.sort_items_unified 对齐）──
+# ── Within-group sort（简报专用；非 sort_items_unified 全键）──
 
 def within_group_sort_key(report: dict) -> tuple:
     """组内排序键：共振档 → 结构总分+阶段；fusion 仅仪表不参与。
 
-    与 `sort_items_unified` 次键/再次键一致（组已由 classify 分好，无 status 主键）。
+    诚实差异：正式池 `sort_items_unified` = lane→共振→链→RS→可碰→分；
+    本简报组已由 classify 分好，次键仅共振档+结构复合分，**不含**威科夫链/RS/可碰。
     """
     from trader_shared.resonance import extract_resonance_grade, resonance_pool_rank
     from pool_cmds.scoring import STAGE_STRENGTH, score_report

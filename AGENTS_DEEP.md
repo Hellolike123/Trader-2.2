@@ -427,20 +427,20 @@ def merge_decisions(
 * **第三席 VPF（价量资金）**：短线加权用 `vpf`，**不是**威科夫。`_wyckoff_to_signal` 仍保留优先级映射供兼容/测试（Spring→SOS→UT→BC→SOW→…），但不被 `merge_decisions` 调用。
 
 #### 5.5.2 场景优先级过滤器 (Scenario Priority Filter)
-融合层摒弃了静态等权（Equal Weighting）模式，通过计算股价在 20 日高低区间的相对价格位置（$pos\_pct$），实行动态权重倾斜：
-* **筑底/突破区间（$pos\_pct \le 0.3$ 或强结构买点）**：将 **80% 的决策权重分配给结构化理论（缠论 45% + 威科夫 35%）**，动量权重压缩至 20%。以此消除低位筑底时动量指标金叉/死叉频繁交织产生的磨损，强力捕捉“Spring 弹簧低吸位”或“缠论三买突破位”。
-* **冲顶/超买区间（$pos\_pct \ge 0.7$ 或强结构卖点/高动量）**：将 **80% 的决策权重分配给动量与威科夫量价（动量 55% + 威科夫 25%）**，缠论权重压缩至 20%。用来在情绪高潮期通过动量极值和威科夫上冲回落拦截假突破，预防高位套牢。
-* **震荡区间**：退化为基于宏观大势的标准权重。
+融合层摒弃了静态等权（Equal Weighting）模式，通过计算股价在 20 日高低区间的相对价格位置（$pos\_pct$），实行动态权重倾斜。短线三席为 **chan / momentum / vpf**（威科夫不进短线加权；与 `fusion_core.merge_decisions` 一致）：
+* **筑底/突破或强空结构警告**（$pos\_pct$ 低位 / 强结构买点，或一类卖/VPF 空警）：`chan 0.44 + momentum 0.20 + vpf 0.36`（结构+价量占 80%，动量 20%）。
+* **真高潮区间**（高位 + 极强动量、且无强空结构）：`chan 0.20 + momentum 0.56 + vpf 0.24`（动量占优）。
+* **震荡区间**：退化为 Regime 标准权重（正常档约 `chan 0.30 / momentum 0.45 / vpf 0.25`，见 `fusion_regime._FALLBACK_REGIME_WEIGHTS` / BUSINESS.md §3.2）。
 
 ```mermaid
 graph TD
-    Price["相对价格区间 (pos_pct)"] -->|<= 0.3 低位/突破| Breakout["低位/突破场景偏斜"]
-    Price -->|>= 0.7 高位/超买| Climax["高位/超买场景偏斜"]
-    Price -->|其他 震荡区| Standard["大势标准权重"]
+    Price["相对价格区间 (pos_pct)"] -->|低位/突破或强空结构| Breakout["结构+VPF 偏斜"]
+    Price -->|高位+强动量且无强空| Climax["动量偏斜"]
+    Price -->|其他 震荡区| Standard["Regime 标准权重"]
 
-    Breakout -->|缠论 45% + 威科夫 35%| Output1["结构占 80% 权重"]
-    Climax -->|动量 55% + 威科夫 25%| Output2["动量占 80% 权重"]
-    Standard -->|大盘牛熊自适应权重| Output3["Regime 权重"]
+    Breakout -->|chan 0.44 + vpf 0.36 + mom 0.20| Output1["结构+价量占 80%"]
+    Climax -->|mom 0.56 + vpf 0.24 + chan 0.20| Output2["动量占优"]
+    Standard -->|chan/momentum/vpf Regime| Output3["大盘自适应"]
 ```
 
 #### 5.5.3 冲突消解与 Veto 噪点消减机制

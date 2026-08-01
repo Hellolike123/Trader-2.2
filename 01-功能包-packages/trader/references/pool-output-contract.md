@@ -5,7 +5,7 @@
 Common rules: no markdown tables in rank/show/plan outputs; use indented alignment; no `##/###` headings.
 
 池定位：用户自选名单 + 短线策略分道（可盯/等齐/先别碰/计划过时）。  
-排序：`lane` → 共振档 → **威科夫吸筹链完整度** → 可碰性（盈亏比）→ `total_score` 弱决胜。  
+排序：`lane` → 共振档 → **威科夫吸筹链** → **周线 RS** → 可碰性（盈亏比）→ `total_score` 弱决胜（与 `sort_items_unified` / AGENTS.md 一致）。  
 `total_score`（缠+威+筹+动）仅诊断附录；`fusion_score` 仅仪表。  
 对外用词：**买点有效** / **买点失效**；计划价漂太远称**计划过时**。  
 威科夫链文案（同道近因）：`威：SC→AR→ST→LPS，还差SOS`；全齐写满链；禁止「事件 n/5」、S级/星级。
