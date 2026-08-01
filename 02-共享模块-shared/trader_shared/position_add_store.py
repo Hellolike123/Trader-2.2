@@ -16,9 +16,10 @@ from pathlib import Path
 from typing import Any
 
 from trader_shared._logging import get_logger
+from trader_shared.json_atomic import load_json_dict, locked_rmw_json
 
 _logger = get_logger(__name__)
-_LOCK = threading.Lock()
+_LOCK = threading.Lock()  # 线程内互斥；跨进程另有 flock
 
 _STORE_ENV = "TRADER_LAST_ADD_PATH"
 _DEFAULT_STORE = Path(os.path.expanduser("~/.trader/last_add_dates.json"))
@@ -80,11 +81,7 @@ def _alias_keys(symbol: Any = None, name: Any = None, code: Any = None) -> list[
 def _load() -> dict[str, str]:
     path = _store_path()
     try:
-        if not path.exists():
-            return {}
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return {}
+        data = load_json_dict(path)
         return {str(k): str(v)[:10] for k, v in data.items() if k and v}
     except Exception as exc:
         _logger.debug("last_add_dates load failed: %s", exc)
@@ -92,12 +89,10 @@ def _load() -> dict[str, str]:
 
 
 def _save(data: dict[str, str]) -> None:
+    """锁内全量写（跨进程 flock）。"""
     path = _store_path()
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        tmp.replace(path)
+        locked_rmw_json(path, lambda _old: dict(data) if isinstance(data, dict) else {})
     except Exception as exc:
         _logger.warning("last_add_dates save failed: %s", exc)
 
@@ -133,11 +128,17 @@ def record_last_add(
     keys = _alias_keys(symbol, name=name, code=code)
     if not keys:
         return td
-    with _LOCK:
-        data = _load()
+
+    def _mutate(data: dict[str, Any]) -> dict[str, Any]:
         for k in keys:
             data[k] = td
-        _save(data)
+        return data
+
+    with _LOCK:
+        try:
+            locked_rmw_json(_store_path(), _mutate)
+        except Exception as exc:
+            _logger.warning("last_add_dates save failed: %s", exc)
     _sync_pool_item(keys, td)
     return td
 

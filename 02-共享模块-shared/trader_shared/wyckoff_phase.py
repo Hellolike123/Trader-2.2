@@ -1,7 +1,6 @@
 """Wyckoff phase state machine + persistence."""
 from __future__ import annotations
 
-import json
 import os
 from typing import Any
 
@@ -630,30 +629,30 @@ def _load_phase_state(symbol: str, timeframe: str = "daily") -> dict[str, Any] |
     if not symbol:
         return None
     try:
-        if os.path.exists(_WYCKOFF_PHASE_FILE):
-            with open(_WYCKOFF_PHASE_FILE) as f:
-                data = json.load(f)
-            return data.get(_phase_key(symbol, timeframe))
-    except (json.JSONDecodeError, OSError):
-        pass
-    return None
+        from pathlib import Path
+        from trader_shared.json_atomic import load_json_dict
+
+        data = load_json_dict(Path(_WYCKOFF_PHASE_FILE))
+        rec = data.get(_phase_key(symbol, timeframe))
+        return rec if isinstance(rec, dict) else None
+    except (OSError, TypeError, ValueError):
+        return None
 
 def _save_phase_state(symbol: str, timeframe: str, phase_state: dict[str, Any]) -> None:
-    """将 phase 状态持久化到文件（按 symbol + 周期维度写）。"""
+    """将 phase 状态持久化（锁内 RMW + tmp/fsync/replace）。"""
     if not symbol:
         return
     try:
-        os.makedirs(os.path.dirname(_WYCKOFF_PHASE_FILE), exist_ok=True)
-        data = {}
-        if os.path.exists(_WYCKOFF_PHASE_FILE):
-            try:
-                with open(_WYCKOFF_PHASE_FILE) as f:
-                    data = json.load(f)
-            except (json.JSONDecodeError, OSError):
-                data = {}
-        data[_phase_key(symbol, timeframe)] = phase_state
-        with open(_WYCKOFF_PHASE_FILE, "w") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        from pathlib import Path
+        from trader_shared.json_atomic import locked_rmw_json
+
+        key = _phase_key(symbol, timeframe)
+
+        def _mutate(data: dict[str, Any]) -> dict[str, Any]:
+            data[key] = phase_state
+            return data
+
+        locked_rmw_json(Path(_WYCKOFF_PHASE_FILE), _mutate)
     except OSError:
         pass
 
