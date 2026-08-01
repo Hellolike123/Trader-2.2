@@ -149,7 +149,8 @@ def read_signals_for_report(target: str, daily_bars: list[dict[str, Any]]) -> tu
 
     buy_signals: list[float] = []
     sell_signals: list[float] = []
-    cost_price: float = 0.0
+    # M3：信号流不得冒充持仓成本；返回的第一元组恒为 0
+    # （持仓成本仅来自显式 --cost / position.json；track/触发价不驱动持仓态）
 
     try:
         for line in reversed(all_lines):
@@ -170,13 +171,6 @@ def read_signals_for_report(target: str, daily_bars: list[dict[str, Any]]) -> tu
             trade_date = str(sig.get("trade_date") or "")[:10]
             analysis_time = str(sig.get("analysis_time") or "")
             time_part = analysis_time[11:].strip() if len(analysis_time) >= 16 else ""
-
-            if cost_price == 0.0:
-                if sig_type in ("low_buy_triggered", "track"):
-                    trigger = sig.get("trigger", {})
-                    price = trigger.get("price", 0)
-                    if price > 0:
-                        cost_price = float(price)
 
             if sig_type not in ("review_result", "low_buy_triggered", "high_sell_triggered"):
                 continue
@@ -207,7 +201,7 @@ def read_signals_for_report(target: str, daily_bars: list[dict[str, Any]]) -> tu
             elif direction in ("bearish", "bearish_lean"):
                 sell_signals.append(return_pct)
     except Exception:
-        return cost_price, None
+        return 0.0, None
 
     win_rate_data: dict | None = None
     total = len(buy_signals) + len(sell_signals)
@@ -227,7 +221,7 @@ def read_signals_for_report(target: str, daily_bars: list[dict[str, Any]]) -> tu
             "sell": _stats(sell_signals),
         }
 
-    return cost_price, win_rate_data
+    return 0.0, win_rate_data
 
 def load_historical_win_rate(target: str) -> dict | None:
     """从 signals.jsonl + 日线回算历史胜率（供报告/复盘展示）。"""
@@ -349,8 +343,9 @@ def state_text(stage: str, theory_status: str) -> str:
 def decision_persist_fields(report: dict[str, Any] | None) -> dict[str, Any]:
     """从报告提取写入 signals.jsonl 的决策字段（体检分组用）。
 
-    有 decision_view.allow_new_recommend 优先；否则用 discipline.allow_new_entry。
-    两者都没有则返回空 dict（保持「未知」，不伪造）。
+    出手听 decision_view：仅当 DV 显式给出 allow_new_recommend 时落盘。
+    M4：禁止缺 DV 时用 discipline.allow_new_entry 冒充「允许新开」。
+    无 DV → 空 dict（保持「未知」）或显式 false 由调用方栈写入。
     """
     if not isinstance(report, dict):
         return {}
@@ -358,14 +353,11 @@ def decision_persist_fields(report: dict[str, Any] | None) -> dict[str, Any]:
     disc = report.get("discipline") if isinstance(report.get("discipline"), dict) else {}
     res = report.get("resonance") if isinstance(report.get("resonance"), dict) else {}
 
-    allow: bool | None = None
-    if "allow_new_recommend" in dv and dv.get("allow_new_recommend") is not None:
-        allow = bool(dv.get("allow_new_recommend"))
-    elif "allow_new_entry" in disc and disc.get("allow_new_entry") is not None:
-        allow = bool(disc.get("allow_new_entry"))
-
-    if allow is None:
+    if "allow_new_recommend" not in dv or dv.get("allow_new_recommend") is None:
+        # 缺 DV：不得用纪律字段写出「允许新开」真值
         return {}
+
+    allow = bool(dv.get("allow_new_recommend"))
 
     grade = str(dv.get("resonance_grade") or res.get("grade") or "").strip()
     out: dict[str, Any] = {

@@ -175,9 +175,11 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     from trader_shared.report_pipeline import run_structure_stage
 
     # 持仓票启用移动止损水位（只紧不松）；无持仓不落水位，避免无仓误抬止损
+    # M3：仅显式 cost>0 才落水位；信号流 track/触发价不得冒充持仓
     _trail_sym = None
-    if float(cost_price or 0) > 0 or float(_signal_cost_price or 0) > 0:
+    if float(cost_price or 0) > 0:
         _trail_sym = str(quote.get("symbol") or getattr(sec, "ts_code", "") or "").strip() or None
+    _ = _signal_cost_price  # 胜率仍用；不得驱动 watermark
     levels, big_order_result, _pre_stage = run_structure_stage(
         current=current,
         bars=bars,

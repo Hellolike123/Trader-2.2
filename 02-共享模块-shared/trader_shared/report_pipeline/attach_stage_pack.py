@@ -56,12 +56,14 @@ def attach_stage_position_pack(
     from trader_shared.signal_core import one_sentence
     from trader_shared.report_presentation import structure_view
 
-    # 已有持仓模式：确定成本价和持仓状态
-    # 必须在 compute_position_with_env() 之前，以便传入正确的 pnl_pct
-    # 成本价已在 bars 获取后从 signals.jsonl 读取（与胜率合并为一次 I/O）
-    if cost_price <= 0:
-        cost_price = float(signal_cost_price or 0)
-    
+    # 已有持仓模式：成本仅来自显式 --cost / 真实持仓入参。
+    # M3：禁止用 signals.jsonl 的 track/low_buy_triggered 冒充成本/持仓。
+    # signal_cost_price 参数保留兼容，已忽略（读信号侧亦恒返回 0）。
+    _ = signal_cost_price
+    cost_price = float(cost_price or 0)
+    if cost_price < 0:
+        cost_price = 0.0
+
     has_position = cost_price > 0
     report["has_position"] = has_position
     report["cost_price"] = cost_price

@@ -80,6 +80,15 @@ def attach_analysis_decision_stack(
             from trader_shared.resonance import ensure_pullback_resonance_placeholder
 
             ensure_pullback_resonance_placeholder(report)
+        # M4：外层 stack 失败也必须 fail-closed decision_view（出手听 DV）
+        report.setdefault(
+            "decision_view",
+            {
+                "schema_version": "decision_view_v1",
+                "allow_new_recommend": False,
+                "summary_line": f"决策：栈失败·不新开（{_st_exc}）",
+            },
+        )
 
     return report
 
