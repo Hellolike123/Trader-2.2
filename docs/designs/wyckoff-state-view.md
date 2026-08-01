@@ -40,7 +40,7 @@ WyckoffStateView
 | `tr.*` | 交易区间上下沿/质量等 |
 | `active_events` | 当前亮灯事件 id 列表 |
 | `event_detail` | id → reason/price |
-| `cause_effect.*` | TR 1:1 因果近似目标 |
+| `cause_effect.*` | P&F 因果目标（水平计数主路径；含 `pnf_method`/`pnf_columns`/`pnf_box_size`；见 `docs/plans/wyckoff-pnf-handoff.md`） |
 | `bias` | `bull` \| `bear` \| `neutral`（弱暗示） |
 | `invalidation_hint` | 结构失效提示文案 |
 | `summary_oneline` | 与 `format_wyckoff_oneline` 同源 |

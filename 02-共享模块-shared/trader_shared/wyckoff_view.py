@@ -64,6 +64,9 @@ class WyckoffCauseEffectView(TypedDict, total=False):
     down_target: float | None
     range: float | None
     note: str
+    pnf_box_size: float | None
+    pnf_columns: int | None
+    pnf_method: str | None  # horizontal | vertical | height_1to1_fallback
 
 
 class WyckoffPrematureView(TypedDict, total=False):
@@ -311,6 +314,9 @@ def to_wyckoff_state_view(
             "down_target": wyk.get("cause_effect_down_target"),
             "range": wyk.get("cause_effect_range"),
             "note": str(wyk.get("cause_effect_note") or ""),
+            "pnf_box_size": wyk.get("pnf_box_size"),
+            "pnf_columns": wyk.get("pnf_columns"),
+            "pnf_method": wyk.get("pnf_method"),
         },
         "bias": bias,
         "invalidation_hint": _invalidation_hint(wyk, bias),
@@ -318,6 +324,53 @@ def to_wyckoff_state_view(
         "raw_available": bool(wyk),
     }
     return view
+
+
+def format_cause_effect_display(wyckoff: dict[str, Any] | None) -> str:
+    """量度目标短行（仅 L3 / measure_allowed）。
+
+    规则（``docs/plans/wyckoff-tr-maturity-l0l3-handoff.md`` §2.3）：
+    - 无上下目标 → 空串
+    - ``measure_allowed is False`` → 空串（防御：残留目标也不展示）
+    - ``pnf_method == height_1to1_fallback`` → ``（高度1:1，非出手）``
+    - 其他有目标 → ``（P&F，非出手）``
+    """
+    raw = _unwrap_wyckoff(wyckoff) if wyckoff else {}
+    if not isinstance(raw, dict):
+        return ""
+    # 兼容 view 形态：cause_effect 嵌套
+    ce = raw.get("cause_effect") if isinstance(raw.get("cause_effect"), dict) else {}
+
+    # 防御：未达 L3 即使残留目标也不展示
+    if "measure_allowed" in raw and raw.get("measure_allowed") is False:
+        return ""
+    if "measure_allowed" in ce and ce.get("measure_allowed") is False:
+        return ""
+
+    up = raw.get("cause_effect_up_target")
+    down = raw.get("cause_effect_down_target")
+    if up is None and down is None:
+        up = ce.get("up_target")
+        down = ce.get("down_target")
+    try:
+        up_f = float(up) if up is not None else None
+    except (TypeError, ValueError):
+        up_f = None
+    try:
+        down_f = float(down) if down is not None else None
+    except (TypeError, ValueError):
+        down_f = None
+    if up_f is None or down_f is None:
+        return ""
+
+    method = raw.get("pnf_method")
+    if method is None:
+        method = ce.get("pnf_method")
+    if method == "height_1to1_fallback":
+        tag = "高度1:1，非出手"
+    else:
+        tag = "P&F，非出手"
+    return f"量度目标：上 {up_f:.2f}｜下 {down_f:.2f}（{tag}）"
 
 
 def format_midline_display(

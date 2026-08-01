@@ -210,14 +210,17 @@ def test_format_wyckoff_midline_light_ar():
 
 
 def test_format_wyckoff_midline_light_shows_box():
-    """中线与短线同款写出箱体上下沿。"""
+    """中线与短线同款：仅 L2/L3（真 ST）写成熟箱体上下沿。"""
     line = format_wyckoff_midline_light({
         "ar_signal": True,
-        "phase": "accumulation_a",
-        "phase_label": "积累期 A（停止：SC+AR）",
+        "phase": "accumulation_b",
+        "phase_label": "积累期 B",
         "phase_a_status": "established",
         "sc_low": 40.3,
         "ar_high": 43.0,
+        "secondary_test_sc_signal": True,
+        "tr_maturity": "L2",
+        "box_display_mode": "box",
         "timeframe": "weekly",
     })
     assert "箱体 40.30-43.00" in line
@@ -231,10 +234,13 @@ def test_format_wyckoff_midline_light_forming_lower():
         "phase_label": "积累期 A（卖力高潮：SC，箱体未成形）",
         "phase_a_status": "forming",
         "sc_low": 38.14,
+        "tr_maturity": "L1",
+        "box_display_mode": "proto",
         "timeframe": "weekly",
     })
-    assert "箱体未成形" in line
+    assert "雏形" in line
     assert "下沿 38.14（上沿未出）" in line
+    assert "箱体 38" not in line
 
 
 def test_format_wyckoff_midline_light_gated_no_tr_suppresses_box():

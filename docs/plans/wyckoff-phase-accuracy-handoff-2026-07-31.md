@@ -155,7 +155,7 @@ WYCKOFF_PHASE_MIN_TR_QUALITY = 0.35   # 建议默认；低于此 = 低质量
 - `fusion_core` 短线三席权重  
 - `chan_*` 买卖点  
 - 中线威科夫改回日线 fallback  
-- 完整 P&F / RS 大盘接入（P1）
+- RS 大盘接入（P1；P&F 因果目标已另开落地，见 `wyckoff-pnf-handoff.md`）
 
 自测：
 

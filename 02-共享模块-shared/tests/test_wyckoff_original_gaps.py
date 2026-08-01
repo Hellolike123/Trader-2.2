@@ -111,10 +111,12 @@ def test_calculate_score_applies_suppress():
 
 
 def test_cause_effect_targets_1to1():
+    """无 bars 时回退高度 1:1（数字与旧契约一致）。"""
     ce = _cause_effect_targets({"tr_upper": 20.0, "tr_lower": 10.0})
     assert ce["cause_effect_up_target"] == 30.0
     assert ce["cause_effect_down_target"] == 0.0
     assert ce["cause_effect_range"] == 10.0
+    assert ce.get("pnf_method") == "height_1to1_fallback"
 
 
 def test_utad_requires_distribution_background():

@@ -11,6 +11,8 @@ from trader_shared.light_data import to_float
 from trader_shared.config import (
     WYCKOFF_MIN_BARS,
     WYCKOFF_CLIMAX_ANCHOR_BARS,
+    WYCKOFF_MEASURE_MIN_BARS,
+    WYCKOFF_PNF_MIN_COLUMNS,
     WYCKOFF_BC_VOL_RATIO_THRESHOLD,
     WYCKOFF_BC_CHANGE_THRESHOLD,
     WYCKOFF_BC_UPPER_SHADOW_RATIO,
@@ -260,7 +262,7 @@ def _build_phase_a_range(sc: dict, ar: dict) -> dict:
         "sc_bar_idx": sc_bar_idx,
         "ar_bar_idx": ar_bar_idx,
         "status": status,
-        "anchor_bars": WYCKOFF_CLIMAX_ANCHOR_BARS,
+        "anchor_bars": WYCKOFF_CLIMAX_ANCHOR_BARS,  # 展示用；周线引擎侧另有缩放
         "st_sc_low": None,
     }
 
@@ -280,6 +282,146 @@ def _refine_phase_a_sc_low(phase_a_range: dict, st_sc: dict) -> dict:
     return out
 
 
+def _tr_window_bar_count(
+    bars: list[dict] | None,
+    phase_a_range: dict | None,
+    tr_ctx: dict | None = None,
+) -> int:
+    """TR 窗根数：优先 tr_start..tr_end，缺省 sc_bar_idx..len-1。"""
+    n = len(bars or [])
+    start = None
+    end = None
+    if tr_ctx:
+        start = tr_ctx.get("tr_start")
+        end = tr_ctx.get("tr_end")
+    pa = phase_a_range or {}
+    if start is None:
+        start = pa.get("sc_bar_idx")
+    if end is None and n > 0:
+        end = n - 1
+    if start is None or end is None:
+        return 0
+    try:
+        return max(0, int(end) - int(start) + 1)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _resolve_tr_maturity(
+    phase_a_range: dict,
+    st_sc: dict,
+    *,
+    bars: list[dict] | None = None,
+    tr_ctx: dict | None = None,
+    min_bars: int | None = None,
+) -> dict:
+    """TR 成熟度 L0–L3（法源：wyckoff-tr-maturity-l0l3-handoff）。
+
+    L0 无 SC；L1 有 SC/SC+AR 但无成功 ST，或有 ST 无 ar_high；
+    L2 = 成功 ST ∧ 有效 ar_high；L3 = L2 ∧ 窗宽足够。
+    """
+    status = str(phase_a_range.get("status") or "none")
+    # 严格：无 SC（status=none）→ L0；仅分位 TR 不得抬级
+    if status == "none":
+        return {
+            "tr_maturity": "L0",
+            "tr_maturity_reason": "无有效 SC（无 Phase A）",
+            "measure_allowed": False,
+            "box_display_mode": "none",
+        }
+
+    st_ok = bool(st_sc.get("secondary_test_sc_signal"))
+    ar_high = phase_a_range.get("ar_high")
+    try:
+        ar_ok = ar_high is not None and float(ar_high) > 0
+    except (TypeError, ValueError):
+        ar_ok = False
+
+    if not st_ok:
+        reason = (
+            "有 SC+AR，缺成功广义 ST（雏形）"
+            if status == "established"
+            else "有 SC，缺 AR/ST（雏形）"
+        )
+        return {
+            "tr_maturity": "L1",
+            "tr_maturity_reason": reason,
+            "measure_allowed": False,
+            "box_display_mode": "proto",
+        }
+    if not ar_ok:
+        return {
+            "tr_maturity": "L1",
+            "tr_maturity_reason": "有成功 ST，上沿未钉（无有效 ar_high）",
+            "measure_allowed": False,
+            "box_display_mode": "proto",
+        }
+
+    # L2 基线；宽度够 → L3
+    width = _tr_window_bar_count(bars, phase_a_range, tr_ctx)
+    need = int(WYCKOFF_MEASURE_MIN_BARS if min_bars is None else min_bars)
+    if width >= need:
+        return {
+            "tr_maturity": "L3",
+            "tr_maturity_reason": f"ST+AR 成立且 TR 窗 {width}≥{need}",
+            "measure_allowed": True,
+            "box_display_mode": "box",
+        }
+    return {
+        "tr_maturity": "L2",
+        "tr_maturity_reason": f"箱体已立（ST+AR），宽度不足（窗 {width}<{need}）",
+        "measure_allowed": False,
+        "box_display_mode": "box",
+    }
+
+
+def _promote_maturity_by_pnf(maturity: dict, ce: dict) -> dict:
+    """L2 时若 P&F 水平计数列数够宽，升为 L3。"""
+    if maturity.get("tr_maturity") != "L2":
+        return maturity
+    if ce.get("pnf_method") != "horizontal":
+        return maturity
+    try:
+        cols = int(ce.get("pnf_columns") or 0)
+    except (TypeError, ValueError):
+        cols = 0
+    if cols < int(WYCKOFF_PNF_MIN_COLUMNS):
+        return maturity
+    out = dict(maturity)
+    out["tr_maturity"] = "L3"
+    out["measure_allowed"] = True
+    out["box_display_mode"] = "box"
+    out["tr_maturity_reason"] = (
+        f"箱体已立且 P&F 水平列 {cols}≥{int(WYCKOFF_PNF_MIN_COLUMNS)}"
+    )
+    return out
+
+
+def _measure_gate_note(tr_maturity: str) -> str:
+    if tr_maturity == "L0":
+        return "未达 L3（无 Phase A）"
+    if tr_maturity == "L1":
+        return "未达 L3（缺成功 ST / 仍为雏形）"
+    if tr_maturity == "L2":
+        return "未达 L3（箱体已立、宽度不足）"
+    return ""
+
+
+def _apply_measure_gate(ce: dict, maturity: dict) -> dict:
+    """非 L3 强制清空量度目标；保留诚实 note。"""
+    if maturity.get("measure_allowed"):
+        return ce
+    note = _measure_gate_note(str(maturity.get("tr_maturity") or "L0"))
+    out = dict(ce or {})
+    out["cause_effect_up_target"] = None
+    out["cause_effect_down_target"] = None
+    out["cause_effect_range"] = None
+    prev = str(out.get("cause_effect_note") or "").strip()
+    if note:
+        out["cause_effect_note"] = note if not prev else f"{note}；{prev}"
+    return out
+
+
 def _seed_tr_quality_from_bounds(sc_low: float, ar_high: float) -> float:
     """established 种子箱宽度 → tr_quality（避免分位 TR 缺失时永久 gated）。"""
     if sc_low <= 0 or ar_high <= sc_low:
@@ -295,14 +437,24 @@ def _seed_tr_quality_from_bounds(sc_low: float, ar_high: float) -> float:
 def _overlay_phase_a_seed_tr_ctx(
     tr_ctx: dict | None,
     phase_a_range: dict,
+    *,
+    tr_maturity: str | None = None,
 ) -> dict | None:
-    """P2：established 时用 sc_low/ar_high overlay tr_ctx；forming/none 仅透传 status。"""
+    """成熟箱 overlay：仅 L2/L3 用 sc_low/ar_high 写 phase_a_seed。
+
+    L1（含 SC+AR 无 ST）保留 phase_a_range 候选边界供雏形展示，不放出种子箱量度。
+    ``tr_maturity is None`` 时回退旧行为（established → seed），供单测直接调用。
+    """
     status = phase_a_range.get("status") or "none"
     ctx: dict = dict(tr_ctx) if tr_ctx else {}
     ctx["phase_a_status"] = status
-    if status != "established":
+    mature = tr_maturity in ("L2", "L3") or (
+        tr_maturity is None and status == "established"
+    )
+    if not mature:
         if ctx and ctx.get("tr_lower") is not None and not ctx.get("tr_seed_source"):
             ctx["tr_seed_source"] = "percentile"
+        # L1 候选边界仅挂在 phase_a_* 字段，不改 tr_lower/tr_upper
         return ctx or None
 
     sc_low = phase_a_range.get("sc_low")
@@ -363,6 +515,7 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
             "utad_signal": False, "utad_reason": "数据不足", "utad_price": None,
             "cause_effect_up_target": None, "cause_effect_down_target": None,
             "cause_effect_range": None, "cause_effect_note": "数据不足",
+            "pnf_box_size": None, "pnf_columns": None, "pnf_method": None,
             "wyckoff_summary": "K线数据不足，无法进行威科夫分析",
             "tr_upper": None, "tr_lower": None, "tr_baseline_volume": None,
             "tr_width": None, "tr_amplitude_pct": None, "tr_quality": None, "tr_in_range": None,
@@ -385,24 +538,45 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
             },
             "sc_low": None, "ar_high": None,
             "secondary_test_sc_signal": False, "secondary_test_sc_reason": "数据不足", "st_sc_low": None,
+            "tr_maturity": "L0",
+            "tr_maturity_reason": "数据不足",
+            "measure_allowed": False,
+            "box_display_mode": "none",
         }
 
     # P2-2: 动态支撑位计算（多源集成）— 仅用于 Spring 检测
-    _weekly_scale = 0.2 if timeframe == "weekly" else 1.0
+    _is_weekly = str(timeframe or "").lower() == "weekly"
+    _weekly_scale = 0.2 if _is_weekly else 1.0
     _phase_lb = max(10, int(WYCKOFF_PHASE_LOOKBACK * _weekly_scale))
     _support_lb = max(3, int(10 * _weekly_scale))
     dynamic_support = _compute_dynamic_support(bars, lookback=_support_lb)
 
     # P0-3: TR 识别层 — 先定位当前交易区间，作为事件检测的语境
-    tr_ctx = _detect_trading_range(bars)
+    # 周线：根数更少、单根振幅更大，须缩放 min_width/lookback，并放宽 amp 上限
+    if _is_weekly:
+        from trader_shared.config import (
+            WYCKOFF_TR_LOOKBACK,
+            WYCKOFF_TR_MIN_WIDTH,
+            WYCKOFF_TR_AMPLITUDE_MAX,
+            WYCKOFF_TR_AMPLITUDE_MIN,
+        )
+        tr_ctx = _detect_trading_range(
+            bars,
+            lookback=max(24, int(WYCKOFF_TR_LOOKBACK * _weekly_scale)),
+            min_width=max(4, int(WYCKOFF_TR_MIN_WIDTH * _weekly_scale)),
+            max_amplitude_pct=max(WYCKOFF_TR_AMPLITUDE_MAX, 55.0),
+            min_amplitude_pct=max(3.0, WYCKOFF_TR_AMPLITUDE_MIN * 0.7),
+        )
+    else:
+        tr_ctx = _detect_trading_range(bars)
 
     spring = _detect_spring(bars, _support=dynamic_support, symbol=symbol, tr_ctx=tr_ctx)
     upthrust = _detect_upthrust(bars, tr_ctx=tr_ctx)
     bc = _detect_buying_climax(bars, tr_ctx=tr_ctx)
-    sc = _detect_selling_climax(bars, tr_ctx=tr_ctx)
+    sc = _detect_selling_climax(bars, tr_ctx=tr_ctx, timeframe=timeframe)
     sow = _detect_sign_of_weakness(bars, tr_ctx=tr_ctx)  # SOW 使用自己的支撑位计算（处理 consecutive 逻辑）
     bearish_div, bullish_div = _detect_volume_divergence(bars)
-    ar = _detect_ar(bars, tr_ctx=tr_ctx)
+    ar = _detect_ar(bars, tr_ctx=tr_ctx, timeframe=timeframe)
     are = _detect_are(bars, tr_ctx=tr_ctx)
     sos = _detect_sos(bars, tr_ctx=tr_ctx)
     st = _detect_st(bars, tr_ctx=tr_ctx)
@@ -437,13 +611,51 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
     # P0-5: 事件簇确认 — 将孤立信号升级为可信的积累/派发事件簇（校验先后顺序 + strength 定级）
     cluster = _detect_event_cluster(bars, tr_ctx=tr_ctx)
     phase_a_range = _build_phase_a_range(sc, ar)
-    st_sc = _detect_secondary_test_sc(bars, tr_ctx=tr_ctx, phase_a_range=phase_a_range)
+    st_sc = _detect_secondary_test_sc(
+        bars, tr_ctx=tr_ctx, phase_a_range=phase_a_range, timeframe=timeframe
+    )
     phase_a_range = _refine_phase_a_sc_low(phase_a_range, st_sc)
-    phase_tr_ctx = _overlay_phase_a_seed_tr_ctx(tr_ctx, phase_a_range)
+    # L0–L3 成熟度：先按 SC/ST/AR + 窗宽定级，再决定是否成熟箱 overlay
+    maturity = _resolve_tr_maturity(
+        phase_a_range, st_sc, bars=bars, tr_ctx=tr_ctx
+    )
+    phase_tr_ctx = _overlay_phase_a_seed_tr_ctx(
+        tr_ctx, phase_a_range, tr_maturity=maturity["tr_maturity"]
+    )
     if phase_tr_ctx is not None:
         phase_tr_ctx["last_close"] = to_float(bars[-1].get("close")) if bars else None
-    # P2-R6：因果目标在种子 overlay（+ST refine）之后重算，宽度用 sc_low/ar_high
+        # 种子箱补 TR 窗口，供周/日线 P&F 水平计数落在 cause 区间内
+        _sc_i = phase_a_range.get("sc_bar_idx")
+        if (
+            phase_tr_ctx.get("phase_a_seed")
+            and _sc_i is not None
+            and phase_tr_ctx.get("tr_start") is None
+        ):
+            try:
+                phase_tr_ctx["tr_start"] = int(_sc_i)
+                phase_tr_ctx["tr_end"] = len(bars) - 1
+                phase_tr_ctx["tr_width"] = max(
+                    1, int(phase_tr_ctx["tr_end"]) - int(phase_tr_ctx["tr_start"]) + 1
+                )
+            except (TypeError, ValueError):
+                pass
+        # overlay 后按真实窗宽再裁定一次（L2→L3）
+        if maturity["tr_maturity"] in ("L2", "L3"):
+            maturity = _resolve_tr_maturity(
+                phase_a_range, st_sc, bars=bars, tr_ctx=phase_tr_ctx
+            )
+    # P2-R6：因果目标在种子 overlay（+ST refine）之后重算；中线必须吃周 K bars
     ce = _cause_effect_targets(phase_tr_ctx or tr_ctx, bars)
+    # L2 且 P&F 水平列够宽 → 升 L3；非 L3 强制清空量度目标
+    maturity = _promote_maturity_by_pnf(maturity, ce)
+    ce = _apply_measure_gate(ce, maturity)
+    phase_a_range = {
+        **phase_a_range,
+        "tr_maturity": maturity["tr_maturity"],
+        "tr_maturity_reason": maturity["tr_maturity_reason"],
+        "measure_allowed": maturity["measure_allowed"],
+        "box_display_mode": maturity["box_display_mode"],
+    }
 
     # P1-1: 阶段状态机 — 基于信号序列推断积累/派发阶段
     signals_dict = {
@@ -632,6 +844,9 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "cause_effect_down_target": ce.get("cause_effect_down_target"),
         "cause_effect_range": ce.get("cause_effect_range"),
         "cause_effect_note": ce.get("cause_effect_note"),
+        "pnf_box_size": ce.get("pnf_box_size"),
+        "pnf_columns": ce.get("pnf_columns"),
+        "pnf_method": ce.get("pnf_method"),
         # P0-1: 弹簧量能分级（signal=False 时仍透传 high_vol_warning 等审计字段）
         "spring_vol_class": spring.get("spring_vol_class")
         if spring.get("spring_vol_class") is not None
@@ -690,6 +905,11 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "secondary_test_sc_bar_idx": st_sc.get("secondary_test_sc_bar_idx"),
         "st_sc_low": st_sc.get("st_sc_low"),
         "secondary_test_sc_low": st_sc.get("st_sc_low"),
+        # L0–L3 TR 成熟度（顶栏必有；与 phase_a_status 并存）
+        "tr_maturity": maturity["tr_maturity"],
+        "tr_maturity_reason": maturity["tr_maturity_reason"],
+        "measure_allowed": bool(maturity["measure_allowed"]),
+        "box_display_mode": maturity["box_display_mode"],
         "wyckoff_summary": "；".join(parts),
     }
 
@@ -1295,19 +1515,67 @@ def _phase_a_box_bounds(wyk: dict[str, Any]) -> tuple[float | None, float | None
 
 
 def _phase_a_box_phrase(wyk: dict[str, Any]) -> str:
-    """箱体人话片段（中短线共用）：established → 箱体 lo-hi；forming → 未成形/上沿未出；否则空。"""
-    phase_a = str(wyk.get("phase_a_status") or "").strip() or "none"
-    label = str(wyk.get("phase_label") or "").strip()
+    """箱体人话片段（中短线共用）。
+
+    L0–L3 合同（``tr_maturity`` / ``box_display_mode`` 优先；见
+    ``wyckoff-tr-maturity-l0l3-handoff.md`` §2.3）：
+      none → 空；proto → 雏形（禁用「箱体」）；box → ``箱体 lo-hi``。
+    无字段时：forming / established 无 ST → 雏形；established+ST → 箱体。
+    """
     lo, hi = _phase_a_box_bounds(wyk)
-    if phase_a == "forming" or "箱体未成形" in label or "区间未钉" in label:
+    mode = str(wyk.get("box_display_mode") or "").strip()
+    if not mode:
+        maturity = str(wyk.get("tr_maturity") or "").strip().upper()
+        mode = {"L0": "none", "L1": "proto", "L2": "box", "L3": "box"}.get(maturity, "")
+
+    if mode == "none":
+        return ""
+    if mode == "proto":
+        if lo is not None and hi is not None:
+            return f"雏形 {lo:.2f}-{hi:.2f}（待 ST）"
         if lo is not None:
-            return f"箱体未成形 · 下沿 {lo:.2f}（上沿未出）"
-        return "箱体未成形 · 上沿未出"
-    if phase_a == "established":
+            return f"雏形 下沿 {lo:.2f}（上沿未出）"
+        return "雏形 · 上沿未出"
+    if mode == "box":
         if lo is not None and hi is not None:
             return f"箱体 {lo:.2f}-{hi:.2f}"
         return ""
+
+    # 兼容回落：无 Gate 字段时，established 单独不得写「箱体 lo-hi」
+    phase_a = str(wyk.get("phase_a_status") or "").strip() or "none"
+    label = str(wyk.get("phase_label") or "").strip()
+    st_ok = bool(wyk.get("secondary_test_sc_signal"))
+    if phase_a == "forming" or "箱体未成形" in label or "区间未钉" in label:
+        if lo is not None:
+            return f"雏形 下沿 {lo:.2f}（上沿未出）"
+        return "箱体未成形 · 上沿未出"
+    if phase_a == "established":
+        if st_ok and lo is not None and hi is not None:
+            return f"箱体 {lo:.2f}-{hi:.2f}"
+        if lo is not None and hi is not None:
+            return f"雏形 {lo:.2f}-{hi:.2f}（待 ST）"
+        if lo is not None:
+            return f"雏形 下沿 {lo:.2f}（上沿未出）"
+        return ""
     return ""
+
+
+def _box_display_mode_of(wyk: dict[str, Any]) -> str:
+    """解析 box_display_mode；缺省时由 tr_maturity 推导。"""
+    mode = str(wyk.get("box_display_mode") or "").strip()
+    if mode:
+        return mode
+    maturity = str(wyk.get("tr_maturity") or "").strip().upper()
+    return {"L0": "none", "L1": "proto", "L2": "box", "L3": "box"}.get(maturity, "")
+
+
+def _suppress_mature_box(wyk: dict[str, Any], *, gated: bool, gate_r: str) -> bool:
+    """无/低质量分位 TR 时压制成熟「箱体」；L1 雏形提示始终可展示。"""
+    if _box_display_mode_of(wyk) == "proto":
+        return False
+    if str(wyk.get("tr_maturity") or "").strip().upper() == "L1":
+        return False
+    return bool(gated) and gate_r in ("no_tr", "low_quality")
 
 
 def format_wyckoff_daily_phase_light(
@@ -1318,7 +1586,8 @@ def format_wyckoff_daily_phase_light(
     产品契约（BUSINESS §2.2）：
       - 只给人看；不进中线定论 / fusion / 共振背景岗 / 单独开仓
       - 无箱体：无清晰区间 · 暂定不出
-      - forming：箱体未成形 / 上沿未出（有下沿则写出）；established：箱体 下沿-上沿
+      - L1 雏形：写出「雏形 …（待 ST）」提示（非成熟箱体、非量度）
+      - L2/L3：箱体 lo-hi
     """
     wyk = _unwrap_wyckoff_dict(wyckoff)
     if not wyk:
@@ -1335,22 +1604,32 @@ def format_wyckoff_daily_phase_light(
     plain = _plain_phase_midline(label)
     box = _phase_a_box_phrase(wyk)
 
-    # P0-B 无/低质量 TR：与中线「构不成区间」同构（优先于 forming 文案）
-    if gated and gate_r in ("no_tr", "low_quality"):
+    # P0-B 无/低质量 TR：压制成熟箱体；若有 L1 雏形仍提示
+    if gated and gate_r in ("no_tr", "low_quality") and _suppress_mature_box(
+        wyk, gated=gated, gate_r=gate_r
+    ):
         if gate_r == "low_quality":
             return "无 · 区间质量差 · 暂定不出 · 仅对照"
         return "无 · 无清晰区间 · 暂定不出 · 仅对照"
+    if gated and gate_r in ("no_tr", "low_quality") and box:
+        slot = plain or "吸筹早期"
+        return f"{slot} · {box} · 仅对照"
 
     # forming：有 SC、尚无 AR 定上沿（有下沿则带出）
     if phase_a == "forming" or "箱体未成形" in label or "区间未钉" in label:
         slot = plain or "吸筹早期"
         return f"{slot} · {box or '箱体未成形 · 上沿未出'} · 仅对照"
 
-    # 有明确叙事（箱体 lo-hi 或过门控后的 A–E / markup…）
+    # 有明确叙事（箱体/雏形 或过门控后的 A–E / markup…）
     if phase != "none" and plain:
-        if phase_a == "established" and box:
+        if box:
             return f"{plain} · {box} · 仅对照"
         return f"{plain} · 仅对照"
+
+    # established 雏形但阶段被闸成 none：仍提示雏形
+    if box:
+        slot = plain or "吸筹早期"
+        return f"{slot} · {box} · 仅对照"
 
     # 无 SC、无叙事：与中线 none 同构
     has_bounds = wyk.get("tr_upper") is not None or wyk.get("tr_lower") is not None
@@ -1367,9 +1646,10 @@ def format_wyckoff_midline_light(
 ) -> str:
     """中线威科夫人话版（周线；不进短线评分）。
 
-    结构「阶段 · [箱体] · 事件 · 含义」（阶段不明用「无」，不跳段；箱体与短线同款）：
+    结构「阶段 · [箱体/雏形] · 事件 · 含义」（阶段不明用「无」，不跳段）：
       威科夫：还在吸筹中 · 箱体 40.30-43.00 · AR（自动反弹）· 不能当已经转强
-      威科夫：吸筹早期 · 箱体未成形 · 下沿 38.14（上沿未出） · SC（卖力高潮）· 还要等弹簧/确认
+      威科夫：无 · 雏形 37.80-43.85（待 ST） · AR（自动反弹）· 不能当已经转强
+      威科夫：吸筹早期 · 雏形 下沿 38.14（上沿未出） · SC（卖力高潮）· 还要等弹簧/确认
       威科夫：无 · BullDiv（看多背离）· 不能当反转
       威科夫：周线不足 · 不参与定论
     """
@@ -1387,13 +1667,20 @@ def format_wyckoff_midline_light(
     parts: list[str] = []
     gate_r = str(wyk.get("phase_tr_gate_reason") or "").strip()
     gated = bool(wyk.get("phase_tr_gated"))
-    # 与短线同构：无/低质量 TR 时阶段不参与定论，禁止再写 forming 箱体
-    suppress_box = gated and gate_r in ("no_tr", "low_quality")
+    # 无/低质量分位 TR：压制成熟箱体；L1 雏形仍提示
+    suppress_box = _suppress_mature_box(wyk, gated=gated, gate_r=gate_r)
+    proto_box = _phase_a_box_phrase(wyk) if not suppress_box else ""
 
     if info["status"] == "none":
         # 已跑周线引擎：不是「没算」，而是 TR/事件定不出阶段
         tr_q = wyk.get("tr_quality")
-        if suppress_box or (tr_q is None and not wyk.get("tr_upper") and not wyk.get("tr_lower")):
+        if proto_box:
+            # L1 雏形：即使阶段/分位 TR 被闸，也给人看候选区间提示
+            parts.append(phase_slot)
+            parts.append(proto_box)
+            parts.append("暂无关键事件")
+            parts.append("不据此开仓")
+        elif suppress_box or (tr_q is None and not wyk.get("tr_upper") and not wyk.get("tr_lower")):
             parts.append("周线已算")
             if gate_r == "low_quality":
                 parts.append("区间质量差")
@@ -1402,9 +1689,6 @@ def format_wyckoff_midline_light(
             parts.append("阶段暂定不出，不据此开仓")
         else:
             parts.append(phase_slot)
-            box = _phase_a_box_phrase(wyk)
-            if box:
-                parts.append(box)
             parts.append("暂无关键事件")
             parts.append("不据此开仓")
         return "威科夫：" + " · ".join(parts) if parts else "威科夫：周线已算 · 暂无定论"
@@ -1415,10 +1699,8 @@ def format_wyckoff_midline_light(
     meaning = _midline_meaning(code, cn, note, d)
 
     parts.append(phase_slot)
-    if not suppress_box:
-        box = _phase_a_box_phrase(wyk)
-        if box:
-            parts.append(box)
+    if proto_box:
+        parts.append(proto_box)
     # 灯：Spring（弹簧）—— 英文 + 中文括号，与短线状态行一致
     if cn and cn not in ("无", "不足", "无事件"):
         parts.append(f"{code}（{cn}）")

@@ -66,10 +66,13 @@
     "utad_signal": false,
     "utad_reason": "无派发背景（需 BC/SOW）",
     "utad_price": null,
-    "cause_effect_up_target": 9.6,
-    "cause_effect_down_target": 7.95,
-    "cause_effect_range": 0.55,
-    "cause_effect_note": "TR 高度 0.55 作 1:1 投射（简化因果/水平计数近似，非点数图）",
+    "cause_effect_up_target": 15.1,
+    "cause_effect_down_target": 2.45,
+    "cause_effect_range": 6.05,
+    "cause_effect_note": "P&F 水平计数：69 列 × box 0.0878 → effect 6.05；↑9.05+effect / ↓8.50-effect",
+    "pnf_box_size": 0.0878,
+    "pnf_columns": 69,
+    "pnf_method": "horizontal",
     "spring_vol_class": null,
     "phase": "none",
     "phase_label": "无明确阶段",
@@ -122,7 +125,7 @@
     "secondary_test_sc_bar_idx": null,
     "st_sc_low": null,
     "secondary_test_sc_low": null,
-    "wyckoff_summary": "因果目标↑9.6/↓7.95"
+    "wyckoff_summary": "因果目标↑15.1/↓2.45"
   },
   "calculate_wyckoff_score": {
     "score": 56,

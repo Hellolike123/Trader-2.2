@@ -1579,6 +1579,9 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
 
     默认根数见 config.WEEKLY_LOOKBACK_BARS（中线缠论需要足够周线成笔/成段）。
     当天第一次打网，同日复用。
+
+    若上游周线接口实际吐出日线间距（mootdx cat=5 曾如此），丢弃并改由日线聚合周线，
+    避免中线威科夫/缠论与短线撞车。
     """
     if datalen is None:
         try:
@@ -1587,7 +1590,19 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
         except Exception:
             datalen = 260
 
-    from trader_shared.cache_utils import get_day_scoped_bars, CACHE_WEEKLY
+    from trader_shared.cache_utils import get_day_scoped_bars, CACHE_WEEKLY, set_cached, cache_calendar_date
+    from trader_shared.indicator_math import (
+        aggregate_daily_to_weekly,
+        weekly_bars_look_like_weekly,
+    )
+
+    def _from_daily() -> list[dict[str, Any]]:
+        # 周根数 * 约 5 交易日，多取缓冲再截断
+        daily = fetch_qfq_daily(sec, http, days=max(int(datalen) * 6, 300)) or []
+        weekly = aggregate_daily_to_weekly(daily)
+        if len(weekly) > int(datalen):
+            weekly = weekly[-int(datalen) :]
+        return weekly
 
     def _net() -> list[dict[str, Any]]:
         fallback_bars = _fetch_mins_fallback(sec, "weekly", datalen)
@@ -1595,16 +1610,41 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
             for bar in fallback_bars:
                 bar["data_source"] = "sina"
                 bar["data_status"] = "full"
-            return fallback_bars
+            if weekly_bars_look_like_weekly(fallback_bars):
+                return fallback_bars
+            _logger.warning(
+                "fetch_weekly: sina weekly spacing looks daily for %s, aggregate from daily",
+                sec.code,
+            )
         bars = _fetch_mins_mootdx(sec, "weekly", datalen)
         if bars:
             for bar in bars:
                 bar["data_source"] = "mootdx (fallback)"
                 bar["data_status"] = "partial"
-            return bars
-        return []
+            if weekly_bars_look_like_weekly(bars):
+                return bars
+            _logger.warning(
+                "fetch_weekly: mootdx weekly spacing looks daily for %s, aggregate from daily",
+                sec.code,
+            )
+        return _from_daily()
 
-    return get_day_scoped_bars(CACHE_WEEKLY, sec.code, _net, min_rows=4)
+    bars = get_day_scoped_bars(CACHE_WEEKLY, sec.code, _net, min_rows=4)
+    if weekly_bars_look_like_weekly(bars):
+        return bars
+    # 同日缓存可能已毒（旧日线冒充周线）：覆盖写回聚合周线
+    fixed = _from_daily()
+    if fixed and weekly_bars_look_like_weekly(fixed):
+        try:
+            set_cached(
+                CACHE_WEEKLY,
+                sec.code,
+                {"fetch_date": cache_calendar_date(), "rows": fixed},
+            )
+        except OSError:
+            pass
+        return fixed
+    return fixed or bars
 
 
 def fetch_monthly(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
@@ -1802,6 +1842,17 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
     daily_bars, _ = ensure_bars_ascending(daily_bars)
     weekly_bars, _ = ensure_bars_ascending(weekly_bars)
     monthly_bars, _ = ensure_bars_ascending(monthly_bars)
+    # 快照护栏：周线间距若像日线，用日线聚合覆盖（中线不得与短线同序列）
+    try:
+        from trader_shared.indicator_math import (
+            aggregate_daily_to_weekly,
+            weekly_bars_look_like_weekly,
+        )
+        if include_weekly and daily_bars and not weekly_bars_look_like_weekly(weekly_bars):
+            weekly_bars = aggregate_daily_to_weekly(daily_bars)
+            weekly_bars, _ = ensure_bars_ascending(weekly_bars)
+    except Exception as exc:
+        _logger.debug("weekly aggregate guard failed: %s", exc)
     bars_5m, _ = ensure_bars_ascending(bars_5m, recompute_atr=False)
     tick_data = results.get("tick_data") or []
     order_book = quote.get("order_book")

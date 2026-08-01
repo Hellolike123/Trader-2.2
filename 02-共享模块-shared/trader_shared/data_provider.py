@@ -832,7 +832,19 @@ class TushareProvider:
                 _logger.debug("tushare weekly failed, fallback: %s", e)
             return self._fallback.fetch_weekly(sec, n)
 
-        return get_day_scoped_bars(CACHE_WEEKLY, sec.code, _net, min_rows=4)
+        from trader_shared.indicator_math import weekly_bars_look_like_weekly
+
+        bars = get_day_scoped_bars(CACHE_WEEKLY, sec.code, _net, min_rows=4)
+        if weekly_bars_look_like_weekly(bars):
+            return bars
+        # fallback 路径可能缓存了日线冒充周线；再走 light_data 聚合纠偏
+        try:
+            fixed = self._fallback.fetch_weekly(sec, n)
+            if weekly_bars_look_like_weekly(fixed):
+                return fixed
+        except Exception as e:
+            _logger.debug("weekly aggregate rewrite failed: %s", e)
+        return bars
 
     def fetch_monthly(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
         """月线 — fallback 到腾讯（Tushare 月线需高级积分）。"""

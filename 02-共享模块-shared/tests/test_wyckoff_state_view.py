@@ -207,6 +207,7 @@ def test_format_daily_phase_forming():
 def test_format_daily_phase_established():
     from trader_shared.wyckoff_view import format_daily_phase_display
 
+    # SC+AR 无 ST → 雏形（禁止成熟「箱体 lo-hi」）
     line = format_daily_phase_display(
         {
             "timeframe": "daily",
@@ -217,11 +218,31 @@ def test_format_daily_phase_established():
             "ar_high": 12.0,
             "tr_lower": 10.0,
             "tr_upper": 12.0,
+            "secondary_test_sc_signal": False,
+            "tr_maturity": "L1",
+            "box_display_mode": "proto",
         }
     )
     assert line.startswith("威科夫：")
-    assert "箱体 10.00-12.00" in line
+    assert "雏形 10.00-12.00（待 ST）" in line
+    assert "箱体 10.00-12.00" not in line
     assert "仅对照" in line
+
+    # 真 ST → 可写箱体
+    line_box = format_daily_phase_display(
+        {
+            "timeframe": "daily",
+            "phase": "accumulation_b",
+            "phase_label": "积累期 B",
+            "phase_a_status": "established",
+            "sc_low": 10.0,
+            "ar_high": 12.0,
+            "secondary_test_sc_signal": True,
+            "tr_maturity": "L2",
+            "box_display_mode": "box",
+        }
+    )
+    assert "箱体 10.00-12.00" in line_box
 
 
 def test_format_daily_phase_forming_shows_lower():
@@ -234,10 +255,13 @@ def test_format_daily_phase_forming_shows_lower():
             "phase_label": "积累期 A（卖力高潮：SC，箱体未成形）",
             "phase_a_status": "forming",
             "sc_low": 38.14,
+            "tr_maturity": "L1",
+            "box_display_mode": "proto",
         }
     )
-    assert "箱体未成形" in line
+    assert "雏形" in line
     assert "下沿 38.14（上沿未出）" in line
+    assert "箱体 38" not in line
 
 
 def test_format_daily_phase_established_invalid_bounds_no_pinned_fallback():
@@ -260,7 +284,7 @@ def test_format_daily_phase_established_invalid_bounds_no_pinned_fallback():
 
 
 def test_format_daily_phase_legacy_unpinned_label():
-    """旧 phase_label「区间未钉」仍映射为箱体未成形人话。"""
+    """旧 phase_label「区间未钉」映射为雏形人话（禁用成熟箱体词）。"""
     from trader_shared.wyckoff_view import format_daily_phase_display
 
     line = format_daily_phase_display(
@@ -270,8 +294,11 @@ def test_format_daily_phase_legacy_unpinned_label():
             "phase_label": "积累期 A（卖力高潮：SC，区间未钉）",
             "phase_a_status": "forming",
             "sc_low": 21.5,
+            "tr_maturity": "L1",
+            "box_display_mode": "proto",
         }
     )
-    assert "箱体未成形" in line
+    assert "雏形" in line
     assert "下沿 21.50（上沿未出）" in line
     assert "区间未钉" not in line
+    assert "箱体 21" not in line

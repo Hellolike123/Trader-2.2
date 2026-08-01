@@ -90,6 +90,35 @@ def test_ensure_bars_ascending_intraday_timestamps() -> None:
     ]
 
 
+def test_aggregate_daily_to_weekly_iso_buckets() -> None:
+    from datetime import date, timedelta
+    from trader_shared.indicator_math import (
+        aggregate_daily_to_weekly,
+        weekly_bars_look_like_weekly,
+    )
+
+    start = date(2026, 6, 1)
+    daily = []
+    for i in range(60):  # ≥4 个完整交易周
+        d = start + timedelta(days=i)
+        if d.weekday() >= 5:
+            continue
+        daily.append({
+            "date": d.isoformat(),
+            "open": 10.0 + i * 0.1,
+            "high": 11.0 + i * 0.1,
+            "low": 9.0 + i * 0.1,
+            "close": 10.5 + i * 0.1,
+            "volume": 100.0,
+        })
+    weekly = aggregate_daily_to_weekly(daily)
+    assert len(weekly) >= 4
+    assert weekly_bars_look_like_weekly(weekly)
+    assert not weekly_bars_look_like_weekly(daily)
+    # 周内 open=首根 close=末根
+    assert weekly[0]["open"] == daily[0]["open"]
+
+
 def test_aggregate_5m_to_60m_sorts_within_hour() -> None:
     from trader_shared.indicator_math import aggregate_5m_to_60m
 

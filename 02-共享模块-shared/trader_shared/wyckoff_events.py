@@ -87,6 +87,11 @@ try:
 except ImportError:
     WYCKOFF_MIN_BARS = 15
     WYCKOFF_CLIMAX_ANCHOR_BARS = 15
+    # 广义 ST 默认须与 config.py 同步（A 股放宽后）
+    WYCKOFF_ST_SC_VOL_RATIO = 0.72
+    WYCKOFF_ST_SC_MAX_BARS = 22
+    WYCKOFF_ST_SC_PROXIMITY = 0.03
+    WYCKOFF_ST_SC_MAX_PIERCE = 0.012
     WYCKOFF_BC_VOL_RATIO_THRESHOLD = 1.8  # must match config.py
     WYCKOFF_BC_CHANGE_THRESHOLD = 1.0
     WYCKOFF_BC_UPPER_SHADOW_RATIO = 0.02
@@ -169,8 +174,20 @@ def _spring_breach_level(support: float, bar: dict | None = None) -> float:
         return support - atr14 * WYCKOFF_SPRING_ATR_MULTIPLE
     return support * WYCKOFF_SPRING_RECLAIM_RATIO
 
-def _price_pos_pct(bars: list[dict], idx: int, lookback: int | None = None) -> float | None:
-    """计算 bars[idx] 收盘价在近窗高低区间中的位置 (0=底, 1=顶)。"""
+def _price_pos_pct(
+    bars: list[dict],
+    idx: int,
+    lookback: int | None = None,
+    *,
+    ref: str = "high",
+) -> float | None:
+    """计算 bars[idx] 在近窗高低区间中的位置 (0=底, 1=顶)。
+
+    ref:
+      - ``high``（默认）：max(close, high)，偏高位过滤（BC）
+      - ``close``：收盘价，适合 SC 低位（周线高潮周高低跨度大时勿用 high）
+      - ``low``：min(close, low)
+    """
     if idx < 0 or idx >= len(bars):
         return None
     lb = lookback or WYCKOFF_SPRING_SUPPORT_LOOKBACK
@@ -182,6 +199,7 @@ def _price_pos_pct(bars: list[dict], idx: int, lookback: int | None = None) -> f
     valid_l = [lo for lo in lows if lo is not None]
     close = to_float(bars[idx].get("close"))
     high = to_float(bars[idx].get("high"))
+    low = to_float(bars[idx].get("low"))
     if not valid_h or not valid_l or close is None:
         return None
     range_hi = max(valid_h)
@@ -189,9 +207,41 @@ def _price_pos_pct(bars: list[dict], idx: int, lookback: int | None = None) -> f
     span = range_hi - range_lo
     if span <= 0:
         return 1.0  # 无波动时视为中性高位
-    # 用 high/close 较高者判定是否在高位区
-    ref = max(close, high if high is not None else close)
-    return (ref - range_lo) / span
+    if ref == "close":
+        px = close
+    elif ref == "low":
+        px = min(close, low if low is not None else close)
+    else:
+        # 用 high/close 较高者判定是否在高位区
+        px = max(close, high if high is not None else close)
+    return (px - range_lo) / span
+
+
+def _sc_detector_params(timeframe: str = "daily", *, is_index: bool = False) -> dict:
+    """日/周线 SC 锚点参数。周线单根振幅大、量比更平滑，须缩窗降量阈并用 close 定低位。
+
+    指数/大盘：量比难达个股阈值 → 略放宽 SC 量阈；ST 仍强制回测 SC 区，禁止软确认绕过。
+    """
+    if str(timeframe or "").lower() == "weekly":
+        params = {
+            "anchor_bars": max(6, int(WYCKOFF_CLIMAX_ANCHOR_BARS * 0.5)),
+            "support_lookback": max(4, int(WYCKOFF_SPRING_SUPPORT_LOOKBACK * 0.5)),
+            "vol_ratio_threshold": min(WYCKOFF_BC_VOL_RATIO_THRESHOLD, 1.25),
+            "change_pct_max": -1.0,  # 周线跌幅门槛略宽（仍须明显下跌）
+            "pos_ref": "close",
+        }
+    else:
+        params = {
+            "anchor_bars": WYCKOFF_CLIMAX_ANCHOR_BARS,
+            "support_lookback": WYCKOFF_SPRING_SUPPORT_LOOKBACK,
+            "vol_ratio_threshold": WYCKOFF_BC_VOL_RATIO_THRESHOLD,
+            "change_pct_max": -2.0,
+            "pos_ref": "high",  # 与历史日线 SC 行为一致（低位仍用 pos 上界过滤）
+        }
+    if is_index:
+        # 指数量比偏平滑：SC 量阈略降；广义 ST 不得用「站在 SC 上方」软确认替代回测
+        params["vol_ratio_threshold"] = min(float(params["vol_ratio_threshold"]), 1.35)
+    return params
 
 def _is_bc_high_position(bars: list[dict], idx: int) -> bool:
     """BC 高位过滤：须处于近窗价格区间上沿。"""
@@ -540,18 +590,34 @@ def _detect_buying_climax(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     return {"bc_signal": False, "bc_reason": "未检测到购买高潮", "bc_price": 0.0}
 
 
-def _find_sc_anchor(bars: list[dict], tr_ctx: dict | None = None) -> dict | None:
-    """在最近 WYCKOFF_CLIMAX_ANCHOR_BARS 根内找最近一次 SC 锚点（SSOT）。
+def _find_sc_anchor(
+    bars: list[dict],
+    tr_ctx: dict | None = None,
+    *,
+    timeframe: str = "daily",
+    is_index: bool = False,
+) -> dict | None:
+    """在最近 climax 锚点窗内找最近一次 SC（SSOT）。
+
+    ``sc_low`` 必须是 SC 棒最低价（bar.low），禁止用 close / 局部偏高点当谷底。
 
     Returns:
         dict | None: sc_bar_idx, sc_low, sc_close, sc_avg_vol, vol_ratio, change_pct, pos
     """
-    if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1:
+    del tr_ctx  # 预留：TR 内优先搜 SC
+    p = _sc_detector_params(timeframe, is_index=is_index)
+    support_lb = int(p["support_lookback"])
+    anchor_bars = int(p["anchor_bars"])
+    vol_th = float(p["vol_ratio_threshold"])
+    change_max = float(p["change_pct_max"])
+    pos_ref = str(p["pos_ref"])
+
+    if len(bars) < support_lb + 1:
         return None
-    scan_start = max(1, len(bars) - WYCKOFF_CLIMAX_ANCHOR_BARS)
+    scan_start = max(1, len(bars) - anchor_bars)
     for scan_idx in range(len(bars) - 1, scan_start - 1, -1):
         current = bars[scan_idx]
-        recent = bars[max(0, scan_idx - WYCKOFF_SPRING_SUPPORT_LOOKBACK):scan_idx]
+        recent = bars[max(0, scan_idx - support_lb):scan_idx]
 
         cur_open = to_float(current.get("open"))
         cur_high = to_float(current.get("high"))
@@ -567,10 +633,11 @@ def _find_sc_anchor(bars: list[dict], tr_ctx: dict | None = None) -> dict | None
             continue
 
         vol_ratio = cur_volume / avg_volume
-        if vol_ratio < WYCKOFF_BC_VOL_RATIO_THRESHOLD:
+        if vol_ratio < vol_th:
             continue
 
-        pos = _price_pos_pct(bars, scan_idx)
+        # 低位过滤可用 close/high 作 pos_ref；谷底价本身始终取棒最低价
+        pos = _price_pos_pct(bars, scan_idx, lookback=support_lb, ref=pos_ref)
         if pos is None or pos > 1 - WYCKOFF_BC_MIN_POS_PCT:
             continue
 
@@ -578,12 +645,13 @@ def _find_sc_anchor(bars: list[dict], tr_ctx: dict | None = None) -> dict | None
             continue
         prev_close = to_float(bars[scan_idx - 1].get("close")) if scan_idx >= 1 else cur_open
         change_pct = (cur_close - prev_close) / max(prev_close, 0.01) * 100
-        if change_pct > -2.0:
+        if change_pct > change_max:
             continue
 
         return {
             "sc_bar_idx": scan_idx,
-            "sc_low": round(cur_low, 2),
+            # SC low SSOT：棒最低价（非 close / 非局部偏高点）
+            "sc_low": round(float(cur_low), 2),
             "sc_close": cur_close,
             "sc_avg_vol": avg_volume,
             "vol_ratio": vol_ratio,
@@ -605,7 +673,13 @@ def _sc_empty() -> dict:
     }
 
 
-def _detect_selling_climax(bars: list[dict], tr_ctx: dict | None = None) -> dict:
+def _detect_selling_climax(
+    bars: list[dict],
+    tr_ctx: dict | None = None,
+    *,
+    timeframe: str = "daily",
+    is_index: bool = False,
+) -> dict:
     """Detect Selling Climax (SC) — 天量宽幅下跌，低位抛售宣泄。
 
     对称于 BC（Buying Climax），但方向相反：
@@ -617,11 +691,13 @@ def _detect_selling_climax(bars: list[dict], tr_ctx: dict | None = None) -> dict
     Returns:
         dict with keys: sc_signal (bool), sc_reason (str), sc_price (float),
         sc_low (float|None), sc_bar_idx (int|None)
+        sc_low / sc_price 均为 SC 棒最低价（SSOT，非 close）
     """
-    if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1:
+    p = _sc_detector_params(timeframe, is_index=is_index)
+    if len(bars) < int(p["support_lookback"]) + 1:
         return {**_sc_empty(), "sc_reason": "数据不足"}
 
-    anchor = _find_sc_anchor(bars, tr_ctx=tr_ctx)
+    anchor = _find_sc_anchor(bars, tr_ctx=tr_ctx, timeframe=timeframe, is_index=is_index)
     if anchor is None:
         return _sc_empty()
 
@@ -639,13 +715,16 @@ def _detect_selling_climax(bars: list[dict], tr_ctx: dict | None = None) -> dict
         parts.append("带下影线")
     parts.append(f"低位区{anchor['pos']*100:.0f}%")
 
-    sc_low = anchor["sc_low"]
+    # SC low SSOT：再从棒读取 low，避免任何路径用 close 冒充谷底
+    sc_bar_idx = int(anchor["sc_bar_idx"])
+    bar_low = to_float(bars[sc_bar_idx].get("low"))
+    sc_low = round(float(bar_low), 2) if bar_low is not None else anchor["sc_low"]
     return {
         "sc_signal": True,
         "sc_reason": "天量宽幅下跌，卖力高潮：" + "，".join(parts),
         "sc_price": sc_low,
         "sc_low": sc_low,
-        "sc_bar_idx": anchor["sc_bar_idx"],
+        "sc_bar_idx": sc_bar_idx,
     }
 
 
@@ -1060,7 +1139,13 @@ def _detect_volume_divergence(bars: list[dict]) -> tuple[bool, bool]:
 
     return bearish, bullish
 
-def _detect_ar(bars: list[dict], tr_ctx: dict | None = None) -> dict:
+def _detect_ar(
+    bars: list[dict],
+    tr_ctx: dict | None = None,
+    *,
+    timeframe: str = "daily",
+    is_index: bool = False,
+) -> dict:
     """Detect Automatic Rally (AR) — SC 之后抛售枯竭的快速反弹（原典）。
 
     只绑 SC。与 `_detect_selling_climax` 共用 `_find_sc_anchor`。
@@ -1070,16 +1155,19 @@ def _detect_ar(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     if len(bars) < WYCKOFF_MIN_BARS + 3:
         return {**_ar_empty(), "ar_reason": "数据不足"}
 
-    anchor = _find_sc_anchor(bars, tr_ctx=tr_ctx)
+    anchor = _find_sc_anchor(bars, tr_ctx=tr_ctx, timeframe=timeframe, is_index=is_index)
     if anchor is None:
         return _ar_empty()
 
     sc_bar_idx = anchor["sc_bar_idx"]
     sc_close = anchor["sc_close"]
     sc_avg_vol = anchor["sc_avg_vol"]
-    sc_low = anchor["sc_low"]
+    # SC low SSOT：与 _find_sc_anchor / SC 检测器同一谷底（棒最低价）
+    bar_low = to_float(bars[sc_bar_idx].get("low"))
+    sc_low = round(float(bar_low), 2) if bar_low is not None else anchor["sc_low"]
 
-    rally_max = min(max(3, WYCKOFF_CLIMAX_ANCHOR_BARS // 2), len(bars) - sc_bar_idx - 1)
+    p = _sc_detector_params(timeframe, is_index=is_index)
+    rally_max = min(max(2, int(p["anchor_bars"]) // 2), len(bars) - sc_bar_idx - 1)
     for i in range(1, rally_max + 1):
         rally_bar = bars[sc_bar_idx + i]
         r_close = to_float(rally_bar.get("close"))
@@ -1127,21 +1215,31 @@ def _detect_secondary_test_sc(
     bars: list[dict],
     tr_ctx: dict | None = None,
     phase_a_range: dict | None = None,
+    *,
+    timeframe: str = "daily",
+    is_index: bool = False,
 ) -> dict:
     """广义 Secondary Test — SC 后二次回测 SC 区（非 Spring Test / st_*）。
 
-    前提：已有 SC 锚点；SC 后若干根内 low 接近 sc_low、量较 SC 明显缩小、
-    未有效破新低（或刺穿后收盘收回）。字段独立，不覆盖 spring_test_* / st_*。
+    前提：已有 SC 锚点；SC 后若干根内 **low 进入 SC 区**（proximity / 允许刺穿+收回）、
+    量较 SC 明显缩小、未有效破新低。字段独立，不覆盖 spring_test_* / st_*。
+
+    禁止软确认（handoff §1.3）：价格一直站在 sc_low 上方、从未回测 SC 区 →
+    不得返回 ``secondary_test_sc_signal=True``。
     """
-    if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 2:
+    del phase_a_range  # 回测锚以 _find_sc_anchor 的 sc_low 为准（SSOT），不用外部偏高种子
+    p = _sc_detector_params(timeframe, is_index=is_index)
+    if len(bars) < int(p["support_lookback"]) + 2:
         return _st_sc_empty("数据不足")
 
-    anchor = _find_sc_anchor(bars, tr_ctx=tr_ctx)
+    anchor = _find_sc_anchor(bars, tr_ctx=tr_ctx, timeframe=timeframe, is_index=is_index)
     if anchor is None:
         return _st_sc_empty()
 
-    sc_bar_idx = anchor["sc_bar_idx"]
-    sc_low = anchor["sc_low"]
+    sc_bar_idx = int(anchor["sc_bar_idx"])
+    # SC low SSOT：回测锚 = SC 棒最低价（与 _find_sc_anchor 同源；禁止 close）
+    bar_low = to_float(bars[sc_bar_idx].get("low"))
+    sc_low = round(float(bar_low), 2) if bar_low is not None else anchor.get("sc_low")
     sc_vol = to_float(bars[sc_bar_idx].get("volume")) or anchor.get("sc_avg_vol") or 0
     if sc_vol <= 0 or sc_low is None:
         return _st_sc_empty("SC 量能数据异常")
@@ -1150,10 +1248,14 @@ def _detect_secondary_test_sc(
     if max_after < 1:
         return _st_sc_empty("SC 后无足够 K 线")
 
+    zone_upper = sc_low * (1.0 + WYCKOFF_ST_SC_PROXIMITY)
+    pierce_floor = sc_low * (1.0 - WYCKOFF_ST_SC_MAX_PIERCE)
+
     best_low: float | None = None
     best_vol: float | None = None
     best_close: float | None = None
     best_idx: int | None = None
+    saw_soft_above = False  # 曾有棒站在 SC 区上方（软确认候选，一律否决）
     for i in range(sc_bar_idx + 1, sc_bar_idx + max_after + 1):
         bar = bars[i]
         t_low = to_float(bar.get("low"))
@@ -1162,11 +1264,13 @@ def _detect_secondary_test_sc(
         if t_low is None or t_vol is None:
             continue
 
-        # 回测 SC 区：low 须在 sc_low 上方 proximity 内，或轻微刺穿后收回
-        upper = sc_low * (1.0 + WYCKOFF_ST_SC_PROXIMITY)
-        if t_low > upper:
+        # 禁止软确认：low 必须进入 SC 区；一直站在上方不算 ST
+        if t_low > zone_upper:
+            saw_soft_above = True
             continue
-        pierce = t_low < sc_low * (1.0 - WYCKOFF_ST_SC_MAX_PIERCE)
+
+        # 有效跌破（超允许刺穿且收盘不收回）→ 失败，不算成功 ST
+        pierce = t_low < pierce_floor
         if pierce and (t_close is None or t_close < sc_low):
             continue
 
@@ -1180,7 +1284,9 @@ def _detect_secondary_test_sc(
             best_idx = i
 
     if best_low is None:
-        return _st_sc_empty("SC 后未检测到有效二次测试")
+        if saw_soft_above:
+            return _st_sc_empty("SC 后价格未回测 SC 区（禁止软确认）")
+        return _st_sc_empty("SC 后未检测到有效二次测试（须回测 SC 区且缩量）")
 
     vol_pct = (best_vol / sc_vol * 100) if best_vol and sc_vol else 0
     return {
@@ -2275,32 +2381,10 @@ def _detect_utad(
 
 
 def _cause_effect_targets(tr_ctx: dict | None, bars: list[dict] | None = None) -> dict:
-    """因果律简化执行：用 TR 高度 1:1 投射目标（水平计数近似，非完整 P&F）。
+    """因果律目标：委托 P&F 水平计数（见 wyckoff_pnf / docs/plans/wyckoff-pnf-handoff.md）。
 
-    上升目标 ≈ tr_upper + (tr_upper - tr_lower)
-    下降目标 ≈ tr_lower - (tr_upper - tr_lower)
+    无 TR / 关开关 / 计数失败时回退 TR 高度 1:1，note 写明原因。
     """
-    empty = {
-        "cause_effect_up_target": None,
-        "cause_effect_down_target": None,
-        "cause_effect_range": None,
-        "cause_effect_note": "无有效 TR，无法做因果目标",
-    }
-    if not tr_ctx:
-        return empty
-    try:
-        upper = float(tr_ctx["tr_upper"])
-        lower = float(tr_ctx["tr_lower"])
-    except (TypeError, ValueError, KeyError):
-        return empty
-    if upper <= lower:
-        return empty
-    height = upper - lower
-    return {
-        "cause_effect_up_target": round(upper + height, 2),
-        "cause_effect_down_target": round(lower - height, 2),
-        "cause_effect_range": round(height, 2),
-        "cause_effect_note": (
-            f"TR 高度 {height:.2f} 作 1:1 投射（简化因果/水平计数近似，非点数图）"
-        ),
-    }
+    from trader_shared.wyckoff_pnf import compute_cause_effect_targets
+
+    return compute_cause_effect_targets(tr_ctx, bars)

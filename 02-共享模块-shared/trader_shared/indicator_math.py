@@ -6,9 +6,105 @@
   - calc_expma / calc_expma_series
   - calc_macd_series / calc_atr_series
   - calc_rsi_series（Wilder 平滑 RSI）
+  - aggregate_daily_to_weekly / weekly_bars_look_like_weekly
 """
 
 from __future__ import annotations
+
+
+def weekly_bars_look_like_weekly(
+    bars: list[dict] | None,
+    *,
+    min_median_gap_days: int = 3,
+    min_bars: int = 4,
+) -> bool:
+    """周 K 间距体检：中位数日历间隔过短则视为日线冒充周线。"""
+    if not bars or len(bars) < min_bars:
+        return False
+    from datetime import datetime
+
+    dates: list[datetime] = []
+    for b in bars:
+        raw = str((b or {}).get("date") or (b or {}).get("time") or "")[:10]
+        if len(raw) < 10:
+            continue
+        try:
+            dates.append(datetime.strptime(raw, "%Y-%m-%d"))
+        except ValueError:
+            continue
+    if len(dates) < min_bars:
+        return False
+    dates.sort()
+    gaps = [(b - a).days for a, b in zip(dates, dates[1:]) if (b - a).days > 0]
+    if not gaps:
+        return False
+    gaps_sorted = sorted(gaps)
+    median = gaps_sorted[len(gaps_sorted) // 2]
+    return median >= min_median_gap_days
+
+
+def aggregate_daily_to_weekly(daily_bars: list[dict] | None) -> list[dict]:
+    """日 K → 周 K（ISO 周；date=该周最后一根交易日）。
+
+    用于 mootdx/sina 周线接口返回日线间距时的可靠回退。
+    """
+    if not daily_bars:
+        return []
+    from datetime import datetime
+
+    groups: dict[tuple[int, int], list[dict]] = {}
+    order: list[tuple[int, int]] = []
+    for bar in daily_bars:
+        if not isinstance(bar, dict):
+            continue
+        raw = str(bar.get("date") or bar.get("time") or "")[:10]
+        if len(raw) < 10:
+            continue
+        try:
+            dt = datetime.strptime(raw, "%Y-%m-%d")
+        except ValueError:
+            continue
+        iso = dt.isocalendar()
+        key = (int(iso[0]), int(iso[1]))
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(bar)
+
+    out: list[dict] = []
+    for key in order:
+        chunk = sorted(
+            groups[key],
+            key=lambda b: str(b.get("date") or b.get("time") or "")[:10],
+        )
+        if not chunk:
+            continue
+
+        def _f(v: object, default: float = 0.0) -> float:
+            try:
+                return float(v)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return default
+
+        highs = [_f(b.get("high")) for b in chunk]
+        lows = [_f(b.get("low"), default=1e18) for b in chunk]
+        vol = sum(_f(b.get("volume")) for b in chunk)
+        amt_vals = []
+        for b in chunk:
+            if b.get("amount") is not None:
+                amt_vals.append(_f(b.get("amount")))
+        out.append({
+            "date": str(chunk[-1].get("date") or chunk[-1].get("time") or "")[:10],
+            "open": _f(chunk[0].get("open")),
+            "high": max(highs) if highs else 0.0,
+            "low": min(lows) if lows else 0.0,
+            "close": _f(chunk[-1].get("close")),
+            "volume": vol,
+            "amount": sum(amt_vals) if amt_vals else None,
+            "data_source": "daily_aggregate",
+            "data_status": "full",
+        })
+    return out
 
 
 def calc_expma(closes: list[float], period: int) -> float | None:

@@ -150,12 +150,16 @@ TREND_MA_LOOKBACK: int = 300  # 至少取 300 天数据才能算出可靠的 MA2
 WYCKOFF_MIN_BARS: int = 15
 # SC/AR（及对称 BC/ARE）锚点搜索上限；仅搜索/超时，不定义 TR 周期
 WYCKOFF_CLIMAX_ANCHOR_BARS: int = 15
-# 广义 ST（Secondary Test of SC）：SC 后回测 SC 区，量须明显低于 SC 棒
-WYCKOFF_ST_SC_VOL_RATIO: float = 0.60           # 测试棒量 < SC 量 × 此比例
-WYCKOFF_ST_SC_MAX_BARS: int = 15                # SC 后最多扫描根数（= anchor 上限）
-WYCKOFF_ST_SC_PROXIMITY: float = 0.02          # 测试 low 须在 sc_low 上方此比例内
-WYCKOFF_ST_SC_MAX_PIERCE: float = 0.005         # 允许刺穿 sc_low 的最大比例（快速收回仍有效）
+# 广义 ST（Secondary Test of SC）：SC 后回测 SC 区，量须明显低于 SC 棒。
+# A 股适配（wyckoff-tr-maturity-l0l3-handoff §4）：只放宽检测参数，不砍「必须回测 SC 区」语义；
+# 禁止软确认（价格一直站在 SC 上方 ≠ ST）。可用 env 覆盖同名常量。
+WYCKOFF_ST_SC_VOL_RATIO: float = float(os.environ.get("WYCKOFF_ST_SC_VOL_RATIO", "0.72"))  # 原 0.60→0.72（仍须明显弱于 SC；建议带 0.70–0.75）
+WYCKOFF_ST_SC_MAX_BARS: int = int(os.environ.get("WYCKOFF_ST_SC_MAX_BARS", "22"))          # 原 15→22（慢回测窗；建议 20–25）
+WYCKOFF_ST_SC_PROXIMITY: float = float(os.environ.get("WYCKOFF_ST_SC_PROXIMITY", "0.03"))  # 原 0.02→0.03；low 须进入 sc_low 上方此比例内
+WYCKOFF_ST_SC_MAX_PIERCE: float = float(os.environ.get("WYCKOFF_ST_SC_MAX_PIERCE", "0.012"))  # 原 0.005→0.012；刺穿须收回（建议 0.01–0.015）
 WYCKOFF_PHASE_A_SEED_MIN_QUALITY: float = 0.40  # established 种子箱最低 tr_quality（避免永久 gated）
+# L3 量度宽度门槛（成熟度合同 §3）：L2 且 TR 窗根数 ≥ 此值（或 P&F 水平列够宽）才允许量度
+WYCKOFF_MEASURE_MIN_BARS: int = int(os.environ.get("WYCKOFF_MEASURE_MIN_BARS", "8"))
 
 # BC (Buying Climax) 购买高潮相关参数
 WYCKOFF_BC_VOL_RATIO_THRESHOLD: float = 1.8     # BC 购买高潮量比阈值（原 2.0，方案 B 调至 1.8）
@@ -274,6 +278,26 @@ WYCKOFF_TR_QUALITY_NEUTRAL: float = 0.5         # tr_quality 中性点：高于�
 WYCKOFF_SCORE_TR_QUALITY_GAIN: int = 20         # TR 质量对 raw 分的最大调整幅度（quality=1→+20，quality=0→-20）
 # 阶段机门控：低于此质量的 TR（或无 TR）上事件可亮灯，但不得抬升明确积累/派发/Markup/Markdown
 WYCKOFF_PHASE_MIN_TR_QUALITY: float = 0.35
+
+# ---- Wyckoff Point & Figure（因果律目标价）----
+# 规格：docs/plans/wyckoff-pnf-handoff.md；主路径水平计数，高度 1:1 仅 fallback。
+# WYCKOFF_PNF_ENABLED=0 强制旧 TR 高度 1:1，便于对照。
+WYCKOFF_PNF_ENABLED: bool = os.environ.get("WYCKOFF_PNF_ENABLED", "true").lower() in (
+    "true", "1", "yes",
+)
+WYCKOFF_PNF_BOX_PCT: float = float(os.environ.get("WYCKOFF_PNF_BOX_PCT", "0.01"))
+WYCKOFF_PNF_BOX_MIN: float = float(os.environ.get("WYCKOFF_PNF_BOX_MIN", "0.01"))
+WYCKOFF_PNF_REVERSAL: int = int(os.environ.get("WYCKOFF_PNF_REVERSAL", "3"))
+WYCKOFF_PNF_MIN_COLUMNS: int = int(os.environ.get("WYCKOFF_PNF_MIN_COLUMNS", "3"))
+WYCKOFF_PNF_VERTICAL_ENABLED: bool = os.environ.get(
+    "WYCKOFF_PNF_VERTICAL_ENABLED", "true"
+).lower() in ("true", "1", "yes")
+WYCKOFF_PNF_INCLUDE_REVERSAL: bool = os.environ.get(
+    "WYCKOFF_PNF_INCLUDE_REVERSAL", "false"
+).lower() in ("true", "1", "yes")
+WYCKOFF_PNF_MIN_TR_QUALITY: float = float(
+    os.environ.get("WYCKOFF_PNF_MIN_TR_QUALITY", "0.0")
+)
 
 # ---- P3 Theory Adjustment ----
 # THEORY_ADJUST_LOG_ONLY=true 时理论微调只记录日志不实际生效，用于首次上线观察
@@ -418,6 +442,7 @@ __all__ = [
     "WYCKOFF_MIN_BARS", "WYCKOFF_CLIMAX_ANCHOR_BARS",
     "WYCKOFF_ST_SC_VOL_RATIO", "WYCKOFF_ST_SC_MAX_BARS", "WYCKOFF_ST_SC_PROXIMITY",
     "WYCKOFF_ST_SC_MAX_PIERCE", "WYCKOFF_PHASE_A_SEED_MIN_QUALITY",
+    "WYCKOFF_MEASURE_MIN_BARS",
     "WYCKOFF_SPRING_SUPPORT_LOOKBACK",
     "WYCKOFF_SPRING_RECLAIM_RATIO", "WYCKOFF_SPRING_ATR_MULTIPLE", "WYCKOFF_SPRING_BULLISH_VOL_RATIO",
     "WYCKOFF_DIVERGENCE_BARS",
@@ -449,6 +474,10 @@ __all__ = [
     # ① TR 质量接打分
     "WYCKOFF_TR_QUALITY_NEUTRAL", "WYCKOFF_SCORE_TR_QUALITY_GAIN",
     "WYCKOFF_PHASE_MIN_TR_QUALITY",
+    "WYCKOFF_PNF_ENABLED", "WYCKOFF_PNF_BOX_PCT", "WYCKOFF_PNF_BOX_MIN",
+    "WYCKOFF_PNF_REVERSAL", "WYCKOFF_PNF_MIN_COLUMNS",
+    "WYCKOFF_PNF_VERTICAL_ENABLED", "WYCKOFF_PNF_INCLUDE_REVERSAL",
+    "WYCKOFF_PNF_MIN_TR_QUALITY",
     "WYCKOFF_COMPRESSION_LOOKBACK", "WYCKOFF_COMPRESSION_ATR_QUANTILE",
     "WYCKOFF_COMPRESSION_VOL_RATIO", "WYCKOFF_COMPRESSION_VOL_REF_WINDOW",
     "WYCKOFF_TREND_PB_LOOKBACK", "WYCKOFF_TREND_PB_MIN_PULLBACK",

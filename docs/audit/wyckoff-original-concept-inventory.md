@@ -4,7 +4,7 @@
 > 
 > 标注：✅ 已实现  ⚠️ 部分实现/有差距  ❌ 未实现
 >
-> 审计日期：2026-07-16（同日二次更新：互斥打分 + 原典缺口补齐）
+> 审计日期：2026-07-16（同日二次更新：互斥打分 + 原典缺口补齐；2026-08-01：P&F 水平计数落地；同日：箱体/量度 L0–L3 成熟度门禁定稿）
 
 ---
 
@@ -13,7 +13,7 @@
 | 概念 | 状态 | 代码落点 |
 |------|------|---------|
 | 供求律 (Supply & Demand) | ✅ | SC/BC/Spring/Upthrust/量比检测 |
-| 因果律 (Cause & Effect) | ⚠️ | TR 高度 1:1 投射 `cause_effect_*`（非完整 P&F 点数图） |
+| 因果律 (Cause & Effect) | ✅ | P&F 水平计数 + **L3 展示门禁**（`tr_maturity`）；L1/分位禁止量度。计数：`wyckoff-pnf-handoff.md`；门禁：`wyckoff-tr-maturity-l0l3-handoff.md` |
 | 努力结果律 (Effort vs Result) | ✅ | `_detect_effort_vs_result` (VSA) |
 
 ---
@@ -36,7 +36,7 @@
 | **PS (Preliminary Support 初步止跌)** | ✅ | `_detect_preliminary_support`；与 SC 互斥让位 |
 | SC (Selling Climax 卖力高潮) | ✅ | |
 | AR (Automatic Rally 自动反弹) | ⚠️ | P1 已落地：`_find_sc_anchor` SSOT + `ar_high` 边界价 + `ar_volume_soft`（弱量仍亮）。**余缺口**：AR 后窗仍 ≤7 根（`anchor//2`），延迟 AR 可能 forming；原典「弱于 SC」量能规则 P2 再 soft 化 |
-| ST (Secondary Test 二次测试) | ✅ | Phase A 广义 ST（测 SC/AR）→ 独立 `_detect_secondary_test_sc` + `secondary_test_sc_*`（§4.4）。字段 `st_*` 仍保留；语义上现为 Spring 后确认。**禁止**与 Spring Test 混名/混检 |
+| ST (Secondary Test 二次测试) | ✅ | 广义 ST + L2/L3 门禁；**禁止软确认**；A 股参数放宽（量比/窗/邻近/刺穿）。`st_*`=Spring 确认，与 `secondary_test_sc_*` 分离。规格：`wyckoff-tr-maturity-l0l3-handoff.md` |
 | Spring (弹簧/震仓) | ✅ | |
 | Test of Spring (Spring 后确认测试) | ✅ | `spring_test_*` 与 `st_*` 双写（`_spring_test_fields_from_st`）；阶段机 C→D 认 Test |
 | SOS (Sign of Strength 强势信号) | ✅ | |
@@ -62,28 +62,31 @@
 
 ## 五、交易区间（TR）分析
 
-> TR 识别层已落地（✅）。阶段机读 `WYCKOFF_PHASE_MIN_TR_QUALITY`（默认 0.35）：低质量/无 TR 时事件可亮、阶段不抬升（`phase_tr_gated`）。**P1**：`phase_a_range`（`sc_low`/`ar_high`/`forming`|`established`）已透出；**P2 已落地**：分位 TR 与 established 种子箱挂门控（forming / 无 established 叠加 P0-B）+ 广义 ST refine 下沿。更大缺口见 §七 RS、§六 P&F。
+> TR 识别层已落地。阶段机读 `WYCKOFF_PHASE_MIN_TR_QUALITY`；P1/P2 种子箱门控见 `wyckoff-phase-a-range-handoff.md`。  
+> **2026-08-01 修正**：`established`（仅 SC+AR）≠ 成熟箱体 / ≠ 可量度。产品分层 **L0–L3**（`tr_maturity`）：无成功 ST 停 L1（雏形）；真 ST → L2 可写「箱体」；L2+宽度 → L3 可量度。分位 TR alone 禁止量度。规格：`docs/plans/wyckoff-tr-maturity-l0l3-handoff.md`。
 
 | 概念 | 状态 | 说明 |
 |------|------|------|
 | TR 识别（成交密集区判定） | ✅ | `_detect_trading_range` 宽度/振幅/质量 |
-| TR 上下沿计算 | ⚠️ | 分位带 tr_upper/tr_lower（刺穿毛刺过滤）与 `phase_a_range` **并存**；established 前分位 TR 不得冒充原典 TR 种子抬阶段；established 时种子 SC/AR 优先 overlay |
+| TR 上下沿计算 | ⚠️ | 分位与 `phase_a_range` 并存；**成熟箱**须 L2（SC+AR+ST）；L1 仅雏形价 |
 | TR 量能基线 | ✅ | `tr_baseline_volume` |
 | TR 质量门控阶段 | ✅ | `_detect_phase` 读 `MIN_TR_QUALITY`；透出 `phase_tr_gated` |
-| TR 种子箱门控（Phase A） | ✅ | `forming` / 无 `established` 叠加 P0-B；禁止借分位 TR 抬 B/C/D；established 时种子边界 overlay。规格：`wyckoff-phase-a-range-handoff.md` §4.3 |
-| TR 持续时间（因果律的基础） | ⚠️ | `tr_width` 透出；目标用高度 1:1 投射，非 P&F 格数 |
+| TR 种子箱门控（Phase A） | ✅ | P2 阶段门控 + L0–L3 展示/量度门禁（SC+AR 无 ST → 雏形、无量度） |
+| TR 成熟度 L0–L3 | ✅ | `tr_maturity` / `measure_allowed` / `box_display_mode`；规格 `wyckoff-tr-maturity-l0l3-handoff.md` |
+| TR 持续时间（因果律的基础） | ✅ | `tr_width` + P&F 列数；量度须 L3（`WYCKOFF_MEASURE_MIN_BARS`） |
 
 ---
 
 ## 六、点数图（Point & Figure）
 
-> 完整 P&F 仍未做；用 TR 高度 1:1 投射作**工程近似**。
+> **计数已落地**（2026-08-01）；**展示授权**须 L3（同日定稿）。面板仅在 `measure_allowed` 时贴量度行；1:1 fallback 不得冒充「P&F」。规格：计数 `wyckoff-pnf-handoff.md`；门禁 `wyckoff-tr-maturity-l0l3-handoff.md`。
 
 | 概念 | 状态 | 说明 |
 |------|------|------|
-| P&F 点数图绘制 | ❌ | 未实现 |
-| 垂直计数 (Vertical Count) | ⚠️ | 近似：`cause_effect_up/down_target` = 边界 ± TR 高度 |
-| 水平计数 (Horizontal Count) | ⚠️ | 同上（用高度而非横盘格数×box） |
+| P&F 点数图绘制 | ✅ | `wyckoff_pnf.build_pnf_columns`（High-Low + 默认 3 格转向） |
+| 垂直计数 (Vertical Count) | ✅ | 水平列不足时的降级：`pnf_method=vertical` |
+| 水平计数 (Horizontal Count) | ✅ | 主路径：`pnf_method=horizontal` |
+| 量度展示门禁 | ✅ | 仅 `tr_maturity=L3`；禁止 L1/分位箱出目标；1:1 勿冒充 P&F |
 
 ---
 
@@ -122,7 +125,7 @@
 | **P0** | TR 识别 + 边界计算 | 所有事件检测的基石（P0-3） |
 | **P1** | Markup / Markdown 阶段标签 | 五阶段循环不完整 |
 | **P1** | BU (Back Up) | SOS 确认后缺失最后一个买点信号 |
-| **P2** | P&F 计数（目标价） | 因果律执行工具，影响操作目标位 |
+| **P2（已落地）** | P&F 计数（目标价） | ✅ 水平计数主路径 + 垂直/1:1 降级；见 `docs/plans/wyckoff-pnf-handoff.md` |
 | **P2** | RS 相对强弱 vs 大盘 | 影响 CM 意图判断 |
 | **P3** | UTAD / PS / PSY / Stopping Volume | 增强完整度 |
 | **P3** | CM 行为模式显式建模 | 设计层增强 |

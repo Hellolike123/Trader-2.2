@@ -408,6 +408,17 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if not str(_wyk_line).startswith("威科夫"):
         _wyk_line = f"威科夫：{_wyk_line}"
     lines.append(f"  {_wyk_line}")
+    # 中线量度目标：周线 P&F（与短线日线分开算）
+    try:
+        from trader_shared.wyckoff_view import format_cause_effect_display
+        _src_m = r.get("wyckoff_midline")
+        if isinstance(_src_m, dict) and isinstance(_src_m.get("wyckoff"), dict):
+            _src_m = _src_m["wyckoff"]
+        _ce_mid = format_cause_effect_display(_src_m if isinstance(_src_m, dict) else {})
+        if _ce_mid:
+            lines.append(f"  {_ce_mid}")
+    except Exception:
+        pass
 
     try:
         from trader_shared.chan_core import format_chanlun_theory_line
@@ -703,6 +714,14 @@ def render_short_midline(r: dict[str, Any]) -> str:
         lines.append(f"  威科夫：{_phase_body or '数据不足 · 仅对照'}")
     except Exception:
         lines.append("  威科夫：数据不足 · 仅对照")
+    # 短线量度目标：日线 P&F（与中线周线分开算）
+    try:
+        from trader_shared.wyckoff_view import format_cause_effect_display
+        _ce_d = format_cause_effect_display(_wyk_daily_u)
+        if _ce_d:
+            lines.append(f"  {_ce_d}")
+    except Exception:
+        pass
 
     # 2) 事件：日线威科夫事件灯（仅有真实事件时输出；暂无事件省略）
     try:

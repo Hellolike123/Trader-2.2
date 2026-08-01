@@ -111,8 +111,9 @@
 - 开口：≥ `WYCKOFF_MIN_BARS=15` 根周 K；不足 → `timeframe=insufficient` →「周线不足 · 不参与定论」
 - 阶段叙事：约近 **12 根周 K**（`WYCKOFF_PHASE_LOOKBACK=60` × 周线缩比 0.2）
 - 读法：优先 `phase` + 事件链（如「还差 SOS」）+ `WyckoffStateView`；**不以**单事件亮灯或打分均值当状态
-- **Phase A 区间边界**（原典）：TR 种子由 **SC 低点 + AR 高点**（理想再加 ST 测 SC）钉定；`WYCKOFF_CLIMAX_ANCHOR_BARS` 等固定窗仅作 SC/AR **搜索/超时**，不定义 TR 周期。`forming`=有 SC；`established`=SC+AR（无 AR 不得假 established）。规格：`docs/plans/wyckoff-phase-a-range-handoff.md`
-- **箱体人话（中短线共用）**：`established` → `箱体 {lo:.2f}-{hi:.2f}`；`forming` → `箱体未成形 · 下沿 xx（上沿未出）`（无下沿则 `箱体未成形 · 上沿未出`）；旧词「区间未钉」仅兼容匹配。实现：`_phase_a_box_phrase`
+- **Phase A 区间边界**（原典）：TR 种子由 **SC/ST 低点 + AR 高点**钉定；`WYCKOFF_CLIMAX_ANCHOR_BARS` 仅作搜索/超时。`forming`=有 SC；`established`=SC+AR（检测态，**≠**成熟箱体）。规格：`docs/plans/wyckoff-phase-a-range-handoff.md`
+- **箱体/量度成熟度 L0–L3**（展示合同）：L0 无 SC；L1=SC 或 SC+AR **无成功 ST** → 只写**雏形**、**禁止**「箱体」与量度；L2=真 ST（回测 SC 区+缩量，**禁止软确认**）→ 可写 `箱体 lo-hi`；L3=L2+宽度 → 可量度。仅分位 TR 不得量度。规格：`docs/plans/wyckoff-tr-maturity-l0l3-handoff.md`
+- **箱体人话（中短线共用）**：L2/L3 → `箱体 {lo:.2f}-{hi:.2f}`；L1 → `雏形 …（待 ST）` / 箱体未成形；旧词「区间未钉」仅兼容。实现：`_phase_a_box_phrase` + `tr_maturity`
 - **中线面板结构**：`威科夫：阶段 · [箱体] · 事件 · 含义`（`format_wyckoff_midline_light`；有箱体则插入，无则跳过箱体槽）
 - **日线威科夫（短线展示双轨）**：
   - 短线 `威科夫：` ← 日线跑**同一套**种子箱/事件机，**只给人看**（与中线点名同构；**禁止**面板写「日线阶段：」；无箱体诚实写「无 / 箱体未成形 / 暂定不出」；有箱同写 `箱体 lo-hi`）
@@ -136,7 +137,7 @@
 2. Spring 后确认测试与 ST 语义分离 → **已落地**（`spring_test_*` 双写 + 阶段 C/D；规格见 `docs/plans/wyckoff-phase-accuracy-handoff-2026-07-31.md` §2）
 3. 低质量 TR 不进阶段机 → **已落地**（`WYCKOFF_PHASE_MIN_TR_QUALITY` + `phase_tr_gated`；同上 handoff §3）
 4. Phase A 边界 SC/AR 钉 TR 种子 → **P1 已落地**（`phase_a_range`/`forming`/`established`）；**P2 已落地**（种子箱门控 + 广义 ST → `docs/plans/wyckoff-phase-a-range-handoff.md` §4）
-5. 完整 P&F 非优先（目标价近似已有 TR 1:1 投射）
+5. 完整 P&F 因果目标 → **计数已落地**；**展示须 L3**（真 ST+宽度；L1/分位禁止量度；1:1 勿冒充 P&F）。短/中分轨；周线禁止日线箱体冒充。规格：`wyckoff-pnf-handoff.md` + `wyckoff-tr-maturity-l0l3-handoff.md`
 
 原典落地盘点：`docs/audit/wyckoff-original-concept-inventory.md`。
 
@@ -307,6 +308,7 @@ Agent 展示层仍应：**不给买入建议**；文案对齐 fusion action / �
   阶段：{major_stage}
   定论：…                       ← 中线合成；禁止塞阶段词冒充看法
   威科夫：{wyckoff_midline}     ← 中线状态岗：仅周线；结构「阶段 · [箱体] · 事件 · 含义」（箱体 lo-hi / 箱体未成形）
+  量度目标：上 x｜下 y（P&F，非出手）  ← 仅 tr_maturity=L3；无数/未达 L3 则省略
   缠论：{chanlun_midline}       ← 结构副读；周不足可 daily_fallback+「（日线）」；不定阶段
   位置：…
   关键价（中线）
@@ -315,6 +317,7 @@ Agent 展示层仍应：**不给买入建议**；文案对齐 fusion action / �
 ⚡ 短线
   缠论：…（日线缠论扳机）
   威科夫：…（日线只对照；标签即威科夫，禁止「日线阶段：」；箱体 lo-hi / 箱体未成形 / 无清晰区间；不进背景岗）
+  量度目标：上 x｜下 y（P&F，非出手）  ← 仅 L3；与中线分轨；未达则省略
   事件：…（日线威科夫事件灯；无事件可省略）
   动能 / 资金 / 共振 / 新开 / 动作
   关键价（短线）

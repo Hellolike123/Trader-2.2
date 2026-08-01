@@ -1827,14 +1827,23 @@ class TestPhaseARangeP2:
         )
         assert no_seed["phase_tr_gate_reason"] == "no_established_seed"
 
-    def test_p2_r6_cause_effect_uses_seed_width(self):
-        """established + ST：tr_lower≤sc_low（refine），cause_effect_range = 种子宽。"""
+    def test_p2_r6_cause_effect_uses_seed_width(self, monkeypatch):
+        """L3（ST+AR+足够窗宽）：种子 overlay 后因果目标从种子上下沿投射（关 P&F = 高度 1:1）。
+
+        短窗仅 L2 时量度会被 maturity 门禁清空；此处补齐 Phase B 宽度至 ≥ MEASURE_MIN_BARS。
+        """
+        monkeypatch.setattr("trader_shared.wyckoff_pnf.WYCKOFF_PNF_ENABLED", False)
         bars = self._nanwang_with_st_bars()
+        # SC..末根须 ≥ WYCKOFF_MEASURE_MIN_BARS（默认 8）；fixture 本身约 6 根
+        for _ in range(4):
+            bars.append(_make_bar(84.0, 84.5, 83.6, 84.1, 110))
         while len(bars) < 25:
             bars.insert(0, _make_bar(90.0, 91.0, 89.0, 90.0, 100))
         result = wyckoff_analysis(bars, use_persisted_phase=False)
         assert result["phase_a_status"] == "established"
         assert result["secondary_test_sc_signal"] is True
+        assert result.get("tr_maturity") == "L3"
+        assert result.get("measure_allowed") is True
         sc_low = float(result["sc_low"])
         ar_high = float(result["ar_high"])
         tr_lo = float(result["tr_lower"])
@@ -1846,7 +1855,8 @@ class TestPhaseARangeP2:
         assert ce_range is not None
         expected = round(ar_high - tr_lo, 2)
         assert abs(float(ce_range) - expected) < 0.02
-        # 因果目标基于种子上下沿 1:1
+        # 关 P&F：因果目标基于种子上下沿 1:1
+        assert result.get("pnf_method") == "height_1to1_fallback"
         assert abs(float(result["cause_effect_up_target"]) - (ar_high + expected)) < 0.05
         assert abs(float(result["cause_effect_down_target"]) - (tr_lo - expected)) < 0.05
 
