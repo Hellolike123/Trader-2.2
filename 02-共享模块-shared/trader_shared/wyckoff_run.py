@@ -1,4 +1,8 @@
-"""威科夫 Skill 引擎：取数 + analysis + view；渲染见 wyckoff_render。"""
+"""威科夫 Skill 引擎：取数 + analysis + view；渲染见 wyckoff_render。
+
+法源：docs/plans/wyckoff-skill-deep-card-handoff.md
+默认详析卡；--brief 走旧短卡。
+"""
 from __future__ import annotations
 
 import argparse
@@ -12,7 +16,13 @@ from trader_shared.wyckoff_chain import (
     format_wyckoff_chain_plain,
     wyckoff_chain_rank,
 )
-from trader_shared.wyckoff_render import render_wyckoff_card, render_wyckoff_rank
+from trader_shared.wyckoff_render import (
+    build_light_snapshot_entry,
+    format_light_change,
+    render_wyckoff_card,
+    render_wyckoff_detail,
+    render_wyckoff_rank,
+)
 
 
 def _pool_path() -> Path:
@@ -156,14 +166,69 @@ def _card_ok(plan: dict[str, Any]) -> bool:
     return bool(plan.get("data_ok")) and not plan.get("error")
 
 
-def run_card(target: str, *, output: str = "markdown") -> tuple[str, bool]:
+def _snapshot_key(plan: dict[str, Any]) -> str:
+    return str(plan.get("code") or plan.get("target") or "").strip()
+
+
+def attach_change_and_persist_snapshot(plan: dict[str, Any]) -> dict[str, Any]:
+    """对比灯快照 → 写入 plan['change_line'] → 写回该票快照。
+
+    对比在更新前；失败不阻断渲染（降级首次记录）。
+    """
+    from trader_shared.trader_paths import load_json, rmw_json
+
+    key = _snapshot_key(plan)
+    curr = build_light_snapshot_entry(plan)
+    prev: dict[str, Any] | None = None
+    if key:
+        try:
+            store = load_json("wyckoff_light_snapshot")
+            entry = store.get(key)
+            if isinstance(entry, dict):
+                prev = entry
+        except Exception:
+            prev = None
+
+    plan = dict(plan)
+    plan["change_line"] = format_light_change(prev, curr)
+    plan["light_snapshot"] = curr
+
+    if key:
+
+        def _mutate(data: dict[str, Any]) -> dict[str, Any]:
+            out = dict(data) if isinstance(data, dict) else {}
+            out[key] = curr
+            return out
+
+        try:
+            rmw_json("wyckoff_light_snapshot", _mutate)
+        except Exception:
+            pass
+    return plan
+
+
+def run_card(
+    target: str,
+    *,
+    output: str = "markdown",
+    brief: bool = False,
+) -> tuple[str, bool]:
     plan = build_wyckoff_plan(target)
     if output == "json":
         # 去掉过大 raw，便于调试
         slim = {k: v for k, v in plan.items() if k not in ("daily_raw", "weekly_raw")}
         text = json.dumps(slim, ensure_ascii=False, indent=2, default=str)
-    else:
+        return text, _card_ok(plan)
+
+    if brief:
         text = render_wyckoff_card(plan)
+    else:
+        if plan.get("data_ok") and not plan.get("error"):
+            plan = attach_change_and_persist_snapshot(plan)
+        else:
+            plan = dict(plan)
+            plan.setdefault("change_line", "首次记录，暂无对比")
+        text = render_wyckoff_detail(plan)
     return text, _card_ok(plan)
 
 
@@ -187,6 +252,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="rank = 池内吸筹链排序（读 pool.json / TRADER_ROOT）",
     )
     parser.add_argument("--target", help="A-share name or code for single-stock card")
+    parser.add_argument(
+        "--brief",
+        action="store_true",
+        help="输出旧版短卡（render_wyckoff_card）；默认详析卡",
+    )
     parser.add_argument("--output", choices=["markdown", "json"], default="markdown")
     return parser.parse_args(argv)
 
@@ -199,7 +269,11 @@ def main(argv: list[str] | None = None) -> int:
             print(text)
             return 0
         if args.target:
-            text, ok = run_card(args.target, output=args.output)
+            text, ok = run_card(
+                args.target,
+                output=args.output,
+                brief=bool(getattr(args, "brief", False)),
+            )
             print(text)
             return 0 if ok else 1
         print("需要 --target <NAME> 或子命令 rank", file=sys.stderr)

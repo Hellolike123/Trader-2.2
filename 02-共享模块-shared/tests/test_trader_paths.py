@@ -54,6 +54,7 @@ def test_keys_resolve_under_trader_root(tmp_path: Path, monkeypatch):
     assert path("last_target") == root / "last_target.txt"
     assert path("signals") == root / "signals.jsonl"
     assert path("signal_results") == root / "signal_results.jsonl"
+    assert path("wyckoff_light_snapshot") == root / "wyckoff_light_snapshot.json"
 
 
 def test_env_override_buy_point_lifecycle(tmp_path: Path, monkeypatch):
