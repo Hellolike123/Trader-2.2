@@ -399,8 +399,29 @@ def load_recent(
 
 # ═══════ 新信号追踪逻辑 ═══════
 
-RESULT_PATH = Path.home() / ".trader" / "signal_results.jsonl"
-STORE_PATH = Path.home() / ".trader" / "signals.jsonl"
+class _TraderKeyedPath(os.PathLike):
+    """Resolve named trader_paths key at access time; tests may replace with a Path."""
+
+    def __init__(self, key: str):
+        self._key = key
+
+    def _resolve(self) -> Path:
+        from trader_shared.trader_paths import path as trader_path
+
+        return trader_path(self._key)
+
+    def __getattr__(self, name):
+        return getattr(self._resolve(), name)
+
+    def __str__(self):
+        return str(self._resolve())
+
+    def __fspath__(self):
+        return str(self._resolve())
+
+
+RESULT_PATH = _TraderKeyedPath("signal_results")
+STORE_PATH = _TraderKeyedPath("signals")
 
 
 # ── 信号类型归一化：中文旧名 → v1 英文标准名 ──

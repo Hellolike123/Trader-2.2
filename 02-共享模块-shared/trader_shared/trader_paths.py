@@ -18,6 +18,7 @@ PATH_KEYS (filenames under trader_root unless noted):
   last_plan                → last_plan.json
   pool_archive             → pool_archive.json
   signals                  → signals.jsonl
+  signal_results           → signal_results.jsonl   (tracker settlement)
   chip_history             → chip_history.json
   calibrated_params        → calibrated_params.json
   trailing_stop_watermark  → trailing_stop_watermark.json
@@ -47,6 +48,7 @@ _FILE_BY_KEY: dict[str, str] = {
     "last_plan": "last_plan.json",
     "pool_archive": "pool_archive.json",
     "signals": "signals.jsonl",
+    "signal_results": "signal_results.jsonl",
     "chip_history": "chip_history.json",
     "calibrated_params": "calibrated_params.json",
     "trailing_stop_watermark": "trailing_stop_watermark.json",
