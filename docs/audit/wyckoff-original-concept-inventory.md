@@ -63,7 +63,7 @@
 ## 五、交易区间（TR）分析
 
 > TR 识别层已落地。阶段机读 `WYCKOFF_PHASE_MIN_TR_QUALITY`；P1/P2 种子箱门控见 `wyckoff-phase-a-range-handoff.md`。  
-> **2026-08-01 修正**：`established`（仅 SC+AR）≠ 成熟箱体 / ≠ 可量度。产品分层 **L0–L3**（`tr_maturity`）：无成功 ST 停 L1（雏形）；真 ST → L2 可写「箱体」；L2+宽度 → L3 可量度。分位 TR alone 禁止量度。规格：`docs/plans/wyckoff-tr-maturity-l0l3-handoff.md`。
+> **2026-08-01 修正**：`established`（仅 SC+AR）≠ 成熟箱体 / ≠ 可量度。产品分层 **L0–L3**（`tr_maturity`）：无成功 ST 停 L1（雏形）；真 ST → L2 可写「箱体」；L2+宽度 → L3 可量度。分位 TR alone 禁止量度。规格：`docs/plans/wyckoff-tr-maturity-l0l3-handoff.md`。RS 见 §七（已落地）。
 
 | 概念 | 状态 | 说明 |
 |------|------|------|
@@ -94,7 +94,7 @@
 
 | 概念 | 状态 | 说明 |
 |------|------|------|
-| 个股 vs 大盘价量对比 | ❌ | 需大盘序列注入 `wyckoff_analysis`；尚未接数据管线 |
+| 个股 vs 对照指数价量对比（RS） | ✅ | 周线阶段**置信修正**（非新阶段）+ **选股池同道排序/弱 RS 慎跟**；对照指数 = `resolve_board_index`；`WYCKOFF_RS_ENABLED`；规格 `docs/plans/wyckoff-rs-phase-handoff.md` |
 
 ---
 
@@ -125,7 +125,7 @@
 | **P0** | TR 识别 + 边界计算 | 所有事件检测的基石（P0-3） |
 | **P1** | Markup / Markdown 阶段标签 | 五阶段循环不完整 |
 | **P1** | BU (Back Up) | SOS 确认后缺失最后一个买点信号 |
-| **P2（已落地）** | P&F 计数（目标价） | ✅ 水平计数主路径 + 垂直/1:1 降级；见 `docs/plans/wyckoff-pnf-handoff.md` |
-| **P2** | RS 相对强弱 vs 大盘 | 影响 CM 意图判断 |
+| **P2（已落地）** | P&F 计数（目标价） | ✅ 水平计数主路径 + L3 展示门禁；见 `docs/plans/wyckoff-pnf-handoff.md` |
+| **P2（已落地）** | RS 相对强弱 vs 对照指数 | ✅ 已落地（见 §七）；阶段置信 + 池排序/慎跟 |
 | **P3** | UTAD / PS / PSY / Stopping Volume | 增强完整度 |
 | **P3** | CM 行为模式显式建模 | 设计层增强 |

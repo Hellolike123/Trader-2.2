@@ -38,7 +38,7 @@
 | Classic 映射（对照） | `fusion_classic_mappers.py`（动量已委托 cards） | 在 cards 路径复制一份映射 |
 | T0 盯盘缓存 | `t0_monitor._cached_build_plan`（`T0_PLAN_TTL_SEC`） | 每 tick 无脑全量 `build_plan` |
 | 选股池逻辑 | `01-功能包-packages/trader/scripts/pool_cmds/*` | 把逻辑写回 `final_pool.py` |
-| 选股池分道 | `classify.py` 分道 + `wyckoff_chain` 同道链（`威：SC→…还差SOS`）+ `sort_items_unified`（lane→共振→链→可碰→分）；入池软门槛 | 用分数/「执行」/事件n/5当注意力王；S/A/B/C 替换分道 |
+| 选股池分道 | `classify.py` 分道 + `wyckoff_chain` 同道链（`威：SC→…还差SOS`）+ 周线 RS（同道排序；弱 RS→等齐慎跟）+ `sort_items_unified`（lane→共振→链→RS→可碰→分）；入池软门槛 | 用分数/「执行」/事件n/5当注意力王；S/A/B/C 替换分道；RS 抬 phase |
 | 威科夫 Skill | `wyckoff_run.py` / `wyckoff_render.py` / `wyckoff_chain.py`；包入口 `wyckoff/scripts/final_wyckoff.py` | 在 skill 包复制引擎；用链排序顶替池分道 / 出手指令 |
 | 仓位轮动共振 | `portfolio_core.enrich_portfolio_resonance` | 在 portfolio 里重跑 build_report / 加厚 fusion |
 | T0 vs 岗位共振 | T0 `plan.resonance`=`t0_structure_score_v1`；报告共振才是 `pullback_probe` | 在 T0 调 `attach_resonance` |

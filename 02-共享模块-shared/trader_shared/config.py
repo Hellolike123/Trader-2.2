@@ -299,6 +299,17 @@ WYCKOFF_PNF_MIN_TR_QUALITY: float = float(
     os.environ.get("WYCKOFF_PNF_MIN_TR_QUALITY", "0.0")
 )
 
+# ---- Wyckoff 周线 RS（相对板块指数强弱，仅修正置信/谨慎叙事） ----
+WYCKOFF_RS_ENABLED: bool = os.environ.get("WYCKOFF_RS_ENABLED", "true").lower() in ("true", "1", "yes")
+WYCKOFF_RS_LOOKBACK_WEEKS: int = 6
+WYCKOFF_RS_SCALE: float = 0.08          # 个股-指数收益差达 8% → rs_score 饱和 ±1
+WYCKOFF_RS_STRONG_THRESHOLD: float = 0.25  # rs_score ≥ 此值 → strong
+WYCKOFF_RS_WEAK_THRESHOLD: float = -0.25   # rs_score ≤ 此值 → weak
+WYCKOFF_RS_CONF_DELTA_MAX: float = 0.06    # 强 RS 对 phase_confidence_delta 最大加成
+WYCKOFF_RS_CONF_DELTA_MIN: float = -0.06   # 弱 RS 最大减分
+WYCKOFF_RS_SPRING_WEAK_EXTRA: float = 0.04   # 弱 RS + Spring 额外谨慎减分
+WYCKOFF_RS_PREMATURE_STRONG_CAP: float = 0.02  # spring_premature 时强 RS 置信上调封顶
+
 # ---- P3 Theory Adjustment ----
 # THEORY_ADJUST_LOG_ONLY=true 时理论微调只记录日志不实际生效，用于首次上线观察
 THEORY_ADJUST_LOG_ONLY: bool = os.environ.get("THEORY_ADJUST_LOG_ONLY", "false").lower() in ("true", "1", "yes")
@@ -478,6 +489,10 @@ __all__ = [
     "WYCKOFF_PNF_REVERSAL", "WYCKOFF_PNF_MIN_COLUMNS",
     "WYCKOFF_PNF_VERTICAL_ENABLED", "WYCKOFF_PNF_INCLUDE_REVERSAL",
     "WYCKOFF_PNF_MIN_TR_QUALITY",
+    "WYCKOFF_RS_ENABLED", "WYCKOFF_RS_LOOKBACK_WEEKS", "WYCKOFF_RS_SCALE",
+    "WYCKOFF_RS_STRONG_THRESHOLD", "WYCKOFF_RS_WEAK_THRESHOLD",
+    "WYCKOFF_RS_CONF_DELTA_MAX", "WYCKOFF_RS_CONF_DELTA_MIN",
+    "WYCKOFF_RS_SPRING_WEAK_EXTRA", "WYCKOFF_RS_PREMATURE_STRONG_CAP",
     "WYCKOFF_COMPRESSION_LOOKBACK", "WYCKOFF_COMPRESSION_ATR_QUANTILE",
     "WYCKOFF_COMPRESSION_VOL_RATIO", "WYCKOFF_COMPRESSION_VOL_REF_WINDOW",
     "WYCKOFF_TREND_PB_LOOKBACK", "WYCKOFF_TREND_PB_MIN_PULLBACK",

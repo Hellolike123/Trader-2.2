@@ -352,12 +352,31 @@ def classify_lane(report: dict[str, Any]) -> dict[str, Any]:
         )
 
     # 4) 可盯：必须买点有效 +（真缠信号或仍在附近）
+    # 弱 RS（周线相对强弱）：原典选股过滤器 — 不否决结构，但降为等齐「慎跟」
     if bp is True and (chan_sig or near):
         reasons.append("买点有效")
         if resonance_ok:
             reasons.append("共振齐")
         elif grade.startswith("missing_"):
             reasons.append("共振未齐")
+        try:
+            from trader_shared.wyckoff_chain import extract_rs_label
+
+            if extract_rs_label(report) == "weak":
+                reasons.append("相对强弱偏弱，慎跟吸筹")
+                return _pack(
+                    "wait",
+                    reasons,
+                    bp=bp,
+                    decision_allow=decision_allow,
+                    discipline_allow=discipline_allow,
+                    strategy_entry_lit=strategy_entry_lit,
+                    resonance_ok=resonance_ok,
+                    chan_followable=chan_ok,
+                    grade=grade,
+                )
+        except Exception:
+            pass
         return _pack(
             "ready",
             reasons,

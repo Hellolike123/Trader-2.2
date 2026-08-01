@@ -133,7 +133,9 @@
 - 非目标：View 不直接下单；不替换 fusion；未做特征/原子事件大重构
 
 **状态准确度演进**：
-1. 个股 vs 大盘相对强弱（RS）接入周线阶段（P1，另开）
+1. 个股 vs **所属板块对照指数**相对强弱（RS）（**已落地**；对照指数 SSOT = `resolve_board_index`；规格见 `docs/plans/wyckoff-rs-phase-handoff.md`）  
+   - 周线阶段机：仅置信修正，**不抬** `phase`  
+   - 选股池：同道排序（lane→共振→链→RS→可碰→分）；弱 RS 可盯→等齐「慎跟」；模块 `wyckoff_rs.py`，开关 `WYCKOFF_RS_ENABLED`
 2. Spring 后确认测试与 ST 语义分离 → **已落地**（`spring_test_*` 双写 + 阶段 C/D；规格见 `docs/plans/wyckoff-phase-accuracy-handoff-2026-07-31.md` §2）
 3. 低质量 TR 不进阶段机 → **已落地**（`WYCKOFF_PHASE_MIN_TR_QUALITY` + `phase_tr_gated`；同上 handoff §3）
 4. Phase A 边界 SC/AR 钉 TR 种子 → **P1 已落地**（`phase_a_range`/`forming`/`established`）；**P2 已落地**（种子箱门控 + 广义 ST → `docs/plans/wyckoff-phase-a-range-handoff.md` §4）
