@@ -83,6 +83,8 @@ def test_holding_hint_no_fusion_action_fallback():
     assert "fusion_action_str" not in sp
     assert "disc_action_str or fusion_action_str" not in sp
     assert 'report_fusion or {}).get("action"' not in sp
+    # stage_pack 不消费 fusion（merge 在其后）
+    assert "report_fusion" not in sp
 
 
 def test_structure_stage_omits_fusion_hint_and_result():
@@ -229,8 +231,8 @@ def test_attach_short_midline_outer_fail_zeros_caps_via_execution_caps(monkeypat
     """短中线外层失败：fail-closed DV + apply_execution_caps 清零 stage_pack 残留。"""
     from trader_shared.report_pipeline.attach_short_midline import (
         attach_short_midline_and_decision,
-        attach_short_midline_and_decision_kwargs,
     )
+    from trader_shared.report_pipeline.stage_context import StageContext
 
     report = {
         "suggested_pct": 22,
@@ -249,8 +251,7 @@ def test_attach_short_midline_outer_fail_zeros_caps_via_execution_caps(monkeypat
     import trader_shared.key_prices as kp
 
     monkeypatch.setattr(kp, "build_key_prices", _boom_key_prices)
-    out = attach_short_midline_and_decision_kwargs(
-        report,
+    ctx = StageContext(
         current=10.0,
         scene="回踩",
         report_fusion={"weighted_score": 0.3, "action": "半仓试"},
@@ -264,7 +265,9 @@ def test_attach_short_midline_outer_fail_zeros_caps_via_execution_caps(monkeypat
         chip_resistance_lower=None,
         chip_resistance_upper=None,
         stage="蓄势",
+        short_term_momentum="蓄势",
     )
+    out = attach_short_midline_and_decision(report, ctx)
     assert out["decision_view"]["allow_new_recommend"] is False
     assert out["suggested_pct"] == 0
     assert out["position_info"]["suggested_pct"] == 0

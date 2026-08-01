@@ -16,6 +16,7 @@ REQUIRED_KEYS = {
     "last_plan",
     "pool_archive",
     "signals",
+    "signal_results",
     "chip_history",
     "calibrated_params",
     "trailing_stop_watermark",
@@ -28,6 +29,7 @@ REQUIRED_KEYS = {
     "t0_ledger",
     "t0_state",
     "holdings",
+    "last_target",
 }
 
 
@@ -49,6 +51,9 @@ def test_keys_resolve_under_trader_root(tmp_path: Path, monkeypatch):
     assert path("t0_state") == root / "t0_state.json"
     assert path("buy_point_lifecycle") == root / "buy_point_lifecycle.json"
     assert path("trailing_stop_watermark") == root / "trailing_stop_watermark.json"
+    assert path("last_target") == root / "last_target.txt"
+    assert path("signals") == root / "signals.jsonl"
+    assert path("signal_results") == root / "signal_results.jsonl"
 
 
 def test_env_override_buy_point_lifecycle(tmp_path: Path, monkeypatch):
@@ -170,3 +175,137 @@ def test_t0_save_uses_trader_root_without_datamanager_patch(tmp_path: Path, monk
     acc.save_position("000001.SZ", {"avg_cost": 10.0, "total_shares": 100})
     assert (root / "position.json").exists()
     assert not (home / ".trader" / "position.json").exists()
+
+
+def test_signal_store_default_uses_trader_root(tmp_path: Path, monkeypatch):
+    """signal_store DEFAULT path must honor TRADER_ROOT via trader_paths."""
+    root = tmp_path / "root"
+    root.mkdir()
+    home = tmp_path / "home"
+    (home / ".trader").mkdir(parents=True)
+    monkeypatch.setenv("TRADER_ROOT", str(root))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("TRADER_SIGNAL_STORE_PATH", raising=False)
+
+    import trader_shared.signal_store as store_mod
+
+    store_mod.DEFAULT_SIGNAL_STORE_PATH = None
+    p = store_mod._get_default_store_path()
+    assert p == root / "signals.jsonl"
+    assert p != home / ".trader" / "signals.jsonl"
+
+
+def test_signal_store_env_override(tmp_path: Path, monkeypatch):
+    custom = tmp_path / "custom_signals.jsonl"
+    monkeypatch.setenv("TRADER_ROOT", str(tmp_path / "root"))
+    monkeypatch.setenv("TRADER_SIGNAL_STORE_PATH", str(custom))
+
+    import trader_shared.signal_store as store_mod
+
+    store_mod.DEFAULT_SIGNAL_STORE_PATH = None
+    assert store_mod._get_default_store_path() == custom
+
+
+def test_pool_readers_use_trader_root(tmp_path: Path, monkeypatch):
+    """cache_utils / wyckoff_run / portfolio_core pool reads honor TRADER_ROOT."""
+    root = tmp_path / "root"
+    root.mkdir()
+    home = tmp_path / "home"
+    (home / ".trader").mkdir(parents=True)
+    monkeypatch.setenv("TRADER_ROOT", str(root))
+    monkeypatch.setenv("HOME", str(home))
+
+    from trader_shared.wyckoff_run import _pool_path
+
+    assert _pool_path() == root / "pool.json"
+
+    import json
+
+    (root / "pool.json").write_text(
+        json.dumps({"items": [{"name": "测", "status": "执行"}]}),
+        encoding="utf-8",
+    )
+    (home / ".trader" / "pool.json").write_text(
+        json.dumps({"items": [{"name": "漏", "status": "执行"}]}),
+        encoding="utf-8",
+    )
+
+    from trader_shared.portfolio_core import _pool_resonance_index
+
+    idx = _pool_resonance_index()
+    assert "测" in idx or any("测" in str(k) for k in idx)
+    assert "漏" not in idx and not any("漏" in str(k) for k in idx)
+
+
+def test_last_target_key_resolves(tmp_path: Path, monkeypatch):
+    root = tmp_path / "root"
+    monkeypatch.setenv("TRADER_ROOT", str(root))
+    assert path("last_target") == root / "last_target.txt"
+
+
+def test_signal_tracker_paths_use_trader_root(tmp_path: Path, monkeypatch):
+    """STORE_PATH / RESULT_PATH resolve under TRADER_ROOT (not HOME/.trader)."""
+    root = tmp_path / "root"
+    root.mkdir()
+    home = tmp_path / "home"
+    (home / ".trader").mkdir(parents=True)
+    monkeypatch.setenv("TRADER_ROOT", str(root))
+    monkeypatch.setenv("HOME", str(home))
+
+    import trader_shared.signal_tracker as st
+
+    # Restore proxies if a prior test replaced them with concrete Paths
+    st.STORE_PATH = st._TraderKeyedPath("signals")
+    st.RESULT_PATH = st._TraderKeyedPath("signal_results")
+
+    assert Path(st.STORE_PATH) == root / "signals.jsonl"
+    assert Path(st.RESULT_PATH) == root / "signal_results.jsonl"
+
+
+def test_review_render_signals_use_trader_root(tmp_path: Path, monkeypatch):
+    """review_render win-rate reader checks TRADER_ROOT signals, not HOME/.trader."""
+    root = tmp_path / "root"
+    root.mkdir()
+    home = tmp_path / "home"
+    (home / ".trader").mkdir(parents=True)
+    monkeypatch.setenv("TRADER_ROOT", str(root))
+    monkeypatch.setenv("HOME", str(home))
+
+    # Only HOME has the file → must treat as missing (TRADER_ROOT wins)
+    (home / ".trader" / "signals.jsonl").write_text("{}\n", encoding="utf-8")
+
+    from trader_shared import review_render as rr
+
+    assert rr._load_historical_win_rate("000001") is None
+
+    # Root file present → passes exists gate; provider boom → still None (offline)
+    (root / "signals.jsonl").write_text("", encoding="utf-8")
+
+    class _Boom:
+        def resolve_security(self, *_a, **_k):
+            raise RuntimeError("offline")
+
+        def fetch_qfq_daily(self, *_a, **_k):
+            raise RuntimeError("offline")
+
+    import trader_shared.data_provider as dp
+
+    monkeypatch.setattr(dp, "get_provider", lambda: _Boom())
+    assert rr._load_historical_win_rate("000001") is None
+    assert path("signals") == root / "signals.jsonl"
+
+
+def test_final_portfolio_positions_use_trader_root(tmp_path: Path, monkeypatch):
+    root = tmp_path / "root"
+    monkeypatch.setenv("TRADER_ROOT", str(root))
+    import importlib
+    import sys
+
+    pkg = Path(__file__).resolve().parents[2] / "01-功能包-packages/review/scripts"
+    if str(pkg) not in sys.path:
+        sys.path.insert(0, str(pkg))
+    import final_portfolio as fp
+
+    importlib.reload(fp)
+    fp.POSITIONS_PATH = None
+    assert fp._positions_path() == root / "positions.json"

@@ -39,64 +39,9 @@ def attach_stage_position_pack(
         base_status=str(ctx.get("base_status") or ""),
         theory_status=str(ctx.get("theory_status") or ""),
         scene=str(ctx.get("scene") or ""),
-        report_fusion=ctx.get("report_fusion") if isinstance(ctx.get("report_fusion"), dict) else None,
         signal_win_rate=ctx.get("signal_win_rate"),
         signal_cost_price=float(ctx.get("signal_cost_price") or 0),
         stage=str(ctx.get("short_term_momentum") or ctx.get("stage") or ""),
-        mark=mark,
-    )
-
-
-def attach_stage_position_pack_kwargs(
-    report: dict[str, Any],
-    *,
-    cost_price: float,
-    current: float,
-    market_env_data: dict[str, Any] | None,
-    stage_result: dict[str, Any],
-    atr14_val: float | None,
-    bars: list,
-    wyck_result: Any,
-    support: float | None,
-    confirm: float | None,
-    expma10_val: Any,
-    expma20_val: Any,
-    chip_migration: Any,
-    levels: dict[str, Any],
-    bars_date: Any,
-    base_status: str,
-    theory_status: str,
-    scene: str,
-    report_fusion: dict[str, Any] | None,
-    signal_win_rate: Any,
-    signal_cost_price: float = 0.0,
-    stage: str = "",
-    mark: MarkFn | None = None,
-) -> tuple[dict[str, Any], float, bool, int]:
-    """Deprecated one-release kwargs wrapper。"""
-    return _attach_stage_position_pack_impl(
-        report,
-        cost_price=cost_price,
-        current=current,
-        market_env_data=market_env_data,
-        stage_result=stage_result,
-        atr14_val=atr14_val,
-        bars=bars,
-        wyck_result=wyck_result,
-        support=support,
-        confirm=confirm,
-        expma10_val=expma10_val,
-        expma20_val=expma20_val,
-        chip_migration=chip_migration,
-        levels=levels,
-        bars_date=bars_date,
-        base_status=base_status,
-        theory_status=theory_status,
-        scene=scene,
-        report_fusion=report_fusion,
-        signal_win_rate=signal_win_rate,
-        signal_cost_price=signal_cost_price,
-        stage=stage,
         mark=mark,
     )
 
@@ -121,13 +66,15 @@ def _attach_stage_position_pack_impl(
     base_status: str,
     theory_status: str,
     scene: str,
-    report_fusion: dict[str, Any] | None,
     signal_win_rate: Any,
     signal_cost_price: float = 0.0,
     stage: str = "",  # deprecated：忽略；勿用动能/determine_stage 填 major_stage
     mark: MarkFn | None = None,
 ) -> tuple[dict[str, Any], float, bool, int]:
-    """持仓/仓位/止盈/stage 展示字段。返回 (report, cost_price, has_position, suggested)。"""
+    """持仓/仓位/止盈/stage 展示字段。返回 (report, cost_price, has_position, suggested)。
+
+    不消费 fusion（仪表在 stage_pack 之后 merge）。
+    """
     _mark = mark or _noop_mark
     market_env_data = market_env_data if isinstance(market_env_data, dict) else {}
     # 缺 stage_result 时默认蓄势/震荡；禁止 stage(走强…) 冒充 major_stage
@@ -146,7 +93,6 @@ def _attach_stage_position_pack_impl(
             "major_stage": _maj or "蓄势",
             "momentum": _mom,
         }
-    report_fusion = report_fusion if isinstance(report_fusion, dict) else {}
     levels = levels if isinstance(levels, dict) else {}
     bars = bars or []
     if not isinstance(report, dict):

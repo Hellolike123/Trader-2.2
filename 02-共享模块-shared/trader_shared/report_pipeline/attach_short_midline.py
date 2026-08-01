@@ -42,44 +42,6 @@ def attach_short_midline_and_decision(
     )
 
 
-def attach_short_midline_and_decision_kwargs(
-    report: dict[str, Any],
-    *,
-    current: float,
-    scene: str,
-    report_fusion: dict[str, Any] | None,
-    stage_result: dict[str, Any],
-    weekly_bars: list | None,
-    suggested: float | int,
-    theory_status: str,
-    market_env_data: dict[str, Any] | None,
-    has_position: bool,
-    data_status: str,
-    chip_resistance_lower: float | None,
-    chip_resistance_upper: float | None,
-    stage: str,
-    mark: MarkFn | None = None,
-) -> dict[str, Any]:
-    """Deprecated one-release kwargs wrapper。"""
-    return _attach_short_midline_and_decision_impl(
-        report,
-        current=current,
-        scene=scene,
-        report_fusion=report_fusion,
-        stage_result=stage_result,
-        weekly_bars=weekly_bars,
-        suggested=suggested,
-        theory_status=theory_status,
-        market_env_data=market_env_data,
-        has_position=has_position,
-        data_status=data_status,
-        chip_resistance_lower=chip_resistance_lower,
-        chip_resistance_upper=chip_resistance_upper,
-        stage=stage,
-        mark=mark,
-    )
-
-
 def _attach_short_midline_and_decision_impl(
     report: dict[str, Any],
     *,

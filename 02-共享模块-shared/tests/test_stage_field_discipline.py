@@ -10,13 +10,14 @@ from trader_shared.stage_fields import (
 )
 from trader_shared.signal_core import _get_major_stage as signal_get_major
 from trader_shared.report_presentation import _get_major_stage as present_get_major
-from trader_shared.report_pipeline.assemble_stage import assemble_base_report_kwargs
-from trader_shared.report_pipeline.attach_stage_pack import attach_stage_position_pack_kwargs
+from trader_shared.report_pipeline.assemble_stage import assemble_base_report
+from trader_shared.report_pipeline.attach_stage_pack import attach_stage_position_pack
+from trader_shared.report_pipeline.stage_context import StageContext
 from trader_shared.resonance import build_resonance, _eval_background
 
 
-def _minimal_assemble_kwargs(**over):
-    """assemble kwargs 最小桩（只测 stage 字段写入；one-release wrapper）。"""
+def _minimal_assemble_ctx(**over) -> StageContext:
+    """assemble StageContext 最小桩（只测 stage 字段写入）。"""
     class _Sec:
         name = "测"
         ts_code = "000001.SZ"
@@ -119,7 +120,7 @@ def _minimal_assemble_kwargs(**over):
         sector_data=None,
     )
     base.update(over)
-    return base
+    return StageContext.from_mapping(base)
 
 
 def test_alias_report_stage_equals_momentum():
@@ -129,7 +130,7 @@ def test_alias_report_stage_equals_momentum():
 
 def test_assemble_stage_aliases_short_term_momentum_not_determine_stage():
     """report['stage'] == short_term_momentum；忽略传入的 determine_stage 词。"""
-    report = assemble_base_report_kwargs(**_minimal_assemble_kwargs(stage="修复"))
+    report = assemble_base_report(_minimal_assemble_ctx(stage="修复"))
     assert report["short_term_momentum"] == "走强"
     assert report["stage"] == report["short_term_momentum"] == "走强"
     assert report["major_stage"] == "蓄势"
@@ -179,8 +180,7 @@ def test_attach_stage_pack_fallback_not_fed_by_zouqiang():
         "major_stage": "",  # 空 → 默认蓄势，而非走强
         "short_term_momentum": "走强",
     }
-    out, _, _, _ = attach_stage_position_pack_kwargs(
-        report,
+    ctx = StageContext(
         cost_price=0.0,
         current=10.0,
         market_env_data={},
@@ -198,10 +198,11 @@ def test_attach_stage_pack_fallback_not_fed_by_zouqiang():
         base_status="中性整理",
         theory_status="等转强",
         scene="等转强",
-        report_fusion={},
         signal_win_rate=None,
         stage="走强",
+        short_term_momentum="走强",
     )
+    out, _, _, _ = attach_stage_position_pack(report, ctx)
     # position_info / stage_stop 用的 major 不得是动能词
     assert out.get("position_info") is not None
     # fallback major 应为蓄势（默认），不是走强

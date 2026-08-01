@@ -109,11 +109,13 @@ def quick_add(target: str, offline: bool = False) -> dict[str, Any]:
 
 
 def cmd_add_last(args: argparse.Namespace) -> int:
-    last_target_path = os.path.expanduser("~/.trader/last_target.txt")
-    if not os.path.exists(last_target_path):
+    from trader_shared.trader_paths import path as trader_path
+
+    last_target_path = trader_path("last_target")
+    if not last_target_path.exists():
         print("没有找到最近分析的标的，请先运行 trader 分析。")
         return 1
-    target = Path(last_target_path).read_text(encoding="utf-8").strip()
+    target = last_target_path.read_text(encoding="utf-8").strip()
     if not target:
         print("最近分析的标的为空，请先运行 trader 分析。")
         return 1

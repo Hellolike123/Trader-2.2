@@ -159,10 +159,11 @@ def main() -> int:
     # ── AI 事实表 (供 Hermes 解析，不展示给用户) ──
     # 上面已在验证前输出完整 facts（含 NEVER_COMPUTE），此处仅写 last_target。
 
-    last_target_path = os.path.expanduser("~/.trader/last_target.txt")
-    os.makedirs(os.path.dirname(last_target_path), exist_ok=True)
-    with open(last_target_path, "w", encoding="utf-8") as f:
-        f.write(args.target)
+    from trader_shared.trader_paths import path as trader_path
+
+    last_target_path = trader_path("last_target")
+    last_target_path.parent.mkdir(parents=True, exist_ok=True)
+    last_target_path.write_text(args.target, encoding="utf-8")
 
     return 0
 

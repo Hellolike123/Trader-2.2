@@ -60,7 +60,10 @@ def _atr_level_note_short(level: str, atr14: float) -> str:
 def _load_historical_win_rate(symbol: str) -> dict | None:
     import json
     import os
-    signals_path = os.path.expanduser("~/.trader/signals.jsonl")
+
+    from trader_shared.trader_paths import path as trader_path
+
+    signals_path = str(trader_path("signals"))
     if not os.path.exists(signals_path):
         return None
     normalized_symbol = symbol.replace(".SH", "").replace(".SZ", "").strip()
