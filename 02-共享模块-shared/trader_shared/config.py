@@ -153,8 +153,10 @@ WYCKOFF_CLIMAX_ANCHOR_BARS: int = 15
 # AR 搜索上沿（SC 后最多扫几根）；默认 = climax 锚点窗，env 可覆。
 # 旧实现用 anchor//2（约 7）致延迟 AR 易 forming；见 phase-a-handoff §6 #6。
 WYCKOFF_AR_MAX_BARS: int = int(os.environ.get("WYCKOFF_AR_MAX_BARS", str(WYCKOFF_CLIMAX_ANCHOR_BARS)))
-# P2-C AR 量能（原典偏「弱于 SC」）：多候选 prefer 弱量；默认不硬否决放量 AR（A 股危险）。
-# ar_volume_soft=True 表示「量能偏强/非原典弱量」（结构仍可亮，除非 REQUIRE）。
+# P2-C AR 量能（原典偏「弱于 SC」）：
+# - 选棒始终钉 SC 后「首段」结构 AR（禁止跳到更晚弱量棒抬高 ar_high）
+# - PREFER 保留开关兼容；soft 标注「量能偏强/非原典弱量」
+# - REQUIRE 默认关（硬否决放量 AR 对 A 股过严）
 WYCKOFF_AR_PREFER_WEAK_VS_SC: bool = os.environ.get(
     "WYCKOFF_AR_PREFER_WEAK_VS_SC", "true"
 ).lower() in ("true", "1", "yes")

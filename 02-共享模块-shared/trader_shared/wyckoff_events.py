@@ -1256,7 +1256,8 @@ def _detect_ar(
     sc_low = round(float(bar_low), 2) if bar_low is not None else anchor["sc_low"]
     sc_vol = to_float(bars[sc_bar_idx].get("volume")) or float(anchor.get("sc_avg_vol") or 0)
 
-    prefer_weak, require_weak, weak_ratio = _ar_volume_flags()
+    _prefer_weak, require_weak, weak_ratio = _ar_volume_flags()
+    del _prefer_weak  # 兼容开关；选棒始终取首段结构 AR
 
     # AR 搜索上沿：WYCKOFF_AR_MAX_BARS（默认=climax 锚点）；周线半幅缩放
     ar_limit = int(WYCKOFF_AR_MAX_BARS)
@@ -1309,12 +1310,9 @@ def _detect_ar(
             "sc_bar_idx": sc_bar_idx,
         }
 
-    if prefer_weak:
-        weak_cands = [c for c in candidates if c["weak_vs_sc"]]
-        chosen = weak_cands[0] if weak_cands else candidates[0]
-    else:
-        chosen = candidates[0]
-
+    # Phase A 上沿钉「SC 后首段自动反弹」：始终取最早结构候选。
+    # 禁止因弱量 prefer 跳到更晚棒抬高 ar_high；弱/强只影响 soft / REQUIRE。
+    chosen = candidates[0]
     soft = not bool(chosen["weak_vs_sc"])
     if soft:
         vol_note = "量能偏强/非原典弱量(soft)"

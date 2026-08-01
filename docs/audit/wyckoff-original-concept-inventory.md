@@ -127,5 +127,7 @@
 | **P1** | BU (Back Up) | SOS 确认后缺失最后一个买点信号 |
 | **P2（已落地）** | P&F 计数（目标价） | ✅ 水平计数主路径 + L3 展示门禁；见 `docs/plans/wyckoff-pnf-handoff.md` |
 | **P2（已落地）** | RS 相对强弱 vs 对照指数 | ✅ 已落地（见 §七）；阶段置信 + 池排序/慎跟 |
-| **P3** | UTAD / PS / PSY / Stopping Volume | 增强完整度 |
-| **P3** | CM 行为模式显式建模 | 设计层增强 |
+| **P3（已落地）** | Stopping Volume 专名 | ✅ 独立灯 + 与 SC 防双计；见 §四 |
+| **P3（已落地）** | CM 行为模式轻量映射 | ✅ `cm_mode`/`cm_note`；不改阶段/量度 |
+| **P3（已落地）** | Jump Across the Creek / AR P2-C | ✅ JAC 专名灯；AR prefer 弱于 SC（REQUIRE 默认关） |
+| **P3 余** | UTAD / PS / PSY（已有检测）完整度打磨、Ultimate Climax / No Demand 专名 | 增强完整度 |

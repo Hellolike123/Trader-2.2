@@ -335,21 +335,21 @@ def _sc_base_then(*extra):
     return bars
 
 
-def test_ar_prefer_selects_weak_volume_bar(monkeypatch):
-    """多候选时 prefer 弱于 SC 的反弹棒。"""
+def test_ar_first_structural_not_skipped_for_later_weak(monkeypatch):
+    """Phase A：始终钉 SC 后首段 AR；不得因 prefer 跳到更晚弱量棒抬高 ar_high。"""
     import trader_shared.config as cfg
 
     monkeypatch.setattr(cfg, "WYCKOFF_AR_PREFER_WEAK_VS_SC", True)
     monkeypatch.setattr(cfg, "WYCKOFF_AR_REQUIRE_WEAK_VS_SC", False)
     bars = _sc_base_then(
-        _bar(83.2, 86.5, 83.0, 85.5, 3000),  # 强量候选（先出现）
-        _bar(85.0, 87.5, 84.5, 87.0, 200),  # 弱量候选（prefer）
+        _bar(83.2, 86.5, 83.0, 85.5, 3000),  # 首段强量 AR
+        _bar(85.0, 87.5, 84.5, 87.0, 200),  # 更晚弱量（不得抢锚）
     )
     ar = _detect_ar(bars)
     assert ar["ar_signal"] is True, ar.get("ar_reason")
-    assert ar["ar_volume_soft"] is False
-    assert ar["ar_bar_idx"] == len(bars) - 1
-    assert ar["ar_high"] == 87.5
+    assert ar["ar_bar_idx"] == len(bars) - 2
+    assert ar["ar_high"] == 86.5
+    assert ar["ar_volume_soft"] is True  # 首段相对 SC 偏强 → soft
 
 
 def test_ar_require_rejects_strong_vs_sc(monkeypatch):
