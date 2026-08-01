@@ -127,6 +127,31 @@ def test_writers_route_through_registry(tmp_path: Path, monkeypatch):
     assert _ledger_path() == root / "t0_ledger.jsonl"
 
 
+def test_signal_core_pool_count_uses_trader_root(tmp_path: Path, monkeypatch):
+    """C leak lock: get_pool_count must honor TRADER_ROOT, not HOME/.trader."""
+    import json
+
+    root = tmp_path / "root"
+    root.mkdir()
+    home = tmp_path / "home"
+    (home / ".trader").mkdir(parents=True)
+    monkeypatch.setenv("TRADER_ROOT", str(root))
+    monkeypatch.setenv("HOME", str(home))
+
+    (root / "pool.json").write_text(
+        json.dumps({"items": [{"name": "A", "status": "执行"}, {"name": "B", "status": "淘汰"}]}),
+        encoding="utf-8",
+    )
+    (home / ".trader" / "pool.json").write_text(
+        json.dumps({"items": [{"name": "X", "status": "执行"}]}),
+        encoding="utf-8",
+    )
+
+    from trader_shared.signal_core import get_pool_count
+
+    assert get_pool_count() == 1
+
+
 def test_t0_save_uses_trader_root_without_datamanager_patch(tmp_path: Path, monkeypatch):
     """Step A: t0 position writer must not hardcode ~/.trader via DataManager."""
     root = tmp_path / "root"

@@ -251,10 +251,11 @@ def load_historical_win_rate(target: str) -> dict | None:
     return win_rate_data
 
 def get_pool_count() -> int:
-    from pathlib import Path
-    path = Path.home() / ".trader" / "pool.json"
+    from trader_shared.trader_paths import path as trader_path
+
+    pool_file = trader_path("pool")
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(pool_file.read_text(encoding="utf-8"))
         items = data.get("items", [])
         return sum(1 for i in items if i.get("status") not in {"淘汰", "已退出"})
     except Exception:
