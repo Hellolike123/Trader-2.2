@@ -706,7 +706,9 @@ def _limit_pct_for(code: str) -> float:
 # 确定性数据，不再每次独立进程重新抓数 → 结果可复现、且坏点只可能在
 # 「写入那一次」出现（写入前仍跑健全性快检拦截）。
 def _cache_dir() -> Path:
-    d = Path.home() / ".trader" / "backtest_cache"
+    from trader_shared.trader_paths import path as trader_path
+
+    d = trader_path("cache") / "backtest_cache"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

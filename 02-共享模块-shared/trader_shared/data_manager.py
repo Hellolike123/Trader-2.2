@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from typing import Iterator
 
 from trader_shared._logging import get_logger
+from trader_shared.trader_paths import KeyedPath
 
 _logger = get_logger(__name__)
 
@@ -29,15 +30,15 @@ class DataManager:
     """
     统一数据总线管理器
     一站式接管所有模块的状态读写，彻底消除数据孤岛与多进程写冲突。
-    统一存储目录: ~/.trader/
+    统一存储目录: trader_paths.trader_root()（默认 ~/.trader/）
     """
-    
-    ROOT_DIR = Path.home() / ".trader"
-    SIGNALS_FILE = ROOT_DIR / "signals.jsonl"
-    
+
+    ROOT_DIR = KeyedPath("root")
+    SIGNALS_FILE = KeyedPath("signals")
+
     @classmethod
     def _init_dir(cls):
-        cls.ROOT_DIR.mkdir(parents=True, exist_ok=True)
+        Path(cls.ROOT_DIR).mkdir(parents=True, exist_ok=True)
         
     @classmethod
     @contextmanager
@@ -63,7 +64,7 @@ class DataManager:
         if path:
             return path
         cls._init_dir()
-        return cls.ROOT_DIR / f"{key}.json"
+        return Path(cls.ROOT_DIR) / f"{key}.json"
         
     @classmethod
     def load_state(cls, key: str, default: Any = None, path: Path | None = None) -> Any:
@@ -181,7 +182,7 @@ class DataManager:
     def load_signals(cls, path: Path | None = None) -> list[dict[str, Any]]:
         """读取完整的信号事件流（委托给 signal_store 统一路径）"""
         cls._init_dir()
-        target_path = path or cls.SIGNALS_FILE
+        target_path = path or Path(cls.SIGNALS_FILE)
         from trader_shared.signal_store import _read_store
         return _read_store(target_path)
 
@@ -189,7 +190,7 @@ class DataManager:
     def append_signal(cls, signal: dict[str, Any], path: Path | None = None) -> None:
         """向 signals.jsonl 安全追加单条信号"""
         cls._init_dir()
-        target_path = path or cls.SIGNALS_FILE
+        target_path = path or Path(cls.SIGNALS_FILE)
         target_path.parent.mkdir(parents=True, exist_ok=True)
         line = json.dumps(signal, ensure_ascii=False, default=str) + "\n"
         

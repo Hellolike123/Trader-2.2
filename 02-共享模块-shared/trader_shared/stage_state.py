@@ -14,7 +14,9 @@ from trader_shared.config import (
     CORRELATION_THRESHOLD, CORRELATION_LOOKBACK_DAYS,
 )
 
-_STATE_FILE = Path.home() / ".trader" / "stage_state.json"
+from trader_shared.trader_paths import KeyedPath
+
+_STATE_FILE = KeyedPath("stage_state")
 
 _logger = get_logger(__name__)
 

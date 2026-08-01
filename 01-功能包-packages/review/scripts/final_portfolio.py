@@ -18,11 +18,9 @@ def _positions_path() -> Path:
     override = globals().get("POSITIONS_PATH")
     if isinstance(override, Path):
         return override
-    try:
-        from trader_shared.trader_paths import path as _tp
-        return _tp("positions_portfolio")
-    except Exception:
-        return Path.home() / ".trader" / "positions.json"
+    from trader_shared.trader_paths import path as _tp
+
+    return _tp("positions_portfolio")
 
 
 def _dual_write_holdings_row(row: dict, *, clear: bool = False) -> None:

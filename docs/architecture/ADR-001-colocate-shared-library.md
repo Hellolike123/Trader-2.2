@@ -1,7 +1,7 @@
 # ADR-001: 消除 `trader_shared` 对 `scripts/` 的向上依赖（收编为真库）
 
-- **Status**: Proposed（基于实测复核，待用户拍板执行）
-- **Branch**: `refactor/trader-architecture`（基于 `0b48fdc`，ADR-004 已落地）
+- **Status**: Accepted（已落地：`pipeline` / `signal_tracker` / `market_env` / `calibrator` / `self_calibration` 均在 `trader_shared/`；向上依赖已消除）
+- **Branch**: `refactor/trader-architecture`（基于 `0b48fdc`，ADR-004 已落地；后续 main 已合入）
 - **前置**: ADR-004 已完成（stub 层、双 config、死集成已清）
 
 ---

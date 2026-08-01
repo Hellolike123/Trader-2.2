@@ -28,11 +28,13 @@ from trader_shared.light_data import to_float
 
 _logger = get_logger(__name__)
 
-# ── 默认路径 ─────────────────────────────────────────────────────────────────
-TRADER_DIR = Path.home() / ".trader"
-SIGNALS_FILE = TRADER_DIR / "signals.jsonl"
-RESULTS_FILE = TRADER_DIR / "signal_results.jsonl"
-CALIBRATED_FILE = TRADER_DIR / "calibrated_params.json"
+# ── 默认路径（运行时经 trader_paths；测试可 patch 模块属性）────────────────
+from trader_shared.trader_paths import KeyedPath
+
+TRADER_DIR = KeyedPath("root")
+SIGNALS_FILE = KeyedPath("signals")
+RESULTS_FILE = KeyedPath("signal_results")
+CALIBRATED_FILE = KeyedPath("calibrated_params")
 
 # ── 参数搜索空间（微幅扰动，不脱离合理范围）────────────────────────────────
 PARAM_SPACE = {

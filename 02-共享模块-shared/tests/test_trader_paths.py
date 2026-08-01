@@ -17,6 +17,7 @@ REQUIRED_KEYS = {
     "pool_archive",
     "signals",
     "signal_results",
+    "signal_log",
     "chip_history",
     "calibrated_params",
     "trailing_stop_watermark",
@@ -30,6 +31,9 @@ REQUIRED_KEYS = {
     "t0_state",
     "holdings",
     "last_target",
+    "cache",
+    "pipeline_state",
+    "stage_state",
 }
 
 
@@ -54,6 +58,12 @@ def test_keys_resolve_under_trader_root(tmp_path: Path, monkeypatch):
     assert path("last_target") == root / "last_target.txt"
     assert path("signals") == root / "signals.jsonl"
     assert path("signal_results") == root / "signal_results.jsonl"
+    assert path("signal_log") == root / "signal_log.jsonl"
+    assert path("cache") == root / "cache"
+    assert path("pipeline_state") == root / "pipeline_state.json"
+    assert path("stage_state") == root / "stage_state.json"
+    assert path("account") == root / "account.json"
+    assert path("calibrated_params") == root / "calibrated_params.json"
 
 
 def test_env_override_buy_point_lifecycle(tmp_path: Path, monkeypatch):
@@ -309,3 +319,50 @@ def test_final_portfolio_positions_use_trader_root(tmp_path: Path, monkeypatch):
     importlib.reload(fp)
     fp.POSITIONS_PATH = None
     assert fp._positions_path() == root / "positions.json"
+
+
+def test_residual_modules_honor_trader_root(tmp_path: Path, monkeypatch):
+    """cache / pipeline / stage / account / DataManager / presentation → TRADER_ROOT."""
+    root = tmp_path / "root"
+    root.mkdir()
+    home = tmp_path / "home"
+    (home / ".trader").mkdir(parents=True)
+    monkeypatch.setenv("TRADER_ROOT", str(root))
+    monkeypatch.setenv("HOME", str(home))
+
+    from trader_shared.cache_utils import CACHE_DIR
+    from trader_shared.data_manager import DataManager
+    from trader_shared.pipeline import STATE_PATH, _state_path
+    from trader_shared.stage_state import _STATE_FILE
+    from trader_shared.account_risk import _ACCOUNT_FILE
+    from trader_shared.self_calibration import CALIBRATED_FILE, SIGNALS_FILE
+    from trader_shared.trader_paths import KeyedPath
+
+    assert Path(CACHE_DIR) == root / "cache"
+    assert Path(CACHE_DIR) / "daily" == root / "cache" / "daily"
+    assert Path(DataManager.ROOT_DIR) == root
+    assert Path(DataManager.SIGNALS_FILE) == root / "signals.jsonl"
+    assert _state_path() == root / "pipeline_state.json"
+    assert Path(STATE_PATH) == root / "pipeline_state.json"
+    assert Path(_STATE_FILE) == root / "stage_state.json"
+    assert Path(_ACCOUNT_FILE) == root / "account.json"
+    assert Path(CALIBRATED_FILE) == root / "calibrated_params.json"
+    assert Path(SIGNALS_FILE) == root / "signals.jsonl"
+    assert isinstance(CACHE_DIR, KeyedPath)
+
+    # report_presentation kelly reader must open TRADER_ROOT file (not HOME)
+    import trader_shared.report_presentation as rp
+
+    rp._kelly_cache.clear()
+    # Enough filled rows to pass KELLY_MIN_TRADES; HOME has contradictory noise
+    lines = [
+        '{"market_env":"正常","status":"filled","return_pct":1.0}\n' for _ in range(20)
+    ]
+    (root / "signal_results.jsonl").write_text("".join(lines), encoding="utf-8")
+    (home / ".trader" / "signal_results.jsonl").write_text(
+        '{"market_env":"正常","status":"filled","return_pct":-1.0}\n',
+        encoding="utf-8",
+    )
+    data = rp._get_kelly_data("正常")
+    assert data["total"] == 20
+    assert data["win_rate"] == 1.0

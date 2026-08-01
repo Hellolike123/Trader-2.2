@@ -367,9 +367,11 @@ def main():
     args = parser.parse_args()
 
     if args.pool:
-        pool_path = Path.home() / ".trader" / "pool.json"
+        from trader_shared.trader_paths import path as trader_path
+
+        pool_path = trader_path("pool")
         if not pool_path.exists():
-            print("选股池文件不存在: ~/.trader/pool.json")
+            print(f"选股池文件不存在: {pool_path}")
             return 1
         pool = json.loads(pool_path.read_text(encoding="utf-8"))
         targets = list(pool.keys())

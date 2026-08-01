@@ -54,7 +54,9 @@ class DynamicPathProxy(os.PathLike):
             from trader_shared.signal_store import _get_default_store_path
             p = _get_default_store_path()
         except ImportError:
-            p = Path.home() / ".trader" / "signals.jsonl"
+            from trader_shared.trader_paths import path as trader_path
+
+            p = trader_path("signals")
         return p.parent if self.is_dir else p
 
     def __getattr__(self, name):
@@ -1508,7 +1510,9 @@ def _migrate_file(file_path: Path, is_signal: bool = True, force: bool = False) 
 
 def consolidate_legacy_log(log_path: Path | None = None, store_path: Path | None = None) -> dict[str, int]:
     if log_path is None:
-        log_path = Path.home() / ".trader" / "signal_log.jsonl"
+        from trader_shared.trader_paths import path as trader_path
+
+        log_path = trader_path("signal_log")
     if store_path is None:
         store_path = STORE_PATH
         

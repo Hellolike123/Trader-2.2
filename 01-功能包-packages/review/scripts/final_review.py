@@ -99,9 +99,10 @@ def run_postmarket_backfill_and_calibration() -> None:
     from pathlib import Path
     import time as _time
 
-    trader_dir = Path.home() / ".trader"
-    signals_file = trader_dir / "signals.jsonl"
-    results_file = trader_dir / "signal_results.jsonl"
+    from trader_shared.trader_paths import path as trader_path
+
+    signals_file = trader_path("signals")
+    results_file = trader_path("signal_results")
 
     if not signals_file.exists():
         _trigger_async_calibration()

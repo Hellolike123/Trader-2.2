@@ -44,7 +44,9 @@ os.environ.setdefault("TRADER_CHAN_NESTING", "0")
 
 
 def _load_pool_targets(limit: int | None) -> list[str]:
-    path = Path.home() / ".trader" / "pool.json"
+    from trader_shared.trader_paths import path as trader_path
+
+    path = trader_path("pool")
     if not path.exists():
         raise SystemExit(f"选股池不存在: {path}（可用 --targets）")
     data = json.loads(path.read_text(encoding="utf-8"))

@@ -254,7 +254,9 @@ def handle_live(args: argparse.Namespace) -> int:
             target_stock = args.target
             if not target_stock:
                 # 默认读取 last_target.txt
-                last_target_path = Path.home() / ".trader" / "last_target.txt"
+                from trader_shared.trader_paths import path as trader_path
+
+                last_target_path = trader_path("last_target")
                 if last_target_path.exists():
                     target_stock = last_target_path.read_text(encoding="utf-8").strip()
             
@@ -299,7 +301,9 @@ def handle_live(args: argparse.Namespace) -> int:
             print(wechat_content)
             
             # 自动写诊断缓存供 monitor 读取
-            last_target_path = Path.home() / ".trader" / "last_target.txt"
+            from trader_shared.trader_paths import path as trader_path
+
+            last_target_path = trader_path("last_target")
             last_target_path.parent.mkdir(parents=True, exist_ok=True)
             last_target_path.write_text(args.target, encoding="utf-8")
             return 0

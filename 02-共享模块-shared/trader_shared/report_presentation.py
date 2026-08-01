@@ -73,7 +73,9 @@ def _get_kelly_data(market_env_level: str) -> dict[str, float]:
 
     result: dict[str, float] = {"win_rate": None, "total": 0}
     try:
-        results_file = Path.home() / ".trader" / "signal_results.jsonl"
+        from trader_shared.trader_paths import path as trader_path
+
+        results_file = trader_path("signal_results")
         if results_file.exists():
             wins, total = 0, 0
             with open(results_file) as f:

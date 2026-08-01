@@ -76,9 +76,15 @@ def _fetch_live_price(name: str) -> tuple[float, float] | None:
 
 # ── 3. 选股池读取 ─────────────────────────────────────────────
 
+def _pool_path() -> Path:
+    from trader_shared.trader_paths import path as trader_path
+
+    return trader_path("pool")
+
+
 def _load_pool_targets() -> list[str]:
-    """读 ~/.trader/pool.json 获取活跃股票列表。"""
-    pool_path = Path.home() / ".trader" / "pool.json"
+    """读 pool.json（trader_paths）获取活跃股票列表。"""
+    pool_path = _pool_path()
     if not pool_path.exists():
         return []
     try:
@@ -96,7 +102,7 @@ def _load_pool_targets() -> list[str]:
 
 def _load_price_zones(name: str) -> dict[str, float]:
     """从 pool.json 读这只票的预设价位。"""
-    pool_path = Path.home() / ".trader" / "pool.json"
+    pool_path = _pool_path()
     if not pool_path.exists():
         return {}
     try:

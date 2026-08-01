@@ -165,7 +165,8 @@ T0 的 `plan.resonance` = `t0_structure_score_v1`，**禁止**挂 `pullback_prob
 | `trailing_stop_watermark` | ATR 水位（**仅真实持仓**） |
 | `buy_point_lifecycle` | 买点盖失败（锁内 RMW） |
 | `chip_history` / `wyckoff_phase` / `last_add_dates` | 筹码搬家 / 阶段机 / 加仓日 |
-| `calibrated_params` / `signal_results` / … | 见 AGENTS 持久化表 |
+| `calibrated_params` / `signal_results` / `signal_log` | 自校准 / 结算 / 旧日志合并 |
+| `cache` / `pipeline_state` / `stage_state` / `account` | 行情缓存目录 / 流水线态 / 阶段态 / 账户风控 |
 
 写模式：`json_atomic.locked_rmw_json`（与水位同级）。
 

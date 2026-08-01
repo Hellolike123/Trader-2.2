@@ -17,7 +17,9 @@ from datetime import datetime, date
 from pathlib import Path
 from typing import Any
 
-_ACCOUNT_FILE = Path.home() / ".trader" / "account.json"
+from trader_shared.trader_paths import KeyedPath
+
+_ACCOUNT_FILE = KeyedPath("account")
 
 
 class AccountRisk:

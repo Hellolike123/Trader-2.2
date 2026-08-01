@@ -9,9 +9,23 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-STATE_PATH = Path.home() / ".trader" / "pipeline_state.json"
-STATE_DIR = STATE_PATH.parent
-LOCK_PATH = STATE_PATH.with_name(STATE_PATH.name + ".lock")
+from trader_shared.trader_paths import KeyedPath
+
+STATE_PATH = KeyedPath("pipeline_state")
+
+
+def _state_path() -> Path:
+    return Path(STATE_PATH)
+
+
+def _state_dir() -> Path:
+    return _state_path().parent
+
+
+def _lock_path() -> Path:
+    p = _state_path()
+    return p.with_name(p.name + ".lock")
+
 
 STATE_SCHEMA = {
     "version": 1,
@@ -20,17 +34,18 @@ STATE_SCHEMA = {
 
 
 def _ensure_dir() -> None:
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    _state_dir().mkdir(parents=True, exist_ok=True)
 
 
 def _load() -> dict[str, Any]:
     _ensure_dir()
-    if not STATE_PATH.exists():
+    sp = _state_path()
+    if not sp.exists():
         return _empty()
     try:
-        with open(LOCK_PATH, "w") as lock_f:
+        with open(_lock_path(), "w") as lock_f:
             fcntl.flock(lock_f, fcntl.LOCK_SH)
-            data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+            data = json.loads(sp.read_text(encoding="utf-8"))
             if not isinstance(data, dict):
                 return _empty()
             return data
@@ -42,14 +57,14 @@ def _save(data: dict[str, Any]) -> None:
     _ensure_dir()
     tmp_path: str | None = None
     try:
-        fd, tmp_path = tempfile.mkstemp(dir=str(STATE_DIR), suffix=".tmp")
+        fd, tmp_path = tempfile.mkstemp(dir=str(_state_dir()), suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
             f.write("\n")
         # 在替换前加排它锁，阻止并发读/写
-        with open(LOCK_PATH, "w") as lock_f:
+        with open(_lock_path(), "w") as lock_f:
             fcntl.flock(lock_f, fcntl.LOCK_EX)
-            os.replace(tmp_path, str(STATE_PATH))
+            os.replace(tmp_path, str(_state_path()))
     except OSError:
         if tmp_path:
             try:
@@ -61,7 +76,7 @@ def _save(data: dict[str, Any]) -> None:
 
 
 def _write_fallback(data: dict[str, Any]) -> None:
-    STATE_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    _state_path().write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _empty() -> dict[str, Any]:

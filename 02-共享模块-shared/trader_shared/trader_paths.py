@@ -19,6 +19,7 @@ PATH_KEYS (filenames under trader_root unless noted):
   pool_archive             → pool_archive.json
   signals                  → signals.jsonl
   signal_results           → signal_results.jsonl   (tracker settlement)
+  signal_log               → signal_log.jsonl       (legacy consolidation)
   chip_history             → chip_history.json
   calibrated_params        → calibrated_params.json
   trailing_stop_watermark  → trailing_stop_watermark.json
@@ -32,6 +33,9 @@ PATH_KEYS (filenames under trader_root unless noted):
   t0_state                 → ~/.t0-trader/state.json by default (not under root)
   holdings                 → holdings.json          (unified SSOT)
   last_target              → last_target.txt        (final_report / pool add-last)
+  cache                    → cache/                 (bars / enrich / market_env)
+  pipeline_state           → pipeline_state.json
+  stage_state              → stage_state.json
 """
 from __future__ import annotations
 
@@ -49,6 +53,7 @@ _FILE_BY_KEY: dict[str, str] = {
     "pool_archive": "pool_archive.json",
     "signals": "signals.jsonl",
     "signal_results": "signal_results.jsonl",
+    "signal_log": "signal_log.jsonl",
     "chip_history": "chip_history.json",
     "calibrated_params": "calibrated_params.json",
     "trailing_stop_watermark": "trailing_stop_watermark.json",
@@ -61,6 +66,9 @@ _FILE_BY_KEY: dict[str, str] = {
     "t0_ledger": "t0_ledger.jsonl",
     "holdings": "holdings.json",
     "last_target": "last_target.txt",
+    "cache": "cache",
+    "pipeline_state": "pipeline_state.json",
+    "stage_state": "stage_state.json",
 }
 
 # key → env var that overrides the full path
@@ -72,6 +80,41 @@ _ENV_OVERRIDE: dict[str, str] = {
 }
 
 PATH_KEYS: frozenset[str] = frozenset({"root", "t0_state", *_FILE_BY_KEY.keys()})
+
+
+class KeyedPath(os.PathLike):
+    """Resolve a named trader_paths key at access time.
+
+    Supports ``/`` and Path attribute forwarding so call sites can keep using
+    ``CACHE_DIR / "daily"`` style. Tests may ``monkeypatch`` / ``patch`` the
+    module attribute with a concrete ``Path``.
+    """
+
+    def __init__(self, key: str):
+        self._key = key
+
+    def _resolve(self) -> Path:
+        return path(self._key)
+
+    def __truediv__(self, other: Any) -> Path:
+        return self._resolve() / other
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._resolve(), name)
+
+    def __str__(self) -> str:
+        return str(self._resolve())
+
+    def __repr__(self) -> str:
+        return f"KeyedPath({self._key!r})"
+
+    def __fspath__(self) -> str:
+        return str(self._resolve())
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, (Path, KeyedPath, os.PathLike)):
+            return Path(self) == Path(other)
+        return NotImplemented
 
 
 def trader_root() -> Path:

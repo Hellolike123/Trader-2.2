@@ -67,7 +67,9 @@ def get_shared_build_pool() -> ThreadPoolExecutor:
                 )
     return _shared_build_pool
 
-CACHE_DIR = Path.home() / ".trader" / "cache"
+from trader_shared.trader_paths import KeyedPath
+
+CACHE_DIR = KeyedPath("cache")
 
 # Subdirectory constants
 CACHE_DAILY = "daily"

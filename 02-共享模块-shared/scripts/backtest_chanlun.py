@@ -45,7 +45,9 @@ _FOCUS_TYPES = ("一类买", "类一买", "二类买", "类二买", "一类卖",
 
 
 def _load_pool() -> list[str]:
-    pool_file = Path.home() / ".trader" / "pool.json"
+    from trader_shared.trader_paths import path as trader_path
+
+    pool_file = trader_path("pool")
     if not pool_file.exists():
         return []
     try:

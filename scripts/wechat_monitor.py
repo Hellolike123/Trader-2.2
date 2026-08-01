@@ -7,10 +7,19 @@ import argparse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+_SHARED = ROOT / "02-共享模块-shared"
+if _SHARED.exists() and str(_SHARED) not in sys.path:
+    sys.path.insert(0, str(_SHARED))
+
 
 def get_active_pool_stocks() -> list[str]:
     """读取选股池，获取所有未被淘汰且未退出的活跃股票"""
-    pool_path = Path.home() / ".trader" / "pool.json"
+    try:
+        from trader_shared.trader_paths import path as trader_path
+
+        pool_path = trader_path("pool")
+    except Exception:
+        pool_path = Path.home() / ".trader" / "pool.json"
     if not pool_path.exists():
         return []
     try:
