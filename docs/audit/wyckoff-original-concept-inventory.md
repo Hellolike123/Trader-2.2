@@ -4,7 +4,7 @@
 > 
 > 标注：✅ 已实现  ⚠️ 部分实现/有差距  ❌ 未实现
 >
-> 审计日期：2026-07-16（同日二次更新：互斥打分 + 原典缺口补齐；2026-08-01：P&F 水平计数落地；同日：箱体/量度 L0–L3 成熟度门禁定稿）
+> 审计日期：2026-07-16（同日二次更新：互斥打分 + 原典缺口补齐；2026-08-01：P&F 水平计数落地；同日：箱体/量度 L0–L3 成熟度门禁定稿；同日：JAC/止跌量/CM/AR P2-C 有界落地）
 
 ---
 
@@ -35,14 +35,14 @@
 |------|------|------|
 | **PS (Preliminary Support 初步止跌)** | ✅ | `_detect_preliminary_support`；与 SC 互斥让位 |
 | SC (Selling Climax 卖力高潮) | ✅ | |
-| AR (Automatic Rally 自动反弹) | ⚠️ | P1 已落地：`_find_sc_anchor` SSOT + `ar_high` 边界价 + `ar_volume_soft`（弱量仍亮）。**余缺口**：AR 后窗仍 ≤7 根（`anchor//2`），延迟 AR 可能 forming；原典「弱于 SC」量能规则 P2 再 soft 化 |
+| AR (Automatic Rally 自动反弹) | ✅ | P1 锚点 + P2-C 量能：`WYCKOFF_AR_PREFER_WEAK_VS_SC`（默认开）多候选 prefer 弱于 SC；`ar_volume_soft`=量能偏强/非原典弱量；`REQUIRE` 默认关。落点 `_detect_ar` / `config.py` |
 | ST (Secondary Test 二次测试) | ✅ | 广义 ST + L2/L3 门禁；**禁止软确认**；A 股参数放宽（量比/窗/邻近/刺穿）。`st_*`=Spring 确认，与 `secondary_test_sc_*` 分离。规格：`wyckoff-tr-maturity-l0l3-handoff.md` |
 | Spring (弹簧/震仓) | ✅ | |
 | Test of Spring (Spring 后确认测试) | ✅ | `spring_test_*` 与 `st_*` 双写（`_spring_test_fields_from_st`）；阶段机 C→D 认 Test |
 | SOS (Sign of Strength 强势信号) | ✅ | |
 | **BU (Back Up 回调买入)** | ✅ | `_detect_backup`（SOS 后缩量回踩） |
 | LPS (Last Point of Support 最后支撑点) | ✅ | 与 LPSY 打分互斥 + LPSY 分析层门控 |
-| **Jump Across the Creek (跳溪)** | ⚠️ | 未专名；强 SOS + Markup/BU 近似表达 |
+| **Jump Across the Creek (跳溪)** | ✅ | `_detect_jump_across_creek` → `jac_signal`/`jac_reason`/`jac_price`；SOS/Markup/BU 附近越过溪站稳；展示灯，不进 fusion |
 
 ---
 
@@ -56,7 +56,7 @@
 | **UTAD (Upthrust After Distribution)** | ✅ | `_detect_utad`（须 BC/SOW 背景 + UT） |
 | SOW (Sign of Weakness 弱势信号) | ✅ | |
 | LPSY (Last Point of Supply 最后供应点) | ✅ | 分析层+打分层派发背景门控；与 LPS 互斥 |
-| **Stopping Volume (止跌量)** | ⚠️ | 与 SC/VSA 部分重叠，未独立命名 |
+| **Stopping Volume (止跌量)** | ✅ | `_detect_stopping_volume` → `stopping_volume_*`；可与 SC 同亮，打分防双计；展示「止跌量」 |
 
 ---
 
@@ -102,7 +102,7 @@
 
 | 概念 | 状态 | 说明 |
 |------|------|------|
-| CM 视角 | ⚠️ | 作为设计原则使用，但无显式建模 CM 行为模式（打压吸筹 / 拉高吸筹 / 横盘吸筹 / 拉高派发 / 横盘派发 / 震仓派发） |
+| CM 视角 | ✅ | `_classify_cm_mode` → `cm_mode`/`cm_note`（六模式+none）；只读 phase+事件灯映射，不改 phase/fusion |
 
 ---
 
@@ -113,7 +113,7 @@
 | Effort vs Result | ✅ | |
 | No Supply（供应耗尽） | ✅ | |
 | **No Demand（无需求）** | ⚠️ | 高位缩量滞涨可部分由 PSY/BC 覆盖，未独立命名 |
-| Stopping Volume | ⚠️ | 与 SC/VSA 重叠，未独立命名 |
+| Stopping Volume | ✅ | 同 §四；独立专名灯 + 打分防双计 |
 | Ultimate Climax | ⚠️ | 与 SC/BC 重叠，未独立命名 |
 
 ---
@@ -127,5 +127,7 @@
 | **P1** | BU (Back Up) | SOS 确认后缺失最后一个买点信号 |
 | **P2（已落地）** | P&F 计数（目标价） | ✅ 水平计数主路径 + L3 展示门禁；见 `docs/plans/wyckoff-pnf-handoff.md` |
 | **P2（已落地）** | RS 相对强弱 vs 对照指数 | ✅ 已落地（见 §七）；阶段置信 + 池排序/慎跟 |
-| **P3** | UTAD / PS / PSY / Stopping Volume | 增强完整度 |
-| **P3** | CM 行为模式显式建模 | 设计层增强 |
+| **P3（已落地）** | Stopping Volume 专名 | ✅ 独立灯 + 与 SC 防双计；见 §四 |
+| **P3（已落地）** | CM 行为模式轻量映射 | ✅ `cm_mode`/`cm_note`；不改阶段/量度 |
+| **P3（已落地）** | Jump Across the Creek / AR P2-C | ✅ JAC 专名灯；AR prefer 弱于 SC（REQUIRE 默认关） |
+| **P3 余** | UTAD / PS / PSY（已有检测）完整度打磨、Ultimate Climax / No Demand 专名 | 增强完整度 |

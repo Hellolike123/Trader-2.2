@@ -25,6 +25,7 @@ _EVENT_SPECS: list[tuple[str, str, str]] = [
     ("st", "st_signal", "st_reason"),  # 兼容；与 spring_test 同亮时下方去重
     ("spring", "spring_signal", "spring_reason"),
     ("sos", "sos_signal", "sos_reason"),
+    ("jac", "jac_signal", "jac_reason"),
     ("bu", "bu_signal", "bu_reason"),
     ("lps", "lps_signal", "lps_reason"),
     ("psy", "psy_signal", "psy_reason"),
@@ -33,6 +34,7 @@ _EVENT_SPECS: list[tuple[str, str, str]] = [
     ("utad", "utad_signal", "utad_reason"),
     ("sow", "sow_signal", "sow_reason"),
     ("lpsy", "lpsy_signal", "lpsy_reason"),
+    ("stopping_volume", "stopping_volume_signal", "stopping_volume_reason"),
     ("compression", "compression_signal", "compression_reason"),
     ("trend_pullback", "trend_pullback_signal", "trend_pullback_reason"),
     ("trend_rally", "trend_rally_signal", "trend_rally_reason"),
@@ -93,6 +95,9 @@ class WyckoffStateView(TypedDict, total=False):
     phase_a_status: str  # none | forming | established
     confidence: float  # 0~1，启发式，非概率校准
     premature: WyckoffPrematureView
+    # CM 行为模式（轻量映射透出）
+    cm_mode: str
+    cm_note: str
 
     tr: WyckoffTRView
     active_events: list[str]
@@ -266,6 +271,10 @@ def to_wyckoff_state_view(
                 or wyk.get("secondary_test_sc_low")
                 or wyk.get("st_sc_low")
             )
+        if price is None and eid == "jac":
+            price = wyk.get("jac_price")
+        if price is None and eid == "stopping_volume":
+            price = wyk.get("stopping_volume_price")
         item: WyckoffEventItem = {
             "id": eid,
             "reason": str(wyk.get(reason_k) or ""),
@@ -297,6 +306,14 @@ def to_wyckoff_state_view(
         if oneline and note not in oneline and "不参与定论" not in oneline and "不抬升" not in oneline:
             oneline = f"{oneline} · {note}"
 
+    cm_mode = str(wyk.get("cm_mode") or "none").strip() or "none"
+    cm_note = str(wyk.get("cm_note") or "").strip()
+    if cm_mode != "none" and cm_note:
+        if oneline and cm_note not in oneline:
+            oneline = f"{oneline} · CM:{cm_note}"
+        elif not oneline:
+            oneline = f"CM:{cm_note}"
+
     tr_maturity = str(wyk.get("tr_maturity") or "").strip().upper()
     box_mode = str(wyk.get("box_display_mode") or "").strip().lower()
     if "measure_allowed" in wyk:
@@ -317,6 +334,8 @@ def to_wyckoff_state_view(
             "spring": bool(wyk.get("spring_premature")),
             "upthrust": bool(wyk.get("upthrust_premature")),
         },
+        "cm_mode": cm_mode,
+        "cm_note": cm_note,
         "tr": {
             "upper": wyk.get("tr_upper"),
             "lower": wyk.get("tr_lower"),

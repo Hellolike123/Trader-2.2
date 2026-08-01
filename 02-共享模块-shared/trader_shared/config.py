@@ -153,6 +153,19 @@ WYCKOFF_CLIMAX_ANCHOR_BARS: int = 15
 # AR 搜索上沿（SC 后最多扫几根）；默认 = climax 锚点窗，env 可覆。
 # 旧实现用 anchor//2（约 7）致延迟 AR 易 forming；见 phase-a-handoff §6 #6。
 WYCKOFF_AR_MAX_BARS: int = int(os.environ.get("WYCKOFF_AR_MAX_BARS", str(WYCKOFF_CLIMAX_ANCHOR_BARS)))
+# P2-C AR 量能（原典偏「弱于 SC」）：
+# - 选棒始终钉 SC 后「首段」结构 AR（禁止跳到更晚弱量棒抬高 ar_high）
+# - PREFER 保留开关兼容；soft 标注「量能偏强/非原典弱量」
+# - REQUIRE 默认关（硬否决放量 AR 对 A 股过严）
+WYCKOFF_AR_PREFER_WEAK_VS_SC: bool = os.environ.get(
+    "WYCKOFF_AR_PREFER_WEAK_VS_SC", "true"
+).lower() in ("true", "1", "yes")
+WYCKOFF_AR_REQUIRE_WEAK_VS_SC: bool = os.environ.get(
+    "WYCKOFF_AR_REQUIRE_WEAK_VS_SC", "false"
+).lower() in ("true", "1", "yes")
+WYCKOFF_AR_WEAK_VS_SC_RATIO: float = float(
+    os.environ.get("WYCKOFF_AR_WEAK_VS_SC_RATIO", "1.0")
+)
 # 广义 ST（Secondary Test of SC）：SC 后回测 SC 区，量/波幅须明显低于 SC 棒。
 # A 股适配（wyckoff-tr-maturity-l0l3-handoff §4）：只放宽检测参数，不砍「必须回测 SC 区」语义；
 # 禁止软确认（价格一直站在 SC 上方 ≠ ST）。可用 env 覆盖同名常量。
@@ -254,6 +267,7 @@ WYCKOFF_SCORE_PS: int = 8                       # Preliminary Support 初步止�
 WYCKOFF_SCORE_PSY: int = -8                     # Preliminary Supply 初步供应
 WYCKOFF_SCORE_BU: int = 12                      # Backup 备份买（SOS 后缩量回踩）
 WYCKOFF_SCORE_UTAD: int = -18                   # UTAD 派发末上冲（强于普通 UT）
+WYCKOFF_SCORE_STOPPING_VOLUME: int = 8          # Stopping Volume 止跌量（与 SC 同亮时不计分防双计）
 # P0-5 事件簇确认打分权重（顺序确认的簇比孤立信号更可靠 → 池/复盘分）
 WYCKOFF_SCORE_CLUSTER_CONFIRM: int = 15         # 积累确认(Spring→SOS 顺序) 额外加分
 WYCKOFF_SCORE_CLUSTER_DISTRIB: int = -15        # 派发确认(Upthrust→SOW 顺序) 额外扣分
@@ -456,6 +470,8 @@ __all__ = [
     "INDEX_CODE",
     "TREND_MA_SHORT", "TREND_MA_LONG", "TREND_FILTER_ENABLED", "TREND_MA_LOOKBACK",
     "WYCKOFF_MIN_BARS", "WYCKOFF_CLIMAX_ANCHOR_BARS", "WYCKOFF_AR_MAX_BARS",
+    "WYCKOFF_AR_PREFER_WEAK_VS_SC", "WYCKOFF_AR_REQUIRE_WEAK_VS_SC",
+    "WYCKOFF_AR_WEAK_VS_SC_RATIO",
     "WYCKOFF_ST_SC_VOL_RATIO", "WYCKOFF_ST_SC_MAX_BARS", "WYCKOFF_ST_SC_PROXIMITY",
     "WYCKOFF_ST_SC_MAX_PIERCE", "WYCKOFF_ST_SC_SPREAD_RATIO",
     "WYCKOFF_PHASE_A_SEED_MIN_QUALITY",
@@ -487,6 +503,7 @@ __all__ = [
     "WYCKOFF_SCORE_ST", "WYCKOFF_SCORE_LPS", "WYCKOFF_SCORE_LPSY",
     "WYCKOFF_SCORE_COMPRESSION", "WYCKOFF_SCORE_TREND_PB", "WYCKOFF_SCORE_TREND_RALLY",
     "WYCKOFF_SCORE_PS", "WYCKOFF_SCORE_PSY", "WYCKOFF_SCORE_BU", "WYCKOFF_SCORE_UTAD",
+    "WYCKOFF_SCORE_STOPPING_VOLUME",
     "WYCKOFF_SCORE_CLUSTER_CONFIRM", "WYCKOFF_SCORE_CLUSTER_DISTRIB", "WYCKOFF_SCORE_CLUSTER_FAIL",
     # ① TR 质量接打分
     "WYCKOFF_TR_QUALITY_NEUTRAL", "WYCKOFF_SCORE_TR_QUALITY_GAIN",

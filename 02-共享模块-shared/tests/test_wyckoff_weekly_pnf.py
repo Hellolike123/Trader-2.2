@@ -18,8 +18,12 @@ def _wk(o: float, h: float, l: float, c: float, v: float, d: date) -> dict:
     }
 
 
-def test_weekly_phase_a_seed_yields_cause_effect_targets() -> None:
-    """构造周线 SC→AR：weekly 路径须亮量度目标。"""
+def test_weekly_phase_a_seed_sc_ar_is_l1_without_st() -> None:
+    """周线 SC→AR：无成功 ST 时为 L1 雏形，不得假抬成熟箱 tr_* / 量度。
+
+    L0–L3 合同：仅 SC+AR（established）≠ 成熟箱；tr_lower/tr_upper 种子 overlay
+    与量度须 L2/L3（见 wyckoff-tr-maturity-l0l3-handoff）。
+    """
     bars: list[dict] = []
     d0 = date(2025, 11, 7)
     for i in range(20):
@@ -38,14 +42,11 @@ def test_weekly_phase_a_seed_yields_cause_effect_targets() -> None:
 
     assert weekly.get("sc_signal") is True
     assert weekly.get("ar_signal") is True
-    assert weekly.get("tr_lower") is not None
-    assert weekly.get("tr_upper") is not None
-    assert weekly.get("cause_effect_up_target") is not None
-    assert weekly.get("cause_effect_down_target") is not None
-    assert weekly.get("pnf_method") in (
-        "horizontal",
-        "vertical",
-        "height_1to1_fallback",
-    )
-    # 上目标应高于箱体上沿
-    assert float(weekly["cause_effect_up_target"]) > float(weekly["tr_upper"])
+    assert weekly.get("phase_a_status") == "established"
+    assert weekly.get("tr_maturity") == "L1"
+    assert weekly.get("measure_allowed") is False
+    assert weekly.get("cause_effect_up_target") is None
+    assert weekly.get("cause_effect_down_target") is None
+    pa = weekly.get("phase_a_range") or {}
+    assert pa.get("sc_low") is not None
+    assert pa.get("ar_high") is not None

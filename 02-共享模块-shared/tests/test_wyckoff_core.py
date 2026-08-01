@@ -399,13 +399,30 @@ class TestDetectAR:
         result = wyckoff_analysis(bars)
         assert result["ar_signal"] is False
 
-    def test_ar_low_volume_soft_still_triggers(self):
-        """SC 后反弹涨幅够但量能不足 → AR 仍触发，标 ar_volume_soft"""
+    def test_ar_weak_vs_sc_still_triggers_no_soft(self):
+        """P2-C：相对 SC 弱量反弹仍亮 AR，且非 soft（原典弱量）。"""
         bars = self._sc_then_rally_bars(rally_close=104, rally_vol=11)
         result = wyckoff_analysis(bars)
         assert result["ar_signal"] is True
-        assert result.get("ar_volume_soft") is True
-        assert "soft" in (result.get("ar_reason") or "")
+        assert result.get("ar_volume_soft") is False
+        assert "弱于SC" in (result.get("ar_reason") or "")
+
+    def test_ar_strong_vs_sc_marks_soft(self):
+        """P2-C：反弹量明显高于 SC → 仍亮 AR，标 soft（量能偏强/非原典弱量）。"""
+        from trader_shared.wyckoff_events import _detect_ar
+
+        # 仅 SC + 一根强量反弹（勿追加弱量尾棒，否则 prefer 会改选弱量）
+        bars = []
+        for i in range(20):
+            base = 150 - i * 2
+            bars.append(_make_bar(base, base + 3, base - 3, base, 10))
+        prev = bars[-1]["close"]
+        bars.append({"open": prev - 1, "high": 99, "low": 95, "close": 98, "volume": 250})
+        bars.append({"open": 98, "high": 105, "low": 97, "close": 104, "volume": 400})
+        ar = _detect_ar(bars)
+        assert ar["ar_signal"] is True
+        assert ar.get("ar_volume_soft") is True
+        assert "soft" in (ar.get("ar_reason") or "") or "偏强" in (ar.get("ar_reason") or "")
 
 
 class TestDetectSOS:
@@ -1588,17 +1605,17 @@ class TestPhaseARangeP1:
         assert "phase_a_range" in wyk
         assert "phase_a_status" in wyk
 
-    def test_ar_volume_soft_still_signals(self):
-        """量能不足 1.2× 时结构满足仍亮 AR，标 soft。"""
+    def test_ar_weak_vs_sc_not_soft(self):
+        """P2-C：弱于 SC 量的反弹仍亮 AR，不标 soft。"""
         bars = self._decline_base(16)
         bars.append(_make_bar(84.0, 85.0, 82.0, 83.0, 2500))
-        bars.append(_make_bar(83.2, 87.0, 83.0, 86.0, 80))  # +3.6%，缩量
+        bars.append(_make_bar(83.2, 87.0, 83.0, 86.0, 80))  # +3.6%，弱于 SC
         from trader_shared.wyckoff_events import _detect_ar
 
         ar = _detect_ar(bars)
         assert ar["ar_signal"] is True
-        assert ar["ar_volume_soft"] is True
-        assert "soft" in ar["ar_reason"]
+        assert ar["ar_volume_soft"] is False
+        assert "弱于SC" in ar["ar_reason"]
 
     def test_ar_event_light_note(self):
         from trader_shared.wyckoff_core import format_wyckoff_event_light
