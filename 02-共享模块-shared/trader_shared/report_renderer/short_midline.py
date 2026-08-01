@@ -136,9 +136,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
         except (TypeError, ValueError):
             return None
 
-    major_stage = str(r.get("major_stage") or "")
-    if major_stage == "None":
-        major_stage = ""
+    # major_stage 不进面板「阶段：」（日线四阶段仅门控/池）；阶段行见 conclusion.stage_line
     momentum = str(r.get("short_term_momentum") or "")
     market_env = r.get("market_env") or {}
     regime = ""

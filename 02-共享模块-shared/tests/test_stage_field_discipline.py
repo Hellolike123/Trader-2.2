@@ -217,6 +217,29 @@ def test_attach_stage_pack_fallback_not_fed_by_zouqiang():
         assert maj in MAJOR_STAGE_VOCAB or maj.startswith("蓄势")
 
 
+def test_mistery_gate_refuses_momentum_as_major_stage():
+    """走强不得经 mistery_gate 洗成主升。"""
+    from trader_shared.mistery_gate import compute_mistery_gate, _normalize_stage
+
+    assert _normalize_stage("走强") == ""
+    assert _normalize_stage("修复") == ""
+    assert _normalize_stage("蓄势偏强") == "蓄势"
+    g = compute_mistery_gate({
+        "major_stage": "走强",  # 误传动能词
+        "short_term_momentum": "走强",
+        "regime": "正常",
+        "current": 10,
+        "support": 9.5,
+        "stop": 9.0,
+        "confirm": 11,
+        "risk": 0.5,
+        "reward_near": 1.5,
+    })
+    # 缺 major → 降档；不得按「主升×走强」放行
+    assert "缺字段降档" in " ".join(g.get("notes") or []) or g.get("position_cap_pct", 99) <= 10
+    assert g.get("action") != "加仓"
+
+
 def test_resonance_wujieduan_plus_major_xushi_not_aligned():
     """中线无阶段 + major 蓄势 → 背景不通过，不得 aligned。"""
     cards = {
