@@ -473,7 +473,21 @@ def attach_short_midline_and_decision(
 
                 ensure_pullback_resonance_placeholder(report)
             except Exception:
-                report["resonance"] = {"schema_version": "resonance_v1", "grade": "empty"}
+                # 与 ensure_pullback_resonance_placeholder 同形，避免异源/残缺 schema
+                report["resonance"] = {
+                    "schema_version": "resonance_v1",
+                    "scene": "pullback_probe",
+                    "grade": "empty",
+                    "posts": {
+                        "background": {"ok": False, "note": "跳过"},
+                        "structure": {"ok": False, "note": "跳过"},
+                        "chip": {"ok": False, "note": "跳过"},
+                        "momentum": {"ok": False, "note": "跳过"},
+                    },
+                    "missing": ["background", "structure", "chip", "momentum"],
+                    "conflict": False,
+                    "summary_line": "共振：跳过",
+                }
             report.setdefault("buy_point_lifecycle", {"status": "none", "display_line": ""})
     except Exception as _sm_exc:
         # 短中线组装失败不阻断主报告；保留原字段

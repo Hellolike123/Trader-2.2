@@ -442,9 +442,20 @@ def ensure_report_analysis_cards(report: dict[str, Any]) -> dict[str, Any]:
 
     try:
         if "wyckoff_midline" not in cards or not isinstance(cards.get("wyckoff_midline"), dict):
-            # 法源 BUSINESS.md §2.0/§2.2：中线卡只认周线 wyckoff_midline；禁日线 wyckoff 冒充
+            # 法源 BUSINESS.md §2.0/§2.2：中线卡只认周线 wyckoff_midline；禁日线/unknown 冒充
             wm = report.get("wyckoff_midline")
+            _wm_tf = ""
+            _wm_st = ""
             if isinstance(wm, dict) and wm:
+                _wm_tf = str(wm.get("timeframe") or "").strip().lower()
+                _wm_st = str(wm.get("status") or "").strip().lower()
+            _weekly_ok = (
+                isinstance(wm, dict)
+                and bool(wm)
+                and _wm_tf in ("weekly", "week", "w")
+                and _wm_st not in ("insufficient", "no_data")
+            )
+            if _weekly_ok:
                 cards["wyckoff_midline"] = build_wyckoff_card(
                     wm,
                     role="midline",

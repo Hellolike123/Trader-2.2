@@ -50,6 +50,9 @@ def _background_stage(report: dict[str, Any]) -> tuple[str, str]:
     return _s(report.get("major_stage")), "major"
 
 
+_WEEKLY_TF = frozenset({"weekly", "week", "w"})
+
+
 def _weekly_wyckoff_ok(
     report: dict[str, Any], cards: dict[str, Any]
 ) -> tuple[bool, dict[str, Any], str]:
@@ -62,20 +65,21 @@ def _weekly_wyckoff_ok(
     if "wyckoff_midline" not in cards or not isinstance(cards.get("wyckoff_midline"), dict):
         return False, {}, "周线威科夫不足/不参与"
     w = _card(cards, "wyckoff_midline")
+    if not w:
+        return False, w, "周线威科夫不足/不参与"
     wm_raw = report.get("wyckoff_midline") if isinstance(report.get("wyckoff_midline"), dict) else {}
     tf = _s(w.get("timeframe") or wm_raw.get("timeframe")).lower()
-    if tf == "insufficient" or _s(wm_raw.get("timeframe")).lower() == "insufficient":
-        return False, w, "周线威科夫不足/不参与"
-    # 空卡（ensure 未写入有效周线载荷）
+    status = _s(w.get("status") or wm_raw.get("status")).lower()
+    # insufficient / no_data / 非周线 timeframe（含 unknown、daily）一律不参与
     if (
-        w.get("raw_available") is False
-        and not _s(w.get("summary_line"))
-        and not _s(w.get("phase"))
-        and not _s(w.get("bias"))
-        and w.get("direction") in (None, 0, "0")
+        tf == "insufficient"
+        or _s(wm_raw.get("timeframe")).lower() == "insufficient"
+        or status in ("insufficient", "no_data")
+        or tf not in _WEEKLY_TF
     ):
         return False, w, "周线威科夫不足/不参与"
-    if not w:
+    # 空卡（ensure 未写入有效周线载荷）
+    if w.get("raw_available") is False:
         return False, w, "周线威科夫不足/不参与"
     return True, w, ""
 

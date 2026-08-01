@@ -222,6 +222,40 @@ def test_background_daily_wyckoff_alone_not_ok():
     assert "威科夫/偏多背景（阶段缺省）" not in res["posts"]["background"]["note"]
 
 
+def test_background_sparse_unknown_midline_not_ok():
+    """稀疏/no_data/unknown 中线卡不得靠 major_stage 洗白背景岗。"""
+    r = _base_report(major_stage="蓄势")
+    r["analysis_cards"]["wyckoff_midline"] = {
+        "direction": 0,
+        "bias": "neutral",
+        "timeframe": "unknown",
+        "status": "no_data",
+        "summary_line": "威科夫：数据不足 · 中性",
+        "raw_available": False,
+        "phase": "none",
+    }
+    r["wyckoff_midline"] = {"phase": "none"}
+    res = build_resonance(r)
+    assert res["posts"]["background"]["ok"] is False
+    assert res["grade"] != "aligned"
+
+
+def test_background_daily_timeframe_midline_not_ok():
+    """timeframe=daily 的 midline 卡视为冒充，背景不参与。"""
+    r = _base_report(major_stage="蓄势")
+    r["analysis_cards"]["wyckoff_midline"] = {
+        "direction": 1,
+        "bias": "bullish",
+        "timeframe": "daily",
+        "status": "ok",
+        "summary_line": "日线弹簧",
+        "raw_available": True,
+    }
+    res = build_resonance(r)
+    assert res["posts"]["background"]["ok"] is False
+    assert res["grade"] != "aligned"
+
+
 def test_background_weekly_midline_stage_with_weekly_card_ok():
     """周线 midline 阶段吸筹/蓄势 + 周线卡可用 → 背景可过（其余岗齐则 aligned）。"""
     r = _base_report(major_stage="派发")  # major 不宜试探词，但中线阶段优先

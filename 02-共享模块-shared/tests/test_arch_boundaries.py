@@ -118,6 +118,21 @@ def test_ensure_wyckoff_midline_no_daily_fallback():
     assert mid.get("phase") in ("", None) or mid.get("timeframe") == "insufficient"
 
 
+def test_ensure_wyckoff_midline_rejects_sparse_unknown():
+    """稀疏/无 weekly timeframe 的 wyckoff_midline 不得建成可用中线卡。"""
+    from trader_shared.analysis_cards import ensure_report_analysis_cards
+
+    report: dict = {
+        "current": 10.0,
+        "wyckoff_midline": {"phase": "none"},
+        "fusion": {"signals_detail": {}},
+    }
+    cards = ensure_report_analysis_cards(report)
+    mid = cards["wyckoff_midline"]
+    assert mid.get("timeframe") == "insufficient"
+    assert mid.get("status") == "insufficient"
+
+
 def test_match_prefers_analysis_cards_over_raw():
     """上下文优先读卡：卡上是一买，顶层错误字段应被卡覆盖。"""
     from trader_shared.strategy_match import build_match_context, match_strategies
