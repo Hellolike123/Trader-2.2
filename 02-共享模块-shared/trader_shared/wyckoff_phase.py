@@ -1,7 +1,7 @@
 """Wyckoff phase state machine + persistence."""
 from __future__ import annotations
 
-import os
+from pathlib import Path
 from typing import Any
 
 from trader_shared.light_data import to_float
@@ -161,7 +161,20 @@ def _apply_p2_phase_a_gates(
     })
     return out
 
-_WYCKOFF_PHASE_FILE = os.path.expanduser("~/.trader/wyckoff_phase.json")
+def _wyckoff_phase_path() -> Path:
+    """``~/.trader/wyckoff_phase.json`` (via trader_paths).
+
+    Tests may monkeypatch ``_WYCKOFF_PHASE_FILE`` to a custom path str/Path.
+    """
+    override = globals().get("_WYCKOFF_PHASE_FILE")
+    if override:
+        return Path(override)
+    from trader_shared.trader_paths import path as trader_path
+    return trader_path("wyckoff_phase")
+
+
+# Backward-compat alias (None → use trader_paths); tests may monkeypatch.
+_WYCKOFF_PHASE_FILE: str | Path | None = None
 
 def _scan_for_signal(
     bars: list[dict],
@@ -629,10 +642,9 @@ def _load_phase_state(symbol: str, timeframe: str = "daily") -> dict[str, Any] |
     if not symbol:
         return None
     try:
-        from pathlib import Path
         from trader_shared.json_atomic import load_json_dict
 
-        data = load_json_dict(Path(_WYCKOFF_PHASE_FILE))
+        data = load_json_dict(_wyckoff_phase_path())
         rec = data.get(_phase_key(symbol, timeframe))
         return rec if isinstance(rec, dict) else None
     except (OSError, TypeError, ValueError):
@@ -643,7 +655,6 @@ def _save_phase_state(symbol: str, timeframe: str, phase_state: dict[str, Any]) 
     if not symbol:
         return
     try:
-        from pathlib import Path
         from trader_shared.json_atomic import locked_rmw_json
 
         key = _phase_key(symbol, timeframe)
@@ -652,7 +663,7 @@ def _save_phase_state(symbol: str, timeframe: str, phase_state: dict[str, Any]) 
             data[key] = phase_state
             return data
 
-        locked_rmw_json(Path(_WYCKOFF_PHASE_FILE), _mutate)
+        locked_rmw_json(_wyckoff_phase_path(), _mutate)
     except OSError:
         pass
 

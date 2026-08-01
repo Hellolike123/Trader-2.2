@@ -11,9 +11,13 @@ from trader_shared.safe_cast import safe_float
 from trader_shared._logging import get_logger
 from trader_shared.interfaces import DataFetcher
 from trader_shared.fetchers import get_fetcher
+from trader_shared.trader_paths import path as trader_path
 
 _logger = get_logger(__name__)
-_TRAILING_WATERMARK_PATH = Path(os.path.expanduser("~/.trader/trailing_stop_watermark.json"))
+
+
+def _trailing_watermark_path() -> Path:
+    return trader_path("trailing_stop_watermark")
 
 
 def load_trailing_watermark(symbol: str, path: Path | None = None) -> float | None:
@@ -21,7 +25,7 @@ def load_trailing_watermark(symbol: str, path: Path | None = None) -> float | No
     sym = str(symbol or "").strip()
     if not sym:
         return None
-    store = path or _TRAILING_WATERMARK_PATH
+    store = path or _trailing_watermark_path()
     try:
         if not store.exists():
             return None
@@ -39,7 +43,7 @@ def save_trailing_watermark(symbol: str, value: float, path: Path | None = None)
     fv = to_float(value)
     if not sym or fv is None or fv <= 0:
         return
-    store = path or _TRAILING_WATERMARK_PATH
+    store = path or _trailing_watermark_path()
     lock_path = store.with_suffix(store.suffix + ".lock")
     try:
         store.parent.mkdir(parents=True, exist_ok=True)

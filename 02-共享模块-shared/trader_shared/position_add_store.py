@@ -10,26 +10,21 @@ SSOT: ``~/.trader/last_add_dates.json``（可用 env ``TRADER_LAST_ADD_PATH`` �
 from __future__ import annotations
 
 import json
-import os
 import threading
 from pathlib import Path
 from typing import Any
 
 from trader_shared._logging import get_logger
 from trader_shared.json_atomic import load_json_dict, locked_rmw_json
+from trader_shared.trader_paths import path as trader_path
 
 _logger = get_logger(__name__)
 _LOCK = threading.Lock()  # 线程内互斥；跨进程另有 flock
 
-_STORE_ENV = "TRADER_LAST_ADD_PATH"
-_DEFAULT_STORE = Path(os.path.expanduser("~/.trader/last_add_dates.json"))
-
 
 def _store_path() -> Path:
-    override = (os.environ.get(_STORE_ENV) or "").strip()
-    if override:
-        return Path(os.path.expanduser(override))
-    return _DEFAULT_STORE
+    """``~/.trader/last_add_dates.json`` or ``TRADER_LAST_ADD_PATH``."""
+    return trader_path("last_add_dates")
 
 
 def _today_iso() -> str:
@@ -146,10 +141,10 @@ def record_last_add(
 def _sync_pool_item(keys: list[str], trade_date: str) -> None:
     """尽力把 pool.json 对应票也打上 last_add_date（失败静默）。"""
     try:
-        path = Path(os.path.expanduser("~/.trader/pool.json"))
-        if not path.exists():
+        pool_path = trader_path("pool")
+        if not pool_path.exists():
             return
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(pool_path.read_text(encoding="utf-8"))
         items = payload.get("items")
         if not isinstance(items, list):
             return
@@ -168,17 +163,17 @@ def _sync_pool_item(keys: list[str], trade_date: str) -> None:
                     item["last_add_date"] = trade_date
                     changed = True
         if changed:
-            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            pool_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     except Exception as exc:
         _logger.debug("pool last_add_date sync skipped: %s", exc)
 
 
 def _from_pool(keys: list[str]) -> str | None:
     try:
-        path = Path(os.path.expanduser("~/.trader/pool.json"))
-        if not path.exists():
+        pool_path = trader_path("pool")
+        if not pool_path.exists():
             return None
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(pool_path.read_text(encoding="utf-8"))
         items = payload.get("items") or []
         keyset = {k.upper() for k in keys}
         for item in items:

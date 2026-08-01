@@ -11,16 +11,13 @@ L2：failed 写入 ~/.trader/buy_point_lifecycle.json；跨日禁止接旧 signa
 """
 from __future__ import annotations
 
-import os
 from datetime import date
 from pathlib import Path
 from typing import Any
 
 from trader_shared.json_atomic import load_json_dict, locked_rmw_json
 from trader_shared.signal_utils import normalize_signal_id
-
-_STORE_ENV = "TRADER_BUY_POINT_LIFECYCLE_PATH"
-_DEFAULT_STORE = Path(os.path.expanduser("~/.trader/buy_point_lifecycle.json"))
+from trader_shared.trader_paths import path as trader_path
 
 
 def _f(x: Any) -> float | None:
@@ -36,8 +33,8 @@ def _f(x: Any) -> float | None:
 
 
 def store_path() -> Path:
-    override = (os.environ.get(_STORE_ENV) or "").strip()
-    return Path(override) if override else _DEFAULT_STORE
+    """``~/.trader/buy_point_lifecycle.json`` or ``TRADER_BUY_POINT_LIFECYCLE_PATH``."""
+    return trader_path("buy_point_lifecycle")
 
 
 def _has_buy_signal(

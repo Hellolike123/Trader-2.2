@@ -2,14 +2,16 @@
 
 所有函数纯计算，无副作用，无网络请求。
 数据存储在 ~/.trader/position.json（持仓）和 ~/.trader/t0_ledger.jsonl（台账）。
+路径经 ``trader_paths`` 解析（可用 ``TRADER_ROOT`` 覆盖根目录）。
 """
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from trader_shared.trader_paths import path as trader_path
 
 
 # ── 默认配置（费率 SSOT：trader_shared.config）────────────────────────────
@@ -23,8 +25,11 @@ except Exception:
 DEFAULT_MIN_EDGE_PCT = 0.8       # 费后最小净空间 %
 DEFAULT_DAY_LOSS_PCT = 1.0       # 当日 T 亏损占市值上限则停
 DEFAULT_MAX_T_COUNT = 5          # 当日 T 操作次数上限
-POSITION_FILE = Path.home() / ".trader" / "position.json"
-LEDGER_FILE = Path.home() / ".trader" / "t0_ledger.jsonl"
+
+
+# Module attrs for monkeypatch / t0_ledger import; defaults from trader_paths registry.
+POSITION_FILE = trader_path("position")
+LEDGER_FILE = trader_path("t0_ledger")
 
 
 # ── 持仓管理 ──────────────────────────────────────────────────────────────

@@ -8,13 +8,13 @@
 
 from __future__ import annotations
 
-import os
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
 from trader_shared._logging import get_logger
 from trader_shared.json_atomic import load_json_dict, locked_rmw_json
+from trader_shared.trader_paths import path as trader_path
 
 _logger = get_logger(__name__)
 
@@ -38,7 +38,11 @@ def _prev_trading_day_iso(as_of: date | None = None) -> str:
         base = as_of or date.today()
         return (base - timedelta(days=1)).isoformat()
 
-_CHIP_HISTORY_PATH = Path(os.path.expanduser("~/.trader/chip_history.json"))
+
+def _chip_history_path() -> Path:
+    """``~/.trader/chip_history.json`` (via trader_paths)."""
+    return trader_path("chip_history")
+
 
 # 搬家警告阈值
 _MIGRATION_WARNING_THRESHOLD = 0.40  # 底部峰下降 > 40% → 警告
@@ -50,13 +54,13 @@ _BACKFILL_DAYS = 10
 
 def _load_history() -> dict[str, Any]:
     """Load chip history from file（无锁读；写路径须走 locked_rmw）。"""
-    return load_json_dict(_CHIP_HISTORY_PATH)
+    return load_json_dict(_chip_history_path())
 
 
 def _save_history(history: dict[str, Any]) -> None:
     """锁内全量写（调用方应已合并好；并发写请用 locked_rmw mutator）。"""
     try:
-        locked_rmw_json(_CHIP_HISTORY_PATH, lambda _old: history if isinstance(history, dict) else {})
+        locked_rmw_json(_chip_history_path(), lambda _old: history if isinstance(history, dict) else {})
     except OSError as exc:
         _logger.debug("Chip history save failed: %s", exc)
 
@@ -123,7 +127,7 @@ def save_chip_snapshot(
         return history
 
     try:
-        locked_rmw_json(_CHIP_HISTORY_PATH, _mutate)
+        locked_rmw_json(_chip_history_path(), _mutate)
     except OSError as exc:
         _logger.debug("Chip history save failed: %s", exc)
 
@@ -208,7 +212,7 @@ def backfill_history(
             return store
 
         try:
-            locked_rmw_json(_CHIP_HISTORY_PATH, _mutate)
+            locked_rmw_json(_chip_history_path(), _mutate)
         except OSError as exc:
             _logger.debug("Chip history backfill save failed: %s", exc)
             return False

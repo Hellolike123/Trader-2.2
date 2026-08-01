@@ -63,8 +63,11 @@ except ImportError:
     def fill_by_target(target, pnl_pct, days_held, outcome): pass
 
 
+from trader_shared.trader_paths import path as trader_path
+
 CACHE_DIR = Path(os.environ.get("T0_CACHE_DIR", Path.home() / ".t0-trader"))
-CACHE_PATH = Path(os.environ.get("T0_TRADER_STATE_PATH", CACHE_DIR / "state.json"))
+# Prefer registry (honors T0_TRADER_STATE_PATH / T0_CACHE_DIR / TRADER_ROOT)
+CACHE_PATH = trader_path("t0_state")
 COOLDOWN_MINUTES = 15
 
 BUY_TRIGGERED = "BUY_TRIGGERED"
