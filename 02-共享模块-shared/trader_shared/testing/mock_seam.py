@@ -78,6 +78,11 @@ class MockProvider:
     def fetch_qfq_daily(self, sec, days: int = 365):
         return gen_bars(80, 9.0, 0.05)
 
+    def fetch_weekly(self, sec, datalen: int | None = None, **kw):
+        """指数/个股周线；RS 与中线同源，缺则 get_weekly 告警。"""
+        n = int(datalen or 40)
+        return gen_bars(max(n, 16), 9.0, 0.12)
+
     def fetch_kline(self, sec, **kw):
         return []
 

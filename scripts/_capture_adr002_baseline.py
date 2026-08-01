@@ -83,6 +83,10 @@ class _MockProvider:
     def fetch_qfq_daily(self, sec, days=365):
         return _gen_bars(80, 9.0, 0.05)
 
+    def fetch_weekly(self, sec, datalen=None, **kw):
+        n = int(datalen or 40)
+        return _gen_bars(max(n, 16), 9.0, 0.12)
+
     def fetch_kline(self, sec, **kw):
         return []
 
