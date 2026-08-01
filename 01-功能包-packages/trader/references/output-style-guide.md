@@ -2,7 +2,8 @@
 
 > Format rules specific to trader output. Absolute structure: `output-template.md`.
 > Production render: `trader_shared.report_core.render_single` → default `render_short_midline`.
-> Pipeline: `run_analysis.build_report` → mid_key_prices + mistery_gate + chan_discipline merge → conclusion → render.
+> Pipeline: `report_builder` → `attach_short_midline_and_decision` → `render_short_midline`
+> （builder 内：mid_key_prices + mistery_gate + chan_discipline merge → conclusion → attach）。
 
 ## Prohibited Content
 

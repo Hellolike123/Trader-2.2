@@ -200,11 +200,30 @@ def _unwrap_wyck(wyck_result: Any) -> dict[str, Any]:
     return wyck_result
 
 
+def _chanlun_midline_timeframe(chanlun_midline: Any) -> str:
+    """中线缠论时框：weekly | daily_fallback | …（空=未标注，单测/旧载荷兼容）。"""
+    chan = _unwrap_chan(chanlun_midline)
+    return str(chan.get("timeframe") or "").strip()
+
+
+def _chan_dir_for_midline_verdict(chanlun_midline: Any) -> int:
+    """中线定论/方向合成用缠论方向。
+
+    BUSINESS.md §2.0 / §2.1：daily_fallback 仅结构展示，禁止驱动中线阶段/定论/方向。
+    仅 timeframe==weekly（或未标注兼容载荷）可参与合成。
+    """
+    tf = _chanlun_midline_timeframe(chanlun_midline)
+    if tf == "daily_fallback":
+        return 0
+    return chanlun_midline_dir(chanlun_midline)
+
+
 def chanlun_midline_dir(chanlun_midline: Any) -> int:
     """中线定论用缠论方向：与 resolve_chanlun_primary / 短线灯标同源。
 
     - 买卖点（含类一/类二）与背驰：一律跟主解析，避免「行文类二卖、定论却上涨」。
     - 仅 trend/structure 兜底时：structure_confidence=low → 0（不靠结构词硬翻方向）。
+    - 调用方若做中线定论合成，须经 `_chan_dir_for_midline_verdict`（daily_fallback→0）。
     """
     chan = _unwrap_chan(chanlun_midline)
     if not chan:
@@ -285,8 +304,11 @@ def midline_theory_dirs(
     wyckoff_midline: Any = None,
     major_stage: str = "",
 ) -> tuple[int, str]:
-    """返回 (chan_dir, wyck_bias)。"""
-    return chanlun_midline_dir(chanlun_midline), wyckoff_midline_bias(wyckoff_midline, major_stage=major_stage)
+    """返回 (chan_dir, wyck_bias)。chan_dir 已闸 daily_fallback→0（§2.0）。"""
+    return (
+        _chan_dir_for_midline_verdict(chanlun_midline),
+        wyckoff_midline_bias(wyckoff_midline, major_stage=major_stage),
+    )
 
 
 def _midline_view_from_theory(
@@ -296,13 +318,21 @@ def _midline_view_from_theory(
     weekly_frame: str | None = None,
     major_stage: str = "",
 ) -> str:
-    """中线看法：周线缠+威合成（B1A），禁止四阶段词。"""
+    """中线看法：周线缠+威合成（B1A），禁止四阶段词。
+
+    BUSINESS.md §2.0：daily_fallback 缠论不驱动中线看法/方向。
+    """
     if weekly_frame == "破坏":
         return "中线框破坏 · 战略减/清倾向"
 
-    chan_dir, wyck_bias = midline_theory_dirs(chanlun_midline, wyckoff_midline, major_stage=major_stage)
+    # 看法方向合成：daily_fallback 缠论视为无方向（仅展示）
+    chan_dir = _chan_dir_for_midline_verdict(chanlun_midline)
+    wyck_bias = wyckoff_midline_bias(wyckoff_midline, major_stage=major_stage)
     chan = _unwrap_chan(chanlun_midline)
     st = str(chan.get("structure_type") or "").strip()
+    # daily_fallback：结构文案也不进看法（避免日线结构词冒充中线看法）
+    if _chanlun_midline_timeframe(chanlun_midline) == "daily_fallback":
+        st = ""
 
     if wyck_bias == "strong_bear":
         return "中线慎跟 · 偏空信号"
@@ -313,7 +343,6 @@ def _midline_view_from_theory(
     if chan_dir < 0:
         # 可用 structure_type 主词，不得插入 major_stage
         if st and not st.startswith("线段不足") and st != "无结构":
-            main = st.replace("趋势", "").strip() or st
             if "下跌" in st:
                 return f"{st} · 暂缓跟踪"
             if "盘整" in st:
@@ -334,24 +363,26 @@ def synthesize_midline_verdict(
     wyckoff_midline: Any = None,
     fallback_stage: str = "",
 ) -> dict:
-    """中线定论：威科夫中线 + 缠论中线 各自独立判定后合成（用户要求）。
+    """中线定论：威科夫中线阶段 + 周线缠论结构副读合成。
 
-    两源各自负责自己的分析与输出（report_core 已分别渲染威科夫/缠论段），
-    本函数只做最后一步：把两者方向(+1/0/-1) × 置信 合成一个阶段定论。
+    BUSINESS.md §2.0 Dual-track：
+    - 中线「阶段」只听周线威科夫；缠论是结构副读，禁止因「缠论领先」改写 stage。
+    - daily_fallback 缠论仅展示，不得驱动 stage / bias / direction。
 
-    合成矩阵（wyck_dir, chan_dir）：
-      (1,1) 主升          (1,0) 蓄势          (1,-1) 蓄势·警惕转弱
-      (0,1) 主升初期       (0,-1) 转弱         (-1,0) 派发
-      (-1,1) 派发·警惕      (-1,-1) 衰退        (0,0) 回退位置分类
+    bias/confidence 仍可听周线缠论方向提示；stage 在威科夫无方向时钉死威科夫阶段词
+    （吸筹/派发/…），不得落成「主升初期/转弱」等缠论抢戏标签。
 
     Returns:
         {"stage","bias","confidence","source","note","wyck_label","chan_label","wyck_dir","chan_dir"}
     """
-    chan_dir = chanlun_midline_dir(chanlun_midline)      # +1/0/-1
+    # A2：daily_fallback → chan_dir=0（不定论/不改方向）
+    _chan_tf = _chanlun_midline_timeframe(chanlun_midline)
+    _chan_display_only = _chan_tf == "daily_fallback"
+    chan_dir = _chan_dir_for_midline_verdict(chanlun_midline)  # +1/0/-1
     wyck_bias = wyckoff_midline_bias(wyckoff_midline)    # strong_bull/strong_bear/neutral
     wyck_dir = {"strong_bull": 1, "strong_bear": -1, "neutral": 0}.get(wyck_bias, 0)
 
-    # ── 两源各自独立输出（展示用，不参与合成）──
+    # ── 两源各自独立输出（展示用；daily_fallback 仍可出现在 chan_label）──
     chan = _unwrap_chan(chanlun_midline)
     w = _unwrap_wyck(wyckoff_midline)
     _st = str(chan.get("structure_type") or "无结构") if isinstance(chan, dict) else "无结构"
@@ -370,9 +401,11 @@ def synthesize_midline_verdict(
             else ("底背驰" if _div.get("bottom_divergence") else "无背驰")
         )
     chan_label = f"{_st}·置信{_conf}·{_chan_sig}"
+    if _chan_display_only:
+        chan_label = f"{chan_label}·日线回退仅展示"
     wyck_label = str(w.get("phase_label") or "无明确阶段") if isinstance(w, dict) else "无明确阶段"
 
-    # ── 阶段词汇映射 ──
+    # ── 威科夫阶段词汇（stage 法源）──
     _PHASE_SHORT = {
         "accumulation_a": "吸筹", "accumulation_b": "吸筹",
         "accumulation_c": "吸筹", "accumulation_d": "吸筹",
@@ -399,8 +432,10 @@ def synthesize_midline_verdict(
         and chan_dir != 0
     ):
         _chan_word = f"{_chan_word}（{_chan_sig}）"
+    elif _chan_display_only:
+        _chan_word = "日线回退仅展示"
 
-    # ── 合成矩阵 ──
+    # ── bias/confidence 矩阵（方向提示）；stage 另按威科夫钉死 ──
     key = (wyck_dir, chan_dir)
     if key == (1, 1):
         stage, bias, confidence = "主升", "bull", "high"
@@ -409,9 +444,21 @@ def synthesize_midline_verdict(
     elif key == (1, -1):
         stage, bias, confidence = "蓄势·警惕转弱", "bull", "low"
     elif key == (0, 1):
-        stage, bias, confidence = "主升初期", "bull", "mid"
+        # 旧：主升初期（缠论抢戏）→ 阶段改钉威科夫；bias 仍可偏多作方向提示
+        bias, confidence = "bull", "mid"
+        stage = (
+            wyck_phase_short
+            if wyck_phase_short != "无阶段"
+            else (fallback_stage or "震荡")
+        )
     elif key == (0, -1):
-        stage, bias, confidence = "转弱", "bear", "mid"
+        # 旧：转弱（缠论抢戏）→ 阶段钉威科夫；bias 仍可偏空
+        bias, confidence = "bear", "mid"
+        stage = (
+            wyck_phase_short
+            if wyck_phase_short != "无阶段"
+            else (fallback_stage or "震荡")
+        )
     elif key == (-1, 1):
         stage, bias, confidence = "派发·警惕", "bear", "low"
     elif key == (-1, 0):
@@ -419,7 +466,10 @@ def synthesize_midline_verdict(
     elif key == (-1, -1):
         stage, bias, confidence = "衰退", "bear", "high"
     else:  # (0, 0) 双源皆无明确方向
-        stage = fallback_stage or "震荡"
+        if wyck_phase_short != "无阶段":
+            stage = wyck_phase_short
+        else:
+            stage = fallback_stage or "震荡"
         bias, confidence = "neutral", "low"
 
     source = "fallback_position" if key == (0, 0) else "wyckoff+chanlun"
@@ -428,7 +478,7 @@ def synthesize_midline_verdict(
     if confidence == "high" and _conf == "low":
         confidence = "mid"
 
-    # ── 合成注记（谁真有方向谁「领先」；无阶段勿伪称领先）──
+    # ── 合成注记：缠论不定阶段，禁止「缠论…领先」改写阶段叙事 ──
     if source == "fallback_position":
         note = f"威科夫{wyck_phase_short} × 缠论{_chan_word} → 双源无明确方向，回退位置分类（{stage}）"
     elif confidence == "low":
@@ -436,7 +486,8 @@ def synthesize_midline_verdict(
     elif key in ((1, 1), (-1, -1)):
         note = f"威科夫{wyck_phase_short} × 缠论{_chan_word} → 共振"
     elif wyck_dir == 0 and chan_dir != 0:
-        note = f"威科夫{wyck_phase_short} × 缠论{_chan_word}领先"
+        # A1：结构副读，不称「领先」
+        note = f"威科夫{wyck_phase_short} × 缠论{_chan_word}（结构副读·不定阶段）"
     elif chan_dir == 0 and wyck_dir != 0:
         note = f"威科夫{wyck_phase_short}领先 × 缠论{_chan_word}"
     else:

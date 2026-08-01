@@ -119,17 +119,18 @@ report_builder→  全部层
 | 变量 | 值 | 行为 |
 |------|-----|------|
 | `FUSION_FROM_CARDS` | **缺省** / `cards` / `true` / `1` / `on` / `auto` | **生产默认**：三席优先意见卡，不足回退 classic |
-| | `classic` / `false` / `0` / `off` | 仅原 `_chan_to_signal` / `_momentum_to_signal` / VPF 路径 |
+| | `classic` / `false` / `0` / `off` | deprecated（仅对照）。当前实现常先 raw→现建卡→card_signals（`fusion_input_path=classic_via_cards`）；真 classic mappers 仅该路径失败时回退 |
 | | `compare` / `both` / `dual` | 两路都算；主结果用 cards；写入 `fusion_compare` |
 
-结果字段：`fusion_input_path` = `classic` \| `cards`；可选 `fusion_compare`。
+结果字段：`fusion_input_path` = `classic` \| `classic_via_cards` \| `cards`；可选 `fusion_compare`。
 
 **默认 cards（与实现钉死）**
 
 - 缺省：`os.environ.get("FUSION_FROM_CARDS") or "cards"` → `cards`。
 - 动量卡生产形态已与 classic 对齐（见 `test_fusion_cards_parity_bugs.py`）。
-- 回退：`FUSION_FROM_CARDS=classic`；对账：`compare` 或 `scripts/compare_fusion_paths.py`。
+- 回退：`FUSION_FROM_CARDS=classic`（过渡期可能记为 `classic_via_cards`）；对账：`compare` 或 `scripts/compare_fusion_paths.py`。
 - **Agent 禁止**再写「默认 classic」；改默认须同步改 `_fusion_input_mode` + 单测 + 本文。
+- `classic_via_cards` 是过渡实现细节，**不改变**生产默认 cards 行为（法源 BUSINESS.md §2.7）。
 
 ### 真票 classic vs cards 对账
 

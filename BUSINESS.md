@@ -180,9 +180,10 @@
 | `FUSION_FROM_CARDS` | 行为 |
 |---------------------|------|
 | 缺省 / `cards` / `true` / `1` | **默认**：三席优先意见卡；失败打 warning 再 classic |
-| `classic` / `false` / `0` | 强制 classic 标准化（deprecated，仅对照） |
+| `classic` / `false` / `0` | deprecated（仅对照）。实现上常先走 raw→现建卡→`fusion_card_signals`（`fusion_input_path=classic_via_cards`）；真 classic mappers 仅作该路径失败时的回退 |
 | `compare` / `dual` | 两路都算；主结果用 cards；写入 `fusion_compare` 供对账 |
 
+**生产默认仍是 cards**；勿把 `classic_via_cards` 当成生产主路径。  
 报告路径仍会预产 `analysis_cards`（策略 📐 / ensure 用），与 fusion 默认输入解耦。  
 实现：`fusion_core._fusion_input_mode` + `analysis/fusion_card_signals.py` + `merge_decisions(..., analysis_cards=...)`。  
 边界与 classic/compare 回退对账：`docs/designs/analysis-strategy-boundaries.md` §5。

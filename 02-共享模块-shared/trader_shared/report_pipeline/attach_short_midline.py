@@ -133,8 +133,15 @@ def attach_short_midline_and_decision(
                 _cmid_inner = _cmid.get("chanlun") or {}
             else:
                 _cmid_inner = _cmid if isinstance(_cmid, dict) else {}
-            _zones_weekly = list(_cmid_inner.get("zones") or [])
-            _st_weekly = str(_cmid_inner.get("structure_type") or "")
+            # A3 / BUSINESS §2.0：仅真周线缠论 zones 可进 weekly_frame / pivot_position_weekly；
+            # daily_fallback 与 mid_key_prices 同构——不得冒充周中枢。
+            _cmid_tf = str((_cmid_inner or {}).get("timeframe") or "").strip()
+            if _cmid_tf == "weekly":
+                _zones_weekly = list(_cmid_inner.get("zones") or [])
+                _st_weekly = str(_cmid_inner.get("structure_type") or "")
+            else:
+                _zones_weekly = []
+                _st_weekly = ""
         except Exception:
             _st_weekly = ""
             _zones_weekly = []
@@ -216,7 +223,8 @@ def attach_short_midline_and_decision(
         try:
             _sd = (report_fusion or {}).get("signals_detail") or {}
             _cs = []
-            for _n in ("chan", "momentum", "wyckoff"):
+            # 法源 BUSINESS.md §2.4：短线第三席 = VPF（非日线威科夫 stub）
+            for _n in ("chan", "momentum", "vpf"):
                 _s = _sd.get(_n) if isinstance(_sd.get(_n), dict) else {}
                 if _s.get("confidence") is not None:
                     _cs.append(float(_s["confidence"]))
@@ -460,7 +468,26 @@ def attach_short_midline_and_decision(
         except Exception as _pipe_exc:
             _logger.debug("report_pipeline skip: %s", _pipe_exc)
             report.setdefault("analysis_cards", {})
-            report.setdefault("resonance", {"schema_version": "resonance_v1", "grade": "empty"})
+            try:
+                from trader_shared.resonance import ensure_pullback_resonance_placeholder
+
+                ensure_pullback_resonance_placeholder(report)
+            except Exception:
+                # 与 ensure_pullback_resonance_placeholder 同形，避免异源/残缺 schema
+                report["resonance"] = {
+                    "schema_version": "resonance_v1",
+                    "scene": "pullback_probe",
+                    "grade": "empty",
+                    "posts": {
+                        "background": {"ok": False, "note": "跳过"},
+                        "structure": {"ok": False, "note": "跳过"},
+                        "chip": {"ok": False, "note": "跳过"},
+                        "momentum": {"ok": False, "note": "跳过"},
+                    },
+                    "missing": ["background", "structure", "chip", "momentum"],
+                    "conflict": False,
+                    "summary_line": "共振：跳过",
+                }
             report.setdefault("buy_point_lifecycle", {"status": "none", "display_line": ""})
     except Exception as _sm_exc:
         # 短中线组装失败不阻断主报告；保留原字段

@@ -118,7 +118,7 @@ CLI / Skill（trader · t0 · review · portfolio …）
 |------|--------------|----------|------|
 | 单票中短线 | `final_report` → `build_report` | 主路径；阶段 1 已写 resonance | 报告版式 TBD |
 | **T0 交易卡片** | `01-功能包-packages/t0/` | 盘中：quote/分钟 + 关键价/纪律 | ✅ 禁止 `attach_resonance`/`pullback_probe`；plan.`resonance`=`t0_structure_score_v1`（非岗位共振） |
-| **选股池** | `final_pool`、`~/.trader/pool.json` | 用户自选 → 策略分道 rank/plan | ✅ 分道：可盯/等齐/先别碰/计划过时；排序 lane→共振→威科夫吸筹链→可碰→分；入池软门槛；`total_score` 仅附录 |
+| **选股池** | `final_pool`、`~/.trader/pool.json` | 用户自选 → 策略分道 rank/plan | ✅ 分道：可盯/等齐/先别碰/计划过时；排序 lane→共振→威科夫吸筹链→RS→可碰→分；入池软门槛；`total_score` 仅附录 |
 | **候选池** | 自建名单 → 同一分析底座 | 批量筛选后再入正式池 | 与正式池同构，不同名单源 |
 | **仓位轮动** | portfolio、`stage_positioning` | 组合 cap、T+1、相关性 | ✅ 读池内 `resonance_grade` 离散提权/降权；排序次键共振档 |
 
@@ -165,6 +165,8 @@ report["resonance"] = {
   missing, conflict, summary_line
 }
 ```
+
+多周期打分（`multi_timeframe_resonance.calc_resonance`）写入 **`report["mtf_resonance"]`**，禁止占用 `report["resonance"]`。
 
 实现：`trader_shared/resonance.py`  
 挂载：`report_builder` 在 `ensure_report_analysis_cards` 之后、`match_strategies` 之前。

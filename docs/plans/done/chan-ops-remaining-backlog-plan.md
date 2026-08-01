@@ -6,7 +6,10 @@
 > 日期：2026-07-10  
 > 前提：方案 B P0 已落地（`chan_discipline` + merge）  
 > 原则：只收紧不放宽；不改笔算法；不在 chan_core 写禁止开仓  
-> 操盘教义：`docs/chan-ops-playbook.md`（已从桌面入库）
+> 操盘教义：`docs/guide/chan-ops-playbook.md`（已从桌面入库）
+>
+> **路径勘误**：UI 标签为 `（本周期）`；接线 `attach_short_midline` → `short_midline.py`
+> （历史文中 `report_core` / 「（同级）」产品文案已迁）。
 
 ---
 
@@ -20,7 +23,7 @@
 | R4 中/短分闸 | ✅ |
 | R5 suggested_pct 同步 | ✅ |
 | R6 中枢位置 | ✅ |
-| R7 同级标注 | ✅ |
+| R7 本周期标注 | ✅ |
 | R8 破生命线/中枢 | ✅ |
 | R9 weekly_frame | ✅ |
 | R10 文档 | ✅ |
@@ -44,7 +47,7 @@
 | ID | 项 | 实现要点 |
 |----|-----|----------|
 | R6 | 中枢位置一行 | `pivot_position`: 中枢内\|中枢上(回踩中)\|中枢下(反抽中)\|中枢外\|未知；🧭 与 ⚡ 可各一行（周/日 zone） |
-| R7 | 同级标注 | 短线专家缠论、中线缠论行：背驰/买卖点带「（同级）」 |
+| R7 | 本周期标注 | 短线专家缠论、中线缠论行：背驰/买卖点带「（本周期）」 |
 | R8 | 破生命线/中枢减仓语义 | current < life_line 或 current < zh_bottom（有效中枢）→ action 倾向减仓/观望（有仓减、无仓不新开）；notes；与 invalidation 对齐不重复长文 |
 | R9 | weekly_frame | 基于 weekly_bars + life/中枢：完好\|紧张\|破坏；写入 report；破坏 → 不新开（chan 或 merge） |
 | R10 | 文档 | playbook 已入库；更新 chan-discipline-b-plan / discipline 状态；output-template 补位置行与分仓 |
@@ -66,7 +69,7 @@
 | `mistery_gate.py` | 尽量不膨胀；weekly_frame 破坏可只在 chan |
 | `midline_structure` 或小工具 | `compute_pivot_position(current, zones)` 可放 chan_discipline |
 | `run_analysis.py` | 传 buy_points、structure_type 日/周、low_zone、zones；写 weekly_frame；同步 position_info |
-| `report_core.py` | 位置行；同级；分仓可选一行；discipline notes |
+| `attach_short_midline` / `short_midline.py` | 位置行；本周期标签；分仓可选一行；discipline notes |
 | `conclusion_block.py` | 读新 notes |
 | `output-template.md` | 样例更新 |
 | `tests/test_chan_discipline.py` 等 | 覆盖 R1–R9 |
@@ -84,7 +87,7 @@
 | V4 | allow_new_entry == (mid and short) |
 | V5 | position_info.suggested_pct 与 report 一致被裁 |
 | V6 | 报告含位置：中枢… |
-| V7 | 缠论文案含（同级）当有买卖点/背驰 |
+| V7 | 缠论文案含（本周期）当有买卖点/背驰 |
 | V8 | 破 life → notes/动作收紧 |
 | V9 | weekly_frame 有值；破坏不新开 |
 | V10 | merge 仍只收紧；pytest 相关绿 |

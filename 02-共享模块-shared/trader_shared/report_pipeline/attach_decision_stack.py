@@ -40,18 +40,10 @@ def attach_analysis_decision_stack(
             _mark("resonance")
         except Exception as _res_exc:
             _logger.debug("resonance skip: %s", _res_exc)
-            report.setdefault(
-                "resonance",
-                {
-                    "schema_version": "resonance_v1",
-                    "scene": "pullback_probe",
-                    "grade": "empty",
-                    "posts": {},
-                    "missing": [],
-                    "conflict": False,
-                    "summary_line": "共振：跳过",
-                },
-            )
+            from trader_shared.resonance import ensure_pullback_resonance_placeholder
+
+            # 勿 setdefault：若曾被 MTF 写入异源 dict，须覆盖为 resonance_v1 占位
+            ensure_pullback_resonance_placeholder(report)
 
         report["strategy_match"] = match_strategies(report)
         _mark("strategy_match")
@@ -85,7 +77,9 @@ def attach_analysis_decision_stack(
 
             attach_resonance(report)
         except Exception:
-            report.setdefault("resonance", {"schema_version": "resonance_v1", "grade": "empty"})
+            from trader_shared.resonance import ensure_pullback_resonance_placeholder
+
+            ensure_pullback_resonance_placeholder(report)
 
     return report
 

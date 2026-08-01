@@ -114,11 +114,13 @@ def classify_structure(
 ) -> dict:
     """走势分类：主状态由中枢拓扑决定；段数只影响 structure_confidence。
 
-    拓扑规则（中枢合并版）：
+    拓扑规则（中枢合并版；formulas.md §4.3 / §9 / §11A）：
     - strokes < 3 → 无结构
-    - 0 个合并中枢 → 单边 / 无结构（原典：0 中枢即无结构，不谎报盘整）
+    - 0 个合并中枢 → 单边 / 无结构（原典：0 中枢即无结构，不谎报盘整；§11A）
     - 1 个合并中枢 → 盘整
-    - 2+ 同向不重叠中枢 → 上涨趋势 / 下跌趋势（即使段数只有 4～6）
+    - 2+ 同向不重叠中枢 + 连接段为反向 → 上涨趋势 / 下跌趋势（即使段数只有 4～6）
+    - 2+ 同向不重叠但连接段非反向（夹同向小中枢）→ 盘整（假趋势，§9.2/§9.4；
+      不发明 structure_type=假趋势）
     - 2+ 重叠/方向混乱 → 盘整
 
     主状态 structure_type 仅允许：
@@ -158,6 +160,7 @@ def classify_structure(
         return _ok("无结构")
 
     # 判断中枢方向关系（拓扑：同向不重叠→趋势，重叠→盘整）
+    # formulas.md §4.3 / §9.2：同向不重叠且连接段为反向 → 趋势；连接段非反向 → 假趋势降盘整
     pair_direction: str | None = None
     zones_trend = "盘整"
     for i in range(1, len(valid_zones)):
@@ -180,8 +183,23 @@ def classify_structure(
     if len(valid_zones) == 1:
         return _ok("盘整")
 
-    # 2+ 同向不重叠中枢 → 直接趋势（段数只调 conf）
+    # 2+ 同向不重叠中枢 → 趋势；但 §9.1/§9.2/§9.4：任一对连接段非反向 → 降为盘整（假趋势）
+    # structure_type 仍只写「盘整」，不发明「假趋势」主状态
     if zones_trend in ("上涨趋势", "下跌趋势"):
+        pair_dir = "up" if zones_trend == "上涨趋势" else "down"
+        for i in range(1, len(valid_zones)):
+            if _connector_is_non_reverse(
+                valid_zones[i - 1],
+                valid_zones[i],
+                pair_dir,
+                segments=segments,
+                strokes=strokes,
+            ):
+                out = _ok("盘整")
+                out["structure_evidence"] = (
+                    f"{out['structure_evidence']},假趋势(连接段非反向·§9.2)"
+                )
+                return out
         return _ok(zones_trend)
 
     # 2+ 重叠/混乱 → 盘整
@@ -485,26 +503,137 @@ def _zone_last_end_index(zone: dict) -> int:
     return max(candidates) if candidates else -1
 
 
-def _strict_down_trend_zones(valid_zones: list[dict]) -> bool:
-    """下跌趋势：≥2 中枢且末中枢整体在前中枢下方（严格不重叠，与 classify 拓扑一致）。"""
-    if len(valid_zones) < 2:
-        return False
-    a, b = valid_zones[-2], valid_zones[-1]
-    try:
-        return float(b["zh_top"]) < float(a["zh_bottom"])
-    except (TypeError, ValueError, KeyError):
-        return False
+def _zone_first_start_index(zone: dict) -> int:
+    """取中枢首端笔/段的 start_index（与 `_zone_last_end_index` 对称）。
+
+    合并中枢走 members；原始中枢顶层带 strokes。无有效索引返回 -1。
+    用于 formulas.md §9.1/§9.2 连接段时间窗：`(prev_end, curr_start)`。
+    """
+    candidates: list[int] = []
+    members = zone.get("members") or [zone]
+    for m in members:
+        for s in m.get("strokes", []):
+            if isinstance(s, dict):
+                si = s.get("start_index")
+                if si is None:
+                    continue
+                try:
+                    v = int(si)
+                except (TypeError, ValueError):
+                    continue
+                if v >= 0:
+                    candidates.append(v)
+    return min(candidates) if candidates else -1
 
 
-def _strict_up_trend_zones(valid_zones: list[dict]) -> bool:
-    """上涨趋势：≥2 中枢且末中枢整体在前中枢上方（严格不重叠）。"""
+def _item_indices_in_open_interval(item: dict, prev_end: int, curr_start: int) -> bool:
+    """笔/段的 start/end_index 是否整段落在开区间 (prev_end, curr_start) 内。"""
+    si = item.get("start_index")
+    ei = item.get("end_index")
+    if si is None or ei is None:
+        return False
+    try:
+        a, b = int(si), int(ei)
+    except (TypeError, ValueError):
+        return False
+    lo, hi = (a, b) if a <= b else (b, a)
+    return prev_end < lo and hi < curr_start
+
+
+def _connector_is_non_reverse(
+    prev_zone: dict,
+    curr_zone: dict,
+    pair_dir: str,
+    segments: list[dict] | None = None,
+    strokes: list[dict] | None = None,
+) -> bool:
+    """连接段是否「非反向走势」（假趋势拓扑，formulas.md §9.1 / §9.2 / §9.4）。
+
+    操作化（仅由「即连接段自身不是反向走势」等价推出，不发明幅度阈值）：
+      - 时间窗：`(_zone_last_end_index(prev), _zone_first_start_index(curr))` 开区间
+      - 索引不可解析或窗口非法 → False（无法证明假趋势，不降级；兼容无 member 索引的裸区单测）
+      - 优先收集窗内 segments，若无则 strokes；仍无 → False（保守）
+      - reverse = down if pair_dir==up else up
+      - 窗内无一笔/段 direction==reverse → True（连接段非反向 → 假趋势）
+      - ≥1 反向项 → False（合格连接）
+    """
+    if pair_dir not in ("up", "down"):
+        return False
+    prev_end = _zone_last_end_index(prev_zone)
+    curr_start = _zone_first_start_index(curr_zone)
+    if prev_end < 0 or curr_start < 0 or prev_end >= curr_start:
+        return False
+
+    connector: list[dict] = []
+    if segments:
+        connector = [
+            s for s in segments
+            if isinstance(s, dict) and _item_indices_in_open_interval(s, prev_end, curr_start)
+        ]
+    if not connector and strokes:
+        connector = [
+            s for s in strokes
+            if isinstance(s, dict) and _item_indices_in_open_interval(s, prev_end, curr_start)
+        ]
+    if not connector:
+        return False
+
+    reverse = "down" if pair_dir == "up" else "up"
+    if any(s.get("direction") == reverse for s in connector):
+        return False
+    return True
+
+
+def _strict_down_trend_zones(
+    valid_zones: list[dict],
+    segments: list[dict] | None = None,
+    strokes: list[dict] | None = None,
+) -> bool:
+    """下跌趋势：≥2 中枢且整链严格下移不重叠（与 classify 拓扑一致）。
+
+    formulas.md §6 / §9.1–§9.4：一类拓扑与 classify 一致——全部相邻同向不重叠，
+    且任一对连接段须为反向；夹同向小中枢（连接段非反向）→ False。
+    未传 segments/strokes 或索引缺失时跳过连接检查（保持旧裸区行为）。
+    """
     if len(valid_zones) < 2:
         return False
-    a, b = valid_zones[-2], valid_zones[-1]
-    try:
-        return float(b["zh_bottom"]) > float(a["zh_top"])
-    except (TypeError, ValueError, KeyError):
+    for i in range(1, len(valid_zones)):
+        prev, curr = valid_zones[i - 1], valid_zones[i]
+        try:
+            if not (float(curr["zh_top"]) < float(prev["zh_bottom"])):
+                return False
+        except (TypeError, ValueError, KeyError):
+            return False
+        if _connector_is_non_reverse(
+            prev, curr, "down", segments=segments, strokes=strokes
+        ):
+            return False
+    return True
+
+
+def _strict_up_trend_zones(
+    valid_zones: list[dict],
+    segments: list[dict] | None = None,
+    strokes: list[dict] | None = None,
+) -> bool:
+    """上涨趋势：≥2 中枢且整链严格上移不重叠。
+
+    同 `_strict_down_trend_zones`：§9 连接段须反向，否则非一类趋势拓扑。
+    """
+    if len(valid_zones) < 2:
         return False
+    for i in range(1, len(valid_zones)):
+        prev, curr = valid_zones[i - 1], valid_zones[i]
+        try:
+            if not (float(curr["zh_bottom"]) > float(prev["zh_top"])):
+                return False
+        except (TypeError, ValueError, KeyError):
+            return False
+        if _connector_is_non_reverse(
+            prev, curr, "up", segments=segments, strokes=strokes
+        ):
+            return False
+    return True
 
 
 def _stroke_leaves_after_zone(stroke: dict, zone: dict) -> bool:
@@ -559,13 +688,17 @@ def _historical_type1_buy_ok(
     down_strokes: list[dict],
     valid_zones: list[dict],
     bars: list[dict] | None,
+    segments: list[dict] | None = None,
+    strokes: list[dict] | None = None,
 ) -> bool:
     """二类买时刻：末笔是抬高低点回抽，一类低点在 down_strokes[-2]。
 
     禁止「同帧 buy_points 里已有一类」——一类要创新低、二类要不破前低，
     同一末笔几何互斥，旧逻辑导致二类永假。
     """
-    if len(down_strokes) < 2 or not _strict_down_trend_zones(valid_zones):
+    if len(down_strokes) < 2 or not _strict_down_trend_zones(
+        valid_zones, segments=segments, strokes=strokes
+    ):
         return False
     first = down_strokes[-2]
     if not _stroke_leaves_zone(first, valid_zones[-1], "down"):
@@ -589,9 +722,13 @@ def _historical_type1_sell_ok(
     up_strokes: list[dict],
     valid_zones: list[dict],
     bars: list[dict] | None,
+    segments: list[dict] | None = None,
+    strokes: list[dict] | None = None,
 ) -> bool:
     """二类卖时刻：末笔是降低高点反抽，一类高点在 up_strokes[-2]。"""
-    if len(up_strokes) < 2 or not _strict_up_trend_zones(valid_zones):
+    if len(up_strokes) < 2 or not _strict_up_trend_zones(
+        valid_zones, segments=segments, strokes=strokes
+    ):
         return False
     first = up_strokes[-2]
     if not _stroke_leaves_zone(first, valid_zones[-1], "up"):
@@ -654,11 +791,20 @@ def _bc_stroke_pair(
     return before[-1], after[-1]
 
 
-def _divergence_kind_for_zones(valid_zones: list[dict], direction: str) -> str:
+def _divergence_kind_for_zones(
+    valid_zones: list[dict],
+    direction: str,
+    segments: list[dict] | None = None,
+    strokes: list[dict] | None = None,
+) -> str:
     """有 b/c 可比较时的 kind：严格趋势中枢 → trend，否则 range。"""
-    if direction == "down" and _strict_down_trend_zones(valid_zones):
+    if direction == "down" and _strict_down_trend_zones(
+        valid_zones, segments=segments, strokes=strokes
+    ):
         return "trend"
-    if direction == "up" and _strict_up_trend_zones(valid_zones):
+    if direction == "up" and _strict_up_trend_zones(
+        valid_zones, segments=segments, strokes=strokes
+    ):
         return "trend"
     if valid_zones:
         return "range"
@@ -672,6 +818,7 @@ def resolve_force_stroke_pair(
     *,
     bc_mode: str | None = None,
     anchor_bar: int | None = None,
+    segments: list[dict] | None = None,
 ) -> tuple[dict | None, dict | None, str]:
     """解析用于力度比较的 (prev/b, curr/c, kind)。
 
@@ -686,7 +833,9 @@ def resolve_force_stroke_pair(
         b, c = _bc_stroke_pair(strokes, valid_zones[-1], direction)
         if b is None or c is None:
             return None, None, "none"
-        return b, c, _divergence_kind_for_zones(valid_zones, direction)
+        return b, c, _divergence_kind_for_zones(
+            valid_zones, direction, segments=segments, strokes=strokes
+        )
 
     # legacy：可选锚定过滤（与 detect_divergence 旧行为一致）
     if anchor_bar is not None:
@@ -696,7 +845,13 @@ def resolve_force_stroke_pair(
             same = anchored
     if len(same) < 2:
         return None, None, "none"
-    kind = _divergence_kind_for_zones(valid_zones, direction) if valid_zones else "none"
+    kind = (
+        _divergence_kind_for_zones(
+            valid_zones, direction, segments=segments, strokes=strokes
+        )
+        if valid_zones
+        else "none"
+    )
     return same[-2], same[-1], kind
 
 
@@ -709,6 +864,7 @@ def detect_buy_points(
     macd_divergence_ok: bool = False,
     bars: list[dict] | None = None,
     bc_mode: str | None = None,
+    segments: list[dict] | None = None,
 ) -> list[dict]:
     """检测缠论买点（P1 定义纠偏）。
 
@@ -747,7 +903,7 @@ def detect_buy_points(
     # strict 模式：力度对用最后中枢 b/c；legacy：末两同向 down
     if last_stroke["direction"] == "down" and len(down_strokes) >= 2 and valid_zones:
         prev_down, curr_down, force_kind = resolve_force_stroke_pair(
-            strokes, valid_zones, "down", bc_mode=bc_mode
+            strokes, valid_zones, "down", bc_mode=bc_mode, segments=segments
         )
         if prev_down is not None and curr_down is not None:
             price_new_low = curr_down["end_price"] <= prev_down["end_price"]
@@ -829,7 +985,8 @@ def detect_buy_points(
                 structure_ok = low_b > low_a and low_b < up_high
                 if structure_ok:
                     hist_type1_ok = _historical_type1_buy_ok(
-                        down_strokes, valid_zones, bars
+                        down_strokes, valid_zones, bars,
+                        segments=segments, strokes=strokes,
                     )
                     area_prev = _stroke_macd_area(bars, down_strokes[-2], "neg")
                     area_curr = _stroke_macd_area(bars, down_strokes[-1], "neg")
@@ -918,6 +1075,7 @@ def detect_sell_points(
     macd_divergence_ok: bool = False,
     bars: list[dict] | None = None,
     bc_mode: str | None = None,
+    segments: list[dict] | None = None,
 ) -> list[dict]:
     """检测缠论卖点（与 detect_buy_points 对称，P1 定义）。
 
@@ -952,7 +1110,7 @@ def detect_sell_points(
     # strict：力度对用最后中枢 b/c；legacy：末两同向 up
     if last_stroke["direction"] == "up" and len(up_strokes) >= 2 and valid_zones:
         prev_up, curr_up, force_kind = resolve_force_stroke_pair(
-            strokes, valid_zones, "up", bc_mode=bc_mode
+            strokes, valid_zones, "up", bc_mode=bc_mode, segments=segments
         )
         if prev_up is not None and curr_up is not None:
             price_new_high = curr_up["end_price"] >= prev_up["end_price"]
@@ -1028,7 +1186,8 @@ def detect_sell_points(
                 structure_ok = high_b < high_a and high_b > down_low
                 if structure_ok:
                     hist_type1_ok = _historical_type1_sell_ok(
-                        up_strokes, valid_zones, bars
+                        up_strokes, valid_zones, bars,
+                        segments=segments, strokes=strokes,
                     )
                     area_prev = _stroke_macd_area(bars, up_strokes[-2], "pos")
                     area_curr = _stroke_macd_area(bars, up_strokes[-1], "pos")
@@ -1099,6 +1258,7 @@ def detect_divergence(
     anchor_bar: int | None = None,
     zones: list[dict] | None = None,
     bc_mode: str | None = None,
+    segments: list[dict] | None = None,
 ) -> dict:
     """背驰检测（P1：优先笔级 MACD 面积；仅无笔/无 index/面积不可算时 fallback 峰谷）。
 
@@ -1131,7 +1291,8 @@ def detect_divergence(
 
     if strokes:
         prev_d, curr_d, b_kind = resolve_force_stroke_pair(
-            strokes, valid_zones, "down", bc_mode=mode, anchor_bar=anchor_bar
+            strokes, valid_zones, "down", bc_mode=mode, anchor_bar=anchor_bar,
+            segments=segments,
         )
         if prev_d is not None and curr_d is not None:
             if curr_d["end_price"] <= prev_d["end_price"]:
@@ -1149,7 +1310,8 @@ def detect_divergence(
                         result["bottom_kind"] = b_kind if b_kind != "none" else "range"
 
         prev_u, curr_u, t_kind = resolve_force_stroke_pair(
-            strokes, valid_zones, "up", bc_mode=mode, anchor_bar=anchor_bar
+            strokes, valid_zones, "up", bc_mode=mode, anchor_bar=anchor_bar,
+            segments=segments,
         )
         if prev_u is not None and curr_u is not None:
             if curr_u["end_price"] >= prev_u["end_price"]:

@@ -88,8 +88,11 @@ raw bars
 避免 `zh_top < zh_bottom` 的非法中枢（这是历史 bug 根因之一）。
 
 **§4.3 中枢方向关系（拓扑）**：`classify_structure` 据合并中枢的上下位置关系判定
-走势类型——同向不重叠中枢 → 上涨/下跌趋势；重叠/混乱 → 盘整；单中枢 → 盘整；
-无中枢且有线段 → 盘整/单边。段数只调 `structure_confidence`，不决定主状态。
+走势类型——同向不重叠中枢 **且连接段为反向（无同向小中枢 / 非「连接段自身不是反向走势」）**
+→ 上涨/下跌趋势；连接段非反向 → **降为盘整（假趋势，§9.2 / §9.4；`structure_type` 仍写「盘整」，
+不发明「假趋势」主状态）**；重叠/混乱 → 盘整；单中枢 → 盘整；
+无中枢且有线段 → **无结构**（§11A，不谎报盘整）/ 单边启发式。段数只调 `structure_confidence`，不决定主状态。
+权威细则仍以 **§9** 为准；实现：`_connector_is_non_reverse` + classify / `_strict_*_trend_zones`。
 
 ---
 
@@ -133,7 +136,8 @@ raw bars
 
 严格定义 + 离开段约束 + 前置条件 + 降级，输入为已去悬空（`§2.3`）的笔与中枢：
 
-- **一类买/卖**：下跌/上涨趋势（≥2 个**严格不重叠**同向中枢，与 `classify_structure` 拓扑一致）
+- **一类买/卖**：下跌/上涨趋势（≥2 个**严格不重叠**同向中枢 **且连接段为反向**，与
+  `classify_structure` / §9 拓扑一致；假趋势不得报一类）
   + 最后中枢**离开段**背驰 + 末两段同向笔价格新低/高 + MACD 面积减弱
   + 离开段须**价格穿出**中枢（down 破 ZD / up 破 ZG），禁止仅时间在 `zone_end` 之后
     （否则会出现中枢在 32、信号价在 51 的假一类买）
@@ -180,9 +184,17 @@ raw bars
 | 三类量能 | 买/卖均要求末棒 ≥ 近20均量 ×1.2（bars 不足放行） | — |
 | 信号粘滞 | 买卖点带 `anchor_index`；`signal_id` 用锚点日；回测按结构键只计首次 | — |
 | 区间套未确认 | 买卖点 + 顶底背驰均写 `*_lower_confirmed`；fusion 降权（×0.65 / nesting ×0.55） | `TRADER_CHAN_NESTING` |
+| 假趋势（§9.2 连接段非反向） | 有 member 索引时 demote→盘整；裸区无索引不降（保守兼容） | `_connector_is_non_reverse` |
 
 > 所有行为变更须在 `test_chanlun_correctness.py` / `test_chan_core` 增补语义 golden，并刷新
 > `chan_split_baseline.json` / `report_render_baseline.txt` 等价闸门基线。
+
+### §8 续 — P1 假趋势连接段（对齐 §9）
+
+- **法源**：§9.1 两中枢须由反向连接段隔开；§9.2/§9.4 夹同向小中枢（连接段自身不是反向走势）→ 非趋势，降盘整。
+- **操作化**：时间窗 `(prev_zone 末 end_index, curr_zone 首 start_index)`；窗内 segments（优先）或 strokes
+  无一 `direction==reverse` → 假趋势。不发明幅度阈值。
+- **一类 / divergence kind=trend**：与 classify 同拓扑（传 strokes/segments 时不可在假趋势上开火）。
 
 ---
 
@@ -192,6 +204,7 @@ raw bars
 |------|------|
 | 二类买要求同帧 `buy_points` 含一类 → 与一类「创新低」互斥，二类永假 | `_historical_type1_buy_ok` 在时间轴上认定 `down_a` |
 | 一类趋势仅比 `zh_top`，允许重叠中枢假趋势 | `_strict_*_trend_zones` 要求末中枢整体在前中枢外 |
+| 同向不重叠但连接段非反向（夹同向小中枢）仍报趋势 | classify / `_strict_*` 经 `_connector_is_non_reverse` 降为盘整（§9.2；标签仍「盘整」） |
 | 区间套 `lower_confirmed=False` 只展示、fusion 满置信 | `_chan_to_signal` 对未确认买点/背驰降权 |
 | 单测仍用 1 中枢期望一类 / merge patch 错模块 | 刷新 `test_chan_core` |
 

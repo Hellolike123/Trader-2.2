@@ -289,18 +289,13 @@ def build_entry_checklist(
         pb_ok = None  # 无回踩数据：不算绿
 
     types = buy_point_types or []
-    # C1「买点信号」只认正式档；类二买为买侧放宽试探，不点绿清单
-    short_trigger = any(
-        any(
-            k in t
-            for k in (
-                "一类买", "类一买", "二类买", "三类买",
-                "一买", "二买", "三买",
-            )
-        )
-        for t in types
-        if "类二买" not in t
-    )
+    # C1「买点信号」只认正式一/二/三类（BUSINESS §2.1）；类一/类二=观察档，不进强扳机。
+    # 精确集合：禁止子串「一买」命中「类一买」。
+    _C1_STRONG_BUY = frozenset({
+        "一买", "二买", "三买",
+        "一类买", "二类买", "三类买",
+    })
+    short_trigger = any(str(t).strip() in _C1_STRONG_BUY for t in types)
 
     curr_val = float(current_price) if current_price is not None else 0.0
     res_lower_val = float(chip_resistance_lower) if chip_resistance_lower is not None else 0.0

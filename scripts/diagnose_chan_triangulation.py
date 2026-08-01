@@ -354,14 +354,18 @@ def _fenlei_to_label(fenlei, bi_list):
 
 # ───────────────────────── 原典清单口径（交实战终审）─────────────────────────
 def _canonical_classify(zones_ranges):
-    """formulas.md §9 严格原典口径（看全部中枢链，非只最后两中枢）。
+    """formulas.md §9 价格拓扑口径（看全部中枢链，非只最后两中枢）。
 
-    原典判定规则：
+    仅有 (bottom, top) 对时，本函数只能覆盖 §9.2/§9.4 的「重叠 / 同向不重叠」价格关系；
+    **不能**看见连接段几何（§9.1「连接段须为反向走势」/ §9.2「夹同向小中枢→假趋势」）。
+    因此价格-only 结果标注「(价格拓扑·原典)」——**不声称完整 §9**。
+    完整连接段检查见 `_canonical_classify_with_connectors`（需带 members 的中枢 + 段/笔）。
+
+    价格规则：
       - 0 中枢 → 无结构
       - 1 中枢 → 盘整 (a+A)
-      - ≥2 中枢：所有相邻中枢『同向且互不重叠』→ 趋势（上涨/下跌）；
-                 任意相邻重叠，或方向不齐 → 盘整（中枢扩展/延伸）。
-    注：原典要求趋势中两中枢不重叠且连接段不回前中枢；重叠即判盘整。
+      - ≥2 中枢：所有相邻『同向且互不重叠』→ 趋势（上涨/下跌）；
+                 任意相邻重叠，或方向不齐 → 盘整。
     zones_ranges: list of (bottom, top)，已按时序排列
     """
     zs = [(b, t) for (b, t) in zones_ranges if b is not None and t is not None]
@@ -378,10 +382,55 @@ def _canonical_classify(zones_ranges):
     if overlapped:
         return "盘整(多中枢重叠·原典)"
     if up:
-        return "上涨趋势(原典)"
+        return "上涨趋势(价格拓扑·原典)"
     if down:
-        return "下跌趋势(原典)"
+        return "下跌趋势(价格拓扑·原典)"
     return "盘整(方向不齐·原典)"
+
+
+def _canonical_classify_with_connectors(zones, segments=None, strokes=None):
+    """§9 完整口径：价格拓扑 + 连接段反向（formulas.md §9.1/§9.2/§9.4）。
+
+    与生产 `classify_structure` / `_connector_is_non_reverse` 同规则：
+    同向不重叠后若任一对连接段非反向 → 降为盘整（假趋势）；structure 标签仍是盘整。
+    zones: 我们的 merged_zones（含 members/strokes 索引）或等价 dict 列表。
+    """
+    from trader_shared.chan_structure import _connector_is_non_reverse
+
+    valid = [z for z in (zones or []) if isinstance(z, dict) and z.get("valid")]
+    if not valid:
+        return "无结构"
+    if len(valid) == 1:
+        return "盘整(单中枢·原典)"
+
+    pair_direction = None
+    zones_trend = "盘整"
+    for i in range(1, len(valid)):
+        prev, curr = valid[i - 1], valid[i]
+        try:
+            if float(curr["zh_bottom"]) > float(prev["zh_top"]):
+                this_dir = "up"
+            elif float(curr["zh_top"]) < float(prev["zh_bottom"]):
+                this_dir = "down"
+            else:
+                return "盘整(多中枢重叠·原典)"
+        except (TypeError, ValueError, KeyError):
+            return "盘整(方向不齐·原典)"
+        if pair_direction is not None and this_dir != pair_direction:
+            return "盘整(方向不齐·原典)"
+        pair_direction = this_dir
+        zones_trend = "上涨趋势" if this_dir == "up" else "下跌趋势"
+
+    if zones_trend not in ("上涨趋势", "下跌趋势"):
+        return "盘整(方向不齐·原典)"
+
+    pair_dir = "up" if zones_trend == "上涨趋势" else "down"
+    for i in range(1, len(valid)):
+        if _connector_is_non_reverse(
+            valid[i - 1], valid[i], pair_dir, segments=segments, strokes=strokes
+        ):
+            return "盘整(假趋势·连接段非反向·原典)"
+    return f"{zones_trend}(原典)"
 
 
 def _zone_pairs(res):
@@ -430,9 +479,16 @@ def main():
 
         # 我们的实现
         st, tl, pc = _our_impl_classify(bars)
-        zp = _zone_pairs(chanlun_analysis(bars, current=bars[-1]["close"], symbol="X"))
-        # 原典清单机械口径
-        canon = _canonical_classify(zp)
+        our = chanlun_analysis(bars, current=bars[-1]["close"], symbol="X")
+        zp = _zone_pairs(our)
+        # 原典：有 members 时用完整 §9（含连接段）；否则价格-only（不声称完整 §9）
+        zones_full = our.get("merged_zones") or []
+        segs = our.get("segments") or []
+        stro = our.get("strokes") or []
+        if zones_full and (segs or stro):
+            canon = _canonical_classify_with_connectors(zones_full, segments=segs, strokes=stro)
+        else:
+            canon = _canonical_classify(zp)
         # czsc（已废弃，仅作信息列；不可用则显示原因）
         cz_label, cz_fen, cz_bi, cz_zs, cz_raw = _czsc_classify(bars)
 

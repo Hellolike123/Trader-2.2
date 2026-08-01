@@ -1,13 +1,14 @@
 # 方案 B：缠论纪律层拆分实施计划
 
-> 状态：**P0 已实施**；**P1/P2（R1–R10）已由 Implementer 落地**（见 docs/chan-ops-remaining-backlog-plan.md）  
+> 状态：**P0 已实施**；**P1/P2（R1–R10）已由 Implementer 落地**（见 docs/plans/done/chan-ops-remaining-backlog-plan.md）  
 > P0 Review：docs/audit/chan-discipline-b-review.md  
 
 > 日期：2026-07-10  
 > 选型：**B** — `chan_discipline` + 通用门控（mistery_gate）+ **merge 只收紧**  
 > 适用：**中线 + 短线**（各读各字段，仓位可分 cap）  
 > 原则：不新开缠论大脑；不重写笔/段；纪律只收紧不放宽  
-> 关联：`docs/discipline-layer-copy-plan.md` · `docs/mid-short-dual-track-plan.md` · 桌面操盘建议（可入库 `docs/chan-ops-playbook.md`）
+> 关联：`docs/discipline-layer-copy-plan.md` · `docs/mid-short-dual-track-plan.md` · `docs/guide/chan-ops-playbook.md`  
+> **挂接勘误**：报告消费纪律经 `attach_short_midline` → `short_midline.py`（非旧 `report_core` 手拼）。
 
 ---
 
@@ -210,7 +211,7 @@ P0 `allow_new_entry`：
 | B2 | `merge_discipline` + 只收紧单测 | fusion 观望不能变买 |
 | B3 | 从 `mistery_gate` 删除已迁规则；入参瘦身 | 无双份冲突逻辑 |
 | B4 | `run_analysis` 接线 + `report["discipline"]` + 砍 suggested_pct | 集成字段存在 |
-| B5 | `conclusion_block` / `report_core` 优先读 discipline.notes | 出手区可见原因 |
+| B5 | `conclusion_block` / `attach_short_midline` 优先读 discipline.notes | 出手区可见原因 |
 | B6 | 单测全家桶 + 回归 test_mistery_gate / mid short | pytest 绿 |
 | B7（P1） | 买点阶梯 + 盘整禁重仓 | 另开 PR 可 |
 

@@ -1,15 +1,18 @@
 # 方案 B 纪律拆分 Review
 
 > 日期：2026-07-10  
-> 规格：`docs/chan-discipline-b-plan.md`  
+> 规格：`docs/plans/done/chan-discipline-b-plan.md`  
 > 审查范围：只读验收 Implementer 拆分；不改业务代码  
 > 总判：**APPROVE**
+>
+> **路径勘误（本周期维护）**：报告挂接 / 渲染为 `attach_short_midline` →
+> `report_renderer/short_midline.py`（历史文中 `report_core` 手拼路径已迁）。
 
 ---
 
 ## 总览
 
-方案 B P0（B1–B6）已落地：`chan_discipline` 承载缠相关纪律，`mistery_gate` 保留 H 硬否决 / 阶段动能主表 / 520，`merge_discipline` 只收紧，`run_analysis` 按 gate→chan→merge 接线，结论与报告消费 `discipline`。指定 pytest **61 passed**。红线三项均满足。
+方案 B P0（B1–B6）已落地：`chan_discipline` 承载缠相关纪律，`mistery_gate` 保留 H 硬否决 / 阶段动能主表 / 520，`merge_discipline` 只收紧；现生产按 gate→chan→merge 挂在 `attach_short_midline`（历史验收记 monolith `run_analysis`），结论与报告消费 `discipline`。指定 pytest **61 passed**。红线三项均满足。
 
 ---
 
@@ -20,8 +23,8 @@
 | T1 | current 在回踩区外 + 日线一类买语义 → `allow_new_entry=False`，无「可按买点挂」 | **PASS** | `apply_chan_discipline`：`in_pb is False` → `_block_new(..., "pullback_out")`（`chan_discipline.py` L185–187）；单测 `TestT1PullbackOutside`；execution 文案走 `观望` → `gate_action_to_execution_text` 为「现价不买 · 不追」，不含「可按买点挂」 |
 | T2 | 派发 + 缠多/三类买 → notes 含冲突或风控，不允许新开 | **PASS** | `stage in ("派发","衰退")` → `_block_new` + 有 `buy_point_types` 时 `stage_buy_conflict` notes（L224–234）；`TestT2PaifaConflict` |
 | T3 | gate `action=观望` 时 merge 后不得变轻仓/回踩/持有 | **PASS** | `merge_discipline`：`_stricter_action` + `allow_new` 否决开仓类 + gate 观望/不做双保险（L348–364）；`TestT3MergeTightenOnly` 含恶意 chan 放宽用例 |
-| T4 | report 含 `discipline`（及可选 `chan_discipline`） | **PASS** | `run_analysis.py` L1638–1641：`report["chan_discipline"]` / `report["discipline"]`；异常路径 `setdefault` 兜底（L1720–1730） |
-| T5 | 渲染/原因可见「不在回踩区」或「中线看法偏空」类 | **PASS** | `conclusion_block` 优先 `entry_block_reason` / `discipline_notes`（L312–335）；`report_core` 出手行 `execution（reason）`（L216–219）；`TestT5ReasonVisible` |
+| T4 | report 含 `discipline`（及可选 `chan_discipline`） | **PASS** | 现：`attach_short_midline` 写 `report["chan_discipline"]` / `report["discipline"]`（历史行号曾指 `run_analysis`）；异常路径 `setdefault` 兜底 |
+| T5 | 渲染/原因可见「不在回踩区」或「中线看法偏空」类 | **PASS** | `conclusion_block` 优先 `entry_block_reason` / `discipline_notes`；`attach_short_midline` → `short_midline` 出手/原因行；`TestT5ReasonVisible` |
 | T6 | 中线 `mid_view` 暂缓 → `allow_new_entry=False` | **PASS** | `_is_mid_view_weak` 含「暂缓/偏空/…」（L62–66）；`TestT6MidViewWeak` |
 | T7 | low conf → cap 下降或观望 | **PASS** | 缠侧 `mid_quality`/`structure_confidence=low` → conf_block 否决；仅 fusion/data → conf_down 砍半（L195–214）；`TestT7LowConfidence` |
 
@@ -34,8 +37,8 @@
 | B1 `chan_discipline` 契约 + 回踩/mid_view | **PASS** | 输出字段含 `allow_new_entry` / mid·short 预留 / `suggested_pct_cap*` / `action_override` / `discipline_notes` / `rules_fired` |
 | B2 `merge_discipline` 只收紧 | **PASS** | False 赢；action rank；cap=min；notes 并集去重保序 |
 | B3 gate 迁出缠规则 | **PASS** | 回踩 / mid_view / 筹码资金 / 缠侧 conf 已 `# migrated` 注释并删除逻辑；`test_mistery_gate` 迁出回归 |
-| B4 `run_analysis` 接线 + 砍仓 | **PASS** | 顺序 gate→chan→merge；`allow_new_entry=False` 时 `suggested_pct=0`（无仓）/ 禁止加仓语义（有仓） |
-| B5 conclusion / report 读 discipline | **PASS** | `build_conclusion_block(discipline=…)`；report 出手用 conclusion.reason；失效优先 `discipline.invalidation` |
+| B4 报告挂接 + 砍仓（现 `attach_short_midline`） | **PASS** | 顺序 gate→chan→merge；`allow_new_entry=False` 时 `suggested_pct=0`（无仓）/ 禁止加仓语义（有仓） |
+| B5 conclusion / report 读 discipline | **PASS** | `build_conclusion_block(discipline=…)`；`attach_short_midline` 出手用 conclusion.reason；失效优先 `discipline.invalidation` |
 | B6 单测全家桶 | **PASS** | 见下方 pytest |
 | B7 买点阶梯 + 盘整禁重仓 | **N/A（P1）** | 规格允许另开 PR；代码未伪装实现 |
 
@@ -45,7 +48,7 @@
 
 | 红线 | 结果 | 证据 |
 |------|------|------|
-| 未在 `chan_core` 写禁止开仓 | **PASS** | `chan_core.py` 无 `allow_new_entry` / `discipline` /「禁止开仓」匹配；开仓裁剪仅在 merge 后 + `run_analysis` 砍 `suggested_pct` |
+| 未在 `chan_core` 写禁止开仓 | **PASS** | `chan_core.py` 无 `allow_new_entry` / `discipline` /「禁止开仓」匹配；开仓裁剪仅在 merge 后 + 报告挂接砍 `suggested_pct` |
 | merge 只收紧（gate 观望不能变买） | **PASS** | `_OPEN_ACTIONS` 仅可被收紧；gate 观望/减仓/止损被强制保留；单测恶意 override「轻仓试错」仍得「观望」 |
 | 无双模块 action 矛盾设计 | **PASS** | 缠规则单源在 chan；gate 不再产出「不在中线回踩区」「中线看法偏空」「筹码…」notes；阶段派发 gate H3 与 chan `stage_risk` 均为收紧侧，经 merge 幂等 |
 
@@ -65,7 +68,7 @@
 - 保留：H1–H7、阶段×动能主表、520/invalidation、style、RR、追高、fusion/data 通用低置信。
 - 迁出清单与模块头注释一致；`in_midline_pullback` 固定 `None` 兼容字段，避免伪信号。
 
-### `run_analysis.py` 顺序
+### 接线顺序（现生产：`attach_short_midline`；历史曾记 `run_analysis`）
 
 ```text
 mid_key_prices / mid_view 文案
@@ -77,12 +80,12 @@ mid_key_prices / mid_view 文案
 → build_conclusion_block(discipline=…)
 ```
 
-与规格 §2.5 一致。
+与规格 §2.5 顺序一致；挂接点见文首路径勘误。
 
 ### 消费链
 
 - `conclusion_block`：`discipline` 优先于 gate 决定 action/cap；reason 注入 entry_block / 回踩 / 偏空 / 置信 / 筹码 / 资金。
-- `report_core`：出手 `execution（reason）` 来自 conclusion；失效读 `discipline` 再回退 gate。
+- `attach_short_midline` → `short_midline.py`：出手/原因来自 conclusion；失效读 `discipline` 再回退 gate。
 
 ---
 

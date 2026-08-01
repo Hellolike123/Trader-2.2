@@ -92,6 +92,45 @@ def test_ensure_report_analysis_cards_keys():
         assert "schema_version" in cards[k]
         assert "source" in cards[k]
     assert report["analysis_cards"] is cards
+    # 法源 BUSINESS §2.0：无周线载荷 → insufficient midline，禁日线冒充
+    assert cards["wyckoff_midline"].get("role") == "midline"
+    assert cards["wyckoff_midline"].get("timeframe") == "insufficient"
+
+
+def test_ensure_wyckoff_midline_no_daily_fallback():
+    """ensure 不得用日线 wyckoff 填充 wyckoff_midline。"""
+    from trader_shared.analysis_cards import ensure_report_analysis_cards
+
+    report: dict = {
+        "current": 10.0,
+        "wyckoff": {
+            "phase": "markup",
+            "phase_label": "上涨",
+            "timeframe": "daily",
+            "spring_signal": True,
+        },
+        "fusion": {"signals_detail": {}},
+    }
+    cards = ensure_report_analysis_cards(report)
+    mid = cards["wyckoff_midline"]
+    assert mid.get("role") == "midline"
+    assert mid.get("timeframe") == "insufficient"
+    assert mid.get("phase") in ("", None) or mid.get("timeframe") == "insufficient"
+
+
+def test_ensure_wyckoff_midline_rejects_sparse_unknown():
+    """稀疏/无 weekly timeframe 的 wyckoff_midline 不得建成可用中线卡。"""
+    from trader_shared.analysis_cards import ensure_report_analysis_cards
+
+    report: dict = {
+        "current": 10.0,
+        "wyckoff_midline": {"phase": "none"},
+        "fusion": {"signals_detail": {}},
+    }
+    cards = ensure_report_analysis_cards(report)
+    mid = cards["wyckoff_midline"]
+    assert mid.get("timeframe") == "insufficient"
+    assert mid.get("status") == "insufficient"
 
 
 def test_match_prefers_analysis_cards_over_raw():

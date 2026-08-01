@@ -442,13 +442,39 @@ def ensure_report_analysis_cards(report: dict[str, Any]) -> dict[str, Any]:
 
     try:
         if "wyckoff_midline" not in cards or not isinstance(cards.get("wyckoff_midline"), dict):
-            cards["wyckoff_midline"] = build_wyckoff_card(
-                report.get("wyckoff_midline") or report.get("wyckoff"),
-                role="midline",
-                symbol=symbol,
+            # 法源 BUSINESS.md §2.0/§2.2：中线卡只认周线 wyckoff_midline；禁日线/unknown 冒充
+            wm = report.get("wyckoff_midline")
+            _wm_tf = ""
+            _wm_st = ""
+            if isinstance(wm, dict) and wm:
+                _wm_tf = str(wm.get("timeframe") or "").strip().lower()
+                _wm_st = str(wm.get("status") or "").strip().lower()
+            _weekly_ok = (
+                isinstance(wm, dict)
+                and bool(wm)
+                and _wm_tf in ("weekly", "week", "w")
+                and _wm_st not in ("insufficient", "no_data")
             )
+            if _weekly_ok:
+                cards["wyckoff_midline"] = build_wyckoff_card(
+                    wm,
+                    role="midline",
+                    symbol=symbol,
+                )
+            else:
+                _mid_empty = _empty_card("wyckoff", "wyckoff_card_v1", role="midline")
+                _mid_empty["timeframe"] = "insufficient"
+                _mid_empty["status"] = "insufficient"
+                _mid_empty["bias"] = "neutral"
+                _mid_empty["summary_line"] = "周线不足 · 不参与定论"
+                cards["wyckoff_midline"] = _mid_empty
     except Exception:
-        cards["wyckoff_midline"] = _empty_card("wyckoff", "wyckoff_card_v1", role="midline")
+        _mid_empty = _empty_card("wyckoff", "wyckoff_card_v1", role="midline")
+        _mid_empty["timeframe"] = "insufficient"
+        _mid_empty["status"] = "insufficient"
+        _mid_empty["bias"] = "neutral"
+        _mid_empty["summary_line"] = "周线不足 · 不参与定论"
+        cards["wyckoff_midline"] = _mid_empty
 
     try:
         if "momentum" not in cards or not isinstance(cards.get("momentum"), dict):
