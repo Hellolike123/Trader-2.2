@@ -3,6 +3,9 @@
 所有函数纯计算，无副作用，无网络请求。
 数据存储在 ~/.trader/position.json（持仓）和 ~/.trader/t0_ledger.jsonl（台账）。
 路径经 ``trader_paths`` 解析（可用 ``TRADER_ROOT`` 覆盖根目录）。
+
+Holdings SSOT（``holdings.json``）：``load_position`` / ``save_position`` 优先读写
+成本与股数；本 release **双写** position.json 以保持向后兼容（legacy 暂不删除）。
 """
 from __future__ import annotations
 
@@ -56,29 +59,109 @@ def _load_position_file() -> dict[str, Any]:
             return {"positions": {}}
 
 
+def _holding_as_t0_pos(symbol: str) -> dict[str, Any] | None:
+    """Map holdings SSOT record → T0 position dict (avg_cost / total_shares)."""
+    try:
+        from trader_shared.holdings import get_holding
+
+        hit = get_holding(symbol)
+    except Exception:
+        return None
+    if not isinstance(hit, dict):
+        return None
+    try:
+        cost = float(hit.get("cost") or 0)
+    except (TypeError, ValueError):
+        cost = 0.0
+    try:
+        shares = int(hit.get("shares") or 0)
+    except (TypeError, ValueError):
+        shares = 0
+    if cost <= 0 and shares <= 0:
+        return None
+    return {
+        "avg_cost": cost,
+        "total_shares": shares,
+        "name": str(hit.get("name") or ""),
+        "updated_at": str(hit.get("updated_at") or ""),
+        "source": "holdings",
+    }
+
+
+def _dual_write_holdings(symbol: str, pos: dict[str, Any]) -> None:
+    try:
+        from trader_shared.holdings import clear_holding, upsert_holding
+
+        cost = float(pos.get("avg_cost") or pos.get("cost") or 0)
+        shares = int(pos.get("total_shares") or pos.get("shares") or 0)
+        if cost <= 0 and shares <= 0:
+            clear_holding(symbol)
+            return
+        upsert_holding(
+            symbol,
+            cost=cost,
+            shares=shares,
+            name=str(pos.get("name") or ""),
+            source="t0",
+        )
+    except Exception:
+        pass
+
+
 def load_position(symbol: str) -> dict[str, Any] | None:
-    """读取指定标的的持仓信息。"""
+    """读取指定标的的持仓信息（优先 holdings SSOT，否则 position.json）。"""
+    hit = _holding_as_t0_pos(symbol)
+    if hit is not None:
+        legacy = (_load_position_file().get("positions") or {}).get(symbol)
+        if isinstance(legacy, dict):
+            return {**legacy, **hit}
+        return hit
     positions = _load_position_file().get("positions", {})
     return positions.get(symbol)
 
 
 def save_position(symbol: str, pos: dict[str, Any]) -> None:
-    """保存指定标的的持仓信息（DataManager 锁内 RMW + tmp+rename）。"""
+    """保存持仓：双写 holdings SSOT + position.json（DataManager 锁内 RMW）。"""
     from trader_shared.data_manager import DataManager
 
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    payload = {**pos, "updated_at": stamp}
 
     def _mutate(data: dict[str, Any]) -> None:
         if not isinstance(data.get("positions"), dict):
             data["positions"] = {}
-        data["positions"][symbol] = {**pos, "updated_at": stamp}
+        data["positions"][symbol] = payload
 
     DataManager.update_state("position", _mutate)
+    _dual_write_holdings(symbol, payload)
 
 
 def list_positions() -> dict[str, dict[str, Any]]:
-    """读取所有持仓。"""
-    return dict(_load_position_file().get("positions") or {})
+    """读取所有持仓（legacy position.json keys + holdings SSOT overlay）。"""
+    out: dict[str, dict[str, Any]] = {}
+    for sym, rec in (_load_position_file().get("positions") or {}).items():
+        if isinstance(rec, dict):
+            out[str(sym)] = rec
+    try:
+        from trader_shared.holdings import list_holdings
+
+        for sym, _rec in list_holdings().items():
+            mapped = _holding_as_t0_pos(sym)
+            if mapped is None:
+                continue
+            bare = str(sym).split(".")[0]
+            placed = False
+            for k in list(out.keys()):
+                if k == sym or str(k).split(".")[0] == bare:
+                    base = out[k] if isinstance(out.get(k), dict) else {}
+                    out[k] = {**base, **mapped}
+                    placed = True
+                    break
+            if not placed:
+                out[sym] = mapped
+    except Exception:
+        pass
+    return out
 
 
 # ── 费用计算 ──────────────────────────────────────────────────────────────

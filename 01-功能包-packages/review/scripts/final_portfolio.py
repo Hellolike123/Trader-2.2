@@ -9,13 +9,81 @@ from pathlib import Path
 from portfolio_run import build_portfolio, build_snapshot_portfolio, load_snapshot
 from portfolio_validate_output import validate
 
-POSITIONS_PATH = Path.home() / ".trader" / "positions.json"
+try:
+    from trader_shared.trader_paths import path as trader_path
+
+    POSITIONS_PATH = trader_path("positions_portfolio")
+except Exception:
+    POSITIONS_PATH = Path.home() / ".trader" / "positions.json"
+
+
+def _positions_path() -> Path:
+    """Runtime path (honors TRADER_ROOT); tests may monkeypatch POSITIONS_PATH."""
+    override = globals().get("POSITIONS_PATH")
+    if isinstance(override, Path):
+        return override
+    try:
+        from trader_shared.trader_paths import path as _tp
+        return _tp("positions_portfolio")
+    except Exception:
+        return Path.home() / ".trader" / "positions.json"
+
+
+def _dual_write_holdings_row(row: dict, *, clear: bool = False) -> None:
+    """Dual-write portfolio row into holdings SSOT when a symbol/code is present."""
+    try:
+        from trader_shared.holdings import clear_holding, upsert_holding
+    except Exception:
+        return
+    code = row.get("symbol") or row.get("code") or row.get("ts_code")
+    if not code:
+        return  # name-only: cannot map into holdings SSOT without inventing codes
+    sym = str(code)
+    if clear:
+        try:
+            clear_holding(sym)
+        except Exception:
+            pass
+        return
+    try:
+        upsert_holding(
+            sym,
+            cost=float(row.get("cost") or 0),
+            shares=int(row.get("shares") or 0),
+            name=str(row.get("name") or ""),
+            source="portfolio",
+        )
+    except Exception:
+        pass
+
+
+def _holdings_ssot_as_rows() -> list[dict]:
+    """Prefer holdings SSOT when present; map to portfolio row shape."""
+    try:
+        from trader_shared.holdings import list_holdings
+
+        rows = []
+        for sym, rec in list_holdings().items():
+            if not isinstance(rec, dict):
+                continue
+            rows.append(
+                {
+                    "name": str(rec.get("name") or sym),
+                    "shares": int(rec.get("shares") or 0),
+                    "cost": float(rec.get("cost") or 0),
+                    "symbol": sym,
+                }
+            )
+        return rows
+    except Exception:
+        return []
 
 
 def load_all() -> dict:
-    if POSITIONS_PATH.exists():
+    p = _positions_path()
+    if p.exists():
         try:
-            data = json.loads(POSITIONS_PATH.read_text(encoding="utf-8"))
+            data = json.loads(p.read_text(encoding="utf-8"))
             if isinstance(data, dict):
                 return data
         except (json.JSONDecodeError, OSError):
@@ -24,14 +92,19 @@ def load_all() -> dict:
 
 
 def save_all(data: dict) -> None:
-    POSITIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    POSITIONS_PATH.write_text(
+    p = _positions_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
         json.dumps(data, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
 
 def load_positions() -> list[dict]:
+    """Prefer holdings SSOT when non-empty; else legacy positions.json."""
+    ssot = _holdings_ssot_as_rows()
+    if ssot:
+        return ssot
     return load_all().get("holdings", [])
 
 
@@ -43,6 +116,10 @@ def save_positions(positions: list[dict]) -> None:
     data = load_all()
     data["holdings"] = positions
     save_all(data)
+    # Dual-write rows that carry a symbol/code
+    for row in positions:
+        if isinstance(row, dict):
+            _dual_write_holdings_row(row)
 
 
 def find_position(positions: list[dict], name: str) -> int | None:
@@ -52,7 +129,7 @@ def find_position(positions: list[dict], name: str) -> int | None:
     return None
 
 
-def record_buy(name: str, shares: int, cost: float) -> dict:
+def record_buy(name: str, shares: int, cost: float, symbol: str | None = None) -> dict:
     positions = load_positions()
     idx = find_position(positions, name)
     if idx is not None:
@@ -60,10 +137,18 @@ def record_buy(name: str, shares: int, cost: float) -> dict:
         total_shares = old.get("shares", 0) + shares
         total_cost = old.get("cost", 0) * old.get("shares", 0) + cost * shares
         avg_cost = round(total_cost / total_shares, 2) if total_shares else cost
-        positions[idx] = {"name": name, "shares": total_shares, "cost": avg_cost}
+        row = {"name": name, "shares": total_shares, "cost": avg_cost}
+        code = symbol or old.get("symbol") or old.get("code")
+        if code:
+            row["symbol"] = code
+        positions[idx] = row
     else:
-        positions.append({"name": name, "shares": shares, "cost": cost})
+        row = {"name": name, "shares": shares, "cost": cost}
+        if symbol:
+            row["symbol"] = symbol
+        positions.append(row)
     save_positions(positions)
+    _dual_write_holdings_row(positions[find_position(positions, name)])
     return {"name": name, "shares": shares, "cost": cost, "total_shares": positions[find_position(positions, name)]["shares"]}
 
 
@@ -75,11 +160,16 @@ def record_sell(name: str, shares: int) -> dict:
     old = positions[idx]
     remaining = old["shares"] - shares
     if remaining <= 0:
-        positions.pop(idx)
+        cleared = positions.pop(idx)
         save_positions(positions)
+        _dual_write_holdings_row(cleared, clear=True)
         return {"name": name, "sold": old["shares"], "remaining": 0}
-    positions[idx] = {"name": name, "shares": remaining, "cost": old["cost"]}
+    row = {"name": name, "shares": remaining, "cost": old["cost"]}
+    if old.get("symbol") or old.get("code"):
+        row["symbol"] = old.get("symbol") or old.get("code")
+    positions[idx] = row
     save_positions(positions)
+    _dual_write_holdings_row(row)
     return {"name": name, "sold": shares, "remaining": remaining}
 
 

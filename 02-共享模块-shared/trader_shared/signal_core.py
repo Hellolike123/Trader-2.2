@@ -150,7 +150,7 @@ def read_signals_for_report(target: str, daily_bars: list[dict[str, Any]]) -> tu
     buy_signals: list[float] = []
     sell_signals: list[float] = []
     # M3：信号流不得冒充持仓成本；返回的第一元组恒为 0
-    # （持仓成本仅来自显式 --cost / position.json；track/触发价不驱动持仓态）
+    # （持仓成本仅来自显式 --cost / holdings SSOT；track/触发价不驱动持仓态）
 
     try:
         for line in reversed(all_lines):

@@ -169,6 +169,8 @@ Skill 包内把路径换成 `python3 scripts/<同名入口>.py ...`。完整命�
 | `~/.trader/chip_history.json` | 筹码搬家快照 |
 | `~/.trader/trailing_stop_watermark.json` | ATR 移动止损水位（仅持仓票，只紧不松） |
 | `~/.trader/buy_point_lifecycle.json` | 买点盖失败记录（跨日禁止接旧 signal_id） |
+| `~/.trader/holdings.json` | 持仓成本/股数 SSOT（`holdings.py`；`--cost` 仍优先；双写 legacy `position.json` / `positions.json`） |
+| `trader_paths.py` | 命名路径注册表（`TRADER_ROOT` + 既有 per-key env）；勿再硬编码 `~/.trader/...` |
 | `~/.t0-trader/state.json` / `~/.review-trader/state.json` | 技能缓存 |
 
 完整读写表见 `AGENTS_DEEP.md`。

@@ -10,11 +10,14 @@ def test_save_position_atomic_roundtrip(tmp_path, monkeypatch):
     root = tmp_path / ".trader"
     root.mkdir()
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("TRADER_ROOT", str(root))
 
     # 引擎在 trader_shared；包入口为 identity shim
     from trader_shared import t0_account as acc
+    import trader_shared.holdings as holdings_mod
 
     monkeypatch.setattr(acc, "POSITION_FILE", root / "position.json")
+    holdings_mod._migrated_once = False
 
     from trader_shared import data_manager as dm
 
