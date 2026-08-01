@@ -381,6 +381,27 @@ class TestR1BuyPointCap:
         )
         assert cl2["items"]["short_trigger"] is True
 
+    def test_like1_buy_not_c1_short_trigger(self):
+        """A4：类一买为观察档，不得因子串「一买」点绿 C1。"""
+        cl = build_entry_checklist(
+            stage="蓄势",
+            buy_point_types=["类一买"],
+            in_pullback=True,
+        )
+        assert cl["items"]["short_trigger"] is False
+        cl_ok = build_entry_checklist(
+            stage="蓄势",
+            buy_point_types=["一类买"],
+            in_pullback=True,
+        )
+        assert cl_ok["items"]["short_trigger"] is True
+        cl_short = build_entry_checklist(
+            stage="蓄势",
+            buy_point_types=["一买"],
+            in_pullback=True,
+        )
+        assert cl_short["items"]["short_trigger"] is True
+
     def test_buy1_strictest_over_buy3(self):
         out = apply_chan_discipline(_open_setup(
             buy_point_types=["三类买", "一类买"],

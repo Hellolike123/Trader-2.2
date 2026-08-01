@@ -118,14 +118,32 @@ def test_empty_report_safe():
 
 
 def test_chan_buy_like_rejects_soft_sell_substring():
-    """「类二」不得子串命中「类二卖」；卖点/空向一律非买点。"""
+    """正式买点才进结构探针；类一/类二观察档与卖点一律非买点（BUSINESS §2.1）。"""
     assert _chan_buy_like("类二卖") is False
     assert _chan_buy_like("类二卖", direction=-1) is False
     assert _chan_buy_like("一卖") is False
     assert _chan_buy_like("二卖") is False
-    assert _chan_buy_like("类二买") is True
+    assert _chan_buy_like("类二买") is False
+    assert _chan_buy_like("类一买") is False
     assert _chan_buy_like("二买") is True
+    assert _chan_buy_like("一类买") is True
     assert _chan_buy_like("二买", direction=-1) is False
+
+
+def test_a5_like_buys_do_not_green_structure_post():
+    """A5：类二买不得把回踩共振结构岗点绿。"""
+    r = _base_report()
+    r["analysis_cards"]["chan"] = {
+        "type_short": "类二买",
+        "type_raw": "类二买",
+        "direction": 1,
+        "summary_line": "类二买 · 回踩偏弱",
+    }
+    r["current"] = 12.0
+    r["key_prices"] = {"buy_zone_low": 9.5, "buy_zone_high": 10.2}
+    res = build_resonance(r)
+    assert res["posts"]["structure"]["ok"] is False
+    assert res["grade"] == "missing_structure"
 
 
 def test_soft_sell_does_not_green_structure_post():

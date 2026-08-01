@@ -133,8 +133,15 @@ def attach_short_midline_and_decision(
                 _cmid_inner = _cmid.get("chanlun") or {}
             else:
                 _cmid_inner = _cmid if isinstance(_cmid, dict) else {}
-            _zones_weekly = list(_cmid_inner.get("zones") or [])
-            _st_weekly = str(_cmid_inner.get("structure_type") or "")
+            # A3 / BUSINESS §2.0：仅真周线缠论 zones 可进 weekly_frame / pivot_position_weekly；
+            # daily_fallback 与 mid_key_prices 同构——不得冒充周中枢。
+            _cmid_tf = str((_cmid_inner or {}).get("timeframe") or "").strip()
+            if _cmid_tf == "weekly":
+                _zones_weekly = list(_cmid_inner.get("zones") or [])
+                _st_weekly = str(_cmid_inner.get("structure_type") or "")
+            else:
+                _zones_weekly = []
+                _st_weekly = ""
         except Exception:
             _st_weekly = ""
             _zones_weekly = []
