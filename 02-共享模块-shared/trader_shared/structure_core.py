@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -33,24 +34,52 @@ def load_trailing_watermark(symbol: str, path: Path | None = None) -> float | No
 
 
 def save_trailing_watermark(symbol: str, value: float, path: Path | None = None) -> None:
-    """写入/抬高持仓票移动止损水位。"""
+    """写入/抬高持仓票移动止损水位（锁内 RMW + temp/fsync/replace）。"""
     sym = str(symbol or "").strip()
     fv = to_float(value)
     if not sym or fv is None or fv <= 0:
         return
     store = path or _TRAILING_WATERMARK_PATH
+    lock_path = store.with_suffix(store.suffix + ".lock")
     try:
         store.parent.mkdir(parents=True, exist_ok=True)
-        data: dict[str, Any] = {}
-        if store.exists():
-            raw = json.loads(store.read_text(encoding="utf-8") or "{}")
-            if isinstance(raw, dict):
-                data = raw
-        prev = to_float((data.get(sym) or {}).get("trailing_stop") if isinstance(data.get(sym), dict) else data.get(sym))
-        if prev is not None and prev > fv:
-            fv = prev
-        data[sym] = {"trailing_stop": round(fv, 2)}
-        store.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        with open(lock_path, "a", encoding="utf-8") as lock_f:
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
+            try:
+                data: dict[str, Any] = {}
+                if store.exists():
+                    try:
+                        raw = json.loads(store.read_text(encoding="utf-8") or "{}")
+                    except (json.JSONDecodeError, OSError) as exc:
+                        # 损坏时禁止用单票 payload 覆盖整文件（会抹掉其它持仓水位）
+                        _logger.debug(
+                            "trailing watermark unreadable, skip save: %s", exc
+                        )
+                        return
+                    if not isinstance(raw, dict):
+                        _logger.debug(
+                            "trailing watermark not a dict, skip save: %s", store
+                        )
+                        return
+                    data = raw
+                prev = to_float(
+                    (data.get(sym) or {}).get("trailing_stop")
+                    if isinstance(data.get(sym), dict)
+                    else data.get(sym)
+                )
+                if prev is not None and prev > fv:
+                    fv = prev
+                data[sym] = {"trailing_stop": round(fv, 2)}
+                tmp_path = store.with_suffix(
+                    store.suffix + f".tmp.{os.getpid()}"
+                )
+                with open(tmp_path, "w", encoding="utf-8") as out:
+                    json.dump(data, out, ensure_ascii=False, indent=2)
+                    out.flush()
+                    os.fsync(out.fileno())
+                os.replace(tmp_path, store)
+            finally:
+                fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
     except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
         _logger.debug("trailing watermark save failed: %s", exc)
 
