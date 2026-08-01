@@ -1291,8 +1291,8 @@ def _detect_secondary_test_sc(
     前提：已有 SC 锚点；SC/AR 后若干根内 **low 进入 SC 区**（proximity / 允许刺穿+收回）、
     量与波幅较 SC 明显缩小、未有效破新低。字段独立，不覆盖 spring_test_* / st_*。
 
-    测试窗（phase-a §4.4.1）：有 ``phase_a_range.ar_bar_idx`` 则从 AR 之后起扫；
-    无 AR 仍从 SC+1。回测锚 ``sc_low`` 以 ``_find_sc_anchor`` 为准（SSOT），
+    测试窗（phase-a §4.4.1）：有 ``ar_bar_idx`` 则从 AR+3 起扫，无 AR 从 SC+3；
+    破位扫描仍从 SC+1。回测锚 ``sc_low`` 以 ``_find_sc_anchor`` 为准（SSOT），
     不用外部偏高种子价。
 
     禁止软确认（handoff §1.3）：价格一直站在 sc_low 上方、从未回测 SC 区 →
