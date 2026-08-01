@@ -408,27 +408,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
     lines.append("📐 理论分析")
     lines.append("  中线")
 
-    # 阶段/定论不再独立上屏；保留阶段变量供尾部亮点/风险使用。
-    _stage_line = str(stage_line or '未知')
-    _mid = str(conclusion.get("midline") or "").strip()
-    if _mid and _mid != "中线观察":
-        # 提取方向标签（偏多/偏空）和短因
-        _tag = ""
-        if any(k in _mid for k in ("可跟踪", "趋势未坏", "结构偏多", "看涨")):
-            _tag = "偏多"
-        elif any(k in _mid for k in ("慎跟", "偏空", "暂缓", "信号打架", "破坏")):
-            _tag = "偏空"
-        # 提取短因（去掉标点，取前8字）
-        _short = _mid.replace("·", "").replace("，", "").replace("。", "").split("（")[0].strip()[:10]
-        if _tag:
-            _stage_line = f"{_stage_line} · {_tag}（{_short}）"
-
-    # 定论已删除（各学说独立行保留）。
-    _midline_note = str(
-        conclusion.get("midline_verdict_note")
-        or (r.get("midline_verdict") or {}).get("note")
-        or ""
-    ).strip()
+    # 阶段/定论不上屏；尾部亮点/风险只用 stage_line + midline 看法，禁止拼盘。
 
     # 仓位衔接：结构看好但仓位为0时，加桥接说明
     _suggested_pct = r.get("suggested_pct")
@@ -1156,20 +1136,23 @@ def render_short_midline(r: dict[str, Any]) -> str:
     )
     if _chan_sig and _chan_sig != "无信号" and not _chan_bear_hl:
         _hl_parts.append(f"缠论{_chan_clean}")
-    # 亮点阶段：读内部 stage_line（不上屏）+ midline_bias，勿把偏空主升当亮点
-    _stage_disp_hl = str(_stage_line or stage_line or "").strip()
+    # 亮点/风险：用 stage_line（威科夫短词）+ midline 看法，禁止「中线阶段{拼盘}」
     _mid_bias_hl = str(r.get("midline_bias") or "").strip().lower()
+    _mid_view = str(mid or "").strip()
     _stage_bear_hl = bool(
         _mid_bias_hl == "bear"
-        or any(k in _stage_disp_hl for k in ("转弱", "派发", "衰退", "偏空", "慎跟", "暂缓"))
+        or any(k in _mid_view for k in ("偏空", "慎跟", "暂缓", "信号打架", "破坏", "减/清"))
+        or any(k in stage_line for k in ("转弱", "派发", "衰退", "主跌"))
     )
     _stage_bull_hl = bool(
-        _stage_disp_hl
-        and any(k in _stage_disp_hl for k in ("蓄势", "主升"))
+        (
+            any(k in _mid_view for k in ("可跟踪", "趋势未坏", "结构偏多"))
+            or any(k in stage_line for k in ("吸筹", "主升", "蓄势"))
+        )
         and not _stage_bear_hl
     )
     if _stage_bull_hl:
-        _hl_parts.append(f"中线阶段{stage_line or _stage_disp_hl}")
+        _hl_parts.append("中线可跟踪")
     if _ma5_v and current > 0 and current > _ma5_v and not _chan_bear_hl and not _stage_bear_hl:
         _hl_parts.append("现价在MA5上方")
 
@@ -1180,13 +1163,13 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     if _hl_parts:
         lines.append(f"✅ 亮点：{'；'.join(_hl_parts)}")
-    elif ("可跟踪" in mid or "未坏" in mid) and not _chan_bear_hl and _stage_bull_hl:
+    elif ("可跟踪" in _mid_view or "未坏" in _mid_view) and not _chan_bear_hl and _stage_bull_hl:
         if _sp is not None and _sp <= 0:
-            lines.append(f"✅ 亮点：中线结构可跟踪，等纪律放行；阶段 {stage_line}")
+            lines.append("✅ 亮点：中线结构可跟踪，等纪律放行")
         else:
-            lines.append(f"✅ 亮点：中线看法仍可跟踪；阶段 {stage_line}")
+            lines.append("✅ 亮点：中线看法仍可跟踪")
     elif _stage_bull_hl:
-        lines.append(f"✅ 亮点：阶段 {stage_line}，等短线信号")
+        lines.append("✅ 亮点：中线可跟踪，等短线信号")
     else:
         lines.append("✅ 亮点：暂无，先看纪律与风险")
 
@@ -1194,20 +1177,21 @@ def render_short_midline(r: dict[str, Any]) -> str:
     _risk_parts = []
     if _chan_bear_hl and _chan_clean:
         _risk_parts.append(f"缠论{_chan_clean}")
-    if _stage_bear_hl and (_stage_disp_hl or stage_line):
-        _risk_parts.append(f"中线阶段{_stage_disp_hl or stage_line}")
-    elif stage_line and any(k in stage_line for k in ("转弱", "派发", "衰退")):
-        _risk_parts.append(f"中线阶段{stage_line}")
+    if _stage_bear_hl:
+        if _mid_view and _mid_view != "中线观察":
+            _risk_parts.append(_mid_view.split("·")[0].strip() or _mid_view)
+        elif stage_line and stage_line not in ("无阶段", "未知", ""):
+            _risk_parts.append(f"中线{stage_line}")
     if "不追" in execution or "不买" in execution:
         _risk_parts.append("现价不宜追")
         if stop_v > 0:
             _risk_parts.append(f"止损看 {stop_v:.2f}")
         if _ma20_v and _ma20_v > current > 0:
             _risk_parts.append(f"上方MA20({_ma20_v:.2f})压力")
-    elif stage_line and "派发" in stage_line and f"中线阶段{stage_line}" not in _risk_parts:
-        _risk_parts.append("派发阶段注意破位" + (f"，跌破 {stop_v:.2f} 需离场" if stop_v else ""))
-    elif stage_line and "衰退" in stage_line and f"中线阶段{stage_line}" not in _risk_parts:
-        _risk_parts.append("衰退阶段，不宜介入")
+    elif stage_line == "派发" and not any("派发" in p for p in _risk_parts):
+        _risk_parts.append("派发注意破位" + (f"，跌破 {stop_v:.2f} 需离场" if stop_v else ""))
+    elif stage_line == "衰退" and not any("衰退" in p for p in _risk_parts):
+        _risk_parts.append("衰退中，不宜介入")
     elif life_v > 0 and current > 0 and current < life_v * 1.02:
         _risk_parts.append(f"靠近/跌破中线生命线 {life_v:.2f}")
     elif not _risk_parts:

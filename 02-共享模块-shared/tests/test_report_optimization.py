@@ -469,6 +469,7 @@ def test_highlight_excludes_bearish_chan_and_weak_stage():
     """类二卖/看跌与转弱不得进 ✅ 亮点，应落在风险。"""
     r = _report()
     r["conclusion"]["stage_line"] = "转弱"
+    r["conclusion"]["midline"] = "中线观察"  # 无看法短因时，风险用 stage_line
     r["fusion"]["signals_detail"]["chan"] = {
         "reason": "类二卖 · 反抽偏弱 · 看跌",
         "direction": -1,
@@ -481,6 +482,7 @@ def test_highlight_excludes_bearish_chan_and_weak_stage():
     risk = next(ln for ln in out.splitlines() if "⚠️ 风险" in ln or ln.startswith("风险：") or "风险：" in ln)
     assert "类二卖" in risk or "看跌" in risk
     assert "转弱" in risk
+    assert "中线阶段" not in risk
 
 
 def test_highlight_excludes_bearish_midline_stage_tag():
@@ -499,6 +501,22 @@ def test_highlight_excludes_bearish_midline_stage_tag():
     assert "偏空" not in hl
     risk = next(ln for ln in out.splitlines() if "⚠️ 风险" in ln)
     assert "偏空" in risk or "主升初期" in risk
+
+
+def test_risk_highlight_no_stage_mashup():
+    """R-R2b：亮点/风险禁止「中线阶段…」拼盘与「阶段 {stage_line}」。"""
+    r = _report()
+    r["conclusion"]["stage_line"] = "无阶段"
+    r["conclusion"]["midline"] = "中线框破坏 · 战略减/清倾向"
+    r["midline_bias"] = "bear"
+    out = render_short_midline(r)
+    risk = next(ln for ln in out.splitlines() if "⚠️ 风险" in ln)
+    hl = next(ln for ln in out.splitlines() if "✅ 亮点" in ln)
+    assert "中线阶段" not in risk
+    assert "中线阶段" not in hl
+    assert "阶段 无阶段" not in hl
+    assert "无阶段 · 偏空" not in risk
+    assert "中线框破坏" in risk
 
 
 def test_short_section_has_daily_phase_line():
