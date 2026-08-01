@@ -111,12 +111,62 @@ def _short_fund_display(vsig: dict[str, Any]) -> str:
     return primary or "中性"
 
 
-def render_short_midline(r: dict[str, Any]) -> str:
-    """短中线报告模板（docs/mid-short-dual-track-plan.md §0.1）。
+def _unwrap_wyckoff_payload(raw: object) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    if isinstance(raw.get("wyckoff"), dict):
+        return raw["wyckoff"]  # type: ignore[index]
+    return raw
 
-    meta → 🧭 中线 → ⚡ 短线 → 说明 → 📌/T0/池
-    B3C 阶段+看法并列；B2A 无 🗺、🌟 仅短线。
-    """
+
+def _float_or_none(val: object) -> float | None:
+    try:
+        if val is None or val == "":
+            return None
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _wyckoff_l3_bounds_line(raw: object) -> str:
+    """L3 成熟箱体的展示边界；仅消费既有 wyckoff/box 字段。"""
+    wyk = _unwrap_wyckoff_payload(raw)
+    if not wyk:
+        return ""
+    ce = wyk.get("cause_effect") if isinstance(wyk.get("cause_effect"), dict) else {}
+    maturity = str(wyk.get("tr_maturity") or ce.get("tr_maturity") or "").strip().upper()
+    allowed = wyk.get("measure_allowed")
+    if allowed is None:
+        allowed = ce.get("measure_allowed")
+    if maturity != "L3" and not bool(allowed):
+        return ""
+
+    tr = wyk.get("tr") if isinstance(wyk.get("tr"), dict) else {}
+    box = wyk.get("box") if isinstance(wyk.get("box"), dict) else {}
+    phase_a = wyk.get("phase_a_range") if isinstance(wyk.get("phase_a_range"), dict) else {}
+    lower = (
+        _float_or_none(wyk.get("tr_lower"))
+        or _float_or_none(tr.get("lower"))
+        or _float_or_none(box.get("lower"))
+        or _float_or_none(wyk.get("box_lower"))
+        or _float_or_none(phase_a.get("sc_low_refined"))
+        or _float_or_none(phase_a.get("st_sc_low"))
+        or _float_or_none(phase_a.get("sc_low"))
+    )
+    upper = (
+        _float_or_none(wyk.get("tr_upper"))
+        or _float_or_none(tr.get("upper"))
+        or _float_or_none(box.get("upper"))
+        or _float_or_none(wyk.get("box_upper"))
+        or _float_or_none(phase_a.get("ar_high"))
+    )
+    if lower is None or upper is None:
+        return ""
+    return f"下沿 {lower:.2f}｜上沿 {upper:.2f}（L3）"
+
+
+def render_short_midline(r: dict[str, Any]) -> str:
+    """短中线报告模板（主题四区：价格状态 → 理论 → 支撑阻力 → 出手）。"""
     name = r.get("name", "")
     code = str(r.get("symbol", "")).replace(".SH", "").replace(".SZ", "")
     current = float(r.get("current") or 0)
@@ -181,8 +231,9 @@ def render_short_midline(r: dict[str, Any]) -> str:
             lines.append(f"⚠️ 数据不完整（{_ds}），仅基础行情参考")
         lines.append("")
 
+    lines.append("📊 价格状态")
     lines.append(
-        f"现价 {current:.2f}（{change_pct:+.2f}%）｜MA20 {_ma20_text}｜MA250 {_ma250_text}{_ma250_warn}"
+        f"  现价 {current:.2f}（{change_pct:+.2f}%）｜MA20 {_ma20_text}｜MA250 {_ma250_text}{_ma250_warn}"
     )
 
     # 盘中诚实标注：实时价已锚定，但策略判定基于截至该日收盘的真实日线
@@ -352,11 +403,12 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if stage_line == "None":
         stage_line = ""
 
-    # ── 🧭 中线（B3C）──
+    # ── 📐 理论分析：中线 ──
     lines.append("")
-    lines.append("🧭 中线")
+    lines.append("📐 理论分析")
+    lines.append("  中线")
 
-    # 阶段 + 中线偏多/偏空标签（合并"看法"行）
+    # 阶段/定论不再独立上屏；保留阶段变量供尾部亮点/风险使用。
     _stage_line = str(stage_line or '未知')
     _mid = str(conclusion.get("midline") or "").strip()
     if _mid and _mid != "中线观察":
@@ -370,16 +422,13 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _short = _mid.replace("·", "").replace("，", "").replace("。", "").split("（")[0].strip()[:10]
         if _tag:
             _stage_line = f"{_stage_line} · {_tag}（{_short}）"
-    lines.append(f"  阶段：{_stage_line}")
 
-    # 定论：威科夫中线 + 缠论中线 合成注记（各自独立输出已在下方威科夫/缠论段渲染）
+    # 定论已删除（各学说独立行保留）。
     _midline_note = str(
         conclusion.get("midline_verdict_note")
         or (r.get("midline_verdict") or {}).get("note")
         or ""
     ).strip()
-    if _midline_note:
-        lines.append(f"  定论：{_midline_note}")
 
     # 仓位衔接：结构看好但仓位为0时，加桥接说明
     _suggested_pct = r.get("suggested_pct")
@@ -387,8 +436,11 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _sp = int(_suggested_pct) if _suggested_pct is not None else None
     except (TypeError, ValueError):
         _sp = None
+    support_lines: list[str] = []
+    decision_lines: list[str] = []
 
     # 威科夫中线：报告边界只经 wyckoff_view（周线独占，禁止回退日线）
+    _wyk_raw: dict[str, Any] = {}
     try:
         from trader_shared.wyckoff_view import format_midline_display
         _wyk_raw = r.get("wyckoff_midline")
@@ -406,7 +458,10 @@ def render_short_midline(r: dict[str, Any]) -> str:
     # 已是「威科夫：…」完整行
     if not str(_wyk_line).startswith("威科夫"):
         _wyk_line = f"威科夫：{_wyk_line}"
-    lines.append(f"  {_wyk_line}")
+    lines.append(f"    {_wyk_line}")
+    _box_mid = _wyckoff_l3_bounds_line(_wyk_raw)
+    if _box_mid:
+        lines.append(f"    {_box_mid}")
     # 中线量度目标：周线 P&F（与短线日线分开算）
     try:
         from trader_shared.wyckoff_view import format_cause_effect_display
@@ -415,7 +470,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _src_m = _src_m["wyckoff"]
         _ce_mid = format_cause_effect_display(_src_m if isinstance(_src_m, dict) else {})
         if _ce_mid:
-            lines.append(f"  {_ce_mid}")
+            lines.append(f"    {_ce_mid}")
     except Exception:
         pass
 
@@ -508,7 +563,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
                 _chan_display = _wave_mid
     else:
         _chan_display = _chan_compact
-    lines.append(f"  缠论：{_chan_display}")
+    lines.append(f"    缠论：{_chan_display}")
 
     # 位置灯（筹码峰：下方成本 / 上方套牢 / 搬家）— 只展示，不进 fusion
     _pos_mid = ""
@@ -521,7 +576,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
             r.get("chip_current_pct") if isinstance(r.get("chip_current_pct"), (int, float)) else None,
         )
         if _pos_mid:
-            lines.append(f"  {_pos_mid}")
+            lines.append(f"    {_pos_mid}")
     except Exception:
         _pos_mid = ""
 
@@ -531,7 +586,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if isinstance(_sh, dict) and _sh.get("status") and _sh.get("status") != "数据不足":
         _sh_chg = _sh.get("change_pct") or 0.0
         _sh_status = _sh.get("status")
-        lines.append(f"  附：股东户数较上期 {_sh_chg:+.2f}%（{_sh_status}）")
+        lines.append(f"    附：股东户数较上期 {_sh_chg:+.2f}%（{_sh_status}）")
 
     # 业绩预期
     _eps_data = _ext_fund.get("consensus_eps") or {}
@@ -559,11 +614,10 @@ def render_short_midline(r: dict[str, Any]) -> str:
                 _eps_parts.append(f"27年均值{_eps_27}元")
             _cnt_val = _count_27 if _count_27 != "--" else _count_26
             _cnt_str = f"（{_cnt_val}家机构预测）" if _cnt_val != "--" else ""
-            lines.append(f"  业绩预期：{' ｜ '.join(_eps_parts)}{_cnt_str}")
+            lines.append(f"    业绩预期：{' ｜ '.join(_eps_parts)}{_cnt_str}")
 
-    # 中线关键价（按价格升序排列）
-    lines.append("")
-    lines.append("  关键价（中线）")
+    # 中线支撑阻力（按价格升序排列）
+    support_lines.append("  中线")
 
     # 收集中线价位，按价格排序
     _mid_items: list[tuple[float, str]] = []
@@ -607,7 +661,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
     # 输出带 % 距离标注
     for _p, _text in _mid_items:
         if "现价" in _text:
-            lines.append(f"    {_text}")
+            support_lines.append(f"    {_text}")
         else:
             _dist_pct = (_p - current) / current * 100 if current > 0 else 0.0
             _dist_str = f"{_dist_pct:+.0f}%" if abs(_dist_pct) >= 1 else f"{_dist_pct:+.1f}%"
@@ -624,13 +678,13 @@ def render_short_midline(r: dict[str, Any]) -> str:
                 _text = _text[:_insert_at] + f"（{_dist_str} · " + _text[_insert_at + 1:]
             else:
                 _text = f"{_text}（{_dist_str}）"
-            lines.append(f"    {_text}")
+            support_lines.append(f"    {_text}")
     if not _mid_items:
-        lines.append("    数据不足")
+        support_lines.append("    数据不足")
 
-    # ── ⚡ 短线 A 版：结构 → 状态 → 动能｜资金 → 动作 → 失效 ──
+    # ── 📐 理论分析：短线 ──
     lines.append("")
-    lines.append("⚡ 短线")
+    lines.append("  短线")
 
     _disc = r.get("discipline") if isinstance(r.get("discipline"), dict) else {}
     _cap_t = _disc.get("suggested_pct_cap")
@@ -673,13 +727,13 @@ def render_short_midline(r: dict[str, Any]) -> str:
             if _wave:
                 _chan_line += f" · {_wave}"
     # 与中线同构：学说点名「缠论：」「威科夫：」
-    lines.append(f"  缠论：{_compact_short_structure_line(_chan_line)}")
+    lines.append(f"    缠论：{_compact_short_structure_line(_chan_line)}")
 
     # 1b) 买点生命周期（L1 展示；挂在缠论下）
     _life = r.get("buy_point_lifecycle") if isinstance(r.get("buy_point_lifecycle"), dict) else {}
     _life_line = str(_life.get("display_line") or "").strip()
     if _life_line:
-        lines.append(f"  {_life_line}")
+        lines.append(f"    {_life_line}")
 
     def _unwrap_wyk_daily(raw: object) -> dict:
         if not isinstance(raw, dict):
@@ -710,15 +764,18 @@ def render_short_midline(r: dict[str, Any]) -> str:
             if _phase_body.startswith(_pfx):
                 _phase_body = _phase_body[len(_pfx):].strip()
                 break
-        lines.append(f"  威科夫：{_phase_body or '数据不足 · 仅对照'}")
+        lines.append(f"    威科夫：{_phase_body or '数据不足 · 仅对照'}")
     except Exception:
-        lines.append("  威科夫：数据不足 · 仅对照")
+        lines.append("    威科夫：数据不足 · 仅对照")
+    _box_daily = _wyckoff_l3_bounds_line(_wyk_daily_u)
+    if _box_daily:
+        lines.append(f"    {_box_daily}")
     # 短线量度目标：日线 P&F（与中线周线分开算）
     try:
         from trader_shared.wyckoff_view import format_cause_effect_display
         _ce_d = format_cause_effect_display(_wyk_daily_u)
         if _ce_d:
-            lines.append(f"  {_ce_d}")
+            lines.append(f"    {_ce_d}")
     except Exception:
         pass
 
@@ -743,7 +800,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _ev = re.sub(r"\s{2,}", " ", _ev).strip()
             # 空事件不占行
             if "暂无事件" not in _ev and "数据不足" not in _ev:
-                lines.append(f"  {_ev}")
+                lines.append(f"    {_ev}")
     except Exception:
         pass
 
@@ -757,7 +814,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
             r.get("chip_current_pct") if isinstance(r.get("chip_current_pct"), (int, float)) else None,
         )
         if _pos_s and _pos_s != _pos_mid:
-            lines.append(f"  {_pos_s}")
+            lines.append(f"    {_pos_s}")
     except Exception:
         pass
 
@@ -782,8 +839,8 @@ def render_short_midline(r: dict[str, Any]) -> str:
                 _vst = f"{_vst} · {_veto}"
     else:
         _vst = "暂无信号"
-    lines.append(f"  动能：{_mst}")
-    lines.append(f"  资金：{_vst}")
+    lines.append(f"    动能：{_mst}")
+    lines.append(f"    资金：{_vst}")
 
     # 信号分歧：结构 vs 动能
     _chan_dir2 = int(_csig2.get("direction", 0)) if _csig2 else 0
@@ -791,16 +848,15 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if _chan_dir2 * _mom_dir2 < 0:
         _c_label = "看多" if _chan_dir2 > 0 else "看空"
         _m_label = "看多" if _mom_dir2 > 0 else "看空"
-        lines.append(f"  ⚠️ 信号分歧：结构{_c_label} vs 动能{_m_label} → 以不新开为主")
+        lines.append(f"    ⚠️ 信号分歧：结构{_c_label} vs 动能{_m_label} → 以不新开为主")
 
-    # 阶段 4：决策块（空行分隔，扫读：看盘 ↑ / 能不能做 ↓）
-    lines.append("")
+    # 阶段 4：决策块（迁入 ✅ 出手）
     try:
         from trader_shared.decision_view import format_decision_narrative_lines
 
         for _nl in format_decision_narrative_lines(r):
-            if _nl and _nl not in lines:
-                lines.append(_nl)
+            if _nl and _nl not in decision_lines:
+                decision_lines.append(_nl)
     except Exception:
         pass
 
@@ -836,9 +892,9 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _reason_line = reason
         else:
             _action_parts.append(reason)
-    lines.append(f"  动作：{' · '.join(_action_parts)}")
+    decision_lines.append(f"  动作：{' · '.join(_action_parts)}")
     if _reason_line:
-        lines.append(f"  原因：{_reason_line}")
+        decision_lines.append(f"  原因：{_reason_line}")
 
     # 5) 破位线（有仓/盯盘看；无仓=计划作废线，不是今天必卖指令）
     _gate = r.get("mistery_gate") if isinstance(r.get("mistery_gate"), dict) else {}
@@ -848,7 +904,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _inv = _inv.replace("或跌破止损", "或破止损")
         if len(_inv) > 52:
             _inv = _inv[:49] + "…"
-        lines.append(f"  破位看：{_inv}")
+        decision_lines.append(f"  破位看：{_inv}")
 
     # 策略闸口仍由 pipeline 写入 strategy_match（供 decision_view）；
     # 人读报告省略 📐——日常以 决策/动作/新开/失效 为准。
@@ -895,8 +951,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
     _rr_buy_verdict = "✓" if _ratio_buy >= 2.0 else ("✗" if _ratio_buy < 1.0 else "△")
     _rr_chase_verdict = "✓" if _ratio_chase >= 2.0 else ("✗" if _ratio_chase < 1.0 else "△")
 
-    lines.append("")
-    lines.append("  关键价（短线）")
+    support_lines.append("  短线")
 
     # 按价格从低到高排列，每个价位一行
     _price_items: list[tuple[float, str, str]] = []  # (price, label, action)
@@ -958,7 +1013,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _price_items.append((float(buy_low) - 0.001, f"低吸区 {float(buy_low):.2f}-{float(buy_high):.2f}", f"{_buy_annotation}{_src_suffix}"))
     elif buy_ref:
         _src_suffix = f" ← {_sup_label}" if _sup_label else ""
-        _price_items.append((float(buy_ref), "买点区", f"分批建仓{_src_suffix}"))
+        _price_items.append((float(buy_ref), "低吸区", f"分批建仓{_src_suffix}"))
 
     # MA5 支撑（如果在止损和现价之间）
     _ma5 = _ma_float("ma5")
@@ -1013,11 +1068,9 @@ def render_short_midline(r: dict[str, Any]) -> str:
     _price_items.sort(key=lambda x: x[0])
     for price, label, action in _price_items:
         if "现价" in label:
-            lines.append(f"    🌟 {current:.2f} 现价（{action}）")
+            support_lines.append(f"    🌟 {current:.2f} 现价（{action}）")
         else:
-            lines.append(f"    {price:.2f} {label}（{action}）")
-
-    lines.append("")
+            support_lines.append(f"    {price:.2f} {label}（{action}）")
 
     # ── T0（日内算法：低吸到高抛的日内差价 + 盈亏比）──
     _t0_has_pos = bool(r.get("has_position"))
@@ -1032,9 +1085,9 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _tw = max(0.0, _sl - _bl)
             _tr_ratio = _tw / _tr if _tr > 0 else 0
             _tv = "✓" if _tr_ratio >= 2.0 else ("✗" if _tr_ratio < 1.0 else "△")
-            lines.append(f"  日内 T0：{_bl:.2f} 低吸 ｜ {_tm:.2f} 观察 ｜ {_sl:.2f} 高抛（差价{_tw:.2f}元，盈亏比{_tr_ratio:.1f}:1 {_tv}）")
+            support_lines.append(f"    日内 T0：{_bl:.2f} 低吸 ｜ {_tm:.2f} 观察 ｜ {_sl:.2f} 高抛（差价{_tw:.2f}元，盈亏比{_tr_ratio:.1f}:1 {_tv}）")
         else:
-            lines.append("  T0：无底仓，不启用（与出手一致，不新开）")
+            support_lines.append("    T0：无底仓，不启用（与出手一致，不新开）")
     else:
         t0_ref = r.get("t0_ref") or {}
         _t0_buy = float(t0_ref.get("low_buy") or buy_low or r.get("support") or 0)
@@ -1045,22 +1098,32 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _tw = max(0.0, _t0_sell - _t0_buy)
             _tr_ratio = _tw / _tr if _tr > 0 else 0
             _tv = "✓" if _tr_ratio >= 2.0 else ("✗" if _tr_ratio < 1.0 else "△")
-            lines.append(f"  日内 T0：{_t0_buy:.2f} 低吸 ｜ {_tm:.2f} 观察 ｜ {_t0_sell:.2f} 高抛（差价{_tw:.2f}元，盈亏比{_tr_ratio:.1f}:1 {_tv}）")
+            support_lines.append(f"    日内 T0：{_t0_buy:.2f} 低吸 ｜ {_tm:.2f} 观察 ｜ {_t0_sell:.2f} 高抛（差价{_tw:.2f}元，盈亏比{_tr_ratio:.1f}:1 {_tv}）")
         elif _t0_has_pos:
             _tp = []
             if _t0_buy > 0:
                 _tp.append(f"低吸参考 {_t0_buy:.2f}")
             if _t0_sell > 0:
                 _tp.append(f"高抛参考 {_t0_sell:.2f}")
-            lines.append(f"  T0：{' ｜ '.join(_tp)}" if _tp else "T0：有底仓，按关键价做短线")
+            support_lines.append(f"    T0：{' ｜ '.join(_tp)}" if _tp else "    T0：有底仓，按关键价做短线")
         elif _t0_buy > 0:
-            lines.append(f"  T0：仅观察；计划买点约 {_t0_buy:.2f}（未放行不下手）")
+            support_lines.append(f"    T0：仅观察；计划买点约 {_t0_buy:.2f}（未放行不下手）")
         else:
-            lines.append("  T0：观察关键价即可")
+            support_lines.append("    T0：观察关键价即可")
 
     # ── 🎯 组合策略共振（combo）已暂停渲染：箱体先做独立模块，暂不进报告 ──
 
     # 「说明」行已删除（与出手行语义重复）
+
+    if support_lines:
+        lines.append("")
+        lines.append("🎯 支撑阻力")
+        lines.extend(support_lines)
+
+    if decision_lines:
+        lines.append("")
+        lines.append("✅ 出手")
+        lines.extend(decision_lines)
 
     # ── 亮点 / 风险（禁止「阶段…中线故事」挂羊头）──
     support = float(r.get("support") or 0)
@@ -1093,7 +1156,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
     )
     if _chan_sig and _chan_sig != "无信号" and not _chan_bear_hl:
         _hl_parts.append(f"缠论{_chan_clean}")
-    # 亮点阶段：看面板「阶段：」行（含偏空标签）+ midline_bias，勿把偏空主升当亮点
+    # 亮点阶段：读内部 stage_line（不上屏）+ midline_bias，勿把偏空主升当亮点
     _stage_disp_hl = str(_stage_line or stage_line or "").strip()
     _mid_bias_hl = str(r.get("midline_bias") or "").strip().lower()
     _stage_bear_hl = bool(

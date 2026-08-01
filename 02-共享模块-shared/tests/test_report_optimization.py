@@ -134,6 +134,22 @@ def _report() -> dict:
     }
 
 
+def _between(text: str, start: str, end: str | None = None) -> str:
+    block = text.split(start, 1)[1]
+    if end and end in block:
+        block = block.split(end, 1)[0]
+    return block
+
+
+def _short_theory_block(text: str) -> str:
+    theory = _between(text, "📐 理论分析", "🎯 支撑阻力")
+    return _between(theory, "\n  短线")
+
+
+def _decision_block(text: str) -> str:
+    return _between(text, "✅ 出手", "✅ 亮点")
+
+
 # ── Task 1: 盈亏比 ✓/✗ 判定 + 卖点区目标百分比 ──
 
 def test_risk_reward_ratio_with_verdict():
@@ -295,7 +311,7 @@ def test_format_wyckoff_event_light_none():
 
 
 def test_short_section_shows_event_light():
-    """⚡ 短线含状态行；读 wyckoff_daily，不进评分。"""
+    """理论分析·短线含事件行；读 wyckoff_daily，不进评分。"""
     r = _report()
     r["wyckoff_daily"] = {
         "spring_signal": True,
@@ -309,7 +325,8 @@ def test_short_section_shows_event_light():
         "wyckoff_summary": "中线",
     }
     out = render_short_midline(r)
-    assert "⚡ 短线" in out
+    assert "📐 理论分析" in out
+    assert "\n  短线" in out
     assert "事件：Spring（弹簧）" in out
     # 中线 + 短线均有「威科夫：」点名行
     assert out.count("威科夫：") >= 2
@@ -329,8 +346,8 @@ def test_short_section_omits_empty_status_and_compacts_structure():
         "reason": "平量（量比1.3）（资金未取到）",
     }
     out = render_short_midline(r)
-    short = out.split("⚡ 短线", 1)[-1]
-    head = short.split("关键价", 1)[0]
+    short = _short_theory_block(out)
+    head = short
     assert "事件：" not in head
     assert "状态：" not in head
     assert "缠论：" in short
@@ -367,7 +384,7 @@ def test_format_chanlun_short_light_from_fusion_reason():
 
 
 def test_short_section_chan_type_first():
-    """⚡ 短线结构：类型优先（一买…）而非 reason 原文堆叠。"""
+    """理论分析·短线结构：类型优先（一买…）而非 reason 原文堆叠。"""
     r = _report()
     r["chanlun"] = {
         "chanlun": {
@@ -382,14 +399,15 @@ def test_short_section_chan_type_first():
         "direction": 1,
     }
     out = render_short_midline(r)
-    short = out.split("⚡ 短线", 1)[-1].split("关键价", 1)[0]
+    short = _short_theory_block(out)
+    decision = _decision_block(out)
     assert "缠论：一买" in short
     assert "看涨" in short
-    # A 版读序：缠论在动作前，且用「动作」不用「出手」
-    assert "动作：" in short
+    # 新骨架：缠论在理论区，动作在出手区；仍不用旧「出手：」行
+    assert "动作：" in decision
     assert "出手：" not in short
-    pos_struct = short.find("缠论：")
-    pos_action = short.find("动作：")
+    pos_struct = out.find("缠论：")
+    pos_action = out.find("动作：")
     assert 0 <= pos_struct < pos_action
 
 
@@ -412,7 +430,7 @@ def test_r01_strategy_gates_omitted_from_report():
         }
     }
     out = render_short_midline(r)
-    short = out.split("⚡ 短线", 1)[-1]
+    short = _decision_block(out)
     assert "📐 策略" not in short
     assert "选股：" not in short
     assert "动作：" in short or "决策：" in short or "新开：" in short
@@ -425,7 +443,7 @@ def test_r02_no_position_not_manage_active_tone():
     r["cost"] = 0
     r["discipline"] = {"allow_new_entry": False, "action": "不新开", "suggested_pct_cap": 0}
     out = render_short_midline(r)
-    short = out.split("⚡ 短线", 1)[-1].split("关键价", 1)[0]
+    short = _decision_block(out)
     assert "📐 策略" not in short
     if "持：" in short:
         hold_line = [ln for ln in short.splitlines() if "持：" in ln][0]
@@ -435,7 +453,7 @@ def test_r02_no_position_not_manage_active_tone():
 def test_r03_strategy_block_no_md_table():
     """R-03: 短线区无 markdown 表格/粗体（含省略 📐 后仍成立）。"""
     out = render_short_midline(_report())
-    short = out.split("⚡ 短线", 1)[-1] if "⚡ 短线" in out else out
+    short = _short_theory_block(out)
     assert "**" not in short
     assert "|---|" not in short
 
@@ -494,7 +512,7 @@ def test_short_section_has_daily_phase_line():
         "phase_tr_gate_reason": "no_tr",
     }
     out = render_short_midline(r)
-    short = out.split("⚡ 短线", 1)[-1]
+    short = _short_theory_block(out)
     assert "缠论：" in short
     assert "威科夫：" in short
     assert "日线阶段：" not in short
@@ -505,6 +523,64 @@ def test_short_section_has_daily_phase_line():
     struct_i = next(i for i, ln in enumerate(lines) if ln.startswith("缠论："))
     phase_i = next(i for i, ln in enumerate(lines) if ln.startswith("威科夫："))
     assert phase_i > struct_i
+
+
+def test_wyckoff_l2_omits_measure_lines():
+    """R-R5：L0-L2 沉默省略量度行，不写未达 L3 解释。"""
+    r = _report()
+    r["wyckoff_midline"] = {
+        "timeframe": "weekly",
+        "phase": "accumulation",
+        "phase_label": "吸筹B",
+        "tr_maturity": "L2",
+        "measure_allowed": False,
+        "tr_lower": 10.0,
+        "tr_upper": 12.0,
+        "cause_effect_up_target": 14.0,
+        "cause_effect_down_target": 8.0,
+    }
+    out = render_short_midline(r)
+    theory = _between(out, "📐 理论分析", "🎯 支撑阻力")
+    assert "量度目标：" not in theory
+    assert "下沿 10.00｜上沿 12.00（L3）" not in theory
+    assert "未达 L3" not in out
+
+
+def test_wyckoff_l3_measure_stays_under_theory():
+    """R-R4/R-R5：L3 下沿/上沿 + 量度目标留在理论分析·威科夫下。"""
+    r = _report()
+    r["wyckoff_midline"] = {
+        "timeframe": "weekly",
+        "phase": "accumulation",
+        "phase_label": "吸筹C",
+        "tr_maturity": "L3",
+        "measure_allowed": True,
+        "tr_lower": 10.0,
+        "tr_upper": 12.0,
+        "cause_effect_up_target": 14.0,
+        "cause_effect_down_target": 8.0,
+        "pnf_method": "height_1to1_fallback",
+    }
+    r["wyckoff_daily"] = {
+        "timeframe": "daily",
+        "phase": "accumulation",
+        "phase_label": "吸筹C",
+        "tr_maturity": "L3",
+        "measure_allowed": True,
+        "tr_lower": 40.0,
+        "tr_upper": 44.0,
+        "cause_effect_up_target": 48.0,
+        "cause_effect_down_target": 36.0,
+    }
+    out = render_short_midline(r)
+    theory = _between(out, "📐 理论分析", "🎯 支撑阻力")
+    support = _between(out, "🎯 支撑阻力", "✅ 出手")
+    assert "下沿 10.00｜上沿 12.00（L3）" in theory
+    assert "量度目标：上 14.00｜下 8.00（高度1:1，非出手）" in theory
+    assert "下沿 40.00｜上沿 44.00（L3）" in theory
+    assert "量度目标：上 48.00｜下 36.00（P&F，非出手）" in theory
+    assert "量度目标：" not in support
+    assert "（L3）" not in support
 
 
 def test_risk_uses_short_resist():
@@ -643,7 +719,7 @@ def test_meta_pure_d_board_without_sector():
         "index_code": "399001.SZ",
     }
     out = render_short_midline(r)
-    head = out.split("🧭")[0]
+    head = out.split("📐 理论分析")[0]
     assert "综合动能 转弱 ｜ 深成 +1.25% ｜ 个股 +0.82%" in out
     assert "大盘" not in head
     assert " 偏弱" not in head and "正常" not in head
@@ -672,7 +748,7 @@ def test_meta_pure_d_with_sector():
     out = render_short_midline(r)
     assert "综合动能 转弱 ｜ 科创 +2.99% ｜ 电气 -3.44% ｜ 个股 +0.84%" in out
     assert "行业：" not in out
-    assert "跑赢" not in out.split("🧭")[0]
+    assert "跑赢" not in out.split("📐 理论分析")[0]
 
 
 # ── Task 9: 中线关键价格式统一 ──

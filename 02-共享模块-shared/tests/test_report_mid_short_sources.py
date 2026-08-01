@@ -188,25 +188,31 @@ class TestRenderDualTrack:
     def test_layout_b3c_b2a(self):
         r = _report()
         md = render_short_midline(r)
-        assert "🧭 中线" in md
-        assert "⚡ 短线" in md
-        # 面板「阶段：」= 周线威科夫短词（fixture phase=none → 无阶段）；禁止日线 major_stage 冒充
-        assert "阶段：无阶段" in md
+        assert "📊 价格状态" in md
+        assert "📐 理论分析" in md
+        assert "🎯 支撑阻力" in md
+        assert "✅ 出手" in md
+        assert "🧭 中线" not in md
+        assert "⚡ 短线" not in md
+        # 中线「阶段：/定论：」独立行已删除；禁止日线 major_stage 冒充上屏
+        assert "阶段：" not in md
+        assert "定论：" not in md
         assert "阶段：蓄势偏强" not in md
         # 看法已并入定论；短线仍可单独有看法行
         assert "中线：蓄势" not in md
         assert "🎯 结论" not in md
         assert "🗳️ 短线专家" not in md
         assert "🗺 空间参考" not in md
-        mid_block = md.split("⚡ 短线")[0]
-        short_block = md.split("⚡ 短线")[1]
+        support_block = md.split("🎯 支撑阻力", 1)[1].split("✅ 出手", 1)[0]
+        mid_block = support_block.split("\n  短线", 1)[0]
+        short_block = support_block.split("\n  短线", 1)[1]
         # 🌟 现价只允许出现在短线关键价（中线禁止）
         assert "🌟" not in mid_block
         assert "🌟" in short_block
-        assert "关键价（中线）" in md
-        assert "关键价（短线）" in md
+        assert "关键价（中线）" not in md
+        assert "关键价（短线）" not in md
         assert "生命线" in md
-        assert "动作：" in md or "出手" in md
+        assert "动作：" in md
         assert "低吸区" in md or "买点区" in md
         assert "止损" in md
         inv = str((r.get("mistery_gate") or {}).get("invalidation") or "")
@@ -220,8 +226,9 @@ class TestRenderDualTrack:
 
     def test_short_experts_day_only(self):
         md = render_short_midline(_report())
-        short_block = md.split("⚡ 短线")[1]
-        assert "DAY_ONLY_顶背驰" in short_block
+        theory = md.split("📐 理论分析", 1)[1].split("🎯 支撑阻力", 1)[0]
+        short_block = theory.split("\n  短线", 1)[1]
+        assert "顶背驰" in short_block
         assert "DAY_ONLY_震荡" in short_block
 
     def test_midline_view_not_stage_words(self):
@@ -252,7 +259,8 @@ class TestMidShortPriceIsolation:
         assert "daily_key_levels_proxy" not in mk["notes"]
 
         md = render_short_midline(r)
-        mid_block = md.split("⚡ 短线")[0]
+        support_block = md.split("🎯 支撑阻力", 1)[1].split("✅ 出手", 1)[0]
+        mid_block = support_block.split("\n  短线", 1)[0]
         assert "48.00" in mid_block or "生命线 48" in mid_block
         # 日线 mid_support 40 不应出现在中线关键价
         assert "生命线 40" not in mid_block

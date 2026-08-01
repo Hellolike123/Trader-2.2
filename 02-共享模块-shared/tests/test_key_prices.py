@@ -225,12 +225,16 @@ class TestRenderShortMidline:
     def test_template_keywords(self):
         md = render_short_midline(self._sample_report())
         assert "｜短中线" in md
-        assert "🧭 中线" in md
-        assert "⚡ 短线" in md
-        # 面板「阶段：」= 周线威科夫短词（不足→无阶段）；禁止日线 major_stage=蓄势偏强 冒充
-        assert "阶段：无阶段" in md
+        assert "📊 价格状态" in md
+        assert "📐 理论分析" in md
+        assert "🎯 支撑阻力" in md
+        assert "✅ 出手" in md
+        assert "🧭 中线" not in md
+        assert "⚡ 短线" not in md
+        # 中线「阶段：/定论：」独立行已删除；禁止日线 major_stage=蓄势偏强 冒充上屏
+        assert "阶段：" not in md
+        assert "定论：" not in md
         assert "阶段：蓄势偏强" not in md
-        assert "阶段：无阶段 ·" in md  # 定论偏多/偏空附在阶段行
         assert "中线：蓄势" not in md
         assert "🎯 结论" not in md
         assert "威科夫" in md
@@ -241,8 +245,8 @@ class TestRenderShortMidline:
         assert "缠论：" in md
         assert "日线三专家" not in md
         assert "🗳️ 短线专家" not in md
-        assert "关键价（中线）" in md
-        assert "关键价（短线）" in md
+        assert "关键价（中线）" not in md
+        assert "关键价（短线）" not in md
         assert "止损" in md
         assert "买" in md
         assert "🗺 空间参考" not in md
