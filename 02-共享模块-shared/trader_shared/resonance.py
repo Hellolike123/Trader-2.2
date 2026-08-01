@@ -50,11 +50,45 @@ def _background_stage(report: dict[str, Any]) -> tuple[str, str]:
     return _s(report.get("major_stage")), "major"
 
 
+def _weekly_wyckoff_ok(
+    report: dict[str, Any], cards: dict[str, Any]
+) -> tuple[bool, dict[str, Any], str]:
+    """背景岗只读周线威科夫；不足/缺席 → 不参与。
+
+    法源：BUSINESS.md §2.0/§2.2；docs/designs/resonance-and-orchestration.md §3
+    （background=周线威科夫；timeframe=insufficient → 不参与；禁日线冒充）。
+    """
+    # 禁回退日线 wyckoff 卡
+    if "wyckoff_midline" not in cards or not isinstance(cards.get("wyckoff_midline"), dict):
+        return False, {}, "周线威科夫不足/不参与"
+    w = _card(cards, "wyckoff_midline")
+    wm_raw = report.get("wyckoff_midline") if isinstance(report.get("wyckoff_midline"), dict) else {}
+    tf = _s(w.get("timeframe") or wm_raw.get("timeframe")).lower()
+    if tf == "insufficient" or _s(wm_raw.get("timeframe")).lower() == "insufficient":
+        return False, w, "周线威科夫不足/不参与"
+    # 空卡（ensure 未写入有效周线载荷）
+    if (
+        w.get("raw_available") is False
+        and not _s(w.get("summary_line"))
+        and not _s(w.get("phase"))
+        and not _s(w.get("bias"))
+        and w.get("direction") in (None, 0, "0")
+    ):
+        return False, w, "周线威科夫不足/不参与"
+    if not w:
+        return False, w, "周线威科夫不足/不参与"
+    return True, w, ""
+
+
 def _eval_background(report: dict[str, Any], cards: dict[str, Any]) -> dict[str, Any]:
+    # 法源：BUSINESS.md §2.0/§2.2；resonance-and-orchestration.md §3
+    ok_w, w, fail_note = _weekly_wyckoff_ok(report, cards)
+    if not ok_w:
+        # 周线不足时 fail closed：major_stage / 日线偏多 均不得洗白背景岗
+        return _post(False, fail_note or "周线威科夫不足/不参与")
+
     stage, stage_src = _background_stage(report)
     mid_bias = _s(report.get("midline_bias")).lower()
-    w = _card(cards, "wyckoff_midline") or _card(cards, "wyckoff")
-    bias = _s(w.get("bias") or w.get("direction_label")).lower()
     summary = _s(w.get("summary_line"))
     dir_w = w.get("direction")
     try:
@@ -74,6 +108,7 @@ def _eval_background(report: dict[str, Any], cards: dict[str, Any]) -> dict[str,
     if dir_i < 0 and any(k in summary for k in ("派发", "砸盘", "Markdown", "markdown")):
         return _post(False, "威科夫中线偏空/派发叙事")
 
+    # 阶段软通过：须周线威科夫已参与（上方已闸）；可用中线定论或 major_stage
     if stage and any(stage == k or stage.startswith(k) for k in _BG_SOFT_OK):
         src_note = "中线" if stage_src == "midline" else ""
         return _post(True, f"{src_note}阶段 {stage}".strip() if src_note else f"阶段 {stage}")
@@ -83,12 +118,37 @@ def _eval_background(report: dict[str, Any], cards: dict[str, Any]) -> dict[str,
     if stage:
         # 未知阶段：不轻易绿灯
         return _post(False, f"阶段 {stage} 背景未确认可试")
-    if dir_i > 0 or bias in ("bullish", "多", "偏多"):
-        return _post(True, "威科夫/偏多背景（阶段缺省）")
+    # 禁：空阶段 + 日线/偏多 bias 洗白（旧「威科夫/偏多背景（阶段缺省）」路径已废）
     if summary:
         return _post(False, "阶段缺失，背景不足")
     return _post(False, "背景数据不足")
 
+
+def ensure_pullback_resonance_placeholder(report: dict[str, Any] | None) -> None:
+    """失败/跳过路径：若现有 resonance 非 resonance_v1，覆盖为空 pullback 占位。
+
+    法源：docs/designs/resonance-and-orchestration.md — report['resonance']=pullback_probe。
+    避免 MTF calc_resonance 等异源 dict 被 setdefault 留住。
+    """
+    if not isinstance(report, dict):
+        return
+    res = report.get("resonance")
+    if isinstance(res, dict) and _s(res.get("schema_version")) == SCHEMA:
+        return
+    report["resonance"] = {
+        "schema_version": SCHEMA,
+        "scene": SCENE_PULLBACK,
+        "grade": "empty",
+        "posts": {
+            "background": _post(False, "跳过"),
+            "structure": _post(False, "跳过"),
+            "chip": _post(False, "跳过"),
+            "momentum": _post(False, "跳过"),
+        },
+        "missing": ["background", "structure", "chip", "momentum"],
+        "conflict": False,
+        "summary_line": "共振：跳过",
+    }
 
 # 结构岗「买点像」：正式一/二/三类（BUSINESS §2.1；类一/类二=观察，不进回踩共振结构探针）
 _CHAN_BUY_TYPES = frozenset({

@@ -174,3 +174,15 @@ def test_a3_weekly_zones_feed_pivot_when_timeframe_weekly():
         stage="蓄势",
     )
     assert out.get("pivot_position_weekly") == "中枢内"
+
+
+def test_expert_conf_average_seats_use_vpf_not_wyckoff():
+    """法源 BUSINESS.md §2.4：专家 conf 均值第三席为 vpf，非日线威科夫 stub。"""
+    import inspect
+
+    from trader_shared.report_pipeline import attach_short_midline as mod
+
+    src = inspect.getsource(mod.attach_short_midline_and_decision)
+    assert '("chan", "momentum", "vpf")' in src or "('chan', 'momentum', 'vpf')" in src
+    assert '("chan", "momentum", "wyckoff")' not in src
+    assert "('chan', 'momentum', 'wyckoff')" not in src

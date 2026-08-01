@@ -29,7 +29,9 @@ def _base_report(**kwargs):
             "wyckoff_midline": {
                 "direction": 0,
                 "bias": "neutral",
+                "timeframe": "weekly",
                 "summary_line": "威科夫中性",
+                "raw_available": True,
             },
             "chip": {
                 "raw_available": True,
@@ -185,3 +187,63 @@ def test_background_midline_verdict_stage_when_no_midline_stage():
     res = build_resonance(r)
     assert res["posts"]["background"]["ok"] is False
     assert "派发" in res["posts"]["background"]["note"] or "不宜" in res["posts"]["background"]["note"]
+
+
+def test_background_insufficient_weekly_not_ok():
+    """法源 BUSINESS §2.0：周线威科夫 insufficient → 背景不参与，不得 aligned。"""
+    r = _base_report(major_stage="蓄势")
+    r["analysis_cards"]["wyckoff_midline"] = {
+        "direction": 1,
+        "bias": "bullish",
+        "timeframe": "insufficient",
+        "summary_line": "周线不足 · 不参与定论",
+        "raw_available": False,
+    }
+    r["wyckoff_midline"] = {"timeframe": "insufficient"}
+    res = build_resonance(r)
+    assert res["posts"]["background"]["ok"] is False
+    assert "周线" in res["posts"]["background"]["note"] or "不参与" in res["posts"]["background"]["note"]
+    assert res["grade"] != "aligned"
+
+
+def test_background_daily_wyckoff_alone_not_ok():
+    """禁日线威科夫冒充背景岗：仅有 daily wyckoff 卡 → 背景不通过。"""
+    r = _base_report(major_stage="蓄势")
+    r["analysis_cards"].pop("wyckoff_midline", None)
+    r["analysis_cards"]["wyckoff"] = {
+        "direction": 1,
+        "bias": "bullish",
+        "summary_line": "日线偏多",
+        "role": "daily",
+    }
+    res = build_resonance(r)
+    assert res["posts"]["background"]["ok"] is False
+    assert res["grade"] != "aligned"
+    assert "威科夫/偏多背景（阶段缺省）" not in res["posts"]["background"]["note"]
+
+
+def test_background_weekly_midline_stage_with_weekly_card_ok():
+    """周线 midline 阶段吸筹/蓄势 + 周线卡可用 → 背景可过（其余岗齐则 aligned）。"""
+    r = _base_report(major_stage="派发")  # major 不宜试探词，但中线阶段优先
+    r["midline_stage"] = "吸筹"
+    r["analysis_cards"]["wyckoff_midline"] = {
+        "direction": 0,
+        "bias": "neutral",
+        "timeframe": "weekly",
+        "summary_line": "吸筹 · 箱体未成形",
+        "raw_available": True,
+    }
+    res = build_resonance(r)
+    assert res["posts"]["background"]["ok"] is True
+    assert res["grade"] == "aligned"
+
+
+def test_ensure_pullback_placeholder_overwrites_mtf_dict():
+    """失败路径：异源 MTF dict 须被 resonance_v1 占位覆盖。"""
+    from trader_shared.resonance import ensure_pullback_resonance_placeholder
+
+    r = {"resonance": {"total_score": 9, "resonance_label": "多周期共振"}}
+    ensure_pullback_resonance_placeholder(r)
+    assert r["resonance"].get("schema_version") == "resonance_v1"
+    assert r["resonance"].get("grade") == "empty"
+    assert "total_score" not in r["resonance"]

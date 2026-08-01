@@ -223,7 +223,8 @@ def attach_short_midline_and_decision(
         try:
             _sd = (report_fusion or {}).get("signals_detail") or {}
             _cs = []
-            for _n in ("chan", "momentum", "wyckoff"):
+            # 法源 BUSINESS.md §2.4：短线第三席 = VPF（非日线威科夫 stub）
+            for _n in ("chan", "momentum", "vpf"):
                 _s = _sd.get(_n) if isinstance(_sd.get(_n), dict) else {}
                 if _s.get("confidence") is not None:
                     _cs.append(float(_s["confidence"]))
@@ -467,7 +468,12 @@ def attach_short_midline_and_decision(
         except Exception as _pipe_exc:
             _logger.debug("report_pipeline skip: %s", _pipe_exc)
             report.setdefault("analysis_cards", {})
-            report.setdefault("resonance", {"schema_version": "resonance_v1", "grade": "empty"})
+            try:
+                from trader_shared.resonance import ensure_pullback_resonance_placeholder
+
+                ensure_pullback_resonance_placeholder(report)
+            except Exception:
+                report["resonance"] = {"schema_version": "resonance_v1", "grade": "empty"}
             report.setdefault("buy_point_lifecycle", {"status": "none", "display_line": ""})
     except Exception as _sm_exc:
         # 短中线组装失败不阻断主报告；保留原字段

@@ -169,9 +169,10 @@ def render_compare(reports: list[dict[str, Any]]) -> str:
                 top_r = resist_peaks[0]
                 lines.append(f"   筹码压力：{float(top_r.get('price',0)):.2f}元（占比{float(top_r.get('share_of_total',0))*100:.0f}%）")
 
-        # 多周期共振
-        resonance = r.get("resonance") or {}
+        # 多周期共振（MTF；与岗位共振 report["resonance"] 隔离）
+        resonance = r.get("mtf_resonance") or r.get("resonance") or {}
         if isinstance(resonance, dict) and resonance.get("total_score", 0) > 0:
+            # 仅消费 MTF 打分字段；pullback_probe 无 total_score，自然跳过
             _format_resonance_score(resonance.get("total_score", 0), lines)
 
         # 信号摘要

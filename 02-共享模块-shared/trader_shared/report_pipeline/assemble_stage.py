@@ -358,7 +358,9 @@ def assemble_base_report(
         "expma50": expma50_val,
         "expma_trend": expma_trend,
         "expma_status": expma_status_result,
-        "resonance": resonance_result,
+        # 多周期打分（MTF）；与岗位共振 report["resonance"]=pullback_probe 隔离
+        # 法源：docs/designs/resonance-and-orchestration.md
+        "mtf_resonance": resonance_result,
         "extend_fundamental": snapshot.extend_fundamental,
         "extend_sentiment": snapshot.extend_sentiment,
         "extend_margin": snapshot.extend_margin,
