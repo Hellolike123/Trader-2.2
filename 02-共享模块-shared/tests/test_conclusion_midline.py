@@ -186,8 +186,7 @@ class TestMidlineViewB1A:
         assert not _STAGE_RE.search(c["midline"])
 
     def test_strong_bear_first(self):
-        """主升阶段 upthrust 视为正常洗盘，不判偏空（P2 设计）。
-        要触发 strong_bear 需要 bc_signal 或 sow_signal，或 major_stage 非主升。"""
+        """M6：日线 major_stage 不得洗周线 UT；仅周线 phase=markup 可豁免。"""
         chan = {
             "chanlun": {
                 "structure_type": "上涨趋势",
@@ -196,13 +195,15 @@ class TestMidlineViewB1A:
             }
         }
         wyck = {
+            "phase": "accumulation_b",
             "upthrust_signal": True,
+            "upthrust_premature": False,
             "spring_signal": False,
             "bc_signal": False,
             "sow_signal": False,
             "sos_signal": False,
         }
-        # 主升 + upthrust → 正常洗盘，不偏空
+        # 日线主升 + 周线非 markup UT → 仍 strong_bear
         c = build_conclusion_block(
             major_stage="主升",
             mistery_gate={"action": "观望", "hard_block": "none", "position_cap_pct": 0},
@@ -211,20 +212,21 @@ class TestMidlineViewB1A:
             chanlun_midline=chan,
             wyckoff_midline=wyck,
         )
-        # 主升阶段 upthrust 不判 strong_bear，chan 上涨 → 可跟踪
-        assert "可跟踪" in c["midline"]
+        assert "慎跟" in c["midline"] or "偏空" in c["midline"]
         assert not _STAGE_RE.search(c["midline"])
 
-        # 非主升阶段 upthrust → strong_bear
+        # 周线 markup + UT → 洗盘豁免，不抬 strong_bear
+        wyck_markup = {**wyck, "phase": "markup"}
         c2 = build_conclusion_block(
             major_stage="蓄势",
             mistery_gate={"action": "观望", "hard_block": "none", "position_cap_pct": 0},
             key_prices=_kp_no_chase(),
             fusion={},
             chanlun_midline=chan,
-            wyckoff_midline=wyck,
+            wyckoff_midline=wyck_markup,
         )
-        assert "慎跟" in c2["midline"] or "偏空" in c2["midline"]
+        assert "可跟踪" in c2["midline"]
+        assert not _STAGE_RE.search(c2["midline"])
 
     def test_conflict_track_vs_no_chase(self):
         chan = {

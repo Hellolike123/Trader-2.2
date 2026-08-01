@@ -189,7 +189,6 @@ def attach_short_midline_and_decision(
             chanlun_midline=report.get("chanlun_midline"),
             wyckoff_midline=report.get("wyckoff_midline"),
             weekly_frame=report.get("weekly_frame"),
-            major_stage=stage_result["major_stage"],
         )
         # 中线定论：威科夫中线 + 缠论中线 各自独立判定后合成（L586 的 position 分类作兜底）
         _midline_verdict = synthesize_midline_verdict(

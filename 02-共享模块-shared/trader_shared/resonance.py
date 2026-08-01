@@ -188,35 +188,38 @@ def _chan_sell_like(type_short: str, direction: Any = None) -> bool:
 
 
 def _price_in_zones(current: float, report: dict[str, Any]) -> bool:
+    """结构岗价区：只认日线 key_prices（BUSINESS §2.0 短线=日线缠论）。
+
+    mid_key_prices（周线区）不得单独绿结构岗；中线价区留给背景/中线叙事。
+    """
     if current <= 0:
         return False
-    for key in ("key_prices", "mid_key_prices"):
-        kp = report.get(key)
-        if not isinstance(kp, dict):
-            continue
-        for zone_key in ("buy_zone", "pullback_zone", "buy_low", "buy_high", "retrace_zone"):
-            z = kp.get(zone_key)
-            if isinstance(z, (list, tuple)) and len(z) >= 2:
-                try:
-                    lo, hi = float(z[0]), float(z[1])
-                    if lo > hi:
-                        lo, hi = hi, lo
-                    if lo <= current <= hi * 1.01:
-                        return True
-                except (TypeError, ValueError):
-                    pass
-        # 区间字段 buy_zone_low/high
-        try:
-            lo = kp.get("buy_zone_low") or kp.get("pullback_low")
-            hi = kp.get("buy_zone_high") or kp.get("pullback_high")
-            if lo is not None and hi is not None:
-                lo_f, hi_f = float(lo), float(hi)
-                if lo_f > hi_f:
-                    lo_f, hi_f = hi_f, lo_f
-                if lo_f <= current <= hi_f * 1.01:
+    kp = report.get("key_prices")
+    if not isinstance(kp, dict):
+        return False
+    for zone_key in ("buy_zone", "pullback_zone", "buy_low", "buy_high", "retrace_zone"):
+        z = kp.get(zone_key)
+        if isinstance(z, (list, tuple)) and len(z) >= 2:
+            try:
+                lo, hi = float(z[0]), float(z[1])
+                if lo > hi:
+                    lo, hi = hi, lo
+                if lo <= current <= hi * 1.01:
                     return True
-        except (TypeError, ValueError):
-            pass
+            except (TypeError, ValueError):
+                pass
+    # 区间字段 buy_zone_low/high
+    try:
+        lo = kp.get("buy_zone_low") or kp.get("pullback_low")
+        hi = kp.get("buy_zone_high") or kp.get("pullback_high")
+        if lo is not None and hi is not None:
+            lo_f, hi_f = float(lo), float(hi)
+            if lo_f > hi_f:
+                lo_f, hi_f = hi_f, lo_f
+            if lo_f <= current <= hi_f * 1.01:
+                return True
+    except (TypeError, ValueError):
+        pass
     return False
 
 
