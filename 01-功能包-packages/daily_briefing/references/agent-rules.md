@@ -35,6 +35,10 @@
 - 仓库根（Cursor always-on）：`python3 01-功能包-packages/<skill>/scripts/<入口>.py ...`
 - 仓位轮动在 **review** 包：`scripts/final_portfolio.py`（无独立 `portfolio/` 包）
 
+## 按文档改代码（CRITICAL）
+
+改引擎/合同（非贴面板快路径）时：先读 `BUSINESS.md` + 对应 `docs/plans/*-handoff.md`，禁止凭感觉发明行为。合同级改动默认「写 Agent + 查 Agent」对照法源验收后再 PR。全文见仓库根 `AGENTS.md`「按文档开发」与 `.cursor/rules/doc-driven-dev.mdc`。
+
 ## 防漏改清单（改代码时）
 
 改单票报告格式时固定步骤（勿改 legacy / 勿手改 AGENTS 满分示例数字）：

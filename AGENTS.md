@@ -21,6 +21,49 @@
 
 ---
 
+## 按文档开发（编程 Agent · CRITICAL）
+
+**法源优先于感觉。** 改实现（威科夫 / 缠论 / 报告 / 选股池 / fusion / T0 等）必须按文档合同落地，禁止凭记忆或「看起来合理」改结论。
+
+### 开工前
+
+1. **先定位法源**（缺一不可则先补文档再写码）：
+   - 产品契约：`BUSINESS.md` 相关节
+   - 手递 / 验收：`docs/plans/*-handoff.md`（及 `docs/plans/done/` 已完成项）
+   - 原典盘点：`docs/audit/`（如 `wyckoff-original-concept-inventory.md`）
+   - 架构：`docs/designs/`（如共振编排）
+2. 开工回复须**点名法源路径**（文件 + 节）；无手递文档时：**先写/补 handoff（字段、禁止项、验收表、可改/勿改）再实现**。
+3. 只实现文档写明的行为；文档未写的能力 **禁止自行发明**（尤其出手/fusion/阶段抬升）。
+
+### 实现中
+
+1. 对照文档「必须 / 禁止 / 须」逐条落地；A 股适配只调检测参数，**不砍原典语义**（例：禁止软确认 ST）。
+2. 合同「必须有测」→ 写成 pytest；文档变了 → **先改测再改码**。
+3. 可改文件白名单以 handoff 为准；勿改 fusion / 出手 / 池分道，除非法源显式授权。
+4. 运行侧贴面板仍走 skill 快路径（跑脚本原样贴）；**改引擎**以本页「改代码去哪」+ 法源为准。
+
+### 默认双 Agent 闭环（复杂/合同变更必用）
+
+| 角色 | 职责 |
+|------|------|
+| **写 Agent** | 只读法源 + 代码锚点 → 实现 + 测例 → commit/push |
+| **查 Agent** | 独立对照同一法源逐项 ✅/❌；找「文档写了代码没做 / 做了却违禁止项」；默认不改码，列出必须再改 |
+
+父 Agent：查完修完再开/更新 PR。用户口令示例：
+
+> 按手递文档实现 {功能}；写一个 Agent、查一个 Agent；禁止凭感觉；查完修完再开 PR。
+
+### PR 必填
+
+- 法源链接（handoff / BUSINESS 节）
+- 对照清单（关键必须/禁止项 ✅/❌）
+- 查 Agent 结论（或自检等价清单）
+- 门禁 / 相关 pytest 结果
+
+细则同步：`.cursor/rules/doc-driven-dev.mdc`。
+
+---
+
 ## 改代码去哪（编程 Agent）
 
 路径均相对 `02-共享模块-shared/trader_shared/`，除非另写包路径。
@@ -52,7 +95,8 @@
 1. **引擎只在 `trader_shared/`**；`01-功能包-packages/{t0,review,wyckoff}/scripts/` 下同名文件是 shim，靠模块身份替换保证 monkeypatch。
 2. **`final_pool.py` 只做 CLI 薄入口**；入池/评分/plan/rank 进 `pool_cmds/`（如 `scoring.py`、`plan_view.py`）。
 3. **改输出**：`short_midline.py` → 刷新 golden → 骨架变了再动 `output-template.md`。
-4. **运行侧 Agent** 仍只读 `agent-quickstart.md`（跑脚本贴 markdown）；**改实现**以本表 + 法源为准。
+4. **运行侧 Agent** 仍只读 `agent-quickstart.md`（跑脚本贴 markdown）；**改实现**以本表 + 法源为准（见上节「按文档开发」）。
+5. **合同级改动**默认走写/查双 Agent；禁止凭感觉改结论或先改文档迁就坏代码。
 
 ---
 
