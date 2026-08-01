@@ -62,7 +62,7 @@
 
 ## 五、交易区间（TR）分析
 
-> TR 识别层已落地（✅）。阶段机读 `WYCKOFF_PHASE_MIN_TR_QUALITY`（默认 0.35）：低质量/无 TR 时事件可亮、阶段不抬升（`phase_tr_gated`）。**P1**：`phase_a_range`（`sc_low`/`ar_high`/`forming`|`established`）已透出；**P2 已落地**：分位 TR 与 established 种子箱挂门控（forming / 无 established 叠加 P0-B）+ 广义 ST refine 下沿。更大缺口见 §七 RS、§六 P&F。
+> TR 识别层已落地（✅）。阶段机读 `WYCKOFF_PHASE_MIN_TR_QUALITY`（默认 0.35）：低质量/无 TR 时事件可亮、阶段不抬升（`phase_tr_gated`）。**P1**：`phase_a_range`（`sc_low`/`ar_high`/`forming`|`established`）已透出；**P2 已落地**：分位 TR 与 established 种子箱挂门控（forming / 无 established 叠加 P0-B）+ 广义 ST refine 下沿。RS 见 §七（已落地）；更大缺口见 §六 P&F。
 
 | 概念 | 状态 | 说明 |
 |------|------|------|
@@ -91,7 +91,7 @@
 
 | 概念 | 状态 | 说明 |
 |------|------|------|
-| 个股 vs 对照指数价量对比（RS） | ✅ | 周线阶段**置信修正**（非新阶段）；对照指数 = `resolve_board_index`；`WYCKOFF_RS_ENABLED` 总开关；规格 `docs/plans/wyckoff-rs-phase-handoff.md` |
+| 个股 vs 对照指数价量对比（RS） | ✅ | 周线阶段**置信修正**（非新阶段）+ **选股池同道排序/弱 RS 慎跟**；对照指数 = `resolve_board_index`；`WYCKOFF_RS_ENABLED`；规格 `docs/plans/wyckoff-rs-phase-handoff.md` |
 
 ---
 
@@ -123,6 +123,6 @@
 | **P1** | Markup / Markdown 阶段标签 | 五阶段循环不完整 |
 | **P1** | BU (Back Up) | SOS 确认后缺失最后一个买点信号 |
 | **P2** | P&F 计数（目标价） | 因果律执行工具，影响操作目标位 |
-| **P2** | RS 相对强弱 vs 对照指数 | ✅ 已落地（见 §七）；影响阶段置信 / CM 意图判断 |
+| **P2** | RS 相对强弱 vs 对照指数 | ✅ 已落地（见 §七）；阶段置信 + 池排序/慎跟 |
 | **P3** | UTAD / PS / PSY / Stopping Volume | 增强完整度 |
 | **P3** | CM 行为模式显式建模 | 设计层增强 |

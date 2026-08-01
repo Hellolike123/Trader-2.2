@@ -1,6 +1,6 @@
 # 威科夫阶段辨识准确度 — Agent Handoff
 
-> **status**: done（P0-A / P0-B 已落地；P1-RS 仍另开）  
+> **status**: done（P0-A / P0-B 已落地；P1-RS → 见 `wyckoff-rs-phase-handoff.md`，已落地）  
 
 > **日期**: 2026-07-31  
 > **产品法源**: `BUSINESS.md` §2.0 / §2.2（中线状态 = **仅周线威科夫**）  
@@ -16,7 +16,7 @@
 3. 本 handoff 只做两刀（按序）：  
    - **P0-A** Spring 后确认测试（Test of Spring）与 ST 语义拆清，并接入阶段机  
    - **P0-B** 低质量 TR 不进 / 不抬升阶段  
-4. **P1-RS**（个股 vs 大盘）另开任务；本文只留接口位，勿在本 PR 塞大盘管线。  
+4. **P1-RS**（个股 vs 对照指数）已另文落地：`docs/plans/wyckoff-rs-phase-handoff.md`（周线置信 + 选股池排序）。  
 5. 禁止：日线回退定中线；改 fusion 席位；把动量写进阶段。
 
 ---
