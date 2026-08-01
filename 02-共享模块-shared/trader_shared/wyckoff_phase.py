@@ -1,8 +1,7 @@
 """Wyckoff phase state machine + persistence."""
 from __future__ import annotations
 
-import json
-import os
+from pathlib import Path
 from typing import Any
 
 from trader_shared.light_data import to_float
@@ -162,7 +161,20 @@ def _apply_p2_phase_a_gates(
     })
     return out
 
-_WYCKOFF_PHASE_FILE = os.path.expanduser("~/.trader/wyckoff_phase.json")
+def _wyckoff_phase_path() -> Path:
+    """``~/.trader/wyckoff_phase.json`` (via trader_paths).
+
+    Tests may monkeypatch ``_WYCKOFF_PHASE_FILE`` to a custom path str/Path.
+    """
+    override = globals().get("_WYCKOFF_PHASE_FILE")
+    if override:
+        return Path(override)
+    from trader_shared.trader_paths import path as trader_path
+    return trader_path("wyckoff_phase")
+
+
+# Backward-compat alias (None → use trader_paths); tests may monkeypatch.
+_WYCKOFF_PHASE_FILE: str | Path | None = None
 
 def _scan_for_signal(
     bars: list[dict],
@@ -630,30 +642,28 @@ def _load_phase_state(symbol: str, timeframe: str = "daily") -> dict[str, Any] |
     if not symbol:
         return None
     try:
-        if os.path.exists(_WYCKOFF_PHASE_FILE):
-            with open(_WYCKOFF_PHASE_FILE) as f:
-                data = json.load(f)
-            return data.get(_phase_key(symbol, timeframe))
-    except (json.JSONDecodeError, OSError):
-        pass
-    return None
+        from trader_shared.json_atomic import load_json_dict
+
+        data = load_json_dict(_wyckoff_phase_path())
+        rec = data.get(_phase_key(symbol, timeframe))
+        return rec if isinstance(rec, dict) else None
+    except (OSError, TypeError, ValueError):
+        return None
 
 def _save_phase_state(symbol: str, timeframe: str, phase_state: dict[str, Any]) -> None:
-    """将 phase 状态持久化到文件（按 symbol + 周期维度写）。"""
+    """将 phase 状态持久化（锁内 RMW + tmp/fsync/replace）。"""
     if not symbol:
         return
     try:
-        os.makedirs(os.path.dirname(_WYCKOFF_PHASE_FILE), exist_ok=True)
-        data = {}
-        if os.path.exists(_WYCKOFF_PHASE_FILE):
-            try:
-                with open(_WYCKOFF_PHASE_FILE) as f:
-                    data = json.load(f)
-            except (json.JSONDecodeError, OSError):
-                data = {}
-        data[_phase_key(symbol, timeframe)] = phase_state
-        with open(_WYCKOFF_PHASE_FILE, "w") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        from trader_shared.json_atomic import locked_rmw_json
+
+        key = _phase_key(symbol, timeframe)
+
+        def _mutate(data: dict[str, Any]) -> dict[str, Any]:
+            data[key] = phase_state
+            return data
+
+        locked_rmw_json(_wyckoff_phase_path(), _mutate)
     except OSError:
         pass
 

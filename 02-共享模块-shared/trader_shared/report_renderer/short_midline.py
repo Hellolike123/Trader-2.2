@@ -349,7 +349,8 @@ def render_short_midline(r: dict[str, Any]) -> str:
     reason = conclusion.get("reason") or ""
     this_week = conclusion.get("this_week") or ""
     conflict = conclusion.get("conflict") or ""
-    stage_line = str(conclusion.get("stage_line") or major_stage or "").strip()
+    # M1：阶段行只听中线定论 stage_line；禁日线 major_stage 冒充
+    stage_line = str(conclusion.get("stage_line") or "").strip()
     if stage_line == "None":
         stage_line = ""
 

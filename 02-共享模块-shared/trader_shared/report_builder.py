@@ -101,6 +101,17 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     quote = snapshot.quote
     bars = list(snapshot.daily_bars)  # copy to avoid mutating snapshot
 
+    # Holdings SSOT：显式 --cost 优先；否则用 holdings.json（非 signals track）
+    try:
+        from trader_shared.holdings import resolve_cost_price
+
+        _hold_sym = str(
+            quote.get("symbol") or getattr(sec, "ts_code", "") or ""
+        ).strip()
+        cost_price = resolve_cost_price(_hold_sym, explicit_cost=float(cost_price or 0))
+    except Exception:
+        pass
+
     # === 上下文：信号/插件/区间套/资金环境（report_pipeline.run_analysis_context_stage）===
     from trader_shared.report_pipeline import StageContext, run_analysis_context_stage
 
@@ -150,6 +161,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     data_status = str(getattr(_ctx, "data_status", None) or getattr(snapshot, "data_status", None) or "full")
 
     # === 融合层（阶段函数：report_pipeline.run_fusion_stage）===
+    # 延期：更晚 relocate（结构/筹码之后）— 架构 #5 非 P0；见 resonance-and-orchestration §6
     from trader_shared.report_pipeline import run_fusion_stage
 
     report_fusion, _pre_cards, volume_warning = run_fusion_stage(
@@ -175,9 +187,11 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     from trader_shared.report_pipeline import run_structure_stage
 
     # 持仓票启用移动止损水位（只紧不松）；无持仓不落水位，避免无仓误抬止损
+    # M3：仅 resolved cost>0（显式 --cost 或 holdings SSOT）才落水位；信号流不得冒充持仓
     _trail_sym = None
-    if float(cost_price or 0) > 0 or float(_signal_cost_price or 0) > 0:
+    if float(cost_price or 0) > 0:
         _trail_sym = str(quote.get("symbol") or getattr(sec, "ts_code", "") or "").strip() or None
+    _ = _signal_cost_price  # 胜率仍用；不得驱动 watermark
     levels, big_order_result, _pre_stage = run_structure_stage(
         current=current,
         bars=bars,

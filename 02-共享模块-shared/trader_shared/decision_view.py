@@ -146,6 +146,90 @@ def build_decision_view(report: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _as_float(val: Any, default: float = 0.0) -> float:
+    try:
+        if val is None:
+            return default
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_pct(val: float | int) -> float | int:
+    if isinstance(val, float) and val == int(val):
+        return int(val)
+    return val
+
+
+def apply_execution_caps(
+    report: dict[str, Any],
+    *,
+    has_position: bool | None = None,
+) -> dict[str, Any]:
+    """单一出口：按 decision_view + discipline 收紧 suggested_pct / caps。
+
+    只收紧、不放松。DV 不推荐新开或纪律禁止新开时：caps 归零；
+    空仓 suggested_pct→0；有仓按既有收紧语义（cap 已归零则 managed pct 亦 0）。
+    """
+    if not isinstance(report, dict):
+        return report
+
+    disc = _disc(report)
+    dv = report.get("decision_view") if isinstance(report.get("decision_view"), dict) else {}
+    allow_new_recommend = bool(dv.get("allow_new_recommend")) if dv else False
+    allow_new_entry = bool(disc.get("allow_new_entry", False)) if disc else False
+    deny = (not allow_new_recommend) or (not allow_new_entry)
+
+    if has_position is None:
+        has_position = bool(report.get("has_position"))
+
+    try:
+        sug = _as_float(
+            report.get("suggested_pct")
+            if report.get("suggested_pct") is not None
+            else (report.get("position_info") or {}).get("suggested_pct"),
+            0.0,
+        )
+    except Exception:
+        sug = 0.0
+
+    if deny:
+        if disc:
+            disc["suggested_pct_cap"] = 0
+            disc["position_cap_pct"] = 0
+            if "suggested_pct_cap_short" in disc:
+                disc["suggested_pct_cap_short"] = 0
+            if "suggested_pct_cap_mid" in disc:
+                disc["suggested_pct_cap_mid"] = 0
+            report["discipline"] = disc
+        # DV/纪律不新开：仓位建议归零（避免「不新开 · 仓 x%」）
+        final_sug: float | int = 0
+        if has_position:
+            report["suggested_pct_context"] = "0%（纪律禁止加仓；持仓按减仓/观察）"
+        else:
+            if dv and not allow_new_recommend:
+                report["suggested_pct_context"] = "0%（决策不推荐新开）"
+            else:
+                report["suggested_pct_context"] = "0%（纪律不新开）"
+    else:
+        cap_raw = disc.get("suggested_pct_cap") if disc else None
+        if cap_raw is None and disc:
+            cap_raw = disc.get("position_cap_pct")
+        cap_f = _as_float(cap_raw, -1.0)
+        if cap_f >= 0 and sug > cap_f:
+            final_sug = _normalize_pct(cap_f)
+            report["suggested_pct_context"] = f"{final_sug}%（纪律 cap 收紧）"
+        else:
+            final_sug = _normalize_pct(sug)
+
+    report["suggested_pct"] = final_sug
+    pos_info = report.get("position_info")
+    if isinstance(pos_info, dict):
+        pos_info["suggested_pct"] = final_sug
+        report["position_info"] = pos_info
+    return report
+
+
 def apply_decision_view(
     report: dict[str, Any],
     *,
@@ -153,6 +237,7 @@ def apply_decision_view(
 ) -> dict[str, Any]:
     """写入 report['decision_view']；可选只收紧 discipline / conclusion 新开相关字段。
 
+    caps / suggested_pct 由 apply_execution_caps 统一收口（在 decision stack 调用）。
     返回 decision_view dict。
     """
     view = build_decision_view(report)
@@ -189,20 +274,7 @@ def apply_decision_view(
             extra = "；".join(reasons)
             if extra and extra not in str(note):
                 disc["entry_block_reason"] = f"{note}；{extra}".strip("；") if note else extra
-            # 不新开时清零仓位建议，避免「不新开 · 仓 15%」陈旧展示
-            disc["suggested_pct_cap"] = 0
-            disc["position_cap_pct"] = 0
-            if "suggested_pct_cap_short" in disc:
-                disc["suggested_pct_cap_short"] = 0
-            if "suggested_pct_cap_mid" in disc:
-                disc["suggested_pct_cap_mid"] = 0
             report["discipline"] = disc
-            report["suggested_pct"] = 0
-            report["suggested_pct_context"] = "0%（决策不推荐新开）"
-            pos_info = report.get("position_info")
-            if isinstance(pos_info, dict):
-                pos_info["suggested_pct"] = 0
-                report["position_info"] = pos_info
             applied = True
 
             # 同步 conclusion 出手文案：若原先偏「可买」则压成不买（只收紧）

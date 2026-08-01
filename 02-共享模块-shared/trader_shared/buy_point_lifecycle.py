@@ -11,17 +11,13 @@ L2：failed 写入 ~/.trader/buy_point_lifecycle.json；跨日禁止接旧 signa
 """
 from __future__ import annotations
 
-import json
-import os
-import uuid
 from datetime import date
 from pathlib import Path
 from typing import Any
 
+from trader_shared.json_atomic import load_json_dict, locked_rmw_json
 from trader_shared.signal_utils import normalize_signal_id
-
-_STORE_ENV = "TRADER_BUY_POINT_LIFECYCLE_PATH"
-_DEFAULT_STORE = Path(os.path.expanduser("~/.trader/buy_point_lifecycle.json"))
+from trader_shared.trader_paths import path as trader_path
 
 
 def _f(x: Any) -> float | None:
@@ -37,8 +33,8 @@ def _f(x: Any) -> float | None:
 
 
 def store_path() -> Path:
-    override = (os.environ.get(_STORE_ENV) or "").strip()
-    return Path(override) if override else _DEFAULT_STORE
+    """``~/.trader/buy_point_lifecycle.json`` or ``TRADER_BUY_POINT_LIFECYCLE_PATH``."""
+    return trader_path("buy_point_lifecycle")
 
 
 def _has_buy_signal(
@@ -145,26 +141,18 @@ def evaluate_buy_point_lifecycle(
 
 
 def _load_store(path: Path | None = None) -> dict[str, Any]:
-    p = path or store_path()
-    try:
-        if p.exists():
-            data = json.loads(p.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                return data
-    except (json.JSONDecodeError, OSError):
-        pass
-    return {}
+    return load_json_dict(path or store_path())
 
 
 def _save_store(data: dict[str, Any], path: Path | None = None) -> None:
+    """全量写（须已持有外部语义一致的数据）；优先用 locked_rmw 入口。"""
     p = path or store_path()
+
+    def _mutate(_old: dict[str, Any]) -> dict[str, Any]:
+        return data if isinstance(data, dict) else {}
+
     try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        with tmp.open("rb") as f:
-            os.fsync(f.fileno())
-        tmp.replace(p)
+        locked_rmw_json(p, _mutate)
     except OSError:
         pass
 
@@ -192,24 +180,40 @@ def save_failed_record(
     key = _symbol_key(symbol)
     if not key or not signal_id:
         return
-    store = _load_store(path)
-    store[key] = {
+    p = path or store_path()
+    payload = {
         "status": "failed",
         "signal_id": str(signal_id),
         "lid_price": _f(lid_price),
         "failed_date": str(failed_date),
     }
-    _save_store(store, path)
+
+    def _mutate(store: dict[str, Any]) -> dict[str, Any]:
+        store[key] = payload
+        return store
+
+    try:
+        locked_rmw_json(p, _mutate)
+    except OSError:
+        pass
 
 
 def clear_failed_record(symbol: str, *, path: Path | None = None) -> None:
     key = _symbol_key(symbol)
     if not key:
         return
-    store = _load_store(path)
-    if key in store:
+    p = path or store_path()
+
+    def _mutate(store: dict[str, Any]) -> dict[str, Any] | None:
+        if key not in store:
+            return None
         store.pop(key, None)
-        _save_store(store, path)
+        return store
+
+    try:
+        locked_rmw_json(p, _mutate)
+    except OSError:
+        pass
 
 
 def mint_lifecycle_signal_id(

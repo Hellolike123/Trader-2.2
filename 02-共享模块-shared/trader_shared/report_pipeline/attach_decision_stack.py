@@ -55,14 +55,20 @@ def attach_analysis_decision_stack(
             _mark("decision_view")
         except Exception as _dv_exc:
             _logger.debug("decision_view skip: %s", _dv_exc)
-            report.setdefault(
-                "decision_view",
-                {
-                    "schema_version": "decision_view_v1",
-                    "allow_new_recommend": False,
-                    "summary_line": "决策：跳过",
-                },
-            )
+            # 强制写入：禁 setdefault 保留旧 allow_new_recommend=True
+            report["decision_view"] = {
+                "schema_version": "decision_view_v1",
+                "allow_new_recommend": False,
+                "summary_line": "决策：跳过",
+            }
+        # 单一 caps 出口：DV 成功或 fail-closed 后都收口 suggested_pct / caps
+        try:
+            from trader_shared.decision_view import apply_execution_caps
+
+            apply_execution_caps(report)
+            _mark("execution_caps")
+        except Exception as _cap_exc:
+            _logger.debug("execution_caps skip: %s", _cap_exc)
     except Exception as _st_exc:
         _logger.debug("analysis_decision_stack skip: %s", _st_exc)
         try:
@@ -80,6 +86,19 @@ def attach_analysis_decision_stack(
             from trader_shared.resonance import ensure_pullback_resonance_placeholder
 
             ensure_pullback_resonance_placeholder(report)
+        # M4：外层 stack 失败也必须 fail-closed decision_view（出手听 DV）
+        # 强制覆盖：禁 setdefault 保留陈旧 allow=True
+        report["decision_view"] = {
+            "schema_version": "decision_view_v1",
+            "allow_new_recommend": False,
+            "summary_line": f"决策：栈失败·不新开（{_st_exc}）",
+        }
+        try:
+            from trader_shared.decision_view import apply_execution_caps
+
+            apply_execution_caps(report)
+        except Exception:
+            pass
 
     return report
 

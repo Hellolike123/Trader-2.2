@@ -31,7 +31,7 @@
 ### 1.3 选股池管理
 
 ```
-入池分析 → 三关筛选 → 入池 → 排序 → 作战表 → 盯盘 → 复盘 → 淘汰归档
+入池分析 → 软门槛分道 → 入池 → 排序 → 作战表 → 盯盘 → 复盘 → 淘汰归档
 ```
 
 ---
@@ -283,15 +283,15 @@ Agent 展示层仍应：**不给买入建议**；文案对齐 fusion action / �
 
 **方向 / 新开**听 `decision_view`（共振齐 ∧ 主策略亮 ∧ 纪律允许）；`fusion.weighted_score` **仅仪表**。不得只从阶段或融合分推断多空/宜买。
 
-### 4.2 选股池三关筛选
+### 4.2 选股池入池（软门槛 + 分道）
 
-**第一关 — 阶段筛选**：衰退期 → 直接拒绝  
+与 AGENTS「入池软门槛」一致：**容量满才硬拒**；阶段/评分偏弱 → `lane=先别碰` 等分道，**不再**「衰退→直接拒绝」挡入库。
 
-**第二关 — 结构评分门槛**：按 `major_stage` 查表 `ADMISSION_SCORE_*`。  
+**评分**：按 `major_stage` 查表 `ADMISSION_SCORE_*`（软信号）。  
 `total_score` = 缠 + 威 + 筹 + 动（封顶 100）。**`fusion_score` 仅仪表，不进总分、不抬/压入池门槛、不参与排序加权。**  
-入池后共振档离散收紧：冲突 / 动能拆台不得标「执行」。
 
-**第三关 — 风控检查**：现价跌破止损 → 拒绝  
+**排序**：`lane → 共振 → 威科夫吸筹链 → 周线 RS → 可碰 → 分`。  
+风控位不清 → 待补 / 分道降权；现价跌破止损 → 分道 avoid（非一律不入库）。
 
 ---
 
@@ -308,7 +308,7 @@ Agent 展示层仍应：**不给买入建议**；文案对齐 fusion action / �
   ← meta 纯 D：不写正常/偏弱/跑赢；无单独「行业：」行；ATR 并入量价行（非独立行）；映射见 §3.4
 
 🧭 中线
-  阶段：{major_stage}
+  阶段：{weekly_wyckoff_phase_short}  ← 仅周线威科夫短词（吸筹/主升/派发/…）；不足→无阶段；**禁止**日线 major_stage / 缠论矩阵冒充（§2.0）
   定论：…                       ← 中线合成；禁止塞阶段词冒充看法
   威科夫：{wyckoff_midline}     ← 中线状态岗：仅周线；结构「阶段 · [箱体] · 事件 · 含义」（箱体 lo-hi / 箱体未成形）
   量度目标：上 x｜下 y（P&F，非出手）  ← 仅 tr_maturity=L3；无数/未达 L3 则省略
@@ -350,7 +350,7 @@ T0：…
 |------|------|------|
 | 出手 / 新开清单 C1 | mistery_gate + chan_discipline | 五项不全绿 → 新开否 |
 | 仓位上限 | merge 取更严 | 只裁 cap，不改 major_stage / fusion 分 / support / stop |
-| 决策收紧清零 | `decision_view.apply_decision_view` | 禁止新开时 `suggested_pct` / 仓位 cap 归零 |
+| 决策收紧清零 | `decision_view.apply_execution_caps`（DV 之后单一出口；含 fail-closed） | 禁止新开时 `suggested_pct` / 仓位 cap 归零 |
 | 失效 | chan_discipline | 跌破 MA20 反抽不回 / 跌破止损等 |
 | regime 很差 | fusion_regime 权重归零 | 加权分偏中性/空仓侧动作（非固定「暂不碰」文案） |
 

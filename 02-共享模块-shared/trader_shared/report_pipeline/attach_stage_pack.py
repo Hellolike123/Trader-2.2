@@ -56,12 +56,14 @@ def attach_stage_position_pack(
     from trader_shared.signal_core import one_sentence
     from trader_shared.report_presentation import structure_view
 
-    # 已有持仓模式：确定成本价和持仓状态
-    # 必须在 compute_position_with_env() 之前，以便传入正确的 pnl_pct
-    # 成本价已在 bars 获取后从 signals.jsonl 读取（与胜率合并为一次 I/O）
-    if cost_price <= 0:
-        cost_price = float(signal_cost_price or 0)
-    
+    # 已有持仓模式：成本仅来自显式 --cost / 真实持仓入参。
+    # M3：禁止用 signals.jsonl 的 track/low_buy_triggered 冒充成本/持仓。
+    # signal_cost_price 参数保留兼容，已忽略（读信号侧亦恒返回 0）。
+    _ = signal_cost_price
+    cost_price = float(cost_price or 0)
+    if cost_price < 0:
+        cost_price = 0.0
+
     has_position = cost_price > 0
     report["has_position"] = has_position
     report["cost_price"] = cost_price
@@ -241,17 +243,11 @@ def attach_stage_position_pack(
     # 个股股性透视卡：历史胜率（与成本推断合并为一次 I/O，已在上面读取）
     report["win_rate_data"] = signal_win_rate
 
-    # ── 一致性仲裁：给 fusion action + suggested_pct 加持仓场景标签 ──
-    # 四个字段（theory_status / fusion.action / suggested_pct / stop）来自独立模块，
-    # 可能互斥（如 fusion 说「减仓」但 suggested_pct=0%）。
-    # 通过 holding_hint + suggested_pct_context 消除互斥语义，让 AI 事实表不再打架。
+    # ── 一致性仲裁：持仓提示只听纪律（fusion 退居仪表，不回退 fusion.action）──
     from trader_shared.stage_positioning import action_for_holding_state
 
-    # 持仓提示：纪律动作优先于 fusion.action（fusion 退居仪表）
     _disc_early = report.get("discipline") if isinstance(report.get("discipline"), dict) else {}
-    disc_action_str = str(_disc_early.get("action") or "").strip()
-    fusion_action_str = str((report_fusion or {}).get("action") or "").strip()
-    hint_action = disc_action_str or fusion_action_str
+    hint_action = str(_disc_early.get("action") or "").strip()
     holding_state = action_for_holding_state(hint_action, has_position)
     report["fusion_holding_hint"] = holding_state.get("holding_hint", "待定")
 

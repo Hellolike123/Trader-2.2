@@ -228,10 +228,7 @@ def run_chip_enrichment_stage(
         pass
     _mark("resonance")
 
-    _sell_timing = resonance_result.get("sell_timing_score", 0)
-    if _sell_timing >= 1 and report_fusion.get("weighted_score", 0) < 0:
-        _boost = 0.05 * _sell_timing
-        report_fusion["confidence"] = min(0.95, report_fusion.get("confidence", 0) + _boost)
+    # fusion 仅仪表：禁止用 weighted_score 改写 fusion.confidence
 
     if chip_resistance and chip_resistance > current:
         levels.setdefault("resistance_levels", []).append(

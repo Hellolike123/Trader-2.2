@@ -148,6 +148,18 @@ def test_a5_like_buys_do_not_green_structure_post():
     assert res["grade"] == "missing_structure"
 
 
+def test_m5_mid_key_prices_alone_do_not_green_structure():
+    """M5：仅周线 mid_key_prices 命中、无日线买点/日线区 → structure 不绿。"""
+    r = _base_report()
+    r["analysis_cards"]["chan"] = {"type_short": "", "direction": 0}
+    r["current"] = 10.0
+    r["key_prices"] = {}  # 无日线区
+    r["mid_key_prices"] = {"buy_zone_low": 9.5, "buy_zone_high": 10.2, "pullback_low": 9.5, "pullback_high": 10.2}
+    res = build_resonance(r)
+    assert res["posts"]["structure"]["ok"] is False
+    assert res["grade"] == "missing_structure"
+
+
 def test_soft_sell_does_not_green_structure_post():
     """三花类：类二卖看跌 → 结构岗不得因买点子串 / 价在买区变绿 → 缺结构。"""
     r = _base_report()

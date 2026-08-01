@@ -251,13 +251,13 @@
 
 **选股池命令集**: `analyze` `add` `add-pending` `confirm-to-pool` `show` `show-pending` `rank` `plan` `review` `remove` `archive-exited`
 
-**入池三关规则**（实现：`pool_cmds/scoring.py`）:
-- 第一关：阶段筛选（衰退 → 拒绝）
-- 第二关：结构评分门槛（按 `major_stage` 查 `ADMISSION_SCORE_*`）
+**入池规则**（实现：`pool_cmds/scoring.py`；与 AGENTS「软门槛 + 分道」对齐）:
+- **软门槛**：容量满才硬拒；阶段/评分偏弱 → `lane=先别碰`（avoid）等分道，**不再**「衰退→直接拒绝」硬挡入库
+- 结构评分（按 `major_stage` 查 `ADMISSION_SCORE_*` 作软信号）:
   - 缠论子分（max 45）+ 威科夫（max 30）+ 筹码（max 25）+ 动量（max 20）→ `total_score`（封顶 100）
   - **`fusion_score`（-20~+20）仅仪表**：不进总分、不抬/压入池门槛、不参与排序
-  - 共振档离散收紧：冲突 / 动能拆台时「执行」→「观察」
-- 第三关：风控（现价 ≤ 止损 → 拒绝；触发/防守位不清 → 待补）
+- 排序：`lane → 共振 → 威科夫吸筹链 → 周线 RS → 可碰 → 分`（见 pool-output-contract）
+- 风控位不清 → 待补 / 分道降权，非一律硬拒
 
 ### 3.2 t0（盘中结构参考卡）
 
@@ -406,7 +406,7 @@
 
 ### 5.5 智能决策融合层 (`fusion_core.py` / `fusion_regime.py`)
 
-决策融合层是贯穿结构、缠论、动量与威科夫等多维分析体系的”终极裁判”。在传统多指标决策中，多头信号与空头冲突往往会导致系统输出”数据冲突”或者”中性旁观”等平庸判定。Trader 2.2 通过智能决策融合层彻底打破了这一桎梏。
+决策融合层是短线三席（缠论 / 动量 / **VPF**）的**仪表**（`product_role=instrument`），**不是**出手总司令。方向/新开听 `decision_view`（共振齐 ∧ 策略可执行 ∧ 纪律）；`fusion.weighted_score` / `fusion.action` 仅参考。法源：`BUSINESS.md` §2.7、`docs/designs/resonance-and-orchestration.md`。（旧文「终极裁判」已废止。）
 
 **`merge_decisions()` 当前签名（12 参数）：**
 ```python

@@ -1,13 +1,14 @@
 """中线定论合成：威科夫中线阶段 + 周线缠论结构副读。
 
-锁定 synthesize_midline_verdict 的合成矩阵、bias、兜底与注记。
-法源：BUSINESS.md §2.0（阶段只听周线威科夫；daily_fallback 不定论）。
+锁定 synthesize_midline_verdict：stage 钉死周线威科夫短词；
+矩阵仅驱动 bias/confidence/note（BUSINESS.md §2.0）。
 """
 import pytest
 from trader_shared.conclusion_block import (
     synthesize_midline_verdict,
     chanlun_midline_dir,
     _chan_dir_for_midline_verdict,
+    wyckoff_midline_bias,
 )
 
 
@@ -38,19 +39,23 @@ def _chan(
 
 
 # (wyck_phase, wyck_signal, chan_type, chan_conf, chan_div, expected_stage, expected_bias, expected_conf)
+# stage = 周线威科夫短词；矩阵不得 remap 吸筹→主升 / 派发→衰退
 CASES = [
-    # 共振：双 bullish / 双 bearish
-    ("accumulation_d", {"sos_signal": True}, "上涨趋势", "high", {}, "主升", "bull", "high"),
-    ("distribution_a", {"bc_signal": True}, "下跌趋势", "high", {"top_divergence": True}, "衰退", "bear", "high"),
+    # 共振：双 bullish / 双 bearish — stage 仍钉威科夫阶段
+    ("accumulation_d", {"sos_signal": True}, "上涨趋势", "high", {}, "吸筹", "bull", "high"),
+    ("distribution_a", {"bc_signal": True}, "下跌趋势", "high", {"top_divergence": True}, "派发", "bear", "high"),
     # 威科夫领先 + 缠论中性
-    ("accumulation_c", {"spring_signal": True}, "盘整趋势", "mid", {}, "蓄势", "bull", "mid"),
+    ("accumulation_c", {"spring_signal": True}, "盘整趋势", "mid", {}, "吸筹", "bull", "mid"),
     ("distribution_a", {"bc_signal": True}, "盘整趋势", "mid", {}, "派发", "bear", "mid"),
-    # A1：威科夫无方向时阶段钉威科夫/回退，禁止缠论改写为「主升初期/转弱」
-    ("none", {}, "上涨趋势", "high", {}, "震荡", "bull", "mid"),
-    ("none", {}, "下跌趋势", "high", {"top_divergence": True}, "震荡", "bear", "mid"),
-    # 冲突：降置信
-    ("accumulation_c", {"spring_signal": True}, "下跌趋势", "high", {"top_divergence": True}, "蓄势·警惕转弱", "bull", "low"),
-    ("distribution_a", {"bc_signal": True}, "上涨趋势", "high", {}, "派发·警惕", "bear", "low"),
+    # 威科夫无方向：阶段钉无阶段；bias 仍可听缠论方向提示
+    ("none", {}, "上涨趋势", "high", {}, "无阶段", "bull", "mid"),
+    ("none", {}, "下跌趋势", "high", {"top_divergence": True}, "无阶段", "bear", "mid"),
+    # 冲突：降置信；stage 不因冲突改写
+    ("accumulation_c", {"spring_signal": True}, "下跌趋势", "high", {"top_divergence": True}, "吸筹", "bull", "low"),
+    ("distribution_a", {"bc_signal": True}, "上涨趋势", "high", {}, "派发", "bear", "low"),
+    # phase 映射
+    ("markup", {}, "上涨趋势", "high", {}, "主升", "bull", "mid"),
+    ("markdown", {}, "下跌趋势", "high", {}, "主跌", "bear", "mid"),
 ]
 
 
@@ -65,26 +70,39 @@ def test_synthesis_matrix(wyck_phase, wyck_sig, chan_type, chan_conf, chan_div, 
     assert r["source"] == "wyckoff+chanlun"
 
 
+def test_m1_accumulation_sos_stays_xichou_not_zhusheng():
+    """M1：吸筹 + SOS + 周线缠多 → stage 仍「吸筹」，不得矩阵改「主升」。"""
+    w = _wyck("accumulation_d", sos_signal=True)
+    c = _chan("上涨趋势", "high", {}, timeframe="weekly")
+    r = synthesize_midline_verdict(c, w, fallback_stage="主升")
+    assert r["wyck_dir"] == 1
+    assert r["chan_dir"] == 1
+    assert r["stage"] == "吸筹"
+    assert r["stage"] != "主升"
+    assert r["bias"] == "bull"
+    assert r["confidence"] == "high"
+
+
 def test_fallback_when_both_neutral():
     r = synthesize_midline_verdict({}, {}, fallback_stage="走强")
     assert r["source"] == "fallback_position"
     assert r["bias"] == "neutral"
     assert r["confidence"] == "low"
-    assert r["stage"] == "走强"
+    assert r["stage"] == "无阶段"
 
 
-def test_fallback_defaults_to_震荡():
+def test_fallback_defaults_to_无阶段():
     r = synthesize_midline_verdict({}, {}, fallback_stage="")
-    assert r["stage"] == "震荡"
-    assert "回退位置分类" in r["note"]
+    assert r["stage"] == "无阶段"
+    assert "双源无明确方向" in r["note"]
 
 
 def test_low_chan_conf_downgrades_resonance():
-    # 双 bullish 但缠论低置信 → 共振档从 high 降到 mid
+    # 双 bullish 但缠论低置信 → 共振档从 high 降到 mid；stage 仍吸筹
     w = _wyck("accumulation_d", sos_signal=True)
     c = _chan("上涨趋势", "low", {}, buy_points=[{"type": "二类买", "confidence": 3}])
     r = synthesize_midline_verdict(c, w, fallback_stage="震荡")
-    assert r["stage"] == "主升"
+    assert r["stage"] == "吸筹"
     assert r["confidence"] == "mid"
 
 
@@ -96,6 +114,7 @@ def test_independent_labels_preserved():
     assert "积累期 C" in r["wyck_label"]
     assert "盘整趋势" in r["chan_label"]
     assert r["wyck_dir"] == 1 and r["chan_dir"] == 0
+    assert r["stage"] == "吸筹"
 
 
 # ── P2 缠论低置信跳过生命线 ─────────────────────────────────
@@ -127,7 +146,7 @@ def test_chanlun_midline_dir_low_conf_with_buy_point():
 
 
 def test_verdict_note_soft_sell_and_wyck_no_phase():
-    """三花类：威科夫无阶段 × 周线类二卖 → 阶段不改写为转弱；bias 可偏空；不定「领先」。"""
+    """三花类：威科夫无阶段 × 周线类二卖 → 阶段无阶段；bias 可偏空；不定「领先」。"""
     w = _wyck("none", phase_tr_gated=True, phase_tr_gate_reason="no_tr")
     c = _chan(
         "盘整",
@@ -139,8 +158,7 @@ def test_verdict_note_soft_sell_and_wyck_no_phase():
     r = synthesize_midline_verdict(c, w, fallback_stage="震荡")
     assert r["chan_dir"] == -1
     assert r["wyck_dir"] == 0
-    # A1：阶段钉威科夫/回退，禁止缠论「转弱」抢戏
-    assert r["stage"] == "震荡"
+    assert r["stage"] == "无阶段"
     assert r["bias"] == "bear"
     assert "上涨" not in r["note"]
     assert "类二卖" in r["note"]
@@ -158,9 +176,10 @@ def test_low_chan_conf_skips_lifeline_in_verdict():
     assert r["bias"] == "bull"
     assert r["confidence"] in ("low", "mid")
     assert r["chan_dir"] == 0
+    assert r["stage"] == "吸筹"
 
 
-# ── P0 合同：A1 / A2 ─────────────────────────────────────────
+# ── P0 合同：A1 / A2 / M1 / M6 ─────────────────────────────────────────
 
 
 def test_a1_accumulation_plus_like2_stays_xichou_not_zhusheng():
@@ -204,11 +223,56 @@ def test_a2_daily_fallback_does_not_drive_verdict_direction():
     assert "日线回退仅展示" in r["note"] or "日线回退仅展示" in r["chan_label"]
 
 
-def test_a1_weekly_chan_bull_no_wyck_stage_uses_fallback_not_zhusheng():
-    """威科夫无阶段 + 周线上涨：阶段回退位置分类，禁止主升初期。"""
+def test_a1_weekly_chan_bull_no_wyck_stage_uses_无阶段():
+    """威科夫无阶段 + 周线上涨：阶段钉无阶段，禁止主升初期/位置分类冒充。"""
     w = _wyck("none", phase_tr_gated=True)
     c = _chan("上涨趋势", "high", {}, timeframe="weekly")
     r = synthesize_midline_verdict(c, w, fallback_stage="走强")
-    assert r["stage"] == "走强"
+    assert r["stage"] == "无阶段"
     assert r["bias"] == "bull"
     assert r["stage"] != "主升初期"
+    assert r["stage"] != "走强"
+
+
+def test_m6_daily_major_stage_cannot_wash_weekly_ut():
+    """M6：日线 major_stage=主升 不得洗周线 UT；除非周线 phase=markup。"""
+    w_ut = {
+        "phase": "accumulation_b",
+        "upthrust_signal": True,
+        "upthrust_premature": False,
+        "spring_signal": False,
+        "bc_signal": False,
+        "sow_signal": False,
+        "sos_signal": False,
+    }
+    assert wyckoff_midline_bias(w_ut, major_stage="主升") == "strong_bear"
+    assert wyckoff_midline_bias(w_ut, major_stage="蓄势偏强") == "strong_bear"
+
+    w_markup_ut = {**w_ut, "phase": "markup"}
+    assert wyckoff_midline_bias(w_markup_ut, major_stage="") == "neutral"
+    assert wyckoff_midline_bias(w_markup_ut, major_stage="衰退") == "neutral"
+
+
+def test_m1_build_conclusion_stage_line_pins_wyckoff_not_major():
+    """M1：conclusion.stage_line 钉威科夫短词；日线 major_stage 不得冒充。"""
+    from trader_shared.conclusion_block import build_conclusion_block
+
+    c = build_conclusion_block(
+        major_stage="主升",
+        mistery_gate={"action": "观望", "hard_block": "none", "position_cap_pct": 0},
+        key_prices={},
+        wyckoff_midline=_wyck("accumulation_d", sos_signal=True),
+        chanlun_midline=_chan("上涨趋势", "high", {}, timeframe="weekly"),
+    )
+    assert c["stage_line"] == "吸筹"
+    assert c["stage_line"] != "主升"
+
+
+def test_m1_renderer_does_not_fallback_to_major_stage():
+    """M1：空 stage_line 时面板阶段行不得回落日线 major_stage。"""
+    from pathlib import Path
+    import trader_shared.report_renderer.short_midline as sm
+
+    src = Path(sm.__file__).read_text(encoding="utf-8")
+    assert 'conclusion.get("stage_line") or major_stage' not in src
+    assert "禁日线 major_stage 冒充" in src or 'conclusion.get("stage_line") or ""' in src

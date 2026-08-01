@@ -8,13 +8,13 @@
 
 from __future__ import annotations
 
-import json
-import os
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
 from trader_shared._logging import get_logger
+from trader_shared.json_atomic import load_json_dict, locked_rmw_json
+from trader_shared.trader_paths import path as trader_path
 
 _logger = get_logger(__name__)
 
@@ -38,7 +38,11 @@ def _prev_trading_day_iso(as_of: date | None = None) -> str:
         base = as_of or date.today()
         return (base - timedelta(days=1)).isoformat()
 
-_CHIP_HISTORY_PATH = Path(os.path.expanduser("~/.trader/chip_history.json"))
+
+def _chip_history_path() -> Path:
+    """``~/.trader/chip_history.json`` (via trader_paths)."""
+    return trader_path("chip_history")
+
 
 # 搬家警告阈值
 _MIGRATION_WARNING_THRESHOLD = 0.40  # 底部峰下降 > 40% → 警告
@@ -49,25 +53,14 @@ _BACKFILL_DAYS = 10
 
 
 def _load_history() -> dict[str, Any]:
-    """Load chip history from file."""
-    try:
-        if _CHIP_HISTORY_PATH.exists():
-            return json.loads(_CHIP_HISTORY_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        _logger.debug("Chip history load failed: %s", exc)
-    return {}
+    """Load chip history from file（无锁读；写路径须走 locked_rmw）。"""
+    return load_json_dict(_chip_history_path())
 
 
 def _save_history(history: dict[str, Any]) -> None:
-    """Save chip history to file atomically."""
+    """锁内全量写（调用方应已合并好；并发写请用 locked_rmw mutator）。"""
     try:
-        import uuid
-        _CHIP_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp = _CHIP_HISTORY_PATH.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")
-        tmp.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
-        with tmp.open("rb") as f:
-            os.fsync(f.fileno())
-        tmp.replace(_CHIP_HISTORY_PATH)
+        locked_rmw_json(_chip_history_path(), lambda _old: history if isinstance(history, dict) else {})
     except OSError as exc:
         _logger.debug("Chip history save failed: %s", exc)
 
@@ -119,20 +112,24 @@ def save_chip_snapshot(
     if snapshot is None:
         return
 
-    history = _load_history()
-    # 保留最近 5 次快照：追加新快照，超过 5 则去重裁旧
-    existing: list[dict[str, Any]] = history.get(target, [])
-    if not isinstance(existing, list):
-        existing = [existing] if isinstance(existing, dict) else []
-    # 去重：同日期已有则不重复追加
-    if existing and existing[-1].get("date") == today:
-        existing[-1] = snapshot
-    else:
-        existing.append(snapshot)
-    if len(existing) > 5:
-        existing = existing[-5:]
-    history[target] = existing
-    _save_history(history)
+    def _mutate(history: dict[str, Any]) -> dict[str, Any]:
+        # 保留最近 5 次快照：追加新快照，超过 5 则去重裁旧
+        existing: list[dict[str, Any]] = history.get(target, [])
+        if not isinstance(existing, list):
+            existing = [existing] if isinstance(existing, dict) else []
+        if existing and existing[-1].get("date") == today:
+            existing[-1] = snapshot
+        else:
+            existing.append(snapshot)
+        if len(existing) > 5:
+            existing = existing[-5:]
+        history[target] = existing
+        return history
+
+    try:
+        locked_rmw_json(_chip_history_path(), _mutate)
+    except OSError as exc:
+        _logger.debug("Chip history save failed: %s", exc)
 
 
 def _save_backfill_snapshot(
@@ -189,9 +186,9 @@ def backfill_history(
         _logger.debug("chip_distribution not available, backfill skipped")
         return False
 
-    # 回填前 _BACKFILL_DAYS 个交易日
+    # 计算在锁外；合并写入走锁内 RMW（避免长持 flock）
+    pending: dict[str, Any] = {}
     backfill_count = 0
-    # bars 按时间正序排列，取最后 _BACKFILL_DAYS+60 天的数据用于计算
     total_bars = len(bars)
     for i in range(max(0, total_bars - _BACKFILL_DAYS), total_bars):
         bar = bars[i]
@@ -199,7 +196,6 @@ def backfill_history(
         if not trade_date:
             continue
 
-        # 用截至当天的数据计算筹码分布
         bars_slice = bars[: i + 1]
         try:
             chip_result = calc_chip_distribution(bars_slice, lookback=60)
@@ -207,11 +203,19 @@ def backfill_history(
             _logger.debug("Chip calc failed for %s on %s: %s", target, trade_date, exc)
             continue
 
-        _save_backfill_snapshot(history, target, trade_date, chip_result)
+        _save_backfill_snapshot(pending, target, trade_date, chip_result)
         backfill_count += 1
 
     if backfill_count > 0:
-        _save_history(history)
+        def _mutate(store: dict[str, Any]) -> dict[str, Any]:
+            store.update(pending)
+            return store
+
+        try:
+            locked_rmw_json(_chip_history_path(), _mutate)
+        except OSError as exc:
+            _logger.debug("Chip history backfill save failed: %s", exc)
+            return False
         _logger.debug("Chip history backfilled for %s: %d days", target, backfill_count)
 
     return backfill_count > 0

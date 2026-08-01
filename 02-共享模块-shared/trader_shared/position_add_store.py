@@ -10,25 +10,21 @@ SSOT: ``~/.trader/last_add_dates.json``（可用 env ``TRADER_LAST_ADD_PATH`` �
 from __future__ import annotations
 
 import json
-import os
 import threading
 from pathlib import Path
 from typing import Any
 
 from trader_shared._logging import get_logger
+from trader_shared.json_atomic import load_json_dict, locked_rmw_json
+from trader_shared.trader_paths import path as trader_path
 
 _logger = get_logger(__name__)
-_LOCK = threading.Lock()
-
-_STORE_ENV = "TRADER_LAST_ADD_PATH"
-_DEFAULT_STORE = Path(os.path.expanduser("~/.trader/last_add_dates.json"))
+_LOCK = threading.Lock()  # 线程内互斥；跨进程另有 flock
 
 
 def _store_path() -> Path:
-    override = (os.environ.get(_STORE_ENV) or "").strip()
-    if override:
-        return Path(os.path.expanduser(override))
-    return _DEFAULT_STORE
+    """``~/.trader/last_add_dates.json`` or ``TRADER_LAST_ADD_PATH``."""
+    return trader_path("last_add_dates")
 
 
 def _today_iso() -> str:
@@ -80,11 +76,7 @@ def _alias_keys(symbol: Any = None, name: Any = None, code: Any = None) -> list[
 def _load() -> dict[str, str]:
     path = _store_path()
     try:
-        if not path.exists():
-            return {}
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return {}
+        data = load_json_dict(path)
         return {str(k): str(v)[:10] for k, v in data.items() if k and v}
     except Exception as exc:
         _logger.debug("last_add_dates load failed: %s", exc)
@@ -92,12 +84,10 @@ def _load() -> dict[str, str]:
 
 
 def _save(data: dict[str, str]) -> None:
+    """锁内全量写（跨进程 flock）。"""
     path = _store_path()
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        tmp.replace(path)
+        locked_rmw_json(path, lambda _old: dict(data) if isinstance(data, dict) else {})
     except Exception as exc:
         _logger.warning("last_add_dates save failed: %s", exc)
 
@@ -133,11 +123,17 @@ def record_last_add(
     keys = _alias_keys(symbol, name=name, code=code)
     if not keys:
         return td
-    with _LOCK:
-        data = _load()
+
+    def _mutate(data: dict[str, Any]) -> dict[str, Any]:
         for k in keys:
             data[k] = td
-        _save(data)
+        return data
+
+    with _LOCK:
+        try:
+            locked_rmw_json(_store_path(), _mutate)
+        except Exception as exc:
+            _logger.warning("last_add_dates save failed: %s", exc)
     _sync_pool_item(keys, td)
     return td
 
@@ -145,10 +141,10 @@ def record_last_add(
 def _sync_pool_item(keys: list[str], trade_date: str) -> None:
     """尽力把 pool.json 对应票也打上 last_add_date（失败静默）。"""
     try:
-        path = Path(os.path.expanduser("~/.trader/pool.json"))
-        if not path.exists():
+        pool_path = trader_path("pool")
+        if not pool_path.exists():
             return
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(pool_path.read_text(encoding="utf-8"))
         items = payload.get("items")
         if not isinstance(items, list):
             return
@@ -167,17 +163,17 @@ def _sync_pool_item(keys: list[str], trade_date: str) -> None:
                     item["last_add_date"] = trade_date
                     changed = True
         if changed:
-            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            pool_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     except Exception as exc:
         _logger.debug("pool last_add_date sync skipped: %s", exc)
 
 
 def _from_pool(keys: list[str]) -> str | None:
     try:
-        path = Path(os.path.expanduser("~/.trader/pool.json"))
-        if not path.exists():
+        pool_path = trader_path("pool")
+        if not pool_path.exists():
             return None
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(pool_path.read_text(encoding="utf-8"))
         items = payload.get("items") or []
         keyset = {k.upper() for k in keys}
         for item in items:
