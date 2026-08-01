@@ -60,11 +60,6 @@ def _profile_enabled() -> bool:
     return os.environ.get("TRADER_PROFILE", "").strip() in ("1", "true", "True", "yes")
 
 
-def _ctx_pick(ctx: Any, *keys: str) -> dict[str, Any]:
-    """从 StageContext bag 取 kwargs（缺省 None）。"""
-    return {k: ctx.get(k) for k in keys}
-
-
 def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     """单票报告编排：单一 StageContext bag，阶段结果 ctx.update，禁止平行 locals。"""
     import time as _time
@@ -312,102 +307,14 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     ctx.short_term_momentum = str((ctx.stage_result or {}).get("momentum") or "震荡")
     ctx.stage = ctx.short_term_momentum  # assemble/attach 兼容槽；assemble 仍以 momentum 为准
 
-    report = assemble_base_report(
-        **_ctx_pick(
-            ctx,
-            "intraday_as_of",
-            "quote",
-            "sec",
-            "analysis_time",
-            "current",
-            "weekly_proxy_close",
-            "monthly_proxy_close",
-            "support",
-            "resistance",
-            "confirm",
-            "stop",
-            "take",
-            "stage",
-            "scene",
-            "levels",
-            "replay",
-            "volume_text",
-            "upward_momentum",
-            "low",
-            "high",
-            "snapshot",
-            "bars",
-            "risk_flags",
-            "atr14_val",
-            "atr_ratio_val",
-            "atr_level",
-            "atr_cap",
-            "atr_adjust",
-            "atr_data_source",
-            "st",
-            "st_dir",
-            "vwap_res",
-            "base_status",
-            "theory_status",
-            "state_label",
-            "volume_note",
-            "market_env_data",
-            "position_cap",
-            "ma250",
-            "chip",
-            "chip_peaks",
-            "chip_support",
-            "chip_resistance",
-            "chip_support_lower",
-            "chip_support_upper",
-            "chip_resistance_lower",
-            "chip_resistance_upper",
-            "main_force_score_result",
-            "big_order_result",
-            "stage_result",
-            "wyck_result",
-            "wyck_mid_result",
-            "chan_result",
-            "chan_mid_result",
-            "expma10_val",
-            "expma12_val",
-            "expma20_val",
-            "expma50_val",
-            "expma_trend",
-            "expma_status_result",
-            "resonance_result",
-            "sector_data",
-            "fusion_pre_cards",
-        )
-    )
+    # B2：assemble/attach 只收 StageContext（禁止 kwargs 爆炸）
+    report = assemble_base_report(ctx)
     # context 降级覆盖 assemble 从 frozen snapshot 抄来的 data_status
     report["data_status"] = ctx.data_status
     # assemble 写 _fusion_pre_cards；fusion 占位，merge 后覆写
 
     report, cost_price, has_position, suggested = attach_stage_position_pack(
-        report,
-        cost_price=float(ctx.cost_price or 0),
-        current=float(ctx.current or 0),
-        market_env_data=ctx.market_env_data if isinstance(ctx.market_env_data, dict) else {},
-        stage_result=ctx.stage_result,
-        atr14_val=ctx.atr14_val,
-        bars=ctx.bars,
-        wyck_result=ctx.wyck_result,
-        support=ctx.support,
-        confirm=ctx.confirm,
-        expma10_val=ctx.expma10_val,
-        expma20_val=ctx.expma20_val,
-        chip_migration=ctx.chip_migration,
-        levels=ctx.levels,
-        bars_date=ctx.bars_date,
-        base_status=str(ctx.base_status or ""),
-        theory_status=str(ctx.theory_status or ""),
-        scene=str(ctx.scene or ""),
-        report_fusion=None,  # 死参；merge 在 stage_pack 之后
-        signal_win_rate=ctx.signal_win_rate,
-        signal_cost_price=float(ctx.signal_cost_price or 0),
-        stage=str(ctx.short_term_momentum or ""),
-        mark=_mark,
+        report, ctx, mark=_mark
     )
     ctx.update(
         cost_price=cost_price,
@@ -437,23 +344,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     ctx.update(report_fusion=report_fusion)
 
     # 短中线 + 决策栈（纪律/策略仍见完整 fusion 仪表）
-    attach_short_midline_and_decision(
-        report,
-        current=ctx.current,
-        scene=str(ctx.scene or ""),
-        report_fusion=report_fusion,
-        stage_result=ctx.stage_result,
-        weekly_bars=ctx.weekly_bars or [],
-        suggested=ctx.suggested,
-        theory_status=str(ctx.theory_status or ""),
-        market_env_data=ctx.market_env_data if isinstance(ctx.market_env_data, dict) else {},
-        has_position=ctx.has_position,
-        data_status=str(ctx.data_status or report.get("data_status") or ""),
-        chip_resistance_lower=ctx.chip_resistance_lower,
-        chip_resistance_upper=ctx.chip_resistance_upper,
-        stage=str(ctx.short_term_momentum or ""),
-        mark=_mark,
-    )
+    attach_short_midline_and_decision(report, ctx, mark=_mark)
 
     _mark("assemble")
     if _prof and _marks:

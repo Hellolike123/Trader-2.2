@@ -142,7 +142,91 @@ def run_stage_positioning_stage(
     }
 
 
-def assemble_base_report(
+_ASSEMBLE_CTX_KEYS = (
+    "intraday_as_of",
+    "quote",
+    "sec",
+    "analysis_time",
+    "current",
+    "weekly_proxy_close",
+    "monthly_proxy_close",
+    "support",
+    "resistance",
+    "confirm",
+    "stop",
+    "take",
+    "stage",
+    "scene",
+    "levels",
+    "replay",
+    "volume_text",
+    "upward_momentum",
+    "low",
+    "high",
+    "snapshot",
+    "bars",
+    "risk_flags",
+    "atr14_val",
+    "atr_ratio_val",
+    "atr_level",
+    "atr_cap",
+    "st",
+    "st_dir",
+    "vwap_res",
+    "base_status",
+    "theory_status",
+    "state_label",
+    "volume_note",
+    "market_env_data",
+    "position_cap",
+    "ma250",
+    "chip",
+    "chip_peaks",
+    "chip_support",
+    "chip_resistance",
+    "chip_support_lower",
+    "chip_support_upper",
+    "chip_resistance_lower",
+    "chip_resistance_upper",
+    "report_fusion",
+    "main_force_score_result",
+    "big_order_result",
+    "stage_result",
+    "wyck_result",
+    "wyck_mid_result",
+    "chan_result",
+    "chan_mid_result",
+    "expma10_val",
+    "expma12_val",
+    "expma20_val",
+    "expma50_val",
+    "expma_trend",
+    "expma_status_result",
+    "resonance_result",
+    "sector_data",
+    "atr_adjust",
+    "atr_data_source",
+    "fusion_pre_cards",
+)
+
+
+def assemble_base_report(ctx: Any) -> dict[str, Any]:
+    """Thin：从 StageContext bag 组装基础 report。"""
+    kwargs = {k: ctx.get(k) for k in _ASSEMBLE_CTX_KEYS}
+    # 缺省与 kwargs 路径一致
+    if kwargs.get("atr_adjust") is None:
+        kwargs["atr_adjust"] = "unknown"
+    if kwargs.get("atr_data_source") is None:
+        kwargs["atr_data_source"] = ""
+    return _assemble_base_report_impl(**kwargs)
+
+
+def assemble_base_report_kwargs(**kwargs: Any) -> dict[str, Any]:
+    """Deprecated one-release：测试/旧调用方可继续 kwargs。"""
+    return _assemble_base_report_impl(**kwargs)
+
+
+def _assemble_base_report_impl(
     *,
     intraday_as_of: Any,
     quote: dict[str, Any],

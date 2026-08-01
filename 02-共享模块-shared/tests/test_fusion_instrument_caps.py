@@ -229,6 +229,7 @@ def test_attach_short_midline_outer_fail_zeros_caps_via_execution_caps(monkeypat
     """短中线外层失败：fail-closed DV + apply_execution_caps 清零 stage_pack 残留。"""
     from trader_shared.report_pipeline.attach_short_midline import (
         attach_short_midline_and_decision,
+        attach_short_midline_and_decision_kwargs,
     )
 
     report = {
@@ -248,7 +249,7 @@ def test_attach_short_midline_outer_fail_zeros_caps_via_execution_caps(monkeypat
     import trader_shared.key_prices as kp
 
     monkeypatch.setattr(kp, "build_key_prices", _boom_key_prices)
-    out = attach_short_midline_and_decision(
+    out = attach_short_midline_and_decision_kwargs(
         report,
         current=10.0,
         scene="回踩",
