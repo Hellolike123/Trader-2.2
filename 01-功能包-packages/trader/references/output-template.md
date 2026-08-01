@@ -130,6 +130,8 @@ T0：无底仓，不启用（与出手一致，不新开）
 |----|------|--------|
 | 阶段（面板「阶段：」） | 周线威科夫短词，中线背景语义 | wyckoff_midline.phase → stage_line / midline_stage |
 | major_stage | 日线四阶段，门控/池软信号（**不**写中线「阶段：」行） | major_stage |
+| short_term_momentum | EXPMA 短期动能（走强/修复/震荡/转弱） | assess_stage → momentum |
+| report["stage"] | **兼容别名 = short_term_momentum**（池/旧读方；非 major_stage） | 同 short_term_momentum |
 | 中线看法 | 周线故事跟不跟 | chanlun_midline + wyckoff_midline |
 | 中线关键价 | 生命线/回踩/压力/目标 | mid_key_prices（周线引擎） |
 | 短线看法/专家 | 追不追 | fusion 日线（仪表；出手听 decision_view） |

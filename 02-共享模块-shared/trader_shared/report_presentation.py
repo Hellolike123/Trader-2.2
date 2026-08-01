@@ -101,17 +101,10 @@ def _get_kelly_data(market_env_level: str) -> dict[str, float]:
     return result
 
 def _get_major_stage(r: dict[str, Any]) -> str:
-    major_stage = str(r.get("major_stage") or "")
-    if not major_stage:
-        old_stage = str(r.get("stage") or "")
-        stage_map = {
-            "修复": "蓄势",
-            "走强": "主升",
-            "震荡": "蓄势",
-            "转弱": "衰退",
-        }
-        major_stage = stage_map.get(old_stage, old_stage)
-    return major_stage
+    """Prefer major_stage；禁止 report['stage']/动能词 走强→主升 映射。"""
+    from trader_shared.stage_fields import major_stage_from_report
+
+    return major_stage_from_report(r)
 
 def today_text() -> str:
     return date.today().isoformat()

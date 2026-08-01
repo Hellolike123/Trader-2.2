@@ -14,17 +14,21 @@
     ↓
 策略层 只读 意见卡 + 公共上下文 → 六闸口匹配 strategy_match
     ↓
-决策层 fusion / discipline 消费信号
+决策层 Decision = decision_view（共振 ∧ 策略可执行 ∧ 纪律）
+    · fusion **仅仪表**（weighted_score / action 不微调出手）
     · fusion **默认 cards**（意见卡三席；不足回退 classic）；`FUSION_FROM_CARDS=classic` 强制原路径
-    · discipline 只收紧出手/仓位，不改 weighted_score
+    · discipline 只收紧出手/仓位，不改 weighted_score / major_stage / support / stop
     ↓
-展示层 report_core 展示状态灯 + 动作 + 📐 闸口
+展示层 report_core 展示状态灯 + 动作 + 📐 闸口（主叙事跟 decision_view）
 ```
+
+法源编排与岗位共振：[`resonance-and-orchestration.md`](resonance-and-orchestration.md)（五层+编排；fusion 不作总司令）。
 
 **禁止**：策略包或 `strategy_match` 内重跑缠论笔、威科夫 Spring 检测、筹码直方图。  
 **禁止**：为加一个包去改 `weighted_score` 公式。  
 **禁止**：报告里手写第二套开仓逻辑绕过闸口。  
-**禁止**：文档或 Agent 写成「默认 classic」——**当前代码与单测缺省均为 cards**（见 §5）。
+**禁止**：文档或 Agent 写成「默认 classic」——**当前代码与单测缺省均为 cards**（见 §5）。  
+**禁止**：从阶段/动能/fusion 分直接推断方向或「宜追」。
 
 ---
 
@@ -34,7 +38,7 @@
 |----|------|---------------------|----------|
 | **分析 Analysis** | 意见卡 + 读卡适配；底层检测仍在 cores/plugins | **`trader_shared/analysis/`**（`cards.py` / `fusion_card_signals.py`）；cores 仍 `chan_core` 等 | `from trader_shared.analysis import build_*_card, ensure_report_analysis_cards` |
 | **策略 Strategy** | 闸口匹配、填止损剧本 | **`trader_shared/strategy/`**（`match.py` + `packs/*.yaml`） | `from trader_shared.strategy import match_strategies, format_gates_brief` |
-| **决策 Decision** | 融合打分、纪律收紧 | `fusion_core` / `mistery_gate` / `chan_discipline` | `merge_decisions` / gate 结果 |
+| **决策 Decision** | **decision_view**（共振∧策略∧纪律）；fusion 仅仪表；纪律收紧 | `decision_view` / `fusion_core` / `mistery_gate` / `chan_discipline` | `build_decision_view` / `merge_discipline`；fusion `merge_decisions` 仅仪表 |
 | **编排 Orchestration** | 串起来写 report | `report_builder.build_report` | report dict |
 | **展示 Presentation** | Markdown | `report_core.render_short_midline` | 纯展示 |
 
@@ -73,7 +77,12 @@ report_builder→  全部层
 | `analysis_cards` | dict | 键：`chan` `wyckoff` `wyckoff_midline` `momentum` `chip` `vpf` |
 | `strategy_match` | dict | `schema_version=strategy_match_v1`，含 `gates` |
 | `discipline` | dict | 纪律合并结果 |
+| `decision_view` | dict | 薄决策（出手真相）；fusion 不得顶替 |
 | `conclusion` | dict | 中短线结论 |
+| `midline_stage` / `conclusion.stage_line` | str | 周线威科夫短词 → 面板「阶段：」 |
+| `major_stage` | str | 日线四阶段 → 门控/池（**不**写面板阶段行） |
+| `short_term_momentum` | str | EXPMA 动能：走强/修复/震荡/转弱 |
+| `stage` | str | **`short_term_momentum` 兼容别名**（非 major_stage；非 determine_stage） |
 | 原有 `chanlun` / `wyckoff` / … | dict | **兼容保留**；新逻辑优先 cards |
 
 构建入口：`analysis_cards.ensure_report_analysis_cards(report)`  

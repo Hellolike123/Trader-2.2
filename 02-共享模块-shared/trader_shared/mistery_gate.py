@@ -65,17 +65,28 @@ _STAGE_MOMENTUM_TABLE: dict[str, dict[str, str]] = {
 
 
 def _normalize_stage(major_stage: str) -> str:
-    """将 major_stage 变体归一到四阶段主类。"""
+    """将 major_stage 变体归一到四阶段主类。
+
+    禁止把 short_term_momentum 动能词（走强/修复/震荡/转弱）映射成四阶段
+    （BUSINESS §4.0 / architecture #2）。误传入动能词 → 视为缺 major_stage。
+    """
     s = str(major_stage or "").strip()
     if not s:
         return ""
+    # 动能词不得洗成四阶段（旧 legacy 走强→主升 已废）
+    try:
+        from trader_shared.stage_fields import SHORT_MOMENTUM_VOCAB
+
+        if s in SHORT_MOMENTUM_VOCAB:
+            return ""
+    except Exception:
+        if s in ("走强", "修复", "震荡", "转弱"):
+            return ""
     # 蓄势偏强/偏弱 → 蓄势
     for base in ("蓄势", "主升", "派发", "衰退"):
         if s.startswith(base) or base in s:
             return base
-    # 旧标签兼容
-    legacy = {"修复": "蓄势", "走强": "主升", "震荡": "蓄势", "转弱": "衰退"}
-    return legacy.get(s, s)
+    return s
 
 
 def _normalize_momentum(momentum: str) -> str:

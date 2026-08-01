@@ -227,9 +227,10 @@ class TestRenderShortMidline:
         assert "｜短中线" in md
         assert "🧭 中线" in md
         assert "⚡ 短线" in md
-        assert "阶段：蓄势偏强" in md
-        # B3C：看法已并入阶段行（阶段：蓄势偏强 · 偏空…），不再单列「看法：」
-        assert "阶段：蓄势偏强 ·" in md
+        # 面板「阶段：」= 周线威科夫短词（不足→无阶段）；禁止日线 major_stage=蓄势偏强 冒充
+        assert "阶段：无阶段" in md
+        assert "阶段：蓄势偏强" not in md
+        assert "阶段：无阶段 ·" in md  # 定论偏多/偏空附在阶段行
         assert "中线：蓄势" not in md
         assert "🎯 结论" not in md
         assert "威科夫" in md

@@ -1,11 +1,19 @@
 # -*- coding: utf-8 -*-
-"""四阶段定位 + 基础报告组装。"""
+"""四阶段定位 + 基础报告组装。
+
+阶段字段纪律（见 ``trader_shared.stage_fields``）：
+- midline_stage / conclusion.stage_line = 周线威科夫短词（面板「阶段：」）
+- major_stage = 日线四阶段（门控/池）
+- short_term_momentum = EXPMA 走强/修复/震荡/转弱
+- report["stage"] = short_term_momentum 别名（禁止再写 determine_stage）
+"""
 from __future__ import annotations
 
 from typing import Any
 
 from trader_shared.report_pipeline._common import MarkFn, _noop_mark  # noqa: F401
 from trader_shared.report_pipeline.prelude import tag_fusion_as_instrument
+from trader_shared.stage_fields import alias_report_stage
 
 def _calc_volume_ratio_from_bars(bars: list[dict], window: int = 5) -> float:
     """从日K线计算量比（近N日均量 / 前N日均量）。"""
@@ -148,7 +156,7 @@ def assemble_base_report(
     confirm: Any,
     stop: Any,
     take: Any,
-    stage: str,
+    stage: str,  # deprecated：忽略；report["stage"] 别名 short_term_momentum
     scene: str,
     levels: dict[str, Any],
     replay: str,
@@ -204,6 +212,10 @@ def assemble_base_report(
     """组装 build_report 基础 dict，并 sync 非内部 levels 字段。"""
     from trader_shared.report_presentation import ma_text
 
+    # stage 入参为旧 determine_stage；不再写入 report，避免与 EXPMA 动能双真相
+    _ = stage
+    _stm = str(stage_result.get("momentum") or "震荡")
+
     report: dict[str, Any] = {
         "intraday_as_of": intraday_as_of,
         "name": quote.get("name") or sec.name,
@@ -220,7 +232,8 @@ def assemble_base_report(
         "trailing_stop": levels.get("trailing_stop"),
         "effective_stop": levels.get("effective_stop") or stop,
         "take": take,
-        "stage": stage,
+        # 兼容别名 = short_term_momentum（池/旧读方）；非 major_stage / 非面板阶段
+        "stage": alias_report_stage(_stm),
         "scene": scene,
         "low_zone": levels["low_zone"],
         "low_zone_lower": levels["low_zone_lower"],

@@ -16,8 +16,11 @@
 | `atr14` | 日线 bars 计算 | ATR14（元）；面板并入量价行，写 `ATR14 x.xx（前/后/未复权）`，勿独立成行、勿写成 ATR15 |
 | `support` / `resistance` | build_structure_context() | 结构支撑/压力位 |
 | `confirm` / `stop` | build_structure_context() | 确认位/止损位 |
-| `major_stage` | assess_stage() | 蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退 |
-| `momentum` | assess_stage() | 走强/修复/震荡/转弱 |
+| `major_stage` | assess_stage() | 日线四阶段：蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退（**非**面板「阶段：」） |
+| `short_term_momentum` | assess_stage() → momentum | EXPMA 动能：走强/修复/震荡/转弱 |
+| `stage` | = short_term_momentum 别名 | 兼容旧读方；禁止当成 major_stage |
+| `midline_stage` / `conclusion.stage_line` | 周线威科夫 | 面板「阶段：」短词；不足→无阶段 |
+| `momentum` | 同 short_term_momentum（内部） | 走强/修复/震荡/转弱 |
 | `fusion.weighted_score` | merge_decisions() | 融合加权分 -1~+1 |
 | `fusion.confidence` | merge_decisions() | 置信度 0~1 |
 | `fusion.action` | merge_decisions() | 融合层建议动作 |
