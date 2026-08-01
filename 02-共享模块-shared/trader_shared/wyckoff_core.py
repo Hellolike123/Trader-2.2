@@ -264,11 +264,17 @@ def _build_phase_a_range(sc: dict, ar: dict) -> dict:
         "status": status,
         "anchor_bars": WYCKOFF_CLIMAX_ANCHOR_BARS,  # 展示用；周线引擎侧另有缩放
         "st_sc_low": None,
+        "sc_low_refined": None,
     }
 
 
 def _refine_phase_a_sc_low(phase_a_range: dict, st_sc: dict) -> dict:
-    """若广义 ST 有效，用更低的 st_sc_low refine phase_a sc_low（status 不变）。"""
+    """若广义 ST 有效，记录 st_sc_low / sc_low_refined；不覆盖原 SC 棒 sc_low。
+
+    合同：``sc_low`` = SC 棒最低价 SSOT；更低的成功 ST low 写入 ``sc_low_refined``
+    （见 ``wyckoff-phase-a-range-handoff.md`` §4.4.3）。成熟箱下沿在 overlay /
+    箱体文案侧取 ``min(sc_low, st_sc_low)``。
+    """
     if not st_sc.get("secondary_test_sc_signal"):
         return phase_a_range
     st_low = st_sc.get("st_sc_low")
@@ -277,8 +283,11 @@ def _refine_phase_a_sc_low(phase_a_range: dict, st_sc: dict) -> dict:
         return phase_a_range
     out = dict(phase_a_range)
     out["st_sc_low"] = st_low
-    if st_low < sc_low:
-        out["sc_low"] = st_low
+    try:
+        if float(st_low) < float(sc_low):
+            out["sc_low_refined"] = round(float(st_low), 2)
+    except (TypeError, ValueError):
+        pass
     return out
 
 
@@ -459,17 +468,30 @@ def _overlay_phase_a_seed_tr_ctx(
 
     sc_low = phase_a_range.get("sc_low")
     ar_high = phase_a_range.get("ar_high")
-    if sc_low is None or ar_high is None or float(sc_low) >= float(ar_high):
+    if sc_low is None or ar_high is None:
+        return ctx or None
+    try:
+        # 成熟箱下沿 = min(SC low, 成功 ST low)；上沿 = AR high
+        lo = float(sc_low)
+        st_low = phase_a_range.get("st_sc_low")
+        if st_low is None:
+            st_low = phase_a_range.get("sc_low_refined")
+        if st_low is not None:
+            lo = min(lo, float(st_low))
+        hi = float(ar_high)
+    except (TypeError, ValueError):
+        return ctx or None
+    if lo >= hi:
         return ctx or None
 
     ctx["tr_lower_ref"] = ctx.get("tr_lower")
     ctx["tr_upper_ref"] = ctx.get("tr_upper")
     ctx["tr_quality_ref"] = ctx.get("tr_quality")
-    ctx["tr_lower"] = float(sc_low)
-    ctx["tr_upper"] = float(ar_high)
-    ctx["tr_amplitude_pct"] = round((float(ar_high) - float(sc_low)) / float(sc_low) * 100, 2)
+    ctx["tr_lower"] = lo
+    ctx["tr_upper"] = hi
+    ctx["tr_amplitude_pct"] = round((hi - lo) / lo * 100, 2)
     ctx["tr_width"] = int(phase_a_range.get("anchor_bars") or WYCKOFF_CLIMAX_ANCHOR_BARS)
-    seed_q = _seed_tr_quality_from_bounds(float(sc_low), float(ar_high))
+    seed_q = _seed_tr_quality_from_bounds(lo, hi)
     prev_q = ctx.get("tr_quality")
     try:
         prev_q_f = float(prev_q) if prev_q is not None else None
@@ -486,7 +508,7 @@ def _overlay_phase_a_seed_tr_ctx(
         ctx["tr_baseline_volume"] = 0.0
     last_close = ctx.get("last_close")
     if last_close is not None:
-        ctx["in_tr"] = float(sc_low) <= float(last_close) <= float(ar_high)
+        ctx["in_tr"] = lo <= float(last_close) <= hi
     elif ctx.get("in_tr") is None:
         ctx["in_tr"] = True
     return ctx
@@ -534,9 +556,10 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
             "phase_a_status": "none",
             "phase_a_range": {
                 "sc_low": None, "ar_high": None, "sc_bar_idx": None, "ar_bar_idx": None,
-                "status": "none", "anchor_bars": WYCKOFF_CLIMAX_ANCHOR_BARS, "st_sc_low": None,
+                "status": "none", "anchor_bars": WYCKOFF_CLIMAX_ANCHOR_BARS,
+                "st_sc_low": None, "sc_low_refined": None,
             },
-            "sc_low": None, "ar_high": None,
+            "sc_low": None, "sc_low_refined": None, "ar_high": None,
             "secondary_test_sc_signal": False, "secondary_test_sc_reason": "数据不足", "st_sc_low": None,
             "tr_maturity": "L0",
             "tr_maturity_reason": "数据不足",
@@ -812,8 +835,14 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         ),
         "sc_signal": sc["sc_signal"],
         "sc_reason": sc["sc_reason"],
+        # sc_price / sc_low = SC 棒最低价 SSOT（勿被 ST refine 覆盖）
         "sc_price": round(sc["sc_price"], 2) if sc["sc_signal"] else None,
-        "sc_low": phase_a_range.get("sc_low") if sc.get("sc_signal") else None,
+        "sc_low": (
+            round(float(sc["sc_low"]), 2)
+            if sc.get("sc_signal") and sc.get("sc_low") is not None
+            else (phase_a_range.get("sc_low") if sc.get("sc_signal") else None)
+        ),
+        "sc_low_refined": phase_a_range.get("sc_low_refined"),
         "sc_bar_idx": sc.get("sc_bar_idx"),
         "bearish_volume_divergence": bearish_div,
         "bullish_volume_divergence": bullish_div,
@@ -1541,6 +1570,12 @@ def _phase_a_box_bounds(wyk: dict[str, Any]) -> tuple[float | None, float | None
     lo = _num(("sc_low",), sources)
     if lo is None:
         lo = _num(("tr_lower",), sources)
+    # 成熟箱 / 雏形下沿：可被成功 ST 或 sc_low_refined 压低（不覆盖原 sc_low 字段）
+    st_lo = _num(("st_sc_low", "sc_low_refined", "secondary_test_sc_low"), sources)
+    if lo is not None and st_lo is not None:
+        lo = min(lo, st_lo)
+    elif lo is None:
+        lo = st_lo
     hi = _num(("ar_high",), sources)
     if hi is None:
         hi = _num(("tr_upper",), sources)

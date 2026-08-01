@@ -1226,6 +1226,9 @@ def _detect_secondary_test_sc(
 
     禁止软确认（handoff §1.3）：价格一直站在 sc_low 上方、从未回测 SC 区 →
     不得返回 ``secondary_test_sc_signal=True``。
+
+    有效跌破（handoff §1.3）：超允许刺穿且收盘不收回 → **Phase A 失败**，
+    整段不得再认后续 ST（禁止 ``continue`` 跳过破位棒后另找假 ST）。
     """
     del phase_a_range  # 回测锚以 _find_sc_anchor 的 sc_low 为准（SSOT），不用外部偏高种子
     p = _sc_detector_params(timeframe, is_index=is_index)
@@ -1269,10 +1272,10 @@ def _detect_secondary_test_sc(
             saw_soft_above = True
             continue
 
-        # 有效跌破（超允许刺穿且收盘不收回）→ 失败，不算成功 ST
+        # 有效跌破（超允许刺穿且收盘不收回）→ Phase A 失败，禁止再认后续 ST
         pierce = t_low < pierce_floor
         if pierce and (t_close is None or t_close < sc_low):
-            continue
+            return _st_sc_empty("SC 后有效跌破未收回（Phase A 失败，禁止再认 ST）")
 
         if t_vol >= sc_vol * WYCKOFF_ST_SC_VOL_RATIO:
             continue

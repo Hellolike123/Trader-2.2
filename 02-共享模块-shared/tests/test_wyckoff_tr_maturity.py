@@ -304,3 +304,52 @@ def test_m_r8_related_pytest_smoke() -> None:
     assert r2.get("secondary_test_sc_signal") is True
     assert isinstance(format_cause_effect_display(r2), str)
     assert isinstance(_phase_a_box_phrase(r2), str)
+
+
+def _sc_breakdown_then_fake_st_bars() -> list[dict]:
+    """南网日线类：SC 后有效跌破未收回，再反弹；禁止把后续缩量棒当 ST。
+
+    序列：SC(low=82) → 破位(low=75, close=76<82) → AR → 假「回测」40 区上方缩量棒。
+    """
+    bars = _decline_base(14, vol=100)
+    bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC
+    bars.append(_bar(82.0, 82.5, 75.0, 76.0, 1800))  # 有效跌破未收回
+    bars.append(_bar(76.5, 87.0, 76.0, 86.0, 2000))  # AR
+    bars.append(_bar(85.0, 86.5, 81.5, 86.0, 900))   # 若未整段失败会被误认 ST
+    for _ in range(4):
+        bars.append(_bar(84.0, 84.5, 83.5, 84.0, 110))
+    return bars
+
+
+def test_m_r9_breakdown_aborts_st_no_l2() -> None:
+    """有效跌破未收回 → 禁止再认 ST；不得抬 L2/L3 / 成熟箱体 / 量度。"""
+    from trader_shared.wyckoff_events import _detect_secondary_test_sc
+
+    bars = _pad_min(_sc_breakdown_then_fake_st_bars())
+    st = _detect_secondary_test_sc(bars)
+    assert st.get("secondary_test_sc_signal") is not True
+    assert "跌破" in (st.get("secondary_test_sc_reason") or "")
+
+    result = wyckoff_analysis(bars, use_persisted_phase=False)
+    assert result.get("sc_signal") is True
+    assert result.get("secondary_test_sc_signal") is not True
+    _require_gate_fields(result)
+    assert result["tr_maturity"] in ("L0", "L1")
+    assert result["measure_allowed"] is False
+    assert result["box_display_mode"] != "box"
+    assert result.get("cause_effect_up_target") is None
+    assert not _mature_box_phrase(_phase_a_box_phrase(result))
+    assert not _mature_box_phrase(format_wyckoff_daily_phase_light(result))
+    # sc_low SSOT：保持 SC 棒低点，不被后续棒覆盖
+    assert result.get("sc_low") == result.get("sc_price")
+
+
+def test_sc_low_not_overwritten_by_st_refine() -> None:
+    """成功 ST 更低时写 sc_low_refined，顶栏 sc_low 仍为 SC 棒价。"""
+    result = wyckoff_analysis(_pad_min(_sc_ar_st_bars()), use_persisted_phase=False)
+    assert result["secondary_test_sc_signal"] is True
+    assert result["sc_low"] == 82.0
+    assert result["sc_price"] == 82.0
+    assert result.get("sc_low_refined") == 81.8 or result.get("st_sc_low") == 81.8
+    assert float(result["tr_lower"]) == 81.8
+    assert "箱体 81.80-" in _phase_a_box_phrase(result)
