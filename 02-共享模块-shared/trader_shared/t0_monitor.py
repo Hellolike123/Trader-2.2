@@ -65,9 +65,9 @@ except ImportError:
 
 from trader_shared.trader_paths import path as trader_path
 
-CACHE_DIR = Path(os.environ.get("T0_CACHE_DIR", Path.home() / ".t0-trader"))
 # Prefer registry (honors T0_TRADER_STATE_PATH / T0_CACHE_DIR / TRADER_ROOT)
 CACHE_PATH = trader_path("t0_state")
+CACHE_DIR = CACHE_PATH.parent
 COOLDOWN_MINUTES = 15
 
 BUY_TRIGGERED = "BUY_TRIGGERED"
