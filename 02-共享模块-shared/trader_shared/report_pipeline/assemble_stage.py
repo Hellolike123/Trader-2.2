@@ -90,11 +90,7 @@ def run_stage_positioning_stage(
         fib_retrace=levels.get("fib_retrace"),
         symbol=ts_code,
         trade_date=bars_date,
-        fusion_hint={
-            "action": report_fusion.get("action"),
-            "confidence": report_fusion.get("confidence", 0),
-            "weighted_score": report_fusion.get("weighted_score", 0),
-        },
+        fusion_hint=None,  # fusion 仅仪表：不微调 major_stage
         wyckoff_result=wyck_result,
         main_force_result=mf_result,
         chan_result=chan_result,

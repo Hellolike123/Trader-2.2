@@ -9,7 +9,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from trader_shared.decision_view import apply_decision_view, build_decision_view  # noqa: E402
+from trader_shared.decision_view import (  # noqa: E402
+    apply_decision_view,
+    apply_execution_caps,
+    build_decision_view,
+)
 
 
 def _report(
@@ -109,6 +113,7 @@ def test_apply_tightens_discipline_only():
 
 
 def test_apply_zeros_stale_caps_when_tightening():
+    """DV deny 后由 apply_execution_caps 单一出口清零 caps/suggested_pct。"""
     r = _report(grade="empty", execution="回踩轻仓试探")
     r["discipline"]["suggested_pct_cap"] = 30
     r["discipline"]["position_cap_pct"] = 30
@@ -118,11 +123,30 @@ def test_apply_zeros_stale_caps_when_tightening():
     v = apply_decision_view(r, tighten_discipline=True)
     assert v["applied_tighten"] is True
     assert r["discipline"]["allow_new_entry"] is False
+    apply_execution_caps(r, has_position=False)
     assert r["discipline"]["suggested_pct_cap"] == 0
     assert r["discipline"]["position_cap_pct"] == 0
     assert r["discipline"]["suggested_pct_cap_short"] == 0
     assert r["suggested_pct"] == 0
     assert r["position_info"]["suggested_pct"] == 0
+
+
+def test_apply_execution_caps_only_on_dv_deny():
+    """caps/suggested_pct 只经 apply_execution_caps 收口，非 attach 手术。"""
+    r = _report(grade="empty", execution="回踩轻仓试探")
+    r["discipline"]["suggested_pct_cap"] = 20
+    r["suggested_pct"] = 20
+    r["position_info"] = {"suggested_pct": 20}
+    apply_decision_view(r, tighten_discipline=True)
+    # DV 已收紧 allow，但尚未跑 caps
+    assert r["discipline"]["allow_new_entry"] is False
+    assert r["discipline"]["suggested_pct_cap"] == 20
+    apply_execution_caps(r, has_position=False)
+    assert r["suggested_pct"] == 0
+    assert r["discipline"]["suggested_pct_cap"] == 0
+    assert "不推荐新开" in str(r.get("suggested_pct_context") or "") or "不新开" in str(
+        r.get("suggested_pct_context") or ""
+    )
 
 
 def test_apply_does_not_loosen():

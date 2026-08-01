@@ -243,17 +243,11 @@ def attach_stage_position_pack(
     # 个股股性透视卡：历史胜率（与成本推断合并为一次 I/O，已在上面读取）
     report["win_rate_data"] = signal_win_rate
 
-    # ── 一致性仲裁：给 fusion action + suggested_pct 加持仓场景标签 ──
-    # 四个字段（theory_status / fusion.action / suggested_pct / stop）来自独立模块，
-    # 可能互斥（如 fusion 说「减仓」但 suggested_pct=0%）。
-    # 通过 holding_hint + suggested_pct_context 消除互斥语义，让 AI 事实表不再打架。
+    # ── 一致性仲裁：持仓提示只听纪律（fusion 退居仪表，不回退 fusion.action）──
     from trader_shared.stage_positioning import action_for_holding_state
 
-    # 持仓提示：纪律动作优先于 fusion.action（fusion 退居仪表）
     _disc_early = report.get("discipline") if isinstance(report.get("discipline"), dict) else {}
-    disc_action_str = str(_disc_early.get("action") or "").strip()
-    fusion_action_str = str((report_fusion or {}).get("action") or "").strip()
-    hint_action = disc_action_str or fusion_action_str
+    hint_action = str(_disc_early.get("action") or "").strip()
     holding_state = action_for_holding_state(hint_action, has_position)
     report["fusion_holding_hint"] = holding_state.get("holding_hint", "待定")
 

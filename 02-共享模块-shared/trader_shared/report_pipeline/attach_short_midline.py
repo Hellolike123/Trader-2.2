@@ -93,12 +93,9 @@ def attach_short_midline_and_decision(
             key_levels=report.get("key_levels") or {},
             take=float(report.get("take") or 0) or None,
         )
-        # 场景/融合偏空时强制「不追」，避免 RR 好看但结论打架
+        # 场景偏空时强制「不追」；fusion.action 仅仪表，不再改 chase
         _sc = str(report.get("scene") or scene or "")
-        _fa = str((report_fusion or {}).get("action") or "")
-        _force_no_chase = any(k in _sc for k in ("冲高", "减仓", "高抛", "暂不碰")) or any(
-            k in _fa for k in ("减仓", "空仓", "止损")
-        )
+        _force_no_chase = any(k in _sc for k in ("冲高", "减仓", "高抛", "暂不碰"))
         if _force_no_chase and key_prices.get("line_chase"):
             key_prices["chase_ok"] = False
             _lc = str(key_prices["line_chase"])
@@ -309,28 +306,8 @@ def attach_short_midline_and_decision(
         #       暂不接入本报告渲染。用户决策：箱体优先做独立模块，先不进报告；
         #       组合报告亦暂缓。模块与单测保留，后续如需在报告呈现再接回。
 
-        # 只收紧：禁止新开时裁 suggested_pct / 出手语义；R5 同步 position_info
+        # 出手语义：纪律 action（caps/suggested_pct 统一由 decision_view 后 apply_execution_caps 收口）
         _disc_action = str(discipline.get("action") or mistery_gate.get("action") or "观望")
-
-        # 中短仲裁：中线偏多时削弱短线的全仓止损
-        # 场景：大盘很差→-0.5默认偏斜→"空仓/止损"，但中线周线显示独立积累行情
-        # → 降级为"减1/3"，不平掉中线看好的仓位。
-        # 结构化触发：读 synthesize_midline_verdict 产出的 midline_bias（bull/bear/neutral），
-        # 不再解析阶段行文字，避免换词后静默失效。
-        _mid_positive = report.get("midline_bias") == "bull"
-        if _mid_positive and _disc_action in ("空仓/止损", "空仓 (大盘很差, 一票否决)"):
-            _disc_action = "减1/3 (中线偏多)"
-            # 同步收紧到 discipline 输出（下游消费 _disc_action）
-            discipline["action"] = _disc_action
-            if "notes" not in discipline or not discipline["notes"]:
-                discipline["notes"] = "中线偏多，短线不减至空仓，改减1/3"
-            else:
-                _n = str(discipline["notes"])
-                if "中线偏多" not in _n:
-                    discipline["notes"] = f"{_n}；中线偏多，短线不减至空仓"
-            if "rules_fired" in discipline and isinstance(discipline["rules_fired"], list):
-                discipline["rules_fired"].append("mid_bullish_downgrade")
-
         _disc_cap = discipline.get("suggested_pct_cap")
         if _disc_cap is None:
             _disc_cap = discipline.get("position_cap_pct")
@@ -338,35 +315,8 @@ def attach_short_midline_and_decision(
             _disc_cap_f = float(_disc_cap if _disc_cap is not None else 0)
         except (TypeError, ValueError):
             _disc_cap_f = 0.0
-        try:
-            _sug = float(report.get("suggested_pct") if report.get("suggested_pct") is not None else suggested or 0)
-        except (TypeError, ValueError):
-            _sug = float(suggested or 0) if suggested is not None else 0.0
-        if not discipline.get("allow_new_entry", True):
-            if has_position:
-                _final_sug = min(_sug, _disc_cap_f) if _disc_cap_f > 0 else 0
-            else:
-                _final_sug = 0
-            if _final_sug == 0:
-                if has_position:
-                    report["suggested_pct_context"] = "0%（纪律禁止加仓；持仓按减仓/观察）"
-                else:
-                    report["suggested_pct_context"] = "0%（纪律不新开）"
-        else:
-            if _disc_cap_f >= 0 and _sug > _disc_cap_f:
-                _final_sug = _disc_cap_f
-                report["suggested_pct_context"] = (
-                    f"{int(_final_sug) if _final_sug == int(_final_sug) else _final_sug}%（纪律 cap 收紧）"
-                )
-            else:
-                _final_sug = _sug
-        if isinstance(_final_sug, float) and _final_sug == int(_final_sug):
-            _final_sug = int(_final_sug)
-        report["suggested_pct"] = _final_sug
-        if isinstance(report.get("position_info"), dict):
-            report["position_info"]["suggested_pct"] = _final_sug
 
-        # 买点盖须在结论块之前：失败只收紧 discipline C1，避免结论/清单滞后
+        # 买点盖须在结论块之前：失败只收紧 discipline C1；caps 同步留给 decision stack
         try:
             apply_buy_point_lifecycle(report, mark=_mark)
             discipline = (
@@ -376,12 +326,6 @@ def attach_short_midline_and_decision(
             )
             if not discipline.get("allow_new_entry", True):
                 _disc_action = str(discipline.get("action") or _disc_action)
-                if not has_position:
-                    _final_sug = 0
-                    report["suggested_pct"] = _final_sug
-                    report["suggested_pct_context"] = "0%（纪律不新开）"
-                    if isinstance(report.get("position_info"), dict):
-                        report["position_info"]["suggested_pct"] = _final_sug
         except Exception as _bp_exc:
             _logger.debug("buy_point_lifecycle pre-conclusion: %s", _bp_exc)
 
@@ -452,11 +396,8 @@ def attach_short_midline_and_decision(
             try:
                 from trader_shared.stage_positioning import action_for_holding_state
 
-                _hint_action = str(
-                    _disc.get("action")
-                    or (report.get("fusion") or {}).get("action")
-                    or ""
-                ).strip()
+                # 持仓提示只听纪律/DV，不回退 fusion.action
+                _hint_action = str(_disc.get("action") or "").strip()
                 _hs = action_for_holding_state(_hint_action, bool(report.get("has_position")))
                 report["fusion_holding_hint"] = _hs.get(
                     "holding_hint", report.get("fusion_holding_hint", "待定")

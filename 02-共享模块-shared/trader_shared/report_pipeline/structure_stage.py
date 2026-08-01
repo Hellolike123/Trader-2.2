@@ -61,15 +61,12 @@ def run_structure_stage(
         "ma20": _quick_ma(20),
         "ma30": _quick_ma(30),
     }
+    # fusion 仅仪表：不得用 action/weighted_score 微调 major_stage / 结构位
     _pre_stage, _pre_conf, _pre_reason, _pre_vp = _detect_major_stage(
         current,
         _pre_ma,
         bars,
-        fusion_hint={
-            "action": report_fusion.get("action"),
-            "confidence": report_fusion.get("confidence", 0),
-            "weighted_score": report_fusion.get("weighted_score", 0),
-        },
+        fusion_hint=None,
         wyckoff_result=wyck_result,
         chan_result=chan_result,
         main_force_result=mf_result,
@@ -80,7 +77,7 @@ def run_structure_stage(
         bars,
         quote.get("current_change_pct"),
         quote,
-        fusion_result=report_fusion,
+        fusion_result=None,
         chan_result=chan_result,
         fetcher=fetcher,
         vp_result=vp_result,

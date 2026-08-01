@@ -521,30 +521,8 @@ def _detect_major_stage(
             confidence = mf_conf
             reason = mf_reason
 
-        # fusion_hint 微调 (不影响阶段，只做边际调整)
-        if fusion_hint:
-            ws = fusion_hint.get("weighted_score")
-            conf = fusion_hint.get("confidence", 0)
-            if ws is not None and conf is not None and conf >= 0.3:
-                try:
-                    ws_f = float(ws)
-                    if ws_f >= 0.25 and final_stage in ("蓄势", "蓄势偏弱"):
-                        # 强买入信号 → 偏积极方向微调
-                        if final_stage == "蓄势偏弱":
-                            final_stage = "蓄势"
-                        elif final_stage == "蓄势":
-                            final_stage = "蓄势偏强"
-                        confidence = min(100, confidence + 10)
-                    elif ws_f < -0.2 and final_stage in ("主升", "蓄势偏强", "蓄势"):
-                        # 强卖出信号 → 偏保守方向微调
-                        base_for_downgrade = final_stage
-                        if base_for_downgrade in ("蓄势偏强", "蓄势"):
-                            final_stage = _downgrade_stage(base_for_downgrade)
-                        elif base_for_downgrade == "主升":
-                            final_stage = "蓄势偏强"
-                        confidence = max(0, confidence - 10)
-                except (TypeError, ValueError):
-                    pass
+        # fusion_hint 已废弃：fusion 仅仪表，不得用 weighted_score 微调 major_stage
+        _ = fusion_hint
     else:
         # ── 第三步：结构兜底 — 量价启发式 ──
         final_stage = vp_stage
