@@ -272,7 +272,18 @@ Agent 展示层仍应：**不给买入建议**；文案对齐 fusion action / �
 
 ## 4. 阶段判定规则
 
-### 4.1 四阶段模型
+### 4.0 阶段字段词典（禁止混用）
+
+| 字段 | 含义 | 词表 / 用途 |
+|------|------|-------------|
+| `midline_stage` / `conclusion.stage_line` | 周线威科夫短词 | 吸筹/主升/派发/无阶段… → **面板「阶段：」** |
+| `major_stage` | 日线四阶段 | 蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退 → 门控/池软信号（**不**写面板阶段行） |
+| `short_term_momentum` | EXPMA 短期动能 | 走强/修复/震荡/转弱 |
+| `report["stage"]` | **兼容别名** | **= `short_term_momentum`**（池/旧读方）；禁止再写轻量 `determine_stage`；禁止映射成 `major_stage` |
+
+实现锚点：`trader_shared/stage_fields.py`；面板渲染见 `report_renderer/short_midline.py`。
+
+### 4.1 四阶段模型（`major_stage`）
 
 | 阶段 | 特征 | 操作建议 |
 |------|------|----------|

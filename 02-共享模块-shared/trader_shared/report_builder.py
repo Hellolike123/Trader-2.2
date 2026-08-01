@@ -224,7 +224,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     else:
         weekly_proxy_close = float(bars[0]["close"])
     monthly_proxy_close = float(bars[-STRUCTURE_WINDOW]["close"] if len(bars) >= STRUCTURE_WINDOW else bars[0]["close"])
-    stage = determine_stage(current, weekly_proxy_close, monthly_proxy_close)
+    # determine_stage 仅轻量位置分类；不再写入 report["stage"]（改别名 short_term_momentum）
     scene = levels["status"]
     base_status = str(levels.get("base_status") or scene)
     theory_status = str(levels.get("theory_status") or scene)
@@ -234,7 +234,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     low = min((to_float(b.get("low")) for b in recent20), default=current)
     analysis_time = f"{quote.get('trade_date')} {quote.get('trade_time') or ''}".strip()
 
-    state_label = state_text(stage, theory_status)
+    # state_text 实际只听 theory_status；stage 槽位占位（动能在 stage_result 后可知）
+    state_label = state_text("", theory_status)
     volume_note = volume_view(volume_text)
     market_env_data = env  # 复用并行块已抓取的大盘环境，避免重复请求
     buy_scenes = {"低吸观察", "防守观察", "等转强"}
@@ -315,6 +316,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     bars_date = _stage_pack.bars_date
     upward_momentum = _stage_pack.upward_momentum
     take = _stage_pack.take
+    # 字段纪律：report["stage"] 在 assemble 内别名 short_term_momentum
+    short_term_momentum = str((stage_result or {}).get("momentum") or "震荡")
 
     report = assemble_base_report(
         intraday_as_of=intraday_as_of,
@@ -329,7 +332,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         confirm=confirm,
         stop=stop,
         take=take,
-        stage=stage,
+        stage=short_term_momentum,  # assemble 忽略此值，改写为 stage_result.momentum
         scene=scene,
         levels=levels,
         replay=replay,
@@ -409,7 +412,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         report_fusion=report_fusion if isinstance(report_fusion, dict) else {},
         signal_win_rate=_signal_win_rate,
         signal_cost_price=float(_signal_cost_price or 0),
-        stage=str(stage or ""),
+        stage=short_term_momentum,  # attach 忽略；不得冒充 major_stage
         mark=_mark,
     )
 
@@ -431,7 +434,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         data_status=str(data_status or report.get("data_status") or ""),
         chip_resistance_lower=chip_resistance_lower,
         chip_resistance_upper=chip_resistance_upper,
-        stage=str(stage or ""),
+        stage=short_term_momentum,  # synthesize_midline_verdict 已忽略 fallback_stage
         mark=_mark,
     )
 
@@ -452,6 +455,11 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     return report
 
 def determine_stage(current: float, weekly: float, monthly: float) -> str:
+    """轻量位置分类（走强/修复/震荡/转弱）。
+
+    Deprecated for report payload：``report["stage"]`` 已别名 ``short_term_momentum``
+    （EXPMA 路径）。本函数保留给外部/对照调用，勿再写入 assemble。
+    """
     if current > weekly > monthly:
         return "走强"
     if current >= weekly and weekly <= monthly:

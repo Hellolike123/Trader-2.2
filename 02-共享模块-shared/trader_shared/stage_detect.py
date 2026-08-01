@@ -820,9 +820,9 @@ def assess_stage(
 
     Returns:
         {
-            "major_stage": str,       # 蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退
+            "major_stage": str,       # 日线四阶段：蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退
             "major_reason": str,
-            "momentum": str,          # 走强/修复/震荡/转弱
+            "momentum": str,          # short_term_momentum：走强/修复/震荡/转弱（EXPMA）
             "momentum_reason": str,
             "action": str,            # 操作建议
             "max_position_pct": int,  # 最大仓位百分比
@@ -831,6 +831,9 @@ def assess_stage(
             "protection_notes": list, # 四层防护触发说明
             "stop_losses": dict,
         }
+
+    命名纪律（非本函数产出）：面板「阶段：」= midline_stage（周线威科夫）；
+    report["stage"] 别名 short_term_momentum=momentum；勿与 major_stage 混用。
     """
     ma5 = ma_values.get("ma5")
     ma10 = ma_values.get("ma10")

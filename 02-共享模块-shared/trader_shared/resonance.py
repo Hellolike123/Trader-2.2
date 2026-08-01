@@ -17,6 +17,10 @@ _BG_HARD_NO = frozenset({
     "派发", "衰退", "派发期", "衰退期",
     "转弱", "派发·警惕",
 })
+# 中线不足：fail closed，禁止再用 major_stage=蓄势 软绿
+_BG_INSUFFICIENT = frozenset({
+    "无阶段", "不足", "数据不足", "中线数据不足",
+})
 # 仍允许讨论回踩试探的阶段（宽松，可后续收紧）
 # 含威科夫周线阶段词「吸筹」（中线阶段法源；禁靠缠论「主升初期」洗白）
 _BG_SOFT_OK = frozenset({
@@ -99,6 +103,14 @@ def _eval_background(report: dict[str, Any], cards: dict[str, Any]) -> dict[str,
         dir_i = int(dir_w) if dir_w is not None else 0
     except (TypeError, ValueError):
         dir_i = 0
+
+    # 中线「无阶段」/不足：fail closed（不得靠 major_stage=蓄势 软绿）
+    if stage_src == "midline" and (
+        stage in _BG_INSUFFICIENT
+        or stage.startswith("无阶段")
+        or any(k == stage or stage.startswith(k) for k in ("无阶段",))
+    ):
+        return _post(False, f"中线阶段 {stage or '无阶段'} 不参与背景")
 
     # 中线定论偏空 / 转弱：与报告阶段行对齐，不得再用 major_stage=蓄势洗白
     if mid_bias == "bear" or any(k in stage for k in ("转弱", "派发", "衰退")):

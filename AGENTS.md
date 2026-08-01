@@ -8,6 +8,7 @@
 - **Agent 快路径**：各 skill **只预读** `references/agent-quickstart.md` + 共用 `references/agent-rules.md`；跑脚本 → 原样贴 markdown → 停。禁止开工前批量读 references、禁止默认 `--output json`。
 - **命令 cwd**：Skill 包内用 `python3 scripts/...`；仓库根用 `python3 01-功能包-packages/<skill>/scripts/...`。仓位轮动在 **review** 包（无独立 `portfolio/` 包）。
 - **中短线双轨**：`report_core.render_short_midline`；中线关键价用 `mid_key_prices`（周线），禁止日线 `key_levels` 冒充。
+- **阶段三字段**：`midline_stage`/`stage_line`=周线威科夫（面板「阶段：」）｜`major_stage`=日线四阶段（门控/池）｜`short_term_momentum`=EXPMA 动能；`report["stage"]` **别名** `short_term_momentum`（非 major、非 determine_stage）。见 `stage_fields.py` / BUSINESS §4.0。
 - **纪律只收紧**：`mistery_gate` + `chan_discipline` → `merge_discipline`；不改 major_stage / fusion 分 / support / stop。开仓清单 C1 见 `chan_discipline.format_entry_line_c1`。
 - **方向/出手**：以 `decision_view`（共振 ∧ 策略可执行 ∧ 纪律）为准；`fusion.weighted_score` 仅仪表。不得从阶段/动能直接推断方向。
 - **Fusion override**：`FUSION_OVERRIDE_ENABLED` **默认 false**（不覆盖 theory_status）；对照旧行为再显式开。

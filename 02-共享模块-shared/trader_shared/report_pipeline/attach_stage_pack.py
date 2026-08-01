@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""四阶段仓位包挂接。"""
+"""四阶段仓位包挂接。
+
+major_stage 只认 stage_result（日线四阶段）；禁止用 determine_stage / 动能词冒充。
+"""
 from __future__ import annotations
 
 from typing import Any
@@ -33,13 +36,28 @@ def attach_stage_position_pack(
     report_fusion: dict[str, Any] | None,
     signal_win_rate: Any,
     signal_cost_price: float = 0.0,
-    stage: str = "",
+    stage: str = "",  # deprecated：忽略；勿用动能/determine_stage 填 major_stage
     mark: MarkFn | None = None,
 ) -> tuple[dict[str, Any], float, bool, int]:
     """持仓/仓位/止盈/stage 展示字段。返回 (report, cost_price, has_position, suggested)。"""
     _mark = mark or _noop_mark
     market_env_data = market_env_data if isinstance(market_env_data, dict) else {}
-    stage_result = stage_result if isinstance(stage_result, dict) else {"major_stage": stage or "蓄势", "momentum": "震荡"}
+    # 缺 stage_result 时默认蓄势/震荡；禁止 stage(走强…) 冒充 major_stage
+    _ = stage
+    if isinstance(stage_result, dict) and stage_result.get("major_stage"):
+        pass
+    else:
+        _maj = ""
+        _mom = "震荡"
+        if isinstance(report, dict):
+            _maj = str(report.get("major_stage") or "").strip()
+            _mom = str(
+                report.get("short_term_momentum") or report.get("stage") or "震荡"
+            ).strip() or "震荡"
+        stage_result = {
+            "major_stage": _maj or "蓄势",
+            "momentum": _mom,
+        }
     report_fusion = report_fusion if isinstance(report_fusion, dict) else {}
     levels = levels if isinstance(levels, dict) else {}
     bars = bars or []
@@ -201,8 +219,10 @@ def attach_stage_position_pack(
         report["effective_stop"] = stop_price
 
     # structure_note: 在 sync_report_with_data 之后计算，使用已修正的 scene
+    # stage 槽位传 short_term_momentum（兼容）；structure_view 实际只读 theory/scene
     structure_note = structure_view({
-        "current": current, "confirm": confirm, "stage": stage,
+        "current": current, "confirm": confirm,
+        "stage": str(stage_result.get("momentum") or report.get("short_term_momentum") or ""),
         "base_status": base_status, "theory_status": theory_status,
         "scene": str(report.get("scene") or scene),
     })

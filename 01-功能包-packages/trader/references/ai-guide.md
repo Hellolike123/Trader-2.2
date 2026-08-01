@@ -8,8 +8,10 @@
 | `change_pct` | float | 今日涨跌幅 % | 1.5 |
 | `name` | str | 股票名称 | 南网科技 |
 | `symbol` | str | 股票代码 | 688248.SH |
-| `major_stage` | str | 大阶段 | 蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退 |
-| `short_term_momentum` | str | 短期动能 | 走强/修复/震荡/转弱 |
+| `major_stage` | str | 日线四阶段（门控/池；非面板阶段行） | 蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退 |
+| `short_term_momentum` | str | 短期动能（EXPMA） | 走强/修复/震荡/转弱 |
+| `stage` | str | **= short_term_momentum 别名** | 走强/修复/震荡/转弱 |
+| `midline_stage` | str | 周线威科夫短词（面板「阶段：」） | 吸筹/主升/派发/无阶段… |
 | `stage_action` | str | 阶段操作建议 | 试探买/持有/减仓/不碰 |
 | `confidence` | int | 阶段置信度 0-100 | 65 |
 | `theory_status` | str | 体系结论 | 突破确认/等转强/低吸观察/暂不碰/防守观察 |
@@ -109,13 +111,13 @@
 | `macd_status.death_cross` | bool | 是否死叉 | false |
 | `macd_status.positive` | bool | MACD是否为正 | true |
 
-## 阶段定位字段（6 阶段 + 4 动能）
+## 阶段定位字段（日线四阶段 + 4 动能；面板阶段另见 midline_stage）
 
 | 字段 | 类型 | 含义 | 示例 |
 |------|------|------|------|
-| `major_stage` | str | 大阶段 | 蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退 |
+| `major_stage` | str | 日线四阶段（门控/池） | 蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退 |
 | `major_reason` | str | 阶段判定原因 | "主力:主力行为不明｜量价兜底:蓄势" |
-| `short_term_momentum` | str | 短期动能 | 走强/修复/震荡/转弱 |
+| `short_term_momentum` | str | 短期动能（`stage` 别名同源） | 走强/修复/震荡/转弱 |
 | `momentum_reason` | str | 动能判定原因 | "MACD转正，量价修复" |
 | `stage_action` | str | 阶段操作建议 | 试探买/持有/减仓/不碰 |
 | `max_position_pct` | int | 阶段最大仓位 % | 30 |
