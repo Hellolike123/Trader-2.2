@@ -10,7 +10,7 @@
 - Do not invent intraday order instructions beyond script-rendered T0 lines.
 - Do not write mi姐 / Mistery brand words in user-facing Markdown (internal field may still be `mistery_gate`).
 - Do not use R:R jargon like `2.1R` / `不足 1R`.
-- Do not put stage words (蓄势/主升/派发…) into 中线「看法」; stage only under `阶段：`.
+- Do not put stage words (蓄势/主升/派发…) into highlights/risk mashups; stage lives inside `威科夫：` only（无独立 `阶段：` 行）.
 - Do not backfill 中线 威科夫/缠论 from daily experts; mid fields only (`*_midline`).
 - Do not hand-write a full report when `--output markdown` succeeds.
 
@@ -30,9 +30,10 @@ If output contains any of these **as the main single-ticket layout**, rerun the 
 🗳️ 短线专家
 🗺 空间参考
 ✅ 先给结论
+✅ 出手
+共振： / 新开： / 动作： / 破位看：
 📏 仓位上限
-🧭 为什么
-🧭 简要分析
+🧭 中线 / ⚡ 短线（作主分区标题）
 ⏱️ T0 简版
 做T
 执行价
@@ -48,26 +49,22 @@ Valid first line must look like:
 
 ## Short-midline Layout (code order)
 
-Matches `report_renderer/short_midline.py` (`render_short_midline`):
+Matches `report_renderer/short_midline.py` (`render_short_midline`)；契约见 `output-template.md` / handoff §0.1-10：
 
 1. Title: `分析报告 — {name}（{code}）｜短中线`
-2. Meta: 现价（含 MA20/MA250）；`综合动能 … ｜ {板块指数} ±x% ｜ {行业短名} ±x% ｜ 个股 ±x%`（不写正常/偏弱/跑赢）；量价行可选量比/换手/调整天数，ATR14（含复权口径）并入同行列；年线下方警告
-3. `🧭 中线`
-   - `阶段：` ← major_stage + 可选 `· 偏多/偏空（短因）`（B3C；**无**独立 `看法：` 行）
-   - optional `定论：` ← midline_verdict_note
-   - `威科夫：` / `缠论：` ← View / `*_midline` only
-   - optional `位置：` ← pivot_position_weekly
-   - `关键价（中线）` 生命线 / 回踩区 / 压力 / 目标 ← `mid_key_prices`（周线引擎，无 🌟）
-4. `⚡ 短线`（A 版读序）
-   - `缠论：` → optional 买点 → `威科夫：`（日线只对照；禁止「日线阶段：」；箱体 lo-hi / 箱体未成形）→ optional `事件：` → `动能：` → `资金：`
-   - （空行）→ `共振：` → `新开：` → `动作：` → optional `原因：` → `破位看：`
-   - `关键价（短线）` 止损 / 买点区 / `🌟 现价` / 卖点区 + 买/追亏赚两行 ← `key_prices`
-5. optional `说明：` when mid/short conflict
-6. `✅ 亮点` / `⚠️ 风险` / optional `📌 本周只做` / `T0：…` / 入池提示
+2. `📊 价格状态`：现价（MA20/MA250）；`综合动能 … ｜ {板块指数} ±x% ｜ {行业短名}? ±x% ｜ 个股 ±x%`（不写正常/偏弱/跑赢）；量价行含 ATR14
+3. `📐 理论分析`
+   - `中线`：`威科夫：` / optional L3 下沿上沿+量度 / `缠论：` / optional 位置·筹码…
+   - `短线`：`缠论：` → optional 买点 → `威科夫：`（仅对照）→ optional L3/事件 → `动能：` → `资金：`
+4. `🎯 支撑阻力`
+   - `中线` ← `mid_key_prices`（无 🌟；已破生命线提示「已跌破」）
+   - `短线` ← `key_prices`（止损/低吸或支撑/🌟现价/卖点）+ optional 日内 T0
+5. `✅ 门禁`：`结论：` → optional `还差：` → optional `等待：` → `作废：` → optional `附：`
+6. `✅ 亮点` / `⚠️ 风险` / optional `📌 明日策略` / 入池提示
 
-## C1 Entry Line
+## C1 Entry Line（字段口径；面板并入「还差」）
 
-From `chan_discipline.build_entry_checklist` / `format_entry_line_c1`（买点盖失败时由 `attach_buy_point` 强制收紧）:
+From `chan_discipline.build_entry_checklist` / `format_entry_line_c1`（字段仍写 `entry_line`；**面板不再单独打「新开：」行**）:
 
 | Flag | Label |
 |------|----------------|
@@ -77,15 +74,15 @@ From `chan_discipline.build_entry_checklist` / `format_entry_line_c1`（买点�
 | conf_ok | 融合置信（非「方向一致」） |
 | fund_ok | 筹码资金稳 |
 
-- All five True → `新开：可试探 · 五项齐了`
-- Else → `新开：先别买 · …`（人话缺项，非旧版「否（缺：…）」模板）
-- Display is compact one line; do not expand five ticks unless debugging JSON
+- All five True → 字段 `新开：可试探 · 五项齐了`；面板可省略「还差」
+- Else → 字段 `新开：先别买 · …`；面板「还差」合并共振缺岗 + C1 缺项（去重，>5 折叠）
 
-## Discipline (动作 / 新开 / 破位看)
+## Discipline / 门禁展示
 
 - Merge: `mistery_gate` + `chan_discipline` via `merge_discipline` — **only tighten** caps/actions
 - Never rewrite major_stage / fusion scores / support / stop prices via discipline
-- User-facing: `动作` / `新开` / `破位看` / 纪律 — not mi/Mistery；**不用「出手」作主标签**
+- User-facing panel: `✅ 门禁` 的 `结论/还差/等待/作废/附` — not mi/Mistery；**不用「出手」作分区标题**
+- 等待/作废价须能在支撑阻力找到同号（已破生命线优先收回；空仓作废=破止损）
 - Mid target alone must not greenlight a buy; need short trigger + checklist
 
 ## Fixed Keywords
