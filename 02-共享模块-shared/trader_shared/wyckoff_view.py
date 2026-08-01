@@ -67,6 +67,11 @@ class WyckoffCauseEffectView(TypedDict, total=False):
     pnf_box_size: float | None
     pnf_columns: int | None
     pnf_method: str | None  # horizontal | vertical | height_1to1_fallback
+    # L0–L3 量度闸（与顶栏同名；缺省时 format 不得贴假量度）
+    tr_maturity: str
+    measure_allowed: bool
+    box_display_mode: str
+    tr_maturity_reason: str
 
 
 class WyckoffPrematureView(TypedDict, total=False):
@@ -94,6 +99,12 @@ class WyckoffStateView(TypedDict, total=False):
     event_detail: dict[str, WyckoffEventItem]
 
     cause_effect: WyckoffCauseEffectView
+
+    # L0–L3 箱体/量度成熟度（顶栏必有；见 wyckoff-tr-maturity-l0l3-handoff）
+    tr_maturity: str  # L0 | L1 | L2 | L3
+    tr_maturity_reason: str
+    measure_allowed: bool
+    box_display_mode: str  # none | proto | box
 
     bias: Bias
     invalidation_hint: str
@@ -286,6 +297,14 @@ def to_wyckoff_state_view(
         if oneline and note not in oneline and "不参与定论" not in oneline and "不抬升" not in oneline:
             oneline = f"{oneline} · {note}"
 
+    tr_maturity = str(wyk.get("tr_maturity") or "").strip().upper()
+    box_mode = str(wyk.get("box_display_mode") or "").strip().lower()
+    if "measure_allowed" in wyk:
+        measure_allowed = bool(wyk.get("measure_allowed"))
+    else:
+        measure_allowed = tr_maturity == "L3"
+    maturity_reason = str(wyk.get("tr_maturity_reason") or "")
+
     view: WyckoffStateView = {
         "schema_version": "wyckoff_state_v1",
         "symbol": str(symbol or wyk.get("symbol") or ""),
@@ -317,7 +336,15 @@ def to_wyckoff_state_view(
             "pnf_box_size": wyk.get("pnf_box_size"),
             "pnf_columns": wyk.get("pnf_columns"),
             "pnf_method": wyk.get("pnf_method"),
+            "tr_maturity": tr_maturity,
+            "measure_allowed": measure_allowed,
+            "box_display_mode": box_mode,
+            "tr_maturity_reason": maturity_reason,
         },
+        "tr_maturity": tr_maturity,
+        "tr_maturity_reason": maturity_reason,
+        "measure_allowed": measure_allowed,
+        "box_display_mode": box_mode,
         "bias": bias,
         "invalidation_hint": _invalidation_hint(wyk, bias),
         "summary_oneline": oneline,
@@ -332,19 +359,26 @@ def format_cause_effect_display(wyckoff: dict[str, Any] | None) -> str:
     规则（``docs/plans/wyckoff-tr-maturity-l0l3-handoff.md`` §2.3）：
     - 无上下目标 → 空串
     - ``measure_allowed is False`` → 空串（防御：残留目标也不展示）
+    - 缺省 ``measure_allowed`` 时：仅当顶栏/嵌套 ``tr_maturity==L3`` 才展示；否则空串
     - ``pnf_method == height_1to1_fallback`` → ``（高度1:1，非出手）``
     - 其他有目标 → ``（P&F，非出手）``
     """
     raw = _unwrap_wyckoff(wyckoff) if wyckoff else {}
     if not isinstance(raw, dict):
         return ""
-    # 兼容 view 形态：cause_effect 嵌套
+    # 兼容 view 形态：cause_effect 嵌套；优先读顶栏再嵌套
     ce = raw.get("cause_effect") if isinstance(raw.get("cause_effect"), dict) else {}
 
-    # 防御：未达 L3 即使残留目标也不展示
-    if "measure_allowed" in raw and raw.get("measure_allowed") is False:
-        return ""
-    if "measure_allowed" in ce and ce.get("measure_allowed") is False:
+    allowed: bool | None = None
+    if "measure_allowed" in raw:
+        allowed = bool(raw.get("measure_allowed"))
+    elif "measure_allowed" in ce:
+        allowed = bool(ce.get("measure_allowed"))
+    else:
+        maturity = str(raw.get("tr_maturity") or ce.get("tr_maturity") or "").strip().upper()
+        # 键缺失：不得贴假量度；仅显式 L3 放行
+        allowed = maturity == "L3"
+    if not allowed:
         return ""
 
     up = raw.get("cause_effect_up_target")

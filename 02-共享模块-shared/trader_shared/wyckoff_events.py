@@ -13,10 +13,12 @@ try:
     from trader_shared.config import (
         WYCKOFF_MIN_BARS,
         WYCKOFF_CLIMAX_ANCHOR_BARS,
+        WYCKOFF_AR_MAX_BARS,
         WYCKOFF_ST_SC_VOL_RATIO,
         WYCKOFF_ST_SC_MAX_BARS,
         WYCKOFF_ST_SC_PROXIMITY,
         WYCKOFF_ST_SC_MAX_PIERCE,
+        WYCKOFF_ST_SC_SPREAD_RATIO,
         WYCKOFF_BC_VOL_RATIO_THRESHOLD,
         WYCKOFF_BC_CHANGE_THRESHOLD,
         WYCKOFF_BC_UPPER_SHADOW_RATIO,
@@ -87,11 +89,13 @@ try:
 except ImportError:
     WYCKOFF_MIN_BARS = 15
     WYCKOFF_CLIMAX_ANCHOR_BARS = 15
+    WYCKOFF_AR_MAX_BARS = 15
     # 广义 ST 默认须与 config.py 同步（A 股放宽后）
     WYCKOFF_ST_SC_VOL_RATIO = 0.72
     WYCKOFF_ST_SC_MAX_BARS = 22
     WYCKOFF_ST_SC_PROXIMITY = 0.03
     WYCKOFF_ST_SC_MAX_PIERCE = 0.012
+    WYCKOFF_ST_SC_SPREAD_RATIO = 0.85
     WYCKOFF_BC_VOL_RATIO_THRESHOLD = 1.8  # must match config.py
     WYCKOFF_BC_CHANGE_THRESHOLD = 1.0
     WYCKOFF_BC_UPPER_SHADOW_RATIO = 0.02
@@ -215,6 +219,66 @@ def _price_pos_pct(
         # 用 high/close 较高者判定是否在高位区
         px = max(close, high if high is not None else close)
     return (px - range_lo) / span
+
+
+# 常见 A 股指数 ts_code（须带后缀时区分 000001.SH 上证 vs 000001.SZ 个股）
+_WYCKOFF_INDEX_TS_CODES = frozenset({
+    "000001.SH",  # 上证综指
+    "399001.SZ",  # 深成指
+    "399006.SZ",  # 创业板指
+    "000688.SH",  # 科创50
+    "000852.SH",  # 中证1000
+    "000300.SH",  # 沪深300
+    "000016.SH",  # 上证50
+    "399005.SZ",  # 中小100
+})
+# 无歧义裸码（不含 000001）
+_WYCKOFF_INDEX_BARE_CODES = frozenset({
+    "000852", "000688", "399001", "399006", "000300", "000016", "399005",
+})
+
+
+def resolve_wyckoff_is_index(symbol: Any = "") -> bool:
+    """识别威科夫分析标的是否为指数（用于放宽 SC 量阈，禁止软 ST 绕过）。
+
+    带 ``.SH/.SZ/.BJ`` 后缀时**只**认完整 ``ts_code`` 白名单，禁止去后缀走裸码
+    （避免 ``000300.SZ`` 维维股份、``000016.SZ`` 深康佳 误判为沪深300/上证50）。
+    """
+    if symbol is None:
+        return False
+    if hasattr(symbol, "ts_code"):
+        ts = str(getattr(symbol, "ts_code", "") or "").strip().upper()
+        if ts in _WYCKOFF_INDEX_TS_CODES:
+            return True
+        code = str(getattr(symbol, "code", "") or "").strip()
+        market = str(getattr(symbol, "market", "") or "").strip().upper()
+        if code and market:
+            digits = "".join(ch for ch in code if ch.isdigit())[-6:]
+            return f"{digits}.{market}" in _WYCKOFF_INDEX_TS_CODES
+        symbol = code or ts
+    raw = str(symbol or "").strip().upper().replace("_", ".")
+    if not raw:
+        return False
+    if raw in _WYCKOFF_INDEX_TS_CODES:
+        return True
+    # sh000001 / sz399001
+    if raw.startswith(("SH", "SZ")) and len(raw) >= 8 and "." not in raw:
+        mkt, digits = raw[:2], raw[2:]
+        if digits.isdigit():
+            return f"{digits}.{mkt}" in _WYCKOFF_INDEX_TS_CODES
+        return False
+    # 带交易所后缀：只匹配完整 ts_code，禁止 strip 后撞裸码白名单
+    if ".SH" in raw or ".SZ" in raw or ".BJ" in raw:
+        parts = raw.split(".")
+        if len(parts) >= 2:
+            digits = "".join(ch for ch in parts[0] if ch.isdigit())[-6:]
+            mkt = parts[1][:2]
+            if digits and mkt:
+                return f"{digits}.{mkt}" in _WYCKOFF_INDEX_TS_CODES
+        return False
+    # 无后缀：仅无无歧义裸码（不含 000001；000001 须带 .SH）
+    bare = "".join(ch for ch in raw if ch.isdigit())[-6:] if raw else ""
+    return bare in _WYCKOFF_INDEX_BARE_CODES
 
 
 def _sc_detector_params(timeframe: str = "daily", *, is_index: bool = False) -> dict:
@@ -1166,8 +1230,11 @@ def _detect_ar(
     bar_low = to_float(bars[sc_bar_idx].get("low"))
     sc_low = round(float(bar_low), 2) if bar_low is not None else anchor["sc_low"]
 
-    p = _sc_detector_params(timeframe, is_index=is_index)
-    rally_max = min(max(2, int(p["anchor_bars"]) // 2), len(bars) - sc_bar_idx - 1)
+    # AR 搜索上沿：WYCKOFF_AR_MAX_BARS（默认=climax 锚点）；周线半幅缩放
+    ar_limit = int(WYCKOFF_AR_MAX_BARS)
+    if str(timeframe or "").lower() == "weekly":
+        ar_limit = max(2, int(ar_limit * 0.5))
+    rally_max = min(max(2, ar_limit), len(bars) - sc_bar_idx - 1)
     for i in range(1, rally_max + 1):
         rally_bar = bars[sc_bar_idx + i]
         r_close = to_float(rally_bar.get("close"))
@@ -1221,13 +1288,19 @@ def _detect_secondary_test_sc(
 ) -> dict:
     """广义 Secondary Test — SC 后二次回测 SC 区（非 Spring Test / st_*）。
 
-    前提：已有 SC 锚点；SC 后若干根内 **low 进入 SC 区**（proximity / 允许刺穿+收回）、
-    量较 SC 明显缩小、未有效破新低。字段独立，不覆盖 spring_test_* / st_*。
+    前提：已有 SC 锚点；SC/AR 后若干根内 **low 进入 SC 区**（proximity / 允许刺穿+收回）、
+    量与波幅较 SC 明显缩小、未有效破新低。字段独立，不覆盖 spring_test_* / st_*。
+
+    测试窗（phase-a §4.4.1）：有 ``ar_bar_idx`` 则从 AR+3 起扫，无 AR 从 SC+3；
+    破位扫描仍从 SC+1。回测锚 ``sc_low`` 以 ``_find_sc_anchor`` 为准（SSOT），
+    不用外部偏高种子价。
 
     禁止软确认（handoff §1.3）：价格一直站在 sc_low 上方、从未回测 SC 区 →
     不得返回 ``secondary_test_sc_signal=True``。
+
+    有效跌破（handoff §1.3）：超允许刺穿且收盘不收回 → **Phase A 失败**，
+    整段不得再认后续 ST（禁止 ``continue`` 跳过破位棒后另找假 ST）。
     """
-    del phase_a_range  # 回测锚以 _find_sc_anchor 的 sc_low 为准（SSOT），不用外部偏高种子
     p = _sc_detector_params(timeframe, is_index=is_index)
     if len(bars) < int(p["support_lookback"]) + 2:
         return _st_sc_empty("数据不足")
@@ -1237,31 +1310,70 @@ def _detect_secondary_test_sc(
         return _st_sc_empty()
 
     sc_bar_idx = int(anchor["sc_bar_idx"])
-    # SC low SSOT：回测锚 = SC 棒最低价（与 _find_sc_anchor 同源；禁止 close）
+    # SC low SSOT：回测锚 = SC 棒最低价（与 _find_sc_anchor 同源；禁止 close / 外部偏高种子）
     bar_low = to_float(bars[sc_bar_idx].get("low"))
     sc_low = round(float(bar_low), 2) if bar_low is not None else anchor.get("sc_low")
     sc_vol = to_float(bars[sc_bar_idx].get("volume")) or anchor.get("sc_avg_vol") or 0
+    sc_high = to_float(bars[sc_bar_idx].get("high"))
     if sc_vol <= 0 or sc_low is None:
         return _st_sc_empty("SC 量能数据异常")
+    sc_spread = None
+    if sc_high is not None and sc_high > sc_low:
+        sc_spread = float(sc_high) - float(sc_low)
 
-    max_after = min(WYCKOFF_ST_SC_MAX_BARS, len(bars) - sc_bar_idx - 1)
-    if max_after < 1:
+    # ST 候选窗：phase-a §4.4.1「SC/AR 后 3…LOOKBACK」；有 AR 以 AR 为锚，否则 SC
+    # 破位扫描仍从 SC+1（整段 Phase A，含 AR 前跌破）
+    st_anchor = sc_bar_idx
+    pa = phase_a_range if isinstance(phase_a_range, dict) else None
+    if pa is not None and pa.get("ar_bar_idx") is not None:
+        try:
+            ar_i = int(pa["ar_bar_idx"])
+            if ar_i >= sc_bar_idx:
+                st_anchor = ar_i
+        except (TypeError, ValueError):
+            pass
+    st_scan_start = int(st_anchor) + 3
+
+    st_scan_end = min(len(bars), st_scan_start + int(WYCKOFF_ST_SC_MAX_BARS))
+    # 破位扫描须覆盖 SC→AR 前 + ST 窗，避免漏掉 AR 前有效跌破
+    fail_scan_end = min(
+        len(bars),
+        max(st_scan_end, sc_bar_idx + 1 + int(WYCKOFF_ST_SC_MAX_BARS)),
+    )
+    if fail_scan_end <= sc_bar_idx + 1:
         return _st_sc_empty("SC 后无足够 K 线")
 
     zone_upper = sc_low * (1.0 + WYCKOFF_ST_SC_PROXIMITY)
     pierce_floor = sc_low * (1.0 - WYCKOFF_ST_SC_MAX_PIERCE)
+    spread_cap = (
+        sc_spread * float(WYCKOFF_ST_SC_SPREAD_RATIO)
+        if sc_spread is not None and sc_spread > 0
+        else None
+    )
 
     best_low: float | None = None
     best_vol: float | None = None
     best_close: float | None = None
     best_idx: int | None = None
     saw_soft_above = False  # 曾有棒站在 SC 区上方（软确认候选，一律否决）
-    for i in range(sc_bar_idx + 1, sc_bar_idx + max_after + 1):
+    saw_wide_spread = False
+    for i in range(sc_bar_idx + 1, fail_scan_end):
         bar = bars[i]
         t_low = to_float(bar.get("low"))
+        t_high = to_float(bar.get("high"))
         t_close = to_float(bar.get("close"))
         t_vol = to_float(bar.get("volume"))
         if t_low is None or t_vol is None:
+            continue
+
+        # 有效跌破（超允许刺穿且收盘不收回）→ Phase A 失败，禁止再认后续 ST
+        # （含 AR 前破位；不得跳过破位棒后另找假 ST）
+        pierce = t_low < pierce_floor
+        if pierce and (t_close is None or t_close < sc_low):
+            return _st_sc_empty("SC 后有效跌破未收回（Phase A 失败，禁止再认 ST）")
+
+        # AR 前的棒只做破位扫描，不认 ST
+        if i < st_scan_start or i >= st_scan_end:
             continue
 
         # 禁止软确认：low 必须进入 SC 区；一直站在上方不算 ST
@@ -1269,13 +1381,15 @@ def _detect_secondary_test_sc(
             saw_soft_above = True
             continue
 
-        # 有效跌破（超允许刺穿且收盘不收回）→ 失败，不算成功 ST
-        pierce = t_low < pierce_floor
-        if pierce and (t_close is None or t_close < sc_low):
-            continue
-
         if t_vol >= sc_vol * WYCKOFF_ST_SC_VOL_RATIO:
             continue
+
+        # L2：ST 波幅须明显弱于 SC；过宽不算 ST
+        if spread_cap is not None and t_high is not None:
+            t_spread = float(t_high) - float(t_low)
+            if t_spread > spread_cap:
+                saw_wide_spread = True
+                continue
 
         if best_low is None or t_low < best_low:
             best_low = t_low
@@ -1284,9 +1398,13 @@ def _detect_secondary_test_sc(
             best_idx = i
 
     if best_low is None:
+        if saw_wide_spread:
+            return _st_sc_empty(
+                f"SC 后回测波幅未弱于 SC（须≤{float(WYCKOFF_ST_SC_SPREAD_RATIO):.0%} SC 波幅）"
+            )
         if saw_soft_above:
             return _st_sc_empty("SC 后价格未回测 SC 区（禁止软确认）")
-        return _st_sc_empty("SC 后未检测到有效二次测试（须回测 SC 区且缩量）")
+        return _st_sc_empty("SC 后未检测到有效二次测试（须回测 SC 区且量/波幅弱于 SC）")
 
     vol_pct = (best_vol / sc_vol * 100) if best_vol and sc_vol else 0
     return {
