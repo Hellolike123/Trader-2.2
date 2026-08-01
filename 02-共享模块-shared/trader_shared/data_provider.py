@@ -354,8 +354,10 @@ class UnifiedProvider:
         # 与 Tushare/light_data 统一：日 scoped + {fetch_date, rows}，禁止裸 list 脏读
         from trader_shared.cache_utils import (
             CACHE_DAILY,
+            cache_calendar_date,
             daily_bars_cache_target,
             get_day_scoped_bars,
+            set_cached,
         )
 
         self._ensure_http()
@@ -365,16 +367,72 @@ class UnifiedProvider:
         ld_sec = self._to_sec(sec)
         # tencent/mootdx 均走 light_data 前复权路径；缓存按 provider+adjust 分桶
         cache_provider = "mootdx" if self._backend == "mootdx" else "tencent"
-        cache_target = daily_bars_cache_target(
+        qfq_target = daily_bars_cache_target(
             sec.code, provider=cache_provider, adjust="qfq"
         )
+        none_target = daily_bars_cache_target(
+            sec.code, provider=cache_provider, adjust="none"
+        )
+        min_rows = min(20, max(days, 1))
+        # light_data 在腾讯仅返回 day（未复权）时仍可能给出可用 bars；
+        # 不得经 get_day_scoped_bars 写入 */qfq/* 桶。
+        unadj_holder: list[list] = []
+
+        def _persist_none(bars: list) -> list:
+            if len(bars) < min_rows:
+                return bars
+            try:
+                from trader_shared.light_data import ensure_bars_ascending
+
+                fixed, _ = ensure_bars_ascending(bars)
+                set_cached(
+                    CACHE_DAILY,
+                    none_target,
+                    {"fetch_date": cache_calendar_date(), "rows": fixed},
+                )
+                return list(fixed)
+            except (OSError, ImportError, TypeError, ValueError) as exc:
+                _logger.debug(
+                    "unadjusted daily cache write failed %s: %s", none_target, exc
+                )
+                return bars
 
         def _net() -> list:
-            return list(_fetch(ld_sec, http, days=days) or [])
+            bars = list(_fetch(ld_sec, http, days=days) or [])
+            if not bars:
+                return []
+            if _daily_bars_look_qfq(bars):
+                return bars
+            unadj_holder.append(_persist_none(bars))
+            return []
 
-        return get_day_scoped_bars(
-            CACHE_DAILY, cache_target, _net, min_rows=min(20, max(days, 1))
+        out = get_day_scoped_bars(
+            CACHE_DAILY, qfq_target, _net, min_rows=min_rows
         )
+        if out and _daily_bars_look_qfq(out):
+            return out
+        if unadj_holder:
+            return list(unadj_holder[0])
+        # 旧污染：qfq 桶里已是未复权 → 丢弃缓存命中，直拉并写入正确桶
+        if out and not _daily_bars_look_qfq(out):
+            direct = list(_fetch(ld_sec, http, days=days) or [])
+            if direct and _daily_bars_look_qfq(direct):
+                try:
+                    from trader_shared.light_data import ensure_bars_ascending
+
+                    fixed, _ = ensure_bars_ascending(direct)
+                    set_cached(
+                        CACHE_DAILY,
+                        qfq_target,
+                        {"fetch_date": cache_calendar_date(), "rows": fixed},
+                    )
+                    return list(fixed)
+                except (OSError, ImportError, TypeError, ValueError):
+                    return direct
+            if direct:
+                return _persist_none(direct)
+            return []
+        return list(out) if out else []
 
     def fetch_5m(self, sec: Security, datalen: int = 60) -> list[dict[str, Any]]:
         if self._backend == "akshare":

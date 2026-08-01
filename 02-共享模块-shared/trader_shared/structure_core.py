@@ -50,10 +50,18 @@ def save_trailing_watermark(symbol: str, value: float, path: Path | None = None)
                 if store.exists():
                     try:
                         raw = json.loads(store.read_text(encoding="utf-8") or "{}")
-                        if isinstance(raw, dict):
-                            data = raw
-                    except (json.JSONDecodeError, OSError):
-                        data = {}
+                    except (json.JSONDecodeError, OSError) as exc:
+                        # 损坏时禁止用单票 payload 覆盖整文件（会抹掉其它持仓水位）
+                        _logger.debug(
+                            "trailing watermark unreadable, skip save: %s", exc
+                        )
+                        return
+                    if not isinstance(raw, dict):
+                        _logger.debug(
+                            "trailing watermark not a dict, skip save: %s", store
+                        )
+                        return
+                    data = raw
                 prev = to_float(
                     (data.get(sym) or {}).get("trailing_stop")
                     if isinstance(data.get(sym), dict)

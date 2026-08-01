@@ -215,6 +215,15 @@ class TestTrailingStop:
         save_trailing_watermark("600000.SH", 11.0, path=store)  # 不得回松
         assert load_trailing_watermark("600000.SH", path=store) == 11.5
 
+    def test_trailing_stop_watermark_corrupt_does_not_wipe(self, tmp_path):
+        """损坏 JSON 时跳过写入，不得用单票覆盖抹掉其它水位。"""
+        from trader_shared.structure_core import save_trailing_watermark
+
+        store = tmp_path / "trailing_stop_watermark.json"
+        store.write_text("{not-json", encoding="utf-8")
+        save_trailing_watermark("600000.SH", 12.0, path=store)
+        assert store.read_text(encoding="utf-8") == "{not-json"
+
 
 # ── find_key_levels (P0-4) ──────────────────────────────────────────
 
