@@ -1,35 +1,35 @@
 # -*- coding: utf-8 -*-
-"""融合阶段。"""
+"""融合阶段：预产卡（早）与 merge/仪表（晚）。
+
+法源：docs/designs/resonance-and-orchestration.md §6 阶段5；
+BUSINESS.md §2.7（fusion 仅仪表）。merge 在 stage_pack 之后、
+attach_short_midline 之前挂接；禁止挪到 decision_view 之后（A2 不做）。
+"""
 from __future__ import annotations
 
 from typing import Any
 
 from trader_shared.report_pipeline._common import MarkFn, _noop_mark, _logger
+from trader_shared.report_pipeline.prelude import tag_fusion_as_instrument
 
-def run_fusion_stage(
+
+def run_pre_cards_stage(
     *,
     chan_result: dict[str, Any],
     momentum_result: dict[str, Any],
     wyck_result: dict[str, Any],
     bars: list,
-    env: dict[str, Any],
     quote: dict[str, Any],
-    current: float,
-    main_force_env: str,
-    fetcher: Any,
-    data_status: str,
     fund_flow_features: dict[str, Any] | None,
     snapshot: Any,
     target: str,
     sector_data: dict[str, Any] | None,
     mark: MarkFn | None = None,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None]:
-    """融合阶段：预产分析卡 → merge_decisions → fusion_verbatim。
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """预产分析卡 + 量价警告 + 板块相对标注。
 
-    自 build_report 抽出；返回 (report_fusion, pre_cards, volume_warning)。
+    返回 (pre_cards, volume_warning)。不调用 merge_decisions。
     """
-    import traceback
-
     _mark = mark or _noop_mark
     volume_warning: dict[str, Any] | None = None
     try:
@@ -93,50 +93,12 @@ def run_fusion_stage(
         _logger.debug("pre-fusion analysis_cards skip: %s", _pc_exc)
         _pre_cards = {}
 
-    try:
-        from trader_shared.fusion_core import merge_decisions
+    _mark("pre_cards")
+    return _pre_cards, volume_warning
 
-        report_fusion = merge_decisions(
-            chan_result=chan_result,
-            momentum_result=momentum_result,
-            wyckoff_result=wyck_result,
-            regime=env.get("level", "正常"),
-            current_price=current,
-            bars=bars,
-            hmm_regime=env.get("hmm_regime_en", "range"),
-            main_force_env=main_force_env,
-            fetcher=fetcher,
-            data_status=data_status,
-            volume_warning=volume_warning,
-            fund_flow_data=fund_flow_features,
-            current_change_pct=_stock_chg_pct,
-            extend_fundamental=getattr(snapshot, "extend_fundamental", None),
-            extend_sentiment=getattr(snapshot, "extend_sentiment", None),
-            extend_sector=getattr(snapshot, "extend_sector", None),
-            extend_concept=getattr(snapshot, "extend_concept", None),
-            extend_northbound=getattr(snapshot, "extend_northbound", None),
-            extend_margin=getattr(snapshot, "extend_margin", None),
-            analysis_cards=_pre_cards or None,
-        )
-    except Exception:
-        _sec = getattr(snapshot, "security", None)
-        _logger.warning(
-            "merge_decisions 崩溃 (data_status=%s, symbol=%s):\n%s",
-            data_status,
-            getattr(_sec, "ts_code", None) or "?",
-            traceback.format_exc(),
-        )
-        report_fusion = {
-            "action": "融合层异常",
-            "confidence": 0,
-            "weighted_score": 0,
-            "regime": "",
-            "hmm_regime": "range",
-            "disagreement": 0,
-            "signals_detail": {},
-            "weights_used": {},
-        }
 
+def _attach_fusion_verbatim(report_fusion: dict[str, Any]) -> None:
+    """为人读仪表写 fusion_verbatim（不改分数/动作）。"""
     try:
         _ws = float(report_fusion.get("weighted_score") or 0)
         _conf = float(report_fusion.get("confidence") or 0)
@@ -195,7 +157,132 @@ def run_fusion_stage(
     except Exception:
         report_fusion["fusion_verbatim"] = "🎯 数据异常"
 
+
+def run_fusion_merge_stage(
+    *,
+    chan_result: dict[str, Any],
+    momentum_result: dict[str, Any],
+    wyck_result: dict[str, Any],
+    bars: list,
+    env: dict[str, Any],
+    quote: dict[str, Any],
+    current: float,
+    main_force_env: str,
+    fetcher: Any,
+    data_status: str,
+    fund_flow_features: dict[str, Any] | None,
+    snapshot: Any,
+    volume_warning: dict[str, Any] | None,
+    analysis_cards: dict[str, Any] | None,
+    mark: MarkFn | None = None,
+) -> dict[str, Any]:
+    """merge_decisions + verbatim + tag instrument。
+
+    挂接点：stage_pack 之后、attach_short_midline 之前。
+    返回已标 product_role=instrument 的 fusion dict。
+    """
+    import traceback
+
+    _mark = mark or _noop_mark
+    _stock_chg_pct = float(quote.get("current_change_pct") or 0)
+    _pre_cards = analysis_cards if isinstance(analysis_cards, dict) else {}
+
+    try:
+        from trader_shared.fusion_core import merge_decisions
+
+        report_fusion = merge_decisions(
+            chan_result=chan_result,
+            momentum_result=momentum_result,
+            wyckoff_result=wyck_result,
+            regime=env.get("level", "正常"),
+            current_price=current,
+            bars=bars,
+            hmm_regime=env.get("hmm_regime_en", "range"),
+            main_force_env=main_force_env,
+            fetcher=fetcher,
+            data_status=data_status,
+            volume_warning=volume_warning,
+            fund_flow_data=fund_flow_features,
+            current_change_pct=_stock_chg_pct,
+            extend_fundamental=getattr(snapshot, "extend_fundamental", None),
+            extend_sentiment=getattr(snapshot, "extend_sentiment", None),
+            extend_sector=getattr(snapshot, "extend_sector", None),
+            extend_concept=getattr(snapshot, "extend_concept", None),
+            extend_northbound=getattr(snapshot, "extend_northbound", None),
+            extend_margin=getattr(snapshot, "extend_margin", None),
+            analysis_cards=_pre_cards or None,
+        )
+    except Exception:
+        _sec = getattr(snapshot, "security", None)
+        _logger.warning(
+            "merge_decisions 崩溃 (data_status=%s, symbol=%s):\n%s",
+            data_status,
+            getattr(_sec, "ts_code", None) or "?",
+            traceback.format_exc(),
+        )
+        report_fusion = {
+            "action": "融合层异常",
+            "confidence": 0,
+            "weighted_score": 0,
+            "regime": "",
+            "hmm_regime": "range",
+            "disagreement": 0,
+            "signals_detail": {},
+            "weights_used": {},
+        }
+
+    _attach_fusion_verbatim(report_fusion)
+    report_fusion = tag_fusion_as_instrument(report_fusion)
     _mark("fusion")
-    return report_fusion, _pre_cards, volume_warning
+    return report_fusion
 
 
+def run_fusion_stage(
+    *,
+    chan_result: dict[str, Any],
+    momentum_result: dict[str, Any],
+    wyck_result: dict[str, Any],
+    bars: list,
+    env: dict[str, Any],
+    quote: dict[str, Any],
+    current: float,
+    main_force_env: str,
+    fetcher: Any,
+    data_status: str,
+    fund_flow_features: dict[str, Any] | None,
+    snapshot: Any,
+    target: str,
+    sector_data: dict[str, Any] | None,
+    mark: MarkFn | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None]:
+    """兼容旧调用方：pre_cards → merge，返回 (fusion, pre_cards, volume_warning)。"""
+    pre_cards, volume_warning = run_pre_cards_stage(
+        chan_result=chan_result,
+        momentum_result=momentum_result,
+        wyck_result=wyck_result,
+        bars=bars,
+        quote=quote,
+        fund_flow_features=fund_flow_features,
+        snapshot=snapshot,
+        target=target,
+        sector_data=sector_data,
+        mark=mark,
+    )
+    report_fusion = run_fusion_merge_stage(
+        chan_result=chan_result,
+        momentum_result=momentum_result,
+        wyck_result=wyck_result,
+        bars=bars,
+        env=env,
+        quote=quote,
+        current=current,
+        main_force_env=main_force_env,
+        fetcher=fetcher,
+        data_status=data_status,
+        fund_flow_features=fund_flow_features,
+        snapshot=snapshot,
+        volume_warning=volume_warning,
+        analysis_cards=pre_cards,
+        mark=mark,
+    )
+    return report_fusion, pre_cards, volume_warning

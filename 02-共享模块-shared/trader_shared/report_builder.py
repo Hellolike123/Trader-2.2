@@ -92,7 +92,8 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         attach_stage_position_pack,
         run_analysis_context_stage,
         run_chip_enrichment_stage,
-        run_fusion_stage,
+        run_fusion_merge_stage,
+        run_pre_cards_stage,
         run_stage_positioning_stage,
         run_structure_stage,
     )
@@ -163,18 +164,14 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     ctx.atr_adjust = ctx.get("atr_adjust") or "unknown"
     ctx.atr_data_source = ctx.get("atr_data_source") or ""
 
-    # === 融合层（延期更晚 relocate — 架构 #5 非 P0）===
-    report_fusion, pre_cards, volume_warning = run_fusion_stage(
+    # === 预产分析卡（早；merge 在 stage_pack 后）===
+    # 法源：resonance-and-orchestration.md §6 #5 — pre_cards early; merge after stage_pack
+    pre_cards, volume_warning = run_pre_cards_stage(
         chan_result=ctx.chan_result,
         momentum_result=ctx.momentum_result,
         wyck_result=ctx.wyck_result,
         bars=ctx.bars,
-        env=ctx.env,
         quote=ctx.quote,
-        current=ctx.current,
-        main_force_env=ctx.main_force_env,
-        fetcher=ctx.fetcher,
-        data_status=ctx.data_status,
         fund_flow_features=ctx.fund_flow_features,
         snapshot=ctx.snapshot,
         target=ctx.target,
@@ -182,9 +179,9 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         mark=_mark,
     )
     ctx.update(
-        report_fusion=report_fusion,
         fusion_pre_cards=pre_cards or {},
         volume_warning=volume_warning,
+        report_fusion=None,  # merge 前无仪表
     )
 
     # === 结构层 ===
@@ -201,12 +198,12 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             or None
         )
     # signal_cost_price 胜率仍用；不得驱动 watermark
+    # structure/chip/stage 不消费 fusion（仪表）
     levels, big_order_result, pre_stage = run_structure_stage(
         current=ctx.current,
         bars=ctx.bars,
         bars_5m=ctx.bars_5m,
         quote=ctx.quote,
-        report_fusion=ctx.report_fusion,
         chan_result=ctx.chan_result,
         wyck_result=ctx.wyck_result,
         momentum_result=ctx.momentum_result,
@@ -283,7 +280,6 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             mf_result=ctx.mf_result,
             big_order_result=ctx.big_order_result,
             levels=ctx.levels,
-            report_fusion=ctx.report_fusion,
             provider=ctx.provider,
             snapshot=ctx.snapshot,
             mark=_mark,
@@ -302,7 +298,6 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             chip_support_lower=ctx.chip_support_lower,
             chip_resistance_lower=ctx.chip_resistance_lower,
             chip_resistance_upper=ctx.chip_resistance_upper,
-            report_fusion=ctx.report_fusion,
             wyck_result=ctx.wyck_result,
             mf_result=ctx.mf_result,
             chan_result=ctx.chan_result,
@@ -367,7 +362,6 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
             "chip_support_upper",
             "chip_resistance_lower",
             "chip_resistance_upper",
-            "report_fusion",
             "main_force_score_result",
             "big_order_result",
             "stage_result",
@@ -388,6 +382,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     )
     # context 降级覆盖 assemble 从 frozen snapshot 抄来的 data_status
     report["data_status"] = ctx.data_status
+    # assemble 写 _fusion_pre_cards；fusion 占位，merge 后覆写
 
     report, cost_price, has_position, suggested = attach_stage_position_pack(
         report,
@@ -408,7 +403,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         base_status=str(ctx.base_status or ""),
         theory_status=str(ctx.theory_status or ""),
         scene=str(ctx.scene or ""),
-        report_fusion=ctx.report_fusion if isinstance(ctx.report_fusion, dict) else {},
+        report_fusion=None,  # 死参；merge 在 stage_pack 之后
         signal_win_rate=ctx.signal_win_rate,
         signal_cost_price=float(ctx.signal_cost_price or 0),
         stage=str(ctx.short_term_momentum or ""),
@@ -420,12 +415,33 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         suggested=suggested,
     )
 
-    # 短中线 + 决策栈
+    # === 融合仪表 merge（stage_pack 后、短中线/决策栈前；不做 A2）===
+    report_fusion = run_fusion_merge_stage(
+        chan_result=ctx.chan_result,
+        momentum_result=ctx.momentum_result,
+        wyck_result=ctx.wyck_result,
+        bars=ctx.bars,
+        env=ctx.env if isinstance(ctx.env, dict) else {},
+        quote=ctx.quote,
+        current=float(ctx.current or 0),
+        main_force_env=ctx.main_force_env,
+        fetcher=ctx.fetcher,
+        data_status=str(ctx.data_status or ""),
+        fund_flow_features=ctx.fund_flow_features,
+        snapshot=ctx.snapshot,
+        volume_warning=ctx.volume_warning,
+        analysis_cards=ctx.fusion_pre_cards if isinstance(ctx.fusion_pre_cards, dict) else {},
+        mark=_mark,
+    )
+    report["fusion"] = report_fusion
+    ctx.update(report_fusion=report_fusion)
+
+    # 短中线 + 决策栈（纪律/策略仍见完整 fusion 仪表）
     attach_short_midline_and_decision(
         report,
         current=ctx.current,
         scene=str(ctx.scene or ""),
-        report_fusion=ctx.report_fusion if isinstance(ctx.report_fusion, dict) else {},
+        report_fusion=report_fusion,
         stage_result=ctx.stage_result,
         weekly_bars=ctx.weekly_bars or [],
         suggested=ctx.suggested,

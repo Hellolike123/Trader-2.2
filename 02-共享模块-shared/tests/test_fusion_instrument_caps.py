@@ -92,7 +92,48 @@ def test_structure_stage_omits_fusion_hint_and_result():
     ).read_text(encoding="utf-8")
     assert "fusion_hint=None" in src
     assert "fusion_result=None" in src
+    assert "report_fusion" not in src
     assert '"weighted_score": report_fusion.get("weighted_score"' not in src
+
+
+def test_builder_pre_cards_early_merge_after_stage_pack():
+    """A1：pre_cards 早；merge 在 stage_pack 后、short_midline 前；不做 A2。"""
+    src = Path(ROOT / "trader_shared/report_builder.py").read_text(encoding="utf-8")
+    # 只看 build_report 函数体（避开顶部 import）
+    body = src.split("def build_report", 1)[1]
+    assert "run_pre_cards_stage(" in body
+    assert "run_fusion_merge_stage(" in body
+    i_pre = body.index("run_pre_cards_stage(")
+    i_struct = body.index("run_structure_stage(")
+    i_pack = body.index("attach_stage_position_pack(")
+    i_merge = body.index("run_fusion_merge_stage(")
+    i_sm = body.index("attach_short_midline_and_decision(")
+    assert i_pre < i_struct < i_pack < i_merge < i_sm
+
+
+def test_fusion_merge_stage_tags_instrument():
+    """merge 出口带 product_role=instrument。"""
+    from trader_shared.report_pipeline.fusion_stage import run_fusion_merge_stage
+
+    fusion = run_fusion_merge_stage(
+        chan_result={},
+        momentum_result={},
+        wyck_result={},
+        bars=[],
+        env={"level": "正常", "hmm_regime_en": "range"},
+        quote={"current_change_pct": 0},
+        current=10.0,
+        main_force_env="unknown",
+        fetcher=None,
+        data_status="full",
+        fund_flow_features=None,
+        snapshot=type("S", (), {})(),
+        volume_warning=None,
+        analysis_cards={},
+    )
+    assert isinstance(fusion, dict)
+    assert fusion.get("product_role") == "instrument"
+    assert "fusion_verbatim" in fusion
 
 
 def test_assemble_stage_omits_fusion_hint():

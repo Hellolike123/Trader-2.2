@@ -21,14 +21,14 @@ def run_chip_enrichment_stage(
     mf_result: dict[str, Any] | None,
     big_order_result: dict[str, Any],
     levels: dict[str, Any],
-    report_fusion: dict[str, Any],
     provider: Any = None,
     snapshot: Any = None,
     mark: MarkFn | None = None,
 ) -> dict[str, Any]:
-    """筹码 + 主力评分 + EXPMA + 多周期共振，并回写 levels / fusion 置信。
+    """筹码 + 主力评分 + EXPMA + 多周期共振，并回写 levels。
 
     自 build_report 抽出；返回 enrichment dict（chip_* / expma_* / resonance_result 等）。
+    不消费 / 不改写 fusion（仪表在 stage_pack 后 merge）。
     """
     from trader_shared.chip_core import analyze_chips_and_migration
     from trader_shared.indicator_math import aggregate_5m_to_60m, calc_expma_series

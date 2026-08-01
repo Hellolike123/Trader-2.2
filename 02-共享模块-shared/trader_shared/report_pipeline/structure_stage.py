@@ -12,7 +12,6 @@ def run_structure_stage(
     bars: list,
     bars_5m: list | None,
     quote: dict[str, Any],
-    report_fusion: dict[str, Any],
     chan_result: dict[str, Any],
     wyck_result: dict[str, Any],
     momentum_result: dict[str, Any],

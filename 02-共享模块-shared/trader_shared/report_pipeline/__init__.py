@@ -18,7 +18,11 @@ from trader_shared.report_pipeline.attach import (
     attach_stage_position_pack,
     sync_report_with_data,
 )
-from trader_shared.report_pipeline.fusion_stage import run_fusion_stage
+from trader_shared.report_pipeline.fusion_stage import (
+    run_fusion_merge_stage,
+    run_fusion_stage,
+    run_pre_cards_stage,
+)
 from trader_shared.report_pipeline.structure_stage import run_structure_stage
 from trader_shared.report_pipeline.chip_stage import run_chip_enrichment_stage
 from trader_shared.report_pipeline.assemble_stage import (
@@ -42,6 +46,8 @@ __all__ = [
     "sync_report_with_data",
     "attach_stage_position_pack",
     "run_fusion_stage",
+    "run_pre_cards_stage",
+    "run_fusion_merge_stage",
     "run_structure_stage",
     "run_chip_enrichment_stage",
     "_calc_volume_ratio_from_bars",
