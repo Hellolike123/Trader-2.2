@@ -1639,13 +1639,16 @@ class TestPhaseARangeP2:
         return bars
 
     def _nanwang_with_st_bars(self) -> list[dict]:
-        """SC + 缩量二次测试 + AR（established + secondary ST）。"""
+        """SC + AR + 缩量二次测试（established + secondary ST；ST 在 AR 后）。
+
+        ST 用收复阳线，避免近端阴线被误锚为新 SC。
+        """
         bars = self._decline_base(14, vol=100)
         bars.append(_make_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC low=82
-        bars.append(_make_bar(83.0, 83.4, 81.8, 82.5, 800))   # ST: 近 sc_low, 量缩
-        for i in range(3):
-            bars.append(_make_bar(82.6 + i * 0.1, 83.0 + i * 0.1, 82.4 + i * 0.1, 82.7 + i * 0.1, 120))
-        bars.append(_make_bar(83.0, 87.0, 82.8, 86.0, 130))   # AR
+        bars.append(_make_bar(83.5, 87.0, 85.0, 86.0, 400))   # AR
+        bars.append(_make_bar(82.2, 83.2, 81.8, 82.9, 800))   # ST after AR（阳线）
+        for _ in range(3):
+            bars.append(_make_bar(85.0, 85.4, 84.8, 85.1, 120))
         return bars
 
     def _forming_good_tr_bars(self) -> list[dict]:
@@ -1717,13 +1720,17 @@ class TestPhaseARangeP2:
         assert float(result.get("tr_quality") or 0) >= 0.35
 
     def test_p2_established_seed_overlays_tr_bounds(self):
-        bars = self._nanwang_like_bars()
+        """L2（SC+AR+ST）才写成熟种子箱 overlay；仅 SC+AR=L1 不放出 tr_lower/upper。"""
+        bars = self._nanwang_with_st_bars()
         while len(bars) < 25:
             bars.insert(0, _make_bar(90.0, 91.0, 89.0, 90.0, 100))
         result = wyckoff_analysis(bars, use_persisted_phase=False)
         assert result["phase_a_status"] == "established"
-        assert result["tr_lower"] == result["sc_low"]
+        assert result.get("secondary_test_sc_signal") is True
+        assert result.get("tr_maturity") in ("L2", "L3")
+        assert result["tr_lower"] == min(float(result["sc_low"]), float(result["st_sc_low"]))
         assert result["tr_upper"] == result["ar_high"]
+        assert result.get("tr_seed_source") == "phase_a_seed"
         assert result.get("phase_tr_gated") is not True
 
     def test_p2_established_low_percentile_tr_not_gated(self):

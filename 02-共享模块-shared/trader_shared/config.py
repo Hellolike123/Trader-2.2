@@ -150,13 +150,18 @@ TREND_MA_LOOKBACK: int = 300  # 至少取 300 天数据才能算出可靠的 MA2
 WYCKOFF_MIN_BARS: int = 15
 # SC/AR（及对称 BC/ARE）锚点搜索上限；仅搜索/超时，不定义 TR 周期
 WYCKOFF_CLIMAX_ANCHOR_BARS: int = 15
-# 广义 ST（Secondary Test of SC）：SC 后回测 SC 区，量须明显低于 SC 棒。
+# AR 搜索上沿（SC 后最多扫几根）；默认 = climax 锚点窗，env 可覆。
+# 旧实现用 anchor//2（约 7）致延迟 AR 易 forming；见 phase-a-handoff §6 #6。
+WYCKOFF_AR_MAX_BARS: int = int(os.environ.get("WYCKOFF_AR_MAX_BARS", str(WYCKOFF_CLIMAX_ANCHOR_BARS)))
+# 广义 ST（Secondary Test of SC）：SC 后回测 SC 区，量/波幅须明显低于 SC 棒。
 # A 股适配（wyckoff-tr-maturity-l0l3-handoff §4）：只放宽检测参数，不砍「必须回测 SC 区」语义；
 # 禁止软确认（价格一直站在 SC 上方 ≠ ST）。可用 env 覆盖同名常量。
 WYCKOFF_ST_SC_VOL_RATIO: float = float(os.environ.get("WYCKOFF_ST_SC_VOL_RATIO", "0.72"))  # 原 0.60→0.72（仍须明显弱于 SC；建议带 0.70–0.75）
 WYCKOFF_ST_SC_MAX_BARS: int = int(os.environ.get("WYCKOFF_ST_SC_MAX_BARS", "22"))          # 原 15→22（慢回测窗；建议 20–25）
 WYCKOFF_ST_SC_PROXIMITY: float = float(os.environ.get("WYCKOFF_ST_SC_PROXIMITY", "0.03"))  # 原 0.02→0.03；low 须进入 sc_low 上方此比例内
 WYCKOFF_ST_SC_MAX_PIERCE: float = float(os.environ.get("WYCKOFF_ST_SC_MAX_PIERCE", "0.012"))  # 原 0.005→0.012；刺穿须收回（建议 0.01–0.015）
+# ST 棒 (high-low) 须 ≤ SC 棒波幅 × 此比例；过宽不算 ST（L2 合同：量/波幅弱于 SC）
+WYCKOFF_ST_SC_SPREAD_RATIO: float = float(os.environ.get("WYCKOFF_ST_SC_SPREAD_RATIO", "0.85"))
 WYCKOFF_PHASE_A_SEED_MIN_QUALITY: float = 0.40  # established 种子箱最低 tr_quality（避免永久 gated）
 # L3 量度宽度门槛（成熟度合同 §3）：L2 且 TR 窗根数 ≥ 此值（或 P&F 水平列够宽）才允许量度
 WYCKOFF_MEASURE_MIN_BARS: int = int(os.environ.get("WYCKOFF_MEASURE_MIN_BARS", "8"))
@@ -450,9 +455,10 @@ __all__ = [
     "T0_COMMISSION_RATE", "T0_STAMP_TAX_RATE", "T0_SLIP_RATE", "T0_ROUND_TRIP_COST_PCT",
     "INDEX_CODE",
     "TREND_MA_SHORT", "TREND_MA_LONG", "TREND_FILTER_ENABLED", "TREND_MA_LOOKBACK",
-    "WYCKOFF_MIN_BARS", "WYCKOFF_CLIMAX_ANCHOR_BARS",
+    "WYCKOFF_MIN_BARS", "WYCKOFF_CLIMAX_ANCHOR_BARS", "WYCKOFF_AR_MAX_BARS",
     "WYCKOFF_ST_SC_VOL_RATIO", "WYCKOFF_ST_SC_MAX_BARS", "WYCKOFF_ST_SC_PROXIMITY",
-    "WYCKOFF_ST_SC_MAX_PIERCE", "WYCKOFF_PHASE_A_SEED_MIN_QUALITY",
+    "WYCKOFF_ST_SC_MAX_PIERCE", "WYCKOFF_ST_SC_SPREAD_RATIO",
+    "WYCKOFF_PHASE_A_SEED_MIN_QUALITY",
     "WYCKOFF_MEASURE_MIN_BARS",
     "WYCKOFF_SPRING_SUPPORT_LOOKBACK",
     "WYCKOFF_SPRING_RECLAIM_RATIO", "WYCKOFF_SPRING_ATR_MULTIPLE", "WYCKOFF_SPRING_BULLISH_VOL_RATIO",

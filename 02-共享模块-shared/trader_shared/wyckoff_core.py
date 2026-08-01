@@ -119,7 +119,8 @@ from .wyckoff_events import (
     _detect_utad,
     _cause_effect_targets,
     _price_pos_pct,
-    _spring_breach_level
+    _spring_breach_level,
+    resolve_wyckoff_is_index,
 )
 
 
@@ -593,13 +594,15 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
     else:
         tr_ctx = _detect_trading_range(bars)
 
+    # 指数标的：仅放宽 SC 检测量阈（_sc_detector_params）；禁止软 ST 绕过
+    is_index = resolve_wyckoff_is_index(symbol)
     spring = _detect_spring(bars, _support=dynamic_support, symbol=symbol, tr_ctx=tr_ctx)
     upthrust = _detect_upthrust(bars, tr_ctx=tr_ctx)
     bc = _detect_buying_climax(bars, tr_ctx=tr_ctx)
-    sc = _detect_selling_climax(bars, tr_ctx=tr_ctx, timeframe=timeframe)
+    sc = _detect_selling_climax(bars, tr_ctx=tr_ctx, timeframe=timeframe, is_index=is_index)
     sow = _detect_sign_of_weakness(bars, tr_ctx=tr_ctx)  # SOW 使用自己的支撑位计算（处理 consecutive 逻辑）
     bearish_div, bullish_div = _detect_volume_divergence(bars)
-    ar = _detect_ar(bars, tr_ctx=tr_ctx, timeframe=timeframe)
+    ar = _detect_ar(bars, tr_ctx=tr_ctx, timeframe=timeframe, is_index=is_index)
     are = _detect_are(bars, tr_ctx=tr_ctx)
     sos = _detect_sos(bars, tr_ctx=tr_ctx)
     st = _detect_st(bars, tr_ctx=tr_ctx)
@@ -635,7 +638,11 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
     cluster = _detect_event_cluster(bars, tr_ctx=tr_ctx)
     phase_a_range = _build_phase_a_range(sc, ar)
     st_sc = _detect_secondary_test_sc(
-        bars, tr_ctx=tr_ctx, phase_a_range=phase_a_range, timeframe=timeframe
+        bars,
+        tr_ctx=tr_ctx,
+        phase_a_range=phase_a_range,
+        timeframe=timeframe,
+        is_index=is_index,
     )
     phase_a_range = _refine_phase_a_sc_low(phase_a_range, st_sc)
     # L0–L3 成熟度：先按 SC/ST/AR + 窗宽定级，再决定是否成熟箱 overlay

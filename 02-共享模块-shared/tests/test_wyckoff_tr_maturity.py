@@ -53,13 +53,18 @@ def _sc_ar_no_st_bars() -> list[dict]:
 
 
 def _sc_ar_st_bars() -> list[dict]:
-    """SC + 缩量回测 ST + AR（窗宽通常 < MEASURE_MIN → L2）。"""
+    """SC + AR + 缩量回测 ST（窗宽通常 < MEASURE_MIN → L2）。ST 须在 AR 后。
+
+    ST 用收复阳线，避免被 ``_find_sc_anchor`` 从近端误锚成新 SC。
+    """
     bars = _decline_base(14, vol=100)
-    bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC
-    bars.append(_bar(83.0, 83.4, 81.8, 82.5, 800))   # ST
+    bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC spread=3.0
+    bars.append(_bar(83.5, 87.0, 85.0, 86.0, 400))   # AR（low 在 zone 上沿外）
+    # ST：low 回测 SC 区，收复阳线；波幅 1.4 ≤ 0.85×3
+    bars.append(_bar(82.2, 83.2, 81.8, 82.9, 800))
     for i in range(3):
-        bars.append(_bar(82.6 + i * 0.1, 83.0 + i * 0.1, 82.4 + i * 0.1, 82.7 + i * 0.1, 120))
-    bars.append(_bar(83.0, 87.0, 82.8, 86.0, 130))  # AR
+        # 站在 zone 上方，避免后续棒抢 ST
+        bars.append(_bar(85.0 + i * 0.05, 85.4, 84.8, 85.2, 120))
     return bars
 
 
@@ -67,7 +72,54 @@ def _sc_ar_st_wide_bars() -> list[dict]:
     """M-R4：在 ST 箱上略加宽至 ≥ MEASURE_MIN_BARS，且 SC 仍在 climax 窗内。"""
     bars = _sc_ar_st_bars()
     for _ in range(2):
-        bars.append(_bar(84.0, 84.4, 83.7, 84.1, 110))
+        bars.append(_bar(85.0, 85.4, 84.8, 85.1, 110))
+    return bars
+
+
+def _wide_spread_st_bars() -> list[dict]:
+    """宽波幅+缩量回测：量弱但波幅不弱于 SC → 不得认 ST / L2。"""
+    bars = _decline_base(14, vol=100)
+    bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC spread=3.0；cap≈2.55
+    bars.append(_bar(83.5, 87.0, 85.0, 86.0, 400))   # AR
+    # 收复阳线 + 宽波幅 4.0 > cap；后续棒不得进入 SC 区
+    bars.append(_bar(82.0, 85.5, 81.5, 83.5, 800))
+    for _ in range(3):
+        bars.append(_bar(85.5, 86.0, 85.2, 85.7, 110))
+    return bars
+
+
+def _delayed_ar_bars() -> list[dict]:
+    """SC 后第 10 根才 AR（>旧 anchor//2≈7，< WYCKOFF_AR_MAX_BARS=15）。"""
+    bars = _decline_base(14, vol=100)
+    bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC
+    for i in range(9):
+        # 反弹不足 2%，不得提前亮 AR
+        b = 83.0 + (i % 3) * 0.05
+        bars.append(_bar(b, b + 0.3, b - 0.2, b + 0.05, 120))
+    bars.append(_bar(83.5, 87.0, 83.2, 86.0, 150))  # AR @ SC+10
+    return bars
+
+
+def _st_before_ar_bars() -> list[dict]:
+    """AR 前有缩量回测棒；有 AR 时不得把该棒当 ST。"""
+    bars = _decline_base(14, vol=100)
+    bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC
+    bars.append(_bar(82.2, 83.2, 81.8, 82.9, 800))   # 缩量回测阳线（AR 前）
+    bars.append(_bar(83.5, 87.0, 85.0, 86.0, 400))   # AR
+    for _ in range(3):
+        bars.append(_bar(85.5, 86.0, 85.2, 85.7, 110))  # 站在 zone 上，无合法 ST
+    return bars
+
+
+def _st_after_ar_bars() -> list[dict]:
+    """AR 后合法缩量窄波幅 ST。"""
+    bars = _decline_base(14, vol=100)
+    bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC
+    bars.append(_bar(82.2, 83.2, 81.8, 82.9, 800))   # AR 前缩量棒（应忽略）
+    bars.append(_bar(83.5, 87.0, 85.0, 86.0, 400))   # AR
+    bars.append(_bar(82.3, 83.1, 81.9, 82.8, 700))   # 合法 ST（阳线收复）
+    for _ in range(2):
+        bars.append(_bar(85.0, 85.4, 84.8, 85.1, 110))
     return bars
 
 
@@ -353,3 +405,129 @@ def test_sc_low_not_overwritten_by_st_refine() -> None:
     assert result.get("sc_low_refined") == 81.8 or result.get("st_sc_low") == 81.8
     assert float(result["tr_lower"]) == 81.8
     assert "箱体 81.80-" in _phase_a_box_phrase(result)
+
+
+def test_st_wide_spread_no_st_no_l2() -> None:
+    """宽波幅+缩量 → 无 ST / 不得 L2。"""
+    from trader_shared.wyckoff_events import _detect_secondary_test_sc
+
+    bars = _pad_min(_wide_spread_st_bars())
+    # 先建 phase_a 以带 ar_bar_idx
+    result = wyckoff_analysis(bars, use_persisted_phase=False)
+    assert result.get("sc_signal") is True
+    assert result.get("ar_signal") is True
+    assert result.get("secondary_test_sc_signal") is not True
+    reason = result.get("secondary_test_sc_reason") or ""
+    assert "波幅" in reason
+    _require_gate_fields(result)
+    assert result["tr_maturity"] == "L1"
+    assert result["measure_allowed"] is False
+    assert result["box_display_mode"] == "proto"
+    assert not _mature_box_phrase(_phase_a_box_phrase(result))
+
+    st = _detect_secondary_test_sc(bars, phase_a_range=result.get("phase_a_range"))
+    assert st.get("secondary_test_sc_signal") is not True
+    assert "波幅" in (st.get("secondary_test_sc_reason") or "")
+
+
+def test_st_scan_starts_after_ar_ignores_pre_ar() -> None:
+    """有 AR 时：AR 前缩量棒不得当 ST；AR 后合法 ST 仍可。"""
+    from trader_shared.wyckoff_events import _detect_secondary_test_sc
+
+    pre = _pad_min(_st_before_ar_bars())
+    r_pre = wyckoff_analysis(pre, use_persisted_phase=False)
+    assert r_pre.get("ar_signal") is True
+    assert r_pre.get("secondary_test_sc_signal") is not True
+    assert r_pre["tr_maturity"] == "L1"
+
+    post = _pad_min(_st_after_ar_bars())
+    r_post = wyckoff_analysis(post, use_persisted_phase=False)
+    assert r_post.get("ar_signal") is True
+    assert r_post.get("secondary_test_sc_signal") is True
+    assert r_post["tr_maturity"] in ("L2", "L3")
+    # 合法 ST 须在 AR 之后
+    ar_i = r_post["phase_a_range"]["ar_bar_idx"]
+    st_i = r_post.get("secondary_test_sc_bar_idx")
+    assert st_i is not None and ar_i is not None and st_i > ar_i
+
+    # 无 phase_a_range 时仍可从 SC+1 扫（兼容单测直调）
+    st_direct = _detect_secondary_test_sc(post)
+    assert st_direct.get("secondary_test_sc_signal") is True
+
+
+def test_delayed_ar_within_ar_max_bars() -> None:
+    """延迟 AR（>7 根、< AR_MAX）仍亮 ar_signal + established。"""
+    from trader_shared.wyckoff_events import _detect_ar
+
+    bars = _pad_min(_delayed_ar_bars())
+    ar = _detect_ar(bars)
+    assert ar.get("ar_signal") is True
+    assert ar.get("ar_bar_idx") is not None
+    sc_i = ar.get("sc_bar_idx")
+    assert sc_i is not None
+    assert int(ar["ar_bar_idx"]) - int(sc_i) > 7
+
+    result = wyckoff_analysis(bars, use_persisted_phase=False)
+    assert result.get("sc_signal") is True
+    assert result.get("ar_signal") is True
+    assert result["phase_a_status"] == "established"
+    assert result.get("ar_high") is not None
+
+
+def test_is_index_relaxes_sc_vol_threshold() -> None:
+    """同 bars：is_index=True 放宽 SC 量阈，与 False 行为可区分。"""
+    from trader_shared.wyckoff_events import (
+        _detect_selling_climax,
+        _sc_detector_params,
+        resolve_wyckoff_is_index,
+    )
+
+    assert resolve_wyckoff_is_index("000001.SH") is True
+    assert resolve_wyckoff_is_index("000001.SZ") is False  # 平安银行
+    assert resolve_wyckoff_is_index("000852.SH") is True
+    assert resolve_wyckoff_is_index("399006.SZ") is True
+
+    stock_th = float(_sc_detector_params("daily", is_index=False)["vol_ratio_threshold"])
+    idx_th = float(_sc_detector_params("daily", is_index=True)["vol_ratio_threshold"])
+    assert idx_th < stock_th
+    assert idx_th <= 1.35
+
+    # 量比落在 (idx_th, stock_th) 之间：仅指数路径亮 SC
+    avg = 100.0
+    mid_vol = int((idx_th + stock_th) / 2 * avg)  # e.g. ~157
+    bars = _decline_base(14, vol=int(avg))
+    bars.append(_bar(84.0, 85.0, 82.0, 83.0, mid_vol))
+    bars.append(_bar(83.2, 83.6, 83.0, 83.5, 120))
+
+    sc_stock = _detect_selling_climax(bars, is_index=False)
+    sc_idx = _detect_selling_climax(bars, is_index=True)
+    assert sc_stock.get("sc_signal") is not True
+    assert sc_idx.get("sc_signal") is True
+
+    # 生产路径：指数码传入 is_index
+    r_idx = wyckoff_analysis(bars, symbol="000001.SH", use_persisted_phase=False)
+    r_stock = wyckoff_analysis(bars, symbol="600519.SH", use_persisted_phase=False)
+    assert r_idx.get("sc_signal") is True
+    assert r_stock.get("sc_signal") is not True
+
+
+def test_view_exposes_tr_maturity_measure_fields() -> None:
+    """View / cause_effect 透出 tr_maturity、measure_allowed、box_display_mode。"""
+    from trader_shared.wyckoff_view import to_wyckoff_state_view
+
+    result = wyckoff_analysis(_pad_min(_sc_ar_no_st_bars()), use_persisted_phase=False)
+    view = to_wyckoff_state_view(result, symbol="TEST")
+    assert view.get("tr_maturity") == "L1"
+    assert view.get("measure_allowed") is False
+    assert view.get("box_display_mode") == "proto"
+    ce = view.get("cause_effect") or {}
+    assert ce.get("tr_maturity") == "L1"
+    assert ce.get("measure_allowed") is False
+    assert ce.get("box_display_mode") == "proto"
+    assert format_cause_effect_display(view) == ""
+
+    # 缺省 measure_allowed 的裸目标 → 空
+    assert format_cause_effect_display({
+        "cause_effect_up_target": 10.0,
+        "cause_effect_down_target": 8.0,
+    }) == ""
