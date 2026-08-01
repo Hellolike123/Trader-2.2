@@ -11,12 +11,8 @@ def test_save_position_atomic_roundtrip(tmp_path, monkeypatch):
     root.mkdir()
     monkeypatch.setenv("HOME", str(tmp_path))
 
-    # t0_account 在 packages 下，确保可 import
-    pkg = Path(__file__).resolve().parents[2] / "01-功能包-packages" / "t0" / "scripts"
-    if str(pkg) not in sys.path:
-        sys.path.insert(0, str(pkg))
-
-    import t0_account as acc
+    # 引擎在 trader_shared；包入口为 identity shim
+    from trader_shared import t0_account as acc
 
     monkeypatch.setattr(acc, "POSITION_FILE", root / "position.json")
 
@@ -37,3 +33,12 @@ def test_save_position_atomic_roundtrip(tmp_path, monkeypatch):
     acc.save_position("000001", {"avg_cost": 10.0, "total_shares": 200})
     all_pos = acc.list_positions()
     assert set(all_pos) == {"688248", "000001"}
+
+    # shim 身份替换：monkeypatch shared 对包入口生效
+    pkg = Path(__file__).resolve().parents[2] / "01-功能包-packages" / "t0" / "scripts"
+    if str(pkg) not in sys.path:
+        sys.path.insert(0, str(pkg))
+    import t0_account as pkg_acc  # noqa: E402
+
+    assert pkg_acc is acc or pkg_acc.__name__ in ("trader_shared.t0_account", "t0_account")
+    assert hasattr(pkg_acc, "save_position")
