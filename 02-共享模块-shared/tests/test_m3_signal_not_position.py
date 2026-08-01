@@ -82,4 +82,9 @@ def test_report_builder_watermark_gate_ignores_signal_cost():
     src = Path(rb.__file__).read_text(encoding="utf-8")
     # 不得再出现 signal_cost 驱动 trailing_ratchet
     assert "or float(_signal_cost_price or 0) > 0" not in src
-    assert "if float(cost_price or 0) > 0:" in src
+    # 水位门：resolved cost（locals 或 StageContext bag），非 signal_cost
+    assert (
+        "if float(cost_price or 0) > 0:" in src
+        or "if float(ctx.cost_price or 0) > 0:" in src
+    )
+    assert "trailing_ratchet_symbol" in src

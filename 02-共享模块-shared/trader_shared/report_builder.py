@@ -60,7 +60,13 @@ def _profile_enabled() -> bool:
     return os.environ.get("TRADER_PROFILE", "").strip() in ("1", "true", "True", "yes")
 
 
+def _ctx_pick(ctx: Any, *keys: str) -> dict[str, Any]:
+    """从 StageContext bag 取 kwargs（缺省 None）。"""
+    return {k: ctx.get(k) for k in keys}
+
+
 def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
+    """单票报告编排：单一 StageContext bag，阶段结果 ctx.update，禁止平行 locals。"""
     import time as _time
     _prof = _profile_enabled()
     _t0 = _time.perf_counter()
@@ -78,7 +84,19 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         import warnings
         warnings.warn(f"[trader] 计算依赖缺失，降级为行情模式: {_ex}")
         return _degraded_quote_report(target)
-    
+
+    from trader_shared.report_pipeline import (
+        StageContext,
+        assemble_base_report,
+        attach_short_midline_and_decision,
+        attach_stage_position_pack,
+        run_analysis_context_stage,
+        run_chip_enrichment_stage,
+        run_fusion_stage,
+        run_stage_positioning_stage,
+        run_structure_stage,
+    )
+
     # DI: 注入 TencentFetcher 供下游模块使用
     fetcher = TencentFetcher()
     provider = get_provider()
@@ -112,104 +130,94 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     except Exception:
         pass
 
-    # === 上下文：信号/插件/区间套/资金环境（report_pipeline.run_analysis_context_stage）===
-    from trader_shared.report_pipeline import StageContext, run_analysis_context_stage
+    # 单一 bag：各 stage 写入后不再爆炸成平行 locals
+    ctx = StageContext(
+        target=target,
+        cost_price=float(cost_price or 0),
+        fetcher=fetcher,
+        provider=provider,
+        snapshot=snapshot,
+        sec=sec,
+        quote=quote,
+        bars=bars,
+    )
 
-    _ctx = StageContext.from_mapping(
+    # === 上下文：信号/插件/区间套/资金环境 ===
+    ctx.update(
         run_analysis_context_stage(
-            target=target,
-            snapshot=snapshot,
-            bars=bars,
-            quote=quote,
-            sec=sec,
-            provider=provider,
+            target=ctx.target,
+            snapshot=ctx.snapshot,
+            bars=ctx.bars,
+            quote=ctx.quote,
+            sec=ctx.sec,
+            provider=ctx.provider,
             mark=_mark,
         )
     )
-    risk_flags = _ctx.risk_flags
-    _signal_cost_price = _ctx.signal_cost_price
-    _signal_win_rate = _ctx.signal_win_rate
-    live_bar = _ctx.live_bar
-    intraday_as_of = _ctx.intraday_as_of
-    bars_5m = _ctx.bars_5m
-    weekly_bars = _ctx.weekly_bars
-    monthly_bars = _ctx.monthly_bars
-    atr14_val = _ctx.atr14_val
-    atr_ratio_val = _ctx.atr_ratio_val
-    atr_level = _ctx.atr_level
-    atr_cap = _ctx.atr_cap
-    atr_adjust = getattr(_ctx, "atr_adjust", None) or "unknown"
-    atr_data_source = getattr(_ctx, "atr_data_source", None) or ""
-    current = _ctx.current
-    recent20 = _ctx.recent20
-    change_pct_val = _ctx.change_pct_val
-    _st = _ctx.st
-    _st_dir = _ctx.st_dir
-    chan_result = _ctx.chan_result
-    chan_mid_result = _ctx.chan_mid_result
-    wyck_result = _ctx.wyck_result
-    wyck_mid_result = _ctx.wyck_mid_result
-    momentum_result = _ctx.momentum_result
-    _vwap_res = _ctx.vwap_res
-    main_force_env = _ctx.main_force_env
-    mf_result = _ctx.mf_result
-    fund_flow_features = _ctx.fund_flow_features
-    big_order_result = _ctx.big_order_result
-    env = _ctx.env
-    _sector_data = _ctx.sector_data
     # 现价缺失等降级由 context 返回，不改 frozen snapshot
-    data_status = str(getattr(_ctx, "data_status", None) or getattr(snapshot, "data_status", None) or "full")
+    ctx.data_status = str(
+        ctx.get("data_status")
+        or getattr(ctx.snapshot, "data_status", None)
+        or "full"
+    )
+    ctx.atr_adjust = ctx.get("atr_adjust") or "unknown"
+    ctx.atr_data_source = ctx.get("atr_data_source") or ""
 
-    # === 融合层（阶段函数：report_pipeline.run_fusion_stage）===
-    # 延期：更晚 relocate（结构/筹码之后）— 架构 #5 非 P0；见 resonance-and-orchestration §6
-    from trader_shared.report_pipeline import run_fusion_stage
-
-    report_fusion, _pre_cards, volume_warning = run_fusion_stage(
-        chan_result=chan_result,
-        momentum_result=momentum_result,
-        wyck_result=wyck_result,
-        bars=bars,
-        env=env,
-        quote=quote,
-        current=current,
-        main_force_env=main_force_env,
-        fetcher=fetcher,
-        data_status=data_status,
-        fund_flow_features=fund_flow_features,
-        snapshot=snapshot,
-        target=target,
-        sector_data=_sector_data if isinstance(_sector_data, dict) else None,
+    # === 融合层（延期更晚 relocate — 架构 #5 非 P0）===
+    report_fusion, pre_cards, volume_warning = run_fusion_stage(
+        chan_result=ctx.chan_result,
+        momentum_result=ctx.momentum_result,
+        wyck_result=ctx.wyck_result,
+        bars=ctx.bars,
+        env=ctx.env,
+        quote=ctx.quote,
+        current=ctx.current,
+        main_force_env=ctx.main_force_env,
+        fetcher=ctx.fetcher,
+        data_status=ctx.data_status,
+        fund_flow_features=ctx.fund_flow_features,
+        snapshot=ctx.snapshot,
+        target=ctx.target,
+        sector_data=ctx.sector_data if isinstance(ctx.sector_data, dict) else None,
         mark=_mark,
     )
-    _fusion_pre_cards_pending: dict[str, Any] = _pre_cards or {}
-
-    # === 结构层（阶段函数：report_pipeline.run_structure_stage）===
-    from trader_shared.report_pipeline import run_structure_stage
-
-    # 持仓票启用移动止损水位（只紧不松）；无持仓不落水位，避免无仓误抬止损
-    # M3：仅 resolved cost>0（显式 --cost 或 holdings SSOT）才落水位；信号流不得冒充持仓
-    _trail_sym = None
-    if float(cost_price or 0) > 0:
-        _trail_sym = str(quote.get("symbol") or getattr(sec, "ts_code", "") or "").strip() or None
-    _ = _signal_cost_price  # 胜率仍用；不得驱动 watermark
-    levels, big_order_result, _pre_stage = run_structure_stage(
-        current=current,
-        bars=bars,
-        bars_5m=bars_5m,
-        quote=quote,
+    ctx.update(
         report_fusion=report_fusion,
-        chan_result=chan_result,
-        wyck_result=wyck_result,
-        momentum_result=momentum_result,
-        mf_result=mf_result,
-        main_force_env=main_force_env,
-        fetcher=fetcher,
-        big_order_result=big_order_result,
-        order_book=snapshot.order_book,
+        fusion_pre_cards=pre_cards or {},
+        volume_warning=volume_warning,
+    )
+
+    # === 结构层 ===
+    # 持仓票启用移动止损水位（只紧不松）；无持仓不落水位
+    # M3：仅 resolved cost>0 才落水位；信号流不得冒充持仓
+    _trail_sym = None
+    if float(ctx.cost_price or 0) > 0:
+        _trail_sym = (
+            str(
+                ctx.quote.get("symbol")
+                or getattr(ctx.sec, "ts_code", "")
+                or ""
+            ).strip()
+            or None
+        )
+    # signal_cost_price 胜率仍用；不得驱动 watermark
+    levels, big_order_result, pre_stage = run_structure_stage(
+        current=ctx.current,
+        bars=ctx.bars,
+        bars_5m=ctx.bars_5m,
+        quote=ctx.quote,
+        report_fusion=ctx.report_fusion,
+        chan_result=ctx.chan_result,
+        wyck_result=ctx.wyck_result,
+        momentum_result=ctx.momentum_result,
+        mf_result=ctx.mf_result,
+        main_force_env=ctx.main_force_env,
+        fetcher=ctx.fetcher,
+        big_order_result=ctx.big_order_result,
+        order_book=ctx.snapshot.order_book,
         mark=_mark,
         trailing_ratchet_symbol=_trail_sym,
     )
-
     support = levels["main_support"]
     resistance = levels["resistance"]
     confirm = levels["confirm_price"]
@@ -217,224 +225,217 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     take = levels["take"]
     # key_pressure 为大单分析提供关注价位（确认位优先，次选阻力位）
     levels["key_pressure"] = confirm if confirm > 0 else resistance
-    # 使用约5个交易日前的收盘价作为周收盘价的近似
-    # 注意：这是5/20个交易日前的日线收盘价，非真实周/月K线
+    # 约5/STRUCTURE_WINDOW 交易日前收盘作周/月近似（非真实周/月K）
+    bars = ctx.bars
     if len(bars) >= 5:
         weekly_proxy_close = float(bars[-5]["close"])
     else:
         weekly_proxy_close = float(bars[0]["close"])
-    monthly_proxy_close = float(bars[-STRUCTURE_WINDOW]["close"] if len(bars) >= STRUCTURE_WINDOW else bars[0]["close"])
-    # determine_stage 仅轻量位置分类；不再写入 report["stage"]（改别名 short_term_momentum）
+    monthly_proxy_close = float(
+        bars[-STRUCTURE_WINDOW]["close"]
+        if len(bars) >= STRUCTURE_WINDOW
+        else bars[0]["close"]
+    )
     scene = levels["status"]
     base_status = str(levels.get("base_status") or scene)
     theory_status = str(levels.get("theory_status") or scene)
-    replay = structure_replay(recent20)
-    volume_text = volume_observation(recent20, bars_5m)
-    high = max((to_float(b.get("high")) for b in recent20), default=current)
-    low = min((to_float(b.get("low")) for b in recent20), default=current)
-    analysis_time = f"{quote.get('trade_date')} {quote.get('trade_time') or ''}".strip()
-
-    # state_text 实际只听 theory_status；stage 槽位占位（动能在 stage_result 后可知）
-    state_label = state_text("", theory_status)
-    volume_note = volume_view(volume_text)
-    market_env_data = env  # 复用并行块已抓取的大盘环境，避免重复请求
+    recent20 = ctx.recent20
+    volume_text = volume_observation(recent20, ctx.bars_5m)
     buy_scenes = {"低吸观察", "防守观察", "等转强"}
-    position_cap = min(10, atr_cap) if scene in buy_scenes else 10
-
-    # === 筹码/EXPMA/共振（阶段函数：report_pipeline.run_chip_enrichment_stage）===
-    from trader_shared.report_pipeline import StageContext, run_chip_enrichment_stage
-
-    _enrich = StageContext.from_mapping(
-        run_chip_enrichment_stage(
-            bars=bars,
-            bars_5m=bars_5m,
-            current=current,
-            target=target,
-            quote=quote,
-            ts_code=sec.ts_code,
-            support=support,
-            resistance=resistance,
-            weekly_bars=weekly_bars,
-            weekly_proxy_close=weekly_proxy_close,
-            mf_result=mf_result,
-            big_order_result=big_order_result,
-            levels=levels,
-            report_fusion=report_fusion,
-            provider=provider,
-            snapshot=snapshot,
-            mark=_mark,
-        )
-    )
-    chip = _enrich.chip
-    chip_peaks = _enrich.chip_peaks
-    chip_migration = _enrich.chip_migration
-    chip_support = _enrich.chip_support
-    chip_resistance = _enrich.chip_resistance
-    chip_support_lower = _enrich.chip_support_lower
-    chip_support_upper = _enrich.chip_support_upper
-    chip_resistance_lower = _enrich.chip_resistance_lower
-    chip_resistance_upper = _enrich.chip_resistance_upper
-    main_force_score_result = _enrich.main_force_score_result
-    expma10_val = _enrich.expma10_val
-    expma12_val = _enrich.expma12_val
-    expma20_val = _enrich.expma20_val
-    expma50_val = _enrich.expma50_val
-    expma_trend = _enrich.expma_trend
-    expma_status_result = _enrich.expma_status_result
-    resonance_result = _enrich.resonance_result
-
-    # === 四阶段定位（阶段函数：report_pipeline.run_stage_positioning_stage）===
-    from trader_shared.report_pipeline import (
-        assemble_base_report,
-        run_stage_positioning_stage,
-    )
-
-    _stage_pack = StageContext.from_mapping(
-        run_stage_positioning_stage(
-            bars=bars,
-            current=current,
-            quote=quote,
-            levels=levels,
-            atr14_val=atr14_val,
-            chip_migration=chip_migration,
-            chip_support_lower=chip_support_lower,
-            chip_resistance_lower=chip_resistance_lower,
-            chip_resistance_upper=chip_resistance_upper,
-            report_fusion=report_fusion,
-            wyck_result=wyck_result,
-            mf_result=mf_result,
-            chan_result=chan_result,
-            ts_code=sec.ts_code,
-            extend_sector=snapshot.extend_sector,
-            pre_stage=_pre_stage,
-            support=support,
-            confirm=confirm,
-        )
-    )
-    stage_result = _stage_pack.stage_result
-    ma250 = _stage_pack.ma250
-    bars_date = _stage_pack.bars_date
-    upward_momentum = _stage_pack.upward_momentum
-    take = _stage_pack.take
-    # 字段纪律：report["stage"] 在 assemble 内别名 short_term_momentum
-    short_term_momentum = str((stage_result or {}).get("momentum") or "震荡")
-
-    report = assemble_base_report(
-        intraday_as_of=intraday_as_of,
-        quote=quote,
-        sec=sec,
-        analysis_time=analysis_time,
-        current=current,
-        weekly_proxy_close=weekly_proxy_close,
-        monthly_proxy_close=monthly_proxy_close,
+    ctx.update(
+        levels=levels,
+        big_order_result=big_order_result,
+        pre_stage=pre_stage,
         support=support,
         resistance=resistance,
         confirm=confirm,
         stop=stop,
         take=take,
-        stage=short_term_momentum,  # assemble 忽略此值，改写为 stage_result.momentum
+        weekly_proxy_close=weekly_proxy_close,
+        monthly_proxy_close=monthly_proxy_close,
         scene=scene,
-        levels=levels,
-        replay=replay,
-        volume_text=volume_text,
-        upward_momentum=upward_momentum,
-        low=low,
-        high=high,
-        snapshot=snapshot,
-        bars=bars,
-        risk_flags=risk_flags,
-        atr14_val=atr14_val,
-        atr_ratio_val=atr_ratio_val,
-        atr_level=atr_level,
-        atr_cap=atr_cap,
-        atr_adjust=atr_adjust,
-        atr_data_source=atr_data_source,
-        st=_st,
-        st_dir=_st_dir,
-        vwap_res=_vwap_res,
         base_status=base_status,
         theory_status=theory_status,
-        state_label=state_label,
-        volume_note=volume_note,
-        market_env_data=market_env_data,
-        position_cap=position_cap,
-        ma250=ma250,
-        chip=chip,
-        chip_peaks=chip_peaks,
-        chip_support=chip_support,
-        chip_resistance=chip_resistance,
-        chip_support_lower=chip_support_lower,
-        chip_support_upper=chip_support_upper,
-        chip_resistance_lower=chip_resistance_lower,
-        chip_resistance_upper=chip_resistance_upper,
-        report_fusion=report_fusion,
-        main_force_score_result=main_force_score_result,
-        big_order_result=big_order_result,
-        stage_result=stage_result,
-        wyck_result=wyck_result,
-        wyck_mid_result=wyck_mid_result,
-        chan_result=chan_result,
-        chan_mid_result=chan_mid_result,
-        expma10_val=expma10_val,
-        expma12_val=expma12_val,
-        expma20_val=expma20_val,
-        expma50_val=expma50_val,
-        expma_trend=expma_trend,
-        expma_status_result=expma_status_result,
-        resonance_result=resonance_result,
-        sector_data=_sector_data,
-        fusion_pre_cards=_fusion_pre_cards_pending,
+        replay=structure_replay(recent20),
+        volume_text=volume_text,
+        high=max((to_float(b.get("high")) for b in recent20), default=ctx.current),
+        low=min((to_float(b.get("low")) for b in recent20), default=ctx.current),
+        analysis_time=f"{ctx.quote.get('trade_date')} {ctx.quote.get('trade_time') or ''}".strip(),
+        state_label=state_text("", theory_status),
+        volume_note=volume_view(volume_text),
+        market_env_data=ctx.env,  # 复用并行块大盘环境
+        position_cap=min(10, ctx.atr_cap) if scene in buy_scenes else 10,
     )
-    # context 降级（如现价缺失）覆盖 assemble 从 frozen snapshot 抄来的 data_status
-    report["data_status"] = data_status
 
-    from trader_shared.report_pipeline import attach_stage_position_pack
+    # === 筹码/EXPMA/共振 ===
+    ctx.update(
+        run_chip_enrichment_stage(
+            bars=ctx.bars,
+            bars_5m=ctx.bars_5m,
+            current=ctx.current,
+            target=ctx.target,
+            quote=ctx.quote,
+            ts_code=ctx.sec.ts_code,
+            support=ctx.support,
+            resistance=ctx.resistance,
+            weekly_bars=ctx.weekly_bars,
+            weekly_proxy_close=ctx.weekly_proxy_close,
+            mf_result=ctx.mf_result,
+            big_order_result=ctx.big_order_result,
+            levels=ctx.levels,
+            report_fusion=ctx.report_fusion,
+            provider=ctx.provider,
+            snapshot=ctx.snapshot,
+            mark=_mark,
+        )
+    )
+
+    # === 四阶段定位 ===
+    ctx.update(
+        run_stage_positioning_stage(
+            bars=ctx.bars,
+            current=ctx.current,
+            quote=ctx.quote,
+            levels=ctx.levels,
+            atr14_val=ctx.atr14_val,
+            chip_migration=ctx.chip_migration,
+            chip_support_lower=ctx.chip_support_lower,
+            chip_resistance_lower=ctx.chip_resistance_lower,
+            chip_resistance_upper=ctx.chip_resistance_upper,
+            report_fusion=ctx.report_fusion,
+            wyck_result=ctx.wyck_result,
+            mf_result=ctx.mf_result,
+            chan_result=ctx.chan_result,
+            ts_code=ctx.sec.ts_code,
+            extend_sector=ctx.snapshot.extend_sector,
+            pre_stage=ctx.pre_stage,
+            support=ctx.support,
+            confirm=ctx.confirm,
+        )
+    )
+    # 字段纪律：report["stage"] 在 assemble 内别名 short_term_momentum
+    ctx.short_term_momentum = str((ctx.stage_result or {}).get("momentum") or "震荡")
+    ctx.stage = ctx.short_term_momentum  # assemble/attach 兼容槽；assemble 仍以 momentum 为准
+
+    report = assemble_base_report(
+        **_ctx_pick(
+            ctx,
+            "intraday_as_of",
+            "quote",
+            "sec",
+            "analysis_time",
+            "current",
+            "weekly_proxy_close",
+            "monthly_proxy_close",
+            "support",
+            "resistance",
+            "confirm",
+            "stop",
+            "take",
+            "stage",
+            "scene",
+            "levels",
+            "replay",
+            "volume_text",
+            "upward_momentum",
+            "low",
+            "high",
+            "snapshot",
+            "bars",
+            "risk_flags",
+            "atr14_val",
+            "atr_ratio_val",
+            "atr_level",
+            "atr_cap",
+            "atr_adjust",
+            "atr_data_source",
+            "st",
+            "st_dir",
+            "vwap_res",
+            "base_status",
+            "theory_status",
+            "state_label",
+            "volume_note",
+            "market_env_data",
+            "position_cap",
+            "ma250",
+            "chip",
+            "chip_peaks",
+            "chip_support",
+            "chip_resistance",
+            "chip_support_lower",
+            "chip_support_upper",
+            "chip_resistance_lower",
+            "chip_resistance_upper",
+            "report_fusion",
+            "main_force_score_result",
+            "big_order_result",
+            "stage_result",
+            "wyck_result",
+            "wyck_mid_result",
+            "chan_result",
+            "chan_mid_result",
+            "expma10_val",
+            "expma12_val",
+            "expma20_val",
+            "expma50_val",
+            "expma_trend",
+            "expma_status_result",
+            "resonance_result",
+            "sector_data",
+            "fusion_pre_cards",
+        )
+    )
+    # context 降级覆盖 assemble 从 frozen snapshot 抄来的 data_status
+    report["data_status"] = ctx.data_status
 
     report, cost_price, has_position, suggested = attach_stage_position_pack(
         report,
-        cost_price=float(cost_price or 0),
-        current=float(current or 0),
-        market_env_data=market_env_data if isinstance(market_env_data, dict) else {},
-        stage_result=stage_result,
-        atr14_val=atr14_val,
-        bars=bars,
-        wyck_result=wyck_result,
-        support=support,
-        confirm=confirm,
-        expma10_val=expma10_val,
-        expma20_val=expma20_val,
-        chip_migration=chip_migration,
-        levels=levels,
-        bars_date=bars_date,
-        base_status=str(base_status or ""),
-        theory_status=str(theory_status or ""),
-        scene=str(scene or ""),
-        report_fusion=report_fusion if isinstance(report_fusion, dict) else {},
-        signal_win_rate=_signal_win_rate,
-        signal_cost_price=float(_signal_cost_price or 0),
-        stage=short_term_momentum,  # attach 忽略；不得冒充 major_stage
+        cost_price=float(ctx.cost_price or 0),
+        current=float(ctx.current or 0),
+        market_env_data=ctx.market_env_data if isinstance(ctx.market_env_data, dict) else {},
+        stage_result=ctx.stage_result,
+        atr14_val=ctx.atr14_val,
+        bars=ctx.bars,
+        wyck_result=ctx.wyck_result,
+        support=ctx.support,
+        confirm=ctx.confirm,
+        expma10_val=ctx.expma10_val,
+        expma20_val=ctx.expma20_val,
+        chip_migration=ctx.chip_migration,
+        levels=ctx.levels,
+        bars_date=ctx.bars_date,
+        base_status=str(ctx.base_status or ""),
+        theory_status=str(ctx.theory_status or ""),
+        scene=str(ctx.scene or ""),
+        report_fusion=ctx.report_fusion if isinstance(ctx.report_fusion, dict) else {},
+        signal_win_rate=ctx.signal_win_rate,
+        signal_cost_price=float(ctx.signal_cost_price or 0),
+        stage=str(ctx.short_term_momentum or ""),
         mark=_mark,
     )
+    ctx.update(
+        cost_price=cost_price,
+        has_position=has_position,
+        suggested=suggested,
+    )
 
-
-    from trader_shared.report_pipeline import attach_short_midline_and_decision
-
-    # 短中线 + 决策栈（pipeline）
+    # 短中线 + 决策栈
     attach_short_midline_and_decision(
         report,
-        current=current,
-        scene=str(scene or ""),
-        report_fusion=report_fusion if isinstance(report_fusion, dict) else {},
-        stage_result=stage_result,
-        weekly_bars=weekly_bars or [],
-        suggested=suggested,
-        theory_status=str(theory_status or ""),
-        market_env_data=market_env_data if isinstance(market_env_data, dict) else {},
-        has_position=has_position,
-        data_status=str(data_status or report.get("data_status") or ""),
-        chip_resistance_lower=chip_resistance_lower,
-        chip_resistance_upper=chip_resistance_upper,
-        stage=short_term_momentum,  # synthesize_midline_verdict 已忽略 fallback_stage
+        current=ctx.current,
+        scene=str(ctx.scene or ""),
+        report_fusion=ctx.report_fusion if isinstance(ctx.report_fusion, dict) else {},
+        stage_result=ctx.stage_result,
+        weekly_bars=ctx.weekly_bars or [],
+        suggested=ctx.suggested,
+        theory_status=str(ctx.theory_status or ""),
+        market_env_data=ctx.market_env_data if isinstance(ctx.market_env_data, dict) else {},
+        has_position=ctx.has_position,
+        data_status=str(ctx.data_status or report.get("data_status") or ""),
+        chip_resistance_lower=ctx.chip_resistance_lower,
+        chip_resistance_upper=ctx.chip_resistance_upper,
+        stage=str(ctx.short_term_momentum or ""),
         mark=_mark,
     )
 
@@ -443,10 +444,10 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         # 累计 + 段耗时（后一项减前一项），便于定位 assemble 内部大头
         prev = 0.0
         segs: list[str] = []
-        for lab, sec in _marks:
-            delta = sec - prev
+        for lab, elapsed in _marks:
+            delta = elapsed - prev
             segs.append(f"{lab}=+{delta:.3f}s")
-            prev = sec
+            prev = elapsed
         total = _time.perf_counter() - _t0
         line = f"[TRADER_PROFILE] {target} total={total:.3f}s " + " ".join(segs)
         _logger.info(line)

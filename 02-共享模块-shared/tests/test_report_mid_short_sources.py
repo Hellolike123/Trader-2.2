@@ -190,8 +190,10 @@ class TestRenderDualTrack:
         md = render_short_midline(r)
         assert "🧭 中线" in md
         assert "⚡ 短线" in md
-        assert "阶段：蓄势偏强" in md
-        # 看法已并入「阶段：… · 偏多/偏空」；短线仍可单独有看法行
+        # 面板「阶段：」= 周线威科夫短词（fixture phase=none → 无阶段）；禁止日线 major_stage 冒充
+        assert "阶段：无阶段" in md
+        assert "阶段：蓄势偏强" not in md
+        # 看法已并入定论；短线仍可单独有看法行
         assert "中线：蓄势" not in md
         assert "🎯 结论" not in md
         assert "🗳️ 短线专家" not in md
