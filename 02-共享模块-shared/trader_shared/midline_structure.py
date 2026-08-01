@@ -231,11 +231,11 @@ def _calc_fibonacci_from_swings(
     *,
     lookback: int = 40,
 ) -> dict[str, Any]:
-    """从周线摆动高低点计算 Fibonacci 回撤位和延伸位。
+    """Fibonacci 回撤/延伸（对照用；主路径 build_midline_levels 不再调用）。
 
     找最近一段上升浪（swing_low → swing_high），计算：
-    - 38.2%/50%/61.8% 回撤位（黄金购买点候选）
-    - 138.2% 延伸位（波段目标）
+    - 38.2%/50%/61.8% 回撤位
+    - 138.2% 延伸位
     """
     n = min(lookback, len(highs))
     if n < 5:
@@ -680,7 +680,7 @@ def build_midline_levels(
     components["pullback_low"] = pb_lo_comp
     components["pullback_high"] = pb_hi_comp
 
-    # ── C/D. 压力 / 目标（fib 补充目标：fib_ext > 结构目标时覆盖；§9.5 过时现已放宽）───
+    # ── C/D. 压力 / 目标（§9.5：P0 无 fib；仅周线笔段/摆动）───
     resist: float | None = None
     resist_comp = "none"
     target: float | None = None
@@ -749,26 +749,10 @@ def build_midline_levels(
         # MA 降级不单独把 full 打成 partial；仅结构决定
         pass
 
-    # ── Fibonacci：黄金购买点 + 延伸目标 ────────────────────
-    golden_buy: float | None = None
-    golden_buy_comp = "none"
-    fib_result = _calc_fibonacci_from_swings(highs, lows, lookback=40)
-    fib_retrs = fib_result.get("retracements") or {}
-    fib_ext = fib_result.get("extension")
-
-    # 黄金购买点：50% 回撤位
-    gb_50 = fib_retrs.get("50.0%")
-    if gb_50 is not None and gb_50 > 0:
-        golden_buy = gb_50
-        golden_buy_comp = "fib_50_retracement"
-
-    # 目标：优先 Fibonacci 138.2% 延伸位（有预测意义），高于原历史高点目标
-    if fib_ext is not None and fib_ext > 0:
-        if target is None or fib_ext > target:
-            target = fib_ext
-            target_comp = "fib_138_extension"
-
-    components["golden_buy"] = golden_buy_comp
+    # ── Fibonacci：主路径关闭（恢复 midline-price-engine-plan §9.5）──
+    # 不写黄金买点、不用 138.2% 抬目标；helper `_calc_fibonacci_from_swings` 仅保留供对照。
+    components["golden_buy"] = "none"
+    components["target"] = target_comp  # 与 Fib 覆盖前一致，防止标签漂移
 
     return _pack(
         life_line=life_line,
@@ -776,7 +760,7 @@ def build_midline_levels(
         pullback_high=pb_hi,
         resist=resist,
         target=target,
-        golden_buy=golden_buy,
+        golden_buy=None,
         components=components,
         source=source,
         quality=quality,

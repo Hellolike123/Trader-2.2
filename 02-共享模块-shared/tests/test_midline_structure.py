@@ -302,6 +302,39 @@ class TestBuildMidlineLevels:
         assert r["components"]["target"] == "seg_high"
         assert r["merge_resist_target"] is True
         assert "压力/目标" in r["line_resist"]
+        # §9.5 / R-R6b：主路径关闭 Fib
+        assert r.get("golden_buy") is None
+        assert r["components"].get("golden_buy") == "none"
+        assert "fib_" not in str(r["components"].get("target"))
+        assert not (r.get("line_golden_buy") or "").strip()
+
+    def test_fib_does_not_raise_target_or_add_golden_buy(self):
+        """即使周线摆动能算出更高 138.2%，目标仍钉线段高，无黄金买点。"""
+        # 近 40 根：低 40 → 高 80，Fib138≈95.28；结构目标钉 62
+        bars = []
+        for i in range(40):
+            if i < 5:
+                c = 40.0 + i * 0.1
+            elif i < 25:
+                c = 40.0 + (i - 5) * 2.0  # 爬到 ~80
+            else:
+                c = 80.0 - (i - 25) * 0.5
+            bars.append(_bar(i, c, high=c + 1.0, low=max(1.0, c - 1.0)))
+        from trader_shared.midline_structure import _calc_fibonacci_from_swings, _extract_hl
+
+        highs, lows, _ = _extract_hl(bars)
+        fib = _calc_fibonacci_from_swings(highs, lows, lookback=40)
+        assert fib.get("extension") is not None and fib["extension"] > 62.0
+
+        r = build_midline_levels(
+            current=58.0,
+            weekly_bars=bars,
+            chanlun_midline=_CHAN_WEEKLY_FULL,
+        )
+        assert r["target"] == pytest.approx(62.0)
+        assert r["components"]["target"] == "seg_high"
+        assert r.get("golden_buy") is None
+        assert "黄金买点" not in (r.get("line_golden_buy") or "")
 
     def test_already_below_life(self):
         bars = _weekly_bars_n(40)
