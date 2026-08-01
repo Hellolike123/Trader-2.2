@@ -296,7 +296,7 @@ def _attach_short_midline_and_decision_impl(
             "regime": _regime,
             "current": current,
             "support": report.get("support"),
-            "stop": _eff_stop if _eff_stop is not None else report.get("stop"),
+            "stop": _key_price_stop if _key_price_stop is not None else report.get("stop"),
             "confirm": report.get("confirm"),
             "suggested_pct": suggested,
             "ma20": _ma20,

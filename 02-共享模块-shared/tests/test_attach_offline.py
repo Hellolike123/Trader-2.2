@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -82,6 +84,39 @@ def test_attach_short_midline_writes_discipline_or_conclusion():
     }
     out = attach_short_midline_and_decision(report, _sm_ctx())
     assert "discipline" in out or "conclusion" in out or "key_prices" in out
+
+
+def test_attach_rr11_flat_trailing_above_uses_hard_stop_no_nameerror():
+    """R-R11 完整 attach：空仓 + trailing>现价 → key_prices 止损=硬止损，无 NameError。"""
+    from trader_shared.report_pipeline.attach_short_midline import (
+        attach_short_midline_and_decision,
+    )
+
+    report = {
+        "current": 41.90,
+        "has_position": False,
+        "support": 41.82,
+        "stop": 40.57,
+        "trailing_stop": 47.21,
+        "effective_stop": 47.21,
+        "confirm": 42.74,
+        "resistance": 42.57,
+        "take": 43.59,
+        "scene": "防守观察",
+        "suggested_pct": 0,
+        "ma": {"ma5": 42.57, "ma10": 42.65, "ma20": 48.42},
+        "low_zone_lower": 41.82,
+        "low_zone_upper": 41.82,
+        "chanlun_midline": {},
+        "wyckoff_midline": {},
+        "chanlun": {},
+        "key_levels": {},
+    }
+    out = attach_short_midline_and_decision(report, _sm_ctx(has_position=False))
+    assert "gate_error" not in out or "_eff_stop" not in str(out.get("gate_error") or "")
+    kp = out.get("key_prices") or {}
+    assert kp.get("stop_sell") == pytest.approx(40.57)
+    assert float(kp.get("stop_sell") or 0) < 41.90
 
 
 def test_a3_daily_fallback_zones_not_weekly_pivots():
