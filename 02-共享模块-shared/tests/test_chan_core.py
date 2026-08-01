@@ -32,6 +32,9 @@ from trader_shared.chan_core import (
     _chan_type_canonical,
     _chanlun_compute,
     ChanlunEngine,
+    _strict_up_trend_zones,
+    _strict_down_trend_zones,
+    _connector_is_non_reverse,
 )
 
 
@@ -1767,6 +1770,175 @@ class TestClassifyStructure:
         result = classify_structure(zones, segments=segs, strokes=strokes, timeframe="daily")
         assert result["structure_type"] == "上涨趋势"
         assert result["structure_confidence"] == "low"
+
+
+class TestFakeTrendDemotion:
+    """假趋势降级（formulas.md §9.1 / §9.2 / §9.4）：连接段非反向 → 盘整。"""
+
+    @staticmethod
+    def _zone_with_span(zh_bottom, zh_top, start_index, end_index):
+        """带 members 笔索引的合并中枢（索引坐标系与传入 strokes/segments 一致）。"""
+        return {
+            "zh_bottom": zh_bottom,
+            "zh_top": zh_top,
+            "zh_center": (zh_bottom + zh_top) / 2,
+            "valid": True,
+            "members": [{
+                "zh_bottom": zh_bottom,
+                "zh_top": zh_top,
+                "valid": True,
+                "strokes": [{
+                    "direction": "up",
+                    "start_index": start_index,
+                    "end_index": end_index,
+                    "start_price": zh_bottom,
+                    "end_price": zh_top,
+                }],
+            }],
+        }
+
+    def test_same_dir_connector_demotes_to_consolidation(self):
+        """两同向不重叠中枢 + 连接段全同向 → 盘整（假趋势），非 structure_type=假趋势。"""
+        zones = [
+            self._zone_with_span(15.0, 20.0, 0, 10),
+            self._zone_with_span(25.0, 30.0, 20, 30),
+        ]
+        # 窗 (10, 20) 内两段同向 up（上涨趋势的连接段非反向）
+        segs = [
+            {"direction": "up", "start_index": 11, "end_index": 14},
+            {"direction": "up", "start_index": 15, "end_index": 18},
+        ]
+        strokes = self._make_indexed_strokes(32)
+        result = classify_structure(zones, segments=segs, strokes=strokes)
+        assert result["structure_type"] == "盘整"
+        assert "假趋势" in result.get("structure_evidence", "")
+
+    def test_reverse_connector_keeps_uptrend(self):
+        """两同向不重叠中枢 + 窗内有反向段 → 仍上涨趋势。"""
+        zones = [
+            self._zone_with_span(15.0, 20.0, 0, 10),
+            self._zone_with_span(25.0, 30.0, 20, 30),
+        ]
+        segs = [
+            {"direction": "up", "start_index": 11, "end_index": 13},
+            {"direction": "down", "start_index": 14, "end_index": 17},  # 反向连接
+            {"direction": "up", "start_index": 18, "end_index": 19},
+        ]
+        strokes = self._make_indexed_strokes(32)
+        result = classify_structure(zones, segments=segs, strokes=strokes)
+        assert result["structure_type"] == "上涨趋势"
+
+    def test_reverse_connector_keeps_downtrend(self):
+        """下跌趋势：窗内有 up 反向段 → 仍下跌趋势。"""
+        zones = [
+            self._zone_with_span(25.0, 30.0, 0, 10),
+            self._zone_with_span(15.0, 20.0, 20, 30),
+        ]
+        segs = [
+            {"direction": "down", "start_index": 11, "end_index": 13},
+            {"direction": "up", "start_index": 14, "end_index": 17},
+            {"direction": "down", "start_index": 18, "end_index": 19},
+        ]
+        strokes = self._make_indexed_strokes(32)
+        result = classify_structure(zones, segments=segs, strokes=strokes)
+        assert result["structure_type"] == "下跌趋势"
+
+    def test_bare_zones_without_indices_still_trend(self):
+        """裸区无 member 索引 → 无法证明假趋势，兼容旧行为仍判趋势。"""
+        zones = [
+            {"zh_top": 20.0, "zh_bottom": 15.0, "valid": True},
+            {"zh_top": 30.0, "zh_bottom": 25.0, "valid": True},
+        ]
+        segs = [{"direction": "up"} for _ in range(11)]
+        strokes = [{"direction": "up" if i % 2 == 0 else "down"} for i in range(12)]
+        result = classify_structure(zones, segments=segs, strokes=strokes)
+        assert result["structure_type"] == "上涨趋势"
+
+    def test_overlap_still_consolidation(self):
+        """重叠中枢 → 盘整（与假趋势无关，锁回归）。"""
+        zones = [
+            self._zone_with_span(15.0, 20.0, 0, 10),
+            self._zone_with_span(14.0, 18.0, 20, 30),  # 与前重叠
+        ]
+        segs = [
+            {"direction": "down", "start_index": 11, "end_index": 18},
+        ]
+        strokes = self._make_indexed_strokes(32)
+        result = classify_structure(zones, segments=segs, strokes=strokes)
+        assert result["structure_type"] == "盘整"
+
+    def test_zero_zones_with_segments_is_no_structure(self):
+        """0 中枢 + 有线段 → 无结构（§11A 锁）。"""
+        strokes = self._make_indexed_strokes(8)
+        result = classify_structure(
+            [], segments=[{"direction": "up", "start_index": 0, "end_index": 2}], strokes=strokes
+        )
+        assert result["structure_type"] == "无结构"
+
+    def test_strict_up_false_on_fake_trend_with_strokes(self):
+        """_strict_up_trend_zones：假趋势夹同向连接 → False（一类不可开火）。"""
+        zones = [
+            self._zone_with_span(15.0, 20.0, 0, 10),
+            self._zone_with_span(25.0, 30.0, 20, 30),
+        ]
+        strokes = [
+            {"direction": "up", "start_index": 11, "end_index": 14},
+            {"direction": "up", "start_index": 15, "end_index": 18},
+        ]
+        assert _strict_up_trend_zones(zones) is True  # 无 strokes 时跳过连接检查
+        assert _strict_up_trend_zones(zones, strokes=strokes) is False
+        assert _connector_is_non_reverse(zones[0], zones[1], "up", strokes=strokes) is True
+
+    def test_strict_up_true_on_reverse_connector(self):
+        """_strict_up_trend_zones：窗内有反向连接 → True。"""
+        zones = [
+            self._zone_with_span(15.0, 20.0, 0, 10),
+            self._zone_with_span(25.0, 30.0, 20, 30),
+        ]
+        strokes = [
+            {"direction": "up", "start_index": 11, "end_index": 13},
+            {"direction": "down", "start_index": 14, "end_index": 17},
+        ]
+        assert _strict_up_trend_zones(zones, strokes=strokes) is True
+
+    def test_strict_down_false_on_fake_trend(self):
+        """_strict_down_trend_zones：下跌假趋势 → False。"""
+        zones = [
+            self._zone_with_span(25.0, 30.0, 0, 10),
+            self._zone_with_span(15.0, 20.0, 20, 30),
+        ]
+        strokes = [
+            {"direction": "down", "start_index": 11, "end_index": 14},
+            {"direction": "down", "start_index": 15, "end_index": 18},
+        ]
+        assert _strict_down_trend_zones(zones, strokes=strokes) is False
+        strokes_rev = [
+            {"direction": "down", "start_index": 11, "end_index": 13},
+            {"direction": "up", "start_index": 14, "end_index": 17},
+        ]
+        assert _strict_down_trend_zones(zones, strokes=strokes_rev) is True
+
+    @staticmethod
+    def _make_indexed_strokes(n):
+        strokes = []
+        for i in range(n):
+            if i % 2 == 0:
+                strokes.append({
+                    "direction": "up",
+                    "start_price": 10.0,
+                    "end_price": 15.0,
+                    "start_index": i * 2,
+                    "end_index": i * 2 + 1,
+                })
+            else:
+                strokes.append({
+                    "direction": "down",
+                    "start_price": 15.0,
+                    "end_price": 10.0,
+                    "start_index": i * 2,
+                    "end_index": i * 2 + 1,
+                })
+        return strokes
 
 
 class TestChanlunAnalysisIntegration:

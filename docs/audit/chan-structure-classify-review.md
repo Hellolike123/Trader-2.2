@@ -2,8 +2,12 @@
 
 > 日期：2026-07-10  
 > 审查人：Reviewer Agent（只读 + 跑测，未改业务代码）  
-> 计划：`docs/chan-structure-classify-fix-plan.md`  
+> 计划：`docs/plans/done/chan-structure-classify-fix-plan.md`  
 > 判定：**通过**
+>
+> ** supersession（本周期）**：§11A 已落地——0 中枢+有线段 → **无结构**（勿再按计划 §1.3
+> 「有线段→盘整」当现行）；§9 假趋势 demotion 已在 `classify_structure`（连接段非反向→盘整）；
+> 渲染路径为 `short_midline.py`（经 `attach_short_midline`）。
 
 ---
 
@@ -94,23 +98,13 @@ if zones_trend in ("上涨趋势", "下跌趋势"):
 - `structure_confidence`：段数 × timeframe 门槛
 - `structure_evidence`：`segments={n},pivots={m}`
 - `chanlun_analysis` 透传 `structure_confidence` / `structure_evidence`
-- 0 中枢有线段 → `盘整` + conf 通常 `low`（弱盘整，符合 §1.3）
+- 0 中枢有线段 → **`无结构`**（§11A；计划 §1.3「有线段→盘整」已 superseded）
+- 2+ 同向不重叠但连接段非反向 → **`盘整`**（假趋势，§9；evidence 可注；非 `structure_type=假趋势`）
 
 ### [PASS] 代码：midline/daily 报告引用不交叉
 
-**`report_core.py` 理论区（约 168–178 行）**
-
-```python
-_chan_mid = r.get("chanlun_midline")
-# 严格用中线缠结果，禁止回退到日线 fusion
-_chan_compact = format_chanlun_theory_line(_chan_mid)
-```
-
-**短线专家区（约 189–199 行）**
-
-```python
-_csig2 = fusion_signals.get("chan")  # 日线 fusion 事件信号
-```
+**渲染**：`attach_short_midline` → `report_renderer/short_midline.py`（中线缠论只读
+`chanlun_midline` / `format_chanlun_theory_line`；短线读日线 fusion / 日线缠论扳机）。
 
 **双源策略**
 
@@ -121,7 +115,7 @@ _csig2 = fusion_signals.get("chan")  # 日线 fusion 事件信号
 
 单测：`test_daily_and_midline_timeframe_separated`、`test_theory_line_*`。
 
-说明：本轮相关测试**未**直接 import `report_core` 断言理论字段源；以代码静态审查 + midline 单元测试为准，**PASS**。P1 见下。
+说明：本轮相关测试以代码静态审查 + midline 单元测试为准，**PASS**。
 
 ### [PASS] 单测覆盖计划 §3
 
@@ -187,13 +181,14 @@ rg "线段不足" 02-共享模块-shared/trader_shared/chan_core.py
 |------|------------|------|
 | strokes &lt; 3 | 无结构 | `_ok("无结构")` |
 | 0 中枢 + 单边启发式 | 单边上涨/下跌 | `_detect_unilateral` |
-| 0 中枢 + 有线段 | 盘整（弱） | `_ok("盘整")` |
+| 0 中枢 + 有线段 | **无结构**（§11A） | `_ok("无结构")` |
 | 0 中枢 + 无线段 | 无结构 | `_ok("无结构")` |
 | 1 中枢 | 盘整 | 先拓扑循环再 `len==1` 返回盘整 |
-| 2+ 同向不重叠 | 上涨/下跌趋势 | 直接 `_ok(zones_trend)` |
+| 2+ 同向不重叠 + 连接段反向 | 上涨/下跌趋势 | `_ok(zones_trend)` |
+| 2+ 同向不重叠 + 连接段非反向 | 盘整（假趋势） | demote；evidence 可注 §9.2 |
 | 2+ 重叠/混乱 | 盘整 | 末尾 `_ok("盘整")` |
 
-与计划 §1.2–1.4 **一致**。
+与现行 formulas §4.3 / §9 / §11A **一致**（计划 §1.3 有线段→盘整 已 superseded）。
 
 ---
 
@@ -205,8 +200,8 @@ rg "线段不足" 02-共享模块-shared/trader_shared/chan_core.py
 
 ### P1（非阻塞建议）
 
-1. **report_core 理论源缺少自动化回归**  
-   当前靠静态读码确认理论行只读 `chanlun_midline`。建议补 1 条轻量单测：mock `r["chanlun_midline"]` vs fusion 日线结构不同时，输出行只含 midline 文案。  
+1. **short_midline 理论源缺少自动化回归**  
+   当前靠静态读码确认理论行只读 `chanlun_midline`（经 `attach_short_midline`）。建议补 1 条轻量单测：mock midline vs fusion 日线结构不同时，输出行只含 midline 文案。  
    影响：防未来回归交叉引用；**不挡本次合并**。
 
 2. **历史缓存「线段不足」兼容分支无专测**  
@@ -228,7 +223,7 @@ rg "线段不足" 02-共享模块-shared/trader_shared/chan_core.py
 | `trader_shared/config.py` | 日周 8 常量 | 与计划默认值一致 |
 | `tests/test_chan_core.py` | 结构/ conf / 流水线 | 覆盖 §3 核心 |
 | `tests/test_chan_midline.py` | 中线 timeframe / 展示 | 覆盖双源与展示 |
-| `report_core.py` | 理论只读 midline | 静态 PASS（本轮 diff 未强制要求改 report） |
+| `report_renderer/short_midline.py` | 理论只读 midline（经 attach） | 静态 PASS |
 
 ---
 

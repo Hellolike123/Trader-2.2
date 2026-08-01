@@ -1,9 +1,12 @@
 # 方案 B 纪律拆分 Review
 
 > 日期：2026-07-10  
-> 规格：`docs/chan-discipline-b-plan.md`  
+> 规格：`docs/plans/done/chan-discipline-b-plan.md`  
 > 审查范围：只读验收 Implementer 拆分；不改业务代码  
 > 总判：**APPROVE**
+>
+> **路径勘误（本周期维护）**：报告挂接 / 渲染为 `attach_short_midline` →
+> `report_renderer/short_midline.py`（历史文中 `report_core` 手拼路径已迁）。
 
 ---
 
@@ -21,7 +24,7 @@
 | T2 | 派发 + 缠多/三类买 → notes 含冲突或风控，不允许新开 | **PASS** | `stage in ("派发","衰退")` → `_block_new` + 有 `buy_point_types` 时 `stage_buy_conflict` notes（L224–234）；`TestT2PaifaConflict` |
 | T3 | gate `action=观望` 时 merge 后不得变轻仓/回踩/持有 | **PASS** | `merge_discipline`：`_stricter_action` + `allow_new` 否决开仓类 + gate 观望/不做双保险（L348–364）；`TestT3MergeTightenOnly` 含恶意 chan 放宽用例 |
 | T4 | report 含 `discipline`（及可选 `chan_discipline`） | **PASS** | `run_analysis.py` L1638–1641：`report["chan_discipline"]` / `report["discipline"]`；异常路径 `setdefault` 兜底（L1720–1730） |
-| T5 | 渲染/原因可见「不在回踩区」或「中线看法偏空」类 | **PASS** | `conclusion_block` 优先 `entry_block_reason` / `discipline_notes`（L312–335）；`report_core` 出手行 `execution（reason）`（L216–219）；`TestT5ReasonVisible` |
+| T5 | 渲染/原因可见「不在回踩区」或「中线看法偏空」类 | **PASS** | `conclusion_block` 优先 `entry_block_reason` / `discipline_notes`；`attach_short_midline` → `short_midline` 出手/原因行；`TestT5ReasonVisible` |
 | T6 | 中线 `mid_view` 暂缓 → `allow_new_entry=False` | **PASS** | `_is_mid_view_weak` 含「暂缓/偏空/…」（L62–66）；`TestT6MidViewWeak` |
 | T7 | low conf → cap 下降或观望 | **PASS** | 缠侧 `mid_quality`/`structure_confidence=low` → conf_block 否决；仅 fusion/data → conf_down 砍半（L195–214）；`TestT7LowConfidence` |
 
@@ -35,7 +38,7 @@
 | B2 `merge_discipline` 只收紧 | **PASS** | False 赢；action rank；cap=min；notes 并集去重保序 |
 | B3 gate 迁出缠规则 | **PASS** | 回踩 / mid_view / 筹码资金 / 缠侧 conf 已 `# migrated` 注释并删除逻辑；`test_mistery_gate` 迁出回归 |
 | B4 `run_analysis` 接线 + 砍仓 | **PASS** | 顺序 gate→chan→merge；`allow_new_entry=False` 时 `suggested_pct=0`（无仓）/ 禁止加仓语义（有仓） |
-| B5 conclusion / report 读 discipline | **PASS** | `build_conclusion_block(discipline=…)`；report 出手用 conclusion.reason；失效优先 `discipline.invalidation` |
+| B5 conclusion / report 读 discipline | **PASS** | `build_conclusion_block(discipline=…)`；`attach_short_midline` 出手用 conclusion.reason；失效优先 `discipline.invalidation` |
 | B6 单测全家桶 | **PASS** | 见下方 pytest |
 | B7 买点阶梯 + 盘整禁重仓 | **N/A（P1）** | 规格允许另开 PR；代码未伪装实现 |
 
@@ -82,7 +85,7 @@ mid_key_prices / mid_view 文案
 ### 消费链
 
 - `conclusion_block`：`discipline` 优先于 gate 决定 action/cap；reason 注入 entry_block / 回踩 / 偏空 / 置信 / 筹码 / 资金。
-- `report_core`：出手 `execution（reason）` 来自 conclusion；失效读 `discipline` 再回退 gate。
+- `attach_short_midline` → `short_midline.py`：出手/原因来自 conclusion；失效读 `discipline` 再回退 gate。
 
 ---
 

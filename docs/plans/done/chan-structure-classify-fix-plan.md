@@ -3,6 +3,11 @@
 > 日期：2026-07-10  
 > 模式：双 Agent（Implementer → Reviewer）  
 > 业务与代码必须一一对应，审查按清单验收。
+>
+> **Supersession（2026-08 / P1）**：勿再按本文 §1.3「0 中枢+有线段→盘整」施工。
+> 现行法源：`formulas.md` **§11A** → 0 中枢+有线段 = **无结构**；**§9** 假趋势
+> （连接段非反向）已在 `classify_structure` demote→**盘整**（非 `structure_type=假趋势`）。
+> Review：`docs/audit/chan-structure-classify-review.md`。
 
 ---
 

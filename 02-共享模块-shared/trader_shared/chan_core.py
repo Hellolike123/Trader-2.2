@@ -62,6 +62,10 @@ from .chan_structure import (
     _structure_conf_thresholds,
     _structure_confidence,
     _zone_last_end_index,
+    _zone_first_start_index,
+    _connector_is_non_reverse,
+    _strict_down_trend_zones,
+    _strict_up_trend_zones,
     classify_structure,
     detect_buy_points,
     detect_divergence,
@@ -151,17 +155,18 @@ def _chanlun_compute(
         _anchor_bar = _last_pivot_anchor_bar(segments, strokes, merged_zones)
     divergence = detect_divergence(
         cleaned, strokes, anchor_bar=_anchor_bar, zones=zones, bc_mode=divergence_bc,
+        segments=segments,
     )
     macd_divergence_buy = _check_macd_for_2nd_buy(cleaned, strokes)
     macd_divergence_sell = _check_macd_for_2nd_sell(cleaned, strokes)
 
     buy_points = detect_buy_points(
         strokes, zones, current, macd_for_buy_sell_curr, macd_for_buy_sell_prev,
-        macd_divergence_buy, bars=cleaned, bc_mode=divergence_bc,
+        macd_divergence_buy, bars=cleaned, bc_mode=divergence_bc, segments=segments,
     )
     sell_points = detect_sell_points(
         strokes, zones, current, macd_for_buy_sell_curr, macd_for_buy_sell_prev,
-        macd_divergence_sell, bars=cleaned, bc_mode=divergence_bc,
+        macd_divergence_sell, bars=cleaned, bc_mode=divergence_bc, segments=segments,
     )
 
     # --- E1: 多级别区间套确认 ---
