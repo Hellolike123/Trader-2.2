@@ -350,7 +350,7 @@ T0：…
 |------|------|------|
 | 出手 / 新开清单 C1 | mistery_gate + chan_discipline | 五项不全绿 → 新开否 |
 | 仓位上限 | merge 取更严 | 只裁 cap，不改 major_stage / fusion 分 / support / stop |
-| 决策收紧清零 | `decision_view.apply_decision_view` | 禁止新开时 `suggested_pct` / 仓位 cap 归零 |
+| 决策收紧清零 | `decision_view.apply_execution_caps`（DV 之后单一出口；含 fail-closed） | 禁止新开时 `suggested_pct` / 仓位 cap 归零 |
 | 失效 | chan_discipline | 跌破 MA20 反抽不回 / 跌破止损等 |
 | regime 很差 | fusion_regime 权重归零 | 加权分偏中性/空仓侧动作（非固定「暂不碰」文案） |
 

@@ -429,6 +429,18 @@ def attach_short_midline_and_decision(
                     "summary_line": "共振：跳过",
                 }
             report.setdefault("buy_point_lifecycle", {"status": "none", "display_line": ""})
+            # 栈后异常：仍 fail-closed DV + 单一 caps 出口（防 suggested_pct 残留）
+            report["decision_view"] = {
+                "schema_version": "decision_view_v1",
+                "allow_new_recommend": False,
+                "summary_line": f"决策：管道失败·不新开（{_pipe_exc}）",
+            }
+            try:
+                from trader_shared.decision_view import apply_execution_caps
+
+                apply_execution_caps(report)
+            except Exception:
+                pass
     except Exception as _sm_exc:
         # 短中线组装失败不阻断主报告；保留原字段
         report.setdefault("key_prices", {})
@@ -458,6 +470,18 @@ def attach_short_midline_and_decision(
             ensure_report_analysis_cards(report)
         except Exception:
             report.setdefault("analysis_cards", {})
+        # fail-closed DV + 单一 caps 出口（清零 stage_pack 残留 suggested_pct）
+        report["decision_view"] = {
+            "schema_version": "decision_view_v1",
+            "allow_new_recommend": False,
+            "summary_line": f"决策：短中线失败·不新开（{_sm_exc}）",
+        }
+        try:
+            from trader_shared.decision_view import apply_execution_caps
+
+            apply_execution_caps(report)
+        except Exception:
+            pass
         _mark("conclusion")
 
     return report

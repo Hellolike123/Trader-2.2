@@ -182,3 +182,48 @@ def test_attach_short_midline_has_no_suggested_pct_surgery_block():
     assert "0%（纪律不新开）" not in src
     assert "0%（纪律禁止加仓；持仓按减仓/观察）" not in src
     assert "纪律 cap 收紧" not in src
+
+
+def test_attach_short_midline_outer_fail_zeros_caps_via_execution_caps(monkeypatch):
+    """短中线外层失败：fail-closed DV + apply_execution_caps 清零 stage_pack 残留。"""
+    from trader_shared.report_pipeline.attach_short_midline import (
+        attach_short_midline_and_decision,
+    )
+
+    report = {
+        "suggested_pct": 22,
+        "position_info": {"suggested_pct": 22},
+        "has_position": False,
+        "discipline": {
+            "allow_new_entry": True,
+            "suggested_pct_cap": 22,
+            "position_cap_pct": 22,
+        },
+    }
+
+    def _boom_key_prices(**_k):
+        raise RuntimeError("key_prices boom")
+
+    import trader_shared.key_prices as kp
+
+    monkeypatch.setattr(kp, "build_key_prices", _boom_key_prices)
+    out = attach_short_midline_and_decision(
+        report,
+        current=10.0,
+        scene="回踩",
+        report_fusion={"weighted_score": 0.3, "action": "半仓试"},
+        stage_result={"major_stage": "蓄势", "momentum": "中性"},
+        weekly_bars=[],
+        suggested=22,
+        theory_status="",
+        market_env_data={},
+        has_position=False,
+        data_status="full",
+        chip_resistance_lower=None,
+        chip_resistance_upper=None,
+        stage="蓄势",
+    )
+    assert out["decision_view"]["allow_new_recommend"] is False
+    assert out["suggested_pct"] == 0
+    assert out["position_info"]["suggested_pct"] == 0
+    assert out["discipline"]["suggested_pct_cap"] == 0

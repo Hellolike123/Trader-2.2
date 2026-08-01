@@ -483,7 +483,7 @@ def _detect_major_stage(
         current: 当前价格
         ma_values: 均线值字典（保留用于兜底兼容）
         bars: K线数据
-        fusion_hint: 融合层信号（微调用）
+        fusion_hint: 已废弃（兼容入参）；fusion 仅仪表，不得微调 major_stage
         wyckoff_result: 威科夫分析结果
         chan_result: 缠论分析结果（兜底保留，当前未使用）
         main_force_result: 主力行为分析结果

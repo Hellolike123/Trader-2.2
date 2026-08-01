@@ -161,6 +161,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     data_status = str(getattr(_ctx, "data_status", None) or getattr(snapshot, "data_status", None) or "full")
 
     # === 融合层（阶段函数：report_pipeline.run_fusion_stage）===
+    # 延期：更晚 relocate（结构/筹码之后）— 架构 #5 非 P0；见 resonance-and-orchestration §6
     from trader_shared.report_pipeline import run_fusion_stage
 
     report_fusion, _pre_cards, volume_warning = run_fusion_stage(
