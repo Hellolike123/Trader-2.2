@@ -55,7 +55,6 @@ def run_stage_positioning_stage(
     chip_support_lower: Any,
     chip_resistance_lower: Any,
     chip_resistance_upper: Any,
-    report_fusion: dict[str, Any],
     wyck_result: dict[str, Any],
     mf_result: dict[str, Any] | None,
     chan_result: dict[str, Any],
@@ -69,6 +68,7 @@ def run_stage_positioning_stage(
 
     自 build_report 抽出；可能改写 levels['take']。
     返回 stage_result / ma250 / bars_date / upward_momentum / take。
+    不消费 fusion（仪表在 stage_pack 后 merge）。
     """
     from trader_shared.light_data import to_float
     from trader_shared.report_presentation import upward_momentum_observation
@@ -142,7 +142,91 @@ def run_stage_positioning_stage(
     }
 
 
-def assemble_base_report(
+_ASSEMBLE_CTX_KEYS = (
+    "intraday_as_of",
+    "quote",
+    "sec",
+    "analysis_time",
+    "current",
+    "weekly_proxy_close",
+    "monthly_proxy_close",
+    "support",
+    "resistance",
+    "confirm",
+    "stop",
+    "take",
+    "stage",
+    "scene",
+    "levels",
+    "replay",
+    "volume_text",
+    "upward_momentum",
+    "low",
+    "high",
+    "snapshot",
+    "bars",
+    "risk_flags",
+    "atr14_val",
+    "atr_ratio_val",
+    "atr_level",
+    "atr_cap",
+    "st",
+    "st_dir",
+    "vwap_res",
+    "base_status",
+    "theory_status",
+    "state_label",
+    "volume_note",
+    "market_env_data",
+    "position_cap",
+    "ma250",
+    "chip",
+    "chip_peaks",
+    "chip_support",
+    "chip_resistance",
+    "chip_support_lower",
+    "chip_support_upper",
+    "chip_resistance_lower",
+    "chip_resistance_upper",
+    "report_fusion",
+    "main_force_score_result",
+    "big_order_result",
+    "stage_result",
+    "wyck_result",
+    "wyck_mid_result",
+    "chan_result",
+    "chan_mid_result",
+    "expma10_val",
+    "expma12_val",
+    "expma20_val",
+    "expma50_val",
+    "expma_trend",
+    "expma_status_result",
+    "resonance_result",
+    "sector_data",
+    "atr_adjust",
+    "atr_data_source",
+    "fusion_pre_cards",
+)
+
+
+def assemble_base_report(ctx: Any) -> dict[str, Any]:
+    """Thin：从 StageContext bag 组装基础 report。"""
+    kwargs = {k: ctx.get(k) for k in _ASSEMBLE_CTX_KEYS}
+    # 缺省与 kwargs 路径一致
+    if kwargs.get("atr_adjust") is None:
+        kwargs["atr_adjust"] = "unknown"
+    if kwargs.get("atr_data_source") is None:
+        kwargs["atr_data_source"] = ""
+    return _assemble_base_report_impl(**kwargs)
+
+
+def assemble_base_report_kwargs(**kwargs: Any) -> dict[str, Any]:
+    """Deprecated one-release：测试/旧调用方可继续 kwargs。"""
+    return _assemble_base_report_impl(**kwargs)
+
+
+def _assemble_base_report_impl(
     *,
     intraday_as_of: Any,
     quote: dict[str, Any],
@@ -189,7 +273,7 @@ def assemble_base_report(
     chip_support_upper: Any,
     chip_resistance_lower: Any,
     chip_resistance_upper: Any,
-    report_fusion: dict[str, Any],
+    report_fusion: dict[str, Any] | None = None,  # 占位；生产路径由 merge 后写 tagged fusion
     main_force_score_result: dict[str, Any],
     big_order_result: dict[str, Any],
     stage_result: dict[str, Any],
@@ -209,7 +293,10 @@ def assemble_base_report(
     atr_data_source: str = "",
     fusion_pre_cards: Any = None,
 ) -> dict[str, Any]:
-    """组装 build_report 基础 dict，并 sync 非内部 levels 字段。"""
+    """组装 build_report 基础 dict，并 sync 非内部 levels 字段。
+
+    fusion：可占位；生产 builder 在 stage_pack 后 ``run_fusion_merge_stage`` 覆写 tagged。
+    """
     from trader_shared.report_presentation import ma_text
 
     # stage 入参为旧 determine_stage；不再写入 report，避免与 EXPMA 动能双真相
@@ -317,8 +404,11 @@ def assemble_base_report(
         "chip_peaks": chip_peaks,
         "chip_current_pct": chip.get("current_pct"),
         "chip_mid_price": chip.get("mid_price"),
-        "fusion": tag_fusion_as_instrument(
-            report_fusion if isinstance(report_fusion, dict) else {}
+        # 生产路径：merge 后覆写 tagged fusion；此处占位或兼容旧 kwargs
+        "fusion": (
+            tag_fusion_as_instrument(report_fusion)
+            if isinstance(report_fusion, dict) and report_fusion
+            else {}
         ),
         "gap": levels.get("gap"),
         "time_window": levels.get("time_window"),

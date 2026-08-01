@@ -14,6 +14,7 @@ REQUIRED_KEYS = {
     "pool",
     "pending",
     "last_plan",
+    "pool_archive",
     "signals",
     "chip_history",
     "calibrated_params",
@@ -40,6 +41,7 @@ def test_keys_resolve_under_trader_root(tmp_path: Path, monkeypatch):
     assert trader_root() == root
     assert path("root") == root
     assert path("pool") == root / "pool.json"
+    assert path("pool_archive") == root / "pool_archive.json"
     assert path("holdings") == root / "holdings.json"
     assert path("position") == root / "position.json"
     assert path("positions_portfolio") == root / "positions.json"
@@ -123,6 +125,31 @@ def test_writers_route_through_registry(tmp_path: Path, monkeypatch):
     assert _chip_history_path() == root / "chip_history.json"
     assert _position_path() == root / "position.json"
     assert _ledger_path() == root / "t0_ledger.jsonl"
+
+
+def test_signal_core_pool_count_uses_trader_root(tmp_path: Path, monkeypatch):
+    """C leak lock: get_pool_count must honor TRADER_ROOT, not HOME/.trader."""
+    import json
+
+    root = tmp_path / "root"
+    root.mkdir()
+    home = tmp_path / "home"
+    (home / ".trader").mkdir(parents=True)
+    monkeypatch.setenv("TRADER_ROOT", str(root))
+    monkeypatch.setenv("HOME", str(home))
+
+    (root / "pool.json").write_text(
+        json.dumps({"items": [{"name": "A", "status": "执行"}, {"name": "B", "status": "淘汰"}]}),
+        encoding="utf-8",
+    )
+    (home / ".trader" / "pool.json").write_text(
+        json.dumps({"items": [{"name": "X", "status": "执行"}]}),
+        encoding="utf-8",
+    )
+
+    from trader_shared.signal_core import get_pool_count
+
+    assert get_pool_count() == 1
 
 
 def test_t0_save_uses_trader_root_without_datamanager_patch(tmp_path: Path, monkeypatch):

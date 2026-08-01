@@ -102,7 +102,9 @@ def one_sentence(r: dict[str, Any], low_zone: str) -> str:
 
 def read_signals_for_report(target: str, daily_bars: list[dict[str, Any]]) -> tuple[float, dict | None]:
     global _signals_cache_data, _signals_cache_mtime, _signals_cache_path
-    signals_path = os.path.expanduser("~/.trader/signals.jsonl")
+    from trader_shared.trader_paths import path as trader_path
+
+    signals_path = str(trader_path("signals"))
 
     try:
         current_mtime = os.path.getmtime(signals_path)
@@ -218,7 +220,9 @@ def read_signals_for_report(target: str, daily_bars: list[dict[str, Any]]) -> tu
 
 def load_historical_win_rate(target: str) -> dict | None:
     """从 signals.jsonl + 日线回算历史胜率（供报告/复盘展示）。"""
-    signals_path = os.path.expanduser("~/.trader/signals.jsonl")
+    from trader_shared.trader_paths import path as trader_path
+
+    signals_path = str(trader_path("signals"))
     if not os.path.exists(signals_path):
         return None
     normalized = str(target or "").replace(".SH", "").replace(".SZ", "").strip()
@@ -247,10 +251,11 @@ def load_historical_win_rate(target: str) -> dict | None:
     return win_rate_data
 
 def get_pool_count() -> int:
-    from pathlib import Path
-    path = Path.home() / ".trader" / "pool.json"
+    from trader_shared.trader_paths import path as trader_path
+
+    pool_file = trader_path("pool")
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(pool_file.read_text(encoding="utf-8"))
         items = data.get("items", [])
         return sum(1 for i in items if i.get("status") not in {"淘汰", "已退出"})
     except Exception:

@@ -15,15 +15,22 @@ from trader_shared.report_pipeline.attach import (
     apply_buy_point_lifecycle,
     attach_analysis_decision_stack,
     attach_short_midline_and_decision,
+    attach_short_midline_and_decision_kwargs,
     attach_stage_position_pack,
+    attach_stage_position_pack_kwargs,
     sync_report_with_data,
 )
-from trader_shared.report_pipeline.fusion_stage import run_fusion_stage
+from trader_shared.report_pipeline.fusion_stage import (
+    run_fusion_merge_stage,
+    run_fusion_stage,
+    run_pre_cards_stage,
+)
 from trader_shared.report_pipeline.structure_stage import run_structure_stage
 from trader_shared.report_pipeline.chip_stage import run_chip_enrichment_stage
 from trader_shared.report_pipeline.assemble_stage import (
     _calc_volume_ratio_from_bars,
     assemble_base_report,
+    assemble_base_report_kwargs,
     run_stage_positioning_stage,
 )
 from trader_shared.report_pipeline.context_stage import run_analysis_context_stage
@@ -39,13 +46,18 @@ __all__ = [
     "apply_buy_point_lifecycle",
     "attach_analysis_decision_stack",
     "attach_short_midline_and_decision",
+    "attach_short_midline_and_decision_kwargs",
     "sync_report_with_data",
     "attach_stage_position_pack",
+    "attach_stage_position_pack_kwargs",
     "run_fusion_stage",
+    "run_pre_cards_stage",
+    "run_fusion_merge_stage",
     "run_structure_stage",
     "run_chip_enrichment_stage",
     "_calc_volume_ratio_from_bars",
     "run_stage_positioning_stage",
     "assemble_base_report",
+    "assemble_base_report_kwargs",
     "run_analysis_context_stage",
 ]

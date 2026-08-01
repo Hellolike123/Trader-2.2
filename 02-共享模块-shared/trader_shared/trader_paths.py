@@ -16,6 +16,7 @@ PATH_KEYS (filenames under trader_root unless noted):
   pool                     → pool.json
   pending                  → pending.json
   last_plan                → last_plan.json
+  pool_archive             → pool_archive.json
   signals                  → signals.jsonl
   chip_history             → chip_history.json
   calibrated_params        → calibrated_params.json
@@ -43,6 +44,7 @@ _FILE_BY_KEY: dict[str, str] = {
     "pool": "pool.json",
     "pending": "pending.json",
     "last_plan": "last_plan.json",
+    "pool_archive": "pool_archive.json",
     "signals": "signals.jsonl",
     "chip_history": "chip_history.json",
     "calibrated_params": "calibrated_params.json",

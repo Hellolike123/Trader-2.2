@@ -15,6 +15,7 @@ def test_attach_facade_reexports():
     from trader_shared.report_pipeline.attach_buy_point import apply_buy_point_lifecycle
     from trader_shared.report_pipeline.attach_short_midline import (
         attach_short_midline_and_decision,
+        attach_short_midline_and_decision_kwargs,
     )
 
     assert facade.apply_buy_point_lifecycle is apply_buy_point_lifecycle
@@ -41,6 +42,7 @@ def test_sync_report_with_data_fixes_stop_above_support():
 def test_attach_short_midline_writes_discipline_or_conclusion():
     from trader_shared.report_pipeline.attach_short_midline import (
         attach_short_midline_and_decision,
+        attach_short_midline_and_decision_kwargs,
     )
 
     report = {
@@ -56,7 +58,7 @@ def test_attach_short_midline_writes_discipline_or_conclusion():
         "wyckoff_midline": {},
         "chanlun": {},
     }
-    out = attach_short_midline_and_decision(
+    out = attach_short_midline_and_decision_kwargs(
         report,
         current=10.0,
         scene="观察",
@@ -79,6 +81,7 @@ def test_a3_daily_fallback_zones_not_weekly_pivots():
     """A3：daily_fallback zones 不得冒充周中枢 / pivot_position_weekly。"""
     from trader_shared.report_pipeline.attach_short_midline import (
         attach_short_midline_and_decision,
+        attach_short_midline_and_decision_kwargs,
     )
 
     bait_zones = [{"valid": True, "zh_bottom": 9.0, "zh_top": 11.0, "zh_center": 10.0}]
@@ -106,7 +109,7 @@ def test_a3_daily_fallback_zones_not_weekly_pivots():
         },
         "chanlun": {},
     }
-    out = attach_short_midline_and_decision(
+    out = attach_short_midline_and_decision_kwargs(
         report,
         current=10.0,
         scene="观察",
@@ -135,6 +138,7 @@ def test_a3_weekly_zones_feed_pivot_when_timeframe_weekly():
     """对照：真 weekly zones 仍可进 pivot_position_weekly。"""
     from trader_shared.report_pipeline.attach_short_midline import (
         attach_short_midline_and_decision,
+        attach_short_midline_and_decision_kwargs,
     )
 
     report = {
@@ -157,7 +161,7 @@ def test_a3_weekly_zones_feed_pivot_when_timeframe_weekly():
         "wyckoff_midline": {"phase": "accumulation_b", "phase_label": "吸筹B"},
         "chanlun": {},
     }
-    out = attach_short_midline_and_decision(
+    out = attach_short_midline_and_decision_kwargs(
         report,
         current=10.0,
         scene="观察",
@@ -182,7 +186,7 @@ def test_expert_conf_average_seats_use_vpf_not_wyckoff():
 
     from trader_shared.report_pipeline import attach_short_midline as mod
 
-    src = inspect.getsource(mod.attach_short_midline_and_decision)
+    src = inspect.getsource(mod._attach_short_midline_and_decision_impl)
     assert '("chan", "momentum", "vpf")' in src or "('chan', 'momentum', 'vpf')" in src
     assert '("chan", "momentum", "wyckoff")' not in src
     assert "('chan', 'momentum', 'wyckoff')" not in src

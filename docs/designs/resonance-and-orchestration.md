@@ -155,7 +155,7 @@ CLI / Skill（trader · t0 · review · portfolio …）
 | **2** | strategy context 可读共振；包可 match grade | 可选更严（旧包不变） | ✅ `build_match_context` 暴露 `resonance_*`；YAML `field: resonance_grade` |
 | **3** | decision_view：新开听 共振∧策略∧纪律 | **改变**（只收紧；禁止新开时 caps/`suggested_pct` 归零） | ✅ `decision_view.py`；caps 由 `apply_execution_caps` 在 DV/fail-closed 后收口；不改 fusion 分 |
 | **4** | fusion 退居仪表；展示主叙事跟 decision_view | 改变因果 | ✅ `format_decision_narrative_lines` + `render_short_midline` 共振/决策/新开/仪表；`weighted_score`/`action` 不微调 major_stage / chase_ok / holding_hint / chip confidence |
-| **5** | `build_report` 拆阶段函数（总管变瘦） | 行为冻结重构 | ✅ pipeline：短中线+stage_pack+风险旗/live_bar；fusion 标 `product_role=instrument`；`report["decision"]` 别名；见 `plans/done/build-report-pipeline-refactor.md`。**延期**：`run_fusion_stage` 在 builder 内更晚挂接（非 P0；行为冻结优先） |
+| **5** | `build_report` 拆阶段函数（总管变瘦） | 行为冻结重构 | ✅ pipeline：短中线+stage_pack+风险旗/live_bar；fusion 标 `product_role=instrument`；`report["decision"]` 别名；见 `plans/done/build-report-pipeline-refactor.md`。**挂接顺序（A1）**：`run_pre_cards_stage` 在 context 后早跑；`run_fusion_merge_stage`（merge+verbatim+tag instrument）在 **stage_pack 之后、attach_short_midline 之前**。structure/chip/stage 不消费 fusion。**延期（A2 不做）**：勿把 merge 挪到 decision_view 之后。 |
 
 **阶段 1 字段**：
 

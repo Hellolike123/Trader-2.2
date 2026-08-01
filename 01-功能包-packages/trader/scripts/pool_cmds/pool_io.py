@@ -68,25 +68,36 @@ def today_text() -> str:
 
 
 def state_dir() -> Path:
-    root = Path.home() / ".trader"
+    """~/.trader 或 TRADER_ROOT（trader_paths SSOT）。"""
+    from trader_shared.trader_paths import path as trader_path
+
+    root = trader_path("root")
     root.mkdir(parents=True, exist_ok=True)
     return root
 
 
 def pool_path() -> Path:
-    return state_dir() / "pool.json"
+    from trader_shared.trader_paths import path as trader_path
+
+    return trader_path("pool")
 
 
 def last_plan_path() -> Path:
-    return state_dir() / "last_plan.json"
+    from trader_shared.trader_paths import path as trader_path
+
+    return trader_path("last_plan")
 
 
 def archive_path() -> Path:
-    return state_dir() / "pool_archive.json"
+    from trader_shared.trader_paths import path as trader_path
+
+    return trader_path("pool_archive")
 
 
 def pending_path() -> Path:
-    return state_dir() / "pending.json"
+    from trader_shared.trader_paths import path as trader_path
+
+    return trader_path("pending")
 
 
 CONTRACT_VERSION_PENDING = "trader_pending_v1"

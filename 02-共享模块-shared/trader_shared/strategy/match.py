@@ -389,7 +389,7 @@ def match_strategies(
             entry_reason = "清单未全绿"
         else:
             entry_mode = "active"
-            entry_reason = "可执行"
+            entry_reason = "可扳机"
 
     entry_out = {
         "primary": _pack_summary(ent_p) if entry_mode != "off" or ent_p else _pack_summary(ent_p),

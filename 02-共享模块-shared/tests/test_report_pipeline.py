@@ -42,7 +42,7 @@ def test_apply_buy_point_lifecycle_sets_field():
 
 
 def test_attach_short_midline_importable():
-    from trader_shared.report_pipeline import attach_short_midline_and_decision
+    from trader_shared.report_pipeline import attach_short_midline_and_decision_kwargs
 
     report = {
         "current": 10.0,
@@ -57,7 +57,7 @@ def test_attach_short_midline_importable():
         "wyckoff_midline": {},
         "chanlun": {},
     }
-    out = attach_short_midline_and_decision(
+    out = attach_short_midline_and_decision_kwargs(
         report,
         current=10.0,
         scene="观察",

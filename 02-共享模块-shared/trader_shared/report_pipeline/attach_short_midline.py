@@ -15,6 +15,73 @@ _logger = get_logger(__name__)
 
 def attach_short_midline_and_decision(
     report: dict[str, Any],
+    ctx: Any,
+    *,
+    mark: MarkFn | None = None,
+) -> dict[str, Any]:
+    """Thin：短中线 + 决策栈；字段从 StageContext 取。"""
+    _fusion = ctx.get("report_fusion")
+    if not isinstance(_fusion, dict):
+        _fusion = report.get("fusion") if isinstance(report.get("fusion"), dict) else {}
+    return _attach_short_midline_and_decision_impl(
+        report,
+        current=float(ctx.get("current") or 0),
+        scene=str(ctx.get("scene") or ""),
+        report_fusion=_fusion if isinstance(_fusion, dict) else {},
+        stage_result=ctx.get("stage_result") if isinstance(ctx.get("stage_result"), dict) else {},
+        weekly_bars=ctx.get("weekly_bars") or [],
+        suggested=ctx.get("suggested") if ctx.get("suggested") is not None else 0,
+        theory_status=str(ctx.get("theory_status") or ""),
+        market_env_data=ctx.get("market_env_data") if isinstance(ctx.get("market_env_data"), dict) else {},
+        has_position=bool(ctx.get("has_position")),
+        data_status=str(ctx.get("data_status") or report.get("data_status") or ""),
+        chip_resistance_lower=ctx.get("chip_resistance_lower"),
+        chip_resistance_upper=ctx.get("chip_resistance_upper"),
+        stage=str(ctx.get("short_term_momentum") or ctx.get("stage") or ""),
+        mark=mark,
+    )
+
+
+def attach_short_midline_and_decision_kwargs(
+    report: dict[str, Any],
+    *,
+    current: float,
+    scene: str,
+    report_fusion: dict[str, Any] | None,
+    stage_result: dict[str, Any],
+    weekly_bars: list | None,
+    suggested: float | int,
+    theory_status: str,
+    market_env_data: dict[str, Any] | None,
+    has_position: bool,
+    data_status: str,
+    chip_resistance_lower: float | None,
+    chip_resistance_upper: float | None,
+    stage: str,
+    mark: MarkFn | None = None,
+) -> dict[str, Any]:
+    """Deprecated one-release kwargs wrapper。"""
+    return _attach_short_midline_and_decision_impl(
+        report,
+        current=current,
+        scene=scene,
+        report_fusion=report_fusion,
+        stage_result=stage_result,
+        weekly_bars=weekly_bars,
+        suggested=suggested,
+        theory_status=theory_status,
+        market_env_data=market_env_data,
+        has_position=has_position,
+        data_status=data_status,
+        chip_resistance_lower=chip_resistance_lower,
+        chip_resistance_upper=chip_resistance_upper,
+        stage=stage,
+        mark=mark,
+    )
+
+
+def _attach_short_midline_and_decision_impl(
+    report: dict[str, Any],
     *,
     current: float,
     scene: str,
