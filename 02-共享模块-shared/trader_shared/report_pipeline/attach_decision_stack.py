@@ -55,14 +55,12 @@ def attach_analysis_decision_stack(
             _mark("decision_view")
         except Exception as _dv_exc:
             _logger.debug("decision_view skip: %s", _dv_exc)
-            report.setdefault(
-                "decision_view",
-                {
-                    "schema_version": "decision_view_v1",
-                    "allow_new_recommend": False,
-                    "summary_line": "决策：跳过",
-                },
-            )
+            # 强制写入：禁 setdefault 保留旧 allow_new_recommend=True
+            report["decision_view"] = {
+                "schema_version": "decision_view_v1",
+                "allow_new_recommend": False,
+                "summary_line": "决策：跳过",
+            }
     except Exception as _st_exc:
         _logger.debug("analysis_decision_stack skip: %s", _st_exc)
         try:
@@ -81,14 +79,12 @@ def attach_analysis_decision_stack(
 
             ensure_pullback_resonance_placeholder(report)
         # M4：外层 stack 失败也必须 fail-closed decision_view（出手听 DV）
-        report.setdefault(
-            "decision_view",
-            {
-                "schema_version": "decision_view_v1",
-                "allow_new_recommend": False,
-                "summary_line": f"决策：栈失败·不新开（{_st_exc}）",
-            },
-        )
+        # 强制覆盖：禁 setdefault 保留陈旧 allow=True
+        report["decision_view"] = {
+            "schema_version": "decision_view_v1",
+            "allow_new_recommend": False,
+            "summary_line": f"决策：栈失败·不新开（{_st_exc}）",
+        }
 
     return report
 

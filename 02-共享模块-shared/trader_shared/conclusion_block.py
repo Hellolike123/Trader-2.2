@@ -600,7 +600,8 @@ def build_conclusion_block(
 ) -> dict[str, Any]:
     """组装结论块字段。
 
-    major_stage 仅用于 stage_line 展示与门控侧，不驱动 conclusion.midline。
+    stage_line 钉周线威科夫阶段短词（与 synthesize_midline_verdict 同源）；
+    major_stage（日线四阶段）仅供冲突/风险旁注，不得冒充中线阶段行。
     discipline 优先于 mistery_gate（merge 后主字段）；无则回退 gate。
     """
     gate = mistery_gate or {}
@@ -748,10 +749,15 @@ def build_conclusion_block(
         or any(k in execution for k in ("不买", "不追"))
     )
 
-    stage_txt = str(major_stage or "").strip()
+    # M1：阶段行 = 周线威科夫短词；禁日线 major_stage 写入 stage_line
+    _verdict_stage = synthesize_midline_verdict(chanlun_midline, wyckoff_midline).get("stage")
+    stage_txt = str(_verdict_stage or "").strip()
     if stage_txt == "None":
         stage_txt = ""
-    stage_n = stage_txt
+    # 冲突旁注仍可读日线四阶段（风险侧），与中线阶段行分离
+    stage_n = str(major_stage or "").strip()
+    if stage_n == "None":
+        stage_n = ""
     for base in ("蓄势", "主升", "派发", "衰退"):
         if stage_n.startswith(base) or base in stage_n:
             stage_n = base

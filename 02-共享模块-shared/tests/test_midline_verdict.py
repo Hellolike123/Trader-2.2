@@ -251,3 +251,28 @@ def test_m6_daily_major_stage_cannot_wash_weekly_ut():
     w_markup_ut = {**w_ut, "phase": "markup"}
     assert wyckoff_midline_bias(w_markup_ut, major_stage="") == "neutral"
     assert wyckoff_midline_bias(w_markup_ut, major_stage="衰退") == "neutral"
+
+
+def test_m1_build_conclusion_stage_line_pins_wyckoff_not_major():
+    """M1：conclusion.stage_line 钉威科夫短词；日线 major_stage 不得冒充。"""
+    from trader_shared.conclusion_block import build_conclusion_block
+
+    c = build_conclusion_block(
+        major_stage="主升",
+        mistery_gate={"action": "观望", "hard_block": "none", "position_cap_pct": 0},
+        key_prices={},
+        wyckoff_midline=_wyck("accumulation_d", sos_signal=True),
+        chanlun_midline=_chan("上涨趋势", "high", {}, timeframe="weekly"),
+    )
+    assert c["stage_line"] == "吸筹"
+    assert c["stage_line"] != "主升"
+
+
+def test_m1_renderer_does_not_fallback_to_major_stage():
+    """M1：空 stage_line 时面板阶段行不得回落日线 major_stage。"""
+    from pathlib import Path
+    import trader_shared.report_renderer.short_midline as sm
+
+    src = Path(sm.__file__).read_text(encoding="utf-8")
+    assert 'conclusion.get("stage_line") or major_stage' not in src
+    assert "禁日线 major_stage 冒充" in src or 'conclusion.get("stage_line") or ""' in src

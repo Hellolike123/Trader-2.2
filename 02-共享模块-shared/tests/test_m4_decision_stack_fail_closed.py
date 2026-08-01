@@ -64,3 +64,26 @@ def test_persist_refuses_discipline_only_true():
         }
     )
     assert fields2["allow_new_recommend"] is False
+
+
+def test_outer_stack_failure_overwrites_stale_allow_true(monkeypatch):
+    """M4：栈失败须强制覆盖陈旧 allow_new_recommend=True（禁 setdefault 泄漏）。"""
+    report = {
+        "current": 10.0,
+        "major_stage": "蓄势",
+        "decision_view": {
+            "schema_version": "decision_view_v1",
+            "allow_new_recommend": True,
+            "summary_line": "陈旧放行",
+        },
+    }
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("match boom")
+
+    import trader_shared.strategy_match as sm
+    monkeypatch.setattr(sm, "match_strategies", _boom)
+
+    out = attach_analysis_decision_stack(report)
+    assert out["decision_view"]["allow_new_recommend"] is False
+    assert "不新开" in str(out["decision_view"].get("summary_line") or "")

@@ -129,7 +129,8 @@ class TestMidlineViewB1A:
             chanlun_midline=chan,
             wyckoff_midline=wyck,
         )
-        assert c["stage_line"] == "蓄势偏强"
+        # M1：无周线威科夫 phase → 阶段行「无阶段」，不得落日线「蓄势偏强」
+        assert c["stage_line"] == "无阶段"
         # P2：缠论 low 置信 → chanlun_midline_dir 返回 0（中性），不靠兜底翻转方向
         # 下跌 + low 置信 → 中线观察（非暂缓/偏空，因为低置信不驱动方向）
         assert "可跟踪" not in c["midline"]
@@ -163,7 +164,8 @@ class TestMidlineViewB1A:
         )
         assert "可跟踪" in c["midline"]
         assert not _STAGE_RE.search(c["midline"])
-        assert c["stage_line"] == "蓄势"
+        # M1：阶段行钉威科夫；fixture 无 phase → 无阶段（非日线蓄势）
+        assert c["stage_line"] == "无阶段"
 
     def test_fight_chan_bear_wyck_bull(self):
         chan = {"chanlun": {"structure_type": "盘整", "trend_label": "下跌", "divergence": {}}}
