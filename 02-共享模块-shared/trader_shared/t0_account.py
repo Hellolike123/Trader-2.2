@@ -30,27 +30,44 @@ DEFAULT_DAY_LOSS_PCT = 1.0       # 当日 T 亏损占市值上限则停
 DEFAULT_MAX_T_COUNT = 5          # 当日 T 操作次数上限
 
 
-# Module attrs for monkeypatch / t0_ledger import; defaults from trader_paths registry.
-POSITION_FILE = trader_path("position")
-LEDGER_FILE = trader_path("t0_ledger")
+# Optional monkeypatch overrides (None → live trader_paths registry).
+# Prefer ``_position_path()`` / ``_ledger_path()`` over reading these Path attrs
+# so TRADER_ROOT changes are honored after import.
+POSITION_FILE: Path | None = None
+LEDGER_FILE: Path | None = None
+
+
+def _position_path() -> Path:
+    ov = globals().get("POSITION_FILE")
+    if isinstance(ov, Path):
+        return ov
+    return trader_path("position")
+
+
+def _ledger_path() -> Path:
+    ov = globals().get("LEDGER_FILE")
+    if isinstance(ov, Path):
+        return ov
+    return trader_path("t0_ledger")
 
 
 # ── 持仓管理 ──────────────────────────────────────────────────────────────
 def _load_position_file() -> dict[str, Any]:
-    """读取整份 position.json（经 DataManager 读锁）。"""
+    """读取整份 position.json（经 DataManager 读锁；路径走 trader_paths）。"""
+    store = _position_path()
     try:
         from trader_shared.data_manager import DataManager
 
-        data = DataManager.load_state("position", {"positions": {}})
+        data = DataManager.load_state("position", {"positions": {}}, path=store)
         if not isinstance(data, dict):
             return {"positions": {}}
         data.setdefault("positions", {})
         return data
     except Exception:
-        if not POSITION_FILE.exists():
+        if not store.exists():
             return {"positions": {}}
         try:
-            data = json.loads(POSITION_FILE.read_text(encoding="utf-8"))
+            data = json.loads(store.read_text(encoding="utf-8"))
             if not isinstance(data, dict):
                 return {"positions": {}}
             data.setdefault("positions", {})
@@ -126,13 +143,14 @@ def save_position(symbol: str, pos: dict[str, Any]) -> None:
 
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     payload = {**pos, "updated_at": stamp}
+    store = _position_path()
 
     def _mutate(data: dict[str, Any]) -> None:
         if not isinstance(data.get("positions"), dict):
             data["positions"] = {}
         data["positions"][symbol] = payload
 
-    DataManager.update_state("position", _mutate)
+    DataManager.update_state("position", _mutate, path=store)
     _dual_write_holdings(symbol, payload)
 
 

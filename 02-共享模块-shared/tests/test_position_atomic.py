@@ -16,12 +16,8 @@ def test_save_position_atomic_roundtrip(tmp_path, monkeypatch):
     from trader_shared import t0_account as acc
     import trader_shared.holdings as holdings_mod
 
-    monkeypatch.setattr(acc, "POSITION_FILE", root / "position.json")
     holdings_mod._migrated_once = False
-
-    from trader_shared import data_manager as dm
-
-    monkeypatch.setattr(dm.DataManager, "ROOT_DIR", root)
+    monkeypatch.setattr(acc, "POSITION_FILE", None)
 
     acc.save_position("688248", {"avg_cost": 50.0, "total_shares": 1000})
     pos = acc.load_position("688248")

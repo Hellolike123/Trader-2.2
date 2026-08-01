@@ -12,7 +12,8 @@ from typing import Any
 from trader_shared.t0_account import (
     DEFAULT_FEE_RATE,
     DEFAULT_STAMP_TAX_RATE,
-    LEDGER_FILE,
+    LEDGER_FILE,  # monkeypatchable override (may be None)
+    _ledger_path,
     calc_new_cost,
     calc_round_trip_cost,
 )
@@ -53,9 +54,10 @@ def record_t_trade(
         "note": note,
     }
 
-    LEDGER_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ledger = _ledger_path()
+    ledger.parent.mkdir(parents=True, exist_ok=True)
     # M7：append 加 flock，避免并发写交错半行
-    with open(LEDGER_FILE, "a", encoding="utf-8") as f:
+    with open(ledger, "a", encoding="utf-8") as f:
         fcntl.flock(f.fileno(), fcntl.LOCK_EX)
         try:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -68,14 +70,15 @@ def record_t_trade(
 
 def load_ledger(symbol: str | None = None, days: int | None = None) -> list[dict[str, Any]]:
     """读取台账记录。symbol=None 读全部，days=None 读全部。"""
-    if not LEDGER_FILE.exists():
+    ledger = _ledger_path()
+    if not ledger.exists():
         return []
     records: list[dict[str, Any]] = []
     cutoff_date = None
     if days:
         from datetime import timedelta
         cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-    with open(LEDGER_FILE, "r", encoding="utf-8") as f:
+    with open(ledger, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:

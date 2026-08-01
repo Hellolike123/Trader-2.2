@@ -114,9 +114,32 @@ def test_writers_route_through_registry(tmp_path: Path, monkeypatch):
     from trader_shared.structure_core import _trailing_watermark_path
     from trader_shared.wyckoff_phase import _wyckoff_phase_path
     from trader_shared.chip_migration_monitor import _chip_history_path
+    from trader_shared.t0_account import _ledger_path, _position_path
 
     assert store_path() == root / "buy_point_lifecycle.json"
     assert _store_path() == root / "last_add_dates.json"
     assert _trailing_watermark_path() == root / "trailing_stop_watermark.json"
     assert _wyckoff_phase_path() == root / "wyckoff_phase.json"
     assert _chip_history_path() == root / "chip_history.json"
+    assert _position_path() == root / "position.json"
+    assert _ledger_path() == root / "t0_ledger.jsonl"
+
+
+def test_t0_save_uses_trader_root_without_datamanager_patch(tmp_path: Path, monkeypatch):
+    """Step A: t0 position writer must not hardcode ~/.trader via DataManager."""
+    root = tmp_path / "root"
+    root.mkdir()
+    monkeypatch.setenv("TRADER_ROOT", str(root))
+    # Ensure HOME/.trader would be a different place if DataManager leaked
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+
+    from trader_shared import t0_account as acc
+    import trader_shared.holdings as h
+
+    h._migrated_once = False
+    monkeypatch.setattr(acc, "POSITION_FILE", None)
+    acc.save_position("000001.SZ", {"avg_cost": 10.0, "total_shares": 100})
+    assert (root / "position.json").exists()
+    assert not (home / ".trader" / "position.json").exists()

@@ -9,12 +9,8 @@ from pathlib import Path
 from portfolio_run import build_portfolio, build_snapshot_portfolio, load_snapshot
 from portfolio_validate_output import validate
 
-try:
-    from trader_shared.trader_paths import path as trader_path
-
-    POSITIONS_PATH = trader_path("positions_portfolio")
-except Exception:
-    POSITIONS_PATH = Path.home() / ".trader" / "positions.json"
+# Optional monkeypatch override (None → live trader_paths registry).
+POSITIONS_PATH: Path | None = None
 
 
 def _positions_path() -> Path:
@@ -101,11 +97,54 @@ def save_all(data: dict) -> None:
 
 
 def load_positions() -> list[dict]:
-    """Prefer holdings SSOT when non-empty; else legacy positions.json."""
+    """Merge legacy positions.json with holdings SSOT.
+
+    - Name-only legacy rows are never dropped (and never get invented codes).
+    - Coded legacy rows get cost/shares overlaid from holdings when present.
+    - Holdings-only symbols (e.g. from T0) are appended.
+    """
+    legacy = [dict(r) for r in (load_all().get("holdings") or []) if isinstance(r, dict)]
     ssot = _holdings_ssot_as_rows()
-    if ssot:
-        return ssot
-    return load_all().get("holdings", [])
+    if not ssot:
+        return legacy
+
+    by_bare: dict[str, dict] = {}
+    name_only_names: set[str] = set()
+    for row in legacy:
+        code = row.get("symbol") or row.get("code") or row.get("ts_code")
+        if code:
+            by_bare[str(code).split(".")[0]] = row
+        else:
+            name = str(row.get("name") or "")
+            if name:
+                name_only_names.add(name)
+
+    extras: list[dict] = []
+    for sr in ssot:
+        sym = str(sr.get("symbol") or "")
+        bare = sym.split(".")[0] if sym else ""
+        name = str(sr.get("name") or "")
+        if bare and bare in by_bare:
+            by_bare[bare]["cost"] = sr.get("cost", by_bare[bare].get("cost"))
+            by_bare[bare]["shares"] = sr.get("shares", by_bare[bare].get("shares"))
+            if not (by_bare[bare].get("symbol") or by_bare[bare].get("code")):
+                by_bare[bare]["symbol"] = sym
+            continue
+        # Do not invent a code onto a name-only legacy row; skip duplicate by name.
+        if name and name in name_only_names:
+            continue
+        extras.append(sr)
+
+    out: list[dict] = []
+    for row in legacy:
+        code = row.get("symbol") or row.get("code") or row.get("ts_code")
+        if code:
+            bare = str(code).split(".")[0]
+            out.append(by_bare.get(bare, row))
+        else:
+            out.append(row)
+    out.extend(extras)
+    return out
 
 
 def load_account() -> dict:
