@@ -43,7 +43,7 @@
 | Phase A 边界 | `phase_a_range` + 顶栏 `phase_a_status`；`forming`/`established`/`none` | `wyckoff_core._build_phase_a_range` |
 | TR 边界 | 分位带 `tr_upper`/`tr_lower` **并存**；established 前不得借假 TR 抬 B/C/D（**P2-A 已落地**） | `_detect_trading_range` |
 | 阶段文案 | SC+AR →「停止：SC+AR」；仅 SC →「卖力高潮：SC，箱体未成形」（须过 P0-B TR 门控才赋 accumulation_a） | `wyckoff_phase._detect_phase` |
-| AR 量能 | 结构满足仍亮；`ar_volume_soft=True` 标弱量（非唯一硬否决） | `_detect_ar` |
+| AR 量能 | P2-C：prefer 弱于 SC；`ar_volume_soft=True`=量能偏强/非原典弱量；REQUIRE 默认关 | `_detect_ar` |
 | 常量 | `WYCKOFF_CLIMAX_ANCHOR_BARS=15`；SC/AR/阶段扫描共用 | `config.py` |
 | 日线事件灯 | AR 文案「钉潜在上沿，仅反弹不能当反转」；**不参与**中线阶段 | `format_wyckoff_event_light` |
 
@@ -171,7 +171,7 @@ python -m pytest 02-共享模块-shared/tests/test_wyckoff_*.py -q
 |------|-----------------|---------|
 | **P2-A 种子箱门控** | 「SC low + AR high（+ ST low）set TR」— 无 AR 不得假 established；分位 TR 不得冒充种子抬阶段 | `phase_a_status` + `phase_tr_gated` 叠加；forming / 无 established 时事件可亮、**禁止**抬 B/C/D / 派发 / markup/markdown |
 | **P2-B 广义 ST** | SC(+AR) 后二次缩量回测 SC 区；**非** Spring 后 Test | 新检测器 `_detect_secondary_test_sc`；字段 `secondary_test_sc_*`；与 `spring_test_*` / `st_*` **分离** |
-| **P2-C AR 量能 soft**（可选，本迭代可 flag） | 原典偏「弱于 SC / 供应耗尽后反弹」 | 1.2× hard → prefer 弱量或相对 SC 递减；保留 `ar_volume_soft` + feature flag |
+| **P2-C AR 量能 soft**（✅ 已落地） | 原典偏「弱于 SC / 供应耗尽后反弹」 | `WYCKOFF_AR_PREFER_WEAK_VS_SC` 默认 True；`REQUIRE` 默认 False；`WEAK_VS_SC_RATIO`≈1.0；`ar_volume_soft`=量能偏强/非原典弱量 |
 
 **forming 时阶段文案（二选一，本合同选定）**：
 
@@ -378,7 +378,7 @@ python -m pytest 02-共享模块-shared/tests/test_wyckoff_*.py -q
 | 2 | `ar_price`=close | ✅ `ar_high` 边界价；close 保留 alias |
 | 3 | 仅 SC 即 accumulation_a / 无 forming | ✅ `phase_a_range.status=forming`；文案「箱体未成形」（须过 TR 门控才赋 A） |
 | 4 | 分位 TR ≠ SC/AR | ✅ 并存；P2-A 种子 overlay + forming/no_established 门控 |
-| 5 | AR 放量 1.2× hard | ✅ 结构为主 + `ar_volume_soft`；P2-C 可选 soft 化 |
+| 5 | AR 放量 1.2× hard | ✅ 结构为主 + `ar_volume_soft`；P2-C 已落地（prefer/REQUIRE flag） |
 | 6 | AR 后窗 1–7 根 | ⚠️ 现为 1–7 根（`max(3, anchor//2)`）；超长延迟仍 forming |
 | 7 | forming 仍可进 accumulation_b/c/d | ✅ P2-A：forming clamp 最高 A；派发/markdown 亦闸 |
 | 8 | 无 established 时分位 TR 可抬阶段 | ✅ P2-A：`_detect_phase` 读 `phase_a_status` + `_apply_p2_phase_a_gates` |
@@ -419,7 +419,8 @@ python -m pytest 02-共享模块-shared/tests/test_wyckoff_*.py -q
 - [x] P2-A：`established` 时种子 `sc_low`/`ar_high` overlay `tr_ctx`，优先于分位 TR  
 - [x] P2-B：`_detect_secondary_test_sc` + `secondary_test_sc_*`；与 `spring_test_*`/`st_*` 分离  
 - [x] `BUSINESS.md` §2.2 + inventory ST/TR 行标 P2 完成  
-- [x] 不扩大 scope 到删分位 TR / 日线 fusion（P&F 已另开落地） 
+- [x] 不扩大 scope 到删分位 TR / 日线 fusion（P&F 已另开落地）
+- [x] P2-C：AR prefer 弱于 SC + `ar_volume_soft` 语义（偏强）+ REQUIRE 默认关（见 config `WYCKOFF_AR_*`） 
 
 ---
 

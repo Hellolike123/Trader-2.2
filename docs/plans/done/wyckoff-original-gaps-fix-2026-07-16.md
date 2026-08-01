@@ -23,7 +23,7 @@
 | 项 | 原因 |
 |----|------|
 | 个股 vs 大盘 RS | 需稳定大盘序列注入，未接数据管线 |
-| Jump Across the Creek 专名 | 与强 SOS 重叠，暂用 SOS+BU/Markup 表达 |
+| Jump Across the Creek 专名 | ✅ 2026-08-01：`jac_*` 专名灯（SOS/Markup/BU 附近）；不进 fusion |
 
 ## 文件
 

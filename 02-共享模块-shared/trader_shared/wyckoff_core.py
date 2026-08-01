@@ -55,6 +55,7 @@ from trader_shared.config import (
     WYCKOFF_SCORE_PSY,
     WYCKOFF_SCORE_BU,
     WYCKOFF_SCORE_UTAD,
+    WYCKOFF_SCORE_STOPPING_VOLUME,
     WYCKOFF_SCORE_CLUSTER_CONFIRM,
     WYCKOFF_SCORE_CLUSTER_DISTRIB,
     WYCKOFF_SCORE_CLUSTER_FAIL,
@@ -117,6 +118,9 @@ from .wyckoff_events import (
     _detect_preliminary_supply,
     _detect_backup,
     _detect_utad,
+    _detect_jump_across_creek,
+    _detect_stopping_volume,
+    _classify_cm_mode,
     _cause_effect_targets,
     _price_pos_pct,
     _spring_breach_level,
@@ -750,6 +754,26 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         # 用过渡后状态覆盖瞬时推断（phase 只进不退）
         phase = new_phase_state
 
+    # 原典专名灯（不进阶段机 / 不抬 L2/L3）：跳溪 + 止跌量
+    jac = _detect_jump_across_creek(
+        bars,
+        tr_ctx=phase_tr_ctx,
+        ar_high=ar.get("ar_high") if ar.get("ar_signal") else phase_a_range.get("ar_high"),
+        sos_signal=bool(sos.get("sos_signal")),
+        bu_signal=bool(bu.get("bu_signal")),
+        phase=str(phase.get("phase") or ""),
+    )
+    stopping_vol = _detect_stopping_volume(bars, tr_ctx=phase_tr_ctx)
+    cm = _classify_cm_mode(
+        phase=str(phase.get("phase") or ""),
+        signals={
+            **signals_dict,
+            "jac_signal": bool(jac.get("jac_signal")),
+            "stopping_volume_signal": bool(stopping_vol.get("stopping_volume_signal")),
+            "phase": str(phase.get("phase") or ""),
+        },
+    )
+
     # P3-1: VSA 量价幅度分析
     vsa = _detect_effort_vs_result(bars)
 
@@ -788,6 +812,12 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         parts.append(f"备份买: {bu['bu_reason']}")
     if utad.get("utad_signal"):
         parts.append(f"UTAD: {utad['utad_reason']}")
+    if jac.get("jac_signal"):
+        parts.append(f"跳溪: {jac['jac_reason']}")
+    if stopping_vol.get("stopping_volume_signal"):
+        parts.append(f"止跌量: {stopping_vol['stopping_volume_reason']}")
+    if cm.get("cm_mode") and cm.get("cm_mode") != "none" and cm.get("cm_note"):
+        parts.append(f"CM:{cm['cm_note']}")
     if bearish_div and bullish_div:
         parts.append("量价信号冲突，无法确定方向")
     elif bearish_div:
@@ -896,6 +926,18 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "utad_signal": bool(utad.get("utad_signal")),
         "utad_reason": utad.get("utad_reason"),
         "utad_price": utad.get("utad_price"),
+        # Jump Across the Creek / Stopping Volume（专名灯；JAC 不计分）
+        "jac_signal": bool(jac.get("jac_signal")),
+        "jac_reason": jac.get("jac_reason"),
+        "jac_price": jac.get("jac_price"),
+        "jac_bar_idx": jac.get("jac_bar_idx"),
+        "stopping_volume_signal": bool(stopping_vol.get("stopping_volume_signal")),
+        "stopping_volume_reason": stopping_vol.get("stopping_volume_reason"),
+        "stopping_volume_price": stopping_vol.get("stopping_volume_price"),
+        "stopping_volume_bar_idx": stopping_vol.get("stopping_volume_bar_idx"),
+        # CM 行为模式（轻量映射；不改 phase）
+        "cm_mode": cm.get("cm_mode") or "none",
+        "cm_note": cm.get("cm_note") or "",
         "cause_effect_up_target": ce.get("cause_effect_up_target"),
         "cause_effect_down_target": ce.get("cause_effect_down_target"),
         "cause_effect_range": ce.get("cause_effect_range"),
@@ -1210,6 +1252,11 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
         raw += WYCKOFF_SCORE_UTAD
         signals.append(f"UTAD {WYCKOFF_SCORE_UTAD}")
 
+    # 16b. Stopping Volume — 与 SC 同亮时不计分（防双计）；JAC 永不计分
+    if analysis.get("stopping_volume_signal") and not sc_on:
+        raw += WYCKOFF_SCORE_STOPPING_VOLUME
+        signals.append(f"止跌量 +{WYCKOFF_SCORE_STOPPING_VOLUME}")
+
     # ── P3-1: VSA 量价幅度修正 ──
     effort_no_result = analysis.get("effort_no_result", False)
     no_supply = analysis.get("no_supply", False)
@@ -1360,6 +1407,10 @@ def resolve_wyckoff_primary(
 
     if wyk.get("utad_signal"):
         code, cn, main, note, d = "UTAD", "派发末上冲", "派发末上冲回落", "警惕破位下行", -1
+    elif wyk.get("jac_signal"):
+        code, cn, main, note, d = (
+            "JAC", "跳溪", "强势越过溪并站稳", "专名灯，非单独开仓", 1
+        )
     elif wyk.get("bu_signal"):
         code, cn, main, note, d = "BU", "回踩确认", "强势后缩量回踩", "趋势启动区试探", 1
     elif wyk.get("spring_signal"):
@@ -1409,6 +1460,10 @@ def resolve_wyckoff_primary(
         code, cn, main, note, d = "ARE", "自动回落", "BC后快速回落", "仅回落，还不能当反转空", -1
     elif wyk.get("sc_signal"):
         code, cn, main, note, d = "SC", "卖力高潮", "天量宽幅下跌", "卖力高潮，抛压宣泄后可能止跌", 1
+    elif wyk.get("stopping_volume_signal"):
+        code, cn, main, note, d = (
+            "SV", "止跌量", "下跌末段放量收回", "卖压被吸收，可与SC同亮", 1
+        )
     elif wyk.get("spring_test_signal") or wyk.get("st_signal"):
         code, cn, main, note, d = (
             "SpringTest", "Spring确认", "Spring后缩量回测", "确认测试有效，非笼统ST", 1
@@ -1537,6 +1592,7 @@ def _midline_meaning(code: str, cn_name: str, note: str, direction: int) -> str:
         "Spring": "回踩区再谈",
         "SOS": "仍看回踩站不站稳",
         "BU": "勿追高",
+        "JAC": "非单独开仓",
         "LPS": "破了就不算",
         "BC": "不能当还能续涨",
         "UT": "不能当突破成功",
@@ -1544,6 +1600,7 @@ def _midline_meaning(code: str, cn_name: str, note: str, direction: int) -> str:
         "SOW": "先防守",
         "LPSY": "反抽别追",
         "PSY": "还不能当见顶定论",
+        "SV": "可与SC同亮非双开仓",
         "Compression": "等方向选择",
         "TrendPullback": "破位就算假",
         "BullDiv": "不能当反转",

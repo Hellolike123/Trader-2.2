@@ -14,6 +14,9 @@ try:
         WYCKOFF_MIN_BARS,
         WYCKOFF_CLIMAX_ANCHOR_BARS,
         WYCKOFF_AR_MAX_BARS,
+        WYCKOFF_AR_PREFER_WEAK_VS_SC,
+        WYCKOFF_AR_REQUIRE_WEAK_VS_SC,
+        WYCKOFF_AR_WEAK_VS_SC_RATIO,
         WYCKOFF_ST_SC_VOL_RATIO,
         WYCKOFF_ST_SC_MAX_BARS,
         WYCKOFF_ST_SC_PROXIMITY,
@@ -90,6 +93,9 @@ except ImportError:
     WYCKOFF_MIN_BARS = 15
     WYCKOFF_CLIMAX_ANCHOR_BARS = 15
     WYCKOFF_AR_MAX_BARS = 15
+    WYCKOFF_AR_PREFER_WEAK_VS_SC = True
+    WYCKOFF_AR_REQUIRE_WEAK_VS_SC = False
+    WYCKOFF_AR_WEAK_VS_SC_RATIO = 1.0
     # 广义 ST 默认须与 config.py 同步（A 股放宽后）
     WYCKOFF_ST_SC_VOL_RATIO = 0.72
     WYCKOFF_ST_SC_MAX_BARS = 22
@@ -1203,6 +1209,23 @@ def _detect_volume_divergence(bars: list[dict]) -> tuple[bool, bool]:
 
     return bearish, bullish
 
+def _ar_volume_flags() -> tuple[bool, bool, float]:
+    """运行时读 AR 量能 flag（便于测例 monkeypatch config）。"""
+    try:
+        from trader_shared import config as cfg
+
+        prefer = bool(getattr(cfg, "WYCKOFF_AR_PREFER_WEAK_VS_SC", WYCKOFF_AR_PREFER_WEAK_VS_SC))
+        require = bool(getattr(cfg, "WYCKOFF_AR_REQUIRE_WEAK_VS_SC", WYCKOFF_AR_REQUIRE_WEAK_VS_SC))
+        ratio = float(getattr(cfg, "WYCKOFF_AR_WEAK_VS_SC_RATIO", WYCKOFF_AR_WEAK_VS_SC_RATIO))
+        return prefer, require, ratio
+    except Exception:
+        return (
+            bool(WYCKOFF_AR_PREFER_WEAK_VS_SC),
+            bool(WYCKOFF_AR_REQUIRE_WEAK_VS_SC),
+            float(WYCKOFF_AR_WEAK_VS_SC_RATIO),
+        )
+
+
 def _detect_ar(
     bars: list[dict],
     tr_ctx: dict | None = None,
@@ -1214,7 +1237,10 @@ def _detect_ar(
 
     只绑 SC。与 `_detect_selling_climax` 共用 `_find_sc_anchor`。
     边界价用 ar_high（反弹棒最高价）；ar_price 保留 close 供旧消费。
-    量能 1.2× 为 soft：涨幅/结构为主，弱量仍可为 ar_signal 并标 ar_volume_soft。
+
+    P2-C 量能：相对 SC 棒量 prefer 弱量（``WYCKOFF_AR_PREFER_WEAK_VS_SC``）；
+    ``ar_volume_soft=True`` = 量能偏强/非原典弱量（结构仍可亮）；
+    ``WYCKOFF_AR_REQUIRE_WEAK_VS_SC`` 时放量 AR 硬否决（默认关）。
     """
     if len(bars) < WYCKOFF_MIN_BARS + 3:
         return {**_ar_empty(), "ar_reason": "数据不足"}
@@ -1225,16 +1251,20 @@ def _detect_ar(
 
     sc_bar_idx = anchor["sc_bar_idx"]
     sc_close = anchor["sc_close"]
-    sc_avg_vol = anchor["sc_avg_vol"]
     # SC low SSOT：与 _find_sc_anchor / SC 检测器同一谷底（棒最低价）
     bar_low = to_float(bars[sc_bar_idx].get("low"))
     sc_low = round(float(bar_low), 2) if bar_low is not None else anchor["sc_low"]
+    sc_vol = to_float(bars[sc_bar_idx].get("volume")) or float(anchor.get("sc_avg_vol") or 0)
+
+    prefer_weak, require_weak, weak_ratio = _ar_volume_flags()
 
     # AR 搜索上沿：WYCKOFF_AR_MAX_BARS（默认=climax 锚点）；周线半幅缩放
     ar_limit = int(WYCKOFF_AR_MAX_BARS)
     if str(timeframe or "").lower() == "weekly":
         ar_limit = max(2, int(ar_limit * 0.5))
     rally_max = min(max(2, ar_limit), len(bars) - sc_bar_idx - 1)
+
+    candidates: list[dict] = []
     for i in range(1, rally_max + 1):
         rally_bar = bars[sc_bar_idx + i]
         r_close = to_float(rally_bar.get("close"))
@@ -1242,26 +1272,61 @@ def _detect_ar(
         r_volume = to_float(rally_bar.get("volume"))
         if r_close is None or r_high is None or r_volume is None:
             continue
-
         if r_close <= sc_close * 1.02:
             continue
 
-        vol_ok = r_volume > sc_avg_vol * 1.2
+        weak_vs_sc = bool(sc_vol > 0 and r_volume <= sc_vol * weak_ratio)
+        if require_weak and not weak_vs_sc:
+            continue
         pct = (r_close / sc_close - 1) * 100
-        vol_note = "放量" if vol_ok else "量能偏弱(soft)"
+        candidates.append(
+            {
+                "i": i,
+                "r_close": r_close,
+                "r_high": r_high,
+                "r_volume": r_volume,
+                "weak_vs_sc": weak_vs_sc,
+                "pct": pct,
+            }
+        )
+
+    if not candidates:
+        reason = "SC 后未检测到有效反弹"
+        if require_weak:
+            # 区分：结构有反弹但全被量能硬否决
+            for i in range(1, rally_max + 1):
+                rally_bar = bars[sc_bar_idx + i]
+                r_close = to_float(rally_bar.get("close"))
+                r_volume = to_float(rally_bar.get("volume"))
+                if r_close is None or r_volume is None:
+                    continue
+                if r_close > sc_close * 1.02 and sc_vol > 0 and r_volume > sc_vol * weak_ratio:
+                    reason = "AR 放量相对 SC，REQUIRE 弱量否决"
+                    break
         return {
-            "ar_signal": True,
-            "ar_reason": f"SC 后自动反弹，{vol_note} +{pct:.1f}%",
-            "ar_price": round(r_close, 2),
-            "ar_high": round(r_high, 2),
-            "ar_bar_idx": sc_bar_idx + i,
-            "ar_volume_soft": not vol_ok,
+            **_ar_empty(reason),
             "sc_low": sc_low,
             "sc_bar_idx": sc_bar_idx,
         }
 
+    if prefer_weak:
+        weak_cands = [c for c in candidates if c["weak_vs_sc"]]
+        chosen = weak_cands[0] if weak_cands else candidates[0]
+    else:
+        chosen = candidates[0]
+
+    soft = not bool(chosen["weak_vs_sc"])
+    if soft:
+        vol_note = "量能偏强/非原典弱量(soft)"
+    else:
+        vol_note = "弱于SC量"
     return {
-        **_ar_empty("SC 后未检测到有效反弹"),
+        "ar_signal": True,
+        "ar_reason": f"SC 后自动反弹，{vol_note} +{chosen['pct']:.1f}%",
+        "ar_price": round(chosen["r_close"], 2),
+        "ar_high": round(chosen["r_high"], 2),
+        "ar_bar_idx": sc_bar_idx + int(chosen["i"]),
+        "ar_volume_soft": soft,
         "sc_low": sc_low,
         "sc_bar_idx": sc_bar_idx,
     }
@@ -2496,6 +2561,248 @@ def _detect_utad(
         "utad_reason": "派发背景上的上冲回落（UTAD）",
         "utad_price": round(price, 2) if price else None,
     }
+
+
+def _jac_empty(reason: str = "无有效溪上沿") -> dict:
+    return {
+        "jac_signal": False,
+        "jac_reason": reason,
+        "jac_price": None,
+        "jac_bar_idx": None,
+    }
+
+
+def _detect_jump_across_creek(
+    bars: list[dict],
+    tr_ctx: dict | None = None,
+    *,
+    ar_high: float | None = None,
+    sos_signal: bool = False,
+    bu_signal: bool = False,
+    phase: str | None = None,
+) -> dict:
+    """Jump Across the Creek（跳溪）— 强势越过溪并站稳的专名灯。
+
+    非新阶段机；不进 fusion。溪优先 ``tr_upper`` / ``ar_high``。
+    薄检测：近窗阳线 close > creek×(1+eps)，后续 1–2 根不跌回溪下，量能不明显萎缩。
+    仅在 SOS / markup / BU 附近亮（避免无背景假跳溪）。
+    """
+    if len(bars) < WYCKOFF_MIN_BARS + 3:
+        return _jac_empty("数据不足")
+
+    phase_s = str(phase or "")
+    near_ctx = bool(sos_signal or bu_signal or phase_s == "markup")
+    if not near_ctx:
+        return _jac_empty("非 SOS/Markup/BU 附近，跳溪不亮")
+
+    creek: float | None = None
+    if tr_ctx is not None and tr_ctx.get("tr_upper") is not None:
+        try:
+            creek = float(tr_ctx["tr_upper"])
+        except (TypeError, ValueError):
+            creek = None
+    if creek is None and ar_high is not None:
+        try:
+            creek = float(ar_high)
+        except (TypeError, ValueError):
+            creek = None
+    if creek is None or creek <= 0:
+        return _jac_empty()
+
+    eps = 0.005
+    threshold = creek * (1.0 + eps)
+    # 近窗找越过溪的阳线；须留 1–2 根后续确认站稳
+    scan_start = max(0, len(bars) - 10)
+    avg_start = max(0, len(bars) - 20)
+    avg_vols = [to_float(b.get("volume")) or 0 for b in bars[avg_start:]]
+    avg_vol = sum(avg_vols) / max(len(avg_vols), 1)
+
+    for i in range(scan_start, len(bars) - 1):
+        bar = bars[i]
+        o = to_float(bar.get("open"))
+        c = to_float(bar.get("close"))
+        v = to_float(bar.get("volume"))
+        if o is None or c is None or v is None:
+            continue
+        if c <= o:
+            continue
+        if c <= threshold:
+            continue
+        # 量能不明显萎缩（相对近均量）
+        if avg_vol > 0 and v < avg_vol * 0.7:
+            continue
+        # 后续 1–2 根不跌回 creek 下
+        hold_end = min(len(bars), i + 3)
+        hold_bars = bars[i + 1 : hold_end]
+        if not hold_bars:
+            continue
+        held = True
+        for hb in hold_bars:
+            hc = to_float(hb.get("close"))
+            if hc is None or hc < creek:
+                held = False
+                break
+        if not held:
+            continue
+        return {
+            "jac_signal": True,
+            "jac_reason": f"越过溪 {creek:.2f} 并站稳（跳溪/JAC）",
+            "jac_price": round(c, 2),
+            "jac_bar_idx": i,
+        }
+
+    return _jac_empty("未见越过溪并站稳")
+
+
+def _stopping_volume_empty(reason: str = "未检测到止跌量") -> dict:
+    return {
+        "stopping_volume_signal": False,
+        "stopping_volume_reason": reason,
+        "stopping_volume_price": None,
+        "stopping_volume_bar_idx": None,
+    }
+
+
+def _detect_stopping_volume(bars: list[dict], tr_ctx: dict | None = None) -> dict:
+    """Stopping Volume（止跌量）— 下跌末段放量宽幅、收盘收回棒体上半。
+
+    可与 SC 同亮但独立命名；打分层由 core 防双计。
+    """
+    del tr_ctx  # 预留：TR 下沿附近优先
+    if len(bars) < WYCKOFF_MIN_BARS + 2:
+        return _stopping_volume_empty("数据不足")
+
+    # 近窗均量 / 均波幅（不含末棒）
+    look = bars[-(WYCKOFF_MIN_BARS + 1) : -1]
+    vols = [to_float(b.get("volume")) or 0 for b in look]
+    spreads: list[float] = []
+    for b in look:
+        h = to_float(b.get("high"))
+        lo = to_float(b.get("low"))
+        if h is not None and lo is not None and h > lo:
+            spreads.append(h - lo)
+    avg_vol = sum(vols) / max(len(vols), 1)
+    avg_spread = sum(spreads) / max(len(spreads), 1) if spreads else 0.0
+    if avg_vol <= 0:
+        return _stopping_volume_empty("量能数据异常")
+
+    # 下跌末段：近 5 根总体下行
+    recent = bars[-6:-1]
+    if len(recent) < 3:
+        return _stopping_volume_empty("下跌背景不足")
+    first_c = to_float(recent[0].get("close"))
+    last_c = to_float(recent[-1].get("close"))
+    if first_c is None or last_c is None or last_c > first_c * 0.995:
+        return _stopping_volume_empty("非下跌末段")
+
+    # 在近 3 根内找止跌量棒（含当前）
+    for idx in range(len(bars) - 3, len(bars)):
+        if idx < 1:
+            continue
+        bar = bars[idx]
+        o = to_float(bar.get("open"))
+        h = to_float(bar.get("high"))
+        lo = to_float(bar.get("low"))
+        c = to_float(bar.get("close"))
+        v = to_float(bar.get("volume"))
+        if any(x is None for x in (o, h, lo, c, v)):
+            continue
+        spread = float(h) - float(lo)
+        if spread <= 0:
+            continue
+        # 放量
+        if float(v) < avg_vol * 1.5:
+            continue
+        # 波幅大
+        if avg_spread > 0 and spread < avg_spread * 1.2:
+            continue
+        # 收盘收回棒体上半（卖压被吸收）
+        mid = float(lo) + 0.5 * spread
+        if float(c) < mid:
+            continue
+        # 否决：普通阴线贴地收（虽已过 mid 检查，再防极窄上影）
+        upper_half_ratio = (float(c) - float(lo)) / spread
+        if upper_half_ratio < 0.5:
+            continue
+        return {
+            "stopping_volume_signal": True,
+            "stopping_volume_reason": (
+                f"下跌末段放量宽幅止跌（量比 {float(v) / avg_vol:.1f}，收盘上半）"
+            ),
+            "stopping_volume_price": round(float(c), 2),
+            "stopping_volume_bar_idx": idx,
+        }
+
+    return _stopping_volume_empty()
+
+
+_CM_MODE_NOTES: dict[str, str] = {
+    "markdown_absorption": "打压吸筹",
+    "rally_absorption": "拉高吸筹",
+    "range_absorption": "横盘吸筹",
+    "rally_distribution": "拉高派发",
+    "range_distribution": "横盘派发",
+    "shakeout_distribution": "震仓派发",
+    "none": "",
+}
+
+
+def _classify_cm_mode(
+    *,
+    phase: str | None = None,
+    signals: dict | None = None,
+) -> dict:
+    """复合人行为模式 — 只读 phase + 事件灯的轻量映射（非新引擎）。
+
+    禁止改 phase / tr_maturity / measure_allowed / fusion。
+    """
+    sig = signals if isinstance(signals, dict) else {}
+    phase_s = str(phase or sig.get("phase") or "none")
+
+    sc = bool(sig.get("sc_signal"))
+    spring = bool(sig.get("spring_signal"))
+    sos = bool(sig.get("sos_signal"))
+    bu = bool(sig.get("bu_signal"))
+    jac = bool(sig.get("jac_signal"))
+    ar = bool(sig.get("ar_signal"))
+    st = bool(sig.get("st_signal") or sig.get("spring_test_signal") or sig.get("secondary_test_sc_signal"))
+    compression = bool(sig.get("compression_signal"))
+    bc = bool(sig.get("bc_signal"))
+    ut = bool(sig.get("upthrust_signal")) and not bool(sig.get("upthrust_premature"))
+    utad = bool(sig.get("utad_signal"))
+    sow = bool(sig.get("sow_signal"))
+    are = bool(sig.get("are_signal"))
+    lpsy = bool(sig.get("lpsy_signal"))
+
+    is_acc = phase_s.startswith("accumulation") or phase_s == "markup"
+    is_dist = phase_s.startswith("distribution") or phase_s == "markdown"
+
+    mode = "none"
+    # 派发优先（UTAD/BC 背景明确时）
+    if utad or is_dist or (bc and (ut or sow or are or lpsy)):
+        if utad:
+            mode = "shakeout_distribution"
+        elif bc or ut:
+            mode = "rally_distribution"
+        elif sow or are or lpsy or is_dist:
+            mode = "range_distribution"
+    elif is_acc or sc or spring or sos or bu or jac or ar:
+        if phase_s == "markup" or bu or sos or jac:
+            mode = "rally_absorption"
+        elif spring or sc:
+            mode = "markdown_absorption"
+        elif compression or st or phase_s in (
+            "accumulation_b",
+            "accumulation_c",
+            "accumulation_d",
+            "accumulation_e",
+        ):
+            mode = "range_absorption"
+        elif ar or phase_s.startswith("accumulation"):
+            mode = "range_absorption"
+
+    note = _CM_MODE_NOTES.get(mode, "")
+    return {"cm_mode": mode, "cm_note": note}
 
 
 def _cause_effect_targets(tr_ctx: dict | None, bars: list[dict] | None = None) -> dict:
