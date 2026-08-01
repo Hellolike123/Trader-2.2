@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -14,6 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from trader_shared.report_core import render_short_midline  # noqa: E402
+from trader_shared.report_pipeline.attach_short_midline import _select_key_price_stop  # noqa: E402
 from trader_shared.wyckoff_core import (  # noqa: E402
     format_wyckoff_event_light,
     format_wyckoff_midline_light,
@@ -606,6 +608,75 @@ def test_risk_uses_short_resist():
     out = render_short_midline(_report())
     assert "41.85" in out
     assert "44.65" in out
+
+
+def test_rr11_empty_position_uses_hard_stop_when_trailing_above_current():
+    """R-R11：空仓时 trailing 高于现价不得污染 key_prices 与展示止损。"""
+    current = 41.63
+    hard_stop = 39.90
+    invalid_trailing = 42.50
+    valid_trailing = 40.80
+    assert _select_key_price_stop(
+        {"stop": hard_stop, "trailing_stop": invalid_trailing},
+        current=current,
+        has_position=False,
+    ) == pytest.approx(hard_stop)
+    assert _select_key_price_stop(
+        {"stop": hard_stop, "trailing_stop": invalid_trailing},
+        current=current,
+        has_position=True,
+    ) == pytest.approx(hard_stop)
+    assert _select_key_price_stop(
+        {"stop": hard_stop, "trailing_stop": valid_trailing},
+        current=current,
+        has_position=True,
+    ) == pytest.approx(valid_trailing)
+
+    r = _report()
+    r["current"] = current
+    r["has_position"] = False
+    r["stop"] = hard_stop
+    r["trailing_stop"] = invalid_trailing
+    r["effective_stop"] = invalid_trailing
+    r["key_prices"] = {
+        **r["key_prices"],
+        "stop_sell": invalid_trailing,
+        "buy_zone_low": 40.20,
+        "buy_zone_high": 40.50,
+        "buy_ref": 40.35,
+    }
+    r["discipline"] = {
+        **r.get("discipline", {}),
+        "invalidation": f"跌破止损 {hard_stop:.2f}",
+    }
+    out = render_short_midline(r)
+    support = _between(out, "🎯 支撑阻力", "✅ 出手")
+    assert f"{hard_stop:.2f} 止损" in support
+    assert f"{invalid_trailing:.2f} 止损" not in out
+
+    stop_prices: list[float] = []
+    for match in re.finditer(
+        r"(?:(\d+\.\d+)\s+止损|止损看\s*(\d+\.\d+)|破止损\s*(\d+\.\d+))",
+        out,
+    ):
+        stop_prices.extend(float(g) for g in match.groups() if g)
+    assert stop_prices
+    assert all(price < current for price in stop_prices)
+
+
+def test_rr12_point_buy_zone_renders_as_support_not_range():
+    """R-R12：点状低吸区展示为支撑，禁止伪装成 41.82-41.82 区间。"""
+    r = _report()
+    r["key_prices"] = {
+        **r["key_prices"],
+        "buy_zone_low": 41.82,
+        "buy_zone_high": 41.82,
+        "buy_ref": 41.82,
+    }
+    out = render_short_midline(r)
+    support = _between(out, "🎯 支撑阻力", "✅ 出手")
+    assert "41.82 支撑" in support
+    assert "低吸区 41.82-41.82" not in support
 
 
 # ── Task 5: 中线筹码状态行 ──

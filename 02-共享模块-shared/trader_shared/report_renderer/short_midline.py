@@ -128,6 +128,37 @@ def _float_or_none(val: object) -> float | None:
         return None
 
 
+def _select_display_stop(
+    report: dict[str, Any],
+    *,
+    current: float,
+    key_prices: dict[str, Any],
+) -> float | None:
+    """Stop shown in short support/resistance, matching key_prices stop policy."""
+    hard = _float_or_none(report.get("stop"))
+    fallback = _float_or_none(key_prices.get("stop_sell"))
+    base = hard if hard is not None and hard > 0 else fallback
+    if not bool(report.get("has_position")):
+        return base
+
+    trailing = _float_or_none(report.get("trailing_stop"))
+    if trailing is not None and trailing > 0 and current > 0 and trailing < current:
+        try:
+            from trader_shared.structure_core import effective_stop_price
+
+            selected = effective_stop_price(hard, trailing)
+        except Exception:
+            selected = max(v for v in (hard, trailing) if v is not None)
+        return selected if selected is not None else base
+    return base
+
+
+def _is_point_buy_zone(low: float, high: float) -> bool:
+    lo = min(low, high)
+    hi = max(low, high)
+    return round(lo, 2) == round(hi, 2) or ((hi - lo) / max(lo, 1e-9)) < 0.0015
+
+
 def _wyckoff_l3_bounds_line(raw: object) -> str:
     """L3 成熟箱体的展示边界；仅消费既有 wyckoff/box 字段。"""
     wyk = _unwrap_wyckoff_payload(raw)
@@ -859,6 +890,18 @@ def render_short_midline(r: dict[str, Any]) -> str:
         if len(_action_main) > 22:
             _action_main = _action_main[:20] + "…"
 
+    if not any("新开：" in _dl for _dl in decision_lines):
+        _entry_state = "先别买" if _is_hold_off else "按纪律"
+        _entry_reasons: list[str] = []
+        if not _all_green:
+            _entry_reasons.append("清单未全绿")
+        if "不追" in execution:
+            _entry_reasons.append("不追现价")
+        if "门控组装失败" in str(reason):
+            _entry_reasons.append("门控组装失败")
+        _entry_tail = f" · {'｜'.join(_entry_reasons[:3])}" if _entry_reasons else ""
+        decision_lines.append(f"  新开：{_entry_state}{_entry_tail}")
+
     _action_parts = [_action_main]
     _action_parts.extend(_wait_bits)
     if _cap_t is not None:
@@ -885,18 +928,21 @@ def render_short_midline(r: dict[str, Any]) -> str:
         if len(_inv) > 52:
             _inv = _inv[:49] + "…"
         decision_lines.append(f"  破位看：{_inv}")
+    elif not any("破位看：" in _dl for _dl in decision_lines):
+        _break_bits: list[str] = []
+        _ma20_break = _ma_float("ma20")
+        if current > 0 and _ma20_break:
+            _break_bits.append(f"跌破MA20({_ma20_break:.2f})站不回")
+        _stop_preview = _select_display_stop(r, current=current, key_prices=key_prices)
+        if _stop_preview and _stop_preview > 0:
+            _break_bits.append(f"或破止损 {_stop_preview:.2f}")
+        if _break_bits:
+            decision_lines.append(f"  破位看：{'；'.join(_break_bits)}")
 
     # 策略闸口仍由 pipeline 写入 strategy_match（供 decision_view）；
     # 人读报告省略 📐——日常以 决策/动作/新开/失效 为准。
 
-    stop_sell = key_prices.get("stop_sell") or r.get("effective_stop") or r.get("stop")
-    try:
-        _trail_v = float(r.get("trailing_stop") or 0)
-        _hard_v = float(stop_sell or r.get("stop") or 0)
-        if _trail_v > 0:
-            stop_sell = max(_hard_v, _trail_v)
-    except (TypeError, ValueError):
-        pass
+    stop_sell = _select_display_stop(r, current=current, key_prices=key_prices)
     buy_low = key_prices.get("buy_zone_low")
     buy_high = key_prices.get("buy_zone_high")
     buy_ref = key_prices.get("buy_ref")
@@ -912,7 +958,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
             buy_low = buy_low or support
             buy_high = buy_high or round(support * 1.005, 2)
     if not stop_sell:
-        stop_sell = float(r.get("stop") or 0) or None
+        stop_sell = _float_or_none(r.get("stop"))
     if not short_high and not short_low:
         confirm = float(r.get("confirm") or 0)
         if confirm > 0:
@@ -990,7 +1036,13 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _buy_annotation = "回踩买"
             if _risk_buy > 0 and _rew_buy > 0:
                 _buy_annotation += f"，亏{_risk_buy:.1f} 赚{_rew_buy:.1f} → 盈亏比 {_ratio_buy:.1f}:1 {_rr_buy_verdict}"
-        _price_items.append((float(buy_low) - 0.001, f"低吸区 {float(buy_low):.2f}-{float(buy_high):.2f}", f"{_buy_annotation}{_src_suffix}"))
+        _buy_low_f = float(buy_low)
+        _buy_high_f = float(buy_high)
+        if _is_point_buy_zone(_buy_low_f, _buy_high_f):
+            _point = round((_buy_low_f + _buy_high_f) / 2.0, 2)
+            _price_items.append((_point, "支撑", f"{_buy_annotation}{_src_suffix}"))
+        else:
+            _price_items.append((_buy_low_f - 0.001, f"低吸区 {_buy_low_f:.2f}-{_buy_high_f:.2f}", f"{_buy_annotation}{_src_suffix}"))
     elif buy_ref:
         _src_suffix = f" ← {_sup_label}" if _sup_label else ""
         _price_items.append((float(buy_ref), "低吸区", f"分批建仓{_src_suffix}"))

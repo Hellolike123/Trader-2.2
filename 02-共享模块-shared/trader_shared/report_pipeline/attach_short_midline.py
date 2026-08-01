@@ -13,6 +13,36 @@ from trader_shared.report_pipeline.attach_decision_stack import (
 
 _logger = get_logger(__name__)
 
+
+def _positive_float(value: Any) -> float | None:
+    try:
+        val = float(value)
+    except (TypeError, ValueError):
+        return None
+    if val <= 0:
+        return None
+    return val
+
+
+def _select_key_price_stop(
+    report: dict[str, Any],
+    *,
+    current: float,
+    has_position: bool,
+) -> float | None:
+    """Stop fed into key_prices: empty position uses hard stop only."""
+    hard = _positive_float(report.get("stop"))
+    if not has_position:
+        return hard
+
+    trailing = _positive_float(report.get("trailing_stop"))
+    if trailing is not None and current > 0 and trailing < current:
+        from trader_shared.structure_core import effective_stop_price
+
+        return effective_stop_price(hard, trailing)
+    return hard
+
+
 def attach_short_midline_and_decision(
     report: dict[str, Any],
     ctx: Any,
@@ -101,17 +131,16 @@ def _attach_short_midline_and_decision_impl(
             if _ma20:
                 break
 
-        # 关键价/亏赚/纪律破位用有效止损（hard ∪ trailing）；report.stop 仍保留 hard
-        from trader_shared.structure_core import effective_stop_price
-
-        _eff_stop = effective_stop_price(
-            report.get("stop"),
-            report.get("trailing_stop"),
-        ) or effective_stop_price(report.get("effective_stop"), None)
+        # key_prices 不吃空仓 trailing；有仓也只接低于现价的移动止损。
+        _key_price_stop = _select_key_price_stop(
+            report,
+            current=current,
+            has_position=has_position,
+        )
         key_prices = build_key_prices(
             current=current,
             support=float(report.get("support") or 0) or None,
-            stop=_eff_stop,
+            stop=_key_price_stop,
             confirm=float(report.get("confirm") or 0) or None,
             resistance=float(report.get("resistance") or 0) or None,
             ma20=_ma20,
