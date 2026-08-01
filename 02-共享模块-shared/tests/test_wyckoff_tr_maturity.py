@@ -53,17 +53,19 @@ def _sc_ar_no_st_bars() -> list[dict]:
 
 
 def _sc_ar_st_bars() -> list[dict]:
-    """SC + AR + 缩量回测 ST（窗宽通常 < MEASURE_MIN → L2）。ST 须在 AR 后。
+    """SC + AR + 缩量回测 ST（窗宽通常 < MEASURE_MIN → L2）。ST 须在 AR+3 起。
 
     ST 用收复阳线，避免被 ``_find_sc_anchor`` 从近端误锚成新 SC。
     """
     bars = _decline_base(14, vol=100)
     bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC spread=3.0
     bars.append(_bar(83.5, 87.0, 85.0, 86.0, 400))   # AR（low 在 zone 上沿外）
-    # ST：low 回测 SC 区，收复阳线；波幅 1.4 ≤ 0.85×3
+    # AR+1 / AR+2：站在 zone 上，满足「AR 后至少 3 根才认 ST」
+    bars.append(_bar(85.2, 85.6, 85.0, 85.3, 120))
+    bars.append(_bar(85.1, 85.5, 84.9, 85.2, 120))
+    # ST @ AR+3：low 回测 SC 区，收复阳线；波幅 1.4 ≤ 0.85×3
     bars.append(_bar(82.2, 83.2, 81.8, 82.9, 800))
-    for i in range(3):
-        # 站在 zone 上方，避免后续棒抢 ST
+    for i in range(2):
         bars.append(_bar(85.0 + i * 0.05, 85.4, 84.8, 85.2, 120))
     return bars
 
@@ -81,9 +83,11 @@ def _wide_spread_st_bars() -> list[dict]:
     bars = _decline_base(14, vol=100)
     bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC spread=3.0；cap≈2.55
     bars.append(_bar(83.5, 87.0, 85.0, 86.0, 400))   # AR
+    bars.append(_bar(85.2, 85.6, 85.0, 85.3, 120))
+    bars.append(_bar(85.1, 85.5, 84.9, 85.2, 120))
     # 收复阳线 + 宽波幅 4.0 > cap；后续棒不得进入 SC 区
     bars.append(_bar(82.0, 85.5, 81.5, 83.5, 800))
-    for _ in range(3):
+    for _ in range(2):
         bars.append(_bar(85.5, 86.0, 85.2, 85.7, 110))
     return bars
 
@@ -112,12 +116,14 @@ def _st_before_ar_bars() -> list[dict]:
 
 
 def _st_after_ar_bars() -> list[dict]:
-    """AR 后合法缩量窄波幅 ST。"""
+    """AR 后合法缩量窄波幅 ST（AR+3 起算）。"""
     bars = _decline_base(14, vol=100)
     bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC
     bars.append(_bar(82.2, 83.2, 81.8, 82.9, 800))   # AR 前缩量棒（应忽略）
     bars.append(_bar(83.5, 87.0, 85.0, 86.0, 400))   # AR
-    bars.append(_bar(82.3, 83.1, 81.9, 82.8, 700))   # 合法 ST（阳线收复）
+    bars.append(_bar(85.2, 85.6, 85.0, 85.3, 120))   # AR+1
+    bars.append(_bar(85.1, 85.5, 84.9, 85.2, 120))   # AR+2
+    bars.append(_bar(82.3, 83.1, 81.9, 82.8, 700))   # 合法 ST @ AR+3
     for _ in range(2):
         bars.append(_bar(85.0, 85.4, 84.8, 85.1, 110))
     return bars
@@ -140,12 +146,9 @@ def _percentile_tr_no_sc_bars() -> list[dict]:
 
 
 def _require_gate_fields(result: dict) -> None:
-    if "tr_maturity" not in result:
-        pytest.skip("depends on Gate: tr_maturity not yet in wyckoff_analysis")
-    if "measure_allowed" not in result:
-        pytest.skip("depends on Gate: measure_allowed not yet in wyckoff_analysis")
-    if "box_display_mode" not in result:
-        pytest.skip("depends on Gate: box_display_mode not yet in wyckoff_analysis")
+    assert "tr_maturity" in result
+    assert "measure_allowed" in result
+    assert "box_display_mode" in result
 
 
 def _mature_box_phrase(text: str) -> bool:
@@ -277,7 +280,7 @@ def test_m_r3_sc_ar_st_at_least_l2_box() -> None:
 
 
 def test_m_r4_wide_enough_l3_measure() -> None:
-    """M-R4：宽度足够 → L3 + 量度（或至少 measure_allowed）。"""
+    """M-R4：宽度足够 → L3 + 量度数字（上下目标均须有）。"""
     # 勿过度前插 pad：SC 须留在 climax 检测窗内
     result = wyckoff_analysis(_sc_ar_st_wide_bars(), use_persisted_phase=False)
     assert result["secondary_test_sc_signal"] is True
@@ -285,15 +288,11 @@ def test_m_r4_wide_enough_l3_measure() -> None:
     assert result["tr_maturity"] == "L3"
     assert result["measure_allowed"] is True
     assert result["box_display_mode"] == "box"
-    has_targets = (
-        result.get("cause_effect_up_target") is not None
-        and result.get("cause_effect_down_target") is not None
-    )
-    assert has_targets or result["measure_allowed"] is True
-    if has_targets:
-        line = format_cause_effect_display(result)
-        assert line.startswith("量度目标：")
-        assert "非出手" in line
+    assert result.get("cause_effect_up_target") is not None
+    assert result.get("cause_effect_down_target") is not None
+    line = format_cause_effect_display(result)
+    assert line.startswith("量度目标：")
+    assert "非出手" in line
 
 
 def test_m_r5_percentile_tr_no_sc_l0() -> None:
@@ -445,12 +444,12 @@ def test_st_scan_starts_after_ar_ignores_pre_ar() -> None:
     assert r_post.get("ar_signal") is True
     assert r_post.get("secondary_test_sc_signal") is True
     assert r_post["tr_maturity"] in ("L2", "L3")
-    # 合法 ST 须在 AR 之后
+    # 合法 ST 须在 AR+3 起（phase-a §4.4.1）
     ar_i = r_post["phase_a_range"]["ar_bar_idx"]
     st_i = r_post.get("secondary_test_sc_bar_idx")
-    assert st_i is not None and ar_i is not None and st_i > ar_i
+    assert st_i is not None and ar_i is not None and st_i >= ar_i + 3
 
-    # 无 phase_a_range 时仍可从 SC+1 扫（兼容单测直调）
+    # 无 phase_a_range 时从 SC+3 扫（兼容单测直调）
     st_direct = _detect_secondary_test_sc(post)
     assert st_direct.get("secondary_test_sc_signal") is True
 
@@ -486,6 +485,11 @@ def test_is_index_relaxes_sc_vol_threshold() -> None:
     assert resolve_wyckoff_is_index("000001.SZ") is False  # 平安银行
     assert resolve_wyckoff_is_index("000852.SH") is True
     assert resolve_wyckoff_is_index("399006.SZ") is True
+    # 同裸码不同市场：指数在 .SH，个股在 .SZ 不得误判
+    assert resolve_wyckoff_is_index("000300.SH") is True   # 沪深300
+    assert resolve_wyckoff_is_index("000300.SZ") is False  # 维维股份
+    assert resolve_wyckoff_is_index("000016.SH") is True   # 上证50
+    assert resolve_wyckoff_is_index("000016.SZ") is False  # 深康佳A
 
     stock_th = float(_sc_detector_params("daily", is_index=False)["vol_ratio_threshold"])
     idx_th = float(_sc_detector_params("daily", is_index=True)["vol_ratio_threshold"])

@@ -239,7 +239,11 @@ _WYCKOFF_INDEX_BARE_CODES = frozenset({
 
 
 def resolve_wyckoff_is_index(symbol: Any = "") -> bool:
-    """识别威科夫分析标的是否为指数（用于放宽 SC 量阈，禁止软 ST 绕过）。"""
+    """识别威科夫分析标的是否为指数（用于放宽 SC 量阈，禁止软 ST 绕过）。
+
+    带 ``.SH/.SZ/.BJ`` 后缀时**只**认完整 ``ts_code`` 白名单，禁止去后缀走裸码
+    （避免 ``000300.SZ`` 维维股份、``000016.SZ`` 深康佳 误判为沪深300/上证50）。
+    """
     if symbol is None:
         return False
     if hasattr(symbol, "ts_code"):
@@ -249,24 +253,32 @@ def resolve_wyckoff_is_index(symbol: Any = "") -> bool:
         code = str(getattr(symbol, "code", "") or "").strip()
         market = str(getattr(symbol, "market", "") or "").strip().upper()
         if code and market:
-            return f"{code}.{market}" in _WYCKOFF_INDEX_TS_CODES
+            digits = "".join(ch for ch in code if ch.isdigit())[-6:]
+            return f"{digits}.{market}" in _WYCKOFF_INDEX_TS_CODES
         symbol = code or ts
-    raw = str(symbol or "").strip().upper()
+    raw = str(symbol or "").strip().upper().replace("_", ".")
     if not raw:
         return False
     if raw in _WYCKOFF_INDEX_TS_CODES:
         return True
     # sh000001 / sz399001
-    if raw.startswith(("SH", "SZ")) and len(raw) >= 8:
+    if raw.startswith(("SH", "SZ")) and len(raw) >= 8 and "." not in raw:
         mkt, digits = raw[:2], raw[2:]
         if digits.isdigit():
             return f"{digits}.{mkt}" in _WYCKOFF_INDEX_TS_CODES
-    bare = raw.replace(".SH", "").replace(".SZ", "").replace(".BJ", "")
-    bare = "".join(ch for ch in bare if ch.isdigit())[-6:] if bare else ""
-    if bare in _WYCKOFF_INDEX_BARE_CODES:
-        return True
-    # 裸 000001 歧义 → 不当指数；仅明确 .SH
-    return False
+        return False
+    # 带交易所后缀：只匹配完整 ts_code，禁止 strip 后撞裸码白名单
+    if ".SH" in raw or ".SZ" in raw or ".BJ" in raw:
+        parts = raw.split(".")
+        if len(parts) >= 2:
+            digits = "".join(ch for ch in parts[0] if ch.isdigit())[-6:]
+            mkt = parts[1][:2]
+            if digits and mkt:
+                return f"{digits}.{mkt}" in _WYCKOFF_INDEX_TS_CODES
+        return False
+    # 无后缀：仅无无歧义裸码（不含 000001；000001 须带 .SH）
+    bare = "".join(ch for ch in raw if ch.isdigit())[-6:] if raw else ""
+    return bare in _WYCKOFF_INDEX_BARE_CODES
 
 
 def _sc_detector_params(timeframe: str = "daily", *, is_index: bool = False) -> dict:
@@ -1309,16 +1321,18 @@ def _detect_secondary_test_sc(
     if sc_high is not None and sc_high > sc_low:
         sc_spread = float(sc_high) - float(sc_low)
 
-    # AR 已出现则 ST 候选从 AR 后计；破位扫描仍从 SC+1（整段 Phase A）
-    st_scan_start = sc_bar_idx + 1
+    # ST 候选窗：phase-a §4.4.1「SC/AR 后 3…LOOKBACK」；有 AR 以 AR 为锚，否则 SC
+    # 破位扫描仍从 SC+1（整段 Phase A，含 AR 前跌破）
+    st_anchor = sc_bar_idx
     pa = phase_a_range if isinstance(phase_a_range, dict) else None
     if pa is not None and pa.get("ar_bar_idx") is not None:
         try:
             ar_i = int(pa["ar_bar_idx"])
             if ar_i >= sc_bar_idx:
-                st_scan_start = ar_i + 1
+                st_anchor = ar_i
         except (TypeError, ValueError):
             pass
+    st_scan_start = int(st_anchor) + 3
 
     st_scan_end = min(len(bars), st_scan_start + int(WYCKOFF_ST_SC_MAX_BARS))
     # 破位扫描须覆盖 SC→AR 前 + ST 窗，避免漏掉 AR 前有效跌破

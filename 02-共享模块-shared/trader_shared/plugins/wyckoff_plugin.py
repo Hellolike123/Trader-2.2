@@ -24,7 +24,13 @@ class WyckoffPlugin(IndicatorPlugin):
         weekly_bars: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         from trader_shared.wyckoff_core import wyckoff_strategy
-        return wyckoff_strategy(current, bars, change_pct, quote)
+
+        symbol = ""
+        if isinstance(quote, dict):
+            symbol = str(
+                quote.get("symbol") or quote.get("ts_code") or quote.get("code") or ""
+            ).strip()
+        return wyckoff_strategy(current, bars, change_pct, quote, symbol=symbol)
 
     def weight(self) -> float:
         return 0.35  # Default weight in fusion (matches existing wyckoff weight)

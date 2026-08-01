@@ -1639,15 +1639,17 @@ class TestPhaseARangeP2:
         return bars
 
     def _nanwang_with_st_bars(self) -> list[dict]:
-        """SC + AR + 缩量二次测试（established + secondary ST；ST 在 AR 后）。
+        """SC + AR + 缩量二次测试（established + secondary ST；ST 在 AR+3）。
 
         ST 用收复阳线，避免近端阴线被误锚为新 SC。
         """
         bars = self._decline_base(14, vol=100)
         bars.append(_make_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC low=82
         bars.append(_make_bar(83.5, 87.0, 85.0, 86.0, 400))   # AR
-        bars.append(_make_bar(82.2, 83.2, 81.8, 82.9, 800))   # ST after AR（阳线）
-        for _ in range(3):
+        bars.append(_make_bar(85.2, 85.6, 85.0, 85.3, 120))   # AR+1
+        bars.append(_make_bar(85.1, 85.5, 84.9, 85.2, 120))   # AR+2
+        bars.append(_make_bar(82.2, 83.2, 81.8, 82.9, 800))   # ST @ AR+3（阳线）
+        for _ in range(2):
             bars.append(_make_bar(85.0, 85.4, 84.8, 85.1, 120))
         return bars
 

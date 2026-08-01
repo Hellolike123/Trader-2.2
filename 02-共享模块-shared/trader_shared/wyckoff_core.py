@@ -989,6 +989,10 @@ def wyckoff_strategy(current: float, bars: list[dict], change_pct: Any = None, q
     日线威科夫主要用于 ``calculate_wyckoff_score``（池/复盘）与兼容导出字段。
     中线展示读 ``wyckoff_strategy_midline``（周线独占）。
     """
+    if not symbol and isinstance(quote, dict):
+        symbol = str(
+            quote.get("symbol") or quote.get("ts_code") or quote.get("code") or ""
+        ).strip()
     result = wyckoff_analysis(bars, symbol=symbol)
     if isinstance(result, dict):
         result = {**result, "timeframe": "daily"}
