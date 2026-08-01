@@ -14,6 +14,7 @@ REQUIRED_KEYS = {
     "pool",
     "pending",
     "last_plan",
+    "pool_archive",
     "signals",
     "chip_history",
     "calibrated_params",
@@ -40,6 +41,7 @@ def test_keys_resolve_under_trader_root(tmp_path: Path, monkeypatch):
     assert trader_root() == root
     assert path("root") == root
     assert path("pool") == root / "pool.json"
+    assert path("pool_archive") == root / "pool_archive.json"
     assert path("holdings") == root / "holdings.json"
     assert path("position") == root / "position.json"
     assert path("positions_portfolio") == root / "positions.json"

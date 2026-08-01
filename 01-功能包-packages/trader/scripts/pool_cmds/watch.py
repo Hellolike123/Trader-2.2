@@ -15,10 +15,17 @@ def cmd_watch(args: argparse.Namespace) -> int:
         print("选股池为空，无需盯盘")
         return 0
 
-    # FIX-T-BIAS-148: always include execution items beyond rank 3
+    # FIX-T-BIAS-148: always include ready/execution items beyond rank 3
     # so that high-risk stocks are never silently ignored.
-    exec_items = [item for item in items if item.get("status") == "执行"]
-    rank_items = [item for item in items if item.get("status") != "执行"]
+    # Prefer lane==ready（分道 SSOT）；无 lane 时回退 status==执行（等价纳入）。
+    def _watch_ready(it: dict[str, Any]) -> bool:
+        lane = it.get("lane")
+        if lane is not None and str(lane).strip() != "":
+            return str(lane) == "ready"
+        return it.get("status") == "执行"
+
+    exec_items = [item for item in items if _watch_ready(item)]
+    rank_items = [item for item in items if not _watch_ready(item)]
     top3 = rank_items[:3]
     for item in exec_items:
         if item not in top3:

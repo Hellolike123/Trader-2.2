@@ -117,7 +117,7 @@ DOC claims（soft admit / AGENTS_DEEP fusion commander / fusion_regime docstring
 | **D1 / C-F04** | cards→classic fallback | BUSINESS §2.7 **允许** warning 后 classic；已有 warning。若要「cards 失败硬失败」属产品加严，另开任务，非审计违约 |
 | **D2 / C-F07** | `mid_bullish_downgrade` 松开空仓 | 确违「纪律只收紧」，但属持仓减仓语义调档、非阶段/新开主契约；M1–M4 优先。随后单独：删除该分支或改为「仅文案提示、不改 discipline.action」 |
 | **D3 / C-F08** | pool `watch` 仍按 `status==执行` 分流 | 分道（lane）已是注意力主序；`执行` 为旧三关诊断残留。改 watch UX 不阻塞出手正确性 |
-| **D4 / C-F09** | strategy `entry_reason="可执行"` 文案 | `executable=True` 闸门符合 BUSINESS；文案「可执行」易与 T0 禁令混淆，属文案归一（可改「清单齐/可扳机」），非逻辑 bug |
+| **D4 / C-F09** | strategy `entry_reason` 文案 | ✅ 已改为 `可扳机`（闸门仍 `executable=True`；避免与 T0「可执行」禁令混淆） |
 | **D5 / C-F10** | `FUSION_LOG_ONLY` import-time 常量 | 调试开关；生产默认 false。改为函数内读 env 属洁癖 |
 | **D6 / C-F11** | 其它 P2（日志噪音、死路径注释等） | 不改决策正确性 |
 | **D7** | 全面刷新全部 golden / 用户指南旧「三关硬拒」叙事页 | DOC 批处理；代码以 M1 验收测为准，骨架变了再刷 template |
@@ -184,7 +184,8 @@ Phase E (defer queue)           D2 mid_bullish_downgrade → D3/D4 文案
 
 **MUST-FIX-NOW**: M1 阶段钉威科夫 · M2 lifecycle 锁 · M3 假持仓/水位 · M4 decision_view fail-closed · M5 结构岗日线区 · M6 禁日线洗周线 UT · M7 t0_account/ledger 迁 shared · M8 其它 JSON 锁  
 
-**DEFER**: classic 回退（法源允许）· mid_bullish_downgrade · watch「执行」· 策略「可执行」文案 · FUSION_LOG_ONLY · 其它 P2/DOC 深刷  
+**DEFER**: classic 回退（法源允许）· mid_bullish_downgrade · FUSION_LOG_ONLY · 其它 P2/DOC 深刷  
+（已落地：watch 优先 `lane==ready`；策略 `entry_reason=可扳机`）  
 
 **DOC winners**: 软入池+分道 · fusion 仅仪表 · fusion_regime 文案降级为仪表 · 本裁定覆盖历史 P0 过度宣称  
 
