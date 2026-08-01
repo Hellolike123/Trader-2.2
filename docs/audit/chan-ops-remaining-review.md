@@ -15,8 +15,8 @@
 
 ## 总览
 
-R1–R10 已在 `chan_discipline` / `run_analysis` / `attach_short_midline` + `short_midline` 渲染 /
-单测 / `output-template` 链路落地。  
+R1–R10 已在 `chan_discipline` / `attach_short_midline` + `short_midline` 渲染 /
+单测 / `output-template` 链路落地（历史验收曾记 `run_analysis` 单体，现已拆到 `report_builder` 挂接）。  
 原则核对：只收紧不放宽；`chan_core` 无禁止开仓；买点阶梯 / 盘整 / low_zone / 分闸 / 位置 /
 本周期标注 / 破位 / 周框均有实现与测试。  
 指定 pytest：**85 passed**（0.07s）。
@@ -31,11 +31,11 @@ R1–R10 已在 `chan_discipline` / `run_analysis` / `attach_short_midline` + `s
 | V2 | 盘整 + 走强表本可轻仓 → 被压到观望或 cap≤10 | **PASS** | 日/周 `structure_type` 含「盘整」→ `_tighten_cap` ≤10 + notes「盘整不做趋势重仓」；仍允许新开时 action 最多「轻仓试错」（L414–428, L519–526）。`TestR2PanZhengNoHeavy`；merge 用例 cap≤10 且非「持有/回踩低吸」重仓语义 |
 | V3 | 在中线回踩内但 low_zone 外 → short 闸否决或总否决新开 | **PASS** | R3：`in_lz is False` → `_block_short`（L445–450）。现勘：mid=True / short=False / total=False。`TestR3LowZoneShortGate` |
 | V4 | `allow_new_entry == (mid and short)` | **PASS** | 汇总 L505–506：`allow_new = allow_mid and allow_short`；merge 侧 L649 + L708–709 分闸透传后总闸仍等于 mid∧short（gate 否决时两边同 False）。`TestR4SplitGates` / `test_merge_preserves_split_fields` |
-| V5 | `position_info.suggested_pct` 与 report 一致被裁 | **PASS** | `run_analysis.py` L1706–1741：按 `discipline.suggested_pct_cap` / `allow_new_entry` 算 `_final_sug`，同时写 `report["suggested_pct"]` 与 `report["position_info"]["suggested_pct"]`；context 文案同步。`position_info` 在 L1350–1357 必建 |
-| V6 | 报告含位置：中枢… | **PASS** | `compute_pivot_position` → `中枢内\|中枢上(回踩中)\|中枢下(反抽中)\|中枢外\|未知`。`run_analysis` 写 `pivot_position_weekly/daily`。渲染：`attach_short_midline` → `short_midline.py` 🧭/⚡ 各一行 `位置：…`。`output-template.md` 样例已补。`TestR6PivotPosition` |
+| V5 | `position_info.suggested_pct` 与 report 一致被裁 | **PASS** | 现：`attach_short_midline` / assemble 按 `discipline.suggested_pct_cap` / `allow_new_entry` 裁 `suggested_pct` 与 `position_info.suggested_pct`（历史验收行号曾指 monolith `run_analysis`） |
+| V6 | 报告含位置：中枢… | **PASS** | `compute_pivot_position` → `中枢内\|中枢上(回踩中)\|中枢下(反抽中)\|中枢外\|未知`。现由 `attach_short_midline` 写 `pivot_position_weekly/daily`；渲染 `short_midline.py` 🧭/⚡ 各一行 `位置：…`。`TestR6PivotPosition` |
 | V7 | 缠论文案含（本周期）当有买卖点/背驰 | **PASS** | `needs_same_level_tag` / `append_same_level_tag`（产物文案 `（本周期）`，兼容旧「同级」）。`short_midline` 中线/短线缠论行追加。`TestR7SameLevelTag`；template 样例 `顶背驰 · 看跌（本周期）` |
 | V8 | 破 life → notes/动作收紧 | **PASS** | `current < life_line` → 双闸否决 + notes「跌破中线生命线」；有仓 `action_override=减仓`，无仓观望（L452–480）。中枢下沿同理（L481–489）。`TestR8LifeZhBreak`；现勘有仓减仓 |
-| V9 | `weekly_frame` 有值；破坏不新开 | **PASS** | `compute_weekly_frame` → 完好\|紧张\|破坏（数据不足 None）（L146–183）。`run_analysis` 写入 `report["weekly_frame"]`（L1584–1587）；`apply_chan_discipline` 对「破坏」双闸否决（L491–503）。`TestR9WeeklyFrame` |
+| V9 | `weekly_frame` 有值；破坏不新开 | **PASS** | `compute_weekly_frame` → 完好\|紧张\|破坏（数据不足 None）。现由 `attach_short_midline` 写入 `report["weekly_frame"]`；`apply_chan_discipline` 对「破坏」双闸否决。`TestR9WeeklyFrame` |
 | V10 | merge 仍只收紧；pytest 相关绿 | **PASS** | `merge_discipline`：False 赢 / action rank 只收紧 / cap=min / notes 并集（L628–730）；`TestT3MergeTightenOnly` 恶意放宽仍观望。pytest 见下 |
 
 ---
@@ -44,7 +44,7 @@ R1–R10 已在 `chan_discipline` / `run_analysis` / `attach_short_midline` + `s
 
 | 红线 | 结果 | 证据 |
 |------|------|------|
-| 不在 `chan_core` 写禁止开仓 | **PASS** | `chan_core.py` 无 `allow_new_entry` / `discipline` /「禁止开仓」；裁剪仅 `chan_discipline` + merge + `run_analysis` 砍仓 |
+| 不在 `chan_core` 写禁止开仓 | **PASS** | `chan_core.py` 无 `allow_new_entry` / `discipline` /「禁止开仓」；裁剪仅 `chan_discipline` + merge + 报告挂接砍仓 |
 | 只收紧不放宽 | **PASS** | merge：gate 观望/减仓/止损不可被 chan 放宽为开仓；cap 取 min；否决新开时开仓类 action→观望 |
 | 不改笔算法 / 无新中线主引擎 | **PASS** | 改动集中在 discipline / 报告展示 / 接线；无 `chan_core` 分型笔段重写 |
 | 报告无 mi/Mistery 人设 | **PASS** | template 与 report 出手/失效/纪律白话；无品牌词新增 |
@@ -68,7 +68,9 @@ R1–R10 已在 `chan_discipline` / `run_analysis` / `attach_short_midline` + `s
 
 ---
 
-## 接线顺序（run_analysis）
+## 接线顺序（现生产：`report_builder` → `attach_short_midline`）
+
+> 历史验收标题曾写 monolith `run_analysis`；逻辑顺序不变，挂接点已迁。
 
 ```text
 mid_key_prices
