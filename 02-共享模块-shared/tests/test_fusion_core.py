@@ -675,32 +675,20 @@ class TestMergeDecisions:
         assert result["signals_detail"]["chan"]["direction"] == 0
         assert result["signals_detail"]["chan"]["confidence"] in (0.3, 0.35)
 
-    def test_log_only_action(self):
-        import os
-        original = os.environ.get("FUSION_LOG_ONLY")
-
-        # 默认 FUSION_LOG_ONLY=true
-        os.environ["FUSION_LOG_ONLY"] = "true"
-        # Reimport to pick up new env
-        import importlib
-        import trader_shared.fusion_core
-        importlib.reload(trader_shared.fusion_core)
+    def test_log_only_action(self, monkeypatch):
+        """FUSION_LOG_ONLY 运行时读 env，无需 reload 模块。"""
         from trader_shared.fusion_core import merge_decisions
 
+        monkeypatch.setenv("FUSION_LOG_ONLY", "true")
         chan = {"chanlun": {"buy_points": [{"type": "一类买", "price": 28}], "divergence": {}, "trend_label": "拉升段"}}
         mom = {"momentum": {"score": 72, "direction": "bullish", "signals": []}}
         wyk = {"wyckoff": {"spring_signal": True}}
         result = merge_decisions(chan, mom, wyk, regime="正常")
-
-        # 日志模式下 action 被覆盖
         assert "日志模式" in result["action"]
 
-        # 恢复
-        if original is None:
-            os.environ.pop("FUSION_LOG_ONLY", None)
-        else:
-            os.environ["FUSION_LOG_ONLY"] = original
-        importlib.reload(trader_shared.fusion_core)
+        monkeypatch.setenv("FUSION_LOG_ONLY", "false")
+        result2 = merge_decisions(chan, mom, wyk, regime="正常")
+        assert "日志模式" not in str(result2.get("action") or "")
 
 
 class TestIntegrationDataFlow:

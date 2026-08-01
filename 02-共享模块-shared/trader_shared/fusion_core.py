@@ -52,9 +52,15 @@ except ImportError:  # pragma: no cover
     def bayesian_merge(chan, mom, wyk, regime_state="range"): return {}
 
 # ── 安全模式: 环境变量控制 (FUSION_LOG_ONLY=true = 只日志, 不改决策行为)
-# 默认关闭日志模式, 融合层正式生效。调试时可设置 FUSION_LOG_ONLY=true
+# 默认关闭日志模式。运行时读 env（勿在 import 时冻结）。
 
-FUSION_LOG_ONLY = os.environ.get("FUSION_LOG_ONLY", "false").lower() in ("true", "1", "yes")
+
+def _fusion_log_only() -> bool:
+    return os.environ.get("FUSION_LOG_ONLY", "false").lower() in ("true", "1", "yes")
+
+
+# 兼容旧 import；新代码请用 _fusion_log_only()
+FUSION_LOG_ONLY = False  # noqa: F841 — legacy name; value not authoritative
 
 # Arch C：fusion 三席输入来源
 # - cards（生产默认）：analysis_cards → fusion_card_signals；席位语义只改那边
@@ -788,7 +794,7 @@ def merge_decisions(
 
     # 7. 日志 + 安全模式
     _log_fusion(result)
-    if FUSION_LOG_ONLY:
+    if _fusion_log_only():
         result["action"] = "日志模式 (FUSION_LOG_ONLY=true)，决策由现有 system 输出"
 
     return result

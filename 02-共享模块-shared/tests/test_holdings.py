@@ -112,7 +112,8 @@ def test_watermark_gate_uses_resolved_cost(trader_tmp, monkeypatch):
 
     src = Path(rb.__file__).read_text(encoding="utf-8")
     assert "resolve_cost_price" in src
-    assert "if float(cost_price or 0) > 0:" in src
+    # StageContext bag: gate reads ctx.cost_price (not bare local)
+    assert "if float(ctx.cost_price or 0) > 0:" in src
     # M3: signal cost must not drive ratchet
     assert "or float(_signal_cost_price or 0) > 0" not in src
 
