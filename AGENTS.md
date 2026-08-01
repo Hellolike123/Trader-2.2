@@ -2,7 +2,7 @@
 
 - **目标架构法源**：`docs/designs/resonance-and-orchestration.md` — 五层+编排、岗位共振；fusion 不作总司令。
 - **版本**：Trader 2.4+（技能：`trader` / `t0` / `review` / `wyckoff`）。单票**始终**中短线双轨（`render_short_midline`；`SHORT_MIDLINE_REPORT=false` 已忽略）。
-- **Fusion 生产路径**：`FUSION_FROM_CARDS` 缺省 = `cards`；`classic` / `compare` 仅对照（classic deprecated）。详见 `BUSINESS.md` §2.7。
+- **Fusion 生产路径**：`FUSION_FROM_CARDS` 缺省 = `cards`；`classic` / `compare` 仅对照（classic deprecated）。详见 `BUSINESS.md` §2.7。**A1** 已落地（merge 在 stage_pack 后、短中线前）；**A2 仍延期**（勿把 merge 挪到 decision_view 之后）。
 - **快照 enrich**：`TRADER_SNAPSHOT_ENRICH=0` 可整段关掉；`TRADER_ENRICH_BOARDS` **默认关**（不用 akshare 成分股扫板，行业走 tushare 日缓存；概念软加成需显式 `=1`）。
 - **门禁**：`scripts/run-gate-tests.sh`（离线子集）；禁止把全量历史红项塞进门禁。说明：`docs/architecture/ci-gate.md`。
 - **Agent 快路径**：各 skill **只预读** `references/agent-quickstart.md` + 共用 `references/agent-rules.md`；跑脚本 → 原样贴 markdown → 停。禁止开工前批量读 references、禁止默认 `--output json`。
@@ -164,8 +164,9 @@ Skill 包内把路径换成 `python3 scripts/<同名入口>.py ...`。完整命�
 
 | 文件 | 用途 |
 |------|------|
-| `~/.trader/signals.jsonl` | Signal Contract v2 事件流 |
-| `~/.trader/pool.json` / `pending.json` / `last_plan.json` | 选股池 |
+| `~/.trader/signals.jsonl` | Signal Contract v2 事件流（`trader_paths` key=`signals`；`TRADER_SIGNAL_STORE_PATH`） |
+| `~/.trader/pool.json` / `pending.json` / `last_plan.json` | 选股池（keys=`pool`/`pending`/`last_plan`） |
+| `~/.trader/last_target.txt` | 最近分析标的（key=`last_target`；`final_report` / pool `add-last`） |
 | `~/.trader/calibrated_params.json` | 自校准参数 |
 | `~/.trader/chip_history.json` | 筹码搬家快照 |
 | `~/.trader/trailing_stop_watermark.json` | ATR 移动止损水位（仅持仓票，只紧不松） |

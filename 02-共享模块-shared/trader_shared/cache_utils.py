@@ -461,9 +461,9 @@ def warm_chanlun_states() -> dict[str, Any]:
     """预建每只池内活跃票的 ``ChanlunEngine`` 状态到 ``CHANLUN_STATE_DIR/{code}.json``。
 
     供 T0 盯盘 / 次日分析 ``ChanlunEngine.load`` 直接复用，避免重复网络抓取 300 根历史。
-    读取 ``~/.trader/pool.json`` 取 status 非「淘汰/已退出」的标的；对每个标的拉取日线
-    （``include_5m/weekly/monthly/ticks=False``，暖缓存阶段已有 CACHE_DAILY，二次调用命中缓存极快），
-    批量 build 引擎并 save。
+    读取 pool.json（``trader_paths`` / ``TRADER_ROOT``）取 status 非「淘汰/已退出」的标的；
+    对每个标的拉取日线（``include_5m/weekly/monthly/ticks=False``，暖缓存阶段已有
+    CACHE_DAILY，二次调用命中缓存极快），批量 build 引擎并 save。
 
     容错：单只构建/保存异常 → ``failed += 1`` + 记 ``errors``，**不阻断其他票 / 不阻断 warm**。
 
@@ -472,7 +472,9 @@ def warm_chanlun_states() -> dict[str, Any]:
     """
     from pathlib import Path
 
-    pool_path = Path.home() / ".trader" / "pool.json"
+    from trader_shared.trader_paths import path as trader_path
+
+    pool_path = trader_path("pool")
     if not pool_path.exists():
         return {"total": 0, "success": 0, "failed": 0, "errors": []}
 
@@ -550,7 +552,7 @@ def warm_pool_cache() -> dict[str, Any]:
     """Pre-cache data for all active stocks in the pool.
 
     Called after market close (15:00) to prepare data for next day's analysis.
-    Reads ~/.trader/pool.json and fetches full data for each active stock.
+    Reads pool.json via trader_paths (TRADER_ROOT) and fetches full data for each active stock.
 
     Returns:
         {"total": int, "success": int, "failed": int, "skipped": int, "errors": list}
@@ -558,7 +560,9 @@ def warm_pool_cache() -> dict[str, Any]:
     import sys
     from pathlib import Path
 
-    pool_path = Path.home() / ".trader" / "pool.json"
+    from trader_shared.trader_paths import path as trader_path
+
+    pool_path = trader_path("pool")
     if not pool_path.exists():
         return {"total": 0, "success": 0, "failed": 0, "skipped": 0, "errors": []}
 

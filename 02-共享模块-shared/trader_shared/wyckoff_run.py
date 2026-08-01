@@ -16,7 +16,9 @@ from trader_shared.wyckoff_render import render_wyckoff_card, render_wyckoff_ran
 
 
 def _pool_path() -> Path:
-    return Path.home() / ".trader" / "pool.json"
+    from trader_shared.trader_paths import path as trader_path
+
+    return trader_path("pool")
 
 
 def load_pool_items(path: Path | None = None) -> list[dict[str, Any]]:
@@ -182,7 +184,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         nargs="?",
         choices=["rank"],
         default=None,
-        help="rank = 池内吸筹链排序（读 ~/.trader/pool.json）",
+        help="rank = 池内吸筹链排序（读 pool.json / TRADER_ROOT）",
     )
     parser.add_argument("--target", help="A-share name or code for single-stock card")
     parser.add_argument("--output", choices=["markdown", "json"], default="markdown")

@@ -221,11 +221,6 @@ def assemble_base_report(ctx: Any) -> dict[str, Any]:
     return _assemble_base_report_impl(**kwargs)
 
 
-def assemble_base_report_kwargs(**kwargs: Any) -> dict[str, Any]:
-    """Deprecated one-release：测试/旧调用方可继续 kwargs。"""
-    return _assemble_base_report_impl(**kwargs)
-
-
 def _assemble_base_report_impl(
     *,
     intraday_as_of: Any,

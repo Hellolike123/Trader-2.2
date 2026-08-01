@@ -26,18 +26,24 @@ SIGNAL_SCHEMA_VERSION: int = 1
 
 
 def _get_default_store_path() -> Path:
-    """Return default signal store path.
+    """Return default signal store path via trader_paths.
 
-    Prefers TRADER_SIGNAL_STORE_PATH env var, otherwise falls back to
-    ~/.trader/signals.jsonl.
+    Order: ``TRADER_SIGNAL_STORE_PATH`` → module ``DEFAULT_SIGNAL_STORE_PATH``
+    monkeypatch (tests) → ``TRADER_ROOT``/signals.jsonl.
     """
-    env_path = os.environ.get("TRADER_SIGNAL_STORE_PATH")
+    from trader_shared.trader_paths import path as trader_path
+
+    env_path = (os.environ.get("TRADER_SIGNAL_STORE_PATH") or "").strip()
     if env_path:
-        return Path(env_path)
-    return DEFAULT_SIGNAL_STORE_PATH
+        return Path(os.path.expanduser(env_path))
+    # Module attribute override (tests: store_mod.DEFAULT_SIGNAL_STORE_PATH = ...)
+    if DEFAULT_SIGNAL_STORE_PATH is not None:
+        return Path(DEFAULT_SIGNAL_STORE_PATH)
+    return trader_path("signals")
 
 
-DEFAULT_SIGNAL_STORE_PATH = Path.home() / ".trader" / "signals.jsonl"
+# None → resolve via trader_paths at call time; tests may assign a Path.
+DEFAULT_SIGNAL_STORE_PATH: Path | None = None
 _ROTATION_THRESHOLD_BYTES = 10 * 1024 * 1024  # 10MB
 
 
@@ -266,7 +272,7 @@ def cleanup_old_signals(
 
     Args:
         max_age_days: Maximum age in days. Older terminal signals are archived.
-        path: Override signal store path (default: ~/.trader/signals.jsonl).
+        path: Override signal store path (default: trader_paths ``signals``).
 
     Returns:
         Dict with 'total', 'archived', 'kept', 'failed' counts.

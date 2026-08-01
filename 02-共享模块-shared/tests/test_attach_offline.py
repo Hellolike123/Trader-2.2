@@ -10,12 +10,35 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+def _sm_ctx(**over):
+    """Minimal StageContext for attach_short_midline_and_decision."""
+    from trader_shared.report_pipeline.stage_context import StageContext
+
+    base = dict(
+        current=10.0,
+        scene="观察",
+        report_fusion={"action": "观望", "regime": "正常", "signals_detail": {}},
+        stage_result={"major_stage": "蓄势", "momentum": "震荡"},
+        weekly_bars=[],
+        suggested=0,
+        theory_status="观察",
+        market_env_data={"level": "正常"},
+        has_position=False,
+        data_status="full",
+        chip_resistance_lower=None,
+        chip_resistance_upper=None,
+        stage="蓄势",
+        short_term_momentum="蓄势",
+    )
+    base.update(over)
+    return StageContext.from_mapping(base)
+
+
 def test_attach_facade_reexports():
     from trader_shared.report_pipeline import attach as facade
     from trader_shared.report_pipeline.attach_buy_point import apply_buy_point_lifecycle
     from trader_shared.report_pipeline.attach_short_midline import (
         attach_short_midline_and_decision,
-        attach_short_midline_and_decision_kwargs,
     )
 
     assert facade.apply_buy_point_lifecycle is apply_buy_point_lifecycle
@@ -42,7 +65,6 @@ def test_sync_report_with_data_fixes_stop_above_support():
 def test_attach_short_midline_writes_discipline_or_conclusion():
     from trader_shared.report_pipeline.attach_short_midline import (
         attach_short_midline_and_decision,
-        attach_short_midline_and_decision_kwargs,
     )
 
     report = {
@@ -58,22 +80,7 @@ def test_attach_short_midline_writes_discipline_or_conclusion():
         "wyckoff_midline": {},
         "chanlun": {},
     }
-    out = attach_short_midline_and_decision_kwargs(
-        report,
-        current=10.0,
-        scene="观察",
-        report_fusion={"action": "观望", "regime": "正常", "signals_detail": {}},
-        stage_result={"major_stage": "蓄势", "momentum": "震荡"},
-        weekly_bars=[],
-        suggested=0,
-        theory_status="观察",
-        market_env_data={"level": "正常"},
-        has_position=False,
-        data_status="full",
-        chip_resistance_lower=None,
-        chip_resistance_upper=None,
-        stage="蓄势",
-    )
+    out = attach_short_midline_and_decision(report, _sm_ctx())
     assert "discipline" in out or "conclusion" in out or "key_prices" in out
 
 
@@ -81,7 +88,6 @@ def test_a3_daily_fallback_zones_not_weekly_pivots():
     """A3：daily_fallback zones 不得冒充周中枢 / pivot_position_weekly。"""
     from trader_shared.report_pipeline.attach_short_midline import (
         attach_short_midline_and_decision,
-        attach_short_midline_and_decision_kwargs,
     )
 
     bait_zones = [{"valid": True, "zh_bottom": 9.0, "zh_top": 11.0, "zh_center": 10.0}]
@@ -109,22 +115,7 @@ def test_a3_daily_fallback_zones_not_weekly_pivots():
         },
         "chanlun": {},
     }
-    out = attach_short_midline_and_decision_kwargs(
-        report,
-        current=10.0,
-        scene="观察",
-        report_fusion={"action": "观望", "regime": "正常", "signals_detail": {}},
-        stage_result={"major_stage": "蓄势", "momentum": "震荡"},
-        weekly_bars=[],
-        suggested=0,
-        theory_status="观察",
-        market_env_data={"level": "正常"},
-        has_position=False,
-        data_status="full",
-        chip_resistance_lower=None,
-        chip_resistance_upper=None,
-        stage="蓄势",
-    )
+    out = attach_short_midline_and_decision(report, _sm_ctx())
     # 无真周 zones → 周枢位置未知（不得用日线回退中枢算出「中枢内」）
     assert out.get("pivot_position_weekly") in (None, "未知", "")
     # 阶段不得被 daily_fallback 类二抬成主升初期
@@ -138,7 +129,6 @@ def test_a3_weekly_zones_feed_pivot_when_timeframe_weekly():
     """对照：真 weekly zones 仍可进 pivot_position_weekly。"""
     from trader_shared.report_pipeline.attach_short_midline import (
         attach_short_midline_and_decision,
-        attach_short_midline_and_decision_kwargs,
     )
 
     report = {
@@ -161,22 +151,7 @@ def test_a3_weekly_zones_feed_pivot_when_timeframe_weekly():
         "wyckoff_midline": {"phase": "accumulation_b", "phase_label": "吸筹B"},
         "chanlun": {},
     }
-    out = attach_short_midline_and_decision_kwargs(
-        report,
-        current=10.0,
-        scene="观察",
-        report_fusion={"action": "观望", "regime": "正常", "signals_detail": {}},
-        stage_result={"major_stage": "蓄势", "momentum": "震荡"},
-        weekly_bars=[],
-        suggested=0,
-        theory_status="观察",
-        market_env_data={"level": "正常"},
-        has_position=False,
-        data_status="full",
-        chip_resistance_lower=None,
-        chip_resistance_upper=None,
-        stage="蓄势",
-    )
+    out = attach_short_midline_and_decision(report, _sm_ctx())
     assert out.get("pivot_position_weekly") == "中枢内"
 
 

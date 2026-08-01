@@ -30,6 +30,7 @@ PATH_KEYS (filenames under trader_root unless noted):
   t0_ledger                → t0_ledger.jsonl
   t0_state                 → ~/.t0-trader/state.json by default (not under root)
   holdings                 → holdings.json          (unified SSOT)
+  last_target              → last_target.txt        (final_report / pool add-last)
 """
 from __future__ import annotations
 
@@ -57,6 +58,7 @@ _FILE_BY_KEY: dict[str, str] = {
     "account": "account.json",
     "t0_ledger": "t0_ledger.jsonl",
     "holdings": "holdings.json",
+    "last_target": "last_target.txt",
 }
 
 # key → env var that overrides the full path

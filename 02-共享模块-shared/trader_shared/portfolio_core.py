@@ -233,15 +233,14 @@ def enrich_portfolio_resonance(items: list[dict[str, Any]]) -> list[dict[str, An
 
 
 def _pool_resonance_index() -> dict[str, dict[str, Any]]:
-    """~/.trader/pool.json → key(name/symbol/target) → meta。失败返回空。"""
+    """pool.json（trader_paths / TRADER_ROOT）→ key(name/symbol/target) → meta。失败返回空。"""
     try:
-        from pathlib import Path
         import json
-        import os
 
         from trader_shared.resonance import extract_resonance_grade
+        from trader_shared.trader_paths import path as trader_path
 
-        path = Path(os.path.expanduser("~/.trader/pool.json"))
+        path = trader_path("pool")
         if not path.exists():
             return {}
         data = json.loads(path.read_text(encoding="utf-8"))

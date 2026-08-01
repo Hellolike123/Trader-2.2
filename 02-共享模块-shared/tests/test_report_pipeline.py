@@ -42,7 +42,7 @@ def test_apply_buy_point_lifecycle_sets_field():
 
 
 def test_attach_short_midline_importable():
-    from trader_shared.report_pipeline import attach_short_midline_and_decision_kwargs
+    from trader_shared.report_pipeline import StageContext, attach_short_midline_and_decision
 
     report = {
         "current": 10.0,
@@ -57,8 +57,7 @@ def test_attach_short_midline_importable():
         "wyckoff_midline": {},
         "chanlun": {},
     }
-    out = attach_short_midline_and_decision_kwargs(
-        report,
+    ctx = StageContext(
         current=10.0,
         scene="观察",
         report_fusion={"action": "观望", "regime": "正常", "signals_detail": {}},
@@ -72,7 +71,9 @@ def test_attach_short_midline_importable():
         chip_resistance_lower=None,
         chip_resistance_upper=None,
         stage="蓄势",
+        short_term_momentum="蓄势",
     )
+    out = attach_short_midline_and_decision(report, ctx)
     assert "key_prices" in out or "conclusion" in out or "discipline" in out
 
 
