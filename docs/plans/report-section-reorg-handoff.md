@@ -18,11 +18,17 @@
 5. **L3** 时威科夫下显式写出 `下沿 x｜上沿 y（L3）` + `量度目标：上 …｜下 …（P&F/高度1:1，非出手）`；L0–L2 **不贴**量度行（沉默省略，不写「未达 L3」解释行）。  
 6. 同步 `BUSINESS.md` §5.1、`output-template.md`、golden、骨架断言测。  
 7. **亮点/风险净化（续）**：尾部不得再拼装「中线阶段无阶段 · 偏空（…）」；偏空用中线看法短因（如「中线框破坏」），偏多用「中线可跟踪」类白话，禁止 `中线阶段{拼盘}` / `阶段 {stage_line}` 上屏。  
-8. **中线 Fib 关闭**：`midline_structure` 主路径不再写「黄金买点」（50%回撤）、不再用 138.2% 抬高目标；恢复 `midline-price-engine-plan.md` §9.5（压力/目标仅周线笔段/摆动）。
+8. **中线 Fib 关闭**：`midline_structure` 主路径不再写「黄金买点」（50%回撤）、不再用 138.2% 抬高目标；恢复 `midline-price-engine-plan.md` §9.5（压力/目标仅周线笔段/摆动）。  
+9. **短线支撑阻力展示净化**（南网裁决）：
+   - **止损展示**：空仓 / 止损≥现价时，只用硬止损 `report.stop`；有仓且 `trailing_stop` **低于现价**时才可用移动止损（只紧不松）。禁止面板出现「止损在现价上方」。  
+   - **点状低吸区**：若 `buy_zone_high - buy_zone_low` 相对价宽 < 0.15%（或两价四舍五入后相等），改标 `支撑 x`，禁止 `低吸区 x-x` 装区间。  
+   - **组装 stop 入 `build_key_prices`**：与上同规（空仓传硬止损），避免 trailing 抬高污染低吸区评分。  
+   - 风险/破位看里的「止损看」与面板止损同口径。  
+   - 可改：`short_midline.py` 短线支撑阻力拼装、`attach_short_midline.py` 传入 stop 选择；golden/测。不大改 `structure_core` 硬/移动计算公式本身。
 
 ### 0.2 不做（后续迭代）
 
-- 不改 `key_prices` / `structure_core` 主算法（中线 Fib 关闭属例外，见 §0.1-8）。  
+- 不改 `structure_core` 硬/移动止损公式本体（仅展示与传入 `build_key_prices` 的 stop 选择，见 §0.1-9）。  
 - 不改 fusion / decision_view / 出手判定 / 池分道。  
 - 短线低吸区改挂缠论结构（另开 handoff）。  
 - 不改威科夫 skill 独立卡。  
@@ -148,6 +154,8 @@
 | R-R5 | L0–L2 无量度行；L3 有下沿/上沿分行 + 量度行（fixture） | 单测 |
 | R-R6 | 中线支撑阻力仍来自 `mid_key_prices`；短线来自 `key_prices` | 既有 isolation 测不破 |
 | R-R6b | 中线无 Fib 黄金买点；目标不被 138.2% 抬高（component≠fib_*） | `test_midline_structure` |
+| R-R11 | 空仓+trailing&gt;现价时，短线止损展示=硬止损且 &lt; 现价 | 单测（南网类） |
+| R-R12 | 点状买区展示为「支撑」而非「低吸区 x-x」 | 单测 |
 | R-R7 | 出手块含共振/新开/动作（有则破位看） | golden |
 | R-R8 | 微信红线：无 `#`/`**`/管道表/`---` | 目视 + 既有格式测 |
 | R-R9 | `BUSINESS.md` §5.1 与 `output-template.md` 与渲染一致 | 查 Agent |
