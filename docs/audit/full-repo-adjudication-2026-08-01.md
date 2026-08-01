@@ -23,7 +23,7 @@
 | **C-F06** | chip / wyckoff_phase / add-store 持久化竞态 | **CONFIRMED P1** | `chip_migration_monitor`：atomic replace 无锁；`wyckoff_phase._save_phase_state`：直接 `open(...,"w")` 非原子且无锁；`position_add_store._save`：atomic 但进程间无 flock（有线程锁不够） |
 | **C-F07** | `mid_bullish_downgrade` 仍接线松开纪律 | **CONFIRMED P2** | `attach_short_midline`：中线 `midline_bias==bull` 时把「空仓/止损」改「减1/3」——违「纪律只收紧」 |
 
-DOC claims（soft admit / AGENTS_DEEP fusion commander / fusion_regime docstring / P0 overclaim）→ 见 §4；不进 MUST-FIX 代码项，进 DOC 批处理。
+DOC claims（soft admit / AGENTS_DEEP fusion commander / fusion_regime docstring / P0 overclaim）→ 见 §3；代码 MUST 落地后已回写 BUSINESS §4.2/§5.1、output-template、AGENTS_DEEP（软入池 + fusion 仪表 + 阶段=周威科夫）。
 
 ---
 
