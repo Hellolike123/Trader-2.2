@@ -312,6 +312,9 @@ def _event_price_from_sources(
         "UT": ("upthrust_price",),
         "UTAD": ("utad_price",),
         "BU": ("bu_price",),
+        "PSY": ("psy_price",),
+        "JAC": ("jac_price",),
+        "SV": ("stopping_volume_price",),
     }
     for k in price_keys.get(code, ()):
         v = raw.get(k)
@@ -324,25 +327,92 @@ def _event_price_from_sources(
     return None
 
 
+# 日线五灯之外：引擎已实现且 view/信号已亮时追加展示（W-D10 防静默黑洞）
+_EXTRA_DAILY_ORDER = (
+    "PS",
+    "Spring",
+    "BU",
+    "JAC",
+    "SV",
+    "PSY",
+    "BC",
+    "ARE",
+    "UT",
+    "UTAD",
+    "SOW",
+    "LPSY",
+)
+_EXTRA_SIGNAL_KEYS: dict[str, str] = {
+    "ps_signal": "PS",
+    "spring_signal": "Spring",
+    "bu_signal": "BU",
+    "jac_signal": "JAC",
+    "stopping_volume_signal": "SV",
+    "psy_signal": "PSY",
+    "bc_signal": "BC",
+    "are_signal": "ARE",
+    "upthrust_signal": "UT",
+    "utad_signal": "UTAD",
+    "sow_signal": "SOW",
+    "lpsy_signal": "LPSY",
+}
+
+
 def _accum_lit_set(raw: dict[str, Any], view: dict[str, Any]) -> set[str]:
-    events = extract_accum_events(raw if raw else view)
-    return set(events)
+    """日线吸筹灯集合：chain 提取 + view.active_events（含 secondary_test_sc→ST）。"""
+    src = raw if raw else view
+    events = set(extract_accum_events(src))
+    # handoff §2.4：active_events / 信号字段一并认（防链提取与 L2 真 ST 脱节）
+    if src.get("secondary_test_sc_signal") or src.get("st_signal") or src.get(
+        "spring_test_signal"
+    ):
+        events.add("ST")
+    active = view.get("active_events") if isinstance(view.get("active_events"), list) else []
+    for eid in active:
+        code = _VIEW_ID_TO_CODE.get(str(eid), "")
+        if code in ACCUM_CHAIN:
+            events.add(code)
+        elif str(eid) == "secondary_test_sc":
+            events.add("ST")
+    return events
+
+
+def _extra_lit_codes(raw: dict[str, Any], view: dict[str, Any]) -> list[str]:
+    """非五灯已亮事件（只展示引擎已点亮的，不编造未亮全集）。"""
+    src = raw if raw else view
+    found: set[str] = set()
+    for sig, code in _EXTRA_SIGNAL_KEYS.items():
+        if src.get(sig):
+            found.add(code)
+    active = view.get("active_events") if isinstance(view.get("active_events"), list) else []
+    for eid in active:
+        code = _VIEW_ID_TO_CODE.get(str(eid), "")
+        # spring_test 已映射进链上 ST；此处 Spring 仅在 spring 真事件时追加
+        if str(eid) == "spring_test":
+            continue
+        if code and code not in ACCUM_CHAIN:
+            found.add(code)
+    return [c for c in _EXTRA_DAILY_ORDER if c in found]
+
+
+def _format_lamp_line(code: str, *, lit: bool, view: dict[str, Any], raw: dict[str, Any]) -> str:
+    cn = _cn(code)
+    if not lit:
+        return f"○ {code}（{cn}）未亮"
+    px_s = _fmt_price(_event_price_from_sources(code, view=view, raw=raw))
+    if px_s:
+        return f"● {code}（{cn}）{px_s}"
+    return f"● {code}（{cn}）"
 
 
 def _format_daily_lights(view: dict[str, Any], raw: dict[str, Any]) -> list[str]:
+    """日线默认五灯 + 其他已亮主灯（handoff §1/§2.4 + W-D10）。"""
     lit = _accum_lit_set(raw, view)
-    lines: list[str] = []
-    for code in ACCUM_CHAIN:
-        cn = _cn(code)
-        if code in lit:
-            px = _event_price_from_sources(code, view=view, raw=raw)
-            px_s = _fmt_price(px)
-            if px_s:
-                lines.append(f"● {code}（{cn}）{px_s}")
-            else:
-                lines.append(f"● {code}（{cn}）")
-        else:
-            lines.append(f"○ {code}（{cn}）未亮")
+    lines = [
+        _format_lamp_line(code, lit=(code in lit), view=view, raw=raw) for code in ACCUM_CHAIN
+    ]
+    for code in _extra_lit_codes(raw, view):
+        lines.append(_format_lamp_line(code, lit=True, view=view, raw=raw))
     return lines
 
 
@@ -432,14 +502,21 @@ def _pool_advice(
 
 
 def _oneline_compress(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    """一句话：阶段（phase_label）必带，避免详析阶段黑洞（W-D10）。"""
+    phase = str(view.get("phase_label") or view.get("phase") or "").strip()
+    if phase in ("none", "None"):
+        phase = "无明确阶段"
     summary = str(view.get("summary_oneline") or "").strip()
     if summary:
-        # 压缩过长摘要
-        if len(summary) > 48:
-            summary = summary[:46] + "…"
+        if len(summary) > 40:
+            summary = summary[:38] + "…"
+        if phase:
+            return f"{phase}｜{summary}"
         return summary
     bias = _BIAS_CN.get(str(view.get("bias") or "neutral"), "中性")
     primary = _primary_light_label(raw, view)
+    if phase:
+        return f"{phase}｜{bias} · {primary}"
     return f"{bias} · {primary}"
 
 
@@ -562,7 +639,10 @@ def build_light_snapshot_entry(
     daily_raw = _as_raw(plan.get("daily_raw"))
     weekly_raw = _as_raw(plan.get("weekly_raw"))
 
-    daily_events = extract_accum_events(daily_raw if daily_raw else daily_view)
+    # 五灯链 + 已亮非五灯（与详析灯块同源，供 🔔 变化对比）
+    chain = list(extract_accum_events(daily_raw if daily_raw else daily_view))
+    extras = _extra_lit_codes(daily_raw, daily_view)
+    daily_events = chain + [c for c in extras if c not in chain]
     weekly_codes: list[str] = []
     seen: set[str] = set()
     for eid in weekly_view.get("active_events") or []:

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-# 吸筹链固定顺序（ST 槽位 = Test of Spring / spring_test_*，展示名见 _CHAIN_DISPLAY）
+# 吸筹链固定顺序（ST 槽位认 st_* / spring_test_* / secondary_test_sc_*；展示名见 _CHAIN_DISPLAY）
 ACCUM_CHAIN = ("SC", "AR", "ST", "LPS", "SOS")
 
 # 同道内 RS 排序档：弱侧更重（原典：弱相对强弱更常用来降级）
@@ -52,6 +52,16 @@ def _wyckoff_dict(report_or_item: dict[str, Any] | None) -> dict[str, Any]:
         cached = report_or_item.get(f"wyckoff_{label.lower()}_signal")
         if cached is not None:
             merged[key] = cached
+    # 广义 ST（测 SC）与 Spring 确认：扁平字段也要并入，供 extract_accum_events 认灯
+    for flat_key in (
+        "secondary_test_sc_signal",
+        "spring_test_signal",
+        "wyckoff_secondary_test_sc_signal",
+        "wyckoff_spring_test_signal",
+    ):
+        if report_or_item.get(flat_key) is not None:
+            canon = flat_key.replace("wyckoff_", "")
+            merged[canon] = report_or_item.get(flat_key)
     if report_or_item.get("wyckoff_bc_signal") is not None:
         merged["bc_signal"] = report_or_item.get("wyckoff_bc_signal")
     # 仅有链标签、无任何 signal 旗时，用链回填
@@ -73,7 +83,12 @@ def extract_accum_events(report_or_item: dict[str, Any] | None) -> list[str]:
         key = _SIGNAL_KEYS[label]
         lit = bool(wyk.get(key))
         if label == "ST":
-            lit = lit or bool(wyk.get("spring_test_signal"))
+            # 广义 ST（回测 SC）与 Spring 确认均可点亮链上 ST；与 L0–L3 真 ST 对齐
+            lit = (
+                lit
+                or bool(wyk.get("spring_test_signal"))
+                or bool(wyk.get("secondary_test_sc_signal"))
+            )
         if lit:
             out.append(label)
     return out

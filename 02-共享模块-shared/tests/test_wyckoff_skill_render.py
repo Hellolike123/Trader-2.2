@@ -1,11 +1,12 @@
 """威科夫 Skill 渲染合同（无网络）。
 
-法源验收：docs/plans/wyckoff-skill-deep-card-handoff.md §4 W-D1..W-D9
+法源验收：docs/plans/wyckoff-skill-deep-card-handoff.md §4 W-D1..W-D11
 """
 from __future__ import annotations
 
 import re
 
+from trader_shared.wyckoff_chain import extract_accum_events
 from trader_shared.wyckoff_render import (
     build_light_snapshot_entry,
     format_light_change,
@@ -367,6 +368,97 @@ def test_wd5_lights_bullet_cn_and_price():
         assert ln.count("●") + ln.count("○") == 1
 
 
+def test_wd5_secondary_test_sc_lights_st_without_st_signal():
+    """W-D5 / §2.4：仅 secondary_test_sc（无 st_signal）须亮 ST；禁止靠 phase 字样猜灯。"""
+    # 链提取：广义 ST
+    only_st_sc = {
+        "sc_signal": True,
+        "ar_signal": True,
+        "st_signal": False,
+        "spring_test_signal": False,
+        "secondary_test_sc_signal": True,
+        "lps_signal": False,
+        "sos_signal": False,
+    }
+    assert extract_accum_events(only_st_sc) == ["SC", "AR", "ST"]
+
+    # 仅 phase 字样、无事件 → 不亮
+    phase_only = {
+        "phase_label": "二次测试",
+        "sc_signal": False,
+        "ar_signal": False,
+        "st_signal": False,
+        "secondary_test_sc_signal": False,
+        "spring_test_signal": False,
+        "lps_signal": False,
+        "sos_signal": False,
+    }
+    assert extract_accum_events(phase_only) == []
+
+    # 详析：L2 箱 + secondary_test_sc → ST●（查 Agent 曾抓的 ST 黑洞）
+    plan = _sample_plan()
+    plan["daily_raw"]["st_signal"] = False
+    plan["daily_raw"]["spring_test_signal"] = False
+    plan["daily_raw"]["secondary_test_sc_signal"] = True
+    plan["daily_raw"]["lps_signal"] = False
+    plan["daily_view"]["active_events"] = ["sc", "ar", "secondary_test_sc"]
+    plan["daily_view"]["event_detail"].pop("lps", None)
+    text = render_wyckoff_detail(plan)
+    assert "● ST（二次测试）9.60" in text
+    assert "○ LPS（最后支撑点）未亮" in text
+
+
+def test_wd10_phase_label_on_oneline():
+    """W-D10：phase_label 须出现在中线/短线一句话，禁止阶段黑洞。"""
+    text = render_wyckoff_detail(_sample_plan())
+    # 中线块第一句带周线 phase；短线块带日线 phase
+    mid_block = text.split("🧭 中线")[1].split("⚡ 短线")[0]
+    short_block = text.split("⚡ 短线")[1].split("🔮 故事链")[0]
+    assert "吸筹B" in mid_block
+    assert "吸筹C" in short_block
+    # 一句话行格式：阶段｜…
+    assert any(ln.strip().startswith("一句话：吸筹B｜") for ln in mid_block.splitlines())
+    assert any(ln.strip().startswith("一句话：吸筹C｜") for ln in short_block.splitlines())
+
+
+def test_wd10_extra_lit_events_not_silent():
+    """W-D10：引擎已亮的非五灯（PS/Spring/JAC/SV 等）不得静默。"""
+    plan = _sample_plan()
+    plan["daily_raw"]["ps_signal"] = True
+    plan["daily_raw"]["ps_price"] = 9.4
+    plan["daily_raw"]["spring_signal"] = True
+    plan["daily_raw"]["spring_price"] = 9.55
+    plan["daily_raw"]["jac_signal"] = True
+    plan["daily_raw"]["jac_price"] = 11.2
+    plan["daily_raw"]["stopping_volume_signal"] = True
+    plan["daily_raw"]["stopping_volume_price"] = 9.45
+    plan["daily_view"]["active_events"] = [
+        "ps",
+        "sc",
+        "ar",
+        "secondary_test_sc",
+        "spring",
+        "lps",
+        "jac",
+        "stopping_volume",
+    ]
+    plan["daily_view"]["event_detail"]["ps"] = {"id": "ps", "price": 9.4}
+    plan["daily_view"]["event_detail"]["spring"] = {"id": "spring", "price": 9.55}
+    plan["daily_view"]["event_detail"]["jac"] = {"id": "jac", "price": 11.2}
+    plan["daily_view"]["event_detail"]["stopping_volume"] = {
+        "id": "stopping_volume",
+        "price": 9.45,
+    }
+    text = render_wyckoff_detail(plan)
+    short_block = text.split("⚡ 短线")[1].split("🔮 故事链")[0]
+    assert "● PS（初步止跌）9.40" in short_block
+    assert "● Spring（弹簧确认）9.55" in short_block
+    assert "● JAC（跳溪）11.20" in short_block
+    assert "● SV（止跌量）9.45" in short_block
+    # 仍保留默认五灯骨架
+    assert "○ SOS（强势信号）未亮" in short_block or "● SOS" in short_block
+
+
 def test_wd6_no_buy_words():
     """W-D6：无买卖指令词。"""
     text = render_wyckoff_detail(_sample_plan())
@@ -469,6 +561,27 @@ def test_build_light_snapshot_entry_shape():
     assert "LPS" in entry["daily_events"]
     assert isinstance(entry["daily_prices"], dict)
     assert isinstance(entry["weekly_events"], list)
+
+
+def test_wd8_snapshot_includes_extra_lit_for_change():
+    """W-D8：非五灯已亮须进快照，才能在 🔔 变化里新亮/熄灭。"""
+    plan = _sample_plan()
+    plan["daily_raw"]["jac_signal"] = True
+    plan["daily_raw"]["jac_price"] = 11.2
+    plan["daily_view"]["active_events"] = ["sc", "ar", "secondary_test_sc", "lps", "jac"]
+    plan["daily_view"]["event_detail"]["jac"] = {"id": "jac", "price": 11.2}
+    entry = build_light_snapshot_entry(plan, ts="2026-08-01T00:00:00+00:00")
+    assert "JAC" in entry["daily_events"]
+    assert entry["daily_prices"].get("JAC") == 11.2
+
+    prev = {
+        "daily_events": ["SC", "AR", "ST", "LPS"],
+        "weekly_events": [],
+        "daily_prices": {},
+        "weekly_prices": {},
+    }
+    line = format_light_change(prev, entry)
+    assert "新亮：" in line and "JAC" in line
 
 
 def test_trader_paths_wyckoff_light_snapshot(tmp_path, monkeypatch):

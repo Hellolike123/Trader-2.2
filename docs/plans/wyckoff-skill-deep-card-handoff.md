@@ -137,6 +137,9 @@ load_market_snapshot → wyckoff_analysis(daily|weekly)
 | LPSY | 最后供应点 |
 | UT / UTAD | 上冲 / 派发后上冲 |
 | BU | 回调买入 |
+| JAC | 跳溪 |
+| SV | 止跌量 |
+| PSY | 初步供应 |
 | Markup | 主升 |
 | Markdown | 主跌 |
 | TR | 交易区间 |
@@ -156,6 +159,7 @@ load_market_snapshot → wyckoff_analysis(daily|weekly)
 ### 2.4 灯列表
 
 - 日线默认展示吸筹链：`SC, AR, ST, LPS, SOS`（ST 含 `secondary_test_sc_signal` 或 Spring 确认类灯的映射按 chain 模块既有语义；**以 `extract_accum_events` / active_events + 信号字段为准**）。  
+- 日线另追加：**引擎已亮**的非五灯（PS / Spring / BU / JAC / SV / 派发侧等，来自 active_events 或信号字段）一行一灯，避免 W-D10「引擎有、面板永远不提」；**不**为未亮概念编造整表 ○。  
 - 周线：以 `active_events` 亮灯为主；未亮可 `○ 其他主灯未亮`。  
 - 亮：`● CODE（中文）价`；未亮：`○ CODE（中文）未亮`。  
 - **不得**因「价格合适」手工点亮。
