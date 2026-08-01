@@ -1918,6 +1918,27 @@ class TestFakeTrendDemotion:
         ]
         assert _strict_down_trend_zones(zones, strokes=strokes_rev) is True
 
+    def test_strict_matches_classify_on_earlier_non_reverse_pair(self):
+        """3 中枢：前对连接非反向、末对反向 → classify 盘整且 _strict_* False（防一类漏点）。"""
+        zones = [
+            self._zone_with_span(15.0, 20.0, 0, 10),
+            self._zone_with_span(25.0, 30.0, 20, 30),
+            self._zone_with_span(35.0, 40.0, 40, 50),
+        ]
+        segs = [
+            {"direction": "up", "start_index": 11, "end_index": 14},
+            {"direction": "up", "start_index": 15, "end_index": 18},  # Z0–Z1 非反向
+            {"direction": "up", "start_index": 31, "end_index": 33},
+            {"direction": "down", "start_index": 34, "end_index": 37},  # Z1–Z2 反向
+            {"direction": "up", "start_index": 38, "end_index": 39},
+        ]
+        strokes = self._make_indexed_strokes(60)
+        result = classify_structure(zones, segments=segs, strokes=strokes)
+        assert result["structure_type"] == "盘整"
+        assert "假趋势" in result.get("structure_evidence", "")
+        # 若只查末对会误 True；须与 classify 同链 demote
+        assert _strict_up_trend_zones(zones, segments=segs, strokes=strokes) is False
+
     @staticmethod
     def _make_indexed_strokes(n):
         strokes = []

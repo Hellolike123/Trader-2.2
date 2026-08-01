@@ -589,22 +589,25 @@ def _strict_down_trend_zones(
     segments: list[dict] | None = None,
     strokes: list[dict] | None = None,
 ) -> bool:
-    """下跌趋势：≥2 中枢且末中枢整体在前中枢下方（严格不重叠，与 classify 拓扑一致）。
+    """下跌趋势：≥2 中枢且整链严格下移不重叠（与 classify 拓扑一致）。
 
-    formulas.md §6 / §9.1–§9.4：一类拓扑与 classify 一致——同向不重叠后还须连接段为反向；
-    夹同向小中枢（连接段非反向）→ False。未传 segments/strokes 或索引缺失时跳过连接检查
-    （保持旧裸区行为）。
+    formulas.md §6 / §9.1–§9.4：一类拓扑与 classify 一致——全部相邻同向不重叠，
+    且任一对连接段须为反向；夹同向小中枢（连接段非反向）→ False。
+    未传 segments/strokes 或索引缺失时跳过连接检查（保持旧裸区行为）。
     """
     if len(valid_zones) < 2:
         return False
-    a, b = valid_zones[-2], valid_zones[-1]
-    try:
-        if not (float(b["zh_top"]) < float(a["zh_bottom"])):
+    for i in range(1, len(valid_zones)):
+        prev, curr = valid_zones[i - 1], valid_zones[i]
+        try:
+            if not (float(curr["zh_top"]) < float(prev["zh_bottom"])):
+                return False
+        except (TypeError, ValueError, KeyError):
             return False
-    except (TypeError, ValueError, KeyError):
-        return False
-    if _connector_is_non_reverse(a, b, "down", segments=segments, strokes=strokes):
-        return False
+        if _connector_is_non_reverse(
+            prev, curr, "down", segments=segments, strokes=strokes
+        ):
+            return False
     return True
 
 
@@ -613,20 +616,23 @@ def _strict_up_trend_zones(
     segments: list[dict] | None = None,
     strokes: list[dict] | None = None,
 ) -> bool:
-    """上涨趋势：≥2 中枢且末中枢整体在前中枢上方（严格不重叠）。
+    """上涨趋势：≥2 中枢且整链严格上移不重叠。
 
     同 `_strict_down_trend_zones`：§9 连接段须反向，否则非一类趋势拓扑。
     """
     if len(valid_zones) < 2:
         return False
-    a, b = valid_zones[-2], valid_zones[-1]
-    try:
-        if not (float(b["zh_bottom"]) > float(a["zh_top"])):
+    for i in range(1, len(valid_zones)):
+        prev, curr = valid_zones[i - 1], valid_zones[i]
+        try:
+            if not (float(curr["zh_bottom"]) > float(prev["zh_top"])):
+                return False
+        except (TypeError, ValueError, KeyError):
             return False
-    except (TypeError, ValueError, KeyError):
-        return False
-    if _connector_is_non_reverse(a, b, "up", segments=segments, strokes=strokes):
-        return False
+        if _connector_is_non_reverse(
+            prev, curr, "up", segments=segments, strokes=strokes
+        ):
+            return False
     return True
 
 
