@@ -80,12 +80,16 @@ def test_a03_chan_buy1_type_first():
     assert_card_numeric_finite(card)
 
 
-def test_a03b_chan_from_fusion_reason():
+def test_a03b_chan_does_not_infer_from_fusion_reason():
+    """C-D3c：引擎无点时禁止从 fusion.reason 手补一买。"""
     card = build_chan_card(
         {},
         fusion_chan={"reason": "缠论一类买 (底背驰)", "direction": 1},
     )
-    assert card["type_short"] == "一买" or "一买" in card["summary_line"]
+    assert card.get("status") != "point"
+    assert card.get("type_short") not in ("一买", "一类买")
+    assert "一买" not in str(card.get("summary_line") or "")
+    assert "一类买" not in str(card.get("summary_line") or "")
 
 
 def test_a04_chip_no_peaks_no_pct_empty():

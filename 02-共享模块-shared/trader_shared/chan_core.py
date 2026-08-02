@@ -312,6 +312,71 @@ def _chanlun_compute(
         "pivot_count": pivot_count,
     }
 
+def _bars_adjust_mode(bars: list[dict] | None) -> str:
+    """返回单个序列实际可核的复权口径；无证据时不猜。"""
+    if not bars:
+        return "unknown"
+    modes = {
+        str(bar.get("adjust") or "").strip().lower()
+        for bar in bars
+        if isinstance(bar, dict) and str(bar.get("adjust") or "").strip()
+    }
+    if not modes:
+        return "unknown"
+    if len(modes) > 1:
+        return "mixed"
+    return next(iter(modes))
+
+
+def _combined_adjust_mode(
+    daily_bars: list[dict] | None,
+    weekly_bars: list[dict] | None,
+) -> str:
+    """汇总日周复权；任一序列未知时不得宣称已统一。"""
+    series_modes = [
+        _bars_adjust_mode(series)
+        for series in (daily_bars, weekly_bars)
+        if series
+    ]
+    if not series_modes:
+        return "unknown"
+    if "mixed" in series_modes or len(set(series_modes)) > 1:
+        return "unknown" if "unknown" in series_modes else "mixed"
+    return series_modes[0]
+
+
+def _chan_data_payload(
+    *,
+    note: str,
+    daily_bars: list[dict] | None,
+    weekly_bars: list[dict] | None,
+) -> dict[str, Any]:
+    """空、过短或失败时的 fail-closed 缠论结构。"""
+    return {
+        "timeframe": "insufficient",
+        "data_ok": False,
+        "data_note": note,
+        "data_bars_daily": len(daily_bars or []),
+        "data_bars_weekly": len(weekly_bars or []),
+        "adjust_mode": _combined_adjust_mode(daily_bars, weekly_bars),
+        "structure_type": "",
+        "structure_confidence": "low",
+        "trend_label": "数据不足",
+        "strokes": [],
+        "segments": [],
+        "zones": [],
+        "divergence": {},
+        "buy_points": [],
+        "sell_points": [],
+    }
+
+
+def _insufficient_note(label: str, count: int) -> str:
+    if count <= 0:
+        return f"{label}数据为空，无法进行缠论分析"
+    return f"{label}不足：仅{count}根，至少需要{CHANLUN_MIN_BARS}根"
+
+
 def chanlun_analysis(
     bars: list[dict],
     current: float,
@@ -329,21 +394,40 @@ def chanlun_analysis(
     委托共享内核 `_chanlun_compute`：先算「包含处理 + MACD」，再交给内核。
     divergence_bc: None 跟环境/配置（默认 legacy）；回测可显式传 \"strict\"/\"legacy\"。
     """
+    bars = bars if isinstance(bars, list) else []
+    weekly_bars = weekly_bars if isinstance(weekly_bars, list) else []
+    is_weekly = timeframe == "weekly"
+    daily_meta = [] if is_weekly else bars
+    weekly_meta = bars if is_weekly else weekly_bars
+    label = "周线" if is_weekly else "日线"
     if len(bars) < CHANLUN_MIN_BARS:
-        return {}
+        return _chan_data_payload(
+            note=_insufficient_note(label, len(bars)),
+            daily_bars=daily_meta,
+            weekly_bars=weekly_meta,
+        )
 
-    # 结构层：包含处理（拷贝 OHLC，不修改入参 bars）
-    cleaned = handle_inclusion(bars)
-    # 力度层：在 inclusion 后序列上重算 MACD，使笔 index 与 histogram 同坐标系。
-    # _calc_macd 内部 dict 拷贝，只写 cleaned，绝不写回调用方 raw bars。
-    cleaned = _calc_macd(cleaned)
+    try:
+        # 结构层：包含处理（拷贝 OHLC，不修改入参 bars）
+        cleaned = handle_inclusion(bars)
+        # 力度层：在 inclusion 后序列上重算 MACD，使笔 index 与 histogram 同坐标系。
+        # _calc_macd 内部 dict 拷贝，只写 cleaned，绝不写回调用方 raw bars。
+        cleaned = _calc_macd(cleaned)
 
-    return _chanlun_compute(
-        cleaned, current,
-        higher_trend=higher_trend, symbol=symbol,
-        analysis_date=analysis_date, weekly_bars=weekly_bars, timeframe=timeframe,
-        raw_bars=bars, divergence_bc=divergence_bc,
-    )
+        result = _chanlun_compute(
+            cleaned, current,
+            higher_trend=higher_trend, symbol=symbol,
+            analysis_date=analysis_date, weekly_bars=weekly_bars or None, timeframe=timeframe,
+            raw_bars=bars, divergence_bc=divergence_bc,
+        )
+    except Exception as exc:
+        return _chan_data_payload(
+            note=f"{label}缠论分析失败：{exc}",
+            daily_bars=daily_meta,
+            weekly_bars=weekly_meta,
+        )
+
+    return result
 
 class ChanlunEngine:
     """缠论增量分析引擎（有状态）。
@@ -556,6 +640,16 @@ def chanlun_strategy(
     weekly_bars: list[dict] | None = None,
 ) -> dict:
     """日线缠论（短线 / fusion）。周线仅作 higher_trend 过滤，不是中线主分析。"""
+    bars = bars if isinstance(bars, list) else []
+    weekly_bars = weekly_bars if isinstance(weekly_bars, list) else []
+    if len(bars) < CHANLUN_MIN_BARS:
+        return {
+            "chanlun": _chan_data_payload(
+                note=_insufficient_note("日线", len(bars)),
+                daily_bars=bars,
+                weekly_bars=weekly_bars,
+            )
+        }
     macd_h_curr = to_float(bars[-1].get("macd_histogram")) if bars else None
     macd_h_prev = to_float(bars[-2].get("macd_histogram")) if len(bars) >= 2 else None
     # 从 quote 派生 symbol/date，供 signal_id 使用（向后兼容：无 quote 时不加 id）
@@ -563,14 +657,29 @@ def chanlun_strategy(
         symbol = quote.get("symbol")
     if analysis_date is None and isinstance(quote, dict):
         analysis_date = quote.get("trade_date") or (bars[-1].get("date") if bars else None)
-    result = chanlun_analysis(
-        bars, current, macd_h_curr, macd_h_prev,
-        symbol=symbol, analysis_date=analysis_date,
-        weekly_bars=weekly_bars,
-        timeframe="daily",
-    )
-    if isinstance(result, dict):
-        result = {**result, "timeframe": "daily"}
+    try:
+        result = chanlun_analysis(
+            bars, current, macd_h_curr, macd_h_prev,
+            symbol=symbol, analysis_date=analysis_date,
+            weekly_bars=weekly_bars,
+            timeframe="daily",
+        )
+    except Exception as exc:
+        result = _chan_data_payload(
+            note=f"日线缠论分析失败：{exc}",
+            daily_bars=bars,
+            weekly_bars=weekly_bars,
+        )
+    if isinstance(result, dict) and result.get("data_ok") is not False:
+        result = {
+            **result,
+            "timeframe": "daily",
+            "data_ok": True,
+            "data_note": "日线数据充足",
+            "data_bars_daily": len(bars),
+            "data_bars_weekly": len(weekly_bars),
+            "adjust_mode": _combined_adjust_mode(bars, weekly_bars),
+        }
     return {"chanlun": result}
 
 def chanlun_strategy_midline(
@@ -588,8 +697,8 @@ def chanlun_strategy_midline(
     - 中线：本函数 → 报告「理论：缠论 …」
     - 短线：chanlun_strategy(日线) → fusion / 短线专家
     """
-    weekly_bars = weekly_bars or []
-    daily_bars = daily_bars or []
+    weekly_bars = weekly_bars if isinstance(weekly_bars, list) else []
+    daily_bars = daily_bars if isinstance(daily_bars, list) else []
     if symbol is None and isinstance(quote, dict):
         symbol = quote.get("symbol")
     if analysis_date is None and isinstance(quote, dict):
@@ -607,16 +716,19 @@ def chanlun_strategy_midline(
         conf_tf = "daily"
         extra_weekly = weekly_bars if weekly_bars else None
     else:
+        if not weekly_bars and not daily_bars:
+            note = "日线与周线数据为空，无法进行中线缠论分析"
+        else:
+            note = (
+                f"日线与周线均不足（日{len(daily_bars)}根，周{len(weekly_bars)}根；"
+                f"至少需要{CHANLUN_MIN_BARS}根）"
+            )
         return {
-            "chanlun": {
-                "timeframe": "insufficient",
-                "structure_type": "",
-                "structure_confidence": "low",
-                "trend_label": "数据不足",
-                "divergence": {},
-                "buy_points": [],
-                "sell_points": [],
-            }
+            "chanlun": _chan_data_payload(
+                note=note,
+                daily_bars=daily_bars,
+                weekly_bars=weekly_bars,
+            )
         }
 
     if analysis_date is None and bars:
@@ -625,15 +737,45 @@ def chanlun_strategy_midline(
     macd_h_prev = to_float(bars[-2].get("macd_histogram")) if len(bars) >= 2 else None
     # 现价：周线分析用当前价更贴现价位置
     cur = float(current) if current and current > 0 else float(to_float(bars[-1].get("close")) or 0)
-    result = chanlun_analysis(
-        bars, cur, macd_h_curr, macd_h_prev,
-        symbol=symbol, analysis_date=analysis_date,
-        weekly_bars=extra_weekly,
-        timeframe=conf_tf,
-    )
+    try:
+        result = chanlun_analysis(
+            bars, cur, macd_h_curr, macd_h_prev,
+            symbol=symbol, analysis_date=analysis_date,
+            weekly_bars=extra_weekly,
+            timeframe=conf_tf,
+        )
+    except Exception as exc:
+        return {
+            "chanlun": _chan_data_payload(
+                note=f"{'周线' if tf == 'weekly' else '日线回退'}缠论分析失败：{exc}",
+                daily_bars=daily_bars,
+                weekly_bars=weekly_bars,
+            )
+        }
     if not isinstance(result, dict):
         result = {}
-    result = {**result, "timeframe": tf}
+    if result.get("data_ok") is False:
+        result = {
+            **result,
+            "data_bars_daily": len(daily_bars),
+            "data_bars_weekly": len(weekly_bars),
+            "adjust_mode": _combined_adjust_mode(daily_bars, weekly_bars),
+        }
+    else:
+        note = (
+            "周线数据充足"
+            if tf == "weekly"
+            else f"周线不足（{len(weekly_bars)}根），中线缠论使用日线结构展示"
+        )
+        result = {
+            **result,
+            "timeframe": tf,
+            "data_ok": True,
+            "data_note": note,
+            "data_bars_daily": len(daily_bars),
+            "data_bars_weekly": len(weekly_bars),
+            "adjust_mode": _combined_adjust_mode(daily_bars, weekly_bars),
+        }
     return {"chanlun": result}
 
 def format_chanlun_theory_line(chan_result: Any) -> str:
@@ -644,6 +786,8 @@ def format_chanlun_theory_line(chan_result: Any) -> str:
     chan = unwrap_chan(chan_result) if isinstance(chan_result, dict) else {}
     if not isinstance(chan, dict) or not chan:
         return "中枢未成型·先观望"
+    if chan.get("data_ok") is False or chan.get("timeframe") == "insufficient":
+        return str(chan.get("data_note") or "数据不足，无法进行缠论分析")
 
     st = str(chan.get("structure_type") or "").strip()
     # 兼容历史缓存中的「线段不足*」主状态；正常路径不再产出该值
@@ -867,50 +1011,11 @@ def format_chanlun_short_light(
     """
     info = resolve_chanlun_primary(chan_result)
     chan = info.get("chan") if isinstance(info.get("chan"), dict) else {}
+    if chan.get("data_ok") is False or chan.get("timeframe") == "insufficient":
+        return str(chan.get("data_note") or "日线数据不足，无法进行缠论分析")
 
-    # fusion 有更强 reason 且 resolve 无 point 时，可从 reason 补类型（兼容只有 signals_detail 的 mock）
-    if info["status"] in ("none", "trend") and isinstance(fusion_chan, dict):
-        reason = str(fusion_chan.get("reason") or "")
-        for raw, short in _CHAN_TYPE_SHORT.items():
-            if raw in reason or short in reason:
-                info = {
-                    **info,
-                    "status": "point",
-                    "type_raw": raw,
-                    "type_short": short,
-                    "note": _CHAN_TYPE_NOTE.get(raw, ""),
-                    "direction": int(fusion_chan.get("direction") or info["direction"] or 0),
-                    "same_level": True,
-                }
-                if "底背驰" in reason and "买" in short:
-                    info["note"] = "底背驰"
-                if "顶背驰" in reason and "卖" in short:
-                    info["note"] = "顶背驰"
-                break
-        else:
-            if "底背驰" in reason:
-                info = {
-                    **info,
-                    "status": "divergence",
-                    "type_raw": "底背驰",
-                    "type_short": "底背驰",
-                    "note": "抛压减轻",
-                    "direction": 1,
-                    "same_level": True,
-                }
-            elif "顶背驰" in reason:
-                info = {
-                    **info,
-                    "status": "divergence",
-                    "type_raw": "顶背驰",
-                    "type_short": "顶背驰",
-                    "note": "上攻乏力",
-                    "direction": -1,
-                    "same_level": True,
-                }
-            elif fusion_chan.get("direction") is not None and info["status"] == "none":
-                d = int(fusion_chan.get("direction") or 0)
-                info = {**info, "direction": d, "note": reason.replace("缠论", "").strip() or info["note"]}
+    # fusion_chan 仅为调用兼容保留；买卖点、背驰与趋势叙事只认引擎结果。
+    # 禁止从 fusion reason 反向补出引擎未形成的买卖点类型。
 
     d = int(info["direction"] or 0)
     dir_label = "看涨" if d > 0 else ("看跌" if d < 0 else "中性")
@@ -979,13 +1084,15 @@ def format_chanlun_short_light(
             "笔数不足", "无法判断", "无明确结构", "数据不足", "线段不足",
             "中枢未成型", "先观望", "结构待确认",
         )
+        _order_words = ("宜买", "可执行", "可低吸", "该买了")
         extra = []
         for w in [x.strip() for x in wave.replace("｜", "·").split("·") if x.strip()]:
             if w in body:
                 continue
             if any(n in w for n in _struct_noise):
                 continue
-            if any(k in w for k in sig_kw if k in body):
+            # wave_label 只能补结构叙事，不能绕过引擎结果补点或下单话术。
+            if any(k in w for k in sig_kw) or any(k in w for k in _order_words):
                 continue
             if len(w) > 12:
                 w = w[:11] + "…"
@@ -993,8 +1100,8 @@ def format_chanlun_short_light(
         if extra:
             body = f"{body} · {' · '.join(extra[:2])}"
 
-    # 空 chan 且无 fusion
-    if not chan and info["status"] == "none" and not (fusion_chan or {}).get("reason"):
+    # 空 chan 不得因 fusion 文案伪装成引擎信号
+    if not chan and info["status"] == "none":
         return "暂无信号 · 中性"
 
     return body

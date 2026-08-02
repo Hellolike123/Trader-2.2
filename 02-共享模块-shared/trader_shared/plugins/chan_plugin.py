@@ -74,7 +74,16 @@ class ChanlunPlugin(IndicatorPlugin):
             out = chanlun_strategy(current, eff, change_pct, quote)
             # 修正 strategy 默认的 timeframe=daily 标签，避免分钟结果被误标
             if isinstance(out, dict) and isinstance(out.get("chanlun"), dict):
-                out = {**out, "chanlun": {**out["chanlun"], "timeframe": "5m"}}
+                out = {
+                    **out,
+                    "chanlun": {
+                        **out["chanlun"],
+                        "timeframe": "5m",
+                        "data_bars_daily": None,
+                        "data_bars_lower": len(eff),
+                        "data_note": "5分钟数据充足",
+                    },
+                }
             return out
         # 日线路径：保留 weekly_bars 透传（ADR-002，中线回退依赖它，不可丢）
         return chanlun_strategy(current, bars, change_pct, quote, weekly_bars=weekly_bars)

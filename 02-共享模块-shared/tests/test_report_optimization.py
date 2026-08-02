@@ -315,6 +315,65 @@ def test_short_section_shows_event_light():
     assert out.count("威科夫：") >= 2
 
 
+def test_cd2b_midline_daily_fallback_survives_wave_label_rendering():
+    """C-D2b：wave_label_mid 覆盖 compact 行时仍须标明日线 fallback。"""
+    r = _report()
+    r["chanlun_midline"] = {
+        "chanlun": {
+            "timeframe": "daily_fallback",
+            "structure_type": "上涨趋势",
+            "structure_confidence": "high",
+            "trend_label": "拉升段",
+            "strokes": [
+                {"direction": "up"},
+                {"direction": "down"},
+                {"direction": "up"},
+            ],
+            "segments": [{"direction": "up"}],
+            "buy_points": [],
+            "sell_points": [],
+            "divergence": {},
+        }
+    }
+    # 生产缺口：该字段会盖掉 format_chanlun_theory_line 的「（日线）」。
+    r["conclusion"]["wave_label_mid"] = "拉升趋势中 · 线段偏少"
+
+    out = render_short_midline(r)
+    midline = out.split("🧭 中线", 1)[-1].split("⚡ 短线", 1)[0]
+    chan_line = next(line for line in midline.splitlines() if "缠论：" in line)
+
+    assert "日线" in chan_line
+
+
+def test_cd1a_daily_insufficient_reaches_final_shortline_panel():
+    """C-D1a：生产报告的 chanlun_daily 不足原因不能被旧 fusion 槽盖掉。"""
+    r = _report()
+    r["chanlun_daily"] = {
+        "chanlun": {
+            "timeframe": "insufficient",
+            "data_ok": False,
+            "data_note": "日线不足：仅8根，至少需要20根",
+            "data_bars_daily": 8,
+            "data_bars_weekly": 0,
+            "adjust_mode": "unknown",
+            "buy_points": [],
+            "sell_points": [],
+            "divergence": {},
+        }
+    }
+    r["fusion"]["signals_detail"]["chan"] = {
+        "direction": 0,
+        "reason": "暂无买卖点 · 中性",
+    }
+
+    out = render_short_midline(r)
+    shortline = out.split("⚡ 短线", 1)[-1]
+    chan_line = next(line for line in shortline.splitlines() if "缠论：" in line)
+
+    assert "日线不足" in chan_line
+    assert "暂无买卖点 · 中性" not in chan_line
+
+
 def test_short_section_omits_empty_status_and_compacts_structure():
     """无威科夫事件不占事件行；缠论过长压缩；资金去掉「未取到」。"""
     r = _report()
@@ -356,14 +415,46 @@ def test_format_chanlun_short_light_buy1():
     assert "（本周期）" in line  # 本周期信号标记（非区间套确认）
 
 
-def test_format_chanlun_short_light_from_fusion_reason():
-    """仅有 fusion reason 时也能解析出一买句式。"""
+def test_format_chanlun_short_light_does_not_infer_point_from_fusion_reason():
+    """C-D3b/c/d：引擎无点时，fusion 文案不得补出买点或下单叙事。"""
     line = format_chanlun_short_light(
-        {},
+        {
+            "chanlun": {
+                "buy_points": [],
+                "sell_points": [],
+                "divergence": {},
+                "trend_label": "回调段",
+            }
+        },
         fusion_chan={"reason": "缠论一类买 (底背驰)", "direction": 1},
+        wave_label="接近一买 · 可低吸 · 回调见底",
     )
-    assert "一买" in line
-    assert "看涨" in line
+    assert line.startswith("暂无买卖点")
+    assert "回调段" in line
+    assert "回调见底" in line
+    assert "一买" not in line
+    assert "一类买" not in line
+    assert not any(word in line for word in ("宜买", "可执行", "可低吸", "该买了"))
+
+
+def test_short_midline_chan_exception_fallback_fail_closed(monkeypatch):
+    """C-D3c/d：format 抛错时不得把 fusion reason/下单词灌进面板。"""
+    import trader_shared.chan_core as chan_core
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("forced")
+
+    monkeypatch.setattr(chan_core, "format_chanlun_short_light", _boom)
+    r = _report()
+    r["fusion"]["signals_detail"]["chan"] = {
+        "reason": "缠论一类买 · 可低吸",
+        "direction": 1,
+    }
+    out = render_short_midline(r)
+    short = out.split("⚡ 短线", 1)[-1].split("关键价", 1)[0]
+    assert "缠论：暂无信号 · 中性" in short
+    assert "一买" not in short
+    assert "可低吸" not in short
 
 
 def test_short_section_chan_type_first():
@@ -448,9 +539,17 @@ def test_highlight_specific():
 
 
 def test_highlight_excludes_bearish_chan_and_weak_stage():
-    """类二卖/看跌与转弱不得进 ✅ 亮点，应落在风险。"""
+    """类二卖/看跌与转弱不得进 ✅ 亮点，应落在风险（引擎卖点，非 fusion 手补）。"""
     r = _report()
     r["conclusion"]["stage_line"] = "转弱"
+    r["chanlun"] = {
+        "chanlun": {
+            "buy_points": [],
+            "sell_points": [{"type": "类二卖", "price": 45.0}],
+            "divergence": {},
+            "trend_label": "回调段",
+        }
+    }
     r["fusion"]["signals_detail"]["chan"] = {
         "reason": "类二卖 · 反抽偏弱 · 看跌",
         "direction": -1,
@@ -461,7 +560,7 @@ def test_highlight_excludes_bearish_chan_and_weak_stage():
     assert "看跌" not in hl
     assert "转弱" not in hl
     risk = next(ln for ln in out.splitlines() if "⚠️ 风险" in ln or ln.startswith("风险：") or "风险：" in ln)
-    assert "类二卖" in risk or "看跌" in risk
+    assert "类二卖" in risk or "二卖" in risk
     assert "转弱" in risk
 
 
@@ -471,6 +570,14 @@ def test_highlight_excludes_bearish_midline_stage_tag():
     r["conclusion"]["stage_line"] = "主升初期"
     r["conclusion"]["midline"] = "盘整偏空 · 暂缓跟踪"
     r["midline_bias"] = "bear"
+    r["chanlun"] = {
+        "chanlun": {
+            "buy_points": [],
+            "sell_points": [],
+            "divergence": {},
+            "trend_label": "回调段",
+        }
+    }
     r["fusion"]["signals_detail"]["chan"] = {
         "reason": "暂无买卖点 · 回调段 · 看跌",
         "direction": -1,
@@ -481,6 +588,151 @@ def test_highlight_excludes_bearish_midline_stage_tag():
     assert "偏空" not in hl
     risk = next(ln for ln in out.splitlines() if "⚠️ 风险" in ln)
     assert "偏空" in risk or "主升初期" in risk
+
+
+def test_cd3_panel_no_fusion_buy_without_engine_point():
+    """C-D3b/c/d：中线浪型与亮点不得从 fusion/污染 wave 露出买点、背驰或下单词。"""
+    r = _report()
+    r["chanlun"] = {
+        "chanlun": {
+            "buy_points": [],
+            "sell_points": [],
+            "divergence": {},
+            "trend_label": "回调段",
+            "timeframe": "daily",
+        }
+    }
+    r["chanlun_midline"] = {
+        "chanlun": {
+            "buy_points": [],
+            "sell_points": [],
+            "divergence": {},
+            "trend_label": "拉升段",
+            "timeframe": "weekly",
+            "strokes": [
+                {"direction": "up", "end_price": 40.0},
+                {"direction": "down", "end_price": 38.0},
+                {"direction": "up", "end_price": 43.0},
+            ],
+        }
+    }
+    r["conclusion"]["wave_label_mid"] = "拉升趋势中 · 关注一类买｜底背驰"
+    r["fusion"]["signals_detail"]["chan"] = {
+        "reason": "缠论一类买 · 可低吸",
+        "direction": 1,
+    }
+    out = render_short_midline(r)
+    mid = out.split("🧭 中线", 1)[-1].split("⚡ 短线", 1)[0]
+    hl = next(ln for ln in out.splitlines() if "✅ 亮点" in ln)
+    chan_line = next(ln for ln in mid.splitlines() if "缠论：" in ln)
+    for forbidden in (
+        "一类买", "一买", "关注一类", "接近一买", "可低吸", "宜买", "该买了",
+        "底背驰", "顶背驰",
+    ):
+        assert forbidden not in chan_line
+        assert forbidden not in hl
+    assert "拉升趋势中" in chan_line
+
+
+def test_cd4e_trader_midline_wave_label_demoted():
+    """C-D4e：Trader 中线 wave 路径也须笔尖离价降级，禁拉升趋势中·看涨。"""
+    r = _report()
+    r["current"] = 95.0
+    r["chanlun_midline"] = {
+        "chanlun": {
+            "buy_points": [],
+            "sell_points": [],
+            "divergence": {},
+            "trend_label": "拉升段",
+            "timeframe": "weekly",
+            "strokes": [
+                {"direction": "up", "end_price": 120.0},
+                {"direction": "down", "end_price": 110.0},
+                {"direction": "up", "end_price": 187.0},
+            ],
+        }
+    }
+    r["conclusion"]["wave_label_mid"] = "拉升趋势中 · 线段偏少"
+    out = render_short_midline(r)
+    mid = out.split("🧭 中线", 1)[-1].split("⚡ 短线", 1)[0]
+    chan_line = next(ln for ln in mid.splitlines() if "缠论：" in ln)
+    assert "高点已离开·向下未成笔" in chan_line
+    assert "拉升趋势中" not in chan_line
+    assert "看涨" not in chan_line
+
+
+def test_cd3_midline_wave_sanitized_even_with_engine_sell():
+    """C-D3：有引擎卖点时，污染浪型里的买点宣称/下单词仍须剔除。"""
+    r = _report()
+    r["chanlun_midline"] = {
+        "chanlun": {
+            "buy_points": [],
+            "sell_points": [{"type": "一类卖", "price": 50.0}],
+            "divergence": {},
+            "trend_label": "拉升段",
+            "timeframe": "weekly",
+            "strokes": [
+                {"direction": "up", "end_price": 40.0},
+                {"direction": "down", "end_price": 38.0},
+                {"direction": "up", "end_price": 43.0},
+            ],
+        }
+    }
+    r["conclusion"]["wave_label_mid"] = "拉升趋势中 · 关注一类买｜可低吸"
+    out = render_short_midline(r)
+    mid = out.split("🧭 中线", 1)[-1].split("⚡ 短线", 1)[0]
+    chan_line = next(ln for ln in mid.splitlines() if "缠论：" in ln)
+    assert "一类卖" in chan_line or "一卖" in chan_line
+    for forbidden in ("关注一类买", "一类买", "一买", "可低吸", "宜买", "该买了"):
+        assert forbidden not in chan_line
+
+
+def test_cd3_midline_opposite_divergence_stripped_from_wave_state():
+    """C-D3：单侧引擎背驰时，浪型状态段不得残留相反背驰。"""
+    r = _report()
+    base_strokes = [
+        {"direction": "up", "end_price": 40.0},
+        {"direction": "down", "end_price": 38.0},
+        {"direction": "up", "end_price": 43.0},
+    ]
+
+    r_top = dict(r)
+    r_top["chanlun_midline"] = {
+        "chanlun": {
+            "buy_points": [],
+            "sell_points": [],
+            "divergence": {"top_divergence": True, "bottom_divergence": False},
+            "trend_label": "拉升段",
+            "timeframe": "weekly",
+            "strokes": list(base_strokes),
+        }
+    }
+    r_top["conclusion"] = dict(r["conclusion"])
+    r_top["conclusion"]["wave_label_mid"] = "底背驰 · 拉升趋势中"
+    out_top = render_short_midline(r_top)
+    mid_top = out_top.split("🧭 中线", 1)[-1].split("⚡ 短线", 1)[0]
+    chan_top = next(ln for ln in mid_top.splitlines() if "缠论：" in ln)
+    assert "底背驰" not in chan_top
+    assert "顶背驰" in chan_top or "看跌" in chan_top
+
+    r_bot = dict(r)
+    r_bot["chanlun_midline"] = {
+        "chanlun": {
+            "buy_points": [],
+            "sell_points": [],
+            "divergence": {"top_divergence": False, "bottom_divergence": True},
+            "trend_label": "回调段",
+            "timeframe": "weekly",
+            "strokes": list(base_strokes),
+        }
+    }
+    r_bot["conclusion"] = dict(r["conclusion"])
+    r_bot["conclusion"]["wave_label_mid"] = "顶背驰 · 回调见底"
+    out_bot = render_short_midline(r_bot)
+    mid_bot = out_bot.split("🧭 中线", 1)[-1].split("⚡ 短线", 1)[0]
+    chan_bot = next(ln for ln in mid_bot.splitlines() if "缠论：" in ln)
+    assert "顶背驰" not in chan_bot
+    assert "底背驰" in chan_bot or "看涨" in chan_bot
 
 
 def test_short_section_has_daily_phase_line():

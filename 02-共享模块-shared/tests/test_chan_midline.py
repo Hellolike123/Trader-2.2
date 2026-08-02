@@ -11,8 +11,11 @@ if str(ROOT) not in sys.path:
 from trader_shared.chan_core import (  # noqa: E402
     chanlun_strategy,
     chanlun_strategy_midline,
+    format_chanlun_short_light,
     format_chanlun_theory_line,
 )
+from trader_shared import chan_core  # noqa: E402
+from trader_shared.config import CHANLUN_MIN_BARS  # noqa: E402
 
 
 def _bars(n: int, start: float = 100.0) -> list[dict]:
@@ -51,6 +54,67 @@ class TestChanMidline:
         d = _bars(50)
         r = chanlun_strategy(d[-1]["close"], d)
         assert r["chanlun"].get("timeframe") == "daily"
+
+    def test_cd1a_daily_insufficient_is_explicit_in_analysis_and_display(self):
+        """C-D1a：日线不足须 fail closed，不能显示成正常中性无买卖点。"""
+        d = _bars(CHANLUN_MIN_BARS - 1)
+        r = chanlun_strategy(d[-1]["close"], d)
+        chan = r["chanlun"]
+
+        assert chan["timeframe"] == "insufficient"
+        assert chan["data_ok"] is False
+        assert chan["data_bars_daily"] == CHANLUN_MIN_BARS - 1
+        assert "日线不足" in chan["data_note"]
+
+        line = format_chanlun_short_light(r)
+        assert "日线不足" in line
+        assert "暂无买卖点 · 中性" not in line
+
+    def test_cd1b_empty_daily_bars_reports_fetch_failure_honestly(self):
+        """C-D1b：空 bars 明示日线为空，不能伪装成正常结构。"""
+        r = chanlun_strategy(10.0, [])
+        chan = r["chanlun"]
+
+        assert chan["timeframe"] == "insufficient"
+        assert chan["data_ok"] is False
+        assert chan["data_bars_daily"] == 0
+        assert "日线数据为空" in chan["data_note"]
+        assert "数据为空" in format_chanlun_short_light(r)
+
+    def test_cd1b_analysis_failure_is_not_rendered_as_neutral(self, monkeypatch):
+        """C-D1b：分析异常须保留失败原因，不得降成“暂无买卖点”。"""
+        def _fail(*args, **kwargs):
+            raise RuntimeError("夹具损坏")
+
+        monkeypatch.setattr(chan_core, "chanlun_analysis", _fail)
+        daily = _bars(CHANLUN_MIN_BARS)
+        r = chanlun_strategy(daily[-1]["close"], daily)
+        chan = r["chanlun"]
+
+        assert chan["timeframe"] == "insufficient"
+        assert chan["data_ok"] is False
+        assert "分析失败" in chan["data_note"]
+        assert "夹具损坏" in chan["data_note"]
+        assert "暂无买卖点" not in format_chanlun_short_light(r)
+
+    def test_cd1c_data_counts_and_adjust_mode_are_auditable(self):
+        """C-D1c：透出日周根数；复权不一致时不得假称 qfq 已统一。"""
+        daily = [{**bar, "adjust": "qfq"} for bar in _bars(50)]
+        weekly_qfq = [{**bar, "adjust": "qfq"} for bar in _bars(30)]
+        same = chanlun_strategy_midline(
+            daily[-1]["close"], weekly_bars=weekly_qfq, daily_bars=daily
+        )["chanlun"]
+
+        assert same["data_bars_daily"] == 50
+        assert same["data_bars_weekly"] == 30
+        assert same["adjust_mode"] == "qfq"
+        assert same["data_ok"] is True
+
+        weekly_raw = [{**bar, "adjust": "none"} for bar in _bars(30)]
+        mixed = chanlun_strategy_midline(
+            daily[-1]["close"], weekly_bars=weekly_raw, daily_bars=daily
+        )["chanlun"]
+        assert mixed["adjust_mode"] == "mixed"
 
     def test_theory_line_format(self):
         w = _bars(40)

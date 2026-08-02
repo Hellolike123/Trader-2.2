@@ -54,6 +54,8 @@ def _build_wave_label(chanlun_daily: Any, current: float = 0.0) -> str:
     chan = _unwrap_chan(chanlun_daily)
     if not chan:
         return ""
+    if chan.get("data_ok") is False or chan.get("timeframe") == "insufficient":
+        return str(chan.get("data_note") or "数据不足 · 先观望")
 
     segments = chan.get("segments") if isinstance(chan.get("segments"), list) else []
     strokes = chan.get("strokes") if isinstance(chan.get("strokes"), list) else []
