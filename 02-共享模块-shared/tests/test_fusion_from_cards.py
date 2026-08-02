@@ -103,6 +103,59 @@ def test_merge_decisions_classic_path(monkeypatch):
     assert out["signals_detail"]["chan"]["direction"] == 1
 
 
+def test_merge_decisions_cards_fail_closed_no_classic(monkeypatch):
+    """A1：默认/cards 下 _three_signals_via_cards→None → 中性占位，禁止静默 classic。"""
+    monkeypatch.setenv("FUSION_FROM_CARDS", "cards")
+    classic_calls: list[str] = []
+
+    def _boom(*_a, **_k):
+        return None
+
+    def _spy_chan(chan_result):
+        classic_calls.append("chan")
+        from trader_shared.fusion_classic_mappers import _chan_to_signal as _real
+        return _real(chan_result)
+
+    def _spy_mom(momentum_result):
+        classic_calls.append("momentum")
+        from trader_shared.fusion_classic_mappers import _momentum_to_signal as _real
+        return _real(momentum_result)
+
+    monkeypatch.setattr(
+        "trader_shared.fusion_core._three_signals_via_cards",
+        _boom,
+    )
+    monkeypatch.setattr(
+        "trader_shared.fusion_classic_mappers._chan_to_signal",
+        _spy_chan,
+    )
+    monkeypatch.setattr(
+        "trader_shared.fusion_classic_mappers._momentum_to_signal",
+        _spy_mom,
+    )
+
+    out = merge_decisions(
+        chan_result={
+            "chanlun": {
+                "buy_points": [{"type": "一类买", "price": 10, "confidence": 3}],
+                "sell_points": [],
+                "divergence": {"bottom_divergence": True},
+                "trend_label": "上涨",
+            }
+        },
+        momentum_result={"momentum": {"score": 80, "direction": "bullish"}},
+        regime="正常",
+        fusion_from_cards="cards",
+    )
+    assert out.get("fusion_input_path") == "cards_failed"
+    assert classic_calls == []
+    for key in ("chan", "momentum", "vpf"):
+        sig = out["signals_detail"][key]
+        assert sig["direction"] == 0
+        assert float(sig.get("confidence") or 0) <= 0.2
+        assert "cards" in str(sig.get("reason") or "") and "失败" in str(sig.get("reason") or "")
+
+
 def test_merge_compare_attaches_fusion_compare(monkeypatch):
     monkeypatch.setenv("FUSION_FROM_CARDS", "compare")
     cards = {
