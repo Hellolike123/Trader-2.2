@@ -10,13 +10,55 @@
 #     基线若本就带 bug，门禁会把它锁成绿。这是等价性测试的固有代价。
 #
 # 环境变量：
-#   TRADER_CI_PYTHON  覆盖 Python 解释器（默认用本机 venv；CI runner 设此变量指向其 python）
+#   TRADER_CI_PYTHON  覆盖 Python 解释器。未设时解析顺序：
+#     Mac 历史 venv（若存在）→ python3 → python；都不可用则非零退出。
+#   详见 docs/architecture/ci-gate.md。
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-PYTHON="${TRADER_CI_PYTHON:-/Users/like/.workbuddy/binaries/python/envs/default/bin/python}"
+# Python 解析（G-P1…G-P4）：env → Mac venv if exists → python3 → python → 明确失败
+_MAC_VENV="/Users/like/.workbuddy/binaries/python/envs/default/bin/python"
+
+_resolve_python() {
+  local candidate=""
+  if [[ -n "${TRADER_CI_PYTHON:-}" ]]; then
+    candidate="$TRADER_CI_PYTHON"
+  elif [[ -x "$_MAC_VENV" ]]; then
+    candidate="$_MAC_VENV"
+  elif command -v python3 >/dev/null 2>&1; then
+    candidate="$(command -v python3)"
+  elif command -v python >/dev/null 2>&1; then
+    candidate="$(command -v python)"
+  else
+    echo "error: no usable Python found (set TRADER_CI_PYTHON, or install python3/python)" >&2
+    return 1
+  fi
+
+  # 可执行性：绝对/相对路径用 -x；否则走 PATH（command -v）
+  if [[ "$candidate" == */* ]]; then
+    if [[ ! -x "$candidate" ]]; then
+      echo "error: Python not executable: $candidate" >&2
+      return 1
+    fi
+  elif ! command -v "$candidate" >/dev/null 2>&1; then
+    echo "error: Python not found on PATH: $candidate" >&2
+    return 1
+  fi
+
+  # G-P4：选定解释器须能跑 import sys
+  if ! "$candidate" -c "import sys; print(sys.executable)" >/dev/null 2>&1; then
+    echo "error: Python failed smoke check: $candidate" >&2
+    return 1
+  fi
+
+  printf '%s\n' "$candidate"
+}
+
+PYTHON="$(_resolve_python)" || exit 1
+echo "gate python: $PYTHON"
+
 # PYTHONPATH 顺序敏感：shared 必须在前，否则 config 会解析到 trader_shared/config.py 导致收集失败
 export PYTHONPATH="02-共享模块-shared:01-功能包-packages/trader/scripts"
 
