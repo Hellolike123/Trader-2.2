@@ -1,8 +1,8 @@
 # 架构 follow-up：置信度软抽 + 日线裁定去 fusion.action — Agent Handoff
 
-> **状态**: mother_law（实现中）· 2026-08-02  
-> **基线**: `cursor/arch-cleanup-complete-1c6b`（#53 伞分支）  
-> **双 Agent**: 写落地 / 查对照；push 更新 #53。
+> **状态**: impl_done（写+查 PASS；已并 #53）· 2026-08-02  
+> **基线**: `cursor/arch-cleanup-complete-1c6b` · PR [#53](https://github.com/Hellolike123/Trader-2.2/pull/53)  
+> **双 Agent**: 写落地 ✅ / 查 PASS ✅。
 
 ---
 
