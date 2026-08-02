@@ -111,7 +111,7 @@
 - 开口：≥ `WYCKOFF_MIN_BARS=15` 根周 K；不足 → `timeframe=insufficient` →「周线不足 · 不参与定论」
 - 阶段叙事：约近 **12 根周 K**（`WYCKOFF_PHASE_LOOKBACK=60` × 周线缩比 0.2）
 - 读法：优先 `phase` + 事件链（如「还差 SOS」）+ `WyckoffStateView`；**不以**单事件亮灯或打分均值当状态
-- **Phase A 区间边界**（原典）：TR 种子由 **SC/ST 低点 + AR 高点**钉定；`WYCKOFF_CLIMAX_ANCHOR_BARS` 仅作搜索/超时。`forming`=有 SC；`established`=SC+AR（检测态，**≠**成熟箱体）。规格：`docs/plans/wyckoff-phase-a-range-handoff.md`
+- **Phase A 区间边界**（原典）：TR 种子由 **SC/ST 低点 + AR 高点**钉定。`forming`/`established`/`failed`（检测态，**≠**成熟箱体）。**SC 搜索宇宙 / 结构钉住 / 破位收口**现行法源：`docs/plans/wyckoff-structure-anchor-handoff.md`（冷启动日 90 / 周 39；未失效钉住；破位→`failed`）。`WYCKOFF_CLIMAX_ANCHOR_BARS=15` **不再**当 SC 唯一窗（仅 AR 等待默认种子等，见该 handoff §2.2）。P1/P2 种子史：`docs/plans/wyckoff-phase-a-range-handoff.md`
 - **箱体/量度成熟度 L0–L3**（展示合同）：L0 无 SC；L1=SC 或 SC+AR **无成功 ST** → 只写**雏形**、**禁止**「箱体」与量度；L2=真 ST（回测 SC 区+缩量，**禁止软确认**）→ 可写 `箱体 lo-hi`；L3=L2+宽度 → 可量度。仅分位 TR 不得量度。规格：`docs/plans/wyckoff-tr-maturity-l0l3-handoff.md`
 - **箱体人话（中短线共用）**：L2/L3 → `箱体 {lo:.2f}-{hi:.2f}`；L1 → `雏形 …（待 ST）` / 箱体未成形；旧词「区间未钉」仅兼容。实现：`_phase_a_box_phrase` + `tr_maturity`
 - **中线面板结构**：`威科夫：阶段 · [箱体] · 事件 · 含义`（`format_wyckoff_midline_light`；有箱体则插入，无则跳过箱体槽）

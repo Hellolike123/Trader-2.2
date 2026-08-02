@@ -1,7 +1,12 @@
 # 缠论专项报告 — 开工 Playbook（给下一任 Agent）
 
+<<<<<<< HEAD
 > **状态**: 用户口令备忘（2026-08-02）；正式手递已写 → [`chanlun-skill-deep-card-handoff.md`](./chanlun-skill-deep-card-handoff.md)  
 > **用法**: 先读本文 → 再读正式 handoff → 四 Agent 落地（Agent2 起写码）。  
+=======
+> **状态**: 用户口令备忘（2026-08-02）  
+> **用法**: 先读本文 → 再写正式 handoff → 四 Agent 落地。  
+>>>>>>> origin/main
 > **注意**: 缠论有**自己的体系**，不要把威科夫的 SC/箱体/Phase A 小本本照搬过来；复用的是**工作方法**，不是威科夫语义。
 
 ---

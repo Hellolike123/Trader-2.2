@@ -11,6 +11,8 @@ from trader_shared.light_data import to_float
 from trader_shared.config import (
     WYCKOFF_MIN_BARS,
     WYCKOFF_CLIMAX_ANCHOR_BARS,
+    WYCKOFF_SC_COLD_START_BARS_DAILY,
+    WYCKOFF_SC_COLD_START_BARS_WEEKLY,
     WYCKOFF_MEASURE_MIN_BARS,
     WYCKOFF_PNF_MIN_COLUMNS,
     WYCKOFF_BC_VOL_RATIO_THRESHOLD,
@@ -86,6 +88,11 @@ from .wyckoff_phase import (
     _save_phase_state,
     _scan_for_signal,
     _transition_phase
+)
+from .wyckoff_phase_a_store import (
+    delete_phase_a_anchor,
+    load_phase_a_anchor,
+    save_phase_a_anchor,
 )
 
 from .wyckoff_events import (
@@ -245,8 +252,16 @@ def _resolve_score_conflicts(analysis: dict) -> set[str]:
     return suppress
 
 
-def _build_phase_a_range(sc: dict, ar: dict) -> dict:
-    """Phase A 区间边界：SC 低点 + AR 高点；status 诚实透出 forming/established。"""
+def _cold_start_anchor_bars(timeframe: str = "daily") -> int:
+    return (
+        int(WYCKOFF_SC_COLD_START_BARS_WEEKLY)
+        if str(timeframe or "").lower() == "weekly"
+        else int(WYCKOFF_SC_COLD_START_BARS_DAILY)
+    )
+
+
+def _build_phase_a_range(sc: dict, ar: dict, *, timeframe: str = "daily") -> dict:
+    """Phase A 区间边界：SC 低点 + AR 高点；status 诚实透出四态。"""
     sc_low = sc.get("sc_low") if sc.get("sc_signal") else None
     if sc_low is None and sc.get("sc_signal") and sc.get("sc_price"):
         sc_low = sc.get("sc_price")
@@ -254,7 +269,9 @@ def _build_phase_a_range(sc: dict, ar: dict) -> dict:
     sc_bar_idx = sc.get("sc_bar_idx") if sc.get("sc_signal") else ar.get("sc_bar_idx")
     ar_bar_idx = ar.get("ar_bar_idx") if ar.get("ar_signal") else None
 
-    if not sc.get("sc_signal"):
+    if sc.get("phase_a_failed"):
+        status = "failed"
+    elif not sc.get("sc_signal"):
         status = "none"
     elif ar.get("ar_signal") and ar_high is not None:
         status = "established"
@@ -267,7 +284,10 @@ def _build_phase_a_range(sc: dict, ar: dict) -> dict:
         "sc_bar_idx": sc_bar_idx,
         "ar_bar_idx": ar_bar_idx,
         "status": status,
-        "anchor_bars": WYCKOFF_CLIMAX_ANCHOR_BARS,  # 展示用；周线引擎侧另有缩放
+        "anchor_bars": sc.get("anchor_bars") or ar.get("anchor_bars") or _cold_start_anchor_bars(timeframe),
+        "search_mode": sc.get("search_mode") or ar.get("search_mode") or "cold_start",
+        "fail_bar_idx": sc.get("fail_bar_idx"),
+        "fail_reason": sc.get("fail_reason"),
         "st_sc_low": None,
         "sc_low_refined": None,
     }
@@ -335,11 +355,16 @@ def _resolve_tr_maturity(
     L2 = 成功 ST ∧ 有效 ar_high；L3 = L2 ∧ 窗宽足够。
     """
     status = str(phase_a_range.get("status") or "none")
-    # 严格：无 SC（status=none）→ L0；仅分位 TR 不得抬级
-    if status == "none":
+    # 严格：无 SC（status=none）/ 已失败（status=failed）→ L0；仅分位 TR 不得抬级
+    if status in {"none", "failed"}:
+        reason = (
+            "Phase A 失败（有效跌破 SC 未收回）"
+            if status == "failed"
+            else "无有效 SC（无 Phase A）"
+        )
         return {
             "tr_maturity": "L0",
-            "tr_maturity_reason": "无有效 SC（无 Phase A）",
+            "tr_maturity_reason": reason,
             "measure_allowed": False,
             "box_display_mode": "none",
         }
@@ -519,9 +544,17 @@ def _overlay_phase_a_seed_tr_ctx(
     return ctx
 
 
-def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily", use_persisted_phase: bool = True, index_weekly_bars: list[dict] | None = None) -> dict:
+def wyckoff_analysis(
+    bars: list[dict],
+    symbol: str = "",
+    timeframe: str = "daily",
+    use_persisted_phase: bool = True,
+    index_weekly_bars: list[dict] | None = None,
+    phase_a_range: dict | None = None,
+    use_persisted_phase_a_anchor: bool = True,
+) -> dict:
     if len(bars) < WYCKOFF_MIN_BARS:
-        return {
+        result = {
             "spring_signal": False, "spring_reason": "数据不足", "spring_price": None,
             "upthrust_signal": False, "upthrust_reason": "数据不足", "upthrust_price": None,
             "bc_signal": False, "bc_reason": "数据不足", "bc_price": None,
@@ -561,7 +594,7 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
             "phase_a_status": "none",
             "phase_a_range": {
                 "sc_low": None, "ar_high": None, "sc_bar_idx": None, "ar_bar_idx": None,
-                "status": "none", "anchor_bars": WYCKOFF_CLIMAX_ANCHOR_BARS,
+                "status": "none", "anchor_bars": _cold_start_anchor_bars(timeframe),
                 "st_sc_low": None, "sc_low_refined": None,
             },
             "sc_low": None, "sc_low_refined": None, "ar_high": None,
@@ -571,6 +604,9 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
             "measure_allowed": False,
             "box_display_mode": "none",
         }
+        if use_persisted_phase_a_anchor and str(symbol or "").strip():
+            delete_phase_a_anchor(symbol, timeframe)
+        return result
 
     # P2-2: 动态支撑位计算（多源集成）— 仅用于 Spring 检测
     _is_weekly = str(timeframe or "").lower() == "weekly"
@@ -597,22 +633,33 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         )
     else:
         tr_ctx = _detect_trading_range(bars)
+    if (
+        use_persisted_phase_a_anchor
+        and str(symbol or "").strip()
+        and phase_a_range is None
+    ):
+        phase_a_range = load_phase_a_anchor(symbol, timeframe, bars)
+    event_tr_ctx = dict(tr_ctx) if isinstance(tr_ctx, dict) else {}
+    if isinstance(phase_a_range, dict):
+        event_tr_ctx["phase_a_range"] = phase_a_range
+    if not event_tr_ctx:
+        event_tr_ctx = None
 
     # 指数标的：仅放宽 SC 检测量阈（_sc_detector_params）；禁止软 ST 绕过
     is_index = resolve_wyckoff_is_index(symbol)
-    spring = _detect_spring(bars, _support=dynamic_support, symbol=symbol, tr_ctx=tr_ctx)
-    upthrust = _detect_upthrust(bars, tr_ctx=tr_ctx)
-    bc = _detect_buying_climax(bars, tr_ctx=tr_ctx)
-    sc = _detect_selling_climax(bars, tr_ctx=tr_ctx, timeframe=timeframe, is_index=is_index)
-    sow = _detect_sign_of_weakness(bars, tr_ctx=tr_ctx)  # SOW 使用自己的支撑位计算（处理 consecutive 逻辑）
+    spring = _detect_spring(bars, _support=dynamic_support, symbol=symbol, tr_ctx=event_tr_ctx)
+    upthrust = _detect_upthrust(bars, tr_ctx=event_tr_ctx)
+    bc = _detect_buying_climax(bars, tr_ctx=event_tr_ctx)
+    sc = _detect_selling_climax(bars, tr_ctx=event_tr_ctx, timeframe=timeframe, is_index=is_index)
+    sow = _detect_sign_of_weakness(bars, tr_ctx=event_tr_ctx)  # SOW 使用自己的支撑位计算（处理 consecutive 逻辑）
     bearish_div, bullish_div = _detect_volume_divergence(bars)
-    ar = _detect_ar(bars, tr_ctx=tr_ctx, timeframe=timeframe, is_index=is_index)
-    are = _detect_are(bars, tr_ctx=tr_ctx)
-    sos = _detect_sos(bars, tr_ctx=tr_ctx)
-    st = _detect_st(bars, tr_ctx=tr_ctx)
+    ar = _detect_ar(bars, tr_ctx=event_tr_ctx, timeframe=timeframe, is_index=is_index)
+    are = _detect_are(bars, tr_ctx=event_tr_ctx)
+    sos = _detect_sos(bars, tr_ctx=event_tr_ctx)
+    st = _detect_st(bars, tr_ctx=event_tr_ctx)
     spring_test = _spring_test_fields_from_st(st)
-    lps = _detect_lps(bars, tr_ctx=tr_ctx)
-    lpsy = _detect_lpsy(bars, tr_ctx=tr_ctx)
+    lps = _detect_lps(bars, tr_ctx=event_tr_ctx)
+    lpsy = _detect_lpsy(bars, tr_ctx=event_tr_ctx)
     # LPSY 门控与打分一致：无派发背景则不亮灯（避免展示吓人、分数不扣）
     _has_dist_bg = bool(bc.get("bc_signal") or upthrust.get("upthrust_signal") or sow.get("sow_signal"))
     if lpsy.get("lpsy_signal") and not _has_dist_bg:
@@ -623,12 +670,12 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
             "lpsy_gated": True,
         }
     # 原典补齐
-    ps = _detect_preliminary_support(bars, tr_ctx=tr_ctx)
-    psy = _detect_preliminary_supply(bars, tr_ctx=tr_ctx)
-    bu = _detect_backup(bars, tr_ctx=tr_ctx)
+    ps = _detect_preliminary_support(bars, tr_ctx=event_tr_ctx)
+    psy = _detect_preliminary_supply(bars, tr_ctx=event_tr_ctx)
+    bu = _detect_backup(bars, tr_ctx=event_tr_ctx)
     utad = _detect_utad(
         bars,
-        tr_ctx=tr_ctx,
+        tr_ctx=event_tr_ctx,
         bc_signal=bool(bc.get("bc_signal")),
         sow_signal=bool(sow.get("sow_signal")),
         upthrust_signal=bool(upthrust.get("upthrust_signal")),
@@ -639,11 +686,11 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
     trend_pullback = _detect_trend_pullback(bars)
     trend_rally = _detect_trend_rally(bars)
     # P0-5: 事件簇确认 — 将孤立信号升级为可信的积累/派发事件簇（校验先后顺序 + strength 定级）
-    cluster = _detect_event_cluster(bars, tr_ctx=tr_ctx)
-    phase_a_range = _build_phase_a_range(sc, ar)
+    cluster = _detect_event_cluster(bars, tr_ctx=event_tr_ctx)
+    phase_a_range = _build_phase_a_range(sc, ar, timeframe=timeframe)
     st_sc = _detect_secondary_test_sc(
         bars,
-        tr_ctx=tr_ctx,
+        tr_ctx=event_tr_ctx,
         phase_a_range=phase_a_range,
         timeframe=timeframe,
         is_index=is_index,
@@ -784,7 +831,9 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         parts.append(f"上冲回落信号: {upthrust['upthrust_reason']}")
     if bc["bc_signal"]:
         parts.append(f"购买高潮: {bc['bc_reason']}")
-    if sc["sc_signal"]:
+    if phase_a_range.get("status") == "failed":
+        parts.append(phase_a_range.get("fail_reason") or "Phase A 失败：有效跌破 SC 未收回")
+    elif sc["sc_signal"]:
         parts.append(f"卖力高潮: {sc['sc_reason']}")
     if sow["sow_signal"]:
         parts.append(f"弱势信号: {sow['sow_reason']}")
@@ -841,7 +890,7 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
     if not parts:
         parts.append("无明显威科夫信号")
 
-    return {
+    result = {
         "spring_signal": spring["spring_signal"],
         "spring_reason": spring["spring_reason"],
         "spring_price": round(spring["spring_price"], 2) if spring["spring_signal"] else None,
@@ -1023,6 +1072,9 @@ def wyckoff_analysis(bars: list[dict], symbol: str = "", timeframe: str = "daily
         "rs_relative_return": rs_fields.get("rs_relative_return"),
         "phase_confidence_delta_event": phase.get("phase_confidence_delta_event"),
     }
+    if use_persisted_phase_a_anchor and str(symbol or "").strip():
+        save_phase_a_anchor(symbol, timeframe, result.get("phase_a_range"), bars)
+    return result
 
 def wyckoff_strategy(current: float, bars: list[dict], change_pct: Any = None, quote: dict | None = None, symbol: str = "") -> dict:
     """日线威科夫（短线侧兼容 / 插件日线轨）。
@@ -1402,6 +1454,18 @@ def resolve_wyckoff_primary(
         }
 
     # 优先级与 format_wyckoff_oneline 一致（含 UTAD/BU 优先于 Spring）
+    if str(wyk.get("phase_a_status") or "").strip() == "failed":
+        return {
+            "status": "event",
+            "code": "PhaseAFail",
+            "cn_name": "破位失败",
+            "main": "Phase A 失败，跌破 SC 未收回",
+            "note": "失效结构，不按健康吸筹推进",
+            "direction": -1,
+            "phase_label": phase,
+            "timeframe": tf,
+        }
+
     code = cn = main = note = None
     d = 0
 
@@ -1742,6 +1806,9 @@ def format_wyckoff_daily_phase_light(
     plain = _plain_phase_midline(label)
     box = _phase_a_box_phrase(wyk)
 
+    if phase_a == "failed":
+        return "Phase A失败 · 破位未收回 · 仅对照"
+
     # P0-B 无/低质量 TR：压制成熟箱体；若有 L1 雏形仍提示
     if gated and gate_r in ("no_tr", "low_quality") and _suppress_mature_box(
         wyk, gated=gated, gate_r=gate_r
@@ -1798,6 +1865,8 @@ def format_wyckoff_midline_light(
         return "威科夫：数据不足 · 中性"
 
     wyk = _unwrap_wyckoff_dict(wyckoff)
+    if str(wyk.get("phase_a_status") or "").strip() == "failed":
+        return "威科夫：Phase A失败 · 破位未收回 · 不据此开仓"
     phase_plain = _plain_phase_midline(str(info.get("phase_label") or ""))
     d = int(direction) if direction is not None else int(info["direction"] or 0)
     # 契约：中线威科夫始终「阶段 · 事件」；阶段定不出时用「无」，禁止直接跳到事件灯

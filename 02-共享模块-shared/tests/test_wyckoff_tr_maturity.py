@@ -385,12 +385,15 @@ def test_m_r9_breakdown_aborts_st_no_l2() -> None:
     assert result.get("sc_signal") is True
     assert result.get("secondary_test_sc_signal") is not True
     _require_gate_fields(result)
-    assert result["tr_maturity"] in ("L0", "L1")
+    assert result["phase_a_status"] == "failed"
+    assert result["phase_a_range"]["status"] == "failed"
+    assert result["tr_maturity"] == "L0"
     assert result["measure_allowed"] is False
-    assert result["box_display_mode"] != "box"
+    assert result["box_display_mode"] == "none"
     assert result.get("cause_effect_up_target") is None
     assert not _mature_box_phrase(_phase_a_box_phrase(result))
     assert not _mature_box_phrase(format_wyckoff_daily_phase_light(result))
+    assert "Phase A失败" in format_wyckoff_daily_phase_light(result)
     # sc_low SSOT：保持 SC 棒低点，不被后续棒覆盖
     assert result.get("sc_low") == result.get("sc_price")
 
