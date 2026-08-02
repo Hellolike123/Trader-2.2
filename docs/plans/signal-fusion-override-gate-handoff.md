@@ -53,6 +53,7 @@
 
 - `02-共享模块-shared/trader_shared/signal_core.py`  
 - `02-共享模块-shared/tests/test_signal_checkup.py`（或新建 `test_signal_fusion_override.py`）  
+- `01-功能包-packages/trader/tests/test_fusion_integration.py`（仓外旧测：对齐默认不 remap / 显式开启才 remap）  
 - 可选：`02-共享模块-shared/tests/test_arch_boundaries.py`  
 - 本文手递状态行；`docs/plans/README.md` 仅当需挂索引时一行  
 
