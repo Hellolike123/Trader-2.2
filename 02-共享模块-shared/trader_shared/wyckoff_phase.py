@@ -257,6 +257,17 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
     wide_bars = bars[-lookback:]
     phase_a_status = (tr_ctx or {}).get("phase_a_status") or "none"
 
+    if phase_a_status == "failed":
+        return {
+            "phase": "none",
+            "phase_label": "无明确阶段（Phase A 失败，破位未收回）",
+            "phase_confidence_delta": 0.0,
+            "spring_premature": bool(signals.get("spring_signal")),
+            "upthrust_premature": bool(signals.get("upthrust_signal")),
+            "phase_tr_gated": True,
+            "phase_tr_gate_reason": "phase_a_failed",
+        }
+
     # P0-B + P2-A：低质量 / 无 TR → 事件可亮，阶段不抬升（forming 仍可到 A）
     tr_q = None
     if tr_ctx is not None and tr_ctx.get("tr_quality") is not None:

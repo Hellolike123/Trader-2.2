@@ -7,6 +7,12 @@
 > **读者**: 实现 Agent（只读本文 + 下列代码锚点即可动手）  
 > **关联**: `wyckoff-phase-a-range-handoff.md`（P1/P2 种子）；`wyckoff-pnf-handoff.md`（P&F 计数本身不变，**何时允许量度**由本文闸）
 
+> **⚠️ 勘误短注（2026-08-02）**  
+> SC 搜索宇宙 / 结构钉住 / 破位后 `phase_a_range.status=failed` → `tr_maturity=L0` 的现行合同见  
+> [`wyckoff-structure-anchor-handoff.md`](./wyckoff-structure-anchor-handoff.md) §3。  
+> 本文 §1.3「有效跌破 → 失败 Phase A / 仍 L0–L1」在**破位失败**场景收紧为 **必须 L0**（不得健康雏形 L1）；  
+> 无破位的普通 L1（SC 或 SC+AR 无 ST）合同不变。勿把旧「CLIMAX=15=SC 窗」写回现行法。
+
 ---
 
 ## 0. 30 秒摘要
@@ -33,6 +39,7 @@
 | `phase_a_status` | 典型 `tr_maturity` | 说明 |
 |------------------|--------------------|------|
 | `none` | `L0` | 无 SC |
+| **`failed`**（有效破位未收回） | **`L0`** | 见 structure-anchor §3；**禁止**健康雏形 / established 叙事 |
 | `forming`（仅 SC） | `L1` | 上沿未出；无 ST 更不能 L2 |
 | `established`（SC+AR）且无 ST | `L1` | **打破旧语义**：established ≠ 可写成熟箱体 / 可量度 |
 | `established` + 成功 ST | `L2` 或 `L3` | 有宽度 → L3 |
@@ -52,7 +59,7 @@
 - 价格仍在 `sc_low` 之上、从未回测 SC 区  
 - 「弹上去后横着」但 low 未进入 proximity / 允许刺穿带  
 - 回测时量能仍 ≥ SC × `WYCKOFF_ST_SC_VOL_RATIO`（未明显缩量）  
-- 有效跌破 SC 且收盘不收回（新低延续 → 失败 Phase A / 仍 L0–L1）
+- 有效跌破 SC 且收盘不收回（新低延续 → 失败 Phase A → **`status=failed` / `tr_maturity=L0`**；见 structure-anchor §3；不得健康 L1 雏形）
 
 ---
 

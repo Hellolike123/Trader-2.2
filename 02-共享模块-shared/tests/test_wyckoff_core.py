@@ -1581,7 +1581,9 @@ class TestPhaseARangeP1:
         assert result["phase_a_status"] == "established"
         assert result["phase_a_range"]["status"] == "established"
         assert result["sc_low"] < result["ar_high"]
-        assert result["phase_a_range"]["anchor_bars"] == 15
+        from trader_shared.config import WYCKOFF_SC_COLD_START_BARS_DAILY
+
+        assert result["phase_a_range"]["anchor_bars"] == WYCKOFF_SC_COLD_START_BARS_DAILY
 
     def test_r5_sc_window_matches_ar_no_fight(self):
         """同一 fixture：AR 亮则 SC 必亮（消除 5 vs 15 根不一致）。"""
@@ -1629,7 +1631,11 @@ class TestPhaseARangeP1:
 
         assert hasattr(config, "WYCKOFF_CLIMAX_ANCHOR_BARS")
         assert config.WYCKOFF_CLIMAX_ANCHOR_BARS == 15
+        assert config.WYCKOFF_SC_COLD_START_BARS_DAILY == 90
+        assert config.WYCKOFF_SC_COLD_START_BARS_WEEKLY == 39
         assert "WYCKOFF_CLIMAX_ANCHOR_BARS" in config.__all__
+        assert "WYCKOFF_SC_COLD_START_BARS_DAILY" in config.__all__
+        assert "WYCKOFF_SC_COLD_START_BARS_WEEKLY" in config.__all__
 
 
 class TestPhaseARangeP2:
