@@ -327,6 +327,8 @@ def test_sb1_default_slim_skeleton_no_long_blocks():
     assert "\n  现在\n" in text
     assert "\n    周线：" in text
     assert "\n    日线：" in text
+    assert "\n    周线量度：" in text
+    assert "\n    日线量度：" in text
     assert "\n  若变好\n" in text
     assert "\n  若变坏\n" in text
     assert "\n  ⭐ 盯\n" in text
@@ -506,6 +508,53 @@ def test_sb11_l0_slim_does_not_show_percentile_box_numbers():
     assert "无箱｜未达 L3" in mid_short
     assert "雏形 41.23" not in mid_short
     assert "箱体 41.23" not in mid_short
+
+
+def test_sb27_story_measure_l3_gate():
+    """S-B27：推演量度仅 L3；未达写暂不测算，禁止假目标。"""
+    text = render_wyckoff_slim(_sample_plan())
+    story = text.split("🔮 推演", 1)[1].split("若变好", 1)[0]
+    assert "周线量度：未达 L3，暂不测算" in story
+    assert "日线量度：未达 L3，暂不测算" in story
+    assert "量度目标" not in story
+
+    # 残留目标 + measure_allowed=False → 仍不得展示
+    dirty = copy.deepcopy(_sample_plan())
+    dirty["daily_raw"]["cause_effect_up_target"] = 99.0
+    dirty["daily_raw"]["cause_effect_down_target"] = 1.0
+    dirty["daily_raw"]["measure_allowed"] = False
+    dirty["daily_view"]["measure_allowed"] = False
+    dirty["daily_view"]["cause_effect"] = {
+        "up_target": 99.0,
+        "down_target": 1.0,
+        "measure_allowed": False,
+    }
+    dirty_story = render_wyckoff_slim(dirty).split("🔮 推演", 1)[1].split("若变好", 1)[0]
+    assert "99.00" not in dirty_story
+    assert "量度目标" not in dirty_story
+    assert "日线量度：未达 L3，暂不测算" in dirty_story
+
+    # L3 + 上下目标 → 日线量度出数字
+    p3 = copy.deepcopy(_sample_plan())
+    p3["daily_raw"]["tr_maturity"] = "L3"
+    p3["daily_raw"]["measure_allowed"] = True
+    p3["daily_raw"]["cause_effect_up_target"] = 15.0
+    p3["daily_raw"]["cause_effect_down_target"] = 8.0
+    p3["daily_raw"]["pnf_method"] = "horizontal"
+    p3["daily_view"]["tr_maturity"] = "L3"
+    p3["daily_view"]["measure_allowed"] = True
+    p3["daily_view"]["box_display_mode"] = "box"
+    p3["daily_view"]["cause_effect"] = {
+        "up_target": 15.0,
+        "down_target": 8.0,
+        "pnf_method": "horizontal",
+        "measure_allowed": True,
+        "tr_maturity": "L3",
+    }
+    t3 = render_wyckoff_slim(p3)
+    story3 = t3.split("🔮 推演", 1)[1].split("若变好", 1)[0]
+    assert "周线量度：未达 L3，暂不测算" in story3
+    assert "日线量度：量度目标：上 15.00｜下 8.00（P&F，非出手）" in story3
 
 
 # ── W-D1..W-D9（旧完整详析，--full）───────────────────────────

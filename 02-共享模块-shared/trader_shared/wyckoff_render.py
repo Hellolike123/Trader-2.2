@@ -547,6 +547,24 @@ def _slim_range_phrase(view: dict[str, Any], raw: dict[str, Any]) -> str:
     return f"{phrase}｜未达 L3"
 
 
+def _slim_measure_line(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    """推演量度行（法源：wyckoff-tr-maturity-l0l3 §2.3；slim-b §3.5）。
+
+    - measure_allowed / L3 → ``format_cause_effect_display``（有上下目标才出数字）
+    - 否则 → ``未达 L3，暂不测算``（禁止贴残留假目标）
+    """
+    if not view and not raw:
+        return "数据不足，暂不测算"
+    if _measure_allowed(view, raw):
+        from trader_shared.wyckoff_view import format_cause_effect_display
+
+        ce = format_cause_effect_display(raw) or format_cause_effect_display(view)
+        if ce:
+            return ce
+        return "已达 L3，暂无可用目标"
+    return "未达 L3，暂不测算"
+
+
 def _slim_lit_codes(view: dict[str, Any], raw: dict[str, Any], *, weekly: bool) -> list[str]:
     if weekly:
         codes: list[str] = []
@@ -1476,6 +1494,8 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
             "  现在",
             "    周线：数据不足",
             f"    日线：{plan['error']}",
+            "    周线量度：数据不足，暂不测算",
+            "    日线量度：数据不足，暂不测算",
             "",
             "  若变好",
             "    周线：补足数据后再评估",
@@ -1539,6 +1559,8 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
     if change:
         lines.extend(["", "🔔 变化", f"  {change}"])
 
+    w_meas = _slim_measure_line(weekly_view, weekly_raw)
+    d_meas = _slim_measure_line(daily_view, daily_raw)
     lines.extend(
         [
             "",
@@ -1546,6 +1568,8 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
             "  现在",
             f"    周线：{weekly_story['now']}",
             f"    日线：{daily_story['now']}",
+            f"    周线量度：{w_meas}",
+            f"    日线量度：{d_meas}",
             "",
             "  若变好",
             f"    周线：{weekly_story['better']}",
