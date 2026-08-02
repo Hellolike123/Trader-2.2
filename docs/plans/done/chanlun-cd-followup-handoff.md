@@ -2,7 +2,7 @@
 
 > **status**: done  
 > **日期**: 2026-08-02  
-> **前置**: P0 已合 `main`（#27）；法源母本 [`chanlun-skill-deep-card-handoff.md`](./chanlun-skill-deep-card-handoff.md) §7.2 / §10  
+> **前置**: P0 已合 `main`（#27）；法源母本 [`chanlun-skill-deep-card-handoff.md`](../chanlun-skill-deep-card-handoff.md) §7.2 / §10  
 > **本 PR 目标**: 清掉查表剩余 ❌（C-D1a–c / C-D2b / C-D3* / C-D4a–c / C-D5）  
 > **方法**: 手递 + 多 Agent **同时**写码 → 查 Agent 对照 → 修 → PR  
 > **禁止**: 威科夫 SC/箱体硬套；改 fusion 出手语义；改池分道；Skill 包复制引擎

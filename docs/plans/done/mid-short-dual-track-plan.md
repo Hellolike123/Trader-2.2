@@ -1,10 +1,12 @@
 # 中短线双轨对齐计划（理论已双源 → 看法/价位/报告闭环）
 
-> 状态：**规格冻结**（B1A / B2A / B3C / B4A 已拍板，见 §0.3）  
+> **status**: done / **superseded（布局）**  
+> **superseded 注（2026-08-02）**：独立面板「阶段：」行已由 [`../trader-drop-stage-line-handoff.md`](../trader-drop-stage-line-handoff.md) 废除；中线阶段细读改走「威科夫：」；字段 `midline_stage` 仍保留。下文凡写「阶段：与看法：并列」仅作历史，**勿按本文恢复「阶段：」行**。  
+> 状态（历史）：规格冻结（B1A / B2A / B3C / B4A 已拍板，见 §0.3）  
 
 > 日期：2026-07-10  
 > 协作：双 Agent（Implementer 改 / Reviewer 审）  
-> 规格真相源：本文档（产品冻结口径以 §1–§3 为准）  
+> 规格真相源：现行面板以 `BUSINESS.md` §5.1 + drop-stage / declutter 为准；本文仅历史  
 > 前置：`docs/short-midline-report-and-gate-plan.md` 已落地门控/短中线骨架；本计划纠正「中线挂羊头」并补中线关键价闭环  
 > 布局覆盖声明：本计划 §0.1 覆盖前置文档 §1.1 布局，以及 §1.2/§1.5/§4.3 中「中线看法=major_stage」口径；门控 H 规则、亏赚句式、微信红线仍继承前置
 
