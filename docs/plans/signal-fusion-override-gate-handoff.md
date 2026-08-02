@@ -1,6 +1,6 @@
 # signal_core fusion 覆盖须听 FUSION_OVERRIDE — Agent Handoff
 
-> **状态**: mother_law（实现中）· 2026-08-02  
+> **状态**: mother_law（写 Agent 已落地，待查）· 2026-08-02  
 > **基线**: `main` @ PR #49 合入后（`cursor/plans-index-sync-514d`）  
 > **分支**: `cursor/signal-fusion-p0-1c6b`  
 > **双 Agent**: 写落地 / 查对照；查完修完再 PR。
