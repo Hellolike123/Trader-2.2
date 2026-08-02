@@ -35,6 +35,7 @@
 - 改 SC/ST/LPS 检测阈值（用户明日再调）。  
 - 改 fusion / trader 门禁 / 池分道。  
 - 在详析里手工补「有低点就算 SC」。  
+- **检测下一轮备忘**（SC 结构搜索宇宙、南网破位后仍亮 SC+AR 雏形收口）：见 [`wyckoff-detect-tuning-next.md`](wyckoff-detect-tuning-next.md)。
 
 ---
 
