@@ -738,6 +738,24 @@ def _pinned_sc_bar_idx_from_ctx(
     return sc_idx
 
 
+def _fail_bar_cutoff_from_ctx(tr_ctx: dict | None) -> int | None:
+    """从 tr_ctx / phase_a_range 读取 fail_bar_idx（破位棒），供冷启动排除旧锚。"""
+    if not isinstance(tr_ctx, dict):
+        return None
+    pa = _phase_a_from_ctx(tr_ctx)
+    for src in (pa, tr_ctx):
+        if not isinstance(src, dict):
+            continue
+        v = src.get("fail_bar_idx")
+        if v is None:
+            continue
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def _find_sc_anchor(
     bars: list[dict],
     tr_ctx: dict | None = None,
@@ -751,6 +769,11 @@ def _find_sc_anchor(
     Path A：调用方持有未失效 Phase A 锚时，搜索宇宙钉住
     ``[sc_bar_idx, 今]``，可越过冷启动 CAP。
     Path B：无 alive 锚时，日线仅最近 90 根、周线仅最近 39 根冷启动。
+
+    ``include_failed=False``（Path B / AR 等）且 ctx 带 ``fail_bar_idx`` 时，
+    **跳过** ``scan_idx <= fail_bar_idx`` 的候选（S-A5 / range-diff W-DIFF-2），
+    避免已破 SC 被冷启动再次钉成健康 forming/established。
+    ``include_failed=True``（汇报已失败 SC / 广义 ST）**不**套此排除。
 
     ``sc_low`` 必须是 SC 棒最低价（bar.low），禁止用 close / 局部偏高点当谷底。
 
@@ -773,7 +796,11 @@ def _find_sc_anchor(
     else:
         scan_start = max(1, len(bars) - anchor_bars)
         search_mode = "cold_start"
+    # W-DIFF-2 / S-A5：冷启动排除 fail_bar 及更早；include_failed 不排除
+    fail_cutoff = None if include_failed else _fail_bar_cutoff_from_ctx(tr_ctx)
     for scan_idx in range(len(bars) - 1, scan_start - 1, -1):
+        if fail_cutoff is not None and scan_idx <= fail_cutoff:
+            continue
         current = bars[scan_idx]
         recent = bars[max(0, scan_idx - support_lb):scan_idx]
 

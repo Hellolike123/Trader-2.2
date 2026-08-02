@@ -191,3 +191,72 @@ def test_find_sc_anchor_direct_path_a_path_b_modes() -> None:
     assert pinned is not None
     assert pinned["sc_bar_idx"] == sc_idx
     assert pinned["search_mode"] == "pinned"
+
+
+def test_w_diff2_cold_start_excludes_fail_bar_and_earlier_sc() -> None:
+    """W-DIFF-2 / M-R3 / S-A5：fail_bar 后冷启动不得钉 fail 棒或更早 SC 为健康锚。"""
+    total = 60
+    old_sc = 25
+    bars = _with_sc_at(total, old_sc, ar=True)
+    # 无破位时冷启动本可认该 SC；ctx 带 fail_bar 后必须排除
+    bare = _find_sc_anchor(bars, include_failed=False)
+    assert bare is not None
+    assert bare["sc_bar_idx"] == old_sc
+
+    fail_bar = old_sc + 2
+    cold = _find_sc_anchor(
+        bars,
+        tr_ctx={
+            "phase_a_range": {
+                "status": "failed",
+                "fail_bar_idx": fail_bar,
+                "sc_bar_idx": old_sc,
+                "sc_low": 82.0,
+            }
+        },
+        include_failed=False,
+    )
+    assert cold is None or cold["sc_bar_idx"] > fail_bar
+
+    # include_failed=True 不套排除，仍可找到旧 SC（汇报失败锚）
+    kept = _find_sc_anchor(
+        bars,
+        tr_ctx={"phase_a_range": {"status": "failed", "fail_bar_idx": fail_bar}},
+        include_failed=True,
+    )
+    assert kept is not None
+    assert kept["sc_bar_idx"] == old_sc
+
+    # 破位序列经 wyckoff_analysis：不得健康 forming/established
+    broken = _breakdown_then_fake_st_bars()
+    result = wyckoff_analysis(broken, use_persisted_phase=False)
+    assert result["phase_a_status"] == "failed"
+    assert result["tr_maturity"] == "L0"
+    assert result["box_display_mode"] == "none"
+    fbi = result["phase_a_range"].get("fail_bar_idx")
+    assert fbi is not None
+    # 再冷启动：ctx 带 fail_bar → 不得把 fail 及更早钉成健康锚
+    replay = _find_sc_anchor(
+        broken,
+        tr_ctx={"phase_a_range": dict(result["phase_a_range"])},
+        include_failed=False,
+    )
+    if replay is not None:
+        assert replay["sc_bar_idx"] > int(fbi)
+        assert not replay.get("phase_a_failed")
+    full = wyckoff_analysis(
+        broken,
+        use_persisted_phase=False,
+        phase_a_range={
+            "status": "failed",
+            "fail_bar_idx": fbi,
+            "sc_bar_idx": result["phase_a_range"]["sc_bar_idx"],
+            "sc_low": result["phase_a_range"]["sc_low"],
+        },
+    )
+    assert full["phase_a_status"] in {"failed", "none"} or (
+        full["phase_a_range"].get("sc_bar_idx") is not None
+        and int(full["phase_a_range"]["sc_bar_idx"]) > int(fbi)
+    )
+    if full["phase_a_status"] in {"forming", "established"}:
+        assert int(full["phase_a_range"]["sc_bar_idx"]) > int(fbi)

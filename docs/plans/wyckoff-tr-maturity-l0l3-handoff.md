@@ -52,6 +52,10 @@
 - **推荐 L2**：`secondary_test_sc_signal` **且** 有效 `ar_high`。  
 - 仅有 ST、无 AR：保持 L1（或透出「下沿已测、上沿未钉」），**禁止**成熟「箱体 lo-hi」，**禁止**量度。
 
+**proto / 雏形边界只认事件种子**（`range-diff-fixes` W-DIFF-1）：下沿 = `sc_low`（可被成功 ST / `sc_low_refined` 压低），上沿 = `ar_high`。  
+**禁止**用分位 `tr_lower` / `tr_upper` 填雏形上下沿；无 `ar_high` 时短语走「上沿未出」，不得写假双沿。  
+L2/L3 成熟箱上沿同样**必须**来自 `ar_high`，不得靠分位 `tr_upper` 冒充。实现：`wyckoff_core._phase_a_box_bounds`。
+
 ### 1.3 禁止软确认（否决清单）
 
 下列 **一律不算** ST，不得抬 L2：
