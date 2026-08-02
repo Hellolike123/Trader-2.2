@@ -45,3 +45,44 @@ def test_resonance_conflict_blocks_chase():
         resonance={"grade": "conflict"},
     )
     assert "不宜追高" in out
+
+
+def test_fusion_action_reduce_alone_does_not_tighten():
+    """A4：仅 fusion.action=减仓、纪律未挡、DV 绿、chase_ok、无 conflict → 不得因 action 收紧。"""
+    out = build_daily_ruling(
+        {"weighted_score": 0.5, "action": "减仓"},
+        scene="突破确认",
+        chase_ok=True,
+        gate_action="轻仓试探",
+        decision_view={"allow_new_recommend": True},
+        resonance={"grade": "aligned"},
+    )
+    assert "不宜追高" not in out
+    assert "宜追" in out
+
+
+def test_fusion_action_empty_alone_does_not_tighten():
+    """A4：仅 fusion.action=空仓 → 不得因 action 变不宜追高。"""
+    out = build_daily_ruling(
+        {"weighted_score": 0.5, "action": "空仓"},
+        scene="突破确认",
+        chase_ok=True,
+        gate_action="轻仓试探",
+        decision_view={"allow_new_recommend": True},
+        resonance={"grade": "aligned"},
+    )
+    assert "不宜追高" not in out
+    assert "宜追" in out
+
+
+def test_gate_action_reduce_still_blocks_chase():
+    """A4/F2e：gate_action=减仓 → 仍不宜追高（覆盖旧 reduce_like 意图）。"""
+    out = build_daily_ruling(
+        {"weighted_score": 0.5, "action": "偏多"},
+        scene="突破确认",
+        chase_ok=True,
+        gate_action="减仓",
+        decision_view={"allow_new_recommend": True},
+        resonance={"grade": "aligned"},
+    )
+    assert "不宜追高" in out
