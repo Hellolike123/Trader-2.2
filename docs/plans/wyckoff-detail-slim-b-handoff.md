@@ -4,6 +4,7 @@
 > 本文 SSOT：威科夫 `--target` 默认输出改为 B·中剪瘦身卡；旧完整详析保留到 `--full`。  
 > 法源对齐：`docs/plans/wyckoff-skill-deep-card-handoff.md`（旧完整详析合同，需改为 `--full`）；`docs/plans/wyckoff-failed-chain-copy-handoff.md` §2.3（失败态不得健康推进）；`docs/plans/wyckoff-tr-maturity-l0l3-handoff.md`（L0-L3 / 箱体与量度门禁）。  
 > 实现锚点：`02-共享模块-shared/trader_shared/wyckoff_render.py`；`02-共享模块-shared/trader_shared/wyckoff_run.py`；skill shim `01-功能包-packages/wyckoff/scripts/final_wyckoff.py` 只保持薄入口。
+> 实现勘误（Agent2）：failed 短句采用“旧链停止推进”，避免默认 slim 卡出现裸 `还差 AR` 字样；下一盯仍固定“重新寻底／新 SC”。
 
 ---
 

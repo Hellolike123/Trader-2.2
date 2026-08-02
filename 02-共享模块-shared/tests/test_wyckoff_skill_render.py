@@ -7,12 +7,15 @@ from __future__ import annotations
 import copy
 import re
 
+import pytest
+
 from trader_shared.wyckoff_chain import extract_accum_events
 from trader_shared.wyckoff_render import (
     build_light_snapshot_entry,
     format_light_change,
     render_wyckoff_card,
     render_wyckoff_detail,
+    render_wyckoff_slim,
     render_wyckoff_rank,
 )
 from trader_shared.wyckoff_run import build_wyckoff_rank_rows
@@ -279,10 +282,126 @@ def test_main_exits_0_when_card_ok(monkeypatch, capsys, tmp_path):
     code = wr.main(["--target", "测试股"])
     assert code == 0
     out = capsys.readouterr().out
-    assert "威科夫详析 — 测试股" in out
+    assert "威科夫 — 测试股（600000）｜日+周" in out
+    assert "威科夫详析" not in out
 
 
-# ── W-D1..W-D9 ──────────────────────────────────────────────
+# ── S-B1..S-B13（默认 slim-B）────────────────────────────────
+
+
+def test_sb1_default_slim_skeleton_no_long_blocks():
+    """S-B1/S-B4/S-B13：默认 B 骨架；旧长块不出现。"""
+    text = render_wyckoff_slim(_sample_plan())
+    assert text.startswith("威科夫 — 测试股（600000）｜日+周")
+    assert "现价 10.50｜周" in text
+    assert "🧭 中线" in text
+    assert "⚡ 短线" in text
+    assert "⭐ 盯" in text
+    assert "本卡不下单；出手/分道看 trader" in text
+    assert "威科夫详析 —" not in text
+    assert "📊 现况" not in text
+    assert "🔮 故事链" not in text
+    assert "💬 综述" not in text
+    assert "说明：本卡不下单；买卖看 trader 门禁" not in text
+
+
+def test_sb1_cli_default_uses_slim(monkeypatch, capsys, tmp_path):
+    """S-B1：CLI --target 默认输出 slim-B。"""
+    from trader_shared import wyckoff_run as wr
+
+    monkeypatch.setenv("TRADER_ROOT", str(tmp_path))
+    monkeypatch.setattr(wr, "build_wyckoff_plan", lambda target: _sample_plan())
+    code = wr.main(["--target", "测试股"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert out.startswith("威科夫 — 测试股（600000）｜日+周")
+    assert "威科夫详析 —" not in out
+    assert "📊 现况" not in out
+
+
+def test_sb2_full_cli_keeps_legacy_detail(monkeypatch, capsys, tmp_path):
+    """S-B2：--full 仍输出旧完整详析。"""
+    from trader_shared import wyckoff_run as wr
+
+    monkeypatch.setenv("TRADER_ROOT", str(tmp_path))
+    monkeypatch.setattr(wr, "build_wyckoff_plan", lambda target: _sample_plan())
+    code = wr.main(["--target", "测试股", "--full"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert out.startswith("威科夫详析 — 测试股（600000）｜日线+周线")
+    assert "📊 现况" in out
+    assert "🔮 故事链" in out
+    assert "💬 综述" in out
+
+
+def test_sb2_brief_full_conflict_reports_argparse_error():
+    """S-B2：--brief / --full 不可同时使用。"""
+    from trader_shared import wyckoff_run as wr
+
+    with pytest.raises(SystemExit) as exc:
+        wr.parse_args(["--target", "测试股", "--brief", "--full"])
+    assert exc.value.code == 2
+
+
+def test_sb5_change_folded_unless_new_or_gone():
+    """S-B5：无新亮/熄灭时省略变化块；有变化时仅短行。"""
+    first = _sample_plan()
+    first["change_line"] = "首次记录，暂无对比"
+    assert "🔔 变化" not in render_wyckoff_slim(first)
+
+    still_only = _sample_plan()
+    still_only["change_line"] = "新亮：无｜仍亮：SC（卖力高潮）｜熄灭：无"
+    assert "🔔 变化" not in render_wyckoff_slim(still_only)
+
+    changed = _sample_plan()
+    changed["change_line"] = "新亮：周AR（自动反弹）｜仍亮：SC（卖力高潮）｜熄灭：日ST（二次测试）"
+    text = render_wyckoff_slim(changed)
+    assert "🔔 变化" in text
+    assert "新亮：周AR（自动反弹）；熄灭：日ST（二次测试）" in text
+    assert "仍亮：" not in text
+
+
+def test_sb6_sb7_slim_lights_vertical_and_one_next_watch():
+    """S-B6/S-B7/S-B8：灯竖排，只列已亮 + 至多一个下一盯。"""
+    text = render_wyckoff_slim(_sample_plan())
+    assert "● SC｜● AR" not in text
+    assert "● SC / ● AR" not in text
+    short_block = text.split("⚡ 短线", 1)[1].split("⭐ 盯", 1)[0]
+    lamp_lines = [ln for ln in short_block.splitlines() if re.match(r"\s*[●○]\s", ln)]
+    assert lamp_lines
+    for ln in lamp_lines:
+        assert ln.count("●") + ln.count("○") == 1
+        if "SC" in ln or "AR" in ln or "ST" in ln or "LPS" in ln or "SOS" in ln:
+            assert "（" in ln and "）" in ln
+    assert sum(1 for ln in lamp_lines if ln.strip().startswith("○")) <= 1
+    assert "○ SOS（强势信号）未亮" not in short_block
+
+
+def test_sb9_failed_slim_resets_next_watch_without_healthy_gap():
+    """S-B9/S-B10：failed 日线下一盯重新寻底/新 SC，不写健康推进。"""
+    text = render_wyckoff_slim(_failed_phase_a_plan())
+    short_block = text.split("⚡ 短线", 1)[1].split("⭐ 盯", 1)[0]
+    assert "Phase A 已失效" in short_block
+    assert "无箱" in short_block
+    assert "● SC（卖力高潮）9.50" in short_block
+    assert "○ 下一盯：重新寻底／新 SC（卖力高潮）" in short_block
+    assert "还差" not in text
+    assert "链可推进" not in text
+    assert "○ AR（自动反弹）未亮" not in text
+
+
+def test_sb11_l0_slim_does_not_show_percentile_box_numbers():
+    """S-B11：L0 不展示分位上下沿当箱体/雏形。"""
+    text = render_wyckoff_slim(_l0_percentile_plan())
+    mid_short = text.split("🧭 中线", 1)[1].split("⭐ 盯", 1)[0]
+    for forbidden in ("41.23", "58.77", "40.00", "60.00"):
+        assert forbidden not in mid_short
+    assert "无箱｜未达 L3" in mid_short
+    assert "雏形 41.23" not in mid_short
+    assert "箱体 41.23" not in mid_short
+
+
+# ── W-D1..W-D9（旧完整详析，--full）───────────────────────────
 
 
 def test_wd1_detail_default_skeleton():
@@ -605,7 +724,8 @@ def test_wd8_change_first_and_diff(tmp_path, monkeypatch):
     monkeypatch.setattr(wr, "build_wyckoff_plan", lambda target: dict(plan))
     text, ok = wr.run_card("测试股", brief=False)
     assert ok
-    assert "首次记录，暂无对比" in text
+    assert text.startswith("威科夫 — 测试股（600000）｜日+周")
+    assert "🔔 变化" not in text
     store = load_json("wyckoff_light_snapshot")
     assert "600000" in store
     assert path("wyckoff_light_snapshot").name == "wyckoff_light_snapshot.json"
@@ -619,6 +739,7 @@ def test_wd8_change_first_and_diff(tmp_path, monkeypatch):
     monkeypatch.setattr(wr, "build_wyckoff_plan", lambda target: dict(plan2))
     text2, ok2 = wr.run_card("测试股", brief=False)
     assert ok2
+    assert "🔔 变化" in text2
     assert "熄灭：" in text2
     assert "LPS" in text2
 

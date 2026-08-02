@@ -1,6 +1,7 @@
 """威科夫 Skill 人读渲染（微信安全；不作交易指令）。
 
-法源：docs/plans/wyckoff-skill-deep-card-handoff.md
+法源：docs/plans/wyckoff-detail-slim-b-handoff.md
+旧完整详析：docs/plans/wyckoff-skill-deep-card-handoff.md（--full）
 只拼装引擎/View 字段；禁止在本模块检测 SC 或发明价格。
 """
 from __future__ import annotations
@@ -293,6 +294,21 @@ def _primary_light_label(raw: dict[str, Any], view: dict[str, Any]) -> str:
     return "无主灯"
 
 
+def _primary_light_code(raw: dict[str, Any], view: dict[str, Any]) -> str:
+    if is_phase_a_failed(raw) or is_phase_a_failed(view):
+        return "PhaseAFail"
+    from trader_shared.wyckoff_core import resolve_wyckoff_primary
+
+    info = resolve_wyckoff_primary(raw if raw else view)
+    if info.get("status") == "event":
+        return str(info.get("code") or "").strip() or "无主灯"
+    active = view.get("active_events") or []
+    if active:
+        eid = str(active[0])
+        return _VIEW_ID_TO_CODE.get(eid, eid.upper()) or "无主灯"
+    return "无主灯"
+
+
 def _event_price_from_sources(
     code: str,
     *,
@@ -484,6 +500,144 @@ def _format_weekly_lights(view: dict[str, Any], raw: dict[str, Any]) -> list[str
     else:
         lines.append("○ 其他主灯未亮")
     return lines
+
+
+def _slim_range_phrase(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    """Slim-B 区间门禁：L0 不展示分位沿；量度只在 L3 出现。"""
+    if is_phase_a_failed(raw) or is_phase_a_failed(view):
+        return "无箱｜未达 L3"
+    mode = _box_mode(view, raw)
+    maturity = _maturity(view, raw)
+    seed = str(raw.get("tr_seed_source") or "").strip().lower()
+    if maturity == "L0" or mode == "none" or (seed == "percentile" and mode not in ("proto", "box")):
+        return "无箱｜未达 L3"
+
+    lo, hi = _phase_a_bounds(raw)
+    if mode == "proto" or maturity == "L1":
+        if lo is not None and hi is not None:
+            phrase = f"雏形 {_fmt_price(lo)}～{_fmt_price(hi)}（待 ST）"
+        elif lo is not None:
+            phrase = f"雏形 {_fmt_price(lo)}（上沿未出）"
+        else:
+            phrase = "雏形待确认"
+        return f"{phrase}｜未达 L3"
+
+    if lo is not None and hi is not None:
+        phrase = f"箱体 {_fmt_price(lo)}～{_fmt_price(hi)}"
+    elif lo is not None:
+        phrase = f"箱体下沿 {_fmt_price(lo)}"
+    else:
+        phrase = "箱体边界待确认"
+    if _measure_allowed(view, raw):
+        from trader_shared.wyckoff_view import format_cause_effect_display
+
+        ce = format_cause_effect_display(raw) or format_cause_effect_display(view)
+        return f"{phrase}｜{ce}" if ce else phrase
+    return f"{phrase}｜未达 L3"
+
+
+def _slim_lit_codes(view: dict[str, Any], raw: dict[str, Any], *, weekly: bool) -> list[str]:
+    if weekly:
+        codes: list[str] = []
+        seen: set[str] = set()
+        for eid in view.get("active_events") or []:
+            code = _VIEW_ID_TO_CODE.get(str(eid), str(eid).upper())
+            if code and code not in seen:
+                seen.add(code)
+                codes.append(code)
+        if not codes:
+            for code in ACCUM_CHAIN:
+                if code in _accum_lit_set(raw, view):
+                    codes.append(code)
+        return codes
+    codes = [code for code in ACCUM_CHAIN if code in _accum_lit_set(raw, view)]
+    for code in _extra_lit_codes(raw, view):
+        if code not in codes:
+            codes.append(code)
+    return codes
+
+
+def _slim_next_hollow(view: dict[str, Any], raw: dict[str, Any], *, failed: bool) -> str:
+    if failed:
+        return "○ 下一盯：重新寻底／新 SC（卖力高潮）"
+    lit = set(_slim_lit_codes(view, raw, weekly=False))
+    for code in ACCUM_CHAIN:
+        if code not in lit:
+            return f"○ {code}（{_cn(code)}）下一盯"
+    return "○ 下一盯：回踩确认／延续"
+
+
+def _format_slim_lights(view: dict[str, Any], raw: dict[str, Any], *, weekly: bool) -> list[str]:
+    failed = (not weekly) and (is_phase_a_failed(raw) or is_phase_a_failed(view))
+    lines = [
+        _format_lamp_line(code, lit=True, view=view, raw=raw)
+        for code in _slim_lit_codes(view, raw, weekly=weekly)
+    ]
+    lines.append(_slim_next_hollow(view, raw, failed=failed))
+    return lines
+
+
+def _slim_structure_sentence(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    bias = _BIAS_CN.get(str(view.get("bias") or "neutral"), "中性")
+    if is_phase_a_failed(raw) or is_phase_a_failed(view):
+        sc_px = _fmt_price(_event_price_from_sources("SC", view=view, raw=raw))
+        if sc_px:
+            return f"Phase A 已失效（SC {sc_px} 后破位未收）｜无箱｜旧链停止推进"
+        return "Phase A 已失效｜无箱｜旧链停止推进"
+
+    lit = set(_slim_lit_codes(view, raw, weekly=False))
+    if {"SC", "AR"}.issubset(lit):
+        lead = f"SC后反弹{bias}"
+    elif "SC" in lit:
+        lead = f"SC已亮{bias}"
+    else:
+        main = _primary_light_code(raw, view)
+        lead = f"{main}已亮{bias}" if main != "无主灯" else f"结构未明{bias}"
+    return f"{lead}，{_slim_range_phrase(view, raw)}"
+
+
+def _slim_change_line(change: str | None) -> str | None:
+    text = str(change or "").strip()
+    if not text or "首次记录" in text or "暂无对比" in text:
+        return None
+    parts: list[str] = []
+    for raw_part in text.replace("；", "｜").split("｜"):
+        part = raw_part.strip()
+        if not part:
+            continue
+        if part.startswith("仍亮："):
+            continue
+        if part.startswith(("新亮：", "熄灭：")):
+            payload = part.split("：", 1)[1].strip()
+            if payload and payload != "无":
+                parts.append(part)
+    return "；".join(parts) if parts else None
+
+
+def _slim_watch_lines(
+    *,
+    daily_view: dict[str, Any],
+    weekly_view: dict[str, Any],
+    daily_raw: dict[str, Any],
+    weekly_raw: dict[str, Any],
+) -> list[str]:
+    daily_failed = is_phase_a_failed(daily_raw) or is_phase_a_failed(daily_view)
+
+    def _next_label(view: dict[str, Any], raw: dict[str, Any]) -> str:
+        lit = set(_slim_lit_codes(view, raw, weekly=False))
+        for code in ACCUM_CHAIN:
+            if code not in lit:
+                return f"{code}（{_cn(code)}）"
+        return "回踩确认／延续"
+
+    if daily_failed:
+        weekly_next = _next_label(weekly_view, weekly_raw) if weekly_view else "周线主灯"
+        return [f"日线等新 SC；周线看能否出 {weekly_next} 确认结构"]
+    daily_next = _next_label(daily_view, daily_raw)
+    if weekly_view:
+        weekly_next = _next_label(weekly_view, weekly_raw)
+        return [f"日线盯 {daily_next}；周线盯 {weekly_next}"]
+    return [f"日线盯 {daily_next}；周线数据不足"]
 
 
 def _pool_advice(
@@ -776,8 +930,86 @@ def render_wyckoff_card(plan: dict[str, Any]) -> str:
     return text
 
 
+def render_wyckoff_slim(plan: dict[str, Any]) -> str:
+    """默认 B·中剪瘦身卡（--target）。
+
+    旧完整详析保留在 render_wyckoff_detail，供 --full 使用。
+    """
+    name = str(plan.get("name") or plan.get("target") or "未知")
+    code = str(plan.get("code") or "")
+    title = f"威科夫 — {name}" + (f"（{code}）" if code else "") + "｜日+周"
+    if plan.get("error") and not plan.get("data_ok", True):
+        lines = [
+            title,
+            "现价 —｜周中性·无主灯｜日中性·无主灯｜暂不建议入池（数据不足）",
+            "",
+            "⭐ 盯",
+            f"  ⚠ {plan['error']}",
+            "  本卡不下单；出手/分道看 trader",
+        ]
+        return "\n".join(lines)
+
+    price_s = _fmt_price(plan.get("price")) or "—"
+    daily_view = _as_view(plan.get("daily_view"))
+    weekly_view = _as_view(plan.get("weekly_view"))
+    daily_raw = _as_raw(plan.get("daily_raw"))
+    weekly_raw = _as_raw(plan.get("weekly_raw"))
+    d_bias = _BIAS_CN.get(str(daily_view.get("bias") or "neutral"), "中性")
+    w_bias = _BIAS_CN.get(str(weekly_view.get("bias") or "neutral"), "中性")
+    d_main = _primary_light_code(daily_raw, daily_view)
+    w_main = _primary_light_code(weekly_raw, weekly_view) if weekly_view else "无主灯"
+    pool_line = _pool_advice(
+        daily_view=daily_view,
+        weekly_view=weekly_view,
+        daily_raw=daily_raw,
+        weekly_raw=weekly_raw,
+    )
+
+    lines: list[str] = [
+        title,
+        f"现价 {price_s}｜周{w_bias}·{w_main}｜日{d_bias}·{d_main}｜{pool_line}",
+        "",
+        "🧭 中线",
+        f"  {_slim_structure_sentence(weekly_view, weekly_raw) if weekly_view else '周线数据不足｜无箱｜未达 L3'}",
+        "  灯",
+    ]
+    for lamp in _format_slim_lights(weekly_view, weekly_raw, weekly=True):
+        lines.append(f"  {lamp}")
+
+    lines.extend(
+        [
+            "",
+            "⚡ 短线",
+            f"  {_slim_structure_sentence(daily_view, daily_raw)}",
+            "  灯",
+        ]
+    )
+    for lamp in _format_slim_lights(daily_view, daily_raw, weekly=False):
+        lines.append(f"  {lamp}")
+
+    change = _slim_change_line(plan.get("change_line"))
+    if change:
+        lines.extend(["", "🔔 变化", f"  {change}"])
+
+    lines.extend(["", "⭐ 盯"])
+    for watch in _slim_watch_lines(
+        daily_view=daily_view,
+        weekly_view=weekly_view,
+        daily_raw=daily_raw,
+        weekly_raw=weekly_raw,
+    ):
+        lines.append(f"  {watch}")
+    lines.append("  本卡不下单；出手/分道看 trader")
+
+    text = "\n".join(lines)
+    for bad in _FORBIDDEN_BUY_WORDS:
+        if bad in text:
+            text = text.replace(bad, "（结构参考）")
+    return text
+
+
 def render_wyckoff_detail(plan: dict[str, Any]) -> str:
-    """单票威科夫详析卡（默认 --target）。
+    """单票威科夫完整详析卡（--full）。
 
     plan：name/code/price/daily_view/weekly_view/daily_raw/weekly_raw/
     chain_plain/change_line/data_ok/error
@@ -921,5 +1153,6 @@ __all__ = [
     "format_light_change",
     "render_wyckoff_card",
     "render_wyckoff_detail",
+    "render_wyckoff_slim",
     "render_wyckoff_rank",
 ]

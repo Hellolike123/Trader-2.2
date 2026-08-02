@@ -1,13 +1,19 @@
 # Wyckoff Agent 快路径
 
-目标：1 条命令 → code fence 原样贴出威科夫详析卡或池链排序 → 停。禁止先批量读 references。  
+目标：1 条命令 → code fence 原样贴出威科夫 B·中剪卡或池链排序 → 停。禁止先批量读 references。  
 硬规则：同目录 `agent-rules.md`。  
-默认详析卡；短卡加 `--brief`。
+默认 B·中剪卡；旧完整详析加 `--full`；短卡加 `--brief`。
 
 ## 默认（cwd = 本 skill 根）
 
 ```bash
 python3 scripts/final_wyckoff.py --target <NAME>
+```
+
+旧完整详析：
+
+```bash
+python3 scripts/final_wyckoff.py --target <NAME> --full
 ```
 
 旧版短卡：
