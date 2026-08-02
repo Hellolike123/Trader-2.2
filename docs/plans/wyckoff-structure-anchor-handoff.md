@@ -89,6 +89,8 @@
 - `low < sc_low * (1 - WYCKOFF_ST_SC_MAX_PIERCE)` **且** `close < sc_low`  
 → **Phase A 失败**（有效跌破未收回）。
 
+**裁决（W-DIFF-7）**：刺穿超限（`low` 破 `MAX_PIERCE` 地板）但 `close ≥ sc_low` 收回 → **不** `failed`；未 failed 前提下**仍可走**广义 ST 检测（`MAX_PIERCE`+`close` 只定义失败，不禁止深测后收回认 ST）。见 `w-diff7-st-pierce-decision-handoff.md`。
+
 失败后硬规则：
 
 1. **禁止** `secondary_test_sc_signal=True`（既有 `_detect_secondary_test_sc`；不得 `continue` 跳过破位棒另找假 ST）。  

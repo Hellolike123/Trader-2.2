@@ -65,6 +65,8 @@ L2/L3 成熟箱上沿同样**必须**来自 `ar_high`，不得靠分位 `tr_uppe
 - 回测时量能仍 ≥ SC × `WYCKOFF_ST_SC_VOL_RATIO`（未明显缩量）  
 - 有效跌破 SC 且收盘不收回（新低延续 → 失败 Phase A → **`status=failed` / `tr_maturity=L0`**；见 structure-anchor §3；不得健康 L1 雏形）
 
+**刺穿裁决（W-DIFF-7）**：**禁止**写成「超刺穿一律否 ST」。刺穿超 `MAX_PIERCE` 但 `close ≥ sc_low` 收回 → **不算**破位；未 failed 且满足既有 ST 条件（回测 SC 区 + 缩量等）时**仍可认 ST**（对齐原典 spring/二次测试；见 structure-anchor §3.1 / `w-diff7-st-pierce-decision-handoff.md`）。本裁决不改 ST 检测阈值/公式。
+
 ---
 
 ## 2. 字段合同（新增 / 行为变更）
@@ -132,7 +134,7 @@ box_display_mode: "none" | "proto" | "box"
 | `WYCKOFF_ST_SC_VOL_RATIO` | 0.60 | 可略放宽至 ~0.70–0.75 | 仍须明显弱于 SC |
 | `WYCKOFF_ST_SC_MAX_BARS` | 15（现行 config **22**） | 可 → 20–25（慢回测，**日线语义**）；**周线半幅** `max(8, ceil(N/2))`（22→11；见 `wyckoff-weekly-scan-windows-handoff.md` S3） | 仍须发生回测；禁止周线沿用日线 22 根≈5 个月过松窗 |
 | `WYCKOFF_ST_SC_PROXIMITY` | 0.02 | 可 → 0.03 | 仍须进入 SC 区 |
-| `WYCKOFF_ST_SC_MAX_PIERCE` | 0.005 | 可 → 0.01–0.015 | 刺穿须收回；有效破位不算 |
+| `WYCKOFF_ST_SC_MAX_PIERCE` | 0.005 | 可 → 0.01–0.015 | 刺穿须收回；有效破位（超刺穿且 close 未收回）不算 ST；**超刺穿但收回仍可走 ST**（W-DIFF-7） |
 
 **SC low SSOT**：`sc_low` / ST 回测锚必须是 SC 棒**最低价**（及 refine 后更低的成功 ST low）；禁止用偏高的局部低点当谷底（南网真谷 vs 系统偏高种子对照）。
 
