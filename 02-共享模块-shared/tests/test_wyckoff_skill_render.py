@@ -193,6 +193,15 @@ def _failed_plus_sos_plan() -> dict:
     return plan
 
 
+def _failed_plus_lps_plan() -> dict:
+    plan = _failed_phase_a_plan()
+    plan["daily_raw"]["lps_signal"] = True
+    plan["daily_raw"]["lps_price"] = 10.1
+    plan["daily_view"]["active_events"] = ["sc", "lps"]
+    plan["daily_view"]["event_detail"]["lps"] = {"id": "lps", "price": 10.1}
+    return plan
+
+
 def _weekly_are_without_bc_plan() -> dict:
     plan = _sample_plan()
     plan["weekly_view"]["active_events"] = ["are"]
@@ -318,7 +327,7 @@ def test_sb1_default_slim_skeleton_no_long_blocks():
     assert lines[:4] == [
         "测试股（600000）｜现价 10.50",
         "周线：偏多｜SC后反弹，雏形 8.00～12.00（待 ST）｜慎做",
-        "日线本波：LPS 修复｜箱体 9.50～11.00",
+        "日线本波：Phase C · 试盘｜LPS 修复｜箱体 9.50～11.00",
         "入池：建议入池（日线已见 LPS/SOS，周线非偏空）",
     ]
     assert "🧭 周线 · 大阶段" in text
@@ -347,13 +356,13 @@ def test_sb1_default_slim_skeleton_no_long_blocks():
 def test_sb17_failed_slim_story_no_healthy_advance():
     """S-B17：短推演保留；failed 不得健康还差/链可推进。"""
     text = render_wyckoff_slim(_failed_phase_a_plan())
-    assert "日线本波：旧底已废｜待新寻底" in text
+    assert "日线本波：Phase A 失效｜须重新寻底" in text
     story = text.split("🔮 推演", 1)[1]
     assert "\n  现在\n" in story
     assert "\n  若变好\n" in story
     assert "\n  若变坏\n" in story
     assert "\n  ⭐ 盯\n" in story
-    assert "重新寻底" in story or "旧底已废" in story
+    assert "Phase A 失效｜须重新寻底" in story
     assert "还差" not in story
     assert "链可推进" not in story
     assert "SC→SOS（Phase A 已失效）" not in story
@@ -447,10 +456,10 @@ def test_sb6_sb7_slim_lights_vertical_and_one_next_watch():
 
 
 def test_sb9_failed_slim_resets_next_watch_without_healthy_gap():
-    """S-B9/S-B10：failed 且无新强势时，旧底已废并待新寻底。"""
+    """S-B9/S-B10 / P-C1/P-C2：failed 无强势 → Phase A 失效｜须重新寻底 + 旧SC仅对照。"""
     text = render_wyckoff_slim(_failed_phase_a_plan())
     short_block = text.split("⚡ 日线 · 本波", 1)[1].split("🔮 推演", 1)[0]
-    assert "Phase A failed｜旧底已废｜废锚参考 SC 9.50（已废）｜待新寻底" in short_block
+    assert "Phase A 失效｜须重新寻底｜旧SC 9.50（仅对照）" in short_block
     assert "雏形" not in short_block  # failed 不得健康雏形
     assert "箱体" not in short_block
     assert "● SC（卖力高潮）9.50" in short_block
@@ -461,18 +470,18 @@ def test_sb9_failed_slim_resets_next_watch_without_healthy_gap():
 
 
 def test_sb28_overview_writes_proto_prices_and_failed_anchor_ref():
-    """S-B28：总览写出雏形价；failed 写废锚参考，不写健康箱体。"""
+    """S-B28：总览写出雏形价；failed 写旧SC仅对照，不写健康箱体。"""
     text = render_wyckoff_slim(_sample_plan())
     assert "周线：偏多｜SC后反弹，雏形 8.00～12.00（待 ST）｜慎做" in text
     failed = render_wyckoff_slim(_failed_phase_a_plan())
     daily = failed.split("⚡ 日线 · 本波", 1)[1].split("🔮 推演", 1)[0]
-    assert "废锚参考 SC 9.50（已废）" in daily
+    assert "旧SC 9.50（仅对照）" in daily
     assert "雏形 9.50" not in daily
     assert "箱体 9.50" not in daily
 
 
 def test_sb18_sb23_failed_plus_sos_keeps_full_lights_and_explains():
-    """S-B18/S-B23/S-B24：failed+SOS 写本波强势，SC/SOS 同亮并解释。"""
+    """S-B18/S-B23/S-B24 / P-C3：failed+SOS 写破后强势，SC/SOS 同亮并解释。"""
     plan = _failed_plus_sos_plan()
     plan["weekly_view"]["active_events"] = ["are"]
     plan["weekly_view"]["bias"] = "bear"
@@ -480,11 +489,12 @@ def test_sb18_sb23_failed_plus_sos_keeps_full_lights_and_explains():
     plan["weekly_raw"]["are_price"] = 12.0
     plan["weekly_raw"]["bc_signal"] = False
     text = render_wyckoff_slim(plan)
-    assert "日线本波：SOS 强｜旧底已废" in text
+    assert "日线本波：Phase A 失效 · 破后强势｜本波 SOS 强" in text
     assert "⚡ 日线 · 本波" in text
     assert "说明：●SC 是旧底事实，●SOS 是本波强势事实；不按顺序推进读。" in text
     assert "SC→SOS（Phase A 已失效）" not in text
     daily = text.split("⚡ 日线 · 本波", 1)[1].split("🔮 推演", 1)[0]
+    assert "Phase A 失效 · 破后强势｜本波 SOS 强｜旧SC 9.50（仅对照）" in daily
     assert "● SC（卖力高潮）9.50" in daily
     assert "● SOS（强势信号）11.20" in daily
     for bad in ("日偏空", "换幕", "当前幕", "上一幕"):
@@ -494,6 +504,35 @@ def test_sb18_sb23_failed_plus_sos_keeps_full_lights_and_explains():
     assert "派发未确认" in mid or "中线观望" in mid
     assert "还差" not in text
     assert "链可推进" not in text
+
+
+def test_pc4_failed_plus_lps_copy():
+    """P-C4：failed+LPS → Phase A 失效｜本波 LPS 修复。"""
+    text = render_wyckoff_slim(_failed_plus_lps_plan())
+    assert "日线本波：Phase A 失效｜本波 LPS 修复" in text
+    daily = text.split("⚡ 日线 · 本波", 1)[1].split("🔮 推演", 1)[0]
+    assert "Phase A 失效｜本波 LPS 修复" in daily
+    assert "说明：旧底事实与本波修复事实并列；不按顺序推进读。" in daily
+    assert "还差" not in text
+    assert "链可推进" not in text
+
+
+def test_pc5_pc6_failed_slim_banned_words_and_story_aligns():
+    """P-C5/P-C6：默认 B 失败路径禁旧词；推演现在日线与总览同语义。"""
+    for plan in (_failed_phase_a_plan(), _failed_plus_sos_plan(), _failed_plus_lps_plan()):
+        text = render_wyckoff_slim(plan)
+        for bad in ("旧底已废", "废锚", "Phase A failed", "（已废）", "待新寻底"):
+            assert bad not in text
+        overview = next(ln for ln in text.splitlines() if ln.startswith("日线本波："))
+        wave = overview.split("日线本波：", 1)[1]
+        story_now = text.split("🔮 推演", 1)[1].split("若变好", 1)[0]
+        assert f"日线：{wave}" in story_now
+
+    sample = render_wyckoff_slim(_sample_plan())
+    worse = sample.split("若变坏", 1)[1].split("⭐ 盯", 1)[0]
+    assert "作废" not in worse
+    assert "雏形不成立" in worse or "结构不成立" in worse
+    assert "有效" not in next(ln for ln in sample.splitlines() if ln.startswith("日线本波："))
 
 
 def test_sb19_weekly_are_without_bc_no_accum_sc_next():

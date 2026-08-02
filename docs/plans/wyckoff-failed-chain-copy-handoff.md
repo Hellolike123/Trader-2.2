@@ -3,7 +3,8 @@
 > 状态：规格冻结（用户 2026-08-02 确认；Agent1 只写 handoff，不改代码）  
 > 法源对齐：`docs/plans/wyckoff-structure-anchor-handoff.md` §3.2 / S-A5（failed → L0，禁健康推进叙事）  
 > 法源对齐：`docs/plans/wyckoff-skill-deep-card-handoff.md` §0.1 / §1 / §2.1（详析故事链只渲染，不改检测）  
-> 实现锚点：`02-共享模块-shared/trader_shared/wyckoff_chain.py::format_wyckoff_chain_plain`；`02-共享模块-shared/trader_shared/wyckoff_render.py::_story_block`
+> 实现锚点：`02-共享模块-shared/trader_shared/wyckoff_chain.py::format_wyckoff_chain_plain`；`02-共享模块-shared/trader_shared/wyckoff_render.py::_story_block`  
+> 交叉：默认 B 卡失败人话（`Phase A 失效｜须重新寻底` 等）见 `docs/plans/wyckoff-phase-fail-copy-handoff.md`；本文只管禁健康「还差 / 链可推进」，不恢复旧底已废词。
 
 ---
 

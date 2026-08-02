@@ -1018,15 +1018,62 @@ def _slim_range_head(view: dict[str, Any], raw: dict[str, Any]) -> str:
 
 
 def _slim_failed_anchor_ref(view: dict[str, Any], raw: dict[str, Any]) -> str:
-    """failed → L0：禁止健康雏形/箱体；只写废锚 SC 低点供对照（不带上沿冒充区间）。"""
+    """failed → L0：禁止健康雏形/箱体；只写旧 SC 低点供对照（不带上沿冒充区间）。"""
     lo, _hi = _phase_a_bounds(raw)
     if lo is not None:
-        return f"废锚参考 SC {_fmt_price(lo)}（已废）"
+        return f"旧SC {_fmt_price(lo)}（仅对照）"
     px = _event_price_from_sources("SC", view=view, raw=raw)
     px_s = _fmt_price(px)
     if px_s:
-        return f"废锚参考 SC {px_s}（已废）"
-    return "无成熟箱"
+        return f"旧SC {px_s}（仅对照）"
+    return ""
+
+
+def _slim_phase_display(view: dict[str, Any]) -> str | None:
+    """有明确 phase 时套 Phase X · 中文；无则不强编（不写「有效」）。"""
+    phase = str(view.get("phase") or "").strip().lower()
+    label = str(view.get("phase_label") or "").strip()
+    mapping = {
+        "accumulation_a": "Phase A · 止跌开场",
+        "accumulation_b": "Phase B · 建因横盘",
+        "accumulation_c": "Phase C · 试盘",
+        "accumulation_d": "Phase D · 强度确认",
+        "accumulation_e": "Phase E · 离开区间",
+        "markup": "Phase E · 离开区间",
+    }
+    if phase in mapping:
+        return mapping[phase]
+    # 仅当 label 已点明 B/C（或 A/D/E）时套用，避免无 phase 字段时假写
+    for key, text in (
+        ("积累期 a", mapping["accumulation_a"]),
+        ("积累期a", mapping["accumulation_a"]),
+        ("吸筹a", mapping["accumulation_a"]),
+        ("吸筹 a", mapping["accumulation_a"]),
+        ("phase a", mapping["accumulation_a"]),
+        ("积累期 b", mapping["accumulation_b"]),
+        ("积累期b", mapping["accumulation_b"]),
+        ("吸筹b", mapping["accumulation_b"]),
+        ("吸筹 b", mapping["accumulation_b"]),
+        ("phase b", mapping["accumulation_b"]),
+        ("积累期 c", mapping["accumulation_c"]),
+        ("积累期c", mapping["accumulation_c"]),
+        ("吸筹c", mapping["accumulation_c"]),
+        ("吸筹 c", mapping["accumulation_c"]),
+        ("phase c", mapping["accumulation_c"]),
+        ("积累期 d", mapping["accumulation_d"]),
+        ("积累期d", mapping["accumulation_d"]),
+        ("吸筹d", mapping["accumulation_d"]),
+        ("吸筹 d", mapping["accumulation_d"]),
+        ("phase d", mapping["accumulation_d"]),
+        ("积累期 e", mapping["accumulation_e"]),
+        ("积累期e", mapping["accumulation_e"]),
+        ("吸筹e", mapping["accumulation_e"]),
+        ("吸筹 e", mapping["accumulation_e"]),
+        ("phase e", mapping["accumulation_e"]),
+    ):
+        if key in label.lower():
+            return text
+    return None
 
 
 def _slim_weekly_stage_short(view: dict[str, Any], raw: dict[str, Any]) -> str:
@@ -1107,21 +1154,26 @@ def _slim_daily_wave_short(view: dict[str, Any], raw: dict[str, Any]) -> str:
     lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
     if failed:
         if "SOS" in lit:
-            return "SOS 强｜旧底已废"
+            return "Phase A 失效 · 破后强势｜本波 SOS 强"
         if "LPS" in lit:
-            return "LPS 修复｜旧底已废"
-        return "旧底已废｜待新寻底"
+            return "Phase A 失效｜本波 LPS 修复"
+        return "Phase A 失效｜须重新寻底"
     if "SOS" in lit:
-        return f"SOS 强｜{_slim_range_head(view, raw)}"
-    if "LPS" in lit:
-        return f"LPS 修复｜{_slim_range_head(view, raw)}"
-    if "ST" in lit:
-        return f"ST 已现｜{_slim_range_head(view, raw)}"
-    if "AR" in lit:
-        return f"AR 反弹｜{_slim_range_head(view, raw)}"
-    if "SC" in lit:
-        return f"SC 已现｜{_slim_range_head(view, raw)}"
-    return f"本波未成型｜{_slim_range_head(view, raw)}"
+        event = f"SOS 强｜{_slim_range_head(view, raw)}"
+    elif "LPS" in lit:
+        event = f"LPS 修复｜{_slim_range_head(view, raw)}"
+    elif "ST" in lit:
+        event = f"ST 已现｜{_slim_range_head(view, raw)}"
+    elif "AR" in lit:
+        event = f"AR 反弹｜{_slim_range_head(view, raw)}"
+    elif "SC" in lit:
+        event = f"SC 已现｜{_slim_range_head(view, raw)}"
+    else:
+        event = f"本波未成型｜{_slim_range_head(view, raw)}"
+    phase_head = _slim_phase_display(view)
+    if phase_head:
+        return f"{phase_head}｜{event}"
+    return event
 
 
 def _slim_daily_sentence(view: dict[str, Any], raw: dict[str, Any]) -> str:
@@ -1129,11 +1181,12 @@ def _slim_daily_sentence(view: dict[str, Any], raw: dict[str, Any]) -> str:
     lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
     if failed:
         ref = _slim_failed_anchor_ref(view, raw)
+        ref_tail = f"｜{ref}" if ref else ""
         if "SOS" in lit:
-            return f"SOS 强｜旧底已废｜{ref}"
+            return f"Phase A 失效 · 破后强势｜本波 SOS 强{ref_tail}"
         if "LPS" in lit:
-            return f"LPS 修复｜旧底已废｜{ref}"
-        return f"Phase A failed｜旧底已废｜{ref}｜待新寻底"
+            return f"Phase A 失效｜本波 LPS 修复{ref_tail}"
+        return f"Phase A 失效｜须重新寻底{ref_tail}"
     wave = _slim_daily_wave_short(view, raw)
     full_range = _slim_range_phrase(view, raw)
     range_head = _slim_range_head(view, raw)
@@ -1210,10 +1263,10 @@ def _slim_weekly_story_lines(view: dict[str, Any], raw: dict[str, Any]) -> dict[
         missing = next((code for code in ACCUM_CHAIN if code not in lit), "")
         better = f"补 {missing}（{_cn(missing)}）并站稳" if missing else "吸筹链保持完整并延续"
         watch = f"盯 {missing}（{_cn(missing)}）" if missing else "盯回踩是否守住"
-    worse = "失守雏形下沿，雏形作废" if "雏形" in range_head else "结构继续转弱则保持观察"
+    worse = "失守雏形下沿，雏形不成立" if "雏形" in range_head else "结构继续转弱则保持观察"
     lo, _hi = _phase_a_bounds(raw)
     if lo is not None and ("雏形" in range_head or "箱体" in range_head):
-        worse = f"失守 {_fmt_price(lo)} 一带，结构作废"
+        worse = f"失守 {_fmt_price(lo)} 一带，结构不成立"
     return {"now": now, "better": better, "worse": worse, "watch": watch}
 
 
@@ -1223,20 +1276,20 @@ def _slim_daily_story_lines(view: dict[str, Any], raw: dict[str, Any]) -> dict[s
     if failed:
         if "SOS" in lit:
             return {
-                "now": "SOS 强但旧底已废，灯为事实并列",
+                "now": "Phase A 失效 · 破后强势｜本波 SOS 强",
                 "better": "回踩不破并继续站稳 SOS（强势信号）区域",
                 "worse": "SOS 熄火或继续破位则保持无箱观察",
                 "watch": "盯 SOS（强势信号）后回踩是否站稳",
             }
         if "LPS" in lit:
             return {
-                "now": "LPS 修复但旧底已废，灯为事实并列",
+                "now": "Phase A 失效｜本波 LPS 修复",
                 "better": "修复延续并补出 SOS（强势信号）",
-                "worse": "修复失败则重新寻底",
+                "worse": "修复失败则须重新寻底",
                 "watch": "盯 LPS（最后支撑点）修复是否守住",
             }
         return {
-            "now": "旧底已废，本波没有新强势灯",
+            "now": "Phase A 失效｜须重新寻底",
             "better": "重新寻底后出现新 SC（卖力高潮）",
             "worse": "继续破位则保持无箱观察",
             "watch": "盯新 SC（卖力高潮）",
