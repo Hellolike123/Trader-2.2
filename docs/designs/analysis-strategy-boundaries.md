@@ -16,7 +16,7 @@
     ↓
 决策层 Decision = decision_view（共振 ∧ 策略可执行 ∧ 纪律）
     · fusion **仅仪表**（weighted_score / action 不微调出手）
-    · fusion **默认 cards**（意见卡三席；失败降级中性，不静默 classic）；`FUSION_FROM_CARDS=classic` 强制原路径
+    · fusion **一律 cards**（意见卡三席；失败降级中性）；`classic`/`compare` **已退役**（告警后仍 cards）
     · discipline 只收紧出手/仓位，不改 weighted_score / major_stage / support / stop
     ↓
 展示层 report_core 展示状态灯 + 动作 + 📐 闸口（主叙事跟 decision_view）
@@ -54,7 +54,7 @@
 presentation  →  report dict 字段
 strategy      →  analysis_cards + context（禁止 → wyckoff_events / detect_buy_points）
 analysis_cards→  analysis cores（适配层，允许）
-decision      →  默认 cards（意见卡三席）；`FUSION_FROM_CARDS=classic` 走 cores 标准化
+decision      →  一律 cards（意见卡三席）；classic/compare 已退役
 report_builder→  全部层
 ```
 
@@ -120,39 +120,25 @@ report_builder→  全部层
 |------|------|------|
 | **A** | 边界文档 + import 红线单测 | ✅ 本文 + `test_arch_boundaries.py` |
 | **B** | report 必出完整 cards + context 优先读卡 | ✅ `ensure_report_analysis_cards` |
-| **C** | fusion 可读卡（classic / cards / compare） | ✅ **默认 cards**；`fusion_card_signals.py`；parity 测入门禁（`test_default_fusion_mode_is_cards`） |
+| **C** | fusion 可读卡（仅 cards） | ✅ **一律 cards**；`fusion_card_signals.py`；classic/compare **已退役**；parity 测入门禁 |
 | **D** | 物理目录 `analysis/` `strategy/` | ✅ 2026-07-18；旧模块路径 re-export 兼容 |
 
 ### 阶段 C 环境变量（与代码 `fusion_core._fusion_input_mode` 一致）
 
 | 变量 | 值 | 行为 |
 |------|-----|------|
-| `FUSION_FROM_CARDS` | **缺省** / `cards` / `true` / `1` / `on` / `auto` | **生产默认**：三席优先意见卡；适配失败 → 中性占位（`fusion_input_path=cards_failed`），**禁止**静默回退 classic |
-| | `classic` / `false` / `0` / `off` | deprecated（仅对照）。当前实现常先 raw→现建卡→card_signals（`fusion_input_path=classic_via_cards`）；真 classic mappers 仅该路径失败时回退 |
-| | `compare` / `both` / `dual` | 两路都算；主结果用 cards；写入 `fusion_compare` |
+| `FUSION_FROM_CARDS` | **缺省** / `cards` / `true` / `1` / `on` / `auto` | **生产唯一路径**：三席优先意见卡；适配失败 → 中性占位（`fusion_input_path=cards_failed`） |
+| | `classic` / `false` / `0` / `off` / `compare` / `both` / `dual` | **已退役**：`DeprecationWarning` 后仍 cards；无 classic mapper / 无 `fusion_compare` |
 
-结果字段：`fusion_input_path` = `classic` \| `classic_via_cards` \| `cards` \| `cards_failed`；可选 `fusion_compare`。
+结果字段：`fusion_input_path` = `cards` \| `cards_failed`。
 
-**默认 cards（与实现钉死）**
+**一律 cards（与实现钉死）**
 
 - 缺省：`os.environ.get("FUSION_FROM_CARDS") or "cards"` → `cards`。
-- 动量卡生产形态已与 classic 对齐（见 `test_fusion_cards_parity_bugs.py`）。
-- 生产 cards 失败 = **降级中性**（`cards_failed`），不静默 classic；显式 `FUSION_FROM_CARDS=classic` 才可走 classic / `classic_via_cards`；对账：`compare` 或 `scripts/compare_fusion_paths.py`。
-- **Agent 禁止**再写「默认 classic」；改默认须同步改 `_fusion_input_mode` + 单测 + 本文。
-- `classic_via_cards` 是过渡实现细节，**不改变**生产默认 cards 行为（法源 BUSINESS.md §2.7）。
-
-### 真票 classic vs cards 对账
-
-```bash
-export PYTHONPATH=02-共享模块-shared:01-功能包-packages/trader/scripts
-# 选股池前 8 只（各跑 2 次 build_report，需网络）
-python scripts/compare_fusion_paths.py --pool --limit 8
-# 指定票 + JSON
-python scripts/compare_fusion_paths.py --targets 002050 688248 --json /tmp/fusion_cmp.json
-```
-
-逻辑库：`trader_shared/fusion_path_compare.py`（stable / mild / unstable + 批末建议）。  
-**不稳** → 优先修 cards；必要时临时 `classic` 回退对照。
+- 生产 cards 失败 = **降级中性**（`cards_failed`），不回退 classic。
+- classic mappers 已归档：`trader_shared/_deprecated/fusion_classic_mappers.py`（生产树零 import）。
+- `scripts/compare_fusion_paths.py` / `fusion_path_compare.py` **obsolete**（打印退役说明 / 仅历史纯函数）。
+- **Agent 禁止**再写「生产可 classic / compare 对账」；法源 BUSINESS.md §2.7 + `retire-classic-fusion-handoff.md`。
 
 ---
 

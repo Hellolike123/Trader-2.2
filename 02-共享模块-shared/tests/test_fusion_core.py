@@ -13,7 +13,7 @@ class TestChanToSignal:
     """缠论信号标准化测试。"""
 
     def setup_method(self):
-        from trader_shared.fusion_core import _chan_to_signal
+        from trader_shared._deprecated.fusion_classic_mappers import _chan_to_signal
         self._fn = _chan_to_signal
 
     def test_一类买(self):
@@ -148,7 +148,7 @@ class TestMomentumToSignal:
     """动量信号标准化测试。"""
 
     def setup_method(self):
-        from trader_shared.fusion_core import _momentum_to_signal
+        from trader_shared._deprecated.fusion_classic_mappers import _momentum_to_signal
         self._fn = _momentum_to_signal
 
     def test_bullish_strong(self):
@@ -252,7 +252,7 @@ class TestWyckoffToSignal:
     """威科夫信号标准化测试。"""
 
     def setup_method(self):
-        from trader_shared.fusion_core import _wyckoff_to_signal
+        from trader_shared._deprecated.fusion_classic_mappers import _wyckoff_to_signal
         self._fn = _wyckoff_to_signal
 
     def test_spring(self):
@@ -662,7 +662,7 @@ class TestMergeDecisions:
         assert abs(with_sector_none["confidence"] - base["confidence"]) < 1e-9
 
     def test_exception_handling_in_standardization(self):
-        from trader_shared.fusion_classic_mappers import _chan_to_signal
+        from trader_shared._deprecated.fusion_classic_mappers import _chan_to_signal
         from trader_shared.fusion_core import merge_decisions
 
         # classic mapper：非法输入 → 中性、置信 0.3
@@ -708,7 +708,7 @@ class TestIntegrationDataFlow:
 
     def test_chan_nested_structure(self):
         """levels["chanlun"] 是嵌套的: {"chanlun": {...}} → chanlun_strategy 返回的是 {"chanlun": {...}}"""
-        from trader_shared.fusion_core import _chan_to_signal
+        from trader_shared._deprecated.fusion_classic_mappers import _chan_to_signal
 
         # 模拟 run_all() 返回的 levels["chanlun"] 结构
         levels_chanlun = {
@@ -724,7 +724,7 @@ class TestIntegrationDataFlow:
         assert result["confidence"] == 0.55  # 二类买 conf=2
 
     def test_momentum_nested_structure(self):
-        from trader_shared.fusion_core import _momentum_to_signal
+        from trader_shared._deprecated.fusion_classic_mappers import _momentum_to_signal
 
         levels_momentum = {"momentum": {"score": 72, "direction": "bullish", "signals": ["A"]}}
         result = _momentum_to_signal(levels_momentum)
@@ -733,7 +733,7 @@ class TestIntegrationDataFlow:
 
     def test_momentum_insufficient_has_zero_confidence(self):
         """数据不足 (score=None / direction=insufficient) 置信度强制 0，不污染加权。"""
-        from trader_shared.fusion_core import _momentum_to_signal
+        from trader_shared._deprecated.fusion_classic_mappers import _momentum_to_signal
 
         # score=None 形式（assess_momentum 不足路径新约定）
         res_none = _momentum_to_signal({"momentum": {"score": None, "direction": "insufficient", "signals": []}})
@@ -748,14 +748,14 @@ class TestIntegrationDataFlow:
 
     def test_momentum_insufficient_does_not_pollute_weighted_score(self):
         """insufficient 动量的 direction=0 且 confidence=0，加权贡献必为 0。"""
-        from trader_shared.fusion_core import _momentum_to_signal
+        from trader_shared._deprecated.fusion_classic_mappers import _momentum_to_signal
 
         sig = _momentum_to_signal({"momentum": {"score": None, "direction": "insufficient", "signals": []}})
         contribution = sig["direction"] * sig["confidence"] * 0.56  # 高位 climax 最大动量权重
         assert contribution == 0.0
 
     def test_wyckoff_nested_structure(self):
-        from trader_shared.fusion_core import _wyckoff_to_signal
+        from trader_shared._deprecated.fusion_classic_mappers import _wyckoff_to_signal
 
         levels_wyckoff = {"wyckoff": {"spring_signal": True, "spring_reason": "test"}}
         result = _wyckoff_to_signal(levels_wyckoff)
@@ -899,19 +899,19 @@ class TestP0Regression:
 
     def test_sell_points_一类卖(self):
         """一类卖信号应返回 direction=-1, confidence=0.8"""
-        from trader_shared.fusion_core import _chan_to_signal
+        from trader_shared._deprecated.fusion_classic_mappers import _chan_to_signal
         result = _chan_to_signal({"chanlun": {"sell_points": [{"type": "一类卖", "price": 30}]}})
         assert result["direction"] == -1
         assert result["confidence"] == 0.8
 
     def test_sell_points_二类卖(self):
-        from trader_shared.fusion_core import _chan_to_signal
+        from trader_shared._deprecated.fusion_classic_mappers import _chan_to_signal
         result = _chan_to_signal({"chanlun": {"sell_points": [{"type": "二类卖", "price": 28}]}})
         assert result["direction"] == -1
         assert result["confidence"] == 0.5
 
     def test_sell_points_三类卖(self):
-        from trader_shared.fusion_core import _chan_to_signal
+        from trader_shared._deprecated.fusion_classic_mappers import _chan_to_signal
         result = _chan_to_signal({"chanlun": {"sell_points": [{"type": "三类卖", "price": 25}]}})
         assert result["direction"] == -1
         assert result["confidence"] == 0.5

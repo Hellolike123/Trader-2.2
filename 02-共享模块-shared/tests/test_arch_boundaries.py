@@ -237,6 +237,23 @@ def test_report_builder_no_tencent_fetcher_ctor():
     assert "from trader_shared.fetchers import TencentFetcher" not in src
 
 
+def _is_classic_mappers_import(imp: str) -> bool:
+    if imp == "trader_shared.fusion_classic_mappers" or imp.startswith(
+        "trader_shared.fusion_classic_mappers."
+    ):
+        return True
+    if imp == "fusion_classic_mappers" or imp.endswith(".fusion_classic_mappers"):
+        # allow archived package only under _deprecated
+        if "._deprecated." in f".{imp}." or imp.startswith("trader_shared._deprecated"):
+            return False
+        # bare fusion_classic_mappers or non-deprecated path
+        if imp == "fusion_classic_mappers":
+            return True
+        if imp.endswith(".fusion_classic_mappers") and "_deprecated" not in imp:
+            return True
+    return False
+
+
 def test_analysis_package_no_classic_mappers_import():
     """F1d/A1：analysis/*.py 不得 import fusion_classic_mappers。"""
     analysis_dir = PKG / "analysis"
@@ -244,25 +261,39 @@ def test_analysis_package_no_classic_mappers_import():
     for path in sorted(analysis_dir.glob("*.py")):
         imports = _imports_in_file(path)
         for imp in imports:
-            if imp == "trader_shared.fusion_classic_mappers" or imp.startswith(
-                "trader_shared.fusion_classic_mappers."
-            ):
-                bad.append((path.name, imp))
-            elif imp == "fusion_classic_mappers" or imp.endswith(".fusion_classic_mappers"):
+            if _is_classic_mappers_import(imp):
                 bad.append((path.name, imp))
     assert not bad, f"analysis must not import classic_mappers: {bad}"
 
 
-def test_score_to_confidence_neutral_reexport_same_values():
-    """F1e/A2：中性模块与 classic re-export / fusion_core 懒导入数值一致。"""
-    from trader_shared.fusion_classic_mappers import _score_to_confidence as via_classic
+def test_production_tree_no_classic_mappers_import():
+    """C5/A2：生产树（排除 _deprecated）零 import classic_mappers；含 fusion_core。"""
+    bad: list[tuple[str, str]] = []
+    skip_parts = {"_deprecated", "tests", "__pycache__"}
+    for path in sorted(PKG.rglob("*.py")):
+        if any(part in skip_parts for part in path.parts):
+            continue
+        imports = _imports_in_file(path)
+        for imp in imports:
+            if _is_classic_mappers_import(imp):
+                bad.append((str(path.relative_to(PKG)), imp))
+            # also forbid importing archived path from production
+            if imp == "trader_shared._deprecated.fusion_classic_mappers" or imp.startswith(
+                "trader_shared._deprecated.fusion_classic_mappers."
+            ):
+                bad.append((str(path.relative_to(PKG)), imp))
+    assert not bad, f"production must not import classic_mappers: {bad}"
+
+
+def test_score_to_confidence_neutral_core_same_values():
+    """F1e：中性模块与 fusion_core 懒导入数值一致（classic re-export 已退役）。"""
     from trader_shared.fusion_confidence import _score_to_confidence as via_neutral
     from trader_shared.fusion_core import _score_to_confidence as via_core
 
     samples = (0, 20, 25, 35, 40, 45, 50, 60, 65, 75, 90, 100, None, "abc")
     for s in samples:
-        a, b, c = via_neutral(s), via_classic(s), via_core(s)
-        assert a == b == c, f"score={s!r}: neutral={a} classic={b} core={c}"
+        a, c = via_neutral(s), via_core(s)
+        assert a == c, f"score={s!r}: neutral={a} core={c}"
 
 
 def test_build_daily_ruling_source_ignores_fusion_action():

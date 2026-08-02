@@ -1,7 +1,8 @@
-"""classic vs cards fusion 对账（纯逻辑，无网络）。
+"""OBSOLETE — classic vs cards fusion 对账纯逻辑（已退役）。
 
-供 scripts/compare_fusion_paths.py 与单测复用。
-契约：默认生产仍 classic；本模块只做漂移度量，不改默认路径。
+历史：供 scripts/compare_fusion_paths.py 与单测复用。
+法源：docs/plans/retire-classic-fusion-handoff.md — classic/compare 热路径已删；
+生产一律 cards。本模块仅保留测例可 import 的纯函数，不再代表现行生产契约。
 """
 from __future__ import annotations
 

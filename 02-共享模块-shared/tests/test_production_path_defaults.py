@@ -23,10 +23,18 @@ def test_fusion_default_mode_cards(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_classic_fusion_emits_deprecation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FUSION_FROM_CARDS", "classic")
-    from trader_shared import fusion_core
+    from trader_shared.fusion_core import _fusion_input_mode
 
-    with pytest.warns(DeprecationWarning, match="classic is deprecated"):
-        fusion_core._warn_deprecated_fusion_classic()
+    with pytest.warns(DeprecationWarning, match="retired"):
+        assert _fusion_input_mode() == "cards"
+
+
+def test_compare_fusion_emits_deprecation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FUSION_FROM_CARDS", "compare")
+    from trader_shared.fusion_core import _fusion_input_mode
+
+    with pytest.warns(DeprecationWarning, match="retired"):
+        assert _fusion_input_mode() == "cards"
 
 
 def test_legacy_env_ignored_still_short_midline(monkeypatch: pytest.MonkeyPatch) -> None:
