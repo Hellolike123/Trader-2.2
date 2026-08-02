@@ -317,9 +317,10 @@ def test_sb17_failed_slim_story_no_healthy_advance():
     assert "\n  若变好\n" in story
     assert "\n  若变坏\n" in story
     assert "\n  ⭐ 盯\n" in story
-    assert "重新寻底" in story or "新 SC" in story
+    assert "旧Phase A已破" in story or "旧筑底已破" in story or "重新寻底" in story
     assert "还差" not in story
     assert "链可推进" not in story
+    assert "SC→SOS（Phase A 已失效）" not in story
 
 
 def test_sb1_cli_default_uses_slim(monkeypatch, capsys, tmp_path):
@@ -395,16 +396,34 @@ def test_sb6_sb7_slim_lights_vertical_and_one_next_watch():
 
 
 def test_sb9_failed_slim_resets_next_watch_without_healthy_gap():
-    """S-B9/S-B10：failed 日线下一盯重新寻底/新 SC，不写健康推进。"""
+    """S-B9/S-B10：failed 且无破后强势时，下一盯重新寻底/新 SC。"""
     text = render_wyckoff_slim(_failed_phase_a_plan())
     short_block = text.split("⚡ 短线", 1)[1].split("🔮 推演", 1)[0]
-    assert "Phase A 已失效" in short_block
+    assert "旧筑底已破" in short_block
     assert "无箱" in short_block
     assert "● SC（卖力高潮）9.50" in short_block
     assert "○ 下一盯：重新寻底／新 SC（卖力高潮）" in short_block
     assert "还差" not in text
     assert "链可推进" not in text
     assert "○ AR（自动反弹）未亮" not in text
+
+
+def test_sb18_failed_plus_sos_splits_old_vs_after():
+    """S-B18：failed 后又亮 SOS → 拆开旧破与破后强势，禁 SC→SOS（已失效）拧句。"""
+    plan = _failed_phase_a_plan()
+    plan["daily_raw"]["sos_signal"] = True
+    plan["daily_raw"]["sos_price"] = 11.2
+    plan["daily_view"]["active_events"] = ["sc", "sos"]
+    plan["daily_view"]["event_detail"]["sos"] = {"id": "sos", "price": 11.2}
+    text = render_wyckoff_slim(plan)
+    assert "旧破·其后SOS" in text or "旧破·其后SOS" in text.split("\n", 2)[1]
+    assert "破后强势，不是原吸筹链复活" in text
+    assert "SC→SOS（Phase A 已失效）" not in text
+    assert "旧Phase A已破｜其后SOS" in text
+    assert "重新寻底／新 SC" not in text
+    assert "回踩是否站稳" in text
+    assert "还差" not in text
+    assert "链可推进" not in text
 
 
 def test_sb11_l0_slim_does_not_show_percentile_box_numbers():

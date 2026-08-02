@@ -296,6 +296,10 @@ def _primary_light_label(raw: dict[str, Any], view: dict[str, Any]) -> str:
 
 def _primary_light_code(raw: dict[str, Any], view: dict[str, Any]) -> str:
     if is_phase_a_failed(raw) or is_phase_a_failed(view):
+        # 顶栏：旧破 + 破后强势分开写，避免「PhaseAFail」被读成现在很差
+        post = _slim_post_fail_strength(view, raw)
+        if post:
+            return f"旧破·其后{'+'.join(post)}"
         return "PhaseAFail"
     from trader_shared.wyckoff_core import resolve_wyckoff_primary
 
@@ -557,8 +561,18 @@ def _slim_lit_codes(view: dict[str, Any], raw: dict[str, Any], *, weekly: bool) 
     return codes
 
 
+def _slim_post_fail_strength(view: dict[str, Any], raw: dict[str, Any]) -> list[str]:
+    """Phase A failed 后仍亮、但不属于「原吸筹链复活」的强势灯（如 SOS/LPS）。"""
+    lit = _slim_lit_codes(view, raw, weekly=False)
+    # SC 是旧锚事件史；AR/ST 在 failed 合同下本不应健康点亮
+    return [c for c in lit if c in ("SOS", "LPS")]
+
+
 def _slim_next_hollow(view: dict[str, Any], raw: dict[str, Any], *, failed: bool) -> str:
     if failed:
+        # 破后已有强势灯：勿再喊「重新寻底」——用户会觉得和现价拧巴
+        if _slim_post_fail_strength(view, raw):
+            return "○ 下一盯：回踩是否站稳（旧吸筹链已废，非原链推进）"
         return "○ 下一盯：重新寻底／新 SC（卖力高潮）"
     lit = set(_slim_lit_codes(view, raw, weekly=False))
     for code in ACCUM_CHAIN:
@@ -581,9 +595,12 @@ def _slim_structure_sentence(view: dict[str, Any], raw: dict[str, Any]) -> str:
     bias = _BIAS_CN.get(str(view.get("bias") or "neutral"), "中性")
     if is_phase_a_failed(raw) or is_phase_a_failed(view):
         sc_px = _fmt_price(_event_price_from_sources("SC", view=view, raw=raw))
-        if sc_px:
-            return f"Phase A 已失效（SC {sc_px} 后破位未收）｜无箱｜旧链停止推进"
-        return "Phase A 已失效｜无箱｜旧链停止推进"
+        post = _slim_post_fail_strength(view, raw)
+        old = f"旧筑底已破（SC {sc_px}）" if sc_px else "旧筑底已破"
+        if post:
+            post_s = "、".join(f"{c}（{_cn(c)}）" for c in post)
+            return f"{old}｜其后{post_s}（破后强势，不是原吸筹链复活）｜无箱"
+        return f"{old}｜无箱｜旧吸筹链停止推进（≠现在一定很差）"
 
     lit = set(_slim_lit_codes(view, raw, weekly=False))
     if {"SC", "AR"}.issubset(lit):
@@ -625,10 +642,11 @@ def _slim_next_label(view: dict[str, Any], raw: dict[str, Any]) -> str:
 def _slim_chain_token(view: dict[str, Any], raw: dict[str, Any], *, failed: bool) -> str:
     """推演「现在」用的短链 token（非完整 chain_plain）。"""
     if failed:
-        lit = _slim_lit_codes(view, raw, weekly=False)
-        if lit:
-            return f"{'→'.join(lit)}（Phase A 已失效）"
-        return "Phase A 已失效"
+        # 禁止 SC→SOS（Phase A 已失效）这种「又像推进又像作废」的拧句
+        post = _slim_post_fail_strength(view, raw)
+        if post:
+            return f"旧Phase A已破｜其后{'+'.join(post)}（非原链复活）"
+        return "旧Phase A已破（待新寻底）"
     lit = _slim_lit_codes(view, raw, weekly=False)
     if not lit:
         return "吸筹链未成型"
@@ -648,9 +666,15 @@ def _slim_watch_lines(
 ) -> list[str]:
     daily_failed = is_phase_a_failed(daily_raw) or is_phase_a_failed(daily_view)
     if daily_failed:
+        post = _slim_post_fail_strength(daily_view, daily_raw)
         weekly_next = (
             _slim_next_label(weekly_view, weekly_raw) if weekly_view else "周线主灯"
         )
+        if post:
+            return [
+                f"日线旧链已废，盯回踩是否站稳（其后已有{'+'.join(post)}）；"
+                f"周线另看 {weekly_next}"
+            ]
         return [f"日线等新 SC；周线看能否出 {weekly_next} 确认结构"]
     daily_next = _slim_next_label(daily_view, daily_raw)
     if weekly_view:
@@ -681,7 +705,14 @@ def _slim_story_lines(
         now = f"日线 {d_now}｜周线数据不足"
 
     if daily_failed:
-        better = "日线重新寻底并出现新 SC（卖力高潮）"
+        post = _slim_post_fail_strength(daily_view, daily_raw)
+        if post:
+            better = (
+                f"日线回踩不破、其后{'+'.join(post)}强势延续"
+                "（仍不把旧 Phase A 算复活）"
+            )
+        else:
+            better = "日线重新寻底并出现新 SC（卖力高潮）"
         if weekly_view and not weekly_failed:
             w_next = _slim_next_label(weekly_view, weekly_raw)
             better += f"；周线出 {w_next} 确认雏形"
@@ -692,7 +723,13 @@ def _slim_story_lines(
             w_next = _slim_next_label(weekly_view, weekly_raw)
             better += f"；周线跟上 {w_next}"
 
-    if daily_failed or _box_mode(daily_view, daily_raw) == "none":
+    if daily_failed:
+        post = _slim_post_fail_strength(daily_view, daily_raw)
+        if post:
+            worse = "若回踩失守、破后强势熄火，则短线转弱（旧吸筹链本就已废）"
+        else:
+            worse = "日线继续破位走弱则旧链保持作废、短线更弱"
+    elif _box_mode(daily_view, daily_raw) == "none":
         worse = "日线继续破位走弱则旧链彻底作废"
     else:
         worse = _invalidation_phrase(daily_view, daily_raw) or "若日线结构破坏则链失效"
