@@ -1,19 +1,165 @@
 {
-  "fusion.weighted_score": -0.28,
-  "fusion.confidence": 0.422,
-  "fusion.action": "减仓",
-  "fusion.disagreement": 1,
+  "fusion.weighted_score": -0.09,
+  "fusion.confidence": 0.0,
+  "fusion.action": "高位观望",
+  "fusion.disagreement": 2,
   "chanlun_midline": {
     "chanlun": {
-      "strokes": [],
-      "zones": [],
+      "strokes": [
+        {
+          "start_type": "top",
+          "start_price": 9.15,
+          "end_type": "bottom",
+          "end_price": 8.45,
+          "direction": "down",
+          "start_index": 13,
+          "end_index": 17,
+          "power_price": 0.7,
+          "length": 4,
+          "power_volume": 3045000.0
+        },
+        {
+          "start_type": "bottom",
+          "start_price": 8.45,
+          "end_type": "top",
+          "end_price": 9.02,
+          "direction": "up",
+          "start_index": 17,
+          "end_index": 22,
+          "power_price": 0.57,
+          "length": 5,
+          "power_volume": 4078000.0
+        },
+        {
+          "start_type": "top",
+          "start_price": 9.15,
+          "end_type": "bottom",
+          "end_price": 8.45,
+          "direction": "down",
+          "start_index": 27,
+          "end_index": 31,
+          "power_price": 0.7,
+          "length": 4,
+          "power_volume": 3087000.0
+        },
+        {
+          "start_type": "bottom",
+          "start_price": 8.45,
+          "end_type": "top",
+          "end_price": 9.02,
+          "direction": "up",
+          "start_index": 31,
+          "end_index": 36,
+          "power_price": 0.57,
+          "length": 5,
+          "power_volume": 4134000.0
+        }
+      ],
+      "zones": [
+        {
+          "zh_top": 9.02,
+          "zh_bottom": 8.45,
+          "zh_center": 8.735,
+          "members": [
+            {
+              "zh_top": 9.02,
+              "zh_bottom": 8.45,
+              "zh_center": 8.735,
+              "strokes": [
+                {
+                  "start_type": "top",
+                  "start_price": 9.15,
+                  "end_type": "bottom",
+                  "end_price": 8.45,
+                  "direction": "down",
+                  "start_index": 13,
+                  "end_index": 17,
+                  "power_price": 0.7,
+                  "length": 4,
+                  "power_volume": 3045000.0
+                },
+                {
+                  "start_type": "bottom",
+                  "start_price": 8.45,
+                  "end_type": "top",
+                  "end_price": 9.02,
+                  "direction": "up",
+                  "start_index": 17,
+                  "end_index": 22,
+                  "power_price": 0.57,
+                  "length": 5,
+                  "power_volume": 4078000.0
+                },
+                {
+                  "start_type": "top",
+                  "start_price": 9.15,
+                  "end_type": "bottom",
+                  "end_price": 8.45,
+                  "direction": "down",
+                  "start_index": 27,
+                  "end_index": 31,
+                  "power_price": 0.7,
+                  "length": 4,
+                  "power_volume": 3087000.0
+                }
+              ],
+              "valid": true
+            },
+            {
+              "zh_top": 9.02,
+              "zh_bottom": 8.45,
+              "zh_center": 8.735,
+              "strokes": [
+                {
+                  "start_type": "bottom",
+                  "start_price": 8.45,
+                  "end_type": "top",
+                  "end_price": 9.02,
+                  "direction": "up",
+                  "start_index": 17,
+                  "end_index": 22,
+                  "power_price": 0.57,
+                  "length": 5,
+                  "power_volume": 4078000.0
+                },
+                {
+                  "start_type": "top",
+                  "start_price": 9.15,
+                  "end_type": "bottom",
+                  "end_price": 8.45,
+                  "direction": "down",
+                  "start_index": 27,
+                  "end_index": 31,
+                  "power_price": 0.7,
+                  "length": 4,
+                  "power_volume": 3087000.0
+                },
+                {
+                  "start_type": "bottom",
+                  "start_price": 8.45,
+                  "end_type": "top",
+                  "end_price": 9.02,
+                  "direction": "up",
+                  "start_index": 31,
+                  "end_index": 36,
+                  "power_price": 0.57,
+                  "length": 5,
+                  "power_volume": 4134000.0
+                }
+              ],
+              "valid": true
+            }
+          ],
+          "valid": true
+        }
+      ],
       "buy_points": [],
       "sell_points": [],
-      "trend_label": "数据不足",
+      "trend_label": "拉升段",
       "buy_point_text": "无",
       "sell_point_text": "无",
-      "strokes_count": 0,
-      "zones_count": 0,
+      "strokes_count": 4,
+      "zones_count": 2,
       "divergence": {
         "top_divergence": false,
         "bottom_divergence": false,
@@ -22,14 +168,25 @@
         "kind": "none",
         "bc_mode": "legacy"
       },
-      "last_valid_zone_last_price": null,
-      "last_valid_zone_first_price": null,
-      "segments": [],
-      "segments_count": 0,
-      "structure_type": "无结构",
-      "structure_segments_count": 0,
+      "last_valid_zone_last_price": 8.735,
+      "last_valid_zone_first_price": 8.735,
+      "segments": [
+        {
+          "direction": "down",
+          "start_price": 9.15,
+          "end_price": 8.45,
+          "high": 9.15,
+          "low": 8.45,
+          "start_index": 0,
+          "end_index": 3,
+          "strokes_count": 4
+        }
+      ],
+      "segments_count": 1,
+      "structure_type": "盘整",
+      "structure_segments_count": 1,
       "structure_confidence": "low",
-      "structure_evidence": "segments=0,pivots=0",
+      "structure_evidence": "segments=1,pivots=1",
       "higher_trend": null,
       "higher_trend_conflict": false,
       "fractions": [
@@ -272,9 +429,111 @@
           "close": 8.82
         }
       ],
-      "merged_zones": [],
-      "pivot_count": 0,
-      "timeframe": "weekly"
+      "merged_zones": [
+        {
+          "zh_top": 9.02,
+          "zh_bottom": 8.45,
+          "zh_center": 8.735,
+          "members": [
+            {
+              "zh_top": 9.02,
+              "zh_bottom": 8.45,
+              "zh_center": 8.735,
+              "strokes": [
+                {
+                  "start_type": "top",
+                  "start_price": 9.15,
+                  "end_type": "bottom",
+                  "end_price": 8.45,
+                  "direction": "down",
+                  "start_index": 13,
+                  "end_index": 17,
+                  "power_price": 0.7,
+                  "length": 4,
+                  "power_volume": 3045000.0
+                },
+                {
+                  "start_type": "bottom",
+                  "start_price": 8.45,
+                  "end_type": "top",
+                  "end_price": 9.02,
+                  "direction": "up",
+                  "start_index": 17,
+                  "end_index": 22,
+                  "power_price": 0.57,
+                  "length": 5,
+                  "power_volume": 4078000.0
+                },
+                {
+                  "start_type": "top",
+                  "start_price": 9.15,
+                  "end_type": "bottom",
+                  "end_price": 8.45,
+                  "direction": "down",
+                  "start_index": 27,
+                  "end_index": 31,
+                  "power_price": 0.7,
+                  "length": 4,
+                  "power_volume": 3087000.0
+                }
+              ],
+              "valid": true
+            },
+            {
+              "zh_top": 9.02,
+              "zh_bottom": 8.45,
+              "zh_center": 8.735,
+              "strokes": [
+                {
+                  "start_type": "bottom",
+                  "start_price": 8.45,
+                  "end_type": "top",
+                  "end_price": 9.02,
+                  "direction": "up",
+                  "start_index": 17,
+                  "end_index": 22,
+                  "power_price": 0.57,
+                  "length": 5,
+                  "power_volume": 4078000.0
+                },
+                {
+                  "start_type": "top",
+                  "start_price": 9.15,
+                  "end_type": "bottom",
+                  "end_price": 8.45,
+                  "direction": "down",
+                  "start_index": 27,
+                  "end_index": 31,
+                  "power_price": 0.7,
+                  "length": 4,
+                  "power_volume": 3087000.0
+                },
+                {
+                  "start_type": "bottom",
+                  "start_price": 8.45,
+                  "end_type": "top",
+                  "end_price": 9.02,
+                  "direction": "up",
+                  "start_index": 31,
+                  "end_index": 36,
+                  "power_price": 0.57,
+                  "length": 5,
+                  "power_volume": 4134000.0
+                }
+              ],
+              "valid": true
+            }
+          ],
+          "valid": true
+        }
+      ],
+      "pivot_count": 1,
+      "timeframe": "weekly",
+      "data_ok": true,
+      "data_note": "周线数据充足",
+      "data_bars_daily": 80,
+      "data_bars_weekly": 40,
+      "adjust_mode": "unknown"
     }
   },
   "wyckoff_midline": {

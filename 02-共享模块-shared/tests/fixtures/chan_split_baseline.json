@@ -1,14 +1,328 @@
 {
   "chanlun_analysis": {
-    "strokes": [],
-    "zones": [],
+    "strokes": [
+      {
+        "start_type": "top",
+        "start_price": 9.2,
+        "end_type": "bottom",
+        "end_price": 8.45,
+        "direction": "down",
+        "start_index": 17,
+        "end_index": 26,
+        "power_price": 0.75,
+        "length": 9,
+        "power_volume": 10255000.0
+      },
+      {
+        "start_type": "bottom",
+        "start_price": 8.45,
+        "end_type": "top",
+        "end_price": 9.15,
+        "direction": "up",
+        "start_index": 26,
+        "end_index": 35,
+        "power_price": 0.7,
+        "length": 9,
+        "power_volume": 9324000.0
+      },
+      {
+        "start_type": "top",
+        "start_price": 9.2,
+        "end_type": "bottom",
+        "end_price": 8.45,
+        "direction": "down",
+        "start_index": 41,
+        "end_index": 50,
+        "power_price": 0.75,
+        "length": 9,
+        "power_volume": 10535000.0
+      },
+      {
+        "start_type": "bottom",
+        "start_price": 8.45,
+        "end_type": "top",
+        "end_price": 9.15,
+        "direction": "up",
+        "start_index": 50,
+        "end_index": 59,
+        "power_price": 0.7,
+        "length": 9,
+        "power_volume": 9576000.0
+      },
+      {
+        "start_type": "top",
+        "start_price": 9.2,
+        "end_type": "bottom",
+        "end_price": 8.45,
+        "direction": "down",
+        "start_index": 65,
+        "end_index": 74,
+        "power_price": 0.75,
+        "length": 9,
+        "power_volume": 10815000.0
+      },
+      {
+        "start_type": "bottom",
+        "start_price": 8.45,
+        "end_type": "top",
+        "end_price": 9.15,
+        "direction": "up",
+        "start_index": 74,
+        "end_index": 83,
+        "power_price": 0.7,
+        "length": 9,
+        "power_volume": 9828000.0
+      },
+      {
+        "start_type": "top",
+        "start_price": 9.2,
+        "end_type": "bottom",
+        "end_price": 8.45,
+        "direction": "down",
+        "start_index": 89,
+        "end_index": 98,
+        "power_price": 0.75,
+        "length": 9,
+        "power_volume": 11095000.0
+      }
+    ],
+    "zones": [
+      {
+        "zh_top": 9.15,
+        "zh_bottom": 8.45,
+        "zh_center": 8.8,
+        "members": [
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 17,
+                "end_index": 26,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10255000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 26,
+                "end_index": 35,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9324000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 41,
+                "end_index": 50,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10535000.0
+              }
+            ],
+            "valid": true
+          },
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 26,
+                "end_index": 35,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9324000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 41,
+                "end_index": 50,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10535000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 50,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9576000.0
+              }
+            ],
+            "valid": true
+          },
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 41,
+                "end_index": 50,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10535000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 50,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9576000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 65,
+                "end_index": 74,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10815000.0
+              }
+            ],
+            "valid": true
+          },
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 50,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9576000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 65,
+                "end_index": 74,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10815000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 74,
+                "end_index": 83,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9828000.0
+              }
+            ],
+            "valid": true
+          },
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 65,
+                "end_index": 74,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10815000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 74,
+                "end_index": 83,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9828000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 89,
+                "end_index": 98,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 11095000.0
+              }
+            ],
+            "valid": true
+          }
+        ],
+        "valid": true
+      }
+    ],
     "buy_points": [],
     "sell_points": [],
-    "trend_label": "数据不足",
+    "trend_label": "回调段",
     "buy_point_text": "无",
     "sell_point_text": "无",
-    "strokes_count": 0,
-    "zones_count": 0,
+    "strokes_count": 7,
+    "zones_count": 5,
     "divergence": {
       "top_divergence": false,
       "bottom_divergence": false,
@@ -17,14 +331,25 @@
       "kind": "none",
       "bc_mode": "legacy"
     },
-    "last_valid_zone_last_price": null,
-    "last_valid_zone_first_price": null,
-    "segments": [],
-    "segments_count": 0,
-    "structure_type": "无结构",
-    "structure_segments_count": 0,
+    "last_valid_zone_last_price": 8.8,
+    "last_valid_zone_first_price": 8.8,
+    "segments": [
+      {
+        "direction": "down",
+        "start_price": 9.2,
+        "end_price": 8.45,
+        "high": 9.2,
+        "low": 8.45,
+        "start_index": 0,
+        "end_index": 6,
+        "strokes_count": 7
+      }
+    ],
+    "segments_count": 1,
+    "structure_type": "盘整",
+    "structure_segments_count": 1,
     "structure_confidence": "low",
-    "structure_evidence": "segments=0,pivots=0",
+    "structure_evidence": "segments=1,pivots=1",
     "higher_trend": null,
     "higher_trend_conflict": false,
     "fractions": [
@@ -267,19 +592,562 @@
         "close": 9.05
       }
     ],
-    "merged_zones": [],
-    "pivot_count": 0
+    "merged_zones": [
+      {
+        "zh_top": 9.15,
+        "zh_bottom": 8.45,
+        "zh_center": 8.8,
+        "members": [
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 17,
+                "end_index": 26,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10255000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 26,
+                "end_index": 35,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9324000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 41,
+                "end_index": 50,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10535000.0
+              }
+            ],
+            "valid": true
+          },
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 26,
+                "end_index": 35,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9324000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 41,
+                "end_index": 50,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10535000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 50,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9576000.0
+              }
+            ],
+            "valid": true
+          },
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 41,
+                "end_index": 50,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10535000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 50,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9576000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 65,
+                "end_index": 74,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10815000.0
+              }
+            ],
+            "valid": true
+          },
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 50,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9576000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 65,
+                "end_index": 74,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10815000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 74,
+                "end_index": 83,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9828000.0
+              }
+            ],
+            "valid": true
+          },
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 65,
+                "end_index": 74,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10815000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 74,
+                "end_index": 83,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9828000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 89,
+                "end_index": 98,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 11095000.0
+              }
+            ],
+            "valid": true
+          }
+        ],
+        "valid": true
+      }
+    ],
+    "pivot_count": 1
   },
   "chanlun_engine": {
-    "strokes": [],
-    "zones": [],
+    "strokes": [
+      {
+        "start_type": "top",
+        "start_price": 9.2,
+        "end_type": "bottom",
+        "end_price": 8.45,
+        "direction": "down",
+        "start_index": 17,
+        "end_index": 26,
+        "power_price": 0.75,
+        "length": 9,
+        "power_volume": 10255000.0
+      },
+      {
+        "start_type": "bottom",
+        "start_price": 8.45,
+        "end_type": "top",
+        "end_price": 9.15,
+        "direction": "up",
+        "start_index": 26,
+        "end_index": 35,
+        "power_price": 0.7,
+        "length": 9,
+        "power_volume": 9324000.0
+      },
+      {
+        "start_type": "top",
+        "start_price": 9.2,
+        "end_type": "bottom",
+        "end_price": 8.45,
+        "direction": "down",
+        "start_index": 41,
+        "end_index": 50,
+        "power_price": 0.75,
+        "length": 9,
+        "power_volume": 10535000.0
+      },
+      {
+        "start_type": "bottom",
+        "start_price": 8.45,
+        "end_type": "top",
+        "end_price": 9.15,
+        "direction": "up",
+        "start_index": 50,
+        "end_index": 59,
+        "power_price": 0.7,
+        "length": 9,
+        "power_volume": 9576000.0
+      },
+      {
+        "start_type": "top",
+        "start_price": 9.2,
+        "end_type": "bottom",
+        "end_price": 8.45,
+        "direction": "down",
+        "start_index": 65,
+        "end_index": 74,
+        "power_price": 0.75,
+        "length": 9,
+        "power_volume": 10815000.0
+      },
+      {
+        "start_type": "bottom",
+        "start_price": 8.45,
+        "end_type": "top",
+        "end_price": 9.15,
+        "direction": "up",
+        "start_index": 74,
+        "end_index": 83,
+        "power_price": 0.7,
+        "length": 9,
+        "power_volume": 9828000.0
+      },
+      {
+        "start_type": "top",
+        "start_price": 9.2,
+        "end_type": "bottom",
+        "end_price": 8.45,
+        "direction": "down",
+        "start_index": 89,
+        "end_index": 98,
+        "power_price": 0.75,
+        "length": 9,
+        "power_volume": 11095000.0
+      }
+    ],
+    "zones": [
+      {
+        "zh_top": 9.15,
+        "zh_bottom": 8.45,
+        "zh_center": 8.8,
+        "members": [
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 17,
+                "end_index": 26,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10255000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 26,
+                "end_index": 35,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9324000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 41,
+                "end_index": 50,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10535000.0
+              }
+            ],
+            "valid": true
+          },
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 26,
+                "end_index": 35,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9324000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 41,
+                "end_index": 50,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10535000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 50,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9576000.0
+              }
+            ],
+            "valid": true
+          },
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 41,
+                "end_index": 50,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10535000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 50,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9576000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 65,
+                "end_index": 74,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10815000.0
+              }
+            ],
+            "valid": true
+          },
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 50,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9576000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 65,
+                "end_index": 74,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10815000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 74,
+                "end_index": 83,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9828000.0
+              }
+            ],
+            "valid": true
+          },
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 65,
+                "end_index": 74,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10815000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 74,
+                "end_index": 83,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9828000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 89,
+                "end_index": 98,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 11095000.0
+              }
+            ],
+            "valid": true
+          }
+        ],
+        "valid": true
+      }
+    ],
     "buy_points": [],
     "sell_points": [],
-    "trend_label": "数据不足",
+    "trend_label": "回调段",
     "buy_point_text": "无",
     "sell_point_text": "无",
-    "strokes_count": 0,
-    "zones_count": 0,
+    "strokes_count": 7,
+    "zones_count": 5,
     "divergence": {
       "top_divergence": false,
       "bottom_divergence": false,
@@ -288,14 +1156,25 @@
       "kind": "none",
       "bc_mode": "legacy"
     },
-    "last_valid_zone_last_price": null,
-    "last_valid_zone_first_price": null,
-    "segments": [],
-    "segments_count": 0,
-    "structure_type": "无结构",
-    "structure_segments_count": 0,
+    "last_valid_zone_last_price": 8.8,
+    "last_valid_zone_first_price": 8.8,
+    "segments": [
+      {
+        "direction": "down",
+        "start_price": 9.2,
+        "end_price": 8.45,
+        "high": 9.2,
+        "low": 8.45,
+        "start_index": 0,
+        "end_index": 6,
+        "strokes_count": 7
+      }
+    ],
+    "segments_count": 1,
+    "structure_type": "盘整",
+    "structure_segments_count": 1,
     "structure_confidence": "low",
-    "structure_evidence": "segments=0,pivots=0",
+    "structure_evidence": "segments=1,pivots=1",
     "higher_trend": null,
     "higher_trend_conflict": false,
     "fractions": [
@@ -538,7 +1417,236 @@
         "close": 9.05
       }
     ],
-    "merged_zones": [],
-    "pivot_count": 0
+    "merged_zones": [
+      {
+        "zh_top": 9.15,
+        "zh_bottom": 8.45,
+        "zh_center": 8.8,
+        "members": [
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 17,
+                "end_index": 26,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10255000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 26,
+                "end_index": 35,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9324000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 41,
+                "end_index": 50,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10535000.0
+              }
+            ],
+            "valid": true
+          },
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 26,
+                "end_index": 35,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9324000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 41,
+                "end_index": 50,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10535000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 50,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9576000.0
+              }
+            ],
+            "valid": true
+          },
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 41,
+                "end_index": 50,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10535000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 50,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9576000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 65,
+                "end_index": 74,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10815000.0
+              }
+            ],
+            "valid": true
+          },
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 50,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9576000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 65,
+                "end_index": 74,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10815000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 74,
+                "end_index": 83,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9828000.0
+              }
+            ],
+            "valid": true
+          },
+          {
+            "zh_top": 9.15,
+            "zh_bottom": 8.45,
+            "zh_center": 8.8,
+            "strokes": [
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 65,
+                "end_index": 74,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 10815000.0
+              },
+              {
+                "start_type": "bottom",
+                "start_price": 8.45,
+                "end_type": "top",
+                "end_price": 9.15,
+                "direction": "up",
+                "start_index": 74,
+                "end_index": 83,
+                "power_price": 0.7,
+                "length": 9,
+                "power_volume": 9828000.0
+              },
+              {
+                "start_type": "top",
+                "start_price": 9.2,
+                "end_type": "bottom",
+                "end_price": 8.45,
+                "direction": "down",
+                "start_index": 89,
+                "end_index": 98,
+                "power_price": 0.75,
+                "length": 9,
+                "power_volume": 11095000.0
+              }
+            ],
+            "valid": true
+          }
+        ],
+        "valid": true
+      }
+    ],
+    "pivot_count": 1
   }
 }
