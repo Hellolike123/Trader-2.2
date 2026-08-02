@@ -124,7 +124,7 @@ _GATE_REASON_NOTES: dict[str, str] = {
     "low_quality": "TR质量不足，阶段不参与定论",
     "forming_phase_a": "箱体未成形，阶段不抬升",
     "no_established_seed": "无Phase A种子箱，阶段不抬升",
-    "phase_a_failed": "Phase A失败，阶段不参与定论",
+    "phase_a_failed": "Phase A 失效，阶段不参与定论",
 }
 
 
@@ -308,6 +308,12 @@ def to_wyckoff_state_view(
         note = _GATE_REASON_NOTES.get(reason) or "阶段不参与定论"
         if oneline and note not in oneline and "不参与定论" not in oneline and "不抬升" not in oneline:
             oneline = f"{oneline} · {note}"
+    # R-F4：直接进面板的 failed 人话写「失效」不写「失败」
+    if phase_a_status == "failed" and oneline:
+        oneline = (
+            oneline.replace("Phase A 失败", "Phase A 失效")
+            .replace("Phase A失败", "Phase A失效")
+        )
 
     cm_mode = str(wyk.get("cm_mode") or "none").strip() or "none"
     cm_note = str(wyk.get("cm_note") or "").strip()
