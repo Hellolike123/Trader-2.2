@@ -43,7 +43,7 @@ def _post(ok: bool, note: str) -> dict[str, Any]:
 
 
 def _background_stage(report: dict[str, Any]) -> tuple[str, str]:
-    """背景岗阶段：优先中线定论（与报告「阶段：」同源），再回退 major_stage。"""
+    """背景岗阶段：优先 midline_stage（周线威科夫短词），再回退 major_stage。"""
     mid = _s(report.get("midline_stage"))
     if not mid:
         mv = report.get("midline_verdict")

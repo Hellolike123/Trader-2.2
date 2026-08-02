@@ -832,7 +832,7 @@ def assess_stage(
             "stop_losses": dict,
         }
 
-    命名纪律（非本函数产出）：面板「阶段：」= midline_stage（周线威科夫）；
+    命名纪律（非本函数产出）：midline_stage=周线威科夫（共振字段；面板不单独成行）；
     report["stage"] 别名 short_term_momentum=momentum；勿与 major_stage 混用。
     """
     ma5 = ma_values.get("ma5")

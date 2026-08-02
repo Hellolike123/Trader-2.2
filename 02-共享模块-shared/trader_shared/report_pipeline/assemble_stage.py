@@ -2,7 +2,7 @@
 """四阶段定位 + 基础报告组装。
 
 阶段字段纪律（见 ``trader_shared.stage_fields``）：
-- midline_stage / conclusion.stage_line = 周线威科夫短词（面板「阶段：」）
+- midline_stage / conclusion.stage_line = 周线威科夫短词（共振字段；面板不单独「阶段：」行）
 - major_stage = 日线四阶段（门控/池）
 - short_term_momentum = EXPMA 走强/修复/震荡/转弱
 - report["stage"] = short_term_momentum 别名（禁止再写 determine_stage）

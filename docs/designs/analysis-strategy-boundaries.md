@@ -79,8 +79,8 @@ report_builder→  全部层
 | `discipline` | dict | 纪律合并结果 |
 | `decision_view` | dict | 薄决策（出手真相）；fusion 不得顶替 |
 | `conclusion` | dict | 中短线结论 |
-| `midline_stage` / `conclusion.stage_line` | str | 周线威科夫短词 → 面板「阶段：」 |
-| `major_stage` | str | 日线四阶段 → 门控/池（**不**写面板阶段行） |
+| `midline_stage` / `conclusion.stage_line` | str | 周线威科夫短词 → 共振字段（面板不单独「阶段：」行；细读见威科夫：） |
+| `major_stage` | str | 日线四阶段 → 门控/池（**不**写中线展示） |
 | `short_term_momentum` | str | EXPMA 动能：走强/修复/震荡/转弱 |
 | `stage` | str | **`short_term_momentum` 兼容别名**（非 major_stage；非 determine_stage） |
 | 原有 `chanlun` / `wyckoff` / … | dict | **兼容保留**；新逻辑优先 cards |

@@ -174,7 +174,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
         except (TypeError, ValueError):
             return None
 
-    # major_stage 不进面板「阶段：」（日线四阶段仅门控/池）；阶段行见 conclusion.stage_line
+    # major_stage 不进中线展示（日线四阶段仅门控/池）；midline_stage 字段供共振
     momentum = str(r.get("short_term_momentum") or "")
     market_env = r.get("market_env") or {}
     regime = ""
@@ -230,7 +230,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
         lines.append(f"  ⏱ 盘中：实时价已锚定 · 策略判定基于截至 {_intraday_as_of} 收盘")
 
     # meta 纯 D：动能｜板块指数涨跌｜行业短名涨跌｜个股（不写正常/偏弱、不写跑赢）
-    # 阶段主展示在 🧭；环境档仍跟板块指数算，仅内部逻辑用，meta 不露
+    # 中线阶段细读在 🧭 威科夫行；环境档仍跟板块指数算，仅内部逻辑用，meta 不露
     meta_parts = []
     if momentum:
         meta_parts.append(f"综合动能 {momentum}")
