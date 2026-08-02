@@ -142,10 +142,10 @@ def summarize_batch(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "counts": by,
         "recommend": recommend,
         "recommend_zh": {
-            "keep_classic": "偏差偏大：可临时 FUSION_FROM_CARDS=classic 对照，优先修 cards",
-            "keep_classic_mild_drift": "有轻微漂移：生产仍默认 cards，建议逐票看",
+            "keep_classic": "偏差偏大：历史对账文案；classic 已退役，只修 cards",
+            "keep_classic_mild_drift": "有轻微漂移（历史对账文案；生产仅 cards）",
             "consider_cards_default": "对齐良好（生产已默认 cards）",
-            "keep_classic_fix_cards": "不稳定：优先修 cards；必要时 classic 回退",
+            "keep_classic_fix_cards": "不稳定（历史对账文案；classic 已退役，只修 cards）",
         }.get(recommend, recommend),
     }
 
