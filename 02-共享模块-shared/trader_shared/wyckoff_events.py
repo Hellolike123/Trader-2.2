@@ -690,9 +690,10 @@ def _phase_a_breakdown(
         bar = bars[i]
         t_low = to_float(bar.get("low"))
         t_close = to_float(bar.get("close"))
-        if t_low is None:
+        # 法源 structure-anchor §3.1 / known-gaps G-K1：须 close；缺失则跳过该棒
+        if t_low is None or t_close is None:
             continue
-        if t_low < floor and (t_close is None or t_close < low_anchor):
+        if t_low < floor and t_close < low_anchor:
             return {
                 "phase_a_failed": True,
                 "fail_bar_idx": i,

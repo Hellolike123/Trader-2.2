@@ -53,6 +53,18 @@ def build_chanlun_view(result: Any, *, current: float | None = None) -> dict[str
     except Exception:
         tip_leave = ""
 
+    # G-K3 / C-DIFF-5：zones_count=引擎 raw 窗；pivot_count=合并后中枢
+    raw_zones = chan.get("zones_count")
+    try:
+        zones_count = int(raw_zones) if raw_zones is not None else len(zones)
+    except (TypeError, ValueError):
+        zones_count = len(zones)
+    merged_pivots = chan.get("pivot_count")
+    try:
+        pivot_count = int(merged_pivots) if merged_pivots is not None else len(zones)
+    except (TypeError, ValueError):
+        pivot_count = len(zones)
+
     return {
         "timeframe": timeframe,
         "data_ok": timeframe != "insufficient" and bool(chan),
@@ -62,7 +74,8 @@ def build_chanlun_view(result: Any, *, current: float | None = None) -> dict[str
         "current_stroke_direction": current_dir,
         "recent_stroke_directions": directions[-5:],
         "tip_leave": tip_leave,
-        "zones_count": len(zones),
+        "zones_count": zones_count,
+        "pivot_count": pivot_count,
         "segments_count": len(segments),
         # 买卖点只复制引擎数组；不读 fusion reason，也不从汇总文案反推。
         "buy_points": buy_points,

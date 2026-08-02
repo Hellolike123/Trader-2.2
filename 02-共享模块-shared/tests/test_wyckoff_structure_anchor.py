@@ -260,3 +260,31 @@ def test_w_diff2_cold_start_excludes_fail_bar_and_earlier_sc() -> None:
     )
     if full["phase_a_status"] in {"forming", "established"}:
         assert int(full["phase_a_range"]["sc_bar_idx"]) > int(fbi)
+
+
+def test_g_k1_close_none_skips_breakdown_not_failed() -> None:
+    """G-K1 / W-DIFF-6 / M-G1：close 缺失 + 深刺穿 → 不判 failed；有 close 才破。"""
+    from trader_shared.config import WYCKOFF_ST_SC_MAX_PIERCE
+    from trader_shared.wyckoff_events import _phase_a_breakdown
+
+    sc_low = 100.0
+    floor = sc_low * (1.0 - WYCKOFF_ST_SC_MAX_PIERCE)
+    assert floor < sc_low
+    # bars[0]=SC；bars[1]=深刺穿但 close 缺失
+    bars_no_close = [
+        _bar(101.0, 102.0, sc_low, 101.0, 200),
+        {"open": 99.0, "high": 100.0, "low": floor - 1.0, "close": None, "volume": 150},
+        _bar(100.0, 101.0, 99.5, 100.5, 120),
+    ]
+    assert _phase_a_breakdown(bars_no_close, 0, sc_low) is None
+
+    # 同刺穿但 close < sc_low → failed
+    bars_closed = [
+        _bar(101.0, 102.0, sc_low, 101.0, 200),
+        _bar(99.0, 100.0, floor - 1.0, sc_low - 1.0, 150),
+        _bar(100.0, 101.0, 99.5, 100.5, 120),
+    ]
+    failed = _phase_a_breakdown(bars_closed, 0, sc_low)
+    assert failed is not None
+    assert failed["phase_a_failed"] is True
+    assert failed["fail_bar_idx"] == 1
