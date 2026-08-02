@@ -128,6 +128,25 @@ _GATE_REASON_NOTES: dict[str, str] = {
 }
 
 
+def _panel_fail_copy(text: str) -> str:
+    """面板/卡可见失败词 → 失效（法源 P-L1/P-L2；与 render 同源）。
+
+    只改人话展示；不改 core 内部 fail_reason 存储。
+    """
+    s = str(text or "")
+    if not s:
+        return s
+    # 先收口「已失效 / 旧故事作废」，再收口「失败」
+    s = s.replace("Phase A 已失效", "Phase A 失效")
+    s = s.replace("Phase A已失效", "Phase A失效")
+    s = s.replace("结构已失效", "结构失效")
+    s = s.replace("旧故事作废", "Phase A 失效")
+    s = s.replace("Phase A 失败", "Phase A 失效")
+    s = s.replace("Phase A失败", "Phase A失效")
+    s = s.replace("已失效", "失效")
+    return s
+
+
 def _unwrap_wyckoff(wyckoff: dict[str, Any] | None) -> dict[str, Any]:
     wyk = wyckoff if isinstance(wyckoff, dict) else {}
     if "wyckoff" in wyk and isinstance(wyk.get("wyckoff"), dict):
@@ -292,7 +311,8 @@ def to_wyckoff_state_view(
     bias = _bias_from_analysis(wyk)
     oneline = format_wyckoff_oneline(wyk, show_phase=False)
     phase_a_status = str(wyk.get("phase_a_status") or "").strip() or "none"
-    phase_label = str(wyk.get("phase_label") or "")
+    # P-L1/P-L2：可见面 phase_label 禁「Phase A 失败」；映射为「失效」同义句
+    phase_label = _panel_fail_copy(str(wyk.get("phase_label") or ""))
     # forming：摘要补「箱体未成形」（微信红线：无 #/**/表格）
     if (
         phase_a_status == "forming"
@@ -308,12 +328,8 @@ def to_wyckoff_state_view(
         note = _GATE_REASON_NOTES.get(reason) or "阶段不参与定论"
         if oneline and note not in oneline and "不参与定论" not in oneline and "不抬升" not in oneline:
             oneline = f"{oneline} · {note}"
-    # R-F4：直接进面板的 failed 人话写「失效」不写「失败」
-    if phase_a_status == "failed" and oneline:
-        oneline = (
-            oneline.replace("Phase A 失败", "Phase A 失效")
-            .replace("Phase A失败", "Phase A失效")
-        )
+    # R-F4 / P-L1：直接进面板的 failed 人话写「失效」不写「失败」
+    oneline = _panel_fail_copy(oneline)
 
     cm_mode = str(wyk.get("cm_mode") or "none").strip() or "none"
     cm_note = str(wyk.get("cm_note") or "").strip()

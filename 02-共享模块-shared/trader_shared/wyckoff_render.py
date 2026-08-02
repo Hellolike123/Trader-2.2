@@ -130,22 +130,10 @@ def _cn(code: str) -> str:
 
 
 def _panel_fail_copy(text: str) -> str:
-    """面板可见失败词 → 失效（法源 wyckoff-phase-fail-copy-handoff §1.1.6）。
+    """面板可见失败词 → 失效（SSOT：wyckoff_view._panel_fail_copy；P-L2）。"""
+    from trader_shared.wyckoff_view import _panel_fail_copy as _ssot
 
-    只改人话展示；不改 core 内部 fail_reason 存储。
-    """
-    s = str(text or "")
-    if not s:
-        return s
-    # 先收口「已失效 / 旧故事作废」，再收口「失败」
-    s = s.replace("Phase A 已失效", "Phase A 失效")
-    s = s.replace("Phase A已失效", "Phase A失效")
-    s = s.replace("结构已失效", "结构失效")
-    s = s.replace("旧故事作废", "Phase A 失效")
-    s = s.replace("Phase A 失败", "Phase A 失效")
-    s = s.replace("Phase A失败", "Phase A失效")
-    s = s.replace("已失效", "失效")
-    return s
+    return _ssot(text)
 
 
 def _as_view(obj: Any) -> dict[str, Any]:

@@ -339,3 +339,34 @@ def test_r_f4_phase_a_failed_gate_note_uses_shixiao():
     assert "阶段不参与定论" in line
     for bad in ("Phase A失败", "Phase A 失败"):
         assert bad not in line
+
+
+def test_p_l1_failed_phase_label_sanitized_on_view():
+    """P-L1/P-L4/M-L1：failed fixture 的 view.phase_label 无「Phase A 失败」禁词。"""
+    v = to_wyckoff_state_view(
+        {
+            "phase": "none",
+            "phase_label": "无明确阶段（Phase A 失败，破位未收回）",
+            "phase_a_status": "failed",
+            "phase_tr_gated": True,
+            "phase_tr_gate_reason": "phase_a_failed",
+            "sc_signal": True,
+            "timeframe": "daily",
+        }
+    )
+    label = v["phase_label"]
+    assert label == "无明确阶段（Phase A 失效，破位未收回）"
+    assert "Phase A 失效" in label
+    for bad in ("Phase A失败", "Phase A 失败"):
+        assert bad not in label
+    # 引擎若给无空格「Phase A失败」亦须收口
+    v2 = to_wyckoff_state_view(
+        {
+            "phase_label": "Phase A失败",
+            "phase_a_status": "failed",
+            "timeframe": "daily",
+        }
+    )
+    assert "Phase A失败" not in v2["phase_label"]
+    assert "Phase A 失败" not in v2["phase_label"]
+    assert "Phase A失效" in v2["phase_label"] or "Phase A 失效" in v2["phase_label"]

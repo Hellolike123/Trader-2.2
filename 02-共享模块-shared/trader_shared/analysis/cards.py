@@ -90,12 +90,12 @@ def build_wyckoff_card(
     else:
         summary = format_wyckoff_event_light(wyckoff)
 
+    from trader_shared.wyckoff_view import _panel_fail_copy, to_wyckoff_state_view
+
     bias = "neutral"
     phase = str(raw.get("phase") or "")
     phase_label = str(info.get("phase_label") or "")
     try:
-        from trader_shared.wyckoff_view import to_wyckoff_state_view
-
         view = to_wyckoff_state_view(
             wyckoff,
             symbol=symbol or "",
@@ -106,6 +106,11 @@ def build_wyckoff_card(
         phase_label = str(view.get("phase_label") or phase_label)
     except Exception:
         pass
+
+    # P-L1/P-L2：卡可见 phase_label / main 与 view 同源 sanitize
+    phase_label = _panel_fail_copy(phase_label)
+    main = _panel_fail_copy(str(info.get("main") or ""))
+    note = _panel_fail_copy(str(info.get("note") or ""))
 
     return {
         "schema_version": "wyckoff_card_v1",
@@ -119,8 +124,8 @@ def build_wyckoff_card(
         "event_code": str(info.get("code") or "—"),
         "event_cn": str(info.get("cn_name") or ""),
         "direction": _as_dir(info.get("direction")),
-        "main": str(info.get("main") or ""),
-        "note": str(info.get("note") or ""),
+        "main": main,
+        "note": note,
         "summary_line": summary,
         "tr_ok": tr_ok,
         "bias": bias,
