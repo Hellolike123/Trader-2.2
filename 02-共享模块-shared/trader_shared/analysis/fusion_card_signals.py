@@ -234,7 +234,7 @@ def vpf_card_to_fusion_signal(card: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def fusion_signals_from_cards(cards: dict[str, Any] | None) -> dict[str, dict[str, Any]] | None:
-    """返回 {chan, momentum, vpf} 三席；cards 无效则 None（回退 classic）。"""
+    """返回 {chan, momentum, vpf} 三席；cards 无效则 None（调用方降级 cards_failed 中性，禁静默 classic）。"""
     if not isinstance(cards, dict) or not cards:
         return None
     chan_c = cards.get("chan") if isinstance(cards.get("chan"), dict) else {}

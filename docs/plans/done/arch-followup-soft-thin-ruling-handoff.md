@@ -1,6 +1,6 @@
 # 架构 follow-up：置信度软抽 + 日线裁定去 fusion.action — Agent Handoff
 
-> **状态**: impl_done（写+查 PASS；已并 #53）· 2026-08-02  
+> **状态**: done（2026-08-02；迁入 `docs/plans/done/`；写+查 PASS）· 原 impl_done 已并 #53
 > **基线**: `cursor/arch-cleanup-complete-1c6b` · PR [#53](https://github.com/Hellolike123/Trader-2.2/pull/53)  
 > **双 Agent**: 写落地 ✅ / 查 PASS ✅。
 

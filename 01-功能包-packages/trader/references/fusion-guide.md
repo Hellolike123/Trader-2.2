@@ -17,7 +17,7 @@
 | `disagreement` | float | [0, 3] | 三路信号分歧度（max - min direction） |
 | `signals_detail` | dict | — | **chan / momentum / vpf** 各自的 direction + confidence |
 | `weights_used` | dict | — | 实际权重（键为 chan/momentum/vpf） |
-| `fusion_input_path` | str | cards/classic/... | 本次三席输入路径 |
+| `fusion_input_path` | str | `cards` / `cards_failed` / `classic` / `classic_via_cards` | 本次三席输入路径 |
 
 ## 输入路径（`FUSION_FROM_CARDS`）
 
@@ -25,9 +25,12 @@
 
 | 模式 | 行为 |
 |------|------|
-| 缺省 / `cards` | **生产默认**：意见卡 → `fusion_card_signals`；失败打 **warning** 后回退 classic |
-| `classic` | 强制 classic（deprecated，仅对照） |
+| 缺省 / `cards` | **生产默认**：意见卡 → `fusion_card_signals`；失败 → 中性占位（`fusion_input_path=cards_failed`），**禁止**静默回退 classic |
+| `classic` | 强制 classic（deprecated，仅对照；可经 `classic_via_cards`） |
 | `compare` | 两路都算；主结果用 cards；写入 `fusion_compare` |
+
+`fusion_input_path` 枚举：`classic` \| `classic_via_cards` \| `cards` \| `cards_failed`。  
+`weighted_score` / `action` / breakdown **仅仪表**；出手听 `decision_view`。
 
 ## 8 档阈值（weighted_score → 方向强度，仪表用语）
 

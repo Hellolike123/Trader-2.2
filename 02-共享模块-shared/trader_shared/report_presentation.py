@@ -27,8 +27,6 @@ from trader_shared.stage_positioning import (
     evaluate_position_state, _detect_major_stage,
 )
 
-from trader_shared.fetchers import TencentFetcher
-
 from trader_shared.indicator_math import aggregate_5m_to_60m, calc_supertrend, calc_vwap
 
 from trader_shared.chip_core import analyze_chips_and_migration
@@ -139,9 +137,8 @@ def _signal_direction_text(direction: int) -> str:
     return "中性"
 
 def _fusion_breakdown(fusion: dict) -> list[str]:
-    """生成融合层决策分解文本。"""
+    """生成融合仪表分解文本（分数/regime/分歧+仅参考；禁 action 指令主句）。"""
     rows = []
-    action = fusion.get("action", "")
     score = fusion.get("weighted_score", 0)
     confidence = fusion.get("confidence", 0)
     regime = fusion.get("regime", "")
@@ -150,8 +147,12 @@ def _fusion_breakdown(fusion: dict) -> list[str]:
     weights = fusion.get("weights_used", {})
     disagreement = fusion.get("disagreement", 0)
 
+    regime_part = str(regime or "未知")
     rows.append("")
-    rows.append(f"  融合层：{action}（评分 {score:+.2f}，置信度 {confidence:.0%}）")
+    rows.append(
+        f"  融合仪表：评分 {score:+.2f}｜置信 {confidence:.0%}｜"
+        f"{regime_part}｜分歧 {disagreement:.1f}｜仅参考"
+    )
 
     if regime:
         hmm_cn = {"bull": "多头", "bear": "空头", "range": "震荡"}.get(hmm, hmm)
@@ -173,7 +174,7 @@ def _fusion_breakdown(fusion: dict) -> list[str]:
         rows.append(f"    ⚠️ {vw.get('reason', '')}")
 
     if disagreement > 1:
-        rows.append(f"  注意：多信号存在分歧（分歧度 {disagreement:.1f}），优先采纳缠论/威科夫方向")
+        rows.append(f"  注意：多信号存在分歧（分歧度 {disagreement:.1f}），仪表仅参考")
 
     return rows
 

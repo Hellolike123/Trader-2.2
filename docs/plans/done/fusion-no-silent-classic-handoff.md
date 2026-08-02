@@ -1,6 +1,6 @@
 # 生产 cards 失败禁止静默回退 classic — Agent Handoff
 
-> **状态**: impl_done（写+查 PASS；待合 #52）· 2026-08-02  
+> **状态**: done（2026-08-02；迁入 `docs/plans/done/`；写+查 PASS）· 原 impl_done 待合 #52
 > **基线**: `main` @ #49 后（与 #50 / #51 独立）  
 > **分支**: `cursor/fusion-no-silent-classic-1c6b` · PR [#52](https://github.com/Hellolike123/Trader-2.2/pull/52)  
 > **双 Agent**: 写落地 ✅ / 查 PASS ✅。  
@@ -10,9 +10,9 @@
 
 ## 0. 法源
 
-1. [`docs/designs/analysis-strategy-boundaries.md`](../designs/analysis-strategy-boundaries.md) §5：生产默认 **cards**；`classic` deprecated 仅对照；禁止文档/Agent 写成默认 classic。  
-2. [`BUSINESS.md`](../../BUSINESS.md) §2.7（Fusion 生产路径 = cards）。  
-3. [`docs/designs/resonance-and-orchestration.md`](../designs/resonance-and-orchestration.md) §7：fusion 兼容可留；新功能默认不依赖加厚/回退权重。  
+1. [`docs/designs/analysis-strategy-boundaries.md`](../../designs/analysis-strategy-boundaries.md) §5：生产默认 **cards**；`classic` deprecated 仅对照；禁止文档/Agent 写成默认 classic。  
+2. [`BUSINESS.md`](../../../BUSINESS.md) §2.7（Fusion 生产路径 = cards）。  
+3. [`docs/designs/resonance-and-orchestration.md`](../../designs/resonance-and-orchestration.md) §7：fusion 兼容可留；新功能默认不依赖加厚/回退权重。  
 4. 现状：`fusion_core.merge_decisions` 在 `_mode == cards` 且 `_three_signals_via_cards` 返回 `None` 时 **静默** `_classic_three()` 并把 `fusion_input_path` 标成 `classic`——生产路径悄悄换轨。
 
 ---
