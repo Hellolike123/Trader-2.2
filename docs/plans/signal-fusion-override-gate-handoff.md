@@ -1,9 +1,9 @@
 # signal_core fusion 覆盖须听 FUSION_OVERRIDE — Agent Handoff
 
-> **状态**: mother_law（写 Agent 已落地，待查）· 2026-08-02  
+> **状态**: impl_done（写+查双轮 PASS；门禁绿；待合 #50）· 2026-08-02  
 > **基线**: `main` @ PR #49 合入后（`cursor/plans-index-sync-514d`）  
-> **分支**: `cursor/signal-fusion-p0-1c6b`  
-> **双 Agent**: 写落地 / 查对照；查完修完再 PR。
+> **分支**: `cursor/signal-fusion-p0-1c6b` · PR [#50](https://github.com/Hellolike123/Trader-2.2/pull/50)  
+> **双 Agent**: 写落地 ✅ / 查两轮 PASS ✅。
 
 ---
 
