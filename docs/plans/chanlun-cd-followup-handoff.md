@@ -1,6 +1,6 @@
 # 缠论 C-D Follow-up — Agent Handoff（并行四路）
 
-> **status**: active  
+> **status**: done  
 > **日期**: 2026-08-02  
 > **前置**: P0 已合 `main`（#27）；法源母本 [`chanlun-skill-deep-card-handoff.md`](./chanlun-skill-deep-card-handoff.md) §7.2 / §10  
 > **本 PR 目标**: 清掉查表剩余 ❌（C-D1a–c / C-D2b / C-D3* / C-D4a–c / C-D5）  

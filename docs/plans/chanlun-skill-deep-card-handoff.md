@@ -326,6 +326,8 @@ python -m pytest 02-共享模块-shared/tests/test_chan_geometry.py \
 
 ### 10.2 查 Agent 对照 C-D*（摘要）
 
+> **历史快照**：表内 ❌ 为当时对照结果；后续落地见 follow-up DoD / PR #29，勿再当现行缺口清单。
+
 | ID | 状态 | 一句 |
 |----|------|------|
 | C-D1a/b/c | ❌ | 不足/失败字段合同未落地；日 qfq vs 周 sina 复权不一致 |
