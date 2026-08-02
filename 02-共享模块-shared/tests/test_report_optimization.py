@@ -437,6 +437,26 @@ def test_format_chanlun_short_light_does_not_infer_point_from_fusion_reason():
     assert not any(word in line for word in ("宜买", "可执行", "可低吸", "该买了"))
 
 
+def test_short_midline_chan_exception_fallback_fail_closed(monkeypatch):
+    """C-D3c/d：format 抛错时不得把 fusion reason/下单词灌进面板。"""
+    import trader_shared.chan_core as chan_core
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("forced")
+
+    monkeypatch.setattr(chan_core, "format_chanlun_short_light", _boom)
+    r = _report()
+    r["fusion"]["signals_detail"]["chan"] = {
+        "reason": "缠论一类买 · 可低吸",
+        "direction": 1,
+    }
+    out = render_short_midline(r)
+    short = out.split("⚡ 短线", 1)[-1].split("关键价", 1)[0]
+    assert "缠论：暂无信号 · 中性" in short
+    assert "一买" not in short
+    assert "可低吸" not in short
+
+
 def test_short_section_chan_type_first():
     """⚡ 短线结构：类型优先（一买…）而非 reason 原文堆叠。"""
     r = _report()

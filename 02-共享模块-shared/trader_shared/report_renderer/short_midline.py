@@ -685,15 +685,8 @@ def render_short_midline(r: dict[str, Any]) -> str:
             wave_label=_wave,
         )
     except Exception:
-        if _csig2:
-            _st2 = str(_csig2.get("reason") or "").replace("缠论", "").strip().lstrip(":：").strip() or "无信号"
-            _cd2 = _csig2.get("direction", 0)
-            _dl2 = "看涨" if _cd2 and int(_cd2) > 0 else ("看跌" if _cd2 and int(_cd2) < 0 else "中性")
-            _chan_line = f"{_st2} · {_dl2}"
-        else:
-            _chan_line = "暂无信号 · 中性"
-            if _wave:
-                _chan_line += f" · {_wave}"
+        # C-D3c/d：异常兜底 fail-closed，禁止把 fusion reason/下单词灌进面板
+        _chan_line = "暂无信号 · 中性"
     # 与中线同构：学说点名「缠论：」「威科夫：」
     lines.append(f"  缠论：{_compact_short_structure_line(_chan_line)}")
 

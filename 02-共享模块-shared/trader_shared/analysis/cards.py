@@ -138,54 +138,12 @@ def build_chan_card(
     from trader_shared.chan_core import format_chanlun_short_light, resolve_chanlun_primary
 
     info = resolve_chanlun_primary(chan_result)
+    # C-D3：禁止从 fusion_chan.reason 手补买卖点/背驰；只认引擎 resolve 结果。
     line = format_chanlun_short_light(
         chan_result,
-        fusion_chan=fusion_chan,
+        fusion_chan=None,
         wave_label=wave_label,
     )
-    if info.get("status") in ("none", "trend") and isinstance(fusion_chan, dict):
-        reason = str(fusion_chan.get("reason") or "")
-        for raw, short in (
-            ("一类买", "一买"),
-            ("类一买", "类一买"),
-            ("二类买", "二买"),
-            ("三类买", "三买"),
-            ("类二买", "类二买"),
-            ("一类卖", "一卖"),
-            ("类一卖", "类一卖"),
-            ("类二卖", "类二卖"),
-            ("二类卖", "二卖"),
-            ("三类卖", "三卖"),
-        ):
-            if raw in reason or short in reason:
-                info = {
-                    **info,
-                    "status": "point",
-                    "type_raw": raw,
-                    "type_short": short,
-                    "direction": _as_dir(fusion_chan.get("direction")),
-                    "same_level": True,
-                }
-                break
-        else:
-            if "底背驰" in reason:
-                info = {
-                    **info,
-                    "status": "divergence",
-                    "type_raw": "底背驰",
-                    "type_short": "底背驰",
-                    "direction": 1,
-                    "same_level": True,
-                }
-            elif "顶背驰" in reason:
-                info = {
-                    **info,
-                    "status": "divergence",
-                    "type_raw": "顶背驰",
-                    "type_short": "顶背驰",
-                    "direction": -1,
-                    "same_level": True,
-                }
 
     point = info.get("point") if isinstance(info.get("point"), dict) else None
     # fusion 契约字段：与 classic _point_conf 对齐

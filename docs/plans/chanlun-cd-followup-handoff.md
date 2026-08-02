@@ -73,10 +73,10 @@ P0 已修笔链/指数。本轮三刀并行：
 
 ## 4. DoD
 
-- [ ] Agent-Buy/Data/Skill 各自测绿  
-- [ ] Agent-Check 对照本文无 ❌（或仅剩明示延期项）  
-- [ ] 未改 fusion 出手 / 威科夫定论 / 池分道  
-- [ ] PR 含法源、对照清单、查结论、pytest  
+- [x] Agent-Buy/Data/Skill 各自落地并测绿  
+- [x] Agent-Check 首轮抓到 cards.py + short_midline 异常兜底漏网 → 父 Agent 已修  
+- [x] 未改 fusion 出手 / 威科夫定论 / 池分道  
+- [ ] PR 含法源、对照清单、查结论、pytest 
 
 ---
 
