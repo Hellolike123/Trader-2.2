@@ -401,12 +401,30 @@ def merge_decisions(
             chan_signal, momentum_signal, vpf_signal = _via
             _path = "cards"
         else:
+            # 生产 cards 失败：降级中性占位，禁止静默回退 classic（handoff fusion-no-silent-classic）
             _logger.warning(
-                "FUSION cards path failed; falling back to classic (fusion_from_cards=%s)",
-                _mode,
+                "FUSION cards path failed; using neutral placeholders (no classic fallback)"
             )
-            chan_signal, momentum_signal, vpf_signal = _classic_three()
-            _path = "classic"
+            chan_signal = {
+                "direction": 0,
+                "confidence": 0.0,
+                "reason": "cards 适配失败",
+                "raw_key": "chan",
+            }
+            momentum_signal = {
+                "direction": 0,
+                "confidence": 0.0,
+                "reason": "cards 适配失败",
+                "raw_key": "momentum",
+            }
+            vpf_signal = {
+                "direction": 0,
+                "confidence": 0.0,
+                "reason": "cards 适配失败",
+                "raw_key": "vpf",
+                "fund_quality": "missing",
+            }
+            _path = "cards_failed"
 
     # 2. 场景优先级过滤器 (Scenario Priority Filter)
     # 计算20日高低区间位置
@@ -771,7 +789,7 @@ def merge_decisions(
             },
         },
         "weights_used": weights,
-        "fusion_input_path": _path,  # Arch C: classic | cards
+        "fusion_input_path": _path,  # Arch C: classic | classic_via_cards | cards | cards_failed
     }
     if _compare is not None:
         result["fusion_compare"] = _compare
