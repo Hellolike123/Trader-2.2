@@ -1,6 +1,7 @@
 # Phase A 失败态链文案收口 — Agent Handoff
 
-> 状态：规格冻结（用户 2026-08-02 确认；Agent1 只写 handoff，不改代码）  
+> **状态**: done（2026-08-02；已合入）  
+> 历史手递（Agent1 曾只写 handoff；现行失败链文案已合）  
 > 法源对齐：`docs/plans/wyckoff-structure-anchor-handoff.md` §3.2 / S-A5（failed → L0，禁健康推进叙事）  
 > 法源对齐：`docs/plans/wyckoff-skill-deep-card-handoff.md` §0.1 / §1 / §2.1（详析故事链只渲染，不改检测）  
 > 实现锚点：`02-共享模块-shared/trader_shared/wyckoff_chain.py::format_wyckoff_chain_plain`；`02-共享模块-shared/trader_shared/wyckoff_render.py::_story_block`  
@@ -153,7 +154,7 @@ Phase A 失效｜须重新寻底；观察是否出现新的 SC（卖力高潮）
 
 ## 5. 必须同步的文档清单
 
-1. `docs/plans/wyckoff-failed-chain-copy-handoff.md`
+1. `docs/plans/done/wyckoff-failed-chain-copy-handoff.md`
    - 本 handoff，作为失败态链 copy 的 SSOT。
 2. `docs/plans/wyckoff-skill-deep-card-handoff.md`
    - 在故事链裁决处增补：failed 时「若变好」不得写下一灯推进；可直接链到本文 §2.3。

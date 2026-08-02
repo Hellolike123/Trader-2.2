@@ -1,15 +1,14 @@
 # 威科夫 Phase A 区间边界（SC/AR）— Agent Handoff
 
-> **status**: p2_done（检测态）；**展示/量度成熟度**另见 L0–L3（2026-08-01）  
-> **日期**: 2026-07-31（修订 2026-08-01）  
+> **status**: impl_done（种子史；非 SC 窗 SSOT）  
+> **日期**: 2026-07-31（修订 2026-08-01 / 勘误 2026-08-02）  
 > **产品法源**: `BUSINESS.md` §2.0 / §2.2（中线状态 = **仅周线威科夫**；短线日线威科夫只对照）  
 > **目标**: 按 Wyckoff Analytics 原典，用 **SC 低点 + AR 高点**（理想再加 ST 测 SC）钉 Phase A / TR 种子边界；固定 15 根只作搜索/超时，**不定义周期**  
 > **后续门禁**: `established`（SC+AR）≠ 可写成熟「箱体」/可量度 → 见 `docs/plans/wyckoff-tr-maturity-l0l3-handoff.md`  
-> **读者**: 下一任实现 Agent（只读本文 + 法源 + 下列代码锚点即可动手）
+> **读者**: 追溯种子史；**现行 SC 窗 / 钉住 / 破位只读 structure-anchor**
 
-> **⚠️ 勘误 / 已被取代（2026-08-02）**  
-> SC **搜索宇宙**与结构钉住 / 破位收口的**现行法源**已迁至  
-> [`wyckoff-structure-anchor-handoff.md`](./wyckoff-structure-anchor-handoff.md)。  
+> **⚠️ 勘误 / 已被取代（2026-08-02）— 加粗必读**  
+> **禁止按正文旧 `CLIMAX=15` 当 SC 窗。现行 SC 搜索宇宙 / 结构钉住 / 破位收口只读 [`wyckoff-structure-anchor-handoff.md`](./wyckoff-structure-anchor-handoff.md)。**  
 > 本文凡写「`WYCKOFF_CLIMAX_ANCHOR_BARS=15` = SC/AR 共用锚点扫描上限 / SC 唯一搜索窗」之处，**仅作 P1/P2 历史**；  
 > 新方案：未失效 Phase A 钉住 `[sc_bar_idx, 今]`；冷启动日 90 / 周 39；`CLIMAX=15` 仅 AR 等待默认种子与非 SC 短窗兼容别名。  
 > **勿按本文 §3.2 / §3.3「扫描窗=CLIMAX」实现新代码。** 下文正文不删，供追溯。
@@ -360,7 +359,7 @@ python -m pytest 02-共享模块-shared/tests/test_wyckoff_*.py -q
 | 日线进中线 / fusion | 已定稿禁止 |
 | 删除 `tr_upper`/`tr_lower` 分位 TR | 并存；established 时种子优先 |
 | P&F 因果目标 | **已另开并落地** → `docs/plans/wyckoff-pnf-handoff.md`；RS 仍另开 |
-| Spring Test / `st_*` 重命名或合并进广义 ST | 见 `wyckoff-phase-accuracy-handoff-2026-07-31.md` |
+| Spring Test / `st_*` 重命名或合并进广义 ST | 见 `done/wyckoff-phase-accuracy-handoff-2026-07-31.md` |
 | 吸筹链 ST 槽改指广义 ST | 链 ST 仍 = Spring 确认 |
 
 ---
@@ -372,7 +371,7 @@ python -m pytest 02-共享模块-shared/tests/test_wyckoff_*.py -q
 | 日线进中线 / fusion | 已定稿禁止 |
 | 用 15 日**定义** TR 宽度 | 15 仅 anchor 搜索 |
 | RS（个股 vs 大盘） | 另开；P&F 已落地见 `wyckoff-pnf-handoff.md` |
-| Spring Test / `st_*` 重命名 | 见 `wyckoff-phase-accuracy-handoff-2026-07-31.md` |
+| Spring Test / `st_*` 重命名 | 见 `done/wyckoff-phase-accuracy-handoff-2026-07-31.md` |
 | 删除 `tr_upper`/`tr_lower` 分位 TR | P1 并存；长期可「established 时优先 SC/AR 种子」 |
 
 ---

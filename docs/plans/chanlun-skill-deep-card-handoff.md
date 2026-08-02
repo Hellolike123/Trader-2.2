@@ -1,11 +1,12 @@
 # 缠论专项结构卡 — Agent Handoff
 
-> **status**: active（对照票已暴露实锤；修笔链/错标的优先于「先做空壳 Skill」）  
+> **status**: impl_done（现行母法源；C-D 母本 + 四关心点）  
 > **日期**: 2026-08-02  
 > **开工备忘**: [`chanlun-skill-playbook.md`](./chanlun-skill-playbook.md)（须先读）  
 > **对照证据**: 下文 §9（南网 / 华工 / 上证指数 / 科创50，2026-08-02 实跑）  
 > **产品法源**: `BUSINESS.md` §2.0 / §2.1；算法权威 `02-共享模块-shared/trader_shared/formulas.md` §2–§6  
-> **读者**: Agent2 写码 / Agent3 查验 / Agent4 复审  
+> **读者**: 验收 / 对照 Agent（勿再标 active 诱重复开工）  
+> **已合 follow-up**: `done/chanlun-cd-followup-handoff.md`、`done/chanlun-observe-tier-handoff.md` 已合入；§10.2 C-D 表内 ❌ 为**历史快照**，勿当现行缺口清单  
 > **方法复用**: 仅复用「手递 + 四 Agent」做法；**禁止**把威科夫 SC/箱体/Phase A/L0–L3 语义硬套进缠论
 
 ---
@@ -233,15 +234,16 @@ python -m pytest 02-共享模块-shared/tests/test_chan_geometry.py \
 - [x] 未改 fusion / 威科夫中线定论 / 池分道  
 - [x] 相关 pytest（stall / resolve / tip-leave / BuildStrokes）绿  
 
-### 7.2 完整 C-D / 专项卡（follow-up）
+### 7.2 完整 C-D / 专项卡（follow-up · 已合入）
 
-手递：[`chanlun-cd-followup-handoff.md`](./chanlun-cd-followup-handoff.md)（Buy / Data / Skill 三路并行 + Check）。
+手递（已合入）：[`done/chanlun-cd-followup-handoff.md`](./done/chanlun-cd-followup-handoff.md)（Buy / Data / Skill 三路并行 + Check）。  
+下列勾选为**历史待办快照**；落地以 follow-up / PR #29 为准，勿再按未勾开新工。
 
-- [ ] C-D1a/b/c 不足字段与日周复权一致  
-- [ ] C-D2b 面板最终行保留「（日线）」  
-- [ ] C-D3a–d 禁 fusion 手补买卖点；透出引擎原类型/价  
-- [ ] C-D4a–c / C-D5 专项卡透出笔方向笔数  
-- [ ] Agent-Check 复审完整表
+- [x] C-D1a/b/c 不足字段与日周复权一致  
+- [x] C-D2b 面板最终行保留「（日线）」  
+- [x] C-D3a–d 禁 fusion 手补买卖点；透出引擎原类型/价  
+- [x] C-D4a–c / C-D5 专项卡透出笔方向笔数  
+- [x] Agent-Check 复审完整表
 
 ---
 

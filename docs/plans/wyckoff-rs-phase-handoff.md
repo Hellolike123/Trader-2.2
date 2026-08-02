@@ -1,6 +1,6 @@
 # 威科夫 RS 相对强弱 — 周线阶段置信修正 Agent Handoff
 
-> **status**: done  
+> **status**: impl_done（现行；池 RS 已合入）  
 > **日期**: 2026-08-01  
 > **分支**: `feat/wyckoff-rs-phase`  
 > **产品法源**: `BUSINESS.md` §2.0 / §2.2（中线状态 = **仅周线威科夫**；对照指数 = `resolve_board_index`）  
@@ -18,7 +18,7 @@
 4. **路径**：仅 `wyckoff_strategy_midline`（周线 `wyckoff_analysis` + `use_persisted_phase=False`）；日线「威科夫：仅对照」**可不接** RS（或展示一句但不改日线阶段机）。  
 5. **规则方向**：相对强 → 同阶段置信略升（封顶）；相对弱 → 置信下调，Spring/吸筹叙事更谨慎（可类比 `spring_premature` 降权）；**禁止**仅凭 RS 把 `phase` 从 `none` 抬成 `markup` / `accumulation_d`。  
 6. **缺数**：指数周线拉不到 → `rs_gate=missing` / `rs_label=neutral`，阶段机照常跑，**不挡**阶段。  
-7. **依赖已落地**：P0-A/B（Spring test + TR 门控）、P1/P2 Phase A 种子箱 — 见 `wyckoff-phase-accuracy-handoff-2026-07-31.md`、`wyckoff-phase-a-range-handoff.md`；本任务**只加 RS 修正层**。
+7. **依赖已落地**：P0-A/B（Spring test + TR 门控）、P1/P2 Phase A 种子箱 — 见 `done/wyckoff-phase-accuracy-handoff-2026-07-31.md`、`wyckoff-phase-a-range-handoff.md`；本任务**只加 RS 修正层**。
 
 ---
 
@@ -88,7 +88,7 @@ resolve_board_index(code_or_sec) -> (ts_code, short_label)
 | 对照指数 | `resolve_board_index` 已用于 meta / `context_stage` 环境档 | `market_env.py`；`context_stage._fetch_market_env` |
 | 指数行情 | 实时 `_fetch_index_data`（腾讯）；**无**周线指数 SSOT  helper | `market_env._fetch_index_data` |
 | 周线拉数 | `DataProvider.fetch_weekly(sec)` 支持任意 `Security` | `data_provider.py` |
-| RS 占位 | accuracy handoff 预留 P1-RS；**现码无** `rs_*` 字段 | `wyckoff-phase-accuracy-handoff-2026-07-31.md` §5 |
+| RS 占位 | accuracy handoff 预留 P1-RS；**现码无** `rs_*` 字段 | `done/wyckoff-phase-accuracy-handoff-2026-07-31.md` §5 |
 | 行业 | `get_stock_sector_snapshot_cached`；与 RS **未接** | `context_stage._fetch_sector_data` |
 
 ---
@@ -294,7 +294,7 @@ python -m pytest 02-共享模块-shared/tests/test_wyckoff_rs.py 02-共享模块
 | 池打分阶段修正 | `wyckoff_core.calculate_wyckoff_score`（`phase_delta * 20`） |
 | 中线面板 | `format_wyckoff_midline_light` |
 | 周线拉数 | `data_provider.fetch_weekly` |
-| 前置 handoff | `wyckoff-phase-accuracy-handoff-2026-07-31.md`（P0-A/B）；`wyckoff-phase-a-range-handoff.md`（Phase A） |
+| 前置 handoff | `done/wyckoff-phase-accuracy-handoff-2026-07-31.md`（P0-A/B）；`wyckoff-phase-a-range-handoff.md`（Phase A） |
 
 ---
 
@@ -314,7 +314,7 @@ python -m pytest 02-共享模块-shared/tests/test_wyckoff_rs.py 02-共享模块
 ## 11. 交接检查清单
 
 - [x] 已读 `BUSINESS.md` §2.0、§2.2  
-- [x] 已读 `wyckoff-phase-accuracy-handoff-2026-07-31.md` §5（P1-RS 占位）  
+- [x] 已读 `done/wyckoff-phase-accuracy-handoff-2026-07-31.md` §5（P1-RS 占位）  
 - [x] 已打开 `resolve_board_index` / `wyckoff_strategy_midline` / `_detect_phase` / `_confidence`  
 - [x] 确认 RS **post-process**，不改 phase 枚举  
 - [x] 确认日线 fusion / 池打分默认行为（是否接 RS）与 §4 一致  

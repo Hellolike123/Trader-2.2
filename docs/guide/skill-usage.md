@@ -3,7 +3,7 @@
 > 给操盘手：把五个 Skill 当五个岗位助手，按交易日节奏喊人。  
 > 给 Agent / 手跑脚本：文末有命令与快路径。  
 > 详细对话示例与面板样例见 [user-guide.md](./user-guide.md)。  
-> 法源手递：[skill-usage-guide-chanlun-handoff.md](../plans/skill-usage-guide-chanlun-handoff.md)。
+> 法源手递（已合入）：[skill-usage-guide-chanlun-handoff.md](../plans/done/skill-usage-guide-chanlun-handoff.md)。
 
 核心原则：**脚本产出是唯一真相**。不要手拼面板，不要凭阶段/动能推断方向。
 

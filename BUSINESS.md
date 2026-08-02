@@ -122,6 +122,17 @@
   - 短线 `事件：` ← 事件灯（`format_wyckoff_event_light` / `format_event_display`）
   - **不进**中线定论、**不进** fusion、**不进**共振背景岗、**不单独开仓**
 
+**区间定义要点**（已修硬伤；详 `docs/plans/done/range-diff-fixes-handoff.md` + 母法源）：
+1. **forming 无 AR**：雏形只写「上沿未出」；**禁止**分位 `tr_upper` 冒充上沿（maturity / W-DIFF-1）。
+2. **破位冷启动**：Path B（`include_failed=False`）排除 `sc_bar_idx ≤ fail_bar_idx`（structure-anchor / W-DIFF-2）。
+3. **中枢 ZG/ZD**：取段/笔 `high`/`low` 极值（`formulas.md` §4.1 / §9.1；已落地）。
+
+**已知未修差异**（诚实列表；勿装零差；详见 `docs/plans/known-gaps.md`）：
+- `report["wyckoff"]` 周不足可回退日线；面板 SSOT = `wyckoff_midline` / `wyckoff_daily`
+- 破位：`close is None` 现码更严（与 structure-anchor「须 close」不完全一致）
+- 背驰展示可 multi，一类扳机面积-only（formulas 取舍）
+- `zones_count` 引擎 raw vs 卡 merged
+
 **约束**：
 - 日线威科夫**已退出**短线 fusion（第三席为 VPF）；日线结果不得写入中线定论
 - 主消费：中线「威科夫：」一行 + 选股池/复盘吸筹链排序；背景岗共振**只读周线**威科夫；短线「威科夫：」仅对照阅读
@@ -138,7 +149,7 @@
 1. 个股 vs **所属板块对照指数**相对强弱（RS）（**已落地**；对照指数 SSOT = `resolve_board_index`；规格见 `docs/plans/wyckoff-rs-phase-handoff.md`）  
    - 周线阶段机：仅置信修正，**不抬** `phase`  
    - 选股池：同道排序（lane→共振→链→RS→可碰→分）；弱 RS 可盯→等齐「慎跟」；模块 `wyckoff_rs.py`，开关 `WYCKOFF_RS_ENABLED`
-2. Spring 后确认测试与 ST 语义分离 → **已落地**（`spring_test_*` 双写 + 阶段 C/D；规格见 `docs/plans/wyckoff-phase-accuracy-handoff-2026-07-31.md` §2）
+2. Spring 后确认测试与 ST 语义分离 → **已落地**（`spring_test_*` 双写 + 阶段 C/D；规格见 `docs/plans/done/wyckoff-phase-accuracy-handoff-2026-07-31.md` §2）
 3. 低质量 TR 不进阶段机 → **已落地**（`WYCKOFF_PHASE_MIN_TR_QUALITY` + `phase_tr_gated`；同上 handoff §3）
 4. Phase A 边界 SC/AR 钉 TR 种子 → **P1 已落地**（`phase_a_range`/`forming`/`established`）；**P2 已落地**（种子箱门控 + 广义 ST → `docs/plans/wyckoff-phase-a-range-handoff.md` §4）
 5. 完整 P&F 因果目标 → **计数已落地**；**展示须 L3**（真 ST+宽度；L1/分位禁止量度；1:1 勿冒充 P&F）。短/中分轨；周线禁止日线箱体冒充。规格：`wyckoff-pnf-handoff.md` + `wyckoff-tr-maturity-l0l3-handoff.md`

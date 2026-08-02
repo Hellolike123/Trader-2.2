@@ -1,10 +1,11 @@
 # 威科夫结构锚点搜索 — Agent Handoff（新方案 SSOT）
 
-> **状态**: 规格冻结（用户 2026-08-02 确认采纳；Agent1 文档钉死）  
-> **协作**: Agent1 完善本文与关联文档 → Agent2 按本文写码 → Agent3 查验+测 →（通过后）Agent4 全量复审  
-> **取代 / 勿混**: 旧默认「日线只在最近 `WYCKOFF_CLIMAX_ANCHOR_BARS=15` 根内找 SC 且无结构钉住」**不再作为产品法源**。15 若仍出现在旧文，仅作历史；实现与验收以**本文**为准。  
-> **相关**: `wyckoff-phase-a-range-handoff.md`（P1/P2 历史；文首勘误）、`wyckoff-tr-maturity-l0l3-handoff.md`（L0–L3；破位连带）、原典盘点；详析卡只渲染、不补灯。  
-> **调参续篇**: `wyckoff-detect-tuning-next.md` 仅指向本文，**禁止**另起第二份搜索宇宙 SSOT。
+> **状态**: impl_done（现行母法源；SC 宇宙 / 钉住 / 破位收口已合入）  
+> **协作**: 实现与验收以**本文**为准（历史：Agent1 文档钉死 → 写/查 Agent 落地）  
+> **取代 / 勿混**: 旧默认「日线只在最近 `WYCKOFF_CLIMAX_ANCHOR_BARS=15` 根内找 SC 且无结构钉住」**不再作为产品法源**。15 若仍出现在旧文，仅作历史。  
+> **相关**: `wyckoff-phase-a-range-handoff.md`（P1/P2 种子史；文首勘误）、`wyckoff-tr-maturity-l0l3-handoff.md`（L0–L3；破位连带）、原典盘点；详析卡只渲染、不补灯。  
+> **调参续篇**: `wyckoff-detect-tuning-next.md` 仅指向本文，**禁止**另起第二份搜索宇宙 SSOT。  
+> **链文案史**: failed 健康推进禁令见 `done/wyckoff-failed-chain-copy-handoff.md`（已合入）。
 
 ---
 
@@ -106,7 +107,7 @@
 | alive 锚 | **清空** | 下一决策走路径 B；重新搜 SC 时 **排除** `sc_bar_idx ≤ fail_bar_idx` 的旧锚（避免同一已破 SC 被冷启动再次钉成 forming/established）；**已实现**于 `_find_sc_anchor`（见 S-A5 / W-DIFF-2） |
 | （建议）`fail_bar_idx` / `fail_reason` | 透出可选 | 调试；验收不强制字段名，但 S-A5 须能区分失败态；冷启动排除读此字段 |
 
-链文案收口：failed → L0 时，`chain_plain` / 详析故事链也必须按 `wyckoff-failed-chain-copy-handoff.md` §2 收口，不得保留「还差下一灯」或健康推进语气。
+链文案收口：failed → L0 时，`chain_plain` / 详析故事链也必须按 `done/wyckoff-failed-chain-copy-handoff.md` §2 收口，不得保留「还差下一灯」或健康推进语气。
 
 **与 L0–L3 handoff 关系**：`wyckoff-tr-maturity-l0l3-handoff.md` §1.1 增 `failed → L0`；§1.3「仍 L0–L1」在破位失败场景收紧为 **L0**（本文优先）。
 
@@ -159,7 +160,7 @@
 | **S-A2** | 无锚：日线只在最近 90 内冷启动 | 无 alive 锚；唯一合格 SC 在 `len-100` → **不得**认该 SC（`sc_signal` 假或锚在窗内另一根）；CAP 内有合格 SC → 可认且 `sc_bar_idx >= len-90` | 合成；断言读 `WYCKOFF_SC_COLD_START_BARS_DAILY` |
 | **S-A3** | 无锚：周线只在最近 39 内冷启动 | 同 S-A2，CAP=39，`timeframe=weekly` | 合成；`WYCKOFF_SC_COLD_START_BARS_WEEKLY` |
 | **S-A4** | 有效破位 → 禁止后续 ST | 破位后缩量回测棒 → `secondary_test_sc_signal is not True`；reason 含跌破/失败类 | 既有 `_sc_breakdown_then_fake_st_bars` + M-R9；可复用 |
-| **S-A5** | 有效破位 → 不得健康 established/雏形推进叙事 | `phase_a_range.status == "failed"`；`phase_a_status == "failed"`；`tr_maturity == "L0"`；`box_display_mode == "none"`；文案无健康「停止：SC+AR」/无「雏形」推进；`measure_allowed is False`；**已实现**：Path B 冷启动（`include_failed=False`）排除 `sc_bar_idx ≤ fail_bar_idx`（`wyckoff_events._find_sc_anchor` / `_fail_bar_cutoff_from_ctx`；`range-diff-fixes` W-DIFF-2）；`include_failed=True` 不排除 | 同上夹具加严；南网手工点 §3.3 作对照说明（单测以合成准，禁默认全网抓数）；`test_w_diff2_cold_start_excludes_fail_bar_and_earlier_sc` |
+| **S-A5** | 有效破位 → 不得健康 established/雏形推进叙事 | `phase_a_range.status == "failed"`；`phase_a_status == "failed"`；`tr_maturity == "L0"`；`box_display_mode == "none"`；文案无健康「停止：SC+AR」/无「雏形」推进；`measure_allowed is False`；**已实现**：Path B 冷启动（`include_failed=False`）排除 `sc_bar_idx ≤ fail_bar_idx`（`wyckoff_events._find_sc_anchor` / `_fail_bar_cutoff_from_ctx`；`done/range-diff-fixes-handoff` W-DIFF-2）；`include_failed=True` 不排除 | 同上夹具加严；南网手工点 §3.3 作对照说明（单测以合成准，禁默认全网抓数）；`test_w_diff2_cold_start_excludes_fail_bar_and_earlier_sc` |
 | **S-A6** | 中线周 / 短线日 宇宙分离 | 日线 analysis 的 `phase_a_range` 不进中线定论；周线路径 CAP/钉住独立；契约：短线「仅对照」 | 既有 R6 / midline 契约测 + 文档对照；必要时补「日 CAP≠周 CAP」单元 |
 | **S-A7** | 相关 wyckoff pytest 绿 | 至少：`test_wyckoff_tr_maturity.py`、`test_wyckoff_core.py`、结构锚新测；门禁子集不塞全历史红项 | `pytest` 本地 / CI |
 | **S-A8** | 文档无「SC 唯一窗=15」作为现行法源 | Agent3 查：本文 + phase-a 文首勘误 + maturity 短注 + `config.py` 注释 + `wyckoff-detect-tuning-next.md`；历史正文可保留但须标明历史 | 文档 diff 审查 |
