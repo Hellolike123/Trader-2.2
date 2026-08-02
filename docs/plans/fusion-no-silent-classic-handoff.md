@@ -1,9 +1,9 @@
 # 生产 cards 失败禁止静默回退 classic — Agent Handoff
 
-> **状态**: mother_law（写 Agent 已落地，待查）· 2026-08-02  
+> **状态**: impl_done（写+查 PASS；待合 #52）· 2026-08-02  
 > **基线**: `main` @ #49 后（与 #50 / #51 独立）  
-> **分支**: `cursor/fusion-no-silent-classic-1c6b`  
-> **双 Agent**: 写落地 / 查对照；查完修完再 PR。  
+> **分支**: `cursor/fusion-no-silent-classic-1c6b` · PR [#52](https://github.com/Hellolike123/Trader-2.2/pull/52)  
+> **双 Agent**: 写落地 ✅ / 查 PASS ✅。  
 > **失败态写死**: `fusion_input_path=cards_failed`（中性三席，不静默 classic）。
 
 ---
