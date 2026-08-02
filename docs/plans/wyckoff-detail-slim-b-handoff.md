@@ -1,8 +1,8 @@
 # 威科夫默认 B 卡改版 — Agent Handoff
 
-> 状态：规格冻结（用户 2026-08-02 确认；Agent1 只写 / 改 handoff，不改代码）
-> 本文 SSOT：威科夫 `--target` 默认输出改为「周线大阶段定方向 + 日线本波做波段」B 卡；旧完整详析保留到 `--full`；短卡保留到 `--brief`。
-> 法源对齐：`BUSINESS.md` §2.0 / §2.2（中线状态只听周线威科夫，日线威科夫只作短线对照展示）；`docs/plans/wyckoff-skill-deep-card-handoff.md`（旧完整详析合同，迁为 `--full`）；`docs/plans/wyckoff-failed-chain-copy-handoff.md` §2.3（失败态不得健康推进）；`docs/plans/wyckoff-tr-maturity-l0l3-handoff.md`（L0-L3 / 箱体与量度门禁）；`docs/plans/wyckoff-structure-anchor-handoff.md` §3（failed → L0，旧结构不得复活）。
+> **状态**: impl_done（现行展示合同；默认 B 卡骨架已合入）
+> 本文 SSOT：威科夫 `--target` 默认输出为「周线大阶段定方向 + 日线本波做波段」B 卡；旧完整详析保留到 `--full`；短卡保留到 `--brief`。
+> 法源对齐：`BUSINESS.md` §2.0 / §2.2（中线状态只听周线威科夫，日线威科夫只作短线对照展示）；`docs/plans/wyckoff-skill-deep-card-handoff.md`（旧完整详析合同，迁为 `--full`）；`docs/plans/done/wyckoff-failed-chain-copy-handoff.md` §2.3（失败态不得健康推进）；`docs/plans/wyckoff-tr-maturity-l0l3-handoff.md`（L0-L3 / 箱体与量度门禁）；`docs/plans/wyckoff-structure-anchor-handoff.md` §3（failed → L0，旧结构不得复活）。
 > 实现锚点：`02-共享模块-shared/trader_shared/wyckoff_render.py`；`02-共享模块-shared/trader_shared/wyckoff_run.py`；skill shim `01-功能包-packages/wyckoff/scripts/final_wyckoff.py` 只保持薄入口。
 
 ---
@@ -513,7 +513,7 @@ failed 规则：
 
 ### 9.2 Agent2（写代码）
 
-1. 只读本文 + `wyckoff-failed-chain-copy-handoff.md` + `wyckoff-tr-maturity-l0l3-handoff.md` + 旧完整详析 handoff。
+1. 只读本文 + `done/wyckoff-failed-chain-copy-handoff.md` + `wyckoff-tr-maturity-l0l3-handoff.md` + 旧完整详析 handoff。
 2. 只改 §6.1 白名单文件。
 3. 逐项实现 S-B1…S-B26。
 4. 同步 §8 文档清单。

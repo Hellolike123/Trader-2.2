@@ -1,6 +1,7 @@
 # 威科夫失效文案残留清扫 + 选股器快路径 — Agent Handoff
 
-> 状态：规格冻结（用户 2026-08-02：额度收尾；双 Agent；**一定不要出 bug**）  
+> **状态**: done（2026-08-02；已合入）  
+> 历史手递（额度收尾；双 Agent；**一定不要出 bug**）  
 > 法源对齐：`docs/plans/wyckoff-phase-fail-copy-handoff.md`（P-C*）；`docs/plans/wyckoff-detail-slim-b-handoff.md` S-B25（禁幕类隐喻）；`01-功能包-packages/trader/references/pool-commands.md`（选股池命令）  
 > 实现锚点：`wyckoff_render.py`；`wyckoff`/`trader` `agent-quickstart.md`；测例  
 > 产品裁决：**只清展示残留 + 文档快路径**；不改判定、不改报告四区、不造日线假雏形。

@@ -1,6 +1,6 @@
 # Trader 面板减重与关闭态动词净化 — Agent Handoff
 
-> 状态：规格冻结（用户 2026-08-02 确认预览文案后开工）  
+> **状态**: impl_done（现行面板合同；关闭态动词净化已合入）  
 > 法源对齐：`BUSINESS.md` §2.0 / §4.0 / §5.1；`docs/t0-strategy-v2.md`（T0 非出手指令）；`docs/plans/trader-drop-stage-line-handoff.md`（无独立「阶段：」行）  
 > 实现锚点：`02-共享模块-shared/trader_shared/report_renderer/short_midline.py`（主）；必要时薄改 `_helpers.py` / 渲染侧注解，**禁止**改 fusion / decision_view / resonance 算法
 

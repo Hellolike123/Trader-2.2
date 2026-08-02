@@ -1,6 +1,6 @@
 # 威科夫周线扫描窗缩放 — Agent Handoff（S1 + S3）
 
-> **状态**: 规格冻结（用户 2026-08-02 确认修软债 S1+S3）  
+> **状态**: impl_done（现行合同；周窗 S1/S3 已合入）  
 > **产品法源**: `BUSINESS.md` §2.2；AR 半幅先例见 `wyckoff-structure-anchor-handoff.md` §2.2  
 > **非目标**: 不改 fusion / decision_view / 池分道；不改 SC 冷启动 90/39；不改 Spring/SOS/compression/cluster 全面缩放（软债 S4 另案）；不改 `WIDTH_REF`（S2 另案）
 

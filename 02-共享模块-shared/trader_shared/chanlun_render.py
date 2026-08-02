@@ -1,6 +1,6 @@
 """缠论专项结构卡渲染（微信安全；只读引擎薄 view）。
 
-法源：docs/plans/chanlun-cd-followup-handoff.md §2.3 / §3；
+法源：docs/plans/done/chanlun-cd-followup-handoff.md §2.3 / §3；
 排版对齐威科夫详析卡：分节独立成行，买卖点前置，少堆竖线墙。
 禁止在此模块重算笔或从其他文案补出买卖点。
 """

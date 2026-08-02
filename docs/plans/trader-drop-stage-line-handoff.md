@@ -1,6 +1,6 @@
 # Trader 面板去掉「阶段：」行 — Agent Handoff
 
-> 状态：规格冻结（用户 2026-08-02 确认：有威科夫定阶段则面板「阶段：」不需要）  
+> **状态**: impl_done（现行面板合同；独立「阶段：」行已废除）  
 > 法源对齐：`BUSINESS.md` §2.0 / §2.2 / §4.0 / §5.1；`docs/designs/resonance-and-orchestration.md`（背景岗读周线威科夫 / `midline_stage`）  
 > 实现锚点：`02-共享模块-shared/trader_shared/report_renderer/short_midline.py`
 

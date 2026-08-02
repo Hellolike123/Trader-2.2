@@ -1,6 +1,6 @@
 # 威科夫阶段辨识准确度 — Agent Handoff
 
-> **status**: done（P0-A / P0-B 已落地；P1-RS → 见 `wyckoff-rs-phase-handoff.md`，已落地）  
+> **status**: done（P0-A / P0-B 已落地；P1-RS → 见 `../wyckoff-rs-phase-handoff.md`，已落地）  
 
 > **日期**: 2026-07-31  
 > **产品法源**: `BUSINESS.md` §2.0 / §2.2（中线状态 = **仅周线威科夫**）  

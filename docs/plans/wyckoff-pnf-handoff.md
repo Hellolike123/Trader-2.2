@@ -1,6 +1,6 @@
 # 威科夫 Point & Figure（P&F）因果目标 — Agent Handoff
 
-> **status**: done（计数引擎）；**量度授权**见 L0–L3 门禁（2026-08-01）  
+> **status**: impl_done（现行；计数引擎已合入）；**量度授权**见 L0–L3 门禁（2026-08-01）  
 > **日期**: 2026-08-01  
 > **产品法源**: `BUSINESS.md` §2.2；原典盘点 `docs/audit/wyckoff-original-concept-inventory.md` §一 / §六  
 > **量度何时可出**: `docs/plans/wyckoff-tr-maturity-l0l3-handoff.md`（仅 `tr_maturity=L3`；L1 雏形 / 仅分位 TR **禁止**量度）  

@@ -1,10 +1,10 @@
 # 威科夫 Phase 失效文案统一 — Agent Handoff
 
-> 状态：规格冻结续篇（用户 2026-08-02：默认 B 已落地；继续对齐 `--full` / `--brief`）  
-> 法源对齐：`docs/plans/wyckoff-detail-slim-b-handoff.md`（B 卡骨架）；`docs/plans/wyckoff-failed-chain-copy-handoff.md`（失败态禁健康推进）；`docs/plans/wyckoff-structure-anchor-handoff.md` §3（failed → L0）  
+> **状态**: impl_done（现行展示合同；Phase 失效人话 SSOT 已合入）  
+> 法源对齐：`docs/plans/wyckoff-detail-slim-b-handoff.md`（B 卡骨架）；`docs/plans/done/wyckoff-failed-chain-copy-handoff.md`（失败态禁健康推进）；`docs/plans/wyckoff-structure-anchor-handoff.md` §3（failed → L0）  
 > 实现锚点：`wyckoff_render.py`（`render_wyckoff_slim` / `render_wyckoff_detail` / `render_wyckoff_card` / `_story_block`）；链短句 `wyckoff_chain.format_wyckoff_chain_plain`（仅展示词）  
 > 产品裁决：只改**人话展示**；不改 Phase A failed 判定、L0–L3、fusion、出手、池分道。  
-> 续篇：报告光杆 `format_wyckoff_*_light` failed 已按 `wyckoff-report-fail-copy-leak-handoff.md`（R-F*）覆盖。
+> 续篇（已合入）：报告光杆 `format_wyckoff_*_light` failed 见 `done/wyckoff-report-fail-copy-leak-handoff.md`（R-F*）。
 
 ---
 
@@ -163,7 +163,7 @@ Phase A 失效｜须重新寻底；观察是否出现新的 SC（卖力高潮）
 5. `docs/plans/wyckoff-detail-slim-b-handoff.md` / `wyckoff-skill-deep-card-handoff.md`（`--full` 文案交叉）  
 6. `01-功能包-packages/wyckoff/references/output-template.md`  
 7. `01-功能包-packages/wyckoff/references/agent-quickstart.md`  
-8. 必要时 `docs/plans/wyckoff-failed-chain-copy-handoff.md` 交叉引用一句（勿改判定）
+8. 必要时 `docs/plans/done/wyckoff-failed-chain-copy-handoff.md` 交叉引用一句（勿改判定）
 
 ### 5.2 勿改
 

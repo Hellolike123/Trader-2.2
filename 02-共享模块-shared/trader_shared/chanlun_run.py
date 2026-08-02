@@ -1,6 +1,6 @@
 """缠论 Skill 编排：共用行情快照并调用既有缠论引擎。
 
-法源：docs/plans/chanlun-cd-followup-handoff.md §2.3 / §3。
+法源：docs/plans/done/chanlun-cd-followup-handoff.md §2.3 / §3。
 本模块只编排和构建薄 view，不复制分型、笔、段、中枢或买卖点算法。
 """
 from __future__ import annotations
