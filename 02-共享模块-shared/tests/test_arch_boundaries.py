@@ -162,3 +162,76 @@ def test_match_prefers_analysis_cards_over_raw():
     ent = r["gates"]["entry"]
     assert ent["primary"] is not None
     assert ent["primary"]["id"] == "entry.chan_buy1_probe"
+
+
+def _ast_mentions_name(node: ast.AST, name: str) -> bool:
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and child.id == name:
+            return True
+    return False
+
+
+def _is_call_to(node: ast.AST, name: str) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id == name
+    if isinstance(func, ast.Attribute):
+        return func.attr == name
+    return False
+
+
+def test_build_signal_gates_map_fusion_behind_override_flag():
+    """R1/#50 M6：build_signal 内 _map_fusion_to_signal 须在 FUSION_OVERRIDE_ENABLED 闸内。
+
+    假实现「无闸 remap」应失败：所有 map 调用必须落在检查该名的 If 体内。
+    """
+    path = PKG / "signal_core.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    build_fn = next(
+        (
+            n
+            for n in tree.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and n.name == "build_signal"
+        ),
+        None,
+    )
+    assert build_fn is not None, "signal_core.build_signal missing"
+
+    gated_calls = 0
+    ungated_calls = 0
+
+    class _Visitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self._gate_depth = 0
+
+        def visit_If(self, node: ast.If) -> None:
+            gated = _ast_mentions_name(node.test, "FUSION_OVERRIDE_ENABLED")
+            if gated:
+                self._gate_depth += 1
+                self.generic_visit(node)
+                self._gate_depth -= 1
+            else:
+                self.generic_visit(node)
+
+        def visit_Call(self, node: ast.Call) -> None:
+            nonlocal gated_calls, ungated_calls
+            if _is_call_to(node, "_map_fusion_to_signal"):
+                if self._gate_depth > 0:
+                    gated_calls += 1
+                else:
+                    ungated_calls += 1
+            self.generic_visit(node)
+
+    _Visitor().visit(build_fn)
+    assert gated_calls >= 1, "expected _map_fusion_to_signal under FUSION_OVERRIDE_ENABLED"
+    assert ungated_calls == 0, f"ungated _map_fusion_to_signal calls: {ungated_calls}"
+
+
+def test_report_builder_no_tencent_fetcher_ctor():
+    """R3/A3：report_builder 源码不得再构造 TencentFetcher()。"""
+    src = (PKG / "report_builder.py").read_text(encoding="utf-8")
+    assert "TencentFetcher()" not in src
+    assert "from trader_shared.fetchers import TencentFetcher" not in src

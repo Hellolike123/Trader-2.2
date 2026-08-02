@@ -174,7 +174,7 @@ def status_for(current: float, support: float, low_zone_upper: float, confirm: f
     }
     if FUSION_OVERRIDE_ENABLED and isinstance(fusion_result, dict):
         fc = safe_float(fusion_result, "confidence")
-        if fc >= FUSION_CONFIDENCE_THRESHOLD:
+        if fc > FUSION_CONFIDENCE_THRESHOLD:  # 契约「超过阈值」= 严格 >（对齐 decision_core）
             fusion_action = str(fusion_result.get("action") or "").strip()
             mapped_status = _FUSION_STATUS_MAP.get(fusion_action)
             if mapped_status is not None:
