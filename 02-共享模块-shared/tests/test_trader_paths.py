@@ -23,6 +23,7 @@ REQUIRED_KEYS = {
     "buy_point_lifecycle",
     "last_add_dates",
     "wyckoff_phase",
+    "wyckoff_phase_a_anchor",
     "position",
     "positions_portfolio",
     "account",
@@ -54,6 +55,7 @@ def test_keys_resolve_under_trader_root(tmp_path: Path, monkeypatch):
     assert path("last_target") == root / "last_target.txt"
     assert path("signals") == root / "signals.jsonl"
     assert path("signal_results") == root / "signal_results.jsonl"
+    assert path("wyckoff_phase_a_anchor") == root / "wyckoff_phase_a_anchor.json"
 
 
 def test_env_override_buy_point_lifecycle(tmp_path: Path, monkeypatch):
@@ -120,6 +122,7 @@ def test_writers_route_through_registry(tmp_path: Path, monkeypatch):
     from trader_shared.position_add_store import _store_path
     from trader_shared.structure_core import _trailing_watermark_path
     from trader_shared.wyckoff_phase import _wyckoff_phase_path
+    from trader_shared.wyckoff_phase_a_store import _wyckoff_phase_a_anchor_path
     from trader_shared.chip_migration_monitor import _chip_history_path
     from trader_shared.t0_account import _ledger_path, _position_path
 
@@ -127,6 +130,7 @@ def test_writers_route_through_registry(tmp_path: Path, monkeypatch):
     assert _store_path() == root / "last_add_dates.json"
     assert _trailing_watermark_path() == root / "trailing_stop_watermark.json"
     assert _wyckoff_phase_path() == root / "wyckoff_phase.json"
+    assert _wyckoff_phase_a_anchor_path() == root / "wyckoff_phase_a_anchor.json"
     assert _chip_history_path() == root / "chip_history.json"
     assert _position_path() == root / "position.json"
     assert _ledger_path() == root / "t0_ledger.jsonl"

@@ -89,6 +89,11 @@ from .wyckoff_phase import (
     _scan_for_signal,
     _transition_phase
 )
+from .wyckoff_phase_a_store import (
+    delete_phase_a_anchor,
+    load_phase_a_anchor,
+    save_phase_a_anchor,
+)
 
 from .wyckoff_events import (
     _board_vol_scale,
@@ -546,9 +551,10 @@ def wyckoff_analysis(
     use_persisted_phase: bool = True,
     index_weekly_bars: list[dict] | None = None,
     phase_a_range: dict | None = None,
+    use_persisted_phase_a_anchor: bool = True,
 ) -> dict:
     if len(bars) < WYCKOFF_MIN_BARS:
-        return {
+        result = {
             "spring_signal": False, "spring_reason": "数据不足", "spring_price": None,
             "upthrust_signal": False, "upthrust_reason": "数据不足", "upthrust_price": None,
             "bc_signal": False, "bc_reason": "数据不足", "bc_price": None,
@@ -598,6 +604,9 @@ def wyckoff_analysis(
             "measure_allowed": False,
             "box_display_mode": "none",
         }
+        if use_persisted_phase_a_anchor and str(symbol or "").strip():
+            delete_phase_a_anchor(symbol, timeframe)
+        return result
 
     # P2-2: 动态支撑位计算（多源集成）— 仅用于 Spring 检测
     _is_weekly = str(timeframe or "").lower() == "weekly"
@@ -624,6 +633,12 @@ def wyckoff_analysis(
         )
     else:
         tr_ctx = _detect_trading_range(bars)
+    if (
+        use_persisted_phase_a_anchor
+        and str(symbol or "").strip()
+        and phase_a_range is None
+    ):
+        phase_a_range = load_phase_a_anchor(symbol, timeframe, bars)
     event_tr_ctx = dict(tr_ctx) if isinstance(tr_ctx, dict) else {}
     if isinstance(phase_a_range, dict):
         event_tr_ctx["phase_a_range"] = phase_a_range
@@ -875,7 +890,7 @@ def wyckoff_analysis(
     if not parts:
         parts.append("无明显威科夫信号")
 
-    return {
+    result = {
         "spring_signal": spring["spring_signal"],
         "spring_reason": spring["spring_reason"],
         "spring_price": round(spring["spring_price"], 2) if spring["spring_signal"] else None,
@@ -1057,6 +1072,9 @@ def wyckoff_analysis(
         "rs_relative_return": rs_fields.get("rs_relative_return"),
         "phase_confidence_delta_event": phase.get("phase_confidence_delta_event"),
     }
+    if use_persisted_phase_a_anchor and str(symbol or "").strip():
+        save_phase_a_anchor(symbol, timeframe, result.get("phase_a_range"), bars)
+    return result
 
 def wyckoff_strategy(current: float, bars: list[dict], change_pct: Any = None, quote: dict | None = None, symbol: str = "") -> dict:
     """日线威科夫（短线侧兼容 / 插件日线轨）。
