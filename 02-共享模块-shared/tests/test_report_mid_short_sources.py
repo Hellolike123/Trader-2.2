@@ -190,9 +190,10 @@ class TestRenderDualTrack:
         md = render_short_midline(r)
         assert "🧭 中线" in md
         assert "⚡ 短线" in md
-        # 面板「阶段：」= 周线威科夫短词（fixture phase=none → 无阶段）；禁止日线 major_stage 冒充
-        assert "阶段：无阶段" in md
+        # 面板无独立「阶段：」行；禁止日线 major_stage 冒充成阶段行
+        assert "  阶段：" not in md
         assert "阶段：蓄势偏强" not in md
+        assert r["conclusion"].get("stage_line") == "无阶段"  # 字段仍钉周线威科夫
         # 看法已并入定论；短线仍可单独有看法行
         assert "中线：蓄势" not in md
         assert "🎯 结论" not in md
@@ -221,7 +222,8 @@ class TestRenderDualTrack:
     def test_short_experts_day_only(self):
         md = render_short_midline(_report())
         short_block = md.split("⚡ 短线")[1]
-        assert "DAY_ONLY_顶背驰" in short_block
+        # C-D3：无引擎买卖点时禁 fusion 手补顶背驰进缠论行；动能仍可读日线 fusion
+        assert "DAY_ONLY_顶背驰" not in short_block
         assert "DAY_ONLY_震荡" in short_block
 
     def test_midline_view_not_stage_words(self):

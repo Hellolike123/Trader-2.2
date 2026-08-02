@@ -49,8 +49,7 @@
   量比1.2（平量） ｜ 换手4.0% ｜ ATR14 1.20（未复权）
 
 🧭 中线
-  阶段：蓄势偏强 · 偏空（盘整偏空暂缓跟踪）
-  定论：周线结构偏弱，先观察
+  定论：周线结构偏弱，先观察 · 偏空（盘整偏空暂缓跟踪）
   威科夫：吸筹早期 · 箱体 40.30-43.00 · AR（自动反弹） · 不能当已经转强
   缠论：盘整(段偏少)·看跌
   位置：中枢下(反抽中)
@@ -97,8 +96,8 @@ T0：无底仓，不启用（与出手一致，不新开）
 - **标题**：`分析报告 — {名}（{码}）｜短中线`
 - **meta**：`综合动能 … ｜ {上证/深成/创业板/科创} ±x% ｜ {行业短名} ±x% ｜ 个股 ±x%`（纯 D：不写正常/偏弱/跑赢；环境档跟板块指数算但 meta 不露）；MA 行须含 MA20 与 MA250；量价行：`量比… ｜ 换手… ｜ 调整N天/创新高 ｜ ATR14 x.xx（前/后/未复权）`（ATR **并入同行**，禁止再单独成行）；阶段主展示在 🧭
 - **🧭 中线**
-  - `阶段：` ← **周线威科夫**阶段短词（与「威科夫：」同源；不足→无阶段）；**禁止**日线 `major_stage` / 缠论方向矩阵冒充。可选偏多/偏空短因可附在定论；**禁止**再写独立 `看法：` 行
-  - 可选 `定论：` ← 中线合成注记（`midline_verdict_note`）
+  - **无**独立 `阶段：` 行（阶段细读见下方 `威科夫：`；字段 `midline_stage` / `stage_line` 仍钉周线威科夫短词供共振，不足→`无阶段`）；**禁止**日线 `major_stage` / 缠论方向矩阵冒充
+  - 可选 `定论：` ← 中线合成注记（`midline_verdict_note`）；偏多/偏空短因并入本行；**禁止**再写独立 `看法：` 行
   - `威科夫：` ← 只读周线 `wyckoff_midline` / View（`format_wyckoff_midline_light`）；结构「阶段 · [箱体] · 事件 · 含义」；箱体与短线同款（`箱体 lo-hi` / `箱体未成形 · 下沿…（上沿未出）`）；禁止回退日线
   - `缠论：` ← 只读 `chanlun_midline`；有买卖点/背驰时行尾 `（本周期）`；周不足可 daily_fallback+「（日线）」；不定阶段
   - 可选 `位置：` ← `pivot_position_weekly`（中枢内/上/下/外/未知）
@@ -128,8 +127,8 @@ T0：无底仓，不启用（与出手一致，不新开）
 
 | 层 | 含义 | 数据源 |
 |----|------|--------|
-| 阶段（面板「阶段：」） | 周线威科夫短词，中线背景语义 | wyckoff_midline.phase → stage_line / midline_stage |
-| major_stage | 日线四阶段，门控/池软信号（**不**写中线「阶段：」行） | major_stage |
+| 阶段（字段 `midline_stage`；面板不单独成行） | 周线威科夫短词，中线背景/共振 | wyckoff_midline.phase → stage_line / midline_stage |
+| major_stage | 日线四阶段，门控/池软信号（**不**写中线展示） | major_stage |
 | short_term_momentum | EXPMA 短期动能（走强/修复/震荡/转弱） | assess_stage → momentum |
 | report["stage"] | **兼容别名 = short_term_momentum**（池/旧读方；非 major_stage） | 同 short_term_momentum |
 | 中线看法 | 周线故事跟不跟 | chanlun_midline + wyckoff_midline |

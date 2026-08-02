@@ -4,7 +4,8 @@
 三套真相，禁止混用：
 
 - ``midline_stage`` / ``conclusion.stage_line``
-  周线威科夫短词 → 面板「阶段：」（吸筹/主升/派发/无阶段…）
+  周线威科夫短词 → 共振背景岗 / 字段（吸筹/主升/派发/无阶段…）；
+  面板**不**再单独输出「阶段：」行（细读见「威科夫：」）
 - ``major_stage``
   日线四阶段 → 门控 / 选股池软信号（蓄势/主升/派发/衰退…）
 - ``short_term_momentum``
@@ -12,7 +13,7 @@
 
 ``report["stage"]`` 是 ``short_term_momentum`` 的兼容别名（池/旧读方）；
 **不是** ``major_stage``，也不是轻量 ``determine_stage`` 位置分类。
-面板「阶段：」**禁止**指向 ``major_stage``。
+中线展示**禁止**用 ``major_stage`` 冒充威科夫阶段。
 """
 from __future__ import annotations
 
