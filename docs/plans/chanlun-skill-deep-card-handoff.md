@@ -1,8 +1,9 @@
 # 缠论专项结构卡 — Agent Handoff
 
-> **status**: active（Agent1 方案已锁；实现待 Agent2）  
+> **status**: active（对照票已暴露实锤；修笔链/错标的优先于「先做空壳 Skill」）  
 > **日期**: 2026-08-02  
 > **开工备忘**: [`chanlun-skill-playbook.md`](./chanlun-skill-playbook.md)（须先读）  
+> **对照证据**: 下文 §9（南网 / 华工 / 上证指数 / 科创50，2026-08-02 实跑）  
 > **产品法源**: `BUSINESS.md` §2.0 / §2.1；算法权威 `02-共享模块-shared/trader_shared/formulas.md` §2–§6  
 > **读者**: Agent2 写码 / Agent3 查验 / Agent4 复审  
 > **方法复用**: 仅复用「手递 + 四 Agent」做法；**禁止**把威科夫 SC/箱体/Phase A/L0–L3 语义硬套进缠论
@@ -11,10 +12,10 @@
 
 ## 0. 30 秒摘要
 
-1. **要做**：独立缠论 Skill 结构卡（学术展开：笔/段/中枢/一二三买/笔方向），薄包装 + 引擎在 `trader_shared`。  
-2. **验收主轴**（用户四点，缺一不算过）：取数对｜期限对｜一二三买只跟引擎｜笔向上向下与引擎一致。  
+1. **先修实锤，再谈专项卡**：对照票已证明（a）指数名会解析成个股；（b）周线笔链在「距不够 + 同向分型 break」下整段停摆，末笔假向上，面板中线假看涨。  
+2. **验收主轴**（用户四点）：取数对｜期限对｜一二三买只跟引擎｜笔向上向下与引擎一致。  
 3. **不是**：威科夫换皮；不是出手总司令；不得覆盖周线威科夫中线阶段。  
-4. **顺序**：本 handoff 锁定合同 → 写码+测 → 查验 → PASS 后复审 → PR。
+4. **顺序**：对照暴露问题（已做）→ 本文锁合同 → **先修笔链/取数** + 测 → 再薄 Skill 卡透出可核对字段 → 查验 → PR。
 
 ---
 
@@ -148,6 +149,7 @@ recent_stroke_directions: list["up"|"down"]    # 最近 N 笔，时间升序
 | **C-D1a** | 取数 | 日线根数 &lt; `CHANLUN_MIN_BARS` | `data_ok=False` 或短线 `insufficient`；面板明示不足；**不**输出伪造买卖点 |
 | **C-D1b** | 取数 | 取数失败 / 空 bars | 诚实失败文案；不静默换错标的或错周期 |
 | **C-D1c** | 取数 | 正常前复权日+周夹具 | `adjust_mode` 一致；升序；`data_bars_*` 与输入一致 |
+| **C-D1d** | 取数 | 「上证指数」「科创50」等指数名（对照 §9.1） | **不得**解析成平安银行/000050 个股价位；错解析须失败或明确指数代码，禁止 silent 个股 |
 | **C-D2a** | 期限 | 周 K 充足 | 中线副读 `timeframe=weekly`；无「（日线）」误标 |
 | **C-D2b** | 期限 | 周不足、日够 | `timeframe=daily_fallback`；面板含「（日线）」；**不**写入中线阶段定论槽 |
 | **C-D2c** | 期限 | 短线块 | 仅日线（+可选 30m 确认字段）；禁止周线笔出现在短线「当前笔」 |
@@ -158,7 +160,9 @@ recent_stroke_directions: list["up"|"down"]    # 最近 N 笔，时间升序
 | **C-D4a** | 笔方向 | 合成夹具末笔 `direction=up` | 面板当前笔=向上；`stroke_count` 匹配 |
 | **C-D4b** | 笔方向 | 合成夹具末笔 `direction=down` | 面板当前笔=向下 |
 | **C-D4c** | 笔方向 | 近 N 笔序列 | 面板近笔序列与 `strokes[*].direction` 一致 |
-| **C-D5** | 输出 | 渲染样例 | 无微信违禁符；与 output-template 同源 |
+| **C-D4d** | 笔方向 | **南网类笔链停摆夹具**（§9.2）：向上笔后出现合格反向底分型（可跨过「距不够的近底」） | 必须成向下笔或诚实标「笔未确认/延伸中」；**禁止**末笔仍停在旧顶且 `trend_label=拉升段` 驱动「拉升趋势中·看涨」 |
+| **C-D4e** | 笔方向 | 华工类：末笔日期远早于最后一根 K，且价格已反向大幅离开笔终点 | 不得继续用旧向上笔当「当前笔」叙事；须推进笔或降级文案 |
+| **C-D5** | 输出 | 渲染样例 | 无微信违禁符；与 output-template 同源；须透出当前笔方向/笔数便于人核 |
 | **C-D6** | 边界 | 回归 | 相关 pytest 绿；**勿改** fusion 出手语义、威科夫中线定论、池分道 |
 
 查验口令：对照本表 + playbook §0 四关心点逐项 ✅/❌；抓假买卖点与笔反向。
@@ -168,47 +172,41 @@ recent_stroke_directions: list["up"|"down"]    # 最近 N 笔，时间升序
 ## 5. 实现切分与白名单（四 Agent）
 
 ```text
-Agent1 方案（本会话）: playbook + 本文；C-D* 锁死
-Agent2 写码:
-  - 新建 01-功能包-packages/chanlun/（SKILL / quickstart / output-template / shim）
-  - trader_shared/chanlun_run.py + chanlun_render.py（引擎编排与面板；不复制 chan_core）
-  - tests：C-D1…C-D6（合成夹具优先）
-Agent3 查验: 对照本文 C-D* + 四关心点；跑测；列 ❌
+Agent1 方案: playbook + 本文 + §9 对照实锤；C-D* 锁死
+Agent2 写码（优先级）:
+  P0  chan_geometry.build_strokes — 修「距不够跳过 → 同向 break → 整链停摆」
+       + 南网/华工类夹具测 C-D4d/e
+  P0  light_data.resolve_security / NAME_MAP — 指数名不得落成个股（C-D1d）
+  P1  conclusion_block / 中线缠论文案 — 笔链陈旧时禁止「拉升趋势中·看涨」假有
+  P2  薄 Skill 卡 chanlun_run/render — 透出取数/期限/买卖点/当前笔，便于人核
+Agent3 查验: 对照本文 C-D* + §9；跑测；列 ❌
 Agent4 复审: Agent3 PASS 后独立再过一遍
 ```
 
 **可改**：
 
-- 新建：`01-功能包-packages/chanlun/**`
-- 新建：`02-共享模块-shared/trader_shared/chanlun_run.py`、`chanlun_render.py`（命名以落地为准，须在 PR 点名）
-- 新建/改：`02-共享模块-shared/tests/test_chanlun_skill_*.py`（或等价）
-- 文档：本文、playbook、必要时 `AGENTS.md` Skill 速查一行、`BUSINESS.md` 仅增加「专项卡入口」交叉引用（**不改** §2.0 岗位语义）
-
-**可薄改（仅当透出字段缺口）**：
-
-- `chan_core` / 策略包装：只加**派生只读字段**（如 `current_stroke_direction`），禁止改买卖点/成笔判定公式
+- `chan_geometry.py`（`build_strokes` 停摆修复；须仍遵守 `formulas.md` §2.1「取第一个距离合格反向分型」，不得倒回「最极端延伸」吞笔）  
+- `light_data.py`（指数/名称解析；`NAME_MAP` 补指数别名或拒绝歧义）  
+- `conclusion_block.py` / 短中线缠论展示（仅防陈旧笔假叙事；不改威科夫阶段）  
+- 新建：`01-功能包-packages/chanlun/**`、`chanlun_run.py` / `chanlun_render.py`  
+- 新建/改：`tests/test_chanlun_*.py`（含笔链停摆夹具、指数解析）  
+- 文档：本文、playbook
 
 **勿改**：
 
 - `fusion_core` / 出手 / `decision_view` 语义  
 - 威科夫中线定论与 L0–L3 箱体量度  
 - 池分道 / `classify.py`  
-- `formulas.md` 买卖点定义（除非另开算法 handoff）  
+- 把「最极端分型延伸」整段请回（`formulas.md` 已否决）  
 - 在 Skill 包内复制一整份 `chan_core` 引擎
 
-包形态对齐威科夫：`final_chanlun.py` → `trader_shared.chanlun_run.main`；包内 `chanlun_*.py` 为 identity shim。
-
-建议命令（落地后）：
-
-```bash
-python3 01-功能包-packages/chanlun/scripts/final_chanlun.py --target <NAME>
-```
-
-自测（Agent2 补齐路径后）：
+自测（Agent2 落地后）：
 
 ```bash
 export PYTHONPATH=02-共享模块-shared
-python -m pytest 02-共享模块-shared/tests/test_chanlun_skill_card.py -q
+python -m pytest 02-共享模块-shared/tests/test_chan_geometry.py \
+  02-共享模块-shared/tests/test_chanlun_stroke_stall.py \
+  02-共享模块-shared/tests/test_resolve_security_index.py -q
 ```
 
 ---
@@ -227,15 +225,69 @@ python -m pytest 02-共享模块-shared/tests/test_chanlun_skill_card.py -q
 
 ## 7. DoD
 
-- [ ] `chanlun` Skill 包可跑，stdout 结构卡符合 §3  
-- [ ] C-D1a…C-D6 测例绿（或表中每条有对应用例）  
-- [ ] 四关心点在真票或夹具上可人工核对：取数根数、期限标签、买卖点仅引擎、笔方向一致  
-- [ ] 微信红线扫描通过  
+- [ ] **C-D4d/e 绿**：南网/华工类笔链不再假向上；中线不再因陈旧 `拉升段` 喊看涨  
+- [ ] **C-D1d 绿**：上证指数/科创50 不再落到个股 11 元/6 元价位  
+- [ ] C-D1…C-D6 其余测例绿  
+- [ ] 专项卡（若本迭代做）可核对：根数、期限、买卖点、当前笔方向  
 - [ ] 未改 fusion / 威科夫中线定论 / 池分道  
-- [ ] PR 含：法源链接、C-D* 对照清单、Agent3/4 结论、pytest 结果
+- [ ] PR 含：法源、§9 对照、C-D* 清单、查验结论、pytest
 
 ---
 
 ## 8. 一句话
 
-> 缠论专项用自己的笔/段/中枢/买卖点；用户死盯取数、期限、一二三买、笔上下。方法走手递+四 Agent；语义禁止威科夫化。先锁本文再写码。
+> 用户死盯取数、期限、一二三买、笔上下。对照票已打出：指数错解析 + 周线笔链停摆假看涨。先修这两刀，再谈漂亮专项卡；禁止威科夫换皮。
+
+---
+
+## 9. 对照结论（2026-08-02 实跑 · 为何改）
+
+环境：`load_market_snapshot` + `chanlun_strategy` / `chanlun_strategy_midline` + `build_report`；Tushare 未配（不影响腾讯日/周 K）。
+
+### 9.1 取数错标的（关心点 1）
+
+| 输入 | `resolve_security` | 末收盘 | 判断 |
+|------|-------------------|--------|------|
+| 上证指数 | `000001` **SZ**，名仍叫上证指数 | **11.63** | ❌ 实为平安银行量级，非上证综指 |
+| 平安银行 | `000001` SZ | 11.63 | 同码，坐实混淆 |
+| 科创50 | `000050` SZ | 6.47 | ❌ 非 588000 |
+| 南网科技 / 华工科技 | 688248 / 000988 | 41.9 / 95.37 | ✅ 个股 OK |
+| 399006 | 399006 | 3343.96 | ✅ 指数量级正常 |
+
+根因线索：`NAME_MAP` 无指数别名；名称搜索 + `infer_a_share_market("000001")→SZ`；**无价位/品种诚实校验**。
+
+### 9.2 笔链停摆 → 假向上 / 假看涨（关心点 4）
+
+**南网科技 · 周线**
+
+- 末笔：`up` 42.05→**63.58**，合并 K 索引 162–167，日期 **2026-01-23**  
+- 之后分型仍在：底 169 / 顶 171(75.0) / … / 底 **185 (37.8, 2026-07-24)**；现价 **41.9**（相对笔终点约 **-34%**）  
+- 从顶 167 起连续 9 次 `build_strokes` 尝试：皆 `skip reverse dist<4` 后 `same-type break`，**零新笔**  
+- 引擎：`structure_type=盘整`，`trend_label=拉升段`，`format_chanlun_theory_line`→`盘整·中性`  
+- **面板**（`build_report`）：中线 `缠论：拉升趋势中 · 看涨` ← `conclusion_block` 吃陈旧 `拉升段` 放大假有  
+
+**华工科技 · 周线**
+
+- 末笔：`up`→45.0，日期停在 **2025-05-16**；其后 **46** 根合并 K（高点曾 ~187，现价 95）  
+- 同属笔链冻住；中线叙事不可信  
+
+机制（代码）：`chan_geometry.build_strokes` 在「反向分型距不够则继续扫」时，一旦碰到**同向分型就 break 且不成笔**，再 `i+=1` 从下一个分型重试——密分型震荡下会**整段饿死**，旧向上笔成为僵尸当前笔。
+
+### 9.3 一二三买（关心点 3）
+
+- 本批四票引擎 `buy_points`/`sell_points` 多为空；短线南网 UI「暂无买卖点」与引擎一致（未手补）。  
+- **尚不能结案「买卖点算法假无」**：中线笔链停摆会阻断后续段/中枢/背驰链；须 **先修 C-D4d 再重测买卖点**。  
+- 展示层风险：即便 `theory_line` 较中性，`wave_label_mid` 仍可喊「拉升趋势中」——专项卡必须跟引擎笔画，不跟浪型旁枝。
+
+### 9.4 期限（关心点 2）
+
+- 南网/华工周线根数 ≥ `CHANLUN_MIN_BARS`，中线 `timeframe=weekly`（未误走 daily_fallback）✅  
+- `daily_fallback` 标注「（日线）」路径在 `format_chanlun_theory_line` 已存在；本批未触发，夹具测仍要留（C-D2b）。  
+- 短线日 / 中线周 数据源未串根 ✅；**串的是「陈旧周笔驱动的中线看涨文案」**，归 C-D4/展示，不归错周期取数。
+
+### 9.5 优先级（给 Agent2）
+
+1. **P0** 笔链停摆（C-D4d/e）— 用户第四点实锤  
+2. **P0** 指数错解析（C-D1d）— 用户第一点实锤  
+3. **P1** 陈旧 `拉升段`→「拉升趋势中·看涨」闸（展示）  
+4. **P2** 专项结构卡透出字段（无卡也能先修引擎）
