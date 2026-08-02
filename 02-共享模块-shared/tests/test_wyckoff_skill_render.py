@@ -317,7 +317,7 @@ def test_sb1_default_slim_skeleton_no_long_blocks():
     lines = text.splitlines()
     assert lines[:4] == [
         "测试股（600000）｜现价 10.50",
-        "周线：偏多｜SC后反弹，雏形待 ST｜慎做",
+        "周线：偏多｜SC后反弹，雏形 8.00～12.00（待 ST）｜慎做",
         "日线本波：LPS 修复｜箱体 9.50～11.00",
         "入池：建议入池（日线已见 LPS/SOS，周线非偏空）",
     ]
@@ -450,13 +450,25 @@ def test_sb9_failed_slim_resets_next_watch_without_healthy_gap():
     """S-B9/S-B10：failed 且无新强势时，旧底已废并待新寻底。"""
     text = render_wyckoff_slim(_failed_phase_a_plan())
     short_block = text.split("⚡ 日线 · 本波", 1)[1].split("🔮 推演", 1)[0]
-    assert "Phase A failed｜旧底已废｜无箱｜待新寻底" in short_block
-    assert "无箱" in short_block
+    assert "Phase A failed｜旧底已废｜废锚参考 SC 9.50（已废）｜待新寻底" in short_block
+    assert "雏形" not in short_block  # failed 不得健康雏形
+    assert "箱体" not in short_block
     assert "● SC（卖力高潮）9.50" in short_block
     assert "○ AR（自动反弹）" in short_block
     assert "还差" not in text
     assert "链可推进" not in text
     assert "下一盯" not in short_block
+
+
+def test_sb28_overview_writes_proto_prices_and_failed_anchor_ref():
+    """S-B28：总览写出雏形价；failed 写废锚参考，不写健康箱体。"""
+    text = render_wyckoff_slim(_sample_plan())
+    assert "周线：偏多｜SC后反弹，雏形 8.00～12.00（待 ST）｜慎做" in text
+    failed = render_wyckoff_slim(_failed_phase_a_plan())
+    daily = failed.split("⚡ 日线 · 本波", 1)[1].split("🔮 推演", 1)[0]
+    assert "废锚参考 SC 9.50（已废）" in daily
+    assert "雏形 9.50" not in daily
+    assert "箱体 9.50" not in daily
 
 
 def test_sb18_sb23_failed_plus_sos_keeps_full_lights_and_explains():

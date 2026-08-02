@@ -1017,6 +1017,18 @@ def _slim_range_head(view: dict[str, Any], raw: dict[str, Any]) -> str:
     return phrase.split("｜", 1)[0]
 
 
+def _slim_failed_anchor_ref(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    """failed → L0：禁止健康雏形/箱体；只写废锚 SC 低点供对照（不带上沿冒充区间）。"""
+    lo, _hi = _phase_a_bounds(raw)
+    if lo is not None:
+        return f"废锚参考 SC {_fmt_price(lo)}（已废）"
+    px = _event_price_from_sources("SC", view=view, raw=raw)
+    px_s = _fmt_price(px)
+    if px_s:
+        return f"废锚参考 SC {px_s}（已废）"
+    return "无成熟箱"
+
+
 def _slim_weekly_stage_short(view: dict[str, Any], raw: dict[str, Any]) -> str:
     if not view:
         return "周线数据不足"
@@ -1032,11 +1044,15 @@ def _slim_weekly_stage_short(view: dict[str, Any], raw: dict[str, Any]) -> str:
         return "派发未确认"
 
     lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
+    range_head = _slim_range_head(view, raw)
     if {"SC", "AR"}.issubset(lit):
-        if _box_mode(view, raw) == "proto" or _maturity(view, raw) == "L1":
-            return "SC后反弹，雏形待 ST"
-        return f"SC后反弹，{_slim_range_head(view, raw)}"
+        # L1 雏形有价就写进总览，方便对照（非成熟箱体）
+        if "雏形" in range_head or "箱体" in range_head:
+            return f"SC后反弹，{range_head}"
+        return "SC后反弹，雏形待 ST"
     if "SC" in lit:
+        if "雏形" in range_head:
+            return f"SC 已亮，{range_head}"
         return "SC 已亮，待 AR"
     if lit:
         main = next((code for code in ACCUM_CHAIN if code in lit), next(iter(lit)))
@@ -1112,11 +1128,12 @@ def _slim_daily_sentence(view: dict[str, Any], raw: dict[str, Any]) -> str:
     failed = _slim_daily_failed(view, raw)
     lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
     if failed:
+        ref = _slim_failed_anchor_ref(view, raw)
         if "SOS" in lit:
-            return "SOS 强｜旧底已废｜无成熟箱"
+            return f"SOS 强｜旧底已废｜{ref}"
         if "LPS" in lit:
-            return "LPS 修复｜旧底已废｜无成熟箱"
-        return "Phase A failed｜旧底已废｜无箱｜待新寻底"
+            return f"LPS 修复｜旧底已废｜{ref}"
+        return f"Phase A failed｜旧底已废｜{ref}｜待新寻底"
     wave = _slim_daily_wave_short(view, raw)
     full_range = _slim_range_phrase(view, raw)
     range_head = _slim_range_head(view, raw)
