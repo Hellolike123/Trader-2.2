@@ -16,6 +16,14 @@ git config core.hooksPath scripts/git-hooks
 
 hook 已随仓库版本化提交，clone 后需各机执行一次上面这行（git 不自动应用 hooksPath）。
 
+## 环境变量（Python 解释器）
+
+| 变量 | 作用 |
+|---|---|
+| `TRADER_CI_PYTHON` | 覆盖门禁所用 Python。若已设且可执行，脚本**只用它**（不回退）。 |
+
+默认解析顺序：`TRADER_CI_PYTHON`（env，已设且可执行则用之）→ Mac 历史 venv（若该绝对路径存在且可执行）→ `python3` → `python`；都不可用则非零退出并打印明确错误。选定解释器还会做一次 `import sys` 冒烟。云 / Linux / CI 无需手设本机 Mac 路径即可跑门禁。
+
 ## 门禁范围（锁定）
 
 跑 `scripts/run-gate-tests.sh` 里 `TESTS` 数组列出的文件（**离线、无凭证、确定性**）。条数以脚本实际跑出的 pytest 计数为准（约 **300+** / 数秒级；随用例增减会变）。
