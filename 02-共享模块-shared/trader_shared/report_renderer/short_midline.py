@@ -509,9 +509,10 @@ def render_short_midline(r: dict[str, Any]) -> str:
         except Exception:
             pass
 
-    # C-D3：引擎无买卖点时，浪型不得夹带「关注一类买 / 接近一买 / 可低吸」等；
+    # C-D3：浪型文案始终洗掉买/卖点宣称与下单词（引擎点改由 _chan_point_type 注入）；
     # 无引擎背驰时也不得残留污染浪型里的「底/顶背驰」。
-    if not _chan_point_type and _wave_mid:
+    # 有卖点时同样必须洗——不得因 _chan_point_type 非空而跳过清洗。
+    if _wave_mid:
         _wave_mid = _sanitize_chan_display_text(
             _wave_mid, allow_divergence=_engine_has_div
         )

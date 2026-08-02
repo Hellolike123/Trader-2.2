@@ -661,6 +661,32 @@ def test_cd4e_trader_midline_wave_label_demoted():
     assert "看涨" not in chan_line
 
 
+def test_cd3_midline_wave_sanitized_even_with_engine_sell():
+    """C-D3：有引擎卖点时，污染浪型里的买点宣称/下单词仍须剔除。"""
+    r = _report()
+    r["chanlun_midline"] = {
+        "chanlun": {
+            "buy_points": [],
+            "sell_points": [{"type": "一类卖", "price": 50.0}],
+            "divergence": {},
+            "trend_label": "拉升段",
+            "timeframe": "weekly",
+            "strokes": [
+                {"direction": "up", "end_price": 40.0},
+                {"direction": "down", "end_price": 38.0},
+                {"direction": "up", "end_price": 43.0},
+            ],
+        }
+    }
+    r["conclusion"]["wave_label_mid"] = "拉升趋势中 · 关注一类买｜可低吸"
+    out = render_short_midline(r)
+    mid = out.split("🧭 中线", 1)[-1].split("⚡ 短线", 1)[0]
+    chan_line = next(ln for ln in mid.splitlines() if "缠论：" in ln)
+    assert "一类卖" in chan_line or "一卖" in chan_line
+    for forbidden in ("关注一类买", "一类买", "一买", "可低吸", "宜买", "该买了"):
+        assert forbidden not in chan_line
+
+
 def test_short_section_has_daily_phase_line():
     """短线区必有「威科夫：」只读行（与中线点名同构）；禁止「日线阶段：」。"""
     r = _report()
