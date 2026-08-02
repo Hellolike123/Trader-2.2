@@ -176,3 +176,18 @@ def test_cd5_stdout_is_wechat_safe(monkeypatch, capsys, up_view):
     assert "|" not in output
     for forbidden in ("宜买", "可执行", "可低吸", "该买了", "三重共振买"):
         assert forbidden not in output
+
+
+def test_cd4e_tip_leave_demotes_stale_up_stroke():
+    """C-D4e：现价大幅低于末向上笔终点 → 不得再喊向上笔/拉升段。"""
+    stale = _engine_result(["up", "down", "up"])
+    stale["chanlun"]["strokes"][-1]["end_price"] = 187.0
+    stale["chanlun"]["trend_label"] = "拉升段"
+    view = build_chanlun_view(stale, current=95.0)
+    assert view["current_stroke_direction"] == "up"  # 引擎原始末笔仍可核
+    assert view["tip_leave"] == "up_left"
+    text = render_chanlun_card(_plan(view))
+    short = text.split("⏱ 短线（日）", 1)[1].split("⏱ 中线副读", 1)[0]
+    assert "高点已离开·向下未成笔" in short
+    assert "当前笔 向上笔" not in short
+    assert "走势 拉升段" not in short

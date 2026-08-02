@@ -49,7 +49,20 @@ def _fmt_points(points: Any) -> str:
     return "、".join(rendered) if rendered else "未形成"
 
 
+def _tip_leave_label(view: dict[str, Any]) -> str:
+    """C-D4e：笔尖离价降级文案（与 conclusion_block 同源语义）。"""
+    tip = str(view.get("tip_leave") or "")
+    if tip == "up_left":
+        return "高点已离开·向下未成笔"
+    if tip == "down_left":
+        return "低点已离开·向上未成笔"
+    return ""
+
+
 def _fmt_current_direction(view: dict[str, Any]) -> str:
+    demoted = _tip_leave_label(view)
+    if demoted:
+        return demoted
     direction = str(view.get("current_stroke_direction") or "")
     return _DIRECTION_LABEL.get(direction, "未形成")
 
@@ -76,6 +89,9 @@ def _fmt_structure(view: dict[str, Any]) -> str:
 def _fmt_trend(view: dict[str, Any]) -> str:
     if not view.get("data_ok") or view.get("timeframe") == "insufficient":
         return "数据不足"
+    demoted = _tip_leave_label(view)
+    if demoted:
+        return demoted
     return str(view.get("trend_label") or "暂无明确走势")
 
 

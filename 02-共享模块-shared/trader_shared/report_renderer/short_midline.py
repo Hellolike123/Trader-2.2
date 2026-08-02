@@ -30,6 +30,38 @@ def _short_industry_name(name: str) -> str:
     return s
 
 
+# 引擎无买卖点时，浪型/fusion 不得夹带买点与下单词（C-D3）
+_CHAN_POINT_CLAIM_RE = re.compile(
+    r"(?:关注|接近|潜在)?"
+    r"(?:类)?[一二三](?:类)?[买卖]"
+    r"|可低吸|宜买|可执行|该买了|三重共振买"
+)
+_CHAN_DIV_CLAIM_RE = re.compile(r"底背驰|顶背驰")
+
+
+def _sanitize_chan_display_text(text: str, *, allow_divergence: bool = True) -> str:
+    """洗掉无引擎点时的买点宣称与下单词；无引擎背驰时连同背驰词一并洗掉。"""
+    raw = str(text or "").strip()
+    if not raw:
+        return raw
+    claim_re = _CHAN_POINT_CLAIM_RE if allow_divergence else re.compile(
+        _CHAN_POINT_CLAIM_RE.pattern + r"|" + _CHAN_DIV_CLAIM_RE.pattern
+    )
+    chunks: list[str] = []
+    for part in re.split(r"\s*[·｜|]\s*", raw):
+        piece = part.strip()
+        if not piece:
+            continue
+        cleaned = claim_re.sub("", piece).strip(" ·｜|，,")
+        if cleaned and not claim_re.search(cleaned):
+            if cleaned in ("关注", "接近", "潜在", "注意"):
+                continue
+            chunks.append(cleaned)
+        elif cleaned:
+            chunks.append(cleaned)
+    return " · ".join(chunks)
+
+
 def _compact_short_structure_line(line: str) -> str:
     """短线结构行压缩：最多保留「主信号 · 注 · 方向」三段，避免浪型堆叠难扫读。"""
     raw = str(line or "").strip()
@@ -448,9 +480,21 @@ def render_short_midline(r: dict[str, Any]) -> str:
     # 方向/点类型与 resolve_chanlun_primary 同源（禁再手写一套卖买优先级）
     _chan_dir_mid = ""
     _chan_point_type = ""  # 买卖点类型名，如"一类买""类二买"等
+    _engine_has_div = False
+    _mid_strokes: list = []
+    try:
+        from trader_shared.chan_core import unwrap_chan
+
+        _mid_chan = unwrap_chan(r.get("chanlun_midline")) or {}
+        _mid_strokes = [
+            s for s in (_mid_chan.get("strokes") or []) if isinstance(s, dict)
+        ]
+    except Exception:
+        _mid_strokes = []
     if not _insufficient_struct:
         try:
             from trader_shared.chan_core import resolve_chanlun_primary
+
             _prim = resolve_chanlun_primary(r.get("chanlun_midline"))
             _pd = int(_prim.get("direction") or 0)
             if _pd < 0:
@@ -461,8 +505,34 @@ def render_short_midline(r: dict[str, Any]) -> str:
                 _chan_point_type = str(
                     _prim.get("type_raw") or _prim.get("type_short") or ""
                 ).strip()
+            _engine_has_div = _prim.get("status") == "divergence"
         except Exception:
             pass
+
+    # C-D3：引擎无买卖点时，浪型不得夹带「关注一类买 / 接近一买 / 可低吸」等；
+    # 无引擎背驰时也不得残留污染浪型里的「底/顶背驰」。
+    if not _chan_point_type and _wave_mid:
+        _wave_mid = _sanitize_chan_display_text(
+            _wave_mid, allow_divergence=_engine_has_div
+        )
+
+    # C-D4e：中线浪型路径也须接笔尖离价闸（与 conclusion_block / Skill 同源）
+    try:
+        from trader_shared.conclusion_block import _stroke_tip_left_against
+
+        _tip_mid = _stroke_tip_left_against(_mid_strokes, float(current or 0))
+        if _tip_mid == "up_left":
+            _wave_mid = "高点已离开·向下未成笔"
+            _chan_dir_mid = ""
+            _chan_point_type = ""
+            _insufficient_struct = False
+        elif _tip_mid == "down_left":
+            _wave_mid = "低点已离开·向上未成笔"
+            _chan_dir_mid = ""
+            _chan_point_type = ""
+            _insufficient_struct = False
+    except Exception:
+        pass
 
     if _wave_mid:
         if _chan_dir_mid:
@@ -1092,22 +1162,35 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     lines.append("")
     # ── 亮点 / 风险（具体数据驱动，禁模板空话）──
-    _chan_sig = str((fusion_signals.get("chan") or {}).get("reason") or "")
     _ma20_v = _ma_float("ma20")
     _ma5_v = _ma_float("ma5")
 
-    # 亮点：仅偏多/中性结构；卖点/看跌/转弱不得进 ✅
+    # 亮点/风险缠论：只认引擎买卖点（resolve_chanlun_primary）；禁 fusion.reason 手补（C-D3）
     _hl_parts = []
-    _chan_clean = _chan_sig.replace("缠论", "").strip() or _chan_sig if _chan_sig else ""
+    _chan_bear_hl = False
+    _chan_hl_label = ""
+    _chan_risk_label = ""
     try:
-        _chan_dir_hl = int((fusion_signals.get("chan") or {}).get("direction") or 0)
-    except (TypeError, ValueError):
-        _chan_dir_hl = 0
-    _chan_bear_hl = _chan_dir_hl < 0 or any(
-        k in _chan_sig for k in ("卖", "看跌", "顶背驰", "偏空", "减仓")
-    )
-    if _chan_sig and _chan_sig != "无信号" and not _chan_bear_hl:
-        _hl_parts.append(f"缠论{_chan_clean}")
+        from trader_shared.chan_core import resolve_chanlun_primary
+
+        _prim_hl = resolve_chanlun_primary(r.get("chanlun") or r.get("chanlun_daily"))
+        _chan_dir_hl = int(_prim_hl.get("direction") or 0)
+        _chan_type_hl = str(
+            _prim_hl.get("type_short") or _prim_hl.get("type_raw") or ""
+        ).strip()
+        _chan_bear_hl = _chan_dir_hl < 0 or any(
+            k in _chan_type_hl for k in ("卖", "看跌", "顶背驰", "偏空", "减仓")
+        )
+        if _prim_hl.get("status") == "point" and _chan_type_hl:
+            if _chan_bear_hl:
+                _chan_risk_label = _chan_type_hl
+            else:
+                _chan_hl_label = _chan_type_hl
+    except Exception:
+        _chan_hl_label = ""
+        _chan_risk_label = ""
+    if _chan_hl_label:
+        _hl_parts.append(f"缠论{_chan_hl_label}")
     # 亮点阶段：看面板「阶段：」行（含偏空标签）+ midline_bias，勿把偏空主升当亮点
     _stage_disp_hl = str(_stage_line or stage_line or "").strip()
     _mid_bias_hl = str(r.get("midline_bias") or "").strip().lower()
@@ -1144,8 +1227,8 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     # 风险：止损价 + 短线 MA20 压力（不用中线远压力） + 未来待解禁
     _risk_parts = []
-    if _chan_bear_hl and _chan_clean:
-        _risk_parts.append(f"缠论{_chan_clean}")
+    if _chan_bear_hl and _chan_risk_label:
+        _risk_parts.append(f"缠论{_chan_risk_label}")
     if _stage_bear_hl and (_stage_disp_hl or stage_line):
         _risk_parts.append(f"中线阶段{_stage_disp_hl or stage_line}")
     elif stage_line and any(k in stage_line for k in ("转弱", "派发", "衰退")):

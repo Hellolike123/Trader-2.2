@@ -63,10 +63,12 @@ P0 已修笔链/指数。本轮三刀并行：
 | ID | 测 |
 |----|----|
 | C-D3b/c | 引擎 buy_points=[] + fusion reason 含「一类买」→ 短线灯 **无**「一买」 |
+| C-D3b/c/d | 污染 `wave_label_mid` + fusion reason → 中线缠论行与 ✅ 亮点 **无**一类买/可低吸 |
 | C-D3d | render 样例无下单词 |
 | C-D1a | bars 根数不足 → insufficient + 不足文案 |
 | C-D2b | midline daily_fallback → 最终字符串含「日线」 |
 | C-D4a/b | 夹具末笔 up/down → 卡文案方向一致 |
+| C-D4e | Skill：末向上笔 tip 高、现价反向离开 ≥15% → 卡文案「高点已离开·向下未成笔」，禁「当前笔 向上笔／走势 拉升段」 |
 | C-D5 | Skill stdout 无 `#`/`**`/`\|` 表格 |
 
 ---
@@ -75,11 +77,13 @@ P0 已修笔链/指数。本轮三刀并行：
 
 - [x] Agent-Buy/Data/Skill 各自落地并测绿  
 - [x] Agent-Check 首轮抓到 cards.py + short_midline 异常兜底漏网 → 父 Agent 已修  
+- [x] Agent-Check 二轮抓到：中线 wave/亮点仍可读 fusion；Skill 未接 tip-leave（C-D4e）→ 父 Agent 已修  
 - [x] 未改 fusion 出手 / 威科夫定论 / 池分道  
-- [ ] PR 含法源、对照清单、查结论、pytest 
+- [ ] Agent-Check 三轮全表复审通过后再合 PR  
+- [ ] PR 含法源、对照清单、查结论、pytest  
 
 ---
 
 ## 5. 一句话
 
-> 三路并行清 C-D 余债：禁手补买点、不足诚实、专项卡透笔；查完再合。
+> 三路并行清 C-D 余债：禁手补买点、不足诚实、专项卡透笔；**查完再合**（先修面板污染 + Skill tip-leave）。

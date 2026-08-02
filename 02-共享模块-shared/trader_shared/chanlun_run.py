@@ -20,8 +20,12 @@ def _unwrap(result: Any) -> dict[str, Any]:
     return nested if isinstance(nested, dict) else result
 
 
-def build_chanlun_view(result: Any) -> dict[str, Any]:
-    """从引擎结果提取可核字段；不在展示层重算结构。"""
+def build_chanlun_view(result: Any, *, current: float | None = None) -> dict[str, Any]:
+    """从引擎结果提取可核字段；不在展示层重算结构。
+
+    C-D4e：现价相对末笔终点反向大幅离开时，写入 tip_leave，供渲染降级文案
+    （不在此推进笔几何，只禁止旧笔「拉升/当前向上」假叙事）。
+    """
     chan = _unwrap(result)
     strokes = [s for s in (chan.get("strokes") or []) if isinstance(s, dict)]
     directions = [
@@ -34,6 +38,20 @@ def build_chanlun_view(result: Any) -> dict[str, Any]:
     zones = [z for z in (chan.get("zones") or []) if isinstance(z, dict)]
     segments = [s for s in (chan.get("segments") or []) if isinstance(s, dict)]
     timeframe = str(chan.get("timeframe") or "insufficient")
+    current_dir = (
+        str(strokes[-1].get("direction"))
+        if strokes and strokes[-1].get("direction") in ("up", "down")
+        else ""
+    )
+
+    tip_leave = ""
+    try:
+        from trader_shared.conclusion_block import _stroke_tip_left_against
+
+        price = float(current) if current is not None else 0.0
+        tip_leave = _stroke_tip_left_against(strokes, price) or ""
+    except Exception:
+        tip_leave = ""
 
     return {
         "timeframe": timeframe,
@@ -41,12 +59,9 @@ def build_chanlun_view(result: Any) -> dict[str, Any]:
         "structure_type": str(chan.get("structure_type") or ""),
         "trend_label": str(chan.get("trend_label") or ""),
         "stroke_count": len(strokes),
-        "current_stroke_direction": (
-            str(strokes[-1].get("direction"))
-            if strokes and strokes[-1].get("direction") in ("up", "down")
-            else ""
-        ),
+        "current_stroke_direction": current_dir,
         "recent_stroke_directions": directions[-5:],
+        "tip_leave": tip_leave,
         "zones_count": len(zones),
         "segments_count": len(segments),
         # 买卖点只复制引擎数组；不读 fusion reason，也不从汇总文案反推。
@@ -210,8 +225,8 @@ def build_chanlun_plan(target: str) -> dict[str, Any]:
         "data_status": str(getattr(snapshot, "data_status", "") or ""),
         "daily_analysis": _unwrap(short_result),
         "midline_analysis": _unwrap(midline_result),
-        "short_view": build_chanlun_view(short_result),
-        "midline_view": build_chanlun_view(midline_result),
+        "short_view": build_chanlun_view(short_result, current=current),
+        "midline_view": build_chanlun_view(midline_result, current=current),
         "error": None if data_ok else data_note,
     }
 
