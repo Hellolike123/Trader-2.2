@@ -480,63 +480,144 @@ def _check_macd_for_2nd_sell(
 
     return True
 
-def _zone_last_end_index(zone: dict) -> int:
-    """取中枢末端笔的 end_index，用于「离开段」约束判断。
+def _item_raw_index_span(item: dict) -> tuple[int, int] | None:
+    """读取成员 start/end_index 原始跨度（尚未映到 bar）。"""
+    si = item.get("start_index")
+    ei = item.get("end_index")
+    if si is None or ei is None:
+        return None
+    try:
+        a, b = int(si), int(ei)
+    except (TypeError, ValueError):
+        return None
+    if a < 0 or b < 0:
+        return None
+    return (a, b) if a <= b else (b, a)
+
+
+def _zone_member_items(zone: dict) -> list[dict]:
+    """合并中枢走 members；原始中枢顶层带 strokes。"""
+    items: list[dict] = []
+    members = zone.get("members") or [zone]
+    for m in members:
+        for s in m.get("strokes", []):
+            if isinstance(s, dict):
+                items.append(s)
+    return items
+
+
+def _zone_indices_are_stroke_ordinals(zone: dict, strokes: list[dict] | None) -> bool:
+    """段级中枢成员索引为笔序；笔级中枢索引已是 bar（对齐 ``_last_pivot_anchor_bar``）。"""
+    if not strokes:
+        return False
+    idxs: list[int] = []
+    for item in _zone_member_items(zone):
+        span = _item_raw_index_span(item)
+        if span is None:
+            continue
+        idxs.extend(span)
+    if not idxs:
+        return False
+    return max(idxs) < len(strokes)
+
+
+def _map_stroke_ordinal_span_to_bar(
+    lo: int,
+    hi: int,
+    strokes: list[dict],
+) -> tuple[int, int] | None:
+    """笔序 [lo, hi] → bar 起止（取覆盖笔的 start/end_index 极值）。"""
+    if lo < 0 or hi < 0 or not strokes:
+        return None
+    hi = min(hi, len(strokes) - 1)
+    lo = min(lo, hi)
+    bars: list[int] = []
+    for i in range(lo, hi + 1):
+        s = strokes[i]
+        for key in ("start_index", "end_index"):
+            v = s.get(key)
+            if v is None:
+                continue
+            try:
+                bars.append(int(v))
+            except (TypeError, ValueError):
+                continue
+    if not bars:
+        return None
+    return min(bars), max(bars)
+
+
+def _item_bar_span(
+    item: dict,
+    strokes: list[dict] | None = None,
+    *,
+    as_segment: bool = False,
+) -> tuple[int, int] | None:
+    """笔/段索引 → bar 跨度。
+
+    ``as_segment=True``（或段级中枢成员）时经 strokes 映到 bar；
+    笔级则索引已是 bar，直接用。法源：formulas.md §9.1；range-diff C-DIFF-2。
+    """
+    span = _item_raw_index_span(item)
+    if span is None:
+        return None
+    lo, hi = span
+    if as_segment and strokes and hi < len(strokes):
+        return _map_stroke_ordinal_span_to_bar(lo, hi, strokes)
+    return lo, hi
+
+
+def _zone_last_end_index(zone: dict, strokes: list[dict] | None = None) -> int:
+    """取中枢末端在 **K 线（bar）** 坐标系下的 end 索引，用于离开段约束。
 
     兼容两种中枢结构：
     - 合并中枢（build_zones merge=True，默认）：顶层无 strokes，末端落在 members 的最后一笔；
     - 原始滑动窗口中枢（merge=False）：顶层直接带 strokes。
-    返回所有成员笔中最大的 end_index；无任何有效笔返回 -1。
+    段级中枢成员 ``start_index/end_index`` 为笔序，须经 ``strokes`` 映到 bar
+   （范式对齐 ``_last_pivot_anchor_bar``）；笔级中枢索引已是 bar。
+    无任何有效成员返回 -1。
 
     修复 D4：旧实现直接读 zone.get("strokes")，但默认 merge=True 产出的合并中枢
     顶层没有 strokes 字段，导致 _last_zone_end 恒为 -1，"背驰须发生在离开段"
     的约束被静默禁用，可能产出假一类买卖。
     """
+    as_seg = _zone_indices_are_stroke_ordinals(zone, strokes)
     candidates: list[int] = []
-    members = zone.get("members") or [zone]
-    for m in members:
-        for s in m.get("strokes", []):
-            if isinstance(s, dict):
-                e = s.get("end_index", -1)
-                if e >= 0:
-                    candidates.append(e)
+    for item in _zone_member_items(zone):
+        span = _item_bar_span(item, strokes, as_segment=as_seg)
+        if span is not None:
+            candidates.append(span[1])
     return max(candidates) if candidates else -1
 
 
-def _zone_first_start_index(zone: dict) -> int:
-    """取中枢首端笔/段的 start_index（与 `_zone_last_end_index` 对称）。
+def _zone_first_start_index(zone: dict, strokes: list[dict] | None = None) -> int:
+    """取中枢首端在 **bar** 坐标系下的 start_index（与 `_zone_last_end_index` 对称）。
 
-    合并中枢走 members；原始中枢顶层带 strokes。无有效索引返回 -1。
-    用于 formulas.md §9.1/§9.2 连接段时间窗：`(prev_end, curr_start)`。
+    合并中枢走 members；原始中枢顶层带 strokes。段级须映笔序→bar。
+    无有效索引返回 -1。用于 formulas.md §9.1/§9.2 连接段时间窗：`(prev_end, curr_start)`。
     """
+    as_seg = _zone_indices_are_stroke_ordinals(zone, strokes)
     candidates: list[int] = []
-    members = zone.get("members") or [zone]
-    for m in members:
-        for s in m.get("strokes", []):
-            if isinstance(s, dict):
-                si = s.get("start_index")
-                if si is None:
-                    continue
-                try:
-                    v = int(si)
-                except (TypeError, ValueError):
-                    continue
-                if v >= 0:
-                    candidates.append(v)
+    for item in _zone_member_items(zone):
+        span = _item_bar_span(item, strokes, as_segment=as_seg)
+        if span is not None:
+            candidates.append(span[0])
     return min(candidates) if candidates else -1
 
 
-def _item_indices_in_open_interval(item: dict, prev_end: int, curr_start: int) -> bool:
-    """笔/段的 start/end_index 是否整段落在开区间 (prev_end, curr_start) 内。"""
-    si = item.get("start_index")
-    ei = item.get("end_index")
-    if si is None or ei is None:
+def _item_indices_in_open_interval(
+    item: dict,
+    prev_end: int,
+    curr_start: int,
+    strokes: list[dict] | None = None,
+    *,
+    as_segment: bool = False,
+) -> bool:
+    """笔/段在 bar 坐标系下是否整段落在开区间 (prev_end, curr_start) 内。"""
+    span = _item_bar_span(item, strokes, as_segment=as_segment)
+    if span is None:
         return False
-    try:
-        a, b = int(si), int(ei)
-    except (TypeError, ValueError):
-        return False
-    lo, hi = (a, b) if a <= b else (b, a)
+    lo, hi = span
     return prev_end < lo and hi < curr_start
 
 
@@ -550,17 +631,17 @@ def _connector_is_non_reverse(
     """连接段是否「非反向走势」（假趋势拓扑，formulas.md §9.1 / §9.2 / §9.4）。
 
     操作化（仅由「即连接段自身不是反向走势」等价推出，不发明幅度阈值）：
-      - 时间窗：`(_zone_last_end_index(prev), _zone_first_start_index(curr))` 开区间
+      - 时间窗：`(_zone_last_end_index(prev), _zone_first_start_index(curr))` 开区间（**bar** 序）
       - 索引不可解析或窗口非法 → False（无法证明假趋势，不降级；兼容无 member 索引的裸区单测）
-      - 优先收集窗内 segments，若无则 strokes；仍无 → False（保守）
+      - 优先收集窗内 segments（段索引映 bar），若无则 strokes；仍无 → False（保守）
       - reverse = down if pair_dir==up else up
       - 窗内无一笔/段 direction==reverse → True（连接段非反向 → 假趋势）
       - ≥1 反向项 → False（合格连接）
     """
     if pair_dir not in ("up", "down"):
         return False
-    prev_end = _zone_last_end_index(prev_zone)
-    curr_start = _zone_first_start_index(curr_zone)
+    prev_end = _zone_last_end_index(prev_zone, strokes)
+    curr_start = _zone_first_start_index(curr_zone, strokes)
     if prev_end < 0 or curr_start < 0 or prev_end >= curr_start:
         return False
 
@@ -568,12 +649,18 @@ def _connector_is_non_reverse(
     if segments:
         connector = [
             s for s in segments
-            if isinstance(s, dict) and _item_indices_in_open_interval(s, prev_end, curr_start)
+            if isinstance(s, dict)
+            and _item_indices_in_open_interval(
+                s, prev_end, curr_start, strokes, as_segment=True
+            )
         ]
     if not connector and strokes:
         connector = [
             s for s in strokes
-            if isinstance(s, dict) and _item_indices_in_open_interval(s, prev_end, curr_start)
+            if isinstance(s, dict)
+            and _item_indices_in_open_interval(
+                s, prev_end, curr_start, strokes, as_segment=False
+            )
         ]
     if not connector:
         return False
@@ -636,9 +723,16 @@ def _strict_up_trend_zones(
     return True
 
 
-def _stroke_leaves_after_zone(stroke: dict, zone: dict) -> bool:
-    """笔是否从中枢之后离开（无 index 时放行，兼容手工 stroke 单测）。"""
-    z_end = _zone_last_end_index(zone)
+def _stroke_leaves_after_zone(
+    stroke: dict,
+    zone: dict,
+    strokes: list[dict] | None = None,
+) -> bool:
+    """笔是否从中枢之后离开（无 index 时放行，兼容手工 stroke 单测）。
+
+    比较在 **bar** 坐标系：段级中枢 zone_end 经 strokes 映到 bar 后再比。
+    """
+    z_end = _zone_last_end_index(zone, strokes)
     si = stroke.get("start_index")
     if si is None or z_end < 0:
         return True
@@ -662,7 +756,12 @@ def _with_anchor(point: dict[str, Any], stroke: dict | None) -> dict[str, Any]:
     return point
 
 
-def _stroke_leaves_zone(stroke: dict, zone: dict, direction: str) -> bool:
+def _stroke_leaves_zone(
+    stroke: dict,
+    zone: dict,
+    direction: str,
+    strokes: list[dict] | None = None,
+) -> bool:
     """离开段须同时满足：时间在中枢之后 + 价格穿出中枢。
 
     仅「start_index > zone_end」会把远高于/低于中枢的后续笔误判为离开段
@@ -670,8 +769,9 @@ def _stroke_leaves_zone(stroke: dict, zone: dict, direction: str) -> bool:
     - down：end_price < zh_bottom（破 ZD）
     - up：end_price > zh_top（破 ZG）
     缺价位字段时回退为时间离开（兼容残缺单测）。
+    段级中枢时间比较须 bar 序（见 ``_zone_last_end_index``）。
     """
-    if not _stroke_leaves_after_zone(stroke, zone):
+    if not _stroke_leaves_after_zone(stroke, zone, strokes):
         return False
     try:
         end_price = float(stroke["end_price"])
@@ -681,7 +781,7 @@ def _stroke_leaves_zone(stroke: dict, zone: dict, direction: str) -> bool:
             return end_price > float(zone["zh_top"])
     except (TypeError, ValueError, KeyError):
         return True
-    return True
+    return False
 
 
 def _historical_type1_buy_ok(
@@ -701,7 +801,7 @@ def _historical_type1_buy_ok(
     ):
         return False
     first = down_strokes[-2]
-    if not _stroke_leaves_zone(first, valid_zones[-1], "down"):
+    if not _stroke_leaves_zone(first, valid_zones[-1], "down", strokes):
         return False
     if len(down_strokes) >= 3:
         prior = down_strokes[-3]
@@ -731,7 +831,7 @@ def _historical_type1_sell_ok(
     ):
         return False
     first = up_strokes[-2]
-    if not _stroke_leaves_zone(first, valid_zones[-1], "up"):
+    if not _stroke_leaves_zone(first, valid_zones[-1], "up", strokes):
         return False
     if len(up_strokes) >= 3:
         prior = up_strokes[-3]
@@ -766,10 +866,11 @@ def _bc_stroke_pair(
       - c：中枢之后（start_index > zone_end）同向笔的末笔
       - b：中枢结束前（end_index <= zone_end）同向笔的最近一笔
       - 缺 index / 缺 b 或 c → (None, None)
+    zone_end 为 **bar** 索引（段级中枢成员笔序经 strokes 映射）。
     """
     if not strokes or not isinstance(zone, dict):
         return None, None
-    z_end = _zone_last_end_index(zone)
+    z_end = _zone_last_end_index(zone, strokes)
     if z_end < 0:
         return None, None
 
@@ -908,7 +1009,7 @@ def detect_buy_points(
         if prev_down is not None and curr_down is not None:
             price_new_low = curr_down["end_price"] <= prev_down["end_price"]
             last_zone = valid_zones[-1]
-            if price_new_low and _stroke_leaves_zone(curr_down, last_zone, "down"):
+            if price_new_low and _stroke_leaves_zone(curr_down, last_zone, "down", strokes):
                 area_prev = _stroke_macd_area(bars, prev_down, "neg")
                 area_curr = _stroke_macd_area(bars, curr_down, "neg")
                 _is_strict_trend = force_kind == "trend"
@@ -1116,7 +1217,7 @@ def detect_sell_points(
         if prev_up is not None and curr_up is not None:
             price_new_high = curr_up["end_price"] >= prev_up["end_price"]
             last_zone = valid_zones[-1]
-            if price_new_high and _stroke_leaves_zone(curr_up, last_zone, "up"):
+            if price_new_high and _stroke_leaves_zone(curr_up, last_zone, "up", strokes):
                 area_prev = _stroke_macd_area(bars, prev_up, "pos")
                 area_curr = _stroke_macd_area(bars, curr_up, "pos")
                 _is_strict_trend = force_kind == "trend"

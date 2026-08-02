@@ -772,11 +772,27 @@ def _merge_zones(raw_zones: list[dict], gap_pct: float) -> list[dict]:
             })
     return merged
 
+def _item_extreme_high_low(item: dict) -> tuple[float, float]:
+    """取笔/段高低：优先 finite ``high``/``low``，否则回退端点价。
+
+    法源：formulas.md §4.1 / §9.1；range-diff-fixes C-DIFF-1。
+    段的 ``high``/``low`` 为运行极值，可与端点价不同；笔通常无独立极值字段。
+    """
+    hi = to_float(item.get("high"))
+    lo = to_float(item.get("low"))
+    if hi is not None and lo is not None and math.isfinite(hi) and math.isfinite(lo):
+        return float(hi), float(lo)
+    sp = float(item["start_price"])
+    ep = float(item["end_price"])
+    return max(sp, ep), min(sp, ep)
+
+
 def build_zones(items: list[dict], level: str = "segment", merge: bool = True) -> list[dict]:
     """构建中枢序列。
 
     当 level=="segment" 且 items 含 start_index/end_index 字段时，用 3 段线段构建中枢；
     否则用旧逻辑（3 笔构建中枢）。
+    每段/笔高低优先取 finite ``high``/``low``，缺省回退端点价（ZG=min(高) ZD=max(低)）。
     merge=True（且 CHAN_ZONE_MERGE_ENABLED）时，将**价格重叠**的滑动窗口中枢
     合并为 consolidated pivot（P0：纯 gap 不再合并），减少中枢数量膨胀。
     """
@@ -790,8 +806,9 @@ def build_zones(items: list[dict], level: str = "segment", merge: bool = True) -
         highs: list[float] = []
         lows: list[float] = []
         for s in group:
-            highs.append(max(s["start_price"], s["end_price"]))
-            lows.append(min(s["start_price"], s["end_price"]))
+            h, l = _item_extreme_high_low(s)
+            highs.append(h)
+            lows.append(l)
 
         zh_top = min(highs)
         zh_bottom = max(lows)

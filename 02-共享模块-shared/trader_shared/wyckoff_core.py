@@ -1691,7 +1691,12 @@ def _midline_meaning(code: str, cn_name: str, note: str, direction: int) -> str:
 
 
 def _phase_a_box_bounds(wyk: dict[str, Any]) -> tuple[float | None, float | None]:
-    """Phase A 箱体下沿/上沿：优先 sc_low/ar_high（顶层再 phase_a_range），再 tr_lower/tr_upper。"""
+    """Phase A 箱体下沿/上沿：只认事件种子（SC/ST 低 + AR 高）。
+
+    法源：``wyckoff-tr-maturity-l0l3-handoff.md`` §1.1 / §2.3；``range-diff-fixes`` W-DIFF-1。
+    下沿 = ``sc_low``（可被 ``st_sc_low`` / ``sc_low_refined`` 压低）；上沿 = ``ar_high``。
+    **禁止**用分位 ``tr_lower`` / ``tr_upper`` 冒充雏形或成熟箱边界。
+    """
     pa = wyk.get("phase_a_range") if isinstance(wyk.get("phase_a_range"), dict) else {}
 
     def _num(keys: tuple[str, ...], sources: tuple[dict, ...]) -> float | None:
@@ -1708,17 +1713,14 @@ def _phase_a_box_bounds(wyk: dict[str, Any]) -> tuple[float | None, float | None
 
     sources = (wyk, pa)
     lo = _num(("sc_low",), sources)
-    if lo is None:
-        lo = _num(("tr_lower",), sources)
     # 成熟箱 / 雏形下沿：可被成功 ST 或 sc_low_refined 压低（不覆盖原 sc_low 字段）
     st_lo = _num(("st_sc_low", "sc_low_refined", "secondary_test_sc_low"), sources)
     if lo is not None and st_lo is not None:
         lo = min(lo, st_lo)
     elif lo is None:
         lo = st_lo
+    # 上沿只认 AR 种子；无 ar_high → hi=None（短语走「上沿未出」），禁止 tr_upper
     hi = _num(("ar_high",), sources)
-    if hi is None:
-        hi = _num(("tr_upper",), sources)
     if lo is not None and hi is not None and lo >= hi:
         return None, None
     return lo, hi

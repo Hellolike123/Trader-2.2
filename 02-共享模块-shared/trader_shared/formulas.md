@@ -81,6 +81,8 @@ raw bars
 
 **§4.1 定义**：连续 3 段（线段或笔）重叠区间 = 中枢。`zh_top=min(highs)`，
 `zh_bottom=max(lows)`，`valid = zh_top > zh_bottom`。
+实现取每段/笔的 **finite `high`/`low` 极值字段**；无则回退 `max/min(start_price, end_price)`
+（段运行极值可纠偏端点；笔通常端点即极值）。见 `chan_geometry.build_zones` / `_item_extreme_high_low`。
 
 **§4.2 合并**：`CHAN_ZONE_MERGE_ENABLED=True`（默认）时，仅当两中枢**价格真正重叠**
 （`zh_top > last.bottom and zh_bottom < last.top`）才合并为 consolidated pivot，
@@ -220,7 +222,11 @@ raw bars
 ### §9.1 中枢（原典定义）
 - 某**固定级别**上，至少 **3 段（次级别走势类型）** 间产生**价格重叠**，构成该级别一个中枢。
 - 中枢区间 `ZG=min(三段高点)`、`ZD=max(三段低点)`；有效中枢须 `ZG > ZD`。
+  实现高低取段/笔 `high`/`low`（无则端点价），同 §4.1。
 - 两个以上中枢的**连接段**必须是**反向走势**（由反向线段/次级别走势隔开），否则不能算「两个中枢」。
+- **离开段 / 连接段时间比较用 K 线（bar）索引**；段级中枢成员的 `start_index`/`end_index` 为笔序，
+  须经 strokes 映到 bar（范式对齐 `_last_pivot_anchor_bar`；实现 `_zone_last_end_index` /
+  `_zone_first_start_index` / `_stroke_leaves_after_zone` / `_bc_stroke_pair`）。
 
 ### §9.2 走势类型（原典二分）
 - **盘整（a+A）**：只有一个该级别中枢，或虽有多次重叠但合并后为一个中枢。

@@ -253,6 +253,50 @@ class TestBuildZones:
         result = build_zones(strokes)
         assert len(result) == 0
 
+    def test_c_diff1_segment_high_low_beats_endpoints(self):
+        """C-DIFF-1 / M-R2：段 high/low ≠ 端点 → ZG/ZD = min(highs)/max(lows)。"""
+        # 端点价互不重叠（纯端点造不出中枢）；运行极值重叠 → 合法中枢
+        segs = [
+            {
+                "direction": "up",
+                "start_price": 10.0,
+                "end_price": 20.0,
+                "high": 36.0,
+                "low": 10.0,
+            },
+            {
+                "direction": "down",
+                "start_price": 35.0,
+                "end_price": 30.0,
+                "high": 35.0,
+                "low": 28.0,
+            },
+            {
+                "direction": "up",
+                "start_price": 30.0,
+                "end_price": 40.0,
+                "high": 40.0,
+                "low": 29.0,
+            },
+        ]
+        endpoint_highs = [max(s["start_price"], s["end_price"]) for s in segs]
+        endpoint_lows = [min(s["start_price"], s["end_price"]) for s in segs]
+        endpoint_zg = min(endpoint_highs)
+        endpoint_zd = max(endpoint_lows)
+        assert endpoint_zg <= endpoint_zd  # 纯端点无效
+        assert build_zones(
+            [{k: v for k, v in s.items() if k not in ("high", "low")} for s in segs],
+            level="segment",
+            merge=False,
+        ) == []
+
+        result = build_zones(segs, level="segment", merge=False)
+        assert len(result) == 1
+        assert result[0]["zh_top"] == min(36.0, 35.0, 40.0)  # 35
+        assert result[0]["zh_bottom"] == max(10.0, 28.0, 29.0)  # 29
+        assert (result[0]["zh_top"], result[0]["zh_bottom"]) != (endpoint_zg, endpoint_zd)
+        assert result[0]["zh_top"] > result[0]["zh_bottom"]
+
 
 class TestDetectBuyPoints:
     def _make_bars_with_neg_areas(self, len_prev=5, len_curr=5, area_prev=-10.0, area_curr=-3.0):
@@ -723,6 +767,49 @@ class TestBcStrokePairStrict:
         b, c = _bc_stroke_pair(strokes, zone, "down")
         assert b is strokes[2]
         assert c is strokes[4]
+
+    def test_c_diff2_segment_zone_maps_to_bar_for_leaves_and_bc(self):
+        """C-DIFF-2 / M-R4：段中枢成员笔序映 bar；区内笔 leaves_after=False；strict b/c 可解析。"""
+        from trader_shared.chan_structure import (
+            _bc_stroke_pair,
+            _stroke_leaves_after_zone,
+            _zone_last_end_index,
+        )
+
+        # 6 笔；段中枢由笔序 1..3 构成（bar 覆盖 10..39）
+        strokes = [
+            {"direction": "up", "end_price": 12.0, "start_index": 0, "end_index": 9},
+            {"direction": "down", "end_price": 10.0, "start_index": 10, "end_index": 19},
+            {"direction": "up", "end_price": 13.0, "start_index": 20, "end_index": 29},
+            {"direction": "down", "end_price": 11.0, "start_index": 30, "end_index": 39},
+            {"direction": "up", "end_price": 12.5, "start_index": 40, "end_index": 49},
+            {"direction": "down", "end_price": 9.0, "start_index": 50, "end_index": 59},  # leave c
+        ]
+        # 段成员：笔序（非整段 bar）
+        seg_zone = {
+            "valid": True,
+            "zh_top": 12.5,
+            "zh_bottom": 10.5,
+            "strokes": [
+                {"start_index": 1, "end_index": 2, "start_price": 12.0, "end_price": 10.0},
+                {"start_index": 2, "end_index": 3, "start_price": 10.0, "end_price": 13.0},
+                {"start_index": 3, "end_index": 3, "start_price": 13.0, "end_price": 11.0},
+            ],
+        }
+        # 未映 bar 时 zone_end 会是笔序 3；映 bar 后应为 39
+        assert _zone_last_end_index(seg_zone) == 3  # 无 strokes → 原始笔序
+        assert _zone_last_end_index(seg_zone, strokes) == 39
+
+        # 区内笔（bar 10..39）不得判为离开
+        for s in strokes[1:4]:
+            assert _stroke_leaves_after_zone(s, seg_zone, strokes) is False
+        # 区后笔才离开
+        assert _stroke_leaves_after_zone(strokes[5], seg_zone, strokes) is True
+
+        b, c = _bc_stroke_pair(strokes, seg_zone, "down")
+        assert b is not None and c is not None
+        assert b is strokes[3]  # 区末前最近 down（end_index=39 <= 39）
+        assert c is strokes[5]  # 区后 down
 
     def test_strict_no_pair_no_divergence(self):
         """strict 且无法解析 b/c → 不报笔级底背驰，也不走峰谷。"""
