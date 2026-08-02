@@ -574,7 +574,7 @@ def _zone_last_end_index(zone: dict, strokes: list[dict] | None = None) -> int:
     - 合并中枢（build_zones merge=True，默认）：顶层无 strokes，末端落在 members 的最后一笔；
     - 原始滑动窗口中枢（merge=False）：顶层直接带 strokes。
     段级中枢成员 ``start_index/end_index`` 为笔序，须经 ``strokes`` 映到 bar
-   （范式对齐 ``_last_pivot_anchor_bar``）；笔级中枢索引已是 bar。
+    （范式对齐 ``_last_pivot_anchor_bar``）；笔级中枢索引已是 bar。
     无任何有效成员返回 -1。
 
     修复 D4：旧实现直接读 zone.get("strokes")，但默认 merge=True 产出的合并中枢
