@@ -1,6 +1,6 @@
 # 缠论类一/类二观察档展示 — Agent Handoff
 
-> **状态**: active（2026-08-02）  
+> **状态**: done（2026-08-02；写/查双 Agent PASS）  
 > **轨道**: 与「真池/样本干跑」并行的缠论下一刀（用户口令：1 与 2 分开、双 Agent、同时做）  
 > **母法源**: `chanlun-skill-deep-card-handoff.md` §2.3「展示分层」；`chanlun-skill-playbook.md` §0 关心点 3  
 > **产品裁决**: **只改展示分层文案**；不改买卖点检测、不改 fusion/出手/威科夫定论/池分道。
