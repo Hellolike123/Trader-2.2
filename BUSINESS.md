@@ -189,18 +189,20 @@
 
 ### 2.7 Fusion 输入路径（Arch C）
 
-短线三席（缠/动量/VPF）**生产默认 cards**（意见卡 → `fusion_card_signals`；不足则 **warning 后**回退 classic）。
+短线三席（缠/动量/VPF）**一律 cards**（意见卡 → `fusion_card_signals`）。  
+适配失败 → **中性占位**（`fusion_input_path=cards_failed`），**禁止**回退 classic。
 
 | `FUSION_FROM_CARDS` | 行为 |
 |---------------------|------|
-| 缺省 / `cards` / `true` / `1` | **默认**：三席优先意见卡；失败打 warning 再 classic |
-| `classic` / `false` / `0` | deprecated（仅对照）。实现上常先走 raw→现建卡→`fusion_card_signals`（`fusion_input_path=classic_via_cards`）；真 classic mappers 仅作该路径失败时的回退 |
-| `compare` / `dual` | 两路都算；主结果用 cards；写入 `fusion_compare` 供对账 |
+| 缺省 / `cards` / `true` / `1` / `on` / `auto` | **生产唯一路径**：三席优先意见卡；失败 → 中性占位（`cards_failed`） |
+| `classic` / `false` / `0` / `off` / `compare` / `both` / `dual` | **已退役**：发 `DeprecationWarning` 后仍走 cards（无 classic mapper / 无 `fusion_compare`） |
 
-**生产默认仍是 cards**；勿把 `classic_via_cards` 当成生产主路径。  
-报告路径仍会预产 `analysis_cards`（策略 📐 / ensure 用），与 fusion 默认输入解耦。  
+`fusion_input_path` 枚举：`cards` \| `cards_failed`。
+
+报告路径仍会预产 `analysis_cards`（策略 📐 / ensure 用），与 fusion 输入解耦。  
 实现：`fusion_core._fusion_input_mode` + `analysis/fusion_card_signals.py` + `merge_decisions(..., analysis_cards=...)`。  
-边界与 classic/compare 回退对账：`docs/designs/analysis-strategy-boundaries.md` §5。
+classic mappers 已归档：`trader_shared/_deprecated/fusion_classic_mappers.py`。  
+边界：`docs/designs/analysis-strategy-boundaries.md` §5。
 
 `FUSION_OVERRIDE_ENABLED` **默认 false**：融合分不覆盖 `theory_status`；出手听 `decision_view`。  
 `decision_view` 策略亮条件：entry `executable=True`（`plan` 不算可新开）。

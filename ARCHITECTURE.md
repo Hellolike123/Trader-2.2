@@ -1,10 +1,10 @@
 # ARCHITECTURE.md — Trader 系统架构
 
-> **最后更新**：2026-08-01 | **基于**：`main` @ `b7163be`（#15–#21 合同/编排加固后）  
+> **最后更新**：2026-08-02 | **基于**：`cursor/arch-cleanup-complete-1c6b`（#53 架构收口）  
 > **产品方向法源**：[`docs/designs/resonance-and-orchestration.md`](docs/designs/resonance-and-orchestration.md)  
 > **层边界**：[`docs/designs/analysis-strategy-boundaries.md`](docs/designs/analysis-strategy-boundaries.md)  
 > **改代码地图**：[`AGENTS.md`](AGENTS.md)「改代码去哪」（**优先于本文行数表**；行数仅供扫图）  
-> **业务合同**：[`BUSINESS.md`](BUSINESS.md) §2.0 双轨 / §4.0 阶段三字段  
+> **业务合同**：[`BUSINESS.md`](BUSINESS.md) §2.0 双轨 / §2.7 Fusion / §4.0 阶段三字段  
 
 冲突时：`BUSINESS.md` + resonance 法源 + `trader_shared/` 实现 > 本文。旧文「fusion 当总司令」一律过时。
 
@@ -30,10 +30,10 @@ Fusion **仅仪表**（`product_role=instrument`）；新开铁律：
 │ 共振/策略│ resonance(pullback_probe) · strategy packs · 六闸
 │ 决策/纪律│ mistery_gate / chan_discipline → merge（只收紧）
 │          │ decision_view + apply_execution_caps（仓位单出口）
-│ Fusion   │ 生产 cards；merge 在 stage_pack 后、短中线前（A1）
+│ Fusion   │ 生产 cards；失败→cards_failed 中性；merge 在 stage_pack 后（A1）
 ├──────────────────────────────────────────────────────────────┤
-│ 数据/持久│ market_types SSOT · data_provider · trader_paths
-│          │ holdings SSOT · json_atomic 锁内 RMW
+│ 数据/持久│ market_types SSOT · data_provider · data_access.get_quotes
+│          │ trader_paths · holdings SSOT · json_atomic 锁内 RMW
 ├──────────────────────────────────────────────────────────────┤
 │ 展示层   │ report_renderer/short_midline · T0 结构卡 · 池面板
 └──────────────────────────────────────────────────────────────┘
@@ -43,6 +43,8 @@ Fusion **仅仪表**（`product_role=instrument`）；新开铁律：
 - ADR-001～003b：shared 库 / PluginRegistry / builder vs renderer  
 - 2026-07：`report_pipeline/` 分包；t0/review/wyckoff 引擎下沉（包内 shim）  
 - 2026-08：阶段字段纪律 · holdings/`trader_paths` · fusion 仪表化 · execution_caps · A1 早卡晚并  
+- 2026-08-02：cards 失败=`cards_failed`（禁静默 classic）· `fusion_confidence` 中性模块 · 池价 `get_quotes`  
+- 2026-08-02：classic/compare **已退役**；mappers → `_deprecated/`；`fusion_input_path` 仅 `cards`/`cards_failed` 
 
 ---
 
@@ -104,6 +106,7 @@ SSOT：`stage_fields.py` · BUSINESS §4.0 · AGENTS「阶段三字段」。
 |------|------|
 | `market_types.py` | `Security` / `MarketSnapshot` SSOT |
 | `data_provider.py` / `light_data.py` | 多源行情；日 K 按 provider+adjust 分桶缓存 |
+| `data_access.py` | 上层统一取数；`get_quotes` 有界并行批量快照（池价刷新） |
 | `trader_paths.py` | `~/.trader`（或 `TRADER_ROOT`）命名路径注册表 |
 | `json_atomic.py` | flock + tmp/fsync/replace |
 | `holdings.py` | 持仓成本/股数 SSOT；`resolve_cost_price(显式>--cost>holdings>0)` |
@@ -128,7 +131,8 @@ SSOT：`stage_fields.py` · BUSINESS §4.0 · AGENTS「阶段三字段」。
 | `strategy/match.py` + `strategy/packs/` | 六闸；entry 须 `executable=True`（文案「可扳机」） |
 | `mistery_gate` / `chan_discipline` | 纪律只收紧 → `merge_discipline` |
 | `decision_view.py` | 出手真相 + `apply_execution_caps` |
-| `fusion_core.py` | 三席加权仪表；默认 cards；不改 major_stage / chase / holding_hint |
+| `fusion_core.py` | 三席加权仪表；一律 cards；失败→`cards_failed` 中性（classic/compare 已退役） |
+| `fusion_confidence.py` | 置信度 U 型映射中性模块（cards 共用；勿经 classic_mappers） |
 
 ### 5.4 报告流水线
 
@@ -186,7 +190,8 @@ resonance / strategy_match   ← 读卡，不重跑检测
 holdings.resolve_cost_price  ← 水位/持仓态
 ```
 
-融合三席（仪表）：缠论 · 动量 · **VPF**（日线威科夫已退出加权）。
+融合三席（仪表）：缠论 · 动量 · **VPF**（日线威科夫已退出加权）。  
+`fusion_input_path`：`cards` \| `cards_failed`（见 BUSINESS §2.7；classic/compare 已退役）。
 
 ---
 

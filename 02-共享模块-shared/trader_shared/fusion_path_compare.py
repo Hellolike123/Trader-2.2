@@ -1,7 +1,8 @@
-"""classic vs cards fusion 对账（纯逻辑，无网络）。
+"""OBSOLETE — classic vs cards fusion 对账纯逻辑（已退役）。
 
-供 scripts/compare_fusion_paths.py 与单测复用。
-契约：默认生产仍 classic；本模块只做漂移度量，不改默认路径。
+历史：供 scripts/compare_fusion_paths.py 与单测复用。
+法源：docs/plans/retire-classic-fusion-handoff.md — classic/compare 热路径已删；
+生产一律 cards。本模块仅保留测例可 import 的纯函数，不再代表现行生产契约。
 """
 from __future__ import annotations
 
@@ -141,10 +142,10 @@ def summarize_batch(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "counts": by,
         "recommend": recommend,
         "recommend_zh": {
-            "keep_classic": "偏差偏大：可临时 FUSION_FROM_CARDS=classic 对照，优先修 cards",
-            "keep_classic_mild_drift": "有轻微漂移：生产仍默认 cards，建议逐票看",
+            "keep_classic": "偏差偏大：历史对账文案；classic 已退役，只修 cards",
+            "keep_classic_mild_drift": "有轻微漂移（历史对账文案；生产仅 cards）",
             "consider_cards_default": "对齐良好（生产已默认 cards）",
-            "keep_classic_fix_cards": "不稳定：优先修 cards；必要时 classic 回退",
+            "keep_classic_fix_cards": "不稳定（历史对账文案；classic 已退役，只修 cards）",
         }.get(recommend, recommend),
     }
 

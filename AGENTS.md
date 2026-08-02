@@ -3,7 +3,7 @@
 - **目标架构法源**：`docs/designs/resonance-and-orchestration.md` — 五层+编排、岗位共振；fusion 不作总司令。
 - **版本**：Trader 2.4+（技能：`trader` / `t0` / `review` / `wyckoff` / `chanlun`）。单票**始终**中短线双轨（`render_short_midline`；`SHORT_MIDLINE_REPORT=false` 已忽略）。
 - **Skill 用法指南**：[`docs/guide/skill-usage.md`](docs/guide/skill-usage.md)（五岗一天节奏；chanlun=结构学术卡，与 wyckoff 皆不当总司令）。
-- **Fusion 生产路径**：`FUSION_FROM_CARDS` 缺省 = `cards`；`classic` / `compare` 仅对照（classic deprecated）。详见 `BUSINESS.md` §2.7。**A1** 已落地（merge 在 stage_pack 后、短中线前）；**A2 仍延期**（勿把 merge 挪到 decision_view 之后）。
+- **Fusion 生产路径**：`FUSION_FROM_CARDS` **一律 cards**；失败 → `cards_failed` 中性占位；`classic` / `compare` **已退役**（告警后仍 cards）。详见 `BUSINESS.md` §2.7。**A1** 已落地（merge 在 stage_pack 后、短中线前）；**A2 仍延期**（勿把 merge 挪到 decision_view 之后）。
 - **快照 enrich**：`TRADER_SNAPSHOT_ENRICH=0` 可整段关掉；`TRADER_ENRICH_BOARDS` **默认关**（不用 akshare 成分股扫板，行业走 tushare 日缓存；概念软加成需显式 `=1`）。
 - **门禁**：`scripts/run-gate-tests.sh`（离线子集）；禁止把全量历史红项塞进门禁。说明：`docs/architecture/ci-gate.md`。
 - **Agent 快路径**：各 skill **只预读** `references/agent-quickstart.md` + 共用 `references/agent-rules.md`；跑脚本 → 原样贴 markdown → 停。禁止开工前批量读 references、禁止默认 `--output json`。
@@ -79,8 +79,10 @@
 | 板块对照指数 / 环境档 | `market_env.py`（`resolve_board_index` + `assess(index_code=)`）+ `context_stage` | 展示写死中证1000；meta 露正常/偏弱 |
 | 行情类型 SSOT | `market_types.py`（`Security`/`MarketSnapshot`） | 在 light_data/data_provider 再各造一份 |
 | 买点盖生命周期 | `buy_point_lifecycle.py` + `attach_buy_point.py`；策略闸读字段在 `strategy/match.py` | 在策略层重算盖价/笔；接旧 failed `signal_id` |
-| Fusion 生产路径 | `fusion_core.py` + `analysis/cards.py` + `fusion_card_signals.py` | 加厚 classic 当主路径 |
-| Classic 映射（对照） | `fusion_classic_mappers.py`（动量已委托 cards） | 在 cards 路径复制一份映射 |
+| Fusion 生产路径 | `fusion_core.py` + `analysis/cards.py` + `fusion_card_signals.py`（失败=`cards_failed`） | 加厚 classic；生产回退 classic；挂回 `_deprecated` |
+| Fusion 置信度 | `fusion_confidence.py`（中性；cards 共用） | analysis 经 classic_mappers 再取置信 |
+| Classic 映射（已退役） | `_deprecated/fusion_classic_mappers.py`（归档；生产零 import） | 生产树再 import classic_mappers |
+| 批量快照 / 池价 | `data_access.get_quotes`（经 `get_provider`） | 池内直调 `light_data` + 自建 HttpClient |
 | T0 盯盘缓存 | `t0_monitor._cached_build_plan`（`T0_PLAN_TTL_SEC`） | 每 tick 无脑全量 `build_plan` |
 | 选股池逻辑 | `01-功能包-packages/trader/scripts/pool_cmds/*` | 把逻辑写回 `final_pool.py` |
 | 选股池分道 | `classify.py` 分道 + `wyckoff_chain` 同道链（`威：SC→…还差SOS`）+ 周线 RS（同道排序；弱 RS→等齐慎跟）+ `sort_items_unified`（lane→共振→链→RS→可碰→分）；入池软门槛 | 用分数/「执行」/事件n/5当注意力王；S/A/B/C 替换分道；RS 抬 phase |

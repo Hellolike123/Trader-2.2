@@ -17,7 +17,7 @@
 | `disagreement` | float | [0, 3] | 三路信号分歧度（max - min direction） |
 | `signals_detail` | dict | — | **chan / momentum / vpf** 各自的 direction + confidence |
 | `weights_used` | dict | — | 实际权重（键为 chan/momentum/vpf） |
-| `fusion_input_path` | str | cards/classic/... | 本次三席输入路径 |
+| `fusion_input_path` | str | `cards` / `cards_failed` | 本次三席输入路径 |
 
 ## 输入路径（`FUSION_FROM_CARDS`）
 
@@ -25,9 +25,11 @@
 
 | 模式 | 行为 |
 |------|------|
-| 缺省 / `cards` | **生产默认**：意见卡 → `fusion_card_signals`；失败打 **warning** 后回退 classic |
-| `classic` | 强制 classic（deprecated，仅对照） |
-| `compare` | 两路都算；主结果用 cards；写入 `fusion_compare` |
+| 缺省 / `cards` | **生产唯一路径**：意见卡 → `fusion_card_signals`；失败 → 中性占位（`fusion_input_path=cards_failed`） |
+| `classic` / `compare` 等 | **已退役**：`DeprecationWarning` 后仍走 cards（无 classic mapper / 无 `fusion_compare`） |
+
+`fusion_input_path` 枚举：`cards` \| `cards_failed`。  
+`weighted_score` / `action` / breakdown **仅仪表**；出手听 `decision_view`。
 
 ## 8 档阈值（weighted_score → 方向强度，仪表用语）
 
@@ -66,7 +68,9 @@ action 生成后可能被以下机制覆盖（按优先级）：
 
 build_report() 会生成 `fusion_verbatim` 字段，AI 输出时必须逐字引用，不可改写。
 
-格式：`{emoji} {action}｜置信{confidence}%｜加权分{weighted_score}｜{regime}`
+**仪表化**：主行是分数/regime/分歧 +「仅参考」，禁止 `🎯 {action}` 指令形主行（出手听 `decision_view`）。
+
+格式：`{emoji} 加权{score}｜置信{confidence%}｜{regime}｜分歧{disagreement}｜仅参考`
 
 emoji 由 weighted_score 决定：≥0.25 🟢 / ≥0.10 🟡 / ≥-0.05 ⚪ / ≥-0.12 🟠 / else 🔴
 

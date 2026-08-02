@@ -56,26 +56,33 @@ except ImportError:  # pragma: no cover
 
 FUSION_LOG_ONLY = os.environ.get("FUSION_LOG_ONLY", "false").lower() in ("true", "1", "yes")
 
-# Arch C：fusion 三席输入来源
-# - cards（生产默认）：analysis_cards → fusion_card_signals；席位语义只改那边
-# - classic（deprecated）：无卡时用 raw→卡→card_signals；有卡则直接走卡
-# - compare：classic 原始 mapper 与 cards 对账（parity 测试用，非生产）
+# Arch C：fusion 三席输入来源 — 仅 cards（classic/compare 已退役）
+_RETIRED_FUSION_MODES = frozenset({
+    "0", "false", "no", "classic", "off", "compare", "both", "dual",
+})
+
+
+def _warn_retired_fusion_mode(mode: str, *, stacklevel: int = 3) -> None:
+    warnings.warn(
+        f"FUSION_FROM_CARDS={mode!r} is retired; always using cards. "
+        "Classic/compare fusion paths have been removed. "
+        "Seat mapping lives in analysis/fusion_card_signals.py.",
+        DeprecationWarning,
+        stacklevel=stacklevel,
+    )
+
+
 def _fusion_input_mode() -> str:
+    """一律 cards；classic/compare 等旧值发 DeprecationWarning 后仍返回 cards。"""
     v = (os.environ.get("FUSION_FROM_CARDS") or "cards").strip().lower()
-    if v in ("0", "false", "no", "classic", "off"):
-        return "classic"
-    if v in ("compare", "both", "dual"):
-        return "compare"
-    return "cards"  # true / 1 / cards / on / auto / 缺省
+    if v in _RETIRED_FUSION_MODES:
+        _warn_retired_fusion_mode(v, stacklevel=3)
+    return "cards"
 
 
 def _warn_deprecated_fusion_classic() -> None:
-    warnings.warn(
-        "FUSION_FROM_CARDS=classic is deprecated; production path is cards. "
-        "Seat mapping changes belong in analysis/fusion_card_signals.py.",
-        DeprecationWarning,
-        stacklevel=3,
-    )
+    """兼容旧测例名；语义同 _warn_retired_fusion_mode('classic')。"""
+    _warn_retired_fusion_mode("classic", stacklevel=3)
 
 
 def _three_signals_via_cards(
@@ -150,19 +157,17 @@ def _log_fusion(result: dict) -> None:
 
 
 
-# Classic mappers：生产 cards 路径不加载；compare/classic 回退与测试经 __getattr__ 懒导入
-_CLASSIC_MAPPER_NAMES = frozenset({
-    "_chan_to_signal",
-    "_momentum_to_signal",
+# 置信度中性模块：cards / 测试经 __getattr__ 懒导入（不再导出 classic mapper）
+_CONFIDENCE_NAMES = frozenset({
     "_score_to_confidence",
-    "_wyckoff_to_signal",
+    "_load_confidence_params",
 })
 
 
 def __getattr__(name: str):
-    if name in _CLASSIC_MAPPER_NAMES:
-        import trader_shared.fusion_classic_mappers as _m
-        return getattr(_m, name)
+    if name in _CONFIDENCE_NAMES:
+        import trader_shared.fusion_confidence as _c
+        return getattr(_c, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -252,7 +257,7 @@ def merge_decisions(
     extend_margin: dict | None = None,      # Phase 2: 融资融券（预留接入）
     vpf_result: dict | None = None,         # 价量资金专家（优先）；缺省由 volume/fund 合成
     analysis_cards: dict | None = None,     # Arch C：意见卡（优先三席）
-    fusion_from_cards: str | bool | None = None,  # None→环境变量；True/cards/compare/classic
+    fusion_from_cards: str | bool | None = None,  # None→环境变量；仅 cards（旧 classic/compare 告警后当 cards）
 ) -> dict:
     """决策融合层核心函数。
 
@@ -266,147 +271,68 @@ def merge_decisions(
         regime:          market_env assess() 返回的 level 字段
         volume_warning / fund_flow_data / vpf_result: 第三席 VPF 输入
         analysis_cards:  Arch C 意见卡；与 fusion_from_cards 联用
-        fusion_from_cards: classic|cards|compare；None 读环境 FUSION_FROM_CARDS（默认 cards）
+        fusion_from_cards: 仅 cards；None 读环境；classic/compare/false 已退役（告警后仍 cards）
 
     Returns:
         含 signals_detail.chan / momentum / vpf；weights_used 键为 chan/momentum/vpf
-        另：fusion_input_path、可选 fusion_compare
+        另：fusion_input_path（cards | cards_failed）
     """
     from trader_shared.fusion_regime import get_regime_weights, score_to_action, compute_confidence
 
     # fetcher 参数仅保留调用方兼容；本函数体内不再使用（避免无意义 get_fetcher）
     _ = fetcher
+    # vpf_result 仅经 cards/VPF 卡路径消费；保留形参兼容旧调用
+    _ = vpf_result
 
-    # ── 解析 fusion 输入模式 ──
+    # ── 解析 fusion 输入模式（一律 cards；退役值告警）──
     if fusion_from_cards is None:
-        _mode = _fusion_input_mode()
+        _fusion_input_mode()  # may warn on retired env
     elif isinstance(fusion_from_cards, bool):
-        _mode = "cards" if fusion_from_cards else "classic"
+        if not fusion_from_cards:
+            _warn_retired_fusion_mode("false", stacklevel=3)
     else:
         _m = str(fusion_from_cards).strip().lower()
-        _mode = "classic" if _m in ("0", "false", "classic", "off") else (
-            "compare" if _m in ("compare", "both", "dual") else "cards"
-        )
+        if _m in _RETIRED_FUSION_MODES:
+            _warn_retired_fusion_mode(_m, stacklevel=3)
 
-    def _classic_three() -> tuple[dict, dict, dict]:
-        from trader_shared.fusion_classic_mappers import (
-            _chan_to_signal,
-            _momentum_to_signal,
-        )
-        try:
-            _cs = _chan_to_signal(chan_result)
-        except (TypeError, KeyError) as exc:
-            _logger.warning("Chanlun signal normalization failed: %s", exc)
-            _cs = {"direction": 0, "confidence": 0.0,
-                   "reason": "缠论标准化异常", "raw_key": "chan"}
-        try:
-            _ms = _momentum_to_signal(momentum_result)
-        except (TypeError, KeyError) as exc:
-            _logger.warning("Momentum signal normalization failed: %s", exc)
-            _ms = {"direction": 0, "confidence": 0.0,
-                   "reason": "动量标准化异常", "raw_key": "momentum"}
-        try:
-            from trader_shared.vpf_core import build_vpf_signal, vpf_to_fusion_signal
-            if isinstance(vpf_result, dict) and vpf_result.get("raw_key") == "vpf":
-                _vs = vpf_to_fusion_signal(vpf_result)
-            else:
-                _avg_turnover_wan = None
-                if bars and len(bars) >= 10:
-                    _amounts = []
-                    for _b in bars[-20:]:
-                        _a = _b.get("amount") if isinstance(_b, dict) else getattr(_b, "amount", None)
-                        if _a is not None:
-                            try:
-                                _amounts.append(float(str(_a).replace(",", "")))
-                            except (TypeError, ValueError):
-                                pass
-                    if _amounts:
-                        _avg_turnover_wan = sum(_amounts) / len(_amounts) / 10000.0
-                _vs = build_vpf_signal(
-                    volume_warning if isinstance(volume_warning, dict) else None,
-                    fund_flow_data if isinstance(fund_flow_data, dict) else None,
-                    bars=bars,
-                    avg_daily_turnover_wan=_avg_turnover_wan,
-                )
-        except Exception as exc:
-            _logger.warning("VPF signal build failed: %s", exc)
-            _vs = {
-                "direction": 0,
-                "confidence": 0.2,
-                "reason": "价量资金标准化异常",
-                "raw_key": "vpf",
-                "fund_quality": "missing",
-            }
-        return _cs, _ms, _vs
-
-    # 1. 信号标准化（生产 = cards；classic 经卡适配；compare 保留原始 mapper 对账）
-    _compare: dict[str, Any] | None = None
+    # 1. 信号标准化（仅 cards；失败 → cards_failed 中性占位）
     _path = "cards"
-
-    if _mode == "compare":
-        chan_signal, momentum_signal, vpf_signal = _classic_three()
-        _via = _three_signals_via_cards(
-            chan_result,
-            momentum_result,
-            volume_warning=volume_warning if isinstance(volume_warning, dict) else None,
-            fund_flow_data=fund_flow_data if isinstance(fund_flow_data, dict) else None,
-            bars=bars,
-            analysis_cards=analysis_cards if isinstance(analysis_cards, dict) else None,
-        )
-        if _via:
-            _compare = {
-                "classic": {
-                    "chan_dir": chan_signal.get("direction"),
-                    "mom_dir": momentum_signal.get("direction"),
-                    "vpf_dir": vpf_signal.get("direction"),
-                },
-                "cards": {
-                    "chan_dir": _via[0].get("direction"),
-                    "mom_dir": _via[1].get("direction"),
-                    "vpf_dir": _via[2].get("direction"),
-                },
-            }
-            chan_signal, momentum_signal, vpf_signal = _via
-            _path = "cards"
-        else:
-            _path = "classic"
-    elif _mode == "classic":
-        _warn_deprecated_fusion_classic()
-        # classic：只从 raw 现建卡再走 card_signals，忽略可能错误的预产卡
-        _via = _three_signals_via_cards(
-            chan_result,
-            momentum_result,
-            volume_warning=volume_warning if isinstance(volume_warning, dict) else None,
-            fund_flow_data=fund_flow_data if isinstance(fund_flow_data, dict) else None,
-            bars=bars,
-            analysis_cards=None,
-        )
-        if _via:
-            chan_signal, momentum_signal, vpf_signal = _via
-            _path = "classic_via_cards"
-        else:
-            chan_signal, momentum_signal, vpf_signal = _classic_three()
-            _path = "classic"
+    _via = _three_signals_via_cards(
+        chan_result,
+        momentum_result,
+        volume_warning=volume_warning if isinstance(volume_warning, dict) else None,
+        fund_flow_data=fund_flow_data if isinstance(fund_flow_data, dict) else None,
+        bars=bars,
+        analysis_cards=analysis_cards if isinstance(analysis_cards, dict) else None,
+    )
+    if _via:
+        chan_signal, momentum_signal, vpf_signal = _via
+        _path = "cards"
     else:
-        # cards（默认）
-        _via = _three_signals_via_cards(
-            chan_result,
-            momentum_result,
-            volume_warning=volume_warning if isinstance(volume_warning, dict) else None,
-            fund_flow_data=fund_flow_data if isinstance(fund_flow_data, dict) else None,
-            bars=bars,
-            analysis_cards=analysis_cards if isinstance(analysis_cards, dict) else None,
+        # 生产 cards 失败：降级中性占位，禁止回退 classic（已退役）
+        _logger.warning(
+            "FUSION cards path failed; using neutral placeholders (no classic fallback)"
         )
-        if _via:
-            chan_signal, momentum_signal, vpf_signal = _via
-            _path = "cards"
-        else:
-            _logger.warning(
-                "FUSION cards path failed; falling back to classic (fusion_from_cards=%s)",
-                _mode,
-            )
-            chan_signal, momentum_signal, vpf_signal = _classic_three()
-            _path = "classic"
+        chan_signal = {
+            "direction": 0,
+            "confidence": 0.0,
+            "reason": "cards 适配失败",
+            "raw_key": "chan",
+        }
+        momentum_signal = {
+            "direction": 0,
+            "confidence": 0.0,
+            "reason": "cards 适配失败",
+            "raw_key": "momentum",
+        }
+        vpf_signal = {
+            "direction": 0,
+            "confidence": 0.0,
+            "reason": "cards 适配失败",
+            "raw_key": "vpf",
+            "fund_quality": "missing",
+        }
+        _path = "cards_failed"
 
     # 2. 场景优先级过滤器 (Scenario Priority Filter)
     # 计算20日高低区间位置
@@ -771,10 +697,8 @@ def merge_decisions(
             },
         },
         "weights_used": weights,
-        "fusion_input_path": _path,  # Arch C: classic | cards
+        "fusion_input_path": _path,  # Arch C: cards | cards_failed
     }
-    if _compare is not None:
-        result["fusion_compare"] = _compare
     if volume_warning:
         result["volume_warning"] = volume_warning
     if bayesian_used:

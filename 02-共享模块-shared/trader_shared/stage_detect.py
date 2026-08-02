@@ -762,22 +762,29 @@ def compute_position_with_env(
     }
 
 def action_for_holding_state(
-    fusion_action: str,
+    discipline_action: str,
     has_position: bool,
 ) -> dict[str, str]:
-    """根据持仓状态给 fusion action 加场景标签，消除与 suggested_pct 的互斥。
+    """根据持仓状态给纪律 action 加场景标签，消除与 suggested_pct 的互斥。
 
-    当 fusion action 说「减仓」但 suggested_pct=0（未持仓）时，
+    入参是纪律层 action（`discipline.action` / gate），**不是** fusion.action。
+    报告键仍写 `fusion_holding_hint`（历史键名，勿改）。
+
+    当纪律 action 说「减仓」但 suggested_pct=0（未持仓）时，
     两个语义互斥：减仓的前提是你有仓位才能减。
     此函数通过 holding_hint 明确场景，让 AI 渲染时不再同框打架。
 
+    Args:
+        discipline_action: 纪律层动作文案（非 fusion 仪表 action）
+        has_position: 是否已有持仓
+
     Returns:
         {
-            "action": str,        # 原始 action 保留
+            "action": str,        # 原始纪律 action 保留
             "holding_hint": str,  # 场景化提示（显示给用户/AI）
         }
     """
-    action = str(fusion_action).strip()
+    action = str(discipline_action).strip()
 
     if action in _REDUCE_ACTIONS:
         if has_position:

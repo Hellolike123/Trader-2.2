@@ -83,10 +83,6 @@
 | [`chanlun-skill-deep-card-handoff.md`](./chanlun-skill-deep-card-handoff.md) | 四关心点 + C-D* 母本（勿标 active） |
 | [`chanlun-skill-playbook.md`](./chanlun-skill-playbook.md) | 薄入口，链到 deep-card |
 
-### 本轮清理手递
-
-- [`docs-law-cleanup-handoff.md`](./docs-law-cleanup-handoff.md) — 文档三桶 / MOVE / 状态消歧（完成后可进 `done/`）
-
 ---
 
 ## 已知未修差异（诚实列表）
@@ -99,6 +95,18 @@
 
 一次性已合入手递在 [`done/`](./done/)。链文案 / follow-up / range-diff / accuracy 等历史见该目录；母法源内用 `done/…` 相对路径或「见 done/…」指过去。  
 例：`done/wyckoff-failed-chain-copy-handoff.md`、`done/range-diff-fixes-handoff.md`、`done/chanlun-cd-followup-handoff.md`、`done/wyckoff-phase-accuracy-handoff-2026-07-31.md`。
+
+### 架构收口（#50–#53 · 已 done）
+
+| 文件 | 一句 |
+|------|------|
+| [`done/signal-fusion-override-gate-handoff.md`](./done/signal-fusion-override-gate-handoff.md) | signal_core 覆盖须听 `FUSION_OVERRIDE` |
+| [`done/pool-quote-provider-handoff.md`](./done/pool-quote-provider-handoff.md) | 池价刷新走 `data_access.get_quotes` |
+| [`done/fusion-no-silent-classic-handoff.md`](./done/fusion-no-silent-classic-handoff.md) | cards 失败=`cards_failed`，禁静默 classic |
+| [`done/arch-residual-cleanup-handoff.md`](./done/arch-residual-cleanup-handoff.md) | 余项收口（verbatim 仪表 / 死 fetcher 等） |
+| [`done/arch-followup-soft-thin-ruling-handoff.md`](./done/arch-followup-soft-thin-ruling-handoff.md) | `fusion_confidence` 软抽；日线裁定去 fusion.action |
+| [`done/arch-finalize-docs-handoff.md`](./done/arch-finalize-docs-handoff.md) | 文档真相收尾 + 归档 + breakdown 仪表化 |
+| [`done/docs-law-cleanup-handoff.md`](./done/docs-law-cleanup-handoff.md) | 文档三桶 / MOVE / 状态消歧 |
 
 ### 已知差异指针
 

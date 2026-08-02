@@ -36,10 +36,10 @@ class TestDataAccessImports:
     def test_all_functions_importable(self):
         from trader_shared.data_access import (
             get_daily, get_5m, get_15m, get_30m,
-            get_weekly, get_monthly, get_quote, get_ticks, get_snapshot,
+            get_weekly, get_monthly, get_quote, get_quotes, get_ticks, get_snapshot,
         )
         for f in [get_daily, get_5m, get_15m, get_30m,
-                  get_weekly, get_monthly, get_quote, get_ticks, get_snapshot]:
+                  get_weekly, get_monthly, get_quote, get_quotes, get_ticks, get_snapshot]:
             assert callable(f)
 
 
@@ -108,6 +108,21 @@ class TestGetQuote:
         with patch("trader_shared.data_access.get_provider", side_effect=Exception("失败")):
             from trader_shared.data_access import get_quote
             assert get_quote("688248") == {}
+
+
+class TestGetQuotes:
+    def test_batch_returns_per_target(self):
+        mock_p = _make_mock_provider(quote={"current_price": 10.0, "current_change_pct": 1.0})
+        with patch("trader_shared.data_access.get_provider", return_value=mock_p):
+            from trader_shared.data_access import get_quotes
+            result = get_quotes(["688248", "600519"])
+        assert set(result) == {"688248", "600519"}
+        assert result["688248"]["current_price"] == 10.0
+        assert mock_p.fetch_quote.call_count == 2
+
+    def test_empty_targets(self):
+        from trader_shared.data_access import get_quotes
+        assert get_quotes([]) == {}
 
 
 class TestGetSnapshot:

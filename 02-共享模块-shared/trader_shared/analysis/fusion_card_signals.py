@@ -131,9 +131,9 @@ def chan_card_to_fusion_signal(card: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _momentum_score_to_confidence(score: Any) -> float:
-    """U 型置信（cards 自有；classic 委托至此，避免 cards→classic 依赖）。"""
+    """U 型置信（中性 fusion_confidence；禁止经 classic_mappers）。"""
     try:
-        from trader_shared.fusion_classic_mappers import _score_to_confidence
+        from trader_shared.fusion_confidence import _score_to_confidence
 
         return float(_score_to_confidence(score))
     except Exception:
@@ -234,7 +234,7 @@ def vpf_card_to_fusion_signal(card: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def fusion_signals_from_cards(cards: dict[str, Any] | None) -> dict[str, dict[str, Any]] | None:
-    """返回 {chan, momentum, vpf} 三席；cards 无效则 None（回退 classic）。"""
+    """返回 {chan, momentum, vpf} 三席；cards 无效则 None（调用方降级 cards_failed 中性，禁静默 classic）。"""
     if not isinstance(cards, dict) or not cards:
         return None
     chan_c = cards.get("chan") if isinstance(cards.get("chan"), dict) else {}

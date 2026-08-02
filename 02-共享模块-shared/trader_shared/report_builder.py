@@ -20,8 +20,6 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 from trader_shared.light_data import to_float, pct_change
 
-from trader_shared.fetchers import TencentFetcher
-
 from trader_shared.config import LOOKBACK_DAYS, STRUCTURE_WINDOW
 
 from trader_shared.signal_core import state_text
@@ -93,11 +91,10 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         run_structure_stage,
     )
 
-    # DI: 注入 TencentFetcher 供下游模块使用
-    fetcher = TencentFetcher()
     provider = get_provider()
     # 月线/ tick 默认不进主路径：月线在共振块按需补拉；tick 本报告未消费。
     # 周线必须拉（中线缠/威 + mid_key_prices）。
+    # 数据 SSOT = get_provider；不再构造死 DI TencentFetcher（下游 fetcher 形参可传 None）。
     snapshot = provider.load_market_snapshot(
         target,
         days=LOOKBACK_DAYS,
@@ -130,7 +127,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     ctx = StageContext(
         target=target,
         cost_price=float(cost_price or 0),
-        fetcher=fetcher,
+        fetcher=None,  # 兼容下游签名；禁止再构造死 DI
         provider=provider,
         snapshot=snapshot,
         sec=sec,
