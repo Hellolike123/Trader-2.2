@@ -1,8 +1,8 @@
 # known-gaps 收口 — Agent Handoff
 
-> **状态**: active（2026-08-02）  
+> **状态**: done（已合 #47；2026-08-02 迁入 `docs/plans/done/`）  
 > **前置**: #46 已合；清单见 `docs/plans/known-gaps.md` / `BUSINESS.md` §2.2  
-> **本 PR**: 修可对齐的代码差 + 文档取舍写死；**不**开 W-DIFF-7（深刺穿 ST 需产品裁决）。  
+> **本 PR**: 修可对齐的代码差 + 文档取舍写死；W-DIFF-7 产品裁决见 `w-diff7-st-pierce-decision-handoff.md`（已 done）。  
 > **双 Agent**: 写落地 / 查对照。
 
 ---
