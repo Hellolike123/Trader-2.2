@@ -1002,12 +1002,18 @@ class TestDetectDivergence:
 class TestChanlunAnalysis:
     def test_api_empty(self):
         result = chanlun_analysis([], 10.0)
-        assert result == {}
+        assert result["timeframe"] == "insufficient"
+        assert result["data_ok"] is False
+        assert result["data_bars_daily"] == 0
+        assert "日线数据为空" in result["data_note"]
 
     def test_insufficient_bars(self):
         bars = [_make_bar(10, 12, 10, 11) for _ in range(19)]
         result = chanlun_analysis(bars, 10.0)
-        assert result == {}
+        assert result["timeframe"] == "insufficient"
+        assert result["data_ok"] is False
+        assert result["data_bars_daily"] == 19
+        assert "日线不足" in result["data_note"]
 
     def test_macd_written_back_to_bars(self):
         """_calc_macd 应将 MACD 写回 bars（macd_histogram 字段）。"""

@@ -508,6 +508,16 @@ def render_short_midline(r: dict[str, Any]) -> str:
                 _chan_display = _wave_mid
     else:
         _chan_display = _chan_compact
+    _chan_mid_inner = _chan_mid
+    if isinstance(_chan_mid_inner, dict) and isinstance(_chan_mid_inner.get("chanlun"), dict):
+        _chan_mid_inner = _chan_mid_inner["chanlun"]
+    _chan_mid_tf = (
+        str(_chan_mid_inner.get("timeframe") or "").strip()
+        if isinstance(_chan_mid_inner, dict)
+        else ""
+    )
+    if _chan_mid_tf == "daily_fallback" and "日线" not in _chan_display:
+        _chan_display = f"{_chan_display}（日线）"
     lines.append(f"  缠论：{_chan_display}")
 
     # 位置灯（筹码峰：下方成本 / 上方套牢 / 搬家）— 只展示，不进 fusion
@@ -657,6 +667,18 @@ def render_short_midline(r: dict[str, Any]) -> str:
     try:
         from trader_shared.chan_core import format_chanlun_short_light
         _chan_src = r.get("chanlun") or r.get("chan")
+        _chan_daily = r.get("chanlun_daily")
+        _chan_daily_inner = _chan_daily
+        if isinstance(_chan_daily_inner, dict) and isinstance(
+            _chan_daily_inner.get("chanlun"), dict
+        ):
+            _chan_daily_inner = _chan_daily_inner["chanlun"]
+        if isinstance(_chan_daily_inner, dict) and (
+            _chan_daily_inner.get("data_ok") is False
+            or _chan_daily_inner.get("timeframe") == "insufficient"
+        ):
+            # 不足/失败必须越过旧 fusion-only 兼容槽，原样进入最终面板。
+            _chan_src = _chan_daily
         _chan_line = format_chanlun_short_light(
             _chan_src,
             fusion_chan=_csig2 or None,

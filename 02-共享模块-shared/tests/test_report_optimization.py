@@ -315,6 +315,65 @@ def test_short_section_shows_event_light():
     assert out.count("威科夫：") >= 2
 
 
+def test_cd2b_midline_daily_fallback_survives_wave_label_rendering():
+    """C-D2b：wave_label_mid 覆盖 compact 行时仍须标明日线 fallback。"""
+    r = _report()
+    r["chanlun_midline"] = {
+        "chanlun": {
+            "timeframe": "daily_fallback",
+            "structure_type": "上涨趋势",
+            "structure_confidence": "high",
+            "trend_label": "拉升段",
+            "strokes": [
+                {"direction": "up"},
+                {"direction": "down"},
+                {"direction": "up"},
+            ],
+            "segments": [{"direction": "up"}],
+            "buy_points": [],
+            "sell_points": [],
+            "divergence": {},
+        }
+    }
+    # 生产缺口：该字段会盖掉 format_chanlun_theory_line 的「（日线）」。
+    r["conclusion"]["wave_label_mid"] = "拉升趋势中 · 线段偏少"
+
+    out = render_short_midline(r)
+    midline = out.split("🧭 中线", 1)[-1].split("⚡ 短线", 1)[0]
+    chan_line = next(line for line in midline.splitlines() if "缠论：" in line)
+
+    assert "日线" in chan_line
+
+
+def test_cd1a_daily_insufficient_reaches_final_shortline_panel():
+    """C-D1a：生产报告的 chanlun_daily 不足原因不能被旧 fusion 槽盖掉。"""
+    r = _report()
+    r["chanlun_daily"] = {
+        "chanlun": {
+            "timeframe": "insufficient",
+            "data_ok": False,
+            "data_note": "日线不足：仅8根，至少需要20根",
+            "data_bars_daily": 8,
+            "data_bars_weekly": 0,
+            "adjust_mode": "unknown",
+            "buy_points": [],
+            "sell_points": [],
+            "divergence": {},
+        }
+    }
+    r["fusion"]["signals_detail"]["chan"] = {
+        "direction": 0,
+        "reason": "暂无买卖点 · 中性",
+    }
+
+    out = render_short_midline(r)
+    shortline = out.split("⚡ 短线", 1)[-1]
+    chan_line = next(line for line in shortline.splitlines() if "缠论：" in line)
+
+    assert "日线不足" in chan_line
+    assert "暂无买卖点 · 中性" not in chan_line
+
+
 def test_short_section_omits_empty_status_and_compacts_structure():
     """无威科夫事件不占事件行；缠论过长压缩；资金去掉「未取到」。"""
     r = _report()
