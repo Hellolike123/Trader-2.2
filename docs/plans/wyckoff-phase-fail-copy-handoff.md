@@ -1,8 +1,8 @@
 # 威科夫 Phase 失效文案统一 — Agent Handoff
 
-> 状态：实现中（写 Agent 按本文落地；查 Agent 对照 §1–§4）  
+> 状态：规格冻结续篇（用户 2026-08-02：默认 B 已落地；继续对齐 `--full` / `--brief`）  
 > 法源对齐：`docs/plans/wyckoff-detail-slim-b-handoff.md`（B 卡骨架）；`docs/plans/wyckoff-failed-chain-copy-handoff.md`（失败态禁健康推进）；`docs/plans/wyckoff-structure-anchor-handoff.md` §3（failed → L0）  
-> 实现锚点：`02-共享模块-shared/trader_shared/wyckoff_render.py`（`render_wyckoff_slim` 及 `_slim_daily_*`）  
+> 实现锚点：`wyckoff_render.py`（`render_wyckoff_slim` / `render_wyckoff_detail` / `render_wyckoff_card` / `_story_block`）；链短句 `wyckoff_chain.format_wyckoff_chain_plain`（仅展示词）  
 > 产品裁决：只改**人话展示**；不改 Phase A failed 判定、L0–L3、fusion、出手、池分道。
 
 ---
@@ -23,7 +23,11 @@
    （D/E 本迭代可不强改，有现成 phase 展示则尽量同构：`Phase D · 强度确认` / `Phase E · 离开区间`）
 4. 推演「现在」日线句与总览/本波主句同语义（失效｜须重新寻底 或 失效 · 破后强势｜本波 SOS 强）。
 5. 「若变坏」周线少用「作废」→ 可用 `雏形不成立` / `结构不成立`。
-6. 同步文档：本文、`wyckoff-detail-slim-b-handoff.md` 对照样、`output-template.md`、`agent-quickstart.md`（若提及旧底已废）、相关 pytest。
+6. **`--full` / `--brief` 人话与默认 B 同源**（骨架可不同，失败语义同句式）：  
+   - 禁面板可见：`Phase A 失败`、`Phase A 已失效`、`旧故事作废`、`待新寻底`（作主句）、`废锚` / `（已废）`  
+   - `--full` 故事链「若变好」failed：`Phase A 失效｜须重新寻底`（可续「出现新 SC」）；链短句 `威：SC（Phase A 失效）`（去掉「已」）  
+   - `--brief`：阶段/链/事件/一句 中 failed 可见面改写为「失效」语义；可用 render 层映射，**不必**改 core 内部 `fail_reason` 字段存储  
+7. 同步文档：本文、slim-b 对照样、`output-template.md`（含 `--full`/`--brief` 示例）、`agent-quickstart.md`、相关 pytest。
 
 ### 1.2 不做
 
@@ -31,7 +35,8 @@
 2. 不改检测阈值、fusion、decision_view、池分道。  
 3. 不恢复健康「还差 AR / 链可推进」。  
 4. 不发明 B/C「失效」引擎态（文案合同可先写；无判定则不硬编失败）。  
-5. 不改 `--full` 详析骨架（若详析仍有旧词，本迭代以默认 B 卡为准；详析可顺手替换同义词但非必须）。
+5. 不把 `--full`/`--brief` 骨架改成默认 B 卡（只对齐失败人话）。  
+6. 不改 `wyckoff_core` / `wyckoff_events` 内部调试字段原文（除非该字符串直接进面板且无法在 render 映射）。
 
 ---
 
@@ -119,6 +124,30 @@
 | P-C7 | 文档对照样与 output-template 已同步 | 文件审查 |
 | P-C8 | 勿改 failed 判定 / fusion / 出手 / 池分道 | diff 审查 |
 | P-C9 | `test_wyckoff_skill_render.py` 绿 | pytest |
+| P-C10 | `--full` failed fixture：故事链/综述可见面无 `Phase A 失败` / `Phase A 已失效` / `旧故事作废`；含 `Phase A 失效` 与重新寻底语义 | pytest `render_wyckoff_detail` |
+| P-C11 | `--brief` failed fixture：阶段/链/事件/一句 无 `Phase A 失败`（作主展示）；链为 `Phase A 失效` 语义 | pytest `render_wyckoff_card` |
+| P-C12 | `format_wyckoff_chain_plain` failed：`威：…（Phase A 失效）`（无「已失效」） | pytest |
+
+### 2.4 `--full` / `--brief` 失败样（骨架保持，人话对齐）
+
+`--full` 故事链片段：
+
+```text
+现在
+威：SC（Phase A 失效）｜日线偏空｜周线背景偏多
+
+若变好
+Phase A 失效｜须重新寻底；观察是否出现新的 SC（卖力高潮）
+```
+
+`--brief` 片段：
+
+```text
+🧭 阶段：…（Phase A 失效…）｜偏向 …
+📎 链：威：SC（Phase A 失效）
+```
+
+（阶段行若来自引擎 `phase_label` 含「失败」，render 层须映射为「失效」再上屏。）
 
 ---
 
@@ -126,19 +155,21 @@
 
 ### 5.1 可改
 
-1. `02-共享模块-shared/trader_shared/wyckoff_render.py`  
-2. `02-共享模块-shared/tests/test_wyckoff_skill_render.py`  
-3. `docs/plans/wyckoff-phase-fail-copy-handoff.md`（本文）  
-4. `docs/plans/wyckoff-detail-slim-b-handoff.md`（对照样与 S-B9/S-B18 文案同步）  
-5. `01-功能包-packages/wyckoff/references/output-template.md`  
-6. `01-功能包-packages/wyckoff/references/agent-quickstart.md`（若含旧词）  
-7. 必要时 `docs/plans/wyckoff-failed-chain-copy-handoff.md` 交叉引用一句（勿改判定）
+1. `02-共享模块-shared/trader_shared/wyckoff_render.py`（slim / detail / card / `_story_block`）  
+2. `02-共享模块-shared/trader_shared/wyckoff_chain.py`（仅 `format_wyckoff_chain_plain` 等**展示短句**）  
+3. `02-共享模块-shared/tests/test_wyckoff_skill_render.py`（及必要 chain 测）  
+4. `docs/plans/wyckoff-phase-fail-copy-handoff.md`（本文）  
+5. `docs/plans/wyckoff-detail-slim-b-handoff.md` / `wyckoff-skill-deep-card-handoff.md`（`--full` 文案交叉）  
+6. `01-功能包-packages/wyckoff/references/output-template.md`  
+7. `01-功能包-packages/wyckoff/references/agent-quickstart.md`  
+8. 必要时 `docs/plans/wyckoff-failed-chain-copy-handoff.md` 交叉引用一句（勿改判定）
 
 ### 5.2 勿改
 
-1. `wyckoff_core.py` / 事件检测阈值  
+1. `wyckoff_core.py` / `wyckoff_events.py` 检测阈值与 failed 判定逻辑  
 2. fusion / decision_view / 池分道 / trader 出手  
 3. Skill shim 正文复制引擎  
+4. 默认 B 卡骨架（已落地，勿回退）
 
 ---
 
@@ -146,7 +177,7 @@
 
 | 角色 | 职责 |
 |------|------|
-| **写 Agent** | 只读本文 + slim-b / failed-chain-copy → 改白名单 → 测 P-C* → 同步文档 |
-| **查 Agent** | 对照本文 §1–§4 逐项 ✅/❌；抓残留「已废/废锚/failed」；默认不改码 |
+| **写 Agent** | 只读本文 + slim-b / failed-chain-copy / deep-card → 改白名单 → 测 P-C1…P-C12 → 同步文档 |
+| **查 Agent** | 对照本文 §1–§4；重点抓 `--full`/`--brief` 残留「失败/已失效」；默认不改码 |
 
-父 Agent：查完修完再开/更新 PR。
+父 Agent：查完修完再更新 PR #36（同分支续作）或开新 PR。
