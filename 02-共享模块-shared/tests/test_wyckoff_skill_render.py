@@ -869,6 +869,75 @@ def test_pc12_chain_plain_failed_no_yi_shixiao():
     assert "已失效" not in empty
 
 
+_CL_FAIL_BANNED = (
+    "旧底已废",
+    "废锚",
+    "Phase A failed",
+    "（已废）",
+    "待新寻底",
+    "Phase A 已失效",
+    "Phase A 失败",
+    "旧故事作废",
+    "换幕",
+    "当前幕",
+    "上一幕",
+    "吸筹幕",
+)
+
+
+def test_cl1_cl2_failed_three_renders_banned_words():
+    """C-L1/C-L2：三档 failed 面板禁词；默认 B 仍含 Phase A 失效｜须重新寻底。"""
+    for plan in (_failed_phase_a_plan(), _failed_plus_sos_plan(), _failed_plus_lps_plan()):
+        for render in (render_wyckoff_slim, render_wyckoff_detail, render_wyckoff_card):
+            text = render(plan)
+            for bad in _CL_FAIL_BANNED:
+                assert bad not in text, f"{render.__name__} leaked {bad!r}"
+    slim = render_wyckoff_slim(_failed_phase_a_plan())
+    assert "Phase A 失效｜须重新寻底" in slim
+    assert "日线本波：Phase A 失效｜须重新寻底" in slim
+
+
+def test_cl3_dead_helper_fail_copy_no_banned_words():
+    """C-L3：残留 helper 产出不含幕类词与「待新寻底/作废」主语义。"""
+    from trader_shared import wyckoff_render as wr
+
+    plan = _failed_plus_sos_plan()
+    d_view, d_raw = plan["daily_view"], plan["daily_raw"]
+    w_view, w_raw = plan["weekly_view"], plan["weekly_raw"]
+    blobs = [
+        wr._slim_structure_sentence(d_view, d_raw),
+        wr._slim_chain_token(d_view, d_raw, failed=True, weekly=False),
+        "\n".join(wr._slim_story_lines(
+            daily_view=d_view,
+            weekly_view=w_view,
+            daily_raw=d_raw,
+            weekly_raw=w_raw,
+        )),
+        "\n".join(wr._format_slim_lights(d_view, d_raw, weekly=False)),
+        "\n".join(wr._slim_prev_act_lines(d_view, d_raw)),
+        wr._primary_light_code(d_raw, d_view),
+    ]
+    joined = "\n".join(blobs)
+    for bad in (
+        "待新寻底",
+        "换幕",
+        "当前幕",
+        "上一幕",
+        "吸筹幕",
+        "作废",
+        "旧Phase A已破",
+    ):
+        assert bad not in joined, f"helper leaked {bad!r}"
+    assert "破后强势" in joined
+    assert "Phase A 失效" in joined
+    assert "须重新寻底" in wr._slim_chain_token(
+        _failed_phase_a_plan()["daily_view"],
+        _failed_phase_a_plan()["daily_raw"],
+        failed=True,
+        weekly=False,
+    )
+
+
 def test_wd10_phase_label_on_oneline():
     """W-D10：phase_label 须出现在中线/短线一句话，禁止阶段黑洞。"""
     text = render_wyckoff_detail(_sample_plan())

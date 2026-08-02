@@ -33,6 +33,19 @@ python3 scripts/final_wyckoff.py rank
 - 禁止默认 `--output json`
 - 失败：只报失败原因；禁止凭记忆补事件/阶段
 
+## 当选股器用（cwd = 本 skill 根；池入口在 trader）
+
+```text
+验票（结构）→ python3 scripts/final_wyckoff.py --target <NAME>
+入池 → python3 ../trader/scripts/final_pool.py add --target <NAME>
+刷新 → python3 ../trader/scripts/final_pool.py refresh
+排序 → python3 ../trader/scripts/final_pool.py rank  与/或  python3 scripts/final_wyckoff.py rank
+明日盯 → python3 ../trader/scripts/final_pool.py plan
+```
+
+仓库根等价：`python3 01-功能包-packages/wyckoff/scripts/final_wyckoff.py ...` / `python3 01-功能包-packages/trader/scripts/final_pool.py ...`。  
+wyckoff 入池行为软建议；出手/分道仍听 trader。本 Skill 的 `rank` ≠ trader 分道。
+
 ## 硬门控
 
 1. 未跑脚本 → 不报威科夫结论
