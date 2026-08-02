@@ -63,18 +63,22 @@ def _plan(short_view: dict, midline_view: dict | None = None) -> dict:
 
 def test_cd4a_last_up_matches_card(up_view):
     text = render_chanlun_card(_plan(up_view))
-    short = text.split("⏱ 短线（日）", 1)[1].split("⏱ 中线副读", 1)[0]
+    short = text.split("⚡ 短线（日）", 1)[1].split("⏱ 中线副读", 1)[0]
     assert up_view["stroke_count"] == 3
     assert up_view["current_stroke_direction"] == "up"
-    assert "笔 3｜当前笔 向上笔｜近笔 ↑↓↑" in short
+    assert "笔：3" in short
+    assert "当前笔：向上笔" in short
+    assert "近笔：↑↓↑" in short
 
 
 def test_cd4b_last_down_matches_card(down_view):
     text = render_chanlun_card(_plan(down_view))
-    short = text.split("⏱ 短线（日）", 1)[1].split("⏱ 中线副读", 1)[0]
+    short = text.split("⚡ 短线（日）", 1)[1].split("⏱ 中线副读", 1)[0]
     assert down_view["stroke_count"] == 3
     assert down_view["current_stroke_direction"] == "down"
-    assert "笔 3｜当前笔 向下笔｜近笔 ↓↑↓" in short
+    assert "笔：3" in short
+    assert "当前笔：向下笔" in short
+    assert "近笔：↓↑↓" in short
 
 
 def test_cd4c_recent_sequence_is_engine_order():
@@ -82,7 +86,9 @@ def test_cd4c_recent_sequence_is_engine_order():
     assert view["stroke_count"] == 6
     assert view["recent_stroke_directions"] == ["up", "down", "up", "down", "up"]
     text = render_chanlun_card(_plan(view))
-    assert "笔 6｜当前笔 向上笔｜近笔 ↑↓↑↓↑" in text
+    assert "笔：6" in text
+    assert "当前笔：向上笔" in text
+    assert "近笔：↑↓↑↓↑" in text
 
 
 def test_midline_daily_fallback_is_explicit(up_view):
@@ -98,13 +104,13 @@ def test_buy_sell_points_only_come_from_engine_arrays(up_view):
     empty = _engine_result(["up", "down", "up"])
     empty["chanlun"]["buy_point_text"] = "一类买"
     no_point_text = render_chanlun_card(_plan(build_chanlun_view(empty)))
-    assert "买点 未形成" in no_point_text
+    assert "买点：未形成" in no_point_text
     assert "一类买" not in no_point_text
 
     with_point = _engine_result(["up", "down", "up"])
     with_point["chanlun"]["buy_points"] = [{"type": "一类买", "price": 10.25}]
     point_text = render_chanlun_card(_plan(build_chanlun_view(with_point)))
-    assert "买点 一类买 10.25" in point_text
+    assert "买点：一类买 10.25" in point_text
 
 
 def test_build_plan_uses_shared_snapshot_and_both_engines(monkeypatch):
@@ -187,7 +193,20 @@ def test_cd4e_tip_leave_demotes_stale_up_stroke():
     assert view["current_stroke_direction"] == "up"  # 引擎原始末笔仍可核
     assert view["tip_leave"] == "up_left"
     text = render_chanlun_card(_plan(view))
-    short = text.split("⏱ 短线（日）", 1)[1].split("⏱ 中线副读", 1)[0]
+    short = text.split("⚡ 短线（日）", 1)[1].split("⏱ 中线副读", 1)[0]
     assert "高点已离开·向下未成笔" in short
-    assert "当前笔 向上笔" not in short
-    assert "走势 拉升段" not in short
+    assert "当前笔：向上笔" not in short
+    assert "走势：拉升段" not in short
+
+
+def test_wechat_layout_has_section_breaks_and_buy_first():
+    """微信排版：分节空行 + 买卖点在结构之前。"""
+    text = render_chanlun_card(
+        _plan(build_chanlun_view(_engine_result(["up", "down", "up"])))
+    )
+    assert "\n\n📊 现况\n" in text
+    assert "\n\n⚡ 短线（日）\n" in text
+    short = text.split("⚡ 短线（日）", 1)[1].split("⏱ 中线副读", 1)[0]
+    assert short.index("买点：") < short.index("结构：")
+    assert short.index("卖点：") < short.index("结构：")
+    assert "|" not in text

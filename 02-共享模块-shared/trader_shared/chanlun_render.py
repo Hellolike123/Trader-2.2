@@ -1,6 +1,7 @@
 """缠论专项结构卡渲染（微信安全；只读引擎薄 view）。
 
-法源：docs/plans/chanlun-cd-followup-handoff.md §2.3 / §3。
+法源：docs/plans/chanlun-cd-followup-handoff.md §2.3 / §3；
+排版对齐威科夫详析卡：分节独立成行，买卖点前置，少堆竖线墙。
 禁止在此模块重算笔或从其他文案补出买卖点。
 """
 from __future__ import annotations
@@ -105,19 +106,19 @@ def _midline_heading(view: dict[str, Any]) -> str:
 
 
 def _view_lines(view: dict[str, Any]) -> list[str]:
+    """微信可读：买卖点前置，字段分行；并列仅保留短字段用｜。"""
+    stroke_n = int(view.get("stroke_count") or 0)
+    zones_n = int(view.get("zones_count") or 0)
+    segs_n = int(view.get("segments_count") or 0)
     return [
-        (
-            f"  结构 {_fmt_structure(view)}｜走势 {_fmt_trend(view)}"
-            f"｜笔 {int(view.get('stroke_count') or 0)}"
-            f"｜当前笔 {_fmt_current_direction(view)}"
-            f"｜近笔 {_fmt_recent_directions(view)}"
-        ),
-        (
-            f"  中枢 {int(view.get('zones_count') or 0)}"
-            f"｜段 {int(view.get('segments_count') or 0)}"
-            f"｜买点 {_fmt_points(view.get('buy_points'))}"
-            f"｜卖点 {_fmt_points(view.get('sell_points'))}"
-        ),
+        f"  买点：{_fmt_points(view.get('buy_points'))}",
+        f"  卖点：{_fmt_points(view.get('sell_points'))}",
+        f"  结构：{_fmt_structure(view)}",
+        f"  走势：{_fmt_trend(view)}",
+        f"  笔：{stroke_n}",
+        f"  当前笔：{_fmt_current_direction(view)}",
+        f"  近笔：{_fmt_recent_directions(view)}",
+        f"  中枢：{zones_n}｜段：{segs_n}",
     ]
 
 
@@ -148,24 +149,24 @@ def render_chanlun_card(plan: dict[str, Any]) -> str:
         plan.get("midline_view") if isinstance(plan.get("midline_view"), dict) else {}
     )
 
-    lines = [title]
+    lines = [title, ""]
     price = _fmt_price(plan.get("price"))
+    lines.append("📊 现况")
     if price is not None:
-        lines.append(f"现价 {price}")
-    lines.extend(
-        [
-            f"取数：日{daily_count}根｜周{weekly_count}根｜复权{adjust_label}｜{data_note}",
-            "",
-            "⏱ 短线（日）",
-        ]
-    )
+        lines.append(f"  现价：{price}")
+    lines.append(f"  取数：日{daily_count}根｜周{weekly_count}根")
+    lines.append(f"  复权：{adjust_label}")
+    lines.append(f"  说明：{data_note}")
+    lines.extend(["", "⚡ 短线（日）"])
     lines.extend(_view_lines(short_view))
     lines.extend(["", _midline_heading(midline_view)])
     lines.extend(_view_lines(midline_view))
     lines.extend(
         [
             "",
-            "💬 说明：本卡只复述缠论引擎结构与买卖点；中线阶段仍由周线威科夫负责",
+            "💬 说明",
+            "  本卡只复述缠论引擎结构与买卖点",
+            "  中线阶段仍由周线威科夫负责",
         ]
     )
     return _wechat_safe("\n".join(lines))
