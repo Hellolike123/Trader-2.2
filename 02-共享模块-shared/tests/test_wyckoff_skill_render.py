@@ -297,10 +297,10 @@ def test_sb1_default_slim_skeleton_no_long_blocks():
     assert "🧭 中线" in text
     assert "⚡ 短线" in text
     assert "🔮 推演" in text
-    assert "现在：" in text
-    assert "若变好：" in text
-    assert "若变坏：" in text
-    assert "⭐ 盯：" in text
+    assert "\n  现在\n" in text
+    assert "\n  若变好\n" in text
+    assert "\n  若变坏\n" in text
+    assert "\n  ⭐ 盯\n" in text
     assert "本卡不下单；出手/分道看 trader" in text
     assert "威科夫详析 —" not in text
     assert "📊 现况" not in text
@@ -313,10 +313,10 @@ def test_sb17_failed_slim_story_no_healthy_advance():
     """S-B17：短推演保留；failed 不得健康还差/链可推进。"""
     text = render_wyckoff_slim(_failed_phase_a_plan())
     story = text.split("🔮 推演", 1)[1]
-    assert "现在：" in story
-    assert "若变好：" in story
-    assert "若变坏：" in story
-    assert "⭐ 盯：" in story
+    assert "\n  现在\n" in story
+    assert "\n  若变好\n" in story
+    assert "\n  若变坏\n" in story
+    assert "\n  ⭐ 盯\n" in story
     assert "重新寻底" in story or "新 SC" in story
     assert "还差" not in story
     assert "链可推进" not in story

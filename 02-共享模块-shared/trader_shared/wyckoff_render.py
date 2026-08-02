@@ -715,11 +715,19 @@ def _slim_story_lines(
     )
     watch_s = watch[0] if watch else "继续观察结构"
 
+    # 与中线/短线一致：标题下缩进；标签与正文分行（旧故事链节奏，一行一段不挤）
     return [
-        f"现在：{now}",
-        f"若变好：{better}",
-        f"若变坏：{worse}",
-        f"⭐ 盯：{watch_s}",
+        "现在",
+        now,
+        "",
+        "若变好",
+        better,
+        "",
+        "若变坏",
+        worse,
+        "",
+        "⭐ 盯",
+        watch_s,
         "本卡不下单；出手/分道看 trader",
     ]
 
@@ -1028,9 +1036,12 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
             "现价 —｜周中性·无主灯｜日中性·无主灯｜暂不建议入池（数据不足）",
             "",
             "🔮 推演",
-            f"现在：⚠ {plan['error']}",
-            "⭐ 盯：数据不足，仅现价",
-            "本卡不下单；出手/分道看 trader",
+            "  现在",
+            f"  ⚠ {plan['error']}",
+            "",
+            "  ⭐ 盯",
+            "  数据不足，仅现价",
+            "  本卡不下单；出手/分道看 trader",
         ]
         return "\n".join(lines)
 
@@ -1083,7 +1094,10 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
         daily_raw=daily_raw,
         weekly_raw=weekly_raw,
     ):
-        lines.append(story)
+        if story == "":
+            lines.append("")
+        else:
+            lines.append(f"  {story}")
 
     text = "\n".join(lines)
     for bad in _FORBIDDEN_BUY_WORDS:
