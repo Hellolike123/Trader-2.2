@@ -298,6 +298,22 @@ def _assemble_base_report_impl(
     _ = stage
     _stm = str(stage_result.get("momentum") or "震荡")
 
+    # G-K2：report["wyckoff"] = 周线结果或 insufficient 桩；禁止 or daily
+    _wyck_mid_insufficient = {
+        "timeframe": "insufficient",
+        "phase": "none",
+        "wyckoff_summary": "中线数据不足",
+        "spring_signal": False,
+        "upthrust_signal": False,
+        "bc_signal": False,
+        "sow_signal": False,
+        "sos_signal": False,
+    }
+    _wyck_mid = (
+        (wyck_mid_result.get("wyckoff") if isinstance(wyck_mid_result, dict) else None)
+        or _wyck_mid_insufficient
+    )
+
     report: dict[str, Any] = {
         "intraday_as_of": intraday_as_of,
         "name": quote.get("name") or sec.name,
@@ -426,22 +442,9 @@ def _assemble_base_report_impl(
         "confidence": stage_result.get("confidence", 0),
         "protection_notes": stage_result.get("protection_notes", []),
         "stop_losses": stage_result.get("stop_losses", {}),
-        "wyckoff": (wyck_mid_result.get("wyckoff") if isinstance(wyck_mid_result, dict) else None)
-        or wyck_result.get("wyckoff", wyck_result),
+        "wyckoff": _wyck_mid,
         "wyckoff_daily": wyck_result.get("wyckoff", wyck_result),
-        "wyckoff_midline": (
-            (wyck_mid_result.get("wyckoff") if isinstance(wyck_mid_result, dict) else None)
-            or {
-                "timeframe": "insufficient",
-                "phase": "none",
-                "wyckoff_summary": "中线数据不足",
-                "spring_signal": False,
-                "upthrust_signal": False,
-                "bc_signal": False,
-                "sow_signal": False,
-                "sos_signal": False,
-            }
-        ),
+        "wyckoff_midline": _wyck_mid,
         "chanlun_daily": chan_result,
         "chanlun_midline": chan_mid_result
         if chan_mid_result

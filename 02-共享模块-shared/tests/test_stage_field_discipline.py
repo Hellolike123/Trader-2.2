@@ -274,3 +274,47 @@ def test_resonance_wujieduan_plus_major_xushi_not_aligned():
     res = build_resonance(report)
     assert res["posts"]["background"]["ok"] is False
     assert res["grade"] != "aligned"
+
+
+def test_g_k2_wyckoff_alias_equals_midline_no_daily_fallback():
+    """G-K2 / W-DIFF-3 / M-G2：mid 不足时 report['wyckoff'] = insufficient 桩，≠ daily。"""
+    daily = {
+        "timeframe": "daily",
+        "phase": "accumulation_b",
+        "wyckoff_summary": "日线吸筹",
+        "spring_signal": False,
+        "upthrust_signal": False,
+        "bc_signal": False,
+        "sow_signal": False,
+        "sos_signal": False,
+    }
+    report = assemble_base_report(
+        _minimal_assemble_ctx(
+            wyck_result={"wyckoff": daily},
+            wyck_mid_result=None,
+        )
+    )
+    assert report["wyckoff"] is report["wyckoff_midline"]
+    assert report["wyckoff"]["timeframe"] == "insufficient"
+    assert report["wyckoff"] is not report["wyckoff_daily"]
+    assert report["wyckoff_daily"] is daily or report["wyckoff_daily"] == daily
+
+    mid = {
+        "timeframe": "weekly",
+        "phase": "accumulation_c",
+        "wyckoff_summary": "周线吸筹",
+        "spring_signal": True,
+        "upthrust_signal": False,
+        "bc_signal": False,
+        "sow_signal": False,
+        "sos_signal": False,
+    }
+    report2 = assemble_base_report(
+        _minimal_assemble_ctx(
+            wyck_result={"wyckoff": daily},
+            wyck_mid_result={"wyckoff": mid},
+        )
+    )
+    assert report2["wyckoff"] is report2["wyckoff_midline"]
+    assert report2["wyckoff"] is mid
+    assert report2["wyckoff"] is not report2["wyckoff_daily"]
