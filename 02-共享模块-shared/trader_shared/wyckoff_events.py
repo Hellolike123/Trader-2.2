@@ -1451,6 +1451,17 @@ def _st_sc_empty(reason: str = "未检测到 SC 锚点") -> dict:
     }
 
 
+def _st_sc_max_bars_for_tf(timeframe: str = "daily") -> int:
+    """广义 ST 扫描根数：日线 = config；周线半幅（``wyckoff-weekly-scan-windows-handoff`` §1.2）。
+
+    默认 22 → 周线 ``max(8, ceil(22/2))=11``，避免周线 ST 窗≈5 个月过松。
+    """
+    n = int(WYCKOFF_ST_SC_MAX_BARS)
+    if str(timeframe or "").lower() == "weekly":
+        return max(8, (n + 1) // 2)
+    return n
+
+
 def _detect_secondary_test_sc(
     bars: list[dict],
     tr_ctx: dict | None = None,
@@ -1522,11 +1533,12 @@ def _detect_secondary_test_sc(
             pass
     st_scan_start = int(st_anchor) + 3
 
-    st_scan_end = min(len(bars), st_scan_start + int(WYCKOFF_ST_SC_MAX_BARS))
+    st_max = _st_sc_max_bars_for_tf(timeframe)
+    st_scan_end = min(len(bars), st_scan_start + st_max)
     # 破位扫描须覆盖 SC→AR 前 + ST 窗，避免漏掉 AR 前有效跌破
     fail_scan_end = min(
         len(bars),
-        max(st_scan_end, sc_bar_idx + 1 + int(WYCKOFF_ST_SC_MAX_BARS)),
+        max(st_scan_end, sc_bar_idx + 1 + st_max),
     )
     if fail_scan_end <= sc_bar_idx + 1:
         return _st_sc_empty("SC 后无足够 K 线")
@@ -2077,26 +2089,47 @@ def _scan_last_event(
 
     timeframe / is_index：透传给 SC/AR 等认周期检测器（W-01）。
 
+    短序列（n < window）：与 ``_scan_for_signal`` 对齐，整段试探一次（S1；
+    周线叙事窗约 12 根时常小于日线 window=15）。命中则索引 = n-1。
+
     Returns:
         (index, result) —— 未找到时 (-1, None)
     """
     n = len(scan_bars)
-    if n < window:
+    if n <= 0:
         return -1, None
+
+    def _call(sub: list[dict]) -> dict:
+        try:
+            if tr_ctx is None:
+                return detector_fn(sub, timeframe=timeframe, is_index=is_index)
+            return detector_fn(
+                sub, tr_ctx=tr_ctx, timeframe=timeframe, is_index=is_index
+            )
+        except TypeError:
+            pass
+        if tr_ctx is None:
+            return detector_fn(sub)
+        try:
+            return detector_fn(sub, tr_ctx=tr_ctx)
+        except TypeError:
+            return detector_fn(sub)
+
+    if n < window:
+        try:
+            res = _call(scan_bars)
+            if any(k.endswith("_signal") and res.get(k) is True for k in res):
+                return n - 1, res
+        except Exception:
+            pass
+        return -1, None
+
     last_idx = -1
     last_res: dict | None = None
     for start in range(0, n - window + 1, step):
         sub = scan_bars[start:start + window]
         try:
-            # 统一用关键字传 tr_ctx / timeframe：各 detector 第二位置参数不同
-            # (_detect_spring / _detect_sign_of_weakness 第二参是 _support，
-            #  位置传参会把 tr_ctx 错塞进 _support 导致 tr_ctx 实际为 None 而失效)
-            try:
-                res = detector_fn(
-                    sub, tr_ctx=tr_ctx, timeframe=timeframe, is_index=is_index
-                )
-            except TypeError:
-                res = detector_fn(sub, tr_ctx=tr_ctx)
+            res = _call(sub)
         except Exception:
             continue
         if any(k.endswith("_signal") and res.get(k) is True for k in res):

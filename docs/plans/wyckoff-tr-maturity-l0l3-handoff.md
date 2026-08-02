@@ -126,7 +126,7 @@ box_display_mode: "none" | "proto" | "box"
 | 常量 | 现状默认 | A 股建议方向 | 语义红线 |
 |------|----------|--------------|----------|
 | `WYCKOFF_ST_SC_VOL_RATIO` | 0.60 | 可略放宽至 ~0.70–0.75 | 仍须明显弱于 SC |
-| `WYCKOFF_ST_SC_MAX_BARS` | 15 | 可 → 20–25（慢回测） | 仍须发生回测 |
+| `WYCKOFF_ST_SC_MAX_BARS` | 15（现行 config **22**） | 可 → 20–25（慢回测，**日线语义**）；**周线半幅** `max(8, ceil(N/2))`（22→11；见 `wyckoff-weekly-scan-windows-handoff.md` S3） | 仍须发生回测；禁止周线沿用日线 22 根≈5 个月过松窗 |
 | `WYCKOFF_ST_SC_PROXIMITY` | 0.02 | 可 → 0.03 | 仍须进入 SC 区 |
 | `WYCKOFF_ST_SC_MAX_PIERCE` | 0.005 | 可 → 0.01–0.015 | 刺穿须收回；有效破位不算 |
 

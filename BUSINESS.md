@@ -110,6 +110,8 @@
 - 取数：`WEEKLY_LOOKBACK_BARS=260`（约 5 年周 K 背景）
 - 开口：≥ `WYCKOFF_MIN_BARS=15` 根周 K；不足 → `timeframe=insufficient` →「周线不足 · 不参与定论」
 - 阶段叙事：约近 **12 根周 K**（`WYCKOFF_PHASE_LOOKBACK=60` × 周线缩比 0.2）
+- **阶段机滑窗（周线）**：`_scan_for_signal` / `_scan_last_event` 的 `window` / `max_lookback` 相对日线 **半幅**（`max(6, ceil(N/2))`）；短序列整段回退。禁止周线叙事窗≈12 仍套日线 `window=15` 导致索引序失效。规格：`docs/plans/wyckoff-weekly-scan-windows-handoff.md`（S1）
+- **广义 ST 扫描窗**：日线 `WYCKOFF_ST_SC_MAX_BARS`（默认 22）；周线 **半幅** `max(8, ceil(N/2))`（22→11）。规格：同上 handoff（S3）+ `wyckoff-tr-maturity-l0l3-handoff.md` §4
 - 读法：优先 `phase` + 事件链（如「还差 SOS」）+ `WyckoffStateView`；**不以**单事件亮灯或打分均值当状态
 - **Phase A 区间边界**（原典）：TR 种子由 **SC/ST 低点 + AR 高点**钉定。`forming`/`established`/`failed`（检测态，**≠**成熟箱体）。**SC 搜索宇宙 / 结构钉住 / 破位收口**现行法源：`docs/plans/wyckoff-structure-anchor-handoff.md`（冷启动日 90 / 周 39；未失效钉住；破位→`failed`）。`WYCKOFF_CLIMAX_ANCHOR_BARS=15` **不再**当 SC 唯一窗（仅 AR 等待默认种子等，见该 handoff §2.2）。P1/P2 种子史：`docs/plans/wyckoff-phase-a-range-handoff.md`
 - **箱体/量度成熟度 L0–L3**（展示合同）：L0 无 SC；L1=SC 或 SC+AR **无成功 ST** → 只写**雏形**、**禁止**「箱体」与量度；L2=真 ST（回测 SC 区+缩量，**禁止软确认**）→ 可写 `箱体 lo-hi`；L3=L2+宽度 → 可量度。仅分位 TR 不得量度。规格：`docs/plans/wyckoff-tr-maturity-l0l3-handoff.md`

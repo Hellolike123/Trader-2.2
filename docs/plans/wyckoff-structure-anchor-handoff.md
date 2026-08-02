@@ -56,7 +56,7 @@
 | `WYCKOFF_SC_COLD_START_BARS_DAILY` | **90** | `_find_sc_anchor` / `_sc_detector_params`（`timeframe=daily`）路径 B | 日线冷启动 SC 搜索宇宙硬封顶 | 当 TR 周期；当 AR 等待窗 |
 | `WYCKOFF_SC_COLD_START_BARS_WEEKLY` | **39** | 同上（`timeframe=weekly`）路径 B | 周线冷启动 SC 搜索宇宙硬封顶 | 同上 |
 | `WYCKOFF_AR_MAX_BARS` | **15**（env 可覆） | `_detect_ar`（及对称 ARE 若共用） | **AR 等待窗**：SC 后最多扫几根找首段 AR；周线可半幅缩放（既有） | 当 SC 搜索宇宙 |
-| `WYCKOFF_CLIMAX_ANCHOR_BARS` | **15**（保留名） | ① 无 env 时作 `WYCKOFF_AR_MAX_BARS` 的默认种子；② BC/ARE/阶段机短事件 lookback（既有 `wyckoff_phase` 扫描窗） | **仅** AR 等待默认种子 / 非 SC 短窗兼容别名 | **禁止**再当「SC 唯一搜索宇宙=15」；`_find_sc_anchor` **不得**再用它当 Path B CAP |
+| `WYCKOFF_CLIMAX_ANCHOR_BARS` | **15**（保留名） | ① 无 env 时作 `WYCKOFF_AR_MAX_BARS` 的默认种子；② BC/ARE/阶段机短事件 lookback（既有 `wyckoff_phase` 扫描窗） | **仅** AR 等待默认种子 / 非 SC 短窗兼容别名；**周线阶段机滑窗须半幅**（见 `wyckoff-weekly-scan-windows-handoff.md` S1） | **禁止**再当「SC 唯一搜索宇宙=15」；`_find_sc_anchor` **不得**再用它当 Path B CAP；**禁止**周线叙事窗≈12 仍套未缩放 `window=15` |
 | `phase_a_range.anchor_bars` | 日 90 / 周 39 | 透出/调试 | = 该 timeframe 的冷启动 CAP（非 15） | 写回 15 冒充 SC 宇宙 |
 | （可选）`phase_a_range.search_mode` | `"pinned"` \| `"cold_start"` | 透出 | 路径 A / B；实现可加，验收不强制字段名 | — |
 
