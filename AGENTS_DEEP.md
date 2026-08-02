@@ -14,7 +14,7 @@
 - **ATR trailing**：持仓票水位 `~/.trader/trailing_stop_watermark.json`（只紧不松；无仓不落）
 - **买点盖价**：`mid.pullback_low` > `buy_zone_low` > support；**不用** `life_line` 当回踩下沿
 - **T0 v2**：`today_action` 为人读结构文案；`position_size` 认 v2 + 旧枚举；风险状态含「数据异常/趋势下行暂不…」
-- **Fusion**：默认 cards；失败 warning 后 classic；三席 chan/momentum/**vpf**
+- **Fusion**：默认 cards；失败 → `cards_failed` 中性占位（**禁止**静默回退 classic）；三席 chan/momentum/**vpf**
 - 历史条目「T0 执行卡/三重共振」仅为变更史，**不再**描述当前产品输出
 
 ### 2026-07-20 — T0 执行卡 + Wyckoff Spring 弱分级 + 缠论 15m（历史）
@@ -578,7 +578,7 @@ ThreadPoolExecutor 并行执行策略（run_analysis.py）
   build_structure_context()     ← ATR + 移动止损(+持仓水位) + 支撑/阻力（串行）
   ↓
   merge_decisions(chan, momentum, vpf, regime, hmm_regime, analysis_cards=...)
-  ├── 默认 cards 路径（失败 warning → classic）
+  ├── 默认 cards 路径（失败 → cards_failed 中性；禁静默 classic）
   ├── Scenario Priority Filter (pos_pct → 动态权重)
   ├── Veto 噪声消解
   → {action, confidence, signals_detail.chan/momentum/vpf, fusion_input_path}

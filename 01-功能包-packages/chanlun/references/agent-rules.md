@@ -1,25 +1,65 @@
-# Chanlun Agent 硬规则
+# Agent 共用硬规则（SSOT）
 
-本文件继承仓库 `_common/agent-rules.md`；以下为本 Skill 必须执行的最小闭环。
+五 Skill（trader / t0 / review / wyckoff / daily_briefing）共用。改红线只改本文件；各 skill `references/agent-rules.md` 由本文件同步（或 `pack_all` 复制）。
 
-## 执行契约
+## 执行契约（CRITICAL）
 
-1. 只预读本 Skill 的 `agent-quickstart.md`
-2. 跑入口脚本，默认使用 Markdown 输出
-3. stdout 整段放进 fenced code block 原样贴出，然后停止
-4. 禁止改写、摘要、润色或补脚本未写的笔、段、中枢、价位和买卖点
-5. 脚本失败时只报失败原因，禁止手写面板
-6. 禁止默认 `--output json`
+本 skill 是**命令包装器**，不是分析知识库。
 
-## 微信红线
+1. 只预读该 skill 的 `references/agent-quickstart.md`
+2. 跑入口脚本，默认渲染输出（markdown）
+3. stdout **原样贴出**（整段放进 fenced code block）→ 停
+4. 禁止开工前批量读 references
+5. **禁止默认 `--output json`**（整包可达数百 KB）；仅 markdown 失败或确需字段时再开 JSON
+6. **禁止**改写、摘要、润色、补买卖建议、补脚本未写的价位/阶段/出手
+7. **脚本未成功产出面板** → 只报失败/降级原因；**禁止**凭记忆或训练数据编完整报告
+8. markdown 成功时**不要读** `anti-hallucination.md` / 字段指南（那些只服务 JSON 回退）
 
-面板禁止 Markdown 标题、水平线、粗体、ASCII 竖线表格、引用和星号／短横列表。
-并列只用全角 `｜`；脚本已渲染时不得二次排版。
+## 微信 / 移动端红线
 
-## 缠论边界
+最终面板会进微信。贴出脚本面板时禁止改写成：
 
-- 买卖点只认脚本中的引擎结果，禁止手补“接近一买”等暗示
-- 当前笔方向、笔数和近笔序列必须原样保留
-- 短线固定日线；中线只作周线结构副读，fallback 必须保留“日线”标注
-- 中线阶段仍由周线威科夫负责，本 Skill 不覆盖
-- 禁止“宜买、可执行、可低吸、该买了、三重共振买”等指令词
+- `#` / `##` 等 Markdown 标题
+- `---` / `***` 水平线
+- `**` 粗体
+- `|...|` 表格（并列用全角 `｜` 或空格）
+- `>` 块引用
+- `*` / `-` 列表符与带圈数字
+
+分节用 emoji + 普通文本独立成行（如 `🧭 中线`、`⚡ 短线`）。
+脚本已按红线渲染时：原样贴即可，不要「再排版」。
+
+## 命令 cwd
+
+- Skill 包内（Hermes / 已 cd 到 skill 根）：一律 `python3 scripts/<入口>.py ...`
+- 仓库根（Cursor always-on）：`python3 01-功能包-packages/<skill>/scripts/<入口>.py ...`
+- 仓位轮动在 **review** 包：`scripts/final_portfolio.py`（无独立 `portfolio/` 包）
+
+## 按文档改代码（CRITICAL）
+
+改引擎/合同（非贴面板快路径）时：先读 `BUSINESS.md` + 对应 `docs/plans/*-handoff.md`，禁止凭感觉发明行为。合同级改动默认「写 Agent + 查 Agent」对照法源验收后再 PR。全文见仓库根 `AGENTS.md`「按文档开发」与 `.cursor/rules/doc-driven-dev.mdc`。
+
+## 防漏改清单（改代码时）
+
+改单票报告格式时固定步骤（勿改 legacy / 勿手改 AGENTS 满分示例数字）：
+
+1. 改 `trader_shared/report_renderer/short_midline.py`
+2. 刷新 `02-共享模块-shared/tests/golden/*.render.md` + `fixtures/report_render_baseline.txt`
+3. 分区骨架变了再同步 `trader/references/output-template.md`（门禁会查分区头）
+4. 契约/业务同步：`BUSINESS.md` §5.1（及涉及的 §3.x）+ `AGENTS_DEEP.md` 微信满分骨架 + `output-style-guide.md`
+
+meta 纯 D（现行）：`综合动能 … ｜ {科创/创业板/上证/深成} ±% ｜ {行业短名} ±% ｜ 个股 ±%`；禁止再写「大盘 正常/偏弱」或单独「行业：…｜跑赢…」行。量价行可含量比/换手/调整天数/`ATR14 x.xx（复权口径）`（ATR 并入同行，非独立行）。
+
+短线学说点名：中线/短线均写 `威科夫：`（日线只对照）；**禁止**面板标签 `日线阶段：`。箱体人话：`箱体 lo-hi` / `箱体未成形 · 下沿…（上沿未出）`（禁写旧词「区间未钉」作产出）。
+
+| 改什么 | 认准一处 |
+|--------|----------|
+| 中短线面板文案 | 上面步骤 |
+| 板块对照指数 / 环境档 | `market_env.resolve_board_index` + `assess(index_code=)`；接线 `context_stage` |
+| 新开 / 出手收紧 | `chan_discipline` / `mistery_gate` / `decision_view`（须 entry.executable；C1 用 `format_entry_line_c1`；禁止新开时 caps/`suggested_pct` 归零） |
+| Fusion 席位（生产） | `analysis/fusion_card_signals.py`（cards 路径；失败 → `cards_failed` 中性，禁静默 classic） |
+| ATR 移动止损水位 | `structure_core`（持仓票 `~/.trader/trailing_stop_watermark.json`，只紧不松） |
+| 买点盖价 | `buy_point_lifecycle.resolve_lid_price`（显式>回踩下沿>买区下沿>支撑；不用 life_line 当回踩） |
+| 微信红线本身 | 只改本文件，再 sync 各 Skill 的 `references/agent-rules.md` |
+
+生产唯一渲染：短中线（`SHORT_MIDLINE_REPORT=false` 已忽略）。Fusion 默认 `cards`；classic 仅对照（deprecated）。出手听 `decision_view`（entry 须 executable），fusion 分仅仪表；`FUSION_OVERRIDE_ENABLED` 默认 false。

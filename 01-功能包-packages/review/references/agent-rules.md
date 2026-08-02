@@ -57,7 +57,7 @@ meta 纯 D（现行）：`综合动能 … ｜ {科创/创业板/上证/深成} 
 | 中短线面板文案 | 上面步骤 |
 | 板块对照指数 / 环境档 | `market_env.resolve_board_index` + `assess(index_code=)`；接线 `context_stage` |
 | 新开 / 出手收紧 | `chan_discipline` / `mistery_gate` / `decision_view`（须 entry.executable；C1 用 `format_entry_line_c1`；禁止新开时 caps/`suggested_pct` 归零） |
-| Fusion 席位（生产） | `analysis/fusion_card_signals.py`（cards 路径；失败 warning→classic） |
+| Fusion 席位（生产） | `analysis/fusion_card_signals.py`（cards 路径；失败 → `cards_failed` 中性，禁静默 classic） |
 | ATR 移动止损水位 | `structure_core`（持仓票 `~/.trader/trailing_stop_watermark.json`，只紧不松） |
 | 买点盖价 | `buy_point_lifecycle.resolve_lid_price`（显式>回踩下沿>买区下沿>支撑；不用 life_line 当回踩） |
 | 微信红线本身 | 只改本文件，再 sync 各 Skill 的 `references/agent-rules.md` |
