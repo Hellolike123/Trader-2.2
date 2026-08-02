@@ -128,8 +128,12 @@ def test_s_a4_s_a5_breakdown_fails_phase_a_and_forbids_st() -> None:
 
     daily_line = format_wyckoff_daily_phase_light(result)
     midline = format_wyckoff_midline_light(result)
-    assert "Phase A失败" in daily_line
-    assert "Phase A失败" in midline
+    # R-F1/R-F2/R-F3/R-F5：报告光杆 failed → 失效｜须重新寻底；禁「失败」
+    assert daily_line == "Phase A 失效｜须重新寻底｜仅对照"
+    assert midline == "威科夫：Phase A 失效｜须重新寻底｜不据此开仓"
+    for bad in ("Phase A失败", "Phase A 失败"):
+        assert bad not in daily_line
+        assert bad not in midline
     assert "停止：SC+AR" not in result.get("phase_label", "")
     assert "雏形" not in daily_line
     assert "雏形" not in midline
@@ -137,6 +141,33 @@ def test_s_a4_s_a5_breakdown_fails_phase_a_and_forbids_st() -> None:
     assert chain.startswith("威：SC")
     assert chain.endswith("（Phase A 失效）")
     assert "还差" not in chain
+
+
+def test_r_f_light_format_failed_ban_words() -> None:
+    """R-F1…R-F5 / M-R1：光杆 format failed fixture 禁「失败」，含失效｜须重新寻底。"""
+    failed = {
+        "phase_a_status": "failed",
+        "phase": "none",
+        "phase_label": "无明确阶段（Phase A 失败，破位未收回）",
+        "phase_tr_gated": True,
+        "phase_tr_gate_reason": "phase_a_failed",
+        "tr_maturity": "L0",
+        "box_display_mode": "none",
+        "measure_allowed": False,
+        "sc_signal": True,
+        "sc_price": 10.0,
+        "sc_low": 10.0,
+        "timeframe": "daily",
+    }
+    daily = format_wyckoff_daily_phase_light(failed)
+    mid = format_wyckoff_midline_light(failed)
+    assert daily == "Phase A 失效｜须重新寻底｜仅对照"
+    assert mid == "威科夫：Phase A 失效｜须重新寻底｜不据此开仓"
+    for text in (daily, mid):
+        assert "Phase A 失效" in text
+        assert "须重新寻底" in text
+        for bad in ("Phase A失败", "Phase A 失败"):
+            assert bad not in text
 
 
 def test_s_a6_daily_weekly_caps_are_separate() -> None:

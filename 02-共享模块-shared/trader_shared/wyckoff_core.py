@@ -1462,11 +1462,12 @@ def resolve_wyckoff_primary(
 
     # 优先级与 format_wyckoff_oneline 一致（含 UTAD/BU 优先于 Spring）
     if str(wyk.get("phase_a_status") or "").strip() == "failed":
+        # 人话直接进面板（oneline / view）；写「失效」不写「失败」（R-F* / §1.2.6）
         return {
             "status": "event",
             "code": "PhaseAFail",
-            "cn_name": "破位失败",
-            "main": "Phase A 失败，跌破 SC 未收回",
+            "cn_name": "破位失效",
+            "main": "Phase A 失效，须重新寻底",
             "note": "失效结构，不按健康吸筹推进",
             "direction": -1,
             "phase_label": phase,
@@ -1814,7 +1815,7 @@ def format_wyckoff_daily_phase_light(
     box = _phase_a_box_phrase(wyk)
 
     if phase_a == "failed":
-        return "Phase A失败 · 破位未收回 · 仅对照"
+        return "Phase A 失效｜须重新寻底｜仅对照"
 
     # P0-B 无/低质量 TR：压制成熟箱体；若有 L1 雏形仍提示
     if gated and gate_r in ("no_tr", "low_quality") and _suppress_mature_box(
@@ -1873,7 +1874,7 @@ def format_wyckoff_midline_light(
 
     wyk = _unwrap_wyckoff_dict(wyckoff)
     if str(wyk.get("phase_a_status") or "").strip() == "failed":
-        return "威科夫：Phase A失败 · 破位未收回 · 不据此开仓"
+        return "威科夫：Phase A 失效｜须重新寻底｜不据此开仓"
     phase_plain = _plain_phase_midline(str(info.get("phase_label") or ""))
     d = int(direction) if direction is not None else int(info["direction"] or 0)
     # 契约：中线威科夫始终「阶段 · 事件」；阶段定不出时用「无」，禁止直接跳到事件灯
