@@ -408,22 +408,51 @@ def test_sb9_failed_slim_resets_next_watch_without_healthy_gap():
     assert "○ AR（自动反弹）未亮" not in text
 
 
-def test_sb18_failed_plus_sos_splits_old_vs_after():
-    """S-B18：failed 后又亮 SOS → 拆开旧破与破后强势，禁 SC→SOS（已失效）拧句。"""
+def test_sb18_failed_plus_sos_uses_two_act_scene_change():
+    """S-B18/S-B19：failed+SOS → 换幕两幕；当前幕只有 SOS；SC 进上一幕。"""
     plan = _failed_phase_a_plan()
     plan["daily_raw"]["sos_signal"] = True
     plan["daily_raw"]["sos_price"] = 11.2
     plan["daily_view"]["active_events"] = ["sc", "sos"]
     plan["daily_view"]["event_detail"]["sos"] = {"id": "sos", "price": 11.2}
+    # 周线派发辅助 ARE：下一盯不得接吸筹 SC
+    plan["weekly_view"]["active_events"] = ["are"]
+    plan["weekly_view"]["bias"] = "bear"
+    plan["weekly_raw"]["are_signal"] = True
+    plan["weekly_raw"]["are_price"] = 12.0
+    plan["weekly_raw"]["bc_signal"] = False
     text = render_wyckoff_slim(plan)
-    assert "旧破·其后SOS" in text or "旧破·其后SOS" in text.split("\n", 2)[1]
-    assert "破后强势，不是原吸筹链复活" in text
+    assert "日：换幕（旧吸筹结束→破后强势）" in text
+    assert "⚡ 短线 · 当前幕" in text
+    assert "📎 上一幕（已结束）" in text
+    assert "破后强势" in text
+    assert "不是旧吸筹复活" in text
     assert "SC→SOS（Phase A 已失效）" not in text
-    assert "旧Phase A已破｜其后SOS" in text
     assert "重新寻底／新 SC" not in text
-    assert "回踩是否站稳" in text
+    short_cur = text.split("⚡ 短线 · 当前幕", 1)[1].split("📎 上一幕", 1)[0]
+    assert "● SOS（强势信号）" in short_cur
+    assert "● SC（卖力高潮）" not in short_cur
+    assert "○ 下一盯：回踩是否站稳" in short_cur
+    prev = text.split("📎 上一幕（已结束）", 1)[1].split("🔮 推演", 1)[0]
+    assert "SC" in prev and "旧故事作废" in prev
+    mid = text.split("🧭 中线", 1)[1].split("⚡ 短线", 1)[0]
+    assert "○ SC（卖力高潮）下一盯" not in mid
+    assert "派发未确认" in mid or "中线观望" in mid
     assert "还差" not in text
     assert "链可推进" not in text
+
+
+def test_sb19_weekly_are_without_bc_no_accum_sc_next():
+    """S-B19：周线 ARE 无 BC 时，下一盯不得接吸筹 SC。"""
+    plan = _sample_plan()
+    plan["weekly_view"]["active_events"] = ["are"]
+    plan["weekly_view"]["bias"] = "bear"
+    plan["weekly_raw"] = {"are_signal": True, "are_price": 31.78, "bc_signal": False}
+    text = render_wyckoff_slim(plan)
+    mid = text.split("🧭 中线", 1)[1].split("⚡ 短线", 1)[0]
+    assert "● ARE（自动回落）" in mid
+    assert "○ SC（卖力高潮）下一盯" not in mid
+    assert "派发未确认" in mid
 
 
 def test_sb11_l0_slim_does_not_show_percentile_box_numbers():
