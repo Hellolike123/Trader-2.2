@@ -25,6 +25,7 @@ PATH_KEYS (filenames under trader_root unless noted):
   buy_point_lifecycle      → buy_point_lifecycle.json
   last_add_dates           → last_add_dates.json
   wyckoff_phase            → wyckoff_phase.json
+  wyckoff_phase_a_anchor   → wyckoff_phase_a_anchor.json
   position                 → position.json          (T0)
   positions_portfolio      → positions.json         (review portfolio)
   account                  → account.json
@@ -55,6 +56,7 @@ _FILE_BY_KEY: dict[str, str] = {
     "buy_point_lifecycle": "buy_point_lifecycle.json",
     "last_add_dates": "last_add_dates.json",
     "wyckoff_phase": "wyckoff_phase.json",
+    "wyckoff_phase_a_anchor": "wyckoff_phase_a_anchor.json",
     "position": "position.json",
     "positions_portfolio": "positions.json",
     "account": "account.json",

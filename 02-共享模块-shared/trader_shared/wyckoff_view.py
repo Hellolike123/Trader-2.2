@@ -92,7 +92,7 @@ class WyckoffStateView(TypedDict, total=False):
 
     phase: str
     phase_label: str
-    phase_a_status: str  # none | forming | established
+    phase_a_status: str  # none | forming | established | failed
     confidence: float  # 0~1，启发式，非概率校准
     premature: WyckoffPrematureView
     # CM 行为模式（轻量映射透出）
@@ -124,6 +124,7 @@ _GATE_REASON_NOTES: dict[str, str] = {
     "low_quality": "TR质量不足，阶段不参与定论",
     "forming_phase_a": "箱体未成形，阶段不抬升",
     "no_established_seed": "无Phase A种子箱，阶段不抬升",
+    "phase_a_failed": "Phase A失败，阶段不参与定论",
 }
 
 
@@ -146,6 +147,8 @@ def _bias_from_analysis(wyk: dict[str, Any]) -> Bias:
     """与 format_wyckoff_oneline 主信号优先级大致对齐的弱 bias（不用于下单）。"""
     if wyk.get("timeframe") == "insufficient":
         return "neutral"
+    if str(wyk.get("phase_a_status") or "").strip() == "failed":
+        return "bear"
     if wyk.get("utad_signal") or wyk.get("sow_signal") or wyk.get("lpsy_signal"):
         return "bear"
     if wyk.get("bc_signal") and not wyk.get("spring_signal"):

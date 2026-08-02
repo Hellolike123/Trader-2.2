@@ -13,6 +13,8 @@ try:
     from trader_shared.config import (
         WYCKOFF_MIN_BARS,
         WYCKOFF_CLIMAX_ANCHOR_BARS,
+        WYCKOFF_SC_COLD_START_BARS_DAILY,
+        WYCKOFF_SC_COLD_START_BARS_WEEKLY,
         WYCKOFF_AR_MAX_BARS,
         WYCKOFF_AR_PREFER_WEAK_VS_SC,
         WYCKOFF_AR_REQUIRE_WEAK_VS_SC,
@@ -92,6 +94,8 @@ try:
 except ImportError:
     WYCKOFF_MIN_BARS = 15
     WYCKOFF_CLIMAX_ANCHOR_BARS = 15
+    WYCKOFF_SC_COLD_START_BARS_DAILY = 90
+    WYCKOFF_SC_COLD_START_BARS_WEEKLY = 39
     WYCKOFF_AR_MAX_BARS = 15
     WYCKOFF_AR_PREFER_WEAK_VS_SC = True
     WYCKOFF_AR_REQUIRE_WEAK_VS_SC = False
@@ -288,13 +292,16 @@ def resolve_wyckoff_is_index(symbol: Any = "") -> bool:
 
 
 def _sc_detector_params(timeframe: str = "daily", *, is_index: bool = False) -> dict:
-    """日/周线 SC 锚点参数。周线单根振幅大、量比更平滑，须缩窗降量阈并用 close 定低位。
+    """日/周线 SC 锚点参数。
+
+    ``anchor_bars`` 是无 alive 锚时的冷启动 CAP（日 90 / 周 39），
+    不是旧 ``WYCKOFF_CLIMAX_ANCHOR_BARS`` 的 15 根短窗。
 
     指数/大盘：量比难达个股阈值 → 略放宽 SC 量阈；ST 仍强制回测 SC 区，禁止软确认绕过。
     """
     if str(timeframe or "").lower() == "weekly":
         params = {
-            "anchor_bars": max(6, int(WYCKOFF_CLIMAX_ANCHOR_BARS * 0.5)),
+            "anchor_bars": int(WYCKOFF_SC_COLD_START_BARS_WEEKLY),
             "support_lookback": max(4, int(WYCKOFF_SPRING_SUPPORT_LOOKBACK * 0.5)),
             "vol_ratio_threshold": min(WYCKOFF_BC_VOL_RATIO_THRESHOLD, 1.25),
             "change_pct_max": -1.0,  # 周线跌幅门槛略宽（仍须明显下跌）
@@ -302,7 +309,7 @@ def _sc_detector_params(timeframe: str = "daily", *, is_index: bool = False) -> 
         }
     else:
         params = {
-            "anchor_bars": WYCKOFF_CLIMAX_ANCHOR_BARS,
+            "anchor_bars": int(WYCKOFF_SC_COLD_START_BARS_DAILY),
             "support_lookback": WYCKOFF_SPRING_SUPPORT_LOOKBACK,
             "vol_ratio_threshold": WYCKOFF_BC_VOL_RATIO_THRESHOLD,
             "change_pct_max": -2.0,
@@ -660,21 +667,96 @@ def _detect_buying_climax(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     return {"bc_signal": False, "bc_reason": "未检测到购买高潮", "bc_price": 0.0}
 
 
+def _phase_a_breakdown(
+    bars: list[dict],
+    sc_bar_idx: int,
+    sc_low: float,
+    *,
+    end_idx: int | None = None,
+) -> dict | None:
+    """有效破 SC low 未收回 → Phase A failed（与广义 ST 刺穿语义一致）。"""
+    if sc_low is None:
+        return None
+    try:
+        low_anchor = float(sc_low)
+    except (TypeError, ValueError):
+        return None
+    if low_anchor <= 0:
+        return None
+
+    stop = len(bars) if end_idx is None else min(len(bars), int(end_idx))
+    floor = low_anchor * (1.0 - WYCKOFF_ST_SC_MAX_PIERCE)
+    for i in range(int(sc_bar_idx) + 1, stop):
+        bar = bars[i]
+        t_low = to_float(bar.get("low"))
+        t_close = to_float(bar.get("close"))
+        if t_low is None:
+            continue
+        if t_low < floor and (t_close is None or t_close < low_anchor):
+            return {
+                "phase_a_failed": True,
+                "fail_bar_idx": i,
+                "fail_reason": "SC 后有效跌破未收回（Phase A 失败）",
+            }
+    return None
+
+
+def _phase_a_from_ctx(tr_ctx: dict | None) -> dict:
+    if not isinstance(tr_ctx, dict):
+        return {}
+    pa = tr_ctx.get("phase_a_range")
+    if isinstance(pa, dict):
+        return pa
+    return tr_ctx
+
+
+def _pinned_sc_bar_idx_from_ctx(
+    bars: list[dict],
+    tr_ctx: dict | None,
+    *,
+    include_failed: bool = False,
+) -> int | None:
+    pa = _phase_a_from_ctx(tr_ctx)
+    status = str(pa.get("status") or pa.get("phase_a_status") or "").strip()
+    if status not in {"forming", "established"}:
+        return None
+    try:
+        sc_idx = int(pa.get("sc_bar_idx"))
+    except (TypeError, ValueError):
+        return None
+    if sc_idx < 1 or sc_idx >= len(bars):
+        return None
+
+    sc_low = pa.get("sc_low")
+    if sc_low is None:
+        bar_low = to_float(bars[sc_idx].get("low"))
+        sc_low = bar_low
+    if sc_low is None:
+        return None
+    if not include_failed and _phase_a_breakdown(bars, sc_idx, float(sc_low)) is not None:
+        return None
+    return sc_idx
+
+
 def _find_sc_anchor(
     bars: list[dict],
     tr_ctx: dict | None = None,
     *,
     timeframe: str = "daily",
     is_index: bool = False,
+    include_failed: bool = False,
 ) -> dict | None:
-    """在最近 climax 锚点窗内找最近一次 SC（SSOT）。
+    """找最近一次 SC（SSOT）。
+
+    Path A：调用方持有未失效 Phase A 锚时，搜索宇宙钉住
+    ``[sc_bar_idx, 今]``，可越过冷启动 CAP。
+    Path B：无 alive 锚时，日线仅最近 90 根、周线仅最近 39 根冷启动。
 
     ``sc_low`` 必须是 SC 棒最低价（bar.low），禁止用 close / 局部偏高点当谷底。
 
     Returns:
         dict | None: sc_bar_idx, sc_low, sc_close, sc_avg_vol, vol_ratio, change_pct, pos
     """
-    del tr_ctx  # 预留：TR 内优先搜 SC
     p = _sc_detector_params(timeframe, is_index=is_index)
     support_lb = int(p["support_lookback"])
     anchor_bars = int(p["anchor_bars"])
@@ -684,7 +766,13 @@ def _find_sc_anchor(
 
     if len(bars) < support_lb + 1:
         return None
-    scan_start = max(1, len(bars) - anchor_bars)
+    pinned_idx = _pinned_sc_bar_idx_from_ctx(bars, tr_ctx, include_failed=include_failed)
+    if pinned_idx is not None:
+        scan_start = max(1, pinned_idx)
+        search_mode = "pinned"
+    else:
+        scan_start = max(1, len(bars) - anchor_bars)
+        search_mode = "cold_start"
     for scan_idx in range(len(bars) - 1, scan_start - 1, -1):
         current = bars[scan_idx]
         recent = bars[max(0, scan_idx - support_lb):scan_idx]
@@ -718,7 +806,11 @@ def _find_sc_anchor(
         if change_pct > change_max:
             continue
 
-        return {
+        failed = _phase_a_breakdown(bars, scan_idx, float(cur_low))
+        if failed is not None and not include_failed:
+            continue
+
+        out = {
             "sc_bar_idx": scan_idx,
             # SC low SSOT：棒最低价（非 close / 非局部偏高点）
             "sc_low": round(float(cur_low), 2),
@@ -729,6 +821,13 @@ def _find_sc_anchor(
             "pos": pos,
             "cur_high": cur_high,
             "cur_open": cur_open,
+            "anchor_bars": anchor_bars,
+            "search_mode": search_mode,
+        }
+        if failed is not None:
+            out.update(failed)
+        return {
+            **out,
         }
     return None
 
@@ -767,7 +866,13 @@ def _detect_selling_climax(
     if len(bars) < int(p["support_lookback"]) + 1:
         return {**_sc_empty(), "sc_reason": "数据不足"}
 
-    anchor = _find_sc_anchor(bars, tr_ctx=tr_ctx, timeframe=timeframe, is_index=is_index)
+    anchor = _find_sc_anchor(
+        bars,
+        tr_ctx=tr_ctx,
+        timeframe=timeframe,
+        is_index=is_index,
+        include_failed=True,
+    )
     if anchor is None:
         return _sc_empty()
 
@@ -795,6 +900,11 @@ def _detect_selling_climax(
         "sc_price": sc_low,
         "sc_low": sc_low,
         "sc_bar_idx": sc_bar_idx,
+        "anchor_bars": anchor.get("anchor_bars"),
+        "search_mode": anchor.get("search_mode"),
+        "phase_a_failed": bool(anchor.get("phase_a_failed")),
+        "fail_bar_idx": anchor.get("fail_bar_idx"),
+        "fail_reason": anchor.get("fail_reason"),
     }
 
 
@@ -1368,7 +1478,13 @@ def _detect_secondary_test_sc(
     if len(bars) < int(p["support_lookback"]) + 2:
         return _st_sc_empty("数据不足")
 
-    anchor = _find_sc_anchor(bars, tr_ctx=tr_ctx, timeframe=timeframe, is_index=is_index)
+    anchor = _find_sc_anchor(
+        bars,
+        tr_ctx=tr_ctx,
+        timeframe=timeframe,
+        is_index=is_index,
+        include_failed=True,
+    )
     if anchor is None:
         return _st_sc_empty()
 
@@ -1383,6 +1499,15 @@ def _detect_secondary_test_sc(
     sc_spread = None
     if sc_high is not None and sc_high > sc_low:
         sc_spread = float(sc_high) - float(sc_low)
+
+    failed = _phase_a_breakdown(bars, sc_bar_idx, float(sc_low))
+    if failed is not None:
+        return {
+            **_st_sc_empty(str(failed.get("fail_reason") or "SC 后有效跌破未收回（Phase A 失败）")),
+            "phase_a_failed": True,
+            "fail_bar_idx": failed.get("fail_bar_idx"),
+            "fail_reason": failed.get("fail_reason"),
+        }
 
     # ST 候选窗：phase-a §4.4.1「SC/AR 后 3…LOOKBACK」；有 AR 以 AR 为锚，否则 SC
     # 破位扫描仍从 SC+1（整段 Phase A，含 AR 前跌破）
@@ -1407,7 +1532,6 @@ def _detect_secondary_test_sc(
         return _st_sc_empty("SC 后无足够 K 线")
 
     zone_upper = sc_low * (1.0 + WYCKOFF_ST_SC_PROXIMITY)
-    pierce_floor = sc_low * (1.0 - WYCKOFF_ST_SC_MAX_PIERCE)
     spread_cap = (
         sc_spread * float(WYCKOFF_ST_SC_SPREAD_RATIO)
         if sc_spread is not None and sc_spread > 0
@@ -1428,12 +1552,6 @@ def _detect_secondary_test_sc(
         t_vol = to_float(bar.get("volume"))
         if t_low is None or t_vol is None:
             continue
-
-        # 有效跌破（超允许刺穿且收盘不收回）→ Phase A 失败，禁止再认后续 ST
-        # （含 AR 前破位；不得跳过破位棒后另找假 ST）
-        pierce = t_low < pierce_floor
-        if pierce and (t_close is None or t_close < sc_low):
-            return _st_sc_empty("SC 后有效跌破未收回（Phase A 失败，禁止再认 ST）")
 
         # AR 前的棒只做破位扫描，不认 ST
         if i < st_scan_start or i >= st_scan_end:
