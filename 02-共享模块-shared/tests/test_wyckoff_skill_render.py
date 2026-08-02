@@ -776,9 +776,11 @@ def test_c_f4_c_f5_c_f7_failed_detail_story_resets_phase_a_copy():
     better = story.split("若变好", 1)[1].split("若变坏", 1)[0]
     watch = story.split("⭐ 盯", 1)[1].split("入池：", 1)[0]
 
-    assert "现在\n威：SC（Phase A 已失效）" in story
-    assert "Phase A 已失效" in better
+    assert "现在\n威：SC（Phase A 失效）" in story
+    assert "Phase A 失效｜须重新寻底" in better
     assert "重新寻底" in better or "新的 SC" in better
+    assert "Phase A 已失效" not in better
+    assert "旧故事作废" not in story
     assert "● SC（卖力高潮）9.50" in text
     assert "链可推进" not in better
     assert "还差" not in story
@@ -789,7 +791,7 @@ def test_c_f4_c_f5_c_f7_failed_detail_story_resets_phase_a_copy():
 def test_c_f6_failed_short_card_uses_failed_chain_copy():
     """C-F6：短卡链行吃到 failed chain_plain，不保留旧「还差」。"""
     text = render_wyckoff_card(_failed_phase_a_plan())
-    assert "📎 链：威：SC（Phase A 已失效）" in text
+    assert "📎 链：威：SC（Phase A 失效）" in text
     assert "还差" not in text
 
 
@@ -818,12 +820,53 @@ def test_c_f7_view_failed_raw_missing_status_still_closes():
     )
     detail = render_wyckoff_detail(plan)
     card = render_wyckoff_card(plan)
-    assert "威：SC（Phase A 已失效）" in detail
+    assert "威：SC（Phase A 失效）" in detail
     assert "威：SC，还差AR" not in detail
-    assert "📎 链：威：SC（Phase A 已失效）" in card
+    assert "📎 链：威：SC（Phase A 失效）" in card
     assert "还差" not in card
     story = detail.split("🔮 故事链", 1)[1]
     assert "链可推进" not in story
+
+
+def test_pc10_full_failed_story_uses_invalid_copy():
+    """P-C10：--full failed 故事链/综述无「失败/已失效/旧故事作废」，含失效+重新寻底。"""
+    text = render_wyckoff_detail(_failed_phase_a_plan())
+    story = text.split("🔮 故事链（以日线推进；周线作背景）", 1)[1]
+    summary = text.split("💬 综述", 1)[1]
+    visible = story + summary
+    for bad in ("Phase A 失败", "Phase A失败", "Phase A 已失效", "旧故事作废"):
+        assert bad not in visible
+    assert "Phase A 失效" in visible
+    assert "重新寻底" in visible
+    assert "威：SC（Phase A 失效）" in story
+    assert "Phase A 失效｜须重新寻底" in story
+
+
+def test_pc11_brief_failed_maps_fail_to_invalid():
+    """P-C11：--brief failed 阶段/链/事件/一句无「Phase A 失败」主展示；链为失效语义。"""
+    text = render_wyckoff_card(_failed_phase_a_plan())
+    assert "📎 链：威：SC（Phase A 失效）" in text
+    assert "Phase A 失效" in text
+    for bad in ("Phase A 失败", "Phase A失败", "Phase A 已失效"):
+        assert bad not in text
+    assert "🧭 阶段：" in text
+    assert "📌 事件：" in text
+    assert "💬 一句：" in text
+    assert "还差" not in text
+
+
+def test_pc12_chain_plain_failed_no_yi_shixiao():
+    """P-C12：format_wyckoff_chain_plain failed → 威：…（Phase A 失效），无「已失效」。"""
+    from trader_shared.wyckoff_chain import format_wyckoff_chain_plain
+
+    out = format_wyckoff_chain_plain(
+        {"wyckoff": {"sc_signal": True}, "phase_a_status": "failed"}
+    )
+    assert out == "威：SC（Phase A 失效）"
+    assert "已失效" not in out
+    empty = format_wyckoff_chain_plain({"phase_a_range": {"status": "failed"}})
+    assert empty == "威：结构失效"
+    assert "已失效" not in empty
 
 
 def test_wd10_phase_label_on_oneline():

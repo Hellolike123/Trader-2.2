@@ -129,6 +129,25 @@ def _cn(code: str) -> str:
     return _EVENT_CN.get(c) or "事件"
 
 
+def _panel_fail_copy(text: str) -> str:
+    """面板可见失败词 → 失效（法源 wyckoff-phase-fail-copy-handoff §1.1.6）。
+
+    只改人话展示；不改 core 内部 fail_reason 存储。
+    """
+    s = str(text or "")
+    if not s:
+        return s
+    # 先收口「已失效 / 旧故事作废」，再收口「失败」
+    s = s.replace("Phase A 已失效", "Phase A 失效")
+    s = s.replace("Phase A已失效", "Phase A失效")
+    s = s.replace("结构已失效", "结构失效")
+    s = s.replace("旧故事作废", "Phase A 失效")
+    s = s.replace("Phase A 失败", "Phase A 失效")
+    s = s.replace("Phase A失败", "Phase A失效")
+    s = s.replace("已失效", "失效")
+    return s
+
+
 def _as_view(obj: Any) -> dict[str, Any]:
     return obj if isinstance(obj, dict) else {}
 
@@ -277,7 +296,7 @@ def _invalidation_phrase(view: dict[str, Any], raw: dict[str, Any]) -> str:
         # hint 若引用 TR 沿但不当箱：改写
         if any(k in hint for k in ("TR", "下沿", "上沿", "箱")):
             return "暂无明确箱体失效价"
-    return hint or "暂无明确失效价"
+    return _panel_fail_copy(hint or "暂无明确失效价")
 
 
 def _primary_light_label(raw: dict[str, Any], view: dict[str, Any]) -> str:
@@ -662,7 +681,11 @@ def _slim_current_act_sentence(view: dict[str, Any], raw: dict[str, Any]) -> str
 
 def _slim_prev_act_lines(view: dict[str, Any], raw: dict[str, Any]) -> list[str]:
     sc_px = _fmt_price(_event_price_from_sources("SC", view=view, raw=raw))
-    head = f"吸筹 Phase A：SC {sc_px} → 破位 → 旧故事作废" if sc_px else "吸筹 Phase A：破位 → 旧故事作废"
+    head = (
+        f"吸筹 Phase A：SC {sc_px} → 破位 → Phase A 失效"
+        if sc_px
+        else "吸筹 Phase A：破位 → Phase A 失效"
+    )
     lines = [
         "📎 上一幕（已结束）",
         f"  {head}",
@@ -1309,10 +1332,10 @@ def _slim_daily_story_lines(view: dict[str, Any], raw: dict[str, Any]) -> dict[s
 
 def _oneline_compress(view: dict[str, Any], raw: dict[str, Any]) -> str:
     """一句话：阶段（phase_label）必带，避免详析阶段黑洞（W-D10）。"""
-    phase = str(view.get("phase_label") or view.get("phase") or "").strip()
+    phase = _panel_fail_copy(str(view.get("phase_label") or view.get("phase") or "").strip())
     if phase in ("none", "None"):
         phase = "无明确阶段"
-    summary = str(view.get("summary_oneline") or "").strip()
+    summary = _panel_fail_copy(str(view.get("summary_oneline") or "").strip())
     if summary:
         if len(summary) > 40:
             summary = summary[:38] + "…"
@@ -1348,9 +1371,9 @@ def _story_block(
     now_parts = [chain_plain or "威：吸筹链未成型", f"日线{d_bias}", f"周线背景{w_bias}"]
     now = "｜".join(now_parts)
 
-    # 若变好
+    # 若变好（failed 与默认 B 同源：Phase A 失效｜须重新寻底）
     if daily_failed:
-        better = "Phase A 已失效，先观察是否重新寻底并形成新的 SC（卖力高潮）"
+        better = "Phase A 失效｜须重新寻底；观察是否出现新的 SC（卖力高潮）"
     elif miss:
         miss_cn = _cn(miss)
         better = f"若出现 {miss}（{miss_cn}）且站稳，链可推进"
@@ -1504,13 +1527,14 @@ def render_wyckoff_card(plan: dict[str, Any]) -> str:
     weekly = plan.get("weekly_view") if isinstance(plan.get("weekly_view"), dict) else {}
     daily_raw = _as_raw(plan.get("daily_raw"))
 
-    phase = str(daily.get("phase_label") or daily.get("phase") or "未知")
+    # 面板可见串做失败→失效映射（骨架不变；core fail_reason 不动）
+    phase = _panel_fail_copy(str(daily.get("phase_label") or daily.get("phase") or "未知"))
     bias = _BIAS_CN.get(str(daily.get("bias") or "neutral"), "中性")
-    chain = _display_chain_plain(plan.get("chain_plain"), daily_raw, daily)
-    events = _events_line(daily, plan.get("event_line"))
+    chain = _panel_fail_copy(_display_chain_plain(plan.get("chain_plain"), daily_raw, daily))
+    events = _panel_fail_copy(_events_line(daily, plan.get("event_line")))
     tr_line = _fmt_tr(daily.get("tr") if isinstance(daily.get("tr"), dict) else None)
-    invalid = str(daily.get("invalidation_hint") or "暂无明确失效价")
-    oneline = str(daily.get("summary_oneline") or "无摘要")
+    invalid = _panel_fail_copy(str(daily.get("invalidation_hint") or "暂无明确失效价"))
+    oneline = _panel_fail_copy(str(daily.get("summary_oneline") or "无摘要"))
 
     lines = [
         f"威科夫 — {name}（{code}）" if code else f"威科夫 — {name}",
@@ -1527,7 +1551,7 @@ def render_wyckoff_card(plan: dict[str, Any]) -> str:
         ]
     )
 
-    w_phase = str(weekly.get("phase_label") or weekly.get("phase") or "").strip()
+    w_phase = _panel_fail_copy(str(weekly.get("phase_label") or weekly.get("phase") or "").strip())
     if w_phase and w_phase not in ("none", "未知"):
         w_bias = _BIAS_CN.get(str(weekly.get("bias") or "neutral"), "中性")
         lines.append(f"🧭 中线阶段：{w_phase}｜偏向 {w_bias}")
@@ -1693,7 +1717,9 @@ def render_wyckoff_detail(plan: dict[str, Any]) -> str:
     weekly_view = _as_view(plan.get("weekly_view"))
     daily_raw = _as_raw(plan.get("daily_raw"))
     weekly_raw = _as_raw(plan.get("weekly_raw"))
-    chain_plain = _display_chain_plain(plan.get("chain_plain"), daily_raw, daily_view)
+    chain_plain = _panel_fail_copy(
+        _display_chain_plain(plan.get("chain_plain"), daily_raw, daily_view)
+    )
 
     d_bias = _BIAS_CN.get(str(daily_view.get("bias") or "neutral"), "中性")
     w_bias = _BIAS_CN.get(str(weekly_view.get("bias") or "neutral"), "中性")
@@ -1704,7 +1730,7 @@ def render_wyckoff_detail(plan: dict[str, Any]) -> str:
     w_meas = _measure_allowed(weekly_view, weekly_raw) if weekly_view else False
     meas_label = "已给出" if (d_meas or w_meas) else "均未达 L3"
 
-    change = str(plan.get("change_line") or "首次记录，暂无对比").strip()
+    change = _panel_fail_copy(str(plan.get("change_line") or "首次记录，暂无对比").strip())
 
     pool_line = _pool_advice(
         daily_view=daily_view,

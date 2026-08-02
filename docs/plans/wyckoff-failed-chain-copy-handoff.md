@@ -4,7 +4,7 @@
 > 法源对齐：`docs/plans/wyckoff-structure-anchor-handoff.md` §3.2 / S-A5（failed → L0，禁健康推进叙事）  
 > 法源对齐：`docs/plans/wyckoff-skill-deep-card-handoff.md` §0.1 / §1 / §2.1（详析故事链只渲染，不改检测）  
 > 实现锚点：`02-共享模块-shared/trader_shared/wyckoff_chain.py::format_wyckoff_chain_plain`；`02-共享模块-shared/trader_shared/wyckoff_render.py::_story_block`  
-> 交叉：默认 B 卡失败人话（`Phase A 失效｜须重新寻底` 等）见 `docs/plans/wyckoff-phase-fail-copy-handoff.md`；本文只管禁健康「还差 / 链可推进」，不恢复旧底已废词。
+> 交叉：默认 B / `--full` / `--brief` 失败人话用词（`Phase A 失效`、去掉「已失效」）以 `docs/plans/wyckoff-phase-fail-copy-handoff.md` 为准；本文只管禁健康「还差 / 链可推进」，不恢复旧底已废词。展示短句若与本文旧例「已失效」冲突，以 phase-fail-copy 为准。
 
 ---
 
@@ -50,14 +50,14 @@ phase_a_range.status == "failed"
 短句规则：
 
 ```text
-有已亮链：威：{已亮链}（Phase A 已失效）
-无已亮链：威：结构已失效
+有已亮链：威：{已亮链}（Phase A 失效）
+无已亮链：威：结构失效
 ```
 
 南网科技这类 `sc_signal=True`、`phase_a_status=failed`、`tr_maturity=L0` 的对照，应输出：
 
 ```text
-威：SC（Phase A 已失效）
+威：SC（Phase A 失效）
 ```
 
 禁止：
@@ -86,13 +86,13 @@ phase_a_range.status == "failed"
 失败态应改为重新观察语气，不假装旧 Phase A 仍健康：
 
 ```text
-Phase A 已失效，先观察是否重新寻底并形成新的 SC（卖力高潮）
+Phase A 失效｜须重新寻底；观察是否出现新的 SC（卖力高潮）
 ```
 
 可选追加条件必须仍是观察语气：
 
 ```text
-Phase A 已失效，先观察是否重新寻底并形成新的 SC（卖力高潮）；后续若有新 AR/ST，再按新结构评估
+Phase A 失效｜须重新寻底；观察是否出现新的 SC（卖力高潮）；后续若有新 AR/ST，再按新结构评估
 ```
 
 禁止把旧 SC 后的 AR / ST / LPS / SOS 写成可推进链；旧结构已 failed 时，下一步不是「还差下一灯」，而是「重新寻底 / 新 SC」。
@@ -138,10 +138,10 @@ Phase A 已失效，先观察是否重新寻底并形成新的 SC（卖力高潮
 
 | ID | 必须 | 测 / 验 |
 |----|------|---------|
-| C-F1 | `chain_plain` 失败态无「还差」 | 输入含 `sc_signal=True` 且 `phase_a_status="failed"` 或 `phase_a_range.status="failed"`；断言输出为 `威：SC（Phase A 已失效）`，且不含「还差」 |
-| C-F2 | `chain_plain` 失败态保留已亮事实 | 输入含 SC+AR 等已亮灯且 failed；断言已亮链仍展示，但后缀为 `（Phase A 已失效）`，不追加下一灯 |
-| C-F3 | 无已亮链但 failed 时不写健康链 | 输入无吸筹链事件但 failed；断言输出 `威：结构已失效`，不写「吸筹链未成型，还差…」 |
-| C-F4 | 详析故事链「若变好」失败态不写推进 | `_story_block` / `render_wyckoff_detail` fixture：failed + SC 亮；断言「若变好」含「Phase A 已失效」和「重新寻底」或「新的 SC」，不含「链可推进」/「还差」 |
+| C-F1 | `chain_plain` 失败态无「还差」 | 输入含 `sc_signal=True` 且 `phase_a_status="failed"` 或 `phase_a_range.status="failed"`；断言输出为 `威：SC（Phase A 失效）`，且不含「还差」 |
+| C-F2 | `chain_plain` 失败态保留已亮事实 | 输入含 SC+AR 等已亮灯且 failed；断言已亮链仍展示，但后缀为 `（Phase A 失效）`，不追加下一灯 |
+| C-F3 | 无已亮链但 failed 时不写健康链 | 输入无吸筹链事件但 failed；断言输出 `威：结构失效`，不写「吸筹链未成型，还差…」 |
+| C-F4 | 详析故事链「若变好」失败态不写推进 | `_story_block` / `render_wyckoff_detail` fixture：failed + SC 亮；断言「若变好」含「Phase A 失效」和「重新寻底」或「新的 SC」，不含「链可推进」/「还差」 |
 | C-F5 | 灯逻辑不变 | 同一 fixture 断言灯区仍可显示 `● SC（卖力高潮）`；失败态 copy 不把 `sc_signal` 改 False |
 | C-F6 | 短卡吃到 `chain_plain` | `render_wyckoff_card` 或短卡路径使用 failed fixture；断言链行不含「还差」，含失败态短句 |
 | C-F7 | 详析现况 / 现在吃到 `chain_plain` | `render_wyckoff_detail` 的「现在」行使用同一失败态链短句，避免详析仍出现「威：SC，还差AR」 |
@@ -160,7 +160,7 @@ Phase A 已失效，先观察是否重新寻底并形成新的 SC（卖力高潮
 3. `docs/plans/wyckoff-structure-anchor-handoff.md`
    - 在 S-A5 或 §3.2 文案合同处增一行指针：failed→L0 时链文案也必须收口到本文，不得保留「还差下一灯」。
 4. `01-功能包-packages/wyckoff/references/output-template.md`
-   - 若短卡链示例或详析故事链示例覆盖失败态，示例须使用 `威：SC（Phase A 已失效）` 或本文同款规则。
+   - 若短卡链示例或详析故事链示例覆盖失败态，示例须使用 `威：SC（Phase A 失效）` 或本文同款规则（用词见 phase-fail-copy）。
 5. 测例位置
    - 主测：`02-共享模块-shared/tests/test_wyckoff_skill_render.py`。
    - 可复用结构失败 fixture：`02-共享模块-shared/tests/test_wyckoff_tr_maturity.py` 或 `02-共享模块-shared/tests/test_wyckoff_structure_anchor.py`。

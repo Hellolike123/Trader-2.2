@@ -64,7 +64,7 @@ def test_c_f1_failed_phase_a_sc_has_no_gap_copy():
     """C-F1：phase_a_status=failed 时保留 SC，禁止「还差」。"""
     item = {"wyckoff": {"sc_signal": True}, "phase_a_status": "failed"}
     out = format_wyckoff_chain_plain(item)
-    assert out == "威：SC（Phase A 已失效）"
+    assert out == "威：SC（Phase A 失效）"
     assert "还差" not in out
 
 
@@ -82,7 +82,7 @@ def test_c_f2_failed_phase_a_keeps_lit_chain_from_nested_range():
         }
     }
     out = format_wyckoff_chain_plain(item)
-    assert out == "威：SC→AR（Phase A 已失效）"
+    assert out == "威：SC→AR（Phase A 失效）"
     assert "还差" not in out
     assert "Spring确认" not in out
 
@@ -118,7 +118,7 @@ def test_w02_secondary_test_sc_does_not_light_chain_st_as_spring_confirm():
 def test_c_f3_failed_phase_a_without_accum_events_is_invalid_structure():
     """C-F3：failed 但无吸筹链亮灯时，不写健康未成型/还差。"""
     out = format_wyckoff_chain_plain({"phase_a_range": {"status": "failed"}})
-    assert out == "威：结构已失效"
+    assert out == "威：结构失效"
     assert "还差" not in out
     assert "吸筹链未成型" not in out
 
@@ -140,7 +140,9 @@ def test_w01_failed_phase_a_chain_rank_is_zero():
             "ar_signal": True,
         }
     }
-    assert "已失效" in format_wyckoff_chain_plain(failed_long)
+    plain = format_wyckoff_chain_plain(failed_long)
+    assert "Phase A 失效" in plain
+    assert "已失效" not in plain
     assert wyckoff_chain_rank(failed_long) == 0
     assert wyckoff_chain_rank(healthy_short) == 2
     assert wyckoff_chain_rank(failed_long) < wyckoff_chain_rank(healthy_short)
