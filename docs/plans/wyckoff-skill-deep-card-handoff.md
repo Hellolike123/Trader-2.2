@@ -1,11 +1,12 @@
 # 威科夫 Skill 详析卡 — Agent Handoff
 
-> **状态**: 规格冻结（用户 2026-08-01 对话确认；明日再调参）  
+> **状态**: 旧完整详析合同（已迁为 `--full`；默认 `--target` 见 `docs/plans/wyckoff-detail-slim-b-handoff.md`）  
 > **产品法源**:  
 > - 原典盘点 `docs/audit/wyckoff-original-concept-inventory.md`  
 > - 箱体/量度门禁 `docs/plans/wyckoff-tr-maturity-l0l3-handoff.md`  
 > - View 契约 `docs/designs/wyckoff-state-view.md`  
 > - P&F `docs/plans/wyckoff-pnf-handoff.md`  
+> - 默认 B·中剪卡 `docs/plans/wyckoff-detail-slim-b-handoff.md`  
 > **协作**: 写 Agent 实现；查 Agent 对照本文 + 原典盘点查幻觉/漏项；父 Agent 修完再 PR  
 
 ---
@@ -14,7 +15,7 @@
 
 ### 0.1 做
 
-1. **单票默认输出「详析卡」**（学术展开、日线+周线分维），入口仍 `final_wyckoff.py --target`。  
+1. **单票旧完整详析保留为 `--full`**（学术展开、日线+周线分维）；默认 `final_wyckoff.py --target` 已迁 B·中剪卡。  
 2. **短卡保留**：`--brief` 走现有 `render_wyckoff_card` 薄卡（兼容）。  
 3. **只渲染、不改检测**：全部结构/事件/成熟度/量度来自 `wyckoff_analysis` → `to_wyckoff_state_view` / 既有 chain 辅助；**禁止**手写事件、假箱沿、假 SC、假量度。  
 4. **L0–L3 展示门禁**（与 maturity handoff 一致，硬禁止）：  
@@ -189,10 +190,10 @@ load_market_snapshot → wyckoff_analysis(daily|weekly)
 ### 可改
 
 - `trader_shared/wyckoff_render.py`（新增 `render_wyckoff_detail`；brief 保留）  
-- `trader_shared/wyckoff_run.py`（CLI：默认 detail，`--brief`；拼装 plan 字段供 render）  
+- `trader_shared/wyckoff_run.py`（CLI：`--full` 输出旧完整详析，`--brief` 输出短卡；默认已迁 slim-B）  
 - `trader_shared/trader_paths.py`（注册 snapshot key）  
 - `01-功能包-packages/wyckoff/references/output-template.md`  
-- `01-功能包-packages/wyckoff/references/agent-quickstart.md`（一句：默认详析，`--brief` 短卡）  
+- `01-功能包-packages/wyckoff/references/agent-quickstart.md`（一句：默认 slim-B，`--full` 旧完整详析，`--brief` 短卡）  
 - `02-共享模块-shared/tests/test_wyckoff_skill_render.py`（及必要新测）  
 - 本 handoff  
 
@@ -208,7 +209,7 @@ load_market_snapshot → wyckoff_analysis(daily|weekly)
 
 | ID | 必须 | 测/验 |
 |----|------|-------|
-| W-D1 | `--target` 默认详析含 现况/变化/中线/短线/故事链/综述 | 单测 fixture |
+| W-D1 | `--full` 旧完整详析含 现况/变化/中线/短线/故事链/综述 | 单测 fixture |
 | W-D2 | `--brief` 仍为旧短卡骨架 | 单测 |
 | W-D3 | L0 + percentile：详析「区间」不得出现分位上下沿数字当箱/雏形 | 单测（天奈类：有 tr_lower 但 maturity L0） |
 | W-D4 | L1 写雏形；L2/L3 写箱体；量度仅 L3 | 单测 |

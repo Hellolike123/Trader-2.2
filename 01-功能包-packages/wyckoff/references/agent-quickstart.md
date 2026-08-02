@@ -1,13 +1,19 @@
 # Wyckoff Agent 快路径
 
-目标：1 条命令 → code fence 原样贴出威科夫详析卡或池链排序 → 停。禁止先批量读 references。  
+目标：1 条命令 → code fence 原样贴出威科夫 B·中剪卡或池链排序 → 停。禁止先批量读 references。  
 硬规则：同目录 `agent-rules.md`。  
-默认详析卡；短卡加 `--brief`。
+默认 B·中剪卡；旧完整详析加 `--full`；短卡加 `--brief`。默认首行为 `{名}（{码}）｜现价 {price}`，标题下固定 `周线：` / `日线本波：` / `入池：` 三行；周线与日线块均为满灯竖排，短推演固定保留；推演「现在」附周/日量度（仅 L3 出目标，否则「未达 L3，暂不测算」）。
 
 ## 默认（cwd = 本 skill 根）
 
 ```bash
 python3 scripts/final_wyckoff.py --target <NAME>
+```
+
+旧完整详析：
+
+```bash
+python3 scripts/final_wyckoff.py --target <NAME> --full
 ```
 
 旧版短卡：

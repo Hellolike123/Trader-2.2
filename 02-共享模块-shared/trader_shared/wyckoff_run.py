@@ -1,7 +1,7 @@
 """威科夫 Skill 引擎：取数 + analysis + view；渲染见 wyckoff_render。
 
-法源：docs/plans/wyckoff-skill-deep-card-handoff.md
-默认详析卡；--brief 走旧短卡。
+法源：docs/plans/wyckoff-detail-slim-b-handoff.md
+默认 B·中剪 slim 卡；--full 走旧完整详析；--brief 走旧短卡。
 """
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from trader_shared.wyckoff_render import (
     render_wyckoff_card,
     render_wyckoff_detail,
     render_wyckoff_rank,
+    render_wyckoff_slim,
 )
 
 
@@ -212,6 +213,7 @@ def run_card(
     *,
     output: str = "markdown",
     brief: bool = False,
+    full: bool = False,
 ) -> tuple[str, bool]:
     plan = build_wyckoff_plan(target)
     if output == "json":
@@ -228,7 +230,7 @@ def run_card(
         else:
             plan = dict(plan)
             plan.setdefault("change_line", "首次记录，暂无对比")
-        text = render_wyckoff_detail(plan)
+        text = render_wyckoff_detail(plan) if full else render_wyckoff_slim(plan)
     return text, _card_ok(plan)
 
 
@@ -252,10 +254,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="rank = 池内吸筹链排序（读 pool.json / TRADER_ROOT）",
     )
     parser.add_argument("--target", help="A-share name or code for single-stock card")
-    parser.add_argument(
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
         "--brief",
         action="store_true",
-        help="输出旧版短卡（render_wyckoff_card）；默认详析卡",
+        help="输出旧版短卡（render_wyckoff_card）；默认 B·中剪 slim 卡",
+    )
+    group.add_argument(
+        "--full",
+        action="store_true",
+        help="输出旧完整详析卡（render_wyckoff_detail）；默认 B·中剪 slim 卡",
     )
     parser.add_argument("--output", choices=["markdown", "json"], default="markdown")
     return parser.parse_args(argv)
@@ -273,6 +281,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.target,
                 output=args.output,
                 brief=bool(getattr(args, "brief", False)),
+                full=bool(getattr(args, "full", False)),
             )
             print(text)
             return 0 if ok else 1

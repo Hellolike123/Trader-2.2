@@ -1,6 +1,7 @@
 """威科夫 Skill 人读渲染（微信安全；不作交易指令）。
 
-法源：docs/plans/wyckoff-skill-deep-card-handoff.md
+法源：docs/plans/wyckoff-detail-slim-b-handoff.md
+旧完整详析：docs/plans/wyckoff-skill-deep-card-handoff.md（--full）
 只拼装引擎/View 字段；禁止在本模块检测 SC 或发明价格。
 """
 from __future__ import annotations
@@ -31,7 +32,7 @@ _EVENT_CN: dict[str, str] = {
     "LPS": "最后支撑点",
     "SOS": "强势信号",
     "PS": "初步止跌",
-    "BC": "买力高潮",
+    "BC": "购买高潮",
     "ARE": "自动回落",
     "SOW": "弱势信号",
     "LPSY": "最后供应点",
@@ -70,6 +71,8 @@ _VIEW_ID_TO_CODE: dict[str, str] = {
 }
 
 _DIST_VIEW_IDS = frozenset({"are", "bc", "sow", "lpsy", "utad", "upthrust"})
+_DIST_CHAIN = ("BC", "ARE", "SOW", "LPSY", "UTAD")
+_DIST_CODES = frozenset(_DIST_CHAIN) | {"UT", "PSY"}
 
 _FORBIDDEN_BUY_WORDS = (
     "可执行",
@@ -293,6 +296,30 @@ def _primary_light_label(raw: dict[str, Any], view: dict[str, Any]) -> str:
     return "无主灯"
 
 
+def _slim_is_scene_change(view: dict[str, Any], raw: dict[str, Any]) -> bool:
+    """突然拉升类：旧 Phase A 已破 + 破后仍有 SOS/LPS → 换幕（两幕卡）。"""
+    return (is_phase_a_failed(raw) or is_phase_a_failed(view)) and bool(
+        _slim_post_fail_strength(view, raw)
+    )
+
+
+def _primary_light_code(raw: dict[str, Any], view: dict[str, Any]) -> str:
+    if _slim_is_scene_change(view, raw):
+        return "换幕"
+    if is_phase_a_failed(raw) or is_phase_a_failed(view):
+        return "PhaseAFail"
+    from trader_shared.wyckoff_core import resolve_wyckoff_primary
+
+    info = resolve_wyckoff_primary(raw if raw else view)
+    if info.get("status") == "event":
+        return str(info.get("code") or "").strip() or "无主灯"
+    active = view.get("active_events") or []
+    if active:
+        eid = str(active[0])
+        return _VIEW_ID_TO_CODE.get(eid, eid.upper()) or "无主灯"
+    return "无主灯"
+
+
 def _event_price_from_sources(
     code: str,
     *,
@@ -486,6 +513,384 @@ def _format_weekly_lights(view: dict[str, Any], raw: dict[str, Any]) -> list[str
     return lines
 
 
+def _slim_range_phrase(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    """Slim-B 区间门禁：L0 不展示分位沿；量度只在 L3 出现。"""
+    if is_phase_a_failed(raw) or is_phase_a_failed(view):
+        return "无箱｜未达 L3"
+    mode = _box_mode(view, raw)
+    maturity = _maturity(view, raw)
+    seed = str(raw.get("tr_seed_source") or "").strip().lower()
+    if maturity == "L0" or mode == "none" or (seed == "percentile" and mode not in ("proto", "box")):
+        return "无箱｜未达 L3"
+
+    lo, hi = _phase_a_bounds(raw)
+    if mode == "proto" or maturity == "L1":
+        if lo is not None and hi is not None:
+            phrase = f"雏形 {_fmt_price(lo)}～{_fmt_price(hi)}（待 ST）"
+        elif lo is not None:
+            phrase = f"雏形 {_fmt_price(lo)}（上沿未出）"
+        else:
+            phrase = "雏形待确认"
+        return f"{phrase}｜未达 L3"
+
+    if lo is not None and hi is not None:
+        phrase = f"箱体 {_fmt_price(lo)}～{_fmt_price(hi)}"
+    elif lo is not None:
+        phrase = f"箱体下沿 {_fmt_price(lo)}"
+    else:
+        phrase = "箱体边界待确认"
+    if _measure_allowed(view, raw):
+        from trader_shared.wyckoff_view import format_cause_effect_display
+
+        ce = format_cause_effect_display(raw) or format_cause_effect_display(view)
+        return f"{phrase}｜{ce}" if ce else phrase
+    return f"{phrase}｜未达 L3"
+
+
+def _slim_measure_line(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    """推演量度行（法源：wyckoff-tr-maturity-l0l3 §2.3；slim-b §3.5）。
+
+    - measure_allowed / L3 → ``format_cause_effect_display``（有上下目标才出数字）
+    - 否则 → ``未达 L3，暂不测算``（禁止贴残留假目标）
+    """
+    if not view and not raw:
+        return "数据不足，暂不测算"
+    if _measure_allowed(view, raw):
+        from trader_shared.wyckoff_view import format_cause_effect_display
+
+        ce = format_cause_effect_display(raw) or format_cause_effect_display(view)
+        if ce:
+            return ce
+        return "已达 L3，暂无可用目标"
+    return "未达 L3，暂不测算"
+
+
+def _slim_lit_codes(view: dict[str, Any], raw: dict[str, Any], *, weekly: bool) -> list[str]:
+    if weekly:
+        codes: list[str] = []
+        seen: set[str] = set()
+        for eid in view.get("active_events") or []:
+            code = _VIEW_ID_TO_CODE.get(str(eid), str(eid).upper())
+            if code and code not in seen:
+                seen.add(code)
+                codes.append(code)
+        if not codes:
+            for code in ACCUM_CHAIN:
+                if code in _accum_lit_set(raw, view):
+                    codes.append(code)
+        return codes
+    codes = [code for code in ACCUM_CHAIN if code in _accum_lit_set(raw, view)]
+    for code in _extra_lit_codes(raw, view):
+        if code not in codes:
+            codes.append(code)
+    return codes
+
+
+def _slim_post_fail_strength(view: dict[str, Any], raw: dict[str, Any]) -> list[str]:
+    """Phase A failed 后仍亮、但不属于「原吸筹链复活」的强势灯（如 SOS/LPS）。"""
+    lit = _slim_lit_codes(view, raw, weekly=False)
+    # SC 是旧锚事件史；AR/ST 在 failed 合同下本不应健康点亮
+    return [c for c in lit if c in ("SOS", "LPS")]
+
+
+def _slim_is_dist_side(view: dict[str, Any], raw: dict[str, Any]) -> bool:
+    active = {str(x) for x in (view.get("active_events") or [])}
+    if active & _DIST_VIEW_IDS:
+        return True
+    lit = set(_slim_lit_codes(view, raw, weekly=True))
+    return bool(lit & _DIST_CODES)
+
+
+def _slim_next_hollow(
+    view: dict[str, Any],
+    raw: dict[str, Any],
+    *,
+    failed: bool,
+    weekly: bool = False,
+) -> str:
+    if weekly:
+        if _slim_is_dist_side(view, raw):
+            lit = set(_slim_lit_codes(view, raw, weekly=True))
+            # ARE 无 BC：辅助派发，禁止瞎接吸筹 SC
+            if "ARE" in lit and "BC" not in lit:
+                return "○ 下一盯：派发未确认（缺 BC），中线观望"
+            for code in _DIST_CHAIN:
+                if code not in lit:
+                    return f"○ {code}（{_cn(code)}）下一盯"
+            return "○ 下一盯：派发侧观望"
+        lit = set(_slim_lit_codes(view, raw, weekly=True))
+        for code in ACCUM_CHAIN:
+            if code not in lit:
+                return f"○ {code}（{_cn(code)}）下一盯"
+        return "○ 下一盯：回踩确认／延续"
+    if failed:
+        if _slim_post_fail_strength(view, raw):
+            return "○ 下一盯：回踩是否站稳"
+        return "○ 下一盯：重新寻底／新 SC（卖力高潮）"
+    lit = set(_slim_lit_codes(view, raw, weekly=False))
+    for code in ACCUM_CHAIN:
+        if code not in lit:
+            return f"○ {code}（{_cn(code)}）下一盯"
+    return "○ 下一盯：回踩确认／延续"
+
+
+def _format_slim_lights(view: dict[str, Any], raw: dict[str, Any], *, weekly: bool) -> list[str]:
+    failed = (not weekly) and (is_phase_a_failed(raw) or is_phase_a_failed(view))
+    # 换幕：当前幕灯只列破后强势，SC 进上一幕，避免 SC+SOS 同框拧巴
+    if (not weekly) and _slim_is_scene_change(view, raw):
+        codes = _slim_post_fail_strength(view, raw)
+    else:
+        codes = _slim_lit_codes(view, raw, weekly=weekly)
+    lines = [
+        _format_lamp_line(code, lit=True, view=view, raw=raw) for code in codes
+    ]
+    lines.append(_slim_next_hollow(view, raw, failed=failed, weekly=weekly))
+    return lines
+
+
+def _slim_current_act_sentence(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    post = _slim_post_fail_strength(view, raw)
+    if not post:
+        post_s = "破后强势"
+    elif len(post) == 1:
+        c = post[0]
+        post_s = f"{c}（{_cn(c)}）"
+    else:
+        post_s = "、".join(f"{c}（{_cn(c)}）" for c in post)
+    return f"破后强势：{post_s}｜这是新一段，不是旧吸筹复活｜无箱"
+
+
+def _slim_prev_act_lines(view: dict[str, Any], raw: dict[str, Any]) -> list[str]:
+    sc_px = _fmt_price(_event_price_from_sources("SC", view=view, raw=raw))
+    head = f"吸筹 Phase A：SC {sc_px} → 破位 → 旧故事作废" if sc_px else "吸筹 Phase A：破位 → 旧故事作废"
+    lines = [
+        "📎 上一幕（已结束）",
+        f"  {head}",
+    ]
+    if "SC" in _accum_lit_set(raw, view) or bool(raw.get("sc_signal")):
+        lamp = _format_lamp_line("SC", lit=True, view=view, raw=raw)
+        lines.append(f"  {lamp}（历史，不参与当前推进）")
+    return lines
+
+
+def _slim_structure_sentence(
+    view: dict[str, Any],
+    raw: dict[str, Any],
+    *,
+    weekly: bool = False,
+    daily_scene_change: bool = False,
+) -> str:
+    bias = _BIAS_CN.get(str(view.get("bias") or "neutral"), "中性")
+    if weekly:
+        lit = set(_slim_lit_codes(view, raw, weekly=True))
+        if lit & _DIST_CODES:
+            main = next((c for c in _DIST_CHAIN if c in lit), next(iter(lit)))
+            lead = f"{main}已亮{bias}"
+            note = "｜与日线换幕可并存（中线仍冷）" if daily_scene_change else ""
+            return f"{lead}，{_slim_range_phrase(view, raw)}{note}"
+        if {"SC", "AR"}.issubset(lit):
+            lead = f"SC后反弹{bias}"
+        elif "SC" in lit:
+            lead = f"SC已亮{bias}"
+        else:
+            main = _primary_light_code(raw, view)
+            lead = f"{main}已亮{bias}" if main not in {"无主灯", "换幕", "PhaseAFail"} else f"结构未明{bias}"
+        note = "｜与日线换幕可并存（中线仍冷）" if daily_scene_change else ""
+        return f"{lead}，{_slim_range_phrase(view, raw)}{note}"
+
+    if _slim_is_scene_change(view, raw):
+        return _slim_current_act_sentence(view, raw)
+    if is_phase_a_failed(raw) or is_phase_a_failed(view):
+        sc_px = _fmt_price(_event_price_from_sources("SC", view=view, raw=raw))
+        old = f"旧筑底已破（SC {sc_px}）" if sc_px else "旧筑底已破"
+        return f"{old}｜无箱｜旧吸筹链停止推进（待新寻底）"
+
+    lit = set(_slim_lit_codes(view, raw, weekly=False))
+    if {"SC", "AR"}.issubset(lit):
+        lead = f"SC后反弹{bias}"
+    elif "SC" in lit:
+        lead = f"SC已亮{bias}"
+    else:
+        main = _primary_light_code(raw, view)
+        lead = f"{main}已亮{bias}" if main != "无主灯" else f"结构未明{bias}"
+    return f"{lead}，{_slim_range_phrase(view, raw)}"
+
+
+def _slim_change_line(change: str | None) -> str | None:
+    text = str(change or "").strip()
+    if not text or "首次记录" in text or "暂无对比" in text:
+        return None
+    parts: list[str] = []
+    for raw_part in text.replace("；", "｜").split("｜"):
+        part = raw_part.strip()
+        if not part:
+            continue
+        if part.startswith("仍亮："):
+            continue
+        if part.startswith(("新亮：", "熄灭：")):
+            payload = part.split("：", 1)[1].strip()
+            if payload and payload != "无":
+                parts.append(part)
+    return "；".join(parts) if parts else None
+
+
+def _slim_next_label(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    lit = set(_slim_lit_codes(view, raw, weekly=False))
+    for code in ACCUM_CHAIN:
+        if code not in lit:
+            return f"{code}（{_cn(code)}）"
+    return "回踩确认／延续"
+
+
+def _slim_chain_token(
+    view: dict[str, Any],
+    raw: dict[str, Any],
+    *,
+    failed: bool,
+    weekly: bool = False,
+) -> str:
+    """推演「现在」用的短链 token（非完整 chain_plain）。"""
+    if (not weekly) and _slim_is_scene_change(view, raw):
+        post = _slim_post_fail_strength(view, raw)
+        return f"已换幕→破后强势（{'+'.join(post)}）；旧吸筹幕已关"
+    if failed:
+        return "旧Phase A已破（待新寻底）"
+    # 周线 / 派发侧优先，禁止 ARE 被误当成吸筹链再「待SC」
+    dist_lit = set(_slim_lit_codes(view, raw, weekly=True)) & _DIST_CODES
+    if weekly or dist_lit:
+        if dist_lit:
+            main = next((c for c in _DIST_CHAIN if c in dist_lit), next(iter(dist_lit)))
+            if "ARE" in dist_lit and "BC" not in dist_lit:
+                return f"{main}（派发未确认）"
+            return f"{main}，待下一派发灯"
+        if weekly:
+            lit_w = _slim_lit_codes(view, raw, weekly=True)
+            if not lit_w:
+                return "周线结构未明"
+            miss = first_missing_accum(lit_w)
+            chain = "→".join(lit_w)
+            return f"{chain}，待{miss}" if miss else chain
+    lit = _slim_lit_codes(view, raw, weekly=False)
+    # 日线 token 忽略派发灯，避免 ARE 混入吸筹链
+    lit = [c for c in lit if c in ACCUM_CHAIN or c in ("SOS", "LPS", "Spring")]
+    if not lit:
+        return "吸筹链未成型"
+    miss = first_missing_accum(lit)
+    chain = "→".join(lit)
+    if miss:
+        return f"{chain}，待{miss}"
+    return chain
+
+
+def _slim_weekly_watch_hint(weekly_view: dict[str, Any], weekly_raw: dict[str, Any]) -> str:
+    if not weekly_view:
+        return "周线数据不足"
+    if _slim_is_dist_side(weekly_view, weekly_raw):
+        lit = set(_slim_lit_codes(weekly_view, weekly_raw, weekly=True))
+        if "ARE" in lit and "BC" not in lit:
+            return "周线派发未确认（缺 BC），中线观望"
+        return "周线派发侧观望"
+    return f"周线盯 {_slim_next_label(weekly_view, weekly_raw)}"
+
+
+def _slim_watch_lines(
+    *,
+    daily_view: dict[str, Any],
+    weekly_view: dict[str, Any],
+    daily_raw: dict[str, Any],
+    weekly_raw: dict[str, Any],
+) -> list[str]:
+    if _slim_is_scene_change(daily_view, daily_raw):
+        return [f"日线盯回踩是否站稳；{_slim_weekly_watch_hint(weekly_view, weekly_raw)}"]
+    daily_failed = is_phase_a_failed(daily_raw) or is_phase_a_failed(daily_view)
+    if daily_failed:
+        return [
+            f"日线等新 SC；{_slim_weekly_watch_hint(weekly_view, weekly_raw)}"
+        ]
+    daily_next = _slim_next_label(daily_view, daily_raw)
+    return [f"日线盯 {daily_next}；{_slim_weekly_watch_hint(weekly_view, weekly_raw)}"]
+
+
+def _slim_story_lines(
+    *,
+    daily_view: dict[str, Any],
+    weekly_view: dict[str, Any],
+    daily_raw: dict[str, Any],
+    weekly_raw: dict[str, Any],
+) -> list[str]:
+    """B 卡短推演：现在 / 若变好 / 若变坏 / 盯（每项一行）。"""
+    daily_failed = is_phase_a_failed(daily_raw) or is_phase_a_failed(daily_view)
+    weekly_failed = (
+        is_phase_a_failed(weekly_raw) or is_phase_a_failed(weekly_view)
+        if weekly_view
+        else False
+    )
+    scene = _slim_is_scene_change(daily_view, daily_raw)
+    d_now = _slim_chain_token(daily_view, daily_raw, failed=daily_failed, weekly=False)
+    if weekly_view:
+        w_now = _slim_chain_token(
+            weekly_view, weekly_raw, failed=weekly_failed, weekly=True
+        )
+        now = f"日线 {d_now}｜周线 {w_now}"
+    else:
+        now = f"日线 {d_now}｜周线数据不足"
+
+    if scene:
+        better = "日线回踩不破，破后强势延续（旧吸筹幕不复活）"
+        worse = "若回踩失守、破后强势熄火，则短线转弱"
+    elif daily_failed:
+        better = "日线重新寻底并出现新 SC（卖力高潮）"
+        worse = "日线继续破位走弱则旧链保持作废、短线更弱"
+    else:
+        d_next = _slim_next_label(daily_view, daily_raw)
+        better = f"日线出现 {d_next} 且站稳"
+        if _box_mode(daily_view, daily_raw) == "none":
+            worse = "日线继续破位走弱则结构转弱"
+        else:
+            worse = _invalidation_phrase(daily_view, daily_raw) or "若日线结构破坏则链失效"
+            if worse.startswith("失效："):
+                worse = worse[len("失效：") :]
+
+    if weekly_view and not weekly_failed and not _slim_is_dist_side(weekly_view, weekly_raw):
+        if not scene:
+            w_next = _slim_next_label(weekly_view, weekly_raw)
+            if "确认雏形" not in better and "周线" not in better:
+                better += f"；周线出 {w_next} 确认雏形"
+        mode = _box_mode(weekly_view, weekly_raw)
+        if mode in ("proto", "box"):
+            lo, _hi = _phase_a_bounds(weekly_raw)
+            if lo is None:
+                lo = (weekly_view.get("tr") or {}).get("lower") if isinstance(weekly_view.get("tr"), dict) else None
+            if lo is not None:
+                worse += f"；周线失守 {_fmt_price(lo)} 一带则雏形作废"
+    elif weekly_view and _slim_is_dist_side(weekly_view, weekly_raw):
+        better += "；周线仍偏冷，不要求跟日线同步转多"
+        worse += "；周线派发若加深则中线更冷"
+
+    watch = _slim_watch_lines(
+        daily_view=daily_view,
+        weekly_view=weekly_view,
+        daily_raw=daily_raw,
+        weekly_raw=weekly_raw,
+    )
+    watch_s = watch[0] if watch else "继续观察结构"
+
+    return [
+        "现在",
+        now,
+        "",
+        "若变好",
+        better,
+        "",
+        "若变坏",
+        worse,
+        "",
+        "⭐ 盯",
+        watch_s,
+        "本卡不下单；出手/分道看 trader",
+    ]
+
+
 def _pool_advice(
     *,
     daily_view: dict[str, Any],
@@ -537,6 +942,316 @@ def _pool_advice(
     if "ST" not in ev_set and not has_lps_sos and d_mat in ("L0", "L1"):
         return "暂不建议入池（早期结构，尚无 ST/LPS）"
     return "暂不建议入池"
+
+
+def _slim_active_codes(view: dict[str, Any]) -> set[str]:
+    out: set[str] = set()
+    for eid in view.get("active_events") or []:
+        code = _VIEW_ID_TO_CODE.get(str(eid), str(eid).upper())
+        if code:
+            out.add(code)
+    return out
+
+
+_SLIM_SIGNAL_KEYS: dict[str, tuple[str, ...]] = {
+    "SC": ("sc_signal", "wyckoff_sc_signal"),
+    "AR": ("ar_signal", "wyckoff_ar_signal"),
+    "ST": (
+        "secondary_test_sc_signal",
+        "st_signal",
+        "spring_test_signal",
+        "wyckoff_st_signal",
+    ),
+    "LPS": ("lps_signal", "wyckoff_lps_signal"),
+    "SOS": ("sos_signal", "wyckoff_sos_signal"),
+    "BC": ("bc_signal",),
+    "ARE": ("are_signal",),
+    "SOW": ("sow_signal",),
+    "LPSY": ("lpsy_signal",),
+    "UTAD": ("utad_signal", "upthrust_signal"),
+}
+
+
+def _slim_code_lit(code: str, view: dict[str, Any], raw: dict[str, Any]) -> bool:
+    active = _slim_active_codes(view)
+    if code in active:
+        return True
+    if code in ACCUM_CHAIN and code in _accum_lit_set(raw, view):
+        return True
+    return any(bool(raw.get(key)) for key in _SLIM_SIGNAL_KEYS.get(code, ()))
+
+
+def _slim_lit_set(
+    chain: tuple[str, ...],
+    view: dict[str, Any],
+    raw: dict[str, Any],
+) -> set[str]:
+    return {code for code in chain if _slim_code_lit(code, view, raw)}
+
+
+def _format_slim_full_lights(
+    chain: tuple[str, ...],
+    view: dict[str, Any],
+    raw: dict[str, Any],
+) -> list[str]:
+    lines: list[str] = []
+    for code in chain:
+        lit = _slim_code_lit(code, view, raw)
+        if lit:
+            px_s = _fmt_price(_event_price_from_sources(code, view=view, raw=raw))
+            lines.append(f"● {code}（{_cn(code)}）{px_s if px_s else ''}")
+        else:
+            lines.append(f"○ {code}（{_cn(code)}）")
+    return lines
+
+
+def _slim_weekly_side(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    bias = str(view.get("bias") or "neutral").strip().lower()
+    if _slim_is_dist_side(view, raw) or bias == "bear":
+        return "distribution"
+    return "accumulation"
+
+
+def _slim_range_head(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    phrase = _slim_range_phrase(view, raw)
+    return phrase.split("｜", 1)[0]
+
+
+def _slim_failed_anchor_ref(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    """failed → L0：禁止健康雏形/箱体；只写废锚 SC 低点供对照（不带上沿冒充区间）。"""
+    lo, _hi = _phase_a_bounds(raw)
+    if lo is not None:
+        return f"废锚参考 SC {_fmt_price(lo)}（已废）"
+    px = _event_price_from_sources("SC", view=view, raw=raw)
+    px_s = _fmt_price(px)
+    if px_s:
+        return f"废锚参考 SC {px_s}（已废）"
+    return "无成熟箱"
+
+
+def _slim_weekly_stage_short(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    if not view:
+        return "周线数据不足"
+    side = _slim_weekly_side(view, raw)
+    bias = _BIAS_CN.get(str(view.get("bias") or "neutral"), "中性")
+    if side == "distribution":
+        lit = _slim_lit_set(_DIST_CHAIN, view, raw)
+        if "ARE" in lit and "BC" not in lit:
+            return "ARE 先亮但缺 BC，派发未确认"
+        main = next((code for code in _DIST_CHAIN if code in lit), "")
+        if main:
+            return f"{main} 已亮，派发侧观察"
+        return "派发未确认"
+
+    lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
+    range_head = _slim_range_head(view, raw)
+    if {"SC", "AR"}.issubset(lit):
+        # L1 雏形有价就写进总览，方便对照（非成熟箱体）
+        if "雏形" in range_head or "箱体" in range_head:
+            return f"SC后反弹，{range_head}"
+        return "SC后反弹，雏形待 ST"
+    if "SC" in lit:
+        if "雏形" in range_head:
+            return f"SC 已亮，{range_head}"
+        return "SC 已亮，待 AR"
+    if lit:
+        main = next((code for code in ACCUM_CHAIN if code in lit), next(iter(lit)))
+        return f"{main} 已亮，结构观察"
+    return f"{bias}，结构未明"
+
+
+def _slim_weekly_tier(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    if not view:
+        return "慎做"
+    side = _slim_weekly_side(view, raw)
+    if side == "distribution" or str(view.get("bias") or "").strip().lower() == "bear":
+        return "先别做"
+    lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
+    maturity = _maturity(view, raw)
+    if lit & {"LPS", "SOS"} or maturity in ("L2", "L3"):
+        return "可盯小波段"
+    return "慎做"
+
+
+def _slim_weekly_sentence(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    if not view:
+        return "周线数据不足｜无箱｜未达 L3"
+    bias = _BIAS_CN.get(str(view.get("bias") or "neutral"), "中性")
+    side = _slim_weekly_side(view, raw)
+    if side == "distribution":
+        lit = _slim_lit_set(_DIST_CHAIN, view, raw)
+        if "ARE" in lit and "BC" not in lit:
+            return "ARE（自动回落）先亮但缺 BC（购买高潮）确认｜派发未确认｜中线观望"
+        main = next((code for code in _DIST_CHAIN if code in lit), "")
+        if main:
+            return f"{main}（{_cn(main)}）已亮{bias}｜{_slim_range_phrase(view, raw)}"
+        return f"派发侧{bias}｜派发未确认｜中线观望"
+
+    lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
+    if {"SC", "AR"}.issubset(lit):
+        return f"SC后反弹{bias}，{_slim_range_phrase(view, raw)}"
+    if "SC" in lit:
+        return f"SC已亮{bias}，{_slim_range_phrase(view, raw)}"
+    main = next((code for code in ACCUM_CHAIN if code in lit), "")
+    if main:
+        return f"{main}（{_cn(main)}）已亮{bias}，{_slim_range_phrase(view, raw)}"
+    return f"结构未明{bias}｜{_slim_range_phrase(view, raw)}"
+
+
+def _slim_daily_failed(view: dict[str, Any], raw: dict[str, Any]) -> bool:
+    return is_phase_a_failed(raw) or is_phase_a_failed(view)
+
+
+def _slim_daily_wave_short(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    failed = _slim_daily_failed(view, raw)
+    lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
+    if failed:
+        if "SOS" in lit:
+            return "SOS 强｜旧底已废"
+        if "LPS" in lit:
+            return "LPS 修复｜旧底已废"
+        return "旧底已废｜待新寻底"
+    if "SOS" in lit:
+        return f"SOS 强｜{_slim_range_head(view, raw)}"
+    if "LPS" in lit:
+        return f"LPS 修复｜{_slim_range_head(view, raw)}"
+    if "ST" in lit:
+        return f"ST 已现｜{_slim_range_head(view, raw)}"
+    if "AR" in lit:
+        return f"AR 反弹｜{_slim_range_head(view, raw)}"
+    if "SC" in lit:
+        return f"SC 已现｜{_slim_range_head(view, raw)}"
+    return f"本波未成型｜{_slim_range_head(view, raw)}"
+
+
+def _slim_daily_sentence(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    failed = _slim_daily_failed(view, raw)
+    lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
+    if failed:
+        ref = _slim_failed_anchor_ref(view, raw)
+        if "SOS" in lit:
+            return f"SOS 强｜旧底已废｜{ref}"
+        if "LPS" in lit:
+            return f"LPS 修复｜旧底已废｜{ref}"
+        return f"Phase A failed｜旧底已废｜{ref}｜待新寻底"
+    wave = _slim_daily_wave_short(view, raw)
+    full_range = _slim_range_phrase(view, raw)
+    range_head = _slim_range_head(view, raw)
+    if f"｜{range_head}" in wave:
+        tail = full_range.split("｜", 1)[1] if "｜" in full_range else ""
+        return f"{wave}｜{tail}" if tail else wave
+    return f"{wave}｜{full_range}"
+
+
+def _slim_daily_explain(view: dict[str, Any], raw: dict[str, Any]) -> str | None:
+    if not _slim_daily_failed(view, raw):
+        return None
+    lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
+    if "SOS" in lit:
+        return "说明：●SC 是旧底事实，●SOS 是本波强势事实；不按顺序推进读。"
+    if "LPS" in lit:
+        return "说明：旧底事实与本波修复事实并列；不按顺序推进读。"
+    return None
+
+
+def _slim_chain_now(
+    chain: tuple[str, ...],
+    view: dict[str, Any],
+    raw: dict[str, Any],
+    *,
+    weekly: bool,
+) -> str:
+    lit = [code for code in chain if _slim_code_lit(code, view, raw)]
+    if weekly and chain == _DIST_CHAIN:
+        if "ARE" in lit and "BC" not in lit:
+            return "ARE（自动回落）先亮但缺 BC（购买高潮），派发未确认"
+        return "→".join(lit) if lit else "派发未确认"
+    if not lit:
+        return "结构未明" if weekly else "本波未成型"
+    missing = next((code for code in chain if code not in lit), "")
+    text = "→".join(lit)
+    if missing and not (not weekly and _slim_daily_failed(view, raw)):
+        text += f"，待 {missing}（{_cn(missing)}）"
+    return text
+
+
+def _slim_weekly_story_lines(view: dict[str, Any], raw: dict[str, Any]) -> dict[str, str]:
+    if not view:
+        return {
+            "now": "数据不足",
+            "better": "补足周线数据后再评估",
+            "worse": "数据不足时不引用箱沿",
+            "watch": "先补周线结构",
+        }
+    side = _slim_weekly_side(view, raw)
+    chain = _DIST_CHAIN if side == "distribution" else tuple(ACCUM_CHAIN)
+    lit = _slim_lit_set(chain, view, raw)
+    now = _slim_chain_now(chain, view, raw, weekly=True)
+    if side == "distribution":
+        if "ARE" in lit and "BC" not in lit:
+            return {
+                "now": now,
+                "better": "派发未确认先观望，需后续结构证伪偏空",
+                "worse": "补出 SOW（弱势信号）则派发压力加深",
+                "watch": "盯 BC（购买高潮）是否补确认，未确认则观望",
+            }
+        return {
+            "now": now,
+            "better": "派发压力缓和后再重看吸筹侧",
+            "worse": "派发链继续加深则中线更冷",
+            "watch": "盯派发链是否继续点亮",
+        }
+
+    range_head = _slim_range_head(view, raw)
+    if "ST" not in lit and {"SC", "AR"}.issubset(lit):
+        better = "补 ST（二次测试）并守住雏形下沿"
+        watch = "盯 ST（二次测试）能否补上"
+    else:
+        missing = next((code for code in ACCUM_CHAIN if code not in lit), "")
+        better = f"补 {missing}（{_cn(missing)}）并站稳" if missing else "吸筹链保持完整并延续"
+        watch = f"盯 {missing}（{_cn(missing)}）" if missing else "盯回踩是否守住"
+    worse = "失守雏形下沿，雏形作废" if "雏形" in range_head else "结构继续转弱则保持观察"
+    lo, _hi = _phase_a_bounds(raw)
+    if lo is not None and ("雏形" in range_head or "箱体" in range_head):
+        worse = f"失守 {_fmt_price(lo)} 一带，结构作废"
+    return {"now": now, "better": better, "worse": worse, "watch": watch}
+
+
+def _slim_daily_story_lines(view: dict[str, Any], raw: dict[str, Any]) -> dict[str, str]:
+    failed = _slim_daily_failed(view, raw)
+    lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
+    if failed:
+        if "SOS" in lit:
+            return {
+                "now": "SOS 强但旧底已废，灯为事实并列",
+                "better": "回踩不破并继续站稳 SOS（强势信号）区域",
+                "worse": "SOS 熄火或继续破位则保持无箱观察",
+                "watch": "盯 SOS（强势信号）后回踩是否站稳",
+            }
+        if "LPS" in lit:
+            return {
+                "now": "LPS 修复但旧底已废，灯为事实并列",
+                "better": "修复延续并补出 SOS（强势信号）",
+                "worse": "修复失败则重新寻底",
+                "watch": "盯 LPS（最后支撑点）修复是否守住",
+            }
+        return {
+            "now": "旧底已废，本波没有新强势灯",
+            "better": "重新寻底后出现新 SC（卖力高潮）",
+            "worse": "继续破位则保持无箱观察",
+            "watch": "盯新 SC（卖力高潮）",
+        }
+
+    now = _slim_chain_now(tuple(ACCUM_CHAIN), view, raw, weekly=False)
+    missing = next((code for code in ACCUM_CHAIN if code not in lit), "")
+    better = f"补 {missing}（{_cn(missing)}）并站稳" if missing else "吸筹链保持完整并延续"
+    if _box_mode(view, raw) == "none":
+        worse = "继续破位则保持无箱观察"
+    else:
+        lo, _hi = _phase_a_bounds(raw)
+        worse = f"失守 {_fmt_price(lo)} 一带则本波转弱" if lo is not None else "结构破坏则本波转弱"
+    watch = f"盯 {missing}（{_cn(missing)}）" if missing else "盯回踩是否守住"
+    return {"now": now, "better": better, "worse": worse, "watch": watch}
 
 
 def _oneline_compress(view: dict[str, Any], raw: dict[str, Any]) -> str:
@@ -776,8 +1491,127 @@ def render_wyckoff_card(plan: dict[str, Any]) -> str:
     return text
 
 
+def render_wyckoff_slim(plan: dict[str, Any]) -> str:
+    """默认 B·中剪瘦身卡（--target）。
+
+    旧完整详析保留在 render_wyckoff_detail，供 --full 使用。
+    """
+    name = str(plan.get("name") or plan.get("target") or "未知")
+    code = str(plan.get("code") or "")
+    price_s = _fmt_price(plan.get("price")) or "—"
+    title = f"{name}（{code}）｜现价 {price_s}" if code else f"{name}｜现价 {price_s}"
+    if plan.get("error") and not plan.get("data_ok", True):
+        lines = [
+            title,
+            "周线：中性｜数据不足｜慎做",
+            "日线本波：数据不足",
+            "入池：暂不建议入池（数据不足）",
+            "",
+            "🔮 推演",
+            "  现在",
+            "    周线：数据不足",
+            f"    日线：{plan['error']}",
+            "    周线量度：数据不足，暂不测算",
+            "    日线量度：数据不足，暂不测算",
+            "",
+            "  若变好",
+            "    周线：补足数据后再评估",
+            "    日线：补足数据后再评估",
+            "",
+            "  若变坏",
+            "    周线：数据不足时不引用箱沿",
+            "    日线：数据不足时不引用箱沿",
+            "",
+            "  ⭐ 盯",
+            "    周线：先补数据",
+            "    日线：先补数据",
+            "    本卡不下单；出手/分道看 trader",
+        ]
+        return "\n".join(lines)
+
+    daily_view = _as_view(plan.get("daily_view"))
+    weekly_view = _as_view(plan.get("weekly_view"))
+    daily_raw = _as_raw(plan.get("daily_raw"))
+    weekly_raw = _as_raw(plan.get("weekly_raw"))
+    w_bias = _BIAS_CN.get(str(weekly_view.get("bias") or "neutral"), "中性")
+    weekly_side = _slim_weekly_side(weekly_view, weekly_raw) if weekly_view else "accumulation"
+    weekly_chain = _DIST_CHAIN if weekly_side == "distribution" else tuple(ACCUM_CHAIN)
+    pool_line = _pool_advice(
+        daily_view=daily_view,
+        weekly_view=weekly_view,
+        daily_raw=daily_raw,
+        weekly_raw=weekly_raw,
+    )
+    weekly_story = _slim_weekly_story_lines(weekly_view, weekly_raw)
+    daily_story = _slim_daily_story_lines(daily_view, daily_raw)
+
+    lines: list[str] = [
+        title,
+        f"周线：{w_bias}｜{_slim_weekly_stage_short(weekly_view, weekly_raw)}｜{_slim_weekly_tier(weekly_view, weekly_raw)}",
+        f"日线本波：{_slim_daily_wave_short(daily_view, daily_raw)}",
+        f"入池：{pool_line}",
+        "",
+        "🧭 周线 · 大阶段",
+        f"  {_slim_weekly_sentence(weekly_view, weekly_raw)}",
+        "  灯",
+    ]
+    for lamp in _format_slim_full_lights(weekly_chain, weekly_view, weekly_raw):
+        lines.append(f"  {lamp}")
+
+    lines.extend(
+        [
+            "",
+            "⚡ 日线 · 本波",
+            f"  {_slim_daily_sentence(daily_view, daily_raw)}",
+        ]
+    )
+    explain = _slim_daily_explain(daily_view, daily_raw)
+    if explain:
+        lines.append(f"  {explain}")
+    lines.append("  灯")
+    for lamp in _format_slim_full_lights(tuple(ACCUM_CHAIN), daily_view, daily_raw):
+        lines.append(f"  {lamp}")
+
+    change = _slim_change_line(plan.get("change_line"))
+    if change:
+        lines.extend(["", "🔔 变化", f"  {change}"])
+
+    w_meas = _slim_measure_line(weekly_view, weekly_raw)
+    d_meas = _slim_measure_line(daily_view, daily_raw)
+    lines.extend(
+        [
+            "",
+            "🔮 推演",
+            "  现在",
+            f"    周线：{weekly_story['now']}",
+            f"    日线：{daily_story['now']}",
+            f"    周线量度：{w_meas}",
+            f"    日线量度：{d_meas}",
+            "",
+            "  若变好",
+            f"    周线：{weekly_story['better']}",
+            f"    日线：{daily_story['better']}",
+            "",
+            "  若变坏",
+            f"    周线：{weekly_story['worse']}",
+            f"    日线：{daily_story['worse']}",
+            "",
+            "  ⭐ 盯",
+            f"    周线：{weekly_story['watch']}",
+            f"    日线：{daily_story['watch']}",
+            "    本卡不下单；出手/分道看 trader",
+        ]
+    )
+
+    text = "\n".join(lines)
+    for bad in _FORBIDDEN_BUY_WORDS:
+        if bad in text:
+            text = text.replace(bad, "（结构参考）")
+    return text
+
+
 def render_wyckoff_detail(plan: dict[str, Any]) -> str:
-    """单票威科夫详析卡（默认 --target）。
+    """单票威科夫完整详析卡（--full）。
 
     plan：name/code/price/daily_view/weekly_view/daily_raw/weekly_raw/
     chain_plain/change_line/data_ok/error
@@ -921,5 +1755,6 @@ __all__ = [
     "format_light_change",
     "render_wyckoff_card",
     "render_wyckoff_detail",
+    "render_wyckoff_slim",
     "render_wyckoff_rank",
 ]
