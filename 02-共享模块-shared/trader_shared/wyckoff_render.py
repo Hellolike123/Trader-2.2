@@ -316,7 +316,7 @@ def _primary_light_label(raw: dict[str, Any], view: dict[str, Any]) -> str:
 
 
 def _slim_is_scene_change(view: dict[str, Any], raw: dict[str, Any]) -> bool:
-    """突然拉升类：旧 Phase A 已破 + 破后仍有 SOS/LPS → 换幕（两幕卡）。"""
+    """突然拉升类：Phase A 失效 + 破后仍有 SOS/LPS → 破后强势（双段对照）。"""
     return (is_phase_a_failed(raw) or is_phase_a_failed(view)) and bool(
         _slim_post_fail_strength(view, raw)
     )
@@ -324,7 +324,7 @@ def _slim_is_scene_change(view: dict[str, Any], raw: dict[str, Any]) -> bool:
 
 def _primary_light_code(raw: dict[str, Any], view: dict[str, Any]) -> str:
     if _slim_is_scene_change(view, raw):
-        return "换幕"
+        return "破后强势"
     if is_phase_a_failed(raw) or is_phase_a_failed(view):
         return "PhaseAFail"
     from trader_shared.wyckoff_core import resolve_wyckoff_primary
@@ -655,7 +655,7 @@ def _slim_next_hollow(
 
 def _format_slim_lights(view: dict[str, Any], raw: dict[str, Any], *, weekly: bool) -> list[str]:
     failed = (not weekly) and (is_phase_a_failed(raw) or is_phase_a_failed(view))
-    # 换幕：当前幕灯只列破后强势，SC 进上一幕，避免 SC+SOS 同框拧巴
+    # 破后强势：灯只列破后强势事实；旧 SC 另作历史对照，避免 SC+SOS 同框拧巴
     if (not weekly) and _slim_is_scene_change(view, raw):
         codes = _slim_post_fail_strength(view, raw)
     else:
@@ -687,7 +687,7 @@ def _slim_prev_act_lines(view: dict[str, Any], raw: dict[str, Any]) -> list[str]
         else "吸筹 Phase A：破位 → Phase A 失效"
     )
     lines = [
-        "📎 上一幕（已结束）",
+        "📎 Phase A 失效（历史对照）",
         f"  {head}",
     ]
     if "SC" in _accum_lit_set(raw, view) or bool(raw.get("sc_signal")):
@@ -709,7 +709,7 @@ def _slim_structure_sentence(
         if lit & _DIST_CODES:
             main = next((c for c in _DIST_CHAIN if c in lit), next(iter(lit)))
             lead = f"{main}已亮{bias}"
-            note = "｜与日线换幕可并存（中线仍冷）" if daily_scene_change else ""
+            note = "｜与日线破后强势可并存（中线仍冷）" if daily_scene_change else ""
             return f"{lead}，{_slim_range_phrase(view, raw)}{note}"
         if {"SC", "AR"}.issubset(lit):
             lead = f"SC后反弹{bias}"
@@ -717,8 +717,12 @@ def _slim_structure_sentence(
             lead = f"SC已亮{bias}"
         else:
             main = _primary_light_code(raw, view)
-            lead = f"{main}已亮{bias}" if main not in {"无主灯", "换幕", "PhaseAFail"} else f"结构未明{bias}"
-        note = "｜与日线换幕可并存（中线仍冷）" if daily_scene_change else ""
+            lead = (
+                f"{main}已亮{bias}"
+                if main not in {"无主灯", "破后强势", "PhaseAFail"}
+                else f"结构未明{bias}"
+            )
+        note = "｜与日线破后强势可并存（中线仍冷）" if daily_scene_change else ""
         return f"{lead}，{_slim_range_phrase(view, raw)}{note}"
 
     if _slim_is_scene_change(view, raw):
@@ -726,7 +730,7 @@ def _slim_structure_sentence(
     if is_phase_a_failed(raw) or is_phase_a_failed(view):
         sc_px = _fmt_price(_event_price_from_sources("SC", view=view, raw=raw))
         old = f"旧筑底已破（SC {sc_px}）" if sc_px else "旧筑底已破"
-        return f"{old}｜无箱｜旧吸筹链停止推进（待新寻底）"
+        return f"{old}｜无箱｜旧吸筹链停止推进（须重新寻底）"
 
     lit = set(_slim_lit_codes(view, raw, weekly=False))
     if {"SC", "AR"}.issubset(lit):
@@ -775,9 +779,9 @@ def _slim_chain_token(
     """推演「现在」用的短链 token（非完整 chain_plain）。"""
     if (not weekly) and _slim_is_scene_change(view, raw):
         post = _slim_post_fail_strength(view, raw)
-        return f"已换幕→破后强势（{'+'.join(post)}）；旧吸筹幕已关"
+        return f"破后强势（{'+'.join(post)}）；Phase A 失效"
     if failed:
-        return "旧Phase A已破（待新寻底）"
+        return "Phase A 失效｜须重新寻底"
     # 周线 / 派发侧优先，禁止 ARE 被误当成吸筹链再「待SC」
     dist_lit = set(_slim_lit_codes(view, raw, weekly=True)) & _DIST_CODES
     if weekly or dist_lit:
@@ -859,11 +863,11 @@ def _slim_story_lines(
         now = f"日线 {d_now}｜周线数据不足"
 
     if scene:
-        better = "日线回踩不破，破后强势延续（旧吸筹幕不复活）"
+        better = "日线回踩不破，破后强势延续（旧吸筹不复活）"
         worse = "若回踩失守、破后强势熄火，则短线转弱"
     elif daily_failed:
         better = "日线重新寻底并出现新 SC（卖力高潮）"
-        worse = "日线继续破位走弱则旧链保持作废、短线更弱"
+        worse = "日线继续破位走弱则 Phase A 失效、短线更弱"
     else:
         d_next = _slim_next_label(daily_view, daily_raw)
         better = f"日线出现 {d_next} 且站稳"
@@ -885,7 +889,7 @@ def _slim_story_lines(
             if lo is None:
                 lo = (weekly_view.get("tr") or {}).get("lower") if isinstance(weekly_view.get("tr"), dict) else None
             if lo is not None:
-                worse += f"；周线失守 {_fmt_price(lo)} 一带则雏形作废"
+                worse += f"；周线失守 {_fmt_price(lo)} 一带则雏形不成立"
     elif weekly_view and _slim_is_dist_side(weekly_view, weekly_raw):
         better += "；周线仍偏冷，不要求跟日线同步转多"
         worse += "；周线派发若加深则中线更冷"
