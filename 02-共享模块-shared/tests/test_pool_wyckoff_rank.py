@@ -60,6 +60,42 @@ def test_format_empty():
     assert format_wyckoff_chain_plain({"wyckoff": {}}) == "威：吸筹链未成型"
 
 
+def test_c_f1_failed_phase_a_sc_has_no_gap_copy():
+    """C-F1：phase_a_status=failed 时保留 SC，禁止「还差」。"""
+    item = {"wyckoff": {"sc_signal": True}, "phase_a_status": "failed"}
+    out = format_wyckoff_chain_plain(item)
+    assert out == "威：SC（Phase A 已失效）"
+    assert "还差" not in out
+
+
+def test_c_f2_failed_phase_a_keeps_lit_chain_from_nested_range():
+    """C-F2：nested phase_a_range.status=failed 时展示已亮链，不追加下一灯。"""
+    item = {
+        "wyckoff": {
+            "sc_signal": True,
+            "ar_signal": True,
+            "secondary_test_sc_signal": True,
+            "phase_a_range": {"status": "failed"},
+        }
+    }
+    out = format_wyckoff_chain_plain(item)
+    assert out == "威：SC→AR→Spring确认（Phase A 已失效）"
+    assert "还差" not in out
+
+
+def test_c_f3_failed_phase_a_without_accum_events_is_invalid_structure():
+    """C-F3：failed 但无吸筹链亮灯时，不写健康未成型/还差。"""
+    out = format_wyckoff_chain_plain({"phase_a_range": {"status": "failed"}})
+    assert out == "威：结构已失效"
+    assert "还差" not in out
+    assert "吸筹链未成型" not in out
+
+
+def test_failed_phase_a_keeps_list_input_legacy_behavior():
+    """列表输入只有 events，无 failed 信息时保持旧行为。"""
+    assert format_wyckoff_chain_plain(["SC"]) == "威：SC，还差AR"
+
+
 def test_bc_cooldown_plain():
     item = {"wyckoff": {"bc_signal": True, "sc_signal": False}}
     assert format_wyckoff_chain_plain(item) == "威：BC后观望"

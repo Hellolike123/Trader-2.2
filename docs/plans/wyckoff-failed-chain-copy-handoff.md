@@ -40,6 +40,8 @@ phase_a_range.status == "failed"
 
 若两个字段同时存在但不一致，copy 层按更保守的失败态处理；字段一致性问题由结构锚点 S-A5 / 相关测试另行卡住。
 
+渲染拼装：`daily_raw` / `daily_view` **任一** failed 即收口；`_display_chain_plain` 须把失败态写入用于 `format_wyckoff_chain_plain` 的 src，禁止「view=failed、raw 仍 established」时优先 raw 而漏出「还差」。
+
 ### 2.2 `chain_plain` 短句规则
 
 失败态时，`format_wyckoff_chain_plain` 仍可展示已经亮过的吸筹链事实，但必须停止健康推进暗示。

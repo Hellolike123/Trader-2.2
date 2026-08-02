@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import copy
 import re
 
 from trader_shared.wyckoff_chain import extract_accum_events
@@ -144,6 +145,40 @@ def _l0_percentile_plan() -> dict:
             "summary_oneline": "暂无",
         },
     }
+
+
+def _failed_phase_a_plan() -> dict:
+    plan = copy.deepcopy(_sample_plan())
+    plan["chain_plain"] = "威：SC，还差AR"  # 故意放旧缓存，render 应按 failed raw 收口。
+    plan["daily_raw"].update(
+        {
+            "ar_signal": False,
+            "secondary_test_sc_signal": False,
+            "st_signal": False,
+            "lps_signal": False,
+            "phase_a_status": "failed",
+            "phase_a_range": {"status": "failed", "sc_low": 9.5},
+            "tr_maturity": "L0",
+            "box_display_mode": "none",
+            "measure_allowed": False,
+        }
+    )
+    plan["daily_view"].update(
+        {
+            "phase_label": "Phase A失败",
+            "bias": "neutral",
+            "active_events": ["sc"],
+            "tr_maturity": "L0",
+            "box_display_mode": "none",
+            "measure_allowed": False,
+            "phase_a_status": "failed",
+            "phase_a_range": {"status": "failed", "sc_low": 9.5},
+            "invalidation_hint": "Phase A失败：有效跌破 SC 低点",
+            "summary_oneline": "Phase A失败，等待新结构",
+        }
+    )
+    plan["daily_view"]["event_detail"] = {"sc": {"id": "sc", "price": 9.5, "reason": "SC"}}
+    return plan
 
 
 def test_render_card_skeleton_wechat_safe():
@@ -406,6 +441,63 @@ def test_wd5_secondary_test_sc_lights_st_without_st_signal():
     text = render_wyckoff_detail(plan)
     assert "● ST（二次测试）9.60" in text
     assert "○ LPS（最后支撑点）未亮" in text
+
+
+def test_c_f4_c_f5_c_f7_failed_detail_story_resets_phase_a_copy():
+    """C-F4/C-F5/C-F7：详析 failed 时若变好/现在收口，灯仍保留 SC。"""
+    text = render_wyckoff_detail(_failed_phase_a_plan())
+    story = text.split("🔮 故事链（以日线推进；周线作背景）", 1)[1].split("💬 综述", 1)[0]
+    better = story.split("若变好", 1)[1].split("若变坏", 1)[0]
+    watch = story.split("⭐ 盯", 1)[1].split("入池：", 1)[0]
+
+    assert "现在\n威：SC（Phase A 已失效）" in story
+    assert "Phase A 已失效" in better
+    assert "重新寻底" in better or "新的 SC" in better
+    assert "● SC（卖力高潮）9.50" in text
+    assert "链可推进" not in better
+    assert "还差" not in story
+    assert "盯下一灯" not in watch
+    assert "重新寻底" in watch or "新的 SC" in watch
+
+
+def test_c_f6_failed_short_card_uses_failed_chain_copy():
+    """C-F6：短卡链行吃到 failed chain_plain，不保留旧「还差」。"""
+    text = render_wyckoff_card(_failed_phase_a_plan())
+    assert "📎 链：威：SC（Phase A 已失效）" in text
+    assert "还差" not in text
+
+
+def test_c_f7_view_failed_raw_missing_status_still_closes():
+    """C-F7 补洞：仅 daily_view=failed、daily_raw 无 status 时仍不得「还差」。"""
+    plan = copy.deepcopy(_sample_plan())
+    plan["chain_plain"] = "威：SC，还差AR"
+    # raw：有 SC 灯，故意不带 failed
+    plan["daily_raw"] = {
+        "sc_signal": True,
+        "sc_price": 9.5,
+        "ar_signal": False,
+        "phase_a_status": "established",
+        "phase_a_range": {"status": "established", "sc_low": 9.5},
+    }
+    plan["daily_view"].update(
+        {
+            "phase_a_status": "failed",
+            "phase_a_range": {"status": "failed", "sc_low": 9.5},
+            "tr_maturity": "L0",
+            "box_display_mode": "none",
+            "active_events": ["sc"],
+            "event_detail": {"sc": {"id": "sc", "price": 9.5}},
+            "summary_oneline": "Phase A失败",
+        }
+    )
+    detail = render_wyckoff_detail(plan)
+    card = render_wyckoff_card(plan)
+    assert "威：SC（Phase A 已失效）" in detail
+    assert "威：SC，还差AR" not in detail
+    assert "📎 链：威：SC（Phase A 已失效）" in card
+    assert "还差" not in card
+    story = detail.split("🔮 故事链", 1)[1]
+    assert "链可推进" not in story
 
 
 def test_wd10_phase_label_on_oneline():

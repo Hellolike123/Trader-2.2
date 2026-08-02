@@ -64,6 +64,12 @@ def _wyckoff_dict(report_or_item: dict[str, Any] | None) -> dict[str, Any]:
             merged[canon] = report_or_item.get(flat_key)
     if report_or_item.get("wyckoff_bc_signal") is not None:
         merged["bc_signal"] = report_or_item.get("wyckoff_bc_signal")
+    # Phase A 失败态可来自顶层或 nested wyckoff；顶层覆盖缓存，供链文案收口。
+    for key in ("phase_a_status", "phase_a_range"):
+        if report_or_item.get(key) is not None:
+            merged[key] = report_or_item.get(key)
+    if report_or_item.get("wyckoff_phase_a_status") is not None:
+        merged["phase_a_status"] = report_or_item.get("wyckoff_phase_a_status")
     # 仅有链标签、无任何 signal 旗时，用链回填
     has_any_flag = any(merged.get(k) for k in _SIGNAL_KEYS.values())
     chain = report_or_item.get("wyckoff_chain")
@@ -107,6 +113,17 @@ def _chain_label(label: str) -> str:
     return _CHAIN_DISPLAY.get(label, label)
 
 
+def is_phase_a_failed(report_or_item: dict[str, Any] | None) -> bool:
+    """Phase A copy 层失败态：phase_a_status 或 phase_a_range.status 任一 failed 即收口。"""
+    wyk = _wyckoff_dict(report_or_item)
+    if str(wyk.get("phase_a_status") or "").strip().lower() == "failed":
+        return True
+    pa = wyk.get("phase_a_range")
+    if isinstance(pa, dict) and str(pa.get("status") or "").strip().lower() == "failed":
+        return True
+    return False
+
+
 def _bc_watch_only(wyk: dict[str, Any], events: list[str]) -> bool:
     """仅有 BC、吸筹链尚无事件时观望（有 SC 等则走链文案）。"""
     return bool(wyk.get("bc_signal")) and len(events) == 0 and not wyk.get("sos_signal")
@@ -127,6 +144,11 @@ def format_wyckoff_chain_plain(report_or_item: dict[str, Any] | list[str] | None
         src = report_or_item if isinstance(report_or_item, dict) else {}
         wyk = _wyckoff_dict(src)
         events = extract_accum_events(src)
+        if is_phase_a_failed(src):
+            if events:
+                chain = "→".join(_chain_label(e) for e in events)
+                return f"威：{chain}（Phase A 已失效）"
+            return "威：结构已失效"
         if _bc_watch_only(wyk, events):
             return "威：BC后观望"
 
@@ -262,6 +284,7 @@ __all__ = [
     "first_missing_accum",
     "format_rs_plain",
     "format_wyckoff_chain_plain",
+    "is_phase_a_failed",
     "wyckoff_chain_rank",
     "wyckoff_rs_rank",
 ]

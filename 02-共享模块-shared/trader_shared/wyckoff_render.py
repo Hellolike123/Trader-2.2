@@ -11,6 +11,8 @@ from trader_shared.wyckoff_chain import (
     ACCUM_CHAIN,
     extract_accum_events,
     first_missing_accum,
+    format_wyckoff_chain_plain,
+    is_phase_a_failed,
 )
 
 _BIAS_CN = {
@@ -135,6 +137,42 @@ def _as_raw(obj: Any) -> dict[str, Any]:
     if isinstance(nested, dict) and nested:
         return nested
     return obj
+
+
+def _display_chain_plain(chain_plain: str | None, raw: dict[str, Any], view: dict[str, Any]) -> str:
+    """failed Phase A 时忽略旧缓存，统一走 chain SSOT 的失败态短句。
+
+    保守合并：raw / view 任一 failed 即收口。事件灯优先取 raw；失败态字段
+    从 view 强制写入，避免「view=failed 但 raw 未带 status」漏出还差下一灯。
+    """
+    if not (is_phase_a_failed(raw) or is_phase_a_failed(view)):
+        return str(chain_plain or "威：吸筹链未成型")
+    src: dict[str, Any] = dict(raw) if isinstance(raw, dict) and raw else {}
+    if not src and isinstance(view, dict):
+        src = dict(view)
+    # 强制失败态（handoff：两字段不一致时按更保守的失败处理）
+    src["phase_a_status"] = "failed"
+    pa = dict(src["phase_a_range"]) if isinstance(src.get("phase_a_range"), dict) else {}
+    if isinstance(view, dict) and isinstance(view.get("phase_a_range"), dict):
+        pa = {**view.get("phase_a_range"), **pa}
+    pa["status"] = "failed"
+    src["phase_a_range"] = pa
+    # view.active_events → 回填灯（raw 缺旗时仍能保留已亮事实）
+    if isinstance(view, dict):
+        active = view.get("active_events")
+        if isinstance(active, (list, tuple)):
+            mapping = {
+                "sc": "sc_signal",
+                "ar": "ar_signal",
+                "st": "st_signal",
+                "lps": "lps_signal",
+                "sos": "sos_signal",
+            }
+            for ev in active:
+                key = mapping.get(str(ev).strip().lower())
+                if key and not src.get(key):
+                    src[key] = True
+    return format_wyckoff_chain_plain(src)
 
 
 def _box_mode(view: dict[str, Any], raw: dict[str, Any]) -> str:
@@ -535,13 +573,17 @@ def _story_block(
     d_bias = _BIAS_CN.get(str(daily_view.get("bias") or "neutral"), "中性")
     d_range = _range_phrase(daily_view, daily_raw)
     d_inv = _invalidation_phrase(daily_view, daily_raw)
+    daily_failed = is_phase_a_failed(daily_raw) or is_phase_a_failed(daily_view)
+    chain_plain = _display_chain_plain(chain_plain, daily_raw, daily_view)
 
     # 现在
     now_parts = [chain_plain or "威：吸筹链未成型", f"日线{d_bias}", f"周线背景{w_bias}"]
     now = "｜".join(now_parts)
 
     # 若变好
-    if miss:
+    if daily_failed:
+        better = "Phase A 已失效，先观察是否重新寻底并形成新的 SC（卖力高潮）"
+    elif miss:
         miss_cn = _cn(miss)
         better = f"若出现 {miss}（{miss_cn}）且站稳，链可推进"
         px = _event_price_from_sources(miss, view=daily_view, raw=daily_raw)
@@ -564,7 +606,9 @@ def _story_block(
         worse = "暂无明确失效价；若日线继续破位走弱则链失效"
 
     # 盯
-    if miss:
+    if daily_failed:
+        watch = f"观察是否重新寻底并形成新的 SC（卖力高潮）；区间：{d_range}"
+    elif miss:
         watch = f"盯下一灯 {miss}（{_cn(miss)}）；区间：{d_range}"
     else:
         watch = f"盯回踩是否守住；区间：{d_range}"
@@ -690,10 +734,11 @@ def render_wyckoff_card(plan: dict[str, Any]) -> str:
     price_s = _fmt_price(price)
     daily = plan.get("daily_view") if isinstance(plan.get("daily_view"), dict) else {}
     weekly = plan.get("weekly_view") if isinstance(plan.get("weekly_view"), dict) else {}
+    daily_raw = _as_raw(plan.get("daily_raw"))
 
     phase = str(daily.get("phase_label") or daily.get("phase") or "未知")
     bias = _BIAS_CN.get(str(daily.get("bias") or "neutral"), "中性")
-    chain = str(plan.get("chain_plain") or "威：吸筹链未成型")
+    chain = _display_chain_plain(plan.get("chain_plain"), daily_raw, daily)
     events = _events_line(daily, plan.get("event_line"))
     tr_line = _fmt_tr(daily.get("tr") if isinstance(daily.get("tr"), dict) else None)
     invalid = str(daily.get("invalidation_hint") or "暂无明确失效价")
@@ -761,7 +806,7 @@ def render_wyckoff_detail(plan: dict[str, Any]) -> str:
     weekly_view = _as_view(plan.get("weekly_view"))
     daily_raw = _as_raw(plan.get("daily_raw"))
     weekly_raw = _as_raw(plan.get("weekly_raw"))
-    chain_plain = str(plan.get("chain_plain") or "威：吸筹链未成型")
+    chain_plain = _display_chain_plain(plan.get("chain_plain"), daily_raw, daily_view)
 
     d_bias = _BIAS_CN.get(str(daily_view.get("bias") or "neutral"), "中性")
     w_bias = _BIAS_CN.get(str(weekly_view.get("bias") or "neutral"), "中性")

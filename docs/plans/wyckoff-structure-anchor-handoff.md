@@ -106,6 +106,8 @@
 | alive 锚 | **清空** | 下一决策走路径 B；重新搜 SC 时 **排除** `sc_bar_idx ≤ fail_bar_idx` 的旧锚（避免同一已破 SC 被冷启动再次钉成 forming/established） |
 | （建议）`fail_bar_idx` / `fail_reason` | 透出可选 | 调试；验收不强制字段名，但 S-A5 须能区分失败态 |
 
+链文案收口：failed → L0 时，`chain_plain` / 详析故事链也必须按 `wyckoff-failed-chain-copy-handoff.md` §2 收口，不得保留「还差下一灯」或健康推进语气。
+
 **与 L0–L3 handoff 关系**：`wyckoff-tr-maturity-l0l3-handoff.md` §1.1 增 `failed → L0`；§1.3「仍 L0–L1」在破位失败场景收紧为 **L0**（本文优先）。
 
 **禁止**：破位后仍 `status=established` 或健康 `forming`；破位后 `box_display_mode=proto` 无失败语义；仅把 ST 关掉却继续「停止：SC+AR」推进叙事。

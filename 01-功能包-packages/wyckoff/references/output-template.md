@@ -68,6 +68,7 @@ L0 / `box_display_mode=none` / 分位种子：区间不得出现分位上下沿�
 现价 {价}
 🧭 阶段：{phase_label}｜偏向 {偏多|偏空|中性}
 📎 链：威：SC→AR→ST→LPS，还差SOS
+📎 失败态链示例：威：SC（Phase A 已失效）
 📌 事件：{亮灯事件或无亮灯事件}
 📐 TR：下沿x／上沿y｜质量z
 ⚠ 失效：{invalidation_hint}
