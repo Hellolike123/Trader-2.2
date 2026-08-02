@@ -319,3 +319,23 @@ def test_confidence_rs_merged_delta_strong_gt_neutral_gt_weak():
     neutral = to_wyckoff_state_view({**base, "phase_confidence_delta": 0.0})
     weak = to_wyckoff_state_view({**base, "phase_confidence_delta": -0.08})
     assert strong["confidence"] > neutral["confidence"] > weak["confidence"]
+
+
+def test_r_f4_phase_a_failed_gate_note_uses_shixiao():
+    """R-F4：view 直接进面板的 phase_a_failed 映射写「失效」不写「失败」。"""
+    v = to_wyckoff_state_view(
+        {
+            "phase": "none",
+            "phase_label": "无明确阶段",
+            "phase_a_status": "failed",
+            "phase_tr_gated": True,
+            "phase_tr_gate_reason": "phase_a_failed",
+            "sc_signal": True,
+            "timeframe": "daily",
+        }
+    )
+    line = v["summary_oneline"]
+    assert "Phase A 失效" in line
+    assert "阶段不参与定论" in line
+    for bad in ("Phase A失败", "Phase A 失败"):
+        assert bad not in line
