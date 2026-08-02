@@ -183,6 +183,9 @@ def _scan_for_signal(
     step: int = 5,
     max_lookback_bars: int | None = None,
     tr_ctx: dict | None = None,
+    *,
+    timeframe: str = "daily",
+    is_index: bool = False,
 ) -> bool:
     """在 bars 上滑动窗口运行检测器，找到任意窗口触发即返回 True。
 
@@ -192,16 +195,26 @@ def _scan_for_signal(
     Args:
         max_lookback_bars: 限定只扫描最近 N 根 K 线（防历史幽灵信号），
                            如 30 表示只看 bars 的最后 30 根。
+        timeframe / is_index: 透传给认周期的检测器（SC/AR 周线窗/阈值），
+                              避免周线阶段机滑窗默默用日线参数（W-01）。
     """
     if max_lookback_bars is not None and len(bars) > max_lookback_bars:
         bars = bars[-max_lookback_bars:]
     n = len(bars)
     def _call_detector(sub: list[dict]) -> dict:
-        """统一关键字传 tr_ctx（与 _scan_last_event 一致）。
+        """统一关键字传 tr_ctx + timeframe（与 _scan_last_event 一致）。
 
         Spring/SOW 第二位置参是 _support，位置传 tr_ctx 会错塞；
-        compression 等无 tr_ctx 形参时 TypeError → 回退无参调用。
+        无 timeframe/tr_ctx 形参时 TypeError → 逐级回退。
         """
+        try:
+            if tr_ctx is None:
+                return detector_fn(sub, timeframe=timeframe, is_index=is_index)
+            return detector_fn(
+                sub, tr_ctx=tr_ctx, timeframe=timeframe, is_index=is_index
+            )
+        except TypeError:
+            pass
         if tr_ctx is None:
             return detector_fn(sub)
         try:
@@ -236,7 +249,15 @@ def _scan_for_signal(
             continue
     return False
 
-def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: int | None = None, tr_ctx: dict | None = None) -> dict[str, Any]:
+def _detect_phase(
+    bars: list[dict],
+    signals: dict[str, Any],
+    _phase_lookback: int | None = None,
+    tr_ctx: dict | None = None,
+    *,
+    timeframe: str = "daily",
+    is_index: bool = False,
+) -> dict[str, Any]:
     """基于信号序列推断威科夫阶段（积累 Phase A-E / 派发 Phase A'-E'）。
 
     原典约束（五阶段机串联）：
@@ -299,27 +320,28 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
         }
 
     # 当前 bar 信号优先（避免 scan step 漏检末尾），再滑动扫描历史窗口
+    _scan_kw = {"tr_ctx": tr_ctx, "timeframe": timeframe, "is_index": is_index}
     bc_found = bool(signals.get("bc_signal")) or _scan_for_signal(
-        wide_bars, _detect_buying_climax, window=15, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
+        wide_bars, _detect_buying_climax, window=15, step=5, max_lookback_bars=30, **_scan_kw
     )
     ar_found = bool(signals.get("ar_signal")) or _scan_for_signal(
-        wide_bars, _detect_ar, window=WYCKOFF_CLIMAX_ANCHOR_BARS + 3, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
+        wide_bars, _detect_ar, window=WYCKOFF_CLIMAX_ANCHOR_BARS + 3, step=5, max_lookback_bars=30, **_scan_kw
     )
     are_found = bool(signals.get("are_signal")) or _scan_for_signal(
-        wide_bars, _detect_are, window=WYCKOFF_CLIMAX_ANCHOR_BARS + 3, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
+        wide_bars, _detect_are, window=WYCKOFF_CLIMAX_ANCHOR_BARS + 3, step=5, max_lookback_bars=30, **_scan_kw
     )
     ut_found = bool(signals.get("upthrust_signal")) or _scan_for_signal(
-        wide_bars, _detect_upthrust, window=15, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
+        wide_bars, _detect_upthrust, window=15, step=5, max_lookback_bars=30, **_scan_kw
     )
     sow_found = bool(signals.get("sow_signal")) or _scan_for_signal(
-        wide_bars, _detect_sign_of_weakness, window=16, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
+        wide_bars, _detect_sign_of_weakness, window=16, step=5, max_lookback_bars=30, **_scan_kw
     )
     # 新增：SC（卖力高潮）和 LPSY（最后供应点）扫描
     sc_found = bool(signals.get("sc_signal")) or _scan_for_signal(
-        wide_bars, _detect_selling_climax, window=WYCKOFF_CLIMAX_ANCHOR_BARS, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
+        wide_bars, _detect_selling_climax, window=WYCKOFF_CLIMAX_ANCHOR_BARS, step=5, max_lookback_bars=30, **_scan_kw
     )
     lpsy_found = bool(signals.get("lpsy_signal")) or _scan_for_signal(
-        wide_bars, _detect_lpsy, window=15, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
+        wide_bars, _detect_lpsy, window=15, step=5, max_lookback_bars=30, **_scan_kw
     )
 
     def _finish(d: dict[str, Any]) -> dict[str, Any]:
@@ -327,39 +349,40 @@ def _detect_phase(bars: list[dict], signals: dict[str, Any], _phase_lookback: in
 
     # 后期信号：当前 bar + 滑窗扫描（P1-3 修复：让经典积累链可被阶段机识别）
     spring = bool(signals.get("spring_signal")) or _scan_for_signal(
-        wide_bars, _detect_spring, window=15, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
+        wide_bars, _detect_spring, window=15, step=5, max_lookback_bars=30, **_scan_kw
     )
     sos = bool(signals.get("sos_signal")) or _scan_for_signal(
-        wide_bars, _detect_sos, window=15, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
+        wide_bars, _detect_sos, window=15, step=5, max_lookback_bars=30, **_scan_kw
     )
     lps = bool(signals.get("lps_signal")) or _scan_for_signal(
-        wide_bars, _detect_lps, window=15, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
+        wide_bars, _detect_lps, window=15, step=5, max_lookback_bars=30, **_scan_kw
     )
     compression = bool(signals.get("compression_signal")) or _scan_for_signal(
-        wide_bars, _detect_compression, window=20, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
+        wide_bars, _detect_compression, window=20, step=5, max_lookback_bars=30, **_scan_kw
     )
     trend_pullback = bool(signals.get("trend_pullback_signal")) or _scan_for_signal(
-        wide_bars, _detect_trend_pullback, window=15, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
+        wide_bars, _detect_trend_pullback, window=15, step=5, max_lookback_bars=30, **_scan_kw
     )
     trend_rally = bool(signals.get("trend_rally_signal")) or _scan_for_signal(
-        wide_bars, _detect_trend_rally, window=15, step=5, max_lookback_bars=30, tr_ctx=tr_ctx
+        wide_bars, _detect_trend_rally, window=15, step=5, max_lookback_bars=30, **_scan_kw
     )
     # Test of Spring（与 st_* 同源）
     spring_test = bool(
         signals.get("spring_test_signal") or signals.get("st_signal")
     ) or _scan_for_signal(
-        wide_bars, _detect_st, window=20, step=5, max_lookback_bars=40, tr_ctx=tr_ctx
+        wide_bars, _detect_st, window=20, step=5, max_lookback_bars=40, **_scan_kw
     )
 
     # ── 原典顺序校验：事件索引 — Spring/UT 必须在 Phase B 之后才有效 ────────
     # 计算各事件在 wide_bars 中的最后触发索引（若索引数组已排序则取最后出现位置）
-    spring_idx, _ = _scan_last_event(wide_bars, _detect_spring, tr_ctx, window=15, step=1)
-    ut_idx, _ = _scan_last_event(wide_bars, _detect_upthrust, tr_ctx, window=15, step=1)
-    sc_idx, _ = _scan_last_event(wide_bars, _detect_selling_climax, tr_ctx, window=WYCKOFF_CLIMAX_ANCHOR_BARS, step=1)
-    bc_idx, _ = _scan_last_event(wide_bars, _detect_buying_climax, tr_ctx, window=WYCKOFF_CLIMAX_ANCHOR_BARS, step=1)
-    ar_idx, _ = _scan_last_event(wide_bars, _detect_ar, tr_ctx, window=WYCKOFF_CLIMAX_ANCHOR_BARS + 3, step=1)
-    are_idx, _ = _scan_last_event(wide_bars, _detect_are, tr_ctx, window=WYCKOFF_CLIMAX_ANCHOR_BARS + 3, step=1)
-    comp_idx, _ = _scan_last_event(wide_bars, _detect_compression, tr_ctx, window=20, step=1)
+    _last_kw = {"timeframe": timeframe, "is_index": is_index}
+    spring_idx, _ = _scan_last_event(wide_bars, _detect_spring, tr_ctx, window=15, step=1, **_last_kw)
+    ut_idx, _ = _scan_last_event(wide_bars, _detect_upthrust, tr_ctx, window=15, step=1, **_last_kw)
+    sc_idx, _ = _scan_last_event(wide_bars, _detect_selling_climax, tr_ctx, window=WYCKOFF_CLIMAX_ANCHOR_BARS, step=1, **_last_kw)
+    bc_idx, _ = _scan_last_event(wide_bars, _detect_buying_climax, tr_ctx, window=WYCKOFF_CLIMAX_ANCHOR_BARS, step=1, **_last_kw)
+    ar_idx, _ = _scan_last_event(wide_bars, _detect_ar, tr_ctx, window=WYCKOFF_CLIMAX_ANCHOR_BARS + 3, step=1, **_last_kw)
+    are_idx, _ = _scan_last_event(wide_bars, _detect_are, tr_ctx, window=WYCKOFF_CLIMAX_ANCHOR_BARS + 3, step=1, **_last_kw)
+    comp_idx, _ = _scan_last_event(wide_bars, _detect_compression, tr_ctx, window=20, step=1, **_last_kw)
 
     # Phase B（建仓区）背景：
     #   积累：SC+AR（原典 Automatic Rally）或压缩蓄力

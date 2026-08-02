@@ -2066,11 +2066,16 @@ def _scan_last_event(
     tr_ctx: dict | None,
     window: int,
     step: int = 1,
+    *,
+    timeframe: str = "daily",
+    is_index: bool = False,
 ) -> tuple[int, dict | None]:
     """在 scan_bars 上滑窗扫描 detector_fn，返回 (最后触发 bar 的索引, 该次检测器完整输出)。
 
     所有事件检测器都检查子窗口最后一根 bar（bars[-1]）是否为信号，因此
     start+window-1 即为事件触发位置。用于事件簇确认时的先后顺序判断。
+
+    timeframe / is_index：透传给 SC/AR 等认周期检测器（W-01）。
 
     Returns:
         (index, result) —— 未找到时 (-1, None)
@@ -2083,10 +2088,15 @@ def _scan_last_event(
     for start in range(0, n - window + 1, step):
         sub = scan_bars[start:start + window]
         try:
-            # 统一用关键字传 tr_ctx：各 detector 第二位置参数不同
+            # 统一用关键字传 tr_ctx / timeframe：各 detector 第二位置参数不同
             # (_detect_spring / _detect_sign_of_weakness 第二参是 _support，
             #  位置传参会把 tr_ctx 错塞进 _support 导致 tr_ctx 实际为 None 而失效)
-            res = detector_fn(sub, tr_ctx=tr_ctx)
+            try:
+                res = detector_fn(
+                    sub, tr_ctx=tr_ctx, timeframe=timeframe, is_index=is_index
+                )
+            except TypeError:
+                res = detector_fn(sub, tr_ctx=tr_ctx)
         except Exception:
             continue
         if any(k.endswith("_signal") and res.get(k) is True for k in res):

@@ -691,8 +691,8 @@ def test_wd5_lights_bullet_cn_and_price():
 
 
 def test_wd5_secondary_test_sc_lights_st_without_st_signal():
-    """W-D5 / §2.4：仅 secondary_test_sc（无 st_signal）须亮 ST；禁止靠 phase 字样猜灯。"""
-    # 链提取：广义 ST
+    """W-D5：详析灯认 secondary_test_sc 为 ST（二次测试）；链槽不进（W-02）。"""
+    # 链提取：广义 ST 不进链 ST 槽（phase-a §4.4.2）
     only_st_sc = {
         "sc_signal": True,
         "ar_signal": True,
@@ -702,7 +702,7 @@ def test_wd5_secondary_test_sc_lights_st_without_st_signal():
         "lps_signal": False,
         "sos_signal": False,
     }
-    assert extract_accum_events(only_st_sc) == ["SC", "AR", "ST"]
+    assert extract_accum_events(only_st_sc) == ["SC", "AR"]
 
     # 仅 phase 字样、无事件 → 不亮
     phase_only = {
@@ -717,7 +717,7 @@ def test_wd5_secondary_test_sc_lights_st_without_st_signal():
     }
     assert extract_accum_events(phase_only) == []
 
-    # 详析：L2 箱 + secondary_test_sc → ST●（查 Agent 曾抓的 ST 黑洞）
+    # 详析：L2 箱 + secondary_test_sc → ST●（二次测试，非 Spring确认）
     plan = _sample_plan()
     plan["daily_raw"]["st_signal"] = False
     plan["daily_raw"]["spring_test_signal"] = False

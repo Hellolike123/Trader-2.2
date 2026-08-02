@@ -176,14 +176,23 @@ class TestTrailingStop:
         assert config.ENABLE_TRAILING_STOP is True
         closes = [10.0 + i * 0.1 for i in range(30)]
         bars = _make_bars(closes)
-        result = build_structure_context(current=12.0, bars=bars)
+        # 持仓上下文（pnl）才算 trailing
+        result = build_structure_context(current=12.0, bars=bars, pnl_pct=0.05)
         assert result.get("trailing_stop") is not None
         assert result["trailing_stop"] < 12.0
+
+    def test_a03_no_position_skips_trailing(self):
+        """A-03：无仓上下文不算 trailing，effective_stop 等于 hard_stop。"""
+        closes = [10.0 + i * 0.1 for i in range(30)]
+        bars = _make_bars(closes)
+        result = build_structure_context(current=12.0, bars=bars)
+        assert result.get("trailing_stop") is None
+        assert result.get("effective_stop") == result.get("hard_stop")
 
     def test_trailing_stop_not_below_hard_stop(self):
         closes = [10.0 + i * 0.1 for i in range(100)]
         bars = _make_bars(closes)
-        result = build_structure_context(current=19.0, bars=bars)
+        result = build_structure_context(current=19.0, bars=bars, pnl_pct=0.10)
         assert result.get("trailing_stop") is not None
         assert result["trailing_stop"] >= result.get("hard_stop", 0)
 
@@ -191,7 +200,7 @@ class TestTrailingStop:
         monkeypatch.setattr("trader_shared.config.ENABLE_TRAILING_STOP", False)
         closes = [10.0 + i * 0.1 for i in range(30)]
         bars = _make_bars(closes)
-        result = build_structure_context(current=12.0, bars=bars)
+        result = build_structure_context(current=12.0, bars=bars, pnl_pct=0.05)
         assert result.get("trailing_stop") is None
 
     def test_trailing_stop_pnl_scaling(self):
@@ -207,7 +216,7 @@ class TestTrailingStop:
     def test_trailing_stop_ratchet_with_prev(self):
         closes = [10.0 + i * 0.1 for i in range(30)]
         bars = _make_bars(closes)
-        fresh = build_structure_context(current=12.0, bars=bars)
+        fresh = build_structure_context(current=12.0, bars=bars, pnl_pct=0.05)
         assert fresh.get("trailing_stop") is not None
         higher_prev = round(float(fresh["trailing_stop"]) + 1.0, 2)
         ratcheted = build_structure_context(

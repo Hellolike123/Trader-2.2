@@ -69,7 +69,10 @@ def test_c_f1_failed_phase_a_sc_has_no_gap_copy():
 
 
 def test_c_f2_failed_phase_a_keeps_lit_chain_from_nested_range():
-    """C-F2：nested phase_a_range.status=failed 时展示已亮链，不追加下一灯。"""
+    """C-F2：nested phase_a_range.status=failed 时展示已亮链，不追加下一灯。
+
+    W-02：广义 ST（secondary_test_sc）不进链 ST 槽，故链上只有 SC→AR。
+    """
     item = {
         "wyckoff": {
             "sc_signal": True,
@@ -79,8 +82,37 @@ def test_c_f2_failed_phase_a_keeps_lit_chain_from_nested_range():
         }
     }
     out = format_wyckoff_chain_plain(item)
-    assert out == "威：SC→AR→Spring确认（Phase A 已失效）"
+    assert out == "威：SC→AR（Phase A 已失效）"
     assert "还差" not in out
+    assert "Spring确认" not in out
+
+
+def test_w02_secondary_test_sc_does_not_light_chain_st_as_spring_confirm():
+    """W-02 / phase-a §4.4.2：测 SC 不得点亮链 ST；Spring 确认才点亮。"""
+    only_st_sc = {
+        "wyckoff": {
+            "sc_signal": True,
+            "ar_signal": True,
+            "st_signal": False,
+            "spring_test_signal": False,
+            "secondary_test_sc_signal": True,
+        }
+    }
+    assert extract_accum_events(only_st_sc) == ["SC", "AR"]
+    # 已亮链不含 Spring确认；「还差Spring确认」是缺口提示，允许
+    out = format_wyckoff_chain_plain(only_st_sc)
+    assert out.startswith("威：SC→AR")
+    assert "SC→AR→Spring确认" not in out
+
+    spring_confirm = {
+        "wyckoff": {
+            "sc_signal": True,
+            "ar_signal": True,
+            "spring_test_signal": True,
+        }
+    }
+    assert extract_accum_events(spring_confirm) == ["SC", "AR", "ST"]
+    assert format_wyckoff_chain_plain(spring_confirm) == "威：SC→AR→Spring确认，还差LPS"
 
 
 def test_c_f3_failed_phase_a_without_accum_events_is_invalid_structure():

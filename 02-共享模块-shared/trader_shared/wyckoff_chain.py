@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
-# 吸筹链固定顺序（ST 槽位认 st_* / spring_test_* / secondary_test_sc_*；展示名见 _CHAIN_DISPLAY）
+# 吸筹链固定顺序。
+# ST 槽 = Spring 确认（st_* / spring_test_*）；广义 ST（secondary_test_sc）不进此槽
+# （phase-a-range §4.4.2 / W-02：禁把测 SC 显示成 Spring确认）。
 ACCUM_CHAIN = ("SC", "AR", "ST", "LPS", "SOS")
 
 # 同道内 RS 排序档：弱侧更重（原典：弱相对强弱更常用来降级）
@@ -89,12 +91,8 @@ def extract_accum_events(report_or_item: dict[str, Any] | None) -> list[str]:
         key = _SIGNAL_KEYS[label]
         lit = bool(wyk.get(key))
         if label == "ST":
-            # 广义 ST（回测 SC）与 Spring 确认均可点亮链上 ST；与 L0–L3 真 ST 对齐
-            lit = (
-                lit
-                or bool(wyk.get("spring_test_signal"))
-                or bool(wyk.get("secondary_test_sc_signal"))
-            )
+            # 链 ST = Spring 确认；广义 ST（测 SC）只服务 L0–L3，不进链槽
+            lit = lit or bool(wyk.get("spring_test_signal"))
         if lit:
             out.append(label)
     return out

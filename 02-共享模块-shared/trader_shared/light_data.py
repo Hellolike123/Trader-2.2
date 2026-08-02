@@ -1200,9 +1200,8 @@ def _compute_atr_fields(bars: list[dict[str, Any]]) -> None:
         if i == 0:
             bar["tr"] = round(h - l, 4)
             continue
+        # 与 calc_atr_series / BUSINESS §6.3 对齐：缺昨收则 TR=None，禁止 fallback 昨开
         pc = _ohlc_float(bars[i - 1].get("close"))
-        if pc is None:
-            pc = _ohlc_float(bars[i - 1].get("open"))
         if pc is None:
             bar["tr"] = None
             continue

@@ -347,3 +347,18 @@ class TestEmaBollingerAtrWarmup:
         assert series[13] is None
         assert series[18] is None
         assert series[22] is not None and series[22] > 0
+
+    def test_a01_missing_prev_close_no_open_fallback(self):
+        """A-01：缺昨收时 TR=None，禁止 fallback 昨开；与 calc_atr_series 一致。"""
+        from trader_shared.indicator_math import calc_atr_series
+        from trader_shared.light_data import _compute_atr_fields
+
+        bars = [
+            # 昨开存在但昨收缺失：旧逻辑会用 open=10 算出 TR=12
+            {"open": 10.0, "high": 11.0, "low": 9.0, "close": None},
+            {"open": 10.0, "high": 22.0, "low": 10.0, "close": 11.0},
+        ]
+        _compute_atr_fields(bars)
+        assert bars[1]["tr"] is None
+        series = calc_atr_series(bars, 2)
+        assert series[1] is None

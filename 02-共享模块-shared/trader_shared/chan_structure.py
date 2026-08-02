@@ -1058,9 +1058,10 @@ def detect_buy_points(
                             if strokes[i].get("direction") == "down":
                                 pb_stroke = strokes[i]
                                 break
+                        # 信号价用回踩结构锚点，禁止现价冒充（C-01 / deep-card §2.3）
                         buy_points.append(_with_anchor({
                             "type": "三类买",
-                            "price": round(last_close, 4),
+                            "price": round(float(pullback_low), 4),
                             "confidence": 1,
                         }, pb_stroke or strokes[leave_i]))
 
@@ -1240,13 +1241,22 @@ def detect_sell_points(
                     vol_ok = not bars or _volume_spike(len(bars) - 1, 1.2)
                     if vol_ok:
                         bounce_stroke = None
+                        pullback_high = None
                         for i in range(len(strokes) - 1, leave_i, -1):
                             if strokes[i].get("direction") == "up":
                                 bounce_stroke = strokes[i]
+                                if bounce_stroke.get("end_price") is not None:
+                                    pullback_high = bounce_stroke["end_price"]
                                 break
+                        # 信号价用反抽结构锚点，禁止现价冒充（C-01 / deep-card §2.3）
+                        struct_price = (
+                            float(pullback_high)
+                            if pullback_high is not None
+                            else float(last_close)
+                        )
                         sell_points.append(_with_anchor({
                             "type": "三类卖",
-                            "price": round(last_close, 4),
+                            "price": round(struct_price, 4),
                             "confidence": 1,
                         }, bounce_stroke or strokes[leave_i]))
 

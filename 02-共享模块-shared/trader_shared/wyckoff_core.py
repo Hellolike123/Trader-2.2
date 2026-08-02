@@ -764,7 +764,14 @@ def wyckoff_analysis(
         "tr_upper": phase_tr_ctx.get("tr_upper") if phase_tr_ctx else None,
         "last_close": to_float(bars[-1].get("close")) if bars else None,
     }
-    phase = _detect_phase(bars, signals_dict, _phase_lookback=_phase_lb, tr_ctx=phase_tr_ctx)
+    phase = _detect_phase(
+        bars,
+        signals_dict,
+        _phase_lookback=_phase_lb,
+        tr_ctx=phase_tr_ctx,
+        timeframe=timeframe,
+        is_index=is_index,
+    )
 
     # 周线 RS：仅修正 phase_confidence_delta，不改 phase；日线显式 disabled
     rs_fields: dict[str, Any] = {}

@@ -849,7 +849,12 @@ def build_structure_context(
 
     trailing_stop = None
     highest_close = None
-    if ENABLE_TRAILING_STOP and atr_pct and atr_pct > 0:
+    # A-03：仅持仓上下文算 trailing（水位 symbol / 显式 prev / 有盈亏）
+    # 无仓不抬 effective_stop，避免空仓票被移动止损抬高展示与状态机
+    _has_position_ctx = bool(trailing_ratchet_symbol) or (
+        prev_trailing_stop is not None
+    ) or (pnl_pct is not None)
+    if ENABLE_TRAILING_STOP and atr_pct and atr_pct > 0 and _has_position_ctx:
         # 近 STRUCTURE_WINDOW 窗内最高收（勿用全历史高点，否则回撤票止损远高于现价误触发）
         recent_bars = bars[-STRUCTURE_WINDOW:] if bars else []
         closes = [v for b in recent_bars if (v := to_float(b.get("close"))) is not None]

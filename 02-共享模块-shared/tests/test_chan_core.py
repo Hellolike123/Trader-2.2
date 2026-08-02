@@ -413,6 +413,21 @@ class TestDetectBuyPoints:
         types = [bp["type"] for bp in result]
         assert "三类买" in types
 
+    def test_c01_third_buy_price_is_pullback_anchor_not_last_close(self):
+        """C-01：三类买 price 用回踩结构价，现价日变时信号价不变。"""
+        strokes = [
+            {"direction": "up", "end_price": 11.0, "end_index": 10},
+            {"direction": "down", "end_price": 10.05, "end_index": 14},
+        ]
+        zones = [{"zh_top": 10.0, "zh_bottom": 8.0, "valid": True}]
+        a = detect_buy_points(strokes, zones, 10.30)
+        b = detect_buy_points(strokes, zones, 10.80)
+        pa = next(p for p in a if p["type"] == "三类买")
+        pb = next(p for p in b if p["type"] == "三类买")
+        assert pa["price"] == 10.05
+        assert pb["price"] == 10.05
+        assert pa["price"] != 10.30
+
     def test_buy_point_3_inside_zone(self):
         """P1 三类买：close 仍在中枢内 → 无。"""
         strokes = [{"direction": "up", "end_price": 9.5}]
@@ -647,6 +662,21 @@ class TestDetectSellPointsP1:
         result = detect_sell_points(strokes, zones, 7.5)
         types = [sp["type"] for sp in result]
         assert "三类卖" in types
+
+    def test_c01_third_sell_price_is_bounce_anchor_not_last_close(self):
+        """C-01：三类卖 price 用反抽结构价，非现价。"""
+        strokes = [
+            {"direction": "down", "end_price": 7.0, "end_index": 10},
+            {"direction": "up", "end_price": 7.8, "end_index": 14},
+        ]
+        zones = [{"zh_top": 10.0, "zh_bottom": 8.0, "valid": True}]
+        a = detect_sell_points(strokes, zones, 7.5)
+        b = detect_sell_points(strokes, zones, 7.2)
+        pa = next(p for p in a if p["type"] == "三类卖")
+        pb = next(p for p in b if p["type"] == "三类卖")
+        assert pa["price"] == 7.8
+        assert pb["price"] == 7.8
+        assert pa["price"] != 7.5
 
     def test_sell_point_3_no_bounce_after_leave(self):
         """三类卖：仅离开未反弹 → 无。"""
