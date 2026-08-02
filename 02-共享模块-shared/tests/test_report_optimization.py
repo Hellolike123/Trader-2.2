@@ -687,6 +687,54 @@ def test_cd3_midline_wave_sanitized_even_with_engine_sell():
         assert forbidden not in chan_line
 
 
+def test_cd3_midline_opposite_divergence_stripped_from_wave_state():
+    """C-D3：单侧引擎背驰时，浪型状态段不得残留相反背驰。"""
+    r = _report()
+    base_strokes = [
+        {"direction": "up", "end_price": 40.0},
+        {"direction": "down", "end_price": 38.0},
+        {"direction": "up", "end_price": 43.0},
+    ]
+
+    r_top = dict(r)
+    r_top["chanlun_midline"] = {
+        "chanlun": {
+            "buy_points": [],
+            "sell_points": [],
+            "divergence": {"top_divergence": True, "bottom_divergence": False},
+            "trend_label": "拉升段",
+            "timeframe": "weekly",
+            "strokes": list(base_strokes),
+        }
+    }
+    r_top["conclusion"] = dict(r["conclusion"])
+    r_top["conclusion"]["wave_label_mid"] = "底背驰 · 拉升趋势中"
+    out_top = render_short_midline(r_top)
+    mid_top = out_top.split("🧭 中线", 1)[-1].split("⚡ 短线", 1)[0]
+    chan_top = next(ln for ln in mid_top.splitlines() if "缠论：" in ln)
+    assert "底背驰" not in chan_top
+    assert "顶背驰" in chan_top or "看跌" in chan_top
+
+    r_bot = dict(r)
+    r_bot["chanlun_midline"] = {
+        "chanlun": {
+            "buy_points": [],
+            "sell_points": [],
+            "divergence": {"top_divergence": False, "bottom_divergence": True},
+            "trend_label": "回调段",
+            "timeframe": "weekly",
+            "strokes": list(base_strokes),
+        }
+    }
+    r_bot["conclusion"] = dict(r["conclusion"])
+    r_bot["conclusion"]["wave_label_mid"] = "顶背驰 · 回调见底"
+    out_bot = render_short_midline(r_bot)
+    mid_bot = out_bot.split("🧭 中线", 1)[-1].split("⚡ 短线", 1)[0]
+    chan_bot = next(ln for ln in mid_bot.splitlines() if "缠论：" in ln)
+    assert "顶背驰" not in chan_bot
+    assert "底背驰" in chan_bot or "看涨" in chan_bot
+
+
 def test_short_section_has_daily_phase_line():
     """短线区必有「威科夫：」只读行（与中线点名同构）；禁止「日线阶段：」。"""
     r = _report()

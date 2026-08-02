@@ -36,17 +36,22 @@ _CHAN_POINT_CLAIM_RE = re.compile(
     r"(?:类)?[一二三](?:类)?[买卖]"
     r"|可低吸|宜买|可执行|该买了|三重共振买"
 )
-_CHAN_DIV_CLAIM_RE = re.compile(r"底背驰|顶背驰")
-
-
-def _sanitize_chan_display_text(text: str, *, allow_divergence: bool = True) -> str:
-    """洗掉无引擎点时的买点宣称与下单词；无引擎背驰时连同背驰词一并洗掉。"""
+def _sanitize_chan_display_text(
+    text: str,
+    *,
+    allow_bottom_div: bool = False,
+    allow_top_div: bool = False,
+) -> str:
+    """洗掉买/卖点宣称与下单词；背驰词仅按引擎实际方向放行。"""
     raw = str(text or "").strip()
     if not raw:
         return raw
-    claim_re = _CHAN_POINT_CLAIM_RE if allow_divergence else re.compile(
-        _CHAN_POINT_CLAIM_RE.pattern + r"|" + _CHAN_DIV_CLAIM_RE.pattern
-    )
+    ban_parts = [_CHAN_POINT_CLAIM_RE.pattern]
+    if not allow_bottom_div:
+        ban_parts.append(r"底背驰")
+    if not allow_top_div:
+        ban_parts.append(r"顶背驰")
+    claim_re = re.compile("|".join(ban_parts))
     chunks: list[str] = []
     for part in re.split(r"\s*[·｜|]\s*", raw):
         piece = part.strip()
@@ -480,7 +485,8 @@ def render_short_midline(r: dict[str, Any]) -> str:
     # 方向/点类型与 resolve_chanlun_primary 同源（禁再手写一套卖买优先级）
     _chan_dir_mid = ""
     _chan_point_type = ""  # 买卖点类型名，如"一类买""类二买"等
-    _engine_has_div = False
+    _allow_bottom_div = False
+    _allow_top_div = False
     _mid_strokes: list = []
     try:
         from trader_shared.chan_core import unwrap_chan
@@ -489,6 +495,13 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _mid_strokes = [
             s for s in (_mid_chan.get("strokes") or []) if isinstance(s, dict)
         ]
+        _mid_div = (
+            _mid_chan.get("divergence")
+            if isinstance(_mid_chan.get("divergence"), dict)
+            else {}
+        )
+        _allow_bottom_div = bool(_mid_div.get("bottom_divergence"))
+        _allow_top_div = bool(_mid_div.get("top_divergence"))
     except Exception:
         _mid_strokes = []
     if not _insufficient_struct:
@@ -505,16 +518,23 @@ def render_short_midline(r: dict[str, Any]) -> str:
                 _chan_point_type = str(
                     _prim.get("type_raw") or _prim.get("type_short") or ""
                 ).strip()
-            _engine_has_div = _prim.get("status") == "divergence"
+            # primary 背驰类型再校准放行方向（防 divergence 字典缺失）
+            if _prim.get("status") == "divergence":
+                _tr = str(_prim.get("type_raw") or "")
+                if "底" in _tr:
+                    _allow_bottom_div = True
+                if "顶" in _tr:
+                    _allow_top_div = True
         except Exception:
             pass
 
     # C-D3：浪型文案始终洗掉买/卖点宣称与下单词（引擎点改由 _chan_point_type 注入）；
-    # 无引擎背驰时也不得残留污染浪型里的「底/顶背驰」。
-    # 有卖点时同样必须洗——不得因 _chan_point_type 非空而跳过清洗。
+    # 背驰词按引擎实际方向放行（有顶背驰不得残留底背驰，反之亦然）。
     if _wave_mid:
         _wave_mid = _sanitize_chan_display_text(
-            _wave_mid, allow_divergence=_engine_has_div
+            _wave_mid,
+            allow_bottom_div=_allow_bottom_div,
+            allow_top_div=_allow_top_div,
         )
 
     # C-D4e：中线浪型路径也须接笔尖离价闸（与 conclusion_block / Skill 同源）
