@@ -868,49 +868,8 @@ def format_chanlun_short_light(
     info = resolve_chanlun_primary(chan_result)
     chan = info.get("chan") if isinstance(info.get("chan"), dict) else {}
 
-    # fusion 有更强 reason 且 resolve 无 point 时，可从 reason 补类型（兼容只有 signals_detail 的 mock）
-    if info["status"] in ("none", "trend") and isinstance(fusion_chan, dict):
-        reason = str(fusion_chan.get("reason") or "")
-        for raw, short in _CHAN_TYPE_SHORT.items():
-            if raw in reason or short in reason:
-                info = {
-                    **info,
-                    "status": "point",
-                    "type_raw": raw,
-                    "type_short": short,
-                    "note": _CHAN_TYPE_NOTE.get(raw, ""),
-                    "direction": int(fusion_chan.get("direction") or info["direction"] or 0),
-                    "same_level": True,
-                }
-                if "底背驰" in reason and "买" in short:
-                    info["note"] = "底背驰"
-                if "顶背驰" in reason and "卖" in short:
-                    info["note"] = "顶背驰"
-                break
-        else:
-            if "底背驰" in reason:
-                info = {
-                    **info,
-                    "status": "divergence",
-                    "type_raw": "底背驰",
-                    "type_short": "底背驰",
-                    "note": "抛压减轻",
-                    "direction": 1,
-                    "same_level": True,
-                }
-            elif "顶背驰" in reason:
-                info = {
-                    **info,
-                    "status": "divergence",
-                    "type_raw": "顶背驰",
-                    "type_short": "顶背驰",
-                    "note": "上攻乏力",
-                    "direction": -1,
-                    "same_level": True,
-                }
-            elif fusion_chan.get("direction") is not None and info["status"] == "none":
-                d = int(fusion_chan.get("direction") or 0)
-                info = {**info, "direction": d, "note": reason.replace("缠论", "").strip() or info["note"]}
+    # fusion_chan 仅为调用兼容保留；买卖点、背驰与趋势叙事只认引擎结果。
+    # 禁止从 fusion reason 反向补出引擎未形成的买卖点类型。
 
     d = int(info["direction"] or 0)
     dir_label = "看涨" if d > 0 else ("看跌" if d < 0 else "中性")
@@ -979,13 +938,15 @@ def format_chanlun_short_light(
             "笔数不足", "无法判断", "无明确结构", "数据不足", "线段不足",
             "中枢未成型", "先观望", "结构待确认",
         )
+        _order_words = ("宜买", "可执行", "可低吸", "该买了")
         extra = []
         for w in [x.strip() for x in wave.replace("｜", "·").split("·") if x.strip()]:
             if w in body:
                 continue
             if any(n in w for n in _struct_noise):
                 continue
-            if any(k in w for k in sig_kw if k in body):
+            # wave_label 只能补结构叙事，不能绕过引擎结果补点或下单话术。
+            if any(k in w for k in sig_kw) or any(k in w for k in _order_words):
                 continue
             if len(w) > 12:
                 w = w[:11] + "…"
@@ -993,8 +954,8 @@ def format_chanlun_short_light(
         if extra:
             body = f"{body} · {' · '.join(extra[:2])}"
 
-    # 空 chan 且无 fusion
-    if not chan and info["status"] == "none" and not (fusion_chan or {}).get("reason"):
+    # 空 chan 不得因 fusion 文案伪装成引擎信号
+    if not chan and info["status"] == "none":
         return "暂无信号 · 中性"
 
     return body

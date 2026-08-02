@@ -356,14 +356,26 @@ def test_format_chanlun_short_light_buy1():
     assert "（本周期）" in line  # 本周期信号标记（非区间套确认）
 
 
-def test_format_chanlun_short_light_from_fusion_reason():
-    """仅有 fusion reason 时也能解析出一买句式。"""
+def test_format_chanlun_short_light_does_not_infer_point_from_fusion_reason():
+    """C-D3b/c/d：引擎无点时，fusion 文案不得补出买点或下单叙事。"""
     line = format_chanlun_short_light(
-        {},
+        {
+            "chanlun": {
+                "buy_points": [],
+                "sell_points": [],
+                "divergence": {},
+                "trend_label": "回调段",
+            }
+        },
         fusion_chan={"reason": "缠论一类买 (底背驰)", "direction": 1},
+        wave_label="接近一买 · 可低吸 · 回调见底",
     )
-    assert "一买" in line
-    assert "看涨" in line
+    assert line.startswith("暂无买卖点")
+    assert "回调段" in line
+    assert "回调见底" in line
+    assert "一买" not in line
+    assert "一类买" not in line
+    assert not any(word in line for word in ("宜买", "可执行", "可低吸", "该买了"))
 
 
 def test_short_section_chan_type_first():
