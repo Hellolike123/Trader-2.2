@@ -136,6 +136,11 @@ def test_fusion_merge_stage_tags_instrument():
     assert isinstance(fusion, dict)
     assert fusion.get("product_role") == "instrument"
     assert "fusion_verbatim" in fusion
+    # R4/A4：仪表文案，禁止 🎯 action 指令主行；仍保留字段
+    verbatim = str(fusion.get("fusion_verbatim") or "")
+    assert verbatim
+    assert "🎯" not in verbatim
+    assert "仅参考" in verbatim
 
 
 def test_assemble_stage_omits_fusion_hint():

@@ -98,11 +98,10 @@ def run_pre_cards_stage(
 
 
 def _attach_fusion_verbatim(report_fusion: dict[str, Any]) -> None:
-    """为人读仪表写 fusion_verbatim（不改分数/动作）。"""
+    """为人读仪表写 fusion_verbatim（不改分数/动作；禁止 🎯 action 指令主行）。"""
     try:
         _ws = float(report_fusion.get("weighted_score") or 0)
         _conf = float(report_fusion.get("confidence") or 0)
-        _action = str(report_fusion.get("action") or "未知")
         _regime = str(report_fusion.get("regime") or "未知")
         _dis = float(report_fusion.get("disagreement") or 0)
         if _regime == "很差":
@@ -119,24 +118,15 @@ def _attach_fusion_verbatim(report_fusion: dict[str, Any]) -> None:
             _emoji = "🟠"
         else:
             _emoji = "🔴"
-        _disclaimer = ""
+        _note = ""
         if _dis > 1:
-            _disclaimer = "（信号冲突，建议等待）"
+            _note = "（信号冲突）"
         elif _conf < 0.3:
-            _disclaimer = "（信号弱，轻仓）"
-        _action_explain = {
-            "高位观望": "不追高，等回调",
-            "空仓/止损": "不买，有仓位要走",
-            "减仓": "减仓锁定利润",
-            "减1/3 (高位松动)": "减仓，高位有风险",
-            "持股观望": "持有，等方向",
-            "等转强观察": "等突破再买",
-            "等转强": "等信号确认",
-        }
-        _explain = _action_explain.get(_action, "")
-        _main_line = f"🎯 {_action}{_disclaimer}"
-        if _explain:
-            _main_line += f"\n  {_explain}"
+            _note = "（信号弱）"
+        # 仪表主行：分数/regime/分歧 + 仅参考（出手听 decision_view）
+        _main_line = (
+            f"{_emoji} 加权{_ws:+.2f}｜置信{_conf:.0%}｜{_regime}｜分歧{_dis:.1f}｜仅参考{_note}"
+        )
         _sd = report_fusion.get("signals_detail") or {}
         _dim_parts = []
         for key, label in [("chan", "缠论"), ("momentum", "动量"), ("vpf", "价量资金")]:
@@ -155,7 +145,7 @@ def _attach_fusion_verbatim(report_fusion: dict[str, Any]) -> None:
         _breakdown = f"  {'｜'.join(_dim_parts)}" if _dim_parts else ""
         report_fusion["fusion_verbatim"] = _main_line + ("\n" + _breakdown if _breakdown else "")
     except Exception:
-        report_fusion["fusion_verbatim"] = "🎯 数据异常"
+        report_fusion["fusion_verbatim"] = "⚪ 仪表数据异常｜仅参考"
 
 
 def run_fusion_merge_stage(

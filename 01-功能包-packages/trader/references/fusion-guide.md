@@ -66,7 +66,9 @@ action 生成后可能被以下机制覆盖（按优先级）：
 
 build_report() 会生成 `fusion_verbatim` 字段，AI 输出时必须逐字引用，不可改写。
 
-格式：`{emoji} {action}｜置信{confidence}%｜加权分{weighted_score}｜{regime}`
+**仪表化**：主行是分数/regime/分歧 +「仅参考」，禁止 `🎯 {action}` 指令形主行（出手听 `decision_view`）。
+
+格式：`{emoji} 加权{score}｜置信{confidence%}｜{regime}｜分歧{disagreement}｜仅参考`
 
 emoji 由 weighted_score 决定：≥0.25 🟢 / ≥0.10 🟡 / ≥-0.05 ⚪ / ≥-0.12 🟠 / else 🔴
 
