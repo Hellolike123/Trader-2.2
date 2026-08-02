@@ -262,6 +262,13 @@ def test_daily_bars_cache_target_buckets():
     assert cu.daily_bars_cache_target("000001", provider="tushare", adjust="none") == (
         "tushare/none/000001"
     )
+    # 上证指数 vs 平安银行：同码不同市必须分键
+    assert cu.daily_bars_cache_target(
+        "000001", provider="tencent", adjust="qfq", market="SH"
+    ) == "tencent/qfq/000001_SH"
+    assert cu.daily_bars_cache_target(
+        "000001", provider="tencent", adjust="qfq", market="SZ"
+    ) == "tencent/qfq/000001_SZ"
     # 路径分隔符不得穿透缓存目录
     assert "/" not in cu._safe_cache_seg("a/b")
     assert cu.daily_bars_cache_target("a/b", provider="x\\y", adjust="qfq") == (

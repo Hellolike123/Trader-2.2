@@ -99,6 +99,13 @@ NAME_MAP = {
     "中国平安": "601318",
     "中证1000": "000852",
     "华工科技": "000988",
+    # 指数：须带交易所前缀，避免「上证指数→000001→infer SZ→平安银行」
+    "上证指数": "SH000001",
+    "上证综指": "SH000001",
+    "上证": "SH000001",
+    "科创50": "SH000688",  # 指数；ETF 588000 价约 1.x，勿混
+    "上证科创板50成份指数": "SH000688",
+    "科创50ETF": "SH588000",
 }
 
 # 运行时名称→代码缓存（避免重复搜索）
@@ -1315,7 +1322,9 @@ def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[di
 def _fetch_qfq_daily_raw(sec: Security, http: HttpClient, days: int = 300) -> list[dict[str, Any]]:
     from trader_shared.cache_utils import daily_bars_cache_target as _daily_cache_target
 
-    _qfq_cache_target = _daily_cache_target(sec.code, provider="tencent", adjust="qfq")
+    _qfq_cache_target = _daily_cache_target(
+        sec.code, provider="tencent", adjust="qfq", market=sec.market
+    )
 
     # ── Circuit breaker check — return cached data if paused ──
     if _circuit_tencent_daily.is_open:
@@ -1452,7 +1461,7 @@ def _fetch_qfq_daily_raw(sec: Security, http: HttpClient, days: int = 300) -> li
                 set_cached(
                     CACHE_DAILY,
                     daily_bars_cache_target(
-                        sec.code, provider="tencent", adjust=_adj
+                        sec.code, provider="tencent", adjust=_adj, market=sec.market
                     ),
                     {"fetch_date": cache_calendar_date(), "rows": result},
                 )
@@ -1647,7 +1656,11 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
             )
         return _from_daily()
 
-    bars = get_day_scoped_bars(CACHE_WEEKLY, sec.code, _net, min_rows=4)
+    # 周线缓存键须带市场，避免 000001.SH/SZ 互毒（与 daily_bars_cache_target 同因）
+    _weekly_target = (
+        f"{sec.code}_{sec.market.upper()}" if sec.market else sec.code
+    )
+    bars = get_day_scoped_bars(CACHE_WEEKLY, _weekly_target, _net, min_rows=4)
     if weekly_bars_look_like_weekly(bars):
         return bars
     # 同日缓存可能已毒（旧日线冒充周线）：覆盖写回聚合周线
@@ -1656,7 +1669,7 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
         try:
             set_cached(
                 CACHE_WEEKLY,
-                sec.code,
+                _weekly_target,
                 {"fetch_date": cache_calendar_date(), "rows": fixed},
             )
         except OSError:

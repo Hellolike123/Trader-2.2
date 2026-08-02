@@ -342,16 +342,24 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5, bars: lis
             break
 
         # 缠论笔定义：从起点出发，取【第一个】距离合格的反向分型成笔，
-        # 不往前延伸至「最极端」分型。过度延伸会吞掉本应独立的笔，
-        # 导致笔→线段→中枢→背驰→买卖点全链路失真（这是历史“胡算”根因之一）。
+        # 不往前延伸至「最极端」分型作终点（过度延伸会吞掉独立笔）。
+        # 但：扫描反向时若先遇到「距不够的近反向」，再碰到同向分型，
+        # 不得 break 饿死整链（南网/华工周线实锤：密分型震荡下末笔假向上）。
+        # 同向只更新起点极值并继续找合格反向；终点仍取第一个距离合格者。
         best_end = None
         best_j = None
+        start_j = j  # 记录扫描起点，供找不到反向时回退推进
         while j < num:
             f = fractions[j]
 
             if f["type"] == start["type"]:
-                # 同向分型 → 转折点，停止扫描
-                break
+                # 同向：未找到合格反向前，取更极端者作新起点，继续扫描
+                if start["type"] == "top" and f["high"] > start["high"]:
+                    start = f
+                elif start["type"] == "bottom" and f["low"] < start["low"]:
+                    start = f
+                j += 1
+                continue
 
             # 反向分型：第一个距离合格者即笔终点（缠论标准）
             if f["index"] - start["index"] >= min_bars_per_stroke - 1:
@@ -396,8 +404,30 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5, bars: lis
             last_direction = direction
             i = best_j
         else:
-            # 从当前 start 无法成笔（后续无合格反向分型），推进起点防死循环
-            i += 1
+            # 无合格反向：若扫描中起点已推进到更极值，且可衔接上一笔同向终点 → 延伸上一笔
+            # （未独立成笔的同向新高/新低，避免僵尸末笔停在旧顶/旧底）
+            if strokes:
+                last = strokes[-1]
+                last_end_type = last.get("end_type")
+                if last_end_type == start["type"] == "top":
+                    if start["high"] > float(last.get("end_price") or 0):
+                        last["end_price"] = start["high"]
+                        last["end_index"] = start["index"]
+                        last["power_price"] = round(
+                            abs(float(last["end_price"]) - float(last["start_price"])), 4
+                        )
+                        last["length"] = int(last["end_index"]) - int(last["start_index"])
+                elif last_end_type == start["type"] == "bottom":
+                    prev_ep = float(last.get("end_price") or 0)
+                    if start["low"] < prev_ep or prev_ep == 0:
+                        last["end_price"] = start["low"]
+                        last["end_index"] = start["index"]
+                        last["power_price"] = round(
+                            abs(float(last["end_price"]) - float(last["start_price"])), 4
+                        )
+                        last["length"] = int(last["end_index"]) - int(last["start_index"])
+            # 推进起点防死循环（至少越过本轮初始扫描位置）
+            i = max(i + 1, start_j)
 
     return strokes
 
