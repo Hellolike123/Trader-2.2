@@ -235,3 +235,44 @@ def test_report_builder_no_tencent_fetcher_ctor():
     src = (PKG / "report_builder.py").read_text(encoding="utf-8")
     assert "TencentFetcher()" not in src
     assert "from trader_shared.fetchers import TencentFetcher" not in src
+
+
+def test_analysis_package_no_classic_mappers_import():
+    """F1d/A1：analysis/*.py 不得 import fusion_classic_mappers。"""
+    analysis_dir = PKG / "analysis"
+    bad: list[tuple[str, str]] = []
+    for path in sorted(analysis_dir.glob("*.py")):
+        imports = _imports_in_file(path)
+        for imp in imports:
+            if imp == "trader_shared.fusion_classic_mappers" or imp.startswith(
+                "trader_shared.fusion_classic_mappers."
+            ):
+                bad.append((path.name, imp))
+            elif imp == "fusion_classic_mappers" or imp.endswith(".fusion_classic_mappers"):
+                bad.append((path.name, imp))
+    assert not bad, f"analysis must not import classic_mappers: {bad}"
+
+
+def test_score_to_confidence_neutral_reexport_same_values():
+    """F1e/A2：中性模块与 classic re-export / fusion_core 懒导入数值一致。"""
+    from trader_shared.fusion_classic_mappers import _score_to_confidence as via_classic
+    from trader_shared.fusion_confidence import _score_to_confidence as via_neutral
+    from trader_shared.fusion_core import _score_to_confidence as via_core
+
+    samples = (0, 20, 25, 35, 40, 45, 50, 60, 65, 75, 90, 100, None, "abc")
+    for s in samples:
+        a, b, c = via_neutral(s), via_classic(s), via_core(s)
+        assert a == b == c, f"score={s!r}: neutral={a} classic={b} core={c}"
+
+
+def test_build_daily_ruling_source_ignores_fusion_action():
+    """A3：build_daily_ruling 源码不读 fusion.action / reduce_like。"""
+    import inspect
+
+    from trader_shared.conclusion_block import build_daily_ruling
+
+    src = inspect.getsource(build_daily_ruling)
+    assert 'fusion.get("action")' not in src
+    assert "fusion['action']" not in src
+    assert '["action"]' not in src
+    assert "reduce_like" not in src

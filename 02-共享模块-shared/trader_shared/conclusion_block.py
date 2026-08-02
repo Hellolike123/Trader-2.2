@@ -581,7 +581,8 @@ def build_daily_ruling(
 ) -> str:
     """日线裁定人话：偏多/偏空/中性 + 宜追|不宜追高|观望。
 
-    出手姿态优先听纪律 / decision_view / 共振档；fusion 分仅作偏多偏空仪表，
+    stance 只听 gate_action / chase_ok / decision_view / resonance；
+    weighted_score 仅定 bias（偏多/偏空/中性），不得读 fusion.action，
     不得单独把 stance 推成「宜追」。
     """
     fusion = fusion or {}
@@ -591,7 +592,6 @@ def build_daily_ruling(
     except (TypeError, ValueError):
         score_f = 0.0
 
-    action = str(fusion.get("action") or "")
     sc = str(scene or theory_status or "")
     dv = decision_view if isinstance(decision_view, dict) else {}
     res = resonance if isinstance(resonance, dict) else {}
@@ -604,7 +604,6 @@ def build_daily_ruling(
     else:
         bias = "中性"
 
-    reduce_like = any(k in action for k in ("减仓", "空仓", "止损", "观望"))
     disc_block = gate_action in ("不做", "观望", "减仓", "止损离场", "不新开")
     dv_block = bool(dv) and dv.get("allow_new_recommend") is False
     res_block = grade in ("conflict", "momentum_veto")
@@ -615,9 +614,6 @@ def build_daily_ruling(
         stance = "宜追" if "突破" in sc else "观望"
     else:
         stance = "观望"
-
-    if reduce_like and bias != "偏多":
-        stance = "不宜追高"
 
     return f"{bias}，{stance}"
 

@@ -150,16 +150,24 @@ def _log_fusion(result: dict) -> None:
 
 
 
+# 置信度中性模块：cards / classic re-export / 测试经 __getattr__ 懒导入
+_CONFIDENCE_NAMES = frozenset({
+    "_score_to_confidence",
+    "_load_confidence_params",
+})
+
 # Classic mappers：生产 cards 路径不加载；compare/classic 回退与测试经 __getattr__ 懒导入
 _CLASSIC_MAPPER_NAMES = frozenset({
     "_chan_to_signal",
     "_momentum_to_signal",
-    "_score_to_confidence",
     "_wyckoff_to_signal",
 })
 
 
 def __getattr__(name: str):
+    if name in _CONFIDENCE_NAMES:
+        import trader_shared.fusion_confidence as _c
+        return getattr(_c, name)
     if name in _CLASSIC_MAPPER_NAMES:
         import trader_shared.fusion_classic_mappers as _m
         return getattr(_m, name)

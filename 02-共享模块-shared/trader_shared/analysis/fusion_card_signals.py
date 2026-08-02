@@ -131,9 +131,9 @@ def chan_card_to_fusion_signal(card: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _momentum_score_to_confidence(score: Any) -> float:
-    """U 型置信（cards 自有；classic 委托至此，避免 cards→classic 依赖）。"""
+    """U 型置信（中性 fusion_confidence；禁止经 classic_mappers）。"""
     try:
-        from trader_shared.fusion_classic_mappers import _score_to_confidence
+        from trader_shared.fusion_confidence import _score_to_confidence
 
         return float(_score_to_confidence(score))
     except Exception:
