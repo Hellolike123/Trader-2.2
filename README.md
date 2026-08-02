@@ -73,6 +73,7 @@ Trader3.0/
 |------|------|------|
 | **AGENTS.md** | AI Agent | 快路径 + 改代码地图 + 红线摘要 |
 | **AGENTS_DEEP.md** | 开发者 / Agent | 算法细节、满分示例、深度契约 |
+| **[docs/guide/skill-usage.md](docs/guide/skill-usage.md)** | 操盘手 / Agent | 五 Skill 岗位用法（含 chanlun）与一天节奏 |
 | **docs/designs/resonance-and-orchestration.md** | Agent | 五层+编排法源 |
 | **BUSINESS.md** | 开发者 / 业务人员 | 业务逻辑、计算规则、报告规则 |
 | **README.md** | 所有人 | 项目简介、快速开始 |

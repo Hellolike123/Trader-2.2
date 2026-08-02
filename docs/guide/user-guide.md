@@ -1,7 +1,8 @@
 # Trader 用户操作手册
 
 > 输出格式以代码渲染为准：`report_core.render_short_midline` + `01-功能包-packages/trader/references/output-template.md`。  
-> 下文示例结构已对齐 **短中线双轨**（旧版 `📍 决策` 示例已废弃）。
+> 下文示例结构已对齐 **短中线双轨**（旧版 `📍 决策` 示例已废弃）。  
+> 五 Skill 岗位怎么喊人（含 **chanlun** 结构卡）：见 [skill-usage.md](./skill-usage.md)。
 
 ## 每日工作流
 
