@@ -111,7 +111,7 @@
 | `macd_status.death_cross` | bool | 是否死叉 | false |
 | `macd_status.positive` | bool | MACD是否为正 | true |
 
-## 阶段定位字段（日线四阶段 + 4 动能；面板阶段另见 midline_stage）
+## 阶段定位字段（日线四阶段 + 4 动能；midline_stage 供共振，面板不单独成行）
 
 | 字段 | 类型 | 含义 | 示例 |
 |------|------|------|------|
