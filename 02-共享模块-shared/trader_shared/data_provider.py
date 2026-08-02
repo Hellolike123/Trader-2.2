@@ -956,7 +956,11 @@ class TushareProvider:
 
         from trader_shared.indicator_math import weekly_bars_look_like_weekly
 
-        bars = get_day_scoped_bars(CACHE_WEEKLY, sec.code, _net, min_rows=4)
+        # 周线缓存键须带市场，避免 000852.SH（中证1000）与 000852.SZ（同码股）互毒
+        _weekly_target = (
+            f"{sec.code}_{sec.market.upper()}" if sec.market else sec.code
+        )
+        bars = get_day_scoped_bars(CACHE_WEEKLY, _weekly_target, _net, min_rows=4)
         if weekly_bars_look_like_weekly(bars):
             return bars
         # fallback 路径可能缓存了日线冒充周线；再走 light_data 聚合纠偏

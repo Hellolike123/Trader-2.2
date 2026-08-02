@@ -172,6 +172,7 @@ def wyckoff_chain_rank(report_or_item: dict[str, Any] | list[str] | None) -> int
 
     始终按信号现算，不读 wyckoff_chain_rank 缓存。
     仅 BC 观望 → 0。
+    Phase A failed → 0（与 format_wyckoff_chain_plain 收口一致，禁止失效长链排前）。
     """
     if isinstance(report_or_item, list):
         events = [str(x) for x in report_or_item]
@@ -180,6 +181,8 @@ def wyckoff_chain_rank(report_or_item: dict[str, Any] | list[str] | None) -> int
         src = report_or_item if isinstance(report_or_item, dict) else {}
         wyk = _wyckoff_dict(src)
         events = extract_accum_events(src)
+        if is_phase_a_failed(src):
+            return 0
         if _bc_watch_only(wyk, events):
             return 0
 

@@ -29,7 +29,8 @@ def test_unified_provider_uses_qfq_cache_bucket(monkeypatch):
     bars = provider.fetch_qfq_daily(sec, days=30)
     assert bars
     assert seen["key"] == cu.CACHE_DAILY
-    assert seen["target"] == "tencent/qfq/688248"
+    # 日 K 桶须带市场后缀，避免 000001.SH/SZ 互毒（C-D1d）
+    assert seen["target"] == "tencent/qfq/688248_SH"
 
 
 def test_unified_provider_does_not_poison_qfq_bucket(monkeypatch):
@@ -88,8 +89,8 @@ def test_unified_provider_does_not_poison_qfq_bucket(monkeypatch):
     bars = provider.fetch_qfq_daily(sec, days=30)
     assert len(bars) >= 20
     assert all(b.get("adjust") == "none" for b in bars)
-    qfq_writes = [w for w in writes if w[1] == "tencent/qfq/688248"]
-    none_writes = [w for w in writes if w[1] == "tencent/none/688248"]
+    qfq_writes = [w for w in writes if w[1] == "tencent/qfq/688248_SH"]
+    none_writes = [w for w in writes if w[1] == "tencent/none/688248_SH"]
     assert not qfq_writes, f"qfq bucket poisoned: {qfq_writes}"
     assert none_writes, "expected unadjusted bars under tencent/none"
 

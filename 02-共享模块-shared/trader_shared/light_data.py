@@ -675,6 +675,66 @@ MOOTDX_CATEGORY = {"daily": 4, "weekly": 5, "monthly": 6, "1m": 7, "5m": 8, "15m
 
 _MOOTDX_MARKET = {"SH": 1, "SZ": 0, "BJ": 2}
 
+# 分钟周期别名：context_stage 传 "30"，light_data/akshare 亦认 "30m"
+_MINUTE_INTERVAL_TO_SCALE = {
+    "1m": "1",
+    "1": "1",
+    "5m": "5",
+    "5": "5",
+    "15m": "15",
+    "15": "15",
+    "30m": "30",
+    "30": "30",
+    "60m": "60",
+    "60": "60",
+}
+_MINUTE_INTERVAL_TO_MOOTDX = {
+    "1m": "1m",
+    "1": "1m",
+    "5m": "5m",
+    "5": "5m",
+    "15m": "15m",
+    "15": "15m",
+    "30m": "30m",
+    "30": "30m",
+    "60m": "60m",
+    "60": "60m",
+    "weekly": "weekly",
+    "monthly": "monthly",
+}
+
+
+def _resolve_sina_kline_scale(interval: str) -> str:
+    """把 ``30m`` / ``30`` / ``60`` 归一为新浪 ``scale``；未知数字原样透传。"""
+    raw = str(interval or "").strip().lower()
+    if raw in ("weekly",):
+        return "1200"
+    if raw in ("monthly",):
+        return "7200"
+    if raw in _MINUTE_INTERVAL_TO_SCALE:
+        return _MINUTE_INTERVAL_TO_SCALE[raw]
+    if raw.isdigit():
+        return raw
+    return "5"
+
+
+def _resolve_akshare_kline_period(interval: str) -> str:
+    """把 ``30m`` / ``30`` 归一为 akshare ``period``。"""
+    raw = str(interval or "").strip().lower()
+    if raw in ("weekly", "monthly"):
+        return raw
+    if raw in _MINUTE_INTERVAL_TO_SCALE:
+        return _MINUTE_INTERVAL_TO_SCALE[raw]
+    if raw.isdigit():
+        return raw
+    return "60"
+
+
+def _resolve_mootdx_category_key(interval: str) -> str | None:
+    """把 ``30`` / ``30m`` 归一为 ``MOOTDX_CATEGORY`` 键。"""
+    raw = str(interval or "").strip().lower()
+    return _MINUTE_INTERVAL_TO_MOOTDX.get(raw)
+
 
 def _mootdx_market(sec: Security) -> int:
     return _MOOTDX_MARKET.get(sec.market.upper(), 0)
@@ -1507,8 +1567,7 @@ def _fetch_mins_mootdx(sec: Security, interval: str, datalen: int = 60) -> list[
     client = _get_mootdx_client()
     if client is None:
         return None
-    category_map = {"5m": "5m", "15m": "15m", "30m": "30m", "60m": "60m", "weekly": "weekly", "monthly": "monthly"}
-    cat = category_map.get(interval)
+    cat = _resolve_mootdx_category_key(interval)
     if cat is None:
         return None
     cat_num = MOOTDX_CATEGORY.get(cat)
@@ -1725,8 +1784,8 @@ def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dic
     without third-party packages or proxy interference.
     """
     try:
-        period_map = {"5m": "5", "15m": "15", "30m": "30", "60m": "60", "60": "60", "weekly": "1200", "monthly": "7200"}
-        scale = period_map.get(interval, "5")
+        # 须认 "30" 与 "30m"：context_stage 区间套传裸数字，旧 map 默认落到 5 会静默假确认
+        scale = _resolve_sina_kline_scale(interval)
         
         import ssl
         from urllib.request import Request, urlopen
@@ -1783,8 +1842,7 @@ def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dic
     except ImportError:
         return []
     try:
-        period_map = {"5m": "5", "15m": "15", "30m": "30", "60": "60", "weekly": "weekly", "monthly": "monthly"}
-        period = period_map.get(interval, "60")
+        period = _resolve_akshare_kline_period(interval)
         df = ak.stock_zh_a_hist_min_em(symbol=sec.code, period=period, adjust="qfq")
         if df is None or df.empty:
             return []

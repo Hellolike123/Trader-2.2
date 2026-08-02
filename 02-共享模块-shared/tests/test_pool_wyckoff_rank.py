@@ -91,6 +91,29 @@ def test_c_f3_failed_phase_a_without_accum_events_is_invalid_structure():
     assert "吸筹链未成型" not in out
 
 
+def test_w01_failed_phase_a_chain_rank_is_zero():
+    """W-01：failed 长链不得按亮灯数排前；rank 须归零。"""
+    failed_long = {
+        "wyckoff": {
+            "sc_signal": True,
+            "ar_signal": True,
+            "st_signal": True,
+            "lps_signal": True,
+            "phase_a_status": "failed",
+        }
+    }
+    healthy_short = {
+        "wyckoff": {
+            "sc_signal": True,
+            "ar_signal": True,
+        }
+    }
+    assert "已失效" in format_wyckoff_chain_plain(failed_long)
+    assert wyckoff_chain_rank(failed_long) == 0
+    assert wyckoff_chain_rank(healthy_short) == 2
+    assert wyckoff_chain_rank(failed_long) < wyckoff_chain_rank(healthy_short)
+
+
 def test_failed_phase_a_keeps_list_input_legacy_behavior():
     """列表输入只有 events，无 failed 信息时保持旧行为。"""
     assert format_wyckoff_chain_plain(["SC"]) == "威：SC，还差AR"
