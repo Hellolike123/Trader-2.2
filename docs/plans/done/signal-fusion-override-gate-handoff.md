@@ -1,6 +1,6 @@
 # signal_core fusion 覆盖须听 FUSION_OVERRIDE — Agent Handoff
 
-> **状态**: impl_done（写+查双轮 PASS；门禁绿；待合 #50）· 2026-08-02  
+> **状态**: done（2026-08-02；迁入 `docs/plans/done/`；写+查双轮 PASS）· 原 impl_done 待合 #50
 > **基线**: `main` @ PR #49 合入后（`cursor/plans-index-sync-514d`）  
 > **分支**: `cursor/signal-fusion-p0-1c6b` · PR [#50](https://github.com/Hellolike123/Trader-2.2/pull/50)  
 > **双 Agent**: 写落地 ✅ / 查两轮 PASS ✅。
@@ -9,9 +9,9 @@
 
 ## 0. 法源（先读）
 
-1. [`docs/designs/resonance-and-orchestration.md`](../designs/resonance-and-orchestration.md) §1 方向铁律：出手/新开听共振∧策略∧纪律；fusion `weighted_score`/`action` 仅仪表；`FUSION_OVERRIDE_ENABLED` **默认 false**。  
-2. [`docs/designs/analysis-strategy-boundaries.md`](../designs/analysis-strategy-boundaries.md) §0：禁止从 fusion 分/action 直接推断方向；fusion 默认不微调出手。  
-3. [`ARCHITECTURE.md`](../../ARCHITECTURE.md) §1：Fusion 仅仪表；新开铁律跟 `decision_view`。  
+1. [`docs/designs/resonance-and-orchestration.md`](../../designs/resonance-and-orchestration.md) §1 方向铁律：出手/新开听共振∧策略∧纪律；fusion `weighted_score`/`action` 仅仪表；`FUSION_OVERRIDE_ENABLED` **默认 false**。  
+2. [`docs/designs/analysis-strategy-boundaries.md`](../../designs/analysis-strategy-boundaries.md) §0：禁止从 fusion 分/action 直接推断方向；fusion 默认不微调出手。  
+3. [`ARCHITECTURE.md`](../../../ARCHITECTURE.md) §1：Fusion 仅仪表；新开铁律跟 `decision_view`。  
 4. 对照实现（已正确闸）：`decision_core.py` / `t0_candidate_core.py` 均 `if FUSION_OVERRIDE_ENABLED and ...`。
 
 ---

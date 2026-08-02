@@ -1,6 +1,6 @@
 # 架构余项收口（P1/P2）— Agent Handoff
 
-> **状态**: impl_done（写+查 PASS；待合 #53）· 2026-08-02  
+> **状态**: done（2026-08-02；迁入 `docs/plans/done/`；写+查 PASS）· 原 impl_done 待合 #53
 > **基线**: 伞分支 `cursor/arch-cleanup-complete-1c6b`（已含 #50/#51/#52 + R1–R6）  
 > **PR**: [#53](https://github.com/Hellolike123/Trader-2.2/pull/53)（伞；#50–#52 可关为重复）  
 > **双 Agent**: 写落地 ✅ / 查 PASS ✅。

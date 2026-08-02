@@ -1,6 +1,6 @@
 # 池价刷新统一走 Provider（并行）— Agent Handoff
 
-> **状态**: impl_done（写+查 PASS；待合 #51）· 2026-08-02  
+> **状态**: done（2026-08-02；迁入 `docs/plans/done/`；写+查 PASS）· 原 impl_done 待合 #51
 > **基线**: `main` @ #49 后（与 #50 signal-fusion 独立；本 PR 不依赖 #50）  
 > **分支**: `cursor/pool-quote-provider-1c6b` · PR [#51](https://github.com/Hellolike123/Trader-2.2/pull/51)  
 > **双 Agent**: 写落地 ✅ / 查 PASS ✅。
@@ -9,9 +9,9 @@
 
 ## 0. 法源
 
-1. [`ARCHITECTURE.md`](../../ARCHITECTURE.md) §5.1：数据 SSOT = `market_types` + `data_provider` / `get_provider`；新写勿绕过 provider 直调 `light_data`。  
-2. [`docs/designs/resonance-and-orchestration.md`](../designs/resonance-and-orchestration.md) §2.2 数据层：行情/缓存/HA；上层只吃 snapshot/quote。  
-3. [`AGENTS.md`](../../AGENTS.md)「改代码去哪」：选股池逻辑在 `pool_cmds/*`；引擎/数据在 `trader_shared/`。  
+1. [`ARCHITECTURE.md`](../../../ARCHITECTURE.md) §5.1：数据 SSOT = `market_types` + `data_provider` / `get_provider`；新写勿绕过 provider 直调 `light_data`。  
+2. [`docs/designs/resonance-and-orchestration.md`](../../designs/resonance-and-orchestration.md) §2.2 数据层：行情/缓存/HA；上层只吃 snapshot/quote。  
+3. [`AGENTS.md`](../../../AGENTS.md)「改代码去哪」：选股池逻辑在 `pool_cmds/*`；引擎/数据在 `trader_shared/`。  
 4. 现状问题：`pool_cmds/plan_view._refresh_pool_prices` 与 `watch.py` **串行** `light_data.fetch_quote` + 自建 `HttpClient`，绕过 `get_provider()`。
 
 ---
