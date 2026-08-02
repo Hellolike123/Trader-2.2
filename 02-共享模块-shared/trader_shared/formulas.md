@@ -108,6 +108,13 @@ raw bars
 - **MACD 柱来源**：`indicator_math.calc_macd_series` → `histogram = DIF−DEA`（×1，非通达信 2×）；
   `_calc_macd` 预热不足写 `None`（禁止 `0.0` 占位）；面积计算跳过 `None` 与反号柱
 
+**§5.1a 展示 vs 扳机口径（已声明取舍，C-DIFF-3/4）**：
+- **展示背驰**（`detect_divergence`）：有 `power_price`/`length` 时可用 multi
+  （`_stroke_force_weaker_multi`，≥2 维衰减）；无则退回面积-only。
+- **一类 / 历史一类扳机**（`detect_buy/sell_points` 及历史一类前置）：**面积-only**
+  （`_stroke_force_weaker`）；**禁止**把一类扳机改成 multi（除非另开手递）。
+- 二者可分歧属产品取舍，非未修 bug；见 `docs/plans/known-gaps.md`。
+
 **§5.2 fallback — 峰谷（仅 legacy 且笔级未评估侧）**：无笔/无 index/面积不可算时，扫近期峰谷
 （最近 `CHAN_DIVERGENCE_FALLBACK_WINDOW=120` 根），比较末两个峰/谷的价与 MACD 柱。
 `strict` 模式关闭峰谷 fallback，避免与 b/c 口径混杂。
@@ -140,9 +147,10 @@ raw bars
 
 - **一类买/卖**：下跌/上涨趋势（≥2 个**严格不重叠**同向中枢 **且连接段为反向**，与
   `classify_structure` / §9 拓扑一致；假趋势不得报一类）
-  + 最后中枢**离开段**背驰 + 末两段同向笔价格新低/高 + MACD 面积减弱
+  + 最后中枢**离开段**背驰 + 末两段同向笔价格新低/高 + **MACD 面积减弱（面积-only，见 §5.1a）**
   + 离开段须**价格穿出**中枢（down 破 ZD / up 破 ZG），禁止仅时间在 `zone_end` 之后
     （否则会出现中枢在 32、信号价在 51 的假一类买）
+  + 历史一类前置同口径：力度比较用 `_stroke_force_weaker`，不用 multi
 - **二类买/卖**：`down_a→up→down_b` 且 `low_b>low_a` 且 `low_b<up_high`（卖点对称），
   **且前置一类在时间轴上成立**——`down_a`/`up_a` 须满足历史一类结构
   （趋势 + 离开中枢 + 若存在更早同向笔则曾创新低/高 + 力度不更强），

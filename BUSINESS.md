@@ -128,10 +128,10 @@
 3. **中枢 ZG/ZD**：取段/笔 `high`/`low` 极值（`formulas.md` §4.1 / §9.1；已落地）。
 
 **已知未修差异**（诚实列表；勿装零差；详见 `docs/plans/known-gaps.md`）：
-- `report["wyckoff"]` 周不足可回退日线；面板 SSOT = `wyckoff_midline` / `wyckoff_daily`
-- 破位：`close is None` 现码更严（与 structure-anchor「须 close」不完全一致）
-- 背驰展示可 multi，一类扳机面积-only（formulas 取舍）
-- `zones_count` 引擎 raw vs 卡 merged
+- W-DIFF-7：深刺穿收回是否算 ST（产品裁决未定；本轮不改）
+
+**已声明取舍**（非未修 bug）：
+- 背驰展示可 multi；一类/历史一类扳机面积-only（`formulas.md` §5.1a / §6）
 
 **约束**：
 - 日线威科夫**已退出**短线 fusion（第三席为 VPF）；日线结果不得写入中线定论

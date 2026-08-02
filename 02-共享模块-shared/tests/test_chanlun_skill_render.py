@@ -255,3 +255,21 @@ def test_wechat_layout_has_section_breaks_and_buy_first():
     assert short.index("买点：") < short.index("结构：")
     assert short.index("卖点：") < short.index("结构：")
     assert "|" not in text
+
+
+def test_g_k3_zones_count_raw_and_pivot_count_merged():
+    """G-K3 / C-DIFF-5 / M-G3：zones_count=raw、pivot_count=merged；面板可区分。"""
+    engine = _engine_result(["up", "down", "up", "down", "up"])
+    engine["chanlun"]["zones"] = [{"valid": True}, {"valid": True}]
+    engine["chanlun"]["zones_count"] = 5  # raw 滑动窗
+    engine["chanlun"]["pivot_count"] = 2  # 合并后中枢
+    view = build_chanlun_view(engine)
+    assert view["zones_count"] == 5
+    assert view["pivot_count"] == 2
+    assert view["zones_count"] != view["pivot_count"]
+
+    text = render_chanlun_card(_plan(view))
+    short = text.split("⚡ 短线（日）", 1)[1].split("⏱ 中线副读", 1)[0]
+    assert "中枢：2｜窗5｜段：1" in short
+    # 旧单口径「中枢：5｜段」不得冒充
+    assert "中枢：5｜段" not in short

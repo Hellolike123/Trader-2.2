@@ -121,7 +121,9 @@ def _midline_heading(view: dict[str, Any]) -> str:
 def _view_lines(view: dict[str, Any]) -> list[str]:
     """微信可读：买卖点前置，字段分行；并列仅保留短字段用｜。"""
     stroke_n = int(view.get("stroke_count") or 0)
-    zones_n = int(view.get("zones_count") or 0)
+    # G-K3：中枢=合并后 pivot；窗=引擎 raw zones_count
+    pivot_n = int(view.get("pivot_count") if view.get("pivot_count") is not None else (view.get("zones_count") or 0))
+    raw_n = int(view.get("zones_count") or 0)
     segs_n = int(view.get("segments_count") or 0)
     return [
         f"  买点：{_fmt_points(view.get('buy_points'))}",
@@ -131,7 +133,7 @@ def _view_lines(view: dict[str, Any]) -> list[str]:
         f"  笔：{stroke_n}",
         f"  当前笔：{_fmt_current_direction(view)}",
         f"  近笔：{_fmt_recent_directions(view)}",
-        f"  中枢：{zones_n}｜段：{segs_n}",
+        f"  中枢：{pivot_n}｜窗{raw_n}｜段：{segs_n}",
     ]
 
 
