@@ -34,6 +34,18 @@ def _fmt_price(value: Any) -> str | None:
         return None
 
 
+# 类一/类二 = 观察档（deep-card §2.3）；正式一类/二类/三类不加。
+# 用 startswith「类一」「类二」：一类买/二类买 不会误命中。
+_OBSERVE_TYPE_PREFIXES = ("类一", "类二")
+
+
+def _display_point_type(point_type: str) -> str:
+    """展示分层：类一/类二可见面标（观察）；正式一/二/三类原样。"""
+    if point_type.startswith(_OBSERVE_TYPE_PREFIXES) and "（观察）" not in point_type:
+        return f"{point_type}（观察）"
+    return point_type
+
+
 def _fmt_points(points: Any) -> str:
     """仅展示引擎给出的 type/price；空数组不得推断或手补。"""
     if not isinstance(points, list):
@@ -45,8 +57,9 @@ def _fmt_points(points: Any) -> str:
         point_type = str(point.get("type") or "").strip()
         if not point_type:
             continue
+        label = _display_point_type(point_type)
         price = _fmt_price(point.get("price"))
-        rendered.append(f"{point_type} {price}" if price else point_type)
+        rendered.append(f"{label} {price}" if price else label)
     return "、".join(rendered) if rendered else "未形成"
 
 

@@ -413,6 +413,28 @@ def test_format_chanlun_short_light_buy1():
     assert "底背驰" in line
     assert "看涨" in line
     assert "（本周期）" in line  # 本周期信号标记（非区间套确认）
+    assert "（观察）" not in line
+
+
+def test_format_chanlun_short_light_observe_tier_like2():
+    """O-T 可选：类二买短名旁标观察；不改 type_raw / fusion 计分。"""
+    from trader_shared.chan_core import resolve_chanlun_primary
+
+    chan = {
+        "chanlun": {
+            "buy_points": [{"type": "类二买", "price": 346.16, "confidence": 1}],
+            "sell_points": [],
+            "divergence": {},
+            "trend_label": "回调段",
+        }
+    }
+    info = resolve_chanlun_primary(chan)
+    assert info["type_raw"] == "类二买"
+    assert info["type_short"] == "类二买"  # resolve 不变，仅 light 展示加观察
+    line = format_chanlun_short_light(chan)
+    assert line.startswith("类二买（观察）")
+    assert "回踩偏弱" in line
+    assert "看涨" in line
 
 
 def test_format_chanlun_short_light_does_not_infer_point_from_fusion_reason():
