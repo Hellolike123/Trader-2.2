@@ -77,10 +77,10 @@ P0 已修笔链/指数。本轮三刀并行：
 
 - [x] Agent-Buy/Data/Skill 各自落地并测绿  
 - [x] Agent-Check 首轮抓到 cards.py + short_midline 异常兜底漏网 → 父 Agent 已修  
-- [x] Agent-Check 二轮抓到：中线 wave/亮点仍可读 fusion；Skill 未接 tip-leave（C-D4e）→ 父 Agent 已修  
+- [x] Agent-Check 二～四轮抓漏（亮点 fusion / 假背驰 / Trader tip-leave / 有卖点跳过清洗 / 相反背驰）→ 父 Agent 已修  
+- [x] Agent-Check 五轮全表复审：**通过，可以合 PR #29**  
 - [x] 未改 fusion 出手 / 威科夫定论 / 池分道  
-- [ ] Agent-Check 三轮全表复审通过后再合 PR  
-- [ ] PR 含法源、对照清单、查结论、pytest  
+- [x] PR 含法源、对照清单、查结论、pytest（69 passed：report_optimization / skill_render / cards_p0 / wave_label_stroke_tip）
 
 ---
 
