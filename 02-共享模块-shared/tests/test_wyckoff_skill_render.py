@@ -1,7 +1,20 @@
-"""威科夫 Skill 渲染合同（无网络）。"""
+"""威科夫 Skill 渲染合同（无网络）。
+
+法源验收：docs/plans/wyckoff-skill-deep-card-handoff.md §4 W-D1..W-D11
+"""
 from __future__ import annotations
 
-from trader_shared.wyckoff_render import render_wyckoff_card, render_wyckoff_rank
+import copy
+import re
+
+from trader_shared.wyckoff_chain import extract_accum_events
+from trader_shared.wyckoff_render import (
+    build_light_snapshot_entry,
+    format_light_change,
+    render_wyckoff_card,
+    render_wyckoff_detail,
+    render_wyckoff_rank,
+)
 from trader_shared.wyckoff_run import build_wyckoff_rank_rows
 
 
@@ -13,21 +26,159 @@ def _sample_plan() -> dict:
         "data_ok": True,
         "chain_plain": "威：SC→AR→ST→LPS，还差SOS",
         "event_line": "SC / AR / ST / LPS",
+        "change_line": "首次记录，暂无对比",
+        "daily_raw": {
+            "sc_signal": True,
+            "ar_signal": True,
+            "secondary_test_sc_signal": True,
+            "st_signal": True,
+            "lps_signal": True,
+            "sc_price": 9.5,
+            "sc_low": 9.5,
+            "ar_price": 11.0,
+            "ar_high": 11.0,
+            "secondary_test_sc_price": 9.6,
+            "lps_price": 10.2,
+            "tr_maturity": "L2",
+            "box_display_mode": "box",
+            "measure_allowed": False,
+            "tr_seed_source": "phase_a_seed",
+            "phase_a_status": "established",
+        },
+        "weekly_raw": {
+            "sc_signal": True,
+            "ar_signal": True,
+            "sc_low": 8.0,
+            "ar_high": 12.0,
+            "tr_maturity": "L1",
+            "box_display_mode": "proto",
+            "measure_allowed": False,
+            "tr_seed_source": "phase_a_seed",
+        },
         "daily_view": {
             "phase": "accumulation_c",
             "phase_label": "吸筹C",
             "bias": "bull",
-            "tr": {"lower": 9.8, "upper": 11.2, "quality": 0.62},
-            "active_events": ["sc", "ar", "st", "lps"],
-            "invalidation_hint": "收盘有效跌破 TR 下沿 9.80 则偏多结构受损",
+            "tr": {"lower": 9.5, "upper": 11.0, "quality": 0.62},
+            "tr_maturity": "L2",
+            "box_display_mode": "box",
+            "measure_allowed": False,
+            "active_events": ["sc", "ar", "secondary_test_sc", "lps"],
+            "event_detail": {
+                "sc": {"id": "sc", "price": 9.5, "reason": "SC"},
+                "ar": {"id": "ar", "price": 11.0, "reason": "AR"},
+                "secondary_test_sc": {"id": "secondary_test_sc", "price": 9.6, "reason": "ST"},
+                "lps": {"id": "lps", "price": 10.2, "reason": "LPS"},
+            },
+            "invalidation_hint": "收盘有效跌破 TR 下沿 9.50 则偏多结构受损",
             "summary_oneline": "吸筹推进中，关注 LPS 后 SOS",
+            "cause_effect": {"up_target": None, "down_target": None},
         },
         "weekly_view": {
             "phase": "accumulation_b",
             "phase_label": "吸筹B",
             "bias": "bull",
+            "tr_maturity": "L1",
+            "box_display_mode": "proto",
+            "measure_allowed": False,
+            "active_events": ["sc", "ar"],
+            "event_detail": {
+                "sc": {"id": "sc", "price": 8.0, "reason": "SC"},
+                "ar": {"id": "ar", "price": 12.0, "reason": "AR"},
+            },
+            "invalidation_hint": "暂无明确失效价",
+            "summary_oneline": "周线吸筹推进",
+            "tr": {"lower": 8.0, "upper": 12.0},
         },
     }
+
+
+def _l0_percentile_plan() -> dict:
+    """天奈类：有分位 tr_lower/tr_upper 但 maturity L0 — 区间不得上屏这些数字。"""
+    return {
+        "name": "天奈样",
+        "code": "688116",
+        "price": 50.0,
+        "data_ok": True,
+        "chain_plain": "威：吸筹链未成型",
+        "change_line": "首次记录，暂无对比",
+        "daily_raw": {
+            "tr_lower": 41.23,
+            "tr_upper": 58.77,
+            "tr_seed_source": "percentile",
+            "tr_maturity": "L0",
+            "box_display_mode": "none",
+            "measure_allowed": False,
+            "phase_a_status": "none",
+        },
+        "weekly_raw": {
+            "tr_lower": 40.0,
+            "tr_upper": 60.0,
+            "tr_seed_source": "percentile",
+            "tr_maturity": "L0",
+            "box_display_mode": "none",
+            "measure_allowed": False,
+        },
+        "daily_view": {
+            "phase": "none",
+            "phase_label": "",
+            "bias": "neutral",
+            "tr": {"lower": 41.23, "upper": 58.77, "quality": 0.5},
+            "tr_maturity": "L0",
+            "box_display_mode": "none",
+            "measure_allowed": False,
+            "active_events": [],
+            "event_detail": {},
+            "invalidation_hint": "收盘有效跌破 TR 下沿 41.23 则偏多结构受损",
+            "summary_oneline": "暂无明确结构",
+        },
+        "weekly_view": {
+            "phase": "none",
+            "bias": "neutral",
+            "tr": {"lower": 40.0, "upper": 60.0},
+            "tr_maturity": "L0",
+            "box_display_mode": "none",
+            "measure_allowed": False,
+            "active_events": [],
+            "event_detail": {},
+            "invalidation_hint": "收盘有效跌破 TR 下沿 40.00 则偏多结构受损",
+            "summary_oneline": "暂无",
+        },
+    }
+
+
+def _failed_phase_a_plan() -> dict:
+    plan = copy.deepcopy(_sample_plan())
+    plan["chain_plain"] = "威：SC，还差AR"  # 故意放旧缓存，render 应按 failed raw 收口。
+    plan["daily_raw"].update(
+        {
+            "ar_signal": False,
+            "secondary_test_sc_signal": False,
+            "st_signal": False,
+            "lps_signal": False,
+            "phase_a_status": "failed",
+            "phase_a_range": {"status": "failed", "sc_low": 9.5},
+            "tr_maturity": "L0",
+            "box_display_mode": "none",
+            "measure_allowed": False,
+        }
+    )
+    plan["daily_view"].update(
+        {
+            "phase_label": "Phase A失败",
+            "bias": "neutral",
+            "active_events": ["sc"],
+            "tr_maturity": "L0",
+            "box_display_mode": "none",
+            "measure_allowed": False,
+            "phase_a_status": "failed",
+            "phase_a_range": {"status": "failed", "sc_low": 9.5},
+            "invalidation_hint": "Phase A失败：有效跌破 SC 低点",
+            "summary_oneline": "Phase A失败，等待新结构",
+        }
+    )
+    plan["daily_view"]["event_detail"] = {"sc": {"id": "sc", "price": 9.5, "reason": "SC"}}
+    return plan
 
 
 def test_render_card_skeleton_wechat_safe():
@@ -117,13 +268,416 @@ def test_main_exits_1_when_card_data_fails(monkeypatch, capsys):
     assert code == 1
     out = capsys.readouterr().out
     assert "取数失败" in out
-    assert "数据不足" in out
+    assert "威科夫详析" in out or "数据不足" in out
 
 
-def test_main_exits_0_when_card_ok(monkeypatch, capsys):
+def test_main_exits_0_when_card_ok(monkeypatch, capsys, tmp_path):
     from trader_shared import wyckoff_run as wr
 
+    monkeypatch.setenv("TRADER_ROOT", str(tmp_path))
     monkeypatch.setattr(wr, "build_wyckoff_plan", lambda target: _sample_plan())
     code = wr.main(["--target", "测试股"])
     assert code == 0
-    assert "威科夫 — 测试股" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "威科夫详析 — 测试股" in out
+
+
+# ── W-D1..W-D9 ──────────────────────────────────────────────
+
+
+def test_wd1_detail_default_skeleton():
+    """W-D1：详析含 现况/变化/中线/短线/故事链/综述。"""
+    text = render_wyckoff_detail(_sample_plan())
+    assert text.startswith("威科夫详析 — 测试股（600000）｜日线+周线")
+    assert "📊 现况" in text
+    assert "🔔 变化" in text
+    assert "🧭 中线（周线 · 入池看这里）" in text
+    assert "⚡ 短线（日线 · 盯触发看这里）" in text
+    assert "🔮 故事链（以日线推进；周线作背景）" in text
+    assert "⭐ 盯" in text
+    assert "💬 综述" in text
+    assert "#" not in text
+    assert "**" not in text
+    assert "---" not in text
+    assert "|" not in text
+
+
+def test_wd2_brief_old_card(monkeypatch, capsys, tmp_path):
+    """W-D2：--brief 仍为旧短卡骨架。"""
+    from trader_shared import wyckoff_run as wr
+
+    monkeypatch.setenv("TRADER_ROOT", str(tmp_path))
+    monkeypatch.setattr(wr, "build_wyckoff_plan", lambda target: _sample_plan())
+    code = wr.main(["--target", "测试股", "--brief"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert out.startswith("威科夫 — 测试股（600000）")
+    assert "威科夫详析" not in out
+    assert "📎 链：" in out
+    assert "📐 TR：" in out
+
+
+def test_wd3_l0_percentile_no_box_numbers_on_range():
+    """W-D3：L0+percentile 区间不得出现分位上下沿数字当箱/雏形。"""
+    plan = _l0_percentile_plan()
+    text = render_wyckoff_detail(plan)
+    # 抓「区间：」行
+    range_lines = [ln for ln in text.splitlines() if "区间：" in ln]
+    assert range_lines
+    for ln in range_lines:
+        assert "41.23" not in ln
+        assert "58.77" not in ln
+        assert "40.00" not in ln and "40.0" not in ln
+        assert "60.00" not in ln and "60.0" not in ln
+        assert "箱体" not in ln
+        assert "雏形" not in ln or "无雏形" in ln
+        assert "无成熟箱" in ln or "无雏形" in ln
+    # 失效也不得用分位沿冒充箱沿
+    inv_lines = [ln for ln in text.splitlines() if "失效：" in ln]
+    for ln in inv_lines:
+        assert "41.23" not in ln
+        assert "40.00" not in ln
+
+
+def test_wd4_l1_proto_l2_box_l3_measure_only():
+    """W-D4：L1 雏形；L2/L3 箱体；量度仅 L3。"""
+    # L1
+    p1 = _sample_plan()
+    p1["daily_raw"]["tr_maturity"] = "L1"
+    p1["daily_raw"]["box_display_mode"] = "proto"
+    p1["daily_raw"]["measure_allowed"] = False
+    p1["daily_raw"]["secondary_test_sc_signal"] = False
+    p1["daily_raw"]["st_signal"] = False
+    p1["daily_view"]["tr_maturity"] = "L1"
+    p1["daily_view"]["box_display_mode"] = "proto"
+    p1["daily_view"]["measure_allowed"] = False
+    t1 = render_wyckoff_detail(p1)
+    short_range = [ln for ln in t1.splitlines() if ln.strip().startswith("区间：")]
+    # 短线区间（第二处区间：在 ⚡ 块）
+    assert any("雏形" in ln for ln in short_range)
+    assert "箱体" not in "\n".join(short_range)
+    assert "量度目标" not in t1
+
+    # L2
+    p2 = _sample_plan()
+    t2 = render_wyckoff_detail(p2)
+    assert "箱体" in t2
+    assert "量度目标" not in t2
+    assert "未达 L3，暂不测算" in t2
+
+    # L3
+    p3 = _sample_plan()
+    p3["daily_raw"]["tr_maturity"] = "L3"
+    p3["daily_raw"]["measure_allowed"] = True
+    p3["daily_raw"]["cause_effect_up_target"] = 15.0
+    p3["daily_raw"]["cause_effect_down_target"] = 8.0
+    p3["daily_raw"]["pnf_method"] = "horizontal"
+    p3["daily_view"]["tr_maturity"] = "L3"
+    p3["daily_view"]["measure_allowed"] = True
+    p3["daily_view"]["box_display_mode"] = "box"
+    p3["daily_view"]["cause_effect"] = {
+        "up_target": 15.0,
+        "down_target": 8.0,
+        "pnf_method": "horizontal",
+        "measure_allowed": True,
+        "tr_maturity": "L3",
+    }
+    t3 = render_wyckoff_detail(p3)
+    assert "箱体" in t3
+    assert "量度目标" in t3
+    assert "测算已给出" in t3
+
+
+def test_wd5_lights_bullet_cn_and_price():
+    """W-D5：灯 ●/○ 一行一灯；缩写带中文；亮灯价来自 event_detail。"""
+    text = render_wyckoff_detail(_sample_plan())
+    assert "● SC（卖力高潮）9.50" in text
+    assert "● AR（自动反弹）11.00" in text
+    assert "● ST（二次测试）9.60" in text
+    assert "● LPS（最后支撑点）10.20" in text
+    assert "○ SOS（强势信号）未亮" in text
+    # 一行一灯：每个 ●/○ 独占一行
+    lamp_lines = [ln for ln in text.splitlines() if re.match(r"\s*[●○]\s", ln)]
+    assert len(lamp_lines) >= 5
+    for ln in lamp_lines:
+        assert ln.count("●") + ln.count("○") == 1
+
+
+def test_wd5_secondary_test_sc_lights_st_without_st_signal():
+    """W-D5 / §2.4：仅 secondary_test_sc（无 st_signal）须亮 ST；禁止靠 phase 字样猜灯。"""
+    # 链提取：广义 ST
+    only_st_sc = {
+        "sc_signal": True,
+        "ar_signal": True,
+        "st_signal": False,
+        "spring_test_signal": False,
+        "secondary_test_sc_signal": True,
+        "lps_signal": False,
+        "sos_signal": False,
+    }
+    assert extract_accum_events(only_st_sc) == ["SC", "AR", "ST"]
+
+    # 仅 phase 字样、无事件 → 不亮
+    phase_only = {
+        "phase_label": "二次测试",
+        "sc_signal": False,
+        "ar_signal": False,
+        "st_signal": False,
+        "secondary_test_sc_signal": False,
+        "spring_test_signal": False,
+        "lps_signal": False,
+        "sos_signal": False,
+    }
+    assert extract_accum_events(phase_only) == []
+
+    # 详析：L2 箱 + secondary_test_sc → ST●（查 Agent 曾抓的 ST 黑洞）
+    plan = _sample_plan()
+    plan["daily_raw"]["st_signal"] = False
+    plan["daily_raw"]["spring_test_signal"] = False
+    plan["daily_raw"]["secondary_test_sc_signal"] = True
+    plan["daily_raw"]["lps_signal"] = False
+    plan["daily_view"]["active_events"] = ["sc", "ar", "secondary_test_sc"]
+    plan["daily_view"]["event_detail"].pop("lps", None)
+    text = render_wyckoff_detail(plan)
+    assert "● ST（二次测试）9.60" in text
+    assert "○ LPS（最后支撑点）未亮" in text
+
+
+def test_c_f4_c_f5_c_f7_failed_detail_story_resets_phase_a_copy():
+    """C-F4/C-F5/C-F7：详析 failed 时若变好/现在收口，灯仍保留 SC。"""
+    text = render_wyckoff_detail(_failed_phase_a_plan())
+    story = text.split("🔮 故事链（以日线推进；周线作背景）", 1)[1].split("💬 综述", 1)[0]
+    better = story.split("若变好", 1)[1].split("若变坏", 1)[0]
+    watch = story.split("⭐ 盯", 1)[1].split("入池：", 1)[0]
+
+    assert "现在\n威：SC（Phase A 已失效）" in story
+    assert "Phase A 已失效" in better
+    assert "重新寻底" in better or "新的 SC" in better
+    assert "● SC（卖力高潮）9.50" in text
+    assert "链可推进" not in better
+    assert "还差" not in story
+    assert "盯下一灯" not in watch
+    assert "重新寻底" in watch or "新的 SC" in watch
+
+
+def test_c_f6_failed_short_card_uses_failed_chain_copy():
+    """C-F6：短卡链行吃到 failed chain_plain，不保留旧「还差」。"""
+    text = render_wyckoff_card(_failed_phase_a_plan())
+    assert "📎 链：威：SC（Phase A 已失效）" in text
+    assert "还差" not in text
+
+
+def test_c_f7_view_failed_raw_missing_status_still_closes():
+    """C-F7 补洞：仅 daily_view=failed、daily_raw 无 status 时仍不得「还差」。"""
+    plan = copy.deepcopy(_sample_plan())
+    plan["chain_plain"] = "威：SC，还差AR"
+    # raw：有 SC 灯，故意不带 failed
+    plan["daily_raw"] = {
+        "sc_signal": True,
+        "sc_price": 9.5,
+        "ar_signal": False,
+        "phase_a_status": "established",
+        "phase_a_range": {"status": "established", "sc_low": 9.5},
+    }
+    plan["daily_view"].update(
+        {
+            "phase_a_status": "failed",
+            "phase_a_range": {"status": "failed", "sc_low": 9.5},
+            "tr_maturity": "L0",
+            "box_display_mode": "none",
+            "active_events": ["sc"],
+            "event_detail": {"sc": {"id": "sc", "price": 9.5}},
+            "summary_oneline": "Phase A失败",
+        }
+    )
+    detail = render_wyckoff_detail(plan)
+    card = render_wyckoff_card(plan)
+    assert "威：SC（Phase A 已失效）" in detail
+    assert "威：SC，还差AR" not in detail
+    assert "📎 链：威：SC（Phase A 已失效）" in card
+    assert "还差" not in card
+    story = detail.split("🔮 故事链", 1)[1]
+    assert "链可推进" not in story
+
+
+def test_wd10_phase_label_on_oneline():
+    """W-D10：phase_label 须出现在中线/短线一句话，禁止阶段黑洞。"""
+    text = render_wyckoff_detail(_sample_plan())
+    # 中线块第一句带周线 phase；短线块带日线 phase
+    mid_block = text.split("🧭 中线")[1].split("⚡ 短线")[0]
+    short_block = text.split("⚡ 短线")[1].split("🔮 故事链")[0]
+    assert "吸筹B" in mid_block
+    assert "吸筹C" in short_block
+    # 一句话行格式：阶段｜…
+    assert any(ln.strip().startswith("一句话：吸筹B｜") for ln in mid_block.splitlines())
+    assert any(ln.strip().startswith("一句话：吸筹C｜") for ln in short_block.splitlines())
+
+
+def test_wd10_extra_lit_events_not_silent():
+    """W-D10：引擎已亮的非五灯（PS/Spring/JAC/SV 等）不得静默。"""
+    plan = _sample_plan()
+    plan["daily_raw"]["ps_signal"] = True
+    plan["daily_raw"]["ps_price"] = 9.4
+    plan["daily_raw"]["spring_signal"] = True
+    plan["daily_raw"]["spring_price"] = 9.55
+    plan["daily_raw"]["jac_signal"] = True
+    plan["daily_raw"]["jac_price"] = 11.2
+    plan["daily_raw"]["stopping_volume_signal"] = True
+    plan["daily_raw"]["stopping_volume_price"] = 9.45
+    plan["daily_view"]["active_events"] = [
+        "ps",
+        "sc",
+        "ar",
+        "secondary_test_sc",
+        "spring",
+        "lps",
+        "jac",
+        "stopping_volume",
+    ]
+    plan["daily_view"]["event_detail"]["ps"] = {"id": "ps", "price": 9.4}
+    plan["daily_view"]["event_detail"]["spring"] = {"id": "spring", "price": 9.55}
+    plan["daily_view"]["event_detail"]["jac"] = {"id": "jac", "price": 11.2}
+    plan["daily_view"]["event_detail"]["stopping_volume"] = {
+        "id": "stopping_volume",
+        "price": 9.45,
+    }
+    text = render_wyckoff_detail(plan)
+    short_block = text.split("⚡ 短线")[1].split("🔮 故事链")[0]
+    assert "● PS（初步止跌）9.40" in short_block
+    assert "● Spring（弹簧确认）9.55" in short_block
+    assert "● JAC（跳溪）11.20" in short_block
+    assert "● SV（止跌量）9.45" in short_block
+    # 仍保留默认五灯骨架
+    assert "○ SOS（强势信号）未亮" in short_block or "● SOS" in short_block
+
+
+def test_wd6_no_buy_words():
+    """W-D6：无买卖指令词。"""
+    text = render_wyckoff_detail(_sample_plan())
+    for bad in ("宜买", "可低吸", "可执行", "该买了", "立即买入", "去买"):
+        assert bad not in text
+
+
+def test_wd7_story_prices_whitelist_only():
+    """W-D7：故事链价格不出现白名单外数字。"""
+    plan = _sample_plan()
+    # 注入非白名单噪音价到 summary（不得进故事链主叙事外的瞎造；我们检查故事链段）
+    plan["daily_view"]["summary_oneline"] = "吸筹推进"
+    text = render_wyckoff_detail(plan)
+    # 截取故事链段
+    start = text.index("🔮 故事链")
+    end = text.index("💬 综述")
+    story = text[start:end]
+    allowed = {"9.50", "11.00", "9.60", "10.20", "8.00", "12.00", "10.50"}
+    # 故事链中出现的 xx.xx 必须在批准源（含现价旁注不应出现在故事；我们未写现价进故事）
+    found = set(re.findall(r"\d+\.\d{2}", story))
+    assert found <= allowed | {"9.50", "11.00", "9.60", "10.20", "8.00", "12.00"}
+
+
+def test_wd8_change_first_and_diff(tmp_path, monkeypatch):
+    """W-D8：无快照→首次记录；有快照→新亮/熄灭可测。"""
+    assert format_light_change(None, {"daily_events": ["SC"], "weekly_events": []}) == (
+        "首次记录，暂无对比"
+    )
+    prev = {
+        "daily_events": ["SC", "AR"],
+        "weekly_events": ["SC"],
+        "daily_prices": {},
+        "weekly_prices": {},
+    }
+    curr = {
+        "daily_events": ["SC", "AR", "ST"],
+        "weekly_events": [],
+        "daily_prices": {"ST": 9.6},
+        "weekly_prices": {},
+    }
+    line = format_light_change(prev, curr)
+    assert "新亮：" in line and "ST" in line
+    assert "熄灭：" in line and "周SC" in line
+    assert "仍亮：" in line and "SC" in line
+
+    # 持久化：run_card 写快照
+    from trader_shared import wyckoff_run as wr
+    from trader_shared.trader_paths import load_json, path
+
+    monkeypatch.setenv("TRADER_ROOT", str(tmp_path))
+    plan = _sample_plan()
+    monkeypatch.setattr(wr, "build_wyckoff_plan", lambda target: dict(plan))
+    text, ok = wr.run_card("测试股", brief=False)
+    assert ok
+    assert "首次记录，暂无对比" in text
+    store = load_json("wyckoff_light_snapshot")
+    assert "600000" in store
+    assert path("wyckoff_light_snapshot").name == "wyckoff_light_snapshot.json"
+
+    # 第二次：制造变化（去掉 LPS）
+    plan2 = _sample_plan()
+    plan2["daily_raw"]["lps_signal"] = False
+    plan2["daily_view"]["active_events"] = ["sc", "ar", "secondary_test_sc"]
+    plan2["daily_view"]["event_detail"].pop("lps", None)
+    plan2["chain_plain"] = "威：SC→AR→ST，还差LPS"
+    monkeypatch.setattr(wr, "build_wyckoff_plan", lambda target: dict(plan2))
+    text2, ok2 = wr.run_card("测试股", brief=False)
+    assert ok2
+    assert "熄灭：" in text2
+    assert "LPS" in text2
+
+
+def test_wd9_pool_tiers_no_order():
+    """W-D9：入池三档文案出现且无下单句。"""
+    # 建议入池：有 LPS + 周线非 bear
+    t = render_wyckoff_detail(_sample_plan())
+    assert "建议入池" in t
+    assert "立即买入" not in t
+    assert "本卡不下单" in t
+
+    # 暂不建议：L0 双线
+    t0 = render_wyckoff_detail(_l0_percentile_plan())
+    assert "暂不建议入池" in t0
+
+    # 结构偏空
+    bear = _sample_plan()
+    bear["weekly_view"]["bias"] = "bear"
+    bear["weekly_view"]["active_events"] = ["bc", "are"]
+    bear["weekly_raw"]["bc_signal"] = True
+    bear["weekly_raw"]["are_signal"] = True
+    tb = render_wyckoff_detail(bear)
+    assert "暂不建议入池" in tb
+    assert "结构偏空" in tb
+
+
+def test_build_light_snapshot_entry_shape():
+    entry = build_light_snapshot_entry(_sample_plan(), ts="2026-08-01T00:00:00+00:00")
+    assert entry["ts"] == "2026-08-01T00:00:00+00:00"
+    assert "SC" in entry["daily_events"]
+    assert "LPS" in entry["daily_events"]
+    assert isinstance(entry["daily_prices"], dict)
+    assert isinstance(entry["weekly_events"], list)
+
+
+def test_wd8_snapshot_includes_extra_lit_for_change():
+    """W-D8：非五灯已亮须进快照，才能在 🔔 变化里新亮/熄灭。"""
+    plan = _sample_plan()
+    plan["daily_raw"]["jac_signal"] = True
+    plan["daily_raw"]["jac_price"] = 11.2
+    plan["daily_view"]["active_events"] = ["sc", "ar", "secondary_test_sc", "lps", "jac"]
+    plan["daily_view"]["event_detail"]["jac"] = {"id": "jac", "price": 11.2}
+    entry = build_light_snapshot_entry(plan, ts="2026-08-01T00:00:00+00:00")
+    assert "JAC" in entry["daily_events"]
+    assert entry["daily_prices"].get("JAC") == 11.2
+
+    prev = {
+        "daily_events": ["SC", "AR", "ST", "LPS"],
+        "weekly_events": [],
+        "daily_prices": {},
+        "weekly_prices": {},
+    }
+    line = format_light_change(prev, entry)
+    assert "新亮：" in line and "JAC" in line
+
+
+def test_trader_paths_wyckoff_light_snapshot(tmp_path, monkeypatch):
+    from trader_shared.trader_paths import path
+
+    monkeypatch.setenv("TRADER_ROOT", str(tmp_path))
+    assert path("wyckoff_light_snapshot") == tmp_path / "wyckoff_light_snapshot.json"

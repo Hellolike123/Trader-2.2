@@ -15,6 +15,7 @@ from trader_shared.wyckoff_core import (
     wyckoff_analysis,
 )
 from trader_shared.wyckoff_events import _find_sc_anchor, _sc_detector_params
+from trader_shared.wyckoff_chain import format_wyckoff_chain_plain
 
 
 def _bar(o, h, l, c, v=100):
@@ -132,6 +133,10 @@ def test_s_a4_s_a5_breakdown_fails_phase_a_and_forbids_st() -> None:
     assert "停止：SC+AR" not in result.get("phase_label", "")
     assert "雏形" not in daily_line
     assert "雏形" not in midline
+    chain = format_wyckoff_chain_plain(result)
+    assert chain.startswith("威：SC")
+    assert chain.endswith("（Phase A 已失效）")
+    assert "还差" not in chain
 
 
 def test_s_a6_daily_weekly_caps_are_separate() -> None:

@@ -1,7 +1,8 @@
 # 威科夫检测调参 — 续篇指针（非第二 SSOT）
 
 > **状态**: 指针页（2026-08-02）  
-> **用途**: 避免「搜索宇宙 / 钉住 / 破位收口」出现双份现行法源。
+> **用途**: 避免「搜索宇宙 / 钉住 / 破位收口」出现双份现行法源。  
+> **详析卡备忘**: 原对话记下的「15 窗 / 南网破位」已冻结进 structure-anchor；本文不再重开算法。
 
 ---
 
@@ -31,6 +32,7 @@
 |------|------|
 | `wyckoff-phase-a-range-handoff.md` | P1/P2 历史；文首已勘误「15=SC 窗」 |
 | `wyckoff-tr-maturity-l0l3-handoff.md` | L0–L3 展示/量度；破位失败态以 structure-anchor 为准 |
+| `wyckoff-skill-deep-card-handoff.md` | 详析卡渲染合同（PR #25）；不改检测阈值 |
 
 ---
 

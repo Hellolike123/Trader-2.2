@@ -55,6 +55,7 @@ def test_keys_resolve_under_trader_root(tmp_path: Path, monkeypatch):
     assert path("last_target") == root / "last_target.txt"
     assert path("signals") == root / "signals.jsonl"
     assert path("signal_results") == root / "signal_results.jsonl"
+    assert path("wyckoff_light_snapshot") == root / "wyckoff_light_snapshot.json"
     assert path("wyckoff_phase_a_anchor") == root / "wyckoff_phase_a_anchor.json"
 
 
