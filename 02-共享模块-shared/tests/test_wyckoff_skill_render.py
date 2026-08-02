@@ -267,6 +267,30 @@ def test_render_rank_rows():
     assert "**" not in text
 
 
+def test_a_r3_rank_failed_phase_label_sanitized():
+    """A-R3/A-R4：rank 渲染 failed fixture 禁「Phase A失败」类词，含「Phase A 失效」。"""
+    text = render_wyckoff_rank(
+        [
+            {
+                "name": "败票",
+                "chain_plain": "威：SC（Phase A 失效）",
+                "phase_label": "无明确阶段（Phase A 失败，破位未收回）",
+            },
+            {
+                "name": "紧凑",
+                "chain_plain": "威：吸筹链未成型",
+                "phase_label": "Phase A失败",
+            },
+        ]
+    )
+    for bad in ("Phase A失败", "Phase A 失败"):
+        assert bad not in text, f"rank leaked {bad!r}"
+    assert "Phase A 失效" in text
+    assert "Phase A失效" in text
+    assert "1. 败票｜威：SC（Phase A 失效）｜无明确阶段（Phase A 失效，破位未收回）" in text
+    assert "2. 紧凑｜威：吸筹链未成型｜Phase A失效" in text
+
+
 def test_build_rank_rows_sort_by_chain():
     items = [
         {"name": "弱", "wyckoff": {"sc_signal": True}},

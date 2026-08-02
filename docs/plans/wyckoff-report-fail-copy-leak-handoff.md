@@ -1,6 +1,7 @@
 # 交易员报告 Phase 失效文案漏网 — Agent Handoff
 
-> **状态**: active（2026-08-02）  
+> **状态**: done（2026-08-02）  
+
 > **触发**: 干跑宁德时代 `final_report` 中线仍见 `威科夫：Phase A失败 · 破位未收回 · 不据此开仓`；威科夫 skill 卡已按 P-C* 清扫，**报告光杆路径漏网**。  
 > **上游法源**: `wyckoff-phase-fail-copy-handoff.md`（P-C*）；`wyckoff-fail-copy-cleanup-handoff.md`（C-L*）  
 > **产品裁决**: 凡**直接进面板**的人话，failed 写「失效」不写「失败」；不改判定字段内部原文（除非该串直接进面板）。

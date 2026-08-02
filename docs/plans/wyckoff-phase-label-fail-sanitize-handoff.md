@@ -1,6 +1,7 @@
 # phase_label 失败字样 Sanitize — Agent Handoff
 
-> **状态**: active（2026-08-02）  
+> **状态**: done（2026-08-02）  
+
 > **触发**: 报告光杆 failed 句已修（PR #39）；但 `phase_label` / `fail_reason` 等字段仍可含「Phase A 失败」，经 `build_wyckoff_card.phase_label`、view、详析映射若未 sanitize 仍可能露脸。  
 > **上游**: `wyckoff-phase-fail-copy-handoff.md` §1.2.6；`wyckoff-report-fail-copy-leak-handoff.md`
 
