@@ -1,9 +1,9 @@
 # 池价刷新统一走 Provider（并行）— Agent Handoff
 
-> **状态**: mother_law（实现中）· 2026-08-02  
+> **状态**: impl_done（写+查 PASS；待合 #51）· 2026-08-02  
 > **基线**: `main` @ #49 后（与 #50 signal-fusion 独立；本 PR 不依赖 #50）  
-> **分支**: `cursor/pool-quote-provider-1c6b`  
-> **双 Agent**: 写落地 / 查对照；查完修完再 PR。
+> **分支**: `cursor/pool-quote-provider-1c6b` · PR [#51](https://github.com/Hellolike123/Trader-2.2/pull/51)  
+> **双 Agent**: 写落地 ✅ / 查 PASS ✅。
 
 ---
 
