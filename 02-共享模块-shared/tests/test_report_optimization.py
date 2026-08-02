@@ -586,8 +586,11 @@ def test_highlight_excludes_bearish_midline_stage_tag():
     hl = next(ln for ln in out.splitlines() if "✅ 亮点" in ln)
     assert "主升初期" not in hl
     assert "偏空" not in hl
+    # 偏空已在定论；D-R7 关闭态风险优先现价不宜追，不复读「中线偏空」
+    verdict = next((ln for ln in out.splitlines() if "定论：" in ln), "")
     risk = next(ln for ln in out.splitlines() if "⚠️ 风险" in ln)
-    assert "偏空" in risk or "主升初期" in risk
+    assert "偏空" in verdict or "偏空" in risk or "主升初期" in risk
+    assert "现价不宜追" in risk or "偏空" in risk or "主升初期" in risk
 
 
 def test_cd3_panel_no_fusion_buy_without_engine_point():
@@ -936,3 +939,108 @@ def test_mid_key_price_format():
     assert "41.14-46.69 回踩区" in out
     assert "56.00 压力位" in out or "56.00 压力" in out
     assert "68.82 目标位" in out or "68.82 目标" in out
+
+
+# ── 面板减重 D-R1…D-R8（trader-panel-declutter-handoff）──
+
+def _closed_declutter_report() -> dict:
+    """关闭态样例：无仓 + 不新开 + 框破坏偏空。"""
+    r = _report()
+    r["has_position"] = False
+    r["weekly_frame"] = "破坏"
+    r["discipline"] = {
+        "allow_new_entry": False,
+        "action": "不新开",
+        "suggested_pct_cap": 0,
+        "invalidation": "破止损作废",
+        "weekly_frame": "破坏",
+    }
+    r["conclusion"]["execution"] = "不新开 · 不追现价 · 仓 0%"
+    r["conclusion"]["midline"] = "中线框破坏 · 战略减/清倾向"
+    r["conclusion"]["midline_verdict_note"] = (
+        "威科夫无阶段 × 缠论盘整 → 双源无明确方向"
+    )
+    r["conclusion"]["stage_line"] = "无阶段"
+    r["mid_key_prices"] = {
+        **r["mid_key_prices"],
+        "line_pullback": "41.14-46.69 回踩区（到了分批低吸）",
+        "line_golden_buy": "42.00 黄金买点（50%回撤·最佳低吸位）",
+    }
+    return r
+
+
+def test_d_r1_verdict_no_stack_bias_on_no_direction():
+    """D-R1：框破坏+双源无明确方向 → 单一拧句，无硬叠。"""
+    out = render_short_midline(_closed_declutter_report())
+    verdict = next(ln for ln in out.splitlines() if "定论：" in ln)
+    assert "双源无明确方向" not in verdict
+    assert "无方向 · 偏空" not in verdict
+    assert "中线框破坏" in verdict and "偏空" in verdict and "战略减" in verdict
+    assert "仅副读" in verdict
+
+
+def test_d_r2_plan_buy_zone_when_not_allowed():
+    """D-R2：allow_new_entry=False → 计划买区，无低吸区。"""
+    out = render_short_midline(_closed_declutter_report())
+    assert "计划买区" in out
+    assert "低吸区" not in out
+    assert "未放行" in out
+    assert "回踩买" not in out
+
+
+def test_d_r3_ma5_observe_when_closed():
+    """D-R3：关闭态 MA5 为观察，无加仓试探。"""
+    out = render_short_midline(_closed_declutter_report())
+    assert "加仓试探" not in out
+    assert "MA5 支撑（观察）" in out
+
+
+def test_d_r4_spot_no_hold_when_flat():
+    """D-R4：无仓现价注解为不追，无「持有」。"""
+    out = render_short_midline(_closed_declutter_report())
+    spot = next(ln for ln in out.splitlines() if "🌟" in ln and "现价" in ln)
+    assert "不追" in spot
+    assert "持有" not in spot
+
+
+def test_d_r5_t0_disabled_when_flat_closed():
+    """D-R5：无仓+不新开 → 仅无底仓不启用，无日内 T0/低吸。"""
+    out = render_short_midline(_closed_declutter_report())
+    assert "T0：无底仓，不启用（与出手一致，不新开）" in out
+    assert "日内 T0：" not in out
+    # 短线关键价区计划买区可有「未放行」，但 T0 行不得含低吸
+    t0_lines = [ln for ln in out.splitlines() if "T0" in ln]
+    assert t0_lines
+    assert all("低吸" not in ln for ln in t0_lines)
+
+
+def test_d_r6_mid_key_no_low_absorb_verbs_when_closed():
+    """D-R6：关闭/偏空时中线回踩无低吸；黄金无最佳低吸。"""
+    out = render_short_midline(_closed_declutter_report())
+    mid = out.split("⚡ 短线", 1)[0]
+    pb = next(ln for ln in mid.splitlines() if "回踩区" in ln)
+    assert "低吸" not in pb
+    assert "结构参考" in pb
+    gold = next(ln for ln in mid.splitlines() if "黄金" in ln)
+    assert "最佳低吸" not in gold
+    assert "低吸" not in gold
+    assert "黄金位" in gold or "50%回撤" in gold
+
+
+def test_d_r7_risk_no_repeat_bias_blob():
+    """D-R7：风险不含与定论相同的整段中线偏空。"""
+    out = render_short_midline(_closed_declutter_report())
+    risk = next(ln for ln in out.splitlines() if "⚠️ 风险" in ln)
+    assert "中线偏空" not in risk
+    assert "现价不宜追" in risk
+
+
+def test_d_r8_t0_intraday_ok_with_position():
+    """D-R8：有仓时可打日内 T0 低吸/高抛（不误伤）。"""
+    r = _closed_declutter_report()
+    r["has_position"] = True
+    r["cost"] = 40.0
+    out = render_short_midline(r)
+    assert "日内 T0：" in out
+    assert "低吸" in out
+    assert "无底仓，不启用" not in out
