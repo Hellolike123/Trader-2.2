@@ -145,8 +145,8 @@ def format_wyckoff_chain_plain(report_or_item: dict[str, Any] | list[str] | None
         if is_phase_a_failed(src):
             if events:
                 chain = "→".join(_chain_label(e) for e in events)
-                return f"威：{chain}（Phase A 已失效）"
-            return "威：结构已失效"
+                return f"威：{chain}（Phase A 失效）"
+            return "威：结构失效"
         if _bc_watch_only(wyk, events):
             return "威：BC后观望"
 

@@ -135,7 +135,7 @@ def test_s_a4_s_a5_breakdown_fails_phase_a_and_forbids_st() -> None:
     assert "雏形" not in midline
     chain = format_wyckoff_chain_plain(result)
     assert chain.startswith("威：SC")
-    assert chain.endswith("（Phase A 已失效）")
+    assert chain.endswith("（Phase A 失效）")
     assert "还差" not in chain
 
 

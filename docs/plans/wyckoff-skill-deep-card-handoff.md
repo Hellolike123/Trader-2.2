@@ -25,7 +25,7 @@
    - 量度目标 **仅 L3 / measure_allowed**；否则「未达 L3，暂不测算」  
 5. **事件灯**：● 亮 / ○ 未亮；一行一灯；缩写后必须带中文释义；亮灯须带引擎事件价（有则）。  
 6. **故事链**：`现在 / 若变好 / 若变坏 / ⭐ 盯 / 入池 / 说明`；原典缩写保留+释义；价格只许来自批准源（见 §2.3）。  
-   - Phase A failed 时，「若变好」与「⭐ 盯」不得写下一灯推进；文案收口见 `wyckoff-failed-chain-copy-handoff.md` §2.3。
+   - Phase A failed 时，「若变好」与「⭐ 盯」不得写下一灯推进；文案收口见 `wyckoff-failed-chain-copy-handoff.md` §2.3；失败人话用词（`Phase A 失效｜须重新寻底`，禁「已失效/旧故事作废」）见 `wyckoff-phase-fail-copy-handoff.md` §1.1.6（骨架仍按本文，勿改成默认 B）。
 7. **`🔔 变化`**：相对上次同票快照的新亮/仍亮/熄灭；首次无快照写「首次记录，暂无对比」。  
 8. **入池软建议**三档：`建议入池` / `暂不建议入池` / `建议复核出池`（规则见 §2.5）；**禁止**买卖仓位指令。  
 9. 同步 `01-功能包-packages/wyckoff/references/output-template.md` + pytest。  

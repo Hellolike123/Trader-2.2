@@ -129,6 +129,25 @@ def _cn(code: str) -> str:
     return _EVENT_CN.get(c) or "事件"
 
 
+def _panel_fail_copy(text: str) -> str:
+    """面板可见失败词 → 失效（法源 wyckoff-phase-fail-copy-handoff §1.1.6）。
+
+    只改人话展示；不改 core 内部 fail_reason 存储。
+    """
+    s = str(text or "")
+    if not s:
+        return s
+    # 先收口「已失效 / 旧故事作废」，再收口「失败」
+    s = s.replace("Phase A 已失效", "Phase A 失效")
+    s = s.replace("Phase A已失效", "Phase A失效")
+    s = s.replace("结构已失效", "结构失效")
+    s = s.replace("旧故事作废", "Phase A 失效")
+    s = s.replace("Phase A 失败", "Phase A 失效")
+    s = s.replace("Phase A失败", "Phase A失效")
+    s = s.replace("已失效", "失效")
+    return s
+
+
 def _as_view(obj: Any) -> dict[str, Any]:
     return obj if isinstance(obj, dict) else {}
 
@@ -277,7 +296,7 @@ def _invalidation_phrase(view: dict[str, Any], raw: dict[str, Any]) -> str:
         # hint 若引用 TR 沿但不当箱：改写
         if any(k in hint for k in ("TR", "下沿", "上沿", "箱")):
             return "暂无明确箱体失效价"
-    return hint or "暂无明确失效价"
+    return _panel_fail_copy(hint or "暂无明确失效价")
 
 
 def _primary_light_label(raw: dict[str, Any], view: dict[str, Any]) -> str:
@@ -662,7 +681,11 @@ def _slim_current_act_sentence(view: dict[str, Any], raw: dict[str, Any]) -> str
 
 def _slim_prev_act_lines(view: dict[str, Any], raw: dict[str, Any]) -> list[str]:
     sc_px = _fmt_price(_event_price_from_sources("SC", view=view, raw=raw))
-    head = f"吸筹 Phase A：SC {sc_px} → 破位 → 旧故事作废" if sc_px else "吸筹 Phase A：破位 → 旧故事作废"
+    head = (
+        f"吸筹 Phase A：SC {sc_px} → 破位 → Phase A 失效"
+        if sc_px
+        else "吸筹 Phase A：破位 → Phase A 失效"
+    )
     lines = [
         "📎 上一幕（已结束）",
         f"  {head}",
@@ -1018,15 +1041,62 @@ def _slim_range_head(view: dict[str, Any], raw: dict[str, Any]) -> str:
 
 
 def _slim_failed_anchor_ref(view: dict[str, Any], raw: dict[str, Any]) -> str:
-    """failed → L0：禁止健康雏形/箱体；只写废锚 SC 低点供对照（不带上沿冒充区间）。"""
+    """failed → L0：禁止健康雏形/箱体；只写旧 SC 低点供对照（不带上沿冒充区间）。"""
     lo, _hi = _phase_a_bounds(raw)
     if lo is not None:
-        return f"废锚参考 SC {_fmt_price(lo)}（已废）"
+        return f"旧SC {_fmt_price(lo)}（仅对照）"
     px = _event_price_from_sources("SC", view=view, raw=raw)
     px_s = _fmt_price(px)
     if px_s:
-        return f"废锚参考 SC {px_s}（已废）"
-    return "无成熟箱"
+        return f"旧SC {px_s}（仅对照）"
+    return ""
+
+
+def _slim_phase_display(view: dict[str, Any]) -> str | None:
+    """有明确 phase 时套 Phase X · 中文；无则不强编（不写「有效」）。"""
+    phase = str(view.get("phase") or "").strip().lower()
+    label = str(view.get("phase_label") or "").strip()
+    mapping = {
+        "accumulation_a": "Phase A · 止跌开场",
+        "accumulation_b": "Phase B · 建因横盘",
+        "accumulation_c": "Phase C · 试盘",
+        "accumulation_d": "Phase D · 强度确认",
+        "accumulation_e": "Phase E · 离开区间",
+        "markup": "Phase E · 离开区间",
+    }
+    if phase in mapping:
+        return mapping[phase]
+    # 仅当 label 已点明 B/C（或 A/D/E）时套用，避免无 phase 字段时假写
+    for key, text in (
+        ("积累期 a", mapping["accumulation_a"]),
+        ("积累期a", mapping["accumulation_a"]),
+        ("吸筹a", mapping["accumulation_a"]),
+        ("吸筹 a", mapping["accumulation_a"]),
+        ("phase a", mapping["accumulation_a"]),
+        ("积累期 b", mapping["accumulation_b"]),
+        ("积累期b", mapping["accumulation_b"]),
+        ("吸筹b", mapping["accumulation_b"]),
+        ("吸筹 b", mapping["accumulation_b"]),
+        ("phase b", mapping["accumulation_b"]),
+        ("积累期 c", mapping["accumulation_c"]),
+        ("积累期c", mapping["accumulation_c"]),
+        ("吸筹c", mapping["accumulation_c"]),
+        ("吸筹 c", mapping["accumulation_c"]),
+        ("phase c", mapping["accumulation_c"]),
+        ("积累期 d", mapping["accumulation_d"]),
+        ("积累期d", mapping["accumulation_d"]),
+        ("吸筹d", mapping["accumulation_d"]),
+        ("吸筹 d", mapping["accumulation_d"]),
+        ("phase d", mapping["accumulation_d"]),
+        ("积累期 e", mapping["accumulation_e"]),
+        ("积累期e", mapping["accumulation_e"]),
+        ("吸筹e", mapping["accumulation_e"]),
+        ("吸筹 e", mapping["accumulation_e"]),
+        ("phase e", mapping["accumulation_e"]),
+    ):
+        if key in label.lower():
+            return text
+    return None
 
 
 def _slim_weekly_stage_short(view: dict[str, Any], raw: dict[str, Any]) -> str:
@@ -1107,21 +1177,26 @@ def _slim_daily_wave_short(view: dict[str, Any], raw: dict[str, Any]) -> str:
     lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
     if failed:
         if "SOS" in lit:
-            return "SOS 强｜旧底已废"
+            return "Phase A 失效 · 破后强势｜本波 SOS 强"
         if "LPS" in lit:
-            return "LPS 修复｜旧底已废"
-        return "旧底已废｜待新寻底"
+            return "Phase A 失效｜本波 LPS 修复"
+        return "Phase A 失效｜须重新寻底"
     if "SOS" in lit:
-        return f"SOS 强｜{_slim_range_head(view, raw)}"
-    if "LPS" in lit:
-        return f"LPS 修复｜{_slim_range_head(view, raw)}"
-    if "ST" in lit:
-        return f"ST 已现｜{_slim_range_head(view, raw)}"
-    if "AR" in lit:
-        return f"AR 反弹｜{_slim_range_head(view, raw)}"
-    if "SC" in lit:
-        return f"SC 已现｜{_slim_range_head(view, raw)}"
-    return f"本波未成型｜{_slim_range_head(view, raw)}"
+        event = f"SOS 强｜{_slim_range_head(view, raw)}"
+    elif "LPS" in lit:
+        event = f"LPS 修复｜{_slim_range_head(view, raw)}"
+    elif "ST" in lit:
+        event = f"ST 已现｜{_slim_range_head(view, raw)}"
+    elif "AR" in lit:
+        event = f"AR 反弹｜{_slim_range_head(view, raw)}"
+    elif "SC" in lit:
+        event = f"SC 已现｜{_slim_range_head(view, raw)}"
+    else:
+        event = f"本波未成型｜{_slim_range_head(view, raw)}"
+    phase_head = _slim_phase_display(view)
+    if phase_head:
+        return f"{phase_head}｜{event}"
+    return event
 
 
 def _slim_daily_sentence(view: dict[str, Any], raw: dict[str, Any]) -> str:
@@ -1129,11 +1204,12 @@ def _slim_daily_sentence(view: dict[str, Any], raw: dict[str, Any]) -> str:
     lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
     if failed:
         ref = _slim_failed_anchor_ref(view, raw)
+        ref_tail = f"｜{ref}" if ref else ""
         if "SOS" in lit:
-            return f"SOS 强｜旧底已废｜{ref}"
+            return f"Phase A 失效 · 破后强势｜本波 SOS 强{ref_tail}"
         if "LPS" in lit:
-            return f"LPS 修复｜旧底已废｜{ref}"
-        return f"Phase A failed｜旧底已废｜{ref}｜待新寻底"
+            return f"Phase A 失效｜本波 LPS 修复{ref_tail}"
+        return f"Phase A 失效｜须重新寻底{ref_tail}"
     wave = _slim_daily_wave_short(view, raw)
     full_range = _slim_range_phrase(view, raw)
     range_head = _slim_range_head(view, raw)
@@ -1210,10 +1286,10 @@ def _slim_weekly_story_lines(view: dict[str, Any], raw: dict[str, Any]) -> dict[
         missing = next((code for code in ACCUM_CHAIN if code not in lit), "")
         better = f"补 {missing}（{_cn(missing)}）并站稳" if missing else "吸筹链保持完整并延续"
         watch = f"盯 {missing}（{_cn(missing)}）" if missing else "盯回踩是否守住"
-    worse = "失守雏形下沿，雏形作废" if "雏形" in range_head else "结构继续转弱则保持观察"
+    worse = "失守雏形下沿，雏形不成立" if "雏形" in range_head else "结构继续转弱则保持观察"
     lo, _hi = _phase_a_bounds(raw)
     if lo is not None and ("雏形" in range_head or "箱体" in range_head):
-        worse = f"失守 {_fmt_price(lo)} 一带，结构作废"
+        worse = f"失守 {_fmt_price(lo)} 一带，结构不成立"
     return {"now": now, "better": better, "worse": worse, "watch": watch}
 
 
@@ -1223,20 +1299,20 @@ def _slim_daily_story_lines(view: dict[str, Any], raw: dict[str, Any]) -> dict[s
     if failed:
         if "SOS" in lit:
             return {
-                "now": "SOS 强但旧底已废，灯为事实并列",
+                "now": "Phase A 失效 · 破后强势｜本波 SOS 强",
                 "better": "回踩不破并继续站稳 SOS（强势信号）区域",
                 "worse": "SOS 熄火或继续破位则保持无箱观察",
                 "watch": "盯 SOS（强势信号）后回踩是否站稳",
             }
         if "LPS" in lit:
             return {
-                "now": "LPS 修复但旧底已废，灯为事实并列",
+                "now": "Phase A 失效｜本波 LPS 修复",
                 "better": "修复延续并补出 SOS（强势信号）",
-                "worse": "修复失败则重新寻底",
+                "worse": "修复失败则须重新寻底",
                 "watch": "盯 LPS（最后支撑点）修复是否守住",
             }
         return {
-            "now": "旧底已废，本波没有新强势灯",
+            "now": "Phase A 失效｜须重新寻底",
             "better": "重新寻底后出现新 SC（卖力高潮）",
             "worse": "继续破位则保持无箱观察",
             "watch": "盯新 SC（卖力高潮）",
@@ -1256,10 +1332,10 @@ def _slim_daily_story_lines(view: dict[str, Any], raw: dict[str, Any]) -> dict[s
 
 def _oneline_compress(view: dict[str, Any], raw: dict[str, Any]) -> str:
     """一句话：阶段（phase_label）必带，避免详析阶段黑洞（W-D10）。"""
-    phase = str(view.get("phase_label") or view.get("phase") or "").strip()
+    phase = _panel_fail_copy(str(view.get("phase_label") or view.get("phase") or "").strip())
     if phase in ("none", "None"):
         phase = "无明确阶段"
-    summary = str(view.get("summary_oneline") or "").strip()
+    summary = _panel_fail_copy(str(view.get("summary_oneline") or "").strip())
     if summary:
         if len(summary) > 40:
             summary = summary[:38] + "…"
@@ -1295,9 +1371,9 @@ def _story_block(
     now_parts = [chain_plain or "威：吸筹链未成型", f"日线{d_bias}", f"周线背景{w_bias}"]
     now = "｜".join(now_parts)
 
-    # 若变好
+    # 若变好（failed 与默认 B 同源：Phase A 失效｜须重新寻底）
     if daily_failed:
-        better = "Phase A 已失效，先观察是否重新寻底并形成新的 SC（卖力高潮）"
+        better = "Phase A 失效｜须重新寻底；观察是否出现新的 SC（卖力高潮）"
     elif miss:
         miss_cn = _cn(miss)
         better = f"若出现 {miss}（{miss_cn}）且站稳，链可推进"
@@ -1451,13 +1527,14 @@ def render_wyckoff_card(plan: dict[str, Any]) -> str:
     weekly = plan.get("weekly_view") if isinstance(plan.get("weekly_view"), dict) else {}
     daily_raw = _as_raw(plan.get("daily_raw"))
 
-    phase = str(daily.get("phase_label") or daily.get("phase") or "未知")
+    # 面板可见串做失败→失效映射（骨架不变；core fail_reason 不动）
+    phase = _panel_fail_copy(str(daily.get("phase_label") or daily.get("phase") or "未知"))
     bias = _BIAS_CN.get(str(daily.get("bias") or "neutral"), "中性")
-    chain = _display_chain_plain(plan.get("chain_plain"), daily_raw, daily)
-    events = _events_line(daily, plan.get("event_line"))
+    chain = _panel_fail_copy(_display_chain_plain(plan.get("chain_plain"), daily_raw, daily))
+    events = _panel_fail_copy(_events_line(daily, plan.get("event_line")))
     tr_line = _fmt_tr(daily.get("tr") if isinstance(daily.get("tr"), dict) else None)
-    invalid = str(daily.get("invalidation_hint") or "暂无明确失效价")
-    oneline = str(daily.get("summary_oneline") or "无摘要")
+    invalid = _panel_fail_copy(str(daily.get("invalidation_hint") or "暂无明确失效价"))
+    oneline = _panel_fail_copy(str(daily.get("summary_oneline") or "无摘要"))
 
     lines = [
         f"威科夫 — {name}（{code}）" if code else f"威科夫 — {name}",
@@ -1474,7 +1551,7 @@ def render_wyckoff_card(plan: dict[str, Any]) -> str:
         ]
     )
 
-    w_phase = str(weekly.get("phase_label") or weekly.get("phase") or "").strip()
+    w_phase = _panel_fail_copy(str(weekly.get("phase_label") or weekly.get("phase") or "").strip())
     if w_phase and w_phase not in ("none", "未知"):
         w_bias = _BIAS_CN.get(str(weekly.get("bias") or "neutral"), "中性")
         lines.append(f"🧭 中线阶段：{w_phase}｜偏向 {w_bias}")
@@ -1640,7 +1717,9 @@ def render_wyckoff_detail(plan: dict[str, Any]) -> str:
     weekly_view = _as_view(plan.get("weekly_view"))
     daily_raw = _as_raw(plan.get("daily_raw"))
     weekly_raw = _as_raw(plan.get("weekly_raw"))
-    chain_plain = _display_chain_plain(plan.get("chain_plain"), daily_raw, daily_view)
+    chain_plain = _panel_fail_copy(
+        _display_chain_plain(plan.get("chain_plain"), daily_raw, daily_view)
+    )
 
     d_bias = _BIAS_CN.get(str(daily_view.get("bias") or "neutral"), "中性")
     w_bias = _BIAS_CN.get(str(weekly_view.get("bias") or "neutral"), "中性")
@@ -1651,7 +1730,7 @@ def render_wyckoff_detail(plan: dict[str, Any]) -> str:
     w_meas = _measure_allowed(weekly_view, weekly_raw) if weekly_view else False
     meas_label = "已给出" if (d_meas or w_meas) else "均未达 L3"
 
-    change = str(plan.get("change_line") or "首次记录，暂无对比").strip()
+    change = _panel_fail_copy(str(plan.get("change_line") or "首次记录，暂无对比").strip())
 
     pool_line = _pool_advice(
         daily_view=daily_view,
