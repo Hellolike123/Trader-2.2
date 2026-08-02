@@ -1020,17 +1020,25 @@ def format_chanlun_short_light(
     d = int(info["direction"] or 0)
     dir_label = "看涨" if d > 0 else ("看跌" if d < 0 else "中性")
 
-    parts: list[str] = [str(info["type_short"] or "暂无信号")]
+    # 展示分层（O-T 可选）：类一/类二短名旁标观察；不改 type_raw / fusion 计分。
+    type_short = str(info["type_short"] or "暂无信号")
+    type_raw = str(info.get("type_raw") or "")
+    if type_raw.startswith(("类一", "类二")) and "（观察）" not in type_short:
+        type_short = f"{type_short}（观察）"
+
+    parts: list[str] = [type_short]
     note = str(info.get("note") or "").strip()
     # 类型已含「背驰」时 note 不再重复背驰词
     if note:
         if note not in parts[0] and not (note in ("底背驰", "顶背驰") and note in parts[0]):
             # 一买 的 note 是 底背驰 → 要挂上
-            if parts[0] in (
+            _point_shorts = (
                 "一买", "一卖", "二买", "三买", "二卖", "三卖",
                 "类二买", "类二卖", "类一买", "类一卖",
-            ) or info["status"] == "point":
-                if note != parts[0]:
+            )
+            _base_short = parts[0].replace("（观察）", "")
+            if _base_short in _point_shorts or info["status"] == "point":
+                if note != parts[0] and note != _base_short:
                     parts.append(note)
             elif info["status"] == "trend" and note:
                 parts.append(note)

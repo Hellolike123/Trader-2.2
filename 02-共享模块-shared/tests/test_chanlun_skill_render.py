@@ -111,6 +111,51 @@ def test_buy_sell_points_only_come_from_engine_arrays(up_view):
     with_point["chanlun"]["buy_points"] = [{"type": "一类买", "price": 10.25}]
     point_text = render_chanlun_card(_plan(build_chanlun_view(with_point)))
     assert "买点：一类买 10.25" in point_text
+    assert "（观察）" not in point_text.split("买点：", 1)[1].split("\n", 1)[0]
+
+
+def test_ot5_observe_tier_like_points_marked():
+    """O-T5 / M-O1：类一/类二可见面须标（观察）。"""
+    like2 = _engine_result(["up", "down", "up"])
+    like2["chanlun"]["buy_points"] = [{"type": "类二买", "price": 346.16}]
+    like2["chanlun"]["sell_points"] = [{"type": "类一卖", "price": 350.0}]
+    text = render_chanlun_card(_plan(build_chanlun_view(like2)))
+    assert "买点：类二买（观察） 346.16" in text
+    assert "卖点：类一卖（观察） 350.00" in text
+    for forbidden in ("宜买", "可执行", "可低吸", "该买了", "接近一买"):
+        assert forbidden not in text
+
+    soft1 = _engine_result(["up", "down", "up"])
+    soft1["chanlun"]["buy_points"] = [
+        {"type": "类一买", "price": 10.5},
+        {"type": "类二买", "price": 11.0},
+    ]
+    multi = render_chanlun_card(_plan(build_chanlun_view(soft1)))
+    assert "类一买（观察） 10.50" in multi
+    assert "类二买（观察） 11.00" in multi
+
+
+def test_ot5_formal_points_not_marked_observe():
+    """O-T5 / M-O2：正式一类/二类/三类不得误标（观察）。"""
+    formal = _engine_result(["up", "down", "up"])
+    formal["chanlun"]["buy_points"] = [
+        {"type": "一类买", "price": 10.25},
+        {"type": "二类买", "price": 10.50},
+        {"type": "三类买", "price": 10.75},
+    ]
+    formal["chanlun"]["sell_points"] = [
+        {"type": "一类卖", "price": 12.0},
+        {"type": "二类卖", "price": 12.5},
+        {"type": "三类卖", "price": 13.0},
+    ]
+    text = render_chanlun_card(_plan(build_chanlun_view(formal)))
+    buy_line = next(line for line in text.splitlines() if "买点：" in line)
+    sell_line = next(line for line in text.splitlines() if "卖点：" in line)
+    assert "（观察）" not in buy_line
+    assert "（观察）" not in sell_line
+    assert "一类买 10.25" in buy_line
+    assert "二类买 10.50" in buy_line
+    assert "三类买 10.75" in buy_line
 
 
 def test_build_plan_uses_shared_snapshot_and_both_engines(monkeypatch):
