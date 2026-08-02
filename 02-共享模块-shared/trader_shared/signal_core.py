@@ -7,6 +7,12 @@ from trader_shared.signal_contract import assert_valid_signal
 from trader_shared.signal_utils import normalize_signal_id
 from trader_shared.light_data import to_float
 
+try:
+    from trader_shared.config import FUSION_OVERRIDE_ENABLED, FUSION_CONFIDENCE_THRESHOLD
+except Exception:
+    FUSION_OVERRIDE_ENABLED = False
+    FUSION_CONFIDENCE_THRESHOLD = 0.6
+
 DATA_STATUS_MAP = {
     "complete": "full",
     "partial": "partial",
@@ -375,16 +381,22 @@ def decision_persist_fields(report: dict[str, Any] | None) -> dict[str, Any]:
 def build_signal(r: dict[str, Any]) -> dict[str, Any]:
     signal_type, direction, action, confidence = signal_state(r)
 
+    # fusion action remap 仅对照路径：须显式 FUSION_OVERRIDE_ENABLED（默认 false）
+    # 与 decision_core 同闸：enabled ∧ confidence > FUSION_CONFIDENCE_THRESHOLD
     fusion_override = False
     fusion = r.get("fusion")
-    if isinstance(fusion, dict):
+    if FUSION_OVERRIDE_ENABLED and isinstance(fusion, dict):
         fc = fusion.get("confidence", 0)
+        try:
+            fc = float(fc)
+        except (TypeError, ValueError):
+            fc = 0.0
         sd = fusion.get("signals_detail", {})
         has_signal = isinstance(sd, dict) and any(
             isinstance(v, dict) and v.get("direction") != 0
             for v in sd.values()
         )
-        if fc > 0.4 and has_signal:
+        if fc > FUSION_CONFIDENCE_THRESHOLD and has_signal:
             mapped = _map_fusion_to_signal(fusion.get("action", ""))
             if mapped is not None:
                 ft, fd, fa = mapped
