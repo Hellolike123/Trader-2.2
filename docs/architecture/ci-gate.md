@@ -88,7 +88,7 @@ bash scripts/run-gate-tests.sh
 3. **`test_contract.py` 等契约债不在门禁内**：勿盲目纳入导致永久红。
 4. **耗时**：当前门禁为数秒级（视机器而定）；若变重，再考虑「仅跑改动相关」分层，不急着拆。
 5. **PYTHONPATH 顺序敏感**：`02-共享模块-shared` 必须在前。
-6. **Fusion 默认**：生产与测缺省 **cards**（`FUSION_FROM_CARDS` 未设）；`classic` 为强制回退。见 `analysis-strategy-boundaries.md` §5、`test_default_fusion_mode_is_cards`。
+6. **Fusion 默认**：生产与测缺省 **cards**（`FUSION_FROM_CARDS` 未设）；`classic`/`compare` **已退役**（设了也告警后仍 cards）。见 `analysis-strategy-boundaries.md` §5、`test_default_fusion_mode_is_cards`。
 
 ## 跳过门禁（谨慎）
 
