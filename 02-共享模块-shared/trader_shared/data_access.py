@@ -2,7 +2,7 @@
 
 提供面向上层脚本的极简 API，屏蔽底层 provider/Security 细节：
 
-    from trader_shared.data_access import get_daily, get_5m, get_weekly, get_quote
+    from trader_shared.data_access import get_daily, get_5m, get_weekly, get_quote, get_quotes
 
 上层只需传股票代码字符串，无需关心 Security 对象、provider 切换、
 缓存策略等内部细节。内部使用全局 provider（get_provider()）。
@@ -14,12 +14,16 @@
 """
 from __future__ import annotations
 
-from typing import Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Iterable
 
 from trader_shared._logging import get_logger
 from trader_shared.data_provider import get_provider
 
 _logger = get_logger(__name__)
+
+# 批量行情并行上限（handoff：4～8）
+_QUOTE_MAX_WORKERS = 6
 
 
 def _provider_and_sec(target: str):
@@ -130,6 +134,47 @@ def get_quote(target: str) -> dict[str, Any]:
     except Exception as e:
         _logger.warning("get_quote(%s) failed: %s", target, e)
         return {}
+
+
+def get_quotes(
+    targets: Iterable[str],
+    *,
+    max_workers: int = _QUOTE_MAX_WORKERS,
+) -> dict[str, dict[str, Any]]:
+    """批量获取实时快照（经 get_provider / get_quote）。
+
+    有界 ThreadPoolExecutor 并行；单票失败写入空 dict，不影响其余。
+
+    Args:
+        targets: 股票代码或名称可迭代
+        max_workers: 并行上限，默认 6（夹在 4～8）
+
+    Returns:
+        ``{target: quote_dict}``；失败票对应 ``{}``。
+    """
+    uniq: list[str] = []
+    seen: set[str] = set()
+    for raw in targets:
+        t = str(raw or "").strip()
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        uniq.append(t)
+    if not uniq:
+        return {}
+
+    workers = max(1, min(int(max_workers or _QUOTE_MAX_WORKERS), 8, len(uniq)))
+    results: dict[str, dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(get_quote, t): t for t in uniq}
+        for fut in as_completed(futures):
+            t = futures[fut]
+            try:
+                results[t] = fut.result() or {}
+            except Exception as e:
+                _logger.warning("get_quotes(%s) failed: %s", t, e)
+                results[t] = {}
+    return results
 
 
 # ── Tick 数据 ──────────────────────────────────────────────────────────────────

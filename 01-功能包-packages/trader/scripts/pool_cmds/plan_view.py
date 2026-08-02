@@ -298,29 +298,46 @@ def one_sentence(items: list[dict[str, Any]]) -> str:
     return f"明天只重点盯 {' 和 '.join(top)}；不触发不买，其他只盘后更新。"
 
 
-def _refresh_pool_prices(items: list[dict[str, Any]], pool: dict[str, Any]) -> list[dict[str, Any]]:
+def _refresh_pool_prices(
+    items: list[dict[str, Any]],
+    pool: dict[str, Any],
+    *,
+    quote_fn=None,
+) -> list[dict[str, Any]]:
     """批量拉取实时行情，刷新 pool item 的 current / change_pct，写回 pool.json。
 
+    经 data_access.get_quotes（get_provider）有界并行；禁止直调 light_data + HttpClient。
     在 list / rank / plan 等只读视图中调用，确保显示的现价不超过 1 分钟。
+
+    Args:
+        quote_fn: 可选注入 ``(targets: list[str]) -> dict[str, dict]``，便于无网测；
+                  默认走 ``data_access.get_quotes``。
     """
-    try:
-        from trader_shared.light_data import fetch_quote, HttpClient, resolve_security
-    except ImportError:
+    names = [str(item.get("name") or "").strip() for item in items]
+    names = [n for n in names if n]
+    if not names:
         return items
 
-    client = HttpClient()
+    fetch = quote_fn
+    if fetch is None:
+        try:
+            from trader_shared.data_access import get_quotes as fetch
+        except ImportError:
+            return items
+
+    try:
+        quotes = fetch(names) or {}
+    except Exception:
+        return items
+
     now_iso = datetime.now().isoformat()
     refreshed = 0
 
     for item in items:
-        name = item.get("name", "")
+        name = str(item.get("name") or "").strip()
         if not name:
             continue
-        try:
-            sec = resolve_security(name)
-            q = fetch_quote(sec, client)
-        except Exception:
-            continue
+        q = quotes.get(name) if isinstance(quotes, dict) else None
         if not q:
             continue
         current_val = to_float(q.get("current_price"))
