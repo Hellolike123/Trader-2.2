@@ -402,10 +402,10 @@ class UnifiedProvider:
         # tencent/mootdx 均走 light_data 前复权路径；缓存按 provider+adjust 分桶
         cache_provider = "mootdx" if self._backend == "mootdx" else "tencent"
         qfq_target = daily_bars_cache_target(
-            sec.code, provider=cache_provider, adjust="qfq"
+            sec.code, provider=cache_provider, adjust="qfq", market=sec.market
         )
         none_target = daily_bars_cache_target(
-            sec.code, provider=cache_provider, adjust="none"
+            sec.code, provider=cache_provider, adjust="none", market=sec.market
         )
         min_rows = min(20, max(days, 1))
         # light_data 在腾讯仅返回 day（未复权）时仍可能给出可用 bars；
@@ -880,7 +880,7 @@ class TushareProvider:
             return bars
 
         cache_target = daily_bars_cache_target(
-            sec.code, provider="tushare", adjust="none"
+            sec.code, provider="tushare", adjust="none", market=sec.market
         )
         # 日 K：当天第一次打网，同日复用；出口正序由 get_day_scoped_bars 统一保证
         return get_day_scoped_bars(

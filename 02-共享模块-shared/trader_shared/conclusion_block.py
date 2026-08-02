@@ -12,6 +12,38 @@ from trader_shared.mistery_gate import gate_action_to_execution_text
 # 看法行禁止四阶段词（B3C）
 _STAGE_WORDS_RE = re.compile(r"蓄势|主升|派发|衰退")
 
+# 笔尖离价兜底：现价相对末笔终点反向偏离超过该比例 → 禁止「拉升趋势中」假有
+# （华工对照：末笔延伸至高点后砸跌近半，反向笔尚未确认时浪型不得继续喊拉升）
+_STROKE_TIP_LEAVE_PCT = 0.15
+
+
+def _stroke_tip_left_against(strokes: list, current: float, leave_pct: float = _STROKE_TIP_LEAVE_PCT) -> str:
+    """现价是否已反向大幅离开末笔终点（反向笔尚未确认时的展示闸）。
+
+    返回：
+      "" — 未离开或无法判断
+      "up_left" — 末笔向上，现价明显低于笔终点（高点已离开）
+      "down_left" — 末笔向下，现价明显高于笔终点（低点已离开）
+    """
+    if not strokes or not current or current <= 0:
+        return ""
+    last = strokes[-1] if isinstance(strokes[-1], dict) else None
+    if not last:
+        return ""
+    try:
+        ep = float(last.get("end_price") or 0)
+    except (TypeError, ValueError):
+        return ""
+    if ep <= 0:
+        return ""
+    direction = str(last.get("direction") or "")
+    gap = (current - ep) / ep
+    if direction == "up" and gap <= -leave_pct:
+        return "up_left"
+    if direction == "down" and gap >= leave_pct:
+        return "down_left"
+    return ""
+
 
 def _build_wave_label(chanlun_daily: Any, current: float = 0.0) -> str:
     """从日线缠论数据推导浪型叙事，用于波段交易提示。
@@ -31,6 +63,7 @@ def _build_wave_label(chanlun_daily: Any, current: float = 0.0) -> str:
     sell_points = chan.get("sell_points") if isinstance(chan.get("sell_points"), list) else []
     divergence = chan.get("divergence") if isinstance(chan.get("divergence"), dict) else {}
     merged_zones = chan.get("merged_zones") if isinstance(chan.get("merged_zones"), list) else []
+    tip_left = _stroke_tip_left_against(strokes, float(current or 0))
 
     # ── 段数不足（<2）：优先用 trend_label / structure / 笔级叙事 ──
     # 禁止「笔数不足」误报（有笔无线段）；禁止「线段不足/无法判断」——段少也要给可执行立场。
@@ -46,6 +79,11 @@ def _build_wave_label(chanlun_daily: Any, current: float = 0.0) -> str:
         _sig = _signal_overlay(buy_points, sell_points, divergence)
 
         def _thin_struct_label() -> str:
+            # 笔尖已反向离开：禁止再用拉升/回调「趋势中」假叙事（C-D4 展示兜底）
+            if tip_left == "up_left":
+                return "高点已离开·向下未成笔"
+            if tip_left == "down_left":
+                return "低点已离开·向上未成笔"
             if trend_label == "拉升段":
                 return "拉升遇阻" if has_sell else "拉升趋势中"
             if trend_label == "回调段":
@@ -96,7 +134,11 @@ def _build_wave_label(chanlun_daily: Any, current: float = 0.0) -> str:
     # ── 缠论走势分类输出 ──
     parts: list[str] = []
 
-    if trend_label == "拉升段":
+    if tip_left == "up_left":
+        parts.append("高点已离开·向下未成笔")
+    elif tip_left == "down_left":
+        parts.append("低点已离开·向上未成笔")
+    elif trend_label == "拉升段":
         if up_count >= 3:
             parts.append("趋势延续 · 笔力递增")
         elif up_count >= 1 and down_count >= 1:

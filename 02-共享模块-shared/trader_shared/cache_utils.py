@@ -100,16 +100,24 @@ def daily_bars_cache_target(
     *,
     provider: str,
     adjust: str,
+    market: str | None = None,
 ) -> str:
-    """日 K 缓存 target：``{provider}/{adjust}/{code}``。
+    """日 K 缓存 target：``{provider}/{adjust}/{code}`` 或 ``…/{code}_{market}``。
 
     未复权（tushare daily）与前复权（tencent/akshare qfq）必须分桶，
     禁止共用裸 ``{code}.json`` 互相覆盖。
+
+    **市场分桶**：``000001.SH``（上证指数）与 ``000001.SZ``（平安银行）不得共键；
+    传入 ``market`` 时后缀 ``_{market}``（C-D1d 对照实锤）。
     """
+    code_seg = _safe_cache_seg(code)
+    m = str(market or "").strip().upper()
+    if m:
+        code_seg = f"{code_seg}_{_safe_cache_seg(m)}"
     return (
         f"{_safe_cache_seg(provider)}/"
         f"{_safe_cache_seg(adjust, default='none')}/"
-        f"{_safe_cache_seg(code)}"
+        f"{code_seg}"
     )
 
 
