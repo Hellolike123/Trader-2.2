@@ -99,3 +99,7 @@
 
 一次性已合入手递在 [`done/`](./done/)。链文案 / follow-up / range-diff / accuracy 等历史见该目录；母法源内用 `done/…` 相对路径或「见 done/…」指过去。  
 例：`done/wyckoff-failed-chain-copy-handoff.md`、`done/range-diff-fixes-handoff.md`、`done/chanlun-cd-followup-handoff.md`、`done/wyckoff-phase-accuracy-handoff-2026-07-31.md`。
+
+### 已知差异指针
+
+见 [`known-gaps.md`](./known-gaps.md)：**当前无未修代码差**；取舍（背驰 multi / W-DIFF-7 ST）见该页。
