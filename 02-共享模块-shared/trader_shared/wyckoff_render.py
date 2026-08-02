@@ -614,6 +614,31 @@ def _slim_change_line(change: str | None) -> str | None:
     return "；".join(parts) if parts else None
 
 
+def _slim_next_label(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    lit = set(_slim_lit_codes(view, raw, weekly=False))
+    for code in ACCUM_CHAIN:
+        if code not in lit:
+            return f"{code}（{_cn(code)}）"
+    return "回踩确认／延续"
+
+
+def _slim_chain_token(view: dict[str, Any], raw: dict[str, Any], *, failed: bool) -> str:
+    """推演「现在」用的短链 token（非完整 chain_plain）。"""
+    if failed:
+        lit = _slim_lit_codes(view, raw, weekly=False)
+        if lit:
+            return f"{'→'.join(lit)}（Phase A 已失效）"
+        return "Phase A 已失效"
+    lit = _slim_lit_codes(view, raw, weekly=False)
+    if not lit:
+        return "吸筹链未成型"
+    miss = first_missing_accum(lit)
+    chain = "→".join(lit)
+    if miss:
+        return f"{chain}，待{miss}"
+    return chain
+
+
 def _slim_watch_lines(
     *,
     daily_view: dict[str, Any],
@@ -622,22 +647,81 @@ def _slim_watch_lines(
     weekly_raw: dict[str, Any],
 ) -> list[str]:
     daily_failed = is_phase_a_failed(daily_raw) or is_phase_a_failed(daily_view)
-
-    def _next_label(view: dict[str, Any], raw: dict[str, Any]) -> str:
-        lit = set(_slim_lit_codes(view, raw, weekly=False))
-        for code in ACCUM_CHAIN:
-            if code not in lit:
-                return f"{code}（{_cn(code)}）"
-        return "回踩确认／延续"
-
     if daily_failed:
-        weekly_next = _next_label(weekly_view, weekly_raw) if weekly_view else "周线主灯"
+        weekly_next = (
+            _slim_next_label(weekly_view, weekly_raw) if weekly_view else "周线主灯"
+        )
         return [f"日线等新 SC；周线看能否出 {weekly_next} 确认结构"]
-    daily_next = _next_label(daily_view, daily_raw)
+    daily_next = _slim_next_label(daily_view, daily_raw)
     if weekly_view:
-        weekly_next = _next_label(weekly_view, weekly_raw)
+        weekly_next = _slim_next_label(weekly_view, weekly_raw)
         return [f"日线盯 {daily_next}；周线盯 {weekly_next}"]
     return [f"日线盯 {daily_next}；周线数据不足"]
+
+
+def _slim_story_lines(
+    *,
+    daily_view: dict[str, Any],
+    weekly_view: dict[str, Any],
+    daily_raw: dict[str, Any],
+    weekly_raw: dict[str, Any],
+) -> list[str]:
+    """B 卡短推演：现在 / 若变好 / 若变坏 / 盯（每项一行）。"""
+    daily_failed = is_phase_a_failed(daily_raw) or is_phase_a_failed(daily_view)
+    weekly_failed = (
+        is_phase_a_failed(weekly_raw) or is_phase_a_failed(weekly_view)
+        if weekly_view
+        else False
+    )
+    d_now = _slim_chain_token(daily_view, daily_raw, failed=daily_failed)
+    if weekly_view:
+        w_now = _slim_chain_token(weekly_view, weekly_raw, failed=weekly_failed)
+        now = f"日线 {d_now}｜周线 {w_now}"
+    else:
+        now = f"日线 {d_now}｜周线数据不足"
+
+    if daily_failed:
+        better = "日线重新寻底并出现新 SC（卖力高潮）"
+        if weekly_view and not weekly_failed:
+            w_next = _slim_next_label(weekly_view, weekly_raw)
+            better += f"；周线出 {w_next} 确认雏形"
+    else:
+        d_next = _slim_next_label(daily_view, daily_raw)
+        better = f"日线出现 {d_next} 且站稳"
+        if weekly_view and not weekly_failed:
+            w_next = _slim_next_label(weekly_view, weekly_raw)
+            better += f"；周线跟上 {w_next}"
+
+    if daily_failed or _box_mode(daily_view, daily_raw) == "none":
+        worse = "日线继续破位走弱则旧链彻底作废"
+    else:
+        worse = _invalidation_phrase(daily_view, daily_raw) or "若日线结构破坏则链失效"
+        if worse.startswith("失效："):
+            worse = worse[len("失效：") :]
+    if weekly_view and not weekly_failed:
+        mode = _box_mode(weekly_view, weekly_raw)
+        if mode in ("proto", "box"):
+            lo, _hi = _phase_a_bounds(weekly_raw)
+            if lo is None:
+                lo = (weekly_view.get("tr") or {}).get("lower") if isinstance(weekly_view.get("tr"), dict) else None
+            if lo is not None:
+                worse += f"；周线失守 {_fmt_price(lo)} 一带则雏形作废"
+
+    watch = _slim_watch_lines(
+        daily_view=daily_view,
+        weekly_view=weekly_view,
+        daily_raw=daily_raw,
+        weekly_raw=weekly_raw,
+    )
+    watch_s = watch[0] if watch else "继续观察结构"
+
+    return [
+        f"现在：{now}",
+        f"若变好：{better}",
+        f"若变坏：{worse}",
+        f"⭐ 盯：{watch_s}",
+        "本卡不下单；出手/分道看 trader",
+    ]
 
 
 def _pool_advice(
@@ -943,9 +1027,10 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
             title,
             "现价 —｜周中性·无主灯｜日中性·无主灯｜暂不建议入池（数据不足）",
             "",
-            "⭐ 盯",
-            f"  ⚠ {plan['error']}",
-            "  本卡不下单；出手/分道看 trader",
+            "🔮 推演",
+            f"现在：⚠ {plan['error']}",
+            "⭐ 盯：数据不足，仅现价",
+            "本卡不下单；出手/分道看 trader",
         ]
         return "\n".join(lines)
 
@@ -991,15 +1076,14 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
     if change:
         lines.extend(["", "🔔 变化", f"  {change}"])
 
-    lines.extend(["", "⭐ 盯"])
-    for watch in _slim_watch_lines(
+    lines.extend(["", "🔮 推演"])
+    for story in _slim_story_lines(
         daily_view=daily_view,
         weekly_view=weekly_view,
         daily_raw=daily_raw,
         weekly_raw=weekly_raw,
     ):
-        lines.append(f"  {watch}")
-    lines.append("  本卡不下单；出手/分道看 trader")
+        lines.append(story)
 
     text = "\n".join(lines)
     for bad in _FORBIDDEN_BUY_WORDS:

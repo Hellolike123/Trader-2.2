@@ -290,19 +290,36 @@ def test_main_exits_0_when_card_ok(monkeypatch, capsys, tmp_path):
 
 
 def test_sb1_default_slim_skeleton_no_long_blocks():
-    """S-B1/S-B4/S-B13：默认 B 骨架；旧长块不出现。"""
+    """S-B1/S-B4/S-B13/S-B17：默认 B 骨架含短推演；旧长块不出现。"""
     text = render_wyckoff_slim(_sample_plan())
     assert text.startswith("威科夫 — 测试股（600000）｜日+周")
     assert "现价 10.50｜周" in text
     assert "🧭 中线" in text
     assert "⚡ 短线" in text
-    assert "⭐ 盯" in text
+    assert "🔮 推演" in text
+    assert "现在：" in text
+    assert "若变好：" in text
+    assert "若变坏：" in text
+    assert "⭐ 盯：" in text
     assert "本卡不下单；出手/分道看 trader" in text
     assert "威科夫详析 —" not in text
     assert "📊 现况" not in text
     assert "🔮 故事链" not in text
     assert "💬 综述" not in text
     assert "说明：本卡不下单；买卖看 trader 门禁" not in text
+
+
+def test_sb17_failed_slim_story_no_healthy_advance():
+    """S-B17：短推演保留；failed 不得健康还差/链可推进。"""
+    text = render_wyckoff_slim(_failed_phase_a_plan())
+    story = text.split("🔮 推演", 1)[1]
+    assert "现在：" in story
+    assert "若变好：" in story
+    assert "若变坏：" in story
+    assert "⭐ 盯：" in story
+    assert "重新寻底" in story or "新 SC" in story
+    assert "还差" not in story
+    assert "链可推进" not in story
 
 
 def test_sb1_cli_default_uses_slim(monkeypatch, capsys, tmp_path):
@@ -366,7 +383,7 @@ def test_sb6_sb7_slim_lights_vertical_and_one_next_watch():
     text = render_wyckoff_slim(_sample_plan())
     assert "● SC｜● AR" not in text
     assert "● SC / ● AR" not in text
-    short_block = text.split("⚡ 短线", 1)[1].split("⭐ 盯", 1)[0]
+    short_block = text.split("⚡ 短线", 1)[1].split("🔮 推演", 1)[0]
     lamp_lines = [ln for ln in short_block.splitlines() if re.match(r"\s*[●○]\s", ln)]
     assert lamp_lines
     for ln in lamp_lines:
@@ -380,7 +397,7 @@ def test_sb6_sb7_slim_lights_vertical_and_one_next_watch():
 def test_sb9_failed_slim_resets_next_watch_without_healthy_gap():
     """S-B9/S-B10：failed 日线下一盯重新寻底/新 SC，不写健康推进。"""
     text = render_wyckoff_slim(_failed_phase_a_plan())
-    short_block = text.split("⚡ 短线", 1)[1].split("⭐ 盯", 1)[0]
+    short_block = text.split("⚡ 短线", 1)[1].split("🔮 推演", 1)[0]
     assert "Phase A 已失效" in short_block
     assert "无箱" in short_block
     assert "● SC（卖力高潮）9.50" in short_block
@@ -393,7 +410,7 @@ def test_sb9_failed_slim_resets_next_watch_without_healthy_gap():
 def test_sb11_l0_slim_does_not_show_percentile_box_numbers():
     """S-B11：L0 不展示分位上下沿当箱体/雏形。"""
     text = render_wyckoff_slim(_l0_percentile_plan())
-    mid_short = text.split("🧭 中线", 1)[1].split("⭐ 盯", 1)[0]
+    mid_short = text.split("🧭 中线", 1)[1].split("🔮 推演", 1)[0]
     for forbidden in ("41.23", "58.77", "40.00", "60.00"):
         assert forbidden not in mid_short
     assert "无箱｜未达 L3" in mid_short
