@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Fusion 置信度映射（中性模块）。
 
-从 classic_mappers 软抽，供 cards / classic re-export 共用。
-禁止 analysis 经此再依赖 fusion_classic_mappers。
+供 cards 路径与 fusion_core 懒导出共用。
+classic mappers 已退役（见 trader_shared/_deprecated/）；禁止生产树再依赖。
 """
 from __future__ import annotations
 

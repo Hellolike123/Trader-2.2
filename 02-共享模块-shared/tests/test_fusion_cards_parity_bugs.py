@@ -4,6 +4,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -15,7 +17,7 @@ from trader_shared.analysis.fusion_card_signals import (  # noqa: E402
     momentum_card_to_fusion_signal,
     vpf_card_to_fusion_signal,
 )
-from trader_shared.fusion_core import _fusion_input_mode, _momentum_to_signal, merge_decisions  # noqa: E402
+from trader_shared.fusion_core import _fusion_input_mode, merge_decisions  # noqa: E402
 from trader_shared.strategy_match import build_match_context, match_strategies  # noqa: E402
 
 
@@ -33,9 +35,6 @@ def test_i1_momentum_card_production_shape_bullish():
     assert card["direction"] == 1
     assert card["confidence"] > 0.3
     assert card["raw_available"] is True
-    classic = _momentum_to_signal(raw)
-    assert card["direction"] == classic["direction"]
-    assert abs(card["confidence"] - classic["confidence"]) < 0.05
 
     sig = momentum_card_to_fusion_signal(card)
     assert sig["direction"] == 1
@@ -87,9 +86,11 @@ def test_default_fusion_mode_is_cards(monkeypatch):
     assert _fusion_input_mode() == "cards"
 
 
-def test_fusion_mode_classic_explicit(monkeypatch):
+def test_fusion_mode_classic_explicit_still_cards(monkeypatch):
+    """C5：显式 classic env → 仍 cards + DeprecationWarning。"""
     monkeypatch.setenv("FUSION_FROM_CARDS", "classic")
-    assert _fusion_input_mode() == "classic"
+    with pytest.warns(DeprecationWarning, match="retired"):
+        assert _fusion_input_mode() == "cards"
 
 
 def test_i4_like2_not_buy2():

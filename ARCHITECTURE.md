@@ -44,6 +44,7 @@ Fusion **仅仪表**（`product_role=instrument`）；新开铁律：
 - 2026-07：`report_pipeline/` 分包；t0/review/wyckoff 引擎下沉（包内 shim）  
 - 2026-08：阶段字段纪律 · holdings/`trader_paths` · fusion 仪表化 · execution_caps · A1 早卡晚并  
 - 2026-08-02：cards 失败=`cards_failed`（禁静默 classic）· `fusion_confidence` 中性模块 · 池价 `get_quotes`  
+- 2026-08-02：classic/compare **已退役**；mappers → `_deprecated/`；`fusion_input_path` 仅 `cards`/`cards_failed` 
 
 ---
 
@@ -130,8 +131,8 @@ SSOT：`stage_fields.py` · BUSINESS §4.0 · AGENTS「阶段三字段」。
 | `strategy/match.py` + `strategy/packs/` | 六闸；entry 须 `executable=True`（文案「可扳机」） |
 | `mistery_gate` / `chan_discipline` | 纪律只收紧 → `merge_discipline` |
 | `decision_view.py` | 出手真相 + `apply_execution_caps` |
-| `fusion_core.py` | 三席加权仪表；默认 cards；失败→`cards_failed` 中性（禁静默 classic） |
-| `fusion_confidence.py` | 置信度 U 型映射中性模块（cards/classic 共用；勿经 classic_mappers 再依赖） |
+| `fusion_core.py` | 三席加权仪表；一律 cards；失败→`cards_failed` 中性（classic/compare 已退役） |
+| `fusion_confidence.py` | 置信度 U 型映射中性模块（cards 共用；勿经 classic_mappers） |
 
 ### 5.4 报告流水线
 
@@ -190,7 +191,7 @@ holdings.resolve_cost_price  ← 水位/持仓态
 ```
 
 融合三席（仪表）：缠论 · 动量 · **VPF**（日线威科夫已退出加权）。  
-`fusion_input_path`：`cards` \| `cards_failed` \| `classic` \| `classic_via_cards`（见 BUSINESS §2.7）。
+`fusion_input_path`：`cards` \| `cards_failed`（见 BUSINESS §2.7；classic/compare 已退役）。
 
 ---
 

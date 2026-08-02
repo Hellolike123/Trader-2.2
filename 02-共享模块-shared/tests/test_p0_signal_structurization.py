@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / "02-共享模块-shared"))
 sys.path.insert(0, str(ROOT / "01-功能包-packages" / "trader" / "scripts"))
 
 from trader_shared import fusion_core, signal_schema, vpf_core
+from trader_shared._deprecated.fusion_classic_mappers import _chan_to_signal
 from trader_shared.signal_schema import (
     SignalTier,
     chan_is_strong_bear,
@@ -130,7 +131,7 @@ def _chan_raw(buy=None, sell=None, div_top=False, div_bottom=False, trend=None):
     (_chan_raw(), SignalTier.NEUTRAL),
 ])
 def test_chan_to_signal_tier_and_parity(raw, expected_tier):
-    sig = fusion_core._chan_to_signal(raw)
+    sig = _chan_to_signal(raw)
     assert sig.get("signal_tier") == expected_tier
     # 关键: 新 tier 布尔 == 旧 reason 关键词布尔
     new_bull = chan_is_strong_bull(sig.get("signal_tier"))
@@ -144,10 +145,10 @@ def test_chan_priority_tier():
     # 同时有一类买 + 一类卖 → 卖点赢 (SELL_1)
     raw = _chan_raw(buy={"type": "一类买", "signal_id": "b"},
                     sell={"type": "一类卖", "signal_id": "s"})
-    assert fusion_core._chan_to_signal(raw).get("signal_tier") == SignalTier.CHAN_SELL_1
+    assert _chan_to_signal(raw).get("signal_tier") == SignalTier.CHAN_SELL_1
     # 一类买 + 底背驰 → 一类买赢 (BUY_1)
     raw = _chan_raw(buy={"type": "一类买", "signal_id": "b"}, div_bottom=True)
-    assert fusion_core._chan_to_signal(raw).get("signal_tier") == SignalTier.CHAN_BUY_1
+    assert _chan_to_signal(raw).get("signal_tier") == SignalTier.CHAN_BUY_1
 
 
 # ───────────────────────── 3. vpf 分支矩阵 ─────────────────────────
@@ -258,7 +259,7 @@ def test_merge_decisions_real_pipeline_smoke():
 
     # 端到端等价: 用与 merge_decisions 相同的入口重建 chan/vpf 信号,
     # 断言其内部强信号布尔量 == 旧 reason 关键词逻辑
-    chan_sig = fusion_core._chan_to_signal(chan_raw)
+    chan_sig = _chan_to_signal(chan_raw)
     vpf_sig = vpf_core.build_vpf_signal(
         vpf_in.get("volume_warning"), vpf_in.get("fund_features"))
     assert chan_is_strong_bull(chan_sig.get("signal_tier")) == _old_strong_bullish_chan(chan_sig)

@@ -1,7 +1,6 @@
 """Arch C：fusion 从 analysis_cards 取三席。"""
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -67,7 +66,7 @@ def test_merge_decisions_cards_path(monkeypatch):
             "fund_quality": "missing",
         },
     }
-    # classic 输入故意给空结构，cards 路径应仍能产出
+    # raw 输入故意给空结构，cards 路径应仍能产出
     out = merge_decisions(
         chan_result={"chanlun": {"buy_points": [], "sell_points": [], "divergence": {}, "trend_label": ""}},
         momentum_result={"momentum": {"score": 50, "direction": "neutral"}},
@@ -80,58 +79,56 @@ def test_merge_decisions_cards_path(monkeypatch):
     assert out["signals_detail"]["chan"]["direction"] == 1
 
 
-def test_merge_decisions_classic_path(monkeypatch):
+def test_merge_decisions_classic_env_still_cards(monkeypatch):
+    """A1/C5：设 classic env 仍走 cards 族，并发 DeprecationWarning。"""
     monkeypatch.setenv("FUSION_FROM_CARDS", "classic")
-    out = merge_decisions(
-        chan_result={
-            "chanlun": {
-                "buy_points": [{"type": "一类买", "price": 10, "confidence": 3}],
-                "sell_points": [],
-                "divergence": {"bottom_divergence": True},
-                "trend_label": "上涨",
-            }
+    cards = {
+        "chan": {
+            "type_short": "一买",
+            "type_raw": "一类买",
+            "direction": 1,
+            "summary_line": "一买",
+            "raw_available": True,
+            "same_level": True,
         },
-        momentum_result={"momentum": {"score": 60, "direction": "bullish"}},
-        regime="正常",
-        analysis_cards={
-            "chan": {"type_short": "一卖", "direction": -1, "raw_available": True},  # 若误用卡会看空
+        "momentum": {"direction": 1, "confidence": 0.5, "reason": "动量偏多", "raw_available": True},
+        "vpf": {
+            "direction": 0,
+            "confidence": 0.2,
+            "reason": "中性",
+            "raw_available": True,
+            "fund_quality": "missing",
         },
-        fusion_from_cards="classic",
-    )
-    # classic 已收敛为 raw→卡→card_signals（classic_via_cards）；仍须忽略错误预产卡
-    assert out.get("fusion_input_path") in ("classic", "classic_via_cards")
+    }
+    with pytest.warns(DeprecationWarning, match="retired"):
+        out = merge_decisions(
+            chan_result={
+                "chanlun": {
+                    "buy_points": [{"type": "一类买", "price": 10, "confidence": 3}],
+                    "sell_points": [],
+                    "divergence": {"bottom_divergence": True},
+                    "trend_label": "上涨",
+                }
+            },
+            momentum_result={"momentum": {"score": 60, "direction": "bullish"}},
+            regime="正常",
+            analysis_cards=cards,
+            fusion_from_cards="classic",
+        )
+    assert out.get("fusion_input_path") in ("cards", "cards_failed")
     assert out["signals_detail"]["chan"]["direction"] == 1
 
 
 def test_merge_decisions_cards_fail_closed_no_classic(monkeypatch):
     """A1：默认/cards 下 _three_signals_via_cards→None → 中性占位，禁止静默 classic。"""
     monkeypatch.setenv("FUSION_FROM_CARDS", "cards")
-    classic_calls: list[str] = []
 
     def _boom(*_a, **_k):
         return None
 
-    def _spy_chan(chan_result):
-        classic_calls.append("chan")
-        from trader_shared.fusion_classic_mappers import _chan_to_signal as _real
-        return _real(chan_result)
-
-    def _spy_mom(momentum_result):
-        classic_calls.append("momentum")
-        from trader_shared.fusion_classic_mappers import _momentum_to_signal as _real
-        return _real(momentum_result)
-
     monkeypatch.setattr(
         "trader_shared.fusion_core._three_signals_via_cards",
         _boom,
-    )
-    monkeypatch.setattr(
-        "trader_shared.fusion_classic_mappers._chan_to_signal",
-        _spy_chan,
-    )
-    monkeypatch.setattr(
-        "trader_shared.fusion_classic_mappers._momentum_to_signal",
-        _spy_mom,
     )
 
     out = merge_decisions(
@@ -148,7 +145,7 @@ def test_merge_decisions_cards_fail_closed_no_classic(monkeypatch):
         fusion_from_cards="cards",
     )
     assert out.get("fusion_input_path") == "cards_failed"
-    assert classic_calls == []
+    assert "fusion_compare" not in out
     for key in ("chan", "momentum", "vpf"):
         sig = out["signals_detail"][key]
         assert sig["direction"] == 0
@@ -156,21 +153,21 @@ def test_merge_decisions_cards_fail_closed_no_classic(monkeypatch):
         assert "cards" in str(sig.get("reason") or "") and "失败" in str(sig.get("reason") or "")
 
 
-def test_merge_compare_attaches_fusion_compare(monkeypatch):
+def test_merge_compare_env_still_cards_no_fusion_compare(monkeypatch):
+    """C5：compare 已退役 → 仍 cards，无 fusion_compare，发 DeprecationWarning。"""
     monkeypatch.setenv("FUSION_FROM_CARDS", "compare")
     cards = {
         "chan": {"type_short": "一买", "direction": 1, "raw_available": True, "summary_line": "一买", "type_raw": "一类买"},
         "momentum": {"direction": 0, "confidence": 0.2, "reason": "中性", "raw_available": True},
         "vpf": {"direction": 0, "confidence": 0.2, "reason": "中性", "raw_available": True},
     }
-    out = merge_decisions(
-        chan_result={"chanlun": {"buy_points": [], "sell_points": [], "divergence": {}, "trend_label": "盘整"}},
-        momentum_result={"momentum": {"score": 50, "direction": "neutral"}},
-        regime="正常",
-        analysis_cards=cards,
-        fusion_from_cards="compare",
-    )
-    assert out.get("fusion_input_path") == "cards"
-    assert "fusion_compare" in out
-    assert "classic" in out["fusion_compare"]
-    assert "cards" in out["fusion_compare"]
+    with pytest.warns(DeprecationWarning, match="retired"):
+        out = merge_decisions(
+            chan_result={"chanlun": {"buy_points": [], "sell_points": [], "divergence": {}, "trend_label": "盘整"}},
+            momentum_result={"momentum": {"score": 50, "direction": "neutral"}},
+            regime="正常",
+            analysis_cards=cards,
+            fusion_from_cards="compare",
+        )
+    assert out.get("fusion_input_path") in ("cards", "cards_failed")
+    assert "fusion_compare" not in out

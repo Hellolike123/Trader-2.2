@@ -1,6 +1,6 @@
 # 退役 classic 模式 / mappers — Agent Handoff
 
-> **状态**: mother_law（实现中）· 2026-08-02  
+> **状态**: write_done（待查 Agent）· 2026-08-02  
 > **基线**: `cursor/arch-cleanup-complete-1c6b`（#53）· 分支 `cursor/retire-classic-fusion-1c6b`  
 > **拍板**: 用户明确要求做「删 classic 模式/mappers」。  
 > **双 Agent**: 写落地 / 查对照。

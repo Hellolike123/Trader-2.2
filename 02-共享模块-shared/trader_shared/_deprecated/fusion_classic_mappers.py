@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Classic fusion mappers（已 deprecated，仅 compare / 单测 / cards 兼容）。
+"""Classic fusion mappers — ARCHIVED（已退役，不在生产热路径）。
 
-生产三席语义以 analysis/fusion_card_signals.py 为准。
+仅供历史单测 / 考古；生产三席语义以 analysis/fusion_card_signals.py 为准。
+法源：docs/plans/retire-classic-fusion-handoff.md
 """
 from __future__ import annotations
 
