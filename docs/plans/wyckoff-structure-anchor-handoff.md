@@ -200,3 +200,51 @@ python -m pytest \
 ```
 
 （若尚未建 `test_wyckoff_structure_anchor.py`，测例可暂放 maturity/core，但验收 ID 仍用 S-A\*。）
+
+---
+
+## 8. 满血续篇：Phase A 锚跨日小本本（用户 2026-08-02 确认做）
+
+> **人话**：算出来还有效的吸筹锚，记在本机；下次自动带上；破了就撕掉。  
+> **目的**：横盘超过冷启动 90/39 仍 Path A 钉住，无需调用方手传 `phase_a_range`。  
+> **与 §2 Path A 关系**：持久化 = 自动提供 alive 锚；破位收口 §3 仍负责清空。
+
+### 8.1 存储合同
+
+| 项 | 合同 |
+|----|------|
+| 路径 | `trader_paths` 新 key `wyckoff_phase_a_anchor` → `wyckoff_phase_a_anchor.json`（`TRADER_ROOT` 下） |
+| 键 | `"{symbol}|{daily\|weekly}"`（symbol 用引擎统一码；空 symbol 可不落盘） |
+| 值 | `sc_bar_idx`, `sc_low`, `ar_high`（可 null）, `status`∈{forming,established}, `sc_date`（SC 棒 date 字符串，防缺棒错位）, `ts`（ISO，可选）, `fail_bar_idx`（失败时可不存整条） |
+| 读写点 | `wyckoff_analysis`：**开头** load → 若 alive 则作 `phase_a_range` 输入；**结尾** forming/established → save；failed/none → **删除**该键 |
+| 与 `wyckoff_phase.json` | **分开**；禁止混进 phase「只进不退」状态机 |
+| `use_persisted_phase=False` | **仍应**读写本小本本（锚记忆 ≠ 阶段黏性）；若需单测禁用，另加显式参 `use_persisted_phase_a_anchor=True` 默认开，测里可关 |
+
+### 8.2 校验与清空
+
+1. load 后：用 `sc_date` 在 bars 里定位；对不上 → 丢弃旧锚，走冷启动。  
+2. 本次 `status=failed` 或 §3 破位 → 删键。  
+3. load 的 status 已是 failed/none → 不喂 Path A。  
+4. 日线 / 周线键分离，禁止串周期。
+
+### 8.3 可改（本续篇追加）
+
+- `trader_paths.py`（注册 key）  
+- `wyckoff_core.py`（load/save/delete 挂钩 analysis）  
+- 可选小模块 `wyckoff_phase_a_store.py`（读写纯函数，便于测）  
+- `tests/test_wyckoff_structure_anchor.py`（或新 `test_wyckoff_phase_a_persist.py`）  
+- 本文 §8 / 验收 S-P\*  
+
+### 8.4 验收表（续）
+
+| ID | 必须 | 测 |
+|----|------|-----|
+| **S-P1** | 第一次冷启动认出 forming/established → 落盘有该 symbol\|daily/weekly | tmp_path + TRADER_ROOT |
+| **S-P2** | 第二次不传 phase_a_range：SC 逻辑上已在 CAP 外，仍 pinned 同一 sc_low/sc_date | 合成：先短序列落盘，再加长 bars 使 idx 超 CAP，靠小本本钉住 |
+| **S-P3** | 破位 failed → 盘上键删除；再跑不得健康雏形 | tmp_path |
+| **S-P4** | 日/周键不串；`sc_date` 对不上则丢弃走冷启动 | 单测 |
+
+### 8.5 四 Agent（本续篇）
+
+同 §6：Agent1 钉死 §8 细节 → Agent2 实现 S-P\* → Agent3 查 → Agent4 复审。  
+**禁止**：改 fusion/出手/分道；用小本本绕过破位收口；把锚写进 `wyckoff_phase.json`。
