@@ -128,10 +128,11 @@
 3. **中枢 ZG/ZD**：取段/笔 `high`/`low` 极值（`formulas.md` §4.1 / §9.1；已落地）。
 
 **已知未修差异**（诚实列表；勿装零差；详见 `docs/plans/known-gaps.md`）：
-- W-DIFF-7：深刺穿收回是否算 ST（产品裁决未定；本轮不改）
+- 当前无未修代码差
 
 **已声明取舍**（非未修 bug）：
 - 背驰展示可 multi；一类/历史一类扳机面积-only（`formulas.md` §5.1a / §6）
+- W-DIFF-7：深刺穿但收盘收回不算破位，未 failed 仍可走 ST（`w-diff7-st-pierce-decision-handoff.md` / structure-anchor §3.1）
 
 **约束**：
 - 日线威科夫**已退出**短线 fusion（第三席为 VPF）；日线结果不得写入中线定论
