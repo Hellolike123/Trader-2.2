@@ -10,7 +10,7 @@
 - Do not invent intraday order instructions beyond script-rendered T0 lines.
 - Do not write mi姐 / Mistery brand words in user-facing Markdown (internal field may still be `mistery_gate`).
 - Do not use R:R jargon like `2.1R` / `不足 1R`.
-- Do not put stage words (蓄势/主升/派发…) into 中线「看法」; stage only under `阶段：`.
+- Do not put stage words (蓄势/主升/派发…) into 中线「看法」; no independent `阶段：` / `看法：` lines — stage detail under `威科夫：`, bias under `定论：`.
 - Do not backfill 中线 威科夫/缠论 from daily experts; mid fields only (`*_midline`).
 - Do not hand-write a full report when `--output markdown` succeeds.
 
@@ -53,8 +53,8 @@ Matches `report_renderer/short_midline.py` (`render_short_midline`):
 1. Title: `分析报告 — {name}（{code}）｜短中线`
 2. Meta: 现价（含 MA20/MA250）；`综合动能 … ｜ {板块指数} ±x% ｜ {行业短名} ±x% ｜ 个股 ±x%`（不写正常/偏弱/跑赢）；量价行可选量比/换手/调整天数，ATR14（含复权口径）并入同行列；年线下方警告
 3. `🧭 中线`
-   - `阶段：` ← major_stage + 可选 `· 偏多/偏空（短因）`（B3C；**无**独立 `看法：` 行）
-   - optional `定论：` ← midline_verdict_note
+   - **无**独立 `阶段：` 行（`midline_stage` 字段供共振；细读见威科夫）
+   - optional `定论：` ← midline_verdict_note + 可选偏多/偏空短因（**无**独立 `看法：` 行）
    - `威科夫：` / `缠论：` ← View / `*_midline` only
    - optional `位置：` ← pivot_position_weekly
    - `关键价（中线）` 生命线 / 回踩区 / 压力 / 目标 ← `mid_key_prices`（周线引擎，无 🌟）

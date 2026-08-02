@@ -11,7 +11,7 @@
 | `major_stage` | str | 日线四阶段（门控/池；非面板阶段行） | 蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退 |
 | `short_term_momentum` | str | 短期动能（EXPMA） | 走强/修复/震荡/转弱 |
 | `stage` | str | **= short_term_momentum 别名** | 走强/修复/震荡/转弱 |
-| `midline_stage` | str | 周线威科夫短词（面板「阶段：」） | 吸筹/主升/派发/无阶段… |
+| `midline_stage` | str | 周线威科夫短词（共振字段；面板不单独成行） | 吸筹/主升/派发/无阶段… |
 | `stage_action` | str | 阶段操作建议 | 试探买/持有/减仓/不碰 |
 | `confidence` | int | 阶段置信度 0-100 | 65 |
 | `theory_status` | str | 体系结论 | 突破确认/等转强/低吸观察/暂不碰/防守观察 |

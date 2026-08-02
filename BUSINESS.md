@@ -276,7 +276,7 @@ Agent 展示层仍应：**不给买入建议**；文案对齐 fusion action / �
 
 | 字段 | 含义 | 词表 / 用途 |
 |------|------|-------------|
-| `midline_stage` / `conclusion.stage_line` | 周线威科夫短词 | 吸筹/主升/派发/无阶段… → **面板「阶段：」** |
+| `midline_stage` / `conclusion.stage_line` | 周线威科夫短词 | 吸筹/主升/派发/无阶段… → **共振背景岗 / 字段**；面板**不**再单独输出「阶段：」行（细读见 `威科夫：`） |
 | `major_stage` | 日线四阶段 | 蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退 → 门控/池软信号（**不**写面板阶段行） |
 | `short_term_momentum` | EXPMA 短期动能 | 走强/修复/震荡/转弱 |
 | `report["stage"]` | **兼容别名** | **= `short_term_momentum`**（池/旧读方）；禁止再写轻量 `determine_stage`；禁止映射成 `major_stage` |
@@ -319,9 +319,8 @@ Agent 展示层仍应：**不给买入建议**；文案对齐 fusion action / �
   ← meta 纯 D：不写正常/偏弱/跑赢；无单独「行业：」行；ATR 并入量价行（非独立行）；映射见 §3.4
 
 🧭 中线
-  阶段：{weekly_wyckoff_phase_short}  ← 仅周线威科夫短词（吸筹/主升/派发/…）；不足→无阶段；**禁止**日线 major_stage / 缠论矩阵冒充（§2.0）
-  定论：…                       ← 中线合成；禁止塞阶段词冒充看法
-  威科夫：{wyckoff_midline}     ← 中线状态岗：仅周线；结构「阶段 · [箱体] · 事件 · 含义」（箱体 lo-hi / 箱体未成形）
+  定论：…                       ← 中线合成；可附偏多/偏空短因；禁止独立「看法：」；字段 midline_stage 仍钉周线威科夫（不足→无阶段）
+  威科夫：{wyckoff_midline}     ← 中线状态岗：仅周线；结构「阶段 · [箱体] · 事件 · 含义」（箱体 lo-hi / 箱体未成形）；**无**独立「阶段：」行
   量度目标：上 x｜下 y（P&F，非出手）  ← 仅 tr_maturity=L3；无数/未达 L3 则省略
   缠论：{chanlun_midline}       ← 结构副读；周不足可 daily_fallback+「（日线）」；不定阶段
   位置：…

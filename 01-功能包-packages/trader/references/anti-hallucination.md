@@ -19,7 +19,7 @@
 | `major_stage` | assess_stage() | 日线四阶段：蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退（**非**面板「阶段：」） |
 | `short_term_momentum` | assess_stage() → momentum | EXPMA 动能：走强/修复/震荡/转弱 |
 | `stage` | = short_term_momentum 别名 | 兼容旧读方；禁止当成 major_stage |
-| `midline_stage` / `conclusion.stage_line` | 周线威科夫 | 面板「阶段：」短词；不足→无阶段 |
+| `midline_stage` / `conclusion.stage_line` | 周线威科夫 | 共振/字段短词（面板不单独「阶段：」行）；不足→无阶段 |
 | `momentum` | 同 short_term_momentum（内部） | 走强/修复/震荡/转弱 |
 | `fusion.weighted_score` | merge_decisions() | 融合加权分 -1~+1 |
 | `fusion.confidence` | merge_decisions() | 置信度 0~1 |

@@ -269,10 +269,11 @@ def test_m1_build_conclusion_stage_line_pins_wyckoff_not_major():
 
 
 def test_m1_renderer_does_not_fallback_to_major_stage():
-    """M1：空 stage_line 时面板阶段行不得回落日线 major_stage。"""
+    """M1：空 stage_line 时不得回落日线 major_stage；面板无「阶段：」行。"""
     from pathlib import Path
     import trader_shared.report_renderer.short_midline as sm
 
     src = Path(sm.__file__).read_text(encoding="utf-8")
     assert 'conclusion.get("stage_line") or major_stage' not in src
     assert "禁日线 major_stage 冒充" in src or 'conclusion.get("stage_line") or ""' in src
+    assert 'f"  阶段：' not in src and "阶段：{_stage_line}" not in src

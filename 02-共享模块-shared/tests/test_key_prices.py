@@ -227,10 +227,10 @@ class TestRenderShortMidline:
         assert "｜短中线" in md
         assert "🧭 中线" in md
         assert "⚡ 短线" in md
-        # 面板「阶段：」= 周线威科夫短词（不足→无阶段）；禁止日线 major_stage=蓄势偏强 冒充
-        assert "阶段：无阶段" in md
+        # 面板无独立「阶段：」行；字段仍为周线威科夫短词；禁日线 major_stage 冒充
+        assert "  阶段：" not in md
         assert "阶段：蓄势偏强" not in md
-        assert "阶段：无阶段 ·" in md  # 定论偏多/偏空附在阶段行
+        assert "定论：" in md and "偏空" in md  # 偏多/偏空短因并入定论
         assert "中线：蓄势" not in md
         assert "🎯 结论" not in md
         assert "威科夫" in md
