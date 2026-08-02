@@ -152,3 +152,30 @@ def test_momentum_and_vpf_card_shape():
     assert v["fund_direction"] == 1
     assert v["vp_direction"] == -1
     assert v["warning_type"] == "climactic"
+
+
+def test_p_l_failed_phase_label_sanitized_on_card():
+    """P-L1/P-L2/P-L4/M-L1：failed card 可见 phase_label/main 无「Phase A 失败」。"""
+    raw = {
+        "phase": "none",
+        "phase_label": "无明确阶段（Phase A 失败，破位未收回）",
+        "phase_a_status": "failed",
+        "phase_tr_gated": True,
+        "phase_tr_gate_reason": "phase_a_failed",
+        "sc_signal": True,
+        "sc_price": 10.0,
+        "timeframe": "daily",
+        "tr_maturity": "L0",
+        "box_display_mode": "none",
+        "measure_allowed": False,
+    }
+    card = build_wyckoff_card(raw, role="daily")
+    label = card["phase_label"]
+    assert label == "无明确阶段（Phase A 失效，破位未收回）"
+    assert "Phase A 失效" in label
+    for bad in ("Phase A失败", "Phase A 失败"):
+        assert bad not in label
+        assert bad not in str(card.get("main") or "")
+        assert bad not in str(card.get("note") or "")
+    assert "Phase A 失效" in str(card.get("main") or "")
+    assert_card_numeric_finite(card)
