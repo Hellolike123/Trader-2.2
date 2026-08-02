@@ -6,7 +6,13 @@ import re
 from datetime import datetime
 from typing import Any
 
-from trader_shared.report_renderer._helpers import _reformat_mid_line, _short_midline_enabled
+from trader_shared.report_renderer._helpers import (
+    _is_closed_stance,
+    _reformat_mid_line,
+    _rewrite_declutter_verdict_note,
+    _short_midline_enabled,
+    _soften_mid_key_entry_verbs,
+)
 from trader_shared.stage_fields import MIDLINE_STAGE_INSUFFICIENT
 
 # 行业短名：电气设备→电气；其余去常见后缀 / 别名
@@ -409,17 +415,36 @@ def render_short_midline(r: dict[str, Any]) -> str:
     _bias_suffix = f"{_bias_tag}（{_bias_short}）" if _bias_tag and _bias_short else (_bias_tag or "")
 
     # 定论：威科夫中线 + 缠论中线 合成注记；可附偏多/偏空短因
+    # D-R1：偏空/框破坏 +「双源无明确方向」拧成单一句，禁止「无方向 · 偏空」硬叠
     _midline_note = str(
         conclusion.get("midline_verdict_note")
         or (r.get("midline_verdict") or {}).get("note")
         or ""
     ).strip()
-    if _midline_note:
+    _weekly_frame = r.get("weekly_frame")
+    if not _weekly_frame and isinstance(r.get("discipline"), dict):
+        _weekly_frame = r["discipline"].get("weekly_frame")
+    _rewritten_note = _rewrite_declutter_verdict_note(
+        _midline_note,
+        bias_tag=_bias_tag,
+        bias_short=_bias_short,
+        mid=_mid,
+        weekly_frame=str(_weekly_frame) if _weekly_frame is not None else None,
+        stage_line=_stage_line,
+    )
+    _verdict_shown = ""
+    if _rewritten_note:
+        _verdict_shown = _rewritten_note
+        lines.append(f"  定论：{_rewritten_note}")
+    elif _midline_note:
         if _bias_suffix and _bias_tag not in _midline_note and _bias_short not in _midline_note:
-            lines.append(f"  定论：{_midline_note} · {_bias_suffix}")
+            _verdict_shown = f"{_midline_note} · {_bias_suffix}"
+            lines.append(f"  定论：{_verdict_shown}")
         else:
+            _verdict_shown = _midline_note
             lines.append(f"  定论：{_midline_note}")
     elif _bias_suffix:
+        _verdict_shown = _bias_suffix
         lines.append(f"  定论：{_bias_suffix}")
 
     # 仓位衔接：结构看好但仓位为0时，加桥接说明
@@ -670,6 +695,22 @@ def render_short_midline(r: dict[str, Any]) -> str:
     lines.append("")
     lines.append("  关键价（中线）")
 
+    # 纪律/关闭态：中线关键价与短线区共用（D-R2…D-R6）
+    _disc = r.get("discipline") if isinstance(r.get("discipline"), dict) else {}
+    _allow_entry_early = bool(_disc.get("allow_new_entry", True))
+    _closed_stance = _is_closed_stance(
+        allow_new_entry=_allow_entry_early,
+        execution=str(execution or ""),
+    )
+    _frame_break_mid = (
+        str(_weekly_frame or "") == "破坏"
+        or "框破坏" in _mid
+        or "战略减" in _mid
+    )
+    _soften_mid_entry = bool(
+        _closed_stance or _bias_tag == "偏空" or _frame_break_mid
+    )
+
     # 收集中线价位，按价格排序
     _mid_items: list[tuple[float, str]] = []
     _mid_fields = [
@@ -679,6 +720,8 @@ def render_short_midline(r: dict[str, Any]) -> str:
     ]
     for _key, _name in _mid_fields:
         _line = _reformat_mid_line(mid_key_prices.get(_key) or "")
+        if _soften_mid_entry and _line:
+            _line = _soften_mid_key_entry_verbs(_line)
         if not _line:
             continue
         _m = re.match(r"([\d.]+)", _line)
@@ -737,7 +780,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
     lines.append("")
     lines.append("⚡ 短线")
 
-    _disc = r.get("discipline") if isinstance(r.get("discipline"), dict) else {}
+    # _disc 已在中线关键价前解析
     _cap_t = _disc.get("suggested_pct_cap")
     # 全绿才保留试探类；否则强制观察语义
     _all_green = False
@@ -1056,27 +1099,38 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _stop_annotation = f"跌破亏 {_risk_chase:.1f}"
         _price_items.append((float(stop_sell), "止损", _stop_annotation))
 
+    _allow_entry = bool(_disc.get("allow_new_entry", True))
+    _closed_short = _is_closed_stance(
+        allow_new_entry=_allow_entry,
+        execution=str(execution or ""),
+    )
     if buy_low and buy_high:
         _src_suffix = f" ← {_sup_label}" if _sup_label else ""
-        _allow_entry = bool(_disc.get("allow_new_entry", True))
         if not _allow_entry:
-            _buy_annotation = "等确认"
+            # D-R2：未放行 → 计划买区 + 未放行语义；禁止「回踩买」
+            _buy_label = f"计划买区 {float(buy_low):.2f}-{float(buy_high):.2f}"
+            _buy_annotation = "未放行，仅标记"
         else:
+            _buy_label = f"低吸区 {float(buy_low):.2f}-{float(buy_high):.2f}"
             _buy_annotation = "回踩买"
             if _risk_buy > 0 and _rew_buy > 0:
                 _buy_annotation += f"，亏{_risk_buy:.1f} 赚{_rew_buy:.1f} → 盈亏比 {_ratio_buy:.1f}:1 {_rr_buy_verdict}"
-        _price_items.append((float(buy_low) - 0.001, f"低吸区 {float(buy_low):.2f}-{float(buy_high):.2f}", f"{_buy_annotation}{_src_suffix}"))
+        _price_items.append((float(buy_low) - 0.001, _buy_label, f"{_buy_annotation}{_src_suffix}"))
     elif buy_ref:
         _src_suffix = f" ← {_sup_label}" if _sup_label else ""
         _price_items.append((float(buy_ref), "买点区", f"分批建仓{_src_suffix}"))
 
     # MA5 支撑（如果在止损和现价之间）
+    # D-R3：关闭态 → 观察（禁止「加仓试探」）
     _ma5 = _ma_float("ma5")
     if _ma5 and stop_sell and _ma5 > float(stop_sell) and _ma5 < current:
-        _price_items.append((_ma5, "MA5 支撑", "加仓试探"))
+        _ma5_act = "观察" if _closed_short else "加仓试探"
+        _price_items.append((_ma5, "MA5 支撑", _ma5_act))
 
+    # D-R4：无仓现价注解「不追」；有仓仍可用持有类措辞
     if current > 0:
-        _price_items.append((current, "现价", "持有，不追"))
+        _px_act = "持有，不追" if r.get("has_position") else "不追"
+        _price_items.append((current, "现价", _px_act))
 
     # VWAP 支撑/压力
     _vwap = r.get("vwap")
@@ -1130,21 +1184,14 @@ def render_short_midline(r: dict[str, Any]) -> str:
     lines.append("")
 
     # ── T0（日内算法：低吸到高抛的日内差价 + 盈亏比）──
+    # D-R5：无仓+关闭态一律不启用；禁止再打「日内 T0：…低吸…高抛」
     _t0_has_pos = bool(r.get("has_position"))
-    _t0_no_new = any(k in execution for k in ("不买", "不追", "不新开", "观望"))
+    _t0_no_new = _is_closed_stance(
+        allow_new_entry=_allow_entry,
+        execution=str(execution or ""),
+    )
     if not _t0_has_pos and _t0_no_new:
-        _bl = float(buy_low or 0)
-        _bh = float(buy_high or 0)
-        _sl = float(short_low or 0)
-        if _bl > 0 and _sl > 0:
-            _tm = round((_bh + _sl) / 2, 2)
-            _tr = max(0.0, _bl - float(stop_sell or 0))
-            _tw = max(0.0, _sl - _bl)
-            _tr_ratio = _tw / _tr if _tr > 0 else 0
-            _tv = "✓" if _tr_ratio >= 2.0 else ("✗" if _tr_ratio < 1.0 else "△")
-            lines.append(f"  日内 T0：{_bl:.2f} 低吸 ｜ {_tm:.2f} 观察 ｜ {_sl:.2f} 高抛（差价{_tw:.2f}元，盈亏比{_tr_ratio:.1f}:1 {_tv}）")
-        else:
-            lines.append("  T0：无底仓，不启用（与出手一致，不新开）")
+        lines.append("  T0：无底仓，不启用（与出手一致，不新开）")
     else:
         t0_ref = r.get("t0_ref") or {}
         _t0_buy = float(t0_ref.get("low_buy") or buy_low or r.get("support") or 0)
@@ -1256,19 +1303,27 @@ def render_short_midline(r: dict[str, Any]) -> str:
         lines.append("✅ 亮点：暂无，先看纪律与风险")
 
     # 风险：止损价 + 短线 MA20 压力（不用中线远压力） + 未来待解禁
+    # D-R7：禁止再贴与定论相同的「中线偏空（短因）」整段；关闭态优先现价不宜追+止损
     _risk_parts = []
     if _chan_bear_hl and _chan_risk_label:
         _risk_parts.append(f"缠论{_chan_risk_label}")
+    _bias_risk_blob = f"中线{_bias_suffix}" if _bias_suffix else "中线偏空"
+    _bias_already_in_verdict = bool(
+        _verdict_shown
+        and (
+            (_bias_suffix and _bias_suffix in _verdict_shown)
+            or ("偏空" in _verdict_shown and _bias_tag == "偏空")
+            or ("框破坏" in _verdict_shown)
+        )
+    )
     if _stage_bear_hl:
         if _stage_real and any(k in _stage_line for k in ("转弱", "派发", "衰退", "主跌")):
             _risk_parts.append(f"中线阶段{_stage_line}")
-        elif _bias_suffix:
-            _risk_parts.append(f"中线{_bias_suffix}")
-        else:
-            _risk_parts.append("中线偏空")
+        elif not _bias_already_in_verdict and not _closed_stance:
+            _risk_parts.append(_bias_risk_blob)
     elif _stage_real and any(k in _stage_line for k in ("转弱", "派发", "衰退")):
         _risk_parts.append(f"中线阶段{_stage_line}")
-    if "不追" in execution or "不买" in execution:
+    if "不追" in execution or "不买" in execution or _closed_stance:
         _risk_parts.append("现价不宜追")
         if stop_v > 0:
             _risk_parts.append(f"止损看 {stop_v:.2f}")

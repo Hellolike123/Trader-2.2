@@ -265,8 +265,13 @@ class TestRenderShortMidline:
                     k in line
                     for k in ("不新开", "不追", "不买", "观望", "等站稳", "等确认", "仓 ", "试探")
                 )
-        # 关键价区：报告用「低吸区/止盈区」表述（原「买点区」已改名）
-        assert "低吸区" in md or "止盈区" in md or "买点区" in md
+        # 关键价区：放行「低吸区」；未放行「计划买区」；或止盈区/买点区
+        assert (
+            "低吸区" in md
+            or "计划买区" in md
+            or "止盈区" in md
+            or "买点区" in md
+        )
         assert "无底仓" in md or "T0：" in md
         # render_short_midline 是短中线子区块，无完整报告顶部「MA20/MA250」摘要；
         # validate_trader 为完整报告设计，此处仅校验与本子区块相关的规则
