@@ -1815,7 +1815,8 @@ def render_wyckoff_rank(rows: list[dict[str, Any]], *, empty_hint: str | None = 
     for i, row in enumerate(rows, 1):
         name = str(row.get("name") or row.get("target") or "?")
         chain = str(row.get("chain_plain") or "威：吸筹链未成型")
-        phase = str(row.get("phase_label") or row.get("phase") or "—")
+        # A-R3：rank 面板 phase_label 与 view/card 同源 sanitize（禁「Phase A失败」）
+        phase = _panel_fail_copy(str(row.get("phase_label") or row.get("phase") or "—"))
         lines.append(f"{i}. {name}｜{chain}｜{phase}")
     lines.append("说明：排序仅看吸筹链进度；出手仍以 trader 分道与 decision_view 为准")
     return "\n".join(lines)

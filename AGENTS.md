@@ -119,6 +119,7 @@ A 股交易决策辅助系统。免费行情 + 缠论 / 威科夫 / 筹码 / ATR
 | `t0` | 盘中结构参考卡 + 盯盘 | `01-功能包-packages/t0/scripts/final_t0.py` |
 | `review` | 盘后复盘 + 仓位轮动 + 信号追踪 + 决策体检 | `01-功能包-packages/review/scripts/final_review.py` / `final_portfolio.py` / `final_tracker.py`（`checkup`） |
 | `wyckoff` | 威科夫结构卡 + 池内吸筹链排序 | `01-功能包-packages/wyckoff/scripts/final_wyckoff.py`（`--target` / `rank`） |
+| `chanlun` | 缠论结构学术卡（不下单；不覆盖周线威科夫阶段） | `01-功能包-packages/chanlun/scripts/final_chanlun.py --target` |
 
 运维（非 Skill）：`scripts/run_trader.py`、`scripts/t0_cron.py`、`scripts/wechat_monitor.py`。
 
@@ -134,6 +135,7 @@ A 股交易决策辅助系统。免费行情 + 缠论 / 威科夫 / 筹码 / ATR
 盘中结构参考 → python 01-功能包-packages/t0/scripts/final_t0.py --target <NAME> --monitor
 威科夫卡 → python 01-功能包-packages/wyckoff/scripts/final_wyckoff.py --target <NAME>
 威科夫池链 → python 01-功能包-packages/wyckoff/scripts/final_wyckoff.py rank
+缠论卡 → python 01-功能包-packages/chanlun/scripts/final_chanlun.py --target <NAME>
 盘后复盘 → python 01-功能包-packages/review/scripts/final_review.py --target <NAME>
 仓位轮动 → python 01-功能包-packages/review/scripts/final_portfolio.py --targets A B
 信号回溯 → python 01-功能包-packages/review/scripts/final_tracker.py --stock <NAME>
