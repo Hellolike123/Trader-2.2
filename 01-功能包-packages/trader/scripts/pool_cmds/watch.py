@@ -46,12 +46,11 @@ def cmd_watch(args: argparse.Namespace) -> int:
         scene = str(item.get("scene") or "")
         status = str(item.get("status") or "?")
 
-        # Try to get live quote
+        # Try to get live quote（经 data_access / provider，禁止自建 HttpClient）
         change_pct = 0.0
         try:
-            from trader_shared.light_data import fetch_quote, HttpClient, resolve_security
-            sec = resolve_security(name)
-            q = fetch_quote(sec, HttpClient())
+            from trader_shared.data_access import get_quote
+            q = get_quote(name)
             if q and to_float(q.get("current_price")):
                 current = to_float(q.get("current_price"))
                 change_pct = to_float(q.get("current_change_pct")) or 0.0
