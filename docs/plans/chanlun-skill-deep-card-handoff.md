@@ -233,13 +233,15 @@ python -m pytest 02-共享模块-shared/tests/test_chan_geometry.py \
 - [x] 未改 fusion / 威科夫中线定论 / 池分道  
 - [x] 相关 pytest（stall / resolve / tip-leave / BuildStrokes）绿  
 
-### 7.2 完整 C-D / 专项卡（**另开 follow-up**，不挡 P0 合入）
+### 7.2 完整 C-D / 专项卡（follow-up）
+
+手递：[`chanlun-cd-followup-handoff.md`](./chanlun-cd-followup-handoff.md)（Buy / Data / Skill 三路并行 + Check）。
 
 - [ ] C-D1a/b/c 不足字段与日周复权一致  
 - [ ] C-D2b 面板最终行保留「（日线）」  
 - [ ] C-D3a–d 禁 fusion 手补买卖点；透出引擎原类型/价  
 - [ ] C-D4a–c / C-D5 专项卡透出笔方向笔数  
-- [ ] Agent4 复审完整表
+- [ ] Agent-Check 复审完整表
 
 ---
 
