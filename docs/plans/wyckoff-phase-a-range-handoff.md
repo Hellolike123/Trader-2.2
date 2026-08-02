@@ -7,6 +7,13 @@
 > **后续门禁**: `established`（SC+AR）≠ 可写成熟「箱体」/可量度 → 见 `docs/plans/wyckoff-tr-maturity-l0l3-handoff.md`  
 > **读者**: 下一任实现 Agent（只读本文 + 法源 + 下列代码锚点即可动手）
 
+> **⚠️ 勘误 / 已被取代（2026-08-02）**  
+> SC **搜索宇宙**与结构钉住 / 破位收口的**现行法源**已迁至  
+> [`wyckoff-structure-anchor-handoff.md`](./wyckoff-structure-anchor-handoff.md)。  
+> 本文凡写「`WYCKOFF_CLIMAX_ANCHOR_BARS=15` = SC/AR 共用锚点扫描上限 / SC 唯一搜索窗」之处，**仅作 P1/P2 历史**；  
+> 新方案：未失效 Phase A 钉住 `[sc_bar_idx, 今]`；冷启动日 90 / 周 39；`CLIMAX=15` 仅 AR 等待默认种子与非 SC 短窗兼容别名。  
+> **勿按本文 §3.2 / §3.3「扫描窗=CLIMAX」实现新代码。** 下文正文不删，供追溯。
+
 ---
 
 ## 短线「威科夫：」（展示合同，2026-07-31）

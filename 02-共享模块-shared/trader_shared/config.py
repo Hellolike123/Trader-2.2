@@ -148,10 +148,13 @@ TREND_MA_LOOKBACK: int = 300  # 至少取 300 天数据才能算出可靠的 MA2
 # ---- Wyckoff constants ----
 # ⚠️ WYCKOFF_SPRING_RECLAIM_RATIO 每年年底需检查是否需要更新
 WYCKOFF_MIN_BARS: int = 15
-# SC/AR（及对称 BC/ARE）锚点搜索上限；仅搜索/超时，不定义 TR 周期
+# CLIMAX：现行语义 = AR 等待默认种子 / 非 SC 短事件 lookback 兼容别名（默认 15）。
+# 禁止再当「SC 唯一搜索宇宙」。SC 冷启动 CAP + 结构钉住 SSOT：
+#   docs/plans/wyckoff-structure-anchor-handoff.md §2.2
+# （Agent2 将新增 WYCKOFF_SC_COLD_START_BARS_DAILY=90 / _WEEKLY=39；_find_sc_anchor 读 CAP）
 WYCKOFF_CLIMAX_ANCHOR_BARS: int = 15
-# AR 搜索上沿（SC 后最多扫几根）；默认 = climax 锚点窗，env 可覆。
-# 旧实现用 anchor//2（约 7）致延迟 AR 易 forming；见 phase-a-handoff §6 #6。
+# AR 搜索上沿（SC 后最多扫几根）；默认数值沿用 CLIMAX=15，env 可覆。
+# 非法源 SC 搜索宇宙。旧实现用 anchor//2（约 7）致延迟 AR 易 forming；见 phase-a-handoff 历史。
 WYCKOFF_AR_MAX_BARS: int = int(os.environ.get("WYCKOFF_AR_MAX_BARS", str(WYCKOFF_CLIMAX_ANCHOR_BARS)))
 # P2-C AR 量能（原典偏「弱于 SC」）：
 # - 选棒始终钉 SC 后「首段」结构 AR（禁止跳到更晚弱量棒抬高 ar_high）
