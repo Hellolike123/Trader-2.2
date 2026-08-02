@@ -1,6 +1,7 @@
 # CI 门禁 Python 可移植默认值 handoff
 
-> **状态**: active（2026-08-02）  
+> **状态**: done（2026-08-02）  
+
 > **产品裁决**: 门禁脚本默认解释器不得绑死本机 Mac 绝对路径；云 / Linux / CI 无该路径时须能跑。  
 > **范围**: 只改 `scripts/run-gate-tests.sh` 的 Python 解析 + `docs/architecture/ci-gate.md` 说明；**不改**测试集合、不改业务引擎。
 
