@@ -278,6 +278,34 @@ def test_phase_a_box_bounds_prefers_seed_over_tr():
     }) == ""
 
 
+def test_w_diff1_forming_no_ar_high_rejects_tr_upper():
+    """W-DIFF-1 / M-R1：forming 无 ar_high 时禁止分位 tr_upper 冒充上沿。"""
+    from trader_shared.wyckoff_core import _phase_a_box_bounds, _phase_a_box_phrase
+
+    wyk = {
+        "phase_a_status": "forming",
+        "box_display_mode": "proto",
+        "tr_maturity": "L1",
+        "tr_upper": 92.9,
+        "tr_lower": 80.0,
+        "sc_low": 82.0,
+        "ar_high": None,
+        "phase_a_range": {
+            "status": "forming",
+            "sc_low": 82.0,
+            "ar_high": None,
+        },
+    }
+    lo, hi = _phase_a_box_bounds(wyk)
+    assert lo == 82.0
+    assert hi is None
+    phrase = _phase_a_box_phrase(wyk)
+    assert "上沿未出" in phrase
+    assert "92.9" not in phrase
+    assert "雏形 82.00-92.90" not in phrase
+    assert "（待 ST）" not in phrase
+
+
 def test_format_wyckoff_midline_light_event_without_phase():
     """有事件、无阶段时阶段位为「无」；事件 Code（中文）+ 短防误读。"""
     line = format_wyckoff_midline_light({
