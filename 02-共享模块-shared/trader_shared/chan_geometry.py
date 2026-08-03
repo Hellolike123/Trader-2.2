@@ -888,9 +888,12 @@ def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: boo
     # 收尾：如果最后一段至少有 min_strokes 笔，追加（run 已覆盖 strokes[seg_start:]）
     remaining = strokes[seg_start:]
     if len(remaining) >= min_strokes:
-        start_p, end_p, seg_hi, seg_lo = _segment_range(current_direction, remaining)
+        direction = _unfinished_segment_direction(
+            current_direction, remaining, prior_segments=len(segments)
+        )
+        start_p, end_p, seg_hi, seg_lo = _segment_range(direction, remaining)
         segments.append({
-            "direction": current_direction,
+            "direction": direction,
             "start_price": start_p,
             "end_price": end_p,
             "high": seg_hi,
@@ -901,6 +904,52 @@ def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: boo
         })
 
     return segments
+
+
+def _unfinished_segment_direction(
+    claimed: str,
+    remaining: list[dict],
+    *,
+    prior_segments: int,
+) -> str:
+    """未完成段方向纠偏（§3.5）。
+
+    特征序列未终结时，`current_direction` 可能一直停在首段推断方向。
+    实盘华工周线：首段判 down 后一路创新高至 187，整段仍输出
+    ``down 187→22``——与净走势拧句。仅当尚无已完成段（整段都是未完成）
+    且末笔已突破段首极值时，按净走势翻转展示方向。
+    已有完成段后的「形成中反向段」（如中际 1416→506）不翻转。
+    """
+    if prior_segments > 0 or not remaining or claimed not in ("up", "down"):
+        return claimed
+    first, last = remaining[0], remaining[-1]
+    try:
+        last_ep = float(last["end_price"])
+    except (TypeError, ValueError, KeyError):
+        return claimed
+    if claimed == "down" and last.get("direction") == "up":
+        try:
+            open_high = (
+                float(first["start_price"])
+                if first.get("direction") == "down"
+                else float(first["end_price"])
+            )
+        except (TypeError, ValueError, KeyError):
+            return claimed
+        if last_ep > open_high + 1e-9:
+            return "up"
+    if claimed == "up" and last.get("direction") == "down":
+        try:
+            open_low = (
+                float(first["start_price"])
+                if first.get("direction") == "up"
+                else float(first["end_price"])
+            )
+        except (TypeError, ValueError, KeyError):
+            return claimed
+        if last_ep < open_low - 1e-9:
+            return "down"
+    return claimed
 
 def _merge_zones(raw_zones: list[dict], gap_pct: float) -> list[dict]:
     """将重叠的滑动窗口中枢合并为 consolidated pivot。

@@ -7,7 +7,7 @@ for mod in ("trader_shared.chan_core", "light_data"):
     if mod in sys.modules:
         del sys.modules[mod]
 
-from trader_shared.chan_geometry import _segment_range
+from trader_shared.chan_geometry import _segment_range, _unfinished_segment_direction
 from trader_shared.chan_core import (
     handle_inclusion,
     find_fractions,
@@ -1695,9 +1695,12 @@ class TestBuildSegmentsFollowups:
 
         remaining = strokes[seg_start:]
         if len(remaining) >= min_strokes:
-            start_p, end_p, seg_high, seg_low = _segment_range(current_direction, remaining)
+            direction = _unfinished_segment_direction(
+                current_direction, remaining, prior_segments=len(segments)
+            )
+            start_p, end_p, seg_high, seg_low = _segment_range(direction, remaining)
             segments.append({
-                "direction": current_direction, "start_price": start_p, "end_price": end_p,
+                "direction": direction, "start_price": start_p, "end_price": end_p,
                 "high": seg_high, "low": seg_low,
                 "start_index": seg_start, "end_index": len(strokes) - 1,
                 "strokes_count": len(remaining),
@@ -1907,6 +1910,35 @@ class TestBuildSegmentsFollowups:
                 assert sg["low"] == lo
                 assert sg["start_price"] == sp
                 assert sg["end_price"] == ep
+
+
+    def test_unfinished_sole_segment_flips_when_net_up(self):
+        """华工周线形：唯一未完成段初判 down，末笔创新高 → 展示纠偏为 up。"""
+        strokes = [
+            {"direction": "down", "start_price": 46.39, "end_price": 28.86},
+            {"direction": "up", "start_price": 28.86, "end_price": 34.55},
+            {"direction": "down", "start_price": 34.55, "end_price": 25.82},
+            {"direction": "up", "start_price": 25.82, "end_price": 33.29},
+            {"direction": "down", "start_price": 33.29, "end_price": 22.96},
+            {"direction": "up", "start_price": 22.96, "end_price": 37.18},
+            {"direction": "down", "start_price": 37.18, "end_price": 27.3},
+            {"direction": "up", "start_price": 27.3, "end_price": 46.33},
+            {"direction": "down", "start_price": 46.33, "end_price": 37.44},
+            {"direction": "up", "start_price": 37.44, "end_price": 50.08},
+            {"direction": "down", "start_price": 50.08, "end_price": 32.33},
+            {"direction": "up", "start_price": 32.33, "end_price": 100.89},
+            {"direction": "down", "start_price": 100.89, "end_price": 67.28},
+            {"direction": "up", "start_price": 67.28, "end_price": 187.66},
+        ]
+        segs = build_segments(strokes, min_strokes=3)
+        assert len(segs) == 1
+        assert segs[0]["direction"] == "up"
+        assert segs[0]["end_price"] == segs[0]["high"]
+        assert float(segs[0]["end_price"]) >= 187.66 - 1e-6
+        assert not (
+            segs[0]["direction"] == "down"
+            and abs(float(segs[0]["start_price"]) - 187.66) < 1e-6
+        )
 
     def test_shared_pivot_stroke_excludes_far_extreme(self):
         """向下未完成段共用上一向上转折笔时，不得把该上笔起点旧低算进本段 end。"""
