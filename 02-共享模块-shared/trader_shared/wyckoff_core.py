@@ -796,17 +796,27 @@ def wyckoff_analysis(
     # B: 跨日持久化状态机 — 加载旧状态、过渡、存储
     # use_persisted_phase=False 时（如中线威科夫）跳过持久化，直接返回本次
     # K 线的即时推断，避免「只进不退」状态机掩盖当前周期的真实阶段。
+    # Phase A 破位失败：强制落下 none（S-A5），禁止 none→黏回健康「停止：SC+AR」。
     if use_persisted_phase:
+        _gate_reason = str(phase.get("phase_tr_gate_reason") or "")
+        _force_clear = _gate_reason == "phase_a_failed"
+        _detect_meta = {
+            "spring_premature": bool(phase.get("spring_premature")),
+            "upthrust_premature": bool(phase.get("upthrust_premature")),
+            "phase_tr_gated": bool(phase.get("phase_tr_gated", False)),
+            "phase_tr_gate_reason": _gate_reason,
+        }
         old_state = _load_phase_state(symbol, timeframe)
         new_phase_state = _transition_phase(
             old_state,
             phase["phase"],
             phase["phase_label"],
             phase.get("phase_confidence_delta", 0.0),
+            force_apply_none=_force_clear,
         )
         _save_phase_state(symbol, timeframe, new_phase_state)
-        # 用过渡后状态覆盖瞬时推断（phase 只进不退）
-        phase = new_phase_state
+        # 用过渡后状态覆盖瞬时推断；保留门控/孤立信号元数据（过渡态不含这些键）
+        phase = {**new_phase_state, **_detect_meta}
 
     # 原典专名灯（不进阶段机 / 不抬 L2/L3）：跳溪 + 止跌量
     jac = _detect_jump_across_creek(

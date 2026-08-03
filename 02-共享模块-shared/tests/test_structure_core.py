@@ -143,6 +143,17 @@ class TestAverageATRPct:
         assert result is not None
         assert result < 0.001
 
+    def test_window_is_exactly_period_not_period_plus_one(self):
+        """回退 ATR 窗 = period 根；前一根只作 prev_close，不进平均（对齐 SMA(TR,n)）。"""
+        period = 5
+        # 前一根 close=100；窗口内每根 H-L=1 且无跳空 → TR 全为 1
+        bars = [{"open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 1}]
+        for _ in range(period):
+            bars.append({"open": 100.0, "high": 101.0, "low": 100.0, "close": 100.0, "volume": 1})
+        result = average_atr_pct(bars, period=period)
+        assert result is not None
+        assert abs(result - (1.0 / 100.0)) < 1e-9
+
 
 # ── average_amplitude_pct ──────────────────────────────────────────
 

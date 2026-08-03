@@ -1185,7 +1185,7 @@ def _ohlc_float(v: Any) -> float | None:
 def _compute_atr_fields(bars: list[dict[str, Any]]) -> None:
     """对日线 bar 列表原地附加 TR / ATR14 / ATR7 / ATR_ratio 字段。
 
-    需要至少 8 根 bar 才能计算 atr7，15 根才能计算 atr14。
+    需要至少 7 根 bar 才能计算 atr7，14 根才能计算 atr14（SMA 预热：index >= period-1）。
     不足或 OHLC 缺失时字段为 None（与 indicator_math.calc_atr_series 预热语义一致）。
     下游请用 ``(atr14 or 0)`` / ``atr14 is not None``；勿把不足当成 ATR=0。
     """

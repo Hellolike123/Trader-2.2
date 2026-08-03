@@ -288,3 +288,38 @@ def test_g_k1_close_none_skips_breakdown_not_failed() -> None:
     assert failed is not None
     assert failed["phase_a_failed"] is True
     assert failed["fail_bar_idx"] == 1
+
+
+def test_s_a5_persisted_phase_clears_on_phase_a_failed(tmp_path, monkeypatch) -> None:
+    """S-A5 + 日线黏性：use_persisted_phase=True 时破位不得黏回健康阶段名。"""
+    from trader_shared.trader_paths import load_json
+    from trader_shared.wyckoff_phase import _save_phase_state
+
+    monkeypatch.setenv("TRADER_ROOT", str(tmp_path))
+    symbol = "600519.SH"
+    _save_phase_state(
+        symbol,
+        "daily",
+        {
+            "phase": "accumulation_a",
+            "phase_label": "停止：SC+AR",
+            "phase_confidence_delta": 0.1,
+            "first_seen": "accumulation_a",
+        },
+    )
+
+    bars = _breakdown_then_fake_st_bars()
+    result = wyckoff_analysis(bars, symbol=symbol, use_persisted_phase=True)
+
+    assert result["phase_a_status"] == "failed"
+    assert result["tr_maturity"] == "L0"
+    assert result["phase"] == "none"
+    assert result.get("phase_tr_gate_reason") == "phase_a_failed"
+    assert result.get("phase_tr_gated") is True
+    assert "停止：SC+AR" not in str(result.get("phase_label") or "")
+    assert "雏形" not in str(result.get("phase_label") or "")
+
+    stored = load_json("wyckoff_phase").get(f"{symbol}::daily") or {}
+    assert stored.get("phase") == "none"
+    assert "停止：SC+AR" not in str(stored.get("phase_label") or "")
+    assert (tmp_path / "wyckoff_phase.json").exists()

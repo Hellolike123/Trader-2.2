@@ -718,12 +718,15 @@ def _transition_phase(
     new_phase: str,
     new_phase_label: str,
     new_confidence_delta: float,
+    *,
+    force_apply_none: bool = False,
 ) -> dict[str, Any]:
     """状态机：phase 平滑过渡，允许反向翻转。
 
     规则：
       - 无旧状态 → 直接使用新 phase
-      - 新 phase 为 "none" → 维持旧状态（平滑，不抖动）
+      - 新 phase 为 "none" → 默认维持旧状态（平滑，不抖动）
+      - force_apply_none=True（Phase A 破位失败等）→ 必须落下 none，禁止黏回健康叙事
       - 同方向（同为积累或同为派发）→ 只升级不降级
       - 反方向（积累↔派发）→ 允许翻转（基于方向符号，不再限制白名单）
     """
@@ -740,8 +743,15 @@ def _transition_phase(
     new_order = _PHASE_ORDER.get(new_phase, 0)
     first_seen = old_phase_state.get("first_seen")
 
-    # 新 phase 无信号 → 保持旧状态
+    # 新 phase 无信号 → 默认保持旧状态；结构失败收口时强制落下 none（S-A5）
     if new_phase == "none":
+        if force_apply_none:
+            return {
+                "phase": "none",
+                "phase_label": new_phase_label,
+                "phase_confidence_delta": new_confidence_delta,
+                "first_seen": None,
+            }
         return {**old_phase_state, "phase_confidence_delta": 0.0}
 
     # 旧 phase 也是 "none" → 直接升级

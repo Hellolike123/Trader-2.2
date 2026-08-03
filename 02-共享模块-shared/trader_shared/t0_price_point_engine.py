@@ -1329,8 +1329,11 @@ def check_resonance(report_data, zones, state, ab_result=None):
 
 
 def _latest_atr(bars: list[dict], period: int = 14) -> float:
-    """取 bars 上 calc_atr_series 最后一个有效 ATR；不足则 0。"""
-    if not bars or len(bars) < period + 1:
+    """取 bars 上 calc_atr_series 最后一个有效 ATR；不足则 0。
+
+    SMA(TR, period) 在恰好 period 根时已有首值（index=period-1）；勿误卡 period+1。
+    """
+    if not bars or period <= 0 or len(bars) < period:
         return 0.0
     from trader_shared.indicator_math import calc_atr_series
 

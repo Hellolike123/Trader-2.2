@@ -179,3 +179,26 @@ def test_p_l_failed_phase_label_sanitized_on_card():
         assert bad not in str(card.get("note") or "")
     assert "Phase A 失效" in str(card.get("main") or "")
     assert_card_numeric_finite(card)
+
+
+def test_daily_wyckoff_card_rejects_weekly_fallback():
+    """G-K2 延伸：缺 wyckoff_daily 时不得用周线 report['wyckoff'] 冒充日卡。"""
+    from trader_shared.analysis_cards import ensure_report_analysis_cards
+
+    report = {
+        "symbol": "600519.SH",
+        "current": 100.0,
+        "wyckoff": {
+            "timeframe": "weekly",
+            "phase": "accumulation_b",
+            "phase_label": "周线吸筹（冒充探针）",
+            "spring_signal": True,
+            "spring_price": 90.0,
+        },
+    }
+    cards = ensure_report_analysis_cards(report)
+    daily = cards["wyckoff"]
+    assert daily["role"] == "daily"
+    assert daily.get("raw_available") is False
+    assert "周线吸筹" not in str(daily.get("summary_line") or "")
+    assert "周线吸筹" not in str(daily.get("phase_label") or "")

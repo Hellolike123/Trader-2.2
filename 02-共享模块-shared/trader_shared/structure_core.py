@@ -217,19 +217,20 @@ def average_atr_pct(bars: list[BarData], period: int | None = None) -> float | N
     ATR 使用 True Range = max(high-low, |high-prev_close|, |low-prev_close|)，
     比简单振幅 (high-low) 更能捕捉跳空缺口的影响。
     先算 ATR 绝对值，再除以最新 close，避免逐根归一化后再平均导致的偏差。
+    窗口严格 period 根；若有更早一根，用其 close 作首根 prev_close（对齐 SMA(TR,n)）。
     """
     period = period or STRUCTURE_WINDOW
+    if not bars or period <= 0:
+        return None
     tr_values: list[float] = []
     last_close: float | None = None
-    # P1 Fix: 当 len(bars) > period 时，首根 K 线的 prev_close 应取 bars[-period-1].close
-    # 原代码始终用 None 初始化为 prev_close，首根 K 线跳空缺口被漏算导致 ATR 低估。
-    preview = bars[-(period + 1):] if len(bars) > period else bars[-period:]
+    window = bars[-period:]
     prev_close: float | None = None
-    if len(bars) > period and len(preview) > period:
+    if len(bars) > period:
         first_prev = to_float(bars[-period - 1].get("close"))
         if first_prev is not None and first_prev > 0:
             prev_close = first_prev
-    for item in preview:
+    for item in window:
         high = to_float(item.get("high"))
         low = to_float(item.get("low"))
         close = to_float(item.get("close"))

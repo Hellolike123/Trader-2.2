@@ -395,11 +395,23 @@ def ensure_report_analysis_cards(report: dict[str, Any]) -> dict[str, Any]:
 
     try:
         if "wyckoff" not in cards or not isinstance(cards.get("wyckoff"), dict):
-            cards["wyckoff"] = build_wyckoff_card(
-                report.get("wyckoff_daily") or report.get("wyckoff"),
-                role="daily",
-                symbol=symbol,
-            )
+            # 法源 BUSINESS.md §2.0/§2.2：日卡只认日线；禁周线 wyckoff 冒充（对齐 short_midline）
+            _wd = report.get("wyckoff_daily")
+            _wd_ok = isinstance(_wd, dict) and bool(_wd)
+            if not _wd_ok:
+                _fb = report.get("wyckoff")
+                if isinstance(_fb, dict) and bool(_fb):
+                    _fb_tf = str(_fb.get("timeframe") or "").strip().lower()
+                    if _fb_tf not in ("weekly", "week", "w"):
+                        _wd = _fb
+                        _wd_ok = True
+                    else:
+                        _wd = None
+                        _wd_ok = False
+            if _wd_ok:
+                cards["wyckoff"] = build_wyckoff_card(_wd, role="daily", symbol=symbol)
+            else:
+                cards["wyckoff"] = _empty_card("wyckoff", "wyckoff_card_v1")
     except Exception:
         cards["wyckoff"] = _empty_card("wyckoff", "wyckoff_card_v1")
 

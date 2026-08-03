@@ -284,6 +284,27 @@ class TestT0AtrSsot:
         assert abs(atr - expected) < 1e-9
         assert atr > 0
 
+    def test_latest_atr_accepts_exactly_period_bars(self):
+        """BUSINESS §6.3：14 根即可出 ATR14；勿误要求 15 根。"""
+        from trader_shared.indicator_math import calc_atr_series
+        from trader_shared.t0_price_point_engine import _latest_atr
+
+        bars = []
+        price = 50.0
+        for i in range(14):
+            high = price + 1.0
+            low = price - 1.0
+            close = price + 0.1
+            bars.append({"open": price, "high": high, "low": low, "close": close, "volume": 1000})
+            price = close
+
+        series = calc_atr_series(bars, 14)
+        assert series[-1] is not None and series[-1] > 0
+        atr = _latest_atr(bars, 14)
+        assert atr > 0
+        assert abs(atr - float(series[-1])) < 1e-9
+        assert _latest_atr(bars[:13], 14) == 0.0
+
 
 class TestEmaBollingerAtrWarmup:
     def test_calculate_ema_matches_calc_expma_series(self):
