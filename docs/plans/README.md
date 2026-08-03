@@ -25,7 +25,8 @@
 2. [`wyckoff-structure-anchor-handoff.md`](./wyckoff-structure-anchor-handoff.md) — SC 宇宙 / 钉住 / 破位→L0  
 3. [`wyckoff-tr-maturity-l0l3-handoff.md`](./wyckoff-tr-maturity-l0l3-handoff.md) — L0–L3 / 箱体·量度门  
 4. [`wyckoff-detail-slim-b-handoff.md`](./wyckoff-detail-slim-b-handoff.md) — 默认 B 卡；[`wyckoff-phase-fail-copy-handoff.md`](./wyckoff-phase-fail-copy-handoff.md) — 失效人话  
-5. 需要时：[`wyckoff-skill-deep-card-handoff.md`](./wyckoff-skill-deep-card-handoff.md)（`--full`）· [`wyckoff-pnf-handoff.md`](./wyckoff-pnf-handoff.md) · [`wyckoff-weekly-scan-windows-handoff.md`](./wyckoff-weekly-scan-windows-handoff.md)
+5. 需要时：[`wyckoff-skill-deep-card-handoff.md`](./wyckoff-skill-deep-card-handoff.md)（`--full`）· [`wyckoff-pnf-handoff.md`](./wyckoff-pnf-handoff.md) · [`wyckoff-weekly-scan-windows-handoff.md`](./wyckoff-weekly-scan-windows-handoff.md)  
+6. SC/ST 现行默认数值：[`wyckoff-tr-maturity-l0l3-handoff.md`](./wyckoff-tr-maturity-l0l3-handoff.md) §4（PR #55 松参样本见 [`done/wyckoff-ashare-box-sensitivity-handoff.md`](./done/wyckoff-ashare-box-sensitivity-handoff.md)）
 
 ### 缠论
 
@@ -107,6 +108,12 @@
 | [`done/arch-followup-soft-thin-ruling-handoff.md`](./done/arch-followup-soft-thin-ruling-handoff.md) | `fusion_confidence` 软抽；日线裁定去 fusion.action |
 | [`done/arch-finalize-docs-handoff.md`](./done/arch-finalize-docs-handoff.md) | 文档真相收尾 + 归档 + breakdown 仪表化 |
 | [`done/docs-law-cleanup-handoff.md`](./done/docs-law-cleanup-handoff.md) | 文档三桶 / MOVE / 状态消歧 |
+
+### 威科夫灵敏度（#55 · 已 done）
+
+| 文件 | 一句 |
+|------|------|
+| [`done/wyckoff-ashare-box-sensitivity-handoff.md`](./done/wyckoff-ashare-box-sensitivity-handoff.md) | A 股 SC/ST 小步松参；箱体定义不变；6 票对照 |
 
 ### 已知差异指针
 
