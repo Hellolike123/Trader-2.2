@@ -19,6 +19,7 @@ from pool_cmds.classify import (  # noqa: E402
     classify_lane,
     ensure_lane,
     lane_rank,
+    _chan_signal,
     _wyckoff_veto,
 )
 from pool_cmds.scoring import sort_items_unified  # noqa: E402
@@ -266,6 +267,29 @@ def test_wait_when_no_chan():
         }
     )
     assert out["lane"] == "wait"
+
+
+def test_chan_signal_formal_only_rejects_observe():
+    """F4：类一/类二观察档不得算日缠真信号；正式一类买可。"""
+    assert _chan_signal(
+        {"chan_buy_point_types": ["类一买"]}, strategy_entry_lit=False
+    ) is False
+    assert _chan_signal(
+        {"chan_buy_point_types": ["类二买"]}, strategy_entry_lit=False
+    ) is False
+    assert _chan_signal(
+        {"chan_buy_point_types": ["一类买"]}, strategy_entry_lit=False
+    ) is True
+    assert _chan_signal(
+        {"chan_buy_point_types": ["二类买"]}, strategy_entry_lit=False
+    ) is True
+    # 禁止子串：不得因「一买」命中「类一买」
+    assert _chan_signal(
+        {"chan_buy_point_types": ["类一买"]}, strategy_entry_lit=False
+    ) is False
+    assert _chan_signal(
+        {"chan_buy_point_types": ["一买"]}, strategy_entry_lit=False
+    ) is True
 
 
 def test_ensure_lane_reclassifies_price_drift():

@@ -280,6 +280,32 @@ def test_cb3_observe_like_appended_not_in_formal_slot():
     assert "● 类二买（观察） 346.16" in daily
 
 
+def test_slim_story_plain_language_with_observe():
+    """推演人话：观察附注 + 无「现 暂无…」拧句 + 盯正式一类买。"""
+    like1 = _engine_result(["down", "up", "down"])
+    like1["chanlun"]["buy_points"] = [{"type": "类一买", "price": 29.98}]
+    text = render_chanlun_slim(_plan(build_chanlun_view(like1)))
+    story = text.split("🔮 推演", 1)[1]
+    assert "另有类一买（观察，不算正式）" in story
+    assert "观察档已亮（不算正式）；还需走出正式买点" in story
+    assert "当前笔被反向打掉，或正式卖点亮起" in story
+    assert "先盯：正式一类买是否形成" in story
+    assert "笔结构延续且出现更高阶" not in story
+    assert "；现 暂无正式买卖点" not in story
+    assert "笔破坏" not in story
+
+
+def test_slim_story_formal_buy_plain():
+    """有正式买时：若变好不写观察话术；盯下一档正式买。"""
+    with_point = _engine_result(["up", "down", "up"])
+    with_point["chanlun"]["buy_points"] = [{"type": "二类买", "price": 10.50}]
+    text = render_chanlun_slim(_plan(build_chanlun_view(with_point)))
+    story = text.split("🔮 推演", 1)[1]
+    assert "二类买 10.50还在，当前方向别被反向打掉" in story
+    assert "先盯：正式三类买是否形成" in story
+    assert "观察档已亮" not in story
+
+
 def test_cb4_midline_fallback_tagged(up_view):
     """C-B4：daily_fallback → 周线句含（日线）。"""
     fallback = build_chanlun_view(

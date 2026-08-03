@@ -459,46 +459,64 @@ def _pivot_facts(view: dict[str, Any]) -> str:
     return f"中枢：{pivot_n}｜窗{raw_n}｜段：{segs_n}"
 
 
+def _observe_aside(view: dict[str, Any]) -> str:
+    """推演附注：观察档已亮但不算正式（禁止升格叙事）。"""
+    _, observe = _collect_points(view)
+    if not observe:
+        return ""
+    labels: list[str] = []
+    for label, _price in observe[:2]:
+        # label 已含「（观察）」
+        short = label.replace("（观察）", "")
+        labels.append(short)
+    joined = "、".join(labels)
+    return f"另有{joined}（观察，不算正式）"
+
+
 def _next_formal_focus(view: dict[str, Any]) -> str:
-    """下一关注：按一→二→三类买推进；已有买则看更高阶未形成者。"""
+    """盯：按一→二→三类买推进；人话短句，不写「笔破坏」术语。"""
     formal, _ = _collect_points(view)
     buy_order = _FORMAL_BUY
     lit_idx = [i for i, lamp in enumerate(buy_order) if lamp in formal]
     if lit_idx:
         nxt = lit_idx[-1] + 1
         if nxt < len(buy_order):
-            return f"下一关注：{buy_order[nxt]}未形成"
-        return "正式买点已齐，盯笔破坏"
+            return f"先盯：正式{buy_order[nxt]}是否形成"
+        return "正式买已齐，盯会不会被反向打掉"
     if _has_formal(view, _FORMAL_SELL):
-        return "下一关注：笔破坏或卖点消化"
-    return "下一关注：一类买未形成"
+        return "先盯：卖点消化，或方向被打掉"
+    return "先盯：正式一类买是否形成"
 
 
 def _story_lines(view: dict[str, Any], *, fallback_tag: bool = False) -> dict[str, str]:
+    """推演四句：现在 / 若变好 / 若变坏 / 盯（人话；观察档不进正式结论）。"""
     if not view.get("data_ok") or view.get("timeframe") == "insufficient":
         return {
             "now": "数据不足",
-            "better": "补足数据后再评估",
+            "better": "补足数据后再看",
             "worse": "数据不足时不引用买卖点",
             "watch": "先补数据",
         }
     now = _sentence(view, fallback_tag=fallback_tag)
+    aside = _observe_aside(view)
+    if aside:
+        now = f"{now}｜{aside}"
     primary = _primary_formal_label(view)
     tip = _tip_leave_label(view)
-    better = (
-        f"笔结构延续且出现更高阶正式买；现 {primary}"
-        if not _has_formal(view, _FORMAL_BUY)
-        else f"正式买维持：{primary}；笔未反向破坏"
-    )
-    worse = (
-        tip
-        if tip
-        else (
-            "笔破坏或正式卖亮起"
-            if not _has_formal(view, _FORMAL_SELL)
-            else f"正式卖在场：{primary}"
-        )
-    )
+    has_buy = _has_formal(view, _FORMAL_BUY)
+    has_sell = _has_formal(view, _FORMAL_SELL)
+    if has_buy:
+        better = f"{primary}还在，当前方向别被反向打掉"
+    elif aside:
+        better = "观察档已亮（不算正式）；还需走出正式买点"
+    else:
+        better = "当前结构先别坏，并走出正式买点"
+    if tip:
+        worse = f"{tip}；再弱则结构落空"
+    elif has_sell:
+        worse = f"已有正式卖：{primary}，走坏继续跟卖侧"
+    else:
+        worse = "当前笔被反向打掉，或正式卖点亮起"
     watch = _next_formal_focus(view)
     return {"now": now, "better": better, "worse": worse, "watch": watch}
 
@@ -582,8 +600,8 @@ def render_chanlun_slim(plan: dict[str, Any]) -> str:
             f"    日线：{err}",
             "",
             "  若变好",
-            "    周线：补足数据后再评估",
-            "    日线：补足数据后再评估",
+            "    周线：补足数据后再看",
+            "    日线：补足数据后再看",
             "",
             "  若变坏",
             "    周线：数据不足时不引用买卖点",

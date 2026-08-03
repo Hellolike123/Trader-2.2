@@ -173,8 +173,9 @@ raw bars
 
 优先用真实周线（`weekly_bars`）估计上级别趋势；不可用时回退日线 chunk 聚合
 （`CHAN_MULTILEVEL_CHUNK=5`）。末 3 段多数决，`confidence = 同向段数/3`。
-上级明确反向时，下级仅保留「一类」背驰点并清理无对应一类的背离（`higher_trend_conflict`
-标记真冲突）。`CHAN_MULTILEVEL_ENABLED` 控制开关。
+上级明确反向时，下级保留一类背驰点及观察档类一/类二，去掉正式二/三类粘滞点，
+并清理无对应买/卖时的背离（`higher_trend_conflict` 标记真冲突）。
+`CHAN_MULTILEVEL_ENABLED` 控制开关。
 
 ---
 

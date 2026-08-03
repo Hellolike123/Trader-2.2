@@ -125,8 +125,18 @@ def _near_buy_zone(report: dict[str, Any]) -> bool:
     return False
 
 
+# 与 C1 / chan_discipline 正式买集合一致；禁止子串「一买」命中「类一买」
+_FORMAL_CHAN_BUY_TYPES = frozenset({
+    "一买", "二买", "三买",
+    "一类买", "二类买", "三类买",
+})
+
+
 def _chan_signal(report: dict[str, Any], *, strategy_entry_lit: bool) -> bool:
-    """日缠真信号：策略点亮 / buy_like / 买点类型；不用任意 signal_tier，不用纯距离。"""
+    """日缠真信号：策略点亮 / buy_like / 正式买点类型；不用任意 signal_tier，不用纯距离。
+
+    chan_buy_point_types 只认正式一/二/三类（含短名）；类一/类二观察档不算。
+    """
     if strategy_entry_lit:
         return True
     if report.get("strategy_entry_lit") is True:
@@ -141,8 +151,8 @@ def _chan_signal(report: dict[str, Any], *, strategy_entry_lit: bool) -> bool:
     if tier.startswith("buy"):
         return True
     bps = report.get("chan_buy_point_types") or []
-    if isinstance(bps, (list, tuple)) and len(bps) > 0:
-        return True
+    if isinstance(bps, (list, tuple)):
+        return any(str(t).strip() in _FORMAL_CHAN_BUY_TYPES for t in bps)
     return False
 
 

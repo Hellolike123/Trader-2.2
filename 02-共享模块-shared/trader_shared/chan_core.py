@@ -183,19 +183,21 @@ def _chanlun_compute(
         hc = to_float(higher_trend.get("confidence")) or 0.0
     confident = hc >= 0.66
 
-    # 多级别过滤（P1 裁定）：上级明确反向时保留「一类」背驰点，去掉二/三类粘滞点；
-    # 同步清理无对应一类时的 divergence，避免过滤买点却仍报底/顶背驰。
+    # 多级别过滤（P1 裁定）：上级明确反向时保留一类背驰点 + 观察档类一/类二；
+    # 仍去掉正式二/三类粘滞点。同步清理无对应买/卖时的 divergence。
     if isinstance(divergence, dict):
         divergence = dict(divergence)
     else:
         divergence = {"top_divergence": False, "bottom_divergence": False}
 
+    _ht_keep_buy = frozenset({"一类买", "类一买", "类二买"})
+    _ht_keep_sell = frozenset({"一类卖", "类一卖", "类二卖"})
     if confident and ht == "down":
-        buy_points = [bp for bp in buy_points if bp["type"] == "一类买"]
+        buy_points = [bp for bp in buy_points if bp["type"] in _ht_keep_buy]
         if not buy_points:
             divergence["bottom_divergence"] = False
     if confident and ht == "up":
-        sell_points = [sp for sp in sell_points if sp["type"] == "一类卖"]
+        sell_points = [sp for sp in sell_points if sp["type"] in _ht_keep_sell]
         if not sell_points:
             divergence["top_divergence"] = False
 

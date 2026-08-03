@@ -388,6 +388,128 @@ class TestDetectBuyPoints:
         assert bp1["confidence"] == 1
         assert bp1.get("force_source") == "hist_bar_fallback"
 
+    def test_buy_point_1_observe_hist_even_when_area_exists(self):
+        """有面积但不背驰时，仍可用柱序列弱确认 → 类一买（不升格一类）。"""
+        bars, sp, ep, sc, ec = self._make_bars_with_neg_areas(
+            area_prev=-3.0, area_curr=-4.0
+        )
+        # 末 3 根负柱收窄（弱确认）
+        bars[-3]["macd_histogram"] = -1.0
+        bars[-2]["macd_histogram"] = -0.6
+        bars[-1]["macd_histogram"] = -0.2
+        strokes = [
+            {"direction": "down", "end_price": 10.0, "start_index": sp, "end_index": ep},
+            {"direction": "up", "end_price": 12.0},
+            {"direction": "down", "end_price": 9.0, "start_index": sc, "end_index": ec},
+        ]
+        result = detect_buy_points(strokes, self._down_trend_zones(), 9.0, bars=bars)
+        types = [bp["type"] for bp in result]
+        assert "一类买" not in types
+        assert "类一买" in types
+        assert next(bp for bp in result if bp["type"] == "类一买").get("force_source") == (
+            "hist_bar_fallback"
+        )
+
+    def test_buy_point_1_observe_sticky_leave_single_zone(self):
+        """唯一中枢 end 粘连破位笔：严格离开失败，观察档价格离开仍可出类一。"""
+        bars, sp, ep, sc, ec = self._make_bars_with_neg_areas(
+            area_prev=-3.0, area_curr=-5.0
+        )
+        bars[-3]["macd_histogram"] = -1.0
+        bars[-2]["macd_histogram"] = -0.5
+        bars[-1]["macd_histogram"] = -0.2
+        zones = [
+            {
+                # 粘连：中枢 end = 当前破位笔 end（三花类实盘）
+                "zh_top": 12.0, "zh_bottom": 10.5, "valid": True,
+                "strokes": [{"start_index": sp, "end_index": ec}],
+            },
+        ]
+        strokes = [
+            {"direction": "down", "end_price": 10.0, "start_index": sp, "end_index": ep},
+            {"direction": "up", "end_price": 12.0, "start_index": ep + 1, "end_index": sc - 1},
+            {"direction": "down", "end_price": 9.0, "start_index": sc, "end_index": ec},
+        ]
+        result = detect_buy_points(strokes, zones, 9.0, bars=bars)
+        types = [bp["type"] for bp in result]
+        assert "一类买" not in types
+        assert "类一买" in types
+
+    def test_buy_point_1_observe_vol_missing_not_ok(self):
+        """F1：粘连离开 + 面积更强 + 无 volume → 不得仅因缺量伪缩量出类一。"""
+        bars, sp, ep, sc, ec = self._make_bars_with_neg_areas(
+            area_prev=-3.0, area_curr=-5.0
+        )
+        for b in bars:
+            b.pop("volume", None)
+        zones = [
+            {
+                "zh_top": 12.0, "zh_bottom": 10.5, "valid": True,
+                "strokes": [{"start_index": sp, "end_index": ec}],
+            },
+        ]
+        strokes = [
+            {"direction": "down", "end_price": 10.0, "start_index": sp, "end_index": ep},
+            {"direction": "up", "end_price": 12.0, "start_index": ep + 1, "end_index": sc - 1},
+            {"direction": "down", "end_price": 9.0, "start_index": sc, "end_index": ec},
+        ]
+        result = detect_buy_points(strokes, zones, 9.0, bars=bars)
+        types = [bp["type"] for bp in result]
+        assert "一类买" not in types
+        assert "类一买" not in types
+
+    def test_buy_point_1_observe_vol_shrink_ok(self):
+        """F1：粘连离开 + 面积更强 + 明确缩量 → 可出类一（vol_shrink_observe）。"""
+        bars, sp, ep, sc, ec = self._make_bars_with_neg_areas(
+            area_prev=-3.0, area_curr=-5.0
+        )
+        for i in range(sp, ep + 1):
+            bars[i]["volume"] = 2000
+        for i in range(sc, ec + 1):
+            bars[i]["volume"] = 500
+        zones = [
+            {
+                "zh_top": 12.0, "zh_bottom": 10.5, "valid": True,
+                "strokes": [{"start_index": sp, "end_index": ec}],
+            },
+        ]
+        strokes = [
+            {"direction": "down", "end_price": 10.0, "start_index": sp, "end_index": ep},
+            {"direction": "up", "end_price": 12.0, "start_index": ep + 1, "end_index": sc - 1},
+            {"direction": "down", "end_price": 9.0, "start_index": sc, "end_index": ec},
+        ]
+        result = detect_buy_points(strokes, zones, 9.0, bars=bars)
+        types = [bp["type"] for bp in result]
+        assert "一类买" not in types
+        assert "类一买" in types
+        bp = next(bp for bp in result if bp["type"] == "类一买")
+        assert bp.get("force_source") == "vol_shrink_observe"
+
+    def test_buy_point_2_structure_only_observe(self):
+        """抬高低点几何成立、无力度无缩量数据 → 仍报类二买（观察）。"""
+        strokes = [
+            {"direction": "down", "end_price": 8.0, "start_index": 0, "end_index": 2},
+            {"direction": "up", "end_price": 11.0, "start_index": 2, "end_index": 4},
+            {"direction": "down", "end_price": 10.0, "start_index": 4, "end_index": 6},
+        ]
+        # 有 volume 且后笔放量 → vol_shrink False；无 macd → area_ok False
+        bars = [
+            {"macd_histogram": None, "volume": 1000},
+            {"macd_histogram": None, "volume": 1000},
+            {"macd_histogram": None, "volume": 1000},
+            {"macd_histogram": None, "volume": 1000},
+            {"macd_histogram": None, "volume": 2000},
+            {"macd_histogram": None, "volume": 2000},
+            {"macd_histogram": None, "volume": 2000},
+        ]
+        result = detect_buy_points(strokes, [], 10.0, bars=bars, macd_divergence_ok=False)
+        types = [bp["type"] for bp in result]
+        assert "二类买" not in types
+        assert "类二买" in types
+        assert next(bp for bp in result if bp["type"] == "类二买").get("force_source") == (
+            "structure_only"
+        )
+
     def test_buy_point_2(self):
         """二类买：抬高低点 + 历史一类前置（趋势+离开）+ macd_divergence_ok。"""
         strokes = [
@@ -444,6 +566,39 @@ class TestDetectBuyPoints:
         types = [bp["type"] for bp in result]
         assert "二类买" not in types
         assert "类二买" in types
+
+    def test_buy_point_2_hist_type1_leave_reference_zone(self):
+        """F2：末中枢粘连时，历史一类对照笔前中枢可离开 → 正式二类可成立。"""
+        # zone0 在 leave 笔前已结束；zone1 end 粘到 leave 笔 end（若仍用 [-1] 则时间离开假）
+        zones = [
+            {
+                "zh_top": 16.0, "zh_bottom": 14.0, "valid": True,
+                "strokes": [{"start_index": 0, "end_index": 4}],
+            },
+            {
+                "zh_top": 12.0, "zh_bottom": 10.0, "valid": True,
+                "strokes": [{"start_index": 5, "end_index": 20}],
+            },
+        ]
+        strokes = [
+            {
+                "direction": "down", "end_price": 9.0,
+                "start_index": 10, "end_index": 20,
+            },
+            {
+                "direction": "up", "end_price": 11.0,
+                "start_index": 20, "end_index": 22,
+            },
+            {
+                "direction": "down", "end_price": 10.0,
+                "start_index": 22, "end_index": 24,
+            },
+        ]
+        result = detect_buy_points(
+            strokes, zones, 10.0, macd_divergence_ok=True
+        )
+        types = [bp["type"] for bp in result]
+        assert "二类买" in types
 
     def test_buy_point_3_above_old_narrow_window(self):
         """P1 三类买：close 在中枢上方 3%（旧逻辑 >2% 会拒）+ 回踩 down 不破 zh_top → 有。"""
@@ -2179,6 +2334,35 @@ class TestHigherLevelTrend:
         bars = [_make_bar(10 + i * 0.1, 11 + i * 0.1, 9 + i * 0.1, 10 + i * 0.1) for i in range(30)]
         result = chanlun_analysis(bars, 10.5)
         assert result["higher_trend"] is None or result["higher_trend_conflict"] is False
+
+    def test_ht_down_keeps_observe_buys_drops_formal_2nd(self, monkeypatch):
+        """F3：HT down 保留一类/类一/类二买；正式二类买仍剃掉。"""
+        import trader_shared.chan_core as chan_core
+
+        fake = [
+            {"type": "一类买", "price": 9.0, "confidence": 3},
+            {"type": "类一买", "price": 9.1, "confidence": 1},
+            {"type": "类二买", "price": 9.2, "confidence": 1},
+            {"type": "二类买", "price": 9.3, "confidence": 2},
+            {"type": "三类买", "price": 9.4, "confidence": 2},
+        ]
+        monkeypatch.setattr(
+            chan_core, "detect_buy_points", lambda *a, **k: [dict(p) for p in fake]
+        )
+        monkeypatch.setattr(chan_core, "detect_sell_points", lambda *a, **k: [])
+        bars = [
+            _make_bar(10 + i * 0.1, 11 + i * 0.1, 9 + i * 0.1, 10 + i * 0.1)
+            for i in range(30)
+        ]
+        result = chanlun_analysis(
+            bars, 10.5, higher_trend={"trend": "down", "confidence": 1.0}
+        )
+        types = [bp["type"] for bp in result.get("buy_points") or []]
+        assert "一类买" in types
+        assert "类一买" in types
+        assert "类二买" in types
+        assert "二类买" not in types
+        assert "三类买" not in types
 
 
 class TestBuildZonesMerge:
