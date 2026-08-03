@@ -28,6 +28,8 @@ try:
         WYCKOFF_BC_CHANGE_THRESHOLD,
         WYCKOFF_BC_UPPER_SHADOW_RATIO,
         WYCKOFF_BC_MIN_POS_PCT,
+        WYCKOFF_SC_MAX_POS_PCT,
+        WYCKOFF_SC_CHANGE_PCT_MAX_DAILY,
         WYCKOFF_SOW_SUPPORT_LOOKBACK,
         WYCKOFF_SOW_VOL_RATIO_THRESHOLD,
         WYCKOFF_SOW_CONSECUTIVE_DAYS,
@@ -101,15 +103,17 @@ except ImportError:
     WYCKOFF_AR_REQUIRE_WEAK_VS_SC = False
     WYCKOFF_AR_WEAK_VS_SC_RATIO = 1.0
     # 广义 ST 默认须与 config.py 同步（A 股放宽后）
-    WYCKOFF_ST_SC_VOL_RATIO = 0.72
+    WYCKOFF_ST_SC_VOL_RATIO = 0.80
     WYCKOFF_ST_SC_MAX_BARS = 22
-    WYCKOFF_ST_SC_PROXIMITY = 0.03
+    WYCKOFF_ST_SC_PROXIMITY = 0.045
     WYCKOFF_ST_SC_MAX_PIERCE = 0.012
     WYCKOFF_ST_SC_SPREAD_RATIO = 0.85
-    WYCKOFF_BC_VOL_RATIO_THRESHOLD = 1.8  # must match config.py
+    WYCKOFF_BC_VOL_RATIO_THRESHOLD = 1.5  # must match config.py
     WYCKOFF_BC_CHANGE_THRESHOLD = 1.0
     WYCKOFF_BC_UPPER_SHADOW_RATIO = 0.02
     WYCKOFF_BC_MIN_POS_PCT = 0.65
+    WYCKOFF_SC_MAX_POS_PCT = 0.50
+    WYCKOFF_SC_CHANGE_PCT_MAX_DAILY = -1.5
     WYCKOFF_SOW_SUPPORT_LOOKBACK = 10
     WYCKOFF_SOW_VOL_RATIO_THRESHOLD = 1.0
     WYCKOFF_SOW_CONSECUTIVE_DAYS = 1
@@ -312,7 +316,7 @@ def _sc_detector_params(timeframe: str = "daily", *, is_index: bool = False) -> 
             "anchor_bars": int(WYCKOFF_SC_COLD_START_BARS_DAILY),
             "support_lookback": WYCKOFF_SPRING_SUPPORT_LOOKBACK,
             "vol_ratio_threshold": WYCKOFF_BC_VOL_RATIO_THRESHOLD,
-            "change_pct_max": -2.0,
+            "change_pct_max": float(WYCKOFF_SC_CHANGE_PCT_MAX_DAILY),
             "pos_ref": "high",  # 与历史日线 SC 行为一致（低位仍用 pos 上界过滤）
         }
     if is_index:
@@ -823,8 +827,9 @@ def _find_sc_anchor(
             continue
 
         # 低位过滤可用 close/high 作 pos_ref；谷底价本身始终取棒最低价
+        # SC 位置上限用 WYCKOFF_SC_MAX_POS_PCT（试验默认 0.50；旧约 1-BC_MIN=0.35）
         pos = _price_pos_pct(bars, scan_idx, lookback=support_lb, ref=pos_ref)
-        if pos is None or pos > 1 - WYCKOFF_BC_MIN_POS_PCT:
+        if pos is None or pos > float(WYCKOFF_SC_MAX_POS_PCT):
             continue
 
         if cur_close >= cur_open:

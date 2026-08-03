@@ -98,17 +98,20 @@ def test_w_s3_helper_weekly_half():
 
 
 def _sc_ar_st_at_offset(offset_from_st_start: int) -> list[dict]:
-    """SC+AR 后，在 ST 窗起点起第 offset 根放合格 ST（0=AR+3）。"""
+    """SC+AR 后，在 ST 窗起点起第 offset 根放合格 ST（0=AR+3）。
+
+    填充棒须站在 sc_low×(1+prox≈0.045) 之上，避免松 proximity 后被误认 ST。
+    """
     bars = [_bar(90.0, 91.0, 89.0, 90.0, 100) for _ in range(14)]
-    bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC
+    bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC；zone 上沿≈85.69
     bars.append(_bar(83.5, 87.0, 85.0, 86.0, 400))  # AR
-    bars.append(_bar(85.2, 85.6, 85.0, 85.3, 120))  # AR+1
-    bars.append(_bar(85.1, 85.5, 84.9, 85.2, 120))  # AR+2
+    bars.append(_bar(86.2, 86.6, 86.0, 86.3, 120))  # AR+1 区外
+    bars.append(_bar(86.1, 86.5, 85.9, 86.2, 120))  # AR+2 区外
     for _ in range(offset_from_st_start):
-        bars.append(_bar(85.5, 86.0, 85.2, 85.7, 110))
+        bars.append(_bar(86.5, 87.0, 86.2, 86.7, 110))
     bars.append(_bar(82.2, 83.2, 81.8, 82.9, 800))  # ST
     for _ in range(2):
-        bars.append(_bar(85.0, 85.4, 84.8, 85.2, 120))
+        bars.append(_bar(86.5, 86.9, 86.2, 86.6, 120))
     return bars
 
 
