@@ -52,8 +52,9 @@ _VIEW_ID_TO_CODE: dict[str, str] = {
     "sc": "SC",
     "ar": "AR",
     "secondary_test_sc": "ST",
+    # st_* / spring_test_* = Spring 确认（phase-a §4.4.2）；禁止映成 ST（二次测试）
     "spring_test": "Spring",
-    "st": "ST",
+    "st": "Spring",
     "spring": "Spring",
     "sos": "SOS",
     "lps": "LPS",
@@ -341,7 +342,8 @@ def _event_price_from_sources(
     elif code == "AR":
         id_candidates = ["ar"]
     elif code == "ST":
-        id_candidates = ["secondary_test_sc", "spring_test", "st"]
+        # 灯文案 ST（二次测试）= 广义 ST；勿吃 Spring 确认价
+        id_candidates = ["secondary_test_sc"]
     elif code in ("Spring", "SpringTest"):
         id_candidates = ["spring", "spring_test", "st"]
     elif code == "LPS":
@@ -369,8 +371,6 @@ def _event_price_from_sources(
             "secondary_test_sc_price",
             "secondary_test_sc_low",
             "st_sc_low",
-            "spring_test_price",
-            "st_price",
         ),
         "Spring": ("spring_price", "spring_test_price", "st_price"),
         "SpringTest": ("spring_test_price", "st_price"),
@@ -417,6 +417,9 @@ _EXTRA_DAILY_ORDER = (
 _EXTRA_SIGNAL_KEYS: dict[str, str] = {
     "ps_signal": "PS",
     "spring_signal": "Spring",
+    # Spring 确认（与广义 ST 分离；phase-a §4.4.2）
+    "spring_test_signal": "Spring",
+    "st_signal": "Spring",
     "bu_signal": "BU",
     "jac_signal": "JAC",
     "stopping_volume_signal": "SV",
@@ -430,22 +433,44 @@ _EXTRA_SIGNAL_KEYS: dict[str, str] = {
 }
 
 
-def _accum_lit_set(raw: dict[str, Any], view: dict[str, Any]) -> set[str]:
-    """日线吸筹灯集合：chain 提取 + view.active_events（含 secondary_test_sc→ST）。"""
+def _spring_confirm_lit(raw: dict[str, Any], view: dict[str, Any]) -> bool:
+    """Spring 确认是否亮（st_* / spring_test_* / spring_signal；非广义 ST）。"""
     src = raw if raw else view
-    events = set(extract_accum_events(src))
-    # handoff §2.4：active_events / 信号字段一并认（防链提取与 L2 真 ST 脱节）
-    if src.get("secondary_test_sc_signal") or src.get("st_signal") or src.get(
-        "spring_test_signal"
-    ):
+    if src.get("spring_test_signal") or src.get("st_signal") or src.get("spring_signal"):
+        return True
+    active = view.get("active_events") if isinstance(view.get("active_events"), list) else []
+    return any(str(eid) in ("spring_test", "st", "spring") for eid in active)
+
+
+def _accum_lit_set(raw: dict[str, Any], view: dict[str, Any]) -> set[str]:
+    """吸筹灯集合：ST（二次测试）只认广义 ST；链槽 Spring确认 → 展示码 Spring。
+
+    池链 extract 的 ST 槽仍指 Spring 确认（中文「Spring确认」），但 B/详析灯
+    「ST（二次测试）」禁止并灌 spring_test（phase-a §4.4.2 / slim-b §4.4）。
+    """
+    src = raw if raw else view
+    events: set[str] = set()
+    for code in extract_accum_events(src):
+        if code == "ST":
+            events.add("Spring")
+        else:
+            events.add(code)
+    # 广义 ST（测 SC）→ 灯 ST（二次测试）；抬 L2 的那条
+    if src.get("secondary_test_sc_signal"):
         events.add("ST")
+    if _spring_confirm_lit(src, view):
+        events.add("Spring")
     active = view.get("active_events") if isinstance(view.get("active_events"), list) else []
     for eid in active:
-        code = _VIEW_ID_TO_CODE.get(str(eid), "")
-        if code in ACCUM_CHAIN:
-            events.add(code)
-        elif str(eid) == "secondary_test_sc":
+        eid_s = str(eid)
+        if eid_s == "secondary_test_sc":
             events.add("ST")
+            continue
+        code = _VIEW_ID_TO_CODE.get(eid_s, "")
+        if code == "Spring":
+            events.add("Spring")
+        elif code in ACCUM_CHAIN:
+            events.add(code)
     return events
 
 
@@ -459,11 +484,11 @@ def _extra_lit_codes(raw: dict[str, Any], view: dict[str, Any]) -> list[str]:
     active = view.get("active_events") if isinstance(view.get("active_events"), list) else []
     for eid in active:
         code = _VIEW_ID_TO_CODE.get(str(eid), "")
-        # spring_test 已映射进链上 ST；此处 Spring 仅在 spring 真事件时追加
-        if str(eid) == "spring_test":
-            continue
         if code and code not in ACCUM_CHAIN:
             found.add(code)
+    # Spring 确认也可能仅由 _accum_lit_set 认出（无 spring_signal）
+    if "Spring" in _accum_lit_set(raw, view):
+        found.add("Spring")
     return [c for c in _EXTRA_DAILY_ORDER if c in found]
 
 
@@ -971,12 +996,8 @@ def _slim_active_codes(view: dict[str, Any]) -> set[str]:
 _SLIM_SIGNAL_KEYS: dict[str, tuple[str, ...]] = {
     "SC": ("sc_signal", "wyckoff_sc_signal"),
     "AR": ("ar_signal", "wyckoff_ar_signal"),
-    "ST": (
-        "secondary_test_sc_signal",
-        "st_signal",
-        "spring_test_signal",
-        "wyckoff_st_signal",
-    ),
+    # ST（二次测试）只认广义 ST；Spring 确认见 _spring_confirm_lit / 额外灯
+    "ST": ("secondary_test_sc_signal",),
     "LPS": ("lps_signal", "wyckoff_lps_signal"),
     "SOS": ("sos_signal", "wyckoff_sos_signal"),
     "BC": ("bc_signal",),
@@ -1017,6 +1038,10 @@ def _format_slim_full_lights(
             lines.append(f"● {code}（{_cn(code)}）{px_s if px_s else ''}")
         else:
             lines.append(f"○ {code}（{_cn(code)}）")
+    # 吸筹五灯之外：Spring 确认另灯，禁止并进 ST（二次测试）
+    if chain == tuple(ACCUM_CHAIN) and _spring_confirm_lit(raw, view):
+        px_s = _fmt_price(_event_price_from_sources("Spring", view=view, raw=raw))
+        lines.append(f"● Spring（{_cn('Spring')}）{px_s if px_s else ''}")
     return lines
 
 
@@ -1179,6 +1204,8 @@ def _slim_daily_wave_short(view: dict[str, Any], raw: dict[str, Any]) -> str:
         event = f"LPS 修复｜{_slim_range_head(view, raw)}"
     elif "ST" in lit:
         event = f"ST 已现｜{_slim_range_head(view, raw)}"
+    elif _spring_confirm_lit(raw, view):
+        event = f"Spring 确认｜{_slim_range_head(view, raw)}"
     elif "AR" in lit:
         event = f"AR 反弹｜{_slim_range_head(view, raw)}"
     elif "SC" in lit:
@@ -1235,6 +1262,9 @@ def _slim_chain_now(
             return "ARE（自动回落）先亮但缺 BC（购买高潮），派发未确认"
         return "→".join(lit) if lit else "派发未确认"
     if not lit:
+        if not weekly and _spring_confirm_lit(raw, view):
+            # 孤岛 Spring 确认：不得写成「ST，待 SC」
+            return "Spring（弹簧确认），待 SC（卖力高潮）"
         return "结构未明" if weekly else "本波未成型"
     missing = next((code for code in chain if code not in lit), "")
     text = "→".join(lit)
@@ -1467,7 +1497,9 @@ def build_light_snapshot_entry(
     weekly_raw = _as_raw(plan.get("weekly_raw"))
 
     # 五灯链 + 已亮非五灯（与详析灯块同源，供 🔔 变化对比）
-    chain = list(extract_accum_events(daily_raw if daily_raw else daily_view))
+    # ST 仅广义二次测试；Spring 确认走 extras（禁止 snapshot 把 Spring 记成 ST）
+    lit = _accum_lit_set(daily_raw if daily_raw else daily_view, daily_view)
+    chain = [c for c in ACCUM_CHAIN if c in lit]
     extras = _extra_lit_codes(daily_raw, daily_view)
     daily_events = chain + [c for c in extras if c not in chain]
     weekly_codes: list[str] = []

@@ -34,7 +34,9 @@ def _sample_plan() -> dict:
             "sc_signal": True,
             "ar_signal": True,
             "secondary_test_sc_signal": True,
-            "st_signal": True,
+            # 样例只亮广义 ST；Spring 确认另测（禁止与 ST 二次测试并灌）
+            "st_signal": False,
+            "spring_test_signal": False,
             "lps_signal": True,
             "sc_price": 9.5,
             "sc_low": 9.5,
@@ -751,6 +753,60 @@ def test_wd5_lights_bullet_cn_and_price():
     assert len(lamp_lines) >= 5
     for ln in lamp_lines:
         assert ln.count("●") + ln.count("○") == 1
+
+
+def test_p0_spring_confirm_not_labeled_as_st_secondary_test():
+    """P0：Spring 确认不得渲染成 ST（二次测试）。
+
+    法源：phase-a §4.4.2 禁止改名；slim-b §4.4 ST=二次测试 / Spring=弹簧确认；
+    tr-maturity：广义 ST 与 spring_test 分离。
+    """
+    plan = _sample_plan()
+    plan["daily_raw"] = {
+        "sc_signal": False,
+        "ar_signal": False,
+        "secondary_test_sc_signal": False,
+        "st_signal": True,
+        "spring_test_signal": True,
+        "spring_test_price": 29.03,
+        "st_price": 29.03,
+        "lps_signal": False,
+        "sos_signal": False,
+        "tr_maturity": "L0",
+        "box_display_mode": "none",
+        "measure_allowed": False,
+        "phase_a_status": "none",
+    }
+    plan["daily_view"] = {
+        "phase": "none",
+        "phase_label": "无明确阶段",
+        "bias": "neutral",
+        "tr_maturity": "L0",
+        "box_display_mode": "none",
+        "measure_allowed": False,
+        "active_events": ["spring_test"],
+        "event_detail": {
+            "spring_test": {"id": "spring_test", "price": 29.03, "reason": "Spring确认"},
+        },
+        "invalidation_hint": "",
+        "summary_oneline": "Spring确认，还差SC",
+        "cause_effect": {"up_target": None, "down_target": None},
+    }
+    plan["chain_plain"] = "威：Spring确认，还差SC"
+
+    slim = render_wyckoff_slim(plan)
+    assert "○ ST（二次测试）" in slim
+    assert "● ST（二次测试）" not in slim
+    assert "● Spring（弹簧确认）29.03" in slim
+    assert "ST 已现" not in slim
+    assert "Spring 确认" in slim
+    assert "ST，待 SC" not in slim
+    assert "Spring（弹簧确认），待 SC（卖力高潮）" in slim
+
+    detail = render_wyckoff_detail(plan)
+    assert "○ ST（二次测试）未亮" in detail or "○ ST（二次测试）" in detail
+    assert "● ST（二次测试）" not in detail
+    assert "● Spring（弹簧确认）29.03" in detail
 
 
 def test_wd5_secondary_test_sc_lights_st_without_st_signal():

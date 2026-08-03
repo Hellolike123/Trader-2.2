@@ -288,3 +288,101 @@ def test_g_k1_close_none_skips_breakdown_not_failed() -> None:
     assert failed is not None
     assert failed["phase_a_failed"] is True
     assert failed["fail_bar_idx"] == 1
+
+
+def test_w_diff7_deep_pierce_close_recover_not_breakdown() -> None:
+    """W-DIFF-7 / structure-anchor §3.1：deep pierce 但 close≥sc_low → 不算破位。
+
+    对照：同 low 深刺穿且 close<sc_low → failed。不改 MAX_PIERCE 阈值。
+    """
+    from trader_shared.config import WYCKOFF_ST_SC_MAX_PIERCE
+    from trader_shared.wyckoff_events import _phase_a_breakdown
+
+    sc_low = 82.0
+    floor = sc_low * (1.0 - WYCKOFF_ST_SC_MAX_PIERCE)
+    deep_low = floor - 0.5
+    assert deep_low < floor
+
+    bars_recover = [
+        _bar(84.0, 85.0, sc_low, 83.0, 2500),
+        _bar(81.0, 83.0, deep_low, sc_low, 900),  # close == sc_low 收回
+        _bar(83.0, 84.0, 82.5, 83.5, 120),
+    ]
+    assert _phase_a_breakdown(bars_recover, 0, sc_low) is None
+
+    bars_above = [
+        _bar(84.0, 85.0, sc_low, 83.0, 2500),
+        _bar(81.0, 83.5, deep_low, sc_low + 0.3, 900),  # close > sc_low
+        _bar(83.0, 84.0, 82.5, 83.5, 120),
+    ]
+    assert _phase_a_breakdown(bars_above, 0, sc_low) is None
+
+    bars_fail = [
+        _bar(84.0, 85.0, sc_low, 83.0, 2500),
+        _bar(81.0, 82.0, deep_low, sc_low - 0.5, 900),  # close < sc_low
+        _bar(80.0, 81.0, 79.5, 80.5, 120),
+    ]
+    failed = _phase_a_breakdown(bars_fail, 0, sc_low)
+    assert failed is not None
+    assert failed["phase_a_failed"] is True
+    assert failed["fail_bar_idx"] == 1
+
+
+def test_w_diff7_analysis_deep_pierce_recover_keeps_alive_phase_a() -> None:
+    """W-DIFF-7：分析路径上 deep pierce+收回 → 不得 phase_a_status=failed / L0。"""
+    from trader_shared.config import WYCKOFF_ST_SC_MAX_PIERCE
+
+    sc_low = 82.0
+    floor = sc_low * (1.0 - WYCKOFF_ST_SC_MAX_PIERCE)
+    deep_low = floor - 0.4
+    bars = [_neutral(90.0, 100) for _ in range(14)]
+    bars.append(_bar(84.0, 85.0, sc_low, 83.0, 2500))  # SC
+    bars.append(_bar(83.5, 87.0, 85.0, 86.0, 160))     # AR
+    bars.append(_bar(85.0, 85.5, 84.8, 85.2, 120))
+    bars.append(_bar(85.0, 85.4, 84.9, 85.1, 120))
+    # 深刺穿但收盘收回：不算破位（本测不要求认 ST，只锁 alive）
+    bars.append(_bar(81.5, 83.2, deep_low, sc_low + 0.2, 900))
+    for _ in range(3):
+        bars.append(_bar(84.5, 85.0, 84.0, 84.6, 110))
+
+    result = wyckoff_analysis(bars, use_persisted_phase=False)
+    assert result.get("sc_signal") is True
+    assert result["phase_a_status"] in {"forming", "established"}
+    assert result["phase_a_status"] != "failed"
+    assert result["tr_maturity"] != "L0"
+    assert result["phase_a_range"].get("status") != "failed"
+
+
+def test_s_a5_persisted_phase_clears_on_phase_a_failed(tmp_path, monkeypatch) -> None:
+    """S-A5 + 日线黏性：use_persisted_phase=True 时破位不得黏回健康阶段名。"""
+    from trader_shared.trader_paths import load_json
+    from trader_shared.wyckoff_phase import _save_phase_state
+
+    monkeypatch.setenv("TRADER_ROOT", str(tmp_path))
+    symbol = "600519.SH"
+    _save_phase_state(
+        symbol,
+        "daily",
+        {
+            "phase": "accumulation_a",
+            "phase_label": "停止：SC+AR",
+            "phase_confidence_delta": 0.1,
+            "first_seen": "accumulation_a",
+        },
+    )
+
+    bars = _breakdown_then_fake_st_bars()
+    result = wyckoff_analysis(bars, symbol=symbol, use_persisted_phase=True)
+
+    assert result["phase_a_status"] == "failed"
+    assert result["tr_maturity"] == "L0"
+    assert result["phase"] == "none"
+    assert result.get("phase_tr_gate_reason") == "phase_a_failed"
+    assert result.get("phase_tr_gated") is True
+    assert "停止：SC+AR" not in str(result.get("phase_label") or "")
+    assert "雏形" not in str(result.get("phase_label") or "")
+
+    stored = load_json("wyckoff_phase").get(f"{symbol}::daily") or {}
+    assert stored.get("phase") == "none"
+    assert "停止：SC+AR" not in str(stored.get("phase_label") or "")
+    assert (tmp_path / "wyckoff_phase.json").exists()
