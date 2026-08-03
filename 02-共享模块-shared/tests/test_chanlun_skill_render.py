@@ -300,6 +300,53 @@ def test_slim_formal_buy_lights_and_pool(up_view):
     assert "可盯" in text.splitlines()[1]
 
 
+def test_overview_uptrend_pullback_not_contradictory():
+    """上涨趋势+回调段+向下笔 → 回调偏空｜上涨趋势内回调，勿「偏空｜上涨趋势」。"""
+    eng = _engine_result(["up", "down", "up", "down"], timeframe="weekly")
+    eng["chanlun"]["structure_type"] = "上涨趋势"
+    eng["chanlun"]["trend_label"] = "回调段"
+    mid = build_chanlun_view(eng)
+    text = render_chanlun_slim(_plan(
+        build_chanlun_view(_engine_result(["up", "down", "up"])),
+        mid,
+    ))
+    overview = text.splitlines()[1]
+    assert overview.startswith("周线副读：")
+    assert "回调偏空｜上涨趋势内回调｜" in overview
+    assert "上涨趋势 · 回调段" not in overview
+    # 禁止旧拧句「偏空｜上涨趋势 · 回调段」
+    assert "偏空｜上涨趋势 ·" not in overview
+
+
+def test_wave_short_no_rally_down_stroke_twist():
+    """日线本波：拉升段+向下笔 → 拉升遇阻，勿「拉升段 · 向下笔」。"""
+    eng = _engine_result(["up", "down", "up", "down"])
+    eng["chanlun"]["structure_type"] = "盘整"
+    eng["chanlun"]["trend_label"] = "拉升段"
+    text = render_chanlun_slim(_plan(build_chanlun_view(eng)))
+    assert "日线本波：拉升遇阻" in text
+    assert "拉升段 · 向下笔" not in text
+
+
+def test_tip_leave_uptrend_phrase_and_no_dup():
+    """上涨趋势+高点已离开 → 上涨趋势内回撤；正文不重复 tip。"""
+    eng = _engine_result(["up", "down", "up"], timeframe="weekly")
+    eng["chanlun"]["structure_type"] = "上涨趋势"
+    eng["chanlun"]["trend_label"] = "拉升段"
+    eng["chanlun"]["strokes"][-1]["end_price"] = 100.0
+    mid = build_chanlun_view(eng, current=50.0)
+    assert mid["tip_leave"] == "up_left"
+    text = render_chanlun_slim(_plan(
+        build_chanlun_view(_engine_result(["down", "up", "down"])),
+        mid,
+    ))
+    overview = text.splitlines()[1]
+    assert "回调偏空" in overview
+    assert "上涨趋势内回撤" in overview
+    weekly_body = text.split("🧭 周线 · 结构副读", 1)[1].split("⚡ 日线", 1)[0]
+    assert weekly_body.count("高点已离开·向下未成笔") == 1
+
+
 def test_cd4e_tip_leave_demotes_stale_up_stroke():
     """C-D4e：现价大幅低于末向上笔终点 → 不得再喊向上笔/拉升段。"""
     stale = _engine_result(["up", "down", "up"])

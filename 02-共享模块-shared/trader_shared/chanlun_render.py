@@ -277,18 +277,32 @@ def _primary_formal_label(view: dict[str, Any]) -> str:
 
 
 def _view_bias_cn(view: dict[str, Any]) -> str:
+    """总览偏向：正式点优先；否则用「大结构内本波」人话，避免「偏空｜上涨趋势」拧句。"""
     if not view.get("data_ok") or view.get("timeframe") == "insufficient":
         return "中性"
     if _has_formal(view, _FORMAL_SELL) and not _has_formal(view, _FORMAL_BUY):
         return "偏空"
     if _has_formal(view, _FORMAL_BUY):
         return "偏多"
-    tip = _tip_leave_label(view)
-    if tip.startswith("高点"):
-        return "偏空"
-    if tip.startswith("低点"):
-        return "偏多"
+    structure = str(view.get("structure_type") or "").strip()
+    trend = str(view.get("trend_label") or "").strip()
     direction = str(view.get("current_stroke_direction") or "")
+    tip = _tip_leave_label(view)
+    # tip / 回调 落在上涨框架里 → 回调偏空（勿裸写偏空｜上涨趋势）
+    if tip.startswith("高点") or (
+        structure == "上涨趋势" and (trend == "回调段" or direction == "down")
+    ):
+        return "回调偏空" if structure == "上涨趋势" or tip.startswith("高点") else "偏空"
+    if tip.startswith("低点") or (
+        structure == "下跌趋势" and (trend == "拉升段" or direction == "up")
+    ):
+        return "反弹偏多" if structure == "下跌趋势" or tip.startswith("低点") else "偏多"
+    # 盘整内：笔向与本波标签冲突时，跟笔向但加「盘整」语境
+    if structure == "盘整":
+        if direction == "down" or trend == "回调段":
+            return "盘整偏空"
+        if direction == "up" or trend == "拉升段":
+            return "盘整偏多"
     if direction == "up":
         return "偏多"
     if direction == "down":
@@ -325,27 +339,82 @@ def _pool_advice(short: dict[str, Any], mid: dict[str, Any]) -> str:
     return "暂不建议入池（无正式买点）"
 
 
-def _structure_short(view: dict[str, Any]) -> str:
+def _wave_vs_stroke_phrase(view: dict[str, Any]) -> str:
+    """本波标签与当前笔冲突时，用人话消歧（如拉升段+向下笔→拉升遇阻）。"""
+    trend = str(view.get("trend_label") or "").strip()
+    direction = str(view.get("current_stroke_direction") or "")
+    tip = _tip_leave_label(view)
+    if tip:
+        return tip
+    if trend == "拉升段" and direction == "down":
+        return "拉升遇阻"
+    if trend == "回调段" and direction == "up":
+        return "回调后反弹"
+    if trend in ("拉升段", "回调段"):
+        return trend
+    return trend or "暂无明确走势"
+
+
+def _structure_wave_phrase(view: dict[str, Any]) -> str:
+    """大结构 + 本波合一，避免「上涨趋势 · 回调段」读成两套结论。"""
     if not view.get("data_ok") or view.get("timeframe") == "insufficient":
         return "数据不足"
     structure = _fmt_structure(view)
-    trend = _fmt_trend(view)
     if structure == "数据不足":
         return structure
-    if trend and trend != structure:
-        return f"{structure} · {trend}"
-    return structure
+    tip = _tip_leave_label(view)
+    trend = str(view.get("trend_label") or "").strip()
+    direction = str(view.get("current_stroke_direction") or "")
+    wave = _wave_vs_stroke_phrase(view)
+
+    if tip:
+        if structure == "上涨趋势":
+            return f"上涨趋势内回撤（{tip}）"
+        if structure == "下跌趋势":
+            return f"下跌趋势内反弹（{tip}）"
+        if structure == "盘整":
+            return f"盘整·{tip}"
+        return tip
+
+    if structure == "上涨趋势" and (
+        trend == "回调段" or direction == "down" or wave in ("回调段", "拉升遇阻")
+    ):
+        return "上涨趋势内回调"
+    if structure == "下跌趋势" and (
+        trend == "拉升段" or direction == "up" or wave in ("拉升段", "回调后反弹")
+    ):
+        return "下跌趋势内反弹"
+    if structure == "盘整":
+        if wave == "拉升遇阻":
+            return "盘整·拉升遇阻"
+        if wave == "回调后反弹":
+            return "盘整·回调后反弹"
+        if wave in ("回调段", "拉升段"):
+            return f"盘整·{wave}"
+        return "盘整"
+    if wave and wave != structure:
+        return f"{structure} · {wave}"
+    return structure or wave or "暂无明确结构"
+
+
+def _structure_short(view: dict[str, Any]) -> str:
+    return _structure_wave_phrase(view)
 
 
 def _sentence(view: dict[str, Any], *, fallback_tag: bool = False) -> str:
     if not view.get("data_ok") or view.get("timeframe") == "insufficient":
         return "数据不足，仅现价"
-    parts = [
-        _fmt_trend(view),
-        _fmt_structure(view),
-        f"当前{_fmt_current_direction(view)}",
-        _primary_formal_label(view),
-    ]
+    phrase = _structure_wave_phrase(view)
+    tip = _tip_leave_label(view)
+    parts = [phrase]
+    # tip 已写进 phrase 时勿再重复「当前{同一句 tip}」
+    if not tip:
+        parts.append(f"当前{_fmt_current_direction(view)}")
+    else:
+        direction = str(view.get("current_stroke_direction") or "")
+        if direction in _DIRECTION_LABEL:
+            parts.append(f"引擎末笔{_DIRECTION_LABEL[direction]}（仅对照）")
+    parts.append(_primary_formal_label(view))
     line = " · ".join(p for p in parts if p)
     if fallback_tag or str(view.get("timeframe") or "") == "daily_fallback":
         if "（日线）" not in line:
@@ -354,16 +423,21 @@ def _sentence(view: dict[str, Any], *, fallback_tag: bool = False) -> str:
 
 
 def _wave_short(view: dict[str, Any]) -> str:
+    """日线本波总览：与周线同构，禁止「拉升段 · 向下笔」拧句。"""
     if not view.get("data_ok") or view.get("timeframe") == "insufficient":
         return "数据不足"
     tip = _tip_leave_label(view)
     if tip:
         return tip
     primary = _primary_formal_label(view)
+    wave = _wave_vs_stroke_phrase(view)
     direction = _fmt_current_direction(view)
     if primary != "暂无正式买卖点":
         return f"{primary} · {direction}"
-    return f"{_fmt_trend(view)} · {direction}"
+    # 本波名已含方向语义时不再叠「·向下笔」
+    if wave in ("拉升遇阻", "回调后反弹"):
+        return wave
+    return f"{wave} · {direction}"
 
 
 def _stroke_facts(view: dict[str, Any]) -> str:
