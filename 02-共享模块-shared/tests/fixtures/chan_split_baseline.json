@@ -17,12 +17,12 @@
         "start_type": "bottom",
         "start_price": 8.45,
         "end_type": "top",
-        "end_price": 9.2,
+        "end_price": 9.15,
         "direction": "up",
         "start_index": 26,
-        "end_index": 41,
-        "power_price": 0.75,
-        "length": 15,
+        "end_index": 35,
+        "power_price": 0.7,
+        "length": 9,
         "power_volume": 9324000.0
       },
       {
@@ -41,12 +41,12 @@
         "start_type": "bottom",
         "start_price": 8.45,
         "end_type": "top",
-        "end_price": 9.2,
+        "end_price": 9.15,
         "direction": "up",
         "start_index": 50,
-        "end_index": 65,
-        "power_price": 0.75,
-        "length": 15,
+        "end_index": 59,
+        "power_price": 0.7,
+        "length": 9,
         "power_volume": 9576000.0
       },
       {
@@ -65,12 +65,12 @@
         "start_type": "bottom",
         "start_price": 8.45,
         "end_type": "top",
-        "end_price": 9.2,
+        "end_price": 9.15,
         "direction": "up",
         "start_index": 74,
-        "end_index": 89,
-        "power_price": 0.75,
-        "length": 15,
+        "end_index": 83,
+        "power_price": 0.7,
+        "length": 9,
         "power_volume": 9828000.0
       },
       {
@@ -88,14 +88,14 @@
     ],
     "zones": [
       {
-        "zh_top": 9.2,
+        "zh_top": 9.15,
         "zh_bottom": 8.45,
-        "zh_center": 8.825,
+        "zh_center": 8.8,
         "members": [
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "top",
@@ -113,12 +113,12 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 26,
-                "end_index": 41,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 35,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9324000.0
               },
               {
@@ -137,20 +137,20 @@
             "valid": true
           },
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 26,
-                "end_index": 41,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 35,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9324000.0
               },
               {
@@ -169,21 +169,21 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 50,
-                "end_index": 65,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9576000.0
               }
             ],
             "valid": true
           },
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "top",
@@ -201,12 +201,12 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 50,
-                "end_index": 65,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9576000.0
               },
               {
@@ -225,20 +225,20 @@
             "valid": true
           },
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 50,
-                "end_index": 65,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9576000.0
               },
               {
@@ -257,21 +257,21 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 74,
-                "end_index": 89,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 83,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9828000.0
               }
             ],
             "valid": true
           },
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "top",
@@ -289,12 +289,12 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 74,
-                "end_index": 89,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 83,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9828000.0
               },
               {
@@ -331,8 +331,8 @@
       "kind": "none",
       "bc_mode": "legacy"
     },
-    "last_valid_zone_last_price": 8.825,
-    "last_valid_zone_first_price": 8.825,
+    "last_valid_zone_last_price": 8.8,
+    "last_valid_zone_first_price": 8.8,
     "segments": [
       {
         "direction": "down",
@@ -594,14 +594,14 @@
     ],
     "merged_zones": [
       {
-        "zh_top": 9.2,
+        "zh_top": 9.15,
         "zh_bottom": 8.45,
-        "zh_center": 8.825,
+        "zh_center": 8.8,
         "members": [
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "top",
@@ -619,12 +619,12 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 26,
-                "end_index": 41,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 35,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9324000.0
               },
               {
@@ -643,20 +643,20 @@
             "valid": true
           },
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 26,
-                "end_index": 41,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 35,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9324000.0
               },
               {
@@ -675,21 +675,21 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 50,
-                "end_index": 65,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9576000.0
               }
             ],
             "valid": true
           },
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "top",
@@ -707,12 +707,12 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 50,
-                "end_index": 65,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9576000.0
               },
               {
@@ -731,20 +731,20 @@
             "valid": true
           },
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 50,
-                "end_index": 65,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9576000.0
               },
               {
@@ -763,21 +763,21 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 74,
-                "end_index": 89,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 83,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9828000.0
               }
             ],
             "valid": true
           },
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "top",
@@ -795,12 +795,12 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 74,
-                "end_index": 89,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 83,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9828000.0
               },
               {
@@ -842,12 +842,12 @@
         "start_type": "bottom",
         "start_price": 8.45,
         "end_type": "top",
-        "end_price": 9.2,
+        "end_price": 9.15,
         "direction": "up",
         "start_index": 26,
-        "end_index": 41,
-        "power_price": 0.75,
-        "length": 15,
+        "end_index": 35,
+        "power_price": 0.7,
+        "length": 9,
         "power_volume": 9324000.0
       },
       {
@@ -866,12 +866,12 @@
         "start_type": "bottom",
         "start_price": 8.45,
         "end_type": "top",
-        "end_price": 9.2,
+        "end_price": 9.15,
         "direction": "up",
         "start_index": 50,
-        "end_index": 65,
-        "power_price": 0.75,
-        "length": 15,
+        "end_index": 59,
+        "power_price": 0.7,
+        "length": 9,
         "power_volume": 9576000.0
       },
       {
@@ -890,12 +890,12 @@
         "start_type": "bottom",
         "start_price": 8.45,
         "end_type": "top",
-        "end_price": 9.2,
+        "end_price": 9.15,
         "direction": "up",
         "start_index": 74,
-        "end_index": 89,
-        "power_price": 0.75,
-        "length": 15,
+        "end_index": 83,
+        "power_price": 0.7,
+        "length": 9,
         "power_volume": 9828000.0
       },
       {
@@ -913,14 +913,14 @@
     ],
     "zones": [
       {
-        "zh_top": 9.2,
+        "zh_top": 9.15,
         "zh_bottom": 8.45,
-        "zh_center": 8.825,
+        "zh_center": 8.8,
         "members": [
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "top",
@@ -938,12 +938,12 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 26,
-                "end_index": 41,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 35,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9324000.0
               },
               {
@@ -962,20 +962,20 @@
             "valid": true
           },
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 26,
-                "end_index": 41,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 35,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9324000.0
               },
               {
@@ -994,21 +994,21 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 50,
-                "end_index": 65,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9576000.0
               }
             ],
             "valid": true
           },
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "top",
@@ -1026,12 +1026,12 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 50,
-                "end_index": 65,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9576000.0
               },
               {
@@ -1050,20 +1050,20 @@
             "valid": true
           },
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 50,
-                "end_index": 65,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9576000.0
               },
               {
@@ -1082,21 +1082,21 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 74,
-                "end_index": 89,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 83,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9828000.0
               }
             ],
             "valid": true
           },
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "top",
@@ -1114,12 +1114,12 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 74,
-                "end_index": 89,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 83,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9828000.0
               },
               {
@@ -1156,8 +1156,8 @@
       "kind": "none",
       "bc_mode": "legacy"
     },
-    "last_valid_zone_last_price": 8.825,
-    "last_valid_zone_first_price": 8.825,
+    "last_valid_zone_last_price": 8.8,
+    "last_valid_zone_first_price": 8.8,
     "segments": [
       {
         "direction": "down",
@@ -1419,14 +1419,14 @@
     ],
     "merged_zones": [
       {
-        "zh_top": 9.2,
+        "zh_top": 9.15,
         "zh_bottom": 8.45,
-        "zh_center": 8.825,
+        "zh_center": 8.8,
         "members": [
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "top",
@@ -1444,12 +1444,12 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 26,
-                "end_index": 41,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 35,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9324000.0
               },
               {
@@ -1468,20 +1468,20 @@
             "valid": true
           },
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 26,
-                "end_index": 41,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 35,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9324000.0
               },
               {
@@ -1500,21 +1500,21 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 50,
-                "end_index": 65,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9576000.0
               }
             ],
             "valid": true
           },
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "top",
@@ -1532,12 +1532,12 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 50,
-                "end_index": 65,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9576000.0
               },
               {
@@ -1556,20 +1556,20 @@
             "valid": true
           },
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 50,
-                "end_index": 65,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 59,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9576000.0
               },
               {
@@ -1588,21 +1588,21 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 74,
-                "end_index": 89,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 83,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9828000.0
               }
             ],
             "valid": true
           },
           {
-            "zh_top": 9.2,
+            "zh_top": 9.15,
             "zh_bottom": 8.45,
-            "zh_center": 8.825,
+            "zh_center": 8.8,
             "strokes": [
               {
                 "start_type": "top",
@@ -1620,12 +1620,12 @@
                 "start_type": "bottom",
                 "start_price": 8.45,
                 "end_type": "top",
-                "end_price": 9.2,
+                "end_price": 9.15,
                 "direction": "up",
                 "start_index": 74,
-                "end_index": 89,
-                "power_price": 0.75,
-                "length": 15,
+                "end_index": 83,
+                "power_price": 0.7,
+                "length": 9,
                 "power_volume": 9828000.0
               },
               {
