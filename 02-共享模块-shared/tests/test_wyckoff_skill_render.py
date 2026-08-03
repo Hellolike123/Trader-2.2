@@ -574,6 +574,57 @@ def test_sb19_weekly_are_without_bc_no_accum_sc_next():
     assert "派发未确认" in mid
 
 
+def test_weekly_failed_with_are_lamp_writes_phase_a_failed_side():
+    """B 卡 #5：周线 phase_a=failed 且有真实派发灯（ARE 无 BC）→
+    不得空「派发未确认」盖住失效；须写 Phase A 失效…｜派发侧另察。"""
+    plan = _weekly_are_without_bc_plan()
+    plan["weekly_raw"].update(
+        {
+            "phase_a_status": "failed",
+            "phase_a_range": {"status": "failed", "sc_low": 30.0},
+        }
+    )
+    plan["weekly_view"].update(
+        {
+            "phase_a_status": "failed",
+            "phase_a_range": {"status": "failed", "sc_low": 30.0},
+        }
+    )
+    text = render_wyckoff_slim(plan)
+    mid = text.split("🧭 周线 · 大阶段", 1)[1].split("⚡ 日线 · 本波", 1)[0]
+    assert "Phase A 失效" in mid
+    assert "派发侧另察" in mid
+    # 不得只剩空「派发未确认」盖住失效：失效词须打头
+    assert "派发未确认" not in mid.split("｜")[0]
+    # 派发满灯仍保留（ARE 灯事实不灭）
+    assert "● ARE（自动回落）31.78" in mid
+
+
+def test_weekly_failed_without_dist_lamp_writes_phase_a_failed_side():
+    """B 卡 #5 对称：周线 failed + 无派发灯（无 BC/ARE/SOW…）→ 直接 Phase A 失效，不写空派发。"""
+    plan = _sample_plan()
+    plan["weekly_raw"].update(
+        {
+            "phase_a_status": "failed",
+            "phase_a_range": {"status": "failed", "sc_low": 30.0},
+            "are_signal": False,
+            "bc_signal": False,
+        }
+    )
+    plan["weekly_view"].update(
+        {
+            "phase_a_status": "failed",
+            "phase_a_range": {"status": "failed", "sc_low": 30.0},
+            "bias": "bear",
+            "active_events": [],
+        }
+    )
+    text = render_wyckoff_slim(plan)
+    mid = text.split("🧭 周线 · 大阶段", 1)[1].split("⚡ 日线 · 本波", 1)[0]
+    assert "Phase A 失效" in mid
+    assert "派发未确认" not in mid
+
+
 def test_sb11_l0_slim_does_not_show_percentile_box_numbers():
     """S-B11：L0 不展示分位上下沿当箱体/雏形。"""
     text = render_wyckoff_slim(_l0_percentile_plan())

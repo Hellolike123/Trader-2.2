@@ -1143,13 +1143,20 @@ def _slim_weekly_sentence(view: dict[str, Any], raw: dict[str, Any]) -> str:
     if side == "distribution":
         lit = _slim_lit_set(_DIST_CHAIN, view, raw)
         if "ARE" in lit and "BC" not in lit:
+            # 周线 failed + 真实派发灯：不得空「派发未确认」盖住失效（wyckoff-b-card-spring-st §3 #5）
+            if is_phase_a_failed(raw) or is_phase_a_failed(view):
+                return "Phase A 失效｜派发侧另察（ARE 先亮但缺 BC 确认）"
             return "ARE（自动回落）先亮但缺 BC（购买高潮）确认｜派发未确认｜中线观望"
         main = next((code for code in _DIST_CHAIN if code in lit), "")
         if main:
             return f"{main}（{_cn(main)}）已亮{bias}｜{_slim_range_phrase(view, raw)}"
+        if is_phase_a_failed(raw) or is_phase_a_failed(view):
+            return f"Phase A 失效{bias}｜派发侧另察"
         return f"派发侧{bias}｜派发未确认｜中线观望"
 
     lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
+    if is_phase_a_failed(raw) or is_phase_a_failed(view):
+        return "Phase A 失效｜须重新寻底"
     if {"SC", "AR"}.issubset(lit):
         return f"SC后反弹{bias}，{_slim_range_phrase(view, raw)}"
     if "SC" in lit:
