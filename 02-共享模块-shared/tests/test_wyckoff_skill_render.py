@@ -576,6 +576,51 @@ def test_sb19_weekly_are_without_bc_no_accum_sc_next():
     assert "派发未确认" in mid
 
 
+def test_p1_weekly_failed_not_blank_distribution():
+    """周线 Phase A failed 且无派发灯：须写失效，禁止空「派发未确认」盖住。"""
+    plan = _sample_plan()
+    plan["weekly_raw"] = {
+        "sc_signal": True,
+        "sc_low": 63.3,
+        "sc_price": 63.3,
+        "ar_signal": False,
+        "phase_a_status": "failed",
+        "phase_a_range": {"status": "failed", "sc_low": 63.3},
+        "tr_maturity": "L0",
+        "box_display_mode": "none",
+        "measure_allowed": False,
+        "bc_signal": False,
+        "are_signal": False,
+    }
+    plan["weekly_view"] = {
+        "phase": "none",
+        "phase_label": "Phase A失效",
+        "bias": "bear",
+        "tr_maturity": "L0",
+        "box_display_mode": "none",
+        "measure_allowed": False,
+        "phase_a_status": "failed",
+        "phase_a_range": {"status": "failed", "sc_low": 63.3},
+        "active_events": ["sc"],
+        "event_detail": {"sc": {"id": "sc", "price": 63.3, "reason": "SC"}},
+        "invalidation_hint": "Phase A失效",
+        "summary_oneline": "Phase A失效，须重新寻底",
+        "cause_effect": {"up_target": None, "down_target": None},
+    }
+    text = render_wyckoff_slim(plan)
+    overview = next(ln for ln in text.splitlines() if ln.startswith("周线："))
+    assert "Phase A 失效｜须重新寻底" in overview
+    assert "派发未确认" not in overview
+    mid = text.split("🧭 周线 · 大阶段", 1)[1].split("⚡ 日线 · 本波", 1)[0]
+    assert "Phase A 失效｜须重新寻底" in mid
+    assert "旧SC 63.30（仅对照）" in mid
+    assert "● SC（卖力高潮）" in mid
+    assert "○ BC（购买高潮）" not in mid
+    story_weekly = text.split("🔮 推演", 1)[1].split("日线：", 1)[0]
+    assert "周线：Phase A 失效｜须重新寻底" in story_weekly
+    assert "派发未确认" not in story_weekly
+
+
 def test_sb11_l0_slim_does_not_show_percentile_box_numbers():
     """S-B11：L0 不展示分位上下沿当箱体/雏形。"""
     text = render_wyckoff_slim(_l0_percentile_plan())

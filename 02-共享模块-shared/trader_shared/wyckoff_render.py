@@ -1046,6 +1046,11 @@ def _format_slim_full_lights(
 
 
 def _slim_weekly_side(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    # Phase A failed 且无真实派发灯：走吸筹侧展示失效事实，勿被 bias=bear 空派发盖住
+    if is_phase_a_failed(raw) or is_phase_a_failed(view):
+        if _slim_lit_set(_DIST_CHAIN, view, raw) or _slim_is_dist_side(view, raw):
+            return "distribution"
+        return "accumulation"
     bias = str(view.get("bias") or "neutral").strip().lower()
     if _slim_is_dist_side(view, raw) or bias == "bear":
         return "distribution"
@@ -1119,6 +1124,9 @@ def _slim_phase_display(view: dict[str, Any]) -> str | None:
 def _slim_weekly_stage_short(view: dict[str, Any], raw: dict[str, Any]) -> str:
     if not view:
         return "周线数据不足"
+    if is_phase_a_failed(raw) or is_phase_a_failed(view):
+        # 与日线 fail-copy 同语义；禁止空「派发未确认」盖住失效
+        return "Phase A 失效｜须重新寻底"
     side = _slim_weekly_side(view, raw)
     bias = _BIAS_CN.get(str(view.get("bias") or "neutral"), "中性")
     if side == "distribution":
@@ -1163,6 +1171,12 @@ def _slim_weekly_tier(view: dict[str, Any], raw: dict[str, Any]) -> str:
 def _slim_weekly_sentence(view: dict[str, Any], raw: dict[str, Any]) -> str:
     if not view:
         return "周线数据不足｜无箱｜未达 L3"
+    if is_phase_a_failed(raw) or is_phase_a_failed(view):
+        ref = _slim_failed_anchor_ref(view, raw)
+        ref_tail = f"｜{ref}" if ref else ""
+        if _slim_lit_set(_DIST_CHAIN, view, raw) or _slim_is_dist_side(view, raw):
+            return f"Phase A 失效｜须重新寻底{ref_tail}｜派发侧另察"
+        return f"Phase A 失效｜须重新寻底{ref_tail}"
     bias = _BIAS_CN.get(str(view.get("bias") or "neutral"), "中性")
     side = _slim_weekly_side(view, raw)
     if side == "distribution":
@@ -1280,6 +1294,13 @@ def _slim_weekly_story_lines(view: dict[str, Any], raw: dict[str, Any]) -> dict[
             "better": "补足周线数据后再评估",
             "worse": "数据不足时不引用箱沿",
             "watch": "先补周线结构",
+        }
+    if is_phase_a_failed(raw) or is_phase_a_failed(view):
+        return {
+            "now": "Phase A 失效｜须重新寻底",
+            "better": "重新寻底后出现新 SC（卖力高潮）",
+            "worse": "继续破位则保持无箱观察",
+            "watch": "盯新 SC（卖力高潮）",
         }
     side = _slim_weekly_side(view, raw)
     chain = _DIST_CHAIN if side == "distribution" else tuple(ACCUM_CHAIN)
