@@ -1,7 +1,8 @@
 # A 股箱体灵敏度小步试验 — Handoff
 
-> **状态**: done（已合入 `main`，PR #55）  
+> **状态**: done（已合入 `main`，PR #55；归档于 `plans/done/`）  
 > **产品**：路 B —— **不改**「箱体=SC+AR+真ST」定义；只略松检测参数。  
+> **现行数值 SSOT**：`config.py` + [`../wyckoff-tr-maturity-l0l3-handoff.md`](../wyckoff-tr-maturity-l0l3-handoff.md) §4  
 > **样本**：南网科技 / 三花智控 / 顺丰控股 / 中航机载 / 德方纳米 / 顶点软件  
 > **方法**：同行情 env A/B（松前默认 vs 试验默认）对照阶段/雏形/箱体/灯。
 

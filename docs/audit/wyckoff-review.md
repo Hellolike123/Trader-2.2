@@ -15,8 +15,8 @@
 | # | 原典规则 | 代码落点 | 判定 | 证据 |
 |---|---------|---------|------|------|
 | 1 | 三大定律：供求/因果/努力结果 | `wyckoff_events._detect_effort_vs_result` / `wyckoff_core` VSA 修正 | [PASS] | L1048-1093 实现努力无结果/供应耗尽；因果律(P&F)本项目未实现（见备注） |
-| 2 | SC 卖力高潮（低位天量宽幅阴） | `wyckoff_events._detect_selling_climax` L347 | [PASS] | 量比≥1.8 + 低位过滤 + 阴线跌幅≥2% + 实体大 |
-| 3 | BC 购买高潮（高位天量滞涨） | `wyckoff_events._detect_buying_climax` L268 | [PASS] | 量比≥1.8 + 高位过滤 + 滞涨/阴线 |
+| 2 | SC 卖力高潮（低位天量宽幅阴） | `wyckoff_events._detect_selling_climax` L347 | [PASS] | 量比阈值随 `WYCKOFF_BC_VOL_RATIO_THRESHOLD`（现行默认 **1.5**，PR #55；审计当时为 1.8）+ 低位过滤 + 阴线跌幅门槛（日线现行 **-1.5%**）+ 实体大 |
+| 3 | BC 购买高潮（高位天量滞涨） | `wyckoff_events._detect_buying_climax` L268 | [PASS] | 量比同 SC/BC 阈值（现行默认 **1.5**）+ 高位过滤 + 滞涨/阴线 |
 | 4 | AR 自动反弹（BC/SC 后放量反弹） | `wyckoff_events._detect_ar` L627 | [PASS] | 记忆依赖 BC/SC 锚点，后 1-3 根 close>bc*1.02 且放量 |
 | 5 | Spring 弹簧（刺穿支撑后收回） | `wyckoff_events._detect_spring` L503 | [PASS] | ATR/固定刺穿线 + 收回到支撑上 + 量能分级 |
 | 6 | SOS 强势（连续放量突破） | `wyckoff_events._detect_sos` L718 | [PASS] | ≥4/5 阳线 + 抬高 + 量≥1.2× + 累计≥2% |
@@ -195,7 +195,7 @@ PYTHONPATH="02-共享模块-shared:01-功能包-packages/trader/scripts" \
   - 修复：对 spring/sos/lps 也加近期滑窗扫描（或维护信号滑动窗口），让阶段机基于"近 N 根内出现过的事件序列"而非"最后一根"。
 
 ### P2（备注）
-- **P2-1 硬编码阈值多为工程经验值，非原典精确数值。** 证据：`WYCKOFF_BC_VOL_RATIO_THRESHOLD # 原2.0，方案B调至1.8`、`WYCKOFF_SPRING_RECLAIM_RATIO # 每年年底需检查`。建议：集中到 config 并标注"经验值·需回测"，不要伪装成原典。
+- **P2-1 硬编码阈值多为工程经验值，非原典精确数值。** 证据：`WYCKOFF_BC_VOL_RATIO_THRESHOLD` 历经 2.0→1.8→**1.5**（PR #55）、`WYCKOFF_SPRING_RECLAIM_RATIO # 每年年底需检查`。建议：集中到 config 并标注"经验值·需回测"，不要伪装成原典；现行默认以 L0–L3 §4 / `config.py` 为准。
 - **P2-2 SC 复用 `WYCKOFF_SCORE_AR`(+10) 无独立常量，spec 也未定义 SC 分值。** 建议显式定义 `WYCKOFF_SCORE_SC` 便于调参与清晰。
 - **P2-3 `_detect_st` 支撑位为"近 10 根最低价"重算，未用 Spring 记录的 support。** 松耦合，多数情况可工作，但与原典"ST 依赖 Spring 锚点"不完全一致。
 - **P2-4 `format_wyckoff_oneline` 残留 `timeframe=="daily_fallback"` 死分支**（中线从不产出该值），清理。

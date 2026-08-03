@@ -38,5 +38,7 @@
 
 ## 若需后续调参
 
-仅在 **structure-anchor 落地且验收绿** 之后，另开手递讨论参数带（如 ST 量比、AR_MAX 数值）。  
-任何新手递若触及 SC 搜索宇宙 / 钉住 / 破位，必须 **修订 structure-anchor** 或显式声明取代它——禁止在本文件堆第二套规则。
+SC/ST **现行默认值**以 `config.py` + [`wyckoff-tr-maturity-l0l3-handoff.md`](./wyckoff-tr-maturity-l0l3-handoff.md) §4 为准。  
+PR #55 已合入小步松参（样本对照见 [`done/wyckoff-ashare-box-sensitivity-handoff.md`](./done/wyckoff-ashare-box-sensitivity-handoff.md)）；本文不重抄数值表。
+
+再调参须另开手递。任何新手递若触及 SC 搜索宇宙 / 钉住 / 破位，必须 **修订 structure-anchor** 或显式声明取代它——禁止在本文件堆第二套规则。
