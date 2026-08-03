@@ -2364,6 +2364,35 @@ class TestHigherLevelTrend:
         assert "二类买" not in types
         assert "三类买" not in types
 
+    def test_ht_up_keeps_observe_sells_drops_formal_2nd(self, monkeypatch):
+        """F3 对称：HT up 保留一类/类一/类二卖；正式二类/三类卖仍剃掉。"""
+        import trader_shared.chan_core as chan_core
+
+        fake = [
+            {"type": "一类卖", "price": 19.0, "confidence": 3},
+            {"type": "类一卖", "price": 18.9, "confidence": 1},
+            {"type": "类二卖", "price": 18.8, "confidence": 1},
+            {"type": "二类卖", "price": 18.7, "confidence": 2},
+            {"type": "三类卖", "price": 18.6, "confidence": 2},
+        ]
+        monkeypatch.setattr(chan_core, "detect_buy_points", lambda *a, **k: [])
+        monkeypatch.setattr(
+            chan_core, "detect_sell_points", lambda *a, **k: [dict(p) for p in fake]
+        )
+        bars = [
+            _make_bar(10 + i * 0.1, 11 + i * 0.1, 9 + i * 0.1, 10 + i * 0.1)
+            for i in range(30)
+        ]
+        result = chanlun_analysis(
+            bars, 10.5, higher_trend={"trend": "up", "confidence": 1.0}
+        )
+        types = [sp["type"] for sp in result.get("sell_points") or []]
+        assert "一类卖" in types
+        assert "类一卖" in types
+        assert "类二卖" in types
+        assert "二类卖" not in types
+        assert "三类卖" not in types
+
 
 class TestBuildZonesMerge:
     """E2: 中枢合并测试。"""

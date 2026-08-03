@@ -157,14 +157,21 @@ raw bars
   **禁止**用「同帧 `buy_points` 里已有一类」判定（一类要创新低、二类要不破前低，
   同一末笔几何互斥，旧实现导致二类永假）。
 - **买卖侧分层（产品 C 对称）**：正式「二类买/卖」必须历史一类 + 力度/缩量齐备；
-  历史一类不满足或力度未齐 → 降级「类二买/类二卖」（无趋势中枢仍可出类二）。
-  fusion 强多/强空 / C1「买点信号」/ 买点阶梯二档 **只认正式二类**，不认类二。
-  一类同理：严格趋势 → 一类买/卖（conf=3）；单中枢盘整背驰 → 类一买/卖（conf=2）；
-  柱序列弱确认 → 类一（conf=1）。
+  历史一类不满足或力度未齐 → 降级「类二买/类二卖」（**结构几何即可**出观察档类二，
+  `force_source=structure_only` 亦可；无趋势中枢仍可出类二）。
+  fusion 强多/强空 / C1「买点信号」/ 买点阶梯二档 / 池 `_chan_signal` **只认正式二类**，不认类二。
+  一类同理：严格趋势 + 严格离开 + 面积减弱 → 一类买/卖（conf=3）；
+  单中枢盘整背驰（严格离开）→ 类一买/卖（conf=2）；
+  观察软确认（conf=1，不升格正式一类）：柱序列弱确认 / 明确缩量
+  （`_volume_shrink_between_strokes(..., missing_ok=False)`，缺量不算）/
+  力度不显著更强 / 离开粘连仅价格穿出（`_stroke_leaves_zone_observe`）。
+  离开段对照中枢优先 `_leave_reference_zone`（笔前已完成中枢）；历史一类前置同口径，
+  **不用** sticky observe leave 升格正式二类。
 - **三类买/卖**：离开中枢后回抽不入（末 3 笔内）；现价相对 ZG/ZD 离开幅度 **≤15%**
   （买卖对称；超过则视为陈旧中枢，不报三买/三卖）；量能 ≥ 近20均量 ×1.2（不足放行）
 
 实现辅助：`_strict_down_trend_zones` / `_strict_up_trend_zones`、
+`_leave_reference_zone` / `_stroke_leaves_zone_observe`、
 `_historical_type1_buy_ok` / `_historical_type1_sell_ok`（`chan_structure.py`）。
 
 ---

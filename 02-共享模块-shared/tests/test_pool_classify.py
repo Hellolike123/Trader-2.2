@@ -283,6 +283,9 @@ def test_chan_signal_formal_only_rejects_observe():
     assert _chan_signal(
         {"chan_buy_point_types": ["二类买"]}, strategy_entry_lit=False
     ) is True
+    assert _chan_signal(
+        {"chan_buy_point_types": ["三类买"]}, strategy_entry_lit=False
+    ) is True
     # 禁止子串：不得因「一买」命中「类一买」
     assert _chan_signal(
         {"chan_buy_point_types": ["类一买"]}, strategy_entry_lit=False
@@ -290,6 +293,20 @@ def test_chan_signal_formal_only_rejects_observe():
     assert _chan_signal(
         {"chan_buy_point_types": ["一买"]}, strategy_entry_lit=False
     ) is True
+
+
+def test_chan_signal_tier_allowlist_rejects_soft():
+    """signal_tier 只认正式买档；chan_buy_soft1/like2 与 buy_xxx 杂串不得放行。"""
+    def _card(tier: str) -> dict:
+        return {"analysis_cards": {"chan": {"signal_tier": tier}}}
+
+    assert _chan_signal(_card("chan_buy_1"), strategy_entry_lit=False) is True
+    assert _chan_signal(_card("chan_buy_2"), strategy_entry_lit=False) is True
+    assert _chan_signal(_card("buy2"), strategy_entry_lit=False) is True
+    assert _chan_signal(_card("chan_buy_soft1"), strategy_entry_lit=False) is False
+    assert _chan_signal(_card("chan_buy_like2"), strategy_entry_lit=False) is False
+    assert _chan_signal(_card("buy_soft"), strategy_entry_lit=False) is False
+    assert _chan_signal(_card("buyer"), strategy_entry_lit=False) is False
 
 
 def test_ensure_lane_reclassifies_price_drift():

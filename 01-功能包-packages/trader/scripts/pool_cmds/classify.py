@@ -130,12 +130,19 @@ _FORMAL_CHAN_BUY_TYPES = frozenset({
     "一买", "二买", "三买",
     "一类买", "二类买", "三类买",
 })
+# signal_tier 只认正式买 / 短名；禁止 startswith("buy") 误放 soft/like2/杂串
+_FORMAL_CHAN_BUY_TIERS = frozenset({
+    "buy", "buy1", "buy2", "buy3", "long", "entry",
+    "chan_buy_1", "chan_buy_2", "chan_buy_3",
+    "一买", "二买", "三买",
+    "一类买", "二类买", "三类买",
+})
 
 
 def _chan_signal(report: dict[str, Any], *, strategy_entry_lit: bool) -> bool:
     """日缠真信号：策略点亮 / buy_like / 正式买点类型；不用任意 signal_tier，不用纯距离。
 
-    chan_buy_point_types 只认正式一/二/三类（含短名）；类一/类二观察档不算。
+    chan_buy_point_types / signal_tier 只认正式一/二/三类；类一/类二观察档不算。
     """
     if strategy_entry_lit:
         return True
@@ -146,9 +153,7 @@ def _chan_signal(report: dict[str, Any], *, strategy_entry_lit: bool) -> bool:
     if chan_card.get("buy_like") is True:
         return True
     tier = str(chan_card.get("signal_tier") or "").strip().lower()
-    if tier in {"buy", "buy1", "buy2", "buy3", "long", "entry"}:
-        return True
-    if tier.startswith("buy"):
+    if tier in _FORMAL_CHAN_BUY_TIERS:
         return True
     bps = report.get("chan_buy_point_types") or []
     if isinstance(bps, (list, tuple)):
