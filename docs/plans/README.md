@@ -30,9 +30,10 @@
 ### 缠论
 
 1. [`BUSINESS.md`](../../BUSINESS.md) §2.0 / §2.1  
-2. [`chanlun-skill-playbook.md`](./chanlun-skill-playbook.md) — 四关心点薄入口  
-3. [`chanlun-skill-deep-card-handoff.md`](./chanlun-skill-deep-card-handoff.md) — C-D* 母本（`impl_done`；表内 ❌ 为历史快照）  
-4. 算法：[`formulas.md`](../../02-共享模块-shared/trader_shared/formulas.md) §2–§6 / §4.1 / §9.1
+2. [`chanlun-skill-slim-b-handoff.md`](./chanlun-skill-slim-b-handoff.md) — 默认 B·中剪报告  
+3. [`chanlun-skill-playbook.md`](./chanlun-skill-playbook.md) — 四关心点薄入口  
+4. [`chanlun-skill-deep-card-handoff.md`](./chanlun-skill-deep-card-handoff.md) — C-D* 母本（`impl_done`；表内 ❌ 为历史快照）  
+5. 算法：[`formulas.md`](../../02-共享模块-shared/trader_shared/formulas.md) §2–§6 / §4.1 / §9.1
 
 ### 交易员面板
 
@@ -80,6 +81,7 @@
 
 | 文件 | 一句 |
 |------|------|
+| [`chanlun-skill-slim-b-handoff.md`](./chanlun-skill-slim-b-handoff.md) | 默认 B·中剪报告（灯/推演） |
 | [`chanlun-skill-deep-card-handoff.md`](./chanlun-skill-deep-card-handoff.md) | 四关心点 + C-D* 母本（勿标 active） |
 | [`chanlun-skill-playbook.md`](./chanlun-skill-playbook.md) | 薄入口，链到 deep-card |
 

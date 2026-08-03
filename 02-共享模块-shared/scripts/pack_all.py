@@ -250,6 +250,11 @@ META_TEMPLATES = {
         "version": "1.0.0",
         "description": "A股威科夫结构参考卡 + 池内吸筹链排序（人读，不作交易总司令）",
     },
+    "chanlun": {
+        "name": "chanlun",
+        "version": "1.0.0",
+        "description": "A股缠论 B·中剪结构报告（日线本波 + 周线副读；人读，不作交易总司令）",
+    },
 }
 
 
@@ -370,7 +375,7 @@ def main(args: list[str] | None = None) -> int:
     print(f"Release dir: {release_dir_name}/  hosts={hosts}")
 
     stages: list[tuple[str, str, Path]] = []
-    skills_to_pack = ["trader", "t0", "review", "daily_briefing", "wyckoff"]
+    skills_to_pack = ["trader", "t0", "review", "daily_briefing", "wyckoff", "chanlun"]
 
     for skill_name in skills_to_pack:
         print(f"\nStage skill: {skill_name}")

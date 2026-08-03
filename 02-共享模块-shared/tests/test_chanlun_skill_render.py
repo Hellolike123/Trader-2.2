@@ -1,9 +1,9 @@
-"""缠论 Skill 合同测试（C-D4a–c / C-D5）。"""
+"""缠论 Skill 合同测试（C-D4a–c / C-D5 / C-B* slim）。"""
 from __future__ import annotations
 
 import pytest
 
-from trader_shared.chanlun_render import render_chanlun_card
+from trader_shared.chanlun_render import render_chanlun_card, render_chanlun_slim
 from trader_shared.chanlun_run import build_chanlun_plan, build_chanlun_view
 from trader_shared.market_types import MarketSnapshot, Security
 
@@ -215,18 +215,89 @@ def test_build_plan_uses_shared_snapshot_and_both_engines(monkeypatch):
     assert plan["adjust_mode"] == "qfq"
 
 
-def test_cd5_stdout_is_wechat_safe(monkeypatch, capsys, up_view):
+def test_cd5_stdout_default_is_slim_b(monkeypatch, capsys, up_view):
+    """C-B1 / C-B5：默认 B·中剪；微信红线。"""
     from trader_shared import chanlun_run
 
     monkeypatch.setattr(chanlun_run, "build_chanlun_plan", lambda target: _plan(up_view))
+    monkeypatch.setattr(
+        chanlun_run,
+        "attach_change_and_persist_snapshot",
+        lambda plan: {**plan, "change_line": "首次记录，暂无对比"},
+    )
     assert chanlun_run.main(["--target", "测试股"]) == 0
     output = capsys.readouterr().out
-    assert output.startswith("缠论 — 测试股（600000）｜短中线结构卡")
+    assert output.startswith("测试股（600000）｜现价 12.34")
+    assert "🧭 周线 · 结构副读" in output
+    assert "⚡ 日线 · 本波" in output
+    assert "🔮 推演" in output
     assert "#" not in output
     assert "**" not in output
     assert "|" not in output
-    for forbidden in ("宜买", "可执行", "可低吸", "该买了", "三重共振买"):
+    for forbidden in ("宜买", "可执行", "可低吸", "该买了", "三重共振买", "接近一买"):
         assert forbidden not in output
+
+
+def test_cb6_brief_still_old_card(monkeypatch, capsys, up_view):
+    """C-B6：--brief 仍出旧薄卡。"""
+    from trader_shared import chanlun_run
+
+    monkeypatch.setattr(chanlun_run, "build_chanlun_plan", lambda target: _plan(up_view))
+    assert chanlun_run.main(["--target", "测试股", "--brief"]) == 0
+    output = capsys.readouterr().out
+    assert output.startswith("缠论 — 测试股（600000）｜短中线结构卡")
+    assert "📊 现况" in output
+
+
+def test_cb1_slim_six_lamps_vertical(up_view):
+    """C-B1：六灯竖排。"""
+    text = render_chanlun_slim(_plan(up_view))
+    daily = text.split("⚡ 日线 · 本波", 1)[1].split("🔮 推演", 1)[0]
+    for lamp in ("一类买", "二类买", "三类买", "一类卖", "二类卖", "三类卖"):
+        assert f"○ {lamp}" in daily or f"● {lamp}" in daily
+    # 一行一灯：正式六灯各占一行
+    lamp_lines = [ln for ln in daily.splitlines() if ln.strip().startswith(("●", "○"))]
+    assert len(lamp_lines) >= 6
+
+
+def test_cb2_no_points_all_empty_circles(up_view):
+    """C-B2：无买卖点 → 六灯全 ○；无手补。"""
+    text = render_chanlun_slim(_plan(up_view))
+    daily = text.split("⚡ 日线 · 本波", 1)[1]
+    for lamp in ("一类买", "二类买", "三类买", "一类卖", "二类卖", "三类卖"):
+        assert f"○ {lamp}" in daily
+    assert "● 一类买" not in daily
+    assert "接近一买" not in text
+
+
+def test_cb3_observe_like_appended_not_in_formal_slot():
+    """C-B3：类二买仅观察追加；正式二类买仍 ○。"""
+    like2 = _engine_result(["up", "down", "up"])
+    like2["chanlun"]["buy_points"] = [{"type": "类二买", "price": 346.16}]
+    text = render_chanlun_slim(_plan(build_chanlun_view(like2)))
+    daily = text.split("⚡ 日线 · 本波", 1)[1]
+    assert "○ 二类买" in daily
+    assert "● 类二买（观察） 346.16" in daily
+
+
+def test_cb4_midline_fallback_tagged(up_view):
+    """C-B4：daily_fallback → 周线句含（日线）。"""
+    fallback = build_chanlun_view(
+        _engine_result(["up", "down", "up"], timeframe="daily_fallback")
+    )
+    text = render_chanlun_slim(_plan(up_view, fallback))
+    weekly = text.split("🧭 周线 · 结构副读", 1)[1].split("⚡ 日线", 1)[0]
+    assert "（日线）" in weekly
+
+
+def test_slim_formal_buy_lights_and_pool(up_view):
+    with_point = _engine_result(["up", "down", "up"])
+    with_point["chanlun"]["buy_points"] = [{"type": "二类买", "price": 10.50}]
+    plan = _plan(build_chanlun_view(with_point))
+    text = render_chanlun_slim(plan)
+    assert "● 二类买 10.50" in text
+    assert "入池：建议入池" in text
+    assert "可盯" in text.splitlines()[1]
 
 
 def test_cd4e_tip_leave_demotes_stale_up_stroke():

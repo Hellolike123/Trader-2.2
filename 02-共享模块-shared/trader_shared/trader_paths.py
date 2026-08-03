@@ -26,6 +26,7 @@ PATH_KEYS (filenames under trader_root unless noted):
   last_add_dates           → last_add_dates.json
   wyckoff_phase            → wyckoff_phase.json
   wyckoff_light_snapshot   → wyckoff_light_snapshot.json  (详析卡灯变化)
+  chanlun_light_snapshot   → chanlun_light_snapshot.json  (缠论 B 卡灯变化)
   wyckoff_phase_a_anchor   → wyckoff_phase_a_anchor.json
   position                 → position.json          (T0)
   positions_portfolio      → positions.json         (review portfolio)
@@ -58,6 +59,7 @@ _FILE_BY_KEY: dict[str, str] = {
     "last_add_dates": "last_add_dates.json",
     "wyckoff_phase": "wyckoff_phase.json",
     "wyckoff_light_snapshot": "wyckoff_light_snapshot.json",
+    "chanlun_light_snapshot": "chanlun_light_snapshot.json",
     "wyckoff_phase_a_anchor": "wyckoff_phase_a_anchor.json",
     "position": "position.json",
     "positions_portfolio": "positions.json",

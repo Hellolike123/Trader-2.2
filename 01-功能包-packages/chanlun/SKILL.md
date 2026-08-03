@@ -1,11 +1,11 @@
 ---
 name: chanlun
-description: Use for A-share Chanlun daily/weekly structure cards. Run the script and paste its markdown unchanged; do not hand-write signals or issue orders.
+description: Use for A-share Chanlun B-slim structure reports (daily wave + weekly secondary read). Run the script and paste markdown unchanged; do not hand-write signals or issue orders.
 ---
 
 # Chanlun — 执行包装器
 
-缠论短中线结构卡。硬规则见 `references/agent-rules.md`。
+缠论 B·中剪结构报告（默认）+ 旧薄卡（`--brief`）。硬规则见 `references/agent-rules.md`。
 产品定位：核对日线/周线的笔、段、中枢和引擎买卖点；不改写周线威科夫中线阶段。
 
 ## 做且只做
@@ -17,6 +17,12 @@ description: Use for A-share Chanlun daily/weekly structure cards. Run the scrip
 
 ```bash
 python3 scripts/final_chanlun.py --target <NAME>
+```
+
+旧薄卡：
+
+```bash
+python3 scripts/final_chanlun.py --target <NAME> --brief
 ```
 
 仓库根 cwd 时使用：

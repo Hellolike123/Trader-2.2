@@ -1,6 +1,8 @@
 """缠论 Skill 编排：共用行情快照并调用既有缠论引擎。
 
-法源：docs/plans/done/chanlun-cd-followup-handoff.md §2.3 / §3。
+法源：
+- B·中剪：docs/plans/chanlun-skill-slim-b-handoff.md
+- 旧薄卡：docs/plans/done/chanlun-cd-followup-handoff.md §2.3 / §3
 本模块只编排和构建薄 view，不复制分型、笔、段、中枢或买卖点算法。
 """
 from __future__ import annotations
@@ -10,7 +12,12 @@ import json
 import sys
 from typing import Any
 
-from trader_shared.chanlun_render import render_chanlun_card
+from trader_shared.chanlun_render import (
+    build_chanlun_light_snapshot_entry,
+    format_chanlun_light_change,
+    render_chanlun_card,
+    render_chanlun_slim,
+)
 
 
 def _unwrap(result: Any) -> dict[str, Any]:
@@ -248,7 +255,50 @@ def _card_ok(plan: dict[str, Any]) -> bool:
     return bool(plan.get("data_ok")) and not plan.get("error")
 
 
-def run_card(target: str, *, output: str = "markdown") -> tuple[str, bool]:
+def _snapshot_key(plan: dict[str, Any]) -> str:
+    return str(plan.get("code") or plan.get("target") or "").strip()
+
+
+def attach_change_and_persist_snapshot(plan: dict[str, Any]) -> dict[str, Any]:
+    """对比灯快照 → 写入 plan['change_line'] → 写回该票快照。"""
+    from trader_shared.trader_paths import load_json, rmw_json
+
+    key = _snapshot_key(plan)
+    curr = build_chanlun_light_snapshot_entry(plan)
+    prev: dict[str, Any] | None = None
+    if key:
+        try:
+            store = load_json("chanlun_light_snapshot")
+            entry = store.get(key)
+            if isinstance(entry, dict):
+                prev = entry
+        except Exception:
+            prev = None
+
+    plan = dict(plan)
+    plan["change_line"] = format_chanlun_light_change(prev, curr)
+    plan["light_snapshot"] = curr
+
+    if key:
+
+        def _mutate(data: dict[str, Any]) -> dict[str, Any]:
+            out = dict(data) if isinstance(data, dict) else {}
+            out[key] = curr
+            return out
+
+        try:
+            rmw_json("chanlun_light_snapshot", _mutate)
+        except Exception:
+            pass
+    return plan
+
+
+def run_card(
+    target: str,
+    *,
+    output: str = "markdown",
+    brief: bool = False,
+) -> tuple[str, bool]:
     plan = build_chanlun_plan(target)
     if output == "json":
         slim = {
@@ -257,12 +307,26 @@ def run_card(target: str, *, output: str = "markdown") -> tuple[str, bool]:
             if key not in ("daily_analysis", "midline_analysis")
         }
         return json.dumps(slim, ensure_ascii=False, indent=2, default=str), _card_ok(plan)
-    return render_chanlun_card(plan), _card_ok(plan)
+
+    if brief:
+        return render_chanlun_card(plan), _card_ok(plan)
+
+    if plan.get("data_ok") and not plan.get("error"):
+        plan = attach_change_and_persist_snapshot(plan)
+    else:
+        plan = dict(plan)
+        plan.setdefault("change_line", "首次记录，暂无对比")
+    return render_chanlun_slim(plan), _card_ok(plan)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Chanlun daily/weekly structure card.")
+    parser = argparse.ArgumentParser(description="Chanlun B·中剪 / 旧薄结构卡.")
     parser.add_argument("--target", help="A-share name or code")
+    parser.add_argument(
+        "--brief",
+        action="store_true",
+        help="输出旧版薄卡（render_chanlun_card）；默认 B·中剪 slim 卡",
+    )
     parser.add_argument("--output", choices=["markdown", "json"], default="markdown")
     return parser.parse_args(argv)
 
@@ -273,7 +337,7 @@ def main(argv: list[str] | None = None) -> int:
         print("需要 --target <NAME>", file=sys.stderr)
         return 2
     try:
-        text, ok = run_card(args.target, output=args.output)
+        text, ok = run_card(args.target, output=args.output, brief=bool(args.brief))
         print(text)
         return 0 if ok else 1
     except Exception as exc:
@@ -282,6 +346,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 __all__ = [
+    "attach_change_and_persist_snapshot",
     "build_chanlun_plan",
     "build_chanlun_view",
     "main",

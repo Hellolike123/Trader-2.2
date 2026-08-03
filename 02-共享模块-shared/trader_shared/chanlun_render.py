@@ -1,8 +1,9 @@
 """缠论专项结构卡渲染（微信安全；只读引擎薄 view）。
 
-法源：docs/plans/done/chanlun-cd-followup-handoff.md §2.3 / §3；
-排版对齐威科夫详析卡：分节独立成行，买卖点前置，少堆竖线墙。
-禁止在此模块重算笔或从其他文案补出买卖点。
+法源：
+- B·中剪：docs/plans/chanlun-skill-slim-b-handoff.md
+- 旧薄卡：docs/plans/done/chanlun-cd-followup-handoff.md §2.3 / §3
+禁止在此模块重算笔或从其他文案补出买卖点；禁止抄威科夫箱体/量度语义。
 """
 from __future__ import annotations
 
@@ -25,6 +26,21 @@ _ADJUST_LABEL = {
     "unknown": "未知",
     "mixed/unknown": "混合／未知",
 }
+
+# 正式六灯（B 卡满灯竖排）；类一/类二另作观察追加
+_FORMAL_LAMPS = ("一类买", "二类买", "三类买", "一类卖", "二类卖", "三类卖")
+_FORMAL_BUY = ("一类买", "二类买", "三类买")
+_FORMAL_SELL = ("一类卖", "二类卖", "三类卖")
+_FORBIDDEN_BUY_WORDS = (
+    "可执行",
+    "宜买",
+    "去买",
+    "可低吸",
+    "三重共振买",
+    "该买了",
+    "接近一买",
+    "潜在三买",
+)
 
 
 def _fmt_price(value: Any) -> str | None:
@@ -187,4 +203,397 @@ def render_chanlun_card(plan: dict[str, Any]) -> str:
     return _wechat_safe("\n".join(lines))
 
 
-__all__ = ["render_chanlun_card"]
+def _as_view(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _collect_points(view: dict[str, Any]) -> tuple[dict[str, str], list[tuple[str, str]]]:
+    """正式 type→价；观察档 (label, price_s) 列表。只读引擎数组。"""
+    formal: dict[str, str] = {}
+    observe: list[tuple[str, str]] = []
+    for key in ("buy_points", "sell_points"):
+        points = view.get(key)
+        if not isinstance(points, list):
+            continue
+        for point in points:
+            if not isinstance(point, dict):
+                continue
+            point_type = str(point.get("type") or "").strip()
+            if not point_type:
+                continue
+            price_s = _fmt_price(point.get("price")) or ""
+            if point_type in _FORMAL_LAMPS:
+                # 同类型多点：保留第一个有价的
+                if point_type not in formal or (price_s and not formal[point_type]):
+                    formal[point_type] = price_s
+            elif point_type.startswith(_OBSERVE_TYPE_PREFIXES):
+                label = _display_point_type(point_type)
+                observe.append((label, price_s))
+    return formal, observe
+
+
+def _lit_types(view: dict[str, Any]) -> list[str]:
+    """快照用：已亮正式 + 观察 type（引擎原文）。"""
+    out: list[str] = []
+    for key in ("buy_points", "sell_points"):
+        points = view.get(key)
+        if not isinstance(points, list):
+            continue
+        for point in points:
+            if not isinstance(point, dict):
+                continue
+            point_type = str(point.get("type") or "").strip()
+            if point_type:
+                out.append(point_type)
+    return out
+
+
+def _format_lamp_lines(view: dict[str, Any]) -> list[str]:
+    formal, observe = _collect_points(view)
+    lines: list[str] = []
+    for lamp in _FORMAL_LAMPS:
+        if lamp in formal:
+            price = formal[lamp]
+            lines.append(f"● {lamp} {price}".rstrip())
+        else:
+            lines.append(f"○ {lamp}")
+    for label, price in observe:
+        lines.append(f"● {label} {price}".rstrip() if price else f"● {label}")
+    return lines
+
+
+def _has_formal(view: dict[str, Any], types: tuple[str, ...]) -> bool:
+    formal, _ = _collect_points(view)
+    return any(t in formal for t in types)
+
+
+def _primary_formal_label(view: dict[str, Any]) -> str:
+    formal, _ = _collect_points(view)
+    for lamp in _FORMAL_LAMPS:
+        if lamp in formal:
+            price = formal[lamp]
+            return f"{lamp} {price}".rstrip() if price else lamp
+    return "暂无正式买卖点"
+
+
+def _view_bias_cn(view: dict[str, Any]) -> str:
+    if not view.get("data_ok") or view.get("timeframe") == "insufficient":
+        return "中性"
+    if _has_formal(view, _FORMAL_SELL) and not _has_formal(view, _FORMAL_BUY):
+        return "偏空"
+    if _has_formal(view, _FORMAL_BUY):
+        return "偏多"
+    tip = _tip_leave_label(view)
+    if tip.startswith("高点"):
+        return "偏空"
+    if tip.startswith("低点"):
+        return "偏多"
+    direction = str(view.get("current_stroke_direction") or "")
+    if direction == "up":
+        return "偏多"
+    if direction == "down":
+        return "偏空"
+    return "中性"
+
+
+def _stance_tier(short: dict[str, Any], mid: dict[str, Any]) -> str:
+    if not short.get("data_ok") or short.get("timeframe") == "insufficient":
+        return "先别做"
+    if _has_formal(short, _FORMAL_SELL) and not _has_formal(short, _FORMAL_BUY):
+        return "先别做"
+    if _has_formal(short, _FORMAL_BUY) and not _tip_leave_label(short):
+        return "可盯"
+    _ = mid  # 周线副读不抬姿态档，只参与入池
+    return "慎做"
+
+
+def _pool_advice(short: dict[str, Any], mid: dict[str, Any]) -> str:
+    if not short.get("data_ok") or short.get("timeframe") == "insufficient":
+        return "暂不建议入池（数据不足）"
+    short_buy = _has_formal(short, _FORMAL_BUY)
+    short_sell = _has_formal(short, _FORMAL_SELL)
+    mid_sell_only = _has_formal(mid, _FORMAL_SELL) and not _has_formal(mid, _FORMAL_BUY)
+    if short_sell and not short_buy:
+        return "结构偏空，暂不建议入池"
+    if mid_sell_only and not short_buy:
+        return "结构偏空，暂不建议入池"
+    formal, _ = _collect_points(short)
+    if any(t in formal for t in ("二类买", "三类买")) and not mid_sell_only:
+        return "建议入池"
+    if "一类买" in formal and not mid_sell_only:
+        return "建议入池（日线一类买，待确认）"
+    return "暂不建议入池（无正式买点）"
+
+
+def _structure_short(view: dict[str, Any]) -> str:
+    if not view.get("data_ok") or view.get("timeframe") == "insufficient":
+        return "数据不足"
+    structure = _fmt_structure(view)
+    trend = _fmt_trend(view)
+    if structure == "数据不足":
+        return structure
+    if trend and trend != structure:
+        return f"{structure} · {trend}"
+    return structure
+
+
+def _sentence(view: dict[str, Any], *, fallback_tag: bool = False) -> str:
+    if not view.get("data_ok") or view.get("timeframe") == "insufficient":
+        return "数据不足，仅现价"
+    parts = [
+        _fmt_trend(view),
+        _fmt_structure(view),
+        f"当前{_fmt_current_direction(view)}",
+        _primary_formal_label(view),
+    ]
+    line = " · ".join(p for p in parts if p)
+    if fallback_tag or str(view.get("timeframe") or "") == "daily_fallback":
+        if "（日线）" not in line:
+            line = f"{line}（日线）"
+    return line
+
+
+def _wave_short(view: dict[str, Any]) -> str:
+    if not view.get("data_ok") or view.get("timeframe") == "insufficient":
+        return "数据不足"
+    tip = _tip_leave_label(view)
+    if tip:
+        return tip
+    primary = _primary_formal_label(view)
+    direction = _fmt_current_direction(view)
+    if primary != "暂无正式买卖点":
+        return f"{primary} · {direction}"
+    return f"{_fmt_trend(view)} · {direction}"
+
+
+def _stroke_facts(view: dict[str, Any]) -> str:
+    stroke_n = int(view.get("stroke_count") or 0)
+    return (
+        f"笔：{stroke_n}｜当前笔：{_fmt_current_direction(view)}"
+        f"｜近笔：{_fmt_recent_directions(view)}"
+    )
+
+
+def _pivot_facts(view: dict[str, Any]) -> str:
+    pivot_n = int(
+        view.get("pivot_count")
+        if view.get("pivot_count") is not None
+        else (view.get("zones_count") or 0)
+    )
+    raw_n = int(view.get("zones_count") or 0)
+    segs_n = int(view.get("segments_count") or 0)
+    return f"中枢：{pivot_n}｜窗{raw_n}｜段：{segs_n}"
+
+
+def _next_formal_focus(view: dict[str, Any]) -> str:
+    """下一关注：按一→二→三类买推进；已有买则看更高阶未形成者。"""
+    formal, _ = _collect_points(view)
+    buy_order = _FORMAL_BUY
+    lit_idx = [i for i, lamp in enumerate(buy_order) if lamp in formal]
+    if lit_idx:
+        nxt = lit_idx[-1] + 1
+        if nxt < len(buy_order):
+            return f"下一关注：{buy_order[nxt]}未形成"
+        return "正式买点已齐，盯笔破坏"
+    if _has_formal(view, _FORMAL_SELL):
+        return "下一关注：笔破坏或卖点消化"
+    return "下一关注：一类买未形成"
+
+
+def _story_lines(view: dict[str, Any], *, fallback_tag: bool = False) -> dict[str, str]:
+    if not view.get("data_ok") or view.get("timeframe") == "insufficient":
+        return {
+            "now": "数据不足",
+            "better": "补足数据后再评估",
+            "worse": "数据不足时不引用买卖点",
+            "watch": "先补数据",
+        }
+    now = _sentence(view, fallback_tag=fallback_tag)
+    primary = _primary_formal_label(view)
+    tip = _tip_leave_label(view)
+    better = (
+        f"笔结构延续且出现更高阶正式买；现 {primary}"
+        if not _has_formal(view, _FORMAL_BUY)
+        else f"正式买维持：{primary}；笔未反向破坏"
+    )
+    worse = (
+        tip
+        if tip
+        else (
+            "笔破坏或正式卖亮起"
+            if not _has_formal(view, _FORMAL_SELL)
+            else f"正式卖在场：{primary}"
+        )
+    )
+    watch = _next_formal_focus(view)
+    return {"now": now, "better": better, "worse": worse, "watch": watch}
+
+
+def format_chanlun_light_change(
+    prev: dict[str, Any] | None,
+    curr: dict[str, Any],
+) -> str:
+    """🔔 变化文案。prev 为空 → 首次记录。"""
+    if not prev:
+        return "首次记录，暂无对比"
+
+    def _codes(entry: dict[str, Any], key: str) -> set[str]:
+        vals = entry.get(key) or []
+        return {str(x) for x in vals if str(x).strip()}
+
+    prev_d = _codes(prev, "daily_points")
+    prev_w = _codes(prev, "weekly_points")
+    curr_d = _codes(curr, "daily_points")
+    curr_w = _codes(curr, "weekly_points")
+    prev_all = prev_d | {f"W:{c}" for c in prev_w}
+    curr_all = curr_d | {f"W:{c}" for c in curr_w}
+
+    def _label(token: str) -> str:
+        if token.startswith("W:"):
+            return f"周{token[2:]}"
+        return token
+
+    new_lit = sorted(curr_all - prev_all)
+    gone = sorted(prev_all - curr_all)
+    parts: list[str] = []
+    parts.append("新亮：" + ("、".join(_label(x) for x in new_lit) if new_lit else "无"))
+    parts.append("熄灭：" + ("、".join(_label(x) for x in gone) if gone else "无"))
+    return "；".join(parts)
+
+
+def build_chanlun_light_snapshot_entry(plan: dict[str, Any]) -> dict[str, Any]:
+    """从 plan 提取灯快照（不写盘）。"""
+    from datetime import datetime, timezone
+
+    short = _as_view(plan.get("short_view"))
+    mid = _as_view(plan.get("midline_view"))
+    return {
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "daily_points": _lit_types(short),
+        "weekly_points": _lit_types(mid),
+    }
+
+
+def _slim_change_line(change_line: Any) -> str | None:
+    """有新亮或熄灭才展示；首次/无变化省略。"""
+    text = str(change_line or "").strip()
+    if not text or text.startswith("首次记录"):
+        return None
+    has_new = "新亮：无" not in text and "新亮：" in text
+    has_gone = "熄灭：无" not in text and "熄灭：" in text
+    if not has_new and not has_gone:
+        return None
+    # 压缩「仍亮」若存在
+    return text
+
+
+def render_chanlun_slim(plan: dict[str, Any]) -> str:
+    """默认 B·中剪卡（--target）。"""
+    name = str(plan.get("name") or plan.get("target") or "未知")
+    code = str(plan.get("code") or "")
+    price_s = _fmt_price(plan.get("price")) or "—"
+    title = f"{name}（{code}）｜现价 {price_s}" if code else f"{name}｜现价 {price_s}"
+
+    if plan.get("error") and not plan.get("data_ok", True):
+        err = str(plan.get("error") or "数据不足")
+        lines = [
+            title,
+            "周线副读：中性｜数据不足｜先别做",
+            "日线本波：数据不足",
+            "入池：暂不建议入池（数据不足）",
+            "",
+            "🔮 推演",
+            "  现在",
+            "    周线：数据不足",
+            f"    日线：{err}",
+            "",
+            "  若变好",
+            "    周线：补足数据后再评估",
+            "    日线：补足数据后再评估",
+            "",
+            "  若变坏",
+            "    周线：数据不足时不引用买卖点",
+            "    日线：数据不足时不引用买卖点",
+            "",
+            "  ⭐ 盯",
+            "    周线：先补数据",
+            "    日线：先补数据",
+            "    本卡不下单；出手/分道看 trader；中线阶段看威科夫",
+        ]
+        return _wechat_safe("\n".join(lines))
+
+    short = _as_view(plan.get("short_view"))
+    mid = _as_view(plan.get("midline_view"))
+    mid_fallback = str(mid.get("timeframe") or "") == "daily_fallback"
+    w_bias = _view_bias_cn(mid)
+    stance = _stance_tier(short, mid)
+    pool_line = _pool_advice(short, mid)
+    w_story = _story_lines(mid, fallback_tag=mid_fallback)
+    d_story = _story_lines(short)
+
+    lines: list[str] = [
+        title,
+        f"周线副读：{w_bias}｜{_structure_short(mid)}｜{stance}",
+        f"日线本波：{_wave_short(short)}",
+        f"入池：{pool_line}",
+        "",
+        "🧭 周线 · 结构副读",
+        f"  {_sentence(mid, fallback_tag=mid_fallback)}",
+        "  灯",
+    ]
+    for lamp in _format_lamp_lines(mid):
+        lines.append(f"  {lamp}")
+
+    lines.extend(
+        [
+            "",
+            "⚡ 日线 · 本波",
+            f"  {_sentence(short)}",
+            f"  {_stroke_facts(short)}",
+            f"  {_pivot_facts(short)}",
+            "  灯",
+        ]
+    )
+    for lamp in _format_lamp_lines(short):
+        lines.append(f"  {lamp}")
+
+    change = _slim_change_line(plan.get("change_line"))
+    if change:
+        lines.extend(["", "🔔 变化", f"  {change}"])
+
+    lines.extend(
+        [
+            "",
+            "🔮 推演",
+            "  现在",
+            f"    周线：{w_story['now']}",
+            f"    日线：{d_story['now']}",
+            "",
+            "  若变好",
+            f"    周线：{w_story['better']}",
+            f"    日线：{d_story['better']}",
+            "",
+            "  若变坏",
+            f"    周线：{w_story['worse']}",
+            f"    日线：{d_story['worse']}",
+            "",
+            "  ⭐ 盯",
+            f"    周线：{w_story['watch']}",
+            f"    日线：{d_story['watch']}",
+            "    本卡不下单；出手/分道看 trader；中线阶段看威科夫",
+        ]
+    )
+
+    text = "\n".join(lines)
+    for bad in _FORBIDDEN_BUY_WORDS:
+        if bad in text:
+            text = text.replace(bad, "（结构参考）")
+    return _wechat_safe(text)
+
+
+__all__ = [
+    "build_chanlun_light_snapshot_entry",
+    "format_chanlun_light_change",
+    "render_chanlun_card",
+    "render_chanlun_slim",
+]
