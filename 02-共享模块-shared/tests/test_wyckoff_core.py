@@ -97,7 +97,7 @@ class TestDetectBuyingClimax:
     def test_bc_detected(self):
         # 准备 14 天的数据，作为 recent 平均 volume 约 100
         bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
-        # 最新一天：量比 1.9（高于 WYCKOFF_BC_VOL_RATIO_THRESHOLD=1.8），上影线明显，收阴，涨幅仅 0.5%
+        # 最新一天：量比 1.9（高于 WYCKOFF_BC_VOL_RATIO_THRESHOLD=1.5），上影线明显，收阴，涨幅仅 0.5%
         bars.append({"open": 101, "high": 105, "low": 99, "close": 100.5, "volume": 190})
         result = wyckoff_analysis(bars)
         assert result["bc_signal"] is True
@@ -105,8 +105,8 @@ class TestDetectBuyingClimax:
 
     def test_bc_not_detected_due_to_volume(self):
         bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
-        # 最新一天：量比仅 1.6（低于 1.8），不满足
-        bars.append({"open": 101, "high": 105, "low": 99, "close": 100.5, "volume": 160})
+        # 最新一天：量比仅 1.4（低于 1.5），不满足
+        bars.append({"open": 101, "high": 105, "low": 99, "close": 100.5, "volume": 140})
         result = wyckoff_analysis(bars)
         assert result["bc_signal"] is False
 
