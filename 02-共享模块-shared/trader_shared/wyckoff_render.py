@@ -32,7 +32,7 @@ _EVENT_CN: dict[str, str] = {
     "LPS": "最后支撑点",
     "SOS": "强势信号",
     "PS": "初步止跌",
-    "BC": "购买高潮",
+    "BC": "买力高潮",
     "ARE": "自动回落",
     "SOW": "弱势信号",
     "LPSY": "最后供应点",
@@ -1146,7 +1146,7 @@ def _slim_weekly_sentence(view: dict[str, Any], raw: dict[str, Any]) -> str:
             # 周线 failed + 真实派发灯：不得空「派发未确认」盖住失效（wyckoff-b-card-spring-st §3 #5）
             if is_phase_a_failed(raw) or is_phase_a_failed(view):
                 return "Phase A 失效｜派发侧另察（ARE 先亮但缺 BC 确认）"
-            return "ARE（自动回落）先亮但缺 BC（购买高潮）确认｜派发未确认｜中线观望"
+            return "ARE（自动回落）先亮但缺 BC（买力高潮）确认｜派发未确认｜中线观望"
         main = next((code for code in _DIST_CHAIN if code in lit), "")
         if main:
             return f"{main}（{_cn(main)}）已亮{bias}｜{_slim_range_phrase(view, raw)}"
@@ -1239,7 +1239,7 @@ def _slim_chain_now(
     lit = [code for code in chain if _slim_code_lit(code, view, raw)]
     if weekly and chain == _DIST_CHAIN:
         if "ARE" in lit and "BC" not in lit:
-            return "ARE（自动回落）先亮但缺 BC（购买高潮），派发未确认"
+            return "ARE（自动回落）先亮但缺 BC（买力高潮），派发未确认"
         return "→".join(lit) if lit else "派发未确认"
     if not lit:
         return "结构未明" if weekly else "本波未成型"
@@ -1268,7 +1268,7 @@ def _slim_weekly_story_lines(view: dict[str, Any], raw: dict[str, Any]) -> dict[
                 "now": now,
                 "better": "派发未确认先观望，需后续结构证伪偏空",
                 "worse": "补出 SOW（弱势信号）则派发压力加深",
-                "watch": "盯 BC（购买高潮）是否补确认，未确认则观望",
+                "watch": "盯 BC（买力高潮）是否补确认，未确认则观望",
             }
         return {
             "now": now,

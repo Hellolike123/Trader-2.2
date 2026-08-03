@@ -565,7 +565,7 @@ def test_sb19_weekly_are_without_bc_no_accum_sc_next():
     text = render_wyckoff_slim(plan)
     assert "周线：偏空｜ARE 先亮但缺 BC，派发未确认｜先别做" in text
     mid = text.split("🧭 周线 · 大阶段", 1)[1].split("⚡ 日线 · 本波", 1)[0]
-    assert "○ BC（购买高潮）" in mid
+    assert "○ BC（买力高潮）" in mid
     assert "● ARE（自动回落）31.78" in mid
     assert "○ SOW（弱势信号）" in mid
     assert "○ LPSY（最后供应点）" in mid
