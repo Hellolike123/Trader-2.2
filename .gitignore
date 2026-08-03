@@ -49,3 +49,7 @@ id_rsa.pub
 **/tushare_config.local.py
 **/config.json
 
+
+# reasonix 本地工具配置（勿提交；自动生成/频繁变更）
+reasonix.toml
+.reasonix/
