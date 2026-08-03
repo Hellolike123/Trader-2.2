@@ -42,13 +42,13 @@ def _sc_only_bars() -> list[dict]:
 
 
 def _sc_ar_no_st_bars() -> list[dict]:
-    """SC+AR，无回测 ST：SC 后 lows 始终高于 sc_low×(1+prox≈0.03)。"""
+    """SC+AR，无回测 ST：SC 后 lows 始终高于 sc_low×(1+prox≈0.045)。"""
     bars = _decline_base(14, vol=100)
-    bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC low=82；prox 上沿≈84.46
+    bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC low=82；prox 上沿≈85.69
     for i in range(3):
-        b = 85.0 + i * 0.2
-        bars.append(_bar(b, b + 0.5, b - 0.3, b + 0.1, 150))  # low≥84.7
-    bars.append(_bar(85.5, 88.0, 85.0, 87.0, 200))  # AR
+        b = 86.2 + i * 0.2
+        bars.append(_bar(b, b + 0.5, b - 0.3, b + 0.1, 150))  # low≥85.9，区外
+    bars.append(_bar(86.5, 88.0, 86.0, 87.0, 200))  # AR
     return bars
 
 
@@ -83,12 +83,12 @@ def _wide_spread_st_bars() -> list[dict]:
     bars = _decline_base(14, vol=100)
     bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC spread=3.0；cap≈2.55
     bars.append(_bar(83.5, 87.0, 85.0, 86.0, 400))   # AR
-    bars.append(_bar(85.2, 85.6, 85.0, 85.3, 120))
-    bars.append(_bar(85.1, 85.5, 84.9, 85.2, 120))
+    bars.append(_bar(86.2, 86.6, 86.0, 86.3, 120))  # 区外（prox 上沿≈85.69）
+    bars.append(_bar(86.1, 86.5, 85.9, 86.2, 120))
     # 收复阳线 + 宽波幅 4.0 > cap；后续棒不得进入 SC 区
     bars.append(_bar(82.0, 85.5, 81.5, 83.5, 800))
     for _ in range(2):
-        bars.append(_bar(85.5, 86.0, 85.2, 85.7, 110))
+        bars.append(_bar(86.5, 87.0, 86.2, 86.7, 110))
     return bars
 
 
@@ -111,7 +111,7 @@ def _st_before_ar_bars() -> list[dict]:
     bars.append(_bar(82.2, 83.2, 81.8, 82.9, 800))   # 缩量回测阳线（AR 前）
     bars.append(_bar(83.5, 87.0, 85.0, 86.0, 400))   # AR
     for _ in range(3):
-        bars.append(_bar(85.5, 86.0, 85.2, 85.7, 110))  # 站在 zone 上，无合法 ST
+        bars.append(_bar(86.5, 87.0, 86.2, 86.7, 110))  # 站在 zone 上，无合法 ST
     return bars
 
 
@@ -130,12 +130,12 @@ def _st_after_ar_bars() -> list[dict]:
 
 
 def _soft_confirm_bars() -> list[dict]:
-    """M-R6：AR 后价格一直高于 sc_low×(1+prox)，无回测。"""
+    """M-R6：AR 后价格一直高于 sc_low×(1+prox≈0.045)，无回测。"""
     bars = _decline_base(14, vol=100)
-    bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC
-    bars.append(_bar(85.0, 88.0, 85.0, 87.0, 400))   # AR，low 高于 prox
+    bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC；zone 上沿≈85.69
+    bars.append(_bar(86.5, 88.0, 86.0, 87.0, 400))   # AR，low 高于 prox
     for i in range(8):
-        b = 85.5 + (i % 3) * 0.2
+        b = 86.5 + (i % 3) * 0.2
         bars.append(_bar(b, b + 0.4, b - 0.2, b + 0.1, 120))
     return bars
 
@@ -360,15 +360,16 @@ def test_m_r8_related_pytest_smoke() -> None:
 def _sc_breakdown_then_fake_st_bars() -> list[dict]:
     """南网日线类：SC 后有效跌破未收回，再反弹；禁止把后续缩量棒当 ST。
 
-    序列：SC(low=82) → 破位(low=75, close=76<82) → AR → 假「回测」40 区上方缩量棒。
+    序列：SC(low=82) → 破位(low=75, close=76<82) → AR → 假「回测」区上方缩量棒。
+    破位棒量比须 < SC 量阈（1.5），避免被松参后误锚成新 SC。
     """
     bars = _decline_base(14, vol=100)
     bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC
-    bars.append(_bar(82.0, 82.5, 75.0, 76.0, 1800))  # 有效跌破未收回
+    bars.append(_bar(82.0, 82.5, 75.0, 76.0, 140))   # 有效跌破未收回（量比 1.4，非新 SC）
     bars.append(_bar(76.5, 87.0, 76.0, 86.0, 2000))  # AR
     bars.append(_bar(85.0, 86.5, 81.5, 86.0, 900))   # 若未整段失败会被误认 ST
     for _ in range(4):
-        bars.append(_bar(84.0, 84.5, 83.5, 84.0, 110))
+        bars.append(_bar(86.5, 87.0, 86.2, 86.6, 110))  # 站区外，不得另找假 ST
     return bars
 
 
