@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from trader_shared.chan_geometry import build_strokes
+from trader_shared.chan_geometry import build_strokes, build_zones
 
 
 def _f(typ: str, idx: int, *, high: float, low: float) -> dict:
@@ -192,3 +192,25 @@ def test_zhonghang_gap_after_deeper_bottom_then_break_top():
     ), strokes
     downs = [s for s in strokes if s["direction"] == "down"]
     assert any(abs(float(s["end_price"]) - 40.57) < 1e-6 for s in downs)
+
+
+def test_extreme_breaking_short_stroke_feeds_pivot():
+    """§2.1c + §4：破极值短笔须作为普通笔参与中枢，不得因 length<5 被丢弃。"""
+    fractions = [
+        _f("top", 0, high=20.0, low=19.0),
+        _f("bottom", 10, high=11.0, low=10.0),     # down 20→10
+        _f("top", 12, high=16.0, low=15.0),        # 近顶（距 2，未破 20）
+        _f("bottom", 13, high=9.5, low=9.0),        # 更深底（start 推进）
+        _f("top", 14, high=21.0, low=20.0),         # 更高顶破下笔起点 20 → 短上破例
+        _f("bottom", 20, high=12.0, low=11.0),
+    ]
+    strokes = build_strokes(fractions, min_bars_per_stroke=5)
+    short_up = [
+        s for s in strokes
+        if s["direction"] == "up" and int(s["length"]) < 4
+    ]
+    assert short_up, f"应有破极值短上笔，实际 strokes={strokes}"
+    zones = build_zones(strokes, merge=False)
+    assert zones, f"短笔参与后须能形成中枢，实际 strokes={strokes}"
+    assert zones[0]["valid"] is True
+    assert zones[0]["zh_top"] > zones[0]["zh_bottom"]
