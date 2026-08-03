@@ -261,8 +261,16 @@ def test_m_r2_sc_ar_no_st_l1_forbid_box() -> None:
     box = _phase_a_box_phrase(result)
     assert not _mature_box_phrase(box)
     assert "箱体" not in box
-    assert not _mature_box_phrase(format_wyckoff_daily_phase_light(result))
-    assert not _mature_box_phrase(format_wyckoff_midline_light(result))
+    daily_line = format_wyckoff_daily_phase_light(result)
+    mid_line = format_wyckoff_midline_light(result)
+    assert not _mature_box_phrase(daily_line)
+    assert not _mature_box_phrase(mid_line)
+    # L1 面板禁成熟「箱体」叙事（可写雏形）；禁量度数字
+    assert "箱体" not in daily_line
+    assert "箱体" not in mid_line
+    assert "雏形" in box or "雏形" in daily_line or "雏形" in mid_line
+    assert "量度目标" not in daily_line
+    assert "量度目标" not in mid_line
 
 
 def test_m_r3_sc_ar_st_at_least_l2_box() -> None:
@@ -277,6 +285,49 @@ def test_m_r3_sc_ar_st_at_least_l2_box() -> None:
     if result["tr_maturity"] == "L2":
         assert result["measure_allowed"] is False
         assert format_cause_effect_display(result) == ""
+
+
+def _sc_st_no_ar_bars() -> list[dict]:
+    """§1.2：成功广义 ST，但全程无有效 AR（close 从未 > sc_close×1.02）。
+
+    无 AR 时 ST 窗从 SC+3 起扫；缩量窄波幅回测阳线认 ST。
+    """
+    bars = _decline_base(14, vol=100)
+    bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC close=83 → AR 阈≈84.66
+    bars.append(_bar(83.2, 83.6, 83.0, 83.4, 120))   # SC+1：弱反弹，不开 AR
+    bars.append(_bar(83.1, 83.5, 82.9, 83.2, 120))   # SC+2
+    # ST @ SC+3：回测 SC 区 + 缩量 + 波幅≤0.85×3；close 仍 < AR 阈
+    bars.append(_bar(82.2, 83.2, 81.8, 82.9, 800))
+    for _ in range(2):
+        bars.append(_bar(83.0, 83.4, 82.8, 83.1, 110))
+    return bars
+
+
+def test_m_r_st_without_ar_stays_l1() -> None:
+    """§1.2：仅有成功 ST、无有效 ar_high → 停 L1；禁成熟箱体 / 量度。"""
+    result = wyckoff_analysis(_pad_min(_sc_st_no_ar_bars()), use_persisted_phase=False)
+    assert result.get("sc_signal") is True
+    assert result.get("ar_signal") is not True
+    assert result.get("ar_high") in (None, 0, 0.0)
+    assert result.get("secondary_test_sc_signal") is True
+    _require_gate_fields(result)
+    assert result["tr_maturity"] == "L1"
+    assert result["tr_maturity"] not in ("L2", "L3")
+    assert result["box_display_mode"] != "box"
+    assert result["box_display_mode"] == "proto"
+    assert result["measure_allowed"] is False
+    assert result.get("cause_effect_up_target") is None
+    assert result.get("cause_effect_down_target") is None
+    assert format_cause_effect_display(result) == ""
+    box = _phase_a_box_phrase(result)
+    assert not _mature_box_phrase(box)
+    assert "箱体" not in box
+    daily_line = format_wyckoff_daily_phase_light(result)
+    mid_line = format_wyckoff_midline_light(result)
+    assert not _mature_box_phrase(daily_line)
+    assert not _mature_box_phrase(mid_line)
+    assert "箱体" not in daily_line
+    assert "箱体" not in mid_line
 
 
 def test_m_r4_wide_enough_l3_measure() -> None:
@@ -401,6 +452,63 @@ def test_m_r9_breakdown_aborts_st_no_l2() -> None:
         assert bad not in daily_line
     # sc_low SSOT：保持 SC 棒低点，不被后续棒覆盖
     assert result.get("sc_low") == result.get("sc_price")
+
+
+def _sc_ar_deep_pierce_recover_st_bars() -> list[dict]:
+    """W-DIFF-7：SC+AR 后深刺穿 floor 但 close≥sc_low 收回，且满足缩量窄波幅 ST。
+
+    不改 MAX_PIERCE / VOL / SPREAD 阈值；只构造满足现合同的棒。
+    SC low=82、spread=3 → floor≈81.016；ST low 低于 floor、close≥82、波幅≤2.55。
+    """
+    from trader_shared.config import WYCKOFF_ST_SC_MAX_PIERCE
+
+    sc_low = 82.0
+    floor = sc_low * (1.0 - WYCKOFF_ST_SC_MAX_PIERCE)
+    deep_low = round(floor - 0.4, 2)  # e.g. ~80.62
+    assert deep_low < floor
+
+    bars = _decline_base(14, vol=100)
+    bars.append(_bar(84.0, 85.0, sc_low, 83.0, 2500))  # SC spread=3.0
+    bars.append(_bar(83.5, 87.0, 85.0, 86.0, 400))   # AR
+    bars.append(_bar(85.2, 85.6, 85.0, 85.3, 120))   # AR+1
+    bars.append(_bar(85.1, 85.5, 84.9, 85.2, 120))   # AR+2
+    # ST @ AR+3：深刺穿 + 收盘收回 + 缩量 + 窄波幅（high-low=2.4 ≤ 0.85×3）
+    bars.append(_bar(81.2, 83.0, deep_low, 82.4, 800))
+    for i in range(2):
+        bars.append(_bar(85.0 + i * 0.05, 85.4, 84.8, 85.2, 120))
+    return bars
+
+
+def test_w_diff7_deep_pierce_recover_allows_st() -> None:
+    """W-DIFF-7：深刺穿但 close≥sc_low → 不算破位；满足既有 ST 条件时可认 ST。
+
+    禁止写成「超刺穿一律否 ST」；本测不改阈值公式。
+    """
+    from trader_shared.config import WYCKOFF_ST_SC_MAX_PIERCE
+    from trader_shared.wyckoff_events import _detect_secondary_test_sc, _phase_a_breakdown
+
+    bars = _pad_min(_sc_ar_deep_pierce_recover_st_bars())
+    result = wyckoff_analysis(bars, use_persisted_phase=False)
+    sc_low = float(result.get("sc_low") or 82.0)
+    floor = sc_low * (1.0 - WYCKOFF_ST_SC_MAX_PIERCE)
+    st_idx = result.get("secondary_test_sc_bar_idx")
+    assert st_idx is not None
+    st_low = float(bars[int(st_idx)]["low"])
+    st_close = float(bars[int(st_idx)]["close"])
+    assert st_low < floor
+    assert st_close >= sc_low
+
+    assert _phase_a_breakdown(bars, int(result["phase_a_range"]["sc_bar_idx"]), sc_low) is None
+    assert result["phase_a_status"] != "failed"
+    assert result.get("secondary_test_sc_signal") is True
+    _require_gate_fields(result)
+    assert result["tr_maturity"] in ("L2", "L3")
+    assert result["box_display_mode"] == "box"
+    assert result["measure_allowed"] is (result["tr_maturity"] == "L3")
+
+    st = _detect_secondary_test_sc(bars, phase_a_range=result.get("phase_a_range"))
+    assert st.get("secondary_test_sc_signal") is True
+    assert st.get("phase_a_failed") is not True
 
 
 def test_sc_low_not_overwritten_by_st_refine() -> None:
