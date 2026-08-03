@@ -7,6 +7,7 @@ for mod in ("trader_shared.chan_core", "light_data"):
     if mod in sys.modules:
         del sys.modules[mod]
 
+from trader_shared.chan_geometry import _segment_range
 from trader_shared.chan_core import (
     handle_inclusion,
     find_fractions,
@@ -1649,9 +1650,7 @@ class TestBuildSegmentsFollowups:
                                 and mid["high"] < left["high"] and mid["high"] < right["high"]):
                             end_idx = i - 1
                             seg_strokes = strokes[seg_start:end_idx + 1]
-                            seg_high = max(max(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
-                            seg_low = min(min(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
-                            start_p, end_p = seg_low, seg_high
+                            start_p, end_p, seg_high, seg_low = _segment_range("up", seg_strokes)
                             segments.append({
                                 "direction": "up", "start_price": start_p, "end_price": end_p,
                                 "high": seg_high, "low": seg_low,
@@ -1681,9 +1680,7 @@ class TestBuildSegmentsFollowups:
                                 and mid["low"] > left["low"] and mid["low"] > right["low"]):
                             end_idx = i - 1
                             seg_strokes = strokes[seg_start:end_idx + 1]
-                            seg_high = max(max(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
-                            seg_low = min(min(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
-                            start_p, end_p = seg_high, seg_low
+                            start_p, end_p, seg_high, seg_low = _segment_range("down", seg_strokes)
                             segments.append({
                                 "direction": "down", "start_price": start_p, "end_price": end_p,
                                 "high": seg_high, "low": seg_low,
@@ -1698,12 +1695,7 @@ class TestBuildSegmentsFollowups:
 
         remaining = strokes[seg_start:]
         if len(remaining) >= min_strokes:
-            seg_high = max(max(ss["start_price"], ss["end_price"]) for ss in remaining)
-            seg_low = min(min(ss["start_price"], ss["end_price"]) for ss in remaining)
-            if current_direction == "up":
-                start_p, end_p = seg_low, seg_high
-            else:
-                start_p, end_p = seg_high, seg_low
+            start_p, end_p, seg_high, seg_low = _segment_range(current_direction, remaining)
             segments.append({
                 "direction": current_direction, "start_price": start_p, "end_price": end_p,
                 "high": seg_high, "low": seg_low,
@@ -1905,22 +1897,48 @@ class TestBuildSegmentsFollowups:
             assert actual == expect, f"mismatch:\n actual={actual}\n expect={expect}"
 
     def test_p01_each_segment_high_low_is_constituent_extremes(self):
-        """每段 high == 构成笔 max(start,end) 的最大值；low == min(start,end) 的最小值。"""
+        """每段 high/low/起终点与 `_segment_range`（§3.4，含共用转折笔排除）一致。"""
         for strokes in self._make_structured_inputs():
             segs = build_segments(strokes, min_strokes=3)
             for sg in segs:
                 cons = strokes[sg["start_index"]:sg["end_index"] + 1]
-                hi = max(max(s["start_price"], s["end_price"]) for s in cons)
-                lo = min(min(s["start_price"], s["end_price"]) for s in cons)
+                sp, ep, hi, lo = _segment_range(sg["direction"], cons)
                 assert sg["high"] == hi
                 assert sg["low"] == lo
-                # start/end_price 与方向一致：用段内极值（§3.4），非首末笔 min/max
-                if sg["direction"] == "up":
-                    assert sg["start_price"] == lo
-                    assert sg["end_price"] == hi
-                else:
-                    assert sg["start_price"] == hi
-                    assert sg["end_price"] == lo
+                assert sg["start_price"] == sp
+                assert sg["end_price"] == ep
+
+    def test_shared_pivot_stroke_excludes_far_extreme(self):
+        """向下未完成段共用上一向上转折笔时，不得把该上笔起点旧低算进本段 end。"""
+        strokes = [
+            {"direction": "up", "start_price": 67.2, "end_price": 658.8},
+            {"direction": "down", "start_price": 658.8, "end_price": 506.0},
+            {"direction": "up", "start_price": 506.0, "end_price": 1416.88},
+        ]
+        # 人为构造：先一段向上终结，再收尾向下段——用足够特征序列让上段先结束
+        long_up = [
+            {"direction": "down", "start_price": 170.0, "end_price": 85.0},
+            {"direction": "up", "start_price": 85.0, "end_price": 120.0},
+            {"direction": "down", "start_price": 120.0, "end_price": 95.0},
+            {"direction": "up", "start_price": 95.0, "end_price": 190.0},
+            {"direction": "down", "start_price": 190.0, "end_price": 110.0},
+            {"direction": "up", "start_price": 110.0, "end_price": 160.0},
+            {"direction": "down", "start_price": 160.0, "end_price": 100.0},
+            {"direction": "up", "start_price": 100.0, "end_price": 180.0},
+            {"direction": "down", "start_price": 180.0, "end_price": 90.0},
+            {"direction": "up", "start_price": 90.0, "end_price": 110.0},
+            {"direction": "down", "start_price": 110.0, "end_price": 67.2},
+            {"direction": "up", "start_price": 67.2, "end_price": 658.8},
+            {"direction": "down", "start_price": 658.8, "end_price": 506.0},
+            {"direction": "up", "start_price": 506.0, "end_price": 1416.88},
+        ]
+        segs = build_segments(long_up, min_strokes=3)
+        assert len(segs) >= 2
+        last = segs[-1]
+        if last["direction"] == "down":
+            assert last["low"] >= 506.0 - 1e-6
+            assert abs(last["end_price"] - last["low"]) < 1e-6
+            assert last["end_price"] > 67.2 + 1.0  # 不得落到共用上笔旧低 67.2
 
     def test_p02_merge_non_contain_is_inplace(self):
         """_merge_char_element 非合并分支原地 append（O(1)），合并分支也原地修改。"""

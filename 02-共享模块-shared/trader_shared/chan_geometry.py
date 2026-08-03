@@ -356,25 +356,36 @@ def _reverse_breaks_prior_extreme(
 
     上一笔向下后出现更高顶、或上一笔向上后出现更低底，即使 K 线距不足
     也可成笔——否则护栏禁延伸后会留下价格断层并丢掉中间结构。
-    仅当当前起点仍锚在上一笔终点时生效（尚未被推到更极端同向）。
+
+    起点可已推到更极端同向（更深底/更高顶），只要仍在上一笔终点一侧延续
+    （下笔后 start.low <= last.end；上笔后 start.high >= last.end）。
+    实盘中航光电：底@216→近顶未破→更深底@220→顶@221 破 42.64，
+    若仍要求 start 锚在 216 会漏掉短上笔并留下 40.74→38.62 断层。
     """
     if not strokes:
         return False
     last = strokes[-1]
     try:
-        if int(start.get("index")) != int(last.get("end_index")):
-            return False
+        start_i = int(start.get("index"))
+        last_ei = int(last.get("end_index"))
         last_sp = float(last.get("start_price"))
+        last_ep = float(last.get("end_price"))
         last_dir = str(last.get("direction") or "")
     except (TypeError, ValueError):
         return False
-    if last_dir == "down" and reverse.get("type") == "top":
+    if start_i < last_ei:
+        return False
+    if last_dir == "down" and start.get("type") == "bottom" and reverse.get("type") == "top":
         try:
+            if float(start["low"]) > last_ep + 1e-9:
+                return False
             return float(reverse["high"]) > last_sp + 1e-9
         except (TypeError, ValueError, KeyError):
             return False
-    if last_dir == "up" and reverse.get("type") == "bottom":
+    if last_dir == "up" and start.get("type") == "top" and reverse.get("type") == "bottom":
         try:
+            if float(start["high"]) < last_ep - 1e-9:
+                return False
             return float(reverse["low"]) < last_sp - 1e-9
         except (TypeError, ValueError, KeyError):
             return False
@@ -624,14 +635,50 @@ def _merge_char_element(
     return seq, char_direction
 
 def _segment_endpoints(direction: str, seg_high: float, seg_low: float) -> tuple[float, float]:
-    """线段起终点与方向一致：用段内极值，不用首末笔 min/max。
-
-    旧逻辑取首笔 min/max + 末笔 max/min，未完成段常出现「向上段 end<start」
-    （如南网 up 52→45）或「向下段 end>start」，与 direction 拧句。
-    """
+    """线段起终点与方向一致：向上 low→high，向下 high→low。"""
     if direction == "up":
         return float(seg_low), float(seg_high)
     return float(seg_high), float(seg_low)
+
+
+def _segment_range(direction: str, run_strokes: list[dict]) -> tuple[float, float, float, float]:
+    """由段内笔计算 (start_p, end_p, high, low)。
+
+    新段与上一笔共用转折笔时，首笔方向与段方向相反——其远端极值属于上一段，
+    不得并进本段高低（中际旭创周线：向下未完成段若计入共用上笔起点 67.2，
+    会显示 1416→67.2 假摔；应排除后为 1416→506）。
+    """
+    if not run_strokes:
+        return 0.0, 0.0, 0.0, 0.0
+    first = run_strokes[0]
+    raw_high = max(max(float(s["start_price"]), float(s["end_price"])) for s in run_strokes)
+    raw_low = min(min(float(s["start_price"]), float(s["end_price"])) for s in run_strokes)
+    if (
+        direction == "down"
+        and first.get("direction") == "up"
+        and len(run_strokes) > 1
+    ):
+        rest = run_strokes[1:]
+        hi = max(
+            float(first["end_price"]),
+            max(max(float(s["start_price"]), float(s["end_price"])) for s in rest),
+        )
+        lo = min(min(float(s["start_price"]), float(s["end_price"])) for s in rest)
+        return hi, lo, hi, lo
+    if (
+        direction == "up"
+        and first.get("direction") == "down"
+        and len(run_strokes) > 1
+    ):
+        rest = run_strokes[1:]
+        lo = min(
+            float(first["end_price"]),
+            min(min(float(s["start_price"]), float(s["end_price"])) for s in rest),
+        )
+        hi = max(max(float(s["start_price"]), float(s["end_price"])) for s in rest)
+        return lo, hi, hi, lo
+    start_p, end_p = _segment_endpoints(direction, raw_high, raw_low)
+    return start_p, end_p, raw_high, raw_low
 
 
 def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: bool | None = None) -> list[dict]:
@@ -648,7 +695,7 @@ def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: boo
     - A-2：双侧分型（缠论 1.2 合规，与 find_fractions 一致）——底/顶分型需同时满足
       low 与 high 两侧（middle 整体在单侧之外），单侧假分型（仅 low 达标而 high 不达标）
       不再终结线段，减少误判与包含处理导致的假终结
-    - 起终点：向上 ``low→high``、向下 ``high→low``（段内 run 极值；见 ``_segment_endpoints``）
+    - 起终点：向上 ``low→high``、向下 ``high→low``（``_segment_range``；共用转折笔排除远端）
 
     包含处理规则（与 K 线包含一致）：
     - 两根特征序列元素重叠时，按方向合并
@@ -754,13 +801,15 @@ def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: boo
                     if (mid["low"] < left["low"] and mid["low"] < right["low"]
                             and mid["high"] < left["high"] and mid["high"] < right["high"]):
                         end_idx = i - 1
-                        start_p, end_p = _segment_endpoints("up", run_high, run_low)
+                        start_p, end_p, seg_hi, seg_lo = _segment_range(
+                            "up", strokes[seg_start: end_idx + 1]
+                        )
                         segments.append({
                             "direction": "up",
                             "start_price": start_p,
                             "end_price": end_p,
-                            "high": run_high,
-                            "low": run_low,
+                            "high": seg_hi,
+                            "low": seg_lo,
                             "start_index": seg_start,
                             "end_index": end_idx,
                             "strokes_count": end_idx - seg_start + 1,
@@ -804,13 +853,15 @@ def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: boo
                     if (mid["high"] > left["high"] and mid["high"] > right["high"]
                             and mid["low"] > left["low"] and mid["low"] > right["low"]):
                         end_idx = i - 1
-                        start_p, end_p = _segment_endpoints("down", run_high, run_low)
+                        start_p, end_p, seg_hi, seg_lo = _segment_range(
+                            "down", strokes[seg_start: end_idx + 1]
+                        )
                         segments.append({
                             "direction": "down",
                             "start_price": start_p,
                             "end_price": end_p,
-                            "high": run_high,
-                            "low": run_low,
+                            "high": seg_hi,
+                            "low": seg_lo,
                             "start_index": seg_start,
                             "end_index": end_idx,
                             "strokes_count": end_idx - seg_start + 1,
@@ -837,13 +888,13 @@ def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: boo
     # 收尾：如果最后一段至少有 min_strokes 笔，追加（run 已覆盖 strokes[seg_start:]）
     remaining = strokes[seg_start:]
     if len(remaining) >= min_strokes:
-        start_p, end_p = _segment_endpoints(current_direction, run_high, run_low)
+        start_p, end_p, seg_hi, seg_lo = _segment_range(current_direction, remaining)
         segments.append({
             "direction": current_direction,
             "start_price": start_p,
             "end_price": end_p,
-            "high": run_high,
-            "low": run_low,
+            "high": seg_hi,
+            "low": seg_lo,
             "start_index": seg_start,
             "end_index": len(strokes) - 1,
             "strokes_count": len(remaining),

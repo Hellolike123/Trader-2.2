@@ -160,3 +160,35 @@ def test_short_down_breaks_prior_up_extreme():
     )
     for a, b in zip(strokes, strokes[1:]):
         assert abs(float(a["end_price"]) - float(b["start_price"])) < 1e-9
+
+
+def test_zhonghang_gap_after_deeper_bottom_then_break_top():
+    """中航光电日线形：下笔后近顶未破 → 更深底 → 短距更高顶破起点。
+
+    旧 §2.1c 要求 start 锚在上一笔终点，起点推到更深底后漏掉 42.99 短上笔，
+    留下 down 40.74 → up 38.62 断层。
+    """
+    fractions = [
+        _f("bottom", 206, high=38.0, low=37.5),
+        _f("top", 212, high=42.64, low=41.0),
+        _f("bottom", 216, high=41.48, low=40.74),   # down 终点
+        _f("top", 218, high=42.22, low=41.41),      # 近顶未破 42.64
+        _f("bottom", 220, high=42.0, low=40.57),     # 更深底（start 被推离 216）
+        _f("top", 221, high=42.99, low=41.63),      # 破极值短顶
+        _f("bottom", 229, high=39.03, low=38.62),
+        _f("top", 235, high=41.91, low=40.0),
+    ]
+    strokes = build_strokes(fractions, min_bars_per_stroke=5)
+    for a, b in zip(strokes, strokes[1:]):
+        assert abs(float(a["end_price"]) - float(b["start_price"])) < 1e-9, (
+            f"断层 {a['end_price']}→{b['start_price']} strokes={strokes}"
+        )
+    # 更深底衔接后短上笔到 42.99，再下到 38.62（连续，不再 40.74 跳空起笔）
+    assert any(
+        s["direction"] == "up"
+        and abs(float(s["start_price"]) - 40.57) < 1e-6
+        and abs(float(s["end_price"]) - 42.99) < 1e-6
+        for s in strokes
+    ), strokes
+    downs = [s for s in strokes if s["direction"] == "down"]
+    assert any(abs(float(s["end_price"]) - 40.57) < 1e-6 for s in downs)
