@@ -888,6 +888,10 @@ def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: boo
     # 收尾：如果最后一段至少有 min_strokes 笔，追加（run 已覆盖 strokes[seg_start:]）
     remaining = strokes[seg_start:]
     if len(remaining) >= min_strokes:
+        if _absorb_unfinished_down_at_high(
+            segments, strokes, remaining, current_direction
+        ):
+            return segments
         direction = _unfinished_segment_direction(
             current_direction, remaining, prior_segments=len(segments)
         )
@@ -906,6 +910,55 @@ def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: boo
     return segments
 
 
+def _absorb_unfinished_down_at_high(
+    segments: list[dict],
+    strokes: list[dict],
+    remaining: list[dict],
+    current_direction: str,
+) -> bool:
+    """§3.5b：形成中下行段已回到片段高点时的收尾处理。
+
+    - 若末笔创出上一向上段新高 → 并回上一上段（中际旭创周线 1416）
+    - 若未破前高 → 不输出该未完成下行（中科曙光周线 113<128）
+    返回 True 表示已处理完毕，调用方应直接 ``return segments``。
+    """
+    if not (
+        segments
+        and current_direction == "down"
+        and remaining
+        and remaining[-1].get("direction") == "up"
+    ):
+        return False
+    try:
+        last_ep = float(remaining[-1]["end_price"])
+        frag_high = max(
+            max(float(s["start_price"]), float(s["end_price"])) for s in remaining
+        )
+    except (TypeError, ValueError, KeyError):
+        return False
+    if abs(last_ep - frag_high) > 1e-9:
+        return False
+    prev = segments[-1]
+    if prev.get("direction") != "up":
+        return False
+    try:
+        prev_end = float(prev["end_price"])
+        prev_si = int(prev["start_index"])
+    except (TypeError, ValueError, KeyError):
+        return False
+    if last_ep > prev_end + 1e-9:
+        ext = strokes[prev_si:]
+        sp, ep, hi, lo = _segment_range("up", ext)
+        prev["start_price"] = sp
+        prev["end_price"] = ep
+        prev["high"] = hi
+        prev["low"] = lo
+        prev["end_index"] = len(strokes) - 1
+        prev["strokes_count"] = len(strokes) - prev_si
+    # 无论是否并回，都不再追加未完成下行段
+    return True
+
+
 def _unfinished_segment_direction(
     claimed: str,
     remaining: list[dict],
@@ -918,7 +971,7 @@ def _unfinished_segment_direction(
     实盘华工周线：首段判 down 后一路创新高至 187，整段仍输出
     ``down 187→22``——与净走势拧句。仅当尚无已完成段（整段都是未完成）
     且末笔已突破段首极值时，按净走势翻转展示方向。
-    已有完成段后的「形成中反向段」（如中际 1416→506）不翻转。
+    已有完成段后的形成中下行@高点见 ``_absorb_unfinished_down_at_high``（§3.5b）。
     """
     if prior_segments > 0 or not remaining or claimed not in ("up", "down"):
         return claimed

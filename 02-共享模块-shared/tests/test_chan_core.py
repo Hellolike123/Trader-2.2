@@ -7,7 +7,11 @@ for mod in ("trader_shared.chan_core", "light_data"):
     if mod in sys.modules:
         del sys.modules[mod]
 
-from trader_shared.chan_geometry import _segment_range, _unfinished_segment_direction
+from trader_shared.chan_geometry import (
+    _absorb_unfinished_down_at_high,
+    _segment_range,
+    _unfinished_segment_direction,
+)
 from trader_shared.chan_core import (
     handle_inclusion,
     find_fractions,
@@ -1695,6 +1699,10 @@ class TestBuildSegmentsFollowups:
 
         remaining = strokes[seg_start:]
         if len(remaining) >= min_strokes:
+            if _absorb_unfinished_down_at_high(
+                segments, strokes, remaining, current_direction
+            ):
+                return segments
             direction = _unfinished_segment_direction(
                 current_direction, remaining, prior_segments=len(segments)
             )
@@ -1940,14 +1948,22 @@ class TestBuildSegmentsFollowups:
             and abs(float(segs[0]["start_price"]) - 187.66) < 1e-6
         )
 
-    def test_shared_pivot_stroke_excludes_far_extreme(self):
-        """向下未完成段共用上一向上转折笔时，不得把该上笔起点旧低算进本段 end。"""
-        strokes = [
+    def test_segment_range_shared_pivot_excludes_old_low(self):
+        """_segment_range：下行段共用上转折笔时排除该笔起点旧低。"""
+        run = [
             {"direction": "up", "start_price": 67.2, "end_price": 658.8},
             {"direction": "down", "start_price": 658.8, "end_price": 506.0},
-            {"direction": "up", "start_price": 506.0, "end_price": 1416.88},
+            {"direction": "up", "start_price": 506.0, "end_price": 600.0},
         ]
-        # 人为构造：先一段向上终结，再收尾向下段——用足够特征序列让上段先结束
+        sp, ep, hi, lo = _segment_range("down", run)
+        assert lo == 506.0
+        assert ep == 506.0
+        assert hi == 658.8 or hi == 600.0
+        assert sp == hi
+        assert ep > 67.2 + 1.0
+
+    def test_forming_down_new_high_merges_into_prior_up(self):
+        """§3.5b 中际形：形成中下行又创出上一上段新高 → 并回上段。"""
         long_up = [
             {"direction": "down", "start_price": 170.0, "end_price": 85.0},
             {"direction": "up", "start_price": 85.0, "end_price": 120.0},
@@ -1965,12 +1981,34 @@ class TestBuildSegmentsFollowups:
             {"direction": "up", "start_price": 506.0, "end_price": 1416.88},
         ]
         segs = build_segments(long_up, min_strokes=3)
-        assert len(segs) >= 2
+        assert len(segs) >= 1
         last = segs[-1]
-        if last["direction"] == "down":
-            assert last["low"] >= 506.0 - 1e-6
-            assert abs(last["end_price"] - last["low"]) < 1e-6
-            assert last["end_price"] > 67.2 + 1.0  # 不得落到共用上笔旧低 67.2
+        assert last["direction"] == "up"
+        assert float(last["end_price"]) >= 1416.88 - 1e-6
+        assert not any(s["direction"] == "down" and abs(float(s["start_price"]) - 1416.88) < 1e-6 for s in segs)
+
+    def test_forming_down_below_prior_high_omitted(self):
+        """§3.5b 中科曙光周线形：形成中下行回到局部高但未破前高 → 不输出该段。"""
+        # 先构造可终结的上段，再给一段未完成下行（末笔回到片段高 113 < 前高 128）
+        strokes = [
+            {"direction": "up", "start_price": 58.7, "end_price": 90.0},
+            {"direction": "down", "start_price": 90.0, "end_price": 70.0},
+            {"direction": "up", "start_price": 70.0, "end_price": 100.0},
+            {"direction": "down", "start_price": 100.0, "end_price": 80.0},
+            {"direction": "up", "start_price": 80.0, "end_price": 110.0},
+            {"direction": "down", "start_price": 110.0, "end_price": 85.0},
+            {"direction": "up", "start_price": 85.0, "end_price": 128.12},
+            {"direction": "down", "start_price": 128.12, "end_price": 77.77},
+            {"direction": "up", "start_price": 77.77, "end_price": 113.0},
+        ]
+        segs = build_segments(strokes, min_strokes=3)
+        assert segs
+        assert segs[-1]["direction"] == "up"
+        assert float(segs[-1]["end_price"]) == 128.12
+        assert not any(
+            s["direction"] == "down" and abs(float(s["high"]) - 113.0) < 1e-6
+            for s in segs
+        )
 
     def test_p02_merge_non_contain_is_inplace(self):
         """_merge_char_element 非合并分支原地 append（O(1)），合并分支也原地修改。"""
