@@ -1382,6 +1382,27 @@ class TestBuildSegments:
         assert segs[0]["end_price"] == 25
         assert segs[0]["strokes_count"] == 3
 
+    def test_segment_endpoints_match_direction_via_run_extremes(self):
+        """未完成向上段末笔回落时：起终点仍用段内极值（low→high），禁止 end<start。"""
+        strokes = [
+            {"direction": "up",   "start_price": 50, "end_price": 70},
+            {"direction": "down", "start_price": 70, "end_price": 55},
+            {"direction": "up",   "start_price": 55, "end_price": 68},
+            {"direction": "down", "start_price": 68, "end_price": 40},
+            {"direction": "up",   "start_price": 40, "end_price": 45},  # 末笔弱反弹
+        ]
+        segs = build_segments(strokes, min_strokes=3)
+        assert len(segs) >= 1
+        last = segs[-1]
+        if last["direction"] == "up":
+            assert last["start_price"] <= last["end_price"]
+            assert last["start_price"] == last["low"]
+            assert last["end_price"] == last["high"]
+        else:
+            assert last["start_price"] >= last["end_price"]
+            assert last["start_price"] == last["high"]
+            assert last["end_price"] == last["low"]
+
     def test_minimal_down_segment(self):
         """3 笔构成最小向下线段（下-上-下）。"""
         strokes = [
@@ -1630,8 +1651,7 @@ class TestBuildSegmentsFollowups:
                             seg_strokes = strokes[seg_start:end_idx + 1]
                             seg_high = max(max(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
                             seg_low = min(min(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
-                            start_p = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
-                            end_p = max(strokes[end_idx]["start_price"], strokes[end_idx]["end_price"])
+                            start_p, end_p = seg_low, seg_high
                             segments.append({
                                 "direction": "up", "start_price": start_p, "end_price": end_p,
                                 "high": seg_high, "low": seg_low,
@@ -1663,8 +1683,7 @@ class TestBuildSegmentsFollowups:
                             seg_strokes = strokes[seg_start:end_idx + 1]
                             seg_high = max(max(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
                             seg_low = min(min(ss["start_price"], ss["end_price"]) for ss in seg_strokes)
-                            start_p = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
-                            end_p = min(strokes[end_idx]["start_price"], strokes[end_idx]["end_price"])
+                            start_p, end_p = seg_high, seg_low
                             segments.append({
                                 "direction": "down", "start_price": start_p, "end_price": end_p,
                                 "high": seg_high, "low": seg_low,
@@ -1679,14 +1698,12 @@ class TestBuildSegmentsFollowups:
 
         remaining = strokes[seg_start:]
         if len(remaining) >= min_strokes:
-            if current_direction == "up":
-                start_p = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
-                end_p = max(strokes[-1]["start_price"], strokes[-1]["end_price"])
-            else:
-                start_p = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
-                end_p = min(strokes[-1]["start_price"], strokes[-1]["end_price"])
             seg_high = max(max(ss["start_price"], ss["end_price"]) for ss in remaining)
             seg_low = min(min(ss["start_price"], ss["end_price"]) for ss in remaining)
+            if current_direction == "up":
+                start_p, end_p = seg_low, seg_high
+            else:
+                start_p, end_p = seg_high, seg_low
             segments.append({
                 "direction": current_direction, "start_price": start_p, "end_price": end_p,
                 "high": seg_high, "low": seg_low,
@@ -1897,17 +1914,13 @@ class TestBuildSegmentsFollowups:
                 lo = min(min(s["start_price"], s["end_price"]) for s in cons)
                 assert sg["high"] == hi
                 assert sg["low"] == lo
-                # start/end_price 方向与公式一致
+                # start/end_price 与方向一致：用段内极值（§3.4），非首末笔 min/max
                 if sg["direction"] == "up":
-                    assert sg["start_price"] == min(strokes[sg["start_index"]]["start_price"],
-                                                    strokes[sg["start_index"]]["end_price"])
-                    assert sg["end_price"] == max(strokes[sg["end_index"]]["start_price"],
-                                                  strokes[sg["end_index"]]["end_price"])
+                    assert sg["start_price"] == lo
+                    assert sg["end_price"] == hi
                 else:
-                    assert sg["start_price"] == max(strokes[sg["start_index"]]["start_price"],
-                                                    strokes[sg["start_index"]]["end_price"])
-                    assert sg["end_price"] == min(strokes[sg["end_index"]]["start_price"],
-                                                  strokes[sg["end_index"]]["end_price"])
+                    assert sg["start_price"] == hi
+                    assert sg["end_price"] == lo
 
     def test_p02_merge_non_contain_is_inplace(self):
         """_merge_char_element 非合并分支原地 append（O(1)），合并分支也原地修改。"""

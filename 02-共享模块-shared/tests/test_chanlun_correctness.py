@@ -22,29 +22,37 @@ from trader_shared.testing.mock_seam import apply_seam, gen_bars
 
 
 def test_stroke_takes_first_qualifying_not_most_extreme():
-    """笔终点应是第一个距离合格的反向分型，不是最极端的那个。
+    """初选：第一个合格反向成笔；若后续更高顶成为下一笔起点，§2.1a 衔接延伸上一笔。
 
     序列：底@0 → 顶@5(高12) → 顶@8(高15) → 底@20。
-    缠论：从底@0 出发，第一个合格反向分型是顶@5（高12）即止笔；
-    若错误地延伸到最极端，会取到顶@8（高15），吞掉独立笔。
+    从底@0 初选终点是顶@5；形成向下笔前起点抬到顶@8 时，衔接把上一笔 end 延到 15，
+    保证价格连续（不再保留 12→15 断层）。
     """
     fractions = [
         {"type": "bottom", "index": 0, "low": 10.0, "high": 10.5, "close": 10.2},
-        {"type": "top", "index": 5, "high": 12.0, "low": 11.5, "close": 11.8},  # 第一个合格反向
-        {"type": "top", "index": 8, "high": 15.0, "low": 14.5, "close": 14.8},  # 更极端但更靠后
+        {"type": "top", "index": 5, "high": 12.0, "low": 11.5, "close": 11.8},  # 初选合格反向
+        {"type": "top", "index": 8, "high": 15.0, "low": 14.5, "close": 14.8},  # 下一笔起点抬高
         {"type": "bottom", "index": 20, "low": 8.0, "high": 8.5, "close": 8.2},
     ]
     result = build_strokes(fractions, min_bars_per_stroke=5)
     assert len(result) == 2, f"应成 2 笔，实际 {len(result)}"
-    # 第一笔终点必须是第一个合格反向分型（高12），而非最极端（高15）
-    assert result[0]["end_price"] == 12.0, (
-        f"笔终点取了最极端端点（错误），应为第一个合格反向分型 12.0，"
-        f"实际 {result[0]['end_price']}"
-    )
     assert result[0]["end_type"] == "top"
-    # 第二笔：顶@8 → 底@20
+    assert result[0]["end_price"] == 15.0
     assert result[1]["start_price"] == 15.0
     assert result[1]["end_price"] == 8.0
+    assert abs(float(result[0]["end_price"]) - float(result[1]["start_price"])) < 1e-9
+
+
+def test_stroke_single_qualifying_top_keeps_first_end():
+    """仅一个合格反向顶、无后续分型：终点就是该顶（初选规则）。"""
+    fractions = [
+        {"type": "bottom", "index": 0, "low": 10.0, "high": 10.5, "close": 10.2},
+        {"type": "top", "index": 5, "high": 12.0, "low": 11.5, "close": 11.8},
+    ]
+    result = build_strokes(fractions, min_bars_per_stroke=5)
+    assert len(result) == 1
+    assert result[0]["end_price"] == 12.0
+    assert result[0]["end_index"] == 5
 
 
 def _make_bars(n, old_div_at=None, recent_div_at=None):

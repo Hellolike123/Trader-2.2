@@ -304,6 +304,93 @@ def _higher_level_trend(bars: list[dict], chunk: int = 5, weekly_bars: list[dict
         result["confidence"] = 0.5
     return result
 
+def _stroke_extend_allowed(
+    stroke: dict,
+    new_index: int,
+    fractions: list[dict],
+) -> bool:
+    """笔终点延伸护栏：禁止跨过「破坏单向极值」的反向分型。
+
+    向下笔延伸时，(old_end, new_idx) 内若出现 high > 笔起点的顶 → 禁止
+   （否则会吞掉中间冲高，如华工 181→90 跨过 187 顶）。
+    向上笔对称：禁止跨过 low < 笔起点的底。
+    南网式「更深底 + 中间更低顶」仍允许（顶未破笔起点）。
+    """
+    try:
+        old_ei = int(stroke.get("end_index"))
+        start_px = float(stroke.get("start_price"))
+        direction = str(stroke.get("direction") or "")
+        new_i = int(new_index)
+    except (TypeError, ValueError):
+        return False
+    if new_i <= old_ei or start_px <= 0 or direction not in ("up", "down"):
+        return False
+    for f in fractions:
+        try:
+            fi = int(f.get("index"))
+        except (TypeError, ValueError):
+            continue
+        if not (old_ei < fi < new_i):
+            continue
+        if direction == "down" and f.get("type") == "top":
+            try:
+                if float(f["high"]) > start_px + 1e-9:
+                    return False
+            except (TypeError, ValueError, KeyError):
+                return False
+        if direction == "up" and f.get("type") == "bottom":
+            try:
+                if float(f["low"]) < start_px - 1e-9:
+                    return False
+            except (TypeError, ValueError, KeyError):
+                return False
+    return True
+
+
+def _reverse_breaks_prior_extreme(
+    strokes: list[dict],
+    start: dict,
+    reverse: dict,
+) -> bool:
+    """§2.1c：短距反向分型是否破坏上一笔起点极值。
+
+    上一笔向下后出现更高顶、或上一笔向上后出现更低底，即使 K 线距不足
+    也可成笔——否则护栏禁延伸后会留下价格断层并丢掉中间结构。
+    仅当当前起点仍锚在上一笔终点时生效（尚未被推到更极端同向）。
+    """
+    if not strokes:
+        return False
+    last = strokes[-1]
+    try:
+        if int(start.get("index")) != int(last.get("end_index")):
+            return False
+        last_sp = float(last.get("start_price"))
+        last_dir = str(last.get("direction") or "")
+    except (TypeError, ValueError):
+        return False
+    if last_dir == "down" and reverse.get("type") == "top":
+        try:
+            return float(reverse["high"]) > last_sp + 1e-9
+        except (TypeError, ValueError, KeyError):
+            return False
+    if last_dir == "up" and reverse.get("type") == "bottom":
+        try:
+            return float(reverse["low"]) < last_sp - 1e-9
+        except (TypeError, ValueError, KeyError):
+            return False
+    return False
+
+
+def _apply_stroke_extension(stroke: dict, *, end_price: float, end_index: int) -> None:
+    """就地更新笔终点与力度/长度。"""
+    stroke["end_price"] = float(end_price)
+    stroke["end_index"] = int(end_index)
+    stroke["power_price"] = round(
+        abs(float(stroke["end_price"]) - float(stroke["start_price"])), 4
+    )
+    stroke["length"] = int(stroke["end_index"]) - int(stroke["start_index"])
+
+
 def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5, bars: list[dict] | None = None) -> list[dict]:
     """由分型序列构建笔。
 
@@ -313,6 +400,7 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5, bars: lis
     P0：反向分型距离不够时跳过，保留 start 继续找。
     P1：取【第一个】距离合格的反向分型成笔（非「最极端」延伸；与 formulas.md §2.1 一致）。
     P4：返回 power_price（绝对价差）和 length（K 线根数）；传入 bars 时额外计算 power_volume。
+    §2.1c：若短距反向破坏上一笔起点极值，允许破例成笔（防断层）。
     """
     if len(fractions) < 2:
         return []
@@ -346,6 +434,7 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5, bars: lis
         # 但：扫描反向时若先遇到「距不够的近反向」，再碰到同向分型，
         # 不得 break 饿死整链（南网/华工周线实锤：密分型震荡下末笔假向上）。
         # 同向只更新起点极值并继续找合格反向；终点仍取第一个距离合格者。
+        # §2.1c：短距反向若破坏上一笔起点极值，亦视为合格终点。
         best_end = None
         best_j = None
         start_j = j  # 记录扫描起点，供找不到反向时回退推进
@@ -361,8 +450,9 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5, bars: lis
                 j += 1
                 continue
 
-            # 反向分型：第一个距离合格者即笔终点（缠论标准）
-            if f["index"] - start["index"] >= min_bars_per_stroke - 1:
+            # 反向分型：距离合格，或破上一笔起点极值（§2.1c）
+            dist_ok = f["index"] - start["index"] >= min_bars_per_stroke - 1
+            if dist_ok or _reverse_breaks_prior_extreme(strokes, start, f):
                 best_end = f
                 best_j = j
                 break
@@ -377,6 +467,35 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5, bars: lis
             if last_direction is not None and direction == last_direction:
                 i = best_j
                 continue
+
+            # 衔接：起点被推到更极端同向时，尝试把上一笔终点延到新起点（南网防断裂）。
+            # 护栏：不得跨过破坏笔起点极值的反向分型（华工防吞中间冲高）。
+            if strokes:
+                last = strokes[-1]
+                last_end_type = last.get("end_type")
+                try:
+                    last_ei = int(last.get("end_index"))
+                    start_i = int(start["index"])
+                except (TypeError, ValueError):
+                    last_ei, start_i = -1, -1
+                if (
+                    last_end_type == start["type"] == "bottom"
+                    and start_i > last_ei
+                    and float(start["low"]) < float(last.get("end_price") or 0)
+                    and _stroke_extend_allowed(last, start_i, fractions)
+                ):
+                    _apply_stroke_extension(
+                        last, end_price=float(start["low"]), end_index=start_i
+                    )
+                elif (
+                    last_end_type == start["type"] == "top"
+                    and start_i > last_ei
+                    and float(start["high"]) > float(last.get("end_price") or 0)
+                    and _stroke_extend_allowed(last, start_i, fractions)
+                ):
+                    _apply_stroke_extension(
+                        last, end_price=float(start["high"]), end_index=start_i
+                    )
 
             sp = start["low"] if start["type"] == "bottom" else start["high"]
             ep = best_end["high"] if best_end["type"] == "top" else best_end["low"]
@@ -404,28 +523,33 @@ def build_strokes(fractions: list[dict], min_bars_per_stroke: int = 5, bars: lis
             last_direction = direction
             i = best_j
         else:
-            # 无合格反向：若扫描中起点已推进到更极值，且可衔接上一笔同向终点 → 延伸上一笔
-            # （未独立成笔的同向新高/新低，避免僵尸末笔停在旧顶/旧底）
+            # 无合格反向：同向新高/新低可延伸上一笔；同样受破坏性反向分型护栏约束
             if strokes:
                 last = strokes[-1]
                 last_end_type = last.get("end_type")
+                try:
+                    start_i = int(start["index"])
+                except (TypeError, ValueError):
+                    start_i = -1
                 if last_end_type == start["type"] == "top":
-                    if start["high"] > float(last.get("end_price") or 0):
-                        last["end_price"] = start["high"]
-                        last["end_index"] = start["index"]
-                        last["power_price"] = round(
-                            abs(float(last["end_price"]) - float(last["start_price"])), 4
+                    if (
+                        start_i >= 0
+                        and start["high"] > float(last.get("end_price") or 0)
+                        and _stroke_extend_allowed(last, start_i, fractions)
+                    ):
+                        _apply_stroke_extension(
+                            last, end_price=float(start["high"]), end_index=start_i
                         )
-                        last["length"] = int(last["end_index"]) - int(last["start_index"])
                 elif last_end_type == start["type"] == "bottom":
                     prev_ep = float(last.get("end_price") or 0)
-                    if start["low"] < prev_ep or prev_ep == 0:
-                        last["end_price"] = start["low"]
-                        last["end_index"] = start["index"]
-                        last["power_price"] = round(
-                            abs(float(last["end_price"]) - float(last["start_price"])), 4
+                    if (
+                        start_i >= 0
+                        and (start["low"] < prev_ep or prev_ep == 0)
+                        and _stroke_extend_allowed(last, start_i, fractions)
+                    ):
+                        _apply_stroke_extension(
+                            last, end_price=float(start["low"]), end_index=start_i
                         )
-                        last["length"] = int(last["end_index"]) - int(last["start_index"])
             # 推进起点防死循环（至少越过本轮初始扫描位置）
             i = max(i + 1, start_j)
 
@@ -499,6 +623,17 @@ def _merge_char_element(
     seq[-1] = merged
     return seq, char_direction
 
+def _segment_endpoints(direction: str, seg_high: float, seg_low: float) -> tuple[float, float]:
+    """线段起终点与方向一致：用段内极值，不用首末笔 min/max。
+
+    旧逻辑取首笔 min/max + 末笔 max/min，未完成段常出现「向上段 end<start」
+    （如南网 up 52→45）或「向下段 end>start」，与 direction 拧句。
+    """
+    if direction == "up":
+        return float(seg_low), float(seg_high)
+    return float(seg_high), float(seg_low)
+
+
 def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: bool | None = None) -> list[dict]:
     """将笔序列构建为线段序列。
 
@@ -513,6 +648,7 @@ def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: boo
     - A-2：双侧分型（缠论 1.2 合规，与 find_fractions 一致）——底/顶分型需同时满足
       low 与 high 两侧（middle 整体在单侧之外），单侧假分型（仅 low 达标而 high 不达标）
       不再终结线段，减少误判与包含处理导致的假终结
+    - 起终点：向上 ``low→high``、向下 ``high→low``（段内 run 极值；见 ``_segment_endpoints``）
 
     包含处理规则（与 K 线包含一致）：
     - 两根特征序列元素重叠时，按方向合并
@@ -618,8 +754,7 @@ def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: boo
                     if (mid["low"] < left["low"] and mid["low"] < right["low"]
                             and mid["high"] < left["high"] and mid["high"] < right["high"]):
                         end_idx = i - 1
-                        start_p = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
-                        end_p = max(strokes[end_idx]["start_price"], strokes[end_idx]["end_price"])
+                        start_p, end_p = _segment_endpoints("up", run_high, run_low)
                         segments.append({
                             "direction": "up",
                             "start_price": start_p,
@@ -669,8 +804,7 @@ def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: boo
                     if (mid["high"] > left["high"] and mid["high"] > right["high"]
                             and mid["low"] > left["low"] and mid["low"] > right["low"]):
                         end_idx = i - 1
-                        start_p = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
-                        end_p = min(strokes[end_idx]["start_price"], strokes[end_idx]["end_price"])
+                        start_p, end_p = _segment_endpoints("down", run_high, run_low)
                         segments.append({
                             "direction": "down",
                             "start_price": start_p,
@@ -703,12 +837,7 @@ def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: boo
     # 收尾：如果最后一段至少有 min_strokes 笔，追加（run 已覆盖 strokes[seg_start:]）
     remaining = strokes[seg_start:]
     if len(remaining) >= min_strokes:
-        if current_direction == "up":
-            start_p = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
-            end_p = max(strokes[-1]["start_price"], strokes[-1]["end_price"])
-        else:
-            start_p = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
-            end_p = min(strokes[-1]["start_price"], strokes[-1]["end_price"])
+        start_p, end_p = _segment_endpoints(current_direction, run_high, run_low)
         segments.append({
             "direction": current_direction,
             "start_price": start_p,
