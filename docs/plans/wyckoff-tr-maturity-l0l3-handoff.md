@@ -129,12 +129,22 @@ box_display_mode: "none" | "proto" | "box"
 
 检测器仍为 `_detect_secondary_test_sc`（`wyckoff_events.py`）。
 
-| 常量 | 现状默认 | A 股建议方向 | 语义红线 |
-|------|----------|--------------|----------|
-| `WYCKOFF_ST_SC_VOL_RATIO` | 0.60 | 可略放宽至 ~0.70–0.75 | 仍须明显弱于 SC |
-| `WYCKOFF_ST_SC_MAX_BARS` | 15（现行 config **22**） | 可 → 20–25（慢回测，**日线语义**）；**周线半幅** `max(8, ceil(N/2))`（22→11；见 `wyckoff-weekly-scan-windows-handoff.md` S3） | 仍须发生回测；禁止周线沿用日线 22 根≈5 个月过松窗 |
-| `WYCKOFF_ST_SC_PROXIMITY` | 0.02 | 可 → 0.03 | 仍须进入 SC 区 |
-| `WYCKOFF_ST_SC_MAX_PIERCE` | 0.005 | 可 → 0.01–0.015 | 刺穿须收回；有效破位（超刺穿且 close 未收回）不算 ST；**超刺穿但收回仍可走 ST**（W-DIFF-7） |
+| 常量 | 现行默认（`config.py`） | 备注 | 语义红线 |
+|------|------------------------|------|----------|
+| `WYCKOFF_ST_SC_VOL_RATIO` | **0.80** | PR #55；原 0.60→0.72→0.80 | 仍须明显弱于 SC |
+| `WYCKOFF_ST_SC_MAX_BARS` | **22** | 日线慢回测；**周线半幅** `max(8, ceil(N/2))`（22→11；见 `wyckoff-weekly-scan-windows-handoff.md` S3） | 仍须发生回测；禁止周线沿用日线 22 根≈5 个月过松窗 |
+| `WYCKOFF_ST_SC_PROXIMITY` | **0.045** | PR #55；原 0.02→0.03→0.045 | 仍须进入 SC 区 |
+| `WYCKOFF_ST_SC_MAX_PIERCE` | **0.012** | 原 0.005 | 刺穿须收回；有效破位（超刺穿且 close 未收回）不算 ST；**超刺穿但收回仍可走 ST**（W-DIFF-7） |
+
+**SC 检测默认（同 PR #55；路 B：只松检测，不改「箱体=SC+AR+真ST」）**：
+
+| 常量 | 现行默认 |
+|------|----------|
+| `WYCKOFF_BC_VOL_RATIO_THRESHOLD`（SC/BC 量比） | **1.5**（原 1.8） |
+| `WYCKOFF_SC_CHANGE_PCT_MAX_DAILY` | **-1.5**（原日线 -2.0） |
+| `WYCKOFF_SC_MAX_POS_PCT` | **0.50**（原约 0.35） |
+
+样本对照与合入说明：`done/wyckoff-ashare-box-sensitivity-handoff.md`。再松须另开手递；**禁止软确认 ST**。
 
 **SC low SSOT**：`sc_low` / ST 回测锚必须是 SC 棒**最低价**（及 refine 后更低的成功 ST low）；禁止用偏高的局部低点当谷底（南网真谷 vs 系统偏高种子对照）。
 

@@ -173,11 +173,11 @@ WYCKOFF_AR_WEAK_VS_SC_RATIO: float = float(
 # 广义 ST（Secondary Test of SC）：SC 后回测 SC 区，量/波幅须明显低于 SC 棒。
 # A 股适配（wyckoff-tr-maturity-l0l3-handoff §4）：只放宽检测参数，不砍「必须回测 SC 区」语义；
 # 禁止软确认（价格一直站在 SC 上方 ≠ ST）。可用 env 覆盖同名常量。
-# A 股箱体灵敏度试验（docs/plans/wyckoff-ashare-box-sensitivity-handoff.md）：
-# 略松 ST 缩量/回踩带，便于走到 L2「箱体」；定义仍须真 ST。
-WYCKOFF_ST_SC_VOL_RATIO: float = float(os.environ.get("WYCKOFF_ST_SC_VOL_RATIO", "0.80"))  # 试验：0.72→0.80
+# A 股箱体灵敏度（done/wyckoff-ashare-box-sensitivity-handoff.md，PR #55）：
+# 略松 ST 缩量/回踩带；箱体定义仍须真 ST。
+WYCKOFF_ST_SC_VOL_RATIO: float = float(os.environ.get("WYCKOFF_ST_SC_VOL_RATIO", "0.80"))  # 现行：0.72→0.80
 WYCKOFF_ST_SC_MAX_BARS: int = int(os.environ.get("WYCKOFF_ST_SC_MAX_BARS", "22"))          # 原 15→22（慢回测窗；建议 20–25）
-WYCKOFF_ST_SC_PROXIMITY: float = float(os.environ.get("WYCKOFF_ST_SC_PROXIMITY", "0.045"))  # 试验：0.03→0.045
+WYCKOFF_ST_SC_PROXIMITY: float = float(os.environ.get("WYCKOFF_ST_SC_PROXIMITY", "0.045"))  # 现行：0.03→0.045
 WYCKOFF_ST_SC_MAX_PIERCE: float = float(os.environ.get("WYCKOFF_ST_SC_MAX_PIERCE", "0.012"))  # 原 0.005→0.012；刺穿须收回（建议 0.01–0.015）
 # ST 棒 (high-low) 须 ≤ SC 棒波幅 × 此比例；过宽不算 ST（L2 合同：量/波幅弱于 SC）
 WYCKOFF_ST_SC_SPREAD_RATIO: float = float(os.environ.get("WYCKOFF_ST_SC_SPREAD_RATIO", "0.85"))
@@ -185,14 +185,14 @@ WYCKOFF_PHASE_A_SEED_MIN_QUALITY: float = 0.40  # established 种子箱最低 tr
 # L3 量度宽度门槛（成熟度合同 §3）：L2 且 TR 窗根数 ≥ 此值（或 P&F 水平列够宽）才允许量度
 WYCKOFF_MEASURE_MIN_BARS: int = int(os.environ.get("WYCKOFF_MEASURE_MIN_BARS", "8"))
 
-# BC (Buying Climax) 购买高潮相关参数；SC 日线量比共用 BC_VOL（试验 1.8→1.5）
+# BC (Buying Climax) 购买高潮相关参数；SC 日线量比共用 BC_VOL（现行 1.8→1.5，PR #55）
 WYCKOFF_BC_VOL_RATIO_THRESHOLD: float = float(os.environ.get("WYCKOFF_BC_VOL_RATIO_THRESHOLD", "1.5"))
 WYCKOFF_BC_CHANGE_THRESHOLD: float = 1.0        # BC 滞涨涨幅门槛 (%)
 WYCKOFF_BC_UPPER_SHADOW_RATIO: float = 0.02     # BC 上影线占波幅比例
 WYCKOFF_BC_MIN_POS_PCT: float = 0.65            # BC 须处于近窗价格区间上沿（高位过滤，0=底 1=顶）
-# SC 近窗位置上限（0=底 1=顶）：pos 须 ≤ 此值。旧行为约 1-BC_MIN=0.35；试验放宽到 0.50
+# SC 近窗位置上限（0=底 1=顶）：pos 须 ≤ 此值。旧约 1-BC_MIN=0.35；现行 0.50（PR #55）
 WYCKOFF_SC_MAX_POS_PCT: float = float(os.environ.get("WYCKOFF_SC_MAX_POS_PCT", "0.50"))
-# 日线 SC 跌幅上限（须 ≤ 此值，负数）：试验 -2.0→-1.5；周线仍用代码内 -1.0
+# 日线 SC 跌幅上限（须 ≤ 此值，负数）：现行 -2.0→-1.5；周线仍用代码内 -1.0
 WYCKOFF_SC_CHANGE_PCT_MAX_DAILY: float = float(os.environ.get("WYCKOFF_SC_CHANGE_PCT_MAX_DAILY", "-1.5"))
 
 # SOW (Sign of Weakness) 弱势信号相关参数

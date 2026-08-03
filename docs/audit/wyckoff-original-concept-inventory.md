@@ -36,7 +36,7 @@
 | **PS (Preliminary Support 初步止跌)** | ✅ | `_detect_preliminary_support`；与 SC 互斥让位 |
 | SC (Selling Climax 卖力高潮) | ✅ | |
 | AR (Automatic Rally 自动反弹) | ✅ | P1 锚点 + P2-C 量能：`WYCKOFF_AR_PREFER_WEAK_VS_SC`（默认开）多候选 prefer 弱于 SC；`ar_volume_soft`=量能偏强/非原典弱量；`REQUIRE` 默认关。落点 `_detect_ar` / `config.py` |
-| ST (Secondary Test 二次测试) | ✅ | 广义 ST + L2/L3 门禁；**禁止软确认**；A 股参数放宽（量比/窗/邻近/刺穿）。`st_*`=Spring 确认，与 `secondary_test_sc_*` 分离。规格：`wyckoff-tr-maturity-l0l3-handoff.md` |
+| ST (Secondary Test 二次测试) | ✅ | 广义 ST + L2/L3 门禁；**禁止软确认**；A 股参数放宽（现行默认见 L0–L3 §4：ST 量比 0.80 / 邻近 0.045 等；PR #55）。`st_*`=Spring 确认，与 `secondary_test_sc_*` 分离。规格：`wyckoff-tr-maturity-l0l3-handoff.md` |
 | Spring (弹簧/震仓) | ✅ | |
 | Test of Spring (Spring 后确认测试) | ✅ | `spring_test_*` 与 `st_*` 双写（`_spring_test_fields_from_st`）；阶段机 C→D 认 Test |
 | SOS (Sign of Strength 强势信号) | ✅ | |
