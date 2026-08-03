@@ -47,14 +47,17 @@ def _weekly_with_sc_at(total: int, sc_idx: int) -> list[dict]:
 
 
 def _breakdown_then_fake_st_bars() -> list[dict]:
-    bars = [_neutral(90.0, 100) for _ in range(14)]
+    # 松参（PR #55：proximity 0.045 / SC 量比 1.5）后：SC 定位更靠后、破位棒须在 SC 之后
+    # 才触发 _phase_a_breakdown。此形态：SC low=82 → 紧随破位（low 72 << floor, close 73 < 82）
+    # → failed / L0 / box none；后续反弹棒不足以误认 ST（未回测 SC 区）。
+    bars = [_neutral(90.0, 100) for _ in range(20)]
     bars.append(_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC
-    bars.append(_bar(82.0, 82.5, 75.0, 76.0, 1800))  # 有效破位未收回
-    bars.append(_bar(76.5, 87.0, 76.0, 86.0, 2000))
-    bars.append(_bar(85.0, 86.5, 81.5, 86.0, 900))   # 未收口时容易误认 ST
+    bars.append(_bar(81.5, 82.0, 72.0, 73.0, 1800))  # 有效破位：low/close 双低于 SC low
+    bars.append(_bar(74.0, 88.0, 73.0, 87.0, 2000))  # 反弹
+    bars.append(_bar(86.0, 87.0, 84.5, 86.0, 900))   # 未回测 SC 区，不会误认 ST
     for _ in range(4):
         bars.append(_bar(84.0, 84.5, 83.5, 84.0, 110))
-    while len(bars) < 30:
+    while len(bars) < 40:
         bars.insert(0, _neutral(90.0, 100))
     return bars
 
