@@ -1061,9 +1061,14 @@ def _merge_zones(raw_zones: list[dict], gap_pct: float) -> list[dict]:
         else:
             contiguous = True
         if overlap and contiguous:
-            new_top = min(last["zh_top"], z["zh_top"])
-            new_bottom = max(last["zh_bottom"], z["zh_bottom"])
-            # 交集须仍为合法区间；否则保持独立，避免 top <= bottom
+            # Bug S（2026-08-04）：合并区间取**并集**而非交集。
+            # 交集（min(top)/max(bottom)）在链式合并时把区间逐级压缩成窄条
+            # （工行实测：8 个原始中枢合并后只剩 0.04 元宽），丢失震荡带信息，
+            # 且导致 strict 背驰 b/c 笔解析失败（z_end 塌缩）。并集 = max(top)/min(bottom)
+            # 完整覆盖成员震荡带，符合缠论中枢延伸语义。
+            new_top = max(last["zh_top"], z["zh_top"])
+            new_bottom = min(last["zh_bottom"], z["zh_bottom"])
+            # 并集后区间只会 >= 原区间；仍保留合法性校验避免 top <= bottom
             if new_top > new_bottom:
                 last["zh_top"] = new_top
                 last["zh_bottom"] = new_bottom
