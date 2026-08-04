@@ -292,8 +292,12 @@ def _append_sos(b, n=5, vol=1_600_000):
         b.append(mk(o, h, l, c, vol))
 
 
-def _append_sow(b, n=6, vol=2_500_000):
-    """连续跌破 TR 下沿 8.5：最后 2 根 low 均 <8.5，末根放量收低 → SOW 触发。"""
+def _append_sow(b, n=6, vol=1_300_000):
+    """连续跌破 TR 下沿 8.5：最后 2 根 low 均 <8.5，末根放量收低 → SOW 触发。
+
+    量比取 1.3（≥SOW 阈值 1.0、< SC 阈值 1.5）：若量比 ≥1.5，末根破位 bar 会被
+    `_detect_selling_climax` 同时判为 SC，簇的 SC 重置锚（Bug C 合同）将清掉
+    簇内事件，派发确认/积累失败无法成立。"""
     start = 8.7
     for k in range(n):
         o = round(start - 0.07 * k, 3)

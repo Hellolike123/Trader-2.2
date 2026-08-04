@@ -43,6 +43,7 @@
     "sos_signal": false,
     "sos_reason": "量能不足",
     "sos_price": null,
+    "sos_kind": null,
     "st_signal": false,
     "st_reason": "未检测到 Spring，无法触发 ST",
     "st_price": null,
