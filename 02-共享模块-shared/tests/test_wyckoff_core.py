@@ -111,6 +111,138 @@ class TestDetectBuyingClimax:
         assert result["bc_signal"] is False
 
 
+class TestBuyingClimaxRetroScan:
+    """Bug H：BC 回溯窗口 90 + 滞涨 5.0 + 长上影分支（docs/plans/wyckoff-epic-context-refactor-handoff H-M1~M7 / H1~H6）。
+
+    参考 TestBCHighPosition 风格：护栏（量比≥1.5、高位 pos≥0.65）不变。
+    """
+
+    def _tail_after_bc(self, n: int = 59, start: float = 12.0) -> list[dict]:
+        """BC 之后的缓跌尾段（量 100，量比 <1.5、单日变化 <5%，非 BC）。"""
+        bars = []
+        for i in range(n):
+            p = start - i * (start - 8.0) / max(n, 1)
+            bars.append(_make_bar(round(p + 0.15, 2), round(p + 0.4, 2),
+                                  round(p - 0.4, 2), round(p, 2), 100))
+        return bars
+
+    def test_bc_found_60_bars_back(self):
+        """H1：历史顶部在 60 根前 → WYCKOFF_BC_SCAN_BARS=90 回溯窗口可扫到（旧 5 根窗口永远扫不到）。"""
+        from trader_shared.wyckoff_events import _detect_buying_climax
+
+        bars = []
+        # 0..9：低位垫底（量 100）
+        for _ in range(10):
+            bars.append(_make_bar(10.0, 10.5, 9.5, 10.0, 100))
+        # 10..19：拉到高位 ~12（量 100）
+        for i in range(10):
+            p = 10.0 + i * 0.2
+            bars.append(_make_bar(round(p, 2), round(p + 0.3, 2),
+                                  round(p - 0.2, 2), round(p + 0.15, 2), 100))
+        # 20：BC 顶部日 —— 滞涨 +1.7%（<5.0）、上影比 0.17（<0.25）、量比 3.0、高位 pos 1.0
+        bars.append(_make_bar(12.0, 12.2, 11.9, 12.15, 300))
+        # 21..79：缓跌尾段 59 根
+        bars.extend(self._tail_after_bc())
+        assert len(bars) == 80
+        r = _detect_buying_climax(bars)
+        assert r["bc_signal"] is True, r["bc_reason"]
+        assert r["bc_bar_idx"] == 20
+
+    def test_bc_triggered_by_stagnant_5pct(self):
+        """H3：+2.2% 无显著长上影 → 滞涨 5.0 分支触发（旧 1.0 阈值会拒）。"""
+        from trader_shared.wyckoff_events import _detect_buying_climax
+
+        bars = [_make_bar(10, 10.5, 9.5, 10, 100) for _ in range(14)]
+        # 顶部日：+2.2%、上影比 0.23（<0.25）、收阳（非收阴）、量比 3.0
+        bars.append(_make_bar(10.1, 10.27, 10.05, 10.22, 300))
+        r = _detect_buying_climax(bars)
+        assert r["bc_signal"] is True, r["bc_reason"]
+        assert "涨幅仅" in r["bc_reason"], "应由滞涨分支触发"
+        assert "显著长上影" not in r["bc_reason"]
+
+    def test_bc_triggered_by_strong_upper_shadow(self):
+        """H2：+6.8% + 上影比 0.31（06-25 型）→ 长上影分支触发（滞涨 5.0 已失效、非收阴）。"""
+        from trader_shared.wyckoff_events import _detect_buying_climax
+
+        bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
+        # 顶部日：+6.8%、上影比 (109.9-106.8)/(109.9-100.0) = 0.313 ≥ 0.25、收阳
+        bars.append(_make_bar(100.0, 109.9, 100.0, 106.8, 300))
+        r = _detect_buying_climax(bars)
+        assert r["bc_signal"] is True, r["bc_reason"]
+        assert "显著长上影" in r["bc_reason"]
+
+    def test_upper_shadow_boundary_024_026(self):
+        """H4：上影比 0.24 → 不触发；0.26 → 触发（边界）。
+
+        +5.2%（非滞涨）、收阳（非收阴）→ 只有长上影分支能触发。
+        """
+        from trader_shared.wyckoff_events import _detect_buying_climax
+
+        base = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
+        # h=106.84：upper=1.64 / range=6.84 → 0.2398 < 0.25
+        assert (106.84 - 105.2) / (106.84 - 100.0) < 0.25
+        r1 = _detect_buying_climax(base + [_make_bar(100.0, 106.84, 100.0, 105.2, 300)])
+        assert r1["bc_signal"] is False, r1["bc_reason"]
+        # h=107.03：upper=1.83 / range=7.03 → 0.2603 ≥ 0.25
+        assert (107.03 - 105.2) / (107.03 - 100.0) >= 0.25
+        r2 = _detect_buying_climax(base + [_make_bar(100.0, 107.03, 100.0, 105.2, 300)])
+        assert r2["bc_signal"] is True, r2["bc_reason"]
+
+    def test_bc_rejected_low_vol_ratio(self):
+        """H5：量比 1.4（<1.5）→ 拒（护栏不变）。"""
+        from trader_shared.wyckoff_events import _detect_buying_climax
+
+        bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
+        # 顶部日：+0.5% 滞涨、高位，但量比 1.4
+        bars.append(_make_bar(100.0, 102.0, 98.0, 100.5, 140))
+        r = _detect_buying_climax(bars)
+        assert r["bc_signal"] is False
+
+    def test_bc_rejected_low_position_high_volume(self):
+        """H5b：低位天量 → 拒（_is_bc_high_position 护栏不变）。"""
+        from trader_shared.wyckoff_events import _detect_buying_climax
+
+        bars = []
+        for i in range(14):
+            # 前段冲高到 120，当前在 100 附近 → pos 偏低
+            h = 100 + i * 1.5
+            bars.append(_make_bar(h - 1, h, h - 3, h - 0.5, 100))
+        bars.append(_make_bar(102, 103, 99, 100, 300))
+        r = _detect_buying_climax(bars)
+        assert r["bc_signal"] is False
+
+    def test_are_reuses_bc_detector_60_bars_back(self):
+        """H6：ARE 复用 _detect_buying_climax（H-M5）——60 根前的 BC 也能成为 ARE 锚（旧 ARE 15 根窗口扫不到）。"""
+        from trader_shared.wyckoff_events import _detect_are, _detect_buying_climax
+
+        bars = []
+        for _ in range(10):
+            bars.append(_make_bar(10.0, 10.5, 9.5, 10.0, 100))
+        for i in range(10):
+            p = 10.0 + i * 0.2
+            bars.append(_make_bar(round(p, 2), round(p + 0.3, 2),
+                                  round(p - 0.2, 2), round(p + 0.15, 2), 100))
+        bars.append(_make_bar(12.0, 12.2, 11.9, 12.15, 300))  # BC（idx 20）
+        bars.extend(self._tail_after_bc())                     # 59 根缓跌
+        # 近端一根放量跌 ≥2%（量比 1.4 < 1.5 → 本身非 BC，ARE 回落棒）
+        bars.append(_make_bar(7.9, 8.0, 7.2, 7.3, 140))
+        bc = _detect_buying_climax(bars)
+        assert bc["bc_signal"] is True and bc["bc_bar_idx"] == 20, bc["bc_reason"]
+        are = _detect_are(bars)
+        assert are["are_signal"] is True, are.get("are_reason")
+
+    def test_config_exports_new_bc_constants(self):
+        """H-M1~M3：新/改常量导出（env 可覆、__all__ 同步）。"""
+        from trader_shared import config
+
+        assert config.WYCKOFF_BC_SCAN_BARS == 90
+        assert config.WYCKOFF_BC_CHANGE_THRESHOLD == 5.0
+        assert config.WYCKOFF_BC_STRONG_UPPER_SHADOW_RATIO == 0.25
+        assert "WYCKOFF_BC_SCAN_BARS" in config.__all__
+        assert "WYCKOFF_BC_CHANGE_THRESHOLD" in config.__all__
+        assert "WYCKOFF_BC_STRONG_UPPER_SHADOW_RATIO" in config.__all__
+
+
 class TestDetectSosThrust:
     """SOS climb OR thrust — docs/plans/wyckoff-sos-single-day-handoff.md"""
 
@@ -1222,16 +1354,19 @@ class TestWyckoffScoreWithClassicSignals:
     def test_sos_adds_15(self):
         """SOS 信号精确贡献 +15。5 连阳放量突破，无其他信号。
 
-        数学推导：S > 1.38B 满足 SOS，S < 1.8B 避免 BC。取 S=1.5B。
+        数学推导：S > 1.38B 满足 SOS。取 S=1.5B。
         20 base bars (vol=200) + 5 SOS bars (vol=300)。
+        Bug H 新合同（滞涨门槛 5.0）：首日跳空 ≥5%（+5.3%），否则 +4% 的高位放量
+        首日会被判 BC（滞涨 <5%）→ raw 被 BC(-15) 抵消。
         """
         from trader_shared.wyckoff_core import calculate_wyckoff_score
         bars = []
         for i in range(20):
             o = 100 + i * 0.01
             bars.append(_make_bar(o, o + 0.5, o - 0.5, o + 0.2, 200))
-        # 5 连阳：累计涨 (106.16-104)/104 ≈ 2.1% ≥ 2%
-        for i in range(5):
+        # 5 连阳：首日跳空 +5.3%（≥5.0，非滞涨），累计涨 ≥2%
+        bars.append(_make_bar(100.6, 105.7, 100.4, 105.7, 300))
+        for i in range(1, 5):
             o = 104 + i * 0.44
             c = o + 0.4
             bars.append(_make_bar(o, c, o - 0.2, c, 300))
@@ -1881,8 +2016,10 @@ class TestAutomaticReaction:
             bars.append(_make_bar(base, base + 2, base - 1, base + 1, 1000))
         # BC：高位天量滞涨/收阴
         bars.append(_make_bar(105, 108, 104, 104.5, 5000))
-        # ARE：随后 1–3 根放量跌 ≥2%
-        bars.append(_make_bar(104, 104.5, 100, 101, 4000))
+        # ARE：随后 1–3 根放量跌 ≥2%。
+        # Bug H 新合同（H-M5 复用 _detect_buying_climax）：回落棒须跌出高位区
+        # （pos<0.65），否则其本身（放量阴线+高位）会被判为「最近一次 BC」→ ARE 无回落空间。
+        bars.append(_make_bar(100, 100.5, 95, 95.5, 4000))
         are = _detect_are(bars)
         assert are["are_signal"] is True, are.get("are_reason")
         assert are["are_price"] is not None

@@ -187,8 +187,13 @@ WYCKOFF_MEASURE_MIN_BARS: int = int(os.environ.get("WYCKOFF_MEASURE_MIN_BARS", "
 
 # BC (Buying Climax) 购买高潮相关参数；SC 日线量比共用 BC_VOL（现行 1.8→1.5，PR #55）
 WYCKOFF_BC_VOL_RATIO_THRESHOLD: float = float(os.environ.get("WYCKOFF_BC_VOL_RATIO_THRESHOLD", "1.5"))
-WYCKOFF_BC_CHANGE_THRESHOLD: float = 1.0        # BC 滞涨涨幅门槛 (%)
-WYCKOFF_BC_UPPER_SHADOW_RATIO: float = 0.02     # BC 上影线占波幅比例
+# BC 滞涨涨幅门槛 (%)：1.0→5.0（Bug H，容忍 A 股单日波动；05-29 +2.2% / 06-25 +6.8% 顶部日）
+WYCKOFF_BC_CHANGE_THRESHOLD: float = float(os.environ.get("WYCKOFF_BC_CHANGE_THRESHOLD", "5.0"))
+WYCKOFF_BC_UPPER_SHADOW_RATIO: float = 0.02     # BC 上影线占波幅比例（提示文案用）
+# BC 回溯窗口（根）：5→90，对齐 SC 冷启动日 90（Bug H：历史顶部事件须可回溯扫描到）
+WYCKOFF_BC_SCAN_BARS: int = int(os.environ.get("WYCKOFF_BC_SCAN_BARS", "90"))
+# 显著长上影阈值：upper_shadow / price_range ≥ 0.25 即触发 BC 长上影分支（Bug H 06-25 型）
+WYCKOFF_BC_STRONG_UPPER_SHADOW_RATIO: float = float(os.environ.get("WYCKOFF_BC_STRONG_UPPER_SHADOW_RATIO", "0.25"))
 WYCKOFF_BC_MIN_POS_PCT: float = 0.65            # BC 须处于近窗价格区间上沿（高位过滤，0=底 1=顶）
 # SC 近窗位置上限（0=底 1=顶）：pos 须 ≤ 此值。旧约 1-BC_MIN=0.35；现行 0.50（PR #55）
 WYCKOFF_SC_MAX_POS_PCT: float = float(os.environ.get("WYCKOFF_SC_MAX_POS_PCT", "0.50"))
@@ -505,6 +510,7 @@ __all__ = [
     "WYCKOFF_DIVERGENCE_BARS",
     "WYCKOFF_BC_VOL_RATIO_THRESHOLD", "WYCKOFF_BC_CHANGE_THRESHOLD",
     "WYCKOFF_BC_UPPER_SHADOW_RATIO", "WYCKOFF_BC_MIN_POS_PCT",
+    "WYCKOFF_BC_SCAN_BARS", "WYCKOFF_BC_STRONG_UPPER_SHADOW_RATIO",
     "WYCKOFF_SC_MAX_POS_PCT", "WYCKOFF_SC_CHANGE_PCT_MAX_DAILY",
     "WYCKOFF_SOW_SUPPORT_LOOKBACK",
     "WYCKOFF_SOW_VOL_RATIO_THRESHOLD", "WYCKOFF_SOW_CONSECUTIVE_DAYS",

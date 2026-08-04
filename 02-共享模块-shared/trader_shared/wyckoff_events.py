@@ -27,6 +27,8 @@ try:
         WYCKOFF_BC_VOL_RATIO_THRESHOLD,
         WYCKOFF_BC_CHANGE_THRESHOLD,
         WYCKOFF_BC_UPPER_SHADOW_RATIO,
+        WYCKOFF_BC_SCAN_BARS,
+        WYCKOFF_BC_STRONG_UPPER_SHADOW_RATIO,
         WYCKOFF_BC_MIN_POS_PCT,
         WYCKOFF_SC_MAX_POS_PCT,
         WYCKOFF_SC_CHANGE_PCT_MAX_DAILY,
@@ -630,17 +632,22 @@ def _compute_dynamic_support(
 def _detect_buying_climax(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     """Detect Buying Climax (BC) — 天量滞涨，高位放量阴线。
 
-    P1 Fix: 扫描 bars[-5:] 而非仅 bars[-1]，任一满足 BC 条件即触发。
-    返回最近一次 BC 的信息。
+    Bug H 重构（wyckoff-sos-修复交接说明 §8 / wyckoff-epic-context-refactor-handoff H-M1~M4）：
+      - 回溯窗口 5 → WYCKOFF_BC_SCAN_BARS=90（对齐 SC 冷启动日 90），从新到旧找**最近一次** BC
+      - 滞涨阈值 1.0 → 5.0（容忍 A 股单日波动）
+      - 新增「显著长上影」OR 分支（upper_shadow / price_range ≥ 0.25，06-25 +6.8% 型）
+    触发 = 量比≥1.5 ∧ 高位 pos≥0.65 ∧（滞涨 ∨ 显著长上影 ∨ 收阴）。
 
     Returns:
-        dict with keys: bc_signal (bool), bc_reason (str), bc_price (float)
+        dict with keys: bc_signal (bool), bc_reason (str), bc_price (float),
+        bc_bar_idx (int|None，最近一次 BC 位置), bc_close (float|None, BC 棒收盘),
+        bc_avg_vol (float|None, BC 前均量) —— 供 ARE 复用（H-M5）
     """
     if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1:
         return {"bc_signal": False, "bc_reason": "数据不足", "bc_price": 0.0}
 
-    # P1 Fix: 扫描最近 5 根 K 线，任一满足 BC 条件即触发
-    scan_start = max(1, len(bars) - 5)
+    # H-M1: 回溯扫描最近 WYCKOFF_BC_SCAN_BARS 根，任一满足 BC 条件即触发
+    scan_start = max(1, len(bars) - WYCKOFF_BC_SCAN_BARS)
     for scan_idx in range(len(bars) - 1, scan_start - 1, -1):
         current = bars[scan_idx]
         recent = bars[max(0, scan_idx - WYCKOFF_SPRING_SUPPORT_LOOKBACK):scan_idx]
@@ -679,11 +686,12 @@ def _detect_buying_climax(bars: list[dict], tr_ctx: dict | None = None) -> dict:
         if not _is_bc_high_position(bars, scan_idx):
             continue
 
-        # 天量 + 滞涨（收盘接近开盘或阴线）
+        # H-M2/M4: 滞涨（<5.0%）∨ 显著长上影（≥0.25）∨ 收阴
         is_stagnant = change_pct < WYCKOFF_BC_CHANGE_THRESHOLD
+        strong_upper_shadow = upper_shadow_ratio >= WYCKOFF_BC_STRONG_UPPER_SHADOW_RATIO
         has_upper_shadow = upper_shadow_ratio > WYCKOFF_BC_UPPER_SHADOW_RATIO
 
-        if not (is_stagnant or (cur_close < cur_open)):
+        if not (is_stagnant or strong_upper_shadow or (cur_close < cur_open)):
             continue
 
         parts = []
@@ -693,7 +701,9 @@ def _detect_buying_climax(bars: list[dict], tr_ctx: dict | None = None) -> dict:
             parts.append(f"高位区{pos*100:.0f}%")
         if is_stagnant:
             parts.append(f"涨幅仅 {change_pct:.1f}%")
-        if has_upper_shadow:
+        if strong_upper_shadow:
+            parts.append("显著长上影")
+        elif has_upper_shadow:
             parts.append("上影线明显")
         if cur_close < cur_open:
             parts.append("收阴")
@@ -702,6 +712,9 @@ def _detect_buying_climax(bars: list[dict], tr_ctx: dict | None = None) -> dict:
             "bc_signal": True,
             "bc_reason": "天量滞涨，购买高潮信号：" + "，".join(parts),
             "bc_price": round(cur_high, 2),
+            "bc_bar_idx": scan_idx,
+            "bc_close": cur_close,
+            "bc_avg_vol": avg_volume,
         }
 
     return {"bc_signal": False, "bc_reason": "未检测到购买高潮", "bc_price": 0.0}
@@ -1719,73 +1732,52 @@ def _detect_are(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     """Detect Automatic Reaction (ARE) — BC 之后买力枯竭的快速回落（对称 AR）。
 
     触发条件:
-      1. 最近 N 根内检测到 BC（购买高潮）
+      1. 检测到 BC（购买高潮）——H-M5：复用 ``_detect_buying_climax``（同常量同分支，
+         消漂移；ARE 的 BC 锚 = 最近一次 BC 触发位置，窗口跟随 WYCKOFF_BC_SCAN_BARS）
       2. BC 后 1-3 根内，存在至少 1 根满足:
          - close < bc_close * 0.98（下跌 >= 2%）
          - volume > bc 前均量 * 1.2（放量）
 
-    注：回落棒本身也可能像 BC（高位放量阴线）。从近到远尝试 BC 候选，
-    直到找到带有效回落的一对，避免把最后一根回落误锚成 BC。
+    注：回落棒本身也可能像 BC（高位放量阴线）。若最近一次 BC 恰在末根（无回落空间），
+    返回「BC 后未检测到有效回落」（与原「从近到远尝试 BC 候选」的兜底语义对齐）。
     """
     if len(bars) < WYCKOFF_MIN_BARS + 3:
         return {"are_signal": False, "are_reason": "数据不足", "are_price": None}
 
-    scan_start = max(1, len(bars) - WYCKOFF_CLIMAX_ANCHOR_BARS)
-    saw_bc = False
-
-    for scan_idx in range(len(bars) - 1, scan_start - 1, -1):
-        # 至少留 1 根给回落
-        if scan_idx >= len(bars) - 1:
-            continue
-
-        current = bars[scan_idx]
-        recent = bars[max(0, scan_idx - WYCKOFF_SPRING_SUPPORT_LOOKBACK):scan_idx]
-
-        cur_open = to_float(current.get("open"))
-        cur_close = to_float(current.get("close"))
-        cur_high = to_float(current.get("high"))
-        cur_volume = to_float(current.get("volume"))
-        if any(v is None for v in [cur_open, cur_close, cur_high, cur_volume]):
-            continue
-
-        avg_volume = sum(to_float(b.get("volume")) or 0 for b in recent) / max(len(recent), 1)
-        if avg_volume <= 0:
-            continue
-
-        prev_close = to_float(bars[scan_idx - 1].get("close")) if scan_idx >= 1 else cur_open
-        change_pct = (cur_close - prev_close) / max(abs(prev_close), 0.01) * 100
-        vol_ratio = cur_volume / avg_volume
-        # 对齐 BC：高位 + 天量 + 滞涨/收阴
-        if vol_ratio < WYCKOFF_BC_VOL_RATIO_THRESHOLD:
-            continue
-        if not _is_bc_high_position(bars, scan_idx):
-            continue
-        is_stagnant = change_pct < WYCKOFF_BC_CHANGE_THRESHOLD
-        if not (is_stagnant or cur_close < cur_open):
-            continue
-
-        saw_bc = True
-        react_max = min(max(3, WYCKOFF_CLIMAX_ANCHOR_BARS // 2), len(bars) - scan_idx - 1)
-        for i in range(1, react_max + 1):
-            react_bar = bars[scan_idx + i]
-            r_close = to_float(react_bar.get("close"))
-            r_volume = to_float(react_bar.get("volume"))
-            if r_close is None or r_volume is None:
-                continue
-            if r_close >= cur_close * 0.98:
-                continue
-            vol_ok = r_volume > avg_volume * 1.2
-            pct = (r_close / cur_close - 1) * 100
-            vol_note = "放量" if vol_ok else "量能偏弱(soft)"
-            return {
-                "are_signal": True,
-                "are_reason": f"BC 后自动回落，{vol_note} {pct:.1f}%",
-                "are_price": round(r_close, 2),
-                "are_volume_soft": not vol_ok,
-            }
-
-    if not saw_bc:
+    bc = _detect_buying_climax(bars, tr_ctx=tr_ctx)
+    if not bc.get("bc_signal"):
         return {"are_signal": False, "are_reason": "未检测到 BC，无法触发 ARE", "are_price": None}
+
+    try:
+        bc_idx = int(bc.get("bc_bar_idx") or -1)
+    except (TypeError, ValueError):
+        bc_idx = -1
+    bc_close = bc.get("bc_close")
+    avg_volume = bc.get("bc_avg_vol")
+    if bc_idx < 0 or bc_idx >= len(bars) - 1:
+        return {"are_signal": False, "are_reason": "BC 后未检测到有效回落", "are_price": None}
+    if bc_close is None or avg_volume is None or bc_close <= 0:
+        return {"are_signal": False, "are_reason": "BC 数据异常，无法触发 ARE", "are_price": None}
+
+    react_max = min(max(3, WYCKOFF_CLIMAX_ANCHOR_BARS // 2), len(bars) - bc_idx - 1)
+    for i in range(1, react_max + 1):
+        react_bar = bars[bc_idx + i]
+        r_close = to_float(react_bar.get("close"))
+        r_volume = to_float(react_bar.get("volume"))
+        if r_close is None or r_volume is None:
+            continue
+        if r_close >= bc_close * 0.98:
+            continue
+        vol_ok = avg_volume > 0 and r_volume > avg_volume * 1.2
+        pct = (r_close / bc_close - 1) * 100
+        vol_note = "放量" if vol_ok else "量能偏弱(soft)"
+        return {
+            "are_signal": True,
+            "are_reason": f"BC 后自动回落，{vol_note} {pct:.1f}%",
+            "are_price": round(r_close, 2),
+            "are_volume_soft": not vol_ok,
+        }
+
     return {"are_signal": False, "are_reason": "BC 后未检测到有效回落", "are_price": None}
 
 def _sos_empty(reason: str) -> dict:
