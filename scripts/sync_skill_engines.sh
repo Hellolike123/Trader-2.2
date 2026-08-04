@@ -77,7 +77,20 @@ for f in "$SRC_DIR"/*.py; do
 
   # 规则：目标不存在则跳过（不新增文件）
   if ! target_has_file "$name"; then
-    echo "  - $name  跳过（目标安装位无此文件，不新增）"
+    # 防御（查 Agent 建议）：基准位缺失但其它安装位存在 → 安装不完整，告警并计入漂移
+    found_elsewhere=0
+    for ((i = 1; i < ${#TARGETS[@]}; i++)); do
+      if [ -f "${TARGETS[$i]}/$name" ]; then
+        found_elsewhere=1
+        break
+      fi
+    done
+    if [ "$found_elsewhere" -eq 1 ]; then
+      echo "  ✗ $name  基准位($BASE_TARGET)缺失但其它安装位存在（安装不完整，需人工核对）"
+      any_drift=1
+    else
+      echo "  - $name  跳过（目标安装位无此文件，不新增）"
+    fi
     continue
   fi
 
