@@ -43,6 +43,9 @@ try:
         WYCKOFF_UT_VOL_RATIO,
         WYCKOFF_DIVERGENCE_BARS,
         WYCKOFF_DIVERGENCE_RATIO,
+        WYCKOFF_SOS_THRUST_MIN_GAIN,
+        WYCKOFF_SOS_THRUST_VOL_RATIO,
+        WYCKOFF_SOS_RECENT_LOOKBACK,
         WYCKOFF_PHASE_LOOKBACK,
         WYCKOFF_VSA_AVG_SPREAD_PERIOD,
         # Wyckoff Score 权重
@@ -80,6 +83,7 @@ try:
         WYCKOFF_TR_AMPLITUDE_MAX,
         WYCKOFF_TR_AMPLITUDE_MIN,
         WYCKOFF_TR_QUALITY_WIDTH_REF,
+        WYCKOFF_TR_FALLBACK_MIN_WIDTH,
         WYCKOFF_TR_FLOOR_PCT,
         WYCKOFF_TR_CEIL_PCT,
         # P0-4 Spring/Upthrust 真假分级常量
@@ -92,6 +96,7 @@ try:
         # P0-5 事件簇确认常量
         WYCKOFF_CLUSTER_LOOKBACK,
         WYCKOFF_CLUSTER_MIN_GAP,
+        WYCKOFF_CLUSTER_EVENT_FRESH_BARS,
     )
 except ImportError:
     WYCKOFF_MIN_BARS = 15
@@ -127,6 +132,9 @@ except ImportError:
     WYCKOFF_UT_VOL_RATIO = 1.2
     WYCKOFF_DIVERGENCE_BARS = 5
     WYCKOFF_DIVERGENCE_RATIO = 0.85
+    WYCKOFF_SOS_THRUST_MIN_GAIN = 0.05
+    WYCKOFF_SOS_THRUST_VOL_RATIO = 1.8
+    WYCKOFF_SOS_RECENT_LOOKBACK = 30
     WYCKOFF_PHASE_LOOKBACK = 60
     WYCKOFF_VSA_AVG_SPREAD_PERIOD = 20
     # Wyckoff Score 权重 fallback
@@ -165,6 +173,7 @@ except ImportError:
     WYCKOFF_TR_AMPLITUDE_MAX = 30.0
     WYCKOFF_TR_AMPLITUDE_MIN = 6.0
     WYCKOFF_TR_QUALITY_WIDTH_REF = 60
+    WYCKOFF_TR_FALLBACK_MIN_WIDTH = 10
     WYCKOFF_TR_FLOOR_PCT = 0.15
     WYCKOFF_TR_CEIL_PCT = 0.85
     # P0-4 Spring/Upthrust 真假分级常量 fallback
@@ -177,6 +186,7 @@ except ImportError:
     # P0-5 事件簇确认常量 fallback
     WYCKOFF_CLUSTER_LOOKBACK = 60
     WYCKOFF_CLUSTER_MIN_GAP = 5
+    WYCKOFF_CLUSTER_EVENT_FRESH_BARS = 10
 
 
 # ── 共享工具：Spring 刺穿深度 / BC 高位过滤 ─────────────────────────
@@ -385,6 +395,97 @@ def _is_trading_range(bars: list[dict], lookback: int = 20) -> bool:
     max_allowed = max(atr_pct * 4, 30.0)  # 最低 30%
     return range_pct <= max_allowed
 
+def _tr_dir_changes(bars: list[dict], start: int, end: int) -> int:
+    """候选窗内相邻收盘方向交替次数（end 为开区间终点索引）。"""
+    dir_changes = 0
+    prev_dir = 0
+    for j in range(start + 1, end):
+        cj = to_float(bars[j].get("close"))
+        cj1 = to_float(bars[j - 1].get("close"))
+        if cj is None or cj1 is None:
+            continue
+        d = 1 if cj > cj1 else (-1 if cj < cj1 else 0)
+        if d != 0 and prev_dir != 0 and d != prev_dir:
+            dir_changes += 1
+        if d != 0:
+            prev_dir = d
+    return dir_changes
+
+
+def _tr_build_from_slice(
+    bars: list[dict],
+    start: int,
+    end: int,
+    *,
+    min_amplitude_pct: float,
+    max_amplitude_pct: float,
+    min_dir_changes: int = 2,
+) -> dict | None:
+    """由 [start, end) 切片构建 TR；不合格返回 None。振幅用绝对 hi/lo；边界用分位带。"""
+    if end <= start:
+        return None
+    width = end - start
+    hi_max: float | None = None
+    lo_min: float | None = None
+    vol_sum = 0.0
+    count = 0
+    _lows: list[float] = []
+    _highs: list[float] = []
+    for j in range(start, end):
+        h = to_float(bars[j].get("high"))
+        l = to_float(bars[j].get("low"))
+        v = to_float(bars[j].get("volume"))
+        if h is None or l is None or v is None or l <= 0:
+            continue
+        hi_max = h if hi_max is None else max(hi_max, h)
+        lo_min = l if lo_min is None else min(lo_min, l)
+        vol_sum += v
+        count += 1
+        _lows.append(l)
+        _highs.append(h)
+    if hi_max is None or lo_min is None or lo_min <= 0 or count <= 0:
+        return None
+    amplitude = (hi_max - lo_min) / lo_min * 100
+    if amplitude < min_amplitude_pct or amplitude > max_amplitude_pct:
+        return None
+    if _tr_dir_changes(bars, start, end) < min_dir_changes:
+        return None
+
+    bound_hi, bound_lo = hi_max, lo_min
+    if _lows and _highs:
+        _lows.sort()
+        _highs.sort()
+        fl = max(0.0, min(1.0, WYCKOFF_TR_FLOOR_PCT))
+        cl = max(0.0, min(1.0, WYCKOFF_TR_CEIL_PCT))
+        _fi = min(len(_lows) - 1, int(round(fl * (len(_lows) - 1))))
+        _ci = min(len(_highs) - 1, int(round(cl * (len(_highs) - 1))))
+        _pctl_lower = _lows[_fi]
+        _pctl_upper = _highs[_ci]
+        if _pctl_upper > _pctl_lower:
+            bound_hi, bound_lo = _pctl_upper, _pctl_lower
+
+    last = bars[end - 1]
+    close_last = to_float(last.get("close"))
+    in_tr = (close_last is not None) and (bound_lo <= close_last <= bound_hi)
+    width_score = min(1.0, width / max(1, WYCKOFF_TR_QUALITY_WIDTH_REF))
+    amp_mid = (min_amplitude_pct + max_amplitude_pct) / 2.0
+    amp_score = 1.0 - abs(amplitude - amp_mid) / max(amp_mid, 1e-6) * 0.5
+    amp_score = max(0.3, min(1.0, amp_score))
+    tr_quality = round(width_score * 0.7 + amp_score * 0.3, 3)
+
+    return {
+        "tr_upper": round(bound_hi, 4),
+        "tr_lower": round(bound_lo, 4),
+        "tr_baseline_volume": round(vol_sum / count, 2),
+        "tr_start": start,
+        "tr_end": end - 1,
+        "tr_width": width,
+        "tr_amplitude_pct": round(amplitude, 2),
+        "tr_quality": tr_quality,
+        "in_tr": bool(in_tr),
+    }
+
+
 def _detect_trading_range(
     bars: list[dict],
     lookback: int | None = None,
@@ -397,142 +498,77 @@ def _detect_trading_range(
     原典依据：TR 是吸筹或派发的「容器」，价格在区间内反复测试清晰的上下沿、
     持续足够时长。因果律要求 TR 宽度决定后续行情幅度。
 
-    算法：从当前 bar 向后回溯（最多 lookback 根），逐步纳入更早 K 线，
-    维护区间 high_max / low_min。一旦区间振幅 (high_max-low_min)/low_min
-    超过 max_amplitude_pct（说明已滑入趋势段），停止回溯。
-    候选 TR 须满足：宽度 >= min_width 且振幅落入 [min_amplitude_pct, max_amplitude_pct]。
-
-    Args:
-        bars: K 线列表
-        lookback: 最大回溯根数（默认 WYCKOFF_TR_LOOKBACK）
-        min_width / max_amplitude_pct / min_amplitude_pct: 可调阈值
+    主路径：从当前 bar 向后回溯 grow，振幅超限则停（兼容旧行为）。
+    Fallback（Bug B / wyckoff-sos-epic-bcg-handoff）：主路径失败时，末端对齐滑窗
+    [FALLBACK_MIN_WIDTH .. lookback] 取质量最高合格候选（SC 前高打断 / 崩盘后短横盘）。
 
     Returns:
-        dict | None：
-        {
-            "tr_upper": float,            # 区间上沿（反复被拒的高点）
-            "tr_lower": float,            # 区间下沿（反复被撑的地点）
-            "tr_baseline_volume": float,  # 区间内平均成交量（量能基线）
-            "tr_start": int,              # 区间起点索引（含）
-            "tr_end": int,                # 区间终点索引（= len(bars)-1）
-            "tr_width": int,              # 区间宽度（根数）
-            "tr_amplitude_pct": float,    # 区间振幅 %
-            "tr_quality": float,          # 质量评分 0~1（越宽越清晰越高）
-            "in_tr": bool,                # 当前收盘价是否在区间内
-        }
-        无有效 TR 返回 None（调用方 fallback 局部极值逻辑）。
+        dict | None（tr_upper/lower/baseline/start/end/width/amp/quality/in_tr；fallback 时 tr_fallback=True）
     """
     n = len(bars)
-    if n < min_width:
+    fb_min = max(4, int(WYCKOFF_TR_FALLBACK_MIN_WIDTH))
+    if n < min(min_width, fb_min):
         return None
     _lookback = min(lookback if lookback is not None else WYCKOFF_TR_LOOKBACK, n)
     start_search = max(0, n - _lookback)
 
-    # 从末端向前扩展，维护区间内 high_max / low_min / 均量
-    last = bars[-1]
-    hi_max = to_float(last.get("high"))
-    lo_min = to_float(last.get("low"))
-    last_vol = to_float(last.get("volume"))
-    if hi_max is None or lo_min is None or last_vol is None or lo_min <= 0:
-        return None
+    # ── 主路径 grow ──────────────────────────────────────────────
+    primary: dict | None = None
+    if n >= min_width:
+        last = bars[-1]
+        hi_max = to_float(last.get("high"))
+        lo_min = to_float(last.get("low"))
+        last_vol = to_float(last.get("volume"))
+        if hi_max is not None and lo_min is not None and last_vol is not None and lo_min > 0:
+            count = 1
+            best_start = n - 1
+            for i in range(n - 2, start_search - 1, -1):
+                h = to_float(bars[i].get("high"))
+                l = to_float(bars[i].get("low"))
+                v = to_float(bars[i].get("volume"))
+                if h is None or l is None or v is None or l <= 0:
+                    continue
+                new_hi = max(hi_max, h)
+                new_lo = min(lo_min, l)
+                amp = (new_hi - new_lo) / new_lo * 100
+                if amp > max_amplitude_pct:
+                    break
+                hi_max, lo_min = new_hi, new_lo
+                count += 1
+                if count >= min_width:
+                    best_start = i
+            if n - best_start >= min_width:
+                primary = _tr_build_from_slice(
+                    bars,
+                    best_start,
+                    n,
+                    min_amplitude_pct=min_amplitude_pct,
+                    max_amplitude_pct=max_amplitude_pct,
+                )
+    if primary is not None:
+        return primary
 
-    vol_sum = last_vol
-    count = 1
-    best_start = n - 1
-
-    for i in range(n - 2, start_search - 1, -1):
-        h = to_float(bars[i].get("high"))
-        l = to_float(bars[i].get("low"))
-        v = to_float(bars[i].get("volume"))
-        if h is None or l is None or v is None or l <= 0:
+    # ── Fallback：末端对齐滑窗（不降低全局 MIN_WIDTH）────────────────
+    best_fb: dict | None = None
+    best_q = -1.0
+    max_w = min(_lookback, n)
+    for width in range(fb_min, max_w + 1):
+        start = n - width
+        cand = _tr_build_from_slice(
+            bars,
+            start,
+            n,
+            min_amplitude_pct=min_amplitude_pct,
+            max_amplitude_pct=max_amplitude_pct,
+        )
+        if cand is None:
             continue
-        new_hi = max(hi_max, h)
-        new_lo = min(lo_min, l)
-        amp = (new_hi - new_lo) / new_lo * 100
-        # 纳入该根会让振幅超阈值 → 已进入趋势段，TR 停在此前
-        if amp > max_amplitude_pct:
-            break
-        hi_max, lo_min = new_hi, new_lo
-        vol_sum += v
-        count += 1
-        if count >= min_width:
-            best_start = i  # 持续刷新为满足条件的最早起点
-
-    width = n - best_start
-    if width < min_width:
-        return None
-    amplitude = (hi_max - lo_min) / lo_min * 100
-    if amplitude < min_amplitude_pct or amplitude > max_amplitude_pct:
-        return None
-
-    # 方向交替测试（原典核心）：TR 内价格应频繁改变方向（在区间内来回震荡、
-    # 反复测试上下沿），区别于单向趋势段（即便相对振幅落入区间也不算 TR）。
-    # 统计候选区间内 close 涨跌方向的变化次数，震荡段远多于趋势段。
-    # 注：用相邻方向交替而非全局三分位折返，避免突破段高点拉伸上界、
-    # 压低横盘段正常震荡的折返计数（T4 场景）。
-    dir_changes = 0
-    prev_dir = 0
-    for j in range(best_start + 1, n):
-        cj = to_float(bars[j].get("close"))
-        cj1 = to_float(bars[j - 1].get("close"))
-        if cj is None or cj1 is None:
-            continue
-        d = 1 if cj > cj1 else (-1 if cj < cj1 else 0)
-        if d != 0 and prev_dir != 0 and d != prev_dir:
-            dir_changes += 1
-        if d != 0:
-            prev_dir = d
-    if dir_changes < 2:
-        return None
-
-    # ── 边界用「反复测试的清晰上下沿」而非绝对极值 ──────────────────────
-    # 原典：TR 是价格反复测试清晰上下沿的容器；Spring（刺穿下沿）/Upthrust
-    # （刺穿上沿）是事件而非边界本身。若直接取区间 low/high 的极值作边界，
-    # 会把刺穿毛刺当成支撑/阻力，导致 Spring 无法「跌破」自身最低点而漏检。
-    # 故对区间内的 low/high 取分位带（默认 15/85 分位），过滤最深/最高的刺穿，
-    # 得到价格真正反复测试的水平。无效时回退绝对极值。
-    _lows = []
-    _highs = []
-    for j in range(best_start, n):
-        l = to_float(bars[j].get("low"))
-        h = to_float(bars[j].get("high"))
-        if l is not None and l > 0:
-            _lows.append(l)
-        if h is not None and h > 0:
-            _highs.append(h)
-    if _lows and _highs:
-        _lows.sort()
-        _highs.sort()
-        fl = max(0.0, min(1.0, WYCKOFF_TR_FLOOR_PCT))
-        cl = max(0.0, min(1.0, WYCKOFF_TR_CEIL_PCT))
-        _fi = min(len(_lows) - 1, int(round(fl * (len(_lows) - 1))))
-        _ci = min(len(_highs) - 1, int(round(cl * (len(_highs) - 1))))
-        _pctl_lower = _lows[_fi]
-        _pctl_upper = _highs[_ci]
-        if _pctl_upper > _pctl_lower:
-            hi_max, lo_min = _pctl_upper, _pctl_lower
-
-    tr_baseline_volume = vol_sum / count if count > 0 else 0.0
-    close_last = to_float(last.get("close"))
-    in_tr = (close_last is not None) and (lo_min <= close_last <= hi_max)
-    # 质量：宽度越大越高（封顶 1.0）；振幅越居中（远离上下限）略加权
-    width_score = min(1.0, width / max(1, WYCKOFF_TR_QUALITY_WIDTH_REF))
-    amp_mid = (min_amplitude_pct + max_amplitude_pct) / 2.0
-    amp_score = 1.0 - abs(amplitude - amp_mid) / max(amp_mid, 1e-6) * 0.5
-    amp_score = max(0.3, min(1.0, amp_score))
-    tr_quality = round(width_score * 0.7 + amp_score * 0.3, 3)
-
-    return {
-        "tr_upper": round(hi_max, 4),
-        "tr_lower": round(lo_min, 4),
-        "tr_baseline_volume": round(tr_baseline_volume, 2),
-        "tr_start": best_start,
-        "tr_end": n - 1,
-        "tr_width": width,
-        "tr_amplitude_pct": round(amplitude, 2),
-        "tr_quality": tr_quality,
-        "in_tr": bool(in_tr),
-    }
+        q = float(cand.get("tr_quality") or 0.0)
+        prev_w = int((best_fb or {}).get("tr_width") or 0)
+        if q > best_q or (q == best_q and width > prev_w):
+            best_q = q
+            best_fb = {**cand, "tr_fallback": True}
+    return best_fb
 
 def _compute_dynamic_support(
     bars: list[dict],
@@ -1716,41 +1752,56 @@ def _detect_are(bars: list[dict], tr_ctx: dict | None = None) -> dict:
         return {"are_signal": False, "are_reason": "未检测到 BC，无法触发 ARE", "are_price": None}
     return {"are_signal": False, "are_reason": "BC 后未检测到有效回落", "are_price": None}
 
-def _detect_sos(bars: list[dict], tr_ctx: dict | None = None) -> dict:
-    """Detect Sign of Strength (SOS) — 连续放量突破。
+def _sos_empty(reason: str) -> dict:
+    return {"sos_signal": False, "sos_reason": reason, "sos_price": None, "sos_kind": None}
 
-    触发条件（最近 5 根 K 线窗口）:
-      - ≥4/5 阳线 (close > open)（A 股极少 5 连阳，与 LPS 对齐）
-      - close[4] >= open[0] (总体抬高)
-      - 平均量比 > 1.2（相对前窗基线均量）
-      - 累计涨幅 >= 2%
+
+def _sos_baseline_avg_vol(
+    bars: list[dict],
+    tr_ctx: dict | None,
+    *,
+    robust: bool = False,
+) -> float:
+    """基线量：有 TR 基线量则用它（勿绑 in_tr），否则前10根。
+
+    robust=True（thrust）：无 TR 基线时用**中位数**，避免 AR/天量单日拉高均值导致
+    真突破量比被压死（南网 08-03 vs 07-20 AR）。
     """
-    if len(bars) < WYCKOFF_DIVERGENCE_BARS + WYCKOFF_SPRING_SUPPORT_LOOKBACK:
-        return {"sos_signal": False, "sos_reason": "数据不足", "sos_price": None}
-
     recent = bars[-(WYCKOFF_DIVERGENCE_BARS + WYCKOFF_SPRING_SUPPORT_LOOKBACK):-1]
-    current_window = bars[-WYCKOFF_DIVERGENCE_BARS:]
-
-    # 基线均量：有 TR 基线量则用它（勿绑 in_tr），否则前10根均量
     if tr_ctx is not None and tr_ctx.get("tr_baseline_volume"):
-        baseline_avg_vol = tr_ctx["tr_baseline_volume"]
-    else:
-        baseline_start = max(0, len(recent) - 10)
-        baseline = recent[baseline_start:]
-        baseline_avg_vol = sum(to_float(b.get("volume")) or 0 for b in baseline) / max(len(baseline), 1)
-    if baseline_avg_vol <= 0:
-        return {"sos_signal": False, "sos_reason": "量能数据不足", "sos_price": None}
+        try:
+            bv = float(tr_ctx["tr_baseline_volume"])
+            if bv > 0:
+                return bv
+        except (TypeError, ValueError):
+            pass
+    baseline_start = max(0, len(recent) - 10)
+    baseline = recent[baseline_start:]
+    vols = [to_float(b.get("volume")) or 0 for b in baseline]
+    vols = [v for v in vols if v > 0]
+    if not vols:
+        return 0.0
+    if robust:
+        vs = sorted(vols)
+        mid = len(vs) // 2
+        if len(vs) % 2:
+            return float(vs[mid])
+        return float(vs[mid - 1] + vs[mid]) / 2.0
+    return sum(vols) / len(vols)
 
-    # 检查 5 根 K 线
-    closes = []
-    opens = []
-    volumes = []
+
+def _try_sos_climb(bars: list[dict], baseline_avg_vol: float) -> dict:
+    """连续爬坡型 SOS（近 5 根 ≥4 阳）。"""
+    current_window = bars[-WYCKOFF_DIVERGENCE_BARS:]
+    closes: list[float] = []
+    opens: list[float] = []
+    volumes: list[float] = []
     for b in current_window:
         o = to_float(b.get("open"))
         c = to_float(b.get("close"))
         v = to_float(b.get("volume"))
         if o is None or c is None or v is None:
-            return {"sos_signal": False, "sos_reason": "数据异常", "sos_price": None}
+            return _sos_empty("数据异常")
         closes.append(c)
         opens.append(o)
         volumes.append(v)
@@ -1758,27 +1809,240 @@ def _detect_sos(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     # P1-2: 放宽为 ≥4/5 阳线（A 股连续 5 阳极罕见，4/5 + 强涨幅更实际）
     bullish_count = sum(1 for c, o in zip(closes, opens) if c > o)
     if bullish_count < WYCKOFF_DIVERGENCE_BARS - 1:
-        return {"sos_signal": False, "sos_reason": f"仅 {bullish_count}/{WYCKOFF_DIVERGENCE_BARS} 阳线，不足 {WYCKOFF_DIVERGENCE_BARS - 1} 根", "sos_price": None}
+        return _sos_empty(
+            f"仅 {bullish_count}/{WYCKOFF_DIVERGENCE_BARS} 阳线，不足 {WYCKOFF_DIVERGENCE_BARS - 1} 根"
+        )
 
-    # 总体抬高
     if closes[-1] < opens[0]:
-        return {"sos_signal": False, "sos_reason": "未总体抬高", "sos_price": None}
+        return _sos_empty("未总体抬高")
 
-    # 平均量比
     sos_avg_vol = sum(volumes) / len(current_window)
     if sos_avg_vol < baseline_avg_vol * 1.2:
-        return {"sos_signal": False, "sos_reason": "量能不足", "sos_price": None}
+        return _sos_empty("量能不足")
 
-    # 累计涨幅
     gain = (closes[-1] - opens[0]) / max(opens[0], 0.01)
     if gain < 0.02:
-        return {"sos_signal": False, "sos_reason": f"涨幅 {gain*100:.1f}% 不足 2%", "sos_price": None}
+        return _sos_empty(f"涨幅 {gain*100:.1f}% 不足 2%")
 
     return {
         "sos_signal": True,
         "sos_reason": f"强势突破，{bullish_count}/5 阳线累计涨{gain*100:.1f}%，量能放大",
         "sos_price": round(closes[-1], 2),
+        "sos_kind": "climb",
     }
+
+
+def _sos_thrust_creek(tr_ctx: dict | None) -> float | None:
+    """Thrust 突破锚（溪/箱顶）。
+
+    优先 phase_a ``ar_high``（吸筹离开 AR 钉的上沿），其次 ``tr_upper``。
+    避免：突破后分位 TR 上沿被抬高，回扫历史 tip 时 close>tr_upper 反而不成立。
+    """
+    if not isinstance(tr_ctx, dict):
+        return None
+    candidates: list[float] = []
+    pa = tr_ctx.get("phase_a_range")
+    if isinstance(pa, dict) and pa.get("ar_high") is not None:
+        try:
+            candidates.append(float(pa["ar_high"]))
+        except (TypeError, ValueError):
+            pass
+    for k in ("ar_high", "tr_upper"):
+        if tr_ctx.get(k) is None:
+            continue
+        try:
+            candidates.append(float(tr_ctx[k]))
+        except (TypeError, ValueError):
+            continue
+    if not candidates:
+        return None
+    # 取有效正数中的「结构上沿」：优先 AR（列表中先出现），否则 tr_upper
+    for c in candidates:
+        if c > 0:
+            return c
+    return None
+
+
+def _sos_thrust_baseline_vol(
+    bars: list[dict],
+    tr_ctx: dict | None,
+    creek: float,
+    fallback: float,
+) -> float:
+    """Thrust 量比分母：TR 内、tip 之前、收盘仍 ≤ 溪 的 bar 中位数。
+
+    南网实证：整段 tr_baseline 含突破日 → 5.75M，08-03 量比仅 1.47；
+    溪内中位 ≈ 横盘均量，才能还原 handoff「相对 TR 内均量 ≥1.8」。
+    """
+    vols: list[float] = []
+    start = 0
+    if isinstance(tr_ctx, dict) and tr_ctx.get("tr_start") is not None:
+        try:
+            start = max(0, int(tr_ctx["tr_start"]))
+        except (TypeError, ValueError):
+            start = 0
+    # tip = bars[-1]；只取之前的 bar
+    end = max(start, len(bars) - 1)
+    for b in bars[start:end]:
+        c = to_float(b.get("close"))
+        v = to_float(b.get("volume"))
+        if v is None or v <= 0:
+            continue
+        if c is not None and c > creek:
+            continue  # 已离开溪上的 bar 不进基线
+        vols.append(float(v))
+    if len(vols) >= 3:
+        vs = sorted(vols)
+        mid = len(vs) // 2
+        if len(vs) % 2:
+            return float(vs[mid])
+        return float(vs[mid - 1] + vs[mid]) / 2.0
+    if fallback > 0:
+        return float(fallback)
+    return _sos_baseline_avg_vol(bars, tr_ctx, robust=True)
+
+
+def _try_sos_thrust(bars: list[dict], tr_ctx: dict | None, baseline_avg_vol: float) -> dict:
+    """单日爆发型 SOS：阳线 + 收盘站上溪/TR 上沿 + 放量 + 大涨。
+
+    法源：docs/plans/wyckoff-sos-single-day-handoff.md
+    v1：无 creek（ar_high/tr_upper）不做 thrust（禁止无箱大阳兜底）。
+    """
+    tr_upper = _sos_thrust_creek(tr_ctx)
+    if tr_upper is None:
+        return _sos_empty("无TR上沿，不判单日爆发型SOS")
+
+    last = bars[-1]
+    o = to_float(last.get("open"))
+    c = to_float(last.get("close"))
+    v = to_float(last.get("volume"))
+    if o is None or c is None or v is None or o <= 0:
+        return _sos_empty("数据异常")
+
+    baseline_avg_vol = _sos_thrust_baseline_vol(
+        bars, tr_ctx, tr_upper, baseline_avg_vol
+    )
+    if baseline_avg_vol <= 0:
+        return _sos_empty("量能数据不足")
+
+    if c <= o:
+        return _sos_empty("单日非阳线，非爆发型SOS")
+    if c <= tr_upper:
+        return _sos_empty(f"收盘未站上TR上沿{tr_upper:.2f}")
+
+    # 开→收 与 昨收→收 取大（跳空高开实体偏小但仍强势离开箱）
+    prev_c = to_float(bars[-2].get("close")) if len(bars) >= 2 else None
+    gain_oc = (c - o) / max(o, 0.01)
+    gain_pc = (c - prev_c) / max(abs(prev_c), 0.01) if prev_c else gain_oc
+    single_gain = max(gain_oc, gain_pc)
+    if single_gain < WYCKOFF_SOS_THRUST_MIN_GAIN:
+        return _sos_empty(
+            f"单日涨幅{single_gain*100:.1f}%不足{WYCKOFF_SOS_THRUST_MIN_GAIN*100:.0f}%"
+        )
+
+    # 两位小数对齐人读「量比 1.8」（84498/47000≈1.7978 不应因浮点被卡）
+    vol_ratio = v / baseline_avg_vol
+    vol_ratio_r = round(vol_ratio, 2)
+    if vol_ratio_r < WYCKOFF_SOS_THRUST_VOL_RATIO:
+        return _sos_empty(
+            f"单日量比{vol_ratio_r:.2f}不足{WYCKOFF_SOS_THRUST_VOL_RATIO:.1f}"
+        )
+
+    return {
+        "sos_signal": True,
+        "sos_reason": (
+            f"单日爆发型突破：+{single_gain*100:.1f}%，量比{vol_ratio_r:.1f}，"
+            f"收盘站上溪/上沿{tr_upper:.2f}"
+        ),
+        "sos_price": round(c, 2),
+        "sos_kind": "thrust",
+    }
+
+
+def _detect_sos_at_tip(bars: list[dict], tr_ctx: dict | None = None) -> dict:
+    """仅判断序列末日是否 SOS（climb OR thrust）。供滑窗/回扫复用。"""
+    if len(bars) < WYCKOFF_DIVERGENCE_BARS + WYCKOFF_SPRING_SUPPORT_LOOKBACK:
+        return _sos_empty("数据不足")
+
+    baseline_climb = _sos_baseline_avg_vol(bars, tr_ctx, robust=False)
+    if baseline_climb <= 0:
+        return _sos_empty("量能数据不足")
+
+    climb = _try_sos_climb(bars, baseline_climb)
+    if climb.get("sos_signal"):
+        return climb
+
+    baseline_thrust = _sos_baseline_avg_vol(bars, tr_ctx, robust=True)
+    thrust = _try_sos_thrust(bars, tr_ctx, baseline_thrust if baseline_thrust > 0 else baseline_climb)
+    if thrust.get("sos_signal"):
+        return thrust
+
+    return climb if climb.get("sos_reason") else thrust
+
+
+def _detect_sos(
+    bars: list[dict],
+    tr_ctx: dict | None = None,
+    *,
+    lookback_tips: int = 1,
+    min_tip_idx: int | None = None,
+) -> dict:
+    """Detect Sign of Strength (SOS) — climb 连续放量 OR thrust 单日爆发。
+
+    Climb（最近 5 根）:
+      - ≥4/5 阳线 (close > open)（A 股极少 5 连阳，与 LPS 对齐）
+      - close[-1] >= open[0] (总体抬高)
+      - 平均量比 > 1.2（相对前窗基线均量）
+      - 累计涨幅 >= 2%
+
+    Thrust（法源 wyckoff-sos-single-day-handoff）:
+      - 须 tr_upper；阳线；close > tr_upper；开收涨幅与量比过阈
+
+    lookback_tips:
+      - 1（默认）→ 仅末日 tip（簇滑窗 / BU 回扫必须，避免索引漂移）
+      - N>1 → 从末日往回最多 N 根 tip，取最近一次命中（主分析用 RECENT_LOOKBACK）
+
+    min_tip_idx:
+      - 若给出（通常 = 最后 SC 的 bar 索引），仅接受 tip 索引 **严格大于** 该值的 SOS，
+        防止回扫到 SC 之前派发段的假强势（南网周线 sos_price=63 类污染）。
+    """
+    lb = max(1, int(lookback_tips))
+    floor_i = int(min_tip_idx) if min_tip_idx is not None else -1
+
+    def _ok_idx(i: int) -> bool:
+        return i > floor_i
+
+    tip = _detect_sos_at_tip(bars, tr_ctx)
+    tip_i = len(bars) - 1
+    if tip.get("sos_signal") and _ok_idx(tip_i):
+        return tip
+    if tip.get("sos_signal") and not _ok_idx(tip_i):
+        tip = _sos_empty("SOS 不晚于 SC，忽略旧强势")
+    if lb <= 1 or len(bars) < 2:
+        return tip
+
+    min_len = WYCKOFF_DIVERGENCE_BARS + WYCKOFF_SPRING_SUPPORT_LOOKBACK
+    # i = tip 索引；从次末日往回找最近一次命中（且须晚于 SC）
+    # 有 SC 地板：扫 SC→今（突破可能早于固定 30 窗），硬顶 120
+    # 无 SC：仅 lookback_tips 近窗
+    if floor_i >= 0:
+        oldest = max(min_len - 1, floor_i + 1, len(bars) - 120)
+    else:
+        oldest = max(min_len - 1, len(bars) - lb)
+    for i in range(len(bars) - 2, oldest - 1, -1):
+        if not _ok_idx(i):
+            continue
+        sub = bars[: i + 1]
+        if len(sub) < min_len:
+            continue
+        hit = _detect_sos_at_tip(sub, tr_ctx)
+        if hit.get("sos_signal"):
+            age = len(bars) - 1 - i
+            reason = hit.get("sos_reason") or ""
+            if age > 0 and "近端" not in reason:
+                hit = {**hit, "sos_reason": f"{reason}（近端{age}根前）"}
+            return hit
+    return tip
 
 def _detect_st(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     """Detect Secondary Test (ST) — 二次测试 Spring 支撑，缩量确认。
@@ -2210,6 +2474,9 @@ def _detect_event_cluster(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     lookback = WYCKOFF_CLUSTER_LOOKBACK
     scan = bars[-lookback:] if len(bars) > lookback else bars
     gap = WYCKOFF_CLUSTER_MIN_GAP
+    n_scan = len(scan)
+    fresh = max(3, int(WYCKOFF_CLUSTER_EVENT_FRESH_BARS))
+    fresh_floor = max(0, n_scan - fresh)
 
     # 在 scan 内找各事件最后触发位置 + 完整输出（用于读 strength）
     spring_idx, spring_res = _scan_last_event(scan, _detect_spring, tr_ctx, window=15, step=1)
@@ -2217,23 +2484,51 @@ def _detect_event_cluster(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     ut_idx, ut_res = _scan_last_event(scan, _detect_upthrust, tr_ctx, window=15, step=1)
     sos_idx, _ = _scan_last_event(scan, _detect_sos, tr_ctx, window=15, step=1)
     sow_idx, _ = _scan_last_event(scan, _detect_sign_of_weakness, tr_ctx, window=16, step=1)
+    # Bug C：最后 SC 作为阶段重置锚——SC 之前的派发/吸筹事件不参与当前簇
+    sc_idx, _ = _scan_last_event(scan, _detect_selling_climax, tr_ctx, window=15, step=1)
+
+    def _after_sc(idx: int) -> bool:
+        return idx >= 0 and (sc_idx < 0 or idx > sc_idx)
+
+    if sc_idx >= 0:
+        if not _after_sc(spring_idx):
+            spring_idx, spring_res = -1, None
+        if not _after_sc(st_idx):
+            st_idx = -1
+        if not _after_sc(ut_idx):
+            ut_idx, ut_res = -1, None
+        if not _after_sc(sos_idx):
+            sos_idx = -1
+        if not _after_sc(sow_idx):
+            sow_idx = -1
 
     support_idx = max(spring_idx, st_idx)  # 支撑测试 = Spring 或 ST
 
     # 顺序确认：支撑测试必须先于 SOS（间隔 >= gap）；上冲必须先于 SOW
-    accumulation_confirmed = support_idx >= 0 and sos_idx > support_idx + gap
-    distribution_confirmed = ut_idx >= 0 and sow_idx > ut_idx + gap
+    # 确认事件须落在近端 fresh 窗（防 60 日旧簇污染）
+    accumulation_confirmed = (
+        support_idx >= 0
+        and sos_idx > support_idx + gap
+        and sos_idx >= fresh_floor
+    )
+    distribution_confirmed = (
+        ut_idx >= 0
+        and sow_idx > ut_idx + gap
+        and sow_idx >= fresh_floor
+    )
 
     # 失败簇：支撑测试后接 SOW（且 SOS 不存在或在 SOW 之前）→ 假突破实为派发
     accumulation_failed = (
         support_idx >= 0
         and sow_idx > support_idx + gap
+        and sow_idx >= fresh_floor
         and (sos_idx < 0 or sow_idx > sos_idx)
     )
     # 失败簇：上冲后接 SOS（且 SOW 不存在或在 SOS 之前）→ 假派发实为吸筹
     distribution_failed = (
         ut_idx >= 0
         and sos_idx > ut_idx + gap
+        and sos_idx >= fresh_floor
         and (sow_idx < 0 or sos_idx > sow_idx)
     )
 

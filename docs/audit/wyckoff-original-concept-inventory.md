@@ -39,7 +39,7 @@
 | ST (Secondary Test 二次测试) | ✅ | 广义 ST + L2/L3 门禁；**禁止软确认**；A 股参数放宽（现行默认见 L0–L3 §4：ST 量比 0.80 / 邻近 0.045 等；PR #55）。`st_*`=Spring 确认，与 `secondary_test_sc_*` 分离。规格：`wyckoff-tr-maturity-l0l3-handoff.md` |
 | Spring (弹簧/震仓) | ✅ | |
 | Test of Spring (Spring 后确认测试) | ✅ | `spring_test_*` 与 `st_*` 双写（`_spring_test_fields_from_st`）；阶段机 C→D 认 Test |
-| SOS (Sign of Strength 强势信号) | ✅ | |
+| SOS (Sign of Strength 强势信号) | ✅ | climb（≥4/5 阳连续窗）**或** thrust（单日放量站上 TR 上沿）；`sos_kind`；法源 `wyckoff-sos-single-day-handoff.md` |
 | **BU (Back Up 回调买入)** | ✅ | `_detect_backup`（SOS 后缩量回踩） |
 | LPS (Last Point of Support 最后支撑点) | ✅ | 与 LPSY 打分互斥 + LPSY 分析层门控 |
 | **Jump Across the Creek (跳溪)** | ✅ | `_detect_jump_across_creek` → `jac_signal`/`jac_reason`/`jac_price`；SOS/Markup/BU 附近越过溪站稳；展示灯，不进 fusion |

@@ -226,6 +226,8 @@ WYCKOFF_UT_STRONG_RECLAIM: float = 1.0          # UT 跌回TR中轴以下比例 
 # 上冲(Upthrust)→SOW 确认派发；并校验事件先后顺序 + 用 P0-4 strength 定级。
 WYCKOFF_CLUSTER_LOOKBACK: int = 60           # 事件簇扫描回溯窗口（与阶段机同量级）
 WYCKOFF_CLUSTER_MIN_GAP: int = 5             # 支撑测试与 SOS 的最小间隔根数（防同根棒误判顺序）
+# 确认事件（SOW/SOS）须落在 scan 近端，防 60 日旧派发簇污染（Bug C）
+WYCKOFF_CLUSTER_EVENT_FRESH_BARS: int = int(os.environ.get("WYCKOFF_CLUSTER_EVENT_FRESH_BARS", "10"))
 
 # Wyckoff 阶段状态机
 WYCKOFF_PHASE_LOOKBACK: int = 60                # 阶段序列回溯窗口（约 3 个月）
@@ -236,6 +238,13 @@ WYCKOFF_VSA_AVG_SPREAD_PERIOD: int = 20         # VSA 平均波幅计算周期
 # Divergence 量价背离相关参数
 WYCKOFF_DIVERGENCE_BARS: int = 5                # 背离比对K线窗口
 WYCKOFF_DIVERGENCE_RATIO: float = 0.85          # 背离量能萎缩比例由 80% 放宽至 85%
+
+# SOS 单日爆发型（thrust）：法源 docs/plans/wyckoff-sos-single-day-handoff.md
+# 与 climb（≥4/5 阳连续窗）OR；须 close>tr_upper，无 TR 上沿不做 thrust
+WYCKOFF_SOS_THRUST_MIN_GAIN: float = float(os.environ.get("WYCKOFF_SOS_THRUST_MIN_GAIN", "0.05"))
+WYCKOFF_SOS_THRUST_VOL_RATIO: float = float(os.environ.get("WYCKOFF_SOS_THRUST_VOL_RATIO", "1.8"))
+# 近端 SOS 回扫根数（突破后数日仍亮灯；1=仅末日 tip。簇/BU 内滑窗保持 tip-only）
+WYCKOFF_SOS_RECENT_LOOKBACK: int = int(os.environ.get("WYCKOFF_SOS_RECENT_LOOKBACK", "30"))
 
 # Compression 压缩蓄势参数
 WYCKOFF_COMPRESSION_LOOKBACK: int = 20          # 压缩检测回溯窗口
@@ -297,6 +306,9 @@ WYCKOFF_TR_MIN_WIDTH: int = 20                  # TR 最小宽度（根数），
 WYCKOFF_TR_AMPLITUDE_MAX: float = 30.0          # TR 最大振幅 %，超过即判定已进入趋势段，停止回溯
 WYCKOFF_TR_AMPLITUDE_MIN: float = 6.0           # TR 最小振幅 %，过窄视为无意义的窄幅噪声
 WYCKOFF_TR_QUALITY_WIDTH_REF: int = 60          # TR 质量评分的宽度参考（width/该值，封顶 1.0）
+# 主 grow 因 SC 前高打断失败时：末端滑窗 fallback 最小宽（南网横盘~10 根；不全局降低 MIN_WIDTH）
+# 法源 docs/plans/wyckoff-sos-epic-bcg-handoff.md Bug B
+WYCKOFF_TR_FALLBACK_MIN_WIDTH: int = int(os.environ.get("WYCKOFF_TR_FALLBACK_MIN_WIDTH", "10"))
 # TR 上下沿用「反复测试的清晰边界」而非绝对极值：取区间内 low/high 的分位带，
 # 排除 Spring/Upthrust 的刺穿毛刺（原典：刺穿是事件，不是边界本身）。
 WYCKOFF_TR_FLOOR_PCT: float = 0.15              # 下沿 = 区间 low 的 15 分位（过滤最深 ~15% 刺穿）

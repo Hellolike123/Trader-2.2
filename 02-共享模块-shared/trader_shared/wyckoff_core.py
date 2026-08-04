@@ -32,6 +32,7 @@ from trader_shared.config import (
     WYCKOFF_UT_VOL_RATIO,
     WYCKOFF_DIVERGENCE_BARS,
     WYCKOFF_DIVERGENCE_RATIO,
+    WYCKOFF_SOS_RECENT_LOOKBACK,
     WYCKOFF_PHASE_LOOKBACK,
     WYCKOFF_PHASE_MIN_TR_QUALITY,
     WYCKOFF_PHASE_A_SEED_MIN_QUALITY,
@@ -655,7 +656,19 @@ def wyckoff_analysis(
     bearish_div, bullish_div = _detect_volume_divergence(bars)
     ar = _detect_ar(bars, tr_ctx=event_tr_ctx, timeframe=timeframe, is_index=is_index)
     are = _detect_are(bars, tr_ctx=event_tr_ctx)
-    sos = _detect_sos(bars, tr_ctx=event_tr_ctx)
+    # 主路径近端回扫 SOS（突破后数日仍亮）；须晚于 SC，防派发段旧强势
+    # 簇/BU 内仍 tip-only（默认 lookback_tips=1）
+    _sc_tip_floor = sc.get("sc_bar_idx")
+    try:
+        _sc_tip_floor = int(_sc_tip_floor) if _sc_tip_floor is not None else None
+    except (TypeError, ValueError):
+        _sc_tip_floor = None
+    sos = _detect_sos(
+        bars,
+        tr_ctx=event_tr_ctx,
+        lookback_tips=int(WYCKOFF_SOS_RECENT_LOOKBACK),
+        min_tip_idx=_sc_tip_floor,
+    )
     st = _detect_st(bars, tr_ctx=event_tr_ctx)
     spring_test = _spring_test_fields_from_st(st)
     lps = _detect_lps(bars, tr_ctx=event_tr_ctx)
@@ -696,6 +709,18 @@ def wyckoff_analysis(
         is_index=is_index,
     )
     phase_a_range = _refine_phase_a_sc_low(phase_a_range, st_sc)
+    # Bug G：Phase A 失败时强制作废事件簇，禁止 accum✓ 与 phase_a failed 并存
+    # 法源 docs/plans/wyckoff-sos-epic-bcg-handoff.md
+    if str(phase_a_range.get("status") or "") == "failed":
+        cluster = {
+            "accumulation_confirmed": False,
+            "distribution_confirmed": False,
+            "accumulation_failed": False,
+            "distribution_failed": False,
+            "cluster_quality": None,
+            "cluster_confidence": 0.0,
+            "cluster_reason": "Phase A 失败，事件簇作废",
+        }
     # L0–L3 成熟度：先按 SC/ST/AR + 窗宽定级，再决定是否成熟箱 overlay
     maturity = _resolve_tr_maturity(
         phase_a_range, st_sc, bars=bars, tr_ctx=tr_ctx
@@ -703,6 +728,39 @@ def wyckoff_analysis(
     phase_tr_ctx = _overlay_phase_a_seed_tr_ctx(
         tr_ctx, phase_a_range, tr_maturity=maturity["tr_maturity"]
     )
+    # TR/种子 overlay 后用更完整 tr_ctx 重判近端 SOS + BU（南网：分位 TR 或种子上沿）
+    # 合并顺序：原始 TR（保留 tr_start 供 thrust 溪内量基线）→ event → phase overlay → AR
+    _sos_tr: dict = {}
+    if isinstance(tr_ctx, dict):
+        _sos_tr.update(tr_ctx)
+    if isinstance(event_tr_ctx, dict):
+        _sos_tr.update(event_tr_ctx)
+    if isinstance(phase_tr_ctx, dict):
+        _sos_tr.update(phase_tr_ctx)
+    if isinstance(phase_a_range, dict):
+        _sos_tr["phase_a_range"] = phase_a_range
+        if phase_a_range.get("ar_high") is not None:
+            _sos_tr["ar_high"] = phase_a_range.get("ar_high")
+    if ar.get("ar_signal") and ar.get("ar_high") is not None:
+        _sos_tr.setdefault("ar_high", ar.get("ar_high"))
+    _sc_floor2 = phase_a_range.get("sc_bar_idx")
+    if _sc_floor2 is None:
+        _sc_floor2 = _sc_tip_floor
+    else:
+        try:
+            _sc_floor2 = int(_sc_floor2)
+        except (TypeError, ValueError):
+            _sc_floor2 = _sc_tip_floor
+    if _sos_tr:
+        sos2 = _detect_sos(
+            bars,
+            tr_ctx=_sos_tr,
+            lookback_tips=int(WYCKOFF_SOS_RECENT_LOOKBACK),
+            min_tip_idx=_sc_floor2,
+        )
+        if sos2.get("sos_signal"):
+            sos = sos2
+            bu = _detect_backup(bars, tr_ctx=_sos_tr)
     if phase_tr_ctx is not None:
         phase_tr_ctx["last_close"] = to_float(bars[-1].get("close")) if bars else None
         # 种子箱补 TR 窗口，供周/日线 P&F 水平计数落在 cause 区间内
@@ -962,6 +1020,7 @@ def wyckoff_analysis(
         "sos_signal": sos["sos_signal"],
         "sos_reason": sos["sos_reason"],
         "sos_price": round(sos["sos_price"], 2) if sos["sos_signal"] else None,
+        "sos_kind": sos.get("sos_kind"),  # climb | thrust | None；法源 wyckoff-sos-single-day-handoff
         "st_signal": st["st_signal"],
         "st_reason": st["st_reason"],
         "st_price": round(st["st_price"], 2) if st["st_signal"] else None,

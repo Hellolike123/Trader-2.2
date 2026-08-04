@@ -12,8 +12,8 @@ from trader_shared.wyckoff_core import (
     format_wyckoff_oneline,
     _detect_phase,
     _detect_lps,
-    _detect_sos,
 )
+from trader_shared.wyckoff_events import _detect_sos  # 直连 events，避免 facade/缓存歧义
 
 
 def _make_bar(open_, high, low, close, volume=1000):
@@ -109,6 +109,265 @@ class TestDetectBuyingClimax:
         bars.append({"open": 101, "high": 105, "low": 99, "close": 100.5, "volume": 140})
         result = wyckoff_analysis(bars)
         assert result["bc_signal"] is False
+
+
+class TestDetectSosThrust:
+    """SOS climb OR thrust — docs/plans/wyckoff-sos-single-day-handoff.md"""
+
+    def _pad(self, n: int = 20, o: float = 42.0, c: float = 42.0, v: float = 1000.0):
+        # 阴/平为主，避免误触 climb（≥4/5 阳）
+        return [_make_bar(o, o + 0.5, o - 0.5, c, v) for _ in range(n)]
+
+    def _tr(self, upper: float = 44.50, baseline: float = 47000.0):
+        return {"tr_upper": upper, "tr_lower": 41.50, "tr_baseline_volume": baseline}
+
+    def test_thrust_sos_breakout_above_tr(self):
+        bars = self._pad()
+        # 两根阴线打断 climb 窗口；量 9 万 / 基线 4.7 万 → 量比明确 ≥1.8
+        bars.extend([
+            _make_bar(42.41, 43.28, 41.40, 41.55, 34532),
+            _make_bar(42.49, 43.10, 41.82, 41.90, 39720),
+            _make_bar(42.66, 47.92, 42.66, 45.50, 90000),
+        ])
+        r = _detect_sos(bars, tr_ctx=self._tr())
+        assert r["sos_signal"] is True, r
+        assert r.get("sos_kind") == "thrust"
+        assert r["sos_price"] == 45.50
+        assert "单日爆发" in (r.get("sos_reason") or "")
+
+    def test_thrust_blocked_inside_tr(self):
+        bars = self._pad()
+        bars.append(_make_bar(42.0, 44.0, 42.0, 44.40, 90000))  # 大阳但未过 44.50
+        r = _detect_sos(bars, tr_ctx=self._tr())
+        assert r["sos_signal"] is False
+        assert r.get("sos_kind") is None
+
+    def test_thrust_gain_boundary(self):
+        bars = self._pad()
+        # 昨收钉在开盘价附近，避免 max(开收,昨收涨幅) 把 4.9% 抬过 5%
+        bars.append(_make_bar(42.90, 43.0, 42.8, 42.90, 1000))
+        # 4.9%: open=昨收=42.90 -> close 45.00
+        bars_lo = bars + [_make_bar(42.90, 46.0, 42.90, 45.00, 90000)]
+        r_lo = _detect_sos(bars_lo, tr_ctx=self._tr(upper=44.0))
+        assert r_lo["sos_signal"] is False, r_lo
+        # 5.1%: open=昨收=42.82 -> close 45.00
+        bars2 = self._pad()
+        bars2.append(_make_bar(42.82, 43.0, 42.7, 42.82, 1000))
+        bars_hi = bars2 + [_make_bar(42.82, 46.0, 42.82, 45.00, 90000)]
+        r_hi = _detect_sos(bars_hi, tr_ctx=self._tr(upper=44.0))
+        assert r_hi["sos_signal"] is True, r_hi
+        assert r_hi.get("sos_kind") == "thrust"
+
+    def test_thrust_vol_boundary(self):
+        baseline = 10000.0
+        # pad 量=基线，并设 tr_start，使溪内中位数基线=baseline（不被默认 pad 1000 带偏）
+        bars = self._pad(v=baseline)
+        tr = self._tr(upper=44.0, baseline=baseline)
+        tr["tr_start"] = 0
+        bars_lo = bars + [_make_bar(42.0, 48.0, 42.0, 45.0, int(baseline * 1.7))]
+        r_lo = _detect_sos(bars_lo, tr_ctx=tr)
+        assert r_lo["sos_signal"] is False, r_lo
+        bars_hi = bars + [_make_bar(42.0, 48.0, 42.0, 45.0, int(baseline * 1.8))]
+        r_hi = _detect_sos(bars_hi, tr_ctx=tr)
+        assert r_hi["sos_signal"] is True, r_hi
+        assert r_hi.get("sos_kind") == "thrust"
+
+    def test_thrust_requires_tr_upper(self):
+        bars = self._pad()
+        bars.append(_make_bar(42.0, 48.0, 42.0, 45.0, 90000))
+        r = _detect_sos(bars, tr_ctx={"tr_baseline_volume": 10000.0})  # 无 upper
+        assert r["sos_signal"] is False
+        r2 = _detect_sos(bars, tr_ctx=None)
+        assert r2["sos_signal"] is False
+
+    def test_climb_sos_still_works(self):
+        # 20 根基线缩量 + 5 根放量阳线爬坡
+        bars = [_make_bar(40.0, 40.5, 39.5, 40.0, 1000) for _ in range(20)]
+        bars.extend([
+            _make_bar(40.0, 41.0, 39.9, 40.8, 1500),
+            _make_bar(40.8, 41.5, 40.5, 41.2, 1500),
+            _make_bar(41.2, 42.0, 41.0, 41.8, 1500),
+            _make_bar(41.8, 42.5, 41.5, 41.6, 900),   # 1 阴，仍 4/5 阳
+            _make_bar(41.6, 43.0, 41.5, 42.8, 1600),
+        ])
+        r = _detect_sos(bars, tr_ctx=None)
+        assert r["sos_signal"] is True
+        assert r.get("sos_kind") == "climb"
+        assert "阳线" in (r.get("sos_reason") or "")
+
+    def test_backup_can_anchor_thrust_sos(self):
+        from trader_shared.wyckoff_events import _detect_backup
+
+        bars = self._pad(25)
+        # 在 i=len-4 处 thrust SOS：需 sub 切片末根为爆发日
+        bars.append(_make_bar(42.66, 47.92, 42.66, 45.50, 90000))
+        # SOS 后至少 2 根缩量回踩，不破 TR 上沿区
+        bars.append(_make_bar(45.40, 45.80, 44.80, 45.20, 20000))
+        bars.append(_make_bar(45.10, 45.50, 44.70, 45.00, 18000))
+        tr = self._tr()
+        # 直接确认末日 thrust 在回扫窗内
+        sos_at = _detect_sos(bars[:-2], tr_ctx=tr)
+        assert sos_at["sos_signal"] is True and sos_at.get("sos_kind") == "thrust"
+        bu = _detect_backup(bars, tr_ctx=tr)
+        assert bu.get("bu_signal") is True, bu
+
+
+class TestNanwangLikeThrust:
+    """南网风格：AR 天量后横盘 + 单日站上 ar_high。"""
+
+    def test_thrust_after_ar_volume_spike_uses_median_baseline(self):
+        bars = [_make_bar(42.0, 42.5, 41.6, 42.0, 47000) for _ in range(20)]
+        bars.append(_make_bar(39.0, 43.5, 38.5, 42.99, 145000))  # AR 天量
+        tr_start = len(bars)
+        for i in range(8):
+            b = 42.0 + (i % 3) * 0.3
+            bars.append(_make_bar(b, b + 0.5, b - 0.4, b + 0.05, 47000))
+        bars.append(_make_bar(42.66, 47.92, 42.66, 45.50, 84500))  # SOS 日
+        tr_ctx = {
+            "ar_high": 42.99,
+            "tr_start": tr_start,
+            "tr_upper": 45.14,  # 突破后抬高的分位上沿（溪仍用 ar_high）
+            # 故意给偏高的整段 baseline（含突破），应被溪内中位数覆盖
+            "tr_baseline_volume": 90000,
+            "phase_a_range": {"ar_high": 42.99, "sc_low": 37.80, "status": "established"},
+        }
+        r = _detect_sos(bars, tr_ctx=tr_ctx, lookback_tips=1)
+        assert r["sos_signal"] is True, r
+        assert r.get("sos_kind") == "thrust"
+        assert r.get("sos_price") == 45.50
+
+
+class TestSosScFloor:
+    """近端 SOS 不得回扫到 SC 之前的旧强势（周线 63 元类）。"""
+
+    def test_min_tip_idx_blocks_pre_sc_sos(self):
+        bars = [_make_bar(60.0, 61.0, 59.0, 60.5, 2000) for _ in range(20)]
+        # 旧强势 tip（SC 之前，回扫不得采用）
+        bars.append(_make_bar(60.0, 64.0, 60.0, 63.14, 9000))
+        for _ in range(5):
+            bars.append(_make_bar(50.0, 51.0, 49.0, 50.0, 1000))
+        bars.append(_make_bar(40.0, 41.0, 37.8, 38.0, 8000))  # SC
+        sc_idx = len(bars) - 1
+        for _ in range(8):
+            bars.append(_make_bar(42.0, 42.5, 41.5, 42.0, 1200))  # SC 后无 thrust
+        r = _detect_sos(
+            bars,
+            tr_ctx={"tr_upper": 55.0, "tr_baseline_volume": 1000.0},
+            lookback_tips=40,
+            min_tip_idx=sc_idx,
+        )
+        assert r.get("sos_signal") is False or r.get("sos_price") != 63.14
+        assert r.get("sos_price") != 63.14
+
+
+class TestTradingRangeFallbackBugB:
+    """Bug B：SC 前高打断 grow → fallback 滑窗仍可检出崩盘后横盘。"""
+
+    def test_nanwang_like_crash_then_range_not_none(self):
+        from trader_shared.wyckoff_events import _detect_trading_range
+
+        bars = []
+        # 高位派发段
+        for i in range(15):
+            p = 60.0 + (i % 5) * 0.8
+            bars.append(_make_bar(p, p + 1.5, p - 1.0, p + 0.3, 5000))
+        # 崩盘（含更高旧高刺穿风险）
+        bars.append(_make_bar(55.0, 55.06, 48.0, 49.0, 20000))
+        bars.append(_make_bar(48.0, 48.5, 40.0, 42.0, 25000))
+        bars.append(_make_bar(42.0, 43.0, 37.80, 38.5, 30000))  # SC low
+        # AR
+        bars.append(_make_bar(39.0, 43.5, 38.5, 42.99, 145000))
+        # 横盘吸筹 ~12 根 41.5–44.5
+        for i in range(12):
+            base = 42.0 + (i % 4) * 0.4
+            bars.append(_make_bar(base, min(44.4, base + 0.8), max(41.6, base - 0.6), base + 0.1, 47000))
+        # 突破
+        bars.append(_make_bar(42.66, 47.92, 42.66, 45.50, 84500))
+        tr = _detect_trading_range(bars)
+        assert tr is not None, "崩盘后横盘+突破应检出 TR（fallback）"
+        assert tr["tr_upper"] is not None and tr["tr_lower"] is not None
+        # 上沿应接近横盘带，不应被 55 旧高钉死
+        assert tr["tr_upper"] < 52.0
+        assert tr["tr_lower"] > 36.0
+
+
+class TestEventClusterBugCG:
+    """Bug C：旧派发簇污染；Bug G：phase_a failed 作废簇。"""
+
+    def test_sc_resets_pre_sc_distribution(self, monkeypatch):
+        from trader_shared import wyckoff_events as we
+
+        bars = [_make_bar(10, 11, 9, 10, 100) for _ in range(40)]
+
+        def fake_scan(scan, fn, tr_ctx, window, step=1, **kw):
+            name = getattr(fn, "__name__", "")
+            if name == "_detect_upthrust":
+                return 5, {"upthrust_signal": True, "upthrust_strength": "ordinary"}
+            if name == "_detect_sign_of_weakness":
+                return 12, {"sow_signal": True}
+            if name == "_detect_selling_climax":
+                return 20, {"sc_signal": True}  # SC 在 UT/SOW 之后 → 旧派发作废
+            return -1, None
+
+        monkeypatch.setattr(we, "_scan_last_event", fake_scan)
+        r = we._detect_event_cluster(bars)
+        assert r["distribution_confirmed"] is False
+
+    def test_stale_sow_not_fresh_enough(self, monkeypatch):
+        from trader_shared import wyckoff_events as we
+
+        bars = [_make_bar(10, 11, 9, 10, 100) for _ in range(60)]
+
+        def fake_scan(scan, fn, tr_ctx, window, step=1, **kw):
+            name = getattr(fn, "__name__", "")
+            if name == "_detect_upthrust":
+                return 40, {"upthrust_signal": True, "upthrust_strength": "ordinary"}
+            if name == "_detect_sign_of_weakness":
+                return 46, {"sow_signal": True}  # 距末 14 根，默认 fresh=10 → 不够新
+            return -1, None
+
+        monkeypatch.setattr(we, "_scan_last_event", fake_scan)
+        r = we._detect_event_cluster(bars)
+        assert r["distribution_confirmed"] is False
+
+    def test_phase_a_failed_clears_cluster(self, monkeypatch):
+        import trader_shared.wyckoff_core as wc
+
+        bars = [_make_bar(100, 101, 99, 100, 100) for _ in range(40)]
+
+        monkeypatch.setattr(
+            wc,
+            "_detect_event_cluster",
+            lambda *a, **k: {
+                "accumulation_confirmed": True,
+                "distribution_confirmed": False,
+                "accumulation_failed": False,
+                "distribution_failed": False,
+                "cluster_quality": "medium",
+                "cluster_confidence": 0.65,
+                "cluster_reason": "积累确认：支撑测试(ordinary)→SOS 突破",
+            },
+        )
+
+        def _failed_pa(*a, **k):
+            return {
+                "sc_low": 90.0,
+                "ar_high": None,
+                "sc_bar_idx": 10,
+                "ar_bar_idx": None,
+                "status": "failed",
+                "fail_reason": "有效跌破 SC 未收回",
+                "anchor_bars": 15,
+                "st_sc_low": None,
+                "sc_low_refined": None,
+            }
+
+        monkeypatch.setattr(wc, "_build_phase_a_range", _failed_pa)
+        monkeypatch.setattr(wc, "_refine_phase_a_sc_low", lambda pa, st: pa)
+        r = wc.wyckoff_analysis(bars)
+        assert r["accumulation_confirmed"] is False
+        assert r["distribution_confirmed"] is False
+        assert "Phase A 失败" in (r.get("cluster_reason") or "")
 
 
 class TestDetectSignOfWeakness:
