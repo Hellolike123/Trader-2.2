@@ -700,6 +700,29 @@ def _briefing_one_liner(item: dict[str, Any]) -> str:
     return "等信号"
 
 
+def _momentum_label(momentum: Any) -> str:
+    """momentum 字段规范化为展示摘要：dict({direction, score}) → 「偏多(70)」；str 原样。
+
+    Bug L（wyckoff-sos-修复交接说明 §9D / 用户实测）：:762 曾用
+    ``f"{major_stage}+{momentum}"``，而 report["momentum"] 是 dict（direction/score），
+    f-string 直接把整坨 dict 拼进 stage_label。此处统一收敛为可读摘要。
+    """
+    if not momentum:
+        return ""
+    if isinstance(momentum, dict):
+        d_map = {"bullish": "偏多", "bearish": "偏空", "neutral": "中性"}
+        direction = str(momentum.get("direction") or momentum.get("label") or "").lower()
+        d = d_map.get(direction, direction)
+        score = momentum.get("score")
+        if score is not None:
+            try:
+                return f"{d}({int(score)})"
+            except (TypeError, ValueError):
+                pass
+        return d
+    return str(momentum)
+
+
 def _format_layer_name(layer: str, count: int) -> str:
     desc_map = {
         "执行": "执行区",
@@ -757,11 +780,12 @@ def render_briefing(layers: dict[str, list[dict[str, Any]]], date_str: str) -> s
             else:
                 rank_emoji = f"{rank}."
 
-            # Main line
+            # Main line（Bug L：momentum 可能为 dict → _momentum_label 收敛摘要）
+            _ml = _momentum_label(momentum)
             if major_stage:
-                stage_label = f"{major_stage}+{momentum}" if momentum else major_stage
+                stage_label = f"{major_stage}+{_ml}" if _ml else major_stage
             else:
-                stage_label = momentum
+                stage_label = _ml
             lines.append(f"  {rank_emoji} {name}    {score}分  {stage_label}")
 
             # 技术分析解读（替代原来的一句话）
