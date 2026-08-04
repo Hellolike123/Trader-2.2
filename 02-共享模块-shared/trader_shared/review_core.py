@@ -369,6 +369,23 @@ def theory_verdicts(current: float, quote: dict[str, Any], daily: list[dict[str,
     structure_score += 10 if above_pressure else 0
     structure_score += macd_struc_b
 
+    # Bug U（2026-08-04）：结构分触顶虚高对冲——上涨空间质量项。
+    # 结构分加分项多（8 组最多 +105）、减分项少（3 组 -35），强结构轻松破 100 被钳制，
+    # 丧失区分度（南网科技 100 触顶但 state 仅"短线止跌修复"）。加"距上方压力空间"质量项：
+    # - 现价贴紧近期高点（距 10 日高 < 2%）→ 上方空间极小，结构"强但到头" -15
+    # - 现价接近近期高点（2%~4%）→ 上方空间受限 -10
+    # - 现价显著低于近期高点（距 10 日高 > 8%）且站稳 → 突破后空间打开 +5
+    # 分级扣分保证叠加满加分仍不会触顶（南网 130-15=115 仍钳 100，需 -15 起步+空间修正）。
+    _recent_high_10d = max((to_float(b.get("high")) for b in daily[-10:]), default=None)
+    if _recent_high_10d and _recent_high_10d > 0:
+        _space_pct = (_recent_high_10d - current) / _recent_high_10d * 100
+        if 0 <= _space_pct < 2.0:
+            structure_score -= 15   # 贴死压力位，上方空间极小
+        elif _space_pct < 4.0:
+            structure_score -= 10   # 接近压力位，空间受限
+        elif _space_pct > 8.0:
+            structure_score += 5    # 空间打开
+
     # ── 威科夫分：基于独立打分函数 ──
     # 基准 50，叠加 review 特有的 intraday 量价调整
     wyckoff_result = calculate_wyckoff_score(daily, symbol=symbol, analysis=wyck_r)
