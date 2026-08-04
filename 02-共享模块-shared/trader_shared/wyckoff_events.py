@@ -828,6 +828,14 @@ def _find_sc_anchor(
     change_max = float(p["change_pct_max"])
     pos_ref = str(p["pos_ref"])
 
+    # I-M1（统一结构上下文）：tr_ctx.sc_anchor 为完整序列算好的 SC 锚 → 直接返回，
+    # 不重算、不冷启动。簇确认（_detect_event_cluster）与后续阶段机以此保证
+    # 簇的重置锚与主流程 sc.sc_bar_idx 同源；无该字段走下方原逻辑（I-M2 向后兼容）。
+    if isinstance(tr_ctx, dict):
+        _ctx_anchor = tr_ctx.get("sc_anchor")
+        if isinstance(_ctx_anchor, dict):
+            return _ctx_anchor
+
     if len(bars) < support_lb + 1:
         return None
     pinned_idx = _pinned_sc_bar_idx_from_ctx(bars, tr_ctx, include_failed=include_failed)
@@ -2512,8 +2520,21 @@ def _detect_event_cluster(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     ut_idx, ut_res = _scan_last_event(scan, _detect_upthrust, tr_ctx, window=15, step=1)
     sos_idx, _ = _scan_last_event(scan, _detect_sos, tr_ctx, window=15, step=1)
     sow_idx, _ = _scan_last_event(scan, _detect_sign_of_weakness, tr_ctx, window=16, step=1)
-    # Bug C：最后 SC 作为阶段重置锚——SC 之前的派发/吸筹事件不参与当前簇
-    sc_idx, _ = _scan_last_event(scan, _detect_selling_climax, tr_ctx, window=15, step=1)
+    # I-M3（统一结构上下文，Bug I 机制根）：SC 重置锚用**完整序列**算一次
+    # （与主流程 _detect_selling_climax 的 _find_sc_anchor 同源），再换算成 scan 内偏移；
+    # 不再对截断子序列滑窗重算 SC（旧 _scan_last_event(scan, _detect_selling_climax, ...) 行已删）。
+    # 锚不在 scan 内 → -1（与原「scan 内未检出 SC」一致：全部事件可认，见 I-M4）。
+    _sc_anchor = _find_sc_anchor(bars, tr_ctx, include_failed=True)
+    sc_idx = -1
+    if _sc_anchor is not None:
+        try:
+            _sc_full = int(_sc_anchor["sc_bar_idx"])
+        except (KeyError, TypeError, ValueError):
+            _sc_full = -1
+        if _sc_full >= 0:
+            sc_idx = _sc_full - (len(bars) - len(scan))
+            if not (0 <= sc_idx < n_scan):
+                sc_idx = -1
 
     def _after_sc(idx: int) -> bool:
         return idx >= 0 and (sc_idx < 0 or idx > sc_idx)

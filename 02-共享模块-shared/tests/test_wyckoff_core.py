@@ -370,6 +370,147 @@ class TestEventClusterBugCG:
         assert "Phase A 失败" in (r.get("cluster_reason") or "")
 
 
+class TestClusterScAnchorUnified:
+    """I：簇 SC 重置锚与主流程统一（docs/plans/wyckoff-epic-context-refactor-handoff I-M1~M6 / I1~I3）。
+
+    构造「完整序列 SC 锚 ≠ 旧滑窗重算 SC 锚」场景：
+    - 完整序列 `_find_sc_anchor` 锚定 bars[45]（天量跳空大跌 SC）；
+    - 尾段 bars[55:70] 的 15 根子序列里，bars[59]（T）的前 6 根高量（320）被
+      截断窗裁掉，近窗均量被压低 → 量比 6.0 → 旧滑窗重算会把它判成「更近的 SC」，
+      从而把 45~59 之间的事件全部清掉（Bug I 机制：同一函数在截断子序列上结果不同）；
+    - 统一锚后簇改用完整序列锚（scan 偏移 35）→ 45 之后的事件保留。
+    """
+
+    def _split_anchor_bars(self) -> list[dict]:
+        bars = []
+        # 0..34：缓升 88→94（量 100）
+        for i in range(35):
+            p = 88 + i * (6 / 34)
+            bars.append(_make_bar(round(p - 0.5, 2), round(p + 0.5, 2),
+                                  round(p - 1.0, 2), round(p, 2), 100))
+        # 35..44：平台 99~100（量 100）
+        for i in range(10):
+            bars.append(_make_bar(99.5, 100.5, 98.8, round(99.8 + 0.02 * i, 2), 100))
+        # 45：SC #1 —— 天量跳空大跌（量比 3.0、-7%、pos≈0.47）
+        bars.append(_make_bar(95.0, 96.0, 92.0, 93.0, 300))
+        # 46..48：反弹
+        bars.append(_make_bar(95.5, 97.5, 94.5, 97.0, 100))
+        bars.append(_make_bar(97.0, 98.5, 96.0, 98.0, 100))
+        bars.append(_make_bar(98.0, 99.5, 97.0, 99.0, 100))
+        # 49..54：高量平台（抬 T 的完整序列近窗均量 → T 全序列量比 1.41 < 1.5）
+        for _ in range(6):
+            bars.append(_make_bar(99.2, 100.2, 98.8, 99.6, 320))
+        # 55..58：低量缓升（子序列里 T 的近窗均量被压低 → 量比 6.0）
+        bars.append(_make_bar(101.0, 102.0, 100.5, 101.2, 50))
+        bars.append(_make_bar(101.2, 102.2, 100.7, 101.5, 50))
+        bars.append(_make_bar(101.5, 102.5, 101.0, 101.8, 50))
+        bars.append(_make_bar(101.8, 103.0, 101.3, 102.5, 50))
+        # 59：mini-SC 候选 T —— 完整序列非 SC，15 根子序列里是 SC
+        bars.append(_make_bar(98.5, 99.0, 95.5, 96.0, 300))
+        # 60..69：缓跌尾段（单日变化 <1.5%、量比 <1.5，非 SC）
+        for i in range(10):
+            p = 98.0 - i * 0.2
+            bars.append(_make_bar(round(p + 0.15, 2), round(p + 0.4, 2),
+                                  round(p - 0.4, 2), round(p, 2), 100))
+        return bars
+
+    def test_full_sequence_anchor_differs_from_truncated_recompute(self):
+        """撕裂前提（I-M6 场景）：完整序列锚(45) ≠ 15 根子序列重算锚(全局 59)。"""
+        from trader_shared import wyckoff_events as we
+
+        bars = self._split_anchor_bars()
+        full_anchor = we._find_sc_anchor(bars, include_failed=True)
+        sub_anchor = we._find_sc_anchor(bars[-15:], include_failed=True)
+        assert full_anchor is not None, "完整序列应锚定 SC #1"
+        assert full_anchor["sc_bar_idx"] == 45
+        assert sub_anchor is not None, "15 根子序列应把 T 重算成 SC（截断窗量比 6.0）"
+        assert sub_anchor["sc_bar_idx"] == 4  # 全局 59
+        assert sub_anchor["sc_bar_idx"] + (len(bars) - 15) != full_anchor["sc_bar_idx"]
+        assert sub_anchor["vol_ratio"] >= 5.0  # 截断近窗（4 根低量 50）→ 量比 6.0
+
+    def test_cluster_sc_anchor_matches_main_flow(self, monkeypatch):
+        """I-M3~M6：簇锚 == 主流程锚；SC 不再走滑窗重算；统一锚之后的事件保留。"""
+        from trader_shared import wyckoff_events as we
+
+        bars = self._split_anchor_bars()
+        # 主流程锚（_detect_selling_climax 同款调用）
+        main_anchor = we._find_sc_anchor(bars, include_failed=True)
+        assert main_anchor is not None and main_anchor["sc_bar_idx"] == 45
+
+        calls: list[str] = []
+
+        def fake_scan(scan, fn, tr_ctx, window, step=1, **kw):
+            calls.append(getattr(fn, "__name__", ""))
+            name = getattr(fn, "__name__", "")
+            if name == "_detect_upthrust":
+                return 42, {"upthrust_signal": True, "upthrust_strength": "ordinary"}
+            if name == "_detect_sign_of_weakness":
+                return 54, {"sow_signal": True}
+            return -1, None
+
+        monkeypatch.setattr(we, "_scan_last_event", fake_scan)
+        r = we._detect_event_cluster(bars)
+        assert "_detect_selling_climax" not in calls, "SC 不得再经滑窗重算（I-M3）"
+        # 统一锚 scan 偏移 = 45 - (70-60) = 35；UT(42)/SOW(54) 均在锚之后 → 保留
+        assert r["distribution_confirmed"] is True, (
+            f"UT/SOW 应落在统一锚之后被保留, got {r['cluster_reason']}"
+        )
+
+    def test_cluster_filters_events_before_unified_anchor(self, monkeypatch):
+        """I-M4 边界：统一锚(scan 35)之前的事件仍被过滤（与原「SC 之后才认事件」语义一致）。"""
+        from trader_shared import wyckoff_events as we
+
+        bars = self._split_anchor_bars()
+
+        def fake_scan(scan, fn, tr_ctx, window, step=1, **kw):
+            name = getattr(fn, "__name__", "")
+            if name == "_detect_upthrust":
+                return 30, {"upthrust_signal": True, "upthrust_strength": "ordinary"}
+            if name == "_detect_sign_of_weakness":
+                return 54, {"sow_signal": True}
+            return -1, None
+
+        monkeypatch.setattr(we, "_scan_last_event", fake_scan)
+        r = we._detect_event_cluster(bars)
+        assert r["distribution_confirmed"] is False, "统一锚之前的事件应被 SC 重置锚清掉"
+
+    def test_find_sc_anchor_returns_tr_ctx_anchor_directly(self):
+        """I-M1：tr_ctx.sc_anchor 为 dict → 直接返回（含可选 phase_a_failed/fail_* 字段）。"""
+        from trader_shared.wyckoff_events import _find_sc_anchor
+
+        bars = [_make_bar(10, 11, 9, 10, 100) for _ in range(30)]
+        anchor = {
+            "sc_bar_idx": 5,
+            "sc_low": 8.5,
+            "sc_close": 9.0,
+            "sc_avg_vol": 100.0,
+            "vol_ratio": 2.0,
+            "change_pct": -3.0,
+            "pos": 0.2,
+            "cur_high": 10.5,
+            "cur_open": 9.8,
+            "anchor_bars": 90,
+            "search_mode": "pinned",
+            "phase_a_failed": True,
+            "fail_bar_idx": 20,
+            "fail_reason": "SC 后有效跌破未收回（Phase A 失败）",
+        }
+        out = _find_sc_anchor(bars, {"sc_anchor": anchor}, include_failed=False)
+        assert out is anchor, "sc_anchor 字段存在时应直接返回，不重算、不冷启动"
+        assert out["sc_bar_idx"] == 5
+        assert out["phase_a_failed"] is True and out["fail_bar_idx"] == 20
+
+    def test_find_sc_anchor_without_sc_anchor_field_unchanged(self):
+        """I-M2：无 sc_anchor 字段 → 现有行为不变（tr_ctx 为普通 dict 也不受影响）。"""
+        from trader_shared.wyckoff_events import _find_sc_anchor
+
+        bars = [_make_bar(10, 11, 9, 10, 100) for _ in range(30)]
+        assert _find_sc_anchor(bars, {"tr_upper": 11.0, "tr_lower": 9.0}) is None
+        assert _find_sc_anchor(bars, None) is None
+        assert _find_sc_anchor(bars, {"sc_anchor": None}) is None
+        assert _find_sc_anchor(bars, {"sc_anchor": "not-a-dict"}) is None
+
+
 class TestDetectSignOfWeakness:
     def test_sow_detected_consecutive(self):
         """SOW 需连续 2 日跌破支撑且收盘仍破（support 从不含确认窗口的 K 线计算）。"""
