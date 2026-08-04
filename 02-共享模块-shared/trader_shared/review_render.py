@@ -32,19 +32,24 @@ def model_summary(theory: dict[str, Any]) -> str:
 
 
 def _short_verdict(text: str) -> str:
+    """摘要短句：按标点切分取首分句；超长时在标点处截断，避免从词中间硬切（Bug M）。"""
     text = str(text).strip()
-    if "。" in text:
-        parts = [p.strip() for p in text.split("。") if p.strip()]
-        short = parts[0]
-        if len(short) <= 12:
-            return short
-        for p in parts:
-            if not any(kw in p for kw in ("回调", "反弹", "修复", "调整", "震荡", "下跌", "上涨")):
-                continue
+    if not text:
+        return ""
+    # 按标点切分（。，；：、）取有意义分句
+    import re
+    parts = [p.strip() for p in re.split(r"[。，；：、；,;:]", text) if p.strip()]
+    if not parts:
+        return text
+    short = parts[0]
+    if len(short) <= 12:
+        return short
+    for p in parts:
+        if any(kw in p for kw in ("回调", "反弹", "修复", "调整", "震荡", "下跌", "上涨")):
             short = p
             break
-        return short[:16]
-    return text[:16]
+    # 分句仍超长（无标点的长句）→ 保留前 24 字（中文语义基本完整），不再切词尾
+    return short[:24]
 
 
 def _atr_level_note_short(level: str, atr14: float) -> str:
