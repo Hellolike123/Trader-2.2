@@ -1252,3 +1252,47 @@ def test_trader_paths_wyckoff_light_snapshot(tmp_path, monkeypatch):
 
     monkeypatch.setenv("TRADER_ROOT", str(tmp_path))
     assert path("wyckoff_light_snapshot") == tmp_path / "wyckoff_light_snapshot.json"
+
+
+# ── 渲染前防御 check（accumulation_confirmed ∧ phase_a failed）──────────
+# 法源：docs/plans/2026-08-04-agent-suggestions-handoff.md 改动 2
+
+
+def _contradictory_plan() -> dict:
+    """矛盾结果：accumulation_confirmed=True 与 phase_a_range.status=failed 并存。"""
+    plan = _failed_phase_a_plan()
+    plan["daily_raw"]["accumulation_confirmed"] = True
+    return plan
+
+
+def test_render_warn_contradictory_accum_confirmed_and_phase_a_failed(caplog):
+    """改动2 ①：矛盾结果 → caplog 断言 warning 文案。"""
+    import logging
+
+    caplog.set_level(logging.WARNING, logger="trader.wyckoff_render")
+    render_wyckoff_slim(_contradictory_plan())
+    assert any(
+        "矛盾字段: accumulation_confirmed=True 与 phase_a_status=failed 并存"
+        in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_render_no_warn_on_normal_result(caplog):
+    """改动2 ②：正常结果（accum=False 或 phase_a 非 failed）→ 不告警。"""
+    import logging
+
+    caplog.set_level(logging.WARNING, logger="trader.wyckoff_render")
+    render_wyckoff_card(_sample_plan())  # phase_a established，无 accumulation_confirmed
+    render_wyckoff_slim(_sample_plan())
+    render_wyckoff_detail(_failed_phase_a_plan())  # failed 但无 accumulation_confirmed
+    assert not any("矛盾字段" in record.getMessage() for record in caplog.records)
+
+
+def test_render_warn_does_not_change_output():
+    """改动2 ③：渲染输出与告警前一致（只告警不改卡）。"""
+    contradictory = _contradictory_plan()
+    baseline = copy.deepcopy(contradictory)
+    baseline["daily_raw"]["accumulation_confirmed"] = False  # 去掉矛盾条件，输出应不变
+    for render in (render_wyckoff_card, render_wyckoff_slim, render_wyckoff_detail):
+        assert render(contradictory) == render(baseline)

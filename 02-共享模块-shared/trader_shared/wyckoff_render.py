@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from trader_shared._logging import get_logger
 from trader_shared.wyckoff_chain import (
     ACCUM_CHAIN,
     extract_accum_events,
@@ -15,6 +16,8 @@ from trader_shared.wyckoff_chain import (
     format_wyckoff_chain_plain,
     is_phase_a_failed,
 )
+
+_logger = get_logger(__name__)
 
 _BIAS_CN = {
     "bull": "偏多",
@@ -148,6 +151,26 @@ def _as_raw(obj: Any) -> dict[str, Any]:
     if isinstance(nested, dict) and nested:
         return nested
     return obj
+
+
+def _warn_contradictory_phase_a(result: dict[str, Any]) -> None:
+    """渲染前防御 check：accumulation_confirmed=True 与 phase_a failed 并存 → 告警。
+
+    只告警、绝不改渲染输出（上游引擎合同已防并存，此为兜底）。
+    """
+    candidates = [
+        result,
+        _as_raw(result.get("daily_raw")),
+        _as_raw(result.get("daily_view")),
+    ]
+    for candidate in candidates:
+        if candidate.get("accumulation_confirmed") and (
+            (candidate.get("phase_a_range") or {}).get("status") == "failed"
+        ):
+            _logger.warning(
+                "[wyckoff] 矛盾字段: accumulation_confirmed=True 与 phase_a_status=failed 并存，请检查上游引擎"
+            )
+            return
 
 
 def _display_chain_plain(chain_plain: str | None, raw: dict[str, Any], view: dict[str, Any]) -> str:
@@ -1544,6 +1567,7 @@ def render_wyckoff_card(plan: dict[str, Any]) -> str:
     plan 字段：name/code/price/chain_plain/daily_view/weekly_view/
     event_line/data_ok/error
     """
+    _warn_contradictory_phase_a(plan)
     if plan.get("error"):
         name = str(plan.get("name") or plan.get("target") or "未知")
         code = str(plan.get("code") or "")
@@ -1604,6 +1628,7 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
 
     旧完整详析保留在 render_wyckoff_detail，供 --full 使用。
     """
+    _warn_contradictory_phase_a(plan)
     name = str(plan.get("name") or plan.get("target") or "未知")
     code = str(plan.get("code") or "")
     price_s = _fmt_price(plan.get("price")) or "—"
@@ -1725,6 +1750,7 @@ def render_wyckoff_detail(plan: dict[str, Any]) -> str:
     chain_plain/change_line/data_ok/error
     纯展示；灯变化文案由调用方写入 change_line（对比在写快照前完成）。
     """
+    _warn_contradictory_phase_a(plan)
     if plan.get("error") and not plan.get("data_ok", True):
         name = str(plan.get("name") or plan.get("target") or "未知")
         code = str(plan.get("code") or "")
