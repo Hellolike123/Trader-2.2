@@ -89,7 +89,7 @@ def _build_report_one(target: str) -> dict[str, Any]:
     """Run build_report for a single stock, returning result dict."""
     try:
         from run_analysis import build_report
-        from final_pool import score_report
+        from pool_cmds.scoring import score_report
         report = build_report(target)
         scores = score_report(report)
         report.update(scores)

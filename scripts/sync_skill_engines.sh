@@ -27,7 +27,9 @@ ROOTS=(
   "$HOME/.workbuddy/skills"
   "$HOME/.hermes/skills"
 )
-SKILLS=(trader t0 wyckoff review)
+# Bug J（wyckoff-sos-修复交接说明 §9B）：trader_shared 传染 6 个 skill——
+# chanlun / daily_briefing 亦内嵌引擎副本，一并纳入同步。
+SKILLS=(chanlun wyckoff daily_briefing review t0 trader)
 
 MODE="sync"
 for arg in "$@"; do
