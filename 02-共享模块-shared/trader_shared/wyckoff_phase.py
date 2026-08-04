@@ -410,7 +410,10 @@ def _detect_phase(
     # [0, len(wide_bars)) 内（持久化钉锚可能在 lookback 之外）→ -1（与原
     # 「滑窗未检出 SC」同义）；无锚 → 原 _last 滑窗（P-M3）
     if _unified_anchor is not None:
-        sc_idx = int(_unified_anchor["sc_bar_idx"]) - (len(bars) - len(wide_bars))
+        try:
+            sc_idx = int(_unified_anchor["sc_bar_idx"]) - (len(bars) - len(wide_bars))
+        except (TypeError, KeyError, ValueError):
+            sc_idx = -1  # 锚缺键/非法 → 与原「滑窗未检出 SC」同义（查 Agent SUGGESTED 1）
         if not (0 <= sc_idx < len(wide_bars)):
             sc_idx = -1
     else:

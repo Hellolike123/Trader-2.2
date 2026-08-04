@@ -828,6 +828,8 @@ def wyckoff_analysis(
     # tr_ctx.sc_anchor 短路（wyckoff-epic-context-refactor-handoff I-M1），周线路径
     # 同一行覆盖（timeframe/is_index 透传 → 周线冷启动 39 帽，P-M6/P5）。
     # phase_tr_ctx 由 _overlay_phase_a_seed_tr_ctx 保证为 dict（恒含 phase_a_status）。
+    # 须在 _sos_tr merge（wc.py 下方 _sos_tr.update(phase_tr_ctx)）**之后**注入：
+    # 否则 sc_anchor 会经 _sos_tr 泄漏给 _detect_sos/_detect_backup 复检（查 Agent 复核）。
     _unified_sc_anchor = _find_sc_anchor(
         bars,
         event_tr_ctx,
