@@ -1268,6 +1268,14 @@ def detect_buy_points(
                             "confidence": 1,
                         }, pb_stroke or strokes[leave_i]))
 
+    # Bug N（2026-08-04）：买点失效过滤（对称）——当前收盘价已跌破买点价，
+    # 信号不再代表「当下可买入」的支撑判断，标记 stale 供渲染层降级展示。
+    if last_close and last_close > 0:
+        for _pt in buy_points:
+            _p = to_float(_pt.get("price"))
+            if _p and _p > 0 and last_close < _p:
+                _pt["stale"] = True
+                _pt.setdefault("stale_reason", f"现价{last_close:.2f}已低于买点{_p:.2f}，信号失效")
     return buy_points
 
 def detect_sell_points(
@@ -1493,6 +1501,14 @@ def detect_sell_points(
                             "confidence": 1,
                         }, bounce_stroke or strokes[leave_i]))
 
+    # Bug N（2026-08-04）：卖点失效过滤——当前收盘价已超过卖点价（价格反向突破），
+    # 信号不再代表「当下可卖出」的衰竭判断，标记 stale 供渲染层降级展示（不作废历史）。
+    if last_close and last_close > 0:
+        for _pt in sell_points:
+            _p = to_float(_pt.get("price"))
+            if _p and _p > 0 and last_close > _p:
+                _pt["stale"] = True
+                _pt.setdefault("stale_reason", f"现价{last_close:.2f}已高于卖点{_p:.2f}，信号失效")
     return sell_points
 
 def detect_divergence(

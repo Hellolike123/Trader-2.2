@@ -63,12 +63,17 @@ def _display_point_type(point_type: str) -> str:
 
 
 def _fmt_points(points: Any) -> str:
-    """仅展示引擎给出的 type/price；空数组不得推断或手补。"""
+    """仅展示引擎给出的 type/price；空数组不得推断或手补。
+
+    Bug N（2026-08-04）：跳过 stale 信号（现价已反向穿越信号价），避免展示过期卖/买点。
+    """
     if not isinstance(points, list):
         return "未形成"
     rendered: list[str] = []
     for point in points:
         if not isinstance(point, dict):
+            continue
+        if point.get("stale"):
             continue
         point_type = str(point.get("type") or "").strip()
         if not point_type:
@@ -208,7 +213,10 @@ def _as_view(value: Any) -> dict[str, Any]:
 
 
 def _collect_points(view: dict[str, Any]) -> tuple[dict[str, str], list[tuple[str, str]]]:
-    """正式 type→价；观察档 (label, price_s) 列表。只读引擎数组。"""
+    """正式 type→价；观察档 (label, price_s) 列表。只读引擎数组。
+
+    Bug N（2026-08-04）：跳过 stale 信号（现价已反向穿越信号价），不参与亮灯。
+    """
     formal: dict[str, str] = {}
     observe: list[tuple[str, str]] = []
     for key in ("buy_points", "sell_points"):
@@ -217,6 +225,8 @@ def _collect_points(view: dict[str, Any]) -> tuple[dict[str, str], list[tuple[st
             continue
         for point in points:
             if not isinstance(point, dict):
+                continue
+            if point.get("stale"):
                 continue
             point_type = str(point.get("type") or "").strip()
             if not point_type:
@@ -233,7 +243,7 @@ def _collect_points(view: dict[str, Any]) -> tuple[dict[str, str], list[tuple[st
 
 
 def _lit_types(view: dict[str, Any]) -> list[str]:
-    """快照用：已亮正式 + 观察 type（引擎原文）。"""
+    """快照用：已亮正式 + 观察 type（引擎原文）。Bug N：跳过 stale。"""
     out: list[str] = []
     for key in ("buy_points", "sell_points"):
         points = view.get(key)
@@ -241,6 +251,8 @@ def _lit_types(view: dict[str, Any]) -> list[str]:
             continue
         for point in points:
             if not isinstance(point, dict):
+                continue
+            if point.get("stale"):
                 continue
             point_type = str(point.get("type") or "").strip()
             if point_type:
