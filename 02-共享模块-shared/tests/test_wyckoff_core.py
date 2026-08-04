@@ -1644,7 +1644,13 @@ class TestPhaseUnifiedScAnchor:
 
     def _run_with_fakes(self, bars, tr_ctx, *, lookback, timeframe="daily",
                         spring_idx=-1, ar_idx=-1):
-        """隔离 _scan/_last：记录调用与子窗 tr_ctx；仅 fake 指定事件索引。"""
+        """隔离 _scan/_last：记录调用与子窗 tr_ctx；仅 fake 指定事件索引。
+
+        B 收尾（wyckoff-epic-vol-phase-verif-handoff 方向 B）：统一锚存在时 AR 走
+        ``_ar_verdict``（直接调 _detect_ar 单次评估，不再经 _scan_last_event），
+        故此处同步 patch ``wyckoff_phase._detect_ar`` 注入 ar_idx，保证阶段机
+        顺序逻辑测试语义不变（索引由 fake 提供，与旧 _last fake 等价）。
+        """
         from unittest.mock import patch
         from trader_shared import wyckoff_phase as wp
 
@@ -1664,8 +1670,14 @@ class TestPhaseUnifiedScAnchor:
                 return ar_idx, {"ar_signal": True}
             return -1, None
 
+        def fake_ar(_bars, tr_ctx=None, *, timeframe="daily", is_index=False):
+            if ar_idx >= 0:
+                return {"ar_signal": True, "ar_bar_idx": ar_idx}
+            return {"ar_signal": False, "ar_bar_idx": None}
+
         with patch("trader_shared.wyckoff_phase._scan_for_signal", side_effect=fake_scan), \
-             patch("trader_shared.wyckoff_phase._scan_last_event", side_effect=fake_last):
+             patch("trader_shared.wyckoff_phase._scan_last_event", side_effect=fake_last), \
+             patch("trader_shared.wyckoff_phase._detect_ar", side_effect=fake_ar):
             ph = wp._detect_phase(
                 bars, self._sig(), _phase_lookback=lookback,
                 tr_ctx=tr_ctx, timeframe=timeframe,

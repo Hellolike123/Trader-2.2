@@ -366,10 +366,50 @@ def _detect_phase(
             wide_bars, det, _sub_ctx, window=w, step=1, timeframe=timeframe, is_index=is_index
         )
 
+    def _ar_verdict() -> tuple[bool | None, int | None]:
+        """B 撕裂点收尾（AR 子窗锚统一，见 workflows/phase-scan-audit/ TP-1/TP-2）。
+
+        统一锚存在（主流程注入）时：AR 只认「完整序列 SC 锚」之后的自动反弹——
+        把统一锚 remap 进 wide_bars 局部索引后单次评估，不再对子窗重算 SC 锚。
+        理由：P-M4 剥离 sc_anchor 后，子窗内 _detect_ar 会对**子窗**冷启动重算 SC，
+        与主流程 AR 灯（完整序列锚）索引口径可能不同 → 同一批数据给出两个不同 SC，
+        AR 信号被绑到与主流程 SC 不一致的历史 SC 上（历史定位语义撕裂）。
+        SC 锚早于 lookback（remap 出界）→ 本窗无统一 AR，退化为 signals 判定。
+
+        Returns:
+            (found, idx) —— 统一锚路径：found=统一判定（已含 signals）、idx=wide_bars
+            相对索引（无 AR 为 -1）；无锚（孤立调用，P-M3 兼容）：(None, None) →
+            调用方回退原滑窗重算。
+        """
+        if _unified_anchor is None:
+            return None, None
+        offset = len(bars) - len(wide_bars)
+        try:
+            sc_full = int(_unified_anchor["sc_bar_idx"])
+        except (TypeError, KeyError, ValueError):
+            sc_full = -1
+        local = sc_full - offset
+        if not (0 <= local < len(wide_bars)):
+            return bool(signals.get("ar_signal")), -1
+        ar_ctx = {**_sub_ctx, "sc_anchor": {**_unified_anchor, "sc_bar_idx": local}}
+        try:
+            res = _detect_ar(wide_bars, tr_ctx=ar_ctx, timeframe=timeframe, is_index=is_index)
+        except Exception:
+            return bool(signals.get("ar_signal")), -1
+        if res.get("ar_signal"):
+            try:
+                return True, int(res.get("ar_bar_idx") or -1)
+            except (TypeError, ValueError):
+                return True, -1
+        return bool(signals.get("ar_signal")), -1
+
     bc_found = bool(signals.get("bc_signal")) or _scan(_detect_buying_climax, 15)
-    ar_found = bool(signals.get("ar_signal")) or _scan(
-        _detect_ar, WYCKOFF_CLIMAX_ANCHOR_BARS + 3
-    )
+    ar_found, _ar_idx_unified = _ar_verdict()
+    if _ar_idx_unified is None:
+        # 无统一锚（孤立调用）：原滑窗重算（历史定位语义，P-M3 向后兼容）
+        ar_found = bool(signals.get("ar_signal")) or _scan(
+            _detect_ar, WYCKOFF_CLIMAX_ANCHOR_BARS + 3
+        )
     are_found = bool(signals.get("are_signal")) or _scan(
         _detect_are, WYCKOFF_CLIMAX_ANCHOR_BARS + 3
     )
@@ -419,7 +459,10 @@ def _detect_phase(
     else:
         sc_idx, _ = _last(_detect_selling_climax, WYCKOFF_CLIMAX_ANCHOR_BARS)
     bc_idx, _ = _last(_detect_buying_climax, WYCKOFF_CLIMAX_ANCHOR_BARS)
-    ar_idx, _ = _last(_detect_ar, WYCKOFF_CLIMAX_ANCHOR_BARS + 3)
+    if _ar_idx_unified is not None:
+        ar_idx = _ar_idx_unified  # B 统一路径：wide_bars 相对索引，与 spring_idx 同空间
+    else:
+        ar_idx, _ = _last(_detect_ar, WYCKOFF_CLIMAX_ANCHOR_BARS + 3)
     are_idx, _ = _last(_detect_are, WYCKOFF_CLIMAX_ANCHOR_BARS + 3)
     comp_idx, _ = _last(_detect_compression, 20)
 
