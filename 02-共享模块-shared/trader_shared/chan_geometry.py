@@ -772,6 +772,15 @@ def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: boo
     run_high = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
     run_low = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
 
+    # Bug R（2026-08-04）：第二类线段破坏基准——段起点极值。
+    # 缠论原典：特征序列元素突破线段起点极值即线段破坏（与三分型 OR 并存）。
+    #   - 向下段：特征序列（向上笔）的 high 突破段起点 high → 破坏
+    #   - 向上段：特征序列（向下笔）的 low 跌破段起点 low → 破坏
+    # 段起点 = 段第一笔的极值（线段起点唯一，不随段内延伸更新）。
+    # 防止"单笔突破即切"过切的护栏：段内笔数须 >= min_strokes 才允许第二类破坏。
+    seg_pivot_high = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+    seg_pivot_low = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+
     for i in range(seg_start + 1, len(strokes)):
         s = strokes[i]
 
@@ -825,7 +834,48 @@ def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: boo
                         l_i = min(s["start_price"], s["end_price"])
                         run_high = max(run_high, h_i)
                         run_low = min(run_low, l_i)
+                        # Bug R：重置第二类破坏基准（新段起点极值）
+                        seg_pivot_high = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                        seg_pivot_low = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
                         continue
+
+                # Bug R（2026-08-04）：第二类线段破坏——特征序列元素**整体**脱离段起点区间。
+                # 缠论原典语义：仅"终点突破"不算趋势反转，只是段内反弹；须整根特征元素
+                # 脱离段起点极值才是趋势确认反转。向上段被破坏 = 特征序列（向下笔）的
+                # **high 整体低于段起点 low**（价格完全跌破上升起点 → 翻转向下；单边上涨
+                # 的回落笔 high 仍高于起点 low，不会误判——§3.5b 华工/中际形约束）。
+                # 护栏 1：段内笔数须 >= min_strokes；护栏 2：破坏后剩余笔须 >= min_strokes
+                # （破坏需确认——末笔技术性脱离不破坏，避免新段不足 3 笔丢失暴涨段，
+                #  华工形 67.28→187.66 即因此保持 1 段 up）。
+                seg_len = i - seg_start
+                if seg_len >= min_strokes and (len(strokes) - i) >= min_strokes and char_h < seg_pivot_low:
+                    end_idx = i - 1
+                    start_p, end_p, seg_hi, seg_lo = _segment_range(
+                        "up", strokes[seg_start: end_idx + 1]
+                    )
+                    segments.append({
+                        "direction": "up",
+                        "start_price": start_p,
+                        "end_price": end_p,
+                        "high": seg_hi,
+                        "low": seg_lo,
+                        "start_index": seg_start,
+                        "end_index": end_idx,
+                        "strokes_count": end_idx - seg_start + 1,
+                    })
+                    seg_start = end_idx
+                    current_direction = "down"
+                    char_seq = []
+                    char_direction = None
+                    run_high = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                    run_low = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                    h_i = max(s["start_price"], s["end_price"])
+                    l_i = min(s["start_price"], s["end_price"])
+                    run_high = max(run_high, h_i)
+                    run_low = min(run_low, l_i)
+                    seg_pivot_high = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                    seg_pivot_low = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                    continue
 
         else:  # current_direction == "down"
             # 向下线段：只看向上笔作为特征序列
@@ -877,7 +927,45 @@ def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: boo
                         l_i = min(s["start_price"], s["end_price"])
                         run_high = max(run_high, h_i)
                         run_low = min(run_low, l_i)
+                        # Bug R：重置第二类破坏基准（新段起点极值）
+                        seg_pivot_high = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                        seg_pivot_low = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
                         continue
+
+                # Bug R（2026-08-04）：第二类线段破坏——特征序列元素**整体**脱离段起点区间。
+                # 向下段被破坏 = 特征序列（向上笔）的 **low 整体高于段起点 high**（价格
+                # 完全脱离下跌区间，趋势确认反转向上；仅终点突破如 50.08>46.39 但起点仍在
+                # 段内不算——§3.5b 华工/中际形约束）。护栏 1：段内笔数 >= min_strokes；
+                # 护栏 2：破坏后剩余笔 >= min_strokes（破坏需确认，末笔脱离不破坏）。
+                seg_len = i - seg_start
+                if seg_len >= min_strokes and (len(strokes) - i) >= min_strokes and char_l > seg_pivot_high:
+                    end_idx = i - 1
+                    start_p, end_p, seg_hi, seg_lo = _segment_range(
+                        "down", strokes[seg_start: end_idx + 1]
+                    )
+                    segments.append({
+                        "direction": "down",
+                        "start_price": start_p,
+                        "end_price": end_p,
+                        "high": seg_hi,
+                        "low": seg_lo,
+                        "start_index": seg_start,
+                        "end_index": end_idx,
+                        "strokes_count": end_idx - seg_start + 1,
+                    })
+                    seg_start = end_idx
+                    current_direction = "up"
+                    char_seq = []
+                    char_direction = None
+                    run_high = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                    run_low = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                    h_i = max(s["start_price"], s["end_price"])
+                    l_i = min(s["start_price"], s["end_price"])
+                    run_high = max(run_high, h_i)
+                    run_low = min(run_low, l_i)
+                    seg_pivot_high = max(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                    seg_pivot_low = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
+                    continue
 
         # 当前笔 i 属于未闭合段（未触发终结），将其高低纳入 run（增量维护）
         h = max(s["start_price"], s["end_price"])
