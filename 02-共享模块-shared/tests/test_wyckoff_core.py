@@ -1597,6 +1597,213 @@ class TestDetectPhaseSemantics:
         assert any("阶段修正" in s for s in result["signals"])
 
 
+class TestPhaseUnifiedScAnchor:
+    """P-M7（docs/plans/wyckoff-epic-phase-unify-handoff 验收 P1~P5）：
+    阶段机吃统一 SC 锚（Bug I 收尾）——注入同源、无注入回归、越界防护、子窗剥离、周线。"""
+
+    _OK_TR = {
+        "tr_quality": 0.7,
+        "tr_upper": 105.0,
+        "tr_lower": 95.0,
+        "in_tr": True,
+        "tr_width": 40,
+        "phase_a_status": "established",
+    }
+
+    @staticmethod
+    def _anchor(sc_bar_idx: int, **kw) -> dict:
+        """与 _find_sc_anchor 返回同构的完整序列 SC 锚（含全部既有键）。"""
+        out = {
+            "sc_bar_idx": sc_bar_idx,
+            "sc_low": 95.0,
+            "sc_close": 96.0,
+            "sc_avg_vol": 100.0,
+            "vol_ratio": 2.0,
+            "change_pct": -3.0,
+            "pos": 0.2,
+            "cur_high": 103.0,
+            "cur_open": 99.0,
+            "anchor_bars": 90,
+            "search_mode": "pinned",
+        }
+        out.update(kw)
+        return out
+
+    @staticmethod
+    def _sig(**kw) -> dict:
+        d = {k: False for k in (
+            "spring_signal", "upthrust_signal", "bc_signal", "sc_signal",
+            "sow_signal", "ar_signal", "are_signal", "sos_signal", "st_signal",
+            "spring_test_signal", "secondary_test_sc_signal", "lps_signal",
+            "lpsy_signal", "compression_signal", "trend_pullback_signal",
+            "trend_rally_signal", "bu_signal", "utad_signal",
+            "ps_signal", "psy_signal",
+        )}
+        d.update(kw)
+        return d
+
+    def _run_with_fakes(self, bars, tr_ctx, *, lookback, timeframe="daily",
+                        spring_idx=-1, ar_idx=-1):
+        """隔离 _scan/_last：记录调用与子窗 tr_ctx；仅 fake 指定事件索引。"""
+        from unittest.mock import patch
+        from trader_shared import wyckoff_phase as wp
+
+        scan_calls: list = []
+        last_calls: list = []
+
+        def fake_scan(_bars, det, window=15, step=5, max_lookback_bars=None, **kw):
+            scan_calls.append((getattr(det, "__name__", ""), kw.get("tr_ctx")))
+            return False
+
+        def fake_last(_bars, det, tr_ctx, window, step=1, **kw):
+            last_calls.append((getattr(det, "__name__", ""), tr_ctx))
+            name = getattr(det, "__name__", "")
+            if name == "_detect_spring":
+                return spring_idx, {"spring_signal": True}
+            if name == "_detect_ar":
+                return ar_idx, {"ar_signal": True}
+            return -1, None
+
+        with patch("trader_shared.wyckoff_phase._scan_for_signal", side_effect=fake_scan), \
+             patch("trader_shared.wyckoff_phase._scan_last_event", side_effect=fake_last):
+            ph = wp._detect_phase(
+                bars, self._sig(), _phase_lookback=lookback,
+                tr_ctx=tr_ctx, timeframe=timeframe,
+            )
+        return ph, scan_calls, last_calls
+
+    def test_p1_anchor_same_source_sc_found_and_converted_sc_idx_order(self):
+        """验收 P1：注入统一锚 → sc_found=True 且 spring 次序用换算后 sc_idx（45→25）。
+        wide_bars=bars[-40:]（offset=20）；若误用原始 45 → acc_b_ctx_idx=45 > 27 → 判过早。"""
+        bars = [_make_bar(100, 105, 95, 102, 100) for _ in range(60)]
+        tr_ctx = {**self._OK_TR, "sc_anchor": self._anchor(45)}
+        ph, scan_calls, last_calls = self._run_with_fakes(
+            bars, tr_ctx, lookback=40, spring_idx=27, ar_idx=20)
+        assert ph["phase"] == "accumulation_a"
+        assert ph["spring_premature"] is False, "spring(27) 在换算 sc_idx(25) 之后 → 有效"
+        # 同源：SC 不再经滑窗重算（_scan/_last 均不得出现 _detect_selling_climax）
+        assert "_detect_selling_climax" not in [c[0] for c in scan_calls]
+        assert "_detect_selling_climax" not in [c[0] for c in last_calls]
+        # P-M4：子窗 tr_ctx 不含 sc_anchor（其余键原样）
+        for _name, ctx in scan_calls + last_calls:
+            assert ctx is None or "sc_anchor" not in ctx
+
+    def test_p1b_spring_before_converted_sc_idx_premature(self):
+        """验收 P1（次序边界）：spring(23) < 换算 sc_idx(25) → premature。"""
+        bars = [_make_bar(100, 105, 95, 102, 100) for _ in range(60)]
+        tr_ctx = {**self._OK_TR, "sc_anchor": self._anchor(45)}
+        ph, _, _ = self._run_with_fakes(
+            bars, tr_ctx, lookback=40, spring_idx=23, ar_idx=20)
+        assert ph["spring_premature"] is True, "spring(23) < 换算 sc_idx(25) → 过早"
+        assert ph["phase"] == "accumulation_a"
+
+    def test_p2_no_anchor_keeps_sliding_window_sc(self):
+        """验收 P2：无 sc_anchor → 原滑窗逻辑零改动（_scan/_last 仍调 SC 检测器）。"""
+        bars = [_make_bar(100, 105, 95, 102, 100) for _ in range(60)]
+        ph, scan_calls, last_calls = self._run_with_fakes(
+            bars, self._OK_TR, lookback=40, spring_idx=27, ar_idx=20)
+        assert "_detect_selling_climax" in [c[0] for c in scan_calls], "无锚应走原 _scan SC"
+        assert "_detect_selling_climax" in [c[0] for c in last_calls], "无锚应走原 _last SC"
+        # 原行为：无 sc/ar 索引 → B 背景缺失 → 孤立 spring 判过早、phase=none
+        assert ph["spring_premature"] is True
+        assert ph["phase"] == "none"
+
+    def test_p3_anchor_outside_lookback_sc_idx_minus1(self):
+        """验收 P3：锚 sc_bar_idx 在 lookback 外（bars=120、lookback=60 → 5-60=-55）→ -1 不崩。"""
+        bars = [_make_bar(100, 105, 95, 102, 100) for _ in range(120)]
+        tr_ctx = {**self._OK_TR, "sc_anchor": self._anchor(5)}
+        ph, scan_calls, last_calls = self._run_with_fakes(
+            bars, tr_ctx, lookback=60, spring_idx=20, ar_idx=25)
+        assert ph["phase"] == "accumulation_a", "sc_found 仍 True（锚存在）"
+        assert ph["spring_premature"] is True, "sc_idx=-1 → 次序按无 SC 处理"
+        assert "_detect_selling_climax" not in [c[0] for c in scan_calls]
+        assert "_detect_selling_climax" not in [c[0] for c in last_calls]
+
+    def test_p4_subwindow_ctx_strips_anchor_ar_still_lights(self):
+        """验收 P4：带 sc_anchor 的 tr_ctx 下 _scan(_detect_ar) 子窗不越界、AR 仍亮（SC+AR）。"""
+        from unittest.mock import patch
+        from trader_shared import wyckoff_phase as wp
+
+        # 低位 SC（全序列 idx=60）+ 放量反弹（TestDetectAR 同款下降段，SC 落在 wide_bars 末 30 根）
+        bars = [_make_bar(100, 105, 95, 102, 10) for _ in range(40)]
+        for i in range(20):
+            base = 150 - i * 2  # 150 → 112，抬高近窗上沿
+            bars.append(_make_bar(base, base + 3, base - 3, base, 10))
+        prev = bars[-1]["close"]
+        bars.append({"open": prev - 1, "high": 99, "low": 95, "close": 98, "volume": 250})  # SC idx=60
+        bars.append({"open": 98, "high": 105, "low": 97, "close": 104, "volume": 80})      # AR
+        bars.append(_make_bar(104, 105, 103, 104, 10))
+        bars.append(_make_bar(104, 105, 103, 104, 10))
+        assert len(bars) == 64
+        tr_ctx = {**self._OK_TR, "sc_anchor": self._anchor(60)}
+        seen_ctx: list = []
+        real_scan = wp._scan_for_signal
+
+        def _spy(_bars, det, window=15, step=5, max_lookback_bars=None, **kw):
+            seen_ctx.append(kw.get("tr_ctx"))
+            if getattr(det, "__name__", "") == "_detect_ar":
+                return real_scan(
+                    _bars, det, window=window, step=step,
+                    max_lookback_bars=max_lookback_bars, **kw,
+                )
+            return False
+
+        def _fake_last(_bars, det, tr_ctx, window, step=1, **kw):
+            return -1, None
+
+        with patch("trader_shared.wyckoff_phase._scan_for_signal", side_effect=_spy), \
+             patch("trader_shared.wyckoff_phase._scan_last_event", side_effect=_fake_last):
+            ph = wp._detect_phase(bars, self._sig(), _phase_lookback=60, tr_ctx=tr_ctx)
+        assert seen_ctx, "阶段机应调用滑窗"
+        assert all(ctx is None or "sc_anchor" not in ctx for ctx in seen_ctx), \
+            "P-M4：滑窗子 ctx 必须剥离 sc_anchor"
+        # AR 子窗真实运行：不越界不崩、仍亮 → SC+AR 停止（未剥离时子窗 IndexError 被吞 → 无 AR）
+        assert ph["phase"] == "accumulation_a"
+        assert "SC+AR" in ph["phase_label"], ph["phase_label"]
+
+    def test_p4b_unstripped_anchor_crashes_subwindow(self):
+        """P-M4 陷阱对照：未剥离的 sc_anchor（全序列索引）进子窗 → _detect_ar 越界。"""
+        from trader_shared.wyckoff_events import _detect_ar
+
+        bars = [_make_bar(100, 105, 95, 102, 10) for _ in range(40)]
+        for i in range(20):
+            base = 150 - i * 2
+            bars.append(_make_bar(base, base + 3, base - 3, base, 10))
+        prev = bars[-1]["close"]
+        bars.append({"open": prev - 1, "high": 99, "low": 95, "close": 98, "volume": 250})
+        bars.append({"open": 98, "high": 105, "low": 97, "close": 104, "volume": 80})
+        sub = bars[-18:]
+        try:
+            _detect_ar(sub, tr_ctx={**self._OK_TR, "sc_anchor": self._anchor(60)})
+            raised = False
+        except IndexError:
+            raised = True
+        assert raised, "未剥离的 sc_anchor 应导致子窗 bars[60] 越界（P-M4 依据）"
+
+    def test_p5_weekly_anchor_consumed_with_weekly_params(self):
+        """验收 P5：周线阶段机吃周线统一锚（39 帽冷启动），换算/次序用周线 wide_bars。"""
+        from trader_shared import wyckoff_events as we
+        from trader_shared.config import WYCKOFF_SC_COLD_START_BARS_WEEKLY
+
+        bars = []
+        for i in range(260):
+            p = 100.0 + (i % 7) * 0.05
+            bars.append(_make_bar(p, p + 0.1, p - 0.1, p + 0.02, 100))
+        bars[250] = {"open": 100.5, "high": 100.8, "low": 98.0, "close": 98.6, "volume": 2000}
+        # 周线统一锚（与周线 SC 灯同参 timeframe="weekly"）→ 39 帽冷启动
+        anchor = we._find_sc_anchor(bars, timeframe="weekly", include_failed=True)
+        assert anchor is not None and anchor["sc_bar_idx"] == 250
+        assert anchor["anchor_bars"] == int(WYCKOFF_SC_COLD_START_BARS_WEEKLY), "周线 39 帽"
+        tr_ctx = {**self._OK_TR, "sc_anchor": anchor}
+        # 周线 lookback=12 → wide_bars=bars[-12:]（offset=248）→ sc_idx = 250-248 = 2
+        ph, scan_calls, last_calls = self._run_with_fakes(
+            bars, tr_ctx, lookback=12, timeframe="weekly", spring_idx=5, ar_idx=3)
+        assert ph["phase"] == "accumulation_a", "周线阶段机吃周线锚 → sc_found"
+        assert ph["spring_premature"] is False, "spring(5) 在换算 sc_idx(2)/ar(3) 之后 → 有效"
+        assert "_detect_selling_climax" not in [c[0] for c in scan_calls]
+        assert "_detect_selling_climax" not in [c[0] for c in last_calls]
+
+
 class TestHighVolSpringDeweight:
     """高量 Spring 降权（通过 analysis override 提供 B 背景避免过早降权干扰）"""
 

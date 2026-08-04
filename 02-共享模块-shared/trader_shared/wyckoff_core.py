@@ -104,6 +104,7 @@ from .wyckoff_events import (
     _detect_buying_climax,
     _detect_compression,
     _detect_effort_vs_result,
+    _find_sc_anchor,
     _detect_lps,
     _detect_lpsy,
     _detect_selling_climax,
@@ -822,6 +823,21 @@ def wyckoff_analysis(
         "tr_upper": phase_tr_ctx.get("tr_upper") if phase_tr_ctx else None,
         "last_close": to_float(bars[-1].get("close")) if bars else None,
     }
+    # P-M1/P-M6（Bug I 收尾）：统一 SC 锚注入阶段机 —— 与主流程 SC 灯
+    # （wc.py _detect_selling_climax）同 event_tr_ctx 同源；_find_sc_anchor 已支持
+    # tr_ctx.sc_anchor 短路（wyckoff-epic-context-refactor-handoff I-M1），周线路径
+    # 同一行覆盖（timeframe/is_index 透传 → 周线冷启动 39 帽，P-M6/P5）。
+    # phase_tr_ctx 由 _overlay_phase_a_seed_tr_ctx 保证为 dict（恒含 phase_a_status）。
+    _unified_sc_anchor = _find_sc_anchor(
+        bars,
+        event_tr_ctx,
+        timeframe=timeframe,
+        is_index=is_index,
+        include_failed=True,
+    )
+    if _unified_sc_anchor is not None:
+        phase_tr_ctx["sc_anchor"] = _unified_sc_anchor
+
     phase = _detect_phase(
         bars,
         signals_dict,

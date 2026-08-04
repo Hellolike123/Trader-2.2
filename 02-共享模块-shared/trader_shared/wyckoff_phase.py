@@ -295,6 +295,10 @@ def _detect_phase(
     """
     lookback = min(_phase_lookback if _phase_lookback is not None else WYCKOFF_PHASE_LOOKBACK, len(bars))
     wide_bars = bars[-lookback:]
+    # P-M2/P-M3：统一 SC 锚（wc 主流程经 phase_tr_ctx 注入，与 SC 灯同源）——
+    # 有锚（dict）→ sc_found 恒 True、sc_idx 换算 wide_bars 偏移，不再滑窗重算 SC；
+    # 无 sc_anchor 键 → 走原滑窗逻辑（向后兼容，孤立调用不受影响）。
+    _unified_anchor = tr_ctx.get("sc_anchor") if isinstance(tr_ctx, dict) else None
     phase_a_status = (tr_ctx or {}).get("phase_a_status") or "none"
 
     if phase_a_status == "failed":
@@ -340,7 +344,15 @@ def _detect_phase(
 
     # 当前 bar 信号优先（避免 scan step 漏检末尾），再滑动扫描历史窗口
     # 周线：window / max_lookback 半幅（S1；见 wyckoff-weekly-scan-windows-handoff）
-    _scan_kw = {"tr_ctx": tr_ctx, "timeframe": timeframe, "is_index": is_index}
+    # P-M4：滑窗子窗口 ctx 剥掉 sc_anchor —— 锚是全序列索引，进子窗会让检测器
+    # 短路返回后 bars[sc_bar_idx] 越界，异常被 _scan_for_signal 吞掉 → 静默无信号；
+    # 阶段机门控（phase_a_status/tr_quality/tr_lower）继续读原 tr_ctx。
+    _sub_ctx = (
+        {k: v for k, v in tr_ctx.items() if k != "sc_anchor"}
+        if isinstance(tr_ctx, dict)
+        else None
+    )
+    _scan_kw = {"tr_ctx": _sub_ctx, "timeframe": timeframe, "is_index": is_index}
 
     def _scan(det, window: int, *, step: int = 5, max_lookback_bars: int | None = 30) -> bool:
         w, mlb = _tf_scan_params(timeframe, window, max_lookback_bars)
@@ -351,7 +363,7 @@ def _detect_phase(
     def _last(det, window: int) -> tuple[int, Any]:
         w, _ = _tf_scan_params(timeframe, window, None)
         return _scan_last_event(
-            wide_bars, det, tr_ctx, window=w, step=1, timeframe=timeframe, is_index=is_index
+            wide_bars, det, _sub_ctx, window=w, step=1, timeframe=timeframe, is_index=is_index
         )
 
     bc_found = bool(signals.get("bc_signal")) or _scan(_detect_buying_climax, 15)
@@ -364,9 +376,13 @@ def _detect_phase(
     ut_found = bool(signals.get("upthrust_signal")) or _scan(_detect_upthrust, 15)
     sow_found = bool(signals.get("sow_signal")) or _scan(_detect_sign_of_weakness, 16)
     # 新增：SC（卖力高潮）和 LPSY（最后供应点）扫描
-    sc_found = bool(signals.get("sc_signal")) or _scan(
-        _detect_selling_climax, WYCKOFF_CLIMAX_ANCHOR_BARS
-    )
+    # P-M2：统一锚存在 → sc_found 恒 True（短路原 _scan SC 滑窗重算）；无锚 → 原逻辑（P-M3）
+    if _unified_anchor is not None:
+        sc_found = True
+    else:
+        sc_found = bool(signals.get("sc_signal")) or _scan(
+            _detect_selling_climax, WYCKOFF_CLIMAX_ANCHOR_BARS
+        )
     lpsy_found = bool(signals.get("lpsy_signal")) or _scan(_detect_lpsy, 15)
 
     def _finish(d: dict[str, Any]) -> dict[str, Any]:
@@ -390,7 +406,15 @@ def _detect_phase(
     # 计算各事件在 wide_bars 中的最后触发索引（若索引数组已排序则取最后出现位置）
     spring_idx, _ = _last(_detect_spring, 15)
     ut_idx, _ = _last(_detect_upthrust, 15)
-    sc_idx, _ = _last(_detect_selling_climax, WYCKOFF_CLIMAX_ANCHOR_BARS)
+    # P-M2：统一锚 → 全序列 sc_bar_idx 换算 wide_bars 偏移；换算结果不在
+    # [0, len(wide_bars)) 内（持久化钉锚可能在 lookback 之外）→ -1（与原
+    # 「滑窗未检出 SC」同义）；无锚 → 原 _last 滑窗（P-M3）
+    if _unified_anchor is not None:
+        sc_idx = int(_unified_anchor["sc_bar_idx"]) - (len(bars) - len(wide_bars))
+        if not (0 <= sc_idx < len(wide_bars)):
+            sc_idx = -1
+    else:
+        sc_idx, _ = _last(_detect_selling_climax, WYCKOFF_CLIMAX_ANCHOR_BARS)
     bc_idx, _ = _last(_detect_buying_climax, WYCKOFF_CLIMAX_ANCHOR_BARS)
     ar_idx, _ = _last(_detect_ar, WYCKOFF_CLIMAX_ANCHOR_BARS + 3)
     are_idx, _ = _last(_detect_are, WYCKOFF_CLIMAX_ANCHOR_BARS + 3)
