@@ -839,14 +839,17 @@ def build_structure_context(
 
     # ── P0: ATR 移动止损 ──
     from trader_shared.config import ENABLE_TRAILING_STOP, TRAILING_STOP_ATR_MULTIPLE
-        
+
+    # Bug P（2026-08-04）：原代码函数内直接对 TRAILING_STOP_ATR_MULTIPLE 赋值，
+    # 局部遮蔽同名 import 常量，易误导读者以为改了全局配置。改为局部变量 _trailing_mult。
+    _trailing_mult = TRAILING_STOP_ATR_MULTIPLE  # 默认 3.0（config）
     if pnl_pct is not None:
         if pnl_pct >= 0.40:
-            TRAILING_STOP_ATR_MULTIPLE = 1.2
+            _trailing_mult = 1.2
         elif pnl_pct >= 0.30:
-            TRAILING_STOP_ATR_MULTIPLE = 1.5
+            _trailing_mult = 1.5
         elif pnl_pct >= 0.20:
-            TRAILING_STOP_ATR_MULTIPLE = 2.0
+            _trailing_mult = 2.0
 
     trailing_stop = None
     highest_close = None
@@ -861,7 +864,7 @@ def build_structure_context(
         closes = [v for b in recent_bars if (v := to_float(b.get("close"))) is not None]
         if closes:
             highest_close = max(closes)
-            trailing_stop = round(highest_close * (1 - atr_pct * TRAILING_STOP_ATR_MULTIPLE), 2)
+            trailing_stop = round(highest_close * (1 - atr_pct * _trailing_mult), 2)
             # 移动止损不应低于原始 hard_stop（不扩大亏损）
             if trailing_stop is not None:
                 trailing_stop = max(trailing_stop, stop)
