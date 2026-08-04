@@ -1369,16 +1369,24 @@ def _fetch_daily_sina(sec: Security, days: int = 300) -> list[dict[str, Any]] | 
         return None
 
 
-def fetch_qfq_daily(sec: Security, http: HttpClient, days: int = 300) -> list[dict[str, Any]]:
-    """拉取日线（腾讯优先）。出口保证时间正序，bars[-1]=最新。"""
-    bars = _fetch_qfq_daily_raw(sec, http, days=days)
+def fetch_qfq_daily(
+    sec: Security, http: HttpClient, days: int = 300, *, fresh: bool = False
+) -> list[dict[str, Any]]:
+    """拉取日线（腾讯优先）。出口保证时间正序，bars[-1]=最新。
+
+    ``fresh=True``（周线新鲜度闸专用）：跳过同日文件缓存与 URL 缓存短路，
+    强制触网取最新盘中 bar；网络全源失败仍回退非 fresh 缓存语义。
+    """
+    bars = _fetch_qfq_daily_raw(sec, http, days=days, fresh=fresh)
     fixed, _ = ensure_bars_ascending(bars if isinstance(bars, list) else [])
     if fix_daily_scale_glitches(fixed):
         _compute_atr_fields(fixed)
     return fixed
 
 
-def _fetch_qfq_daily_raw(sec: Security, http: HttpClient, days: int = 300) -> list[dict[str, Any]]:
+def _fetch_qfq_daily_raw(
+    sec: Security, http: HttpClient, days: int = 300, *, fresh: bool = False
+) -> list[dict[str, Any]]:
     from trader_shared.cache_utils import daily_bars_cache_target as _daily_cache_target
 
     _qfq_cache_target = _daily_cache_target(
@@ -1413,37 +1421,40 @@ def _fetch_qfq_daily_raw(sec: Security, http: HttpClient, days: int = 300) -> li
         return []
 
     # ── 文件缓存：按自然日 fetch_date 复用（与 Tushare 路径一致）──
-    try:
-        from trader_shared.cache_utils import (
-            get_cached as _file_cached,
-            CACHE_DAILY,
-            TTL_BARS_DAY,
-            is_fetch_date_today,
-            unwrap_bars_payload,
-        )
-        _cached_result = _file_cached(CACHE_DAILY, _qfq_cache_target, ttl=TTL_BARS_DAY)
-        if _cached_result is not None:
-            _data = _cached_result.data
-            if is_fetch_date_today(_data):
-                _rows = unwrap_bars_payload(_data)
-                if isinstance(_rows, list) and len(_rows) >= 200:
-                    return _rows
-            # 兼容旧裸 list + 未过 TTL
-            if (
-                isinstance(_data, list)
-                and len(_data) >= 200
-                and not _cached_result.stale
-            ):
-                return _data
-    except (ImportError, OSError) as exc:
-        _logger.debug("File cache read failed for %s: %s", sec.code, exc)
+    # fresh=True 跳过同日短路（周线新鲜度闸要盘中最新）；网络全源失败时
+    # 由调用侧 `or fetch_qfq_daily(...)` 回退非 fresh 缓存兜底。
+    if not fresh:
+        try:
+            from trader_shared.cache_utils import (
+                get_cached as _file_cached,
+                CACHE_DAILY,
+                TTL_BARS_DAY,
+                is_fetch_date_today,
+                unwrap_bars_payload,
+            )
+            _cached_result = _file_cached(CACHE_DAILY, _qfq_cache_target, ttl=TTL_BARS_DAY)
+            if _cached_result is not None:
+                _data = _cached_result.data
+                if is_fetch_date_today(_data):
+                    _rows = unwrap_bars_payload(_data)
+                    if isinstance(_rows, list) and len(_rows) >= 200:
+                        return _rows
+                # 兼容旧裸 list + 未过 TTL
+                if (
+                    isinstance(_data, list)
+                    and len(_data) >= 200
+                    and not _cached_result.stale
+                ):
+                    return _data
+        except (ImportError, OSError) as exc:
+            _logger.debug("File cache read failed for %s: %s", sec.code, exc)
 
     # Tencent HTTP first — fast and stable
     raw_params = f"_var=kline_dayhfq&param={sec.qq_symbol},day,,,{max(days, 20)},qfq"
     cache_key = get_cache_key(TENCENT_FQKLINE_URL, raw_params)
 
     cached = get_from_cache(cache_key)
-    if cached is not None:
+    if cached is not None and not fresh:
         return cached
 
     def do_fetch():
@@ -1667,6 +1678,12 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
 
     若上游周线接口实际吐出日线间距（mootdx cat=5 曾如此），丢弃并改由日线聚合周线，
     避免中线威科夫/缠论与短线撞车。
+
+    D（周线新鲜度）：缓存周线最后 bar 日期 < 日线最后 bar 日期 → 视为过期，
+    用 _from_daily() 重聚合覆盖写回（凌晨生成的周线缓存盘中不再滞后）。
+    E（volume 单位）：sina/mootdx 周线 volume=手 → 本函数入口 ×100 归一到股，
+    与腾讯日线（=股）同单位；每根周线 bar 写缓存前带 vol_unit="share" 标记，
+    旧格式缓存（无标记）读取时强制回源重写。
     """
     if datalen is None:
         try:
@@ -1681,13 +1698,36 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
         weekly_bars_look_like_weekly,
     )
 
-    def _from_daily() -> list[dict[str, Any]]:
+    def _last_bar_date(bars_list: list[dict[str, Any]]) -> str:
+        """取 bars 最后有效日期（YYYY-MM-DD），供周线新鲜度闸对比。"""
+        for b in reversed(bars_list or []):
+            raw = str(b.get("date") or b.get("time") or "")[:10]
+            if len(raw) >= 10:
+                return raw
+        return ""
+
+    def _stamp_vol_unit_share(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """E：给周线 bar 打 ``vol_unit="share"`` 标记（写缓存前每根必带）。
+
+        只做标记、不做任何数值换算；换算只发生在 sina/mootdx 周线出口（_net）。
+        """
+        for bar in bars:
+            if isinstance(bar, dict):
+                bar["vol_unit"] = "share"
+        return bars
+
+    def _from_daily(
+        daily: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
         # 周根数 * 约 5 交易日，多取缓冲再截断
-        daily = fetch_qfq_daily(sec, http, days=max(int(datalen) * 6, 300)) or []
+        # daily 由调用方传入时复用（D 闸 fresh 日线直接聚合，避免二次拉取）
+        if daily is None:
+            daily = fetch_qfq_daily(sec, http, days=max(int(datalen) * 6, 300)) or []
         weekly = aggregate_daily_to_weekly(daily)
         if len(weekly) > int(datalen):
             weekly = weekly[-int(datalen) :]
-        return weekly
+        # E-M2：聚合路径（腾讯日线=股）不得 ×100，仅补 vol_unit 标记
+        return _stamp_vol_unit_share(weekly)
 
     def _net() -> list[dict[str, Any]]:
         fallback_bars = _fetch_mins_fallback(sec, "weekly", datalen)
@@ -1696,7 +1736,12 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
                 bar["data_source"] = "sina"
                 bar["data_status"] = "full"
             if weekly_bars_look_like_weekly(fallback_bars):
-                return fallback_bars
+                # E-M1：sina 周线 volume=手 → ×100 归一到股（与腾讯日线同单位）
+                for bar in fallback_bars:
+                    _v = to_float(bar.get("volume"))
+                    if _v is not None:
+                        bar["volume"] = _v * 100.0
+                return _stamp_vol_unit_share(fallback_bars)
             _logger.warning(
                 "fetch_weekly: sina weekly spacing looks daily for %s, aggregate from daily",
                 sec.code,
@@ -1707,7 +1752,12 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
                 bar["data_source"] = "mootdx (fallback)"
                 bar["data_status"] = "partial"
             if weekly_bars_look_like_weekly(bars):
-                return bars
+                # E-M1：mootdx 周线 volume=手 → ×100 归一到股（与腾讯日线同单位）
+                for bar in bars:
+                    _v = to_float(bar.get("volume"))
+                    if _v is not None:
+                        bar["volume"] = _v * 100.0
+                return _stamp_vol_unit_share(bars)
             _logger.warning(
                 "fetch_weekly: mootdx weekly spacing looks daily for %s, aggregate from daily",
                 sec.code,
@@ -1719,7 +1769,47 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
         f"{sec.code}_{sec.market.upper()}" if sec.market else sec.code
     )
     bars = get_day_scoped_bars(CACHE_WEEKLY, _weekly_target, _net, min_rows=4)
+    # E-M3 缓存迁移：旧手单位缓存（首根 bar 无 vol_unit 标记）→ 视为过期强制回源重写
+    if bars and not bars[0].get("vol_unit") == "share":
+        _logger.info(
+            "fetch_weekly: legacy cache without vol_unit for %s, refetch & rewrite",
+            sec.code,
+        )
+        refreshed = _net()
+        if refreshed:
+            bars = refreshed
+            try:
+                set_cached(
+                    CACHE_WEEKLY,
+                    _weekly_target,
+                    {"fetch_date": cache_calendar_date(), "rows": bars},
+                )
+            except OSError:
+                pass
+        # 全源失败：保留旧缓存兜底（不回源失败时弃用旧数据）
     if weekly_bars_look_like_weekly(bars):
+        # D-M1 周线专属新鲜度闸：缓存周线最后 bar 日期 < 日线最后 bar 日期 → 视为过期。
+        # fresh=True 强制触网取盘中最新日线（凌晨预热同日缓存不短路——查 Agent Delta 1）；
+        # 网络全源失败时回退非 fresh 缓存兜底。
+        _daily = (
+            fetch_qfq_daily(sec, http, days=max(int(datalen) * 6, 300), fresh=True)
+            or fetch_qfq_daily(sec, http, days=max(int(datalen) * 6, 300))
+        )
+        _weekly_last = _last_bar_date(bars)
+        _daily_last = _last_bar_date(_daily)
+        if _weekly_last and _daily_last and _weekly_last < _daily_last:
+            # D-M2：用 fresh 日线重聚合覆盖写回周线缓存（fetch_date=今天）并返回
+            fixed = _from_daily(_daily)
+            if fixed and weekly_bars_look_like_weekly(fixed):
+                try:
+                    set_cached(
+                        CACHE_WEEKLY,
+                        _weekly_target,
+                        {"fetch_date": cache_calendar_date(), "rows": fixed},
+                    )
+                except OSError:
+                    pass
+                return fixed
         return bars
     # 同日缓存可能已毒（旧日线冒充周线）：覆盖写回聚合周线
     fixed = _from_daily()

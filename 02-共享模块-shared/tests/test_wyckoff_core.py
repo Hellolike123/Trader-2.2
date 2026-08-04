@@ -1897,6 +1897,82 @@ class TestPhaseARangeP1:
         assert "WYCKOFF_SC_COLD_START_BARS_WEEKLY" in config.__all__
 
 
+class TestSCFailedChainAr:
+    """F: SC 失效链断裂 + 误导文案（wyckoff-sos-epic-fde-handoff §1 F-M1~F-M6 / §4 F1~F3）。
+
+    SC 检测器用 include_failed=True（失效 SC 也亮灯）；_detect_ar 常规锚缺失时应
+    再探测「存在但失效」的 SC 并输出失效态文案（含「失效」），而非「未检测到 SC」。
+    """
+
+    def _decline_base(self, n: int = 14, vol: int = 100) -> list[dict]:
+        bars = []
+        for _ in range(n):
+            bars.append(_make_bar(90.0, 91.0, 89.0, 90.0, vol))
+        return bars
+
+    def _failed_sc_bars(self) -> list[dict]:
+        """SC 亮灯（失效）→ 后续破位未收回（Phase A 失败），AR 锚缺失（茅台型）。"""
+        bars = self._decline_base(14)
+        # SC：跳空大跌放量（idx 14，sc_low=82.0）
+        bars.append(_make_bar(84.0, 85.0, 82.0, 83.0, 2500))
+        # 两根整理（不构成新 SC：量比 < 1.5）
+        bars.append(_make_bar(83.2, 83.6, 82.8, 83.3, 120))
+        bars.append(_make_bar(83.4, 83.8, 83.0, 83.5, 120))
+        # 有效跌破 SC low（82*0.988=81.016）且收盘未收回 → Phase A 失败
+        bars.append(_make_bar(81.5, 82.0, 80.5, 81.0, 300))
+        return bars
+
+    def test_f1_failed_sc_ar_reports_invalidated_not_no_sc(self):
+        """F1: SC 失效 + AR 锚缺失 → ar_reason 含「失效」、不含「未检测到 SC」；
+        ar_signal=False；sc_low/sc_bar_idx 透出。"""
+        from trader_shared.wyckoff_events import _detect_ar, _detect_selling_climax
+
+        bars = self._failed_sc_bars()
+        sc = _detect_selling_climax(bars)
+        # 前提：SC 灯亮且标记失效（与 bug 报告口径一致）
+        assert sc["sc_signal"] is True
+        assert sc["phase_a_failed"] is True
+        assert sc["sc_low"] == 82.0
+        assert sc["sc_bar_idx"] == 14
+
+        ar = _detect_ar(bars)
+        assert ar["ar_signal"] is False
+        assert "失效" in ar["ar_reason"]
+        assert "未检测到 SC" not in ar["ar_reason"]
+        assert ar["sc_low"] == 82.0
+        assert ar["sc_bar_idx"] == 14
+
+    def test_f2_valid_sc_ar_unchanged(self):
+        """F2: SC 有效 → AR 原行为（回归：ar_signal / ar_high / sc_low / sc_bar_idx）。"""
+        from trader_shared.wyckoff_events import _detect_ar, _detect_selling_climax
+
+        bars = self._decline_base(14)
+        bars.append(_make_bar(84.0, 85.0, 82.0, 83.0, 2500))  # SC
+        for i in range(4):
+            bars.append(_make_bar(83.2 + i * 0.1, 83.6 + i * 0.1, 82.8 + i * 0.1, 83.3 + i * 0.1, 120))
+        bars.append(_make_bar(83.5, 87.0, 83.0, 86.0, 130))  # AR
+
+        sc = _detect_selling_climax(bars)
+        ar = _detect_ar(bars)
+        assert sc["sc_signal"] is True
+        assert ar["ar_signal"] is True
+        assert ar["ar_high"] == 87.0
+        assert ar["sc_low"] == sc["sc_low"] == 82.0
+        assert ar["sc_bar_idx"] == sc["sc_bar_idx"] == 14
+        assert "失效" not in ar["ar_reason"]
+
+    def test_f3_no_sc_original_message(self):
+        """F3: 无任何 SC → 维持原文案「未检测到 SC，无法触发 AR」。"""
+        from trader_shared.wyckoff_events import _detect_ar
+
+        bars = [_make_bar(100.0, 105.0, 95.0, 102.0, 100) for _ in range(18)]
+        ar = _detect_ar(bars)
+        assert ar["ar_signal"] is False
+        assert ar["ar_reason"] == "未检测到 SC，无法触发 AR"
+        assert ar["sc_low"] is None
+        assert ar["sc_bar_idx"] is None
+
+
 class TestPhaseARangeP2:
     """P2: 种子箱门控 + 广义 ST（测 SC）。"""
 

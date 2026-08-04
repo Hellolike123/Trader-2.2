@@ -1426,6 +1426,34 @@ def _detect_ar(
 
     anchor = _find_sc_anchor(bars, tr_ctx=tr_ctx, timeframe=timeframe, is_index=is_index)
     if anchor is None:
+        # F-M1/F-M2：SC 失效链——常规锚（include_failed=False）缺失时，
+        # 再探测「存在但失效」的 SC（与 _detect_selling_climax 的 include_failed=True
+        # 口径一致），输出失效态文案而非「未检测到 SC」；禁止软确认（ar_signal 恒 False）。
+        failed_anchor = _find_sc_anchor(
+            bars,
+            tr_ctx=tr_ctx,
+            timeframe=timeframe,
+            is_index=is_index,
+            include_failed=True,
+        )
+        if (
+            failed_anchor is not None
+            and failed_anchor.get("phase_a_failed")
+            and failed_anchor.get("fail_reason")
+        ):
+            # F-M5：失效态仍透出 SC 位置（SC low SSOT：棒最低价）
+            f_sc_bar_idx = int(failed_anchor["sc_bar_idx"])
+            f_bar_low = to_float(bars[f_sc_bar_idx].get("low"))
+            f_sc_low = (
+                round(float(f_bar_low), 2)
+                if f_bar_low is not None
+                else failed_anchor["sc_low"]
+            )
+            return {
+                **_ar_empty("SC 已失效（Phase A 失败），链终止，须重新寻底"),
+                "sc_low": f_sc_low,
+                "sc_bar_idx": f_sc_bar_idx,
+            }
         return _ar_empty()
 
     sc_bar_idx = anchor["sc_bar_idx"]
