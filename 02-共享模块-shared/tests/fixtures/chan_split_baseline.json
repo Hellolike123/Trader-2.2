@@ -313,7 +313,9 @@
             "valid": true
           }
         ],
-        "valid": true
+        "valid": true,
+        "_span_start": 17,
+        "_span_end": 98
       }
     ],
     "buy_points": [],
@@ -819,7 +821,9 @@
             "valid": true
           }
         ],
-        "valid": true
+        "valid": true,
+        "_span_start": 17,
+        "_span_end": 98
       }
     ],
     "pivot_count": 1
@@ -1138,7 +1142,9 @@
             "valid": true
           }
         ],
-        "valid": true
+        "valid": true,
+        "_span_start": 17,
+        "_span_end": 98
       }
     ],
     "buy_points": [],
@@ -1644,7 +1650,9 @@
             "valid": true
           }
         ],
-        "valid": true
+        "valid": true,
+        "_span_start": 17,
+        "_span_end": 98
       }
     ],
     "pivot_count": 1

@@ -1007,14 +1007,13 @@ def _unfinished_segment_direction(
 def _merge_zones(raw_zones: list[dict], gap_pct: float) -> list[dict]:
     """将重叠的滑动窗口中枢合并为 consolidated pivot。
 
-    合并条件（P0 安全修复）：**仅当两中枢价格区间真正重叠**时才合并
-    （`z.top > last.bottom and z.bottom < last.top`）。
-
-    纯 gap（不重叠）不再合并——即使间距 < gap_pct。旧逻辑用交集合并
-    近邻非重叠中枢时会出现 `zh_top < zh_bottom` 的非法中枢。
-
-    gap_pct 参数保留以兼容调用方（CHAN_ZONE_MERGE_GAP_PCT），当前已禁用 gap 合并，
-    仅作未来扩展预留，本函数内不消费。
+    合并条件（P0 安全修复）：
+    1. **价格区间真正重叠**（`z.top > last.bottom and z.bottom < last.top`）——纯 gap 不合并，
+       即使间距 < gap_pct（旧逻辑用交集合并近邻非重叠中枢会出现 top <= bottom 的非法中枢）。
+    2. **时间连续性（Bug Q / 2026-08-04）**：中枢成员笔在时间上必须相邻——
+       当前中枢的起始笔索引须与合并簇的结束笔索引间隔 <= 2（滑动窗口 3 笔一组，
+       相邻窗口天然共享/紧邻笔）。**阻止跨越多笔的链式合并**：价格逐级重叠但时间
+       相隔很远的中枢（如 2024 年 25 元 → 2026 年 65 元）不得并进同一中枢。
 
     合并后取交集：zh_top = min(tops), zh_bottom = max(bottoms)，并保证 top > bottom；
     成员原始中枢记录到 members。
@@ -1022,18 +1021,46 @@ def _merge_zones(raw_zones: list[dict], gap_pct: float) -> list[dict]:
     # gap_pct 暂不使用（禁用 gap 合并，避免非法中枢）
     _ = gap_pct
 
+    def _zone_stroke_span(z: dict) -> tuple[int, int] | None:
+        """取中枢成员笔的 (起始笔索引, 结束笔索引)。
+
+        笔索引 = 原始 strokes 列表索引（build_zones 传入 items 的下标）。
+        无法解析（缺字段）时返回 None——调用方应回退到仅价格重叠判定（兼容
+        无索引字段的构造数据/旧测试）。
+        """
+        ss = z.get("strokes") or []
+        if not ss:
+            return None
+        f = ss[0].get("start_index")
+        l = ss[-1].get("end_index")
+        try:
+            fi, li = int(f), int(l)
+        except (TypeError, ValueError):
+            return None
+        if fi < 0 or li < 0:
+            return None
+        return fi, li
+
     merged: list[dict[str, Any]] = []
     for z in raw_zones:
+        span = _zone_stroke_span(z)
         if not merged:
             merged.append({
                 "zh_top": z["zh_top"], "zh_bottom": z["zh_bottom"],
                 "zh_center": z["zh_center"], "members": [z], "valid": True,
+                "_span_start": span[0] if span else None,
+                "_span_end": span[1] if span else None,
             })
             continue
         last = merged[-1]
-        # 仅真正价格重叠才合并
+        # 价格重叠
         overlap = z["zh_top"] > last["zh_bottom"] and z["zh_bottom"] < last["zh_top"]
-        if overlap:
+        # 时间连续性（Bug Q）：两者都能解析索引时才校验；任一方无法解析 → 回退旧行为
+        if span is not None and last.get("_span_end") is not None:
+            contiguous = (span[0] - last["_span_end"]) <= 2
+        else:
+            contiguous = True
+        if overlap and contiguous:
             new_top = min(last["zh_top"], z["zh_top"])
             new_bottom = max(last["zh_bottom"], z["zh_bottom"])
             # 交集须仍为合法区间；否则保持独立，避免 top <= bottom
@@ -1042,15 +1069,21 @@ def _merge_zones(raw_zones: list[dict], gap_pct: float) -> list[dict]:
                 last["zh_bottom"] = new_bottom
                 last["zh_center"] = round((last["zh_top"] + last["zh_bottom"]) / 2, 4)
                 last["members"].append(z)
+                if span is not None:
+                    last["_span_end"] = max(last["_span_end"] or 0, span[1])
             else:
                 merged.append({
                     "zh_top": z["zh_top"], "zh_bottom": z["zh_bottom"],
                     "zh_center": z["zh_center"], "members": [z], "valid": True,
+                    "_span_start": span[0] if span else None,
+                    "_span_end": span[1] if span else None,
                 })
         else:
             merged.append({
                 "zh_top": z["zh_top"], "zh_bottom": z["zh_bottom"],
                 "zh_center": z["zh_center"], "members": [z], "valid": True,
+                "_span_start": span[0] if span else None,
+                "_span_end": span[1] if span else None,
             })
     return merged
 
