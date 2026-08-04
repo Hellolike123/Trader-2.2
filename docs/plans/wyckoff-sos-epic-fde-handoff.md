@@ -55,6 +55,10 @@
 
 ### Bug E — volume 单位（`light_data.py` 周线入口）
 
+> **⚠️ 2026-08-04 裁决回退**：本 E 节合同已被 `docs/plans/2026-08-04-weekly-vol-unit-adjudication.md`
+> 取代——全源（日线+周线）volume 实测=手，周线 sina/mootdx 出口**不再 ×100**，
+> `vol_unit` 统一打 `"lot"`（手）。下文 E-M1~E-M5 原文保留备查（回退版本见裁决法源 §2）。
+
 | # | 合同 |
 |---|------|
 | E-M1 | sina / mootdx 周线 volume 在 light_data 数据入口统一 ×100 归一到「股」（与腾讯日线同单位）。**实现位置：`fetch_weekly._net()` 出口**（sina/mootdx 分支 return 前归一）——`_fetch_mins_fallback`/`_fetch_mins_mootdx` 是 5m/15m/30m/60m/weekly/monthly 共用函数，内部归一会误伤分钟线，故不在此二函数内改 |

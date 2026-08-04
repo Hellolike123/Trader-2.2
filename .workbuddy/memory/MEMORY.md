@@ -17,7 +17,7 @@
 - **tushare HTTP 不可达卡死已修**（93ff9c0）：`_probe_reachable()` 硬超时探测，不可达干净回退腾讯。
 - 回测拉数铁则：绕过 `get_provider` 缓存语义，直接 `TencentFetcher().fetch_qfq_daily(code, days)`；必要时 `set_provider(UnifiedProvider(backend="tencent"))`。
 - **🔴 TencentFetcher 跨进程偶发 100× 缩放坏点**：进程内确定，跨进程不保证 → 回测统一走落盘缓存（写前读后都跑 >5× 中位数断言）。
-- **🔴 日线 volume 单位实测（2026-08-04，推翻 FDE 轮假设）**：**腾讯日线 volume=手**（amount 交叉验证 amount≈vol×100×close + 腾讯实时 qfqday 与 mootdx 缓存同量级：601398/600519/000001），与 sina/mootdx/pytdx3/tushare **全源一致=手**。FDE 轮「腾讯日线=股」假设错误 → 其周线出口 ×100（=股）与日线（=手）存在跨周期绝对值 100× 差异（A-P4 冻结，待裁决，见 `workflows/phase-scan-audit/README.md` §2）。日线新缓存 bar 打 `vol_unit="lot"`（`_stamp_vol_unit`，light_data.py）；fallback **不 ×100**（实测修正 A-M1）。
+- **🔴 日线 volume 单位实测（2026-08-04，推翻 FDE 轮假设）**：**腾讯日线 volume=手**（amount 交叉验证 amount≈vol×100×close + 腾讯实时 qfqday 与 mootdx 缓存同量级：601398/600519/000001），与 sina/mootdx/pytdx3/tushare **全源一致=手**。FDE 轮「腾讯日线=股」假设错误 → 其周线出口 ×100（=股）与日线（=手）存在跨周期绝对值 100× 差异；**2026-08-04 已裁决回退**（`docs/plans/2026-08-04-weekly-vol-unit-adjudication.md`）：周线 sina/mootdx 出口不再 ×100，周线全路径（sina/mootdx + 日线聚合）统一=手，`vol_unit="lot"`。日线新缓存 bar 打 `vol_unit="lot"`（`_stamp_vol_unit`，light_data.py）；fallback **不 ×100**（实测修正 A-M1）。
 
 ## 决策框架（勿破坏）
 

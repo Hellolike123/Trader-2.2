@@ -1725,9 +1725,9 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
 
     D（周线新鲜度）：缓存周线最后 bar 日期 < 日线最后 bar 日期 → 视为过期，
     用 _from_daily() 重聚合覆盖写回（凌晨生成的周线缓存盘中不再滞后）。
-    E（volume 单位）：sina/mootdx 周线 volume=手 → 本函数入口 ×100 归一到股，
-    与腾讯日线（=股）同单位；每根周线 bar 写缓存前带 vol_unit="share" 标记，
-    旧格式缓存（无标记）读取时强制回源重写。
+    E（volume 单位）：2026-08-04 裁决回退——全源（日线+周线）=手，不 ×100。
+    周线 sina/mootdx 出口与聚合路径均保持原始手数，每根周线 bar 写缓存前带
+    vol_unit="lot" 标记；旧格式缓存（"share"/无标记）读取时强制回源重写。
     """
     if datalen is None:
         try:
@@ -1750,16 +1750,6 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
                 return raw
         return ""
 
-    def _stamp_vol_unit_share(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """E：给周线 bar 打 ``vol_unit="share"`` 标记（写缓存前每根必带）。
-
-        只做标记、不做任何数值换算；换算只发生在 sina/mootdx 周线出口（_net）。
-        """
-        for bar in bars:
-            if isinstance(bar, dict):
-                bar["vol_unit"] = "share"
-        return bars
-
     def _from_daily(
         daily: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
@@ -1770,8 +1760,9 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
         weekly = aggregate_daily_to_weekly(daily)
         if len(weekly) > int(datalen):
             weekly = weekly[-int(datalen) :]
-        # E-M2：聚合路径（腾讯日线=股）不得 ×100，仅补 vol_unit 标记
-        return _stamp_vol_unit_share(weekly)
+        # E-M2（2026-08-04 裁决回退）：聚合路径（日线=手）不 ×100，与 sina/mootdx 出口
+        # 同单位，仅补 vol_unit="lot" 标记
+        return _stamp_vol_unit(weekly, _DAILY_VOL_UNIT)
 
     def _net() -> list[dict[str, Any]]:
         fallback_bars = _fetch_mins_fallback(sec, "weekly", datalen)
@@ -1780,12 +1771,8 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
                 bar["data_source"] = "sina"
                 bar["data_status"] = "full"
             if weekly_bars_look_like_weekly(fallback_bars):
-                # E-M1：sina 周线 volume=手 → ×100 归一到股（与腾讯日线同单位）
-                for bar in fallback_bars:
-                    _v = to_float(bar.get("volume"))
-                    if _v is not None:
-                        bar["volume"] = _v * 100.0
-                return _stamp_vol_unit_share(fallback_bars)
+                # E-M1（2026-08-04 裁决回退）：sina 周线 volume=手，全源统一=手，不 ×100
+                return _stamp_vol_unit(fallback_bars, _DAILY_VOL_UNIT)
             _logger.warning(
                 "fetch_weekly: sina weekly spacing looks daily for %s, aggregate from daily",
                 sec.code,
@@ -1796,12 +1783,8 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
                 bar["data_source"] = "mootdx (fallback)"
                 bar["data_status"] = "partial"
             if weekly_bars_look_like_weekly(bars):
-                # E-M1：mootdx 周线 volume=手 → ×100 归一到股（与腾讯日线同单位）
-                for bar in bars:
-                    _v = to_float(bar.get("volume"))
-                    if _v is not None:
-                        bar["volume"] = _v * 100.0
-                return _stamp_vol_unit_share(bars)
+                # E-M1（2026-08-04 裁决回退）：mootdx 周线 volume=手，全源统一=手，不 ×100
+                return _stamp_vol_unit(bars, _DAILY_VOL_UNIT)
             _logger.warning(
                 "fetch_weekly: mootdx weekly spacing looks daily for %s, aggregate from daily",
                 sec.code,
@@ -1813,8 +1796,9 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
         f"{sec.code}_{sec.market.upper()}" if sec.market else sec.code
     )
     bars = get_day_scoped_bars(CACHE_WEEKLY, _weekly_target, _net, min_rows=4)
-    # E-M3 缓存迁移：旧手单位缓存（首根 bar 无 vol_unit 标记）→ 视为过期强制回源重写
-    if bars and not bars[0].get("vol_unit") == "share":
+    # E-M3 缓存迁移（2026-08-04 裁决回退）：旧缓存 "share"（=股）/无标记（非 "lot"=手）
+    # → 视为过期强制回源重写为手数，保证旧 ×100 值不残留
+    if bars and bars[0].get("vol_unit") != _DAILY_VOL_UNIT:
         _logger.info(
             "fetch_weekly: legacy cache without vol_unit for %s, refetch & rewrite",
             sec.code,

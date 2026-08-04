@@ -47,7 +47,7 @@ def _make_weekly(dates: list[str], last_vol: float = 100.0) -> list[dict]:
 
 
 def _make_daily(dates: list[str], vols: list[float] | None = None) -> list[dict]:
-    """日线（腾讯单位=股）；未给 vols 时逐日 100.0。"""
+    """日线（单位=手）；未给 vols 时逐日 100.0。"""
     vols = vols or [100.0] * len(dates)
     return [
         {
@@ -85,7 +85,7 @@ def _seed_weekly_cache(target: str, bars: list[dict], *, tagged: bool) -> None:
     rows = [dict(b) for b in bars]
     if tagged:
         for b in rows:
-            b["vol_unit"] = "share"
+            b["vol_unit"] = "lot"
     cu.set_cached(
         cu.CACHE_WEEKLY, target, {"fetch_date": cu.cache_calendar_date(), "rows": rows}
     )
@@ -115,7 +115,7 @@ class TestWeeklyFreshnessD:
         bars = light_data.fetch_weekly(sec, http, datalen=8)
 
         assert bars[-1]["date"] == "2026-08-04"  # 重聚合含盘中新 bar
-        assert bars[-1]["vol_unit"] == "share"
+        assert bars[-1]["vol_unit"] == "lot"
         # 缓存已覆盖写回（fetch_date=今天，rows 最新 bar=周二）
         cached = cu.get_cached(cu.CACHE_WEEKLY, "600036_SH")
         assert cached is not None
@@ -162,7 +162,7 @@ class TestWeeklyFreshnessD:
 
         # fresh 拉取生效（凌晨缓存不复用）→ 周线重聚合含周二
         assert bars[-1]["date"] == "2026-08-04"
-        assert bars[-1]["vol_unit"] == "share"
+        assert bars[-1]["vol_unit"] == "lot"
         assert any(c.kwargs.get("fresh") for c in mock_daily.call_args_list), (
             "D 闸必须以 fresh=True 触网取盘中最新日线"
         )
@@ -172,10 +172,11 @@ class TestWeeklyFreshnessD:
 
 
 class TestWeeklyVolumeUnitE:
-    """E-M1~E-M5 / E1 / E2 / E3：sina/mootdx 周线 ×100 归一到股；聚合路径不乘；旧缓存强制回源。"""
+    """E-M1~E-M5 / E1 / E2 / E3（2026-08-04 裁决回退）：sina/mootdx 周线=手不 ×100，
+    聚合路径=日线求和；旧缓存（"share"/无标记）强制回源重写为 lot=手。"""
 
-    def test_e1_sina_weekly_volume_x100_and_marker(self, sec, http, monkeypatch):
-        """sina 构造行 volume=84498.17（手）→ ×100 = 8449817.0（股），每根 bar 带 vol_unit。"""
+    def test_e1_sina_weekly_volume_no_mult_and_marker(self, sec, http, monkeypatch):
+        """sina 构造行 volume=84498.17（手）→ 保持原值（全源=手，不 ×100），每根 bar 带 vol_unit="lot"。"""
         # 旧格式缓存（无 vol_unit 标记）→ 触发强制回源
         _seed_weekly_cache("600036_SH", _make_weekly(_FRIDAYS, last_vol=84498.17), tagged=False)
         sina_bars = _make_weekly(_FRIDAYS, last_vol=84498.17)
@@ -192,17 +193,17 @@ class TestWeeklyVolumeUnitE:
         bars = light_data.fetch_weekly(sec, http, datalen=8)
 
         assert mock_sina.called  # 旧缓存无标记 → 强制回源
-        assert bars[-1]["volume"] == 84498.17 * 100 == pytest.approx(8449817.0)
-        assert all(b.get("vol_unit") == "share" for b in bars)
+        assert bars[-1]["volume"] == 84498.17  # 不乘，保持手数
+        assert all(b.get("vol_unit") == "lot" for b in bars)
         # 缓存已重写为带标记的新格式
         cached = cu.get_cached(cu.CACHE_WEEKLY, "600036_SH")
         assert cached is not None
         rows = cached.data["rows"]
-        assert rows[0].get("vol_unit") == "share"
-        assert rows[-1]["volume"] == pytest.approx(8449817.0)
+        assert rows[0].get("vol_unit") == "lot"
+        assert rows[-1]["volume"] == 84498.17
 
-    def test_e1b_mootdx_weekly_volume_x100_and_marker(self, sec, http, monkeypatch):
-        """mootdx 周线（查 Agent SUGGESTED 2）：volume=手 → ×100 归一到股，带 vol_unit 标记。"""
+    def test_e1b_mootdx_weekly_volume_no_mult_and_marker(self, sec, http, monkeypatch):
+        """mootdx 周线 volume=手 → 保持原值（不 ×100），带 vol_unit="lot" 标记。"""
         _seed_weekly_cache("600036_SH", _make_weekly(_FRIDAYS, last_vol=84498.17), tagged=False)
         monkeypatch.setattr(light_data, "_fetch_mins_fallback", MagicMock(return_value=None))
         mock_mootdx = MagicMock(return_value=_make_weekly(_FRIDAYS, last_vol=84498.17))
@@ -217,17 +218,17 @@ class TestWeeklyVolumeUnitE:
         bars = light_data.fetch_weekly(sec, http, datalen=8)
 
         assert mock_mootdx.called  # sina 空 → mootdx 分支生效
-        assert bars[-1]["volume"] == pytest.approx(8449817.0)
-        assert all(b.get("vol_unit") == "share" for b in bars)
+        assert bars[-1]["volume"] == 84498.17  # 不乘，保持手数
+        assert all(b.get("vol_unit") == "lot" for b in bars)
         cached = cu.get_cached(cu.CACHE_WEEKLY, "600036_SH")
-        assert cached.data["rows"][-1]["volume"] == pytest.approx(8449817.0)
+        assert cached.data["rows"][-1]["volume"] == 84498.17
 
     def test_e2_aggregate_path_not_multiplied(self, sec, http, monkeypatch):
-        """聚合路径（腾讯日线=股）不 ×100：周线 volume=日线逐日求和。"""
+        """聚合路径（日线=手）不 ×100：周线 volume=日线逐日求和，vol_unit="lot"。"""
         _seed_weekly_cache("600036_SH", _make_weekly(_FRIDAYS), tagged=False)
         monkeypatch.setattr(light_data, "_fetch_mins_fallback", MagicMock(return_value=None))
         monkeypatch.setattr(light_data, "_fetch_mins_mootdx", MagicMock(return_value=None))
-        # 最后一周量能 100+200+300+400+500=1500（股），其余周 500
+        # 最后一周量能 100+200+300+400+500=1500（手），其余周 500
         daily = (
             _make_daily(_DAILY_WEEK1, [100, 100, 100, 100, 100])
             + _make_daily(_DAILY_WEEK2, [100, 100, 100, 100, 100])
@@ -242,10 +243,10 @@ class TestWeeklyVolumeUnitE:
         assert bars[-1]["date"] == "2026-07-31"
         assert bars[-1]["volume"] == 1500.0  # 原值求和，未 ×100
         assert bars[-2]["volume"] == 500.0
-        assert all(b.get("vol_unit") == "share" for b in bars)
+        assert all(b.get("vol_unit") == "lot" for b in bars)
 
     def test_e3_tagged_cache_not_refetched(self, sec, http, monkeypatch):
-        """新格式缓存（首根 bar 带 vol_unit="share"）→ 不触发回源。"""
+        """新格式缓存（首根 bar 带 vol_unit="lot"）→ 不触发回源。"""
         seeded = _make_weekly(_FRIDAYS, last_vol=500.0)
         _seed_weekly_cache("600036_SH", seeded, tagged=True)
         mock_sina = MagicMock(return_value=_make_weekly(_FRIDAYS, last_vol=1.0))

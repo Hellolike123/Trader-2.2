@@ -91,8 +91,9 @@ P-M4 为防止「全序列索引进子窗越界」把子窗 ctx 中的 `sc_ancho
   tushare 一致。FDE 轮基于「腾讯日线=股」把周线 sina/mootdx 出口 ×100（=股），
   与日线（手）形成跨周期绝对值 100× 差异（周线聚合路径 E-M2 不乘，反而仍是手）。
 - 本轮按 A-M1「以源码/协议证据为准」跳过日线 fallback 的 ×100（避免反向制造失真），
-  vol_unit 打 "lot"（手）。**周线 ×100 的存废**（改回手 = 与日线一致 / 维持股）涉及 FDE
-  合同（A-P4 冻结），建议下轮单独裁决，并同步复核 `test_light_data_weekly.py` E 组断言。
+  vol_unit 打 "lot"（手）。**周线 ×100 的存废**——**已裁决（2026-08-04）：回退 ×100**，
+  周线全路径（sina/mootdx 出口 + 日线聚合）统一=手，`vol_unit="lot"`；E/D 组测试断言
+  已同步改为「不乘 + lot」（法源：`docs/plans/2026-08-04-weekly-vol-unit-adjudication.md`）。
 
 ## 3. 交付物
 
