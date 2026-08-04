@@ -152,3 +152,104 @@ class TestNoContradictionC:
         # 输出契约字段存在（供渲染/下游消费）
         assert "distribution_confirmed" in r
         assert "sos_kind" in r
+
+
+# ── §11.1 南网标本端到端复现（合成数据，不依赖缓存 / 不触网）──────────────
+# 交接 §0 标本：高位派发(55)→崩盘 SC 37.80→AR 42.99→横盘 TR 41.5~44.5→08-03 放量
+# 突破 45.50。正确判定 = TR 亮 + SOS(thrust) 亮 + 吸筹链 SC→AR + 不误报派发。
+# 注：日线缓存止于 07-31（缺 08-03 突破日），故用合成数据补齐 §11.1 的端到端断言
+# （C-M5：缓存不可断的场景在合成测例中显式标注）。
+
+
+def _nanwang_breakout_bars() -> list[dict]:
+    import datetime as _dt
+
+    def _day(i: int) -> str:
+        return (_dt.date(2026, 5, 1) + _dt.timedelta(days=i)).strftime("%Y-%m-%d")
+
+    bars = []
+    for i in range(10):
+        bars.append({"date": _day(i), "open": 54.0, "high": 55.06, "low": 53.5,
+                     "close": 54.5, "volume": 1_000_000})
+    # 崩盘 3 根 → SC 37.80
+    bars.append({"date": _day(10), "open": 54.5, "high": 55.06, "low": 50.0,
+                 "close": 50.5, "volume": 8_000_000})
+    bars.append({"date": _day(11), "open": 50.5, "high": 50.8, "low": 42.0,
+                 "close": 43.0, "volume": 9_000_000})
+    bars.append({"date": _day(12), "open": 43.0, "high": 43.5, "low": 37.8,
+                 "close": 38.5, "volume": 10_000_000})  # SC 37.80
+    bars.append({"date": _day(13), "open": 38.5, "high": 42.99, "low": 38.0,
+                 "close": 42.5, "volume": 5_000_000})  # AR 42.99
+    for i in range(12):  # 短横盘 41.5~44.5（<20 根 → TR fallback）
+        c = 43.0 if i % 2 == 0 else 43.4
+        bars.append({"date": _day(14 + i), "open": 43.2, "high": 44.5, "low": 41.5,
+                     "close": c, "volume": 4_700_000})
+    bars.append({"date": _day(26), "open": 43.0, "high": 47.92, "low": 42.66,
+                 "close": 45.50, "volume": 90_000_000})  # 08-03 式放量突破
+    return bars
+
+
+class TestNanwangSpecimenS11:
+    """交接 §11.1 端到端：合成南网标本（TR/SOS/dist/吸筹链）。"""
+
+    def test_end_to_end_specimen(self):
+        bars = _nanwang_breakout_bars()
+        r = wyckoff_analysis(
+            bars, symbol="688248", timeframe="daily",
+            use_persisted_phase=False, use_persisted_phase_a_anchor=False,
+        )
+        # ✅ TR 亮出（≈41.5~44.5，不再 None）—— Bug B 修复生效
+        assert r.get("tr_quality") is not None
+        assert r.get("tr_lower") is not None and r.get("tr_upper") is not None
+        assert abs(float(r["tr_lower"]) - 41.5) < 1.0
+        assert abs(float(r["tr_upper"]) - 44.5) < 1.0
+        # ✅ SOS 灯亮（单日爆发型 thrust，sos_price≈45.50）—— Bug A 修复生效
+        assert r.get("sos_signal") is True
+        assert r.get("sos_kind") == "thrust"
+        assert "单日爆发" in str(r.get("sos_reason") or "")
+        assert abs(float(r.get("sos_price") or 0) - 45.50) < 0.5
+        # ✅ distribution_confirmed=False（不再错误的派发确认）—— Bug C 修复生效
+        assert r.get("distribution_confirmed") is False
+        # ✅ 吸筹链：SC(37.80)→AR(42.99)
+        assert r.get("sc_signal") is True
+        assert r.get("ar_signal") is True
+        assert r.get("accumulation_confirmed") is False  # 簇未走完整确认链（无误报）
+        # ✅ 阶段机消费同一结构：accumulation_a
+        assert r.get("phase") == "accumulation_a"
+
+
+class TestClusterResetsAfterScS11:
+    """交接 §11.4：簇确认在 SC 之后旧派发事件（UT/SOW）应失效。"""
+
+    def test_dist_cluster_before_sc_is_reset(self):
+        import datetime as _dt
+
+        def _day(i):
+            return (_dt.date(2026, 4, 1) + _dt.timedelta(days=i)).strftime("%Y-%m-%d")
+
+        bars = []
+        # 高位段（派发背景）
+        for i in range(15):
+            bars.append({"date": _day(i), "open": 54.0, "high": 55.0, "low": 53.5,
+                         "close": 54.5, "volume": 1_000_000})
+        # 派发簇：UT（上冲回落）+ 崩盘 SOW（放量跌破）—— 都发生在 SC 之前
+        bars.append({"date": _day(15), "open": 54.5, "high": 56.0, "low": 53.8,
+                     "close": 54.0, "volume": 3_000_000})  # UT 上冲回落
+        bars.append({"date": _day(16), "open": 54.0, "high": 54.2, "low": 50.0,
+                     "close": 50.5, "volume": 8_000_000})  # SOW 放量跌破
+        # SC（崩盘低点）—— 在此之后的新行情
+        bars.append({"date": _day(17), "open": 50.5, "high": 50.8, "low": 37.8,
+                     "close": 38.5, "volume": 10_000_000})
+        # 横盘吸筹（无新派发事件）
+        for i in range(30):
+            c = 41.5 + (i % 5)
+            bars.append({"date": _day(18 + i), "open": c + 0.3, "high": c + 1.0,
+                         "low": c - 0.8, "close": c, "volume": 2_000_000})
+        r = wyckoff_analysis(
+            bars, symbol="600519", timeframe="daily",
+            use_persisted_phase=False, use_persisted_phase_a_anchor=False,
+        )
+        # SC 之后旧派发事件失效 → 不得确认派发
+        assert r.get("distribution_confirmed") is False, (
+            "SC 之后的簇确认不得拿 SC 前的 UT/SOW 确认派发（Bug C 修复）"
+        )

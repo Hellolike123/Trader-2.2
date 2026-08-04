@@ -825,3 +825,34 @@ def test_upthrust_premature_half_score():
     u_prem = calculate_wyckoff_score(b, analysis=_fa_upthrust(tr_quality=0.5, upthrust_premature=True))
     assert u_norm["raw"] < u_prem["raw"], "过早 UT 减半应使 raw 偏上（看空力度减弱）"
     assert any("降权" in s for s in u_prem["signals"]), "过早 UT 应有降权标注"
+
+
+# ── Bug B fallback：下跌→横盘→突破不再 None（wyckoff-sos-修复交接说明 §2 / §11.4）────
+def test_tr_fallback_on_crash_sideways_breakout():
+    """高位派发→崩盘(SC)→短横盘(<20 根)→突破：主路径回溯振幅超限失败，
+    fallback 末端对齐滑窗补出 TR（tr_fallback=True），不再 None。
+
+    对应交接 §11.4 单元级：构造「下跌→横盘→突破」序列验证 _detect_trading_range 不 None。
+    """
+    bars = []
+    for _ in range(10):
+        bars.append(mk(54.0, 55.06, 53.5, 54.5, 1_000_000))
+    bars.append(mk(54.5, 55.06, 50.0, 50.5, 8_000_000))
+    bars.append(mk(50.5, 50.8, 42.0, 43.0, 9_000_000))
+    bars.append(mk(43.0, 43.5, 37.8, 38.5, 10_000_000))  # SC 37.80
+    bars.append(mk(38.5, 42.99, 38.0, 42.5, 5_000_000))  # AR 42.99
+    for i in range(12):
+        c = 43.0 if i % 2 == 0 else 43.4
+        bars.append(mk(43.2, 44.5, 41.5, c, 4_700_000))  # 短横盘 41.5~44.5
+    bars.append(mk(43.0, 47.92, 42.66, 45.50, 90_000_000))  # 突破 45.50
+
+    tr = we._detect_trading_range(bars)
+    assert tr is not None, "下跌→横盘→突破 不得再 None（Bug B fallback）"
+    assert tr.get("tr_fallback") is True, "主路径失败应走 fallback"
+    assert tr["tr_lower"] < tr["tr_upper"]
+    assert 6.0 <= tr["tr_amplitude_pct"] <= 30.0
+    # 交接 §0 期望：TR ≈ 41.5~44.5
+    assert abs(tr["tr_lower"] - 41.5) < 1.0
+    assert abs(tr["tr_upper"] - 44.5) < 1.0
+    # 突破根超出上沿 → in_tr=False 属预期（区间识别仍成立）
+    assert tr["in_tr"] is False
