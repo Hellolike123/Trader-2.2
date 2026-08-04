@@ -189,14 +189,15 @@ class TestBuyingClimaxRetroScan:
         assert r2["bc_signal"] is True, r2["bc_reason"]
 
     def test_bc_rejected_low_vol_ratio(self):
-        """H5：量比 1.4（<1.5）→ 拒（护栏不变）。"""
+        """H5：量比 1.4（<1.5）→ 拒（量比护栏单独验证，pos/滞涨/上影分支均满足）。"""
         from trader_shared.wyckoff_events import _detect_buying_climax
 
         bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
-        # 顶部日：+0.5% 滞涨、高位，但量比 1.4
-        bars.append(_make_bar(100.0, 102.0, 98.0, 100.5, 140))
+        # 顶部日：+0.96% 滞涨、高位 pos≈0.95、上影比 0.20（各触发分支都满足），
+        # 唯独量比 140/100=1.4 < 1.5 → 只能量比闸拒
+        bars.append(_make_bar(104.0, 105.5, 103.0, 105.0, 140))
         r = _detect_buying_climax(bars)
-        assert r["bc_signal"] is False
+        assert r["bc_signal"] is False, r["bc_reason"]
 
     def test_bc_rejected_low_position_high_volume(self):
         """H5b：低位天量 → 拒（_is_bc_high_position 护栏不变）。"""
@@ -427,6 +428,8 @@ class TestEventClusterBugCG:
     """Bug C：旧派发簇污染；Bug G：phase_a failed 作废簇。"""
 
     def test_sc_resets_pre_sc_distribution(self, monkeypatch):
+        """统一锚后（I-M3）：簇 SC 重置锚来自完整序列 _find_sc_anchor，不再滑窗重算。
+        SC 之后的 UT/SOW 才参与簇；SC 之前/同棒事件作废。"""
         from trader_shared import wyckoff_events as we
 
         bars = [_make_bar(10, 11, 9, 10, 100) for _ in range(40)]
@@ -437,10 +440,26 @@ class TestEventClusterBugCG:
                 return 5, {"upthrust_signal": True, "upthrust_strength": "ordinary"}
             if name == "_detect_sign_of_weakness":
                 return 12, {"sow_signal": True}
-            if name == "_detect_selling_climax":
-                return 20, {"sc_signal": True}  # SC 在 UT/SOW 之后 → 旧派发作废
             return -1, None
 
+        # 统一锚：SC 在 idx=20（UT@5 / SOW@12 之前）→ 旧派发事件全部作废
+        monkeypatch.setattr(
+            we,
+            "_find_sc_anchor",
+            lambda *a, **k: {
+                "sc_bar_idx": 20,
+                "sc_low": 9.0,
+                "sc_close": 10.0,
+                "sc_avg_vol": 100.0,
+                "vol_ratio": 2.0,
+                "change_pct": -3.0,
+                "pos": 0.1,
+                "cur_high": 10.0,
+                "cur_open": 10.5,
+                "anchor_bars": 40,
+                "search_mode": "cold_start",
+            },
+        )
         monkeypatch.setattr(we, "_scan_last_event", fake_scan)
         r = we._detect_event_cluster(bars)
         assert r["distribution_confirmed"] is False
