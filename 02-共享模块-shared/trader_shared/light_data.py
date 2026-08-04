@@ -1307,6 +1307,40 @@ def ensure_bars_ascending(
     return rows, rewritten
 
 
+# ── A 方向：日线 volume 单位审计（wyckoff-epic-vol-phase-verif-handoff §1 方向 A / §2）──
+# 结论（以源码 + 协议 + 实测证据为准；handoff A-M1「以源码/协议证据为准」条款）：
+#   腾讯日线 kline（web.ifzq.gtimg.cn/appstock/app/fqkline/get 的 qfqday）、
+#   sina getKLineData scale=240、mootdx/pytdx3（通达信协议）、tushare 日线 ——
+#   volume 单位均为「手」（lot），不存在「腾讯=股、fallback=手」的跨源差异。
+#   实测证据：
+#     1) amount 交叉验证（amount ≈ volume × 100 × close，偏差 <3%）：
+#        000001 / 600519 / 300750 / 000858 / 600036 / 601318 / 688248 等缓存日线
+#        （mootdx/tushare 源）全部满足「手」，无一满足「股」；
+#     2) 腾讯实时 qfqday 与 amount 已确认=手的 mootdx 缓存同量级：
+#        601398 08-03 腾讯 vol=5,128,943 ≈ 缓存 07-24 3,689,522；
+#        600519 08-03 腾讯 vol=36,147 ≈ 缓存 07-31 55,127；
+#        000001 08-04 腾讯 vol=1,221,130 ≈ 缓存 07-31 2,024,978。
+#   故 A-M1 的「fallback ×100 归一到股」会**反向制造** 100× 失真（fallback 变股、
+#   腾讯仍手）——跳过 ×100，各源天然一致；仅按 A-M2 补自描述标记。
+#   vol_unit 取值按实际单位（lot=手）而非 handoff 字面 "share"（后者基于「腾讯=股」
+#   的错误前提；标 "share" 会让未来消费者对 手 值误乘 100）。
+#   注：FDE 轮周线 sina/mootdx 出口 ×100（=股）与日线（=手）的跨周期绝对值差异，
+#   是 FDE 轮基于同一错误前提的遗留；超本轮范围（A-P4 不改周线）→
+#   见 workflows/phase-scan-audit/ 报告 §方向A-遗留。
+_DAILY_VOL_UNIT = "lot"  # 日线各源统一 volume 单位（手 = 100 股）
+
+
+def _stamp_vol_unit(bars: list[dict[str, Any]], unit: str) -> list[dict[str, Any]]:
+    """给每根 bar 打 ``vol_unit`` 自描述标记（写缓存/返回前；与周线 E-M2 同风格）。
+
+    只做标记、不做数值换算；换算决策见上方 _DAILY_VOL_UNIT 审计注释。
+    """
+    for bar in bars:
+        if isinstance(bar, dict):
+            bar["vol_unit"] = unit
+    return bars
+
+
 def _fetch_daily_sina(sec: Security, days: int = 300) -> list[dict[str, Any]] | None:
     """Fetch daily K-line from Sina API as fallback when Tencent fails.
 
@@ -1500,6 +1534,10 @@ def _fetch_qfq_daily_raw(
         result = retry(do_fetch)
         _circuit_tencent_daily.record_success()
         _compute_atr_fields(result)
+        # A-M2：腾讯成功路径写缓存/返回前每根 bar 打 vol_unit 标记（日线各源=手）。
+        # 腾讯主路径 volume 数值不改（A-P1）；标记仅自描述，旧缓存（无标记）读取
+        # 行为不变（A-P2，无强制失效）。
+        _stamp_vol_unit(result, _DAILY_VOL_UNIT)
         # 是否覆盖「应有最新交易日」：用 trading_context，勿比墙钟日历日
         _dates = [b.get("date") for b in result if b.get("date")]
         _latest_date = max(_dates) if _dates else None
@@ -1542,15 +1580,19 @@ def _fetch_qfq_daily_raw(
         _circuit_tencent_daily.record_failure()
 
     # Fallback: Sina daily bars (scale=240 = daily)
+    # A-M1（实测修正）：sina 日线与腾讯日线同单位=手（getKLineData 同周线接口，
+    # FDE 轮已证 sina 周线=手），**不 ×100**——×100 会把 fallback 变股、与腾讯（手）
+    # 制造 100× 失真；仅补 vol_unit 标记。
     sina_bars = _fetch_daily_sina(sec, days)
     if sina_bars:
         for bar in sina_bars:
             bar["data_source"] = "sina"
             bar["data_status"] = "partial"
         _compute_atr_fields(sina_bars)
-        return sina_bars
+        return _stamp_vol_unit(sina_bars, _DAILY_VOL_UNIT)
 
     # Fallback: pytdx3
+    # A-M1（实测修正）：通达信协议 vol=手，与腾讯同单位 → 不 ×100，仅打标。
     if _check_pytdx3():
         tdx3_bars = _fetch_qfq_tdx3(sec, days)
         if tdx3_bars is not None:
@@ -1558,16 +1600,18 @@ def _fetch_qfq_daily_raw(
                 bar["data_source"] = "pytdx3"
                 bar["data_status"] = "full"
             _compute_atr_fields(tdx3_bars)
-            return tdx3_bars
+            return _stamp_vol_unit(tdx3_bars, _DAILY_VOL_UNIT)
 
     # Fallback: mootdx
+    # A-M1（实测修正）：通达信协议 vol=手（amount 交叉验证 000001/600519/300750
+    # 均≈vol×100×close），与腾讯同单位 → 不 ×100，仅打标。
     mootdx_bars = _fetch_qfq_mootdx(sec, days)
     if mootdx_bars is not None:
         for bar in mootdx_bars:
             bar["data_source"] = "mootdx"
             bar["data_status"] = "full"
         _compute_atr_fields(mootdx_bars)
-        return mootdx_bars
+        return _stamp_vol_unit(mootdx_bars, _DAILY_VOL_UNIT)
 
     # 全源失败，返回空列表（避免下游 bars[-1] 炸 TypeError）
     return []
