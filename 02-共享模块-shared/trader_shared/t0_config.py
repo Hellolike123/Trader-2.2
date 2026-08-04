@@ -15,8 +15,8 @@ ZONE_MAX_WIDTH_PCT: float = 0.008
 ZONE_AMPLITUDE_FACTOR: float = 0.10
 ZONE_MIN_WIDTH_PCT: float = 0.005        # 区间宽度下限，防止低价股区间过窄
 DEFAULT_ZONE_WIDTH_PCT: float = 0.005
-BUY_CONFIRM_FACTOR: float = 1.002
-SELL_CONFIRM_FACTOR: float = 0.998
+BUY_CONFIRM_FACTOR: float = 0.998
+SELL_CONFIRM_FACTOR: float = 1.002
 BUY_ACCEPT_FACTOR: float = 1.003
 SELL_ACCEPT_FACTOR: float = 0.997
 # 动态滑点：低量比时收窄，高量比时放宽
