@@ -34,7 +34,7 @@ def _sample_plan() -> dict:
             "sc_signal": True,
             "ar_signal": True,
             "secondary_test_sc_signal": True,
-            # 样例只亮广义 ST；Spring 确认另测（禁止与 ST 二次测试并灌）
+            # 样例只亮广义 ST；Spring 确认另测（禁止与 ST（SC区回测）并灌）
             "st_signal": False,
             "spring_test_signal": False,
             "lps_signal": True,
@@ -352,7 +352,7 @@ def test_sb1_default_slim_skeleton_no_long_blocks():
     lines = text.splitlines()
     assert lines[:4] == [
         "测试股（600000）｜现价 10.50",
-        "周线：偏多｜SC后反弹，雏形 8.00～12.00（待 ST）｜慎做",
+        "周线：偏多｜SC后反弹，雏形 8.00～12.00（待SC区回测）｜慎做",
         "日线本波：Phase C · 试盘｜LPS 修复｜箱体 9.50～11.00",
         "入池：建议入池（日线已见 LPS/SOS，周线非偏空）",
     ]
@@ -444,10 +444,10 @@ def test_sb5_change_folded_unless_new_or_gone():
     assert "🔔 变化" not in render_wyckoff_slim(still_only)
 
     changed = _sample_plan()
-    changed["change_line"] = "新亮：周AR（自动反弹）｜仍亮：SC（卖力高潮）｜熄灭：日ST（二次测试）"
+    changed["change_line"] = "新亮：周AR（自动反弹）｜仍亮：SC（卖力高潮）｜熄灭：日ST（SC区回测）"
     text = render_wyckoff_slim(changed)
     assert "🔔 变化" in text
-    assert "新亮：周AR（自动反弹）；熄灭：日ST（二次测试）" in text
+    assert "新亮：周AR（自动反弹）；熄灭：日ST（SC区回测）" in text
     assert "仍亮：" not in text
 
 
@@ -498,7 +498,7 @@ def test_sb9_failed_slim_resets_next_watch_without_healthy_gap():
 def test_sb28_overview_writes_proto_prices_and_failed_anchor_ref():
     """S-B28：总览写出雏形价；failed 写旧SC仅对照，不写健康箱体。"""
     text = render_wyckoff_slim(_sample_plan())
-    assert "周线：偏多｜SC后反弹，雏形 8.00～12.00（待 ST）｜慎做" in text
+    assert "周线：偏多｜SC后反弹，雏形 8.00～12.00（待SC区回测）｜慎做" in text
     failed = render_wyckoff_slim(_failed_phase_a_plan())
     daily = failed.split("⚡ 日线 · 本波", 1)[1].split("🔮 推演", 1)[0]
     assert "旧SC 9.50（仅对照）" in daily
@@ -796,7 +796,7 @@ def test_wd5_lights_bullet_cn_and_price():
     text = render_wyckoff_detail(_sample_plan())
     assert "● SC（卖力高潮）9.50" in text
     assert "● AR（自动反弹）11.00" in text
-    assert "● ST（二次测试）9.60" in text
+    assert "● ST（SC区回测）9.60" in text
     assert "● LPS（最后支撑点）10.20" in text
     assert "○ SOS（强势信号）未亮" in text
     # 一行一灯：每个 ●/○ 独占一行
@@ -807,9 +807,9 @@ def test_wd5_lights_bullet_cn_and_price():
 
 
 def test_p0_spring_confirm_not_labeled_as_st_secondary_test():
-    """P0：Spring 确认不得渲染成 ST（二次测试）。
+    """P0：Spring 确认不得渲染成 ST（SC区回测）。
 
-    法源：phase-a §4.4.2 禁止改名；slim-b §4.4 ST=二次测试 / Spring=弹簧确认；
+    法源：phase-a §4.4.2 禁止改名；slim-b §4.4 ST=SC区回测 / Spring=弹簧确认；
     tr-maturity：广义 ST 与 spring_test 分离。
     """
     plan = _sample_plan()
@@ -846,8 +846,8 @@ def test_p0_spring_confirm_not_labeled_as_st_secondary_test():
     plan["chain_plain"] = "威：Spring确认，还差SC"
 
     slim = render_wyckoff_slim(plan)
-    assert "○ ST（二次测试）" in slim
-    assert "● ST（二次测试）" not in slim
+    assert "○ ST（SC区回测）" in slim
+    assert "● ST（SC区回测）" not in slim
     assert "● Spring（弹簧确认）29.03" in slim
     assert "ST 已现" not in slim
     assert "Spring 确认" in slim
@@ -855,13 +855,13 @@ def test_p0_spring_confirm_not_labeled_as_st_secondary_test():
     assert "Spring（弹簧确认），待 SC（卖力高潮）" in slim
 
     detail = render_wyckoff_detail(plan)
-    assert "○ ST（二次测试）未亮" in detail or "○ ST（二次测试）" in detail
-    assert "● ST（二次测试）" not in detail
+    assert "○ ST（SC区回测）未亮" in detail or "○ ST（SC区回测）" in detail
+    assert "● ST（SC区回测）" not in detail
     assert "● Spring（弹簧确认）29.03" in detail
 
 
 def test_wd5_secondary_test_sc_lights_st_without_st_signal():
-    """W-D5：详析灯认 secondary_test_sc 为 ST（二次测试）；链槽不进（W-02）。"""
+    """W-D5：详析灯认 secondary_test_sc 为 ST（SC区回测）；链槽不进（W-02）。"""
     # 链提取：广义 ST 不进链 ST 槽（phase-a §4.4.2）
     only_st_sc = {
         "sc_signal": True,
@@ -876,7 +876,7 @@ def test_wd5_secondary_test_sc_lights_st_without_st_signal():
 
     # 仅 phase 字样、无事件 → 不亮
     phase_only = {
-        "phase_label": "二次测试",
+        "phase_label": "SC区回测",
         "sc_signal": False,
         "ar_signal": False,
         "st_signal": False,
@@ -887,7 +887,7 @@ def test_wd5_secondary_test_sc_lights_st_without_st_signal():
     }
     assert extract_accum_events(phase_only) == []
 
-    # 详析：L2 箱 + secondary_test_sc → ST●（二次测试，非 Spring确认）
+    # 详析：L2 箱 + secondary_test_sc → ST●（SC区回测，非 Spring确认）
     plan = _sample_plan()
     plan["daily_raw"]["st_signal"] = False
     plan["daily_raw"]["spring_test_signal"] = False
@@ -896,7 +896,7 @@ def test_wd5_secondary_test_sc_lights_st_without_st_signal():
     plan["daily_view"]["active_events"] = ["sc", "ar", "secondary_test_sc"]
     plan["daily_view"]["event_detail"].pop("lps", None)
     text = render_wyckoff_detail(plan)
-    assert "● ST（二次测试）9.60" in text
+    assert "● ST（SC区回测）9.60" in text
     assert "○ LPS（最后支撑点）未亮" in text
 
 
@@ -1296,3 +1296,52 @@ def test_render_warn_does_not_change_output():
     baseline["daily_raw"]["accumulation_confirmed"] = False  # 去掉矛盾条件，输出应不变
     for render in (render_wyckoff_card, render_wyckoff_slim, render_wyckoff_detail):
         assert render(contradictory) == render(baseline)
+
+
+class TestStScNoteS11:
+    """ST 双口径修复单（2026-08-05）改动3：ST（SC区回测）未亮 + Spring 确认亮 →
+    追加说明行；ST 亮或双未亮 → 无说明行。"""
+
+    def _raw_st(self, st: bool, spring: bool, sc_price: float = 9.5) -> dict:
+        return {
+            "secondary_test_sc_signal": st,
+            "spring_test_signal": spring,
+            "sc_signal": True,
+            "sc_low": sc_price,
+            "ar_signal": True,
+            "ar_high": 11.0,
+            "phase_a_range": {"status": "established", "sc_low": sc_price, "ar_high": 11.0},
+            "tr_upper": 12.0, "tr_lower": 8.0,
+        }
+
+    def test_st_off_spring_on_adds_note(self):
+        """ST 未亮 + Spring 亮（南网 688248 场景）→ slim 灯含说明行。"""
+        from trader_shared.wyckoff_render import (
+            _format_daily_lights, _format_slim_full_lights,
+        )
+        raw = self._raw_st(st=False, spring=True)
+        view = {"bias": "bullish", "active_events": ["sc", "ar", "spring_test", "sos"]}
+        slim = _format_slim_full_lights(("SC", "AR", "ST", "LPS", "SOS"), view, raw)
+        daily = _format_daily_lights(view, raw)
+        for lines in (slim, daily):
+            assert any("注：ST=SC区回测" in ln for ln in lines), lines
+            assert any("○ ST（SC区回测）" in ln for ln in lines), lines
+            assert any("● Spring（弹簧确认）" in ln for ln in lines), lines
+
+    def test_st_on_no_note(self):
+        """广义 ST 已亮 → ● ST（SC区回测），无说明行。"""
+        from trader_shared.wyckoff_render import _format_daily_lights
+        raw = self._raw_st(st=True, spring=False)
+        view = {"bias": "neutral", "active_events": ["sc", "ar", "secondary_test_sc"]}
+        lines = _format_daily_lights(view, raw)
+        assert any("● ST（SC区回测）" in ln for ln in lines), lines
+        assert not any("注：ST=SC区回测" in ln for ln in lines), lines
+
+    def test_both_off_no_note(self):
+        """ST/Spring 双未亮 → 无说明行（全链最弱样本）。"""
+        from trader_shared.wyckoff_render import _format_daily_lights
+        raw = self._raw_st(st=False, spring=False)
+        view = {"bias": "neutral", "active_events": ["sc", "ar"]}
+        lines = _format_daily_lights(view, raw)
+        assert any("○ ST（SC区回测）" in ln for ln in lines), lines
+        assert not any("注：ST=SC区回测" in ln for ln in lines), lines

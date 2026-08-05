@@ -29,7 +29,7 @@ _BIAS_CN = {
 _EVENT_CN: dict[str, str] = {
     "SC": "卖力高潮",
     "AR": "自动反弹",
-    "ST": "二次测试",
+    "ST": "SC区回测",
     "Spring": "弹簧确认",
     "SpringTest": "弹簧确认",
     "LPS": "最后支撑点",
@@ -273,7 +273,7 @@ def _range_phrase(view: dict[str, Any], raw: dict[str, Any]) -> str:
     lo, hi = _phase_a_bounds(raw)
     if mode == "proto" or maturity == "L1":
         if lo is not None and hi is not None:
-            phrase = f"雏形 下沿{_fmt_price(lo)}／上沿{_fmt_price(hi)}（待 ST）"
+            phrase = f"雏形 下沿{_fmt_price(lo)}／上沿{_fmt_price(hi)}（待SC区回测）"
         elif lo is not None:
             phrase = f"雏形 下沿{_fmt_price(lo)}（上沿未出）"
         else:
@@ -531,6 +531,9 @@ def _format_daily_lights(view: dict[str, Any], raw: dict[str, Any]) -> list[str]
     lines = [
         _format_lamp_line(code, lit=(code in lit), view=view, raw=raw) for code in ACCUM_CHAIN
     ]
+    # ST（SC区回测）未亮但 Spring 确认已亮 → 二次测试已完成，防误读（2026-08-05 ST双口径修复单 改动3）
+    if "ST" not in lit and _spring_confirm_lit(raw, view):
+        lines.append("（注：ST=SC区回测，强势吸筹可不回测；二次测试已完成＝看Spring确认灯）")
     for code in _extra_lit_codes(raw, view):
         lines.append(_format_lamp_line(code, lit=True, view=view, raw=raw))
     return lines
@@ -581,7 +584,7 @@ def _slim_range_phrase(view: dict[str, Any], raw: dict[str, Any]) -> str:
     lo, hi = _phase_a_bounds(raw)
     if mode == "proto" or maturity == "L1":
         if lo is not None and hi is not None:
-            phrase = f"雏形 {_fmt_price(lo)}～{_fmt_price(hi)}（待 ST）"
+            phrase = f"雏形 {_fmt_price(lo)}～{_fmt_price(hi)}（待SC区回测）"
         elif lo is not None:
             phrase = f"雏形 {_fmt_price(lo)}（上沿未出）"
         else:
@@ -1061,10 +1064,13 @@ def _format_slim_full_lights(
             lines.append(f"● {code}（{_cn(code)}）{px_s if px_s else ''}")
         else:
             lines.append(f"○ {code}（{_cn(code)}）")
-    # 吸筹五灯之外：Spring 确认另灯，禁止并进 ST（二次测试）
+    # 吸筹五灯之外：Spring 确认另灯，禁止并进 ST（SC区回测）
     if chain == tuple(ACCUM_CHAIN) and _spring_confirm_lit(raw, view):
         px_s = _fmt_price(_event_price_from_sources("Spring", view=view, raw=raw))
         lines.append(f"● Spring（{_cn('Spring')}）{px_s if px_s else ''}")
+        # ST（SC区回测）未亮但 Spring 确认已亮 → 二次测试已完成，防误读（2026-08-05 ST双口径修复单 改动3）
+        if not _slim_code_lit("ST", view, raw):
+            lines.append("（注：ST=SC区回测，强势吸筹可不回测；二次测试已完成＝看Spring确认灯）")
     return lines
 
 
@@ -1159,7 +1165,7 @@ def _slim_weekly_stage_short(view: dict[str, Any], raw: dict[str, Any]) -> str:
         # L1 雏形有价就写进总览，方便对照（非成熟箱体）
         if "雏形" in range_head or "箱体" in range_head:
             return f"SC后反弹，{range_head}"
-        return "SC后反弹，雏形待 ST"
+        return "SC后反弹，雏形待SC区回测"
     if "SC" in lit:
         if "雏形" in range_head:
             return f"SC 已亮，{range_head}"
