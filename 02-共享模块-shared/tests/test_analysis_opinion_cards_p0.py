@@ -102,7 +102,7 @@ def test_a04_chip_no_peaks_no_pct_empty():
 
 
 def test_a05_chip_price_below_all_peaks_scheme_c():
-    """A-05: 跌穿成本区 → 支撑弱 · 阻力 · 套牢面大。"""
+    """A-05: 跌穿成本区 → 下方难撑；trapped_tag 仍保留供策略，summary 不写套牢面。"""
     card = build_chip_card(
         41.63,
         [
@@ -113,9 +113,10 @@ def test_a05_chip_price_below_all_peaks_scheme_c():
         9.0,
     )
     assert card["has_data"] is True
-    assert "支撑弱" in card["support_tag"] or "支撑弱" in card["summary_line"]
+    assert "下方难撑" in card["support_tag"] or "下方难撑" in card["summary_line"]
     assert card["resist_px"] == pytest.approx(44.4)
-    assert "套牢面大" in card["trapped_tag"] or "套牢面大" in card["summary_line"]
+    assert card.get("trapped_tag") == "多数套牢"
+    assert "多数套牢" not in str(card.get("summary_line") or "")
     assert card["summary_line"].startswith("筹码：")
     assert " · " in card["summary_line"]
     assert_card_numeric_finite(card)

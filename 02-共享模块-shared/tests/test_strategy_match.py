@@ -127,7 +127,7 @@ def test_s01_block_new_no_position_entry_not_active():
 
 
 def test_s02_sow_support_weak_veto_entry():
-    """S-02: SOW + 支撑弱 → defense 否决 entry active。"""
+    """S-02: SOW + 下方难撑 → defense 否决 entry active。"""
     r = match_strategies({
         "current": 41.0,
         "has_position": False,
@@ -135,7 +135,7 @@ def test_s02_sow_support_weak_veto_entry():
         "checklist_all_green": True,
         "wyckoff_event": "SOW",
         "chip_support_weak": True,
-        "chip_trapped_tag": "套牢面大",
+        "chip_trapped_tag": "多数套牢",
         "chan_type_short": "一买",
         "chan_type_raw": "一类买",
     })

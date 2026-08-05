@@ -8,53 +8,57 @@ from unittest.mock import patch, MagicMock
 
 # ── fund_flow_data ──────────────────────────────────────────────────
 
-class TestSecidMapping:
+class TestSinaDaimaMapping:
     def test_shanghai_code(self):
-        from trader_shared.fund_flow_data import _secid
-        assert _secid("688248.SH") == "1.688248"
-        assert _secid("600000.SH") == "1.600000"
+        from trader_shared.fund_flow_data import _sina_daima
+        assert _sina_daima("688248.SH") == "sh688248"
+        assert _sina_daima("600000.SH") == "sh600000"
 
     def test_shenzhen_code(self):
-        from trader_shared.fund_flow_data import _secid
-        assert _secid("000001.SZ") == "0.000001"
-        assert _secid("300001.SZ") == "0.300001"
+        from trader_shared.fund_flow_data import _sina_daima
+        assert _sina_daima("000001.SZ") == "sz000001"
+        assert _sina_daima("300001.SZ") == "sz300001"
 
     def test_no_suffix_shanghai(self):
-        from trader_shared.fund_flow_data import _secid
-        assert _secid("688248") == "1.688248"
-        assert _secid("600000") == "1.600000"
+        from trader_shared.fund_flow_data import _sina_daima
+        assert _sina_daima("688248") == "sh688248"
+        assert _sina_daima("600000") == "sh600000"
 
     def test_no_suffix_shenzhen(self):
-        from trader_shared.fund_flow_data import _secid
-        assert _secid("000001") == "0.000001"
-        assert _secid("300001") == "0.300001"
+        from trader_shared.fund_flow_data import _sina_daima
+        assert _sina_daima("000001") == "sz000001"
+        assert _sina_daima("300001") == "sz300001"
 
 
-class TestParseFflowKlines:
-    """东财 daykline 行解析（元→万元），不依赖网络。"""
+class TestSinaFundFlowHelpers:
+    """新浪资金流辅助：代码映射 + 元转万元，不依赖网络。"""
 
-    def test_parse_line_yuan_to_wan(self):
-        from trader_shared.fund_flow_data import _parse_fflow_kline_line
-        # 主力1000万=1e7元, 小-200万, 中-100万, 大300万, 超700万
-        line = "2026-07-01,10000000,-2000000,-1000000,3000000,7000000"
-        row = _parse_fflow_kline_line(line)
-        assert row is not None
-        assert row["date"] == "2026-07-01"
-        assert row["net_flow_wan"] == 1000.0
-        assert row["small_wan"] == -200.0
-        assert row["medium_wan"] == -100.0
-        assert row["large_wan"] == 300.0
-        assert row["super_large_wan"] == 700.0
+    def test_yuan_to_wan(self):
+        from trader_shared.fund_flow_data import _yuan_to_wan
+        assert _yuan_to_wan(10000000) == 1000.0
+        assert _yuan_to_wan(-24669010.56) == -2466.9
+        assert _yuan_to_wan(None) == 0.0
+        assert _yuan_to_wan("-") == 0.0
 
-    def test_parse_klines_tail_days(self):
-        from trader_shared.fund_flow_data import _parse_fflow_klines
-        lines = [
-            f"2026-01-{i:02d},10000,0,0,5000,5000" for i in range(1, 11)
-        ]
-        rows = _parse_fflow_klines(lines, days=3)
-        assert len(rows) == 3
-        assert rows[-1]["date"] == "2026-01-10"
-        assert rows[0]["net_flow_wan"] == 1.0  # 10000元 → 1万
+    def test_sina_record_shape_from_fields(self):
+        from trader_shared.fund_flow_data import _make_record, _yuan_to_wan
+        r0 = _yuan_to_wan(-164970417.81)
+        r1 = _yuan_to_wan(-24669010.56)
+        r2 = _yuan_to_wan(-8584540.15)
+        r3 = _yuan_to_wan(-291024.0)
+        row = _make_record(
+            date="2026-08-05",
+            net_flow_wan=r0 + r1,
+            super_large_wan=r0,
+            large_wan=r1,
+            medium_wan=r2,
+            small_wan=r3,
+            source="sina",
+        )
+        assert row["source"] == "sina"
+        assert row["super_large_wan"] == -16497.04
+        assert row["large_wan"] == -2466.9
+        assert abs(row["net_flow_wan"] - (row["super_large_wan"] + row["large_wan"])) < 1e-9
 
 
 class TestCalcFundFlowFeatures:

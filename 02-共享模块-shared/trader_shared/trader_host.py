@@ -70,7 +70,10 @@ def detect_trader_host() -> str:
 
 
 def fund_flow_source_order() -> list[str]:
-    """资金流瀑布顺序。WorkBuddy：tdx 优先；其余：tushare 优先。"""
+    """资金流瀑布顺序。WorkBuddy：tdx 优先；其余：tushare 优先。
+
+    免费 HTTP 备源只用新浪（sina）；不再走东财/akshare。
+    """
     if detect_trader_host() == HOST_WORKBUDDY:
-        return ["tdx", "tushare", "eastmoney", "akshare"]
-    return ["tushare", "tdx", "eastmoney", "akshare"]
+        return ["tdx", "tushare", "sina"]
+    return ["tushare", "tdx", "sina"]

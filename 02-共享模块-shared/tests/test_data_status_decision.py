@@ -23,18 +23,32 @@ def _patch_full_sources(monkeypatch):
         return {"current_price": 10.0, "data_status": "full"}
 
     def fake_daily(sec, http, days=300):
-        bars = [{"close": 10.0, "data_status": "full"} for _ in range(100)]
-        bars[50] = {"close": 9.9, "data_status": "partial"}  # 个别质量 partial
+        # 带日期，避免周线护栏/正序逻辑把无日期序列判废
+        bars = [
+            {"date": f"2026-01-{(i % 28) + 1:02d}", "close": 10.0, "data_status": "full"}
+            for i in range(100)
+        ]
+        bars[50] = {"date": "2026-02-20", "close": 9.9, "data_status": "partial"}  # 个别质量 partial
         return bars
 
     def fake_5m(sec, http, datalen=60):
-        return [{"close": 10.0, "data_status": "full"} for _ in range(60)]
+        return [
+            {"time": f"2026-08-05 10:{i:02d}", "close": 10.0, "data_status": "full"}
+            for i in range(60)
+        ]
 
     def fake_weekly(sec, http, datalen=80):
-        return [{"close": 10.0, "data_status": "full"} for _ in range(80)]
+        # 周级间距，避免被 weekly_bars_look_like_weekly 判成日线后聚合清空
+        return [
+            {"date": f"2024-{(i % 12) + 1:02d}-{((i % 3) * 7) + 1:02d}", "close": 10.0, "data_status": "full"}
+            for i in range(80)
+        ]
 
     def fake_monthly(sec, http, datalen=60):
-        return [{"close": 10.0, "data_status": "full"} for _ in range(60)]
+        return [
+            {"date": f"{2020 + (i // 12)}-{(i % 12) + 1:02d}-01", "close": 10.0, "data_status": "full"}
+            for i in range(60)
+        ]
 
     def fake_ticks(sec, n):
         return []
@@ -158,3 +172,34 @@ def test_enrich_payload_useful_rejects_none_shell():
         None,
         None,
     )
+
+
+
+def test_report_builder_missing_data_message(monkeypatch):
+    """核心行情缺失时，错误应点名 missing quote/daily，而不是一句空话。"""
+    import pytest
+    from trader_shared.market_types import MarketSnapshot, Security
+
+    class _P:
+        def load_market_snapshot(self, *a, **k):
+            return MarketSnapshot(
+                security=Security(code="600406", market="SH", name="国电南瑞"),
+                quote={},
+                daily_bars=[],
+                data_status="failed",
+                missing_sources=["quote", "daily"],
+                source_errors={"quote": "empty"},
+            )
+
+    # build_report 内部 from trader_shared.data_provider import get_provider
+    monkeypatch.setattr(
+        "trader_shared.data_provider.get_provider",
+        lambda: _P(),
+    )
+    from trader_shared.report_builder import build_report
+    with pytest.raises(RuntimeError) as ei:
+        build_report("国电南瑞")
+    msg = str(ei.value)
+    assert "missing required market data" in msg
+    assert "quote" in msg
+    assert "daily" in msg

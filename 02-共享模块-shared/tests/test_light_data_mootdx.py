@@ -224,9 +224,10 @@ def test_run_mootdx_hard_timeout_returns_within_budget():
     elapsed = time.perf_counter() - t0
 
     assert res is None
-    assert elapsed < 2.5, f"hard timeout took {elapsed:.2f}s (expected ~1.5s)"
+    assert elapsed < 3.8, f"hard timeout took {elapsed:.2f}s (expected ~2.5s)"
     assert light_data._MOOTDX_CLIENT is None
-    assert light_data._DATA_SOURCE_CONTROLLER.is_healthy() is False
+    # 单次硬超时只记失败，不立即永久隔离；连续失败才 UNHEALTHY
+    assert light_data._DATA_SOURCE_CONTROLLER.consecutive_failures >= 1
 
 
 def test_run_mootdx_skips_when_unhealthy():
@@ -311,3 +312,38 @@ def test_api_rate_limiter_first_call_loads_from_disk():
         # After the first call, the cache is populated
         assert limiter._cache is not None
         assert len(limiter._cache["calls"]) == 15  # 14 seed + 1 new
+
+
+
+def test_single_hard_timeout_keeps_source_available():
+    """一次硬超时不应立刻把 mootdx 整源隔离到不可用。"""
+    ctrl = light_data._DATA_SOURCE_CONTROLLER
+    ctrl.healthy = True
+    ctrl.consecutive_failures = 0
+    ctrl.cool_down_until = 0.0
+
+    def hang():
+        time.sleep(5.0)
+        return "late"
+
+    with warnings.catch_warnings(record=True):
+        warnings.simplefilter("always")
+        assert light_data.run_mootdx_with_timeout(hang) is None
+
+    assert ctrl.consecutive_failures >= 1
+    assert ctrl.is_healthy() is True
+
+
+def test_fetch_5m_accepts_short_sina_bars(monkeypatch):
+    """盘后/夜盘不足 8 根时，>=3 根新浪分钟线仍应可用。"""
+    sec = light_data.resolve_security("600406")
+    short_bars = [
+        {"time": f"2026-08-05 14:{50+i:02d}", "date": "2026-08-05",
+         "open": 24.5, "high": 24.6, "low": 24.4, "close": 24.5, "volume": 1000}
+        for i in range(4)
+    ]
+    monkeypatch.setattr(light_data, "_fetch_mins_fallback", lambda *a, **k: short_bars)
+    monkeypatch.setattr(light_data, "_fetch_mins_mootdx", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not fallback")))
+    bars = light_data.fetch_5m(sec, light_data.HttpClient(), datalen=60)
+    assert len(bars) == 4
+    assert bars[0]["data_source"] == "sina"

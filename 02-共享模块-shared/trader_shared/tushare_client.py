@@ -1,12 +1,12 @@
 """Tushare Pro 数据客户端（SDK + HTTP 双通道）。
 
-默认 HTTP 优先（stockai888 代理上 SDK 常空表）；``TUSHARE_SDK_FIRST=1`` 恢复 SDK 优先。
+默认走专属网关 ``http://api.quicksync.cn``（高权限筹码等）；HTTP 优先，``TUSHARE_SDK_FIRST=1`` 可改 SDK 优先。
 Token：环境变量 / tushare_config.local.py；未设置时查询返回空，不崩溃。
 
 环境变量：
     TUSHARE_TOKEN       必填，Tushare Pro API token
-    TUSHARE_API_URL     可选，默认 https://fastapic.stockai888.top
-    TUSHARE_REALTIME_URL 可选，默认 https://realtime.stockai888.top
+    TUSHARE_API_URL     可选，默认 http://api.quicksync.cn
+    TUSHARE_REALTIME_URL 可选，默认 http://api.quicksync.cn
     TUSHARE_SDK_FIRST   可选，1=SDK 优先；默认 0（HTTP 优先）
 
 使用方式：
@@ -27,10 +27,10 @@ from pathlib import Path
 from typing import Any
 
 # ── 配置 ──────────────────────────────────────────────────────────────────
-_DEFAULT_API_URL = "https://fastapic.stockai888.top"
-_DEFAULT_REALTIME_URL = "https://realtime.stockai888.top"
-# 代理限流约 120 次/分钟；全局节流略留余量
-_MIN_INTERVAL = 0.55
+_DEFAULT_API_URL = "http://api.quicksync.cn"
+_DEFAULT_REALTIME_URL = "http://api.quicksync.cn"
+# 官方也有频控；进程内轻微节流，避免连打触发分钟限额
+_MIN_INTERVAL = 0.35
 _RATE_LOCK = threading.Lock()
 _LAST_CALL_MONO = 0.0
 
@@ -58,7 +58,7 @@ def _global_rate_limit() -> None:
 def bypass_http_proxy_for_market() -> None:
     """Clear process HTTP(S) proxy so Tushare/腾讯不被系统代理隧道 403。
 
-    Agent / IDE 沙箱常注入 http_proxy；对 stockai888 探测与 POST 会误伤。
+    Agent / IDE 沙箱常注入 http_proxy；对 api.tushare.pro 探测与 POST 会误伤。
     行情通道一律直连。可用 TRADER_KEEP_HTTP_PROXY=1 保留代理（调试用）。
     """
     if os.environ.get("TRADER_KEEP_HTTP_PROXY", "").strip() in ("1", "true", "True", "yes"):
@@ -77,15 +77,29 @@ def bypass_http_proxy_for_market() -> None:
         cur = os.environ.get(key, "")
         if "*" in cur:
             continue
-        extra = "fastapic.stockai888.top,realtime.stockai888.top,.stockai888.top"
+        extra = "api.tushare.pro,.tushare.pro,api.quicksync.cn,.quicksync.cn,run.quicksync.cn,run.tushare.xyz,qt.gtimg.cn,web.ifzq.gtimg.cn,.gtimg.cn,.qq.com,money.finance.sina.com.cn,finance.sina.com.cn,suggest3.sinajs.cn,.sina.com.cn,.sinajs.cn,.eastmoney.com"
         os.environ[key] = f"{cur},{extra}" if cur else extra
 
 
-def _load_local_tushare_token() -> str:
-    """从同目录 ``tushare_config.local.py`` 读 token（文件名含点，用 importlib）。"""
+def _resolve_proxies() -> dict | None:
+    """代理策略。
+
+    默认返回 {"http": None, "https": None} 强制直连（绕过会 403 的沙箱注入代理，
+    见 bypass_http_proxy_for_market）。
+
+    设 TRADER_KEEP_HTTP_PROXY=1 时返回 None，让 requests 跟随环境 http_proxy/https_proxy
+    （用于必须走代理才能出网的沙箱，如当前 WorkBuddy 执行环境）。
+    """
+    if os.environ.get("TRADER_KEEP_HTTP_PROXY", "").strip() in ("1", "true", "True", "yes"):
+        return None
+    return {"http": None, "https": None}
+
+
+def _load_local_tushare_config():
+    """加载同目录 ``tushare_config.local.py``（文件名含点，用 importlib）。"""
     local_path = Path(__file__).resolve().parent / "tushare_config.local.py"
     if not local_path.is_file():
-        return ""
+        return None
     try:
         import importlib.util
 
@@ -93,12 +107,33 @@ def _load_local_tushare_token() -> str:
             "trader_shared_tushare_config_local", local_path
         )
         if spec is None or spec.loader is None:
-            return ""
+            return None
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        return str(getattr(mod, "TUSHARE_TOKEN", "") or "").strip()
+        return mod
     except Exception:
+        return None
+
+
+def _load_local_tushare_token() -> str:
+    """从本地配置读 token。"""
+    mod = _load_local_tushare_config()
+    if mod is None:
         return ""
+    return str(getattr(mod, "TUSHARE_TOKEN", "") or "").strip()
+
+
+def _skill_config_dict() -> dict[str, Any]:
+    """读取 skill 包 config.json（pack_all 写入；仓内通常不存在）。"""
+    _skill_root = Path(__file__).resolve().parent.parent.parent
+    _cfg = _skill_root / "config.json"
+    if not _cfg.exists():
+        return {}
+    try:
+        cfg = json.loads(_cfg.read_text(encoding="utf-8"))
+        return cfg if isinstance(cfg, dict) else {}
+    except Exception:
+        return {}
 
 
 def _get_token() -> str:
@@ -110,16 +145,10 @@ def _get_token() -> str:
     if local_token:
         return local_token
     # 尝试 skill 包内的 config.json（pack_all.py 打包时自动写入；勿把含密钥的 zip 公开分发）
-    _skill_root = Path(__file__).resolve().parent.parent.parent
-    _cfg = _skill_root / "config.json"
-    if _cfg.exists():
-        try:
-            cfg = json.loads(_cfg.read_text(encoding="utf-8"))
-            t = str(cfg.get("tushare_token", "")).strip()
-            if t:
-                return t
-        except Exception:
-            pass
+    cfg = _skill_config_dict()
+    t = str(cfg.get("tushare_token", "") or "").strip()
+    if t:
+        return t
     try:
         from trader_shared.tushare_config import TUSHARE_TOKEN
         return str(TUSHARE_TOKEN).strip()
@@ -128,25 +157,43 @@ def _get_token() -> str:
 
 
 def _get_api_url() -> str:
-    # 优先环境变量，其次配置文件
+    # 优先环境变量，其次本地 local 配置，再 skill config / 共享配置，最后默认专属网关
     url = os.environ.get("TUSHARE_API_URL", "").strip()
     if url:
         return url
+    mod = _load_local_tushare_config()
+    if mod is not None:
+        local_url = str(getattr(mod, "TUSHARE_API_URL", "") or "").strip()
+        if local_url:
+            return local_url
+    cfg = _skill_config_dict()
+    cfg_url = str(cfg.get("tushare_api_url", "") or "").strip()
+    if cfg_url:
+        return cfg_url
     try:
         from trader_shared.tushare_config import TUSHARE_API_URL
-        return str(TUSHARE_API_URL).strip()
+        return str(TUSHARE_API_URL).strip() or _DEFAULT_API_URL
     except ImportError:
         return _DEFAULT_API_URL
 
 
 def _get_realtime_url() -> str:
-    # 优先环境变量，其次配置文件
+    # 优先环境变量，其次本地 local 配置，再 skill config / 共享配置，最后默认专属网关
     url = os.environ.get("TUSHARE_REALTIME_URL", "").strip()
     if url:
         return url
+    mod = _load_local_tushare_config()
+    if mod is not None:
+        local_url = str(getattr(mod, "TUSHARE_REALTIME_URL", "") or "").strip()
+        if local_url:
+            return local_url
+    cfg = _skill_config_dict()
+    cfg_url = str(cfg.get("tushare_realtime_url", "") or cfg.get("tushare_api_url", "") or "").strip()
+    if cfg_url:
+        return cfg_url
     try:
         from trader_shared.tushare_config import TUSHARE_REALTIME_URL
-        return str(TUSHARE_REALTIME_URL).strip()
+        return str(TUSHARE_REALTIME_URL).strip() or _DEFAULT_REALTIME_URL
     except ImportError:
         return _DEFAULT_REALTIME_URL
 
@@ -200,6 +247,12 @@ class TushareClient:
             warnings.warn("[tushare] TUSHARE_TOKEN 未设置，Tushare 数据功能禁用")
             return
 
+        # 专属网关/官方域都优先直连，避免 socks5h 代理缺依赖把整通道打挂
+        try:
+            bypass_http_proxy_for_market()
+        except Exception:
+            pass
+
         # 快速可达性探测：避免对不可达主机发起无超时请求导致进程挂死
         if not _probe_reachable(self._api_url):
             warnings.warn(
@@ -210,9 +263,18 @@ class TushareClient:
         # 尝试初始化 SDK
         try:
             import tushare as ts  # noqa: F811
+            try:
+                import tushare.pro.client as _ts_client  # type: ignore
+                # 与专属文档一致：改 DataApi 默认网关，避免仍打官方域名
+                _ts_client.DataApi._DataApi__http_url = self._api_url  # type: ignore[attr-defined]
+            except Exception:
+                pass
             ts.set_token(self._token)
-            self._pro = ts.pro_api()
-            self._pro._DataApi__http_url = self._api_url  # type: ignore[attr-defined]
+            self._pro = ts.pro_api(self._token)
+            try:
+                self._pro._DataApi__http_url = self._api_url  # type: ignore[attr-defined]
+            except Exception:
+                pass
             self._sdk_ok = True
         except Exception as e:
             warnings.warn(f"[tushare] SDK 初始化失败，降级到 HTTP: {e}")
@@ -293,7 +355,7 @@ class TushareClient:
                     },
                     timeout=30,
                     headers={"Accept-Encoding": "gzip"},
-                    proxies={"http": None, "https": None},
+                    proxies=_resolve_proxies(),
                 )
                 data = resp.json()
                 if data.get("code") != 0:
@@ -321,8 +383,7 @@ class TushareClient:
     ) -> list[dict[str, Any]]:
         """日线行情。ts_code 格式如 '688248.SH'。
 
-        注意：stockai888 代理的 ``daily`` 不接受 ``adj``；带 adj 会空结果。
-        复权请走单独接口 / 下游字段，勿在此塞 adj。
+        注意：官方 ``daily`` 为未复权；复权请走 adj_factor / 下游字段，勿在此硬塞 adj。
         """
         params: dict[str, Any] = {"ts_code": ts_code}
         if start_date:
@@ -343,7 +404,7 @@ class TushareClient:
         return self.query("moneyflow", **params)
 
     def query_realtime(self, ts_codes: str) -> list[dict[str, Any]]:
-        """实时行情（爬虫，走 realtime.stockai888.top）。
+        """实时行情（tushare realtime_quote；生产现价仍优先腾讯）。
 
         ts_codes: 逗号分隔，如 '688248.SH,000001.SZ'
         """
@@ -404,10 +465,77 @@ class TushareClient:
         return self.query("cyq_perf", **params)
 
     def query_cyq_chips(
-        self, ts_code: str, trade_date: str
+        self,
+        ts_code: str,
+        trade_date: str = "",
+        start_date: str = "",
+        end_date: str = "",
     ) -> list[dict[str, Any]]:
-        """每日筹码。"""
-        return self.query("cyq_chips", ts_code=ts_code, trade_date=trade_date)
+        """每日筹码 / 筹码峰分布。
+
+        兼容两种调用：
+        - trade_date=YYYYMMDD：单日逐价位
+        - start_date/end_date：区间（专属网关文档示例）
+        """
+        params: dict[str, Any] = {"ts_code": ts_code}
+        if trade_date:
+            params["trade_date"] = trade_date
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+        return self.query("cyq_chips", **params)
+
+    
+    def query_stk_holdernumber(
+        self, ts_code: str, start_date: str = "", end_date: str = ""
+    ) -> list[dict[str, Any]]:
+        """股东户数。"""
+        params: dict[str, Any] = {"ts_code": ts_code}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+        return self.query("stk_holdernumber", **params)
+
+    def query_share_float(
+        self, ts_code: str, start_date: str = "", end_date: str = ""
+    ) -> list[dict[str, Any]]:
+        """限售解禁 / 流通股本变动。"""
+        params: dict[str, Any] = {"ts_code": ts_code}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+        return self.query("share_float", **params)
+
+    def query_margin_detail(
+        self, ts_code: str = "", trade_date: str = "", start_date: str = "", end_date: str = ""
+    ) -> list[dict[str, Any]]:
+        """融资融券交易明细。"""
+        params: dict[str, Any] = {}
+        if ts_code:
+            params["ts_code"] = ts_code
+        if trade_date:
+            params["trade_date"] = trade_date
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+        return self.query("margin_detail", **params)
+
+    def query_moneyflow_hsgt(
+        self, start_date: str = "", end_date: str = "", trade_date: str = ""
+    ) -> list[dict[str, Any]]:
+        """沪深港通资金流向。"""
+        params: dict[str, Any] = {}
+        if trade_date:
+            params["trade_date"] = trade_date
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+        return self.query("moneyflow_hsgt", **params)
 
     def query_index_classify(self, src: str = "SW") -> list[dict[str, Any]]:
         """行业分类。src: 'SW'=申万。"""

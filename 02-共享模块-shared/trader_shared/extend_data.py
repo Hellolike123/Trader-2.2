@@ -17,39 +17,8 @@ from trader_shared._logging import get_logger
 
 _logger = get_logger(__name__)
 
-# akshare 可用性缓存（避免重复 import 尝试）
-_akshare_available: bool | None = None
-AKSHARE_ENABLED = os.environ.get("AKSHARE_ENABLED", "true").lower() in ("true", "1", "yes")
-
-
-def _check_akshare() -> bool:
-    """检查 akshare 是否可用，结果缓存到模块级变量。"""
-    global _akshare_available
-    if _akshare_available is not None:
-        return _akshare_available
-    if not AKSHARE_ENABLED:
-        _akshare_available = False
-        return False
-    try:
-        import akshare  # noqa: F401
-        _akshare_available = True
-    except ImportError:
-        _logger.debug("akshare 未安装，跳过相关数据采集")
-        _akshare_available = False
-    return _akshare_available
-
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-DATACENTER_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 
-def _http_get_json(url: str, params: dict[str, Any] | None = None) -> dict:
-    """Helper to perform HTTP GET returning JSON via requests for SSL safety on macOS."""
-    try:
-        r = requests.get(url, params=params, headers={"User-Agent": UA}, timeout=10)
-        if r.status_code == 200:
-            return r.json()
-    except (requests.RequestException, ValueError) as e:
-        _logger.debug("HTTP GET JSON failed for %s: %s", url, e)
-    return {}
 
 def _http_get_text(url: str, referer: str | None = None, encoding: str = "utf-8") -> str:
     """Helper to perform HTTP GET returning plain text via requests."""
@@ -65,23 +34,44 @@ def _http_get_text(url: str, referer: str | None = None, encoding: str = "utf-8"
         _logger.debug("HTTP GET text failed for %s: %s", url, e)
     return ""
 
-def eastmoney_datacenter(report_name: str, filter_str: str = "", page_size: int = 10, sort_columns: str = "", sort_types: str = "-1") -> list[dict]:
-    """东财数据中心统一接口"""
-    params = {
-        "reportName": report_name,
-        "columns": "ALL",
-        "filter": filter_str,
-        "pageNumber": "1",
-        "pageSize": str(page_size),
-        "sortColumns": sort_columns,
-        "sortTypes": sort_types,
-        "source": "WEB",
-        "client": "WEB",
-    }
-    d = _http_get_json(DATACENTER_URL, params=params)
-    if d.get("result") and d["result"].get("data"):
-        return d["result"]["data"]
-    return []
+
+def _to_ts_code(code: str) -> str:
+    """6 位码 / 已带后缀 → tushare ts_code。"""
+    s = str(code or "").strip().upper()
+    if not s:
+        return ""
+    if "." in s:
+        return s
+    if s.startswith(("6", "5", "9")):
+        return f"{s}.SH"
+    return f"{s}.SZ"
+
+
+def _ymd(val: Any) -> str:
+    """把 20260102 / 2026-01-02 / datetime 压成 YYYY-MM-DD。"""
+    if val is None:
+        return ""
+    if hasattr(val, "strftime"):
+        try:
+            return val.strftime("%Y-%m-%d")
+        except Exception:
+            pass
+    s = str(val).strip()
+    if not s:
+        return ""
+    digits = "".join(ch for ch in s if ch.isdigit())
+    if len(digits) >= 8:
+        return f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}"
+    return s[:10]
+
+
+def _safe_float(val: Any, default: float = 0.0) -> float:
+    try:
+        if val is None or (isinstance(val, float) and val != val):
+            return default
+        return float(val)
+    except (TypeError, ValueError):
+        return default
 
 # 全局内存缓存：同花顺强势股列表（避免日内重复请求）
 _hot_reason_cache: dict[str, pd.DataFrame] = {}
@@ -123,81 +113,200 @@ class ExtendDataProvider:
 
     @staticmethod
     def get_shareholder_trend(code: str) -> dict[str, Any]:
-        """查询股东户数变动趋势 (RPT_HOLDERNUMLATEST)
-        
+        """查询股东户数变动趋势（Tushare stk_holdernumber）。
+
         返回:
             {
                 "latest_notice_date": "2026-05-15",
                 "latest_holder_num": 120000.0,
                 "change_pct": -4.2,
-                "status": "筹码集中" | "筹码松散" | "持平" | "数据不足"
+                "status": "筹码集中" | "筹码松散" | "持平" | "数据不足",
+                "source": "tushare"
             }
         """
-        data = eastmoney_datacenter(
-            report_name="RPT_HOLDERNUMLATEST",
-            filter_str=f'(SECURITY_CODE="{code}")',
-            page_size=1,
-            sort_columns="HOLD_NOTICE_DATE"
-        )
-        if not data:
-            return {"status": "数据不足", "change_pct": 0.0, "latest_notice_date": "", "latest_holder_num": 0.0}
-        
+        empty = {
+            "status": "数据不足",
+            "change_pct": 0.0,
+            "latest_notice_date": "",
+            "latest_holder_num": 0.0,
+            "source": "tushare",
+        }
+        ts_code = _to_ts_code(code)
+        if not ts_code:
+            return empty
         try:
-            row = data[0]
-            latest = float(row.get("HOLDER_NUM", 0) or 0)
-            change = float(row.get("HOLDER_NUM_RATIO", 0) or 0)
-            
+            from trader_shared.tushare_client import get_client
+
+            rows = get_client().query_stk_holdernumber(ts_code) or []
+        except Exception as exc:
+            _logger.debug("Shareholder tushare fetch failed for %s: %s", code, exc)
+            return empty
+        if not rows:
+            return empty
+
+        def _sort_key(r: dict[str, Any]) -> str:
+            return _ymd(r.get("ann_date") or r.get("end_date") or r.get("trade_date") or "")
+
+        try:
+            ordered = sorted(
+                [r for r in rows if isinstance(r, dict)],
+                key=_sort_key,
+            )
+            if not ordered:
+                return empty
+            latest_row = ordered[-1]
+            latest = _safe_float(
+                latest_row.get("holder_num")
+                or latest_row.get("holder_nums")
+                or latest_row.get("holder")
+            )
+            prev = None
+            if len(ordered) >= 2:
+                prev = _safe_float(
+                    ordered[-2].get("holder_num")
+                    or ordered[-2].get("holder_nums")
+                    or ordered[-2].get("holder")
+                )
+            # tushare 偶发直接给变动比
+            raw_chg = latest_row.get("holder_num_ratio")
+            if raw_chg is None:
+                raw_chg = latest_row.get("holder_num_change_pct")
+            if raw_chg is None:
+                raw_chg = latest_row.get("change_pct")
+            if raw_chg is not None and str(raw_chg).strip() != "":
+                change = _safe_float(raw_chg)
+            elif prev and prev > 0 and latest > 0:
+                change = (latest - prev) / prev * 100.0
+            else:
+                change = 0.0
+
             status = "持平"
             if change <= -3.0:
                 status = "筹码集中"
             elif change >= 3.0:
                 status = "筹码松散"
-                
+
             return {
-                "latest_notice_date": (row.get("HOLD_NOTICE_DATE") or row.get("END_DATE") or "")[:10],
+                "latest_notice_date": _ymd(
+                    latest_row.get("ann_date") or latest_row.get("end_date") or latest_row.get("trade_date")
+                ),
                 "latest_holder_num": latest,
-                "change_pct": round(change, 2),
-                "status": status
+                "change_pct": round(float(change or 0.0), 2),
+                "status": status,
+                "source": "tushare",
             }
         except (TypeError, ValueError, KeyError) as exc:
             _logger.debug("Shareholder trend parse failed for %s: %s", code, exc)
-            return {"status": "数据不足", "change_pct": 0.0, "latest_notice_date": "", "latest_holder_num": 0.0}
+            return empty
 
     @staticmethod
-    def get_upcoming_unlocks(code: str) -> list[dict[str, Any]]:
-        """查询个股未来 90 天待解禁信息 (RPT_LIFT_STAGE)
-        
+    def get_upcoming_unlocks(code: str, *, days: int = 90, as_of: str | None = None) -> list[dict[str, Any]]:
+        """查询个股未来待解禁（Tushare share_float）。
+
         返回:
             [{"date": "2026-06-12", "ratio": 8.2, "amount_wan": 5000.0}, ...]
         """
-        data = eastmoney_datacenter(
-            report_name="RPT_LIFT_STAGE",
-            filter_str=f'(SECURITY_CODE="{code}")',
-            page_size=10,
-            sort_columns="FREE_DATE",
-            sort_types="1"
-        )
-        unlocks = []
+        ts_code = _to_ts_code(code)
+        if not ts_code:
+            return []
         try:
             from trader_shared.cn_time import today_cn
-            today_str = today_cn().isoformat()
+
+            today_str = _ymd(as_of) if as_of else today_cn().isoformat()
         except Exception:
+            today_str = _ymd(as_of) if as_of else date.today().strftime("%Y-%m-%d")
+        if not today_str:
             today_str = date.today().strftime("%Y-%m-%d")
-        for row in data:
-            free_date = (row.get("FREE_DATE") or "")[:10]
-            if free_date and free_date >= today_str:
+
+        # 窗口：as_of 起 ~ days 天
+        try:
+            y, m, d = [int(x) for x in today_str.split("-")[:3]]
+            start_dt = date(y, m, d)
+            end_dt = start_dt + __import__("datetime").timedelta(days=max(1, int(days)))
+            start_s = start_dt.strftime("%Y%m%d")
+            end_s = end_dt.strftime("%Y%m%d")
+        except Exception:
+            start_s = today_str.replace("-", "")
+            end_s = ""
+
+        try:
+            from trader_shared.tushare_client import get_client
+
+            rows = get_client().query_share_float(ts_code, start_date=start_s, end_date=end_s) or []
+        except Exception as exc:
+            _logger.debug("Unlock tushare fetch failed for %s: %s", code, exc)
+            return []
+
+        unlocks: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            free_date = _ymd(row.get("float_date") or row.get("free_date") or row.get("ann_date"))
+            if not free_date or free_date < today_str:
+                continue
+            if days > 0:
                 try:
-                    # FREE_RATIO is in absolute fraction (e.g. 0.05 for 5%), so multiply by 100 to get percentage
-                    ratio = float(row.get("FREE_RATIO", 0) or 0) * 100
-                    # CURRENT_FREE_SHARES is in ten thousand shares (万股)
-                    amount_wan = float(row.get("CURRENT_FREE_SHARES", 0) or 0)
-                    unlocks.append({
-                        "date": free_date,
-                        "ratio": round(ratio, 2),
-                        "amount_wan": round(amount_wan, 2)
-                    })
-                except (ValueError, TypeError):
-                    continue
+                    y, m, d = [int(x) for x in free_date.split("-")[:3]]
+                    if (date(y, m, d) - date.fromisoformat(today_str)).days > int(days):
+                        continue
+                except Exception:
+                    pass
+            # float_ratio 常见为绝对比例 0.05=5%；也兼容已是百分数
+            ratio_raw = _safe_float(row.get("float_ratio") or row.get("free_ratio") or row.get("ratio"))
+            ratio = ratio_raw * 100.0 if 0 < abs(ratio_raw) <= 1.5 else ratio_raw
+            # 解禁股数：股 / 万股 兼容
+            shares = _safe_float(
+                row.get("float_share")
+                or row.get("free_share")
+                or row.get("current_free_shares")
+                or row.get("share")
+            )
+            amount_wan = shares / 10000.0 if shares > 100000 else shares
+            unlocks.append({
+                "date": free_date,
+                "ratio": round(ratio, 2),
+                "amount_wan": round(amount_wan, 2),
+                "source": "tushare",
+            })
+        unlocks.sort(key=lambda x: str(x.get("date") or ""))
+        return unlocks
+
+    @staticmethod
+    def get_all_unlocks(code: str) -> list[dict[str, Any]]:
+        """回测用：全部限售解禁事件（不过滤 today）。"""
+        ts_code = _to_ts_code(code)
+        if not ts_code:
+            return []
+        try:
+            from trader_shared.tushare_client import get_client
+
+            rows = get_client().query_share_float(ts_code) or []
+        except Exception as exc:
+            _logger.debug("Unlock-all tushare fetch failed for %s: %s", code, exc)
+            return []
+        unlocks: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            free_date = _ymd(row.get("float_date") or row.get("free_date") or row.get("ann_date"))
+            if not free_date:
+                continue
+            ratio_raw = _safe_float(row.get("float_ratio") or row.get("free_ratio") or row.get("ratio"))
+            ratio = ratio_raw * 100.0 if 0 < abs(ratio_raw) <= 1.5 else ratio_raw
+            shares = _safe_float(
+                row.get("float_share")
+                or row.get("free_share")
+                or row.get("current_free_shares")
+                or row.get("share")
+            )
+            amount_wan = shares / 10000.0 if shares > 100000 else shares
+            unlocks.append({
+                "date": free_date,
+                "ratio": round(ratio, 2),
+                "amount_wan": round(amount_wan, 2),
+                "source": "tushare",
+            })
+        unlocks.sort(key=lambda x: str(x.get("date") or ""))
         return unlocks
 
     @staticmethod
@@ -298,9 +407,7 @@ class ExtendDataProvider:
 
     @staticmethod
     def get_margin_data(code: str) -> dict[str, Any]:
-        """获取个股融资融券明细数据（via akshare）。
-
-        自动识别沪/深市，调用对应接口获取最近交易日的融资融券数据。
+        """获取个股融资融券明细（Tushare margin_detail）。
 
         返回:
             {
@@ -310,365 +417,318 @@ class ExtendDataProvider:
                 "short_sell_vol": float,      # 融券卖出量（股）
                 "short_balance_wan": float,   # 融券余额（万元）
                 "date": str,                  # 数据日期
-                "status": str                 # "正常" | "无数据" | "接口不可用"
+                "status": str,                # "正常" | "无数据" | "接口不可用"
+                "source": "tushare",
             }
         """
-        if not _check_akshare():
-            return {"margin_balance_wan": 0, "margin_buy_wan": 0, "margin_sell_wan": 0,
-                    "short_sell_vol": 0, "short_balance_wan": 0, "date": "", "status": "接口不可用"}
-
+        empty = {
+            "margin_balance_wan": 0.0,
+            "margin_buy_wan": 0.0,
+            "margin_sell_wan": 0.0,
+            "short_sell_vol": 0.0,
+            "short_balance_wan": 0.0,
+            "date": "",
+            "status": "无数据",
+            "source": "tushare",
+        }
+        ts_code = _to_ts_code(code)
+        if not ts_code:
+            return {**empty, "status": "无数据"}
         try:
-            import akshare as ak
-            # 识别市场：6/9 开头为沪市，其余为深市
-            is_sse = code.startswith(("5", "6", "9"))  # 含沪市 ETF 51xxxx
+            from trader_shared.tushare_client import get_client
+
+            client = get_client()
+        except Exception as exc:
+            _logger.debug("Margin tushare client failed for %s: %s", code, exc)
+            return {**empty, "status": "接口不可用"}
+
+        rows: list[dict[str, Any]] = []
+        try:
+            # 近约 20 个自然日窗口，取最新有数的一天
             try:
                 from trader_shared.cn_time import today_cn
-                today_str = today_cn().strftime("%Y%m%d")
+                end_d = today_cn()
             except Exception:
-                today_str = date.today().strftime("%Y%m%d")
+                end_d = date.today()
+            start_d = end_d - __import__("datetime").timedelta(days=20)
+            rows = client.query_margin_detail(
+                ts_code=ts_code,
+                start_date=start_d.strftime("%Y%m%d"),
+                end_date=end_d.strftime("%Y%m%d"),
+            ) or []
+            if not rows:
+                # 再试无日期参数（部分 token 只回最新）
+                rows = client.query_margin_detail(ts_code=ts_code) or []
+        except Exception as exc:
+            _logger.debug("Margin tushare fetch failed for %s: %s", code, exc)
+            return {**empty, "status": "无数据"}
 
-            if is_sse:
-                df = ak.stock_margin_detail_sse(date=today_str)
-            else:
-                df = ak.stock_margin_detail_szse(date=today_str)
+        if not rows:
+            return empty
 
-            if df is None or df.empty:
-                return {"margin_balance_wan": 0, "margin_buy_wan": 0, "margin_sell_wan": 0,
-                        "short_sell_vol": 0, "short_balance_wan": 0, "date": "", "status": "无数据"}
+        def _row_date(r: dict[str, Any]) -> str:
+            return _ymd(r.get("trade_date") or r.get("date") or r.get("end_date"))
 
-            # 按股票代码筛选（列名可能是 "标的证券" 或 "证券代码" 或 "股票代码"）
-            code_col = None
-            for candidate in ["标的证券", "证券代码", "股票代码", "代码"]:
-                if candidate in df.columns:
-                    code_col = candidate
-                    break
-            if code_col is None:
-                _logger.debug("Margin data columns not recognized for %s: %s", code, list(df.columns))
-                return {"margin_balance_wan": 0, "margin_buy_wan": 0, "margin_sell_wan": 0,
-                        "short_sell_vol": 0, "short_balance_wan": 0, "date": "", "status": "无数据"}
+        try:
+            ordered = sorted([r for r in rows if isinstance(r, dict)], key=_row_date)
+            if not ordered:
+                return empty
+            r = ordered[-1]
+            # tushare 常见单位：元；余额/买入/偿还 → 万元
+            def _yuan_to_wan(v: Any) -> float:
+                x = _safe_float(v)
+                # 极大数当元；已经是万的量级则保持
+                return round(x / 10000.0, 2) if abs(x) >= 100000 else round(x, 2)
 
-            # 代码匹配（akshare 返回的代码可能是纯数字或带前缀）
-            row = df[df[code_col].astype(str).str.contains(code, na=False)]
-            if row.empty:
-                return {"margin_balance_wan": 0, "margin_buy_wan": 0, "margin_sell_wan": 0,
-                        "short_sell_vol": 0, "short_balance_wan": 0, "date": "", "status": "无数据"}
-
-            r = row.iloc[0]
-
-            def _safe_float(val: Any) -> float:
-                try:
-                    return float(val) if pd.notna(val) else 0.0
-                except (ValueError, TypeError):
-                    return 0.0
-
-            # 列名兼容多种命名
-            margin_balance = _safe_float(r.get("融资余额(元)", r.get("融资余额", 0)))
-            margin_buy = _safe_float(r.get("融资买入额(元)", r.get("融资买入额", r.get("融资买入", 0))))
-            margin_sell = _safe_float(r.get("融资偿还额(元)", r.get("融资偿还额", r.get("融资偿还", 0))))
-            short_sell = _safe_float(r.get("融券卖出量(股)", r.get("融券卖出量", r.get("融券卖出", 0))))
-            short_balance = _safe_float(r.get("融券余额(元)", r.get("融券余额", 0)))
-
-            data_date = str(r.get("信用交易日期", r.get("日期", today_str)))[:10]
-
+            margin_balance = _yuan_to_wan(
+                r.get("rzye") or r.get("rz_balance") or r.get("fin_balance") or r.get("margin_balance")
+            )
+            margin_buy = _yuan_to_wan(
+                r.get("rzmre") or r.get("rz_buy") or r.get("fin_buy") or r.get("margin_buy")
+            )
+            margin_sell = _yuan_to_wan(
+                r.get("rzche") or r.get("rz_repay") or r.get("fin_repay") or r.get("margin_repay")
+            )
+            short_sell = _safe_float(
+                r.get("rqmcl") or r.get("rq_sell") or r.get("short_sell") or r.get("short_volume")
+            )
+            short_balance = _yuan_to_wan(
+                r.get("rqye") or r.get("rq_balance") or r.get("short_balance")
+            )
             return {
-                "margin_balance_wan": round(margin_balance / 10000, 2),
-                "margin_buy_wan": round(margin_buy / 10000, 2),
-                "margin_sell_wan": round(margin_sell / 10000, 2),
+                "margin_balance_wan": margin_balance,
+                "margin_buy_wan": margin_buy,
+                "margin_sell_wan": margin_sell,
                 "short_sell_vol": short_sell,
-                "short_balance_wan": round(short_balance / 10000, 2),
-                "date": data_date,
+                "short_balance_wan": short_balance,
+                "date": _row_date(r),
                 "status": "正常",
+                "source": "tushare",
             }
         except Exception as exc:
-            _logger.debug("Margin data fetch failed for %s: %s", code, exc)
-            return {"margin_balance_wan": 0, "margin_buy_wan": 0, "margin_sell_wan": 0,
-                    "short_sell_vol": 0, "short_balance_wan": 0, "date": "", "status": "无数据"}
+            _logger.debug("Margin parse failed for %s: %s", code, exc)
+            return empty
 
     @staticmethod
     def get_northbound_flow() -> dict[str, Any]:
-        """获取北向资金（沪深港通）当日净流入数据（via akshare）。
+        """获取北向资金（沪深港通）净流入（Tushare moneyflow_hsgt）。
 
         返回:
             {
                 "north_net_flow_wan": float,   # 当日北向净流入（万元）
                 "north_flow_5d_wan": float,    # 近5日累计净流入（万元）
-                "date": str,                   # 数据日期
-                "status": str                  # "正常" | "无数据" | "接口不可用"
+                "date": str,
+                "status": str,
+                "source": "tushare",
             }
         """
-        if not _check_akshare():
-            return {"north_net_flow_wan": 0, "north_flow_5d_wan": 0, "date": "", "status": "接口不可用"}
+        empty = {
+            "north_net_flow_wan": 0.0,
+            "north_flow_5d_wan": 0.0,
+            "date": "",
+            "status": "无数据",
+            "source": "tushare",
+        }
+        try:
+            from trader_shared.tushare_client import get_client
+
+            client = get_client()
+        except Exception as exc:
+            _logger.debug("Northbound tushare client failed: %s", exc)
+            return {**empty, "status": "接口不可用"}
 
         try:
-            import akshare as ak
-            df = ak.stock_hsgt_north_net_flow_in_em(symbol="北向资金")
+            try:
+                from trader_shared.cn_time import today_cn
+                end_d = today_cn()
+            except Exception:
+                end_d = date.today()
+            start_d = end_d - __import__("datetime").timedelta(days=20)
+            rows = client.query_moneyflow_hsgt(
+                start_date=start_d.strftime("%Y%m%d"),
+                end_date=end_d.strftime("%Y%m%d"),
+            ) or []
+            if not rows:
+                rows = client.query_moneyflow_hsgt() or []
+        except Exception as exc:
+            _logger.debug("Northbound tushare fetch failed: %s", exc)
+            return empty
 
-            if df is None or df.empty:
-                return {"north_net_flow_wan": 0, "north_flow_5d_wan": 0, "date": "", "status": "无数据"}
+        if not rows:
+            return empty
 
-            # 列名兼容：可能是 "value", "当日净流入", "净流入" 等
-            flow_col = None
-            for candidate in ["value", "当日净流入", "净流入", "north_net_flow_in_em"]:
-                if candidate in df.columns:
-                    flow_col = candidate
-                    break
+        def _row_date(r: dict[str, Any]) -> str:
+            return _ymd(r.get("trade_date") or r.get("date"))
 
-            date_col = None
-            for candidate in ["date", "日期", "datetime"]:
-                if candidate in df.columns:
-                    date_col = candidate
-                    break
+        try:
+            ordered = sorted([r for r in rows if isinstance(r, dict)], key=_row_date)
+            if not ordered:
+                return empty
+            recent = ordered[-5:]
+            latest = recent[-1]
 
-            if flow_col is None or date_col is None:
-                _logger.debug("Northbound flow columns not recognized: %s", list(df.columns))
-                return {"north_net_flow_wan": 0, "north_flow_5d_wan": 0, "date": "", "status": "无数据"}
+            def _to_wan(v: Any) -> float:
+                x = _safe_float(v)
+                # moneyflow_hsgt 常见单位：百万元 或 元；做粗兼容
+                if abs(x) >= 1000000:  # 元
+                    return round(x / 10000.0, 2)
+                if abs(x) >= 1000:  # 可能是百万元 → 万元 *100
+                    # 百万元 * 100 = 万元
+                    return round(x * 100.0, 2)
+                return round(x, 2)
 
-            # 按日期排序取最新
-            df = df.sort_values(date_col, ascending=False)
-            latest = df.iloc[0]
+            # north_money / north_net_flow / hgt+sgt
+            def _north_of(r: dict[str, Any]) -> float:
+                if r.get("north_money") is not None:
+                    return _to_wan(r.get("north_money"))
+                if r.get("north_net_flow") is not None:
+                    return _to_wan(r.get("north_net_flow"))
+                hgt = _safe_float(r.get("hgt"))
+                sgt = _safe_float(r.get("sgt"))
+                if hgt or sgt:
+                    return _to_wan(hgt + sgt)
+                return _to_wan(r.get("value") or r.get("net_flow") or 0)
 
-            def _safe_float(val: Any) -> float:
-                try:
-                    return float(val) if pd.notna(val) else 0.0
-                except (ValueError, TypeError):
-                    return 0.0
-
-            # 净流入值单位可能是元或万元，akshare 北向资金通常返回元
-            net_flow_raw = _safe_float(latest[flow_col])
-            # 近5日累计
-            recent5 = df.head(5)
-            flow_5d_raw = sum(_safe_float(row[flow_col]) for _, row in recent5.iterrows())
-
-            data_date = str(latest[date_col])[:10]
-
+            day_vals = [_north_of(r) for r in recent]
             return {
-                "north_net_flow_wan": round(net_flow_raw / 10000, 2) if abs(net_flow_raw) > 100000 else round(net_flow_raw, 2),
-                "north_flow_5d_wan": round(flow_5d_raw / 10000, 2) if abs(flow_5d_raw) > 100000 else round(flow_5d_raw, 2),
-                "date": data_date,
+                "north_net_flow_wan": day_vals[-1],
+                "north_flow_5d_wan": round(sum(day_vals), 2),
+                "date": _row_date(latest),
                 "status": "正常",
+                "source": "tushare",
             }
         except Exception as exc:
-            _logger.debug("Northbound flow fetch failed: %s", exc)
-            return {"north_net_flow_wan": 0, "north_flow_5d_wan": 0, "date": "", "status": "无数据"}
+            _logger.debug("Northbound parse failed: %s", exc)
+            return empty
 
     @staticmethod
     def get_sector_data(code: str) -> dict[str, Any]:
-        """获取个股所属行业板块及板块行情数据（via akshare）。
+        """个股所属行业板块（Tushare / sector_data 缓存路径）。
 
-        通过板块成分股反查个股所属板块，再获取板块实时行情。
-
-        返回:
-            {
-                "sector_name": str,             # 板块名称
-                "sector_change_pct": float,     # 板块今日涨跌幅
-                "sector_rank": int,             # 板块排名（按涨跌幅）
-                "sector_total": int,            # 板块总数
-                "stock_vs_sector": str,         # 个股 vs 板块相对强弱
-                "status": str                   # "正常" | "无数据" | "接口不可用"
-            }
+        返回字段对齐历史契约，供 fusion / assess_stage 消费。
         """
-        if not _check_akshare():
-            return {"sector_name": "", "sector_change_pct": 0, "sector_rank": 0,
-                    "sector_total": 0, "stock_vs_sector": "", "status": "接口不可用"}
-
+        empty = {
+            "sector_name": "",
+            "sector_change_pct": 0.0,
+            "sector_rank": 0,
+            "sector_total": 0,
+            "stock_vs_sector": "",
+            "status": "无数据",
+            "source": "tushare",
+        }
+        ts_code = _to_ts_code(code)
+        if not ts_code:
+            return empty
         try:
-            import akshare as ak
+            from trader_shared.sector_data import get_stock_sector_snapshot_cached
 
-            # Step 1: 获取所有行业板块实时行情（含涨跌幅排名）
-            spot_df = ak.stock_board_industry_spot_em()
-            if spot_df is None or spot_df.empty:
-                return {"sector_name": "", "sector_change_pct": 0, "sector_rank": 0,
-                        "sector_total": 0, "stock_vs_sector": "", "status": "无数据"}
-
-            # 板块名称列
-            name_col = None
-            for candidate in ["板块名称", "名称"]:
-                if candidate in spot_df.columns:
-                    name_col = candidate
-                    break
-            # 涨跌幅列
-            chg_col = None
-            for candidate in ["涨跌幅", "板块涨跌幅"]:
-                if candidate in spot_df.columns:
-                    chg_col = candidate
-                    break
-
-            if name_col is None or chg_col is None:
-                _logger.debug("Sector spot columns not recognized: %s", list(spot_df.columns))
-                return {"sector_name": "", "sector_change_pct": 0, "sector_rank": 0,
-                        "sector_total": 0, "stock_vs_sector": "", "status": "无数据"}
-
-            # 按涨跌幅排序
-            spot_df = spot_df.sort_values(chg_col, ascending=False).reset_index(drop=True)
-            spot_df["_rank"] = range(1, len(spot_df) + 1)
-            sector_total = len(spot_df)
-
-            # Step 2: 遍历板块找到个股所属板块
-            # 为避免遍历全部板块（太慢），只检查涨幅前 50 的板块
-            matched_sector = ""
-            matched_chg = 0.0
-            matched_rank = 0
-
-            checked = 0
-            for _, sector_row in spot_df.iterrows():
-                if checked >= 50:
-                    break
-                sector_name = str(sector_row.get(name_col, ""))
-                if not sector_name:
-                    continue
-                try:
-                    cons_df = ak.stock_board_industry_cons_em(symbol=sector_name)
-                    checked += 1
-                    if cons_df is None or cons_df.empty:
-                        continue
-                    # 成分股代码列
-                    code_col_cons = None
-                    for c in ["代码", "股票代码", "证券代码"]:
-                        if c in cons_df.columns:
-                            code_col_cons = c
-                            break
-                    if code_col_cons is None:
-                        continue
-                    if code in cons_df[code_col_cons].astype(str).values:
-                        matched_sector = sector_name
-
-                        def _safe_float(val: Any) -> float:
-                            try:
-                                return float(val) if pd.notna(val) else 0.0
-                            except (ValueError, TypeError):
-                                return 0.0
-
-                        matched_chg = _safe_float(sector_row.get(chg_col, 0))
-                        matched_rank = int(sector_row.get("_rank", 0))
-                        break
-                except Exception:
-                    continue
-
-            if not matched_sector:
-                return {"sector_name": "", "sector_change_pct": 0, "sector_rank": 0,
-                        "sector_total": sector_total, "stock_vs_sector": "", "status": "无数据"}
-
-            return {
-                "sector_name": matched_sector,
-                "sector_change_pct": round(matched_chg, 2),
-                "sector_rank": matched_rank,
-                "sector_total": sector_total,
-                "stock_vs_sector": "",  # 需要个股涨幅才能计算，在 build_report 中填充
-                "status": "正常",
-            }
+            snap = get_stock_sector_snapshot_cached(ts_code)
         except Exception as exc:
-            _logger.debug("Sector data fetch failed for %s: %s", code, exc)
-            return {"sector_name": "", "sector_change_pct": 0, "sector_rank": 0,
-                    "sector_total": 0, "stock_vs_sector": "", "status": "无数据"}
+            _logger.debug("Sector tushare snapshot failed for %s: %s", code, exc)
+            return {**empty, "status": "接口不可用"}
+        if not isinstance(snap, dict):
+            return empty
+        status = str(snap.get("status") or "")
+        if status != "正常":
+            return {
+                **empty,
+                "sector_name": str(snap.get("sector_name") or snap.get("industry") or ""),
+                "status": "无数据" if status else "无数据",
+                "industry": snap.get("industry") or "",
+                "sector_code": snap.get("sector_code") or "",
+            }
+        return {
+            "sector_name": str(snap.get("sector_name") or snap.get("industry") or ""),
+            "sector_change_pct": float(snap.get("sector_change_pct") or 0),
+            "sector_rank": int(snap.get("sector_rank") or 0),
+            "sector_total": int(snap.get("sector_total") or 0),
+            "stock_vs_sector": str(snap.get("stock_vs_sector") or ""),
+            "status": "正常",
+            "source": "tushare",
+            "industry": snap.get("industry") or "",
+            "sector_code": snap.get("sector_code") or "",
+        }
 
     @staticmethod
-    def get_concept_data(code: str) -> dict[str, Any]:
-        """获取个股所属概念板块及行情数据（via akshare）。
+    def get_concept_data(code: str, *, max_concepts: int = 40) -> dict[str, Any]:
+        """个股所属概念（Tushare concept / concept_detail，有上限扫描）。
 
-        通过概念板块成分股反查个股所属概念，再获取各概念实时行情。
-        个股可同时属于多个概念板块。
-
-        返回:
-            {
-                "concept_list": [str],        # 命中概念名称列表
-                "concept_change_pct": [float],# 各概念今日涨跌幅（与 concept_list 对齐）
-                "concept_rank": dict,         # {概念名: {"rank": int, "total": int, "change_pct": float}}
-                "concept_total": int,         # 概念板块总数
-                "status": str                 # "正常" | "无数据" | "接口不可用"
-            }
+        仅在 TRADER_ENRICH_BOARDS=1 时主链路会调用；失败返回空，不拖主报告。
         """
-        if not _check_akshare():
-            return {"concept_list": [], "concept_change_pct": [], "concept_rank": {},
-                    "concept_total": 0, "status": "接口不可用"}
-
+        empty = {
+            "concept_list": [],
+            "concept_change_pct": [],
+            "concept_rank": {},
+            "concept_total": 0,
+            "status": "无数据",
+            "source": "tushare",
+        }
+        ts_code = _to_ts_code(code)
+        bare = ts_code.split(".")[0] if ts_code else str(code or "").strip()
+        if not bare:
+            return empty
         try:
-            import akshare as ak
+            from trader_shared.sector_data import get_concept_detail, get_concept_list
 
-            # Step 1: 获取所有概念板块实时行情（含涨跌幅排名）
-            spot_df = ak.stock_board_concept_spot_em()
-            if spot_df is None or spot_df.empty:
-                return {"concept_list": [], "concept_change_pct": [], "concept_rank": {},
-                        "concept_total": 0, "status": "无数据"}
-
-            # 板块名称列
-            name_col = None
-            for candidate in ["板块名称", "名称"]:
-                if candidate in spot_df.columns:
-                    name_col = candidate
-                    break
-            # 涨跌幅列
-            chg_col = None
-            for candidate in ["涨跌幅", "板块涨跌幅"]:
-                if candidate in spot_df.columns:
-                    chg_col = candidate
-                    break
-
-            if name_col is None or chg_col is None:
-                _logger.debug("Concept spot columns not recognized: %s", list(spot_df.columns))
-                return {"concept_list": [], "concept_change_pct": [], "concept_rank": {},
-                        "concept_total": 0, "status": "无数据"}
-
-            # 按涨跌幅排序（热门概念优先检查）
-            spot_df = spot_df.sort_values(chg_col, ascending=False).reset_index(drop=True)
-            spot_df["_rank"] = range(1, len(spot_df) + 1)
-            concept_total = len(spot_df)
-
-            def _safe_float(val: Any) -> float:
-                try:
-                    return float(val) if pd.notna(val) else 0.0
-                except (ValueError, TypeError):
-                    return 0.0
-
-            # Step 2: 遍历概念板块找到个股所属概念（个股可命中多个）
-            concept_list: list[str] = []
-            concept_change_pct: list[float] = []
-            concept_rank: dict[str, dict[str, Any]] = {}
-
-            checked = 0
-            for _, concept_row in spot_df.iterrows():
-                if checked >= 80:
-                    break
-                concept_name = str(concept_row.get(name_col, ""))
-                if not concept_name:
-                    continue
-                try:
-                    cons_df = ak.stock_board_concept_cons_em(symbol=concept_name)
-                    checked += 1
-                    if cons_df is None or cons_df.empty:
-                        continue
-                    # 成分股代码列
-                    code_col_cons = None
-                    for c in ["代码", "股票代码", "证券代码"]:
-                        if c in cons_df.columns:
-                            code_col_cons = c
-                            break
-                    if code_col_cons is None:
-                        continue
-                    if code in cons_df[code_col_cons].astype(str).values:
-                        c_chg = _safe_float(concept_row.get(chg_col, 0))
-                        c_rank = int(concept_row.get("_rank", 0))
-                        concept_list.append(concept_name)
-                        concept_change_pct.append(round(c_chg, 2))
-                        concept_rank[concept_name] = {
-                            "rank": c_rank,
-                            "total": concept_total,
-                            "change_pct": round(c_chg, 2),
-                        }
-                except Exception:
-                    continue
-
-            if not concept_list:
-                return {"concept_list": [], "concept_change_pct": [], "concept_rank": {},
-                        "concept_total": concept_total, "status": "无数据"}
-
-            return {
-                "concept_list": concept_list,
-                "concept_change_pct": concept_change_pct,
-                "concept_rank": concept_rank,
-                "concept_total": concept_total,
-                "status": "正常",
-            }
+            concepts = get_concept_list() or []
         except Exception as exc:
-            _logger.debug("Concept data fetch failed for %s: %s", code, exc)
-            return {"concept_list": [], "concept_change_pct": [], "concept_rank": {},
-                    "concept_total": 0, "status": "无数据"}
+            _logger.debug("Concept list tushare failed for %s: %s", code, exc)
+            return {**empty, "status": "接口不可用"}
+        if not concepts:
+            return empty
+
+        concept_list: list[str] = []
+        concept_change_pct: list[float] = []
+        concept_rank: dict[str, dict[str, Any]] = {}
+        total = len(concepts)
+        checked = 0
+        for i, c in enumerate(concepts):
+            if checked >= max(1, int(max_concepts)):
+                break
+            if not isinstance(c, dict):
+                continue
+            cid = str(c.get("code") or c.get("id") or c.get("ts_code") or "").strip()
+            cname = str(c.get("name") or c.get("concept_name") or "").strip()
+            if not cid or not cname:
+                continue
+            try:
+                members = get_concept_detail(cid) or []
+            except Exception:
+                continue
+            checked += 1
+            hit = False
+            for mrow in members:
+                if not isinstance(mrow, dict):
+                    continue
+                mcode = str(mrow.get("ts_code") or mrow.get("code") or mrow.get("symbol") or "")
+                if bare and bare in mcode.replace(".SH", "").replace(".SZ", ""):
+                    hit = True
+                    break
+                if ts_code and mcode.upper() == ts_code.upper():
+                    hit = True
+                    break
+            if not hit:
+                continue
+            chg = _safe_float(c.get("pct_change") or c.get("change_pct") or c.get("pct_chg") or 0)
+            concept_list.append(cname)
+            concept_change_pct.append(round(chg, 2))
+            concept_rank[cname] = {
+                "rank": int(c.get("rank") or (i + 1)),
+                "total": total,
+                "change_pct": round(chg, 2),
+            }
+            # 面板只需要少数概念，命中 5 个就够
+            if len(concept_list) >= 5:
+                break
+
+        if not concept_list:
+            return {**empty, "concept_total": total}
+        return {
+            "concept_list": concept_list,
+            "concept_change_pct": concept_change_pct,
+            "concept_rank": concept_rank,
+            "concept_total": total,
+            "status": "正常",
+            "source": "tushare",
+        }
+

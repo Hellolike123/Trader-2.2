@@ -133,7 +133,7 @@ def build_vpf_signal(
     Args:
         volume_warning: detect_volume_divergence 结果或 volume_warning_to_signal 风格 dict
         fund_features: calc_fund_flow_features 结果
-        fund_source: 可选标注 eastmoney|akshare|tdx|missing
+        fund_source: 可选标注 sina|akshare|tdx|tushare|missing
         bars: 日K线数据（用于近5日量价趋势分计算）
         avg_daily_turnover_wan: 近20日均成交额（万元），用于资金强度比归一化
 

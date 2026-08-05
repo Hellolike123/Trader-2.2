@@ -101,6 +101,144 @@ def get_cyq_chips(ts_code: str, trade_date: str) -> list[dict[str, Any]]:
     return client.query_cyq_chips(ts_code, trade_date)
 
 
+_cyq_chips_mem: dict[str, tuple[str, list[dict[str, Any]]]] = {}
+
+
+def get_cyq_chips_cached(ts_code: str, trade_date: str = "") -> list[dict[str, Any]]:
+    """逐价位筹码：按 ts_code+trade_date 同日缓存。"""
+    import trader_shared.cache_utils as _cu
+
+    code = str(ts_code or "").strip()
+    day = str(trade_date or "").strip()
+    if not code:
+        return []
+    if not day:
+        # 无日期时尝试用 cyq_perf 最新交易日
+        perf = get_cyq_perf_cached(code)
+        if perf:
+            day = str(max(perf, key=lambda x: str(x.get("trade_date", ""))).get("trade_date") or "")
+    if not day:
+        return []
+    key = f"{code}|{day}"
+    today = _cu.cache_calendar_date()
+    mem = _cyq_chips_mem.get(key)
+    if mem is not None and mem[0] == today:
+        return list(mem[1])
+    cache_key = f"{code.replace('.', '_')}_{day}"
+    cached = _cu.get_cached(getattr(_cu, "CACHE_CYQ_CHIPS", _cu.CACHE_CYQ), cache_key, ttl=getattr(_cu, "TTL_CYQ", 86400))
+    if cached is not None and isinstance(cached.data, dict) and _cu.is_fetch_date_today(cached.data, today):
+        rows = cached.data.get("rows")
+        if isinstance(rows, list):
+            _cyq_chips_mem[key] = (today, rows)
+            return list(rows)
+    try:
+        rows = get_cyq_chips(code, day) or []
+    except Exception as exc:
+        _logger.debug("get_cyq_chips network failed for %s %s: %s", code, day, exc)
+        if cached is not None and isinstance(cached.data, dict):
+            old = cached.data.get("rows")
+            if isinstance(old, list) and old:
+                return list(old)
+        return []
+    if rows:
+        payload = {"fetch_date": today, "rows": rows, "trade_date": day}
+        try:
+            _cu.set_cached(getattr(_cu, "CACHE_CYQ_CHIPS", _cu.CACHE_CYQ), cache_key, payload)
+        except OSError as exc:
+            _logger.debug("cyq_chips cache write failed for %s: %s", code, exc)
+        _cyq_chips_mem[key] = (today, rows)
+    return list(rows)
+
+
+def cyq_chips_to_peaks(
+    rows: list[dict[str, Any]] | None,
+    *,
+    top_n: int = 5,
+) -> list[dict[str, Any]]:
+    """把 cyq_chips 逐价位转成主峰候选。
+
+    兼容字段：price/cost/pricecenter；percent/percent_chip/ratio；volume/vol。
+
+    注意 percent 口径：
+    - 专属网关常见：0.42 = 0.42%（各档之和≈100）
+    - 少数源：0.0042 = 0.42%（各档之和≈1）
+    不能把「已经是百分数且 <1.5 的小档」再 *100。
+    """
+    if not rows:
+        return []
+
+    parsed: list[tuple[float, float, float]] = []  # price, raw_share, vol
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        px = r.get("price")
+        if px is None:
+            px = r.get("cost")
+        if px is None:
+            px = r.get("pricecenter")
+        try:
+            price = float(px or 0)
+        except (TypeError, ValueError):
+            continue
+        if price <= 0:
+            continue
+        share = r.get("percent")
+        if share is None:
+            share = r.get("percent_chip")
+        if share is None:
+            share = r.get("ratio")
+        try:
+            share_raw = float(share or 0)
+        except (TypeError, ValueError):
+            share_raw = 0.0
+        vol = r.get("volume")
+        if vol is None:
+            vol = r.get("vol")
+        try:
+            vol_f = float(vol or 0)
+        except (TypeError, ValueError):
+            vol_f = 0.0
+        if share_raw <= 0 and vol_f <= 0:
+            continue
+        parsed.append((price, share_raw, vol_f))
+    if not parsed:
+        return []
+
+    # 判定 share 是「百分数」还是「0~1 比例」
+    shares = [s for _, s, _ in parsed if s > 0]
+    scale = 1.0
+    if shares:
+        total = sum(shares)
+        mx = max(shares)
+        # 总和接近 1（或明显 < 5）且最大值很小 → 比例制，转百分
+        if total <= 5.0 and mx <= 1.5:
+            scale = 100.0
+
+    scored: list[dict[str, Any]] = []
+    for price, share_raw, vol_f in parsed:
+        share_f = share_raw * scale if share_raw > 0 else 0.0
+        score = share_f if share_f > 0 else vol_f
+        if score <= 0:
+            continue
+        scored.append({
+            "price": round(price, 2),
+            "share_of_total": round(share_f, 2) if share_f > 0 else 0.0,
+            "volume": vol_f,
+            "_score": score,
+        })
+    if not scored:
+        return []
+    scored.sort(key=lambda x: -float(x.get("_score") or 0))
+    out = []
+    for item in scored[: max(1, int(top_n))]:
+        item = dict(item)
+        item.pop("_score", None)
+        out.append(item)
+    return out
+
+
 def clear_cyq_mem_cache() -> None:
-    """测试用：清空进程内 cyq 缓存。"""
+    """测试用：清空进程内 cyq / cyq_chips 缓存。"""
     _cyq_mem.clear()
+    _cyq_chips_mem.clear()
+    _cyq_chips_mem.clear()

@@ -259,12 +259,38 @@ META_TEMPLATES = {
 
 
 def _write_skill_config(staged: Path, host: str) -> None:
-    """写入 config.json：Tushare 密钥（若有）+ 明确 trader_host。"""
+    """写入 config.json：Tushare 密钥（若有）+ 明确 trader_host。
+
+    取值优先级：环境变量 > 仓内 tushare_config.local.py。
+    默认网关为专属 quicksync；勿把含密钥 zip 公开分发。
+    """
     cfg: dict[str, str] = {"trader_host": host}
+
+    local_vals: dict[str, str] = {}
+    local_path = Path(__file__).resolve().parents[1] / "trader_shared" / "tushare_config.local.py"
+    if local_path.is_file():
+        try:
+            import importlib.util
+
+            spec = importlib.util.spec_from_file_location("_pack_tushare_local", local_path)
+            if spec is not None and spec.loader is not None:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                for var in ("TUSHARE_TOKEN", "TUSHARE_API_URL", "TUSHARE_REALTIME_URL"):
+                    val = str(getattr(mod, var, "") or "").strip()
+                    if val:
+                        local_vals[var] = val
+        except Exception:
+            local_vals = {}
+
     for var in ("TUSHARE_TOKEN", "TUSHARE_API_URL", "TUSHARE_REALTIME_URL"):
-        val = os.environ.get(var, "").strip()
+        val = os.environ.get(var, "").strip() or local_vals.get(var, "")
         if val:
             cfg[var.lower()] = val
+    # 兜底：有 token 但没显式 URL 时，写入专属网关，避免 skill 包回落到旧官方域
+    if cfg.get("tushare_token"):
+        cfg.setdefault("tushare_api_url", "http://api.quicksync.cn")
+        cfg.setdefault("tushare_realtime_url", "http://api.quicksync.cn")
     (staged / "config.json").write_text(
         json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )

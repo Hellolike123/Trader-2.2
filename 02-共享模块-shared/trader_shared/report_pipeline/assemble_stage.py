@@ -190,6 +190,7 @@ _ASSEMBLE_CTX_KEYS = (
     "chip_resistance_upper",
     "report_fusion",
     "main_force_score_result",
+    "fund_flow_features",
     "big_order_result",
     "stage_result",
     "wyck_result",
@@ -270,6 +271,7 @@ def _assemble_base_report_impl(
     chip_resistance_upper: Any,
     report_fusion: dict[str, Any] | None = None,  # 占位；生产路径由 merge 后写 tagged fusion
     main_force_score_result: dict[str, Any],
+    fund_flow_features: dict[str, Any] | None = None,
     big_order_result: dict[str, Any],
     stage_result: dict[str, Any],
     wyck_result: dict[str, Any],
@@ -430,6 +432,7 @@ def _assemble_base_report_impl(
         "fib_ext_1382": levels.get("fib_ext_1382"),
         "fib_ext_1618": levels.get("fib_ext_1618"),
         "main_force_score": main_force_score_result,
+        "fund_flow_features": fund_flow_features if isinstance(fund_flow_features, dict) else {},
         "big_order_summary": big_order_result.get("summary"),
         "big_order_direction": big_order_result.get("direction_summary"),
         "major_stage": stage_result["major_stage"],

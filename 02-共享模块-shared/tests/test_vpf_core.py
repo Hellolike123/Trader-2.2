@@ -63,6 +63,7 @@ class TestBuildVpfSignal:
         assert sig["fund_quality"] == "full"
 
     def test_conflict_fund_in_volume_bear(self):
+        """资金强信号优先：连入 conf>=0.55 时听资金，价量分歧写入 reason，不归零。"""
         ff = {
             "consecutive_inflow_days": 2,
             "consecutive_outflow_days": 0,
@@ -72,4 +73,9 @@ class TestBuildVpfSignal:
         }
         vw = {"warning_type": "climactic", "signal": -1, "confidence": 0.7, "reason": "天量天价"}
         sig = build_vpf_signal(vw, ff)
-        assert sig["direction"] == 0  # 打架 → 观望
+        assert sig["direction"] == 1  # 资金强信号优先，不因价量偏空归零
+        assert sig["fund_direction"] == 1
+        assert sig["vp_direction"] == -1
+        assert sig["fund_quality"] == "full"
+        assert "主力连2日净流入" in str(sig.get("reason") or "")
+        assert "天量天价" in str(sig.get("reason") or "") or "价量" in str(sig.get("reason") or "")

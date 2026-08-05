@@ -13,6 +13,16 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from trader_shared.chip_core import (
+    CHIP_TAG_MIGRATE_HEAVY,
+    CHIP_TAG_MIGRATE_WARN,
+    CHIP_TAG_RESIST_WEAK,
+    CHIP_TAG_SUPPORT_WEAK,
+    CHIP_TAG_TRAPPED_HEAVY,
+    CHIP_TAG_TRAPPED_LIGHT,
+    CHIP_TAG_TRAPPED_MID,
+)
+
 
 def _finite(x: Any, default: float | None = None) -> float | None:
     try:
@@ -288,27 +298,27 @@ def build_chip_card(
     above = sorted([x for x in clean if x["price"] > cur], key=lambda x: x["price"]) if cur > 0 else []
 
     if below:
-        support_tag = f"支撑 {below[-1]['price']:.2f}"
+        support_tag = f"撑 {below[-1]['price']:.2f}"
     else:
-        support_tag = "支撑弱" if clean or profit_pct is not None else ""
+        support_tag = CHIP_TAG_SUPPORT_WEAK if clean or profit_pct is not None else ""
 
     resist_px: float | None = None
     if above:
         resist_px = above[0]["price"]
-        resist_tag = f"阻力 {resist_px:.2f}"
+        resist_tag = f"压 {resist_px:.2f}"
     else:
-        resist_tag = "阻力弱" if clean or profit_pct is not None else ""
+        resist_tag = CHIP_TAG_RESIST_WEAK if clean or profit_pct is not None else ""
 
     trapped_tag = ""
     if profit_pct is not None:
         pp = _finite(profit_pct)
         if pp is not None:
             if pp < 20:
-                trapped_tag = "套牢面大"
+                trapped_tag = CHIP_TAG_TRAPPED_HEAVY
             elif pp > 80:
-                trapped_tag = "套牢面小"
+                trapped_tag = CHIP_TAG_TRAPPED_LIGHT
             else:
-                trapped_tag = "套牢面中性"
+                trapped_tag = CHIP_TAG_TRAPPED_MID
 
     migration_tag = ""
     mig = migration if isinstance(migration, dict) else {}
@@ -319,9 +329,9 @@ def build_chip_card(
         except (TypeError, ValueError):
             mp_f = 0.0
         if level in ("clear", "exit", "critical") or mp_f >= 50:
-            migration_tag = "底部松动重"
+            migration_tag = CHIP_TAG_MIGRATE_HEAVY
         elif level in ("warning", "warn") or mp_f >= 40:
-            migration_tag = "底部松动"
+            migration_tag = CHIP_TAG_MIGRATE_WARN
 
     has_data = bool(line)
     return {

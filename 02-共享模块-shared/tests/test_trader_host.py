@@ -40,9 +40,13 @@ def test_detect_host_from_connectors(monkeypatch):
 
 def test_fund_flow_order_by_host(monkeypatch):
     monkeypatch.setenv("TRADER_HOST", "workbuddy")
-    assert fund_flow_source_order()[0] == "tdx"
+    order_wb = fund_flow_source_order()
+    assert order_wb[0] == "tdx"
+    assert order_wb == ["tdx", "tushare", "sina"]
     monkeypatch.setenv("TRADER_HOST", "hermes")
-    assert fund_flow_source_order()[0] == "tushare"
+    order_hm = fund_flow_source_order()
+    assert order_hm[0] == "tushare"
+    assert order_hm == ["tushare", "tdx", "sina"]
 
 
 def test_get_provider_forced_env_beats_tushare(monkeypatch):

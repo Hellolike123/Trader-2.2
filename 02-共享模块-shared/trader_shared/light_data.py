@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import json
 import math
 import random
@@ -16,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener, urlopen
 
 from trader_shared._logging import get_logger
 from trader_shared.cache_utils import get_shared_build_pool
@@ -66,6 +67,19 @@ def _check_akshare() -> bool:
     return _AKSHARE_AVAILABLE
 
 
+def _tdx_first() -> bool:
+    """WorkBuddy 宿主行情源偏好：tdx（通达信直连）优先于腾讯 HTTP。
+
+    Hermes/local 环境保持腾讯 HTTP 优先（tushare 主源另有 provider 层分流）。
+    """
+    try:
+        from trader_shared.trader_host import HOST_WORKBUDDY, detect_trader_host
+
+        return detect_trader_host() == HOST_WORKBUDDY
+    except Exception:
+        return False
+
+
 def _check_pytdx3() -> bool:
     global TdxHq_API, TDXParams, _TDX3_AVAILABLE
     if _TDX3_AVAILABLE is not None:
@@ -86,6 +100,86 @@ TENCENT_FQKLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
 SINA_KLINE_URL = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData"
 TIMEOUT_SECONDS = 5
 MAX_ATTEMPTS = 2
+
+# 免费行情域名：默认强制直连，避免 IDE/系统 socks 代理把新浪/腾讯/通达信拐丢
+_MARKET_DIRECT_HOST_SUFFIXES = (
+    "gtimg.cn",
+    "qq.com",
+    "sina.com.cn",
+    "sinajs.cn",
+    "eastmoney.com",
+    "tushare.pro",
+    "quicksync.cn",
+    "tushare.xyz",
+)
+
+
+def ensure_market_direct_network() -> None:
+    """行情链路启动时尽量清掉进程代理，并扩大 NO_PROXY 覆盖。
+
+    与 tushare_client.bypass_http_proxy_for_market 同目标；light_data 也要自己做，
+    因为很多路径根本不经过 tushare_client。
+    """
+    if os.environ.get("TRADER_KEEP_HTTP_PROXY", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    ):
+        return
+    try:
+        from trader_shared.tushare_client import bypass_http_proxy_for_market
+
+        bypass_http_proxy_for_market()
+    except Exception:
+        for key in (
+            "http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
+            "all_proxy", "ALL_PROXY",
+        ):
+            os.environ.pop(key, None)
+    extra = (
+        "qt.gtimg.cn,web.ifzq.gtimg.cn,.gtimg.cn,.qq.com,"
+        "money.finance.sina.com.cn,finance.sina.com.cn,suggest3.sinajs.cn,"
+        ".sina.com.cn,.sinajs.cn,.eastmoney.com,"
+        "api.tushare.pro,.tushare.pro,api.quicksync.cn,.quicksync.cn,"
+        "run.quicksync.cn,run.tushare.xyz"
+    )
+    for key in ("NO_PROXY", "no_proxy"):
+        cur = os.environ.get(key, "")
+        if "*" in cur:
+            continue
+        parts = [x.strip() for x in cur.split(",") if x.strip()]
+        for item in extra.split(","):
+            if item and item not in parts:
+                parts.append(item)
+        os.environ[key] = ",".join(parts)
+
+
+def _urlopen_direct(request: Request, *, timeout: float, context: ssl.SSLContext | None = None):
+    """urlopen 封装：先清代理，再走标准 urlopen。
+
+    优先 ``ensure_market_direct_network()`` + 原生 ``urlopen``（本机证书链最稳）。
+    若环境仍强制注入代理，再降级到 ``ProxyHandler({})`` 直连 opener；
+    SSL 上下文挂 ``HTTPSHandler``，因为 ``OpenerDirector.open()`` 不接受 context=。
+    """
+    ensure_market_direct_network()
+    keep_proxy = os.environ.get("TRADER_KEEP_HTTP_PROXY", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+    # 主路径：清掉代理环境后直接 urlopen（与历史可跑路径一致）
+    if not keep_proxy:
+        try:
+            return urlopen(request, timeout=timeout, context=context)
+        except Exception:
+            # 某些运行时仍可能从别处读到代理；再试一次显式无代理 opener
+            pass
+    if keep_proxy:
+        return urlopen(request, timeout=timeout, context=context)
+    handlers: list[Any] = [ProxyHandler({})]
+    if context is not None:
+        handlers.append(HTTPSHandler(context=context))
+    else:
+        handlers.append(HTTPSHandler())
+    opener = build_opener(*handlers)
+    return opener.open(request, timeout=timeout)
+
 NAME_MAP = {
     "南网科技": "688248",
     "三花智控": "002050",
@@ -99,6 +193,7 @@ NAME_MAP = {
     "中国平安": "601318",
     "中证1000": "000852",
     "华工科技": "000988",
+    "国电南瑞": "600406",
     # 指数：须带交易所前缀，避免「上证指数→000001→infer SZ→平安银行」
     "上证指数": "SH000001",
     "上证综指": "SH000001",
@@ -135,7 +230,7 @@ def _search_code_by_name(name: str) -> str | None:
                 "Referer": "https://finance.sina.com.cn/",
             },
         )
-        with urlopen(req, timeout=3.0) as resp:
+        with _urlopen_direct(req, timeout=3.0) as resp:
             raw = resp.read().decode("gbk", errors="ignore")
 
         # 响应格式: var suggestvalue="红板科技,11,603459,sh603459,红板科技,,红板科技,99,1,,,";
@@ -495,7 +590,7 @@ class MarketDataSourceController:
     Tracks consecutive failures, enforces cooldown isolation on repeated failures,
     and maintains healthy/unhealthy state flags. (线程安全)
     """
-    def __init__(self, max_failures: int = 3, cooldown_seconds: float = 30.0) -> None:
+    def __init__(self, max_failures: int = 4, cooldown_seconds: float = 12.0) -> None:
         self.max_failures = max_failures
         self.cooldown_seconds = cooldown_seconds
         self._lock = threading.Lock()
@@ -543,25 +638,33 @@ class MarketDataSourceController:
                 )
 
     def report_hard_timeout(self) -> None:
-        """Hard wall-clock timeout: isolate immediately so callers fallback in seconds."""
+        """Hard timeout：计失败，但短隔离，避免同轮兜底被一次超时彻底打挂。"""
         with self._lock:
             self.total_calls += 1
             self.total_failures += 1
-            self.consecutive_failures = self.max_failures
+            self.consecutive_failures += 1
             self.last_failure_time = time.time()
-            self.healthy = False
-            self.cool_down_until = time.time() + self.cooldown_seconds
-            warnings.warn(
-                f"⚠️ mootdx client marked as UNHEALTHY after hard timeout. "
-                f"Isolated for {self.cooldown_seconds} seconds."
-            )
+            # 单次硬超时不再直接拉满失败计数；连续两次硬超时/失败才隔离
+            if self.consecutive_failures >= max(2, self.max_failures - 1):
+                self.healthy = False
+                # 硬超时隔离更短，给同轮后续请求一次恢复窗口
+                cool = min(self.cooldown_seconds, 8.0)
+                self.cool_down_until = time.time() + cool
+                warnings.warn(
+                    f"⚠️ mootdx client marked as UNHEALTHY after hard timeout. "
+                    f"Isolated for {cool:.0f} seconds."
+                )
+            else:
+                warnings.warn(
+                    "⚠️ mootdx hard-timeout recorded; keep source available for same-round fallback"
+                )
 
 
 _DATA_SOURCE_CONTROLLER = MarketDataSourceController()
 
 # Wall-clock hard timeout for mootdx. socket.setdefaulttimeout alone does NOT
 # abort hung pytdx/mootdx reads (observed ~38s despite "1.5s limit").
-_MOOTDX_HARD_TIMEOUT_S = 1.5
+_MOOTDX_HARD_TIMEOUT_S = 2.5
 
 
 class _CircuitBreaker:
@@ -609,7 +712,7 @@ _circuit_tencent_daily = _CircuitBreaker(threshold=5, cooldown_seconds=60.0)
 
 
 def run_mootdx_with_timeout(func, *args, **kwargs) -> Any:
-    """Execute a mootdx call with a hard wall-clock timeout (default 1.5s).
+    """Execute a mootdx call with a hard wall-clock timeout (default 2.5s).
 
     Runs the call in a daemon worker so a hung TCP read cannot block the caller
     for tens of seconds. On hard timeout the client is discarded and the source
@@ -903,6 +1006,16 @@ def save_realtime_cache(key: str, data: Any) -> None:
 # Security → market_types
 
 
+def _market_ssl_context() -> ssl.SSLContext:
+    """行情 HTTPS 证书上下文：优先 certifi，避免部分 Mac/Python 缺 CA 根。"""
+    try:
+        import certifi  # type: ignore
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
+
 class HttpClient:
     """HTTP 客户端，带连接池和指数退避重试。"""
 
@@ -912,7 +1025,7 @@ class HttpClient:
             "Accept": "application/json,text/plain,*/*",
             "Referer": "https://finance.sina.com.cn/",
         }
-        self.ssl_context = ssl.create_default_context()
+        self.ssl_context = _market_ssl_context()
 
     def get_bytes(
         self,
@@ -932,7 +1045,9 @@ class HttpClient:
         for attempt in range(max_retries + 1):
             try:
                 request = Request(full_url, headers=self.headers)
-                with urlopen(request, timeout=TIMEOUT_SECONDS, context=self.ssl_context) as response:
+                with _urlopen_direct(
+                    request, timeout=TIMEOUT_SECONDS, context=self.ssl_context
+                ) as response:
                     return response.read()
             except HTTPError:
                 raise  # HTTP 错误码不重试，直接失败
@@ -1006,8 +1121,13 @@ def resolve_security(target: str) -> Security:
     code = code[-6:].zfill(6)
     if not market:
         market = infer_a_share_market(code)
-    # 名称：已知 NAME_MAP > 在线搜索成功 > 回退到代码
-    display_name = raw if (raw in NAME_MAP or not re.sub(r"\D", "", raw)) else code
+    # 名称：输入中文名 > NAME_MAP 反查 > 在线搜索成功 > 回退到代码
+    if raw in NAME_MAP or not re.sub(r"\D", "", raw):
+        display_name = raw
+    else:
+        # 代码输入时反查常用名，避免报告标题只剩 600406
+        rev = {v: k for k, v in NAME_MAP.items() if str(v).isdigit() and len(str(v)) == 6}
+        display_name = rev.get(code, code)
     return Security(code=code, market=market, name=display_name)
 
 
@@ -1108,6 +1228,21 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
     if cached is not None:
         return sanitize_quote(cached)
 
+    # ── WorkBuddy：tdx（通达信直连）优先 ──
+    if _tdx_first():
+        tdx_q = _fetch_quote_tdx3(sec) if _check_pytdx3() else None
+        if tdx_q is not None:
+            tdx_q["data_source"] = "pytdx3"
+            tdx_q["data_status"] = "full"
+            save_realtime_cache(cache_key, tdx_q)
+            return sanitize_quote(tdx_q)
+        mootdx_q = _fetch_quote_mootdx(sec)
+        if mootdx_q is not None:
+            mootdx_q["data_source"] = "mootdx"
+            mootdx_q["data_status"] = "full"
+            save_realtime_cache(cache_key, mootdx_q)
+            return sanitize_quote(mootdx_q)
+
     # ── Circuit breaker check — skip Tencent if paused ──
     tencent_available = not _circuit_tencent_quote.is_open
 
@@ -1146,7 +1281,7 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
             _logger.debug("Tencent HTTP quote failed for %s: %s", sec.qq_symbol, exc)
 
     # Fallback: pytdx3 (fast timeout, mainly a backup)
-    if _check_pytdx3():
+    if not _tdx_first() and _check_pytdx3():
         tdx3_q = _fetch_quote_tdx3(sec)
         if tdx3_q is not None:
             tdx3_q["data_source"] = "pytdx3"
@@ -1155,13 +1290,14 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
             return sanitize_quote(tdx3_q)
 
     # Fallback: mootdx
-    mootdx_q = _fetch_quote_mootdx(sec)
-    if mootdx_q is not None:
-        # 注意：不再走 Tencent HTTP 补充（第 1 优先已失败，跳过重复超时）
-        mootdx_q["data_source"] = "mootdx"
-        mootdx_q["data_status"] = "full"
-        save_realtime_cache(cache_key, mootdx_q)
-        return sanitize_quote(mootdx_q)
+    if not _tdx_first():
+        mootdx_q = _fetch_quote_mootdx(sec)
+        if mootdx_q is not None:
+            # 注意：不再走 Tencent HTTP 补充（第 1 优先已失败，跳过重复超时）
+            mootdx_q["data_source"] = "mootdx"
+            mootdx_q["data_status"] = "full"
+            save_realtime_cache(cache_key, mootdx_q)
+            return sanitize_quote(mootdx_q)
 
     # Cleanup: 移除了重复的 Tencent HTTP retry（do_fetch），
     # 因为 Tencent HTTP 已在上方尝试过，再次 retry 不会成功。
@@ -1354,7 +1490,7 @@ def _fetch_daily_sina(sec: Security, days: int = 300) -> list[dict[str, Any]] | 
             f"CN_MarketData.getKLineData?symbol={sec.qq_symbol}&scale=240"
             f"&ma=no&datalen={max(days, 20)}"
         )
-        ssl_ctx = ssl.create_default_context()
+        ssl_ctx = _market_ssl_context()
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36",
             "Referer": "https://finance.sina.com.cn/",
@@ -1365,7 +1501,7 @@ def _fetch_daily_sina(sec: Security, days: int = 300) -> list[dict[str, Any]] | 
         for attempt in range(3):
             try:
                 request = Request(url, headers=headers)
-                with urlopen(request, timeout=TIMEOUT_SECONDS, context=ssl_ctx) as response:
+                with _urlopen_direct(request, timeout=TIMEOUT_SECONDS, context=ssl_ctx) as response:
                     text = response.read().decode("gbk", errors="ignore")
                     break
             except HTTPError:
@@ -1416,6 +1552,47 @@ def fetch_qfq_daily(
     if fix_daily_scale_glitches(fixed):
         _compute_atr_fields(fixed)
     return fixed
+
+
+def _fetch_qfq_tencent_kline(
+    sec: Security, http: HttpClient, period: str = "day", datalen: int = 60
+) -> list[dict[str, Any]]:
+    """腾讯 fqkline 前复权 K 线（day/week/month），WorkBuddy tdx 口径用。
+
+    出口保证时间正序，bars[-1]=最新；失败返回 []。period: day|week|month。
+    """
+    period = str(period or "day").strip().lower()
+    if period not in ("day", "week", "month"):
+        period = "day"
+    try:
+        _rate_limit_delay()
+        raw_params = (
+            f"_var=kline_{period}hfq&param={sec.qq_symbol},{period},,,{max(int(datalen), 20)},qfq"
+        )
+        full_url = f"{TENCENT_FQKLINE_URL}?{raw_params}"
+        payload = extract_jsonp(http.get_text(full_url))
+        sec_data = (payload.get("data") or {}).get(sec.qq_symbol) or {}
+        rows = sec_data.get(f"qfq{period}") or []
+        bars: list[dict[str, Any]] = []
+        for row in rows:
+            if isinstance(row, list) and len(row) >= 6:
+                bars.append({
+                    "date": str(row[0])[:10],
+                    "open": to_float(row[1]),
+                    "close": to_float(row[2]),
+                    "high": to_float(row[3]),
+                    "low": to_float(row[4]),
+                    "volume": to_float(row[5]),
+                    "data_source": f"tencent-qfq-{period}",
+                    "data_status": "full",
+                    "adjust": "qfq",
+                })
+        return ensure_bars_ascending(bars, recompute_atr=False)[0] if bars else []
+    except (OSError, ValueError, KeyError) as exc:
+        _logger.debug(
+            "Tencent qfq kline (%s) failed for %s: %s", period, sec.qq_symbol, exc
+        )
+        return []
 
 
 def _fetch_qfq_daily_raw(
@@ -1656,7 +1833,7 @@ def _fetch_mins_mootdx(sec: Security, interval: str, datalen: int = 60) -> list[
 def fetch_5m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
     # Prioritize robust Sina HTTP API to ensure complete 5m data without weekend truncation
     fallback_bars = _fetch_mins_fallback(sec, "5m", datalen)
-    if fallback_bars and len(fallback_bars) >= 8:
+    if fallback_bars and len(fallback_bars) >= 3:
         for bar in fallback_bars:
             bar["data_source"] = "sina"
             bar["data_status"] = "full"
@@ -1676,7 +1853,7 @@ def fetch_5m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[st
 
 def fetch_15m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
     fallback_bars = _fetch_mins_fallback(sec, "15m", datalen)
-    if fallback_bars and len(fallback_bars) >= 8:
+    if fallback_bars and len(fallback_bars) >= 3:
         for bar in fallback_bars:
             bar["data_source"] = "sina"
             bar["data_status"] = "full"
@@ -1696,7 +1873,7 @@ def fetch_15m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[s
 
 def fetch_30m(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
     fallback_bars = _fetch_mins_fallback(sec, "30m", datalen)
-    if fallback_bars and len(fallback_bars) >= 8:
+    if fallback_bars and len(fallback_bars) >= 3:
         for bar in fallback_bars:
             bar["data_source"] = "sina"
             bar["data_status"] = "full"
@@ -1765,6 +1942,10 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
         return _stamp_vol_unit(weekly, _DAILY_VOL_UNIT)
 
     def _net() -> list[dict[str, Any]]:
+        # WorkBuddy：sina/mootdx 周线为不复权，历史价位会因除权漂移（如 7/17 除息 0.18
+        # → BC 75.00 实为 74.82）。直接走腾讯前复权日线聚合，与 tdx MCP 前复权口径一致。
+        if _tdx_first():
+            return _from_daily()
         fallback_bars = _fetch_mins_fallback(sec, "weekly", datalen)
         if fallback_bars and len(fallback_bars) >= 4:
             for bar in fallback_bars:
@@ -1855,7 +2036,16 @@ def fetch_weekly(sec: Security, http: HttpClient, datalen: int | None = None) ->
 
 
 def fetch_monthly(sec: Security, http: HttpClient, datalen: int = 60) -> list[dict[str, Any]]:
-    """Fetch monthly K-line bars. Sina HTTP first, fallback to mootdx."""
+    """Fetch monthly K-line bars. Sina HTTP first, fallback to mootdx.
+
+    WorkBuddy（tdx 口径）：sina/mootdx 月线不复权，历史价位会因除权漂移；
+    改用腾讯 qfq 前复权月线，与 tdx MCP 一致。
+    """
+    if _tdx_first():
+        _qfq = _fetch_qfq_tencent_kline(sec, http, "month", datalen)
+        if _qfq:
+            fixed, _ = ensure_bars_ascending(_qfq, recompute_atr=False)
+            return _stamp_vol_unit(fixed, _DAILY_VOL_UNIT)
     fallback_bars = _fetch_mins_fallback(sec, "monthly", datalen)
     if fallback_bars and len(fallback_bars) >= 3:
         for bar in fallback_bars:
@@ -1875,8 +2065,11 @@ def fetch_monthly(sec: Security, http: HttpClient, datalen: int = 60) -> list[di
 
 
 def fetch_kline(sec: Security, http: HttpClient, datalen: int = 60, interval: str = "60") -> list[dict[str, Any]]:
+    # WorkBuddy 周线/月线：sina/mootdx 不复权 → 走腾讯前复权接口（与 tdx MCP 口径一致）
+    if _tdx_first() and str(interval or "").strip().lower() in ("weekly", "monthly"):
+        return fetch_weekly(sec, http, datalen=datalen) if str(interval).lower() == "weekly" else fetch_monthly(sec, http, datalen=datalen)
     fallback_bars = _fetch_mins_fallback(sec, interval, datalen)
-    if fallback_bars and len(fallback_bars) >= 8:
+    if fallback_bars and len(fallback_bars) >= 3:
         for bar in fallback_bars:
             bar["data_source"] = "sina"
             bar["data_status"] = "full"
@@ -1914,7 +2107,7 @@ def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dic
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36",
             "Referer": "https://finance.sina.com.cn/",
         }
-        ssl_ctx = ssl.create_default_context()
+        ssl_ctx = _market_ssl_context()
         
         # 指数退避重试（仅网络异常，HTTP 错误码不重试）
         from urllib.error import HTTPError
@@ -1922,7 +2115,7 @@ def _fetch_mins_fallback(sec: Security, interval: str, datalen: int) -> list[dic
         for attempt in range(3):
             try:
                 request = Request(url, headers=headers)
-                with urlopen(request, timeout=5, context=ssl_ctx) as response:
+                with _urlopen_direct(request, timeout=5, context=ssl_ctx) as response:
                     text = response.read().decode("gbk", errors="ignore")
                     break
             except HTTPError:
@@ -2005,6 +2198,7 @@ def _fetch_fund_flow_safe(target: str) -> dict[str, Any]:
 
 
 def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, include_weekly: bool = True, include_monthly: bool = True, include_ticks: bool = True) -> MarketSnapshot:
+    ensure_market_direct_network()
     sec = resolve_security(target)
     http = HttpClient()
     source_errors: dict[str, str] = {}
@@ -2054,7 +2248,13 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
             aggregate_daily_to_weekly,
             weekly_bars_look_like_weekly,
         )
-        if include_weekly and daily_bars and not weekly_bars_look_like_weekly(weekly_bars):
+        # 仅纠正「取到了但间距像日线」；空周线保持缺失，让 missing_sources 暴露源失败
+        if (
+            include_weekly
+            and daily_bars
+            and weekly_bars
+            and not weekly_bars_look_like_weekly(weekly_bars)
+        ):
             weekly_bars = aggregate_daily_to_weekly(daily_bars)
             weekly_bars, _ = ensure_bars_ascending(weekly_bars)
     except Exception as exc:

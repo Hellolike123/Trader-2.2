@@ -135,7 +135,7 @@ def build_match_context(report: dict[str, Any] | None = None, **overrides: Any) 
 
     support_tag = str(chip_c.get("support_tag") or r.get("chip_support_tag") or "")
     trapped = str(chip_c.get("trapped_tag") or r.get("chip_trapped_tag") or "")
-    chip_weak = bool(r.get("chip_support_weak")) or ("支撑弱" in support_tag)
+    chip_weak = bool(r.get("chip_support_weak")) or ("下方难撑" in support_tag) or ("支撑弱" in support_tag)
 
     current = float(r.get("current") or 0)
     # 策略止损用有效止损（hard ∪ trailing），与报告/纪律一致
@@ -268,14 +268,14 @@ def _match_defense(ctx: dict[str, Any]) -> bool:
         return True
     if str(ctx.get("regime") or "") in ("很差",):
         return True
-    if ctx.get("chip_support_weak") and "套牢面大" in str(ctx.get("chip_trapped_tag") or ""):
+    if ctx.get("chip_support_weak") and any(k in str(ctx.get("chip_trapped_tag") or "") for k in ("多数套牢", "套牢面大")):
         return True
     if ctx.get("chip_support_weak") and ctx.get("wyckoff_event") == "SOW":
         return True
     # SOW alone already covered; chip weak alone for S-02 with SOW
     if ctx.get("chip_support_weak") and ev == "SOW":
         return True
-    # S-02: SOW + 支撑弱 — SOW enough
+    # S-02: SOW + 下方难撑 — SOW enough
     return False
 
 

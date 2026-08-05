@@ -23,7 +23,7 @@ from trader_shared.chip_core import format_chip_position_light  # noqa: E402
 
 
 def test_format_chip_position_light_basic():
-    """方案 C：支撑 · 阻力 · 套牢面；无警报不写底部。"""
+    """方案 C：撑/压/主峰；不写套牢面；无警报不写底部。"""
     line = format_chip_position_light(
         55.0,
         [
@@ -34,15 +34,17 @@ def test_format_chip_position_light_basic():
         profit_pct=10.0,
     )
     assert line.startswith("筹码：")
-    assert "支撑 50.00" in line or "支撑弱" in line
-    assert "阻力 58.00" in line
-    assert "套牢面大" in line
+    assert "撑 50.00" in line or "下方难撑" in line
+    assert "压 58.00" in line
+    assert "多数套牢" not in line
+    assert "多数获利" not in line
+    assert "套牢中等" not in line
     assert "底部" not in line  # 无警报不写
     assert "｜" not in line
 
 
 def test_format_chip_position_light_nanwang_like():
-    """跌穿成本区：支撑弱 · 阻力 · 套牢面大。"""
+    """跌穿成本区：下方难撑 · 压位（不写套牢面）。"""
     line = format_chip_position_light(
         41.63,
         [
@@ -52,9 +54,109 @@ def test_format_chip_position_light_nanwang_like():
         {"has_history": True, "warning_level": "none", "migration_pct": 0},
         profit_pct=9.0,
     )
-    assert "支撑弱" in line
-    assert "阻力 44.40" in line
-    assert "套牢面大" in line
+    assert "下方难撑" in line
+    assert "压 44.40" in line
+    assert "多数套牢" not in line
+    assert "成本较" not in line  # 普通峰不是 15/85 分位，不写集中度
+
+
+def test_format_chip_position_light_main_peak_where_cost_sits():
+    """主筹码峰：标出主峰在哪（相对现价）。"""
+    # 上方大峰
+    above = format_chip_position_light(
+        43.2,
+        [
+            {"price": 41.75, "share_of_total": 8, "volume": 50},
+            {"price": 44.95, "share_of_total": 35, "volume": 200},
+            {"price": 49.36, "share_of_total": 10, "volume": 60},
+        ],
+        None,
+        profit_pct=8.0,
+    )
+    assert "主峰在 44.95 上方" in above
+
+    # 下方大峰
+    below = format_chip_position_light(
+        46.0,
+        [
+            {"price": 41.75, "share_of_total": 30, "volume": 180},
+            {"price": 44.95, "share_of_total": 12, "volume": 70},
+            {"price": 49.36, "share_of_total": 9, "volume": 40},
+        ],
+        None,
+        profit_pct=60.0,
+    )
+    assert "主峰在 41.75 下方" in below
+
+    # 附近
+    near = format_chip_position_light(
+        45.0,
+        [
+            {"price": 44.80, "share_of_total": 28, "volume": 150},
+            {"price": 50.00, "share_of_total": 10, "volume": 40},
+        ],
+        None,
+        profit_pct=50.0,
+    )
+    assert "主峰在 44.80 附近" in near
+
+    # 仅 15/85 分位时不把分位当主峰
+    only_pct = format_chip_position_light(
+        50.0,
+        [
+            {"price": 48.5, "share_of_total": 15},
+            {"price": 51.0, "share_of_total": 85},
+        ],
+        None,
+        profit_pct=55.0,
+    )
+    assert "主峰在" not in only_pct
+    assert "成本较齐" in only_pct
+
+    # 国电南瑞类：95 分位 30.00 绝不能盖过真实主峰 22.50
+    gdnr_like = format_chip_position_light(
+        24.54,
+        [
+            {"price": 22.50, "share_of_total": 9.59, "volume": 0},
+            {"price": 22.80, "share_of_total": 7.48, "volume": 0},
+            {"price": 24.00, "share_of_total": 6.35, "volume": 0},
+            {"price": 24.60, "share_of_total": 5.22, "volume": 0},
+            {"price": 21.60, "share_of_total": 5, "kind": "percentile", "percentile": 5},
+            {"price": 22.50, "share_of_total": 15, "kind": "percentile", "percentile": 15},
+            {"price": 24.00, "share_of_total": 50, "kind": "percentile", "percentile": 50},
+            {"price": 26.40, "share_of_total": 85, "kind": "percentile", "percentile": 85},
+            {"price": 30.00, "share_of_total": 95, "kind": "percentile", "percentile": 95},
+        ],
+        None,
+        profit_pct=56.7,
+    )
+    assert "主峰在 22.50 下方" in gdnr_like
+    assert "主峰在 30.00" not in gdnr_like
+
+
+def test_format_chip_position_light_concentration_from_cyq_percentiles():
+    """仅 cyq 15/85 分位可写偏集中/偏发散。"""
+    tight = format_chip_position_light(
+        50.0,
+        [
+            {"price": 48.5, "share_of_total": 15},
+            {"price": 51.0, "share_of_total": 85},
+        ],
+        None,
+        profit_pct=55.0,
+    )
+    assert "成本较齐" in tight
+
+    wide = format_chip_position_light(
+        50.0,
+        [
+            {"price": 40.0, "share_of_total": 15},
+            {"price": 60.0, "share_of_total": 85},
+        ],
+        None,
+        profit_pct=55.0,
+    )
+    assert "成本较散" in wide
 
 
 def _daily_bars() -> list[dict]:
@@ -822,22 +924,22 @@ def test_risk_uses_short_resist():
 # ── Task 5: 中线筹码状态行 ──
 
 def test_midline_chip_status():
-    """中线区筹码方案 C：支撑 · 阻力 · 套牢面。"""
+    """中线区筹码方案 C：撑/压/主峰。"""
     out = render_short_midline(_report())
     assert "筹码：" in out
-    assert "阻力 44.95" in out or "阻力 44.9" in out
-    assert "套牢面大" in out  # profit 8.3%
+    assert "压 44.95" in out or "压 44.9" in out
+    assert "多数套牢" not in out
 
 
 def test_midline_chip_no_above_peak_graceful():
-    """无上方峰时写阻力弱，不出现旧「套牢峰」文案。"""
+    """无上方峰时写上方阻力弱，不出现旧「套牢峰」文案。"""
     r = _report()
     r["chip_peaks"] = [{"price": 40.0, "volume": 100, "support_level": "弱支撑"}]
     r["chip_current_pct"] = 95.0
     out = render_short_midline(r)
     assert "套牢峰" not in out
-    assert "阻力弱" in out
-    assert "套牢面小" in out  # 获利盘 95%
+    assert "上方阻力弱" in out
+    assert "多数获利" not in out
 
 
 def test_midline_chip_missing_graceful():
@@ -891,6 +993,55 @@ def test_vpf_with_veto_appends():
     r["fusion"]["fund_flow_outflow_veto_msg"] = "连续 3 日主力净流出超阈值"
     out = render_short_midline(r)
     assert "连3日流出" in out or "主力连续3日净流出" in out or "连续 3 日主力净流出" in out
+
+
+def test_fund_line_appends_main_force_and_relation():
+    """资金行可附加主力评分 / 价资关系 / 大单短标签。"""
+    r = _report()
+    r["fund_flow_features"] = {
+        "cum_flow_5d_wan": -1800,
+        "consecutive_outflow_days": 3,
+        "flow_price_relation": "价涨资出",
+    }
+    r["main_force_score"] = {"total_score": 4, "label": "偏弱"}
+    r["big_order_direction"] = "偏卖"
+    out = render_short_midline(r)
+    fund_line = next(l for l in out.split("\n") if "资金：" in l)
+    assert "连3日流出" in fund_line
+    assert "价涨资出" in fund_line
+    assert "主力4/15" in fund_line
+    assert "大单偏卖" in fund_line
+
+
+def test_fund_line_marks_estimate_and_stale_source():
+    """资金估 / 资金偏旧 短标注。"""
+    from datetime import date, timedelta
+
+    r = _report()
+    old = (date.today() - timedelta(days=5)).strftime("%Y%m%d")
+    r["fund_flow_features"] = {
+        "cum_flow_5d_wan": -50,
+        "consecutive_outflow_days": 0,
+        "flow_price_relation": "无数据",
+        "data_source": "bars_estimate",
+        "latest_fund_date": old,
+    }
+    r["main_force_score"] = {}
+    r["big_order_direction"] = None
+    out = render_short_midline(r)
+    fund_line = next(l for l in out.split("\n") if "资金：" in l)
+    assert "资金估" in fund_line
+    assert "资金偏旧" in fund_line
+
+
+def test_risk_flags_prefix_hard_flags():
+    """ST/停牌/新股硬旗前置到风险行。"""
+    r = _report()
+    r["risk_flags"] = ["ST", "新股"]
+    out = render_short_midline(r)
+    risk_line = next(l for l in out.split("\n") if l.startswith("⚠️ 风险："))
+    assert risk_line.index("ST") < risk_line.index("现价不宜追")
+    assert "新股" in risk_line
 
 
 # ── Task 8: 调整天数 + 相对强弱降级 ──

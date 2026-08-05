@@ -203,3 +203,20 @@ python3 02-共享模块-shared/scripts/pack_all.py
 | 输出格式 | `output-template.md` / `output-style-guide.md` |
 | 测试 | `02-共享模块-shared/tests/TESTING.md` |
 | 包 import | `from trader_shared.xxx import ...`；`pip install -e .` |
+
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `Hellolike123/Trader-2.2` via `gh`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout (`CONTEXT.md` + `docs/adr/` at repo root). See `docs/agents/domain.md`.

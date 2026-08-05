@@ -6,13 +6,14 @@
     > skill config.json
     > 本文件 TUSHARE_TOKEN（应始终为空）
 
-获取 token: https://tushare.pro
-示例见 tushare_config.example.py
+专属高权限网关文档见 tushare_config.example.py。
 """
 from __future__ import annotations
 
 # 留空；生产请设置环境变量 TUSHARE_TOKEN 或本地 tushare_config.local.py
 TUSHARE_TOKEN = ""
 
-TUSHARE_API_URL = "https://fastapic.stockai888.top"
-TUSHARE_REALTIME_URL = "https://realtime.stockai888.top"
+# 默认走专属 Pro 网关（筹码等高权限接口）
+TUSHARE_API_URL = "http://api.quicksync.cn"
+# 实时报价生产仍优先腾讯/新浪；若走 tushare realtime，也指向同一专属域
+TUSHARE_REALTIME_URL = "http://api.quicksync.cn"

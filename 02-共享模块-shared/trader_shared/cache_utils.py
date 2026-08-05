@@ -77,6 +77,7 @@ CACHE_ENRICH = "enrich"
 CACHE_MARKET_ENV = "market_env"
 CACHE_FUND_FLOW = "fund_flow"
 CACHE_CYQ = "cyq_perf"  # tushare 筹码日频；按自然日复用
+CACHE_CYQ_CHIPS = "cyq_chips"  # tushare 逐价位筹码；按自然日复用
 
 # TTL constants (seconds)
 TTL_DAILY = 86400       # 文件年龄兜底；日 K 真正失效看 fetch_date（同日复用）

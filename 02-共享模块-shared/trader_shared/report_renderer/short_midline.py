@@ -139,8 +139,28 @@ def _compact_short_structure_line(line: str) -> str:
     return body
 
 
-def _short_fund_display(vsig: dict[str, Any]) -> str:
-    """资金行短文案：取主句、压「近5日主力累计*」前缀，避免截成「价量近…」。"""
+def _fmt_flow_wan(val: Any) -> str:
+    """万元金额短标签。"""
+    try:
+        v = float(val)
+    except (TypeError, ValueError):
+        return "--"
+    if abs(v) >= 10000:
+        return f"{v/10000:.2f}亿"
+    if abs(v) >= 100:
+        return f"{v:.0f}万"
+    return f"{v:.1f}万"
+
+
+def _short_fund_display(
+    vsig: dict[str, Any],
+    *,
+    fund_features: dict[str, Any] | None = None,
+    main_force_score: dict[str, Any] | None = None,
+    big_order_summary: Any = None,
+    big_order_direction: Any = None,
+) -> str:
+    """资金行短文案：价量主句 + 可选主力/价资/大单补充，避免截成「价量近…」。"""
     reason = str(vsig.get("reason") or vsig.get("vp_reason") or "").strip() or "中性"
     reason = re.sub(r"（资金未取到）", "", reason)
     reason = re.sub(r"资金未取到", "", reason)
@@ -148,11 +168,117 @@ def _short_fund_display(vsig: dict[str, Any]) -> str:
     primary = re.sub(r"近5日主力累计流出", "主力5日流出", primary)
     primary = re.sub(r"近5日主力累计流入", "主力5日流入", primary)
     primary = re.sub(r"\s{2,}", " ", primary).strip(" ·｜|")
-    if len(primary) > 28:
-        primary = re.sub(r"（占比[^）]*）", "", primary).strip()
-    if len(primary) > 28:
-        primary = primary[:26] + "…"
-    return primary or "中性"
+
+    ff = fund_features if isinstance(fund_features, dict) else {}
+    extras: list[str] = []
+
+    # 若主句还只是价量，补连续日；无连续日才写 5 日累计金额
+    if "主力" not in primary and "净流" not in primary:
+        try:
+            cum5 = float(ff.get("cum_flow_5d_wan") or 0)
+        except (TypeError, ValueError):
+            cum5 = 0.0
+        con_in = int(ff.get("consecutive_inflow_days") or 0)
+        con_out = int(ff.get("consecutive_outflow_days") or 0)
+        if con_out >= 2:
+            extras.append(f"连{con_out}日流出")
+        elif con_in >= 2:
+            extras.append(f"连{con_in}日流入")
+        elif abs(cum5) >= 100:
+            extras.append(("主力5日流入" if cum5 > 0 else "主力5日流出") + _fmt_flow_wan(abs(cum5)))
+
+    # 价资关系（短且信息密度高，优先保留）
+    rel = str(ff.get("flow_price_relation") or "").strip()
+    if rel and rel not in ("无数据", "中性", "—", "-") and rel not in primary:
+        extras.append(rel)
+
+    mf = main_force_score if isinstance(main_force_score, dict) else {}
+    try:
+        mf_total = mf.get("total_score")
+        mf_total_i = int(mf_total) if mf_total is not None else None
+    except (TypeError, ValueError):
+        mf_total_i = None
+    mf_label = str(mf.get("label") or "").strip()
+    # 标签压短：只要分数；等级仅在偏强/偏弱/强/弱时带一字
+    if mf_total_i is not None:
+        short_lbl = ""
+        for k in ("偏强", "偏弱", "很强", "很弱", "强", "弱"):
+            if k in mf_label:
+                short_lbl = k
+                break
+        extras.append(f"主力{mf_total_i}/15" + (f"·{short_lbl}" if short_lbl else ""))
+
+    # 大单：优先短方向，其次 summary 压短
+    bo_dir = str(big_order_direction or "").strip()
+    bo_sum = str(big_order_summary or "").strip()
+    bo = bo_dir or bo_sum
+    if bo:
+        bo = re.sub(r"\s+", "", bo)
+        if len(bo) > 8:
+            bo = bo[:7] + "…"
+        if bo not in primary and all(bo not in x for x in extras):
+            extras.append(f"大单{bo}" if not bo.startswith("大单") else bo)
+
+    # 源/过期：只在异常或可辨识时点一下，不抢主句
+    src = str(ff.get("data_source") or "").strip().lower()
+    if src in ("bars_estimate", "estimate", "bars"):
+        extras.append("资金估")
+    elif src and src not in ("", "none", "unknown"):
+        # 正常有真源时，仅当主句弱/无连续信息时补源名
+        if not any(k in primary for k in ("连", "主力", "净流")) and not any(
+            x.startswith("连") for x in extras
+        ):
+            short_src = {
+                "tushare": "源tushare",
+                "tdx": "源tdx",
+                "sina": "源sina",
+            }.get(src, f"源{src}"[:8])
+            extras.append(short_src)
+    # 资金日期偏旧（>3 自然日）→ 偏旧
+    latest_fd = str(ff.get("latest_fund_date") or "").strip()
+    if latest_fd:
+        try:
+            from trader_shared.cn_time import today_cn
+            _today = today_cn()
+            digits = "".join(ch for ch in latest_fd if ch.isdigit())
+            if len(digits) >= 8:
+                from datetime import date as _date
+                _fd = _date(int(digits[:4]), int(digits[4:6]), int(digits[6:8]))
+                if (_today - _fd).days >= 3:
+                    extras.append("资金偏旧")
+        except Exception:
+            pass
+    # 无连续日时，10 日累计显著才补一句（避免和 5 日重复）
+    if not any(x.startswith("连") for x in extras) and "5日" not in primary:
+        try:
+            cum10 = float(ff.get("cum_flow_10d_wan") or 0)
+        except (TypeError, ValueError):
+            cum10 = 0.0
+        if abs(cum10) >= 3000 and "10日" not in primary:
+            extras.append(("10日流入" if cum10 > 0 else "10日流出") + _fmt_flow_wan(abs(cum10)))
+
+    # 去重保序；先收 5 项，超长再从末尾丢（连续/价资/评分优先于大单/源）
+    seen: set[str] = set()
+    clean_extras: list[str] = []
+    for x in extras:
+        if x and x not in seen and x not in primary:
+            seen.add(x)
+            clean_extras.append(x)
+    clean_extras = clean_extras[:5]
+
+    parts = [primary] if primary else []
+    parts.extend(clean_extras)
+    out = " · ".join(p for p in parts if p)
+    out = re.sub(r"（占比[^）]*）", "", out).strip(" ·")
+    # 仍超长：从末尾丢补充项
+    while len(out) > 52 and clean_extras:
+        clean_extras.pop()
+        parts = [primary] if primary else []
+        parts.extend(clean_extras)
+        out = " · ".join(p for p in parts if p)
+    if len(out) > 52:
+        out = out[:50] + "…"
+    return out or "中性"
 
 
 def render_short_midline(r: dict[str, Any]) -> str:
@@ -344,39 +470,29 @@ def render_short_midline(r: dict[str, Any]) -> str:
         if _concept_parts:
             lines.append(f"  概念题材：{' ｜ '.join(_concept_parts[:4])}")
 
-    # 资金面
-    _ext_north = r.get("extend_northbound") or {}
+    # 资金面：只保留个股两融；北向全市场数字噪音大且单位易糊，面板不展示
     _ext_margin = r.get("extend_margin") or {}
-    _has_north = isinstance(_ext_north, dict) and _ext_north.get("status") == "正常"
     _has_margin = isinstance(_ext_margin, dict) and _ext_margin.get("status") == "正常"
-    if _has_north or _has_margin:
-        _north_part = ""
-        if _has_north:
-            _net = _ext_north.get("north_net_flow_wan")
-            _5d = _ext_north.get("north_flow_5d_wan")
-            def _fmt_flow(val):
-                if val is None: return "--"
-                if abs(val) >= 10000: return f"{val/10000:.2f}亿"
-                return f"{val:.2f}万"
-            _north_part = f"北向净流入 {_fmt_flow(_net)}（近5日 {_fmt_flow(_5d)}）"
-        _margin_part = ""
-        if _has_margin:
-            _bal = _ext_margin.get("margin_balance_wan")
-            _buy = _ext_margin.get("margin_buy_wan") or 0.0
-            _sell = _ext_margin.get("margin_sell_wan") or 0.0
-            _net_buy = _buy - _sell
-            def _fmt_flow(val):
-                if val is None: return "--"
-                if abs(val) >= 10000: return f"{val/10000:.2f}亿"
-                return f"{val:.2f}万"
-            _margin_part = f"融资余额 {_fmt_flow(_bal)}（本日净买入 {_fmt_flow(_net_buy)}）"
-        _cap_parts = []
-        if _north_part:
-            _cap_parts.append(_north_part)
-        if _margin_part:
-            _cap_parts.append(_margin_part)
-        if _cap_parts:
-            lines.append(f"  资金面：{' ｜ '.join(_cap_parts)}")
+    if _has_margin:
+        _bal = _ext_margin.get("margin_balance_wan")
+        _buy = _ext_margin.get("margin_buy_wan") or 0.0
+        _sell = _ext_margin.get("margin_sell_wan") or 0.0
+        _net_buy = float(_buy) - float(_sell)
+
+        def _fmt_flow(val):
+            if val is None:
+                return "--"
+            try:
+                v = float(val)
+            except (TypeError, ValueError):
+                return "--"
+            if abs(v) >= 10000:
+                return f"{v/10000:.2f}亿"
+            return f"{v:.2f}万"
+
+        lines.append(
+            f"  资金面：融资余额 {_fmt_flow(_bal)}（本日净买入 {_fmt_flow(_net_buy)}）"
+        )
 
     mid = conclusion.get("midline") or "中线观察"
     short = conclusion.get("shortline") or "观察"
@@ -924,10 +1040,18 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _mst = "暂无信号"
 
     _vsig = fusion_signals.get("vpf") if isinstance(fusion_signals.get("vpf"), dict) else {}
-    if _vsig:
-        _vst = _short_fund_display(_vsig)
+    _ff_feat = r.get("fund_flow_features") if isinstance(r.get("fund_flow_features"), dict) else {}
+    _mf_score = r.get("main_force_score") if isinstance(r.get("main_force_score"), dict) else {}
+    if _vsig or _ff_feat or _mf_score or r.get("big_order_summary") or r.get("big_order_direction"):
+        _vst = _short_fund_display(
+            _vsig or {},
+            fund_features=_ff_feat,
+            main_force_score=_mf_score,
+            big_order_summary=r.get("big_order_summary"),
+            big_order_direction=r.get("big_order_direction"),
+        )
         _veto = str(fusion.get("fund_flow_outflow_veto_msg") or "").strip()
-        if _veto:
+        if _veto and "连" not in _vst:
             _days_m = re.search(r"连续\s*(\d+)\s*日", _veto)
             if _days_m:
                 _vst = f"{_vst} · 连{_days_m.group(1)}日流出"
@@ -1302,9 +1426,14 @@ def render_short_midline(r: dict[str, Any]) -> str:
     else:
         lines.append("✅ 亮点：暂无，先看纪律与风险")
 
-    # 风险：止损价 + 短线 MA20 压力（不用中线远压力） + 未来待解禁
+    # 风险：硬旗(ST/停牌/新股) + 止损价 + 短线 MA20 压力（不用中线远压力） + 未来待解禁
     # D-R7：禁止再贴与定论相同的「中线偏空（短因）」整段；关闭态优先现价不宜追+止损
     _risk_parts = []
+    _rf = r.get("risk_flags") if isinstance(r.get("risk_flags"), list) else []
+    for _flag in _rf:
+        _fs = str(_flag or "").strip()
+        if _fs and _fs not in _risk_parts:
+            _risk_parts.append(_fs)
     if _chan_bear_hl and _chan_risk_label:
         _risk_parts.append(f"缠论{_chan_risk_label}")
     _bias_risk_blob = f"中线{_bias_suffix}" if _bias_suffix else "中线偏空"

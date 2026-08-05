@@ -39,14 +39,34 @@ def run_chip_enrichment_stage(
 
     tushare_chip_data = None
     try:
-        from trader_shared.chip_data import get_cyq_perf_cached
+        from trader_shared.chip_data import (
+            cyq_chips_to_peaks,
+            get_cyq_chips_cached,
+            get_cyq_perf_cached,
+        )
 
         _cyq = get_cyq_perf_cached(ts_code, start_date="", end_date="")
+        _latest = None
+        _trade_date = ""
         if _cyq:
             _latest = max(_cyq, key=lambda x: str(x.get("trade_date", "")))
+            _trade_date = str(_latest.get("trade_date") or "")
+        # 主峰优先：cyq_chips 逐价位；失败再只用 cyq_perf 分位锚
+        _chip_peaks: list[dict] = []
+        _source = "tushare_cyq_perf"
+        if _trade_date:
+            try:
+                _chip_rows = get_cyq_chips_cached(ts_code, _trade_date)
+                _chip_peaks = cyq_chips_to_peaks(_chip_rows, top_n=8)
+                if _chip_peaks:
+                    _source = "tushare_cyq_chips"
+            except Exception as _chips_exc:
+                _log.debug("cyq_chips peak enrich failed for %s: %s", ts_code, _chips_exc)
+
+        if _latest is not None:
             _winner_rate = float(_latest.get("winner_rate", 0) or 0)
             _cost_50 = float(_latest.get("cost_50pct", 0) or 0)
-            _peaks = []
+            _pct_peaks = []
             for _pct_key, _share in [
                 ("cost_5pct", 5),
                 ("cost_15pct", 15),
@@ -56,15 +76,31 @@ def run_chip_enrichment_stage(
             ]:
                 _price = float(_latest.get(_pct_key, 0) or 0)
                 if _price > 0:
-                    _peaks.append({"price": _price, "share_of_total": _share})
+                    # share_of_total 这里记「分位编号」不是真实占比；主峰/强度排序必须跳过
+                    _pct_peaks.append({
+                        "price": _price,
+                        "share_of_total": _share,
+                        "kind": "percentile",
+                        "percentile": _share,
+                    })
+            # 分位锚始终保留（成本较齐/散依赖 15/85）；主峰用 chips 真峰在前
+            # 同价也保留分位锚：真峰负责撑/压/主峰，分位锚只服务带宽标签
+            _merged = list(_chip_peaks) if _chip_peaks else []
+            for _pp in _pct_peaks:
+                _merged.append(_pp)
+            # 若 chips 空，退回分位峰
+            if not _merged:
+                _merged = _pct_peaks
+                _source = "tushare_cyq_perf"
             tushare_chip_data = {
                 "current_pct": _winner_rate,
                 "mid_price": _cost_50,
-                "peaks": _peaks,
-                "source": "tushare_cyq_perf",
+                "peaks": _merged,
+                "source": _source,
+                "trade_date": _trade_date,
             }
     except Exception as e:
-        _log.warning("Tushare cyq_perf fallback to internal calc: %s", e)
+        _log.warning("Tushare cyq_perf/chips fallback to internal calc: %s", e)
 
     chip_res = analyze_chips_and_migration(
         bars=bars,

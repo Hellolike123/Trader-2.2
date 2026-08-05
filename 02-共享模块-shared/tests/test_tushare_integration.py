@@ -238,7 +238,7 @@ class TestTushareClientWithSDK:
         assert result[0]["PRICE"] == 10.5
 
 
-# ── _fetch_fund_flow_tushare: field mapping ──────────────────────────────────
+# ── _fetch_from_tushare: field mapping ──────────────────────────────────
 
 
 class TestFetchFundFlowTushare:
@@ -279,29 +279,24 @@ class TestFetchFundFlowTushare:
             "trader_shared.tushare_client.get_client", lambda: mock_client
         )
 
-        from trader_shared.fund_flow_data import _fetch_fund_flow_tushare
-        result = _fetch_fund_flow_tushare("688248", days=30)
+        from trader_shared.fund_flow_data import _fetch_from_tushare
+        result = _fetch_from_tushare("688248", days=30)
 
         assert len(result) == 2
-        # Check first record
-        r0 = result[0]
-        assert r0["date"] == "2026-07-10"  # YYYYMMDD → YYYY-MM-DD
-        assert r0["net_flow_wan"] == 17500
-        assert r0["buy_elg_amount"] == 5000
-        assert r0["sell_elg_amount"] == 2500
-        assert r0["buy_lg_amount"] == 15000
-        assert r0["sell_lg_amount"] == 10000
-        assert r0["buy_md_amount"] == 25000
-        assert r0["sell_md_amount"] == 20000
-        assert r0["buy_sm_amount"] == 50000
-        assert r0["sell_sm_amount"] == 40000
-        assert r0["buy_elg_vol"] == 100
-        assert r0["sell_elg_vol"] == 50
-        assert r0["buy_lg_vol"] == 300
-        assert r0["sell_lg_vol"] == 200
-        # Check second record
-        assert result[1]["date"] == "2026-07-09"
-        assert result[1]["net_flow_wan"] == 14500
+        # 升序：旧→新
+        r0, r1 = result[0], result[1]
+        assert r0["date"] == "2026-07-09"
+        # (4000+10000)-(2000+7500)=4500
+        assert r0["net_flow_wan"] == 4500
+        assert r0["source"] == "tushare"
+
+        assert r1["date"] == "2026-07-10"
+        # 主力净额 = (buy_elg+buy_lg) - (sell_elg+sell_lg) = (5000+15000)-(2500+10000)=7500
+        assert r1["net_flow_wan"] == 7500
+        assert r1["super_large_wan"] == 2500  # 5000-2500
+        assert r1["large_wan"] == 5000        # 15000-10000
+        assert r1["medium_wan"] == 5000       # 25000-20000
+        assert r1["small_wan"] == 10000       # 50000-40000
 
     def test_returns_empty_when_client_unavailable(self, monkeypatch):
         mock_client = MagicMock()
@@ -310,8 +305,8 @@ class TestFetchFundFlowTushare:
             "trader_shared.tushare_client.get_client", lambda: mock_client
         )
 
-        from trader_shared.fund_flow_data import _fetch_fund_flow_tushare
-        result = _fetch_fund_flow_tushare("688248", days=30)
+        from trader_shared.fund_flow_data import _fetch_from_tushare
+        result = _fetch_from_tushare("688248", days=30)
         assert result == []
 
     def test_returns_empty_when_no_records(self, monkeypatch):
@@ -322,8 +317,8 @@ class TestFetchFundFlowTushare:
             "trader_shared.tushare_client.get_client", lambda: mock_client
         )
 
-        from trader_shared.fund_flow_data import _fetch_fund_flow_tushare
-        result = _fetch_fund_flow_tushare("688248", days=30)
+        from trader_shared.fund_flow_data import _fetch_from_tushare
+        result = _fetch_from_tushare("688248", days=30)
         assert result == []
 
     def test_none_fields_default_to_zero(self, monkeypatch):
@@ -349,11 +344,12 @@ class TestFetchFundFlowTushare:
             "trader_shared.tushare_client.get_client", lambda: mock_client
         )
 
-        from trader_shared.fund_flow_data import _fetch_fund_flow_tushare
-        result = _fetch_fund_flow_tushare("000001", days=30)
+        from trader_shared.fund_flow_data import _fetch_from_tushare
+        result = _fetch_from_tushare("000001", days=30)
         assert len(result) == 1
         assert result[0]["net_flow_wan"] == 0
-        assert result[0]["buy_elg_amount"] == 0
+        assert result[0]["super_large_wan"] == 0
+        assert result[0]["large_wan"] == 0
 
 
 # ── _symbol_to_ts_code ──────────────────────────────────────────────────────
@@ -553,7 +549,8 @@ class TestTushareProviderFetchQfqDaily:
         assert bars[-1]["data_source"] == "tushare"
         assert bars[-1]["adjust"] == "none"
         assert bars[-1]["data_status"] == "partial"
-        assert seen.get("target") == "tushare/none/000001"
+        # 市场分桶：000001.SH 指数 vs 000001.SZ 个股不得共键
+        assert seen.get("target") == "tushare/none/000001_SZ"
         # ATR fields should be computed；正序后第2根 TR 用第1根收盘作昨收
         assert "tr" in bars[-1]
         assert bars[1]["tr"] == round(
@@ -609,6 +606,10 @@ class TestTushareProviderFetchQfqDaily:
 class TestGetProviderTushare:
     def test_get_provider_returns_tushare_when_token_available(self, monkeypatch, _with_token):
         """get_provider() should return TushareProvider when TUSHARE_TOKEN is set and SDK works."""
+        # pin hermes：本机若探测到 WorkBuddy connectors，会优先 mootdx，掩盖 tushare 分支
+        monkeypatch.delenv("TRADER_DATA_PROVIDER", raising=False)
+        monkeypatch.setenv("TRADER_HOST", "hermes")
+
         # Mock tushare SDK
         mock_ts = MagicMock()
         mock_pro = MagicMock()
@@ -617,12 +618,24 @@ class TestGetProviderTushare:
         monkeypatch.setitem(sys.modules, "tushare.stock", MagicMock())
         monkeypatch.setitem(sys.modules, "tushare.stock.cons", MagicMock())
 
+        # 单测不依赖外网可达；专属网关探测失败时仍应覆盖“有 token → tushare”分支
+        monkeypatch.setattr(
+            "trader_shared.tushare_client._probe_reachable",
+            lambda *a, **k: True,
+        )
+        monkeypatch.setattr(
+            "trader_shared.data_provider._tushare_available",
+            lambda: True,
+        )
+
         from trader_shared.tushare_client import reset_client
         reset_client()
 
         import importlib
         import trader_shared.data_provider as dp
         importlib.reload(dp)
+        # reload 后补钉，避免模块身份变化丢 patch
+        monkeypatch.setattr(dp, "_tushare_available", lambda: True)
         dp._provider = None  # Reset global
 
         provider = dp.get_provider()
@@ -672,48 +685,87 @@ class TestFetchFundFlowIntegration:
         mock_client.available = True
         mock_client.query_moneyflow.return_value = mock_records
 
-        # Patch the tushare_client module at the import level
-        mock_tc = MagicMock()
-        mock_tc.get_client.return_value = mock_client
-        monkeypatch.setitem(sys.modules, "trader_shared.tushare_client", mock_tc)
+        monkeypatch.setattr(
+            "trader_shared.tushare_client.get_client", lambda: mock_client
+        )
+        monkeypatch.setattr(
+            "trader_shared.fund_flow_data.load_fund_flow",
+            lambda symbol, max_age_hours=6: [],
+        )
+        monkeypatch.setattr(
+            "trader_shared.fund_flow_data.save_fund_flow",
+            lambda symbol, daily_flow: None,
+        )
+        monkeypatch.setattr(
+            "trader_shared.fund_flow_data._fetch_from_tdx",
+            lambda symbol, days: [],
+        )
+        monkeypatch.setattr(
+            "trader_shared.fund_flow_data._fetch_from_sina",
+            lambda symbol, days: [],
+        )
+        monkeypatch.setenv("FUND_FLOW_SOURCE", "auto")
+        monkeypatch.setenv("TRADER_HOST", "hermes")
 
         from trader_shared.fund_flow_data import fetch_fund_flow
         result = fetch_fund_flow("688248", days=30)
 
         assert len(result) == 1
         assert result[0]["date"] == "2026-07-10"
-        assert result[0]["net_flow_wan"] == 17500
-        # Verify Tushare was called (not eastmoney)
+        # 主力净额按 buy/sell 分档重算，不是 net_mf_amount
+        assert result[0]["net_flow_wan"] == 7500
+        assert result[0]["source"] == "tushare"
         mock_client.query_moneyflow.assert_called_once()
 
-    def test_fallback_to_eastmoney_when_tushare_empty(self, monkeypatch):
-        """When Tushare returns empty, should fallback to eastmoney."""
+    def test_fallback_to_sina_when_tushare_empty(self, monkeypatch):
+        """When Tushare returns empty, should fallback to sina."""
         mock_client = MagicMock()
         mock_client.available = True
         mock_client.query_moneyflow.return_value = []
 
-        mock_tc = MagicMock()
-        mock_tc.get_client.return_value = mock_client
-        monkeypatch.setitem(sys.modules, "trader_shared.tushare_client", mock_tc)
+        monkeypatch.setattr(
+            "trader_shared.tushare_client.get_client", lambda: mock_client
+        )
 
-        # Mock eastmoney to return data
-        eastmoney_data = [{"date": "2026-07-10", "super_large_wan": 10, "large_wan": 5,
-                           "medium_wan": 2, "small_wan": 1, "net_flow_wan": 15}]
+        # Mock sina to return data; tdx empty
+        sina_data = [{
+            "date": "2026-07-10",
+            "super_large_wan": 10,
+            "large_wan": 5,
+            "medium_wan": 2,
+            "small_wan": 1,
+            "net_flow_wan": 15,
+            "source": "sina",
+        }]
         monkeypatch.setattr(
-            "trader_shared.fund_flow_data._fetch_fund_flow_eastmoney",
-            lambda symbol, days: eastmoney_data
+            "trader_shared.fund_flow_data._fetch_from_tushare",
+            lambda symbol, days: [],
         )
-        # Also mock TDX to return empty
         monkeypatch.setattr(
-            "trader_shared.fund_flow_data._fetch_fund_flow_tdx_mcp",
-            lambda symbol, days: []
+            "trader_shared.fund_flow_data._fetch_from_sina",
+            lambda symbol, days: sina_data,
         )
+        monkeypatch.setattr(
+            "trader_shared.fund_flow_data._fetch_from_tdx",
+            lambda symbol, days: [],
+        )
+        monkeypatch.setattr(
+            "trader_shared.fund_flow_data.load_fund_flow",
+            lambda symbol, max_age_hours=6: [],
+        )
+        monkeypatch.setattr(
+            "trader_shared.fund_flow_data.save_fund_flow",
+            lambda symbol, daily_flow: None,
+        )
+        monkeypatch.setenv("FUND_FLOW_SOURCE", "auto")
+        monkeypatch.setenv("TRADER_HOST", "hermes")
 
         from trader_shared.fund_flow_data import fetch_fund_flow
         result = fetch_fund_flow("688248", days=30)
 
         assert len(result) == 1
         assert result[0]["super_large_wan"] == 10
+        assert result[0].get("source") == "sina"
 
 
 class TestTushareFundFlowE2E:
@@ -748,15 +800,15 @@ class TestTushareFundFlowE2E:
             "trader_shared.tushare_client.get_client", lambda: mock_client
         )
 
-        from trader_shared.fund_flow_data import _fetch_fund_flow_tushare, calc_fund_flow_features
+        from trader_shared.fund_flow_data import _fetch_from_tushare, calc_fund_flow_features
 
         # 第一步：Tushare 数据获取 + 字段映射
-        flow_data = _fetch_fund_flow_tushare("688248", days=30)
+        flow_data = _fetch_from_tushare("688248", days=30)
         assert len(flow_data) == 5
 
-        # 确认 net_flow_wan 存在且非零
-        assert flow_data[0]["net_flow_wan"] == 5000
-        assert flow_data[1]["net_flow_wan"] == 3000
+        # 确认 net_flow_wan 按分档重算（不直接信 net_mf_amount）
+        assert flow_data[0]["net_flow_wan"] == 7500
+        assert flow_data[1]["net_flow_wan"] == 7500
 
         # 第二步：喂给 calc_fund_flow_features，验证特征非零
         # 需要构造简单的 bars（daily K-line）作为参数

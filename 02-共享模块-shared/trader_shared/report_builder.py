@@ -92,6 +92,11 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     )
 
     provider = get_provider()
+    try:
+        from trader_shared.light_data import ensure_market_direct_network
+        ensure_market_direct_network()
+    except Exception:
+        pass
     # 月线/ tick 默认不进主路径：月线在共振块按需补拉；tick 本报告未消费。
     # 周线必须拉（中线缠/威 + mid_key_prices）。
     # 数据 SSOT = get_provider；不再构造死 DI TencentFetcher（下游 fetcher 形参可传 None）。
@@ -105,8 +110,22 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     )
     _mark("snapshot")
     if not snapshot.quote or not snapshot.daily_bars:
-        detail = "; ".join(f"{key}: {value}" for key, value in snapshot.source_errors.items()) or "missing required market data"
-        raise RuntimeError(detail)
+        missing = list(getattr(snapshot, "missing_sources", None) or [])
+        if not snapshot.quote and "quote" not in missing:
+            missing.append("quote")
+        if not snapshot.daily_bars and "daily" not in missing:
+            missing.append("daily")
+        err_bits = [
+            f"{key}: {value}"
+            for key, value in (getattr(snapshot, "source_errors", None) or {}).items()
+        ]
+        detail = "; ".join(err_bits) if err_bits else "no source_errors"
+        raise RuntimeError(
+            "missing required market data"
+            f" | missing={missing or ['quote/daily']}"
+            f" | data_status={getattr(snapshot, 'data_status', '?')}"
+            f" | detail={detail}"
+        )
 
     sec = snapshot.security
     quote = snapshot.quote

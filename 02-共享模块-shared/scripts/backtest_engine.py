@@ -222,27 +222,11 @@ def _fetch_risk_history(sec) -> dict[str, Any]:
     except Exception:
         fund_flow_hist = []
 
-    # 2) 全部限售解禁事件（原始拉取，不过滤 today，循环内按 t 切 90 天窗口）
+    # 2) 全部限售解禁事件（Tushare share_float；不过滤 today，循环内按 t 切 90 天窗口）
     try:
-        from trader_shared.extend_data import eastmoney_datacenter
-        data = eastmoney_datacenter(
-            report_name="RPT_LIFT_STAGE",
-            filter_str=f'(SECURITY_CODE="{code}")',
-            page_size=50, sort_columns="FREE_DATE", sort_types="1",
-        )
-        for row in data:
-            free_date = (row.get("FREE_DATE") or "")[:10]
-            if not free_date:
-                continue
-            try:
-                ratio = float(row.get("FREE_RATIO", 0) or 0) * 100
-                amount_wan = float(row.get("CURRENT_FREE_SHARES", 0) or 0)
-                unlocks_all.append({"date": free_date,
-                                  "ratio": round(ratio, 2),
-                                  "amount_wan": round(amount_wan, 2)})
-            except (ValueError, TypeError):
-                continue
-        unlocks_all.sort(key=lambda x: x["date"])
+        from trader_shared.extend_data import ExtendDataProvider
+        unlocks_all = ExtendDataProvider.get_all_unlocks(code) or []
+        unlocks_all = sorted(unlocks_all, key=lambda x: str(x.get("date") or ""))
     except Exception:
         unlocks_all = []
 
@@ -1112,12 +1096,10 @@ if __name__ == "__main__":
 #    - extend_fundamental(shareholder)：t ≥ 披露日才生效 → 筹码集中置信加成。
 #    全部 point-in-time 切片，无前视。报告打印「风控触发」次数对账。
 # 仍待补（out-of-scope，需各自历史源）：
-# 1. extend_sector / extend_concept：需先「个股→板块/概念」实时分类
-#    （akshare 实时端点在 Mac 返回无数据，分类步挂）→ 无法映射历史板块/概念
-#    指数，故 point-in-time 切片不可行 → out-of-scope。若在能联网的沙箱/tushare
-#    可用环境，需另接 stock_board_industry_cons_em 分类 + stock_board_*_hist_em 历史。
-# 2. extend_margin（融资融券）：akshare 仅市场级明细表，无单票历史时间序列
-#    → out-of-scope（重构单票融资历史需另找数据源）。
+# 1. extend_sector / extend_concept：实盘已走 tushare sector_data / concept；
+#    回测 point-in-time 仍需板块/概念指数历史序列，暂未切片接入。
+# 2. extend_margin（融资融券）：实盘已走 tushare margin_detail；
+#    回测全历史逐日序列切片仍 out-of-scope。
 # 3. 资金流 API 仅返回最近 ~27 交易日 → veto 只在回测末段最近窗口生效
 #    （与实盘一致：实盘 build_report 同样只取最近资金流）。
 # 4. 单标的、单头寸，无多标的组合与仓位再平衡。

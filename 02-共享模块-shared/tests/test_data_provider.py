@@ -173,17 +173,12 @@ def test_aggregate_5m_to_60m_reads_time_when_date_is_day_only() -> None:
     assert out[0]["close"] == 12.5
 
 
-def test_parse_em_klines_takes_latest_n_after_sort() -> None:
-    from trader_shared.fund_flow_data import _parse_em_klines
+def test_sina_daima_and_yuan_helpers() -> None:
+    from trader_shared.fund_flow_data import _sina_daima, _yuan_to_wan
 
-    # 倒序源：最新在前；取 days=2 应得到最近两天
-    klines = [
-        "2026-07-10,100,0,0,0,0",
-        "2026-07-09,90,0,0,0,0",
-        "2026-07-08,80,0,0,0,0",
-    ]
-    out = _parse_em_klines(klines, days=2)
-    assert [r["date"] for r in out] == ["2026-07-09", "2026-07-10"]
+    assert _sina_daima("600406") == "sh600406"
+    assert _sina_daima("000001.SZ") == "sz000001"
+    assert _yuan_to_wan(198514992.52) == 19851.5
 
 
 def test_get_day_scoped_bars_fixes_reversed_cache(monkeypatch) -> None:

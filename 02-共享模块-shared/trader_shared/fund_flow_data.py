@@ -29,25 +29,27 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-FFLOW_URL = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
+# 新浪资金流（单位：元 → 统一转万元）
+SINA_FFLOW_URL = (
+    "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+    "MoneyFlow.ssl_qsfx_lscjfb"
+)
 
-# 浏览器特征头：裸 UA 易被东财间歇拒/空返回（社区实测）
-_EM_HEADERS = {
+_SINA_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     ),
-    "Referer": "https://quote.eastmoney.com/",
-    "Origin": "https://quote.eastmoney.com",
+    "Referer": "https://finance.sina.com.cn/",
     "Accept": "*/*",
 }
 
 # Session 复用 + 对 429/5xx 轻量重试；连接失败不无限拖
-_EM_SESSION = requests.Session()
-_EM_SESSION.trust_env = False  # 跳过系统代理直连
-_EM_SESSION.headers.update(_EM_HEADERS)
+_SINA_SESSION = requests.Session()
+_SINA_SESSION.trust_env = False  # 跳过系统代理直连
+_SINA_SESSION.headers.update(_SINA_HEADERS)
 try:
-    _em_retry = Retry(
+    _sina_retry = Retry(
         total=2,
         connect=1,
         read=1,
@@ -56,14 +58,14 @@ try:
         allowed_methods=frozenset(["GET"]),
         raise_on_status=False,
     )
-    _em_adapter = HTTPAdapter(max_retries=_em_retry)
-    _EM_SESSION.mount("https://", _em_adapter)
-    _EM_SESSION.mount("http://", _em_adapter)
+    _sina_adapter = HTTPAdapter(max_retries=_sina_retry)
+    _SINA_SESSION.mount("https://", _sina_adapter)
+    _SINA_SESSION.mount("http://", _sina_adapter)
 except TypeError:  # 旧 urllib3 无 allowed_methods 等
-    _em_adapter = HTTPAdapter(max_retries=0)
-    _EM_SESSION.mount("https://", _em_adapter)
-    _EM_SESSION.mount("http://", _em_adapter)
-_FAST_FAIL_SESSION = _EM_SESSION  # 兼容旧名
+    _sina_adapter = HTTPAdapter(max_retries=0)
+    _SINA_SESSION.mount("https://", _sina_adapter)
+    _SINA_SESSION.mount("http://", _sina_adapter)
+_FAST_FAIL_SESSION = _SINA_SESSION
 
 
 # ── 标准记录工厂 ──────────────────────────────────────────────
@@ -159,6 +161,8 @@ def _fetch_from_tushare(symbol: str, days: int = 30) -> list[dict[str, Any]]:
     except ImportError:
         return []
     client = get_client()
+    if not getattr(client, "available", True):
+        return []
     ts_code = _symbol_to_ts_code(symbol)
     try:
         from trader_shared.cn_time import today_cn
@@ -191,88 +195,64 @@ def _fetch_from_tushare(symbol: str, days: int = 30) -> list[dict[str, Any]]:
     return result
 
 
-def _fetch_from_eastmoney(symbol: str, days: int = 30) -> list[dict[str, Any]]:
-    """取数器：东方财富 → 标准格式（万元）。"""
+def _fetch_from_sina(symbol: str, days: int = 30) -> list[dict[str, Any]]:
+    """取数器：新浪 MoneyFlow → 标准格式（万元）。
+
+    接口 MoneyFlow.ssl_qsfx_lscjfb：
+      r0/r1/r2/r3 = 超大/大/中/小 成交额（元）
+      r0_net/r1_net/r2_net/r3_net = 对应净额（元）
+      netamount = 主力净额（元，约等于 r0_net+r1_net）
+    """
     try:
         n = max(1, int(days))
     except (TypeError, ValueError):
         n = 30
-    lmt = min(120, max(n, 30))
+    num = min(120, max(n, 30))
     params = {
-        "secid": _secid(symbol),
-        "lmt": str(lmt),
-        "klt": "101",
-        "fields1": "f1,f2,f3,f7",
-        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65",
+        "page": "1",
+        "num": str(num),
+        "sort": "opendate",
+        "asc": "0",  # 新→旧，后面再正序截取
+        "daima": _sina_daima(symbol),
     }
     try:
-        r = _EM_SESSION.get(FFLOW_URL, params=params, timeout=_em_timeout())
+        r = _SINA_SESSION.get(SINA_FFLOW_URL, params=params, timeout=_fund_flow_timeout())
         if r.status_code != 200:
             return []
         data = r.json()
-        payload = data.get("data") if isinstance(data, dict) else None
-        if not payload:
+        if not isinstance(data, list) or not data:
             return []
-        klines = payload.get("klines") or []
-        if not isinstance(klines, list) or not klines:
-            return []
-        return _parse_em_klines(klines, days=n)
+        rows: list[dict[str, Any]] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            date_str = str(item.get("opendate") or "")[:10]
+            if not date_str:
+                continue
+            r0_net = _yuan_to_wan(item.get("r0_net"))
+            r1_net = _yuan_to_wan(item.get("r1_net"))
+            r2_net = _yuan_to_wan(item.get("r2_net"))
+            r3_net = _yuan_to_wan(item.get("r3_net"))
+            # 主力 = 超大+大；若缺分档则退回 netamount
+            main = r0_net + r1_net
+            if main == 0.0 and item.get("netamount") not in (None, ""):
+                main = _yuan_to_wan(item.get("netamount"))
+            rows.append(
+                _make_record(
+                    date=date_str,
+                    net_flow_wan=main,
+                    super_large_wan=r0_net,
+                    large_wan=r1_net,
+                    medium_wan=r2_net,
+                    small_wan=r3_net,
+                    source="sina",
+                )
+            )
+        rows.sort(key=lambda x: str(x.get("date") or ""))
+        return rows[-n:] if len(rows) > n else rows
     except Exception as e:
-        warnings.warn(f"[fund_flow] 东方财富失败: {e}")
+        warnings.warn(f"[fund_flow] 新浪失败: {e}")
         return []
-
-
-def _fetch_from_akshare(symbol: str, days: int = 30) -> list[dict[str, Any]]:
-    """取数器：AkShare → 标准格式（万元）。"""
-    try:
-        import akshare as ak
-    except Exception:
-        return []
-    code, market = _market_for_akshare(symbol)
-    try:
-        n = max(1, int(days))
-    except (TypeError, ValueError):
-        n = 30
-    try:
-        df = ak.stock_individual_fund_flow(stock=code, market=market)
-    except Exception as e:
-        warnings.warn(f"[fund_flow] AkShare 失败: {e}")
-        return []
-    if df is None or getattr(df, "empty", True):
-        return []
-    cols = list(df.columns)
-    c_date = _pick_col(cols, "日期", "date", "时间")
-    c_main = _pick_col(cols, "主力净流入-净额", "主力净流入", "主力净额", "main_net")
-    c_super = _pick_col(cols, "超大单净流入-净额", "超大单净流入", "超大单")
-    c_large = _pick_col(cols, "大单净流入-净额", "大单净流入", "大单")
-    c_mid = _pick_col(cols, "中单净流入-净额", "中单净流入", "中单")
-    c_small = _pick_col(cols, "小单净流入-净额", "小单净流入", "小单")
-    if not c_date or not c_main:
-        return []
-    rows: list[dict[str, Any]] = []
-    # 先按日期正序再取最近 n 行，避免 DF 倒序时 tail 拿到最旧段
-    try:
-        df = df.copy()
-        df["__flow_date"] = df[c_date].astype(str).str[:10]
-        df = df.sort_values("__flow_date", ascending=True).tail(n)
-    except Exception:
-        df = df.tail(n)
-    for _, r in df.iterrows():
-        try:
-            date_str = str(r.get(c_date) if hasattr(r, "get") else r[c_date])[:10]
-            rows.append(_make_record(
-                date=date_str,
-                net_flow_wan=_to_wan_amount(r[c_main]),
-                super_large_wan=_to_wan_amount(r[c_super]) if c_super else 0.0,
-                large_wan=_to_wan_amount(r[c_large]) if c_large else 0.0,
-                medium_wan=_to_wan_amount(r[c_mid]) if c_mid else 0.0,
-                small_wan=_to_wan_amount(r[c_small]) if c_small else 0.0,
-                source="akshare",
-            ))
-        except Exception:
-            continue
-    rows.sort(key=lambda x: str(x.get("date") or ""))
-    return rows
 
 
 # ══════════════════════════════════════════════════════════════
@@ -339,11 +319,20 @@ def _sort_fund_flow_asc(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # 第三层：调度 — 瀑布选最优源 → 存 → 返回
 # ══════════════════════════════════════════════════════════════
 
+def _fetcher_map() -> dict[str, Any]:
+    """每次现场取映射，便于测试 monkeypatch 各取数器。"""
+    return {
+        "tdx": _fetch_from_tdx,
+        "tushare": _fetch_from_tushare,
+        "sina": _fetch_from_sina,
+    }
+
+
+# 兼容外部若仍读 FETCHERS.keys()
 FETCHERS: dict[str, Any] = {
     "tdx": _fetch_from_tdx,
     "tushare": _fetch_from_tushare,
-    "eastmoney": _fetch_from_eastmoney,
-    "akshare": _fetch_from_akshare,
+    "sina": _fetch_from_sina,
 }
 
 
@@ -372,12 +361,12 @@ def fetch_fund_flow(symbol: str, days: int = 30) -> list[dict[str, Any]]:
 
             order = fund_flow_source_order()
         except Exception:
-            order = ["tushare", "tdx", "eastmoney", "akshare"]
+            order = ["tushare", "tdx", "sina"]
     else:
         order = [source]
 
     for name in order:
-        fetcher = FETCHERS.get(name)
+        fetcher = _fetcher_map().get(name)
         if not fetcher:
             continue
         result = fetcher(symbol, days)
@@ -587,7 +576,7 @@ def _calc_flow_price_relation(
     return "价资中性"
 
 
-def _em_timeout() -> float | tuple[float, float]:
+def _fund_flow_timeout() -> float | tuple[float, float]:
     raw = os.environ.get("FUND_FLOW_TIMEOUT", "10").strip()
     try:
         t = float(raw)
@@ -598,15 +587,34 @@ def _em_timeout() -> float | tuple[float, float]:
     return (min(5.0, t), t)
 
 
-def _secid(symbol: str) -> str:
-    code = symbol.split(".")[0] if "." in symbol else symbol
-    suffix = symbol.split(".")[-1] if "." in symbol else ""
-    if suffix in ("SH", "sh"):
-        return f"1.{code}"
-    if suffix in ("SZ", "sz"):
-        return f"0.{code}"
-    # 沪市：主板6/ETF基金5/B股9；勿把 51xxxx ETF 判成深市
-    return f"1.{code}" if code.startswith(("5", "6", "9")) else f"0.{code}"
+
+def _sina_daima(symbol: str) -> str:
+    """600406 / 600406.SH / sh600406 → sh600406。"""
+    s = str(symbol or "").strip()
+    if not s:
+        return ""
+    low = s.lower()
+    if low.startswith(("sh", "sz", "bj")) and len(low) >= 8 and low[2:].isdigit():
+        return low[:2] + low[2:8]
+    code = s.split(".")[0] if "." in s else s
+    code = "".join(c for c in code if c.isdigit())[-6:].zfill(6)
+    suffix = s.split(".")[-1].upper() if "." in s else ""
+    if suffix == "SH" or code.startswith(("5", "6", "9")):
+        return f"sh{code}"
+    if suffix == "BJ" or code.startswith(("4", "8")):
+        return f"bj{code}"
+    return f"sz{code}"
+
+
+def _yuan_to_wan(val: Any) -> float:
+    """新浪金额字段：元 → 万元。"""
+    try:
+        x = float(val)
+    except (TypeError, ValueError):
+        return 0.0
+    if x != x:  # NaN
+        return 0.0
+    return round(x / 10000.0, 2)
 
 
 def _symbol_to_ts_code(symbol: str) -> str:
@@ -617,81 +625,3 @@ def _symbol_to_ts_code(symbol: str) -> str:
         return f"{code}.SH"
     return f"{code}.SZ"
 
-
-def _parse_em_klines(klines: list[Any], days: int = 30) -> list[dict[str, Any]]:
-    if not klines:
-        return []
-    n = max(1, int(days))
-    out: list[dict[str, Any]] = []
-    for line in klines:
-        row = _parse_em_kline_line(str(line))
-        if row:
-            out.append(row)
-    # 先正序再取最近 n 根，避免源倒序时 [-n:] 拿到最旧段
-    out.sort(key=lambda x: str(x.get("date") or ""))
-    return out[-n:] if len(out) > n else out
-
-
-def _parse_em_kline_line(line: str) -> dict[str, Any] | None:
-    """东财行 → 标准格式。
-    
-    字段: date, 主力净, 小单, 中单, 大单, 超大单（API 单位：元）。
-    """
-    parts = str(line or "").split(",")
-    if len(parts) < 6:
-        return None
-    try:
-        date_str = parts[0]
-        super_large = float(parts[5]) / 10000.0 if parts[5] != "-" else 0.0
-        large = float(parts[4]) / 10000.0 if parts[4] != "-" else 0.0
-        medium = float(parts[3]) / 10000.0 if parts[3] != "-" else 0.0
-        small = float(parts[2]) / 10000.0 if parts[2] != "-" else 0.0
-        main_force = float(parts[1]) / 10000.0 if parts[1] != "-" else super_large + large
-        return _make_record(
-            date=date_str,
-            net_flow_wan=main_force,
-            super_large_wan=round(super_large, 2),
-            large_wan=round(large, 2),
-            medium_wan=round(medium, 2),
-            small_wan=round(small, 2),
-        )
-    except (ValueError, IndexError, TypeError):
-        return None
-
-
-def _market_for_akshare(symbol: str) -> tuple[str, str]:
-    code = symbol.split(".")[0] if "." in symbol else str(symbol)
-    code = code.replace("SH", "").replace("SZ", "").replace("sh", "").replace("sz", "")
-    if code[:2].lower() in ("sh", "sz", "bj") and len(code) > 6:
-        code = code[2:]
-    code = "".join(c for c in code if c.isdigit())[-6:].zfill(6)
-    suffix = symbol.split(".")[-1].upper() if "." in symbol else ""
-    if suffix in ("SH",) or code.startswith(("5", "6", "9")):
-        return code, "sh"
-    if suffix in ("BJ",) or code.startswith(("8", "4")):
-        return code, "bj"
-    return code, "sz"
-
-
-def _pick_col(columns: list[Any], *candidates: str) -> str | None:
-    cols = [str(c) for c in columns]
-    for name in candidates:
-        if name in cols:
-            return name
-    for name in candidates:
-        for c in cols:
-            if name in c:
-                return c
-    return None
-
-
-def _to_wan_amount(val: Any) -> float:
-    try:
-        x = float(val)
-    except (TypeError, ValueError):
-        return 0.0
-    if x != x:
-        return 0.0
-    if abs(x) >= 10000:
-        return round(x / 10000.0, 2)
-    return round(x, 2)

@@ -225,16 +225,15 @@ def _fetch_from_sina(code, start=START, end=END):
 
 
 def _fetch_real_bars(code, start=START, end=END):
-    """取真实日线。优先级：新浪财经（沙箱可达）→ tushare(官方端点) → 网易 CSV。"""
+    """取真实日线。优先级：新浪财经（沙箱可达）→ tushare(当前配置网关) → 网易 CSV。"""
     # 1) 新浪财经（沙箱白名单内，最稳）
     bars, err = _fetch_from_sina(code, start, end)
     if bars:
         return bars
-    # 2) tushare（官方端点，https）—— 沙箱可能不通，回退用
+    # 2) tushare（当前配置网关）—— 沙箱可能不通，回退用
     try:
         from trader_shared.tushare_client import get_client
         c = get_client()
-        c._api_url = "https://api.tushare.pro"
         rows = c.query_daily(ts_code=code, start_date=start, end_date=end)
         if rows:
             rows = sorted(rows, key=lambda r: str(r.get("trade_date", "")))

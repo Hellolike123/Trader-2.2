@@ -1160,7 +1160,7 @@ def get_provider() -> DataProvider:
     选源顺序：
     1. set_provider 注入
     2. TRADER_DATA_PROVIDER 强制（修：有 Tushare token 时也会生效）
-    3. 按 TRADER_HOST / 探测：WorkBuddy 优先 tushare→mootdx→tencent（资金流另优先 tdx）
+    3. 按 TRADER_HOST / 探测：WorkBuddy 优先 tdx(mootdx 通达信直连)→tushare→tencent
        Hermes/local：tushare→tencent
     """
     global _provider
@@ -1181,6 +1181,16 @@ def get_provider() -> DataProvider:
     from trader_shared.trader_host import HOST_WORKBUDDY, detect_trader_host
 
     host = detect_trader_host()
+    if host == HOST_WORKBUDDY:
+        # WorkBuddy：tdx（通达信直连）优先，tushare 次之，腾讯兜底
+        try:
+            from trader_shared.light_data import _check_mootdx
+        except ImportError:
+            _check_mootdx = lambda: False  # noqa: E731
+        if _check_mootdx():
+            _provider = UnifiedProvider(backend="mootdx")
+            _logger.info("DataProvider: using tdx/mootdx (host=workbuddy, tdx 优先)")
+            return _provider
     if _tushare_available():
         _provider = TushareProvider()
         _logger.info("DataProvider: using tushare (host=%s)", host)
