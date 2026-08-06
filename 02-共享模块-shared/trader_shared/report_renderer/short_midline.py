@@ -361,12 +361,10 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if _intraday_as_of:
         lines.append(f"  ⏱ 盘中：实时价已锚定 · 策略判定基于截至 {_intraday_as_of} 收盘")
 
-    # meta 纯 D：动能｜板块指数涨跌｜行业短名涨跌｜个股（不写正常/偏弱、不写跑赢）
-    # 阶段主展示在 🧭；环境档仍跟板块指数算，仅内部逻辑用，meta 不露
-    meta_parts = []
-    if momentum:
-        meta_parts.append(f"综合动能 {momentum}")
-
+    # 顶栏 A：价（上行已出）→ 环境 → 量能
+    # 环境：板块指数｜行业短名｜动能（不写个股%——现价行已有；不写正常/偏弱/跑赢）
+    # 量能：量比/换手/调整；ATR/两融默认不进顶栏（ATR 仍在引擎/止损侧使用）
+    env_parts = []
     _market_env_data = r.get("market_env") if isinstance(r.get("market_env"), dict) else {}
     _mkt_chg = _market_env_data.get("change_pct")
     _bars_mkt = _market_env_data.get("bars") or []
@@ -382,15 +380,14 @@ def render_short_midline(r: dict[str, Any]) -> str:
         except Exception:
             _idx_label = "指数"
     if _bars_stale and _last_date:
-        meta_parts.append(f"{_idx_label} ⚠️暂停于{_last_date[-5:]}")
+        env_parts.append(f"{_idx_label} ⚠️暂停于{_last_date[-5:]}")
     elif _mkt_chg is not None:
         try:
-            meta_parts.append(f"{_idx_label} {float(_mkt_chg):+.2f}%")
+            env_parts.append(f"{_idx_label} {float(_mkt_chg):+.2f}%")
         except (TypeError, ValueError):
-            meta_parts.append(_idx_label)
+            env_parts.append(_idx_label)
     elif regime or _idx_label:
-        # 无涨跌幅时仍标板块名（离线 mock）；不写正常/偏弱
-        meta_parts.append(_idx_label)
+        env_parts.append(_idx_label)
 
     _ext_sec = r.get("extend_sector") or {}
     if isinstance(_ext_sec, dict) and _ext_sec.get("status") == "正常":
@@ -399,27 +396,23 @@ def render_short_midline(r: dict[str, Any]) -> str:
         if _sec_name:
             _short_ind = _short_industry_name(_sec_name)
             if isinstance(_sec_chg, (int, float)):
-                meta_parts.append(f"{_short_ind} {float(_sec_chg):+.2f}%")
+                env_parts.append(f"{_short_ind} {float(_sec_chg):+.2f}%")
             else:
-                meta_parts.append(_short_ind)
-    if change_pct is not None:
-        try:
-            meta_parts.append(f"个股 {float(change_pct):+.2f}%")
-        except (TypeError, ValueError):
-            pass
-
-    if meta_parts:
-        lines.append(f"  {' ｜ '.join(meta_parts)}")
+                env_parts.append(_short_ind)
+    if momentum:
+        env_parts.append(f"动能 {momentum}")
+    if env_parts:
+        lines.append(f"  环境：{' ｜ '.join(env_parts)}")
 
     volume_ratio_val = float(r.get("volume_ratio") or 0)
     turnover_val = float(r.get("turnover_rate") or 0)
     vol_parts = []
     if volume_ratio_val > 0:
         vol_label = "放量" if volume_ratio_val >= 1.5 else ("缩量" if volume_ratio_val <= 0.7 else "平量")
-        vol_parts.append(f"量比{volume_ratio_val:.1f}（{vol_label}）")
+        # 量能行：量比数字 + 平/放/缩，去掉重复括号堆砌
+        vol_parts.append(f"量比{volume_ratio_val:.1f} {vol_label}")
     if turnover_val > 0:
         vol_parts.append(f"换手{turnover_val:.1f}%")
-    # 调整天数并入量价行
     _bars = r.get("daily_bars") or []
     if len(_bars) >= 20 and current > 0:
         _recent = _bars[-20:]
@@ -434,31 +427,10 @@ def render_short_midline(r: dict[str, Any]) -> str:
                 vol_parts.append("创新高")
             else:
                 vol_parts.append(f"调整{_days_from_high}天")
-
-    # ATR 复权口径并入量价行（日线 ATR 依赖 OHLC 尺度，前复权/未复权不可混读）
-    _atr_adj = str(r.get("atr_adjust") or "").strip().lower()
-    _atr_adj_label = {
-        "qfq": "前复权",
-        "hfq": "后复权",
-        "none": "未复权",
-    }.get(_atr_adj)
-    if _atr_adj_label:
-        _atr14 = r.get("atr14")
-        try:
-            _atr14_f = float(_atr14) if _atr14 is not None else None
-        except (TypeError, ValueError):
-            _atr14_f = None
-        if _atr14_f is not None and _atr14_f > 0:
-            vol_parts.append(f"ATR14 {_atr14_f:.2f}（{_atr_adj_label}）")
-        else:
-            vol_parts.append(f"ATR口径 {_atr_adj_label}")
-
     if vol_parts:
-        lines.append(f"  {' ｜ '.join(vol_parts)}")
+        lines.append(f"  量能：{' ｜ '.join(vol_parts)}")
 
-    # 行业/个股已并入上方 meta（纯 D）；不再单独「行业：…｜跑赢…」行
-
-    # 概念题材
+    # 概念题材（可选；默认 enrich 关时多半无）
     _ext_concept = r.get("extend_concept") or {}
     if isinstance(_ext_concept, dict) and (_ext_concept.get("status") == "正常" or _ext_concept.get("concept_list")):
         _c_list = _ext_concept.get("concept_list") or []
@@ -470,29 +442,30 @@ def render_short_midline(r: dict[str, Any]) -> str:
         if _concept_parts:
             lines.append(f"  概念题材：{' ｜ '.join(_concept_parts[:4])}")
 
-    # 资金面：只保留个股两融；北向全市场数字噪音大且单位易糊，面板不展示
+    # 两融默认不进顶栏（避免与短线「资金：」叠床架屋）；异常大净买/净卖才点名
     _ext_margin = r.get("extend_margin") or {}
     _has_margin = isinstance(_ext_margin, dict) and _ext_margin.get("status") == "正常"
     if _has_margin:
-        _bal = _ext_margin.get("margin_balance_wan")
         _buy = _ext_margin.get("margin_buy_wan") or 0.0
         _sell = _ext_margin.get("margin_sell_wan") or 0.0
-        _net_buy = float(_buy) - float(_sell)
+        try:
+            _net_buy = float(_buy) - float(_sell)
+        except (TypeError, ValueError):
+            _net_buy = 0.0
+        # 阈值：|净买|≥5000万 才出一行
+        if abs(_net_buy) >= 5000:
 
-        def _fmt_flow(val):
-            if val is None:
-                return "--"
-            try:
-                v = float(val)
-            except (TypeError, ValueError):
-                return "--"
-            if abs(v) >= 10000:
-                return f"{v/10000:.2f}亿"
-            return f"{v:.2f}万"
+            def _fmt_flow(val):
+                try:
+                    v = float(val)
+                except (TypeError, ValueError):
+                    return "--"
+                if abs(v) >= 10000:
+                    return f"{v/10000:.2f}亿"
+                return f"{v:.2f}万"
 
-        lines.append(
-            f"  资金面：融资余额 {_fmt_flow(_bal)}（本日净买入 {_fmt_flow(_net_buy)}）"
-        )
+            _dir = "净买" if _net_buy >= 0 else "净卖"
+            lines.append(f"  两融：本日{_dir} {_fmt_flow(abs(_net_buy))}")
 
     mid = conclusion.get("midline") or "中线观察"
     short = conclusion.get("shortline") or "观察"
@@ -517,7 +490,8 @@ def render_short_midline(r: dict[str, Any]) -> str:
     lines.append("🧭 中线")
 
     # 面板不再输出「阶段：」行（S-R1）；stage_line 仅供亮点/风险与字段侧共振。
-    # 原挂在阶段行后的偏多/偏空短因并入定论（禁独立「看法：」行）。
+    # 面板不输出「定论：」——威科夫/缠论分行自读；字段 midline_verdict* 仍供池/共振。
+    # 偏多/偏空短因仅作内部 bias，用于风险去重；禁止独立「看法：」行。
     _stage_line = str(stage_line or "").strip()
     _mid = str(conclusion.get("midline") or "").strip()
     _bias_tag = ""
@@ -530,8 +504,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _bias_short = _mid.replace("·", "").replace("，", "").replace("。", "").split("（")[0].strip()[:10]
     _bias_suffix = f"{_bias_tag}（{_bias_short}）" if _bias_tag and _bias_short else (_bias_tag or "")
 
-    # 定论：威科夫中线 + 缠论中线 合成注记；可附偏多/偏空短因
-    # D-R1：偏空/框破坏 +「双源无明确方向」拧成单一句，禁止「无方向 · 偏空」硬叠
+    # 内部仍可合成 verdict 文案供风险去重；人读面板不展示
     _midline_note = str(
         conclusion.get("midline_verdict_note")
         or (r.get("midline_verdict") or {}).get("note")
@@ -551,17 +524,13 @@ def render_short_midline(r: dict[str, Any]) -> str:
     _verdict_shown = ""
     if _rewritten_note:
         _verdict_shown = _rewritten_note
-        lines.append(f"  定论：{_rewritten_note}")
     elif _midline_note:
         if _bias_suffix and _bias_tag not in _midline_note and _bias_short not in _midline_note:
             _verdict_shown = f"{_midline_note} · {_bias_suffix}"
-            lines.append(f"  定论：{_verdict_shown}")
         else:
             _verdict_shown = _midline_note
-            lines.append(f"  定论：{_midline_note}")
     elif _bias_suffix:
         _verdict_shown = _bias_suffix
-        lines.append(f"  定论：{_bias_suffix}")
 
     # 仓位衔接：结构看好但仓位为0时，加桥接说明
     _suggested_pct = r.get("suggested_pct")

@@ -230,7 +230,7 @@ class TestRenderShortMidline:
         # 面板无独立「阶段：」行；字段仍为周线威科夫短词；禁日线 major_stage 冒充
         assert "  阶段：" not in md
         assert "阶段：蓄势偏强" not in md
-        assert "定论：" in md and "偏空" in md  # 偏多/偏空短因并入定论
+        assert "定论：" not in md  # 面板不展示定论；威科夫/缠论分行
         assert "中线：蓄势" not in md
         assert "🎯 结论" not in md
         assert "威科夫" in md

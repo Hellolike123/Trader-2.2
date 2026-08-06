@@ -742,10 +742,9 @@ def test_highlight_excludes_bearish_midline_stage_tag():
     hl = next(ln for ln in out.splitlines() if "✅ 亮点" in ln)
     assert "主升初期" not in hl
     assert "偏空" not in hl
-    # 偏空已在定论；D-R7 关闭态风险优先现价不宜追，不复读「中线偏空」
-    verdict = next((ln for ln in out.splitlines() if "定论：" in ln), "")
+    # 面板无定论行；D-R7 关闭态风险优先现价不宜追，不复读整段「中线偏空」
+    assert not any(ln.lstrip().startswith("定论：") for ln in out.splitlines())
     risk = next(ln for ln in out.splitlines() if "⚠️ 风险" in ln)
-    assert "偏空" in verdict or "偏空" in risk or "主升初期" in risk
     assert "现价不宜追" in risk or "偏空" in risk or "主升初期" in risk
 
 
@@ -1058,16 +1057,13 @@ def test_adjust_days():
 
 
 def test_atr_merged_into_volume_line():
-    """ATR14（含复权口径）并入量比/换手/调整同行，禁止独立成行。"""
+    """顶栏 A：量能行含量比/换手/调整；ATR 默认不进顶栏、无独立 ATR 行。"""
     out = render_short_midline(_report())
-    assert "ATR14 1.85（未复权）" in out
-    vol_line = next(
-        ln for ln in out.splitlines()
-        if "量比" in ln and "ATR14" in ln
-    )
-    assert "调整19天" in vol_line
+    vol_line = next(ln for ln in out.splitlines() if ln.lstrip().startswith("量能："))
+    assert "量比" in vol_line and "调整19天" in vol_line
     assert "换手3.0%" in vol_line
-    # 不得再有仅含 ATR 的独立缩进行
+    assert "ATR14" not in vol_line
+    assert "ATR14" not in out.split("🧭", 1)[0]
     atr_only = [
         ln for ln in out.splitlines()
         if ln.strip().startswith("ATR14") or ln.strip().startswith("ATR口径")
@@ -1076,12 +1072,13 @@ def test_atr_merged_into_volume_line():
 
 
 def test_atr_adjust_label_only_when_atr_missing():
-    """有复权口径但无有效 atr14 时写 ATR口径，仍并入量价行。"""
+    """顶栏 A：无有效 atr14 时也不在顶栏写 ATR口径。"""
     r = _report()
     r["atr14"] = 0
     out = render_short_midline(r)
-    assert "ATR口径 未复权" in out
-    assert any("量比" in ln and "ATR口径" in ln for ln in out.splitlines())
+    head = out.split("🧭", 1)[0]
+    assert "ATR口径" not in head
+    assert "ATR14" not in head
 
 
 def test_adjust_days_new_high():
@@ -1093,7 +1090,7 @@ def test_adjust_days_new_high():
 
 
 def test_meta_pure_d_board_without_sector():
-    """无行业时 meta 仍标板块指数涨跌 + 个股；不写大盘/正常偏弱/跑赢。"""
+    """无行业时环境行：指数 + 动能；无个股%、无大盘/正常偏弱/跑赢。"""
     r = _report()
     r["symbol"] = "002050.SZ"
     r["extend_sector"] = {}
@@ -1105,16 +1102,18 @@ def test_meta_pure_d_board_without_sector():
     }
     out = render_short_midline(r)
     head = out.split("🧭")[0]
-    assert "综合动能 转弱 ｜ 深成 +1.25% ｜ 个股 +0.82%" in out
+    assert "环境：深成 +1.25% ｜ 动能 转弱" in out
+    assert "个股 +" not in head
     assert "大盘" not in head
     assert " 偏弱" not in head and "正常" not in head
     assert "相对强弱" not in out
     assert "行业：" not in out
     assert "跑赢" not in head
+    assert "量能：" in head
 
 
 def test_meta_pure_d_with_sector():
-    """有行业时并入 meta 短名；不单独行业行、不写跑赢。"""
+    """有行业时并入环境行短名；无个股%、不单独行业行、不写跑赢。"""
     r = _report()
     r["symbol"] = "688248.SH"
     r["market_env"] = {
@@ -1131,9 +1130,11 @@ def test_meta_pure_d_with_sector():
     }
     r["change_pct"] = 0.84
     out = render_short_midline(r)
-    assert "综合动能 转弱 ｜ 科创 +2.99% ｜ 电气 -3.44% ｜ 个股 +0.84%" in out
+    head = out.split("🧭")[0]
+    assert "环境：科创 +2.99% ｜ 电气 -3.44% ｜ 动能 转弱" in out
+    assert "个股 +" not in head
     assert "行业：" not in out
-    assert "跑赢" not in out.split("🧭")[0]
+    assert "跑赢" not in head
 
 
 # ── Task 9: 中线关键价格式统一 ──
@@ -1176,13 +1177,24 @@ def _closed_declutter_report() -> dict:
 
 
 def test_d_r1_verdict_no_stack_bias_on_no_direction():
-    """D-R1：框破坏+双源无明确方向 → 单一拧句，无硬叠。"""
-    out = render_short_midline(_closed_declutter_report())
-    verdict = next(ln for ln in out.splitlines() if "定论：" in ln)
-    assert "双源无明确方向" not in verdict
-    assert "无方向 · 偏空" not in verdict
-    assert "中线框破坏" in verdict and "偏空" in verdict and "战略减" in verdict
-    assert "仅副读" in verdict
+    """D-R1：面板不再展示定论行；内部 rewrite 仍去硬叠（字段侧）。"""
+    from trader_shared.report_renderer.short_midline import _rewrite_declutter_verdict_note
+
+    r = _closed_declutter_report()
+    out = render_short_midline(r)
+    assert not any(ln.lstrip().startswith("定论：") for ln in out.splitlines())
+    note = _rewrite_declutter_verdict_note(
+        r["conclusion"]["midline_verdict_note"],
+        bias_tag="偏空",
+        bias_short="中线框破坏战略减清倾向",
+        mid=r["conclusion"]["midline"],
+        weekly_frame="破坏",
+        stage_line=r["conclusion"].get("stage_line") or "",
+    )
+    assert "双源无明确方向" not in note
+    assert "无方向 · 偏空" not in note
+    assert "中线框破坏" in note and "偏空" in note and "战略减" in note
+    assert "仅副读" in note
 
 
 def test_d_r2_plan_buy_zone_when_not_allowed():
@@ -1234,7 +1246,7 @@ def test_d_r6_mid_key_no_low_absorb_verbs_when_closed():
 
 
 def test_d_r7_risk_no_repeat_bias_blob():
-    """D-R7：风险不含与定论相同的整段中线偏空。"""
+    """D-R7：风险不含整段中线偏空复读。"""
     out = render_short_midline(_closed_declutter_report())
     risk = next(ln for ln in out.splitlines() if "⚠️ 风险" in ln)
     assert "中线偏空" not in risk
