@@ -50,6 +50,15 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     # 占满后子任务永远排不上 → 全池卡死（实测 300s 零输出）。
     # 这里用独立池跑 build_report，共享池留给内部并行，两层互不抢占。
     target_keys = [str(t.get("target") or t.get("name")) for t in targets]
+    # enrich 预热（②b/B2）：批量路径开头集中并行抓取扩展字段写缓存，
+    # 让后续 build_report 的 snapshot 阶段命中（TTL 不变，零语义改动；
+    # TRADER_SNAPSHOT_ENRICH=0 或失败时自动跳过/降级）。
+    try:
+        from trader_shared.data_provider import prewarm_enrich
+
+        prewarm_enrich(target_keys)
+    except Exception:
+        pass  # 预热失败不影响 refresh 主流程
     results: dict[str, dict[str, Any] | None] = {}
     refresh_pool = ThreadPoolExecutor(max_workers=5, thread_name_prefix="trader-pool-refresh")
     future_to_key: dict = {

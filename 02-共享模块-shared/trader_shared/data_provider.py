@@ -330,6 +330,49 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
         return snap
 
 
+def prewarm_enrich(targets: list[str], *, max_workers: int = 5) -> None:
+    """批量预热 enrich 文件缓存（TTL 不变，默认 12h）。
+
+    供 refresh 等批量路径在开头调用：集中并行抓取各票扩展字段并写内存+文件缓存，
+    后续 build_report 的 snapshot 阶段命中缓存，避免每票阻塞等待 enrich 抓取。
+
+    不改变任何数据语义（TTL / 缓存键 / _enrich_snapshot 行为零改动）；
+    ``TRADER_SNAPSHOT_ENRICH=0`` 时自动跳过；预热失败静默降级（build_report 照常重抓）。
+    """
+    _flag = os.environ.get("TRADER_SNAPSHOT_ENRICH", "1").strip().lower()
+    if _flag in ("0", "false", "no", "off"):
+        return
+    if not targets:
+        return
+    try:
+        from trader_shared.light_data import resolve_security as _resolve
+        from concurrent.futures import ThreadPoolExecutor
+
+        secs = []
+        for t in targets:
+            try:
+                secs.append(_resolve(str(t).strip()))
+            except Exception:
+                continue
+        if not secs:
+            return
+        # _enrich_snapshot 仅读 snap.security.code，其余字段不参与（已核实）；
+        # 构造最小快照即可触发抓取+写缓存，预热结果即刻被 build_report 命中。
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="trader-prewarm") as pool:
+            futs = [
+                pool.submit(_enrich_snapshot, MarketSnapshot(security=s, quote={}, daily_bars=[]))
+                for s in secs
+            ]
+            for f in futs:
+                try:
+                    f.result()
+                except Exception:
+                    continue  # 静默降级：build_report 时会重新抓取
+    except Exception:
+        # 预热任何异常都不阻断 refresh
+        return
+
+
 class UnifiedProvider:
     """Unified data provider — single implementation for all backends.
 
