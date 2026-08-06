@@ -1148,7 +1148,7 @@ def test_meta_pure_d_board_without_sector():
 
 
 def test_meta_pure_d_with_sector():
-    """有行业时并入环境行短名；无个股%、不单独行业行、不写跑赢。"""
+    """有行业时环境行含行业涨跌 + 相对板块；无个股绝对%、不写跑赢。"""
     r = _report()
     r["symbol"] = "688248.SH"
     r["market_env"] = {
@@ -1166,7 +1166,7 @@ def test_meta_pure_d_with_sector():
     r["change_pct"] = 0.84
     out = render_short_midline(r)
     head = out.split("🧭")[0]
-    assert "环境：科创 +2.99% ｜ 电气 -3.44% ｜ 动能 转弱" in out
+    assert "环境：科创 +2.99% ｜ 电气 -3.44% ｜ 强于板块 +4.28% ｜ 动能 转弱" in out
     assert "个股 +" not in head
     assert "行业：" not in out
     assert "跑赢" not in head

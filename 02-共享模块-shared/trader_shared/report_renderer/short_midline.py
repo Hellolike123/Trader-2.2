@@ -356,8 +356,9 @@ def render_short_midline(r: dict[str, Any]) -> str:
     )
 
     # 顶栏 A：价（上行已出）→ 环境 → 量能
-    # 环境：板块指数｜行业短名｜动能（不写个股%——现价行已有；不写正常/偏弱/跑赢）
-    # 量能：量比/换手/调整；ATR/两融默认不进顶栏（ATR 仍在引擎/止损侧使用）
+    # 环境：板块指数｜行业短名±%｜相对板块（强于/弱于/持平）｜动能
+    # 不写个股绝对涨跌%（现价行已有）；不写正常/偏弱；不用「跑赢」旧词
+    # 量能：量比/换手/调整；ATR/两融默认不进顶栏
     env_parts = []
     _market_env_data = r.get("market_env") if isinstance(r.get("market_env"), dict) else {}
     _mkt_chg = _market_env_data.get("change_pct")
@@ -384,15 +385,46 @@ def render_short_midline(r: dict[str, Any]) -> str:
         env_parts.append(_idx_label)
 
     _ext_sec = r.get("extend_sector") or {}
+    _sec_chg_f = None
     if isinstance(_ext_sec, dict) and _ext_sec.get("status") == "正常":
         _sec_name = str(_ext_sec.get("sector_name") or _ext_sec.get("industry") or "").strip()
         _sec_chg = _ext_sec.get("sector_change_pct")
+        if isinstance(_sec_chg, (int, float)):
+            _sec_chg_f = float(_sec_chg)
         if _sec_name:
             _short_ind = _short_industry_name(_sec_name)
-            if isinstance(_sec_chg, (int, float)):
-                env_parts.append(f"{_short_ind} {float(_sec_chg):+.2f}%")
+            if _sec_chg_f is not None:
+                env_parts.append(f"{_short_ind} {_sec_chg_f:+.2f}%")
             else:
                 env_parts.append(_short_ind)
+        # 个股 vs 所属板块：用超额涨跌，不重复印个股绝对%
+        _vs = None
+        if _sec_chg_f is not None and change_pct is not None:
+            try:
+                _vs = float(change_pct) - _sec_chg_f
+            except (TypeError, ValueError):
+                _vs = None
+        if _vs is None:
+            # 兼容上游已算好的 stock_vs_sector 文案
+            _raw_vs = str(_ext_sec.get("stock_vs_sector") or "").strip()
+            if _raw_vs:
+                import re as _re
+                _mvs = _re.search(r"([+-]?\d+(?:\.\d+)?)\s*%", _raw_vs)
+                if _mvs:
+                    try:
+                        _vs = float(_mvs.group(1))
+                        # 跑弱板块文案里有时已是负号；跑赢为正
+                        if "跑弱" in _raw_vs and _vs > 0:
+                            _vs = -_vs
+                    except ValueError:
+                        _vs = None
+        if _vs is not None:
+            if abs(_vs) < 0.15:
+                env_parts.append("持平板块")
+            elif _vs > 0:
+                env_parts.append(f"强于板块 +{_vs:.2f}%")
+            else:
+                env_parts.append(f"弱于板块 {_vs:.2f}%")
     if momentum:
         env_parts.append(f"动能 {momentum}")
     if env_parts:
