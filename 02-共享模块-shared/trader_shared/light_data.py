@@ -99,6 +99,10 @@ TENCENT_QUOTE_URL = "https://qt.gtimg.cn/q="
 TENCENT_FQKLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
 SINA_KLINE_URL = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData"
 TIMEOUT_SECONDS = 5
+# 腾讯实时行情 HTTP 硬超时（与 mootdx 2.5s 一致）：腾讯偶发慢/超时 → 快速切
+# pytdx3/mootdx，避免 get_text 默认 3 次重试（最坏 3×5s+退避≈15.7s）拖死 snapshot。
+# 腾讯快时仍第一优先（0.2~0.4s 赢）；失败后熔断器打开，同进程后续直接跳过腾讯。
+TENCENT_QUOTE_HARD_TIMEOUT_S = 2.5
 MAX_ATTEMPTS = 2
 
 # 免费行情域名：默认强制直连，避免 IDE/系统 socks 代理把新浪/腾讯/通达信拐丢
@@ -1250,7 +1254,10 @@ def fetch_quote(sec: Security, http: HttpClient) -> QuoteData:
     if tencent_available:
         try:
             _rate_limit_delay()
-            text = http.get_text(TENCENT_QUOTE_URL + sec.qq_symbol, encoding="gbk")
+            text = _run_with_hard_timeout(
+                lambda: http.get_text(TENCENT_QUOTE_URL + sec.qq_symbol, encoding="gbk", max_retries=0),
+                timeout_s=TENCENT_QUOTE_HARD_TIMEOUT_S,
+            )
             match = re.search(r'="([^"]*)"', text)
             if match and len(match.group(1).split("~")) >= 35:
                 trade_date, trade_time = parse_trade_datetime(match.group(1).split("~"))
