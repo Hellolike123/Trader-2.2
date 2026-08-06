@@ -129,19 +129,11 @@ A 股交易决策辅助系统。免费行情 + 缠论 / 威科夫 / 筹码 / ATR
 
 ## 推荐工作流
 
-```
-新票验票 → python 01-功能包-packages/trader/scripts/final_report.py --target <NAME>
-入池 → python 01-功能包-packages/trader/scripts/final_pool.py add --target <NAME>
-排序 → python 01-功能包-packages/trader/scripts/final_pool.py rank
-明日作战表 → python 01-功能包-packages/trader/scripts/final_pool.py plan
-盘中结构参考 → python 01-功能包-packages/t0/scripts/final_t0.py --target <NAME> --monitor
-威科夫卡 → python 01-功能包-packages/wyckoff/scripts/final_wyckoff.py --target <NAME>
-威科夫池链 → python 01-功能包-packages/wyckoff/scripts/final_wyckoff.py rank
-缠论卡 → python 01-功能包-packages/chanlun/scripts/final_chanlun.py --target <NAME>
-盘后复盘 → python 01-功能包-packages/review/scripts/final_review.py --target <NAME>
-仓位轮动 → python 01-功能包-packages/review/scripts/final_portfolio.py --targets A B
-信号回溯 → python 01-功能包-packages/review/scripts/final_tracker.py --stock <NAME>
-```
+命令速查（验票 / 入池 / 排序 / 作战表 / 盯盘 / 威科夫 / 缠论 / 复盘 / 仓位 / 信号回溯）见 `docs/guide/skill-usage.md` §五，与各 `SKILL.md` 同源。核心入口：
+
+- 单票验票：`python3 01-功能包-packages/trader/scripts/final_report.py --target <NAME>`
+- 入池 / 排序 / 作战表：`python3 01-功能包-packages/trader/scripts/final_pool.py add|rank|plan`
+- 盘后复盘：`python3 01-功能包-packages/review/scripts/final_review.py --target <NAME>`
 
 Skill 包内把路径换成 `python3 scripts/<同名入口>.py ...`。完整命令映射与自然触发词见 `AGENTS_DEEP.md`。
 
@@ -166,6 +158,8 @@ Skill 包内把路径换成 `python3 scripts/<同名入口>.py ...`。完整命�
 ---
 
 ## 持久化文件
+
+> 仅改代码 / 排查时看；跑 skill 命令不需要记这些路径（脚本自管理）。
 
 | 文件 | 用途 |
 |------|------|
