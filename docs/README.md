@@ -1,6 +1,7 @@
 # Trader3.0 文档入口
 
-> **从这里开始。** 历史 plan 在 `plans/done/`；现行契约在 `designs/` 与仓库根 `AGENTS.md` / `ARCHITECTURE.md` / `BUSINESS.md`。  
+> **从这里开始。** 现行契约在 `designs/` 与仓库根 `AGENTS.md` / `ARCHITECTURE.md` / `BUSINESS.md`。  
+> **考古区 `_archive/`**：已交付 handoff、评审逐字稿、methodology、废弃规格与历史 plan 一律归档于此。**默认勿读**（Agent 快路径不导航 `_archive/`）；仅当需要追溯某次决策原文时按文件名检索。
 > 其他 Agent 工具目录（`.opencode` / `.mimocode` / `.trellis` 等）属本地协同环境，**勿当业务代码清理**。
 
 ---
@@ -60,8 +61,8 @@
 | 目录 | 含义 |
 |------|------|
 | [plans/active/](./plans/active/) | 尚未做完 / 仍可能执行（空则表示无在施计划） |
-| [plans/done/](./plans/done/) | 已落地或历史方案（考古用） |
-| [methodology/calc-audit-plan.md](./methodology/calc-audit-plan.md) | 可复用计算审查方法（非施工单） |
+| [plans/done/](./plans/done/) | 已落地且仍被现行合同引用的 2 份（其余在 `_archive/plans-done/`） |
+| [_archive/](./_archive/) | 考古区：已交付 handoff / 评审 / methodology / 废弃规格 / 历史 plan（默认勿读） |
 
 新计划请直接建在 `plans/active/`，**不要**再丢到仓库根目录。
 
@@ -71,14 +72,13 @@
 
 | 目录 | 内容 |
 |------|------|
-| [reviews/2026-06/](./reviews/2026-06/) | 报告多轮体检等 |
-| [reviews/2026-07/](./reviews/2026-07/) | 代码审查、缠/威 handoff |
+| [_archive/reviews/](./_archive/reviews/) | 历史评审逐字稿（2026-06/07，考古用） |
 
 ---
 
 ## 审计 audit/
 
-批次审查报告、模块 review 底稿。日常开发不必通读；对症搜文件名即可。
+现行仅保留 `[wyckoff-original-concept-inventory.md](./audit/wyckoff-original-concept-inventory.md)`（BUSINESS 引用的原典盘点）。其余批次审查报告、模块 review 底稿已归档 `_archive/audit/`。日常开发不必通读；对症搜文件名即可。
 
 ---
 
@@ -86,8 +86,8 @@
 
 | 路径 | 用途 |
 |------|------|
-| [methodology/](./methodology/) | Skill 设计方法等 |
-| [_deprecated/](./_deprecated/) | 废弃规格与旧 superpowers |
+| [_archive/methodology/](./_archive/methodology/) | Skill 设计方法等（考古） |
+| [_archive/_deprecated/](./_archive/_deprecated/) | 废弃规格与旧 superpowers（考古） |
 | [guide/](./guide/) | 用户手册、缠论操盘 playbook |
 
 ---
@@ -103,4 +103,4 @@ Agent 改架构/业务规则时：**先改 `AGENTS.md` + `designs/`，再改代�
 
 ---
 
-*文档整理批次：2026-07-18（分类归档，无业务代码变更）。*
+*文档整理批次：2026-07-18（首次分类归档）；2026-08-06（Skill 消费优化：reviews/methodology/_deprecated/历史 plan/审计底稿迁入 `_archive/`，活跃树 152→40 文件）。*
