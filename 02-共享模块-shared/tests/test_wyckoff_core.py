@@ -313,6 +313,50 @@ class TestDetectSosThrust:
         r2 = _detect_sos(bars, tr_ctx=None)
         assert r2["sos_signal"] is False
 
+    def test_thrust_price_cap_blocks_remote_high(self):
+        """价幅上限（2026-08-06）：收盘 ≤1.5×上沿 亮，远超（历史高位反弹）灭。"""
+        # 近箱突破：close=45.50 ≤ 44.0×1.5 → 应亮（thrust 路径，tr_start=0 保基线）
+        bars = self._pad(v=47000.0)
+        tr = self._tr(upper=44.0)
+        tr["tr_start"] = 0
+        bars.append(_make_bar(42.0, 48.0, 42.0, 45.50, 90000))
+        r_near = _detect_sos(bars, tr_ctx=tr)
+        assert r_near["sos_signal"] is True, r_near
+        assert r_near.get("sos_kind") == "thrust"
+
+        # 历史高位反弹：close=70.09 > 46.53×1.5 → 应灭（德方纳米场景）
+        bars2 = self._pad(v=47000.0)
+        tr2 = self._tr(upper=46.53)
+        tr2["tr_start"] = 0
+        bars2.append(_make_bar(66.0, 72.0, 66.0, 70.09, 90000))
+        r_far = _detect_sos(bars2, tr_ctx=tr2)
+        assert r_far["sos_signal"] is False, r_far
+        # climb 失败（pad 阴线）可能先于 thrust 返回，reason 不固定；
+        # 关键断言是「熄灭」——历史高位 70.09 不得被判定为 SOS。
+        assert r_far.get("sos_kind") is None
+
+    def test_thrust_price_cap_direct_remote_high(self):
+        """直测 _try_sos_thrust：close=70.09 vs upper=46.53×1.5 → 价幅上限拒绝。"""
+        from trader_shared.wyckoff_events import _try_sos_thrust
+
+        bars = [
+            {"open": 66.0, "close": 66.0, "high": 66.2, "low": 65.8, "volume": 47000},
+            {"open": 66.5, "close": 70.09, "high": 72.0, "low": 66.5, "volume": 90000},
+        ]
+        tr = {"tr_upper": 46.53, "tr_lower": 41.0, "tr_baseline_volume": 47000, "tr_start": 0}
+        r = _try_sos_thrust(bars, tr, 47000.0)
+        assert r["sos_signal"] is False, r
+        assert "远超上沿" in (r.get("sos_reason") or "")
+
+        # 近箱突破（≤1.5×）：close=50 vs upper=46.53 → 放行（thrust 正常）
+        bars2 = [
+            {"open": 46.0, "close": 46.0, "high": 46.2, "low": 45.8, "volume": 47000},
+            {"open": 46.5, "close": 50.0, "high": 50.5, "low": 46.5, "volume": 90000},
+        ]
+        r2 = _try_sos_thrust(bars2, tr, 47000.0)
+        assert r2["sos_signal"] is True, r2
+        assert r2.get("sos_kind") == "thrust"
+
     def test_climb_sos_still_works(self):
         # 20 根基线缩量 + 5 根放量阳线爬坡
         bars = [_make_bar(40.0, 40.5, 39.5, 40.0, 1000) for _ in range(20)]

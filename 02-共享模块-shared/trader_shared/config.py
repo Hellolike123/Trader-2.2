@@ -248,6 +248,10 @@ WYCKOFF_DIVERGENCE_RATIO: float = 0.85          # 背离量能萎缩比例由 80
 # 与 climb（≥4/5 阳连续窗）OR；须 close>tr_upper，无 TR 上沿不做 thrust
 WYCKOFF_SOS_THRUST_MIN_GAIN: float = float(os.environ.get("WYCKOFF_SOS_THRUST_MIN_GAIN", "0.05"))
 WYCKOFF_SOS_THRUST_VOL_RATIO: float = float(os.environ.get("WYCKOFF_SOS_THRUST_VOL_RATIO", "1.8"))
+# 价幅上限（2026-08-06 修复）：SOS=站上箱体的突破，非「远高于箱体的历史价反弹」。
+# 无 SC 地板回扫时，历史高位反弹阳线（如德方纳米 70.09 vs 上沿 46.53）会被误判，
+# 用 tr_upper×1.5 上限拒绝。
+WYCKOFF_SOS_MAX_PRICE_MULT: float = float(os.environ.get("WYCKOFF_SOS_MAX_PRICE_MULT", "1.5"))
 # 近端 SOS 回扫根数（突破后数日仍亮灯；1=仅末日 tip。簇/BU 内滑窗保持 tip-only）
 WYCKOFF_SOS_RECENT_LOOKBACK: int = int(os.environ.get("WYCKOFF_SOS_RECENT_LOOKBACK", "30"))
 

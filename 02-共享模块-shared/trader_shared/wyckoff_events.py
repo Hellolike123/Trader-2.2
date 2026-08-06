@@ -47,6 +47,7 @@ try:
         WYCKOFF_DIVERGENCE_RATIO,
         WYCKOFF_SOS_THRUST_MIN_GAIN,
         WYCKOFF_SOS_THRUST_VOL_RATIO,
+        WYCKOFF_SOS_MAX_PRICE_MULT,
         WYCKOFF_SOS_RECENT_LOOKBACK,
         WYCKOFF_PHASE_LOOKBACK,
         WYCKOFF_VSA_AVG_SPREAD_PERIOD,
@@ -1957,6 +1958,12 @@ def _try_sos_thrust(bars: list[dict], tr_ctx: dict | None, baseline_avg_vol: flo
         return _sos_empty("单日非阳线，非爆发型SOS")
     if c <= tr_upper:
         return _sos_empty(f"收盘未站上TR上沿{tr_upper:.2f}")
+    # 价幅上限（2026-08-06）：收盘远超箱体上沿 → 历史高位反弹，非箱体突破。
+    # 无 SC 地板回扫时防「高位下跌途中的大阳线」误判为 SOS。
+    if c > tr_upper * WYCKOFF_SOS_MAX_PRICE_MULT:
+        return _sos_empty(
+            f"收盘{c:.2f}远超上沿{tr_upper:.2f}（×{WYCKOFF_SOS_MAX_PRICE_MULT:.1f}），历史高位反弹，非箱体突破"
+        )
 
     # 开→收 与 昨收→收 取大（跳空高开实体偏小但仍强势离开箱）
     prev_c = to_float(bars[-2].get("close")) if len(bars) >= 2 else None
