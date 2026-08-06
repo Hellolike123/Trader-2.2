@@ -1092,13 +1092,13 @@ def test_adjust_days():
 
 
 def test_atr_merged_into_volume_line():
-    """顶栏 A：量能行含量比/换手/调整；ATR 默认不进顶栏、无独立 ATR 行。"""
+    """顶栏：量能行含量比/换手/调整/动能/ATR；无独立 ATR 行。"""
     out = render_short_midline(_report())
     vol_line = next(ln for ln in out.splitlines() if ln.lstrip().startswith("量能："))
     assert "量比" in vol_line and "调整19天" in vol_line
     assert "换手3.0%" in vol_line
-    assert "ATR14" not in vol_line
-    assert "ATR14" not in out.split("🧭", 1)[0]
+    assert "ATR14" in vol_line
+    # 无单独 ATR 行
     atr_only = [
         ln for ln in out.splitlines()
         if ln.strip().startswith("ATR14") or ln.strip().startswith("ATR口径")

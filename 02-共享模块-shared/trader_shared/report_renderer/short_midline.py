@@ -358,7 +358,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
     # 顶栏 A：价（上行已出）→ 环境 → 量能
     # 环境：板块指数｜行业短名±%｜相对板块（强于/弱于/持平）｜动能
     # 不写个股绝对涨跌%（现价行已有）；不写正常/偏弱；不用「跑赢」旧词
-    # 量能：量比/换手/调整；ATR/两融默认不进顶栏
+    # 量能：量比/换手/调整/动能/ATR；两融默认不进顶栏
     env_parts = []
     _market_env_data = r.get("market_env") if isinstance(r.get("market_env"), dict) else {}
     _mkt_chg = _market_env_data.get("change_pct")
@@ -428,6 +428,28 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if env_parts:
         lines.append(f"  环境：{' ｜ '.join(env_parts)}")
 
+    # 概念=身份标签（可多选）；不跟概念假指数比。有真实板块指数时强弱已在「环境」行。
+    # 概念紧接环境（身份），量能/动能/ATR 整行下移。
+    _concepts = []
+    if isinstance(_ext_sec, dict):
+        _raw_cs = _ext_sec.get("concepts") or []
+        if isinstance(_raw_cs, list):
+            _concepts = [str(x).strip() for x in _raw_cs if str(x).strip()]
+        if not _concepts:
+            _pc = str(_ext_sec.get("primary_concept") or "").strip()
+            if _pc:
+                _concepts = [_pc]
+    # 兼容旧 enrich 扫板：仅取名字，忽略概念涨跌（避免假指数）
+    if not _concepts:
+        _ext_concept = r.get("extend_concept") or {}
+        if isinstance(_ext_concept, dict):
+            _c_list = _ext_concept.get("concept_list") or []
+            if isinstance(_c_list, list):
+                _concepts = [str(x).strip() for x in _c_list if str(x).strip()]
+    if _concepts:
+        # 顶栏最多 3 个标签，扫读用
+        lines.append(f"  概念：{' ｜ '.join(_concepts[:3])}")
+
     volume_ratio_val = float(r.get("volume_ratio") or 0)
     turnover_val = float(r.get("turnover_rate") or 0)
     vol_parts = []
@@ -454,29 +476,18 @@ def render_short_midline(r: dict[str, Any]) -> str:
     # 动能与量能/调整同属个股状态，放量能行不进环境（环境只放指数与板块对照）
     if momentum:
         vol_parts.append(f"动能 {momentum}")
+    # ATR14：波动尺子，跟量能/动能同行
+    _atr = r.get("atr14")
+    if _atr is None:
+        _atr = r.get("atr")
+    try:
+        _atr_f = float(_atr) if _atr is not None else 0.0
+    except (TypeError, ValueError):
+        _atr_f = 0.0
+    if _atr_f > 0:
+        vol_parts.append(f"ATR14 {_atr_f:.2f}")
     if vol_parts:
         lines.append(f"  量能：{' ｜ '.join(vol_parts)}")
-
-    # 概念=身份标签（可多选）；不跟概念假指数比。有真实板块指数时强弱已在「环境」行。
-    _concepts = []
-    if isinstance(_ext_sec, dict):
-        _raw_cs = _ext_sec.get("concepts") or []
-        if isinstance(_raw_cs, list):
-            _concepts = [str(x).strip() for x in _raw_cs if str(x).strip()]
-        if not _concepts:
-            _pc = str(_ext_sec.get("primary_concept") or "").strip()
-            if _pc:
-                _concepts = [_pc]
-    # 兼容旧 enrich 扫板：仅取名字，忽略概念涨跌（避免假指数）
-    if not _concepts:
-        _ext_concept = r.get("extend_concept") or {}
-        if isinstance(_ext_concept, dict):
-            _c_list = _ext_concept.get("concept_list") or []
-            if isinstance(_c_list, list):
-                _concepts = [str(x).strip() for x in _c_list if str(x).strip()]
-    if _concepts:
-        # 顶栏最多 3 个标签，扫读用
-        lines.append(f"  概念：{' ｜ '.join(_concepts[:3])}")
 
     # 两融默认不进顶栏（避免与短线「资金：」叠床架屋）；异常大净买/净卖才点名
     _ext_margin = r.get("extend_margin") or {}

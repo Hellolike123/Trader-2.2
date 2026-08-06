@@ -80,6 +80,7 @@ def test_short_midline_concept_tags_no_fake_pct():
         "short_term_momentum": "修复",
         "market_change_pct": -0.55,
         "volume_ratio": 0.9,
+        "atr14": 2.58,
         "turnover_rate": 0,
         "daily_bars": [],
         "extend_sector": {
@@ -112,3 +113,9 @@ def test_short_midline_concept_tags_no_fake_pct():
     assert "强于板块" in md or "弱于板块" in md or "持平板块" in md
     # 不应出现概念假涨幅括号
     assert "磷酸铁锂（涨幅" not in md
+    # 概念在量能之上；量能含动能+ATR
+    ci = md.index("概念：")
+    vi = md.index("量能：")
+    assert ci < vi
+    assert "动能 修复" in md.split("量能：", 1)[1].splitlines()[0]
+    assert "ATR14 2.58" in md.split("量能：", 1)[1].splitlines()[0]
