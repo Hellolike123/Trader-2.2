@@ -1191,16 +1191,17 @@ def _slim_weekly_stage_short(view: dict[str, Any], raw: dict[str, Any]) -> str:
 
 
 def _slim_weekly_tier(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    """周/总动作建议（展示用，不下单）。"""
     if not view:
-        return "慎做"
+        return "谨慎"
     side = _slim_weekly_side(view, raw)
     if side == "distribution" or str(view.get("bias") or "").strip().lower() == "bear":
-        return "先别做"
+        return "暂不参与"
     lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
     maturity = _maturity(view, raw)
     if lit & {"LPS", "SOS"} or maturity in ("L2", "L3"):
-        return "可盯小波段"
-    return "慎做"
+        return "可跟踪"
+    return "谨慎"
 
 
 def _slim_weekly_sentence(view: dict[str, Any], raw: dict[str, Any]) -> str:
@@ -1692,7 +1693,7 @@ def _slim_board_daily_label(view: dict[str, Any], raw: dict[str, Any]) -> str:
     return "结构未明"
 
 
-def _slim_posture_tier(
+def _slim_action_tier(
     *,
     daily_view: dict[str, Any],
     weekly_view: dict[str, Any],
@@ -1700,19 +1701,20 @@ def _slim_posture_tier(
     weekly_raw: dict[str, Any],
     pool_line: str,
 ) -> str:
+    """动作建议：暂不参与 / 谨慎 / 等确认 / 可跟踪（非下单指令）。"""
     if pool_line.startswith("建议入池"):
         return "可跟踪"
     if pool_line.startswith("结构偏空") or "双线均 L0" in pool_line:
-        return "观望"
+        return "暂不参与"
     d_lab = _slim_board_daily_label(daily_view, daily_raw)
     w_lab = _slim_board_weekly_label(weekly_view, weekly_raw)
     if d_lab in ("本波未成型", "本波无新SC") or w_lab in ("派发中", "派发未确认"):
-        return "观望"
+        return "暂不参与"
     lit = _slim_lit_set(tuple(ACCUM_CHAIN), daily_view, daily_raw)
     miss = next((c for c in ACCUM_CHAIN if c not in lit), "")
     if lit and miss and not _slim_daily_failed(daily_view, daily_raw):
         return "等确认"
-    return "只盯结构"
+    return "谨慎"
 
 
 def _slim_situation_reason(
@@ -1819,14 +1821,15 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
         err = str(plan.get("error") or "数据不足")
         lines = [
             title,
-            "局：结构未明 · 结构未明",
-            "姿态：观望｜数据不足",
-            "周线：中性｜数据不足｜慎做",
+            "趋势：结构未明 · 结构未明",
+            "状态：数据不足",
+            "动作：谨慎",
+            "周线：中性｜数据不足",
             f"日线本波：{err}",
             "入池：暂不建议入池（数据不足）",
             "",
             "📌 现在 / 变好 / 变差",
-            "  现在：观望｜数据不足",
+            "  现在：谨慎｜数据不足",
             "  变好：数据齐全后再评估",
             "  变差：数据不足时不引用箱沿",
         ]
@@ -1847,7 +1850,7 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
     )
     w_lab = _slim_board_weekly_label(weekly_view, weekly_raw)
     d_lab = _slim_board_daily_label(daily_view, daily_raw)
-    posture = _slim_posture_tier(
+    action = _slim_action_tier(
         daily_view=daily_view,
         weekly_view=weekly_view,
         daily_raw=daily_raw,
@@ -1867,11 +1870,25 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
         weekly_raw=weekly_raw,
     )
 
+    action_line = _slim_weekly_tier(weekly_view, weekly_raw)
+    # 动作以综合档为准；周线偏空/派发时与综合档取更冷
+    if action == "暂不参与" or action_line == "暂不参与":
+        action_show = "暂不参与"
+    elif action == "可跟踪" and action_line == "可跟踪":
+        action_show = "可跟踪"
+    elif action == "等确认":
+        action_show = "等确认"
+    elif action_line == "可跟踪" and action != "暂不参与":
+        action_show = "可跟踪"
+    else:
+        action_show = action if action in ("暂不参与", "等确认", "可跟踪", "谨慎") else action_line
+
     lines: list[str] = [
         title,
-        f"局：{w_lab} · {d_lab}",
-        f"姿态：{posture}｜{situation}",
-        f"周线：{w_bias}｜{_slim_weekly_stage_short(weekly_view, weekly_raw)}｜{_slim_weekly_tier(weekly_view, weekly_raw)}",
+        f"趋势：{w_lab} · {d_lab}",
+        f"状态：{situation}",
+        f"动作：{action_show}",
+        f"周线：{w_lab}｜{w_bias}｜{_slim_weekly_stage_short(weekly_view, weekly_raw)}",
         f"日线本波：{_slim_daily_wave_short(daily_view, daily_raw)}",
         f"入池：{pool_line}",
         "",
@@ -1908,7 +1925,7 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
         [
             "",
             "📌 现在 / 变好 / 变差",
-            f"  现在：{posture}｜{situation}",
+            f"  现在：{action_show}｜{situation}",
             f"  变好：{better}",
             f"  变差：{worse}",
         ]

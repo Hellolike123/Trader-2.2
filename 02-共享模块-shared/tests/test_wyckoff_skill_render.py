@@ -351,9 +351,10 @@ def test_sb1_default_slim_skeleton_no_long_blocks():
     text = render_wyckoff_slim(_sample_plan())
     lines = text.splitlines()
     assert lines[0] == "测试股（600000）｜现价 10.50"
-    assert lines[1].startswith("局：")
-    assert lines[2].startswith("姿态：")
-    assert "周线：偏多｜SC后反弹，雏形 8.00～12.00（待SC区回测）｜慎做" in text
+    assert lines[1].startswith("趋势：")
+    assert lines[2].startswith("状态：")
+    assert any(ln.startswith("动作：") for ln in lines[:8])
+    assert "周线：吸筹中｜偏多｜SC后反弹，雏形 8.00～12.00（待SC区回测）" in text
     assert "日线本波：Phase C · 试盘｜LPS 修复｜箱体 9.50～11.00" in text
     assert "入池：建议入池（日线已见 LPS/SOS，周线非偏空）" in text
     assert "🧭 周线 · 吸筹中" in text
@@ -496,7 +497,7 @@ def test_sb9_failed_slim_resets_next_watch_without_healthy_gap():
 def test_sb28_overview_writes_proto_prices_and_failed_anchor_ref():
     """S-B28：总览写出雏形价；failed 写旧SC对照，不写健康箱体。"""
     text = render_wyckoff_slim(_sample_plan())
-    assert "周线：偏多｜SC后反弹，雏形 8.00～12.00（待SC区回测）｜慎做" in text
+    assert "周线：吸筹中｜偏多｜SC后反弹，雏形 8.00～12.00（待SC区回测）" in text
     failed = render_wyckoff_slim(_failed_phase_a_plan())
     daily = failed.split("⚡ 日线 · ", 1)[1].split("📌 现在 / 变好 / 变差", 1)[0]
     assert "旧SC 9.50（对照）" in daily
@@ -570,7 +571,7 @@ def test_sb19_weekly_are_without_bc_no_accum_sc_next():
     """S-B19/S-B22/S-B24：周线 ARE 无 BC 用派发满灯，不能接吸筹 SC。"""
     plan = _weekly_are_without_bc_plan()
     text = render_wyckoff_slim(plan)
-    assert "周线：偏空｜ARE 先亮但缺 BC，派发未确认｜先别做" in text
+    assert "周线：派发未确认｜偏空｜ARE 先亮但缺 BC，派发未确认" in text
     mid = text.split("🧭 周线 · ", 1)[1].split("⚡ 日线 · ", 1)[0]
     assert "○ BC（买力高潮）" in mid
     assert "● ARE（自动回落）31.78" in mid
