@@ -790,37 +790,130 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _closed_stance or _bias_tag == "偏空" or _frame_break_mid
     )
 
-    # 收集中线价位，按价格排序
-    _mid_items: list[tuple[float, str]] = []
-    _mid_fields = [
-        ("line_life", "生命线"), ("line_pullback", "回踩区"),
-        ("line_golden_buy", "黄金买点"), ("line_resist", "压力位"),
-        ("line_target", "目标位"),
-    ]
-    for _key, _name in _mid_fields:
-        _line = _reformat_mid_line(mid_key_prices.get(_key) or "")
-        if _soften_mid_entry and _line:
-            _line = _soften_mid_key_entry_verbs(_line)
-        if not _line:
-            continue
-        _m = re.match(r"([\d.]+)", _line)
-        if _m:
-            _mid_items.append((float(_m.group(1)), _line))
+    # 中线关键价：保留价格升序阶梯；收束档位，避免百科式堆价
+    # 候选带 kind，便于去重/远档裁剪（仍按价格排序输出）
+    _mid_cands: list[tuple[float, float, str, str]] = []  # sort_p, label_p, kind, body
 
-    # 添加 MA 参考位（年线优先，其次 MA20）
+    def _mid_add(sort_p: float, label_p: float, kind: str, body: str) -> None:
+        if sort_p <= 0 or not body:
+            return
+        _mid_cands.append((float(sort_p), float(label_p), kind, body))
+
+    _life_line = _reformat_mid_line(mid_key_prices.get("line_life") or "")
+    if _soften_mid_entry and _life_line:
+        _life_line = _soften_mid_key_entry_verbs(_life_line)
+    _life_m = re.match(r"([\d.]+)", _life_line or "")
+    _life_p = float(_life_m.group(1)) if _life_m else 0.0
+    if _life_line and _life_p > 0:
+        _mid_add(_life_p, _life_p, "life", _life_line)
+
+    _pb_line = _reformat_mid_line(mid_key_prices.get("line_pullback") or "")
+    if _soften_mid_entry and _pb_line:
+        _pb_line = _soften_mid_key_entry_verbs(_pb_line)
+    # 偏空/关闭：大回踩区与生命线重叠时只留生命线，避免 38-57 这种百科区间
+    _skip_pullback = False
+    if _pb_line and (_soften_mid_entry or _closed_stance or _bias_tag == "偏空"):
+        _rm = re.match(r"([\d.]+)-([\d.]+)", _pb_line)
+        if _rm and _life_p > 0:
+            _lo, _hi = float(_rm.group(1)), float(_rm.group(2))
+            if _lo <= _life_p <= _hi or abs(_lo - _life_p) / max(_life_p, 1e-6) < 0.03:
+                _skip_pullback = True
+    if _pb_line and not _skip_pullback:
+        _pm = re.match(r"([\d.]+)", _pb_line)
+        if _pm:
+            _mid_add(float(_pm.group(1)), float(_pm.group(1)), "pullback", _pb_line)
+
+    _gold_line = _reformat_mid_line(mid_key_prices.get("line_golden_buy") or "")
+    if _soften_mid_entry and _gold_line:
+        _gold_line = _soften_mid_key_entry_verbs(_gold_line)
+    if _gold_line:
+        _gm = re.match(r"([\d.]+)", _gold_line)
+        if _gm:
+            _mid_add(float(_gm.group(1)), float(_gm.group(1)), "golden", _gold_line)
+
     _ma250_v = _ma_float("ma250")
     _ma20_v = _ma_float("ma20")
-    if _ma250_v and _ma250_v > 0:
-        _lbl = "年线支撑" if current > _ma250_v else "年线压力"
-        _mid_items.append((_ma250_v, f"{_ma250_v:.2f} MA250（{_lbl}）"))
     if _ma20_v and _ma20_v > 0 and abs(_ma20_v - (_ma250_v or 0)) > 0.5:
         _lbl = "中线压力" if current < _ma20_v else "中线支撑"
-        _mid_items.append((_ma20_v, f"{_ma20_v:.2f} MA20（{_lbl}）"))
+        _mid_add(_ma20_v, _ma20_v, "ma20", f"{_ma20_v:.2f} MA20（{_lbl}）")
+    if _ma250_v and _ma250_v > 0:
+        _lbl = "年线支撑" if current > _ma250_v else "年线压力"
+        _mid_add(_ma250_v, _ma250_v, "ma250", f"{_ma250_v:.2f} MA250（{_lbl}）")
 
-    # 按价格排序
-    _mid_items.sort(key=lambda x: x[0])
+    _res_line = _reformat_mid_line(mid_key_prices.get("line_resist") or "")
+    if _soften_mid_entry and _res_line:
+        _res_line = _soften_mid_key_entry_verbs(_res_line)
+    _tgt_line = _reformat_mid_line(mid_key_prices.get("line_target") or "")
+    if _soften_mid_entry and _tgt_line:
+        _tgt_line = _soften_mid_key_entry_verbs(_tgt_line)
+    _res_p = 0.0
+    _tgt_p = 0.0
+    if _res_line:
+        _xm = re.match(r"([\d.]+)", _res_line)
+        if _xm:
+            _res_p = float(_xm.group(1))
+    if _tgt_line:
+        _tm = re.match(r"([\d.]+)", _tgt_line)
+        if _tm:
+            _tgt_p = float(_tm.group(1))
+    # 压力/目标过远（>+50%）标「远」；>+100% 默认不进阶梯
+    def _far_note(line: str, px: float) -> str | None:
+        if current <= 0 or px <= 0:
+            return line
+        pct = (px - current) / current * 100.0
+        if pct > 80:
+            return None
+        if pct > 50:
+            if "（" in line:
+                return line[:-1] + " · 远）" if line.endswith("）") else f"{line} · 远"
+            return f"{line}（远）"
+        return line
 
-    # 中线关键价插入现价锚点（无 🌟；🌟 仅短线关键价）
+    if _res_line and _res_p > 0:
+        _rl = _far_note(_res_line, _res_p)
+        if _rl:
+            _mid_add(_res_p, _res_p, "resist", _rl)
+    if _tgt_line and _tgt_p > 0:
+        # 与压力过近则只留一档（目标优先若更高）
+        if _res_p > 0 and abs(_tgt_p - _res_p) / max(_tgt_p, 1e-6) < 0.03:
+            pass  # 压力已加；目标几乎同价跳过
+        else:
+            _tl = _far_note(_tgt_line, _tgt_p)
+            if _tl:
+                _mid_add(_tgt_p, _tgt_p, "target", _tl)
+
+    # 价格去重：同价优先 life>ma20>golden>ma250>pullback>resist>target
+    _kind_rank = {
+        "life": 0,
+        "ma20": 1,
+        "golden": 2,
+        "ma250": 3,
+        "pullback": 4,
+        "resist": 5,
+        "target": 6,
+        "spot": 7,
+    }
+    _mid_cands.sort(key=lambda x: (x[0], _kind_rank.get(x[2], 9)))
+    _mid_items: list[tuple[float, str]] = []
+    _seen_px: list[float] = []
+    for sp, lp, kind, body in _mid_cands:
+        if any(abs(sp - s) < 0.02 for s in _seen_px):
+            continue
+        _seen_px.append(sp)
+        _mid_items.append((sp, body))
+
+    # 阶梯最多 6 档（不含现价）：优先保留近档 + 生命线/年线/目标
+    if len(_mid_items) > 6 and current > 0:
+        def _keep_score(item: tuple[float, str]) -> tuple:
+            p, body = item
+            dist = abs(p - current) / current
+            hard = 0 if any(k in body for k in ("生命线", "MA250", "MA20", "目标", "黄金")) else 1
+            return (hard, dist)
+
+        _mid_items = sorted(_mid_items, key=_keep_score)[:6]
+        _mid_items.sort(key=lambda x: x[0])
+
+    # 中线阶梯插入现价锚点（无 🌟）
     if current > 0:
         _ins = False
         for _i, (p, _) in enumerate(_mid_items):
@@ -831,27 +924,24 @@ def render_short_midline(r: dict[str, Any]) -> str:
         if not _ins:
             _mid_items.append((current, f"现价 {current:.2f}"))
 
-    # 输出带 % 距离标注
     for _p, _text in _mid_items:
         if "现价" in _text:
             lines.append(f"    {_text}")
+            continue
+        _dist_pct = (_p - current) / current * 100 if current > 0 else 0.0
+        _dist_str = f"{_dist_pct:+.0f}%" if abs(_dist_pct) >= 1 else f"{_dist_pct:+.1f}%"
+        _range_m = re.match(r"([\d.]+)-([\d.]+)\s", _text)
+        if _range_m:
+            _hi = float(_range_m.group(2))
+            _hi_pct = (_hi - current) / current * 100 if current > 0 else 0.0
+            _hi_str = f"{_hi_pct:+.0f}%" if abs(_hi_pct) >= 1 else f"{_hi_pct:+.1f}%"
+            _dist_str = f"{_dist_str}~{_hi_str}"
+        _insert_at = _text.find("（")
+        if _insert_at > 0:
+            _text = _text[:_insert_at] + f"（{_dist_str} · " + _text[_insert_at + 1:]
         else:
-            _dist_pct = (_p - current) / current * 100 if current > 0 else 0.0
-            _dist_str = f"{_dist_pct:+.0f}%" if abs(_dist_pct) >= 1 else f"{_dist_pct:+.1f}%"
-            # 如果是区间（如 61.18-72.60），计算上下界的 %
-            _range_m = re.match(r"([\d.]+)-([\d.]+)\s", _text)
-            if _range_m:
-                _hi = float(_range_m.group(2))
-                _hi_pct = (_hi - current) / current * 100 if current > 0 else 0.0
-                _hi_str = f"{_hi_pct:+.0f}%" if abs(_hi_pct) >= 1 else f"{_hi_pct:+.1f}%"
-                _dist_str = f"{_dist_str}~{_hi_str}"
-            # 在首个（前插入 % 距离
-            _insert_at = _text.find("（")
-            if _insert_at > 0:
-                _text = _text[:_insert_at] + f"（{_dist_str} · " + _text[_insert_at + 1:]
-            else:
-                _text = f"{_text}（{_dist_str}）"
-            lines.append(f"    {_text}")
+            _text = f"{_text}（{_dist_str}）"
+        lines.append(f"    {_text}")
     if not _mid_items:
         lines.append("    数据不足")
 
@@ -1224,26 +1314,23 @@ def render_short_midline(r: dict[str, Any]) -> str:
         allow_new_entry=_allow_entry,
         execution=str(execution or ""),
     )
-    if buy_low and buy_high:
-        _src_suffix = f" ← {_sup_label}" if _sup_label else ""
-        if not _allow_entry:
-            # D-R2：未放行 → 计划买区 + 未放行语义；禁止「回踩买」
-            _buy_label = f"计划买区 {float(buy_low):.2f}-{float(buy_high):.2f}"
-            _buy_annotation = "未放行，仅标记"
-        else:
+    # 关闭态阶梯：止损 + MA5? + 现价 + 站稳线（confirm）；不铺计划买区/止盈旅游图
+    # 放行态：低吸区 + 止盈仍按价格阶梯
+    if not _closed_short:
+        if buy_low and buy_high:
+            _src_suffix = f" ← {_sup_label}" if _sup_label else ""
             _buy_label = f"低吸区 {float(buy_low):.2f}-{float(buy_high):.2f}"
             _buy_annotation = "回踩买"
             if _risk_buy > 0 and _rew_buy > 0:
                 _buy_annotation += f"，亏{_risk_buy:.1f} 赚{_rew_buy:.1f} → 盈亏比 {_ratio_buy:.1f}:1 {_rr_buy_verdict}"
-        _price_items.append((float(buy_low) - 0.001, _buy_label, f"{_buy_annotation}{_src_suffix}"))
-    elif buy_ref:
-        _src_suffix = f" ← {_sup_label}" if _sup_label else ""
-        _price_items.append((float(buy_ref), "买点区", f"分批建仓{_src_suffix}"))
+            _price_items.append((float(buy_low) - 0.001, _buy_label, f"{_buy_annotation}{_src_suffix}"))
+        elif buy_ref:
+            _src_suffix = f" ← {_sup_label}" if _sup_label else ""
+            _price_items.append((float(buy_ref), "买点区", f"分批建仓{_src_suffix}"))
 
-    # MA5 支撑（如果在止损和现价之间）
-    # D-R3：关闭态 → 观察（禁止「加仓试探」）
     _ma5 = _ma_float("ma5")
     if _ma5 and stop_sell and _ma5 > float(stop_sell) and _ma5 < current:
+        # D-R3：关闭态 → 观察（禁止「加仓试探」）
         _ma5_act = "观察" if _closed_short else "加仓试探"
         _price_items.append((_ma5, "MA5 支撑", _ma5_act))
 
@@ -1252,52 +1339,65 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _px_act = "持有，不追" if r.get("has_position") else "不追"
         _price_items.append((current, "现价", _px_act))
 
-    # VWAP 支撑/压力
-    _vwap = r.get("vwap")
-    _vwap_lvl = r.get("vwap_level")
+    # 关闭态：站稳线（confirm）替代止盈区堆砌
+    _confirm_v = None
     try:
-        _vwap_f = float(_vwap) if _vwap is not None else None
+        _confirm_v = float(r.get("confirm") or 0) or None
     except (TypeError, ValueError):
-        _vwap_f = None
-    if _vwap_f is not None:
-        _vwap_act = "日内均线支撑" if current >= _vwap_f else "日内均线压力"
-        _price_items.append((_vwap_f, f"VWAP（{_vwap_lvl or '--'}）", _vwap_act))
+        _confirm_v = None
+    if _closed_short and _confirm_v and _confirm_v > current:
+        _price_items.append((_confirm_v, "站稳线", "站上再谈"))
 
-    # MA20 压力（如果在现价和卖点区之间）
-    _ma20 = _ma_float("ma20")
-    if _ma20 and _ma20 > current:
-        _price_items.append((_ma20, "MA20 压力", "靠近只减不加"))
+    if not _closed_short:
+        # VWAP / MA20 压力 / 止盈：仅放行态进阶梯，避免关闭态像可交易地图
+        _vwap = r.get("vwap")
+        _vwap_lvl = r.get("vwap_level")
+        try:
+            _vwap_f = float(_vwap) if _vwap is not None else None
+        except (TypeError, ValueError):
+            _vwap_f = None
+        if _vwap_f is not None:
+            _vwap_act = "日内均线支撑" if current >= _vwap_f else "日内均线压力"
+            _price_items.append((_vwap_f, f"VWAP（{_vwap_lvl or '--'}）", _vwap_act))
 
-    if short_low and short_high:
-        _res_suffix = f" ← {_res_label}" if _res_label else ""
-        _allow_entry = bool(_disc.get("allow_new_entry", True))
-        if not _allow_entry:
-            _sell_annotation = "等确认"
-        else:
+        _ma20 = _ma_float("ma20")
+        if _ma20 and _ma20 > current:
+            _price_items.append((_ma20, "MA20 压力", "靠近只减不加"))
+
+        if short_low and short_high:
+            _res_suffix = f" ← {_res_label}" if _res_label else ""
             _sell_annotation = "分批出"
             if _rew_chase > 0:
                 _sell_annotation += f"，赚 {_rew_chase:.1f}"
             if _sell_tgt_pct:
                 _sell_annotation += _sell_tgt_pct
-        if float(short_low) == float(short_high):
-            _price_items.append((float(short_low), "止盈区", f"{_sell_annotation}{_res_suffix}"))
-        else:
-            _price_items.append((float(short_low) - 0.001, f"止盈区 {float(short_low):.2f}-{float(short_high):.2f}", f"{_sell_annotation}{_res_suffix}"))
+            if float(short_low) == float(short_high):
+                _price_items.append((float(short_low), "止盈区", f"{_sell_annotation}{_res_suffix}"))
+            else:
+                _price_items.append(
+                    (
+                        float(short_low) - 0.001,
+                        f"止盈区 {float(short_low):.2f}-{float(short_high):.2f}",
+                        f"{_sell_annotation}{_res_suffix}",
+                    )
+                )
 
-    # 止盈（如果和卖点区不同）
-    _take = r.get("take")
-    try:
-        _take_f = float(_take) if _take is not None else None
-    except (TypeError, ValueError):
-        _take_f = None
-    if _take_f and short_high and abs(_take_f - float(short_high)) / max(float(short_high), 1) > 0.01:
-        _price_items.append((_take_f, "前高/止盈", "全部止盈"))
+        _take = r.get("take")
+        try:
+            _take_f = float(_take) if _take is not None else None
+        except (TypeError, ValueError):
+            _take_f = None
+        if _take_f and short_high and abs(_take_f - float(short_high)) / max(float(short_high), 1) > 0.01:
+            _price_items.append((_take_f, "前高/止盈", "全部止盈"))
 
-    # 按价格排序输出
+    # 按价格排序输出（阶梯形态保留）
     _price_items.sort(key=lambda x: x[0])
     for price, label, action in _price_items:
         if "现价" in label:
             lines.append(f"    🌟 {current:.2f} 现价（{action}）")
+        elif "低吸区" in label or "计划买区" in label or label.startswith("止盈区 "):
+            # 区间标签自带价格
+            lines.append(f"    {label}（{action}）")
         else:
             lines.append(f"    {price:.2f} {label}（{action}）")
 

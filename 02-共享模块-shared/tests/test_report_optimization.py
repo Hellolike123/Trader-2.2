@@ -238,18 +238,53 @@ def _report() -> dict:
 
 # ── Task 1: 盈亏比 ✓/✗ 判定 + 卖点区目标百分比 ──
 
+def _open_ladder_report() -> dict:
+    """放行态 mock：共振齐 + 策略亮 + 纪律允许，短线才铺低吸/止盈阶梯。"""
+    r = _report()
+    r["discipline"] = {
+        **(r.get("discipline") or {}),
+        "allow_new_entry": True,
+        "action": "试探",
+        "suggested_pct_cap": 10,
+        "entry_checklist": {"all_green": True},
+    }
+    r["conclusion"] = {
+        **(r.get("conclusion") or {}),
+        "execution": "试探 · 仓 10%",
+        "midline": "趋势未坏 · 可跟踪",
+        "reason": "",
+    }
+    r["resonance"] = {"grade": "aligned", "aligned": True}
+    r["strategy_match"] = {
+        "gates": {
+            "entry": {
+                "executable": True,
+                "mode": "active",
+                "primary": {"id": "pullback", "name": "回踩"},
+            }
+        }
+    }
+    r["decision_view"] = {
+        "allow_new_recommend": True,
+        "discipline_allow": True,
+        "resonance_ok": True,
+        "strategy_entry_lit": True,
+        "summary_line": "可试探",
+    }
+    r["suggested_pct"] = 10
+    return r
+
+
 def test_risk_reward_ratio_with_verdict():
-    """短线关键价低吸区带盈亏比 ✓（现版：回踩买 · 盈亏比 x:1）。"""
-    out = render_short_midline(_report())
+    """放行态：短线低吸区带盈亏比 ✓。"""
+    out = render_short_midline(_open_ladder_report())
     assert "回踩买" in out
     assert "盈亏比 2.4:1 ✓" in out
-    # 现价不宜追：动作区「不划算」
-    assert "不划算" in out
 
 
 def test_sell_zone_with_target_pct():
-    """止盈区行带目标百分比。"""
-    out = render_short_midline(_report())
+    """放行态：止盈区行带目标百分比。"""
+    out = render_short_midline(_open_ladder_report())
     assert "止盈区" in out
     assert "目标+" in out
 
@@ -257,8 +292,8 @@ def test_sell_zone_with_target_pct():
 # ── Task 2: 价格阶梯来源标注 ──
 
 def test_price_source_annotation():
-    """买点区/卖点区带来源标注。"""
-    out = render_short_midline(_report())
+    """放行态：买点区/卖点区带来源标注。"""
+    out = render_short_midline(_open_ladder_report())
     assert "← MA5支撑" in out
     assert "← MA10压力" in out
 
@@ -1140,12 +1175,14 @@ def test_meta_pure_d_with_sector():
 # ── Task 9: 中线关键价格式统一 ──
 
 def test_mid_key_price_format():
-    """中线关键价格式：价格前置 + 动作统一。"""
+    """中线关键价阶梯：价格前置；偏空时可收掉与生命线重叠的大回踩区。"""
     out = render_short_midline(_report())
-    assert "41.14 生命线" in out
-    assert "41.14-46.69 回踩区" in out
-    assert "56.00 压力位" in out or "56.00 压力" in out
-    assert "68.82 目标位" in out or "68.82 目标" in out
+    mid = out.split("⚡ 短线", 1)[0]
+    assert "41.14 生命线" in mid
+    # 偏空/关闭：大回踩与生命线重叠可不展示
+    assert "56.00 压力位" in mid or "56.00 压力" in mid
+    assert "68.82 目标位" in mid or "68.82 目标" in mid
+    assert "MA20" in mid or "MA250" in mid
 
 
 # ── 面板减重 D-R1…D-R8（trader-panel-declutter-handoff）──
@@ -1198,12 +1235,13 @@ def test_d_r1_verdict_no_stack_bias_on_no_direction():
 
 
 def test_d_r2_plan_buy_zone_when_not_allowed():
-    """D-R2：allow_new_entry=False → 计划买区，无低吸区。"""
+    """D-R2：关闭态短线阶梯不铺计划买区/低吸区；用站稳线。"""
     out = render_short_midline(_closed_declutter_report())
-    assert "计划买区" in out
-    assert "低吸区" not in out
-    assert "未放行" in out
-    assert "回踩买" not in out
+    short = out.split("⚡ 短线", 1)[1]
+    assert "计划买区" not in short
+    assert "低吸区" not in short
+    assert "回踩买" not in short
+    assert "站稳线" in short or "止损" in short
 
 
 def test_d_r3_ma5_observe_when_closed():
@@ -1233,16 +1271,16 @@ def test_d_r5_t0_disabled_when_flat_closed():
 
 
 def test_d_r6_mid_key_no_low_absorb_verbs_when_closed():
-    """D-R6：关闭/偏空时中线回踩无低吸；黄金无最佳低吸。"""
+    """D-R6：关闭/偏空时中线关键价无低吸动词；重叠大回踩可省略。"""
     out = render_short_midline(_closed_declutter_report())
     mid = out.split("⚡ 短线", 1)[0]
-    pb = next(ln for ln in mid.splitlines() if "回踩区" in ln)
-    assert "低吸" not in pb
-    assert "结构参考" in pb
-    gold = next(ln for ln in mid.splitlines() if "黄金" in ln)
-    assert "最佳低吸" not in gold
-    assert "低吸" not in gold
-    assert "黄金位" in gold or "50%回撤" in gold
+    assert "低吸" not in mid
+    assert "最佳低吸" not in mid
+    # 黄金若在阶梯中，须是黄金位而非最佳低吸
+    gold_lines = [ln for ln in mid.splitlines() if "黄金" in ln]
+    for gl in gold_lines:
+        assert "黄金位" in gl or "50%回撤" in gl
+        assert "最佳低吸" not in gl
 
 
 def test_d_r7_risk_no_repeat_bias_blob():
