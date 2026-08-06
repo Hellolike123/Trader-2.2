@@ -32,6 +32,9 @@ trader.egg-info/
 .trader/
 *.pyc
 
+# 考古区（已移出工作树；防止误重建进树）
+docs/_archive/
+
 # Literal tilde directory (accidentally created)
 ~/
 *.pem

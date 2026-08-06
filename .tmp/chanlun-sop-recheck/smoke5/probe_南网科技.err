@@ -1,0 +1,14 @@
+/Users/like/Documents/Opencode/Trader3.0/02-共享模块-shared/trader_shared/light_data.py:554: UserWarning: ⚠️ mootdx client marked as UNHEALTHY after hard timeout. Isolated for 30.0 seconds.
+  warnings.warn(
+/Users/like/Documents/Opencode/Trader3.0/02-共享模块-shared/trader_shared/light_data.py:635: UserWarning: ⚠️ mootdx call hard-timeout after 1.5s; abandoning worker and falling back
+  warnings.warn(
+/Users/like/Documents/Opencode/Trader3.0/02-共享模块-shared/trader_shared/fund_flow_data.py:147: UserWarning: [fund_flow] TDX 取数失败: HTTPConnectionPool(host='tdxhub.icfqs.com', port=7615): Max retries exceeded with url: /TQLEX (Caused by NameResolutionError("<urllib3.connection.HTTPConnection object at 0x10bc24590>: Failed to resolve 'tdxhub.icfqs.com' ([Errno 8] nodename nor servname provided, or not known)"))
+  warnings.warn(f"[fund_flow] TDX 取数失败: {e}")
+/Users/like/Documents/Opencode/Trader3.0/02-共享模块-shared/trader_shared/tushare_client.py:205: UserWarning: [tushare] API https://fastapic.stockai888.top 不可达，禁用 Tushare 数据通道（将 fallback 到腾讯）
+  warnings.warn(
+/Users/like/Documents/Opencode/Trader3.0/02-共享模块-shared/trader_shared/fund_flow_data.py:221: UserWarning: [fund_flow] 东方财富失败: HTTPSConnectionPool(host='push2his.eastmoney.com', port=443): Max retries exceeded with url: /api/qt/stock/fflow/daykline/get?secid=0.%E5%8D%97%E7%BD%91%E7%A7%91%E6%8A%80&lmt=30&klt=101&fields1=f1%2Cf2%2Cf3%2Cf7&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56%2Cf57%2Cf58%2Cf59%2Cf60%2Cf61%2Cf62%2Cf63%2Cf64%2Cf65 (Caused by NameResolutionError("<urllib3.connection.HTTPSConnection object at 0x10bb03110>: Failed to resolve 'push2his.eastmoney.com' ([Errno 8] nodename nor servname provided, or not known)"))
+  warnings.warn(f"[fund_flow] 东方财富失败: {e}")
+/Users/like/Library/Python/3.13/lib/python/site-packages/py_mini_racer/py_mini_racer.py:13: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+/Users/like/Documents/Opencode/Trader3.0/02-共享模块-shared/trader_shared/fund_flow_data.py:239: UserWarning: [fund_flow] AkShare 失败: HTTPSConnectionPool(host='push2his.eastmoney.com', port=443): Max retries exceeded with url: /api/qt/stock/fflow/daykline/get?lmt=0&klt=101&secid=0.000000&fields1=f1%2Cf2%2Cf3%2Cf7&fields2=f51%2Cf52%2Cf53%2Cf54%2Cf55%2Cf56%2Cf57%2Cf58%2Cf59%2Cf60%2Cf61%2Cf62%2Cf63%2Cf64%2Cf65&ut=b2884a393a59ad64002292a3e90d46a5&_=1785813819458 (Caused by NameResolutionError("<urllib3.connection.HTTPSConnection object at 0x10c5a2c10>: Failed to resolve 'push2his.eastmoney.com' ([Errno 8] nodename nor servname provided, or not known)"))
+  warnings.warn(f"[fund_flow] AkShare 失败: {e}")

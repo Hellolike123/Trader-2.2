@@ -1,0 +1,9 @@
+{
+  "xdtMaker": {
+    "builtinTools": {
+      "slack": {
+        "enabled": false
+      }
+    }
+  }
+}

@@ -192,7 +192,7 @@ python3 02-共享模块-shared/scripts/pack_all.py
 
 | 需要了解 | 去哪里找 |
 |---------|----------|
-| 文档地图（一次看全局） | `docs/README.md`；考古区 `docs/_archive/` **默认勿读** |
+| 文档地图（一次看全局） | `docs/README.md`；考古区已移出工作树（`docs/_archive/` 不再存在于树内，考古走 git 历史：`git log --all --oneline -- docs/`） |
 | 架构 / 算法 / 满分示例 | `AGENTS_DEEP.md` |
 | Skill 契约 | 各 `SKILL.md` + `references/` |
 | 输出格式 | `output-template.md` / `output-style-guide.md` |

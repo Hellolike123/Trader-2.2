@@ -1,0 +1,271 @@
+[
+  {
+    "name": "南网科技",
+    "code": "688248",
+    "status": "OK",
+    "cache_path": "/Users/like/.trader/cache/daily/688248.json",
+    "fetch_date": "2026-08-01",
+    "daily_n": 370,
+    "weekly_n": 79,
+    "weekly_src": "/Users/like/.trader/cache/weekly/688248.json",
+    "last_bar": "2026-07-31",
+    "price": 41.9,
+    "daily": {
+      "tag": "daily",
+      "data_ok": false,
+      "tf": "insufficient",
+      "structure": "盘整",
+      "trend": "拉升段",
+      "strokes": 24,
+      "last5": "↑↓↑↓↑",
+      "zones": 17,
+      "segs": 2,
+      "tip": "",
+      "buy_types": [],
+      "sell_types": [
+        "类二卖"
+      ],
+      "formal_buy": [],
+      "obs_buy": [],
+      "formal_sell": [],
+      "obs_sell": [
+        "类二卖"
+      ],
+      "render_formal_keys": [],
+      "render_observe": [
+        [
+          "类二卖（观察）",
+          "45.14"
+        ]
+      ],
+      "observe_leaked_to_formal": []
+    },
+    "weekly": {
+      "tag": "weekly",
+      "data_ok": false,
+      "tf": "insufficient",
+      "structure": "盘整",
+      "trend": "回调段",
+      "strokes": 3,
+      "last5": "↓↑↓",
+      "zones": 1,
+      "segs": 1,
+      "tip": "",
+      "buy_types": [],
+      "sell_types": [],
+      "formal_buy": [],
+      "obs_buy": [],
+      "formal_sell": [],
+      "obs_sell": [],
+      "render_formal_keys": [],
+      "render_observe": [],
+      "observe_leaked_to_formal": []
+    },
+    "render_head": "南网科技（688248）｜现价 —\n周线副读：中性｜数据不足｜先别做\n日线本波：数据不足\n入池：暂不建议入池（数据不足）\n\n🧭 周线 · 结构副读\n  数据不足，仅现价\n  灯\n  ○ 一类买\n  ○ 二类买\n  ○ 三类买\n  ○ 一类卖",
+    "s2_false_formal": [],
+    "s2_ok": true
+  },
+  {
+    "name": "华工科技",
+    "code": "000988",
+    "status": "OK",
+    "cache_path": "/Users/like/.trader/cache/daily/000988.json",
+    "fetch_date": "2026-07-30",
+    "daily_n": 245,
+    "weekly_n": 260,
+    "weekly_src": "/Users/like/.trader/cache/weekly/000988.json",
+    "last_bar": "2026-07-29",
+    "price": 100.26,
+    "daily": {
+      "tag": "daily",
+      "data_ok": false,
+      "tf": "insufficient",
+      "structure": "盘整",
+      "trend": "回调段",
+      "strokes": 24,
+      "last5": "↓↑↓↑↓",
+      "zones": 19,
+      "segs": 1,
+      "tip": "",
+      "buy_types": [
+        "类一买"
+      ],
+      "sell_types": [],
+      "formal_buy": [],
+      "obs_buy": [
+        "类一买"
+      ],
+      "formal_sell": [],
+      "obs_sell": [],
+      "render_formal_keys": [],
+      "render_observe": [
+        [
+          "类一买（观察）",
+          "95.27"
+        ]
+      ],
+      "observe_leaked_to_formal": []
+    },
+    "weekly": {
+      "tag": "weekly",
+      "data_ok": false,
+      "tf": "insufficient",
+      "structure": "上涨趋势",
+      "trend": "拉升段",
+      "strokes": 19,
+      "last5": "↑↓↑↓↑",
+      "zones": 13,
+      "segs": 2,
+      "tip": "up_left",
+      "buy_types": [],
+      "sell_types": [],
+      "formal_buy": [],
+      "obs_buy": [],
+      "formal_sell": [],
+      "obs_sell": [],
+      "render_formal_keys": [],
+      "render_observe": [],
+      "observe_leaked_to_formal": []
+    },
+    "render_head": "华工科技（000988）｜现价 —\n周线副读：中性｜数据不足｜先别做\n日线本波：数据不足\n入池：暂不建议入池（数据不足）\n\n🧭 周线 · 结构副读\n  数据不足，仅现价\n  灯\n  ○ 一类买\n  ○ 二类买\n  ○ 三类买\n  ○ 一类卖",
+    "s2_false_formal": [],
+    "s2_ok": true
+  },
+  {
+    "name": "中际旭创",
+    "code": "300308",
+    "status": "OK",
+    "cache_path": "/Users/like/.trader/cache/daily/300308.json",
+    "fetch_date": "2026-07-22",
+    "daily_n": 121,
+    "weekly_n": 171,
+    "weekly_src": "/Users/like/.trader/cache/weekly/300308_SZ.json",
+    "last_bar": "2026-07-22",
+    "price": 1065.1,
+    "daily": {
+      "tag": "daily",
+      "data_ok": false,
+      "tf": "insufficient",
+      "structure": "上涨趋势",
+      "trend": "回调段",
+      "strokes": 10,
+      "last5": "↓↑↓↑↓",
+      "zones": 7,
+      "segs": 1,
+      "tip": "",
+      "buy_types": [],
+      "sell_types": [],
+      "formal_buy": [],
+      "obs_buy": [],
+      "formal_sell": [],
+      "obs_sell": [],
+      "render_formal_keys": [],
+      "render_observe": [],
+      "observe_leaked_to_formal": []
+    },
+    "weekly": {
+      "tag": "weekly",
+      "data_ok": false,
+      "tf": "insufficient",
+      "structure": "盘整",
+      "trend": "拉升段",
+      "strokes": 13,
+      "last5": "↑↓↑↓↑",
+      "zones": 10,
+      "segs": 1,
+      "tip": "up_left",
+      "buy_types": [],
+      "sell_types": [
+        "类一卖"
+      ],
+      "formal_buy": [],
+      "obs_buy": [],
+      "formal_sell": [],
+      "obs_sell": [
+        "类一卖"
+      ],
+      "render_formal_keys": [],
+      "render_observe": [
+        [
+          "类一卖（观察）",
+          "1416.88"
+        ]
+      ],
+      "observe_leaked_to_formal": []
+    },
+    "render_head": "中际旭创（300308）｜现价 —\n周线副读：中性｜数据不足｜先别做\n日线本波：数据不足\n入池：暂不建议入池（数据不足）\n\n🧭 周线 · 结构副读\n  数据不足，仅现价\n  灯\n  ○ 一类买\n  ○ 二类买\n  ○ 三类买\n  ○ 一类卖",
+    "s2_false_formal": [],
+    "s2_ok": true
+  },
+  {
+    "name": "曙光数创",
+    "status": "SKIP_NO_CACHE",
+    "note": "无本地代码映射/缓存"
+  },
+  {
+    "name": "中航光电",
+    "code": "002179",
+    "status": "OK",
+    "cache_path": "/Users/like/.trader/cache/daily/002179.json",
+    "fetch_date": "2026-07-31",
+    "daily_n": 533,
+    "weekly_n": 171,
+    "weekly_src": "/Users/like/.trader/cache/weekly/002179_SZ.json",
+    "last_bar": "2026-07-30",
+    "price": 33.38,
+    "daily": {
+      "tag": "daily",
+      "data_ok": false,
+      "tf": "insufficient",
+      "structure": "盘整",
+      "trend": "拉升段",
+      "strokes": 50,
+      "last5": "↑↓↑↓↑",
+      "zones": 3,
+      "segs": 5,
+      "tip": "",
+      "buy_types": [],
+      "sell_types": [
+        "类二卖"
+      ],
+      "formal_buy": [],
+      "obs_buy": [],
+      "formal_sell": [],
+      "obs_sell": [
+        "类二卖"
+      ],
+      "render_formal_keys": [],
+      "render_observe": [
+        [
+          "类二卖（观察）",
+          "34.10"
+        ]
+      ],
+      "observe_leaked_to_formal": []
+    },
+    "weekly": {
+      "tag": "weekly",
+      "data_ok": false,
+      "tf": "insufficient",
+      "structure": "盘整",
+      "trend": "拉升段",
+      "strokes": 14,
+      "last5": "↑↓↑↓↑",
+      "zones": 12,
+      "segs": 1,
+      "tip": "up_left",
+      "buy_types": [],
+      "sell_types": [],
+      "formal_buy": [],
+      "obs_buy": [],
+      "formal_sell": [],
+      "obs_sell": [],
+      "render_formal_keys": [],
+      "render_observe": [],
+      "observe_leaked_to_formal": []
+    },
+    "render_head": "中航光电（002179）｜现价 —\n周线副读：中性｜数据不足｜先别做\n日线本波：数据不足\n入池：暂不建议入池（数据不足）\n\n🧭 周线 · 结构副读\n  数据不足，仅现价\n  灯\n  ○ 一类买\n  ○ 二类买\n  ○ 三类买\n  ○ 一类卖",
+    "s2_false_formal": [],
+    "s2_ok": true
+  }
+]

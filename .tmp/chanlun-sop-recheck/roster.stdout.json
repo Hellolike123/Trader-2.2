@@ -1,0 +1,84 @@
+{
+  "generated_by": "sop/scripts/discover-roster.py",
+  "probed": false,
+  "host": "local",
+  "agents": [
+    {
+      "name": "claude",
+      "path": "/usr/local/bin/claude",
+      "vendor": "anthropic",
+      "tier": "frontier",
+      "tiers_available": [
+        "frontier",
+        "balanced",
+        "fast"
+      ],
+      "background_recipe": "IS_SANDBOX=1 claude --dangerously-skip-permissions",
+      "version": "2.1.107 (Claude Code)",
+      "health": "available",
+      "probe_ms": null,
+      "notes": []
+    },
+    {
+      "name": "codex",
+      "path": "/Users/like/.npm-global/bin/codex",
+      "vendor": "openai",
+      "tier": "frontier",
+      "tiers_available": [
+        "frontier",
+        "balanced"
+      ],
+      "background_recipe": "codex in a bypass/full-auto approval+sandbox mode (never interactive default)",
+      "version": "codex-cli 0.137.0",
+      "health": "available",
+      "probe_ms": null,
+      "notes": []
+    },
+    {
+      "name": "grok",
+      "path": "/Users/like/.grok/bin/grok",
+      "vendor": "xai",
+      "tier": "frontier",
+      "tiers_available": [
+        "frontier",
+        "fast"
+      ],
+      "background_recipe": null,
+      "version": "grok 0.2.114 (0c785038798)",
+      "health": "available",
+      "probe_ms": null,
+      "notes": []
+    },
+    {
+      "name": "opencode",
+      "path": "/Users/like/.opencode/bin/opencode",
+      "vendor": "multi",
+      "tier": "balanced",
+      "tiers_available": [
+        "frontier",
+        "balanced",
+        "fast"
+      ],
+      "background_recipe": null,
+      "version": "1.18.11",
+      "health": "available",
+      "probe_ms": null,
+      "notes": []
+    },
+    {
+      "name": "gemini",
+      "path": "/Users/like/.npm-global/bin/gemini",
+      "vendor": "google",
+      "tier": "frontier",
+      "tiers_available": [
+        "frontier",
+        "fast"
+      ],
+      "background_recipe": null,
+      "version": "0.43.0",
+      "health": "available",
+      "probe_ms": null,
+      "notes": []
+    }
+  ]
+}
