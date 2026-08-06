@@ -150,7 +150,7 @@
 | `time_window` | str | 时间窗口提示 | "临近财报发布" |
 | `fib_retrace` | dict | 斐波那契回调位 | {"0.382": 58.00, "0.500": 57.00, "0.618": 56.00} |
 | `wyckoff` | dict | 威科夫完整分析结果（spring/bc/sos/phase 等） | `{"spring_signal":true,"phase_label":"..."}`；报告文案见 `format_wyckoff_oneline()` |
-| `market_env.level` | str | 板块环境档（内部；meta 纯 D 不写） | 正常/偏弱/很差 |
+| `market_env.level` | str | 板块环境档（内部；顶栏不写 level 文案） | 正常/偏弱/很差 |
 | `market_env.index_code` | str | 对照指数 ts 代码 | 000688.SH |
 | `market_env.index_label` | str | meta 短名 | 科创/创业板/上证/深成 |
 | `market_env.change_pct` | float | 对照指数当日涨跌 % | 2.99 |

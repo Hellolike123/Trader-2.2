@@ -76,7 +76,7 @@
 | 流水线阶段 | `report_pipeline/{fusion,structure,chip,assemble,context}_stage.py` 等 | 把大段逻辑塞回 builder |
 | 短中线挂接 | `report_pipeline/attach_*.py`（facade=`attach.py`） | 把胶水写回 monolith `attach.py` |
 | 短中线文案 | `report_renderer/short_midline.py` | 手拼面板 / 改旧 `📍 决策` / 旧「大盘 正常」meta |
-| 板块对照指数 / 环境档 | `market_env.py`（`resolve_board_index` + `assess(index_code=)`）+ `context_stage` | 展示写死中证1000；meta 露正常/偏弱 |
+| 板块对照指数 / 环境档 | `market_env.py` + `sector_data`（概念→真实 THS 指数）+ `context_stage` | 展示写死中证1000；顶栏露正常/偏弱；概念假指数 |
 | 行情类型 SSOT | `market_types.py`（`Security`/`MarketSnapshot`） | 在 light_data/data_provider 再各造一份 |
 | 买点盖生命周期 | `buy_point_lifecycle.py` + `attach_buy_point.py`；策略闸读字段在 `strategy/match.py` | 在策略层重算盖价/笔；接旧 failed `signal_id` |
 | Fusion 生产路径 | `fusion_core.py` + `analysis/cards.py` + `fusion_card_signals.py`（失败=`cards_failed`） | 加厚 classic；生产回退 classic；挂回 `_deprecated` |

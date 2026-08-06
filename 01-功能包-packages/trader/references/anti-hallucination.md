@@ -13,7 +13,7 @@
 | `current` | fetch_quote() | 实时报价 |
 | `change_pct` | fetch_quote() | 今日涨跌幅 % |
 | `ma5/10/20/30/250` | 日线 bars 计算 | 均线 |
-| `atr14` | 日线 bars 计算 | ATR14（元）；面板并入量价行，写 `ATR14 x.xx（前/后/未复权）`，勿独立成行、勿写成 ATR15 |
+| `atr14` | 日线 bars 计算 | ATR14（元）；并入顶栏 `量能：` 行写 `ATR14 x.xx`（可带复权口径），勿独立成行、勿写成 ATR15 |
 | `support` / `resistance` | build_structure_context() | 结构支撑/压力位 |
 | `confirm` / `stop` | build_structure_context() | 确认位/止损位 |
 | `major_stage` | assess_stage() | 日线四阶段：蓄势/蓄势偏强/蓄势偏弱/主升/派发/衰退（**非**面板「阶段：」） |

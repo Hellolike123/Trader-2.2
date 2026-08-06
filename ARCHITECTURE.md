@@ -149,7 +149,7 @@ flowchart LR
 |------|------|------|
 | `midline_stage` / `conclusion.stage_line` | **周线威科夫**短词（吸筹/主升/派发/…；不足→无阶段） | 共振背景岗（面板不单独「阶段：」行；细读见威科夫：） |
 | `major_stage` | 日线四阶段（蓄势/主升/派发/衰退） | 门控 / 池软信号；**不**写面板阶段行 |
-| `short_term_momentum` | EXPMA 走强/修复/震荡/转弱 | meta「综合动能」 |
+| `short_term_momentum` | EXPMA 走强/修复/震荡/转弱 | 顶栏量能行「动能 …」 |
 | `report["stage"]` | **别名** = `short_term_momentum` | 兼容旧读方；非 major、非 determine_stage |
 
 SSOT：`stage_fields.py` · BUSINESS §4.0 · AGENTS「阶段三字段」。
