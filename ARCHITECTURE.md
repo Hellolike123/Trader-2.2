@@ -72,6 +72,77 @@ context
 
 ---
 
+## 2.1 数据流图（输入 → snapshot → stage → 输出 → renderer）
+
+> 用途：Agent 改字段/排查时**按图导航**，替代 grep 猜链路。数据 SSOT = `market_types.MarketSnapshot`；拉取入口 = `light_data.load_market_snapshot`（经 `data_provider.get_provider`）。本图是当前实现（2026-08-06）的忠实映射，非理想设计。
+
+```mermaid
+flowchart LR
+    subgraph 数据源[数据源 · 多源 HA]
+        S1[实时行情<br/>新浪/腾讯 quote]
+        S2[5m 分钟线<br/>新浪 → mootdx 回退]
+        S3[日 K qfq<br/>provider+adjust 分桶缓存]
+        S4[周 K / 月 K<br/>按 fetch_date 复用]
+        S5[tick<br/>tdx3 500 笔]
+        S6[enrich 8 路并行<br/>股东/EPS/解禁/热点/两融/北向/行业/概念]
+    end
+
+    subgraph 快照[MarketSnapshot · 唯一 SSOT]
+        M1[quote + daily + 5m + weekly]
+        M2[extend_fundamental / sentiment / margin<br/>northbound / sector / concept]
+    end
+
+    subgraph 编排[report_builder · 只排队]
+        B1[StageContext 单袋<br/>ctx.update 逐 stage]
+    end
+
+    subgraph 阶段[report_pipeline · 按 §2 顺序]
+        P1[context_stage<br/>市场环境·VWAP 5m]
+        P2[structure_stage<br/>缠论·结构价·VP 5m]
+        P3[chip_stage<br/>筹码·5m→60m 聚合]
+        P4[fusion_merge_stage<br/>cards + extend_* 加权]
+        P5[attach_decision_stack<br/>resonance→strategy→decision_view]
+        P6[execution_caps<br/>suggested_pct 唯一出口]
+    end
+
+    subgraph 输出[输出契约]
+        R1[report dict<br/>含 extend_* 原样透传]
+        R2[render_short_midline<br/>资金/北向/板块块读 extend_*]
+        R3[markdown / json / signal]
+    end
+
+    S1 --> M1
+    S2 --> M1
+    S3 --> M1
+    S4 --> M1
+    S5 --> M1
+    S6 --> M2
+    M1 --> B1
+    M2 --> B1
+    B1 --> P1 --> P2 --> P3 --> P4 --> P5 --> P6
+    P2 --> R1
+    P3 --> R1
+    P6 --> R1
+    M2 --> R1
+    R1 --> R2 --> R3
+```
+
+**关键消费矩阵**（改某字段前先查这里）：
+
+| 数据 | 拉取处 | 消费方（决策链） | 展示方 |
+|------|--------|------------------|--------|
+| 日 K qfq | `light_data.fetch_qfq_daily` | structure / chip / fusion / stage_detect | 全部 |
+| 5m | `fetch_5m`（新浪→mootdx） | chip（60m 聚合）· context（VWAP）· structure（VP） | 盘中参考 |
+| 周 K | `fetch_weekly` | midline 缠/威 · `mid_key_prices` | 中线 |
+| `extend_sector` | `_enrich_snapshot`（tushare 行业快照） | **fusion 加权** · **stage_detect** · context 市场环境 | 板块行 |
+| `extend_fundamental` | 同（股东趋势） | **fusion 加权** | 资金/股东块 |
+| `extend_sentiment` | 同（解禁/EPS） | **fusion 加权** | 解禁块 |
+| `extend_margin` / `northbound` | 同（两融/北向） | **fusion 加权** | 两融/北向块 |
+
+> ⚠ 因此 `TRADER_SNAPSHOT_ENRICH=0` **不能**进批量路径：extend_* 参与 fusion 加权与阶段检测，关闭会改变结论（非仅减速）。
+
+---
+
 ## 3. 阶段三字段（禁止混读）
 
 | 字段 | 含义 | 用途 |

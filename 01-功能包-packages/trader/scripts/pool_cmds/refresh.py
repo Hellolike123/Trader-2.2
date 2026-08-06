@@ -19,8 +19,7 @@ def cmd_refresh(args: argparse.Namespace) -> int:
       若调用方已显式设置该环境变量则尊重不覆盖。单票精看仍可 export 开启。
     """
     import os
-    from concurrent.futures import as_completed
-    from trader_shared.cache_utils import get_shared_build_pool
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     # 批量路径：未显式配置时默认关 nesting（省 I/O）；已设置则不覆盖
     if "TRADER_CHAN_NESTING" not in os.environ:
@@ -45,12 +44,16 @@ def cmd_refresh(args: argparse.Namespace) -> int:
             return 0
 
     # 并行刷新：用 target 作为 key（record_from_report 也用它）
-    # 复用全局共享线程池，避免嵌套 pool → build_report → load_market_snapshot 的线程爆炸
+    # ⚠ 死锁修复（2026-08-06）：不能用全局共享池跑 build_report。
+    # build_report → light_data.load_market_snapshot 内部用同一个共享池
+    # submit quote/daily/5m/weekly 并 as_completed 等结果；外层把 5 worker
+    # 占满后子任务永远排不上 → 全池卡死（实测 300s 零输出）。
+    # 这里用独立池跑 build_report，共享池留给内部并行，两层互不抢占。
     target_keys = [str(t.get("target") or t.get("name")) for t in targets]
     results: dict[str, dict[str, Any] | None] = {}
-    shared = get_shared_build_pool()
+    refresh_pool = ThreadPoolExecutor(max_workers=5, thread_name_prefix="trader-pool-refresh")
     future_to_key: dict = {
-        shared.submit(safe_build_report, key): key for key in target_keys
+        refresh_pool.submit(safe_build_report, key): key for key in target_keys
     }
     for fut in as_completed(future_to_key):
         key = future_to_key[fut]
@@ -58,6 +61,7 @@ def cmd_refresh(args: argparse.Namespace) -> int:
             results[key] = fut.result()
         except Exception:
             results[key] = None  # 失败保留原 record
+    refresh_pool.shutdown(wait=True)
 
     # 逐只更新 record（遍历原始全量以保持顺序）
     refreshed = 0
@@ -94,4 +98,3 @@ def cmd_refresh(args: argparse.Namespace) -> int:
         print(f"刷新失败（保留旧数据）：{', '.join(failed)}")
     print("下一步：说「生成明日作战表」查看最新池子")
     return 0
-
