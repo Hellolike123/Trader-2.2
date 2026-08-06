@@ -51,7 +51,7 @@ Valid first line must look like:
 Matches `report_renderer/short_midline.py` (`render_short_midline`):
 
 1. Title: `分析报告 — {name}（{code}）｜短中线`
-2. Meta: 现价（含 MA20/MA250）；`综合动能 … ｜ {板块指数} ±x% ｜ {行业短名} ±x% ｜ 个股 ±x%`（不写正常/偏弱/跑赢）；量价行可选量比/换手/调整天数，ATR14（含复权口径）并入同行列；年线下方警告
+2. Meta: 现价（含 MA20/MA250）；`环境：宽基±% ｜ 主交易板块±% ｜ 强于/弱于/持平板块` → `概念：标签…` → `量能：量比/换手/调整/动能/ATR14`（不写正常/偏弱/跑赢；概念不做假指数；年线下方警告）
 3. `🧭 中线`
    - **无**独立 `阶段：` 行（`midline_stage` 字段供共振；细读见威科夫）
    - optional `定论：` ← midline_verdict_note + 可选偏多/偏空短因（**无**独立 `看法：` 行）

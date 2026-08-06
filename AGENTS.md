@@ -4,7 +4,7 @@
 - **版本**：Trader 2.4+（技能：`trader` / `t0` / `review` / `wyckoff` / `chanlun`）。单票**始终**中短线双轨（`render_short_midline`；`SHORT_MIDLINE_REPORT=false` 已忽略）。
 - **Skill 用法指南**：[`docs/guide/skill-usage.md`](docs/guide/skill-usage.md)（五岗一天节奏；chanlun=结构学术卡，与 wyckoff 皆不当总司令）。
 - **Fusion 生产路径**：`FUSION_FROM_CARDS` **一律 cards**；失败 → `cards_failed` 中性占位；`classic` / `compare` **已退役**（告警后仍 cards）。详见 `BUSINESS.md` §2.7。**A1** 已落地（merge 在 stage_pack 后、短中线前）；**A2 仍延期**（勿把 merge 挪到 decision_view 之后）。
-- **快照 enrich**：`TRADER_SNAPSHOT_ENRICH=0` 可整段关掉；`TRADER_ENRICH_BOARDS` **默认关**（不用 akshare 成分股扫板，行业走 tushare 日缓存；概念软加成需显式 `=1`）。
+- **快照 enrich**：`TRADER_SNAPSHOT_ENRICH=0` 可整段关掉；`TRADER_ENRICH_BOARDS` **默认关**（不用 akshare 成分股扫板）。板块快照走 `sector_data`（概念标签 + 映射真实 THS 指数日线；行业别名兜底）；旧「概念扫板涨跌」需显式 `TRADER_ENRICH_BOARDS=1`，面板也不再展示概念假指数。
 - **门禁**：`scripts/run-gate-tests.sh`（离线子集）；禁止把全量历史红项塞进门禁。说明：`docs/architecture/ci-gate.md`。
 - **Agent 快路径**：各 skill **只预读** `references/agent-quickstart.md` + 共用 `references/agent-rules.md`；跑脚本 → 原样贴 markdown → 停。禁止开工前批量读 references、禁止默认 `--output json`。
 - **命令 cwd**：Skill 包内用 `python3 scripts/...`；仓库根用 `python3 01-功能包-packages/<skill>/scripts/...`。仓位轮动在 **review** 包（无独立 `portfolio/` 包）。
@@ -16,7 +16,7 @@
 - **策略亮**：entry 须 `executable=True`（active）；`plan` 仅计划，不算可推荐新开。
 - **T0 v2**：人读结构仪表盘（`docs/t0-strategy-v2.md`），禁止「可执行/可低吸/三重共振买」指令叙事。
 - **输出契约**：`01-功能包-packages/trader/references/output-template.md` 与 `render_short_midline` 同源。实现锚点：`report_core` / `report_builder` / `report_pipeline`。
-- **meta 纯 D**：`综合动能 … ｜ {科创/创业板/上证/深成} ±% ｜ {行业短名} ±% ｜ 个股 ±%`；环境档跟板块指数算但不写「正常/偏弱/跑赢」。法源 `BUSINESS.md` §3.4。
+- **顶栏**：`环境：{宽基} ±% ｜ {主交易板块?} ±% ｜ 强于/弱于/持平板块` → `概念：标签…` → `量能：量比… ｜ 调整… ｜ 动能 … ｜ ATR14 …`；概念只标签、不比假指数；环境档内部用但不写「正常/偏弱/跑赢」。法源 `BUSINESS.md` §3.4 / §5.1。
 - **深度与满分示例**：性能史、算法细节、微信端满分范例 → [`AGENTS_DEEP.md`](AGENTS_DEEP.md)。
 
 改报告格式：`short_midline.py` → 刷新 golden →（骨架变了再）`output-template.md` + `BUSINESS.md` §5.1。完整防漏清单：`01-功能包-packages/_common/agent-rules.md`。
