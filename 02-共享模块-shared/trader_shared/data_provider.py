@@ -241,6 +241,10 @@ def _enrich_snapshot(snap: MarketSnapshot) -> MarketSnapshot:
                     "status": "正常",
                     "industry": snap_sec.get("industry") or "",
                     "sector_code": snap_sec.get("sector_code") or "",
+                    # 概念=身份标签；不参与假指数比较
+                    "concepts": list(snap_sec.get("concepts") or [])[:6],
+                    "primary_concept": snap_sec.get("primary_concept") or "",
+                    "match_via": snap_sec.get("match_via") or "",
                 }
             except Exception:
                 return None

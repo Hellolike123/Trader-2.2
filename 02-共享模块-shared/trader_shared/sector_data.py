@@ -155,65 +155,222 @@ def get_index_classify(src: str = "SW") -> list[dict[str, Any]]:
     return data
 
 
+# Tushare stock_basic.industry → 同花顺行业指数候选名（有真实日线才可做强弱）
+_INDUSTRY_THS_ALIASES: dict[str, tuple[str, ...]] = {
+    "化工原料": ("化学原料", "商品化工(A股)", "化学制品(A股)", "电池化学品"),
+    "化学原料": ("化学原料", "商品化工(A股)"),
+    "电气设备": ("电气设备", "电源设备", "电池"),
+    "元器件": ("电子元件", "电子", "半导体"),
+    "半导体": ("半导体", "半导体产品与设备Ⅱ(A股)"),
+    "汽车配件": ("汽车零部件", "汽车与汽车零部件(A股)"),
+    "建筑工程": ("建筑与工程", "建筑装饰"),
+    "软件服务": ("软件开发", "软件与服务(A股)"),
+}
+
+# 交易主题概念 → 优先对照的 THS 指数名（只映射到有指数的尺子，概念本身不算假指数）
+_CONCEPT_TO_THS_INDEX: dict[str, tuple[str, ...]] = {
+    "磷酸铁锂": ("电池化学品", "锂电池", "电池"),
+    "锂电池": ("锂电池", "电池"),
+    "锂电正极": ("电池化学品", "锂电池", "电池"),
+    "锂电负极": ("电池化学品", "锂电池", "电池"),
+    "锂电池概念": ("锂电池", "电池"),
+    "宁德时代概念": ("锂电池", "电池"),
+    "储能": ("电池", "锂电池"),
+    "光伏": ("光伏概念", "电源设备"),
+    "新能源汽车": ("新能源汽车", "电池"),
+    "芯片": ("半导体", "集成电路"),
+    "人工智能": ("人工智能", "软件开发"),
+    "消费电子": ("消费电子", "元器件"),
+}
+
+# 同花顺行业指数里，适合做「主交易板块」的优先名（有日线）
+_PREFERRED_THS_TRADE_INDEX = (
+    "电池",
+    "锂电池",
+    "电池化学品",
+    "光伏概念",
+    "新能源汽车",
+    "半导体",
+    "软件开发",
+    "化学原料",
+    "商品化工(A股)",
+    "化学制品(A股)",
+)
+
+
+def _index_by_names(
+    ths_indices: list[dict[str, Any]], names: tuple[str, ...] | list[str]
+) -> dict[str, Any] | None:
+    by_name = {str(x.get("name") or "").strip(): x for x in ths_indices if isinstance(x, dict)}
+    for n in names:
+        hit = by_name.get(str(n).strip())
+        if hit:
+            return hit
+    # 宽松：全等失败后再 contains（短名优先已在 names 顺序里）
+    for n in names:
+        nn = str(n).strip()
+        if not nn:
+            continue
+        for name, idx in by_name.items():
+            if nn == name or nn in name or name in nn:
+                return idx
+    return None
+
+
 def _match_ths_industry(
     industry: str, ths_indices: list[dict[str, Any]]
 ) -> dict[str, Any] | None:
-    matched = None
-    for keyword in _SECTOR_KEYWORDS.get(industry, []):
-        for idx in ths_indices:
-            if str(idx.get("name", "")) == keyword:
-                return idx
+    ind = str(industry or "").strip()
+    if not ind:
+        return None
+    # 1) 显式别名
+    aliased = _INDUSTRY_THS_ALIASES.get(ind)
+    if aliased:
+        hit = _index_by_names(ths_indices, aliased)
+        if hit:
+            return hit
+    # 2) 关键词表
+    for keyword in _SECTOR_KEYWORDS.get(ind, []):
+        hit = _index_by_names(ths_indices, (keyword,))
+        if hit:
+            return hit
+    # 3) 原名全等/包含
+    hit = _index_by_names(ths_indices, (ind,))
+    if hit:
+        return hit
+    # 4) 家电特判
     for idx in ths_indices:
         idx_name = str(idx.get("name", ""))
-        if industry == idx_name or industry in idx_name:
+        if "家电" in idx_name and "家电" in ind:
             return idx
-    for idx in ths_indices:
-        idx_name = str(idx.get("name", ""))
-        if "家电" in idx_name and "家电" in industry:
-            return idx
-    return matched
+    return None
+
+
+def _concept_names_for_stock(ts_code: str) -> list[str]:
+    """个股概念标签（身份，不做假指数比较）。"""
+    client = get_client()
+    if not client.available:
+        return []
+    rows = client.query("concept_detail", ts_code=ts_code) or []
+    names: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        n = str(row.get("concept_name") or row.get("name") or "").strip()
+        if not n or n in seen:
+            continue
+        seen.add(n)
+        names.append(n)
+    return names
+
+
+def _match_ths_from_concepts(
+    concept_names: list[str], ths_indices: list[dict[str, Any]]
+) -> tuple[dict[str, Any] | None, str]:
+    """概念只作映射线索 → 有真实日线的 THS 指数；返回 (index, via_concept)."""
+    for cn in concept_names:
+        cands = _CONCEPT_TO_THS_INDEX.get(cn)
+        if not cands:
+            # 概念名若本身就是优先交易指数名
+            if cn in _PREFERRED_THS_TRADE_INDEX:
+                cands = (cn,)
+            else:
+                continue
+        hit = _index_by_names(ths_indices, cands)
+        if hit:
+            return hit, cn
+    return None, ""
+
+
+def _pack_sector_snap(
+    *,
+    industry: str,
+    matched: dict[str, Any],
+    concepts: list[str],
+    match_via: str,
+) -> dict[str, Any]:
+    sector_code = str(matched.get("ts_code") or "")
+    sector_name = str(matched.get("name") or "")
+    primary_concept = concepts[0] if concepts else ""
+    base = {
+        "industry": industry,
+        "sector_name": sector_name,
+        "sector_code": sector_code,
+        "concepts": concepts[:6],
+        "primary_concept": primary_concept,
+        "match_via": match_via,
+    }
+    if not sector_code:
+        return {**base, "status": "未匹配板块"}
+    sector_daily = get_ths_daily(sector_code)
+    if not sector_daily:
+        return {**base, "status": "无日线"}
+    latest = sector_daily[-1]
+    try:
+        sector_chg_pct = float(latest.get("pct_change", 0) or 0)
+    except (TypeError, ValueError):
+        sector_chg_pct = 0.0
+    return {
+        **base,
+        "sector_change_pct": sector_chg_pct,
+        "status": "正常",
+    }
 
 
 def get_stock_sector_snapshot(ts_code: str) -> dict[str, Any] | None:
-    """个股行业 + 匹配板块 + 板块当日涨跌。无缓存，打网。"""
+    """个股：概念标签 + 唯一主板块指数（有日线才可强弱）。
+
+    规则：
+    - 概念 = 身份标签（可多选），**不做假指数比较**
+    - 比较尺子 = 同花顺板块/行业指数（必须有日线）唯一一条
+    - 映射优先：概念→交易指数；其次 stock_basic.industry→指数（含别名）
+    """
     client = get_client()
     if not client.available:
         return None
 
+    code = str(ts_code or "").strip()
+    if not code:
+        return None
+
     stock_info = client.query(
-        "stock_basic", ts_code=ts_code, fields="ts_code,name,industry"
+        "stock_basic", ts_code=code, fields="ts_code,name,industry"
     )
     if not stock_info:
         return None
-    industry = stock_info[0].get("industry", "")
-    if not industry:
-        return None
+    industry = str(stock_info[0].get("industry") or "").strip()
 
-    ths_indices = get_ths_index("I")  # 列表级缓存
-    matched = _match_ths_industry(str(industry), ths_indices or [])
-    if not matched:
-        return {"industry": industry, "status": "未匹配板块"}
+    concepts = _concept_names_for_stock(code)
+    ths_indices = get_ths_index("I") or []
 
-    sector_code = matched.get("ts_code", "")
-    sector_name = matched.get("name", "")
-    sector_daily = get_ths_daily(str(sector_code))  # 日频缓存
-    if not sector_daily:
+    matched = None
+    match_via = ""
+    # 1) 概念映射到真实指数（德方：磷酸铁锂→电池化学品/锂电池）
+    matched, via_c = _match_ths_from_concepts(concepts, ths_indices)
+    if matched is not None:
+        match_via = f"concept:{via_c}"
+    # 2) 基础行业（别名表）
+    if matched is None and industry:
+        matched = _match_ths_industry(industry, ths_indices)
+        if matched is not None:
+            match_via = f"industry:{industry}"
+
+    if matched is None:
         return {
             "industry": industry,
-            "sector_name": sector_name,
-            "sector_code": sector_code,
-            "status": "无日线",
+            "status": "未匹配板块",
+            "concepts": concepts[:6],
+            "primary_concept": concepts[0] if concepts else "",
+            "match_via": "",
         }
 
-    latest = sector_daily[-1]
-    sector_chg_pct = float(latest.get("pct_change", 0) or 0)
-    return {
-        "industry": industry,
-        "sector_name": sector_name,
-        "sector_code": sector_code,
-        "sector_change_pct": sector_chg_pct,
-        "status": "正常",
-    }
+    return _pack_sector_snap(
+        industry=industry,
+        matched=matched,
+        concepts=concepts,
+        match_via=match_via,
+    )
 
 
 def get_stock_sector_snapshot_cached(ts_code: str) -> dict[str, Any] | None:
@@ -228,7 +385,7 @@ def get_stock_sector_snapshot_cached(ts_code: str) -> dict[str, Any] | None:
         return dict(mem[1])
 
     file_key = code.replace(".", "_")
-    cached = _cu.get_cached("sector_stock_snap", file_key, ttl=_CACHE_TTL_DAY)
+    cached = _cu.get_cached("sector_stock_snap_v2", file_key, ttl=_CACHE_TTL_DAY)
     if cached is not None and _cu.is_fetch_date_today(cached.data, today):
         snap = cached.data.get("snapshot") if isinstance(cached.data, dict) else None
         if isinstance(snap, dict):
@@ -248,7 +405,7 @@ def get_stock_sector_snapshot_cached(ts_code: str) -> dict[str, Any] | None:
     if snap is not None:
         payload = {"fetch_date": today, "snapshot": snap}
         try:
-            _cu.set_cached("sector_stock_snap", file_key, payload)
+            _cu.set_cached("sector_stock_snap_v2", file_key, payload)
         except OSError as exc:
             _logger.debug("sector snap cache write failed: %s", exc)
         _stock_sector_mem[code] = (today, snap)

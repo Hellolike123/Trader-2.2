@@ -118,6 +118,9 @@ def run_analysis_context_stage(
                 "sector_change_pct": float(ext.get("sector_change_pct") or 0),
                 "status": "正常",
                 "stock_vs_sector": ext.get("stock_vs_sector") or "",
+                "concepts": list(ext.get("concepts") or [])[:6],
+                "primary_concept": ext.get("primary_concept") or "",
+                "match_via": ext.get("match_via") or "",
             }
         try:
             from trader_shared.sector_data import get_stock_sector_snapshot_cached

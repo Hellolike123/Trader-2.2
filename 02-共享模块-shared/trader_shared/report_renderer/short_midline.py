@@ -456,17 +456,26 @@ def render_short_midline(r: dict[str, Any]) -> str:
     if vol_parts:
         lines.append(f"  量能：{' ｜ '.join(vol_parts)}")
 
-    # 概念题材（可选；默认 enrich 关时多半无）
-    _ext_concept = r.get("extend_concept") or {}
-    if isinstance(_ext_concept, dict) and (_ext_concept.get("status") == "正常" or _ext_concept.get("concept_list")):
-        _c_list = _ext_concept.get("concept_list") or []
-        _c_chgs = _ext_concept.get("concept_change_pct") or []
-        _concept_parts = []
-        for _c_name, _c_chg in zip(_c_list, _c_chgs):
-            _c_chg_str = f"{_c_chg:+.2f}%" if isinstance(_c_chg, (int, float)) else "--"
-            _concept_parts.append(f"{_c_name}（涨幅 {_c_chg_str}）")
-        if _concept_parts:
-            lines.append(f"  概念题材：{' ｜ '.join(_concept_parts[:4])}")
+    # 概念=身份标签（可多选）；不跟概念假指数比。有真实板块指数时强弱已在「环境」行。
+    _concepts = []
+    if isinstance(_ext_sec, dict):
+        _raw_cs = _ext_sec.get("concepts") or []
+        if isinstance(_raw_cs, list):
+            _concepts = [str(x).strip() for x in _raw_cs if str(x).strip()]
+        if not _concepts:
+            _pc = str(_ext_sec.get("primary_concept") or "").strip()
+            if _pc:
+                _concepts = [_pc]
+    # 兼容旧 enrich 扫板：仅取名字，忽略概念涨跌（避免假指数）
+    if not _concepts:
+        _ext_concept = r.get("extend_concept") or {}
+        if isinstance(_ext_concept, dict):
+            _c_list = _ext_concept.get("concept_list") or []
+            if isinstance(_c_list, list):
+                _concepts = [str(x).strip() for x in _c_list if str(x).strip()]
+    if _concepts:
+        # 顶栏最多 3 个标签，扫读用
+        lines.append(f"  概念：{' ｜ '.join(_concepts[:3])}")
 
     # 两融默认不进顶栏（避免与短线「资金：」叠床架屋）；异常大净买/净卖才点名
     _ext_margin = r.get("extend_margin") or {}
