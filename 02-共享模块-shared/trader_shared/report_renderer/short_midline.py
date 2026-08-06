@@ -965,7 +965,41 @@ def render_short_midline(r: dict[str, Any]) -> str:
         if _fb_d.get("timeframe") != "weekly":
             _wyk_daily_u = _fb_d
 
-    # 1c) 威科夫：日线只对照（标签固定「威科夫：」，禁止「日线阶段：」；不进背景岗/出手）
+    # 1c) 威科夫：日线阶段 + 事件并一行（禁止「日线阶段：」/独立「事件：」；不进出手）
+    # 尾注统一「不作买点」——有 SOS 等偏多事件时防误读为可买
+    def _short_wyckoff_event_bit(ev_raw: str) -> str:
+        s = str(ev_raw or "").strip()
+        for pfx in ("事件：", "状态："):
+            if s.startswith(pfx):
+                s = s[len(pfx):].strip()
+                break
+        if not s or "暂无事件" in s or "数据不足" in s or s in ("—", "-"):
+            return ""
+        # 去长括号复述，保留灯码与方向
+        s = re.sub(r"(· [^·（]{2,16})（[^）]{6,}）", r"\1", s)
+        s = re.sub(r"\s*·\s*", " · ", s)
+        s = re.sub(r"\s{2,}", " ", s).strip()
+        # 压缩：Code + 偏多/偏空
+        code_m = re.match(
+            r"([A-Za-z]{2,8}|Spring|BullDiv|BearDiv)(?:（[^）]*）)?",
+            s,
+        )
+        code = code_m.group(1) if code_m else ""
+        bias = ""
+        if "偏多" in s:
+            bias = "偏多"
+        elif "偏空" in s:
+            bias = "偏空"
+        if code and bias:
+            return f"{code}{bias}"
+        if code:
+            return code
+        # 兜底截断
+        if len(s) > 18:
+            s = s[:16] + "…"
+        return s
+
+    _phase_body = ""
     try:
         from trader_shared.wyckoff_view import format_daily_phase_display
 
@@ -974,45 +1008,44 @@ def render_short_midline(r: dict[str, Any]) -> str:
             symbol=str(r.get("ts_code") or r.get("code") or ""),
         )
         _phase_body = str(_phase_d).strip()
-        # 兼容旧前缀；面板只出「威科夫：」
         for _pfx in ("日线阶段：", "威科夫："):
             if _phase_body.startswith(_pfx):
                 _phase_body = _phase_body[len(_pfx):].strip()
                 break
-        lines.append(f"  威科夫：{_phase_body or '数据不足 · 仅对照'}")
     except Exception:
-        lines.append("  威科夫：数据不足 · 仅对照")
+        _phase_body = ""
+
+    _ev_bit = ""
+    try:
+        from trader_shared.wyckoff_view import format_event_display
+
+        if _wyk_daily_u:
+            _ev_full = format_event_display(
+                _wyk_daily_u, symbol=str(r.get("ts_code") or r.get("code") or "")
+            )
+            _ev_bit = _short_wyckoff_event_bit(_ev_full)
+    except Exception:
+        _ev_bit = ""
+
+    # 去掉阶段尾「仅对照」——改由统一尾注「不作买点」
+    if _phase_body.endswith(" · 仅对照"):
+        _phase_body = _phase_body[: -len(" · 仅对照")].strip()
+    elif _phase_body.endswith("仅对照"):
+        _phase_body = _phase_body[: -len("仅对照")].rstrip(" ·").strip()
+    _phase_body = _phase_body or "数据不足"
+
+    _wyk_parts = [_phase_body]
+    if _ev_bit:
+        _wyk_parts.append(_ev_bit)
+    _wyk_parts.append("不作买点")
+    lines.append("  威科夫：" + " · ".join(_wyk_parts))
+
     # 短线量度目标：日线 P&F（与中线周线分开算）
     try:
         from trader_shared.wyckoff_view import format_cause_effect_display
         _ce_d = format_cause_effect_display(_wyk_daily_u)
         if _ce_d:
             lines.append(f"  {_ce_d}")
-    except Exception:
-        pass
-
-    # 2) 事件：日线威科夫事件灯（仅有真实事件时输出；暂无事件省略）
-    try:
-        from trader_shared.wyckoff_view import format_event_display
-
-        if _wyk_daily_u:
-            _ev = format_event_display(
-                _wyk_daily_u, symbol=str(r.get("ts_code") or r.get("code") or "")
-            )
-            # 统一标签「事件：」（format 内可能仍是「状态：/事件：」）
-            if _ev.startswith("状态："):
-                _ev = "事件：" + _ev[len("状态："):]
-            elif _ev.startswith("事件："):
-                pass
-            else:
-                _ev = f"事件：{_ev}"
-            # 去掉「主句（复述注）」长括号，保留灯码 + 主句 + 方向
-            _ev = re.sub(r"(· [^·（]{2,16})（[^）]{6,}）", r"\1", _ev)
-            _ev = re.sub(r"\s*·\s*", " · ", _ev)
-            _ev = re.sub(r"\s{2,}", " ", _ev).strip()
-            # 空事件不占行
-            if "暂无事件" not in _ev and "数据不足" not in _ev:
-                lines.append(f"  {_ev}")
     except Exception:
         pass
 

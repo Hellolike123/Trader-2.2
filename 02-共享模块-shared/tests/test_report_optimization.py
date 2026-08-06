@@ -425,7 +425,7 @@ def test_format_wyckoff_event_light_none():
 
 
 def test_short_section_shows_event_light():
-    """⚡ 短线含状态行；读 wyckoff_daily，不进评分。"""
+    """⚡ 短线威科夫并入事件；读 wyckoff_daily，不进评分；无独立事件行。"""
     r = _report()
     r["wyckoff_daily"] = {
         "spring_signal": True,
@@ -440,7 +440,11 @@ def test_short_section_shows_event_light():
     }
     out = render_short_midline(r)
     assert "⚡ 短线" in out
-    assert "事件：Spring（弹簧）" in out
+    short = out.split("⚡ 短线", 1)[-1]
+    assert "事件：" not in short
+    wyk = next(ln for ln in short.splitlines() if ln.strip().startswith("威科夫："))
+    assert "Spring" in wyk
+    assert "不作买点" in wyk
     # 中线 + 短线均有「威科夫：」点名行
     assert out.count("威科夫：") >= 2
 
@@ -905,7 +909,8 @@ def test_short_section_has_daily_phase_line():
     assert "缠论：" in short
     assert "威科夫：" in short
     assert "日线阶段：" not in short
-    assert "暂定不出" in short or "仅对照" in short
+    assert "暂定不出" in short or "不作买点" in short or "仅对照" in short
+    assert "不作买点" in short
     assert "暂不出阶段" not in short
     # 仍在短线块内，且在缠论之后
     lines = [ln.strip() for ln in short.splitlines() if ln.strip()]
