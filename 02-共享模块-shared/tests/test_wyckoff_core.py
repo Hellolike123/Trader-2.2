@@ -357,6 +357,32 @@ class TestDetectSosThrust:
         assert r2["sos_signal"] is True, r2
         assert r2.get("sos_kind") == "thrust"
 
+    def test_climb_price_cap_via_at_tip(self):
+        """climb 路径价幅上限（2026-08-06）：历史高位 5 连阳经 _detect_sos_at_tip 被拒。"""
+        from trader_shared.wyckoff_events import _detect_sos_at_tip
+
+        def _mk(o, c, v):
+            return {"open": o, "close": c, "high": max(o, c) + 0.1, "low": min(o, c) - 0.1, "volume": v}
+
+        # 前 15 根低价阴线 pad（保 climb 窗口在末 5 根 + 量比基线）+ 历史高位 5 连阳（66→70.09）
+        pad = [_mk(45.0, 44.8, 47000) for _ in range(15)]
+        bars = pad + [
+            _mk(66, 66.5, 60000), _mk(66.5, 67, 65000), _mk(67, 68, 70000),
+            _mk(68, 69, 75000), _mk(69, 70.09, 90000),
+        ]
+        tr = {"tr_upper": 46.53, "tr_lower": 41.0, "tr_baseline_volume": 47000, "tr_start": 0}
+        r = _detect_sos_at_tip(bars, tr)
+        assert r["sos_signal"] is False, r
+        assert "远超上沿" in (r.get("sos_reason") or "")
+
+        # 近箱 5 连阳（45→46.5，≤46.53×1.5）→ 放行
+        bars2 = pad + [
+            _mk(45, 45.3, 60000), _mk(45.3, 45.6, 65000), _mk(45.6, 46.0, 70000),
+            _mk(46.0, 46.3, 75000), _mk(46.3, 46.5, 90000),
+        ]
+        r2 = _detect_sos_at_tip(bars2, tr)
+        assert r2["sos_signal"] is True, r2
+
     def test_climb_sos_still_works(self):
         # 20 根基线缩量 + 5 根放量阳线爬坡
         bars = [_make_bar(40.0, 40.5, 39.5, 40.0, 1000) for _ in range(20)]

@@ -2005,14 +2005,34 @@ def _detect_sos_at_tip(bars: list[dict], tr_ctx: dict | None = None) -> dict:
 
     climb = _try_sos_climb(bars, baseline_climb)
     if climb.get("sos_signal"):
-        return climb
+        return _sos_price_capped(climb, tr_ctx)
 
     baseline_thrust = _sos_baseline_avg_vol(bars, tr_ctx, robust=True)
     thrust = _try_sos_thrust(bars, tr_ctx, baseline_thrust if baseline_thrust > 0 else baseline_climb)
     if thrust.get("sos_signal"):
-        return thrust
+        return _sos_price_capped(thrust, tr_ctx)
 
     return climb if climb.get("sos_reason") else thrust
+
+
+def _sos_price_capped(res: dict, tr_ctx: dict | None = None) -> dict:
+    """统一价幅上限：sos_price 远超 tr_upper×1.5 → 历史高位反弹，拒绝。
+
+    climb/thrust 两条 SOS 路径共用（2026-08-06）：无 SC 地板回扫时，
+    历史高位的大阳/连阳会被误判为「站上箱体」。thrust 内部已早退检查，
+    此处兜底 climb（thrust 重复检查无害）。
+    """
+    if not res.get("sos_signal"):
+        return res
+    tr_upper = _sos_thrust_creek(tr_ctx)
+    price = res.get("sos_price")
+    if tr_upper is None or price is None:
+        return res
+    if price > tr_upper * WYCKOFF_SOS_MAX_PRICE_MULT:
+        return _sos_empty(
+            f"收盘{price:.2f}远超上沿{tr_upper:.2f}（×{WYCKOFF_SOS_MAX_PRICE_MULT:.1f}），历史高位反弹，非箱体突破"
+        )
+    return res
 
 
 def _detect_sos(
