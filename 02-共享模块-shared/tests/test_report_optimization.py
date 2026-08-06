@@ -1175,14 +1175,31 @@ def test_meta_pure_d_with_sector():
 # ── Task 9: 中线关键价格式统一 ──
 
 def test_mid_key_price_format():
-    """中线关键价阶梯：价格前置；偏空时可收掉与生命线重叠的大回踩区。"""
+    """中线关键价阶梯：价格升序；>+30% 目标/压力不进阶梯。"""
     out = render_short_midline(_report())
     mid = out.split("⚡ 短线", 1)[0]
     assert "41.14 生命线" in mid
-    # 偏空/关闭：大回踩与生命线重叠可不展示
-    assert "56.00 压力位" in mid or "56.00 压力" in mid
-    assert "68.82 目标位" in mid or "68.82 目标" in mid
     assert "MA20" in mid or "MA250" in mid
+    # 56 压力 +30% 边界可留；68 目标 +59% 必须去掉
+    assert "68.82" not in mid
+    # 严格升序（抓关键价块数字行）
+    block = []
+    grab = False
+    for ln in mid.splitlines():
+        if "关键价（中线）" in ln:
+            grab = True
+            continue
+        if grab:
+            if not ln.strip():
+                break
+            if ln.strip().startswith("现价") or any(ch.isdigit() for ch in ln):
+                block.append(ln)
+    prices = []
+    for ln in block:
+        m = __import__('re').search(r"(\d+\.\d+)", ln.replace('🌟',''))
+        if m:
+            prices.append(float(m.group(1)))
+    assert prices == sorted(prices), prices
 
 
 # ── 面板减重 D-R1…D-R8（trader-panel-declutter-handoff）──

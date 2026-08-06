@@ -856,31 +856,20 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _tm = re.match(r"([\d.]+)", _tgt_line)
         if _tm:
             _tgt_p = float(_tm.group(1))
-    # 压力/目标过远（>+50%）标「远」；>+100% 默认不进阶梯
-    def _far_note(line: str, px: float) -> str | None:
+    # 压力/目标：距现价 >+30% 视为过远，不进阶梯（不标「远」凑数）
+    def _near_enough(px: float) -> bool:
         if current <= 0 or px <= 0:
-            return line
-        pct = (px - current) / current * 100.0
-        if pct > 80:
-            return None
-        if pct > 50:
-            if "（" in line:
-                return line[:-1] + " · 远）" if line.endswith("）") else f"{line} · 远"
-            return f"{line}（远）"
-        return line
+            return False
+        return (px - current) / current * 100.0 <= 30.0
 
-    if _res_line and _res_p > 0:
-        _rl = _far_note(_res_line, _res_p)
-        if _rl:
-            _mid_add(_res_p, _res_p, "resist", _rl)
-    if _tgt_line and _tgt_p > 0:
-        # 与压力过近则只留一档（目标优先若更高）
-        if _res_p > 0 and abs(_tgt_p - _res_p) / max(_tgt_p, 1e-6) < 0.03:
-            pass  # 压力已加；目标几乎同价跳过
+    if _res_line and _res_p > 0 and _near_enough(_res_p):
+        _mid_add(_res_p, _res_p, "resist", _res_line)
+    if _tgt_line and _tgt_p > 0 and _near_enough(_tgt_p):
+        # 与压力过近则只留一档
+        if _res_p > 0 and _near_enough(_res_p) and abs(_tgt_p - _res_p) / max(_tgt_p, 1e-6) < 0.03:
+            pass
         else:
-            _tl = _far_note(_tgt_line, _tgt_p)
-            if _tl:
-                _mid_add(_tgt_p, _tgt_p, "target", _tl)
+            _mid_add(_tgt_p, _tgt_p, "target", _tgt_line)
 
     # 价格去重：同价优先 life>ma20>golden>ma250>pullback>resist>target
     _kind_rank = {
@@ -902,27 +891,25 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _seen_px.append(sp)
         _mid_items.append((sp, body))
 
-    # 阶梯最多 6 档（不含现价）：优先保留近档 + 生命线/年线/目标
+    # 先按价格升序
+    _mid_items.sort(key=lambda x: x[0])
+
+    # 阶梯最多 6 档（不含现价）：优先近档 + 硬位，裁完再按价格排回
     if len(_mid_items) > 6 and current > 0:
         def _keep_score(item: tuple[float, str]) -> tuple:
             p, body = item
             dist = abs(p - current) / current
-            hard = 0 if any(k in body for k in ("生命线", "MA250", "MA20", "目标", "黄金")) else 1
+            hard = 0 if any(k in body for k in ("生命线", "MA250", "MA20", "黄金")) else 1
             return (hard, dist)
 
         _mid_items = sorted(_mid_items, key=_keep_score)[:6]
         _mid_items.sort(key=lambda x: x[0])
 
-    # 中线阶梯插入现价锚点（无 🌟）
+    # 中线阶梯插入现价锚点（无 🌟），插入后仍保持价格升序
     if current > 0:
-        _ins = False
-        for _i, (p, _) in enumerate(_mid_items):
-            if p > current:
-                _mid_items.insert(_i, (current, f"现价 {current:.2f}"))
-                _ins = True
-                break
-        if not _ins:
-            _mid_items.append((current, f"现价 {current:.2f}"))
+        _mid_items = [it for it in _mid_items if "现价" not in it[1]]
+        _mid_items.append((current, f"现价 {current:.2f}"))
+        _mid_items.sort(key=lambda x: x[0])
 
     for _p, _text in _mid_items:
         if "现价" in _text:
@@ -1390,16 +1377,26 @@ def render_short_midline(r: dict[str, Any]) -> str:
         if _take_f and short_high and abs(_take_f - float(short_high)) / max(float(short_high), 1) > 0.01:
             _price_items.append((_take_f, "前高/止盈", "全部止盈"))
 
-    # 按价格排序输出（阶梯形态保留）
-    _price_items.sort(key=lambda x: x[0])
+    # 按价格严格升序输出（价在前）
+    _price_items.sort(key=lambda x: (x[0], x[1]))
     for price, label, action in _price_items:
         if "现价" in label:
             lines.append(f"    🌟 {current:.2f} 现价（{action}）")
-        elif "低吸区" in label or "计划买区" in label or label.startswith("止盈区 "):
-            # 区间标签自带价格
+            continue
+        # 区间类：label 可能是「低吸区 41.93-42.98」→ 统一成「41.93-42.98 低吸区」
+        _zm = re.match(
+            r"^(低吸区|计划买区|止盈区|买点区)\s+([\d.]+)-([\d.]+)$",
+            str(label).strip(),
+        )
+        if _zm:
+            lines.append(
+                f"    {float(_zm.group(2)):.2f}-{float(_zm.group(3)):.2f} {_zm.group(1)}（{action}）"
+            )
+        elif str(label).startswith("止盈区 ") or str(label).startswith("低吸区 "):
+            # 兜底：仍尽量价在前
             lines.append(f"    {label}（{action}）")
         else:
-            lines.append(f"    {price:.2f} {label}（{action}）")
+            lines.append(f"    {float(price):.2f} {label}（{action}）")
 
     lines.append("")
 
