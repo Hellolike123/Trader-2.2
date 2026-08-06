@@ -447,7 +447,7 @@ def test_m_r9_breakdown_aborts_st_no_l2() -> None:
     daily_line = format_wyckoff_daily_phase_light(result)
     assert not _mature_box_phrase(daily_line)
     # R-F2/R-F5：光杆日线 failed → Phase A 失效；禁「失败」
-    assert daily_line == "Phase A 失效｜须重新寻底｜仅对照"
+    assert daily_line == "Phase A 失效｜本波无新SC｜对照"
     for bad in ("Phase A失败", "Phase A 失败"):
         assert bad not in daily_line
     # sc_low SSOT：保持 SC 棒低点，不被后续棒覆盖

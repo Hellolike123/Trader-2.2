@@ -382,13 +382,13 @@ def test_sb1_default_slim_skeleton_no_long_blocks():
 def test_sb17_failed_slim_story_no_healthy_advance():
     """S-B17：短推演保留；failed 不得健康还差/链可推进。"""
     text = render_wyckoff_slim(_failed_phase_a_plan())
-    assert "日线本波：Phase A 失效｜须重新寻底" in text
+    assert "日线本波：Phase A 失效｜本波无新SC" in text
     story = text.split("🔮 推演", 1)[1]
     assert "\n  现在\n" in story
     assert "\n  若变好\n" in story
     assert "\n  若变坏\n" in story
     assert "\n  ⭐ 盯\n" in story
-    assert "Phase A 失效｜须重新寻底" in story
+    assert "Phase A 失效｜本波无新SC" in story
     assert "还差" not in story
     assert "链可推进" not in story
     assert "SC→SOS（Phase A 已失效）" not in story
@@ -482,10 +482,10 @@ def test_sb6_sb7_slim_lights_vertical_and_one_next_watch():
 
 
 def test_sb9_failed_slim_resets_next_watch_without_healthy_gap():
-    """S-B9/S-B10 / P-C1/P-C2：failed 无强势 → Phase A 失效｜须重新寻底 + 旧SC仅对照。"""
+    """S-B9/S-B10 / P-C1/P-C2：failed 无强势 → Phase A 失效｜本波无新SC + 旧SC对照。"""
     text = render_wyckoff_slim(_failed_phase_a_plan())
     short_block = text.split("⚡ 日线 · 本波", 1)[1].split("🔮 推演", 1)[0]
-    assert "Phase A 失效｜须重新寻底｜旧SC 9.50（仅对照）" in short_block
+    assert "Phase A 失效｜本波无新SC｜旧SC 9.50（对照）" in short_block
     assert "雏形" not in short_block  # failed 不得健康雏形
     assert "箱体" not in short_block
     assert "● SC（卖力高潮）9.50" in short_block
@@ -496,12 +496,12 @@ def test_sb9_failed_slim_resets_next_watch_without_healthy_gap():
 
 
 def test_sb28_overview_writes_proto_prices_and_failed_anchor_ref():
-    """S-B28：总览写出雏形价；failed 写旧SC仅对照，不写健康箱体。"""
+    """S-B28：总览写出雏形价；failed 写旧SC对照，不写健康箱体。"""
     text = render_wyckoff_slim(_sample_plan())
     assert "周线：偏多｜SC后反弹，雏形 8.00～12.00（待SC区回测）｜慎做" in text
     failed = render_wyckoff_slim(_failed_phase_a_plan())
     daily = failed.split("⚡ 日线 · 本波", 1)[1].split("🔮 推演", 1)[0]
-    assert "旧SC 9.50（仅对照）" in daily
+    assert "旧SC 9.50（对照）" in daily
     assert "雏形 9.50" not in daily
     assert "箱体 9.50" not in daily
 
@@ -520,7 +520,7 @@ def test_sb18_sb23_failed_plus_sos_keeps_full_lights_and_explains():
     assert "说明：●SC 是旧底事实，●SOS 是本波强势事实；不按顺序推进读。" in text
     assert "SC→SOS（Phase A 已失效）" not in text
     daily = text.split("⚡ 日线 · 本波", 1)[1].split("🔮 推演", 1)[0]
-    assert "Phase A 失效 · 破后强势｜本波 SOS 强｜旧SC 9.50（仅对照）" in daily
+    assert "Phase A 失效 · 破后强势｜本波 SOS 强｜旧SC 9.50（对照）" in daily
     assert "● SC（卖力高潮）9.50" in daily
     assert "● SOS（强势信号）11.20" in daily
     for bad in ("日偏空", "换幕", "当前幕", "上一幕"):
@@ -908,15 +908,15 @@ def test_c_f4_c_f5_c_f7_failed_detail_story_resets_phase_a_copy():
     watch = story.split("⭐ 盯", 1)[1].split("入池：", 1)[0]
 
     assert "现在\n威：SC（Phase A 失效）" in story
-    assert "Phase A 失效｜须重新寻底" in better
-    assert "重新寻底" in better or "新的 SC" in better
+    assert "Phase A 失效｜本波无新SC" in better
+    assert "本波无新SC" in better or "本波新SC" in better
     assert "Phase A 已失效" not in better
     assert "旧故事作废" not in story
     assert "● SC（卖力高潮）9.50" in text
     assert "链可推进" not in better
     assert "还差" not in story
     assert "盯下一灯" not in watch
-    assert "重新寻底" in watch or "新的 SC" in watch
+    assert "本波新SC" in watch or "本波无新SC" in watch
 
 
 def test_c_f6_failed_short_card_uses_failed_chain_copy():
@@ -960,7 +960,7 @@ def test_c_f7_view_failed_raw_missing_status_still_closes():
 
 
 def test_pc10_full_failed_story_uses_invalid_copy():
-    """P-C10：--full failed 故事链/综述无「失败/已失效/旧故事作废」，含失效+重新寻底。"""
+    """P-C10：--full failed 故事链/综述无「失败/已失效/旧故事作废」，含失效+本波无新SC。"""
     text = render_wyckoff_detail(_failed_phase_a_plan())
     story = text.split("🔮 故事链（以日线推进；周线作背景）", 1)[1]
     summary = text.split("💬 综述", 1)[1]
@@ -968,9 +968,9 @@ def test_pc10_full_failed_story_uses_invalid_copy():
     for bad in ("Phase A 失败", "Phase A失败", "Phase A 已失效", "旧故事作废"):
         assert bad not in visible
     assert "Phase A 失效" in visible
-    assert "重新寻底" in visible
+    assert "本波无新SC" in visible or "本波新SC" in visible
     assert "威：SC（Phase A 失效）" in story
-    assert "Phase A 失效｜须重新寻底" in story
+    assert "Phase A 失效｜本波无新SC" in story
 
 
 def test_pc11_brief_failed_maps_fail_to_invalid():
@@ -1017,15 +1017,15 @@ _CL_FAIL_BANNED = (
 
 
 def test_cl1_cl2_failed_three_renders_banned_words():
-    """C-L1/C-L2：三档 failed 面板禁词；默认 B 仍含 Phase A 失效｜须重新寻底。"""
+    """C-L1/C-L2：三档 failed 面板禁词；默认 B 仍含 Phase A 失效｜本波无新SC。"""
     for plan in (_failed_phase_a_plan(), _failed_plus_sos_plan(), _failed_plus_lps_plan()):
         for render in (render_wyckoff_slim, render_wyckoff_detail, render_wyckoff_card):
             text = render(plan)
             for bad in _CL_FAIL_BANNED:
                 assert bad not in text, f"{render.__name__} leaked {bad!r}"
     slim = render_wyckoff_slim(_failed_phase_a_plan())
-    assert "Phase A 失效｜须重新寻底" in slim
-    assert "日线本波：Phase A 失效｜须重新寻底" in slim
+    assert "Phase A 失效｜本波无新SC" in slim
+    assert "日线本波：Phase A 失效｜本波无新SC" in slim
 
 
 def test_cl3_dead_helper_fail_copy_no_banned_words():
@@ -1061,7 +1061,7 @@ def test_cl3_dead_helper_fail_copy_no_banned_words():
         assert bad not in joined, f"helper leaked {bad!r}"
     assert "破后强势" in joined
     assert "Phase A 失效" in joined
-    assert "须重新寻底" in wr._slim_chain_token(
+    assert "本波无新SC" in wr._slim_chain_token(
         _failed_phase_a_plan()["daily_view"],
         _failed_phase_a_plan()["daily_raw"],
         failed=True,

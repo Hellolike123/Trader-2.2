@@ -131,9 +131,9 @@ def test_s_a4_s_a5_breakdown_fails_phase_a_and_forbids_st() -> None:
 
     daily_line = format_wyckoff_daily_phase_light(result)
     midline = format_wyckoff_midline_light(result)
-    # R-F1/R-F2/R-F3/R-F5：报告光杆 failed → 失效｜须重新寻底；禁「失败」
-    assert daily_line == "Phase A 失效｜须重新寻底｜仅对照"
-    assert midline == "威科夫：Phase A 失效｜须重新寻底｜不据此开仓"
+    # R-F1/R-F2/R-F3/R-F5：报告光杆 failed → 失效｜本波无新SC；禁「失败」
+    assert daily_line == "Phase A 失效｜本波无新SC｜对照"
+    assert midline == "威科夫：Phase A 失效｜本波无新SC｜不据此开仓"
     for bad in ("Phase A失败", "Phase A 失败"):
         assert bad not in daily_line
         assert bad not in midline
@@ -147,7 +147,7 @@ def test_s_a4_s_a5_breakdown_fails_phase_a_and_forbids_st() -> None:
 
 
 def test_r_f_light_format_failed_ban_words() -> None:
-    """R-F1…R-F5 / M-R1：光杆 format failed fixture 禁「失败」，含失效｜须重新寻底。"""
+    """R-F1…R-F5 / M-R1：光杆 format failed fixture 禁「失败」，含失效｜本波无新SC。"""
     failed = {
         "phase_a_status": "failed",
         "phase": "none",
@@ -164,11 +164,11 @@ def test_r_f_light_format_failed_ban_words() -> None:
     }
     daily = format_wyckoff_daily_phase_light(failed)
     mid = format_wyckoff_midline_light(failed)
-    assert daily == "Phase A 失效｜须重新寻底｜仅对照"
-    assert mid == "威科夫：Phase A 失效｜须重新寻底｜不据此开仓"
+    assert daily == "Phase A 失效｜本波无新SC｜对照"
+    assert mid == "威科夫：Phase A 失效｜本波无新SC｜不据此开仓"
     for text in (daily, mid):
         assert "Phase A 失效" in text
-        assert "须重新寻底" in text
+        assert "本波无新SC" in text
         for bad in ("Phase A失败", "Phase A 失败"):
             assert bad not in text
 

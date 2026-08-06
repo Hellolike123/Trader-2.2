@@ -183,7 +183,7 @@ def test_format_daily_phase_no_tr_isomorphic():
     assert "日线阶段：" not in line
     assert "无清晰区间" in line
     assert "暂定不出" in line
-    assert "仅对照" in line
+    assert "对照" in line
 
 
 def test_format_daily_phase_forming():
@@ -201,7 +201,7 @@ def test_format_daily_phase_forming():
     assert line.startswith("威科夫：")
     assert "箱体未成形" in line
     assert "上沿未出" in line
-    assert "仅对照" in line
+    assert "对照" in line
 
 
 def test_format_daily_phase_established():
@@ -226,7 +226,7 @@ def test_format_daily_phase_established():
     assert line.startswith("威科夫：")
     assert "雏形 10.00-12.00（待 ST）" in line
     assert "箱体 10.00-12.00" not in line
-    assert "仅对照" in line
+    assert "对照" in line
 
     # 真 ST → 可写箱体
     line_box = format_daily_phase_display(
@@ -280,7 +280,7 @@ def test_format_daily_phase_established_invalid_bounds_no_pinned_fallback():
     )
     assert "箱体已钉" not in line
     assert "箱体 12" not in line
-    assert "仅对照" in line
+    assert "对照" in line
 
 
 def test_format_daily_phase_legacy_unpinned_label():

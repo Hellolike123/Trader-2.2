@@ -1,6 +1,7 @@
 # 威科夫 Phase 失效文案统一 — Agent Handoff
 
-> **状态**: impl_done（现行展示合同；Phase 失效人话 SSOT 已合入）  
+> **状态**: impl_done（现行展示合同；Phase 失效人话 SSOT 已合入）
+> **续篇精简**: `docs/plans/wyckoff-failed-sc-copy-slim-handoff.md`（主句改为 `本波无新SC`；旧锚 `（对照）`）  
 > 法源对齐：`docs/plans/wyckoff-detail-slim-b-handoff.md`（B 卡骨架）；`docs/plans/done/wyckoff-failed-chain-copy-handoff.md`（失败态禁健康推进）；`docs/plans/wyckoff-structure-anchor-handoff.md` §3（failed → L0）  
 > 实现锚点：`wyckoff_render.py`（`render_wyckoff_slim` / `render_wyckoff_detail` / `render_wyckoff_card` / `_story_block`）；链短句 `wyckoff_chain.format_wyckoff_chain_plain`（仅展示词）  
 > 产品裁决：只改**人话展示**；不改 Phase A failed 判定、L0–L3、fusion、出手、池分道。  
@@ -13,20 +14,20 @@
 ### 1.1 做
 
 1. 默认 B 卡日线失败态统一句式：  
-   - 无新强势：`Phase A 失效｜须重新寻底`  
+   - 无新强势：`Phase A 失效｜本波无新SC`  
    - 有 SOS：`Phase A 失效 · 破后强势｜本波 SOS 强`  
    - 有 LPS 无 SOS：`Phase A 失效｜本波 LPS 修复`
-2. 日线本波主句可附旧 SC 对照价：`｜旧SC {价}（仅对照）`；**禁止**「废锚 / 已废 / 作废」。
+2. 日线本波主句可附旧 SC 对照价：`｜旧SC {价}（对照）`；**禁止**「废锚 / 已废 / 作废」。
 3. 有效阶段**不写「有效」**；阶段名与中文释义用中间点：  
    - `Phase A · 止跌开场`  
    - `Phase B · 建因横盘`  
    - `Phase C · 试盘`  
    （D/E 本迭代可不强改，有现成 phase 展示则尽量同构：`Phase D · 强度确认` / `Phase E · 离开区间`）
-4. 推演「现在」日线句与总览/本波主句同语义（失效｜须重新寻底 或 失效 · 破后强势｜本波 SOS 强）。
+4. 推演「现在」日线句与总览/本波主句同语义（失效｜本波无新SC 或 失效 · 破后强势｜本波 SOS 强）。
 5. 「若变坏」周线少用「作废」→ 可用 `雏形不成立` / `结构不成立`。
 6. **`--full` / `--brief` 人话与默认 B 同源**（骨架可不同，失败语义同句式）：  
    - 禁面板可见：`Phase A 失败`、`Phase A 已失效`、`旧故事作废`、`待新寻底`（作主句）、`废锚` / `（已废）`  
-   - `--full` 故事链「若变好」failed：`Phase A 失效｜须重新寻底`（可续「出现新 SC」）；链短句 `威：SC（Phase A 失效）`（去掉「已」）  
+   - `--full` 故事链「若变好」failed：`Phase A 失效｜本波无新SC`（可续「出现本波新SC」）；链短句 `威：SC（Phase A 失效）`（去掉「已」）  
    - `--brief`：阶段/链/事件/一句 中 failed 可见面改写为「失效」语义；可用 render 层映射，**不必**改 core 内部 `fail_reason` 字段存储  
 7. 同步文档：本文、slim-b 对照样、`output-template.md`（含 `--full`/`--brief` 示例）、`agent-quickstart.md`、相关 pytest。
 
@@ -48,7 +49,7 @@
 ```text
 南网科技（688248）｜现价 41.90
 周线：偏多｜SC后反弹，雏形 37.80～43.85（待 ST）｜慎做
-日线本波：Phase A 失效｜须重新寻底
+日线本波：Phase A 失效｜本波无新SC
 入池：暂不建议入池（早期结构，尚无 ST/LPS）
 
 🧭 周线 · 大阶段
@@ -61,7 +62,7 @@
   ○ SOS（强势信号）
 
 ⚡ 日线 · 本波
-  Phase A 失效｜须重新寻底｜旧SC 41.02（仅对照）
+  Phase A 失效｜本波无新SC｜旧SC 41.02（对照）
   灯
   ● SC（卖力高潮）41.02
   ○ AR（自动反弹）
@@ -72,7 +73,7 @@
 🔮 推演
   现在
     周线：SC→AR，待 ST（二次测试）
-    日线：Phase A 失效｜须重新寻底
+    日线：Phase A 失效｜本波无新SC
     周线量度：未达 L3，暂不测算
     日线量度：未达 L3，暂不测算
 ```
@@ -83,7 +84,7 @@
 日线本波：Phase A 失效 · 破后强势｜本波 SOS 强
 
 ⚡ 日线 · 本波
-  Phase A 失效 · 破后强势｜本波 SOS 强｜旧SC {价}（仅对照）
+  Phase A 失效 · 破后强势｜本波 SOS 强｜旧SC {价}（对照）
   说明：●SC 是旧底事实，●SOS 是本波强势事实；不按 SC→SOS 顺序推进读。
 ```
 
@@ -104,8 +105,8 @@
 |------|------|
 | `旧底已废` | `Phase A 失效` |
 | `Phase A failed`（英文 failed） | `Phase A 失效` |
-| `废锚参考` / `（已废）` | `旧SC {价}（仅对照）` |
-| `待新寻底`（总览主句） | `须重新寻底` |
+| `废锚参考` / `（已废）` | `旧SC {价}（对照）` |
+| `待新寻底`（总览主句） | `本波无新SC` |
 | `作废`（若变坏周线） | `雏形不成立` / `结构不成立` |
 
 说明行「不按顺序推进读」保留。
@@ -116,8 +117,8 @@
 
 | ID | 必须 | 测 |
 |----|------|-----|
-| P-C1 | failed 无强势：总览含 `Phase A 失效｜须重新寻底` | pytest fixture |
-| P-C2 | failed 本波主句含 `旧SC` + `仅对照`；无废锚/已废/failed 英文 | pytest |
+| P-C1 | failed 无强势：总览含 `Phase A 失效｜本波无新SC` | pytest fixture |
+| P-C2 | failed 本波主句含 `旧SC` + `对照`；无废锚/已废/failed 英文 | pytest |
 | P-C3 | failed+SOS：`Phase A 失效 · 破后强势｜本波 SOS 强`；说明行仍在 | pytest |
 | P-C4 | failed+LPS：`Phase A 失效｜本波 LPS 修复` | pytest |
 | P-C5 | 默认 B 失败路径无：`旧底已废` / `废锚` / `Phase A failed` / `（已废）` | pytest |
@@ -138,7 +139,7 @@
 威：SC（Phase A 失效）｜日线偏空｜周线背景偏多
 
 若变好
-Phase A 失效｜须重新寻底；观察是否出现新的 SC（卖力高潮）
+Phase A 失效｜本波无新SC；观察是否出现本波新SC
 ```
 
 `--brief` 片段：

@@ -28,7 +28,7 @@
   {●|○} UTAD（派发后上冲）{price?}
 
 ⚡ 日线 · 本波
-  {日线本波一句话：本波事件 + failed/强弱事实 + 区间/门禁；failed 写 Phase A 失效｜须重新寻底｜旧SC 价（仅对照），不写健康雏形/箱体}
+  {日线本波一句话：本波事件 + failed/强弱事实 + 区间/门禁；failed 写 Phase A 失效｜本波无新SC｜旧SC 价（对照），不写健康雏形/箱体}
   {failed+SOS 时说明：旧底事实与本波强势事实并列，不按顺序推进读}
   灯
   {●|○} SC（卖力高潮）{price?}
@@ -61,7 +61,7 @@
     本卡不下单；出手/分道看 trader
 ```
 
-`🔔 变化` 仅当有新亮或熄灭时出现；首次记录、无变化、仅仍亮时整块省略。`🔮 推演` 必出：标签与正文分行、段间空行；每段先周线、后日线。「现在」段附周/日量度行：仅 L3 / `measure_allowed` 出 `量度目标`；否则 `未达 L3，暂不测算`。灯必须满灯竖排，一行一灯；默认 B 不写舞台/换幕/当前幕/上一幕。failed 无新强势写 `Phase A 失效｜须重新寻底`（主句可附 `旧SC {价}（仅对照）`）；failed+SOS 写 `Phase A 失效 · 破后强势｜本波 SOS 强` 且保留 SC/SOS 同亮解释；failed+LPS 写 `Phase A 失效｜本波 LPS 修复`。禁 `旧底已废` / `废锚` / `Phase A failed` / `（已废）` / 总览主句 `待新寻底`。有效阶段不写「有效」，有明确 phase 可套 `Phase B · 建因横盘` / `Phase C · 试盘`。L0 / `box_display_mode=none` / 分位种子：区间不得出现分位上下沿数字当箱/雏形。周线 ARE 无 BC 时用派发链，禁止接吸筹 SC。文案细合同见 `docs/plans/wyckoff-phase-fail-copy-handoff.md`。
+`🔔 变化` 仅当有新亮或熄灭时出现；首次记录、无变化、仅仍亮时整块省略。`🔮 推演` 必出：标签与正文分行、段间空行；每段先周线、后日线。「现在」段附周/日量度行：仅 L3 / `measure_allowed` 出 `量度目标`；否则 `未达 L3，暂不测算`。灯必须满灯竖排，一行一灯；默认 B 不写舞台/换幕/当前幕/上一幕。failed 无新强势写 `Phase A 失效｜本波无新SC`（主句可附 `旧SC {价}（对照）`）；failed+SOS 写 `Phase A 失效 · 破后强势｜本波 SOS 强` 且保留 SC/SOS 同亮解释；failed+LPS 写 `Phase A 失效｜本波 LPS 修复`。禁 `旧底已废` / `废锚` / `Phase A failed` / `（已废）` / 总览主句 `待新寻底`。有效阶段不写「有效」，有明确 phase 可套 `Phase B · 建因横盘` / `Phase C · 试盘`。L0 / `box_display_mode=none` / 分位种子：区间不得出现分位上下沿数字当箱/雏形。周线 ARE 无 BC 时用派发链，禁止接吸筹 SC。文案细合同见 `docs/plans/wyckoff-phase-fail-copy-handoff.md`。
 
 ## 单票完整详析卡（`--full`）
 
@@ -103,7 +103,7 @@
   威：SC（Phase A 失效）｜日线偏空｜周线背景偏多
 
   若变好
-  Phase A 失效｜须重新寻底；观察是否出现新的 SC（卖力高潮）
+  Phase A 失效｜本波无新SC；观察是否出现本波新SC
 
   若变坏
   …
@@ -118,7 +118,7 @@
   …
 ```
 
-`--full` 保留旧详析里的现况、故事链、综述与首次记录变化块；默认 `--target` 不再输出这些长块。failed 人话与默认 B 同源：禁 `Phase A 失败` / `Phase A 已失效` / `旧故事作废`；写 `Phase A 失效｜须重新寻底`（可续新 SC）。见 `docs/plans/wyckoff-phase-fail-copy-handoff.md` §1.1.6 / §2.4。
+`--full` 保留旧详析里的现况、故事链、综述与首次记录变化块；默认 `--target` 不再输出这些长块。failed 人话与默认 B 同源：禁 `Phase A 失败` / `Phase A 已失效` / `旧故事作废`；写 `Phase A 失效｜本波无新SC`（可续本波新SC）。见 `docs/plans/wyckoff-phase-fail-copy-handoff.md` §1.1.6 / §2.4。
 
 ## 单票短卡（`--brief`）
 

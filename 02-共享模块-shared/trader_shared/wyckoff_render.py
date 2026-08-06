@@ -684,7 +684,7 @@ def _slim_next_hollow(
     if failed:
         if _slim_post_fail_strength(view, raw):
             return "○ 下一盯：回踩是否站稳"
-        return "○ 下一盯：重新寻底／新 SC（卖力高潮）"
+        return "○ 下一盯：本波新SC"
     lit = set(_slim_lit_codes(view, raw, weekly=False))
     for code in ACCUM_CHAIN:
         if code not in lit:
@@ -769,7 +769,7 @@ def _slim_structure_sentence(
     if is_phase_a_failed(raw) or is_phase_a_failed(view):
         sc_px = _fmt_price(_event_price_from_sources("SC", view=view, raw=raw))
         old = f"旧筑底已破（SC {sc_px}）" if sc_px else "旧筑底已破"
-        return f"{old}｜无箱｜旧吸筹链停止推进（须重新寻底）"
+        return f"{old}｜无箱｜旧吸筹链停止推进（本波无新SC）"
 
     lit = set(_slim_lit_codes(view, raw, weekly=False))
     if {"SC", "AR"}.issubset(lit):
@@ -820,7 +820,7 @@ def _slim_chain_token(
         post = _slim_post_fail_strength(view, raw)
         return f"破后强势（{'+'.join(post)}）；Phase A 失效"
     if failed:
-        return "Phase A 失效｜须重新寻底"
+        return "Phase A 失效｜本波无新SC"
     # 周线 / 派发侧优先，禁止 ARE 被误当成吸筹链再「待SC」
     dist_lit = set(_slim_lit_codes(view, raw, weekly=True)) & _DIST_CODES
     if weekly or dist_lit:
@@ -871,7 +871,7 @@ def _slim_watch_lines(
     daily_failed = is_phase_a_failed(daily_raw) or is_phase_a_failed(daily_view)
     if daily_failed:
         return [
-            f"日线等新 SC；{_slim_weekly_watch_hint(weekly_view, weekly_raw)}"
+            f"日线盯本波新SC；{_slim_weekly_watch_hint(weekly_view, weekly_raw)}"
         ]
     daily_next = _slim_next_label(daily_view, daily_raw)
     return [f"日线盯 {daily_next}；{_slim_weekly_watch_hint(weekly_view, weekly_raw)}"]
@@ -905,7 +905,7 @@ def _slim_story_lines(
         better = "日线回踩不破，破后强势延续（旧吸筹不复活）"
         worse = "若回踩失守、破后强势熄火，则短线转弱"
     elif daily_failed:
-        better = "日线重新寻底并出现新 SC（卖力高潮）"
+        better = "日线出现本波新SC"
         worse = "日线继续破位走弱则 Phase A 失效、短线更弱"
     else:
         d_next = _slim_next_label(daily_view, daily_raw)
@@ -1090,11 +1090,11 @@ def _slim_failed_anchor_ref(view: dict[str, Any], raw: dict[str, Any]) -> str:
     """failed → L0：禁止健康雏形/箱体；只写旧 SC 低点供对照（不带上沿冒充区间）。"""
     lo, _hi = _phase_a_bounds(raw)
     if lo is not None:
-        return f"旧SC {_fmt_price(lo)}（仅对照）"
+        return f"旧SC {_fmt_price(lo)}（对照）"
     px = _event_price_from_sources("SC", view=view, raw=raw)
     px_s = _fmt_price(px)
     if px_s:
-        return f"旧SC {px_s}（仅对照）"
+        return f"旧SC {px_s}（对照）"
     return ""
 
 
@@ -1210,7 +1210,7 @@ def _slim_weekly_sentence(view: dict[str, Any], raw: dict[str, Any]) -> str:
 
     lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
     if is_phase_a_failed(raw) or is_phase_a_failed(view):
-        return "Phase A 失效｜须重新寻底"
+        return "Phase A 失效｜本波无新SC"
     if {"SC", "AR"}.issubset(lit):
         return f"SC后反弹{bias}，{_slim_range_phrase(view, raw)}"
     if "SC" in lit:
@@ -1233,7 +1233,7 @@ def _slim_daily_wave_short(view: dict[str, Any], raw: dict[str, Any]) -> str:
             return "Phase A 失效 · 破后强势｜本波 SOS 强"
         if "LPS" in lit:
             return "Phase A 失效｜本波 LPS 修复"
-        return "Phase A 失效｜须重新寻底"
+        return "Phase A 失效｜本波无新SC"
     if "SOS" in lit:
         event = f"SOS 强｜{_slim_range_head(view, raw)}"
     elif "LPS" in lit:
@@ -1264,7 +1264,7 @@ def _slim_daily_sentence(view: dict[str, Any], raw: dict[str, Any]) -> str:
             return f"Phase A 失效 · 破后强势｜本波 SOS 强{ref_tail}"
         if "LPS" in lit:
             return f"Phase A 失效｜本波 LPS 修复{ref_tail}"
-        return f"Phase A 失效｜须重新寻底{ref_tail}"
+        return f"Phase A 失效｜本波无新SC{ref_tail}"
     wave = _slim_daily_wave_short(view, raw)
     full_range = _slim_range_phrase(view, raw)
     range_head = _slim_range_head(view, raw)
@@ -1366,14 +1366,14 @@ def _slim_daily_story_lines(view: dict[str, Any], raw: dict[str, Any]) -> dict[s
             return {
                 "now": "Phase A 失效｜本波 LPS 修复",
                 "better": "修复延续并补出 SOS（强势信号）",
-                "worse": "修复失败则须重新寻底",
+                "worse": "修复失败则本波无新SC",
                 "watch": "盯 LPS（最后支撑点）修复是否守住",
             }
         return {
-            "now": "Phase A 失效｜须重新寻底",
-            "better": "重新寻底后出现新 SC（卖力高潮）",
+            "now": "Phase A 失效｜本波无新SC",
+            "better": "出现本波新SC",
             "worse": "继续破位则保持无箱观察",
-            "watch": "盯新 SC（卖力高潮）",
+            "watch": "盯本波新SC",
         }
 
     now = _slim_chain_now(tuple(ACCUM_CHAIN), view, raw, weekly=False)
@@ -1429,9 +1429,9 @@ def _story_block(
     now_parts = [chain_plain or "威：吸筹链未成型", f"日线{d_bias}", f"周线背景{w_bias}"]
     now = "｜".join(now_parts)
 
-    # 若变好（failed 与默认 B 同源：Phase A 失效｜须重新寻底）
+    # 若变好（failed 与默认 B 同源：Phase A 失效｜本波无新SC）
     if daily_failed:
-        better = "Phase A 失效｜须重新寻底；观察是否出现新的 SC（卖力高潮）"
+        better = "Phase A 失效｜本波无新SC；观察是否出现本波新SC"
     elif miss:
         miss_cn = _cn(miss)
         better = f"若出现 {miss}（{miss_cn}）且站稳，链可推进"
@@ -1456,7 +1456,7 @@ def _story_block(
 
     # 盯
     if daily_failed:
-        watch = f"观察是否重新寻底并形成新的 SC（卖力高潮）；区间：{d_range}"
+        watch = f"盯本波新SC；区间：{d_range}"
     elif miss:
         watch = f"盯下一灯 {miss}（{_cn(miss)}）；区间：{d_range}"
     else:
