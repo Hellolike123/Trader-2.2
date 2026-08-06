@@ -301,7 +301,7 @@ class TestBuildMidlineLevels:
         assert r["target"] == pytest.approx(62.0)
         assert r["components"]["target"] == "seg_high"
         assert r["merge_resist_target"] is True
-        assert "压力/目标" in r["line_resist"]
+        assert "压力" in r["line_resist"] and "目标" not in r["line_resist"]
 
     def test_already_below_life(self):
         bars = _weekly_bars_n(40)

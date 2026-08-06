@@ -457,12 +457,12 @@ def build_midline_levels(
             # 压力已被突破（低于现价）→ 不显示压力，只显示目标
             if current is not None and resist < current:
                 line_resist = ""
-                line_target = f"目标 {target:.2f}（波段上看）"
+                line_target = f"远档结构 {target:.2f}（仅对照）"
             elif _resist_far:
-                line_resist = f"压力/目标 {resist:.2f}（远期参考）"
+                line_resist = f"压力 {resist:.2f}（远期参考）"
                 line_target = ""
             else:
-                line_resist = f"压力/目标 {resist:.2f}（靠近只减不加；波段上看）"
+                line_resist = f"压力 {resist:.2f}（靠近只减不加）"
                 line_target = ""
         else:
             if resist is not None:
@@ -474,7 +474,7 @@ def build_midline_levels(
                 else:
                     line_resist = f"压力 {resist:.2f}（靠近只减不加）"
             if target is not None:
-                line_target = f"目标 {target:.2f}（波段上看）"
+                line_target = f"远档结构 {target:.2f}（仅对照）"
 
         notes_parts = [f"source={source}", f"engine=weekly_v1"]
         if notes_extra:
@@ -852,13 +852,13 @@ def build_degraded_daily_key_levels(
     merge_resist_target = False
     if resist is not None and target is not None and abs(resist - target) < 1e-9:
         merge_resist_target = True
-        line_resist = f"压力/目标 {resist:.2f}（靠近只减不加；波段上看）"
+        line_resist = f"压力 {resist:.2f}（靠近只减不加）"
         line_target = ""
     else:
         if resist is not None:
             line_resist = f"压力 {resist:.2f}（靠近只减不加）"
         if target is not None:
-            line_target = f"目标 {target:.2f}（波段上看）"
+            line_target = f"远档结构 {target:.2f}（仅对照）"
 
     notes_parts = ["source=degraded_daily_key_levels", "engine=weekly_v1"]
     if life_source:

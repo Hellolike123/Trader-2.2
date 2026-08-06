@@ -846,6 +846,14 @@ def render_short_midline(r: dict[str, Any]) -> str:
     _tgt_line = _reformat_mid_line(mid_key_prices.get("line_target") or "")
     if _soften_mid_entry and _tgt_line:
         _tgt_line = _soften_mid_key_entry_verbs(_tgt_line)
+    # 旧「目标位/到了分批止盈」统一降成远档结构对照
+    if _tgt_line:
+        _tgt_line = _tgt_line.replace("目标位", "远档结构").replace("到了分批止盈", "仅对照")
+        if "远档结构" in _tgt_line and "仅对照" not in _tgt_line:
+            if "（" in _tgt_line:
+                _tgt_line = _tgt_line[:-1] + " · 仅对照）" if _tgt_line.endswith("）") else _tgt_line
+            else:
+                _tgt_line = f"{_tgt_line}（仅对照）"
     _res_p = 0.0
     _tgt_p = 0.0
     if _res_line:
@@ -856,16 +864,36 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _tm = re.match(r"([\d.]+)", _tgt_line)
         if _tm:
             _tgt_p = float(_tm.group(1))
-    # 压力/目标：距现价 >+30% 视为过远，不进阶梯（不标「远」凑数）
+
+    # 质量：components.target 若是 max/min 兜底，不上梯
+    _comps = mid_key_prices.get("components") if isinstance(mid_key_prices.get("components"), dict) else {}
+    _tgt_comp = str((_comps or {}).get("target") or "")
+    _tgt_fallback = _tgt_comp in {
+        "weekly_max_fallback",
+        "weekly_min_fallback",
+        "none",
+        "",
+    }
+    # 局面：偏空/关闭/框破坏 → 不挂远档结构（避免假多头靶）
+    _hide_target = bool(_soften_mid_entry or _closed_stance or _bias_tag == "偏空" or _frame_break_mid)
+
+    # 压力/远档：距现价 >+30% 不进阶梯
     def _near_enough(px: float) -> bool:
         if current <= 0 or px <= 0:
             return False
         return (px - current) / current * 100.0 <= 30.0
 
     if _res_line and _res_p > 0 and _near_enough(_res_p):
+        # 压力文案去掉止盈语义
+        _res_line = _res_line.replace("到了分批止盈", "靠近分批减仓").replace("波段上看", "结构参考")
         _mid_add(_res_p, _res_p, "resist", _res_line)
-    if _tgt_line and _tgt_p > 0 and _near_enough(_tgt_p):
-        # 与压力过近则只留一档
+    if (
+        _tgt_line
+        and _tgt_p > 0
+        and _near_enough(_tgt_p)
+        and not _hide_target
+        and not _tgt_fallback
+    ):
         if _res_p > 0 and _near_enough(_res_p) and abs(_tgt_p - _res_p) / max(_tgt_p, 1e-6) < 0.03:
             pass
         else:

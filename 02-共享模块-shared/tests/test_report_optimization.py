@@ -1180,8 +1180,10 @@ def test_mid_key_price_format():
     mid = out.split("⚡ 短线", 1)[0]
     assert "41.14 生命线" in mid
     assert "MA20" in mid or "MA250" in mid
-    # 56 压力 +30% 边界可留；68 目标 +59% 必须去掉
+    # 偏空 mock：远档/目标不上梯；+30% 边界压力可留
     assert "68.82" not in mid
+    assert "目标位" not in mid
+    assert "到了分批止盈" not in mid
     # 严格升序（抓关键价块数字行）
     block = []
     grab = False

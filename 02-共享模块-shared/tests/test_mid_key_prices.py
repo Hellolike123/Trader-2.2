@@ -109,7 +109,7 @@ class TestMidKeyPricesWeekly:
         )
         # up stroke end == up seg high == 62
         assert mk["merge_resist_target"] is True
-        assert "压力/目标" in mk["line_resist"]
+        assert "压力" in mk["line_resist"] and "目标" not in mk["line_resist"]
         assert mk["line_target"] == ""
 
     def test_swing_only_when_no_chan(self):

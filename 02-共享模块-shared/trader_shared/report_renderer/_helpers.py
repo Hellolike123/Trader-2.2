@@ -36,20 +36,20 @@ def _reformat_mid_line(line: str) -> str:
     if m:
         _tag = m.group(2).replace("到了才谈低吸", "到了分批低吸")
         return f"{m.group(1)} 回踩区（{_tag}）"
-    # 压力/目标（合并）
+    # 压力/目标（旧合并文案）→ 统一压力位，去掉止盈暗示
     m = re.match(r"^压力/目标\s+([\d.]+)（(.+)）$", line)
     if m:
-        _tag = m.group(2).replace("靠近只减不加", "靠近分批减仓").replace("波段上看", "到了分批止盈")
-        return f"{m.group(1)} 压力/目标位（{_tag}）"
+        _tag = m.group(2).replace("靠近只减不加", "靠近分批减仓").replace("波段上看", "结构参考").replace("到了分批止盈", "结构参考")
+        return f"{m.group(1)} 压力位（{_tag}）"
     # 压力
     m = re.match(r"^压力\s+([\d.]+)（(.+)）$", line)
     if m:
         _tag = m.group(2).replace("靠近只减不加", "靠近分批减仓")
         return f"{m.group(1)} 压力位（{_tag}）"
-    # 目标
-    m = re.match(r"^目标\s+([\d.]+)（(.+)）$", line)
+    # 目标/远档结构（不做止盈指令）
+    m = re.match(r"^(?:目标|远档结构)\s+([\d.]+)（(.+)）$", line)
     if m:
-        return f"{m.group(1)} 目标位（到了分批止盈）"
+        return f"{m.group(1)} 远档结构（仅对照）"
     # 黄金买点
     m = re.match(r"^黄金买点\s+([\d.]+)（(.+)）$", line)
     if m:
