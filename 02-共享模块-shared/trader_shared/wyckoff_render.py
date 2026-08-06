@@ -1822,10 +1822,9 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
         lines = [
             title,
             "状态：数据不足",
-            "动作：谨慎",
+            "动作：谨慎｜数据不足",
             "周线：中性｜数据不足",
             f"日线本波：{err}",
-            "入池：暂不建议入池（数据不足）",
             "",
             "📌 现在 / 变好 / 变差",
             "  现在：谨慎｜数据不足",
@@ -1882,13 +1881,19 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
     else:
         action_show = action if action in ("暂不参与", "等确认", "可跟踪", "谨慎") else action_line
 
+    # 入池与动作冷建议重复：仅「建议入池」并入动作行；暂不建议不再单列
+    action_display = action_show
+    if pool_line.startswith("建议入池"):
+        reason = pool_line[len("建议入池"):].strip()
+        # reason like "（日线已见…）"
+        action_display = f"{action_show}｜建议入池{reason}" if reason else f"{action_show}｜建议入池"
+
     lines: list[str] = [
         title,
         f"状态：{situation}",
-        f"动作：{action_show}",
+        f"动作：{action_display}",
         f"周线：{w_lab}｜{w_bias}｜{_slim_weekly_stage_short(weekly_view, weekly_raw)}",
         f"日线本波：{_slim_daily_wave_short(daily_view, daily_raw)}",
-        f"入池：{pool_line}",
         "",
         f"🧭 周线 · {w_lab}",
         f"  {_slim_weekly_sentence(weekly_view, weekly_raw)}",

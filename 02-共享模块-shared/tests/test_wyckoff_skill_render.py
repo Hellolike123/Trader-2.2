@@ -355,7 +355,8 @@ def test_sb1_default_slim_skeleton_no_long_blocks():
     assert lines[2].startswith("动作：")
     assert "周线：吸筹中｜偏多｜SC后反弹，雏形 8.00～12.00（待SC区回测）" in text
     assert "日线本波：Phase C · 试盘｜LPS 修复｜箱体 9.50～11.00" in text
-    assert "入池：建议入池（日线已见 LPS/SOS，周线非偏空）" in text
+    assert "动作：可跟踪｜建议入池（日线已见 LPS/SOS，周线非偏空）" in text
+    assert "入池：" not in text
     assert "🧭 周线 · 吸筹中" in text
     assert "⚡ 日线 · 链推进中" in text
     assert "📌 现在 / 变好 / 变差" in text
