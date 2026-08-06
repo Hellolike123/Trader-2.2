@@ -355,12 +355,6 @@ def render_short_midline(r: dict[str, Any]) -> str:
         f"现价 {current:.2f}（{change_pct:+.2f}%）｜MA20 {_ma20_text}｜MA250 {_ma250_text}{_ma250_warn}"
     )
 
-    # 盘中诚实标注：实时价已锚定，但策略判定基于截至该日收盘的真实日线
-    # （合成 bar 不再掺入 bars，避免 volume=0 等假数据污染策略计算）
-    _intraday_as_of = r.get("intraday_as_of")
-    if _intraday_as_of:
-        lines.append(f"  ⏱ 盘中：实时价已锚定 · 策略判定基于截至 {_intraday_as_of} 收盘")
-
     # 顶栏 A：价（上行已出）→ 环境 → 量能
     # 环境：板块指数｜行业短名｜动能（不写个股%——现价行已有；不写正常/偏弱/跑赢）
     # 量能：量比/换手/调整；ATR/两融默认不进顶栏（ATR 仍在引擎/止损侧使用）
