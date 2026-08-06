@@ -1821,7 +1821,6 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
         err = str(plan.get("error") or "数据不足")
         lines = [
             title,
-            "趋势：结构未明 · 结构未明",
             "状态：数据不足",
             "动作：谨慎",
             "周线：中性｜数据不足",
@@ -1885,7 +1884,6 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
 
     lines: list[str] = [
         title,
-        f"趋势：{w_lab} · {d_lab}",
         f"状态：{situation}",
         f"动作：{action_show}",
         f"周线：{w_lab}｜{w_bias}｜{_slim_weekly_stage_short(weekly_view, weekly_raw)}",

@@ -351,9 +351,8 @@ def test_sb1_default_slim_skeleton_no_long_blocks():
     text = render_wyckoff_slim(_sample_plan())
     lines = text.splitlines()
     assert lines[0] == "测试股（600000）｜现价 10.50"
-    assert lines[1].startswith("趋势：")
-    assert lines[2].startswith("状态：")
-    assert any(ln.startswith("动作：") for ln in lines[:8])
+    assert lines[1].startswith("状态：")
+    assert lines[2].startswith("动作：")
     assert "周线：吸筹中｜偏多｜SC后反弹，雏形 8.00～12.00（待SC区回测）" in text
     assert "日线本波：Phase C · 试盘｜LPS 修复｜箱体 9.50～11.00" in text
     assert "入池：建议入池（日线已见 LPS/SOS，周线非偏空）" in text
