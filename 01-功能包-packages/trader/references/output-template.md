@@ -4,7 +4,7 @@
 
 本模板为 `trader` 命令 (`final_report.py`) 的绝对输出契约。生产渲染入口：`trader_shared.report_core.render_single` → 默认 `render_short_midline`。
 
-规格：`docs/mid-short-dual-track-plan.md` · `docs/discipline-layer-copy-plan.md` · 中线价 `docs/midline-price-engine-plan.md`
+规格：现行输出契约 = 本模板（absolute truth）+ `trader_shared.report_renderer.short_midline` 同源 + `BUSINESS.md §5.1`；历史规格（考古）见 `docs/_archive/plans-done/{mid-short-dual-track-plan,discipline-layer-copy-plan,midline-price-engine-plan}.md`
 
 > **变更记录 (v2.7.1 周线 260 + 波段标签 · 2026-07-16)**：
 > - 周线默认 `WEEKLY_LOOKBACK_BARS=260`；中线缠论不再因历史过短假「笔数不足」
