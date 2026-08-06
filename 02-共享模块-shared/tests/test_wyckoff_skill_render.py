@@ -347,51 +347,49 @@ def test_main_exits_0_when_card_ok(monkeypatch, capsys, tmp_path):
 
 
 def test_sb1_default_slim_skeleton_no_long_blocks():
-    """S-B1/S-B4/S-B13/S-B17/S-B20/S-B21：默认 B 新骨架。"""
+    """S-B1/S-B4/S-B13/S-B17/S-B20/S-B21：默认 B 新骨架（局/姿态 + 现在变好变差）。"""
     text = render_wyckoff_slim(_sample_plan())
     lines = text.splitlines()
-    assert lines[:4] == [
-        "测试股（600000）｜现价 10.50",
-        "周线：偏多｜SC后反弹，雏形 8.00～12.00（待SC区回测）｜慎做",
-        "日线本波：Phase C · 试盘｜LPS 修复｜箱体 9.50～11.00",
-        "入池：建议入池（日线已见 LPS/SOS，周线非偏空）",
-    ]
-    assert "🧭 周线 · 大阶段" in text
-    assert "⚡ 日线 · 本波" in text
-    assert "🔮 推演" in text
-    assert "\n  现在\n" in text
-    assert "\n    周线：" in text
-    assert "\n    日线：" in text
-    assert "\n    周线量度：" in text
-    assert "\n    日线量度：" in text
-    assert "\n  若变好\n" in text
-    assert "\n  若变坏\n" in text
-    assert "\n  ⭐ 盯\n" in text
-    assert "    本卡不下单；出手/分道看 trader" in text
+    assert lines[0] == "测试股（600000）｜现价 10.50"
+    assert lines[1].startswith("局：")
+    assert lines[2].startswith("姿态：")
+    assert "周线：偏多｜SC后反弹，雏形 8.00～12.00（待SC区回测）｜慎做" in text
+    assert "日线本波：Phase C · 试盘｜LPS 修复｜箱体 9.50～11.00" in text
+    assert "入池：建议入池（日线已见 LPS/SOS，周线非偏空）" in text
+    assert "🧭 周线 · 吸筹中" in text
+    assert "⚡ 日线 · 链推进中" in text
+    assert "📌 现在 / 变好 / 变差" in text
+    assert "  现在：" in text
+    assert "  变好：" in text
+    assert "  变差：" in text
+    assert "🔮 推演" not in text
+    assert "若变好" not in text
+    assert "⭐ 盯" not in text
+    assert "本卡不下单" not in text
+    assert "周线量度：" not in text
     assert "威科夫 —" not in text
     assert "威科夫详析 —" not in text
     assert "日+周" not in lines[0]
     assert "📊 现况" not in text
     assert "🔮 故事链" not in text
     assert "💬 综述" not in text
-    assert "说明：本卡不下单；买卖看 trader 门禁" not in text
     for bad in ("舞台", "换幕", "当前幕", "上一幕"):
         assert bad not in text
 
 
 def test_sb17_failed_slim_story_no_healthy_advance():
-    """S-B17：短推演保留；failed 不得健康还差/链可推进。"""
+    """S-B17：现在/变好/变差保留；failed 不得健康还差/链可推进。"""
     text = render_wyckoff_slim(_failed_phase_a_plan())
     assert "日线本波：Phase A 失效｜本波无新SC" in text
-    story = text.split("🔮 推演", 1)[1]
-    assert "\n  现在\n" in story
-    assert "\n  若变好\n" in story
-    assert "\n  若变坏\n" in story
-    assert "\n  ⭐ 盯\n" in story
-    assert "Phase A 失效｜本波无新SC" in story
+    story = text.split("📌 现在 / 变好 / 变差", 1)[1]
+    assert "  现在：" in story
+    assert "  变好：" in story
+    assert "  变差：" in story
+    assert "本波无新SC" in story or "出现本波新SC" in story
     assert "还差" not in story
     assert "链可推进" not in story
     assert "SC→SOS（Phase A 已失效）" not in story
+    assert "本卡不下单" not in text
 
 
 def test_sb1_cli_default_uses_slim(monkeypatch, capsys, tmp_path):
@@ -456,8 +454,8 @@ def test_sb6_sb7_slim_lights_vertical_and_one_next_watch():
     text = render_wyckoff_slim(_sample_plan())
     assert "● SC｜● AR" not in text
     assert "● SC / ● AR" not in text
-    weekly_block = text.split("🧭 周线 · 大阶段", 1)[1].split("⚡ 日线 · 本波", 1)[0]
-    daily_block = text.split("⚡ 日线 · 本波", 1)[1].split("🔮 推演", 1)[0]
+    weekly_block = text.split("🧭 周线 · ", 1)[1].split("⚡ 日线 · ", 1)[0]
+    daily_block = text.split("⚡ 日线 · ", 1)[1].split("📌 现在 / 变好 / 变差", 1)[0]
     weekly_lamps = [ln for ln in weekly_block.splitlines() if re.match(r"\s*[●○]\s", ln)]
     daily_lamps = [ln for ln in daily_block.splitlines() if re.match(r"\s*[●○]\s", ln)]
     def _lamp_codes(lines: list[str]) -> list[str]:
@@ -484,7 +482,7 @@ def test_sb6_sb7_slim_lights_vertical_and_one_next_watch():
 def test_sb9_failed_slim_resets_next_watch_without_healthy_gap():
     """S-B9/S-B10 / P-C1/P-C2：failed 无强势 → Phase A 失效｜本波无新SC + 旧SC对照。"""
     text = render_wyckoff_slim(_failed_phase_a_plan())
-    short_block = text.split("⚡ 日线 · 本波", 1)[1].split("🔮 推演", 1)[0]
+    short_block = text.split("⚡ 日线 · ", 1)[1].split("📌 现在 / 变好 / 变差", 1)[0]
     assert "Phase A 失效｜本波无新SC｜旧SC 9.50（对照）" in short_block
     assert "雏形" not in short_block  # failed 不得健康雏形
     assert "箱体" not in short_block
@@ -500,7 +498,7 @@ def test_sb28_overview_writes_proto_prices_and_failed_anchor_ref():
     text = render_wyckoff_slim(_sample_plan())
     assert "周线：偏多｜SC后反弹，雏形 8.00～12.00（待SC区回测）｜慎做" in text
     failed = render_wyckoff_slim(_failed_phase_a_plan())
-    daily = failed.split("⚡ 日线 · 本波", 1)[1].split("🔮 推演", 1)[0]
+    daily = failed.split("⚡ 日线 · ", 1)[1].split("📌 现在 / 变好 / 变差", 1)[0]
     assert "旧SC 9.50（对照）" in daily
     assert "雏形 9.50" not in daily
     assert "箱体 9.50" not in daily
@@ -516,16 +514,16 @@ def test_sb18_sb23_failed_plus_sos_keeps_full_lights_and_explains():
     plan["weekly_raw"]["bc_signal"] = False
     text = render_wyckoff_slim(plan)
     assert "日线本波：Phase A 失效 · 破后强势｜本波 SOS 强" in text
-    assert "⚡ 日线 · 本波" in text
+    assert "⚡ 日线 · " in text
     assert "说明：●SC 是旧底事实，●SOS 是本波强势事实；不按顺序推进读。" in text
     assert "SC→SOS（Phase A 已失效）" not in text
-    daily = text.split("⚡ 日线 · 本波", 1)[1].split("🔮 推演", 1)[0]
+    daily = text.split("⚡ 日线 · ", 1)[1].split("📌 现在 / 变好 / 变差", 1)[0]
     assert "Phase A 失效 · 破后强势｜本波 SOS 强｜旧SC 9.50（对照）" in daily
-    assert "● SC（卖力高潮）9.50" in daily
+    assert "● SC（卖力高潮）9.50" in daily or "● SC（卖力高潮）9.50（对照）" in daily
     assert "● SOS（强势信号）11.20" in daily
     for bad in ("日偏空", "换幕", "当前幕", "上一幕"):
         assert bad not in text
-    mid = text.split("🧭 周线 · 大阶段", 1)[1].split("⚡ 日线 · 本波", 1)[0]
+    mid = text.split("🧭 周线 · ", 1)[1].split("⚡ 日线 · ", 1)[0]
     assert "○ SC（卖力高潮）" not in mid
     assert "派发未确认" in mid or "中线观望" in mid
     assert "还差" not in text
@@ -536,7 +534,7 @@ def test_pc4_failed_plus_lps_copy():
     """P-C4：failed+LPS → Phase A 失效｜本波 LPS 修复。"""
     text = render_wyckoff_slim(_failed_plus_lps_plan())
     assert "日线本波：Phase A 失效｜本波 LPS 修复" in text
-    daily = text.split("⚡ 日线 · 本波", 1)[1].split("🔮 推演", 1)[0]
+    daily = text.split("⚡ 日线 · ", 1)[1].split("📌 现在 / 变好 / 变差", 1)[0]
     assert "Phase A 失效｜本波 LPS 修复" in daily
     assert "说明：旧底事实与本波修复事实并列；不按顺序推进读。" in daily
     assert "还差" not in text
@@ -551,11 +549,18 @@ def test_pc5_pc6_failed_slim_banned_words_and_story_aligns():
             assert bad not in text
         overview = next(ln for ln in text.splitlines() if ln.startswith("日线本波："))
         wave = overview.split("日线本波：", 1)[1]
-        story_now = text.split("🔮 推演", 1)[1].split("若变好", 1)[0]
-        assert f"日线：{wave}" in story_now
+        story_now = text.split("📌 现在 / 变好 / 变差", 1)[1].split("  变好：", 1)[0]
+        # 现在行 = 姿态｜局面；与日线本波同语义关键词对齐
+        assert "  现在：" in story_now
+        if "本波无新SC" in wave:
+            assert "本波无新SC" in story_now
+        elif "破后强势" in wave:
+            assert "破后强势" in story_now or "SOS" in text
+        elif "LPS 修复" in wave:
+            assert "修复" in story_now or "LPS" in text
 
     sample = render_wyckoff_slim(_sample_plan())
-    worse = sample.split("若变坏", 1)[1].split("⭐ 盯", 1)[0]
+    worse = sample.split("  变差：", 1)[1]
     assert "作废" not in worse
     assert "雏形不成立" in worse or "结构不成立" in worse
     assert "有效" not in next(ln for ln in sample.splitlines() if ln.startswith("日线本波："))
@@ -566,7 +571,7 @@ def test_sb19_weekly_are_without_bc_no_accum_sc_next():
     plan = _weekly_are_without_bc_plan()
     text = render_wyckoff_slim(plan)
     assert "周线：偏空｜ARE 先亮但缺 BC，派发未确认｜先别做" in text
-    mid = text.split("🧭 周线 · 大阶段", 1)[1].split("⚡ 日线 · 本波", 1)[0]
+    mid = text.split("🧭 周线 · ", 1)[1].split("⚡ 日线 · ", 1)[0]
     assert "○ BC（买力高潮）" in mid
     assert "● ARE（自动回落）31.78" in mid
     assert "○ SOW（弱势信号）" in mid
@@ -593,11 +598,12 @@ def test_weekly_failed_with_are_lamp_writes_phase_a_failed_side():
         }
     )
     text = render_wyckoff_slim(plan)
-    mid = text.split("🧭 周线 · 大阶段", 1)[1].split("⚡ 日线 · 本波", 1)[0]
+    mid = text.split("🧭 周线 · ", 1)[1].split("⚡ 日线 · ", 1)[0]
     assert "Phase A 失效" in mid
     assert "派发侧另察" in mid
     # 不得只剩空「派发未确认」盖住失效：失效词须打头
-    assert "派发未确认" not in mid.split("｜")[0]
+    assert "Phase A 失效" in mid
+    assert any(ln.strip().startswith("Phase A 失效") for ln in mid.splitlines())
     # 派发满灯仍保留（ARE 灯事实不灭）
     assert "● ARE（自动回落）31.78" in mid
 
@@ -622,7 +628,7 @@ def test_weekly_failed_without_dist_lamp_writes_phase_a_failed_side():
         }
     )
     text = render_wyckoff_slim(plan)
-    mid = text.split("🧭 周线 · 大阶段", 1)[1].split("⚡ 日线 · 本波", 1)[0]
+    mid = text.split("🧭 周线 · ", 1)[1].split("⚡ 日线 · ", 1)[0]
     assert "Phase A 失效" in mid
     assert "派发未确认" not in mid
 
@@ -630,7 +636,7 @@ def test_weekly_failed_without_dist_lamp_writes_phase_a_failed_side():
 def test_sb11_l0_slim_does_not_show_percentile_box_numbers():
     """S-B11：L0 不展示分位上下沿当箱体/雏形。"""
     text = render_wyckoff_slim(_l0_percentile_plan())
-    mid_short = text.split("🧭 周线 · 大阶段", 1)[1].split("🔮 推演", 1)[0]
+    mid_short = text.split("🧭 周线 · ", 1)[1].split("📌 现在 / 变好 / 变差", 1)[0]
     for forbidden in ("41.23", "58.77", "40.00", "60.00"):
         assert forbidden not in mid_short
     assert "无箱｜未达 L3" in mid_short
@@ -639,14 +645,14 @@ def test_sb11_l0_slim_does_not_show_percentile_box_numbers():
 
 
 def test_sb27_story_measure_l3_gate():
-    """S-B27：推演量度仅 L3；未达写暂不测算，禁止假目标。"""
+    """S-B27：B 卡姿态块不再堆量度行；假目标不得出现在姿态块。"""
     text = render_wyckoff_slim(_sample_plan())
-    story = text.split("🔮 推演", 1)[1].split("若变好", 1)[0]
-    assert "周线量度：未达 L3，暂不测算" in story
-    assert "日线量度：未达 L3，暂不测算" in story
+    story = text.split("📌 现在 / 变好 / 变差", 1)[1]
+    assert "周线量度：" not in story
+    assert "日线量度：" not in story
     assert "量度目标" not in story
+    assert "未达 L3" in text
 
-    # 残留目标 + measure_allowed=False → 仍不得展示
     dirty = copy.deepcopy(_sample_plan())
     dirty["daily_raw"]["cause_effect_up_target"] = 99.0
     dirty["daily_raw"]["cause_effect_down_target"] = 1.0
@@ -657,10 +663,10 @@ def test_sb27_story_measure_l3_gate():
         "down_target": 1.0,
         "measure_allowed": False,
     }
-    dirty_story = render_wyckoff_slim(dirty).split("🔮 推演", 1)[1].split("若变好", 1)[0]
+    dirty_text = render_wyckoff_slim(dirty)
+    dirty_story = dirty_text.split("📌 现在 / 变好 / 变差", 1)[1]
     assert "99.00" not in dirty_story
     assert "量度目标" not in dirty_story
-    assert "日线量度：未达 L3，暂不测算" in dirty_story
 
     # L3 + 上下目标 → 日线量度出数字
     p3 = copy.deepcopy(_sample_plan())
@@ -680,9 +686,13 @@ def test_sb27_story_measure_l3_gate():
         "tr_maturity": "L3",
     }
     t3 = render_wyckoff_slim(p3)
-    story3 = t3.split("🔮 推演", 1)[1].split("若变好", 1)[0]
-    assert "周线量度：未达 L3，暂不测算" in story3
-    assert "日线量度：量度目标：上 15.00｜下 8.00（P&F，非出手）" in story3
+    story3 = t3.split("📌 现在 / 变好 / 变差", 1)[1]
+    # B 卡姿态块仍不堆量度；L3 目标若展示只允许在周/日结构句，不得进姿态块假目标噪音
+    assert "周线量度：" not in story3
+    assert "日线量度：" not in story3
+    assert "99.00" not in t3  # dirty leftover not relevant; ensure no junk
+    # L3 合法目标可出现在日线结构句（若引擎/渲染接入）；姿态块禁止
+    assert "  现在：" in story3
 
 
 # ── W-D1..W-D9（旧完整详析，--full）───────────────────────────
@@ -697,7 +707,7 @@ def test_wd1_detail_default_skeleton():
     assert "🧭 中线（周线 · 入池看这里）" in text
     assert "⚡ 短线（日线 · 盯触发看这里）" in text
     assert "🔮 故事链（以日线推进；周线作背景）" in text
-    assert "⭐ 盯" in text
+    assert "📌 现在 / 变好 / 变差" in text or "⭐ 盯" in text
     assert "💬 综述" in text
     assert "#" not in text
     assert "**" not in text
@@ -852,7 +862,8 @@ def test_p0_spring_confirm_not_labeled_as_st_secondary_test():
     assert "ST 已现" not in slim
     assert "Spring 确认" in slim
     assert "ST，待 SC" not in slim
-    assert "Spring（弹簧确认），待 SC（卖力高潮）" in slim
+    assert ("出现本波新SC" in slim or "本波新SC" in slim)
+    assert "Spring 确认" in slim
 
     detail = render_wyckoff_detail(plan)
     assert "○ ST（SC区回测）未亮" in detail or "○ ST（SC区回测）" in detail

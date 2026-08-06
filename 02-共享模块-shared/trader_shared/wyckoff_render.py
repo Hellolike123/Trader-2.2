@@ -1055,19 +1055,33 @@ def _format_slim_full_lights(
     chain: tuple[str, ...],
     view: dict[str, Any],
     raw: dict[str, Any],
+    *,
+    weekly: bool = False,
 ) -> list[str]:
+    daily_failed = (not weekly) and (_slim_daily_failed(view, raw))
     lines: list[str] = []
     for code in chain:
         lit = _slim_code_lit(code, view, raw)
         if lit:
             px_s = _fmt_price(_event_price_from_sources(code, view=view, raw=raw))
-            lines.append(f"● {code}（{_cn(code)}）{px_s if px_s else ''}")
+            tag = _slim_lamp_price_tag(
+                code, lit=True, weekly=weekly, daily_failed=daily_failed
+            )
+            core = f"● {code}（{_cn(code)}）"
+            if px_s:
+                core += px_s
+            if tag:
+                core += tag
+            lines.append(core)
         else:
             lines.append(f"○ {code}（{_cn(code)}）")
     # 吸筹五灯之外：Spring 确认另灯，禁止并进 ST（SC区回测）
     if chain == tuple(ACCUM_CHAIN) and _spring_confirm_lit(raw, view):
         px_s = _fmt_price(_event_price_from_sources("Spring", view=view, raw=raw))
-        lines.append(f"● Spring（{_cn('Spring')}）{px_s if px_s else ''}")
+        core = f"● Spring（{_cn('Spring')}）"
+        if px_s:
+            core += px_s
+        lines.append(core)
         # ST（SC区回测）未亮但 Spring 确认已亮 → 二次测试已完成，防误读（2026-08-05 ST双口径修复单 改动3）
         if not _slim_code_lit("ST", view, raw):
             lines.append("（注：ST=SC区回测，强势吸筹可不回测；二次测试已完成＝看Spring确认灯）")
@@ -1643,10 +1657,158 @@ def render_wyckoff_card(plan: dict[str, Any]) -> str:
     return text
 
 
+
+def _slim_board_weekly_label(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    if not view:
+        return "结构未明"
+    if _slim_is_dist_side(view, raw):
+        lit = _slim_lit_set(_DIST_CHAIN, view, raw)
+        if "ARE" in lit and "BC" not in lit:
+            return "派发未确认"
+        return "派发中"
+    if is_phase_a_failed(raw) or is_phase_a_failed(view):
+        return "吸筹失效"
+    lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
+    if lit:
+        return "吸筹中"
+    return "结构未明"
+
+
+def _slim_board_daily_label(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    if not view and not raw:
+        return "结构未明"
+    failed = _slim_daily_failed(view, raw)
+    lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
+    if failed:
+        if "SOS" in lit:
+            return "破后强势"
+        if "LPS" in lit:
+            return "修复中"
+        return "本波无新SC"
+    if not lit and not _spring_confirm_lit(raw, view):
+        return "本波未成型"
+    if lit or _spring_confirm_lit(raw, view):
+        return "链推进中"
+    return "结构未明"
+
+
+def _slim_posture_tier(
+    *,
+    daily_view: dict[str, Any],
+    weekly_view: dict[str, Any],
+    daily_raw: dict[str, Any],
+    weekly_raw: dict[str, Any],
+    pool_line: str,
+) -> str:
+    if pool_line.startswith("建议入池"):
+        return "可跟踪"
+    if pool_line.startswith("结构偏空") or "双线均 L0" in pool_line:
+        return "观望"
+    d_lab = _slim_board_daily_label(daily_view, daily_raw)
+    w_lab = _slim_board_weekly_label(weekly_view, weekly_raw)
+    if d_lab in ("本波未成型", "本波无新SC") or w_lab in ("派发中", "派发未确认"):
+        return "观望"
+    lit = _slim_lit_set(tuple(ACCUM_CHAIN), daily_view, daily_raw)
+    miss = next((c for c in ACCUM_CHAIN if c not in lit), "")
+    if lit and miss and not _slim_daily_failed(daily_view, daily_raw):
+        return "等确认"
+    return "只盯结构"
+
+
+def _slim_situation_reason(
+    *,
+    daily_view: dict[str, Any],
+    weekly_view: dict[str, Any],
+    daily_raw: dict[str, Any],
+    weekly_raw: dict[str, Any],
+) -> str:
+    w = _slim_board_weekly_label(weekly_view, weekly_raw)
+    d = _slim_board_daily_label(daily_view, daily_raw)
+    w_part = {
+        "派发中": "中线派发",
+        "派发未确认": "中线派发未确认",
+        "吸筹失效": "周线吸筹失效",
+        "吸筹中": "中线吸筹中",
+        "结构未明": "周线结构未明",
+    }.get(w, w)
+    d_part = {
+        "本波未成型": "日线吸筹未成型",
+        "本波无新SC": "日线本波无新SC",
+        "破后强势": "日线破后强势",
+        "修复中": "日线修复中",
+        "链推进中": "日线链推进中",
+        "结构未明": "日线结构未明",
+    }.get(d, d)
+    return f"{w_part}，{d_part}"
+
+
+def _slim_stance_better_worse(
+    *,
+    daily_view: dict[str, Any],
+    weekly_view: dict[str, Any],
+    daily_raw: dict[str, Any],
+    weekly_raw: dict[str, Any],
+) -> tuple[str, str]:
+    w_lab = _slim_board_weekly_label(weekly_view, weekly_raw)
+    d_lab = _slim_board_daily_label(daily_view, daily_raw)
+    if w_lab in ("派发中", "派发未确认") and d_lab in ("本波未成型", "本波无新SC"):
+        return (
+            "派发缓和，并且出现本波新SC",
+            "派发再加深，或日线无SC继续破位",
+        )
+    if d_lab == "本波无新SC":
+        return ("出现本波新SC", "日线无SC继续破位")
+    if d_lab == "本波未成型":
+        return ("出现本波新SC", "日线无SC继续破位")
+    if d_lab == "破后强势":
+        return (
+            "回踩不破并继续站稳 SOS（强势信号）区域",
+            "SOS 熄火或继续破位则保持无箱观察",
+        )
+    if d_lab == "修复中":
+        return (
+            "修复延续并出现 SOS（强势信号）",
+            "修复失败则本波无新SC",
+        )
+    w_story = _slim_weekly_story_lines(weekly_view, weekly_raw)
+    d_story = _slim_daily_story_lines(daily_view, daily_raw)
+    better_parts = []
+    for part in (w_story.get("better"), d_story.get("better")):
+        s = str(part or "").strip()
+        if s and s not in better_parts:
+            better_parts.append(s)
+    worse_parts = []
+    for part in (w_story.get("worse"), d_story.get("worse")):
+        s = str(part or "").strip()
+        if s and s not in worse_parts:
+            worse_parts.append(s)
+    better = "；".join(better_parts) if better_parts else "结构改善并站稳"
+    worse = "；".join(worse_parts) if worse_parts else "结构转弱则保持观察"
+    return better, worse
+
+
+def _slim_lamp_price_tag(
+    code: str,
+    *,
+    lit: bool,
+    weekly: bool,
+    daily_failed: bool,
+) -> str:
+    if not lit:
+        return ""
+    if weekly and code in _DIST_CODES:
+        return "（事件价）"
+    if (not weekly) and daily_failed and code == "SC":
+        return "（对照）"
+    return ""
+
+
+
 def render_wyckoff_slim(plan: dict[str, Any]) -> str:
     """默认 B·中剪瘦身卡（--target）。
 
     旧完整详析保留在 render_wyckoff_detail，供 --full 使用。
+    局/姿态 + 现在/变好/变差：见 wyckoff-stance-posture-handoff。
     """
     _warn_contradictory_phase_a(plan)
     name = str(plan.get("name") or plan.get("target") or "未知")
@@ -1654,31 +1816,19 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
     price_s = _fmt_price(plan.get("price")) or "—"
     title = f"{name}（{code}）｜现价 {price_s}" if code else f"{name}｜现价 {price_s}"
     if plan.get("error") and not plan.get("data_ok", True):
+        err = str(plan.get("error") or "数据不足")
         lines = [
             title,
+            "局：结构未明 · 结构未明",
+            "姿态：观望｜数据不足",
             "周线：中性｜数据不足｜慎做",
-            "日线本波：数据不足",
+            f"日线本波：{err}",
             "入池：暂不建议入池（数据不足）",
             "",
-            "🔮 推演",
-            "  现在",
-            "    周线：数据不足",
-            f"    日线：{plan['error']}",
-            "    周线量度：数据不足，暂不测算",
-            "    日线量度：数据不足，暂不测算",
-            "",
-            "  若变好",
-            "    周线：补足数据后再评估",
-            "    日线：补足数据后再评估",
-            "",
-            "  若变坏",
-            "    周线：数据不足时不引用箱沿",
-            "    日线：数据不足时不引用箱沿",
-            "",
-            "  ⭐ 盯",
-            "    周线：先补数据",
-            "    日线：先补数据",
-            "    本卡不下单；出手/分道看 trader",
+            "📌 现在 / 变好 / 变差",
+            "  现在：观望｜数据不足",
+            "  变好：数据齐全后再评估",
+            "  变差：数据不足时不引用箱沿",
         ]
         return "\n".join(lines)
 
@@ -1695,26 +1845,49 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
         daily_raw=daily_raw,
         weekly_raw=weekly_raw,
     )
-    weekly_story = _slim_weekly_story_lines(weekly_view, weekly_raw)
-    daily_story = _slim_daily_story_lines(daily_view, daily_raw)
+    w_lab = _slim_board_weekly_label(weekly_view, weekly_raw)
+    d_lab = _slim_board_daily_label(daily_view, daily_raw)
+    posture = _slim_posture_tier(
+        daily_view=daily_view,
+        weekly_view=weekly_view,
+        daily_raw=daily_raw,
+        weekly_raw=weekly_raw,
+        pool_line=pool_line,
+    )
+    situation = _slim_situation_reason(
+        daily_view=daily_view,
+        weekly_view=weekly_view,
+        daily_raw=daily_raw,
+        weekly_raw=weekly_raw,
+    )
+    better, worse = _slim_stance_better_worse(
+        daily_view=daily_view,
+        weekly_view=weekly_view,
+        daily_raw=daily_raw,
+        weekly_raw=weekly_raw,
+    )
 
     lines: list[str] = [
         title,
+        f"局：{w_lab} · {d_lab}",
+        f"姿态：{posture}｜{situation}",
         f"周线：{w_bias}｜{_slim_weekly_stage_short(weekly_view, weekly_raw)}｜{_slim_weekly_tier(weekly_view, weekly_raw)}",
         f"日线本波：{_slim_daily_wave_short(daily_view, daily_raw)}",
         f"入池：{pool_line}",
         "",
-        "🧭 周线 · 大阶段",
+        f"🧭 周线 · {w_lab}",
         f"  {_slim_weekly_sentence(weekly_view, weekly_raw)}",
         "  灯",
     ]
-    for lamp in _format_slim_full_lights(weekly_chain, weekly_view, weekly_raw):
+    for lamp in _format_slim_full_lights(
+        weekly_chain, weekly_view, weekly_raw, weekly=True
+    ):
         lines.append(f"  {lamp}")
 
     lines.extend(
         [
             "",
-            "⚡ 日线 · 本波",
+            f"⚡ 日线 · {d_lab}",
             f"  {_slim_daily_sentence(daily_view, daily_raw)}",
         ]
     )
@@ -1722,37 +1895,22 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
     if explain:
         lines.append(f"  {explain}")
     lines.append("  灯")
-    for lamp in _format_slim_full_lights(tuple(ACCUM_CHAIN), daily_view, daily_raw):
+    for lamp in _format_slim_full_lights(
+        tuple(ACCUM_CHAIN), daily_view, daily_raw, weekly=False
+    ):
         lines.append(f"  {lamp}")
 
     change = _slim_change_line(plan.get("change_line"))
     if change:
         lines.extend(["", "🔔 变化", f"  {change}"])
 
-    w_meas = _slim_measure_line(weekly_view, weekly_raw)
-    d_meas = _slim_measure_line(daily_view, daily_raw)
     lines.extend(
         [
             "",
-            "🔮 推演",
-            "  现在",
-            f"    周线：{weekly_story['now']}",
-            f"    日线：{daily_story['now']}",
-            f"    周线量度：{w_meas}",
-            f"    日线量度：{d_meas}",
-            "",
-            "  若变好",
-            f"    周线：{weekly_story['better']}",
-            f"    日线：{daily_story['better']}",
-            "",
-            "  若变坏",
-            f"    周线：{weekly_story['worse']}",
-            f"    日线：{daily_story['worse']}",
-            "",
-            "  ⭐ 盯",
-            f"    周线：{weekly_story['watch']}",
-            f"    日线：{daily_story['watch']}",
-            "    本卡不下单；出手/分道看 trader",
+            "📌 现在 / 变好 / 变差",
+            f"  现在：{posture}｜{situation}",
+            f"  变好：{better}",
+            f"  变差：{worse}",
         ]
     )
 
@@ -1761,6 +1919,7 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
         if bad in text:
             text = text.replace(bad, "（结构参考）")
     return text
+
 
 
 def render_wyckoff_detail(plan: dict[str, Any]) -> str:
