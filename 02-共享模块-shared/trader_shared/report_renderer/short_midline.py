@@ -734,41 +734,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
     except Exception:
         _pos_mid = ""
 
-    # 附：股东（背景，不抢位置灯）
-    _ext_fund = r.get("extend_fundamental") or {}
-    _sh = _ext_fund.get("shareholder") or {}
-    if isinstance(_sh, dict) and _sh.get("status") and _sh.get("status") != "数据不足":
-        _sh_chg = _sh.get("change_pct") or 0.0
-        _sh_status = _sh.get("status")
-        lines.append(f"  附：股东户数较上期 {_sh_chg:+.2f}%（{_sh_status}）")
-
-    # 业绩预期
-    _eps_data = _ext_fund.get("consensus_eps") or {}
-    _eps_rows = _eps_data.get("rows") or []
-    if isinstance(_eps_rows, list) and _eps_rows:
-        _eps_26 = None
-        _eps_27 = None
-        _count_26 = "--"
-        _count_27 = "--"
-        for _row in _eps_rows:
-            _year = str(_row.get("year", ""))
-            _avg = str(_row.get("avg_eps", ""))
-            _cnt = str(_row.get("count", ""))
-            if "2026" in _year or "26" in _year:
-                _eps_26 = _avg
-                _count_26 = _cnt
-            elif "2027" in _year or "27" in _year:
-                _eps_27 = _avg
-                _count_27 = _cnt
-        if _eps_26 or _eps_27:
-            _eps_parts = []
-            if _eps_26:
-                _eps_parts.append(f"26年均值{_eps_26}元")
-            if _eps_27:
-                _eps_parts.append(f"27年均值{_eps_27}元")
-            _cnt_val = _count_27 if _count_27 != "--" else _count_26
-            _cnt_str = f"（{_cnt_val}家机构预测）" if _cnt_val != "--" else ""
-            lines.append(f"  业绩预期：{' ｜ '.join(_eps_parts)}{_cnt_str}")
+    # 股东户数 / 业绩预期：默认不进主面板（研报附件，打断结构→关键价）
 
     # 中线关键价（按价格升序排列）
     lines.append("")
