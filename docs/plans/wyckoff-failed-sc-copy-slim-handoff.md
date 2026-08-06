@@ -28,3 +28,9 @@ failed+SOS / failed+LPS 主句**不改**（仍破后强势 / LPS 修复）；旧
 
 - pytest：`test_wyckoff_skill_render` / `test_wyckoff_structure_anchor` 相关 failed 串
 - 面板可见：主句含 `本波无新SC`；有价则 `旧SC`+`（对照）`；禁加长「历史可有过 SC…」段落
+
+## 4. 续：未成型路径（非 failed）
+
+日/周吸筹链缺灯时，推演禁用「补 X」作业口吻：
+- 缺 SC：`出现本波新SC` / `盯本波新SC`
+- 缺其它：`出现 {code}（中文）并站稳` / `盯 {code}`

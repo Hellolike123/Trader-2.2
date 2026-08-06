@@ -1326,8 +1326,8 @@ def _slim_weekly_story_lines(view: dict[str, Any], raw: dict[str, Any]) -> dict[
             return {
                 "now": now,
                 "better": "派发未确认先观望，需后续结构证伪偏空",
-                "worse": "补出 SOW（弱势信号）则派发压力加深",
-                "watch": "盯 BC（买力高潮）是否补确认，未确认则观望",
+                "worse": "出现 SOW（弱势信号）则派发压力加深",
+                "watch": "盯 BC（买力高潮）是否确认，未确认则观望",
             }
         return {
             "now": now,
@@ -1338,12 +1338,19 @@ def _slim_weekly_story_lines(view: dict[str, Any], raw: dict[str, Any]) -> dict[
 
     range_head = _slim_range_head(view, raw)
     if "ST" not in lit and {"SC", "AR"}.issubset(lit):
-        better = "补 ST（二次测试）并守住雏形下沿"
-        watch = "盯 ST（二次测试）能否补上"
+        better = "出现 ST（二次测试）并守住雏形下沿"
+        watch = "盯 ST（二次测试）是否出现"
     else:
         missing = next((code for code in ACCUM_CHAIN if code not in lit), "")
-        better = f"补 {missing}（{_cn(missing)}）并站稳" if missing else "吸筹链保持完整并延续"
-        watch = f"盯 {missing}（{_cn(missing)}）" if missing else "盯回踩是否守住"
+        if missing == "SC":
+            better = "出现本波新SC"
+            watch = "盯本波新SC"
+        elif missing:
+            better = f"出现 {missing}（{_cn(missing)}）并站稳"
+            watch = f"盯 {missing}（{_cn(missing)}）"
+        else:
+            better = "吸筹链保持完整并延续"
+            watch = "盯回踩是否守住"
     worse = "失守雏形下沿，雏形不成立" if "雏形" in range_head else "结构继续转弱则保持观察"
     lo, _hi = _phase_a_bounds(raw)
     if lo is not None and ("雏形" in range_head or "箱体" in range_head):
@@ -1365,7 +1372,7 @@ def _slim_daily_story_lines(view: dict[str, Any], raw: dict[str, Any]) -> dict[s
         if "LPS" in lit:
             return {
                 "now": "Phase A 失效｜本波 LPS 修复",
-                "better": "修复延续并补出 SOS（强势信号）",
+                "better": "修复延续并出现 SOS（强势信号）",
                 "worse": "修复失败则本波无新SC",
                 "watch": "盯 LPS（最后支撑点）修复是否守住",
             }
@@ -1378,13 +1385,20 @@ def _slim_daily_story_lines(view: dict[str, Any], raw: dict[str, Any]) -> dict[s
 
     now = _slim_chain_now(tuple(ACCUM_CHAIN), view, raw, weekly=False)
     missing = next((code for code in ACCUM_CHAIN if code not in lit), "")
-    better = f"补 {missing}（{_cn(missing)}）并站稳" if missing else "吸筹链保持完整并延续"
+    if missing == "SC":
+        better = "出现本波新SC"
+        watch = "盯本波新SC"
+    elif missing:
+        better = f"出现 {missing}（{_cn(missing)}）并站稳"
+        watch = f"盯 {missing}（{_cn(missing)}）"
+    else:
+        better = "吸筹链保持完整并延续"
+        watch = "盯回踩是否守住"
     if _box_mode(view, raw) == "none":
         worse = "继续破位则保持无箱观察"
     else:
         lo, _hi = _phase_a_bounds(raw)
         worse = f"失守 {_fmt_price(lo)} 一带则本波转弱" if lo is not None else "结构破坏则本波转弱"
-    watch = f"盯 {missing}（{_cn(missing)}）" if missing else "盯回踩是否守住"
     return {"now": now, "better": better, "worse": worse, "watch": watch}
 
 
