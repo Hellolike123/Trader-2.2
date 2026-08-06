@@ -124,6 +124,8 @@ TESTS=(
   "02-共享模块-shared/tests/test_data_provider.py"
   "02-共享模块-shared/tests/test_context_stage_offline.py"
   "02-共享模块-shared/tests/test_position_add_store.py"
+  # 批量路径加速回归（2026-08-06）：refresh 死锁修复 / enrich 预热 / 腾讯 quote 硬超时
+  "02-共享模块-shared/tests/test_batch_path_accel.py"
 )
 
 exec "$PYTHON" -m pytest -q -p no:cacheprovider "${TESTS[@]}"

@@ -195,7 +195,7 @@ def test_fetch_quote_fast_path_with_tencent(mock_get_client):
     # Tencent HTTP format: prefix="fields"
     fake_text = 'sh600035="' + "~".join(fake_content) + '"'
 
-    def fake_get_text(url, encoding="gbk"):
+    def fake_get_text(url, encoding="gbk", max_retries=2):
         return fake_text
 
     sec = light_data.resolve_security("600036")
