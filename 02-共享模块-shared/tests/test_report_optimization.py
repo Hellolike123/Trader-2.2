@@ -1137,7 +1137,8 @@ def test_meta_pure_d_board_without_sector():
     }
     out = render_short_midline(r)
     head = out.split("🧭")[0]
-    assert "环境：深成 +1.25% ｜ 动能 转弱" in out
+    assert "环境：深成 +1.25%" in out
+    assert "量能：" in out and "动能 转弱" in out
     assert "个股 +" not in head
     assert "大盘" not in head
     assert " 偏弱" not in head and "正常" not in head
@@ -1166,7 +1167,8 @@ def test_meta_pure_d_with_sector():
     r["change_pct"] = 0.84
     out = render_short_midline(r)
     head = out.split("🧭")[0]
-    assert "环境：科创 +2.99% ｜ 电气 -3.44% ｜ 强于板块 +4.28% ｜ 动能 转弱" in out
+    assert "环境：科创 +2.99% ｜ 电气 -3.44% ｜ 强于板块 +4.28%" in out
+    assert "动能 转弱" in out and "量能：" in out
     assert "个股 +" not in head
     assert "行业：" not in out
     assert "跑赢" not in head

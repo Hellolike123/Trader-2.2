@@ -425,8 +425,6 @@ def render_short_midline(r: dict[str, Any]) -> str:
                 env_parts.append(f"强于板块 +{_vs:.2f}%")
             else:
                 env_parts.append(f"弱于板块 {_vs:.2f}%")
-    if momentum:
-        env_parts.append(f"动能 {momentum}")
     if env_parts:
         lines.append(f"  环境：{' ｜ '.join(env_parts)}")
 
@@ -453,6 +451,9 @@ def render_short_midline(r: dict[str, Any]) -> str:
                 vol_parts.append("创新高")
             else:
                 vol_parts.append(f"调整{_days_from_high}天")
+    # 动能与量能/调整同属个股状态，放量能行不进环境（环境只放指数与板块对照）
+    if momentum:
+        vol_parts.append(f"动能 {momentum}")
     if vol_parts:
         lines.append(f"  量能：{' ｜ '.join(vol_parts)}")
 
