@@ -224,6 +224,27 @@ def apply_seam(patcher) -> None:
     patcher.setattr(_cu, "fetch_fund_flow_cached", lambda *a, **k: None)
     patcher.setattr(_tc, "get_client", lambda *a, **k: UnavailableClient())
     patcher.setattr(_chip, "get_cyq_perf", lambda *a, **k: None)
+    # ── chip 全链路确定性（2026-08-06：cyq 文件缓存 + chip_history 状态文件穿透）──
+    # chip_stage 用 cached 变体（函数内 import → 打 chip_data 源生效）；
+    # chip_core 模块级 import check/save（pattern-2 绑定 → 必须打 chip_core 命名空间）。
+    # save_chip_snapshot no-op：防止 golden 运行污染真实 ~/.trader/chip_history.json。
+    patcher.setattr(_chip, "get_cyq_perf_cached", lambda *a, **k: None)
+    patcher.setattr(_chip, "get_cyq_chips_cached", lambda *a, **k: [])
+    try:
+        import trader_shared.chip_core as _cc
+
+        _MOCK_CHIP_MIGRATION = {
+            "migration_pct": 0.0,
+            "warning_level": "none",
+            "warning_text": "",
+            "has_history": False,
+            "support_migration": None,
+            "resistance_migration": None,
+        }
+        patcher.setattr(_cc, "check_chip_migration", lambda *a, **k: dict(_MOCK_CHIP_MIGRATION))
+        patcher.setattr(_cc, "save_chip_snapshot", lambda *a, **k: None)
+    except Exception:
+        pass
     try:
         import run_analysis as _ra2
         if hasattr(_ra2, "read_signals_for_report"):
