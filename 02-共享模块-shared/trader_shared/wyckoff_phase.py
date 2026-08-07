@@ -486,20 +486,60 @@ def _detect_phase(
     acc_b_ctx = sc_ar_b_ctx or has_compression           # 积累 B 背景
     dist_b_ctx = bc_dist_b_ctx or has_compression        # 派发 B 背景
 
-    # Spring/UT 有效性（孤立性校验）：
-    #   spring_idx>=0：有 bar 位置 → 在 B 背景之后才算有效
-    #   spring_idx=-1 但信号来自 signals dict → 看 B 背景是否存在（保守判断）
+    # Spring/UT 有效性（孤立性校验）— P0-2：
+    #   B 背景只认「严格早于事件」完成的路径；事件之后的 compression 不得把真 Spring/UT 判 premature。
+    #   spring_idx=-1 但信号来自 signals dict → 看 B 背景是否存在（兼容注入测）
     if spring_idx >= 0:
-        acc_b_ctx_idx = max(sc_idx, ar_idx, comp_idx)
-        spring_premature = not (acc_b_ctx and spring_idx > acc_b_ctx_idx)
+        prior_b: list[int] = []
+        if (
+            sc_idx >= 0
+            and ar_idx >= 0
+            and sc_idx < spring_idx
+            and ar_idx < spring_idx
+        ):
+            prior_b.append(max(sc_idx, ar_idx))
+        if comp_idx >= 0 and comp_idx < spring_idx:
+            prior_b.append(comp_idx)
+        if prior_b:
+            spring_premature = False
+        elif acc_b_ctx and sc_idx < 0 and ar_idx < 0 and comp_idx < 0:
+            spring_premature = False  # 仅 signals 布尔、无扫描索引
+        else:
+            spring_premature = True
     elif spring:
         spring_premature = not acc_b_ctx
     else:
         spring_premature = False
 
     if ut_idx >= 0:
-        dist_b_ctx_idx = max(bc_idx, are_idx, comp_idx)
-        upthrust_premature = not (dist_b_ctx and ut_idx > dist_b_ctx_idx)
+        prior_dist_b: list[int] = []
+        if (
+            bc_idx >= 0
+            and are_idx >= 0
+            and bc_idx < ut_idx
+            and are_idx < ut_idx
+        ):
+            prior_dist_b.append(max(bc_idx, are_idx))
+        # BC + (compression|SOW 索引侧) 在 UT 前；SOW 无稳定 idx 时靠 dist_b_ctx+bc
+        if bc_idx >= 0 and bc_idx < ut_idx and (comp_idx >= 0 and comp_idx < ut_idx):
+            prior_dist_b.append(max(bc_idx, comp_idx))
+        if comp_idx >= 0 and comp_idx < ut_idx:
+            prior_dist_b.append(comp_idx)
+        if prior_dist_b:
+            upthrust_premature = False
+        elif dist_b_ctx and bc_idx < 0 and are_idx < 0 and comp_idx < 0:
+            upthrust_premature = False
+        elif (
+            dist_b_ctx
+            and bc_idx >= 0
+            and bc_idx < ut_idx
+            and sow_found
+            and (are_idx < 0 or are_idx < ut_idx)
+        ):
+            # BC+SOW 派发 B（无 are/comp 索引）
+            upthrust_premature = False
+        else:
+            upthrust_premature = True
     elif ut_found:
         upthrust_premature = not dist_b_ctx
     else:
@@ -725,9 +765,10 @@ def _detect_phase(
             "upthrust_premature": upthrust_premature,
         })
     if not upthrust_premature and ut_found:
+        # P1-3：裸 UT 对称裸 Spring → C 测试（非派发 A 停止）
         return _finish({
-            "phase": "distribution_a",
-            "phase_label": "派发期 A（上冲回落：UT）",
+            "phase": "distribution_c",
+            "phase_label": "派发期 C（测试：UT）",
             "phase_confidence_delta": -0.05,
             "spring_premature": spring_premature,
             "upthrust_premature": False,

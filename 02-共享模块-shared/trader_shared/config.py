@@ -210,7 +210,7 @@ WYCKOFF_SPRING_SUPPORT_LOOKBACK: int = 10       # 弹簧支撑回溯K线数
 WYCKOFF_SPRING_RECLAIM_RATIO: float = 0.985     # 刺穿深度比例，跌破 1.5% 即确认（原 0.97）
 WYCKOFF_SPRING_ATR_MULTIPLE: float = 0.5        # ATR 动态刺穿深度（0.5 × ATR）
 WYCKOFF_SPRING_BULLISH_VOL_RATIO: float = 1.3   # 弹簧放量反弹量比
-WYCKOFF_SPRING_LOW_VOL_RATIO: float = 0.8       # 弹簧低量确认阈值（低量 = 供应耗尽，可靠）
+WYCKOFF_SPRING_LOW_VOL_RATIO: float = 0.8       # 弹簧低量确认阈值（低量 = 供应耗尽，可靠；不得映射 strength=weak）
 
 # UTAD (Upthrust Action / Upthrust) 上冲回落相关参数
 WYCKOFF_UTAD_BREAKOUT_RATIO: float = 1.005      # 假突破幅度，超出阻力 0.5% 即可（原 1.02）

@@ -1225,19 +1225,30 @@ def _detect_spring(bars: list[dict], _support: float | None = None, symbol: str 
         return {"spring_signal": False, "spring_price": 0.0,
                 "spring_reason": f"收回力度不足（{reclaim_ratio*100:.0f}% < 50%），弱弹簧", "spring_strength": "weak"}
 
-    # ── 分级：强 = 量价齐振；弱 = 缩量无确认；其他 = 标准 ──
-    # high_vol_warning 已在上方硬过滤；此处不再标 strong（避免与放量真破位语义冲突）
-    if (
-        vol_class != "high_vol_warning"
-        and depth_pct >= WYCKOFF_SPRING_STRONG_DEPTH_PCT
-        and vol_ratio >= 1.0
+    # ── 分级（法源 wyckoff-spring-st-phase-bugfix-handoff P0-1）──
+    # 原典：缩量 Spring = 供应耗尽，可靠；禁止因缩量 alone 标 weak。
+    # strong = 深刺 + 收回中轴 + (缩量 或 正常量且 vol_ratio>=1.0)
+    # weak = 仅浅刺穿噪音； ordinary = 其余
+    deep_reclaim = (
+        depth_pct >= WYCKOFF_SPRING_STRONG_DEPTH_PCT
         and reclaim_ratio >= WYCKOFF_SPRING_STRONG_RECLAIM
+    )
+    if vol_class == "low_vol_confirm" and deep_reclaim:
+        strength = "strong"
+        strength_note = "深度震仓+缩量供应耗尽+坚决收回中轴，吸筹最强确认"
+    elif (
+        vol_class == "normal"
+        and deep_reclaim
+        and vol_ratio >= 1.0
     ):
         strength = "strong"
-        strength_note = "深度震仓+放量承接+坚决收回中轴，吸筹最强确认"
-    elif vol_ratio < WYCKOFF_SPRING_LOW_VOL_RATIO:
+        strength_note = "深度震仓+量能配合+坚决收回中轴，吸筹最强确认"
+    elif depth_pct < WYCKOFF_SPRING_WEAK_DEPTH_PCT:
         strength = "weak"
-        strength_note = f"缩量（量比{vol_ratio:.1f}），无主动承接确认，可靠性低"
+        strength_note = f"刺穿过浅（{depth_pct:.2f}%），噪音风险"
+    elif vol_class == "low_vol_confirm":
+        strength = "ordinary"
+        strength_note = "缩量洗盘（供应耗尽），标准可靠弹簧"
     else:
         strength = "ordinary"
         strength_note = "标准弹簧"
@@ -1403,10 +1414,26 @@ def _detect_volume_divergence(bars: list[dict]) -> tuple[bool, bool]:
     max_price_idx = max(range(len(prices)), key=lambda i: prices[i])
     min_price_idx = min(range(len(prices)), key=lambda i: prices[i])
 
-    # 看空背离：价格在上升趋势中创新高（峰值高于起点），但后半段平均量萎缩至前半段比例内
-    bearish = (prices[max_price_idx] > prices[0]) and (second_half_avg_vol < first_half_avg_vol * WYCKOFF_DIVERGENCE_RATIO)
-    # 看多背离：价格在下降趋势中创新低（谷值低于起点），但后半段平均量释放或萎缩度满足抛压出清
-    bullish = (prices[min_price_idx] < prices[0]) and (second_half_avg_vol < first_half_avg_vol * WYCKOFF_DIVERGENCE_RATIO)
+    vol_dry = second_half_avg_vol < first_half_avg_vol * WYCKOFF_DIVERGENCE_RATIO
+    # P2-1：极值须落在窗口后半（趋势延续），避免震荡窗双亮
+    # 看空：后半段创新高 + 量萎
+    bearish = (
+        vol_dry
+        and prices[max_price_idx] > prices[0]
+        and max_price_idx >= mid
+    )
+    # 看多：后半段创新低 + 量萎（抛压耗尽）
+    bullish = (
+        vol_dry
+        and prices[min_price_idx] < prices[0]
+        and min_price_idx >= mid
+    )
+    # 双亮时只保更近极值一侧
+    if bearish and bullish:
+        if max_price_idx >= min_price_idx:
+            bullish = False
+        else:
+            bearish = False
 
     return bearish, bullish
 
@@ -2102,8 +2129,8 @@ def _detect_sos(
 def _detect_st(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     """Detect Secondary Test (ST) — 二次测试 Spring 支撑，缩量确认。
 
-    触发条件:
-      1. 最近 N 根 K 线内检测到 Spring 信号
+    触发条件（法源 wyckoff-spring-st-phase-bugfix-handoff P1-1）:
+      1. 最近窗内经 `_detect_spring` 同闸检出 Spring（禁止山寨刺穿条件）
       2. Spring 后 3-15 根 K 线内:
          - 价格回到支撑区域（±1%）
          - 成交量 < 均量 * 0.8
@@ -2112,80 +2139,35 @@ def _detect_st(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 15 + 1:
         return {"st_signal": False, "st_reason": "数据不足", "st_price": None}
 
-    # 扫描 Spring 事件
-    recent = bars[-(WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1):-1]
-    current = bars[-1]
-
-    low_values = [to_float(b.get("low")) for b in recent]
-    valid_lows = [v for v in low_values if v is not None]
-    # 支撑位：有 TR 下沿则固定用它（ST 与 Spring 同锚），否则局部最低
     has_tr_lower = bool(tr_ctx and tr_ctx.get("tr_lower") is not None)
-    if has_tr_lower:
-        support = tr_ctx["tr_lower"]
-    else:
-        support = min(valid_lows) if valid_lows else None
 
-    if support is None:
-        return {"st_signal": False, "st_reason": "支撑位数据异常", "st_price": None}
-
-    # P1: 与 Spring 共用 ATR/固定比例刺穿深度
-    breach_level = _spring_breach_level(support, current)
-    cur_low = to_float(current.get("low"))
-    cur_close = to_float(current.get("close"))
-
-    def _st_support_for_bar(bar: dict, pre_bars: list[dict]) -> float | None:
-        if has_tr_lower:
-            return float(tr_ctx["tr_lower"])
-        pls = [to_float(b.get("low")) for b in pre_bars]
-        vs = [v for v in pls if v is not None]
-        return min(vs) if vs else None
-
-    # 检查最近是否有 Spring
-    spring_detected = (cur_low is not None and cur_close is not None and
-                       cur_low < breach_level and cur_close >= support)
-
-    if not spring_detected:
-        # 也可能 Spring 发生在更早的 bar
-        scan_range = bars[-(WYCKOFF_SPRING_SUPPORT_LOOKBACK + 15):-1]
-        for i in range(len(scan_range) - 1, 0, -1):
-            sl = to_float(scan_range[i].get("low"))
-            sc = to_float(scan_range[i].get("close"))
-            if sl is None or sc is None:
-                continue
-            pre = scan_range[max(0, i - WYCKOFF_SPRING_SUPPORT_LOOKBACK):i]
-            sup = _st_support_for_bar(scan_range[i], pre)
-            if sup is None:
-                continue
-            br = _spring_breach_level(sup, scan_range[i])
-            if sl < br and sc >= sup:
-                support = sup
-                spring_detected = True
-                break
-
-    if not spring_detected:
-        return {"st_signal": False, "st_reason": "未检测到 Spring，无法触发 ST", "st_price": None}
-
-    # 在 Spring 后 3-15 根 K 线内寻找回测
-    # 当前 bar 就是最后一个，用它检查
-    # 需要回溯查找 Spring 发生位置
+    # P1-1：Spring 锚必须过完整 `_detect_spring`（收回/量能/2 根窗等同闸）
     spring_idx = None
-    for i in range(len(bars) - 2, max(0, len(bars) - WYCKOFF_SPRING_SUPPORT_LOOKBACK - 15 - 1), -1):
-        sl = to_float(bars[i].get("low"))
-        sc = to_float(bars[i].get("close"))
-        if sl is None or sc is None:
+    support: float | None = None
+    scan_lo = max(0, len(bars) - WYCKOFF_SPRING_SUPPORT_LOOKBACK - 15 - 1)
+    min_spring_len = WYCKOFF_SPRING_SUPPORT_LOOKBACK + 1
+    for i in range(len(bars) - 2, scan_lo - 1, -1):
+        if i + 1 < min_spring_len:
             continue
-        pre = bars[max(0, i - WYCKOFF_SPRING_SUPPORT_LOOKBACK):i]
-        sup = _st_support_for_bar(bars[i], pre)
-        if sup is None:
+        sub = bars[: i + 1]
+        try:
+            sp = _detect_spring(sub, tr_ctx=tr_ctx)
+        except Exception:
             continue
-        br = _spring_breach_level(sup, bars[i])
-        if sl < br and sc >= sup:
-            spring_idx = i
-            support = sup
-            break
+        if not sp.get("spring_signal"):
+            continue
+        spring_idx = i
+        if has_tr_lower:
+            support = float(tr_ctx["tr_lower"])
+        else:
+            pre = bars[max(0, i - WYCKOFF_SPRING_SUPPORT_LOOKBACK):i]
+            pls = [to_float(b.get("low")) for b in pre]
+            vs = [v for v in pls if v is not None]
+            support = min(vs) if vs else to_float(bars[i].get("low"))
+        break
 
-    if spring_idx is None:
-        return {"st_signal": False, "st_reason": "Spring 锚点未找到", "st_price": None}
+    if spring_idx is None or support is None:
+        return {"st_signal": False, "st_reason": "未检测到 Spring，无法触发 ST", "st_price": None}
 
     # 检查 Spring 后 3-15 根 K 线
     _spring_vol_slice = bars[max(0, spring_idx - WYCKOFF_SPRING_SUPPORT_LOOKBACK):spring_idx]
@@ -2212,7 +2194,7 @@ def _detect_st(bars: list[dict], tr_ctx: dict | None = None) -> dict:
         if spring_avg_vol > 0 and t_volume < spring_avg_vol * 0.8:
             return {
                 "st_signal": True,
-                "st_reason": f"Spring 支撑二次测试，缩量确认",
+                "st_reason": "Spring 支撑二次测试，缩量确认",
                 "st_price": round(support, 2),
             }
 
@@ -2258,17 +2240,18 @@ def _detect_lps(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     """Detect LPS (Last Point of Support) — SOS 突破后回调不破前低。
 
     威科夫阶段: ... → SOS → 回调 → LPS → 主升
-    检测逻辑:
-      1. 从近到远找「最近一次」有效 SOS 锚点（SOS 结束后的 bar 索引）
+    检测逻辑（P1-2：climb 原窗 + thrust tip 双锚）:
+      1. 从近到远找「最近一次」有效 SOS（climb 手写窗 **或** tip thrust）
       2. 只评估该 SOS 之后到当前的完整回调（2–10 根），不回退到更早伪 SOS
       3. 回调不破 SOS 前低（允许约 1% 容差）
       4. 回调末端缩量（相对基线均量 * 0.7）
-      5. SOS 阳线标准与 _detect_sos 对齐：≥4/5 阳线
+      5. climb：≥4/5 阳线（与历史 LPS 合同一致）
     """
     sos_len = WYCKOFF_DIVERGENCE_BARS  # 5
     min_pb = 2
     max_pb = 10
     baseline_len = 10
+    min_tip_len = WYCKOFF_DIVERGENCE_BARS + WYCKOFF_SPRING_SUPPORT_LOOKBACK
     min_bars = sos_len + min_pb + baseline_len + WYCKOFF_SPRING_SUPPORT_LOOKBACK  # ≈27
     if len(bars) < min_bars:
         return {"lps_signal": False, "lps_reason": "数据不足", "lps_price": None}
@@ -2280,8 +2263,8 @@ def _detect_lps(bars: list[dict], tr_ctx: dict | None = None) -> dict:
         else None
     )
 
-    def _valid_sos(sos_start: int, sos_end: int, tr_baseline: float | None = None) -> tuple[bool, float, float]:
-        """返回 (是否有效 SOS, 前低, 基线均量)。"""
+    def _valid_sos_climb(sos_start: int, sos_end: int) -> tuple[bool, float, float]:
+        """climb SOS 窗（历史合同）；返回 (ok, pre_low, baseline_avg_vol)。"""
         if sos_start < baseline_len or sos_end - sos_start != sos_len:
             return False, 0.0, 0.0
         sos_window = bars[sos_start:sos_end]
@@ -2306,10 +2289,12 @@ def _detect_lps(bars: list[dict], tr_ctx: dict | None = None) -> dict:
         if gain < 0.02:
             return False, 0.0, 0.0
         if tr_baseline:
-            baseline_avg_vol = tr_baseline
+            baseline_avg_vol = float(tr_baseline)
         else:
             baseline = bars[sos_start - baseline_len:sos_start]
-            baseline_avg_vol = sum(to_float(b.get("volume")) or 0 for b in baseline) / max(len(baseline), 1)
+            baseline_avg_vol = sum(to_float(b.get("volume")) or 0 for b in baseline) / max(
+                len(baseline), 1
+            )
             if baseline_avg_vol <= 0:
                 return False, 0.0, 0.0
         if sum(sos_vols) / sos_len < baseline_avg_vol * 1.2:
@@ -2319,13 +2304,49 @@ def _detect_lps(bars: list[dict], tr_ctx: dict | None = None) -> dict:
         pre_lows = [v for v in pre_lows if v is not None]
         if not pre_lows:
             return False, 0.0, 0.0
-        return True, min(pre_lows), baseline_avg_vol
+        return True, float(min(pre_lows)), float(baseline_avg_vol)
 
-    # 从近到远：sos_end = n-2, n-3, ... n-10 → 取最近一次有效 SOS 后只评估一次
+    def _valid_sos_thrust_tip(sos_end: int) -> tuple[bool, float, float]:
+        """P1-2：单日 thrust SOS tip（sos_end-1）；climb tip 不走此分支（防基线口径漂移）。"""
+        if sos_end < min_tip_len:
+            return False, 0.0, 0.0
+        sub = bars[:sos_end]
+        try:
+            hit = _detect_sos_at_tip(sub, tr_ctx)
+        except Exception:
+            return False, 0.0, 0.0
+        if not hit.get("sos_signal") or str(hit.get("sos_kind") or "") != "thrust":
+            return False, 0.0, 0.0
+        tip_i = sos_end - 1
+        pre_start = max(0, tip_i - 5)
+        pre_lows = [to_float(bars[i].get("low")) for i in range(pre_start, tip_i)]
+        pre_lows = [v for v in pre_lows if v is not None]
+        if not pre_lows:
+            tip_lo = to_float(bars[tip_i].get("low"))
+            if tip_lo is None:
+                return False, 0.0, 0.0
+            pre_low = float(tip_lo)
+        else:
+            pre_low = float(min(pre_lows))
+        if tr_baseline:
+            baseline_avg_vol = float(tr_baseline)
+        else:
+            base_lo = max(0, tip_i - baseline_len)
+            baseline = bars[base_lo:tip_i]
+            baseline_avg_vol = sum(to_float(b.get("volume")) or 0 for b in baseline) / max(
+                len(baseline), 1
+            )
+            if baseline_avg_vol <= 0:
+                return False, 0.0, 0.0
+        return True, pre_low, float(baseline_avg_vol)
+
+    # 从近到远：sos_end = n-2 … → 取最近一次有效 SOS 后只评估一次
     for pb_len in range(min_pb, max_pb + 1):
         sos_end = n - pb_len
         sos_start = sos_end - sos_len
-        ok, pre_low, baseline_avg_vol = _valid_sos(sos_start, sos_end, tr_baseline)
+        ok, pre_low, baseline_avg_vol = _valid_sos_climb(sos_start, sos_end)
+        if not ok:
+            ok, pre_low, baseline_avg_vol = _valid_sos_thrust_tip(sos_end)
         if not ok:
             continue
 

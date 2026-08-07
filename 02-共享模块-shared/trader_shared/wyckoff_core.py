@@ -1267,7 +1267,8 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
     lps_on = analysis.get("lps_signal") and "lps_signal" not in suppress
     lpsy_on = analysis.get("lpsy_signal") and "lpsy_signal" not in suppress
 
-    # 1. Spring — 最强看多信号；孤立/过早、高量警告、弱弹簧（缩量无承接）均降权减半
+    # 1. Spring — 最强看多信号；孤立/过早、高量警告、弱弹簧（浅刺噪音）均降权减半
+    # 缩量 low_vol_confirm 为原典可靠形态，不得因缩量 alone 进 weak（见 P0-1 handoff）
     spring_strength = analysis.get("spring_strength")
     spring_deweight = bool(
         analysis.get("spring_premature")
@@ -1284,7 +1285,7 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
             signals.append(f"Spring(高量降权) +{spring_pts}")
         elif spring_strength == "weak":
             spring_pts = spring_pts // 2
-            signals.append(f"Spring(弱/缩量无承接,降权) +{spring_pts}")
+            signals.append(f"Spring(弱/浅刺噪音,降权) +{spring_pts}")
         else:
             signals.append(f"Spring +{spring_pts}")
         raw += spring_pts
@@ -1307,12 +1308,15 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
         raw += WYCKOFF_SCORE_BULLISH_DIV
         signals.append(f"看多背离 +{WYCKOFF_SCORE_BULLISH_DIV}")
 
-    # 4. Upthrust — 假突破派发；孤立/过早 UT（缺 Phase B 背景）降权为噪声，分数减半
+    # 4. Upthrust — 假突破派发；孤立/过早或 weak 降权减半（P1-4 对称 Spring weak）
     if upthrust:
         ut_pts = WYCKOFF_SCORE_UT
         if analysis.get("upthrust_premature"):
             ut_pts = ut_pts // 2
             signals.append(f"Upthrust(孤立/过早,降权) {ut_pts}")
+        elif analysis.get("upthrust_strength") == "weak":
+            ut_pts = ut_pts // 2
+            signals.append(f"Upthrust(弱,降权) {ut_pts}")
         else:
             signals.append(f"Upthrust {ut_pts}")
         raw += ut_pts

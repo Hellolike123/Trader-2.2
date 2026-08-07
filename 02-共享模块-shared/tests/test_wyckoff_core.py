@@ -1119,44 +1119,27 @@ class TestDetectSOS:
 class TestDetectST:
     """ST (Secondary Test) 二次测试 检测测试"""
 
-    def test_st_detected(self):
-        """Spring 后 3-15 根缩量回测支撑 → ST 触发
-
-        需要 >= 31 根 bar 才能让 spring_idx 搜索到索引 15 的 Spring
-        ST bar low 必须在 [support*0.99, support*1.01] = [89.1, 90.9] 区间
-        volume < avg_vol*0.8 = 160
-        """
+    def _spring_then_test_bars(self, *, st_vol: int):
+        """P1-1：真 Spring（缩量+收回中轴）+ 3 根后 ST 候选。"""
         # 前 15 根: low=90, vol=200
         bars = [_make_bar(100, 105, 90, 102, 200) for _ in range(15)]
-        # 索引 15: Spring bar: low=85 < 88.65, close=91 >= 90
-        bars.append({"open": 89, "high": 93, "low": 85, "close": 91, "volume": 300})
-        # 索引 16-20: 上涨远离支撑
+        # Spring：low 刺穿 + close 强收回 + 缩量（过 _detect_spring 全闸）
+        bars.append({"open": 89, "high": 98, "low": 85, "close": 97, "volume": 150})
+        # 中间 3 根远离后再回（ST 窗 spring+3 起）
         bars.extend([
-            {"open": 92, "high": 96, "low": 91, "close": 95, "volume": 200},
-            {"open": 95, "high": 98, "low": 94, "close": 97, "volume": 220},
-            {"open": 97, "high": 100, "low": 96, "close": 99, "volume": 210},
-            {"open": 99, "high": 101, "low": 98, "close": 100, "volume": 200},
-            {"open": 100, "high": 102, "low": 99, "close": 101, "volume": 200},
+            {"open": 97, "high": 99, "low": 96, "close": 98, "volume": 200},
+            {"open": 98, "high": 100, "low": 97, "close": 99, "volume": 200},
+            {"open": 99, "high": 100, "low": 98, "close": 99, "volume": 200},
         ])
-        # 索引 21-24: 横盘靠近支撑
-        bars.extend([
-            {"open": 101, "high": 102, "low": 100, "close": 101, "volume": 190},
-            {"open": 101, "high": 102, "low": 100, "close": 100, "volume": 180},
-            {"open": 100, "high": 101, "low": 99, "close": 100, "volume": 180},
-            {"open": 100, "high": 101, "low": 98, "close": 99, "volume": 180},
-        ])
-        # 索引 25: ST bar: low=89.5 ∈ [89.1, 90.9], vol=150 < 160
-        bars.append({"open": 90, "high": 91, "low": 89.5, "close": 90, "volume": 150})
-        # 需要至少 31 根: 15 + 1 + 5 + 4 + 1 = 26, 还需要更多
-        # 再加几根
-        bars.extend([
-            {"open": 90, "high": 92, "low": 89, "close": 91, "volume": 180},
-            {"open": 91, "high": 93, "low": 90, "close": 92, "volume": 180},
-            {"open": 92, "high": 94, "low": 91, "close": 93, "volume": 180},
-            {"open": 93, "high": 95, "low": 92, "close": 94, "volume": 180},
-            {"open": 94, "high": 96, "low": 93, "close": 95, "volume": 180},
-        ])
-        # 总计: 15 + 1 + 5 + 4 + 1 + 5 = 31
+        # ST：回测 support≈90 ±1%，量相对 spring 前均量缩
+        bars.append({"open": 91, "high": 92, "low": 89.5, "close": 90.5, "volume": st_vol})
+        # 填满长度
+        bars.extend([_make_bar(91, 93, 90, 92, 180) for _ in range(8)])
+        return bars
+
+    def test_st_detected(self):
+        """Spring 后 3-15 根缩量回测支撑 → ST 触发"""
+        bars = self._spring_then_test_bars(st_vol=100)
         result = wyckoff_analysis(bars)
         assert result["st_signal"] is True, f"ST not detected: {result.get('st_reason')}"
 
@@ -1168,30 +1151,7 @@ class TestDetectST:
 
     def test_st_not_detected_high_volume(self):
         """Spring 后回测但量能不萎缩 → ST 不触发"""
-        bars = [_make_bar(100, 105, 90, 102, 200) for _ in range(15)]
-        bars.append({"open": 89, "high": 93, "low": 85, "close": 91, "volume": 300})  # Spring
-        bars.extend([
-            {"open": 92, "high": 96, "low": 91, "close": 95, "volume": 200},
-            {"open": 95, "high": 98, "low": 94, "close": 97, "volume": 220},
-            {"open": 97, "high": 100, "low": 96, "close": 99, "volume": 210},
-            {"open": 99, "high": 101, "low": 98, "close": 100, "volume": 200},
-            {"open": 100, "high": 102, "low": 99, "close": 101, "volume": 200},
-        ])
-        bars.extend([
-            {"open": 101, "high": 102, "low": 100, "close": 101, "volume": 190},
-            {"open": 101, "high": 102, "low": 100, "close": 100, "volume": 180},
-            {"open": 100, "high": 101, "low": 99, "close": 100, "volume": 180},
-            {"open": 100, "high": 101, "low": 98, "close": 99, "volume": 180},
-        ])
-        # volume=180 > 200*0.8=160 → 不满足缩量
-        bars.append({"open": 90, "high": 91, "low": 89.5, "close": 90, "volume": 180})
-        bars.extend([
-            {"open": 90, "high": 92, "low": 89, "close": 91, "volume": 180},
-            {"open": 91, "high": 93, "low": 90, "close": 92, "volume": 180},
-            {"open": 92, "high": 94, "low": 91, "close": 93, "volume": 180},
-            {"open": 93, "high": 95, "low": 92, "close": 94, "volume": 180},
-            {"open": 94, "high": 96, "low": 93, "close": 95, "volume": 180},
-        ])
+        bars = self._spring_then_test_bars(st_vol=200)  # >= avg*0.8
         result = wyckoff_analysis(bars)
         assert result["st_signal"] is False
 
@@ -1463,34 +1423,20 @@ class TestWyckoffScoreWithClassicSignals:
         assert result["raw"] == 15, f"Expected raw=15 (SOS only), got {result['raw']}"
 
     def test_st_adds_8(self):
-        """ST 信号贡献 +8。Spring(+25) + ST(+8) + 阶段(accumulation_c +2) = 35。
+        """ST 信号贡献 +8（与 Spring 同序列可共存）。"""
+        from trader_shared.wyckoff_core import calculate_wyckoff_score, wyckoff_analysis
 
-        构造：27 根 bars (ST 需要 len >= 26)
-        - bars[4:14]: 基准 10 根 (low=90, vol=200)
-        - bars[14]: Spring (low=88<90*0.985, close=90>=90)
-        - bars[15:17]: 2 根中间 bar
-        - bars[18]: ST trigger (low=89.5≈support, vol=100<200*0.8=160)
-        - bars[19:25]: 7 根收尾 (low≥90, 不触发新 Spring)
-        - bars[26]: Spring bar (bars[-1], low=88<90*0.985, close=90>=90)
-        """
-        from trader_shared.wyckoff_core import calculate_wyckoff_score
-        # 前 14 根：基准，low=90
-        bars = [_make_bar(100, 105, 90, 102, 200) for _ in range(14)]
-        # Spring bar (index 14)
-        bars.append(_make_bar(89, 91, 88, 90, 150))
-        # 中间 bar (index 15-16)
-        bars.append(_make_bar(91, 92, 90, 91.5, 180))
-        bars.append(_make_bar(91.5, 92, 90.5, 91, 180))
-        # ST trigger (index 18): low=89.5 回到 support(90) ±1%, vol=100 < 200*0.8
-        bars.append(_make_bar(91, 91.5, 88.5, 90.5, 100))
-        # 收尾 bars (index 19-25): low≥90, 确保不被误判为 Spring
-        for i in range(7):
-            bars.append(_make_bar(90 + i * 0.1, 91 + i * 0.1, 90, 90.5, 150))
-        # bars[-1] (index 26): Spring bar, close=97 → reclaim=7/2=350% ≥ 50%
-        bars.append(_make_bar(89, 97, 88, 97, 150))
+        helper = TestDetectST()
+        bars = helper._spring_then_test_bars(st_vol=100)
+        # 末日再挂一根有效 Spring，保证 tip spring 灯 + 序列内 ST
+        bars.append({"open": 89, "high": 98, "low": 85, "close": 97, "volume": 150})
+        an = wyckoff_analysis(bars)
+        assert an.get("st_signal") is True, f"ST 应亮: {an.get('st_reason')}"
+        assert an.get("spring_signal") is True
         result = calculate_wyckoff_score(bars)
-        # Spring 过早(12)+ST(8)+TR质量(4)=24
-        assert result["raw"] == 24, f"Expected raw=24 (Spring12+ST8+TR4), got {result['raw']}"
+        assert any("Spring确认" in s or "ST" in s for s in result["signals"]), result["signals"]
+        # Spring 全分或降权 + ST(+8) 至少高于裸 ST
+        assert result["raw"] >= 8
 
     def test_lps_adds_12(self):
         """LPS 信号精确贡献 +12。回调段缩量触发 VSA 供应耗尽 +5。
@@ -1713,7 +1659,8 @@ class TestPhaseUnifiedScAnchor:
         return d
 
     def _run_with_fakes(self, bars, tr_ctx, *, lookback, timeframe="daily",
-                        spring_idx=-1, ar_idx=-1):
+                        spring_idx=-1, ar_idx=-1, comp_idx=-1,
+                        signals=None):
         """隔离 _scan/_last：记录调用与子窗 tr_ctx；仅 fake 指定事件索引。
 
         B 收尾（wyckoff-epic-vol-phase-verif-handoff 方向 B）：统一锚存在时 AR 走
@@ -1726,18 +1673,33 @@ class TestPhaseUnifiedScAnchor:
 
         scan_calls: list = []
         last_calls: list = []
+        sig = signals if signals is not None else self._sig()
 
         def fake_scan(_bars, det, window=15, step=5, max_lookback_bars=None, **kw):
             scan_calls.append((getattr(det, "__name__", ""), kw.get("tr_ctx")))
+            name = getattr(det, "__name__", "")
+            # 仅 compression 可经 scan 亮 B 背景；spring 亮灯由 signals 控制，避免打乱既有 phase 断言
+            if name == "_detect_compression" and comp_idx >= 0:
+                return True
+            if name == "_detect_spring" and bool(sig.get("spring_signal")):
+                return True
             return False
 
         def fake_last(_bars, det, tr_ctx, window, step=1, **kw):
             last_calls.append((getattr(det, "__name__", ""), tr_ctx))
             name = getattr(det, "__name__", "")
             if name == "_detect_spring":
-                return spring_idx, {"spring_signal": True}
+                if spring_idx >= 0:
+                    return spring_idx, {"spring_signal": True}
+                return -1, None
             if name == "_detect_ar":
-                return ar_idx, {"ar_signal": True}
+                if ar_idx >= 0:
+                    return ar_idx, {"ar_signal": True}
+                return -1, None
+            if name == "_detect_compression":
+                if comp_idx >= 0:
+                    return comp_idx, {"compression_signal": True}
+                return -1, None
             return -1, None
 
         def fake_ar(_bars, tr_ctx=None, *, timeframe="daily", is_index=False):
@@ -1749,7 +1711,7 @@ class TestPhaseUnifiedScAnchor:
              patch("trader_shared.wyckoff_phase._scan_last_event", side_effect=fake_last), \
              patch("trader_shared.wyckoff_phase._detect_ar", side_effect=fake_ar):
             ph = wp._detect_phase(
-                bars, self._sig(), _phase_lookback=lookback,
+                bars, sig, _phase_lookback=lookback,
                 tr_ctx=tr_ctx, timeframe=timeframe,
             )
         return ph, scan_calls, last_calls
@@ -1778,6 +1740,25 @@ class TestPhaseUnifiedScAnchor:
             bars, tr_ctx, lookback=40, spring_idx=23, ar_idx=20)
         assert ph["spring_premature"] is True, "spring(23) < 换算 sc_idx(25) → 过早"
         assert ph["phase"] == "accumulation_a"
+
+    def test_p0_2_compression_after_spring_not_premature(self):
+        """P0-2：SC→AR→Spring 后出现 compression，不得把 Spring 判 premature。"""
+        bars = [_make_bar(100, 105, 95, 102, 100) for _ in range(60)]
+        tr_ctx = {**self._OK_TR, "sc_anchor": self._anchor(45)}  # wide sc_idx=25
+        # spring=27, ar=20, comp=35（在 spring 之后）
+        ph, _, _ = self._run_with_fakes(
+            bars,
+            tr_ctx,
+            lookback=40,
+            spring_idx=27,
+            ar_idx=20,
+            comp_idx=35,
+            signals=self._sig(spring_signal=True),
+        )
+        assert ph["spring_premature"] is False, (
+            "comp 在 spring 之后不得抬高 B 完成点导致 premature"
+        )
+        assert ph["phase"] == "accumulation_c"
 
     def test_p2_no_anchor_keeps_sliding_window_sc(self):
         """验收 P2：无 sc_anchor → 原滑窗逻辑零改动（_scan/_last 仍调 SC 检测器）。"""

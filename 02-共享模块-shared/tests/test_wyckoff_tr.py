@@ -173,29 +173,39 @@ def _grade(tag="", spring_bar=None, upthrust_bar=None, with_spikes=True):
     return sp, ut
 
 
-# ── 8. Strong Spring：深刺穿 + 放量承接 + 坚决收回中轴 ──────────────────────
+# ── 8. Strong Spring：深刺穿 + 量能配合 + 坚决收回中轴 ──────────────────────
 def test_strong_spring_grading():
     # 成交量必须 < avg_vol×BULLISH_VOL_RATIO(1.3) ≈ 143万，否则被放量过滤器拦截判为 failure
     sp, _ = _grade(spring_bar=mk(8.9, 9.0, 8.2, 9.0, 1_200_000))
     assert sp["spring_signal"] is True
     assert sp["spring_strength"] == "strong", f"应为 strong, got {sp.get('spring_strength')}"
     assert sp["spring_depth_pct"] >= 1.5, "深度刺穿应 >= 1.5%"
-    assert sp["spring_vol_ratio"] >= 1.0, "放量承接 vol_ratio 应 >= 1.0"
+    assert sp["spring_vol_ratio"] >= 1.0, "量能配合 vol_ratio 应 >= 1.0"
     assert sp["spring_reclaim_ratio"] >= 1.0, "收盘应收回 TR 中轴以上"
     assert "吸筹最强确认" in sp["spring_strength_note"]
 
 
-# ── 9. Weak Spring：缩量无承接，可靠性低 ──────────────────────────────────────
+# ── 8b. Strong Spring：缩量供应耗尽（原典最强）──────────────────────────────
+def test_strong_low_vol_spring_grading():
+    """P0-1：深刺+缩量+收回中轴 → strong（禁止标 weak）。"""
+    sp, _ = _grade(spring_bar=mk(8.9, 9.0, 8.2, 9.0, 600_000))
+    assert sp["spring_signal"] is True, f"应触发 spring, got {sp.get('spring_reason')}"
+    assert sp["spring_vol_class"] == "low_vol_confirm"
+    assert sp["spring_strength"] == "strong", f"缩量深刺应为 strong, got {sp.get('spring_strength')}"
+    assert "供应耗尽" in sp["spring_strength_note"] or "缩量" in sp["spring_strength_note"]
+
+
+# ── 9. Weak Spring：浅刺穿噪音 ──────────────────────────────────────────────
 def test_weak_spring_grading():
-    # 缩量（600k << 基线109万）+ depth=0.24% → vol_ratio<0.8 → weak
-    bar = mk(8.9, 8.95, 8.48, 8.75, 600_000)
-    bar["atr14"] = 0.03
+    # 极浅刺穿（depth < WEAK_DEPTH 0.5%）→ weak 噪音；须能过 breach 线
+    bar = mk(8.9, 8.95, 8.48, 8.75, 1_100_000)
+    bar["atr14"] = 0.03  # breach 很浅，low=8.48 可过
     bars = build_flat_tr(with_spikes=True) + [bar]
     tr = we._detect_trading_range(bars)
     sp2 = we._detect_spring(bars, tr_ctx=tr)
     assert sp2["spring_signal"] is True, f"应触发 spring, got {sp2.get('spring_reason')}"
-    assert sp2["spring_strength"] == "weak", f"应判 weak, got {sp2.get('spring_strength')}"
-    assert "无主动承接" in sp2["spring_strength_note"]
+    assert sp2["spring_strength"] == "weak", f"浅刺应判 weak, got {sp2.get('spring_strength')}"
+    assert "刺穿过浅" in sp2["spring_strength_note"] or "噪音" in sp2["spring_strength_note"]
 
 
 # ── 10. Ordinary Spring：标准刺穿，深度/量/收回未同时达 strong ───────────────
@@ -256,6 +266,37 @@ def test_strength_grading_without_tr_ctx_no_crash():
     assert "spring_strength" in sp, "不带 tr_ctx 也应含 spring_strength 字段"
     ut = we._detect_upthrust(bars)
     assert "upthrust_strength" in ut
+
+
+def test_st_rejects_fake_spring_without_reclaim():
+    """P1-1：仅刺穿未收回（非 _detect_spring）不得锚 ST。"""
+    bars = build_flat_tr(n=40, with_spikes=False)
+    tr = we._detect_trading_range(bars)
+    assert tr is not None
+    lo = float(tr["tr_lower"])
+    # 假「刺穿」：low 破下沿但收盘不收回 → 非 Spring
+    bars.append(mk(lo + 0.1, lo + 0.15, lo - 0.3, lo - 0.1, 1_200_000))
+    # 后续缩量回踩区（若误锚会误亮 ST）
+    for _ in range(5):
+        bars.append(mk(lo + 0.05, lo + 0.1, lo + 0.01, lo + 0.05, 400_000))
+    tr2 = we._detect_trading_range(bars) or tr
+    assert we._detect_spring(bars[: len(bars) - 5], tr_ctx=tr2).get("spring_signal") is False
+    st = we._detect_st(bars, tr_ctx=tr2)
+    assert st.get("st_signal") is False, f"假刺穿不得触发 ST: {st}"
+
+
+def test_volume_divergence_not_both_true():
+    """P2-1：同窗不得同时 bullish+bearish。"""
+    # 先涨后跌且后半缩量 → 至多一侧
+    bars = []
+    for i in range(5):
+        c = 10.0 + i * 0.5
+        bars.append(mk(c - 0.1, c + 0.2, c - 0.2, c, 1_000_000))
+    for i in range(5):
+        c = 12.0 - i * 0.6
+        bars.append(mk(c + 0.1, c + 0.2, c - 0.3, c, 500_000))
+    bearish, bullish = we._detect_volume_divergence(bars)
+    assert not (bearish and bullish), f"双亮非法: bearish={bearish} bullish={bullish}"
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -597,6 +638,15 @@ def test_phase_ut_trend_rally_is_distribution_d():
     assert ph["phase"] == "distribution_d"
 
 
+def test_phase_bare_ut_with_b_is_distribution_c():
+    """P1-3：压缩作派发 B 的裸 UT → distribution_c（测试）；BC+ARE 仍先到 A。"""
+    b = _super_flat(50)
+    ph = _ph(b, _sig(upthrust_signal=True, compression_signal=True))
+    assert ph.get("upthrust_premature") is False
+    assert ph["phase"] == "distribution_c"
+    assert "测试" in ph.get("phase_label", "") or "UT" in ph.get("phase_label", "")
+
+
 def test_phase_spring_ut_both_isolated():
     """Spring+UT 双孤立（都缺 B 背景）→ 都判过早, phase=none"""
     b = _super_flat(50)
@@ -796,16 +846,35 @@ def test_tr_quality_score_adjustment():
 
 
 def test_weak_spring_half_score():
-    """弱弹簧（缩量无承接）打分减半，与 premature 同级。"""
+    """弱弹簧（浅刺噪音）打分减半；缩量 ordinary 不减半。"""
     b = _flat(30)
     s_norm = calculate_wyckoff_score(b, analysis=_fa_spring(tr_quality=0.5, spring_premature=False))
     weak = _fa_spring(tr_quality=0.5, spring_premature=False)
     weak["spring_strength"] = "weak"
-    weak["spring_vol_class"] = "low_vol_confirm"
+    weak["spring_vol_class"] = "normal"
     s_weak = calculate_wyckoff_score(b, analysis=weak)
     assert s_norm["raw"] > s_weak["raw"], "弱弹簧 raw 应更低"
     assert s_weak["raw"] == 12, f"弱弹簧 raw 应为 12 (25//2)，实得 {s_weak['raw']}"
     assert any("弱" in s or "降权" in s for s in s_weak["signals"])
+
+    low_vol = _fa_spring(tr_quality=0.5, spring_premature=False)
+    low_vol["spring_strength"] = "ordinary"
+    low_vol["spring_vol_class"] = "low_vol_confirm"
+    s_lv = calculate_wyckoff_score(b, analysis=low_vol)
+    assert s_lv["raw"] == s_norm["raw"], "缩量 ordinary 应全分，不得因 low_vol 降权"
+
+
+def test_weak_upthrust_half_score():
+    """P1-4：UT weak 打分绝对值减半。"""
+    b = _flat(30)
+    u_norm = calculate_wyckoff_score(b, analysis=_fa_upthrust(tr_quality=0.5, upthrust_premature=False))
+    weak = _fa_upthrust(tr_quality=0.5, upthrust_premature=False)
+    weak["upthrust_strength"] = "weak"
+    u_weak = calculate_wyckoff_score(b, analysis=weak)
+    assert u_norm["raw"] > u_weak["raw"] or abs(u_weak["raw"]) < abs(u_norm["raw"])
+    # UT 基分 -20 → weak -10；tr_quality=0.5 无调整
+    assert u_weak["raw"] == -10, f"弱 UT raw 应为 -10，实得 {u_weak['raw']}"
+    assert any("弱" in s or "降权" in s for s in u_weak["signals"])
 
 
 def test_spring_premature_half_score():
