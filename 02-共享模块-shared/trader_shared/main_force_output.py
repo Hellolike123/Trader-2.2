@@ -76,6 +76,7 @@ def format_main_force_score_section(result: dict[str, Any], score_result: dict[s
             "💰 主力行为",
             f"阶段：{stage_cn} ｜ 综合 {total}/10（{label}）",
             f"  资金 {flow}/4 ｜ 筹码 {chip}/3 ｜ 大单 {order}/3",
+            "  注：≥9强势 · ≥6参与 · ≥3观望 · <3撤离",
         ]
 
         if signals:

@@ -251,7 +251,10 @@ def _score_order(big_order: dict[str, Any]) -> int:
 # ── 等级标签 ─────────────────────────────────────────────────────
 
 def _score_to_label(total: int) -> str:
-    """总分 0-10 → 等级标签。"""
+    """总分 0-10 → 等级标签。
+
+    档位（面板注）：≥9 强势 · ≥6 参与 · ≥3 观望 · <3 撤离
+    """
     if total >= 9:
         return "🟢主力强势"
     elif total >= 6:

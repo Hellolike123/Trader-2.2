@@ -256,12 +256,22 @@ def _short_fund_display(
         if mf_total_i > 10:
             mf_total_i = int(round(mf_total_i * 10 / 15))
         mf_total_i = max(0, min(10, mf_total_i))
-        short_lbl = ""
-        for k in ("偏强", "偏弱", "很强", "很弱", "强", "弱"):
-            if k in mf_label:
-                short_lbl = k
+        # 档位：≥9强势 ≥6参与 ≥3观望 <3撤离（与 main_force_scoring 一致）
+        if mf_total_i >= 9:
+            tier = "强势"
+        elif mf_total_i >= 6:
+            tier = "参与"
+        elif mf_total_i >= 3:
+            tier = "观望"
+        else:
+            tier = "撤离"
+        # 若上游 label 已带档位词，优先用清洗后的
+        clean = re.sub(r"[🟢🟡🟠🔴]", "", mf_label)
+        for k in ("强势", "参与", "观望", "撤离"):
+            if k in clean:
+                tier = k
                 break
-        extras.append(f"主力{mf_total_i}/10" + (f"·{short_lbl}" if short_lbl else ""))
+        extras.append(f"主力{mf_total_i}/10·{tier}")
 
     # 大单：优先短方向，其次 summary 压短
     bo_dir = str(big_order_direction or "").strip()
