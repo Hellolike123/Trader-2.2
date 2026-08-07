@@ -104,8 +104,13 @@ raw bars
 - 向下段：特征序列（向上笔）的 `high` 突破段起点 `high` → 段破坏
 - 护栏：段内累计笔数 ≥ `min_strokes` 且破坏后剩余笔数 ≥ `min_strokes`，避免单笔
   噪声造成新段不足 3 笔
-- 段起点取段首笔极值（唯一，不随段内延伸更新）；破坏后从破坏笔前一笔闭合当前段，
-  以破坏笔起新反向段，重置特征序列与段起点极值
+- 段起点取段首笔极值（唯一，不随段内延伸更新）；破坏后从破坏笔前一笔（共用转折笔
+  `i-1`）闭合当前段，触发笔 `i` 纳入新反向段（新段起点即 `i-1`），重置特征序列与段起点极值
+
+**§3.7 三分型尾部护栏（2026-08-08 合同对齐）**：三分型终结与 §3.6 第二类破坏共用
+“剩余笔数 ≥ `min_strokes`”护栏。切点统一为 `end_idx = i - 1`（共用转折笔；触发笔
+`i` 纳入新反向段，新段起点即 `i-1`）；若 `len(strokes) - i < min_strokes`（尾部不足），三分型**不切、
+不丢尾段**，整段连同尾部一起收尾输出。
 
 ---
 
@@ -126,7 +131,8 @@ raw bars
 → 上涨/下跌趋势；连接段非反向 → **降为盘整（假趋势，§9.2 / §9.4；`structure_type` 仍写「盘整」，
 不发明「假趋势」主状态）**；重叠/混乱 → 盘整；单中枢 → 盘整；
 无中枢且有线段 → **无结构**（§11A，不谎报盘整）/ 单边启发式。段数只调 `structure_confidence`，不决定主状态。
-权威细则仍以 **§9** 为准；实现：`_connector_is_non_reverse` + classify / `_strict_*_trend_zones`。
+**趋势判定只取最后两个合并中枢（§9.4）**，前面中枢对不再降级；权威细则仍以 **§9** 为准；
+实现：`_connector_is_non_reverse` + classify / `_strict_*_trend_zones`。
 
 ---
 
@@ -201,6 +207,11 @@ raw bars
   **不用** sticky observe leave 升格正式二类。
 - **三类买/卖**：离开中枢后回抽不入（末 3 笔内）；现价相对 ZG/ZD 离开幅度 **≤15%**
   （买卖对称；超过则视为陈旧中枢，不报三买/三卖）；量能 ≥ 近20均量 ×1.2（不足放行）
+- **二类买/卖 Trend filter（工程风控，2026-08-08 合同化）**：用**确认前窗口**
+  `closes[-10:-5]` / `closes[-15:-5]` / `closes[-25:-5]`（后移 5 根，排除当前信号 bar）；
+  买侧最后 5 根收盘全部低于该窗口均量、卖侧全部高于该窗口均量时，`_check_macd_for_2nd_buy/sell`
+  判否。注意这不是独立硬闸：正式二类买/卖还会走面积力度 OR 旁路
+  （`force_ok = area_ok or macd_divergence_ok`），Trend filter 只在它作为唯一力度来源时生效。
 
 实现辅助：`_strict_down_trend_zones` / `_strict_up_trend_zones`、
 `_leave_reference_zone` / `_stroke_leaves_zone_observe`、
@@ -245,6 +256,8 @@ raw bars
 - **操作化**：时间窗 `(prev_zone 末 end_index, curr_zone 首 start_index)`；窗内 segments（优先）或 strokes
   无一 `direction==reverse` → 假趋势。不发明幅度阈值。
 - **一类 / divergence kind=trend**：与 classify 同拓扑（传 strokes/segments 时不可在假趋势上开火）。
+- **§9.4 口径（2026-08-08）**：连接段非反向判定**仅查最后两中枢**那一对，前面中枢对
+  不再降级；classify 与 `_strict_*_trend_zones` 同口径。
 
 ---
 
@@ -342,6 +355,13 @@ raw bars
 
 ### 复测结论
 - 30 只跨行业离线 CSV，A+B 后 **30/30 共识（100%）**；其余 25 只结构类型零回归。
+
+## 11A. 0 中枢单边启发式（_detect_unilateral）
+
+0 中枢时按原典不谎报盘整，先判单边再落「无结构」（§4.3 / §9.4）：
+- 前置：`len(strokes) >= 6`
+- 相邻笔对价格重叠占比 `<= 0.4`（即 >60% 笔对无重叠）才允许判单边
+- 方向：末笔中点 / 首笔中点 `> 1.05` → 单边上涨；`< 0.95` → 单边下跌；否则 None → 无结构
 
 ---
 

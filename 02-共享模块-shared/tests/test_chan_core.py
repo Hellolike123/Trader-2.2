@@ -27,10 +27,12 @@ from trader_shared.chan_core import (
     chanlun_analysis,
     chanlun_strategy,
     unwrap_chan,
+    resolve_chanlun_primary,
     _check_macd_for_2nd_buy,
     _stroke_macd_area,
     _stroke_force_weaker,
     _stroke_force_not_much_stronger,
+    format_chanlun_theory_line,
     _aggregate_bars,
     _higher_level_trend,
     _merge_zones,
@@ -1439,6 +1441,7 @@ class TestBuildSegments:
 
         特征序列（向下笔）不互相包含（middle 整体低于左右，故不被包含处理吞掉）：
         left(h=20,l=15) / mid(h=18,l=12 最低 low 且最低 high) / right(h=19,l=14) → 标准双侧底分型。
+        §3.7 尾部护栏：触发笔后剩余 >=3 笔才切，故补足 9 笔。
         """
         strokes = [
             {"direction": "up",   "start_price": 10, "end_price": 20},  # 0
@@ -1448,6 +1451,8 @@ class TestBuildSegments:
             {"direction": "up",   "start_price": 12, "end_price": 22},  # 4
             {"direction": "down", "start_price": 19, "end_price": 14},  # 5 char right → 底分型终结
             {"direction": "up",   "start_price": 14, "end_price": 18},  # 6 新段
+            {"direction": "down", "start_price": 18, "end_price": 12},  # 7 新段
+            {"direction": "up",   "start_price": 12, "end_price": 16},  # 8 新段收尾
         ]
         segs = build_segments(strokes, min_strokes=3)
         assert len(segs) >= 2
@@ -1572,7 +1577,8 @@ class TestBuildSegmentsFollowups:
     """A-2 缠论合规 + B-01 健壮性 + P-01/P-02 性能/不变量的补充测试。"""
 
     # ---- 暴力参考实现：与 build_segments 同一套分段决策，但段 high/low 用 O(n) 重算 ----
-    # （逐字复刻旧逻辑），用于性质测试锁定 P-01 增量维护结果与旧 O(n) 重算字节级一致。
+    # （逐字复刻分段决策，含 §3.7 三分型尾部护栏），用于性质测试锁定 P-01 增量维护
+    # 结果与 O(n) 重算字节级一致。
     @staticmethod
     def _brute_force_segments(strokes, min_strokes=3):
         if len(strokes) < min_strokes:
@@ -1651,7 +1657,8 @@ class TestBuildSegmentsFollowups:
                     if len(char_seq) >= 3:
                         left, mid, right = char_seq[-3], char_seq[-2], char_seq[-1]
                         if (mid["low"] < left["low"] and mid["low"] < right["low"]
-                                and mid["high"] < left["high"] and mid["high"] < right["high"]):
+                                and mid["high"] < left["high"] and mid["high"] < right["high"]
+                                and (len(strokes) - i) >= min_strokes):
                             end_idx = i - 1
                             seg_strokes = strokes[seg_start:end_idx + 1]
                             start_p, end_p, seg_high, seg_low = _segment_range("up", seg_strokes)
@@ -1681,7 +1688,8 @@ class TestBuildSegmentsFollowups:
                     if len(char_seq) >= 3:
                         left, mid, right = char_seq[-3], char_seq[-2], char_seq[-1]
                         if (mid["high"] > left["high"] and mid["high"] > right["high"]
-                                and mid["low"] > left["low"] and mid["low"] > right["low"]):
+                                and mid["low"] > left["low"] and mid["low"] > right["low"]
+                                and (len(strokes) - i) >= min_strokes):
                             end_idx = i - 1
                             seg_strokes = strokes[seg_start:end_idx + 1]
                             start_p, end_p, seg_high, seg_low = _segment_range("down", seg_strokes)
@@ -1733,7 +1741,10 @@ class TestBuildSegmentsFollowups:
         assert segs[0]["direction"] == "up"
 
     def test_a2_bilateral_bottom_terminates(self):
-        """标准双侧底分型（mid.low 最低 且 mid.high 最低，整体低于左右）应终结。"""
+        """标准双侧底分型（mid.low 最低 且 mid.high 最低，整体低于左右）应终结。
+
+        §3.7：触发笔后剩余 >=3 笔才切，故补足 9 笔。
+        """
         strokes = [
             {"direction": "up",   "start_price": 10, "end_price": 20},
             {"direction": "down", "start_price": 20, "end_price": 15},  # left  h20 l15
@@ -1742,6 +1753,8 @@ class TestBuildSegmentsFollowups:
             {"direction": "up",   "start_price": 12, "end_price": 22},
             {"direction": "down", "start_price": 18, "end_price": 14},  # right h18 l14
             {"direction": "up",   "start_price": 14, "end_price": 18},
+            {"direction": "down", "start_price": 18, "end_price": 12},
+            {"direction": "up",   "start_price": 12, "end_price": 16},
         ]
         segs = build_segments(strokes, min_strokes=3)
         assert len(segs) >= 2
@@ -1764,7 +1777,10 @@ class TestBuildSegmentsFollowups:
         assert segs[0]["direction"] == "down"
 
     def test_a2_bilateral_top_terminates(self):
-        """标准双侧顶分型（mid.high 最高 且 mid.low 最高，整体高于左右）应终结。"""
+        """标准双侧顶分型（mid.high 最高 且 mid.low 最高，整体高于左右）应终结。
+
+        §3.7：触发笔后剩余 >=3 笔才切，故补足 9 笔。
+        """
         strokes = [
             {"direction": "down", "start_price": 20, "end_price": 10},
             {"direction": "up",   "start_price": 10, "end_price": 15},  # left  h15 l10
@@ -1773,6 +1789,8 @@ class TestBuildSegmentsFollowups:
             {"direction": "down", "start_price": 18, "end_price": 9},
             {"direction": "up",   "start_price": 12, "end_price": 16},  # right h16 l12
             {"direction": "down", "start_price": 16, "end_price": 9},
+            {"direction": "up",   "start_price": 9,  "end_price": 14},
+            {"direction": "down", "start_price": 14, "end_price": 10},
         ]
         segs = build_segments(strokes, min_strokes=3)
         assert len(segs) >= 2
@@ -1791,7 +1809,7 @@ class TestBuildSegmentsFollowups:
             {"direction": "down", "start_price": 19, "end_price": 14},
             {"direction": "up",   "start_price": 14, "end_price": 18},
         ]
-        # 双侧（mid.high 最低）→ 干净三分型 → 2 段
+        # 双侧（mid.high 最低）→ 干净三分型 → 2 段（§3.7：触发后剩余 >=3 笔）
         bilateral = [
             {"direction": "up",   "start_price": 10, "end_price": 20},
             {"direction": "down", "start_price": 20, "end_price": 15},
@@ -1800,6 +1818,8 @@ class TestBuildSegmentsFollowups:
             {"direction": "up",   "start_price": 12, "end_price": 22},
             {"direction": "down", "start_price": 18, "end_price": 14},
             {"direction": "up",   "start_price": 14, "end_price": 18},
+            {"direction": "down", "start_price": 18, "end_price": 12},
+            {"direction": "up",   "start_price": 12, "end_price": 16},
         ]
         assert len(build_segments(unilateral, min_strokes=3)) < len(build_segments(bilateral, min_strokes=3))
 
@@ -1919,6 +1939,55 @@ class TestBuildSegmentsFollowups:
                 assert sg["start_price"] == sp
                 assert sg["end_price"] == ep
 
+    def test_three_fractal_tail_insufficient_keeps_one_segment_no_loss(self):
+        """§3.7：6 笔三分型触发但尾部不足 min_strokes → 不切、不丢尾段。"""
+        prices = [
+            (10.0, 20.0, "up"),
+            (20.0, 15.0, "down"),
+            (15.0, 25.0, "up"),
+            (17.0, 12.0, "down"),
+            (12.0, 22.0, "up"),
+            (18.0, 14.0, "down"),  # 三分型触发笔，但 len-i=1 < 3
+        ]
+        strokes = [
+            {"direction": d, "start_price": s, "end_price": e,
+             "start_index": i * 3, "end_index": i * 3 + 3,
+             "power_price": abs(e - s), "length": 3}
+            for i, (s, e, d) in enumerate(prices)
+        ]
+        segs = build_segments(strokes, min_strokes=3)
+        assert len(segs) == 1
+        assert segs[0]["strokes_count"] == 6
+        assert segs[0]["end_index"] == 5
+
+    def test_three_fractal_tail_sufficient_cuts(self):
+        """§3.7：9 笔三分型触发且尾部剩余 >=3 → 正常切段（共用转折笔）。"""
+        prices = [
+            (10.0, 20.0, "up"),
+            (20.0, 15.0, "down"),
+            (15.0, 25.0, "up"),
+            (17.0, 12.0, "down"),
+            (12.0, 22.0, "up"),
+            (18.0, 14.0, "down"),  # 三分型触发笔，len-i=4 >= 3
+            (14.0, 24.0, "up"),
+            (24.0, 19.0, "down"),
+            (19.0, 23.0, "up"),    # 末笔未创片段新高，不触发 §3.5b 并回
+        ]
+        strokes = [
+            {"direction": d, "start_price": s, "end_price": e,
+             "start_index": i * 3, "end_index": i * 3 + 3,
+             "power_price": abs(e - s), "length": 3}
+            for i, (s, e, d) in enumerate(prices)
+        ]
+        segs = build_segments(strokes, min_strokes=3)
+        assert len(segs) == 2
+        assert segs[0]["direction"] == "up"
+        assert segs[0]["end_index"] == 4
+        assert segs[0]["strokes_count"] == 5
+        assert segs[1]["direction"] == "down"
+        assert segs[1]["start_index"] == 4
+        assert segs[1]["end_index"] == 8
+        assert segs[1]["strokes_count"] == 5
 
     def test_huagong_weekly_bug_r_cuts_down_then_up(self):
         """华工周线形：Bug R（§3.6）修复后，第 9 笔 up 高点 50.08 突破 down 段
@@ -2318,7 +2387,7 @@ class TestFakeTrendDemotion:
         assert _strict_down_trend_zones(zones, strokes=strokes_rev) is True
 
     def test_strict_matches_classify_on_earlier_non_reverse_pair(self):
-        """3 中枢：前对连接非反向、末对反向 → classify 盘整且 _strict_* False（防一类漏点）。"""
+        """§9.4：3 中枢前对连接非反向、末对反向 → 只看末对 → 上涨趋势。"""
         zones = [
             self._zone_with_span(15.0, 20.0, 0, 10),
             self._zone_with_span(25.0, 30.0, 20, 30),
@@ -2333,9 +2402,28 @@ class TestFakeTrendDemotion:
         ]
         strokes = self._make_indexed_strokes(60)
         result = classify_structure(zones, segments=segs, strokes=strokes)
+        assert result["structure_type"] == "上涨趋势"
+        assert "假趋势" not in result.get("structure_evidence", "")
+        # §9.4：只查末对（Z1–Z2 反向），前对（Z0–Z1 非反向）不再降级
+        assert _strict_up_trend_zones(zones, segments=segs, strokes=strokes) is True
+
+    def test_last_pair_overlap_is_consolidation(self):
+        """§9.4：3 中枢前对干净、末对重叠 → 末两中枢重叠 → 盘整。"""
+        zones = [
+            self._zone_with_span(15.0, 20.0, 0, 10),
+            self._zone_with_span(25.0, 30.0, 20, 30),
+            self._zone_with_span(24.0, 28.0, 40, 50),  # 与 Z1 重叠
+        ]
+        segs = [
+            {"direction": "up", "start_index": 11, "end_index": 13},
+            {"direction": "down", "start_index": 14, "end_index": 17},  # Z0–Z1 反向
+            {"direction": "up", "start_index": 31, "end_index": 33},
+            {"direction": "down", "start_index": 34, "end_index": 37},  # Z1–Z2 窗内反向
+            {"direction": "up", "start_index": 38, "end_index": 39},
+        ]
+        strokes = self._make_indexed_strokes(60)
+        result = classify_structure(zones, segments=segs, strokes=strokes)
         assert result["structure_type"] == "盘整"
-        assert "假趋势" in result.get("structure_evidence", "")
-        # 若只查末对会误 True；须与 classify 同链 demote
         assert _strict_up_trend_zones(zones, segments=segs, strokes=strokes) is False
 
     @staticmethod
@@ -2408,6 +2496,59 @@ class TestChanlunAnalysisIntegration:
         assert isinstance(result["merged_zones"], list)
         assert "pivot_count" in result
         assert isinstance(result["pivot_count"], int)
+
+
+class TestTheoryLineDirectionUnified:
+    """format_chanlun_theory_line 与 resolve_chanlun_primary 方向同源（正式点优先于背驰）。"""
+
+    def test_buy_beats_top_divergence(self):
+        chan = {
+            "timeframe": "daily",
+            "data_ok": True,
+            "structure_type": "盘整",
+            "structure_confidence": "high",
+            "trend_label": "拉升段",
+            "buy_points": [{"type": "一类买", "price": 10.0, "confidence": 3}],
+            "sell_points": [],
+            "divergence": {
+                "top_divergence": True,
+                "bottom_divergence": False,
+                "top_kind": "trend",
+                "bottom_kind": "none",
+                "kind": "trend",
+            },
+        }
+        prim = resolve_chanlun_primary(chan)
+        assert prim["type_short"] == "一买"
+        assert prim["direction"] == 1
+        line = format_chanlun_theory_line(chan)
+        assert "看涨" in line
+        assert "看跌" not in line
+
+    def test_second_buy_beats_top_divergence(self):
+        """二类买 + 顶背驰 → 正式买点优先，primary/theory 都看涨。"""
+        chan = {
+            "timeframe": "daily",
+            "data_ok": True,
+            "structure_type": "上涨趋势",
+            "structure_confidence": "high",
+            "trend_label": "拉升段",
+            "buy_points": [{"type": "二类买", "price": 10.0, "confidence": 3}],
+            "sell_points": [],
+            "divergence": {
+                "top_divergence": True,
+                "bottom_divergence": False,
+                "top_kind": "trend",
+                "bottom_kind": "none",
+                "kind": "trend",
+            },
+        }
+        prim = resolve_chanlun_primary(chan)
+        assert prim["type_short"] == "二买"
+        assert prim["direction"] == 1
+        line = format_chanlun_theory_line(chan)
+        assert "看涨" in line
+        assert "看跌" not in line
 
 
 class TestAggregateBars:

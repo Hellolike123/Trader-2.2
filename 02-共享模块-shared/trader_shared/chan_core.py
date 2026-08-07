@@ -802,32 +802,10 @@ def format_chanlun_theory_line(chan_result: Any) -> str:
         if conf == "low":
             main = f"{st}(段偏少)"
 
-    # 方向：买卖点/背驰/trend_label（与 fusion 优先级类似，但只出多空标签）
-    buy_points = chan.get("buy_points") if isinstance(chan.get("buy_points"), list) else []
-    sell_points = chan.get("sell_points") if isinstance(chan.get("sell_points"), list) else []
-    divergence = chan.get("divergence") if isinstance(chan.get("divergence"), dict) else {}
-    trend_label = str(chan.get("trend_label") or "")
-
-    direction = 0
-    # 卖优先（含类一卖弱确认），对齐 fusion
-    if any(
-        isinstance(p, dict) and p.get("type") in ("一类卖", "类一卖", "类二卖", "二类卖", "三类卖")
-        for p in sell_points
-    ):
-        direction = -1
-    elif divergence.get("top_divergence"):
-        direction = -1
-    elif any(
-        isinstance(p, dict) and p.get("type") in ("一类买", "类一买", "二类买", "三类买", "类二买")
-        for p in buy_points
-    ):
-        direction = 1
-    elif divergence.get("bottom_divergence"):
-        direction = 1
-    elif "上涨" in trend_label or "多" in trend_label:
-        direction = 1
-    elif "下跌" in trend_label or "空" in trend_label:
-        direction = -1
+    # 方向单一来源：复用 resolve_chanlun_primary（正式买卖点优先于背驰，卖优先）。
+    # 保留本行的结构主文案，只让方向与短线/中线定论走同一优先级，避免同一结果打架。
+    _prim = resolve_chanlun_primary(chan_result)
+    direction = int(_prim.get("direction") or 0)
 
     if direction > 0:
         dir_label = "看涨"
@@ -940,13 +918,11 @@ def resolve_chanlun_primary(chan_result: Any = None) -> dict[str, Any]:
 
     best_buy = _best(buy_points, _BUY_RANK_DISP)
 
+    # 正式/观察买点统一优先于顶背驰（2026-08-08 合同：买卖点 > 背驰）。
+    # 卖点已在上面优先处理；此处避免「二类买 + 顶背驰」同结果方向打架。
     if best_buy is not None and best_buy.get("type") == "一类买":
         return _pack("point", "一类买", "一买", "底背驰", 1, best_buy, True)
 
-    if divergence.get("top_divergence"):
-        return _pack("divergence", "顶背驰", "顶背驰", "上攻乏力", -1, None, True)
-
-    # 类一买：对齐 fusion_classic_mappers（顶背驰之后、类二买之前）
     if best_buy is not None and best_buy.get("type") == "类一买":
         return _pack(
             "point",
@@ -972,6 +948,9 @@ def resolve_chanlun_primary(chan_result: Any = None) -> dict[str, Any]:
             best_buy,
             True,
         )
+
+    if divergence.get("top_divergence"):
+        return _pack("divergence", "顶背驰", "顶背驰", "上攻乏力", -1, None, True)
 
     if divergence.get("bottom_divergence"):
         return _pack("divergence", "底背驰", "底背驰", "抛压减轻", 1, None, True)

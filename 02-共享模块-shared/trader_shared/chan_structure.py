@@ -118,10 +118,11 @@ def classify_structure(
     - strokes < 3 → 无结构
     - 0 个合并中枢 → 单边 / 无结构（原典：0 中枢即无结构，不谎报盘整；§11A）
     - 1 个合并中枢 → 盘整
-    - 2+ 同向不重叠中枢 + 连接段为反向 → 上涨趋势 / 下跌趋势（即使段数只有 4～6）
-    - 2+ 同向不重叠但连接段非反向（夹同向小中枢）→ 盘整（假趋势，§9.2/§9.4；
+    - 2+ 同向不重叠中枢 + 连接段为反向 → 上涨趋势 / 下跌趋势（§9.4：只取最后两个
+      中枢 A/B 判定，前面中枢对不再降级）
+    - 最后一对同向不重叠但连接段非反向（夹同向小中枢）→ 盘整（假趋势，§9.2/§9.4；
       不发明 structure_type=假趋势）
-    - 2+ 重叠/方向混乱 → 盘整
+    - 最后一对重叠/高低交叉 → 盘整
 
     主状态 structure_type 仅允许：
     无结构 / 单边上涨 / 单边下跌 / 盘整 / 上涨趋势 / 下跌趋势
@@ -160,49 +161,35 @@ def classify_structure(
         return _ok("无结构")
 
     # 判断中枢方向关系（拓扑：同向不重叠→趋势，重叠→盘整）
-    # formulas.md §4.3 / §9.2：同向不重叠且连接段为反向 → 趋势；连接段非反向 → 假趋势降盘整
-    pair_direction: str | None = None
-    zones_trend = "盘整"
-    for i in range(1, len(valid_zones)):
-        prev = valid_zones[i - 1]
-        curr = valid_zones[i]
-        if curr["zh_bottom"] > prev["zh_top"]:
-            this_dir = "up"
-        elif curr["zh_top"] < prev["zh_bottom"]:
-            this_dir = "down"
-        else:
-            zones_trend = "盘整"
-            break
-        if pair_direction is not None and this_dir != pair_direction:
-            zones_trend = "盘整"
-            break
-        pair_direction = this_dir
-        zones_trend = "上涨趋势" if this_dir == "up" else "下跌趋势"
-
-    # 1 个中枢：有中枢即盘整
+    # formulas.md §4.3 / §9.4：只取最后两个中枢 A（前）、B（后）判定趋势；
+    # 连接段非反向（假趋势）仅查最后一对；前面中枢对不再降级。
     if len(valid_zones) == 1:
         return _ok("盘整")
 
-    # 2+ 同向不重叠中枢 → 趋势；但 §9.1/§9.2/§9.4：任一对连接段非反向 → 降为盘整（假趋势）
+    zones_trend = "盘整"
+    pair_dir: str | None = None
+    prev, curr = valid_zones[-2], valid_zones[-1]
+    if curr["zh_bottom"] > prev["zh_top"]:
+        pair_dir = "up"
+        zones_trend = "上涨趋势"
+    elif curr["zh_top"] < prev["zh_bottom"]:
+        pair_dir = "down"
+        zones_trend = "下跌趋势"
+
+    # 最后一对同向不重叠 → 趋势；连接段非反向 → 降为盘整（假趋势）
     # structure_type 仍只写「盘整」，不发明「假趋势」主状态
     if zones_trend in ("上涨趋势", "下跌趋势"):
-        pair_dir = "up" if zones_trend == "上涨趋势" else "down"
-        for i in range(1, len(valid_zones)):
-            if _connector_is_non_reverse(
-                valid_zones[i - 1],
-                valid_zones[i],
-                pair_dir,
-                segments=segments,
-                strokes=strokes,
-            ):
-                out = _ok("盘整")
-                out["structure_evidence"] = (
-                    f"{out['structure_evidence']},假趋势(连接段非反向·§9.2)"
-                )
-                return out
+        if _connector_is_non_reverse(
+            prev, curr, pair_dir, segments=segments, strokes=strokes
+        ):
+            out = _ok("盘整")
+            out["structure_evidence"] = (
+                f"{out['structure_evidence']},假趋势(连接段非反向·§9.2)"
+            )
+            return out
         return _ok(zones_trend)
 
-    # 2+ 重叠/混乱 → 盘整
+    # 末对重叠/高低交叉 → 盘整
     return _ok("盘整")
 
 def _stroke_macd_area(bars: list[dict] | None, stroke: dict, side: str) -> float | None:
@@ -387,7 +374,9 @@ def _check_macd_for_2nd_buy(
     Condition A: 笔级 MACD 负面积，后笔力度不显著强于前笔
     Condition B: 近端柱状恢复（绿柱回升）
     Condition C: 成交量缩量（回踩时量缩，代表抛压枯竭）
-    工程风控：MA 空头排列硬过滤
+    工程风控：Trend filter 用确认前窗口（closes[-10:-5] / [-15:-5] / [-25:-5]，
+    后移 5 根排除信号 bar；最后 5 根收盘全部低于该窗口均量则判否）。
+    非独立硬闸：正式二类买还走面积 OR 旁路（area_ok or macd_divergence_ok）。
     """
     if not bars or not strokes:
         return False
@@ -423,7 +412,8 @@ def _check_macd_for_2nd_buy(
     # 回踩笔（第二段 down）的均量 < 第一段 down 的均量
     condition_c = _volume_shrink_between_strokes(bars, down_strokes[-2], down_strokes[-1])
 
-    # Trend filter: reject 2nd buy in strong bearish alignment
+    # Trend filter（确认前窗口，排除信号 bar）：最后 5 根收盘全部低于
+    # closes[-10:-5] / [-15:-5] / [-25:-5] 均量 → 强空头，拒绝二类买
     closes = [to_float(b.get("close")) for b in bars]
     closes = [c for c in closes if c is not None]
     if len(closes) >= 25:
@@ -444,7 +434,9 @@ def _check_macd_for_2nd_sell(
 
     Condition A: 最后两段 up 笔正面积，后笔力度不显著强于前笔
     Condition B: 近端红柱回落
-    工程风控：MA 多头排列硬过滤
+    工程风控：Trend filter 用确认前窗口（closes[-10:-5] / [-15:-5] / [-25:-5]，
+    后移 5 根排除信号 bar；最后 5 根收盘全部高于该窗口均量则判否）。
+    非独立硬闸：正式二类卖还走面积 OR 旁路（area_ok or macd_divergence_ok）。
     """
     if not bars or not strokes:
         return False
@@ -474,6 +466,8 @@ def _check_macd_for_2nd_sell(
     if not (condition_a or condition_b):
         return False
 
+    # Trend filter（确认前窗口，排除信号 bar）：最后 5 根收盘全部高于
+    # closes[-10:-5] / [-15:-5] / [-25:-5] 均量 → 强多头，拒绝二类卖
     closes = [to_float(b.get("close")) for b in bars]
     closes = [c for c in closes if c is not None]
     if len(closes) >= 25:
@@ -682,26 +676,23 @@ def _strict_down_trend_zones(
     segments: list[dict] | None = None,
     strokes: list[dict] | None = None,
 ) -> bool:
-    """下跌趋势：≥2 中枢且整链严格下移不重叠（与 classify 拓扑一致）。
+    """下跌趋势：≥2 中枢且最后一对严格下移不重叠、连接段反向。
 
-    formulas.md §6 / §9.1–§9.4：一类拓扑与 classify 一致——全部相邻同向不重叠，
-    且任一对连接段须为反向；夹同向小中枢（连接段非反向）→ False。
+    formulas.md §6 / §9.1–§9.4：一类拓扑与 classify 一致——只取最后两个中枢判定，
+    末对连接段非反向（夹同向小中枢）→ False；前面中枢对不参与降级。
     未传 segments/strokes 或索引缺失时跳过连接检查（保持旧裸区行为）。
     """
     if len(valid_zones) < 2:
         return False
-    for i in range(1, len(valid_zones)):
-        prev, curr = valid_zones[i - 1], valid_zones[i]
-        try:
-            if not (float(curr["zh_top"]) < float(prev["zh_bottom"])):
-                return False
-        except (TypeError, ValueError, KeyError):
+    prev, curr = valid_zones[-2], valid_zones[-1]
+    try:
+        if not (float(curr["zh_top"]) < float(prev["zh_bottom"])):
             return False
-        if _connector_is_non_reverse(
-            prev, curr, "down", segments=segments, strokes=strokes
-        ):
-            return False
-    return True
+    except (TypeError, ValueError, KeyError):
+        return False
+    return not _connector_is_non_reverse(
+        prev, curr, "down", segments=segments, strokes=strokes
+    )
 
 
 def _strict_up_trend_zones(
@@ -709,24 +700,21 @@ def _strict_up_trend_zones(
     segments: list[dict] | None = None,
     strokes: list[dict] | None = None,
 ) -> bool:
-    """上涨趋势：≥2 中枢且整链严格上移不重叠。
+    """上涨趋势：≥2 中枢且最后一对严格上移不重叠、连接段反向。
 
-    同 `_strict_down_trend_zones`：§9 连接段须反向，否则非一类趋势拓扑。
+    同 `_strict_down_trend_zones`：§9.4 只取最后两中枢，末对连接段须反向。
     """
     if len(valid_zones) < 2:
         return False
-    for i in range(1, len(valid_zones)):
-        prev, curr = valid_zones[i - 1], valid_zones[i]
-        try:
-            if not (float(curr["zh_bottom"]) > float(prev["zh_top"])):
-                return False
-        except (TypeError, ValueError, KeyError):
+    prev, curr = valid_zones[-2], valid_zones[-1]
+    try:
+        if not (float(curr["zh_bottom"]) > float(prev["zh_top"])):
             return False
-        if _connector_is_non_reverse(
-            prev, curr, "up", segments=segments, strokes=strokes
-        ):
-            return False
-    return True
+    except (TypeError, ValueError, KeyError):
+        return False
+    return not _connector_is_non_reverse(
+        prev, curr, "up", segments=segments, strokes=strokes
+    )
 
 
 def _stroke_leaves_after_zone(
