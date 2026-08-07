@@ -673,8 +673,14 @@ def wyckoff_analysis(
     st = _detect_st(bars, tr_ctx=event_tr_ctx)
     spring_test = _spring_test_fields_from_st(st)
     lps = _detect_lps(bars, tr_ctx=event_tr_ctx)
-    lpsy = _detect_lpsy(bars, tr_ctx=event_tr_ctx)
-    # LPSY 门控与打分一致：无派发背景则不亮灯（避免展示吓人、分数不扣）
+    # G8：LPSY 检测器内建派发背景；此处透传 tip 灯 + 双保险门控
+    lpsy = _detect_lpsy(
+        bars,
+        tr_ctx=event_tr_ctx,
+        bc_signal=bool(bc.get("bc_signal")),
+        upthrust_signal=bool(upthrust.get("upthrust_signal")),
+        sow_signal=bool(sow.get("sow_signal")),
+    )
     _has_dist_bg = bool(bc.get("bc_signal") or upthrust.get("upthrust_signal") or sow.get("sow_signal"))
     if lpsy.get("lpsy_signal") and not _has_dist_bg:
         lpsy = {

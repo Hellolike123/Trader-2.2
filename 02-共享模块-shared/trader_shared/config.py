@@ -259,6 +259,10 @@ WYCKOFF_SOS_STALE_HOLD_RATIO: float = float(os.environ.get("WYCKOFF_SOS_STALE_HO
 WYCKOFF_SOS_STALE_MAX_AGE_NO_TR: int = int(os.environ.get("WYCKOFF_SOS_STALE_MAX_AGE_NO_TR", "8"))
 # G1 Ghost ST：ST 命中 bar 须近端，且之后无收盘有效破支撑
 WYCKOFF_ST_FRESH_BARS: int = int(os.environ.get("WYCKOFF_ST_FRESH_BARS", "8"))
+# G7：阶段机确认类事件（Spring/UT/SOS/LPS）滑窗近端；SC/AR/BC 结构锚仍用 PHASE_LOOKBACK
+WYCKOFF_PHASE_CONFIRM_FRESH_BARS: int = int(
+    os.environ.get("WYCKOFF_PHASE_CONFIRM_FRESH_BARS", "12")
+)
 
 # Compression 压缩蓄势参数
 WYCKOFF_COMPRESSION_LOOKBACK: int = 20          # 压缩检测回溯窗口

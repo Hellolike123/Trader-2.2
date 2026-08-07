@@ -2432,20 +2432,55 @@ def _detect_lps(bars: list[dict], tr_ctx: dict | None = None) -> dict:
 
     return {"lps_signal": False, "lps_reason": "未检测到有效 LPS（需 SOS→缩量回调）", "lps_price": None}
 
-def _detect_lpsy(bars: list[dict], tr_ctx: dict | None = None) -> dict:
+def _detect_lpsy(
+    bars: list[dict],
+    tr_ctx: dict | None = None,
+    *,
+    bc_signal: bool = False,
+    upthrust_signal: bool = False,
+    sow_signal: bool = False,
+    require_dist_bg: bool = True,
+) -> dict:
     """Detect LPSY (Last Point of Supply) — 派发末期反弹不过前高。
 
     对称于 LPS（最后支撑点），但方向相反：
-      - 检测到 UT/SOW 事件后（派发背景）
-      - 反弹 up 走势接近前高但未突破
+      - 须派发背景（BC/UT/SOW；G8 检测器内建，与 UTAD 同构）
+      - 反弹接近前高但未突破
       - 成交量萎缩（无需求跟进）
-      - 是 Markdown 前最后一次做多机会/最后逃命波
 
     Returns:
         dict with keys: lpsy_signal (bool), lpsy_reason (str), lpsy_price (float)
     """
     if len(bars) < 15:
         return {"lpsy_signal": False, "lpsy_reason": "数据不足", "lpsy_price": None}
+
+    # G8：派发背景闸（可显式注入；否则弱扫 tip BC/UT/SOW）
+    if require_dist_bg:
+        has_dist = bool(bc_signal or upthrust_signal or sow_signal)
+        if not has_dist and len(bars) >= 15:
+            try:
+                has_dist = bool(_detect_buying_climax(bars, tr_ctx=tr_ctx).get("bc_signal"))
+            except Exception:
+                has_dist = False
+            if not has_dist:
+                try:
+                    has_dist = bool(_detect_upthrust(bars, tr_ctx=tr_ctx).get("upthrust_signal"))
+                except Exception:
+                    pass
+            if not has_dist:
+                try:
+                    has_dist = bool(
+                        _detect_sign_of_weakness(bars, tr_ctx=tr_ctx).get("sow_signal")
+                    )
+                except Exception:
+                    pass
+        if not has_dist:
+            return {
+                "lpsy_signal": False,
+                "lpsy_reason": "无派发背景（BC/UT/SOW），LPSY 不成立",
+                "lpsy_price": None,
+                "lpsy_gated": True,
+            }
 
     # 阻力位：有 TR 上沿则用它（原典 LPSY = 反弹不过 TR 上沿；勿绑 in_tr）
     if tr_ctx is not None and tr_ctx.get("tr_upper") is not None:

@@ -404,6 +404,36 @@ def test_phase_st_tip_only_no_ghost_spring_test_d():
     assert ph["phase"] != "accumulation_d" or "Test" not in ph.get("phase_label", "")
 
 
+def test_lpsy_requires_dist_background_in_detector():
+    """G8：LPSY 检测器无 BC/UT/SOW 不得亮。"""
+    bars = [mk(10, 10.3, 9.8, 10.1, 1_000_000) for _ in range(20)]
+    bars.append(mk(10.2, 10.8, 10.1, 10.7, 2_000_000))
+    for i in range(5):
+        bars.append(mk(10.5 - i * 0.05, 10.6, 10.3, 10.45, 400_000))
+    bars.append(mk(10.4, 10.75, 10.35, 10.7, 300_000))
+    r = we._detect_lpsy(bars, require_dist_bg=True)
+    assert r.get("lpsy_signal") is False
+    assert r.get("lpsy_gated") is True or "派发背景" in (r.get("lpsy_reason") or "")
+
+
+def test_phase_old_spring_outside_fresh_not_c_without_signal():
+    """G7：仅远端历史可 Spring 形态、signals 无 spring → 不得钉 accumulation_c。"""
+    # 平坦底 + 很早一根 spring 形态，随后 25 根无 spring tip
+    bars = [mk(8.9, 9.2, 8.5, 8.9, 1_000_000) for _ in range(40)]
+    tr = we._detect_trading_range(bars)
+    lo = float(tr["tr_lower"]) if tr else 8.5
+    # 插入远端 spring 后继续横盘
+    early = bars[:20] + [mk(lo + 0.1, lo + 0.2, lo - 0.35, lo + 0.2, 600_000)] + bars[20:]
+    for _ in range(20):
+        early.append(mk(8.9, 9.15, 8.55, 8.95, 1_000_000))
+    # 不注入 spring_signal，靠扫描；近端 fresh=12 内应扫不到
+    ph = _ph(early, _sig(sc_signal=True, ar_signal=True, spring_signal=False))
+    assert ph["phase"] != "accumulation_c" or ph.get("spring_premature") is True
+    # 更严：无 tip spring 时不应以 Spring 测试命名 C
+    if ph["phase"] == "accumulation_c":
+        assert "Spring" not in ph.get("phase_label", "")
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # P0-5 事件簇确认 (Event Cluster Confirmation) 专项测试
 #

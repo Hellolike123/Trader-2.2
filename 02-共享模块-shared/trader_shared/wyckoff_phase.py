@@ -28,6 +28,7 @@ from trader_shared.config import (
     WYCKOFF_DIVERGENCE_BARS,
     WYCKOFF_DIVERGENCE_RATIO,
     WYCKOFF_PHASE_LOOKBACK,
+    WYCKOFF_PHASE_CONFIRM_FRESH_BARS,
     WYCKOFF_PHASE_MIN_TR_QUALITY,
     WYCKOFF_VSA_AVG_SPREAD_PERIOD,
     WYCKOFF_SCORE_SPRING,
@@ -403,6 +404,9 @@ def _detect_phase(
                 return True, -1
         return bool(signals.get("ar_signal")), -1
 
+    # G7：确认类事件近端窗；结构锚（SC/AR/BC/ARE）保持长窗
+    _cf = max(8, int(WYCKOFF_PHASE_CONFIRM_FRESH_BARS))
+
     bc_found = bool(signals.get("bc_signal")) or _scan(_detect_buying_climax, 15)
     ar_found, _ar_idx_unified = _ar_verdict()
     if _ar_idx_unified is None:
@@ -413,8 +417,12 @@ def _detect_phase(
     are_found = bool(signals.get("are_signal")) or _scan(
         _detect_are, WYCKOFF_CLIMAX_ANCHOR_BARS + 3
     )
-    ut_found = bool(signals.get("upthrust_signal")) or _scan(_detect_upthrust, 15)
-    sow_found = bool(signals.get("sow_signal")) or _scan(_detect_sign_of_weakness, 16)
+    ut_found = bool(signals.get("upthrust_signal")) or _scan(
+        _detect_upthrust, 15, max_lookback_bars=_cf, step=1
+    )
+    sow_found = bool(signals.get("sow_signal")) or _scan(
+        _detect_sign_of_weakness, 16, max_lookback_bars=_cf, step=1
+    )
     # 新增：SC（卖力高潮）和 LPSY（最后供应点）扫描
     # P-M2：统一锚存在 → sc_found 恒 True（短路原 _scan SC 滑窗重算）；无锚 → 原逻辑（P-M3）
     if _unified_anchor is not None:
@@ -423,20 +431,30 @@ def _detect_phase(
         sc_found = bool(signals.get("sc_signal")) or _scan(
             _detect_selling_climax, WYCKOFF_CLIMAX_ANCHOR_BARS
         )
-    lpsy_found = bool(signals.get("lpsy_signal")) or _scan(_detect_lpsy, 15)
+    lpsy_found = bool(signals.get("lpsy_signal")) or _scan(
+        _detect_lpsy, 15, max_lookback_bars=_cf, step=1
+    )
 
     def _finish(d: dict[str, Any]) -> dict[str, Any]:
         return _apply_p2_phase_a_gates(d, phase_a_status, sc_found)
 
-    # 后期信号：当前 bar + 滑窗扫描（P1-3 修复：让经典积累链可被阶段机识别）
-    spring = bool(signals.get("spring_signal")) or _scan(_detect_spring, 15)
-    sos = bool(signals.get("sos_signal")) or _scan(_detect_sos, 15)
-    lps = bool(signals.get("lps_signal")) or _scan(_detect_lps, 15)
+    # 后期信号：近端确认（G7）— 防历史 Spring/SOS 钉死 C/D 而 tip 灯已灭
+    spring = bool(signals.get("spring_signal")) or _scan(
+        _detect_spring, 15, max_lookback_bars=_cf, step=1
+    )
+    sos = bool(signals.get("sos_signal")) or _scan(
+        _detect_sos, 15, max_lookback_bars=_cf, step=1
+    )
+    lps = bool(signals.get("lps_signal")) or _scan(
+        _detect_lps, 15, max_lookback_bars=_cf, step=1
+    )
     compression = bool(signals.get("compression_signal")) or _scan(_detect_compression, 20)
     trend_pullback = bool(signals.get("trend_pullback_signal")) or _scan(
-        _detect_trend_pullback, 15
+        _detect_trend_pullback, 15, max_lookback_bars=_cf, step=1
     )
-    trend_rally = bool(signals.get("trend_rally_signal")) or _scan(_detect_trend_rally, 15)
+    trend_rally = bool(signals.get("trend_rally_signal")) or _scan(
+        _detect_trend_rally, 15, max_lookback_bars=_cf, step=1
+    )
     # Test of Spring（与 st_* 同源）— G6：只认 tip，禁止滑窗复活历史 ST
     spring_test = bool(
         signals.get("spring_test_signal") or signals.get("st_signal")
@@ -449,7 +467,8 @@ def _detect_phase(
             spring_test = False
 
     # ── 原典顺序校验：事件索引 — Spring/UT 必须在 Phase B 之后才有效 ────────
-    # 计算各事件在 wide_bars 中的最后触发索引（若索引数组已排序则取最后出现位置）
+    # 索引仍扫 wide_bars 全窗（premature 须对照 SC/AR 历史次序）；
+    # 是否「当前仍认 Spring/UT」由上方 G7 近端 _scan 布尔决定。
     spring_idx, _ = _last(_detect_spring, 15)
     ut_idx, _ = _last(_detect_upthrust, 15)
     # P-M2：统一锚 → 全序列 sc_bar_idx 换算 wide_bars 偏移；换算结果不在
