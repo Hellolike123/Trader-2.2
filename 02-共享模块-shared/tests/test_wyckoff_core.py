@@ -1116,6 +1116,37 @@ class TestDetectSOS:
         assert result["sos_signal"] is False
 
 
+class TestPhaseAEventBoundsForSpring:
+    """L1 雏形 sc_low 须能锚 Spring 事件，避免「非交易区间」误杀。"""
+
+    def test_event_bounds_injects_sc_low(self):
+        from trader_shared.wyckoff_core import _event_bounds_tr_ctx_from_phase_a
+
+        ctx = _event_bounds_tr_ctx_from_phase_a(
+            None, {"status": "established", "sc_low": 37.8, "ar_high": 43.0}
+        )
+        assert ctx is not None
+        assert ctx["tr_lower"] == 37.8
+        assert ctx["tr_upper"] == 43.0
+        assert ctx.get("tr_seed_source") == "phase_a_event"
+
+    def test_spring_not_blocked_by_amplitude_when_phase_a_bounds(self):
+        """大振幅序列无 phase_a 下沿会被区间闸挡住；有 sc_low 则进入刺穿判定。"""
+        from trader_shared import wyckoff_events as we
+        from trader_shared.wyckoff_core import _event_bounds_tr_ctx_from_phase_a
+
+        bars = [_make_bar(20 + i * 0.5, 21 + i * 0.5, 19 + i * 0.5, 20.5 + i * 0.5, 1_000_000) for i in range(30)]
+        bars.append(_make_bar(40, 41, 39.5, 40.5, 1_000_000))
+        bare = we._detect_spring(bars)
+        assert bare.get("spring_signal") is False
+        # 无箱时常见「非交易区间」；有箱后不得再被该闸一票否决
+        ctx = _event_bounds_tr_ctx_from_phase_a(
+            None, {"status": "established", "sc_low": 10.0, "ar_high": 15.0}
+        )
+        with_pa = we._detect_spring(bars, tr_ctx=ctx)
+        assert with_pa.get("spring_reason") != "非交易区间（振幅过大）"
+
+
 class TestDetectST:
     """ST (Secondary Test) 二次测试 检测测试"""
 

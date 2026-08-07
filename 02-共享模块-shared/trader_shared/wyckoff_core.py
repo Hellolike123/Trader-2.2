@@ -475,6 +475,45 @@ def _seed_tr_quality_from_bounds(sc_low: float, ar_high: float) -> float:
     return WYCKOFF_PHASE_A_SEED_MIN_QUALITY
 
 
+def _event_bounds_tr_ctx_from_phase_a(
+    tr_ctx: dict | None,
+    phase_a_range: dict | None,
+) -> dict | None:
+    """事件检测用：forming/established 的 sc_low(/ar_high) → tr_lower(/tr_upper)。
+
+    法源 wyckoff-spring-phase-a-event-bounds-handoff：
+    - 仅服务 Spring/UT/ST/SOW 等事件锚，跳过「非交易区间」误杀
+    - **不** phase_a_seed、**不**抬 L2 展示/量度（展示仍走 maturity）
+    """
+    if not isinstance(phase_a_range, dict):
+        return dict(tr_ctx) if isinstance(tr_ctx, dict) else None
+    status = str(phase_a_range.get("status") or "none")
+    if status not in ("forming", "established"):
+        return dict(tr_ctx) if isinstance(tr_ctx, dict) else None
+    sc_low = phase_a_range.get("sc_low")
+    if sc_low is None:
+        return dict(tr_ctx) if isinstance(tr_ctx, dict) else None
+    try:
+        lo = float(sc_low)
+    except (TypeError, ValueError):
+        return dict(tr_ctx) if isinstance(tr_ctx, dict) else None
+    ctx: dict = dict(tr_ctx) if isinstance(tr_ctx, dict) else {}
+    if ctx.get("tr_lower") is None:
+        ctx["tr_lower"] = lo
+        ctx["tr_seed_source"] = ctx.get("tr_seed_source") or "phase_a_event"
+    ar_high = phase_a_range.get("ar_high")
+    if ar_high is not None and ctx.get("tr_upper") is None:
+        try:
+            hi = float(ar_high)
+            if hi > float(ctx.get("tr_lower") or lo):
+                ctx["tr_upper"] = hi
+        except (TypeError, ValueError):
+            pass
+    ctx["phase_a_range"] = phase_a_range
+    ctx["phase_a_status"] = status
+    return ctx or None
+
+
 def _overlay_phase_a_seed_tr_ctx(
     tr_ctx: dict | None,
     phase_a_range: dict,
@@ -495,7 +534,7 @@ def _overlay_phase_a_seed_tr_ctx(
     if not mature:
         if ctx and ctx.get("tr_lower") is not None and not ctx.get("tr_seed_source"):
             ctx["tr_seed_source"] = "percentile"
-        # L1 候选边界仅挂在 phase_a_* 字段，不改 tr_lower/tr_upper
+        # L1 展示不放种子箱；事件锚由 _event_bounds_tr_ctx_from_phase_a 另注入
         return ctx or None
 
     sc_low = phase_a_range.get("sc_low")
@@ -716,6 +755,30 @@ def wyckoff_analysis(
         is_index=is_index,
     )
     phase_a_range = _refine_phase_a_sc_low(phase_a_range, st_sc)
+    # Spring/ST 二次锚：phase_a sc_low 作事件下沿（L1 也注入；不对展示抬 L2）
+    # 法源 wyckoff-spring-phase-a-event-bounds-handoff — 修南网「有雏形箱仍报非交易区间」
+    _ev_tr = _event_bounds_tr_ctx_from_phase_a(event_tr_ctx, phase_a_range)
+    if isinstance(_ev_tr, dict) and _ev_tr.get("tr_lower") is not None:
+        spring2 = _detect_spring(
+            bars, _support=dynamic_support, symbol=symbol, tr_ctx=_ev_tr
+        )
+        if spring2.get("spring_signal") or not spring.get("spring_signal"):
+            spring = spring2
+        st2 = _detect_st(bars, tr_ctx=_ev_tr)
+        if st2.get("st_signal") or not st.get("st_signal"):
+            st = st2
+        spring_test = _spring_test_fields_from_st(st)
+        # SOW/UT 也可认同一事件下沿（破/假破 TR）
+        sow2 = _detect_sign_of_weakness(bars, tr_ctx=_ev_tr)
+        if sow2.get("sow_signal") or sow2.get("sow_intraday_warn"):
+            sow = sow2
+        ut2 = _detect_upthrust(bars, tr_ctx=_ev_tr)
+        if ut2.get("upthrust_signal") or not upthrust.get("upthrust_signal"):
+            upthrust = ut2
+        if isinstance(event_tr_ctx, dict):
+            event_tr_ctx = {**event_tr_ctx, **{k: _ev_tr[k] for k in ("tr_lower", "tr_upper", "tr_seed_source", "phase_a_status") if k in _ev_tr}}
+        else:
+            event_tr_ctx = _ev_tr
     # Bug G：Phase A 失败时强制作废事件簇，禁止 accum✓ 与 phase_a failed 并存
     # 法源 docs/plans/wyckoff-sos-epic-bcg-handoff.md
     if str(phase_a_range.get("status") or "") == "failed":
