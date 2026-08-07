@@ -673,8 +673,15 @@ def _detect_phase(
             "spring_premature": spring_premature,
             "upthrust_premature": upthrust_premature,
         })
-    # P3: Trend Pullback = 积累期 D 趋势确认（停止行为之后）
-    if trend_pullback:
+    # P3 / G3: Trend Pullback → D 仅当已有积累背景（禁裸均线回踩冒充威科夫 D）
+    _acc_bg_for_d = bool(
+        sc_found
+        or ar_found
+        or (spring and not spring_premature)
+        or compression
+        or signals.get("accumulation_confirmed")
+    )
+    if trend_pullback and _acc_bg_for_d:
         return _finish({
             "phase": "accumulation_d",
             "phase_label": "积累期 D（趋势回踩确认）",
@@ -755,8 +762,16 @@ def _detect_phase(
             "spring_premature": spring_premature,
             "upthrust_premature": upthrust_premature,
         })
-    # Trend Rally：跌势中反抽不过均线 → 派发 D（停止行为之后）
-    if trend_rally:
+    # Trend Rally → D 仅当已有派发背景（G3：禁裸均线反抽冒充威科夫 D）
+    _dist_bg_for_d = bool(
+        bc_found
+        or are_found
+        or sow_found
+        or (ut_found and not upthrust_premature)
+        or compression
+        or signals.get("distribution_confirmed")
+    )
+    if trend_rally and _dist_bg_for_d:
         return _finish({
             "phase": "distribution_d",
             "phase_label": "派发期 D（趋势反抽确认）",

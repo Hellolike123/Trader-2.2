@@ -299,6 +299,67 @@ def test_volume_divergence_not_both_true():
     assert not (bearish and bullish), f"双亮非法: bearish={bearish} bullish={bullish}"
 
 
+def _spring_st_sequence(st_vol=100):
+    """真 Spring + 中间棒 + 近端 ST 候选（与 test_wyckoff_core 同构）。"""
+    bars = [mk(100, 105, 90, 102, 200) for _ in range(15)]
+    bars.append(mk(89, 98, 85, 97, 150))  # Spring
+    bars.extend([
+        mk(97, 99, 96, 98, 200),
+        mk(98, 100, 97, 99, 200),
+        mk(99, 100, 98, 99, 200),
+    ])
+    bars.append(mk(91, 92, 89.5, 90.5, st_vol))  # ST
+    bars.extend([mk(91, 93, 90, 92, 180) for _ in range(6)])  # ≥26 根且 age≤8
+    return bars
+
+
+def test_ghost_st_invalidated_after_breakdown():
+    """G1：Spring+ST 后收盘破支撑 → st 灭（幽灵 ST）。"""
+    bars = _spring_st_sequence(st_vol=100)
+    assert we._detect_st(bars).get("st_signal") is True, we._detect_st(bars)
+    for _ in range(12):
+        bars.append(mk(85, 86, 80, 81, 300_000))
+    st = we._detect_st(bars)
+    assert st.get("st_signal") is False, f"破位后不得幽灵 ST: {st}"
+
+
+def test_stale_sos_cleared_when_price_left_box():
+    """G2：历史 SOS + 现价远离上沿 → 不亮。"""
+    bars = build_flat_tr(n=40, with_spikes=False)
+    tr = we._detect_trading_range(bars)
+    assert tr and tr.get("tr_upper") is not None
+    up = float(tr["tr_upper"])
+    # climb SOS 窗
+    for i in range(5):
+        o = up - 0.2 + i * 0.15
+        c = o + 0.12
+        bars.append(mk(o, c + 0.05, o - 0.05, c, 2_000_000))
+    tr2 = we._detect_trading_range(bars) or tr
+    assert we._detect_sos(bars, tr_ctx=tr2, lookback_tips=1).get("sos_signal") is True
+    # 连跌远离
+    for i in range(20):
+        c = up - 0.5 - i * 0.15
+        bars.append(mk(c + 0.1, c + 0.15, c - 0.1, c, 500_000))
+    tr3 = we._detect_trading_range(bars) or tr2
+    stale = we._detect_sos(bars, tr_ctx=tr3, lookback_tips=30)
+    assert stale.get("sos_signal") is False, f"过期 SOS 应灭: {stale}"
+
+
+def test_bare_trend_pullback_not_accumulation_d():
+    """G3：裸 TPB 不得标积累 D。"""
+    b = _super_flat(50)
+    ph = _ph(b, _sig(trend_pullback_signal=True))
+    assert ph["phase"] != "accumulation_d"
+    assert "趋势回踩" not in ph.get("phase_label", "") or ph["phase"] == "none"
+
+
+def test_bare_trend_rally_not_distribution_d():
+    """G3：裸 TRL 不得标派发 D。"""
+    b = _super_flat(50)
+    ph = _ph(b, _sig(trend_rally_signal=True))
+    assert ph["phase"] != "distribution_d"
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # P0-5 事件簇确认 (Event Cluster Confirmation) 专项测试
 #

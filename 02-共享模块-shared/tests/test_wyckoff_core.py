@@ -1133,8 +1133,8 @@ class TestDetectST:
         ])
         # ST：回测 support≈90 ±1%，量相对 spring 前均量缩
         bars.append({"open": 91, "high": 92, "low": 89.5, "close": 90.5, "volume": st_vol})
-        # 填满长度
-        bars.extend([_make_bar(91, 93, 90, 92, 180) for _ in range(8)])
+        # 近端填充：总长≥26；ST age≤8（6 根填充 age=6，tip 再+1 仍≤7）
+        bars.extend([_make_bar(91, 93, 90, 92, 180) for _ in range(6)])
         return bars
 
     def test_st_detected(self):

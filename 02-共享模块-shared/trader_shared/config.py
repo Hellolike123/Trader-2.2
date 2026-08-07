@@ -254,6 +254,11 @@ WYCKOFF_SOS_THRUST_VOL_RATIO: float = float(os.environ.get("WYCKOFF_SOS_THRUST_V
 WYCKOFF_SOS_MAX_PRICE_MULT: float = float(os.environ.get("WYCKOFF_SOS_MAX_PRICE_MULT", "1.5"))
 # 近端 SOS 回扫根数（突破后数日仍亮灯；1=仅末日 tip。簇/BU 内滑窗保持 tip-only）
 WYCKOFF_SOS_RECENT_LOOKBACK: int = int(os.environ.get("WYCKOFF_SOS_RECENT_LOOKBACK", "30"))
+# G2 过期 SOS：回扫命中(age>0)须现价仍守住箱上沿附近；无 TR 则限 age
+WYCKOFF_SOS_STALE_HOLD_RATIO: float = float(os.environ.get("WYCKOFF_SOS_STALE_HOLD_RATIO", "0.98"))
+WYCKOFF_SOS_STALE_MAX_AGE_NO_TR: int = int(os.environ.get("WYCKOFF_SOS_STALE_MAX_AGE_NO_TR", "8"))
+# G1 Ghost ST：ST 命中 bar 须近端，且之后无收盘有效破支撑
+WYCKOFF_ST_FRESH_BARS: int = int(os.environ.get("WYCKOFF_ST_FRESH_BARS", "8"))
 
 # Compression 压缩蓄势参数
 WYCKOFF_COMPRESSION_LOOKBACK: int = 20          # 压缩检测回溯窗口

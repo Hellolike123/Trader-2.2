@@ -49,6 +49,9 @@ try:
         WYCKOFF_SOS_THRUST_VOL_RATIO,
         WYCKOFF_SOS_MAX_PRICE_MULT,
         WYCKOFF_SOS_RECENT_LOOKBACK,
+        WYCKOFF_SOS_STALE_HOLD_RATIO,
+        WYCKOFF_SOS_STALE_MAX_AGE_NO_TR,
+        WYCKOFF_ST_FRESH_BARS,
         WYCKOFF_PHASE_LOOKBACK,
         WYCKOFF_VSA_AVG_SPREAD_PERIOD,
         # Wyckoff Score 权重
@@ -138,6 +141,9 @@ except ImportError:
     WYCKOFF_SOS_THRUST_MIN_GAIN = 0.05
     WYCKOFF_SOS_THRUST_VOL_RATIO = 1.8
     WYCKOFF_SOS_RECENT_LOOKBACK = 30
+    WYCKOFF_SOS_STALE_HOLD_RATIO = 0.98
+    WYCKOFF_SOS_STALE_MAX_AGE_NO_TR = 8
+    WYCKOFF_ST_FRESH_BARS = 8
     WYCKOFF_PHASE_LOOKBACK = 60
     WYCKOFF_VSA_AVG_SPREAD_PERIOD = 20
     # Wyckoff Score 权重 fallback
@@ -2120,26 +2126,46 @@ def _detect_sos(
         hit = _detect_sos_at_tip(sub, tr_ctx)
         if hit.get("sos_signal"):
             age = len(bars) - 1 - i
+            if not _sos_stale_still_valid(bars, age, tr_ctx):
+                continue  # G2：过期且现价未守住 → 跳过
             reason = hit.get("sos_reason") or ""
             if age > 0 and "近端" not in reason:
                 hit = {**hit, "sos_reason": f"{reason}（近端{age}根前）"}
             return hit
     return tip
 
+
+def _sos_stale_still_valid(bars: list[dict], age: int, tr_ctx: dict | None) -> bool:
+    """G2：回扫 SOS(age>0) 须现价仍有效，否则视为过期假强势。"""
+    if age <= 0:
+        return True
+    last_c = to_float(bars[-1].get("close")) if bars else None
+    tr_upper = None
+    if isinstance(tr_ctx, dict) and tr_ctx.get("tr_upper") is not None:
+        try:
+            tr_upper = float(tr_ctx["tr_upper"])
+        except (TypeError, ValueError):
+            tr_upper = None
+    if tr_upper is None:
+        tr_upper = _sos_thrust_creek(tr_ctx)
+    if tr_upper is not None and last_c is not None:
+        return last_c >= float(tr_upper) * float(WYCKOFF_SOS_STALE_HOLD_RATIO)
+    return int(age) <= int(WYCKOFF_SOS_STALE_MAX_AGE_NO_TR)
+
+
 def _detect_st(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     """Detect Secondary Test (ST) — 二次测试 Spring 支撑，缩量确认。
 
-    触发条件（法源 wyckoff-spring-st-phase-bugfix-handoff P1-1）:
+    触发条件（P1-1 + G1）:
       1. 最近窗内经 `_detect_spring` 同闸检出 Spring（禁止山寨刺穿条件）
-      2. Spring 后 3-15 根 K 线内:
-         - 价格回到支撑区域（±1%）
-         - 成交量 < 均量 * 0.8
-         - 最低价未破支撑
+      2. Spring 后 3-15 根 K 线内缩量回测支撑
+      3. ST bar 须近端（≤ ST_FRESH_BARS）且之后无收盘有效破支撑（防 Ghost ST）
     """
     if len(bars) < WYCKOFF_SPRING_SUPPORT_LOOKBACK + 15 + 1:
         return {"st_signal": False, "st_reason": "数据不足", "st_price": None}
 
     has_tr_lower = bool(tr_ctx and tr_ctx.get("tr_lower") is not None)
+    fresh = max(1, int(WYCKOFF_ST_FRESH_BARS))
 
     # P1-1：Spring 锚必须过完整 `_detect_spring`（收回/量能/2 根窗等同闸）
     spring_idx = None
@@ -2169,13 +2195,14 @@ def _detect_st(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     if spring_idx is None or support is None:
         return {"st_signal": False, "st_reason": "未检测到 Spring，无法触发 ST", "st_price": None}
 
-    # 检查 Spring 后 3-15 根 K 线
+    # 检查 Spring 后 3-15 根；取**最近**一次近端且未失效的 ST
     _spring_vol_slice = bars[max(0, spring_idx - WYCKOFF_SPRING_SUPPORT_LOOKBACK):spring_idx]
     spring_avg_vol = (
         sum(to_float(b.get("volume")) or 0 for b in _spring_vol_slice)
         / max(len(_spring_vol_slice), 1)
     )
 
+    best_i: int | None = None
     for i in range(spring_idx + 3, min(spring_idx + 16, len(bars))):
         test_bar = bars[i]
         t_low = to_float(test_bar.get("low"))
@@ -2191,12 +2218,29 @@ def _detect_st(bars: list[dict], tr_ctx: dict | None = None) -> dict:
         if t_low < support * 0.99:
             continue
         # 成交量萎缩
-        if spring_avg_vol > 0 and t_volume < spring_avg_vol * 0.8:
-            return {
-                "st_signal": True,
-                "st_reason": "Spring 支撑二次测试，缩量确认",
-                "st_price": round(support, 2),
-            }
+        if spring_avg_vol > 0 and t_volume >= spring_avg_vol * 0.8:
+            continue
+        # G1：近端
+        age = len(bars) - 1 - i
+        if age > fresh:
+            continue
+        # G1：ST 后收盘未有效破支撑
+        broken = False
+        for j in range(i + 1, len(bars)):
+            jc = to_float(bars[j].get("close"))
+            if jc is not None and jc < support * 0.99:
+                broken = True
+                break
+        if broken:
+            continue
+        best_i = i  # 扫到更近的覆盖更远的
+
+    if best_i is not None:
+        return {
+            "st_signal": True,
+            "st_reason": "Spring 支撑二次测试，缩量确认",
+            "st_price": round(support, 2),
+        }
 
     return {"st_signal": False, "st_reason": "Spring 后未检测到有效二次测试", "st_price": None}
 
