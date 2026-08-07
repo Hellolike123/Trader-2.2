@@ -12,6 +12,24 @@ from typing import Any
 from trader_shared.main_force import STAGE_LABELS
 
 
+
+def _plain_flow_price_relation(rel: str) -> str:
+    s = str(rel or "").strip()
+    table = {
+        "价涨资入": "价涨钱进",
+        "价涨资出": "价涨钱出",
+        "价跌资入": "价跌钱进",
+        "价跌资出": "价跌钱出",
+        "价平资入": "横盘钱进",
+        "价平资出": "横盘钱出",
+        "价资中性": "价资都淡",
+        "价资关系未知": "价资看不出",
+        "价资未判定": "价资看不出",
+        "无数据": "资金数据不足",
+    }
+    return table.get(s, s)
+
+
 def format_main_force_score_section(result: dict[str, Any], score_result: dict[str, Any] | None = None) -> str:
     """生成主力行为评分段落（微信纯文本格式）。
 
@@ -219,7 +237,7 @@ def format_main_force_enhanced(
         today_line += f"（超大单 {today_super_large:+.0f}万｜大单 {today_large:+.0f}万）"
     lines.append(today_line)
 
-    lines.append(f"价资关系：{relation}")
+    lines.append(f"价资：{_plain_flow_price_relation(relation)}")
 
     if hint:
         lines.append(f"提示：{hint}")

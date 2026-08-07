@@ -1047,7 +1047,7 @@ def test_fund_line_appends_main_force_and_relation():
     out = render_short_midline(r)
     fund_line = next(l for l in out.split("\n") if "资金：" in l)
     assert "连3日流出" in fund_line
-    assert "价涨资出" in fund_line
+    assert ("价涨钱出" in fund_line or "价涨但资金出" in fund_line or "价涨资出" in fund_line)
     assert "主力4/15" in fund_line
     assert "大单偏卖" in fund_line
 
@@ -1321,3 +1321,10 @@ def test_d_r8_t0_intraday_ok_with_position():
     assert "日内 T0：" in out
     assert "低吸" in out
     assert "无底仓，不启用" not in out
+
+
+def test_plain_flow_price_relation_copy():
+    from trader_shared.report_renderer.short_midline import _plain_flow_price_relation
+    assert _plain_flow_price_relation("价资关系未知") == "价资看不出"
+    assert _plain_flow_price_relation("价涨资出") == "价涨钱出"
+    assert _plain_flow_price_relation("无数据") == ""

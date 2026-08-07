@@ -449,7 +449,8 @@ def render_single(review: dict[str, Any]) -> str:
             elif con_out >= 2:
                 cum_line += f" 连续{con_out}日净流出"
             lines.append(cum_line)
-            lines.append(f"  今日 {today_flow:+.0f}万  价资{relation}")
+            _rel_map = {"价涨资入":"价涨钱进","价涨资出":"价涨钱出","价跌资入":"价跌钱进","价跌资出":"价跌钱出","价平资入":"横盘钱进","价平资出":"横盘钱出","价资中性":"价资都淡","价资关系未知":"价资看不出","价资未判定":"价资看不出","无数据":"资金数据不足"}
+            lines.append(f"  今日 {today_flow:+.0f}万  价资{_rel_map.get(str(relation), relation)}")
             lines.append("")
         except Exception:
             pass

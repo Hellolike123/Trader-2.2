@@ -152,6 +152,35 @@ def _fmt_flow_wan(val: Any) -> str:
     return f"{v:.1f}万"
 
 
+
+def _plain_flow_price_relation(rel: str) -> str:
+    """价资关系 → 人话（仅展示）。"""
+    s = str(rel or "").strip()
+    if not s or s in ("无数据", "—", "-", "中性"):
+        return ""
+    table = {
+        "价涨资入": "价涨钱进",
+        "价涨资出": "价涨钱出",
+        "价跌资入": "价跌钱进",
+        "价跌资出": "价跌钱出",
+        "价平资入": "横盘钱进",
+        "价平资出": "横盘钱出",
+        "价资中性": "价资都淡",
+        "价资关系未知": "价资看不出",
+        "价资未判定": "价资看不出",
+        # 若上游已是人话，原样
+        "价涨且资金进": "价涨钱进",
+        "价涨但资金出": "价涨钱出",
+        "价跌但资金进": "价跌钱进",
+        "价跌且资金出": "价跌钱出",
+        "横盘资金进": "横盘钱进",
+        "横盘资金出": "横盘钱出",
+        "涨跌和资金都不明显": "价资都淡",
+        "没法判断价和资金是否同向": "价资看不出",
+    }
+    return table.get(s, s)
+
+
 def _short_fund_display(
     vsig: dict[str, Any],
     *,
@@ -187,9 +216,9 @@ def _short_fund_display(
         elif abs(cum5) >= 100:
             extras.append(("主力5日流入" if cum5 > 0 else "主力5日流出") + _fmt_flow_wan(abs(cum5)))
 
-    # 价资关系（短且信息密度高，优先保留）
-    rel = str(ff.get("flow_price_relation") or "").strip()
-    if rel and rel not in ("无数据", "中性", "—", "-") and rel not in primary:
+    # 价资关系（人话；短且信息密度高，优先保留）
+    rel = _plain_flow_price_relation(str(ff.get("flow_price_relation") or ""))
+    if rel and rel not in primary:
         extras.append(rel)
 
     mf = main_force_score if isinstance(main_force_score, dict) else {}
