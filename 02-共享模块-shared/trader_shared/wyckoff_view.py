@@ -11,6 +11,8 @@
 """
 from __future__ import annotations
 
+import re
+
 from typing import Any, Literal, TypedDict
 
 # 与 wyckoff_analysis 返回字段对齐的「原典/扩展事件」键
@@ -481,22 +483,201 @@ def format_event_display(
     return format_wyckoff_event_light(wyckoff if isinstance(wyckoff, dict) else {})
 
 
+def infer_daily_short_wave(wyckoff: dict[str, Any] | None) -> dict[str, Any]:
+    """日线短波段侧与主事件（trader / slim 共用语义）。
+
+    只读展示与对照，不进 fusion / 出手。
+    side: accumulation | distribution | none | failed
+    """
+    from trader_shared.wyckoff_core import _unwrap_wyckoff_dict
+
+    wyk = _unwrap_wyckoff_dict(wyckoff) if wyckoff is not None else {}
+    if not isinstance(wyk, dict):
+        wyk = {}
+
+    def _on(key: str) -> bool:
+        return bool(wyk.get(key))
+
+    def _px(*keys: str) -> float | None:
+        for k in keys:
+            v = wyk.get(k)
+            if v is None or v == "":
+                continue
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    if str(wyk.get("phase_a_status") or "").strip() == "failed":
+        # 破后仍优先暴露 SOS/LPS
+        if _on("sos_signal"):
+            return {
+                "side": "failed",
+                "side_cn": "破后强势",
+                "code": "SOS",
+                "bias": "偏多",
+                "price": _px("sos_price"),
+            }
+        if _on("lps_signal"):
+            return {
+                "side": "failed",
+                "side_cn": "修复中",
+                "code": "LPS",
+                "bias": "偏多",
+                "price": _px("lps_price"),
+            }
+        return {
+            "side": "failed",
+            "side_cn": "本波无新SC",
+            "code": "PhaseAFail",
+            "bias": "偏空",
+            "price": None,
+        }
+
+    accum_flags = [
+        ("sos_signal", "SOS", "偏多", ("sos_price",)),
+        ("lps_signal", "LPS", "偏多", ("lps_price",)),
+        ("spring_signal", "Spring", "偏多", ("spring_price",)),
+        ("secondary_test_sc_signal", "ST", "中性", ("st_price", "secondary_test_price")),
+        ("ar_signal", "AR", "偏多", ("ar_price",)),
+        ("sc_signal", "SC", "偏多", ("sc_price",)),
+    ]
+    dist_flags = [
+        ("utad_signal", "UTAD", "偏空", ("utad_price",)),
+        ("lpsy_signal", "LPSY", "偏空", ("lpsy_price",)),
+        ("sow_signal", "SOW", "偏空", ("sow_price",)),
+        ("upthrust_signal", "UT", "偏空", ("upthrust_price", "ut_price")),
+        ("bc_signal", "BC", "偏空", ("bc_price",)),
+        ("are_signal", "ARE", "偏空", ("are_price",)),
+    ]
+
+    accum_hit = [(k, c, b, ks) for k, c, b, ks in accum_flags if _on(k)]
+    dist_hit = [(k, c, b, ks) for k, c, b, ks in dist_flags if _on(k)]
+    # 成波形门槛
+    accum_formed = any(c in {"SC", "AR", "ST", "LPS", "SOS", "Spring"} for _, c, _, _ in accum_hit)
+    dist_formed = any(c in {"BC", "LPSY", "SOW", "UTAD", "UT"} for _, c, _, _ in dist_hit)
+    if not dist_formed and any(c == "ARE" for _, c, _, _ in dist_hit) and any(
+        c == "BC" for _, c, _, _ in dist_hit
+    ):
+        dist_formed = True
+
+    if dist_formed and not accum_formed:
+        side = "distribution"
+        side_cn = "短波派发"
+        ordered = dist_hit
+    elif accum_formed and not dist_formed:
+        side = "accumulation"
+        side_cn = "短波吸筹"
+        ordered = accum_hit
+    elif dist_formed and accum_formed:
+        if len(dist_hit) >= len(accum_hit):
+            side, side_cn, ordered = "distribution", "短波派发", dist_hit
+        else:
+            side, side_cn, ordered = "accumulation", "短波吸筹", accum_hit
+    else:
+        return {
+            "side": "none",
+            "side_cn": "本波未成型",
+            "code": "",
+            "bias": "",
+            "price": None,
+        }
+
+    # ordered 已按优先级排列
+    _k, code, bias, pkeys = ordered[0]
+    return {
+        "side": side,
+        "side_cn": side_cn,
+        "code": code,
+        "bias": bias,
+        "price": _px(*pkeys),
+    }
+
+
+def format_daily_short_wave_line(wyckoff: dict[str, Any] | None) -> str:
+    """短线威科夫一行正文（无「威科夫：」前缀）：短波侧 · 主事件[价] · 箱/阶段要点。
+
+    未成型时回退日线 light 全文（含「仅对照」），保证与旧契约同构。
+    有短波侧时：侧 + 主灯 + 箱体要点；尾注「仅对照」由本函数或渲染层补。
+    """
+    from trader_shared.wyckoff_core import format_wyckoff_daily_phase_light
+
+    wave = infer_daily_short_wave(wyckoff)
+    side = str(wave.get("side") or "none")
+    side_cn = str(wave.get("side_cn") or "本波未成型")
+    code = str(wave.get("code") or "").strip()
+    bias = str(wave.get("bias") or "").strip()
+    price = wave.get("price")
+
+    body = format_wyckoff_daily_phase_light(wyckoff if isinstance(wyckoff, dict) else {})
+    body = str(body or "").strip()
+    for pfx in ("威科夫：", "日线阶段："):
+        if body.startswith(pfx):
+            body = body[len(pfx) :].strip()
+
+    # 无短波成型：直接用 light（保留「暂定不出 / 上沿未出 / 仅对照」）
+    if side in ("none", "") and not code:
+        return body or "数据不足 · 仅对照"
+
+    def _event_bit() -> str:
+        if not code or code in ("—", "PhaseAFail"):
+            return ""
+        bit = code + (bias if bias and bias not in code else "")
+        if isinstance(price, (int, float)):
+            bit += f"@{price:.2f}" if abs(price) < 1000 else f"@{price:.0f}"
+        return bit
+
+    parts: list[str] = []
+    if code == "PhaseAFail" and side == "failed":
+        parts = ["Phase A 失效", "本波无新SC"]
+    elif side == "failed":
+        parts = [side_cn or "Phase A 失效"]
+        eb = _event_bit()
+        if eb:
+            parts.append(eb)
+    else:
+        parts = [side_cn]
+        eb = _event_bit()
+        if eb:
+            parts.append(eb)
+
+    # 箱体/雏形要点（从 light 抽一段，避免整段旧 phase 盖住短波）
+    body_core = body
+    for suf in (" · 仅对照", "仅对照"):
+        if body_core.endswith(suf):
+            body_core = body_core[: -len(suf)].rstrip(" ·").strip()
+    box_bit = ""
+    for token in ("雏形", "箱体", "无清晰区间", "箱体未成形", "上沿未出", "暂定不出"):
+        if token in body_core:
+            m = re.search(r"[^·]*" + re.escape(token) + r"[^·]*", body_core)
+            if m:
+                box_bit = m.group(0).strip(" ·")
+                break
+    joined = " · ".join(p for p in parts if p)
+    if box_bit and box_bit not in joined:
+        parts.append(box_bit)
+        joined = " · ".join(p for p in parts if p)
+
+    if "仅对照" not in joined and "不作买点" not in joined:
+        joined = f"{joined} · 仅对照" if joined else "仅对照"
+    return joined or body or "数据不足 · 仅对照"
+
+
 def format_daily_phase_display(
     wyckoff: dict[str, Any] | None,
     *,
     symbol: str = "",
 ) -> str:
-    """短线「威科夫：」只读展示：报告边界经 View 再格式化（禁止「日线阶段：」标签）。
+    """短线「威科夫：」只读展示：日线短波侧（禁止「日线阶段：」标签）。
 
-    不进背景岗 / fusion / 出手；与中线阶段同构诚实无箱。
+    中线看周线、短线看日线短波；不进背景岗 / fusion / 出手。
     """
-    from trader_shared.wyckoff_core import format_wyckoff_daily_phase_light
-
     to_wyckoff_state_view(wyckoff, symbol=symbol, timeframe="daily")
-    body = format_wyckoff_daily_phase_light(wyckoff if isinstance(wyckoff, dict) else {})
+    body = format_daily_short_wave_line(wyckoff if isinstance(wyckoff, dict) else {})
     body = str(body or "").strip()
     if body.startswith("威科夫："):
         return body
     if body.startswith("日线阶段："):
         body = body[len("日线阶段："):].strip()
-    return f"威科夫：{body or '数据不足 · 仅对照'}"
+    return f"威科夫：{body or '数据不足'}"

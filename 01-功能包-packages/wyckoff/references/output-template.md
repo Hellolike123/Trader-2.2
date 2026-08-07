@@ -31,7 +31,21 @@
   变差：{条件一句}
 ```
 
-`🔔 变化` 仅当有新亮或熄灭时出现；首次记录、无变化、仅仍亮时整块省略。`📌 现在 / 变好 / 变差` 必出三行；默认 B 不再出旧四段推演与「本卡不下单」尾句。灯必须满灯竖排（无「灯」字标题行；日线按短波侧只排一条链）；派发事件价可标（事件价）；failed 下 SC 可标（对照）。failed 无新强势写 `Phase A 失效｜本波无新SC`（主句可附 `旧SC {价}（对照）`）；failed+SOS 写 `Phase A 失效 · 破后强势｜本波 SOS 强` 且保留 SC/SOS 同亮解释；failed+LPS 写 `Phase A 失效｜本波 LPS 修复`。禁 `旧底已废` / `废锚` / `Phase A failed` / `（已废）` / 总览主句 `待新寻底`。有效阶段不写「有效」，有明确 phase 可套 `Phase B · 建因横盘` / `Phase C · 试盘`。L0 / `box_display_mode=none` / 分位种子：区间不得出现分位上下沿数字当箱/雏形。周线 ARE 无 BC 时用派发链，禁止接吸筹 SC。文案细合同见 `docs/plans/wyckoff-phase-fail-copy-handoff.md`。
+`🔔 变化` 仅当有新亮或熄灭时出现；首次记录、无变化、仅仍亮时整块省略。`📌 现在 / 变好 / 变差` 必出三行；默认 B 不再出旧四段推演与「本卡不下单」尾句。
+
+**侧与灯链（日线短波 / 周线大侧同源语义）**：
+- 先定 **side**（accumulation / distribution / none / failed），再满灯竖排**只一条链**（无「灯」字标题行）
+- 吸筹链：`SC → AR → ST → LPS → SOS`（Spring 确认进 ST/专槽，见渲染实现）
+- 派发链：`BC → ARE → SOW → LPSY → UTAD`
+- 吸筹侧只排吸筹灯；派发侧只排派发灯；**禁止**两条链同时竖排混亮
+- 周线 ARE 无 BC 时仍可用派发链观察，**禁止**接吸筹 SC 当派发叙事
+- 派发事件价可标（事件价）；failed 下 SC 可标（对照）
+- failed 无新强势：`Phase A 失效｜本波无新SC`（可附 `旧SC {价}（对照）`）；failed+SOS：`Phase A 失效 · 破后强势｜本波 SOS 强`；failed+LPS：`Phase A 失效｜本波 LPS 修复`
+- 禁 `旧底已废` / `废锚` / `Phase A failed` / `（已废）` / 总览主句 `待新寻底`
+- 有效阶段不写「有效」；有明确 phase 可套 `Phase B · 建因横盘` / `Phase C · 试盘`
+- L0 / `box_display_mode=none` / 分位种子：区间不得出现分位上下沿数字当箱/雏形
+- Trader 短线一行与上述侧/主灯同源（`infer_daily_short_wave`），不铺满灯、尾注「不作买点」
+- 文案细合同见 `docs/plans/wyckoff-phase-fail-copy-handoff.md`；侧选实现见 `wyckoff_render._slim_daily_side` / `wyckoff_view.infer_daily_short_wave`
 
 ## 单票完整详析卡（`--full`）
 

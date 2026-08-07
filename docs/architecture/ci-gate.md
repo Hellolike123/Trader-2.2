@@ -41,7 +41,7 @@ hook 已随仓库版本化提交，clone 后需各机执行一次上面这行（
 | `test_indicator_math.py` | 指标数学 |
 | `test_fusion_regime_weights.py` / `test_p0_signal_structurization.py` / `test_p1_global_state.py` / `test_plugin_autodiscovery.py` | 融合与信号契约 |
 | `test_box_detect.py` / `test_combo_strategy.py` | 箱体 / 组合策略 |
-| `test_wyckoff_*` / `test_chan_split_*` / `test_stage_split_*` | 拆分等价；含 `test_wyckoff_tr_maturity` / state_view / cause_effect / pnf（L0–L3 量度闸，离线） |
+| `test_wyckoff_*` / `test_chan_split_*` / `test_stage_split_*` | 拆分等价；含 `test_wyckoff_tr_maturity` / **state_view（日线短波侧+主灯文案）** / cause_effect / pnf（L0–L3 量度闸，离线） |
 | `trader_shared/test_chan_nesting*.py` / `test_cache_stale_revalidation.py` | 区间套 / 缓存 |
 | `01-功能包-packages/trader/tests/test_report_renderer.py` | 旧 renderer 包 |
 

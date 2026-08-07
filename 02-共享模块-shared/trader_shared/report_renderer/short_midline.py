@@ -1233,11 +1233,37 @@ def render_short_midline(r: dict[str, Any]) -> str:
         _phase_body = _phase_body[: -len("仅对照")].rstrip(" ·").strip()
     _phase_body = _phase_body or "数据不足"
 
+    # 短波行已含主灯时不再叠事件；且不与短波侧方向打架（派发侧不叠 SOS/LPS）
     _wyk_parts = [_phase_body]
     if _ev_bit:
-        _wyk_parts.append(_ev_bit)
-    _wyk_parts.append("不作买点")
-    lines.append("  威科夫：" + " · ".join(_wyk_parts))
+        _code_m = re.match(r"([A-Za-z]{2,12})", _ev_bit)
+        _ev_code = (_code_m.group(1) if _code_m else "").upper()
+        _accum_codes = {"SOS", "LPS", "SPRING", "SC", "AR", "ST", "JAC", "BU", "SV"}
+        _dist_codes = {"BC", "LPSY", "SOW", "UTAD", "UT", "ARE", "PSY"}
+        _side_dist = "短波派发" in _phase_body
+        _side_acc = "短波吸筹" in _phase_body
+        _conflict = (
+            (_side_dist and _ev_code in _accum_codes)
+            or (_side_acc and _ev_code in _dist_codes)
+            or (bool(_ev_code) and _ev_code in _phase_body.upper())
+        )
+        if _ev_code and not _conflict:
+            _wyk_parts.append(_ev_bit)
+        elif not _ev_code:
+            _wyk_parts.append(_ev_bit)
+    if "不作买点" not in _phase_body and "仅对照" not in _phase_body:
+        _wyk_parts.append("不作买点")
+    elif "不作买点" not in " · ".join(_wyk_parts):
+        # 有「仅对照」也统一改成产品尾注「不作买点」
+        _merged = " · ".join(_wyk_parts)
+        if _merged.endswith(" · 仅对照"):
+            _merged = _merged[: -len(" · 仅对照")].strip()
+            _wyk_parts = [_merged] if _merged else []
+        elif _merged.endswith("仅对照"):
+            _merged = _merged[: -len("仅对照")].rstrip(" ·").strip()
+            _wyk_parts = [_merged] if _merged else []
+        _wyk_parts.append("不作买点")
+    lines.append("  威科夫：" + " · ".join(p for p in _wyk_parts if p))
 
     # 短线量度目标：日线 P&F（与中线周线分开算）
     try:

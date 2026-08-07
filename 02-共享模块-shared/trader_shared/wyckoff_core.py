@@ -1564,9 +1564,36 @@ def resolve_wyckoff_primary(
     code = cn = main = note = None
     d = 0
 
-    if wyk.get("utad_signal"):
+    # 日线短波侧：派发波优先暴露 LPSY/SOW/UTAD，避免 BC 永远盖住
+    try:
+        from trader_shared.wyckoff_view import infer_daily_short_wave
+
+        _wave = infer_daily_short_wave(wyk)
+        _side = str(_wave.get("side") or "")
+    except Exception:
+        _wave, _side = {}, ""
+
+    if _side == "distribution":
+        if wyk.get("utad_signal"):
+            code, cn, main, note, d = "UTAD", "派发末上冲", "派发末上冲回落", "警惕破位下行", -1
+        elif wyk.get("lpsy_signal"):
+            code, cn, main, note, d = "LPSY", "最后供应点", "反弹受阻缩量", "最后供应，反抽别追", -1
+        elif wyk.get("sow_signal"):
+            code, cn, main, note, d = "SOW", "弱势下跌", "放量跌破支撑", "弱势确认，防守优先", -1
+        elif wyk.get("upthrust_signal"):
+            code, cn = "UT", "假突破"
+            if wyk.get("upthrust_premature"):
+                main, note, d = "冲高回落假突破", "孤立/过早信号，缺派发背景，当噪声看待", 0
+            else:
+                main, note, d = "冲高回落假突破", "上方试盘失败，结构偏顶", -1
+        elif wyk.get("bc_signal"):
+            code, cn, main, note, d = "BC", "买力高潮", "高位放量滞涨", "购买高潮迹象，注意见好就收", -1
+        elif wyk.get("are_signal"):
+            code, cn, main, note, d = "ARE", "自动回落", "高潮后自动回落", "派发侧回落观察", -1
+
+    if code is None and wyk.get("utad_signal"):
         code, cn, main, note, d = "UTAD", "派发末上冲", "派发末上冲回落", "警惕破位下行", -1
-    elif wyk.get("jac_signal"):
+    elif code is None and wyk.get("jac_signal"):
         code, cn, main, note, d = (
             "JAC", "跳溪", "强势越过溪并站稳", "专名灯，非单独开仓", 1
         )

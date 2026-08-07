@@ -1,8 +1,10 @@
 # 威科夫 Phase A 区间边界（SC/AR）— Agent Handoff
 
 **状态注（2026-08-07）**：短线威科夫与事件灯已并入同一 `威科夫：` 行，尾注「不作买点」；**不再**独立 `事件：` 行。实现以 `short_midline` + `output-template` 为准。
+**状态注（2026-08-07·短波侧）**：日线展示改为先定吸筹/派发侧再亮该侧链（`infer_daily_short_wave` / skill `_slim_daily_side`）；Trader 短线一行与 skill 灯排同源语义。合同：`BUSINESS.md` §2.2、`docs/designs/wyckoff-state-view.md`「短波侧与双链」。
 
 **状态注（2026-08-07）**：短线威科夫与事件灯已并入同一 `威科夫：` 行，尾注「不作买点」；**不再**独立 `事件：` 行。实现以 `short_midline` + `output-template` 为准。
+**状态注（2026-08-07·短波侧）**：日线展示改为先定吸筹/派发侧再亮该侧链（`infer_daily_short_wave` / skill `_slim_daily_side`）；Trader 短线一行与 skill 灯排同源语义。合同：`BUSINESS.md` §2.2、`docs/designs/wyckoff-state-view.md`「短波侧与双链」。
 
 
 > **status**: impl_done（种子史；非 SC 窗 SSOT）  

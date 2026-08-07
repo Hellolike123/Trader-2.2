@@ -370,3 +370,55 @@ def test_p_l1_failed_phase_label_sanitized_on_view():
     assert "Phase A失败" not in v2["phase_label"]
     assert "Phase A 失败" not in v2["phase_label"]
     assert "Phase A失效" in v2["phase_label"] or "Phase A 失效" in v2["phase_label"]
+
+
+def test_format_daily_short_wave_distribution_lpsy():
+    from trader_shared.wyckoff_view import format_daily_phase_display, infer_daily_short_wave
+
+    wyk = {
+        "timeframe": "daily",
+        "phase": "distribution_d",
+        "phase_label": "派发期 D",
+        "bc_signal": True,
+        "lpsy_signal": True,
+        "lpsy_price": 12.34,
+        "phase_a_status": "established",
+        "tr_maturity": "L2",
+        "box_display_mode": "box",
+        "sc_low": 10.0,
+        "ar_high": 13.0,
+        "secondary_test_sc_signal": True,
+    }
+    wave = infer_daily_short_wave(wyk)
+    assert wave["side"] == "distribution"
+    assert wave["code"] == "LPSY"
+    line = format_daily_phase_display(wyk)
+    assert line.startswith("威科夫：")
+    assert "短波派发" in line
+    assert "LPSY" in line
+    assert "12.34" in line
+
+
+def test_format_daily_short_wave_accumulation_sos():
+    from trader_shared.wyckoff_view import format_daily_phase_display, infer_daily_short_wave
+
+    wyk = {
+        "timeframe": "daily",
+        "phase": "accumulation_d",
+        "phase_label": "积累期 D",
+        "sc_signal": True,
+        "sos_signal": True,
+        "sos_price": 20.5,
+        "phase_a_status": "established",
+        "tr_maturity": "L2",
+        "box_display_mode": "box",
+        "sc_low": 18.0,
+        "ar_high": 21.0,
+        "secondary_test_sc_signal": True,
+    }
+    wave = infer_daily_short_wave(wyk)
+    assert wave["side"] == "accumulation"
+    assert wave["code"] == "SOS"
+    line = format_daily_phase_display(wyk)
+    assert "短波吸筹" in line
+    assert "SOS" in line

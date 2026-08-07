@@ -65,8 +65,28 @@ print(view["phase"], view["bias"], view["summary_oneline"])
 
 现状：**单票 🧭 威科夫行与 wyckoff skill 卡已读 View**（`format_midline_display` / `to_wyckoff_state_view`）；仅少数 legacy 路径仍消费旧 dict。新 Agent/渲染优先 View。
 
+## 短波侧与双链（展示合同，2026-08）
+
+报告/skill **先定侧再亮灯**，不是「所有事件一起亮」：
+
+| 侧 | 链 | 成型关键灯 |
+|----|----|------------|
+| 吸筹 `accumulation` | SC→AR→ST→LPS→SOS | SC/AR/ST/LPS/SOS/Spring |
+| 派发 `distribution` | BC→ARE→SOW→LPSY→UTAD | BC/LPSY/SOW/UTAD/UT（ARE 须搭 BC） |
+| 未成型 `none` | 不铺完整链 | — |
+| 失效 `failed` | 失效叙事；破后可露 SOS/LPS | Phase A failed |
+
+- **Skill 卡**：`wyckoff_render` 按 side 只竖排一条链  
+- **Trader 短线**：`format_daily_phase_display` → `短波吸筹|短波派发 · 主灯… · 不作买点`  
+- **Trader 中线**：只读周线，不吃日线短波  
+- **主灯优先级**：派发波内 LPSY/SOW/UTAD 可盖过单纯 BC（避免高潮灯永久占主位）  
+- **门禁**：`tests/test_wyckoff_state_view.py`（含 short_wave 用例）已在 `scripts/run-gate-tests.sh`
+
+相关：`BUSINESS.md` §2.2；`trader/references/output-template.md`；`wyckoff/references/output-template.md`。
+
 ## 非目标
 
 - 线性强制 PS→SC→AR→… 唯一剧情  
 - 威科夫成为整站交易大脑  
 - AI 进入 `build_report` 必经路径  
+- 日线短波灯单独放行开仓 / 写入 fusion 或共振背景岗  
