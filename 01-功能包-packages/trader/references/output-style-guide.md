@@ -59,7 +59,7 @@ Matches `report_renderer/short_midline.py` (`render_short_midline`):
    - optional `位置：` ← pivot_position_weekly
    - `关键价（中线）` 生命线 / 回踩区 / 压力 / 目标 ← `mid_key_prices`（周线引擎，无 🌟）
 4. `⚡ 短线`（A 版读序）
-   - `缠论：` → optional 买点 → `威科夫：`（日线只对照；事件并入同行；尾注「不作买点」；禁止「日线阶段：」/独立「事件：」；箱体 lo-hi / 箱体未成形）→ `动能：` → `资金：`
+   - `缠论：` → optional 买点 → `威科夫：`（日线只对照；事件并入同行；尾注「不作买点」；禁止「日线阶段：」/独立「事件：」；箱体 lo-hi / 箱体未成形）→ `动能：` → `资金：`（短：`5日净额 · 价资 · 主力x/10·档位 · 大单`；不重复量能）
    - （空行）→ `共振：` → `新开：` → `动作：` → optional `原因：` → `破位看：`
    - `关键价（短线）` 止损 / 买点区 / `🌟 现价` / 卖点区 + 买/追亏赚两行 ← `key_prices`
 5. optional `说明：` when mid/short conflict
@@ -98,3 +98,11 @@ From `chan_discipline.build_entry_checklist` / `format_entry_line_c1`（买点�
 - Prefer script markdown; do not re-compose from memory
 - Direction / new entries follow `decision_view` (resonance ∧ strategy ∧ discipline); `fusion.weighted_score` is instrument-only
 - Mid key prices come from weekly engine (`mid_key_prices.py`), not daily `find_key_levels` success path
+
+## Fund line (资金)
+
+- Do **not** repeat 量能 row (平量/量比/近N日).
+- Preferred shape: `5日净出1719万 · 价资看不出 · 主力1/10·撤离 · 大单偏卖`
+- 价资 display glossary: 价涨钱进/出 · 价跌钱进/出 · 横盘钱进/出 · 价资都淡 · 价资看不出
+- 主力 score is **/10** with tier: ≥9强势 · ≥6参与 · ≥3观望 · <3撤离
+- Amount words already carry direction; use absolute value (no `净出-1200万`)

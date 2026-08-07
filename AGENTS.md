@@ -16,6 +16,7 @@
 - **策略亮**：entry 须 `executable=True`（active）；`plan` 仅计划，不算可推荐新开。
 - **T0 v2**：人读结构仪表盘（`docs/t0-strategy-v2.md`），禁止「可执行/可低吸/三重共振买」指令叙事。
 - **输出契约**：`01-功能包-packages/trader/references/output-template.md` 与 `render_short_midline` 同源。实现锚点：`report_core` / `report_builder` / `report_pipeline`。
+- **资金行/主力分**：`资金：` 短扫读（5日净额·价资人话·主力x/10·档位·大单），不重复量能；主力出口 10 分制（≥9强势·≥6参与·≥3观望·<3撤离）。详见 output-template v2.8.1。
 - **顶栏**：`环境：{宽基} ±% ｜ {主交易板块?} ±% ｜ 强于/弱于/持平板块` → `概念：标签…` → `量能：量比… ｜ 调整… ｜ 动能 … ｜ ATR14 …`；概念只标签、不比假指数；环境档内部用但不写「正常/偏弱/跑赢」。法源 `BUSINESS.md` §3.4 / §5.1。
 - **深度与满分示例**：性能史、算法细节、微信端满分范例 → [`AGENTS_DEEP.md`](AGENTS_DEEP.md)。
 
