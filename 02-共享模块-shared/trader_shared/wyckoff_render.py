@@ -659,6 +659,60 @@ def _slim_is_dist_side(view: dict[str, Any], raw: dict[str, Any]) -> bool:
     return bool(lit & _DIST_CODES)
 
 
+def _slim_daily_side(view: dict[str, Any], raw: dict[str, Any]) -> str:
+    """日线短波侧：独立认本波，不默认抄周线。
+
+    returns: accumulation | distribution | none
+    """
+    if _slim_daily_failed(view, raw):
+        return "accumulation"
+
+    accum = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
+    dist: set[str] = set()
+    active = {str(x).lower() for x in (view.get("active_events") or [])}
+    for eid, code in {
+        "bc": "BC",
+        "are": "ARE",
+        "sow": "SOW",
+        "lpsy": "LPSY",
+        "utad": "UTAD",
+        "ut": "UT",
+        "psy": "PSY",
+    }.items():
+        if eid in active:
+            dist.add(code)
+    for code in list(_DIST_CHAIN) + ["UT", "PSY"]:
+        if _slim_code_lit(code, view, raw):
+            dist.add(code)
+    for code in _extra_lit_codes(raw, view):
+        if code in _DIST_CODES:
+            dist.add(code)
+
+    accum_formed = bool(accum & {"SC", "AR", "ST", "LPS", "SOS"}) or _spring_confirm_lit(
+        raw, view
+    )
+    dist_formed = bool(dist & {"BC", "LPSY", "SOW", "UTAD"})
+    # 单 ARE 不成派发主波
+    if not dist_formed and "ARE" in dist and "BC" in dist:
+        dist_formed = True
+
+    if dist_formed and not accum_formed:
+        return "distribution"
+    if accum_formed and not dist_formed:
+        return "accumulation"
+    if dist_formed and accum_formed:
+        if len(dist & set(_DIST_CHAIN)) >= len(accum):
+            return "distribution"
+        return "accumulation"
+    return "none"
+
+
+def _slim_daily_chain(view: dict[str, Any], raw: dict[str, Any]) -> tuple[str, ...]:
+    if _slim_daily_side(view, raw) == "distribution":
+        return tuple(_DIST_CHAIN)
+    return tuple(ACCUM_CHAIN)
+
+
 def _slim_next_hollow(
     view: dict[str, Any],
     raw: dict[str, Any],
@@ -685,18 +739,13 @@ def _slim_next_hollow(
         if _slim_post_fail_strength(view, raw):
             return "○ 下一盯：回踩是否站稳"
         return "○ 下一盯：本波新SC"
-    lit = set(_slim_lit_codes(view, raw, weekly=False))
-    # 日线已亮派发侧、吸筹链全空 → 下一盯走派发链，避免只空喊 SC
-    dist_lit = lit & _DIST_CODES
-    accum_lit = lit & set(ACCUM_CHAIN)
-    if dist_lit and not accum_lit:
-        for code in _DIST_CHAIN:
-            if code not in lit:
-                return f"○ {code}（{_cn(code)}）下一盯"
-        return "○ 下一盯：派发侧观望"
-    for code in ACCUM_CHAIN:
+    chain = _slim_daily_chain(view, raw)
+    lit = _slim_lit_set(chain, view, raw)
+    for code in chain:
         if code not in lit:
             return f"○ {code}（{_cn(code)}）下一盯"
+    if chain == tuple(_DIST_CHAIN):
+        return "○ 下一盯：派发侧观望"
     return "○ 下一盯：回踩确认／延续"
 
 
@@ -1066,14 +1115,9 @@ def _format_slim_full_lights(
     *,
     weekly: bool = False,
 ) -> list[str]:
-    """竖排满灯。
-
-    日线默认主槽仍是吸筹五灯；已亮的派发/辅助 extras（BC/ARE/LPSY…）
-    必须附在后面，避免 🔔「新亮 LPSY」但灯区全空心。
-    """
+    """竖排满灯：只画当前侧这一条链（吸筹或派发），不混双链。"""
     daily_failed = (not weekly) and (_slim_daily_failed(view, raw))
     lines: list[str] = []
-    shown: set[str] = set()
 
     def _lit_line(code: str, *, lit: bool) -> str:
         if not lit:
@@ -1090,29 +1134,11 @@ def _format_slim_full_lights(
         return core
 
     for code in chain:
-        lit = _slim_code_lit(code, view, raw)
-        lines.append(_lit_line(code, lit=lit))
-        shown.add(code)
+        lines.append(_lit_line(code, lit=_slim_code_lit(code, view, raw)))
 
-    # 日线吸筹主槽之外：附已亮 extras（含 LPSY 等派发灯）
-    if (not weekly) and chain == tuple(ACCUM_CHAIN):
-        for code in _extra_lit_codes(raw, view):
-            if code in shown:
-                continue
-            # Spring 下面单独处理注释；这里先画灯
-            lines.append(_lit_line(code, lit=True))
-            shown.add(code)
-        if _spring_confirm_lit(raw, view) and "Spring" not in shown:
-            lines.append(_lit_line("Spring", lit=True))
-            shown.add("Spring")
-        if "Spring" in shown and not _slim_code_lit("ST", view, raw):
-            lines.append(
-                "（注：ST=SC区回测，强势吸筹可不回测；二次测试已完成＝看Spring确认灯）"
-            )
-    elif chain == tuple(ACCUM_CHAIN) and _spring_confirm_lit(raw, view):
-        # 周线若仍走吸筹链，保留原 Spring 附灯
-        if "Spring" not in shown:
-            lines.append(_lit_line("Spring", lit=True))
+    # 仅吸筹链保留 Spring 确认附注（不并进 ST）
+    if chain == tuple(ACCUM_CHAIN) and _spring_confirm_lit(raw, view):
+        lines.append(_lit_line("Spring", lit=True))
         if not _slim_code_lit("ST", view, raw):
             lines.append(
                 "（注：ST=SC区回测，强势吸筹可不回测；二次测试已完成＝看Spring确认灯）"
@@ -1274,29 +1300,46 @@ def _slim_daily_failed(view: dict[str, Any], raw: dict[str, Any]) -> bool:
 
 def _slim_daily_wave_short(view: dict[str, Any], raw: dict[str, Any]) -> str:
     failed = _slim_daily_failed(view, raw)
-    lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
+    side = _slim_daily_side(view, raw)
+    chain = _slim_daily_chain(view, raw)
+    lit = _slim_lit_set(chain, view, raw)
     if failed:
-        if "SOS" in lit:
+        accum = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
+        if "SOS" in accum:
             return "Phase A 失效 · 破后强势｜本波 SOS 强"
-        if "LPS" in lit:
+        if "LPS" in accum:
             return "Phase A 失效｜本波 LPS 修复"
         return "Phase A 失效｜本波无新SC"
-    if "SOS" in lit:
-        event = f"SOS 强｜{_slim_range_head(view, raw)}"
+    head = _slim_range_head(view, raw)
+    if side == "distribution":
+        if "UTAD" in lit:
+            event = f"UTAD｜{head}"
+        elif "LPSY" in lit:
+            event = f"LPSY｜{head}"
+        elif "SOW" in lit:
+            event = f"SOW｜{head}"
+        elif "BC" in lit:
+            event = f"BC｜{head}"
+        elif "ARE" in lit:
+            event = f"ARE｜{head}"
+        else:
+            event = f"短波派发｜{head}"
+    elif "SOS" in lit:
+        event = f"SOS 强｜{head}"
     elif "LPS" in lit:
-        event = f"LPS 修复｜{_slim_range_head(view, raw)}"
+        event = f"LPS 修复｜{head}"
     elif "ST" in lit:
-        event = f"ST 已现｜{_slim_range_head(view, raw)}"
+        event = f"ST 已现｜{head}"
     elif _spring_confirm_lit(raw, view):
-        event = f"Spring 确认｜{_slim_range_head(view, raw)}"
+        event = f"Spring 确认｜{head}"
     elif "AR" in lit:
-        event = f"AR 反弹｜{_slim_range_head(view, raw)}"
+        event = f"AR 反弹｜{head}"
     elif "SC" in lit:
-        event = f"SC 已现｜{_slim_range_head(view, raw)}"
+        event = f"SC 已现｜{head}"
     else:
-        event = f"本波未成型｜{_slim_range_head(view, raw)}"
+        event = f"本波未成型｜{head}"
     phase_head = _slim_phase_display(view)
-    if phase_head:
+    if phase_head and side != "distribution":
         return f"{phase_head}｜{event}"
     return event
 
@@ -1711,17 +1754,22 @@ def _slim_board_daily_label(view: dict[str, Any], raw: dict[str, Any]) -> str:
     if not view and not raw:
         return "结构未明"
     failed = _slim_daily_failed(view, raw)
-    lit = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
+    side = _slim_daily_side(view, raw)
+    chain = _slim_daily_chain(view, raw)
+    lit = _slim_lit_set(chain, view, raw)
     if failed:
-        if "SOS" in lit:
+        accum = _slim_lit_set(tuple(ACCUM_CHAIN), view, raw)
+        if "SOS" in accum:
             return "破后强势"
-        if "LPS" in lit:
+        if "LPS" in accum:
             return "修复中"
         return "本波无新SC"
-    if not lit and not _spring_confirm_lit(raw, view):
+    if side == "distribution":
+        return "短波派发"
+    if side == "none" or (not lit and not _spring_confirm_lit(raw, view)):
         return "本波未成型"
     if lit or _spring_confirm_lit(raw, view):
-        return "链推进中"
+        return "短波吸筹"
     return "结构未明"
 
 
@@ -1920,6 +1968,7 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
         # reason like "（日线已见…）"
         action_display = f"{action_show}｜建议入池{reason}" if reason else f"{action_show}｜建议入池"
 
+    daily_chain = _slim_daily_chain(daily_view, daily_raw)
     lines: list[str] = [
         title,
         f"状态：{situation}",
@@ -1929,7 +1978,6 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
         "",
         f"🧭 周线 · {w_lab}",
         f"  {_slim_weekly_sentence(weekly_view, weekly_raw)}",
-        "  灯",
     ]
     for lamp in _format_slim_full_lights(
         weekly_chain, weekly_view, weekly_raw, weekly=True
@@ -1946,9 +1994,8 @@ def render_wyckoff_slim(plan: dict[str, Any]) -> str:
     explain = _slim_daily_explain(daily_view, daily_raw)
     if explain:
         lines.append(f"  {explain}")
-    lines.append("  灯")
     for lamp in _format_slim_full_lights(
-        tuple(ACCUM_CHAIN), daily_view, daily_raw, weekly=False
+        daily_chain, daily_view, daily_raw, weekly=False
     ):
         lines.append(f"  {lamp}")
 
@@ -2049,7 +2096,6 @@ def render_wyckoff_detail(plan: dict[str, Any]) -> str:
         f"  失效：{w_inv}",
         f"  入池：{pool_line}",
         "",
-        "  灯",
     ]
     for lamp in _format_weekly_lights(weekly_view, weekly_raw):
         lines.append(f"  {lamp}")
@@ -2062,7 +2108,6 @@ def render_wyckoff_detail(plan: dict[str, Any]) -> str:
             f"  区间：{d_range}",
             f"  失效：{d_inv}",
             "",
-            "  灯",
         ]
     )
     for lamp in _format_daily_lights(daily_view, daily_raw):

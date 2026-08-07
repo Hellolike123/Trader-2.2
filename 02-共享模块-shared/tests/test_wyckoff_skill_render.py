@@ -358,7 +358,7 @@ def test_sb1_default_slim_skeleton_no_long_blocks():
     assert "动作：可跟踪｜建议入池（日线已见 LPS/SOS，周线非偏空）" in text
     assert "入池：" not in text
     assert "🧭 周线 · 吸筹中" in text
-    assert "⚡ 日线 · 链推进中" in text
+    assert "⚡ 日线 · 短波吸筹" in text
     assert "📌 现在 / 变好 / 变差" in text
     assert "  现在：" in text
     assert "  变好：" in text
@@ -1359,7 +1359,7 @@ class TestStScNoteS11:
         assert not any("注：ST=SC区回测" in ln for ln in lines), lines
 
 def test_slim_daily_shows_lit_lpsy_extra():
-    """日线已亮 LPSY（派发 extras）必须出现在 slim 灯区，不能只在 🔔 变化里。"""
+    """日线短波派发：只排派发链，LPSY 在链内；无单独「灯」标题行。"""
     plan = _sample_plan()
     plan["daily_raw"] = {
         **(plan.get("daily_raw") or {}),
@@ -1376,13 +1376,17 @@ def test_slim_daily_shows_lit_lpsy_extra():
     plan["daily_view"] = {
         **(plan.get("daily_view") or {}),
         "active_events": ["bc", "are", "lpsy"],
+        "phase_a_failed": False,
     }
     plan["change_line"] = "新亮：LPSY（最后供应点）｜仍亮：BC（买力高潮）｜熄灭：无"
     text = render_wyckoff_slim(plan)
+    assert "\n  灯\n" not in text and not any(ln.strip() == "灯" for ln in text.splitlines())
     daily_block = text.split("⚡ 日线 · ", 1)[1]
+    assert "短波派发" in text
     assert "● LPSY（最后供应点）" in daily_block
     assert "46.65" in daily_block
     assert "● BC（买力高潮）" in daily_block
-    # 变化与灯区一致：可出现新亮 LPSY
+    # 吸筹空槽不再混排
+    assert "○ SC（卖力高潮）" not in daily_block.split("📌", 1)[0]
     assert "新亮：LPSY（最后供应点）" in text
 
