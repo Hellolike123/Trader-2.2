@@ -1050,7 +1050,7 @@ def test_fund_line_appends_main_force_and_relation():
     assert "5日净出" in fund_line and ("1800万" in fund_line or "0.18亿" in fund_line)
     assert "连3日净出" in fund_line or "连3日流出" in fund_line
     assert ("价涨钱出" in fund_line or "价涨但资金出" in fund_line or "价涨资出" in fund_line)
-    assert "主力4/15" in fund_line
+    assert "主力4/10" in fund_line
     assert "大单偏卖" in fund_line
 
 

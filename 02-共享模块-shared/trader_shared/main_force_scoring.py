@@ -1,12 +1,12 @@
-"""主力行为独立评分模块（15分制）。
+"""主力行为独立评分模块（10分制）。
 
-在 main_force.py 阶段识别的基础上，提供细粒度的 15 分制评分，
+在 main_force.py 阶段识别的基础上，提供细粒度的 10 分制评分，
 用于选股池打分和输出展示。
 
-评分维度：
-  - 资金流向（6分）：累计净流入、连续流入天数、净流入占比
-  - 筹码搬家（5分）：支撑稳定性、阻力变化、警告级别
-  - 大单异动（4分）：大单密度、净买卖比、有效性
+评分维度（出口 10 分制；内部仍 6+5+4 细打再折算）：
+  - 资金流向（展示 4 分 / 内部 6）：累计净流入、连续流入天数、净流入占比
+  - 筹码搬家（展示 3 分 / 内部 5）：支撑稳定性、阻力变化、警告级别
+  - 大单异动（展示 3 分 / 内部 4）：大单密度、净买卖比、有效性
 
 用法:
     from trader_shared.main_force_scoring import score_main_force
@@ -24,7 +24,7 @@ def score_main_force(
     big_order: dict[str, Any],
     bars: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """主力行为 15 分制评分。
+    """主力行为 10 分制评分。
 
     Args:
         features: calc_fund_flow_features() 返回值
@@ -34,28 +34,53 @@ def score_main_force(
 
     Returns:
         {
-            "total_score": int,        # 总分 0-15
-            "flow_score": int,         # 资金流向分 0-6
-            "chip_score": int,         # 筹码搬家分 0-5
-            "order_score": int,        # 大单异动分 0-4
+            "total_score": int,        # 总分 0-10
+            "flow_score": int,         # 资金流向分 0-4（展示）
+            "chip_score": int,         # 筹码搬家分 0-3（展示）
+            "order_score": int,        # 大单异动分 0-3（展示）
+            "scale": 10,               # 分制
             "detail": { ... },         # 各维度详细解释
             "label": str,              # 中文等级标签
         }
     """
-    flow = _score_flow(features)
-    chip = _score_chip(chip_migration)
-    order = _score_order(big_order)
-    total = flow + chip + order
+    # 内部子维仍按 6+5+4=15 细打，出口统一折成 10 分制（便于人读）
+    flow_raw = _score_flow(features)
+    chip_raw = _score_chip(chip_migration)
+    order_raw = _score_order(big_order)
+    total_raw = flow_raw + chip_raw + order_raw  # 0-15
+
+    def _scale(v: int, vmax: int, nmax: int) -> int:
+        if vmax <= 0:
+            return 0
+        return int(round(v * nmax / vmax))
+
+    # 分项展示：4 + 3 + 3 = 10
+    flow = _scale(flow_raw, 6, 4)
+    chip = _scale(chip_raw, 5, 3)
+    order = _scale(order_raw, 4, 3)
+    total = _scale(total_raw, 15, 10)
+    # 保证分项和与总分差不超过 1（四舍五入缝）
+    parts_sum = flow + chip + order
+    if parts_sum != total and parts_sum > 0:
+        # 以总分准，微调最大的一项
+        diff = total - parts_sum
+        order = max(0, min(3, order + diff))
+        if flow + chip + order != total:
+            flow = max(0, min(4, total - chip - order))
 
     label = _score_to_label(total)
 
     detail: dict[str, Any] = {
         "flow_points": flow,
-        "flow_max": 6,
+        "flow_max": 4,
         "chip_points": chip,
-        "chip_max": 5,
+        "chip_max": 3,
         "order_points": order,
-        "order_max": 4,
+        "order_max": 3,
+        "raw_total_15": total_raw,
+        "raw_flow_6": flow_raw,
+        "raw_chip_5": chip_raw,
+        "raw_order_4": order_raw,
         "signals": _build_signals(features, chip_migration, big_order),
     }
 
@@ -64,6 +89,7 @@ def score_main_force(
         "flow_score": flow,
         "chip_score": chip,
         "order_score": order,
+        "scale": 10,
         "detail": detail,
         "label": label,
     }
@@ -225,12 +251,12 @@ def _score_order(big_order: dict[str, Any]) -> int:
 # ── 等级标签 ─────────────────────────────────────────────────────
 
 def _score_to_label(total: int) -> str:
-    """总分 0-15 → 等级标签。"""
-    if total >= 13:
+    """总分 0-10 → 等级标签。"""
+    if total >= 9:
         return "🟢主力强势"
-    elif total >= 9:
+    elif total >= 6:
         return "🟡主力参与"
-    elif total >= 5:
+    elif total >= 3:
         return "🟠主力观望"
     else:
         return "🔴主力撤离"

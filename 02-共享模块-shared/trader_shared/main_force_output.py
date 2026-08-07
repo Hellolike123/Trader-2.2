@@ -13,6 +13,23 @@ from trader_shared.main_force import STAGE_LABELS
 
 
 
+
+def _mf_score_10(score_result: dict[str, Any] | None) -> int | None:
+    """主力总分统一为 0-10；兼容旧 0-15。"""
+    if not isinstance(score_result, dict):
+        return None
+    try:
+        total = score_result.get("total_score")
+        if total is None:
+            return None
+        v = int(total)
+    except (TypeError, ValueError):
+        return None
+    if v > 10:
+        v = int(round(v * 10 / 15))
+    return max(0, min(10, v))
+
+
 def _plain_flow_price_relation(rel: str) -> str:
     s = str(rel or "").strip()
     table = {
@@ -35,7 +52,7 @@ def format_main_force_score_section(result: dict[str, Any], score_result: dict[s
 
     Args:
         result: detect_main_force_stage() 返回值
-        score_result: score_main_force() 返回值（15分制），None 时降级输出
+        score_result: score_main_force() 返回值（10分制），None 时降级输出
 
     Returns:
         微信端纯文本格式的主力行为评分段落
@@ -47,7 +64,7 @@ def format_main_force_score_section(result: dict[str, Any], score_result: dict[s
     stage_cn = STAGE_LABELS.get(stage, "未知")
 
     if score_result and score_result.get("total_score") is not None:
-        total = score_result["total_score"]
+        total = _mf_score_10(score_result)
         label = score_result.get("label", "🔴无数据")
         flow = score_result.get("flow_score", 0)
         chip = score_result.get("chip_score", 0)
@@ -57,8 +74,8 @@ def format_main_force_score_section(result: dict[str, Any], score_result: dict[s
 
         lines = [
             "💰 主力行为",
-            f"阶段：{stage_cn} ｜ 综合 {total}/15（{label}）",
-            f"  资金 {flow}/6 ｜ 筹码 {chip}/5 ｜ 大单 {order}/4",
+            f"阶段：{stage_cn} ｜ 综合 {total}/10（{label}）",
+            f"  资金 {flow}/4 ｜ 筹码 {chip}/3 ｜ 大单 {order}/3",
         ]
 
         if signals:

@@ -252,12 +252,16 @@ def _short_fund_display(
     mf_label = str(mf.get("label") or "").strip()
     # 标签压短：只要分数；等级仅在偏强/偏弱/强/弱时带一字
     if mf_total_i is not None:
+        # 兼容旧缓存/测试若仍喂 0-15：>10 则折成 10 分制
+        if mf_total_i > 10:
+            mf_total_i = int(round(mf_total_i * 10 / 15))
+        mf_total_i = max(0, min(10, mf_total_i))
         short_lbl = ""
         for k in ("偏强", "偏弱", "很强", "很弱", "强", "弱"):
             if k in mf_label:
                 short_lbl = k
                 break
-        extras.append(f"主力{mf_total_i}/15" + (f"·{short_lbl}" if short_lbl else ""))
+        extras.append(f"主力{mf_total_i}/10" + (f"·{short_lbl}" if short_lbl else ""))
 
     # 大单：优先短方向，其次 summary 压短
     bo_dir = str(big_order_direction or "").strip()
@@ -338,7 +342,7 @@ def _short_fund_display(
             return 100
         if x in ("价涨钱进", "价涨钱出", "价跌钱进", "价跌钱出", "横盘钱进", "横盘钱出", "价资都淡", "价资看不出") or x.startswith("价"):
             return 90
-        if x.startswith("主力") and "/15" in x:
+        if x.startswith("主力") and "/10" in x:
             return 70
         if x.startswith("连") and "日" in x:
             return 50

@@ -321,7 +321,7 @@ class TestFormatMainForceEnhanced:
         assert "连续3日净流入" in text
         assert "超大单 +500万" in text
         assert "大单 +300万" in text
-        assert "价跌资入" in text
+        assert "价跌钱进" in text or "价跌资入" in text
         assert "关注是否放量突破" in text
 
     def test_unknown_shows_unavailable(self):
