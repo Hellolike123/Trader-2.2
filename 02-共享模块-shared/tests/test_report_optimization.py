@@ -1035,7 +1035,7 @@ def test_vpf_with_veto_appends():
 
 
 def test_fund_line_appends_main_force_and_relation():
-    """资金行可附加主力评分 / 价资关系 / 大单短标签。"""
+    """资金行可附加 5日金额 / 连日 / 价资 / 主力评分 / 大单。"""
     r = _report()
     r["fund_flow_features"] = {
         "cum_flow_5d_wan": -1800,
@@ -1046,10 +1046,33 @@ def test_fund_line_appends_main_force_and_relation():
     r["big_order_direction"] = "偏卖"
     out = render_short_midline(r)
     fund_line = next(l for l in out.split("\n") if "资金：" in l)
-    assert "连3日流出" in fund_line
+    # 金额优先：能看出进出多少
+    assert "5日净出" in fund_line and ("1800万" in fund_line or "0.18亿" in fund_line)
+    assert "连3日净出" in fund_line or "连3日流出" in fund_line
     assert ("价涨钱出" in fund_line or "价涨但资金出" in fund_line or "价涨资出" in fund_line)
     assert "主力4/15" in fund_line
     assert "大单偏卖" in fund_line
+
+
+def test_fund_line_shows_5d_amount_even_when_primary_has_main_force_word():
+    """主句已有主力字样时，仍应补上 5 日净额（旧逻辑会漏金额）。"""
+    r = _report()
+    r["fusion"] = dict(r.get("fusion") or {})
+    r["fusion"]["signals_detail"] = {
+        "vpf": {"reason": "平量（量比1.0）·量价中性", "direction": 0, "confidence": 0.2}
+    }
+    # short_midline may read volume_signal differently; set common keys
+    r["volume_signal"] = {"reason": "主力偏弱", "direction": -1}
+    r["fund_flow_features"] = {
+        "cum_flow_5d_wan": -15387,
+        "consecutive_outflow_days": 0,
+        "flow_price_relation": "价资关系未知",
+    }
+    r["main_force_score"] = {"total_score": 0, "label": "弱"}
+    out = render_short_midline(r)
+    fund_line = next(l for l in out.split("\n") if "资金：" in l)
+    assert "5日净出" in fund_line
+    assert ("1.54亿" in fund_line or "15387万" in fund_line)
 
 
 def test_fund_line_marks_estimate_and_stale_source():

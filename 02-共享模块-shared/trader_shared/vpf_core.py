@@ -241,19 +241,27 @@ def build_vpf_signal(
         if con_out >= 3:
             fund_dir = -1
             fund_conf = 0.75
-            fund_reason = f"主力连{con_out}日净流出"
+            fund_reason = f"连{con_out}日净出"
+            if abs(cum5_f) >= 100:
+                fund_reason += f"（5日合计{cum5_f:.0f}万）"
         elif con_out >= 2:
             fund_dir = -1
             fund_conf = 0.55
-            fund_reason = f"主力连{con_out}日净流出"
+            fund_reason = f"连{con_out}日净出"
+            if abs(cum5_f) >= 100:
+                fund_reason += f"（5日合计{cum5_f:.0f}万）"
         elif con_in >= 3:
             fund_dir = 1
             fund_conf = 0.75
-            fund_reason = f"主力连{con_in}日净流入"
+            fund_reason = f"连{con_in}日净进"
+            if abs(cum5_f) >= 100:
+                fund_reason += f"（5日合计{cum5_f:.0f}万）"
         elif con_in >= 2:
             fund_dir = 1
             fund_conf = 0.55
-            fund_reason = f"主力连{con_in}日净流入"
+            fund_reason = f"连{con_in}日净进"
+            if abs(cum5_f) >= 100:
+                fund_reason += f"（5日合计{cum5_f:.0f}万）"
         elif cum5_f <= -500:
             # 资金强度比归一化：相对均成交额判断信号强度
             fund_dir = -1
@@ -265,10 +273,10 @@ def build_vpf_signal(
                     fund_conf = 0.40   # 中信号
                 else:
                     fund_conf = 0.25  # 弱信号：相对市值太小
-                fund_reason = f"近5日主力累计流出{cum5_f:.0f}万（占比{_strength:.2%}）"
+                fund_reason = f"5日净出{cum5_f:.0f}万（占比{_strength:.2%}）"
             else:
                 fund_conf = 0.4
-                fund_reason = f"近5日主力累计流出{cum5_f:.0f}万"
+                fund_reason = f"5日净出{cum5_f:.0f}万"
         elif cum5_f >= 500:
             fund_dir = 1
             if avg_daily_turnover_wan and avg_daily_turnover_wan > 0:
@@ -279,10 +287,10 @@ def build_vpf_signal(
                     fund_conf = 0.40
                 else:
                     fund_conf = 0.15
-                fund_reason = f"近5日主力累计流入{cum5_f:.0f}万（占比{_strength:.2%}）"
+                fund_reason = f"5日净进{cum5_f:.0f}万（占比{_strength:.2%}）"
             else:
                 fund_conf = 0.35
-                fund_reason = f"近5日主力累计流入{cum5_f:.0f}万"
+                fund_reason = f"5日净进{cum5_f:.0f}万"
         else:
             fund_dir = 0
             fund_conf = 0.25

@@ -201,20 +201,42 @@ def _short_fund_display(
     ff = fund_features if isinstance(fund_features, dict) else {}
     extras: list[str] = []
 
-    # 若主句还只是价量，补连续日；无连续日才写 5 日累计金额
-    if "主力" not in primary and "净流" not in primary:
-        try:
-            cum5 = float(ff.get("cum_flow_5d_wan") or 0)
-        except (TypeError, ValueError):
-            cum5 = 0.0
+    # 资金进出金额：有显著 5 日净额就写清「净进/净出多少」
+    # （旧逻辑：主句已有「主力/净流」或已有连日时可能不贴金额 → 用户看不出进出多少）
+    try:
+        cum5 = float(ff.get("cum_flow_5d_wan") or 0)
+    except (TypeError, ValueError):
+        cum5 = 0.0
+    try:
         con_in = int(ff.get("consecutive_inflow_days") or 0)
+    except (TypeError, ValueError):
+        con_in = 0
+    try:
         con_out = int(ff.get("consecutive_outflow_days") or 0)
-        if con_out >= 2:
-            extras.append(f"连{con_out}日流出")
-        elif con_in >= 2:
-            extras.append(f"连{con_in}日流入")
-        elif abs(cum5) >= 100:
-            extras.append(("主力5日流入" if cum5 > 0 else "主力5日流出") + _fmt_flow_wan(abs(cum5)))
+    except (TypeError, ValueError):
+        con_out = 0
+
+    primary_has_amt = bool(
+        re.search(r"\d", primary)
+        and (("万" in primary) or ("亿" in primary))
+    )
+    # 主句里的旧口径压成人话短词（仍保留金额）
+    primary = re.sub(r"近5日主力累计流出\s*", "5日净出", primary)
+    primary = re.sub(r"近5日主力累计流入\s*", "5日净进", primary)
+    primary = re.sub(r"主力5日流出\s*", "5日净出", primary)
+    primary = re.sub(r"主力5日流入\s*", "5日净进", primary)
+    primary = re.sub(r"主力连(\d+)日净流出", r"连\1日净出", primary)
+    primary = re.sub(r"主力连(\d+)日净流入", r"连\1日净进", primary)
+    primary = re.sub(r"\s{2,}", " ", primary).strip(" ·｜|")
+
+    if abs(cum5) >= 100 and not primary_has_amt:
+        amt = _fmt_flow_wan(abs(cum5))
+        extras.append(("5日净进" if cum5 > 0 else "5日净出") + amt)
+    # 连日方向：与金额可并存（先金额后连日，扫读先看多少）
+    if con_out >= 2 and f"连{con_out}日" not in primary:
+        extras.append(f"连{con_out}日净出")
+    elif con_in >= 2 and f"连{con_in}日" not in primary:
+        extras.append(f"连{con_in}日净进")
 
     # 价资关系（人话；短且信息密度高，优先保留）
     rel = _plain_flow_price_relation(str(ff.get("flow_price_relation") or ""))
@@ -286,7 +308,8 @@ def _short_fund_display(
         if abs(cum10) >= 3000 and "10日" not in primary:
             extras.append(("10日流入" if cum10 > 0 else "10日流出") + _fmt_flow_wan(abs(cum10)))
 
-    # 去重保序；先收 5 项，超长再从末尾丢（连续/价资/评分优先于大单/源）
+    # 去重保序。优先级：金额 > 连日 > 价资 > 主力分 > 大单/源
+    # 超长时从末尾丢；金额与价资尽量保留，方便一眼看进出多少
     seen: set[str] = set()
     clean_extras: list[str] = []
     for x in extras:
@@ -295,18 +318,50 @@ def _short_fund_display(
             clean_extras.append(x)
     clean_extras = clean_extras[:5]
 
-    parts = [primary] if primary else []
-    parts.extend(clean_extras)
-    out = " · ".join(p for p in parts if p)
-    out = re.sub(r"（占比[^）]*）", "", out).strip(" ·")
-    # 仍超长：从末尾丢补充项
-    while len(out) > 52 and clean_extras:
-        clean_extras.pop()
-        parts = [primary] if primary else []
-        parts.extend(clean_extras)
-        out = " · ".join(p for p in parts if p)
-    if len(out) > 52:
-        out = out[:50] + "…"
+    # 主句过长时先压掉次要括号（量比细节可留到量能行）
+    if len(primary) > 22:
+        primary = re.sub(r"（量比[^）]*）", "", primary).strip(" ·｜|")
+    if len(primary) > 22:
+        primary = re.sub(r"（[^）]{8,}）", "", primary).strip(" ·｜|")
+
+    def _join(pri: str, xs: list[str]) -> str:
+        parts = [pri] if pri else []
+        parts.extend(xs)
+        s = " · ".join(p for p in parts if p)
+        return re.sub(r"（占比[^）]*）", "", s).strip(" ·")
+
+    out = _join(primary, clean_extras)
+    # 微信行宽放宽到 ~64；仍超长则按可丢优先级裁
+    # 可丢：源/偏旧/估 → 大单 → 连日 → 主力分；尽量留 5日金额 + 价资
+    def _drop_score(x: str) -> int:
+        if x.startswith("5日净"):
+            return 100
+        if x in ("价涨钱进", "价涨钱出", "价跌钱进", "价跌钱出", "横盘钱进", "横盘钱出", "价资都淡", "价资看不出") or x.startswith("价"):
+            return 90
+        if x.startswith("主力") and "/15" in x:
+            return 70
+        if x.startswith("连") and "日" in x:
+            return 50
+        if x.startswith("大单"):
+            return 30
+        if x.startswith("源") or x in ("资金估", "资金偏旧"):
+            return 10
+        return 40
+
+    max_len = 64
+    while len(out) > max_len and clean_extras:
+        # 丢掉当前最不重要的一项
+        idx = min(range(len(clean_extras)), key=lambda i: _drop_score(clean_extras[i]))
+        # 若只剩金额/价资仍超长，再允许丢价资
+        if _drop_score(clean_extras[idx]) >= 90 and len(clean_extras) > 1:
+            # 找次重要
+            cands = [i for i in range(len(clean_extras)) if _drop_score(clean_extras[i]) < 90]
+            if cands:
+                idx = min(cands, key=lambda i: _drop_score(clean_extras[i]))
+        clean_extras.pop(idx)
+        out = _join(primary, clean_extras)
+    if len(out) > max_len:
+        out = out[: max_len - 1] + "…"
     return out or "中性"
 
 
