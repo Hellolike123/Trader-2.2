@@ -1011,9 +1011,13 @@ def test_momentum_short_reason():
 # ── Task 7: 价量资金展示 vpf.reason 原文 ──
 
 def test_vpf_reason_full():
-    """价量资金行展示 vpf.reason 原文。"""
+    """资金行短展示：不重复量能细节，保留可扫读资金信息。"""
     out = render_short_midline(_report())
-    assert "资金：平量（量比1.1，近3日-1.4%）" in out
+    fund_line = next(l for l in out.split("\n") if "资金：" in l)
+    assert "资金：" in fund_line
+    assert "量比" not in fund_line
+    # 默认 fixture 无显著资金特征时，允许中性/看不清，但不回堆平量括号
+    assert "平量（" not in fund_line
 
 
 def test_vpf_no_veto_no_append():
@@ -1046,12 +1050,13 @@ def test_fund_line_appends_main_force_and_relation():
     r["big_order_direction"] = "偏卖"
     out = render_short_midline(r)
     fund_line = next(l for l in out.split("\n") if "资金：" in l)
-    # 金额优先：能看出进出多少
+    # 金额优先：短行只保关键项（量能细节不再进资金行）
     assert "5日净出" in fund_line and ("1800万" in fund_line or "0.18亿" in fund_line)
-    assert "连3日净出" in fund_line or "连3日流出" in fund_line
-    assert ("价涨钱出" in fund_line or "价涨但资金出" in fund_line or "价涨资出" in fund_line)
-    assert "主力4/10" in fund_line and ("观望" in fund_line or "·" in fund_line)
-    assert "大单偏卖" in fund_line
+    assert "主力4/10" in fund_line and "观望" in fund_line
+    # 价资 / 大单：有空才带；至少有一个辅助项
+    assert ("价涨钱出" in fund_line) or ("大单偏卖" in fund_line)
+    assert "量比" not in fund_line
+    assert "平量" not in fund_line
 
 
 def test_fund_line_shows_5d_amount_even_when_primary_has_main_force_word():

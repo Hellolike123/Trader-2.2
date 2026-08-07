@@ -64,13 +64,18 @@ def _vpf_reason_bearish(reason: str) -> bool:
     """判定 vpf reason 是否偏空 (复刻旧逻辑, 但收紧 `连` 子串匹配)。
 
     旧逻辑用裸 `"连" in reason`, 会误命中"连续净流入"/"连续涨停"等偏多文案。
-    精确语义: `连` 仅当伴随"净流出"且不含"净流入"时才算偏空
-    (覆盖"主力连3日净流出"/"主力连续净流出"等真实偏空表述)。
+    精确语义: `连` 仅当伴随净出/净流出且不含净进/净流入时才算偏空
+    (覆盖旧文案"主力连3日净流出"与新人话"连3日净出"/"5日净出xxxx万")。
     """
     if any(k in reason for k in _VPF_BEARISH_KEYWORDS):
         return True
-    # `连` 收紧: 仅"连续/连N日 净流出"算偏空, 排除"连续净流入"
-    if "连" in reason and "净流出" in reason and "净流入" not in reason:
+    # 新人话：5日净出 / 10日净出（金额可正可负写法都已去符号，关键词即可）
+    if ("5日净出" in reason or "10日净出" in reason) and "净进" not in reason:
+        return True
+    # `连` 收紧: 仅"连续/连N日 净出/净流出"算偏空, 排除"连续净流入/净进"
+    if "连" in reason and (("净流出" in reason) or ("净出" in reason)) and (
+        "净流入" not in reason and "净进" not in reason
+    ):
         return True
     return False
 

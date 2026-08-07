@@ -77,5 +77,5 @@ class TestBuildVpfSignal:
         assert sig["fund_direction"] == 1
         assert sig["vp_direction"] == -1
         assert sig["fund_quality"] == "full"
-        assert "主力连2日净流入" in str(sig.get("reason") or "")
+        assert ("连2日净进" in str(sig.get("reason") or "") or "主力连2日净流入" in str(sig.get("reason") or ""))
         assert "天量天价" in str(sig.get("reason") or "") or "价量" in str(sig.get("reason") or "")

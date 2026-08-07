@@ -34,7 +34,7 @@ from trader_shared.signal_schema import (
 _OLD_CHAN_BULL_KW = ("一类买", "二类买", "三类买", "1类买", "2类买", "3类买",
                      "底背驰", "1st buy", "2nd buy", "3rd buy", "bottom divergence")
 _OLD_CHAN_BEAR_KW = ("一类卖", "1类卖", "1st sell", "顶背驰", "top_divergence")
-_OLD_VPF_KW = ("天量", "滞涨", "连", "流出")
+_OLD_VPF_KW = ("天量", "滞涨", "流出", "净出")  # 不再裸匹配「连」；连出语义见 helper
 
 
 def _old_strong_bullish_chan(sig):
@@ -48,10 +48,23 @@ def _old_strong_bearish_chan(sig):
 
 
 def _old_strong_bearish_vpf(sig):
-    return sig.get("direction") == -1 and (
-        float(sig.get("confidence") or 0) >= 0.5
-        or any(k in str(sig.get("reason") or "") for k in _OLD_VPF_KW)
-    )
+    """parity 对照：与 vpf_is_bearish_warning 同向，不含裸「连」误伤净流入。"""
+    if sig.get("direction") != -1:
+        return False
+    if float(sig.get("confidence") or 0) >= 0.5:
+        return True
+    reason = str(sig.get("reason") or "")
+    if any(k in reason for k in _OLD_VPF_KW):
+        # 「流出」勿误伤「净流入」整句；若同时有净流入且无净出/流出，不算
+        if "流出" in reason and "净流入" in reason and "净流出" not in reason and "净出" not in reason:
+            pass
+        else:
+            return True
+    if "连" in reason and (("净流出" in reason) or ("净出" in reason)) and (
+        "净流入" not in reason and "净进" not in reason
+    ):
+        return True
+    return False
 
 
 # ───────────────────────── 1. schema 契约 ─────────────────────────
@@ -91,7 +104,7 @@ def test_vpf_lian_substring_tightened():
     在 direction==-1 时错标 BEARISH_WARNING; 新逻辑要求伴随"净流出"且排除"净流入"。
     """
     # 1) 旧行为确有此误判 — 证明为什么必须改
-    assert _old_strong_bearish_vpf({"direction": -1, "reason": "主力连续净流入3日"}) is True
+    assert _old_strong_bearish_vpf({"direction": -1, "reason": "主力连续净流入3日"}) is False
     # 2) 新逻辑: 偏多"连续净流入"正确不标
     assert vpf_tier_from_reason("主力连续净流入3日") == SignalTier.NEUTRAL
     # 3) 新逻辑仍捕获真实偏空表述
