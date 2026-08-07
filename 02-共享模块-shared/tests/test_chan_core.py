@@ -1920,8 +1920,14 @@ class TestBuildSegmentsFollowups:
                 assert sg["end_price"] == ep
 
 
-    def test_unfinished_sole_segment_flips_when_net_up(self):
-        """华工周线形：唯一未完成段初判 down，末笔创新高 → 展示纠偏为 up。"""
+    def test_huagong_weekly_bug_r_cuts_down_then_up(self):
+        """华工周线形：Bug R（§3.6）修复后，第 9 笔 up 高点 50.08 突破 down 段
+        起点高 46.39，down 段正确闭合于 22.96，再起 up 段至 187.66。
+
+        历史行为：旧「整根脱离」条件过严不切，靠 §3.5 把整段翻转假装 1 段 up；
+        Bug R 对齐 formulas §3.6 后，此处是真正的两段（down+up），末段 up 收尾
+        在最高点 187.66，不再依赖 §3.5 兜底。
+        """
         strokes = [
             {"direction": "down", "start_price": 46.39, "end_price": 28.86},
             {"direction": "up", "start_price": 28.86, "end_price": 34.55},
@@ -1939,14 +1945,28 @@ class TestBuildSegmentsFollowups:
             {"direction": "up", "start_price": 67.28, "end_price": 187.66},
         ]
         segs = build_segments(strokes, min_strokes=3)
+        assert len(segs) == 2
+        assert segs[0]["direction"] == "down"
+        assert float(segs[0]["end_price"]) <= 22.96 + 1e-6
+        assert segs[1]["direction"] == "up"
+        assert segs[1]["end_price"] == segs[1]["high"]
+        assert float(segs[1]["end_price"]) >= 187.66 - 1e-6
+
+    def test_unfinished_sole_segment_flips_when_net_up(self):
+        """§3.5：唯一未完成段初判 down，末笔创新高但 Bug R 被护栏挡住
+        （破坏后剩余笔不足 min_strokes），整段净上涨 → 展示纠偏为 up。"""
+        strokes = [
+            {"direction": "down", "start_price": 50.0, "end_price": 40.0},
+            {"direction": "up", "start_price": 40.0, "end_price": 45.0},
+            {"direction": "down", "start_price": 45.0, "end_price": 38.0},
+            {"direction": "up", "start_price": 38.0, "end_price": 48.0},
+            {"direction": "down", "start_price": 48.0, "end_price": 42.0},
+            {"direction": "up", "start_price": 42.0, "end_price": 55.0},
+        ]
+        segs = build_segments(strokes, min_strokes=3)
         assert len(segs) == 1
         assert segs[0]["direction"] == "up"
-        assert segs[0]["end_price"] == segs[0]["high"]
-        assert float(segs[0]["end_price"]) >= 187.66 - 1e-6
-        assert not (
-            segs[0]["direction"] == "down"
-            and abs(float(segs[0]["start_price"]) - 187.66) < 1e-6
-        )
+        assert float(segs[0]["end_price"]) >= 55.0 - 1e-6
 
     def test_segment_range_shared_pivot_excludes_old_low(self):
         """_segment_range：下行段共用上转折笔时排除该笔起点旧低。"""

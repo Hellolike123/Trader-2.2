@@ -839,16 +839,14 @@ def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: boo
                         seg_pivot_low = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
                         continue
 
-                # Bug R（2026-08-04）：第二类线段破坏——特征序列元素**整体**脱离段起点区间。
-                # 缠论原典语义：仅"终点突破"不算趋势反转，只是段内反弹；须整根特征元素
-                # 脱离段起点极值才是趋势确认反转。向上段被破坏 = 特征序列（向下笔）的
-                # **high 整体低于段起点 low**（价格完全跌破上升起点 → 翻转向下；单边上涨
-                # 的回落笔 high 仍高于起点 low，不会误判——§3.5b 华工/中际形约束）。
-                # 护栏 1：段内笔数须 >= min_strokes；护栏 2：破坏后剩余笔须 >= min_strokes
-                # （破坏需确认——末笔技术性脱离不破坏，避免新段不足 3 笔丢失暴涨段，
-                #  华工形 67.28→187.66 即因此保持 1 段 up）。
+                # Bug R（2026-08-04，2026-08-07 对齐 formulas §3.6）：第二类线段破坏——
+                # 特征序列元素**突破**段起点极值即破坏（与三分型终结 OR 并存）。
+                # 向上段被破坏 = 特征序列（向下笔）的 **low 跌破段起点 low**
+                # （价格创出段起点下方新低 → 翻转向下；单边上涨的回落笔 low 仍高于起点
+                # low，不会误判）。护栏 1：段内笔数 >= min_strokes；护栏 2：破坏后剩余
+                # 笔 >= min_strokes（破坏需确认，避免新段不足 3 笔）。
                 seg_len = i - seg_start
-                if seg_len >= min_strokes and (len(strokes) - i) >= min_strokes and char_h < seg_pivot_low:
+                if seg_len >= min_strokes and (len(strokes) - i) >= min_strokes and char_l < seg_pivot_low:
                     end_idx = i - 1
                     start_p, end_p, seg_hi, seg_lo = _segment_range(
                         "up", strokes[seg_start: end_idx + 1]
@@ -932,13 +930,14 @@ def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: boo
                         seg_pivot_low = min(strokes[seg_start]["start_price"], strokes[seg_start]["end_price"])
                         continue
 
-                # Bug R（2026-08-04）：第二类线段破坏——特征序列元素**整体**脱离段起点区间。
-                # 向下段被破坏 = 特征序列（向上笔）的 **low 整体高于段起点 high**（价格
-                # 完全脱离下跌区间，趋势确认反转向上；仅终点突破如 50.08>46.39 但起点仍在
-                # 段内不算——§3.5b 华工/中际形约束）。护栏 1：段内笔数 >= min_strokes；
-                # 护栏 2：破坏后剩余笔 >= min_strokes（破坏需确认，末笔脱离不破坏）。
+                # Bug R（2026-08-04，2026-08-07 对齐 formulas §3.6）：第二类线段破坏——
+                # 特征序列元素**突破**段起点极值即破坏（与三分型终结 OR 并存）。
+                # 向下段被破坏 = 特征序列（向上笔）的 **high 突破段起点 high**
+                # （价格创出段起点上方新高 → 反转向上；单边下跌的反弹笔 high 仍低于起点
+                # high，不会误判）。护栏 1：段内笔数 >= min_strokes；护栏 2：破坏后剩余
+                # 笔 >= min_strokes（破坏需确认，避免新段不足 3 笔）。
                 seg_len = i - seg_start
-                if seg_len >= min_strokes and (len(strokes) - i) >= min_strokes and char_l > seg_pivot_high:
+                if seg_len >= min_strokes and (len(strokes) - i) >= min_strokes and char_h > seg_pivot_high:
                     end_idx = i - 1
                     start_p, end_p, seg_hi, seg_lo = _segment_range(
                         "down", strokes[seg_start: end_idx + 1]
@@ -1149,14 +1148,12 @@ def _merge_zones(raw_zones: list[dict], gap_pct: float) -> list[dict]:
         else:
             contiguous = True
         if overlap and contiguous:
-            # Bug S（2026-08-04）：合并区间取**并集**而非交集。
-            # 交集（min(top)/max(bottom)）在链式合并时把区间逐级压缩成窄条
-            # （工行实测：8 个原始中枢合并后只剩 0.04 元宽），丢失震荡带信息，
-            # 且导致 strict 背驰 b/c 笔解析失败（z_end 塌缩）。并集 = max(top)/min(bottom)
-            # 完整覆盖成员震荡带，符合缠论中枢延伸语义。
-            new_top = max(last["zh_top"], z["zh_top"])
-            new_bottom = min(last["zh_bottom"], z["zh_bottom"])
-            # 并集后区间只会 >= 原区间；仍保留合法性校验避免 top <= bottom
+            # formulas.md §4.2：合并取**交集**（zh_top=min, zh_bottom=max）。
+            # 连续滑动窗口中枢的公共重叠区即中枢本体；并集会把窄震荡撑成巨中枢
+            # （5 笔 ~0.5 元区间被撑成 1.15 元），丧失中枢震荡区间语义。
+            # 链式交集若塌缩到 top <= bottom，说明这些窗口无公共重叠，停止合并。
+            new_top = min(last["zh_top"], z["zh_top"])
+            new_bottom = max(last["zh_bottom"], z["zh_bottom"])
             if new_top > new_bottom:
                 last["zh_top"] = new_top
                 last["zh_bottom"] = new_bottom
@@ -1165,6 +1162,7 @@ def _merge_zones(raw_zones: list[dict], gap_pct: float) -> list[dict]:
                 if span is not None:
                     last["_span_end"] = max(last["_span_end"] or 0, span[1])
             else:
+                # 交集非法（无公共重叠）：不合并，另起一个中枢
                 merged.append({
                     "zh_top": z["zh_top"], "zh_bottom": z["zh_bottom"],
                     "zh_center": z["zh_center"], "members": [z], "valid": True,

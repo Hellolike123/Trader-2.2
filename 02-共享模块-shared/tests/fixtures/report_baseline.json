@@ -79,9 +79,9 @@
       ],
       "zones": [
         {
-          "zh_top": 9.15,
+          "zh_top": 8.97,
           "zh_bottom": 8.5,
-          "zh_center": 8.825,
+          "zh_center": 8.735,
           "members": [
             {
               "zh_top": 9.15,
@@ -277,8 +277,8 @@
         "kind": "none",
         "bc_mode": "legacy"
       },
-      "last_valid_zone_last_price": 8.825,
-      "last_valid_zone_first_price": 8.825,
+      "last_valid_zone_last_price": 8.735,
+      "last_valid_zone_first_price": 8.735,
       "segments": [
         {
           "direction": "up",
@@ -540,9 +540,9 @@
       ],
       "merged_zones": [
         {
-          "zh_top": 9.15,
+          "zh_top": 8.97,
           "zh_bottom": 8.5,
-          "zh_center": 8.825,
+          "zh_center": 8.735,
           "members": [
             {
               "zh_top": 9.15,
