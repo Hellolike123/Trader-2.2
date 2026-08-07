@@ -1357,3 +1357,32 @@ class TestStScNoteS11:
         lines = _format_daily_lights(view, raw)
         assert any("○ ST（SC区回测）" in ln for ln in lines), lines
         assert not any("注：ST=SC区回测" in ln for ln in lines), lines
+
+def test_slim_daily_shows_lit_lpsy_extra():
+    """日线已亮 LPSY（派发 extras）必须出现在 slim 灯区，不能只在 🔔 变化里。"""
+    plan = _sample_plan()
+    plan["daily_raw"] = {
+        **(plan.get("daily_raw") or {}),
+        "bc_signal": True,
+        "bc_price": 70.5,
+        "are_signal": True,
+        "are_price": 63.72,
+        "lpsy_signal": True,
+        "lpsy_price": 46.65,
+        "sc_signal": False,
+        "ar_signal": False,
+        "sos_signal": False,
+    }
+    plan["daily_view"] = {
+        **(plan.get("daily_view") or {}),
+        "active_events": ["bc", "are", "lpsy"],
+    }
+    plan["change_line"] = "新亮：LPSY（最后供应点）｜仍亮：BC（买力高潮）｜熄灭：无"
+    text = render_wyckoff_slim(plan)
+    daily_block = text.split("⚡ 日线 · ", 1)[1]
+    assert "● LPSY（最后供应点）" in daily_block
+    assert "46.65" in daily_block
+    assert "● BC（买力高潮）" in daily_block
+    # 变化与灯区一致：可出现新亮 LPSY
+    assert "新亮：LPSY（最后供应点）" in text
+

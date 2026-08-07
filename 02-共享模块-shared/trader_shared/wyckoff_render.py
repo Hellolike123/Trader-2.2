@@ -686,6 +686,14 @@ def _slim_next_hollow(
             return "○ 下一盯：回踩是否站稳"
         return "○ 下一盯：本波新SC"
     lit = set(_slim_lit_codes(view, raw, weekly=False))
+    # 日线已亮派发侧、吸筹链全空 → 下一盯走派发链，避免只空喊 SC
+    dist_lit = lit & _DIST_CODES
+    accum_lit = lit & set(ACCUM_CHAIN)
+    if dist_lit and not accum_lit:
+        for code in _DIST_CHAIN:
+            if code not in lit:
+                return f"○ {code}（{_cn(code)}）下一盯"
+        return "○ 下一盯：派发侧观望"
     for code in ACCUM_CHAIN:
         if code not in lit:
             return f"○ {code}（{_cn(code)}）下一盯"
@@ -1058,33 +1066,57 @@ def _format_slim_full_lights(
     *,
     weekly: bool = False,
 ) -> list[str]:
+    """竖排满灯。
+
+    日线默认主槽仍是吸筹五灯；已亮的派发/辅助 extras（BC/ARE/LPSY…）
+    必须附在后面，避免 🔔「新亮 LPSY」但灯区全空心。
+    """
     daily_failed = (not weekly) and (_slim_daily_failed(view, raw))
     lines: list[str] = []
-    for code in chain:
-        lit = _slim_code_lit(code, view, raw)
-        if lit:
-            px_s = _fmt_price(_event_price_from_sources(code, view=view, raw=raw))
-            tag = _slim_lamp_price_tag(
-                code, lit=True, weekly=weekly, daily_failed=daily_failed
-            )
-            core = f"● {code}（{_cn(code)}）"
-            if px_s:
-                core += px_s
-            if tag:
-                core += tag
-            lines.append(core)
-        else:
-            lines.append(f"○ {code}（{_cn(code)}）")
-    # 吸筹五灯之外：Spring 确认另灯，禁止并进 ST（SC区回测）
-    if chain == tuple(ACCUM_CHAIN) and _spring_confirm_lit(raw, view):
-        px_s = _fmt_price(_event_price_from_sources("Spring", view=view, raw=raw))
-        core = f"● Spring（{_cn('Spring')}）"
+    shown: set[str] = set()
+
+    def _lit_line(code: str, *, lit: bool) -> str:
+        if not lit:
+            return f"○ {code}（{_cn(code)}）"
+        px_s = _fmt_price(_event_price_from_sources(code, view=view, raw=raw))
+        tag = _slim_lamp_price_tag(
+            code, lit=True, weekly=weekly, daily_failed=daily_failed
+        )
+        core = f"● {code}（{_cn(code)}）"
         if px_s:
             core += px_s
-        lines.append(core)
-        # ST（SC区回测）未亮但 Spring 确认已亮 → 二次测试已完成，防误读（2026-08-05 ST双口径修复单 改动3）
+        if tag:
+            core += tag
+        return core
+
+    for code in chain:
+        lit = _slim_code_lit(code, view, raw)
+        lines.append(_lit_line(code, lit=lit))
+        shown.add(code)
+
+    # 日线吸筹主槽之外：附已亮 extras（含 LPSY 等派发灯）
+    if (not weekly) and chain == tuple(ACCUM_CHAIN):
+        for code in _extra_lit_codes(raw, view):
+            if code in shown:
+                continue
+            # Spring 下面单独处理注释；这里先画灯
+            lines.append(_lit_line(code, lit=True))
+            shown.add(code)
+        if _spring_confirm_lit(raw, view) and "Spring" not in shown:
+            lines.append(_lit_line("Spring", lit=True))
+            shown.add("Spring")
+        if "Spring" in shown and not _slim_code_lit("ST", view, raw):
+            lines.append(
+                "（注：ST=SC区回测，强势吸筹可不回测；二次测试已完成＝看Spring确认灯）"
+            )
+    elif chain == tuple(ACCUM_CHAIN) and _spring_confirm_lit(raw, view):
+        # 周线若仍走吸筹链，保留原 Spring 附灯
+        if "Spring" not in shown:
+            lines.append(_lit_line("Spring", lit=True))
         if not _slim_code_lit("ST", view, raw):
-            lines.append("（注：ST=SC区回测，强势吸筹可不回测；二次测试已完成＝看Spring确认灯）")
+            lines.append(
+                "（注：ST=SC区回测，强势吸筹可不回测；二次测试已完成＝看Spring确认灯）"
+            )
     return lines
 
 
