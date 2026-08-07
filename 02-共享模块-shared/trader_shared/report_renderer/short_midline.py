@@ -393,6 +393,102 @@ def _short_fund_display(
     return out or "资金看不清"
 
 
+
+def _unwrap_wyk_dict(raw: object) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    inner = raw.get("wyckoff")
+    if isinstance(inner, dict):
+        return inner
+    return raw
+
+
+def _wyckoff_side_hint(wyk: dict[str, Any] | None, *, scope: str) -> str:
+    """mid|short side hint: fail|dist|acc|none."""
+    w = wyk if isinstance(wyk, dict) else {}
+    if not w:
+        return "none"
+    if str(w.get("phase_a_status") or "").strip() == "failed":
+        return "fail"
+    if scope == "short":
+        try:
+            from trader_shared.wyckoff_view import infer_daily_short_wave
+
+            wave = infer_daily_short_wave(w)
+            side = str(wave.get("side") or "none")
+            if side == "failed":
+                return "fail"
+            if side == "distribution":
+                return "dist"
+            if side == "accumulation":
+                return "acc"
+            return "none"
+        except Exception:
+            pass
+    # weekly / fallback: phase label + signals
+    blob = " ".join(
+        str(w.get(k) or "")
+        for k in ("phase", "phase_label", "wyckoff_summary", "summary_oneline")
+    )
+    if any(k in blob for k in ("派发", "distribution", "Distribution")):
+        return "dist"
+    if any(k in blob for k in ("吸筹", "积累", "accumulation", "Accumulation")):
+        return "acc"
+    if w.get("lpsy_signal") or w.get("sow_signal") or w.get("utad_signal") or w.get("bc_signal"):
+        return "dist"
+    if w.get("sos_signal") or w.get("lps_signal") or w.get("spring_signal") or w.get("sc_signal"):
+        return "acc"
+    return "none"
+
+
+def format_track_header_light(*, track: str, report: dict[str, Any]) -> str:
+    """中短线标题挂灯：🧭 中线｜🔴 防守 / ⚡ 短线｜🔴 不新开。
+
+    灯只做态度摘要；不进 fusion/出手。绿=资格，不是可买。
+    """
+    r = report if isinstance(report, dict) else {}
+    if track == "mid":
+        wyk = _unwrap_wyk_dict(r.get("wyckoff_midline"))
+        side = _wyckoff_side_hint(wyk, scope="mid")
+        # text fallback from already-known midline display cues in conclusion
+        conc = r.get("conclusion") if isinstance(r.get("conclusion"), dict) else {}
+        mid_txt = str(conc.get("midline") or conc.get("stage_line") or "")
+        if side == "none":
+            if any(k in mid_txt for k in ("失效", "破位", "派发", "偏空", "破坏")):
+                side = "fail" if "失效" in mid_txt else "dist"
+            elif any(k in mid_txt for k in ("吸筹", "可跟踪", "偏多")):
+                side = "acc"
+        if side == "fail":
+            return "🧭 中线｜🔴 防守"
+        if side == "dist":
+            return "🧭 中线｜🔴 防守"
+        if side == "acc":
+            return "🧭 中线｜🟢 可跟踪"
+        return "🧭 中线｜🟡 观望"
+
+    # short track
+    wyk = _unwrap_wyk_dict(r.get("wyckoff_daily") or r.get("wyckoff"))
+    if wyk.get("timeframe") == "weekly":
+        wyk = {}
+    side = _wyckoff_side_hint(wyk, scope="short")
+    dv = r.get("decision_view") if isinstance(r.get("decision_view"), dict) else {}
+    allow = dv.get("allow_new_recommend")
+    # also peek common closed markers from preformatted fields if present
+    closed = False
+    if allow is False:
+        closed = True
+    exec_txt = str((r.get("conclusion") or {}).get("execution") or r.get("execution") or "")
+    if any(k in exec_txt for k in ("不新开", "先别买", "仓 0%")):
+        closed = True
+    # stance layers
+    if closed or side in ("fail", "dist"):
+        return "⚡ 短线｜🔴 不新开"
+    if side == "acc":
+        # structure ok but still only a green *qualification*
+        return "⚡ 短线｜🟢 去看trader"
+    return "⚡ 短线｜🟡 仅观察"
+
+
 def render_short_midline(r: dict[str, Any]) -> str:
     """短中线报告模板（docs/mid-short-dual-track-plan.md §0.1）。
 
@@ -646,7 +742,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     # ── 🧭 中线（B3C）──
     lines.append("")
-    lines.append("🧭 中线")
+    lines.append(format_track_header_light(track="mid", report=r))
 
     # 面板不再输出「阶段：」行（S-R1）；stage_line 仅供亮点/风险与字段侧共振。
     # 面板不输出「定论：」——威科夫/缠论分行自读；字段 midline_verdict* 仍供池/共振。
@@ -1093,7 +1189,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     # ── ⚡ 短线 A 版：结构 → 状态 → 动能｜资金 → 动作 → 失效 ──
     lines.append("")
-    lines.append("⚡ 短线")
+    lines.append(format_track_header_light(track="short", report=r))
 
     # _disc 已在中线关键价前解析
     _cap_t = _disc.get("suggested_pct_cap")

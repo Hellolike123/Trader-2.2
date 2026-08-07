@@ -86,6 +86,7 @@ TESTS=(
   "02-共享模块-shared/tests/test_wyckoff_tr.py"
   "02-共享模块-shared/tests/test_wyckoff_tr_maturity.py"
   "02-共享模块-shared/tests/test_wyckoff_state_view.py"
+  "02-共享模块-shared/tests/test_track_header_light.py"
   "02-共享模块-shared/tests/test_cause_effect_display.py"
   "02-共享模块-shared/tests/test_wyckoff_pnf.py"
   "02-共享模块-shared/tests/test_wyckoff_split_equivalence.py"

@@ -78,6 +78,7 @@ print(view["phase"], view["bias"], view["summary_oneline"])
 
 - **Skill 卡**：`wyckoff_render` 按 side 只竖排一条链  
 - **Trader 短线**：`format_daily_phase_display` → `短波吸筹|短波派发 · 主灯… · 不作买点`  
+- **Trader 标题挂灯**：`format_track_header_light` → `🧭 中线｜🔴 防守` / `⚡ 短线｜🔴 不新开`（中线侧+短波侧+decision 关闭态；绿=资格）  
 - **Trader 中线**：只读周线，不吃日线短波  
 - **主灯优先级**：派发波内 LPSY/SOW/UTAD 可盖过单纯 BC（避免高潮灯永久占主位）  
 - **门禁**：`tests/test_wyckoff_state_view.py`（含 short_wave 用例）已在 `scripts/run-gate-tests.sh`

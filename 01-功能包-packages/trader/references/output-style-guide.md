@@ -5,6 +5,12 @@
 > Pipeline: `report_builder` → `attach_short_midline_and_decision` → `render_short_midline`
 > （builder 内：mid_key_prices + mistery_gate + chan_discipline merge → conclusion → attach）。
 
+
+## 中短线标题挂灯
+
+- 固定形态：`🧭 中线｜{🔴 防守|🟡 观望|🟢 可跟踪}`、`⚡ 短线｜{🔴 不新开|🟡 仅观察|🟢 去看trader}`
+- 灯在标题行，**不写**「操作灯」三字；绿=资格不是可买
+- 下面威科夫/缠论仍是解释层；出手仍看 `新开/动作/decision_view`
 ## Prohibited Content
 
 - Do not invent intraday order instructions beyond script-rendered T0 lines.
