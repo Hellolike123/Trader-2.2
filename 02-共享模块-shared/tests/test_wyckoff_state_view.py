@@ -422,3 +422,63 @@ def test_format_daily_short_wave_accumulation_sos():
     line = format_daily_phase_display(wyk)
     assert "短波吸筹" in line
     assert "SOS" in line
+
+
+def test_short_wave_distribution_confirmed_wins_over_sos():
+    """簇确认定侧：派发确认 + 近端 SOS 不得把短波侧翻成吸筹。"""
+    from trader_shared.wyckoff_view import format_daily_phase_display, infer_daily_short_wave
+
+    wyk = {
+        "timeframe": "weekly",
+        "distribution_confirmed": True,
+        "sos_signal": True,
+        "sos_price": 48.54,
+        "bc_signal": True,
+        "are_signal": True,
+        "phase_a_status": "established",
+    }
+    wave = infer_daily_short_wave(wyk)
+    assert wave["side"] == "distribution", wave
+    assert wave["bias"] == "偏空"
+    assert wave["code"] == "BC"
+    line = format_daily_phase_display(wyk)
+    assert "短波派发" in line
+    assert "BC" in line
+
+
+def test_short_wave_distribution_confirmed_only_uses_cluster_event():
+    """派发确认但无事件灯 → 簇本身作主事件（DistConfirm 偏空），不落 SOS。"""
+    from trader_shared.wyckoff_view import infer_daily_short_wave
+    from trader_shared.wyckoff_core import resolve_wyckoff_primary
+
+    wyk = {
+        "timeframe": "weekly",
+        "distribution_confirmed": True,
+        "sos_signal": True,
+        "sos_price": 48.54,
+        "phase_a_status": "established",
+    }
+    wave = infer_daily_short_wave(wyk)
+    assert wave["side"] == "distribution"
+    assert wave["code"] == "DistConfirm"
+    assert wave["bias"] == "偏空"
+    info = resolve_wyckoff_primary(wyk)
+    assert info["code"] == "DistConfirmed"
+    assert info["direction"] == -1
+
+
+def test_short_wave_accumulation_confirmed_wins_over_sow():
+    """积累确认定侧：近端弱势事件不把积累侧翻成派发。"""
+    from trader_shared.wyckoff_view import infer_daily_short_wave
+
+    wyk = {
+        "timeframe": "daily",
+        "accumulation_confirmed": True,
+        "sos_signal": True,
+        "sow_signal": True,
+        "phase_a_status": "established",
+    }
+    wave = infer_daily_short_wave(wyk)
+    assert wave["side"] == "accumulation", wave
+    assert wave["code"] == "SOS"
+    assert wave["bias"] == "偏多"

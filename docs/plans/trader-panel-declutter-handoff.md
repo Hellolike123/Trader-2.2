@@ -6,6 +6,7 @@
 
 **状态注（2026-08-07）**：主面板已取消 `定论：` 行；本 handoff 中 D-R1 定论文案若仍被引用，仅作字段/池侧 `midline_verdict_note` 语义，**不再渲染到 short_midline**。顶栏现行见 `output-template.md` v2.8.0。
 
+**状态注（2026-08-08）**：关闭态短线阶梯已改为止损+MA5+现价+站稳线，不再铺「计划买区」（6618c616）；D-R2 展示部分被取代，验收按「关闭态无计划买区/低吸区」为准。
 
 > **状态**: impl_done（现行面板合同；关闭态动词净化已合入）  
 > 法源对齐：`BUSINESS.md` §2.0 / §4.0 / §5.1；`docs/t0-strategy-v2.md`（T0 非出手指令）；`docs/plans/trader-drop-stage-line-handoff.md`（无独立「阶段：」行）  

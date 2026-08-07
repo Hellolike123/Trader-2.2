@@ -607,9 +607,15 @@ def _detect_phase(
             })
 
     # ── 积累序列（原典：A停止→B建仓→C弹簧→D确认→E趋势） ──
+    # 派发确认后近端反向 SOS 不翻案：簇确认语境下 Spring 序列不得抬成积累 D/C。
+    # signals 层已抑 sos，但 _scan 仍可能从 bars 重新检出 SOS，故在此按簇标志兜底。
+    # 法源 docs/plans/wyckoff-cluster-reverse-event-handoff.md §1.2
+    _dist_cluster = bool(signals.get("distribution_confirmed")) and not bool(
+        signals.get("distribution_failed")
+    )
     # Spring 必须先经 Phase B（有 SC+AR 停止行为或压缩蓄力）才有效
     # P0-A：Spring+Test 优先进 D；裸 Spring 只到 C；premature 不得被 test 洗白
-    if not spring_premature and spring and spring_test:
+    if not spring_premature and spring and spring_test and not _dist_cluster:
         return _finish({
             "phase": "accumulation_d",
             "phase_label": "积累期 D（确认：Spring+Test）",
@@ -619,7 +625,7 @@ def _detect_phase(
             "phase_tr_gated": False,
             "phase_tr_gate_reason": "",
         })
-    if not spring_premature and spring and (sos or lps):
+    if not spring_premature and spring and (sos or lps) and not _dist_cluster:
         return _finish({
             "phase": "accumulation_d",
             "phase_label": "积累期 D（确认：Spring+SOS/LPS）",
@@ -629,7 +635,7 @@ def _detect_phase(
             "phase_tr_gated": False,
             "phase_tr_gate_reason": "",
         })
-    if not spring_premature and spring and trend_pullback:
+    if not spring_premature and spring and trend_pullback and not _dist_cluster:
         return _finish({
             "phase": "accumulation_d",
             "phase_label": "积累期 D（确认：Spring+趋势回踩）",
@@ -639,7 +645,7 @@ def _detect_phase(
             "phase_tr_gated": False,
             "phase_tr_gate_reason": "",
         })
-    if not spring_premature and spring:
+    if not spring_premature and spring and not _dist_cluster:
         return _finish({
             "phase": "accumulation_c",
             "phase_label": "积累期 C（测试：Spring）",

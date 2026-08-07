@@ -554,15 +554,32 @@ def infer_daily_short_wave(wyckoff: dict[str, Any] | None) -> dict[str, Any]:
 
     accum_hit = [(k, c, b, ks) for k, c, b, ks in accum_flags if _on(k)]
     dist_hit = [(k, c, b, ks) for k, c, b, ks in dist_flags if _on(k)]
+    # 簇确认定侧优先（wyckoff-cluster-reverse-event-handoff §1.3）：
+    # 已排序确认的 UT→SOW / Spring→SOS 比单事件命中数量更可信；
+    # 派发确认后近端 SOS 不得靠数量把短波侧翻成吸筹。
+    cluster_dist = bool(wyk.get("distribution_confirmed")) and not bool(wyk.get("accumulation_confirmed"))
+    cluster_acc = bool(wyk.get("accumulation_confirmed")) and not bool(wyk.get("distribution_confirmed"))
     # 成波形门槛
-    accum_formed = any(c in {"SC", "AR", "ST", "LPS", "SOS", "Spring"} for _, c, _, _ in accum_hit)
-    dist_formed = any(c in {"BC", "LPSY", "SOW", "UTAD", "UT"} for _, c, _, _ in dist_hit)
+    accum_formed = cluster_acc or any(
+        c in {"SC", "AR", "ST", "LPS", "SOS", "Spring"} for _, c, _, _ in accum_hit
+    )
+    dist_formed = cluster_dist or any(
+        c in {"BC", "LPSY", "SOW", "UTAD", "UT"} for _, c, _, _ in dist_hit
+    )
     if not dist_formed and any(c == "ARE" for _, c, _, _ in dist_hit) and any(
         c == "BC" for _, c, _, _ in dist_hit
     ):
         dist_formed = True
 
-    if dist_formed and not accum_formed:
+    if cluster_dist:
+        side = "distribution"
+        side_cn = "短波派发"
+        ordered = dist_hit or [("distribution_confirmed", "DistConfirm", "偏空", ("sow_price", "tr_lower"))]
+    elif cluster_acc:
+        side = "accumulation"
+        side_cn = "短波吸筹"
+        ordered = accum_hit or [("accumulation_confirmed", "AccumConfirm", "偏多", ("sos_price", "tr_upper"))]
+    elif dist_formed and not accum_formed:
         side = "distribution"
         side_cn = "短波派发"
         ordered = dist_hit
@@ -623,6 +640,8 @@ def format_daily_short_wave_line(wyckoff: dict[str, Any] | None) -> str:
     def _event_bit() -> str:
         if not code or code in ("—", "PhaseAFail"):
             return ""
+        if code in ("DistConfirm", "AccumConfirm"):
+            return "派发确认" if code == "DistConfirm" else "积累确认"
         bit = code + (bias if bias and bias not in code else "")
         if isinstance(price, (int, float)):
             bit += f"@{price:.2f}" if abs(price) < 1000 else f"@{price:.0f}"

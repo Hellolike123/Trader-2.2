@@ -208,7 +208,11 @@ class TestRenderDualTrack:
         assert "关键价（短线）" in md
         assert "生命线" in md
         assert "动作：" in md or "出手" in md
-        assert "低吸区" in md or "计划买区" in md or "买点区" in md
+        # 关闭态（动作含不新开/观望）：止损+MA5?+现价+站稳线，不铺计划买区/低吸区
+        assert "站稳线" in md
+        assert "低吸区" not in md
+        assert "计划买区" not in md
+        assert "买点区" not in md
         assert "止损" in md
         inv = str((r.get("mistery_gate") or {}).get("invalidation") or "")
         if inv.strip():
