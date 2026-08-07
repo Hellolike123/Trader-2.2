@@ -2701,7 +2701,11 @@ class TestPhaseARangeP2:
         assert result["phase_a_range"].get("st_sc_low") is not None
 
     def test_p2_no_established_seed_blocks_b_on_good_tr(self):
-        """无 established + 分位 TR 达标 + 压缩 → no_established_seed，不进 B。"""
+        """裸压缩不得进积累 B（G4）；无 SC/AR 时 phase=none。
+
+        历史合同曾靠 no_established_seed 门控把「压缩→B」打回 none；
+        G4 起压缩进 B 须停止背景，裸压缩不再赋 B，门控可不触发。
+        """
         from trader_shared.wyckoff_phase import _detect_phase
 
         bars = [_make_bar(10.0, 10.01, 9.99, 10.0, 30000) for _ in range(60)]
@@ -2739,8 +2743,7 @@ class TestPhaseARangeP2:
             tr_ctx=tr,
         )
         assert ph["phase"] == "none"
-        assert ph.get("phase_tr_gated") is True
-        assert ph.get("phase_tr_gate_reason") == "no_established_seed"
+        assert ph["phase"] != "accumulation_b"
 
     def test_p2_gate_reason_enum_values(self):
         """gate_reason 枚举稳定可测。"""

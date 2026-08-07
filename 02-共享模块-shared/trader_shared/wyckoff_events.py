@@ -1068,18 +1068,18 @@ def _detect_sign_of_weakness(bars: list[dict], _support: float | None = None, tr
 
     # 跌破支撑判定逻辑
     if consecutive > 1:
-        # 需要连续 N 天最低价刺穿才进入量能确认
+        # 末日先至少 low 触及支撑区，才进入连日确认
         if cur_low >= support:
             return {**_empty, "sow_reason": "未跌破支撑"}
 
-        # 检查前 consecutive-1 天是否也跌破
+        # G5：历史确认日须**收盘**破支撑（禁止仅下影刺穿凑连日）
         for i in range(2, consecutive + 1):
             check_bar = bars[-i]
-            check_low = to_float(check_bar.get("low"))
-            if check_low is None or check_low >= support:
+            check_close = to_float(check_bar.get("close"))
+            if check_close is None or check_close >= support:
                 return {
                     **_empty,
-                    "sow_reason": f"仅 {i-1}/{consecutive} 日跌破，需连续{consecutive}天确认",
+                    "sow_reason": f"仅 {i-1}/{consecutive} 日收盘跌破，需连续{consecutive}天确认",
                 }
     else:
         # 单日判定，最低价或收盘价跌破即可进入量能确认

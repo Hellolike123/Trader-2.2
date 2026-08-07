@@ -360,6 +360,50 @@ def test_bare_trend_rally_not_distribution_d():
     assert ph["phase"] != "distribution_d"
 
 
+def test_bare_compression_not_accumulation_b():
+    """G4：裸压缩不得正式标积累 B。"""
+    b = _super_flat(50)
+    ph = _ph(b, _sig(compression_signal=True))
+    assert ph["phase"] != "accumulation_b"
+
+
+def test_compression_with_sc_ar_can_be_accumulation_b():
+    """G4：有 SC/AR 停止背景时压缩仍可进积累 B。"""
+    b = _super_flat(50)
+    ph = _ph(b, _sig(compression_signal=True, sc_signal=True, ar_signal=True))
+    # SC+AR 优先到 A，或压缩 B；不得 none
+    assert ph["phase"] in ("accumulation_a", "accumulation_b")
+
+
+def test_sow_prior_day_wick_only_not_consecutive():
+    """G5：先日仅下影刺穿、收盘未破 → 不得凑连日 SOW。"""
+    bars = [mk(100, 105, 95, 100, 100) for _ in range(14)]
+    bars.append(mk(98, 99, 93, 96, 130))  # low 破 95，收盘 96 未破
+    bars.append(mk(95, 96, 92, 93, 130))  # 末日收盘破
+    sow = we._detect_sign_of_weakness(bars)
+    assert sow.get("sow_signal") is False, f"下影不得凑连日: {sow}"
+
+
+def test_phase_st_tip_only_no_ghost_spring_test_d():
+    """G6：破位后 tip ST 灭 → 不得因历史 ST 滑窗抬到 Spring+Test D。"""
+    bars = _spring_st_sequence(st_vol=100)
+    for _ in range(12):
+        bars.append(mk(85, 86, 80, 81, 300))
+    assert we._detect_st(bars).get("st_signal") is False
+    ph = _ph(
+        bars,
+        _sig(
+            spring_signal=True,
+            sc_signal=True,
+            ar_signal=True,
+            st_signal=False,
+            spring_test_signal=False,
+        ),
+    )
+    assert "Spring+Test" not in ph.get("phase_label", "")
+    assert ph["phase"] != "accumulation_d" or "Test" not in ph.get("phase_label", "")
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # P0-5 事件簇确认 (Event Cluster Confirmation) 专项测试
 #

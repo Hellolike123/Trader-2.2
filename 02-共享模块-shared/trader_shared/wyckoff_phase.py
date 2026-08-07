@@ -437,10 +437,16 @@ def _detect_phase(
         _detect_trend_pullback, 15
     )
     trend_rally = bool(signals.get("trend_rally_signal")) or _scan(_detect_trend_rally, 15)
-    # Test of Spring（与 st_* 同源）
+    # Test of Spring（与 st_* 同源）— G6：只认 tip，禁止滑窗复活历史 ST
     spring_test = bool(
         signals.get("spring_test_signal") or signals.get("st_signal")
-    ) or _scan(_detect_st, 20, max_lookback_bars=40)
+    )
+    if not spring_test:
+        try:
+            _st_tip = _detect_st(wide_bars, tr_ctx=tr_ctx)
+            spring_test = bool(_st_tip.get("st_signal"))
+        except Exception:
+            spring_test = False
 
     # ── 原典顺序校验：事件索引 — Spring/UT 必须在 Phase B 之后才有效 ────────
     # 计算各事件在 wide_bars 中的最后触发索引（若索引数组已排序则取最后出现位置）
@@ -624,8 +630,8 @@ def _detect_phase(
             "phase_tr_gated": False,
             "phase_tr_gate_reason": "",
         })
-    # P2: Compression = 积累期 B 末期（压缩蓄力）
-    # 有派发极性时不得抢在 BC/ARE/SOW/UT 之前盖成积累 B（否则派发 A 永远到不了）
+    # P2 / G4: Compression → 正式积累 B 须有停止背景（SC/AR）；裸压缩不得冒充建仓区
+    # 有派发极性时不得抢在 BC/ARE/SOW/UT 之前盖成积累 B
     _dist_polarity = bool(
         bc_found
         or are_found
@@ -633,7 +639,8 @@ def _detect_phase(
         or (ut_found and not upthrust_premature)
         or signals.get("distribution_confirmed")
     )
-    if compression and not _dist_polarity:
+    _stop_bg = bool(sc_found or ar_found)
+    if compression and not _dist_polarity and _stop_bg:
         return _finish({
             "phase": "accumulation_b",
             "phase_label": "积累期 B（压缩蓄力）",
