@@ -54,7 +54,7 @@
     "lps_reason": "未检测到有效 LPS（需 SOS→缩量回调）",
     "lps_price": null,
     "lpsy_signal": false,
-    "lpsy_reason": "量能未萎缩，供应未枯竭",
+    "lpsy_reason": "无派发背景（BC/UT/SOW），LPSY 不成立",
     "lpsy_price": null,
     "ps_signal": false,
     "ps_reason": "非低位，非 PS",
