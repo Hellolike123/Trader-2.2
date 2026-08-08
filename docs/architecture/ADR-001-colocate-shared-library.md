@@ -2,7 +2,7 @@
 
 - **Status**: Accepted（已合入 `main`，commit `2bc3493`）
 - **Branch**: `refactor/trader-architecture`（历史工作分支；基于 `0b48fdc`，ADR-004 已落地）
-- **前置**: ADR-004 已完成（stub 层、双 config、死集成已清）
+- **前置**: ADR-004 已完成（stub 层、双 config、死集成已清；ADR-004 文档已归档，走 git 历史）
 
 ---
 
