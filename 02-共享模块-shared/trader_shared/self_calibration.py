@@ -6,8 +6,8 @@
 采用 WinRate * ProfitFactor Blended 综合效能评分模型作为适应度函数，
 分别对 global、bull、bear、range 进行离线参数搜优，并将分层参数结构化写入本地配置。
 
-用法（盘后/周末运行）:
-    python3 02-共享模块-shared/scripts/self_calibration.py
+用法（盘后/周末运行，在 02-共享模块-shared 下执行）:
+    python3 -m trader_shared.self_calibration
 
 输出:
     ~/.trader/calibrated_params.json  — 更新后的嵌套分层最优参数
