@@ -12,8 +12,8 @@ import sys
 
 
 _MSG = (
-    "compare_fusion_paths.py is obsolete: classic/compare fusion paths have been retired.\n"
-    "Production always uses cards (FUSION_FROM_CARDS classic/compare → cards + DeprecationWarning).\n"
+    "compare_fusion_paths.py is obsolete: classic/compare fusion paths have been removed.\n"
+    "Production always uses cards; setting classic/compare/false/off raises ValueError.\n"
     "See docs/plans/retire-classic-fusion-handoff.md / BUSINESS.md §2.7."
 )
 

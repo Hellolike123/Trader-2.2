@@ -3,7 +3,7 @@
 - **目标架构法源**：`docs/designs/resonance-and-orchestration.md` — 五层+编排、岗位共振；fusion 不作总司令。
 - **版本**：Trader 2.4+（技能：`trader` / `t0` / `review` / `wyckoff` / `chanlun`）。单票**始终**中短线双轨（`render_short_midline`；`SHORT_MIDLINE_REPORT=false` 已忽略）。
 - **Skill 用法指南**：[`docs/guide/skill-usage.md`](docs/guide/skill-usage.md)（五岗一天节奏；chanlun=结构学术卡，与 wyckoff 皆不当总司令）。
-- **Fusion 生产路径**：`FUSION_FROM_CARDS` **一律 cards**；失败 → `cards_failed` 中性占位；`classic` / `compare` **已退役**（告警后仍 cards）。详见 `BUSINESS.md` §2.7。**A1** 已落地（merge 在 stage_pack 后、短中线前）；**A2 仍延期**（勿把 merge 挪到 decision_view 之后）。
+- **Fusion 生产路径**：`FUSION_FROM_CARDS` **一律 cards**；失败 → `cards_failed` 中性占位；`classic` / `compare` **已移除**（设置即 `ValueError`，不会走 cards）。详见 `BUSINESS.md` §2.7。**A1** 已落地（merge 在 stage_pack 后、短中线前）；**A2 仍延期**（勿把 merge 挪到 decision_view 之后）。
 - **快照 enrich**：`TRADER_SNAPSHOT_ENRICH=0` 可整段关掉；`TRADER_ENRICH_BOARDS` **默认关**（不用 akshare 成分股扫板）。板块快照走 `sector_data`（概念标签 + 映射真实 THS 指数日线；行业别名兜底）；旧「概念扫板涨跌」需显式 `TRADER_ENRICH_BOARDS=1`，面板也不再展示概念假指数。
 - **门禁**：`scripts/run-gate-tests.sh`（离线子集）；禁止把全量历史红项塞进门禁。说明：`docs/architecture/ci-gate.md`。
 - **Agent 快路径**：各 skill **只预读** `references/agent-quickstart.md` + 共用 `references/agent-rules.md`；跑脚本 → 原样贴 markdown → 停。禁止开工前批量读 references、禁止默认 `--output json`。

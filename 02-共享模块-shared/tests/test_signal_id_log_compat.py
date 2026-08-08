@@ -13,7 +13,7 @@ import pytest
 
 def test_log_safe_creates_dual_fields(tmp_path):
     """New log record carries both signal_id and signal_id_md5."""
-    import signal_tracker
+    import trader_shared.signal_tracker as signal_tracker
     
     old_path = signal_tracker.LOG_PATH
     signal_tracker.LOG_PATH = tmp_path / "signal_log.jsonl"
@@ -59,7 +59,7 @@ def test_log_safe_creates_dual_fields(tmp_path):
 
 def test_log_safe_dedup_checking_both_fields(tmp_path):
     """log_safe() dedup checks BOTH signal_id AND signal_id_md5."""
-    import signal_tracker
+    import trader_shared.signal_tracker as signal_tracker
     
     old_path = signal_tracker.LOG_PATH
     signal_tracker.LOG_PATH = tmp_path / "signal_log.jsonl"
@@ -84,7 +84,7 @@ def test_log_safe_dedup_checking_both_fields(tmp_path):
 
 def test_log_safe_finds_old_record_via_md5(tmp_path):
     """Old record (MD5 in signal_id_md5) is found by signal_id_md5 match so log_safe skips dedup."""
-    import signal_tracker
+    import trader_shared.signal_tracker as signal_tracker
     
     old_path = signal_tracker.LOG_PATH
     

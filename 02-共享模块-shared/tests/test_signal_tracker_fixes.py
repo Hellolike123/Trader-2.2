@@ -24,7 +24,7 @@ for _p in (SHARED, SCRIPTS):
         sys.path.insert(0, str(_p.resolve()))
 
 # Force reload to pick up code changes
-import signal_tracker
+import trader_shared.signal_tracker as signal_tracker
 importlib.reload(signal_tracker)
 st = signal_tracker
 

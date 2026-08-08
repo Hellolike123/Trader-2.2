@@ -7,7 +7,7 @@ for _p in (SHARED, SCRIPTS):
     if str(_p.resolve()) not in sys.path:
         sys.path.insert(0, str(_p.resolve()))
 
-from signal_tracker import (
+from trader_shared.signal_tracker import (
     SIGNAL_STATUS_VALUES,
     signal_is_trackable,
     set_signal_status,
@@ -61,7 +61,7 @@ from unittest.mock import MagicMock, patch
 
 def test_check_recent_skips_completed(tmp_path, monkeypatch):
     """check_recent should skip signals with status=completed (lifecycle_skipped)."""
-    import signal_tracker as st
+    import trader_shared.signal_tracker as st
 
     store = tmp_path / "signals.jsonl"
     results = tmp_path / "signal_results.jsonl"
@@ -86,7 +86,7 @@ def test_check_recent_skips_completed(tmp_path, monkeypatch):
 
 def test_backfill_signal_status(tmp_path, monkeypatch):
     """Signals with matching results get status=completed after backfill."""
-    import signal_tracker as st
+    import trader_shared.signal_tracker as st
 
     store = tmp_path / "signals.jsonl"
     results = tmp_path / "signal_results.jsonl"
@@ -109,7 +109,7 @@ def test_backfill_signal_status(tmp_path, monkeypatch):
 
 def test_check_recent_sets_completed_on_signal(tmp_path, monkeypatch):
     """After computing result, signal's status in signals.jsonl becomes completed."""
-    import signal_tracker as st
+    import trader_shared.signal_tracker as st
 
     store = tmp_path / "signals.jsonl"
     results = tmp_path / "signal_results.jsonl"

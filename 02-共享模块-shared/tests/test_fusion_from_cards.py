@@ -79,44 +79,16 @@ def test_merge_decisions_cards_path(monkeypatch):
     assert out["signals_detail"]["chan"]["direction"] == 1
 
 
-def test_merge_decisions_classic_env_still_cards(monkeypatch):
-    """A1/C5：设 classic env 仍走 cards 族，并发 DeprecationWarning。"""
+def test_merge_decisions_classic_env_rejected(monkeypatch):
+    """A1/C5：classic env 已移除 → ValueError，不再告警后当 cards。"""
     monkeypatch.setenv("FUSION_FROM_CARDS", "classic")
-    cards = {
-        "chan": {
-            "type_short": "一买",
-            "type_raw": "一类买",
-            "direction": 1,
-            "summary_line": "一买",
-            "raw_available": True,
-            "same_level": True,
-        },
-        "momentum": {"direction": 1, "confidence": 0.5, "reason": "动量偏多", "raw_available": True},
-        "vpf": {
-            "direction": 0,
-            "confidence": 0.2,
-            "reason": "中性",
-            "raw_available": True,
-            "fund_quality": "missing",
-        },
-    }
-    with pytest.warns(DeprecationWarning, match="retired"):
-        out = merge_decisions(
-            chan_result={
-                "chanlun": {
-                    "buy_points": [{"type": "一类买", "price": 10, "confidence": 3}],
-                    "sell_points": [],
-                    "divergence": {"bottom_divergence": True},
-                    "trend_label": "上涨",
-                }
-            },
-            momentum_result={"momentum": {"score": 60, "direction": "bullish"}},
+    with pytest.raises(ValueError, match="classic"):
+        merge_decisions(
+            chan_result={"chanlun": {"buy_points": [], "sell_points": [], "divergence": {}, "trend_label": ""}},
+            momentum_result={"momentum": {"score": 50, "direction": "neutral"}},
             regime="正常",
-            analysis_cards=cards,
-            fusion_from_cards="classic",
+            analysis_cards={},
         )
-    assert out.get("fusion_input_path") in ("cards", "cards_failed")
-    assert out["signals_detail"]["chan"]["direction"] == 1
 
 
 def test_merge_decisions_cards_fail_closed_no_classic(monkeypatch):
@@ -153,21 +125,13 @@ def test_merge_decisions_cards_fail_closed_no_classic(monkeypatch):
         assert "cards" in str(sig.get("reason") or "") and "失败" in str(sig.get("reason") or "")
 
 
-def test_merge_compare_env_still_cards_no_fusion_compare(monkeypatch):
-    """C5：compare 已退役 → 仍 cards，无 fusion_compare，发 DeprecationWarning。"""
+def test_merge_compare_env_rejected_no_fusion_compare(monkeypatch):
+    """C5：compare env 已移除 → ValueError，且无 fusion_compare。"""
     monkeypatch.setenv("FUSION_FROM_CARDS", "compare")
-    cards = {
-        "chan": {"type_short": "一买", "direction": 1, "raw_available": True, "summary_line": "一买", "type_raw": "一类买"},
-        "momentum": {"direction": 0, "confidence": 0.2, "reason": "中性", "raw_available": True},
-        "vpf": {"direction": 0, "confidence": 0.2, "reason": "中性", "raw_available": True},
-    }
-    with pytest.warns(DeprecationWarning, match="retired"):
-        out = merge_decisions(
+    with pytest.raises(ValueError, match="compare"):
+        merge_decisions(
             chan_result={"chanlun": {"buy_points": [], "sell_points": [], "divergence": {}, "trend_label": "盘整"}},
             momentum_result={"momentum": {"score": 50, "direction": "neutral"}},
             regime="正常",
-            analysis_cards=cards,
-            fusion_from_cards="compare",
+            analysis_cards={},
         )
-    assert out.get("fusion_input_path") in ("cards", "cards_failed")
-    assert "fusion_compare" not in out

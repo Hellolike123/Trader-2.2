@@ -1125,7 +1125,7 @@ def _make_panel(results: list[dict[str, Any]], days_limit: int | None) -> str:
 
     # FIX-T-BIAS-13: 按信号类型（归一化后）统计
     # NOTE: loop variable is `sig_type`, NOT `st` — `st` refers to signal_tracker module
-    # referenced by tests via `import signal_tracker as st`, so we must not shadow it.
+    # referenced by tests via `import trader_shared.signal_tracker as st`, so we must not shadow it.
     types: dict[str, list] = {}
     for r in valid:
         # 归一化信号类型

@@ -16,7 +16,7 @@
     ↓
 决策层 Decision = decision_view（共振 ∧ 策略可执行 ∧ 纪律）
     · fusion **仅仪表**（weighted_score / action 不微调出手）
-    · fusion **一律 cards**（意见卡三席；失败降级中性）；`classic`/`compare` **已退役**（告警后仍 cards）
+    · fusion **一律 cards**（意见卡三席；失败降级中性）；`classic`/`compare` **已移除**（旧值设置即 `ValueError`）
     · discipline 只收紧出手/仓位，不改 weighted_score / major_stage / support / stop
     ↓
 展示层 report_core 展示状态灯 + 动作 + 📐 闸口（主叙事跟 decision_view）
@@ -54,7 +54,7 @@
 presentation  →  report dict 字段
 strategy      →  analysis_cards + context（禁止 → wyckoff_events / detect_buy_points）
 analysis_cards→  analysis cores（适配层，允许）
-decision      →  一律 cards（意见卡三席）；classic/compare 已退役
+decision      →  一律 cards（意见卡三席）；classic/compare 已移除
 report_builder→  全部层
 ```
 
@@ -120,7 +120,7 @@ report_builder→  全部层
 |------|------|------|
 | **A** | 边界文档 + import 红线单测 | ✅ 本文 + `test_arch_boundaries.py` |
 | **B** | report 必出完整 cards + context 优先读卡 | ✅ `ensure_report_analysis_cards` |
-| **C** | fusion 可读卡（仅 cards） | ✅ **一律 cards**；`fusion_card_signals.py`；classic/compare **已退役**；parity 测入门禁 |
+| **C** | fusion 可读卡（仅 cards） | ✅ **一律 cards**；`fusion_card_signals.py`；classic/compare **已移除**；parity 测入门禁 |
 | **D** | 物理目录 `analysis/` `strategy/` | ✅ 2026-07-18；旧模块路径 re-export 兼容 |
 
 ### 阶段 C 环境变量（与代码 `fusion_core._fusion_input_mode` 一致）
@@ -128,13 +128,13 @@ report_builder→  全部层
 | 变量 | 值 | 行为 |
 |------|-----|------|
 | `FUSION_FROM_CARDS` | **缺省** / `cards` / `true` / `1` / `on` / `auto` | **生产唯一路径**：三席优先意见卡；适配失败 → 中性占位（`fusion_input_path=cards_failed`） |
-| | `classic` / `false` / `0` / `off` / `compare` / `both` / `dual` | **已退役**：`DeprecationWarning` 后仍 cards；无 classic mapper / 无 `fusion_compare` |
+| | `classic` / `false` / `0` / `off` / `compare` / `both` / `dual` | **已移除**：设置即 `ValueError`；无 classic mapper / 无 `fusion_compare` |
 
 结果字段：`fusion_input_path` = `cards` \| `cards_failed`。
 
 **一律 cards（与实现钉死）**
 
-- 缺省：`os.environ.get("FUSION_FROM_CARDS") or "cards"` → `cards`。
+- 缺省：`os.environ.get("FUSION_FROM_CARDS") or "cards"` → `cards`；其余旧值显式拒绝，禁止静默当 cards。
 - 生产 cards 失败 = **降级中性**（`cards_failed`），不回退 classic。
 - classic mappers 已归档：`trader_shared/_deprecated/fusion_classic_mappers.py`（生产树零 import）。
 - `scripts/compare_fusion_paths.py` / `fusion_path_compare.py` **obsolete**（打印退役说明 / 仅历史纯函数）。

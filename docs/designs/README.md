@@ -22,7 +22,7 @@
 
 **原则**：以本目录为准；桌面草稿仅作备份，不作为开发契约。
 
-**Fusion 默认（与代码一致）**：`FUSION_FROM_CARDS` **缺省 = cards**；`classic` / `compare` 已退役，设了也仍走 cards。见 `analysis-strategy-boundaries.md` §5。  
+**Fusion 默认（与代码一致）**：`FUSION_FROM_CARDS` **缺省 = cards**；`classic` / `compare` 已移除，设置即报错。见 `analysis-strategy-boundaries.md` §5。
 **产品方向**：主路径走向「共振 + 策略 + 纪律」；fusion 分不作总司令。见 resonance 文档。
 
 ## 其它

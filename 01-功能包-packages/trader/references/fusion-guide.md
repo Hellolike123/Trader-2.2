@@ -26,7 +26,7 @@
 | 模式 | 行为 |
 |------|------|
 | 缺省 / `cards` | **生产唯一路径**：意见卡 → `fusion_card_signals`；失败 → 中性占位（`fusion_input_path=cards_failed`） |
-| `classic` / `compare` 等 | **已退役**：`DeprecationWarning` 后仍走 cards（无 classic mapper / 无 `fusion_compare`） |
+| `classic` / `compare` 等 | **已移除**：设置即 `ValueError`，不会走 cards（无 classic mapper / 无 `fusion_compare`） |
 
 `fusion_input_path` 枚举：`cards` \| `cards_failed`。  
 `weighted_score` / `action` / breakdown **仅仪表**；出手听 `decision_view`。

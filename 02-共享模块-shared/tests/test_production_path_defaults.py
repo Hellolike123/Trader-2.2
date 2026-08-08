@@ -21,20 +21,45 @@ def test_fusion_default_mode_cards(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _fusion_input_mode() == "cards"
 
 
-def test_classic_fusion_emits_deprecation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_classic_fusion_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FUSION_FROM_CARDS", "classic")
     from trader_shared.fusion_core import _fusion_input_mode
 
-    with pytest.warns(DeprecationWarning, match="retired"):
-        assert _fusion_input_mode() == "cards"
+    with pytest.raises(ValueError, match="classic"):
+        _fusion_input_mode()
 
 
-def test_compare_fusion_emits_deprecation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_compare_fusion_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FUSION_FROM_CARDS", "compare")
     from trader_shared.fusion_core import _fusion_input_mode
 
-    with pytest.warns(DeprecationWarning, match="retired"):
-        assert _fusion_input_mode() == "cards"
+    with pytest.raises(ValueError, match="compare"):
+        _fusion_input_mode()
+
+
+@pytest.mark.parametrize("value", ["cards", "true", "1", "on", "auto"])
+def test_fusion_cards_env_values_accepted(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    monkeypatch.setenv("FUSION_FROM_CARDS", value)
+    from trader_shared.fusion_core import _fusion_input_mode
+
+    assert _fusion_input_mode() == "cards"
+
+
+@pytest.mark.parametrize("value", ["classic", "compare", "false", "0", "off", "both", "dual"])
+def test_fusion_retired_env_values_rejected(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    monkeypatch.setenv("FUSION_FROM_CARDS", value)
+    from trader_shared.fusion_core import _fusion_input_mode
+
+    with pytest.raises(ValueError, match="removed"):
+        _fusion_input_mode()
+
+
+def test_fusion_explicit_bool_cards_and_rejected() -> None:
+    from trader_shared.fusion_core import _fusion_input_mode
+
+    assert _fusion_input_mode(True) == "cards"
+    with pytest.raises(ValueError, match="removed"):
+        _fusion_input_mode(False)
 
 
 def test_legacy_env_ignored_still_short_midline(monkeypatch: pytest.MonkeyPatch) -> None:

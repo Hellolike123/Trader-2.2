@@ -31,8 +31,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
-import warnings
 from typing import Any
 
 from trader_shared.safe_cast import safe_float
@@ -56,33 +54,25 @@ except ImportError:  # pragma: no cover
 
 FUSION_LOG_ONLY = os.environ.get("FUSION_LOG_ONLY", "false").lower() in ("true", "1", "yes")
 
-# Arch C：fusion 三席输入来源 — 仅 cards（classic/compare 已退役）
-_RETIRED_FUSION_MODES = frozenset({
-    "0", "false", "no", "classic", "off", "compare", "both", "dual",
-})
+# Arch C：fusion 三席输入来源 — 仅 cards（classic/compare 已移除，旧值拒绝）
+_FUSION_CARDS_VALUES = frozenset({"cards", "true", "1", "on", "auto"})
 
 
-def _warn_retired_fusion_mode(mode: str, *, stacklevel: int = 3) -> None:
-    warnings.warn(
-        f"FUSION_FROM_CARDS={mode!r} is retired; always using cards. "
-        "Classic/compare fusion paths have been removed. "
-        "Seat mapping lives in analysis/fusion_card_signals.py.",
-        DeprecationWarning,
-        stacklevel=stacklevel,
+def _fusion_input_mode(mode: str | bool | None = None) -> str:
+    """解析 fusion 输入模式；只接受 cards 族，旧值显式 ValueError。"""
+    if mode is None:
+        raw = os.environ.get("FUSION_FROM_CARDS") or "cards"
+    else:
+        raw = mode
+    if raw is True:
+        return "cards"
+    v = str(raw).strip().lower()
+    if v in _FUSION_CARDS_VALUES:
+        return "cards"
+    raise ValueError(
+        f"FUSION_FROM_CARDS={raw!r} is removed; only cards is supported "
+        "(classic/compare/false/off have no production path)."
     )
-
-
-def _fusion_input_mode() -> str:
-    """一律 cards；classic/compare 等旧值发 DeprecationWarning 后仍返回 cards。"""
-    v = (os.environ.get("FUSION_FROM_CARDS") or "cards").strip().lower()
-    if v in _RETIRED_FUSION_MODES:
-        _warn_retired_fusion_mode(v, stacklevel=3)
-    return "cards"
-
-
-def _warn_deprecated_fusion_classic() -> None:
-    """兼容旧测例名；语义同 _warn_retired_fusion_mode('classic')。"""
-    _warn_retired_fusion_mode("classic", stacklevel=3)
 
 
 def _three_signals_via_cards(
@@ -257,7 +247,7 @@ def merge_decisions(
     extend_margin: dict | None = None,      # Phase 2: 融资融券（预留接入）
     vpf_result: dict | None = None,         # 价量资金专家（优先）；缺省由 volume/fund 合成
     analysis_cards: dict | None = None,     # Arch C：意见卡（优先三席）
-    fusion_from_cards: str | bool | None = None,  # None→环境变量；仅 cards（旧 classic/compare 告警后当 cards）
+    fusion_from_cards: str | bool | None = None,  # None→环境变量；仅 cards（旧值 ValueError）
 ) -> dict:
     """决策融合层核心函数。
 
@@ -271,7 +261,7 @@ def merge_decisions(
         regime:          market_env assess() 返回的 level 字段
         volume_warning / fund_flow_data / vpf_result: 第三席 VPF 输入
         analysis_cards:  Arch C 意见卡；与 fusion_from_cards 联用
-        fusion_from_cards: 仅 cards；None 读环境；classic/compare/false 已退役（告警后仍 cards）
+        fusion_from_cards: 仅 cards；None 读环境；classic/compare/false 等旧值 ValueError
 
     Returns:
         含 signals_detail.chan / momentum / vpf；weights_used 键为 chan/momentum/vpf
@@ -284,16 +274,8 @@ def merge_decisions(
     # vpf_result 仅经 cards/VPF 卡路径消费；保留形参兼容旧调用
     _ = vpf_result
 
-    # ── 解析 fusion 输入模式（一律 cards；退役值告警）──
-    if fusion_from_cards is None:
-        _fusion_input_mode()  # may warn on retired env
-    elif isinstance(fusion_from_cards, bool):
-        if not fusion_from_cards:
-            _warn_retired_fusion_mode("false", stacklevel=3)
-    else:
-        _m = str(fusion_from_cards).strip().lower()
-        if _m in _RETIRED_FUSION_MODES:
-            _warn_retired_fusion_mode(_m, stacklevel=3)
+    # ── 解析 fusion 输入模式（一律 cards；旧值显式拒绝）──
+    _fusion_input_mode(fusion_from_cards)
 
     # 1. 信号标准化（仅 cards；失败 → cards_failed 中性占位）
     _path = "cards"

@@ -202,7 +202,7 @@
 | `FUSION_FROM_CARDS` | 行为 |
 |---------------------|------|
 | 缺省 / `cards` / `true` / `1` / `on` / `auto` | **生产唯一路径**：三席优先意见卡；失败 → 中性占位（`cards_failed`） |
-| `classic` / `false` / `0` / `off` / `compare` / `both` / `dual` | **已退役**：发 `DeprecationWarning` 后仍走 cards（无 classic mapper / 无 `fusion_compare`） |
+| `classic` / `false` / `0` / `off` / `compare` / `both` / `dual` | **已移除**：设置即 `ValueError`，不会走 cards（无 classic mapper / 无 `fusion_compare`） |
 
 `fusion_input_path` 枚举：`cards` \| `cards_failed`。
 

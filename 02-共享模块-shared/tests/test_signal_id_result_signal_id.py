@@ -12,7 +12,7 @@ _p = Path(__file__).resolve().parent.parent / "scripts"
 if str(_p.resolve()) not in sys.path:
     sys.path.insert(0, str(_p.resolve()))
 
-from signal_tracker import _compute_results_for_sig, make_signal_id
+from trader_shared.signal_tracker import _compute_results_for_sig, make_signal_id
 
 
 def test_compute_results_for_sig_includes_signal_id():
@@ -37,10 +37,10 @@ def test_compute_results_for_sig_includes_signal_id():
         {"date": "2025-05-05", "close": "10.80", "atr14": "0.35"},
     ]
 
-    with patch("signal_tracker.resolve_security", return_value="688248.SH"), \
-         patch("signal_tracker.fetch_qfq_daily", return_value=mock_bars), \
-         patch("signal_tracker.HttpClient", return_value=MagicMock()), \
-         patch("signal_tracker.to_float", side_effect=lambda v: float(v) if v else None):
+    with patch("trader_shared.signal_tracker.resolve_security", return_value="688248.SH"), \
+         patch("trader_shared.signal_tracker.fetch_qfq_daily", return_value=mock_bars), \
+         patch("trader_shared.signal_tracker.HttpClient", return_value=MagicMock()), \
+         patch("trader_shared.signal_tracker.to_float", side_effect=lambda v: float(v) if v else None):
         result = _compute_results_for_sig(sig)
 
     assert result is not None, "_compute_results_for_sig should return a result, not None"
@@ -72,10 +72,10 @@ def test_compute_results_for_sig_signal_id_with_fallback_price():
         {"date": "2025-05-05", "close": "12.50", "atr14": "0.40"},
     ]
 
-    with patch("signal_tracker.resolve_security", return_value="000001.SZ"), \
-         patch("signal_tracker.fetch_qfq_daily", return_value=mock_bars), \
-         patch("signal_tracker.HttpClient", return_value=MagicMock()), \
-         patch("signal_tracker.to_float", side_effect=lambda v: float(v) if v else None):
+    with patch("trader_shared.signal_tracker.resolve_security", return_value="000001.SZ"), \
+         patch("trader_shared.signal_tracker.fetch_qfq_daily", return_value=mock_bars), \
+         patch("trader_shared.signal_tracker.HttpClient", return_value=MagicMock()), \
+         patch("trader_shared.signal_tracker.to_float", side_effect=lambda v: float(v) if v else None):
         result = _compute_results_for_sig(sig)
 
     assert result is not None
@@ -104,10 +104,10 @@ def test_compute_results_for_sig_signal_id_normalized():
         {"date": "2025-05-05", "close": "9.30", "atr14": "0.30"},
     ]
 
-    with patch("signal_tracker.resolve_security", return_value="688248.SH"), \
-         patch("signal_tracker.fetch_qfq_daily", return_value=mock_bars), \
-         patch("signal_tracker.HttpClient", return_value=MagicMock()), \
-         patch("signal_tracker.to_float", side_effect=lambda v: float(v) if v else None):
+    with patch("trader_shared.signal_tracker.resolve_security", return_value="688248.SH"), \
+         patch("trader_shared.signal_tracker.fetch_qfq_daily", return_value=mock_bars), \
+         patch("trader_shared.signal_tracker.HttpClient", return_value=MagicMock()), \
+         patch("trader_shared.signal_tracker.to_float", side_effect=lambda v: float(v) if v else None):
         result = _compute_results_for_sig(sig)
 
     assert result is not None
