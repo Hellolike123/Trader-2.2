@@ -37,7 +37,10 @@ from typing import Any
 SHARED_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # ── 注入 t0 skill 脚本目录，使 import 解析到「与实盘 t0 同一份」信号脑/ trader_shared ──
-T0_DIR = os.path.expanduser("~/.workbuddy/skills/t0/scripts")
+# 优先仓库 skill 包（price_point_engine.py 是 shim → trader_shared 仓库引擎）；
+# 仅当仓库包缺失（如纯安装环境）才回退 ~/.workbuddy 用户安装目录。
+_REPO_T0_DIR = os.path.join(os.path.dirname(SHARED_DIR), "01-功能包-packages", "t0", "scripts")
+T0_DIR = _REPO_T0_DIR if os.path.isdir(_REPO_T0_DIR) else os.path.expanduser("~/.workbuddy/skills/t0/scripts")
 if os.path.isdir(T0_DIR) and T0_DIR not in sys.path:
     sys.path.insert(0, T0_DIR)
 
@@ -543,6 +546,9 @@ def make_signal_fn(code: str, sec, bars_5m: list[dict], bars_15m: list[dict],
     """
     m15_dt = [parse_dt(b.get("time") or b.get("date")) for b in bars_15m]
     daily_dates = [str(b.get("date") or "") for b in daily]
+    # handoff §1：日线威科夫 phase → T0 方向（顺日线过滤）。按日缓存，
+    # 且用 use_persisted_phase=False，避免回测写盘污染真实持仓阶段状态。
+    _daily_phase_cache: dict[str, str | None] = {}
 
     def signal_fn(t_idx: int):
         now_bar = bars_5m[t_idx]
@@ -586,6 +592,17 @@ def make_signal_fn(code: str, sec, bars_5m: list[dict], bars_15m: list[dict],
             "tick_data": [],
             "order_book": None,
         }
+        # handoff §1：注入日线 phase（无前视：仅用当日之前日线；按日缓存）
+        _phase_key = str(daily_upto[-1].get("date") or "") if daily_upto else ""
+        if _phase_key not in _daily_phase_cache:
+            try:
+                from trader_shared.wyckoff_core import wyckoff_analysis
+                _daily_phase_cache[_phase_key] = wyckoff_analysis(
+                    daily_upto, symbol=code, use_persisted_phase=False
+                ).get("phase")
+            except Exception:
+                _daily_phase_cache[_phase_key] = None
+        report_data["daily_phase"] = _daily_phase_cache.get(_phase_key)
         # t0 设计：注入 trader 日线结构支撑/阻力（用 D 之前日线 = 无前视）
         # bb_vwap 模式：EMA13/50+布林+VWAP+威科夫正T，不走 build_price_point_model
         if theory_mode == "bb_vwap":

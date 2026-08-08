@@ -115,6 +115,15 @@ def build_plan(target: str) -> dict[str, Any]:
         "tick_data": [],
         "order_book": quote.get("order_book"),
     }
+
+    # handoff §1：日线威科夫 phase 定 T0 方向；提前算并注入信号引擎（顺日线过滤），
+    # 结果同时复用于 result["wyckoff"]（避免二次全量分析）。
+    try:
+        from trader_shared.wyckoff_core import wyckoff_analysis
+        _wyckoff_result = wyckoff_analysis(daily, symbol=quote.get("symbol") or "")
+    except Exception:
+        _wyckoff_result = {}
+    report_data["daily_phase"] = (_wyckoff_result or {}).get("phase")
     
     # 被动触发避险控制：当现价靠近低吸或高抛关注价 1.5% 以内时，才触发物理 Tick 盯盘抓取
     temp_model = build_price_point_model(report_data)
@@ -189,13 +198,10 @@ def build_plan(target: str) -> dict[str, Any]:
     buy_price = numeric_or_none(model["buy"].get("execution_price")) or current
     stop_price = numeric_or_none(model["buy"].get("invalid_price")) or 0
     sell_price = numeric_or_none(model["sell"].get("observation_price"))
-    # 威科夫分析（用于实时信号提醒和止盈计划）
+    # 威科夫分析（用于实时信号提醒和止盈计划）；复用 build_plan 提前算的结果
     try:
-        from trader_shared.wyckoff_core import wyckoff_analysis
-        wyck_result = {"wyckoff": wyckoff_analysis(daily, symbol=quote.get("symbol") or "")}
-        result["wyckoff"] = wyck_result.get("wyckoff", {})
+        result["wyckoff"] = (_wyckoff_result or {})
     except Exception:
-        wyck_result = {}
         result["wyckoff"] = {}
 
     # 取融合层或报告中的阶段，避免硬编码"主升"导致衰退期仍激进
@@ -208,7 +214,7 @@ def build_plan(target: str) -> dict[str, Any]:
         resistance_price=float(sell_price) if sell_price and sell_price > buy_price else None,
         current_stage=_stage,
         bars=daily,
-        wyckoff_result=wyck_result,
+        wyckoff_result={"wyckoff": (_wyckoff_result or {})},
         atr14=float(model_atr),
     )
 

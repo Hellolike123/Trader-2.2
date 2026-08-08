@@ -238,9 +238,11 @@ def detect_state_change(previous_state: dict[str, Any] | None, plan: dict[str, A
         events.append(SELL_INVALIDATED)
     buy_event = side_event("buy", previous_state.get("buy_status"), buy, first_run=first_run)
     sell_event = side_event("sell", previous_state.get("sell_status"), sell, first_run=first_run)
-    if buy_event and (buy_event != BUY_TRIGGERED or is_zone_hit(buy)):
+    # handoff §3：单信号即提醒——出现任一关键位信号（VWAP回归/前高前低/开盘价/AB信号棒）
+    # + 顺日线方向即推送，不再等 is_zone_hit（价到关注区）或三重共振。
+    if buy_event:
         events.append(buy_event)
-    if sell_event and (sell_event != SELL_TRIGGERED or is_zone_hit(sell)):
+    if sell_event:
         events.append(sell_event)
     return events
 
@@ -416,7 +418,27 @@ def build_alert_message(event: str, plan: dict[str, Any], cost: float | None = N
     name = plan.get("name", "未知")
     symbol = plan.get("symbol", "未知")
     current = plan.get("current_price", 0.0)
-    
+
+    # handoff §3：提醒含 信号类型 + 触价位 + 日线方向 + "人确认"
+    def _key_signal_reason(model: dict[str, Any]) -> str:
+        for r in model.get("reasons") or []:
+            r = str(r)
+            if any(k in r for k in ("VWAP回归", "突破", "开盘价", "AB信号棒")):
+                return r
+        return ""
+
+    def _daily_direction_text() -> str:
+        try:
+            from trader_shared.t0_core import _t0_direction
+            d = _t0_direction(plan)
+        except Exception:
+            d = "neutral"
+        return {
+            "bullish": "日线偏多→正T",
+            "bearish": "日线偏空→反T",
+            "neutral": "日线中性→观望",
+        }.get(d, "日线方向待定")
+
     header_map = {
         BUY_TRIGGERED: "🟢 结构提醒：【近低吸关注区】（参考 · 人决策）",
         SELL_TRIGGERED: "🟢 结构提醒：【近高抛关注区】（参考 · 人决策）",
@@ -442,6 +464,12 @@ def build_alert_message(event: str, plan: dict[str, Any], cost: float | None = N
 
     skip = t_skip_reason(plan)
     if event == BUY_TRIGGERED:
+        sig = _key_signal_reason(model)
+        daily_dir = _daily_direction_text()
+        trig_px = model.get("execution_price") or model.get("trigger_price") or current
+        summary.append(
+            f"信号：{sig or '关键位结构信号'} @ {trig_px:.2f} · {daily_dir} · 人确认"
+        )
         summary.append(f"价格在 {price(model.get('observation_price'))} 一带，{tape_reason or '结构触及低吸关注区'}。")
         summary.append(
             f"  📥 关注区（参考）：{(model.get('execution_price') or current):.2f}"
@@ -456,6 +484,12 @@ def build_alert_message(event: str, plan: dict[str, Any], cost: float | None = N
         if model.get("invalid_price"):
             summary.append(f"  ⚠️ 看法失效参考：跌破 {model.get('invalid_price'):.2f}")
     elif event == SELL_TRIGGERED:
+        sig = _key_signal_reason(model)
+        daily_dir = _daily_direction_text()
+        trig_px = model.get("execution_price") or model.get("trigger_price") or current
+        summary.append(
+            f"信号：{sig or '关键位结构信号'} @ {trig_px:.2f} · {daily_dir} · 人确认"
+        )
         summary.append(f"价格接近 {price(model.get('observation_price'))} 压力参考，{tape_reason or '结构触及高抛关注区'}。")
         summary.append(
             f"  📤 关注区（参考）：{(model.get('acceptable_price') or current):.2f}"
@@ -848,6 +882,30 @@ def run_once(
         day_fuse = fuse_state.get(day) if isinstance(fuse_state, dict) else None
         if isinstance(day_fuse, dict) and day_fuse.get("fused"):
             already_fused = True
+
+        # handoff §5：日内总亏损闸——1% 警告、2% 强制停手（当天不再做T）。
+        # 基准 = 持仓市值（position × cost）；无持仓/无成本时不启用，避免误杀。
+        pnl_alert_line = ""
+        try:
+            from trader_shared.t0_ledger import today_summary
+            _ts = today_summary(target_key)
+            _net = float(_ts.get("net_pnl") or 0)
+            _base = (position or 0) * float(cost or 0)
+            if _base > 0:
+                _loss_ratio = -_net / _base
+                if _loss_ratio >= 0.02:
+                    pnl_alert_line = (
+                        f"🚨 日内总亏损 {_net:.0f} 元（{_loss_ratio*100:.1f}%）"
+                        f"≥ 2% 基准 · 当日停手，不再做 T"
+                    )
+                    already_fused = True
+                elif _loss_ratio >= 0.01:
+                    pnl_alert_line = (
+                        f"⚠️ 日内总亏损 {_net:.0f} 元（{_loss_ratio*100:.1f}%）"
+                        f"≥ 1% 基准 · 收手谨慎"
+                    )
+        except Exception:
+            pnl_alert_line = ""
         
         targets = state.get("targets") if isinstance(state.get("targets"), dict) else {}
         if reset_cache:
@@ -927,12 +985,19 @@ def run_once(
                 warnings.warn(f"[t0-monitor] 信号持久化失败: {e}")
             allowed_events = []
         alert = _fuse_alert(target_key, day_fuse.get("count", 0) if isinstance(day_fuse, dict) else 0, name)
+        if pnl_alert_line:
+            alert = pnl_alert_line + "\n" + alert
         return alert
     
     # ── 量能真空预警（独立于事件系统，每次检查都触发） ──
     vacuum_line = ""
     if vacuum_alert:
         vacuum_line = vacuum_alert + "\n"
+
+    # ── 日内总亏损警示（handoff §5：1% 警告；2% 已在上方熔断） ──
+    pnl_line = ""
+    if pnl_alert_line:
+        pnl_line = pnl_alert_line + "\n"
 
     # ── 实时缠论预警（opt-in，独立于事件系统） ──
     chan_line = ""
@@ -950,12 +1015,12 @@ def run_once(
         except Exception as e:
             warnings.warn(f"[t0-monitor] 信号持久化失败: {e}")
     if not allowed_events:
-        prefix = (vacuum_line + chan_line + chan5_line).strip()
+        prefix = (pnl_line + vacuum_line + chan_line + chan5_line).strip()
         if prefix:
             return prefix
         return "无新提醒" if verbose else ""
     events_text = "\n\n".join(build_alert_message(event, plan, cost=cost, position=position, previous_state=target_state) for event in allowed_events)
-    prefix = vacuum_line + chan_line + chan5_line
+    prefix = pnl_line + vacuum_line + chan_line + chan5_line
     if prefix:
         return prefix + events_text
     return events_text

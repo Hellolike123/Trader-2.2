@@ -4,6 +4,13 @@ from __future__ import annotations
 from typing import Any
 
 from trader_shared.light_data import to_float
+from trader_shared.t0_config import (
+    ACCUM_PHASES,
+    DIST_PHASES,
+    SKIP_LOOKBACK_DAYS,
+    SKIP_MIN_DAILY_AMPLITUDE,
+    SKIP_MIN_DAILY_AMOUNT,
+)
 
 try:
     from trader_shared.order_book import analyze as order_book_analyze
@@ -319,6 +326,11 @@ def t_skip_reason(plan: dict[str, Any]) -> str | None:
     if worth and worth.get("worth") is False:
         return "费后盖不住"
 
+    # handoff §4：前置筛选——日均振幅/日均成交额（从日线 bars 算，窗口内数据不足不拦）
+    _skip = _liquidity_skip_reason(plan)
+    if _skip:
+        return _skip
+
     chg = numeric_or_none(plan.get("current_change_pct"))
     if chg is not None and abs(chg) >= _EXTREME_DAY_CHANGE_PCT:
         return "单边日"
@@ -333,6 +345,35 @@ def t_skip_reason(plan: dict[str, Any]) -> str | None:
             return "临近涨停"
         if abs(current - dn_lim) / dn_lim < 0.005:
             return "临近跌停"
+    return None
+
+
+def _liquidity_skip_reason(plan: dict[str, Any]) -> str | None:
+    """日均振幅 <3% / 日均成交额 <3 亿 → 今日宜不做（handoff §4）。"""
+    daily = (plan.get("data") or {}).get("daily_bars") or []
+    if len(daily) < 5:
+        return None
+    recent = daily[-SKIP_LOOKBACK_DAYS:]
+    amplitudes: list[float] = []
+    amounts: list[float] = []
+    for i, bar in enumerate(recent):
+        high = numeric_or_none(bar.get("high"))
+        low = numeric_or_none(bar.get("low"))
+        close = numeric_or_none(bar.get("close"))
+        volume = numeric_or_none(bar.get("volume"))
+        pre_close = numeric_or_none(recent[i - 1].get("close")) if i > 0 else None
+        if high is not None and low is not None and pre_close and pre_close > 0 and high >= low:
+            amplitudes.append((high - low) / pre_close)
+        if close is not None and close > 0 and volume is not None and volume > 0:
+            amounts.append(close * volume)
+    if amplitudes:
+        avg_amp = sum(amplitudes) / len(amplitudes)
+        if avg_amp < SKIP_MIN_DAILY_AMPLITUDE:
+            return "日均振幅不足"
+    if amounts:
+        avg_amount = sum(amounts) / len(amounts)
+        if avg_amount < SKIP_MIN_DAILY_AMOUNT:
+            return "日均成交额不足"
     return None
 
 
@@ -527,17 +568,53 @@ def _data_thin(plan: dict[str, Any]) -> bool:
     return False
 
 
+def _daily_t0_direction(plan: dict[str, Any]) -> str | None:
+    """日线威科夫阶段 → T0 大方向：bullish / bearish / None（无明确阶段）。
+
+    handoff §1：日线定基调，日内箱位只做时机微调。
+    """
+    wyckoff = plan.get("wyckoff") or {}
+    phase = str(wyckoff.get("phase") or "").strip().lower()
+    if not phase or phase in {"none", "unknown", "无明确阶段"}:
+        return None
+    if phase in ACCUM_PHASES:
+        return "bullish"
+    if phase in DIST_PHASES:
+        return "bearish"
+    return None
+
+
+def _t0_direction(plan: dict[str, Any]) -> str:
+    """T0 方向（bullish / bearish / neutral）：日线优先，无阶段按日内箱位。
+
+    - 日线积累/markup → bullish（低吸高抛，正T）
+    - 日线派发/markdown → bearish（高抛低吸，反T）
+    - 无明确阶段 → 日内箱位：近高反T、近低正T
+    """
+    daily = _daily_t0_direction(plan)
+    if daily == "bullish":
+        return "bullish"
+    if daily == "bearish":
+        return "bearish"
+    bias = _box_zone_bias(plan)
+    if bias == "high":
+        return "bearish"
+    if bias == "low":
+        return "bullish"
+    return "neutral"
+
+
 def _scenario_verb(plan: dict[str, Any]) -> str | None:
-    """有仓时的剧本动词：看反T / 看正T / 观望。"""
+    """有仓时的剧本动词：看正T / 看反T / 观望。"""
     if not _has_position(plan):
         return None
     if t_skip_reason(plan):
         return None
-    bias = _box_zone_bias(plan)
-    if bias == "high":
-        return "看反T"
-    if bias == "low":
+    direction = _t0_direction(plan)
+    if direction == "bullish":
         return "看正T"
+    if direction == "bearish":
+        return "看反T"
     return "观望"
 
 
@@ -613,11 +690,16 @@ def _strategy_tone_line(
     if not _has_position(plan):
         return "无底仓 · 不做T召唤｜仅看结构点位"
 
-    bias = _box_zone_bias(plan)
-    if bias == "high" or is_zone_hit(sell_state):
-        near = "现价近卖区，冲高乏力再评估" if is_zone_hit(sell_state) else "现价近高区，优先评估反T"
+    direction = _t0_direction(plan)
+    if direction == "bearish" or is_zone_hit(sell_state):
+        if is_zone_hit(sell_state):
+            near = "现价近卖区，冲高乏力再评估"
+        elif _box_zone_bias(plan) == "high":
+            near = "现价近高区，优先评估反T"
+        else:
+            near = "日线偏空（派发），冲高乏力再评估反T"
         return f"看反T（高抛再接回）｜{near}"
-    if bias == "low" or is_zone_hit(buy_state):
+    if direction == "bullish" or is_zone_hit(buy_state):
         near_buy = is_zone_hit(buy_state)
         if not near_buy:
             # 价距买点很近也视为近买区（行动卡语气）
@@ -625,7 +707,12 @@ def _strategy_tone_line(
             cur = numeric_or_none(plan.get("current_price"))
             if buy_px and cur and buy_px > 0 and abs(cur - buy_px) / buy_px <= 0.008:
                 near_buy = True
-        near = "现价近买区，待企稳再评估" if near_buy else "现价近低区，待企稳再评估"
+        if near_buy:
+            near = "现价近买区，待企稳再评估"
+        elif _box_zone_bias(plan) == "low":
+            near = "现价近低区，待企稳再评估"
+        else:
+            near = "日线偏多（积累），待回调企稳再评估正T"
         return f"看正T（低吸再卖回）｜{near}"
     return "默认观望｜有冲高乏力再评估反T，有急跌企稳再评估正T"
 
@@ -667,7 +754,7 @@ def _build_action_card(
     stop = numeric_or_none(buy.get("invalid_price"))
     skip = t_skip_reason(plan)
     has_pos = _has_position(plan)
-    bias = _box_zone_bias(plan)
+    direction = _t0_direction(plan)
 
     buy_txt = f"{buy_px:.2f}" if buy_px is not None else "—"
     if is_zone_hit(buy_state) and buy.get("acceptable_price") is not None and buy_px is not None:
@@ -676,7 +763,8 @@ def _build_action_card(
     stop_txt = f"{stop:.2f}" if stop is not None else "—"
 
     # 点位：正T/反T/观望措辞略有不同，但始终含 低吸/止损/高抛 关键字
-    if bias == "high" and has_pos and not skip:
+    # 方向以日线为准（handoff §1）：日线派发→反T优先，积累→正T优先
+    if direction == "bearish" and has_pos and not skip:
         lines.append(f"高抛关注：{sell_txt}一带（冲高乏力再评估）")
         lines.append(f"止损参考：{stop_txt}（跌破则今日停）")
         reclaim = f"{buy_txt}一带" if buy_px is not None else "低吸区"
@@ -1080,8 +1168,9 @@ def _build_playbook(
 
     lines = ["⚡ 今日剧本"]
 
-    if bias == "high":
-        lines.append("场景：近高区 → 反T优先（高抛再接回）；正T仅急跌企稳后评估")
+    direction = _t0_direction(plan)
+    if direction == "bearish":
+        lines.append("场景：日线偏空（派发）→ 反T优先（高抛低吸）；单日只做反T，不反手")
         if sell_px is not None:
             tip = "冲高乏力/缩量" if (shrink or flat) else "冲高乏力"
             lines.append(f"反T看：{sell_px:.2f}一带（{tip}）再评估高抛")
@@ -1094,8 +1183,8 @@ def _build_playbook(
             lines.append(f"接回看：{buy_px:.2f}一带 · 须低于卖点且费后盖住门槛")
         else:
             lines.append("接回看：须低于卖点且费后盖住门槛（区间未齐则慎动）")
-    elif bias == "low":
-        lines.append("场景：近低区 → 正T优先（低吸再卖回）；反T不优先")
+    elif direction == "bullish":
+        lines.append("场景：日线偏多（积累）→ 正T优先（低吸高抛）；单日只做正T，不反手")
         if buy_px is not None:
             tip = "缩量企稳/双底" if shrink else "急跌后企稳"
             lines.append(f"正T看：{buy_px:.2f}一带（{tip}）再评估低吸")

@@ -6,24 +6,33 @@ from typing import Any
 
 from trader_shared.safe_cast import safe_max
 from trader_shared.t0_config import (
+    ACCUM_PHASES,
+    BREAKOUT_VOL_RATIO,
     BUY_ACCEPT_FACTOR,
     BUY_ACCEPT_FACTOR_AGGRESSIVE,
     BUY_ACCEPT_FACTOR_CONSERVATIVE,
     BUY_CONFIRM_FACTOR,
     DEFAULT_ZONE_WIDTH_PCT,
+    DIST_PHASES,
+    FAKE_BREAK_NEAR_PCT,
     INVALID_ABOVE_RESISTANCE,
     INVALID_BELOW_SUPPORT,
     GOOD_T_AMPLITUDE_PCT,
+    KEY_SIGNAL_STRONG_QUALITY,
+    AB_SIGNAL_SCORE_MIN,
     MIN_5M_BARS,
     MACD_WARMUP_BARS,
     MIN_T_AMPLITUDE_PCT,
     MIN_TRIGGER_MATCHES,
     MIN_T_NET_SPACE_PCT,
     MIN_SELL_NET_SPACE_PCT,
+    OPEN_RECLAIM_EPS_PCT,
+    OPEN_RECLAIM_MIN_BARS,
     PRICE_TICK,
     SELL_ACCEPT_FACTOR,
     SELL_ACCEPT_FACTOR_AGGRESSIVE,
     SELL_ACCEPT_FACTOR_CONSERVATIVE,
+    SELL_CONFIRM_FACTOR,
     SLIPPAGE_HIGH_VOLUME_RATIO,
     SLIPPAGE_LOW_VOLUME_RATIO,
     STRONG_TRIGGER_MATCHES,
@@ -32,6 +41,8 @@ from trader_shared.t0_config import (
     TREND_FILTER_ENABLED,
     TREND_FILTER_EXTREME_DROP_PCT,
     TREND_FILTER_EXTREME_ONLY,
+    VWAP_REGRESSION_DEV_PCT,
+    VWAP_REGRESSION_VOL_RATIO,
     VOLUME_EXPAND_RATIO,
     VOLUME_SHRINK_RATIO,
     ZONE_AMPLITUDE_FACTOR,
@@ -55,8 +66,6 @@ from trader_shared.t0_ict_execution import build_ict_signal
 from trader_shared.t0_indicators import (
     calculate_adx,
     calculate_bollinger_bands,
-    detect_bearish_divergence,
-    detect_bullish_divergence,
     calculate_macd,
     calculate_rsi,
     calculate_volume_ratio,
@@ -572,6 +581,164 @@ def vwap_uptrend(state: dict[str, Any]) -> bool:
     return vwap is not None and prev is not None and float(vwap) > float(prev)
 
 
+# ── 关键位信号（handoff §2：关键位 + 量价，单信号即出手）──────────────────
+
+def daily_direction_from_phase(phase: str | None) -> str | None:
+    """日线威科夫 phase → T0 方向：bullish / bearish / None（无明确阶段）。
+
+    词表与 t0_config.ACCUM_PHASES / DIST_PHASES 对齐（handoff §1）。
+    """
+    p = str(phase or "").strip().lower()
+    if not p or p in {"none", "unknown", "无明确阶段"}:
+        return None
+    if p in ACCUM_PHASES:
+        return "bullish"
+    if p in DIST_PHASES:
+        return "bearish"
+    return None
+
+
+def vwap_regression_signal(
+    bars: list[dict[str, Any]], state: dict[str, Any], current: float, side: str, direction: str | None
+) -> dict[str, Any] | None:
+    """VWAP 回归（handoff §2.1）：价格偏离均价线 >1.5% + 缩量 → 做回归。
+
+    - side=buy：价格在 VWAP 下方深偏离 → 低吸回归；要求非日线派发
+    - side=sell：价格在 VWAP 上方深偏离 → 高抛回归；要求非日线积累
+    - 只认「首次进入偏离区」：前一棒收盘未深偏离，本棒才触发，
+      避免持续偏离时每根 5m 都重复触发（单信号即出手，非每棒追）。
+    """
+    vwap = state.get("vwap")
+    if vwap is None or current is None or current <= 0:
+        return None
+    vwap = float(vwap)
+    if vwap <= 0:
+        return None
+    dev = (current - vwap) / vwap
+    vol_ratio = state.get("volume_ratio") or 1.0
+    today = today_bars(bars)
+    prev_close = num(today[-2].get("close")) if len(today) >= 2 else None
+    if side == "buy":
+        if direction == "bearish":
+            return None
+        if dev <= -VWAP_REGRESSION_DEV_PCT and vol_ratio < VWAP_REGRESSION_VOL_RATIO:
+            # 首次进入：前一棒收盘未深偏离（或数据不足时放行）
+            if prev_close is None or (prev_close - vwap) / vwap > -VWAP_REGRESSION_DEV_PCT:
+                return {"reason": f"VWAP回归：价低于均价线{vwap:.2f}达{abs(dev)*100:.1f}%且缩量(量比{vol_ratio:.1f})"}
+    else:
+        if direction == "bullish":
+            return None
+        if dev >= VWAP_REGRESSION_DEV_PCT and vol_ratio < VWAP_REGRESSION_VOL_RATIO:
+            if prev_close is None or (prev_close - vwap) / vwap < VWAP_REGRESSION_DEV_PCT:
+                return {"reason": f"VWAP回归：价高于均价线{vwap:.2f}达{dev*100:.1f}%且缩量(量比{vol_ratio:.1f})"}
+    return None
+
+
+def intraday_breakout_signal(
+    bars: list[dict[str, Any]], state: dict[str, Any], current: float, side: str, direction: str | None
+) -> dict[str, Any] | None:
+    """前高/前低突破（handoff §2.2）。
+
+    - 放量突破日内前高 + 顺日线 → 跟突破（buy）；对称：放量跌破前低 + 顺日线 → 跟跌破（sell）
+    - 缩量到前高 + 逆日线（日线派发）→ 假突破反向高抛；对称：缩量到前低 + 逆日线（日线积累）→ 假突破反向低吸
+    """
+    today = today_bars(bars)
+    if len(today) < 3:
+        return None
+    prev = today[:-1]
+    highs = [num(b.get("high")) for b in prev if num(b.get("high")) is not None]
+    lows = [num(b.get("low")) for b in prev if num(b.get("low")) is not None]
+    if not highs or not lows:
+        return None
+    prev_high = max(highs)
+    prev_low = min(lows)
+    vol_ratio = state.get("volume_ratio") or 1.0
+    expanding = vol_ratio >= BREAKOUT_VOL_RATIO
+    shrinking = vol_ratio < VOLUME_SHRINK_RATIO
+    if side == "buy":
+        # 放量突破前高 + 非派发日线 → 跟突破
+        if expanding and current > prev_high and direction != "bearish":
+            return {"reason": f"放量突破日内前高{prev_high:.2f}(量比{vol_ratio:.1f})"}
+        # 缩量到前低 + 日线积累 → 假突破反向低吸
+        if shrinking and current <= prev_low * (1 + FAKE_BREAK_NEAR_PCT) and direction == "bullish":
+            return {"reason": f"缩量回探前低{prev_low:.2f}(量比{vol_ratio:.1f})·日线积累假突破低吸"}
+    else:
+        # 放量跌破前低 + 非积累日线 → 跟跌破
+        if expanding and current < prev_low and direction != "bullish":
+            return {"reason": f"放量跌破日内前低{prev_low:.2f}(量比{vol_ratio:.1f})"}
+        # 缩量到前高 + 日线派发 → 假突破反向高抛
+        if shrinking and current >= prev_high * (1 - FAKE_BREAK_NEAR_PCT) and direction == "bearish":
+            return {"reason": f"缩量冲前高{prev_high:.2f}(量比{vol_ratio:.1f})·日线派发假突破高抛"}
+    return None
+
+
+def open_price_reclaim_signal(
+    bars: list[dict[str, Any]], state: dict[str, Any], current: float, side: str, direction: str | None
+) -> dict[str, Any] | None:
+    """开盘价失守/收复（handoff §2.3）：开盘 30 分钟后，
+    站稳开盘价上方(顺多)→低吸；下方(顺空)→高抛。
+
+    只认「刚穿越」：当前棒站稳开盘价同侧、且前一棒收盘还在另一侧
+    （或紧贴开盘价），避免整日持续高于/低于开盘价造成每根都触发。
+    """
+    today = today_bars(bars)
+    if len(today) < OPEN_RECLAIM_MIN_BARS + 1:
+        return None
+    open_px = num(today[0].get("open"))
+    if open_px is None or open_px <= 0:
+        return None
+    eps = open_px * OPEN_RECLAIM_EPS_PCT
+    prev_close = num(today[-2].get("close"))
+    if prev_close is None:
+        return None
+    if side == "buy":
+        if direction == "bearish":
+            return None
+        # 刚收复：前一棒收盘 ≤ 开盘价，本棒站稳开盘价上方
+        if prev_close <= open_px and current > open_px + eps:
+            return {"reason": f"开盘价{open_px:.2f}刚收复并站稳(顺日线低吸)"}
+    else:
+        if direction == "bullish":
+            return None
+        # 刚失守：前一棒收盘 ≥ 开盘价，本棒跌破开盘价下方
+        if prev_close >= open_px and current < open_px - eps:
+            return {"reason": f"开盘价{open_px:.2f}刚失守(顺日线高抛)"}
+    return None
+
+
+def ab_signal_bar_signal(
+    ab_result: dict[str, Any] | None, side: str, direction: str | None
+) -> dict[str, Any] | None:
+    """Al Brooks 信号棒（handoff §2.4）：高质量信号棒 + 顺日线即出手。
+
+    只认「信号棒驱动」的信号（analyze_ab 里 buy_reason 以“信号棒”开头）；
+    Always-In 回调计数补充信号不算高质量信号棒，不进入关键位快速通道。
+    另要求信号棒 score>=0.8（strong 里更强的一档），避免 5m 单根 strong 棒过密。
+    """
+    if not ab_result:
+        return None
+    quality = str(ab_result.get("signal_bar_quality") or "none")
+    if KEY_SIGNAL_STRONG_QUALITY and quality != "strong":
+        return None
+    details = ab_result.get("details") or {}
+    sig = details.get("signal_bar") or {}
+    try:
+        score = float(sig.get("score") or 0)
+    except (TypeError, ValueError):
+        score = 0.0
+    if score < AB_SIGNAL_SCORE_MIN:
+        return None
+    if side == "buy":
+        reason = str(ab_result.get("buy_reason") or "")
+        if ab_result.get("buy_signal") and reason.startswith("信号棒") and direction != "bearish":
+            return {"reason": f"AB信号棒({quality}·score{score:.1f})·{reason}"}
+    else:
+        reason = str(ab_result.get("sell_reason") or "")
+        if ab_result.get("sell_signal") and reason.startswith("信号棒") and direction != "bullish":
+            return {"reason": f"AB信号棒({quality}·score{score:.1f})·{reason}"}
+    return None
+
+
 def _ict_strength_meets_minimum(ict: dict[str, Any]) -> bool:
     """检查ICT信号强度是否达到最低门槛。"""
     strength_order = {"weak": 0, "medium": 1, "strong": 2}
@@ -759,6 +926,22 @@ def detect_buy_trigger(report_data: dict[str, Any], zones: dict[str, Any], state
     _sell_mr = (zones.get("sell_zone") or {}).get("main_resistance")
     if _buy_ms is not None and _sell_mr is not None and _buy_ms >= _sell_mr:
         return trigger_result("数据异常", None, [], ["买区高于卖区，VWAP/区间疑似跨日污染"])
+    # handoff §2：关键位信号（VWAP回归/前低突破/开盘价收复/AB信号棒），
+    # 任一命中 + 顺日线方向（非派发）即出手——单信号不要求多条件共振，
+    # 不受净空间/候选区/趋势/blocked 等旧闸限制（数据/振幅硬闸在上方已守）。
+    direction = daily_direction_from_phase(report_data.get("daily_phase"))
+    key_hits = [
+        vwap_regression_signal(bars, state, current, "buy", direction),
+        intraday_breakout_signal(bars, state, current, "buy", direction),
+        open_price_reclaim_signal(bars, state, current, "buy", direction),
+        ab_signal_bar_signal(report_data.get("ab_result"), "buy", direction),
+    ]
+    key_hits = [hit for hit in key_hits if hit]
+    if key_hits:
+        last = bars[-1]
+        reasons = [hit["reason"] for hit in key_hits]
+        trigger_time = last.get("time") or last.get("date")
+        return trigger_result("已触发", num(last.get("close")), reasons, [], trigger_time=trigger_time)
     net_space = report_data.get("t0_net_space_pct")
     if net_space is not None and net_space < MIN_T_NET_SPACE_PCT:
         return trigger_result("被阻断", None, [], ["T0净空间不足"])
@@ -795,10 +978,7 @@ def detect_buy_trigger(report_data: dict[str, Any], zones: dict[str, Any], state
     if macd_green_shrinking(state):
         matched.append("MACD绿柱缩短")
         core_count += 1
-    rsi_series = state.get("rsi") or []
-    if detect_bullish_divergence(bars, rsi_series, lookback=12):
-        matched.append("RSI底背离（价格新低RSI未新低）")
-        core_count += 1
+    # handoff §2：扔掉 RSI 12 棒背离（错位信号）——不再检测
     if rsi_turning_up(state):
         matched.append("RSI低位拐头")
         core_count += 1
@@ -864,6 +1044,22 @@ def detect_sell_trigger(report_data: dict[str, Any], zones: dict[str, Any], stat
     _sell_mr = (zones.get("sell_zone") or {}).get("main_resistance")
     if _buy_ms is not None and _sell_mr is not None and _buy_ms >= _sell_mr:
         return trigger_result("数据异常", None, [], ["买区高于卖区，VWAP/区间疑似跨日污染"])
+    # handoff §2：关键位信号（VWAP回归/前高假突破/开盘价失守/AB信号棒），
+    # 任一命中 + 顺日线方向（非积累）即出手——单信号不要求多条件共振，
+    # 不受净空间/候选区/趋势/blocked 等旧闸限制（数据/振幅硬闸在上方已守）。
+    direction = daily_direction_from_phase(report_data.get("daily_phase"))
+    key_hits = [
+        vwap_regression_signal(bars, state, current, "sell", direction),
+        intraday_breakout_signal(bars, state, current, "sell", direction),
+        open_price_reclaim_signal(bars, state, current, "sell", direction),
+        ab_signal_bar_signal(report_data.get("ab_result"), "sell", direction),
+    ]
+    key_hits = [hit for hit in key_hits if hit]
+    if key_hits:
+        last = bars[-1]
+        reasons = [hit["reason"] for hit in key_hits]
+        trigger_time = last.get("time") or last.get("date")
+        return trigger_result("已触发", num(last.get("close")), reasons, [], trigger_time=trigger_time)
     net_space = report_data.get("t0_net_space_pct")
     if net_space is not None and net_space < MIN_T_NET_SPACE_PCT:
         return trigger_result("被阻断", None, [], ["T0净空间不足"])
@@ -903,10 +1099,7 @@ def detect_sell_trigger(report_data: dict[str, Any], zones: dict[str, Any], stat
     if macd_red_shrinking(state):
         matched.append("MACD红柱缩短")
         core_count += 1
-    rsi_series = state.get("rsi") or []
-    if detect_bearish_divergence(bars, rsi_series, lookback=12):
-        matched.append("RSI顶背离（价格新高RSI未新高）")
-        core_count += 1
+    # handoff §2：扔掉 RSI 12 棒背离（错位信号）——不再检测
     if rsi_turning_down(state):
         matched.append("RSI高位拐头")
         core_count += 1
@@ -1288,6 +1481,16 @@ def check_resonance(report_data, zones, state, ab_result=None):
     sell_score = sell_ema + sell_vwap + sell_box
     sell_red = sell_score >= 40
 
+    # handoff §2：日内出手 = 关键位单信号（任一命中 + 顺日线方向）。
+    # buy_green/sell_red 直接复用 detect_buy/sell_trigger 状态机（含数据/空间硬闸），
+    # 保证回测撮合与盯盘/报告单一事实源；五条件评分降为仪表
+    # （法源 v2 §4.3 / handoff §9：威科夫/动量降为背景参考，不驱动出手）。
+    if str(report_data.get("space_state") or "") != "too_small":
+        buy_green = detect_buy_trigger(report_data, zones, state).get("status") == "已触发"
+        sell_red = detect_sell_trigger(report_data, zones, state).get("status") == "已触发"
+    else:
+        buy_green = sell_red = False
+
     lights = {
         "ema": {
             "buy": score_ema >= 20, "sell": sell_ema >= 20,
@@ -1386,12 +1589,22 @@ def build_price_point_model(report_data: dict[str, Any], structure_result: dict[
     data["ict_signal"] = ict_signal
     daily_bars = data.get("daily_bars") or []
     last_daily = daily_bars[-1] if daily_bars else {}
+    # 展示/仓位用日线 ATR14；单笔止损用日内 5m ATR（handoff §5）
     atr14_val = float(last_daily.get("atr14") or 0)
     atr_ratio_val = float(last_daily.get("atr_ratio") or 0)
+    intraday_atr = _latest_atr(completed, period=14)
+    # handoff §2：AB 信号棒提前算（信号引擎用 ab_result 做单一结构信号）
+    from trader_shared.ab_price_action import analyze_ab
+    ab_result = analyze_ab(
+        bars_5m=completed,
+        bars_15m=report_data.get("kline_15m") or [],
+        current_price=float(data["current_price"]),
+    )
+    data["ab_result"] = ab_result
     buy_trigger = detect_buy_trigger(data, zones, indicator_state)
     sell_trigger = detect_sell_trigger(data, zones, indicator_state)
-    buy_model = calculate_buy_price_model(data, zones, buy_trigger, atr14_val)
-    sell_model = calculate_sell_price_model(data, zones, sell_trigger, atr14_val)
+    buy_model = calculate_buy_price_model(data, zones, buy_trigger, intraday_atr)
+    sell_model = calculate_sell_price_model(data, zones, sell_trigger, intraday_atr)
     observation_flags = observation_validity(data, zones)
     buy_model["observation_valid"] = observation_flags["buy_valid"]
     buy_model["observation_reason"] = observation_flags["buy_reason"]
@@ -1404,13 +1617,6 @@ def build_price_point_model(report_data: dict[str, Any], structure_result: dict[
         level_name, level_advice = _atr_volatility_label(atr_ratio_val)
         atr_info = {"atr14": atr14_val, "atr_ratio": atr_ratio_val, "level": level_name, "level_advice": level_advice}
 
-    # 三重硬共振检查（Al Brooks + 威科夫 + 动量，三亮灯才可操作）
-    from trader_shared.ab_price_action import analyze_ab
-    ab_result = analyze_ab(
-        bars_5m=completed,
-        bars_15m=report_data.get("kline_15m") or [],
-        current_price=float(data["current_price"]),
-    )
     resonance = check_resonance(data, zones, indicator_state, ab_result=ab_result)
 
     return {
