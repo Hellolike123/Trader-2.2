@@ -572,12 +572,19 @@ def _detect_phase(
         upthrust_premature = False
 
     # ── Markup / Markdown（E 后主升/主跌标签）──
+    # 派发簇确认后近端反向 SOS 不翻案：簇确认语境下 Spring 序列不得抬成 Markup
+    # （与下方 accumulation_d 的 Spring 分支对称；法源 wyckoff-cluster-reverse-event-handoff §1.2）
+    _dist_cluster = bool(signals.get("distribution_confirmed")) and not bool(
+        signals.get("distribution_failed")
+    )
     last_close = signals.get("last_close")
-    tr_upper = signals.get("tr_upper")
+    # FINDING-1 修复：TR 上下沿统一从 tr_ctx 读（与 markdown 分支 L596 对称），消除来源不一致
+    tr_upper = (tr_ctx or {}).get("tr_upper") if tr_ctx else None
     bu = bool(signals.get("bu_signal"))
     utad = bool(signals.get("utad_signal"))
     # Markup：积累 D 确认后 + 站上 TR 上沿，或 BU（SOS 后备份买）
-    if (not spring_premature and spring and (sos or lps)) or bu:
+    # 派发簇已确认时，Spring+SOS 假突破不得抬成主升（落 markdown/none）
+    if (not spring_premature and spring and (sos or lps) and not _dist_cluster) or bu:
         if bu or (
             last_close is not None
             and tr_upper is not None
@@ -609,11 +616,9 @@ def _detect_phase(
 
     # ── 积累序列（原典：A停止→B建仓→C弹簧→D确认→E趋势） ──
     # 派发确认后近端反向 SOS 不翻案：簇确认语境下 Spring 序列不得抬成积累 D/C。
+    # _dist_cluster 已在 Markup/Markdown 段前置定义并复用（消除与 markup 分支的不对称）。
     # signals 层已抑 sos，但 _scan 仍可能从 bars 重新检出 SOS，故在此按簇标志兜底。
     # 法源 docs/plans/wyckoff-cluster-reverse-event-handoff.md §1.2
-    _dist_cluster = bool(signals.get("distribution_confirmed")) and not bool(
-        signals.get("distribution_failed")
-    )
     # Spring 必须先经 Phase B（有 SC+AR 停止行为或压缩蓄力）才有效
     # P0-A：Spring+Test 优先进 D；裸 Spring 只到 C；premature 不得被 test 洗白
     if not spring_premature and spring and spring_test and not _dist_cluster:
