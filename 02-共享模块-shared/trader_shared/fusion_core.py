@@ -402,10 +402,17 @@ def merge_decisions(
     if main_force_env and main_force_env != "unknown":
         weights = _apply_main_force_weights(weights, main_force_env)
 
+    # #1 修复：动量数据不足(insufficient) 视为「缺位」而非「真中性」。
+    # 检测口径与 L367 一致（momentum_result 原始方向 == "insufficient"）。
+    # 缺位动量不进入加权/分歧/置信度；其权重剥离后按原比例重归一化给 chan/vpf。
+    # 禁止改回 insufficient=50：那会把它当真中性参与加权，污染决策（见 handoff #1）。
+    _mom_inner = momentum_result.get("momentum") if isinstance(momentum_result, dict) else None
+    mom_insufficient = isinstance(_mom_inner, dict) and _mom_inner.get("direction") == "insufficient"
+
     # 3. 分歧检测与置信优先级冲突消解
-    directions = [chan_signal["direction"],
-                  momentum_signal["direction"],
-                  vpf_signal["direction"]]
+    # 缺位动量不参与分歧（仅用活跃席方向集合）
+    _present_signals = [chan_signal, vpf_signal] + ([] if mom_insufficient else [momentum_signal])
+    directions = [s["direction"] for s in _present_signals]
     disagreement = max(directions) - min(directions)
     disagreement_for_action = disagreement
 
@@ -422,13 +429,27 @@ def merge_decisions(
                 momentum_signal["confidence"] *= 0.3
             disagreement_for_action = 0
 
-    # 4. 加权计算 (使用可能消解后的方向及权重)
+    # 4. 加权计算
+    # 动量不足：剥离动量权重，剩余 chan/vpf 按原比例重归一化到 1.0，
+    # 让现有席主导（等价「降权/跳过」不足席，而非被其死权重稀释）。
     _w_vpf = weights.get("vpf", weights.get("wyckoff", 0.25))
-    weighted_score = (
-        chan_signal["direction"] * chan_signal["confidence"] * weights["chan"] +
-        momentum_signal["direction"] * momentum_signal["confidence"] * weights["momentum"] +
-        vpf_signal["direction"] * vpf_signal["confidence"] * _w_vpf
-    )
+    if mom_insufficient:
+        _active = {k: v for k, v in weights.items() if k != "momentum"}
+        _s = sum(_active.values())
+        _norm = {k: (v / _s if _s > 0 else 0.0) for k, v in _active.items()}
+        _vpf_key = "vpf" if "vpf" in _norm else "wyckoff"
+        weighted_score = (
+            chan_signal["direction"] * chan_signal["confidence"] * _norm.get("chan", 0.0)
+            + vpf_signal["direction"] * vpf_signal["confidence"] * _norm.get(_vpf_key, _w_vpf)
+        )
+        _conf_weights = _norm
+    else:
+        weighted_score = (
+            chan_signal["direction"] * chan_signal["confidence"] * weights["chan"] +
+            momentum_signal["direction"] * momentum_signal["confidence"] * weights["momentum"] +
+            vpf_signal["direction"] * vpf_signal["confidence"] * _w_vpf
+        )
+        _conf_weights = weights
 
     # 4b. 大盘"很差"默认偏斜：权重全零 → score=0 → "持股观望"
     # 在极端弱势下"持股观望"是最危险的动作（市场可能持续下跌），
@@ -452,8 +473,8 @@ def merge_decisions(
         if action in {"等转强", "等转强观察", "回调观望", "观望 (信号冲突)", "持股观望", "观望"}:
             action = "高位观望"
 
-    # 6. 综合置信度
-    confidence = compute_confidence(weighted_score, disagreement_for_action, weights)
+    # 6. 综合置信度（动量不足时仅用活跃席权重，避免死权重压低集中度）
+    confidence = compute_confidence(weighted_score, disagreement_for_action, _conf_weights)
 
     # #7 修复：data_status=partial 时 weighted_score 也截断，避免
     # report 里 weighted_score 显示正数但 action 显示"持股观望"的矛盾。
@@ -678,7 +699,7 @@ def merge_decisions(
                 "raw_key": "wyckoff",
             },
         },
-        "weights_used": weights,
+        "weights_used": _conf_weights,  # 实际用于加权/置信度的权重（动量不足时已剥离重归一化）
         "fusion_input_path": _path,  # Arch C: cards | cards_failed
     }
     if volume_warning:

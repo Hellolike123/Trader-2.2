@@ -1484,6 +1484,21 @@ def _stamp_vol_unit(bars: list[dict[str, Any]], unit: str) -> list[dict[str, Any
     return bars
 
 
+def _mark_cached(bars: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """标记这批 bar 来自本地缓存（浅拷贝首根，避免污染缓存存储对象）。
+
+    仅用于 _fetch_qfq_daily_raw 的各缓存命中返回点；网络路径不调用，
+    故 build_report 读 ``bars[0].get("cached")`` 即知是否命中缓存。
+    """
+    if not isinstance(bars, list) or not bars:
+        return bars
+    out = [dict(b) for b in bars if isinstance(b, dict)]
+    if not out:
+        return bars
+    out[0]["cached"] = True
+    return out
+
+
 def _fetch_daily_sina(sec: Security, days: int = 300) -> list[dict[str, Any]] | None:
     """Fetch daily K-line from Sina API as fallback when Tencent fails.
 
@@ -1631,9 +1646,9 @@ def _fetch_qfq_daily_raw(
                 if is_fetch_date_today(_data):
                     _rows = unwrap_bars_payload(_data)
                     if _rows:
-                        return _rows
+                        return _mark_cached(_rows)
                 if isinstance(_data, list) and not _cached_result.stale:
-                    return _data
+                    return _mark_cached(_data)
         except (ImportError, OSError):
             pass
         return []
@@ -1656,14 +1671,14 @@ def _fetch_qfq_daily_raw(
                 if is_fetch_date_today(_data):
                     _rows = unwrap_bars_payload(_data)
                     if isinstance(_rows, list) and len(_rows) >= 200:
-                        return _rows
+                        return _mark_cached(_rows)
                 # 兼容旧裸 list + 未过 TTL
                 if (
                     isinstance(_data, list)
                     and len(_data) >= 200
                     and not _cached_result.stale
                 ):
-                    return _data
+                    return _mark_cached(_data)
         except (ImportError, OSError) as exc:
             _logger.debug("File cache read failed for %s: %s", sec.code, exc)
 
@@ -1673,7 +1688,7 @@ def _fetch_qfq_daily_raw(
 
     cached = get_from_cache(cache_key)
     if cached is not None and not fresh:
-        return cached
+        return _mark_cached(cached)
 
     def do_fetch():
         _rate_limit_delay()
@@ -2340,6 +2355,50 @@ def load_market_snapshot(target: str, days: int = 300, include_5m: bool = True, 
         missing_sources=missing_sources,
         source_errors=source_errors,
     )
+
+
+def build_source_meta(snapshot, provider=None) -> dict[str, Any]:
+    """构造报告数据源溯源 ``_meta``（D5 / #4 透明度，不影响面板渲染）。
+
+    真实来源以每根 bar 自带的 ``data_source`` / ``vol_unit`` 为准（honest，无 race）；
+    ``provider_backend`` 仅记名义选源（get_provider 结果，可能与实际 fetch 源不同）；
+    ``daily_cached`` 来自 daily fetch 命中缓存时打的 ``cached`` 标记。
+    """
+    from datetime import datetime as _dt
+
+    def _first_src(bars):
+        if bars and isinstance(bars[0], dict):
+            return bars[0].get("data_source")
+        return None
+
+    def _first_cached(bars):
+        return bool(bars and isinstance(bars[0], dict) and bars[0].get("cached"))
+
+    daily = list(getattr(snapshot, "daily_bars", None) or [])
+    b5m = list(getattr(snapshot, "bars_5m", None) or [])
+    wk = list(getattr(snapshot, "weekly_bars", None) or [])
+    backend = None
+    if provider is not None:
+        backend = getattr(provider, "_backend", None) or type(provider).__name__
+    try:
+        from trader_shared.data_provider import _tushare_available
+        tushare_available = _tushare_available()
+    except Exception:
+        tushare_available = None
+    try:
+        fetched_at = _dt.now().isoformat(timespec="seconds")
+    except Exception:
+        fetched_at = None
+    return {
+        "daily_source": _first_src(daily),
+        "daily_cached": _first_cached(daily),
+        "5m_source": _first_src(b5m),
+        "weekly_source": _first_src(wk),
+        "vol_unit": daily[0].get("vol_unit") if daily and isinstance(daily[0], dict) else None,
+        "provider_backend": backend,
+        "tushare_available": tushare_available,
+        "fetched_at": fetched_at,
+    }
 
 
 def normalize_bar(raw: dict[str, Any]) -> dict[str, Any] | None:

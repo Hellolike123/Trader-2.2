@@ -13,6 +13,7 @@ from typing import Any
 import os
 
 from trader_shared._logging import get_logger
+from trader_shared.exception_tracker import collect as _et_collect, reset as _et_reset
 
 _logger = get_logger(__name__)
 
@@ -64,6 +65,7 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
     _prof = _profile_enabled()
     _t0 = _time.perf_counter()
     _marks: list[tuple[str, float]] = []
+    _et_reset()  # D3：每次报告构建前清空计数，做报告级隔离
 
     def _mark(label: str) -> None:
         if _prof:
@@ -375,6 +377,25 @@ def build_report(target: str, cost_price: float = 0.0) -> dict[str, Any]:
         line = f"[TRADER_PROFILE] {target} total={total:.3f}s " + " ".join(segs)
         _logger.info(line)
         print(line, file=sys.stderr)
+
+    # D3：把本次构建中被吞掉的异常按类型+位置计数，挂到 report（私有键，面板不渲染）
+    try:
+        summary = _et_collect()
+        if summary:
+            report["_exception_summary"] = summary
+            _logger.warning(
+                "[TRADER_EXCEPTIONS] %s 构建期间有 %d 类异常被静默吞掉: %s",
+                target, len(summary), summary,
+            )
+    except Exception:
+        pass
+
+    # D5 / #4：数据源溯源 _meta（私有键，面板不渲染；JSON 输出可见）
+    try:
+        from trader_shared.light_data import build_source_meta
+        report["_meta"] = build_source_meta(snapshot, provider)
+    except Exception as exc:
+        _logger.debug("build_source_meta failed for %s: %s", target, exc)
 
     return report
 

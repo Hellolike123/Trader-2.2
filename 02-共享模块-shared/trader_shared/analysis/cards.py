@@ -114,8 +114,10 @@ def build_wyckoff_card(
         bias = str(view.get("bias") or "neutral")
         phase = str(view.get("phase") or phase)
         phase_label = str(view.get("phase_label") or phase_label)
-    except Exception:
-        pass
+    except Exception as e:
+        from trader_shared.exception_tracker import record as _et_record
+
+        _et_record(e, "analysis.cards.stage_view")
 
     # P-L1/P-L2：卡可见 phase_label / main 与 view 同源 sanitize
     phase_label = _panel_fail_copy(phase_label)

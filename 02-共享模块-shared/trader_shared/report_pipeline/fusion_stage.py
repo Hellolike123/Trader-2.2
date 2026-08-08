@@ -38,7 +38,10 @@ def run_pre_cards_stage(
         vw = detect_volume_divergence(bars)
         if vw:
             volume_warning = volume_snapshot_dict(vw)
-    except Exception:
+    except Exception as e:
+        from trader_shared.exception_tracker import record as _et_record
+
+        _et_record(e, "fusion_stage.volume_divergence")
         volume_warning = None
 
     _stock_chg_pct = float(quote.get("current_change_pct") or 0)

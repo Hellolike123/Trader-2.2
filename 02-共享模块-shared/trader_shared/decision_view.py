@@ -103,7 +103,10 @@ def build_decision_view(report: dict[str, Any] | None) -> dict[str, Any]:
 
                 # 「缺结构」→「共振缺结构」；禁止 missing_structure 英文上屏
                 label = resonance_grade_label(grade)
-            except Exception:
+            except Exception as e:
+                from trader_shared.exception_tracker import record as _et_record
+
+                _et_record(e, "decision_view.grade_label_missing")
                 label = "缺岗"
             block_reasons.append(f"共振{label}" if not str(label).startswith("共振") else label)
         else:
@@ -111,7 +114,10 @@ def build_decision_view(report: dict[str, Any] | None) -> dict[str, Any]:
                 from trader_shared.resonance import resonance_grade_label
 
                 block_reasons.append(f"共振未齐（{resonance_grade_label(grade)}）")
-            except Exception:
+            except Exception as e:
+                from trader_shared.exception_tracker import record as _et_record
+
+                _et_record(e, "decision_view.grade_label")
                 block_reasons.append("共振未齐")
     if not strategy_entry_lit:
         if primary is not None and entry_mode == "plan":
@@ -190,7 +196,10 @@ def apply_execution_caps(
             else (report.get("position_info") or {}).get("suggested_pct"),
             0.0,
         )
-    except Exception:
+    except Exception as e:
+        from trader_shared.exception_tracker import record as _et_record
+
+        _et_record(e, "decision_view.suggested_pct")
         sug = 0.0
 
     if deny:

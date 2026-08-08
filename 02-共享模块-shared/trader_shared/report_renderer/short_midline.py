@@ -1634,9 +1634,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
     _risk_chase = max(0.0, current - float(stop_sell or 0)) if current > 0 and stop_sell else 0.0
     _rew_chase = max(0.0, _target_rr - current) if current > 0 and _target_rr > 0 else 0.0
     _ratio_buy = _rew_buy / _risk_buy if _risk_buy > 0 else 0.0
-    _ratio_chase = _rew_chase / _risk_chase if _risk_chase > 0 else 0.0
     _rr_buy_verdict = "✓" if _ratio_buy >= 2.0 else ("✗" if _ratio_buy < 1.0 else "△")
-    _rr_chase_verdict = "✓" if _ratio_chase >= 2.0 else ("✗" if _ratio_chase < 1.0 else "△")
 
     lines.append("")
     lines.append("  关键价（短线）")
@@ -1832,7 +1830,6 @@ def render_short_midline(r: dict[str, Any]) -> str:
     # ── 亮点 / 风险（禁止「阶段…中线故事」挂羊头）──
     support = float(r.get("support") or 0)
     confirm = float(r.get("confirm") or 0)
-    key_levels = r.get("key_levels") or {}
     stop_v = float(stop_sell or 0)
     life_v = float(mid_key_prices.get("life_line") or 0)
 

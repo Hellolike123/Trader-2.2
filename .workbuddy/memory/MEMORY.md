@@ -16,6 +16,7 @@
 
 - **tushare HTTP 不可达卡死已修**（93ff9c0）：`_probe_reachable()` 硬超时探测，不可达干净回退腾讯。
 - 回测拉数铁则：绕过 `get_provider` 缓存语义，直接 `TencentFetcher().fetch_qfq_daily(code, days)`；必要时 `set_provider(UnifiedProvider(backend="tencent"))`。
+- **🔴 名义选源 ≠ 实际抓取源**：本机 `get_provider()` 报 `UnifiedProvider(backend="mootdx")` 但 `light_data.fetch_qfq_daily` 实际**腾讯优先**（缓存命中时 `data_source="tencent-http"`），周线常由日线聚合（`daily_aggregate`）。**已解决透明度**：`build_report` 输出 `report["_meta"]`（D5/#4）含 `daily_source/5m_source/weekly_source/vol_unit/provider_backend/tushare_available/daily_cached/fetched_at`，直接看 JSON 即知真实源。改前先核验（2026-08-08：#4 前提已变，实际 mootdx 非 tencent）。
 - **🔴 TencentFetcher 跨进程偶发 100× 缩放坏点**：进程内确定，跨进程不保证 → 回测统一走落盘缓存（写前读后都跑 >5× 中位数断言）。
 - **🔴 日线 volume 单位实测（2026-08-04，推翻 FDE 轮假设）**：**腾讯日线 volume=手**（amount 交叉验证 amount≈vol×100×close + 腾讯实时 qfqday 与 mootdx 缓存同量级：601398/600519/000001），与 sina/mootdx/pytdx3/tushare **全源一致=手**。FDE 轮「腾讯日线=股」假设错误 → 其周线出口 ×100（=股）与日线（=手）存在跨周期绝对值 100× 差异；**2026-08-04 已裁决回退**（`docs/plans/2026-08-04-weekly-vol-unit-adjudication.md`）：周线 sina/mootdx 出口不再 ×100，周线全路径（sina/mootdx + 日线聚合）统一=手，`vol_unit="lot"`。日线新缓存 bar 打 `vol_unit="lot"`（`_stamp_vol_unit`，light_data.py）；fallback **不 ×100**（实测修正 A-M1）。
 
@@ -28,14 +29,15 @@
 ## 测试
 
 - venv：`/Users/like/.workbuddy/binaries/python/envs/default/bin/python -m pytest`；`PYTHONPATH=02-共享模块-shared:01-功能包-packages/trader/scripts`（shared 在前）。
-- 门禁只跑离线子集 `scripts/run-gate-tests.sh`；`test_contract.py` 有 3 项既有失败。
+- 门禁只跑离线子集 `scripts/run-gate-tests.sh`（TESTS 数组锁定，**不含** test_contract.py）；`test_contract.py` 实测 **37 passed / 0 失败**（2026-08-08 核验，"3 项既有失败"旧账已不成立）。
 - mock_seam：`get_env_for_skill` 须同时 patch 3 处（market_env + 包级 + report_builder/report_presentation）。
 - 陷阱：`trader_shared/report_renderer/` 是已追踪包，勿新建同名 `.py`；展示层叫 `report_presentation.py`。
 - 大文件拆分：AST 提取 + 等价性闸门（mock 桩 diff/md5）；桩改写走 `monkeypatch.setattr`。
 
 ## 待修技术债
 
-- 🟡 动量不足 score=50/neutral 占位语义双关（momentum_core.py:207/257，fusion_core.py:646）——"真中性"与"数据不足"无法区分。
+- 🟢 动量席双关（2026-08-08 **已修复**）：核心双关早已修（momentum_core 返 `score=None/insufficient`、fusion_card_signals 映射 direction=0+reason="动量数据不足"、fusion_core:361-367 climax 置 None）。**残留的重归一化也已于本日落地**：`fusion_core.merge_decisions` 检测 `momentum_result.direction=="insufficient"` → 剥离动量权重、按原比例重归一化 chan/vpf 到 1.0，分歧列表与 `compute_confidence` 仅用活跃席；`weights_used` 回写实际权重。**语义回归安全网**=`tests/test_semantic_fusion_regression.py` + `tests/fusion_regression_helpers.py` + `tests/fixtures/fusion_semantic_baseline.json`（9 场景合成三卡，零网络）。效果：动量不足且 chan+vpf 同多 → 信号由 0.27/增持 升为 0.491/半仓试、conf 0.39→0.90；真中性场景指纹不变；真实分歧（chan空/vpf多）仍保留。门禁 816 通过。
+- ⚠️ 流程教训（2026-08-08）：MEMORY 里的"技术债/失败"笔记会过时——本次 #1/#3/#5 实际已修或变小。**改代码/提方案前先 grep+读码核验现状，勿照旧笔记盲改**。
 
 ## 回测体系（2026-07-23 全部落地）
 

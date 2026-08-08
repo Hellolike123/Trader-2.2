@@ -1,0 +1,249 @@
+{
+  "scenarios": [
+    "all_bullish",
+    "all_bearish",
+    "mom_insufficient_chan_vpf_bull",
+    "mom_insufficient_chan_vpf_bear",
+    "mom_insufficient_chan_bull_vpf_neutral",
+    "mom_insufficient_chan_bear_vpf_bull",
+    "mom_real_neutral_chan_bull",
+    "mom_insufficient_weak_regime",
+    "all_neutral"
+  ],
+  "fingerprints": {
+    "all_bullish": {
+      "weighted_score": 0.652,
+      "raw_weighted_score": 0.652,
+      "action": "半仓试 (多方主导)",
+      "confidence": 0.903,
+      "disagreement": 0,
+      "signals_detail": {
+        "chan": {
+          "direction": 1,
+          "confidence": 0.4
+        },
+        "momentum": {
+          "direction": 1,
+          "confidence": 0.85
+        },
+        "vpf": {
+          "direction": 1,
+          "confidence": 0.6
+        }
+      },
+      "weights_used": {
+        "chan": 0.3,
+        "momentum": 0.45,
+        "vpf": 0.25
+      }
+    },
+    "all_bearish": {
+      "weighted_score": -0.606,
+      "raw_weighted_score": -0.606,
+      "action": "空仓/止损",
+      "confidence": 0.904,
+      "disagreement": 0,
+      "signals_detail": {
+        "chan": {
+          "direction": -1,
+          "confidence": 0.5
+        },
+        "momentum": {
+          "direction": -1,
+          "confidence": 0.85
+        },
+        "vpf": {
+          "direction": -1,
+          "confidence": 0.6
+        }
+      },
+      "weights_used": {
+        "chan": 0.44,
+        "momentum": 0.2,
+        "vpf": 0.36
+      }
+    },
+    "mom_insufficient_chan_vpf_bull": {
+      "weighted_score": 0.491,
+      "raw_weighted_score": 0.491,
+      "action": "半仓试 (多方主导)",
+      "confidence": 0.901,
+      "disagreement": 0,
+      "signals_detail": {
+        "chan": {
+          "direction": 1,
+          "confidence": 0.4
+        },
+        "momentum": {
+          "direction": 0,
+          "confidence": 0.0
+        },
+        "vpf": {
+          "direction": 1,
+          "confidence": 0.6
+        }
+      },
+      "weights_used": {
+        "chan": 0.5455,
+        "momentum": 0.0,
+        "vpf": 0.4545
+      }
+    },
+    "mom_insufficient_chan_vpf_bear": {
+      "weighted_score": -0.545,
+      "raw_weighted_score": -0.545,
+      "action": "空仓/止损",
+      "confidence": 0.901,
+      "disagreement": 0,
+      "signals_detail": {
+        "chan": {
+          "direction": -1,
+          "confidence": 0.5
+        },
+        "momentum": {
+          "direction": 0,
+          "confidence": 0.0
+        },
+        "vpf": {
+          "direction": -1,
+          "confidence": 0.6
+        }
+      },
+      "weights_used": {
+        "chan": 0.55,
+        "momentum": 0.0,
+        "vpf": 0.45
+      }
+    },
+    "mom_insufficient_chan_bull_vpf_neutral": {
+      "weighted_score": 0.218,
+      "raw_weighted_score": 0.218,
+      "action": "等转强观察",
+      "confidence": 0.287,
+      "disagreement": 1,
+      "signals_detail": {
+        "chan": {
+          "direction": 1,
+          "confidence": 0.4
+        },
+        "momentum": {
+          "direction": 0,
+          "confidence": 0.0
+        },
+        "vpf": {
+          "direction": 0,
+          "confidence": 0.3
+        }
+      },
+      "weights_used": {
+        "chan": 0.5455,
+        "momentum": 0.0,
+        "vpf": 0.4545
+      }
+    },
+    "mom_insufficient_chan_bear_vpf_bull": {
+      "weighted_score": 0.0,
+      "raw_weighted_score": 0.0,
+      "action": "持股观望",
+      "confidence": 0.001,
+      "disagreement": 2,
+      "signals_detail": {
+        "chan": {
+          "direction": -1,
+          "confidence": 0.5
+        },
+        "momentum": {
+          "direction": 0,
+          "confidence": 0.0
+        },
+        "vpf": {
+          "direction": 1,
+          "confidence": 0.6
+        }
+      },
+      "weights_used": {
+        "chan": 0.5455,
+        "momentum": 0.0,
+        "vpf": 0.4545
+      }
+    },
+    "mom_real_neutral_chan_bull": {
+      "weighted_score": 0.27,
+      "raw_weighted_score": 0.27,
+      "action": "增持",
+      "confidence": 0.393,
+      "disagreement": 1,
+      "signals_detail": {
+        "chan": {
+          "direction": 1,
+          "confidence": 0.4
+        },
+        "momentum": {
+          "direction": 0,
+          "confidence": 0.25
+        },
+        "vpf": {
+          "direction": 1,
+          "confidence": 0.6
+        }
+      },
+      "weights_used": {
+        "chan": 0.3,
+        "momentum": 0.45,
+        "vpf": 0.25
+      }
+    },
+    "mom_insufficient_weak_regime": {
+      "weighted_score": 0.482,
+      "raw_weighted_score": 0.482,
+      "action": "增持",
+      "confidence": 0.903,
+      "disagreement": 0,
+      "signals_detail": {
+        "chan": {
+          "direction": 1,
+          "confidence": 0.4
+        },
+        "momentum": {
+          "direction": 0,
+          "confidence": 0.0
+        },
+        "vpf": {
+          "direction": 1,
+          "confidence": 0.6
+        }
+      },
+      "weights_used": {
+        "chan": 0.5882,
+        "momentum": 0.0,
+        "vpf": 0.4118
+      }
+    },
+    "all_neutral": {
+      "weighted_score": 0.0,
+      "raw_weighted_score": 0.0,
+      "action": "持股观望",
+      "confidence": 0.003,
+      "disagreement": 0,
+      "signals_detail": {
+        "chan": {
+          "direction": 0,
+          "confidence": 0.35
+        },
+        "momentum": {
+          "direction": 0,
+          "confidence": 0.25
+        },
+        "vpf": {
+          "direction": 0,
+          "confidence": 0.3
+        }
+      },
+      "weights_used": {
+        "chan": 0.3,
+        "momentum": 0.45,
+        "vpf": 0.25
+      }
+    }
+  }
+}
