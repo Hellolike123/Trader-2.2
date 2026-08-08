@@ -27,7 +27,7 @@
 
 - 禁止恢复 classic / compare 生产路径或 `fusion_compare` 输出。
 - 禁止改动 fusion 权重、`decision_view`、support / stop 等决策行为。
-- 禁止删除 `trader_shared/_deprecated/fusion_classic_mappers.py`（归档保留、生产零 import）。
+- 禁止改写 git 历史；活动树退役清理见 `retire-residue-cleanup-handoff.md`。
 - 禁止改动 skill 包 identity shim 的 `sys.modules[__name__] = _impl` 机制。
 - 禁止把 `docs/plans/active/` 之外的母法源移出或改名。
 
@@ -36,7 +36,6 @@
 - `02-共享模块-shared/trader_shared/fusion_core.py`
 - `02-共享模块-shared/trader_shared/__init__.py`
 - `02-共享模块-shared/scripts/backtest_engine.py`
-- `scripts/compare_fusion_paths.py`
 - `02-共享模块-shared/tests/` 下涉及裸 import 与 fusion 模式的测试
 - `scripts/run-gate-tests.sh` 如需同步门禁子集
 - 文档：`AGENTS.md` / `AGENTS_DEEP.md` / `ARCHITECTURE.md` / `BUSINESS.md` / `docs/designs/analysis-strategy-boundaries.md` / `docs/designs/README.md` / `docs/architecture/ci-gate.md` / `01-功能包-packages/*/references/agent-rules.md`

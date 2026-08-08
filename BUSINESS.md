@@ -208,7 +208,7 @@
 
 报告路径仍会预产 `analysis_cards`（策略 📐 / ensure 用），与 fusion 输入解耦。  
 实现：`fusion_core._fusion_input_mode` + `analysis/fusion_card_signals.py` + `merge_decisions(..., analysis_cards=...)`。  
-classic mappers 已归档：`trader_shared/_deprecated/fusion_classic_mappers.py`。  
+classic mappers 已移出活动树（git 历史保留；原 `trader_shared/_deprecated/fusion_classic_mappers.py`）。
 边界：`docs/designs/analysis-strategy-boundaries.md` §5。
 
 `FUSION_OVERRIDE_ENABLED` **默认 false**：融合分不覆盖 `theory_status`；出手听 `decision_view`。  

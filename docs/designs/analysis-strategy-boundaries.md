@@ -136,9 +136,9 @@ report_builder→  全部层
 
 - 缺省：`os.environ.get("FUSION_FROM_CARDS") or "cards"` → `cards`；其余旧值显式拒绝，禁止静默当 cards。
 - 生产 cards 失败 = **降级中性**（`cards_failed`），不回退 classic。
-- classic mappers 已归档：`trader_shared/_deprecated/fusion_classic_mappers.py`（生产树零 import）。
-- `scripts/compare_fusion_paths.py` / `fusion_path_compare.py` **obsolete**（打印退役说明 / 仅历史纯函数）。
-- **Agent 禁止**再写「生产可 classic / compare 对账」；法源 BUSINESS.md §2.7 + `retire-classic-fusion-handoff.md`。
+- classic mappers 已移出活动树（git 历史保留；原 `trader_shared/_deprecated/fusion_classic_mappers.py`）。
+- `scripts/compare_fusion_paths.py` / `fusion_path_compare.py` 已移出活动树（git 历史保留）。
+- **Agent 禁止**再写「生产可 classic / compare 对账」；法源 `BUSINESS.md` §2.7 + `docs/plans/active/retire-residue-cleanup-handoff.md`。
 
 ---
 

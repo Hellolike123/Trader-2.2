@@ -2,7 +2,7 @@
 """Fusion 置信度映射（中性模块）。
 
 供 cards 路径与 fusion_core 懒导出共用。
-classic mappers 已退役（见 trader_shared/_deprecated/）；禁止生产树再依赖。
+classic mappers 已移出活动树（git 历史保留）；禁止生产树再依赖。
 """
 from __future__ import annotations
 

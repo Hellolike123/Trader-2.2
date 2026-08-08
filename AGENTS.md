@@ -82,7 +82,7 @@
 | 买点盖生命周期 | `buy_point_lifecycle.py` + `attach_buy_point.py`；策略闸读字段在 `strategy/match.py` | 在策略层重算盖价/笔；接旧 failed `signal_id` |
 | Fusion 生产路径 | `fusion_core.py` + `analysis/cards.py` + `fusion_card_signals.py`（失败=`cards_failed`） | 加厚 classic；生产回退 classic；挂回 `_deprecated` |
 | Fusion 置信度 | `fusion_confidence.py`（中性；cards 共用） | analysis 经 classic_mappers 再取置信 |
-| Classic 映射（已退役） | `_deprecated/fusion_classic_mappers.py`（归档；生产零 import） | 生产树再 import classic_mappers |
+| Classic 映射（已移出活动树） | git 历史保留（原 `_deprecated/fusion_classic_mappers.py`；生产零 import） | 生产树再 import classic_mappers |
 | 批量快照 / 池价 | `data_access.get_quotes`（经 `get_provider`） | 池内直调 `light_data` + 自建 HttpClient |
 | T0 盯盘缓存 | `t0_monitor._cached_build_plan`（`T0_PLAN_TTL_SEC`） | 每 tick 无脑全量 `build_plan` |
 | 选股池逻辑 | `01-功能包-packages/trader/scripts/pool_cmds/*` | 把逻辑写回 `final_pool.py` |
