@@ -62,6 +62,7 @@ from trader_shared.config import (
     WYCKOFF_SCORE_CLUSTER_CONFIRM,
     WYCKOFF_SCORE_CLUSTER_DISTRIB,
     WYCKOFF_SCORE_CLUSTER_FAIL,
+    WYCKOFF_CLUSTER_EVENT_FRESH_BARS,
     # ① TR 质量接打分
     WYCKOFF_TR_QUALITY_NEUTRAL,
     WYCKOFF_SCORE_TR_QUALITY_GAIN,
@@ -153,6 +154,7 @@ def _resolve_score_conflicts(analysis: dict) -> set[str]:
     sow = bool(analysis.get("sow_signal"))
     spring = bool(analysis.get("spring_signal"))
     ut = bool(analysis.get("upthrust_signal"))
+    sos = bool(analysis.get("sos_signal"))
     lps = bool(analysis.get("lps_signal"))
     lpsy = bool(analysis.get("lpsy_signal"))
     bull = bool(analysis.get("bullish_volume_divergence"))
@@ -250,6 +252,16 @@ def _resolve_score_conflicts(analysis: dict) -> set[str]:
 
     if analysis.get("utad_signal") and ut:
         suppress.add("upthrust_signal")  # UTAD 已单独计分
+
+    # 派发确认后近端反向 SOS：簇确认侧占叙事，抑反向 SOS 分（不推翻派发叙事）。
+    # distribution_failed（UT→SOS 无 SOW）是「假派发实为吸筹」，SOS 才是主叙事，不抑。
+    # 法源 docs/plans/wyckoff-cluster-reverse-event-handoff.md §1.2
+    if (
+        sos
+        and analysis.get("distribution_confirmed")
+        and not analysis.get("distribution_failed")
+    ):
+        suppress.add("sos_signal")
 
     return suppress
 
@@ -744,8 +756,10 @@ def wyckoff_analysis(
     compression = _detect_compression(bars)
     trend_pullback = _detect_trend_pullback(bars)
     trend_rally = _detect_trend_rally(bars)
-    # P0-5: 事件簇确认 — 将孤立信号升级为可信的积累/派发事件簇（校验先后顺序 + strength 定级）
-    cluster = _detect_event_cluster(bars, tr_ctx=event_tr_ctx)
+    # P0-5: 事件簇确认 — 将孤立信号升级为可信的积累/派发事件簇（校验先后顺序 + strength 定级）。
+    # 簇计算延后到近端 SOS overlay 之后，并把最终 SOS 注入 near_sos（派发确认后近端 SOS 降级）。
+    # cluster_tr_ctx 在 _ev_tr 合并且重绑 event_tr_ctx **之前**捕获，保持簇检测器上下文不变。
+    cluster_tr_ctx = event_tr_ctx
     phase_a_range = _build_phase_a_range(sc, ar, timeframe=timeframe)
     st_sc = _detect_secondary_test_sc(
         bars,
@@ -779,18 +793,6 @@ def wyckoff_analysis(
             event_tr_ctx = {**event_tr_ctx, **{k: _ev_tr[k] for k in ("tr_lower", "tr_upper", "tr_seed_source", "phase_a_status") if k in _ev_tr}}
         else:
             event_tr_ctx = _ev_tr
-    # Bug G：Phase A 失败时强制作废事件簇，禁止 accum✓ 与 phase_a failed 并存
-    # 法源 docs/plans/wyckoff-sos-epic-bcg-handoff.md
-    if str(phase_a_range.get("status") or "") == "failed":
-        cluster = {
-            "accumulation_confirmed": False,
-            "distribution_confirmed": False,
-            "accumulation_failed": False,
-            "distribution_failed": False,
-            "cluster_quality": None,
-            "cluster_confidence": 0.0,
-            "cluster_reason": "Phase A 失败，事件簇作废",
-        }
     # L0–L3 成熟度：先按 SC/ST/AR + 窗宽定级，再决定是否成熟箱 overlay
     maturity = _resolve_tr_maturity(
         phase_a_range, st_sc, bars=bars, tr_ctx=tr_ctx
@@ -831,6 +833,27 @@ def wyckoff_analysis(
         if sos2.get("sos_signal"):
             sos = sos2
             bu = _detect_backup(bars, tr_ctx=_sos_tr)
+    _near_sos: dict | None = None
+    if sos.get("sos_signal") and sos.get("sos_age") is not None:
+        try:
+            if int(sos["sos_age"]) <= int(WYCKOFF_CLUSTER_EVENT_FRESH_BARS):
+                _near_sos = sos
+        except (TypeError, ValueError):
+            _near_sos = None
+    cluster = _detect_event_cluster(bars, tr_ctx=cluster_tr_ctx, near_sos=_near_sos)
+    # Bug G：Phase A 失败时强制作废事件簇，禁止 accum✓ 与 phase_a failed 并存
+    # 法源 docs/plans/wyckoff-sos-epic-bcg-handoff.md
+    if str(phase_a_range.get("status") or "") == "failed":
+        cluster = {
+            "accumulation_confirmed": False,
+            "distribution_confirmed": False,
+            "accumulation_failed": False,
+            "distribution_failed": False,
+            "cluster_contested": False,
+            "cluster_quality": None,
+            "cluster_confidence": 0.0,
+            "cluster_reason": "Phase A 失败，事件簇作废",
+        }
     if phase_tr_ctx is not None:
         phase_tr_ctx["last_close"] = to_float(bars[-1].get("close")) if bars else None
         # 种子箱补 TR 窗口，供周/日线 P&F 水平计数落在 cause 区间内
@@ -866,7 +889,14 @@ def wyckoff_analysis(
         "box_display_mode": maturity["box_display_mode"],
     }
 
-    # P1-1: 阶段状态机 — 基于信号序列推断积累/派发阶段
+    # P1-1: 阶段状态机 — 基于信号序列推断积累/派发阶段。
+    # 派发确认后近端反向 SOS：喂给阶段机的 sos 与打分同规则抑掉（结果 dict 仍透出原值），
+    # 并透出簇标志，供 _detect_phase 在 _scan 重新检出 SOS 时兜底守卫。
+    # 法源 docs/plans/wyckoff-cluster-reverse-event-handoff.md §1.2
+    _phase_sos_on = bool(sos.get("sos_signal")) and not (
+        cluster.get("distribution_confirmed")
+        and not cluster.get("distribution_failed")
+    )
     signals_dict = {
         "spring_signal": spring["spring_signal"],
         "upthrust_signal": upthrust["upthrust_signal"],
@@ -875,7 +905,9 @@ def wyckoff_analysis(
         "sow_signal": sow["sow_signal"],
         "ar_signal": ar["ar_signal"],
         "are_signal": are["are_signal"],
-        "sos_signal": sos["sos_signal"],
+        "sos_signal": _phase_sos_on,
+        "distribution_confirmed": bool(cluster.get("distribution_confirmed")),
+        "distribution_failed": bool(cluster.get("distribution_failed")),
         "st_signal": st["st_signal"],
         "spring_test_signal": spring_test["spring_test_signal"],
         "secondary_test_sc_signal": st_sc["secondary_test_sc_signal"],
@@ -1203,6 +1235,7 @@ def wyckoff_analysis(
         "distribution_confirmed": cluster["distribution_confirmed"],
         "accumulation_failed": cluster["accumulation_failed"],
         "distribution_failed": cluster["distribution_failed"],
+        "cluster_contested": cluster.get("cluster_contested", False),
         "cluster_quality": cluster["cluster_quality"],
         "cluster_confidence": cluster["cluster_confidence"],
         "cluster_reason": cluster["cluster_reason"],
@@ -1335,6 +1368,7 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
     sc_on = analysis.get("sc_signal") and "sc_signal" not in suppress
     lps_on = analysis.get("lps_signal") and "lps_signal" not in suppress
     lpsy_on = analysis.get("lpsy_signal") and "lpsy_signal" not in suppress
+    sos_on = analysis.get("sos_signal") and "sos_signal" not in suppress
 
     # 1. Spring — 最强看多信号；孤立/过早、高量警告、弱弹簧（浅刺噪音）均降权减半
     # 缩量 low_vol_confirm 为原典可靠形态，不得因缩量 alone 进 weak（见 P0-1 handoff）
@@ -1418,7 +1452,7 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
         signals.append(f"ARE 回落 {WYCKOFF_SCORE_ARE}")
 
     # 9. SOS (Sign of Strength) — 强势突破
-    if analysis.get("sos_signal"):
+    if sos_on:
         raw += WYCKOFF_SCORE_SOS
         signals.append(f"SOS +{WYCKOFF_SCORE_SOS}")
 
@@ -1491,16 +1525,16 @@ def calculate_wyckoff_score(bars: list[dict], symbol: str = "", analysis: dict |
         signals.append("UT×努力无结果 -5")
 
     # SOS + 高量窄幅 → SOS 不可靠，取消加分
-    if analysis.get("sos_signal") and effort_no_result:
+    if sos_on and effort_no_result:
         raw -= WYCKOFF_SCORE_SOS
         signals.append(f"SOS×努力无结果 撤销 +{WYCKOFF_SCORE_SOS}")
 
     # VSA 单独修正：低量窄幅（供应耗尽）独立看多
-    if no_supply and not spring and not analysis.get("sos_signal"):
+    if no_supply and not spring and not sos_on:
         raw += 5
         signals.append("供应耗尽 +5")
     # VSA 单独修正：高量窄幅（努力无结果）独立看空
-    if effort_no_result and not upthrust and not analysis.get("sos_signal"):
+    if effort_no_result and not upthrust and not sos_on:
         raw -= 5
         signals.append("努力无结果 -5")
 
@@ -1663,6 +1697,44 @@ def resolve_wyckoff_primary(
             code, cn, main, note, d = "BC", "买力高潮", "高位放量滞涨", "购买高潮迹象，注意见好就收", -1
         elif wyk.get("are_signal"):
             code, cn, main, note, d = "ARE", "自动回落", "高潮后自动回落", "派发侧回落观察", -1
+
+    # 已按派发侧链取到主灯：直接返回，禁止再落进下方 JAC/SOS 等反向偏多分支
+    if code is not None and _side == "distribution":
+        return {
+            "status": "event",
+            "code": code,
+            "cn_name": cn,
+            "main": main,
+            "note": note,
+            "direction": d,
+            "phase_label": phase,
+            "timeframe": tf,
+        }
+
+    # 簇确认定侧后无事件灯：派发/积累簇本身作为主事件，禁止落进 JAC/SOS 等反向偏多分支。
+    # 法源 docs/plans/wyckoff-cluster-reverse-event-handoff.md §1.3
+    if code is None and _side == "distribution" and wyk.get("distribution_confirmed"):
+        return {
+            "status": "event",
+            "code": "DistConfirmed",
+            "cn_name": "派发确认",
+            "main": "上冲→SOW 跌破已确认派发",
+            "note": "近端强势不改派发叙事，先防守",
+            "direction": -1,
+            "phase_label": phase,
+            "timeframe": tf,
+        }
+    elif code is None and _side == "accumulation" and wyk.get("accumulation_confirmed"):
+        return {
+            "status": "event",
+            "code": "AccumConfirmed",
+            "cn_name": "积累确认",
+            "main": "支撑测试→SOS 突破已确认积累",
+            "note": "近端回踩不破仍按吸筹跟踪",
+            "direction": 1,
+            "phase_label": phase,
+            "timeframe": tf,
+        }
 
     if code is None and wyk.get("utad_signal"):
         code, cn, main, note, d = "UTAD", "派发末上冲", "派发末上冲回落", "警惕破位下行", -1
@@ -1857,6 +1929,8 @@ def _midline_meaning(code: str, cn_name: str, note: str, direction: int) -> str:
         "UT": "不能当突破成功",
         "UTAD": "小心往下破",
         "SOW": "先防守",
+        "DistConfirmed": "先防守",
+        "AccumConfirmed": "仍看回踩站不站稳",
         "LPSY": "反抽别追",
         "PSY": "还不能当见顶定论",
         "SV": "可与SC同亮非双开仓",

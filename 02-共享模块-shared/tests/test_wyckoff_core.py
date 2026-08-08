@@ -1503,6 +1503,60 @@ class TestWyckoffScoreWithClassicSignals:
         assert result["raw"] == 17, f"Expected raw 17 (LPS+12 + 供应耗尽+5), got {result['raw']}"
 
 
+class TestWyckoffScoreClusterReverseSOS:
+    """派发确认 + 近端 SOS 不打分对冲（wyckoff-cluster-reverse-event-handoff §1.2）。"""
+
+    def _analysis(self, **kw) -> dict:
+        base = {
+            "spring_signal": False, "upthrust_signal": False, "bc_signal": False,
+            "sc_signal": False, "sow_signal": False, "ar_signal": False,
+            "are_signal": False, "sos_signal": False, "st_signal": False,
+            "lps_signal": False, "lpsy_signal": False, "compression_signal": False,
+            "trend_pullback_signal": False, "trend_rally_signal": False,
+            "bearish_volume_divergence": False, "bullish_volume_divergence": False,
+            "effort_no_result": False, "no_supply": False,
+            "accumulation_confirmed": False, "distribution_confirmed": False,
+            "accumulation_failed": False, "distribution_failed": False,
+            "cluster_contested": False,
+            "phase_confidence_delta": 0.0, "spring_premature": False,
+            "upthrust_premature": False, "tr_quality": None,
+        }
+        base.update(kw)
+        return base
+
+    def _bars(self) -> list[dict]:
+        return [_make_bar(100, 101, 99, 100, 100) for _ in range(20)]
+
+    def test_distribution_confirmed_suppresses_sos(self):
+        from trader_shared.wyckoff_core import calculate_wyckoff_score
+
+        result = calculate_wyckoff_score(
+            self._bars(),
+            analysis=self._analysis(
+                sos_signal=True,
+                distribution_confirmed=True,
+                distribution_failed=False,
+                cluster_contested=True,
+            ),
+        )
+        assert result["raw"] == -15, f"派发确认不应被 SOS 对冲, got {result['signals']}"
+        assert "互斥抑制:sos_signal" in result["signals"], result["signals"]
+        assert not any("SOS +15" in s for s in result["signals"]), result["signals"]
+        assert any("派发确认" in s for s in result["signals"]), result["signals"]
+
+    def test_distribution_failed_keeps_sos(self):
+        """UT→SOS 无 SOW（假派发实为吸筹）→ SOS 仍计分（回归）。"""
+        from trader_shared.wyckoff_core import calculate_wyckoff_score
+
+        result = calculate_wyckoff_score(
+            self._bars(),
+            analysis=self._analysis(sos_signal=True, distribution_failed=True),
+        )
+        assert any("SOS +15" in s for s in result["signals"]), result["signals"]
+        assert any("派发失败" in s for s in result["signals"]), result["signals"]
+        assert result["raw"] == 35, f"Expected SOS+15 + 派发失败+20, got {result['signals']}"
+
+
 class TestDetectSOSFourOfFive:
     """SOS ≥4/5 阳线对齐测试"""
 
@@ -1620,6 +1674,76 @@ class TestDetectPhaseSemantics:
             result = _detect_phase(bars, signals, tr_ctx=self._OK_TR)
         assert result["phase"] == "accumulation_d"
         assert "SOS/LPS" in result.get("phase_label", "")
+
+    def test_distribution_confirmed_blocks_accumulation_despite_sos(self):
+        """派发确认 + Spring+SOS → 不得跳积累 D/C（_scan 重扫 SOS 也兜底）。"""
+        from unittest.mock import patch
+
+        signals = {
+            "spring_signal": True,
+            "sos_signal": True,
+            "distribution_confirmed": True,
+            "distribution_failed": False,
+            "compression_signal": True,  # B 背景：Spring 非孤立
+            "lps_signal": False,
+            "spring_test_signal": False,
+            "st_signal": False,
+            "sc_signal": False,
+            "ar_signal": False,
+            "upthrust_signal": False,
+            "bc_signal": False,
+            "sow_signal": False,
+            "are_signal": False,
+            "trend_pullback_signal": False,
+            "trend_rally_signal": False,
+            "bu_signal": False,
+            "utad_signal": False,
+            "tr_upper": 105.0,
+            "last_close": 100.0,
+        }
+        bars = [_make_bar(100, 105, 95, 102, 100) for _ in range(40)]
+
+        def fake_scan(_bars, detector_fn, **kwargs):
+            # 钉死 _scan：不让 _detect_sos/_detect_spring 从 bars 重扫，只看 signals
+            return False
+
+        with patch("trader_shared.wyckoff_phase._scan_for_signal", side_effect=fake_scan):
+            result = _detect_phase(bars, signals, tr_ctx=self._OK_TR)
+
+        assert result["phase"] not in ("accumulation_d", "accumulation_c"), result
+        assert result.get("spring_premature") is False, "守卫应真实生效，而非 premature 挡下"
+
+    def test_distribution_failed_still_enters_accumulation(self):
+        """distribution_failed（假派发实为吸筹）→ Spring+SOS 仍进积累 D（回归）。"""
+        from unittest.mock import patch
+
+        signals = {
+            "spring_signal": True,
+            "sos_signal": True,
+            "distribution_confirmed": False,
+            "distribution_failed": True,
+            "compression_signal": True,  # B 背景：Spring 非孤立
+            "lps_signal": False,
+            "spring_test_signal": False,
+            "st_signal": False,
+            "sc_signal": False,
+            "ar_signal": False,
+            "upthrust_signal": False,
+            "bc_signal": False,
+            "sow_signal": False,
+            "are_signal": False,
+            "trend_pullback_signal": False,
+            "trend_rally_signal": False,
+            "bu_signal": False,
+            "utad_signal": False,
+            "tr_upper": 105.0,
+            "last_close": 100.0,
+        }
+        bars = [_make_bar(100, 105, 95, 102, 100) for _ in range(40)]
+        with patch("trader_shared.wyckoff_phase._scan_for_signal", return_value=False):
+            result = _detect_phase(bars, signals, tr_ctx=self._OK_TR)
+        assert result["phase"] == "accumulation_d", result
+        assert "SOS/LPS" in result.get("phase_label", ""), result
 
     def test_phase_delta_consumed_in_score(self):
         """phase_confidence_delta 在 calculate_wyckoff_score 中被消费"""

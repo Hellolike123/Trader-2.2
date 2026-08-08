@@ -1815,7 +1815,13 @@ def _detect_are(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     return {"are_signal": False, "are_reason": "BC 后未检测到有效回落", "are_price": None}
 
 def _sos_empty(reason: str) -> dict:
-    return {"sos_signal": False, "sos_reason": reason, "sos_price": None, "sos_kind": None}
+    return {
+        "sos_signal": False,
+        "sos_reason": reason,
+        "sos_price": None,
+        "sos_kind": None,
+        "sos_age": None,
+    }
 
 
 def _sos_baseline_avg_vol(
@@ -2103,7 +2109,7 @@ def _detect_sos(
     tip = _detect_sos_at_tip(bars, tr_ctx)
     tip_i = len(bars) - 1
     if tip.get("sos_signal") and _ok_idx(tip_i):
-        return tip
+        return {**tip, "sos_age": 0}
     if tip.get("sos_signal") and not _ok_idx(tip_i):
         tip = _sos_empty("SOS 不晚于 SC，忽略旧强势")
     if lb <= 1 or len(bars) < 2:
@@ -2131,7 +2137,7 @@ def _detect_sos(
             reason = hit.get("sos_reason") or ""
             if age > 0 and "近端" not in reason:
                 hit = {**hit, "sos_reason": f"{reason}（近端{age}根前）"}
-            return hit
+            return {**hit, "sos_age": age}
     return tip
 
 
@@ -2589,7 +2595,11 @@ def _scan_last_event(
             last_res = res
     return last_idx, last_res
 
-def _detect_event_cluster(bars: list[dict], tr_ctx: dict | None = None) -> dict:
+def _detect_event_cluster(
+    bars: list[dict],
+    tr_ctx: dict | None = None,
+    near_sos: dict | None = None,
+) -> dict:
     """事件簇确认 (Event Cluster Confirmation) — 将孤立信号升级为可信的积累/派发事件簇。
 
     原典逻辑：
@@ -2600,17 +2610,23 @@ def _detect_event_cluster(bars: list[dict], tr_ctx: dict | None = None) -> dict:
       - 失败簇（反向信号）：
           · accumulation_failed：Spring 后接 SOW（非 SOS）→ 假突破，实为派发
           · distribution_failed：Upthrust 后接 SOS（非 SOW）→ 假派发，实为吸筹
+      - 派发确认后近端反向事件（wyckoff-cluster-reverse-event-handoff）：
+          SOW 成立后再出近端 SOS → 不翻案（distribution_failed 强制 False），
+          派发叙事保留但簇降级（cluster_contested=True）。
 
     与阶段机的区别：本检测器显式校验事件先后顺序（trigger bar index），
     并用 P0-4 的 strength 字段给簇定级，输出干净的 confirmed/failed 布尔供 fusion 消费。
 
     Args:
         tr_ctx=None 时各检测器走原逻辑（向后兼容）。
+        near_sos：主分析 overlay 后的最终 SOS dict（含 sos_age）；age <= fresh 视为近端，
+            用于捕获簇自身 scan 没扫到、但主分析在末日命中的近端 SOS。
 
     Returns:
         dict with keys:
           accumulation_confirmed, distribution_confirmed,
           accumulation_failed, distribution_failed,
+          cluster_contested,
           cluster_quality ("high"/"medium"/"low"/None),
           cluster_confidence (float 0-1),
           cluster_reason (str)
@@ -2621,6 +2637,7 @@ def _detect_event_cluster(bars: list[dict], tr_ctx: dict | None = None) -> dict:
             "distribution_confirmed": False,
             "accumulation_failed": False,
             "distribution_failed": False,
+            "cluster_contested": False,
             "cluster_quality": None,
             "cluster_confidence": 0.0,
             "cluster_reason": "数据不足",
@@ -2632,6 +2649,16 @@ def _detect_event_cluster(bars: list[dict], tr_ctx: dict | None = None) -> dict:
     n_scan = len(scan)
     fresh = max(3, int(WYCKOFF_CLUSTER_EVENT_FRESH_BARS))
     fresh_floor = max(0, n_scan - fresh)
+
+    def _near_sos_fresh() -> bool:
+        if not isinstance(near_sos, dict) or not near_sos.get("sos_signal"):
+            return False
+        try:
+            raw_age = near_sos.get("sos_age")
+            age = int(raw_age) if raw_age is not None else -1
+        except (TypeError, ValueError):
+            return False
+        return 0 <= age <= fresh
 
     # 在 scan 内找各事件最后触发位置 + 完整输出（用于读 strength）
     spring_idx, spring_res = _scan_last_event(scan, _detect_spring, tr_ctx, window=15, step=1)
@@ -2700,10 +2727,20 @@ def _detect_event_cluster(bars: list[dict], tr_ctx: dict | None = None) -> dict:
         and (sow_idx < 0 or sos_idx > sow_idx)
     )
 
+    # 派发确认后近端反向 SOS：不翻案（不认 distribution_failed），簇降级为 contested。
+    # 法源 docs/plans/wyckoff-cluster-reverse-event-handoff.md §1.1
+    reverse_dist_sos = bool(
+        (distribution_confirmed and sos_idx > sow_idx and sos_idx >= fresh_floor)
+        or _near_sos_fresh()
+    )
+    if distribution_confirmed and reverse_dist_sos:
+        distribution_failed = False
+
     # 质量分级（用 P0-4 strength 字段）
     quality = None
     confidence = 0.0
     reason_parts: list[str] = []
+    contested = False
 
     if accumulation_confirmed:
         sp_strength = (spring_res or {}).get("spring_strength") if spring_idx >= st_idx else "ordinary"
@@ -2722,7 +2759,18 @@ def _detect_event_cluster(bars: list[dict], tr_ctx: dict | None = None) -> dict:
             quality, confidence = "medium", 0.65
         else:
             quality, confidence = "low", 0.45
+        if reverse_dist_sos:
+            # 降级不消失：近端 SOS 挑战派发簇，但派发叙事保留
+            quality = {"high": "medium", "medium": "low", "low": "low"}.get(
+                quality, quality
+            )
+            confidence = {"high": 0.9, "medium": 0.65, "low": 0.45}.get(
+                quality, confidence
+            )
+            contested = True
         reason_parts.append(f"派发确认：上冲({ut_strength})→SOW 跌破")
+        if contested:
+            reason_parts.append("近端再出 SOS，派发簇降级（不推翻派发叙事）")
     elif accumulation_failed:
         reason_parts.append("积累失败：Spring 后接 SOW（假突破，实为派发）")
         confidence = 0.8
@@ -2738,6 +2786,7 @@ def _detect_event_cluster(bars: list[dict], tr_ctx: dict | None = None) -> dict:
         "distribution_confirmed": distribution_confirmed,
         "accumulation_failed": accumulation_failed,
         "distribution_failed": distribution_failed,
+        "cluster_contested": contested,
         "cluster_quality": quality,
         "cluster_confidence": confidence,
         "cluster_reason": "；".join(reason_parts),

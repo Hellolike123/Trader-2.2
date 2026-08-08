@@ -522,6 +522,70 @@ def test_cluster_distribution_confirmed():
     assert "SOW" in cl["cluster_reason"]
 
 
+# ── 17b. 派发确认后近端 SOS：不翻案、簇降级（wyckoff-cluster-reverse-event-handoff）────
+def test_cluster_distribution_confirmed_near_sos_contested():
+    b = _flat(35)
+    b.append(mk(9.0, 9.6, 8.9, 9.0, 3_000_000))  # upthrust
+    _append_fillers(b)
+    _append_sow(b)
+    cl, tr = _cluster(b)
+    assert cl["distribution_confirmed"] is True
+    assert cl["distribution_failed"] is False
+    assert cl["cluster_contested"] is False
+
+    # 主分析在末日命中近端 SOS（age=0）→ 派发簇降级但不翻案
+    cl2 = we._detect_event_cluster(
+        b,
+        tr_ctx=tr,
+        near_sos={"sos_signal": True, "sos_age": 0, "sos_price": 10.2},
+    )
+    assert cl2["distribution_confirmed"] is True, cl2["cluster_reason"]
+    assert cl2["distribution_failed"] is False, "SOW 成立后近端 SOS 不得翻案成假派发"
+    assert cl2["cluster_contested"] is True
+    assert cl2["cluster_quality"] == "low", "派发簇应降级到 low"
+    assert abs(cl2["cluster_confidence"] - 0.45) < 1e-6
+    assert "近端再出 SOS" in cl2["cluster_reason"]
+
+
+def test_cluster_distribution_confirmed_stale_sos_not_contested():
+    b = _flat(35)
+    b.append(mk(9.0, 9.6, 8.9, 9.0, 3_000_000))  # upthrust
+    _append_fillers(b)
+    _append_sow(b)
+    cl, tr = _cluster(b)
+    cl2 = we._detect_event_cluster(
+        b,
+        tr_ctx=tr,
+        near_sos={"sos_signal": True, "sos_age": 99, "sos_price": 10.2},
+    )
+    assert cl2["cluster_contested"] is False
+    assert cl2["cluster_quality"] == cl["cluster_quality"]
+
+
+def test_cluster_sow_then_fresh_sos_does_not_fail_distribution(monkeypatch):
+    """scan 内 SOW 在前、近端 SOS 在后 → 不认 distribution_failed，只降级。"""
+    from trader_shared import wyckoff_events as we
+
+    bars = _flat(60)
+
+    def fake_scan(scan, fn, tr_ctx, window, step=1, **kw):
+        name = getattr(fn, "__name__", "")
+        if name == "_detect_upthrust":
+            return 10, {"upthrust_signal": True, "upthrust_strength": "ordinary"}
+        if name == "_detect_sign_of_weakness":
+            return 52, {"sow_signal": True}
+        if name == "_detect_sos":
+            return 56, {"sos_signal": True}
+        return -1, None
+
+    monkeypatch.setattr(we, "_scan_last_event", fake_scan)
+    r = we._detect_event_cluster(bars)
+    assert r["distribution_confirmed"] is True, r["cluster_reason"]
+    assert r["distribution_failed"] is False, "SOW→SOS 顺序不得再触发假派发翻案"
+    assert r["cluster_contested"] is True
+    assert r["cluster_quality"] == "low"
+
+
 # ── 18. 顺序颠倒：SOS 在前、Spring 在后 → 不确认 ───────────────────────────
 def test_cluster_reversed_order_no_confirm():
     b = _flat(35)

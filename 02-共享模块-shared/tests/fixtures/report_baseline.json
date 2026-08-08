@@ -851,6 +851,7 @@
     "distribution_confirmed": false,
     "accumulation_failed": false,
     "distribution_failed": false,
+    "cluster_contested": false,
     "cluster_quality": null,
     "cluster_confidence": 0.0,
     "cluster_reason": "无确认事件簇",
