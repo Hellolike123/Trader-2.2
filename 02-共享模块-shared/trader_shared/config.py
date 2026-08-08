@@ -195,6 +195,13 @@ WYCKOFF_BC_SCAN_BARS: int = int(os.environ.get("WYCKOFF_BC_SCAN_BARS", "90"))
 # 显著长上影阈值：upper_shadow / price_range ≥ 0.25 即触发 BC 长上影分支（Bug H 06-25 型）
 WYCKOFF_BC_STRONG_UPPER_SHADOW_RATIO: float = float(os.environ.get("WYCKOFF_BC_STRONG_UPPER_SHADOW_RATIO", "0.25"))
 WYCKOFF_BC_MIN_POS_PCT: float = 0.65            # BC 须处于近窗价格区间上沿（高位过滤，0=底 1=顶）
+# BC 高位判定窗口：旧用 SPRING_SUPPORT_LOOKBACK(10, 近窗) → 反弹到近 10 日高即误判 BC。
+# FINDING-5：改成长窗(60)，须处于近 60 日价格区间上沿才认高位（威科夫原典：BC 在长周期主升后）。
+WYCKOFF_BC_HIGH_POS_LOOKBACK: int = int(os.environ.get("WYCKOFF_BC_HIGH_POS_LOOKBACK", "60"))
+# BC 前置涨幅窗口与门槛：BC 前须有一段明显主升（近 PRE_RISE_LOOKBACK 日低点→BC 涨幅≥PRE_RISE_PCT）。
+# 缺此前置 → 反弹棒误当 BC（隆基 601012 型假阳）。威科夫原典 BC 定义即"主升末端供求失衡高潮"。
+WYCKOFF_BC_PRE_RISE_LOOKBACK: int = int(os.environ.get("WYCKOFF_BC_PRE_RISE_LOOKBACK", "60"))
+WYCKOFF_BC_PRE_RISE_PCT: float = float(os.environ.get("WYCKOFF_BC_PRE_RISE_PCT", "0.15"))
 # SC 近窗位置上限（0=底 1=顶）：pos 须 ≤ 此值。旧约 1-BC_MIN=0.35；现行 0.50（PR #55）
 WYCKOFF_SC_MAX_POS_PCT: float = float(os.environ.get("WYCKOFF_SC_MAX_POS_PCT", "0.50"))
 # 日线 SC 跌幅上限（须 ≤ 此值，负数）：现行 -2.0→-1.5；周线仍用代码内 -1.0
@@ -524,6 +531,7 @@ __all__ = [
     "WYCKOFF_BC_VOL_RATIO_THRESHOLD", "WYCKOFF_BC_CHANGE_THRESHOLD",
     "WYCKOFF_BC_UPPER_SHADOW_RATIO", "WYCKOFF_BC_MIN_POS_PCT",
     "WYCKOFF_BC_SCAN_BARS", "WYCKOFF_BC_STRONG_UPPER_SHADOW_RATIO",
+    "WYCKOFF_BC_HIGH_POS_LOOKBACK", "WYCKOFF_BC_PRE_RISE_LOOKBACK", "WYCKOFF_BC_PRE_RISE_PCT",
     "WYCKOFF_SC_MAX_POS_PCT", "WYCKOFF_SC_CHANGE_PCT_MAX_DAILY",
     "WYCKOFF_SOW_SUPPORT_LOOKBACK",
     "WYCKOFF_SOW_VOL_RATIO_THRESHOLD", "WYCKOFF_SOW_CONSECUTIVE_DAYS",

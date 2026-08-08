@@ -20,6 +20,15 @@ def _make_bar(open_, high, low, close, volume=1000):
     return {"open": open_, "high": high, "low": low, "close": close, "volume": volume}
 
 
+def _prerise(n: int, low: float, high: float, volume: int = 100) -> list[dict]:
+    """FINDING-5 辅助：生成 n 根平滑上行段，用于构造 BC 的前置主升（≥15% 涨幅）。"""
+    bars = []
+    for i in range(n):
+        p = low + (high - low) * i / max(n - 1, 1)
+        bars.append(_make_bar(round(p, 2), round(p + 0.3, 2), round(p - 0.3, 2), round(p, 2), volume))
+    return bars
+
+
 class TestDetectSpring:
     def test_spring_detected(self):
         """Spring: 跌破90后收回97（收回力度117%），满足50%门槛。"""
@@ -96,8 +105,9 @@ class TestWyckoffAnalysis:
 class TestDetectBuyingClimax:
     def test_bc_detected(self):
         # 准备 14 天的数据，作为 recent 平均 volume 约 100
-        bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
+        bars = _prerise(20, 85, 100) + [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
         # 最新一天：量比 1.9（高于 WYCKOFF_BC_VOL_RATIO_THRESHOLD=1.5），上影线明显，收阴，涨幅仅 0.5%
+        # FINDING-5：前置 20 根平滑上行（85→100）提供 ≥15% 主升，满足 BC 前置涨幅条件
         bars.append({"open": 101, "high": 105, "low": 99, "close": 100.5, "volume": 190})
         result = wyckoff_analysis(bars)
         assert result["bc_signal"] is True
@@ -109,6 +119,36 @@ class TestDetectBuyingClimax:
         bars.append({"open": 101, "high": 105, "low": 99, "close": 100.5, "volume": 140})
         result = wyckoff_analysis(bars)
         assert result["bc_signal"] is False
+
+    def test_bc_rejected_no_pre_rise(self):
+        """FINDING-5：区间内反弹棒（近窗高位、放量、长上影）但无前置主升 → 不标 BC。
+
+        隆基 601012 型：长期横盘后单根反弹到近 10 日高、量比 1.7、长上影，
+        但 60 日内未从低点抬升≥15% → 非威科夫原典 BC，应拒。
+        """
+        from trader_shared.wyckoff_events import _detect_buying_climax
+
+        # 长期横盘（90 根），最低 ~13、最高 ~14，无趋势性主升
+        bars = [_make_bar(13.5, 14.0, 13.2, 13.6, 100) for _ in range(90)]
+        # 反弹棒：量比 1.7、长上影、收阴、近窗高位（14.0 为横盘区间上沿）
+        bars.append(_make_bar(13.7, 14.0, 13.5, 13.55, 170))
+        r = _detect_buying_climax(bars)
+        assert r["bc_signal"] is False, r["bc_reason"]
+
+    def test_bc_real_climax_with_pre_rise(self):
+        """FINDING-5：前置主升（≥15%）+ 长窗高位 + 放量滞涨 → 真 BC 保留。
+
+        茅台 600519 型：长期主升末端天量长上影，是威科夫原典 BC，应触发。
+        """
+        from trader_shared.wyckoff_events import _detect_buying_climax
+
+        # 前置主升：60 根从 100 拉到 130（+30%）
+        bars = _prerise(60, 100, 130)
+        # 顶部日：量比 1.8、长上影、滞涨 +1%、处长窗高位
+        bars.append(_make_bar(129.0, 132.0, 128.5, 130.5, 180))
+        r = _detect_buying_climax(bars)
+        assert r["bc_signal"] is True, r["bc_reason"]
+        assert r["bc_bar_idx"] == 60
 
 
 class TestBuyingClimaxRetroScan:
@@ -152,7 +192,8 @@ class TestBuyingClimaxRetroScan:
         """H3：+2.2% 无显著长上影 → 滞涨 5.0 分支触发（旧 1.0 阈值会拒）。"""
         from trader_shared.wyckoff_events import _detect_buying_climax
 
-        bars = [_make_bar(10, 10.5, 9.5, 10, 100) for _ in range(14)]
+        bars = _prerise(20, 8.5, 10) + [_make_bar(10, 10.5, 9.5, 10, 100) for _ in range(14)]
+        # FINDING-5：前置 20 根上行（8.5→10）提供 ≥15% 主升，满足 BC 前置涨幅条件
         # 顶部日：+2.2%、上影比 0.23（<0.25）、收阳（非收阴）、量比 3.0
         bars.append(_make_bar(10.1, 10.27, 10.05, 10.22, 300))
         r = _detect_buying_climax(bars)
@@ -164,7 +205,8 @@ class TestBuyingClimaxRetroScan:
         """H2：+6.8% + 上影比 0.31（06-25 型）→ 长上影分支触发（滞涨 5.0 已失效、非收阴）。"""
         from trader_shared.wyckoff_events import _detect_buying_climax
 
-        bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
+        bars = _prerise(20, 85, 100) + [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
+        # FINDING-5：前置 20 根上行（85→100）提供 ≥15% 主升
         # 顶部日：+6.8%、上影比 (109.9-106.8)/(109.9-100.0) = 0.313 ≥ 0.25、收阳
         bars.append(_make_bar(100.0, 109.9, 100.0, 106.8, 300))
         r = _detect_buying_climax(bars)
@@ -178,7 +220,8 @@ class TestBuyingClimaxRetroScan:
         """
         from trader_shared.wyckoff_events import _detect_buying_climax
 
-        base = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
+        base = _prerise(20, 85, 100) + [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
+        # FINDING-5：前置 20 根上行（85→100）提供 ≥15% 主升
         # h=106.84：upper=1.64 / range=6.84 → 0.2398 < 0.25
         assert (106.84 - 105.2) / (106.84 - 100.0) < 0.25
         r1 = _detect_buying_climax(base + [_make_bar(100.0, 106.84, 100.0, 105.2, 300)])
@@ -919,7 +962,8 @@ class TestCalculateWyckoffScore:
 
     def test_bc_penalty(self):
         """购买高潮 → 扣分"""
-        bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
+        bars = _prerise(20, 85, 100) + [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
+        # FINDING-5：前置 20 根上行（85→100）提供 ≥15% 主升
         bars.append({"open": 101, "high": 105, "low": 99, "close": 100.5, "volume": 190})
         result = calculate_wyckoff_score(bars)
         assert result["raw"] < 0
@@ -1375,7 +1419,8 @@ class TestWyckoffScoreWithClassicSignals:
 
     def test_ar_boosts_score(self):
         """AR 信号 → 分数提升 +10"""
-        bars = [_make_bar(100, 105, 95, 102, 10) for _ in range(16)]
+        bars = _prerise(20, 85, 100) + [_make_bar(100, 105, 95, 102, 10) for _ in range(16)]
+        # FINDING-5：前置主升（85→100）满足 BC 前置涨幅条件
         bars.append({"open": 101, "high": 105, "low": 99, "close": 100.5, "volume": 190})  # BC
         # 2 根阳线 + 1 根阴线 → 最后5根中仅3阳 → SOS不触发
         bars.append(_make_bar(103, 105, 102, 104, 100))
@@ -2080,7 +2125,8 @@ class TestBCHighPosition:
 
     def test_bc_still_detected_at_high(self):
         """高位天量仍可触发 BC（回归）"""
-        bars = [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
+        bars = _prerise(20, 85, 100) + [_make_bar(100, 105, 95, 100, 100) for _ in range(14)]
+        # FINDING-5：前置 20 根上行（85→100）提供 ≥15% 主升
         bars.append({"open": 101, "high": 105, "low": 99, "close": 100.5, "volume": 190})
         result = wyckoff_analysis(bars)
         assert result["bc_signal"] is True
@@ -2461,9 +2507,9 @@ class TestAutomaticReaction:
         # BC：高位天量滞涨/收阴
         bars.append(_make_bar(105, 108, 104, 104.5, 5000))
         # ARE：随后 1–3 根放量跌 ≥2%。
-        # Bug H 新合同（H-M5 复用 _detect_buying_climax）：回落棒须跌出高位区
-        # （pos<0.65），否则其本身（放量阴线+高位）会被判为「最近一次 BC」→ ARE 无回落空间。
-        bars.append(_make_bar(100, 100.5, 95, 95.5, 4000))
+        # FINDING-5：回落棒量 1500——不构成 BC（近窗均量~1400，比 1.07<1.5），
+        # 但满足 ARE 回落放量（> BC 前均量 1000×1.2=1200），避免其本身被判为「最近一次 BC」。
+        bars.append(_make_bar(100, 100.5, 95, 95.5, 1500))
         are = _detect_are(bars)
         assert are["are_signal"] is True, are.get("are_reason")
         assert are["are_price"] is not None

@@ -158,9 +158,9 @@
 | FINDING-2 | 建议改(中) | markup 分支缺 `_dist_cluster` 簇兜底（与 accumulation_d 不对称） | wyckoff_phase.py:580 | 加 `not _dist_cluster` 守卫或文档化 |
 | FINDING-3 | 建议改(中) | `use_persisted_phase` 默认 True，日线路径依赖默认致持久化 | wyckoff_core.py:604,1286；review_core.py:350,602；t0_run.py:195 | 默认改 False，显式按需开 |
 | FINDING-4 | 需人工裁定 | 真实票 K 线目检（BC/Spring/SOS 命中位置） | — | 抽 3-5 只已知票联网核对 |
-| FINDING-5 | 建议改(中) | BC 真实票过触发（12 只触发 11 只；含非高位/量未放的假阳） | wyckoff_events.py:639-727 `_detect_buying_climax` | 收紧"高位"判定到更宽摆动高点 + 抬高量比基线；或显式语义为"局部供应棒" |
+| FINDING-5 | **已修复** | BC 真实票过触发（12 只触发 11 只；含非高位/量未放的假阳） | wyckoff_events.py:639-727 `_detect_buying_climax` | 长窗高位(60)+前置涨幅(≥15%)双过滤，已落地（见 §12） |
 
-**无「必须改」项。** FINDING-5 为 F4 目检新发现，建议改但非阻断（下游 phase 已对 BC 过触发稳健，未误判派发）。
+**无「必须改」项。** FINDING-5 为 F4 目检新发现，原评「非阻断」，复查后上调为「高」（BC 下游 `stage_stops.py:247` 直接触发减仓），已于 §12 修复。
 
 ---
 
@@ -236,4 +236,20 @@
 - **Spring**：本批无命中（积累股仅现 SC 未现 Spring 短暂破位），与窗口内未出现该形态一致，非遗漏。
 
 **产物**：`/tmp/f4_report.html`（4 张走势图：隆基 BC 假阳 / 茅台 BC+SC 正确 / 南网 SC+SOS / 宁德积累中 BC 过触发）。未入仓。
-- FINDING-4 真实票目检未做（需联网拉 K 线，留待后续人工裁定）
+
+## 12. FINDING-5 修复（2026-08-08 已落地）
+
+**用户裁决**：「改」——收紧 BC 过触发，对齐威科夫原典。
+
+**修复（按 `wyckoff-bc-overtrigger-fix-handoff.md`）**：
+- `config.py`：新增 `WYCKOFF_BC_HIGH_POS_LOOKBACK=60`（高位窗 10→60）、`WYCKOFF_BC_PRE_RISE_LOOKBACK=60`、`WYCKOFF_BC_PRE_RISE_PCT=0.15`，并导出。
+- `wyckoff_events.py`：`_is_bc_high_position` 默认长窗(60)；新增 `_bc_has_pre_rise`（BC 前 60 日须从低点抬升≥15%）；`_detect_buying_climax` 在量比/高位判定后加前置涨幅闸。
+- 优先级从「中/非阻断」上调为「高」：复查发现 BC 下游 `stage_stops.py:247` 直接触发减仓，并非仅展示误导。
+
+**验证（全绿）**：
+- 真实数据 12 只：BC 11/12 → **7/12**；消除的 5 只均为「无真实前置主升的反弹棒」假阳（隆基/五粮液/平安/招商/科大讯飞），保留的 7 只均核验有真实前置主升(16%–44%)+60 日高位(70%–100%)。
+- 宁德 300750 纠正：原 §11 误判为假阳，按新语义其 BC@428.9 有 31% 前置主升+71.8% 高位，**是真 BC**，应为 True。
+- 单测：`test_wyckoff_core.py` 173 passed；新增 `test_bc_rejected_no_pre_rise`(隆基型拒)+`test_bc_real_climax_with_pre_rise`(真 BC 保留)；5 个平线 BC 用例补前置主升；`test_are_after_bc` 回落棒量降至 1500。
+- 回归：wyckoff+report+chan 382 passed；`test_wyckoff_realstock_verification` 真实票 BC=True 断言通过；门禁 **812 passed / 4 skipped**，零回归。
+
+- FINDING-4 真实票目检：BC/SC 部分已由 F4+FINDING-5 覆盖；Spring/SOS 真实命中位置未单独目检（查法 A 合成测试已覆盖逻辑）。

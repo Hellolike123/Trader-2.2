@@ -30,6 +30,9 @@ try:
         WYCKOFF_BC_SCAN_BARS,
         WYCKOFF_BC_STRONG_UPPER_SHADOW_RATIO,
         WYCKOFF_BC_MIN_POS_PCT,
+        WYCKOFF_BC_HIGH_POS_LOOKBACK,
+        WYCKOFF_BC_PRE_RISE_LOOKBACK,
+        WYCKOFF_BC_PRE_RISE_PCT,
         WYCKOFF_SC_MAX_POS_PCT,
         WYCKOFF_SC_CHANGE_PCT_MAX_DAILY,
         WYCKOFF_SOW_SUPPORT_LOOKBACK,
@@ -343,12 +346,41 @@ def _sc_detector_params(timeframe: str = "daily", *, is_index: bool = False) -> 
         params["vol_ratio_threshold"] = min(float(params["vol_ratio_threshold"]), 1.35)
     return params
 
-def _is_bc_high_position(bars: list[dict], idx: int) -> bool:
-    """BC 高位过滤：须处于近窗价格区间上沿。"""
-    pos = _price_pos_pct(bars, idx)
+def _is_bc_high_position(bars: list[dict], idx: int, lookback: int = WYCKOFF_BC_HIGH_POS_LOOKBACK) -> bool:
+    """BC 高位过滤：须处于近窗价格区间上沿。
+
+    FINDING-5：lookback 默认改长窗（WYCKOFF_BC_HIGH_POS_LOOKBACK=60），
+    不再用 SPRING_SUPPORT_LOOKBACK=10 的近窗——反弹到近 10 日高即误判 BC 的
+    根因在此。威科夫原典 BC 须处于长周期主升后的相对高位。
+    """
+    pos = _price_pos_pct(bars, idx, lookback=lookback)
     if pos is None:
         return False
     return pos >= WYCKOFF_BC_MIN_POS_PCT
+
+
+def _bc_has_pre_rise(bars: list[dict], idx: int) -> bool:
+    """BC 前置涨幅条件：BC 棒之前须有一段明显主升。
+
+    FINDING-5：威科夫原典 BC 定义即「主升末端供求失衡高潮」。若 BC 前
+    PRE_RISE_LOOKBACK 日内价格未从低点抬升≥PRE_RISE_PCT，则只是区间内反弹棒，
+    不应标 BC（隆基 601012 型假阳：反弹到近窗高、量未放、无前置主升）。
+    """
+    if idx <= 0:
+        return False
+    start = max(0, idx - WYCKOFF_BC_PRE_RISE_LOOKBACK)
+    window = bars[start:idx]
+    if not window:
+        return False
+    lows = [to_float(b.get("low")) for b in window]
+    lows = [v for v in lows if v is not None and v > 0]
+    if not lows:
+        return False
+    min_low = min(lows)
+    cur_high = to_float(bars[idx].get("high"))
+    if cur_high is None or cur_high <= 0:
+        return False
+    return (cur_high - min_low) / min_low >= WYCKOFF_BC_PRE_RISE_PCT
 
 def _is_frozen_board(bar: dict) -> bool:
     """检测一字板（开=高=低=收，全天几乎无波动）。A股涨跌停制度下无效换手。"""
@@ -643,7 +675,8 @@ def _detect_buying_climax(bars: list[dict], tr_ctx: dict | None = None) -> dict:
       - 回溯窗口 5 → WYCKOFF_BC_SCAN_BARS=90（对齐 SC 冷启动日 90），从新到旧找**最近一次** BC
       - 滞涨阈值 1.0 → 5.0（容忍 A 股单日波动）
       - 新增「显著长上影」OR 分支（upper_shadow / price_range ≥ 0.25，06-25 +6.8% 型）
-    触发 = 量比≥1.5 ∧ 高位 pos≥0.65 ∧（滞涨 ∨ 显著长上影 ∨ 收阴）。
+    触发 = 量比≥1.5 ∧ 长窗(60)高位 pos≥0.65 ∧ 前置涨幅≥15% ∧（滞涨 ∨ 显著长上影 ∨ 收阴）。
+    FINDING-5：新增「长窗高位 + 前置主升」双过滤，抑制区间内反弹棒误当 BC（原近窗10日高即触发）。
 
     Returns:
         dict with keys: bc_signal (bool), bc_reason (str), bc_price (float),
@@ -690,7 +723,10 @@ def _detect_buying_climax(bars: list[dict], tr_ctx: dict | None = None) -> dict:
             continue
 
         # P1: 高位过滤 — 低位天量不标 BC（派发 Phase A 须在区间上沿）
+        #     FINDING-5：长窗(60)判定高位 + 前置涨幅条件，抑制反弹棒假阳
         if not _is_bc_high_position(bars, scan_idx):
+            continue
+        if not _bc_has_pre_rise(bars, scan_idx):
             continue
 
         # H-M2/M4: 滞涨（<5.0%）∨ 显著长上影（≥0.25）∨ 收阴
