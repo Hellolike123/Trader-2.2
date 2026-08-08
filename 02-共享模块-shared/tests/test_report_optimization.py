@@ -993,17 +993,67 @@ def test_midline_chip_missing_graceful():
 # ── Task 6: 动能行展示 reason 原文 ──
 
 def test_momentum_reason_full():
-    """动能行展示 reason 原文不截断。"""
+    """动能行先给综合总词，再保留 reason 原文。"""
     r = _report()
+    r["fusion"]["signals_detail"]["momentum"]["direction"] = 1
     r["fusion"]["signals_detail"]["momentum"]["reason"] = "MACD柱缩短（多头衰减）"
     out = render_short_midline(r)
-    assert "动能：MACD柱缩短（多头衰减）" in out
+    assert "动能：偏强 · MACD柱缩短（多头衰减）" in out
 
 
 def test_momentum_short_reason():
-    """短 reason 保持原样。"""
+    """中性 + 动量中性只显示总词，避免重复。"""
     r = _report()
     r["fusion"]["signals_detail"]["momentum"]["reason"] = "动量中性"
+    out = render_short_midline(r)
+    assert "动能：中性" in out
+    assert "动能：中性 · 动量中性" not in out
+
+
+def test_momentum_bearish_word():
+    """bearish/-1 显示偏弱，不丢关键信号 reason。"""
+    r = _report()
+    r["fusion"]["signals_detail"]["momentum"] = {
+        "direction": -1,
+        "reason": "MACD死叉+RSI下降(偏空)、多指标共振(强烈看空)",
+    }
+    out = render_short_midline(r)
+    assert "动能：偏弱 · MACD死叉+RSI下降(偏空)、多指标共振(强烈看空)" in out
+
+
+def test_momentum_string_direction_words():
+    """字符串方向 bullish/bearish/neutral 也映射总词。"""
+    cases = [
+        ("bullish", "MACD柱为正", "偏强"),
+        ("bearish", "MACD柱为负", "偏弱"),
+        ("neutral", "MACD柱缩短", "中性"),
+    ]
+    for direction, reason, word in cases:
+        rr = _report()
+        rr["fusion"]["signals_detail"]["momentum"] = {
+            "direction": direction,
+            "reason": reason,
+        }
+        out = render_short_midline(rr)
+        assert f"动能：{word} · {reason}" in out
+
+
+def test_momentum_data_insufficient_keeps_reason():
+    """数据不足时不硬加综合总词。"""
+    r = _report()
+    r["fusion"]["signals_detail"]["momentum"] = {
+        "direction": 1,
+        "reason": "动量数据不足",
+    }
+    out = render_short_midline(r)
+    assert "动能：动量数据不足" in out
+    assert "偏强" not in out
+
+
+def test_momentum_without_direction_keeps_reason():
+    """无 direction 时不硬加综合总词。"""
+    r = _report()
+    r["fusion"]["signals_detail"]["momentum"] = {"reason": "动量中性"}
     out = render_short_midline(r)
     assert "动能：动量中性" in out
 
@@ -1050,6 +1100,7 @@ def test_fund_line_appends_main_force_and_relation():
     r["big_order_direction"] = "偏卖"
     out = render_short_midline(r)
     fund_line = next(l for l in out.split("\n") if "资金：" in l)
+    assert "资金：卖盘占优 · " in fund_line
     # 金额优先：短行只保关键项（量能细节不再进资金行）
     assert "5日净出" in fund_line and ("1800万" in fund_line or "0.18亿" in fund_line)
     assert "主力4/10" in fund_line and "观望" in fund_line
@@ -1057,6 +1108,53 @@ def test_fund_line_appends_main_force_and_relation():
     assert ("价涨钱出" in fund_line) or ("大单偏卖" in fund_line)
     assert "量比" not in fund_line
     assert "平量" not in fund_line
+
+
+def test_fund_line_buy_bias_from_big_order():
+    """大单依据优先给出买盘占优。"""
+    r = _report()
+    r["big_order_direction"] = "偏买"
+    out = render_short_midline(r)
+    fund_line = next(l for l in out.split("\n") if "资金：" in l)
+    assert "资金：买盘占优 · " in fund_line
+    assert "大单偏买" in fund_line
+
+
+def test_fund_line_buy_bias_from_big_order_summary():
+    """大单 summary 也能给出买盘占优。"""
+    r = _report()
+    r["big_order_summary"] = "主动买盘"
+    r["big_order_direction"] = None
+    out = render_short_midline(r)
+    fund_line = next(l for l in out.split("\n") if "资金：" in l)
+    assert "资金：买盘占优 · " in fund_line
+    assert "大单偏买" in fund_line
+
+
+def test_fund_line_bias_falls_back_to_flow_features():
+    """无大单依据时按显著 5/10 日净额符号给买卖盘。"""
+    r = _report()
+    r["fund_flow_features"] = {"cum_flow_5d_wan": 150}
+    out = render_short_midline(r)
+    fund_line = next(l for l in out.split("\n") if "资金：" in l)
+    assert "资金：买盘占优 · " in fund_line
+
+    r2 = _report()
+    r2["fund_flow_features"] = {"cum_flow_10d_wan": -3500}
+    out2 = render_short_midline(r2)
+    fund_line2 = next(l for l in out2.split("\n") if "资金：" in l)
+    assert "资金：卖盘占优 · " in fund_line2
+
+
+def test_fund_line_without_bias_keeps_original():
+    """无大单/显著净额依据时不前置买卖盘词。"""
+    r = _report()
+    r["fund_flow_features"] = {"cum_flow_5d_wan": -50}
+    r["big_order_direction"] = None
+    out = render_short_midline(r)
+    fund_line = next(l for l in out.split("\n") if "资金：" in l)
+    assert "资金：买盘占优" not in fund_line
+    assert "资金：卖盘占优" not in fund_line
 
 
 def test_fund_line_shows_5d_amount_even_when_primary_has_main_force_word():
@@ -1120,7 +1218,7 @@ def test_adjust_days():
 
 
 def test_atr_merged_into_volume_line():
-    """顶栏：量能行含量比/换手/调整/动能/ATR；无独立 ATR 行。"""
+    """顶栏：量能行含量比/换手/调整/位置/ATR；无独立 ATR 行。"""
     out = render_short_midline(_report())
     vol_line = next(ln for ln in out.splitlines() if ln.lstrip().startswith("量能："))
     assert "量比" in vol_line and "调整19天" in vol_line
@@ -1166,7 +1264,7 @@ def test_meta_pure_d_board_without_sector():
     out = render_short_midline(r)
     head = out.split("🧭")[0]
     assert "环境：深成 +1.25%" in out
-    assert "量能：" in out and "动能 转弱" in out
+    assert "量能：" in out and "位置 转弱" in out
     assert "个股 +" not in head
     assert "大盘" not in head
     assert " 偏弱" not in head and "正常" not in head
@@ -1196,7 +1294,7 @@ def test_meta_pure_d_with_sector():
     out = render_short_midline(r)
     head = out.split("🧭")[0]
     assert "环境：科创 +2.99% ｜ 电气 -3.44% ｜ 强于板块 +4.28%" in out
-    assert "动能 转弱" in out and "量能：" in out
+    assert "位置 转弱" in out and "量能：" in out
     assert "个股 +" not in head
     assert "行业：" not in out
     assert "跑赢" not in head

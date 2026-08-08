@@ -45,6 +45,101 @@ def _short_industry_name(name: str) -> str:
     return s
 
 
+_MOMENTUM_DIRECTION_WORDS = {
+    "bullish": "偏强",
+    "bearish": "偏弱",
+    "neutral": "中性",
+}
+
+
+def _momentum_summary_word(sig: dict[str, Any]) -> str:
+    """fusion momentum 席位方向 → 综合总词；无 direction 不硬加。"""
+    direction = sig.get("direction")
+    if direction is None:
+        return ""
+    if isinstance(direction, str):
+        key = direction.strip().lower()
+        if key in _MOMENTUM_DIRECTION_WORDS:
+            return _MOMENTUM_DIRECTION_WORDS[key]
+        try:
+            direction = int(float(key))
+        except (TypeError, ValueError):
+            return ""
+    try:
+        d = int(direction)
+    except (TypeError, ValueError):
+        return ""
+    return {1: "偏强", -1: "偏弱", 0: "中性"}.get(d, "")
+
+
+def _momentum_direction_int(sig: dict[str, Any]) -> int:
+    """fusion momentum 席位方向 → int；兼容 bullish/bearish/neutral 字符串。"""
+    direction = sig.get("direction")
+    if direction is None:
+        return 0
+    if isinstance(direction, str):
+        key = direction.strip().lower()
+        str_map = {"bullish": 1, "bearish": -1, "neutral": 0}
+        if key in str_map:
+            return str_map[key]
+        try:
+            direction = int(float(key))
+        except (TypeError, ValueError):
+            return 0
+    try:
+        return int(direction)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _big_order_side(raw: Any) -> str:
+    """大单字段判买/卖侧；中性或无信息返回空。"""
+    bo_raw = str(raw or "").strip()
+    if not bo_raw:
+        return ""
+    bo_raw_s = re.sub(r"\s+", "", bo_raw)
+    if any(k in bo_raw_s for k in ("买", "流入", "偏多", "主动买")) and not any(
+        k in bo_raw_s for k in ("卖", "流出", "偏空")
+    ):
+        return "buy"
+    if any(k in bo_raw_s for k in ("卖", "流出", "偏空", "主动卖")) and not any(
+        k in bo_raw_s for k in ("买", "流入", "偏多")
+    ):
+        return "sell"
+    return ""
+
+
+def _fund_bias_word(
+    *,
+    fund_features: dict[str, Any] | None = None,
+    big_order_summary: Any = None,
+    big_order_direction: Any = None,
+) -> str:
+    """资金行买卖盘占优词；大单优先，其次显著净额。"""
+    bo_dir = str(big_order_direction or "").strip()
+    bo_sum = str(big_order_summary or "").strip()
+    bo_side = _big_order_side(bo_dir or bo_sum)
+    if bo_side == "buy":
+        return "买盘占优"
+    if bo_side == "sell":
+        return "卖盘占优"
+
+    ff = fund_features if isinstance(fund_features, dict) else {}
+    try:
+        cum5 = float(ff.get("cum_flow_5d_wan") or 0)
+    except (TypeError, ValueError):
+        cum5 = 0.0
+    if abs(cum5) >= 100:
+        return "买盘占优" if cum5 > 0 else "卖盘占优"
+    try:
+        cum10 = float(ff.get("cum_flow_10d_wan") or 0)
+    except (TypeError, ValueError):
+        cum10 = 0.0
+    if abs(cum10) >= 3000:
+        return "买盘占优" if cum10 > 0 else "卖盘占优"
+    return ""
+
+
 # 引擎无买卖点时，浪型/fusion 不得夹带买点与下单词（C-D3）
 _CHAN_POINT_CLAIM_RE = re.compile(
     r"(?:关注|接近|潜在)?"
@@ -299,27 +394,20 @@ def _short_fund_display(
         extras.append(f"主力{mf_total_i}/10·{tier}")
 
     # 大单压成 偏买/偏卖/中性
-    bo_dir = str(big_order_direction or "").strip()
-    bo_sum = str(big_order_summary or "").strip()
-    bo_raw = bo_dir or bo_sum
-    if bo_raw:
-        bo_raw_s = re.sub(r"\s+", "", bo_raw)
-        if any(k in bo_raw_s for k in ("买", "流入", "偏多", "主动买")) and not any(
-            k in bo_raw_s for k in ("卖", "流出", "偏空")
-        ):
-            bo = "大单偏买"
-        elif any(k in bo_raw_s for k in ("卖", "流出", "偏空", "主动卖")) and not any(
-            k in bo_raw_s for k in ("买", "流入", "偏多")
-        ):
-            bo = "大单偏卖"
-        elif any(k in bo_raw_s for k in ("中性", "均衡", "无明显")):
-            bo = ""  # 无信息，不占位
-        else:
+    bo_side = _big_order_side(big_order_direction or big_order_summary)
+    bo = ""
+    if bo_side == "buy":
+        bo = "大单偏买"
+    elif bo_side == "sell":
+        bo = "大单偏卖"
+    elif big_order_direction or big_order_summary:
+        bo_raw_s = re.sub(r"\s+", "", str(big_order_direction or big_order_summary).strip())
+        if not any(k in bo_raw_s for k in ("中性", "均衡", "无明显")):
             bo = "大单" + bo_raw_s[:4]
             if len(bo_raw_s) > 4:
                 bo = bo[:7]
-        if bo and bo not in primary and all(bo not in x for x in extras):
-            extras.append(bo)
+    if bo and bo not in primary and all(bo not in x for x in extras):
+        extras.append(bo)
 
     # 源/质量：仅异常时提示（估/偏旧）；正常 tushare 不写
     src = str(ff.get("data_source") or "").strip().lower()
@@ -572,9 +660,9 @@ def render_short_midline(r: dict[str, Any]) -> str:
     )
 
     # 顶栏 A：价（上行已出）→ 环境 → 量能
-    # 环境：宽基指数｜主交易板块±%｜相对板块（强于/弱于/持平）；动能在量能行
+    # 环境：宽基指数｜主交易板块±%｜相对板块（强于/弱于/持平）；位置在量能行
     # 不写个股绝对涨跌%（现价行已有）；不写正常/偏弱；不用「跑赢」旧词
-    # 量能：量比/换手/调整/动能/ATR；两融默认不进顶栏
+    # 量能：量比/换手/调整/位置/ATR；两融默认不进顶栏
     env_parts = []
     _market_env_data = r.get("market_env") if isinstance(r.get("market_env"), dict) else {}
     _mkt_chg = _market_env_data.get("change_pct")
@@ -645,7 +733,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
         lines.append(f"  环境：{' ｜ '.join(env_parts)}")
 
     # 概念=身份标签（可多选）；不跟概念假指数比。有真实板块指数时强弱已在「环境」行。
-    # 概念紧接环境（身份），量能/动能/ATR 整行下移。
+    # 概念紧接环境（身份），量能/位置/ATR 整行下移。
     _concepts = []
     if isinstance(_ext_sec, dict):
         _raw_cs = _ext_sec.get("concepts") or []
@@ -689,10 +777,10 @@ def render_short_midline(r: dict[str, Any]) -> str:
                 vol_parts.append("创新高")
             else:
                 vol_parts.append(f"调整{_days_from_high}天")
-    # 动能与量能/调整同属个股状态，放量能行不进环境（环境只放指数与板块对照）
+    # 位置与量能/调整同属个股状态，放量能行不进环境（环境只放指数与板块对照）
     if momentum:
-        vol_parts.append(f"动能 {momentum}")
-    # ATR14：波动尺子，跟量能/动能同行
+        vol_parts.append(f"位置 {momentum}")
+    # ATR14：波动尺子，跟量能/位置同行
     _atr = r.get("atr14")
     if _atr is None:
         _atr = r.get("atr")
@@ -1396,9 +1484,17 @@ def render_short_midline(r: dict[str, Any]) -> str:
     # 3) 动能 / 资金分行（微信窄屏一长行会糊成一团）
     _msig = fusion_signals.get("momentum") if isinstance(fusion_signals.get("momentum"), dict) else {}
     if _msig:
-        _mst = str(_msig.get("reason") or "").strip().lstrip(":：").strip() or "无信号"
-        if len(_mst) > 28:
-            _mst = _mst[:26] + "…"
+        _m_reason = str(_msig.get("reason") or "").strip().lstrip(":：").strip() or "无信号"
+        if len(_m_reason) > 28:
+            _m_reason = _m_reason[:26] + "…"
+        _m_word = _momentum_summary_word(_msig)
+        if _m_word and "数据不足" not in _m_reason:
+            if _m_word == "中性" and _m_reason == "动量中性":
+                _mst = "中性"
+            else:
+                _mst = f"{_m_word} · {_m_reason}"
+        else:
+            _mst = _m_reason
     else:
         _mst = "暂无信号"
 
@@ -1422,6 +1518,13 @@ def render_short_midline(r: dict[str, Any]) -> str:
                 _vst = f"{_vst} · {_veto}"
     else:
         _vst = "暂无信号"
+    _fund_bias = _fund_bias_word(
+        fund_features=_ff_feat,
+        big_order_summary=r.get("big_order_summary"),
+        big_order_direction=r.get("big_order_direction"),
+    )
+    if _fund_bias and not _vst.startswith(f"{_fund_bias} "):
+        _vst = f"{_fund_bias} · {_vst}"
     lines.append(f"  动能：{_mst}")
     lines.append(f"  资金：{_vst}")
 
