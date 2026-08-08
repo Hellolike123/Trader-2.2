@@ -2,8 +2,8 @@
 
 > **status**: active  
 > **日期**: 2026-08-03  
-> **对照**: 威科夫 B·中剪 [`wyckoff-detail-slim-b-handoff.md`](./wyckoff-detail-slim-b-handoff.md)（只复用形态，不抄 SC/箱体/L0–L3）  
-> **母法源**: [`chanlun-skill-deep-card-handoff.md`](./chanlun-skill-deep-card-handoff.md)、[`chanlun-skill-playbook.md`](./chanlun-skill-playbook.md)、`BUSINESS.md` §2.0 / §2.1  
+> **对照**: 威科夫 B·中剪已归档（走 git 历史）；只复用形态，不抄 SC/箱体/L0–L3  
+> **母法源**: `BUSINESS.md` §2.0 / §2.1；深卡 / playbook 已归档，考古走 git 历史  
 > **代码**: `trader_shared/chanlun_run.py` / `chanlun_render.py`；入口 `01-功能包-packages/chanlun/scripts/final_chanlun.py`
 
 ---

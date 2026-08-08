@@ -3,7 +3,7 @@
 > 给操盘手：把五个 Skill 当五个岗位助手，按交易日节奏喊人。  
 > 给 Agent / 手跑脚本：文末有命令与快路径。  
 > 详细对话示例与面板样例见 [user-guide.md](./user-guide.md)。  
-> 法源手递（已合入）：[skill-usage-guide-chanlun-handoff.md](../plans/done/skill-usage-guide-chanlun-handoff.md)。
+> 法源手递已合入；chanlun 现行合同见 [chanlun-skill-slim-b-handoff.md](../plans/chanlun-skill-slim-b-handoff.md)。
 
 核心原则：**脚本产出是唯一真相**。不要手拼面板，不要凭阶段/动能推断方向。
 
@@ -40,7 +40,7 @@
 | 3 | **一二三买** | **只跟引擎**已判定的买卖点；禁止手补「接近一买」 |
 | 4 | **笔方向** | 当前笔向上/向下、笔数、近笔序列与引擎一致 |
 
-展开合同与验收见 [`chanlun-skill-playbook.md`](../plans/chanlun-skill-playbook.md)、[`chanlun-skill-deep-card-handoff.md`](../plans/chanlun-skill-deep-card-handoff.md)。  
+展开合同与验收见 [`chanlun-skill-slim-b-handoff.md`](../plans/chanlun-skill-slim-b-handoff.md)；深卡 / playbook 已归档，考古走 git 历史。  
 买不买仍以 trader 报告里的 `decision_view` 出手结论为准——chanlun / wyckoff **都不当总司令**。
 
 ---

@@ -10,7 +10,7 @@
 | [analysis-strategy-boundaries.md](./analysis-strategy-boundaries.md) | **架构边界（Agent 必读）** 依赖方向 / `analysis/`·`strategy/` 包 / 加减模块菜谱 |
 | [analysis-opinion-cards.md](./analysis-opinion-cards.md) | **P0 分析意见卡**字段冻结 |
 | [strategy-gates.md](./strategy-gates.md) | **P1 六闸口 IO / 互斥** |
-| [buy-point-lid-lifecycle.md](./buy-point-lid-lifecycle.md) | **买点「盖」生命周期**（规格；实现分期 L1–L3） |
+| [strategy-gates.md](./strategy-gates.md) | **买点「盖」生命周期**摘要（完整规格已归档，走 git 历史） |
 | [strategy-pack.md](./strategy-pack.md) | 策略包字段、匹配、展示契约 |
 | [strategy-roadmap-and-tests.md](./strategy-roadmap-and-tests.md) | **落地分期 + 测试清单**（P0～P4） |
 | [strategy-menu.md](./strategy-menu.md) | 缠/威/mi 菜单与包映射（思路） |
@@ -22,7 +22,7 @@
 
 **原则**：以本目录为准；桌面草稿仅作备份，不作为开发契约。
 
-**Fusion 默认（与代码一致）**：`FUSION_FROM_CARDS` **缺省 = cards**；`classic` 强制原路径。见 `analysis-strategy-boundaries.md` §5。  
+**Fusion 默认（与代码一致）**：`FUSION_FROM_CARDS` **缺省 = cards**；`classic` / `compare` 已退役，设了也仍走 cards。见 `analysis-strategy-boundaries.md` §5。  
 **产品方向**：主路径走向「共振 + 策略 + 纪律」；fusion 分不作总司令。见 resonance 文档。
 
 ## 其它
