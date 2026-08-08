@@ -320,6 +320,8 @@ def _assemble_base_report_impl(
         "intraday_as_of": intraday_as_of,
         "name": quote.get("name") or sec.name,
         "symbol": quote.get("symbol") or sec.ts_code,
+        "ts_code": sec.ts_code,
+        "code": getattr(sec, "code", None) or str(sec.ts_code).split(".")[0],
         "analysis_time": analysis_time,
         "current": current,
         "change_pct": quote.get("current_change_pct"),
@@ -502,4 +504,3 @@ def _assemble_base_report_impl(
         if _key not in _INTERNAL_LEVELS:
             report.setdefault(_key, _val)
     return report
-

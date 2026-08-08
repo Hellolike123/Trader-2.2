@@ -92,9 +92,10 @@ from .wyckoff_events import (
 )
 
 _PHASE_ORDER = {
-    "markdown": -4,           # 主跌（派发完成后）
-    "distribution_d": -3,
-    "distribution_c": -2,
+    "markdown": -5,           # 主跌（派发完成后）
+    "distribution_d": -4,
+    "distribution_c": -3,
+    "distribution_b": -2,
     "distribution_a": -1,
     "none": 0,
     "accumulation_a": 1,
@@ -921,12 +922,16 @@ def _transition_phase(
             "first_seen": new_phase,
         }
 
-    # 同方向（同正或同负）：只升级不降级
+    # 同方向（同正或同负）：只升级不降级。
+    # 用深度 |order| 比较：积累深度随正值增大，派发深度随负值增大，
+    # 避免负值域 `new_order <= old_order` 把进阶当回退（distribution_b 缺失同理）。
     if (
         (old_order > 0 and new_order > 0)  # 积累
         or (old_order < 0 and new_order < 0)  # 派发
     ):
-        if new_order <= old_order:
+        old_depth = abs(old_order)
+        new_depth = abs(new_order)
+        if new_depth <= old_depth:
             # 信号弱于或持平当前 → 保持旧阶段，但更新 confidence
             return {**old_phase_state, "phase_confidence_delta": new_confidence_delta}
         # 升级

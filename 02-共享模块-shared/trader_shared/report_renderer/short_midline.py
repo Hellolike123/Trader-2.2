@@ -25,6 +25,14 @@ _INDUSTRY_SHORT_ALIAS: dict[str, str] = {
 _INDUSTRY_SUFFIXES = ("设备", "制造", "制品", "材料", "工程", "服务", "产业", "股份")
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    """渲染层安全取 int；direction 等字段可能来自旧缓存/字符串。"""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _short_industry_name(name: str) -> str:
     s = str(name or "").replace("(A股)", "").replace("(A)", "").strip()
     if not s:
@@ -804,7 +812,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
             _wyk_raw = {}
         _wyk_line = format_midline_display(
             _wyk_raw,
-            symbol=str(r.get("ts_code") or r.get("code") or ""),
+            symbol=str(r.get("ts_code") or r.get("code") or r.get("symbol") or ""),
             direction=None,
         )
     except Exception:
@@ -1300,7 +1308,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
         _phase_d = format_daily_phase_display(
             _wyk_daily_u or None,
-            symbol=str(r.get("ts_code") or r.get("code") or ""),
+            symbol=str(r.get("ts_code") or r.get("code") or r.get("symbol") or ""),
         )
         _phase_body = str(_phase_d).strip()
         for _pfx in ("日线阶段：", "威科夫："):
@@ -1316,7 +1324,8 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
         if _wyk_daily_u:
             _ev_full = format_event_display(
-                _wyk_daily_u, symbol=str(r.get("ts_code") or r.get("code") or "")
+                _wyk_daily_u,
+                symbol=str(r.get("ts_code") or r.get("code") or r.get("symbol") or ""),
             )
             _ev_bit = _short_wyckoff_event_bit(_ev_full)
     except Exception:
@@ -1417,7 +1426,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
     lines.append(f"  资金：{_vst}")
 
     # 信号分歧：结构 vs 动能
-    _chan_dir2 = int(_csig2.get("direction", 0)) if _csig2 else 0
+    _chan_dir2 = _safe_int(_csig2.get("direction", 0)) if _csig2 else 0
     _mom_dir2 = int(_msig.get("direction", 0)) if _msig else 0
     if _chan_dir2 * _mom_dir2 < 0:
         _c_label = "看多" if _chan_dir2 > 0 else "看空"
@@ -1721,12 +1730,6 @@ def render_short_midline(r: dict[str, Any]) -> str:
     support = float(r.get("support") or 0)
     confirm = float(r.get("confirm") or 0)
     key_levels = r.get("key_levels") or {}
-    _mid_resist = float(
-        mid_key_prices.get("resist")
-        or key_prices.get("swing_sell")
-        or key_levels.get("mid_resist")
-        or 0
-    )
     stop_v = float(stop_sell or 0)
     life_v = float(mid_key_prices.get("life_line") or 0)
 
@@ -1876,5 +1879,4 @@ def render_short_midline(r: dict[str, Any]) -> str:
         lines.append(f"当前池 {pool_count}/{pool_cap}，回复 1 入池")
 
     return "\n".join(lines)
-
 
