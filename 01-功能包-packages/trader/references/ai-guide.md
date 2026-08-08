@@ -78,7 +78,7 @@
 | `fusion.weights_used.chan` | float | 缠论权重 | 0.30 |
 | `fusion.weights_used.momentum` | float | 动量权重 | 0.45 |
 | `fusion.weights_used.vpf` | float | 价量资金权重（第三席；非威科夫） | 0.25 |
-| `fusion.fusion_input_path` | str | 三席输入路径 | cards / classic |
+| `fusion.fusion_input_path` | str | 三席输入路径 | cards \| cards_failed |
 
 ## MA 和 ATR 字段
 

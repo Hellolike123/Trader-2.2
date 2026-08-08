@@ -6,8 +6,7 @@
 1. 拉全量历史，循环内 bars[:t] 切片 → 绕开数据层缺 end_date 的前视偏差。
 2. 冻结 market_env 到 t 日：切片指数历史 + 本地复算 level / HMM（不偷看今天）。
 3. 复用生产 signal 大脑：plugin_registry.analyze_all + fusion_core.merge_decisions，
-   与实盘同一套逻辑。fusion 默认走 cards（意见卡三席），与实盘 build_report 完全一致
-   （可选 --no-cards 退回 classic 提速）。
+   与实盘同一套逻辑。fusion 一律走 cards（意见卡三席），与实盘 build_report 完全一致。
 4. 撮合：次日开盘成交 + 滑点 + 费（万 1 佣 + 0.1% 印花）+ T+1
    + ATR trailing 止损（替代固定 8%）+ 涨停买不进 / 跌停卖不出约束。
 
@@ -19,8 +18,6 @@
 用法（仓库根目录执行）：
     # 单票（cards 模式，对齐实盘）
     python3 02-共享模块-shared/scripts/backtest_engine.py --target 600519 --days 300
-    # 退回 classic 提速
-    python3 02-共享模块-shared/scripts/backtest_engine.py --target 600519 --no-cards
     # 参数扫描（信号算一遍，撮合并行扫网格）
     python3 02-共享模块-shared/scripts/backtest_engine.py --target 600519 --days 300 --scan
     # 自定义撮合参数
@@ -303,7 +300,7 @@ def _fetch_extend_history(sec, use_cache: bool = True,
 
 # ── 信号函数：第 t 天只看 bars[:t+1]（算一遍，供扫描复用） ──────────────────
 def make_signal_fn(provider, sec, registry, bars, weekly, index_bars,
-                   idx_dates: list[str], use_cards: bool = True,
+                   idx_dates: list[str],
                    fund_flow_hist: list[dict] | None = None,
                    unlocks_all: list[dict] | None = None,
                    shareholder: dict | None = None,
@@ -439,26 +436,23 @@ def make_signal_fn(provider, sec, registry, bars, weekly, index_bars,
             current_change_pct=change_pct,
         )
         # ① cards 对齐实盘：构造三张卡喂给 merge_decisions
-        if use_cards:
-            try:
-                from trader_shared.analysis_cards import (
-                    build_chan_card, build_momentum_card, build_vpf_card,
-                )
-                from trader_shared.vpf_core import build_vpf_signal
-                cards = {
-                    "chan": build_chan_card(chan, role="daily"),
-                    "momentum": build_momentum_card(mom, role="daily"),
-                }
-                avg_to = _avg_turnover(cur)
-                vpf_raw = build_vpf_signal(
-                    None, None, bars=cur, avg_daily_turnover_wan=avg_to)
-                cards["vpf"] = build_vpf_card(vpf_raw, role="daily")
-                merge_kwargs["analysis_cards"] = cards
-                merge_kwargs["fusion_from_cards"] = "cards"
-            except Exception:
-                merge_kwargs["fusion_from_cards"] = "classic"
-        else:
-            merge_kwargs["fusion_from_cards"] = "classic"
+        try:
+            from trader_shared.analysis_cards import (
+                build_chan_card, build_momentum_card, build_vpf_card,
+            )
+            from trader_shared.vpf_core import build_vpf_signal
+            cards = {
+                "chan": build_chan_card(chan, role="daily"),
+                "momentum": build_momentum_card(mom, role="daily"),
+            }
+            avg_to = _avg_turnover(cur)
+            vpf_raw = build_vpf_signal(
+                None, None, bars=cur, avg_daily_turnover_wan=avg_to)
+            cards["vpf"] = build_vpf_card(vpf_raw, role="daily")
+            merge_kwargs["analysis_cards"] = cards
+        except Exception:
+            merge_kwargs.pop("analysis_cards", None)
+        merge_kwargs["fusion_from_cards"] = "cards"
 
         try:
             fusion = merge_decisions(**merge_kwargs)
@@ -807,7 +801,7 @@ def load_data(target: str, days: int, use_env: bool = True,
 
 
 def run_backtest(target: str, days: int = 300, step: int = 1,
-                use_env: bool = True, use_cards: bool = True,
+                use_env: bool = True,
                 use_risk: bool = True, use_extend: bool = True,
                 use_cache: bool = True, force_refresh: bool = False,
                 params: BTParams | None = None,
@@ -831,7 +825,7 @@ def run_backtest(target: str, days: int = 300, step: int = 1,
     veto_log: list[dict] = []
     signal_at = make_signal_fn(
         provider, sec, registry, bars, weekly,
-        index_bars, idx_dates, use_cards=use_cards,
+        index_bars, idx_dates,
         fund_flow_hist=risk.get("fund_flow_hist"),
         unlocks_all=risk.get("unlocks_all"),
         shareholder=risk.get("shareholder"),
@@ -855,7 +849,6 @@ def run_backtest(target: str, days: int = 300, step: int = 1,
         "name": getattr(sec, "name", target),
         "bars_used": len(bars),
         "env_frozen": bool(index_bars),
-        "use_cards": use_cards,
         "use_risk": use_risk,
         "use_extend": use_extend,
         "cache_used": bool(cache_info.get("used")),
@@ -949,7 +942,7 @@ def _print_report(r: dict) -> None:
     seg = "=" * 60
     print("\n" + seg)
     print("  %s (%s)  [%s]" % (
-        r["name"], r["target"], "cards" if r["use_cards"] else "classic"))
+        r["name"], r["target"], "cards"))
     print("  区间 %s | 日线 %d 根 | regime冻结 %s | 涨跌停 %s ±%.0f%%" % (
         r["period"], r["bars_used"],
         "是" if r["env_frozen"] else "否-常量",
@@ -996,7 +989,7 @@ def _print_scan(r: dict) -> None:
         return
     print(f"\n{'='*64}")
     print(f"  参数扫描  {r['name']} ({r['target']})  "
-          f"[{'cards' if r['use_cards'] else 'classic'}]  共 {len(rows)} 组")
+          f"[cards]  共 {len(rows)} 组")
     print(f"  区间 {r['period']} | 信号计算 {r.get('signal_compute_sec','-')}s（只算一遍）")
     print(f"{'='*64}")
     hdr = (f"  {'ATR×':>5} {'止损':>5} {'步':>3} | {'总收益':>8} {'年化':>8} "
@@ -1027,8 +1020,6 @@ def main() -> int:
                         help="信号评估步长 (默认 1，每隔 N 天评估一次)")
     parser.add_argument("--no-env", action="store_true",
                         help="不冻结 market_env（regime 退化为常量）")
-    parser.add_argument("--no-cards", action="store_true",
-                        help="退回 classic 融合（不造三席卡，提速；默认 cards 对齐实盘）")
     parser.add_argument("--scan", action="store_true", help="参数扫描（多进程并行）")
     parser.add_argument(
         "--atr-mult", type=float, default=3.0,
@@ -1062,10 +1053,10 @@ def main() -> int:
     )
 
     print(f"🔍 回测 {args.target} (days={args.days}, step={args.step}, "
-          f"{'cards' if not args.no_cards else 'classic'}{', 扫描' if args.scan else ''})...",
+          f"cards{', 扫描' if args.scan else ''})...",
           end=" ", flush=True)
     r = run_backtest(args.target, days=args.days, step=args.step,
-                     use_env=not args.no_env, use_cards=not args.no_cards,
+                     use_env=not args.no_env,
                      use_risk=not args.no_riskdata,
                      use_extend=not args.no_extend,
                      use_cache=not args.no_cache,
@@ -1088,7 +1079,7 @@ if __name__ == "__main__":
 
 # ─────────────────────────────────────────────────────────────────────────────
 # KNOWN_LIMITATIONS（骨架边界，已修项）：
-# ✅ v2 已做：① 对齐 cards（--no-cards 退回 classic）；② ATR trailing 止损 +
+# ✅ v2 已做：① 一律 cards（对齐实盘）；② ATR trailing 止损 +
 #    涨停买不进 / 跌停卖不出；③ 参数扫描（信号算一遍，撮合多进程并行）。
 # ✅ v2.1 已做：实盘风控接入（默认开，--no-riskdata 关闭做 A/B）：
 #    - fund_flow_data：按 t 切片历史资金流向 → 连续流出 veto 生效；

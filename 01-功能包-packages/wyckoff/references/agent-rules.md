@@ -62,4 +62,4 @@
 | 买点盖价 | `buy_point_lifecycle.resolve_lid_price`（显式>回踩下沿>买区下沿>支撑；不用 life_line 当回踩） |
 | 微信红线本身 | 只改本文件，再 sync 各 Skill 的 `references/agent-rules.md` |
 
-生产唯一渲染：短中线（`SHORT_MIDLINE_REPORT=false` 已忽略）。Fusion 默认 `cards`；`classic`/`compare` **已退役**（设了也告警后仍走 cards）。出手听 `decision_view`（entry 须 executable），fusion 分仅仪表；`FUSION_OVERRIDE_ENABLED` 默认 false。
+生产唯一渲染：短中线（`SHORT_MIDLINE_REPORT=false` 已忽略）。Fusion 默认 `cards`；`classic`/`compare` **已移除**（设了即报错）。出手听 `decision_view`（entry 须 executable），fusion 分仅仪表；`FUSION_OVERRIDE_ENABLED` 默认 false。

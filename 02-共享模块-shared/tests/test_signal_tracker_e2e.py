@@ -19,7 +19,7 @@ for _p in (SHARED, SCRIPTS):
     if str(_p.resolve()) not in sys.path:
         sys.path.insert(0, str(_p.resolve()))
 
-import signal_tracker as st
+import trader_shared.signal_tracker as st
 
 
 class TestEndToEndPipeline:
@@ -84,8 +84,8 @@ class TestEndToEndPipeline:
             {"date": (now + _td(days=6)).strftime("%Y-%m-%d"), "close": 11.0, "atr14": 0.3},
             {"date": (now + _td(days=12)).strftime("%Y-%m-%d"), "close": 10.9, "atr14": 0.3},
         ]
-        with patch("signal_tracker.resolve_security") as mock_resolve, \
-             patch("signal_tracker.fetch_qfq_daily") as mock_daily, \
+        with patch("trader_shared.signal_tracker.resolve_security") as mock_resolve, \
+             patch("trader_shared.signal_tracker.fetch_qfq_daily") as mock_daily, \
              patch.object(st, "to_float") as mock_to_float:
             mock_resolve.return_value = MagicMock(code="688248.SH", market="SH")
             mock_daily.return_value = bars

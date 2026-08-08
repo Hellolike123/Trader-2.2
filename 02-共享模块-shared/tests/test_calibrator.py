@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import calibrator as cal
+import trader_shared.calibrator as cal
 
 
 class TestBySignalType:

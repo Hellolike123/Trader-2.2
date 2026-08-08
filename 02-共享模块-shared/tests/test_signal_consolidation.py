@@ -15,7 +15,7 @@ for p in (SHARED, SCRIPTS, CONTRACTS):
     if str(p.resolve()) not in sys.path:
         sys.path.insert(0, str(p.resolve()))
 
-import signal_tracker as st
+import trader_shared.signal_tracker as st
 
 def test_consolidate_legacy_log_e2e():
     with TemporaryDirectory() as tmp_dir:

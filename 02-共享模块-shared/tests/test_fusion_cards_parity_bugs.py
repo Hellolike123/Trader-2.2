@@ -86,11 +86,11 @@ def test_default_fusion_mode_is_cards(monkeypatch):
     assert _fusion_input_mode() == "cards"
 
 
-def test_fusion_mode_classic_explicit_still_cards(monkeypatch):
-    """C5：显式 classic env → 仍 cards + DeprecationWarning。"""
+def test_fusion_mode_classic_explicit_rejected(monkeypatch):
+    """C5：显式 classic env → ValueError，不再静默当 cards。"""
     monkeypatch.setenv("FUSION_FROM_CARDS", "classic")
-    with pytest.warns(DeprecationWarning, match="retired"):
-        assert _fusion_input_mode() == "cards"
+    with pytest.raises(ValueError, match="classic"):
+        _fusion_input_mode()
 
 
 def test_i4_like2_not_buy2():

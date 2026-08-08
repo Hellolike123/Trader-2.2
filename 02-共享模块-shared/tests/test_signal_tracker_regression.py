@@ -17,7 +17,7 @@ for _p in (SHARED, SCRIPTS):
         sys.path.insert(0, str(_p.resolve()))
 
 import importlib
-import signal_tracker as st
+import trader_shared.signal_tracker as st
 importlib.reload(st)
 
 

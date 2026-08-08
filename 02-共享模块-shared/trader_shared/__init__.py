@@ -10,14 +10,6 @@ Usage:
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-# ── 兼容层（过渡期）：给尚未迁移的 scripts/ 工具留 path ──────────────
-_scripts = Path(__file__).resolve().parent.parent / "scripts"
-if _scripts.exists() and str(_scripts) not in sys.path:
-    sys.path.append(str(_scripts))
-
 # ── 静态导入子模块（ADR-001 收编后，全部在包内，无向上依赖）─────────
 import trader_shared.pipeline as _pipeline
 import trader_shared.signal_tracker as _tracker
@@ -60,14 +52,6 @@ interfaces = _interfaces
 fetchers = _fetchers
 plugin_registry = _plugin_registry
 async_utils = _async_utils
-
-# ── 过渡期裸名别名：tests / 旧脚本仍用 `from signal_tracker import ...` ──
-# 收编后这些模块在 trader_shared/ 下，裸名不再可导入。注册 sys.modules 别名续命，
-# 统一迁移测试留待后续测试基建步。
-for _bare in ("pipeline", "signal_tracker", "market_env", "calibrator", "self_calibration"):
-    _mod = sys.modules.get(f"trader_shared.{_bare}")
-    if _mod is not None:
-        sys.modules.setdefault(_bare, _mod)
 
 __all__ = [
     # pipeline

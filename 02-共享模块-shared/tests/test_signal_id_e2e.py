@@ -14,7 +14,7 @@ import pytest
 # ── Path setup (same as existing tests) ──
 import trader_shared
 
-import signal_tracker
+import trader_shared.signal_tracker as signal_tracker
 from trader_shared.signal_store import append_signal
 
 
@@ -23,7 +23,7 @@ from trader_shared.signal_store import append_signal
 
 def _norm(symbol: str, date: str, signal_type: str) -> None:
     """Return normalized (symbol, date, signal_type) matching what make_signal_id uses."""
-    from signal_tracker import (
+    from trader_shared.signal_tracker import (
         _normalize_symbol,
         _norm_date,
         _normalize_signal_type,
@@ -119,7 +119,7 @@ def tmp_paths(tmp_path: Path) -> Path:
 
 def test_signal_lifecycle_full_pipeline(tmp_paths: Path) -> None:
     """append_signal → log_safe → check_recent skip by signal_id.  All use same derived_id."""
-    from signal_tracker import (
+    from trader_shared.signal_tracker import (
         _normalize_symbol,
         _norm_date,
         _normalize_signal_type,
@@ -275,7 +275,7 @@ def test_old_record_no_signal_id_is_matched(tmp_paths: Path) -> None:
 
 def test_dual_id_consistency(tmp_paths: Path) -> None:
     """signal.signal_id and log.signal_id must be identical when same symbol/date/type/price."""
-    from signal_tracker import (
+    from trader_shared.signal_tracker import (
         _normalize_symbol,
         _norm_date,
         _normalize_signal_type,

@@ -21,7 +21,7 @@ for _p in (SHARED, SCRIPTS):
     if str(_p.resolve()) not in sys.path:
         sys.path.insert(0, str(_p.resolve()))
 
-import signal_tracker as st
+import trader_shared.signal_tracker as st
 
 
 def make_sig(symbol: str = "688248.SH", name: str = "南网科技",

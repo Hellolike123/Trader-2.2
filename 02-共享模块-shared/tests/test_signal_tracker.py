@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""signal_tracker.py regression tests — verifies BUG-001 through BUG-012 fixes."""
+"""trader_shared.signal_tracker.py regression tests — verifies BUG-001 through BUG-012 fixes."""
 from __future__ import annotations
 
 import json
@@ -17,7 +17,7 @@ for _p in (SHARED, SCRIPTS):
     if str(_p.resolve()) not in sys.path:
         sys.path.insert(0, str(_p.resolve()))
 
-import signal_tracker as st
+import trader_shared.signal_tracker as st
 
 
 # ═══════ FIXTURES ═══════
@@ -156,9 +156,9 @@ class TestAtomicWriteAndFsync:
             encoding="utf-8",
         )
 
-        with patch("signal_tracker.os.replace") as mock_replace, \
-             patch("signal_tracker.os.fsync") as mock_fsync, \
-             patch("signal_tracker.os.open") as mock_open:
+        with patch("trader_shared.signal_tracker.os.replace") as mock_replace, \
+             patch("trader_shared.signal_tracker.os.fsync") as mock_fsync, \
+             patch("trader_shared.signal_tracker.os.open") as mock_open:
             mock_fd = MagicMock()
             mock_open.return_value = mock_fd
             st.fill_by_target("A", 1.0)

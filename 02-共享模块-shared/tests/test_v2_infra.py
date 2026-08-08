@@ -6,12 +6,12 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
 
-from pipeline import (
+from trader_shared.pipeline import (
     write_stock, write_market, add_warning, conflicting_signals,
     get_stock_weight, get_full_market, clear_old_warnings,
     _load, _save,
 )
-import pipeline as pl
+import trader_shared.pipeline as pl
 
 
 @pytest.fixture
@@ -19,11 +19,14 @@ def tmp_state(tmp_path):
     """Use a temp file for pipeline state."""
     old_path = pl.STATE_PATH
     old_dir = pl.STATE_DIR
+    old_lock = pl.LOCK_PATH
     pl.STATE_PATH = tmp_path / "pipeline_state.json"
     pl.STATE_DIR = tmp_path
+    pl.LOCK_PATH = tmp_path / "pipeline_state.json.lock"
     yield pl.STATE_PATH
     pl.STATE_PATH = old_path
     pl.STATE_DIR = old_dir
+    pl.LOCK_PATH = old_lock
 
 
 # ── pipeline tests ──
@@ -97,7 +100,7 @@ def test_market_write(tmp_state):
     assert data["market"]["note"] == "测试笔记"
 
 # ── signal_tracker tests ──
-import signal_tracker as st
+import trader_shared.signal_tracker as st
 
 
 @pytest.fixture
@@ -164,14 +167,14 @@ def test_load_recent_filter(tmp_log):
 
 @pytest.fixture
 def _inject_market_env_path():
-    import market_env as me  # noqa: F401
+    import trader_shared.market_env as me  # noqa: F401
     old_has = me._HAS_PIPELINE
     yield me._HAS_PIPELINE
     me._HAS_PIPELINE = old_has
 
 
 def test_market_env_pipeline_import_available(tmp_state, _inject_market_env_path):
-    import market_env as me
+    import trader_shared.market_env as me
     pl.STATE_PATH = tmp_state
     pl.STATE_DIR = tmp_state.parent
     env = me.refresh(write_pipeline=True)
@@ -181,7 +184,7 @@ def test_market_env_pipeline_import_available(tmp_state, _inject_market_env_path
 
 
 def test_resolve_board_index_mapping():
-    import market_env as me
+    import trader_shared.market_env as me
 
     assert me.resolve_board_index("688248") == ("000688.SH", "科创")
     assert me.resolve_board_index("300750.SZ") == ("399006.SZ", "创业板")
@@ -191,7 +194,7 @@ def test_resolve_board_index_mapping():
 
 
 def test_market_env_assess_no_net():
-    import market_env as me
+    import trader_shared.market_env as me
     me._assess_cache = None
     me._assess_cache_time = 0
     me._assess_cache_by_index = {}
@@ -204,7 +207,7 @@ def test_market_env_assess_no_net():
 
 
 def test_market_env_note_for_all_skills():
-    import market_env as me
+    import trader_shared.market_env as me
     env = {"level": "正常", "note": "测试"}
     for skill in ("t0", "trader", "portfolio"):
         note = me.env_note_for(env, skill)
@@ -213,13 +216,12 @@ def test_market_env_note_for_all_skills():
 
 
 def test_calibrator_uses_shared_assess():
-    import calibrator as cal
+    import trader_shared.calibrator as cal
     assert hasattr(cal, "_assess_market")
 
 
 def test_market_env_pipeline_write_via_tradershared():
-    import trader_shared as ts
-    me = ts.get_market_env()
+    import trader_shared.market_env as me
     with patch.object(me, "write_market") as mock_write:
         me.refresh(write_pipeline=True)
         mock_write.assert_called_once()
@@ -227,7 +229,7 @@ def test_market_env_pipeline_write_via_tradershared():
 
 def test_stable_id_deprecated():
     """stable_id() should emit deprecation warning."""
-    import signal_tracker as st
+    import trader_shared.signal_tracker as st
     import warnings
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")

@@ -202,7 +202,7 @@ SSOT：`stage_fields.py` · BUSINESS §4.0 · AGENTS「阶段三字段」。
 | `strategy/match.py` + `strategy/packs/` | 六闸；entry 须 `executable=True`（文案「可扳机」） |
 | `mistery_gate` / `chan_discipline` | 纪律只收紧 → `merge_discipline` |
 | `decision_view.py` | 出手真相 + `apply_execution_caps` |
-| `fusion_core.py` | 三席加权仪表；一律 cards；失败→`cards_failed` 中性（classic/compare 已退役） |
+| `fusion_core.py` | 三席加权仪表；一律 cards；失败→`cards_failed` 中性（classic/compare 已移除，旧值拒绝） |
 | `fusion_confidence.py` | 置信度 U 型映射中性模块（cards 共用；勿经 classic_mappers） |
 
 ### 5.4 报告流水线
@@ -262,7 +262,7 @@ holdings.resolve_cost_price  ← 水位/持仓态
 ```
 
 融合三席（仪表）：缠论 · 动量 · **VPF**（日线威科夫已退出加权）。  
-`fusion_input_path`：`cards` \| `cards_failed`（见 BUSINESS §2.7；classic/compare 已退役）。
+`fusion_input_path`：`cards` \| `cards_failed`（见 BUSINESS §2.7；classic/compare 已移除，旧值拒绝）。
 
 ---
 

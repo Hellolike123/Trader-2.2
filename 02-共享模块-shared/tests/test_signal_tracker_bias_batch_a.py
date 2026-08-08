@@ -23,7 +23,7 @@ for _p in (SHARED, SCRIPTS):
     if str(_p.resolve()) not in sys.path:
         sys.path.insert(0, str(_p.resolve()))
 
-import signal_tracker as st
+import trader_shared.signal_tracker as st
 
 
 # ═══════ FIXTURES ═══════
@@ -135,7 +135,7 @@ class TestHistoricalBackfill:
     def test_backfill_subcommand_exists(self):
         """backfill 子命令应存在。"""
         # 查 help 文本，不启动子进程
-        from signal_tracker import main
+        from trader_shared.signal_tracker import main
         import io, contextlib
         buf = io.StringIO()
         try:
@@ -267,7 +267,7 @@ class TestFailureClassification:
         # 断言：三条记录都被读取（未被过滤成空）
         # 当前 _load_results 会跳过 r_5d=None 的记录进入 filtered
         # 需要新指标：_failure_code 统计
-        from signal_tracker import _bad_line_count
+        from trader_shared.signal_tracker import _bad_line_count
         # 坏行计数不应受失败样本影响（它们是可解析的 JSON）
         t.restore()
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-import self_calibration as sc
+import trader_shared.self_calibration as sc
 from trader_shared.structure_core import _theory_multipliers
 
 
@@ -107,8 +107,8 @@ def test_structure_core_compatibility():
 def test_calibration_guards_and_ema_smoothing():
     """Verify that calibrate() robustly handles low-sample fallback, EMA parameter blending, and [0.85, 1.25] hard clipping."""
     # 1. Low sample protection check
-    with patch("self_calibration._load_jsonl", return_value=[{"id": "sig1"}]), \
-         patch("self_calibration._extract_outcomes", return_value={"sig1": {"won": True, "return_pct": 5.0}}):
+    with patch("trader_shared.self_calibration._load_jsonl", return_value=[{"id": "sig1"}]), \
+         patch("trader_shared.self_calibration._extract_outcomes", return_value={"sig1": {"won": True, "return_pct": 5.0}}):
         
         calibrated = sc.calibrate(n_trials=10, verbose=False)
         # Low samples -> immediately falls back to DEFAULT_PARAMS (1.0)
@@ -128,10 +128,10 @@ def test_calibration_guards_and_ema_smoothing():
         "range": {"zone_width": 0.90, "confirm_buffer": 0.90, "stop_buffer": 0.90},
     }
     
-    with patch("self_calibration._load_jsonl", return_value=fake_signals), \
-         patch("self_calibration._extract_outcomes", return_value=fake_outcomes), \
-         patch("self_calibration.load_calibrated_params", return_value=old_nested), \
-         patch("self_calibration._load_historical_regimes", return_value={}):
+    with patch("trader_shared.self_calibration._load_jsonl", return_value=fake_signals), \
+         patch("trader_shared.self_calibration._extract_outcomes", return_value=fake_outcomes), \
+         patch("trader_shared.self_calibration.load_calibrated_params", return_value=old_nested), \
+         patch("trader_shared.self_calibration._load_historical_regimes", return_value={}):
         
         calibrated = sc.calibrate(n_trials=10, verbose=False)
         

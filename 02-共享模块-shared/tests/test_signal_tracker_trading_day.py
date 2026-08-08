@@ -19,7 +19,7 @@ for _p in (SHARED, SCRIPTS):
     if str(_p.resolve()) not in sys.path:
         sys.path.insert(0, str(_p.resolve()))
 
-import signal_tracker as st
+import trader_shared.signal_tracker as st
 
 
 class TestTradingDayOffset:
@@ -71,8 +71,8 @@ class TestTradingDayOffset:
 
         mock_client = MagicMock()
 
-        with patch("signal_tracker.resolve_security") as mock_resolve, \
-             patch("signal_tracker.fetch_qfq_daily") as mock_daily:
+        with patch("trader_shared.signal_tracker.resolve_security") as mock_resolve, \
+             patch("trader_shared.signal_tracker.fetch_qfq_daily") as mock_daily:
             mock_resolve.return_value = MagicMock(code="688248.SH", market="SH")
             mock_daily.return_value = bars
 
@@ -101,8 +101,8 @@ class TestTradingDayOffset:
             {"date": "2025-10-06", "close": 20.5, "atr14": 0.6},
         ]
 
-        with patch("signal_tracker.resolve_security") as mock_resolve, \
-             patch("signal_tracker.fetch_qfq_daily") as mock_daily:
+        with patch("trader_shared.signal_tracker.resolve_security") as mock_resolve, \
+             patch("trader_shared.signal_tracker.fetch_qfq_daily") as mock_daily:
             mock_resolve.return_value = MagicMock(code="601600.SH", market="SH")
             mock_daily.return_value = bars
             st.HttpClient = MagicMock

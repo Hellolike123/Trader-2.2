@@ -10,7 +10,7 @@ import pytest
 import trader_shared
 
 from trader_shared.signal_store import append_signal
-from signal_tracker import (
+from trader_shared.signal_tracker import (
     _normalize_symbol,
     _norm_date,
     _normalize_signal_type,

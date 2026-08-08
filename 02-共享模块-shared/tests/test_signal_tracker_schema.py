@@ -19,7 +19,7 @@ for _p in (SHARED, SCRIPTS):
     if str(_p.resolve()) not in sys.path:
         sys.path.insert(0, str(_p.resolve()))
 
-import signal_tracker as st
+import trader_shared.signal_tracker as st
 
 
 class TestSchemaVersion:
@@ -63,9 +63,9 @@ class TestSchemaVersion:
             {"date": "2025-04-07", "close": 10.5, "atr14": 0.3},
         ]
 
-        with patch("signal_tracker.resolve_security") as mock_resolve, \
+        with patch("trader_shared.signal_tracker.resolve_security") as mock_resolve, \
              patch.object(st, "HttpClient", MagicMock), \
-             patch("signal_tracker.fetch_qfq_daily", return_value=bars), \
+             patch("trader_shared.signal_tracker.fetch_qfq_daily", return_value=bars), \
              patch.object(st, "to_float", return_value=0.3):
             mock_resolve.return_value = MagicMock(code="688248.SH", market="SH")
             result = st._compute_results_for_sig(sig)
