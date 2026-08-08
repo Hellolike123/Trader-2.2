@@ -54,7 +54,7 @@
 - `hmm_regime.py` — 隐马尔可夫大势检测（Baum-Welch + Viterbi，3 隐状态）
 - `bayesian_fusion.py` — 贝叶斯乘积规则多专家融合（默认关闭，BAYESIAN_FUSION=true 激活）
 - `volume_profile.py` — 日内成交量分布，POC 控制节点与 70% Value Area
-- `scripts/self_calibration.py` — 离线随机搜索参数校准，写入 ~/.trader/calibrated_params.json
+- `trader_shared/self_calibration.py` — 离线随机搜索参数校准，写入 ~/.trader/calibrated_params.json
 
 测试体系扩展至 485 个用例（新增 3 个测试文件），全部通过零 Regression。
 
@@ -568,7 +568,7 @@ $$\text{UUID} = \text{SHA256}(\text{normalized\_symbol} \parallel \text{normaliz
 Tencent API → light_data.py (days=300)
 Sina API → fetch_5m/fetch_15m/fetch_30m
   ↓
-ThreadPoolExecutor 并行执行策略（run_analysis.py）
+ThreadPoolExecutor 并行执行策略（PluginRegistry.analyze_all / report_pipeline.context_stage）
   ├── chanlun_strategy()
   ├── momentum_strategy()
   ├── wyckoff_strategy()
@@ -820,7 +820,7 @@ P(action | chan, mom, vpf, regime) ∝ L(chan) × L(mom) × L(vpf)
 
 ---
 
-### 15.4 离线参数自校准器 (`scripts/self_calibration.py`)
+### 15.4 离线参数自校准器 (`trader_shared/self_calibration.py`)
 
 **设计原则**：完全离线，非交易时段运行，零实盘干扰。
 
@@ -838,11 +838,11 @@ P(action | chan, mom, vpf, regime) ∝ L(chan) × L(mom) × L(vpf)
 
 **调用方式**：
 ```bash
-# 盘后或周末手动运行自校准
-python3 02-共享模块-shared/scripts/self_calibration.py
+# 盘后或周末手动运行自校准（在 02-共享模块-shared 下执行）
+python3 -m trader_shared.self_calibration
 
 # 在代码中读取已校准参数（支持多层降级，消费时由 structure_core.py 根据当前 hmm_regime 动态匹配）
-from self_calibration import load_calibrated_params
+from trader_shared.self_calibration import load_calibrated_params
 params = load_calibrated_params()  # 返回 { "global": {...}, "bull": {...}, "bear": {...}, "range": {...} } （仅 params 子字典，不含外层 version 包装）
 ```
 
