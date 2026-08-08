@@ -9,15 +9,15 @@
 - **Agent 快路径**：各 skill **只预读** `references/agent-quickstart.md` + 共用 `references/agent-rules.md`；跑脚本 → 原样贴 markdown → 停。禁止开工前批量读 references、禁止默认 `--output json`。
 - **命令 cwd**：Skill 包内用 `python3 scripts/...`；仓库根用 `python3 01-功能包-packages/<skill>/scripts/...`。仓位轮动在 **review** 包（无独立 `portfolio/` 包）。
 - **中短线双轨**：`report_core.render_short_midline`；标题挂灯 `🧭 中线｜🔴/🟡/🟢 …` / `⚡ 短线｜🔴/🟡/🟢 …`（`format_track_header_light`；绿=资格非可买）；中线关键价用 `mid_key_prices`（周线），禁止日线 `key_levels` 冒充。
-- **阶段三字段**：`midline_stage`/`stage_line`=周线威科夫（共振字段；面板不单独「阶段：」行，细读见威科夫：）｜`major_stage`=日线四阶段（门控/池）｜`short_term_momentum`=EXPMA 动能；`report["stage"]` **别名** `short_term_momentum`（非 major、非 determine_stage）。见 `stage_fields.py` / BUSINESS §4.0。
+- **阶段三字段**：`midline_stage`/`stage_line`=周线威科夫（共振字段；面板不单独「阶段：」行，细读见威科夫：）｜`major_stage`=日线四阶段（门控/池）｜`short_term_momentum`=EXPMA 动能（面板顶栏标「位置」，字段/词表不变）；`report["stage"]` **别名** `short_term_momentum`（非 major、非 determine_stage）。见 `stage_fields.py` / BUSINESS §4.0。
 - **纪律只收紧**：`mistery_gate` + `chan_discipline` → `merge_discipline`；不改 major_stage / fusion 分 / support / stop。开仓清单 C1 见 `chan_discipline.format_entry_line_c1`。
 - **方向/出手**：以 `decision_view`（共振 ∧ 策略可执行 ∧ 纪律）为准；`fusion.weighted_score` 仅仪表。不得从阶段/动能直接推断方向。
 - **Fusion override**：`FUSION_OVERRIDE_ENABLED` **默认 false**（不覆盖 theory_status）；对照旧行为再显式开。
 - **策略亮**：entry 须 `executable=True`（active）；`plan` 仅计划，不算可推荐新开。
 - **T0 v2**：人读结构仪表盘（`docs/t0-strategy-v2.md`），禁止「可执行/可低吸/三重共振买」指令叙事。
 - **输出契约**：`01-功能包-packages/trader/references/output-template.md` 与 `render_short_midline` 同源。实现锚点：`report_core` / `report_builder` / `report_pipeline`。
-- **资金行/主力分**：`资金：` 短扫读（5日净额·价资人话·主力x/10·档位·大单），不重复量能；主力出口 10 分制（≥9强势·≥6参与·≥3观望·<3撤离）。详见 output-template v2.8.1。
-- **顶栏**：`环境：{宽基} ±% ｜ {主交易板块?} ±% ｜ 强于/弱于/持平板块` → `概念：标签…` → `量能：量比… ｜ 调整… ｜ 动能 … ｜ ATR14 …`；概念只标签、不比假指数；环境档内部用但不写「正常/偏弱/跑赢」。法源 `BUSINESS.md` §3.4 / §5.1。
+- **资金行/主力分**：`资金：` 有依据先 `买盘占优/卖盘占优`（大单优先，其次显著5/10日净额），再短扫读（5日净额·价资人话·主力x/10·档位·大单），不重复量能；主力出口 10 分制（≥9强势·≥6参与·≥3观望·<3撤离）。详见 output-template v2.9.0。
+- **顶栏**：`环境：{宽基} ±% ｜ {主交易板块?} ±% ｜ 强于/弱于/持平板块` → `概念：标签…` → `量能：量比… ｜ 调整… ｜ 位置 … ｜ ATR14 …`；概念只标签、不比假指数；环境档内部用但不写「正常/偏弱/跑赢」。法源 `BUSINESS.md` §3.4 / §5.1。
 - **深度与满分示例**：性能史、算法细节、微信端满分范例 → [`AGENTS_DEEP.md`](AGENTS_DEEP.md)。
 
 改报告格式：`short_midline.py` → 刷新 golden →（骨架变了再）`output-template.md` + `BUSINESS.md` §5.1。完整防漏清单：`01-功能包-packages/_common/agent-rules.md`。
