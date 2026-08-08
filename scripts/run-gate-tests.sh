@@ -93,6 +93,7 @@ TESTS=(
   "02-共享模块-shared/tests/test_chan_segments_bug_r.py"
   "02-共享模块-shared/tests/test_chan_segments_no_overcut.py"
   "02-共享模块-shared/tests/test_chan_split_equivalence.py"
+  "02-共享模块-shared/tests/test_audit_contracts.py"
   "02-共享模块-shared/tests/test_stage_split_equivalence.py"
   "02-共享模块-shared/trader_shared/test_chan_nesting.py"
   "02-共享模块-shared/trader_shared/test_chan_nesting_chain.py"

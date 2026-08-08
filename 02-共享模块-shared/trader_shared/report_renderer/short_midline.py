@@ -237,11 +237,11 @@ def _short_fund_display(
     except (TypeError, ValueError):
         cum5 = 0.0
     try:
-        con_in = int(ff.get("consecutive_inflow_days") or 0)
+        con_in = _safe_int(ff.get("consecutive_inflow_days") or 0)
     except (TypeError, ValueError):
         con_in = 0
     try:
-        con_out = int(ff.get("consecutive_outflow_days") or 0)
+        con_out = _safe_int(ff.get("consecutive_outflow_days") or 0)
     except (TypeError, ValueError):
         con_out = 0
 
@@ -886,7 +886,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
             from trader_shared.chan_core import resolve_chanlun_primary
 
             _prim = resolve_chanlun_primary(r.get("chanlun_midline"))
-            _pd = int(_prim.get("direction") or 0)
+            _pd = _safe_int(_prim.get("direction") or 0)
             if _pd < 0:
                 _chan_dir_mid = "看跌"
             elif _pd > 0:
@@ -1427,7 +1427,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
 
     # 信号分歧：结构 vs 动能
     _chan_dir2 = _safe_int(_csig2.get("direction", 0)) if _csig2 else 0
-    _mom_dir2 = int(_msig.get("direction", 0)) if _msig else 0
+    _mom_dir2 = _safe_int(_msig.get("direction", 0)) if _msig else 0
     if _chan_dir2 * _mom_dir2 < 0:
         _c_label = "看多" if _chan_dir2 > 0 else "看空"
         _m_label = "看多" if _mom_dir2 > 0 else "看空"
@@ -1747,7 +1747,7 @@ def render_short_midline(r: dict[str, Any]) -> str:
         from trader_shared.chan_core import resolve_chanlun_primary
 
         _prim_hl = resolve_chanlun_primary(r.get("chanlun") or r.get("chanlun_daily"))
-        _chan_dir_hl = int(_prim_hl.get("direction") or 0)
+        _chan_dir_hl = _safe_int(_prim_hl.get("direction") or 0)
         _chan_type_hl = str(
             _prim_hl.get("type_short") or _prim_hl.get("type_raw") or ""
         ).strip()
@@ -1879,4 +1879,3 @@ def render_short_midline(r: dict[str, Any]) -> str:
         lines.append(f"当前池 {pool_count}/{pool_cap}，回复 1 入池")
 
     return "\n".join(lines)
-
