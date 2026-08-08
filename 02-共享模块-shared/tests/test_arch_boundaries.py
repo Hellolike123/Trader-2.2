@@ -243,14 +243,7 @@ def _is_classic_mappers_import(imp: str) -> bool:
     ):
         return True
     if imp == "fusion_classic_mappers" or imp.endswith(".fusion_classic_mappers"):
-        # allow archived package only under _deprecated
-        if "._deprecated." in f".{imp}." or imp.startswith("trader_shared._deprecated"):
-            return False
-        # bare fusion_classic_mappers or non-deprecated path
-        if imp == "fusion_classic_mappers":
-            return True
-        if imp.endswith(".fusion_classic_mappers") and "_deprecated" not in imp:
-            return True
+        return True
     return False
 
 
@@ -267,20 +260,15 @@ def test_analysis_package_no_classic_mappers_import():
 
 
 def test_production_tree_no_classic_mappers_import():
-    """C5/A2：生产树（排除 _deprecated）零 import classic_mappers；含 fusion_core。"""
+    """C5/A2：生产树零 import classic_mappers（_deprecated 已移出活动树）。"""
     bad: list[tuple[str, str]] = []
-    skip_parts = {"_deprecated", "tests", "__pycache__"}
+    skip_parts = {"tests", "__pycache__"}
     for path in sorted(PKG.rglob("*.py")):
         if any(part in skip_parts for part in path.parts):
             continue
         imports = _imports_in_file(path)
         for imp in imports:
             if _is_classic_mappers_import(imp):
-                bad.append((str(path.relative_to(PKG)), imp))
-            # also forbid importing archived path from production
-            if imp == "trader_shared._deprecated.fusion_classic_mappers" or imp.startswith(
-                "trader_shared._deprecated.fusion_classic_mappers."
-            ):
                 bad.append((str(path.relative_to(PKG)), imp))
     assert not bad, f"production must not import classic_mappers: {bad}"
 

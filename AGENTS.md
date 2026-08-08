@@ -80,7 +80,7 @@
 | 板块对照指数 / 环境档 | `market_env.py` + `sector_data`（概念→真实 THS 指数）+ `context_stage` | 展示写死中证1000；顶栏露正常/偏弱；概念假指数 |
 | 行情类型 SSOT | `market_types.py`（`Security`/`MarketSnapshot`） | 在 light_data/data_provider 再各造一份 |
 | 买点盖生命周期 | `buy_point_lifecycle.py` + `attach_buy_point.py`；策略闸读字段在 `strategy/match.py` | 在策略层重算盖价/笔；接旧 failed `signal_id` |
-| Fusion 生产路径 | `fusion_core.py` + `analysis/cards.py` + `fusion_card_signals.py`（失败=`cards_failed`） | 加厚 classic；生产回退 classic；挂回 `_deprecated` |
+| Fusion 生产路径 | `fusion_core.py` + `analysis/cards.py` + `fusion_card_signals.py`（失败=`cards_failed`） | 加厚 classic；生产回退 classic；重新引入 classic mapper |
 | Fusion 置信度 | `fusion_confidence.py`（中性；cards 共用） | analysis 经 classic_mappers 再取置信 |
 | Classic 映射（已移出活动树） | git 历史保留（原 `_deprecated/fusion_classic_mappers.py`；生产零 import） | 生产树再 import classic_mappers |
 | 批量快照 / 池价 | `data_access.get_quotes`（经 `get_provider`） | 池内直调 `light_data` + 自建 HttpClient |

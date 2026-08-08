@@ -27,8 +27,4 @@
 
 ## 其它
 
-| 文档 | 用途 |
-|------|------|
-| p0-1-signal-structurization.md | 信号结构化 |
-| p1-split-core-seam-design.md | 核心接缝 |
-| p3-golden-diff-gate.md | Golden 闸门 |
+历史设计稿（信号结构化 / 核心接缝 / Golden 闸门等）已归档，考古走 git 历史。
