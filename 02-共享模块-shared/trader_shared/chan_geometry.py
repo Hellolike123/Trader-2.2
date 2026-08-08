@@ -805,10 +805,13 @@ def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: boo
                 # A-2 特征序列三分型终结：至少 3 个特征元素，最后三根标准双侧底分型
                 # （mid.low 三者最低 且 mid.high 三者最低——middle 整体低于左右，与
                 #   formulas.md 1.2 / find_fractions 一致；单侧假底分型不终结）
+                # §3.7 尾部护栏：与 §3.6 第二类破坏共用“剩余笔数 >= min_strokes”，
+                # 切点 end_idx=i-1（共用转折笔）；尾部不足不切、不丢尾段。
                 if len(char_seq) >= 3:
                     left, mid, right = char_seq[-3], char_seq[-2], char_seq[-1]
                     if (mid["low"] < left["low"] and mid["low"] < right["low"]
-                            and mid["high"] < left["high"] and mid["high"] < right["high"]):
+                            and mid["high"] < left["high"] and mid["high"] < right["high"]
+                            and (len(strokes) - i) >= min_strokes):
                         end_idx = i - 1
                         start_p, end_p, seg_hi, seg_lo = _segment_range(
                             "up", strokes[seg_start: end_idx + 1]
@@ -896,10 +899,13 @@ def build_segments(strokes: list[dict], min_strokes: int = 3, relax_overlap: boo
                 # A-2 特征序列三分型终结：至少 3 个特征元素，最后三根标准双侧顶分型
                 # （mid.high 三者最高 且 mid.low 三者最高——middle 整体高于左右，与
                 #   formulas.md 1.2 / find_fractions 一致；单侧假顶分型不终结）
+                # §3.7 尾部护栏：与 §3.6 第二类破坏共用“剩余笔数 >= min_strokes”，
+                # 切点 end_idx=i-1（共用转折笔）；尾部不足不切、不丢尾段。
                 if len(char_seq) >= 3:
                     left, mid, right = char_seq[-3], char_seq[-2], char_seq[-1]
                     if (mid["high"] > left["high"] and mid["high"] > right["high"]
-                            and mid["low"] > left["low"] and mid["low"] > right["low"]):
+                            and mid["low"] > left["low"] and mid["low"] > right["low"]
+                            and (len(strokes) - i) >= min_strokes):
                         end_idx = i - 1
                         start_p, end_p, seg_hi, seg_lo = _segment_range(
                             "down", strokes[seg_start: end_idx + 1]

@@ -90,6 +90,8 @@ TESTS=(
   "02-共享模块-shared/tests/test_cause_effect_display.py"
   "02-共享模块-shared/tests/test_wyckoff_pnf.py"
   "02-共享模块-shared/tests/test_wyckoff_split_equivalence.py"
+  "02-共享模块-shared/tests/test_chan_segments_bug_r.py"
+  "02-共享模块-shared/tests/test_chan_segments_no_overcut.py"
   "02-共享模块-shared/tests/test_chan_split_equivalence.py"
   "02-共享模块-shared/tests/test_stage_split_equivalence.py"
   "02-共享模块-shared/trader_shared/test_chan_nesting.py"
